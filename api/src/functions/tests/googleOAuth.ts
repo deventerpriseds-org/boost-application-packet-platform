@@ -92,13 +92,18 @@ export async function googleCallback(req: HttpRequest, context: InvocationContex
 
 // Best-effort self-persist of the refresh token using the function's managed
 // identity to call ARM. Returns false if no identity/token endpoint available.
-async function persistRefreshToken(refreshToken: string): Promise<boolean> {
+export async function persistRefreshToken(refreshToken: string): Promise<boolean> {
   const idEndpoint = process.env.IDENTITY_ENDPOINT
   const idHeader = process.env.IDENTITY_HEADER
-  const sub = process.env.WEBSITE_OWNER_NAME?.split('+')[0]
+  // WEBSITE_OWNER_NAME = "{sub}+{rg}-{region}webspace..."; derive sub/rg from it
+  // since WEBSITE_RESOURCE_GROUP is not always populated on the worker.
+  const owner = process.env.WEBSITE_OWNER_NAME || ''
+  const sub = owner.split('+')[0] || '09594120-1b35-4e21-84c6-451ac27175a3'
   const rg = process.env.WEBSITE_RESOURCE_GROUP
-  const site = process.env.WEBSITE_SITE_NAME
-  if (!idEndpoint || !idHeader || !sub || !rg || !site) return false
+    || owner.split('+')[1]?.replace(/-[^-]*webspace.*$/i, '')
+    || 'EnterpriseDS_ResourceGRP'
+  const site = process.env.WEBSITE_SITE_NAME || 'job-platform-api'
+  if (!idEndpoint || !idHeader) return false
 
   // Get ARM token from the managed identity
   const tokRes = await fetch(`${idEndpoint}?resource=https://management.azure.com/&api-version=2019-08-01`, {
