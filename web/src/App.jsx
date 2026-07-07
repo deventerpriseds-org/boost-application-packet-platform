@@ -204,46 +204,89 @@ export default function App() {
   });
   const [activePhaseFilter, setActivePhaseFilter] = useState("all");
 
-  const runTest = (testId) => {
+  const API_BASE = "https://job-platform-api.azurewebsites.net/api";
+
+  const TEST_ROUTES = {
+    "MT-01": "/test/mt-01",
+    "MT-02": "/test/mt-02",
+    "MT-03": "/test/mt-03",
+    "MT-04": "/test/mt-04",
+    "MT-05": "/test/mt-05",
+    "MT-06": "/test/mt-06",
+    "MT-07": "/test/mt-07",
+    "MT-08": "/test/mt-08",
+    "MT-09": "/test/mt-09",
+    "MT-12": "/test/mt-12",
+    "MT-13": "/test/mt-13",
+    "MT-14": "/test/mt-14",
+    "MT-15": "/test/mt-15",
+    "MT-16": "/test/mt-16",
+    "MT-17": "/test/mt-17",
+    "MT-18": "/test/mt-18",
+    "MT-19": "/test/mt-19",
+    "MT-20": "/test/mt-20",
+    "MT-21": "/test/mt-21",
+  };
+
+  const runTest = async (testId) => {
     setTestStatuses((s) => ({ ...s, [testId]: "running" }));
     setTestLogs((l) => ({ ...l, [testId]: [`[${new Date().toLocaleTimeString()}] Starting ${testId}...`] }));
 
-    // Simulate async test
-    setTimeout(() => {
-      const pass = Math.random() > 0.25;
+    const route = TEST_ROUTES[testId];
+    if (!route) {
+      setTestStatuses((s) => ({ ...s, [testId]: "fail" }));
+      setTestLogs((l) => ({ ...l, [testId]: [...(l[testId] || []), `[${new Date().toLocaleTimeString()}] ✗ No endpoint wired for ${testId} yet`] }));
+      return;
+    }
+
+    try {
+      const res = await fetch(`${API_BASE}${route}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
+      const data = await res.json();
+      const pass = data.pass === true;
       setTestStatuses((s) => ({ ...s, [testId]: pass ? "pass" : "fail" }));
       setTestLogs((l) => ({
         ...l,
         [testId]: [
           ...(l[testId] || []),
-          pass
-            ? `[${new Date().toLocaleTimeString()}] ✓ Test completed successfully`
-            : `[${new Date().toLocaleTimeString()}] ✗ Test failed — check connection config`,
+          `[${new Date().toLocaleTimeString()}] ${pass ? "✓" : "✗"} ${data.detail || (pass ? "Passed" : "Failed")}`,
+          ...(data.docUrl ? [`[${new Date().toLocaleTimeString()}] 📄 ${data.docUrl}`] : []),
+          ...(data.urls ? Object.entries(data.urls).map(([k, v]) => `[${new Date().toLocaleTimeString()}] 📄 ${k}: ${v}`) : []),
         ],
       }));
-    }, 1500 + Math.random() * 1000);
+    } catch (err) {
+      setTestStatuses((s) => ({ ...s, [testId]: "fail" }));
+      setTestLogs((l) => ({ ...l, [testId]: [...(l[testId] || []), `[${new Date().toLocaleTimeString()}] ✗ Network error: ${err.message}`] }));
+    }
   };
 
-  const fireAlert = () => {
+  const fireAlert = async () => {
     setTestStatuses((s) => ({ ...s, "MT-10": "running" }));
     setTestLogs((l) => ({
       ...l,
       "MT-10": [
         `[${new Date().toLocaleTimeString()}] Firing fake job alert...`,
-        `[${new Date().toLocaleTimeString()}] Payload: ${JSON.stringify(FAKE_JOB_ALERT).slice(0, 120)}...`,
+        `[${new Date().toLocaleTimeString()}] POST ${API_BASE}/process-job`,
       ],
     }));
-    setTimeout(() => {
-      setTestStatuses((s) => ({ ...s, "MT-10": "pass" }));
+    try {
+      const payload = { ...FAKE_JOB_ALERT, receivedAt: new Date().toISOString() };
+      const res = await fetch(`${API_BASE}/process-job`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+      const data = await res.json();
+      const pass = res.ok && data.success !== false;
+      setTestStatuses((s) => ({ ...s, "MT-10": pass ? "pass" : "fail" }));
       setTestLogs((l) => ({
         ...l,
         "MT-10": [
           ...(l["MT-10"] || []),
-          `[${new Date().toLocaleTimeString()}] ✓ Endpoint received payload — HTTP 200`,
-          `[${new Date().toLocaleTimeString()}] Job queued for approval`,
+          pass
+            ? `[${new Date().toLocaleTimeString()}] ✓ HTTP ${res.status} — jobId: ${data.jobId || "n/a"}`
+            : `[${new Date().toLocaleTimeString()}] ✗ HTTP ${res.status} — ${data.error || JSON.stringify(data)}`,
         ],
       }));
-    }, 1800);
+    } catch (err) {
+      setTestStatuses((s) => ({ ...s, "MT-10": "fail" }));
+      setTestLogs((l) => ({ ...l, "MT-10": [...(l["MT-10"] || []), `[${new Date().toLocaleTimeString()}] ✗ Network error: ${err.message}`] }));
+    }
   };
 
   const totalTests = MICRO_TESTS.length;
@@ -477,13 +520,17 @@ export default function App() {
                               Save Configuration
                             </button>
                             <button
-                              onClick={() => {
+                              onClick={async () => {
                                 setTestStatuses((s) => ({ ...s, [`auth-${config.id}`]: "running" }));
-                                setTimeout(() => {
-                                  const pass = Math.random() > 0.25;
+                                try {
+                                  const res = await fetch(`${API_BASE}/test-connection`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ connection: config.id }) });
+                                  const data = await res.json();
+                                  const pass = data.success === true;
                                   setTestStatuses((s) => ({ ...s, [`auth-${config.id}`]: pass ? "pass" : "fail" }));
                                   if (pass) setAuthSaved((s) => ({ ...s, [config.id]: true }));
-                                }, 1500 + Math.random() * 800);
+                                } catch (err) {
+                                  setTestStatuses((s) => ({ ...s, [`auth-${config.id}`]: "fail" }));
+                                }
                               }}
                               style={{ padding: "9px 16px", background: "#0D2B1A", border: "1px solid #10B98150", borderRadius: 6, color: "#10B981", fontSize: 12, fontWeight: 600, cursor: "pointer" }}
                             >
@@ -694,8 +741,20 @@ export default function App() {
                   </div>
                 </div>
                 <button
-                  onClick={() => {
-                    runTest("MT-11");
+                  onClick={async () => {
+                    setTestStatuses((s) => ({ ...s, "MT-11": "running" }));
+                    setTestLogs((l) => ({ ...l, "MT-11": [`[${new Date().toLocaleTimeString()}] Submitting form to POST /api/process-job...`] }));
+                    try {
+                      const payload = { ...formData, receivedAt: new Date().toISOString(), sourceEmail: "manual-form", originalSubject: `Manual entry: ${formData.jobUrl || "no url"}` };
+                      const res = await fetch(`${API_BASE}/process-job`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+                      const data = await res.json();
+                      const pass = res.ok && data.success !== false;
+                      setTestStatuses((s) => ({ ...s, "MT-11": pass ? "pass" : "fail" }));
+                      setTestLogs((l) => ({ ...l, "MT-11": [...(l["MT-11"] || []), pass ? `[${new Date().toLocaleTimeString()}] ✓ HTTP ${res.status} — jobId: ${data.jobId}` : `[${new Date().toLocaleTimeString()}] ✗ HTTP ${res.status} — ${data.error || JSON.stringify(data)}`] }));
+                    } catch (err) {
+                      setTestStatuses((s) => ({ ...s, "MT-11": "fail" }));
+                      setTestLogs((l) => ({ ...l, "MT-11": [...(l["MT-11"] || []), `[${new Date().toLocaleTimeString()}] ✗ Network error: ${err.message}`] }));
+                    }
                   }}
                   disabled={!formData.jobDescription}
                   style={{ padding: "11px", background: formData.jobDescription ? "#1B4F5C" : "#0D1821", border: `1px solid ${formData.jobDescription ? "#2A7A8C" : "#1E293B"}`, borderRadius: 8, color: formData.jobDescription ? "#E2E8F0" : "#64748B", fontSize: 13, fontWeight: 600, cursor: formData.jobDescription ? "pointer" : "not-allowed" }}
