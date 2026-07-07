@@ -464,15 +464,27 @@ export default function App() {
                           <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
                             <button
                               onClick={() => {
-                                setAuthSaved((s) => ({ ...s, [config.id]: true }));
-                                setExpandedAuth(null);
+                                const filled = config.fields.some(
+                                  (f) => authValues[`${config.id}.${f.key}`]?.trim().length > 0
+                                );
+                                if (filled) {
+                                  setAuthSaved((s) => ({ ...s, [config.id]: true }));
+                                  setExpandedAuth(null);
+                                }
                               }}
                               style={{ flex: 1, padding: "9px", background: "#1B4F5C", border: "none", borderRadius: 6, color: "#E2E8F0", fontSize: 12, fontWeight: 600, cursor: "pointer" }}
                             >
                               Save Configuration
                             </button>
                             <button
-                              onClick={() => runTest(`auth-${config.id}`)}
+                              onClick={() => {
+                                setTestStatuses((s) => ({ ...s, [`auth-${config.id}`]: "running" }));
+                                setTimeout(() => {
+                                  const pass = Math.random() > 0.25;
+                                  setTestStatuses((s) => ({ ...s, [`auth-${config.id}`]: pass ? "pass" : "fail" }));
+                                  if (pass) setAuthSaved((s) => ({ ...s, [config.id]: true }));
+                                }, 1500 + Math.random() * 800);
+                              }}
                               style={{ padding: "9px 16px", background: "#0D2B1A", border: "1px solid #10B98150", borderRadius: 6, color: "#10B981", fontSize: 12, fontWeight: 600, cursor: "pointer" }}
                             >
                               Test Connection
