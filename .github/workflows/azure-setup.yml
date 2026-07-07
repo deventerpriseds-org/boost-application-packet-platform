@@ -1,0 +1,45 @@
+name: Azure Infrastructure Setup
+# Run this manually once to bootstrap tables + Function App env vars.
+# Requires org secrets: AZURE_CLIENT_ID, AZURE_TENANT_ID, AZURE_SUBSCRIPTION_ID (OIDC), AZURE_STORAGE_CONNECTION_STRING.
+
+on:
+  workflow_dispatch:
+
+jobs:
+  setup:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Login to Azure
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Create storage tables
+        run: |
+          CONN="${{ secrets.AZURE_STORAGE_CONNECTION_STRING }}"
+          for table in AppConfig Prompts JobApplications MasterContext; do
+            az storage table create --name $table --connection-string "$CONN" || true
+          done
+
+      - name: Set Function App environment variables
+        run: |
+          az functionapp config appsettings set \
+            --name job-platform-api \
+            --resource-group EnterpriseDS_ResourceGRP \
+            --settings \
+              "AZURE_STORAGE_CONNECTION_STRING=${{ secrets.AZURE_STORAGE_CONNECTION_STRING }}" \
+              "MICROSOFT_TENANT_ID=${{ secrets.AZURE_TENANT_ID }}" \
+              "NODE_ENV=production"
+
+      - name: Verify tables
+        run: |
+          az storage table list \
+            --connection-string "${{ secrets.AZURE_STORAGE_CONNECTION_STRING }}" \
+            --query "[].name" -o tsv
