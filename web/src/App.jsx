@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 
 const PHASES = [
   {
@@ -203,8 +203,31 @@ export default function App() {
     sendToEmail: "von.ellis@enterpriseds.io",
   });
   const [activePhaseFilter, setActivePhaseFilter] = useState("all");
+  const [configStatus, setConfigStatus] = useState({});
 
   const API_BASE = "https://job-platform-api.azurewebsites.net/api";
+
+  // On load, ask the backend which credentials are already configured
+  // (from GitHub secrets → Function App settings). We never receive the
+  // secret values — only booleans + masked hints — so nothing sensitive
+  // is exposed in the browser.
+  useEffect(() => {
+    fetch(`${API_BASE}/config-status`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (!data) return;
+        setConfigStatus(data);
+        setAuthSaved((s) => ({
+          ...s,
+          ...(data.microsoft ? { microsoft: true } : {}),
+          ...(data.google ? { google: true } : {}),
+          ...(data.openai ? { openai: true } : {}),
+          ...(data.azure ? { azure: true } : {}),
+          ...(data.heygen ? { heygen: true } : {}),
+        }));
+      })
+      .catch(() => {});
+  }, []);
 
   const TEST_ROUTES = {
     "MT-01": "/test/mt-01",
@@ -483,12 +506,21 @@ export default function App() {
                     {isOpen && (
                       <div style={{ padding: "0 16px 16px", borderTop: "1px solid #1E293B" }}>
                         <div style={{ paddingTop: 14, display: "flex", flexDirection: "column", gap: 10 }}>
-                          {config.fields.map((field) => (
+                          {configStatus[config.id] && (
+                            <div style={{ fontSize: 11, color: "#10B981", background: "#0D2B1A", border: "1px solid #10B98130", borderRadius: 6, padding: "8px 10px", lineHeight: 1.5 }}>
+                              🔒 Managed by backend — credentials are set from GitHub secrets on the server. You don't need to enter anything here. Leave fields blank to keep using the server-side values, or type a value to override for local testing.
+                            </div>
+                          )}
+                          {config.fields.map((field) => {
+                            const backendHint = configStatus.hints?.[config.id];
+                            const isSecretField = field.type === "password" || field.key === "serviceAccountJson";
+                            const managed = configStatus[config.id] && isSecretField;
+                            return (
                             <div key={field.key}>
-                              <label style={{ fontSize: 11, color: "#94A3B8", display: "block", marginBottom: 4 }}>{field.label}</label>
+                              <label style={{ fontSize: 11, color: "#94A3B8", display: "block", marginBottom: 4 }}>{field.label}{managed && <span style={{ color: "#10B981", marginLeft: 6 }}>✓ set on server</span>}</label>
                               {field.type === "textarea" ? (
                                 <textarea
-                                  placeholder={field.placeholder}
+                                  placeholder={managed ? "•••••••• (configured via GitHub secrets)" : field.placeholder}
                                   value={authValues[`${config.id}.${field.key}`] || ""}
                                   onChange={(e) => setAuthValues((v) => ({ ...v, [`${config.id}.${field.key}`]: e.target.value }))}
                                   style={{ width: "100%", background: "#0A0F14", border: "1px solid #1E293B", borderRadius: 6, color: "#E2E8F0", fontSize: 11, padding: "8px 10px", resize: "vertical", minHeight: 80, fontFamily: "monospace", boxSizing: "border-box" }}
@@ -496,14 +528,15 @@ export default function App() {
                               ) : (
                                 <input
                                   type={field.type}
-                                  placeholder={field.placeholder}
+                                  placeholder={managed ? (backendHint || "•••••••• (configured via GitHub secrets)") : field.placeholder}
                                   value={authValues[`${config.id}.${field.key}`] || ""}
                                   onChange={(e) => setAuthValues((v) => ({ ...v, [`${config.id}.${field.key}`]: e.target.value }))}
                                   style={{ width: "100%", background: "#0A0F14", border: "1px solid #1E293B", borderRadius: 6, color: "#E2E8F0", fontSize: 12, padding: "8px 10px", boxSizing: "border-box" }}
                                 />
                               )}
                             </div>
-                          ))}
+                            );
+                          })}
                           <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
                             <button
                               onClick={() => {
