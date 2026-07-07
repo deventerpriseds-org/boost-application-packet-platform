@@ -79,18 +79,26 @@ export async function testConnection(
         return { status: 200, headers, jsonBody: { success: res.ok, detail: res.ok ? 'OpenAI connected' : `HTTP ${res.status}` } }
       }
       case 'google': {
-        const raw = process.env.GOOGLE_SERVICE_ACCOUNT_JSON
-        if (!raw) return { status: 200, headers, jsonBody: { success: false, detail: 'GOOGLE_SERVICE_ACCOUNT_JSON not set in Function App settings' } }
-        const creds = JSON.parse(raw)
+        // Read from AppConfig table first, fall back to env var
+        const configClient = TableClient.fromConnectionString(CONN, 'AppConfig')
+        const getVal = async (key: string) => {
+          try {
+            const e = await configClient.getEntity('auth', key)
+            return e.value as string
+          } catch { return null }
+        }
+        const rawJson = await getVal('google.serviceAccountJson') ?? process.env.GOOGLE_SERVICE_ACCOUNT_JSON
+        if (!rawJson) return { status: 200, headers, jsonBody: { success: false, detail: 'Google service account JSON not configured. Add it in Auth & Config → Google APIs.' } }
+        const folderId = await getVal('google.outputFolderId') ?? process.env.ZAPIER_DOCS_FOLDER_ID
+        if (!folderId) return { status: 200, headers, jsonBody: { success: false, detail: 'Output Folder ID not configured. Add it in Auth & Config → Google APIs.' } }
+        const creds = JSON.parse(rawJson)
         const auth = new google.auth.GoogleAuth({
           credentials: creds,
           scopes: ['https://www.googleapis.com/auth/drive.readonly']
         })
         const drive = google.drive({ version: 'v3', auth })
-        const FOLDER_ID = process.env.ZAPIER_DOCS_FOLDER_ID
-        if (!FOLDER_ID) return { status: 200, headers, jsonBody: { success: false, detail: 'ZAPIER_DOCS_FOLDER_ID not set in Function App settings' } }
         const res = await drive.files.list({
-          q: `'${FOLDER_ID}' in parents and trashed = false`,
+          q: `'${folderId}' in parents and trashed = false`,
           fields: 'files(id, name)',
           pageSize: 10
         })

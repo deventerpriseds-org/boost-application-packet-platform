@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 
 const PHASES = [
   {
@@ -203,6 +203,41 @@ export default function App() {
     sendToEmail: "von.ellis@enterpriseds.io",
   });
   const [activePhaseFilter, setActivePhaseFilter] = useState("all");
+
+  const API = import.meta.env.VITE_API_URL || 'https://job-platform-api.azurewebsites.net';
+
+  // Load saved config from AppConfig table on mount
+  useEffect(() => {
+    fetch(`${API}/api/config`)
+      .then(r => r.json())
+      .then(data => {
+        if (data.success && data.values) {
+          setAuthValues(data.values)
+          // Mark sections as saved if they have any values
+          const saved = {}
+          AUTH_CONFIGS.forEach(cfg => {
+            saved[cfg.id] = cfg.fields.some(f => data.values[`${cfg.id}.${f.key}`]?.trim())
+          })
+          setAuthSaved(saved)
+        }
+      })
+      .catch(() => {})
+  }, [])
+
+  const saveAuthConfig = async (configId) => {
+    const config = AUTH_CONFIGS.find(c => c.id === configId)
+    const values = {}
+    config.fields.forEach(f => {
+      const val = authValues[`${configId}.${f.key}`]
+      if (val !== undefined) values[`${configId}.${f.key}`] = val
+    })
+    await fetch(`${API}/api/config`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ values })
+    })
+    setAuthSaved(s => ({ ...s, [configId]: true }))
+  }
 
   const runTest = (testId) => {
     setTestStatuses((s) => ({ ...s, [testId]: "running" }));
@@ -463,12 +498,12 @@ export default function App() {
                           ))}
                           <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
                             <button
-                              onClick={() => {
+                              onClick={async () => {
                                 const filled = config.fields.some(
                                   (f) => authValues[`${config.id}.${f.key}`]?.trim().length > 0
                                 );
                                 if (filled) {
-                                  setAuthSaved((s) => ({ ...s, [config.id]: true }));
+                                  await saveAuthConfig(config.id);
                                   setExpandedAuth(null);
                                 }
                               }}
