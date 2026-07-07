@@ -106,7 +106,7 @@ const AUTH_CONFIGS = [
 const MICRO_TESTS = [
   // Phase 1
   { id: "MT-01", phase: 1, title: "Azure Table Storage Read/Write", description: "Write a test row to AppConfig table, read it back and verify it matches.", connection: "Azure" },
-  { id: "MT-02", phase: 1, title: "OpenAI Connection", description: "Send a single 'say hello' message to gpt-4o-mini. Expect response under 5 seconds.", connection: "OpenAI" },
+  { id: "MT-02", phase: 1, title: "OpenAI Connection", description: "Ask gpt-4o-mini 'Hello how are you, what is the current date and time' and show the live model reply. Response changes each run — proves a real API call, not a canned result.", connection: "OpenAI" },
   { id: "MT-03", phase: 1, title: "Google Service Account Auth", description: "List files in the Zapier Automated Docs Drive folder to confirm auth is working.", connection: "Google" },
   { id: "MT-04", phase: 1, title: "Google Docs Template Copy", description: "Copy the resume template to the output folder with a test title. Verify file appears in Drive.", connection: "Google" },
   { id: "MT-05", phase: 1, title: "Google Docs Variable Injection", description: "Inject hardcoded test strings into every {{variable}} in the copied resume doc. Open doc to verify.", connection: "Google" },
