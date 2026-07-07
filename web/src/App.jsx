@@ -192,6 +192,8 @@ export default function App() {
   const [expandedAuth, setExpandedAuth] = useState(null);
   const [authValues, setAuthValues] = useState({});
   const [authSaved, setAuthSaved] = useState({});
+  const [testResponses, setTestResponses] = useState({});
+  const [testTimestamps, setTestTimestamps] = useState({});
   const [showForm, setShowForm] = useState(false);
   const [formData, setFormData] = useState({
     jobDescription: "",
@@ -239,46 +241,94 @@ export default function App() {
     setAuthSaved(s => ({ ...s, [configId]: true }))
   }
 
-  const runTest = (testId) => {
-    setTestStatuses((s) => ({ ...s, [testId]: "running" }));
-    setTestLogs((l) => ({ ...l, [testId]: [`[${new Date().toLocaleTimeString()}] Starting ${testId}...`] }));
+  // Map test ID → real API call
+  const TEST_RUNNERS = {
+    "MT-01": async () => {
+      const r = await fetch(`${API}/api/testConnection`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ connection: 'azure' }) })
+      return r.json()
+    },
+    "MT-02": async () => {
+      const r = await fetch(`${API}/api/testConnection`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ connection: 'openai' }) })
+      return r.json()
+    },
+    "MT-03": async () => {
+      const r = await fetch(`${API}/api/testConnection`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ connection: 'google' }) })
+      return r.json()
+    },
+  }
 
-    // Simulate async test
-    setTimeout(() => {
-      const pass = Math.random() > 0.25;
+  const runTest = async (testId) => {
+    const ts = () => new Date().toLocaleTimeString()
+    setTestStatuses((s) => ({ ...s, [testId]: "running" }));
+    setTestLogs((l) => ({ ...l, [testId]: [`[${ts()}] Starting ${testId}...`] }));
+    setTestResponses((r) => ({ ...r, [testId]: null }));
+    setTestTimestamps((t) => ({ ...t, [testId]: null }));
+
+    const runner = TEST_RUNNERS[testId]
+    if (!runner) {
+      setTestStatuses((s) => ({ ...s, [testId]: "pending" }));
+      setTestLogs((l) => ({ ...l, [testId]: [...(l[testId] || []), `[${ts()}] ⚠ Not yet implemented — API endpoint not built`] }));
+      return
+    }
+
+    try {
+      const data = await runner()
+      const pass = data.success === true
+      const completedAt = new Date().toLocaleTimeString()
       setTestStatuses((s) => ({ ...s, [testId]: pass ? "pass" : "fail" }));
+      setTestResponses((r) => ({ ...r, [testId]: data }));
+      setTestTimestamps((t) => ({ ...t, [testId]: completedAt }));
       setTestLogs((l) => ({
         ...l,
         [testId]: [
           ...(l[testId] || []),
           pass
-            ? `[${new Date().toLocaleTimeString()}] ✓ Test completed successfully`
-            : `[${new Date().toLocaleTimeString()}] ✗ Test failed — check connection config`,
+            ? `[${completedAt}] ✓ ${data.detail || 'Test passed'}`
+            : `[${completedAt}] ✗ ${data.detail || data.error || 'Test failed'}`,
         ],
       }));
-    }, 1500 + Math.random() * 1000);
+    } catch (err) {
+      const completedAt = new Date().toLocaleTimeString()
+      setTestStatuses((s) => ({ ...s, [testId]: "fail" }));
+      setTestLogs((l) => ({ ...l, [testId]: [...(l[testId] || []), `[${completedAt}] ✗ Network error: ${err.message}`] }));
+    }
   };
 
-  const fireAlert = () => {
+  const fireAlert = async () => {
+    const ts = () => new Date().toLocaleTimeString()
     setTestStatuses((s) => ({ ...s, "MT-10": "running" }));
+    setTestResponses((r) => ({ ...r, "MT-10": null }));
     setTestLogs((l) => ({
       ...l,
       "MT-10": [
-        `[${new Date().toLocaleTimeString()}] Firing fake job alert...`,
-        `[${new Date().toLocaleTimeString()}] Payload: ${JSON.stringify(FAKE_JOB_ALERT).slice(0, 120)}...`,
+        `[${ts()}] Firing fake job alert...`,
+        `[${ts()}] POST ${API}/api/processJob`,
       ],
     }));
-    setTimeout(() => {
-      setTestStatuses((s) => ({ ...s, "MT-10": "pass" }));
+    try {
+      const r = await fetch(`${API}/api/processJob`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(FAKE_JOB_ALERT)
+      })
+      const data = await r.json()
+      const completedAt = ts()
+      const pass = r.ok && data.success !== false
+      setTestStatuses((s) => ({ ...s, "MT-10": pass ? "pass" : "fail" }));
+      setTestResponses((rv) => ({ ...rv, "MT-10": data }));
+      setTestTimestamps((t) => ({ ...t, "MT-10": completedAt }));
       setTestLogs((l) => ({
         ...l,
-        "MT-10": [
-          ...(l["MT-10"] || []),
-          `[${new Date().toLocaleTimeString()}] ✓ Endpoint received payload — HTTP 200`,
-          `[${new Date().toLocaleTimeString()}] Job queued for approval`,
+        "MT-10": [...(l["MT-10"] || []),
+          pass
+            ? `[${completedAt}] ✓ HTTP ${r.status} — ${data.message || 'Payload received'}`
+            : `[${completedAt}] ✗ HTTP ${r.status} — ${data.error || 'Unexpected response'}`
         ],
       }));
-    }, 1800);
+    } catch (err) {
+      setTestStatuses((s) => ({ ...s, "MT-10": "fail" }));
+      setTestLogs((l) => ({ ...l, "MT-10": [...(l["MT-10"] || []), `[${ts()}] ✗ Network error: ${err.message}`] }));
+    }
   };
 
   const totalTests = MICRO_TESTS.length;
@@ -613,12 +663,27 @@ export default function App() {
 
                     {isExpanded && (
                       <div style={{ padding: "0 16px 14px", borderTop: "1px solid #1E293B" }}>
-                        <p style={{ fontSize: 12, color: "#94A3B8", margin: "12px 0 10px", lineHeight: 1.6 }}>{test.description}</p>
+                        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", margin: "12px 0 10px" }}>
+                          <p style={{ fontSize: 12, color: "#94A3B8", margin: 0, lineHeight: 1.6 }}>{test.description}</p>
+                          {testTimestamps[test.id] && (
+                            <div style={{ fontSize: 10, color: "#475569", flexShrink: 0, marginLeft: 12 }}>
+                              Last run: {testTimestamps[test.id]}
+                            </div>
+                          )}
+                        </div>
                         {logs.length > 0 && (
-                          <div style={{ background: "#0A0F14", borderRadius: 6, padding: "10px 12px", fontFamily: "monospace", fontSize: 11, color: "#64748B", lineHeight: 1.8 }}>
+                          <div style={{ background: "#0A0F14", borderRadius: 6, padding: "10px 12px", fontFamily: "monospace", fontSize: 11, lineHeight: 1.8, marginBottom: testResponses[test.id] ? 8 : 0 }}>
                             {logs.map((log, i) => (
-                              <div key={i} style={{ color: log.includes("✓") ? "#10B981" : log.includes("✗") ? "#EF4444" : "#64748B" }}>{log}</div>
+                              <div key={i} style={{ color: log.includes("✓") ? "#10B981" : log.includes("✗") ? "#EF4444" : log.includes("⚠") ? "#F59E0B" : "#64748B" }}>{log}</div>
                             ))}
+                          </div>
+                        )}
+                        {testResponses[test.id] && (
+                          <div style={{ marginTop: 8 }}>
+                            <div style={{ fontSize: 10, fontWeight: 600, color: "#475569", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 4 }}>Response Payload</div>
+                            <div style={{ background: "#0A0F14", borderRadius: 6, padding: "10px 12px", fontFamily: "monospace", fontSize: 11, color: "#94A3B8", lineHeight: 1.7, overflowX: "auto", whiteSpace: "pre-wrap", wordBreak: "break-all" }}>
+                              {JSON.stringify(testResponses[test.id], null, 2)}
+                            </div>
                           </div>
                         )}
                       </div>
