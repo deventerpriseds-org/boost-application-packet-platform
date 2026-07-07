@@ -1,0 +1,113 @@
+name: Azure Infrastructure Setup (Run Once)
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type "yes" to confirm resource creation'
+        required: true
+        default: ''
+
+jobs:
+  create-storage-tables:
+    runs-on: ubuntu-latest
+    name: Create Storage Tables
+    steps:
+      - name: Install Azure CLI
+        run: |
+          curl -sL https://aka.ms/InstallAzureCLIDeb | sudo bash
+
+      - name: Create Azure Storage Tables
+        env:
+          CONN: ${{ secrets.AZURE_STORAGE_CONNECTION_STRING }}
+        run: |
+          for table in AppConfig Prompts JobApplications MasterContext; do
+            echo "Creating table: $table"
+            az storage table create --name "$table" --connection-string "$CONN"
+          done
+
+      - name: Verify Tables
+        env:
+          CONN: ${{ secrets.AZURE_STORAGE_CONNECTION_STRING }}
+        run: |
+          echo "Tables in storage account:"
+          az storage table list --connection-string "$CONN" --query "[].name" -o tsv
+
+  create-function-app:
+    runs-on: ubuntu-latest
+    name: Create Function App
+    needs: create-storage-tables
+    steps:
+      - name: Install Azure CLI
+        run: |
+          curl -sL https://aka.ms/InstallAzureCLIDeb | sudo bash
+
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Create Function App
+        run: |
+          az functionapp create \
+            --name job-platform-api \
+            --resource-group EnterpriseDS_ResourceGRP \
+            --storage-account n8nstxpdthydai6fkm \
+            --consumption-plan-location eastus \
+            --runtime node \
+            --runtime-version 18 \
+            --functions-version 4 \
+            --os-type Linux
+
+      - name: Set Function App Settings
+        env:
+          CONN: ${{ secrets.AZURE_STORAGE_CONNECTION_STRING }}
+        run: |
+          az functionapp config appsettings set \
+            --name job-platform-api \
+            --resource-group EnterpriseDS_ResourceGRP \
+            --settings \
+              "AZURE_STORAGE_CONNECTION_STRING=$CONN" \
+              "MICROSOFT_TENANT_ID=b9791c7d-dd6c-4190-b1bb-dbbd1996bc2e" \
+              "NODE_ENV=production"
+
+      - name: Verify Function App
+        run: |
+          az functionapp show \
+            --name job-platform-api \
+            --resource-group EnterpriseDS_ResourceGRP \
+            --query "{name:name, state:state, location:location}" \
+            -o json
+
+  create-static-web-app:
+    runs-on: ubuntu-latest
+    name: Create Static Web App
+    needs: create-storage-tables
+    steps:
+      - name: Install Azure CLI
+        run: |
+          curl -sL https://aka.ms/InstallAzureCLIDeb | sudo bash
+
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Create Static Web App
+        run: |
+          az staticwebapp create \
+            --name job-platform-web \
+            --resource-group EnterpriseDS_ResourceGRP \
+            --location "eastus2" \
+            --sku Free
+
+      - name: Get Deployment Token
+        id: token
+        run: |
+          TOKEN=$(az staticwebapp secrets list \
+            --name job-platform-web \
+            --resource-group EnterpriseDS_ResourceGRP \
+            --query "properties.apiKey" -o tsv)
+          echo "::add-mask::$TOKEN"
+          echo "token=$TOKEN" >> "$GITHUB_OUTPUT"
+          echo "Static Web App deployment token retrieved (${#TOKEN} chars)"
