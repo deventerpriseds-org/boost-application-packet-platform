@@ -93,7 +93,8 @@ export async function mt15(req: HttpRequest, context: InvocationContext): Promis
           coverLetter: portfolio.coverLetter ? countWords(portfolio.coverLetter) : 0,
         },
         portfolioContent: portfolio,
-        rawOutput: content
+        promptSentToAI: { model: 'gpt-4o-mini', maxTokens: 16000, system: finalSystem, user: finalUser },
+        aiResponse: content
       }
     }
   } catch (err) {

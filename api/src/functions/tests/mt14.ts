@@ -62,14 +62,23 @@ export async function mt14(req: HttpRequest, context: InvocationContext): Promis
     const sections = content.split('###').map((s: string) => s.trim()).filter(Boolean)
 
     const unresolved = (finalUser.match(/\{\{/g) || []).length
-    // Show the resolved "Inputs to use" section — proves real MasterContext
-    // values were substituted in, not just blanked out.
-    const inputsIdx = finalUser.indexOf('Inputs to use')
-    const resolvedPreview = inputsIdx >= 0 ? finalUser.slice(inputsIdx, inputsIdx + 900) : finalUser.slice(0, 900)
-    if (sections.length < 14) {
-      return { status: 200, headers: HEADERS, jsonBody: { pass: false, detail: `Only ${sections.length} sections returned (need 14+). Check prompt.`, unresolvedPlaceholders: unresolved, resolvedPromptPreview: resolvedPreview, sections } }
+    // Full transparency: exactly what was submitted to the AI and what came back.
+    const promptSentToAI = { model: 'gpt-4o-mini', maxTokens: 16000, system: finalSystem, user: finalUser }
+    const pass = sections.length >= 14
+    return {
+      status: 200, headers: HEADERS,
+      jsonBody: {
+        pass,
+        detail: pass
+          ? `${sections.length} sections returned. Prompt variables resolved (${unresolved} placeholders left).`
+          : `Only ${sections.length} sections returned (need 14+).`,
+        unresolvedPlaceholders: unresolved,
+        promptSentToAI,
+        aiResponse: content,
+        sectionCount: sections.length,
+        sections
+      }
     }
-    return { status: 200, headers: HEADERS, jsonBody: { pass: true, detail: `${sections.length} sections returned. Prompt variables resolved (${unresolved} placeholders left).`, unresolvedPlaceholders: unresolved, resolvedPromptPreview: resolvedPreview, sectionCount: sections.length, sections } }
   } catch (err) {
     return { status: 200, headers: HEADERS, jsonBody: { pass: false, detail: String(err) } }
   }

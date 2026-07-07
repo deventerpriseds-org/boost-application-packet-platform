@@ -84,7 +84,8 @@ export async function mt16(req: HttpRequest, context: InvocationContext): Promis
           : `Missing sections: ${missing.join(', ')}`,
         sectionHeaders: Object.keys(sections),
         parsedSections: checks,
-        rawOutput: content
+        promptSentToAI: { model: 'gpt-4o-mini', maxTokens: 15500, system: finalSystem, user: finalUser },
+        aiResponse: content
       }
     }
   } catch (err) {

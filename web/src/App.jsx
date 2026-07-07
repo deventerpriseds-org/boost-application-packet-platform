@@ -753,9 +753,34 @@ export default function App() {
                                 {testResults[test.id].endpoint} · HTTP {testResults[test.id].httpStatus} · {testResults[test.id].roundtripMs}ms · {testResults[test.id].ranAt}
                               </span>
                             </div>
-                            <pre style={{ background: "#060A0E", border: "1px solid #1E293B", borderRadius: 6, padding: "10px 12px", fontFamily: "monospace", fontSize: 11, color: "#94A3B8", lineHeight: 1.6, maxHeight: 340, overflow: "auto", margin: 0, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
-                              {JSON.stringify(testResults[test.id].data, null, 2)}
-                            </pre>
+                            {/* AI tests: show exactly what was submitted to the model and its raw reply */}
+                            {testResults[test.id].data?.promptSentToAI && (
+                              <div style={{ marginBottom: 10 }}>
+                                <div style={{ fontSize: 10, fontWeight: 700, color: "#4A6FA5", marginBottom: 4 }}>📤 SUBMITTED TO AI ({testResults[test.id].data.promptSentToAI.model}, max_tokens {testResults[test.id].data.promptSentToAI.maxTokens})</div>
+                                {testResults[test.id].data.promptSentToAI.system && (
+                                  <details style={{ marginBottom: 6 }}>
+                                    <summary style={{ fontSize: 10, color: "#64748B", cursor: "pointer" }}>System message</summary>
+                                    <pre style={{ background: "#060A0E", border: "1px solid #1E293B", borderRadius: 6, padding: "8px 10px", fontFamily: "monospace", fontSize: 10.5, color: "#7C93B8", lineHeight: 1.5, maxHeight: 160, overflow: "auto", margin: "4px 0 0", whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{testResults[test.id].data.promptSentToAI.system}</pre>
+                                  </details>
+                                )}
+                                <details open>
+                                  <summary style={{ fontSize: 10, color: "#64748B", cursor: "pointer" }}>User message (fully resolved — variables replaced)</summary>
+                                  <pre style={{ background: "#060A0E", border: "1px solid #1E293B", borderRadius: 6, padding: "8px 10px", fontFamily: "monospace", fontSize: 10.5, color: "#7C93B8", lineHeight: 1.5, maxHeight: 260, overflow: "auto", margin: "4px 0 0", whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{testResults[test.id].data.promptSentToAI.user}</pre>
+                                </details>
+                              </div>
+                            )}
+                            {testResults[test.id].data?.aiResponse && (
+                              <div style={{ marginBottom: 10 }}>
+                                <div style={{ fontSize: 10, fontWeight: 700, color: "#10B981", marginBottom: 4 }}>📥 AI RESPONSE</div>
+                                <pre style={{ background: "#060A0E", border: "1px solid #10B98130", borderRadius: 6, padding: "8px 10px", fontFamily: "monospace", fontSize: 10.5, color: "#A7C4A0", lineHeight: 1.5, maxHeight: 300, overflow: "auto", margin: 0, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{testResults[test.id].data.aiResponse}</pre>
+                              </div>
+                            )}
+                            <details>
+                              <summary style={{ fontSize: 10, fontWeight: 700, color: "#64748B", cursor: "pointer", marginBottom: 4 }}>Full raw JSON</summary>
+                              <pre style={{ background: "#060A0E", border: "1px solid #1E293B", borderRadius: 6, padding: "10px 12px", fontFamily: "monospace", fontSize: 11, color: "#94A3B8", lineHeight: 1.6, maxHeight: 340, overflow: "auto", margin: "4px 0 0", whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
+                                {JSON.stringify(testResults[test.id].data, null, 2)}
+                              </pre>
+                            </details>
                           </div>
                         )}
                       </div>

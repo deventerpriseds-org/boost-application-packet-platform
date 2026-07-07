@@ -42,6 +42,8 @@ export async function mt02(req: HttpRequest, context: InvocationContext): Promis
           ? `Model replied in ${latency}ms: "${content}"`
           : 'Model returned an empty response',
         prompt,
+        promptSentToAI: { model: 'gpt-4o-mini', maxTokens: 120, user: prompt },
+        aiResponse: content,
         modelResponse: content,
         model: data.model,
         latencyMs: latency
