@@ -51,7 +51,9 @@ jobs:
               "OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}" \
               "MICROSOFT_CLIENT_ID=${{ secrets.AZURE_CLIENT_ID }}" \
               "MICROSOFT_CLIENT_SECRET=${{ secrets.AZURE_CLIENT_SECRET }}" \
-              "MICROSOFT_TENANT_ID=b9791c7d-dd6c-4190-b1bb-dbbd1996bc2e" \
+              "MICROSOFT_TENANT_ID=ee633423-c321-413c-a191-ace8b07e4196" \
+              "GOOGLE_CLIENT_ID=${{ secrets.GOOGLE_CLIENT_ID }}" \
+              "GOOGLE_CLIENT_SECRET=${{ secrets.GOOGLE_CLIENT_SECRET }}" \
               "NODE_ENV=production"
 
       - name: Deploy to Azure Functions

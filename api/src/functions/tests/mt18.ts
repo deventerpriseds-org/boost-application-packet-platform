@@ -1,6 +1,6 @@
 import { app, HttpRequest, HttpResponseInit, InvocationContext } from '@azure/functions'
 import { TableClient } from '@azure/data-tables'
-import { getGoogleToken, IMPERSONATE_SUBJECT } from './googleAuth'
+import { getGoogleToken, getGoogleOAuthToken, HAS_GOOGLE_OAUTH, IMPERSONATE_SUBJECT } from './googleAuth'
 import { assemblePackage } from './mt17'
 
 const CONN = process.env.AZURE_STORAGE_CONNECTION_STRING!
@@ -71,7 +71,9 @@ export async function mt18(req: HttpRequest, context: InvocationContext): Promis
     const pkg = assemblePackage(call1, { aboutMe1: call1.aboutMe1, aboutMe2: call1.aboutMe2, executiveProfile: call1.executiveProfile, coverLetter: call1.coverLetter, coldEmail: '' }, { finalSkills1: call1.skills1.split('|'), finalSkills2: call1.skills2.split('|'), finalRelevant1: call1.relevant1, finalRelevant2: call1.relevant2, finalRelevant3: call1.relevant3, updatedResumeSummary: call1.resumeSummary })
 
     // Populate Google Doc
-    const token = await getGoogleToken(saJson, 'https://www.googleapis.com/auth/drive https://www.googleapis.com/auth/documents', IMPERSONATE_SUBJECT)
+    const token = HAS_GOOGLE_OAUTH
+      ? await getGoogleOAuthToken()
+      : await getGoogleToken(saJson, 'https://www.googleapis.com/auth/drive https://www.googleapis.com/auth/documents', IMPERSONATE_SUBJECT)
     const copyRes = await fetch(`https://www.googleapis.com/drive/v3/files/${RESUME_TEMPLATE_ID}/copy`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },

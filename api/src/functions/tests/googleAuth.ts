@@ -35,6 +35,36 @@ export async function getGoogleToken(serviceAccountJson: string, scope: string, 
 // owns/can-access the templates and output folder and has Drive storage quota.
 export const IMPERSONATE_SUBJECT = process.env.GOOGLE_IMPERSONATE_SUBJECT || 'dev@enterpriseds.io'
 
+// OAuth-user token: mint an access token from a stored refresh token for a real
+// Google account (dev@enterpriseds.io). Files created with this token are owned
+// by that account, using its Drive quota — the fix for a non-Workspace domain
+// where service-account impersonation and Shared Drives are unavailable.
+export async function getGoogleOAuthToken(): Promise<string> {
+  const clientId = process.env.GOOGLE_CLIENT_ID
+  const clientSecret = process.env.GOOGLE_CLIENT_SECRET
+  const refreshToken = process.env.GOOGLE_REFRESH_TOKEN
+  if (!clientId || !clientSecret) throw new Error('GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET not set')
+  if (!refreshToken) throw new Error('GOOGLE_REFRESH_TOKEN not set — run the /api/google/auth consent flow as dev@enterpriseds.io first')
+
+  const res = await fetch('https://oauth2.googleapis.com/token', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      client_id: clientId,
+      client_secret: clientSecret,
+      refresh_token: refreshToken,
+      grant_type: 'refresh_token'
+    })
+  })
+  if (!res.ok) throw new Error(`OAuth token refresh failed: HTTP ${res.status} ${await res.text()}`)
+  const data = await res.json() as any
+  return data.access_token
+}
+
+// True when an OAuth refresh token is configured, so callers can prefer
+// OAuth-user auth (owns quota) over the service account (0 quota) for writes.
+export const HAS_GOOGLE_OAUTH = !!process.env.GOOGLE_REFRESH_TOKEN
+
 export async function getMicrosoftToken(tenantId: string, clientId: string, clientSecret: string): Promise<string> {
   const res = await fetch(`https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/token`, {
     method: 'POST',

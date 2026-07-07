@@ -1,6 +1,6 @@
 import { app, HttpRequest, HttpResponseInit, InvocationContext } from '@azure/functions'
 import { TableClient } from '@azure/data-tables'
-import { getGoogleToken, IMPERSONATE_SUBJECT } from './googleAuth'
+import { getGoogleToken, getGoogleOAuthToken, HAS_GOOGLE_OAUTH, IMPERSONATE_SUBJECT } from './googleAuth'
 import { assemblePackage } from './mt17'
 
 const CONN = process.env.AZURE_STORAGE_CONNECTION_STRING!
@@ -79,7 +79,9 @@ export async function mt19(req: HttpRequest, context: InvocationContext): Promis
     try { const m = (r3.choices?.[0]?.message?.content || '').match(/\{[\s\S]*\}/); if (m) c3 = JSON.parse(m[0]) } catch {}
 
     const pkg = assemblePackage(c1, c2, c3)
-    const token = await getGoogleToken(saJson, 'https://www.googleapis.com/auth/drive https://www.googleapis.com/auth/documents https://www.googleapis.com/auth/presentations', IMPERSONATE_SUBJECT)
+    const token = HAS_GOOGLE_OAUTH
+      ? await getGoogleOAuthToken()
+      : await getGoogleToken(saJson, 'https://www.googleapis.com/auth/drive https://www.googleapis.com/auth/documents https://www.googleapis.com/auth/presentations', IMPERSONATE_SUBJECT)
     const company = c1.targetCompany
 
     const resumeVars: Record<string, string> = { '{{ResumeSummary}}': pkg.ResumeSummary || '', '{{SkillsBullets1}}': pkg.SkillsBullets1 || '', '{{SkillsBullets2}}': pkg.SkillsBullets2 || '', '{{ExpertiseBullets}}': pkg.ExpertiseBullets || '', '{{WorkHistoryBullets1}}': pkg.WorkHistoryBullets1 || '', '{{WorkHistoryBullets2}}': pkg.WorkHistoryBullets2 || '', '{{WorkHistoryBullets3}}': pkg.WorkHistoryBullets3 || '', '{{WorkHistoryBullets4}}': pkg.WorkHistoryBullets4 || '', '{{RelevantBullets1}}': pkg.RelevantBullets1 || '', '{{RelevantBullets2}}': pkg.RelevantBullets2 || '', '{{RelevantBullets3}}': pkg.RelevantBullets3 || '' }
