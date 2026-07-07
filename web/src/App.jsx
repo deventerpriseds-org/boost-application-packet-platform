@@ -190,6 +190,9 @@ export default function App() {
   const [testLogs, setTestLogs] = useState({});
   const [expandedTest, setExpandedTest] = useState(null);
   const [testResults, setTestResults] = useState({});
+  const [promptContents, setPromptContents] = useState({});
+  const [promptMeta, setPromptMeta] = useState({});
+  const [promptSaving, setPromptSaving] = useState({});
   const [expandedAuth, setExpandedAuth] = useState(null);
   const [authValues, setAuthValues] = useState({});
   const [authSaved, setAuthSaved] = useState({});
@@ -229,6 +232,39 @@ export default function App() {
       })
       .catch(() => {});
   }, []);
+
+  // Load the real prompt content from the Prompts table so the Prompts tab
+  // shows what's actually stored (and used by the agents), not empty boxes.
+  const loadPrompts = () => {
+    fetch(`${API_BASE}/prompts`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (!data?.prompts) return;
+        const contents = {}, meta = {};
+        data.prompts.forEach((p) => {
+          contents[p.partitionKey] = p.content;
+          meta[p.partitionKey] = { version: p.version, is_active: p.is_active, length: p.length, notes: p.notes };
+        });
+        setPromptContents(contents);
+        setPromptMeta(meta);
+      })
+      .catch(() => {});
+  };
+  useEffect(() => { loadPrompts(); }, []);
+
+  const savePrompt = async (partitionKey) => {
+    setPromptSaving((s) => ({ ...s, [partitionKey]: true }));
+    try {
+      const res = await fetch(`${API_BASE}/prompts`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ partitionKey, content: promptContents[partitionKey] || "" }),
+      });
+      const data = await res.json();
+      if (data.saved) setPromptMeta((m) => ({ ...m, [partitionKey]: { ...m[partitionKey], version: data.version, is_active: true } }));
+    } catch (e) { /* ignore */ }
+    setPromptSaving((s) => ({ ...s, [partitionKey]: false }));
+  };
 
   const TEST_ROUTES = {
     "MT-01": "/test/mt-01",
@@ -859,18 +895,27 @@ export default function App() {
                     <div style={{ fontSize: 11, color: "#10A37F", marginTop: 2 }}>{prompt.agent}</div>
                     <div style={{ fontSize: 11, color: "#64748B", marginTop: 4 }}>{prompt.description}</div>
                   </div>
-                  <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
-                    <span style={{ fontSize: 10, color: "#10B981", background: "#05260F", padding: "3px 8px", borderRadius: 4 }}>v1 · Active</span>
-                    <button style={{ fontSize: 11, color: "#64748B", background: "#1E293B", border: "none", borderRadius: 6, padding: "4px 10px", cursor: "pointer" }}>History</button>
+                  <div style={{ display: "flex", gap: 6, flexShrink: 0, alignItems: "center" }}>
+                    {promptMeta[prompt.id] ? (
+                      <span style={{ fontSize: 10, color: "#10B981", background: "#05260F", padding: "3px 8px", borderRadius: 4 }}>
+                        v{promptMeta[prompt.id].version} · {promptMeta[prompt.id].is_active ? "Active" : "Inactive"} · {promptMeta[prompt.id].length?.toLocaleString()} chars
+                      </span>
+                    ) : (
+                      <span style={{ fontSize: 10, color: "#F59E0B", background: "#2B1A00", padding: "3px 8px", borderRadius: 4 }}>Not seeded</span>
+                    )}
                   </div>
                 </div>
                 <textarea
-                  placeholder={`Enter ${prompt.label} content...`}
-                  style={{ width: "100%", background: "#0A0F14", border: "1px solid #1E293B", borderRadius: 6, color: "#94A3B8", fontSize: 11, padding: "10px 12px", resize: "vertical", minHeight: 80, fontFamily: "monospace", lineHeight: 1.6, boxSizing: "border-box" }}
+                  value={promptContents[prompt.id] || ""}
+                  onChange={(e) => setPromptContents((c) => ({ ...c, [prompt.id]: e.target.value }))}
+                  placeholder={`(empty — ${prompt.id} not found in Prompts table)`}
+                  style={{ width: "100%", background: "#0A0F14", border: "1px solid #1E293B", borderRadius: 6, color: "#94A3B8", fontSize: 11, padding: "10px 12px", resize: "vertical", minHeight: 120, fontFamily: "monospace", lineHeight: 1.6, boxSizing: "border-box" }}
                 />
-                <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
-                  <button style={{ padding: "7px 14px", background: "#1B4F5C", border: "none", borderRadius: 6, color: "#E2E8F0", fontSize: 11, fontWeight: 600, cursor: "pointer" }}>Save New Version</button>
-                  <button style={{ padding: "7px 14px", background: "transparent", border: "1px solid #1E293B", borderRadius: 6, color: "#64748B", fontSize: 11, cursor: "pointer" }}>Copy ID: {prompt.id}</button>
+                <div style={{ display: "flex", gap: 8, marginTop: 8, alignItems: "center" }}>
+                  <button onClick={() => savePrompt(prompt.id)} disabled={promptSaving[prompt.id]} style={{ padding: "7px 14px", background: "#1B4F5C", border: "none", borderRadius: 6, color: "#E2E8F0", fontSize: 11, fontWeight: 600, cursor: "pointer", opacity: promptSaving[prompt.id] ? 0.6 : 1 }}>
+                    {promptSaving[prompt.id] ? "Saving…" : "Save New Version"}
+                  </button>
+                  <button onClick={loadPrompts} style={{ padding: "7px 14px", background: "transparent", border: "1px solid #1E293B", borderRadius: 6, color: "#64748B", fontSize: 11, cursor: "pointer" }}>Reload from table</button>
                 </div>
               </div>
             ))}
