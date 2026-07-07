@@ -185,11 +185,16 @@ Requirements:
 };
 
 export default function App() {
+  // Persist test state across page refreshes via localStorage so results
+  // aren't lost on reload.
+  const loadPersisted = (key, fallback) => {
+    try { const v = localStorage.getItem(key); return v ? JSON.parse(v) : fallback; } catch { return fallback; }
+  };
   const [activeTab, setActiveTab] = useState("dashboard");
-  const [testStatuses, setTestStatuses] = useState({});
-  const [testLogs, setTestLogs] = useState({});
+  const [testStatuses, setTestStatuses] = useState(() => loadPersisted("jap_testStatuses", {}));
+  const [testLogs, setTestLogs] = useState(() => loadPersisted("jap_testLogs", {}));
   const [expandedTest, setExpandedTest] = useState(null);
-  const [testResults, setTestResults] = useState({});
+  const [testResults, setTestResults] = useState(() => loadPersisted("jap_testResults", {}));
   const [promptContents, setPromptContents] = useState({});
   const [promptMeta, setPromptMeta] = useState({});
   const [promptSaving, setPromptSaving] = useState({});
@@ -251,6 +256,11 @@ export default function App() {
       .catch(() => {});
   };
   useEffect(() => { loadPrompts(); }, []);
+
+  // Persist test state to localStorage whenever it changes.
+  useEffect(() => { try { localStorage.setItem("jap_testStatuses", JSON.stringify(testStatuses)); } catch {} }, [testStatuses]);
+  useEffect(() => { try { localStorage.setItem("jap_testLogs", JSON.stringify(testLogs)); } catch {} }, [testLogs]);
+  useEffect(() => { try { localStorage.setItem("jap_testResults", JSON.stringify(testResults)); } catch {} }, [testResults]);
 
   const savePrompt = async (partitionKey) => {
     setPromptSaving((s) => ({ ...s, [partitionKey]: true }));
@@ -652,7 +662,15 @@ export default function App() {
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20 }}>
               <div>
                 <div style={{ fontSize: 18, fontWeight: 700, color: "#E2E8F0", marginBottom: 4 }}>Micro Tests</div>
-                <div style={{ fontSize: 13, color: "#64748B" }}>{passCount} passed · {failCount} failed · {totalTests - passCount - failCount} pending</div>
+                <div style={{ fontSize: 13, color: "#64748B" }}>
+                  {passCount} passed · {failCount} failed · {totalTests - passCount - failCount} pending
+                  <button
+                    onClick={() => { setTestStatuses({}); setTestLogs({}); setTestResults({}); try { ["jap_testStatuses","jap_testLogs","jap_testResults"].forEach((k) => localStorage.removeItem(k)); } catch {} }}
+                    style={{ marginLeft: 10, padding: "2px 8px", background: "transparent", border: "1px solid #1E293B", borderRadius: 5, color: "#64748B", fontSize: 10, cursor: "pointer" }}
+                  >
+                    Clear results
+                  </button>
+                </div>
               </div>
               <div style={{ display: "flex", gap: 6 }}>
                 {[{ label: "All", value: "all" }, ...PHASES.map((p) => ({ label: p.label, value: String(p.id) }))].map((f) => (

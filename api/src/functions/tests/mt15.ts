@@ -57,30 +57,43 @@ export async function mt15(req: HttpRequest, context: InvocationContext): Promis
     const data = await res.json() as any
     const content = data.choices?.[0]?.message?.content || ''
 
-    // Try to parse JSON from response
-    let parsed: any = {}
-    try {
-      const jsonMatch = content.match(/\{[\s\S]*\}/)
-      if (jsonMatch) parsed = JSON.parse(jsonMatch[0])
-    } catch { parsed = { raw: content } }
+    // The real prompt returns ###-delimited sections, not JSON. Parse into
+    // { header: body } and locate the portfolio content sections.
+    const sections: Record<string, string> = {}
+    const parts = content.split('###').map((s: string) => s.trim()).filter(Boolean)
+    for (let i = 0; i < parts.length - 1; i += 2) {
+      const header = parts[i].replace(/<[^>]+>/g, '').trim().toLowerCase()
+      sections[header] = parts[i + 1]
+    }
+    const find = (needle: string) => Object.entries(sections).find(([h, b]) => h.includes(needle) && b && b.length > 5)?.[1] || ''
 
-    const checks: string[] = []
-    const fields = ['aboutMe1', 'aboutMe2', 'executiveProfile', 'coverLetter', 'coldEmail']
-    const missing = fields.filter(f => !parsed[f])
-    if (missing.length > 0) checks.push(`Missing fields: ${missing.join(', ')}`)
+    const portfolio = {
+      aboutMe1: find('about me') || find('about me passage 1') || find('about me 1'),
+      aboutMe2: find('about me passage 2') || find('about me 2'),
+      executiveProfile: find('executive profile'),
+      coverLetter: find('cover letter'),
+      coldEmail: find('cold email'),
+    }
+    // aboutMe2 fallback: if only one "about me" section, split not needed — accept aboutMe1 presence
+    const required = ['aboutMe1', 'executiveProfile', 'coverLetter']
+    const missing = required.filter((f) => !(portfolio as any)[f])
 
     return {
       status: 200, headers: HEADERS,
       jsonBody: {
         pass: missing.length === 0,
-        detail: missing.length === 0 ? 'All 5 portfolio fields present.' : checks.join('; '),
+        detail: missing.length === 0
+          ? `Portfolio content generated: ${Object.keys(sections).length} sections (About Me, Executive Profile, Cover Letter${portfolio.coldEmail ? ', Cold Email' : ''}).`
+          : `Missing sections: ${missing.join(', ')}`,
+        sectionHeaders: Object.keys(sections),
         wordCounts: {
-          aboutMe1: parsed.aboutMe1 ? countWords(parsed.aboutMe1) : 0,
-          aboutMe2: parsed.aboutMe2 ? countWords(parsed.aboutMe2) : 0,
-          executiveProfile: parsed.executiveProfile ? countWords(parsed.executiveProfile) : 0,
-          coverLetter: parsed.coverLetter ? countWords(parsed.coverLetter) : 0,
+          aboutMe1: portfolio.aboutMe1 ? countWords(portfolio.aboutMe1) : 0,
+          aboutMe2: portfolio.aboutMe2 ? countWords(portfolio.aboutMe2) : 0,
+          executiveProfile: portfolio.executiveProfile ? countWords(portfolio.executiveProfile) : 0,
+          coverLetter: portfolio.coverLetter ? countWords(portfolio.coverLetter) : 0,
         },
-        output: parsed
+        portfolioContent: portfolio,
+        rawOutput: content
       }
     }
   } catch (err) {

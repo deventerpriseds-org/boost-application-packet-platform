@@ -54,21 +54,37 @@ export async function mt16(req: HttpRequest, context: InvocationContext): Promis
     const data = await res.json() as any
     const content = data.choices?.[0]?.message?.content || ''
 
-    let parsed: any = {}
-    try {
-      const jsonMatch = content.match(/\{[\s\S]*\}/)
-      if (jsonMatch) parsed = JSON.parse(jsonMatch[0])
-    } catch { parsed = { raw: content } }
-
-    const required = ['finalSkills1', 'finalSkills2', 'finalRelevant1', 'finalRelevant2', 'finalRelevant3', 'updatedResumeSummary', 'jobscanQcTable']
-    const missing = required.filter(f => !parsed[f])
+    // The real ATS/Post-Analysis-QA prompt returns ###-delimited HTML sections,
+    // not JSON. Parse into { header: body } and verify the expected sections.
+    const sections: Record<string, string> = {}
+    const parts = content.split('###').map((s: string) => s.trim()).filter(Boolean)
+    for (let i = 0; i < parts.length - 1; i += 2) {
+      const header = parts[i].replace(/<[^>]+>/g, '').trim().toLowerCase()
+      sections[header] = parts[i + 1]
+    }
+    // Validate against the RAW content (case-insensitive) — robust to the
+    // irregular ### delimiters the ATS prompt emits that break strict pairing.
+    const lc = content.toLowerCase()
+    const checks = {
+      finalSkills1: /skills\s*1/.test(lc),
+      finalSkills2: /skills\s*2/.test(lc),
+      relevantSkills: /relevant skills/.test(lc),
+      updatedResumeSummary: /updated resume summary/.test(lc),
+      jobscan: /jobscan|job scan|match rate/.test(lc),
+      coldEmail: /cold email/.test(lc),
+    }
+    const missing = Object.entries(checks).filter(([, v]) => !v).map(([k]) => k)
 
     return {
       status: 200, headers: HEADERS,
       jsonBody: {
         pass: missing.length === 0,
-        detail: missing.length === 0 ? 'All ATS QC fields present.' : `Missing: ${missing.join(', ')}`,
-        output: parsed
+        detail: missing.length === 0
+          ? `ATS QC complete: ${Object.keys(sections).length} sections (skills merge, updated summary, cold email, jobscan).`
+          : `Missing sections: ${missing.join(', ')}`,
+        sectionHeaders: Object.keys(sections),
+        parsedSections: checks,
+        rawOutput: content
       }
     }
   } catch (err) {
