@@ -2,6 +2,7 @@ import { app, HttpRequest, HttpResponseInit, InvocationContext } from '@azure/fu
 import { TableClient } from '@azure/data-tables'
 import { getGoogleToken, getGoogleOAuthToken, HAS_GOOGLE_OAUTH, IMPERSONATE_SUBJECT } from './googleAuth'
 import { assemblePackage } from './mt17'
+import { resolveZapVars } from './zapVars'
 
 const CONN = process.env.AZURE_STORAGE_CONNECTION_STRING!
 const HEADERS = {
@@ -51,9 +52,9 @@ export async function mt19(req: HttpRequest, context: InvocationContext): Promis
       prompts[(e as any).partitionKey] = (e as any).content || ''
     }
     const ctxClient = TableClient.fromConnectionString(CONN, 'MasterContext')
-    let masterContext = ''
+    let masterContext: any = {}
     for await (const e of ctxClient.listEntities({ queryOptions: { filter: "PartitionKey eq 'context'" } })) {
-      masterContext = JSON.stringify(e)
+      masterContext = e
     }
     const FAKE_JD = 'VP of Engineering at TechVenture Inc — lead global engineering org, 150+ engineers, cloud-native SaaS.'
 
@@ -63,8 +64,13 @@ export async function mt19(req: HttpRequest, context: InvocationContext): Promis
       body: JSON.stringify({ model: 'gpt-4o-mini', messages: [{ role: 'system', content: system }, { role: 'user', content: user }], max_tokens: maxTokens })
     }).then(r => r.ok ? r.json() : r.text().then(t => { throw new Error(`HTTP ${r.status}: ${t}`) }))
 
-    // Call 1
-    const r1 = await openai(prompts['resume_system'] || 'You are an executive resume writer.', `${prompts['resume_user'] || 'Write resume package with ### delimited sections.'}\n\nCONTEXT:\n${masterContext}\n\nJD:\n${FAKE_JD}`, 16000) as any
+    // Call 1 — resolve Zap placeholders against MasterContext + JD
+    const base19 = prompts['resume_user'] || 'Write resume package with ### delimited sections.'
+    const resolved19 = resolveZapVars(base19, masterContext, FAKE_JD)
+    const call1User19 = resolved19 === base19
+      ? `${resolved19}\n\nCONTEXT:\n${JSON.stringify(masterContext)}\n\nJD:\n${FAKE_JD}`
+      : resolved19
+    const r1 = await openai(prompts['resume_system'] || 'You are an executive resume writer.', call1User19, 16000) as any
     const secs = (r1.choices?.[0]?.message?.content || '').split('###').map((s: string) => s.trim()).filter(Boolean)
     const c1: any = { date: new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' }), targetRole: 'VP of Engineering', targetCompany: 'TechVenture Inc', resumeSummary: secs[0] || '', skills1: secs[1] || '', skills2: secs[2] || '', expertise: secs[3] || '', workHistory1: secs[4] || '', workHistory2: secs[5] || '', workHistory3: secs[6] || '', workHistory4: secs[7] || '', relevant1: secs[8] || '', relevant2: secs[9] || '', relevant3: secs[10] || '', coverLetter: secs[11] || '', aboutMe1: secs[12] || '', aboutMe2: secs[13] || '', executiveProfile: secs[14] || '', coreAccomplishments: secs[15] || '' }
 

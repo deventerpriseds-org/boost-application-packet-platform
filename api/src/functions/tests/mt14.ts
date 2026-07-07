@@ -1,5 +1,6 @@
 import { app, HttpRequest, HttpResponseInit, InvocationContext } from '@azure/functions'
 import { TableClient } from '@azure/data-tables'
+import { resolveZapVars } from './zapVars'
 
 const CONN = process.env.AZURE_STORAGE_CONNECTION_STRING!
 const HEADERS = {
@@ -29,16 +30,22 @@ export async function mt14(req: HttpRequest, context: InvocationContext): Promis
       userPrompt = (e as any).content || ''
     }
 
-    // Load master context
+    // Load master context as an object so we can resolve prompt variables
     const ctxClient = TableClient.fromConnectionString(CONN, 'MasterContext')
-    let masterContext = ''
+    let masterContext: any = {}
     for await (const e of ctxClient.listEntities({ queryOptions: { filter: "PartitionKey eq 'context'" } })) {
-      masterContext = JSON.stringify(e)
+      masterContext = e
     }
 
     const finalSystem = systemPrompt || 'You are an executive recruiter. Create a tailored resume optimized for ATS.'
-    const finalUser = (userPrompt || 'Generate a complete resume package with 14+ sections delimited by ###.') +
-      `\n\nMASTER CONTEXT:\n${masterContext}\n\nJOB DESCRIPTION:\n${FAKE_JD}`
+    // Resolve the Zap {{nodeId__value}} placeholders against MasterContext fields
+    // and the incoming JD, so the model gets a fully grounded prompt. Falls back
+    // to appending context if the prompt has no placeholders (e.g. default prompt).
+    const base = userPrompt || 'Generate a complete resume package with 14+ sections delimited by ###.'
+    const resolved = resolveZapVars(base, masterContext, FAKE_JD)
+    const finalUser = resolved.includes('{{') || resolved === base
+      ? `${resolved}\n\nMASTER CONTEXT:\n${JSON.stringify(masterContext)}\n\nJOB DESCRIPTION:\n${FAKE_JD}`
+      : resolved
 
     const res = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
@@ -54,10 +61,15 @@ export async function mt14(req: HttpRequest, context: InvocationContext): Promis
     const content = data.choices?.[0]?.message?.content || ''
     const sections = content.split('###').map((s: string) => s.trim()).filter(Boolean)
 
+    const unresolved = (finalUser.match(/\{\{/g) || []).length
+    // Show the resolved "Inputs to use" section — proves real MasterContext
+    // values were substituted in, not just blanked out.
+    const inputsIdx = finalUser.indexOf('Inputs to use')
+    const resolvedPreview = inputsIdx >= 0 ? finalUser.slice(inputsIdx, inputsIdx + 900) : finalUser.slice(0, 900)
     if (sections.length < 14) {
-      return { status: 200, headers: HEADERS, jsonBody: { pass: false, detail: `Only ${sections.length} sections returned (need 14+). Check prompt.`, sections } }
+      return { status: 200, headers: HEADERS, jsonBody: { pass: false, detail: `Only ${sections.length} sections returned (need 14+). Check prompt.`, unresolvedPlaceholders: unresolved, resolvedPromptPreview: resolvedPreview, sections } }
     }
-    return { status: 200, headers: HEADERS, jsonBody: { pass: true, detail: `${sections.length} sections returned.`, sectionCount: sections.length, sections } }
+    return { status: 200, headers: HEADERS, jsonBody: { pass: true, detail: `${sections.length} sections returned. Prompt variables resolved (${unresolved} placeholders left).`, unresolvedPlaceholders: unresolved, resolvedPromptPreview: resolvedPreview, sectionCount: sections.length, sections } }
   } catch (err) {
     return { status: 200, headers: HEADERS, jsonBody: { pass: false, detail: String(err) } }
   }

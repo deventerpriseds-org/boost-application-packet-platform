@@ -2,6 +2,7 @@ import { app, HttpRequest, HttpResponseInit, InvocationContext } from '@azure/fu
 import { TableClient } from '@azure/data-tables'
 import { getGoogleToken, getGoogleOAuthToken, HAS_GOOGLE_OAUTH, IMPERSONATE_SUBJECT } from './googleAuth'
 import { assemblePackage } from './mt17'
+import { resolveZapVars } from './zapVars'
 
 const CONN = process.env.AZURE_STORAGE_CONNECTION_STRING!
 const HEADERS = {
@@ -33,10 +34,17 @@ export async function mt18(req: HttpRequest, context: InvocationContext): Promis
       userPrompt = (e as any).content || ''
     }
     const ctxClient = TableClient.fromConnectionString(CONN, 'MasterContext')
-    let masterContext = ''
+    let masterContext: any = {}
     for await (const e of ctxClient.listEntities({ queryOptions: { filter: "PartitionKey eq 'context'" } })) {
-      masterContext = JSON.stringify(e)
+      masterContext = e
     }
+
+    // Resolve Zap {{nodeId__value}} placeholders against MasterContext + JD
+    const base18 = userPrompt || 'Write a full resume package with ### delimited sections.'
+    const resolved18 = resolveZapVars(base18, masterContext, FAKE_JD)
+    const call1User = resolved18 === base18
+      ? `${resolved18}\n\nCONTEXT:\n${JSON.stringify(masterContext)}\n\nJD:\n${FAKE_JD}`
+      : resolved18
 
     // Agent Call 1
     const call1Res = await fetch('https://api.openai.com/v1/chat/completions', {
@@ -46,7 +54,7 @@ export async function mt18(req: HttpRequest, context: InvocationContext): Promis
         model: 'gpt-4o-mini',
         messages: [
           { role: 'system', content: systemPrompt || 'You are an executive resume writer.' },
-          { role: 'user', content: `${userPrompt || 'Write a full resume package with ### delimited sections.'}\n\nCONTEXT:\n${masterContext}\n\nJD:\n${FAKE_JD}` }
+          { role: 'user', content: call1User }
         ],
         max_tokens: 16000
       })
