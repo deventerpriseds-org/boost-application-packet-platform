@@ -189,6 +189,7 @@ export default function App() {
   const [testStatuses, setTestStatuses] = useState({});
   const [testLogs, setTestLogs] = useState({});
   const [expandedTest, setExpandedTest] = useState(null);
+  const [testResults, setTestResults] = useState({});
   const [expandedAuth, setExpandedAuth] = useState(null);
   const [authValues, setAuthValues] = useState({});
   const [authSaved, setAuthSaved] = useState({});
@@ -262,11 +263,13 @@ export default function App() {
       return;
     }
 
+    const startedAt = Date.now();
     try {
       const res = await fetch(`${API_BASE}${route}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
       const data = await res.json();
       const pass = data.pass === true;
       setTestStatuses((s) => ({ ...s, [testId]: pass ? "pass" : "fail" }));
+      setTestResults((r) => ({ ...r, [testId]: { data, httpStatus: res.status, ranAt: new Date().toLocaleString(), roundtripMs: Date.now() - startedAt, endpoint: `POST ${route}` } }));
       setTestLogs((l) => ({
         ...l,
         [testId]: [
@@ -291,12 +294,14 @@ export default function App() {
         `[${new Date().toLocaleTimeString()}] POST ${API_BASE}/process-job`,
       ],
     }));
+    const startedAt = Date.now();
     try {
       const payload = { ...FAKE_JOB_ALERT, receivedAt: new Date().toISOString() };
       const res = await fetch(`${API_BASE}/process-job`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
       const data = await res.json();
       const pass = res.ok && data.success !== false;
       setTestStatuses((s) => ({ ...s, "MT-10": pass ? "pass" : "fail" }));
+      setTestResults((r) => ({ ...r, "MT-10": { data, httpStatus: res.status, ranAt: new Date().toLocaleString(), roundtripMs: Date.now() - startedAt, endpoint: "POST /process-job" } }));
       setTestLogs((l) => ({
         ...l,
         "MT-10": [
@@ -682,8 +687,21 @@ export default function App() {
                         {logs.length > 0 && (
                           <div style={{ background: "#0A0F14", borderRadius: 6, padding: "10px 12px", fontFamily: "monospace", fontSize: 11, color: "#64748B", lineHeight: 1.8 }}>
                             {logs.map((log, i) => (
-                              <div key={i} style={{ color: log.includes("✓") ? "#10B981" : log.includes("✗") ? "#EF4444" : "#64748B" }}>{log}</div>
+                              <div key={i} style={{ color: log.includes("✓") ? "#10B981" : log.includes("✗") ? "#EF4444" : "#64748B", wordBreak: "break-all" }}>{log}</div>
                             ))}
+                          </div>
+                        )}
+                        {testResults[test.id] && (
+                          <div style={{ marginTop: 10 }}>
+                            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+                              <span style={{ fontSize: 10, fontWeight: 700, color: "#64748B", textTransform: "uppercase", letterSpacing: 0.5 }}>Live API Response</span>
+                              <span style={{ fontSize: 10, color: "#475569", fontFamily: "monospace" }}>
+                                {testResults[test.id].endpoint} · HTTP {testResults[test.id].httpStatus} · {testResults[test.id].roundtripMs}ms · {testResults[test.id].ranAt}
+                              </span>
+                            </div>
+                            <pre style={{ background: "#060A0E", border: "1px solid #1E293B", borderRadius: 6, padding: "10px 12px", fontFamily: "monospace", fontSize: 11, color: "#94A3B8", lineHeight: 1.6, maxHeight: 340, overflow: "auto", margin: 0, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
+                              {JSON.stringify(testResults[test.id].data, null, 2)}
+                            </pre>
                           </div>
                         )}
                       </div>
