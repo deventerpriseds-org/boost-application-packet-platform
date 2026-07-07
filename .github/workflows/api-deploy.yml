@@ -49,9 +49,8 @@ jobs:
             --settings \
               "AZURE_STORAGE_CONNECTION_STRING=${{ secrets.AZURE_STORAGE_CONNECTION_STRING }}" \
               "OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}" \
-              "GOOGLE_SERVICE_ACCOUNT_JSON=${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}" \
-              "MICROSOFT_CLIENT_ID=${{ secrets.MICROSOFT_CLIENT_ID }}" \
-              "MICROSOFT_CLIENT_SECRET=${{ secrets.MICROSOFT_CLIENT_SECRET }}" \
+              "MICROSOFT_CLIENT_ID=${{ secrets.AZURE_CLIENT_ID }}" \
+              "MICROSOFT_CLIENT_SECRET=${{ secrets.AZURE_CLIENT_SECRET }}" \
               "MICROSOFT_TENANT_ID=b9791c7d-dd6c-4190-b1bb-dbbd1996bc2e" \
               "NODE_ENV=production"
 
