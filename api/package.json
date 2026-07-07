@@ -16,5 +16,5 @@
     "@types/node": "^18.0.0",
     "typescript": "^5.0.0"
   },
-  "main": "dist/{,!(node_modules)/**}/*.js"
+  "main": "dist/**/*.js"
 }
