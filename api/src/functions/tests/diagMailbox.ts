@@ -75,19 +75,28 @@ export async function diagMailbox(req: HttpRequest, context: InvocationContext):
     }
 
     const dirReadBlocked = senderInfo.error === 'Authorization_RequestDenied'
+    const sentProven = Array.isArray(sentItems) && sentItems.length > 0
+
+    let interpretation: string
+    if (sentProven) {
+      interpretation = `CONFIRMED SENT: ${sender}'s Sent Items contains ${sentItems.length} recent message(s) (see sentItemsRecent). The send side works. If ${recipient} doesn't see them in their inbox, the issue is on delivery/receiving — check Junk, Focused/Other, and Defender Quarantine (security.microsoft.com), or run a Message Trace in Exchange Admin for ${recipient}.`
+    } else if (typeof sentItems === 'string' && sentItems.startsWith('HTTP 403')) {
+      interpretation = `Cannot read Sent Items — grant Mail.Read (Application) + admin consent to prove delivery. A 202 from sendMail already implies ${sender} is a real mailbox.`
+    } else if (dirReadBlocked) {
+      interpretation = `Directory lookup blocked (app lacks User.Read.All); this does not prove the mailbox is missing. Sent Items read returned no recent messages.`
+    } else {
+      interpretation = `Sender mailbox valid. If no email arrives, check Junk/Quarantine for ${recipient}.`
+    }
 
     return {
       status: 200, headers: HEADERS,
       jsonBody: {
         tenantId,
+        sendSideVerdict: sentProven ? 'WORKING — messages present in Sent Items' : 'UNPROVEN',
         sender: { upn: sender, ...senderInfo },
         recipient: { upn: recipient, ...recipientInfo },
         sentItemsRecent: sentItems,
-        interpretation: dirReadBlocked
-          ? `Directory lookup blocked (app has Mail.Send but not User.Read.All), so existence can't be confirmed this way. A 202 from sendMail already implies ${sender} is a real mailbox. To PROVE delivery, grant Mail.Read and re-check "sentItemsRecent" above for the test subjects.`
-          : (senderInfo.mailboxProbe.startsWith('HTTP')
-              ? `Sender ${sender} has no reachable mailbox — Graph 202 but nothing sends.`
-              : `Sender mailbox valid. If no email arrives, check Junk/Quarantine for ${recipient}.`)
+        interpretation
       }
     }
   } catch (err) {
