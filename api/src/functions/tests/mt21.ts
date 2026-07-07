@@ -60,7 +60,7 @@ const HTML_BODY = `
 
 export async function mt21(req: HttpRequest, context: InvocationContext): Promise<HttpResponseInit> {
   if (req.method === 'OPTIONS') return { status: 204, headers: HEADERS }
-  const tenantId = process.env.MICROSOFT_TENANT_ID || 'b9791c7d-dd6c-4190-b1bb-dbbd1996bc2e'
+  const tenantId = process.env.MICROSOFT_TENANT_ID || 'ee633423-c321-413c-a191-ace8b07e4196'
   const clientId = process.env.MICROSOFT_CLIENT_ID
   const clientSecret = process.env.MICROSOFT_CLIENT_SECRET
   if (!clientId || !clientSecret) return { status: 200, headers: HEADERS, jsonBody: { pass: false, detail: 'MICROSOFT_CLIENT_ID or MICROSOFT_CLIENT_SECRET not set' } }
