@@ -54,4 +54,5 @@ jobs:
             --name job-platform-api \
             --resource-group EnterpriseDS_ResourceGRP \
             --settings \
-              GOOGLE_SERVICE_ACCOUNT_JSON='${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}'
+              GOOGLE_SERVICE_ACCOUNT_JSON='${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}' \
+              ZAPIER_DOCS_FOLDER_ID='1MlVLMSQ0EQJoAtpKC1Mv7mDCAJDmdJTt'
