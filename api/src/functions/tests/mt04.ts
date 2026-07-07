@@ -1,5 +1,5 @@
 import { app, HttpRequest, HttpResponseInit, InvocationContext } from '@azure/functions'
-import { getGoogleToken } from './googleAuth'
+import { getGoogleToken, IMPERSONATE_SUBJECT } from './googleAuth'
 
 const HEADERS = {
   'Content-Type': 'application/json',
@@ -17,7 +17,7 @@ export async function mt04(req: HttpRequest, context: InvocationContext): Promis
   if (!saJson) return { status: 200, headers: HEADERS, jsonBody: { pass: false, detail: 'GOOGLE_SERVICE_ACCOUNT_JSON not set' } }
 
   try {
-    const token = await getGoogleToken(saJson, 'https://www.googleapis.com/auth/drive')
+    const token = await getGoogleToken(saJson, 'https://www.googleapis.com/auth/drive', IMPERSONATE_SUBJECT)
     const res = await fetch(`https://www.googleapis.com/drive/v3/files/${RESUME_TEMPLATE_ID}/copy`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
