@@ -10,7 +10,8 @@
   },
   "dependencies": {
     "@azure/data-tables": "^13.2.0",
-    "@azure/functions": "^4.0.0"
+    "@azure/functions": "^4.0.0",
+    "googleapis": "^173.0.0"
   },
   "devDependencies": {
     "@types/node": "^18.0.0",

@@ -1,5 +1,6 @@
 import { app, HttpRequest, HttpResponseInit, InvocationContext } from '@azure/functions'
 import { TableClient, TableServiceClient } from '@azure/data-tables'
+import { google } from 'googleapis'
 
 const CONN = process.env.AZURE_STORAGE_CONNECTION_STRING!
 
@@ -76,6 +77,25 @@ export async function testConnection(
         if (!key) return { status: 200, headers, jsonBody: { success: false, detail: 'OPENAI_API_KEY not set in Function App settings' } }
         const res = await fetch('https://api.openai.com/v1/models', { headers: { Authorization: `Bearer ${key}` } })
         return { status: 200, headers, jsonBody: { success: res.ok, detail: res.ok ? 'OpenAI connected' : `HTTP ${res.status}` } }
+      }
+      case 'google': {
+        const raw = process.env.GOOGLE_SERVICE_ACCOUNT_JSON
+        if (!raw) return { status: 200, headers, jsonBody: { success: false, detail: 'GOOGLE_SERVICE_ACCOUNT_JSON not set in Function App settings' } }
+        const creds = JSON.parse(raw)
+        const auth = new google.auth.GoogleAuth({
+          credentials: creds,
+          scopes: ['https://www.googleapis.com/auth/drive.readonly']
+        })
+        const drive = google.drive({ version: 'v3', auth })
+        const FOLDER_ID = process.env.ZAPIER_DOCS_FOLDER_ID
+        if (!FOLDER_ID) return { status: 200, headers, jsonBody: { success: false, detail: 'ZAPIER_DOCS_FOLDER_ID not set in Function App settings' } }
+        const res = await drive.files.list({
+          q: `'${FOLDER_ID}' in parents and trashed = false`,
+          fields: 'files(id, name)',
+          pageSize: 10
+        })
+        const files = res.data.files ?? []
+        return { status: 200, headers, jsonBody: { success: true, detail: `Drive connected. Found ${files.length} file(s) in folder.`, files: files.map(f => f.name) } }
       }
       default:
         return { status: 200, headers, jsonBody: { success: false, detail: `Connection type '${connection}' not yet implemented` } }
