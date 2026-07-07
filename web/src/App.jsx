@@ -508,7 +508,7 @@ export default function App() {
                         <div style={{ paddingTop: 14, display: "flex", flexDirection: "column", gap: 10 }}>
                           {configStatus[config.id] && (
                             <div style={{ fontSize: 11, color: "#10B981", background: "#0D2B1A", border: "1px solid #10B98130", borderRadius: 6, padding: "8px 10px", lineHeight: 1.5 }}>
-                              🔒 Managed by backend — credentials are set from GitHub secrets on the server. You don't need to enter anything here. Leave fields blank to keep using the server-side values, or type a value to override for local testing.
+                              🔒 Extracted from deventerpriseds-org secrets — credentials are set on the server and never exposed to the browser. You don't need to enter anything here. Leave fields blank to keep using them, or type a value to override for local testing.
                             </div>
                           )}
                           {config.fields.map((field) => {
@@ -517,7 +517,7 @@ export default function App() {
                             const managed = configStatus[config.id] && isSecretField;
                             return (
                             <div key={field.key}>
-                              <label style={{ fontSize: 11, color: "#94A3B8", display: "block", marginBottom: 4 }}>{field.label}{managed && <span style={{ color: "#10B981", marginLeft: 6 }}>✓ set on server</span>}</label>
+                              <label style={{ fontSize: 11, color: "#94A3B8", display: "block", marginBottom: 4 }}>{field.label}{managed && <span style={{ color: "#10B981", marginLeft: 6 }}>✓ from org secrets</span>}</label>
                               {field.type === "textarea" ? (
                                 <textarea
                                   placeholder={managed ? "•••••••• (configured via GitHub secrets)" : field.placeholder}
