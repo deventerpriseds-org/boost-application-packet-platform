@@ -511,6 +511,26 @@ export default function App() {
                               🔒 Extracted from deventerpriseds-org secrets — credentials are set on the server and never exposed to the browser. You don't need to enter anything here. Leave fields blank to keep using them, or type a value to override for local testing.
                             </div>
                           )}
+                          {config.id === "google" && (
+                            <div style={{ fontSize: 11, background: configStatus.googleOAuthConnected ? "#0D2B1A" : "#2B1A0D", border: `1px solid ${configStatus.googleOAuthConnected ? "#10B98130" : "#F59E0B40"}`, borderRadius: 6, padding: "10px 12px", lineHeight: 1.5, display: "flex", flexDirection: "column", gap: 8 }}>
+                              <div style={{ color: configStatus.googleOAuthConnected ? "#10B981" : "#F59E0B", fontWeight: 600 }}>
+                                {configStatus.googleOAuthConnected
+                                  ? "✓ Google account connected (dev@enterpriseds.io)"
+                                  : "⚠ Google account not connected"}
+                              </div>
+                              <div style={{ color: "#94A3B8" }}>
+                                Document copies (MT-04/05/06/18/19) run as the Google account that owns the templates. Connecting authorizes that account once; reconnect if the token is ever revoked or expires.
+                              </div>
+                              <a
+                                href={`${API_BASE}/google/auth`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                style={{ alignSelf: "flex-start", textDecoration: "none", padding: "8px 14px", background: configStatus.googleOAuthConnected ? "#0A0F14" : "#1B4F5C", border: `1px solid ${configStatus.googleOAuthConnected ? "#2A7A8C50" : "#2A7A8C"}`, borderRadius: 6, color: "#E2E8F0", fontSize: 12, fontWeight: 600 }}
+                              >
+                                {configStatus.googleOAuthConnected ? "Reconnect Google Account" : "Connect Google Account"}
+                              </a>
+                            </div>
+                          )}
                           {config.fields.map((field) => {
                             const backendHint = configStatus.hints?.[config.id];
                             const isSecretField = field.type === "password" || field.key === "serviceAccountJson";

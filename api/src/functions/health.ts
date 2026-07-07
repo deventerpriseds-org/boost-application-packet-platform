@@ -114,6 +114,10 @@ export async function configStatus(
       openai: has(process.env.OPENAI_API_KEY),
       heygen: has(process.env.HEYGEN_API_KEY),
       azure: has(process.env.AZURE_STORAGE_CONNECTION_STRING),
+      // Google OAuth-user connection: true once a refresh token is stored, i.e.
+      // dev@enterpriseds.io has consented and file copies run as that account.
+      googleOAuthConnected: has(process.env.GOOGLE_REFRESH_TOKEN),
+      googleOAuthClientReady: has(process.env.GOOGLE_CLIENT_ID) && has(process.env.GOOGLE_CLIENT_SECRET),
       // masked hints so the UI can show a non-empty, non-secret indicator
       hints: {
         openai: has(process.env.OPENAI_API_KEY) ? 'sk-••••••••' : '',
