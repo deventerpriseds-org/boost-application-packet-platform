@@ -215,6 +215,9 @@ export default function App() {
   const [configStatus, setConfigStatus] = useState({});
   const [selectedRole, setSelectedRole] = useState("Engineering");
   const ROLE_OPTIONS = ["Engineering", "Product Management"];
+  const [jobQueue, setJobQueue] = useState([]);
+  const [pipelineRunning, setPipelineRunning] = useState({});
+  const [pipelineResult, setPipelineResult] = useState(null);
 
   const API_BASE = "https://job-platform-api.azurewebsites.net/api";
 
@@ -363,6 +366,31 @@ export default function App() {
       setTestStatuses((s) => ({ ...s, "MT-10": "fail" }));
       setTestLogs((l) => ({ ...l, "MT-10": [...(l["MT-10"] || []), `[${new Date().toLocaleTimeString()}] ✗ Network error: ${err.message}`] }));
     }
+  };
+
+  // MT-22 approval queue: load jobs, approve (run full pipeline).
+  const loadJobs = () => {
+    fetch(`${API_BASE}/jobs`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => { if (d?.jobs) setJobQueue(d.jobs); })
+      .catch(() => {});
+  };
+  useEffect(() => { loadJobs(); }, []);
+
+  const approveJob = async (jobId) => {
+    setPipelineRunning((s) => ({ ...s, [jobId]: true }));
+    setPipelineResult({ jobId, running: true, steps: ["Approved — running full pipeline (3 agents → 4 docs → log → 2 emails)…"] });
+    try {
+      const res = await fetch(`${API_BASE}/pipeline/run`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ jobId }) });
+      const data = await res.json();
+      setPipelineResult({ jobId, ...data });
+      setTestStatuses((s) => ({ ...s, "MT-22": data.pass ? "pass" : "fail" }));
+      loadJobs();
+    } catch (err) {
+      setPipelineResult({ jobId, pass: false, detail: `Network error: ${err.message}` });
+      setTestStatuses((s) => ({ ...s, "MT-22": "fail" }));
+    }
+    setPipelineRunning((s) => ({ ...s, [jobId]: false }));
   };
 
   const totalTests = MICRO_TESTS.length;
@@ -740,7 +768,12 @@ export default function App() {
 
                       {/* Run button */}
                       <button
-                        onClick={(e) => { e.stopPropagation(); test.id === "MT-10" ? fireAlert() : runTest(test.id); }}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (test.id === "MT-10") { fireAlert(); loadJobs(); }
+                          else if (test.id === "MT-22") { setExpandedTest("MT-22"); loadJobs(); }
+                          else runTest(test.id);
+                        }}
                         style={{ padding: "5px 12px", background: "#1E293B", border: "1px solid #334155", borderRadius: 6, color: "#94A3B8", fontSize: 11, fontWeight: 600, cursor: "pointer", flexShrink: 0 }}
                       >
                         {test.hasAction ? test.actionLabel : "Run"}
@@ -750,6 +783,47 @@ export default function App() {
                     {isExpanded && (
                       <div style={{ padding: "0 16px 14px", borderTop: "1px solid #1E293B" }}>
                         <p style={{ fontSize: 12, color: "#94A3B8", margin: "12px 0 10px", lineHeight: 1.6 }}>{test.description}</p>
+                        {test.id === "MT-22" && (
+                          <div style={{ marginBottom: 12 }}>
+                            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                              <span style={{ fontSize: 11, fontWeight: 700, color: "#2E7D52", textTransform: "uppercase", letterSpacing: 0.5 }}>Approval Queue</span>
+                              <div style={{ display: "flex", gap: 8 }}>
+                                <button onClick={() => { fireAlert(); setTimeout(loadJobs, 800); }} style={{ fontSize: 11, padding: "5px 10px", background: "#2A1A3A", border: "1px solid #8B5CF650", borderRadius: 6, color: "#C4B5FD", cursor: "pointer" }}>+ Fire Test Job</button>
+                                <button onClick={loadJobs} style={{ fontSize: 11, padding: "5px 10px", background: "transparent", border: "1px solid #1E293B", borderRadius: 6, color: "#64748B", cursor: "pointer" }}>Refresh</button>
+                              </div>
+                            </div>
+                            {jobQueue.filter((j) => j.status === "received" || j.status === "processing").length === 0 ? (
+                              <div style={{ fontSize: 11, color: "#64748B", padding: "10px", background: "#0A0F14", borderRadius: 6 }}>No pending jobs. Fire a test job (or use the Job Form / MT-10) to queue one.</div>
+                            ) : (
+                              jobQueue.filter((j) => j.status === "received" || j.status === "processing").map((j) => (
+                                <div key={j.jobId} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 12px", background: "#0A0F14", border: "1px solid #1E293B", borderRadius: 6, marginBottom: 6 }}>
+                                  <div>
+                                    <div style={{ fontSize: 12, color: "#E2E8F0", fontWeight: 600 }}>{j.jobTitle} <span style={{ color: "#64748B", fontWeight: 400 }}>@ {j.company}</span></div>
+                                    <div style={{ fontSize: 10, color: "#64748B", marginTop: 2 }}>{j.roleType} · {j.jobId} · {j.status}</div>
+                                  </div>
+                                  <button onClick={() => approveJob(j.jobId)} disabled={pipelineRunning[j.jobId] || j.status === "processing"} style={{ fontSize: 11, fontWeight: 600, padding: "6px 14px", background: pipelineRunning[j.jobId] ? "#1A3A2A" : "#1B5E3A", border: "1px solid #2E7D52", borderRadius: 6, color: "#E2E8F0", cursor: pipelineRunning[j.jobId] ? "wait" : "pointer" }}>
+                                    {pipelineRunning[j.jobId] ? "Running…" : "Approve ▶"}
+                                  </button>
+                                </div>
+                              ))
+                            )}
+                            {pipelineResult && (
+                              <div style={{ marginTop: 10, padding: "10px 12px", background: "#060A0E", border: `1px solid ${pipelineResult.pass ? "#10B98130" : pipelineResult.running ? "#F59E0B30" : "#EF444430"}`, borderRadius: 6 }}>
+                                <div style={{ fontSize: 11, fontWeight: 700, color: pipelineResult.pass ? "#10B981" : pipelineResult.running ? "#F59E0B" : "#EF4444", marginBottom: 6 }}>
+                                  {pipelineResult.running ? "⏳ Pipeline running…" : pipelineResult.pass ? "✓ Pipeline complete" : "✗ Pipeline failed"} — {pipelineResult.detail || ""}
+                                </div>
+                                {(pipelineResult.steps || []).map((s, i) => <div key={i} style={{ fontSize: 10.5, color: "#94A3B8", fontFamily: "monospace", lineHeight: 1.7 }}>• {s}</div>)}
+                                {pipelineResult.urls && (
+                                  <div style={{ marginTop: 6 }}>
+                                    {Object.entries(pipelineResult.urls).filter(([, v]) => v && v.startsWith("http")).map(([k, v]) => (
+                                      <div key={k} style={{ fontSize: 10.5 }}><a href={v} target="_blank" rel="noopener noreferrer" style={{ color: "#4A6FA5" }}>📄 {k}</a></div>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        )}
                         {logs.length > 0 && (
                           <div style={{ background: "#0A0F14", borderRadius: 6, padding: "10px 12px", fontFamily: "monospace", fontSize: 11, color: "#64748B", lineHeight: 1.8 }}>
                             {logs.map((log, i) => (
