@@ -48,15 +48,17 @@ export async function mt12(req: HttpRequest, context: InvocationContext): Promis
       }
     }
 
-    const engOk = results['Engineering'] && results['Engineering'].resumeTemplateId
-    const pmMissing = !results['Product Management']
+    const engOk = !!(results['Engineering'] && results['Engineering'].resumeTemplateId)
+    const pmOk = !!(results['Product Management'] && results['Product Management'].resumeTemplateId)
+    const shared = engOk && pmOk && results['Engineering'].resumeTemplateId === results['Product Management'].resumeTemplateId
     return {
       status: 200, headers: HEADERS,
       jsonBody: {
-        pass: !!engOk,
-        detail: engOk
-          ? `Engineering templates loaded.${pmMissing ? ' Product Management row not seeded yet.' : ''}`
-          : 'Engineering templates not found in AppConfig table.',
+        pass: engOk && pmOk,
+        detail: (engOk && pmOk)
+          ? `Role router resolved template sets for both roles.${shared ? ' (Product Management currently shares Engineering templates; content is shifted at the prompt level.)' : ''}`
+          : `Missing template set — Engineering: ${engOk ? 'ok' : 'missing'}, Product Management: ${pmOk ? 'ok' : 'missing'}`,
+        sharedTemplates: shared,
         results
       }
     }
