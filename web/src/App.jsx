@@ -33,6 +33,14 @@ const PHASES = [
     color: "#3A1A2A",
     accent: "#8B3A5A",
   },
+  {
+    id: 4,
+    label: "Phase 4",
+    title: "Production Precursors",
+    description: "De-risk every production subsystem — pgvector backbone, vision, intake, outreach, convert — before the full Executive Engine build.",
+    color: "#2A1A3A",
+    accent: "#8B5CF6",
+  },
 ];
 
 const AUTH_CONFIGS = [
@@ -134,6 +142,28 @@ const MICRO_TESTS = [
   { id: "MT-25", phase: 3, title: "Upgrade Model (Optional)", description: "Update OpenAI model to gpt-4o if desired for higher quality output.", connection: "OpenAI" },
   { id: "MT-26", phase: 3, title: "Remove / Optional Approval Gate", description: "Disable manual approval requirement. Pipeline fires automatically on job alert.", connection: "Internal" },
   { id: "MT-27", phase: 3, title: "Production Deploy & Verify", description: "Deploy to production Azure Function App. Fire one real job alert end-to-end.", connection: "All", hasAction: true, actionLabel: "Deploy" },
+  // Phase 4 — Production Precursors (de-risk the full Executive Engine build)
+  // Infra backbone
+  { id: "MT-28", phase: 4, title: "Postgres + pgvector Connectivity", description: "Connect to the RAG_AI_Agents database, confirm the vector + pg_trgm extensions, and run a temp-table CRUD round-trip. Proves the production data backbone is reachable.", connection: "Postgres" },
+  { id: "MT-29", phase: 4, title: "Embeddings + Vector Similarity", description: "Embed an anchor, a near-duplicate, and an unrelated string with text-embedding-3, store in pgvector, and confirm cosine distance ranks the duplicate closest. Proves the dedupe/match core.", connection: "OpenAI + Postgres" },
+  { id: "MT-30", phase: 4, title: "Object Storage (Blob)", description: "Upload a PDF to an Azure Blob container, read it back, and verify the bytes round-trip. Proves object storage for video/screenshots/PDFs.", connection: "Storage" },
+  // Phase 1 Intake
+  { id: "MT-31", phase: 4, title: "Parse Alert → Opportunity JSON", description: "Send a raw job-alert email to gpt-4o-mini and extract structured Opportunity JSON (company, role, comp, location, URL, hiring manager/recruiter).", connection: "OpenAI" },
+  { id: "MT-32", phase: 4, title: "Dedupe (pgvector)", description: "Embed an existing opportunity and check an incoming near-duplicate against it via cosine similarity. Duplicate is skipped; a genuinely new role is kept.", connection: "OpenAI + Postgres" },
+  { id: "MT-33", phase: 4, title: "Inbox Watcher — Graph Folder Read", description: "List mail folders and read recent inbox messages via Microsoft Graph (read scope), simulating the per-folder watcher ingest.", connection: "Microsoft" },
+  { id: "MT-34", phase: 4, title: "Opportunity 12-Stage State Machine", description: "Insert an opportunity in Postgres and advance it legally through all 12 pipeline stages to 'accepted'; illegal skips are blocked; dismiss soft-removes.", connection: "Postgres" },
+  // Phase 2 vision
+  { id: "MT-35", phase: 4, title: "JD/ATS Analysis (Vision)", description: "Send a job-description screenshot to gpt-4o vision and get keywords, must-haves, ATS score, and gaps. Proves the vision JD/ATS analysis capability.", connection: "Vision" },
+  { id: "MT-36", phase: 4, title: "Application Answers Autofill (Vision)", description: "Send an application-form screenshot to gpt-4o vision; detect the questions and draft a copy-paste-ready answer per field.", connection: "Vision" },
+  // Phase 3 outreach
+  { id: "MT-37", phase: 4, title: "Multi-Channel Outreach Draft", description: "From a contact + signals, draft cold email, LinkedIn connect (≤300 chars), InMail, and follow-up in one call; verify each respects its channel character limit.", connection: "OpenAI" },
+  { id: "MT-38", phase: 4, title: "Cadence Engine", description: "Persist a scheduled outreach cadence in Postgres (day-offset touches), compute which touches are due as of a simulated day, and report cadence health.", connection: "Postgres" },
+  { id: "MT-39", phase: 4, title: "Asset Analytics", description: "Record asset view events (opens, view-time, forwards) in Postgres and aggregate opens / total view-time / unique viewers / most-viewed.", connection: "Postgres" },
+  // Phase 4 convert
+  { id: "MT-40", phase: 4, title: "Interview Prep", description: "From a JD + interviewer list, generate likely questions with strength tags, suggested answers, and a coverage map.", connection: "OpenAI" },
+  { id: "MT-41", phase: 4, title: "Interview Debrief", description: "From an interview transcript, generate an AI summary, advance-likelihood, per-question scores, and owed follow-ups.", connection: "OpenAI" },
+  { id: "MT-42", phase: 4, title: "Offer / Negotiation Tracker", description: "Given their offer and a walk-away floor, compute live total-comp math and generate a counter draft, comp benchmarks, and a leverage summary.", connection: "OpenAI" },
+  { id: "MT-43", phase: 4, title: "OpenAI Cost / Token Metering", description: "Make a real completion, read its token usage, compute cost, log to a persistent usage_metering table in Postgres, and return the running total.", connection: "OpenAI + Postgres" },
 ];
 
 const CONNECTION_COLORS = {
@@ -145,6 +175,10 @@ const CONNECTION_COLORS = {
   Internal: "#6B7280",
   "OpenAI + Google": "#F59E0B",
   All: "#1B4F5C",
+  Postgres: "#336791",
+  "OpenAI + Postgres": "#2E8B8B",
+  Vision: "#C026D3",
+  Storage: "#0EA5E9",
 };
 
 const STATUS_CONFIG = {
@@ -301,6 +335,22 @@ export default function App() {
     "MT-19": "/test/mt-19",
     "MT-20": "/test/mt-20",
     "MT-21": "/test/mt-21",
+    "MT-28": "/test/mt-28",
+    "MT-29": "/test/mt-29",
+    "MT-30": "/test/mt-30",
+    "MT-31": "/test/mt-31",
+    "MT-32": "/test/mt-32",
+    "MT-33": "/test/mt-33",
+    "MT-34": "/test/mt-34",
+    "MT-35": "/test/mt-35",
+    "MT-36": "/test/mt-36",
+    "MT-37": "/test/mt-37",
+    "MT-38": "/test/mt-38",
+    "MT-39": "/test/mt-39",
+    "MT-40": "/test/mt-40",
+    "MT-41": "/test/mt-41",
+    "MT-42": "/test/mt-42",
+    "MT-43": "/test/mt-43",
   };
 
   const runTest = async (testId) => {

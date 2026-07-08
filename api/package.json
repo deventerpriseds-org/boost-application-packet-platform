@@ -10,10 +10,13 @@
   },
   "dependencies": {
     "@azure/data-tables": "^13.2.0",
-    "@azure/functions": "^4.0.0"
+    "@azure/functions": "^4.0.0",
+    "@azure/storage-blob": "^12.17.0",
+    "pg": "^8.11.3"
   },
   "devDependencies": {
     "@types/node": "^18.0.0",
+    "@types/pg": "^8.11.0",
     "typescript": "^5.0.0"
   },
   "main": "dist/**/*.js"

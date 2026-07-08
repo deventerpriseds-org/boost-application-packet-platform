@@ -54,6 +54,11 @@ jobs:
               "MICROSOFT_TENANT_ID=ee633423-c321-413c-a191-ace8b07e4196" \
               "GOOGLE_CLIENT_ID=${{ secrets.GOOGLE_CLIENT_ID }}" \
               "GOOGLE_CLIENT_SECRET=${{ secrets.GOOGLE_CLIENT_SECRET }}" \
+              "AZURE_PG_HOST=eds-postgresql.postgres.database.azure.com" \
+              "AZURE_PG_PORT=5432" \
+              "AZURE_PG_DATABASE=RAG_AI_Agents" \
+              "AZURE_PG_USER=Admin_eds" \
+              "AZURE_PG_PASSWORD=${{ secrets.AZURE_PG_PASSWORD }}" \
               "NODE_ENV=production"
 
       - name: Deploy to Azure Functions
