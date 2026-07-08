@@ -51,6 +51,15 @@ export async function mt19(req: HttpRequest, context: InvocationContext): Promis
     try { const body = await req.json() as any; if (body?.roleType) roleType = String(body.roleType) } catch {}
     const roleFocus = await getRoleFocus(roleType)
 
+    // Look up the role-specific compact/ATS resume template (the 4th document),
+    // mirroring Zap 289877647's role-based template routing.
+    let compactResumeTemplateId = ''
+    try {
+      const cfg = TableClient.fromConnectionString(CONN, 'AppConfig')
+      const row = await cfg.getEntity('templates', roleType.toLowerCase().replace(/\s+/g, '-')) as any
+      compactResumeTemplateId = row.compactResumeTemplateId || ''
+    } catch { /* no row / no compact template */ }
+
     const promptClient = TableClient.fromConnectionString(CONN, 'Prompts')
     const prompts: Record<string, string> = {}
     for await (const e of promptClient.listEntities({ queryOptions: { filter: 'is_active eq true' } })) {
@@ -112,18 +121,26 @@ export async function mt19(req: HttpRequest, context: InvocationContext): Promis
     const resumeVars: Record<string, string> = { '{{ResumeSummary}}': pkg.ResumeSummary || '', '{{SkillsBullets1}}': pkg.SkillsBullets1 || '', '{{SkillsBullets2}}': pkg.SkillsBullets2 || '', '{{ExpertiseBullets}}': pkg.ExpertiseBullets || '', '{{WorkHistoryBullets1}}': pkg.WorkHistoryBullets1 || '', '{{WorkHistoryBullets2}}': pkg.WorkHistoryBullets2 || '', '{{WorkHistoryBullets3}}': pkg.WorkHistoryBullets3 || '', '{{WorkHistoryBullets4}}': pkg.WorkHistoryBullets4 || '', '{{RelevantBullets1}}': pkg.RelevantBullets1 || '', '{{RelevantBullets2}}': pkg.RelevantBullets2 || '', '{{RelevantBullets3}}': pkg.RelevantBullets3 || '' }
     const portfolioVars: Record<string, string> = { '{{@Company}}': pkg['@Company'] || '', '{{@CoverLetterDate}}': pkg['@CoverLetterDate'] || '', '{{@CoverLetterBody}}': pkg['@CoverLetterBody'] || '', '{{@AboutMe1_50words}}': pkg['@AboutMe1_50words'] || '', '{{@AboutMe2_60words}}': pkg['@AboutMe2_60words'] || '', '{{@ExecutiveProfile_55words}}': pkg['@ExecutiveProfile_55words'] || '', '{{@CoreAccomplishments_5blts_180words}}': pkg['@CoreAccomplishments_5blts_180words'] || '', '{{SoftSkills1}}': Array.isArray(c3.finalSkills1) ? c3.finalSkills1[0] || '' : '', '{{SoftSkills2}}': Array.isArray(c3.finalSkills1) ? c3.finalSkills1[1] || '' : '', '{{HardSkills1}}': Array.isArray(c3.finalSkills2) ? c3.finalSkills2[0] || '' : '', '{{HardSkills2}}': Array.isArray(c3.finalSkills2) ? c3.finalSkills2[1] || '' : '' }
 
-    const [resumeId, portfolioId, coverLetterId] = await Promise.all([
+    const docJobs = [
       copyAndInjectDoc(token, RESUME_TEMPLATE_ID, `MT-19 Full Resume — ${company}`, resumeVars, false),
       copyAndInjectDoc(token, PORTFOLIO_TEMPLATE_ID, `MT-19 Portfolio — ${company}`, portfolioVars, true),
       copyAndInjectDoc(token, COVER_LETTER_TEMPLATE_ID, `MT-19 Cover Letter — ${company}`, portfolioVars, true),
-    ])
+    ]
+    // 4th document — role-specific compact/ATS resume (same resume vars)
+    if (compactResumeTemplateId) {
+      docJobs.push(copyAndInjectDoc(token, compactResumeTemplateId, `MT-19 Compact ATS Resume (${roleType}) — ${company}`, resumeVars, false))
+    }
+    const ids = await Promise.all(docJobs)
+    const [resumeId, portfolioId, coverLetterId, compactId] = ids
 
-    const urls = {
+    const urls: Record<string, string> = {
       fullResume: `https://docs.google.com/document/d/${resumeId}/edit`,
+      compactAtsResume: compactId ? `https://docs.google.com/document/d/${compactId}/edit` : '(compact template not configured for this role)',
       portfolio: `https://docs.google.com/presentation/d/${portfolioId}/edit`,
       coverLetter: `https://docs.google.com/presentation/d/${coverLetterId}/edit`,
     }
-    return { status: 200, headers: HEADERS, jsonBody: { pass: true, detail: `3 of 4 documents generated for ${roleType} focus (compact resume template not seeded yet). Open each URL and verify no placeholders visible.`, roleType, roleFocus, urls, aiCalls } }
+    const docCount = ids.length
+    return { status: 200, headers: HEADERS, jsonBody: { pass: docCount === 4, detail: `${docCount} of 4 documents generated for ${roleType} focus. Open each URL and verify no placeholders visible.`, roleType, roleFocus, compactResumeTemplateId, urls, aiCalls } }
   } catch (err) {
     return { status: 200, headers: HEADERS, jsonBody: { pass: false, detail: String(err) } }
   }
