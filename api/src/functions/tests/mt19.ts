@@ -3,6 +3,7 @@ import { TableClient } from '@azure/data-tables'
 import { getGoogleToken, getGoogleOAuthToken, HAS_GOOGLE_OAUTH, IMPERSONATE_SUBJECT } from './googleAuth'
 import { assemblePackage } from './mt17'
 import { resolveZapVars } from './zapVars'
+import { getRoleFocus, roleDirective } from './roleFocus'
 
 const CONN = process.env.AZURE_STORAGE_CONNECTION_STRING!
 const HEADERS = {
@@ -46,6 +47,10 @@ export async function mt19(req: HttpRequest, context: InvocationContext): Promis
   if (!key || !saJson) return { status: 200, headers: HEADERS, jsonBody: { pass: false, detail: 'OPENAI_API_KEY or GOOGLE_SERVICE_ACCOUNT_JSON not set' } }
 
   try {
+    let roleType = 'Engineering'
+    try { const body = await req.json() as any; if (body?.roleType) roleType = String(body.roleType) } catch {}
+    const roleFocus = await getRoleFocus(roleType)
+
     const promptClient = TableClient.fromConnectionString(CONN, 'Prompts')
     const prompts: Record<string, string> = {}
     for await (const e of promptClient.listEntities({ queryOptions: { filter: 'is_active eq true' } })) {
@@ -67,9 +72,9 @@ export async function mt19(req: HttpRequest, context: InvocationContext): Promis
     // Call 1 — resolve Zap placeholders against MasterContext + JD
     const base19 = prompts['resume_user'] || 'Write resume package with ### delimited sections.'
     const resolved19 = resolveZapVars(base19, masterContext, FAKE_JD)
-    const call1User19 = resolved19 === base19
+    const call1User19 = roleDirective(roleFocus) + (resolved19 === base19
       ? `${resolved19}\n\nCONTEXT:\n${JSON.stringify(masterContext)}\n\nJD:\n${FAKE_JD}`
-      : resolved19
+      : resolved19)
     const sys1 = prompts['resume_system'] || 'You are an executive resume writer.'
     const r1 = await openai(sys1, call1User19, 16000) as any
     const r1Content = r1.choices?.[0]?.message?.content || ''
@@ -78,7 +83,7 @@ export async function mt19(req: HttpRequest, context: InvocationContext): Promis
 
     // Call 2
     const sys2 = prompts['portfolio_system'] || 'You are a helpful assistant.'
-    const user2 = `${prompts['portfolio_user'] || 'Generate portfolio JSON with aboutMe1, aboutMe2, executiveProfile, coverLetter, coldEmail.'}\n\nCALL1:\n${JSON.stringify(c1)}`
+    const user2 = roleDirective(roleFocus) + `${prompts['portfolio_user'] || 'Generate portfolio JSON with aboutMe1, aboutMe2, executiveProfile, coverLetter, coldEmail.'}\n\nCALL1:\n${JSON.stringify(c1)}`
     const r2 = await openai(sys2, user2, 16000) as any
     const r2Content = r2.choices?.[0]?.message?.content || ''
     let c2: any = {}
@@ -118,7 +123,7 @@ export async function mt19(req: HttpRequest, context: InvocationContext): Promis
       portfolio: `https://docs.google.com/presentation/d/${portfolioId}/edit`,
       coverLetter: `https://docs.google.com/presentation/d/${coverLetterId}/edit`,
     }
-    return { status: 200, headers: HEADERS, jsonBody: { pass: true, detail: '3 of 4 documents generated (compact resume template not seeded yet). Open each URL and verify no placeholders visible.', urls, aiCalls } }
+    return { status: 200, headers: HEADERS, jsonBody: { pass: true, detail: `3 of 4 documents generated for ${roleType} focus (compact resume template not seeded yet). Open each URL and verify no placeholders visible.`, roleType, roleFocus, urls, aiCalls } }
   } catch (err) {
     return { status: 200, headers: HEADERS, jsonBody: { pass: false, detail: String(err) } }
   }

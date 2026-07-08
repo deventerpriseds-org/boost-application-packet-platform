@@ -3,6 +3,7 @@ import { TableClient } from '@azure/data-tables'
 import { getGoogleToken, getGoogleOAuthToken, HAS_GOOGLE_OAUTH, IMPERSONATE_SUBJECT } from './googleAuth'
 import { assemblePackage } from './mt17'
 import { resolveZapVars } from './zapVars'
+import { getRoleFocus, roleDirective } from './roleFocus'
 
 const CONN = process.env.AZURE_STORAGE_CONNECTION_STRING!
 const HEADERS = {
@@ -24,6 +25,11 @@ export async function mt18(req: HttpRequest, context: InvocationContext): Promis
   if (!saJson) return { status: 200, headers: HEADERS, jsonBody: { pass: false, detail: 'GOOGLE_SERVICE_ACCOUNT_JSON not set' } }
 
   try {
+    // Role type drives content focus (Engineering vs Product Management)
+    let roleType = 'Engineering'
+    try { const body = await req.json() as any; if (body?.roleType) roleType = String(body.roleType) } catch {}
+    const roleFocus = await getRoleFocus(roleType)
+
     // Load prompts + context
     const promptClient = TableClient.fromConnectionString(CONN, 'Prompts')
     let systemPrompt = '', userPrompt = ''
@@ -42,9 +48,9 @@ export async function mt18(req: HttpRequest, context: InvocationContext): Promis
     // Resolve Zap {{nodeId__value}} placeholders against MasterContext + JD
     const base18 = userPrompt || 'Write a full resume package with ### delimited sections.'
     const resolved18 = resolveZapVars(base18, masterContext, FAKE_JD)
-    const call1User = resolved18 === base18
+    const call1User = roleDirective(roleFocus) + (resolved18 === base18
       ? `${resolved18}\n\nCONTEXT:\n${JSON.stringify(masterContext)}\n\nJD:\n${FAKE_JD}`
-      : resolved18
+      : resolved18)
 
     // Agent Call 1
     const call1Res = await fetch('https://api.openai.com/v1/chat/completions', {
@@ -120,7 +126,7 @@ export async function mt18(req: HttpRequest, context: InvocationContext): Promis
     if (!batchRes.ok) throw new Error(`batchUpdate failed: HTTP ${batchRes.status}`)
 
     const docUrl = `https://docs.google.com/document/d/${docId}/edit`
-    return { status: 200, headers: HEADERS, jsonBody: { pass: true, detail: `Full resume doc created. Open and verify all placeholders replaced: ${docUrl}`, docId, docUrl, aiCalls } }
+    return { status: 200, headers: HEADERS, jsonBody: { pass: true, detail: `Full resume doc created for ${roleType} focus. Open and verify all placeholders replaced: ${docUrl}`, roleType, roleFocus, docId, docUrl, aiCalls } }
   } catch (err) {
     return { status: 200, headers: HEADERS, jsonBody: { pass: false, detail: String(err) } }
   }
