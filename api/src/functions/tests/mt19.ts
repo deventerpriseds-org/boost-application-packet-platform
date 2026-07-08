@@ -70,19 +70,33 @@ export async function mt19(req: HttpRequest, context: InvocationContext): Promis
     const call1User19 = resolved19 === base19
       ? `${resolved19}\n\nCONTEXT:\n${JSON.stringify(masterContext)}\n\nJD:\n${FAKE_JD}`
       : resolved19
-    const r1 = await openai(prompts['resume_system'] || 'You are an executive resume writer.', call1User19, 16000) as any
-    const secs = (r1.choices?.[0]?.message?.content || '').split('###').map((s: string) => s.trim()).filter(Boolean)
+    const sys1 = prompts['resume_system'] || 'You are an executive resume writer.'
+    const r1 = await openai(sys1, call1User19, 16000) as any
+    const r1Content = r1.choices?.[0]?.message?.content || ''
+    const secs = r1Content.split('###').map((s: string) => s.trim()).filter(Boolean)
     const c1: any = { date: new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' }), targetRole: 'VP of Engineering', targetCompany: 'TechVenture Inc', resumeSummary: secs[0] || '', skills1: secs[1] || '', skills2: secs[2] || '', expertise: secs[3] || '', workHistory1: secs[4] || '', workHistory2: secs[5] || '', workHistory3: secs[6] || '', workHistory4: secs[7] || '', relevant1: secs[8] || '', relevant2: secs[9] || '', relevant3: secs[10] || '', coverLetter: secs[11] || '', aboutMe1: secs[12] || '', aboutMe2: secs[13] || '', executiveProfile: secs[14] || '', coreAccomplishments: secs[15] || '' }
 
     // Call 2
-    const r2 = await openai(prompts['portfolio_system'] || 'You are a helpful assistant.', `${prompts['portfolio_user'] || 'Generate portfolio JSON with aboutMe1, aboutMe2, executiveProfile, coverLetter, coldEmail.'}\n\nCALL1:\n${JSON.stringify(c1)}`, 16000) as any
+    const sys2 = prompts['portfolio_system'] || 'You are a helpful assistant.'
+    const user2 = `${prompts['portfolio_user'] || 'Generate portfolio JSON with aboutMe1, aboutMe2, executiveProfile, coverLetter, coldEmail.'}\n\nCALL1:\n${JSON.stringify(c1)}`
+    const r2 = await openai(sys2, user2, 16000) as any
+    const r2Content = r2.choices?.[0]?.message?.content || ''
     let c2: any = {}
-    try { const m = (r2.choices?.[0]?.message?.content || '').match(/\{[\s\S]*\}/); if (m) c2 = JSON.parse(m[0]) } catch {}
+    try { const m = r2Content.match(/\{[\s\S]*\}/); if (m) c2 = JSON.parse(m[0]) } catch {}
 
     // Call 3
-    const r3 = await openai(prompts['ats_system'] || 'You are a helpful assistant.', `${prompts['ats_user'] || 'Return JSON: finalSkills1[], finalSkills2[], finalRelevant1, finalRelevant2, finalRelevant3, updatedResumeSummary, jobscanQcTable.'}\n\nINPUTS:\n${JSON.stringify({ ...c1, ...c2 })}`, 15500) as any
+    const sys3 = prompts['ats_system'] || 'You are a helpful assistant.'
+    const user3 = `${prompts['ats_user'] || 'Return JSON: finalSkills1[], finalSkills2[], finalRelevant1, finalRelevant2, finalRelevant3, updatedResumeSummary, jobscanQcTable.'}\n\nINPUTS:\n${JSON.stringify({ ...c1, ...c2 })}`
+    const r3 = await openai(sys3, user3, 15500) as any
+    const r3Content = r3.choices?.[0]?.message?.content || ''
     let c3: any = {}
-    try { const m = (r3.choices?.[0]?.message?.content || '').match(/\{[\s\S]*\}/); if (m) c3 = JSON.parse(m[0]) } catch {}
+    try { const m = r3Content.match(/\{[\s\S]*\}/); if (m) c3 = JSON.parse(m[0]) } catch {}
+
+    const aiCalls = [
+      { label: 'Agent Call 1 — Resume Package', promptSentToAI: { model: 'gpt-4o-mini', maxTokens: 16000, system: sys1, user: call1User19 }, aiResponse: r1Content },
+      { label: 'Agent Call 2 — Portfolio + Cold Email', promptSentToAI: { model: 'gpt-4o-mini', maxTokens: 16000, system: sys2, user: user2 }, aiResponse: r2Content },
+      { label: 'Agent Call 3 — ATS QC + Skills Merge', promptSentToAI: { model: 'gpt-4o-mini', maxTokens: 15500, system: sys3, user: user3 }, aiResponse: r3Content },
+    ]
 
     const pkg = assemblePackage(c1, c2, c3)
     const token = HAS_GOOGLE_OAUTH
@@ -104,7 +118,7 @@ export async function mt19(req: HttpRequest, context: InvocationContext): Promis
       portfolio: `https://docs.google.com/presentation/d/${portfolioId}/edit`,
       coverLetter: `https://docs.google.com/presentation/d/${coverLetterId}/edit`,
     }
-    return { status: 200, headers: HEADERS, jsonBody: { pass: true, detail: '3 of 4 documents generated (compact resume template not seeded yet). Open each URL and verify no placeholders visible.', urls } }
+    return { status: 200, headers: HEADERS, jsonBody: { pass: true, detail: '3 of 4 documents generated (compact resume template not seeded yet). Open each URL and verify no placeholders visible.', urls, aiCalls } }
   } catch (err) {
     return { status: 200, headers: HEADERS, jsonBody: { pass: false, detail: String(err) } }
   }

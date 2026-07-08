@@ -753,6 +753,26 @@ export default function App() {
                                 {testResults[test.id].endpoint} · HTTP {testResults[test.id].httpStatus} · {testResults[test.id].roundtripMs}ms · {testResults[test.id].ranAt}
                               </span>
                             </div>
+                            {/* Chained AI tests: one block per model call */}
+                            {Array.isArray(testResults[test.id].data?.aiCalls) && testResults[test.id].data.aiCalls.map((call, ci) => (
+                              <div key={ci} style={{ marginBottom: 12, borderLeft: "2px solid #1B4F5C", paddingLeft: 10 }}>
+                                <div style={{ fontSize: 11, fontWeight: 700, color: "#2A7A8C", marginBottom: 6 }}>{call.label || `AI Call ${ci + 1}`}</div>
+                                {call.promptSentToAI?.system && (
+                                  <details style={{ marginBottom: 6 }}>
+                                    <summary style={{ fontSize: 10, color: "#64748B", cursor: "pointer" }}>System message</summary>
+                                    <pre style={{ background: "#060A0E", border: "1px solid #1E293B", borderRadius: 6, padding: "8px 10px", fontFamily: "monospace", fontSize: 10.5, color: "#7C93B8", lineHeight: 1.5, maxHeight: 160, overflow: "auto", margin: "4px 0 0", whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{call.promptSentToAI.system}</pre>
+                                  </details>
+                                )}
+                                <details>
+                                  <summary style={{ fontSize: 10, color: "#4A6FA5", cursor: "pointer" }}>📤 Submitted user message (resolved)</summary>
+                                  <pre style={{ background: "#060A0E", border: "1px solid #1E293B", borderRadius: 6, padding: "8px 10px", fontFamily: "monospace", fontSize: 10.5, color: "#7C93B8", lineHeight: 1.5, maxHeight: 220, overflow: "auto", margin: "4px 0 0", whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{call.promptSentToAI?.user}</pre>
+                                </details>
+                                <details open>
+                                  <summary style={{ fontSize: 10, color: "#10B981", cursor: "pointer" }}>📥 AI response</summary>
+                                  <pre style={{ background: "#060A0E", border: "1px solid #10B98130", borderRadius: 6, padding: "8px 10px", fontFamily: "monospace", fontSize: 10.5, color: "#A7C4A0", lineHeight: 1.5, maxHeight: 220, overflow: "auto", margin: "4px 0 0", whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{call.aiResponse}</pre>
+                                </details>
+                              </div>
+                            ))}
                             {/* AI tests: show exactly what was submitted to the model and its raw reply */}
                             {testResults[test.id].data?.promptSentToAI && (
                               <div style={{ marginBottom: 10 }}>

@@ -61,7 +61,13 @@ export async function mt18(req: HttpRequest, context: InvocationContext): Promis
     })
     if (!call1Res.ok) throw new Error(`Agent Call 1 failed: HTTP ${call1Res.status}`)
     const call1Data = await call1Res.json() as any
-    const sections = (call1Data.choices?.[0]?.message?.content || '').split('###').map((s: string) => s.trim()).filter(Boolean)
+    const call1Content = call1Data.choices?.[0]?.message?.content || ''
+    const sections = call1Content.split('###').map((s: string) => s.trim()).filter(Boolean)
+    const aiCalls = [{
+      label: 'Agent Call 1 — Resume Package',
+      promptSentToAI: { model: 'gpt-4o-mini', maxTokens: 16000, system: systemPrompt || 'You are an executive resume writer.', user: call1User },
+      aiResponse: call1Content
+    }]
 
     // Simple section parser — map by index or keyword
     const call1: any = {
@@ -114,7 +120,7 @@ export async function mt18(req: HttpRequest, context: InvocationContext): Promis
     if (!batchRes.ok) throw new Error(`batchUpdate failed: HTTP ${batchRes.status}`)
 
     const docUrl = `https://docs.google.com/document/d/${docId}/edit`
-    return { status: 200, headers: HEADERS, jsonBody: { pass: true, detail: `Full resume doc created. Open and verify all placeholders replaced: ${docUrl}`, docId, docUrl } }
+    return { status: 200, headers: HEADERS, jsonBody: { pass: true, detail: `Full resume doc created. Open and verify all placeholders replaced: ${docUrl}`, docId, docUrl, aiCalls } }
   } catch (err) {
     return { status: 200, headers: HEADERS, jsonBody: { pass: false, detail: String(err) } }
   }
