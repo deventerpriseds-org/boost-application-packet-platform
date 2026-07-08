@@ -213,6 +213,8 @@ export default function App() {
   });
   const [activePhaseFilter, setActivePhaseFilter] = useState("all");
   const [configStatus, setConfigStatus] = useState({});
+  const [selectedRole, setSelectedRole] = useState("Engineering");
+  const ROLE_OPTIONS = ["Engineering", "Product Management"];
 
   const API_BASE = "https://job-platform-api.azurewebsites.net/api";
 
@@ -311,7 +313,7 @@ export default function App() {
 
     const startedAt = Date.now();
     try {
-      const res = await fetch(`${API_BASE}${route}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
+      const res = await fetch(`${API_BASE}${route}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ roleType: selectedRole }) });
       const data = await res.json();
       const pass = data.pass === true;
       setTestStatuses((s) => ({ ...s, [testId]: pass ? "pass" : "fail" }));
@@ -672,7 +674,17 @@ export default function App() {
                   </button>
                 </div>
               </div>
-              <div style={{ display: "flex", gap: 6 }}>
+              <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 6, marginRight: 8, paddingRight: 12, borderRight: "1px solid #1E293B" }}>
+                  <span style={{ fontSize: 11, color: "#64748B" }}>Role focus:</span>
+                  <select
+                    value={selectedRole}
+                    onChange={(e) => setSelectedRole(e.target.value)}
+                    style={{ background: "#0D1821", border: "1px solid #2A7A8C", borderRadius: 6, color: "#E2E8F0", fontSize: 11, fontWeight: 600, padding: "6px 8px", cursor: "pointer" }}
+                  >
+                    {ROLE_OPTIONS.map((r) => <option key={r} value={r}>{r}</option>)}
+                  </select>
+                </div>
                 {[{ label: "All", value: "all" }, ...PHASES.map((p) => ({ label: p.label, value: String(p.id) }))].map((f) => (
                   <button
                     key={f.value}
