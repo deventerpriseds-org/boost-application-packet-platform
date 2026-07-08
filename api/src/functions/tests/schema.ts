@@ -12,21 +12,31 @@ create extension if not exists vector;
 create extension if not exists pg_trgm;
 create extension if not exists "uuid-ossp";
 
+-- Multi-tenancy + demo flagging: every user-owned row is scoped by owner_email
+-- (the user's profile email) and flags demo/seed rows so a real user can start
+-- clean. Demo seed uses owner_email = 'demo@executive-engine.local', is_demo=true.
+-- "Fresh start for user X" = delete demo rows, insert with owner_email = X.
+
 -- Personas (CTO / VP Engineering / VP Product) — re-filter catalog & baselines
 create table if not exists persona (
   id           uuid primary key default uuid_generate_v4(),
-  key          text unique not null,
+  owner_email  text not null default 'demo@executive-engine.local',
+  is_demo      boolean not null default false,
+  key          text not null,
   name         text not null,
   master_role  text not null,
   comp_target  text,
   positioning  text,
-  created_at   timestamptz not null default now()
+  created_at   timestamptz not null default now(),
+  unique (owner_email, key)
 );
 
 -- The atomic unit. 12-stage pipeline; embedding powers dedupe/match.
 create table if not exists opportunity (
   id            uuid primary key default uuid_generate_v4(),
-  persona_key   text references persona(key),
+  owner_email   text not null default 'demo@executive-engine.local',
+  is_demo       boolean not null default false,
+  persona_key   text,
   company       text not null,
   logo_url      text,
   role          text not null,
@@ -145,6 +155,8 @@ create index if not exists offer_opp_idx on offer(opp_id);
 -- Library entities referenced during generation
 create table if not exists library_entity (
   id         uuid primary key default uuid_generate_v4(),
+  owner_email text not null default 'demo@executive-engine.local',
+  is_demo    boolean not null default false,
   kind       text not null check (kind in ('role_profile','template','playbook','asset')),
   name       text not null,
   category   text,
@@ -176,6 +188,15 @@ create table if not exists usage_metering (
   cost_usd          numeric(12,8),
   ts                timestamptz not null default now()
 );
+
+-- Idempotent multi-tenant column adds (safe on tables that predate them)
+alter table persona        add column if not exists owner_email text not null default 'demo@executive-engine.local';
+alter table persona        add column if not exists is_demo boolean not null default false;
+alter table opportunity    add column if not exists owner_email text not null default 'demo@executive-engine.local';
+alter table opportunity    add column if not exists is_demo boolean not null default false;
+alter table library_entity add column if not exists owner_email text not null default 'demo@executive-engine.local';
+alter table library_entity add column if not exists is_demo boolean not null default false;
+create index if not exists opp_owner_idx2 on opportunity(owner_email);
 `;
 
 // Tables we expect to exist after migration (used by the runner to report).
