@@ -1,0 +1,359 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Executive Engine — System Architecture</title>
+<link href="https://fonts.googleapis.com/css2?family=Caveat:wght@400;500;600;700&family=Caveat+Brush&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --paper:#fdfcf7; --ink:#1a1a1a; --ink2:#555; --ink3:#8a857a;
+    --rule-soft:#d8d4cc; --panel:#f0eeea; --panel-deep:#e8e4dc;
+    --accent:#3a5fc8; --accent-soft:#e8eeff;
+    --green:#2d8a4e; --green-soft:#dff0e6;
+    --yellow:#c8990f; --yellow-soft:#fbf2da;
+    --purple:#8a2d7a; --purple-soft:#f3e6f0;
+    --red:#c83a3a; --red-soft:#fbe6e6;
+    --orange:#c87a3a; --orange-soft:#fbece0;
+  }
+  *{ box-sizing:border-box; }
+  html,body{ margin:0; padding:0; background:#c9c4b8;
+    background-image:radial-gradient(circle at 50% 0, #d6d1c4, #bcb7ab);
+    font-family:'Caveat',cursive; color:var(--ink); }
+  a{ color:var(--accent); } a:hover{ color:#2947a0; }
+  mono, .mono{ font-family:'IBM Plex Mono',monospace; font-size:.82em; }
+
+  .sheet{ width:1600px; margin:26px auto; background:var(--paper);
+    border:2.5px solid var(--ink); box-shadow:0 24px 60px rgba(0,0,0,.34);
+    padding:34px 38px 44px; }
+
+  .h1{ font-family:'Caveat Brush',cursive; font-size:44px; line-height:1; letter-spacing:-.5px; }
+  .sub{ font-size:19px; color:var(--ink2); margin-top:4px; }
+  .h2{ font-size:24px; font-weight:700; }
+  .h3{ font-size:17px; font-weight:700; }
+  .label{ font-size:12px; letter-spacing:.6px; text-transform:uppercase; color:var(--ink3); font-weight:600; font-family:'IBM Plex Mono',monospace; }
+  .meta{ font-size:15px; color:var(--ink2); }
+  .small{ font-size:13px; color:var(--ink3); }
+
+  .box{ border:2px solid var(--ink); background:var(--paper); }
+  .soft{ border:1.5px solid var(--rule-soft); background:var(--paper); }
+  .panel{ background:var(--panel); border:2px solid var(--ink); }
+  .hatch{ background-image:repeating-linear-gradient(45deg,var(--rule-soft) 0,var(--rule-soft) 1px,transparent 1px,transparent 7px); background-color:var(--panel); }
+
+  .pill{ display:inline-flex; align-items:center; gap:5px; padding:2px 9px; border:1.5px solid var(--ink); border-radius:99px; font-size:13px; font-weight:600; white-space:nowrap; }
+  .tag{ display:inline-flex; align-items:center; gap:4px; padding:1px 7px; border-radius:99px; font-size:11px; font-weight:600; font-family:'IBM Plex Mono',monospace; letter-spacing:.2px; white-space:nowrap; }
+
+  .grid{ display:grid; gap:16px; }
+  .arrow-down{ display:flex; flex-direction:column; align-items:center; gap:2px; margin:2px 0; }
+  .arrow-down .ln{ width:2.5px; height:16px; background:var(--ink); }
+  .arrow-down .hd{ width:0; height:0; border-left:7px solid transparent; border-right:7px solid transparent; border-top:9px solid var(--ink); }
+  .arrow-lbl{ font-family:'IBM Plex Mono',monospace; font-size:11px; color:var(--ink3); background:var(--paper); padding:0 6px; }
+
+  .card{ border:2px solid var(--ink); background:var(--paper); padding:11px 13px; }
+  .card .t{ font-size:16px; font-weight:700; line-height:1.15; }
+  .card .d{ font-size:13.5px; color:var(--ink2); margin-top:3px; line-height:1.3; }
+
+  .row{ display:flex; gap:14px; }
+  .col{ display:flex; flex-direction:column; }
+
+  table{ border-collapse:collapse; width:100%; font-size:14px; }
+  th,td{ border:1.5px solid var(--rule-soft); padding:7px 10px; text-align:left; vertical-align:top; }
+  th{ background:var(--panel); font-size:12px; text-transform:uppercase; letter-spacing:.5px; color:var(--ink2); font-family:'IBM Plex Mono',monospace; }
+  td .mono{ font-size:13px; }
+
+  .legend{ display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+  .sec-head{ display:flex; align-items:baseline; gap:12px; margin:26px 0 12px; padding-bottom:6px; border-bottom:2px solid var(--ink); }
+  .num{ display:inline-flex; align-items:center; justify-content:center; width:30px; height:30px; border:2px solid var(--ink); border-radius:50%; font-weight:700; font-size:16px; flex-shrink:0; background:var(--paper); }
+  ul.ticks{ margin:6px 0 0; padding-left:0; list-style:none; }
+  ul.ticks li{ font-size:14px; line-height:1.5; padding-left:20px; position:relative; }
+  ul.ticks li::before{ content:"▸"; position:absolute; left:2px; color:var(--accent); }
+  .kv{ display:flex; justify-content:space-between; gap:10px; padding:4px 0; border-bottom:1.5px solid var(--rule-soft); font-size:14px; }
+  .placeholder-chip{ font-family:'IBM Plex Mono',monospace; font-size:12px; background:var(--yellow-soft); border:1.5px solid var(--yellow); color:#7a5c08; padding:1px 6px; border-radius:4px; }
+</style>
+</head>
+<body>
+<div class="sheet">
+
+  <!-- Header -->
+  <div style="display:flex; align-items:flex-end; justify-content:space-between; gap:20px; flex-wrap:wrap;">
+    <div>
+      <div class="h1">Executive Engine — System Architecture</div>
+      <div class="sub">Alerts land in Outlook → a watcher pulls & enriches → AI tailors → Google Docs/Slides fill from templates → outputs ship. End-to-end data flow + recommended services.</div>
+    </div>
+    <div class="legend">
+      <span class="tag" style="background:var(--yellow-soft); border:1.5px solid var(--yellow); color:#7a5c08;">✉ email / alert</span>
+      <span class="tag" style="background:var(--accent-soft); border:1.5px solid var(--accent); color:var(--accent);">⚡ webhook / event</span>
+      <span class="tag" style="background:var(--purple-soft); border:1.5px solid var(--purple); color:var(--purple);">✦ OpenAI call</span>
+      <span class="tag" style="background:var(--green-soft); border:1.5px solid var(--green); color:var(--green);">▤ Docs / Slides API</span>
+      <span class="tag" style="background:var(--panel-deep); border:1.5px solid var(--ink); color:var(--ink);">⛁ DB / vector</span>
+    </div>
+  </div>
+
+  <!-- Main: pipeline (left) + shared services (right) -->
+  <div style="display:grid; grid-template-columns:1fr 452px; gap:26px; margin-top:22px;">
+
+    <!-- ============ LEFT: linear pipeline ============ -->
+    <div class="col">
+
+      <!-- 1 SOURCES -->
+      <div class="sec-head" style="margin-top:0;">
+        <span class="num">1</span><div class="h2">Job-search platform subscriptions</div>
+        <span class="meta" style="margin-left:auto;">each subscription emails a dedicated alias</span>
+      </div>
+      <div class="grid" style="grid-template-columns:repeat(3,1fr);">
+        <div class="card"><div class="t">LinkedIn Jobs</div><div class="d">Premium job alerts · saved searches (CTO / VP Eng / VP Product)</div><span class="tag" style="background:var(--yellow-soft);border:1.5px solid var(--yellow);color:#7a5c08;margin-top:7px;">✉ daily digest</span></div>
+        <div class="card"><div class="t">Indeed</div><div class="d">Saved-search email alerts · exec filters</div><span class="tag" style="background:var(--yellow-soft);border:1.5px solid var(--yellow);color:#7a5c08;margin-top:7px;">✉ alert email</span></div>
+        <div class="card"><div class="t">Greenhouse / Lever boards</div><div class="d">Followed company career pages · new-role notifications</div><span class="tag" style="background:var(--yellow-soft);border:1.5px solid var(--yellow);color:#7a5c08;margin-top:7px;">✉ role posted</span></div>
+        <div class="card"><div class="t">Executive search firms</div><div class="d">Heidrick, Russell Reynolds, Spencer Stuart — recruiter outreach</div><span class="tag" style="background:var(--yellow-soft);border:1.5px solid var(--yellow);color:#7a5c08;margin-top:7px;">✉ recruiter email</span></div>
+        <div class="card"><div class="t">Wellfound / Otta</div><div class="d">Startup & scale-up leadership alerts</div><span class="tag" style="background:var(--yellow-soft);border:1.5px solid var(--yellow);color:#7a5c08;margin-top:7px;">✉ weekly alert</span></div>
+        <div class="card hatch"><div class="t">+ any email source</div><div class="d">Any alert that reaches the alias is ingested — new platforms need no code, just an inbox rule</div></div>
+      </div>
+
+      <div class="arrow-down"><span class="arrow-lbl">SMTP → jobs@you.com alias</span><div class="ln"></div><div class="hd"></div></div>
+
+      <!-- 2 OUTLOOK -->
+      <div class="sec-head">
+        <span class="num">2</span><div class="h2">Outlook (Microsoft 365) — folder per source</div>
+      </div>
+      <div class="row">
+        <div class="box" style="flex:1.15; padding:13px;">
+          <div class="label">Inbox rules route by sender / subject</div>
+          <div style="display:flex; flex-direction:column; gap:6px; margin-top:9px;">
+            <div class="soft" style="padding:7px 10px; display:flex; justify-content:space-between; align-items:center;"><span class="mono">/Opportunities/LinkedIn</span><span class="small">LinkedIn Jobs →</span></div>
+            <div class="soft" style="padding:7px 10px; display:flex; justify-content:space-between; align-items:center;"><span class="mono">/Opportunities/Indeed</span><span class="small">Indeed →</span></div>
+            <div class="soft" style="padding:7px 10px; display:flex; justify-content:space-between; align-items:center;"><span class="mono">/Opportunities/Greenhouse</span><span class="small">boards →</span></div>
+            <div class="soft" style="padding:7px 10px; display:flex; justify-content:space-between; align-items:center;"><span class="mono">/Opportunities/Recruiters</span><span class="small">search firms →</span></div>
+            <div class="soft" style="padding:7px 10px; display:flex; justify-content:space-between; align-items:center;"><span class="mono">/Opportunities/Other</span><span class="small">catch-all →</span></div>
+          </div>
+        </div>
+        <div class="box" style="flex:1; padding:13px;">
+          <div class="label">Microsoft Graph API</div>
+          <ul class="ticks">
+            <li><span class="mono">POST /subscriptions</span> — change-notification webhook <em>per folder</em></li>
+            <li>Auto-renew (~3-day expiry) via scheduled job</li>
+            <li><span class="mono">GET /messages/{id}</span> — fetch full body + attachments</li>
+            <li><span class="mono">POST /sendMail</span> — used later for outreach</li>
+          </ul>
+          <div style="margin-top:9px; display:flex; gap:6px; flex-wrap:wrap;">
+            <span class="tag" style="background:var(--panel-deep);border:1.5px solid var(--ink);">OAuth · Azure AD app</span>
+            <span class="tag" style="background:var(--panel-deep);border:1.5px solid var(--ink);">Mail.Read</span>
+            <span class="tag" style="background:var(--panel-deep);border:1.5px solid var(--ink);">Mail.Send</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="arrow-down"><span class="arrow-lbl" style="color:var(--accent);">⚡ Graph change notification (new message)</span><div class="ln"></div><div class="hd"></div></div>
+
+      <!-- 3 WATCHER -->
+      <div class="sec-head">
+        <span class="num">3</span><div class="h2">The Watcher — ingestion edge functions</div>
+      </div>
+      <div class="box" style="padding:14px;">
+        <div class="row" style="align-items:stretch;">
+          <div class="soft" style="flex:1; padding:11px;">
+            <span class="tag" style="background:var(--accent-soft);border:1.5px solid var(--accent);color:var(--accent);">fn · ingest-webhook</span>
+            <div class="d" style="margin-top:7px;">Receives Graph notification, fetches the message, hands raw email to extraction.</div>
+          </div>
+          <div style="display:flex; align-items:center; color:var(--ink3); font-family:'IBM Plex Mono',monospace;">→</div>
+          <div class="soft" style="flex:1; padding:11px;">
+            <span class="tag" style="background:var(--purple-soft);border:1.5px solid var(--purple);color:var(--purple);">✦ extract-opportunity</span>
+            <div class="d" style="margin-top:7px;">OpenAI parses email → structured opportunity JSON (company, role, comp, location, url, source, HM/recruiter).</div>
+          </div>
+          <div style="display:flex; align-items:center; color:var(--ink3); font-family:'IBM Plex Mono',monospace;">→</div>
+          <div class="soft" style="flex:1; padding:11px;">
+            <span class="tag" style="background:var(--panel-deep);border:1.5px solid var(--ink);">⛁ dedupe (pgvector)</span>
+            <div class="d" style="margin-top:7px;">Embedding + fuzzy match vs existing rows — skip repeats, merge cross-posts.</div>
+          </div>
+          <div style="display:flex; align-items:center; color:var(--ink3); font-family:'IBM Plex Mono',monospace;">→</div>
+          <div class="soft" style="flex:1; padding:11px;">
+            <span class="tag" style="background:var(--purple-soft);border:1.5px solid var(--purple);color:var(--purple);">✦ enrich</span>
+            <div class="d" style="margin-top:7px;">Company signals + likely stakeholders + match score → write row <span class="mono">status=discovered</span>.</div>
+          </div>
+        </div>
+        <div class="soft" style="margin-top:11px; padding:8px 11px; display:flex; align-items:center; gap:10px; background:var(--panel);">
+          <span class="tag" style="background:var(--paper);border:1.5px solid var(--ink);">⏱ cron · poll-inbox</span>
+          <span class="small">Every 15 min — delta-query fallback in case a webhook is missed, plus subscription auto-renewal.</span>
+        </div>
+      </div>
+
+      <div class="arrow-down"><span class="arrow-lbl" style="color:var(--ink);">⛁ INSERT opportunities · status=discovered</span><div class="ln"></div><div class="hd"></div></div>
+
+      <!-- 4 REVIEW -->
+      <div class="sec-head">
+        <span class="num">4</span><div class="h2">Review queue → Pipeline (state machine)</div>
+      </div>
+      <div class="row">
+        <div class="box" style="flex:1; padding:13px;">
+          <div class="label">Swipe / review</div>
+          <div class="meta" style="margin-top:6px;">User triages each surfaced opportunity:</div>
+          <div style="display:flex; gap:6px; margin-top:8px; flex-wrap:wrap;">
+            <span class="pill" style="border-color:var(--red);color:var(--red);">✕ Dismiss</span>
+            <span class="pill" style="border-color:var(--yellow);color:var(--yellow);">↓ Maybe / research</span>
+            <span class="pill" style="border-color:var(--green);color:var(--green);">✓ Keep → build packet</span>
+          </div>
+        </div>
+        <div class="box" style="flex:1.3; padding:13px;">
+          <div class="label">opportunities.status</div>
+          <div class="mono" style="font-size:13px; margin-top:8px; line-height:1.9;">discovered → saved → enriched → applied →<br>outreach → engaged → screen → r1 → panel →<br>final → offer → accepted</div>
+        </div>
+      </div>
+
+      <div class="arrow-down"><span class="arrow-lbl" style="color:var(--green);">on “Keep + approve” → create packet, kick generation</span><div class="ln"></div><div class="hd"></div></div>
+
+      <!-- 5 GENERATION -->
+      <div class="sec-head">
+        <span class="num">5</span><div class="h2">Generation — AI writes, Google fills templates</div>
+      </div>
+      <div class="box" style="padding:14px;">
+        <div class="meta">A durable job <span class="mono">generate-packet</span> fans out: OpenAI produces the <b>content values</b>, then the Docs/Slides APIs <b>replace placeholders</b> in copies of your master templates. See the right rail for the OpenAI I/O and template details.</div>
+        <div class="row" style="margin-top:11px;">
+          <div class="soft" style="flex:1; padding:11px;"><span class="tag" style="background:var(--purple-soft);border:1.5px solid var(--purple);color:var(--purple);">✦ content values (JSON)</span><div class="d" style="margin-top:6px;">resume fields, cover text, slide copy, outreach, answers</div></div>
+          <div style="display:flex;align-items:center;color:var(--ink3);font-family:'IBM Plex Mono',monospace;">→</div>
+          <div class="soft" style="flex:1; padding:11px;"><span class="tag" style="background:var(--green-soft);border:1.5px solid var(--green);color:var(--green);">▤ fill-docs / fill-slides</span><div class="d" style="margin-top:6px;">copy master → <span class="mono">batchUpdate</span> replaceAllText → export PDF</div></div>
+          <div style="display:flex;align-items:center;color:var(--ink3);font-family:'IBM Plex Mono',monospace;">→</div>
+          <div class="soft" style="flex:1; padding:11px;"><span class="tag" style="background:var(--panel-deep);border:1.5px solid var(--ink);">⛁ artifacts row</span><div class="d" style="margin-top:6px;">status draft → review → approved per round</div></div>
+        </div>
+      </div>
+
+      <div class="arrow-down"><span class="arrow-lbl">approval rounds → ready to send</span><div class="ln"></div><div class="hd"></div></div>
+
+      <!-- 6 OUTPUTS -->
+      <div class="sec-head">
+        <span class="num">6</span><div class="h2">Outputs — the packet & channels</div>
+      </div>
+      <div class="grid" style="grid-template-columns:repeat(4,1fr);">
+        <div class="card"><div class="t">Tailored resume</div><div class="d">Google Doc + PDF · ATS-keyword optimized</div></div>
+        <div class="card"><div class="t">Cover letter</div><div class="d">Per-opportunity narrative</div></div>
+        <div class="card"><div class="t">Portfolio deck</div><div class="d">Google Slides + PDF</div></div>
+        <div class="card"><div class="t">Intro video script</div><div class="d">60s · recorded asset</div></div>
+        <div class="card"><div class="t">Outreach messages</div><div class="d">Email · LinkedIn · InMail · call script → <span class="mono">Graph sendMail</span></div></div>
+        <div class="card"><div class="t">Application answers</div><div class="d">Copy-paste blocks per form field</div></div>
+        <div class="card"><div class="t">Interview prep</div><div class="d">Likely Qs + suggested answers</div></div>
+        <div class="card"><div class="t">Debrief</div><div class="d">Transcript → summary + follow-ups</div></div>
+      </div>
+
+    </div>
+
+    <!-- ============ RIGHT: shared services ============ -->
+    <div class="col" style="gap:16px;">
+
+      <!-- OpenAI brain -->
+      <div class="box" style="border-color:var(--purple); padding:15px; background:var(--purple-soft);">
+        <div style="display:flex; align-items:center; gap:8px;">
+          <div class="h2" style="color:var(--purple);">✦ OpenAI</div>
+          <span class="pill" style="border-color:var(--purple);color:var(--purple);background:var(--paper);margin-left:auto;">shared brain</span>
+        </div>
+        <div class="meta" style="margin-top:4px;">Called from ingestion <b>and</b> generation. Keys held in the secret vault; usage metered per call.</div>
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-top:12px;">
+          <div class="box" style="padding:10px; background:var(--paper);">
+            <div class="label">Inputs to AI</div>
+            <ul class="ticks">
+              <li>Raw alert email (HTML/text)</li>
+              <li>JD text <em>+ screenshot</em> (vision)</li>
+              <li>Master role profile</li>
+              <li>User profile &amp; comp targets</li>
+              <li>Extracted keywords / ATS gaps</li>
+              <li>Template placeholder schema</li>
+              <li>Contact + company signals</li>
+              <li>Application-form screenshot</li>
+              <li>Interview transcript</li>
+            </ul>
+          </div>
+          <div class="box" style="padding:10px; background:var(--paper);">
+            <div class="label">Outputs from AI</div>
+            <ul class="ticks">
+              <li>Opportunity JSON</li>
+              <li>Keywords + ATS score + gaps</li>
+              <li>Resume field values (JSON)</li>
+              <li>Cover-letter text</li>
+              <li>Portfolio slide copy</li>
+              <li>Outreach drafts (per channel)</li>
+              <li>Application answers</li>
+              <li>Interview Qs + answers</li>
+              <li>Debrief summary + scores</li>
+            </ul>
+          </div>
+        </div>
+        <div style="margin-top:10px; display:flex; gap:6px; flex-wrap:wrap;">
+          <span class="tag" style="background:var(--paper);border:1.5px solid var(--purple);color:var(--purple);">gpt-4o · reasoning+vision</span>
+          <span class="tag" style="background:var(--paper);border:1.5px solid var(--purple);color:var(--purple);">gpt-4o-mini · parsing</span>
+          <span class="tag" style="background:var(--paper);border:1.5px solid var(--purple);color:var(--purple);">text-embedding-3 · dedupe/match</span>
+        </div>
+      </div>
+
+      <!-- Google Workspace -->
+      <div class="box" style="border-color:var(--green); padding:15px;">
+        <div style="display:flex; align-items:center; gap:8px;">
+          <div class="h2" style="color:var(--green);">▤ Google Workspace</div>
+          <span class="pill" style="border-color:var(--green);color:var(--green);margin-left:auto;">templates → filled</span>
+        </div>
+        <div class="label" style="margin-top:10px;">Drive — master templates (placeholder text)</div>
+        <div class="soft" style="padding:9px 11px; margin-top:6px;">
+          <div style="display:flex; justify-content:space-between; align-items:center;"><span class="mono">Resume.gdoc</span><span class="tag" style="background:var(--green-soft);border:1.5px solid var(--green);color:var(--green);">Docs API</span></div>
+          <div style="margin-top:6px; display:flex; gap:5px; flex-wrap:wrap;">
+            <span class="placeholder-chip">{{name}}</span><span class="placeholder-chip">{{headline}}</span><span class="placeholder-chip">{{summary}}</span><span class="placeholder-chip">{{impact_1}}</span><span class="placeholder-chip">{{impact_2}}</span><span class="placeholder-chip">{{keywords}}</span>
+          </div>
+        </div>
+        <div class="soft" style="padding:9px 11px; margin-top:8px;">
+          <div style="display:flex; justify-content:space-between; align-items:center;"><span class="mono">Portfolio.gslides</span><span class="tag" style="background:var(--green-soft);border:1.5px solid var(--green);color:var(--green);">Slides API</span></div>
+          <div style="margin-top:6px; display:flex; gap:5px; flex-wrap:wrap;">
+            <span class="placeholder-chip">{{slide_title}}</span><span class="placeholder-chip">{{case_study}}</span><span class="placeholder-chip">{{metric}}</span><span class="placeholder-chip">{{logo_img}}</span>
+          </div>
+        </div>
+        <div class="label" style="margin-top:12px;">Fill sequence</div>
+        <ul class="ticks">
+          <li><span class="mono">drive.files.copy</span> master → <span class="mono">/Packets/{company}/</span></li>
+          <li><span class="mono">docs.batchUpdate · replaceAllText</span> {{ph}} → value</li>
+          <li><span class="mono">slides.batchUpdate</span> replaceAllText + replaceAllShapesWithImage</li>
+          <li><span class="mono">drive.files.export</span> → PDF, link back to artifact</li>
+        </ul>
+        <div style="margin-top:9px; display:flex; gap:6px; flex-wrap:wrap;">
+          <span class="tag" style="background:var(--panel-deep);border:1.5px solid var(--ink);">OAuth · Google</span>
+          <span class="tag" style="background:var(--panel-deep);border:1.5px solid var(--ink);">drive.file</span>
+          <span class="tag" style="background:var(--panel-deep);border:1.5px solid var(--ink);">documents</span>
+          <span class="tag" style="background:var(--panel-deep);border:1.5px solid var(--ink);">presentations</span>
+        </div>
+      </div>
+
+      <!-- Platform services -->
+      <div class="box" style="padding:15px;">
+        <div class="h2">⛁ Platform — recommended services</div>
+        <div class="meta" style="margin-top:2px;">The infra that makes the flow reliable.</div>
+        <div style="display:flex; flex-direction:column; gap:7px; margin-top:11px;">
+          <div class="kv"><span><b>Edge functions</b></span><span class="mono small">ingest-webhook · extract · enrich · generate-packet · fill-docs · fill-slides · send-outreach</span></div>
+          <div class="kv"><span><b>Database</b></span><span class="mono small">Postgres + pgvector</span></div>
+          <div class="kv"><span><b>Durable jobs / queue</b></span><span class="mono small">retries + long AI/gen tasks</span></div>
+          <div class="kv"><span><b>Cron / scheduler</b></span><span class="mono small">poll-inbox · renew-subs · run-cadence · refresh-signals</span></div>
+          <div class="kv"><span><b>Object storage</b></span><span class="mono small">video, screenshots, exported PDFs</span></div>
+          <div class="kv"><span><b>Auth + token vault</b></span><span class="mono small">MS / Google / OpenAI OAuth + secrets</span></div>
+          <div class="kv"><span><b>Vector store</b></span><span class="mono small">dedupe · match score · Q-bank</span></div>
+          <div class="kv"><span><b>Observability</b></span><span class="mono small">logs + OpenAI cost metering</span></div>
+          <div class="kv" style="border-bottom:none;"><span><b>Notifications</b></span><span class="mono small">push/email · daily briefing</span></div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- AI I/O contract table -->
+  <div class="sec-head"><span class="num">✦</span><div class="h2">AI / API I-O contract</div><span class="meta" style="margin-left:auto;">what goes in, what comes out, per task</span></div>
+  <table>
+    <thead><tr><th style="width:16%;">Task</th><th style="width:15%;">Model</th><th style="width:35%;">Input to AI</th><th style="width:34%;">Output from AI</th></tr></thead>
+    <tbody>
+      <tr><td><b>Parse alert</b></td><td><span class="mono">gpt-4o-mini</span></td><td>Raw job-alert email (HTML/text)</td><td>Opportunity JSON — company, role, comp, location, url, source, HM/recruiter</td></tr>
+      <tr><td><b>Dedupe / match</b></td><td><span class="mono">text-embedding-3</span></td><td>Opportunity text + your role profile</td><td>Vector → similarity score (skip dupes) + fit/match score</td></tr>
+      <tr><td><b>JD / ATS analysis</b></td><td><span class="mono">gpt-4o</span> (vision)</td><td>JD text <em>or</em> screenshot + master role profile</td><td>Keywords[], must-haves[], ATS score, coverage gaps[]</td></tr>
+      <tr><td><b>Resume fill</b></td><td><span class="mono">gpt-4o</span></td><td>Profile + JD keywords + template placeholder schema</td><td><span class="mono">{ "{{summary}}": "...", "{{impact_1}}": "..." }</span> value map</td></tr>
+      <tr><td><b>Cover / portfolio</b></td><td><span class="mono">gpt-4o</span></td><td>Profile + JD + Doc/Slides placeholder schema</td><td>Placeholder→value maps for Docs &amp; Slides</td></tr>
+      <tr><td><b>Outreach draft</b></td><td><span class="mono">gpt-4o</span></td><td>Contact + signals + channel + tone + message template</td><td>Message body (respecting channel char-limits)</td></tr>
+      <tr><td><b>Application answers</b></td><td><span class="mono">gpt-4o</span> (vision)</td><td>Form screenshot + profile + JD + answer style</td><td>Question→answer blocks (length-bounded)</td></tr>
+      <tr><td><b>Interview prep</b></td><td><span class="mono">gpt-4o</span></td><td>JD + interviewer list + past Q-bank</td><td>Likely questions + suggested answers + coverage map</td></tr>
+      <tr><td><b>Debrief</b></td><td><span class="mono">gpt-4o</span></td><td>Interview transcript / recording</td><td>Summary + per-question scores + owed follow-ups</td></tr>
+    </tbody>
+  </table>
+
+  <div class="small" style="margin-top:16px; text-align:center; font-family:'IBM Plex Mono',monospace;">Executive Engine · architecture v1 · flows left-to-top-to-bottom; OpenAI &amp; Google Workspace are shared services called from multiple stages.</div>
+
+</div>
+</body>
+</html>
