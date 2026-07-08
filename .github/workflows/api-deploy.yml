@@ -56,7 +56,7 @@ jobs:
               "GOOGLE_CLIENT_SECRET=${{ secrets.GOOGLE_CLIENT_SECRET }}" \
               "AZURE_PG_HOST=eds-postgresql.postgres.database.azure.com" \
               "AZURE_PG_PORT=5432" \
-              "AZURE_PG_DATABASE=RAG_AI_Agents" \
+              "AZURE_PG_DATABASE=boost_resume_n_packet_builder" \
               "AZURE_PG_USER=Admin_eds" \
               "AZURE_PG_PASSWORD=${{ secrets.Azure_admin_pw }}" \
               "NODE_ENV=production"
