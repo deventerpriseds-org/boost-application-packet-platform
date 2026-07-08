@@ -1,6 +1,7 @@
 import { app, HttpRequest, HttpResponseInit, InvocationContext } from '@azure/functions'
 import { TableClient } from '@azure/data-tables'
 import { resolveZapVars } from './zapVars'
+import { getRoleFocus, roleDirective } from './roleFocus'
 
 const CONN = process.env.AZURE_STORAGE_CONNECTION_STRING!
 const HEADERS = {
@@ -20,6 +21,11 @@ export async function mt14(req: HttpRequest, context: InvocationContext): Promis
   if (!key) return { status: 200, headers: HEADERS, jsonBody: { pass: false, detail: 'OPENAI_API_KEY not set' } }
 
   try {
+    // Role type drives content focus (Engineering vs Product Management).
+    let roleType = 'Engineering'
+    try { const body = await req.json() as any; if (body?.roleType) roleType = String(body.roleType) } catch {}
+    const roleFocus = await getRoleFocus(roleType)
+
     // Load prompts
     const promptClient = TableClient.fromConnectionString(CONN, 'Prompts')
     let systemPrompt = '', userPrompt = ''
@@ -43,9 +49,12 @@ export async function mt14(req: HttpRequest, context: InvocationContext): Promis
     // to appending context if the prompt has no placeholders (e.g. default prompt).
     const base = userPrompt || 'Generate a complete resume package with 14+ sections delimited by ###.'
     const resolved = resolveZapVars(base, masterContext, FAKE_JD)
-    const finalUser = resolved.includes('{{') || resolved === base
+    // Prepend the role-focus directive so the same base prompt produces
+    // role-appropriate content (Engineering vs Product Management).
+    const withRole = roleDirective(roleFocus) + (resolved.includes('{{') || resolved === base
       ? `${resolved}\n\nMASTER CONTEXT:\n${JSON.stringify(masterContext)}\n\nJOB DESCRIPTION:\n${FAKE_JD}`
-      : resolved
+      : resolved)
+    const finalUser = withRole
 
     const res = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
@@ -70,8 +79,10 @@ export async function mt14(req: HttpRequest, context: InvocationContext): Promis
       jsonBody: {
         pass,
         detail: pass
-          ? `${sections.length} sections returned. Prompt variables resolved (${unresolved} placeholders left).`
+          ? `${sections.length} sections returned for ${roleType} focus. Prompt variables resolved (${unresolved} placeholders left).`
           : `Only ${sections.length} sections returned (need 14+).`,
+        roleType,
+        roleFocus,
         unresolvedPlaceholders: unresolved,
         promptSentToAI,
         aiResponse: content,
