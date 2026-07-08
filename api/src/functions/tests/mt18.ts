@@ -4,6 +4,7 @@ import { getGoogleToken, getGoogleOAuthToken, HAS_GOOGLE_OAUTH, IMPERSONATE_SUBJ
 import { assemblePackage } from './mt17'
 import { resolveZapVars } from './zapVars'
 import { getRoleFocus, roleDirective } from './roleFocus'
+import { parseResumePackage } from './resumeParser'
 
 const CONN = process.env.AZURE_STORAGE_CONNECTION_STRING!
 const HEADERS = {
@@ -68,24 +69,14 @@ export async function mt18(req: HttpRequest, context: InvocationContext): Promis
     if (!call1Res.ok) throw new Error(`Agent Call 1 failed: HTTP ${call1Res.status}`)
     const call1Data = await call1Res.json() as any
     const call1Content = call1Data.choices?.[0]?.message?.content || ''
-    const sections = call1Content.split('###').map((s: string) => s.trim()).filter(Boolean)
     const aiCalls = [{
       label: 'Agent Call 1 — Resume Package',
       promptSentToAI: { model: 'gpt-4o-mini', maxTokens: 16000, system: systemPrompt || 'You are an executive resume writer.', user: call1User },
       aiResponse: call1Content
     }]
 
-    // Simple section parser — map by index or keyword
-    const call1: any = {
-      date: new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' }),
-      targetRole: 'VP of Engineering', targetCompany: 'TechVenture Inc',
-      resumeSummary: sections[0] || '', skills1: sections[1] || '', skills2: sections[2] || '',
-      expertise: sections[3] || '', workHistory1: sections[4] || '', workHistory2: sections[5] || '',
-      workHistory3: sections[6] || '', workHistory4: sections[7] || '',
-      relevant1: sections[8] || '', relevant2: sections[9] || '', relevant3: sections[10] || '',
-      coverLetter: sections[11] || '', aboutMe1: sections[12] || '', aboutMe2: sections[13] || '',
-      executiveProfile: sections[14] || '', coreAccomplishments: sections[15] || ''
-    }
+    // Parse sections by title (not position) so placeholders map correctly.
+    const call1: any = parseResumePackage(call1Content, masterContext, 'VP of Engineering', 'TechVenture Inc')
 
     // Assemble package with mock call2/call3
     const pkg = assemblePackage(call1, { aboutMe1: call1.aboutMe1, aboutMe2: call1.aboutMe2, executiveProfile: call1.executiveProfile, coverLetter: call1.coverLetter, coldEmail: '' }, { finalSkills1: call1.skills1.split('|'), finalSkills2: call1.skills2.split('|'), finalRelevant1: call1.relevant1, finalRelevant2: call1.relevant2, finalRelevant3: call1.relevant3, updatedResumeSummary: call1.resumeSummary })

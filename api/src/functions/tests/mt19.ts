@@ -4,6 +4,7 @@ import { getGoogleToken, getGoogleOAuthToken, HAS_GOOGLE_OAUTH, IMPERSONATE_SUBJ
 import { assemblePackage } from './mt17'
 import { resolveZapVars } from './zapVars'
 import { getRoleFocus, roleDirective } from './roleFocus'
+import { parseResumePackage } from './resumeParser'
 
 const CONN = process.env.AZURE_STORAGE_CONNECTION_STRING!
 const HEADERS = {
@@ -87,8 +88,7 @@ export async function mt19(req: HttpRequest, context: InvocationContext): Promis
     const sys1 = prompts['resume_system'] || 'You are an executive resume writer.'
     const r1 = await openai(sys1, call1User19, 16000) as any
     const r1Content = r1.choices?.[0]?.message?.content || ''
-    const secs = r1Content.split('###').map((s: string) => s.trim()).filter(Boolean)
-    const c1: any = { date: new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' }), targetRole: 'VP of Engineering', targetCompany: 'TechVenture Inc', resumeSummary: secs[0] || '', skills1: secs[1] || '', skills2: secs[2] || '', expertise: secs[3] || '', workHistory1: secs[4] || '', workHistory2: secs[5] || '', workHistory3: secs[6] || '', workHistory4: secs[7] || '', relevant1: secs[8] || '', relevant2: secs[9] || '', relevant3: secs[10] || '', coverLetter: secs[11] || '', aboutMe1: secs[12] || '', aboutMe2: secs[13] || '', executiveProfile: secs[14] || '', coreAccomplishments: secs[15] || '' }
+    const c1: any = parseResumePackage(r1Content, masterContext, 'VP of Engineering', 'TechVenture Inc')
 
     // Call 2
     const sys2 = prompts['portfolio_system'] || 'You are a helpful assistant.'
@@ -140,7 +140,18 @@ export async function mt19(req: HttpRequest, context: InvocationContext): Promis
       coverLetter: `https://docs.google.com/presentation/d/${coverLetterId}/edit`,
     }
     const docCount = ids.length
-    return { status: 200, headers: HEADERS, jsonBody: { pass: docCount === 4, detail: `${docCount} of 4 documents generated for ${roleType} focus. Open each URL and verify no placeholders visible.`, roleType, roleFocus, compactResumeTemplateId, urls, aiCalls } }
+    // Preview of each placeholder's mapped content, so the doc field mapping
+    // is verifiable without opening every document.
+    const mappedFields = {
+      ResumeSummary: (pkg.ResumeSummary || '').slice(0, 90),
+      SkillsBullets1: (pkg.SkillsBullets1 || '').slice(0, 90),
+      SkillsBullets2: (pkg.SkillsBullets2 || '').slice(0, 90),
+      WorkHistoryBullets1: (pkg.WorkHistoryBullets1 || '').slice(0, 90),
+      RelevantBullets1: (pkg.RelevantBullets1 || '').slice(0, 70),
+      '@CoverLetterBody': (pkg['@CoverLetterBody'] || '').slice(0, 90),
+      '@AboutMe1_50words': (pkg['@AboutMe1_50words'] || '').slice(0, 90),
+    }
+    return { status: 200, headers: HEADERS, jsonBody: { pass: docCount === 4, detail: `${docCount} of 4 documents generated for ${roleType} focus. Open each URL and verify no placeholders visible.`, roleType, roleFocus, compactResumeTemplateId, mappedFields, urls, aiCalls } }
   } catch (err) {
     return { status: 200, headers: HEADERS, jsonBody: { pass: false, detail: String(err) } }
   }

@@ -4,6 +4,7 @@ import { getGoogleToken, getGoogleOAuthToken, HAS_GOOGLE_OAUTH, IMPERSONATE_SUBJ
 import { resolveZapVars } from './zapVars'
 import { getRoleFocus, roleDirective } from './roleFocus'
 import { assemblePackage } from './mt17'
+import { parseResumePackage } from './resumeParser'
 
 const CONN = process.env.AZURE_STORAGE_CONNECTION_STRING!
 const HEADERS = {
@@ -108,9 +109,8 @@ export async function pipelineRun(req: HttpRequest, context: InvocationContext):
     // 2. Agent Call 1 — resume (role-focused, grounded)
     const base1 = resolveZapVars(prompts['resume_user'] || 'Write resume package with ### sections.', mc, jd)
     const r1 = await openai(prompts['resume_system'] || 'You are an executive resume writer.', roleDirective(roleFocus) + base1, 16000) as any
-    const secs = (r1.choices?.[0]?.message?.content || '').split('###').map((s: string) => s.trim()).filter(Boolean)
-    const c1: any = { date: new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' }), targetRole: jobTitle, targetCompany: company, resumeSummary: secs[0] || '', skills1: secs[1] || '', skills2: secs[2] || '', expertise: secs[3] || '', workHistory1: secs[4] || '', workHistory2: secs[5] || '', workHistory3: secs[6] || '', workHistory4: secs[7] || '', relevant1: secs[8] || '', relevant2: secs[9] || '', relevant3: secs[10] || '', coverLetter: secs[11] || '', aboutMe1: secs[12] || '', aboutMe2: secs[13] || '', executiveProfile: secs[14] || '', coreAccomplishments: secs[15] || '' }
-    steps.push(`Agent Call 1 (resume) — ${secs.length} sections`)
+    const c1: any = parseResumePackage(r1.choices?.[0]?.message?.content || '', mc, jobTitle, company)
+    steps.push(`Agent Call 1 (resume) — parsed ${c1._parsedFieldCount} fields by title`)
 
     // 3. Agent Call 2 — portfolio + cold email
     const r2 = await openai(prompts['portfolio_system'] || 'You are a helpful assistant.', roleDirective(roleFocus) + `${prompts['portfolio_user'] || 'Portfolio JSON.'}\n\nCALL1:\n${JSON.stringify(c1)}`, 16000) as any
