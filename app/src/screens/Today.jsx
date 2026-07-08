@@ -28,7 +28,7 @@ export default function Today({ opps }) {
       {/* Hero */}
       <div className="px-box" style={{ padding: 24 }}>
         <div className="px-small" style={{ textTransform: 'uppercase', letterSpacing: 1 }}>Good morning, {persona.name.split(' ')[0]}</div>
-        <div style={{ fontSize: 26, fontWeight: 700, letterSpacing: -0.5, margin: '4px 0 6px' }}>
+        <div style={{ fontSize: 'clamp(20px, 5.5vw, 26px)', fontWeight: 700, letterSpacing: -0.5, margin: '4px 0 6px', lineHeight: 1.15 }}>
           {fresh.length} new to scrub · {active.length} in flight
         </div>
         <div className="px-small">
@@ -37,7 +37,7 @@ export default function Today({ opps }) {
       </div>
 
       {/* KPI strip */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 12 }}>
         <Kpi label="New" value={fresh.length} tone="accent" />
         <Kpi label="Active" value={active.length} tone="green" />
         <Kpi label="Hot" value={hot.length} tone="red" />

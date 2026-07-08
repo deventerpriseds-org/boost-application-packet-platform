@@ -45,8 +45,8 @@ export default function Opportunities({ opps }) {
         <span className="px-small">{rows.length} of {opportunities.length}</span>
       </div>
 
-      <div className="px-box" style={{ padding: 0, overflow: 'hidden' }}>
-        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+      <div className="px-box" style={{ padding: 0, overflowX: 'auto' }}>
+        <table style={{ width: '100%', minWidth: 560, borderCollapse: 'collapse', fontSize: 13 }}>
           <thead>
             <tr style={{ textAlign: 'left', color: 'var(--proto-ink2)', fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.5 }}>
               <Th>Match</Th><Th>Company</Th><Th>Role</Th><Th>Comp</Th><Th>Stage</Th><Th>Urgency</Th>

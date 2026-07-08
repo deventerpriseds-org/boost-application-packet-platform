@@ -23,6 +23,19 @@ export function useRoute() {
 }
 export const go = (path) => { window.location.hash = path.startsWith('#') ? path : `#${path.startsWith('/') ? '' : '/'}${path}` }
 
+// True on phone-width viewports — drives the shell's nav swap.
+export function useIsMobile(breakpoint = 768) {
+  const [mobile, setMobile] = useState(() => (typeof window !== 'undefined' ? window.innerWidth <= breakpoint : false))
+  useEffect(() => {
+    const mq = window.matchMedia(`(max-width: ${breakpoint}px)`)
+    const onChange = () => setMobile(mq.matches)
+    onChange()
+    mq.addEventListener('change', onChange)
+    return () => mq.removeEventListener('change', onChange)
+  }, [breakpoint])
+  return mobile
+}
+
 export function AppProvider({ children }) {
   const [personaKey, setPersonaKey] = useState('CTO')
   const [dark, setDark] = useState(false)

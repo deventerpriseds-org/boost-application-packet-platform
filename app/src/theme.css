@@ -130,3 +130,10 @@
 
     /* Inputs/textareas inherit Inter */
     .px-root input, .px-root textarea, .px-root select { font-family:'Inter', system-ui, sans-serif; }
+
+    /* Responsive: phone widths */
+    @media (max-width: 768px) {
+      .ee-hide-sm { display: none !important; }
+      .px-btn, .px-input { max-width: 100%; }
+      select.px-btn { text-overflow: ellipsis; }
+    }
