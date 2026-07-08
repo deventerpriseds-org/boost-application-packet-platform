@@ -8,3 +8,6 @@ api/dist/
 web/dist/
 *.js.map
 local.settings.json
+
+# Secrets — never commit real DB credentials
+azure-pg-credentials.json
