@@ -102,8 +102,10 @@ until that diff is done.
 - `owner_email` exists but there is no login. "Fresh start by email" is a
   delete/reseed endpoint, not real auth.
 
-### G9 — Whisper transcription  ·  status: OPEN
-- Interview debrief takes **pasted** text; no audio → transcript path.
+### G9 — Whisper transcription  ·  status: CLOSED
+- `POST /app/interview/{id}/transcribe` (whisper-1) turns recorded/uploaded audio
+  into a transcript stored on the interview row; debrief tab has record + upload
+  controls. Verified via a TTS→STT round-trip (phrase returned verbatim).
 
 ### G10 — Cost metering in the app  ·  status: CLOSED
 - `usageMeter.logUsage` (per-model pricing, best-effort) records every metered
@@ -114,8 +116,8 @@ until that diff is done.
 
 ## Priority (owner-directed)
 - **Closed:** G1 HeyGen, G2 ElevenLabs, G4 live inbox watcher, G6 real Docs,
-  G5 real outbound send, G7 scheduler/cron, G10 cost metering.
-- **Remaining — "make it real" wiring hardening:** G9 Whisper transcription,
-  G8 auth/multi-tenancy.
+  G5 real outbound send, G7 scheduler/cron, G10 cost metering, G9 Whisper.
+- **Remaining — "make it real" wiring hardening:** G8 auth/multi-tenancy (the
+  last one — foundational, needs a direction decision).
 - **Deferred (owner):** G3 ATS ingestion + apply; G2's 1:1 chat call button;
   G6 Slides deck for the portfolio artifact.
