@@ -49,7 +49,7 @@ until that diff is done.
      archive to the Video Archive Folder.
 - **Blocked on:** `HEYGEN_API_KEY` in GitHub secrets + Function App settings.
 
-### G2 — ElevenLabs: voice narration + 1:1 voice call  ·  status: OPEN (blocked on key)
+### G2 — ElevenLabs: voice narration + 1:1 voice call  ·  status: CLOSED (MT-45 + barge-in voice coach live; 1:1 chat call button deferred to when app is feature-complete, per owner)
 - **Intent (clarified with owner):** ElevenLabs turns **AI response text into
   voice**. Two surfaces:
   1. **Meeting / narration voice** — narrate generated text (e.g. the intro-video
@@ -73,9 +73,12 @@ until that diff is done.
   currently **seeded**, and "apply" submits nowhere.
 - **Explicitly deferred by owner** — parked here so it is not lost.
 
-### G4 — Live inbox watcher  ·  status: OPEN
-- MT-33 only **reads** a Graph folder. No live webhook/watcher turns real emails
-  into opportunities; in the app, opportunities are seed data.
+### G4 — Live inbox watcher  ·  status: CLOSED
+- Graph change-notification subscription (`mail/*`) turns real LinkedIn alerts in
+  the watched mailbox into opportunities (parse → embed → dedupe → insert), with
+  a 30-min renewal + fallback-poll timer. Configurable mailbox/folder/sources in
+  **Settings ▸ Intake** (`mail_watch_config`) + self-test. Verified on a real
+  LinkedIn alert (HDR, AARC ingested).
 
 ### G5 — Real outbound send  ·  status: OPEN
 - MT-07/08 proved Graph send in isolation. The app's outreach **"Send"** flips
@@ -102,6 +105,8 @@ until that diff is done.
   usage to `usage_metering`.
 
 ## Priority (owner-directed)
-1. **G1 HeyGen** + **G2 ElevenLabs** — next, once keys are provided.
-2. G3 ATS — deferred, not forgotten.
-3. G4–G10 — wiring hardening for production readiness.
+- **Closed:** G1 HeyGen, G2 ElevenLabs, G4 live inbox watcher.
+- **Remaining — "make it real" wiring hardening:** G6 real Docs/Slides artifacts,
+  G5 real outbound send, G7 scheduler/cron (fires due touches — pairs with G5),
+  G10 cost metering in-app, G9 Whisper transcription, G8 auth/multi-tenancy.
+- **Deferred (owner):** G3 ATS ingestion + apply; G2's 1:1 chat call button.
