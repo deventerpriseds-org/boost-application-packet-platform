@@ -246,8 +246,33 @@ export async function mailSendTest(req: HttpRequest, context: InvocationContext)
   } catch (err) { return { status: 200, headers: HEADERS, jsonBody: { error: String(err) } } }
 }
 
+// POST /api/mail/poll-now { minutes? } — on-demand version of the fallback poll:
+// read the watched inbox for recent messages and run them through ingest. Proves
+// delivery + gives a manual "pull now" independent of webhook timing. Returns a
+// per-message trace so you can see what was ingested vs skipped.
+export async function mailPollNow(req: HttpRequest, context: InvocationContext): Promise<HttpResponseInit> {
+  if (req.method === 'OPTIONS') return { status: 204, headers: HEADERS }
+  const creds = graphCreds()
+  if (!creds.clientId || !creds.clientSecret) return { status: 200, headers: HEADERS, jsonBody: { error: 'MICROSOFT creds not set' } }
+  try {
+    const minutes = Number((await req.json().catch(() => ({})) as any)?.minutes) || 60
+    const token = await getMicrosoftToken(creds.tenantId, creds.clientId, creds.clientSecret)
+    const since = new Date(Date.now() - minutes * 60 * 1000).toISOString()
+    const list = await fetch(`https://graph.microsoft.com/v1.0/users/${MAILBOX()}/mailFolders('inbox')/messages?$filter=receivedDateTime ge ${since}&$select=id,subject,from,receivedDateTime&$top=25&$orderby=receivedDateTime desc`, { headers: { Authorization: `Bearer ${token}` } })
+    if (!list.ok) return { status: 200, headers: HEADERS, jsonBody: { ok: false, mailbox: MAILBOX(), detail: `list HTTP ${list.status}: ${(await list.text()).slice(0, 400)}` } }
+    const msgs = ((await list.json()) as any)?.value || []
+    const trace: any[] = []
+    for (const m of msgs) {
+      const r = await ingestMessageId(token, m.id).catch((e) => ({ error: String(e) }))
+      trace.push({ subject: m.subject, from: m?.from?.emailAddress?.address, received: m.receivedDateTime, result: r })
+    }
+    return { status: 200, headers: HEADERS, jsonBody: { ok: true, mailbox: MAILBOX(), scanned: msgs.length, trace } }
+  } catch (err) { return { status: 200, headers: HEADERS, jsonBody: { error: String(err) } } }
+}
+
 app.http('mailNotify', { methods: ['GET', 'POST'], authLevel: 'anonymous', route: 'mail/notify', handler: mailNotify })
 app.http('mailSendTest', { methods: ['POST', 'OPTIONS'], authLevel: 'anonymous', route: 'mail/send-test', handler: mailSendTest })
+app.http('mailPollNow', { methods: ['POST', 'OPTIONS'], authLevel: 'anonymous', route: 'mail/poll-now', handler: mailPollNow })
 app.http('mailSubscribe', { methods: ['POST', 'OPTIONS'], authLevel: 'anonymous', route: 'mail/subscribe', handler: mailSubscribe })
 app.http('mailSubscriptions', { methods: ['GET', 'OPTIONS'], authLevel: 'anonymous', route: 'mail/subscriptions', handler: mailSubscriptions })
 app.http('mailIngestTest', { methods: ['POST', 'OPTIONS'], authLevel: 'anonymous', route: 'mail/ingest-test', handler: mailIngestTest })
