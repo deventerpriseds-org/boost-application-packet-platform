@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react'
+import React, { useEffect, useState, useCallback, useRef } from 'react'
 import { useApp, go } from '../state.jsx'
 import { api } from '../api.js'
 import { Pill } from '../shell.jsx'
@@ -22,6 +22,8 @@ export default function PacketBuilder({ id }) {
   const [state, setState] = useState({ loading: true, error: null, packet: null })
   const [busy, setBusy] = useState(null) // artifactId currently generating
   const [open, setOpen] = useState(null) // artifactId whose content is expanded
+  const [video, setVideo] = useState({}) // {artifactId: {status:'processing'|'completed'|'error', url}}
+  const pollers = useRef({})
 
   const load = useCallback(async () => {
     try {
@@ -49,6 +51,38 @@ export default function PacketBuilder({ id }) {
       toast(`Drafted ${TYPE_LABEL[a.type]}`)
     } catch (err) { toast(`Generate failed: ${err.message || err}`) }
     finally { setBusy(null) }
+  }
+
+  // Clone intro-video: submit a HeyGen render, then poll until the MP4 is ready.
+  const pollVideo = useCallback((artifactId) => {
+    clearTimeout(pollers.current[artifactId])
+    const tick = async () => {
+      try {
+        const s = await api.artifactVideoStatus(artifactId)
+        if (s.error) { setVideo((v) => ({ ...v, [artifactId]: { status: 'error', error: s.error } })); return }
+        if (s.status === 'completed' && s.videoUrl) {
+          setVideo((v) => ({ ...v, [artifactId]: { status: 'completed', url: s.videoUrl } }))
+          patchArtifact(artifactId, { docUrl: s.videoUrl })
+          return
+        }
+        if (s.status === 'failed') { setVideo((v) => ({ ...v, [artifactId]: { status: 'error', error: 'render failed' } })); return }
+        setVideo((v) => ({ ...v, [artifactId]: { status: 'processing' } }))
+        pollers.current[artifactId] = setTimeout(tick, 9000)
+      } catch { pollers.current[artifactId] = setTimeout(tick, 9000) }
+    }
+    tick()
+  }, [])
+
+  useEffect(() => () => Object.values(pollers.current).forEach(clearTimeout), [])
+
+  const genVideo = async (a) => {
+    setVideo((v) => ({ ...v, [a.id]: { status: 'processing' } }))
+    try {
+      const res = await api.generateArtifactVideo(a.id)
+      if (res.error) throw new Error(res.error)
+      toast('Rendering clone video — this takes a couple minutes')
+      pollVideo(a.id)
+    } catch (err) { setVideo((v) => ({ ...v, [a.id]: { status: 'error', error: String(err.message || err) } })); toast(`Video failed: ${err.message || err}`) }
   }
 
   const setStatus = async (a, status) => {
@@ -121,10 +155,30 @@ export default function PacketBuilder({ id }) {
                 </div>
               )}
 
+              {/* Clone intro-video */}
+              {a.type === 'video' && (() => {
+                const v = video[a.id] || {}
+                const url = v.url || a.docUrl
+                if (url) return (
+                  <video controls src={url} style={{ width: '100%', borderRadius: 8, background: '#000', maxHeight: 240 }} />
+                )
+                if (v.status === 'processing') return (
+                  <div className="px-box" style={{ padding: 12, textAlign: 'center', fontSize: 12, color: 'var(--proto-ink2)', background: 'var(--proto-panel)' }}>
+                    🎬 Rendering your clone video… (a couple minutes — you can keep working)
+                  </div>
+                )
+                return (
+                  <button className="px-btn px-btn-accent" disabled={!a.content} title={a.content ? '' : 'Generate the script first'}
+                    onClick={() => genVideo(a)} style={{ alignSelf: 'flex-start' }}>
+                    🎥 Generate clone video
+                  </button>
+                )
+              })()}
+
               <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 'auto' }}>
                 {a.status === 'todo' && (
                   <button className="px-btn px-btn-accent" disabled={busy === a.id} onClick={() => generate(a)}>
-                    {busy === a.id ? 'Generating…' : 'Generate draft'}
+                    {busy === a.id ? 'Generating…' : (a.type === 'video' ? 'Generate script' : 'Generate draft')}
                   </button>
                 )}
                 {(a.status === 'review' || a.status === 'changes') && (
