@@ -250,14 +250,33 @@ export async function outreachSend(req: HttpRequest, context: InvocationContext)
 // Timer: fire due cadence touches. Every scheduled message whose scheduled_for
 // has passed flips to 'due' so it surfaces in the queue for review + send.
 // (We promote to 'due', not auto-send, so nothing goes out without a human.)
+async function promoteDue(client: any): Promise<number> {
+  const r = await client.query(`update outreach_message set state = 'due' where state = 'scheduled' and scheduled_for is not null and scheduled_for <= now() returning id`)
+  return r.rowCount || 0
+}
+
 export async function outreachTick(myTimer: Timer, context: InvocationContext): Promise<void> {
   let client
   try {
     client = await getPgClient()
     await ensureOutreachCols(client)
-    const r = await client.query(`update outreach_message set state = 'due' where state = 'scheduled' and scheduled_for is not null and scheduled_for <= now() returning id`)
-    if (r.rowCount) context.log(`outreachTick: promoted ${r.rowCount} scheduled → due`)
+    const n = await promoteDue(client)
+    if (n) context.log(`outreachTick: promoted ${n} scheduled → due`)
   } catch (e) { context.log(`outreachTick error: ${e}`) } finally { try { await client?.end() } catch {} }
+}
+
+// POST /api/app/outreach/tick — run the scheduler on demand (same as the hourly
+// timer). Returns how many scheduled touches became due. For verification + a
+// manual "process now" control.
+export async function outreachTickNow(req: HttpRequest, context: InvocationContext): Promise<HttpResponseInit> {
+  if (req.method === 'OPTIONS') return { status: 204, headers: HEADERS }
+  let client
+  try {
+    client = await getPgClient()
+    await ensureOutreachCols(client)
+    const promoted = await promoteDue(client)
+    return { status: 200, headers: HEADERS, jsonBody: { ok: true, promoted } }
+  } catch (err) { return { status: 200, headers: HEADERS, jsonBody: { error: String(err) } } } finally { try { await client?.end() } catch {} }
 }
 
 app.http('outreachList', { methods: ['GET', 'OPTIONS'], authLevel: 'anonymous', route: 'app/opportunity/{id}/outreach', handler: outreachList })
@@ -265,5 +284,6 @@ app.http('outreachGenerate', { methods: ['POST', 'OPTIONS'], authLevel: 'anonymo
 app.http('cadenceSeed', { methods: ['POST', 'OPTIONS'], authLevel: 'anonymous', route: 'app/opportunity/{id}/cadence', handler: cadenceSeed })
 app.http('outreachState', { methods: ['POST', 'OPTIONS'], authLevel: 'anonymous', route: 'app/outreach/{messageId}/state', handler: outreachState })
 app.http('outreachSend', { methods: ['POST', 'OPTIONS'], authLevel: 'anonymous', route: 'app/outreach/{messageId}/send', handler: outreachSend })
+app.http('outreachTickNow', { methods: ['POST', 'OPTIONS'], authLevel: 'anonymous', route: 'app/outreach/tick', handler: outreachTickNow })
 app.timer('outreachTick', { schedule: '0 0 */1 * * *', handler: outreachTick })
 app.http('outreachQueue', { methods: ['GET', 'OPTIONS'], authLevel: 'anonymous', route: 'app/outreach', handler: outreachQueue })
