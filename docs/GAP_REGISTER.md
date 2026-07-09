@@ -80,18 +80,23 @@ until that diff is done.
   **Settings ▸ Intake** (`mail_watch_config`) + self-test. Verified on a real
   LinkedIn alert (HDR, AARC ingested).
 
-### G5 — Real outbound send  ·  status: OPEN
-- MT-07/08 proved Graph send in isolation. The app's outreach **"Send"** flips
-  message state; it does not actually send via Graph/Gmail. LinkedIn has no send
-  API (copy-paste by design).
+### G5 — Real outbound send  ·  status: CLOSED
+- `POST /app/outreach/{id}/send` sends email channels (coldEmail/followUp) via
+  Graph `sendMail` from `OUTREACH_SENDER` (von.ellis), parsing the `Subject:`
+  line and storing `to_email`/`subject`. LinkedIn/call channels return a
+  copy-paste result (no API). Verified: real email delivered von.ellis→von.ellis.
 
-### G6 — Real Google Docs/Slides artifacts  ·  status: OPEN
-- MT-04–06 proved Docs/Slides generation. The packet builder stores generated
-  **text**, not actual Docs/Slides files.
+### G6 — Real Google Docs/Slides artifacts  ·  status: CLOSED (Docs)
+- `POST /app/artifact/{id}/document` creates a real, shareable Google Doc from
+  the generated text (Drive create → Docs insert → anyone-reader), stored on
+  `doc_url`, filed in an "Executive Engine Packets" folder. Verified live.
+  (Slides deck for the portfolio artifact is a possible follow-up; text
+  artifacts are Docs.)
 
-### G7 — Scheduler / cron  ·  status: OPEN
-- Cadence stores `scheduled_for` / `day_offset`; nothing fires due touches.
-  MT-38 computes "due" but no timer executes them.
+### G7 — Scheduler / cron  ·  status: CLOSED
+- Timer `outreachTick` (hourly) promotes `scheduled → due` when `scheduled_for`
+  passes (promote-to-due, not auto-send — a human still reviews). Manual trigger
+  `POST /app/outreach/tick` for verification / process-now. Verified live.
 
 ### G8 — Auth / multi-tenancy  ·  status: OPEN
 - `owner_email` exists but there is no login. "Fresh start by email" is a
@@ -105,8 +110,9 @@ until that diff is done.
   usage to `usage_metering`.
 
 ## Priority (owner-directed)
-- **Closed:** G1 HeyGen, G2 ElevenLabs, G4 live inbox watcher.
-- **Remaining — "make it real" wiring hardening:** G6 real Docs/Slides artifacts,
-  G5 real outbound send, G7 scheduler/cron (fires due touches — pairs with G5),
-  G10 cost metering in-app, G9 Whisper transcription, G8 auth/multi-tenancy.
-- **Deferred (owner):** G3 ATS ingestion + apply; G2's 1:1 chat call button.
+- **Closed:** G1 HeyGen, G2 ElevenLabs, G4 live inbox watcher, G6 real Docs,
+  G5 real outbound send, G7 scheduler/cron.
+- **Remaining — "make it real" wiring hardening:** G10 cost metering in-app,
+  G9 Whisper transcription, G8 auth/multi-tenancy.
+- **Deferred (owner):** G3 ATS ingestion + apply; G2's 1:1 chat call button;
+  G6 Slides deck for the portfolio artifact.
