@@ -92,7 +92,7 @@ export default function OppDetail({ id, tab = 'overview' }) {
       </div>
 
       {tab === 'overview' && <Overview o={o} toast={toast} />}
-      {tab === 'contacts' && <Contacts contacts={o.contacts || []} toast={toast} />}
+      {tab === 'contacts' && <Contacts contacts={o.contacts || []} oppId={o.id} toast={toast} />}
       {tab === 'outreach' && <Outreach o={o} />}
     </div>
   )
@@ -203,7 +203,7 @@ function StatusRow({ k, v }) {
   )
 }
 
-function Contacts({ contacts, toast }) {
+function Contacts({ contacts, oppId, toast }) {
   if (!contacts.length) return <div className="px-box" style={{ padding: 20, textAlign: 'center', color: 'var(--proto-ink2)' }}>No contacts enriched for this opportunity yet.</div>
   return (
     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 14 }}>
@@ -215,7 +215,7 @@ function Contacts({ contacts, toast }) {
             {p.signal && <div className="px-small" style={{ marginTop: 6 }}>⚡ {p.signal}</div>}
             <div style={{ display: 'flex', gap: 6, marginTop: 10 }}>
               <button className="px-btn" style={{ fontSize: 12 }} onClick={() => toast('Opening LinkedIn…')}>Open LinkedIn</button>
-              <button className="px-btn px-btn-dark" style={{ fontSize: 12 }} onClick={() => toast('Outreach composer is a later slice.')}>Draft outreach</button>
+              <button className="px-btn px-btn-dark" style={{ fontSize: 12 }} onClick={() => go(`/compose/${oppId}`)}>Draft outreach</button>
             </div>
           </div>
           {p.match != null && <Pill tone="accent">{p.match}</Pill>}
@@ -225,31 +225,53 @@ function Contacts({ contacts, toast }) {
   )
 }
 
-// Representative cadence timeline (structure ported from the handoff; live cadence
-// data lands with the Outreach slice).
+// Live cadence timeline — reads persisted outreach_message rows; can seed the
+// standard 7-touch cadence on demand.
 function Outreach({ o }) {
-  const rows = [
-    { d: 0, task: 'Apply + send recruiter outreach', state: 'sent' },
-    { d: 1, task: 'View LinkedIn + connect', state: 'sent' },
-    { d: 3, task: 'First follow-up (recruiter)', state: 'sent' },
-    { d: 5, task: 'Hiring manager outreach', state: 'due' },
-    { d: 8, task: 'Value-add / portfolio link', state: 'scheduled' },
-    { d: 10, task: 'Second recruiter follow-up', state: 'scheduled' },
-    { d: 14, task: 'Pause, recycle, or archive', state: 'pending' },
-  ]
-  const tone = { sent: 'green', due: 'red', scheduled: 'accent', pending: 'panel' }
+  const { toast } = useApp()
+  const [state, setState] = useState({ loading: true, messages: [] })
+  const [busy, setBusy] = useState(false)
+
+  const load = useCallback(async () => {
+    const res = await api.listOutreach(o.id)
+    setState({ loading: false, messages: res.error ? [] : (res.messages || []) })
+  }, [o.id])
+  useEffect(() => { load() }, [load])
+
+  const seed = async () => {
+    setBusy(true)
+    const res = await api.seedCadence(o.id)
+    setBusy(false)
+    if (res.error) { toast(`Failed: ${res.error}`); return }
+    setState({ loading: false, messages: res.messages || [] })
+    toast(res.seeded ? 'Cadence started' : 'Cadence already running')
+  }
+
+  const tone = { sent: 'green', due: 'red', scheduled: 'accent', draft: 'yellow' }
+  const cadence = state.messages.filter((m) => m.dayOffset != null)
+
   return (
-    <div>
-      <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--proto-ink2)', marginBottom: 8 }}>Cadence timeline <span className="px-small" style={{ fontWeight: 400 }}>representative · live cadence lands with the Outreach slice</span></div>
-      <div className="px-box" style={{ padding: 14, display: 'flex', flexDirection: 'column', gap: 4 }}>
-        {rows.map((c, i) => (
-          <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '8px 0', borderBottom: i < rows.length - 1 ? '1px solid var(--proto-rule-soft)' : 'none' }}>
-            <div className="px-small" style={{ width: 52, flexShrink: 0 }}>Day {c.d}</div>
-            <div style={{ flex: 1, fontSize: 13 }}>{c.task}</div>
-            <Pill tone={tone[c.state]}>{c.state}</Pill>
-          </div>
-        ))}
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--proto-ink2)', flex: 1 }}>Cadence timeline</div>
+        <button className="px-btn" onClick={() => go(`/compose/${o.id}`)}>Compose →</button>
+        {cadence.length === 0 && <button className="px-btn px-btn-accent" disabled={busy} onClick={seed}>{busy ? 'Starting…' : 'Start cadence'}</button>}
       </div>
+      {state.loading ? (
+        <div className="px-box" style={{ padding: 20, textAlign: 'center', color: 'var(--proto-ink2)' }}>Loading cadence…</div>
+      ) : cadence.length === 0 ? (
+        <div className="px-box" style={{ padding: 20, textAlign: 'center', color: 'var(--proto-ink2)', fontSize: 13 }}>No cadence yet. Start the standard 7-touch sequence, or compose a one-off message.</div>
+      ) : (
+        <div className="px-box" style={{ padding: 14, display: 'flex', flexDirection: 'column', gap: 4 }}>
+          {cadence.map((c, i) => (
+            <div key={c.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '8px 0', borderBottom: i < cadence.length - 1 ? '1px solid var(--proto-rule-soft)' : 'none' }}>
+              <div className="px-small" style={{ width: 52, flexShrink: 0 }}>Day {c.dayOffset}</div>
+              <div style={{ flex: 1, fontSize: 13 }}>{c.channelLabel}</div>
+              <Pill tone={tone[c.state] || 'accent'}>{c.state}</Pill>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   )
 }

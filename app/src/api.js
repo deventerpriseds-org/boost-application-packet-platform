@@ -35,6 +35,12 @@ export const api = {
   getPacket: (oppId) => get(`/app/opportunity/${oppId}/packet`),
   generateArtifact: (artifactId) => post(`/app/artifact/${artifactId}/generate`, {}),
   setArtifactStatus: (artifactId, status) => post(`/app/artifact/${artifactId}/status`, { status }),
+  // Outreach
+  listOutreach: (oppId) => get(`/app/opportunity/${oppId}/outreach`),
+  generateOutreach: (oppId, { channel, tone, contactId } = {}) => post(`/app/opportunity/${oppId}/outreach/generate`, { channel, tone, contactId }),
+  seedCadence: (oppId) => post(`/app/opportunity/${oppId}/cadence`, {}),
+  setOutreachState: (messageId, state) => post(`/app/outreach/${messageId}/state`, { state }),
+  outreachQueue: ({ owner } = {}) => get(`/app/outreach${owner ? `?owner=${encodeURIComponent(owner)}` : ''}`),
 }
 
 export { API_BASE }

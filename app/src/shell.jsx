@@ -7,6 +7,7 @@ const NAV = [
   { path: '/opportunities', label: 'Opps', icon: '◇' },
   { path: '/pipeline', label: 'Pipeline', icon: '▤' },
   { path: '/packets', label: 'Packets', icon: '▦' },
+  { path: '/outreach', label: 'Outreach', icon: '✉' },
 ]
 
 // Shared primitives (ported from the handoff shell.jsx)
