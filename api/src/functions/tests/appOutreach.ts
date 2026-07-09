@@ -1,5 +1,29 @@
-import { app, HttpRequest, HttpResponseInit, InvocationContext } from '@azure/functions'
+import { app, HttpRequest, HttpResponseInit, InvocationContext, Timer } from '@azure/functions'
 import { getPgClient } from './pgClient'
+import { getMicrosoftToken } from './googleAuth'
+
+// Email channels can actually be sent via Graph; LinkedIn/call channels have no
+// send API and are copy-paste by design.
+const EMAIL_CHANNELS = new Set(['coldEmail', 'followUp'])
+const OUTREACH_SENDER = () => process.env.OUTREACH_SENDER || process.env.MAIL_SENDER || 'von.ellis@enterpriseds.io'
+
+function graphCreds() {
+  const tenantId = process.env.MICROSOFT_TENANT_ID || 'ee633423-c321-413c-a191-ace8b07e4196'
+  return { tenantId, clientId: process.env.MICROSOFT_CLIENT_ID, clientSecret: process.env.MICROSOFT_CLIENT_SECRET }
+}
+
+// Add recipient/subject columns (idempotent; safe every call).
+async function ensureOutreachCols(client: any) {
+  await client.query(`alter table outreach_message add column if not exists to_email text`)
+  await client.query(`alter table outreach_message add column if not exists subject text`)
+}
+
+// Pull a "Subject: ..." line out of a generated email body, if present.
+function splitSubject(body: string): { subject: string | null; rest: string } {
+  const m = (body || '').match(/^\s*subject:\s*(.+?)\s*(?:\n|$)/i)
+  if (m) return { subject: m[1].trim(), rest: body.slice(m[0].length).replace(/^\s+/, '') }
+  return { subject: null, rest: body }
+}
 
 const HEADERS = {
   'Content-Type': 'application/json',
@@ -27,6 +51,7 @@ function msgShape(m: any) {
     channelLabel: CHANNELS[m.channel]?.label || m.channel, limit: CHANNELS[m.channel]?.limit,
     tone: m.tone, body: m.body, state: m.state, dayOffset: m.day_offset,
     scheduledFor: m.scheduled_for, sentAt: m.sent_at, createdAt: m.created_at,
+    toEmail: m.to_email, subject: m.subject, sendable: EMAIL_CHANNELS.has(m.channel),
   }
 }
 
@@ -166,8 +191,79 @@ export async function outreachQueue(req: HttpRequest, context: InvocationContext
   } finally { try { await client?.end() } catch {} }
 }
 
+// POST /api/app/outreach/{messageId}/send { to?, subject? } — actually send.
+// Email channels go out via Graph sendMail (from OUTREACH_SENDER); LinkedIn/call
+// channels have no API, so we return a copy-paste result and leave state as-is.
+export async function outreachSend(req: HttpRequest, context: InvocationContext): Promise<HttpResponseInit> {
+  if (req.method === 'OPTIONS') return { status: 204, headers: HEADERS }
+  const messageId = req.params.messageId
+  let client
+  try {
+    const body = (await req.json().catch(() => ({}))) as any
+    client = await getPgClient()
+    await ensureOutreachCols(client)
+    const m = (await client.query(
+      `select m.*, o.company, o.role from outreach_message m join opportunity o on o.id = m.opp_id where m.id = $1`, [messageId]
+    )).rows[0]
+    if (!m) return { status: 404, headers: HEADERS, jsonBody: { error: 'message not found' } }
+
+    // LinkedIn / call channels: no send API — copy-paste by design.
+    if (!EMAIL_CHANNELS.has(m.channel)) {
+      return { status: 200, headers: HEADERS, jsonBody: { ok: true, delivered: false, copyPaste: true, channel: m.channel, note: `${CHANNELS[m.channel]?.label || m.channel} has no send API — copy the text and send it manually, then mark it sent.` } }
+    }
+
+    const to = (body?.to || '').trim()
+    if (!to || !/.+@.+\..+/.test(to)) return { status: 400, headers: HEADERS, jsonBody: { error: 'a valid recipient email (to) is required to send' } }
+    const creds = graphCreds()
+    if (!creds.clientId || !creds.clientSecret) return { status: 200, headers: HEADERS, jsonBody: { error: 'MICROSOFT creds not set' } }
+
+    const { subject: parsedSubj, rest } = splitSubject(m.body || '')
+    const subject = (body?.subject || parsedSubj || `Regarding ${m.role} at ${m.company}`).slice(0, 255)
+    const sender = OUTREACH_SENDER()
+    const token = await getMicrosoftToken(creds.tenantId, creds.clientId, creds.clientSecret)
+    const res = await fetch(`https://graph.microsoft.com/v1.0/users/${sender}/sendMail`, {
+      method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        message: {
+          subject,
+          body: { contentType: 'Text', content: rest || m.body || '' },
+          from: { emailAddress: { address: sender } },
+          toRecipients: [{ emailAddress: { address: to } }],
+        },
+        saveToSentItems: true,
+      })
+    })
+    if (!res.ok) {
+      const detail = `sendMail HTTP ${res.status}: ${(await res.text()).slice(0, 400)}`
+      return { status: 200, headers: HEADERS, jsonBody: { ok: false, delivered: false, detail, hint: res.status === 403 ? `App needs Mail.Send (Application) for ${sender}.` : undefined } }
+    }
+    const updated = (await client.query(
+      `update outreach_message set state = 'sent', sent_at = now(), to_email = $1, subject = $2 where id = $3 returning *`,
+      [to, subject, messageId]
+    )).rows[0]
+    return { status: 200, headers: HEADERS, jsonBody: { ok: true, delivered: true, from: sender, to, subject, message: msgShape(updated) } }
+  } catch (err) {
+    return { status: 200, headers: HEADERS, jsonBody: { error: String(err) } }
+  } finally { try { await client?.end() } catch {} }
+}
+
+// Timer: fire due cadence touches. Every scheduled message whose scheduled_for
+// has passed flips to 'due' so it surfaces in the queue for review + send.
+// (We promote to 'due', not auto-send, so nothing goes out without a human.)
+export async function outreachTick(myTimer: Timer, context: InvocationContext): Promise<void> {
+  let client
+  try {
+    client = await getPgClient()
+    await ensureOutreachCols(client)
+    const r = await client.query(`update outreach_message set state = 'due' where state = 'scheduled' and scheduled_for is not null and scheduled_for <= now() returning id`)
+    if (r.rowCount) context.log(`outreachTick: promoted ${r.rowCount} scheduled → due`)
+  } catch (e) { context.log(`outreachTick error: ${e}`) } finally { try { await client?.end() } catch {} }
+}
+
 app.http('outreachList', { methods: ['GET', 'OPTIONS'], authLevel: 'anonymous', route: 'app/opportunity/{id}/outreach', handler: outreachList })
 app.http('outreachGenerate', { methods: ['POST', 'OPTIONS'], authLevel: 'anonymous', route: 'app/opportunity/{id}/outreach/generate', handler: outreachGenerate })
 app.http('cadenceSeed', { methods: ['POST', 'OPTIONS'], authLevel: 'anonymous', route: 'app/opportunity/{id}/cadence', handler: cadenceSeed })
 app.http('outreachState', { methods: ['POST', 'OPTIONS'], authLevel: 'anonymous', route: 'app/outreach/{messageId}/state', handler: outreachState })
+app.http('outreachSend', { methods: ['POST', 'OPTIONS'], authLevel: 'anonymous', route: 'app/outreach/{messageId}/send', handler: outreachSend })
+app.timer('outreachTick', { schedule: '0 0 */1 * * *', handler: outreachTick })
 app.http('outreachQueue', { methods: ['GET', 'OPTIONS'], authLevel: 'anonymous', route: 'app/outreach', handler: outreachQueue })

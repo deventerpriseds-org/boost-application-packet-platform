@@ -44,6 +44,7 @@ export const api = {
   generateOutreach: (oppId, { channel, tone, contactId } = {}) => post(`/app/opportunity/${oppId}/outreach/generate`, { channel, tone, contactId }),
   seedCadence: (oppId) => post(`/app/opportunity/${oppId}/cadence`, {}),
   setOutreachState: (messageId, state) => post(`/app/outreach/${messageId}/state`, { state }),
+  sendOutreach: (messageId, { to, subject } = {}) => post(`/app/outreach/${messageId}/send`, { to, subject }),
   outreachQueue: ({ owner } = {}) => get(`/app/outreach${owner ? `?owner=${encodeURIComponent(owner)}` : ''}`),
   // Convert: interview + offer
   listInterviews: (oppId) => get(`/app/opportunity/${oppId}/interviews`),

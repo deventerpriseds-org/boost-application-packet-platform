@@ -19,6 +19,8 @@ export default function Composer({ id }) {
   const [body, setBody] = useState('')
   const [busy, setBusy] = useState(false)
   const [messageId, setMessageId] = useState(null)
+  const [toEmail, setToEmail] = useState('')
+  const [sending, setSending] = useState(false)
 
   const load = useCallback(async () => {
     try {
@@ -45,10 +47,26 @@ export default function Composer({ id }) {
     finally { setBusy(false) }
   }
 
+  const isEmail = channel === 'coldEmail' || channel === 'followUp'
+
+  // Email channels really send via Graph; LinkedIn/call channels are copy-paste.
   const send = async () => {
     if (!messageId) { toast('Generate a draft first.'); return }
-    const res = await api.setOutreachState(messageId, 'sent')
-    if (res.error) toast(`Failed: ${res.error}`); else toast('Marked as sent ✓')
+    if (!isEmail) {
+      copy()
+      const res = await api.setOutreachState(messageId, 'sent')
+      if (res.error) toast(`Failed: ${res.error}`); else toast('Copied — paste it in, then it’s marked sent ✓')
+      return
+    }
+    if (!/.+@.+\..+/.test(toEmail.trim())) { toast('Enter a recipient email to send.'); return }
+    setSending(true)
+    try {
+      const res = await api.sendOutreach(messageId, { to: toEmail.trim() })
+      if (res.error) { toast(`Failed: ${res.error}`); return }
+      if (res.delivered) toast(`Sent to ${res.to} ✓`)
+      else toast(res.detail || res.note || 'Not sent')
+    } catch (err) { toast(`Send failed: ${err.message || err}`) }
+    finally { setSending(false) }
   }
   const copy = () => { try { navigator.clipboard?.writeText(body) } catch {} toast('Copied to clipboard') }
 
@@ -102,11 +120,22 @@ export default function Composer({ id }) {
               style={{ minHeight: 260, border: 'none', outline: 'none', background: 'var(--proto-paper)', color: 'var(--proto-ink)', fontFamily: 'Inter, system-ui, sans-serif', fontSize: 14, padding: 12, resize: 'vertical', lineHeight: 1.55 }} />
           </div>
 
+          {isEmail && (
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+              <span className="px-small" style={{ textTransform: 'uppercase', letterSpacing: 1 }}>Send to</span>
+              <input className="px-btn" style={{ flex: 1, minWidth: 200, fontFamily: 'inherit' }} type="email"
+                value={toEmail} onChange={(e) => setToEmail(e.target.value)} placeholder="recipient@company.com" />
+            </div>
+          )}
           <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
             <button className="px-btn px-btn-accent" disabled={busy} onClick={() => generate()}>{busy ? 'Generating…' : (messageId ? '↻ Regenerate' : 'Generate draft')}</button>
             <button className="px-btn" onClick={copy}>⧉ Copy</button>
             <div style={{ flex: 1 }} />
-            <button className="px-btn px-btn-green" onClick={send}>Send / queue</button>
+            {isEmail ? (
+              <button className="px-btn px-btn-green" disabled={sending || !messageId} onClick={send}>{sending ? 'Sending…' : '✉ Send email'}</button>
+            ) : (
+              <button className="px-btn px-btn-green" disabled={!messageId} onClick={send} title="LinkedIn has no send API — copies the text and marks it sent">⧉ Copy & mark sent</button>
+            )}
           </div>
         </div>
 
