@@ -4,7 +4,7 @@ import { getPgClient } from './pgClient'
 
 const HEADERS = { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
 
-const MAILBOX = () => process.env.MAIL_WATCH_MAILBOX || 'dev@enterpriseds.io'
+const MAILBOX = () => process.env.MAIL_WATCH_MAILBOX || 'von.ellis@enterpriseds.io'
 const OWNER = () => process.env.MAIL_OWNER_EMAIL || 'demo@executive-engine.local'
 const CLIENT_STATE = () => process.env.MAIL_CLIENT_STATE || 'ee-linkedin-watch'
 const NOTIFY_URL = () => process.env.MAIL_NOTIFY_URL || 'https://job-platform-api.azurewebsites.net/api/mail/notify'
