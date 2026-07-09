@@ -53,6 +53,7 @@ function TopBar({ title }) {
       <select className="px-btn" value={personaKey} onChange={(e) => setPersonaKey(e.target.value)} style={{ fontSize: 12, minWidth: 0, maxWidth: 150, textOverflow: 'ellipsis' }}>
         {Object.values(PERSONAS).map((p) => <option key={p.key} value={p.key}>{p.role} · {p.name}</option>)}
       </select>
+      <button className="px-btn" onClick={() => go('/settings')} title="Settings">⚙</button>
       <button className="px-btn" onClick={() => setDark(!dark)} title="Toggle theme">{dark ? '☾' : '☀'}</button>
     </div>
   )

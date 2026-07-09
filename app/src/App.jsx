@@ -17,8 +17,9 @@ import Answers from './screens/Answers.jsx'
 import Call from './screens/Call.jsx'
 import Library from './screens/Library.jsx'
 import Intake from './screens/Intake.jsx'
+import Settings from './screens/Settings.jsx'
 
-const TITLES = { today: 'Today', intake: 'Intake', opportunities: 'Opportunities', pipeline: 'Pipeline', swipe: 'Swipe', opp: 'Opportunity', packets: 'Packets', packet: 'Packet', outreach: 'Outreach', compose: 'Composer', interview: 'Interview', offer: 'Offer', answers: 'App answers', call: 'Voice coach', library: 'Library' }
+const TITLES = { today: 'Today', intake: 'Intake', settings: 'Settings', opportunities: 'Opportunities', pipeline: 'Pipeline', swipe: 'Swipe', opp: 'Opportunity', packets: 'Packets', packet: 'Packet', outreach: 'Outreach', compose: 'Composer', interview: 'Interview', offer: 'Offer', answers: 'App answers', call: 'Voice coach', library: 'Library' }
 
 function Router() {
   const { personaKey, toast } = useApp()
@@ -30,6 +31,7 @@ function Router() {
 
   let screen
   if (route === 'intake') screen = <Intake />
+  else if (route === 'settings') screen = <Settings tab={parts[1] || 'intake'} />
   else if (route === 'opportunities') screen = <Opportunities opps={opps} />
   else if (route === 'pipeline') screen = <Pipeline opps={opps} />
   else if (route === 'swipe') screen = <Swipe opps={opps} />
