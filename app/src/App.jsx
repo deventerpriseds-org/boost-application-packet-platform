@@ -16,8 +16,9 @@ import Offer from './screens/Offer.jsx'
 import Answers from './screens/Answers.jsx'
 import Call from './screens/Call.jsx'
 import Library from './screens/Library.jsx'
+import Intake from './screens/Intake.jsx'
 
-const TITLES = { today: 'Today', opportunities: 'Opportunities', pipeline: 'Pipeline', swipe: 'Swipe', opp: 'Opportunity', packets: 'Packets', packet: 'Packet', outreach: 'Outreach', compose: 'Composer', interview: 'Interview', offer: 'Offer', answers: 'App answers', call: 'Voice coach', library: 'Library' }
+const TITLES = { today: 'Today', intake: 'Intake', opportunities: 'Opportunities', pipeline: 'Pipeline', swipe: 'Swipe', opp: 'Opportunity', packets: 'Packets', packet: 'Packet', outreach: 'Outreach', compose: 'Composer', interview: 'Interview', offer: 'Offer', answers: 'App answers', call: 'Voice coach', library: 'Library' }
 
 function Router() {
   const { personaKey, toast } = useApp()
@@ -28,7 +29,8 @@ function Router() {
   const opps = useOpportunities(personaKey, { onNew: (o) => toast(`New opportunity · ${o.company} — ${o.role}`) })
 
   let screen
-  if (route === 'opportunities') screen = <Opportunities opps={opps} />
+  if (route === 'intake') screen = <Intake />
+  else if (route === 'opportunities') screen = <Opportunities opps={opps} />
   else if (route === 'pipeline') screen = <Pipeline opps={opps} />
   else if (route === 'swipe') screen = <Swipe opps={opps} />
   else if (route === 'packets') screen = <Packets />

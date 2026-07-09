@@ -54,6 +54,14 @@ export const api = {
   answersVision: (oppId, imageBase64) => post(`/app/opportunity/${oppId}/answers/vision`, { imageBase64 }),
   // Voice call (ElevenLabs Conversational AI) — signed WebSocket URL
   voiceSession: () => get(`/app/voice/session`),
+  // Intake watcher (mail subscription + config + self-test + on-demand pull)
+  mailSubscriptions: () => get(`/mail/subscriptions`),
+  mailSubscribe: () => post(`/mail/subscribe`, {}),
+  mailPollNow: (minutes = 120) => post(`/mail/poll-now`, { minutes }),
+  mailConfigGet: () => get(`/mail/config`),
+  mailConfigSet: (patch) => post(`/mail/config`, patch),
+  mailFolders: (mailbox) => get(`/mail/folders${mailbox ? `?mailbox=${encodeURIComponent(mailbox)}` : ''}`),
+  mailSelfTest: () => post(`/mail/self-test`, {}),
   // Library
   listAssets: () => get(`/app/assets`),
   listPersonas: () => get(`/app/personas`),
