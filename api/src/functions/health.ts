@@ -113,6 +113,8 @@ export async function configStatus(
       google: has(process.env.GOOGLE_SERVICE_ACCOUNT_JSON),
       openai: has(process.env.OPENAI_API_KEY),
       heygen: has(process.env.HEYGEN_API_KEY),
+      elevenlabs: has(process.env.ELEVENLABS_API_KEY),
+      elevenlabsVoice: has(process.env.ELEVENLABS_DEFAULT_VOICE_ID),
       azure: has(process.env.AZURE_STORAGE_CONNECTION_STRING),
       // Google OAuth-user connection: true once a refresh token is stored, i.e.
       // dev@enterpriseds.io has consented and file copies run as that account.

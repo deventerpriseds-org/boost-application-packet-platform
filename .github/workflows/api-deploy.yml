@@ -59,6 +59,9 @@ jobs:
               "AZURE_PG_DATABASE=boost_resume_n_packet_builder" \
               "AZURE_PG_USER=Admin_eds" \
               "AZURE_PG_PASSWORD=${{ secrets.Azure_admin_pw }}" \
+              "HEYGEN_API_KEY=${{ secrets.HEYGEN_API_KEY }}" \
+              "ELEVENLABS_API_KEY=${{ secrets.ELEVENLABS_API_KEY }}" \
+              "ELEVENLABS_DEFAULT_VOICE_ID=${{ secrets.ELEVENLABS_DEFAULT_VOICE_ID }}" \
               "NODE_ENV=production"
 
       - name: Deploy to Azure Functions
