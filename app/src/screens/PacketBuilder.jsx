@@ -85,6 +85,17 @@ export default function PacketBuilder({ id }) {
     } catch (err) { setVideo((v) => ({ ...v, [a.id]: { status: 'error', error: String(err.message || err) } })); toast(`Video failed: ${err.message || err}`) }
   }
 
+  const archiveVideo = async (a) => {
+    setVideo((v) => ({ ...v, [a.id]: { ...v[a.id], archiving: true } }))
+    try {
+      const res = await api.archiveArtifactVideo(a.id)
+      if (res.error) throw new Error(res.error)
+      setVideo((v) => ({ ...v, [a.id]: { ...v[a.id], archiving: false, driveUrl: res.driveUrl } }))
+      patchArtifact(a.id, { driveUrl: res.driveUrl })
+      toast('Saved to Google Drive')
+    } catch (err) { setVideo((v) => ({ ...v, [a.id]: { ...v[a.id], archiving: false } })); toast(`Archive failed: ${err.message || err}`) }
+  }
+
   const setStatus = async (a, status) => {
     const prev = a.status
     patchArtifact(a.id, { status })
@@ -159,8 +170,18 @@ export default function PacketBuilder({ id }) {
               {a.type === 'video' && (() => {
                 const v = video[a.id] || {}
                 const url = v.url || a.docUrl
+                const driveUrl = v.driveUrl || a.driveUrl
                 if (url) return (
-                  <video controls src={url} style={{ width: '100%', borderRadius: 8, background: '#000', maxHeight: 240 }} />
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    <video controls src={url} style={{ width: '100%', borderRadius: 8, background: '#000', maxHeight: 240 }} />
+                    {driveUrl ? (
+                      <a href={driveUrl} target="_blank" rel="noreferrer" className="px-link" style={{ fontSize: 12 }}>✓ Saved to Google Drive ↗</a>
+                    ) : (
+                      <button className="px-btn" style={{ fontSize: 12, alignSelf: 'flex-start' }} disabled={v.archiving} onClick={() => archiveVideo(a)}>
+                        {v.archiving ? 'Saving to Drive…' : '⬇ Save to Drive (permanent copy)'}
+                      </button>
+                    )}
+                  </div>
                 )
                 if (v.status === 'processing') return (
                   <div className="px-box" style={{ padding: 12, textAlign: 'center', fontSize: 12, color: 'var(--proto-ink2)', background: 'var(--proto-panel)' }}>

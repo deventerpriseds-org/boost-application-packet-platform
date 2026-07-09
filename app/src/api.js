@@ -37,6 +37,7 @@ export const api = {
   setArtifactStatus: (artifactId, status) => post(`/app/artifact/${artifactId}/status`, { status }),
   generateArtifactVideo: (artifactId) => post(`/app/artifact/${artifactId}/video`, {}),
   artifactVideoStatus: (artifactId) => get(`/app/artifact/${artifactId}/video/status`),
+  archiveArtifactVideo: (artifactId) => post(`/app/artifact/${artifactId}/archive`, {}),
   // Outreach
   listOutreach: (oppId) => get(`/app/opportunity/${oppId}/outreach`),
   generateOutreach: (oppId, { channel, tone, contactId } = {}) => post(`/app/opportunity/${oppId}/outreach/generate`, { channel, tone, contactId }),

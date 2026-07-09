@@ -16,6 +16,7 @@ const ARTIFACT_STATUSES = ['todo', 'drafting', 'review', 'changes', 'approved']
 // Ensure the artifact table can hold generated text (idempotent; safe on every call).
 async function ensureContentColumn(client: any) {
   await client.query(`alter table artifact add column if not exists content text`)
+  await client.query(`alter table artifact add column if not exists drive_url text`)
 }
 
 // Load (or lazily create) a packet + its 5 artifact rows for an opportunity.
@@ -29,7 +30,7 @@ async function loadPacket(client: any, oppId: string) {
   for (const t of missing) {
     await client.query(`insert into artifact (packet_id, type) values ($1, $2)`, [pkt.id, t])
   }
-  const artifacts = (await client.query(`select id, type, status, template_id, doc_url, content, updated_at from artifact where packet_id = $1`, [pkt.id])).rows
+  const artifacts = (await client.query(`select id, type, status, template_id, doc_url, content, drive_url, updated_at from artifact where packet_id = $1`, [pkt.id])).rows
   // Canonical ordering
   artifacts.sort((a: any, b: any) => ARTIFACT_TYPES.indexOf(a.type) - ARTIFACT_TYPES.indexOf(b.type))
   return { pkt, artifacts }
@@ -50,7 +51,7 @@ function packetShape(pkt: any, artifacts: any[]) {
     id: pkt.id, oppId: pkt.opp_id, status: pkt.status, round: pkt.round,
     jdAnalyzed: pkt.jd_analyzed, coveredKw: pkt.covered_kw || [], atsScore: pkt.ats_score,
     approved: artifacts.filter((a) => a.status === 'approved').length, total: artifacts.length,
-    artifacts: artifacts.map((a) => ({ id: a.id, type: a.type, status: a.status, templateId: a.template_id, docUrl: a.doc_url, content: a.content, updatedAt: a.updated_at }))
+    artifacts: artifacts.map((a) => ({ id: a.id, type: a.type, status: a.status, templateId: a.template_id, docUrl: a.doc_url, driveUrl: a.drive_url, content: a.content, updatedAt: a.updated_at }))
   }
 }
 
