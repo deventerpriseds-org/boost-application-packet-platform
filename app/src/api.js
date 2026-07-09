@@ -49,6 +49,8 @@ export const api = {
   analyzeOffer: (oppId, { theirOffer, floor } = {}) => post(`/app/opportunity/${oppId}/offer`, { theirOffer, floor }),
   // App Answers (vision autofill)
   answersVision: (oppId, imageBase64) => post(`/app/opportunity/${oppId}/answers/vision`, { imageBase64 }),
+  // Voice call (ElevenLabs Conversational AI) — signed WebSocket URL
+  voiceSession: () => get(`/app/voice/session`),
 }
 
 export { API_BASE }
