@@ -122,7 +122,7 @@ function Overview({ o, toast }) {
               <div style={{ fontSize: 16, fontWeight: 700, marginTop: 2 }}>Not started</div>
               <div className="px-small">Keyword-tailored resume, portfolio & intro · approval rounds</div>
             </div>
-            <button className="px-btn px-btn-accent" onClick={() => toast('Packet builder is a later slice — coming soon.')}>Build packet →</button>
+            <button className="px-btn px-btn-accent" onClick={() => go(`/packet/${o.id}`)}>Build packet →</button>
           </div>
         </div>
 

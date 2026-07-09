@@ -7,8 +7,10 @@ import Opportunities from './screens/Opportunities.jsx'
 import Pipeline from './screens/Pipeline.jsx'
 import Swipe from './screens/Swipe.jsx'
 import OppDetail from './screens/OppDetail.jsx'
+import Packets from './screens/Packets.jsx'
+import PacketBuilder from './screens/PacketBuilder.jsx'
 
-const TITLES = { today: 'Today', opportunities: 'Opportunities', pipeline: 'Pipeline', swipe: 'Swipe', opp: 'Opportunity' }
+const TITLES = { today: 'Today', opportunities: 'Opportunities', pipeline: 'Pipeline', swipe: 'Swipe', opp: 'Opportunity', packets: 'Packets', packet: 'Packet' }
 
 function Router() {
   const { personaKey } = useApp()
@@ -21,6 +23,8 @@ function Router() {
   if (route === 'opportunities') screen = <Opportunities opps={opps} />
   else if (route === 'pipeline') screen = <Pipeline opps={opps} />
   else if (route === 'swipe') screen = <Swipe opps={opps} />
+  else if (route === 'packets') screen = <Packets />
+  else if (route === 'packet' && parts[1]) screen = <PacketBuilder id={parts[1]} />
   else if (route === 'opp' && parts[1]) screen = <OppDetail id={parts[1]} tab={parts[2] || 'overview'} />
   else screen = <Today opps={opps} />
 

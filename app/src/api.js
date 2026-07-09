@@ -30,6 +30,11 @@ export const api = {
   getOpportunity: (id) => get(`/app/opportunity/${id}`),
   moveStage: (id, stage) => post(`/app/opportunity/${id}/stage`, { stage }),
   dismiss: (id) => post(`/app/opportunity/${id}/dismiss`, {}),
+  // Packets / artifacts (production line)
+  listPackets: ({ owner } = {}) => get(`/app/packets${owner ? `?owner=${encodeURIComponent(owner)}` : ''}`),
+  getPacket: (oppId) => get(`/app/opportunity/${oppId}/packet`),
+  generateArtifact: (artifactId) => post(`/app/artifact/${artifactId}/generate`, {}),
+  setArtifactStatus: (artifactId, status) => post(`/app/artifact/${artifactId}/status`, { status }),
 }
 
 export { API_BASE }
