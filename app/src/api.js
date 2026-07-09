@@ -54,6 +54,10 @@ export const api = {
   answersVision: (oppId, imageBase64) => post(`/app/opportunity/${oppId}/answers/vision`, { imageBase64 }),
   // Voice call (ElevenLabs Conversational AI) — signed WebSocket URL
   voiceSession: () => get(`/app/voice/session`),
+  // Library
+  listAssets: () => get(`/app/assets`),
+  listPersonas: () => get(`/app/personas`),
+  listLibrary: (kind) => get(`/app/library${kind ? `?kind=${encodeURIComponent(kind)}` : ''}`),
 }
 
 export { API_BASE }

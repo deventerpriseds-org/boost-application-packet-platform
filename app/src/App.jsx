@@ -15,8 +15,9 @@ import Interview from './screens/Interview.jsx'
 import Offer from './screens/Offer.jsx'
 import Answers from './screens/Answers.jsx'
 import Call from './screens/Call.jsx'
+import Library from './screens/Library.jsx'
 
-const TITLES = { today: 'Today', opportunities: 'Opportunities', pipeline: 'Pipeline', swipe: 'Swipe', opp: 'Opportunity', packets: 'Packets', packet: 'Packet', outreach: 'Outreach', compose: 'Composer', interview: 'Interview', offer: 'Offer', answers: 'App answers', call: 'Voice coach' }
+const TITLES = { today: 'Today', opportunities: 'Opportunities', pipeline: 'Pipeline', swipe: 'Swipe', opp: 'Opportunity', packets: 'Packets', packet: 'Packet', outreach: 'Outreach', compose: 'Composer', interview: 'Interview', offer: 'Offer', answers: 'App answers', call: 'Voice coach', library: 'Library' }
 
 function Router() {
   const { personaKey } = useApp()
@@ -37,6 +38,7 @@ function Router() {
   else if (route === 'offer' && parts[1]) screen = <Offer id={parts[1]} />
   else if (route === 'answers' && parts[1]) screen = <Answers id={parts[1]} />
   else if (route === 'call') screen = <Call />
+  else if (route === 'library') screen = <Library tab={parts[1] || 'assets'} />
   else if (route === 'opp' && parts[1]) screen = <OppDetail id={parts[1]} tab={parts[2] || 'overview'} />
   else screen = <Today opps={opps} />
 

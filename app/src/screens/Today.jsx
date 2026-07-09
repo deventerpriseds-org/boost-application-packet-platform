@@ -1,7 +1,23 @@
-import React, { useMemo } from 'react'
+import React, { useMemo, useState, useEffect } from 'react'
 import { useApp, go } from '../state.jsx'
 import { useOpportunities } from '../data.jsx'
+import { api } from '../api.js'
 import { Pill, UrgencyPill, MatchScore, StageBadge } from '../shell.jsx'
+
+// Next-best action per opportunity stage → a real destination in the app.
+function priorityActions(opps) {
+  const first = (pred) => opps.find(pred)
+  const items = []
+  const hot = first((o) => ['final', 'panel', 'offer'].includes(o.stage))
+  const screen = first((o) => o.stage === 'screen' || o.stage === 'r1')
+  const reach = first((o) => o.stage === 'outreach' || o.stage === 'engaged')
+  const stale = first((o) => o.urgency === 'Cool')
+  if (hot) items.push({ id: hot.id, who: hot.company, t: hot.stage === 'offer' ? 'Offer on the table — open negotiation' : `${hot.stage === 'final' ? 'Final round' : 'Panel'} — prep now`, cta: hot.stage === 'offer' ? 'Negotiate' : 'Prep', to: hot.stage === 'offer' ? `/offer/${hot.id}` : `/interview/${hot.id}`, tone: 'red' })
+  if (reach) items.push({ id: reach.id, who: reach.company, t: 'Outreach in flight — send the next touch', cta: 'Compose', to: `/compose/${reach.id}`, tone: 'yellow' })
+  if (screen) items.push({ id: screen.id, who: screen.company, t: 'Recorded screen — debrief it', cta: 'Debrief', to: `/interview/${screen.id}/debrief`, tone: 'accent' })
+  if (stale) items.push({ id: stale.id, who: stale.company, t: 'Going stale — decide next move', cta: 'Review', to: `/opp/${stale.id}`, tone: 'panel' })
+  return items.slice(0, 5)
+}
 
 // Stage groupings for the "Today" hero: what's fresh to triage vs. in-flight.
 const NEW_STAGES = ['discovered', 'saved']
@@ -93,6 +109,21 @@ export default function Today({ opps }) {
     return { fresh, active, hot, avgMatch }
   }, [opportunities])
 
+  const priorities = useMemo(() => priorityActions(opportunities), [opportunities])
+
+  // "This week" — real upcoming outreach touches (due/scheduled) across opps.
+  const [week, setWeek] = useState([])
+  useEffect(() => {
+    let alive = true
+    api.outreachQueue().then((r) => {
+      if (!alive || r.error) return
+      const up = (r.messages || []).filter((m) => m.state === 'due' || m.state === 'scheduled')
+        .sort((a, b) => (a.dayOffset ?? 99) - (b.dayOffset ?? 99)).slice(0, 5)
+      setWeek(up)
+    }).catch(() => {})
+    return () => { alive = false }
+  }, [opportunities])
+
   if (loading) return <Loading />
   if (error) return <ErrorBox error={error} />
 
@@ -118,6 +149,38 @@ export default function Today({ opps }) {
         <Kpi label="Hot" value={hot.length} tone="red" />
         <Kpi label="Avg match" value={`${avgMatch}%`} tone="yellow" />
       </div>
+
+      {/* Do these next — next-best actions */}
+      {priorities.length > 0 && (
+        <Section title="Do these next">
+          {priorities.map((a) => (
+            <div key={a.id + a.cta} className="px-box" onClick={() => go(a.to)} style={{ padding: 12, display: 'flex', alignItems: 'center', gap: 12, cursor: 'pointer' }}>
+              <div style={{ width: 5, alignSelf: 'stretch', borderRadius: 3, background: `var(--proto-${a.tone})` }} />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontWeight: 600, fontSize: 14 }}>{a.who}</div>
+                <div className="px-small">{a.t}</div>
+              </div>
+              <button className="px-btn px-btn-accent" style={{ fontSize: 12 }} onClick={(e) => { e.stopPropagation(); go(a.to) }}>{a.cta}</button>
+            </div>
+          ))}
+        </Section>
+      )}
+
+      {/* This week — real upcoming outreach cadence */}
+      {week.length > 0 && (
+        <Section title="This week">
+          {week.map((m) => (
+            <div key={m.id} className="px-box" onClick={() => go(`/compose/${m.oppId}`)} style={{ padding: 12, display: 'flex', alignItems: 'center', gap: 12, cursor: 'pointer' }}>
+              <div className="px-small" style={{ width: 54, flexShrink: 0 }}>Day {m.dayOffset ?? '—'}</div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontWeight: 600, fontSize: 14 }}>{m.company}</div>
+                <div className="px-small">{m.channelLabel}</div>
+              </div>
+              <Pill tone={m.state === 'due' ? 'red' : 'accent'}>{m.state}</Pill>
+            </div>
+          ))}
+        </Section>
+      )}
 
       {/* Do next */}
       <Section title="Do next — inbox scrub">
