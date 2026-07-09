@@ -1,6 +1,7 @@
 import { app, HttpRequest, HttpResponseInit, InvocationContext, Timer } from '@azure/functions'
 import { getPgClient } from './pgClient'
 import { getMicrosoftToken } from './googleAuth'
+import { logUsage } from './usageMeter'
 
 // Email channels can actually be sent via Graph; LinkedIn/call channels have no
 // send API and are copy-paste by design.
@@ -104,6 +105,7 @@ export async function outreachGenerate(req: HttpRequest, context: InvocationCont
     if (!res.ok) throw new Error(`OpenAI HTTP ${res.status}: ${await res.text()}`)
     const data = await res.json() as any
     let text = (data.choices?.[0]?.message?.content || '').trim()
+    await logUsage(`outreach:${channel}`, 'gpt-4o-mini', data.usage)
     // Enforce the LinkedIn connect hard limit defensively.
     if (text.length > ch.limit) text = text.slice(0, ch.limit)
 

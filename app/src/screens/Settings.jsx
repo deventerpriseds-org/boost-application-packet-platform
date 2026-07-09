@@ -188,7 +188,85 @@ function IntakeSettings() {
   )
 }
 
-const SECTIONS = [{ key: 'intake', label: 'Intake' }]
+const money = (n) => `$${Number(n || 0).toFixed(Number(n) < 1 ? 4 : 2)}`
+
+function UsageSettings() {
+  const [u, setU] = useState({ loading: true, data: null, error: null })
+  const load = useCallback(async () => {
+    setU((s) => ({ ...s, loading: true }))
+    try { const d = await api.usageSummary(); if (d.error) throw new Error(d.error); setU({ loading: false, data: d, error: null }) }
+    catch (e) { setU({ loading: false, data: null, error: String(e.message || e) }) }
+  }, [])
+  useEffect(() => { load() }, [load])
+
+  if (u.loading) return <Card style={{ color: 'var(--proto-ink2)' }}>Loading usage…</Card>
+  if (u.error) return <Card style={{ color: 'var(--proto-red)' }}>Couldn’t load usage: {u.error}</Card>
+  const d = u.data
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+      <Card>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <b style={{ fontSize: 15 }}>AI spend</b>
+          <div style={{ flex: 1 }} />
+          <button className="px-btn" onClick={load}>↻ Refresh</button>
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 12, marginTop: 14 }}>
+          <div><div className="px-small" style={{ textTransform: 'uppercase', letterSpacing: 1 }}>Total cost</div><div style={{ fontSize: 30, fontWeight: 700 }}>{money(d.total.costUsd)}</div></div>
+          <div><div className="px-small" style={{ textTransform: 'uppercase', letterSpacing: 1 }}>Calls</div><div style={{ fontSize: 30, fontWeight: 700 }}>{d.total.calls}</div></div>
+          <div><div className="px-small" style={{ textTransform: 'uppercase', letterSpacing: 1 }}>Tokens</div><div style={{ fontSize: 30, fontWeight: 700 }}>{d.total.tokens.toLocaleString()}</div></div>
+        </div>
+      </Card>
+
+      <Card>
+        <b style={{ fontSize: 14 }}>By feature</b>
+        {d.byFeature.length === 0 && <div className="px-small" style={{ marginTop: 8 }}>No metered calls yet.</div>}
+        <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 4 }}>
+          {d.byFeature.map((f) => (
+            <div key={f.feature} style={{ display: 'flex', alignItems: 'baseline', gap: 10, fontSize: 13 }}>
+              <span style={{ fontWeight: 600, minWidth: 160 }}>{f.feature}</span>
+              <span className="px-small">{f.calls} call{f.calls === 1 ? '' : 's'}</span>
+              <div style={{ flex: 1 }} />
+              <span style={{ fontVariantNumeric: 'tabular-nums' }}>{money(f.costUsd)}</span>
+            </div>
+          ))}
+        </div>
+      </Card>
+
+      <Card>
+        <b style={{ fontSize: 14 }}>By model</b>
+        <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 4 }}>
+          {d.byModel.map((m) => (
+            <div key={m.model} style={{ display: 'flex', alignItems: 'baseline', gap: 10, fontSize: 13 }}>
+              <span style={{ fontWeight: 600, minWidth: 200 }}>{m.model}</span>
+              <span className="px-small">{m.calls}</span>
+              <div style={{ flex: 1 }} />
+              <span style={{ fontVariantNumeric: 'tabular-nums' }}>{money(m.costUsd)}</span>
+            </div>
+          ))}
+        </div>
+      </Card>
+
+      {d.recent.length > 0 && (
+        <Card>
+          <b style={{ fontSize: 14 }}>Recent calls</b>
+          <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 4 }}>
+            {d.recent.map((r, i) => (
+              <div key={i} style={{ display: 'flex', alignItems: 'baseline', gap: 10, fontSize: 12, color: 'var(--proto-ink2)' }}>
+                <span style={{ fontWeight: 600, minWidth: 150, color: 'var(--proto-ink)' }}>{r.feature || '—'}</span>
+                <span>{r.model}</span>
+                <span>{(r.promptTokens || 0) + (r.completionTokens || 0)} tok</span>
+                <div style={{ flex: 1 }} />
+                <span style={{ fontVariantNumeric: 'tabular-nums' }}>{money(r.costUsd)}</span>
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
+    </div>
+  )
+}
+
+const SECTIONS = [{ key: 'intake', label: 'Intake' }, { key: 'usage', label: 'Usage' }]
 
 export default function Settings({ tab = 'intake' }) {
   const active = SECTIONS.find((s) => s.key === tab) ? tab : 'intake'
@@ -203,6 +281,7 @@ export default function Settings({ tab = 'intake' }) {
         ))}
       </div>
       {active === 'intake' && <IntakeSettings />}
+      {active === 'usage' && <UsageSettings />}
     </div>
   )
 }

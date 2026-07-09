@@ -1,6 +1,7 @@
 import { app, HttpRequest, HttpResponseInit, InvocationContext, Timer } from '@azure/functions'
 import { getMicrosoftToken } from './googleAuth'
 import { getPgClient } from './pgClient'
+import { logUsage } from './usageMeter'
 
 const HEADERS = {
   'Content-Type': 'application/json',
@@ -117,7 +118,9 @@ async function embed(text: string): Promise<string | null> {
     body: JSON.stringify({ model: 'text-embedding-3-small', input: text.slice(0, 8000) })
   })
   if (!res.ok) return null
-  const v = (await res.json() as any)?.data?.[0]?.embedding
+  const j = (await res.json()) as any
+  await logUsage('intake:embed', 'text-embedding-3-small', j?.usage)
+  const v = j?.data?.[0]?.embedding
   return Array.isArray(v) ? `[${v.join(',')}]` : null
 }
 
@@ -133,7 +136,9 @@ async function parseAlert(rawText: string): Promise<any[]> {
     body: JSON.stringify({ model: 'gpt-4o-mini', messages: [{ role: 'system', content: system }, { role: 'user', content: user }], max_tokens: 1200, response_format: { type: 'json_object' } })
   })
   if (!res.ok) return []
-  const parsed = JSON.parse((await res.json() as any)?.choices?.[0]?.message?.content || '{}')
+  const j = (await res.json()) as any
+  await logUsage('intake:parse', 'gpt-4o-mini', j?.usage)
+  const parsed = JSON.parse(j?.choices?.[0]?.message?.content || '{}')
   return Array.isArray(parsed.opportunities) ? parsed.opportunities.filter((o: any) => o.company && o.role) : []
 }
 

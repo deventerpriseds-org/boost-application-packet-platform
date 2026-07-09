@@ -1,6 +1,7 @@
 import { app, HttpRequest, HttpResponseInit, InvocationContext } from '@azure/functions'
 import { getPgClient } from './pgClient'
 import { getGoogleOAuthToken, HAS_GOOGLE_OAUTH } from './googleAuth'
+import { logUsage } from './usageMeter'
 
 const HEADERS = {
   'Content-Type': 'application/json',
@@ -134,6 +135,7 @@ export async function artifactGenerate(req: HttpRequest, context: InvocationCont
     if (!res.ok) throw new Error(`OpenAI HTTP ${res.status}: ${await res.text()}`)
     const data = await res.json() as any
     const content = data.choices?.[0]?.message?.content?.trim() || ''
+    await logUsage(`packet:${art.type}`, 'gpt-4o-mini', data.usage)
 
     await client.query(
       `update artifact set content = $1, status = 'review',

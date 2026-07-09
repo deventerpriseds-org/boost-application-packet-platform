@@ -64,6 +64,8 @@ export const api = {
   mailConfigSet: (patch) => post(`/mail/config`, patch),
   mailFolders: (mailbox) => get(`/mail/folders${mailbox ? `?mailbox=${encodeURIComponent(mailbox)}` : ''}`),
   mailSelfTest: () => post(`/mail/self-test`, {}),
+  // AI cost metering
+  usageSummary: () => get(`/app/usage`),
   // Library
   listAssets: () => get(`/app/assets`),
   listPersonas: () => get(`/app/personas`),
