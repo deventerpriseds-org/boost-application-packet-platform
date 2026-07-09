@@ -71,7 +71,7 @@ function InboxScrubHero({ opportunities, toast }) {
 
         {/* Right: CTA */}
         <div style={{ padding: '14px 18px', display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 8, borderLeft: '1px solid var(--proto-rule-soft)', flex: '1 1 170px', minWidth: 150 }}>
-          <div className="px-btn px-btn-accent" style={{ justifyContent: 'center' }} onClick={() => go('/opportunities')}>Review {total} in swipe →</div>
+          <div className="px-btn px-btn-accent" style={{ justifyContent: 'center' }} onClick={() => go('/swipe')}>Review {total} in swipe →</div>
           <div className="px-btn" style={{ justifyContent: 'center', fontSize: 12 }} onClick={() => toast('Inbox monitoring is on — scanning connected sources.')}>Inbox monitoring</div>
           <div className="px-btn" style={{ justifyContent: 'center', fontSize: 12 }} onClick={() => toast('Re-scanning inbox…')}>↻ Re-scan now</div>
         </div>
@@ -153,7 +153,7 @@ function Section({ title, children }) {
 
 function OppRow({ o }) {
   return (
-    <div className="px-box" style={{ padding: 14, display: 'flex', alignItems: 'center', gap: 14 }}>
+    <div className="px-box" onClick={() => go(`/opp/${o.id}`)} style={{ padding: 14, display: 'flex', alignItems: 'center', gap: 14, cursor: 'pointer' }}>
       <MatchScore value={o.match} />
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>

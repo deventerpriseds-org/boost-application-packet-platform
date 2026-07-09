@@ -45,7 +45,23 @@ export function useOpportunities(personaKey) {
     }
   }, [])
 
-  return { ...state, reload, optimisticMove }
+  // Optimistically remove a dismissed opportunity, persist, roll back on failure.
+  const optimisticDismiss = useCallback(async (id, onError) => {
+    let prev
+    setState((s) => {
+      prev = s.opportunities.find((o) => o.id === id)
+      return { ...s, opportunities: s.opportunities.filter((o) => o.id !== id) }
+    })
+    try {
+      const res = await api.dismiss(id)
+      if (res.error) throw new Error(res.error)
+    } catch (err) {
+      setState((s) => (prev ? { ...s, opportunities: [...s.opportunities, prev] } : s))
+      onError?.(err)
+    }
+  }, [])
+
+  return { ...state, reload, optimisticMove, optimisticDismiss }
 }
 
 export const personaName = (key) => PERSONAS[key]?.name || key

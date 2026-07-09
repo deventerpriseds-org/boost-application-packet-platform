@@ -1,4 +1,5 @@
 import React, { useMemo, useState } from 'react'
+import { go } from '../state.jsx'
 import { MatchScore, StageBadge, UrgencyPill, Pill } from '../shell.jsx'
 import { Loading, ErrorBox, Empty } from './Today.jsx'
 
@@ -54,7 +55,7 @@ export default function Opportunities({ opps }) {
           </thead>
           <tbody>
             {rows.map((o) => (
-              <tr key={o.id} style={{ borderTop: '1px solid var(--proto-rule-soft)' }}>
+              <tr key={o.id} onClick={() => go(`/opp/${o.id}`)} style={{ borderTop: '1px solid var(--proto-rule-soft)', cursor: 'pointer' }}>
                 <Td><MatchScore value={o.match} size={30} /></Td>
                 <Td><span style={{ fontWeight: 600 }}>{o.company}</span><div className="px-small">{o.location || '—'}</div></Td>
                 <Td>{o.role}</Td>

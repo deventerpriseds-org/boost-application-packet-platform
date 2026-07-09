@@ -3,6 +3,7 @@ import { useApp, useRoute, go, PERSONAS, useIsMobile } from './state.jsx'
 
 const NAV = [
   { path: '/today', label: 'Today', icon: '◉' },
+  { path: '/swipe', label: 'Swipe', icon: '◈' },
   { path: '/opportunities', label: 'Opps', icon: '◇' },
   { path: '/pipeline', label: 'Pipeline', icon: '▤' },
 ]

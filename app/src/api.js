@@ -29,6 +29,7 @@ export const api = {
   },
   getOpportunity: (id) => get(`/app/opportunity/${id}`),
   moveStage: (id, stage) => post(`/app/opportunity/${id}/stage`, { stage }),
+  dismiss: (id) => post(`/app/opportunity/${id}/dismiss`, {}),
 }
 
 export { API_BASE }
