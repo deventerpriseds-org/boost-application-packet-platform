@@ -70,5 +70,33 @@ export async function voiceSession(req: HttpRequest, context: InvocationContext)
   }
 }
 
+// POST /api/diag/convai-agent-tune — upgrade the agent's turn detection to the
+// echo-robust turn_v3 model and set a turn timeout. Reduces self-interruption
+// from acoustic echo (the agent hearing its own voice on speakerphone).
+export async function convaiAgentTune(req: HttpRequest, context: InvocationContext): Promise<HttpResponseInit> {
+  if (req.method === 'OPTIONS') return { status: 204, headers: HEADERS }
+  const key = process.env.ELEVENLABS_API_KEY
+  const agentId = req.query.get('agentId') || process.env.ELEVENLABS_AGENT_ID
+  if (!key) return { status: 200, headers: HEADERS, jsonBody: { error: 'ELEVENLABS_API_KEY not set' } }
+  if (!agentId) return { status: 200, headers: HEADERS, jsonBody: { error: 'ELEVENLABS_AGENT_ID not set' } }
+  try {
+    const patch = {
+      conversation_config: {
+        turn: { turn_timeout: 8, turn_model: 'turn_v3' },
+      },
+    }
+    const res = await fetch(`https://api.elevenlabs.io/v1/convai/agents/${encodeURIComponent(agentId)}`, {
+      method: 'PATCH', headers: { 'xi-api-key': key, 'Content-Type': 'application/json' }, body: JSON.stringify(patch)
+    })
+    const txt = await res.text()
+    if (!res.ok) return { status: 200, headers: HEADERS, jsonBody: { ok: false, detail: `PATCH HTTP ${res.status}: ${txt.slice(0, 400)}` } }
+    let j: any = null; try { j = JSON.parse(txt) } catch {}
+    return { status: 200, headers: HEADERS, jsonBody: { ok: true, agentId, turn: j?.conversation_config?.turn || 'updated' } }
+  } catch (err) {
+    return { status: 200, headers: HEADERS, jsonBody: { ok: false, detail: String(err) } }
+  }
+}
+
 app.http('convaiAgentEnsure', { methods: ['POST', 'OPTIONS'], authLevel: 'anonymous', route: 'diag/convai-agent-ensure', handler: convaiAgentEnsure })
+app.http('convaiAgentTune', { methods: ['POST', 'OPTIONS'], authLevel: 'anonymous', route: 'diag/convai-agent-tune', handler: convaiAgentTune })
 app.http('voiceSession', { methods: ['GET', 'OPTIONS'], authLevel: 'anonymous', route: 'app/voice/session', handler: voiceSession })
