@@ -156,8 +156,39 @@ export async function interviewTranscribe(req: HttpRequest, context: InvocationC
   } finally { try { await client?.end() } catch {} }
 }
 
+// POST /api/app/interview/transcribe-selftest — server-side round trip:
+// ElevenLabs TTS of a known phrase → Whisper STT → return the transcript. Proves
+// the STT path with real audio using the Function's own creds (verification).
+export async function transcribeSelfTest(req: HttpRequest, context: InvocationContext): Promise<HttpResponseInit> {
+  if (req.method === 'OPTIONS') return { status: 204, headers: HEADERS }
+  const openaiKey = process.env.OPENAI_API_KEY
+  const elKey = process.env.ELEVENLABS_API_KEY
+  const voiceId = process.env.ELEVENLABS_DEFAULT_VOICE_ID
+  try {
+    if (!openaiKey) return { status: 200, headers: HEADERS, jsonBody: { error: 'OPENAI_API_KEY not set' } }
+    if (!elKey || !voiceId) return { status: 200, headers: HEADERS, jsonBody: { error: 'ELEVENLABS_API_KEY / ELEVENLABS_DEFAULT_VOICE_ID not set' } }
+    const phrase = 'The candidate demonstrated strong leadership and clear communication.'
+    const tts = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`, {
+      method: 'POST', headers: { 'xi-api-key': elKey, 'Content-Type': 'application/json', Accept: 'audio/mpeg' },
+      body: JSON.stringify({ text: phrase, model_id: 'eleven_turbo_v2' })
+    })
+    if (!tts.ok) return { status: 200, headers: HEADERS, jsonBody: { error: `TTS HTTP ${tts.status}: ${(await tts.text()).slice(0, 200)}` } }
+    const audio = Buffer.from(await tts.arrayBuffer())
+    const form = new FormData()
+    form.append('file', new Blob([audio], { type: 'audio/mpeg' }), 'audio.mp3')
+    form.append('model', 'whisper-1')
+    const stt = await fetch('https://api.openai.com/v1/audio/transcriptions', {
+      method: 'POST', headers: { Authorization: `Bearer ${openaiKey}` }, body: form as any,
+    })
+    if (!stt.ok) return { status: 200, headers: HEADERS, jsonBody: { error: `Whisper HTTP ${stt.status}: ${(await stt.text()).slice(0, 200)}` } }
+    const transcript = ((await stt.json()) as any)?.text || ''
+    return { status: 200, headers: HEADERS, jsonBody: { ok: true, spoken: phrase, transcript, audioBytes: audio.length } }
+  } catch (err) { return { status: 200, headers: HEADERS, jsonBody: { error: String(err) } } }
+}
+
 app.http('interviewList', { methods: ['GET', 'OPTIONS'], authLevel: 'anonymous', route: 'app/opportunity/{id}/interviews', handler: interviewList })
 app.http('interviewTranscribe', { methods: ['POST', 'OPTIONS'], authLevel: 'anonymous', route: 'app/interview/{interviewId}/transcribe', handler: interviewTranscribe })
+app.http('transcribeSelfTest', { methods: ['POST', 'OPTIONS'], authLevel: 'anonymous', route: 'app/interview/transcribe-selftest', handler: transcribeSelfTest })
 app.http('interviewPrep', { methods: ['POST', 'OPTIONS'], authLevel: 'anonymous', route: 'app/opportunity/{id}/interview/prep', handler: interviewPrep })
 app.http('interviewDebrief', { methods: ['POST', 'OPTIONS'], authLevel: 'anonymous', route: 'app/interview/{interviewId}/debrief', handler: interviewDebrief })
 app.http('offerRoute', { methods: ['GET', 'POST', 'OPTIONS'], authLevel: 'anonymous', route: 'app/opportunity/{id}/offer', handler: offerRoute })
