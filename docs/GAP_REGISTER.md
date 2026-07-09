@@ -105,14 +105,17 @@ until that diff is done.
 ### G9 — Whisper transcription  ·  status: OPEN
 - Interview debrief takes **pasted** text; no audio → transcript path.
 
-### G10 — Cost metering in the app  ·  status: OPEN
-- MT-43 tested token/cost metering; the live app does not record per-generation
-  usage to `usage_metering`.
+### G10 — Cost metering in the app  ·  status: CLOSED
+- `usageMeter.logUsage` (per-model pricing, best-effort) records every metered
+  AI call to `usage_metering`, tagged by feature. Instrumented: packet drafts,
+  outreach drafts, intake parse + embeddings. `GET /app/usage` aggregates
+  totals / by-feature / by-model / by-day / recent; surfaced in **Settings ▸
+  Usage**. Verified: outreach drafts logged with real token cost.
 
 ## Priority (owner-directed)
 - **Closed:** G1 HeyGen, G2 ElevenLabs, G4 live inbox watcher, G6 real Docs,
-  G5 real outbound send, G7 scheduler/cron.
-- **Remaining — "make it real" wiring hardening:** G10 cost metering in-app,
-  G9 Whisper transcription, G8 auth/multi-tenancy.
+  G5 real outbound send, G7 scheduler/cron, G10 cost metering.
+- **Remaining — "make it real" wiring hardening:** G9 Whisper transcription,
+  G8 auth/multi-tenancy.
 - **Deferred (owner):** G3 ATS ingestion + apply; G2's 1:1 chat call button;
   G6 Slides deck for the portfolio artifact.
