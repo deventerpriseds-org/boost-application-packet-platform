@@ -115,6 +115,8 @@ export async function configStatus(
       heygen: has(process.env.HEYGEN_API_KEY),
       elevenlabs: has(process.env.ELEVENLABS_API_KEY),
       elevenlabsVoice: has(process.env.ELEVENLABS_DEFAULT_VOICE_ID),
+      heygenCloneAvatar: has(process.env.HEYGEN_CLONE_1_AVATAR_IDENTITY_ID),
+      heygenCloneVoice: has(process.env.HEYGEN_CLONED_VOICE_ID),
       azure: has(process.env.AZURE_STORAGE_CONNECTION_STRING),
       // Google OAuth-user connection: true once a refresh token is stored, i.e.
       // dev@enterpriseds.io has consented and file copies run as that account.
