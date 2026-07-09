@@ -124,6 +124,11 @@ function Overview({ o, toast }) {
             </div>
             <button className="px-btn px-btn-accent" onClick={() => go(`/packet/${o.id}`)}>Build packet →</button>
           </div>
+          <div style={{ display: 'flex', gap: 6, marginTop: 10, flexWrap: 'wrap' }}>
+            <button className="px-btn" style={{ fontSize: 12 }} onClick={() => go(`/interview/${o.id}`)}>◉ Interview prep</button>
+            <button className="px-btn" style={{ fontSize: 12 }} onClick={() => go(`/compose/${o.id}`)}>✉ Compose outreach</button>
+            <button className="px-btn" style={{ fontSize: 12 }} onClick={() => go(`/offer/${o.id}`)}>◆ Negotiation tracker</button>
+          </div>
         </div>
 
         {o.why && (
@@ -180,6 +185,7 @@ function Overview({ o, toast }) {
           <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13 }}>
             <span>Range</span><b>{o.comp || '—'}</b>
           </div>
+          <div className="px-link" style={{ fontSize: 12, marginTop: 8 }} onClick={() => go(`/offer/${o.id}`)}>Open negotiation tracker →</div>
         </Card>
         {(o.hm || o.recruiter) && (
           <Card title="Key contacts">

@@ -41,6 +41,12 @@ export const api = {
   seedCadence: (oppId) => post(`/app/opportunity/${oppId}/cadence`, {}),
   setOutreachState: (messageId, state) => post(`/app/outreach/${messageId}/state`, { state }),
   outreachQueue: ({ owner } = {}) => get(`/app/outreach${owner ? `?owner=${encodeURIComponent(owner)}` : ''}`),
+  // Convert: interview + offer
+  listInterviews: (oppId) => get(`/app/opportunity/${oppId}/interviews`),
+  interviewPrep: (oppId, { stage, interviewers } = {}) => post(`/app/opportunity/${oppId}/interview/prep`, { stage, interviewers }),
+  interviewDebrief: (interviewId, transcript) => post(`/app/interview/${interviewId}/debrief`, { transcript }),
+  getOffer: (oppId) => get(`/app/opportunity/${oppId}/offer`),
+  analyzeOffer: (oppId, { theirOffer, floor } = {}) => post(`/app/opportunity/${oppId}/offer`, { theirOffer, floor }),
 }
 
 export { API_BASE }
