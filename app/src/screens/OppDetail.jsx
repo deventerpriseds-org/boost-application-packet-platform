@@ -125,6 +125,7 @@ function Overview({ o, toast }) {
             <button className="px-btn px-btn-accent" onClick={() => go(`/packet/${o.id}`)}>Build packet →</button>
           </div>
           <div style={{ display: 'flex', gap: 6, marginTop: 10, flexWrap: 'wrap' }}>
+            <button className="px-btn" style={{ fontSize: 12 }} onClick={() => go(`/answers/${o.id}`)}>⌸ Application answers</button>
             <button className="px-btn" style={{ fontSize: 12 }} onClick={() => go(`/interview/${o.id}`)}>◉ Interview prep</button>
             <button className="px-btn" style={{ fontSize: 12 }} onClick={() => go(`/compose/${o.id}`)}>✉ Compose outreach</button>
             <button className="px-btn" style={{ fontSize: 12 }} onClick={() => go(`/offer/${o.id}`)}>◆ Negotiation tracker</button>

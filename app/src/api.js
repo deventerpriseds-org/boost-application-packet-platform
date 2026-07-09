@@ -47,6 +47,8 @@ export const api = {
   interviewDebrief: (interviewId, transcript) => post(`/app/interview/${interviewId}/debrief`, { transcript }),
   getOffer: (oppId) => get(`/app/opportunity/${oppId}/offer`),
   analyzeOffer: (oppId, { theirOffer, floor } = {}) => post(`/app/opportunity/${oppId}/offer`, { theirOffer, floor }),
+  // App Answers (vision autofill)
+  answersVision: (oppId, imageBase64) => post(`/app/opportunity/${oppId}/answers/vision`, { imageBase64 }),
 }
 
 export { API_BASE }

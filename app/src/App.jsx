@@ -13,8 +13,9 @@ import Outreach from './screens/Outreach.jsx'
 import Composer from './screens/Composer.jsx'
 import Interview from './screens/Interview.jsx'
 import Offer from './screens/Offer.jsx'
+import Answers from './screens/Answers.jsx'
 
-const TITLES = { today: 'Today', opportunities: 'Opportunities', pipeline: 'Pipeline', swipe: 'Swipe', opp: 'Opportunity', packets: 'Packets', packet: 'Packet', outreach: 'Outreach', compose: 'Composer', interview: 'Interview', offer: 'Offer' }
+const TITLES = { today: 'Today', opportunities: 'Opportunities', pipeline: 'Pipeline', swipe: 'Swipe', opp: 'Opportunity', packets: 'Packets', packet: 'Packet', outreach: 'Outreach', compose: 'Composer', interview: 'Interview', offer: 'Offer', answers: 'App answers' }
 
 function Router() {
   const { personaKey } = useApp()
@@ -33,6 +34,7 @@ function Router() {
   else if (route === 'compose' && parts[1]) screen = <Composer id={parts[1]} />
   else if (route === 'interview' && parts[1]) screen = <Interview id={parts[1]} tab={parts[2] || 'prep'} />
   else if (route === 'offer' && parts[1]) screen = <Offer id={parts[1]} />
+  else if (route === 'answers' && parts[1]) screen = <Answers id={parts[1]} />
   else if (route === 'opp' && parts[1]) screen = <OppDetail id={parts[1]} tab={parts[2] || 'overview'} />
   else screen = <Today opps={opps} />
 
