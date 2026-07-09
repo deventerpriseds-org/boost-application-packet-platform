@@ -50,6 +50,7 @@ export const api = {
   listInterviews: (oppId) => get(`/app/opportunity/${oppId}/interviews`),
   interviewPrep: (oppId, { stage, interviewers } = {}) => post(`/app/opportunity/${oppId}/interview/prep`, { stage, interviewers }),
   interviewDebrief: (interviewId, transcript) => post(`/app/interview/${interviewId}/debrief`, { transcript }),
+  interviewTranscribe: (interviewId, { audioBase64, mimeType } = {}) => post(`/app/interview/${interviewId}/transcribe`, { audioBase64, mimeType }),
   getOffer: (oppId) => get(`/app/opportunity/${oppId}/offer`),
   analyzeOffer: (oppId, { theirOffer, floor } = {}) => post(`/app/opportunity/${oppId}/offer`, { theirOffer, floor }),
   // App Answers (vision autofill)

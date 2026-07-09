@@ -123,7 +123,41 @@ export async function offerRoute(req: HttpRequest, context: InvocationContext): 
   } finally { try { await client?.end() } catch {} }
 }
 
+// POST /api/app/interview/{interviewId}/transcribe { audioBase64, mimeType? }
+// Whisper speech-to-text → returns the transcript (and stores it on the row).
+// The debrief step then analyzes it. Keeps audio out of the DB (transcript only).
+export async function interviewTranscribe(req: HttpRequest, context: InvocationContext): Promise<HttpResponseInit> {
+  if (req.method === 'OPTIONS') return { status: 204, headers: HEADERS }
+  const interviewId = req.params.interviewId
+  const key = process.env.OPENAI_API_KEY
+  let client
+  try {
+    const body = (await req.json().catch(() => ({}))) as any
+    const b64 = (body?.audioBase64 || '').toString().replace(/^data:[^;]+;base64,/, '')
+    if (!b64 || b64.length < 100) return { status: 400, headers: HEADERS, jsonBody: { error: 'audioBase64 required' } }
+    if (!key) return { status: 200, headers: HEADERS, jsonBody: { error: 'OPENAI_API_KEY not set' } }
+    const mimeType = body?.mimeType || 'audio/webm'
+    const ext = mimeType.includes('mp3') || mimeType.includes('mpeg') ? 'mp3' : mimeType.includes('wav') ? 'wav' : mimeType.includes('mp4') || mimeType.includes('m4a') ? 'm4a' : 'webm'
+    const bytes = Buffer.from(b64, 'base64')
+
+    const form = new FormData()
+    form.append('file', new Blob([bytes], { type: mimeType }), `audio.${ext}`)
+    form.append('model', 'whisper-1')
+    const res = await fetch('https://api.openai.com/v1/audio/transcriptions', {
+      method: 'POST', headers: { Authorization: `Bearer ${key}` }, body: form as any,
+    })
+    if (!res.ok) return { status: 200, headers: HEADERS, jsonBody: { error: `Whisper HTTP ${res.status}: ${(await res.text()).slice(0, 300)}` } }
+    const transcript = ((await res.json()) as any)?.text || ''
+
+    try { client = await getPgClient(); await client.query(`update interview set transcript = $1 where id = $2`, [transcript, interviewId]) } catch {}
+    return { status: 200, headers: HEADERS, jsonBody: { ok: true, interviewId, transcript, chars: transcript.length } }
+  } catch (err) {
+    return { status: 200, headers: HEADERS, jsonBody: { error: String(err) } }
+  } finally { try { await client?.end() } catch {} }
+}
+
 app.http('interviewList', { methods: ['GET', 'OPTIONS'], authLevel: 'anonymous', route: 'app/opportunity/{id}/interviews', handler: interviewList })
+app.http('interviewTranscribe', { methods: ['POST', 'OPTIONS'], authLevel: 'anonymous', route: 'app/interview/{interviewId}/transcribe', handler: interviewTranscribe })
 app.http('interviewPrep', { methods: ['POST', 'OPTIONS'], authLevel: 'anonymous', route: 'app/opportunity/{id}/interview/prep', handler: interviewPrep })
 app.http('interviewDebrief', { methods: ['POST', 'OPTIONS'], authLevel: 'anonymous', route: 'app/interview/{interviewId}/debrief', handler: interviewDebrief })
 app.http('offerRoute', { methods: ['GET', 'POST', 'OPTIONS'], authLevel: 'anonymous', route: 'app/opportunity/{id}/offer', handler: offerRoute })

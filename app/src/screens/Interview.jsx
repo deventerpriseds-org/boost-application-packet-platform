@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react'
+import React, { useEffect, useState, useCallback, useRef } from 'react'
 import { useApp, go, useRoute } from '../state.jsx'
 import { api } from '../api.js'
 import { Pill } from '../shell.jsx'
@@ -13,6 +13,9 @@ export default function Interview({ id, tab = 'prep' }) {
   const [busy, setBusy] = useState(false)
   const [interviewers, setInterviewers] = useState('')
   const [transcript, setTranscript] = useState('')
+  const [rec, setRec] = useState({ recording: false, transcribing: false })
+  const recorder = useRef(null)
+  const chunks = useRef([])
 
   const load = useCallback(async () => {
     try {
@@ -33,6 +36,44 @@ export default function Interview({ id, tab = 'prep' }) {
       toast(`Prepped ${res.questions.length} questions`)
     } catch (err) { toast(`Prep failed: ${err.message || err}`) }
     finally { setBusy(false) }
+  }
+
+  // Send an audio blob to Whisper and drop the transcript into the field.
+  const transcribe = useCallback(async (blob, mimeType) => {
+    if (!interview?.id) { toast('Generate a prep pack first.'); return }
+    setRec((r) => ({ ...r, transcribing: true }))
+    try {
+      const dataUrl = await new Promise((res, rej) => { const fr = new FileReader(); fr.onload = () => res(fr.result); fr.onerror = rej; fr.readAsDataURL(blob) })
+      const audioBase64 = String(dataUrl).split(',')[1]
+      const out = await api.interviewTranscribe(interview.id, { audioBase64, mimeType })
+      if (out.error) throw new Error(out.error)
+      setTranscript((t) => (t ? t + '\n' : '') + (out.transcript || ''))
+      toast(`Transcribed ${out.chars} chars`)
+    } catch (err) { toast(`Transcribe failed: ${err.message || err}`) }
+    finally { setRec((r) => ({ ...r, transcribing: false })) }
+  }, [interview?.id, toast])
+
+  const toggleRecord = async () => {
+    if (rec.recording) { recorder.current?.stop(); return }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      const mr = new MediaRecorder(stream)
+      chunks.current = []
+      mr.ondataavailable = (e) => { if (e.data.size) chunks.current.push(e.data) }
+      mr.onstop = () => {
+        stream.getTracks().forEach((t) => t.stop())
+        const blob = new Blob(chunks.current, { type: mr.mimeType || 'audio/webm' })
+        setRec((r) => ({ ...r, recording: false }))
+        transcribe(blob, mr.mimeType || 'audio/webm')
+      }
+      recorder.current = mr; mr.start()
+      setRec((r) => ({ ...r, recording: true }))
+    } catch (err) { toast(`Mic error: ${err.message || err}`) }
+  }
+
+  const onUpload = (e) => {
+    const f = e.target.files?.[0]; if (!f) return
+    transcribe(f, f.type || 'audio/mpeg'); e.target.value = ''
   }
 
   const runDebrief = async () => {
@@ -106,8 +147,19 @@ export default function Interview({ id, tab = 'prep' }) {
 
       {tab === 'debrief' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+            <button className={`px-btn${rec.recording ? ' px-btn-green' : ''}`} disabled={rec.transcribing} onClick={toggleRecord}>
+              {rec.recording ? '■ Stop & transcribe' : '● Record audio'}
+            </button>
+            <label className="px-btn" style={{ cursor: 'pointer' }}>
+              ⬆ Upload audio
+              <input type="file" accept="audio/*" onChange={onUpload} style={{ display: 'none' }} />
+            </label>
+            {rec.transcribing && <span className="px-small">Transcribing…</span>}
+            <span className="px-small" style={{ color: 'var(--proto-ink3)' }}>Whisper speech-to-text</span>
+          </div>
           <div className="px-box" style={{ padding: 0, display: 'flex', flexDirection: 'column' }}>
-            <div style={{ padding: '6px 10px', borderBottom: '1px solid var(--proto-rule-soft)' }} className="px-small">Paste interview transcript / notes</div>
+            <div style={{ padding: '6px 10px', borderBottom: '1px solid var(--proto-rule-soft)' }} className="px-small">Transcript (recorded, uploaded, or pasted)</div>
             <textarea value={transcript} onChange={(e) => setTranscript(e.target.value)} placeholder="Paste what was asked and how it went…"
               style={{ minHeight: 160, border: 'none', outline: 'none', background: 'var(--proto-paper)', color: 'var(--proto-ink)', fontFamily: 'Inter, system-ui, sans-serif', fontSize: 13, padding: 12, resize: 'vertical', lineHeight: 1.5 }} />
           </div>
