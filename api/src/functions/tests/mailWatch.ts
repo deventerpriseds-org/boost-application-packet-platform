@@ -207,7 +207,47 @@ export async function mailRenew(myTimer: Timer, context: InvocationContext): Pro
   } catch (e) { context.log(`renew error: ${e}`) }
 }
 
+// POST /api/mail/send-test — send a realistic LinkedIn-style job alert into the
+// watched mailbox via Graph sendMail, so the live webhook path fires end-to-end
+// (subscription → notify → fetch → parse → dedupe → insert → app toast).
+export async function mailSendTest(req: HttpRequest, context: InvocationContext): Promise<HttpResponseInit> {
+  if (req.method === 'OPTIONS') return { status: 204, headers: HEADERS }
+  const creds = graphCreds()
+  if (!creds.clientId || !creds.clientSecret) return { status: 200, headers: HEADERS, jsonBody: { error: 'MICROSOFT creds not set' } }
+  try {
+    const body = (await req.json().catch(() => ({}))) as any
+    const sender = body?.from || process.env.MAIL_SENDER || 'dev@enterpriseds.io'
+    const to = body?.to || MAILBOX()
+    const company = body?.company || 'Northwind Robotics'
+    const role = body?.role || 'Chief Operating Officer'
+    const location = body?.location || 'Boston, MA (Hybrid)'
+    const subject = body?.subject || `LinkedIn Job Alert: ${role} at ${company}`
+    const html = body?.html || `<p>Your job alert for executive roles</p>
+      <h2>${role}</h2>
+      <p><b>${company}</b> — ${location}</p>
+      <p>Estimated compensation: $280,000–$340,000 + equity</p>
+      <p>${company} is hiring a ${role} to scale operations across North America.</p>
+      <p><a href="https://www.linkedin.com/jobs/view/3901234567">View job</a></p>`
+    const token = await getMicrosoftToken(creds.tenantId, creds.clientId, creds.clientSecret)
+    const res = await fetch(`https://graph.microsoft.com/v1.0/users/${sender}/sendMail`, {
+      method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        message: {
+          subject,
+          body: { contentType: 'HTML', content: html },
+          from: { emailAddress: { address: sender } },
+          toRecipients: [{ emailAddress: { address: to } }],
+        },
+        saveToSentItems: true,
+      })
+    })
+    const detail = res.ok ? 'sent (202)' : `HTTP ${res.status}: ${(await res.text()).slice(0, 400)}`
+    return { status: 200, headers: HEADERS, jsonBody: { ok: res.ok, from: sender, to, subject, detail } }
+  } catch (err) { return { status: 200, headers: HEADERS, jsonBody: { error: String(err) } } }
+}
+
 app.http('mailNotify', { methods: ['GET', 'POST'], authLevel: 'anonymous', route: 'mail/notify', handler: mailNotify })
+app.http('mailSendTest', { methods: ['POST', 'OPTIONS'], authLevel: 'anonymous', route: 'mail/send-test', handler: mailSendTest })
 app.http('mailSubscribe', { methods: ['POST', 'OPTIONS'], authLevel: 'anonymous', route: 'mail/subscribe', handler: mailSubscribe })
 app.http('mailSubscriptions', { methods: ['GET', 'OPTIONS'], authLevel: 'anonymous', route: 'mail/subscriptions', handler: mailSubscriptions })
 app.http('mailIngestTest', { methods: ['POST', 'OPTIONS'], authLevel: 'anonymous', route: 'mail/ingest-test', handler: mailIngestTest })
