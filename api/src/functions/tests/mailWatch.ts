@@ -126,15 +126,15 @@ export async function mailSubscribe(req: HttpRequest, context: InvocationContext
   try {
     const token = await getMicrosoftToken(creds.tenantId, creds.clientId, creds.clientSecret)
     const expiration = new Date(Date.now() + 2 * 24 * 3600 * 1000).toISOString() // ~2 days (mail max ~3)
-    // Clean up stale /mail/notify subscriptions that point at a different mailbox
-    // (e.g. after changing MAIL_WATCH_MAILBOX) so the renew timer doesn't keep
-    // watching the old inbox. Keeps exactly one live watch on the current mailbox.
-    const wantResource = `users/${MAILBOX()}/mailFolders('inbox')/messages`
+    // Clean up ALL existing /mail/notify subscriptions before creating a fresh
+    // one — removes stale watches on an old mailbox (after changing
+    // MAIL_WATCH_MAILBOX) and collapses any accidental duplicates on the same
+    // mailbox. Guarantees exactly one live watch after subscribe.
     const removed: string[] = []
     try {
       const existing = ((await (await fetch('https://graph.microsoft.com/v1.0/subscriptions', { headers: { Authorization: `Bearer ${token}` } })).json()) as any)?.value || []
       for (const s of existing) {
-        if ((s.notificationUrl || '').includes('/mail/notify') && s.resource !== wantResource) {
+        if ((s.notificationUrl || '').includes('/mail/notify')) {
           await fetch(`https://graph.microsoft.com/v1.0/subscriptions/${s.id}`, { method: 'DELETE', headers: { Authorization: `Bearer ${token}` } })
           removed.push(s.id)
         }
