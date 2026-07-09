@@ -1,28 +1,43 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useState, useRef } from 'react'
 import { api } from './api.js'
 import { PERSONAS } from './state.jsx'
 
 // Loads the opportunity catalog for the active persona from the live service layer.
-// Returns { loading, error, data, byStage, stages, reload, optimisticMove }.
-export function useOpportunities(personaKey) {
+// Polls every `pollMs` so real-time-ingested opportunities (LinkedIn alerts) pop
+// in; calls onNew(opp) for each newly-appeared id after the first load.
+export function useOpportunities(personaKey, { pollMs = 15000, onNew } = {}) {
   const [state, setState] = useState({ loading: true, error: null, opportunities: [], byStage: {}, stages: [] })
+  const knownIds = useRef(null) // null until first successful load
+  const onNewRef = useRef(onNew); onNewRef.current = onNew
 
-  const reload = useCallback(async () => {
-    setState((s) => ({ ...s, loading: true, error: null }))
+  const reload = useCallback(async ({ silent = false } = {}) => {
+    if (!silent) setState((s) => ({ ...s, loading: true, error: null }))
     try {
       const res = await api.listOpportunities({ persona: personaKey })
       if (res.error) throw new Error(res.error)
-      setState({
-        loading: false, error: null,
-        opportunities: res.opportunities || [],
-        byStage: res.byStage || {}, stages: res.stages || [],
-      })
+      const opportunities = res.opportunities || []
+      // Detect newly-arrived opportunities (after the first load) → notify.
+      if (knownIds.current) {
+        for (const o of opportunities) {
+          if (!knownIds.current.has(o.id)) onNewRef.current?.(o)
+        }
+      }
+      knownIds.current = new Set(opportunities.map((o) => o.id))
+      setState({ loading: false, error: null, opportunities, byStage: res.byStage || {}, stages: res.stages || [] })
     } catch (err) {
-      setState({ loading: false, error: String(err.message || err), opportunities: [], byStage: {}, stages: [] })
+      if (!silent) setState({ loading: false, error: String(err.message || err), opportunities: [], byStage: {}, stages: [] })
     }
   }, [personaKey])
 
-  useEffect(() => { reload() }, [reload])
+  // Reset the known-set when persona changes so we don't toast the whole list.
+  useEffect(() => { knownIds.current = null; reload() }, [reload])
+
+  // Background poll for live arrivals (silent — no loading flicker).
+  useEffect(() => {
+    if (!pollMs) return
+    const t = setInterval(() => reload({ silent: true }), pollMs)
+    return () => clearInterval(t)
+  }, [reload, pollMs])
 
   // Optimistically move an opportunity's stage locally, persist to the API,
   // and roll back on failure.
