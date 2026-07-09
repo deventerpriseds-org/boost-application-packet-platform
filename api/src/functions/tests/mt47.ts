@@ -46,13 +46,24 @@ export async function mt47(req: HttpRequest, context: InvocationContext): Promis
     const text = (await req.json().catch(() => ({})) as any)?.text
       || "Hi, this is my Executive Engine intro. I lead platform modernization at scale, and I'm excited to bring that to your team."
 
-    // Submit — try avatar, fall back to talking_photo if HeyGen rejects the type.
-    let videoId: string, mode = 'avatar'
+    // Resolve the clone id → a renderable look. The stored id may be an avatar
+    // GROUP id (not directly renderable); if so, use its first look's avatar_id.
+    let renderAvatarId = avatarId, resolved = 'direct'
     try {
-      videoId = await submitRender(H, { type: 'avatar', avatar_id: avatarId, avatar_style: 'normal' }, voiceId, text)
+      const g = await fetch(`https://api.heygen.com/v2/avatar_group/${avatarId}/avatars`, { headers: H })
+      if (g.ok) {
+        const look = ((await g.json() as any)?.data?.avatar_list || [])[0]?.avatar_id
+        if (look) { renderAvatarId = look; resolved = 'group-look' }
+      }
+    } catch {}
+
+    // Submit — avatar look, falling back to talking_photo if HeyGen rejects it.
+    let videoId: string, mode = `avatar(${resolved})`
+    try {
+      videoId = await submitRender(H, { type: 'avatar', avatar_id: renderAvatarId, avatar_style: 'normal' }, voiceId, text)
     } catch (e1) {
       mode = 'talking_photo'
-      videoId = await submitRender(H, { type: 'talking_photo', talking_photo_id: avatarId }, voiceId, text)
+      videoId = await submitRender(H, { type: 'talking_photo', talking_photo_id: renderAvatarId }, voiceId, text)
     }
 
     // Poll to completion (cap ~150s to stay within the function timeout).
