@@ -35,6 +35,7 @@ export const api = {
   getPacket: (oppId) => get(`/app/opportunity/${oppId}/packet`),
   generateArtifact: (artifactId) => post(`/app/artifact/${artifactId}/generate`, {}),
   setArtifactStatus: (artifactId, status) => post(`/app/artifact/${artifactId}/status`, { status }),
+  generateArtifactDocument: (artifactId) => post(`/app/artifact/${artifactId}/document`, {}),
   generateArtifactVideo: (artifactId) => post(`/app/artifact/${artifactId}/video`, {}),
   artifactVideoStatus: (artifactId) => get(`/app/artifact/${artifactId}/video/status`),
   archiveArtifactVideo: (artifactId) => post(`/app/artifact/${artifactId}/archive`, {}),

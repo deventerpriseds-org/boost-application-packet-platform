@@ -23,6 +23,7 @@ export default function PacketBuilder({ id }) {
   const [busy, setBusy] = useState(null) // artifactId currently generating
   const [open, setOpen] = useState(null) // artifactId whose content is expanded
   const [video, setVideo] = useState({}) // {artifactId: {status:'processing'|'completed'|'error', url}}
+  const [doc, setDoc] = useState({}) // {artifactId: {busy, error}}
   const pollers = useRef({})
 
   const load = useCallback(async () => {
@@ -39,6 +40,21 @@ export default function PacketBuilder({ id }) {
   const patchArtifact = (artifactId, fields) => setState((s) => ({
     ...s, packet: { ...s.packet, artifacts: s.packet.artifacts.map((a) => (a.id === artifactId ? { ...a, ...fields } : a)) },
   }))
+
+  // Turn the approved/drafted text into a real, shareable Google Doc.
+  const makeDoc = async (a) => {
+    setDoc((d) => ({ ...d, [a.id]: { busy: true } }))
+    try {
+      const res = await api.generateArtifactDocument(a.id)
+      if (res.error) throw new Error(res.error)
+      patchArtifact(a.id, { docUrl: res.docUrl })
+      setDoc((d) => ({ ...d, [a.id]: { busy: false } }))
+      toast(`Google Doc created for ${TYPE_LABEL[a.type]}`)
+    } catch (err) {
+      setDoc((d) => ({ ...d, [a.id]: { busy: false, error: String(err.message || err) } }))
+      toast(`Doc failed: ${err.message || err}`)
+    }
+  }
 
   const generate = async (a) => {
     setBusy(a.id)
@@ -192,6 +208,19 @@ export default function PacketBuilder({ id }) {
                   <button className="px-btn px-btn-accent" disabled={!a.content} title={a.content ? '' : 'Generate the script first'}
                     onClick={() => genVideo(a)} style={{ alignSelf: 'flex-start' }}>
                     🎥 Generate clone video
+                  </button>
+                )
+              })()}
+
+              {/* Real Google Doc (non-video artifacts) */}
+              {a.type !== 'video' && a.content && (() => {
+                const d = doc[a.id] || {}
+                if (a.docUrl) return (
+                  <a href={a.docUrl} target="_blank" rel="noreferrer" className="px-link" style={{ fontSize: 12 }}>✓ Open Google Doc ↗</a>
+                )
+                return (
+                  <button className="px-btn" style={{ fontSize: 12, alignSelf: 'flex-start' }} disabled={d.busy} onClick={() => makeDoc(a)}>
+                    {d.busy ? 'Creating Doc…' : '📄 Create Google Doc'}
                   </button>
                 )
               })()}

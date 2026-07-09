@@ -1,5 +1,6 @@
 import { app, HttpRequest, HttpResponseInit, InvocationContext } from '@azure/functions'
 import { getPgClient } from './pgClient'
+import { getGoogleOAuthToken, HAS_GOOGLE_OAUTH } from './googleAuth'
 
 const HEADERS = {
   'Content-Type': 'application/json',
@@ -166,7 +167,77 @@ export async function artifactStatus(req: HttpRequest, context: InvocationContex
   } finally { try { await client?.end() } catch {} }
 }
 
+// Find (or create) a Drive folder by name under the OAuth user's My Drive.
+async function findOrCreateFolder(token: string, name: string): Promise<string> {
+  const q = encodeURIComponent(`name = '${name.replace(/'/g, "\\'")}' and mimeType = 'application/vnd.google-apps.folder' and trashed = false`)
+  const find = await fetch(`https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id)`, { headers: { Authorization: `Bearer ${token}` } })
+  if (find.ok) { const id = (((await find.json()) as any)?.files || [])[0]?.id; if (id) return id }
+  const create = await fetch('https://www.googleapis.com/drive/v3/files', {
+    method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ name, mimeType: 'application/vnd.google-apps.folder' })
+  })
+  const j = (await create.json()) as any
+  if (!create.ok) throw new Error(`folder create HTTP ${create.status}: ${JSON.stringify(j).slice(0, 200)}`)
+  return j.id
+}
+
+const DOC_TITLE: Record<string, string> = {
+  resume: 'Resume', compact_resume: 'Compact Resume', cover: 'Cover Letter', portfolio: 'Portfolio One-Pager',
+}
+
+// POST /api/app/artifact/{artifactId}/document — turn the generated text into a
+// real, shareable Google Doc (Drive create → insert content → anyone-reader).
+// Stores the doc URL on artifact.doc_url. 'video' artifacts use the HeyGen path.
+export async function artifactDocument(req: HttpRequest, context: InvocationContext): Promise<HttpResponseInit> {
+  if (req.method === 'OPTIONS') return { status: 204, headers: HEADERS }
+  const artifactId = req.params.artifactId
+  let client
+  try {
+    if (!HAS_GOOGLE_OAUTH) return { status: 200, headers: HEADERS, jsonBody: { error: 'GOOGLE_REFRESH_TOKEN not set — run the Google consent flow first (owns Drive quota).' } }
+    client = await getPgClient()
+    await ensureContentColumn(client)
+    const art = (await client.query(`select a.*, p.opp_id from artifact a join packet p on p.id = a.packet_id where a.id = $1`, [artifactId])).rows[0]
+    if (!art) return { status: 404, headers: HEADERS, jsonBody: { error: 'artifact not found' } }
+    if (art.type === 'video') return { status: 400, headers: HEADERS, jsonBody: { error: 'video artifacts are rendered via the HeyGen video action, not a document' } }
+    if (!art.content || !art.content.trim()) return { status: 400, headers: HEADERS, jsonBody: { error: 'generate the content first, then create the document' } }
+    const opp = (await client.query(`select company, role from opportunity where id = $1`, [art.opp_id])).rows[0]
+
+    const token = await getGoogleOAuthToken()
+    const folderId = await findOrCreateFolder(token, 'Executive Engine Packets')
+    const title = `${opp?.company || 'Opportunity'} — ${DOC_TITLE[art.type] || art.type}`
+
+    // 1. Create an empty Google Doc in the packets folder.
+    const created = await fetch('https://www.googleapis.com/drive/v3/files', {
+      method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ name: title, mimeType: 'application/vnd.google-apps.document', parents: [folderId] })
+    })
+    const cj = (await created.json()) as any
+    if (!created.ok) throw new Error(`Doc create HTTP ${created.status}: ${JSON.stringify(cj).slice(0, 200)}`)
+    const docId = cj.id
+
+    // 2. Insert the generated text at the start of the document.
+    const upd = await fetch(`https://docs.googleapis.com/v1/documents/${docId}:batchUpdate`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ requests: [{ insertText: { location: { index: 1 }, text: art.content } }] })
+    })
+    if (!upd.ok) throw new Error(`Docs insert HTTP ${upd.status}: ${(await upd.text()).slice(0, 200)}`)
+
+    // 3. Make it viewable by anyone with the link.
+    await fetch(`https://www.googleapis.com/drive/v3/files/${docId}/permissions`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ role: 'reader', type: 'anyone' })
+    })
+
+    const docUrl = `https://docs.google.com/document/d/${docId}/edit`
+    await client.query(`update artifact set doc_url = $1, updated_at = now() where id = $2`, [docUrl, artifactId])
+    return { status: 200, headers: HEADERS, jsonBody: { ok: true, artifactId, type: art.type, docUrl, title } }
+  } catch (err) {
+    return { status: 200, headers: HEADERS, jsonBody: { error: String(err) } }
+  } finally { try { await client?.end() } catch {} }
+}
+
 app.http('packetGet', { methods: ['GET', 'OPTIONS'], authLevel: 'anonymous', route: 'app/opportunity/{id}/packet', handler: packetGet })
 app.http('packetsList', { methods: ['GET', 'OPTIONS'], authLevel: 'anonymous', route: 'app/packets', handler: packetsList })
 app.http('artifactGenerate', { methods: ['POST', 'OPTIONS'], authLevel: 'anonymous', route: 'app/artifact/{artifactId}/generate', handler: artifactGenerate })
 app.http('artifactStatus', { methods: ['POST', 'OPTIONS'], authLevel: 'anonymous', route: 'app/artifact/{artifactId}/status', handler: artifactStatus })
+app.http('artifactDocument', { methods: ['POST', 'OPTIONS'], authLevel: 'anonymous', route: 'app/artifact/{artifactId}/document', handler: artifactDocument })
