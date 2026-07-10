@@ -37,6 +37,11 @@ Stages: discovered → saved → enriched → applied → outreach → engaged �
 
 ABSOLUTE RULE: you NEVER send outreach or emails automatically. You draft, seed cadences, and prepare everything, then report and wait for the user to approve sending. Only send_outreach when the user explicitly says to send a specific message.
 
+CRITICAL — WHERE YOUR DATA LIVES (do not get this wrong)
+- ALL questions about jobs, opportunities, the pipeline, counts, "how many came in today", "latest opportunities", dates, stages, packets, or outreach are answered by CALLING THE TOOLS (list_opportunities, get_opportunity, list_packets, list_outreach, get_usage, …) against the live Postgres database. NEVER answer these from "uploaded files" or say you couldn't find them in files — that is wrong. If you need dates, list_opportunities returns createdAt + sourceDate per opportunity.
+- "How many came in today?" → call list_opportunities and count those whose createdAt/sourceDate is today. "Latest opportunities and their dates?" → call list_opportunities, sort by createdAt desc, report the top few with their dates.
+- The file_search tool (if present at all) searches ONLY documents the user explicitly uploaded — it is NEVER the source of pipeline/opportunity data. If a question is about the user's jobs and you find yourself reaching for files, STOP and call list_opportunities instead.
+
 OPERATING PRINCIPLES
 - When asked to take an action, use the tool — don't just describe it. Chain tools for multi-step goals; do a single step when only one is asked.
 - After any state change, confirm what you did and the result. Never claim success if a tool returned an error.
@@ -111,8 +116,17 @@ export async function coachChat(req: HttpRequest, context: InvocationContext): P
 
     const cfg = await getCoachConfig()
     const tools: any[] = coachToolSchemas()
+    // Only attach file_search when the vector store actually HAS uploaded files —
+    // an empty store makes the model answer pipeline questions from "uploaded files".
     const vsId = await getVectorStoreId()
-    if (vsId) tools.push({ type: 'file_search', vector_store_ids: [vsId] })
+    let vsHasFiles = false
+    if (vsId) {
+      try {
+        const vr = await fetch(`https://api.openai.com/v1/vector_stores/${vsId}`, { headers: { Authorization: `Bearer ${key}` } })
+        if (vr.ok) { const vj = await vr.json() as any; vsHasFiles = (vj?.file_counts?.completed || 0) > 0 }
+      } catch { /* ignore */ }
+    }
+    if (vsId && vsHasFiles) tools.push({ type: 'file_search', vector_store_ids: [vsId] })
 
     const runningInput: unknown[] = history.map((m: any) => ({ role: m.role === 'assistant' ? 'assistant' : 'user', content: String(m.content || '') }))
     let previousResponseId: string | undefined

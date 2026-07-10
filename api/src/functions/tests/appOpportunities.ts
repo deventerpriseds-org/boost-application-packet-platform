@@ -18,7 +18,8 @@ function rowToOpp(r: any) {
     comp: r.comp_range, match: r.match_score, fit: r.fit, urgency: r.urgency,
     source: r.source, why: r.why_surfaced, hm: r.hiring_manager, recruiter: r.recruiter,
     rolesFor: r.roles_for, stage: r.stage, personaKey: r.persona_key, dismissed: r.dismissed,
-    signals: r.company_signals, pain: r.pain_hypotheses, isDemo: r.is_demo
+    signals: r.company_signals, pain: r.pain_hypotheses, isDemo: r.is_demo,
+    createdAt: r.created_at, sourceDate: r.source_date
   }
 }
 
