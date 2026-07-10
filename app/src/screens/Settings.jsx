@@ -84,6 +84,18 @@ function IntakeSettings() {
     try { if (dirty) await save(); const r = await api.mailSelfTest(); setTest({ running: false, result: r }) }
     catch (e) { setTest({ running: false, result: { error: String(e.message || e), checks: [] } }) }
   }
+  const [realTest, setRealTest] = useState({ running: false, result: null })
+  const [testSource, setTestSource] = useState('linkedin')
+  const sendRealJob = async () => {
+    setRealTest({ running: true, result: null })
+    try {
+      const r = await api.mailSendTestReal({ source: testSource })
+      if (r.error) throw new Error(r.error)
+      setRealTest({ running: false, result: r })
+      // Give the mailbox a moment, then pull it in so the opportunity appears.
+      setTimeout(() => { api.mailPollNow(10).catch(() => {}) }, 6000)
+    } catch (e) { setRealTest({ running: false, result: { error: String(e.message || e) } }) }
+  }
 
   if (cfgErr) return <Card style={{ color: 'var(--proto-red)' }}>Couldn’t load intake config: {cfgErr}</Card>
   if (!cfg) return <Card style={{ color: 'var(--proto-ink2)' }}>Loading intake configuration…</Card>
@@ -98,8 +110,21 @@ function IntakeSettings() {
           <span style={{ width: 9, height: 9, borderRadius: '50%', background: watch ? 'var(--surface-success-default)' : 'var(--proto-ink3)', boxShadow: watch ? '0 0 0 3px var(--surface-success-subtle)' : 'none' }} />
           <b style={{ fontSize: 15 }}>{watch ? `Watching ${watchMailbox}` : sub.loading ? 'Checking watcher…' : 'No active watch'}</b>
           <div style={{ flex: 1 }} />
+          <select className="px-btn" value={testSource} onChange={(e) => setTestSource(e.target.value)} style={{ fontFamily: 'inherit' }}>
+            <option value="linkedin">LinkedIn style</option>
+            <option value="indeed">Indeed style</option>
+            <option value="greenhouse">Greenhouse (single)</option>
+          </select>
+          <button className="px-btn" disabled={realTest.running} onClick={sendRealJob}>{realTest.running ? 'Sending…' : '✉ Send me a test alert'}</button>
           <button className="px-btn" onClick={() => go('/intake')}>View live feed →</button>
         </div>
+        <div className="px-small" style={{ marginTop: 8 }}>Emails your watched mailbox a realistic <b>LinkedIn</b> or <b>Indeed</b> job alert (in their typical format) populated with real executive postings — so you can confirm the full intake → parse → opportunity flow on the kind of email you actually get.</div>
+        {realTest.result && !realTest.result.error && (
+          <div className="px-small" style={{ marginTop: 8, color: 'var(--text-brand)' }}>
+            Sent a <b>{realTest.result.source}</b> alert to {realTest.result.to} with {realTest.result.count} role{realTest.result.count === 1 ? '' : 's'} ({(realTest.result.jobs || []).map((j) => j.role).slice(0, 2).join(', ')}…). It’ll appear in your pipeline shortly — <span className="px-link" style={{ cursor: 'pointer' }} onClick={() => go('/intake')}>open the live feed</span>.
+          </div>
+        )}
+        {realTest.result?.error && <div className="px-small" style={{ marginTop: 8, color: 'var(--proto-red)' }}>{realTest.result.error}</div>}
         {note && <div className="px-small" style={{ marginTop: 10, color: 'var(--text-brand)' }}>{note}</div>}
       </Card>
 

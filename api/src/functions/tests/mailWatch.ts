@@ -444,6 +444,102 @@ export async function mailSendTest(req: HttpRequest, context: InvocationContext)
   } catch (err) { return { status: 200, headers: HEADERS, jsonBody: { error: String(err) } } }
 }
 
+// A few well-known Greenhouse boards to pull a REAL random posting from.
+const SAMPLE_GH_BOARDS = ['stripe', 'databricks', 'gitlab', 'coinbase', 'robinhood', 'airbnb', 'anthropic', 'discord']
+function isExecTitle(t: string): boolean { return /\b(chief|cto|cio|ciso|cfo|coo|ceo|cpo|cmo|vp|vice president|head of|director|svp|evp|president)\b/i.test(t || '') }
+
+// Pull a handful of real executive postings (from Greenhouse boards) to populate
+// the alert with genuine company/role/location content.
+async function realExecRoles(n: number, board?: string): Promise<any[]> {
+  const boards = board ? [board] : SAMPLE_GH_BOARDS.slice().sort(() => Math.random() - 0.5)
+  const out: any[] = []
+  for (const b of boards) {
+    if (out.length >= n) break
+    try {
+      const r = await fetch(`https://boards-api.greenhouse.io/v1/boards/${encodeURIComponent(b)}/jobs`)
+      if (!r.ok) continue
+      const jobs = (((await r.json()) as any)?.jobs || []).filter((j: any) => isExecTitle(j.title))
+      const company = b.charAt(0).toUpperCase() + b.slice(1)
+      for (const j of jobs.sort(() => Math.random() - 0.5).slice(0, n)) {
+        out.push({ company, role: j.title, location: j.location?.name || 'Remote', url: j.absolute_url })
+        if (out.length >= n) break
+      }
+    } catch { /* next board */ }
+  }
+  return out
+}
+
+// LinkedIn-style job-alert digest (mimics the layout/subject LinkedIn actually sends).
+function linkedinAlert(jobs: any[]): { subject: string; html: string } {
+  const lead = jobs[0]
+  const subject = `${lead.role} at ${lead.company}${jobs.length > 1 ? ` and ${jobs.length - 1} other new jobs` : ''}`
+  const cards = jobs.map((j) => `
+    <table role="presentation" width="100%" style="margin:12px 0;border:1px solid #e0e0e0;border-radius:8px"><tr><td style="padding:14px">
+      <div style="font-size:16px;font-weight:600;color:#0a66c2">${j.role}</div>
+      <div style="font-size:14px;color:#000">${j.company}</div>
+      <div style="font-size:13px;color:#666">${j.location}</div>
+      <a href="${j.url}" style="display:inline-block;margin-top:8px;color:#0a66c2;font-weight:600">View job</a>
+    </td></tr></table>`).join('')
+  const html = `<div style="font-family:Arial,sans-serif;max-width:600px">
+    <div style="color:#0a66c2;font-weight:700;font-size:18px">LinkedIn</div>
+    <p style="font-size:15px">Your job alert for <b>executive roles</b> — ${jobs.length} new ${jobs.length === 1 ? 'job' : 'jobs'}</p>
+    ${cards}
+    <p style="font-size:12px;color:#999">You are receiving job alerts for executive roles. Manage alerts on LinkedIn.</p>
+  </div>`
+  return { subject, html }
+}
+
+// Indeed-style job-alert (mimics Indeed's typical alert email).
+function indeedAlert(jobs: any[]): { subject: string; html: string } {
+  const lead = jobs[0]
+  const subject = `${jobs.length} new ${lead.role.split(' ').slice(0, 3).join(' ')} jobs`
+  const rows = jobs.map((j) => `
+    <div style="padding:12px 0;border-bottom:1px solid #eee">
+      <a href="${j.url}" style="font-size:16px;color:#2557a7;font-weight:600;text-decoration:none">${j.role}</a>
+      <div style="font-size:14px;color:#2d2d2d">${j.company}</div>
+      <div style="font-size:13px;color:#767676">${j.location}</div>
+    </div>`).join('')
+  const html = `<div style="font-family:Arial,sans-serif;max-width:600px">
+    <div style="color:#2557a7;font-weight:700;font-size:18px">indeed</div>
+    <p style="font-size:15px"><b>${jobs.length}</b> new jobs match your search: <b>executive</b></p>
+    ${rows}
+    <p style="font-size:12px;color:#999">This is a job alert from Indeed. Unsubscribe or edit alerts on Indeed.</p>
+  </div>`
+  return { subject, html }
+}
+
+// POST /api/mail/send-test-real { source?, board?, count? } — email a REALISTIC job
+// alert (LinkedIn / Indeed / Greenhouse format) populated with real executive
+// postings, to the watched mailbox, so the full intake flow runs on genuine content.
+export async function mailSendTestReal(req: HttpRequest, context: InvocationContext): Promise<HttpResponseInit> {
+  if (req.method === 'OPTIONS') return { status: 204, headers: HEADERS }
+  const creds = graphCreds()
+  if (!creds.clientId || !creds.clientSecret) return { status: 200, headers: HEADERS, jsonBody: { error: 'MICROSOFT creds not set' } }
+  try {
+    const body = (await req.json().catch(() => ({}))) as any
+    const cfg = await loadConfig()
+    const sender = body?.from || process.env.MAIL_SENDER || 'dev@enterpriseds.io'
+    const to = body?.to || cfg.mailbox
+    const source = ['linkedin', 'indeed', 'greenhouse'].includes(body?.source) ? body.source : 'linkedin'
+    const count = source === 'greenhouse' ? 1 : Math.min(Math.max(Number(body?.count) || 3, 1), 6)
+    const jobs = await realExecRoles(count, body?.board)
+    if (!jobs.length) return { status: 200, headers: HEADERS, jsonBody: { error: 'could not fetch real postings right now — try again' } }
+
+    let subject: string, html: string
+    if (source === 'indeed') ({ subject, html } = indeedAlert(jobs))
+    else if (source === 'greenhouse') { const j = jobs[0]; subject = `New role: ${j.role} at ${j.company}`; html = `<p>${j.company} is hiring.</p><h2>${j.role}</h2><p><b>${j.company}</b> — ${j.location}</p><p><a href="${j.url}">View job</a></p>` }
+    else ({ subject, html } = linkedinAlert(jobs))
+
+    const token = await getMicrosoftToken(creds.tenantId, creds.clientId, creds.clientSecret)
+    const res = await fetch(`https://graph.microsoft.com/v1.0/users/${sender}/sendMail`, {
+      method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: { subject, body: { contentType: 'HTML', content: html }, from: { emailAddress: { address: sender } }, toRecipients: [{ emailAddress: { address: to } }] }, saveToSentItems: true })
+    })
+    const detail = res.ok ? 'sent (202)' : `HTTP ${res.status}: ${(await res.text()).slice(0, 300)}`
+    return { status: 200, headers: HEADERS, jsonBody: { ok: res.ok, source, from: sender, to, subject, jobs, count: jobs.length, detail, note: `Realistic ${source} alert emailed to the watched mailbox. Run "pull inbox now" or wait for the watcher to ingest it.` } }
+  } catch (err) { return { status: 200, headers: HEADERS, jsonBody: { error: String(err) } } }
+}
+
 // POST /api/mail/poll-now { minutes? } — on-demand inbox pull + ingest trace.
 export async function mailPollNow(req: HttpRequest, context: InvocationContext): Promise<HttpResponseInit> {
   if (req.method === 'OPTIONS') return { status: 204, headers: HEADERS }
@@ -468,6 +564,7 @@ export async function mailPollNow(req: HttpRequest, context: InvocationContext):
 
 app.http('mailNotify', { methods: ['GET', 'POST'], authLevel: 'anonymous', route: 'mail/notify', handler: mailNotify })
 app.http('mailSendTest', { methods: ['POST', 'OPTIONS'], authLevel: 'anonymous', route: 'mail/send-test', handler: mailSendTest })
+app.http('mailSendTestReal', { methods: ['POST', 'OPTIONS'], authLevel: 'anonymous', route: 'mail/send-test-real', handler: mailSendTestReal })
 app.http('mailPollNow', { methods: ['POST', 'OPTIONS'], authLevel: 'anonymous', route: 'mail/poll-now', handler: mailPollNow })
 app.http('mailSubscribe', { methods: ['POST', 'OPTIONS'], authLevel: 'anonymous', route: 'mail/subscribe', handler: mailSubscribe })
 app.http('mailSubscriptions', { methods: ['GET', 'OPTIONS'], authLevel: 'anonymous', route: 'mail/subscriptions', handler: mailSubscriptions })

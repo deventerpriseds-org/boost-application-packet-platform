@@ -110,6 +110,7 @@ export const api = {
   mailConfigSet: (patch) => post(`/mail/config`, patch),
   mailFolders: (mailbox) => get(`/mail/folders${mailbox ? `?mailbox=${encodeURIComponent(mailbox)}` : ''}`),
   mailSelfTest: () => post(`/mail/self-test`, {}),
+  mailSendTestReal: (opts = {}) => post(`/mail/send-test-real`, opts),
   // AI cost metering
   usageSummary: () => get(`/app/usage`),
   // Asset analytics (tracked opens)
