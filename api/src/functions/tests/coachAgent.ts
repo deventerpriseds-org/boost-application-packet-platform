@@ -112,7 +112,8 @@ export async function coachChat(req: HttpRequest, context: InvocationContext): P
     // and searches come back empty. Give it today's date + search-quality rules.
     const now = new Date()
     const todayStr = now.toISOString().slice(0, 10)
-    const dateHint = `\n\nCURRENT DATE: ${todayStr}. When you build tavily_web_search queries, use THIS year — never your training-cutoff year. Do not hardcode an old year into the query. Prefer max_results >= 5 and only set a narrow time_range ("day"/"week") when the user explicitly asks for very recent news; otherwise leave time_range unset so you don't filter out valid results. If a search returns nothing, broaden it (drop the year, drop time_range, raise max_results) and try again before telling the user you found nothing. Never fabricate figures — only report what the search actually returned, with source URLs.`
+    const curYear = now.getUTCFullYear()
+    const dateHint = `\n\nCURRENT DATE: ${todayStr}. The current year is ${curYear} — your training data is older, so IGNORE any instinct that the year is 2023 or 2024. HARD RULE for tavily_web_search: NEVER put a year earlier than ${curYear} in a query, and do NOT append a specific year at all unless the user named one — just search the topic (e.g. "Stripe recent product launches", not "Stripe product launches October 2023"). Prefer max_results >= 5. Only set a narrow time_range ("day"/"week"/"month") when the user explicitly asks for very recent news; otherwise leave time_range unset. If a search returns nothing, broaden it (drop any year, drop time_range, raise max_results) and retry before saying you found nothing. Never fabricate figures — report only what the search returned, with source URLs.`
 
     // Ground with durable memory (best-effort).
     let memHint = dateHint
