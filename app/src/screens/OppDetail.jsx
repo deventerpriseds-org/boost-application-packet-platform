@@ -91,7 +91,7 @@ export default function OppDetail({ id, tab = 'overview' }) {
         ))}
       </div>
 
-      {tab === 'overview' && <Overview o={o} toast={toast} />}
+      {tab === 'overview' && <Overview o={o} toast={toast} id={id} reload={load} />}
       {tab === 'contacts' && <Contacts contacts={o.contacts || []} oppId={o.id} toast={toast} />}
       {tab === 'outreach' && <Outreach o={o} />}
     </div>
@@ -107,10 +107,16 @@ function Card({ title, sub, children }) {
   )
 }
 
-function Overview({ o, toast }) {
+function Overview({ o, toast, id, reload }) {
   const signals = o.signals || []
   const pain = o.pain || []
   const contacts = o.contacts || []
+  const [enriching, setEnriching] = useState(false)
+  const enrich = async () => {
+    setEnriching(true)
+    try { const r = await api.enrichOpportunity(id || o.id); if (r.error) throw new Error(r.error); toast(`Enriched: ${(r.enrichment?.companySignals || []).length} signals, ${(r.enrichment?.painHypotheses || []).length} pains`); reload && reload() }
+    catch (e) { toast(`Enrich failed: ${e.message || e}`) } finally { setEnriching(false) }
+  }
   return (
     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 16 }}>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
@@ -138,6 +144,9 @@ function Overview({ o, toast }) {
           </Card>
         )}
 
+        <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+          <button className="px-btn" style={{ fontSize: 12 }} disabled={enriching} onClick={enrich}>{enriching ? 'Enriching…' : (signals.length || pain.length ? '↻ Re-enrich' : '✦ Enrich (signals + pains)')}</button>
+        </div>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 16 }}>
           <Card title="Company signals">
             {signals.length ? (

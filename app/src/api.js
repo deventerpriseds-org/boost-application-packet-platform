@@ -49,6 +49,13 @@ export const api = {
   // Packets / artifacts (production line)
   listPackets: ({ owner } = {}) => get(`/app/packets?owner=${encodeURIComponent(owner || _owner)}${demoParam()}`),
   getPacket: (oppId) => get(`/app/opportunity/${oppId}/packet`),
+  analyzeJd: (oppId) => post(`/app/opportunity/${oppId}/jd-analysis`, {}),
+  enrichOpportunity: (oppId) => post(`/app/opportunity/${oppId}/enrich`, {}),
+  buildFullPacket: (oppId, opts = {}) => post(`/app/opportunity/${oppId}/packet/build-all`, opts),
+  bulkRun: (opts = {}) => post(`/app/bulk/packets`, opts),
+  bulkStatus: (jobId) => get(`/app/bulk/${jobId}`),
+  appHealth: () => get(`/app/health`),
+  appSelftest: () => get(`/app/selftest`),
   generateArtifact: (artifactId) => post(`/app/artifact/${artifactId}/generate`, {}),
   setArtifactStatus: (artifactId, status) => post(`/app/artifact/${artifactId}/status`, { status }),
   generateArtifactDocument: (artifactId) => post(`/app/artifact/${artifactId}/document`, {}),

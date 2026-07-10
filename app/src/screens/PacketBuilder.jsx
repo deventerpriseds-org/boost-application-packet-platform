@@ -24,6 +24,8 @@ export default function PacketBuilder({ id }) {
   const [open, setOpen] = useState(null) // artifactId whose content is expanded
   const [video, setVideo] = useState({}) // {artifactId: {status:'processing'|'completed'|'error', url}}
   const [doc, setDoc] = useState({}) // {artifactId: {busy, error}}
+  const [jdBusy, setJdBusy] = useState(false)
+  const [allBusy, setAllBusy] = useState(false)
   const pollers = useRef({})
 
   const load = useCallback(async () => {
@@ -82,6 +84,17 @@ export default function PacketBuilder({ id }) {
       toast(`Drafted ${TYPE_LABEL[a.type]}`)
     } catch (err) { toast(`Generate failed: ${err.message || err}`) }
     finally { setBusy(null) }
+  }
+
+  const runJd = async () => {
+    setJdBusy(true)
+    try { const r = await api.analyzeJd(id); if (r.error) throw new Error(r.error); toast(`ATS ${r.analysis?.atsScore ?? '—'} · ${(r.analysis?.keywords || []).length} keywords`); load() }
+    catch (e) { toast(`JD analysis failed: ${e.message || e}`) } finally { setJdBusy(false) }
+  }
+  const buildAll = async () => {
+    setAllBusy(true)
+    try { const r = await api.buildFullPacket(id, {}); if (r.error) throw new Error(r.error); toast(`Built ${(r.artifacts || []).filter((x) => x.url).length} documents — nothing sent`); load() }
+    catch (e) { toast(`Build failed: ${e.message || e}`) } finally { setAllBusy(false) }
   }
 
   // Clone intro-video: submit a HeyGen render, then poll until the MP4 is ready.
@@ -162,10 +175,18 @@ export default function PacketBuilder({ id }) {
             </div>
           </div>
         </div>
+        {/* JD / ATS analysis + one-click whole-packet build */}
+        <div style={{ marginTop: 12, display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+          {typeof p.atsScore === 'number' && <Pill tone={p.atsScore >= 80 ? 'green' : p.atsScore >= 60 ? 'yellow' : 'red'}>ATS {p.atsScore}</Pill>}
+          {p.jdAnalyzed && (p.coveredKw || []).length > 0 && <span className="px-small">{(p.coveredKw || []).slice(0, 6).join(' · ')}{(p.coveredKw || []).length > 6 ? ' …' : ''}</span>}
+          <div style={{ flex: 1 }} />
+          <button className="px-btn" disabled={jdBusy} onClick={runJd} style={{ fontSize: 12 }}>{jdBusy ? 'Analyzing…' : (p.jdAnalyzed ? '↻ Re-run JD/ATS' : 'Run JD/ATS analysis')}</button>
+          <button className="px-btn px-btn-accent" disabled={allBusy} onClick={buildAll} style={{ fontSize: 12 }}>{allBusy ? 'Building all…' : '⚡ Build entire packet'}</button>
+        </div>
         {ready && (
           <div style={{ marginTop: 12, display: 'flex', alignItems: 'center', gap: 10 }}>
             <Pill tone="green">Ready to ship ✓</Pill>
-            <button className="px-btn px-btn-accent" onClick={() => toast('Sending is wired in the Outreach slice.')}>Ship packet →</button>
+            <button className="px-btn px-btn-accent" onClick={() => go(`/compose/${id}`)}>Go to outreach →</button>
           </div>
         )}
       </div>

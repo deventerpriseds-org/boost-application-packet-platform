@@ -409,7 +409,54 @@ const S = ({ label, v, ok }) => (
   </div>
 )
 
-const SECTIONS = [{ key: 'account', label: 'Account' }, { key: 'intake', label: 'Intake' }, { key: 'coach', label: 'Coach' }, { key: 'workspace', label: 'Workspace' }, { key: 'usage', label: 'Usage' }]
+// System — live health + one-click smoke test (reliability/ops surface).
+function SystemSettings() {
+  const [h, setH] = useState(null)
+  const [st, setSt] = useState(null)
+  const [busy, setBusy] = useState(false)
+  useEffect(() => { api.appHealth().then(setH).catch((e) => setH({ error: String(e) })) }, [])
+  const runSelftest = async () => { setBusy(true); try { setSt(await api.appSelftest()) } catch (e) { setSt({ error: String(e) }) } finally { setBusy(false) } }
+  const row = (k, v, ok) => (
+    <div key={k} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, padding: '4px 0' }}>
+      <span>{k}</span><span style={{ fontWeight: 600, color: ok === false ? 'var(--proto-red)' : ok ? 'var(--proto-green)' : 'var(--proto-ink)' }}>{v}</span>
+    </div>
+  )
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+      <Card>
+        <b style={{ fontSize: 15 }}>Health</b>
+        <div className="px-small" style={{ marginTop: 2, marginBottom: 10 }}>Live readiness of the API and its integrations.</div>
+        {!h ? <div className="px-small">Checking…</div> : h.error ? <div className="px-small" style={{ color: 'var(--proto-red)' }}>{h.error}</div> : (
+          <div>
+            {row('Database', h.checks?.db?.ok ? `connected (${h.checks.db.ms}ms)` : 'unavailable', h.checks?.db?.ok)}
+            {row('OpenAI', h.checks?.openai?.ok ? 'configured' : 'missing', h.checks?.openai?.ok)}
+            {row('Microsoft Graph', h.checks?.graph?.ok ? 'configured' : 'missing', h.checks?.graph?.ok)}
+            {row('Google (Drive)', h.checks?.google?.ok ? 'configured' : 'missing', h.checks?.google?.ok)}
+            {row('Storage', h.checks?.storage?.ok ? 'configured' : 'missing', h.checks?.storage?.ok)}
+            {row('Web search', h.checks?.tavily?.ok ? 'configured' : 'off', h.checks?.tavily?.ok)}
+            {row('Session signing', h.checks?.session?.ok ? 'configured' : 'insecure default', h.checks?.session?.ok)}
+          </div>
+        )}
+      </Card>
+      <Card>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <b style={{ fontSize: 15, flex: 1 }}>Smoke test</b>
+          <button className="px-btn px-btn-accent" disabled={busy} onClick={runSelftest} style={{ fontSize: 12 }}>{busy ? 'Running…' : 'Run self-test'}</button>
+        </div>
+        <div className="px-small" style={{ marginTop: 2 }}>Hits the key endpoints and reports pass/fail.</div>
+        {st && !st.error && (
+          <div style={{ marginTop: 10 }}>
+            <div className="px-small" style={{ marginBottom: 6 }}>{st.passed}/{st.total} passed</div>
+            {(st.checks || []).map((c) => row(c.name, `${c.ok ? '✓' : '✕'} ${c.ms}ms`, c.ok))}
+          </div>
+        )}
+        {st?.error && <div className="px-small" style={{ color: 'var(--proto-red)', marginTop: 8 }}>{st.error}</div>}
+      </Card>
+    </div>
+  )
+}
+
+const SECTIONS = [{ key: 'account', label: 'Account' }, { key: 'intake', label: 'Intake' }, { key: 'coach', label: 'Coach' }, { key: 'workspace', label: 'Workspace' }, { key: 'usage', label: 'Usage' }, { key: 'system', label: 'System' }]
 
 export default function Settings({ tab = 'account' }) {
   const active = SECTIONS.find((s) => s.key === tab) ? tab : 'account'
@@ -428,6 +475,7 @@ export default function Settings({ tab = 'account' }) {
       {active === 'coach' && <CoachSettings />}
       {active === 'workspace' && <WorkspaceSettings />}
       {active === 'usage' && <UsageSettings />}
+      {active === 'system' && <SystemSettings />}
     </div>
   )
 }
