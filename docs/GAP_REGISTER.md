@@ -110,12 +110,26 @@ Two halves + a coverage reality (researched 2026):
   line and storing `to_email`/`subject`. LinkedIn/call channels return a
   copy-paste result (no API). Verified: real email delivered von.ellis→von.ellis.
 
-### G6 — Real Google Docs/Slides artifacts  ·  status: CLOSED (Docs)
+### G6 — Real Google Docs/Slides artifacts  ·  status: CLOSED (Docs + Slides)
 - `POST /app/artifact/{id}/document` creates a real, shareable Google Doc from
   the generated text (Drive create → Docs insert → anyone-reader), stored on
-  `doc_url`, filed in an "Executive Engine Packets" folder. Verified live.
-  (Slides deck for the portfolio artifact is a possible follow-up; text
-  artifacts are Docs.)
+  `doc_url`, filed in an "Executive Engine Packets" folder.
+- `POST /app/artifact/{id}/slides` creates a real Google **Slides** deck for the
+  portfolio artifact (title + section slides via Slides batchUpdate; object IDs
+  must be ≥5 chars). Verified live (5-slide deck). Packet builder offers
+  "Create Slides deck" for portfolio, "Create Google Doc" for other text assets.
+
+### Asset analytics  ·  status: CLOSED
+- Tracked share links: `GET /app/asset/{id}/open?v=<viewer>` logs an open to
+  `asset_event` then 302→ the doc/deck/video. `POST /app/asset/event` for other
+  events; `GET /app/assets/analytics` aggregates opens / unique viewers / view
+  time / last open per asset (owner-scoped). Packet builder "Copy tracked link";
+  **Library ▸ Assets → Engagement** panel. Verified: 2 tracked opens → 2 viewers.
+
+### Demo-data flag  ·  status: CLOSED
+- `Settings ▸ Workspace → Show sample / demo data` toggle (persisted). Off sends
+  `includeDemo=false`; opportunities/packets/outreach filter `is_demo` rows
+  (hidden, not deleted). Verified: 27 → 3 with sample off.
 
 ### G7 — Scheduler / cron  ·  status: CLOSED
 - Timer `outreachTick` (hourly) promotes `scheduled → due` when `scheduled_for`
