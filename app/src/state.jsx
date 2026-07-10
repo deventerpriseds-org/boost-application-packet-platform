@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useEffect, useState, useCallback } from 'react'
-import { api } from './api.js'
+import { api, setOwner } from './api.js'
 import { loadUser, signInMicrosoft, signInGoogle, signOut as authSignOut, providerReady, handleGoogleCallback } from './auth.js'
 
 // Three executive personas (spec §4) — re-filter the opportunity catalog.
@@ -57,7 +57,7 @@ export function AppProvider({ children }) {
   }, [])
 
   const owner = auth.user?.email || DEMO_OWNER
-  useEffect(() => { api.setOwner(owner) }, [owner])
+  useEffect(() => { setOwner(owner) }, [owner])
 
   const signIn = useCallback(async (provider = 'microsoft') => {
     try {
