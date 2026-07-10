@@ -75,6 +75,8 @@ export const api = {
   coachMemoryBootstrap: () => post(`/app/coach/memory/bootstrap`, {}),
   coachProvision: () => post(`/app/coach/provision`, {}),
   coachUpload: (filename, contentBase64) => post(`/app/coach/upload`, { filename, contentBase64 }),
+  coachConfigGet: () => get(`/app/coach/config`),
+  coachConfigSet: (body) => post(`/app/coach/config`, body),
   // Intake watcher (mail subscription + config + self-test + on-demand pull)
   mailSubscriptions: () => get(`/mail/subscriptions`),
   mailSubscribe: () => post(`/mail/subscribe`, {}),

@@ -72,7 +72,7 @@ export function coachToolSchemas(): any[] {
     fn('config_status', 'Read the deployed API config/credential status (which integrations are wired). Read-only diagnostic.'),
     fn('mail_config', 'Read the LinkedIn/mail intake watcher config (watched mailbox, folder, sources). Read-only.'),
     fn('mail_subscriptions', 'List active Microsoft Graph mail change-notification subscriptions. Read-only diagnostic.'),
-    fn('remember', 'Save a durable memory the coach should recall in future conversations (a preference, fact, decision, or context).', { text: { type: 'string' }, kind: { type: 'string', enum: ['note', 'fact', 'preference', 'decision'] } }, ['text']),
+    fn('remember', 'Save a durable memory the coach should recall in future conversations — especially user feedback, preferences, and decisions for continuous improvement. Stored in the user\'s own Postgres (vendor-portable).', { text: { type: 'string' }, kind: { type: 'string', enum: ['note', 'fact', 'preference', 'decision', 'feedback'] } }, ['text']),
     fn('recall', 'Search the coach\'s durable memory for relevant past notes/facts.', { query: { type: 'string' } }, ['query']),
     TAVILY_WEB_SEARCH_TOOL,
   ]

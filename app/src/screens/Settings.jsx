@@ -330,7 +330,86 @@ function WorkspaceSettings() {
   )
 }
 
-const SECTIONS = [{ key: 'account', label: 'Account' }, { key: 'intake', label: 'Intake' }, { key: 'workspace', label: 'Workspace' }, { key: 'usage', label: 'Usage' }]
+// Coach — the AI coach's system prompt, model, memory, and file store. This is
+// the "see everything" surface: the exact prompt the agent runs on, editable.
+function CoachSettings() {
+  const [cfg, setCfg] = useState(null)
+  const [status, setStatus] = useState(null)
+  const [prompt, setPrompt] = useState('')
+  const [model, setModel] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [msg, setMsg] = useState('')
+  const load = useCallback(async () => {
+    try {
+      const [c, s] = await Promise.all([api.coachConfigGet(), api.coachStatus()])
+      setCfg(c); setStatus(s); setPrompt(c.systemPrompt || ''); setModel(c.model || '')
+    } catch (e) { setMsg(String(e.message || e)) }
+  }, [])
+  useEffect(() => { load() }, [load])
+
+  const save = async () => {
+    setBusy(true); setMsg('')
+    try { const r = await api.coachConfigSet({ systemPrompt: prompt, model }); if (r.error) throw new Error(r.error); setCfg(r); setMsg('Saved — the coach now runs on this prompt.') }
+    catch (e) { setMsg(String(e.message || e)) } finally { setBusy(false) }
+  }
+  const reset = async () => {
+    setBusy(true); setMsg('')
+    try { const r = await api.coachConfigSet({ reset: true }); if (r.error) throw new Error(r.error); setCfg(r); setPrompt(r.systemPrompt || ''); setModel(r.model || ''); setMsg('Reset to the built-in default prompt.') }
+    catch (e) { setMsg(String(e.message || e)) } finally { setBusy(false) }
+  }
+  const provision = async () => {
+    setBusy(true); setMsg('')
+    try { const r = await api.coachProvision(); if (r.error) throw new Error(r.error); setMsg(r.created ? `File store created (${r.vectorStoreId}).` : `File store already attached (${r.vectorStoreId}).`); load() }
+    catch (e) { setMsg(String(e.message || e)) } finally { setBusy(false) }
+  }
+
+  if (!cfg) return <Card style={{ color: 'var(--proto-ink2)' }}>Loading coach configuration…</Card>
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+      <Card>
+        <b style={{ fontSize: 15 }}>How the coach remembers you</b>
+        <div className="px-small" style={{ marginTop: 6, lineHeight: 1.6 }}>
+          Durable memory (preferences, decisions, feedback) is embedded and stored in <b>your own Azure Postgres</b> — pgvector tables <code>coach_memory</code> + <code>coach_triples</code>. Because it lives in your database and not an AI vendor’s account, it is <b>vendor-portable</b>: swap OpenAI for another model and every memory persists. The OpenAI file store below is a separate, rebuildable place for uploaded reference documents only.
+        </div>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 18, marginTop: 12 }}>
+          {status && <>
+            <S label="Model" v={status.model} />
+            <S label="Memory DB" v={status.memoryReady ? 'connected' : 'unavailable'} ok={status.memoryReady} />
+            <S label="Web search" v={status.tavily ? 'Tavily on' : 'off'} ok={status.tavily} />
+            <S label="File store" v={status.vectorStoreId || 'none'} ok={!!status.vectorStoreId} />
+          </>}
+        </div>
+        {!status?.vectorStoreId && <button className="px-btn" disabled={busy} style={{ marginTop: 12, fontSize: 12 }} onClick={provision}>Create file store</button>}
+      </Card>
+
+      <Card>
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 10 }}>
+          <b style={{ fontSize: 15 }}>System prompt</b>
+          <span className="px-small">{cfg.custom ? 'customized' : 'built-in default'}</span>
+        </div>
+        <div className="px-small" style={{ marginTop: 4, marginBottom: 8 }}>This is the exact instruction set the coach runs on. Edit it to change its behavior, knowledge, or tone.</div>
+        <textarea className="px-input" value={prompt} onChange={(e) => setPrompt(e.target.value)} rows={16}
+          style={{ width: '100%', fontFamily: 'ui-monospace, monospace', fontSize: 12, lineHeight: 1.5, resize: 'vertical' }} />
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 10, flexWrap: 'wrap' }}>
+          <Label>Model</Label>
+          <input className="px-input" value={model} onChange={(e) => setModel(e.target.value)} style={{ width: 180, fontSize: 13 }} placeholder="gpt-4o" />
+          <div style={{ flex: 1 }} />
+          <button className="px-btn" disabled={busy} onClick={reset} style={{ fontSize: 12 }}>Reset to default</button>
+          <button className="px-btn px-btn-accent" disabled={busy || !prompt.trim()} onClick={save}>{busy ? 'Saving…' : 'Save prompt'}</button>
+        </div>
+        {msg && <div className="px-small" style={{ marginTop: 10 }}>{msg}</div>}
+      </Card>
+    </div>
+  )
+}
+const S = ({ label, v, ok }) => (
+  <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+    <span className="px-small" style={{ textTransform: 'uppercase', letterSpacing: 0.5, fontSize: 10 }}>{label}</span>
+    <span style={{ fontSize: 13, fontWeight: 600, maxWidth: 260, overflow: 'hidden', textOverflow: 'ellipsis', color: ok === false ? 'var(--proto-red)' : ok === true ? 'var(--proto-green)' : 'var(--proto-ink)' }}>{v}</span>
+  </div>
+)
+
+const SECTIONS = [{ key: 'account', label: 'Account' }, { key: 'intake', label: 'Intake' }, { key: 'coach', label: 'Coach' }, { key: 'workspace', label: 'Workspace' }, { key: 'usage', label: 'Usage' }]
 
 export default function Settings({ tab = 'account' }) {
   const active = SECTIONS.find((s) => s.key === tab) ? tab : 'account'
@@ -346,6 +425,7 @@ export default function Settings({ tab = 'account' }) {
       </div>
       {active === 'account' && <AccountSettings />}
       {active === 'intake' && <IntakeSettings />}
+      {active === 'coach' && <CoachSettings />}
       {active === 'workspace' && <WorkspaceSettings />}
       {active === 'usage' && <UsageSettings />}
     </div>

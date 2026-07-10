@@ -12,18 +12,24 @@ const OPENAI_URL = 'https://api.openai.com/v1/responses'
 const DEMO_EMAIL = 'demo@executive-engine.local'
 const MODEL = process.env.COACH_MODEL || 'gpt-4o'
 
-const SYSTEM = `You are the Executive Engine Coach — an AI operator embedded in an executive job-search platform ("Executive Engine"). The platform runs the full journey: Intake (LinkedIn/email alerts → opportunities), Production line (tailored resume, cover letter, portfolio deck, intro video packets), Outreach (multi-channel cold email / follow-up / LinkedIn / call with a cadence), and Convert (interview prep, debrief, offer negotiation).
+const SYSTEM = `You are the Executive Engine Coach — the AI operator AND resident architect of an executive job-search platform ("Executive Engine"). You are not a generic assistant: you know this system's architecture intimately and you can both operate it and help extend it.
 
-Your role is not just to advise — you can DO. You have tools that perform every action the user would otherwise do by hand: list and move opportunities through the 12 pipeline stages, build packets and generate real Google Docs/Slides, draft and send outreach, run interview prep and offer analysis, read usage/cost, and inspect system/credential status for debugging. You also have live web search (Tavily) for company research, hiring-manager background, and comp benchmarks, plus durable memory (remember/recall) so you carry context across conversations.
+WHAT THE PLATFORM IS
+It runs the full journey: Intake (LinkedIn/email alerts → opportunities via a Microsoft Graph watcher), Production line (tailored resume, cover letter, portfolio deck, intro video — built by copying designed Google templates and filling placeholders), Outreach (multi-channel cold email / follow-up / LinkedIn / call on a cadence, real sends via Graph), and Convert (interview prep, debrief via Whisper, offer negotiation). Data lives in Azure Postgres (boost_resume_n_packet_builder); the API is Azure Functions (job-platform-api); the app is a Static Web App. Credentials live in GitHub secrets, synced to the Function App.
 
-Operating principles:
-- When the user asks you to take an action, use the tool — don't just describe it. Chain tools when a goal needs several steps (e.g. find the opportunity → build its packet → generate the resume).
-- For anything you take action on that changes state (advancing a stage, sending outreach), briefly confirm what you did and the result.
-- Proactively remember durable facts and preferences the user shares (target comp, roles, tone, decisions) with the remember tool.
-- Use recall at the start of substantive requests to ground yourself in prior context.
-- Use web search whenever information could be newer than your training or is company/person/market specific. Cite source URLs.
-- You understand the system's own architecture and can help debug it: read config_status / mail_config for tracing. Be precise and honest — never claim an action succeeded if a tool returned an error.
-- Keep replies focused and skimmable. Use short paragraphs or tight bullets.`
+HOW YOUR MEMORY WORKS (answer this precisely — it matters to the user)
+Your durable memory lives in the USER'S OWN Azure Postgres database — pgvector tables coach_memory (semantic, embedded) and coach_triples (a knowledge graph). Every preference, decision, and piece of feedback you save with remember() is embedded and stored THERE, in the user's database. This makes your memory VENDOR-PORTABLE: if we swap OpenAI for a different model tomorrow, all memory persists — only the embedding/inference layer changes; the knowledge stays because it is in the user's DB, not a vendor's account. The OpenAI vector store is a SECONDARY, rebuildable store for uploaded reference documents only — it is NOT where your knowledge of the user lives. Do not conflate the two, and do not describe your memory as "files."
+
+YOUR ROLE
+- You can DO, not just advise: tools perform every action the user would do by hand — list/move opportunities across the 12 stages, build packets and generate real Google Docs/Slides, draft and send outreach, interview prep, offer analysis, usage/cost, and system/credential diagnostics.
+- You are the architect: when asked what's in place, what you can do, or how something works, answer concretely — name the real components — and PROACTIVELY offer to build, change, or improve things. Never deflect a system/meta question with vague talk of "files."
+- Continuous improvement: whenever the user gives feedback or states a preference/decision, immediately capture it with remember() (kind 'feedback', 'preference', or 'decision') so it compounds and shapes future work. Recall at the start of substantive requests.
+
+OPERATING PRINCIPLES
+- When asked to take an action, use the tool — don't just describe it. Chain tools for multi-step goals.
+- After any state change (advancing a stage, sending outreach), confirm what you did and the result. Never claim success if a tool returned an error.
+- Use web search (Tavily) for anything newer than your training or company/person/market-specific; cite source URLs.
+- Keep replies focused and skimmable.`
 
 interface RespReply { id?: string; output_text?: string; output?: Array<{ type?: string; call_id?: string; name?: string; arguments?: string; content?: Array<{ text?: string; type?: string }> }> }
 
@@ -37,13 +43,31 @@ function extractToolCalls(j: RespReply) {
     .map((o) => ({ call_id: o.call_id!, name: o.name!, arguments: o.arguments ?? '{}' }))
 }
 
+async function ensureConfigTable(pool: any) {
+  await pool.query(`CREATE TABLE IF NOT EXISTS coach_config (id INT PRIMARY KEY DEFAULT 1, vector_store_id TEXT, updated_at TIMESTAMPTZ DEFAULT now())`)
+  await pool.query(`ALTER TABLE coach_config ADD COLUMN IF NOT EXISTS system_prompt TEXT`)
+  await pool.query(`ALTER TABLE coach_config ADD COLUMN IF NOT EXISTS model TEXT`)
+}
+
 async function getVectorStoreId(): Promise<string | null> {
   try {
     const pool = getPool()
-    await pool.query(`CREATE TABLE IF NOT EXISTS coach_config (id INT PRIMARY KEY DEFAULT 1, vector_store_id TEXT, updated_at TIMESTAMPTZ DEFAULT now())`)
+    await ensureConfigTable(pool)
     const { rows } = await pool.query<{ vector_store_id: string }>(`SELECT vector_store_id FROM coach_config WHERE id=1`)
     return rows[0]?.vector_store_id || null
   } catch { return null }
+}
+
+// Returns the stored coach config (custom system prompt + model), falling back
+// to the built-in defaults. The stored prompt is what the Settings UI edits.
+async function getCoachConfig(): Promise<{ systemPrompt: string; model: string; custom: boolean }> {
+  try {
+    const pool = getPool()
+    await ensureConfigTable(pool)
+    const { rows } = await pool.query<{ system_prompt: string; model: string }>(`SELECT system_prompt, model FROM coach_config WHERE id=1`)
+    const sp = rows[0]?.system_prompt
+    return { systemPrompt: sp || SYSTEM, model: rows[0]?.model || MODEL, custom: !!sp }
+  } catch { return { systemPrompt: SYSTEM, model: MODEL, custom: false } }
 }
 
 // POST /api/app/coach/chat { messages:[{role,content}], owner }
@@ -65,6 +89,7 @@ export async function coachChat(req: HttpRequest, context: InvocationContext): P
       if (hits.length) memHint = '\n\nRelevant saved memory (from prior conversations):\n' + hits.map((h) => `- ${h.text}`).join('\n')
     } catch { /* memory optional */ }
 
+    const cfg = await getCoachConfig()
     const tools: any[] = coachToolSchemas()
     const vsId = await getVectorStoreId()
     if (vsId) tools.push({ type: 'file_search', vector_store_ids: [vsId] })
@@ -77,8 +102,8 @@ export async function coachChat(req: HttpRequest, context: InvocationContext): P
     let reply = ''
     for (let hop = 0; hop <= maxHops; hop++) {
       const reqBody: Record<string, unknown> = {
-        model: MODEL,
-        instructions: SYSTEM + memHint,
+        model: cfg.model,
+        instructions: cfg.systemPrompt + memHint,
         input: runningInput,
         tools,
         ...(previousResponseId ? { previous_response_id: previousResponseId } : {}),
@@ -198,7 +223,38 @@ export async function coachStatus(req: HttpRequest): Promise<HttpResponseInit> {
   return { status: 200, headers: HEADERS, jsonBody: out }
 }
 
+// GET /api/app/coach/config — the coach's system prompt + model (the Settings editor reads this).
+export async function coachConfigGet(req: HttpRequest): Promise<HttpResponseInit> {
+  if (req.method === 'OPTIONS') return { status: 204, headers: HEADERS }
+  const cfg = await getCoachConfig()
+  return { status: 200, headers: HEADERS, jsonBody: { ...cfg, defaultPrompt: SYSTEM, defaultModel: MODEL } }
+}
+
+// POST /api/app/coach/config { systemPrompt?, model?, reset? } — update the editable prompt/model.
+export async function coachConfigSet(req: HttpRequest): Promise<HttpResponseInit> {
+  if (req.method === 'OPTIONS') return { status: 204, headers: HEADERS }
+  try {
+    const body = await req.json() as any
+    const pool = getPool()
+    await ensureConfigTable(pool)
+    if (body?.reset === true) {
+      await pool.query(`INSERT INTO coach_config (id, system_prompt, model, updated_at) VALUES (1, NULL, NULL, now())
+                        ON CONFLICT (id) DO UPDATE SET system_prompt=NULL, model=NULL, updated_at=now()`)
+    } else {
+      const sp = typeof body?.systemPrompt === 'string' ? body.systemPrompt : null
+      const model = typeof body?.model === 'string' && body.model.trim() ? body.model.trim() : null
+      await pool.query(`INSERT INTO coach_config (id, system_prompt, model, updated_at) VALUES (1, $1, $2, now())
+                        ON CONFLICT (id) DO UPDATE SET system_prompt = COALESCE($1, coach_config.system_prompt), model = COALESCE($2, coach_config.model), updated_at=now()`, [sp, model])
+    }
+    return { status: 200, headers: HEADERS, jsonBody: await getCoachConfig() }
+  } catch (err) {
+    return { status: 200, headers: HEADERS, jsonBody: { error: String(err) } }
+  }
+}
+
 app.http('coachChat', { methods: ['POST', 'OPTIONS'], authLevel: 'anonymous', route: 'app/coach/chat', handler: coachChat })
+app.http('coachConfigGet', { methods: ['GET', 'OPTIONS'], authLevel: 'anonymous', route: 'app/coach/config', handler: coachConfigGet })
+app.http('coachConfigSet', { methods: ['POST', 'OPTIONS'], authLevel: 'anonymous', route: 'app/coach/config', handler: coachConfigSet })
 app.http('coachMemoryBootstrap', { methods: ['POST', 'OPTIONS'], authLevel: 'anonymous', route: 'app/coach/memory/bootstrap', handler: coachMemoryBootstrap })
 app.http('coachMemoryList', { methods: ['GET', 'OPTIONS'], authLevel: 'anonymous', route: 'app/coach/memory/list', handler: coachMemoryList })
 app.http('coachProvision', { methods: ['POST', 'OPTIONS'], authLevel: 'anonymous', route: 'app/coach/provision', handler: coachProvision })

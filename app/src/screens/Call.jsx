@@ -248,12 +248,85 @@ function CoachChat() {
   )
 }
 
+const KIND_ICON = { feedback: '📣', preference: '⭐', decision: '✅', fact: '📌', conversation: '💬', note: '📝' }
+
+// Activity: what the coach knows and remembers about you (huddle-style), plus
+// live system status — proof the memory is real and vendor-portable.
+function CoachActivity() {
+  const [status, setStatus] = useState(null)
+  const [mem, setMem] = useState(null)
+  const [err, setErr] = useState(null)
+  const load = useCallback(async () => {
+    try {
+      const [s, m] = await Promise.all([api.coachStatus({ owner: getOwner() }), api.coachMemoryList({ owner: getOwner() })])
+      setStatus(s); setMem((m.memory || []).filter((x) => x.kind !== 'conversation'))
+    } catch (e) { setErr(String(e.message || e)) }
+  }, [])
+  useEffect(() => { load() }, [load])
+
+  return (
+    <div style={{ maxWidth: 760, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 14 }}>
+      <div>
+        <div style={{ fontSize: 20, fontWeight: 700 }}>Coach activity & memory</div>
+        <div className="px-small">Everything the coach remembers lives in <b>your own Azure Postgres</b> (pgvector) — so it’s vendor-portable and survives swapping AI models.</div>
+      </div>
+
+      {status && (
+        <div className="px-box" style={{ padding: 14, display: 'flex', flexWrap: 'wrap', gap: 18 }}>
+          <Stat label="Model" value={status.model} />
+          <Stat label="Memory DB" value={status.memoryReady ? 'connected' : 'unavailable'} ok={status.memoryReady} />
+          <Stat label="Web search" value={status.tavily ? 'Tavily on' : 'off'} ok={status.tavily} />
+          <Stat label="File store" value={status.vectorStoreId ? 'attached' : 'none'} ok={!!status.vectorStoreId} />
+        </div>
+      )}
+
+      <div className="px-box" style={{ padding: 16 }}>
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 10 }}>
+          <b style={{ fontSize: 14 }}>Saved memory</b>
+          <span className="px-small">preferences, decisions & feedback the coach carries between chats</span>
+          <div style={{ flex: 1 }} />
+          <span className="px-link" style={{ fontSize: 12, cursor: 'pointer' }} onClick={load}>↻ Refresh</span>
+        </div>
+        {err && <div className="px-small" style={{ color: 'var(--proto-red)', marginTop: 8 }}>{err}</div>}
+        {mem && mem.length === 0 && <div className="px-small" style={{ marginTop: 10 }}>Nothing saved yet. Tell the coach a preference or give feedback and it will remember it here.</div>}
+        {mem && mem.length > 0 && (
+          <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {mem.map((m) => (
+              <div key={m.id} style={{ display: 'flex', gap: 10, fontSize: 13, lineHeight: 1.5 }}>
+                <span>{KIND_ICON[m.kind] || '📝'}</span>
+                <div style={{ flex: 1 }}>{m.text}</div>
+                <span className="px-small" style={{ whiteSpace: 'nowrap' }}>{timeAgoShort(m.createdAt)}</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+      <div className="px-small">Manage the coach’s system prompt and configuration in <b>Settings ▸ Coach</b>.</div>
+    </div>
+  )
+}
+function Stat({ label, value, ok }) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+      <span className="px-small" style={{ textTransform: 'uppercase', letterSpacing: 0.5, fontSize: 10 }}>{label}</span>
+      <span style={{ fontSize: 14, fontWeight: 600, color: ok === false ? 'var(--proto-red)' : ok === true ? 'var(--proto-green)' : 'var(--proto-ink)' }}>{value}</span>
+    </div>
+  )
+}
+function timeAgoShort(iso) {
+  if (!iso) return ''
+  const s = (Date.now() - new Date(iso).getTime()) / 1000
+  if (s < 3600) return `${Math.max(1, Math.round(s / 60))}m`
+  if (s < 86400) return `${Math.round(s / 3600)}h`
+  return `${Math.round(s / 86400)}d`
+}
+
 export default function Call() {
-  const [tab, setTab] = useState('chat') // chat | call
+  const [tab, setTab] = useState('chat') // chat | activity | call
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
       <div style={{ display: 'flex', gap: 4, borderBottom: '1px solid var(--proto-rule-soft)' }}>
-        {[{ k: 'chat', l: '💬 Chat' }, { k: 'call', l: '☎️ Voice call' }].map((t) => (
+        {[{ k: 'chat', l: '💬 Chat' }, { k: 'activity', l: '📋 Activity' }, { k: 'call', l: '☎️ Voice call' }].map((t) => (
           <div key={t.k} onClick={() => setTab(t.k)}
             style={{ padding: '8px 14px', cursor: 'pointer', fontSize: 13,
               fontWeight: tab === t.k ? 600 : 500, color: tab === t.k ? 'var(--text-brand)' : 'var(--proto-ink2)',
@@ -262,7 +335,9 @@ export default function Call() {
           </div>
         ))}
       </div>
-      {tab === 'chat' ? <CoachChat /> : <VoiceCall />}
+      {tab === 'chat' && <CoachChat />}
+      {tab === 'activity' && <CoachActivity />}
+      {tab === 'call' && <VoiceCall />}
     </div>
   )
 }
