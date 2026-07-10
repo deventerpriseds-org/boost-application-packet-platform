@@ -87,3 +87,27 @@ The `lib` must include `"DOM"` for Azure SDK compatibility:
 ```json
 "lib": ["ES2020", "DOM"]
 ```
+
+## Git workflow (branch discipline)
+
+Branch discipline exists to **avoid conflicts and lost work by staying synced** —
+NOT to treat `main` as untouchable. Do the sync yourself; don't hand it to the user.
+
+- **Develop** on the session's feature branch and push there.
+- **Before pushing new work or opening/using a PR**, fetch `main` and check
+  whether it has diverged (`git log main..origin/main`). If it's ahead, **sync
+  first** (merge `origin/main` into the feature branch, resolve conflicts
+  deliberately) so you don't clobber others' commits or hit surprise conflicts
+  later. Real example: `main` once carried 7 dev-console commits the feature
+  branch didn't have — syncing preserved them.
+- **Merging to `main` is part of the job**, not something to punt to the user.
+  When work needs to land on `main` (e.g. a new `workflow_dispatch` workflow only
+  becomes runnable once it's on the default branch), merge it, resolve conflicts,
+  push, and then **fast-forward the feature branch back to `main`** so the two
+  don't re-diverge.
+- Resolve conflicts by understanding both sides. For the legacy `web/` console
+  (not the product), preferring one side wholesale is acceptable; for `app/`,
+  `api/`, workflows, and docs, merge the actual intent.
+- After any merge: `npm run build` both `api/` and `app/`, check for duplicate
+  `app.http` route registrations, and smoke-test the previously-passing live
+  endpoints before considering it done.
