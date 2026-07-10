@@ -1,4 +1,5 @@
 import { app, HttpRequest, HttpResponseInit, InvocationContext } from '@azure/functions'
+import { resolveOwner } from './appSession'
 import { coachToolSchemas, executeCoachTool } from './coachTools'
 import { bootstrapMemory, listMemory, recall, remember, deleteMemory, getPool } from './coachMemory'
 
@@ -96,7 +97,7 @@ export async function coachChat(req: HttpRequest, context: InvocationContext): P
   if (!key) return { status: 200, headers: HEADERS, jsonBody: { error: 'OPENAI_API_KEY not set' } }
   try {
     const body = await req.json() as any
-    const owner = (body?.owner || DEMO_EMAIL).toString()
+    const _ro = resolveOwner(req); const owner = _ro.verified ? _ro.owner : (body?.owner || DEMO_EMAIL).toString()
     const history = Array.isArray(body?.messages) ? body.messages.slice(-16) : []
     if (!history.length) return { status: 400, headers: HEADERS, jsonBody: { error: 'messages required' } }
     const lastUser = [...history].reverse().find((m: any) => m.role === 'user')?.content || ''
@@ -181,7 +182,7 @@ export async function coachMemoryBootstrap(req: HttpRequest): Promise<HttpRespon
 // GET /api/app/coach/memory/list?owner=
 export async function coachMemoryList(req: HttpRequest): Promise<HttpResponseInit> {
   if (req.method === 'OPTIONS') return { status: 204, headers: HEADERS }
-  const owner = req.query.get('owner') || DEMO_EMAIL
+  const owner = resolveOwner(req).owner
   try { return { status: 200, headers: HEADERS, jsonBody: { memory: await listMemory({ owner, limit: 100 }) } } }
   catch (err) { return { status: 200, headers: HEADERS, jsonBody: { error: String(err) } } }
 }
@@ -248,7 +249,7 @@ export async function coachUpload(req: HttpRequest): Promise<HttpResponseInit> {
 // GET /api/app/coach/status?owner=
 export async function coachStatus(req: HttpRequest): Promise<HttpResponseInit> {
   if (req.method === 'OPTIONS') return { status: 204, headers: HEADERS }
-  const owner = req.query.get('owner') || DEMO_EMAIL
+  const owner = resolveOwner(req).owner
   const out: any = { model: MODEL, tavily: !!(process.env.TAVILY_API_KEY || '').trim(), openai: !!process.env.OPENAI_API_KEY }
   try { out.vectorStoreId = await getVectorStoreId() } catch (e) { out.vectorStoreError = String(e) }
   try { const m = await listMemory({ owner, limit: 1 }); out.memoryReady = true; out.hasMemory = m.length > 0 } catch (e) { out.memoryReady = false; out.memoryError = String(e) }
@@ -291,7 +292,7 @@ export async function coachMemoryAdd(req: HttpRequest): Promise<HttpResponseInit
     const body = await req.json() as any
     const text = (body?.text || '').toString().trim()
     if (!text) return { status: 400, headers: HEADERS, jsonBody: { error: 'text required' } }
-    const owner = (body?.owner || DEMO_EMAIL).toString()
+    const _ro = resolveOwner(req); const owner = _ro.verified ? _ro.owner : (body?.owner || DEMO_EMAIL).toString()
     const kind = ['note', 'fact', 'preference', 'decision', 'feedback'].includes(body?.kind) ? body.kind : 'note'
     const r = await remember({ owner, kind, text, source: 'manual:settings' })
     return { status: 200, headers: HEADERS, jsonBody: { ok: true, id: r.id } }
@@ -311,7 +312,7 @@ export async function coachMemoryDelete(req: HttpRequest): Promise<HttpResponseI
 // GET /api/app/coach/activity?owner= — the agent's action log (tool calls + prompt sent per turn).
 export async function coachActivity(req: HttpRequest): Promise<HttpResponseInit> {
   if (req.method === 'OPTIONS') return { status: 204, headers: HEADERS }
-  const owner = req.query.get('owner') || DEMO_EMAIL
+  const owner = resolveOwner(req).owner
   try {
     const pool = getPool(); await ensureOpsTables(pool)
     const { rows } = await pool.query(`select id, user_msg, reply, tools, created_at from coach_activity where owner=$1 order by created_at desc limit 40`, [owner])
@@ -322,7 +323,7 @@ export async function coachActivity(req: HttpRequest): Promise<HttpResponseInit>
 // GET /api/app/coach/thread?owner= — restore the persisted conversation (proof it's DB-backed).
 export async function coachThreadGet(req: HttpRequest): Promise<HttpResponseInit> {
   if (req.method === 'OPTIONS') return { status: 204, headers: HEADERS }
-  const owner = req.query.get('owner') || DEMO_EMAIL
+  const owner = resolveOwner(req).owner
   try {
     const pool = getPool(); await ensureOpsTables(pool)
     const { rows } = await pool.query(`select messages, updated_at from coach_thread where owner=$1`, [owner])
@@ -335,7 +336,7 @@ export async function coachThreadClear(req: HttpRequest): Promise<HttpResponseIn
   if (req.method === 'OPTIONS') return { status: 204, headers: HEADERS }
   try {
     const body = await req.json().catch(() => ({})) as any
-    const owner = (body?.owner || DEMO_EMAIL).toString()
+    const _ro = resolveOwner(req); const owner = _ro.verified ? _ro.owner : (body?.owner || DEMO_EMAIL).toString()
     const pool = getPool(); await ensureOpsTables(pool)
     await pool.query(`delete from coach_thread where owner=$1`, [owner])
     return { status: 200, headers: HEADERS, jsonBody: { ok: true } }

@@ -1,4 +1,5 @@
 import { app, HttpRequest, HttpResponseInit, InvocationContext } from '@azure/functions'
+import { resolveOwner } from './appSession'
 import { getPgClient } from './pgClient'
 
 const HEADERS = { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'GET, POST, OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type' }
@@ -25,7 +26,7 @@ async function ensureBulkTable(client: any) {
 // bulk_job, returns the job. Poll GET /api/app/bulk/{jobId}.
 export async function bulkPackets(req: HttpRequest, context: InvocationContext): Promise<HttpResponseInit> {
   if (req.method === 'OPTIONS') return { status: 204, headers: HEADERS }
-  const owner = req.query.get('owner') || DEMO_EMAIL
+  const owner = resolveOwner(req).owner
   let body: any = {}; try { body = await req.json() } catch {}
   const seedCadence = body?.seedCadence === true
   const draftOutreach = body?.draftOutreach === true

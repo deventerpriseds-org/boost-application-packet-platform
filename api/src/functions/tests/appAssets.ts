@@ -1,4 +1,5 @@
 import { app, HttpRequest, HttpResponseInit, InvocationContext } from '@azure/functions'
+import { resolveOwner } from './appSession'
 import { getPgClient } from './pgClient'
 
 const HEADERS = {
@@ -62,7 +63,7 @@ export async function assetEvent(req: HttpRequest, context: InvocationContext): 
 // open, and a label (company · artifact type) for each tracked asset.
 export async function assetsAnalytics(req: HttpRequest, context: InvocationContext): Promise<HttpResponseInit> {
   if (req.method === 'OPTIONS') return { status: 204, headers: HEADERS }
-  const owner = req.query.get('owner') || DEMO_EMAIL
+  const owner = resolveOwner(req).owner
   let client
   try {
     client = await getPgClient()

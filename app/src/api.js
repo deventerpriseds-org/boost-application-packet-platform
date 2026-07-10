@@ -8,20 +8,26 @@ const API_BASE =
 let _owner = 'demo@executive-engine.local'
 export function setOwner(o) { _owner = o || 'demo@executive-engine.local' }
 export function getOwner() { return _owner }
+// Server-verified session token (minted at sign-in). Sent as a Bearer header so
+// the API derives the trusted owner server-side instead of a client-asserted one.
+let _session = (() => { try { return localStorage.getItem('ee_session') || null } catch { return null } })()
+export function setSessionToken(t) { _session = t || null; try { t ? localStorage.setItem('ee_session', t) : localStorage.removeItem('ee_session') } catch {} }
+export function getSessionToken() { return _session }
+function authHeaders(extra) { return _session ? { ...(extra || {}), Authorization: `Bearer ${_session}` } : (extra || {}) }
 // Whether owner-scoped reads include demo/sample (is_demo) rows.
 let _includeDemo = (() => { try { return localStorage.getItem('ee_show_demo') !== 'false' } catch { return true } })()
 export function setIncludeDemo(v) { _includeDemo = !!v }
 const demoParam = () => (_includeDemo ? '' : '&includeDemo=false')
 
 async function get(path) {
-  const res = await fetch(`${API_BASE}${path}`)
+  const res = await fetch(`${API_BASE}${path}`, { headers: authHeaders() })
   if (!res.ok) throw new Error(`GET ${path} → HTTP ${res.status}`)
   return res.json()
 }
 async function post(path, body) {
   const res = await fetch(`${API_BASE}${path}`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: authHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify(body || {}),
   })
   if (!res.ok) throw new Error(`POST ${path} → HTTP ${res.status}`)

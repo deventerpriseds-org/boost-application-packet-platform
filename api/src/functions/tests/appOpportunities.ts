@@ -1,4 +1,5 @@
 import { app, HttpRequest, HttpResponseInit, InvocationContext } from '@azure/functions'
+import { resolveOwner } from './appSession'
 import { getPgClient } from './pgClient'
 
 const HEADERS = {
@@ -24,7 +25,7 @@ function rowToOpp(r: any) {
 // GET /api/app/opportunities?owner=&persona=&stage=  — list (excludes dismissed)
 export async function opportunitiesList(req: HttpRequest, context: InvocationContext): Promise<HttpResponseInit> {
   if (req.method === 'OPTIONS') return { status: 204, headers: HEADERS }
-  const owner = req.query.get('owner') || DEMO_EMAIL
+  const owner = resolveOwner(req).owner
   const persona = req.query.get('persona')
   const stage = req.query.get('stage')
   const includeDemo = req.query.get('includeDemo') !== 'false' // default: show demo/sample data

@@ -1,4 +1,5 @@
 import { app, HttpRequest, HttpResponseInit, InvocationContext } from '@azure/functions'
+import { signSession } from './appSession'
 
 const HEADERS = {
   'Content-Type': 'application/json',
@@ -37,9 +38,12 @@ export async function authGoogleToken(req: HttpRequest, context: InvocationConte
     const info = (await infoRes.json()) as any
     if (!infoRes.ok) return { status: 200, headers: HEADERS, jsonBody: { error: `userinfo failed: ${info.error || infoRes.status}` } }
 
+    // 3. Mint a server-verified session token the app sends on every API call.
+    const sessionToken = info.email ? signSession(String(info.email).toLowerCase(), 'google', Math.floor(Date.now() / 1000)) : null
+
     return {
       status: 200, headers: HEADERS,
-      jsonBody: { accessToken: token.access_token, accountId: info.sub, displayName: info.name || info.email, email: info.email },
+      jsonBody: { accessToken: token.access_token, accountId: info.sub, displayName: info.name || info.email, email: info.email, token: sessionToken },
     }
   } catch (err) {
     return { status: 200, headers: HEADERS, jsonBody: { error: String(err) } }

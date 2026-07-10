@@ -1,4 +1,5 @@
 import { app, HttpRequest, HttpResponseInit, InvocationContext } from '@azure/functions'
+import { resolveOwner } from './appSession'
 import { getPgClient } from './pgClient'
 
 const HEADERS = {
@@ -12,7 +13,7 @@ const DEMO_EMAIL = 'demo@executive-engine.local'
 // GET /api/app/assets?owner= — every generated artifact across packets + engagement
 export async function assetsList(req: HttpRequest, context: InvocationContext): Promise<HttpResponseInit> {
   if (req.method === 'OPTIONS') return { status: 204, headers: HEADERS }
-  const owner = req.query.get('owner') || DEMO_EMAIL
+  const owner = resolveOwner(req).owner
   let client
   try {
     client = await getPgClient()
@@ -40,7 +41,7 @@ export async function assetsList(req: HttpRequest, context: InvocationContext): 
 // GET /api/app/personas?owner= — role profiles (targeting config)
 export async function personasList(req: HttpRequest, context: InvocationContext): Promise<HttpResponseInit> {
   if (req.method === 'OPTIONS') return { status: 204, headers: HEADERS }
-  const owner = req.query.get('owner') || DEMO_EMAIL
+  const owner = resolveOwner(req).owner
   let client
   try {
     client = await getPgClient()
@@ -66,7 +67,7 @@ const DEFAULT_LIBRARY = [
 // GET /api/app/library?owner=&kind= — playbooks / templates (seeds defaults once)
 export async function libraryList(req: HttpRequest, context: InvocationContext): Promise<HttpResponseInit> {
   if (req.method === 'OPTIONS') return { status: 204, headers: HEADERS }
-  const owner = req.query.get('owner') || DEMO_EMAIL
+  const owner = resolveOwner(req).owner
   const kind = req.query.get('kind')
   let client
   try {

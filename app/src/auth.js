@@ -3,7 +3,7 @@
 // enterpriseds-auth-broker). No secrets in the browser. Client IDs + the shared
 // Google redirect are injected at build.
 import { PublicClientApplication } from '@azure/msal-browser'
-import { API_BASE } from './api.js'
+import { API_BASE, setSessionToken } from './api.js'
 
 const TENANT = import.meta.env.VITE_MS_TENANT_ID || 'ee633423-c321-413c-a191-ace8b07e4196'
 const MS_CLIENT_ID = import.meta.env.VITE_MS_CLIENT_ID || ''
@@ -44,6 +44,17 @@ export async function signInMicrosoft() {
   const res = await app.loginPopup({ scopes: ['openid', 'email', 'profile', 'User.Read'] })
   const acct = res.account
   const user = { email: acct?.username, name: acct?.name || acct?.username, provider: 'microsoft' }
+  // Mint a server-verified session token: send the Graph access token to the API,
+  // which validates it via /me and signs our own session token.
+  try {
+    let accessToken = res.accessToken
+    if (!accessToken) { const t = await app.acquireTokenSilent({ scopes: ['User.Read'], account: acct }); accessToken = t.accessToken }
+    if (accessToken) {
+      const r = await fetch(`${API_BASE}/auth/session`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ msAccessToken: accessToken }) })
+      const d = await r.json().catch(() => ({}))
+      if (d?.token) { setSessionToken(d.token); if (d.email) user.email = d.email }
+    }
+  } catch { /* falls back to unverified owner if token mint fails */ }
   saveUser(user)
   return user
 }
@@ -95,6 +106,7 @@ export async function handleGoogleCallback() {
     if (!res.ok) throw new Error((await res.json().catch(() => ({})))?.error || `token exchange ${res.status}`)
     const d = await res.json()
     const user = { email: d.email, name: d.displayName || d.email, provider: 'google' }
+    if (d.token) setSessionToken(d.token) // server-verified session token
     saveUser(user)
     return user
   } catch (e) { handledCode = null; throw e }
@@ -102,5 +114,6 @@ export async function handleGoogleCallback() {
 
 export async function signOut() {
   saveUser(null)
+  setSessionToken(null)
   try { const app = await getMsal(); const a = app.getAllAccounts?.()[0]; if (a) await app.clearCache?.() } catch {}
 }

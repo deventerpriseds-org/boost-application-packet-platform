@@ -1,4 +1,5 @@
 import { app, HttpRequest, HttpResponseInit, InvocationContext } from '@azure/functions'
+import { resolveOwner } from './appSession'
 import { getPgClient } from './pgClient'
 import { getGoogleOAuthToken, HAS_GOOGLE_OAUTH } from './googleAuth'
 import { logUsage } from './usageMeter'
@@ -79,7 +80,7 @@ export async function packetGet(req: HttpRequest, context: InvocationContext): P
 // GET /api/app/packets?owner= — all packets (one row per opp that has a packet) for the list view
 export async function packetsList(req: HttpRequest, context: InvocationContext): Promise<HttpResponseInit> {
   if (req.method === 'OPTIONS') return { status: 204, headers: HEADERS }
-  const owner = req.query.get('owner') || DEMO_EMAIL
+  const owner = resolveOwner(req).owner
   const includeDemo = req.query.get('includeDemo') !== 'false'
   let client
   try {
@@ -411,7 +412,7 @@ async function selfPost(path: string, body: any): Promise<any> {
 export async function packetBuildAll(req: HttpRequest, context: InvocationContext): Promise<HttpResponseInit> {
   if (req.method === 'OPTIONS') return { status: 204, headers: HEADERS }
   const oppId = req.params.id
-  const owner = req.query.get('owner') || DEMO_EMAIL
+  const owner = resolveOwner(req).owner
   let body: any = {}; try { body = await req.json() } catch {}
   let client
   try {

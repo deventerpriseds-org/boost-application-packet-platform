@@ -1,4 +1,5 @@
 import { app, HttpRequest, HttpResponseInit, InvocationContext, Timer } from '@azure/functions'
+import { resolveOwner } from './appSession'
 import { getPgClient } from './pgClient'
 import { getMicrosoftToken } from './googleAuth'
 import { logUsage } from './usageMeter'
@@ -177,7 +178,7 @@ export async function cadenceSeed(req: HttpRequest, context: InvocationContext):
 // GET /api/app/outreach?owner= — cross-opp queue grouped by state
 export async function outreachQueue(req: HttpRequest, context: InvocationContext): Promise<HttpResponseInit> {
   if (req.method === 'OPTIONS') return { status: 204, headers: HEADERS }
-  const owner = req.query.get('owner') || DEMO_EMAIL
+  const owner = resolveOwner(req).owner
   const includeDemo = req.query.get('includeDemo') !== 'false'
   let client
   try {
