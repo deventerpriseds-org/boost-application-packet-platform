@@ -17,7 +17,7 @@ function rowToOpp(r: any) {
     comp: r.comp_range, match: r.match_score, fit: r.fit, urgency: r.urgency,
     source: r.source, why: r.why_surfaced, hm: r.hiring_manager, recruiter: r.recruiter,
     rolesFor: r.roles_for, stage: r.stage, personaKey: r.persona_key, dismissed: r.dismissed,
-    signals: r.company_signals, pain: r.pain_hypotheses
+    signals: r.company_signals, pain: r.pain_hypotheses, isDemo: r.is_demo
   }
 }
 
@@ -27,11 +27,13 @@ export async function opportunitiesList(req: HttpRequest, context: InvocationCon
   const owner = req.query.get('owner') || DEMO_EMAIL
   const persona = req.query.get('persona')
   const stage = req.query.get('stage')
+  const includeDemo = req.query.get('includeDemo') !== 'false' // default: show demo/sample data
   let client
   try {
     client = await getPgClient()
     const conds = ['owner_email = $1', 'not dismissed']
     const params: any[] = [owner]
+    if (!includeDemo) conds.push('not is_demo')
     if (persona) { params.push(persona); conds.push(`$${params.length} = any(roles_for)`) }
     if (stage) { params.push(stage); conds.push(`stage = $${params.length}`) }
     const rows = (await client.query(

@@ -311,7 +311,26 @@ function AccountSettings() {
   )
 }
 
-const SECTIONS = [{ key: 'account', label: 'Account' }, { key: 'intake', label: 'Intake' }, { key: 'usage', label: 'Usage' }]
+function WorkspaceSettings() {
+  const { showDemo, setShowDemo } = useApp()
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+      <Card>
+        <b style={{ fontSize: 15 }}>Sample data</b>
+        <div className="px-small" style={{ marginTop: 2, marginBottom: 14 }}>The workspace ships with sample opportunities, packets, and outreach so the app isn’t empty. Turn this off to see only your real, ingested data.</div>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer', fontSize: 14 }}>
+          <input type="checkbox" checked={showDemo} onChange={(e) => setShowDemo(e.target.checked)} />
+          Show sample / demo data
+        </label>
+        <div className="px-small" style={{ marginTop: 10, color: 'var(--proto-ink2)' }}>
+          {showDemo ? 'Sample data is visible across Today, Opportunities, Pipeline, Packets, and Outreach.' : 'Only your real data is shown. Sample rows are hidden (not deleted) — turn this back on any time.'}
+        </div>
+      </Card>
+    </div>
+  )
+}
+
+const SECTIONS = [{ key: 'account', label: 'Account' }, { key: 'intake', label: 'Intake' }, { key: 'workspace', label: 'Workspace' }, { key: 'usage', label: 'Usage' }]
 
 export default function Settings({ tab = 'account' }) {
   const active = SECTIONS.find((s) => s.key === tab) ? tab : 'account'
@@ -327,6 +346,7 @@ export default function Settings({ tab = 'account' }) {
       </div>
       {active === 'account' && <AccountSettings />}
       {active === 'intake' && <IntakeSettings />}
+      {active === 'workspace' && <WorkspaceSettings />}
       {active === 'usage' && <UsageSettings />}
     </div>
   )

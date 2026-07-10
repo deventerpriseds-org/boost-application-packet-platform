@@ -22,12 +22,12 @@ import Settings from './screens/Settings.jsx'
 const TITLES = { today: 'Today', intake: 'Intake', settings: 'Settings', opportunities: 'Opportunities', pipeline: 'Pipeline', swipe: 'Swipe', opp: 'Opportunity', packets: 'Packets', packet: 'Packet', outreach: 'Outreach', compose: 'Composer', interview: 'Interview', offer: 'Offer', answers: 'App answers', call: 'Voice coach', library: 'Library' }
 
 function Router() {
-  const { personaKey, toast } = useApp()
+  const { personaKey, toast, showDemo } = useApp()
   const { parts } = useRoute()
   const route = parts[0] || 'today'
   // One live data source shared across screens; polls so real-time-ingested
-  // LinkedIn alerts pop in with a toast.
-  const opps = useOpportunities(personaKey, { onNew: (o) => toast(`New opportunity · ${o.company} — ${o.role}`) })
+  // LinkedIn alerts pop in with a toast. Refetches when the demo toggle changes.
+  const opps = useOpportunities(personaKey, { includeDemo: showDemo, onNew: (o) => toast(`New opportunity · ${o.company} — ${o.role}`) })
 
   let screen
   if (route === 'intake') screen = <Intake />

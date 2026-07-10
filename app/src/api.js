@@ -8,6 +8,10 @@ const API_BASE =
 let _owner = 'demo@executive-engine.local'
 export function setOwner(o) { _owner = o || 'demo@executive-engine.local' }
 export function getOwner() { return _owner }
+// Whether owner-scoped reads include demo/sample (is_demo) rows.
+let _includeDemo = (() => { try { return localStorage.getItem('ee_show_demo') !== 'false' } catch { return true } })()
+export function setIncludeDemo(v) { _includeDemo = !!v }
+const demoParam = () => (_includeDemo ? '' : '&includeDemo=false')
 
 async function get(path) {
   const res = await fetch(`${API_BASE}${path}`)
@@ -31,13 +35,13 @@ export const api = {
     if (persona) qs.set('persona', persona)
     if (stage) qs.set('stage', stage)
     const q = qs.toString()
-    return get(`/app/opportunities${q ? `?${q}` : ''}`)
+    return get(`/app/opportunities?${q}${demoParam()}`)
   },
   getOpportunity: (id) => get(`/app/opportunity/${id}`),
   moveStage: (id, stage) => post(`/app/opportunity/${id}/stage`, { stage }),
   dismiss: (id) => post(`/app/opportunity/${id}/dismiss`, {}),
   // Packets / artifacts (production line)
-  listPackets: ({ owner } = {}) => get(`/app/packets?owner=${encodeURIComponent(owner || _owner)}`),
+  listPackets: ({ owner } = {}) => get(`/app/packets?owner=${encodeURIComponent(owner || _owner)}${demoParam()}`),
   getPacket: (oppId) => get(`/app/opportunity/${oppId}/packet`),
   generateArtifact: (artifactId) => post(`/app/artifact/${artifactId}/generate`, {}),
   setArtifactStatus: (artifactId, status) => post(`/app/artifact/${artifactId}/status`, { status }),
@@ -51,7 +55,7 @@ export const api = {
   seedCadence: (oppId) => post(`/app/opportunity/${oppId}/cadence`, {}),
   setOutreachState: (messageId, state) => post(`/app/outreach/${messageId}/state`, { state }),
   sendOutreach: (messageId, { to, subject } = {}) => post(`/app/outreach/${messageId}/send`, { to, subject }),
-  outreachQueue: ({ owner } = {}) => get(`/app/outreach?owner=${encodeURIComponent(owner || _owner)}`),
+  outreachQueue: ({ owner } = {}) => get(`/app/outreach?owner=${encodeURIComponent(owner || _owner)}${demoParam()}`),
   // Convert: interview + offer
   listInterviews: (oppId) => get(`/app/opportunity/${oppId}/interviews`),
   interviewPrep: (oppId, { stage, interviewers } = {}) => post(`/app/opportunity/${oppId}/interview/prep`, { stage, interviewers }),

@@ -78,6 +78,7 @@ export async function packetGet(req: HttpRequest, context: InvocationContext): P
 export async function packetsList(req: HttpRequest, context: InvocationContext): Promise<HttpResponseInit> {
   if (req.method === 'OPTIONS') return { status: 204, headers: HEADERS }
   const owner = req.query.get('owner') || DEMO_EMAIL
+  const includeDemo = req.query.get('includeDemo') !== 'false'
   let client
   try {
     client = await getPgClient()
@@ -88,7 +89,7 @@ export async function packetsList(req: HttpRequest, context: InvocationContext):
          from packet p
          join opportunity o on o.id = p.opp_id
          left join artifact a on a.packet_id = p.id
-        where o.owner_email = $1 and not o.dismissed
+        where o.owner_email = $1 and not o.dismissed ${includeDemo ? '' : 'and not o.is_demo'}
         group by p.id, o.company, o.role, o.match_score, o.stage
         order by o.match_score desc nulls last`, [owner]
     )).rows

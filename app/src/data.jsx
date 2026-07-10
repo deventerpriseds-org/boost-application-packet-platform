@@ -5,7 +5,7 @@ import { PERSONAS } from './state.jsx'
 // Loads the opportunity catalog for the active persona from the live service layer.
 // Polls every `pollMs` so real-time-ingested opportunities (LinkedIn alerts) pop
 // in; calls onNew(opp) for each newly-appeared id after the first load.
-export function useOpportunities(personaKey, { pollMs = 15000, onNew } = {}) {
+export function useOpportunities(personaKey, { pollMs = 15000, onNew, includeDemo = true } = {}) {
   const [state, setState] = useState({ loading: true, error: null, opportunities: [], byStage: {}, stages: [] })
   const knownIds = useRef(null) // null until first successful load
   const onNewRef = useRef(onNew); onNewRef.current = onNew
@@ -27,7 +27,7 @@ export function useOpportunities(personaKey, { pollMs = 15000, onNew } = {}) {
     } catch (err) {
       if (!silent) setState({ loading: false, error: String(err.message || err), opportunities: [], byStage: {}, stages: [] })
     }
-  }, [personaKey])
+  }, [personaKey, includeDemo])
 
   // Reset the known-set when persona changes so we don't toast the whole list.
   useEffect(() => { knownIds.current = null; reload() }, [reload])

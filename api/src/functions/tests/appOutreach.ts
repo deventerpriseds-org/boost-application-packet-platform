@@ -178,13 +178,14 @@ export async function cadenceSeed(req: HttpRequest, context: InvocationContext):
 export async function outreachQueue(req: HttpRequest, context: InvocationContext): Promise<HttpResponseInit> {
   if (req.method === 'OPTIONS') return { status: 204, headers: HEADERS }
   const owner = req.query.get('owner') || DEMO_EMAIL
+  const includeDemo = req.query.get('includeDemo') !== 'false'
   let client
   try {
     client = await getPgClient()
     const rows = (await client.query(
       `select m.*, o.company, o.role from outreach_message m
          join opportunity o on o.id = m.opp_id
-        where o.owner_email = $1 and not o.dismissed
+        where o.owner_email = $1 and not o.dismissed ${includeDemo ? '' : 'and not o.is_demo'}
         order by array_position(array['due','scheduled','draft','sent']::text[], m.state), coalesce(m.day_offset, 999)`, [owner]
     )).rows
     return { status: 200, headers: HEADERS, jsonBody: { count: rows.length, messages: rows.map((m: any) => ({ ...msgShape(m), company: m.company, role: m.role })) } }
