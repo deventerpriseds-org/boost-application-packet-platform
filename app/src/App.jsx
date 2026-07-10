@@ -31,7 +31,7 @@ function Router() {
 
   let screen
   if (route === 'intake') screen = <Intake />
-  else if (route === 'settings') screen = <Settings tab={parts[1] || 'intake'} />
+  else if (route === 'settings') screen = <Settings tab={parts[1] || 'account'} />
   else if (route === 'opportunities') screen = <Opportunities opps={opps} />
   else if (route === 'pipeline') screen = <Pipeline opps={opps} />
   else if (route === 'swipe') screen = <Swipe opps={opps} />

@@ -42,7 +42,8 @@ export function MatchScore({ value, size = 34 }) {
 }
 
 function TopBar({ title }) {
-  const { personaKey, setPersonaKey, dark, setDark } = useApp()
+  const { personaKey, setPersonaKey, dark, setDark, auth } = useApp()
+  const signedIn = !!auth?.user
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '0 14px', height: 54, borderBottom: '1px solid var(--proto-rule-soft)', background: 'var(--proto-paper)', flexShrink: 0 }}>
       <div onClick={() => go('/today')} style={{ cursor: 'pointer', fontWeight: 700, fontSize: 16, letterSpacing: -0.3, color: 'var(--text-primary)', whiteSpace: 'nowrap' }}>
@@ -53,6 +54,11 @@ function TopBar({ title }) {
       <select className="px-btn" value={personaKey} onChange={(e) => setPersonaKey(e.target.value)} style={{ fontSize: 12, minWidth: 0, maxWidth: 150, textOverflow: 'ellipsis' }}>
         {Object.values(PERSONAS).map((p) => <option key={p.key} value={p.key}>{p.role} · {p.name}</option>)}
       </select>
+      <button className="px-btn" onClick={() => go('/settings/account')} title={signedIn ? auth.user.email : 'Sign in'}
+        style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+        <span style={{ width: 7, height: 7, borderRadius: '50%', background: signedIn ? 'var(--surface-success-default)' : 'var(--proto-ink3)' }} />
+        <span className="ee-hide-sm" style={{ maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{signedIn ? auth.user.email : 'Sign in'}</span>
+      </button>
       <button className="px-btn" onClick={() => go('/settings')} title="Settings">⚙</button>
       <button className="px-btn" onClick={() => setDark(!dark)} title="Toggle theme">{dark ? '☾' : '☀'}</button>
     </div>

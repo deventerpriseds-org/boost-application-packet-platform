@@ -3,6 +3,12 @@
 const API_BASE =
   import.meta.env.VITE_API_URL || 'https://job-platform-api.azurewebsites.net/api'
 
+// Active data owner (set from auth). Owner-scoped reads default to this so each
+// signed-in user sees only their own opportunities/packets/outreach.
+let _owner = 'demo@executive-engine.local'
+export function setOwner(o) { _owner = o || 'demo@executive-engine.local' }
+export function getOwner() { return _owner }
+
 async function get(path) {
   const res = await fetch(`${API_BASE}${path}`)
   if (!res.ok) throw new Error(`GET ${path} → HTTP ${res.status}`)
@@ -21,7 +27,7 @@ async function post(path, body) {
 export const api = {
   listOpportunities: ({ owner, persona, stage } = {}) => {
     const qs = new URLSearchParams()
-    if (owner) qs.set('owner', owner)
+    qs.set('owner', owner || _owner)
     if (persona) qs.set('persona', persona)
     if (stage) qs.set('stage', stage)
     const q = qs.toString()
@@ -31,7 +37,7 @@ export const api = {
   moveStage: (id, stage) => post(`/app/opportunity/${id}/stage`, { stage }),
   dismiss: (id) => post(`/app/opportunity/${id}/dismiss`, {}),
   // Packets / artifacts (production line)
-  listPackets: ({ owner } = {}) => get(`/app/packets${owner ? `?owner=${encodeURIComponent(owner)}` : ''}`),
+  listPackets: ({ owner } = {}) => get(`/app/packets?owner=${encodeURIComponent(owner || _owner)}`),
   getPacket: (oppId) => get(`/app/opportunity/${oppId}/packet`),
   generateArtifact: (artifactId) => post(`/app/artifact/${artifactId}/generate`, {}),
   setArtifactStatus: (artifactId, status) => post(`/app/artifact/${artifactId}/status`, { status }),
@@ -45,7 +51,7 @@ export const api = {
   seedCadence: (oppId) => post(`/app/opportunity/${oppId}/cadence`, {}),
   setOutreachState: (messageId, state) => post(`/app/outreach/${messageId}/state`, { state }),
   sendOutreach: (messageId, { to, subject } = {}) => post(`/app/outreach/${messageId}/send`, { to, subject }),
-  outreachQueue: ({ owner } = {}) => get(`/app/outreach${owner ? `?owner=${encodeURIComponent(owner)}` : ''}`),
+  outreachQueue: ({ owner } = {}) => get(`/app/outreach?owner=${encodeURIComponent(owner || _owner)}`),
   // Convert: interview + offer
   listInterviews: (oppId) => get(`/app/opportunity/${oppId}/interviews`),
   interviewPrep: (oppId, { stage, interviewers } = {}) => post(`/app/opportunity/${oppId}/interview/prep`, { stage, interviewers }),

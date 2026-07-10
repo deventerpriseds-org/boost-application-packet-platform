@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useEffect, useState, useCallback } from 'react'
+import { api } from './api.js'
 
 // Three executive personas (spec §4) — re-filter the opportunity catalog.
 export const PERSONAS = {
@@ -36,10 +37,33 @@ export function useIsMobile(breakpoint = 768) {
   return mobile
 }
 
+const DEMO_OWNER = 'demo@executive-engine.local'
+
 export function AppProvider({ children }) {
   const [personaKey, setPersonaKey] = useState('CTO')
   const [dark, setDark] = useState(false)
   const [toasts, setToasts] = useState([])
+  // Auth via Azure Static Web Apps built-in auth (/.auth/me). When signed in,
+  // the user's email becomes the data owner; otherwise we stay in shared demo
+  // mode so the app is usable without login.
+  const [auth, setAuth] = useState({ loading: true, user: null })
+
+  useEffect(() => {
+    let alive = true
+    ;(async () => {
+      try {
+        const res = await fetch('/.auth/me')
+        const data = res.ok ? await res.json() : null
+        const cp = data?.clientPrincipal || null
+        const user = cp ? { email: cp.userDetails, provider: cp.identityProvider, roles: cp.userRoles || [] } : null
+        if (alive) setAuth({ loading: false, user })
+      } catch { if (alive) setAuth({ loading: false, user: null }) }
+    })()
+    return () => { alive = false }
+  }, [])
+
+  const owner = auth.user?.email || DEMO_OWNER
+  useEffect(() => { api.setOwner(owner) }, [owner])
 
   useEffect(() => {
     document.documentElement.classList.toggle('proto-dark', dark)
@@ -54,6 +78,9 @@ export function AppProvider({ children }) {
   const value = {
     personaKey, setPersonaKey, persona: PERSONAS[personaKey],
     dark, setDark, toast,
+    auth, owner,
+    signIn: (provider = 'github') => { window.location.href = `/.auth/login/${provider}?post_login_redirect_uri=${encodeURIComponent(window.location.href)}` },
+    signOut: () => { window.location.href = `/.auth/logout?post_logout_redirect_uri=${encodeURIComponent(window.location.origin)}` },
   }
   return (
     <AppCtx.Provider value={value}>

@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react'
 import { api } from '../api.js'
-import { go } from '../state.jsx'
+import { go, useApp } from '../state.jsx'
 import { Pill } from '../shell.jsx'
 
 // Settings — app configuration. Currently the Intake watcher (which mailbox /
@@ -266,10 +266,47 @@ function UsageSettings() {
   )
 }
 
-const SECTIONS = [{ key: 'intake', label: 'Intake' }, { key: 'usage', label: 'Usage' }]
+function AccountSettings() {
+  const { auth, owner, signIn, signOut } = useApp()
+  const user = auth?.user
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+      <Card>
+        <b style={{ fontSize: 15 }}>Account</b>
+        {auth?.loading ? (
+          <div className="px-small" style={{ marginTop: 10 }}>Checking sign-in…</div>
+        ) : user ? (
+          <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+              <Pill tone="green">Signed in</Pill>
+              <span style={{ fontWeight: 600 }}>{user.email}</span>
+              <span className="px-small">via {user.provider}</span>
+            </div>
+            <div className="px-small">Your opportunities, packets and outreach are scoped to this account.</div>
+            <button className="px-btn" style={{ alignSelf: 'flex-start' }} onClick={signOut}>Sign out</button>
+          </div>
+        ) : (
+          <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <Pill tone="yellow">Shared demo mode</Pill>
+              <span className="px-small">workspace: {owner}</span>
+            </div>
+            <div className="px-small">Sign in to get your own private workspace.</div>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              <button className="px-btn px-btn-accent" onClick={() => signIn('github')}>Sign in with GitHub</button>
+              <button className="px-btn" onClick={() => signIn('aad')}>Sign in with Microsoft</button>
+            </div>
+          </div>
+        )}
+      </Card>
+    </div>
+  )
+}
 
-export default function Settings({ tab = 'intake' }) {
-  const active = SECTIONS.find((s) => s.key === tab) ? tab : 'intake'
+const SECTIONS = [{ key: 'account', label: 'Account' }, { key: 'intake', label: 'Intake' }, { key: 'usage', label: 'Usage' }]
+
+export default function Settings({ tab = 'account' }) {
+  const active = SECTIONS.find((s) => s.key === tab) ? tab : 'account'
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
@@ -280,6 +317,7 @@ export default function Settings({ tab = 'intake' }) {
               border: '1px solid var(--proto-rule-soft)' }}>{s.label}</div>
         ))}
       </div>
+      {active === 'account' && <AccountSettings />}
       {active === 'intake' && <IntakeSettings />}
       {active === 'usage' && <UsageSettings />}
     </div>
