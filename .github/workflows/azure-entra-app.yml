@@ -1,0 +1,61 @@
+name: Provision Microsoft sign-in Entra app (Executive Engine)
+
+# Creates (idempotently) the single-tenant SPA Entra app used for client-side
+# Microsoft sign-in (MSAL, PKCE — no client secret), and sets its SPA redirect
+# URI to the Static Web App URL. Run once. Then re-run the Executive Engine
+# deploy so the app id is baked into the build (VITE_MS_CLIENT_ID).
+#
+# PREREQ (one-time, by an admin — cannot be done from a Claude/CCR session
+# because graph.microsoft.com is blocked there): the deploy service principal
+# `enterpriseds-github-actions` must hold Microsoft Graph Application.ReadWrite.All
+# (admin-consented). See the enterpriseds-azure-deploy skill.
+
+on:
+  workflow_dispatch:
+    inputs:
+      app_name:
+        description: Entra app display name
+        default: executive-engine-signin
+      redirect_uri:
+        description: SPA redirect URI (Static Web App origin)
+        default: https://purple-ground-0f377120f.7.azurestaticapps.net
+
+jobs:
+  provision:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Login to Azure
+        uses: azure/login@v2
+        with:
+          creds: '{"clientId":"${{ secrets.AZURE_CLIENT_ID }}","clientSecret":"${{ secrets.AZURE_CLIENT_SECRET }}","subscriptionId":"${{ secrets.AZURE_SUBSCRIPTION_ID }}","tenantId":"${{ secrets.AZURE_TENANT_ID }}"}'
+
+      - name: Create or update the SPA app registration
+        run: |
+          set -euo pipefail
+          NAME='${{ github.event.inputs.app_name }}'
+          REDIRECT='${{ github.event.inputs.redirect_uri }}'
+          TOKEN=$(az account get-access-token --resource https://graph.microsoft.com --query accessToken -o tsv)
+          GRAPH=https://graph.microsoft.com/v1.0
+
+          # Look up an existing app by display name.
+          EXISTING=$(curl -s -H "Authorization: Bearer $TOKEN" \
+            "$GRAPH/applications?\$filter=displayName eq '$NAME'&\$select=id,appId" )
+          OBJ_ID=$(echo "$EXISTING" | python3 -c "import sys,json;v=json.load(sys.stdin).get('value',[]);print(v[0]['id'] if v else '')")
+          APP_ID=$(echo "$EXISTING" | python3 -c "import sys,json;v=json.load(sys.stdin).get('value',[]);print(v[0]['appId'] if v else '')")
+
+          BODY=$(python3 -c "import json,sys;print(json.dumps({'displayName':sys.argv[1],'signInAudience':'AzureADMyOrg','spa':{'redirectUris':[sys.argv[2]]}}))" "$NAME" "$REDIRECT")
+
+          if [ -z "$OBJ_ID" ]; then
+            echo "Creating $NAME…"
+            RES=$(curl -s -X POST -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d "$BODY" "$GRAPH/applications")
+            APP_ID=$(echo "$RES" | python3 -c "import sys,json;print(json.load(sys.stdin).get('appId',''))")
+          else
+            echo "Updating $NAME ($OBJ_ID) redirect URI…"
+            curl -s -X PATCH -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+              -d "$(python3 -c "import json,sys;print(json.dumps({'spa':{'redirectUris':[sys.argv[1]]}}))" "$REDIRECT")" \
+              "$GRAPH/applications/$OBJ_ID"
+          fi
+
+          if [ -z "$APP_ID" ]; then echo "::error::Could not resolve appId — does the SP have Application.ReadWrite.All (admin-consented)?"; exit 1; fi
+          echo "::notice::Microsoft sign-in appId (VITE_MS_CLIENT_ID) = $APP_ID"
+          echo "Re-run 'Deploy Executive Engine' so this id is baked into the build."

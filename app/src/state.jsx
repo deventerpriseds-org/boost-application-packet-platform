@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useEffect, useState, useCallback } from 'react'
 import { api } from './api.js'
+import { loadUser, signInMicrosoft, signInGoogle, signOut as authSignOut, providerReady } from './auth.js'
 
 // Three executive personas (spec §4) — re-filter the opportunity catalog.
 export const PERSONAS = {
@@ -43,27 +44,23 @@ export function AppProvider({ children }) {
   const [personaKey, setPersonaKey] = useState('CTO')
   const [dark, setDark] = useState(false)
   const [toasts, setToasts] = useState([])
-  // Auth via Azure Static Web Apps built-in auth (/.auth/me). When signed in,
-  // the user's email becomes the data owner; otherwise we stay in shared demo
-  // mode so the app is usable without login.
-  const [auth, setAuth] = useState({ loading: true, user: null })
-
-  useEffect(() => {
-    let alive = true
-    ;(async () => {
-      try {
-        const res = await fetch('/.auth/me')
-        const data = res.ok ? await res.json() : null
-        const cp = data?.clientPrincipal || null
-        const user = cp ? { email: cp.userDetails, provider: cp.identityProvider, roles: cp.userRoles || [] } : null
-        if (alive) setAuth({ loading: false, user })
-      } catch { if (alive) setAuth({ loading: false, user: null }) }
-    })()
-    return () => { alive = false }
-  }, [])
+  // Client-side auth (EnterpriseDS house pattern): Microsoft (MSAL) + Google,
+  // no server token exchange. Signed-in email becomes the data owner; otherwise
+  // shared demo mode so the app stays usable without login.
+  const [auth, setAuth] = useState({ loading: true, user: loadUser() })
+  useEffect(() => { setAuth({ loading: false, user: loadUser() }) }, [])
 
   const owner = auth.user?.email || DEMO_OWNER
   useEffect(() => { api.setOwner(owner) }, [owner])
+
+  const signIn = useCallback(async (provider = 'microsoft') => {
+    try {
+      const user = provider === 'google' ? await signInGoogle() : await signInMicrosoft()
+      setAuth({ loading: false, user })
+      return user
+    } catch (e) { throw e }
+  }, [])
+  const signOut = useCallback(async () => { await authSignOut(); setAuth({ loading: false, user: null }) }, [])
 
   useEffect(() => {
     document.documentElement.classList.toggle('proto-dark', dark)
@@ -78,9 +75,7 @@ export function AppProvider({ children }) {
   const value = {
     personaKey, setPersonaKey, persona: PERSONAS[personaKey],
     dark, setDark, toast,
-    auth, owner,
-    signIn: (provider = 'github') => { window.location.href = `/.auth/login/${provider}?post_login_redirect_uri=${encodeURIComponent(window.location.href)}` },
-    signOut: () => { window.location.href = `/.auth/logout?post_logout_redirect_uri=${encodeURIComponent(window.location.origin)}` },
+    auth, owner, signIn, signOut, providerReady,
   }
   return (
     <AppCtx.Provider value={value}>

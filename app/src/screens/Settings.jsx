@@ -267,8 +267,10 @@ function UsageSettings() {
 }
 
 function AccountSettings() {
-  const { auth, owner, signIn, signOut } = useApp()
+  const { auth, owner, signIn, signOut, providerReady } = useApp()
   const user = auth?.user
+  const [err, setErr] = useState(null)
+  const doSignIn = async (p) => { setErr(null); try { await signIn(p) } catch (e) { setErr(String(e.message || e)) } }
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
       <Card>
@@ -291,11 +293,17 @@ function AccountSettings() {
               <Pill tone="yellow">Shared demo mode</Pill>
               <span className="px-small">workspace: {owner}</span>
             </div>
-            <div className="px-small">Sign in to get your own private workspace.</div>
+            <div className="px-small">Connect the email account you get job alerts on — the same identity that powers your inbox watcher and gives you a private workspace.</div>
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-              <button className="px-btn px-btn-accent" onClick={() => signIn('github')}>Sign in with GitHub</button>
-              <button className="px-btn" onClick={() => signIn('aad')}>Sign in with Microsoft</button>
+              <button className="px-btn px-btn-accent" disabled={!providerReady?.microsoft} onClick={() => doSignIn('microsoft')}
+                title={providerReady?.microsoft ? '' : 'VITE_MS_CLIENT_ID not configured on this deploy'}>Connect Microsoft</button>
+              <button className="px-btn" disabled={!providerReady?.google} onClick={() => doSignIn('google')}
+                title={providerReady?.google ? '' : 'VITE_GOOGLE_CLIENT_ID not configured on this deploy'}>Connect Google</button>
             </div>
+            {!providerReady?.microsoft && !providerReady?.google && (
+              <div className="px-small" style={{ color: 'var(--proto-yellow)' }}>Sign-in providers aren’t configured on this build yet (needs the Entra app + build-time client IDs).</div>
+            )}
+            {err && <div className="px-small" style={{ color: 'var(--proto-red)' }}>{err}</div>}
           </div>
         )}
       </Card>

@@ -21,16 +21,29 @@ jobs:
           cache: 'npm'
           cache-dependency-path: app/package-lock.json
 
-      - name: Install and Build
-        run: |
-          cd app
-          npm ci
-          npm run build
-
       - name: Login to Azure
         uses: azure/login@v2
         with:
           creds: '{"clientId":"${{ secrets.AZURE_CLIENT_ID }}","clientSecret":"${{ secrets.AZURE_CLIENT_SECRET }}","subscriptionId":"${{ secrets.AZURE_SUBSCRIPTION_ID }}","tenantId":"${{ secrets.AZURE_TENANT_ID }}"}'
+
+      # Resolve the Microsoft sign-in Entra app's client ID by name (created by
+      # azure-entra-app.yml). Best-effort: if it doesn't exist yet or the SP lacks
+      # directory read, VITE_MS_CLIENT_ID stays empty and the MS button is disabled.
+      - name: Resolve Microsoft client ID
+        id: msid
+        run: |
+          MSID=$(az ad app list --display-name executive-engine-signin --query "[0].appId" -o tsv 2>/dev/null || true)
+          echo "client_id=${MSID}" >> $GITHUB_OUTPUT
+
+      - name: Install and Build
+        env:
+          VITE_GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          VITE_MS_CLIENT_ID: ${{ steps.msid.outputs.client_id }}
+          VITE_MS_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+        run: |
+          cd app
+          npm ci
+          npm run build
 
       - name: Get Static Web App token
         id: swa_token
