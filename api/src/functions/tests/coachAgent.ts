@@ -115,8 +115,9 @@ export async function coachChat(req: HttpRequest, context: InvocationContext): P
     const curYear = now.getUTCFullYear()
     const dateHint = `\n\nCURRENT DATE: ${todayStr}. The current year is ${curYear} — your training data is older, so IGNORE any instinct that the year is 2023 or 2024. HARD RULE for tavily_web_search: NEVER put a year earlier than ${curYear} in a query, and do NOT append a specific year at all unless the user named one — just search the topic (e.g. "Stripe recent product launches", not "Stripe product launches October 2023"). Prefer max_results >= 5. Only set a narrow time_range ("day"/"week"/"month") when the user explicitly asks for very recent news; otherwise leave time_range unset. If a search returns nothing, broaden it (drop any year, drop time_range, raise max_results) and retry before saying you found nothing. Never fabricate figures — report only what the search returned, with source URLs.`
 
-    // Ground with durable memory (best-effort).
-    let memHint = dateHint
+    // Ground with durable memory (best-effort). Keep this SEPARATE from dateHint —
+    // an earlier version overwrote the date hint whenever memory existed.
+    let memHint = ''
     try {
       const hits = await recall({ owner, query: String(lastUser), k: 5 })
       if (hits.length) memHint = '\n\nRelevant saved memory (from prior conversations):\n' + hits.map((h) => `- ${h.text}`).join('\n')
@@ -145,7 +146,9 @@ export async function coachChat(req: HttpRequest, context: InvocationContext): P
     for (let hop = 0; hop <= maxHops; hop++) {
       const reqBody: Record<string, unknown> = {
         model: cfg.model,
-        instructions: cfg.systemPrompt + memHint,
+        // Front-load the date: gpt-4o ignores a date buried after a 6k-char prompt
+        // and keeps narrating "2023". Putting it FIRST fixes the model's date belief.
+        instructions: dateHint.trim() + '\n\n' + cfg.systemPrompt + memHint,
         input: runningInput,
         tools,
         ...(previousResponseId ? { previous_response_id: previousResponseId } : {}),
@@ -183,7 +186,7 @@ export async function coachChat(req: HttpRequest, context: InvocationContext): P
     try {
       const pool = getPool(); await ensureOpsTables(pool)
       await pool.query(`insert into coach_activity (owner, user_msg, reply, tools, instructions) values ($1,$2,$3,$4,$5)`,
-        [owner, String(lastUser).slice(0, 1000), reply.slice(0, 2000), JSON.stringify(toolTrace), (cfg.systemPrompt + memHint).slice(0, 8000)])
+        [owner, String(lastUser).slice(0, 1000), reply.slice(0, 2000), JSON.stringify(toolTrace), (dateHint.trim() + '\n\n' + cfg.systemPrompt + memHint).slice(0, 8000)])
       const fullThread = [...history.map((m: any) => ({ role: m.role, content: String(m.content || '') })), { role: 'assistant', content: reply }].slice(-40)
       await pool.query(`insert into coach_thread (owner, messages, updated_at) values ($1,$2,now())
                         on conflict (owner) do update set messages=$2, updated_at=now()`, [owner, JSON.stringify(fullThread)])
