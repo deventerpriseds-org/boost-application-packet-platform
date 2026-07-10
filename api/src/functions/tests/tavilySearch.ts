@@ -32,12 +32,25 @@ export interface TavilyArgs {
 export interface TavilyResult { title: string; url: string; content: string; score: number; published_date?: string }
 export interface TavilyResponse { success: boolean; answer: string; sources: string[]; results?: TavilyResult[]; query: string; error?: string }
 
+// Deterministic guard against the model's training-cutoff bias: LLMs routinely
+// staple an obsolete year onto a query ("Stripe product launches October 2023"),
+// which — combined with a relative time_range — makes Tavily return nothing. We
+// strip any 4-digit year strictly older than the current year, regardless of how
+// the question was phrased. This fixes the root cause server-side (not via prompt
+// compliance): a stale year can never reach the search API. A year the user
+// genuinely named that is current/future is preserved.
+export function sanitizeTavilyQuery(query: string, nowYear: number): string {
+  const cleaned = query.replace(/\b(19|20)\d{2}\b/g, (m) => (Number(m) < nowYear ? '' : m))
+  return cleaned.replace(/\s{2,}/g, ' ').trim() || query
+}
+
 export async function tavilySearch(args: TavilyArgs): Promise<TavilyResponse> {
+  const query = sanitizeTavilyQuery(String(args.query || ''), new Date().getUTCFullYear())
   const key = (process.env.TAVILY_API_KEY ?? '').trim()
-  if (!key) return { success: false, answer: 'Web search is not configured (TAVILY_API_KEY missing).', sources: [], query: args.query, error: 'TAVILY_API_KEY not configured' }
+  if (!key) return { success: false, answer: 'Web search is not configured (TAVILY_API_KEY missing).', sources: [], query, error: 'TAVILY_API_KEY not configured' }
 
   const body: Record<string, unknown> = {
-    query: args.query,
+    query,
     topic: args.topic || 'general',
     search_depth: args.search_depth || 'advanced',
     max_results: Math.min(Math.max(args.max_results || 8, 1), 20),
@@ -54,12 +67,12 @@ export async function tavilySearch(args: TavilyArgs): Promise<TavilyResponse> {
     })
     if (!res.ok) {
       const text = await res.text().catch(() => '')
-      return { success: false, answer: "I couldn't search right now.", sources: [], query: args.query, error: `Tavily ${res.status}: ${text.slice(0, 200)}` }
+      return { success: false, answer: "I couldn't search right now.", sources: [], query, error: `Tavily ${res.status}: ${text.slice(0, 200)}` }
     }
     const data = (await res.json()) as { answer?: string; results?: TavilyResult[] }
     const results = (data.results || []).map((r) => ({ title: r.title, url: r.url, content: (r.content || '').slice(0, 600), score: r.score, published_date: r.published_date }))
-    return { success: true, answer: data.answer || 'No results found.', sources: results.map((r) => r.url), results, query: args.query }
+    return { success: true, answer: data.answer || 'No results found.', sources: results.map((r) => r.url), results, query }
   } catch (err) {
-    return { success: false, answer: 'Web search error.', sources: [], query: args.query, error: err instanceof Error ? err.message : String(err) }
+    return { success: false, answer: 'Web search error.', sources: [], query, error: err instanceof Error ? err.message : String(err) }
   }
 }
