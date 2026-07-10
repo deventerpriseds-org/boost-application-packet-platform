@@ -143,7 +143,10 @@ async function parseAlert(rawText: string): Promise<any[]> {
 }
 
 // Insert one opportunity if it isn't a near-duplicate (pgvector). Returns status.
-async function insertOpp(client: any, owner: string, o: any): Promise<{ inserted: boolean; id?: string; reason?: string; company: string; role: string }> {
+// Exported + source-parameterized so ATS ingestion (appAts) reuses the exact
+// embed → dedupe → insert-as-discovered pipeline.
+export { embed as embedOpp }
+export async function insertOpp(client: any, owner: string, o: any, source = 'LinkedIn', why?: string): Promise<{ inserted: boolean; id?: string; reason?: string; company: string; role: string }> {
   const vec = await embed(`${o.company} — ${o.role}`)
   if (vec) {
     const dup = (await client.query(
@@ -158,15 +161,16 @@ async function insertOpp(client: any, owner: string, o: any): Promise<{ inserted
   }
   const roleLower = (o.role || '').toLowerCase()
   const personaKey = roleLower.includes('product') ? 'VPP' : roleLower.includes('cto') || roleLower.includes('chief') ? 'CTO' : 'VPE'
+  const whyText = why || `New ${source} alert${o.url ? ` · ${o.url}` : ''}`
   const r = await client.query(
     `insert into opportunity
        (owner_email, is_demo, persona_key, company, role, location, comp_range, source, source_date,
         why_surfaced, roles_for, stage, urgency, embedding)
-     values ($1, false, $2, $3, $4, $5, $6, 'LinkedIn', now(), $7, $8, 'discovered', 'Warm', ${vec ? '$9::vector' : 'null'})
+     values ($1, false, $2, $3, $4, $5, $6, ${vec ? '$10' : '$9'}, now(), $7, $8, 'discovered', 'Warm', ${vec ? '$9::vector' : 'null'})
      returning id`,
     vec
-      ? [owner, personaKey, o.company, o.role, o.location || null, o.comp || null, `New LinkedIn alert${o.url ? ` · ${o.url}` : ''}`, [personaKey], vec]
-      : [owner, personaKey, o.company, o.role, o.location || null, o.comp || null, `New LinkedIn alert${o.url ? ` · ${o.url}` : ''}`, [personaKey]]
+      ? [owner, personaKey, o.company, o.role, o.location || null, o.comp || null, whyText, [personaKey], vec, source]
+      : [owner, personaKey, o.company, o.role, o.location || null, o.comp || null, whyText, [personaKey], source]
   )
   return { inserted: true, id: r.rows[0].id, company: o.company, role: o.role }
 }

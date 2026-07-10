@@ -59,6 +59,10 @@ const ROUTES: Record<string, Route> = {
   bulk_status:        { method: 'GET', ownerQuery: true, path: (a) => `app/bulk/${enc(a.jobId)}` },
   analyze_jd:         { method: 'POST', ownerQuery: true, path: (a) => `app/opportunity/${enc(a.id)}/jd-analysis` },
   enrich_opportunity: { method: 'POST', ownerQuery: true, path: (a) => `app/opportunity/${enc(a.id)}/enrich` },
+  list_ats_sources:   { method: 'GET', ownerQuery: true, path: () => `app/ats/sources` },
+  add_ats_source:     { method: 'POST', ownerQuery: true, path: () => `app/ats/sources`, body: (a) => ({ provider: a.provider, board: a.board }) },
+  ats_preview:        { method: 'POST', ownerQuery: true, path: () => `app/ats/preview`, body: (a) => ({ provider: a.provider, board: a.board }) },
+  ats_ingest:         { method: 'POST', ownerQuery: true, path: () => `app/ats/ingest`, body: (a) => ({ provider: a.provider, board: a.board, execOnly: a.execOnly }) },
 }
 
 function enc(v: any) { return encodeURIComponent(String(v ?? '')) }
@@ -115,6 +119,11 @@ export function coachToolSchemas(): any[] {
     fn('video_status', 'Check the render status of an intro video artifact.', { artifactId: { type: 'string' } }, ['artifactId']),
     fn('set_artifact_status', 'Advance an artifact\'s status: todo | drafting | review | changes | approved.', { artifactId: { type: 'string' }, status: { type: 'string' } }, ['artifactId', 'status']),
     fn('list_personas', 'List the user\'s role personas (which role profile is active, comp target, positioning).'),
+    // ATS job-board ingestion (Greenhouse / Lever / Ashby)
+    fn('list_ats_sources', 'List the configured ATS job-board sources (Greenhouse/Lever/Ashby) that feed the pipeline.'),
+    fn('add_ats_source', 'Add an ATS job-board source. provider: greenhouse | lever | ashby. board = the company board token (e.g. greenhouse "stripe", lever "netflix").', { provider: { type: 'string', enum: ['greenhouse', 'lever', 'ashby'] }, board: { type: 'string' } }, ['provider', 'board']),
+    fn('ats_preview', 'Preview roles from an ATS board WITHOUT inserting (how many exec roles it has).', { provider: { type: 'string' }, board: { type: 'string' } }, ['provider', 'board']),
+    fn('ats_ingest', 'Ingest jobs from ATS boards into the pipeline as discovered opportunities (embed + dedupe). With provider+board: that one; otherwise all configured sources.', { provider: { type: 'string' }, board: { type: 'string' }, execOnly: { type: 'boolean' } }),
     // Bulk (start-to-finish across many opportunities — NEVER sends)
     fn('bulk_run', 'Run the packet build across MANY opportunities at once (bulk). Pass explicit oppIds OR topN (+optional stage). For each: build the full packet, optionally seed cadence and DRAFT outreach. NEVER sends. Returns a jobId; poll bulk_status.', { oppIds: { type: 'array', items: { type: 'string' } }, topN: { type: 'number' }, stage: { type: 'string' }, seedCadence: { type: 'boolean' }, draftOutreach: { type: 'boolean' } }),
     fn('bulk_status', 'Get the progress/status of a bulk run by jobId.', { jobId: { type: 'string' } }, ['jobId']),
