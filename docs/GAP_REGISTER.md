@@ -86,8 +86,19 @@ until that diff is done.
   **Greenhouse / Lever / Ashby** public job boards; preview + ingest; exec-role
   filter; reuses the intake `insertOpp` (embed → pgvector dedupe → discovered).
   Verified live: Stripe Greenhouse → 14 new exec opps inserted, re-ingest 0 new /
-  15 dupes. Settings ▸ Intake ▸ ATS boards + coach tools. Phases B (structured
-  apply) / C (match score) still open.
+  15 dupes. Settings ▸ Intake ▸ ATS boards + coach tools.
+- **Phase B — structured apply (`appApply.ts`)**: `apply/prepare` drafts answers to
+  the **real Greenhouse application questions** when the opp is a Greenhouse posting
+  (parsed from the stored URL), else the universal exec set (work auth, sponsorship,
+  salary, start, relocation, why-company, leadership) + attaches the tailored
+  resume/cover/portfolio/video links. Returns a copy-paste **handoff**; real
+  auto-submit needs per-company Greenhouse API keys (not held) → wired to fire only
+  when a key is present. Verified: 6 answers + 5 doc links returned.
+- **Phase C — ATS match score**: `match-score` returns a Jobscan-style match rate +
+  matched strengths + keyword gaps, grounded in the master context, stored on
+  `opportunity.match_score`. Verified: Cloudflare CTO → 85, 8 matched, 3 gaps.
+- Coach tools `match_score` / `apply_prepare`; OppDetail shows match badge + prepared
+  application. **Remaining:** true per-company auto-submit + a paid aggregator for breadth.
 
 Two halves + a coverage reality (researched 2026):
 - **Coverage:** LinkedIn/Indeed/Monster/Ladders are *boards*, not ATS; none have
