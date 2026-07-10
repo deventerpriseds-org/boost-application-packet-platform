@@ -1,7 +1,7 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react'
 import { Conversation } from '@elevenlabs/client'
 import { useApp, go } from '../state.jsx'
-import { api, getOwner } from '../api.js'
+import { api, getOwner, getSessionToken } from '../api.js'
 
 // Screens the coach can deep-link to. id-bearing screens take a second segment.
 const NAV_PATH = { today: 'today', opportunities: 'opportunities', pipeline: 'pipeline', packets: 'packets', outreach: 'outreach', library: 'library', settings: 'settings', intake: 'intake', opp: 'opp', packet: 'packet', interview: 'interview', offer: 'offer', answers: 'answers' }
@@ -211,7 +211,11 @@ function CoachChat() {
   useEffect(() => { scrollRef.current?.scrollTo(0, scrollRef.current.scrollHeight) }, [msgs, busy])
 
   // Restore the persisted conversation from Postgres (proof it's DB-backed).
+  // ONLY when signed in — unauthenticated visitors all share the demo owner, so
+  // restoring the shared thread would clobber the current conversation with
+  // someone else's messages ("flash and replace"). Demo stays ephemeral.
   useEffect(() => {
+    if (!getSessionToken()) return
     let live = true
     api.coachThreadGet({ owner: getOwner() }).then((r) => {
       if (live && Array.isArray(r?.messages) && r.messages.length) setMsgs(r.messages.map((m) => ({ role: m.role, content: m.content })))
@@ -220,7 +224,7 @@ function CoachChat() {
   }, [])
 
   const clearThread = async () => {
-    setMsgs([]); try { await api.coachThreadClear({ owner: getOwner() }) } catch {}
+    setMsgs([]); if (getSessionToken()) { try { await api.coachThreadClear({ owner: getOwner() }) } catch {} }
   }
 
   const send = useCallback(async () => {

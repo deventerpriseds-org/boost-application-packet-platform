@@ -107,8 +107,15 @@ export async function coachChat(req: HttpRequest, context: InvocationContext): P
     if (!history.length) return { status: 400, headers: HEADERS, jsonBody: { error: 'messages required' } }
     const lastUser = [...history].reverse().find((m: any) => m.role === 'user')?.content || ''
 
+    // Anchor to the real current date. Without this the model dates its own web
+    // queries to its training cutoff (e.g. "2023"), so time_range filters miss
+    // and searches come back empty. Give it today's date + search-quality rules.
+    const now = new Date()
+    const todayStr = now.toISOString().slice(0, 10)
+    const dateHint = `\n\nCURRENT DATE: ${todayStr}. When you build tavily_web_search queries, use THIS year — never your training-cutoff year. Do not hardcode an old year into the query. Prefer max_results >= 5 and only set a narrow time_range ("day"/"week") when the user explicitly asks for very recent news; otherwise leave time_range unset so you don't filter out valid results. If a search returns nothing, broaden it (drop the year, drop time_range, raise max_results) and try again before telling the user you found nothing. Never fabricate figures — only report what the search actually returned, with source URLs.`
+
     // Ground with durable memory (best-effort).
-    let memHint = ''
+    let memHint = dateHint
     try {
       const hits = await recall({ owner, query: String(lastUser), k: 5 })
       if (hits.length) memHint = '\n\nRelevant saved memory (from prior conversations):\n' + hits.map((h) => `- ${h.text}`).join('\n')
