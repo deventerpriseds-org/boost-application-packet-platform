@@ -56,35 +56,27 @@ function isExecRole(role: string): boolean {
   return /\b(chief|cto|cio|ciso|cfo|coo|ceo|cpo|cmo|vp|vice president|head of|director|svp|evp|president)\b/.test(t)
 }
 
-// GET /api/app/ats/sources
+// GET /api/app/ats/sources — list; POST — add/update { provider, board, enabled? }.
+// One function handles both methods (two functions on the same route drop one).
 export async function atsSources(req: HttpRequest): Promise<HttpResponseInit> {
   if (req.method === 'OPTIONS') return { status: 204, headers: HEADERS }
   const owner = resolveOwner(req).owner
   let client
   try {
     client = await getPgClient(); await ensureTable(client)
+    if (req.method === 'POST') {
+      const body = await req.json() as any
+      const provider = String(body?.provider || '').toLowerCase()
+      const board = String(body?.board || '').trim()
+      if (!PROVIDERS.includes(provider as Provider) || !board) return { status: 400, headers: HEADERS, jsonBody: { error: `provider must be one of ${PROVIDERS.join(', ')} and board is required` } }
+      const { rows } = await client.query(
+        `insert into ats_source (owner_email, provider, board, enabled) values ($1,$2,$3,$4)
+         on conflict (owner_email, provider, board) do update set enabled = $4 returning id`,
+        [owner, provider, board, body?.enabled !== false])
+      return { status: 200, headers: HEADERS, jsonBody: { ok: true, id: rows[0].id } }
+    }
     const { rows } = await client.query(`select id, provider, board, enabled, last_run from ats_source where owner_email = $1 order by provider, board`, [owner])
     return { status: 200, headers: HEADERS, jsonBody: { sources: rows, providers: PROVIDERS } }
-  } catch (err) { return { status: 200, headers: HEADERS, jsonBody: { error: String(err) } } }
-  finally { try { await client?.end() } catch {} }
-}
-
-// POST /api/app/ats/sources { provider, board, enabled? } — add/update a source.
-export async function atsSourceAdd(req: HttpRequest): Promise<HttpResponseInit> {
-  if (req.method === 'OPTIONS') return { status: 204, headers: HEADERS }
-  const owner = resolveOwner(req).owner
-  let client
-  try {
-    const body = await req.json() as any
-    const provider = String(body?.provider || '').toLowerCase()
-    const board = String(body?.board || '').trim()
-    if (!PROVIDERS.includes(provider as Provider) || !board) return { status: 400, headers: HEADERS, jsonBody: { error: `provider must be one of ${PROVIDERS.join(', ')} and board is required` } }
-    client = await getPgClient(); await ensureTable(client)
-    const { rows } = await client.query(
-      `insert into ats_source (owner_email, provider, board, enabled) values ($1,$2,$3,$4)
-       on conflict (owner_email, provider, board) do update set enabled = $4 returning id`,
-      [owner, provider, board, body?.enabled !== false])
-    return { status: 200, headers: HEADERS, jsonBody: { ok: true, id: rows[0].id } }
   } catch (err) { return { status: 200, headers: HEADERS, jsonBody: { error: String(err) } } }
   finally { try { await client?.end() } catch {} }
 }
@@ -159,8 +151,7 @@ export async function atsIngest(req: HttpRequest, context: InvocationContext): P
   finally { try { await client?.end() } catch {} }
 }
 
-app.http('atsSources', { methods: ['GET', 'OPTIONS'], authLevel: 'anonymous', route: 'app/ats/sources', handler: atsSources })
-app.http('atsSourceAdd', { methods: ['POST', 'OPTIONS'], authLevel: 'anonymous', route: 'app/ats/sources', handler: atsSourceAdd })
+app.http('atsSources', { methods: ['GET', 'POST', 'OPTIONS'], authLevel: 'anonymous', route: 'app/ats/sources', handler: atsSources })
 app.http('atsSourceDelete', { methods: ['POST', 'OPTIONS'], authLevel: 'anonymous', route: 'app/ats/sources/delete', handler: atsSourceDelete })
 app.http('atsPreview', { methods: ['POST', 'OPTIONS'], authLevel: 'anonymous', route: 'app/ats/preview', handler: atsPreview })
 app.http('atsIngest', { methods: ['POST', 'OPTIONS'], authLevel: 'anonymous', route: 'app/ats/ingest', handler: atsIngest })
