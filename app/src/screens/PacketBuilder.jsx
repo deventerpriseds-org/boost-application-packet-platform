@@ -62,9 +62,9 @@ export default function PacketBuilder({ id }) {
     try {
       const res = await api.generateArtifactSlides(a.id)
       if (res.error) throw new Error(res.error)
-      patchArtifact(a.id, { docUrl: res.deckUrl })
+      patchArtifact(a.id, { docUrl: res.deckUrl || res.docUrl })
       setDoc((d) => ({ ...d, [a.id]: { busy: false } }))
-      toast(`Slides deck created (${res.slides} slides)`)
+      toast('Slides deck created from template')
     } catch (err) {
       setDoc((d) => ({ ...d, [a.id]: { busy: false, error: String(err.message || err) } }))
       toast(`Deck failed: ${err.message || err}`)
@@ -227,10 +227,10 @@ export default function PacketBuilder({ id }) {
                 )
               })()}
 
-              {/* Real Google Doc, or a Slides deck for the portfolio (non-video) */}
-              {a.type !== 'video' && a.content && (() => {
+              {/* Real Google Doc/Slides by TEMPLATE FILL (copy template → fill placeholders). */}
+              {a.type !== 'video' && (a.content || ['resume', 'compact_resume', 'cover', 'portfolio'].includes(a.type)) && (() => {
                 const d = doc[a.id] || {}
-                const isDeck = a.type === 'portfolio'
+                const isDeck = a.type === 'portfolio' || a.type === 'cover'
                 if (a.docUrl) return (
                   <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
                     <a href={a.docUrl} target="_blank" rel="noreferrer" className="px-link" style={{ fontSize: 12 }}>{(a.docUrl || '').includes('/presentation/') ? '✓ Open Slides deck ↗' : '✓ Open Google Doc ↗'}</a>
