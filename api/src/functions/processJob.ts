@@ -70,5 +70,6 @@ export async function processJob(
 app.http('processJob', {
   methods: ['POST', 'OPTIONS'],
   authLevel: 'anonymous',
+  route: 'process-job',
   handler: processJob
 })

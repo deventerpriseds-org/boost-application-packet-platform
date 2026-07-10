@@ -41,6 +41,32 @@ jobs:
           cd api
           zip -r ../api-deploy.zip . --exclude '*.ts' --exclude 'src/*'
 
+      - name: Sync secrets to Function App settings
+        run: |
+          az functionapp config appsettings set \
+            --name job-platform-api \
+            --resource-group EnterpriseDS_ResourceGRP \
+            --settings \
+              "AZURE_STORAGE_CONNECTION_STRING=${{ secrets.AZURE_STORAGE_CONNECTION_STRING }}" \
+              "OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}" \
+              "MICROSOFT_CLIENT_ID=${{ secrets.AZURE_CLIENT_ID }}" \
+              "MICROSOFT_CLIENT_SECRET=${{ secrets.AZURE_CLIENT_SECRET }}" \
+              "MICROSOFT_TENANT_ID=ee633423-c321-413c-a191-ace8b07e4196" \
+              "GOOGLE_CLIENT_ID=${{ secrets.GOOGLE_CLIENT_ID }}" \
+              "GOOGLE_CLIENT_SECRET=${{ secrets.GOOGLE_CLIENT_SECRET }}" \
+              "AZURE_PG_HOST=eds-postgresql.postgres.database.azure.com" \
+              "AZURE_PG_PORT=5432" \
+              "AZURE_PG_DATABASE=boost_resume_n_packet_builder" \
+              "AZURE_PG_USER=Admin_eds" \
+              "AZURE_PG_PASSWORD=${{ secrets.Azure_admin_pw }}" \
+              "HEYGEN_API_KEY=${{ secrets.HEYGEN_API_KEY }}" \
+              "ELEVENLABS_API_KEY=${{ secrets.ELEVENLABS_API_KEY }}" \
+              "ELEVENLABS_DEFAULT_VOICE_ID=${{ secrets.ELEVENLABS_DEFAULT_VOICE_ID }}" \
+              "ELEVENLABS_AGENT_ID=agent_1901kx3w6qd0f1yrr74gevbyhj1k" \
+              "HEYGEN_CLONE_1_AVATAR_IDENTITY_ID=${{ secrets.HEYGEN_CLONE_1_AVATAR_IDENTITY_ID }}" \
+              "HEYGEN_CLONED_VOICE_ID=${{ secrets.HEYGEN_CLONED_VOICE_ID }}" \
+              "NODE_ENV=production"
+
       - name: Deploy to Azure Functions
         run: |
           az functionapp deployment source config-zip \

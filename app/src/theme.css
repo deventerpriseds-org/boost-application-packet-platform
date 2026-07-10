@@ -1,0 +1,139 @@
+/* Compass design tokens (visual source of truth) */
+@import './tokens/fonts.css';
+@import './tokens/fig-tokens.css';
+@import './tokens/typography.css';
+
+/* --- Skin layer: proto vars mapped to Compass tokens + .px-* utilities
+       (ported verbatim from the design handoff proto-compass/shell.jsx) --- */
+    :root {
+      /* Map the prototype's palette onto Compass tokens.
+         Compass tokens auto-flip in dark mode via [data-theme="dark"], so
+         dark mode "just works" without a separate .proto-dark block. */
+      --proto-paper: var(--surface-background-primary);
+      --proto-ink: var(--text-primary);
+      --proto-ink2: var(--text-secondary);
+      --proto-ink3: var(--text-tertiary);
+      --proto-rule: var(--border-strong);
+      --proto-rule-soft: var(--border-default);
+      --proto-panel: var(--surface-background-secondary);
+      --proto-panel-deep: var(--surface-background-tertiary);
+      --proto-accent: var(--surface-brand-default);
+      --proto-accent-soft: var(--surface-brand-subtle);
+      --proto-green: var(--surface-success-default);  --proto-green-soft: var(--surface-success-subtle);
+      --proto-red: var(--surface-error-default);       --proto-red-soft: var(--surface-error-subtle);
+      --proto-yellow: var(--surface-warning-default);  --proto-yellow-soft: var(--surface-warning-subtle);
+      --proto-purple: var(--purple-600);               --proto-purple-soft: var(--purple-100);
+      --proto-orange: var(--orange-600);
+      --proto-density: 1;
+      --proto-radius: 12px;
+      --proto-radius-sm: 8px;
+    }
+    /* Dark mode — self-contained. The Compass bundle ships a "preview pin"
+       that strips [data-theme="dark"] / .dark, so we drive dark ourselves via
+       the .proto-dark class (which the pin never touches) and override the
+       Compass tokens our screens consume directly. */
+    .proto-dark {
+      --surface-background-primary: var(--neutral-900);
+      --surface-background-secondary: var(--neutral-800);
+      --surface-background-tertiary: var(--neutral-700);
+      --border-default: var(--neutral-700);
+      --border-strong: var(--neutral-600);
+      --border-input: var(--neutral-600);
+      --border-brand: var(--brand-500);
+      --text-primary: var(--neutral-50);
+      --text-secondary: var(--neutral-400);
+      --text-tertiary: var(--neutral-500);
+      --text-brand: var(--brand-300);
+      --text-link: var(--brand-300);
+      --text-link-hover: var(--brand-200);
+      --surface-brand-hover: var(--brand-400);
+      --surface-brand-subtle: var(--brand-950);
+      --surface-success-subtle: var(--green-950);
+      --surface-error-subtle: var(--red-950);
+      --surface-warning-subtle: var(--yellow-950);
+      --surface-info-subtle: var(--blue-950);
+      --text-info: var(--blue-400);
+      --blue-200: var(--blue-800);
+      --proto-purple: var(--purple-400);  --proto-purple-soft: var(--purple-950);
+      --proto-orange: var(--orange-400);
+    }
+    html, body, #root { height: 100%; }
+    body { background: var(--surface-background-secondary); color: var(--proto-ink); font-family:'Inter', system-ui, sans-serif; overflow:hidden; -webkit-font-smoothing:antialiased; }
+
+    /* utility classes — Compass aesthetic */
+    .px-root { background: var(--surface-background-secondary); color: var(--proto-ink); font-family:'Inter', system-ui, sans-serif; width:100%; height:100%; display:flex; flex-direction:column; overflow:hidden; }
+    .px-box { border: 1px solid var(--proto-rule-soft); background: var(--proto-paper); border-radius: var(--proto-radius); }
+    .px-box-soft { border: 1px solid var(--proto-rule-soft); background: var(--proto-paper); border-radius: var(--proto-radius-sm); }
+    .px-panel { background: var(--proto-panel); border: 1px solid var(--proto-rule-soft); border-radius: var(--proto-radius); }
+    .px-hatch { background-image: repeating-linear-gradient(45deg, var(--proto-rule-soft) 0, var(--proto-rule-soft) 1px, transparent 1px, transparent 7px); background-color: var(--proto-panel); border-radius: var(--proto-radius-sm); }
+    .px-dashed { border: 1.5px dashed var(--proto-rule-soft); background: var(--proto-paper); border-radius: var(--proto-radius); }
+    .px-pill { display:inline-flex; align-items:center; gap:4px; padding: 2px 9px; background: var(--proto-panel); color: var(--proto-ink2); font-size:11px; border-radius:99px; font-weight:600; line-height:1.5; }
+    .px-chip { display:inline-flex; align-items:center; gap:4px; padding: 2px 8px; background: var(--proto-panel); font-size:11px; color: var(--proto-ink2); border-radius:99px; font-weight:500; }
+    .px-btn { display:inline-flex; align-items:center; gap:6px; padding:6px 13px; border:1px solid var(--border-input); background: var(--proto-paper); color: var(--proto-ink); font-family:'Inter', system-ui, sans-serif; font-size:13px; font-weight:500; cursor:pointer; user-select:none; border-radius: var(--proto-radius-sm); transition: background 120ms ease, border-color 120ms ease, box-shadow 120ms ease; }
+    .px-input { padding:7px 12px; border:1px solid var(--border-input); background: var(--proto-paper); color: var(--proto-ink); font-family:'Inter', system-ui, sans-serif; font-size:13px; border-radius: var(--proto-radius-sm); outline:none; transition: border-color 120ms ease, box-shadow 120ms ease; }
+    .px-input:focus { border-color: var(--proto-accent); box-shadow: 0 0 0 3px var(--proto-accent-soft); }
+    .px-input::placeholder { color: var(--proto-ink2); }
+    .px-btn:hover { background: var(--proto-panel); border-color: var(--proto-rule); }
+    .px-btn:active { background: var(--proto-panel-deep); }
+    .px-btn-dark { background: var(--surface-brand-default); color: var(--text-on-brand); border-color: var(--surface-brand-default); }
+    .px-btn-dark:hover { background: var(--surface-brand-hover); border-color: var(--surface-brand-hover); }
+    .px-btn-accent { background: var(--surface-brand-default); color: var(--text-on-brand); border-color: var(--surface-brand-default); }
+    .px-btn-accent:hover { background: var(--surface-brand-hover); border-color: var(--surface-brand-hover); }
+    .px-btn-green { background: var(--surface-success-default); color:#fff; border-color: var(--surface-success-default); }
+    .px-btn-green:hover { background: var(--surface-success-hover); border-color: var(--surface-success-hover); }
+    .px-btn-red { background: var(--surface-error-default); color:#fff; border-color: var(--surface-error-default); }
+    .px-btn-red:hover { background: var(--surface-error-hover); border-color: var(--surface-error-hover); }
+    .px-btn-yellow { background: var(--surface-warning-default); color:#fff; border-color: var(--surface-warning-default); }
+    .px-btn-ghost { border-color: transparent; background: transparent; color: var(--text-brand); }
+    .px-btn-ghost:hover { background: var(--surface-brand-subtle); border-color: transparent; }
+    .px-btn:disabled, .px-btn[aria-disabled="true"] { opacity:.45; pointer-events:none; }
+
+    .px-h1 { font-size:24px; font-weight:600; letter-spacing:-0.2px; }
+    .px-h2 { font-size:17px; font-weight:600; letter-spacing:-0.1px; }
+    .px-h3 { font-size:14px; font-weight:600; }
+    .px-label { font-size:11px; color: var(--proto-ink3); letter-spacing:.4px; text-transform:uppercase; font-weight:600; }
+    .px-meta { font-size:12px; color: var(--proto-ink2); }
+    .px-small { font-size:11px; color: var(--proto-ink3); }
+    .px-divider { height:1px; background: var(--proto-rule-soft); }
+    .px-divider-bold { height:1px; background: var(--proto-rule); }
+
+    .px-bar { height:6px; background: var(--proto-panel-deep); border-radius:99px; position:relative; overflow:hidden; }
+    .px-bar > i { display:block; height:100%; background: var(--surface-brand-default); border-radius:99px; }
+
+    .px-ava { width:32px; height:32px; border-radius:50%; background: var(--surface-brand-subtle); display:inline-flex; align-items:center; justify-content:center; font-weight:600; font-size:12px; flex-shrink:0; color: var(--text-brand); }
+    .px-logo { width:32px; height:32px; border-radius: var(--proto-radius-sm); background: var(--proto-panel-deep); display:inline-flex; align-items:center; justify-content:center; font-weight:700; font-size:14px; flex-shrink:0; color: var(--proto-ink2); }
+
+    .px-tab { padding:9px 14px; cursor:pointer; font-size:13px; font-weight:500; white-space:nowrap; color: var(--proto-ink2); transition: color 120ms ease, border-color 120ms ease; border-bottom:2px solid transparent; }
+    .px-tab-active { color: var(--text-brand); border-bottom:2px solid var(--border-brand); font-weight:600; }
+    .px-tab-idle:hover { color: var(--proto-ink); }
+
+    .px-photo { position:relative; background: var(--proto-panel-deep); border-radius: var(--proto-radius-sm); overflow:hidden; }
+    .px-photo::after { content:""; position:absolute; inset:0; opacity:.5; background:
+      linear-gradient(to top right, transparent calc(50% - 1px), var(--proto-rule-soft) 50%, transparent calc(50% + 1px)),
+      linear-gradient(to top left,  transparent calc(50% - 1px), var(--proto-rule-soft) 50%, transparent calc(50% + 1px));
+    }
+
+    .px-note { background: var(--surface-info-subtle); border:1px solid var(--blue-200); padding:8px 10px; font-size:12px; color: var(--text-info); border-radius: var(--proto-radius-sm); }
+
+    .px-link { color: var(--text-link); cursor:pointer; font-weight:500; text-decoration: none; }
+    .px-link:hover { color: var(--text-link-hover); text-decoration: underline; }
+
+    /* appear animations */
+    @keyframes toast-in { from { transform: translateY(8px); opacity:0; } to { transform: translateY(0); opacity:1; } }
+    @keyframes proto-fade { from { opacity:0; transform: translateY(4px); } to { opacity:1; transform: translateY(0); } }
+    .px-fade { animation: proto-fade 180ms ease-out; }
+
+    /* Scrollbar (subtle) */
+    *::-webkit-scrollbar { width:10px; height:10px; }
+    *::-webkit-scrollbar-thumb { background: var(--proto-rule-soft); border-radius: 99px; }
+    *::-webkit-scrollbar-track { background: transparent; }
+
+    /* Inputs/textareas inherit Inter */
+    .px-root input, .px-root textarea, .px-root select { font-family:'Inter', system-ui, sans-serif; }
+
+    /* Responsive: phone widths */
+    @media (max-width: 768px) {
+      .ee-hide-sm { display: none !important; }
+      .px-btn, .px-input { max-width: 100%; }
+      select.px-btn { text-overflow: ellipsis; }
+    }

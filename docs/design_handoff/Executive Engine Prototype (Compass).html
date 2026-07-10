@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Executive Engine · Compass Edition</title>
+
+<!-- Compass Design System -->
+<link rel="stylesheet" href="_ds/compass-design-system-03277a8e-7275-4ccc-af18-f3a1dd3ffc61/tokens/fonts.css">
+<link rel="stylesheet" href="_ds/compass-design-system-03277a8e-7275-4ccc-af18-f3a1dd3ffc61/tokens/fig-tokens.css">
+<link rel="stylesheet" href="_ds/compass-design-system-03277a8e-7275-4ccc-af18-f3a1dd3ffc61/tokens/typography.css">
+<link rel="stylesheet" href="_ds/compass-design-system-03277a8e-7275-4ccc-af18-f3a1dd3ffc61/styles.css">
+
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+
+<!-- Compass bundle (plain compiled JS, load after React) -->
+<script src="_ds/compass-design-system-03277a8e-7275-4ccc-af18-f3a1dd3ffc61/_ds_bundle.js"></script>
+
+<style>
+  html, body { margin:0; padding:0; height:100%; background: var(--surface-background-secondary, #f8fafc); }
+  #root { width:100%; height:100%; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script>
+  // Edit-mode tweaks store — default accent is Compass teal (brand-700)
+  window.__PROTO_INITIAL__ = /*EDITMODE-BEGIN*/{
+    "persona": "CTO",
+    "demoState": "mid",
+    "density": "comfortable",
+    "dark": false,
+    "accent": "rgb(27,79,92)",
+    "view": "desktop",
+    "features": {
+      "ai": true,
+      "swipe": true,
+      "recording": true,
+      "debrief": true,
+      "cadence": true
+    }
+  }/*EDITMODE-END*/;
+</script>
+
+<script src="proto-compass/data.js"></script>
+<script type="text/babel" src="proto-compass/shell.jsx"></script>
+<script type="text/babel" src="proto-compass/state.jsx"></script>
+<script type="text/babel" src="proto-compass/tweaks-panel.jsx"></script>
+<script type="text/babel" src="proto-compass/tweaks.jsx"></script>
+<script type="text/babel" src="proto-compass/home.jsx"></script>
+<script type="text/babel" src="proto-compass/engine.jsx"></script>
+<script type="text/babel" src="proto-compass/packet.jsx"></script>
+<script type="text/babel" src="proto-compass/compose.jsx"></script>
+<script type="text/babel" src="proto-compass/flows.jsx"></script>
+<script type="text/babel" src="proto-compass/intake.jsx"></script>
+<script type="text/babel" src="proto-compass/mobile.jsx"></script>
+<script type="text/babel" src="proto-compass/app.jsx"></script>
+</body>
+</html>

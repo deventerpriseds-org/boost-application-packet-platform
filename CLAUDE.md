@@ -6,8 +6,9 @@
 - **Subscription**: 09594120-1b35-4e21-84c6-451ac27175a3
 - **Tenant**: ee633423-c321-413c-a191-ace8b07e4196 (primary, where subscription lives)
 - **Region**: eastus
-- **Function App**: job-platform-api (job-platform-api.azurewebsites.net)
-- **Static Web App**: job-platform-web (happy-river-0935bfe0f.7.azurestaticapps.net)
+- **Function App**: job-platform-api (job-platform-api.azurewebsites.net) — the API for BOTH apps below
+- **PRODUCTION APP (Executive Engine)**: Static Web App `executive-engine-web` → **https://purple-ground-0f377120f.7.azurestaticapps.net/**. This is the real product we build (`executive-engine` frontend, vendored into `app/`, deployed by `.github/workflows/executive-engine-deploy.yml`). When someone says "the app", this is it.
+- **Legacy dev console**: Static Web App `job-platform-web` (happy-river-0935bfe0f.7.azurestaticapps.net) — the old MT-XX test harness (`web/`), NOT the product.
 - **Storage Account**: n8nstxpdthydai6fkm
 - **Storage Tables**: AppConfig, Prompts, JobApplications, MasterContext
 - **Node runtime**: 22
@@ -32,12 +33,39 @@ az account set --subscription 09594120-1b35-4e21-84c6-451ac27175a3
 
 ## GitHub Secrets Required
 
-- `AZURE_CLIENT_ID` — service principal app ID
-- `AZURE_CLIENT_SECRET` — service principal secret
+**ALL credentials live in GitHub secrets.** Do NOT ask the user for a key or
+assume one is missing — the `api-deploy.yml` workflow syncs them onto the
+Function App's app settings on every deploy. If a credential-backed route fails,
+check `/api/config-status`, don't ask for the secret. To verify DB/Graph/Google
+routes, call the **deployed** Function (it can reach Postgres/Graph/Google); the
+sandbox cannot.
+
+### GitHub secrets (source of truth)
+- `AZURE_CLIENT_ID` / `AZURE_CLIENT_SECRET` — service principal. **Doubles as the
+  Microsoft Graph app** → synced as `MICROSOFT_CLIENT_ID` / `MICROSOFT_CLIENT_SECRET`.
 - `AZURE_TENANT_ID` — ee633423-c321-413c-a191-ace8b07e4196
 - `AZURE_SUBSCRIPTION_ID` — 09594120-1b35-4e21-84c6-451ac27175a3
-- `AZURE_STORAGE_CONNECTION_STRING` — storage account connection string
-- `AZURE_STATIC_WEB_APPS_API_TOKEN` — static web app deployment token
+- `AZURE_STORAGE_CONNECTION_STRING`
+- `AZURE_STATIC_WEB_APPS_API_TOKEN` — legacy console deploy (exec-engine fetches its own token via `az staticwebapp secrets list`)
+- `Azure_admin_pw` — **⚠ note the casing** — Postgres `Admin_eds` password → synced as `AZURE_PG_PASSWORD`
+- `OPENAI_API_KEY`
+- `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET`
+- `HEYGEN_API_KEY`, `HEYGEN_CLONE_1_AVATAR_IDENTITY_ID`, `HEYGEN_CLONED_VOICE_ID`
+- `ELEVENLABS_API_KEY`, `ELEVENLABS_DEFAULT_VOICE_ID`
+
+### App settings NOT synced by the workflow (set directly on the Function App)
+These are live on `job-platform-api` but are **not** in `api-deploy.yml`, so
+don't expect to find them there — confirm via `/api/config-status`:
+- `GOOGLE_REFRESH_TOKEN` — OAuth-user token that owns Drive quota (Docs/Slides
+  create, video archive). `HAS_GOOGLE_OAUTH` gates on it.
+- `GOOGLE_SERVICE_ACCOUNT_JSON` — service-account fallback (0 Drive quota).
+- Hardcoded in the workflow (not secrets): `MICROSOFT_TENANT_ID`,
+  `AZURE_PG_HOST/PORT/DATABASE/USER` (db `boost_resume_n_packet_builder`),
+  `ELEVENLABS_AGENT_ID=agent_1901kx3w6qd0f1yrr74gevbyhj1k`.
+
+When adding a new integration secret: add it to GitHub secrets **and** to the
+`--settings` list in `.github/workflows/api-deploy.yml` (exact-name match — a
+mismatch silently blanks the setting).
 
 ## Deploy Commands
 

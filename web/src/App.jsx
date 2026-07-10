@@ -33,6 +33,14 @@ const PHASES = [
     color: "#3A1A2A",
     accent: "#8B3A5A",
   },
+  {
+    id: 4,
+    label: "Phase 4",
+    title: "Production Precursors",
+    description: "De-risk every production subsystem — pgvector backbone, vision, intake, outreach, convert — before the full Executive Engine build.",
+    color: "#2A1A3A",
+    accent: "#8B5CF6",
+  },
 ];
 
 const AUTH_CONFIGS = [
@@ -106,7 +114,7 @@ const AUTH_CONFIGS = [
 const MICRO_TESTS = [
   // Phase 1
   { id: "MT-01", phase: 1, title: "Azure Table Storage Read/Write", description: "Write a test row to AppConfig table, read it back and verify it matches.", connection: "Azure" },
-  { id: "MT-02", phase: 1, title: "OpenAI Connection", description: "Send a single 'say hello' message to gpt-4o-mini. Expect response under 5 seconds.", connection: "OpenAI" },
+  { id: "MT-02", phase: 1, title: "OpenAI Connection", description: "Ask gpt-4o-mini 'Hello how are you, what is the current date and time' and show the live model reply. Response changes each run — proves a real API call, not a canned result.", connection: "OpenAI" },
   { id: "MT-03", phase: 1, title: "Google Service Account Auth", description: "List files in the Zapier Automated Docs Drive folder to confirm auth is working.", connection: "Google" },
   { id: "MT-04", phase: 1, title: "Google Docs Template Copy", description: "Copy the resume template to the output folder with a test title. Verify file appears in Drive.", connection: "Google" },
   { id: "MT-05", phase: 1, title: "Google Docs Variable Injection", description: "Inject hardcoded test strings into every {{variable}} in the copied resume doc. Open doc to verify.", connection: "Google" },
@@ -134,6 +142,28 @@ const MICRO_TESTS = [
   { id: "MT-25", phase: 3, title: "Upgrade Model (Optional)", description: "Update OpenAI model to gpt-4o if desired for higher quality output.", connection: "OpenAI" },
   { id: "MT-26", phase: 3, title: "Remove / Optional Approval Gate", description: "Disable manual approval requirement. Pipeline fires automatically on job alert.", connection: "Internal" },
   { id: "MT-27", phase: 3, title: "Production Deploy & Verify", description: "Deploy to production Azure Function App. Fire one real job alert end-to-end.", connection: "All", hasAction: true, actionLabel: "Deploy" },
+  // Phase 4 — Production Precursors (de-risk the full Executive Engine build)
+  // Infra backbone
+  { id: "MT-28", phase: 4, title: "Postgres + pgvector Connectivity", description: "Connect to the RAG_AI_Agents database, confirm the vector + pg_trgm extensions, and run a temp-table CRUD round-trip. Proves the production data backbone is reachable.", connection: "Postgres" },
+  { id: "MT-29", phase: 4, title: "Embeddings + Vector Similarity", description: "Embed an anchor, a near-duplicate, and an unrelated string with text-embedding-3, store in pgvector, and confirm cosine distance ranks the duplicate closest. Proves the dedupe/match core.", connection: "OpenAI + Postgres" },
+  { id: "MT-30", phase: 4, title: "Object Storage (Blob)", description: "Upload a PDF to an Azure Blob container, read it back, and verify the bytes round-trip. Proves object storage for video/screenshots/PDFs.", connection: "Storage" },
+  // Phase 1 Intake
+  { id: "MT-31", phase: 4, title: "Parse Alert → Opportunity JSON", description: "Send a raw job-alert email to gpt-4o-mini and extract structured Opportunity JSON (company, role, comp, location, URL, hiring manager/recruiter).", connection: "OpenAI" },
+  { id: "MT-32", phase: 4, title: "Dedupe (pgvector)", description: "Embed an existing opportunity and check an incoming near-duplicate against it via cosine similarity. Duplicate is skipped; a genuinely new role is kept.", connection: "OpenAI + Postgres" },
+  { id: "MT-33", phase: 4, title: "Inbox Watcher — Graph Folder Read", description: "List mail folders and read recent inbox messages via Microsoft Graph (read scope), simulating the per-folder watcher ingest.", connection: "Microsoft" },
+  { id: "MT-34", phase: 4, title: "Opportunity 12-Stage State Machine", description: "Insert an opportunity in Postgres and advance it legally through all 12 pipeline stages to 'accepted'; illegal skips are blocked; dismiss soft-removes.", connection: "Postgres" },
+  // Phase 2 vision
+  { id: "MT-35", phase: 4, title: "JD/ATS Analysis (Vision)", description: "Send a job-description screenshot to gpt-4o vision and get keywords, must-haves, ATS score, and gaps. Proves the vision JD/ATS analysis capability.", connection: "Vision" },
+  { id: "MT-36", phase: 4, title: "Application Answers Autofill (Vision)", description: "Send an application-form screenshot to gpt-4o vision; detect the questions and draft a copy-paste-ready answer per field.", connection: "Vision" },
+  // Phase 3 outreach
+  { id: "MT-37", phase: 4, title: "Multi-Channel Outreach Draft", description: "From a contact + signals, draft cold email, LinkedIn connect (≤300 chars), InMail, and follow-up in one call; verify each respects its channel character limit.", connection: "OpenAI" },
+  { id: "MT-38", phase: 4, title: "Cadence Engine", description: "Persist a scheduled outreach cadence in Postgres (day-offset touches), compute which touches are due as of a simulated day, and report cadence health.", connection: "Postgres" },
+  { id: "MT-39", phase: 4, title: "Asset Analytics", description: "Record asset view events (opens, view-time, forwards) in Postgres and aggregate opens / total view-time / unique viewers / most-viewed.", connection: "Postgres" },
+  // Phase 4 convert
+  { id: "MT-40", phase: 4, title: "Interview Prep", description: "From a JD + interviewer list, generate likely questions with strength tags, suggested answers, and a coverage map.", connection: "OpenAI" },
+  { id: "MT-41", phase: 4, title: "Interview Debrief", description: "From an interview transcript, generate an AI summary, advance-likelihood, per-question scores, and owed follow-ups.", connection: "OpenAI" },
+  { id: "MT-42", phase: 4, title: "Offer / Negotiation Tracker", description: "Given their offer and a walk-away floor, compute live total-comp math and generate a counter draft, comp benchmarks, and a leverage summary.", connection: "OpenAI" },
+  { id: "MT-43", phase: 4, title: "OpenAI Cost / Token Metering", description: "Make a real completion, read its token usage, compute cost, log to a persistent usage_metering table in Postgres, and return the running total.", connection: "OpenAI + Postgres" },
 ];
 
 const CONNECTION_COLORS = {
@@ -145,6 +175,10 @@ const CONNECTION_COLORS = {
   Internal: "#6B7280",
   "OpenAI + Google": "#F59E0B",
   All: "#1B4F5C",
+  Postgres: "#336791",
+  "OpenAI + Postgres": "#2E8B8B",
+  Vision: "#C026D3",
+  Storage: "#0EA5E9",
 };
 
 const STATUS_CONFIG = {
@@ -185,15 +219,22 @@ Requirements:
 };
 
 export default function App() {
+  // Persist test state across page refreshes via localStorage so results
+  // aren't lost on reload.
+  const loadPersisted = (key, fallback) => {
+    try { const v = localStorage.getItem(key); return v ? JSON.parse(v) : fallback; } catch { return fallback; }
+  };
   const [activeTab, setActiveTab] = useState("dashboard");
-  const [testStatuses, setTestStatuses] = useState({});
-  const [testLogs, setTestLogs] = useState({});
+  const [testStatuses, setTestStatuses] = useState(() => loadPersisted("jap_testStatuses", {}));
+  const [testLogs, setTestLogs] = useState(() => loadPersisted("jap_testLogs", {}));
   const [expandedTest, setExpandedTest] = useState(null);
+  const [testResults, setTestResults] = useState(() => loadPersisted("jap_testResults", {}));
+  const [promptContents, setPromptContents] = useState({});
+  const [promptMeta, setPromptMeta] = useState({});
+  const [promptSaving, setPromptSaving] = useState({});
   const [expandedAuth, setExpandedAuth] = useState(null);
   const [authValues, setAuthValues] = useState({});
   const [authSaved, setAuthSaved] = useState({});
-  const [testResponses, setTestResponses] = useState({});
-  const [testTimestamps, setTestTimestamps] = useState({});
   const [showForm, setShowForm] = useState(false);
   const [formData, setFormData] = useState({
     jobDescription: "",
@@ -205,130 +246,201 @@ export default function App() {
     sendToEmail: "von.ellis@enterpriseds.io",
   });
   const [activePhaseFilter, setActivePhaseFilter] = useState("all");
+  const [configStatus, setConfigStatus] = useState({});
+  const [selectedRole, setSelectedRole] = useState("Engineering");
+  const ROLE_OPTIONS = ["Engineering", "Product Management"];
+  const [jobQueue, setJobQueue] = useState([]);
+  const [pipelineRunning, setPipelineRunning] = useState({});
+  const [pipelineResult, setPipelineResult] = useState(null);
 
-  const API = import.meta.env.VITE_API_URL || 'https://job-platform-api.azurewebsites.net';
+  const API_BASE = "https://job-platform-api.azurewebsites.net/api";
 
-  // Load saved config from AppConfig table on mount
+  // On load, ask the backend which credentials are already configured
+  // (from GitHub secrets → Function App settings). We never receive the
+  // secret values — only booleans + masked hints — so nothing sensitive
+  // is exposed in the browser.
   useEffect(() => {
-    fetch(`${API}/api/config`)
-      .then(r => r.json())
-      .then(data => {
-        if (data.success && data.values) {
-          setAuthValues(data.values)
-          // Mark sections as saved if they have any values
-          const saved = {}
-          AUTH_CONFIGS.forEach(cfg => {
-            saved[cfg.id] = cfg.fields.some(f => data.values[`${cfg.id}.${f.key}`]?.trim())
-          })
-          setAuthSaved(saved)
-        }
+    fetch(`${API_BASE}/config-status`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (!data) return;
+        setConfigStatus(data);
+        setAuthSaved((s) => ({
+          ...s,
+          ...(data.microsoft ? { microsoft: true } : {}),
+          ...(data.google ? { google: true } : {}),
+          ...(data.openai ? { openai: true } : {}),
+          ...(data.azure ? { azure: true } : {}),
+          ...(data.heygen ? { heygen: true } : {}),
+        }));
       })
-      .catch(() => {})
-  }, [])
+      .catch(() => {});
+  }, []);
 
-  const saveAuthConfig = async (configId) => {
-    const config = AUTH_CONFIGS.find(c => c.id === configId)
-    const values = {}
-    config.fields.forEach(f => {
-      const val = authValues[`${configId}.${f.key}`]
-      if (val !== undefined) values[`${configId}.${f.key}`] = val
-    })
-    await fetch(`${API}/api/config`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ values })
-    })
-    setAuthSaved(s => ({ ...s, [configId]: true }))
-  }
+  // Load the real prompt content from the Prompts table so the Prompts tab
+  // shows what's actually stored (and used by the agents), not empty boxes.
+  const loadPrompts = () => {
+    fetch(`${API_BASE}/prompts`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (!data?.prompts) return;
+        const contents = {}, meta = {};
+        data.prompts.forEach((p) => {
+          contents[p.partitionKey] = p.content;
+          meta[p.partitionKey] = { version: p.version, is_active: p.is_active, length: p.length, notes: p.notes };
+        });
+        setPromptContents(contents);
+        setPromptMeta(meta);
+      })
+      .catch(() => {});
+  };
+  useEffect(() => { loadPrompts(); }, []);
 
-  // Map test ID → real API call
-  const TEST_RUNNERS = {
-    "MT-01": async () => {
-      const r = await fetch(`${API}/api/testConnection`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ connection: 'azure' }) })
-      return r.json()
-    },
-    "MT-02": async () => {
-      const r = await fetch(`${API}/api/testConnection`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ connection: 'openai' }) })
-      return r.json()
-    },
-    "MT-03": async () => {
-      const r = await fetch(`${API}/api/testConnection`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ connection: 'google' }) })
-      return r.json()
-    },
-  }
+  // Persist test state to localStorage whenever it changes.
+  useEffect(() => { try { localStorage.setItem("jap_testStatuses", JSON.stringify(testStatuses)); } catch {} }, [testStatuses]);
+  useEffect(() => { try { localStorage.setItem("jap_testLogs", JSON.stringify(testLogs)); } catch {} }, [testLogs]);
+  useEffect(() => { try { localStorage.setItem("jap_testResults", JSON.stringify(testResults)); } catch {} }, [testResults]);
+
+  const savePrompt = async (partitionKey) => {
+    setPromptSaving((s) => ({ ...s, [partitionKey]: true }));
+    try {
+      const res = await fetch(`${API_BASE}/prompts`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ partitionKey, content: promptContents[partitionKey] || "" }),
+      });
+      const data = await res.json();
+      if (data.saved) setPromptMeta((m) => ({ ...m, [partitionKey]: { ...m[partitionKey], version: data.version, is_active: true } }));
+    } catch (e) { /* ignore */ }
+    setPromptSaving((s) => ({ ...s, [partitionKey]: false }));
+  };
+
+  const TEST_ROUTES = {
+    "MT-01": "/test/mt-01",
+    "MT-02": "/test/mt-02",
+    "MT-03": "/test/mt-03",
+    "MT-04": "/test/mt-04",
+    "MT-05": "/test/mt-05",
+    "MT-06": "/test/mt-06",
+    "MT-07": "/test/mt-07",
+    "MT-08": "/test/mt-08",
+    "MT-09": "/test/mt-09",
+    "MT-12": "/test/mt-12",
+    "MT-13": "/test/mt-13",
+    "MT-14": "/test/mt-14",
+    "MT-15": "/test/mt-15",
+    "MT-16": "/test/mt-16",
+    "MT-17": "/test/mt-17",
+    "MT-18": "/test/mt-18",
+    "MT-19": "/test/mt-19",
+    "MT-20": "/test/mt-20",
+    "MT-21": "/test/mt-21",
+    "MT-28": "/test/mt-28",
+    "MT-29": "/test/mt-29",
+    "MT-30": "/test/mt-30",
+    "MT-31": "/test/mt-31",
+    "MT-32": "/test/mt-32",
+    "MT-33": "/test/mt-33",
+    "MT-34": "/test/mt-34",
+    "MT-35": "/test/mt-35",
+    "MT-36": "/test/mt-36",
+    "MT-37": "/test/mt-37",
+    "MT-38": "/test/mt-38",
+    "MT-39": "/test/mt-39",
+    "MT-40": "/test/mt-40",
+    "MT-41": "/test/mt-41",
+    "MT-42": "/test/mt-42",
+    "MT-43": "/test/mt-43",
+  };
 
   const runTest = async (testId) => {
-    const ts = () => new Date().toLocaleTimeString()
     setTestStatuses((s) => ({ ...s, [testId]: "running" }));
-    setTestLogs((l) => ({ ...l, [testId]: [`[${ts()}] Starting ${testId}...`] }));
-    setTestResponses((r) => ({ ...r, [testId]: null }));
-    setTestTimestamps((t) => ({ ...t, [testId]: null }));
+    setTestLogs((l) => ({ ...l, [testId]: [`[${new Date().toLocaleTimeString()}] Starting ${testId}...`] }));
 
-    const runner = TEST_RUNNERS[testId]
-    if (!runner) {
-      setTestStatuses((s) => ({ ...s, [testId]: "pending" }));
-      setTestLogs((l) => ({ ...l, [testId]: [...(l[testId] || []), `[${ts()}] ⚠ Not yet implemented — API endpoint not built`] }));
-      return
+    const route = TEST_ROUTES[testId];
+    if (!route) {
+      setTestStatuses((s) => ({ ...s, [testId]: "fail" }));
+      setTestLogs((l) => ({ ...l, [testId]: [...(l[testId] || []), `[${new Date().toLocaleTimeString()}] ✗ No endpoint wired for ${testId} yet`] }));
+      return;
     }
 
+    const startedAt = Date.now();
     try {
-      const data = await runner()
-      const pass = data.success === true
-      const completedAt = new Date().toLocaleTimeString()
+      const res = await fetch(`${API_BASE}${route}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ roleType: selectedRole }) });
+      const data = await res.json();
+      const pass = data.pass === true;
       setTestStatuses((s) => ({ ...s, [testId]: pass ? "pass" : "fail" }));
-      setTestResponses((r) => ({ ...r, [testId]: data }));
-      setTestTimestamps((t) => ({ ...t, [testId]: completedAt }));
+      setTestResults((r) => ({ ...r, [testId]: { data, httpStatus: res.status, ranAt: new Date().toLocaleString(), roundtripMs: Date.now() - startedAt, endpoint: `POST ${route}` } }));
       setTestLogs((l) => ({
         ...l,
         [testId]: [
           ...(l[testId] || []),
-          pass
-            ? `[${completedAt}] ✓ ${data.detail || 'Test passed'}`
-            : `[${completedAt}] ✗ ${data.detail || data.error || 'Test failed'}`,
+          `[${new Date().toLocaleTimeString()}] ${pass ? "✓" : "✗"} ${data.detail || (pass ? "Passed" : "Failed")}`,
+          ...(data.docUrl ? [`[${new Date().toLocaleTimeString()}] 📄 ${data.docUrl}`] : []),
+          ...(data.urls ? Object.entries(data.urls).map(([k, v]) => `[${new Date().toLocaleTimeString()}] 📄 ${k}: ${v}`) : []),
         ],
       }));
     } catch (err) {
-      const completedAt = new Date().toLocaleTimeString()
       setTestStatuses((s) => ({ ...s, [testId]: "fail" }));
-      setTestLogs((l) => ({ ...l, [testId]: [...(l[testId] || []), `[${completedAt}] ✗ Network error: ${err.message}`] }));
+      setTestLogs((l) => ({ ...l, [testId]: [...(l[testId] || []), `[${new Date().toLocaleTimeString()}] ✗ Network error: ${err.message}`] }));
     }
   };
 
   const fireAlert = async () => {
-    const ts = () => new Date().toLocaleTimeString()
     setTestStatuses((s) => ({ ...s, "MT-10": "running" }));
-    setTestResponses((r) => ({ ...r, "MT-10": null }));
     setTestLogs((l) => ({
       ...l,
       "MT-10": [
-        `[${ts()}] Firing fake job alert...`,
-        `[${ts()}] POST ${API}/api/processJob`,
+        `[${new Date().toLocaleTimeString()}] Firing fake job alert...`,
+        `[${new Date().toLocaleTimeString()}] POST ${API_BASE}/process-job`,
       ],
     }));
+    const startedAt = Date.now();
     try {
-      const r = await fetch(`${API}/api/processJob`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(FAKE_JOB_ALERT)
-      })
-      const data = await r.json()
-      const completedAt = ts()
-      const pass = r.ok && data.success !== false
+      const payload = { ...FAKE_JOB_ALERT, receivedAt: new Date().toISOString() };
+      const res = await fetch(`${API_BASE}/process-job`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+      const data = await res.json();
+      const pass = res.ok && data.success !== false;
       setTestStatuses((s) => ({ ...s, "MT-10": pass ? "pass" : "fail" }));
-      setTestResponses((rv) => ({ ...rv, "MT-10": data }));
-      setTestTimestamps((t) => ({ ...t, "MT-10": completedAt }));
+      setTestResults((r) => ({ ...r, "MT-10": { data, httpStatus: res.status, ranAt: new Date().toLocaleString(), roundtripMs: Date.now() - startedAt, endpoint: "POST /process-job" } }));
       setTestLogs((l) => ({
         ...l,
-        "MT-10": [...(l["MT-10"] || []),
+        "MT-10": [
+          ...(l["MT-10"] || []),
           pass
-            ? `[${completedAt}] ✓ HTTP ${r.status} — ${data.message || 'Payload received'}`
-            : `[${completedAt}] ✗ HTTP ${r.status} — ${data.error || 'Unexpected response'}`
+            ? `[${new Date().toLocaleTimeString()}] ✓ HTTP ${res.status} — jobId: ${data.jobId || "n/a"}`
+            : `[${new Date().toLocaleTimeString()}] ✗ HTTP ${res.status} — ${data.error || JSON.stringify(data)}`,
         ],
       }));
     } catch (err) {
       setTestStatuses((s) => ({ ...s, "MT-10": "fail" }));
-      setTestLogs((l) => ({ ...l, "MT-10": [...(l["MT-10"] || []), `[${ts()}] ✗ Network error: ${err.message}`] }));
+      setTestLogs((l) => ({ ...l, "MT-10": [...(l["MT-10"] || []), `[${new Date().toLocaleTimeString()}] ✗ Network error: ${err.message}`] }));
     }
+  };
+
+  // MT-22 approval queue: load jobs, approve (run full pipeline).
+  const loadJobs = () => {
+    fetch(`${API_BASE}/jobs`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => { if (d?.jobs) setJobQueue(d.jobs); })
+      .catch(() => {});
+  };
+  useEffect(() => { loadJobs(); }, []);
+
+  const approveJob = async (jobId) => {
+    setPipelineRunning((s) => ({ ...s, [jobId]: true }));
+    setPipelineResult({ jobId, running: true, steps: ["Approved — running full pipeline (3 agents → 4 docs → log → 2 emails)…"] });
+    try {
+      const res = await fetch(`${API_BASE}/pipeline/run`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ jobId }) });
+      const data = await res.json();
+      setPipelineResult({ jobId, ...data });
+      setTestStatuses((s) => ({ ...s, "MT-22": data.pass ? "pass" : "fail" }));
+      loadJobs();
+    } catch (err) {
+      setPipelineResult({ jobId, pass: false, detail: `Network error: ${err.message}` });
+      setTestStatuses((s) => ({ ...s, "MT-22": "fail" }));
+    }
+    setPipelineRunning((s) => ({ ...s, [jobId]: false }));
   };
 
   const totalTests = MICRO_TESTS.length;
@@ -525,12 +637,41 @@ export default function App() {
                     {isOpen && (
                       <div style={{ padding: "0 16px 16px", borderTop: "1px solid #1E293B" }}>
                         <div style={{ paddingTop: 14, display: "flex", flexDirection: "column", gap: 10 }}>
-                          {config.fields.map((field) => (
+                          {configStatus[config.id] && (
+                            <div style={{ fontSize: 11, color: "#10B981", background: "#0D2B1A", border: "1px solid #10B98130", borderRadius: 6, padding: "8px 10px", lineHeight: 1.5 }}>
+                              🔒 Extracted from deventerpriseds-org secrets — credentials are set on the server and never exposed to the browser. You don't need to enter anything here. Leave fields blank to keep using them, or type a value to override for local testing.
+                            </div>
+                          )}
+                          {config.id === "google" && (
+                            <div style={{ fontSize: 11, background: configStatus.googleOAuthConnected ? "#0D2B1A" : "#2B1A0D", border: `1px solid ${configStatus.googleOAuthConnected ? "#10B98130" : "#F59E0B40"}`, borderRadius: 6, padding: "10px 12px", lineHeight: 1.5, display: "flex", flexDirection: "column", gap: 8 }}>
+                              <div style={{ color: configStatus.googleOAuthConnected ? "#10B981" : "#F59E0B", fontWeight: 600 }}>
+                                {configStatus.googleOAuthConnected
+                                  ? "✓ Google account connected (dev@enterpriseds.io)"
+                                  : "⚠ Google account not connected"}
+                              </div>
+                              <div style={{ color: "#94A3B8" }}>
+                                Document copies (MT-04/05/06/18/19) run as the Google account that owns the templates. Connecting authorizes that account once; reconnect if the token is ever revoked or expires.
+                              </div>
+                              <a
+                                href={`${API_BASE}/google/auth`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                style={{ alignSelf: "flex-start", textDecoration: "none", padding: "8px 14px", background: configStatus.googleOAuthConnected ? "#0A0F14" : "#1B4F5C", border: `1px solid ${configStatus.googleOAuthConnected ? "#2A7A8C50" : "#2A7A8C"}`, borderRadius: 6, color: "#E2E8F0", fontSize: 12, fontWeight: 600 }}
+                              >
+                                {configStatus.googleOAuthConnected ? "Reconnect Google Account" : "Connect Google Account"}
+                              </a>
+                            </div>
+                          )}
+                          {config.fields.map((field) => {
+                            const backendHint = configStatus.hints?.[config.id];
+                            const isSecretField = field.type === "password" || field.key === "serviceAccountJson";
+                            const managed = configStatus[config.id] && isSecretField;
+                            return (
                             <div key={field.key}>
-                              <label style={{ fontSize: 11, color: "#94A3B8", display: "block", marginBottom: 4 }}>{field.label}</label>
+                              <label style={{ fontSize: 11, color: "#94A3B8", display: "block", marginBottom: 4 }}>{field.label}{managed && <span style={{ color: "#10B981", marginLeft: 6 }}>✓ from org secrets</span>}</label>
                               {field.type === "textarea" ? (
                                 <textarea
-                                  placeholder={field.placeholder}
+                                  placeholder={managed ? "•••••••• (configured via GitHub secrets)" : field.placeholder}
                                   value={authValues[`${config.id}.${field.key}`] || ""}
                                   onChange={(e) => setAuthValues((v) => ({ ...v, [`${config.id}.${field.key}`]: e.target.value }))}
                                   style={{ width: "100%", background: "#0A0F14", border: "1px solid #1E293B", borderRadius: 6, color: "#E2E8F0", fontSize: 11, padding: "8px 10px", resize: "vertical", minHeight: 80, fontFamily: "monospace", boxSizing: "border-box" }}
@@ -538,22 +679,23 @@ export default function App() {
                               ) : (
                                 <input
                                   type={field.type}
-                                  placeholder={field.placeholder}
+                                  placeholder={managed ? (backendHint || "•••••••• (configured via GitHub secrets)") : field.placeholder}
                                   value={authValues[`${config.id}.${field.key}`] || ""}
                                   onChange={(e) => setAuthValues((v) => ({ ...v, [`${config.id}.${field.key}`]: e.target.value }))}
                                   style={{ width: "100%", background: "#0A0F14", border: "1px solid #1E293B", borderRadius: 6, color: "#E2E8F0", fontSize: 12, padding: "8px 10px", boxSizing: "border-box" }}
                                 />
                               )}
                             </div>
-                          ))}
+                            );
+                          })}
                           <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
                             <button
-                              onClick={async () => {
+                              onClick={() => {
                                 const filled = config.fields.some(
                                   (f) => authValues[`${config.id}.${f.key}`]?.trim().length > 0
                                 );
                                 if (filled) {
-                                  await saveAuthConfig(config.id);
+                                  setAuthSaved((s) => ({ ...s, [config.id]: true }));
                                   setExpandedAuth(null);
                                 }
                               }}
@@ -562,13 +704,17 @@ export default function App() {
                               Save Configuration
                             </button>
                             <button
-                              onClick={() => {
+                              onClick={async () => {
                                 setTestStatuses((s) => ({ ...s, [`auth-${config.id}`]: "running" }));
-                                setTimeout(() => {
-                                  const pass = Math.random() > 0.25;
+                                try {
+                                  const res = await fetch(`${API_BASE}/test-connection`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ connection: config.id }) });
+                                  const data = await res.json();
+                                  const pass = data.success === true;
                                   setTestStatuses((s) => ({ ...s, [`auth-${config.id}`]: pass ? "pass" : "fail" }));
                                   if (pass) setAuthSaved((s) => ({ ...s, [config.id]: true }));
-                                }, 1500 + Math.random() * 800);
+                                } catch (err) {
+                                  setTestStatuses((s) => ({ ...s, [`auth-${config.id}`]: "fail" }));
+                                }
                               }}
                               style={{ padding: "9px 16px", background: "#0D2B1A", border: "1px solid #10B98150", borderRadius: 6, color: "#10B981", fontSize: 12, fontWeight: 600, cursor: "pointer" }}
                             >
@@ -596,9 +742,27 @@ export default function App() {
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20 }}>
               <div>
                 <div style={{ fontSize: 18, fontWeight: 700, color: "#E2E8F0", marginBottom: 4 }}>Micro Tests</div>
-                <div style={{ fontSize: 13, color: "#64748B" }}>{passCount} passed · {failCount} failed · {totalTests - passCount - failCount} pending</div>
+                <div style={{ fontSize: 13, color: "#64748B" }}>
+                  {passCount} passed · {failCount} failed · {totalTests - passCount - failCount} pending
+                  <button
+                    onClick={() => { setTestStatuses({}); setTestLogs({}); setTestResults({}); try { ["jap_testStatuses","jap_testLogs","jap_testResults"].forEach((k) => localStorage.removeItem(k)); } catch {} }}
+                    style={{ marginLeft: 10, padding: "2px 8px", background: "transparent", border: "1px solid #1E293B", borderRadius: 5, color: "#64748B", fontSize: 10, cursor: "pointer" }}
+                  >
+                    Clear results
+                  </button>
+                </div>
               </div>
-              <div style={{ display: "flex", gap: 6 }}>
+              <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 6, marginRight: 8, paddingRight: 12, borderRight: "1px solid #1E293B" }}>
+                  <span style={{ fontSize: 11, color: "#64748B" }}>Role focus:</span>
+                  <select
+                    value={selectedRole}
+                    onChange={(e) => setSelectedRole(e.target.value)}
+                    style={{ background: "#0D1821", border: "1px solid #2A7A8C", borderRadius: 6, color: "#E2E8F0", fontSize: 11, fontWeight: 600, padding: "6px 8px", cursor: "pointer" }}
+                  >
+                    {ROLE_OPTIONS.map((r) => <option key={r} value={r}>{r}</option>)}
+                  </select>
+                </div>
                 {[{ label: "All", value: "all" }, ...PHASES.map((p) => ({ label: p.label, value: String(p.id) }))].map((f) => (
                   <button
                     key={f.value}
@@ -654,7 +818,12 @@ export default function App() {
 
                       {/* Run button */}
                       <button
-                        onClick={(e) => { e.stopPropagation(); test.id === "MT-10" ? fireAlert() : runTest(test.id); }}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (test.id === "MT-10") { fireAlert(); loadJobs(); }
+                          else if (test.id === "MT-22") { setExpandedTest("MT-22"); loadJobs(); }
+                          else runTest(test.id);
+                        }}
                         style={{ padding: "5px 12px", background: "#1E293B", border: "1px solid #334155", borderRadius: 6, color: "#94A3B8", fontSize: 11, fontWeight: 600, cursor: "pointer", flexShrink: 0 }}
                       >
                         {test.hasAction ? test.actionLabel : "Run"}
@@ -663,27 +832,111 @@ export default function App() {
 
                     {isExpanded && (
                       <div style={{ padding: "0 16px 14px", borderTop: "1px solid #1E293B" }}>
-                        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", margin: "12px 0 10px" }}>
-                          <p style={{ fontSize: 12, color: "#94A3B8", margin: 0, lineHeight: 1.6 }}>{test.description}</p>
-                          {testTimestamps[test.id] && (
-                            <div style={{ fontSize: 10, color: "#475569", flexShrink: 0, marginLeft: 12 }}>
-                              Last run: {testTimestamps[test.id]}
+                        <p style={{ fontSize: 12, color: "#94A3B8", margin: "12px 0 10px", lineHeight: 1.6 }}>{test.description}</p>
+                        {test.id === "MT-22" && (
+                          <div style={{ marginBottom: 12 }}>
+                            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                              <span style={{ fontSize: 11, fontWeight: 700, color: "#2E7D52", textTransform: "uppercase", letterSpacing: 0.5 }}>Approval Queue</span>
+                              <div style={{ display: "flex", gap: 8 }}>
+                                <button onClick={() => { fireAlert(); setTimeout(loadJobs, 800); }} style={{ fontSize: 11, padding: "5px 10px", background: "#2A1A3A", border: "1px solid #8B5CF650", borderRadius: 6, color: "#C4B5FD", cursor: "pointer" }}>+ Fire Test Job</button>
+                                <button onClick={loadJobs} style={{ fontSize: 11, padding: "5px 10px", background: "transparent", border: "1px solid #1E293B", borderRadius: 6, color: "#64748B", cursor: "pointer" }}>Refresh</button>
+                              </div>
                             </div>
-                          )}
-                        </div>
+                            {jobQueue.filter((j) => j.status === "received" || j.status === "processing").length === 0 ? (
+                              <div style={{ fontSize: 11, color: "#64748B", padding: "10px", background: "#0A0F14", borderRadius: 6 }}>No pending jobs. Fire a test job (or use the Job Form / MT-10) to queue one.</div>
+                            ) : (
+                              jobQueue.filter((j) => j.status === "received" || j.status === "processing").map((j) => (
+                                <div key={j.jobId} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 12px", background: "#0A0F14", border: "1px solid #1E293B", borderRadius: 6, marginBottom: 6 }}>
+                                  <div>
+                                    <div style={{ fontSize: 12, color: "#E2E8F0", fontWeight: 600 }}>{j.jobTitle} <span style={{ color: "#64748B", fontWeight: 400 }}>@ {j.company}</span></div>
+                                    <div style={{ fontSize: 10, color: "#64748B", marginTop: 2 }}>{j.roleType} · {j.jobId} · {j.status}</div>
+                                  </div>
+                                  <button onClick={() => approveJob(j.jobId)} disabled={pipelineRunning[j.jobId] || j.status === "processing"} style={{ fontSize: 11, fontWeight: 600, padding: "6px 14px", background: pipelineRunning[j.jobId] ? "#1A3A2A" : "#1B5E3A", border: "1px solid #2E7D52", borderRadius: 6, color: "#E2E8F0", cursor: pipelineRunning[j.jobId] ? "wait" : "pointer" }}>
+                                    {pipelineRunning[j.jobId] ? "Running…" : "Approve ▶"}
+                                  </button>
+                                </div>
+                              ))
+                            )}
+                            {pipelineResult && (
+                              <div style={{ marginTop: 10, padding: "10px 12px", background: "#060A0E", border: `1px solid ${pipelineResult.pass ? "#10B98130" : pipelineResult.running ? "#F59E0B30" : "#EF444430"}`, borderRadius: 6 }}>
+                                <div style={{ fontSize: 11, fontWeight: 700, color: pipelineResult.pass ? "#10B981" : pipelineResult.running ? "#F59E0B" : "#EF4444", marginBottom: 6 }}>
+                                  {pipelineResult.running ? "⏳ Pipeline running…" : pipelineResult.pass ? "✓ Pipeline complete" : "✗ Pipeline failed"} — {pipelineResult.detail || ""}
+                                </div>
+                                {(pipelineResult.steps || []).map((s, i) => <div key={i} style={{ fontSize: 10.5, color: "#94A3B8", fontFamily: "monospace", lineHeight: 1.7 }}>• {s}</div>)}
+                                {pipelineResult.urls && (
+                                  <div style={{ marginTop: 6 }}>
+                                    {Object.entries(pipelineResult.urls).filter(([, v]) => v && v.startsWith("http")).map(([k, v]) => (
+                                      <div key={k} style={{ fontSize: 10.5 }}><a href={v} target="_blank" rel="noopener noreferrer" style={{ color: "#4A6FA5" }}>📄 {k}</a></div>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        )}
                         {logs.length > 0 && (
-                          <div style={{ background: "#0A0F14", borderRadius: 6, padding: "10px 12px", fontFamily: "monospace", fontSize: 11, lineHeight: 1.8, marginBottom: testResponses[test.id] ? 8 : 0 }}>
+                          <div style={{ background: "#0A0F14", borderRadius: 6, padding: "10px 12px", fontFamily: "monospace", fontSize: 11, color: "#64748B", lineHeight: 1.8 }}>
                             {logs.map((log, i) => (
-                              <div key={i} style={{ color: log.includes("✓") ? "#10B981" : log.includes("✗") ? "#EF4444" : log.includes("⚠") ? "#F59E0B" : "#64748B" }}>{log}</div>
+                              <div key={i} style={{ color: log.includes("✓") ? "#10B981" : log.includes("✗") ? "#EF4444" : "#64748B", wordBreak: "break-all" }}>{log}</div>
                             ))}
                           </div>
                         )}
-                        {testResponses[test.id] && (
-                          <div style={{ marginTop: 8 }}>
-                            <div style={{ fontSize: 10, fontWeight: 600, color: "#475569", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 4 }}>Response Payload</div>
-                            <div style={{ background: "#0A0F14", borderRadius: 6, padding: "10px 12px", fontFamily: "monospace", fontSize: 11, color: "#94A3B8", lineHeight: 1.7, overflowX: "auto", whiteSpace: "pre-wrap", wordBreak: "break-all" }}>
-                              {JSON.stringify(testResponses[test.id], null, 2)}
+                        {testResults[test.id] && (
+                          <div style={{ marginTop: 10 }}>
+                            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+                              <span style={{ fontSize: 10, fontWeight: 700, color: "#64748B", textTransform: "uppercase", letterSpacing: 0.5 }}>Live API Response</span>
+                              <span style={{ fontSize: 10, color: "#475569", fontFamily: "monospace" }}>
+                                {testResults[test.id].endpoint} · HTTP {testResults[test.id].httpStatus} · {testResults[test.id].roundtripMs}ms · {testResults[test.id].ranAt}
+                              </span>
                             </div>
+                            {/* Chained AI tests: one block per model call */}
+                            {Array.isArray(testResults[test.id].data?.aiCalls) && testResults[test.id].data.aiCalls.map((call, ci) => (
+                              <div key={ci} style={{ marginBottom: 12, borderLeft: "2px solid #1B4F5C", paddingLeft: 10 }}>
+                                <div style={{ fontSize: 11, fontWeight: 700, color: "#2A7A8C", marginBottom: 6 }}>{call.label || `AI Call ${ci + 1}`}</div>
+                                {call.promptSentToAI?.system && (
+                                  <details style={{ marginBottom: 6 }}>
+                                    <summary style={{ fontSize: 10, color: "#64748B", cursor: "pointer" }}>System message</summary>
+                                    <pre style={{ background: "#060A0E", border: "1px solid #1E293B", borderRadius: 6, padding: "8px 10px", fontFamily: "monospace", fontSize: 10.5, color: "#7C93B8", lineHeight: 1.5, maxHeight: 160, overflow: "auto", margin: "4px 0 0", whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{call.promptSentToAI.system}</pre>
+                                  </details>
+                                )}
+                                <details>
+                                  <summary style={{ fontSize: 10, color: "#4A6FA5", cursor: "pointer" }}>📤 Submitted user message (resolved)</summary>
+                                  <pre style={{ background: "#060A0E", border: "1px solid #1E293B", borderRadius: 6, padding: "8px 10px", fontFamily: "monospace", fontSize: 10.5, color: "#7C93B8", lineHeight: 1.5, maxHeight: 220, overflow: "auto", margin: "4px 0 0", whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{call.promptSentToAI?.user}</pre>
+                                </details>
+                                <details open>
+                                  <summary style={{ fontSize: 10, color: "#10B981", cursor: "pointer" }}>📥 AI response</summary>
+                                  <pre style={{ background: "#060A0E", border: "1px solid #10B98130", borderRadius: 6, padding: "8px 10px", fontFamily: "monospace", fontSize: 10.5, color: "#A7C4A0", lineHeight: 1.5, maxHeight: 220, overflow: "auto", margin: "4px 0 0", whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{call.aiResponse}</pre>
+                                </details>
+                              </div>
+                            ))}
+                            {/* AI tests: show exactly what was submitted to the model and its raw reply */}
+                            {testResults[test.id].data?.promptSentToAI && (
+                              <div style={{ marginBottom: 10 }}>
+                                <div style={{ fontSize: 10, fontWeight: 700, color: "#4A6FA5", marginBottom: 4 }}>📤 SUBMITTED TO AI ({testResults[test.id].data.promptSentToAI.model}, max_tokens {testResults[test.id].data.promptSentToAI.maxTokens})</div>
+                                {testResults[test.id].data.promptSentToAI.system && (
+                                  <details style={{ marginBottom: 6 }}>
+                                    <summary style={{ fontSize: 10, color: "#64748B", cursor: "pointer" }}>System message</summary>
+                                    <pre style={{ background: "#060A0E", border: "1px solid #1E293B", borderRadius: 6, padding: "8px 10px", fontFamily: "monospace", fontSize: 10.5, color: "#7C93B8", lineHeight: 1.5, maxHeight: 160, overflow: "auto", margin: "4px 0 0", whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{testResults[test.id].data.promptSentToAI.system}</pre>
+                                  </details>
+                                )}
+                                <details open>
+                                  <summary style={{ fontSize: 10, color: "#64748B", cursor: "pointer" }}>User message (fully resolved — variables replaced)</summary>
+                                  <pre style={{ background: "#060A0E", border: "1px solid #1E293B", borderRadius: 6, padding: "8px 10px", fontFamily: "monospace", fontSize: 10.5, color: "#7C93B8", lineHeight: 1.5, maxHeight: 260, overflow: "auto", margin: "4px 0 0", whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{testResults[test.id].data.promptSentToAI.user}</pre>
+                                </details>
+                              </div>
+                            )}
+                            {testResults[test.id].data?.aiResponse && (
+                              <div style={{ marginBottom: 10 }}>
+                                <div style={{ fontSize: 10, fontWeight: 700, color: "#10B981", marginBottom: 4 }}>📥 AI RESPONSE</div>
+                                <pre style={{ background: "#060A0E", border: "1px solid #10B98130", borderRadius: 6, padding: "8px 10px", fontFamily: "monospace", fontSize: 10.5, color: "#A7C4A0", lineHeight: 1.5, maxHeight: 300, overflow: "auto", margin: 0, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{testResults[test.id].data.aiResponse}</pre>
+                              </div>
+                            )}
+                            <details>
+                              <summary style={{ fontSize: 10, fontWeight: 700, color: "#64748B", cursor: "pointer", marginBottom: 4 }}>Full raw JSON</summary>
+                              <pre style={{ background: "#060A0E", border: "1px solid #1E293B", borderRadius: 6, padding: "10px 12px", fontFamily: "monospace", fontSize: 11, color: "#94A3B8", lineHeight: 1.6, maxHeight: 340, overflow: "auto", margin: "4px 0 0", whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
+                                {JSON.stringify(testResults[test.id].data, null, 2)}
+                              </pre>
+                            </details>
                           </div>
                         )}
                       </div>
@@ -794,8 +1047,20 @@ export default function App() {
                   </div>
                 </div>
                 <button
-                  onClick={() => {
-                    runTest("MT-11");
+                  onClick={async () => {
+                    setTestStatuses((s) => ({ ...s, "MT-11": "running" }));
+                    setTestLogs((l) => ({ ...l, "MT-11": [`[${new Date().toLocaleTimeString()}] Submitting form to POST /api/process-job...`] }));
+                    try {
+                      const payload = { ...formData, receivedAt: new Date().toISOString(), sourceEmail: "manual-form", originalSubject: `Manual entry: ${formData.jobUrl || "no url"}` };
+                      const res = await fetch(`${API_BASE}/process-job`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+                      const data = await res.json();
+                      const pass = res.ok && data.success !== false;
+                      setTestStatuses((s) => ({ ...s, "MT-11": pass ? "pass" : "fail" }));
+                      setTestLogs((l) => ({ ...l, "MT-11": [...(l["MT-11"] || []), pass ? `[${new Date().toLocaleTimeString()}] ✓ HTTP ${res.status} — jobId: ${data.jobId}` : `[${new Date().toLocaleTimeString()}] ✗ HTTP ${res.status} — ${data.error || JSON.stringify(data)}`] }));
+                    } catch (err) {
+                      setTestStatuses((s) => ({ ...s, "MT-11": "fail" }));
+                      setTestLogs((l) => ({ ...l, "MT-11": [...(l["MT-11"] || []), `[${new Date().toLocaleTimeString()}] ✗ Network error: ${err.message}`] }));
+                    }
                   }}
                   disabled={!formData.jobDescription}
                   style={{ padding: "11px", background: formData.jobDescription ? "#1B4F5C" : "#0D1821", border: `1px solid ${formData.jobDescription ? "#2A7A8C" : "#1E293B"}`, borderRadius: 8, color: formData.jobDescription ? "#E2E8F0" : "#64748B", fontSize: 13, fontWeight: 600, cursor: formData.jobDescription ? "pointer" : "not-allowed" }}
@@ -829,18 +1094,27 @@ export default function App() {
                     <div style={{ fontSize: 11, color: "#10A37F", marginTop: 2 }}>{prompt.agent}</div>
                     <div style={{ fontSize: 11, color: "#64748B", marginTop: 4 }}>{prompt.description}</div>
                   </div>
-                  <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
-                    <span style={{ fontSize: 10, color: "#10B981", background: "#05260F", padding: "3px 8px", borderRadius: 4 }}>v1 · Active</span>
-                    <button style={{ fontSize: 11, color: "#64748B", background: "#1E293B", border: "none", borderRadius: 6, padding: "4px 10px", cursor: "pointer" }}>History</button>
+                  <div style={{ display: "flex", gap: 6, flexShrink: 0, alignItems: "center" }}>
+                    {promptMeta[prompt.id] ? (
+                      <span style={{ fontSize: 10, color: "#10B981", background: "#05260F", padding: "3px 8px", borderRadius: 4 }}>
+                        v{promptMeta[prompt.id].version} · {promptMeta[prompt.id].is_active ? "Active" : "Inactive"} · {promptMeta[prompt.id].length?.toLocaleString()} chars
+                      </span>
+                    ) : (
+                      <span style={{ fontSize: 10, color: "#F59E0B", background: "#2B1A00", padding: "3px 8px", borderRadius: 4 }}>Not seeded</span>
+                    )}
                   </div>
                 </div>
                 <textarea
-                  placeholder={`Enter ${prompt.label} content...`}
-                  style={{ width: "100%", background: "#0A0F14", border: "1px solid #1E293B", borderRadius: 6, color: "#94A3B8", fontSize: 11, padding: "10px 12px", resize: "vertical", minHeight: 80, fontFamily: "monospace", lineHeight: 1.6, boxSizing: "border-box" }}
+                  value={promptContents[prompt.id] || ""}
+                  onChange={(e) => setPromptContents((c) => ({ ...c, [prompt.id]: e.target.value }))}
+                  placeholder={`(empty — ${prompt.id} not found in Prompts table)`}
+                  style={{ width: "100%", background: "#0A0F14", border: "1px solid #1E293B", borderRadius: 6, color: "#94A3B8", fontSize: 11, padding: "10px 12px", resize: "vertical", minHeight: 120, fontFamily: "monospace", lineHeight: 1.6, boxSizing: "border-box" }}
                 />
-                <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
-                  <button style={{ padding: "7px 14px", background: "#1B4F5C", border: "none", borderRadius: 6, color: "#E2E8F0", fontSize: 11, fontWeight: 600, cursor: "pointer" }}>Save New Version</button>
-                  <button style={{ padding: "7px 14px", background: "transparent", border: "1px solid #1E293B", borderRadius: 6, color: "#64748B", fontSize: 11, cursor: "pointer" }}>Copy ID: {prompt.id}</button>
+                <div style={{ display: "flex", gap: 8, marginTop: 8, alignItems: "center" }}>
+                  <button onClick={() => savePrompt(prompt.id)} disabled={promptSaving[prompt.id]} style={{ padding: "7px 14px", background: "#1B4F5C", border: "none", borderRadius: 6, color: "#E2E8F0", fontSize: 11, fontWeight: 600, cursor: "pointer", opacity: promptSaving[prompt.id] ? 0.6 : 1 }}>
+                    {promptSaving[prompt.id] ? "Saving…" : "Save New Version"}
+                  </button>
+                  <button onClick={loadPrompts} style={{ padding: "7px 14px", background: "transparent", border: "1px solid #1E293B", borderRadius: 6, color: "#64748B", fontSize: 11, cursor: "pointer" }}>Reload from table</button>
                 </div>
               </div>
             ))}

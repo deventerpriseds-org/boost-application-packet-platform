@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Executive Engine — Product Specification</title>
+
+<link rel="stylesheet" href="_ds/compass-design-system-03277a8e-7275-4ccc-af18-f3a1dd3ffc61/tokens/fonts.css">
+<link rel="stylesheet" href="_ds/compass-design-system-03277a8e-7275-4ccc-af18-f3a1dd3ffc61/tokens/fig-tokens.css">
+<link rel="stylesheet" href="_ds/compass-design-system-03277a8e-7275-4ccc-af18-f3a1dd3ffc61/tokens/typography.css">
+<link rel="stylesheet" href="_ds/compass-design-system-03277a8e-7275-4ccc-af18-f3a1dd3ffc61/styles.css">
+
+<style>
+  doc-page:not(:defined){ visibility:hidden; }
+  html, body { margin:0; background:#e2e0da; }
+  doc-page {
+    --ink: var(--text-primary, #0f172a);
+    --ink2: var(--text-secondary, #475569);
+    --ink3: var(--text-tertiary, #94a3b8);
+    --brand: var(--surface-brand-default, #1b4f5c);
+    --brand-soft: var(--surface-brand-subtle, #e6eef0);
+    --rule: var(--border-default, #e2e8f0);
+    --panel: var(--surface-background-secondary, #f8fafc);
+    color: var(--ink);
+    font-family: 'Inter', system-ui, sans-serif;
+    font-size: 10.5pt;
+    line-height: 1.5;
+  }
+  doc-page h1, doc-page h2, doc-page h3, doc-page h4 { color: var(--ink); font-weight:600; letter-spacing:-0.01em; }
+  .doc-title { font-size:30pt; line-height:1.05; font-weight:700; margin:0 0 6px; }
+  .doc-sub { font-size:13pt; color:var(--ink2); font-weight:400; margin:0 0 4px; }
+  .doc-meta { font-size:9pt; color:var(--ink3); font-family:'JetBrains Mono', monospace; letter-spacing:.02em; }
+  h2.sec { font-size:16pt; margin:26px 0 4px; padding-top:14px; border-top:2px solid var(--brand); }
+  h2.sec .k { font-family:'JetBrains Mono',monospace; color:var(--brand); font-size:12pt; margin-right:10px; }
+  h3 { font-size:12.5pt; margin:16px 0 4px; }
+  h4 { font-size:10.5pt; margin:12px 0 2px; color:var(--ink); }
+  p { margin:5px 0; }
+  .lead { font-size:11pt; color:var(--ink2); }
+  ul, ol { margin:5px 0; padding-left:20px; }
+  li { margin:2px 0; }
+  strong { font-weight:600; }
+  .mono { font-family:'JetBrains Mono', monospace; font-size:9pt; background:var(--panel); padding:1px 5px; border-radius:4px; }
+  .callout { background:var(--brand-soft); border-radius:10px; padding:12px 15px; margin:12px 0; break-inside:avoid; }
+  .callout .lbl { font-family:'JetBrains Mono',monospace; font-size:8pt; text-transform:uppercase; letter-spacing:.08em; color:var(--brand); font-weight:600; }
+  .grid2 { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+  .card { border:1px solid var(--rule); border-radius:10px; padding:12px 14px; break-inside:avoid; }
+  .card .t { font-weight:600; font-size:10.5pt; }
+  .card .d { color:var(--ink2); font-size:9.5pt; margin-top:2px; }
+  .pill { display:inline-block; padding:1px 9px; border-radius:99px; font-size:8pt; font-weight:600; font-family:'JetBrains Mono',monospace; background:var(--panel); color:var(--ink2); border:1px solid var(--rule); }
+  .pill.brand { background:var(--brand-soft); color:var(--brand); border-color:transparent; }
+  table { border-collapse:collapse; width:100%; font-size:9pt; margin:8px 0; break-inside:avoid; }
+  th, td { border:1px solid var(--rule); padding:5px 8px; text-align:left; vertical-align:top; }
+  th { background:var(--panel); font-family:'JetBrains Mono',monospace; font-size:8pt; text-transform:uppercase; letter-spacing:.04em; color:var(--ink2); font-weight:600; }
+  .stage-flow { font-family:'JetBrains Mono',monospace; font-size:9pt; color:var(--ink2); background:var(--panel); border-radius:8px; padding:10px 12px; line-height:1.9; }
+  .num-list { counter-reset:step; list-style:none; padding-left:0; }
+  .num-list > li { counter-increment:step; position:relative; padding-left:30px; margin:8px 0; break-inside:avoid; }
+  .num-list > li::before { content:counter(step); position:absolute; left:0; top:0; width:20px; height:20px; background:var(--brand); color:#fff; border-radius:50%; font-size:8pt; font-weight:700; display:flex; align-items:center; justify-content:center; font-family:'JetBrains Mono',monospace; }
+  .divider { height:1px; background:var(--rule); margin:14px 0; }
+  .kicker { font-family:'JetBrains Mono',monospace; font-size:8pt; text-transform:uppercase; letter-spacing:.1em; color:var(--brand); font-weight:600; }
+  footer, header { font-family:'JetBrains Mono',monospace; font-size:8pt; color:var(--ink3); }
+  .toc { columns:2; column-gap:32px; font-size:9.5pt; }
+  .toc div { margin:3px 0; break-inside:avoid; }
+  .toc .n { color:var(--brand); font-family:'JetBrains Mono',monospace; margin-right:8px; }
+</style>
+</head>
+<body>
+<doc-page size="letter" margin="0.7in">
+
+  <div slot="header" style="display:flex; justify-content:space-between; align-items:center; padding-bottom:6px; border-bottom:1px solid var(--rule);">
+    <span>Executive Engine</span><span>Product Specification · v1.0</span>
+  </div>
+  <div slot="footer" style="display:flex; justify-content:space-between; align-items:center; padding-top:6px; border-top:1px solid var(--rule);">
+    <span>Confidential — internal</span><span>July 2026</span>
+  </div>
+
+  <!-- COVER -->
+  <div class="kicker">Product Specification</div>
+  <h1 class="doc-title">Executive&nbsp;Engine</h1>
+  <p class="doc-sub">An AI operating system for the executive job search — from inbox alert to signed offer.</p>
+  <p class="doc-meta">v1.0 · July 2026 · Compass Design System · desktop + mobile · working prototype attached</p>
+
+  <div class="callout">
+    <div class="lbl">One-line purpose</div>
+    <p style="margin:6px 0 0; font-size:11.5pt;">Turn the flood of job-search alerts landing in an executive's inbox into a managed, AI-assisted pipeline — automatically pulling in matched roles, tailoring every application asset to beat ATS filters, running multi-channel outreach, and coaching through interviews and offers — so a senior leader can run a rigorous search in minutes a day instead of hours.</p>
+  </div>
+
+  <h3>Contents</h3>
+  <div class="toc">
+    <div><span class="n">1</span>Purpose &amp; original intent</div>
+    <div><span class="n">2</span>The problem</div>
+    <div><span class="n">3</span>End goal &amp; vision</div>
+    <div><span class="n">4</span>Users &amp; personas</div>
+    <div><span class="n">5</span>Core concepts</div>
+    <div><span class="n">6</span>The daily loop</div>
+    <div><span class="n">7</span>Feature modules</div>
+    <div><span class="n">8</span>Data model</div>
+    <div><span class="n">9</span>System architecture</div>
+    <div><span class="n">10</span>AI / API contract</div>
+    <div><span class="n">11</span>Design system &amp; UX</div>
+    <div><span class="n">12</span>Platforms &amp; integrations</div>
+    <div><span class="n">13</span>Tweakable demo dimensions</div>
+    <div><span class="n">14</span>Build phases</div>
+    <div><span class="n">15</span>Open questions</div>
+  </div>
+
+  <!-- 1 PURPOSE -->
+  <h2 class="sec"><span class="k">01</span>Purpose &amp; original intent</h2>
+  <p class="lead">The Executive Engine began as a mail-and-calendar organization problem and grew into a full search-management platform.</p>
+  <p>The originating insight: a senior leader running a confidential job search subscribes to several job platforms (LinkedIn, Indeed, Greenhouse/Lever boards, executive search firms, Wellfound/Otta). Each floods a personal inbox with alert emails. The <strong>signal is there</strong> — the right roles do arrive — but it is buried, unstructured, and impossible to act on consistently. Meanwhile every application demands bespoke, keyword-optimized materials that take hours to produce by hand, and the outreach + interview + offer choreography is easy to drop.</p>
+  <p>The original intent was therefore twofold:</p>
+  <ul>
+    <li><strong>Organize the intake</strong> — route job-alert email into per-role folders, watch those folders, and pull matched opportunities into one reviewable place.</li>
+    <li><strong>Automate the production line</strong> — once a role is approved, generate every asset (resume, cover letter, portfolio, intro video, outreach, application answers) tailored to that specific posting, through approval rounds, until it is ready to send.</li>
+  </ul>
+  <p>Nothing should start from a blank page: materials are seeded from the triggering email and a master profile, then refined. Templates always have a sensible default so the user is never blocked.</p>
+
+  <!-- 2 PROBLEM -->
+  <h2 class="sec"><span class="k">02</span>The problem</h2>
+  <div class="grid2">
+    <div class="card"><div class="t">Alert overload</div><div class="d">Dozens of alert emails per day across 5+ platforms; the good roles are indistinguishable from noise in a linear inbox.</div></div>
+    <div class="card"><div class="t">Manual tailoring</div><div class="d">Each application needs ATS-keyword-optimized, role-specific materials — hours of copy-paste-and-tweak per role.</div></div>
+    <div class="card"><div class="t">Dropped choreography</div><div class="d">Follow-ups, hiring-manager outreach, thank-yous, and debriefs slip through the cracks without a system.</div></div>
+    <div class="card"><div class="t">No pipeline view</div><div class="d">No single place to see where every opportunity stands, what's hot, and what needs action next.</div></div>
+    <div class="card"><div class="t">Interview prep is ad-hoc</div><div class="d">Prep, recording, and structured debrief rarely happen; lessons aren't captured or reused.</div></div>
+    <div class="card"><div class="t">Weak negotiation posture</div><div class="d">Offers are evaluated without benchmarks, leverage tracking, or a prepared counter.</div></div>
+  </div>
+
+  <!-- 3 END GOAL -->
+  <h2 class="sec"><span class="k">03</span>End goal &amp; vision</h2>
+  <p class="lead">A leader opens the app once each morning, spends a few minutes triaging what the engine found overnight, approves a handful of actions, and the machinery does the rest.</p>
+  <p>The end-state product:</p>
+  <ul>
+    <li>Continuously <strong>watches connected inboxes</strong>, extracts and de-duplicates opportunities, enriches them with company signals and likely stakeholders, and scores fit.</li>
+    <li>Presents a <strong>morning briefing</strong> leading with the latest inbox-scrub results — how many roles were discovered and for which role families — then a prioritized action list.</li>
+    <li>Lets the user <strong>triage by swipe</strong> (keep / maybe / dismiss) and, on keep, spins up a tailored <strong>application packet</strong>.</li>
+    <li>Generates every asset from <strong>templates with defaults</strong>, optimized against the specific JD's keywords, through <strong>approval rounds</strong> until ready.</li>
+    <li>Runs <strong>multi-channel outreach</strong> and a <strong>cadence engine</strong>, then coaches <strong>interview prep → recording → AI debrief</strong>, and finally a <strong>negotiation tracker</strong>.</li>
+    <li>Works on <strong>desktop and mobile</strong>, in <strong>light and dark</strong>, adapting to the user's persona (CTO / VP Eng / VP Product).</li>
+  </ul>
+  <div class="callout"><div class="lbl">Success metric</div><p style="margin:6px 0 0;">A rigorous, high-volume executive search run in <strong>~10 minutes a day</strong>, with materials good enough to clear ATS filters and land higher reply and interview rates than manual effort.</p></div>
+
+  <!-- 4 USERS -->
+  <h2 class="sec"><span class="k">04</span>Users &amp; personas</h2>
+  <p>The product adapts to three executive personas. Persona selection re-filters the opportunity catalog, master role baseline, keyword banks, and comp targets throughout.</p>
+  <table>
+    <thead><tr><th>Persona</th><th>Master role</th><th>Comp target</th><th>Positioning</th></tr></thead>
+    <tbody>
+      <tr><td><strong>CTO</strong> (Jordan Davis)</td><td>CTO</td><td>$420–520k + eq</td><td>Edge infra at scale · AI platform · cost-optimized modernization</td></tr>
+      <tr><td><strong>VP Engineering</strong> (Riley Park)</td><td>VP Engineering</td><td>$370–450k + eq</td><td>Platform velocity · org scaling · dev-tools depth</td></tr>
+      <tr><td><strong>VP Product</strong> (Sam Cohen)</td><td>VP Product</td><td>$340–410k + eq</td><td>Risk product · multi-sided platforms · operator-PM</td></tr>
+    </tbody>
+  </table>
+  <p>A secondary user is a <strong>partner/reviewer</strong> (the plan includes one partner seat) who can review packets and leave feedback during approval rounds.</p>
+
+  <!-- 5 CORE CONCEPTS -->
+  <h2 class="sec"><span class="k">05</span>Core concepts</h2>
+  <h3>The opportunity</h3>
+  <p>The atomic unit. Every opportunity carries: company, role, location, comp range, match score, fit tier (Strategic / Good / Stretch), urgency (Hot / Warm / Cool), source + source date, hiring manager, recruiter, a "why surfaced" rationale, and enrichment (company signals, stakeholder map, pain hypotheses).</p>
+  <h3>The pipeline (state machine)</h3>
+  <div class="stage-flow">discovered → saved → enriched → applied → outreach → engaged → screen → r1 → panel → final → offer → accepted</div>
+  <p style="font-size:9.5pt; color:var(--ink2);">Twelve stages. Opportunities advance by user action or automated events. The kanban board and command-center stage-rail both write to this field; dismissed opportunities are soft-removed.</p>
+  <h3>The application packet</h3>
+  <p>Created when an opportunity is kept + approved. Bundles the tailored resume, cover letter, portfolio, and intro video. Each artifact has its own status (<span class="mono">todo → drafting → review → changes → approved</span>) and a selected template. The packet has a round counter, a JD-analyzed flag, a covered-keyword set, and a feedback thread. It cannot ship until all four artifacts are approved.</p>
+  <h3>Master profiles &amp; templates</h3>
+  <p>Eight master role baselines seed every tailored asset. Every asset type (resume, cover, portfolio, video, and each outreach channel, and application answers) has a set of templates with an explicit <strong>default</strong> pre-selected for speed.</p>
+
+  <!-- 6 DAILY LOOP -->
+  <h2 class="sec"><span class="k">06</span>The daily loop</h2>
+  <ol class="num-list">
+    <li><strong>Overnight:</strong> the watcher ingests alert emails, extracts + de-dupes + enriches opportunities, writes them as <span class="mono">discovered</span>.</li>
+    <li><strong>Morning briefing (Today):</strong> leads with the latest inbox-scrub hero — count of new roles found and a breakdown by role family — then a prioritized "do these next" list, KPIs, this-week calendar, engagement signals, and funnel health.</li>
+    <li><strong>Triage:</strong> the user swipes the queue — dismiss, maybe/research, or keep. Keep → build packet.</li>
+    <li><strong>Produce:</strong> in the packet builder, confirm JD keywords, pick/keep templates, generate + approve each artifact through rounds.</li>
+    <li><strong>Reach out:</strong> compose per-channel outreach; the cadence engine schedules follow-ups.</li>
+    <li><strong>Convert:</strong> prep, record, and debrief interviews; track and counter offers.</li>
+  </ol>
+
+  <!-- 7 FEATURE MODULES -->
+  <h2 class="sec"><span class="k">07</span>Feature modules</h2>
+
+  <h3>7.1 Intake — inbox monitoring</h3>
+  <p>A three-pane workspace: <strong>monitored roles</strong> (role families with alert counts) → <strong>alerts</strong> for the selected family → <strong>email preview</strong> with the parsed posting and triage actions (push to swipe queue / snooze / dismiss). Backed by an OAuth <strong>folder-setup stepper</strong> (connect email → create roles → map role→folder → done) so each role family reads from its own inbox folder. Sources: Gmail, Outlook/M365, Yahoo; read-only scopes.</p>
+
+  <h3>7.2 Today — morning briefing</h3>
+  <p>Opens with the <strong>latest-inbox-scrub hero</strong>: a large count of roles discovered overnight, a per-role-family breakdown (each with a "N new" pill), source companies, and CTAs (Review in swipe / Inbox monitoring / Re-scan now). Below: KPI strip (active, hot, reply rate, interview rate, days/stage, asset opens), prioritized action list, this-week schedule, engagement signals (deck opens, forwards, ghosting risk), and funnel-health bars.</p>
+
+  <h3>7.3 Opportunities &amp; Pipeline</h3>
+  <p><strong>Opportunities</strong> — a filterable, sortable table (all / hot / strategic / active) with match, stage, and urgency. <strong>Pipeline</strong> — a twelve-column kanban with drag-to-advance cards and a live stage-funnel visualization.</p>
+
+  <h3>7.4 Command Center (per opportunity)</h3>
+  <p>Tabbed workspace: overview, contacts, resume, outreach, templates, playbooks, interview prep, activity, analytics. Overview leads with an <strong>application-packet band</strong> (progress + open) plus Compose / Answers shortcuts, a stakeholder map, company signals, pain hypotheses, tailored-asset grid, status, activity feed, and a compensation band linking to the negotiation tracker. An interactive stage-rail advances the opportunity.</p>
+
+  <h3>7.5 Application Packet builder</h3>
+  <p>The core production line. A left step-rail (JD analysis → resume → cover → portfolio → video → review) with per-step status. <strong>Nothing starts from scratch</strong> — the JD step is pre-populated from the triggering email (source, role, comp, location, HM) with keywords auto-matched against the master baseline, so the ATS score opens high and only gaps are flagged. Each artifact step offers a <strong>template picker with a default</strong>, an editable draft, keyword-coverage meter, version history, and reviewer feedback. Review step gates sending on all-approved; "Request changes" spins a new round; sending moves the opportunity to <span class="mono">applied</span>.</p>
+
+  <h3>7.6 Outreach Composer</h3>
+  <p>Multi-channel drafting: cold email, LinkedIn connect (300-char aware), LinkedIn DM, InMail, cold-call script, follow-up. Per-contact personalization from the stakeholder map, a <strong>tone toggle</strong> (Direct / Warm / POV-led), a <strong>message-template picker with a default</strong> (Standard / Value-add POV / Referral intro / Re-engage), character-limit warnings, reply-rate benchmarks, "weave signal into draft," copy, and send/queue.</p>
+
+  <h3>7.7 Application Answers autofill</h3>
+  <p>Drop a screenshot or file of an application form → the engine detects the questions and drafts an editable, copy-paste-ready block per field (work auth, sponsorship, salary, start date, relocation, "why this company," leadership experience, approach). An <strong>answer-style picker with a default</strong> (Concise / Detailed / STAR method) reshapes long answers. Copy per-field or copy-all.</p>
+
+  <h3>7.8 Outreach cadence engine</h3>
+  <p>A queue of scheduled touches with day offsets, per-opportunity cadence timelines, templates-in-rotation with reply rates, and cadence-health metrics (on-track / stalling / recommend recycle).</p>
+
+  <h3>7.9 Interviews — prep · record · debrief</h3>
+  <p><strong>Prep:</strong> likely questions with strength tags and expandable suggested answers, interviewer profiles, a coverage map, and materials. <strong>Record:</strong> a recording surface with live timer, live AI cues that advance on schedule, live notes, and transcript. <strong>Debrief:</strong> AI summary with advance-likelihood, per-question scoring, owed follow-ups (draft from playbook), and Q-bank updates; advancing writes the next stage.</p>
+
+  <h3>7.10 Offer / negotiation tracker</h3>
+  <p>Three columns — their offer, your (editable) counter with live total-comp math, and a walk-away floor — plus a generated counter draft, comp benchmarks, leverage summary, and timing. Accept / counter / decline actions.</p>
+
+  <h3>7.11 Roles, Playbooks, Assets, Settings</h3>
+  <ul>
+    <li><strong>Role profiles:</strong> eight master baselines; each detail shows narrative, key wins, linked assets, linked playbooks, and comp reference.</li>
+    <li><strong>Playbooks:</strong> a tagged library (onboarding, operating, AI/risk, etc.) the engine attaches per opportunity.</li>
+    <li><strong>Assets:</strong> analytics on every asset — opens, view time, forwards, most-viewed slides, recent opens.</li>
+    <li><strong>Settings:</strong> account, <strong>Templates manager</strong> (category rail + template cards with primary/variant tags), cadence, connections, notifications, master profiles, privacy, billing, recording consent.</li>
+  </ul>
+
+  <h3>7.12 Mobile</h3>
+  <p>A linked phone experience (iOS-style shell) reached via the Mobile toggle: Today briefing, <strong>swipe queue with a real drag gesture</strong> (rotation + KEEP/PASS/MAYBE overlays), pipeline, outreach, interview prep, packet list, composer/answers pickers, and opportunity detail. Bottom tab-bar navigation; dark-mode toggle in the header.</p>
+
+  <!-- 8 DATA MODEL -->
+  <h2 class="sec"><span class="k">08</span>Data model</h2>
+  <table>
+    <thead><tr><th>Entity</th><th>Key fields</th></tr></thead>
+    <tbody>
+      <tr><td><strong>opportunity</strong></td><td>id, company, logo, role, loc, comp, match, fit, urgency, source, sourceDate, why, hm, recruiter, rolesFor[], stage, dismissed</td></tr>
+      <tr><td><strong>packet</strong></td><td>oppId, status, round, jdAnalyzed, coveredKw[], templates{resume,cover,portfolio,video}, artifacts{…status}, feedback[]</td></tr>
+      <tr><td><strong>artifact</strong></td><td>type, status (todo→drafting→review→changes→approved), template, version history</td></tr>
+      <tr><td><strong>contact / stakeholder</strong></td><td>name, role, signal, match — per opportunity</td></tr>
+      <tr><td><strong>outreach message</strong></td><td>oppId, contact, channel, tone, template, body, state (draft/scheduled/due/sent)</td></tr>
+      <tr><td><strong>interview</strong></td><td>oppId, stage, questions[], transcript, debrief{summary, scores[], followups[]}</td></tr>
+      <tr><td><strong>offer</strong></td><td>oppId, their{base,equity,sign}, counter{…}, floor{…}, benchmarks[]</td></tr>
+      <tr><td><strong>role profile / template / playbook / asset</strong></td><td>library entities referenced during generation</td></tr>
+    </tbody>
+  </table>
+
+  <!-- 9 ARCHITECTURE -->
+  <h2 class="sec"><span class="k">09</span>System architecture</h2>
+  <p class="lead">Flow: platform subscriptions → Outlook/Gmail folders → the watcher → review → generation → outputs. OpenAI and Google Workspace are shared services called from multiple stages. (Full diagram: <em>Executive Engine Architecture.html</em>.)</p>
+  <ol class="num-list">
+    <li><strong>Subscriptions:</strong> LinkedIn, Indeed, Greenhouse/Lever, executive search firms, Wellfound/Otta — each emailing a dedicated alias.</li>
+    <li><strong>Mail folders:</strong> inbox rules route by sender/subject into per-role folders. Microsoft Graph / Gmail API subscription webhook per folder, auto-renewed; read scopes + send scope for outreach.</li>
+    <li><strong>The watcher (edge functions):</strong> <span class="mono">ingest-webhook → extract-opportunity (OpenAI) → dedupe (pgvector) → enrich</span>, with a <span class="mono">poll-inbox</span> cron fallback + subscription renewal.</li>
+    <li><strong>Review:</strong> swipe triage drives the <span class="mono">opportunities.status</span> state machine.</li>
+    <li><strong>Generation:</strong> a durable <span class="mono">generate-packet</span> job fans out — OpenAI produces content values, then Docs/Slides <span class="mono">batchUpdate replaceAllText</span> fills copies of master templates, exported to PDF.</li>
+    <li><strong>Outputs:</strong> resume, cover, portfolio, video, outreach (via Graph sendMail), answers, prep, debrief.</li>
+  </ol>
+  <h4>Recommended platform services</h4>
+  <p style="font-size:9.5pt;">Edge functions (ingest / extract / enrich / generate / fill-docs / fill-slides / send-outreach) · Postgres + pgvector · durable job queue · cron scheduler (poll-inbox, renew-subs, run-cadence, refresh-signals) · object storage (video, screenshots, PDFs) · auth + token vault (MS / Google / OpenAI OAuth) · vector store (dedupe, match, Q-bank) · observability + OpenAI cost metering · push/email notifications.</p>
+
+  <h4>Google Workspace generation detail</h4>
+  <p style="font-size:9.5pt;">Master <span class="mono">Resume.gdoc</span> holds placeholders (<span class="mono">{{name}}</span>, <span class="mono">{{summary}}</span>, <span class="mono">{{impact_1}}</span>, <span class="mono">{{keywords}}</span>…); master <span class="mono">Portfolio.gslides</span> holds <span class="mono">{{slide_title}}</span>, <span class="mono">{{case_study}}</span>, <span class="mono">{{metric}}</span>, <span class="mono">{{logo_img}}</span>. Fill sequence: <span class="mono">drive.files.copy</span> → <span class="mono">docs/slides.batchUpdate replaceAllText</span> (+ replaceAllShapesWithImage) → <span class="mono">drive.files.export</span> to PDF → link back to the artifact.</p>
+
+  <!-- 10 AI CONTRACT -->
+  <h2 class="sec"><span class="k">10</span>AI / API contract</h2>
+  <table>
+    <thead><tr><th>Task</th><th>Model</th><th>Input</th><th>Output</th></tr></thead>
+    <tbody>
+      <tr><td>Parse alert</td><td>gpt-4o-mini</td><td>Raw job-alert email</td><td>Opportunity JSON (company, role, comp, loc, url, source, HM/recruiter)</td></tr>
+      <tr><td>Dedupe / match</td><td>text-embedding-3</td><td>Opportunity text + role profile</td><td>Similarity score (skip dupes) + fit/match score</td></tr>
+      <tr><td>JD / ATS analysis</td><td>gpt-4o (vision)</td><td>JD text or screenshot + master profile</td><td>Keywords[], must-haves[], ATS score, gaps[]</td></tr>
+      <tr><td>Resume fill</td><td>gpt-4o</td><td>Profile + keywords + placeholder schema</td><td>Placeholder→value map</td></tr>
+      <tr><td>Cover / portfolio</td><td>gpt-4o</td><td>Profile + JD + Docs/Slides schema</td><td>Placeholder→value maps</td></tr>
+      <tr><td>Outreach draft</td><td>gpt-4o</td><td>Contact + signals + channel + tone + template</td><td>Message body (channel char-limit aware)</td></tr>
+      <tr><td>Application answers</td><td>gpt-4o (vision)</td><td>Form screenshot + profile + JD + style</td><td>Question→answer blocks (length-bounded)</td></tr>
+      <tr><td>Interview prep</td><td>gpt-4o</td><td>JD + interviewer list + Q-bank</td><td>Likely Qs + suggested answers + coverage map</td></tr>
+      <tr><td>Debrief</td><td>gpt-4o</td><td>Interview transcript / recording</td><td>Summary + per-question scores + follow-ups</td></tr>
+    </tbody>
+  </table>
+  <p style="font-size:9.5pt; color:var(--ink2);">Keys held in the secret vault; usage metered per call. AI features are individually flag-gated (see §13).</p>
+
+  <!-- 11 DESIGN -->
+  <h2 class="sec"><span class="k">11</span>Design system &amp; UX</h2>
+  <p>Built on the <strong>Compass Design System</strong> — a teal-and-slate SaaS system on Inter, fully tokenized. All surfaces use Compass tokens (<span class="mono">--surface-*</span>, <span class="mono">--text-*</span>, <span class="mono">--surface-brand-*</span>); no invented colors. Violet is reserved exclusively for AI features (the <span class="mono">CompassAIBadge</span>).</p>
+  <ul>
+    <li><strong>Light &amp; dark:</strong> a full dark theme via design-system tokens, toggled from the top bar and mobile header. (Note: dark is driven by a dedicated class to survive the bundle's preview-pin, overriding the same tokens.)</li>
+    <li><strong>Density:</strong> comfortable / compact.</li>
+    <li><strong>Accent:</strong> brand-token-driven; teal default.</li>
+    <li><strong>Two visual editions maintained in parallel:</strong> a hand-drawn wireframe original (for concept/QC) and the Compass "product" edition — same router, data, and interactivity, different skin.</li>
+  </ul>
+
+  <!-- 12 PLATFORMS -->
+  <h2 class="sec"><span class="k">12</span>Platforms &amp; integrations</h2>
+  <div class="grid2">
+    <div class="card"><div class="t">Email</div><div class="d">Microsoft Graph (Outlook/M365), Gmail API, Yahoo — read scopes + send for outreach; per-folder change webhooks, auto-renewed.</div></div>
+    <div class="card"><div class="t">Calendar</div><div class="d">Google/Microsoft calendar sync for the week view and interview scheduling.</div></div>
+    <div class="card"><div class="t">OpenAI</div><div class="d">gpt-4o (+ vision), gpt-4o-mini, text-embedding-3 — parsing, generation, dedupe/match.</div></div>
+    <div class="card"><div class="t">Google Workspace</div><div class="d">Drive + Docs + Slides APIs for template fill and PDF export.</div></div>
+    <div class="card"><div class="t">Job platforms</div><div class="d">LinkedIn, Indeed, Greenhouse/Lever, exec search firms, Wellfound/Otta — via email alerts (no code to add a new source).</div></div>
+    <div class="card"><div class="t">Storage / infra</div><div class="d">Postgres + pgvector, durable queue, cron, object storage, token vault, observability.</div></div>
+  </div>
+
+  <!-- 13 TWEAKS -->
+  <h2 class="sec"><span class="k">13</span>Tweakable demo dimensions</h2>
+  <p>The prototype exposes live controls that also define real product configuration axes:</p>
+  <ul>
+    <li><strong>Persona:</strong> CTO / VP Engineering / VP Product — re-filters catalog, baseline, keywords, comp.</li>
+    <li><strong>Demo state:</strong> Just started (day 3) / Mid-pipeline (day 24) / Closing offer (day 42) — re-stages the pipeline and metrics.</li>
+    <li><strong>Visual:</strong> dark mode, density, accent color.</li>
+    <li><strong>Feature flags:</strong> AI features, swipe gestures, interview recording, AI debriefs, cadence engine — each independently toggleable.</li>
+  </ul>
+
+  <!-- 14 PHASES -->
+  <h2 class="sec"><span class="k">14</span>Build phases</h2>
+  <ol class="num-list">
+    <li><strong>Foundation:</strong> OAuth email connect, folder mapping, the watcher (ingest → extract → dedupe → enrich), opportunity store, review/swipe, pipeline.</li>
+    <li><strong>Production line:</strong> JD/ATS analysis, template system with defaults, Docs/Slides generation, packet approval rounds.</li>
+    <li><strong>Outreach:</strong> multi-channel composer, cadence engine, send integration, asset analytics.</li>
+    <li><strong>Convert:</strong> interview prep/record/debrief, offer/negotiation tracker.</li>
+    <li><strong>Polish:</strong> mobile parity, dark mode, personas, notifications, partner-seat review.</li>
+  </ol>
+
+  <!-- 15 OPEN QUESTIONS -->
+  <h2 class="sec"><span class="k">15</span>Open questions</h2>
+  <ul>
+    <li>Recording consent + storage policy for interview capture (jurisdiction-dependent).</li>
+    <li>How aggressively to auto-send outreach vs. always require approval.</li>
+    <li>Whether to add literal Compass React components on flagship screens vs. the current token-themed layer.</li>
+    <li>Partner/reviewer permissions model and notification routing.</li>
+    <li>ATS-scoring fidelity — how closely to model real applicant-tracking parsers.</li>
+  </ul>
+
+  <div class="divider"></div>
+  <p class="doc-meta">Executive Engine · Product Specification v1.0 · companion artifacts: Executive Engine Prototype (Compass).html · Executive Engine Prototype.html (wireframe original) · Executive Engine Architecture.html</p>
+
+</doc-page>
+<script src="proto-compass/doc-page.js"></script>
+</body>
+</html>

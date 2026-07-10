@@ -116,5 +116,53 @@ export async function testConnection(
 app.http('testConnection', {
   methods: ['POST', 'OPTIONS'],
   authLevel: 'anonymous',
+  route: 'test-connection',
   handler: testConnection
+})
+
+// GET /api/config-status - report which credentials are configured server-side
+// Returns booleans only — never the secret values themselves.
+export async function configStatus(
+  req: HttpRequest,
+  context: InvocationContext
+): Promise<HttpResponseInit> {
+  const headers = {
+    'Content-Type': 'application/json',
+    'Access-Control-Allow-Origin': '*'
+  }
+
+  const has = (v?: string) => !!(v && v.trim())
+
+  return {
+    status: 200,
+    headers,
+    jsonBody: {
+      microsoft: has(process.env.MICROSOFT_CLIENT_ID) && has(process.env.MICROSOFT_CLIENT_SECRET),
+      google: has(process.env.GOOGLE_SERVICE_ACCOUNT_JSON),
+      openai: has(process.env.OPENAI_API_KEY),
+      heygen: has(process.env.HEYGEN_API_KEY),
+      elevenlabs: has(process.env.ELEVENLABS_API_KEY),
+      elevenlabsVoice: has(process.env.ELEVENLABS_DEFAULT_VOICE_ID),
+      heygenCloneAvatar: has(process.env.HEYGEN_CLONE_1_AVATAR_IDENTITY_ID),
+      heygenCloneVoice: has(process.env.HEYGEN_CLONED_VOICE_ID),
+      azure: has(process.env.AZURE_STORAGE_CONNECTION_STRING),
+      // Google OAuth-user connection: true once a refresh token is stored, i.e.
+      // dev@enterpriseds.io has consented and file copies run as that account.
+      googleOAuthConnected: has(process.env.GOOGLE_REFRESH_TOKEN),
+      googleOAuthClientReady: has(process.env.GOOGLE_CLIENT_ID) && has(process.env.GOOGLE_CLIENT_SECRET),
+      // masked hints so the UI can show a non-empty, non-secret indicator
+      hints: {
+        openai: has(process.env.OPENAI_API_KEY) ? 'sk-••••••••' : '',
+        microsoft: has(process.env.MICROSOFT_CLIENT_ID) ? `${(process.env.MICROSOFT_CLIENT_ID || '').slice(0, 8)}••••` : '',
+        azure: has(process.env.AZURE_STORAGE_CONNECTION_STRING) ? 'n8nstxpdthydai6fkm ••••' : ''
+      }
+    }
+  }
+}
+
+app.http('configStatus', {
+  methods: ['GET'],
+  authLevel: 'anonymous',
+  route: 'config-status',
+  handler: configStatus
 })
