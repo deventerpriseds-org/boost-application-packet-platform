@@ -98,26 +98,20 @@ until that diff is done.
   passes (promote-to-due, not auto-send — a human still reviews). Manual trigger
   `POST /app/outreach/tick` for verification / process-now. Verified live.
 
-### G8 — Auth / multi-tenancy  ·  status: Google LIVE (zero-touch); Microsoft awaits 1 workflow run
+### G8 — Auth / multi-tenancy  ·  status: BOTH providers enabled + wired (live click-through untested)
 - **Follows the `enterpriseds-azure-deploy` house pattern** (reuse shared infra,
   own Entra app per app, shared Google broker). Client-side Microsoft **MSAL**
   (`@azure/msal-browser@^3.30`, browser + PKCE, no secret) + **Google** auth-code
-  flow through the shared **`enterpriseds-auth-broker`**.
-- **Google — LIVE, verified, zero-touch:** `auth.js` builds the Google auth URL
-  with the shared `VITE_GOOGLE_REDIRECT_URI` (broker) + `VITE_GOOGLE_CLIENT_ID`;
-  the broker forwards the code back; `handleGoogleCallback` exchanges it via the
-  new **`POST /auth/google/token`** (exchanges with `GOOGLE_CLIENT_ID/SECRET`,
-  returns identity). Verified: endpoint reaches Google's token server; app bundle
-  has the broker flow + redirect URI. No Google console step (broker registered
-  once, ever).
-- **Microsoft — wired, one workflow run to activate:** own Entra app via
-  **`azure-entra-app.yml`** (`APP_NAME=executive-engine-web`; SP already holds
-  Graph `Application.ReadWrite.All`, so it sets the SPA redirect URI itself — no
-  portal). `executive-engine-deploy.yml` resolves `VITE_MS_CLIENT_ID` by name.
-  Blocked only by: a new workflow can't be `workflow_dispatch`-ed until it's on
-  the default branch → **after this branch merges to main, run "Provision Entra
-  App (Executive Engine)" once, then redeploy.** Until then the Microsoft button
-  is disabled (client ID empty); Google works.
+  flow through the shared **`enterpriseds-auth-broker`**. Zero portal/console steps.
+- **Provisioned & verified:** `azure-entra-app.yml` ran (success) → created the
+  **`executive-engine-web`** Entra app + set its SPA redirect URI (confirms the SP
+  holds Graph `Application.ReadWrite.All`). Redeploy baked `VITE_MS_CLIENT_ID` in.
+  Deployed bundle (1007 KB) has **MSAL configured** (MS button enabled) AND
+  **Google** (client ID + broker redirect). `POST /auth/google/token` verified to
+  reach Google's token server.
+- **Not yet exercised:** an actual human click-through sign-in for either provider
+  (needs a real consent screen — can't be simulated headlessly). Wiring, client
+  IDs, endpoint, and Entra redirect are all confirmed.
 - Signed-in email → data `owner`; opportunity/packet/outreach reads scoped to it;
   shared demo mode when signed out. **Settings ▸ Account**.
 - (Superseded attempts, for the record: SWA-EasyAuth; reusing the mail app's
