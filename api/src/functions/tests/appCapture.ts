@@ -13,10 +13,13 @@ const HEADERS = { 'Content-Type': 'application/json', 'Access-Control-Allow-Orig
 export async function appCapture(req: HttpRequest, context: InvocationContext): Promise<HttpResponseInit> {
   if (req.method === 'OPTIONS') return { status: 204, headers: HEADERS }
   const key = process.env.OPENAI_API_KEY
-  const owner = resolveOwner(req).owner
   let client
   try {
     const body = await req.json() as any
+    // Prefer the server-verified token; else the extension's configured owner
+    // (body); else the shared demo workspace.
+    const ro = resolveOwner(req)
+    const owner = ro.verified ? ro.owner : (body?.owner || ro.owner)
     const url = (body?.url || '').toString()
     const rawTitle = (body?.title || '').toString()
     const text = (body?.text || '').toString().slice(0, 8000)
