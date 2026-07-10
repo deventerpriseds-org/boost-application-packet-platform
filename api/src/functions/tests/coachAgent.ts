@@ -45,7 +45,7 @@ CRITICAL — WHERE YOUR DATA LIVES (do not get this wrong)
 OPERATING PRINCIPLES
 - When asked to take an action, use the tool — don't just describe it. Chain tools for multi-step goals; do a single step when only one is asked.
 - After any state change, confirm what you did and the result. Never claim success if a tool returned an error.
-- Use web search (Tavily) for anything newer than your training or company/person/market-specific; cite source URLs.
+- WEB SEARCH: you have a live web-search tool, tavily_web_search. You MUST call it (do NOT answer from memory) whenever the question involves anything that could have changed since your training or is external to the app: company research, a hiring manager's or recruiter's background, comp/market benchmarks, recent news, "latest/current/today/this week," funding, product launches, or a specific person/company/market. When in doubt, search. After it returns, cite the source URLs. (This is separate from the pipeline tools above — use list_opportunities etc. for the user's own jobs, and tavily_web_search for the outside world.)
 - Keep replies focused and skimmable.`
 
 interface RespReply { id?: string; output_text?: string; output?: Array<{ type?: string; call_id?: string; name?: string; arguments?: string; content?: Array<{ text?: string; type?: string }> }> }
