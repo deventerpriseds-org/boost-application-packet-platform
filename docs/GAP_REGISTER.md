@@ -130,7 +130,22 @@ Two halves + a coverage reality (researched 2026):
   line and storing `to_email`/`subject`. LinkedIn/call channels return a
   copy-paste result (no API). Verified: real email delivered von.ellis→von.ellis.
 
-### G6 — Real Google Docs/Slides artifacts  ·  status: CLOSED (Docs + Slides)
+### G6 — Real Google Docs/Slides artifacts  ·  status: REDONE as TEMPLATE FILL
+- **Corrected approach (owner):** the packet artifacts must be produced by
+  **copying the designed Google template and filling `{{placeholders}}`**, NOT by
+  creating a blank doc / from-scratch deck. This is the MT-22 `pipeline.ts` path
+  that produced the correctly-formatted portfolio files.
+- **Reuse, not reinvent:** the 3-agent generation was extracted into
+  `pipeline.buildPackageForJD` → `assemblePackage`, shared by the test flow and
+  the production packet builder, so both use the identical proven engine. The
+  assembled package carries the exact placeholder keys.
+- `packetTemplates.ts`: copy template (Drive `files/{id}/copy`) → `replaceAllText`
+  each `{{placeholder}}` → **review-agent cleanup pass** strips any leftover
+  `{{...}}` tokens so dynamic text never leaves eyesores → anyone-reader.
+  resume/compact → Doc template; portfolio/cover → Slides templates. The package
+  is cached on `packet.pkg_json` so all artifacts share one generation.
+
+### G6 (original) — Real Google Docs/Slides artifacts  ·  status: SUPERSEDED (was Docs + Slides)
 - `POST /app/artifact/{id}/document` creates a real, shareable Google Doc from
   the generated text (Drive create → Docs insert → anyone-reader), stored on
   `doc_url`, filed in an "Executive Engine Packets" folder.
