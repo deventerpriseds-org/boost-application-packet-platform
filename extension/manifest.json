@@ -1,0 +1,11 @@
+{
+  "manifest_version": 3,
+  "name": "Executive Engine — Save Job",
+  "version": "0.1.0",
+  "description": "Save any job posting to your Executive Engine pipeline, and autofill applications with your generated answers.",
+  "permissions": ["activeTab", "scripting", "storage"],
+  "host_permissions": ["https://job-platform-api.azurewebsites.net/*"],
+  "action": { "default_popup": "popup.html", "default_title": "Save job to Executive Engine" },
+  "options_page": "options.html",
+  "icons": {}
+}

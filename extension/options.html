@@ -1,0 +1,29 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <style>
+    body { font: 14px/1.6 system-ui, sans-serif; max-width: 520px; margin: 30px auto; padding: 0 16px; color: #1a1a1a; }
+    h1 { font-size: 18px; } label { display: block; margin-top: 14px; font-weight: 600; }
+    input { width: 100%; padding: 8px; font: inherit; border: 1px solid #c7c7c7; border-radius: 6px; box-sizing: border-box; }
+    .hint { color: #666; font-size: 12px; margin-top: 2px; }
+    button { margin-top: 18px; padding: 9px 16px; border-radius: 8px; border: none; background: #4b3fbf; color: #fff; font: inherit; font-weight: 600; cursor: pointer; }
+    .saved { color: #157a3a; margin-left: 10px; }
+  </style>
+</head>
+<body>
+  <h1>Executive Engine — extension settings</h1>
+  <label>Your workspace email</label>
+  <input id="owner" placeholder="you@company.com" />
+  <div class="hint">Jobs you save are scoped to this account (the email you sign in with on the app).</div>
+  <label>Session token (optional, more secure)</label>
+  <input id="token" placeholder="paste from the app once signed in" />
+  <div class="hint">If set, jobs are saved under your server-verified identity. Otherwise the email above is used.</div>
+  <label>API base</label>
+  <input id="apiBase" />
+  <label>App URL</label>
+  <input id="appUrl" />
+  <div><button id="save">Save</button><span id="status" class="saved"></span></div>
+  <script src="options.js"></script>
+</body>
+</html>

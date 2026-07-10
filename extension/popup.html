@@ -1,0 +1,29 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <style>
+    body { font: 13px/1.5 system-ui, sans-serif; width: 320px; margin: 0; padding: 14px; color: #1a1a1a; }
+    h1 { font-size: 15px; margin: 0 0 2px; }
+    .sub { color: #666; font-size: 12px; margin-bottom: 12px; }
+    button { font: inherit; padding: 9px 14px; border-radius: 8px; border: 1px solid #c7c7c7; background: #fff; cursor: pointer; }
+    button.primary { background: #4b3fbf; color: #fff; border-color: #4b3fbf; width: 100%; font-weight: 600; }
+    button:disabled { opacity: .6; cursor: default; }
+    .result { margin-top: 12px; font-size: 12px; }
+    .ok { color: #157a3a; } .err { color: #b3261e; }
+    a { color: #4b3fbf; }
+    .row { display: flex; justify-content: space-between; align-items: center; margin-top: 10px; }
+  </style>
+</head>
+<body>
+  <h1>Save this job</h1>
+  <div class="sub">Captures the posting on this tab into your Executive Engine pipeline.</div>
+  <button id="save" class="primary">＋ Save to pipeline</button>
+  <div id="result" class="result"></div>
+  <div class="row">
+    <a id="openApp" href="#" target="_blank">Open Executive Engine ↗</a>
+    <a href="#" id="opts">Settings</a>
+  </div>
+  <script src="popup.js"></script>
+</body>
+</html>
