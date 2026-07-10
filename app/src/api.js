@@ -78,6 +78,10 @@ export const api = {
   mailSelfTest: () => post(`/mail/self-test`, {}),
   // AI cost metering
   usageSummary: () => get(`/app/usage`),
+  // Asset analytics (tracked opens)
+  assetsAnalytics: () => get(`/app/assets/analytics?owner=${encodeURIComponent(_owner)}`),
+  assetEvent: (body) => post(`/app/asset/event`, body),
+  trackedLink: (artifactId) => `${API_BASE}/app/asset/${artifactId}/open`,
   // Library
   listAssets: () => get(`/app/assets`),
   listPersonas: () => get(`/app/personas`),

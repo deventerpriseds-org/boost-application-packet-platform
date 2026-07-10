@@ -232,7 +232,11 @@ export default function PacketBuilder({ id }) {
                 const d = doc[a.id] || {}
                 const isDeck = a.type === 'portfolio'
                 if (a.docUrl) return (
-                  <a href={a.docUrl} target="_blank" rel="noreferrer" className="px-link" style={{ fontSize: 12 }}>{(a.docUrl || '').includes('/presentation/') ? '✓ Open Slides deck ↗' : '✓ Open Google Doc ↗'}</a>
+                  <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+                    <a href={a.docUrl} target="_blank" rel="noreferrer" className="px-link" style={{ fontSize: 12 }}>{(a.docUrl || '').includes('/presentation/') ? '✓ Open Slides deck ↗' : '✓ Open Google Doc ↗'}</a>
+                    <span className="px-link" style={{ fontSize: 12, cursor: 'pointer' }}
+                      onClick={() => { try { navigator.clipboard?.writeText(api.trackedLink(a.id)) } catch {} toast('Tracked link copied — opens are logged in Library ▸ Assets') }}>⎘ Copy tracked link</span>
+                  </div>
                 )
                 return (
                   <button className="px-btn" style={{ fontSize: 12, alignSelf: 'flex-start' }} disabled={d.busy} onClick={() => (isDeck ? makeSlides(a) : makeDoc(a))}>

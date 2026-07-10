@@ -42,13 +42,55 @@ function useFetch(fn, deps = []) {
   return state
 }
 
+function timeAgo(iso) {
+  if (!iso) return '—'
+  const s = (Date.now() - new Date(iso).getTime()) / 1000
+  if (s < 3600) return `${Math.max(1, Math.round(s / 60))}m ago`
+  if (s < 86400) return `${Math.round(s / 3600)}h ago`
+  return `${Math.round(s / 86400)}d ago`
+}
+
+// Engagement: who's opened the shared assets (via tracked links).
+function AssetAnalytics() {
+  const { loading, error, data } = useFetch(() => api.assetsAnalytics())
+  if (loading || error || !data) return null
+  const assets = (data.assets || []).filter((a) => a.opens > 0)
+  return (
+    <div className="px-box" style={{ padding: 16, marginBottom: 16 }}>
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 10 }}>
+        <b style={{ fontSize: 14 }}>Engagement</b>
+        <span className="px-small">tracked opens on shared assets</span>
+        <div style={{ flex: 1 }} />
+        <span style={{ fontSize: 22, fontWeight: 700 }}>{data.totalOpens || 0}</span>
+        <span className="px-small">total opens</span>
+      </div>
+      {assets.length === 0 ? (
+        <div className="px-small" style={{ marginTop: 10 }}>No opens yet. Share an asset with <b>“Copy tracked link”</b> (in the packet builder) instead of the raw Drive URL, and opens will show up here.</div>
+      ) : (
+        <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 4 }}>
+          {assets.map((a) => (
+            <div key={a.assetId} style={{ display: 'flex', alignItems: 'baseline', gap: 10, fontSize: 13 }}>
+              <span style={{ fontWeight: 600, minWidth: 200 }}>{a.label}</span>
+              <span className="px-small">👁 {a.opens}{a.uniqueViewers ? ` · ${a.uniqueViewers} viewer${a.uniqueViewers === 1 ? '' : 's'}` : ''}</span>
+              <div style={{ flex: 1 }} />
+              <span className="px-small">{timeAgo(a.lastEvent)}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function Assets() {
   const { loading, error, data } = useFetch(() => api.listAssets())
   if (loading) return <Loading />
   if (error) return <ErrorBox error={error} />
   const assets = data.assets || []
-  if (!assets.length) return <Empty>No generated assets yet. Build a packet to create tailored resumes, cover letters, and intro videos.</Empty>
+  if (!assets.length) return (<div><AssetAnalytics /><Empty>No generated assets yet. Build a packet to create tailored resumes, cover letters, and intro videos.</Empty></div>)
   return (
+    <div>
+    <AssetAnalytics />
     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 12 }}>
       {assets.map((a) => (
         <div key={a.id} className="px-box" onClick={() => go(`/packet/${a.oppId}`)} style={{ padding: 14, cursor: 'pointer', display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -64,6 +106,7 @@ function Assets() {
           </div>
         </div>
       ))}
+    </div>
     </div>
   )
 }
