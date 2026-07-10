@@ -239,8 +239,101 @@ export async function artifactDocument(req: HttpRequest, context: InvocationCont
   } finally { try { await client?.end() } catch {} }
 }
 
+// Split generated prose into up to N slide-sized sections: each slide gets a
+// short title (first line/sentence) and the rest as body.
+function toSlideSections(content: string, max = 4): { title: string; body: string }[] {
+  const chunks = content.split(/\n\s*\n/).map((c) => c.trim()).filter(Boolean).slice(0, max)
+  return chunks.map((chunk, i) => {
+    const firstLine = chunk.split('\n')[0].replace(/^[#*\-\d.\s]+/, '').trim()
+    const short = firstLine.length <= 70 ? firstLine : firstLine.slice(0, 67) + '…'
+    const body = chunk.slice(chunk.indexOf('\n') + 1).trim() || chunk
+    // If the chunk was a single line, keep it as body under a generic title.
+    if (!chunk.includes('\n')) return { title: ['Overview', 'Impact', 'Approach', 'Fit'][i] || 'Highlights', body: chunk }
+    return { title: short, body }
+  })
+}
+
+// POST /api/app/artifact/{artifactId}/slides — turn the portfolio text into a
+// real Google Slides deck (title slide + section slides), anyone-with-link
+// reader. Stores the deck URL on artifact.doc_url.
+export async function artifactSlides(req: HttpRequest, context: InvocationContext): Promise<HttpResponseInit> {
+  if (req.method === 'OPTIONS') return { status: 204, headers: HEADERS }
+  const artifactId = req.params.artifactId
+  let client
+  try {
+    if (!HAS_GOOGLE_OAUTH) return { status: 200, headers: HEADERS, jsonBody: { error: 'GOOGLE_REFRESH_TOKEN not set — run the Google consent flow first.' } }
+    client = await getPgClient()
+    await ensureContentColumn(client)
+    const art = (await client.query(`select a.*, p.opp_id from artifact a join packet p on p.id = a.packet_id where a.id = $1`, [artifactId])).rows[0]
+    if (!art) return { status: 404, headers: HEADERS, jsonBody: { error: 'artifact not found' } }
+    if (!art.content || !art.content.trim()) return { status: 400, headers: HEADERS, jsonBody: { error: 'generate the content first, then create the deck' } }
+    const opp = (await client.query(`select company, role from opportunity where id = $1`, [art.opp_id])).rows[0]
+
+    const token = await getGoogleOAuthToken()
+    const folderId = await findOrCreateFolder(token, 'Executive Engine Packets')
+    const title = `${opp?.company || 'Opportunity'} — Portfolio`
+
+    // 1. Create the presentation in the packets folder (Drive scope).
+    const created = await fetch('https://www.googleapis.com/drive/v3/files', {
+      method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ name: title, mimeType: 'application/vnd.google-apps.presentation', parents: [folderId] })
+    })
+    const cj = (await created.json()) as any
+    if (!created.ok) throw new Error(`Slides create HTTP ${created.status}: ${JSON.stringify(cj).slice(0, 200)}`)
+    const presId = cj.id
+
+    // 2. Find the default slide so we can drop it after adding our own.
+    const pres = await fetch(`https://slides.googleapis.com/v1/presentations/${presId}`, { headers: { Authorization: `Bearer ${token}` } })
+    const pj = (await pres.json()) as any
+    if (!pres.ok) return { status: 200, headers: HEADERS, jsonBody: { error: `Slides read HTTP ${pres.status}: ${JSON.stringify(pj).slice(0, 200)}`, hint: pres.status === 403 ? 'The Google OAuth token needs the presentations scope — re-run consent with https://www.googleapis.com/auth/presentations.' : undefined } }
+    const defaultSlideId = pj?.slides?.[0]?.objectId
+
+    // 3. Build a title slide + one slide per section via batchUpdate.
+    const sections = toSlideSections(art.content, 4)
+    const requests: any[] = []
+    // Title slide
+    requests.push({ createSlide: { objectId: 's_title', slideLayoutReference: { predefinedLayout: 'TITLE' }, placeholderIdMappings: [
+      { layoutPlaceholder: { type: 'CENTERED_TITLE' }, objectId: 'p_title' },
+      { layoutPlaceholder: { type: 'SUBTITLE' }, objectId: 'p_sub' },
+    ] } })
+    requests.push({ insertText: { objectId: 'p_title', text: `${opp?.company || ''} — Portfolio` } })
+    requests.push({ insertText: { objectId: 'p_sub', text: opp?.role || '' } })
+    // Section slides
+    sections.forEach((s, i) => {
+      const tId = `t_${i}`, bId = `b_${i}`
+      requests.push({ createSlide: { objectId: `s_${i}`, slideLayoutReference: { predefinedLayout: 'TITLE_AND_BODY' }, placeholderIdMappings: [
+        { layoutPlaceholder: { type: 'TITLE' }, objectId: tId },
+        { layoutPlaceholder: { type: 'BODY' }, objectId: bId },
+      ] } })
+      requests.push({ insertText: { objectId: tId, text: s.title } })
+      requests.push({ insertText: { objectId: bId, text: s.body.slice(0, 1800) } })
+    })
+    // Remove the empty default slide last.
+    if (defaultSlideId) requests.push({ deleteObject: { objectId: defaultSlideId } })
+
+    const upd = await fetch(`https://slides.googleapis.com/v1/presentations/${presId}:batchUpdate`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ requests })
+    })
+    if (!upd.ok) return { status: 200, headers: HEADERS, jsonBody: { error: `Slides batchUpdate HTTP ${upd.status}: ${(await upd.text()).slice(0, 300)}` } }
+
+    // 4. Anyone-with-link reader.
+    await fetch(`https://www.googleapis.com/drive/v3/files/${presId}/permissions`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ role: 'reader', type: 'anyone' })
+    })
+
+    const deckUrl = `https://docs.google.com/presentation/d/${presId}/edit`
+    await client.query(`update artifact set doc_url = $1, updated_at = now() where id = $2`, [deckUrl, artifactId])
+    return { status: 200, headers: HEADERS, jsonBody: { ok: true, artifactId, type: art.type, deckUrl, slides: sections.length + 1, title } }
+  } catch (err) {
+    return { status: 200, headers: HEADERS, jsonBody: { error: String(err) } }
+  } finally { try { await client?.end() } catch {} }
+}
+
 app.http('packetGet', { methods: ['GET', 'OPTIONS'], authLevel: 'anonymous', route: 'app/opportunity/{id}/packet', handler: packetGet })
 app.http('packetsList', { methods: ['GET', 'OPTIONS'], authLevel: 'anonymous', route: 'app/packets', handler: packetsList })
 app.http('artifactGenerate', { methods: ['POST', 'OPTIONS'], authLevel: 'anonymous', route: 'app/artifact/{artifactId}/generate', handler: artifactGenerate })
 app.http('artifactStatus', { methods: ['POST', 'OPTIONS'], authLevel: 'anonymous', route: 'app/artifact/{artifactId}/status', handler: artifactStatus })
 app.http('artifactDocument', { methods: ['POST', 'OPTIONS'], authLevel: 'anonymous', route: 'app/artifact/{artifactId}/document', handler: artifactDocument })
+app.http('artifactSlides', { methods: ['POST', 'OPTIONS'], authLevel: 'anonymous', route: 'app/artifact/{artifactId}/slides', handler: artifactSlides })

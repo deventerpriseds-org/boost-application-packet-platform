@@ -46,6 +46,7 @@ export const api = {
   generateArtifact: (artifactId) => post(`/app/artifact/${artifactId}/generate`, {}),
   setArtifactStatus: (artifactId, status) => post(`/app/artifact/${artifactId}/status`, { status }),
   generateArtifactDocument: (artifactId) => post(`/app/artifact/${artifactId}/document`, {}),
+  generateArtifactSlides: (artifactId) => post(`/app/artifact/${artifactId}/slides`, {}),
   generateArtifactVideo: (artifactId) => post(`/app/artifact/${artifactId}/video`, {}),
   artifactVideoStatus: (artifactId) => get(`/app/artifact/${artifactId}/video/status`),
   archiveArtifactVideo: (artifactId) => post(`/app/artifact/${artifactId}/archive`, {}),

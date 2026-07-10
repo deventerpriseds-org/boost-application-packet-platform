@@ -56,6 +56,21 @@ export default function PacketBuilder({ id }) {
     }
   }
 
+  // Portfolio → a real Google Slides deck.
+  const makeSlides = async (a) => {
+    setDoc((d) => ({ ...d, [a.id]: { busy: true } }))
+    try {
+      const res = await api.generateArtifactSlides(a.id)
+      if (res.error) throw new Error(res.error)
+      patchArtifact(a.id, { docUrl: res.deckUrl })
+      setDoc((d) => ({ ...d, [a.id]: { busy: false } }))
+      toast(`Slides deck created (${res.slides} slides)`)
+    } catch (err) {
+      setDoc((d) => ({ ...d, [a.id]: { busy: false, error: String(err.message || err) } }))
+      toast(`Deck failed: ${err.message || err}`)
+    }
+  }
+
   const generate = async (a) => {
     setBusy(a.id)
     try {
@@ -212,15 +227,16 @@ export default function PacketBuilder({ id }) {
                 )
               })()}
 
-              {/* Real Google Doc (non-video artifacts) */}
+              {/* Real Google Doc, or a Slides deck for the portfolio (non-video) */}
               {a.type !== 'video' && a.content && (() => {
                 const d = doc[a.id] || {}
+                const isDeck = a.type === 'portfolio'
                 if (a.docUrl) return (
-                  <a href={a.docUrl} target="_blank" rel="noreferrer" className="px-link" style={{ fontSize: 12 }}>✓ Open Google Doc ↗</a>
+                  <a href={a.docUrl} target="_blank" rel="noreferrer" className="px-link" style={{ fontSize: 12 }}>{(a.docUrl || '').includes('/presentation/') ? '✓ Open Slides deck ↗' : '✓ Open Google Doc ↗'}</a>
                 )
                 return (
-                  <button className="px-btn" style={{ fontSize: 12, alignSelf: 'flex-start' }} disabled={d.busy} onClick={() => makeDoc(a)}>
-                    {d.busy ? 'Creating Doc…' : '📄 Create Google Doc'}
+                  <button className="px-btn" style={{ fontSize: 12, alignSelf: 'flex-start' }} disabled={d.busy} onClick={() => (isDeck ? makeSlides(a) : makeDoc(a))}>
+                    {d.busy ? (isDeck ? 'Creating deck…' : 'Creating Doc…') : (isDeck ? '▦ Create Slides deck' : '📄 Create Google Doc')}
                   </button>
                 )
               })()}
