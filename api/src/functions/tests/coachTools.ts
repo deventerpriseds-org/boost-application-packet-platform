@@ -38,6 +38,8 @@ const ROUTES: Record<string, Route> = {
   config_status:      { method: 'GET', path: () => `config-status` },
   mail_config:        { method: 'GET', path: () => `mail/config` },
   mail_subscriptions: { method: 'GET', path: () => `mail/subscriptions` },
+  app_health:         { method: 'GET', path: () => `app/health` },
+  app_selftest:       { method: 'GET', path: () => `app/selftest` },
   // --- Newly wired (endpoints already existed) ---
   list_interviews:    { method: 'GET', ownerQuery: true, path: (a) => `app/opportunity/${enc(a.id)}/interviews` },
   interview_debrief:  { method: 'POST', ownerQuery: true, path: (a) => `app/interview/${enc(a.interviewId)}/debrief`, body: (a) => ({ transcript: a.transcript }) },
@@ -89,6 +91,8 @@ export function coachToolSchemas(): any[] {
     fn('get_usage', 'Get AI cost/token usage metering (totals, by-feature, by-model).'),
     fn('assets_analytics', 'Get engagement analytics on shared assets (opens, unique viewers).'),
     fn('config_status', 'Read the deployed API config/credential status (which integrations are wired). Read-only diagnostic.'),
+    fn('app_health', 'Liveness/readiness check — pings Postgres and reports which integrations are configured. Read-only.'),
+    fn('app_selftest', 'Run an automated smoke test of the key app endpoints; returns pass/fail per endpoint. Read-only.'),
     fn('mail_config', 'Read the LinkedIn/mail intake watcher config (watched mailbox, folder, sources). Read-only.'),
     fn('mail_subscriptions', 'List active Microsoft Graph mail change-notification subscriptions. Read-only diagnostic.'),
     fn('remember', 'Save a durable memory the coach should recall in future conversations — especially user feedback, preferences, and decisions for continuous improvement. Stored in the user\'s own Postgres (vendor-portable).', { text: { type: 'string' }, kind: { type: 'string', enum: ['note', 'fact', 'preference', 'decision', 'feedback'] } }, ['text']),
