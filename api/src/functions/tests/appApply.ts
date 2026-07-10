@@ -129,5 +129,30 @@ export async function applyPrepare(req: HttpRequest, context: InvocationContext)
   finally { try { await client?.end() } catch {} }
 }
 
+// POST /api/app/answers/from-questions { questions[], company?, role?, url?, style?, owner? }
+// The universal auto-apply engine: the Chrome extension reads the REAL questions off
+// whatever application form the user is on and posts them here; we draft a tailored
+// answer for each, in order. Works on any ATS (no per-site API needed).
+export async function answersFromQuestions(req: HttpRequest): Promise<HttpResponseInit> {
+  if (req.method === 'OPTIONS') return { status: 204, headers: HEADERS }
+  try {
+    const body = await req.json() as any
+    const questions: string[] = Array.isArray(body?.questions) ? body.questions.map((q: any) => String(q || '').slice(0, 300)).filter(Boolean) : []
+    if (!questions.length) return { status: 400, headers: HEADERS, jsonBody: { error: 'questions[] required' } }
+    const style = ['Concise', 'Detailed', 'STAR'].includes(body?.style) ? body.style : 'Concise'
+    const company = (body?.company || '').toString()
+    const role = (body?.role || '').toString()
+    const profile = `Applying${role ? ` for ${role}` : ''}${company ? ` at ${company}` : ''}${body?.url ? ` (${body.url})` : ''}. US work-authorized, no sponsorship needed, ~4 weeks notice.\n\nMASTER CONTEXT:\n${await masterContextSummary()}`
+    const system = `You fill a job application form. For EACH numbered question below, write a ${style}, copy-paste-ready answer using the candidate profile. Return ONLY JSON: {"answers":["...","..."]} — an array of answer STRINGS in the SAME ORDER as the questions, one per question. For yes/no or short fields answer briefly; skip nothing (use a best-effort answer, or "" only if truly not answerable).`
+    const user = `QUESTIONS:\n${questions.map((q, i) => `${i + 1}. ${q}`).join('\n')}\n\nPROFILE:\n${profile}`
+    const a = await openaiJson(system, user, 'ats:autofill', 1800)
+    let answers: string[] = Array.isArray(a.answers) ? a.answers.map((x: any) => String(x ?? '')) : []
+    // Align length to the questions (pad/trim) so index-matching in the extension is safe.
+    answers = questions.map((_, i) => answers[i] ?? '')
+    return { status: 200, headers: HEADERS, jsonBody: { ok: true, count: answers.length, answers } }
+  } catch (err) { return { status: 200, headers: HEADERS, jsonBody: { error: String(err) } } }
+}
+
 app.http('matchScore', { methods: ['POST', 'OPTIONS'], authLevel: 'anonymous', route: 'app/opportunity/{id}/match-score', handler: matchScore })
+app.http('answersFromQuestions', { methods: ['POST', 'OPTIONS'], authLevel: 'anonymous', route: 'app/answers/from-questions', handler: answersFromQuestions })
 app.http('applyPrepare', { methods: ['POST', 'OPTIONS'], authLevel: 'anonymous', route: 'app/opportunity/{id}/apply/prepare', handler: applyPrepare })

@@ -10,8 +10,12 @@ APIs otherwise block (G11).
   normalizes it with OpenAI and inserts it into your pipeline via the same
   embed → pgvector-dedupe → insert-as-`discovered` path as email/ATS intake
   (so duplicates are skipped automatically).
-- **Autofill** (basic) — `content.js` can fill obvious "why this company / cover
-  letter" textareas from a generated answer (wired for future use).
+- **Fill this application** — on any application form (Workday, Lever, Ashby,
+  Greenhouse, custom), the extension reads the **real fields + their labels** off
+  the live page, sends them to `POST /api/app/answers/from-questions`, and writes a
+  tailored answer back into each field (React/Angular-safe value setting). You then
+  review, attach your resume file (uploads can't be auto-attached), and submit.
+  Works universally because it reads the page, not a per-site API.
 
 ## Install (unpacked, dev)
 1. Chrome → `chrome://extensions` → enable **Developer mode**.

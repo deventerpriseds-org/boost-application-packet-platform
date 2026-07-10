@@ -33,22 +33,75 @@
     return { url: location.href, title, company, location: '', text }
   }
 
-  // Fill obvious "why this company / cover letter" textareas with provided text.
-  function autofill(answer) {
+  // --- Universal auto-apply: detect the real form fields, then fill them back ---
+
+  // Best label for a field: <label for>, wrapping <label>, aria-label, aria-labelledby,
+  // nearby preceding text, name, or placeholder.
+  function labelFor(el) {
+    if (el.labels && el.labels[0]) return el.labels[0].textContent.trim()
+    const al = el.getAttribute('aria-label'); if (al) return al.trim()
+    const lb = el.getAttribute('aria-labelledby')
+    if (lb) { const n = document.getElementById(lb); if (n) return n.textContent.trim() }
+    // Walk up for a container that has a label-like element.
+    let p = el.closest('label, .field, .form-group, [class*="question"], [class*="field"], li, div')
+    if (p) {
+      const lab = p.querySelector('label, legend, .label, [class*="label"]')
+      if (lab && !lab.contains(el)) { const t = lab.textContent.trim(); if (t) return t }
+    }
+    return (el.getAttribute('name') || el.placeholder || '').trim()
+  }
+
+  function isFillable(el) {
+    if (el.disabled || el.readOnly) return false
+    if (el.offsetParent === null && el.type !== 'hidden') { /* hidden by layout */ }
+    if (el.tagName === 'TEXTAREA') return true
+    if (el.tagName === 'INPUT') return ['text', 'email', 'tel', 'url', 'search', 'number', ''].includes((el.type || 'text').toLowerCase())
+    return false
+  }
+
+  // Collect fillable fields, tag each with a ref so we can fill it back reliably.
+  function detectFields() {
+    const els = document.querySelectorAll('input, textarea')
+    const out = []
+    let i = 0
+    for (const el of els) {
+      if (!isFillable(el)) continue
+      const label = labelFor(el)
+      if (!label || label.length > 300) continue
+      el.setAttribute('data-ee-field', String(i))
+      out.push({ ref: i, label, tag: el.tagName.toLowerCase(), type: (el.type || 'text').toLowerCase(), hasValue: !!el.value })
+      i++
+    }
+    return out
+  }
+
+  // React/Angular-safe value set: use the native setter, then dispatch input+change.
+  function setValue(el, value) {
+    const proto = el.tagName === 'TEXTAREA' ? window.HTMLTextAreaElement.prototype : window.HTMLInputElement.prototype
+    const setter = Object.getOwnPropertyDescriptor(proto, 'value')
+    if (setter && setter.set) setter.set.call(el, value); else el.value = value
+    el.dispatchEvent(new Event('input', { bubbles: true }))
+    el.dispatchEvent(new Event('change', { bubbles: true }))
+  }
+
+  // Fill answers[] positionally by the ref we assigned in detectFields().
+  function fillFields(answers, overwrite) {
     let filled = 0
-    const fields = document.querySelectorAll('textarea, input[type="text"]')
-    for (const f of fields) {
-      const label = ((f.getAttribute('aria-label') || f.getAttribute('name') || f.placeholder || '') + ' ' + (f.labels && f.labels[0] ? f.labels[0].textContent : '')).toLowerCase()
-      if (/why|cover|interest|motivat|about you|tell us/.test(label) && f.tagName === 'TEXTAREA' && !f.value) {
-        f.value = answer; f.dispatchEvent(new Event('input', { bubbles: true })); filled++
-      }
+    for (let r = 0; r < answers.length; r++) {
+      const a = answers[r]
+      if (!a) continue
+      const el = document.querySelector(`[data-ee-field="${r}"]`)
+      if (!el) continue
+      if (el.value && !overwrite) continue
+      setValue(el, a); filled++
     }
     return filled
   }
 
   chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     if (msg.type === 'scrape') sendResponse(scrape())
-    else if (msg.type === 'autofill') sendResponse({ filled: autofill(msg.answer || '') })
+    else if (msg.type === 'detectFields') sendResponse({ fields: detectFields(), url: location.href, title: document.title })
+    else if (msg.type === 'fillFields') sendResponse({ filled: fillFields(msg.answers || [], !!msg.overwrite) })
     return true
   })
 })();
