@@ -9,7 +9,7 @@ const HEADERS = {
   'Access-Control-Allow-Headers': 'Content-Type',
 }
 const OPENAI_URL = 'https://api.openai.com/v1/responses'
-const DEMO_EMAIL = 'demo@executive-engine.app'
+const DEMO_EMAIL = 'demo@executive-engine.local'
 const MODEL = process.env.COACH_MODEL || 'gpt-4o'
 
 const SYSTEM = `You are the Executive Engine Coach — an AI operator embedded in an executive job-search platform ("Executive Engine"). The platform runs the full journey: Intake (LinkedIn/email alerts → opportunities), Production line (tailored resume, cover letter, portfolio deck, intro video packets), Outreach (multi-channel cold email / follow-up / LinkedIn / call with a cadence), and Convert (interview prep, debrief, offer negotiation).
