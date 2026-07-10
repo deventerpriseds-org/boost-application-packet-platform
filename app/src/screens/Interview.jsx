@@ -71,6 +71,21 @@ export default function Interview({ id, tab = 'prep' }) {
     } catch (err) { toast(`Mic error: ${err.message || err}`) }
   }
 
+  // Coach directive bridge: when the coach says "start the debrief recording", it
+  // navigates here with a sessionStorage flag; auto-start the mic (browsers may
+  // still require a click for mic permission — the Record button is right there).
+  const autoRan = useRef(false)
+  useEffect(() => {
+    if (autoRan.current || tab !== 'debrief') return
+    let flag; try { flag = sessionStorage.getItem('ee_coach_autorecord') } catch {}
+    if (flag && flag === id) {
+      autoRan.current = true
+      try { sessionStorage.removeItem('ee_coach_autorecord') } catch {}
+      toast('Coach: starting your debrief recording…')
+      setTimeout(() => { if (!rec.recording) toggleRecord() }, 500)
+    }
+  }, [tab, id]) // eslint-disable-line react-hooks/exhaustive-deps
+
   const onUpload = (e) => {
     const f = e.target.files?.[0]; if (!f) return
     transcribe(f, f.type || 'audio/mpeg'); e.target.value = ''

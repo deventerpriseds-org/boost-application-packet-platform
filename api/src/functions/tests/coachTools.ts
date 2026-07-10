@@ -38,6 +38,25 @@ const ROUTES: Record<string, Route> = {
   config_status:      { method: 'GET', path: () => `config-status` },
   mail_config:        { method: 'GET', path: () => `mail/config` },
   mail_subscriptions: { method: 'GET', path: () => `mail/subscriptions` },
+  // --- Newly wired (endpoints already existed) ---
+  list_interviews:    { method: 'GET', ownerQuery: true, path: (a) => `app/opportunity/${enc(a.id)}/interviews` },
+  interview_debrief:  { method: 'POST', ownerQuery: true, path: (a) => `app/interview/${enc(a.interviewId)}/debrief`, body: (a) => ({ transcript: a.transcript }) },
+  seed_cadence:       { method: 'POST', ownerQuery: true, path: (a) => `app/opportunity/${enc(a.id)}/cadence` },
+  set_outreach_state: { method: 'POST', ownerQuery: true, path: (a) => `app/outreach/${enc(a.messageId)}/state`, body: (a) => ({ state: a.state }) },
+  outreach_tick:      { method: 'POST', ownerQuery: true, path: () => `app/outreach/tick` },
+  mail_poll_now:      { method: 'POST', path: (a) => `mail/poll-now`, body: (a) => ({ minutes: a.minutes || 120 }) },
+  answers_vision:     { method: 'POST', ownerQuery: true, path: (a) => `app/opportunity/${enc(a.id)}/answers/vision`, body: (a) => ({ imageBase64: a.imageBase64 }) },
+  generate_video:     { method: 'POST', ownerQuery: true, path: (a) => `app/artifact/${enc(a.artifactId)}/video` },
+  video_status:       { method: 'GET', ownerQuery: true, path: (a) => `app/artifact/${enc(a.artifactId)}/video/status` },
+  archive_video:      { method: 'POST', ownerQuery: true, path: (a) => `app/artifact/${enc(a.artifactId)}/archive` },
+  set_artifact_status:{ method: 'POST', ownerQuery: true, path: (a) => `app/artifact/${enc(a.artifactId)}/status`, body: (a) => ({ status: a.status }) },
+  list_personas:      { method: 'GET', ownerQuery: true, path: () => `app/personas` },
+  // --- New endpoints built for the operator (see appPackets/appBulk/appIntake) ---
+  build_full_packet:  { method: 'POST', ownerQuery: true, path: (a) => `app/opportunity/${enc(a.id)}/packet/build-all`, body: (a) => ({ seedCadence: a.seedCadence, draftOutreach: a.draftOutreach }) },
+  bulk_run:           { method: 'POST', ownerQuery: true, path: () => `app/bulk/packets`, body: (a) => ({ oppIds: a.oppIds, topN: a.topN, stage: a.stage, seedCadence: a.seedCadence, draftOutreach: a.draftOutreach }) },
+  bulk_status:        { method: 'GET', ownerQuery: true, path: (a) => `app/bulk/${enc(a.jobId)}` },
+  analyze_jd:         { method: 'POST', ownerQuery: true, path: (a) => `app/opportunity/${enc(a.id)}/jd-analysis` },
+  enrich_opportunity: { method: 'POST', ownerQuery: true, path: (a) => `app/opportunity/${enc(a.id)}/enrich` },
 }
 
 function enc(v: any) { return encodeURIComponent(String(v ?? '')) }
@@ -74,6 +93,29 @@ export function coachToolSchemas(): any[] {
     fn('mail_subscriptions', 'List active Microsoft Graph mail change-notification subscriptions. Read-only diagnostic.'),
     fn('remember', 'Save a durable memory the coach should recall in future conversations — especially user feedback, preferences, and decisions for continuous improvement. Stored in the user\'s own Postgres (vendor-portable).', { text: { type: 'string' }, kind: { type: 'string', enum: ['note', 'fact', 'preference', 'decision', 'feedback'] } }, ['text']),
     fn('recall', 'Search the coach\'s durable memory for relevant past notes/facts.', { query: { type: 'string' } }, ['query']),
+    // Convert
+    fn('list_interviews', 'List interview rounds recorded for an opportunity.', { id: { type: 'string' } }, ['id']),
+    fn('interview_debrief', 'Debrief an interview from a transcript (summary, per-question scores, owed follow-ups).', { interviewId: { type: 'string' }, transcript: { type: 'string' } }, ['interviewId', 'transcript']),
+    // Outreach
+    fn('seed_cadence', 'Seed the multi-touch outreach cadence (scheduled touches) for an opportunity. Does NOT send.', { id: { type: 'string' } }, ['id']),
+    fn('set_outreach_state', 'Set an outreach message state: draft | scheduled | due | sent | skipped.', { messageId: { type: 'string' }, state: { type: 'string' } }, ['messageId', 'state']),
+    fn('outreach_tick', 'Run the scheduler now: promote scheduled touches whose time has passed to "due" (never auto-sends).'),
+    // Intake
+    fn('mail_poll_now', 'Pull the watched mailbox now for new job alerts (re-scan). minutes = lookback window.', { minutes: { type: 'number' } }),
+    // Production line
+    fn('analyze_jd', 'Run JD/ATS analysis for an opportunity: keywords, must-haves, ATS score, gaps.', { id: { type: 'string' } }, ['id']),
+    fn('enrich_opportunity', 'Enrich an opportunity with company signals, likely stakeholders, and pain hypotheses.', { id: { type: 'string' } }, ['id']),
+    fn('build_full_packet', 'Build the ENTIRE application packet for an opportunity in one go — generates every artifact (resume + compact resume Docs, cover + portfolio Slides) as real Google files. Optionally also seed the cadence and DRAFT (never send) outreach.', { id: { type: 'string' }, seedCadence: { type: 'boolean' }, draftOutreach: { type: 'boolean' } }, ['id']),
+    fn('answers_vision', 'Draft application-form answers from a screenshot (data URI) of the form.', { id: { type: 'string' }, imageBase64: { type: 'string' } }, ['id', 'imageBase64']),
+    fn('generate_video', 'Render the intro video (HeyGen) for a video artifact.', { artifactId: { type: 'string' } }, ['artifactId']),
+    fn('video_status', 'Check the render status of an intro video artifact.', { artifactId: { type: 'string' } }, ['artifactId']),
+    fn('set_artifact_status', 'Advance an artifact\'s status: todo | drafting | review | changes | approved.', { artifactId: { type: 'string' }, status: { type: 'string' } }, ['artifactId', 'status']),
+    fn('list_personas', 'List the user\'s role personas (which role profile is active, comp target, positioning).'),
+    // Bulk (start-to-finish across many opportunities — NEVER sends)
+    fn('bulk_run', 'Run the packet build across MANY opportunities at once (bulk). Pass explicit oppIds OR topN (+optional stage). For each: build the full packet, optionally seed cadence and DRAFT outreach. NEVER sends. Returns a jobId; poll bulk_status.', { oppIds: { type: 'array', items: { type: 'string' } }, topN: { type: 'number' }, stage: { type: 'string' }, seedCadence: { type: 'boolean' }, draftOutreach: { type: 'boolean' } }),
+    fn('bulk_status', 'Get the progress/status of a bulk run by jobId.', { jobId: { type: 'string' } }, ['jobId']),
+    // Client-side UI actions the app executes (things with no server endpoint)
+    fn('ui_action', 'Ask the app to perform a BROWSER action the server cannot do. Use for: start_debrief_recording (open the interview debrief recorder and start recording), navigate (open a screen: today|opportunities|pipeline|packets|outreach|interview|offer|library|settings, optional id), copy_link (copy an artifact\'s tracked share link). The app executes it and shows the user.', { action: { type: 'string', enum: ['start_debrief_recording', 'navigate', 'copy_link'] }, opportunityId: { type: 'string' }, interviewId: { type: 'string' }, screen: { type: 'string' }, id: { type: 'string' }, artifactId: { type: 'string' } }, ['action']),
     TAVILY_WEB_SEARCH_TOOL,
   ]
 }
@@ -92,6 +134,11 @@ export async function executeCoachTool(name: string, args: any, ctx: { owner: st
     if (name === 'recall') {
       const hits = await memRecall({ owner: ctx.owner, query: String(args.query || ''), k: 6 })
       return JSON.stringify({ hits: hits.map((h) => ({ text: h.text, kind: h.kind, score: Number(h.score.toFixed(3)), createdAt: h.createdAt })) })
+    }
+    if (name === 'ui_action') {
+      // No server work — the directive is surfaced to the app (collected from the
+      // tool trace in coachChat) and executed in the browser.
+      return JSON.stringify({ queued: true, action: args.action, note: 'The app will perform this action for the user now.' })
     }
     const route = ROUTES[name]
     if (!route) return JSON.stringify({ error: `unknown tool: ${name}` })

@@ -387,7 +387,7 @@ function CoachSettings() {
           <b style={{ fontSize: 15 }}>System prompt</b>
           <span className="px-small">{cfg.custom ? 'customized' : 'built-in default'}</span>
         </div>
-        <div className="px-small" style={{ marginTop: 4, marginBottom: 8 }}>This is the exact instruction set the coach runs on. Edit it to change its behavior, knowledge, or tone.</div>
+        <div className="px-small" style={{ marginTop: 4, marginBottom: 8 }}>This is the exact instruction set the coach runs on (including its 12-stage playbook). At send time it also appends any of your saved memory relevant to that message. Edit to change its behavior, knowledge, or tone.</div>
         <textarea className="px-input" value={prompt} onChange={(e) => setPrompt(e.target.value)} rows={16}
           style={{ width: '100%', fontFamily: 'ui-monospace, monospace', fontSize: 12, lineHeight: 1.5, resize: 'vertical' }} />
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 10, flexWrap: 'wrap' }}>

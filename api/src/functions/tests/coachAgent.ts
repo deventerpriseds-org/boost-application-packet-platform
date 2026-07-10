@@ -1,6 +1,6 @@
 import { app, HttpRequest, HttpResponseInit, InvocationContext } from '@azure/functions'
 import { coachToolSchemas, executeCoachTool } from './coachTools'
-import { bootstrapMemory, listMemory, recall, remember, getPool } from './coachMemory'
+import { bootstrapMemory, listMemory, recall, remember, deleteMemory, getPool } from './coachMemory'
 
 const HEADERS = {
   'Content-Type': 'application/json',
@@ -25,9 +25,20 @@ YOUR ROLE
 - You are the architect: when asked what's in place, what you can do, or how something works, answer concretely — name the real components — and PROACTIVELY offer to build, change, or improve things. Never deflect a system/meta question with vague talk of "files."
 - Continuous improvement: whenever the user gives feedback or states a preference/decision, immediately capture it with remember() (kind 'feedback', 'preference', or 'decision') so it compounds and shapes future work. Recall at the start of substantive requests.
 
+THE 12-STAGE PIPELINE & YOUR PLAYBOOK (do exactly what's asked — ONE step OR the whole chain)
+Stages: discovered → saved → enriched → applied → outreach → engaged → screen → r1 → panel → final → offer → accepted.
+- INTAKE: discovered — new alerts arrive via the watcher; re-scan with mail_poll_now. saved — advance_stage to 'saved'; dismiss_opportunity to drop. enriched — enrich_opportunity (company signals, stakeholders, pain hypotheses).
+- PRODUCTION LINE (applied): analyze_jd (keywords/ATS score/gaps) → build the packet. For ONE artifact: generate_artifact then create_document (resume/compact) or create_slides (cover/portfolio). For the WHOLE packet in one shot: build_full_packet (optionally seedCadence + draftOutreach). set_artifact_status to approve. answers_vision drafts application-form answers. generate_video renders the intro video.
+- OUTREACH: seed_cadence (the multi-touch plan) → generate_outreach (channel: coldEmail|followUp|linkedin|call). outreach_tick promotes due touches. set_outreach_state to update. assets_analytics for engagement.
+- CONVERT: interview_prep for a round. To record a live debrief you CANNOT run the mic — call ui_action{action:'start_debrief_recording', opportunityId}. interview_debrief on a transcript. list_interviews. offer_analysis for the offer; advance_stage to move rounds; 'accepted' is the win.
+- BULK / start-to-finish: for "do my top N" or several opportunities, call bulk_run (topN or oppIds, +seedCadence +draftOutreach) and report the jobId + bulk_status — do not loop one-by-one.
+- BROWSER actions (the server can't do): use ui_action for start_debrief_recording, navigate (open a screen), copy_link.
+
+ABSOLUTE RULE: you NEVER send outreach or emails automatically. You draft, seed cadences, and prepare everything, then report and wait for the user to approve sending. Only send_outreach when the user explicitly says to send a specific message.
+
 OPERATING PRINCIPLES
-- When asked to take an action, use the tool — don't just describe it. Chain tools for multi-step goals.
-- After any state change (advancing a stage, sending outreach), confirm what you did and the result. Never claim success if a tool returned an error.
+- When asked to take an action, use the tool — don't just describe it. Chain tools for multi-step goals; do a single step when only one is asked.
+- After any state change, confirm what you did and the result. Never claim success if a tool returned an error.
 - Use web search (Tavily) for anything newer than your training or company/person/market-specific; cite source URLs.
 - Keep replies focused and skimmable.`
 
@@ -47,6 +58,14 @@ async function ensureConfigTable(pool: any) {
   await pool.query(`CREATE TABLE IF NOT EXISTS coach_config (id INT PRIMARY KEY DEFAULT 1, vector_store_id TEXT, updated_at TIMESTAMPTZ DEFAULT now())`)
   await pool.query(`ALTER TABLE coach_config ADD COLUMN IF NOT EXISTS system_prompt TEXT`)
   await pool.query(`ALTER TABLE coach_config ADD COLUMN IF NOT EXISTS model TEXT`)
+}
+
+async function ensureOpsTables(pool: any) {
+  await pool.query(`create table if not exists coach_activity (
+    id uuid primary key default gen_random_uuid(), owner text not null, user_msg text, reply text,
+    tools jsonb default '[]'::jsonb, instructions text, created_at timestamptz default now())`)
+  await pool.query(`create index if not exists coach_activity_owner_idx on coach_activity (owner, created_at desc)`)
+  await pool.query(`create table if not exists coach_thread (owner text primary key, messages jsonb default '[]'::jsonb, updated_at timestamptz default now())`)
 }
 
 async function getVectorStoreId(): Promise<string | null> {
@@ -131,10 +150,23 @@ export async function coachChat(req: HttpRequest, context: InvocationContext): P
       runningInput.push(...nextInput)
     }
 
+    // Browser action directives the app must execute (start recording, navigate, copy).
+    const uiActions = toolTrace.filter((t) => t.name === 'ui_action').map((t) => t.arguments)
+
     // Persist the exchange to memory as a lightweight conversation record (best-effort).
     try { if (reply) await remember({ owner, kind: 'conversation', text: `User: ${String(lastUser).slice(0, 500)}\nCoach: ${reply.slice(0, 500)}`, source: 'coach-chat' }) } catch { /* optional */ }
 
-    return { status: 200, headers: HEADERS, jsonBody: { reply, toolCalls: toolTrace, usedMemory: !!memHint, usedVectorStore: !!vsId } }
+    // Persist the action log (Activity tab) + the DB-backed thread (continuity on reload).
+    try {
+      const pool = getPool(); await ensureOpsTables(pool)
+      await pool.query(`insert into coach_activity (owner, user_msg, reply, tools, instructions) values ($1,$2,$3,$4,$5)`,
+        [owner, String(lastUser).slice(0, 1000), reply.slice(0, 2000), JSON.stringify(toolTrace), (cfg.systemPrompt + memHint).slice(0, 8000)])
+      const fullThread = [...history.map((m: any) => ({ role: m.role, content: String(m.content || '') })), { role: 'assistant', content: reply }].slice(-40)
+      await pool.query(`insert into coach_thread (owner, messages, updated_at) values ($1,$2,now())
+                        on conflict (owner) do update set messages=$2, updated_at=now()`, [owner, JSON.stringify(fullThread)])
+    } catch { /* activity/thread optional */ }
+
+    return { status: 200, headers: HEADERS, jsonBody: { reply, toolCalls: toolTrace, uiActions, usedMemory: !!memHint, usedVectorStore: !!vsId } }
   } catch (err) {
     return { status: 200, headers: HEADERS, jsonBody: { error: String(err) } }
   }
@@ -252,7 +284,70 @@ export async function coachConfigSet(req: HttpRequest): Promise<HttpResponseInit
   }
 }
 
+// POST /api/app/coach/memory/add { text, kind, owner } — manual "add context" row.
+export async function coachMemoryAdd(req: HttpRequest): Promise<HttpResponseInit> {
+  if (req.method === 'OPTIONS') return { status: 204, headers: HEADERS }
+  try {
+    const body = await req.json() as any
+    const text = (body?.text || '').toString().trim()
+    if (!text) return { status: 400, headers: HEADERS, jsonBody: { error: 'text required' } }
+    const owner = (body?.owner || DEMO_EMAIL).toString()
+    const kind = ['note', 'fact', 'preference', 'decision', 'feedback'].includes(body?.kind) ? body.kind : 'note'
+    const r = await remember({ owner, kind, text, source: 'manual:settings' })
+    return { status: 200, headers: HEADERS, jsonBody: { ok: true, id: r.id } }
+  } catch (err) { return { status: 200, headers: HEADERS, jsonBody: { error: String(err) } } }
+}
+
+// POST /api/app/coach/memory/delete { id }
+export async function coachMemoryDelete(req: HttpRequest): Promise<HttpResponseInit> {
+  if (req.method === 'OPTIONS') return { status: 204, headers: HEADERS }
+  try {
+    const body = await req.json() as any
+    if (!body?.id) return { status: 400, headers: HEADERS, jsonBody: { error: 'id required' } }
+    return { status: 200, headers: HEADERS, jsonBody: await deleteMemory(String(body.id)) }
+  } catch (err) { return { status: 200, headers: HEADERS, jsonBody: { error: String(err) } } }
+}
+
+// GET /api/app/coach/activity?owner= — the agent's action log (tool calls + prompt sent per turn).
+export async function coachActivity(req: HttpRequest): Promise<HttpResponseInit> {
+  if (req.method === 'OPTIONS') return { status: 204, headers: HEADERS }
+  const owner = req.query.get('owner') || DEMO_EMAIL
+  try {
+    const pool = getPool(); await ensureOpsTables(pool)
+    const { rows } = await pool.query(`select id, user_msg, reply, tools, created_at from coach_activity where owner=$1 order by created_at desc limit 40`, [owner])
+    return { status: 200, headers: HEADERS, jsonBody: { activity: rows.map((r: any) => ({ id: r.id, userMsg: r.user_msg, reply: r.reply, tools: r.tools || [], createdAt: r.created_at })) } }
+  } catch (err) { return { status: 200, headers: HEADERS, jsonBody: { error: String(err) } } }
+}
+
+// GET /api/app/coach/thread?owner= — restore the persisted conversation (proof it's DB-backed).
+export async function coachThreadGet(req: HttpRequest): Promise<HttpResponseInit> {
+  if (req.method === 'OPTIONS') return { status: 204, headers: HEADERS }
+  const owner = req.query.get('owner') || DEMO_EMAIL
+  try {
+    const pool = getPool(); await ensureOpsTables(pool)
+    const { rows } = await pool.query(`select messages, updated_at from coach_thread where owner=$1`, [owner])
+    return { status: 200, headers: HEADERS, jsonBody: { messages: rows[0]?.messages || [], updatedAt: rows[0]?.updated_at || null } }
+  } catch (err) { return { status: 200, headers: HEADERS, jsonBody: { error: String(err) } } }
+}
+
+// POST /api/app/coach/thread/clear { owner }
+export async function coachThreadClear(req: HttpRequest): Promise<HttpResponseInit> {
+  if (req.method === 'OPTIONS') return { status: 204, headers: HEADERS }
+  try {
+    const body = await req.json().catch(() => ({})) as any
+    const owner = (body?.owner || DEMO_EMAIL).toString()
+    const pool = getPool(); await ensureOpsTables(pool)
+    await pool.query(`delete from coach_thread where owner=$1`, [owner])
+    return { status: 200, headers: HEADERS, jsonBody: { ok: true } }
+  } catch (err) { return { status: 200, headers: HEADERS, jsonBody: { error: String(err) } } }
+}
+
 app.http('coachChat', { methods: ['POST', 'OPTIONS'], authLevel: 'anonymous', route: 'app/coach/chat', handler: coachChat })
+app.http('coachMemoryAdd', { methods: ['POST', 'OPTIONS'], authLevel: 'anonymous', route: 'app/coach/memory/add', handler: coachMemoryAdd })
+app.http('coachMemoryDelete', { methods: ['POST', 'OPTIONS'], authLevel: 'anonymous', route: 'app/coach/memory/delete', handler: coachMemoryDelete })
+app.http('coachActivity', { methods: ['GET', 'OPTIONS'], authLevel: 'anonymous', route: 'app/coach/activity', handler: coachActivity })
+app.http('coachThreadGet', { methods: ['GET', 'OPTIONS'], authLevel: 'anonymous', route: 'app/coach/thread', handler: coachThreadGet })
+app.http('coachThreadClear', { methods: ['POST', 'OPTIONS'], authLevel: 'anonymous', route: 'app/coach/thread/clear', handler: coachThreadClear })
 app.http('coachConfigGet', { methods: ['GET', 'OPTIONS'], authLevel: 'anonymous', route: 'app/coach/config', handler: coachConfigGet })
 app.http('coachConfigSet', { methods: ['POST', 'OPTIONS'], authLevel: 'anonymous', route: 'app/coach/config', handler: coachConfigSet })
 app.http('coachMemoryBootstrap', { methods: ['POST', 'OPTIONS'], authLevel: 'anonymous', route: 'app/coach/memory/bootstrap', handler: coachMemoryBootstrap })

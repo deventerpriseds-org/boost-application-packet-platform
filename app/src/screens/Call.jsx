@@ -1,7 +1,27 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react'
 import { Conversation } from '@elevenlabs/client'
-import { useApp } from '../state.jsx'
+import { useApp, go } from '../state.jsx'
 import { api, getOwner } from '../api.js'
+
+// Screens the coach can deep-link to. id-bearing screens take a second segment.
+const NAV_PATH = { today: 'today', opportunities: 'opportunities', pipeline: 'pipeline', packets: 'packets', outreach: 'outreach', library: 'library', settings: 'settings', intake: 'intake', opp: 'opp', packet: 'packet', interview: 'interview', offer: 'offer', answers: 'answers' }
+
+// Execute the browser-side directives the coach returns (things the server can't do).
+function runUiActions(actions, toast) {
+  for (const a of actions || []) {
+    if (!a || !a.action) continue
+    if (a.action === 'navigate') {
+      const seg = NAV_PATH[a.screen] || 'today'
+      go(a.id ? `/${seg}/${a.id}` : `/${seg}`)
+      toast?.(`Opening ${a.screen || 'app'}…`)
+    } else if (a.action === 'start_debrief_recording') {
+      const oid = a.opportunityId || a.id
+      if (oid) { try { sessionStorage.setItem('ee_coach_autorecord', oid) } catch {} ; go(`/interview/${oid}/debrief`); toast?.('Opening the debrief recorder — starting your mic…') }
+    } else if (a.action === 'copy_link') {
+      if (a.artifactId) { try { navigator.clipboard?.writeText(api.trackedLink(a.artifactId)) } catch {} ; toast?.('Tracked link copied') }
+    }
+  }
+}
 
 // Token-overlap similarity (Jaccard) for self-echo detection: if a "user"
 // transcript closely matches what the agent just said, it's the mic hearing the
@@ -170,6 +190,12 @@ const TOOL_LABEL = {
   get_usage: 'Reading usage', assets_analytics: 'Reading analytics', config_status: 'Checking config',
   mail_config: 'Reading intake config', mail_subscriptions: 'Checking subscriptions',
   remember: 'Saving to memory', recall: 'Recalling memory', tavily_web_search: 'Searching the web',
+  seed_cadence: 'Seeding cadence', outreach_tick: 'Running scheduler', set_outreach_state: 'Updating outreach',
+  mail_poll_now: 'Re-scanning inbox', analyze_jd: 'Analyzing JD/ATS', enrich_opportunity: 'Enriching opportunity',
+  build_full_packet: 'Building full packet', bulk_run: 'Bulk building', bulk_status: 'Checking bulk job',
+  list_interviews: 'Reading interviews', interview_debrief: 'Debriefing interview', generate_video: 'Rendering video',
+  video_status: 'Checking video', set_artifact_status: 'Updating artifact', list_personas: 'Reading personas',
+  answers_vision: 'Drafting form answers', ui_action: 'Doing it in the app',
 }
 
 // Operator chat: the coach can read the whole app, take actions, search the web,
@@ -184,6 +210,19 @@ function CoachChat() {
 
   useEffect(() => { scrollRef.current?.scrollTo(0, scrollRef.current.scrollHeight) }, [msgs, busy])
 
+  // Restore the persisted conversation from Postgres (proof it's DB-backed).
+  useEffect(() => {
+    let live = true
+    api.coachThreadGet({ owner: getOwner() }).then((r) => {
+      if (live && Array.isArray(r?.messages) && r.messages.length) setMsgs(r.messages.map((m) => ({ role: m.role, content: m.content })))
+    }).catch(() => {})
+    return () => { live = false }
+  }, [])
+
+  const clearThread = async () => {
+    setMsgs([]); try { await api.coachThreadClear({ owner: getOwner() }) } catch {}
+  }
+
   const send = useCallback(async () => {
     const text = input.trim()
     if (!text || busy) return
@@ -194,6 +233,7 @@ function CoachChat() {
       const r = await api.coachChat(payload, { owner: getOwner() })
       if (r.error) throw new Error(r.error)
       setMsgs((m) => [...m, { role: 'assistant', content: r.reply || '(no reply)', tools: r.toolCalls || [] }])
+      if (r.uiActions && r.uiActions.length) runUiActions(r.uiActions, toast)
     } catch (e) {
       setMsgs((m) => [...m, { role: 'assistant', content: `⚠️ ${e.message || e}`, tools: [] }])
       toast('Coach error')
@@ -204,9 +244,12 @@ function CoachChat() {
 
   return (
     <div style={{ maxWidth: 720, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 12 }}>
-      <div>
-        <div style={{ fontSize: 20, fontWeight: 700 }}>Coach chat</div>
-        <div className="px-small">Ask anything — or tell the coach to <b>do</b> it. It can read your whole pipeline, build packets, draft & send outreach, prep interviews, search the web, and remember what matters across chats.</div>
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+        <div style={{ flex: 1 }}>
+          <div style={{ fontSize: 20, fontWeight: 700 }}>Coach chat</div>
+          <div className="px-small">Ask anything, or tell the coach to <b>do</b> it — a single step or the whole chain. It builds packets, seeds cadences, drafts outreach (never sends), preps interviews, runs bulk, searches the web, and remembers across chats. This thread is saved in your database and restores on reload.</div>
+        </div>
+        {msgs.length > 0 && <span className="px-link" style={{ fontSize: 12, cursor: 'pointer', whiteSpace: 'nowrap' }} onClick={clearThread}>Clear</span>}
       </div>
 
       <div ref={scrollRef} className="px-box" style={{ padding: 14, height: 440, overflow: 'auto', display: 'flex', flexDirection: 'column', gap: 10 }}>
@@ -253,22 +296,35 @@ const KIND_ICON = { feedback: '📣', preference: '⭐', decision: '✅', fact: 
 // Activity: what the coach knows and remembers about you (huddle-style), plus
 // live system status — proof the memory is real and vendor-portable.
 function CoachActivity() {
+  const { toast } = useApp()
   const [status, setStatus] = useState(null)
   const [mem, setMem] = useState(null)
+  const [acts, setActs] = useState(null)
   const [err, setErr] = useState(null)
+  const [ctx, setCtx] = useState('')
+  const [ctxKind, setCtxKind] = useState('preference')
+  const [saving, setSaving] = useState(false)
   const load = useCallback(async () => {
     try {
-      const [s, m] = await Promise.all([api.coachStatus({ owner: getOwner() }), api.coachMemoryList({ owner: getOwner() })])
-      setStatus(s); setMem((m.memory || []).filter((x) => x.kind !== 'conversation'))
+      const [s, m, a] = await Promise.all([api.coachStatus({ owner: getOwner() }), api.coachMemoryList({ owner: getOwner() }), api.coachActivity({ owner: getOwner() })])
+      setStatus(s); setMem((m.memory || []).filter((x) => x.kind !== 'conversation')); setActs(a.activity || [])
     } catch (e) { setErr(String(e.message || e)) }
   }, [])
   useEffect(() => { load() }, [load])
+
+  const addContext = async () => {
+    const text = ctx.trim(); if (!text) return
+    setSaving(true)
+    try { const r = await api.coachMemoryAdd({ text, kind: ctxKind, owner: getOwner() }); if (r.error) throw new Error(r.error); setCtx(''); toast('Context added to memory'); load() }
+    catch (e) { toast(`Add failed: ${e.message || e}`) } finally { setSaving(false) }
+  }
+  const delMem = async (id) => { try { await api.coachMemoryDelete(id); setMem((m) => m.filter((x) => x.id !== id)) } catch {} }
 
   return (
     <div style={{ maxWidth: 760, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 14 }}>
       <div>
         <div style={{ fontSize: 20, fontWeight: 700 }}>Coach activity & memory</div>
-        <div className="px-small">Everything the coach remembers lives in <b>your own Azure Postgres</b> (pgvector) — so it’s vendor-portable and survives swapping AI models.</div>
+        <div className="px-small">The coach’s actions and everything it remembers live in <b>your own Azure Postgres</b> (pgvector) — vendor-portable, and it survives swapping AI models.</div>
       </div>
 
       {status && (
@@ -280,22 +336,59 @@ function CoachActivity() {
         </div>
       )}
 
+      {/* Action log — the agent's actual step-by-step actions per turn */}
       <div className="px-box" style={{ padding: 16 }}>
         <div style={{ display: 'flex', alignItems: 'baseline', gap: 10 }}>
-          <b style={{ fontSize: 14 }}>Saved memory</b>
-          <span className="px-small">preferences, decisions & feedback the coach carries between chats</span>
+          <b style={{ fontSize: 14 }}>Activity</b>
+          <span className="px-small">what the coach did — each turn, the tools it ran</span>
           <div style={{ flex: 1 }} />
           <span className="px-link" style={{ fontSize: 12, cursor: 'pointer' }} onClick={load}>↻ Refresh</span>
         </div>
         {err && <div className="px-small" style={{ color: 'var(--proto-red)', marginTop: 8 }}>{err}</div>}
-        {mem && mem.length === 0 && <div className="px-small" style={{ marginTop: 10 }}>Nothing saved yet. Tell the coach a preference or give feedback and it will remember it here.</div>}
+        {acts && acts.length === 0 && <div className="px-small" style={{ marginTop: 10 }}>No activity yet. Ask the coach to do something in the Chat tab.</div>}
+        {acts && acts.length > 0 && (
+          <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 10 }}>
+            {acts.map((a) => (
+              <div key={a.id} style={{ borderLeft: '2px solid var(--proto-rule-soft)', paddingLeft: 10 }}>
+                <div style={{ display: 'flex', gap: 8, alignItems: 'baseline' }}>
+                  <div className="px-small" style={{ flex: 1, fontStyle: 'italic' }}>“{(a.userMsg || '').slice(0, 90)}”</div>
+                  <span className="px-small" style={{ whiteSpace: 'nowrap' }}>{timeAgoShort(a.createdAt)}</span>
+                </div>
+                {a.tools && a.tools.length > 0 && (
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 4 }}>
+                    {a.tools.map((t, j) => <span key={j} className="px-small" style={{ background: 'var(--proto-panel-deep)', borderRadius: 8, padding: '1px 7px', fontSize: 11 }}>🔧 {TOOL_LABEL[t.name] || t.name}</span>)}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Saved memory + manual add-context */}
+      <div className="px-box" style={{ padding: 16 }}>
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 10 }}>
+          <b style={{ fontSize: 14 }}>Saved memory</b>
+          <span className="px-small">preferences, decisions & feedback carried between chats</span>
+        </div>
+        <div style={{ display: 'flex', gap: 8, marginTop: 10, alignItems: 'flex-start' }}>
+          <textarea className="px-input" rows={2} value={ctx} onChange={(e) => setCtx(e.target.value)} placeholder="Add a context row the coach should remember…" style={{ flex: 1, resize: 'none', fontSize: 13 }} />
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <select className="px-input" value={ctxKind} onChange={(e) => setCtxKind(e.target.value)} style={{ fontSize: 12 }}>
+              {['preference', 'fact', 'decision', 'feedback', 'note'].map((k) => <option key={k} value={k}>{k}</option>)}
+            </select>
+            <button className="px-btn px-btn-accent" disabled={saving || !ctx.trim()} onClick={addContext} style={{ fontSize: 12 }}>{saving ? '…' : 'Add'}</button>
+          </div>
+        </div>
+        {mem && mem.length === 0 && <div className="px-small" style={{ marginTop: 10 }}>Nothing saved yet. Add a context row above, or tell the coach a preference in chat.</div>}
         {mem && mem.length > 0 && (
           <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
             {mem.map((m) => (
-              <div key={m.id} style={{ display: 'flex', gap: 10, fontSize: 13, lineHeight: 1.5 }}>
+              <div key={m.id} style={{ display: 'flex', gap: 10, fontSize: 13, lineHeight: 1.5, alignItems: 'flex-start' }}>
                 <span>{KIND_ICON[m.kind] || '📝'}</span>
                 <div style={{ flex: 1 }}>{m.text}</div>
                 <span className="px-small" style={{ whiteSpace: 'nowrap' }}>{timeAgoShort(m.createdAt)}</span>
+                <span className="px-link" style={{ fontSize: 12, cursor: 'pointer', color: 'var(--proto-red)' }} onClick={() => delMem(m.id)}>✕</span>
               </div>
             ))}
           </div>
@@ -322,11 +415,11 @@ function timeAgoShort(iso) {
 }
 
 export default function Call() {
-  const [tab, setTab] = useState('chat') // chat | activity | call
+  const [tab, setTab] = useState('chat') // activity | chat | call
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
       <div style={{ display: 'flex', gap: 4, borderBottom: '1px solid var(--proto-rule-soft)' }}>
-        {[{ k: 'chat', l: '💬 Chat' }, { k: 'activity', l: '📋 Activity' }, { k: 'call', l: '☎️ Voice call' }].map((t) => (
+        {[{ k: 'activity', l: '📋 Activity' }, { k: 'chat', l: '💬 Chat' }, { k: 'call', l: '☎️ Voice call' }].map((t) => (
           <div key={t.k} onClick={() => setTab(t.k)}
             style={{ padding: '8px 14px', cursor: 'pointer', fontSize: 13,
               fontWeight: tab === t.k ? 600 : 500, color: tab === t.k ? 'var(--text-brand)' : 'var(--proto-ink2)',

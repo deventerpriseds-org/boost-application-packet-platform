@@ -77,6 +77,11 @@ export const api = {
   coachUpload: (filename, contentBase64) => post(`/app/coach/upload`, { filename, contentBase64 }),
   coachConfigGet: () => get(`/app/coach/config`),
   coachConfigSet: (body) => post(`/app/coach/config`, body),
+  coachActivity: ({ owner } = {}) => get(`/app/coach/activity?owner=${encodeURIComponent(owner || _owner)}`),
+  coachThreadGet: ({ owner } = {}) => get(`/app/coach/thread?owner=${encodeURIComponent(owner || _owner)}`),
+  coachThreadClear: ({ owner } = {}) => post(`/app/coach/thread/clear`, { owner: owner || _owner }),
+  coachMemoryAdd: ({ text, kind, owner } = {}) => post(`/app/coach/memory/add`, { text, kind, owner: owner || _owner }),
+  coachMemoryDelete: (id) => post(`/app/coach/memory/delete`, { id }),
   // Intake watcher (mail subscription + config + self-test + on-demand pull)
   mailSubscriptions: () => get(`/mail/subscriptions`),
   mailSubscribe: () => post(`/mail/subscribe`, {}),

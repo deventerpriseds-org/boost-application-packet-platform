@@ -396,8 +396,109 @@ export async function artifactSlides(req: HttpRequest, context: InvocationContex
   } finally { try { await client?.end() } catch {} }
 }
 
+const SELF_BASE = process.env.COACH_SELF_BASE || 'https://job-platform-api.azurewebsites.net/api'
+async function selfPost(path: string, body: any): Promise<any> {
+  try {
+    const r = await fetch(`${SELF_BASE}/${path}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) })
+    return await r.json().catch(() => ({}))
+  } catch (e) { return { error: String(e) } }
+}
+
+// POST /api/app/opportunity/{id}/packet/build-all — build the ENTIRE packet in one
+// call: every templated artifact (resume + compact Docs, cover + portfolio Slides)
+// as real Google files, sharing one generation. Optionally seed the cadence and
+// DRAFT (never send) a cold email. This is the "make it start to finish" endpoint.
+export async function packetBuildAll(req: HttpRequest, context: InvocationContext): Promise<HttpResponseInit> {
+  if (req.method === 'OPTIONS') return { status: 204, headers: HEADERS }
+  const oppId = req.params.id
+  const owner = req.query.get('owner') || DEMO_EMAIL
+  let body: any = {}; try { body = await req.json() } catch {}
+  let client
+  try {
+    if (!HAS_GOOGLE_OAUTH) return { status: 200, headers: HEADERS, jsonBody: { error: 'GOOGLE_REFRESH_TOKEN not set' } }
+    client = await getPgClient(); await ensureContentColumn(client)
+    const opp = (await client.query(`select company, role, comp_range, why_surfaced, company_signals, pain_hypotheses, persona_key from opportunity where id = $1`, [oppId])).rows[0]
+    if (!opp) return { status: 404, headers: HEADERS, jsonBody: { error: 'opportunity not found' } }
+    const { pkt, artifacts } = await loadPacket(client, oppId)
+    const results: any[] = []
+    for (const a of artifacts) {
+      if (!metaFor(a.type)) continue // skip video (HeyGen) + non-templated
+      try {
+        const built = await buildTemplatedArtifact(client, { ...a, packet_id: pkt.id, opp_id: oppId }, opp, false)
+        results.push({ type: a.type, url: built!.url, cleanedTokens: built!.cleaned })
+      } catch (e) { results.push({ type: a.type, error: String(e) }) }
+    }
+    const packetStatus = await recomputePacket(client, pkt.id)
+    let cadenceSeeded = false, outreachDrafted = false
+    if (body?.seedCadence === true) { const r = await selfPost(`app/opportunity/${oppId}/cadence?owner=${encodeURIComponent(owner)}`, {}); cadenceSeeded = !r?.error }
+    if (body?.draftOutreach === true) { const r = await selfPost(`app/opportunity/${oppId}/outreach/generate?owner=${encodeURIComponent(owner)}`, { channel: 'coldEmail' }); outreachDrafted = !r?.error }
+    return { status: 200, headers: HEADERS, jsonBody: { ok: true, oppId, company: opp.company, artifacts: results, packetStatus, cadenceSeeded, outreachDrafted, sent: false, note: 'Packet built. Nothing was sent.' } }
+  } catch (err) {
+    return { status: 200, headers: HEADERS, jsonBody: { error: String(err) } }
+  } finally { try { await client?.end() } catch {} }
+}
+
+// POST /api/app/opportunity/{id}/jd-analysis — JD/ATS analysis: keywords, must-haves,
+// ATS score, gaps. Stores on the packet (jd_analyzed, ats_score, covered_kw).
+export async function jdAnalysis(req: HttpRequest, context: InvocationContext): Promise<HttpResponseInit> {
+  if (req.method === 'OPTIONS') return { status: 204, headers: HEADERS }
+  const oppId = req.params.id
+  const key = process.env.OPENAI_API_KEY
+  let client
+  try {
+    if (!key) return { status: 200, headers: HEADERS, jsonBody: { error: 'OPENAI_API_KEY not set' } }
+    client = await getPgClient(); await ensureContentColumn(client)
+    const opp = (await client.query(`select company, role, comp_range, why_surfaced, company_signals, pain_hypotheses from opportunity where id = $1`, [oppId])).rows[0]
+    if (!opp) return { status: 404, headers: HEADERS, jsonBody: { error: 'opportunity not found' } }
+    const { pkt } = await loadPacket(client, oppId)
+    const system = 'You are an ATS/JD analyst. Return ONLY JSON: {"keywords":[],"mustHaves":[],"atsScore":<0-100 int>,"gaps":[]}. keywords = ATS keywords for this role; mustHaves = hard requirements; gaps = likely gaps for a senior exec candidate.'
+    const user = `Role: ${opp.role} at ${opp.company}\nComp: ${opp.comp_range || 'n/a'}\nContext: ${opp.why_surfaced || ''}\nSignals: ${(opp.company_signals || []).join('; ')}\nPains: ${(opp.pain_hypotheses || []).join('; ')}`
+    const res = await fetch('https://api.openai.com/v1/chat/completions', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` }, body: JSON.stringify({ model: 'gpt-4o-mini', response_format: { type: 'json_object' }, messages: [{ role: 'system', content: system }, { role: 'user', content: user }], max_tokens: 900 }) })
+    if (!res.ok) throw new Error(`OpenAI HTTP ${res.status}`)
+    const data = await res.json() as any
+    let a: any = {}; try { a = JSON.parse(data.choices?.[0]?.message?.content || '{}') } catch {}
+    await logUsage('packet:jd-analysis', 'gpt-4o-mini', data.usage)
+    const kws = Array.isArray(a.keywords) ? a.keywords.map(String) : []
+    const ats = Number.isFinite(a.atsScore) ? Math.round(a.atsScore) : null
+    await client.query(`update packet set jd_analyzed = true, ats_score = $1, covered_kw = $2, updated_at = now() where id = $3`, [ats, kws, pkt.id])
+    return { status: 200, headers: HEADERS, jsonBody: { ok: true, oppId, analysis: { keywords: kws, mustHaves: a.mustHaves || [], atsScore: ats, gaps: a.gaps || [] } } }
+  } catch (err) {
+    return { status: 200, headers: HEADERS, jsonBody: { error: String(err) } }
+  } finally { try { await client?.end() } catch {} }
+}
+
+// POST /api/app/opportunity/{id}/enrich — company signals, stakeholders, pain
+// hypotheses. Updates the opportunity.
+export async function opportunityEnrich(req: HttpRequest, context: InvocationContext): Promise<HttpResponseInit> {
+  if (req.method === 'OPTIONS') return { status: 204, headers: HEADERS }
+  const oppId = req.params.id
+  const key = process.env.OPENAI_API_KEY
+  let client
+  try {
+    if (!key) return { status: 200, headers: HEADERS, jsonBody: { error: 'OPENAI_API_KEY not set' } }
+    client = await getPgClient()
+    const opp = (await client.query(`select company, role, why_surfaced from opportunity where id = $1`, [oppId])).rows[0]
+    if (!opp) return { status: 404, headers: HEADERS, jsonBody: { error: 'opportunity not found' } }
+    const system = 'You are a go-to-market researcher. Return ONLY JSON: {"companySignals":[],"stakeholders":[],"painHypotheses":[]}. companySignals = recent, plausible company signals; stakeholders = likely hiring stakeholders (title level); painHypotheses = the pains this hire likely solves.'
+    const res = await fetch('https://api.openai.com/v1/chat/completions', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` }, body: JSON.stringify({ model: 'gpt-4o-mini', response_format: { type: 'json_object' }, messages: [{ role: 'system', content: system }, { role: 'user', content: `Company: ${opp.company}\nRole: ${opp.role}\nContext: ${opp.why_surfaced || ''}` }], max_tokens: 800 }) })
+    if (!res.ok) throw new Error(`OpenAI HTTP ${res.status}`)
+    const data = await res.json() as any
+    let a: any = {}; try { a = JSON.parse(data.choices?.[0]?.message?.content || '{}') } catch {}
+    await logUsage('opportunity:enrich', 'gpt-4o-mini', data.usage)
+    const signals = Array.isArray(a.companySignals) ? a.companySignals.map(String) : []
+    const pains = Array.isArray(a.painHypotheses) ? a.painHypotheses.map(String) : []
+    await client.query(`update opportunity set company_signals = $1, pain_hypotheses = $2, updated_at = now() where id = $3`, [signals, pains, oppId])
+    return { status: 200, headers: HEADERS, jsonBody: { ok: true, oppId, enrichment: { companySignals: signals, stakeholders: a.stakeholders || [], painHypotheses: pains } } }
+  } catch (err) {
+    return { status: 200, headers: HEADERS, jsonBody: { error: String(err) } }
+  } finally { try { await client?.end() } catch {} }
+}
+
 app.http('packetGet', { methods: ['GET', 'OPTIONS'], authLevel: 'anonymous', route: 'app/opportunity/{id}/packet', handler: packetGet })
 app.http('packetsList', { methods: ['GET', 'OPTIONS'], authLevel: 'anonymous', route: 'app/packets', handler: packetsList })
+app.http('packetBuildAll', { methods: ['POST', 'OPTIONS'], authLevel: 'anonymous', route: 'app/opportunity/{id}/packet/build-all', handler: packetBuildAll })
+app.http('jdAnalysis', { methods: ['POST', 'OPTIONS'], authLevel: 'anonymous', route: 'app/opportunity/{id}/jd-analysis', handler: jdAnalysis })
+app.http('opportunityEnrich', { methods: ['POST', 'OPTIONS'], authLevel: 'anonymous', route: 'app/opportunity/{id}/enrich', handler: opportunityEnrich })
 app.http('artifactGenerate', { methods: ['POST', 'OPTIONS'], authLevel: 'anonymous', route: 'app/artifact/{artifactId}/generate', handler: artifactGenerate })
 app.http('artifactStatus', { methods: ['POST', 'OPTIONS'], authLevel: 'anonymous', route: 'app/artifact/{artifactId}/status', handler: artifactStatus })
 app.http('artifactDocument', { methods: ['POST', 'OPTIONS'], authLevel: 'anonymous', route: 'app/artifact/{artifactId}/document', handler: artifactDocument })
