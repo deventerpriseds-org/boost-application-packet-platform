@@ -68,10 +68,34 @@ until that diff is done.
      TTS). Larger; scope as its own slice.
 - **Blocked on:** `ELEVENLABS_API_KEY` in GitHub secrets + Function App settings.
 
-### G3 — ATS ingestion + apply (Greenhouse / Lever / Indeed / Wellfound)  ·  status: DEFERRED (owner: not forgotten)
-- Spec names these as job sources and application targets. Opportunities are
-  currently **seeded**, and "apply" submits nowhere.
-- **Explicitly deferred by owner** — parked here so it is not lost.
+### G3 — ATS ingestion + apply  ·  status: PLANNED (next; phased A–C, extension = G11)
+Two halves + a coverage reality (researched 2026):
+- **Coverage:** LinkedIn/Indeed/Monster/Ladders are *boards*, not ATS; none have
+  open job-search APIs anymore (LinkedIn partner-gated; Indeed API shut 2021;
+  Glassdoor 2023). Greenhouse/Lever/Ashby *do* have clean public job-board APIs
+  but only cover companies on those ATS. No single/free source = full coverage.
+  **The email watcher (G4) is the universal, ToS-clean discovery layer**; ATS
+  APIs are additive (structured + API-apply on that subset); a paid aggregator
+  (TheirStack/Coresignal/Apify) is optional for breadth; the extension (G11) is
+  the eventual universal layer.
+- **Phase A — ATS ingestion (sources):** Greenhouse + Lever (+ Ashby) boards as
+  configurable sources behind a swappable adapter (mirror the mail-watch config
+  pattern) → parse → embed → dedupe into the pipeline. Closes the ◐ "job feed".
+- **Phase B — Structured apply (targets):** Greenhouse `Submit an application`
+  API — map the generated app-answers (MT-36 vision) → the job's `questions`
+  array + tailored resume → POST. Pre-filled handoff for non-API ATS. Closes the
+  red "autofill/auto-apply" on the API-covered subset.
+- **Phase C — ATS match score:** promote MT-35 JD analysis to a first-class
+  keyword match-rate + gap list per opportunity (Jobscan-style). Closes ◐ "ATS
+  optimization".
+
+### G11 — Chrome extension  ·  status: DEFERRED (owner wants it — LAST, after platform is complete; DO NOT FORGET)
+- The universal layer the boards' closed APIs otherwise block: **save any job
+  page → opportunity** (universal discovery/capture) and **autofill/apply on any
+  ATS web form** using the already-generated answers (universal apply). Matches
+  the extension-first UX of Teal/Simplify/Huntr/Jobright.
+- **Explicitly deferred by owner** until everything else is done and the hosted
+  platform is working — parked here so it is not lost.
 
 ### G4 — Live inbox watcher  ·  status: CLOSED
 - Graph change-notification subscription (`mail/*`) turns real LinkedIn alerts in
