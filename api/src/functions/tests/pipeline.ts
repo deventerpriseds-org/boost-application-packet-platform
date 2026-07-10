@@ -36,6 +36,47 @@ async function copyAndInject(token: string, templateId: string, name: string, va
   return id
 }
 
+// The proven 3-agent packet generation (resume → portfolio/cover → ATS QC),
+// grounded in the Prompts + MasterContext tables and role focus, returning the
+// assembled placeholder package. Extracted from pipelineRun so BOTH the MT-22
+// test flow and the production Executive Engine packet builder use the identical
+// engine (this is what produced the correctly-filled portfolio files).
+export async function buildPackageForJD(opts: { key: string; jd: string; roleType: string; company: string; jobTitle: string }): Promise<{ pkg: Record<string, string | null>; steps: string[]; roleFocus: any }> {
+  const { key, jd, roleType, company, jobTitle } = opts
+  const steps: string[] = []
+  const roleFocus = await getRoleFocus(roleType)
+
+  const promptClient = TableClient.fromConnectionString(CONN, 'Prompts')
+  const prompts: Record<string, string> = {}
+  for await (const e of promptClient.listEntities({ queryOptions: { filter: 'is_active eq true' } })) prompts[(e as any).partitionKey] = (e as any).content || ''
+  const ctxClient = TableClient.fromConnectionString(CONN, 'MasterContext')
+  let mc: any = {}
+  for await (const e of ctxClient.listEntities({ queryOptions: { filter: "PartitionKey eq 'context'" } })) mc = e
+
+  const openai = (system: string, user: string, maxTokens: number) => fetch('https://api.openai.com/v1/chat/completions', {
+    method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
+    body: JSON.stringify({ model: 'gpt-4o-mini', messages: [{ role: 'system', content: system }, { role: 'user', content: user }], max_tokens: maxTokens })
+  }).then(r => r.ok ? r.json() : r.text().then(t => { throw new Error(`OpenAI HTTP ${r.status}: ${t}`) }))
+
+  const base1 = resolveZapVars(prompts['resume_user'] || 'Write resume package with ### sections.', mc, jd)
+  const r1 = await openai(prompts['resume_system'] || 'You are an executive resume writer.', roleDirective(roleFocus) + base1, 16000) as any
+  const c1: any = parseResumePackage(r1.choices?.[0]?.message?.content || '', mc, jobTitle, company)
+  steps.push(`Agent Call 1 (resume) — parsed ${c1._parsedFieldCount} fields by title`)
+
+  const r2 = await openai(prompts['portfolio_system'] || 'You are a helpful assistant.', roleDirective(roleFocus) + `${prompts['portfolio_user'] || 'Portfolio JSON.'}\n\nCALL1:\n${JSON.stringify(c1)}`, 16000) as any
+  let c2: any = {}
+  try { const m = (r2.choices?.[0]?.message?.content || '').match(/\{[\s\S]*\}/); if (m) c2 = JSON.parse(m[0]) } catch {}
+  steps.push('Agent Call 2 (portfolio + cold email)')
+
+  const r3 = await openai(prompts['ats_system'] || 'You are a helpful assistant.', `${prompts['ats_user'] || 'ATS QC.'}\n\nINPUTS:\n${JSON.stringify({ ...c1, ...c2 })}`, 15500) as any
+  let c3: any = {}
+  try { const m = (r3.choices?.[0]?.message?.content || '').match(/\{[\s\S]*\}/); if (m) c3 = JSON.parse(m[0]) } catch {}
+  steps.push('Agent Call 3 (ATS QC + skills merge)')
+
+  const pkg = assemblePackage(c1, c2, c3) as Record<string, string | null>
+  return { pkg, steps, roleFocus }
+}
+
 // GET /api/jobs?status=received — list jobs for the approval queue
 export async function jobsList(req: HttpRequest): Promise<HttpResponseInit> {
   if (req.method === 'OPTIONS') return { status: 204, headers: HEADERS }
@@ -83,8 +124,6 @@ export async function pipelineRun(req: HttpRequest, context: InvocationContext):
 
     await jobsClient.updateEntity({ partitionKey: 'applications', rowKey: jobId, Status: 'processing' } as any, 'Merge')
 
-    const roleFocus = await getRoleFocus(roleType)
-
     // AppConfig: role-specific compact resume template
     let compactResumeTemplateId = ''
     try {
@@ -93,38 +132,9 @@ export async function pipelineRun(req: HttpRequest, context: InvocationContext):
       compactResumeTemplateId = row.compactResumeTemplateId || ''
     } catch {}
 
-    // Prompts + context
-    const promptClient = TableClient.fromConnectionString(CONN, 'Prompts')
-    const prompts: Record<string, string> = {}
-    for await (const e of promptClient.listEntities({ queryOptions: { filter: 'is_active eq true' } })) prompts[(e as any).partitionKey] = (e as any).content || ''
-    const ctxClient = TableClient.fromConnectionString(CONN, 'MasterContext')
-    let mc: any = {}
-    for await (const e of ctxClient.listEntities({ queryOptions: { filter: "PartitionKey eq 'context'" } })) mc = e
-
-    const openai = (system: string, user: string, maxTokens: number) => fetch('https://api.openai.com/v1/chat/completions', {
-      method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
-      body: JSON.stringify({ model: 'gpt-4o-mini', messages: [{ role: 'system', content: system }, { role: 'user', content: user }], max_tokens: maxTokens })
-    }).then(r => r.ok ? r.json() : r.text().then(t => { throw new Error(`OpenAI HTTP ${r.status}: ${t}`) }))
-
-    // 2. Agent Call 1 — resume (role-focused, grounded)
-    const base1 = resolveZapVars(prompts['resume_user'] || 'Write resume package with ### sections.', mc, jd)
-    const r1 = await openai(prompts['resume_system'] || 'You are an executive resume writer.', roleDirective(roleFocus) + base1, 16000) as any
-    const c1: any = parseResumePackage(r1.choices?.[0]?.message?.content || '', mc, jobTitle, company)
-    steps.push(`Agent Call 1 (resume) — parsed ${c1._parsedFieldCount} fields by title`)
-
-    // 3. Agent Call 2 — portfolio + cold email
-    const r2 = await openai(prompts['portfolio_system'] || 'You are a helpful assistant.', roleDirective(roleFocus) + `${prompts['portfolio_user'] || 'Portfolio JSON.'}\n\nCALL1:\n${JSON.stringify(c1)}`, 16000) as any
-    let c2: any = {}
-    try { const m = (r2.choices?.[0]?.message?.content || '').match(/\{[\s\S]*\}/); if (m) c2 = JSON.parse(m[0]) } catch {}
-    steps.push('Agent Call 2 (portfolio + cold email)')
-
-    // 4. Agent Call 3 — ATS QC
-    const r3 = await openai(prompts['ats_system'] || 'You are a helpful assistant.', `${prompts['ats_user'] || 'ATS QC.'}\n\nINPUTS:\n${JSON.stringify({ ...c1, ...c2 })}`, 15500) as any
-    let c3: any = {}
-    try { const m = (r3.choices?.[0]?.message?.content || '').match(/\{[\s\S]*\}/); if (m) c3 = JSON.parse(m[0]) } catch {}
-    steps.push('Agent Call 3 (ATS QC + skills merge)')
-
-    const pkg = assemblePackage(c1, c2, c3)
+    // 2-4. Proven 3-agent generation (shared with the production packet builder).
+    const { pkg, steps: genSteps, roleFocus } = await buildPackageForJD({ key, jd, roleType, company, jobTitle })
+    steps.push(...genSteps)
 
     // 5. Generate documents (role-routed compact resume as 4th)
     const token = HAS_GOOGLE_OAUTH ? await getGoogleOAuthToken() : await getGoogleToken(saJson!, 'https://www.googleapis.com/auth/drive https://www.googleapis.com/auth/documents https://www.googleapis.com/auth/presentations', IMPERSONATE_SUBJECT)
@@ -171,7 +181,7 @@ export async function pipelineRun(req: HttpRequest, context: InvocationContext):
           <li><a href="${urls.portfolio}">Portfolio</a></li>
           <li><a href="${urls.coverLetter}">Cover Letter</a></li>
         </ul>
-        <h3>Cold Email Draft</h3><pre style="background:#f5f5f5;padding:12px">${(c2.coldEmail || '').slice(0, 2000)}</pre>
+        <h3>Cold Email Draft</h3><pre style="background:#f5f5f5;padding:12px">${(pkg.coldEmail || '').slice(0, 2000)}</pre>
         </body></html>`
       const sendMail = (subject: string, contentHtml: string, withPdf: boolean) => fetch(`https://graph.microsoft.com/v1.0/users/dev@enterpriseds.io/sendMail`, {
         method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${mtoken}` },

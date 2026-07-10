@@ -2,6 +2,8 @@ import { app, HttpRequest, HttpResponseInit, InvocationContext } from '@azure/fu
 import { getPgClient } from './pgClient'
 import { getGoogleOAuthToken, HAS_GOOGLE_OAUTH } from './googleAuth'
 import { logUsage } from './usageMeter'
+import { metaFor, varsForType, copyTemplate, injectValues, stripLeftoverTokens, shareAnyone } from './packetTemplates'
+import { buildPackageForJD } from './pipeline'
 
 const HEADERS = {
   'Content-Type': 'application/json',
@@ -188,6 +190,49 @@ const DOC_TITLE: Record<string, string> = {
   resume: 'Resume', compact_resume: 'Compact Resume', cover: 'Cover Letter', portfolio: 'Portfolio One-Pager',
 }
 
+// Cache the assembled package on the packet so building resume + cover +
+// portfolio shares ONE 3-agent generation (unless regen is requested).
+async function ensurePkgColumn(client: any) {
+  await client.query(`alter table packet add column if not exists pkg_json jsonb`)
+}
+
+// G6 — build a real artifact by COPYING its template and filling {{placeholders}}
+// with the proven pipeline package (assemblePackage). Returns null if the type
+// has no template (caller falls back to the legacy prose path).
+async function buildTemplatedArtifact(client: any, art: any, opp: any, regen: boolean) {
+  const meta = metaFor(art.type)
+  if (!meta) return null
+  const key = process.env.OPENAI_API_KEY
+  if (!key) throw new Error('OPENAI_API_KEY not set')
+
+  await ensurePkgColumn(client)
+  const pkt = (await client.query(`select pkg_json from packet where id = $1`, [art.packet_id])).rows[0]
+  let pkg: Record<string, string | null> | null = (!regen && pkt?.pkg_json) ? pkt.pkg_json : null
+  if (!pkg) {
+    const roleType = opp.persona_key || opp.role || 'Executive'
+    const jd = [`${opp.role} at ${opp.company}.`, opp.comp_range ? `Comp: ${opp.comp_range}.` : '',
+      opp.why_surfaced || '', (opp.company_signals || []).length ? `Company signals: ${(opp.company_signals || []).join('; ')}.` : '',
+      (opp.pain_hypotheses || []).length ? `Pain hypotheses: ${(opp.pain_hypotheses || []).join('; ')}.` : ''].filter(Boolean).join(' ')
+    const built = await buildPackageForJD({ key, jd, roleType, company: opp.company, jobTitle: opp.role })
+    pkg = built.pkg
+    await logUsage(`packet:${art.type}:generate`, 'gpt-4o-mini', {})
+    await client.query(`update packet set pkg_json = $1, updated_at = now() where id = $2`, [JSON.stringify(pkg), art.packet_id])
+  }
+
+  const token = await getGoogleOAuthToken()
+  const name = `${opp.company || 'Opportunity'} — ${meta.kindLabel}`
+  const id = await copyTemplate(token, meta.templateId, name)
+  await injectValues(token, id, varsForType(art.type, pkg), meta.isSlides)
+  const cleaned = await stripLeftoverTokens(token, id, meta.isSlides)
+  await shareAnyone(token, id)
+  const url = meta.isSlides ? `https://docs.google.com/presentation/d/${id}/edit` : `https://docs.google.com/document/d/${id}/edit`
+
+  // Store a readable preview of what was injected + the doc url.
+  const preview = meta.placeholders.map((p) => (pkg![p] ? `${p}:\n${pkg![p]}` : '')).filter(Boolean).join('\n\n')
+  await client.query(`update artifact set doc_url = $1, content = coalesce(nullif(content,''), $2), status = case when status = 'todo' then 'review' else status end, updated_at = now() where id = $3`, [url, preview, art.id])
+  return { url, isSlides: meta.isSlides, cleaned, kindLabel: meta.kindLabel, title: name }
+}
+
 // POST /api/app/artifact/{artifactId}/document — turn the generated text into a
 // real, shareable Google Doc (Drive create → insert content → anyone-reader).
 // Stores the doc URL on artifact.doc_url. 'video' artifacts use the HeyGen path.
@@ -202,8 +247,18 @@ export async function artifactDocument(req: HttpRequest, context: InvocationCont
     const art = (await client.query(`select a.*, p.opp_id from artifact a join packet p on p.id = a.packet_id where a.id = $1`, [artifactId])).rows[0]
     if (!art) return { status: 404, headers: HEADERS, jsonBody: { error: 'artifact not found' } }
     if (art.type === 'video') return { status: 400, headers: HEADERS, jsonBody: { error: 'video artifacts are rendered via the HeyGen video action, not a document' } }
+    const opp = (await client.query(`select company, role, comp_range, why_surfaced, company_signals, pain_hypotheses, persona_key from opportunity where id = $1`, [art.opp_id])).rows[0]
+    if (!opp) return { status: 404, headers: HEADERS, jsonBody: { error: 'opportunity not found' } }
+
+    // G6: if this type has a designed template, COPY it and fill placeholders.
+    if (metaFor(art.type)) {
+      const regen = ((await req.json().catch(() => ({}))) as any)?.regen === true
+      const built = await buildTemplatedArtifact(client, art, opp, regen)
+      const packetStatus = await recomputePacket(client, art.packet_id)
+      return { status: 200, headers: HEADERS, jsonBody: { ok: true, artifactId, type: art.type, docUrl: built!.url, deckUrl: built!.isSlides ? built!.url : undefined, title: built!.title, cleanedTokens: built!.cleaned, templated: true, packetStatus } }
+    }
+
     if (!art.content || !art.content.trim()) return { status: 400, headers: HEADERS, jsonBody: { error: 'generate the content first, then create the document' } }
-    const opp = (await client.query(`select company, role from opportunity where id = $1`, [art.opp_id])).rows[0]
 
     const token = await getGoogleOAuthToken()
     const folderId = await findOrCreateFolder(token, 'Executive Engine Packets')
@@ -266,8 +321,18 @@ export async function artifactSlides(req: HttpRequest, context: InvocationContex
     await ensureContentColumn(client)
     const art = (await client.query(`select a.*, p.opp_id from artifact a join packet p on p.id = a.packet_id where a.id = $1`, [artifactId])).rows[0]
     if (!art) return { status: 404, headers: HEADERS, jsonBody: { error: 'artifact not found' } }
+    const opp = (await client.query(`select company, role, comp_range, why_surfaced, company_signals, pain_hypotheses, persona_key from opportunity where id = $1`, [art.opp_id])).rows[0]
+    if (!opp) return { status: 404, headers: HEADERS, jsonBody: { error: 'opportunity not found' } }
+
+    // G6: COPY the designed Slides template and fill its placeholders.
+    if (metaFor(art.type)) {
+      const regen = ((await req.json().catch(() => ({}))) as any)?.regen === true
+      const built = await buildTemplatedArtifact(client, art, opp, regen)
+      const packetStatus = await recomputePacket(client, art.packet_id)
+      return { status: 200, headers: HEADERS, jsonBody: { ok: true, artifactId, type: art.type, deckUrl: built!.url, docUrl: built!.url, title: built!.title, cleanedTokens: built!.cleaned, templated: true, packetStatus } }
+    }
+
     if (!art.content || !art.content.trim()) return { status: 400, headers: HEADERS, jsonBody: { error: 'generate the content first, then create the deck' } }
-    const opp = (await client.query(`select company, role from opportunity where id = $1`, [art.opp_id])).rows[0]
 
     const token = await getGoogleOAuthToken()
     const folderId = await findOrCreateFolder(token, 'Executive Engine Packets')
