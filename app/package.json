@@ -9,7 +9,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@azure/msal-browser": "^5.17.0",
+    "@azure/msal-browser": "^3.30.0",
     "@elevenlabs/client": "^1.14.1",
     "playwright": "^1.61.1",
     "react": "^18.3.1",

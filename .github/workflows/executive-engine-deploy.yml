@@ -26,13 +26,17 @@ jobs:
         with:
           creds: '{"clientId":"${{ secrets.AZURE_CLIENT_ID }}","clientSecret":"${{ secrets.AZURE_CLIENT_SECRET }}","subscriptionId":"${{ secrets.AZURE_SUBSCRIPTION_ID }}","tenantId":"${{ secrets.AZURE_TENANT_ID }}"}'
 
-      # Resolve the Microsoft sign-in Entra app's client ID by name (created by
-      # azure-entra-app.yml). Best-effort: if it doesn't exist yet or the SP lacks
-      # directory read, VITE_MS_CLIENT_ID stays empty and the MS button is disabled.
-      - name: Resolve Microsoft client ID
+      # REUSE the mail app's Entra sign-in registration (enterpriseds-mail-web)
+      # instead of provisioning a new one. Resolve its client ID by name; fall
+      # back to the MAIL_MS_CLIENT_ID org secret if the SP can't read the
+      # directory. Empty → Microsoft button stays disabled (graceful).
+      - name: Resolve Microsoft client ID (reuse mail Entra app)
         id: msid
+        env:
+          FALLBACK_MS_CLIENT_ID: ${{ secrets.MAIL_MS_CLIENT_ID }}
         run: |
-          MSID=$(az ad app list --display-name executive-engine-signin --query "[0].appId" -o tsv 2>/dev/null || true)
+          MSID=$(az ad app list --display-name enterpriseds-mail-web --query "[0].appId" -o tsv 2>/dev/null || true)
+          if [ -z "$MSID" ] || [ "$MSID" = "null" ]; then MSID="$FALLBACK_MS_CLIENT_ID"; fi
           echo "client_id=${MSID}" >> $GITHUB_OUTPUT
 
       - name: Install and Build
