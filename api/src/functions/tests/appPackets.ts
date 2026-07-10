@@ -488,7 +488,8 @@ export async function opportunityEnrich(req: HttpRequest, context: InvocationCon
     await logUsage('opportunity:enrich', 'gpt-4o-mini', data.usage)
     const signals = Array.isArray(a.companySignals) ? a.companySignals.map(String) : []
     const pains = Array.isArray(a.painHypotheses) ? a.painHypotheses.map(String) : []
-    await client.query(`update opportunity set company_signals = $1, pain_hypotheses = $2, updated_at = now() where id = $3`, [signals, pains, oppId])
+    // company_signals / pain_hypotheses are jsonb → pass JSON text.
+    await client.query(`update opportunity set company_signals = $1::jsonb, pain_hypotheses = $2::jsonb, updated_at = now() where id = $3`, [JSON.stringify(signals), JSON.stringify(pains), oppId])
     return { status: 200, headers: HEADERS, jsonBody: { ok: true, oppId, enrichment: { companySignals: signals, stakeholders: a.stakeholders || [], painHypotheses: pains } } }
   } catch (err) {
     return { status: 200, headers: HEADERS, jsonBody: { error: String(err) } }
