@@ -1,30 +1,25 @@
-name: Register Executive Engine redirect URI on the mail Entra app
-
-# REUSE the existing mail-and-appointments Entra sign-in app
-# (enterpriseds-mail-web) for Executive Engine Microsoft sign-in — do NOT create
-# a new app. This appends the Executive Engine Static Web App origin to that
-# app's SPA redirect URIs so MSAL (redirectUri = window.location.origin) is
-# accepted from this app too. Idempotent.
+name: Provision Entra App (Executive Engine web sign-in)
+# Creates/updates THIS app's OWN single-tenant Entra app registration for the
+# web Microsoft sign-in, and points its SPA redirect URI at the Executive Engine
+# Static Web App. One Entra app per app — never reuse another app's registration.
 #
-# Prereq (one-time, admin — graph.microsoft.com is blocked from CCR sessions, so
-# run this from GitHub Actions or the portal): the deploy SP must hold Microsoft
-# Graph Application.ReadWrite.All (admin-consented). Without it, the az rest
-# steps fail with "Insufficient privileges".
+# The deploy service principal (AZURE_CLIENT_ID = enterpriseds-github-actions)
+# already holds Microsoft Graph Application.ReadWrite.All with admin consent, so
+# this runs with no extra grant and no manual portal step. Idempotent.
 #
-# Alternative (no workflow): in the Entra portal, open app
-# 'enterpriseds-mail-web' → Authentication → Single-page application → add the
-# redirect URI printed below.
+# After it runs, "Deploy Executive Engine" resolves the client ID by name and
+# bakes it into the build (VITE_MS_CLIENT_ID).
 
 on:
   workflow_dispatch:
 
 env:
   RESOURCE_GROUP: EnterpriseDS_ResourceGRP
-  MAIL_APP_NAME: enterpriseds-mail-web
-  EE_STATIC_WEB_APP: executive-engine-web
+  STATIC_WEB_APP: executive-engine-web
+  APP_NAME: executive-engine-web
 
 jobs:
-  register-redirect:
+  entra:
     runs-on: ubuntu-latest
     steps:
       - name: Login to Azure
@@ -32,28 +27,37 @@ jobs:
         with:
           creds: '{"clientId":"${{ secrets.AZURE_CLIENT_ID }}","clientSecret":"${{ secrets.AZURE_CLIENT_SECRET }}","subscriptionId":"${{ secrets.AZURE_SUBSCRIPTION_ID }}","tenantId":"${{ secrets.AZURE_TENANT_ID }}"}'
 
-      - name: Append Executive Engine origin to the mail app's SPA redirect URIs
+      - name: Create/update Entra app + SPA redirect URI
         run: |
           set -euo pipefail
-          HOST=$(az staticwebapp show --name "$EE_STATIC_WEB_APP" --resource-group "$RESOURCE_GROUP" --query "defaultHostname" -o tsv)
+          HOST=$(az staticwebapp show --name "$STATIC_WEB_APP" --resource-group "$RESOURCE_GROUP" --query "defaultHostname" -o tsv)
           REDIRECT="https://$HOST"
-          echo "Executive Engine redirect URI: $REDIRECT"
+          echo "Static Web App redirect URI: $REDIRECT"
 
-          APP_ID=$(az ad app list --display-name "$MAIL_APP_NAME" --query "[0].appId" -o tsv)
-          OBJ_ID=$(az ad app show --id "$APP_ID" --query id -o tsv)
-
-          CURRENT=$(az rest --method GET --uri "https://graph.microsoft.com/v1.0/applications/$OBJ_ID?\$select=spa" | jq -c '.spa.redirectUris // []')
-          NEXT=$(echo "$CURRENT" | jq -c --arg u "$REDIRECT" 'if index($u) then . else . + [$u] end')
-          echo "redirect URIs: $CURRENT -> $NEXT"
-
-          az rest --method PATCH \
-            --uri "https://graph.microsoft.com/v1.0/applications/$OBJ_ID" \
-            --headers 'Content-Type=application/json' \
-            --body "{\"spa\":{\"redirectUris\":$NEXT}}"
+          APP_ID=$(az ad app list --display-name "$APP_NAME" --query "[0].appId" -o tsv 2>/dev/null || true)
+          if [ -z "${APP_ID:-}" ] || [ "$APP_ID" = "null" ]; then
+            # az ad app create fails under SP auth (tries to add the caller as owner);
+            # use a direct Graph POST with the SPA redirect URI inline.
+            echo "Creating app registration $APP_NAME ..."
+            CREATED=$(az rest --method POST \
+              --uri "https://graph.microsoft.com/v1.0/applications" \
+              --headers 'Content-Type=application/json' \
+              --body "{\"displayName\":\"$APP_NAME\",\"signInAudience\":\"AzureADMyOrg\",\"spa\":{\"redirectUris\":[\"$REDIRECT\"]}}")
+            APP_ID=$(echo "$CREATED" | jq -r '.appId')
+          else
+            echo "App registration already exists: $APP_ID; ensuring SPA redirect URI ..."
+            OBJ_ID=$(az ad app show --id "$APP_ID" --query id -o tsv)
+            az rest --method PATCH \
+              --uri "https://graph.microsoft.com/v1.0/applications/$OBJ_ID" \
+              --headers 'Content-Type=application/json' \
+              --body "{\"spa\":{\"redirectUris\":[\"$REDIRECT\"]}}"
+          fi
 
           {
-            echo "### Executive Engine sign-in wired to the mail Entra app"
-            echo "- **Reused app:** $MAIL_APP_NAME (client ID \`$APP_ID\`)"
-            echo "- **Added SPA redirect URI:** $REDIRECT"
-            echo "- Next: re-run **Deploy Executive Engine** (it injects VITE_MS_CLIENT_ID from this app / MAIL_MS_CLIENT_ID)."
+            echo "### Entra app ready"
+            echo "- **App name:** $APP_NAME (single tenant)"
+            echo "- **Client ID:** \`$APP_ID\`"
+            echo "- **SPA redirect URI:** $REDIRECT"
+            echo ""
+            echo "Next: re-run **Deploy Executive Engine** — it resolves this Client ID by name automatically."
           } >> "$GITHUB_STEP_SUMMARY"

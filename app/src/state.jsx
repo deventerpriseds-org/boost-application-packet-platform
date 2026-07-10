@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useEffect, useState, useCallback } from 'react'
 import { api } from './api.js'
-import { loadUser, signInMicrosoft, signInGoogle, signOut as authSignOut, providerReady } from './auth.js'
+import { loadUser, signInMicrosoft, signInGoogle, signOut as authSignOut, providerReady, handleGoogleCallback } from './auth.js'
 
 // Three executive personas (spec §4) — re-filter the opportunity catalog.
 export const PERSONAS = {
@@ -48,7 +48,13 @@ export function AppProvider({ children }) {
   // no server token exchange. Signed-in email becomes the data owner; otherwise
   // shared demo mode so the app stays usable without login.
   const [auth, setAuth] = useState({ loading: true, user: loadUser() })
-  useEffect(() => { setAuth({ loading: false, user: loadUser() }) }, [])
+  useEffect(() => {
+    // Complete a Google broker redirect if we came back with a code, else load
+    // any persisted identity.
+    handleGoogleCallback()
+      .then((u) => setAuth({ loading: false, user: u || loadUser() }))
+      .catch(() => setAuth({ loading: false, user: loadUser() }))
+  }, [])
 
   const owner = auth.user?.email || DEMO_OWNER
   useEffect(() => { api.setOwner(owner) }, [owner])

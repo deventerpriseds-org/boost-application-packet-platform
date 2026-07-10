@@ -1,7 +1,7 @@
 // API client for the Executive Engine service layer (Azure Functions).
 // Reads from boost_resume_n_packet_builder via the app/* endpoints.
 const API_BASE =
-  import.meta.env.VITE_API_URL || 'https://job-platform-api.azurewebsites.net/api'
+  import.meta.env.VITE_API_BASE_URL || import.meta.env.VITE_API_URL || 'https://job-platform-api.azurewebsites.net/api'
 
 // Active data owner (set from auth). Owner-scoped reads default to this so each
 // signed-in user sees only their own opportunities/packets/outreach.

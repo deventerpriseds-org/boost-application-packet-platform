@@ -26,24 +26,26 @@ jobs:
         with:
           creds: '{"clientId":"${{ secrets.AZURE_CLIENT_ID }}","clientSecret":"${{ secrets.AZURE_CLIENT_SECRET }}","subscriptionId":"${{ secrets.AZURE_SUBSCRIPTION_ID }}","tenantId":"${{ secrets.AZURE_TENANT_ID }}"}'
 
-      # REUSE the mail app's Entra sign-in registration (enterpriseds-mail-web)
-      # instead of provisioning a new one. Resolve its client ID by name; fall
-      # back to the MAIL_MS_CLIENT_ID org secret if the SP can't read the
-      # directory. Empty → Microsoft button stays disabled (graceful).
-      - name: Resolve Microsoft client ID (reuse mail Entra app)
+      # Resolve THIS app's own Entra sign-in registration (executive-engine-web),
+      # created by azure-entra-app.yml. The deploy SP already has the Graph grant,
+      # so this resolves by name — no portal step. Empty until that workflow has
+      # run → Microsoft button stays disabled (graceful).
+      - name: Resolve Microsoft client ID
         id: msid
-        env:
-          FALLBACK_MS_CLIENT_ID: ${{ secrets.MAIL_MS_CLIENT_ID }}
         run: |
-          MSID=$(az ad app list --display-name enterpriseds-mail-web --query "[0].appId" -o tsv 2>/dev/null || true)
-          if [ -z "$MSID" ] || [ "$MSID" = "null" ]; then MSID="$FALLBACK_MS_CLIENT_ID"; fi
+          MSID=$(az ad app list --display-name executive-engine-web --query "[0].appId" -o tsv 2>/dev/null || true)
+          if [ "$MSID" = "null" ]; then MSID=""; fi
           echo "client_id=${MSID}" >> $GITHUB_OUTPUT
 
       - name: Install and Build
         env:
           VITE_GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          # Shared canonical Google redirect (enterpriseds-auth-broker) — same for
+          # every app, registered once in the Google client. No per-app console step.
+          VITE_GOOGLE_REDIRECT_URI: https://proud-hill-09accd00f.7.azurestaticapps.net
           VITE_MS_CLIENT_ID: ${{ steps.msid.outputs.client_id }}
           VITE_MS_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          VITE_API_BASE_URL: https://job-platform-api.azurewebsites.net/api
         run: |
           cd app
           npm ci
