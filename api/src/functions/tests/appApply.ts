@@ -92,7 +92,8 @@ export async function applyPrepare(req: HttpRequest, context: InvocationContext)
     const style = ['Concise', 'Detailed', 'STAR'].includes(body?.style) ? body.style : 'Concise'
 
     // If this is a Greenhouse posting, map answers to the REAL application questions.
-    const gh = body?.board && body?.jobId ? { board: String(body.board), jobId: String(body.jobId) } : parseGreenhouse(String(body?.url || o.source || ''))
+    // The Greenhouse posting URL is stored in why_surfaced ("greenhouse · board · https://…").
+    const gh = body?.board && body?.jobId ? { board: String(body.board), jobId: String(body.jobId) } : parseGreenhouse(String(body?.url || o.why_surfaced || o.source || ''))
     let questions: string[] | null = null
     if (gh) {
       try {
