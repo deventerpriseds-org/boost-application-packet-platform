@@ -98,9 +98,18 @@ until that diff is done.
   passes (promote-to-due, not auto-send — a human still reviews). Manual trigger
   `POST /app/outreach/tick` for verification / process-now. Verified live.
 
-### G8 — Auth / multi-tenancy  ·  status: OPEN
-- `owner_email` exists but there is no login. "Fresh start by email" is a
-  delete/reseed endpoint, not real auth.
+### G8 — Auth / multi-tenancy  ·  status: FOUNDATION SHIPPED (hardening pending)
+- Azure SWA built-in auth: `/.auth/me` identity in the app → signed-in email
+  becomes the data `owner`; opportunity/packet/outreach reads scope to it (shared
+  demo mode when signed out). Sign in with GitHub/Microsoft + sign out in
+  **Settings ▸ Account**. Verified: `/.auth/me` live (clientPrincipal null when
+  anonymous), config consumed by SWA.
+- **Hardening TODO (needs az):** the app calls the Function App cross-origin, so
+  the verified `x-ms-client-principal` header is NOT injected on API calls. Link
+  the Function App as the SWA's backend (bring-your-own-functions / linked API)
+  so the API can trust identity server-side instead of a client-asserted owner.
+  Until then, owner scoping is client-asserted — fine for single-owner use, not
+  for defending multi-tenant data between distrusting users.
 
 ### G9 — Whisper transcription  ·  status: CLOSED
 - `POST /app/interview/{id}/transcribe` (whisper-1) turns recorded/uploaded audio
@@ -117,7 +126,9 @@ until that diff is done.
 ## Priority (owner-directed)
 - **Closed:** G1 HeyGen, G2 ElevenLabs, G4 live inbox watcher, G6 real Docs,
   G5 real outbound send, G7 scheduler/cron, G10 cost metering, G9 Whisper.
-- **Remaining — "make it real" wiring hardening:** G8 auth/multi-tenancy (the
-  last one — foundational, needs a direction decision).
+- **Foundation shipped:** G8 auth (login + per-user scoping live; server-side
+  identity verification via SWA linked-backend is the remaining hardening step).
+- **Deferred (owner):** G3 ATS ingestion + apply; G2 1:1 chat call button;
+  G6 Slides deck for the portfolio artifact.
 - **Deferred (owner):** G3 ATS ingestion + apply; G2's 1:1 chat call button;
   G6 Slides deck for the portfolio artifact.
