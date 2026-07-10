@@ -106,8 +106,15 @@ Two halves + a coverage reality (researched 2026):
     `POST /app/coach/provision` + `/upload`.
 - **Endpoints:** `POST /app/coach/chat` (tool-call loop, max 8 hops), `/provision`,
   `/upload`, `/memory/bootstrap`, `/memory/list`, `GET /app/coach/status`.
-- **UI:** Coach screen is now tabbed **💬 Chat | ☎️ Voice call**; chat shows the
-  tools the agent ran per reply. Pattern ported from the huddle app's RAG + Responses.
+- **UI:** Coach screen is tabbed **💬 Chat | 📋 Activity | ☎️ Voice call**; chat
+  shows the tools the agent ran per reply; Activity shows saved memory + live
+  status. **Settings ▸ Coach** exposes and lets you EDIT the exact system prompt
+  + model, and shows memory DB / web search / file-store status (huddle-style).
+- **Architect-aware:** the system prompt makes the coach answer meta/system
+  questions concretely (it knows memory is pgvector in the user's OWN Postgres →
+  vendor-portable across AI models; the OpenAI vector store is only for uploaded
+  files) and proactively offer to build/change things. It captures feedback,
+  preferences, and decisions to memory for continuous improvement.
 
 ### G11 — Chrome extension  ·  status: DEFERRED (owner wants it — LAST, after platform is complete; DO NOT FORGET)
 - The universal layer the boards' closed APIs otherwise block: **save any job
