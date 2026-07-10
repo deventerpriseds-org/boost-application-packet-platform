@@ -98,28 +98,32 @@ until that diff is done.
   passes (promote-to-due, not auto-send — a human still reviews). Manual trigger
   `POST /app/outreach/tick` for verification / process-now. Verified live.
 
-### G8 — Auth / multi-tenancy  ·  status: WIRED (one portal step to activate login)
-- **Reuses the mail app's auth** (`deventerprisesds/mail-and-appointments`) — no
-  new app. Client-side Microsoft **MSAL** (`@azure/msal-browser@^3.30`, browser +
-  PKCE, no secret) + **Google** sign-in. Build injects `VITE_MS_CLIENT_ID` from
-  the existing **`enterpriseds-mail-web`** Entra app (with `MAIL_MS_CLIENT_ID`
-  fallback) and `VITE_GOOGLE_CLIENT_ID ← GOOGLE_CLIENT_ID` (shared secret).
-  Verified live: deployed bundle has MSAL + Google both configured.
-- `src/auth.js` (MSAL + Google Identity Services); signed-in email → data
-  `owner`; opportunity/packet/outreach reads scoped to it (shared demo mode when
-  signed out). **Settings ▸ Account** → Connect Microsoft / Google.
-- (Earlier off-pattern SWA-EasyAuth and a bleeding-edge msal v5 that tree-shook
-  out were both replaced. "MSAL missing" was expected dead-code elim when no
-  client ID is set — bundles once configured.)
-- **One step to activate actual login (portal or `azure-entra-app.yml`; graph is
-  blocked from CCR):** add the EE origin
-  `https://purple-ground-0f377120f.7.azurestaticapps.net` to (1) the
-  `enterpriseds-mail-web` Entra app's SPA redirect URIs and (2) the
-  `GOOGLE_CLIENT_ID` OAuth client's authorized JS origins. Needs the deploy SP's
-  `Application.ReadWrite.All` grant for the workflow path.
+### G8 — Auth / multi-tenancy  ·  status: Google LIVE (zero-touch); Microsoft awaits 1 workflow run
+- **Follows the `enterpriseds-azure-deploy` house pattern** (reuse shared infra,
+  own Entra app per app, shared Google broker). Client-side Microsoft **MSAL**
+  (`@azure/msal-browser@^3.30`, browser + PKCE, no secret) + **Google** auth-code
+  flow through the shared **`enterpriseds-auth-broker`**.
+- **Google — LIVE, verified, zero-touch:** `auth.js` builds the Google auth URL
+  with the shared `VITE_GOOGLE_REDIRECT_URI` (broker) + `VITE_GOOGLE_CLIENT_ID`;
+  the broker forwards the code back; `handleGoogleCallback` exchanges it via the
+  new **`POST /auth/google/token`** (exchanges with `GOOGLE_CLIENT_ID/SECRET`,
+  returns identity). Verified: endpoint reaches Google's token server; app bundle
+  has the broker flow + redirect URI. No Google console step (broker registered
+  once, ever).
+- **Microsoft — wired, one workflow run to activate:** own Entra app via
+  **`azure-entra-app.yml`** (`APP_NAME=executive-engine-web`; SP already holds
+  Graph `Application.ReadWrite.All`, so it sets the SPA redirect URI itself — no
+  portal). `executive-engine-deploy.yml` resolves `VITE_MS_CLIENT_ID` by name.
+  Blocked only by: a new workflow can't be `workflow_dispatch`-ed until it's on
+  the default branch → **after this branch merges to main, run "Provision Entra
+  App (Executive Engine)" once, then redeploy.** Until then the Microsoft button
+  is disabled (client ID empty); Google works.
+- Signed-in email → data `owner`; opportunity/packet/outreach reads scoped to it;
+  shared demo mode when signed out. **Settings ▸ Account**.
+- (Superseded attempts, for the record: SWA-EasyAuth; reusing the mail app's
+  Entra app; msal v5 dead-code elim. All corrected.)
 - **Deeper hardening (later):** server-side token verification so `owner` isn't
-  client-asserted (validate the MSAL/Google token in the API). Fine as-is for
-  single-owner use.
+  client-asserted. Fine as-is for single-owner use.
 - **Hardening TODO (needs az):** the app calls the Function App cross-origin, so
   the verified `x-ms-client-principal` header is NOT injected on API calls. Link
   the Function App as the SWA's backend (bring-your-own-functions / linked API)
