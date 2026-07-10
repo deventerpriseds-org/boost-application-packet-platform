@@ -96,6 +96,30 @@ async function listStaticSites(token: string): Promise<any[]> {
   return sites
 }
 
+// The staticSites list API omits creation time, so fetch it from the generic
+// resources API ($expand=createdTime). Returns a map keyed by lowercased
+// resource id → { createdTime, changedTime }.
+async function listResourceTimestamps(token: string): Promise<Record<string, { createdTime?: string; changedTime?: string }>> {
+  const out: Record<string, { createdTime?: string; changedTime?: string }> = {}
+  const filter = encodeURIComponent("resourceType eq 'Microsoft.Web/staticSites'")
+  let url: string | null =
+    `https://management.azure.com/subscriptions/${SUBSCRIPTION_ID}/resources?$filter=${filter}&$expand=createdTime,changedTime&api-version=2021-04-01`
+  try {
+    while (url) {
+      const res: Response = await fetch(url, { headers: { Authorization: `Bearer ${token}` } })
+      if (!res.ok) break // best-effort enrichment; don't fail the whole scan
+      const page = await res.json() as { value?: any[]; nextLink?: string }
+      for (const r of page.value || []) {
+        if (r.id) out[(r.id as string).toLowerCase()] = { createdTime: r.createdTime, changedTime: r.changedTime }
+      }
+      url = page.nextLink || null
+    }
+  } catch {
+    // ignore — createdAt just stays null
+  }
+  return out
+}
+
 // Load curated display names / descriptions keyed by SWA resource name.
 async function loadCurated(): Promise<Record<string, CuratedMeta>> {
   const out: Record<string, CuratedMeta> = {}
@@ -158,7 +182,7 @@ export async function apps(req: HttpRequest, context: InvocationContext): Promis
   // GET
   try {
     const [token, curated] = await Promise.all([getArmToken(), loadCurated()])
-    const sites = await listStaticSites(token)
+    const [sites, timestamps] = await Promise.all([listStaticSites(token), listResourceTimestamps(token)])
     const now = Date.now()
 
     const entries: AppEntry[] = sites.map(site => {
@@ -166,7 +190,8 @@ export async function apps(req: HttpRequest, context: InvocationContext): Promis
       const meta = curated[name] || {}
       const props = site.properties || {}
       const sysData = site.systemData || {}
-      const created = sysData.createdAt || null
+      const ts = timestamps[(site.id || '').toLowerCase()] || {}
+      const created = sysData.createdAt || ts.createdTime || null
       const createdMs = created ? Date.parse(created) : NaN
       const hostname = props.defaultHostname || null
       return {
@@ -180,7 +205,7 @@ export async function apps(req: HttpRequest, context: InvocationContext): Promis
         repositoryUrl: props.repositoryUrl || null,
         sku: (site.sku && site.sku.name) || null,
         createdAt: created,
-        lastModifiedAt: sysData.lastModifiedAt || null,
+        lastModifiedAt: sysData.lastModifiedAt || ts.changedTime || null,
         isNew: !isNaN(createdMs) && (now - createdMs) <= FOURTY_EIGHT_H,
         hidden: !!meta.hidden,
         order: meta.order ?? null,
