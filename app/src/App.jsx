@@ -1,4 +1,4 @@
-import React from 'react'
+import React, { useState } from 'react'
 import { AppProvider, useApp, useRoute } from './state.jsx'
 import { DesktopShell } from './shell.jsx'
 import { useOpportunities } from './data.jsx'
@@ -50,10 +50,59 @@ function Router() {
   return <DesktopShell title={TITLES[route] || 'Today'}>{screen}</DesktopShell>
 }
 
+// Soft login gate: shown on load until the user signs in OR explicitly chooses
+// to explore in demo mode. Signing in gives them their OWN data owner + a
+// server-verified session; demo mode shares the sandbox owner.
+function LoginGate() {
+  const { signIn, enterDemo, providerReady } = useApp()
+  const [err, setErr] = useState(null)
+  const [busy, setBusy] = useState(null)
+  const doSignIn = async (p) => {
+    setErr(null); setBusy(p)
+    try { await signIn(p) } catch (e) { setErr(String(e?.message || e)) } finally { setBusy(null) }
+  }
+  return (
+    <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20, background: 'var(--proto-panel-deep)' }}>
+      <div className="px-box" style={{ padding: 32, maxWidth: 420, width: '100%', display: 'flex', flexDirection: 'column', gap: 18, textAlign: 'center' }}>
+        <div>
+          <div style={{ fontSize: 24, fontWeight: 800, letterSpacing: -0.5 }}>Executive Engine</div>
+          <div className="px-small" style={{ marginTop: 6, lineHeight: 1.5 }}>Sign in to load <b>your own</b> pipeline, packets, and coach memory. Your data is kept separate from everyone else’s.</div>
+        </div>
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <button className="px-btn px-btn-accent" disabled={!providerReady?.microsoft || busy} onClick={() => doSignIn('microsoft')} style={{ padding: '11px 16px', fontSize: 14 }}>
+            {busy === 'microsoft' ? 'Signing in…' : 'Continue with Microsoft'}
+          </button>
+          <button className="px-btn" disabled={!providerReady?.google || busy} onClick={() => doSignIn('google')} style={{ padding: '11px 16px', fontSize: 14 }}>
+            {busy === 'google' ? 'Redirecting…' : 'Continue with Google'}
+          </button>
+          {!providerReady?.microsoft && !providerReady?.google && (
+            <div className="px-small" style={{ color: 'var(--proto-red)' }}>No sign-in provider is configured yet — use demo mode below.</div>
+          )}
+        </div>
+
+        {err && <div className="px-small" style={{ color: 'var(--proto-red)' }}>{err}</div>}
+
+        <div style={{ borderTop: '1px solid var(--proto-rule-soft)', paddingTop: 14 }}>
+          <span className="px-link" style={{ fontSize: 13, cursor: 'pointer' }} onClick={enterDemo}>Explore in demo mode →</span>
+          <div className="px-small" style={{ marginTop: 4 }}>Shared sample workspace. You can sign in later from Settings.</div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function Gate() {
+  const { auth, demoBypass } = useApp()
+  if (auth.loading) return null // avoid a flash of the gate while identity resolves
+  if (!auth.user && !demoBypass) return <LoginGate />
+  return <Router />
+}
+
 export default function App() {
   return (
     <AppProvider>
-      <Router />
+      <Gate />
     </AppProvider>
   )
 }

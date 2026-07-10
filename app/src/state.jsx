@@ -69,6 +69,15 @@ export function AppProvider({ children }) {
     try { localStorage.setItem('ee_show_demo', v ? 'true' : 'false') } catch {}
   }, [])
 
+  // Soft login gate: once the user chooses "explore in demo mode" we remember it
+  // so they aren't nagged every load. Signing out clears it so the gate returns.
+  const [demoBypass, setDemoBypassState] = useState(() => {
+    try { return localStorage.getItem('ee_demo_bypass') === 'true' } catch { return false }
+  })
+  const enterDemo = useCallback(() => {
+    setDemoBypassState(true); try { localStorage.setItem('ee_demo_bypass', 'true') } catch {}
+  }, [])
+
   const signIn = useCallback(async (provider = 'microsoft') => {
     try {
       const user = provider === 'google' ? await signInGoogle() : await signInMicrosoft()
@@ -76,7 +85,10 @@ export function AppProvider({ children }) {
       return user
     } catch (e) { throw e }
   }, [])
-  const signOut = useCallback(async () => { await authSignOut(); setAuth({ loading: false, user: null }) }, [])
+  const signOut = useCallback(async () => {
+    await authSignOut(); setAuth({ loading: false, user: null })
+    setDemoBypassState(false); try { localStorage.removeItem('ee_demo_bypass') } catch {}
+  }, [])
 
   useEffect(() => {
     document.documentElement.classList.toggle('proto-dark', dark)
@@ -92,6 +104,7 @@ export function AppProvider({ children }) {
     personaKey, setPersonaKey, persona: PERSONAS[personaKey],
     dark, setDark, toast,
     auth, owner, signIn, signOut, providerReady,
+    demoBypass, enterDemo, isDemo: owner === DEMO_OWNER,
     showDemo, setShowDemo,
   }
   return (
