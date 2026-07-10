@@ -89,6 +89,26 @@ Two halves + a coverage reality (researched 2026):
   keyword match-rate + gap list per opportunity (Jobscan-style). Closes ◐ "ATS
   optimization".
 
+### G12 — AI Coach → operator agent  ·  status: CLOSED (backend live; UI shipped)
+- The coach was call-only (ElevenLabs voice). Upgraded to a full **OpenAI
+  Responses operator agent** (`gpt-4o`) that can *do* the work, not just advise:
+  - **App tools** (`coachTools.ts`) — function tools mapping to every app
+    operation (list/get/advance/dismiss opportunities, get/list packets, generate
+    artifacts + real Docs/Slides, list/draft/send outreach, interview prep, offer
+    analysis, usage, config/mail diagnostics). The executor calls the API's own
+    endpoints, owner-scoped.
+  - **Live web search** — `tavily_web_search` (TAVILY_API_KEY). Verified: returned
+    post-training-cutoff facts with source URLs.
+  - **Durable memory** — pgvector `coach_memory`/`coach_triples` on the boost PG
+    (`text-embedding-3-small`, 1536-dim), `remember`/`recall` tools + auto-grounding.
+    Verified: a fact saved in one chat was recalled in a **fresh** conversation.
+  - **File store** — OpenAI vector store (`vs_…`) attached via `file_search`;
+    `POST /app/coach/provision` + `/upload`.
+- **Endpoints:** `POST /app/coach/chat` (tool-call loop, max 8 hops), `/provision`,
+  `/upload`, `/memory/bootstrap`, `/memory/list`, `GET /app/coach/status`.
+- **UI:** Coach screen is now tabbed **💬 Chat | ☎️ Voice call**; chat shows the
+  tools the agent ran per reply. Pattern ported from the huddle app's RAG + Responses.
+
 ### G11 — Chrome extension  ·  status: DEFERRED (owner wants it — LAST, after platform is complete; DO NOT FORGET)
 - The universal layer the boards' closed APIs otherwise block: **save any job
   page → opportunity** (universal discovery/capture) and **autofill/apply on any
