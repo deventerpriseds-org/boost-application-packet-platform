@@ -30,17 +30,17 @@ jobs:
           echo "Server $SERVER in resource group $RG"
 
           echo "== current firewall rules =="
-          az postgres flexible-server firewall-rule list -g "$RG" -n "$SERVER" -o table || true
+          az postgres flexible-server firewall-rule list -g "$RG" -s "$SERVER" -o table || true
 
           # 1. Ensure Azure-services access (0.0.0.0-0.0.0.0) BEFORE removing AllowAll.
-          az postgres flexible-server firewall-rule create -g "$RG" -n "$SERVER" \
+          az postgres flexible-server firewall-rule create -g "$RG" -s "$SERVER" \
             --rule-name AllowAzureServices --start-ip-address 0.0.0.0 --end-ip-address 0.0.0.0 || true
 
           # 2. Delete any AllowAll rule (end IP 255.255.255.255).
-          RULES=$(az postgres flexible-server firewall-rule list -g "$RG" -n "$SERVER" -o json)
+          RULES=$(az postgres flexible-server firewall-rule list -g "$RG" -s "$SERVER" -o json)
           for name in $(echo "$RULES" | jq -r '.[] | select(.endIpAddress=="255.255.255.255") | .name'); do
             echo "Deleting AllowAll rule: $name"
-            az postgres flexible-server firewall-rule delete -g "$RG" -n "$SERVER" --rule-name "$name" --yes
+            az postgres flexible-server firewall-rule delete -g "$RG" -s "$SERVER" --rule-name "$name" --yes
           done
 
           echo "Waiting 30s for firewall propagation…"
@@ -51,10 +51,10 @@ jobs:
           if echo "$RESP" | grep -q '"stages"\|"opportunities"\|"byStage"'; then
             echo "✅ API still reaches Postgres after hardening."
             echo "== final firewall rules =="
-            az postgres flexible-server firewall-rule list -g "$RG" -n "$SERVER" -o table
+            az postgres flexible-server firewall-rule list -g "$RG" -s "$SERVER" -o table
           else
             echo "::warning::API could NOT reach Postgres — rolling back (re-adding AllowAll)."
-            az postgres flexible-server firewall-rule create -g "$RG" -n "$SERVER" \
+            az postgres flexible-server firewall-rule create -g "$RG" -s "$SERVER" \
               --rule-name AllowAllRollback --start-ip-address 0.0.0.0 --end-ip-address 255.255.255.255
             echo "::error::Hardening rolled back. The Function App likely needs VNet integration or explicit outbound-IP rules instead of Allow-Azure-Services."
             exit 1
