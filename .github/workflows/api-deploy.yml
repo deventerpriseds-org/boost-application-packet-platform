@@ -52,6 +52,10 @@ jobs:
               "MICROSOFT_CLIENT_ID=${{ secrets.AZURE_CLIENT_ID }}" \
               "MICROSOFT_CLIENT_SECRET=${{ secrets.AZURE_CLIENT_SECRET }}" \
               "MICROSOFT_TENANT_ID=ee633423-c321-413c-a191-ace8b07e4196" \
+              "AZURE_CLIENT_ID=${{ secrets.AZURE_CLIENT_ID }}" \
+              "AZURE_CLIENT_SECRET=${{ secrets.AZURE_CLIENT_SECRET }}" \
+              "AZURE_TENANT_ID=${{ secrets.AZURE_TENANT_ID }}" \
+              "AZURE_SUBSCRIPTION_ID=${{ secrets.AZURE_SUBSCRIPTION_ID }}" \
               "GOOGLE_CLIENT_ID=${{ secrets.GOOGLE_CLIENT_ID }}" \
               "GOOGLE_CLIENT_SECRET=${{ secrets.GOOGLE_CLIENT_SECRET }}" \
               "AZURE_PG_HOST=eds-postgresql.postgres.database.azure.com" \
