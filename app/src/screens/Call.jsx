@@ -199,33 +199,16 @@ const TOOL_LABEL = {
 }
 
 // Operator chat: the coach can read the whole app, take actions, search the web,
-// and remember context across conversations.
-function CoachChat() {
+// and remember context across conversations. State (msgs) is OWNED BY THE PARENT
+// so it survives tab switches; persistence lives in the parent too.
+function CoachChat({ msgs, setMsgs, clearThread }) {
   const { toast } = useApp()
-  const [msgs, setMsgs] = useState([]) // {role, content, tools?}
   const [input, setInput] = useState('')
   const [busy, setBusy] = useState(false)
   const scrollRef = useRef(null)
   const taRef = useRef(null)
 
   useEffect(() => { scrollRef.current?.scrollTo(0, scrollRef.current.scrollHeight) }, [msgs, busy])
-
-  // Restore the persisted conversation from Postgres (proof it's DB-backed).
-  // ONLY when signed in — unauthenticated visitors all share the demo owner, so
-  // restoring the shared thread would clobber the current conversation with
-  // someone else's messages ("flash and replace"). Demo stays ephemeral.
-  useEffect(() => {
-    if (!getSessionToken()) return
-    let live = true
-    api.coachThreadGet({ owner: getOwner() }).then((r) => {
-      if (live && Array.isArray(r?.messages) && r.messages.length) setMsgs(r.messages.map((m) => ({ role: m.role, content: m.content })))
-    }).catch(() => {})
-    return () => { live = false }
-  }, [])
-
-  const clearThread = async () => {
-    setMsgs([]); if (getSessionToken()) { try { await api.coachThreadClear({ owner: getOwner() }) } catch {} }
-  }
 
   const send = useCallback(async () => {
     const text = input.trim()
@@ -251,7 +234,7 @@ function CoachChat() {
       <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
         <div style={{ flex: 1 }}>
           <div style={{ fontSize: 20, fontWeight: 700 }}>Coach chat</div>
-          <div className="px-small">Ask anything, or tell the coach to <b>do</b> it — a single step or the whole chain. It builds packets, seeds cadences, drafts outreach (never sends), preps interviews, runs bulk, searches the web, and remembers across chats. This thread is saved in your database and restores on reload.</div>
+          <div className="px-small">Ask anything, or tell the coach to <b>do</b> it — a single step or the whole chain. It builds packets, seeds cadences, drafts outreach (never sends), preps interviews, runs bulk, searches the web, and remembers across chats. This thread persists across tabs and reloads (in your Azure Postgres when signed in).</div>
         </div>
         {msgs.length > 0 && <span className="px-link" style={{ fontSize: 12, cursor: 'pointer', whiteSpace: 'nowrap' }} onClick={clearThread}>Clear</span>}
       </div>
@@ -269,8 +252,8 @@ function CoachChat() {
             {m.tools && m.tools.length > 0 && (
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
                 {m.tools.map((t, j) => (
-                  <span key={j} className="px-small" style={{ background: 'var(--proto-panel-deep)', borderRadius: 8, padding: '2px 8px', fontSize: 11 }}>
-                    🔧 {TOOL_LABEL[t.name] || t.name}
+                  <span key={j} className="px-small" style={{ background: 'var(--proto-panel-deep)', borderRadius: 8, padding: '2px 8px', fontSize: 11, fontFamily: 'ui-monospace, monospace' }} title={TOOL_LABEL[t.name] || t.name}>
+                    🔧 {t.name}{TOOL_LABEL[t.name] ? <span style={{ opacity: 0.55, fontFamily: 'inherit' }}> · {TOOL_LABEL[t.name]}</span> : null}
                   </span>
                 ))}
               </div>
@@ -360,7 +343,7 @@ function CoachActivity() {
                 </div>
                 {a.tools && a.tools.length > 0 && (
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 4 }}>
-                    {a.tools.map((t, j) => <span key={j} className="px-small" style={{ background: 'var(--proto-panel-deep)', borderRadius: 8, padding: '1px 7px', fontSize: 11 }}>🔧 {TOOL_LABEL[t.name] || t.name}</span>)}
+                    {a.tools.map((t, j) => <span key={j} className="px-small" style={{ background: 'var(--proto-panel-deep)', borderRadius: 8, padding: '1px 7px', fontSize: 11, fontFamily: 'ui-monospace, monospace' }} title={TOOL_LABEL[t.name] || ''}>🔧 {t.name}{TOOL_LABEL[t.name] ? <span style={{ opacity: 0.55 }}> · {TOOL_LABEL[t.name]}</span> : null}</span>)}
                   </div>
                 )}
               </div>
@@ -418,12 +401,45 @@ function timeAgoShort(iso) {
   return `${Math.round(s / 86400)}d`
 }
 
+const threadKey = () => `ee_coach_thread_${getOwner()}`
+function loadLocalThread() {
+  try { const raw = localStorage.getItem(threadKey()); const a = raw ? JSON.parse(raw) : null; return Array.isArray(a) ? a : [] } catch { return [] }
+}
+
 export default function Call() {
-  const [tab, setTab] = useState('chat') // activity | chat | call
+  const [tab, setTab] = useState('chat') // chat | call | activity
+  // Thread state is OWNED HERE so it survives switching tabs (CoachChat unmounts
+  // on tab change). Seeded from localStorage so it also survives navigating away
+  // from this screen and full page reloads — for everyone, signed in or not.
+  const [msgs, setMsgs] = useState(loadLocalThread)
+
+  // Persist every change locally so the conversation is durable client-side.
+  useEffect(() => {
+    try { localStorage.setItem(threadKey(), JSON.stringify(msgs.slice(-40))) } catch {}
+  }, [msgs])
+
+  // When signed in, hydrate from the server thread (Azure PG) once on mount if it
+  // has MORE than what's local (e.g. continued from another device). Never clobber
+  // a longer in-progress local thread.
+  useEffect(() => {
+    if (!getSessionToken()) return
+    let live = true
+    api.coachThreadGet({ owner: getOwner() }).then((r) => {
+      const server = Array.isArray(r?.messages) ? r.messages.map((m) => ({ role: m.role, content: m.content })) : []
+      if (live && server.length > msgs.length) setMsgs(server)
+    }).catch(() => {})
+    return () => { live = false }
+  }, [])
+
+  const clearThread = useCallback(async () => {
+    setMsgs([]); try { localStorage.removeItem(threadKey()) } catch {}
+    if (getSessionToken()) { try { await api.coachThreadClear({ owner: getOwner() }) } catch {} }
+  }, [])
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
       <div style={{ display: 'flex', gap: 4, borderBottom: '1px solid var(--proto-rule-soft)' }}>
-        {[{ k: 'activity', l: '📋 Activity' }, { k: 'chat', l: '💬 Chat' }, { k: 'call', l: '☎️ Voice call' }].map((t) => (
+        {[{ k: 'chat', l: '💬 Chat' }, { k: 'call', l: '☎️ Voice call' }, { k: 'activity', l: '📋 Activity' }].map((t) => (
           <div key={t.k} onClick={() => setTab(t.k)}
             style={{ padding: '8px 14px', cursor: 'pointer', fontSize: 13,
               fontWeight: tab === t.k ? 600 : 500, color: tab === t.k ? 'var(--text-brand)' : 'var(--proto-ink2)',
@@ -432,9 +448,9 @@ export default function Call() {
           </div>
         ))}
       </div>
-      {tab === 'chat' && <CoachChat />}
-      {tab === 'activity' && <CoachActivity />}
+      {tab === 'chat' && <CoachChat msgs={msgs} setMsgs={setMsgs} clearThread={clearThread} />}
       {tab === 'call' && <VoiceCall />}
+      {tab === 'activity' && <CoachActivity />}
     </div>
   )
 }
