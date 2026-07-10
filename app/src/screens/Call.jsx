@@ -1,7 +1,7 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react'
 import { Conversation } from '@elevenlabs/client'
 import { useApp } from '../state.jsx'
-import { api } from '../api.js'
+import { api, getOwner } from '../api.js'
 
 // Token-overlap similarity (Jaccard) for self-echo detection: if a "user"
 // transcript closely matches what the agent just said, it's the mic hearing the
@@ -15,7 +15,7 @@ function similarity(a, b) {
   return inter / Math.min(A.size, B.size)
 }
 
-export default function Call() {
+function VoiceCall() {
   const { toast } = useApp()
   const [status, setStatus] = useState('idle') // idle | connecting | connected | error
   const [mode, setMode] = useState('listening') // listening | speaking
@@ -157,6 +157,112 @@ export default function Call() {
           ))}
         </div>
       )}
+    </div>
+  )
+}
+
+const TOOL_LABEL = {
+  list_opportunities: 'Reading pipeline', get_opportunity: 'Reading opportunity', advance_stage: 'Moving stage',
+  dismiss_opportunity: 'Dismissing', get_packet: 'Reading packet', list_packets: 'Reading packets',
+  generate_artifact: 'Drafting artifact', create_document: 'Creating Google Doc', create_slides: 'Creating Slides deck',
+  list_outreach: 'Reading outreach', opportunity_outreach: 'Reading outreach', generate_outreach: 'Drafting outreach',
+  send_outreach: 'Sending email', interview_prep: 'Prepping interview', offer_analysis: 'Analyzing offer',
+  get_usage: 'Reading usage', assets_analytics: 'Reading analytics', config_status: 'Checking config',
+  mail_config: 'Reading intake config', mail_subscriptions: 'Checking subscriptions',
+  remember: 'Saving to memory', recall: 'Recalling memory', tavily_web_search: 'Searching the web',
+}
+
+// Operator chat: the coach can read the whole app, take actions, search the web,
+// and remember context across conversations.
+function CoachChat() {
+  const { toast } = useApp()
+  const [msgs, setMsgs] = useState([]) // {role, content, tools?}
+  const [input, setInput] = useState('')
+  const [busy, setBusy] = useState(false)
+  const scrollRef = useRef(null)
+  const taRef = useRef(null)
+
+  useEffect(() => { scrollRef.current?.scrollTo(0, scrollRef.current.scrollHeight) }, [msgs, busy])
+
+  const send = useCallback(async () => {
+    const text = input.trim()
+    if (!text || busy) return
+    const next = [...msgs, { role: 'user', content: text }]
+    setMsgs(next); setInput(''); setBusy(true)
+    try {
+      const payload = next.map((m) => ({ role: m.role, content: m.content }))
+      const r = await api.coachChat(payload, { owner: getOwner() })
+      if (r.error) throw new Error(r.error)
+      setMsgs((m) => [...m, { role: 'assistant', content: r.reply || '(no reply)', tools: r.toolCalls || [] }])
+    } catch (e) {
+      setMsgs((m) => [...m, { role: 'assistant', content: `⚠️ ${e.message || e}`, tools: [] }])
+      toast('Coach error')
+    } finally { setBusy(false) }
+  }, [input, busy, msgs, toast])
+
+  const onKey = (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send() } }
+
+  return (
+    <div style={{ maxWidth: 720, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 12 }}>
+      <div>
+        <div style={{ fontSize: 20, fontWeight: 700 }}>Coach chat</div>
+        <div className="px-small">Ask anything — or tell the coach to <b>do</b> it. It can read your whole pipeline, build packets, draft & send outreach, prep interviews, search the web, and remember what matters across chats.</div>
+      </div>
+
+      <div ref={scrollRef} className="px-box" style={{ padding: 14, height: 440, overflow: 'auto', display: 'flex', flexDirection: 'column', gap: 10 }}>
+        {msgs.length === 0 && (
+          <div className="px-small" style={{ margin: 'auto', textAlign: 'center', maxWidth: 420, lineHeight: 1.6 }}>
+            Try: <i>“Show me my top opportunities and build a packet for the best fit.”</i><br />
+            <i>“Research the hiring manager at Acme and draft a cold email.”</i><br />
+            <i>“What have I spent on AI so far this week?”</i>
+          </div>
+        )}
+        {msgs.map((m, i) => (
+          <div key={i} style={{ alignSelf: m.role === 'user' ? 'flex-end' : 'flex-start', maxWidth: '86%', display: 'flex', flexDirection: 'column', gap: 4 }}>
+            {m.tools && m.tools.length > 0 && (
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                {m.tools.map((t, j) => (
+                  <span key={j} className="px-small" style={{ background: 'var(--proto-panel-deep)', borderRadius: 8, padding: '2px 8px', fontSize: 11 }}>
+                    🔧 {TOOL_LABEL[t.name] || t.name}
+                  </span>
+                ))}
+              </div>
+            )}
+            <div style={{
+              background: m.role === 'user' ? 'var(--surface-brand-default)' : 'var(--proto-panel)',
+              color: m.role === 'user' ? 'var(--text-on-brand)' : 'var(--proto-ink)',
+              padding: '9px 13px', borderRadius: 12, fontSize: 13.5, lineHeight: 1.5, whiteSpace: 'pre-wrap' }}>{m.content}</div>
+          </div>
+        ))}
+        {busy && <div className="px-small" style={{ alignSelf: 'flex-start' }}>Coach is working…</div>}
+      </div>
+
+      <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end' }}>
+        <textarea ref={taRef} className="px-input" rows={2} value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={onKey}
+          placeholder="Message your coach — or ask it to take an action…" style={{ flex: 1, resize: 'none', fontFamily: 'inherit' }} />
+        <button className="px-btn px-btn-accent" disabled={busy || !input.trim()} onClick={send} style={{ padding: '10px 20px' }}>
+          {busy ? '…' : 'Send'}
+        </button>
+      </div>
+    </div>
+  )
+}
+
+export default function Call() {
+  const [tab, setTab] = useState('chat') // chat | call
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+      <div style={{ display: 'flex', gap: 4, borderBottom: '1px solid var(--proto-rule-soft)' }}>
+        {[{ k: 'chat', l: '💬 Chat' }, { k: 'call', l: '☎️ Voice call' }].map((t) => (
+          <div key={t.k} onClick={() => setTab(t.k)}
+            style={{ padding: '8px 14px', cursor: 'pointer', fontSize: 13,
+              fontWeight: tab === t.k ? 600 : 500, color: tab === t.k ? 'var(--text-brand)' : 'var(--proto-ink2)',
+              borderBottom: tab === t.k ? '2px solid var(--surface-brand-default)' : '2px solid transparent', marginBottom: -1 }}>
+            {t.l}
+          </div>
+        ))}
+      </div>
+      {tab === 'chat' ? <CoachChat /> : <VoiceCall />}
     </div>
   )
 }

@@ -68,6 +68,13 @@ export const api = {
   answersVision: (oppId, imageBase64) => post(`/app/opportunity/${oppId}/answers/vision`, { imageBase64 }),
   // Voice call (ElevenLabs Conversational AI) — signed WebSocket URL
   voiceSession: () => get(`/app/voice/session`),
+  // AI Coach (OpenAI Responses operator agent: app tools + memory + Tavily)
+  coachChat: (messages, { owner } = {}) => post(`/app/coach/chat`, { messages, owner: owner || _owner }),
+  coachStatus: ({ owner } = {}) => get(`/app/coach/status?owner=${encodeURIComponent(owner || _owner)}`),
+  coachMemoryList: ({ owner } = {}) => get(`/app/coach/memory/list?owner=${encodeURIComponent(owner || _owner)}`),
+  coachMemoryBootstrap: () => post(`/app/coach/memory/bootstrap`, {}),
+  coachProvision: () => post(`/app/coach/provision`, {}),
+  coachUpload: (filename, contentBase64) => post(`/app/coach/upload`, { filename, contentBase64 }),
   // Intake watcher (mail subscription + config + self-test + on-demand pull)
   mailSubscriptions: () => get(`/mail/subscriptions`),
   mailSubscribe: () => post(`/mail/subscribe`, {}),
