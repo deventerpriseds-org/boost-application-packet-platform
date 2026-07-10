@@ -1,0 +1,61 @@
+name: Harden Postgres firewall (Azure services only)
+# Removes the AllowAll (0.0.0.0–255.255.255.255) rule and leaves only
+# "Allow Azure services" (0.0.0.0–0.0.0.0) so the Function App can still reach
+# Postgres but the public internet cannot. Safe: it verifies the API can still
+# query the DB after the change and AUTO-ROLLBACKS (re-adds AllowAll) if not.
+#
+# The deploy SP already has rights on the subscription. Run manually.
+
+on:
+  workflow_dispatch:
+
+env:
+  SERVER: eds-postgresql
+  API: https://job-platform-api.azurewebsites.net/api
+
+jobs:
+  harden:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Login to Azure
+        uses: azure/login@v2
+        with:
+          creds: '{"clientId":"${{ secrets.AZURE_CLIENT_ID }}","clientSecret":"${{ secrets.AZURE_CLIENT_SECRET }}","subscriptionId":"${{ secrets.AZURE_SUBSCRIPTION_ID }}","tenantId":"${{ secrets.AZURE_TENANT_ID }}"}'
+
+      - name: Harden with verify + auto-rollback
+        run: |
+          set -euo pipefail
+          RG=$(az postgres flexible-server list --query "[?name=='$SERVER'].resourceGroup | [0]" -o tsv)
+          if [ -z "$RG" ] || [ "$RG" = "null" ]; then echo "::error::server $SERVER not found"; exit 1; fi
+          echo "Server $SERVER in resource group $RG"
+
+          echo "== current firewall rules =="
+          az postgres flexible-server firewall-rule list -g "$RG" -n "$SERVER" -o table || true
+
+          # 1. Ensure Azure-services access (0.0.0.0-0.0.0.0) BEFORE removing AllowAll.
+          az postgres flexible-server firewall-rule create -g "$RG" -n "$SERVER" \
+            --rule-name AllowAzureServices --start-ip-address 0.0.0.0 --end-ip-address 0.0.0.0 || true
+
+          # 2. Delete any AllowAll rule (end IP 255.255.255.255).
+          RULES=$(az postgres flexible-server firewall-rule list -g "$RG" -n "$SERVER" -o json)
+          for name in $(echo "$RULES" | jq -r '.[] | select(.endIpAddress=="255.255.255.255") | .name'); do
+            echo "Deleting AllowAll rule: $name"
+            az postgres flexible-server firewall-rule delete -g "$RG" -n "$SERVER" --rule-name "$name" --yes
+          done
+
+          echo "Waiting 30s for firewall propagation…"
+          sleep 30
+
+          # 3. Verify the Function App can still query Postgres (fresh connection).
+          RESP=$(curl -s "$API/app/opportunities?includeDemo=false" || true)
+          if echo "$RESP" | grep -q '"stages"\|"opportunities"\|"byStage"'; then
+            echo "✅ API still reaches Postgres after hardening."
+            echo "== final firewall rules =="
+            az postgres flexible-server firewall-rule list -g "$RG" -n "$SERVER" -o table
+          else
+            echo "::warning::API could NOT reach Postgres — rolling back (re-adding AllowAll)."
+            az postgres flexible-server firewall-rule create -g "$RG" -n "$SERVER" \
+              --rule-name AllowAllRollback --start-ip-address 0.0.0.0 --end-ip-address 255.255.255.255
+            echo "::error::Hardening rolled back. The Function App likely needs VNet integration or explicit outbound-IP rules instead of Allow-Azure-Services."
+            exit 1
+          fi
