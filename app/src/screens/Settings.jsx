@@ -330,6 +330,65 @@ function WorkspaceSettings() {
   )
 }
 
+// ATS job-board sources (Greenhouse / Lever / Ashby) — configurable, like the
+// mail watcher. Adds a broader discovery layer beyond email alerts.
+function AtsSources() {
+  const [sources, setSources] = useState(null)
+  const [provider, setProvider] = useState('greenhouse')
+  const [board, setBoard] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [msg, setMsg] = useState('')
+  const load = useCallback(async () => { try { const r = await api.atsSources(); setSources(r.sources || []) } catch (e) { setMsg(String(e.message || e)) } }, [])
+  useEffect(() => { load() }, [load])
+
+  const add = async () => {
+    if (!board.trim()) return
+    setBusy(true); setMsg('')
+    try { const p = await api.atsPreview(provider, board.trim()); if (p.error) throw new Error(p.error)
+      const r = await api.atsSourceAdd(provider, board.trim()); if (r.error) throw new Error(r.error)
+      setMsg(`Added — ${p.execRoles} exec roles of ${p.total} on this board`); setBoard(''); load() }
+    catch (e) { setMsg(`Couldn’t add: ${e.message || e}`) } finally { setBusy(false) }
+  }
+  const del = async (id) => { try { await api.atsSourceDelete(id); load() } catch {} }
+  const ingest = async (s) => {
+    setBusy(true); setMsg('')
+    try { const r = s ? await api.atsIngest({ provider: s.provider, board: s.board }) : await api.atsIngest({})
+      if (r.error) throw new Error(r.error); setMsg(`Ingested: ${r.inserted} new, ${r.duplicates} duplicates (${r.scanned} scanned)`) }
+    catch (e) { setMsg(`Ingest failed: ${e.message || e}`) } finally { setBusy(false) }
+  }
+
+  return (
+    <Card>
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 10 }}>
+        <b style={{ fontSize: 15 }}>ATS job boards</b>
+        <span className="px-small">Greenhouse · Lever · Ashby — pull exec roles beyond email alerts</span>
+      </div>
+      <div style={{ display: 'flex', gap: 8, marginTop: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+        <select className="px-input" value={provider} onChange={(e) => setProvider(e.target.value)} style={{ fontSize: 13 }}>
+          {['greenhouse', 'lever', 'ashby'].map((p) => <option key={p} value={p}>{p}</option>)}
+        </select>
+        <input className="px-input" value={board} onChange={(e) => setBoard(e.target.value)} placeholder="board token (e.g. stripe, netflix)" style={{ flex: 1, minWidth: 160, fontSize: 13 }} />
+        <button className="px-btn px-btn-accent" disabled={busy || !board.trim()} onClick={add} style={{ fontSize: 12 }}>{busy ? '…' : 'Add + preview'}</button>
+      </div>
+      {sources && sources.length > 0 && (
+        <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 6 }}>
+          {sources.map((s) => (
+            <div key={s.id} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13 }}>
+              <Pill tone="panel">{s.provider}</Pill>
+              <span style={{ flex: 1 }}>{s.board}</span>
+              {s.last_run && <span className="px-small">ran {new Date(s.last_run).toLocaleDateString()}</span>}
+              <button className="px-btn" style={{ fontSize: 11 }} disabled={busy} onClick={() => ingest(s)}>Ingest</button>
+              <span className="px-link" style={{ fontSize: 12, cursor: 'pointer', color: 'var(--proto-red)' }} onClick={() => del(s.id)}>✕</span>
+            </div>
+          ))}
+          <button className="px-btn px-btn-accent" style={{ fontSize: 12, alignSelf: 'flex-start', marginTop: 6 }} disabled={busy} onClick={() => ingest(null)}>Ingest all sources now</button>
+        </div>
+      )}
+      {msg && <div className="px-small" style={{ marginTop: 10 }}>{msg}</div>}
+    </Card>
+  )
+}
+
 // Coach — the AI coach's system prompt, model, memory, and file store. This is
 // the "see everything" surface: the exact prompt the agent runs on, editable.
 function CoachSettings() {
@@ -471,7 +530,7 @@ export default function Settings({ tab = 'account' }) {
         ))}
       </div>
       {active === 'account' && <AccountSettings />}
-      {active === 'intake' && <IntakeSettings />}
+      {active === 'intake' && <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}><IntakeSettings /><AtsSources /></div>}
       {active === 'coach' && <CoachSettings />}
       {active === 'workspace' && <WorkspaceSettings />}
       {active === 'usage' && <UsageSettings />}
