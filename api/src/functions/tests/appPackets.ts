@@ -300,8 +300,8 @@ export async function artifactSlides(req: HttpRequest, context: InvocationContex
     requests.push({ insertText: { objectId: 'p_sub', text: opp?.role || '' } })
     // Section slides
     sections.forEach((s, i) => {
-      const tId = `t_${i}`, bId = `b_${i}`
-      requests.push({ createSlide: { objectId: `s_${i}`, slideLayoutReference: { predefinedLayout: 'TITLE_AND_BODY' }, placeholderIdMappings: [
+      const tId = `title_${i}`, bId = `body_${i}`
+      requests.push({ createSlide: { objectId: `slide_${i}`, slideLayoutReference: { predefinedLayout: 'TITLE_AND_BODY' }, placeholderIdMappings: [
         { layoutPlaceholder: { type: 'TITLE' }, objectId: tId },
         { layoutPlaceholder: { type: 'BODY' }, objectId: bId },
       ] } })
