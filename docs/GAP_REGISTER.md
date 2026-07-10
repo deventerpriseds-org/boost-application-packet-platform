@@ -68,7 +68,27 @@ until that diff is done.
      TTS). Larger; scope as its own slice.
 - **Blocked on:** `ELEVENLABS_API_KEY` in GitHub secrets + Function App settings.
 
-### G3 — ATS ingestion + apply  ·  status: PLANNED (next; phased A–C, extension = G11)
+### Production push (owner-directed, 6 items) · status: DONE (see below)
+- **#3 Server-verified identity** — HMAC session tokens (`appSession.ts`): MS Graph
+  `/me` + Google userinfo mint a signed token; `resolveOwner(req)` derives the
+  trusted owner from the Bearer token across every owner-scoped endpoint; safe
+  demo fallback. Verified: bad tokens rejected, bogus Bearer → demo, no regression.
+- **#4 Reliability & ops** — `/app/health` (DB ping + integration status),
+  `/app/selftest` (6/6), Settings ▸ System, coach diagnostics tools.
+- **#5 Surface JD/enrich + engagement** — JD/ATS panel + Build-entire-packet in the
+  packet builder; Enrich in OppDetail. Verified: ATS 85 + 13 keywords; 4 signals + 4 pains.
+- **#1 ATS ingestion (G3 Phase A)** — see G3 below (Greenhouse/Lever/Ashby live).
+- **#2 Chrome extension (G11)** — see G11 below (live capture endpoint).
+- **#6 Polish** — folded in (System settings, ATS/coach surfaces).
+
+### G3 — ATS ingestion + apply  ·  status: Phase A CLOSED (Greenhouse/Lever/Ashby live)
+- `appAts.ts`: configurable `ats_source` (provider + board) with adapters for
+  **Greenhouse / Lever / Ashby** public job boards; preview + ingest; exec-role
+  filter; reuses the intake `insertOpp` (embed → pgvector dedupe → discovered).
+  Verified live: Stripe Greenhouse → 14 new exec opps inserted, re-ingest 0 new /
+  15 dupes. Settings ▸ Intake ▸ ATS boards + coach tools. Phases B (structured
+  apply) / C (match score) still open.
+
 Two halves + a coverage reality (researched 2026):
 - **Coverage:** LinkedIn/Indeed/Monster/Ladders are *boards*, not ATS; none have
   open job-search APIs anymore (LinkedIn partner-gated; Indeed API shut 2021;
@@ -116,7 +136,15 @@ Two halves + a coverage reality (researched 2026):
   files) and proactively offer to build/change things. It captures feedback,
   preferences, and decisions to memory for continuous improvement.
 
-### G11 — Chrome extension  ·  status: DEFERRED (owner wants it — LAST, after platform is complete; DO NOT FORGET)
+### G11 — Chrome extension  ·  status: SHIPPED (MVP capture)
+- `extension/` (MV3): **Save this job** scrapes the tab (JSON-LD `JobPosting` or
+  title/company/body) → `POST /app/capture` (`appCapture.ts`) → normalizes via
+  OpenAI → `insertOpp` (embed → dedupe → discovered, source Extension). Options
+  for workspace email / session token. Basic why/cover autofill in `content.js`.
+  Load unpacked from `extension/`. (Structured auto-apply across arbitrary ATS
+  forms is the deeper follow-on.)
+
+### G11 (original) — Chrome extension  ·  status: SHIPPED — see above (owner wants it — LAST, after platform is complete; DO NOT FORGET)
 - The universal layer the boards' closed APIs otherwise block: **save any job
   page → opportunity** (universal discovery/capture) and **autofill/apply on any
   ATS web form** using the already-generated answers (universal apply). Matches
