@@ -62,14 +62,13 @@ export async function matchScore(req: HttpRequest, context: InvocationContext): 
 }
 
 // Parse a Greenhouse board + job id from a posting URL (best-effort).
-function parseGreenhouse(url: string): { board: string; jobId: string } | null {
-  if (!url) return null
-  let m = url.match(/greenhouse\.io\/(?:embed\/job_app\?token=|.*?boards[.-]?[a-z]*\.greenhouse\.io\/)?([a-z0-9_-]+)\/jobs\/(\d+)/i)
+function parseGreenhouse(text: string): { board: string; jobId: string } | null {
+  if (!text) return null
+  let m = text.match(/greenhouse\.io\/([a-z0-9_-]+)\/jobs\/(\d+)/i)
   if (m) return { board: m[1], jobId: m[2] }
-  m = url.match(/greenhouse\.io\/([a-z0-9_-]+)\/jobs\/(\d+)/i)
-  if (m) return { board: m[1], jobId: m[2] }
-  const jid = url.match(/[?&]gh_jid=(\d+)/)
-  const bd = url.match(/boards\.greenhouse\.io\/([a-z0-9_-]+)/i)
+  const jid = text.match(/[?&]gh_jid=(\d+)/)
+  // Board from a boards.greenhouse.io URL, else from our stored "greenhouse · <board> · …".
+  const bd = text.match(/boards[.-]?[a-z]*\.greenhouse\.io\/([a-z0-9_-]+)/i) || text.match(/greenhouse\s*·\s*([a-z0-9_-]+)/i)
   if (jid && bd) return { board: bd[1], jobId: jid[1] }
   return null
 }
