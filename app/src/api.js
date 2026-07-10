@@ -51,6 +51,8 @@ export const api = {
   getPacket: (oppId) => get(`/app/opportunity/${oppId}/packet`),
   analyzeJd: (oppId) => post(`/app/opportunity/${oppId}/jd-analysis`, {}),
   enrichOpportunity: (oppId) => post(`/app/opportunity/${oppId}/enrich`, {}),
+  matchScore: (oppId) => post(`/app/opportunity/${oppId}/match-score`, {}),
+  applyPrepare: (oppId, opts = {}) => post(`/app/opportunity/${oppId}/apply/prepare`, opts),
   buildFullPacket: (oppId, opts = {}) => post(`/app/opportunity/${oppId}/packet/build-all`, opts),
   bulkRun: (opts = {}) => post(`/app/bulk/packets`, opts),
   bulkStatus: (jobId) => get(`/app/bulk/${jobId}`),

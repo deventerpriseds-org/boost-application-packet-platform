@@ -112,10 +112,24 @@ function Overview({ o, toast, id, reload }) {
   const pain = o.pain || []
   const contacts = o.contacts || []
   const [enriching, setEnriching] = useState(false)
+  const [scoring, setScoring] = useState(false)
+  const [match, setMatch] = useState(null)
+  const [apply, setApply] = useState(null)
+  const [preparing, setPreparing] = useState(false)
   const enrich = async () => {
     setEnriching(true)
     try { const r = await api.enrichOpportunity(id || o.id); if (r.error) throw new Error(r.error); toast(`Enriched: ${(r.enrichment?.companySignals || []).length} signals, ${(r.enrichment?.painHypotheses || []).length} pains`); reload && reload() }
     catch (e) { toast(`Enrich failed: ${e.message || e}`) } finally { setEnriching(false) }
+  }
+  const runMatch = async () => {
+    setScoring(true)
+    try { const r = await api.matchScore(id || o.id); if (r.error) throw new Error(r.error); setMatch(r); toast(`Match ${r.matchRate} · ${(r.gaps || []).length} gaps`); reload && reload() }
+    catch (e) { toast(`Match failed: ${e.message || e}`) } finally { setScoring(false) }
+  }
+  const prepareApply = async () => {
+    setPreparing(true)
+    try { const r = await api.applyPrepare(id || o.id, {}); if (r.error) throw new Error(r.error); setApply(r); toast(`Prepared ${r.answers?.length || 0} answers${r.ats ? ` (${r.ats.provider})` : ''}`) }
+    catch (e) { toast(`Prepare failed: ${e.message || e}`) } finally { setPreparing(false) }
   }
   return (
     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 16 }}>
@@ -144,9 +158,35 @@ function Overview({ o, toast, id, reload }) {
           </Card>
         )}
 
-        <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-          <button className="px-btn" style={{ fontSize: 12 }} disabled={enriching} onClick={enrich}>{enriching ? 'Enriching…' : (signals.length || pain.length ? '↻ Re-enrich' : '✦ Enrich (signals + pains)')}</button>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 6, flexWrap: 'wrap' }}>
+          {(match?.matchRate != null || typeof o.match === 'number') && <Pill tone={(match?.matchRate ?? o.match) >= 75 ? 'green' : (match?.matchRate ?? o.match) >= 50 ? 'yellow' : 'red'}>match {match?.matchRate ?? o.match}</Pill>}
+          <button className="px-btn" style={{ fontSize: 12 }} disabled={scoring} onClick={runMatch}>{scoring ? 'Scoring…' : '◈ ATS match score'}</button>
+          <button className="px-btn" style={{ fontSize: 12 }} disabled={preparing} onClick={prepareApply}>{preparing ? 'Preparing…' : '⌸ Prepare application'}</button>
+          <button className="px-btn" style={{ fontSize: 12 }} disabled={enriching} onClick={enrich}>{enriching ? 'Enriching…' : (signals.length || pain.length ? '↻ Re-enrich' : '✦ Enrich')}</button>
         </div>
+        {match && (match.matched?.length || match.gaps?.length) && (
+          <Card title={`ATS match — ${match.matchRate}`} sub={match.summary}>
+            {match.matched?.length > 0 && <div style={{ fontSize: 12 }}><b>Strengths:</b> {match.matched.join(' · ')}</div>}
+            {match.gaps?.length > 0 && <div style={{ fontSize: 12, marginTop: 6, color: 'var(--proto-red)' }}><b>Gaps:</b> {match.gaps.join(' · ')}</div>}
+          </Card>
+        )}
+        {apply && (
+          <Card title="Prepared application" sub={apply.mode}>
+            {(apply.documents || []).length > 0 && (
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 8 }}>
+                {apply.documents.map((d, i) => <a key={i} href={d.url} target="_blank" rel="noreferrer" className="px-link" style={{ fontSize: 12 }}>{d.type} ↗</a>)}
+              </div>
+            )}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {(apply.answers || []).map((a, i) => (
+                <div key={i} style={{ fontSize: 12 }}>
+                  <div style={{ fontWeight: 600 }}>{a.question}</div>
+                  <div style={{ lineHeight: 1.5, whiteSpace: 'pre-wrap' }}>{a.answer}</div>
+                </div>
+              ))}
+            </div>
+          </Card>
+        )}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 16 }}>
           <Card title="Company signals">
             {signals.length ? (
