@@ -142,7 +142,10 @@ export async function executeCoachTool(name: string, args: any, ctx: { owner: st
   try {
     if (name === 'tavily_web_search') {
       const r = await tavilySearch(args)
-      return JSON.stringify({ answer: r.answer, sources: r.sources, results: (r.results || []).slice(0, 6), error: r.error })
+      const today = new Date().toISOString().slice(0, 10)
+      // Channel C: every Tavily result carries the cutoff label + retrieval date so
+      // the model sees the rule alongside live data and cites recency correctly.
+      return JSON.stringify({ retrieved_at: today, knowledge_cutoff: 'June 2023', answer: r.answer, sources: r.sources, results: (r.results || []).slice(0, 6), error: r.error })
     }
     if (name === 'remember') {
       const r = await memRemember({ owner: ctx.owner, kind: args.kind || 'note', text: String(args.text || ''), source: 'coach-chat' })

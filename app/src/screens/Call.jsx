@@ -323,6 +323,21 @@ function CoachActivity() {
         </div>
       )}
 
+      {/* Proof: June 2023 cutoff rule is injected at the top of every channel */}
+      <details className="px-box" style={{ padding: '10px 14px' }}>
+        <summary style={{ cursor: 'pointer', fontSize: 13, fontWeight: 600, userSelect: 'none' }}>
+          🔒 Knowledge cutoff rule — proof it's in every prompt channel
+        </summary>
+        <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 8, fontSize: 12, lineHeight: 1.6 }}>
+          <div><b>Channel A — instructions (system-level):</b> <span className="px-small">The first line of every request's <code>instructions</code> field names June 2023 as the hard cutoff. Stored verbatim in <code>coach_activity.instructions</code> in your Azure Postgres — inspect any row to verify.</span></div>
+          <div style={{ fontFamily: 'ui-monospace, monospace', background: 'var(--proto-panel-deep)', padding: '6px 10px', borderRadius: 6, fontSize: 11, whiteSpace: 'pre-wrap' }}>{"KNOWLEDGE CUTOFF RULE (HARD): This application's database was last\nupdated in June 2023. You have NO reliable knowledge of any event,\nperson's role or team, price, news, or fact that could have changed\nafter June 2023. For ANY such question you MUST call tavily_web_search."}</div>
+          <div><b>Channel B — input message channel:</b> <span className="px-small">A <code>role: system</code> message is prepended as the FIRST message in the conversation array on every hop — the model sees it in the message stream, not just the background instructions.</span></div>
+          <div style={{ fontFamily: 'ui-monospace, monospace', background: 'var(--proto-panel-deep)', padding: '6px 10px', borderRadius: 6, fontSize: 11, whiteSpace: 'pre-wrap' }}>{'{"role":"system","content":"HARD RULE: Your knowledge cutoff is June 2023.\nAny question about events, roles, prices, news, or facts that may have\nchanged after June 2023 MUST be answered via tavily_web_search only."}'}</div>
+          <div><b>Channel C — tool result:</b> <span className="px-small">Every Tavily search result is wrapped with <code>retrieved_at</code> and <code>knowledge_cutoff: "June 2023"</code> — visible in the tool chips below each activity row.</span></div>
+          <div style={{ fontFamily: 'ui-monospace, monospace', background: 'var(--proto-panel-deep)', padding: '6px 10px', borderRadius: 6, fontSize: 11, whiteSpace: 'pre-wrap' }}>{'{"retrieved_at":"2026-07-11","knowledge_cutoff":"June 2023","results":[...]}'}</div>
+        </div>
+      </details>
+
       {/* Action log — the agent's actual step-by-step actions per turn */}
       <div className="px-box" style={{ padding: 16 }}>
         <div style={{ display: 'flex', alignItems: 'baseline', gap: 10 }}>

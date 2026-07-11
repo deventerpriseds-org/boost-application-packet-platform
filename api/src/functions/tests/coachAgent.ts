@@ -12,6 +12,11 @@ const HEADERS = {
 const OPENAI_URL = 'https://api.openai.com/v1/responses'
 const DEMO_EMAIL = 'demo@executive-engine.local'
 const MODEL = process.env.COACH_MODEL || 'gpt-4o'
+// router = force Tavily only when the freshness router says live info is needed (default)
+// aggressive = force Tavily on any non-action question
+// auto = no forcing (instant rollback — flip via Function App app setting, no redeploy)
+const SEARCH_MODE = process.env.COACH_SEARCH_MODE || 'router'
+const DB_CUTOFF = 'June 2023'
 
 const SYSTEM = `You are the Executive Engine Coach — the AI operator AND resident architect of an executive job-search platform ("Executive Engine"). You are not a generic assistant: you know this system's architecture intimately and you can both operate it and help extend it.
 
@@ -45,7 +50,7 @@ CRITICAL — WHERE YOUR DATA LIVES (do not get this wrong)
 OPERATING PRINCIPLES
 - When asked to take an action, use the tool — don't just describe it. Chain tools for multi-step goals; do a single step when only one is asked.
 - After any state change, confirm what you did and the result. Never claim success if a tool returned an error.
-- WEB SEARCH: you have a live web-search tool, tavily_web_search. You MUST call it (do NOT answer from memory) whenever the question involves anything that could have changed since your training or is external to the app: company research, a hiring manager's or recruiter's background, comp/market benchmarks, recent news, "latest/current/today/this week," funding, product launches, or a specific person/company/market. When in doubt, search. After it returns, cite the source URLs. (This is separate from the pipeline tools above — use list_opportunities etc. for the user's own jobs, and tavily_web_search for the outside world.)
+- WEB SEARCH: Your knowledge cutoff is June 2023. You have NO reliable knowledge of events, people's current roles or teams, prices, news, funding rounds, or any fact that could have changed after June 2023. For ANYTHING that could have changed since then you MUST call tavily_web_search and answer ONLY from its results with cited source URLs. If the search fails or returns nothing, say you couldn't retrieve current data — never answer such questions from memory. This is separate from the pipeline tools above — use list_opportunities etc. for the user's own jobs, and tavily_web_search for the outside world.
 - Keep replies focused and skimmable.`
 
 interface RespReply { id?: string; output_text?: string; output?: Array<{ type?: string; call_id?: string; name?: string; arguments?: string; content?: Array<{ text?: string; type?: string }> }> }
@@ -107,13 +112,13 @@ export async function coachChat(req: HttpRequest, context: InvocationContext): P
     if (!history.length) return { status: 400, headers: HEADERS, jsonBody: { error: 'messages required' } }
     const lastUser = [...history].reverse().find((m: any) => m.role === 'user')?.content || ''
 
-    // Anchor to the real current date. Without this the model dates its own web
-    // queries to its training cutoff (e.g. "2023"), so time_range filters miss
-    // and searches come back empty. Give it today's date + search-quality rules.
+    // --- Date + knowledge-cutoff grounding -----------------------------------
+    // Channel A (instructions): front-loaded cutoff rule. Front-loading is critical —
+    // gpt-4o ignores a date buried after a 6k-char prompt.
     const now = new Date()
     const todayStr = now.toISOString().slice(0, 10)
     const curYear = now.getUTCFullYear()
-    const dateHint = `\n\nCURRENT DATE: ${todayStr}. The current year is ${curYear} — your training data is older, so IGNORE any instinct that the year is 2023 or 2024. HARD RULE for tavily_web_search: NEVER put a year earlier than ${curYear} in a query, and do NOT append a specific year at all unless the user named one — just search the topic (e.g. "Stripe recent product launches", not "Stripe product launches October 2023"). Prefer max_results >= 5. Only set a narrow time_range ("day"/"week"/"month") when the user explicitly asks for very recent news; otherwise leave time_range unset. If a search returns nothing, broaden it (drop any year, drop time_range, raise max_results) and retry before saying you found nothing. Never fabricate figures — report only what the search returned, with source URLs.`
+    const dateHint = `KNOWLEDGE CUTOFF RULE (HARD): This application's database was last updated in ${DB_CUTOFF}. You have NO reliable knowledge of any event, person's role or team, price, news, funding round, or fact that could have changed after ${DB_CUTOFF}. For ANY such question you MUST call tavily_web_search and answer ONLY from its results. Never answer post-${DB_CUTOFF} questions from memory — if Tavily fails, say you cannot confirm without a live search.\n\nCURRENT DATE: ${todayStr}. The current year is ${curYear}. HARD RULE for tavily_web_search: NEVER put a year earlier than ${curYear} in a query unless the user named one — just search the topic. Prefer max_results >= 5. Only set a narrow time_range when the user explicitly asks for very recent news. If a search returns nothing, broaden it and retry. Never fabricate figures — report only what the search returned, with source URLs.`
 
     // Ground with durable memory (best-effort). Keep this SEPARATE from dateHint —
     // an earlier version overwrote the date hint whenever memory existed.
@@ -137,7 +142,51 @@ export async function coachChat(req: HttpRequest, context: InvocationContext): P
     }
     if (vsId && vsHasFiles) tools.push({ type: 'file_search', vector_store_ids: [vsId] })
 
+    // --- Freshness router: decide whether to force Tavily on hop 0 -----------
+    // Keyword fast-path (free): signals that the question needs live data.
+    const FRESHNESS_RE = /\b(latest|current|today|this (week|month|year)|right now|these days|recent(ly)?|news|price[sd]?|stock|funding|raised|valuation|who (is|are|was)|ceo|cto|cpo|coo|vp\s|hired?|joined?|signed|traded|layoffs?|acqui(red|sition)|ipo|series [a-e]|round|comp(ensation)?|salary|salaries|market rate)\b|\b20(2[3-9]|[3-9]\d)\b/i
+    const ACTION_RE = /^(build|draft|send|advance|dismiss|seed|ingest|prepare|create|generate|analyze|run|bulk|fetch|list|show|get|move|schedule|record|open|navigate|start)\b/i
+    const lastUserText = String(lastUser)
+    const isQuestion = lastUserText.includes('?') || /^(what|who|where|when|how|why|is|are|was|were|did|do|does|has|have|can|could|would|tell me|show me)\b/i.test(lastUserText.trim())
+    const isAction = ACTION_RE.test(lastUserText.trim()) && !lastUserText.includes('?')
+
+    let needsLiveSearch = false
+    if (SEARCH_MODE !== 'auto' && !isAction) {
+      if (FRESHNESS_RE.test(lastUserText)) {
+        needsLiveSearch = true
+      } else if (isQuestion && SEARCH_MODE === 'router') {
+        // Fallback classifier: cheap gpt-4o-mini call for questions with no obvious keyword.
+        try {
+          const classRes = await fetch(OPENAI_URL, {
+            method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
+            body: JSON.stringify({
+              model: 'gpt-4o-mini',
+              instructions: 'You are a routing classifier. Reply with exactly "yes" or "no" — nothing else.',
+              input: [{ role: 'user', content: `Does answering this question require live or current web information that an AI cannot reliably know from training data cut off in June 2023? Question: "${lastUserText.slice(0, 300)}"` }],
+              max_output_tokens: 5,
+            }),
+          })
+          if (classRes.ok) {
+            const cj = await classRes.json() as RespReply
+            const ans = (extractText(cj) || '').toLowerCase().trim()
+            needsLiveSearch = ans.startsWith('yes')
+          }
+        } catch { /* classifier optional — no forcing if it fails */ }
+      }
+      if (SEARCH_MODE === 'aggressive' && isQuestion) needsLiveSearch = true
+    }
+    const forceSearch = needsLiveSearch
+
     const runningInput: unknown[] = history.map((m: any) => ({ role: m.role === 'assistant' ? 'assistant' : 'user', content: String(m.content || '') }))
+
+    // Channel B: prepend a system-role message into the conversation channel so
+    // the June 2023 cutoff rule is visible in the message stream on every hop,
+    // not only in instructions. This is the channel that was previously missing it.
+    runningInput.unshift({
+      role: 'system',
+      content: `HARD RULE: Your knowledge cutoff is ${DB_CUTOFF}. Any question about events, roles, prices, news, teams, or facts that may have changed after ${DB_CUTOFF} MUST be answered via tavily_web_search only — never from memory. Today is ${todayStr}.`,
+    })
+
     let previousResponseId: string | undefined
     const toolTrace: Array<{ name: string; arguments: any }> = []
     const maxHops = 8
@@ -146,12 +195,13 @@ export async function coachChat(req: HttpRequest, context: InvocationContext): P
     for (let hop = 0; hop <= maxHops; hop++) {
       const reqBody: Record<string, unknown> = {
         model: cfg.model,
-        // Front-load the date: gpt-4o ignores a date buried after a 6k-char prompt
-        // and keeps narrating "2023". Putting it FIRST fixes the model's date belief.
         instructions: dateHint.trim() + '\n\n' + cfg.systemPrompt + memHint,
         input: runningInput,
         tools,
         ...(previousResponseId ? { previous_response_id: previousResponseId } : {}),
+        // Force Tavily on hop 0 when the router says live data is needed.
+        // Subsequent hops stay auto so the model synthesizes from the results.
+        ...(hop === 0 && forceSearch ? { tool_choice: { type: 'function', name: 'tavily_web_search' } } : {}),
       }
       const res = await fetch(OPENAI_URL, {
         method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
