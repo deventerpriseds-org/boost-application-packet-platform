@@ -12,10 +12,6 @@ const HEADERS = {
 const OPENAI_URL = 'https://api.openai.com/v1/responses'
 const DEMO_EMAIL = 'demo@executive-engine.local'
 const MODEL = process.env.COACH_MODEL || 'gpt-4o'
-// router = force Tavily only when the freshness router says live info is needed (default)
-// aggressive = force Tavily on any non-action question
-// auto = no forcing (instant rollback — flip via Function App app setting, no redeploy)
-const SEARCH_MODE = process.env.COACH_SEARCH_MODE || 'router'
 const DB_CUTOFF = 'June 2023'
 
 const SYSTEM = `You are the Executive Engine Coach — the AI operator AND resident architect of an executive job-search platform ("Executive Engine"). You are not a generic assistant: you know this system's architecture intimately and you can both operate it and help extend it.
@@ -142,41 +138,6 @@ export async function coachChat(req: HttpRequest, context: InvocationContext): P
     }
     if (vsId && vsHasFiles) tools.push({ type: 'file_search', vector_store_ids: [vsId] })
 
-    // --- Freshness router: decide whether to force Tavily on hop 0 -----------
-    // Keyword fast-path (free): signals that the question needs live data.
-    const FRESHNESS_RE = /\b(latest|current|today|this (week|month|year)|right now|these days|recent(ly)?|news|price[sd]?|stock|funding|raised|valuation|who (is|are|was)|ceo|cto|cpo|coo|vp\s|hired?|joined?|signed|traded|layoffs?|acqui(red|sition)|ipo|series [a-e]|round|comp(ensation)?|salary|salaries|market rate)\b|\b20(2[3-9]|[3-9]\d)\b/i
-    const ACTION_RE = /^(build|draft|send|advance|dismiss|seed|ingest|prepare|create|generate|analyze|run|bulk|fetch|list|show|get|move|schedule|record|open|navigate|start)\b/i
-    const lastUserText = String(lastUser)
-    const isQuestion = lastUserText.includes('?') || /^(what|who|where|when|how|why|is|are|was|were|did|do|does|has|have|can|could|would|tell me|show me)\b/i.test(lastUserText.trim())
-    const isAction = ACTION_RE.test(lastUserText.trim()) && !lastUserText.includes('?')
-
-    let needsLiveSearch = false
-    if (SEARCH_MODE !== 'auto' && !isAction) {
-      if (FRESHNESS_RE.test(lastUserText)) {
-        needsLiveSearch = true
-      } else if (isQuestion && SEARCH_MODE === 'router') {
-        // Fallback classifier: cheap gpt-4o-mini call for questions with no obvious keyword.
-        try {
-          const classRes = await fetch(OPENAI_URL, {
-            method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
-            body: JSON.stringify({
-              model: 'gpt-4o-mini',
-              instructions: 'You are a routing classifier. Reply with exactly "yes" or "no" — nothing else.',
-              input: [{ role: 'user', content: `Does answering this question require live or current web information that an AI cannot reliably know from training data cut off in June 2023? Question: "${lastUserText.slice(0, 300)}"` }],
-              max_output_tokens: 5,
-            }),
-          })
-          if (classRes.ok) {
-            const cj = await classRes.json() as RespReply
-            const ans = (extractText(cj) || '').toLowerCase().trim()
-            needsLiveSearch = ans.startsWith('yes')
-          }
-        } catch { /* classifier optional — no forcing if it fails */ }
-      }
-      if (SEARCH_MODE === 'aggressive' && isQuestion) needsLiveSearch = true
-    }
-    const forceSearch = needsLiveSearch
-
     const runningInput: unknown[] = history.map((m: any) => ({ role: m.role === 'assistant' ? 'assistant' : 'user', content: String(m.content || '') }))
 
     // Channel B: prepend a system-role message into the conversation channel so
@@ -199,9 +160,6 @@ export async function coachChat(req: HttpRequest, context: InvocationContext): P
         input: runningInput,
         tools,
         ...(previousResponseId ? { previous_response_id: previousResponseId } : {}),
-        // Force Tavily on hop 0 when the router says live data is needed.
-        // Subsequent hops stay auto so the model synthesizes from the results.
-        ...(hop === 0 && forceSearch ? { tool_choice: { type: 'function', name: 'tavily_web_search' } } : {}),
       }
       const res = await fetch(OPENAI_URL, {
         method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
