@@ -137,9 +137,7 @@ export async function convaiAgentPoint(req: HttpRequest, _context: InvocationCon
       headers: { 'xi-api-key': elKey, 'Content-Type': 'application/json' },
       body: JSON.stringify({
         conversation_config: {
-          agent: {
-            prompt: { llm: customLlmUrl },
-          },
+          custom_llm: { url: customLlmUrl },
         },
       }),
     })
