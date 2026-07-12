@@ -49,8 +49,6 @@ jobs:
             --settings \
               "AZURE_STORAGE_CONNECTION_STRING=${{ secrets.AZURE_STORAGE_CONNECTION_STRING }}" \
               "OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}" \
-              "ANTHROPIC_API_KEY=${{ secrets.ANTHROPIC_API_KEY }}" \
-              "CLAUDE_API_KEY=${{ secrets.ANTHROPIC_API_KEY }}" \
               "MICROSOFT_CLIENT_ID=${{ secrets.AZURE_CLIENT_ID }}" \
               "MICROSOFT_CLIENT_SECRET=${{ secrets.AZURE_CLIENT_SECRET }}" \
               "MICROSOFT_TENANT_ID=ee633423-c321-413c-a191-ace8b07e4196" \
