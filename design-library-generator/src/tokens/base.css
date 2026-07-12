@@ -1,0 +1,89 @@
+/* Design Library Generator — base tokens (light & dark) */
+:root, :root[data-theme="light"] {
+  --dlg-brand: #1B4F5C;
+  --dlg-brand-light: #5BC4D8;
+  --dlg-brand-soft: rgba(27,79,92,0.08);
+
+  --dlg-bg: #F8F9FA;
+  --dlg-surface: #FFFFFF;
+  --dlg-surface-raised: #FFFFFF;
+  --dlg-border: #E2E8F0;
+  --dlg-border-soft: rgba(0,0,0,0.06);
+
+  --dlg-text: #0F172A;
+  --dlg-text-2: #475569;
+  --dlg-text-3: #94A3B8;
+  --dlg-text-on-brand: #FFFFFF;
+
+  --dlg-success: #16A34A;
+  --dlg-success-soft: #DCFCE7;
+  --dlg-warning: #D97706;
+  --dlg-warning-soft: #FEF9C3;
+  --dlg-error: #DC2626;
+  --dlg-error-soft: #FEE2E2;
+  --dlg-info: #2563EB;
+  --dlg-info-soft: #DBEAFE;
+
+  --dlg-radius-sm: 6px;
+  --dlg-radius-md: 8px;
+  --dlg-radius-lg: 12px;
+  --dlg-radius-full: 9999px;
+
+  --dlg-shadow-sm: 0 1px 3px rgba(0,0,0,0.08);
+  --dlg-shadow-md: 0 4px 12px rgba(0,0,0,0.08);
+  --dlg-shadow-lg: 0 8px 24px rgba(0,0,0,0.1);
+
+  --dlg-sidebar: 220px;
+  --dlg-topbar: 54px;
+}
+
+:root[data-theme="dark"] {
+  --dlg-brand: #5BC4D8;
+  --dlg-brand-light: #93D8E8;
+  --dlg-brand-soft: rgba(91,196,216,0.12);
+
+  --dlg-bg: #0F172A;
+  --dlg-surface: #1E293B;
+  --dlg-surface-raised: #293548;
+  --dlg-border: #334155;
+  --dlg-border-soft: rgba(255,255,255,0.06);
+
+  --dlg-text: #F1F5F9;
+  --dlg-text-2: #94A3B8;
+  --dlg-text-3: #475569;
+  --dlg-text-on-brand: #0F172A;
+
+  --dlg-success: #4ADE80;
+  --dlg-success-soft: #052E16;
+  --dlg-warning: #FBBF24;
+  --dlg-warning-soft: #1C1400;
+  --dlg-error: #F87171;
+  --dlg-error-soft: #1F0000;
+  --dlg-info: #60A5FA;
+  --dlg-info-soft: #0D1B3E;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --dlg-brand: #5BC4D8;
+    --dlg-brand-light: #93D8E8;
+    --dlg-brand-soft: rgba(91,196,216,0.12);
+    --dlg-bg: #0F172A;
+    --dlg-surface: #1E293B;
+    --dlg-surface-raised: #293548;
+    --dlg-border: #334155;
+    --dlg-border-soft: rgba(255,255,255,0.06);
+    --dlg-text: #F1F5F9;
+    --dlg-text-2: #94A3B8;
+    --dlg-text-3: #475569;
+    --dlg-text-on-brand: #0F172A;
+    --dlg-success: #4ADE80;
+    --dlg-success-soft: #052E16;
+    --dlg-warning: #FBBF24;
+    --dlg-warning-soft: #1C1400;
+    --dlg-error: #F87171;
+    --dlg-error-soft: #1F0000;
+    --dlg-info: #60A5FA;
+    --dlg-info-soft: #0D1B3E;
+  }
+}
