@@ -7,7 +7,7 @@ import { Loading, ErrorBox, Empty, roleFamily } from './Today.jsx'
 const URGENCIES = ['All', 'Hot', 'Warm', 'Cool']
 const FRESH_STAGES = ['discovered', 'saved', 'enriched']
 const ACTIVE_STAGES = ['applied', 'outreach', 'engaged', 'screen', 'r1', 'panel', 'final', 'offer']
-const CUTOFF_24H = () => Date.now() - 24 * 60 * 60 * 1000
+const CUTOFF_TODAY = () => { const d = new Date(); d.setHours(0, 0, 0, 0); return d.getTime() }
 
 const FILTER_LABELS = { new: 'New today', backlog: 'Backlog', active: 'Active', hot: 'Hot' }
 const filterLabel = (f) => {
@@ -45,10 +45,10 @@ export default function Opportunities({ opps, filter }) {
     let r = opportunities
     // Named filter from Today KPI — takes precedence over manual stage/urgency dropdowns
     if (activeFilter === 'new') {
-      const cutoff = CUTOFF_24H()
-      r = r.filter((o) => FRESH_STAGES.includes(o.stage) && o.createdAt && new Date(o.createdAt).getTime() > cutoff)
+      const cutoff = CUTOFF_TODAY()
+      r = r.filter((o) => FRESH_STAGES.includes(o.stage) && o.createdAt && new Date(o.createdAt).getTime() >= cutoff)
     } else if (activeFilter === 'backlog') {
-      const cutoff = CUTOFF_24H()
+      const cutoff = CUTOFF_TODAY()
       r = r.filter((o) => FRESH_STAGES.includes(o.stage) && (!o.createdAt || new Date(o.createdAt).getTime() <= cutoff))
     } else if (activeFilter === 'active') {
       r = r.filter((o) => ACTIVE_STAGES.includes(o.stage))
@@ -56,8 +56,8 @@ export default function Opportunities({ opps, filter }) {
       r = r.filter((o) => o.urgency === 'Hot')
     } else if (activeFilter?.startsWith('rolenew:')) {
       const fam = activeFilter.slice(8)
-      const cutoff = CUTOFF_24H()
-      r = r.filter((o) => roleFamily(o) === fam && FRESH_STAGES.includes(o.stage) && o.createdAt && new Date(o.createdAt).getTime() > cutoff)
+      const cutoff = CUTOFF_TODAY()
+      r = r.filter((o) => roleFamily(o) === fam && FRESH_STAGES.includes(o.stage) && o.createdAt && new Date(o.createdAt).getTime() >= cutoff)
     } else if (activeFilter?.startsWith('role:')) {
       const fam = activeFilter.slice(5)
       r = r.filter((o) => roleFamily(o) === fam)
