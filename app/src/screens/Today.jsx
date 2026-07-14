@@ -125,9 +125,9 @@ export default function Today({ opps }) {
   const { loading, error, opportunities } = opps
 
   const { newToday, backlog, active, hot, avgMatch } = useMemo(() => {
-    // Use midnight today (calendar day) so the count is stable, not a sliding 24h window.
-    const today = new Date(); today.setHours(0, 0, 0, 0)
-    const cutoff = today.getTime()
+    // Cutoff = start of yesterday so overnight ingest is captured without sliding.
+    const yesterday = new Date(); yesterday.setDate(yesterday.getDate() - 1); yesterday.setHours(0, 0, 0, 0)
+    const cutoff = yesterday.getTime()
     const fresh = opportunities.filter((o) => FRESH_STAGES.includes(o.stage))
     const newToday = fresh.filter((o) => o.createdAt && new Date(o.createdAt).getTime() >= cutoff)
     const backlog = fresh.filter((o) => !o.createdAt || new Date(o.createdAt).getTime() < cutoff)

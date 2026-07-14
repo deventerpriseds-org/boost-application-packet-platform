@@ -7,7 +7,7 @@ import { Loading, ErrorBox, Empty, roleFamily } from './Today.jsx'
 const URGENCIES = ['All', 'Hot', 'Warm', 'Cool']
 const FRESH_STAGES = ['discovered', 'saved', 'enriched']
 const ACTIVE_STAGES = ['applied', 'outreach', 'engaged', 'screen', 'r1', 'panel', 'final', 'offer']
-const CUTOFF_TODAY = () => { const d = new Date(); d.setHours(0, 0, 0, 0); return d.getTime() }
+const CUTOFF_TODAY = () => { const d = new Date(); d.setDate(d.getDate() - 1); d.setHours(0, 0, 0, 0); return d.getTime() }
 
 const FILTER_LABELS = { new: 'New today', backlog: 'Backlog', active: 'Active', hot: 'Hot' }
 const filterLabel = (f) => {
