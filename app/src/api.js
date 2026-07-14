@@ -139,6 +139,7 @@ export const api = {
   createPersona: (data) => post(`/app/personas`, data),
   updatePersona: (key, patch) => patch_(`/app/personas/${key}`, patch),
   deletePersona: (key) => del(`/app/personas/${key}`),
+  tagAllRoles: () => post(`/app/personas/tag-all`, {}),
   listLibrary: (kind) => get(`/app/library${kind ? `?kind=${encodeURIComponent(kind)}` : ''}`),
 }
 

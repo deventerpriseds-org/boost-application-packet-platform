@@ -6,6 +6,7 @@
 - **Subscription**: 09594120-1b35-4e21-84c6-451ac27175a3
 - **Tenant**: ee633423-c321-413c-a191-ace8b07e4196 (primary, where subscription lives)
 - **Region**: eastus
+- **Production owner email**: von.ellis@enterpriseds.io — use as `?owner=` query param when calling app routes programmatically via api-test.yml
 - **Function App**: job-platform-api (job-platform-api.azurewebsites.net) — the API for BOTH apps below
 - **PRODUCTION APP (Executive Engine)**: Static Web App `executive-engine-web` → **https://purple-ground-0f377120f.7.azurestaticapps.net/**. This is the real product we build (`executive-engine` frontend, vendored into `app/`, deployed by `.github/workflows/executive-engine-deploy.yml`). When someone says "the app", this is it.
 - **Legacy dev console**: Static Web App `job-platform-web` (happy-river-0935bfe0f.7.azurestaticapps.net) — the old MT-XX test harness (`web/`), NOT the product.
@@ -106,20 +107,19 @@ mcp__github__actions_run_trigger(
   repo="boost-application-packet-platform",
   workflow_id="api-test.yml",
   ref="main",
-  inputs={ "method": "POST", "path": "/api/opp/<uuid>/enrich" }
+  inputs={ "method": "POST", "path": "/api/app/opportunity/<uuid>/enrich" }
 )
 
 # Advance stage:
 mcp__github__actions_run_trigger(
   method="run_workflow", ...,
-  inputs={ "method": "PATCH", "path": "/api/opp/<uuid>", "body": '{"stage":"saved"}' }
+  inputs={ "method": "PATCH", "path": "/api/app/opportunity/<uuid>", "body": '{"stage":"saved"}' }
 )
 ```
 
-**IMPORTANT:** The service principal token scope must match what `resolveOwner()` expects.
-If the API rejects with 401/403, the token audience may not match — check `/api/health`
-first to confirm the Function App is up, then `/api/config-status` for auth config.
-The workflow is on `main` (must be on default branch to be workflow_dispatch-able).
+**Token scope:** `{client_id}/.default` (NOT `api://{client_id}/.default` — that returns 400).
+**Route prefix:** all app routes are `/api/app/...` (not `/api/opp/...`).
+**The workflow is on `main`** (must be on default branch to be workflow_dispatch-able).
 
 ### Check live API health
 ```
@@ -198,21 +198,40 @@ Checklist before committing a conceptual fix:
 
 ## Git workflow (branch discipline)
 
-Branch discipline exists to **avoid conflicts and lost work by staying synced** —
-NOT to treat `main` as untouchable. Do the sync yourself; don't hand it to the user.
+**HARD RULE: NEVER commit directly to `main`.** All development happens on the
+session's designated feature branch (`claude/git-push-main-1zcqw5` unless told
+otherwise). `main` only ever moves forward via fast-forward from the feature branch
+— never by a direct commit or push of new work.
 
-- **Develop** on the session's feature branch and push there.
-- **Before pushing new work or opening/using a PR**, fetch `main` and check
-  whether it has diverged (`git log main..origin/main`). If it's ahead, **sync
-  first** (merge `origin/main` into the feature branch, resolve conflicts
-  deliberately) so you don't clobber others' commits or hit surprise conflicts
-  later. Real example: `main` once carried 7 dev-console commits the feature
-  branch didn't have — syncing preserved them.
-- **Merging to `main` is part of the job**, not something to punt to the user.
-  When work needs to land on `main` (e.g. a new `workflow_dispatch` workflow only
-  becomes runnable once it's on the default branch), merge it, resolve conflicts,
-  push, and then **fast-forward the feature branch back to `main`** so the two
-  don't re-diverge.
+> **Why this is safe:** `executive-engine-deploy.yml` triggers on both
+> `main` and `claude/git-push-main-1zcqw5`, so the live app deploys from either
+> branch. You see changes on the live app immediately without `main` needing to move.
+
+### One-branch workflow (follow every session):
+
+1. **Before any work**, sync the feature branch with `main`:
+   ```bash
+   git fetch origin
+   git checkout claude/git-push-main-1zcqw5
+   git merge origin/main   # bring in any main commits first
+   ```
+2. **Develop** on the feature branch only. Commit and push there.
+3. **Before each push**, fetch again and merge `origin/main` to stay current:
+   ```bash
+   git fetch origin && git merge origin/main
+   git push -u origin claude/git-push-main-1zcqw5
+   ```
+4. **At the end of every session**, fast-forward `main` to match the feature branch
+   so `main` stays up to date. This is routine — do it every session, not just at
+   milestones:
+   ```bash
+   git checkout main && git merge --ff-only claude/git-push-main-1zcqw5
+   git push origin main
+   git checkout claude/git-push-main-1zcqw5
+   ```
+   If `--ff-only` fails (branches have diverged), resolve on the feature branch
+   first (merge `origin/main` into it, fix conflicts), then retry the fast-forward.
+
 - Resolve conflicts by understanding both sides. For the legacy `web/` console
   (not the product), preferring one side wholesale is acceptable; for `app/`,
   `api/`, workflows, and docs, merge the actual intent.

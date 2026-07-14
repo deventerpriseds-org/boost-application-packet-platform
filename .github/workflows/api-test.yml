@@ -38,12 +38,11 @@ jobs:
           path = os.environ['API_PATH']
           body = os.environ.get('API_BODY', '')
 
-          # Acquire token via client_credentials
           token_url = f"https://login.microsoftonline.com/{tenant}/oauth2/v2.0/token"
           token_data = urllib.parse.urlencode({
             'client_id': client_id,
             'client_secret': client_secret,
-            'scope': f'api://{client_id}/.default',
+            'scope': f'{client_id}/.default',
             'grant_type': 'client_credentials',
           }).encode()
           req = urllib.request.Request(token_url, data=token_data, method='POST')
@@ -51,11 +50,10 @@ jobs:
             token_resp = json.loads(resp.read())
           token = token_resp.get('access_token')
           if not token:
-            print('ERROR: failed to get token:', json.dumps(token_resp, indent=2))
+            print('ERROR: token fetch failed:', json.dumps(token_resp, indent=2))
             exit(1)
-          print(f'Token acquired (expires in {token_resp.get("expires_in")}s)')
+          print(f'Token acquired (expires_in={token_resp.get("expires_in")}s)')
 
-          # Call the API
           base = 'https://job-platform-api.azurewebsites.net'
           url = base + path
           headers = {'Authorization': f'Bearer {token}', 'Content-Type': 'application/json'}
@@ -70,9 +68,9 @@ jobs:
             try:
               result = json.loads(e.read())
             except Exception:
-              result = {'error': str(e)}
+              result = {'http_error': str(e)}
 
-          print(f'\nHTTP {status} {method} {path}')
+          print(f'\nHTTP {status} {method} {url}')
           print(json.dumps(result, indent=2))
           if status >= 400:
             exit(1)

@@ -196,10 +196,64 @@ export async function personasDelete(req: HttpRequest, _context: InvocationConte
   } finally { try { await client?.end() } catch {} }
 }
 
+// POST /api/app/personas/tag-all — re-classify all untagged opportunities against current personas
+export async function personasTagAll(req: HttpRequest, _context: InvocationContext): Promise<HttpResponseInit> {
+  if (req.method === 'OPTIONS') return { status: 204, headers: HEADERS }
+  const owner = resolveOwner(req).owner
+  const openaiKey = process.env.OPENAI_API_KEY
+  if (!openaiKey) return { status: 200, headers: HEADERS, jsonBody: { error: 'OPENAI_API_KEY not set' } }
+  let client
+  try {
+    client = await getPgClient()
+    const personas = (await client.query(
+      `select key, name, master_role from persona where owner_email = $1 order by key`, [owner]
+    )).rows
+    if (!personas.length) return { status: 200, headers: HEADERS, jsonBody: { tagged: 0, skipped: 0, message: 'No roles configured yet.' } }
+    const opps = (await client.query(
+      `select id, role, company from opportunity where owner_email=$1 and not dismissed and (roles_for = '{}' or roles_for is null) limit 200`,
+      [owner]
+    )).rows
+    if (!opps.length) return { status: 200, headers: HEADERS, jsonBody: { tagged: 0, skipped: 0, message: 'All opportunities are already tagged.' } }
+    await client.end(); client = undefined
+
+    const roleList = personas.map((p: any) => `${p.key}: ${p.name || p.master_role}`).join(', ')
+    let tagged = 0, failed = 0
+    // Process in batches of 10 concurrently
+    for (let i = 0; i < opps.length; i += 10) {
+      const batch = opps.slice(i, i + 10)
+      await Promise.all(batch.map(async (opp: any) => {
+        try {
+          const prompt = `You are a talent classifier. Given a job title and company, identify which of the user's target roles it matches (zero or more). Return ONLY JSON: { "matched": ["KEY1","KEY2"], "fit": "Strong"|"Possible"|"Stretch", "urgency": "Hot"|"Warm"|"Cool", "why": "one sentence" }.\nJob: ${opp.role} at ${opp.company}\nTarget roles: ${roleList}`
+          const res = await fetch('https://api.openai.com/v1/chat/completions', {
+            method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${openaiKey}` },
+            body: JSON.stringify({ model: 'gpt-4o-mini', messages: [{ role: 'user', content: prompt }], max_tokens: 200, response_format: { type: 'json_object' } })
+          })
+          if (!res.ok) { failed++; return }
+          const j = (await res.json()) as any
+          const parsed = JSON.parse(j?.choices?.[0]?.message?.content || '{}')
+          const matched: string[] = Array.isArray(parsed.matched) ? parsed.matched.filter((k: string) => personas.some((p: any) => p.key === k)) : []
+          const c2 = await getPgClient()
+          try {
+            await c2.query(
+              `update opportunity set roles_for=$2, fit=$3, urgency=$4, why_surfaced=coalesce(nullif(why_surfaced,''), $5) where id=$1`,
+              [opp.id, matched, parsed.fit || null, parsed.urgency || 'Warm', parsed.why || null]
+            )
+            tagged++
+          } finally { await c2.end() }
+        } catch { failed++ }
+      }))
+    }
+    return { status: 200, headers: HEADERS, jsonBody: { tagged, failed, total: opps.length, message: `Tagged ${tagged} of ${opps.length} opportunities.` } }
+  } catch (err) {
+    return { status: 200, headers: HEADERS, jsonBody: { error: String(err) } }
+  } finally { try { await client?.end() } catch {} }
+}
+
 app.http('answersVision', { methods: ['POST', 'OPTIONS'], authLevel: 'anonymous', route: 'app/opportunity/{id}/answers/vision', handler: answersVision })
 app.http('assetsList', { methods: ['GET', 'OPTIONS'], authLevel: 'anonymous', route: 'app/assets', handler: assetsList })
 app.http('personasList', { methods: ['GET', 'OPTIONS'], authLevel: 'anonymous', route: 'app/personas', handler: personasList })
 app.http('personasCreate', { methods: ['POST', 'OPTIONS'], authLevel: 'anonymous', route: 'app/personas', handler: personasCreate })
 app.http('personasUpdate', { methods: ['PATCH', 'OPTIONS'], authLevel: 'anonymous', route: 'app/personas/{key}', handler: personasUpdate })
 app.http('personasDelete', { methods: ['DELETE', 'OPTIONS'], authLevel: 'anonymous', route: 'app/personas/{key}', handler: personasDelete })
+app.http('personasTagAll', { methods: ['POST', 'OPTIONS'], authLevel: 'anonymous', route: 'app/personas/tag-all', handler: personasTagAll })
 app.http('libraryList', { methods: ['GET', 'OPTIONS'], authLevel: 'anonymous', route: 'app/library', handler: libraryList })
