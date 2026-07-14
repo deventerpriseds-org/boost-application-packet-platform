@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react'
 import { api } from '../api.js'
-import { go } from '../state.jsx'
+import { go, useApp } from '../state.jsx'
 import { Pill } from '../shell.jsx'
 
 // Intake — live monitoring of what's arriving in the watched mailbox and how
@@ -42,6 +42,14 @@ function Card({ children, style }) {
 }
 
 export default function Intake() {
+  const { isDemo } = useApp()
+  if (isDemo) return (
+    <Card>
+      <b style={{ fontSize: 15 }}>Intake monitor</b>
+      <div className="px-small" style={{ marginTop: 8 }}>The intake monitor watches your Microsoft 365 mailbox for job alerts and automatically adds them to your pipeline. Sign in to activate it.</div>
+      <button className="px-btn px-btn-accent" style={{ marginTop: 12 }} onClick={() => go('/settings/account')}>Connect Microsoft account</button>
+    </Card>
+  )
   const [sub, setSub] = useState({ loading: true, watches: [] })
   const [feed, setFeed] = useState({ loading: false, scanned: null, trace: [], error: null, at: null })
   const [minutes, setMinutes] = useState(120)

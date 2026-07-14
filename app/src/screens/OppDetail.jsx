@@ -228,7 +228,7 @@ function Overview({ o, toast, id, reload }) {
             <StatusRow k="Stage" v={<Pill tone="accent">{o.stage}</Pill>} />
             <StatusRow k="Fit" v={o.fit ? <Pill tone="accent">{o.fit}</Pill> : '—'} />
             <StatusRow k="Urgency" v={o.urgency ? <UrgencyPill urgency={o.urgency} /> : '—'} />
-            <StatusRow k="Match" v={<b>{o.match}%</b>} />
+            <StatusRow k="Match" v={<b>{o.match != null ? `${o.match}%` : '—'}</b>} />
           </div>
         </Card>
         <Card title="Compensation target">
@@ -260,7 +260,12 @@ function StatusRow({ k, v }) {
 }
 
 function Contacts({ contacts, oppId, toast }) {
-  if (!contacts.length) return <div className="px-box" style={{ padding: 20, textAlign: 'center', color: 'var(--proto-ink2)' }}>No contacts enriched for this opportunity yet.</div>
+  if (!contacts.length) return (
+    <div className="px-box" style={{ padding: 20, textAlign: 'center', color: 'var(--proto-ink2)' }}>
+      No contacts enriched yet.
+      <div style={{ marginTop: 10 }}><button className="px-btn px-btn-accent" onClick={async () => { try { await api.enrichOpportunity(oppId); toast('Enrichment started') } catch { toast('Enrich failed') } }}>Enrich now</button></div>
+    </div>
+  )
   return (
     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 14 }}>
       {contacts.map((p, i) => (

@@ -32,7 +32,9 @@ export default function Packets() {
   if (!packets.length) {
     return (
       <Empty>
-        No packets yet. Open an opportunity and hit <b>Build packet</b> to start the production line.
+        No packets yet.{' '}
+        <span className="px-link" style={{ cursor: 'pointer' }} onClick={() => go('/opportunities')}>Open an opportunity</span>
+        {' '}and hit <b>Build packet</b> to start the production line.
       </Empty>
     )
   }
