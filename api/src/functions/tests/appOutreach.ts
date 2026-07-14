@@ -163,7 +163,7 @@ export async function cadenceSeed(req: HttpRequest, context: InvocationContext):
     if (existing === 0) {
       for (const c of CADENCE) {
         await client.query(
-          `insert into outreach_message (opp_id, channel, state, day_offset, scheduled_for) values ($1,$2,$3,$4, now() + ($4::text || ' days')::interval)`,
+          `insert into outreach_message (opp_id, channel, state, day_offset, scheduled_for) values ($1,$2,$3,$4, now() + (interval '1 day' * $4))`,
           [oppId, c.channel, c.state, c.d]
         )
       }
