@@ -119,6 +119,10 @@ The `lib` must include `"DOM"` for Azure SDK compatibility:
 "lib": ["ES2020", "DOM"]
 ```
 
+## Verify before reporting (strict rule)
+
+**Never tell the user something is fixed, done, or working until you have confirmed it with actual evidence** — a passing test, a DB query result, a successful log, a git log entry, or a live API response. Triggering a workflow and getting a 204 queued response is NOT confirmation — it means the job started. Read the job logs first, then report. If you cannot confirm (sandbox blocks the endpoint, logs not yet available, etc.), say "I cannot confirm this yet" and explain what would confirm it and how the user can check. Do not infer success from absence of errors.
+
 ## Session start checklist (run these before touching any code)
 
 1. `git log --oneline -10` — compare to what the context summary claims is done.
