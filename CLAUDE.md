@@ -91,6 +91,36 @@ mcp__github__actions_run_trigger(
 # Then poll mcp__github__actions_list for the run_id, then get_job_logs to read output.
 ```
 
+### Call live API endpoints (enrich, stage change, etc.)
+Use `.github/workflows/api-test.yml` — GitHub Actions CAN reach `azurewebsites.net`.
+The workflow acquires a service-principal Bearer token automatically from secrets,
+then calls any API path with any method and body. This is how to test enrichment,
+stage transitions, coach calls, or any other authenticated endpoint without needing
+the user to click in the browser.
+
+```
+# Enrich an opportunity:
+mcp__github__actions_run_trigger(
+  method="run_workflow",
+  owner="deventerpriseds-org",
+  repo="boost-application-packet-platform",
+  workflow_id="api-test.yml",
+  ref="main",
+  inputs={ "method": "POST", "path": "/api/opp/<uuid>/enrich" }
+)
+
+# Advance stage:
+mcp__github__actions_run_trigger(
+  method="run_workflow", ...,
+  inputs={ "method": "PATCH", "path": "/api/opp/<uuid>", "body": '{"stage":"saved"}' }
+)
+```
+
+**IMPORTANT:** The service principal token scope must match what `resolveOwner()` expects.
+If the API rejects with 401/403, the token audience may not match — check `/api/health`
+first to confirm the Function App is up, then `/api/config-status` for auth config.
+The workflow is on `main` (must be on default branch to be workflow_dispatch-able).
+
 ### Check live API health
 ```
 curl https://job-platform-api.azurewebsites.net/api/health
@@ -126,6 +156,20 @@ The Edit tool silently inserts Unicode smart quotes (U+2018/U+2019 curly apostro
 sed -i "s/\xe2\x80\x98/'/g; s/\xe2\x80\x99/'/g; s/\xe2\x80\x9c/\"/g; s/\xe2\x80\x9d/\"/g" <file>
 ```
 Then verify with `grep -P '[\x{2018}\x{2019}\x{201C}\x{201D}]' <file>` (should return nothing). Never skip this step — the build will fail silently at deploy time.
+
+## Fix all consumers, not just the one you found (strict rule)
+
+When fixing a shared concept (a constant, a calculation, a filter, a stage list),
+**grep for every place that concept is used before declaring the fix complete.**
+Example failure mode: fixing `FRESH_STAGES` in one `useMemo` but missing
+`InboxScrubHero` which filters the same stages internally — the KPI shows 51
+but the hero still shows 216.
+
+Checklist before committing a conceptual fix:
+1. `grep -rn <concept>` in both `app/src/` and `api/src/`
+2. Every component/function that touches the concept must be updated consistently
+3. If a child component re-derives what the parent already computed, pass the
+   pre-computed value down rather than letting each component diverge independently
 
 ## Verify before reporting (strict rule)
 

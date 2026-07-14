@@ -47,15 +47,14 @@ const ROLE_DOT = {
 
 // "Latest inbox scrub" hero — new roles found overnight, binned by role family,
 // with a swipe-review CTA. Ported from the design handoff (home.jsx).
-function InboxScrubHero({ opportunities, toast }) {
-  const fresh = opportunities.filter((o) => FRESH_STAGES.includes(o.stage))
+function InboxScrubHero({ newToday, backlog, toast }) {
   const bins = useMemo(() => {
     const map = {}
-    fresh.forEach((o) => { const f = roleFamily(o); map[f] = (map[f] || 0) + 1 })
+    newToday.forEach((o) => { const f = roleFamily(o); map[f] = (map[f] || 0) + 1 })
     return Object.entries(map).sort((a, b) => b[1] - a[1])
-  }, [opportunities])
-  const total = fresh.length
-  const companies = [...new Set(fresh.slice(0, 6).map((o) => o.company))]
+  }, [newToday])
+  const total = newToday.length
+  const companies = [...new Set(newToday.slice(0, 6).map((o) => o.company))]
 
   const [watch, setWatch] = useState(null)
   const [scanning, setScanning] = useState(false)
@@ -86,7 +85,7 @@ function InboxScrubHero({ opportunities, toast }) {
             <span className="px-small" style={{ textTransform: 'uppercase', letterSpacing: 1, color: 'var(--text-brand)' }}>Latest inbox scrub</span>
           </div>
           <div style={{ fontSize: 44, fontWeight: 700, lineHeight: 1, marginTop: 8, color: 'var(--text-brand)' }}>{total}</div>
-          <div className="px-small" style={{ marginTop: 2 }}>new roles found overnight</div>
+          <div className="px-small" style={{ marginTop: 2 }}>new today{backlog.length > 0 ? ` · ${backlog.length} backlog` : ''}</div>
         </div>
 
         {/* Middle: per-role breakdown */}
@@ -95,7 +94,7 @@ function InboxScrubHero({ opportunities, toast }) {
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '6px 20px' }}>
             {bins.length === 0 && <div className="px-small">Inbox is clear — no new roles overnight.</div>}
             {bins.map(([fam, n]) => (
-              <div key={fam} onClick={() => go('/opportunities')} style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', padding: '3px 0' }}>
+              <div key={fam} onClick={() => go('/opportunities?filter=new')} style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', padding: '3px 0' }}>
                 <span style={{ width: 9, height: 9, borderRadius: '50%', background: ROLE_DOT[fam] || 'var(--proto-ink3)', flexShrink: 0 }} />
                 <span style={{ fontSize: 13, fontWeight: 600, flex: 1 }}>{fam}</span>
                 <span className="px-pill">{n} new</span>
@@ -170,7 +169,7 @@ export default function Today({ opps }) {
       </div>
 
       {/* Latest inbox scrub — most immediate attention */}
-      <InboxScrubHero opportunities={opportunities} toast={toast} />
+      <InboxScrubHero newToday={newToday} backlog={backlog} toast={toast} />
 
       {/* KPI strip */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 12 }}>
