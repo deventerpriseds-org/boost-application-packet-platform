@@ -45,6 +45,8 @@ export default function Intake() {
   const [sub, setSub] = useState({ loading: true, watches: [] })
   const [feed, setFeed] = useState({ loading: false, scanned: null, trace: [], error: null, at: null })
   const [minutes, setMinutes] = useState(120)
+  const [clearing, setClearing] = useState(false)
+  const [clearResult, setClearResult] = useState(null)
 
   const loadSubs = useCallback(async () => {
     setSub((s) => ({ ...s, loading: true }))
@@ -62,6 +64,17 @@ export default function Intake() {
       setFeed({ loading: false, scanned: res.scanned ?? (res.trace || []).length, trace: res.trace || [], error: null, at: new Date().toISOString() })
     } catch (e) { setFeed((f) => ({ ...f, loading: false, error: String(e.message || e) })) }
   }, [minutes])
+
+  const clearReload = useCallback(async () => {
+    if (!window.confirm('This will delete all your current opportunities and re-pull the last 7 days from your mailbox. Continue?')) return
+    setClearing(true); setClearResult(null)
+    try {
+      const res = await api.mailClearReload({ days: 7 })
+      if (res.error) throw new Error(res.error)
+      setClearResult({ ok: true, msg: `Cleared ${res.cleared} opp${res.cleared === 1 ? '' : 's'}, re-ingested ${res.ingested?.inserted ?? 0} from ${res.scanned} messages.` })
+    } catch (e) { setClearResult({ ok: false, msg: String(e.message || e) }) }
+    finally { setClearing(false) }
+  }, [])
 
   useEffect(() => { loadSubs() }, [loadSubs])
 
@@ -93,10 +106,13 @@ export default function Intake() {
           <option value={720}>12 hours</option>
           <option value={1440}>24 hours</option>
           <option value={4320}>3 days</option>
+          <option value={10080}>7 days</option>
         </select>
         <button className="px-btn px-btn-accent" onClick={pull} disabled={feed.loading}>{feed.loading ? 'Scanning…' : '⇊ Pull now'}</button>
+        <button className="px-btn" onClick={clearReload} disabled={clearing} style={{ color: 'var(--proto-red)' }} title="Delete all opportunities and re-pull last 7 days">{clearing ? 'Clearing…' : '↺ Clear & reload 7d'}</button>
         {feed.at && <span className="px-small" style={{ color: 'var(--proto-ink2)' }}>scanned {feed.scanned} message{feed.scanned === 1 ? '' : 's'} · {timeAgo(feed.at)}</span>}
         {feed.error && <span className="px-small" style={{ color: 'var(--proto-red)' }}>{feed.error}</span>}
+        {clearResult && <span className="px-small" style={{ color: clearResult.ok ? 'var(--surface-success-default)' : 'var(--proto-red)' }}>{clearResult.msg}</span>}
       </Card>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
