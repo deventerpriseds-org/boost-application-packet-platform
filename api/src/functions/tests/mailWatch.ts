@@ -2,6 +2,7 @@ import { app, HttpRequest, HttpResponseInit, InvocationContext, Timer } from '@a
 import { getMicrosoftToken } from './googleAuth'
 import { getPgClient } from './pgClient'
 import { logUsage } from './usageMeter'
+import { resolveOwner } from './appSession'
 
 const HEADERS = {
   'Content-Type': 'application/json',
@@ -56,32 +57,42 @@ function rowToConfig(r: any): WatchConfig {
   }
 }
 
-// Load the live config, creating a default row on first use.
-async function loadConfig(): Promise<WatchConfig> {
+// Load the live config for a given owner, creating a default row on first use.
+// If no owner is provided (webhook path), loads the first enabled row in the table.
+async function loadConfig(owner?: string): Promise<WatchConfig> {
   let client
   try {
     client = await getPgClient()
     await ensureConfigTable(client)
-    const owner = DEFAULT_OWNER
-    let row = (await client.query('select * from mail_watch_config where owner_email = $1', [owner])).rows[0]
+    let row: any
+    if (owner) {
+      row = (await client.query('select * from mail_watch_config where owner_email = $1', [owner])).rows[0]
+      // Fall back to the legacy DEFAULT_OWNER row so existing config is not lost on first login.
+      if (!row) row = (await client.query('select * from mail_watch_config where owner_email = $1', [DEFAULT_OWNER])).rows[0]
+    } else {
+      // Webhook / no-auth path: use the first enabled config row.
+      row = (await client.query('select * from mail_watch_config where enabled = true order by updated_at desc limit 1')).rows[0]
+    }
     if (!row) {
+      const effectiveOwner = owner || DEFAULT_OWNER
       row = (await client.query(
         `insert into mail_watch_config (owner_email, mailbox, folder, folder_name, senders, subject_patterns, enabled)
          values ($1,$2,'inbox','Inbox',$3,$4,true) returning *`,
-        [owner, DEFAULT_MAILBOX, DEFAULT_SENDERS, DEFAULT_SUBJECTS]
+        [effectiveOwner, DEFAULT_MAILBOX, DEFAULT_SENDERS, DEFAULT_SUBJECTS]
       )).rows[0]
     }
     return rowToConfig(row)
   } finally { try { await client?.end() } catch {} }
 }
 
-async function saveConfig(patch: Partial<WatchConfig>): Promise<WatchConfig> {
+async function saveConfig(owner: string, patch: Partial<WatchConfig>): Promise<WatchConfig> {
   let client
   try {
     client = await getPgClient()
     await ensureConfigTable(client)
-    const owner = DEFAULT_OWNER
     const cur = (await client.query('select * from mail_watch_config where owner_email = $1', [owner])).rows[0]
+      // If no row for this owner yet, copy the legacy DEFAULT_OWNER row's settings as a starting point.
+      ?? (await client.query('select * from mail_watch_config where owner_email = $1', [DEFAULT_OWNER])).rows[0]
     const base: WatchConfig = cur ? rowToConfig(cur) : { ownerEmail: owner, mailbox: DEFAULT_MAILBOX, folder: 'inbox', folderName: 'Inbox', senders: DEFAULT_SENDERS, subjectPatterns: DEFAULT_SUBJECTS, enabled: true }
     const next: WatchConfig = { ...base, ...patch, ownerEmail: owner }
     const row = (await client.query(
@@ -129,8 +140,8 @@ async function embed(text: string): Promise<string | null> {
 async function parseAlert(rawText: string): Promise<any[]> {
   const key = process.env.OPENAI_API_KEY
   if (!key) return []
-  const system = 'You extract executive job opportunities from a job-alert email. Return ONLY JSON.'
-  const user = `From this job-alert email, extract every distinct role. Return JSON: { "opportunities": [ { "company": "...", "role": "...", "location": "...", "comp": "...", "url": "..." } ] }. Use null for unknown fields. Email:\n${rawText.slice(0, 8000)}`
+  const system = 'You extract senior executive job opportunities from a job-alert email. Return ONLY JSON. Only include roles at the VP, Director, C-suite, Partner, or equivalent senior leadership level. Skip coordinator, specialist, analyst, manager, support, or entry/mid-level roles.'
+  const user = `From this job-alert email, extract only SENIOR EXECUTIVE roles (VP, Director, C-suite, SVP, EVP, Partner, Head of, GM, President, or equivalent). Skip any role below director level. Return JSON: { "opportunities": [ { "company": "...", "role": "...", "location": "...", "comp": "...", "url": "..." } ] }. Use null for unknown fields. If no senior roles exist, return { "opportunities": [] }. Email:\n${rawText.slice(0, 8000)}`
   const res = await fetch('https://api.openai.com/v1/chat/completions', {
     method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
     body: JSON.stringify({ model: 'gpt-4o-mini', messages: [{ role: 'system', content: system }, { role: 'user', content: user }], max_tokens: 1200, response_format: { type: 'json_object' } })
@@ -224,7 +235,8 @@ export async function mailSubscribe(req: HttpRequest, context: InvocationContext
   const creds = graphCreds()
   if (!creds.clientId || !creds.clientSecret) return { status: 200, headers: HEADERS, jsonBody: { error: 'MICROSOFT_CLIENT_ID/SECRET not set' } }
   try {
-    const cfg = await loadConfig()
+    const owner = resolveOwner(req).owner
+    const cfg = await loadConfig(owner)
     const token = await getMicrosoftToken(creds.tenantId, creds.clientId, creds.clientSecret)
     const expiration = new Date(Date.now() + 2 * 24 * 3600 * 1000).toISOString()
     // Prune ALL prior /mail/notify subscriptions → guarantees exactly one watch.
@@ -273,7 +285,8 @@ export async function mailSubscriptions(req: HttpRequest, context: InvocationCon
 export async function mailConfig(req: HttpRequest, context: InvocationContext): Promise<HttpResponseInit> {
   if (req.method === 'OPTIONS') return { status: 204, headers: HEADERS }
   try {
-    if (req.method === 'GET') return { status: 200, headers: HEADERS, jsonBody: { config: await loadConfig() } }
+    const owner = resolveOwner(req).owner
+    if (req.method === 'GET') return { status: 200, headers: HEADERS, jsonBody: { config: await loadConfig(owner) } }
     const body = (await req.json().catch(() => ({}))) as any
     const patch: Partial<WatchConfig> = {}
     if (typeof body.mailbox === 'string') patch.mailbox = body.mailbox.trim()
@@ -282,7 +295,7 @@ export async function mailConfig(req: HttpRequest, context: InvocationContext): 
     if (Array.isArray(body.senders)) patch.senders = body.senders.map((s: any) => String(s).trim()).filter(Boolean)
     if (Array.isArray(body.subjectPatterns)) patch.subjectPatterns = body.subjectPatterns.map((s: any) => String(s).trim()).filter(Boolean)
     if (typeof body.enabled === 'boolean') patch.enabled = body.enabled
-    return { status: 200, headers: HEADERS, jsonBody: { ok: true, config: await saveConfig(patch) } }
+    return { status: 200, headers: HEADERS, jsonBody: { ok: true, config: await saveConfig(owner, patch) } }
   } catch (err) { return { status: 200, headers: HEADERS, jsonBody: { error: String(err) } } }
 }
 
@@ -292,7 +305,7 @@ export async function mailFolders(req: HttpRequest, context: InvocationContext):
   const creds = graphCreds()
   if (!creds.clientId || !creds.clientSecret) return { status: 200, headers: HEADERS, jsonBody: { error: 'MICROSOFT creds not set' } }
   try {
-    const mailbox = req.query.get('mailbox') || (await loadConfig()).mailbox
+    const mailbox = req.query.get('mailbox') || (await loadConfig(resolveOwner(req).owner)).mailbox
     const token = await getMicrosoftToken(creds.tenantId, creds.clientId, creds.clientSecret)
     const res = await fetch(`https://graph.microsoft.com/v1.0/users/${mailbox}/mailFolders?$top=100&$select=id,displayName,totalItemCount`, { headers: { Authorization: `Bearer ${token}` } })
     if (!res.ok) return { status: 200, headers: HEADERS, jsonBody: { ok: false, mailbox, detail: `folders HTTP ${res.status}: ${(await res.text()).slice(0, 300)}` } }
@@ -309,9 +322,10 @@ export async function mailSelfTest(req: HttpRequest, context: InvocationContext)
   const checks: { name: string; pass: boolean; detail: string }[] = []
   const add = (name: string, pass: boolean, detail = '') => checks.push({ name, pass, detail })
   let cfg: WatchConfig | null = null
+  const owner = resolveOwner(req).owner
   try {
     // 1. Config loads from Postgres
-    try { cfg = await loadConfig(); add('Config store (Postgres)', true, `mailbox ${cfg.mailbox}, folder ${cfg.folderName}`) }
+    try { cfg = await loadConfig(owner); add('Config store (Postgres)', true, `owner ${owner}, mailbox ${cfg.mailbox}, folder ${cfg.folderName}`) }
     catch (e) { add('Config store (Postgres)', false, String(e)) }
 
     // 2. OpenAI key present (parse + embed)
@@ -546,7 +560,8 @@ export async function mailPollNow(req: HttpRequest, context: InvocationContext):
   const creds = graphCreds()
   if (!creds.clientId || !creds.clientSecret) return { status: 200, headers: HEADERS, jsonBody: { error: 'MICROSOFT creds not set' } }
   try {
-    const cfg = await loadConfig()
+    const owner = resolveOwner(req).owner
+    const cfg = await loadConfig(owner)
     const minutes = Number((await req.json().catch(() => ({})) as any)?.minutes) || 60
     const token = await getMicrosoftToken(creds.tenantId, creds.clientId, creds.clientSecret)
     const since = new Date(Date.now() - minutes * 60 * 1000).toISOString()
