@@ -23,7 +23,7 @@ const TITLES = { today: 'Today', intake: 'Intake', settings: 'Settings', opportu
 
 function Router() {
   const { toast, showDemo } = useApp()
-  const { parts } = useRoute()
+  const { parts, query } = useRoute()
   const route = parts[0] || 'today'
   // One live data source shared across screens; polls so real-time-ingested
   // LinkedIn alerts pop in with a toast. Refetches when the demo toggle changes.
@@ -32,7 +32,7 @@ function Router() {
   let screen
   if (route === 'intake') screen = <Intake />
   else if (route === 'settings') screen = <Settings tab={parts[1] || 'account'} />
-  else if (route === 'opportunities') screen = <Opportunities opps={opps} />
+  else if (route === 'opportunities') screen = <Opportunities opps={opps} filter={query.filter} />
   else if (route === 'pipeline') screen = <Pipeline opps={opps} />
   else if (route === 'swipe') screen = <Swipe opps={opps} />
   else if (route === 'packets') screen = <Packets />

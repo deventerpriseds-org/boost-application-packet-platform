@@ -206,7 +206,7 @@ async function parseAlert(rawText: string): Promise<any[]> {
   const key = process.env.OPENAI_API_KEY
   if (!key) return []
   const system = 'You extract senior executive job opportunities from a job-alert email. Return ONLY JSON. Only include roles at the VP, Director, C-suite, Partner, or equivalent senior leadership level. Skip coordinator, specialist, analyst, manager, support, or entry/mid-level roles.'
-  const user = `From this job-alert email, extract only SENIOR EXECUTIVE roles (VP, Director, C-suite, SVP, EVP, Partner, Head of, GM, President, or equivalent). Skip any role below director level. Return JSON: { "opportunities": [ { "company": "...", "role": "...", "location": "...", "comp": "...", "url": "..." } ] }. Use null for unknown fields. If no senior roles exist, return { "opportunities": [] }. Email:\n${rawText.slice(0, 8000)}`
+  const user = `From this job-alert email, extract only SENIOR EXECUTIVE roles (VP, Director, C-suite, SVP, EVP, Partner, Head of, GM, President, or equivalent). Skip any role below director level. Return JSON: { "opportunities": [ { "company": "...", "role": "...", "location": "...", "comp": "...", "url": "...", "postedDate": "YYYY-MM-DD or null" } ] }. postedDate: the date the job was posted or listed, NOT the email received date. Look for text like "Posted 3 days ago", "Posted July 10", "2 days ago", etc. and resolve to an ISO date. Use null if no posted date is mentioned. Use null for other unknown fields. If no senior roles exist, return { "opportunities": [] }. Email:\n${rawText.slice(0, 8000)}`
   const res = await fetch('https://api.openai.com/v1/chat/completions', {
     method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
     body: JSON.stringify({ model: 'gpt-4o-mini', messages: [{ role: 'system', content: system }, { role: 'user', content: user }], max_tokens: 1200, response_format: { type: 'json_object' } })
@@ -222,7 +222,7 @@ async function parseAlert(rawText: string): Promise<any[]> {
 // Exported + source-parameterized so ATS ingestion (appAts) reuses the exact
 // embed → dedupe → insert-as-discovered pipeline.
 export { embed as embedOpp }
-export async function insertOpp(client: any, owner: string, o: any, source = 'LinkedIn', why?: string): Promise<{ inserted: boolean; id?: string; reason?: string; company: string; role: string }> {
+export async function insertOpp(client: any, owner: string, o: any, source = 'LinkedIn', why?: string, receivedAt?: string): Promise<{ inserted: boolean; id?: string; reason?: string; company: string; role: string }> {
   const vec = await embed(`${o.company} — ${o.role}`)
   if (vec) {
     const dup = (await client.query(
@@ -236,27 +236,30 @@ export async function insertOpp(client: any, owner: string, o: any, source = 'Li
     if (dup) return { inserted: false, reason: 'duplicate', company: o.company, role: o.role }
   }
   const whyText = why || `New ${source} alert${o.url ? ` · ${o.url}` : ''}`
+  // Prefer job's posted date extracted by AI; fall back to email received date; then now()
+  const sourceDateVal = o.postedDate || receivedAt || null
+  const sourceDateExpr = sourceDateVal ? `$${vec ? 10 : 9}::timestamptz` : 'now()'
   const r = await client.query(
     `insert into opportunity
        (owner_email, is_demo, company, role, location, comp_range, source, source_date,
         why_surfaced, roles_for, stage, urgency, embedding)
-     values ($1, false, $2, $3, $4, $5, ${vec ? '$9' : '$8'}, now(), $6, '{}', 'discovered', 'Warm', ${vec ? '$8::vector' : 'null'})
+     values ($1, false, $2, $3, $4, $5, ${vec ? '$9' : '$8'}, ${sourceDateExpr}, $6, '{}', 'discovered', 'Warm', ${vec ? '$8::vector' : 'null'})
      returning id`,
     vec
-      ? [owner, o.company, o.role, o.location || null, o.comp || null, whyText, vec, source]
-      : [owner, o.company, o.role, o.location || null, o.comp || null, whyText, source]
+      ? [owner, o.company, o.role, o.location || null, o.comp || null, whyText, vec, source, ...(sourceDateVal ? [sourceDateVal] : [])]
+      : [owner, o.company, o.role, o.location || null, o.comp || null, whyText, source, ...(sourceDateVal ? [sourceDateVal] : [])]
   )
   return { inserted: true, id: r.rows[0].id, company: o.company, role: o.role }
 }
 
-async function ingestText(rawText: string, owner: string, source = 'Email') {
+async function ingestText(rawText: string, owner: string, source = 'Email', receivedAt?: string) {
   let client
   try {
     client = await getPgClient()
     const opps = await parseAlert(rawText)
     const results = []
     for (const o of opps) {
-      const r = await insertOpp(client, owner, o, source)
+      const r = await insertOpp(client, owner, o, source, undefined, receivedAt)
       results.push(r)
       // Fire-and-forget role tagging — don't await, never blocks ingest
       if (r.inserted && r.id) tagOppRoles(r.id, o, owner).catch(() => {})
@@ -273,7 +276,8 @@ async function ingestMessageId(token: string, id: string, cfg: WatchConfig) {
   const text = `From: ${from}\nSubject: ${msg?.subject}\n\n${(msg?.body?.content || msg?.bodyPreview || '').replace(/<[^>]+>/g, ' ')}`
   if (!isAlert(cfg, from, msg?.subject, msg?.bodyPreview)) return { skipped: 'not a job alert', from }
   const source = detectSource(from, cfg.folderName)
-  return await ingestText(text, cfg.ownerEmail, source)
+  const receivedAt = msg?.receivedDateTime || undefined
+  return await ingestText(text, cfg.ownerEmail, source, receivedAt)
 }
 
 // GET/POST /api/mail/notify — Graph webhook: validation handshake + notifications.

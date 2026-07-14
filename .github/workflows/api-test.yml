@@ -1,0 +1,48 @@
+name: API Test
+
+on:
+  workflow_dispatch:
+    inputs:
+      method:
+        description: 'HTTP method (GET, POST, PATCH, DELETE)'
+        required: false
+        default: 'GET'
+      path:
+        description: 'API path, e.g. /api/opp/uuid/enrich or /api/health'
+        required: true
+      body:
+        description: 'JSON body (for POST/PATCH). Leave empty for GET.'
+        required: false
+        default: ''
+
+jobs:
+  call:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Get access token
+        id: token
+        run: |
+          TOKEN=$(curl -s -X POST \
+            "https://login.microsoftonline.com/${{ secrets.AZURE_TENANT_ID }}/oauth2/v2.0/token" \
+            -d "client_id=${{ secrets.AZURE_CLIENT_ID }}" \
+            -d "client_secret=${{ secrets.AZURE_CLIENT_SECRET }}" \
+            -d "scope=api://${{ secrets.AZURE_CLIENT_ID }}/.default" \
+            -d "grant_type=client_credentials" | jq -r '.access_token')
+          echo "token=$TOKEN" >> $GITHUB_OUTPUT
+
+      - name: Call API
+        run: |
+          METHOD="${{ github.event.inputs.method }}"
+          PATH="${{ github.event.inputs.path }}"
+          BODY="${{ github.event.inputs.body }}"
+          BASE="https://job-platform-api.azurewebsites.net"
+
+          if [ -n "$BODY" ]; then
+            curl -s -X "$METHOD" "$BASE$PATH" \
+              -H "Authorization: Bearer ${{ steps.token.outputs.token }}" \
+              -H "Content-Type: application/json" \
+              -d "$BODY" | jq .
+          else
+            curl -s -X "$METHOD" "$BASE$PATH" \
+              -H "Authorization: Bearer ${{ steps.token.outputs.token }}" | jq .
+          fi
