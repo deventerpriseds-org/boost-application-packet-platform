@@ -95,27 +95,27 @@ export default function Intake() {
 
       <Card style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
         <b style={{ fontSize: 14 }}>Incoming feed</b>
-        <span className=”px-small”>scan last</span>
-        <select className=”px-btn” value={minutes} onChange={(e) => setMinutes(Number(e.target.value))} style={{ fontSize: 12 }}>
+        <span className="px-small">scan last</span>
+        <select className="px-btn" value={minutes} onChange={(e) => setMinutes(Number(e.target.value))} style={{ fontSize: 12 }}>
           <option value={60}>1 hour</option>
           <option value={120}>2 hours</option>
           <option value={720}>12 hours</option>
           <option value={1440}>24 hours</option>
           <option value={4320}>3 days</option>
         </select>
-        <button className=”px-btn px-btn-accent” onClick={pull} disabled={feed.loading}>{feed.loading ? 'Scanning…' : '⇊ Pull now'}</button>
+        <button className="px-btn px-btn-accent" onClick={pull} disabled={feed.loading}>{feed.loading ? 'Scanning…' : '⇊ Pull now'}</button>
         <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontSize: 12, color: 'var(--proto-ink2)', userSelect: 'none' }}>
-          <input type=”checkbox” checked={hideSkipped} onChange={(e) => setHideSkipped(e.target.checked)} style={{ cursor: 'pointer' }} />
+          <input type="checkbox" checked={hideSkipped} onChange={(e) => setHideSkipped(e.target.checked)} style={{ cursor: 'pointer' }} />
           Hide non-alerts
         </label>
-        {feed.at && <span className=”px-small” style={{ color: 'var(--proto-ink2)' }}>scanned {feed.scanned} message{feed.scanned === 1 ? '' : 's'} · {timeAgo(feed.at)}</span>}
-        {feed.error && <span className=”px-small” style={{ color: 'var(--proto-red)' }}>{feed.error}</span>}
+        {feed.at && <span className="px-small" style={{ color: 'var(--proto-ink2)' }}>scanned {feed.scanned} message{feed.scanned === 1 ? '' : 's'} · {timeAgo(feed.at)}</span>}
+        {feed.error && <span className="px-small" style={{ color: 'var(--proto-red)' }}>{feed.error}</span>}
       </Card>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
         {feed.trace.length === 0 && !feed.loading && (
           <Card style={{ textAlign: 'center', color: 'var(--proto-ink2)' }}>
-            {feed.at ? 'No messages in that window.' : 'Hit “Pull now” to see what has arrived.'}
+            {feed.at ? 'No messages in that window.' : 'Hit "Pull now" to see what has arrived.'}
           </Card>
         )}
         {feed.trace.filter((t) => !hideSkipped || !t.result?.skipped).map((t, i) => {

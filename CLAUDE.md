@@ -119,6 +119,14 @@ The `lib` must include `"DOM"` for Azure SDK compatibility:
 "lib": ["ES2020", "DOM"]
 ```
 
+## esbuild smart-quote bug (every JSX edit)
+
+The Edit tool silently inserts Unicode smart quotes (U+2018/U+2019 curly apostrophes, U+201C/U+201D curly double-quotes) into JSX files. esbuild rejects them with `Expected "{" but found "'"`. After **every** JSX file edit, run this before committing:
+```bash
+sed -i "s/\xe2\x80\x98/'/g; s/\xe2\x80\x99/'/g; s/\xe2\x80\x9c/\"/g; s/\xe2\x80\x9d/\"/g" <file>
+```
+Then verify with `grep -P '[\x{2018}\x{2019}\x{201C}\x{201D}]' <file>` (should return nothing). Never skip this step — the build will fail silently at deploy time.
+
 ## Verify before reporting (strict rule)
 
 **Never tell the user something is fixed, done, or working until you have confirmed it with actual evidence** — a passing test, a DB query result, a successful log, a git log entry, or a live API response. Triggering a workflow and getting a 204 queued response is NOT confirmation — it means the job started. Read the job logs first, then report. If you cannot confirm (sandbox blocks the endpoint, logs not yet available, etc.), say "I cannot confirm this yet" and explain what would confirm it and how the user can check. Do not infer success from absence of errors.
