@@ -20,9 +20,10 @@ function priorityActions(opps) {
 }
 
 // Stage groupings for the "Today" hero: what's fresh to triage vs. in-flight.
-const NEW_STAGES = ['discovered', 'saved']
-const SCRUB_STAGES = ['discovered', 'saved', 'enriched'] // "new overnight" awaiting triage
-const ACTIVE_STAGES = ['enriched', 'applied', 'outreach', 'engaged', 'screen', 'r1', 'panel', 'final', 'offer']
+// FRESH_STAGES includes 'enriched' because mail ingest advances rows discovered→enriched
+// immediately; without it the KPI shows 0 even when opportunities exist.
+const FRESH_STAGES  = ['discovered', 'saved', 'enriched']
+const ACTIVE_STAGES = ['applied', 'outreach', 'engaged', 'screen', 'r1', 'panel', 'final', 'offer']
 
 // Bin an opportunity into a monitored-role family (mirrors the intake design).
 function roleFamily(o) {
@@ -47,7 +48,7 @@ const ROLE_DOT = {
 // "Latest inbox scrub" hero — new roles found overnight, binned by role family,
 // with a swipe-review CTA. Ported from the design handoff (home.jsx).
 function InboxScrubHero({ opportunities, toast }) {
-  const fresh = opportunities.filter((o) => SCRUB_STAGES.includes(o.stage))
+  const fresh = opportunities.filter((o) => FRESH_STAGES.includes(o.stage))
   const bins = useMemo(() => {
     const map = {}
     fresh.forEach((o) => { const f = roleFamily(o); map[f] = (map[f] || 0) + 1 })
@@ -125,7 +126,7 @@ export default function Today({ opps }) {
   const { loading, error, opportunities } = opps
 
   const { fresh, active, hot, avgMatch } = useMemo(() => {
-    const fresh = opportunities.filter((o) => NEW_STAGES.includes(o.stage))
+    const fresh = opportunities.filter((o) => FRESH_STAGES.includes(o.stage))
     const active = opportunities.filter((o) => ACTIVE_STAGES.includes(o.stage))
     const hot = opportunities.filter((o) => o.urgency === 'Hot')
     const scored = opportunities.filter((o) => typeof o.match === 'number')
@@ -158,7 +159,7 @@ export default function Today({ opps }) {
       {/* Greeting */}
       <div>
         <div style={{ fontSize: 'clamp(20px, 5.5vw, 26px)', fontWeight: 700, letterSpacing: -0.5, lineHeight: 1.15 }}>
-          Good morning{displayName ? `, ${displayName}` : ''}.
+          {(() => { const h = new Date().getHours(); return h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : 'Good evening' })()}{displayName ? `, ${displayName}` : ''}.
         </div>
         <div className="px-small" style={{ marginTop: 4 }}>
           {fresh.length} new to scrub · {active.length} active opportunities · {hot.length} hot · avg match {avgMatch != null ? `${avgMatch}%` : '—'}
@@ -214,6 +215,7 @@ export default function Today({ opps }) {
         {fresh.length === 0 && <Empty>Nothing new. Inbox is clear. ✦</Empty>}
         {fresh.map((o) => <OppRow key={o.id} o={o} />)}
       </Section>
+
 
       <Section title="In flight">
         {active.length === 0 && <Empty>No active opportunities yet.</Empty>}

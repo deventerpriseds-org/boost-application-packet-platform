@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback } from 'react'
-import { useApp, go, useRoute } from '../state.jsx'
+import { go } from '../state.jsx'
 import { api } from '../api.js'
 import { MatchScore, Pill } from '../shell.jsx'
 import { Loading, ErrorBox, Empty } from './Today.jsx'
@@ -112,27 +112,28 @@ function Assets() {
 }
 
 function Roles() {
-  const { personaKey, setPersonaKey } = useApp()
   const { loading, error, data } = useFetch(() => api.listPersonas())
   if (loading) return <Loading />
   if (error) return <ErrorBox error={error} />
   const personas = data.personas || []
+  if (!personas.length) return (
+    <Empty>No target roles configured yet. <span className="px-link" style={{ cursor: 'pointer' }} onClick={() => go('/settings/roles')}>Add one in Settings →</span></Empty>
+  )
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 12 }}>
-      {personas.map((p) => (
-        <div key={p.key} className="px-box" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 8, borderColor: p.key === personaKey ? 'var(--surface-brand-default)' : undefined }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <div style={{ fontSize: 15, fontWeight: 700, flex: 1 }}>{p.masterRole}</div>
-            {p.key === personaKey && <Pill tone="accent">active</Pill>}
-          </div>
-          <div className="px-small">{p.name} · {p.compTarget || '—'}</div>
-          {p.positioning && <div style={{ fontSize: 13, lineHeight: 1.5 }}>{p.positioning}</div>}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4 }}>
+    <div>
+      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 8 }}>
+        <span className="px-link" style={{ fontSize: 12, cursor: 'pointer' }} onClick={() => go('/settings/roles')}>Manage in Settings →</span>
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 12 }}>
+        {personas.map((p) => (
+          <div key={p.key} className="px-box" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <div style={{ fontSize: 15, fontWeight: 700 }}>{p.masterRole || p.name}</div>
+            <div className="px-small">{p.name} · {p.compTarget || '—'}</div>
+            {p.positioning && <div style={{ fontSize: 13, lineHeight: 1.5 }}>{p.positioning}</div>}
             <Pill>{p.opportunities} opportunities</Pill>
-            {p.key !== personaKey && <button className="px-btn" style={{ fontSize: 12 }} onClick={() => setPersonaKey(p.key)}>Switch to this persona</button>}
           </div>
-        </div>
-      ))}
+        ))}
+      </div>
     </div>
   )
 }

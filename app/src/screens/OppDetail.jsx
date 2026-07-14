@@ -244,7 +244,7 @@ function Overview({ o, toast, id, reload }) {
             <StatusRow k="Stage" v={<Pill tone="accent">{o.stage}</Pill>} />
             <StatusRow k="Fit" v={o.fit ? <Pill tone="accent">{o.fit}</Pill> : '—'} />
             <StatusRow k="Urgency" v={o.urgency ? <UrgencyPill urgency={o.urgency} /> : '—'} />
-            <StatusRow k="Match" v={<b>{o.match}%</b>} />
+            <StatusRow k="Match" v={<b>{o.match != null ? `${o.match}%` : '—'}</b>} />
           </div>
         </Card>
         <Card title="Compensation target">
@@ -276,7 +276,18 @@ function StatusRow({ k, v }) {
 }
 
 function Contacts({ contacts, oppId, toast }) {
-  if (!contacts.length) return <div className="px-box" style={{ padding: 20, textAlign: 'center', color: 'var(--proto-ink2)' }}>No contacts enriched for this opportunity yet.</div>
+  const [enriching, setEnriching] = useState(false)
+  const enrich = async () => {
+    setEnriching(true)
+    try { const r = await api.enrichOpportunity(oppId); if (r.error) throw new Error(r.error); toast('Enriched — reload to see contacts') }
+    catch (e) { toast(`Enrich failed: ${e.message || e}`) } finally { setEnriching(false) }
+  }
+  if (!contacts.length) return (
+    <div className="px-box" style={{ padding: 24, textAlign: 'center', color: 'var(--proto-ink2)' }}>
+      <div>No contacts enriched for this opportunity yet.</div>
+      <button className="px-btn px-btn-accent" style={{ marginTop: 12, fontSize: 13 }} disabled={enriching} onClick={enrich}>{enriching ? 'Enriching…' : '✦ Enrich now'}</button>
+    </div>
+  )
   return (
     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 14 }}>
       {contacts.map((p, i) => (

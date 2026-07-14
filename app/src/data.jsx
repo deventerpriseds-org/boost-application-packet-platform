@@ -78,4 +78,3 @@ export function useOpportunities(personaKey, { pollMs = 15000, onNew, includeDem
   return { ...state, reload, optimisticMove, optimisticDismiss }
 }
 
-export const personaName = (key) => key

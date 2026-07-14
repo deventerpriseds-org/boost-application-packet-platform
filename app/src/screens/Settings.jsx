@@ -23,6 +23,7 @@ function Card({ children, style }) {
 const Label = ({ children }) => <div className="px-small" style={{ textTransform: 'uppercase', letterSpacing: 1, marginBottom: 4 }}>{children}</div>
 
 function IntakeSettings() {
+  const { isDemo } = useApp()
   const [cfg, setCfg] = useState(null)
   const [cfgErr, setCfgErr] = useState(null)
   const [dirty, setDirty] = useState(false)
@@ -97,7 +98,12 @@ function IntakeSettings() {
     } catch (e) { setRealTest({ running: false, result: { error: String(e.message || e) } }) }
   }
 
-  if (cfgErr) return <Card style={{ color: 'var(--proto-red)' }}>Couldn’t load intake config: {cfgErr}</Card>
+  if (isDemo) return (
+    <Card>Sign in with Microsoft to configure your mailbox and intake settings.{' '}
+      <span className="px-link" style={{ cursor: 'pointer' }} onClick={() => go('/settings/account')}>Connect account →</span>
+    </Card>
+  )
+  if (cfgErr) return <Card style={{ color: 'var(--proto-red)' }}>Could not load intake config: {cfgErr}</Card>
   if (!cfg) return <Card style={{ color: 'var(--proto-ink2)' }}>Loading intake configuration…</Card>
 
   const watch = sub.watches[0]
@@ -121,7 +127,7 @@ function IntakeSettings() {
         <div className="px-small" style={{ marginTop: 8 }}>Emails your watched mailbox a realistic <b>LinkedIn</b> or <b>Indeed</b> job alert (in their typical format) populated with real executive postings — so you can confirm the full intake → parse → opportunity flow on the kind of email you actually get.</div>
         {realTest.result && !realTest.result.error && (
           <div className="px-small" style={{ marginTop: 8, color: 'var(--text-brand)' }}>
-            Sent a <b>{realTest.result.source}</b> alert to {realTest.result.to} with {realTest.result.count} role{realTest.result.count === 1 ? '' : 's'} ({(realTest.result.jobs || []).map((j) => j.role).slice(0, 2).join(', ')}…). It’ll appear in your pipeline shortly — <span className="px-link" style={{ cursor: 'pointer' }} onClick={() => go('/intake')}>open the live feed</span>.
+            Sent a <b>{realTest.result.source}</b> alert to {realTest.result.to} with {realTest.result.count} role{realTest.result.count === 1 ? '' : 's'} ({(realTest.result.jobs || []).map((j) => j.role).slice(0, 2).join(', ')}…). It'll appear in your pipeline shortly — <span className="px-link" style={{ cursor: 'pointer' }} onClick={() => go('/intake')}>open the live feed</span>.
           </div>
         )}
         {realTest.result?.error && <div className="px-small" style={{ marginTop: 8, color: 'var(--proto-red)' }}>{realTest.result.error}</div>}
@@ -148,7 +154,7 @@ function IntakeSettings() {
               ))}
             </select>
             {folders.loading && <div className="px-small" style={{ marginTop: 4 }}>Loading folders…</div>}
-            {folders.error && <div className="px-small" style={{ marginTop: 4, color: 'var(--proto-yellow)' }}>Can’t list folders: {folders.error}</div>}
+            {folders.error && <div className="px-small" style={{ marginTop: 4, color: 'var(--proto-yellow)' }}>Can't list folders: {folders.error}</div>}
           </div>
         </div>
 
@@ -225,7 +231,7 @@ function UsageSettings() {
   useEffect(() => { load() }, [load])
 
   if (u.loading) return <Card style={{ color: 'var(--proto-ink2)' }}>Loading usage…</Card>
-  if (u.error) return <Card style={{ color: 'var(--proto-red)' }}>Couldn’t load usage: {u.error}</Card>
+  if (u.error) return <Card style={{ color: 'var(--proto-red)' }}>Couldn't load usage: {u.error}</Card>
   const d = u.data
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
@@ -326,7 +332,7 @@ function AccountSettings() {
                 title={providerReady?.google ? '' : 'VITE_GOOGLE_CLIENT_ID not configured on this deploy'}>Connect Google</button>
             </div>
             {!providerReady?.microsoft && !providerReady?.google && (
-              <div className="px-small" style={{ color: 'var(--proto-yellow)' }}>Sign-in providers aren’t configured on this build yet (needs the Entra app + build-time client IDs).</div>
+              <div className="px-small" style={{ color: 'var(--proto-yellow)' }}>Sign-in providers aren't configured on this build yet (needs the Entra app + build-time client IDs).</div>
             )}
             {err && <div className="px-small" style={{ color: 'var(--proto-red)' }}>{err}</div>}
           </div>
@@ -342,7 +348,7 @@ function WorkspaceSettings() {
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
       <Card>
         <b style={{ fontSize: 15 }}>Sample data</b>
-        <div className="px-small" style={{ marginTop: 2, marginBottom: 14 }}>The workspace ships with sample opportunities, packets, and outreach so the app isn’t empty. Turn this off to see only your real, ingested data.</div>
+        <div className="px-small" style={{ marginTop: 2, marginBottom: 14 }}>The workspace ships with sample opportunities, packets, and outreach so the app isn't empty. Turn this off to see only your real, ingested data.</div>
         <label style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer', fontSize: 14 }}>
           <input type="checkbox" checked={showDemo} onChange={(e) => setShowDemo(e.target.checked)} />
           Show sample / demo data
@@ -372,7 +378,7 @@ function AtsSources() {
     try { const p = await api.atsPreview(provider, board.trim()); if (p.error) throw new Error(p.error)
       const r = await api.atsSourceAdd(provider, board.trim()); if (r.error) throw new Error(r.error)
       setMsg(`Added — ${p.execRoles} exec roles of ${p.total} on this board`); setBoard(''); load() }
-    catch (e) { setMsg(`Couldn’t add: ${e.message || e}`) } finally { setBusy(false) }
+    catch (e) { setMsg(`Couldn't add: ${e.message || e}`) } finally { setBusy(false) }
   }
   const del = async (id) => { try { await api.atsSourceDelete(id); load() } catch {} }
   const ingest = async (s) => {
@@ -417,7 +423,9 @@ function AtsSources() {
 // Coach — the AI coach's system prompt, model, memory, and file store. This is
 // the "see everything" surface: the exact prompt the agent runs on, editable.
 function CoachSettings() {
+  const { isDemo } = useApp()
   const [cfg, setCfg] = useState(null)
+  const [cfgErr, setCfgErr] = useState(null)
   const [status, setStatus] = useState(null)
   const [prompt, setPrompt] = useState('')
   const [model, setModel] = useState('')
@@ -427,7 +435,7 @@ function CoachSettings() {
     try {
       const [c, s] = await Promise.all([api.coachConfigGet(), api.coachStatus()])
       setCfg(c); setStatus(s); setPrompt(c.systemPrompt || ''); setModel(c.model || '')
-    } catch (e) { setMsg(String(e.message || e)) }
+    } catch (e) { setCfgErr(String(e.message || e)) }
   }, [])
   useEffect(() => { load() }, [load])
 
@@ -447,13 +455,19 @@ function CoachSettings() {
     catch (e) { setMsg(String(e.message || e)) } finally { setBusy(false) }
   }
 
+  if (isDemo) return (
+    <Card>Sign in to configure the AI coach.{' '}
+      <span className="px-link" style={{ cursor: 'pointer' }} onClick={() => go('/settings/account')}>Connect account →</span>
+    </Card>
+  )
+  if (cfgErr) return <Card style={{ color: 'var(--proto-red)' }}>Couldn't load coach config: {cfgErr}</Card>
   if (!cfg) return <Card style={{ color: 'var(--proto-ink2)' }}>Loading coach configuration…</Card>
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
       <Card>
         <b style={{ fontSize: 15 }}>How the coach remembers you</b>
         <div className="px-small" style={{ marginTop: 6, lineHeight: 1.6 }}>
-          Durable memory (preferences, decisions, feedback) is embedded and stored in <b>your own Azure Postgres</b> — pgvector tables <code>coach_memory</code> + <code>coach_triples</code>. Because it lives in your database and not an AI vendor’s account, it is <b>vendor-portable</b>: swap OpenAI for another model and every memory persists. The OpenAI file store below is a separate, rebuildable place for uploaded reference documents only.
+          Durable memory (preferences, decisions, feedback) is embedded and stored in <b>your own Azure Postgres</b> — pgvector tables <code>coach_memory</code> + <code>coach_triples</code>. Because it lives in your database and not an AI vendor's account, it is <b>vendor-portable</b>: swap OpenAI for another model and every memory persists. The OpenAI file store below is a separate, rebuildable place for uploaded reference documents only.
         </div>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 18, marginTop: 12 }}>
           {status && <>
