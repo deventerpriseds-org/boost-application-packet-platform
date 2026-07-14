@@ -222,7 +222,7 @@ async function parseAlert(rawText: string): Promise<any[]> {
 // Exported + source-parameterized so ATS ingestion (appAts) reuses the exact
 // embed → dedupe → insert-as-discovered pipeline.
 export { embed as embedOpp }
-export async function insertOpp(client: any, owner: string, o: any, source = 'LinkedIn', why?: string, receivedAt?: string): Promise<{ inserted: boolean; id?: string; reason?: string; company: string; role: string }> {
+export async function insertOpp(client: any, owner: string, o: any, source = 'LinkedIn', why?: string, receivedAt?: string, rawJd?: string): Promise<{ inserted: boolean; id?: string; reason?: string; company: string; role: string }> {
   const vec = await embed(`${o.company} — ${o.role}`)
   if (vec) {
     const dup = (await client.query(
@@ -249,7 +249,14 @@ export async function insertOpp(client: any, owner: string, o: any, source = 'Li
       ? [owner, o.company, o.role, o.location || null, o.comp || null, whyText, vec, source, ...(sourceDateVal ? [sourceDateVal] : [])]
       : [owner, o.company, o.role, o.location || null, o.comp || null, whyText, source, ...(sourceDateVal ? [sourceDateVal] : [])]
   )
-  return { inserted: true, id: r.rows[0].id, company: o.company, role: o.role }
+  const id = r.rows[0].id
+  if (rawJd) {
+    try {
+      await client.query(`alter table opportunity add column if not exists raw_jd text`)
+      await client.query(`update opportunity set raw_jd = $1 where id = $2`, [rawJd, id])
+    } catch {}
+  }
+  return { inserted: true, id, company: o.company, role: o.role }
 }
 
 async function ingestText(rawText: string, owner: string, source = 'Email', receivedAt?: string) {
@@ -259,7 +266,7 @@ async function ingestText(rawText: string, owner: string, source = 'Email', rece
     const opps = await parseAlert(rawText)
     const results = []
     for (const o of opps) {
-      const r = await insertOpp(client, owner, o, source, undefined, receivedAt)
+      const r = await insertOpp(client, owner, o, source, undefined, receivedAt, rawText)
       results.push(r)
       // Fire-and-forget role tagging — don't await, never blocks ingest
       if (r.inserted && r.id) tagOppRoles(r.id, o, owner).catch(() => {})
