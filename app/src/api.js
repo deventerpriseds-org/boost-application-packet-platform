@@ -65,6 +65,7 @@ export const api = {
   listPackets: ({ owner } = {}) => get(`/app/packets?owner=${encodeURIComponent(owner || _owner)}${demoParam()}`),
   getPacket: (oppId) => get(`/app/opportunity/${oppId}/packet`),
   analyzeJd: (oppId) => post(`/app/opportunity/${oppId}/jd-analysis`, {}),
+  parseJd: (oppId) => post(`/app/opportunity/${oppId}/jd-parse`, {}),
   enrichOpportunity: (oppId) => post(`/app/opportunity/${oppId}/enrich`, {}),
   matchScore: (oppId) => post(`/app/opportunity/${oppId}/match-score`, {}),
   applyPrepare: (oppId, opts = {}) => post(`/app/opportunity/${oppId}/apply/prepare`, opts),

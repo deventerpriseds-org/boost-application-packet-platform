@@ -12,7 +12,8 @@ const STAGES = [
   { id: 'panel', label: 'Panel' }, { id: 'final', label: 'Final' },
   { id: 'offer', label: 'Offer' }, { id: 'accepted', label: 'Accepted' },
 ]
-const TABS = ['overview', 'contacts', 'outreach']
+const TABS = ['overview', 'jd', 'contacts', 'outreach']
+const TAB_LABELS = { overview: 'Overview', jd: 'Job Description', contacts: 'Contacts', outreach: 'Outreach' }
 
 export default function OppDetail({ id, tab = 'overview' }) {
   const { toast } = useApp()
@@ -86,12 +87,13 @@ export default function OppDetail({ id, tab = 'overview' }) {
             style={{ padding: '8px 14px', cursor: 'pointer', fontSize: 13, textTransform: 'capitalize',
               fontWeight: tab === t ? 600 : 500, color: tab === t ? 'var(--text-brand)' : 'var(--proto-ink2)',
               borderBottom: tab === t ? '2px solid var(--surface-brand-default)' : '2px solid transparent', marginBottom: -1 }}>
-            {t}
+            {TAB_LABELS[t] || t}
           </div>
         ))}
       </div>
 
       {tab === 'overview' && <Overview o={o} toast={toast} id={id} reload={load} />}
+      {tab === 'jd' && <JdTab o={o} toast={toast} reload={load} />}
       {tab === 'contacts' && <Contacts contacts={o.contacts || []} oppId={o.id} toast={toast} />}
       {tab === 'outreach' && <Outreach o={o} />}
     </div>
@@ -271,6 +273,53 @@ function StatusRow({ k, v }) {
     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingBottom: 8, borderBottom: '1px solid var(--proto-rule-soft)' }}>
       <div className="px-small" style={{ textTransform: 'uppercase', letterSpacing: 1 }}>{k}</div>
       <div style={{ textTransform: 'capitalize' }}>{v}</div>
+    </div>
+  )
+}
+
+function JdTab({ o, toast, reload }) {
+  const [parsing, setParsing] = useState(false)
+  const parse = async () => {
+    setParsing(true)
+    try {
+      const r = await api.parseJd(o.id)
+      if (r.error) throw new Error(r.error)
+      toast('JD parsed — reloading...')
+      await reload()
+    } catch (e) { toast(`Parse failed: ${e.message || e}`) } finally { setParsing(false) }
+  }
+  const hasJd = o.jdSummary || o.jdRequirements || o.jdTable
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+      <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+        <button className="px-btn px-btn-accent" onClick={parse} disabled={parsing}>
+          {parsing ? 'Parsing...' : hasJd ? 'Re-parse JD' : 'Parse Job Description'}
+        </button>
+      </div>
+      {!hasJd && !parsing && (
+        <div className="px-box" style={{ padding: 24, textAlign: 'center', color: 'var(--proto-ink2)' }}>
+          No job description parsed yet. Click Parse Job Description to extract structured data.
+        </div>
+      )}
+      {o.jdSummary && (
+        <div className="px-box" style={{ padding: 16 }}>
+          <div style={{ fontWeight: 700, marginBottom: 8, fontSize: 13 }}>Summary</div>
+          {o.jdTitle && <div className="px-small" style={{ marginBottom: 6 }}><b>Title:</b> {o.jdTitle} {o.jdCompany ? `· ${o.jdCompany}` : ''}</div>}
+          <div style={{ fontSize: 14, lineHeight: 1.6 }}>{o.jdSummary}</div>
+        </div>
+      )}
+      {o.jdRequirements && (
+        <div className="px-box" style={{ padding: 16 }}>
+          <div style={{ fontWeight: 700, marginBottom: 8, fontSize: 13 }}>Requirements & Responsibilities</div>
+          <div style={{ fontSize: 13, lineHeight: 1.7 }} dangerouslySetInnerHTML={{ __html: o.jdRequirements }} />
+        </div>
+      )}
+      {o.jdTable && (
+        <div className="px-box" style={{ padding: 16, overflowX: 'auto' }}>
+          <div style={{ fontWeight: 700, marginBottom: 8, fontSize: 13 }}>ATS Keyword Table</div>
+          <div style={{ fontSize: 12 }} dangerouslySetInnerHTML={{ __html: o.jdTable }} />
+        </div>
+      )}
     </div>
   )
 }

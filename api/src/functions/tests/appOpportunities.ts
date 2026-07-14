@@ -19,7 +19,9 @@ function rowToOpp(r: any) {
     source: r.source, why: r.why_surfaced, hm: r.hiring_manager, recruiter: r.recruiter,
     rolesFor: r.roles_for, stage: r.stage, personaKey: r.persona_key, dismissed: r.dismissed,
     signals: r.company_signals, pain: r.pain_hypotheses, isDemo: r.is_demo,
-    createdAt: r.created_at, sourceDate: r.source_date
+    createdAt: r.created_at, sourceDate: r.source_date,
+    jdTitle: r.jd_title, jdCompany: r.jd_company, jdSummary: r.jd_summary,
+    jdRequirements: r.jd_requirements, jdTable: r.jd_table
   }
 }
 
