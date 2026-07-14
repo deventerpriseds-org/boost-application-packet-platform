@@ -154,21 +154,35 @@ Then verify with `grep -P '[\x{2018}\x{2019}\x{201C}\x{201D}]' <file>` (should r
 
 ## Git workflow (branch discipline)
 
-Branch discipline exists to **avoid conflicts and lost work by staying synced** —
-NOT to treat `main` as untouchable. Do the sync yourself; don't hand it to the user.
+**HARD RULE: NEVER push directly to `main`.** All work goes on the session's
+designated feature branch (`claude/git-push-main-1zcqw5` unless told otherwise).
+Direct commits or pushes to `main` are forbidden — full stop.
 
-- **Develop** on the session's feature branch and push there.
-- **Before pushing new work or opening/using a PR**, fetch `main` and check
-  whether it has diverged (`git log main..origin/main`). If it's ahead, **sync
-  first** (merge `origin/main` into the feature branch, resolve conflicts
-  deliberately) so you don't clobber others' commits or hit surprise conflicts
-  later. Real example: `main` once carried 7 dev-console commits the feature
-  branch didn't have — syncing preserved them.
-- **Merging to `main` is part of the job**, not something to punt to the user.
-  When work needs to land on `main` (e.g. a new `workflow_dispatch` workflow only
-  becomes runnable once it's on the default branch), merge it, resolve conflicts,
-  push, and then **fast-forward the feature branch back to `main`** so the two
-  don't re-diverge.
+### One-branch workflow (follow every session):
+
+1. **Before any work**, sync the feature branch with `main`:
+   ```bash
+   git fetch origin
+   git checkout claude/git-push-main-1zcqw5
+   git merge origin/main   # bring in any main commits first
+   ```
+2. **Develop** on the feature branch only. Commit and push there.
+3. **Before each push**, fetch again and merge `origin/main` to stay current:
+   ```bash
+   git fetch origin && git merge origin/main
+   git push -u origin claude/git-push-main-1zcqw5
+   ```
+4. **Fast-forward `main` FROM the feature branch** only at a deliberate stable
+   milestone (never as routine). Then immediately fast-forward the feature branch
+   back to `main` so they stay identical:
+   ```bash
+   git checkout main && git merge --ff-only claude/git-push-main-1zcqw5
+   git push origin main
+   git checkout claude/git-push-main-1zcqw5 && git merge origin/main
+   ```
+   Skip step 4 entirely unless `main` must have the change (e.g. a new
+   `workflow_dispatch` workflow that only triggers from the default branch).
+
 - Resolve conflicts by understanding both sides. For the legacy `web/` console
   (not the product), preferring one side wholesale is acceptable; for `app/`,
   `api/`, workflows, and docs, merge the actual intent.
