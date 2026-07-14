@@ -67,6 +67,37 @@ When adding a new integration secret: add it to GitHub secrets **and** to the
 `--settings` list in `.github/workflows/api-deploy.yml` (exact-name match — a
 mismatch silently blanks the setting).
 
+## Live Database Access
+
+**You cannot reach the live Postgres DB or the Function App API directly from a
+Claude Code sandbox** — the egress proxy blocks `azurewebsites.net` and DB
+credentials are not available as env vars here. Use GitHub Actions instead.
+
+### Query the live DB
+Trigger `.github/workflows/db-query.yml` via `workflow_dispatch` (it's on `main`).
+The default SQL is `SELECT stage, COUNT(*) FROM opportunity GROUP BY stage`.
+Pass custom SQL via the `sql` input for any other query.
+
+```
+# Via MCP tool:
+mcp__github__actions_run_trigger(
+  method="run_workflow",
+  owner="deventerpriseds-org",
+  repo="boost-application-packet-platform",
+  workflow_id="db-query.yml",
+  ref="main",
+  inputs={}   # or { sql: "SELECT ..." }
+)
+# Then poll mcp__github__actions_list for the run_id, then get_job_logs to read output.
+```
+
+### Check live API health
+```
+curl https://job-platform-api.azurewebsites.net/api/health
+curl https://job-platform-api.azurewebsites.net/api/config-status
+```
+(These work from a browser or the user's terminal — not from this sandbox.)
+
 ## Deploy Commands
 
 ```bash
