@@ -6,6 +6,7 @@
 - **Subscription**: 09594120-1b35-4e21-84c6-451ac27175a3
 - **Tenant**: ee633423-c321-413c-a191-ace8b07e4196 (primary, where subscription lives)
 - **Region**: eastus
+- **Production owner email**: von.ellis@enterpriseds.io — use as `?owner=` query param when calling app routes programmatically via api-test.yml
 - **Function App**: job-platform-api (job-platform-api.azurewebsites.net) — the API for BOTH apps below
 - **PRODUCTION APP (Executive Engine)**: Static Web App `executive-engine-web` → **https://purple-ground-0f377120f.7.azurestaticapps.net/**. This is the real product we build (`executive-engine` frontend, vendored into `app/`, deployed by `.github/workflows/executive-engine-deploy.yml`). When someone says "the app", this is it.
 - **Legacy dev console**: Static Web App `job-platform-web` (happy-river-0935bfe0f.7.azurestaticapps.net) — the old MT-XX test harness (`web/`), NOT the product.
