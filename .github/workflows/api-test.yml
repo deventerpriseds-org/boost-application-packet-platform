@@ -19,30 +19,59 @@ jobs:
   call:
     runs-on: ubuntu-latest
     steps:
-      - name: Get access token
-        id: token
-        run: |
-          TOKEN=$(curl -s -X POST \
-            "https://login.microsoftonline.com/${{ secrets.AZURE_TENANT_ID }}/oauth2/v2.0/token" \
-            -d "client_id=${{ secrets.AZURE_CLIENT_ID }}" \
-            -d "client_secret=${{ secrets.AZURE_CLIENT_SECRET }}" \
-            -d "scope=api://${{ secrets.AZURE_CLIENT_ID }}/.default" \
-            -d "grant_type=client_credentials" | jq -r '.access_token')
-          echo "token=$TOKEN" >> $GITHUB_OUTPUT
-
       - name: Call API
+        env:
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+          API_METHOD: ${{ github.event.inputs.method }}
+          API_PATH: ${{ github.event.inputs.path }}
+          API_BODY: ${{ github.event.inputs.body }}
         run: |
-          METHOD="${{ github.event.inputs.method }}"
-          PATH="${{ github.event.inputs.path }}"
-          BODY="${{ github.event.inputs.body }}"
-          BASE="https://job-platform-api.azurewebsites.net"
+          python3 - <<'PYEOF'
+          import os, json, urllib.request, urllib.parse
 
-          if [ -n "$BODY" ]; then
-            curl -s -X "$METHOD" "$BASE$PATH" \
-              -H "Authorization: Bearer ${{ steps.token.outputs.token }}" \
-              -H "Content-Type: application/json" \
-              -d "$BODY" | jq .
-          else
-            curl -s -X "$METHOD" "$BASE$PATH" \
-              -H "Authorization: Bearer ${{ steps.token.outputs.token }}" | jq .
-          fi
+          tenant = os.environ['AZURE_TENANT_ID']
+          client_id = os.environ['AZURE_CLIENT_ID']
+          client_secret = os.environ['AZURE_CLIENT_SECRET']
+          method = os.environ.get('API_METHOD', 'GET')
+          path = os.environ['API_PATH']
+          body = os.environ.get('API_BODY', '')
+
+          token_url = f"https://login.microsoftonline.com/{tenant}/oauth2/v2.0/token"
+          token_data = urllib.parse.urlencode({
+            'client_id': client_id,
+            'client_secret': client_secret,
+            'scope': f'api://{client_id}/.default',
+            'grant_type': 'client_credentials',
+          }).encode()
+          req = urllib.request.Request(token_url, data=token_data, method='POST')
+          with urllib.request.urlopen(req) as resp:
+            token_resp = json.loads(resp.read())
+          token = token_resp.get('access_token')
+          if not token:
+            print('ERROR: token fetch failed:', json.dumps(token_resp, indent=2))
+            exit(1)
+          print(f'Token acquired (expires_in={token_resp.get("expires_in")}s)')
+
+          base = 'https://job-platform-api.azurewebsites.net'
+          url = base + path
+          headers = {'Authorization': f'Bearer {token}', 'Content-Type': 'application/json'}
+          req_body = body.encode() if body else None
+          req = urllib.request.Request(url, data=req_body, headers=headers, method=method)
+          try:
+            with urllib.request.urlopen(req) as resp:
+              status = resp.status
+              result = json.loads(resp.read())
+          except urllib.error.HTTPError as e:
+            status = e.code
+            try:
+              result = json.loads(e.read())
+            except Exception:
+              result = {'http_error': str(e)}
+
+          print(f'\nHTTP {status} {method} {url}')
+          print(json.dumps(result, indent=2))
+          if status >= 400:
+            exit(1)
+          PYEOF
