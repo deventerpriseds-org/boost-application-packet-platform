@@ -162,9 +162,10 @@ export async function cadenceSeed(req: HttpRequest, context: InvocationContext):
     const existing = (await client.query(`select count(*)::int as n from outreach_message where opp_id = $1 and day_offset is not null`, [oppId])).rows[0].n
     if (existing === 0) {
       for (const c of CADENCE) {
+        const scheduledFor = new Date(Date.now() + c.d * 24 * 60 * 60 * 1000).toISOString()
         await client.query(
-          `insert into outreach_message (opp_id, channel, state, day_offset, scheduled_for) values ($1,$2,$3,$4, now() + (interval '1 day' * $4))`,
-          [oppId, c.channel, c.state, c.d]
+          `insert into outreach_message (opp_id, channel, state, day_offset, scheduled_for) values ($1,$2,$3,$4,$5)`,
+          [oppId, c.channel, c.state, c.d, scheduledFor]
         )
       }
     }
