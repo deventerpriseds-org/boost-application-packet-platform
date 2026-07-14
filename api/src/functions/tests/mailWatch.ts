@@ -333,7 +333,7 @@ export async function mailSubscribe(req: HttpRequest, context: InvocationContext
     if (!res.ok) return { status: 200, headers: HEADERS, jsonBody: { ok: false, detail: `subscribe HTTP ${res.status}: ${txt.slice(0, 500)}`, hint: res.status === 403 ? 'App registration needs Mail.Read (Application) + admin consent to subscribe to a mailbox.' : undefined } }
     const sub = JSON.parse(txt)
     // Ensure ownerEmail is in sync with the subscribed mailbox.
-    await saveConfig({ ownerEmail: cfg.mailbox }).catch(() => {})
+    await saveConfig(owner, { ownerEmail: cfg.mailbox }).catch(() => {})
     return { status: 200, headers: HEADERS, jsonBody: { ok: true, subscriptionId: sub.id, expires: sub.expirationDateTime, mailbox: cfg.mailbox, folder: cfg.folderName, removedStale: removed } }
   } catch (err) {
     return { status: 200, headers: HEADERS, jsonBody: { error: String(err) } }
@@ -670,16 +670,17 @@ export async function mailClearReload(req: HttpRequest, context: InvocationConte
   const creds = graphCreds()
   if (!creds.clientId || !creds.clientSecret) return { status: 200, headers: HEADERS, jsonBody: { error: 'MICROSOFT creds not set' } }
   try {
-    const cfg = await loadConfig()
+    const { owner } = resolveOwner(req)
+    const cfg = await loadConfig(owner)
     const days = Math.max(1, Math.min(Number((await req.json().catch(() => ({})) as any)?.days) || 7, 30))
     const token = await getMicrosoftToken(creds.tenantId, creds.clientId, creds.clientSecret)
 
-    // Delete all real (non-demo) opportunities for this owner.
+    // Delete all real (non-demo) opportunities for the authenticated owner.
     let pgClient
     let cleared = 0
     try {
       pgClient = await getPgClient()
-      const del = await pgClient.query(`delete from opportunity where owner_email = $1 and not is_demo`, [cfg.ownerEmail])
+      const del = await pgClient.query(`delete from opportunity where owner_email = $1 and not is_demo`, [owner])
       cleared = del.rowCount ?? 0
     } finally { try { await pgClient?.end() } catch {} }
 

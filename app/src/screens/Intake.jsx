@@ -54,6 +54,7 @@ export default function Intake() {
   const [feed, setFeed] = useState({ loading: false, scanned: null, trace: [], error: null, at: null })
   const [minutes, setMinutes] = useState(120)
   const [hideSkipped, setHideSkipped] = useState(true)
+  const [clearDays, setClearDays] = useState(7)
   const [clearing, setClearing] = useState(false)
   const [clearResult, setClearResult] = useState(null)
 
@@ -75,15 +76,15 @@ export default function Intake() {
   }, [minutes])
 
   const clearReload = useCallback(async () => {
-    if (!window.confirm('This will delete all your current opportunities and re-pull the last 7 days from your mailbox. Continue?')) return
+    if (!window.confirm(`This will delete all your current opportunities and re-pull the last ${clearDays} day${clearDays === 1 ? '' : 's'} from your mailbox. Continue?`)) return
     setClearing(true); setClearResult(null)
     try {
-      const res = await api.mailClearReload({ days: 7 })
+      const res = await api.mailClearReload({ days: clearDays })
       if (res.error) throw new Error(res.error)
       setClearResult({ ok: true, msg: `Cleared ${res.cleared} opp${res.cleared === 1 ? '' : 's'}, re-ingested ${res.ingested?.inserted ?? 0} from ${res.scanned} messages.` })
     } catch (e) { setClearResult({ ok: false, msg: String(e.message || e) }) }
     finally { setClearing(false) }
-  }, [])
+  }, [clearDays])
 
   useEffect(() => { loadSubs() }, [loadSubs])
 
@@ -122,7 +123,14 @@ export default function Intake() {
           <input type="checkbox" checked={hideSkipped} onChange={(e) => setHideSkipped(e.target.checked)} style={{ cursor: 'pointer' }} />
           Hide non-alerts
         </label>
-        <button className="px-btn" onClick={clearReload} disabled={clearing} style={{ color: 'var(--proto-red)' }} title="Delete all opportunities and re-pull last 7 days">{clearing ? 'Clearing...' : 'Clear & reload 7d'}</button>
+        <select className="px-btn" value={clearDays} onChange={(e) => setClearDays(Number(e.target.value))} style={{ fontSize: 12, color: 'var(--proto-red)' }}>
+          <option value={1}>1 day</option>
+          <option value={3}>3 days</option>
+          <option value={7}>7 days</option>
+          <option value={14}>14 days</option>
+          <option value={30}>30 days</option>
+        </select>
+        <button className="px-btn" onClick={clearReload} disabled={clearing} style={{ color: 'var(--proto-red)' }}>{clearing ? 'Clearing...' : 'Clear & reload'}</button>
         {feed.at && <span className="px-small" style={{ color: 'var(--proto-ink2)' }}>scanned {feed.scanned} message{feed.scanned === 1 ? '' : 's'} · {timeAgo(feed.at)}</span>}
         {feed.error && <span className="px-small" style={{ color: 'var(--proto-red)' }}>{feed.error}</span>}
         {clearResult && <span className="px-small" style={{ color: clearResult.ok ? 'var(--surface-success-default)' : 'var(--proto-red)' }}>{clearResult.msg}</span>}
