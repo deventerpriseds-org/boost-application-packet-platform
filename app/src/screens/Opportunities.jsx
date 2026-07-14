@@ -2,7 +2,7 @@ import React, { useMemo, useState, useEffect } from 'react'
 import { go } from '../state.jsx'
 import { api } from '../api.js'
 import { MatchScore, StageBadge, UrgencyPill, Pill } from '../shell.jsx'
-import { Loading, ErrorBox, Empty } from './Today.jsx'
+import { Loading, ErrorBox, Empty, roleFamily } from './Today.jsx'
 
 const URGENCIES = ['All', 'Hot', 'Warm', 'Cool']
 const FRESH_STAGES = ['discovered', 'saved', 'enriched']
@@ -10,6 +10,11 @@ const ACTIVE_STAGES = ['applied', 'outreach', 'engaged', 'screen', 'r1', 'panel'
 const CUTOFF_24H = () => Date.now() - 24 * 60 * 60 * 1000
 
 const FILTER_LABELS = { new: 'New today', backlog: 'Backlog', active: 'Active', hot: 'Hot' }
+const filterLabel = (f) => {
+  if (!f) return ''
+  if (f.startsWith('role:')) return f.slice(5)
+  return FILTER_LABELS[f] || f
+}
 
 export default function Opportunities({ opps, filter }) {
   const { loading, error, opportunities, stages } = opps
@@ -48,6 +53,9 @@ export default function Opportunities({ opps, filter }) {
       r = r.filter((o) => ACTIVE_STAGES.includes(o.stage))
     } else if (activeFilter === 'hot') {
       r = r.filter((o) => o.urgency === 'Hot')
+    } else if (activeFilter?.startsWith('role:')) {
+      const fam = activeFilter.slice(5)
+      r = r.filter((o) => roleFamily(o) === fam)
     } else {
       if (query.trim()) {
         const q = query.toLowerCase()
@@ -79,7 +87,7 @@ export default function Opportunities({ opps, filter }) {
       )}
       {activeFilter && (
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px', background: 'var(--proto-paper)', border: '1px solid var(--proto-rule-soft)', borderRadius: 8 }}>
-          <span className="px-small">Filtered: <b>{FILTER_LABELS[activeFilter]}</b></span>
+          <span className="px-small">Filtered: <b>{filterLabel(activeFilter)}</b></span>
           <button className="px-btn" style={{ fontSize: 11 }} onClick={() => { setActiveFilter(null); go('/opportunities') }}>✕ Clear</button>
         </div>
       )}
