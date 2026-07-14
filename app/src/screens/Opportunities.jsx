@@ -12,6 +12,7 @@ const CUTOFF_24H = () => Date.now() - 24 * 60 * 60 * 1000
 const FILTER_LABELS = { new: 'New today', backlog: 'Backlog', active: 'Active', hot: 'Hot' }
 const filterLabel = (f) => {
   if (!f) return ''
+  if (f.startsWith('rolenew:')) return f.slice(8) + ' — new today'
   if (f.startsWith('role:')) return f.slice(5)
   return FILTER_LABELS[f] || f
 }
@@ -53,6 +54,10 @@ export default function Opportunities({ opps, filter }) {
       r = r.filter((o) => ACTIVE_STAGES.includes(o.stage))
     } else if (activeFilter === 'hot') {
       r = r.filter((o) => o.urgency === 'Hot')
+    } else if (activeFilter?.startsWith('rolenew:')) {
+      const fam = activeFilter.slice(8)
+      const cutoff = CUTOFF_24H()
+      r = r.filter((o) => roleFamily(o) === fam && FRESH_STAGES.includes(o.stage) && o.createdAt && new Date(o.createdAt).getTime() > cutoff)
     } else if (activeFilter?.startsWith('role:')) {
       const fam = activeFilter.slice(5)
       r = r.filter((o) => roleFamily(o) === fam)
@@ -69,6 +74,13 @@ export default function Opportunities({ opps, filter }) {
     r = [...r].sort((a, b) => (sort === 'match' ? (b.match || 0) - (a.match || 0) : (a.company || '').localeCompare(b.company || '')))
     return r
   }, [opportunities, query, urgency, stage, sort, roleFilter, activeFilter])
+
+  // Single-result redirect: if a named filter yields exactly 1 opp, go directly to its detail
+  useEffect(() => {
+    if (activeFilter && rows.length === 1 && !loading) {
+      go('/opp/' + rows[0].id)
+    }
+  }, [rows, activeFilter, loading])
 
   if (loading) return <Loading />
   if (error) return <ErrorBox error={error} />

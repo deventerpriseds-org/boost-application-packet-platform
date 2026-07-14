@@ -94,7 +94,7 @@ function InboxScrubHero({ newToday, backlog, toast }) {
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '6px 20px' }}>
             {bins.length === 0 && <div className="px-small">Inbox is clear — no new roles overnight.</div>}
             {bins.map(([fam, n]) => (
-              <div key={fam} onClick={() => go('/opportunities?filter=role:' + encodeURIComponent(fam))} style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', padding: '4px 6px', borderRadius: 6, transition: 'background 0.12s' }} onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--proto-rule-soft)' }} onMouseLeave={(e) => { e.currentTarget.style.background = '' }}>
+              <div key={fam} onClick={() => go('/opportunities?filter=rolenew:' + encodeURIComponent(fam))} style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', padding: '4px 6px', borderRadius: 6, transition: 'background 0.12s' }} onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--proto-rule-soft)' }} onMouseLeave={(e) => { e.currentTarget.style.background = '' }}>
                 <span style={{ width: 9, height: 9, borderRadius: '50%', background: ROLE_DOT[fam] || 'var(--proto-ink3)', flexShrink: 0 }} />
                 <span style={{ fontSize: 13, fontWeight: 600, flex: 1 }}>{fam}</span>
                 <span className="px-pill">{n} new</span>
