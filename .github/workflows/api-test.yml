@@ -42,7 +42,7 @@ jobs:
           token_data = urllib.parse.urlencode({
             'client_id': client_id,
             'client_secret': client_secret,
-            'scope': f'api://{client_id}/.default',
+            'scope': f'{client_id}/.default',
             'grant_type': 'client_credentials',
           }).encode()
           req = urllib.request.Request(token_url, data=token_data, method='POST')
