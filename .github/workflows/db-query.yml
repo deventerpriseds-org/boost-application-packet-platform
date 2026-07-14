@@ -1,0 +1,28 @@
+name: DB Query
+
+on:
+  workflow_dispatch:
+    inputs:
+      sql:
+        description: 'SQL to run (read-only)'
+        required: false
+        default: |
+          SELECT stage, COUNT(*) AS count
+          FROM opportunity
+          GROUP BY stage
+          ORDER BY count DESC;
+
+jobs:
+  query:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Run query
+        env:
+          PGHOST: eds-postgresql.postgres.database.azure.com
+          PGPORT: 5432
+          PGDATABASE: boost_resume_n_packet_builder
+          PGUSER: Admin_eds
+          PGPASSWORD: ${{ secrets.Azure_admin_pw }}
+          PGSSLMODE: require
+        run: |
+          psql -c "${{ github.event.inputs.sql }}"
