@@ -33,7 +33,13 @@ export default function Outreach() {
   if (state.loading) return <Loading />
   if (state.error) return <ErrorBox error={state.error} />
   const { messages } = state
-  if (!messages.length) return <Empty>No outreach yet.{' '}<span className="px-link" style={{ cursor: 'pointer' }} onClick={() => go('/opportunities')}>Open an opportunity</span>{' '}then use the Outreach tab to start a cadence.</Empty>
+  if (!messages.length) return (
+    <Empty>
+      No outreach yet.{' '}
+      <span className="px-link" style={{ cursor: 'pointer' }} onClick={() => go('/opportunities')}>Open an opportunity</span>
+      {' '}then go to the Outreach tab and start a cadence.
+    </Empty>
+  )
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>

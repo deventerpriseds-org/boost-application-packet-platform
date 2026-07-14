@@ -14,11 +14,17 @@ const HEADERS = {
 // Env values are the *defaults* only — the live watch config is stored in
 // Postgres (mail_watch_config) and edited from the in-app Intake config panel.
 const DEFAULT_MAILBOX = process.env.MAIL_WATCH_MAILBOX || 'von.ellis@enterpriseds.io'
-const DEFAULT_OWNER = process.env.MAIL_OWNER_EMAIL || 'demo@executive-engine.local'
+// Owner always equals the watched mailbox. The old 'demo@executive-engine.local' default
+// was a bug — opportunities were stored under the wrong key and never appeared in the UI.
+const DEFAULT_OWNER = process.env.MAIL_OWNER_EMAIL || DEFAULT_MAILBOX
 const CLIENT_STATE = () => process.env.MAIL_CLIENT_STATE || 'ee-linkedin-watch'
 const NOTIFY_URL = () => process.env.MAIL_NOTIFY_URL || 'https://job-platform-api.azurewebsites.net/api/mail/notify'
 const DEFAULT_SENDERS = ['linkedin']
-const DEFAULT_SUBJECTS = ['job alert', 'jobs for you', 'new jobs', 'is hiring', 'recommended job', 'new opportunit']
+const DEFAULT_SUBJECTS = [
+  'job alert', 'jobs for you', 'new jobs', 'is hiring', 'recommended job',
+  'new opportunit', 'position', 'opening', 'career', 'hiring', 'role at',
+  'jobs matching', 'job match', 'executive role',
+]
 
 function graphCreds() {
   const tenantId = process.env.MICROSOFT_TENANT_ID || 'ee633423-c321-413c-a191-ace8b07e4196'
@@ -94,7 +100,15 @@ async function saveConfig(owner: string, patch: Partial<WatchConfig>): Promise<W
       // If no row for this owner yet, copy the legacy DEFAULT_OWNER row's settings as a starting point.
       ?? (await client.query('select * from mail_watch_config where owner_email = $1', [DEFAULT_OWNER])).rows[0]
     const base: WatchConfig = cur ? rowToConfig(cur) : { ownerEmail: owner, mailbox: DEFAULT_MAILBOX, folder: 'inbox', folderName: 'Inbox', senders: DEFAULT_SENDERS, subjectPatterns: DEFAULT_SUBJECTS, enabled: true }
-    const next: WatchConfig = { ...base, ...patch, ownerEmail: owner }
+    // ownerEmail always tracks the mailbox — they must match so opportunities
+    // show up when the user views their pipeline.
+    const newMailbox = patch.mailbox ?? base.mailbox
+    const effectiveOwner = newMailbox
+    const next: WatchConfig = { ...base, ...patch, mailbox: newMailbox, ownerEmail: effectiveOwner }
+    // If the mailbox (and therefore owner key) changed, delete the stale row first.
+    if (cur && cur.owner_email !== effectiveOwner) {
+      await client.query('delete from mail_watch_config where owner_email = $1', [cur.owner_email])
+    }
     const row = (await client.query(
       `insert into mail_watch_config (owner_email, mailbox, folder, folder_name, senders, subject_patterns, enabled, updated_at)
        values ($1,$2,$3,$4,$5,$6,$7, now())
@@ -102,7 +116,7 @@ async function saveConfig(owner: string, patch: Partial<WatchConfig>): Promise<W
          mailbox = excluded.mailbox, folder = excluded.folder, folder_name = excluded.folder_name,
          senders = excluded.senders, subject_patterns = excluded.subject_patterns, enabled = excluded.enabled, updated_at = now()
        returning *`,
-      [owner, next.mailbox, next.folder, next.folderName, next.senders, next.subjectPatterns, next.enabled]
+      [effectiveOwner, next.mailbox, next.folder, next.folderName, next.senders, next.subjectPatterns, next.enabled]
     )).rows[0]
     return rowToConfig(row)
   } finally { try { await client?.end() } catch {} }
@@ -111,10 +125,61 @@ async function saveConfig(owner: string, patch: Partial<WatchConfig>): Promise<W
 const folderRef = (cfg: WatchConfig) => `mailFolders('${cfg.folder || 'inbox'}')`
 const messagesResource = (cfg: WatchConfig) => `users/${cfg.mailbox}/${folderRef(cfg)}/messages`
 
-// Does a message look like a job alert per the configured senders/subjects?
+// Detect which job board sourced a message. Checks folder name first (user mail rules
+// are the cleanest signal), then sender/keyword as a catch-all. Both always run.
+function detectSource(from: string, folderName?: string): string {
+  const boards: Array<[RegExp, string]> = [
+    [/linkedin/i, 'LinkedIn'],
+    [/indeed/i, 'Indeed'],
+    [/theladders|ladders/i, 'Ladders'],
+    [/glassdoor/i, 'Glassdoor'],
+    [/ziprecruiter/i, 'ZipRecruiter'],
+    [/greenhouse/i, 'Greenhouse'],
+    [/lever\.co/i, 'Lever'],
+    [/dice\.com/i, 'Dice'],
+    [/monster/i, 'Monster'],
+  ]
+  const folder = (folderName || '').toLowerCase()
+  const sender = (from || '').toLowerCase()
+  for (const [pat, label] of boards) {
+    if (pat.test(folder) || pat.test(sender)) return label
+  }
+  return 'Email'
+}
+
+// Fire-and-forget: classify the opportunity against the user's target roles and
+// update roles_for[], match_score, fit, urgency, why_surfaced.
+async function tagOppRoles(oppId: string, opp: any, owner: string): Promise<void> {
+  const key = process.env.OPENAI_API_KEY
+  if (!key) return
+  let client
+  try {
+    client = await getPgClient()
+    const personas = (await client.query(
+      `select key, name, master_role from persona where owner_email = $1 order by key`, [owner]
+    )).rows
+    if (!personas.length) return
+    const roleList = personas.map((p: any) => `${p.key}: ${p.name || p.master_role}`).join(', ')
+    const prompt = `You are a talent classifier. Given a job title and company, identify which of the user's target roles it matches (zero or more). Return ONLY JSON: { "matched": ["KEY1","KEY2"], "fit": "Strong"|"Possible"|"Stretch", "urgency": "Hot"|"Warm"|"Cool", "why": "one sentence" }.\nJob: ${opp.role} at ${opp.company}\nTarget roles: ${roleList}`
+    const res = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
+      body: JSON.stringify({ model: 'gpt-4o-mini', messages: [{ role: 'user', content: prompt }], max_tokens: 200, response_format: { type: 'json_object' } })
+    })
+    if (!res.ok) return
+    const j = (await res.json()) as any
+    const parsed = JSON.parse(j?.choices?.[0]?.message?.content || '{}')
+    const matched: string[] = Array.isArray(parsed.matched) ? parsed.matched.filter((k: string) => personas.some((p: any) => p.key === k)) : []
+    await client.query(
+      `update opportunity set roles_for=$2, fit=$3, urgency=$4, why_surfaced=coalesce(nullif(why_surfaced,''), $5) where id=$1`,
+      [oppId, matched, parsed.fit || null, parsed.urgency || 'Warm', parsed.why || null]
+    )
+  } catch { /* fire-and-forget: never throw */ } finally { try { await client?.end() } catch {} }
+}
+
+// Does a message look like a job alert? Always requires job-related keywords in
+// subject/preview — sender alone is never sufficient, because LinkedIn and other
+// boards also send connection updates, post notifications, etc. that are noise.
 function isAlert(cfg: WatchConfig, from: string, subject: string, preview: string): boolean {
-  const f = (from || '').toLowerCase()
-  if ((cfg.senders || []).some((s) => s && f.includes(s.toLowerCase()))) return true
   const pats = (cfg.subjectPatterns || []).filter(Boolean)
   if (!pats.length) return false
   try { return new RegExp(pats.join('|'), 'i').test(`${subject || ''} ${preview || ''}`) } catch { return false }
@@ -170,29 +235,32 @@ export async function insertOpp(client: any, owner: string, o: any, source = 'Li
     const dup = (await client.query(`select id from opportunity where owner_email = $1 and lower(company) = lower($2) and lower(role) = lower($3) and not dismissed limit 1`, [owner, o.company, o.role])).rows[0]
     if (dup) return { inserted: false, reason: 'duplicate', company: o.company, role: o.role }
   }
-  const roleLower = (o.role || '').toLowerCase()
-  const personaKey = roleLower.includes('product') ? 'VPP' : roleLower.includes('cto') || roleLower.includes('chief') ? 'CTO' : 'VPE'
   const whyText = why || `New ${source} alert${o.url ? ` · ${o.url}` : ''}`
   const r = await client.query(
     `insert into opportunity
-       (owner_email, is_demo, persona_key, company, role, location, comp_range, source, source_date,
+       (owner_email, is_demo, company, role, location, comp_range, source, source_date,
         why_surfaced, roles_for, stage, urgency, embedding)
-     values ($1, false, $2, $3, $4, $5, $6, ${vec ? '$10' : '$9'}, now(), $7, $8, 'discovered', 'Warm', ${vec ? '$9::vector' : 'null'})
+     values ($1, false, $2, $3, $4, $5, ${vec ? '$9' : '$8'}, now(), $6, '{}', 'discovered', 'Warm', ${vec ? '$8::vector' : 'null'})
      returning id`,
     vec
-      ? [owner, personaKey, o.company, o.role, o.location || null, o.comp || null, whyText, [personaKey], vec, source]
-      : [owner, personaKey, o.company, o.role, o.location || null, o.comp || null, whyText, [personaKey], source]
+      ? [owner, o.company, o.role, o.location || null, o.comp || null, whyText, vec, source]
+      : [owner, o.company, o.role, o.location || null, o.comp || null, whyText, source]
   )
   return { inserted: true, id: r.rows[0].id, company: o.company, role: o.role }
 }
 
-async function ingestText(rawText: string, owner: string) {
+async function ingestText(rawText: string, owner: string, source = 'Email') {
   let client
   try {
     client = await getPgClient()
     const opps = await parseAlert(rawText)
     const results = []
-    for (const o of opps) results.push(await insertOpp(client, owner, o))
+    for (const o of opps) {
+      const r = await insertOpp(client, owner, o, source)
+      results.push(r)
+      // Fire-and-forget role tagging — don't await, never blocks ingest
+      if (r.inserted && r.id) tagOppRoles(r.id, o, owner).catch(() => {})
+    }
     return { parsed: opps.length, inserted: results.filter((r) => r.inserted).length, results }
   } finally { try { await client?.end() } catch {} }
 }
@@ -204,7 +272,8 @@ async function ingestMessageId(token: string, id: string, cfg: WatchConfig) {
   const from = (msg?.from?.emailAddress?.address || '').toLowerCase()
   const text = `From: ${from}\nSubject: ${msg?.subject}\n\n${(msg?.body?.content || msg?.bodyPreview || '').replace(/<[^>]+>/g, ' ')}`
   if (!isAlert(cfg, from, msg?.subject, msg?.bodyPreview)) return { skipped: 'not a job alert', from }
-  return await ingestText(text, cfg.ownerEmail)
+  const source = detectSource(from, cfg.folderName)
+  return await ingestText(text, cfg.ownerEmail, source)
 }
 
 // GET/POST /api/mail/notify — Graph webhook: validation handshake + notifications.
@@ -263,6 +332,8 @@ export async function mailSubscribe(req: HttpRequest, context: InvocationContext
     const txt = await res.text()
     if (!res.ok) return { status: 200, headers: HEADERS, jsonBody: { ok: false, detail: `subscribe HTTP ${res.status}: ${txt.slice(0, 500)}`, hint: res.status === 403 ? 'App registration needs Mail.Read (Application) + admin consent to subscribe to a mailbox.' : undefined } }
     const sub = JSON.parse(txt)
+    // Ensure ownerEmail is in sync with the subscribed mailbox.
+    await saveConfig({ ownerEmail: cfg.mailbox }).catch(() => {})
     return { status: 200, headers: HEADERS, jsonBody: { ok: true, subscriptionId: sub.id, expires: sub.expirationDateTime, mailbox: cfg.mailbox, folder: cfg.folderName, removedStale: removed } }
   } catch (err) {
     return { status: 200, headers: HEADERS, jsonBody: { error: String(err) } }
@@ -554,6 +625,21 @@ export async function mailSendTestReal(req: HttpRequest, context: InvocationCont
   } catch (err) { return { status: 200, headers: HEADERS, jsonBody: { error: String(err) } } }
 }
 
+// Collect all messages matching a Graph URL, following @odata.nextLink pages.
+async function fetchAllMessages(token: string, url: string): Promise<any[]> {
+  const msgs: any[] = []
+  let next: string | null = url
+  while (next) {
+    const res = await fetch(next, { headers: { Authorization: `Bearer ${token}` } })
+    if (!res.ok) break
+    const j = (await res.json()) as any
+    msgs.push(...(j?.value || []))
+    next = j?.['@odata.nextLink'] || null
+    if (msgs.length > 2000) break  // safety cap
+  }
+  return msgs
+}
+
 // POST /api/mail/poll-now { minutes? } — on-demand inbox pull + ingest trace.
 export async function mailPollNow(req: HttpRequest, context: InvocationContext): Promise<HttpResponseInit> {
   if (req.method === 'OPTIONS') return { status: 204, headers: HEADERS }
@@ -565,9 +651,8 @@ export async function mailPollNow(req: HttpRequest, context: InvocationContext):
     const minutes = Number((await req.json().catch(() => ({})) as any)?.minutes) || 60
     const token = await getMicrosoftToken(creds.tenantId, creds.clientId, creds.clientSecret)
     const since = new Date(Date.now() - minutes * 60 * 1000).toISOString()
-    const list = await fetch(`https://graph.microsoft.com/v1.0/${messagesResource(cfg)}?$filter=receivedDateTime ge ${since}&$select=id,subject,from,receivedDateTime&$top=25&$orderby=receivedDateTime desc`, { headers: { Authorization: `Bearer ${token}` } })
-    if (!list.ok) return { status: 200, headers: HEADERS, jsonBody: { ok: false, mailbox: cfg.mailbox, folder: cfg.folderName, detail: `list HTTP ${list.status}: ${(await list.text()).slice(0, 400)}` } }
-    const msgs = ((await list.json()) as any)?.value || []
+    const url = `https://graph.microsoft.com/v1.0/${messagesResource(cfg)}?$filter=receivedDateTime ge ${since}&$select=id,subject,from,receivedDateTime&$top=50&$orderby=receivedDateTime desc`
+    const msgs = await fetchAllMessages(token, url)
     const trace: any[] = []
     for (const m of msgs) {
       const r = await ingestMessageId(token, m.id, cfg).catch((e) => ({ error: String(e) }))
@@ -577,10 +662,49 @@ export async function mailPollNow(req: HttpRequest, context: InvocationContext):
   } catch (err) { return { status: 200, headers: HEADERS, jsonBody: { error: String(err) } } }
 }
 
+// POST /api/mail/clear-reload { days? } — wipe stale opportunities for the owner and
+// re-pull the last N days from the watched mailbox. Fixes the empty-pipeline problem
+// when past emails were ingested under the wrong owner key.
+export async function mailClearReload(req: HttpRequest, context: InvocationContext): Promise<HttpResponseInit> {
+  if (req.method === 'OPTIONS') return { status: 204, headers: HEADERS }
+  const creds = graphCreds()
+  if (!creds.clientId || !creds.clientSecret) return { status: 200, headers: HEADERS, jsonBody: { error: 'MICROSOFT creds not set' } }
+  try {
+    const cfg = await loadConfig()
+    const days = Math.max(1, Math.min(Number((await req.json().catch(() => ({})) as any)?.days) || 7, 30))
+    const token = await getMicrosoftToken(creds.tenantId, creds.clientId, creds.clientSecret)
+
+    // Delete all real (non-demo) opportunities for this owner.
+    let pgClient
+    let cleared = 0
+    try {
+      pgClient = await getPgClient()
+      const del = await pgClient.query(`delete from opportunity where owner_email = $1 and not is_demo`, [cfg.ownerEmail])
+      cleared = del.rowCount ?? 0
+    } finally { try { await pgClient?.end() } catch {} }
+
+    // Re-poll the mailbox for the requested window.
+    const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString()
+    const url = `https://graph.microsoft.com/v1.0/${messagesResource(cfg)}?$filter=receivedDateTime ge ${since}&$select=id,subject,from,receivedDateTime&$top=50&$orderby=receivedDateTime desc`
+    const msgs = await fetchAllMessages(token, url)
+
+    let parsed = 0, inserted = 0
+    for (const m of msgs) {
+      try {
+        const r = await ingestMessageId(token, m.id, cfg)
+        if (r && typeof r === 'object' && 'parsed' in r) { parsed += (r as any).parsed; inserted += (r as any).inserted }
+      } catch {}
+    }
+
+    return { status: 200, headers: HEADERS, jsonBody: { ok: true, owner: cfg.ownerEmail, mailbox: cfg.mailbox, days, cleared, scanned: msgs.length, ingested: { parsed, inserted } } }
+  } catch (err) { return { status: 200, headers: HEADERS, jsonBody: { error: String(err) } } }
+}
+
 app.http('mailNotify', { methods: ['GET', 'POST'], authLevel: 'anonymous', route: 'mail/notify', handler: mailNotify })
 app.http('mailSendTest', { methods: ['POST', 'OPTIONS'], authLevel: 'anonymous', route: 'mail/send-test', handler: mailSendTest })
 app.http('mailSendTestReal', { methods: ['POST', 'OPTIONS'], authLevel: 'anonymous', route: 'mail/send-test-real', handler: mailSendTestReal })
 app.http('mailPollNow', { methods: ['POST', 'OPTIONS'], authLevel: 'anonymous', route: 'mail/poll-now', handler: mailPollNow })
+app.http('mailClearReload', { methods: ['POST', 'OPTIONS'], authLevel: 'anonymous', route: 'mail/clear-reload', handler: mailClearReload })
 app.http('mailSubscribe', { methods: ['POST', 'OPTIONS'], authLevel: 'anonymous', route: 'mail/subscribe', handler: mailSubscribe })
 app.http('mailSubscriptions', { methods: ['GET', 'OPTIONS'], authLevel: 'anonymous', route: 'mail/subscriptions', handler: mailSubscriptions })
 app.http('mailIngestTest', { methods: ['POST', 'OPTIONS'], authLevel: 'anonymous', route: 'mail/ingest-test', handler: mailIngestTest })

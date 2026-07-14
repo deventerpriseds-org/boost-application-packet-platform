@@ -116,6 +116,10 @@ function Overview({ o, toast, id, reload }) {
   const [match, setMatch] = useState(null)
   const [apply, setApply] = useState(null)
   const [preparing, setPreparing] = useState(false)
+  const [packet, setPacket] = useState(null)
+  useEffect(() => {
+    api.getPacket(id || o.id).then((r) => { if (!r.error) setPacket(r) }).catch(() => {})
+  }, [id, o.id])
   const enrich = async () => {
     setEnriching(true)
     try { const r = await api.enrichOpportunity(id || o.id); if (r.error) throw new Error(r.error); toast(`Enriched: ${(r.enrichment?.companySignals || []).length} signals, ${(r.enrichment?.painHypotheses || []).length} pains`); reload && reload() }
@@ -139,8 +143,20 @@ function Overview({ o, toast, id, reload }) {
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
             <div style={{ flex: 1, minWidth: 160 }}>
               <div className="px-small" style={{ textTransform: 'uppercase', letterSpacing: 1, color: 'var(--text-brand)' }}>Application packet</div>
-              <div style={{ fontSize: 16, fontWeight: 700, marginTop: 2 }}>Not started</div>
-              <div className="px-small">Keyword-tailored resume, portfolio & intro · approval rounds</div>
+              <div style={{ fontSize: 16, fontWeight: 700, marginTop: 2 }}>
+                {packet == null ? 'Not started' : (() => {
+                  const arts = packet.artifacts || []
+                  const approved = arts.filter((a) => a.status === 'approved').length
+                  if (arts.length === 0) return 'Not started'
+                  if (approved >= 4) return 'Complete'
+                  return 'In progress'
+                })()}
+              </div>
+              <div className="px-small">
+                {packet && (packet.artifacts || []).length > 0
+                  ? `${(packet.artifacts || []).filter((a) => a.status === 'approved').length} / ${(packet.artifacts || []).length} approved`
+                  : 'Keyword-tailored resume, portfolio & intro · approval rounds'}
+              </div>
             </div>
             <button className="px-btn px-btn-accent" onClick={() => go(`/packet/${o.id}`)}>Build packet →</button>
           </div>
@@ -260,10 +276,16 @@ function StatusRow({ k, v }) {
 }
 
 function Contacts({ contacts, oppId, toast }) {
+  const [enriching, setEnriching] = useState(false)
+  const enrich = async () => {
+    setEnriching(true)
+    try { const r = await api.enrichOpportunity(oppId); if (r.error) throw new Error(r.error); toast('Enriched — reload to see contacts') }
+    catch (e) { toast(`Enrich failed: ${e.message || e}`) } finally { setEnriching(false) }
+  }
   if (!contacts.length) return (
-    <div className="px-box" style={{ padding: 20, textAlign: 'center', color: 'var(--proto-ink2)' }}>
-      No contacts enriched yet.
-      <div style={{ marginTop: 10 }}><button className="px-btn px-btn-accent" onClick={async () => { try { await api.enrichOpportunity(oppId); toast('Enrichment started') } catch { toast('Enrich failed') } }}>Enrich now</button></div>
+    <div className="px-box" style={{ padding: 24, textAlign: 'center', color: 'var(--proto-ink2)' }}>
+      <div>No contacts enriched for this opportunity yet.</div>
+      <button className="px-btn px-btn-accent" style={{ marginTop: 12, fontSize: 13 }} disabled={enriching} onClick={enrich}>{enriching ? 'Enriching...' : 'Enrich now'}</button>
     </div>
   )
   return (
@@ -275,7 +297,7 @@ function Contacts({ contacts, oppId, toast }) {
             <div className="px-small">{p.role}</div>
             {p.signal && <div className="px-small" style={{ marginTop: 6 }}>⚡ {p.signal}</div>}
             <div style={{ display: 'flex', gap: 6, marginTop: 10 }}>
-              <button className="px-btn" style={{ fontSize: 12 }} onClick={() => toast('Opening LinkedIn…')}>Open LinkedIn</button>
+              <button className="px-btn" style={{ fontSize: 12 }} onClick={() => window.open(p.linkedinUrl || `https://www.linkedin.com/search/results/people/?keywords=${encodeURIComponent(p.name)}`, '_blank')}>Open LinkedIn</button>
               <button className="px-btn px-btn-dark" style={{ fontSize: 12 }} onClick={() => go(`/compose/${oppId}`)}>Draft outreach</button>
             </div>
           </div>

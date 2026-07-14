@@ -175,3 +175,10 @@ NOT to treat `main` as untouchable. Do the sync yourself; don't hand it to the u
 - After any merge: `npm run build` both `api/` and `app/`, check for duplicate
   `app.http` route registrations, and smoke-test the previously-passing live
   endpoints before considering it done.
+
+## No dead UI (standing rule)
+
+Every button, link, and selector must be wired before committing.
+Never ship a `onClick={() => toast('...')}` stub as a real button.
+Never render hardcoded fake names, counts, or statuses as live data.
+If a feature isn't ready, hide the control — don't fake it.

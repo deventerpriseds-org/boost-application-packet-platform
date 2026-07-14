@@ -98,7 +98,11 @@ function IntakeSettings() {
     } catch (e) { setRealTest({ running: false, result: { error: String(e.message || e) } }) }
   }
 
-  if (isDemo) return <Card>Sign in with Microsoft to configure your mailbox and intake settings.{' '}<span className="px-link" style={{ cursor: 'pointer' }} onClick={() => go('/settings/account')}>Connect account</span></Card>
+  if (isDemo) return (
+    <Card>Sign in with Microsoft to configure your mailbox and intake settings.{' '}
+      <span className="px-link" style={{ cursor: 'pointer' }} onClick={() => go('/settings/account')}>Connect account →</span>
+    </Card>
+  )
   if (cfgErr) return <Card style={{ color: 'var(--proto-red)' }}>Could not load intake config: {cfgErr}</Card>
   if (!cfg) return <Card style={{ color: 'var(--proto-ink2)' }}>Loading intake configuration…</Card>
 
@@ -451,8 +455,12 @@ function CoachSettings() {
     catch (e) { setMsg(String(e.message || e)) } finally { setBusy(false) }
   }
 
-  if (isDemo) return <Card>Sign in to configure the AI coach.{' '}<span className="px-link" style={{ cursor: 'pointer' }} onClick={() => go('/settings/account')}>Connect account</span></Card>
-  if (cfgErr) return <Card style={{ color: 'var(--proto-red)' }}>Could not load coach config: {cfgErr}</Card>
+  if (isDemo) return (
+    <Card>Sign in to configure the AI coach.{' '}
+      <span className="px-link" style={{ cursor: 'pointer' }} onClick={() => go('/settings/account')}>Connect account →</span>
+    </Card>
+  )
+  if (cfgErr) return <Card style={{ color: 'var(--proto-red)' }}>Couldn't load coach config: {cfgErr}</Card>
   if (!cfg) return <Card style={{ color: 'var(--proto-ink2)' }}>Loading coach configuration…</Card>
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
@@ -546,7 +554,84 @@ function SystemSettings() {
   )
 }
 
-const SECTIONS = [{ key: 'account', label: 'Account' }, { key: 'intake', label: 'Intake' }, { key: 'coach', label: 'Coach' }, { key: 'workspace', label: 'Workspace' }, { key: 'usage', label: 'Usage' }, { key: 'system', label: 'System' }]
+// Roles — target role groups for AI tagging of ingested opportunities.
+// Each role becomes a tag (roles_for[]) on every opportunity; all opps remain
+// visible — this is grouping/filtering aid, not a hard filter.
+function RolesSettings() {
+  const [roles, setRoles] = useState(null)
+  const [adding, setAdding] = useState(false)
+  const [newKey, setNewKey] = useState('')
+  const [newName, setNewName] = useState('')
+  const [msg, setMsg] = useState('')
+  const [editKey, setEditKey] = useState(null)
+  const [editName, setEditName] = useState('')
+
+  const load = useCallback(async () => {
+    try { const r = await api.listPersonas(); setRoles(r.personas || []) }
+    catch { setRoles([]) }
+  }, [])
+  useEffect(() => { load() }, [load])
+
+  const create = useCallback(async () => {
+    if (!newKey || !newName) return
+    try {
+      await api.createPersona({ key: newKey.toUpperCase(), name: newName })
+      setNewKey(''); setNewName(''); setAdding(false); setMsg('Role added.')
+      load()
+    } catch (e) { setMsg(String(e.message || e)) }
+  }, [newKey, newName, load])
+
+  const save = useCallback(async (key) => {
+    try { await api.updatePersona(key, { name: editName }); setEditKey(null); setMsg('Role updated.'); load() }
+    catch (e) { setMsg(String(e.message || e)) }
+  }, [editName, load])
+
+  const remove = useCallback(async (key, name) => {
+    if (!window.confirm(`Remove "${name}"? Opportunities tagged with this role will lose the tag.`)) return
+    try { await api.deletePersona(key); setMsg('Role removed.'); load() }
+    catch (e) { setMsg(String(e.message || e)) }
+  }, [load])
+
+  if (!roles) return <Card style={{ color: 'var(--proto-ink2)' }}>Loading roles…</Card>
+  return (
+    <Card>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+        <b style={{ fontSize: 15, flex: 1 }}>Target roles</b>
+        <button className="px-btn px-btn-accent" onClick={() => { setAdding(true); setMsg('') }}>+ Add role</button>
+      </div>
+      <div className="px-small" style={{ color: 'var(--proto-ink2)', marginBottom: 12 }}>
+        When a new opportunity is ingested, the AI classifies it against these roles and tags it accordingly.
+        Opportunities with no match are tagged "Other" — all remain visible everywhere.
+      </div>
+      {msg && <div className="px-small" style={{ marginBottom: 8, color: 'var(--proto-ink2)' }}>{msg}</div>}
+      {adding && (
+        <div style={{ display: 'flex', gap: 8, marginBottom: 12, flexWrap: 'wrap' }}>
+          <input className="px-input" placeholder="Key (e.g. CTO)" value={newKey} onChange={(e) => setNewKey(e.target.value.toUpperCase())} style={{ width: 90 }} />
+          <input className="px-input" placeholder="Label (e.g. Chief Technology Officer)" value={newName} onChange={(e) => setNewName(e.target.value)} style={{ flex: 1, minWidth: 180 }} />
+          <button className="px-btn px-btn-accent" onClick={create}>Save</button>
+          <button className="px-btn" onClick={() => { setAdding(false); setNewKey(''); setNewName('') }}>Cancel</button>
+        </div>
+      )}
+      {roles.length === 0 && !adding && (
+        <div className="px-small" style={{ color: 'var(--proto-ink2)' }}>No target roles yet. Add one to start grouping your opportunities.</div>
+      )}
+      {roles.map((r) => (
+        <div key={r.key} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 0', borderBottom: '1px solid var(--proto-rule-soft)' }}>
+          <span style={{ fontWeight: 600, fontSize: 12, background: 'var(--proto-accent-soft)', color: 'var(--text-brand)', padding: '2px 8px', borderRadius: 999 }}>{r.key}</span>
+          {editKey === r.key
+            ? <input className="px-input" value={editName} onChange={(e) => setEditName(e.target.value)} style={{ flex: 1 }} />
+            : <span style={{ flex: 1 }}>{r.name}</span>}
+          {r.opportunities > 0 && <span className="px-small" style={{ color: 'var(--proto-ink2)' }}>{r.opportunities} opp{r.opportunities === 1 ? '' : 's'}</span>}
+          {editKey === r.key
+            ? <><button className="px-btn px-btn-accent" onClick={() => save(r.key)}>Save</button><button className="px-btn" onClick={() => setEditKey(null)}>Cancel</button></>
+            : <><button className="px-btn" onClick={() => { setEditKey(r.key); setEditName(r.name) }}>Edit</button><button className="px-btn" style={{ color: 'var(--proto-red)' }} onClick={() => remove(r.key, r.name)}>Remove</button></>}
+        </div>
+      ))}
+    </Card>
+  )
+}
+
+const SECTIONS = [{ key: 'account', label: 'Account' }, { key: 'intake', label: 'Intake' }, { key: 'roles', label: 'Roles' }, { key: 'coach', label: 'Coach' }, { key: 'workspace', label: 'Workspace' }, { key: 'usage', label: 'Usage' }, { key: 'system', label: 'System' }]
 
 export default function Settings({ tab = 'account' }) {
   const active = SECTIONS.find((s) => s.key === tab) ? tab : 'account'
@@ -562,6 +647,7 @@ export default function Settings({ tab = 'account' }) {
       </div>
       {active === 'account' && <AccountSettings />}
       {active === 'intake' && <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}><IntakeSettings /><AtsSources /></div>}
+      {active === 'roles' && <RolesSettings />}
       {active === 'coach' && <CoachSettings />}
       {active === 'workspace' && <WorkspaceSettings />}
       {active === 'usage' && <UsageSettings />}

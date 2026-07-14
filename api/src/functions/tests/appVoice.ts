@@ -1,4 +1,5 @@
 import { app, HttpRequest, HttpResponseInit, InvocationContext } from '@azure/functions'
+import { runCoachTurn } from './coachAgent'
 
 const HEADERS = {
   'Content-Type': 'application/json',
@@ -82,3 +83,70 @@ export async function voiceTurn(req: HttpRequest, context: InvocationContext): P
 }
 
 app.http('voiceTurn', { methods: ['POST', 'OPTIONS'], authLevel: 'anonymous', route: 'app/voice/turn', handler: voiceTurn })
+
+const VOICE_OWNER = process.env.VOICE_DEFAULT_OWNER || 'voice@executive-engine.local'
+
+// POST /api/app/voice/chat — ElevenLabs Custom LLM endpoint.
+// ConvAI sends a Chat Completions-format request; we run the full coach brain
+// (same as /api/app/coach/chat) and return a Chat Completions-format response.
+// ElevenLabs reads choices[0].message.content and speaks it with the configured voice.
+export async function voiceChat(req: HttpRequest, _context: InvocationContext): Promise<HttpResponseInit> {
+  if (req.method === 'OPTIONS') return { status: 204, headers: HEADERS }
+  const key = process.env.OPENAI_API_KEY
+  if (!key) return { status: 200, headers: HEADERS, jsonBody: { error: 'OPENAI_API_KEY not set' } }
+  try {
+    const body = await req.json() as any
+    const messages: Array<{ role: string; content: string }> = Array.isArray(body?.messages) ? body.messages : []
+    // Strip system messages inserted by ConvAI (we supply our own via runCoachTurn).
+    const history = messages.filter((m) => m.role !== 'system').slice(-16)
+    if (!history.length) return { status: 200, headers: HEADERS, jsonBody: { error: 'messages required' } }
+
+    const result = await runCoachTurn(history, VOICE_OWNER, key)
+
+    return {
+      status: 200, headers: HEADERS,
+      jsonBody: {
+        id: `chatcmpl-voice-${Date.now()}`,
+        object: 'chat.completion',
+        model: 'gpt-4o',
+        choices: [{ index: 0, message: { role: 'assistant', content: result.reply }, finish_reason: 'stop' }],
+      },
+    }
+  } catch (err) {
+    return { status: 200, headers: HEADERS, jsonBody: { error: String(err) } }
+  }
+}
+
+app.http('voiceChat', { methods: ['POST', 'OPTIONS'], authLevel: 'anonymous', route: 'app/voice/chat', handler: voiceChat })
+
+// POST /api/diag/convai-agent-point — patch the ElevenLabs ConvAI agent to use
+// our /api/app/voice/chat endpoint as its custom LLM instead of gpt-4o-mini.
+// Run once after deploy; the agent_id is read from ELEVENLABS_AGENT_ID env var.
+export async function convaiAgentPoint(req: HttpRequest, _context: InvocationContext): Promise<HttpResponseInit> {
+  if (req.method === 'OPTIONS') return { status: 204, headers: HEADERS }
+  const elKey = process.env.ELEVENLABS_API_KEY
+  const agentId = process.env.ELEVENLABS_AGENT_ID
+  if (!elKey) return { status: 200, headers: HEADERS, jsonBody: { error: 'ELEVENLABS_API_KEY not set' } }
+  if (!agentId) return { status: 200, headers: HEADERS, jsonBody: { error: 'ELEVENLABS_AGENT_ID not set' } }
+
+  const customLlmUrl = 'https://job-platform-api.azurewebsites.net/api/app/voice/chat'
+
+  try {
+    const res = await fetch(`https://api.elevenlabs.io/v1/convai/agents/${agentId}`, {
+      method: 'PATCH',
+      headers: { 'xi-api-key': elKey, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        conversation_config: {
+          custom_llm: { url: customLlmUrl },
+        },
+      }),
+    })
+    const txt = await res.text()
+    if (!res.ok) return { status: 200, headers: HEADERS, jsonBody: { ok: false, status: res.status, detail: txt.slice(0, 400) } }
+    return { status: 200, headers: HEADERS, jsonBody: { ok: true, agentId, customLlmUrl } }
+  } catch (err) {
+    return { status: 200, headers: HEADERS, jsonBody: { ok: false, detail: String(err) } }
+  }
+}
+
+app.http('convaiAgentPoint', { methods: ['POST', 'OPTIONS'], authLevel: 'anonymous', route: 'diag/convai-agent-point', handler: convaiAgentPoint })

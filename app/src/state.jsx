@@ -2,11 +2,15 @@ import React, { createContext, useContext, useEffect, useState, useCallback } fr
 import { api, setOwner, setIncludeDemo } from './api.js'
 import { loadUser, signInMicrosoft, signInGoogle, signOut as authSignOut, providerReady, handleGoogleCallback } from './auth.js'
 
-// Three executive personas (spec §4) — re-filter the opportunity catalog.
-export const PERSONAS = {
-  CTO: { key: 'CTO', name: 'Jordan Davis', role: 'CTO', comp: '$420–520k + eq' },
-  VPE: { key: 'VPE', name: 'Riley Park', role: 'VP Engineering', comp: '$370–450k + eq' },
-  VPP: { key: 'VPP', name: 'Sam Cohen', role: 'VP Product', comp: '$340–410k + eq' },
+// Derive a display first name from an email address or displayName string.
+// "von.ellis@enterpriseds.io" → "Von", "Von Ellis" → "Von"
+export function firstNameFrom(emailOrName) {
+  if (!emailOrName) return ''
+  if (emailOrName.includes('@')) {
+    const local = emailOrName.split('@')[0].split('.')[0].split('_')[0]
+    return local.charAt(0).toUpperCase() + local.slice(1).toLowerCase()
+  }
+  return emailOrName.split(' ')[0]
 }
 
 const AppCtx = createContext(null)
@@ -41,7 +45,6 @@ export function useIsMobile(breakpoint = 768) {
 const DEMO_OWNER = 'demo@executive-engine.local'
 
 export function AppProvider({ children }) {
-  const [personaKey, setPersonaKey] = useState('CTO')
   const [dark, setDark] = useState(false)
   const [toasts, setToasts] = useState([])
   // Client-side auth (EnterpriseDS house pattern): Microsoft (MSAL) + Google,
@@ -49,14 +52,13 @@ export function AppProvider({ children }) {
   // shared demo mode so the app stays usable without login.
   const [auth, setAuth] = useState({ loading: true, user: loadUser() })
   useEffect(() => {
-    // Complete a Google broker redirect if we came back with a code, else load
-    // any persisted identity.
     handleGoogleCallback()
       .then((u) => setAuth({ loading: false, user: u || loadUser() }))
       .catch(() => setAuth({ loading: false, user: loadUser() }))
   }, [])
 
   const owner = auth.user?.email || DEMO_OWNER
+  const displayName = firstNameFrom(auth.user?.displayName || auth.user?.email || '')
   useEffect(() => { setOwner(owner) }, [owner])
 
   // Show sample/demo data toggle (persisted). Off hides all is_demo rows.
@@ -101,7 +103,7 @@ export function AppProvider({ children }) {
   }, [])
 
   const value = {
-    personaKey, setPersonaKey, persona: PERSONAS[personaKey],
+    displayName,
     dark, setDark, toast,
     auth, owner, signIn, signOut, providerReady,
     demoBypass, enterDemo, isDemo: owner === DEMO_OWNER,

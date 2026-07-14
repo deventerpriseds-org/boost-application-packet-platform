@@ -34,6 +34,21 @@ async function post(path, body) {
   return res.json()
 }
 
+async function patch_(path, body) {
+  const res = await fetch(`${API_BASE}${path}`, {
+    method: 'PATCH',
+    headers: authHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify(body || {}),
+  })
+  if (!res.ok) throw new Error(`PATCH ${path} → HTTP ${res.status}`)
+  return res.json()
+}
+async function del(path) {
+  const res = await fetch(`${API_BASE}${path}`, { method: 'DELETE', headers: authHeaders() })
+  if (!res.ok) throw new Error(`DELETE ${path} → HTTP ${res.status}`)
+  return res.json()
+}
+
 export const api = {
   listOpportunities: ({ owner, persona, stage } = {}) => {
     const qs = new URLSearchParams()
@@ -106,6 +121,7 @@ export const api = {
   mailSubscriptions: () => get(`/mail/subscriptions`),
   mailSubscribe: () => post(`/mail/subscribe`, {}),
   mailPollNow: (minutes = 120) => post(`/mail/poll-now`, { minutes }),
+  mailClearReload: ({ days = 7 } = {}) => post(`/mail/clear-reload`, { days }),
   mailConfigGet: () => get(`/mail/config`),
   mailConfigSet: (patch) => post(`/mail/config`, patch),
   mailFolders: (mailbox) => get(`/mail/folders${mailbox ? `?mailbox=${encodeURIComponent(mailbox)}` : ''}`),
@@ -120,6 +136,9 @@ export const api = {
   // Library
   listAssets: () => get(`/app/assets`),
   listPersonas: () => get(`/app/personas`),
+  createPersona: (data) => post(`/app/personas`, data),
+  updatePersona: (key, patch) => patch_(`/app/personas/${key}`, patch),
+  deletePersona: (key) => del(`/app/personas/${key}`),
   listLibrary: (kind) => get(`/app/library${kind ? `?kind=${encodeURIComponent(kind)}` : ''}`),
 }
 

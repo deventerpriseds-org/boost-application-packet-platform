@@ -5,7 +5,7 @@ import { getPgClient } from './pgClient'
 const HEADERS = {
   'Content-Type': 'application/json',
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+  'Access-Control-Allow-Methods': 'GET, POST, PATCH, DELETE, OPTIONS',
   'Access-Control-Allow-Headers': 'Content-Type'
 }
 const DEMO_EMAIL = 'demo@executive-engine.local'
@@ -132,7 +132,74 @@ export async function answersVision(req: HttpRequest, context: InvocationContext
   } finally { try { await client?.end() } catch {} }
 }
 
+// POST /api/app/personas { key, name, masterRole, compTarget?, positioning? }
+export async function personasCreate(req: HttpRequest, _context: InvocationContext): Promise<HttpResponseInit> {
+  if (req.method === 'OPTIONS') return { status: 204, headers: HEADERS }
+  const owner = resolveOwner(req).owner
+  let client
+  try {
+    const body = (await req.json().catch(() => ({}))) as any
+    const key = (body?.key || '').toString().trim().toUpperCase().replace(/[^A-Z0-9_]/g, '').slice(0, 20)
+    const name = (body?.name || '').toString().trim().slice(0, 100)
+    if (!key || !name) return { status: 400, headers: HEADERS, jsonBody: { error: 'key and name are required' } }
+    client = await getPgClient()
+    const row = (await client.query(
+      `insert into persona (owner_email, key, name, master_role, comp_target, positioning)
+       values ($1,$2,$3,$4,$5,$6)
+       on conflict (owner_email, key) do update set name=excluded.name, master_role=excluded.master_role, comp_target=excluded.comp_target, positioning=excluded.positioning
+       returning *`,
+      [owner, key, name, body?.masterRole || null, body?.compTarget || null, body?.positioning || null]
+    )).rows[0]
+    return { status: 200, headers: HEADERS, jsonBody: { ok: true, persona: { key: row.key, name: row.name, masterRole: row.master_role, compTarget: row.comp_target, positioning: row.positioning } } }
+  } catch (err) {
+    return { status: 200, headers: HEADERS, jsonBody: { error: String(err) } }
+  } finally { try { await client?.end() } catch {} }
+}
+
+// PATCH /api/app/personas/:key { name?, masterRole?, compTarget?, positioning? }
+export async function personasUpdate(req: HttpRequest, _context: InvocationContext): Promise<HttpResponseInit> {
+  if (req.method === 'OPTIONS') return { status: 204, headers: HEADERS }
+  const owner = resolveOwner(req).owner
+  const key = req.params.key
+  let client
+  try {
+    const body = (await req.json().catch(() => ({}))) as any
+    client = await getPgClient()
+    const sets: string[] = [], vals: any[] = [owner, key]
+    if (body?.name !== undefined) { vals.push(body.name); sets.push(`name=$${vals.length}`) }
+    if (body?.masterRole !== undefined) { vals.push(body.masterRole); sets.push(`master_role=$${vals.length}`) }
+    if (body?.compTarget !== undefined) { vals.push(body.compTarget); sets.push(`comp_target=$${vals.length}`) }
+    if (body?.positioning !== undefined) { vals.push(body.positioning); sets.push(`positioning=$${vals.length}`) }
+    if (!sets.length) return { status: 400, headers: HEADERS, jsonBody: { error: 'nothing to update' } }
+    const row = (await client.query(`update persona set ${sets.join(',')} where owner_email=$1 and key=$2 returning *`, vals)).rows[0]
+    if (!row) return { status: 404, headers: HEADERS, jsonBody: { error: 'persona not found' } }
+    return { status: 200, headers: HEADERS, jsonBody: { ok: true, persona: { key: row.key, name: row.name, masterRole: row.master_role, compTarget: row.comp_target, positioning: row.positioning } } }
+  } catch (err) {
+    return { status: 200, headers: HEADERS, jsonBody: { error: String(err) } }
+  } finally { try { await client?.end() } catch {} }
+}
+
+// DELETE /api/app/personas/:key
+export async function personasDelete(req: HttpRequest, _context: InvocationContext): Promise<HttpResponseInit> {
+  if (req.method === 'OPTIONS') return { status: 204, headers: HEADERS }
+  const owner = resolveOwner(req).owner
+  const key = req.params.key
+  let client
+  try {
+    client = await getPgClient()
+    await client.query(`delete from persona where owner_email=$1 and key=$2`, [owner, key])
+    // Clear orphaned references in opportunities
+    await client.query(`update opportunity set roles_for=array_remove(roles_for,$2) where owner_email=$1`, [owner, key])
+    return { status: 200, headers: HEADERS, jsonBody: { ok: true } }
+  } catch (err) {
+    return { status: 200, headers: HEADERS, jsonBody: { error: String(err) } }
+  } finally { try { await client?.end() } catch {} }
+}
+
 app.http('answersVision', { methods: ['POST', 'OPTIONS'], authLevel: 'anonymous', route: 'app/opportunity/{id}/answers/vision', handler: answersVision })
 app.http('assetsList', { methods: ['GET', 'OPTIONS'], authLevel: 'anonymous', route: 'app/assets', handler: assetsList })
 app.http('personasList', { methods: ['GET', 'OPTIONS'], authLevel: 'anonymous', route: 'app/personas', handler: personasList })
+app.http('personasCreate', { methods: ['POST', 'OPTIONS'], authLevel: 'anonymous', route: 'app/personas', handler: personasCreate })
+app.http('personasUpdate', { methods: ['PATCH', 'OPTIONS'], authLevel: 'anonymous', route: 'app/personas/{key}', handler: personasUpdate })
+app.http('personasDelete', { methods: ['DELETE', 'OPTIONS'], authLevel: 'anonymous', route: 'app/personas/{key}', handler: personasDelete })
 app.http('libraryList', { methods: ['GET', 'OPTIONS'], authLevel: 'anonymous', route: 'app/library', handler: libraryList })

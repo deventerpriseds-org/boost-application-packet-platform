@@ -96,6 +96,97 @@ async function getCoachConfig(): Promise<{ systemPrompt: string; model: string; 
   } catch { return { systemPrompt: SYSTEM, model: MODEL, custom: false } }
 }
 
+// Core coach turn — shared by the HTTP chat endpoint and the voice Chat Completions bridge.
+// Takes a history array and owner, runs the full Responses loop (gpt-4o, all tools, cutoff
+// grounding, memory), persists activity + thread, returns reply + tool trace.
+export async function runCoachTurn(
+  history: Array<{ role: string; content: string }>,
+  owner: string,
+  key: string,
+): Promise<{ reply: string; toolCalls: Array<{ name: string; arguments: any }>; uiActions: any[]; usedMemory: boolean; usedVectorStore: boolean }> {
+  const lastUser = [...history].reverse().find((m) => m.role === 'user')?.content || ''
+
+  const now = new Date()
+  const todayStr = now.toISOString().slice(0, 10)
+  const curYear = now.getUTCFullYear()
+  const dateHint = `KNOWLEDGE CUTOFF RULE (HARD): This application's database was last updated in ${DB_CUTOFF}. You have NO reliable knowledge of any event, person's role or team, price, news, funding round, or fact that could have changed after ${DB_CUTOFF}. For ANY such question you MUST call tavily_web_search and answer ONLY from its results. Never answer post-${DB_CUTOFF} questions from memory — if Tavily fails, say you cannot confirm without a live search.\n\nCURRENT DATE: ${todayStr}. The current year is ${curYear}. HARD RULE for tavily_web_search: NEVER put a year earlier than ${curYear} in a query unless the user named one — just search the topic. Prefer max_results >= 5. Only set a narrow time_range when the user explicitly asks for very recent news. If a search returns nothing, broaden it and retry. Never fabricate figures — report only what the search returned, with source URLs.`
+
+  let memHint = ''
+  try {
+    const hits = await recall({ owner, query: String(lastUser), k: 5 })
+    if (hits.length) memHint = '\n\nRelevant saved memory (from prior conversations):\n' + hits.map((h) => `- ${h.text}`).join('\n')
+  } catch { /* memory optional */ }
+
+  const cfg = await getCoachConfig()
+  const tools: any[] = coachToolSchemas()
+  const vsId = await getVectorStoreId()
+  let vsHasFiles = false
+  if (vsId) {
+    try {
+      const vr = await fetch(`https://api.openai.com/v1/vector_stores/${vsId}`, { headers: { Authorization: `Bearer ${key}` } })
+      if (vr.ok) { const vj = await vr.json() as any; vsHasFiles = (vj?.file_counts?.completed || 0) > 0 }
+    } catch { /* ignore */ }
+  }
+  if (vsId && vsHasFiles) tools.push({ type: 'file_search', vector_store_ids: [vsId] })
+
+  const runningInput: unknown[] = history.map((m) => ({ role: m.role === 'assistant' ? 'assistant' : 'user', content: String(m.content || '') }))
+  // Channel B: cutoff rule in the conversation channel (not only instructions).
+  runningInput.unshift({
+    role: 'system',
+    content: `HARD RULE: Your knowledge cutoff is ${DB_CUTOFF}. Any question about events, roles, prices, news, teams, or facts that may have changed after ${DB_CUTOFF} MUST be answered via tavily_web_search only — never from memory. Today is ${todayStr}.`,
+  })
+
+  let previousResponseId: string | undefined
+  const toolTrace: Array<{ name: string; arguments: any }> = []
+  const maxHops = 8
+  let reply = ''
+
+  for (let hop = 0; hop <= maxHops; hop++) {
+    const reqBody: Record<string, unknown> = {
+      model: cfg.model,
+      instructions: dateHint.trim() + '\n\n' + cfg.systemPrompt + memHint,
+      input: runningInput,
+      tools,
+      ...(previousResponseId ? { previous_response_id: previousResponseId } : {}),
+    }
+    const res = await fetch(OPENAI_URL, {
+      method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
+      body: JSON.stringify(reqBody),
+    })
+    if (!res.ok) throw new Error(`OpenAI Responses ${res.status}: ${(await res.text()).slice(0, 300)}`)
+    const json = await res.json() as RespReply
+    previousResponseId = json.id
+
+    const calls = extractToolCalls(json)
+    if (calls.length === 0 || hop === maxHops) { reply = extractText(json).trim(); break }
+
+    const nextInput: unknown[] = []
+    for (const tc of calls) {
+      let args: any = {}
+      try { args = JSON.parse(tc.arguments) } catch { args = {} }
+      toolTrace.push({ name: tc.name, arguments: args })
+      const output = await executeCoachTool(tc.name, args, { owner })
+      nextInput.push({ type: 'function_call_output', call_id: tc.call_id, output })
+    }
+    runningInput.length = 0
+    runningInput.push(...nextInput)
+  }
+
+  const uiActions = toolTrace.filter((t) => t.name === 'ui_action').map((t) => t.arguments)
+
+  try { if (reply) await remember({ owner, kind: 'conversation', text: `User: ${String(lastUser).slice(0, 500)}\nCoach: ${reply.slice(0, 500)}`, source: 'coach-chat' }) } catch {}
+  try {
+    const pool = getPool(); await ensureOpsTables(pool)
+    await pool.query(`insert into coach_activity (owner, user_msg, reply, tools, instructions) values ($1,$2,$3,$4,$5)`,
+      [owner, String(lastUser).slice(0, 1000), reply.slice(0, 2000), JSON.stringify(toolTrace), (dateHint.trim() + '\n\n' + cfg.systemPrompt + memHint).slice(0, 8000)])
+    const fullThread = [...history.map((m) => ({ role: m.role, content: String(m.content || '') })), { role: 'assistant', content: reply }].slice(-40)
+    await pool.query(`insert into coach_thread (owner, messages, updated_at) values ($1,$2,now())
+                      on conflict (owner) do update set messages=$2, updated_at=now()`, [owner, JSON.stringify(fullThread)])
+  } catch {}
+
+  return { reply, toolCalls: toolTrace, uiActions, usedMemory: !!memHint, usedVectorStore: !!(vsId && vsHasFiles) }
+}
+
 // POST /api/app/coach/chat { messages:[{role,content}], owner }
 export async function coachChat(req: HttpRequest, context: InvocationContext): Promise<HttpResponseInit> {
   if (req.method === 'OPTIONS') return { status: 204, headers: HEADERS }
@@ -106,101 +197,10 @@ export async function coachChat(req: HttpRequest, context: InvocationContext): P
     const _ro = resolveOwner(req); const owner = _ro.verified ? _ro.owner : (body?.owner || DEMO_EMAIL).toString()
     const history = Array.isArray(body?.messages) ? body.messages.slice(-16) : []
     if (!history.length) return { status: 400, headers: HEADERS, jsonBody: { error: 'messages required' } }
-    const lastUser = [...history].reverse().find((m: any) => m.role === 'user')?.content || ''
 
-    // --- Date + knowledge-cutoff grounding -----------------------------------
-    // Channel A (instructions): front-loaded cutoff rule. Front-loading is critical —
-    // gpt-4o ignores a date buried after a 6k-char prompt.
-    const now = new Date()
-    const todayStr = now.toISOString().slice(0, 10)
-    const curYear = now.getUTCFullYear()
-    const dateHint = `KNOWLEDGE CUTOFF RULE (HARD): This application's database was last updated in ${DB_CUTOFF}. You have NO reliable knowledge of any event, person's role or team, price, news, funding round, or fact that could have changed after ${DB_CUTOFF}. For ANY such question you MUST call tavily_web_search and answer ONLY from its results. Never answer post-${DB_CUTOFF} questions from memory — if Tavily fails, say you cannot confirm without a live search.\n\nCURRENT DATE: ${todayStr}. The current year is ${curYear}. HARD RULE for tavily_web_search: NEVER put a year earlier than ${curYear} in a query unless the user named one — just search the topic. Prefer max_results >= 5. Only set a narrow time_range when the user explicitly asks for very recent news. If a search returns nothing, broaden it and retry. Never fabricate figures — report only what the search returned, with source URLs.`
+    const result = await runCoachTurn(history, owner, key)
 
-    // Ground with durable memory (best-effort). Keep this SEPARATE from dateHint —
-    // an earlier version overwrote the date hint whenever memory existed.
-    let memHint = ''
-    try {
-      const hits = await recall({ owner, query: String(lastUser), k: 5 })
-      if (hits.length) memHint = '\n\nRelevant saved memory (from prior conversations):\n' + hits.map((h) => `- ${h.text}`).join('\n')
-    } catch { /* memory optional */ }
-
-    const cfg = await getCoachConfig()
-    const tools: any[] = coachToolSchemas()
-    // Only attach file_search when the vector store actually HAS uploaded files —
-    // an empty store makes the model answer pipeline questions from "uploaded files".
-    const vsId = await getVectorStoreId()
-    let vsHasFiles = false
-    if (vsId) {
-      try {
-        const vr = await fetch(`https://api.openai.com/v1/vector_stores/${vsId}`, { headers: { Authorization: `Bearer ${key}` } })
-        if (vr.ok) { const vj = await vr.json() as any; vsHasFiles = (vj?.file_counts?.completed || 0) > 0 }
-      } catch { /* ignore */ }
-    }
-    if (vsId && vsHasFiles) tools.push({ type: 'file_search', vector_store_ids: [vsId] })
-
-    const runningInput: unknown[] = history.map((m: any) => ({ role: m.role === 'assistant' ? 'assistant' : 'user', content: String(m.content || '') }))
-
-    // Channel B: prepend a system-role message into the conversation channel so
-    // the June 2023 cutoff rule is visible in the message stream on every hop,
-    // not only in instructions. This is the channel that was previously missing it.
-    runningInput.unshift({
-      role: 'system',
-      content: `HARD RULE: Your knowledge cutoff is ${DB_CUTOFF}. Any question about events, roles, prices, news, teams, or facts that may have changed after ${DB_CUTOFF} MUST be answered via tavily_web_search only — never from memory. Today is ${todayStr}.`,
-    })
-
-    let previousResponseId: string | undefined
-    const toolTrace: Array<{ name: string; arguments: any }> = []
-    const maxHops = 8
-
-    let reply = ''
-    for (let hop = 0; hop <= maxHops; hop++) {
-      const reqBody: Record<string, unknown> = {
-        model: cfg.model,
-        instructions: dateHint.trim() + '\n\n' + cfg.systemPrompt + memHint,
-        input: runningInput,
-        tools,
-        ...(previousResponseId ? { previous_response_id: previousResponseId } : {}),
-      }
-      const res = await fetch(OPENAI_URL, {
-        method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
-        body: JSON.stringify(reqBody),
-      })
-      if (!res.ok) throw new Error(`OpenAI Responses ${res.status}: ${(await res.text()).slice(0, 300)}`)
-      const json = await res.json() as RespReply
-      previousResponseId = json.id
-
-      const calls = extractToolCalls(json)
-      if (calls.length === 0 || hop === maxHops) { reply = extractText(json).trim(); break }
-
-      const nextInput: unknown[] = []
-      for (const tc of calls) {
-        let args: any = {}
-        try { args = JSON.parse(tc.arguments) } catch { args = {} }
-        toolTrace.push({ name: tc.name, arguments: args })
-        const output = await executeCoachTool(tc.name, args, { owner })
-        nextInput.push({ type: 'function_call_output', call_id: tc.call_id, output })
-      }
-      runningInput.length = 0
-      runningInput.push(...nextInput)
-    }
-
-    // Browser action directives the app must execute (start recording, navigate, copy).
-    const uiActions = toolTrace.filter((t) => t.name === 'ui_action').map((t) => t.arguments)
-
-    // Persist the exchange to memory as a lightweight conversation record (best-effort).
-    try { if (reply) await remember({ owner, kind: 'conversation', text: `User: ${String(lastUser).slice(0, 500)}\nCoach: ${reply.slice(0, 500)}`, source: 'coach-chat' }) } catch { /* optional */ }
-
-    // Persist the action log (Activity tab) + the DB-backed thread (continuity on reload).
-    try {
-      const pool = getPool(); await ensureOpsTables(pool)
-      await pool.query(`insert into coach_activity (owner, user_msg, reply, tools, instructions) values ($1,$2,$3,$4,$5)`,
-        [owner, String(lastUser).slice(0, 1000), reply.slice(0, 2000), JSON.stringify(toolTrace), (dateHint.trim() + '\n\n' + cfg.systemPrompt + memHint).slice(0, 8000)])
-      const fullThread = [...history.map((m: any) => ({ role: m.role, content: String(m.content || '') })), { role: 'assistant', content: reply }].slice(-40)
-      await pool.query(`insert into coach_thread (owner, messages, updated_at) values ($1,$2,now())
-                        on conflict (owner) do update set messages=$2, updated_at=now()`, [owner, JSON.stringify(fullThread)])
-    } catch { /* activity/thread optional */ }
-
-    return { status: 200, headers: HEADERS, jsonBody: { reply, toolCalls: toolTrace, uiActions, usedMemory: !!memHint, usedVectorStore: !!vsId } }
+    return { status: 200, headers: HEADERS, jsonBody: { reply: result.reply, toolCalls: result.toolCalls, uiActions: result.uiActions, usedMemory: result.usedMemory, usedVectorStore: result.usedVectorStore } }
   } catch (err) {
     return { status: 200, headers: HEADERS, jsonBody: { error: String(err) } }
   }

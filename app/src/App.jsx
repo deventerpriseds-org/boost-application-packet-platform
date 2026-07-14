@@ -22,12 +22,12 @@ import Settings from './screens/Settings.jsx'
 const TITLES = { today: 'Today', intake: 'Intake', settings: 'Settings', opportunities: 'Opportunities', pipeline: 'Pipeline', swipe: 'Swipe', opp: 'Opportunity', packets: 'Packets', packet: 'Packet', outreach: 'Outreach', compose: 'Composer', interview: 'Interview', offer: 'Offer', answers: 'App answers', call: 'Voice coach', library: 'Library' }
 
 function Router() {
-  const { personaKey, toast, showDemo } = useApp()
+  const { toast, showDemo } = useApp()
   const { parts } = useRoute()
   const route = parts[0] || 'today'
   // One live data source shared across screens; polls so real-time-ingested
   // LinkedIn alerts pop in with a toast. Refetches when the demo toggle changes.
-  const opps = useOpportunities(personaKey, { includeDemo: showDemo, onNew: (o) => toast(`New opportunity · ${o.company} — ${o.role}`) })
+  const opps = useOpportunities(undefined, { includeDemo: showDemo, onNew: (o) => toast(`New opportunity · ${o.company} — ${o.role}`) })
 
   let screen
   if (route === 'intake') screen = <Intake />
@@ -66,7 +66,7 @@ function LoginGate() {
       <div className="px-box" style={{ padding: 32, maxWidth: 420, width: '100%', display: 'flex', flexDirection: 'column', gap: 18, textAlign: 'center' }}>
         <div>
           <div style={{ fontSize: 24, fontWeight: 800, letterSpacing: -0.5 }}>Executive Engine</div>
-          <div className="px-small" style={{ marginTop: 6, lineHeight: 1.5 }}>Sign in to load <b>your own</b> pipeline, packets, and coach memory. Your data is kept separate from everyone else’s.</div>
+          <div className="px-small" style={{ marginTop: 6, lineHeight: 1.5 }}>Sign in to load <b>your own</b> pipeline, packets, and coach memory. Your data is kept separate from everyone else's.</div>
         </div>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
