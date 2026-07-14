@@ -565,6 +565,7 @@ function RolesSettings() {
   const [msg, setMsg] = useState('')
   const [editKey, setEditKey] = useState(null)
   const [editName, setEditName] = useState('')
+  const [tagging, setTagging] = useState(false)
 
   const load = useCallback(async () => {
     try { const r = await api.listPersonas(); setRoles(r.personas || []) }
@@ -592,11 +593,23 @@ function RolesSettings() {
     catch (e) { setMsg(String(e.message || e)) }
   }, [load])
 
+  const tagAll = useCallback(async () => {
+    setTagging(true); setMsg('')
+    try {
+      const r = await api.tagAllRoles()
+      if (r.error) throw new Error(r.error)
+      setMsg(r.message || `Tagged ${r.tagged} opportunities.`)
+      load()
+    } catch (e) { setMsg(String(e.message || e)) }
+    finally { setTagging(false) }
+  }, [load])
+
   if (!roles) return <Card style={{ color: 'var(--proto-ink2)' }}>Loading roles…</Card>
   return (
     <Card>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
         <b style={{ fontSize: 15, flex: 1 }}>Target roles</b>
+        <button className="px-btn" onClick={tagAll} disabled={tagging} title="Re-classify all untagged opportunities against these roles using AI">{tagging ? 'Tagging...' : 'Re-tag all'}</button>
         <button className="px-btn px-btn-accent" onClick={() => { setAdding(true); setMsg('') }}>+ Add role</button>
       </div>
       <div className="px-small" style={{ color: 'var(--proto-ink2)', marginBottom: 12 }}>

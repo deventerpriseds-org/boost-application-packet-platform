@@ -333,7 +333,7 @@ export async function mailSubscribe(req: HttpRequest, context: InvocationContext
     if (!res.ok) return { status: 200, headers: HEADERS, jsonBody: { ok: false, detail: `subscribe HTTP ${res.status}: ${txt.slice(0, 500)}`, hint: res.status === 403 ? 'App registration needs Mail.Read (Application) + admin consent to subscribe to a mailbox.' : undefined } }
     const sub = JSON.parse(txt)
     // Ensure ownerEmail is in sync with the subscribed mailbox.
-    await saveConfig({ ownerEmail: cfg.mailbox }).catch(() => {})
+    await saveConfig(owner, { ownerEmail: cfg.mailbox }).catch(() => {})
     return { status: 200, headers: HEADERS, jsonBody: { ok: true, subscriptionId: sub.id, expires: sub.expirationDateTime, mailbox: cfg.mailbox, folder: cfg.folderName, removedStale: removed } }
   } catch (err) {
     return { status: 200, headers: HEADERS, jsonBody: { error: String(err) } }
