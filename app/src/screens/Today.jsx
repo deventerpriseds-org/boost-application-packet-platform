@@ -125,13 +125,16 @@ export default function Today({ opps }) {
   const { displayName, toast } = useApp()
   const { loading, error, opportunities } = opps
 
-  const { fresh, active, hot, avgMatch } = useMemo(() => {
+  const { newToday, backlog, active, hot, avgMatch } = useMemo(() => {
+    const cutoff = Date.now() - 24 * 60 * 60 * 1000
     const fresh = opportunities.filter((o) => FRESH_STAGES.includes(o.stage))
+    const newToday = fresh.filter((o) => o.createdAt && new Date(o.createdAt).getTime() > cutoff)
+    const backlog = fresh.filter((o) => !o.createdAt || new Date(o.createdAt).getTime() <= cutoff)
     const active = opportunities.filter((o) => ACTIVE_STAGES.includes(o.stage))
     const hot = opportunities.filter((o) => o.urgency === 'Hot')
     const scored = opportunities.filter((o) => typeof o.match === 'number')
     const avgMatch = scored.length ? Math.round(scored.reduce((a, o) => a + o.match, 0) / scored.length) : null
-    return { fresh, active, hot, avgMatch }
+    return { newToday, backlog, active, hot, avgMatch }
   }, [opportunities])
 
   const priorities = useMemo(() => priorityActions(opportunities), [opportunities])
@@ -162,7 +165,7 @@ export default function Today({ opps }) {
           {(() => { const h = new Date().getHours(); return h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : 'Good evening' })()}{displayName ? `, ${displayName}` : ''}.
         </div>
         <div className="px-small" style={{ marginTop: 4 }}>
-          {fresh.length} new to scrub · {active.length} active opportunities · {hot.length} hot · avg match {avgMatch != null ? `${avgMatch}%` : '—'}
+          {newToday.length} new today · {backlog.length} backlog · {active.length} active · {hot.length} hot
         </div>
       </div>
 
@@ -171,10 +174,10 @@ export default function Today({ opps }) {
 
       {/* KPI strip */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 12 }}>
-        <Kpi label="New" value={fresh.length} tone="accent" />
+        <Kpi label="New today" value={newToday.length} tone="accent" />
+        <Kpi label="Backlog" value={backlog.length} tone="default" />
         <Kpi label="Active" value={active.length} tone="green" />
         <Kpi label="Hot" value={hot.length} tone="red" />
-        <Kpi label="Avg match" value={avgMatch != null ? `${avgMatch}%` : '—'} tone="yellow" />
       </div>
 
       {/* Do these next — next-best actions */}
@@ -210,11 +213,17 @@ export default function Today({ opps }) {
         </Section>
       )}
 
-      {/* Do next */}
-      <Section title="Do next — inbox scrub">
-        {fresh.length === 0 && <Empty>Nothing new. Inbox is clear. ✦</Empty>}
-        {fresh.map((o) => <OppRow key={o.id} o={o} />)}
+      {/* Do next — new today first, then backlog */}
+      <Section title={`New today (${newToday.length})`}>
+        {newToday.length === 0 && <Empty>Nothing new in the last 24 hours.</Empty>}
+        {newToday.map((o) => <OppRow key={o.id} o={o} />)}
       </Section>
+
+      {backlog.length > 0 && (
+        <Section title={`Backlog (${backlog.length})`}>
+          {backlog.map((o) => <OppRow key={o.id} o={o} />)}
+        </Section>
+      )}
 
 
       <Section title="In flight">
