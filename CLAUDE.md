@@ -119,6 +119,27 @@ The `lib` must include `"DOM"` for Azure SDK compatibility:
 "lib": ["ES2020", "DOM"]
 ```
 
+## Session start checklist (run these before touching any code)
+
+1. `git log --oneline -10` — compare to what the context summary claims is done.
+   If the summary says "X was fixed/committed" but it is not in git log, the work
+   was lost when the previous session ended without pushing. **Treat it as not done
+   and redo it.** Do NOT assume the summary is accurate.
+2. `git status` — if there are uncommitted changes, understand them before proceeding.
+   They may be in-progress work from the previous session that was never staged.
+3. When the user reports a bug that was "already fixed in a previous session",
+   **check git log first** before anything else. If the fix is not in git, that is
+   the answer — commit the fix again. Do not blame the user or the live environment.
+
+## Commit discipline (never leave a session without this)
+
+- **Every completed task must be in a git commit and pushed before the session ends.**
+  Edits that exist only on disk are lost when the container is reclaimed.
+- After committing, run `git log --oneline -3` to confirm the commit is present.
+  Do not report work as done until you see it in the log.
+- If context is running low, commit and push whatever is done (even partial) with a
+  clear message ("WIP: fixes 1-7 of 12, 8-12 not started") rather than losing it.
+
 ## Git workflow (branch discipline)
 
 Branch discipline exists to **avoid conflicts and lost work by staying synced** —
