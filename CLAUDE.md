@@ -106,20 +106,19 @@ mcp__github__actions_run_trigger(
   repo="boost-application-packet-platform",
   workflow_id="api-test.yml",
   ref="main",
-  inputs={ "method": "POST", "path": "/api/opp/<uuid>/enrich" }
+  inputs={ "method": "POST", "path": "/api/app/opportunity/<uuid>/enrich" }
 )
 
 # Advance stage:
 mcp__github__actions_run_trigger(
   method="run_workflow", ...,
-  inputs={ "method": "PATCH", "path": "/api/opp/<uuid>", "body": '{"stage":"saved"}' }
+  inputs={ "method": "PATCH", "path": "/api/app/opportunity/<uuid>", "body": '{"stage":"saved"}' }
 )
 ```
 
-**IMPORTANT:** The service principal token scope must match what `resolveOwner()` expects.
-If the API rejects with 401/403, the token audience may not match — check `/api/health`
-first to confirm the Function App is up, then `/api/config-status` for auth config.
-The workflow is on `main` (must be on default branch to be workflow_dispatch-able).
+**Token scope:** `{client_id}/.default` (NOT `api://{client_id}/.default` — that returns 400).
+**Route prefix:** all app routes are `/api/app/...` (not `/api/opp/...`).
+**The workflow is on `main`** (must be on default branch to be workflow_dispatch-able).
 
 ### Check live API health
 ```
