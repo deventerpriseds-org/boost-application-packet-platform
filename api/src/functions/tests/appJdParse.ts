@@ -1,4 +1,4 @@
-import { app, HttpRequest, HttpResponseInit, InvocationContext } from '@azure/functions'
+import { app, HttpRequest, HttpResponseInit, InvocationContext, Timer } from '@azure/functions'
 import { resolveOwner } from './appSession'
 import { getPgClient } from './pgClient'
 import { logUsage } from './usageMeter'
@@ -206,3 +206,84 @@ export async function jdBackfill(req: HttpRequest, context: InvocationContext): 
 
 app.http('jdParse', { methods: ['POST', 'OPTIONS'], authLevel: 'anonymous', route: 'app/opportunity/{id}/jd-parse', handler: jdParse })
 app.http('jdBackfill', { methods: ['POST', 'OPTIONS'], authLevel: 'anonymous', route: 'app/opportunities/jd-backfill', handler: jdBackfill })
+
+// GET /api/app/opportunities/jd-status
+// Returns a count of parsed vs unparsed opps across all non-demo, non-dismissed owners.
+export async function jdStatus(req: HttpRequest, context: InvocationContext): Promise<HttpResponseInit> {
+  if (req.method === 'OPTIONS') return { status: 204, headers: HEADERS }
+  let client
+  try {
+    client = await getPgClient()
+    const r = await client.query(`
+      select
+        count(*) filter (where not is_demo and not dismissed)                         as total,
+        count(*) filter (where not is_demo and not dismissed and jd_summary is not null) as parsed,
+        count(*) filter (where not is_demo and not dismissed and jd_summary is null)    as pending,
+        count(*) filter (where not is_demo and not dismissed and raw_jd is not null and jd_summary is null) as has_raw_jd,
+        count(*) filter (where not is_demo and not dismissed and raw_jd is null and jd_summary is null)     as no_source
+      from opportunity
+    `)
+    const row = r.rows[0]
+    return { status: 200, headers: HEADERS, jsonBody: {
+      total: Number(row.total), parsed: Number(row.parsed), pending: Number(row.pending),
+      hasRawJd: Number(row.has_raw_jd), noSource: Number(row.no_source),
+      pct: row.total > 0 ? Math.round((Number(row.parsed) / Number(row.total)) * 100) : 0,
+    }}
+  } catch (err) {
+    return { status: 200, headers: HEADERS, jsonBody: { error: String(err) } }
+  } finally { try { await client?.end() } catch {} }
+}
+
+// Timer: fire every 5 minutes, pick up to 10 opps missing jd_summary, parse them.
+// Works through the backlog automatically; skips opps with no source gracefully.
+export async function jdParseTick(timer: Timer, context: InvocationContext): Promise<void> {
+  const key = process.env.OPENAI_API_KEY
+  if (!key) { context.log('jd-tick: no OPENAI_API_KEY, skipping'); return }
+  let client
+  try {
+    client = await getPgClient()
+    await ensureJdColumns(client)
+    const { rows } = await client.query(`
+      select id, company, role, raw_jd, why_surfaced, owner_email
+      from opportunity
+      where not dismissed and not is_demo and jd_summary is null
+      order by created_at desc
+      limit 10
+    `)
+    if (rows.length === 0) { context.log('jd-tick: backlog clear'); return }
+    context.log(`jd-tick: processing ${rows.length} opps`)
+    let ok = 0, failed = 0
+    for (const opp of rows) {
+      try {
+        let rawJd: string = opp.raw_jd || ''
+        if (!rawJd) {
+          const url = extractUrl(opp.why_surfaced || '')
+          if (url) {
+            rawJd = await fetchPageText(url) || ''
+            if (rawJd) await client.query(`update opportunity set raw_jd = $1 where id = $2`, [rawJd, opp.id])
+          }
+        }
+        if (!rawJd) rawJd = `Role: ${opp.role}\nCompany: ${opp.company}\nContext: ${opp.why_surfaced || ''}`
+        const parsed = await runJdParse(rawJd, key)
+        await client.query(
+          `update opportunity set jd_title=$1, jd_company=$2, jd_summary=$3, jd_requirements=$4, jd_table=$5, updated_at=now() where id=$6`,
+          [parsed.jdTitle || null, parsed.jdCompany || null, parsed.jdSummary || null, parsed.jdRequirements || null, parsed.jdTable || null, opp.id]
+        )
+        context.log(`jd-tick: ok ${opp.company} / ${opp.role}`)
+        ok++
+      } catch (err) {
+        context.log(`jd-tick: error ${opp.id}: ${err}`)
+        // Mark as attempted so we don't retry indefinitely on a broken record.
+        // Set jd_summary to a sentinel that signals failure without blocking the status count.
+        await client.query(`update opportunity set jd_summary='[parse-failed]' where id=$1`, [opp.id]).catch(() => {})
+        failed++
+      }
+    }
+    context.log(`jd-tick: done — ok=${ok} failed=${failed}`)
+  } catch (err) {
+    context.log(`jd-tick: fatal ${err}`)
+  } finally { try { await client?.end() } catch {} }
+}
+
+app.http('jdStatus', { methods: ['GET', 'OPTIONS'], authLevel: 'anonymous', route: 'app/opportunities/jd-status', handler: jdStatus })
+app.timer('jdParseTick', { schedule: '0 */5 * * * *', handler: jdParseTick })

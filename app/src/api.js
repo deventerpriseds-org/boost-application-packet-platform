@@ -66,6 +66,7 @@ export const api = {
   getPacket: (oppId) => get(`/app/opportunity/${oppId}/packet`),
   analyzeJd: (oppId) => post(`/app/opportunity/${oppId}/jd-analysis`, {}),
   parseJd: (oppId) => post(`/app/opportunity/${oppId}/jd-parse`, {}),
+  jdStatus: () => get('/app/opportunities/jd-status'),
   enrichOpportunity: (oppId) => post(`/app/opportunity/${oppId}/enrich`, {}),
   matchScore: (oppId) => post(`/app/opportunity/${oppId}/match-score`, {}),
   applyPrepare: (oppId, opts = {}) => post(`/app/opportunity/${oppId}/apply/prepare`, opts),
