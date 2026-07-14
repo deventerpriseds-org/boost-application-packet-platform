@@ -1,5 +1,5 @@
 import React from 'react'
-import { useApp, useRoute, go, PERSONAS, useIsMobile } from './state.jsx'
+import { useApp, useRoute, go, useIsMobile } from './state.jsx'
 
 const NAV = [
   { path: '/today', label: 'Today', icon: '◉' },
@@ -42,7 +42,7 @@ export function MatchScore({ value, size = 34 }) {
 }
 
 function TopBar({ title }) {
-  const { personaKey, setPersonaKey, dark, setDark, auth } = useApp()
+  const { dark, setDark, auth } = useApp()
   const signedIn = !!auth?.user
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '0 14px', height: 54, borderBottom: '1px solid var(--proto-rule-soft)', background: 'var(--proto-paper)', flexShrink: 0 }}>
@@ -51,9 +51,6 @@ function TopBar({ title }) {
       </div>
       <div className="ee-hide-sm" style={{ borderLeft: '1px solid var(--proto-rule-soft)', paddingLeft: 12, fontSize: 13, color: 'var(--proto-ink2)' }}>{title}</div>
       <div style={{ flex: 1 }} />
-      <select className="px-btn" value={personaKey} onChange={(e) => setPersonaKey(e.target.value)} style={{ fontSize: 12, minWidth: 0, maxWidth: 150, textOverflow: 'ellipsis' }}>
-        {Object.values(PERSONAS).map((p) => <option key={p.key} value={p.key}>{p.role} · {p.name}</option>)}
-      </select>
       <button className="px-btn" onClick={() => go('/settings/account')} title={signedIn ? auth.user.email : 'Sign in'}
         style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
         <span style={{ width: 7, height: 7, borderRadius: '50%', background: signedIn ? 'var(--surface-success-default)' : 'var(--proto-ink3)' }} />
@@ -66,7 +63,6 @@ function TopBar({ title }) {
 }
 
 function SideNav() {
-  const { persona } = useApp()
   const { parts } = useRoute()
   const active = '/' + (parts[0] || 'today')
   return (
@@ -81,10 +77,6 @@ function SideNav() {
           </div>
         )
       })}
-      <div className="px-divider" style={{ margin: '12px 0' }} />
-      <div className="px-small" style={{ padding: '0 12px', lineHeight: 1.6 }}>
-        Persona<br /><b style={{ color: 'var(--proto-ink)' }}>{persona.role}</b><br />{persona.comp}
-      </div>
     </div>
   )
 }

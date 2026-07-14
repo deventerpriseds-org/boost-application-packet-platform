@@ -19,7 +19,11 @@ const DEFAULT_OWNER = process.env.MAIL_OWNER_EMAIL || DEFAULT_MAILBOX
 const CLIENT_STATE = () => process.env.MAIL_CLIENT_STATE || 'ee-linkedin-watch'
 const NOTIFY_URL = () => process.env.MAIL_NOTIFY_URL || 'https://job-platform-api.azurewebsites.net/api/mail/notify'
 const DEFAULT_SENDERS = ['linkedin']
-const DEFAULT_SUBJECTS = ['job alert', 'jobs for you', 'new jobs', 'is hiring', 'recommended job', 'new opportunit']
+const DEFAULT_SUBJECTS = [
+  'job alert', 'jobs for you', 'new jobs', 'is hiring', 'recommended job',
+  'new opportunit', 'position', 'opening', 'career', 'hiring', 'role at',
+  'jobs matching', 'job match', 'executive role',
+]
 
 function graphCreds() {
   const tenantId = process.env.MICROSOFT_TENANT_ID || 'ee633423-c321-413c-a191-ace8b07e4196'
@@ -161,10 +165,10 @@ async function tagOppRoles(oppId: string, opp: any, owner: string): Promise<void
   } catch { /* fire-and-forget: never throw */ } finally { try { await client?.end() } catch {} }
 }
 
-// Does a message look like a job alert per the configured senders/subjects?
+// Does a message look like a job alert? Always requires job-related keywords in
+// subject/preview — sender alone is never sufficient, because LinkedIn and other
+// boards also send connection updates, post notifications, etc. that are noise.
 function isAlert(cfg: WatchConfig, from: string, subject: string, preview: string): boolean {
-  const f = (from || '').toLowerCase()
-  if ((cfg.senders || []).some((s) => s && f.includes(s.toLowerCase()))) return true
   const pats = (cfg.subjectPatterns || []).filter(Boolean)
   if (!pats.length) return false
   try { return new RegExp(pats.join('|'), 'i').test(`${subject || ''} ${preview || ''}`) } catch { return false }

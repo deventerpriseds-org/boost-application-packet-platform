@@ -1,4 +1,4 @@
-import React, { useMemo, useState, useEffect } from 'react'
+import React, { useMemo, useState, useEffect, useCallback } from 'react'
 import { useApp, go } from '../state.jsx'
 import { useOpportunities } from '../data.jsx'
 import { api } from '../api.js'
@@ -56,6 +56,25 @@ function InboxScrubHero({ opportunities, toast }) {
   const total = fresh.length
   const companies = [...new Set(fresh.slice(0, 6).map((o) => o.company))]
 
+  const [watch, setWatch] = useState(null)
+  const [scanning, setScanning] = useState(false)
+
+  useEffect(() => {
+    api.mailSubscriptions().then((r) => {
+      const watches = (r.value || []).filter((w) => (w.notificationUrl || '').includes('/mail/notify'))
+      setWatch(watches[0] || null)
+    }).catch(() => setWatch(null))
+  }, [])
+
+  const rescan = useCallback(async () => {
+    setScanning(true)
+    try {
+      const res = await api.mailPollNow(60)
+      if (res.error) throw new Error(res.error)
+      toast(`Scanned ${res.scanned ?? 0} messages · ${res.trace?.filter((t) => t.result?.inserted > 0).reduce((n, t) => n + (t.result?.inserted || 0), 0)} new opportunities`)
+    } catch (e) { toast(`Scan failed: ${e.message || e}`) } finally { setScanning(false) }
+  }, [toast])
+
   return (
     <div className="px-box" style={{ padding: 0, overflow: 'hidden', borderColor: 'var(--surface-brand-default)' }}>
       <div style={{ display: 'flex', alignItems: 'stretch', flexWrap: 'wrap' }}>
@@ -88,8 +107,13 @@ function InboxScrubHero({ opportunities, toast }) {
         {/* Right: CTA */}
         <div style={{ padding: '14px 18px', display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 8, borderLeft: '1px solid var(--proto-rule-soft)', flex: '1 1 170px', minWidth: 150 }}>
           <div className="px-btn px-btn-accent" style={{ justifyContent: 'center' }} onClick={() => go('/swipe')}>Review {total} in swipe →</div>
-          <div className="px-btn" style={{ justifyContent: 'center', fontSize: 12 }} onClick={() => toast('Inbox monitoring is on — scanning connected sources.')}>Inbox monitoring</div>
-          <div className="px-btn" style={{ justifyContent: 'center', fontSize: 12 }} onClick={() => toast('Re-scanning inbox…')}>↻ Re-scan now</div>
+          <div className="px-btn" style={{ justifyContent: 'center', fontSize: 12 }} onClick={() => go('/settings/intake')}>
+            <span style={{ width: 7, height: 7, borderRadius: '50%', background: watch ? 'var(--surface-success-default)' : 'var(--proto-ink3)', display: 'inline-block', marginRight: 5 }} />
+            {watch ? 'Watching inbox' : 'No active watch'}
+          </div>
+          <div className="px-btn" style={{ justifyContent: 'center', fontSize: 12, opacity: scanning ? 0.6 : 1, pointerEvents: scanning ? 'none' : 'auto' }} onClick={rescan}>
+            {scanning ? 'Scanning…' : '↻ Re-scan now'}
+          </div>
         </div>
       </div>
     </div>
@@ -97,7 +121,7 @@ function InboxScrubHero({ opportunities, toast }) {
 }
 
 export default function Today({ opps }) {
-  const { persona, toast } = useApp()
+  const { displayName, toast } = useApp()
   const { loading, error, opportunities } = opps
 
   const { fresh, active, hot, avgMatch } = useMemo(() => {
@@ -105,7 +129,7 @@ export default function Today({ opps }) {
     const active = opportunities.filter((o) => ACTIVE_STAGES.includes(o.stage))
     const hot = opportunities.filter((o) => o.urgency === 'Hot')
     const scored = opportunities.filter((o) => typeof o.match === 'number')
-    const avgMatch = scored.length ? Math.round(scored.reduce((a, o) => a + o.match, 0) / scored.length) : 0
+    const avgMatch = scored.length ? Math.round(scored.reduce((a, o) => a + o.match, 0) / scored.length) : null
     return { fresh, active, hot, avgMatch }
   }, [opportunities])
 
@@ -113,14 +137,16 @@ export default function Today({ opps }) {
 
   // "This week" — real upcoming outreach touches (due/scheduled) across opps.
   const [week, setWeek] = useState([])
+  const [weekError, setWeekError] = useState(null)
   useEffect(() => {
     let alive = true
     api.outreachQueue().then((r) => {
-      if (!alive || r.error) return
+      if (!alive) return
+      if (r.error) { setWeekError('Outreach schedule unavailable'); return }
       const up = (r.messages || []).filter((m) => m.state === 'due' || m.state === 'scheduled')
         .sort((a, b) => (a.dayOffset ?? 99) - (b.dayOffset ?? 99)).slice(0, 5)
       setWeek(up)
-    }).catch(() => {})
+    }).catch(() => { if (alive) setWeekError('Outreach schedule unavailable') })
     return () => { alive = false }
   }, [opportunities])
 
@@ -132,10 +158,10 @@ export default function Today({ opps }) {
       {/* Greeting */}
       <div>
         <div style={{ fontSize: 'clamp(20px, 5.5vw, 26px)', fontWeight: 700, letterSpacing: -0.5, lineHeight: 1.15 }}>
-          Good morning, {persona.name.split(' ')[0]}.
+          Good morning{displayName ? `, ${displayName}` : ''}.
         </div>
         <div className="px-small" style={{ marginTop: 4 }}>
-          {fresh.length} new to scrub · {active.length} active opportunities · {hot.length} hot · avg match {avgMatch}%
+          {fresh.length} new to scrub · {active.length} active opportunities · {hot.length} hot · avg match {avgMatch != null ? `${avgMatch}%` : '—'}
         </div>
       </div>
 
@@ -147,7 +173,7 @@ export default function Today({ opps }) {
         <Kpi label="New" value={fresh.length} tone="accent" />
         <Kpi label="Active" value={active.length} tone="green" />
         <Kpi label="Hot" value={hot.length} tone="red" />
-        <Kpi label="Avg match" value={`${avgMatch}%`} tone="yellow" />
+        <Kpi label="Avg match" value={avgMatch != null ? `${avgMatch}%` : '—'} tone="yellow" />
       </div>
 
       {/* Do these next — next-best actions */}
@@ -167,8 +193,9 @@ export default function Today({ opps }) {
       )}
 
       {/* This week — real upcoming outreach cadence */}
-      {week.length > 0 && (
+      {(week.length > 0 || weekError) && (
         <Section title="This week">
+          {weekError && <div className="px-box" style={{ padding: 14, color: 'var(--proto-ink2)', fontSize: 13 }}>{weekError}</div>}
           {week.map((m) => (
             <div key={m.id} className="px-box" onClick={() => go(`/compose/${m.oppId}`)} style={{ padding: 12, display: 'flex', alignItems: 'center', gap: 12, cursor: 'pointer' }}>
               <div className="px-small" style={{ width: 54, flexShrink: 0 }}>Day {m.dayOffset ?? '—'}</div>

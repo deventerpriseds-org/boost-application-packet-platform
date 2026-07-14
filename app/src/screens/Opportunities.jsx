@@ -1,5 +1,6 @@
-import React, { useMemo, useState } from 'react'
+import React, { useMemo, useState, useEffect } from 'react'
 import { go } from '../state.jsx'
+import { api } from '../api.js'
 import { MatchScore, StageBadge, UrgencyPill, Pill } from '../shell.jsx'
 import { Loading, ErrorBox, Empty } from './Today.jsx'
 
@@ -11,6 +12,12 @@ export default function Opportunities({ opps }) {
   const [urgency, setUrgency] = useState('All')
   const [stage, setStage] = useState('All')
   const [sort, setSort] = useState('match')
+  const [roles, setRoles] = useState([])
+  const [roleFilter, setRoleFilter] = useState('all')
+
+  useEffect(() => {
+    api.listPersonas().then((r) => { if (!r.error) setRoles(r.personas || []) }).catch(() => {})
+  }, [])
 
   const rows = useMemo(() => {
     let r = opportunities
@@ -20,15 +27,27 @@ export default function Opportunities({ opps }) {
     }
     if (urgency !== 'All') r = r.filter((o) => o.urgency === urgency)
     if (stage !== 'All') r = r.filter((o) => o.stage === stage)
+    if (roleFilter === 'other') r = r.filter((o) => !o.rolesFor || o.rolesFor.length === 0)
+    else if (roleFilter !== 'all') r = r.filter((o) => (o.rolesFor || []).includes(roleFilter))
     r = [...r].sort((a, b) => (sort === 'match' ? (b.match || 0) - (a.match || 0) : (a.company || '').localeCompare(b.company || '')))
     return r
-  }, [opportunities, query, urgency, stage, sort])
+  }, [opportunities, query, urgency, stage, sort, roleFilter])
 
   if (loading) return <Loading />
   if (error) return <ErrorBox error={error} />
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+      {roles.length > 0 && (
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+          {[{ key: 'all', name: 'All' }, ...roles, { key: 'other', name: 'Other' }].map((r) => (
+            <span key={r.key} className="px-pill" onClick={() => setRoleFilter(r.key)}
+              style={{ cursor: 'pointer', background: roleFilter === r.key ? 'var(--surface-brand-default)' : undefined, color: roleFilter === r.key ? 'var(--text-on-brand)' : undefined }}>
+              {r.name}
+            </span>
+          ))}
+        </div>
+      )}
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
         <input className="px-input" placeholder="Search company or role…" value={query} onChange={(e) => setQuery(e.target.value)}
           style={{ flex: 1, minWidth: 220 }} />
