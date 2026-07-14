@@ -154,9 +154,14 @@ Then verify with `grep -P '[\x{2018}\x{2019}\x{201C}\x{201D}]' <file>` (should r
 
 ## Git workflow (branch discipline)
 
-**HARD RULE: NEVER push directly to `main`.** All work goes on the session's
-designated feature branch (`claude/git-push-main-1zcqw5` unless told otherwise).
-Direct commits or pushes to `main` are forbidden — full stop.
+**HARD RULE: NEVER commit directly to `main`.** All development happens on the
+session's designated feature branch (`claude/git-push-main-1zcqw5` unless told
+otherwise). `main` only ever moves forward via fast-forward from the feature branch
+— never by a direct commit or push of new work.
+
+> **Why this is safe:** `executive-engine-deploy.yml` triggers on both
+> `main` and `claude/git-push-main-1zcqw5`, so the live app deploys from either
+> branch. You see changes on the live app immediately without `main` needing to move.
 
 ### One-branch workflow (follow every session):
 
@@ -172,16 +177,16 @@ Direct commits or pushes to `main` are forbidden — full stop.
    git fetch origin && git merge origin/main
    git push -u origin claude/git-push-main-1zcqw5
    ```
-4. **Fast-forward `main` FROM the feature branch** only at a deliberate stable
-   milestone (never as routine). Then immediately fast-forward the feature branch
-   back to `main` so they stay identical:
+4. **At the end of every session**, fast-forward `main` to match the feature branch
+   so `main` stays up to date. This is routine — do it every session, not just at
+   milestones:
    ```bash
    git checkout main && git merge --ff-only claude/git-push-main-1zcqw5
    git push origin main
-   git checkout claude/git-push-main-1zcqw5 && git merge origin/main
+   git checkout claude/git-push-main-1zcqw5
    ```
-   Skip step 4 entirely unless `main` must have the change (e.g. a new
-   `workflow_dispatch` workflow that only triggers from the default branch).
+   If `--ff-only` fails (branches have diverged), resolve on the feature branch
+   first (merge `origin/main` into it, fix conflicts), then retry the fast-forward.
 
 - Resolve conflicts by understanding both sides. For the legacy `web/` console
   (not the product), preferring one side wholesale is acceptable; for `app/`,
