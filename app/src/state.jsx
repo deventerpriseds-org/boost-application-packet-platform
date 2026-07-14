@@ -24,8 +24,10 @@ export function useRoute() {
     window.addEventListener('hashchange', onHash)
     return () => window.removeEventListener('hashchange', onHash)
   }, [])
-  const parts = hash.replace(/^#\//, '').split('/').filter(Boolean)
-  return { hash, parts }
+  const [pathPart, queryPart] = hash.replace(/^#\//, '').split('?')
+  const parts = pathPart.split('/').filter(Boolean)
+  const query = Object.fromEntries(new URLSearchParams(queryPart || ''))
+  return { hash, parts, query }
 }
 export const go = (path) => { window.location.hash = path.startsWith('#') ? path : `#${path.startsWith('/') ? '' : '/'}${path}` }
 

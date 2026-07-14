@@ -174,10 +174,10 @@ export default function Today({ opps }) {
 
       {/* KPI strip */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 12 }}>
-        <Kpi label="New today" value={newToday.length} tone="accent" />
-        <Kpi label="Backlog" value={backlog.length} tone="default" />
-        <Kpi label="Active" value={active.length} tone="green" />
-        <Kpi label="Hot" value={hot.length} tone="red" />
+        <Kpi label="New today" value={newToday.length} tone="accent" onClick={() => go('/opportunities?filter=new')} />
+        <Kpi label="Backlog" value={backlog.length} tone="default" onClick={() => go('/opportunities?filter=backlog')} />
+        <Kpi label="Active" value={active.length} tone="green" onClick={() => go('/opportunities?filter=active')} />
+        <Kpi label="Hot" value={hot.length} tone="red" onClick={() => go('/opportunities?filter=hot')} />
       </div>
 
       {/* Do these next — next-best actions */}
@@ -234,9 +234,9 @@ export default function Today({ opps }) {
   )
 }
 
-function Kpi({ label, value, tone }) {
+function Kpi({ label, value, tone, onClick }) {
   return (
-    <div className="px-box" style={{ padding: 16 }}>
+    <div className="px-box" onClick={onClick} style={{ padding: 16, cursor: onClick ? 'pointer' : 'default' }}>
       <div className="px-small" style={{ textTransform: 'uppercase', letterSpacing: 1 }}>{label}</div>
       <div style={{ fontSize: 28, fontWeight: 700, color: `var(--proto-${tone})` }}>{value}</div>
     </div>
