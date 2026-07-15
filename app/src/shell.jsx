@@ -2,15 +2,16 @@ import React from 'react'
 import { useApp, useRoute, go, useIsMobile } from './state.jsx'
 
 const NAV = [
-  { path: '/today', label: 'Today', icon: '◉' },
-  { path: '/intake', label: 'Intake', icon: '⇊' },
-  { path: '/swipe', label: 'Swipe', icon: '◈' },
-  { path: '/opportunities', label: 'Opps', icon: '◇' },
-  { path: '/pipeline', label: 'Pipeline', icon: '▤' },
-  { path: '/packets', label: 'Packets', icon: '▦' },
-  { path: '/outreach', label: 'Outreach', icon: '✉' },
-  { path: '/call', label: 'Coach', icon: '☎' },
-  { path: '/library', label: 'Library', icon: '◫' },
+  { path: '/today',              label: 'Today',        icon: '◉' },
+  { path: '/opportunities',      label: 'Opportunities', icon: '◇' },
+  { path: '/pipeline',           label: 'Pipeline',      icon: '▤' },
+  { path: '/packets',            label: 'Packets',       icon: '▦' },
+  { path: '/outreach',           label: 'Outreach',      icon: '✉' },
+  { path: '/library',            label: 'Assets',        icon: '◫' },
+  { path: '/library/roles',      label: 'Role Profiles', icon: '◈' },
+  { path: '/library/playbooks',  label: 'Playbooks',     icon: '▥' },
+  { path: '/call',               label: 'Coach',         icon: '☎' },
+  { path: '/intake',             label: 'Intake',        icon: '⇊' },
 ]
 
 // Shared primitives (ported from the handoff shell.jsx)
@@ -64,16 +65,16 @@ function TopBar({ title }) {
 
 function SideNav() {
   const { parts } = useRoute()
-  const active = '/' + (parts[0] || 'today')
+  const activePath = '/' + parts.slice(0, 2).filter(Boolean).join('/')
   return (
-    <div style={{ width: 196, borderRight: '1px solid var(--proto-rule-soft)', background: 'var(--proto-paper)', padding: 12, flexShrink: 0 }}>
+    <div style={{ width: 196, borderRight: '1px solid var(--proto-rule-soft)', background: 'var(--proto-paper)', padding: 12, flexShrink: 0, overflowY: 'auto' }}>
       {NAV.map((n) => {
-        const on = active === n.path
+        const on = activePath === n.path || activePath.startsWith(n.path + '/') && n.path !== '/today'
         return (
-          <div key={n.path} onClick={() => go(n.path)}
+          <div key={n.label} onClick={() => go(n.path)}
             style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 12px', borderRadius: 8, cursor: 'pointer', marginBottom: 2, fontSize: 13, fontWeight: on ? 600 : 500,
               background: on ? 'var(--proto-accent-soft)' : 'transparent', color: on ? 'var(--text-brand)' : 'var(--proto-ink2)' }}>
-            <span style={{ width: 16, textAlign: 'center' }}>{n.icon}</span>{n.label === 'Opps' ? 'Opportunities' : n.label}
+            <span style={{ width: 16, textAlign: 'center' }}>{n.icon}</span>{n.label}
           </div>
         )
       })}
@@ -81,15 +82,19 @@ function SideNav() {
   )
 }
 
+// Mobile bottom nav shows a condensed subset
+const MOBILE_NAV = ['Today', 'Opportunities', 'Packets', 'Outreach', 'Coach']
+
 function BottomNav() {
   const { parts } = useRoute()
-  const active = '/' + (parts[0] || 'today')
+  const activePath = '/' + (parts[0] || 'today')
+  const mobileItems = NAV.filter((n) => MOBILE_NAV.includes(n.label))
   return (
     <div style={{ display: 'flex', borderTop: '1px solid var(--proto-rule-soft)', background: 'var(--proto-paper)', flexShrink: 0, paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}>
-      {NAV.map((n) => {
-        const on = active === n.path
+      {mobileItems.map((n) => {
+        const on = activePath === n.path
         return (
-          <div key={n.path} onClick={() => go(n.path)}
+          <div key={n.label} onClick={() => go(n.path)}
             style={{ flex: 1, textAlign: 'center', padding: '9px 4px 11px', cursor: 'pointer',
               color: on ? 'var(--text-brand)' : 'var(--proto-ink2)', fontWeight: on ? 600 : 500 }}>
             <div style={{ fontSize: 18, lineHeight: 1.1 }}>{n.icon}</div>
