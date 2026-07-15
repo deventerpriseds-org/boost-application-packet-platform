@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react'
-import { useApp, go } from '../state.jsx'
+import { useApp, go, useIsMobile } from '../state.jsx'
 import { api } from '../api.js'
 import { Pill } from '../shell.jsx'
 import { Loading, ErrorBox } from './Today.jsx'
@@ -155,6 +155,7 @@ function ArtifactCard({ a, busy, setBusy, onGenerate, onSetStatus, onMakeDoc, on
 
 export default function PacketBuilder({ id }) {
   const { toast } = useApp()
+  const mobile = useIsMobile()
   const [pState, setPState] = useState({ loading: true, error: null, packet: null })
   const [opp, setOpp] = useState(null)
   const [busy, setBusy] = useState(null)
@@ -164,6 +165,7 @@ export default function PacketBuilder({ id }) {
   const [parseBusy, setParseBusy] = useState(false)
   const [allBusy, setAllBusy] = useState(false)
   const [activeStep, setActiveStep] = useState('jd')
+  const [atsOpen, setAtsOpen] = useState(false)
   const pollers = useRef({})
 
   const load = useCallback(async () => {
@@ -327,24 +329,265 @@ export default function PacketBuilder({ id }) {
     return artifacts.filter((a) => a.type === stepKey)
   }
 
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 0, height: '100%' }}>
-      {/* Top breadcrumb + header */}
-      <div style={{ marginBottom: 16 }}>
-        <div className="px-small px-link" style={{ marginBottom: 8 }} onClick={() => go('/packets')}>
-          ← Packets
+  const stepContent = (
+    <>
+      {/* JD Analysis step */}
+      {activeStep === 'jd' && (
+        <>
+          <div className="px-box" style={{ padding: 16 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
+              <div style={{ fontSize: 15, fontWeight: 700 }}>Extracted from triggering email</div>
+              {opp?.source && <Pill tone="accent">{opp.source === 'LinkedIn' ? 'from email' : opp.source}</Pill>}
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '110px 1fr', gap: '8px 0', fontSize: 13 }}>
+              {[
+                ['Source', opp?.source || p.source || '—'],
+                ['Role', opp?.role || p.role || '—'],
+                ['Comp', opp?.comp || '—'],
+                ['Location', opp?.location || '—'],
+                ['Hiring manager', opp?.hm || '—'],
+              ].map(([k, v]) => (
+                <React.Fragment key={k}>
+                  <div style={{ color: 'var(--proto-ink2)', fontWeight: 500 }}>{k}</div>
+                  <div style={{ fontWeight: 500 }}>{v}</div>
+                </React.Fragment>
+              ))}
+            </div>
+          </div>
+
+          <div className="px-box" style={{ padding: 16 }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10, gap: 8, flexWrap: 'wrap' }}>
+              <div style={{ fontSize: 14, fontWeight: 700 }}>
+                Job description
+                <span className="px-small" style={{ marginLeft: 8, fontWeight: 400, color: 'var(--proto-ink2)' }}>
+                  {opp?.jdTitle ? 'parsed' : 'from email'}
+                </span>
+              </div>
+              <button className="px-btn" style={{ fontSize: 12 }} disabled={parseBusy} onClick={parseJd}>
+                {parseBusy ? 'Parsing…' : (opp?.jdSummary ? '↻ Re-parse JD' : 'Parse JD')}
+              </button>
+            </div>
+            {opp?.jdSummary ? (
+              <div style={{ fontSize: 13, lineHeight: 1.7 }}>{opp.jdSummary}</div>
+            ) : (
+              <div style={{ fontSize: 13, lineHeight: 1.6, color: 'var(--proto-ink2)', whiteSpace: 'pre-wrap' }}>
+                {opp?.why || 'No job description text available. Use "Parse JD" to extract it from the source URL.'}
+              </div>
+            )}
+          </div>
+
+          <div className="px-box" style={{ padding: 16, display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: 13, fontWeight: 600 }}>ATS keyword analysis</div>
+              <div className="px-small">Match your master baseline against this JD to find coverage gaps</div>
+            </div>
+            <button className="px-btn px-btn-accent" disabled={jdBusy} onClick={runJd}>
+              {jdBusy ? 'Analyzing…' : (p.jdAnalyzed ? '↻ Re-run ATS analysis' : '⚡ Run ATS analysis')}
+            </button>
+            <button className="px-btn" style={{ fontSize: 12 }} disabled={allBusy} onClick={buildAll}>
+              {allBusy ? 'Building…' : 'Build entire packet'}
+            </button>
+          </div>
+
+          <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+            <button className="px-btn px-btn-accent" onClick={() => setActiveStep('resume')}>Next: Resume →</button>
+          </div>
+        </>
+      )}
+
+      {/* Artifact steps */}
+      {['resume', 'cover', 'portfolio', 'video'].includes(activeStep) && (() => {
+        const stepArtifacts = getArtifactsByStep(activeStep)
+        const nextStep = STEPS[STEPS.findIndex((s) => s.key === activeStep) + 1]
+        return (
+          <>
+            {stepArtifacts.length === 0 && (
+              <div className="px-box" style={{ padding: 20, textAlign: 'center', color: 'var(--proto-ink2)', fontSize: 13 }}>
+                No artifact yet for this step.{' '}
+                <span className="px-link" onClick={buildAll}>Build entire packet</span> to generate all at once.
+              </div>
+            )}
+            {stepArtifacts.map((a) => (
+              <ArtifactCard key={a.id} a={a} busy={busy} setBusy={setBusy}
+                onGenerate={generate} onSetStatus={setStatus}
+                onMakeDoc={makeDoc} onMakeSlides={makeSlides}
+                onGenVideo={genVideo} onArchiveVideo={archiveVideo}
+                doc={doc} video={video} />
+            ))}
+            {nextStep && (
+              <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                <button className="px-btn px-btn-accent" onClick={() => setActiveStep(nextStep.key)}>
+                  Next: {nextStep.label} →
+                </button>
+              </div>
+            )}
+          </>
+        )
+      })()}
+
+      {/* Review & send step */}
+      {activeStep === 'send' && (
+        <div className="px-box" style={{ padding: 20, display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <div style={{ fontSize: 15, fontWeight: 700 }}>Review & send</div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {ARTIFACT_TYPES.map((t) => {
+              const a = artifacts.find((x) => x.type === t)
+              if (!a) return null
+              return (
+                <div key={t} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 0', borderBottom: '1px solid var(--proto-rule-soft)' }}>
+                  <div style={{ flex: 1, fontSize: 13, fontWeight: 500 }}>{TYPE_LABEL[t]}</div>
+                  <Pill tone={STATUS_TONE[a.status]}>{a.status}</Pill>
+                </div>
+              )
+            })}
+          </div>
+          <div style={{ marginTop: 4 }}>
+            {ready
+              ? <button className="px-btn px-btn-accent" onClick={() => go(`/compose/${id}`)}>Go to outreach →</button>
+              : <div className="px-small" style={{ color: 'var(--proto-ink2)' }}>Approve all artifacts above to unlock sending.</div>
+            }
+          </div>
         </div>
+      )}
+    </>
+  )
+
+  const atsPanel = (
+    <div className="px-box" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 10 }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1, color: 'var(--proto-ink2)' }}>
+          Keywords &amp; ATS terms
+        </div>
+        {atsScore !== null && (
+          <div style={{ fontSize: 20, fontWeight: 800, color: atsScore >= 80 ? 'var(--proto-green)' : atsScore >= 60 ? 'var(--proto-accent)' : 'var(--proto-red)' }}>
+            {atsScore}%
+          </div>
+        )}
+      </div>
+
+      {coveredKw.length > 0 || missingKw.length > 0 ? (
+        <>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
+            {coveredKw.map((kw) => (
+              <span key={kw} style={{ fontSize: 11, padding: '3px 8px', borderRadius: 99, background: 'var(--proto-green-soft)', color: 'var(--proto-green)', fontWeight: 600 }}>✓ {kw}</span>
+            ))}
+            {missingKw.map((kw) => (
+              <span key={kw} style={{ fontSize: 11, padding: '3px 8px', borderRadius: 99, background: 'var(--proto-red-soft)', color: 'var(--proto-red)', fontWeight: 600 }}>! {kw}</span>
+            ))}
+          </div>
+          <div className="px-small" style={{ color: 'var(--proto-ink3)' }}>
+            ! = missing · ✓ = covered · {coveredKw.length}/{coveredKw.length + missingKw.length}
+          </div>
+        </>
+      ) : (
+        <div className="px-small" style={{ color: 'var(--proto-ink2)' }}>
+          {p.jdAnalyzed ? 'No keyword gaps found.' : 'Run ATS analysis to see keyword coverage.'}
+        </div>
+      )}
+
+      <button className="px-btn px-btn-accent" style={{ width: '100%' }} disabled={allBusy} onClick={buildAll}>
+        {allBusy ? 'Building…' : '⚡ Auto-optimize resume'}
+      </button>
+
+      {!ready && STEPS.filter((s) => s.key !== 'jd' && s.key !== 'send').map((step) => {
+        const sa = getArtifactsByStep(step.key)
+        const allApproved = sa.length > 0 && sa.every((a) => a.status === 'approved')
+        return (
+          <div key={step.key} onClick={() => setActiveStep(step.key)}
+            style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '5px 0', cursor: 'pointer', borderTop: '1px solid var(--proto-rule-soft)' }}>
+            <div style={{ width: 8, height: 8, borderRadius: '50%', flexShrink: 0, background: allApproved ? 'var(--proto-green)' : sa.some((a) => a.status !== 'todo') ? 'var(--proto-accent)' : 'var(--proto-ink3)' }} />
+            <span style={{ fontSize: 12, flex: 1 }}>{step.label}</span>
+            <span className="px-small">{allApproved ? '✓' : sa.length === 0 ? '—' : sa.find((a) => a.status !== 'todo')?.status || 'todo'}</span>
+          </div>
+        )
+      })}
+    </div>
+  )
+
+  if (mobile) {
+    // ── MOBILE LAYOUT ──────────────────────────────────────────────────────
+    const activeIdx = STEPS.findIndex((s) => s.key === activeStep)
+    const prevStep = activeIdx > 0 ? STEPS[activeIdx - 1] : null
+    const nextStep = activeIdx < STEPS.length - 1 ? STEPS[activeIdx + 1] : null
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+        {/* Header */}
+        <div>
+          <div className="px-small px-link" style={{ marginBottom: 6 }} onClick={() => go('/packets')}>← Packets</div>
+          <div style={{ fontSize: 17, fontWeight: 700 }}>{p.company} · {p.role}</div>
+          {ready && <Pill tone="green">Ready to ship ✓</Pill>}
+        </div>
+
+        {/* Horizontal step scroller */}
+        <div style={{ display: 'flex', gap: 8, overflowX: 'auto', paddingBottom: 4, WebkitOverflowScrolling: 'touch' }}>
+          {STEPS.map((step) => {
+            const done = stepDone(step.key, p, artifacts)
+            const active = activeStep === step.key
+            return (
+              <div key={step.key} onClick={() => setActiveStep(step.key)}
+                style={{
+                  flexShrink: 0, display: 'flex', alignItems: 'center', gap: 6,
+                  padding: '7px 12px', borderRadius: 99, cursor: 'pointer', fontSize: 12, fontWeight: active ? 700 : 500,
+                  background: active ? 'var(--surface-brand-default)' : done ? 'var(--proto-green-soft)' : 'var(--proto-panel)',
+                  color: active ? '#fff' : done ? 'var(--proto-green)' : 'var(--proto-ink2)',
+                  border: active ? 'none' : '1px solid var(--proto-rule-soft)',
+                }}>
+                <span>{done ? '✓' : step.num}</span>
+                <span>{step.label}</span>
+              </div>
+            )
+          })}
+        </div>
+
+        {/* ATS bar — collapsible */}
+        {atsScore !== null && (
+          <div className="px-box" style={{ padding: '10px 14px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer' }} onClick={() => setAtsOpen((x) => !x)}>
+              <div style={{ flex: 1, fontSize: 13, fontWeight: 600 }}>Keywords &amp; ATS terms</div>
+              <div style={{ fontSize: 18, fontWeight: 800, color: atsScore >= 80 ? 'var(--proto-green)' : atsScore >= 60 ? 'var(--proto-accent)' : 'var(--proto-red)' }}>
+                {atsScore}%
+              </div>
+              <span style={{ fontSize: 12, color: 'var(--proto-ink2)' }}>{atsOpen ? '▲' : '▼'}</span>
+            </div>
+            {atsOpen && <div style={{ marginTop: 12 }}>{atsPanel}</div>}
+          </div>
+        )}
+
+        {/* Step content */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          {stepContent}
+        </div>
+
+        {/* Prev / Next nav */}
+        <div style={{ display: 'flex', gap: 10, marginTop: 4 }}>
+          {prevStep && (
+            <button className="px-btn" style={{ flex: 1 }} onClick={() => setActiveStep(prevStep.key)}>
+              ← {prevStep.label}
+            </button>
+          )}
+          {nextStep && (
+            <button className="px-btn px-btn-accent" style={{ flex: 1 }} onClick={() => setActiveStep(nextStep.key)}>
+              {nextStep.label} →
+            </button>
+          )}
+        </div>
+      </div>
+    )
+  }
+
+  // ── DESKTOP LAYOUT ──────────────────────────────────────────────────────
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
+      {/* Header */}
+      <div style={{ marginBottom: 16 }}>
+        <div className="px-small px-link" style={{ marginBottom: 8 }} onClick={() => go('/packets')}>← Packets</div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
           <div style={{ flex: 1 }}>
             <div className="px-small" style={{ textTransform: 'uppercase', letterSpacing: 1, color: 'var(--text-brand)' }}>
               Packet — {p.company}
             </div>
-            <div style={{ fontSize: 20, fontWeight: 700, marginTop: 2 }}>
-              {p.company} · {p.role}
-            </div>
-            <div className="px-small" style={{ marginTop: 2, color: 'var(--proto-ink2)' }}>
-              ATS keyword optimization + tailored assets
-            </div>
+            <div style={{ fontSize: 20, fontWeight: 700, marginTop: 2 }}>{p.company} · {p.role}</div>
+            <div className="px-small" style={{ marginTop: 2, color: 'var(--proto-ink2)' }}>ATS keyword optimization + tailored assets</div>
           </div>
           {atsScore !== null && (
             <div style={{ textAlign: 'right' }}>
@@ -354,21 +597,13 @@ export default function PacketBuilder({ id }) {
               </div>
             </div>
           )}
-          {ready
-            ? <Pill tone="green">Ready to ship ✓</Pill>
-            : allBusy
-              ? <Pill tone="yellow">building</Pill>
-              : null
-          }
-          {ready && (
-            <button className="px-btn px-btn-accent" onClick={() => go(`/compose/${id}`)}>Send packet →</button>
-          )}
+          {ready ? <Pill tone="green">Ready to ship ✓</Pill> : allBusy ? <Pill tone="yellow">building</Pill> : null}
+          {ready && <button className="px-btn px-btn-accent" onClick={() => go(`/compose/${id}`)}>Send packet →</button>}
         </div>
       </div>
 
-      {/* 3-column layout */}
+      {/* 3-column */}
       <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start' }}>
-
         {/* Left: step list */}
         <div style={{ width: 220, flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 2 }}>
           {STEPS.map((step) => {
@@ -386,209 +621,25 @@ export default function PacketBuilder({ id }) {
                   <div style={{ fontSize: 13, fontWeight: active ? 600 : 500, color: active ? 'var(--text-brand)' : 'var(--proto-ink1)' }}>
                     {step.label}
                   </div>
-                  <div className="px-small" style={{ marginTop: 1, color: 'var(--proto-ink2)', fontSize: 11 }}>
-                    {step.sub}
-                  </div>
+                  <div className="px-small" style={{ marginTop: 1, color: 'var(--proto-ink2)', fontSize: 11 }}>{step.sub}</div>
                 </div>
               </div>
             )
           })}
         </div>
 
-        {/* Center: step content */}
+        {/* Center: content */}
         <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 14 }}>
-
-          {/* JD Analysis step */}
-          {activeStep === 'jd' && (
-            <>
-              {/* Opportunity metadata card */}
-              <div className="px-box" style={{ padding: 16 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
-                  <div style={{ fontSize: 15, fontWeight: 700 }}>Extracted from triggering email</div>
-                  {opp?.source && (
-                    <Pill tone="accent">{opp.source === 'LinkedIn' ? 'from email' : opp.source}</Pill>
-                  )}
-                </div>
-                <div style={{ display: 'grid', gridTemplateColumns: '100px 1fr', gap: '8px 0', fontSize: 13 }}>
-                  {[
-                    ['Source', opp?.source || p.source || '—'],
-                    ['Role', opp?.role || p.role || '—'],
-                    ['Comp', opp?.comp || '—'],
-                    ['Location', opp?.location || '—'],
-                    ['Hiring manager', opp?.hm || '—'],
-                  ].map(([k, v]) => (
-                    <React.Fragment key={k}>
-                      <div style={{ color: 'var(--proto-ink2)', fontWeight: 500 }}>{k}</div>
-                      <div style={{ fontWeight: 500 }}>{v}</div>
-                    </React.Fragment>
-                  ))}
-                </div>
-              </div>
-
-              {/* JD text */}
-              <div className="px-box" style={{ padding: 16 }}>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
-                  <div style={{ fontSize: 14, fontWeight: 700 }}>
-                    Job description
-                    <span className="px-small" style={{ marginLeft: 8, fontWeight: 400, color: 'var(--proto-ink2)' }}>
-                      {opp?.jdTitle ? 'parsed' : 'from email'}
-                    </span>
-                  </div>
-                  <button className="px-btn" style={{ fontSize: 12 }} disabled={parseBusy} onClick={parseJd}>
-                    {parseBusy ? 'Parsing…' : (opp?.jdSummary ? '↻ Re-parse JD' : 'Parse JD')}
-                  </button>
-                </div>
-                {opp?.jdSummary ? (
-                  <div style={{ fontSize: 13, lineHeight: 1.7, color: 'var(--proto-ink1)' }}>{opp.jdSummary}</div>
-                ) : (
-                  <div style={{ fontSize: 13, lineHeight: 1.6, color: 'var(--proto-ink2)', whiteSpace: 'pre-wrap' }}>
-                    {opp?.why || 'No job description text available. Use "Parse JD" to extract it from the source URL.'}
-                  </div>
-                )}
-              </div>
-
-              {/* Run JD / ATS analysis */}
-              <div className="px-box" style={{ padding: 16, display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-                <div style={{ flex: 1 }}>
-                  <div style={{ fontSize: 13, fontWeight: 600 }}>ATS keyword analysis</div>
-                  <div className="px-small">Match your master baseline against this JD to find coverage gaps</div>
-                </div>
-                <button className="px-btn px-btn-accent" disabled={jdBusy} onClick={runJd}>
-                  {jdBusy ? 'Analyzing…' : (p.jdAnalyzed ? '↻ Re-run ATS analysis' : '⚡ Run ATS analysis')}
-                </button>
-                <button className="px-btn" style={{ fontSize: 12 }} disabled={allBusy} onClick={buildAll}>
-                  {allBusy ? 'Building…' : 'Build entire packet'}
-                </button>
-              </div>
-
-              <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-                <button className="px-btn px-btn-accent" onClick={() => setActiveStep('resume')}>
-                  Next: Resume →
-                </button>
-              </div>
-            </>
-          )}
-
-          {/* Artifact steps */}
-          {['resume', 'cover', 'portfolio', 'video'].includes(activeStep) && (() => {
-            const stepArtifacts = getArtifactsByStep(activeStep)
-            const nextStep = STEPS[STEPS.findIndex((s) => s.key === activeStep) + 1]
-            return (
-              <>
-                {stepArtifacts.length === 0 && (
-                  <div className="px-box" style={{ padding: 20, textAlign: 'center', color: 'var(--proto-ink2)', fontSize: 13 }}>
-                    No artifact created yet for this step. Use Build entire packet to generate all at once.
-                  </div>
-                )}
-                {stepArtifacts.map((a) => (
-                  <ArtifactCard key={a.id} a={a} busy={busy} setBusy={setBusy}
-                    onGenerate={generate} onSetStatus={setStatus}
-                    onMakeDoc={makeDoc} onMakeSlides={makeSlides}
-                    onGenVideo={genVideo} onArchiveVideo={archiveVideo}
-                    doc={doc} video={video} />
-                ))}
-                {nextStep && (
-                  <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-                    <button className="px-btn px-btn-accent" onClick={() => setActiveStep(nextStep.key)}>
-                      Next: {nextStep.label} →
-                    </button>
-                  </div>
-                )}
-              </>
-            )
-          })()}
-
-          {/* Review & send step */}
-          {activeStep === 'send' && (
-            <div className="px-box" style={{ padding: 20, display: 'flex', flexDirection: 'column', gap: 14 }}>
-              <div style={{ fontSize: 15, fontWeight: 700 }}>Review & send</div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                {ARTIFACT_TYPES.map((t) => {
-                  const a = artifacts.find((x) => x.type === t)
-                  if (!a) return null
-                  return (
-                    <div key={t} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 0', borderBottom: '1px solid var(--proto-rule-soft)' }}>
-                      <div style={{ flex: 1, fontSize: 13, fontWeight: 500 }}>{TYPE_LABEL[t]}</div>
-                      <Pill tone={STATUS_TONE[a.status]}>{a.status}</Pill>
-                    </div>
-                  )
-                })}
-              </div>
-              <div style={{ display: 'flex', gap: 10, marginTop: 4 }}>
-                {ready
-                  ? <button className="px-btn px-btn-accent" onClick={() => go(`/compose/${id}`)}>Go to outreach →</button>
-                  : <div className="px-small" style={{ color: 'var(--proto-ink2)' }}>Approve all artifacts above to unlock sending.</div>
-                }
-              </div>
-            </div>
-          )}
+          {stepContent}
         </div>
 
-        {/* Right: Keywords & ATS panel */}
-        <div style={{ width: 280, flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 12 }}>
-          <div className="px-box" style={{ padding: 16 }}>
-            <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1, color: 'var(--proto-ink2)', marginBottom: 12 }}>
-              Keywords &amp; ATS terms
-            </div>
-
-            {atsScore !== null && (
-              <div style={{ textAlign: 'center', marginBottom: 12, paddingBottom: 12, borderBottom: '1px solid var(--proto-rule-soft)' }}>
-                <div style={{ fontSize: 11, color: 'var(--proto-ink2)', marginBottom: 4 }}>ATS MATCH</div>
-                <div style={{ fontSize: 40, fontWeight: 800, lineHeight: 1, color: atsScore >= 80 ? 'var(--proto-green)' : atsScore >= 60 ? 'var(--proto-accent)' : 'var(--proto-red)' }}>
-                  {atsScore}%
-                </div>
-              </div>
-            )}
-
-            {coveredKw.length > 0 || missingKw.length > 0 ? (
-              <>
-                <div className="px-small" style={{ marginBottom: 8, textTransform: 'uppercase', letterSpacing: 0.5, color: 'var(--proto-ink3)' }}>
-                  Auto-matched against your master baseline
-                </div>
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 10 }}>
-                  {coveredKw.map((kw) => (
-                    <span key={kw} style={{ fontSize: 11, padding: '3px 8px', borderRadius: 99, background: 'var(--proto-green-soft)', color: 'var(--proto-green)', fontWeight: 600 }}>
-                      ✓ {kw}
-                    </span>
-                  ))}
-                  {missingKw.map((kw) => (
-                    <span key={kw} style={{ fontSize: 11, padding: '3px 8px', borderRadius: 99, background: 'var(--proto-red-soft)', color: 'var(--proto-red)', fontWeight: 600 }}>
-                      ! {kw}
-                    </span>
-                  ))}
-                </div>
-                <div className="px-small" style={{ color: 'var(--proto-ink3)', marginBottom: 12 }}>
-                  ! = must-have still missing · ✓ = already covered · {coveredKw.length}/{coveredKw.length + missingKw.length} terms
-                </div>
-              </>
-            ) : (
-              <div className="px-small" style={{ color: 'var(--proto-ink2)', marginBottom: 12 }}>
-                {p.jdAnalyzed ? 'No keyword gaps found.' : 'Run ATS analysis to see keyword coverage.'}
-              </div>
-            )}
-
-            <button className="px-btn px-btn-accent" style={{ width: '100%', marginBottom: 8 }} disabled={allBusy} onClick={buildAll}>
-              {allBusy ? 'Building…' : '⚡ Auto-optimize resume'}
-            </button>
-
-            {!ready && STEPS.filter((s) => s.key !== 'jd' && s.key !== 'send').map((step) => {
-              const sa = getArtifactsByStep(step.key)
-              const allApproved = sa.length > 0 && sa.every((a) => a.status === 'approved')
-              return (
-                <div key={step.key} onClick={() => setActiveStep(step.key)}
-                  style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 0', cursor: 'pointer', borderTop: '1px solid var(--proto-rule-soft)' }}>
-                  <div style={{ width: 8, height: 8, borderRadius: '50%', background: allApproved ? 'var(--proto-green)' : sa.some((a) => a.status !== 'todo') ? 'var(--proto-accent)' : 'var(--proto-ink3)' }} />
-                  <span style={{ fontSize: 12, flex: 1, color: 'var(--proto-ink1)' }}>{step.label}</span>
-                  <span className="px-small">{allApproved ? '✓' : sa.length === 0 ? '—' : sa.find((a) => a.status !== 'todo')?.status || 'todo'}</span>
-                </div>
-              )
-            })}
-          </div>
-
+        {/* Right: ATS panel */}
+        <div style={{ width: 280, flexShrink: 0 }}>
+          {atsPanel}
           {atsScore !== null && missingKw.length > 0 && (
-            <div className="px-box" style={{ padding: 14 }}>
+            <div className="px-box" style={{ padding: 14, marginTop: 12 }}>
               <div className="px-small" style={{ fontWeight: 600, marginBottom: 6 }}>
-                Your baseline already covers most terms — fill {missingKw.length} gap{missingKw.length !== 1 ? 's' : ''} to top out.
+                Fill {missingKw.length} gap{missingKw.length !== 1 ? 's' : ''} to top out your score.
               </div>
               <button className="px-btn" style={{ width: '100%', fontSize: 12 }} onClick={() => setActiveStep('resume')}>
                 Next: Resume →
@@ -596,7 +647,6 @@ export default function PacketBuilder({ id }) {
             </div>
           )}
         </div>
-
       </div>
     </div>
   )
