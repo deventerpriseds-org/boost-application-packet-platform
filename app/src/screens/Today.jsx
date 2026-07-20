@@ -47,6 +47,13 @@ const ROLE_DOT = {
 
 // "Latest inbox scrub" hero — new roles found overnight, binned by role family,
 // with a swipe-review CTA. Ported from the design handoff (home.jsx).
+function fmtTime(d) {
+  if (!d) return null
+  const dt = typeof d === 'string' ? new Date(d) : d
+  if (isNaN(dt)) return null
+  return dt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+}
+
 function InboxScrubHero({ newToday, backlog, toast }) {
   const bins = useMemo(() => {
     const map = {}
@@ -58,12 +65,15 @@ function InboxScrubHero({ newToday, backlog, toast }) {
 
   const [watch, setWatch] = useState(null)
   const [scanning, setScanning] = useState(false)
+  const [lastChecked, setLastChecked] = useState(new Date())
+  const [lastIngest, setLastIngest] = useState(null)
 
   useEffect(() => {
     api.mailSubscriptions().then((r) => {
       const watches = (r.value || []).filter((w) => (w.notificationUrl || '').includes('/mail/notify'))
       setWatch(watches[0] || null)
-    }).catch(() => setWatch(null))
+      setLastChecked(new Date())
+    }).catch(() => { setWatch(null); setLastChecked(new Date()) })
   }, [])
 
   const rescan = useCallback(async () => {
@@ -71,9 +81,16 @@ function InboxScrubHero({ newToday, backlog, toast }) {
     try {
       const res = await api.mailPollNow(60)
       if (res.error) throw new Error(res.error)
-      toast(`Scanned ${res.scanned ?? 0} messages · ${res.trace?.filter((t) => t.result?.inserted > 0).reduce((n, t) => n + (t.result?.inserted || 0), 0)} new opportunities`)
+      const inserted = res.trace?.filter((t) => t.result?.inserted > 0).reduce((n, t) => n + (t.result?.inserted || 0), 0) || 0
+      setLastChecked(new Date())
+      setLastIngest(inserted > 0 ? new Date() : lastIngest)
+      toast(`Scanned ${res.scanned ?? 0} messages · ${inserted} new opportunities`)
     } catch (e) { toast(`Scan failed: ${e.message || e}`) } finally { setScanning(false) }
-  }, [toast])
+  }, [toast, lastIngest])
+
+  const watchExpires = watch?.expirationDateTime ? new Date(watch.expirationDateTime) : null
+  const watchActive = watchExpires && watchExpires > new Date()
+  const expiresInHours = watchExpires ? Math.round((watchExpires - new Date()) / 3600000) : null
 
   return (
     <div className="px-box" style={{ padding: 0, overflow: 'hidden', borderColor: 'var(--surface-brand-default)' }}>
@@ -81,11 +98,15 @@ function InboxScrubHero({ newToday, backlog, toast }) {
         {/* Left accent block */}
         <div style={{ background: 'var(--surface-brand-subtle)', padding: '16px 20px', display: 'flex', flexDirection: 'column', justifyContent: 'center', minWidth: 200, flex: '1 1 200px', borderRight: '1px solid var(--proto-rule-soft)' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <span style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--surface-success-default)', boxShadow: '0 0 0 3px var(--surface-success-subtle)' }} />
-            <span className="px-small" style={{ textTransform: 'uppercase', letterSpacing: 1, color: 'var(--text-brand)' }}>Latest inbox scrub</span>
+            <span style={{ width: 8, height: 8, borderRadius: '50%', background: watchActive ? 'var(--surface-success-default)' : 'var(--proto-yellow)', boxShadow: watchActive ? '0 0 0 3px var(--surface-success-subtle)' : 'none' }} />
+            <span className="px-small" style={{ textTransform: 'uppercase', letterSpacing: 1, color: 'var(--text-brand)' }}>Inbox scrub</span>
           </div>
           <div style={{ fontSize: 44, fontWeight: 700, lineHeight: 1, marginTop: 8, color: 'var(--text-brand)' }}>{total}</div>
           <div className="px-small" style={{ marginTop: 2 }}>new today{backlog.length > 0 ? ` · ${backlog.length} backlog` : ''}</div>
+          <div className="px-small" style={{ marginTop: 6, color: 'var(--proto-ink3)' }}>
+            Checked {fmtTime(lastChecked) || '—'}
+            {lastIngest && <span> · ingested {fmtTime(lastIngest)}</span>}
+          </div>
         </div>
 
         {/* Middle: per-role breakdown */}
@@ -104,12 +125,12 @@ function InboxScrubHero({ newToday, backlog, toast }) {
           {companies.length > 0 && <div className="px-small" style={{ marginTop: 10 }}>Sources: {companies.slice(0, 5).join(' · ')}{companies.length > 5 ? ' …' : ''}</div>}
         </div>
 
-        {/* Right: CTA */}
+        {/* Right: CTA + watch status */}
         <div style={{ padding: '14px 18px', display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 8, borderLeft: '1px solid var(--proto-rule-soft)', flex: '1 1 170px', minWidth: 150 }}>
           <div className="px-btn px-btn-accent" style={{ justifyContent: 'center' }} onClick={() => go('/swipe')}>Review {total} in swipe →</div>
           <div className="px-btn" style={{ justifyContent: 'center', fontSize: 12 }} onClick={() => go('/settings/intake')}>
-            <span style={{ width: 7, height: 7, borderRadius: '50%', background: watch ? 'var(--surface-success-default)' : 'var(--proto-ink3)', display: 'inline-block', marginRight: 5 }} />
-            {watch ? 'Watching inbox' : 'No active watch'}
+            <span style={{ width: 7, height: 7, borderRadius: '50%', background: watchActive ? 'var(--surface-success-default)' : 'var(--proto-ink3)', display: 'inline-block', marginRight: 5 }} />
+            {watch === null ? 'Checking watch…' : watchActive ? `Watching · renews ${expiresInHours}h` : 'No active watch'}
           </div>
           <div className="px-btn" style={{ justifyContent: 'center', fontSize: 12, opacity: scanning ? 0.6 : 1, pointerEvents: scanning ? 'none' : 'auto' }} onClick={rescan}>
             {scanning ? 'Scanning…' : '↻ Re-scan now'}
