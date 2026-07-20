@@ -245,3 +245,23 @@ Every button, link, and selector must be wired before committing.
 Never ship a `onClick={() => toast('...')}` stub as a real button.
 Never render hardcoded fake names, counts, or statuses as live data.
 If a feature isn't ready, hide the control — don't fake it.
+
+## EDS Claude Skills (deventerpriseds-org/eds-claude-skills)
+
+Cloned to `/workspace/eds-claude-skills`. Skills load automatically each session via
+`register_repo_root`. **Use these skills proactively** — they encode org-level standards.
+
+| Skill | When to use |
+|---|---|
+| `define-acceptance-criteria` | **Before coding any feature or fix** — extract verifiable ACs, get sign-off first |
+| `verify-work` | **After implementing, before claiming done** — map ACs to evidence; "should work" is banned |
+| `create-github-repo` | When creating a new GitHub repo (triggers `create-repo.yml` workflow via MCP) |
+| `setup-environment` | When a needed CLI (az, gh, vercel, etc.) is missing in the CCR session |
+| `setup-mcp` | When adding MCP servers to a project |
+
+**Mandatory workflow:**
+1. `/define-acceptance-criteria` at the start of every non-trivial task
+2. Implement
+3. `/verify-work` before reporting done
+
+Repo secrets are org-level in `deventerpriseds-org` — no per-repo config needed.
