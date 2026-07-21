@@ -254,14 +254,21 @@ Cloned to `/workspace/eds-claude-skills`. Skills load automatically each session
 | Skill | When to use |
 |---|---|
 | `define-acceptance-criteria` | **Before coding any feature or fix** — extract verifiable ACs, get sign-off first |
-| `verify-work` | **After implementing, before claiming done** — map ACs to evidence; "should work" is banned |
+| `verify-work` | **After implementing, before claiming done** — spawns independent verifier agent; "should work" is banned |
+| `remember` | Session start: read `.claude/memory.md`. Session end: update it and commit |
+| `track-actions` | Session start: surface open ACT items from `.claude/actions.md` before any work |
 | `create-github-repo` | When creating a new GitHub repo (triggers `create-repo.yml` workflow via MCP) |
 | `setup-environment` | When a needed CLI (az, gh, vercel, etc.) is missing in the CCR session |
 | `setup-mcp` | When adding MCP servers to a project |
 
+**Agents (`.claude/agents/` in eds-claude-skills):**
+| Agent | Role |
+|---|---|
+| `verifier` | Independent UAT verifier — spawned by `verify-work`; proves/disproves claims from observable evidence only; never self-reports |
+
 **Mandatory workflow:**
 1. `/define-acceptance-criteria` at the start of every non-trivial task
 2. Implement
-3. `/verify-work` before reporting done
+3. `/verify-work` before reporting done — this spawns the `verifier` agent automatically
 
 Repo secrets are org-level in `deventerpriseds-org` — no per-repo config needed.
