@@ -180,9 +180,19 @@ async function tagOppRoles(oppId: string, opp: any, owner: string): Promise<void
 // subject/preview — sender alone is never sufficient, because LinkedIn and other
 // boards also send connection updates, post notifications, etc. that are noise.
 function isAlert(cfg: WatchConfig, from: string, subject: string, preview: string): boolean {
+  // 1. Configured subject/preview phrases ("is hiring", "new jobs", "recommended job"…).
   const pats = (cfg.subjectPatterns || []).filter(Boolean)
-  if (!pats.length) return false
-  try { return new RegExp(pats.join('|'), 'i').test(`${subject || ''} ${preview || ''}`) } catch { return false }
+  if (pats.length) {
+    try { if (new RegExp(pats.join('|'), 'i').test(`${subject || ''} ${preview || ''}`)) return true } catch {}
+  }
+  // 2. Dedicated job-alert SENDER addresses. LinkedIn/Indeed alerts use
+  //    "{Role} at {Company}" subjects that match none of the phrases above, so
+  //    key off the sender instead. Matches jobalerts-noreply@linkedin.com,
+  //    jobs-noreply@linkedin.com, donotreply@jobalert.indeed.com — while
+  //    excluding general notifications like messages-noreply@linkedin.com.
+  const f = (from || '').toLowerCase()
+  if (/jobalert|jobs?[-.]noreply|job[-.]?alert/.test(f)) return true
+  return false
 }
 
 // --- OpenAI helpers -------------------------------------------------------
