@@ -399,7 +399,33 @@ export async function mailConfig(req: HttpRequest, context: InvocationContext): 
   } catch (err) { return { status: 200, headers: HEADERS, jsonBody: { error: String(err) } } }
 }
 
-// GET /api/mail/folders?mailbox= — list a mailbox's folders (for the selectors).
+// Recursively walk a mailbox's folder tree. Graph only returns direct children per
+// call, so we descend into any folder reporting childFolderCount > 0. Returns a flat,
+// depth-ordered list where each entry carries its full path + nesting level, so the UI
+// can render a multilevel tree. Bounded by maxDepth to avoid pathological mailboxes.
+async function fetchFolderTree(mailbox: string, token: string, maxDepth = 6): Promise<any[]> {
+  const out: any[] = []
+  async function walk(parentId: string | null, parentPath: string, level: number) {
+    if (level > maxDepth) return
+    const url = parentId
+      ? `https://graph.microsoft.com/v1.0/users/${mailbox}/mailFolders/${parentId}/childFolders?$top=100&$select=id,displayName,totalItemCount,childFolderCount`
+      : `https://graph.microsoft.com/v1.0/users/${mailbox}/mailFolders?$top=100&$select=id,displayName,totalItemCount,childFolderCount`
+    const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } })
+    if (!res.ok) return
+    const rows = (((await res.json()) as any)?.value || [])
+    for (const f of rows) {
+      const path = parentPath ? `${parentPath}/${f.displayName}` : f.displayName
+      out.push({ id: f.id, name: f.displayName, path, parentId, level, count: f.totalItemCount, childCount: f.childFolderCount || 0 })
+      if ((f.childFolderCount || 0) > 0) await walk(f.id, path, level + 1)
+    }
+  }
+  await walk(null, '', 0)
+  return out
+}
+
+// GET /api/mail/folders?mailbox=[&tree=1] — list a mailbox's folders.
+// Default: flat top-level list (back-compat for the single-folder selector).
+// tree=1: full recursive tree with path + level for the folder→role mapping UI.
 export async function mailFolders(req: HttpRequest, context: InvocationContext): Promise<HttpResponseInit> {
   if (req.method === 'OPTIONS') return { status: 204, headers: HEADERS }
   const creds = graphCreds()
@@ -407,12 +433,83 @@ export async function mailFolders(req: HttpRequest, context: InvocationContext):
   try {
     const mailbox = req.query.get('mailbox') || (await loadConfig(resolveOwner(req).owner)).mailbox
     const token = await getMicrosoftToken(creds.tenantId, creds.clientId, creds.clientSecret)
+    if (req.query.get('tree')) {
+      const folders = await fetchFolderTree(mailbox, token)
+      return { status: 200, headers: HEADERS, jsonBody: { ok: true, mailbox, folders } }
+    }
     const res = await fetch(`https://graph.microsoft.com/v1.0/users/${mailbox}/mailFolders?$top=100&$select=id,displayName,totalItemCount`, { headers: { Authorization: `Bearer ${token}` } })
     if (!res.ok) return { status: 200, headers: HEADERS, jsonBody: { ok: false, mailbox, detail: `folders HTTP ${res.status}: ${(await res.text()).slice(0, 300)}` } }
     const folders = (((await res.json()) as any)?.value || []).map((f: any) => ({ id: f.id, name: f.displayName, count: f.totalItemCount }))
     // 'inbox' is always addressable by its well-known name.
     return { status: 200, headers: HEADERS, jsonBody: { ok: true, mailbox, folders } }
   } catch (err) { return { status: 200, headers: HEADERS, jsonBody: { error: String(err) } } }
+}
+
+// folder_role_map: maps a mailbox folder → a role bin (persona.key). Rows the router
+// consults when a message's parentFolderId matches, to assign a role directly instead
+// of AI-classifying. Additive table; role_key NULL means "watch this folder but let the
+// router decide the role". PK (owner_email, folder_id) so each folder maps once.
+async function ensureFolderMapTable(client: any) {
+  await client.query(`create table if not exists folder_role_map (
+    owner_email text not null,
+    folder_id text not null,
+    folder_path text not null default '',
+    role_key text,
+    skip_filter boolean not null default true,
+    updated_at timestamptz not null default now(),
+    primary key (owner_email, folder_id)
+  )`)
+}
+
+// GET /api/mail/folder-map — list this owner's folder→role mappings.
+// POST /api/mail/folder-map { folderId, folderPath, roleKey|null, skipFilter? } — upsert one.
+export async function mailFolderMap(req: HttpRequest, context: InvocationContext): Promise<HttpResponseInit> {
+  if (req.method === 'OPTIONS') return { status: 204, headers: HEADERS }
+  let client
+  try {
+    const owner = resolveOwner(req).owner
+    client = await getPgClient()
+    await ensureFolderMapTable(client)
+    if (req.method === 'GET') {
+      const rows = (await client.query(
+        `select folder_id, folder_path, role_key, skip_filter from folder_role_map where owner_email=$1 order by folder_path`, [owner]
+      )).rows
+      const mappings = rows.map((r: any) => ({ folderId: r.folder_id, folderPath: r.folder_path, roleKey: r.role_key, skipFilter: r.skip_filter }))
+      return { status: 200, headers: HEADERS, jsonBody: { ok: true, mappings } }
+    }
+    const body = (await req.json().catch(() => ({}))) as any
+    const folderId = String(body?.folderId || '').trim()
+    if (!folderId) return { status: 400, headers: HEADERS, jsonBody: { error: 'folderId required' } }
+    const folderPath = String(body?.folderPath || '').trim()
+    const roleKey = body?.roleKey ? String(body.roleKey).trim() : null
+    const skipFilter = body?.skipFilter === false ? false : true
+    await client.query(
+      `insert into folder_role_map (owner_email, folder_id, folder_path, role_key, skip_filter, updated_at)
+       values ($1,$2,$3,$4,$5, now())
+       on conflict (owner_email, folder_id)
+       do update set folder_path=excluded.folder_path, role_key=excluded.role_key, skip_filter=excluded.skip_filter, updated_at=now()`,
+      [owner, folderId, folderPath, roleKey, skipFilter]
+    )
+    return { status: 200, headers: HEADERS, jsonBody: { ok: true, folderId, roleKey, skipFilter } }
+  } catch (err) { return { status: 200, headers: HEADERS, jsonBody: { error: String(err) } } }
+  finally { try { await client?.end() } catch {} }
+}
+
+// POST /api/mail/folder-map/delete { folderId } — remove a mapping (revert to unmapped).
+export async function mailFolderMapDelete(req: HttpRequest, context: InvocationContext): Promise<HttpResponseInit> {
+  if (req.method === 'OPTIONS') return { status: 204, headers: HEADERS }
+  let client
+  try {
+    const owner = resolveOwner(req).owner
+    const body = (await req.json().catch(() => ({}))) as any
+    const folderId = String(body?.folderId || '').trim()
+    if (!folderId) return { status: 400, headers: HEADERS, jsonBody: { error: 'folderId required' } }
+    client = await getPgClient()
+    await ensureFolderMapTable(client)
+    const r = await client.query(`delete from folder_role_map where owner_email=$1 and folder_id=$2`, [owner, folderId])
+    return { status: 200, headers: HEADERS, jsonBody: { ok: true, removed: r.rowCount ?? 0 } }
+  } catch (err) { return { status: 200, headers: HEADERS, jsonBody: { error: String(err) } } }
+  finally { try { await client?.end() } catch {} }
 }
 
 // POST /api/mail/self-test — run the watcher checklist end-to-end and report
@@ -740,5 +837,7 @@ app.http('mailSubscriptions', { methods: ['GET', 'OPTIONS'], authLevel: 'anonymo
 app.http('mailIngestTest', { methods: ['POST', 'OPTIONS'], authLevel: 'anonymous', route: 'mail/ingest-test', handler: mailIngestTest })
 app.http('mailConfig', { methods: ['GET', 'POST', 'OPTIONS'], authLevel: 'anonymous', route: 'mail/config', handler: mailConfig })
 app.http('mailFolders', { methods: ['GET', 'OPTIONS'], authLevel: 'anonymous', route: 'mail/folders', handler: mailFolders })
+app.http('mailFolderMap', { methods: ['GET', 'POST', 'OPTIONS'], authLevel: 'anonymous', route: 'mail/folder-map', handler: mailFolderMap })
+app.http('mailFolderMapDelete', { methods: ['POST', 'OPTIONS'], authLevel: 'anonymous', route: 'mail/folder-map/delete', handler: mailFolderMapDelete })
 app.http('mailSelfTest', { methods: ['POST', 'OPTIONS'], authLevel: 'anonymous', route: 'mail/self-test', handler: mailSelfTest })
 app.timer('mailRenew', { schedule: '0 */30 * * * *', handler: mailRenew })

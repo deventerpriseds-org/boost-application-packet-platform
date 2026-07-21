@@ -127,6 +127,10 @@ export const api = {
   mailConfigGet: () => get(`/mail/config`),
   mailConfigSet: (patch) => post(`/mail/config`, patch),
   mailFolders: (mailbox) => get(`/mail/folders${mailbox ? `?mailbox=${encodeURIComponent(mailbox)}` : ''}`),
+  mailFolderTree: (mailbox) => get(`/mail/folders?tree=1${mailbox ? `&mailbox=${encodeURIComponent(mailbox)}` : ''}`),
+  mailFolderMapGet: () => get(`/mail/folder-map`),
+  mailFolderMapSet: ({ folderId, folderPath, roleKey, skipFilter }) => post(`/mail/folder-map`, { folderId, folderPath, roleKey, skipFilter }),
+  mailFolderMapDelete: (folderId) => post(`/mail/folder-map/delete`, { folderId }),
   mailSelfTest: () => post(`/mail/self-test`, {}),
   mailSendTestReal: (opts = {}) => post(`/mail/send-test-real`, opts),
   // AI cost metering

@@ -33,6 +33,41 @@ function IntakeSettings() {
   const [subscribing, setSubscribing] = useState(false)
   const [test, setTest] = useState({ running: false, result: null })
   const [note, setNote] = useState(null)
+  // Folder → role routing
+  const [tree, setTree] = useState({ loading: false, list: [], error: null })
+  const [fmap, setFmap] = useState({})            // folderId -> { roleKey, skipFilter }
+  const [roles, setRoles] = useState([])          // persona role bins
+  const [savingMap, setSavingMap] = useState(null) // folderId currently saving
+
+  const loadTree = useCallback(async (mailbox) => {
+    if (!mailbox) return
+    setTree({ loading: true, list: [], error: null })
+    try {
+      const [t, m, p] = await Promise.all([api.mailFolderTree(mailbox), api.mailFolderMapGet(), api.listPersonas()])
+      if (!t.ok) throw new Error(t.detail || t.error || 'could not list folders')
+      const map = {}
+      for (const row of (m.mappings || [])) map[row.folderId] = { roleKey: row.roleKey, skipFilter: row.skipFilter }
+      setFmap(map)
+      setRoles(p.personas || p.roles || [])
+      setTree({ loading: false, list: t.folders || [], error: null })
+    } catch (e) { setTree({ loading: false, list: [], error: String(e.message || e) }) }
+  }, [])
+
+  // Change a folder's mapping. value: '' = not watched (delete), '__router__' = watch/AI-decide,
+  // otherwise a persona key = watch and force that role.
+  const onMapChange = useCallback(async (folder, value) => {
+    setSavingMap(folder.id)
+    try {
+      if (!value) {
+        await api.mailFolderMapDelete(folder.id)
+        setFmap((m) => { const n = { ...m }; delete n[folder.id]; return n })
+      } else {
+        const roleKey = value === '__router__' ? null : value
+        await api.mailFolderMapSet({ folderId: folder.id, folderPath: folder.path, roleKey, skipFilter: true })
+        setFmap((m) => ({ ...m, [folder.id]: { roleKey, skipFilter: true } }))
+      }
+    } catch (e) { setNote(`Mapping failed: ${e.message || e}`) } finally { setSavingMap(null) }
+  }, [])
 
   const loadCfg = useCallback(async () => {
     try { const r = await api.mailConfigGet(); setCfg(r.config); setDirty(false) }
@@ -57,7 +92,7 @@ function IntakeSettings() {
   }, [])
 
   useEffect(() => { loadCfg(); loadSubs() }, [loadCfg, loadSubs])
-  useEffect(() => { if (cfg?.mailbox) loadFolders(cfg.mailbox) }, [cfg?.mailbox, loadFolders])
+  useEffect(() => { if (cfg?.mailbox) { loadFolders(cfg.mailbox); loadTree(cfg.mailbox) } }, [cfg?.mailbox, loadFolders, loadTree])
 
   const patch = (p) => { setCfg((c) => ({ ...c, ...p })); setDirty(true) }
   const toggleSender = (key) => {
@@ -191,6 +226,55 @@ function IntakeSettings() {
           <div style={{ flex: 1 }} />
           <button className="px-btn" onClick={save} disabled={saving || !dirty}>{saving ? 'Saving…' : dirty ? 'Save' : 'Saved'}</button>
           <button className="px-btn px-btn-accent" onClick={subscribe} disabled={subscribing}>{subscribing ? 'Applying…' : 'Save & subscribe'}</button>
+        </div>
+      </Card>
+
+      <Card>
+        <b style={{ fontSize: 15 }}>Folder → role routing</b>
+        <div className="px-small" style={{ marginTop: 2, marginBottom: 12 }}>
+          Map the folders your Outlook rules sort job mail into onto a role bin. Mail landing in a
+          mapped folder is imported <b>even if it fails the keyword filters above</b> — and tagged
+          with that role. Leave a folder on <b>Router decides</b> to import it but let the AI
+          classifier pick the role. Nested folders are shown indented.
+        </div>
+        {tree.loading && <div className="px-small">Loading folder tree…</div>}
+        {tree.error && <div className="px-small" style={{ color: 'var(--proto-yellow)' }}>Can't list folders: {tree.error}</div>}
+        {!tree.loading && !tree.error && tree.list.filter((f) => (f.name || '').toLowerCase() !== 'inbox').length === 0 && (
+          <div className="px-small" style={{ color: 'var(--proto-ink2)' }}>No subfolders found in this mailbox. Create folders in Outlook and add rules that file job alerts into them, then reload.</div>
+        )}
+        {!tree.loading && tree.list.filter((f) => (f.name || '').toLowerCase() !== 'inbox').length > 0 && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            {tree.list.filter((f) => (f.name || '').toLowerCase() !== 'inbox').map((f) => {
+              const m = fmap[f.id]
+              const value = !m ? '' : (m.roleKey || '__router__')
+              const mapped = !!m
+              return (
+                <div key={f.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '6px 8px', borderRadius: 8, background: mapped ? 'var(--proto-accent-soft)' : 'transparent', border: `1px solid ${mapped ? 'var(--surface-brand-default)' : 'transparent'}` }}>
+                  <span style={{ paddingLeft: (f.level || 0) * 18, fontSize: 13, flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                    <span style={{ color: 'var(--proto-ink3)' }}>{(f.level || 0) > 0 ? '↳ ' : '📁 '}</span>
+                    {f.name}{typeof f.count === 'number' ? <span className="px-small" style={{ color: 'var(--proto-ink3)' }}> · {f.count}</span> : null}
+                  </span>
+                  <select className="px-btn" style={{ minWidth: 190 }} value={value} disabled={savingMap === f.id}
+                    onChange={(e) => onMapChange(f, e.target.value)}>
+                    <option value="">— Not watched —</option>
+                    <option value="__router__">Watch · router decides</option>
+                    {roles.map((r) => (
+                      <option key={r.key} value={r.key}>Watch · {r.name || r.master_role || r.key}</option>
+                    ))}
+                  </select>
+                  {savingMap === f.id && <span className="px-small" style={{ color: 'var(--proto-ink3)' }}>…</span>}
+                </div>
+              )
+            })}
+          </div>
+        )}
+        {roles.length === 0 && !tree.loading && (
+          <div className="px-small" style={{ marginTop: 10, color: 'var(--proto-ink2)' }}>
+            No role bins yet — <span className="px-link" style={{ cursor: 'pointer' }} onClick={() => go('/settings/roles')}>create roles</span> to map folders to them (folders can still be watched with "router decides").
+          </div>
+        )}
+        <div className="px-small" style={{ marginTop: 12, color: 'var(--proto-ink3)' }}>
+          Mappings are saved as you change them. Routing takes effect once the mailbox-wide watch is live.
         </div>
       </Card>
 
