@@ -76,8 +76,12 @@ async function loadConfig(owner?: string): Promise<WatchConfig> {
       // Fall back to the legacy DEFAULT_OWNER row so existing config is not lost on first login.
       if (!row) row = (await client.query('select * from mail_watch_config where owner_email = $1', [DEFAULT_OWNER])).rows[0]
     } else {
-      // Webhook / no-auth path: use the first enabled config row.
-      row = (await client.query('select * from mail_watch_config where enabled = true order by updated_at desc limit 1')).rows[0]
+      // Webhook / no-auth path: pick the CANONICAL config — the one whose owner
+      // matches the mailbox it watches (the invariant enforced below). A stray
+      // row that watches someone else's mailbox under a different owner (e.g. a
+      // demo owner pointed at a real inbox) must never win, or every ingested
+      // alert lands under the wrong owner. Tie-break by recency.
+      row = (await client.query('select * from mail_watch_config where enabled = true order by (owner_email = mailbox) desc, updated_at desc limit 1')).rows[0]
     }
     if (!row) {
       const effectiveOwner = owner || DEFAULT_OWNER
