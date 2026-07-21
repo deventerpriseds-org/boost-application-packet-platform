@@ -48,12 +48,27 @@ Key tables (PostgreSQL):
 - [2026-07] Graph subscription route is /api/mail/... NOT /api/app/mail/... — different prefix from app routes
 - [2026-07] Mail watch subscription watched in InboxScrubHero; lastChecked timestamp shown, expiry countdown shown
 - [2026-07] No dead UI rule: every button must be wired; stubs banned; hide controls that aren't ready
+- [2026-07-21] **Mail intake insert bug class**: the opportunity INSERT in `mailWatch.ts` builds SQL
+  placeholders + a conditional param array by hand. Adding a column (source_date) misaligned them and
+  Postgres threw `could not determine data type of parameter $N`. Any future column add here MUST keep
+  placeholders and the param array in lockstep — see the comment block above the INSERT.
+- [2026-07-21] **Job-alert detection keys off SENDER, not just subject phrases.** LinkedIn alerts use
+  "{Role} at {Company}" subjects. `isAlert()` matches configured phrases OR job-alert sender addresses
+  (`jobalerts-noreply@`, `jobs-noreply@`, `jobalert.indeed.com`); excludes `messages-noreply@`.
+- [2026-07-21] **Webhook owner = canonical config** where `owner_email = mailbox` (NOT newest updated_at).
+  A demo config pointed at the real mailbox used to hijack ingestion under the demo owner.
+- [2026-07-21] **DECIDED (ACT-17): multi-source intake = ONE mailbox-wide Graph subscription**
+  (`users/{id}/messages`, not inbox-only), route by `parentFolderId` → `folder_role_map` → role.
+  All streams (inbox, folders, ATS) funnel through one `routeOpportunity()` for dedup + role mapping.
+  Additive only (new tables via `create table if not exists`; broaden subscription resource; no drops).
 
 ## Feature status
 | Feature | Status | Notes |
 |---|---|---|
-| LinkedIn alert intake (Graph subscription) | done | Auto-renews daily; last checked subscription healthy |
-| Today screen KPI + InboxScrubHero | done | Timestamp + expiry countdown; FRESH_STAGES unified |
+| LinkedIn alert intake (Graph subscription) | done | Auto-renews (mailRenew, 30-min timer); healthy |
+| Mail intake insert + filter + owner | fixed 2026-07-21 | 3 bugs: `$7` INSERT misalign (6826310), isAlert ignored sender (d02c1a2), webhook owner picked demo config (1488d3c). Was frozen at 218 for 7 days; now 298. |
+| Today screen KPI + InboxScrubHero | done | "0 new today" was ACCURATE — intake was dead, not a UI bug. FRESH_STAGES unified. |
+| Multi-source ingest router (folders+inbox+ATS) | open / planning (ACT-17) | AI router `tagOppRoles` exists; MISSING: mailbox-wide sub, subfolder traversal, folder_role_map + UI, ATS timer |
 | Opportunity enrichment | done | POST /api/app/opportunity/:id/enrich |
 | Packet builder (resume+video+cover) | done | HeyGen render + Google Docs template fill |
 | Outreach cadences + Composer | done | |
@@ -70,13 +85,22 @@ Key tables (PostgreSQL):
 - CCR sandbox cannot reach azurewebsites.net directly — use api-test.yml workflow for API calls
 - CCR sandbox cannot reach PostgreSQL — use db-query.yml workflow for DB queries
 - GOOGLE_REFRESH_TOKEN and GOOGLE_SERVICE_ACCOUNT_JSON are set directly on Function App, NOT in api-deploy.yml
-- Graph subscription expiration: renews ~daily via Function; if inbox quiet for days, subscription is still healthy
+- Graph subscription expiration: renews via mailRenew (30-min timer); healthy even if inbox quiet
+- **DIAGNOSIS DISCIPLINE**: "a count that hasn't changed in days" = data-freshness signal. Check
+  `max(created_at)` in the DB BEFORE assuming a UI/KPI bug. In 2026-07-21 the "app shows 0" was dead
+  intake (3 stacked bugs), not the frontend — chasing the UI first wasted the loop.
+- Mail INSERT param bug: placeholders in `mailWatch.ts` are hand-aligned with a conditional array;
+  adding a column silently misaligns → `could not determine data type of parameter $N`. Keep in lockstep.
+- ATS ingestion has NO scheduler timer — `atsIngest` is a manual POST route; 0 sources configured.
+- Two configs can watch the same mailbox; webhook picks `owner_email = mailbox` (canonical), not newest.
 - Mail routes: /api/mail/... NOT /api/app/mail/... (no /app/ prefix)
 - Android native testing: requires BrowserStack App Automate; CCR cannot run AVD (no KVM)
 - iOS testing: requires macOS runner or BrowserStack; categorically unavailable in Linux CCR
 
 ## Active work
-Current task: none — session wrapping up
-Files in flight: none
-Blocker: none
-Next step: Resume plan fixes (OppDetail match, Library crash, Settings demo guard, empty states) or ATS Sources UI wiring
+Current task: ACT-17 — multi-source ingest router (planning; awaiting go on phased build)
+Files in flight: none committed pending; last commits 6826310/d02c1a2/1488d3c (all on main)
+Blocker: none — need user's folder→role mappings + ATS board tokens for final wiring
+Next step: Build ACT-17 phases — (1) routeOpportunity() hub, (2) mailbox-wide sub + subfolder
+  traversal + folder_role_map, (3) ATS scheduler timer, (4) Intake folder-mapping UI. All ADDITIVE.
+Design locked: one mailbox-wide Graph subscription, route by parentFolderId. No destructive migrations.

@@ -16,8 +16,14 @@ Status values: `open` | `in-progress` | `blocked` | `done`
 - AC-2: Given the InboxScrubHero is visible, when Today loads, then its count matches the "New" KPI exactly
 - AC-3: Given opportunities exist with active pipeline stages, when Today loads, then "Active" and "Hot" KPIs reflect actual DB counts
 
-**Status:** `open`
-**Root cause identified:** `NEW_STAGES` excludes `enriched`; `personaKey` undefined from context. Fix outlined in plan file `cryptic-stirring-lagoon.md`.
+**Status:** `done` (2026-07-21)
+**Resolution:** The original hypothesis (`NEW_STAGES` / `personaKey`) was WRONG — those were
+already fixed in a prior session. The real cause was **dead mail intake**: the opportunity
+count had been frozen at 218 for 7 days (nothing since 2026-07-14). The "0 new today" on the
+InboxScrubHero was accurate — no new opps were arriving because intake was silently broken.
+Root cause was three stacked bugs (see ACT-13/14/15) plus a data backfill (ACT-16). After the
+fixes, von.ellis went 218 → 298 with 80 new-today. **Lesson: "a number that hasn't changed in
+days" is a data-freshness signal — check `max(created_at)` before touching any UI/KPI code.**
 
 ---
 
@@ -172,6 +178,97 @@ Status values: `open` | `in-progress` | `blocked` | `done`
 - AC-3: `POST /api/app/ats/sources` is called on save; `GET /api/app/ats/sources` populates the list on load
 
 **Status:** `open`
+
+---
+
+## ACT-13 — Fix frozen intake: opportunity INSERT `$7` type error
+
+**Requested:** 2026-07-21 (surfaced while diagnosing ACT-1)
+**Asked for:** "why does the app still say 0 / 218 hasn't moved in days"
+**Expected outcome:** New job-alert emails insert successfully; count moves off 218
+**Root cause:** When `source_date` was added (`b22e72e`), the INSERT's SQL placeholders fell out
+of alignment with the parameter array. Non-vec path bound `source` as `$7` but the VALUES clause
+referenced `$8` for source and never referenced `$7` → Postgres threw `could not determine data
+type of parameter $7` on EVERY real job-alert insert. Silently dropped all new opps since
+2026-07-14. (The Graph subscription + `mailRenew` timer were healthy the whole time.)
+**Fix:** commit `6826310` — realign placeholders (source `$7`/`$8`, embedding `$7::vector`,
+source_date `$8`/`$9`).
+**Status:** `done`
+**Evidence:** ingest-test returned `inserted: true` id `7e47462a…`; same email that threw `$7`
+now writes a real row with `source_date` correctly parsed.
+
+---
+
+## ACT-14 — Fix intake filter: recognize LinkedIn/Indeed job-alert senders
+
+**Requested:** 2026-07-21 ("plenty has arrived in the last 24h, it wasn't writing anything")
+**Expected outcome:** LinkedIn/Indeed alerts with "{Role} at {Company}" subjects are ingested
+**Root cause:** `isAlert()` only matched configured subject phrases ("is hiring", "new jobs"…)
+and ignored the sender entirely. LinkedIn's dominant alert subject is "{Role} at {Company}"
+(e.g. "Chief Operations Officer at Leidos") which matches no phrase → discarded as "not a job
+alert" even after ACT-13 was fixed. The config's `senders` list was never consulted.
+**Fix:** commit `d02c1a2` — add sender-signal detection: mail from `jobalerts-noreply@`,
+`jobs-noreply@`, `jobalert.indeed.com` is treated as an alert regardless of subject, while
+`messages-noreply@linkedin.com` (notifications) stays excluded.
+**Status:** `done`
+**Evidence:** 48h re-poll ingested 80+ real alerts (AI Fabrik, Booz Allen, BNY, Cboe, Slalom…)
+that were previously all `skipped: "not a job alert"`.
+
+---
+
+## ACT-15 — Fix webhook owner resolution (canonical mail-watch config)
+
+**Requested:** 2026-07-21 (surfaced when re-poll inserts didn't show under von.ellis)
+**Expected outcome:** Incoming alerts insert under the real mailbox owner, visible to the user
+**Root cause:** `loadConfig()` no-owner path (webhook / poll) selected the config row with the
+newest `updated_at`. A demo row (`owner_email=demo@executive-engine.local`) that watched
+von.ellis's real mailbox had a newer timestamp, so it won → every ingested alert was inserted
+under the demo owner and was invisible to the signed-in von.ellis. Violated the file's own
+invariant that `ownerEmail` must equal `mailbox`.
+**Fix:** commit `1488d3c` — prefer the canonical config where `owner_email = mailbox`,
+tie-break by recency.
+**Status:** `done`
+**Evidence:** post-fix webhook path resolves to von.ellis's config.
+
+---
+
+## ACT-16 — Data backfill + cleanup after intake fixes
+
+**Requested:** 2026-07-21 (part of "recount the past 24h")
+**Expected outcome:** The dropped alerts land under von.ellis; no dupes; demo watch disabled
+**Actions taken (via db-query.yml):**
+- Re-homed 80 unique real opps from `demo@executive-engine.local` → `von.ellis@enterpriseds.io`
+  (skipping any that duplicated existing rows by lower(company)+lower(role))
+- Deleted 3 overlapping demo-owner rows
+- Disabled the rogue `demo@executive-engine.local` mail_watch_config row
+- Deleted the synthetic Nira Energy test row (`7e47462a…`)
+**Status:** `done`
+**Evidence:** von.ellis real count 218 → 298, newest `2026-07-21 20:18`, new-today = 80.
+
+---
+
+## ACT-17 — Multi-source ingest router (folders + inbox + ATS)
+
+**Requested:** 2026-07-21
+**Asked for:** "the watch was supposed to be multifaceted… job boards like greenhouse, my general
+inbox, and specific folders I map to a role so jobs that fail keyword filters still get seen.
+Make the many inputs eliminate gaps." + "a router with all 3 pushing to it, one place for dedup
+and role mapping." + "same mail account, roles go to folders via rules — one watch filtering by
+folder, not multiple watches." + "must be additive, not destructive drops/swaps."
+**Expected outcome:** All three input streams normalize into one `routeOpportunity()` that dedups
+and assigns roles (folder-mapped → that role; unmapped/inbox/ATS → AI classify). Folder→role
+mapping UI with multilevel subfolders.
+**Current state (from history audit 2026-07-21):**
+- ✅ EXISTS: AI role router `tagOppRoles()` (source-agnostic, tags from `persona` table)
+- ✅ EXISTS: single top-level folder picker in Settings ▸ Intake
+- ❌ MISSING: mailbox-wide subscription + route by `parentFolderId`
+- ❌ MISSING: multilevel subfolder traversal (`mailFolders` doesn't recurse `childFolders`)
+- ❌ MISSING: `folder_role_map` table + folder→role UI (with unmapped→router fallback)
+- ❌ MISSING: ATS scheduler timer (0 sources configured, no timer; `atsIngest` is manual only)
+**Design decided:** ONE mailbox-wide Graph subscription, route by `parentFolderId`; additive
+schema (`folder_role_map`, `create table if not exists`), no drops/swaps.
+**ACs:** TBD — to define via define-acceptance-criteria before building.
+**Status:** `open` (in planning)
 
 ---
 
