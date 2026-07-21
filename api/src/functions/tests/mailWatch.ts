@@ -238,12 +238,16 @@ export async function insertOpp(client: any, owner: string, o: any, source = 'Li
   const whyText = why || `New ${source} alert${o.url ? ` · ${o.url}` : ''}`
   // Prefer job's posted date extracted by AI; fall back to email received date; then now()
   const sourceDateVal = o.postedDate || receivedAt || null
-  const sourceDateExpr = sourceDateVal ? `$${vec ? 10 : 9}::timestamptz` : 'now()'
+  // Param order — non-vec: [owner$1, company$2, role$3, location$4, comp$5, whyText$6, source$7, (sourceDate$8)]
+  //                    vec: [owner$1, company$2, role$3, location$4, comp$5, whyText$6, vec$7,   source$8, (sourceDate$9)]
+  // Placeholders below MUST match these positions exactly, or Postgres throws
+  // "could not determine data type of parameter $N" for any param the SQL never references.
+  const sourceDateExpr = sourceDateVal ? `$${vec ? 9 : 8}::timestamptz` : 'now()'
   const r = await client.query(
     `insert into opportunity
        (owner_email, is_demo, company, role, location, comp_range, source, source_date,
         why_surfaced, roles_for, stage, urgency, embedding)
-     values ($1, false, $2, $3, $4, $5, ${vec ? '$9' : '$8'}, ${sourceDateExpr}, $6, '{}', 'discovered', 'Warm', ${vec ? '$8::vector' : 'null'})
+     values ($1, false, $2, $3, $4, $5, ${vec ? '$8' : '$7'}, ${sourceDateExpr}, $6, '{}', 'discovered', 'Warm', ${vec ? '$7::vector' : 'null'})
      returning id`,
     vec
       ? [owner, o.company, o.role, o.location || null, o.comp || null, whyText, vec, source, ...(sourceDateVal ? [sourceDateVal] : [])]
