@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback } from 'react'
-import { go } from '../state.jsx'
+import { go, useRoute } from '../state.jsx'
 import { api } from '../api.js'
 import { MatchScore, Pill } from '../shell.jsx'
 import { Loading, ErrorBox, Empty } from './Today.jsx'
@@ -26,7 +26,7 @@ export default function Library({ tab = 'assets' }) {
         ))}
       </div>
       {tab === 'assets' && <Assets />}
-      {tab === 'roles' && <Roles />}
+      {tab === 'roles' && <RolesTab />}
       {tab === 'playbooks' && <Playbooks />}
     </div>
   )
@@ -111,7 +111,15 @@ function Assets() {
   )
 }
 
-function Roles() {
+// Roles tab: grid of role profiles, or a detail view at /library/roles/<key>.
+function RolesTab() {
+  const { parts } = useRoute()
+  const roleKey = parts[2] // /library/roles/<key>
+  if (roleKey) return <RoleDetail roleKey={roleKey} />
+  return <RolesGrid />
+}
+
+function RolesGrid() {
   const { loading, error, data } = useFetch(() => api.listPersonas())
   if (loading) return <Loading />
   if (error) return <ErrorBox error={error} />
@@ -126,7 +134,7 @@ function Roles() {
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 12 }}>
         {personas.map((p) => (
-          <div key={p.key} className="px-box" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <div key={p.key} className="px-box" onClick={() => go(`/library/roles/${p.key}`)} style={{ padding: 16, cursor: 'pointer', display: 'flex', flexDirection: 'column', gap: 8 }}>
             <div style={{ fontSize: 15, fontWeight: 700 }}>{p.masterRole || p.name}</div>
             <div className="px-small">{p.name} · {p.compTarget || '—'}</div>
             {p.positioning && <div style={{ fontSize: 13, lineHeight: 1.5 }}>{p.positioning}</div>}
@@ -138,25 +146,113 @@ function Roles() {
   )
 }
 
+// Role detail — renders ONLY the real persona fields (master_role, name, comp
+// target, positioning) plus the live linked opportunities (rolesFor tag match).
+// Narrative / key wins / linked assets / linked playbooks are NOT backed by any
+// field on the persona or library tables yet, so they are omitted (see note).
+function RoleDetail({ roleKey }) {
+  const personasState = useFetch(() => api.listPersonas(), [roleKey])
+  const oppsState = useFetch(() => api.listOpportunities({ persona: roleKey }), [roleKey])
+  if (personasState.loading) return <Loading />
+  if (personasState.error) return <ErrorBox error={personasState.error} />
+  const persona = (personasState.data.personas || []).find((p) => p.key === roleKey)
+  if (!persona) return (
+    <div>
+      <BackToRoles />
+      <Empty>Role profile not found.</Empty>
+    </div>
+  )
+  const opps = oppsState.data?.opportunities || []
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+      <BackToRoles />
+      <div className="px-box" style={{ padding: 20, display: 'flex', flexDirection: 'column', gap: 10 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <div style={{ fontSize: 20, fontWeight: 800, letterSpacing: -0.3, flex: 1 }}>{persona.masterRole || persona.name}</div>
+          <Pill>{persona.opportunities} opportunities</Pill>
+        </div>
+        <div className="px-small">{persona.name} · <b>Comp target:</b> {persona.compTarget || '—'}</div>
+        {persona.positioning
+          ? <div style={{ fontSize: 14, lineHeight: 1.6, marginTop: 4 }}>{persona.positioning}</div>
+          : <div className="px-small" style={{ marginTop: 4 }}>No positioning statement set. Add one in <span className="px-link" style={{ cursor: 'pointer' }} onClick={() => go('/settings/roles')}>Settings → Roles</span>.</div>}
+      </div>
+
+      <div className="px-box" style={{ padding: 16 }}>
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, marginBottom: 10 }}>
+          <b style={{ fontSize: 14 }}>Linked opportunities</b>
+          <span className="px-small">tagged to this role</span>
+          <div style={{ flex: 1 }} />
+          <span style={{ fontSize: 18, fontWeight: 700 }}>{opps.length}</span>
+        </div>
+        {oppsState.loading ? <Loading /> : opps.length === 0 ? (
+          <div className="px-small">No opportunities are currently tagged to this role.</div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            {opps.map((o) => (
+              <div key={o.id} onClick={() => go(`/opp/${o.id}`)} style={{ display: 'flex', alignItems: 'baseline', gap: 10, fontSize: 13, cursor: 'pointer', padding: '4px 0', borderTop: '1px solid var(--proto-rule-soft)' }}>
+                <span style={{ fontWeight: 600, minWidth: 180 }}>{o.company}</span>
+                <span className="px-small">{o.role}</span>
+                <div style={{ flex: 1 }} />
+                {o.stage && <Pill tone="panel">{o.stage}</Pill>}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div className="px-small" style={{ lineHeight: 1.5 }}>
+        Narrative, key wins, linked assets, comp reference, and linked playbooks are not yet
+        stored on the role profile — this view shows every real field the persona currently has.
+        Those richer fields need backend support before they can be displayed.
+      </div>
+    </div>
+  )
+}
+
+function BackToRoles() {
+  return <span className="px-link" style={{ fontSize: 12, cursor: 'pointer' }} onClick={() => go('/library/roles')}>← All role profiles</span>
+}
+
 function Playbooks() {
   const { loading, error, data } = useFetch(() => api.listLibrary())
+  const [cat, setCat] = useState('all')
   if (loading) return <Loading />
   if (error) return <ErrorBox error={error} />
   const entities = (data.entities || []).filter((e) => e.kind === 'playbook' || e.kind === 'template')
   if (!entities.length) return <Empty>No playbooks yet.</Empty>
+  // `category` is a real field on library_entity — build filter chips from it.
+  // (There is no `role`, `pages`, or `usage` field on the entity, and no create
+  //  endpoint, so those controls are intentionally not rendered.)
+  const categories = Array.from(new Set(entities.map((e) => e.category).filter(Boolean))).sort()
+  const shown = cat === 'all' ? entities : entities.filter((e) => e.category === cat)
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 12 }}>
-      {entities.map((e) => (
-        <div key={e.id} className="px-box" style={{ padding: 14, display: 'flex', flexDirection: 'column', gap: 6 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <div style={{ fontSize: 14, fontWeight: 700, flex: 1 }}>{e.name}</div>
-            <Pill tone={e.kind === 'template' ? 'yellow' : 'accent'}>{e.kind}</Pill>
-          </div>
-          {e.category && <div className="px-small">{e.category}</div>}
-          {e.content?.thesis && <div style={{ fontSize: 13, lineHeight: 1.5 }}>{e.content.thesis}</div>}
-          {e.content?.est_reply && <div className="px-small">Est. reply rate: {e.content.est_reply}</div>}
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+      {categories.length > 0 && (
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+          {['all', ...categories].map((c) => (
+            <div key={c} onClick={() => setCat(c)}
+              style={{ padding: '4px 12px', borderRadius: 999, cursor: 'pointer', fontSize: 12, fontWeight: cat === c ? 600 : 500,
+                border: '1px solid var(--proto-rule-soft)',
+                background: cat === c ? 'var(--surface-brand-default)' : 'transparent',
+                color: cat === c ? '#fff' : 'var(--proto-ink2)' }}>
+              {c === 'all' ? `All (${entities.length})` : `${c} (${entities.filter((e) => e.category === c).length})`}
+            </div>
+          ))}
         </div>
-      ))}
+      )}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 12 }}>
+        {shown.map((e) => (
+          <div key={e.id} className="px-box" style={{ padding: 14, display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <div style={{ fontSize: 14, fontWeight: 700, flex: 1 }}>{e.name}</div>
+              <Pill tone={e.kind === 'template' ? 'yellow' : 'accent'}>{e.kind}</Pill>
+            </div>
+            {e.category && <div className="px-small">{e.category}</div>}
+            {e.content?.thesis && <div style={{ fontSize: 13, lineHeight: 1.5 }}>{e.content.thesis}</div>}
+            {e.content?.est_reply && <div className="px-small">Est. reply rate: {e.content.est_reply}</div>}
+          </div>
+        ))}
+      </div>
     </div>
   )
 }

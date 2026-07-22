@@ -21,6 +21,7 @@ export default function Composer({ id }) {
   const [messageId, setMessageId] = useState(null)
   const [toEmail, setToEmail] = useState('')
   const [sending, setSending] = useState(false)
+  const [savingDraft, setSavingDraft] = useState(false)
 
   const load = useCallback(async () => {
     try {
@@ -55,7 +56,7 @@ export default function Composer({ id }) {
     if (!isEmail) {
       copy()
       const res = await api.setOutreachState(messageId, 'sent')
-      if (res.error) toast(`Failed: ${res.error}`); else toast('Copied — paste it in, then it’s marked sent ✓')
+      if (res.error) toast(`Failed: ${res.error}`); else toast('Copied — paste it in, then it is marked sent ✓')
       return
     }
     if (!/.+@.+\..+/.test(toEmail.trim())) { toast('Enter a recipient email to send.'); return }
@@ -69,6 +70,18 @@ export default function Composer({ id }) {
     finally { setSending(false) }
   }
   const copy = () => { try { navigator.clipboard?.writeText(body) } catch {} toast('Copied to clipboard') }
+
+  // Generate persists a message row; marking it 'draft' files it in the Outreach
+  // queue's Drafts group (Outreach.jsx filters m.state === 'draft').
+  const saveDraft = async () => {
+    if (!messageId) { toast('Generate a draft first.'); return }
+    setSavingDraft(true)
+    try {
+      const res = await api.setOutreachState(messageId, 'draft')
+      if (res.error) toast(`Failed: ${res.error}`); else toast('Saved to Drafts ✓')
+    } catch (err) { toast(`Save failed: ${err.message || err}`) }
+    finally { setSavingDraft(false) }
+  }
 
   if (meta.loading) return <Loading />
   if (meta.error) return <ErrorBox error={meta.error} />
@@ -130,6 +143,7 @@ export default function Composer({ id }) {
           <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
             <button className="px-btn px-btn-accent" disabled={busy} onClick={() => generate()}>{busy ? 'Generating…' : (messageId ? '↻ Regenerate' : 'Generate draft')}</button>
             <button className="px-btn" onClick={copy}>⧉ Copy</button>
+            <button className="px-btn" disabled={savingDraft || !messageId} onClick={saveDraft} title="File this draft in the Outreach queue">{savingDraft ? 'Saving…' : '⌵ Save draft'}</button>
             <div style={{ flex: 1 }} />
             {isEmail ? (
               <button className="px-btn px-btn-green" disabled={sending || !messageId} onClick={send}>{sending ? 'Sending…' : '✉ Send email'}</button>
@@ -139,7 +153,15 @@ export default function Composer({ id }) {
           </div>
         </div>
 
-        {/* Personalization rail */}
+        {/* Personalization rail.
+            Spec also called for a Template row (Standard/Value-add POV/Referral/
+            Re-engage), a "Hooks that convert" list, and a reply-rate benchmark.
+            All three are intentionally omitted: generateOutreach only accepts
+            { channel, tone, contactId } (no template param) and no API response
+            (generate, opportunity, contacts, or listOutreach) returns templates,
+            hooks, or a reply-rate number. Per the no-fake-data rule these controls
+            are hidden rather than stubbed; wire them if/when the API exposes the
+            data (e.g. out.templates, res.message.hooks, opp.metrics.replyRate). */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
           <div>
             <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--proto-ink2)', marginBottom: 6 }}>Personalization</div>

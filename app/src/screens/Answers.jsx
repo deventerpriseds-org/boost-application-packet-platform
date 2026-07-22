@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react'
 import { useApp, go } from '../state.jsx'
 import { api } from '../api.js'
+import { getOwner } from '../api.js'
 import { Loading, ErrorBox } from './Today.jsx'
 
 // Reads a File as a base64 data URL.
@@ -15,7 +16,7 @@ function fileToDataUrl(file) {
 
 export default function Answers({ id }) {
   const { toast } = useApp()
-  const [meta, setMeta] = useState({ loading: true, error: null, company: '', role: '' })
+  const [meta, setMeta] = useState({ loading: true, error: null, opp: null })
   const [preview, setPreview] = useState(null)   // data URL of the uploaded screenshot
   const [busy, setBusy] = useState(false)
   const [answers, setAnswers] = useState(null)     // [{question, answer}]
@@ -25,14 +26,17 @@ export default function Answers({ id }) {
     try {
       const o = await api.getOpportunity(id)
       if (o.error) throw new Error(o.error)
-      setMeta({ loading: false, error: null, company: o.company, role: o.role })
-    } catch (err) { setMeta({ loading: false, error: String(err.message || err) }) }
+      setMeta({ loading: false, error: null, opp: o })
+    } catch (err) { setMeta({ loading: false, error: String(err.message || err), opp: null }) }
   }, [id])
   useEffect(() => { load() }, [load])
 
   const handleFile = async (file) => {
     if (!file) return
-    if (!file.type.startsWith('image/')) { toast('Please drop an image (PNG/JPG screenshot).'); return }
+    // The vision endpoint is image-only (it sends the bytes to gpt-4o as an
+    // image_url). PDFs are not processed end-to-end, so we reject them rather
+    // than pretend to accept them.
+    if (!file.type.startsWith('image/')) { toast('Please drop an image (PNG/JPG screenshot). PDFs are not supported yet.'); return }
     const dataUrl = await fileToDataUrl(file)
     setPreview(dataUrl); setAnswers(null)
     await run(dataUrl)
@@ -62,9 +66,20 @@ export default function Answers({ id }) {
   if (meta.loading) return <Loading />
   if (meta.error) return <ErrorBox error={meta.error} />
 
+  const opp = meta.opp || {}
+  // Profile source = the real context the backend grounds each answer in
+  // (see appExtras.ts answersVision → profile string). Show only real fields.
+  const profileRows = [
+    { label: 'Applicant', value: getOwner() },
+    { label: 'Role baseline', value: opp.role },
+    { label: 'Comp target', value: opp.comp },
+    { label: 'Location', value: opp.location },
+    { label: 'Source', value: opp.source },
+  ].filter((r) => r.value)
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-      <div className="px-small px-link" onClick={() => go(`/opp/${id}`)}>← {meta.company} · {meta.role}</div>
+      <div className="px-small px-link" onClick={() => go(`/opp/${id}`)}>← {opp.company} · {opp.role}</div>
       <div style={{ display: 'flex', alignItems: 'flex-end', gap: 12, flexWrap: 'wrap' }}>
         <div style={{ flex: 1, minWidth: 200 }}>
           <div style={{ fontSize: 20, fontWeight: 700 }}>Application autofill</div>
@@ -75,41 +90,75 @@ export default function Answers({ id }) {
 
       <input ref={fileRef} type="file" accept="image/*" style={{ display: 'none' }} onChange={(e) => handleFile(e.target.files?.[0])} />
 
-      {/* Dropzone */}
-      <div
-        onClick={() => fileRef.current?.click()}
-        onDragOver={(e) => e.preventDefault()}
-        onDrop={(e) => { e.preventDefault(); handleFile(e.dataTransfer.files?.[0]) }}
-        className="px-box"
-        style={{ padding: 28, textAlign: 'center', cursor: 'pointer', borderStyle: 'dashed', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
-        {preview ? (
-          <img src={preview} alt="form" style={{ maxWidth: '100%', maxHeight: 200, borderRadius: 6, border: '1px solid var(--proto-rule-soft)' }} />
-        ) : <div style={{ fontSize: 34 }}>⇪</div>}
-        <div style={{ fontWeight: 600 }}>{busy ? 'Reading the form…' : preview ? 'Replace screenshot' : 'Drop a screenshot of the application form'}</div>
-        <div className="px-small">…or click to choose, or paste from clipboard. gpt-4o reads the questions and drafts each answer.</div>
-      </div>
-
-      {busy && <Loading />}
-
-      {answers && !busy && (
-        answers.length === 0 ? (
-          <div className="px-box" style={{ padding: 20, textAlign: 'center', color: 'var(--proto-ink2)' }}>No questions detected in that image. Try a clearer screenshot of the form fields.</div>
-        ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-            <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--proto-ink2)' }}>Detected questions ({answers.length}) · edit before copying</div>
-            {answers.map((a, i) => (
-              <div key={i} className="px-box" style={{ padding: 14 }}>
-                <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
-                  <div style={{ flex: 1, fontWeight: 600, fontSize: 14 }}>{a.question}</div>
-                  <button className="px-btn" style={{ fontSize: 12 }} onClick={() => copyOne(i, a.answer)}>⧉ Copy</button>
-                </div>
-                <textarea value={a.answer} onChange={(e) => setAnswerText(i, e.target.value)}
-                  style={{ width: '100%', marginTop: 8, minHeight: 70, border: '1px solid var(--proto-rule-soft)', borderRadius: 6, background: 'var(--proto-paper)', color: 'var(--proto-ink)', fontFamily: 'Inter, system-ui, sans-serif', fontSize: 13, padding: 10, resize: 'vertical', lineHeight: 1.5, boxSizing: 'border-box' }} />
-              </div>
-            ))}
+      {/* Two-column: main workspace + right rail (captured form + profile source) */}
+      <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start', flexWrap: 'wrap' }}>
+        <div style={{ flex: '1 1 420px', minWidth: 300, display: 'flex', flexDirection: 'column', gap: 16 }}>
+          {/* Dropzone */}
+          <div
+            onClick={() => fileRef.current?.click()}
+            onDragOver={(e) => e.preventDefault()}
+            onDrop={(e) => { e.preventDefault(); handleFile(e.dataTransfer.files?.[0]) }}
+            className="px-box"
+            style={{ padding: 28, textAlign: 'center', cursor: 'pointer', borderStyle: 'dashed', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
+            {preview ? (
+              <img src={preview} alt="form" style={{ maxWidth: '100%', maxHeight: 200, borderRadius: 6, border: '1px solid var(--proto-rule-soft)' }} />
+            ) : <div style={{ fontSize: 34 }}>⇪</div>}
+            <div style={{ fontWeight: 600 }}>{busy ? 'Reading the form…' : preview ? 'Replace screenshot' : 'Drop a screenshot of the application form'}</div>
+            <div className="px-small">…or click to choose, or paste from clipboard. gpt-4o reads the questions and drafts each answer. PNG/JPG only.</div>
           </div>
-        )
-      )}
+
+          {busy && <Loading />}
+
+          {answers && !busy && (
+            answers.length === 0 ? (
+              <div className="px-box" style={{ padding: 20, textAlign: 'center', color: 'var(--proto-ink2)' }}>No questions detected in that image. Try a clearer screenshot of the form fields.</div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--proto-ink2)' }}>Detected questions ({answers.length}) · edit before copying</div>
+                {answers.map((a, i) => (
+                  <div key={i} className="px-box" style={{ padding: 14 }}>
+                    <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
+                      <div style={{ flex: 1, fontWeight: 600, fontSize: 14 }}>{a.question}</div>
+                      <button className="px-btn" style={{ fontSize: 12 }} onClick={() => copyOne(i, a.answer)}>⧉ Copy</button>
+                    </div>
+                    <textarea value={a.answer} onChange={(e) => setAnswerText(i, e.target.value)}
+                      style={{ width: '100%', marginTop: 8, minHeight: 70, border: '1px solid var(--proto-rule-soft)', borderRadius: 6, background: 'var(--proto-paper)', color: 'var(--proto-ink)', fontFamily: 'Inter, system-ui, sans-serif', fontSize: 13, padding: 10, resize: 'vertical', lineHeight: 1.5, boxSizing: 'border-box' }} />
+                  </div>
+                ))}
+              </div>
+            )
+          )}
+        </div>
+
+        {/* Right rail */}
+        <div style={{ flex: '0 1 260px', minWidth: 220, display: 'flex', flexDirection: 'column', gap: 12 }}>
+          {/* Captured form thumbnail — the real uploaded image */}
+          <div className="px-box" style={{ padding: 12 }}>
+            <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--proto-ink2)', marginBottom: 8 }}>Captured form</div>
+            {preview ? (
+              <img src={preview} alt="captured form" style={{ width: '100%', borderRadius: 6, border: '1px solid var(--proto-rule-soft)', display: 'block' }} />
+            ) : (
+              <div className="px-small" style={{ color: 'var(--proto-ink2)' }}>No screenshot yet. Drop or paste one to autofill.</div>
+            )}
+          </div>
+
+          {/* Profile source — real owner/opportunity fields the answers are grounded in */}
+          <div className="px-box" style={{ padding: 12 }}>
+            <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--proto-ink2)', marginBottom: 8 }}>Profile source</div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {profileRows.map((r) => (
+                <div key={r.label}>
+                  <div className="px-small" style={{ color: 'var(--proto-ink2)', fontSize: 11 }}>{r.label}</div>
+                  <div style={{ fontSize: 13, fontWeight: 600 }}>{r.value}</div>
+                </div>
+              ))}
+              <div className="px-small" style={{ color: 'var(--proto-ink2)', fontSize: 11, marginTop: 2 }}>
+                Answers are grounded in these fields (US work-authorized, ~4 weeks notice).
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
   )
 }
