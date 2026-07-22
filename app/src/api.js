@@ -134,8 +134,16 @@ export const api = {
   mailFolderMapSet: ({ folderId, folderPath, roleKey }) => post(`/mail/folder-map`, { folderId, folderPath, roleKey }),
   mailFolderMapDelete: ({ folderId, roleKey }) => post(`/mail/folder-map/delete`, { folderId, roleKey }),
   mailMessages: ({ folderId, top = 50, mailbox } = {}) => get(`/mail/messages?top=${top}${folderId ? `&folderId=${encodeURIComponent(folderId)}` : ''}${mailbox ? `&mailbox=${encodeURIComponent(mailbox)}` : ''}`),
+  mailMessage: (id, mailbox) => get(`/mail/message/${encodeURIComponent(id)}${mailbox ? `?mailbox=${encodeURIComponent(mailbox)}` : ''}`),
+  mailAlertSnooze: (messageId, hours = 24) => post(`/mail/alert/snooze`, { messageId, hours }),
+  mailAlertDismiss: (messageId) => post(`/mail/alert/dismiss`, { messageId }),
   mailSelfTest: () => post(`/mail/self-test`, {}),
   mailSendTestReal: (opts = {}) => post(`/mail/send-test-real`, opts),
+  // Templates (reusable text/creative assets)
+  templatesList: () => get(`/app/templates?owner=${encodeURIComponent(_owner)}`),
+  templateSave: (data) => post(`/app/templates`, data),
+  templateDelete: (id) => post(`/app/templates/delete`, { id }),
+  templateUse: (id) => post(`/app/templates/${encodeURIComponent(id)}/use`, {}),
   // AI cost metering
   usageSummary: () => get(`/app/usage`),
   // Asset analytics (tracked opens)

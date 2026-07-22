@@ -73,6 +73,8 @@ export async function assetsAnalytics(req: HttpRequest, context: InvocationConte
       `select e.asset_id,
               o.company, o.role, a.type as artifact_type,
               count(*) filter (where e.event = 'open') as opens,
+              count(*) filter (where e.event = 'open' and e.ts >= now() - interval '7 days') as opens7d,
+              count(*) filter (where e.event = 'forward') as forwards,
               count(distinct e.viewer) filter (where e.viewer <> 'owner') as unique_viewers,
               coalesce(sum(e.view_seconds),0) as view_seconds,
               max(e.ts) as last_event
@@ -89,11 +91,14 @@ export async function assetsAnalytics(req: HttpRequest, context: InvocationConte
       status: 200, headers: HEADERS,
       jsonBody: {
         totalOpens: rows.reduce((s: number, r: any) => s + Number(r.opens || 0), 0),
+        totalOpens7d: rows.reduce((s: number, r: any) => s + Number(r.opens7d || 0), 0),
+        totalForwards: rows.reduce((s: number, r: any) => s + Number(r.forwards || 0), 0),
         assets: rows.map((r: any) => ({
           assetId: r.asset_id,
           label: r.company ? `${r.company} · ${r.artifact_type || 'asset'}` : (r.artifact_type || r.asset_id),
           company: r.company, role: r.role, type: r.artifact_type,
-          opens: Number(r.opens || 0), uniqueViewers: Number(r.unique_viewers || 0),
+          opens: Number(r.opens || 0), opens7d: Number(r.opens7d || 0),
+          forwards: Number(r.forwards || 0), uniqueViewers: Number(r.unique_viewers || 0),
           viewSeconds: Number(r.view_seconds || 0), lastEvent: r.last_event,
         })),
       }

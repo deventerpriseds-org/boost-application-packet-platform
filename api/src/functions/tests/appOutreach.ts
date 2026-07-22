@@ -18,6 +18,8 @@ function graphCreds() {
 async function ensureOutreachCols(client: any) {
   await client.query(`alter table outreach_message add column if not exists to_email text`)
   await client.query(`alter table outreach_message add column if not exists subject text`)
+  await client.query(`alter table outreach_message add column if not exists opened_at timestamptz`)
+  await client.query(`alter table outreach_message add column if not exists replied_at timestamptz`)
 }
 
 // Pull a "Subject: ..." line out of a generated email body, if present.
@@ -45,7 +47,7 @@ const CHANNELS: Record<string, { label: string; limit: number; brief: string }> 
   followUp: { label: 'Follow-up', limit: 1200, brief: 'a brief, friendly follow-up that adds value and restates the ask without pressure' },
 }
 const TONES = ['Direct', 'Warm', 'POV-led']
-const STATES = ['draft', 'scheduled', 'due', 'sent']
+const STATES = ['draft', 'scheduled', 'due', 'sent', 'opened', 'replied']
 
 function msgShape(m: any) {
   return {
@@ -53,6 +55,7 @@ function msgShape(m: any) {
     channelLabel: CHANNELS[m.channel]?.label || m.channel, limit: CHANNELS[m.channel]?.limit,
     tone: m.tone, body: m.body, state: m.state, dayOffset: m.day_offset,
     scheduledFor: m.scheduled_for, sentAt: m.sent_at, createdAt: m.created_at,
+    openedAt: m.opened_at, repliedAt: m.replied_at,
     toEmail: m.to_email, subject: m.subject, sendable: EMAIL_CHANNELS.has(m.channel),
   }
 }
@@ -132,8 +135,15 @@ export async function outreachState(req: HttpRequest, context: InvocationContext
     const state = body?.state
     if (!STATES.includes(state)) return { status: 400, headers: HEADERS, jsonBody: { error: `invalid state; one of ${STATES.join(', ')}` } }
     client = await getPgClient()
+    await ensureOutreachCols(client)
+    // Stamp the relevant timestamp on transition; leave others untouched (coalesce keeps prior values).
     const sentAt = state === 'sent' ? 'now()' : 'sent_at'
-    const r = (await client.query(`update outreach_message set state = $1, sent_at = ${sentAt} where id = $2 returning *`, [state, messageId])).rows[0]
+    const openedAt = state === 'opened' ? 'coalesce(opened_at, now())' : 'opened_at'
+    const repliedAt = state === 'replied' ? 'coalesce(replied_at, now())' : 'replied_at'
+    const r = (await client.query(
+      `update outreach_message set state = $1, sent_at = ${sentAt}, opened_at = ${openedAt}, replied_at = ${repliedAt} where id = $2 returning *`,
+      [state, messageId]
+    )).rows[0]
     if (!r) return { status: 404, headers: HEADERS, jsonBody: { error: 'message not found' } }
     return { status: 200, headers: HEADERS, jsonBody: { ok: true, message: msgShape(r) } }
   } catch (err) {

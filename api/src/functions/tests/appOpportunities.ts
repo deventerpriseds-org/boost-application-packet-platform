@@ -12,6 +12,19 @@ const HEADERS = {
 const DEMO_EMAIL = 'demo@executive-engine.local'
 const STAGES = ['discovered', 'saved', 'enriched', 'applied', 'outreach', 'engaged', 'screen', 'r1', 'panel', 'final', 'offer', 'accepted']
 
+// Stage-transition history table (additive, idempotent). Records one row per
+// stage change so metrics can compute dwell time (avg days per stage).
+async function ensureStageHistory(client: any) {
+  await client.query(`create table if not exists opportunity_stage_history (
+    id uuid primary key default gen_random_uuid(),
+    owner_email text,
+    opportunity_id uuid,
+    from_stage text,
+    to_stage text,
+    changed_at timestamptz default now()
+  )`)
+}
+
 function rowToOpp(r: any) {
   return {
     id: r.id, company: r.company, logo: r.logo_url, role: r.role, location: r.location,
@@ -102,8 +115,24 @@ export async function opportunityMoveStage(req: HttpRequest, context: Invocation
     const stage = body?.stage
     if (!STAGES.includes(stage)) return { status: 400, headers: HEADERS, jsonBody: { error: `invalid stage; must be one of ${STAGES.join(', ')}` } }
     client = await getPgClient()
+    // Capture the current stage + owner BEFORE the update so we can record the transition.
+    const prev = (await client.query(`select stage, owner_email from opportunity where id = $1`, [id])).rows[0]
+    if (!prev) return { status: 404, headers: HEADERS, jsonBody: { error: 'not found' } }
     const r = await client.query(`update opportunity set stage = $1, updated_at = now() where id = $2 returning id, stage`, [stage, id])
     if (!r.rowCount) return { status: 404, headers: HEADERS, jsonBody: { error: 'not found' } }
+    // Best-effort stage-transition history. Never break the stage change on failure — log and move on.
+    try {
+      await ensureStageHistory(client)
+      if (prev.stage !== stage) {
+        await client.query(
+          `insert into opportunity_stage_history (owner_email, opportunity_id, from_stage, to_stage)
+           values ($1, $2, $3, $4)`,
+          [prev.owner_email, id, prev.stage, stage]
+        )
+      }
+    } catch (histErr) {
+      context.log(`opportunityMoveStage: failed to record stage history for ${id}: ${histErr}`)
+    }
     return { status: 200, headers: HEADERS, jsonBody: { ok: true, id: r.rows[0].id, stage: r.rows[0].stage } }
   } catch (err) {
     return { status: 500, headers: HEADERS, jsonBody: { error: String(err) } }

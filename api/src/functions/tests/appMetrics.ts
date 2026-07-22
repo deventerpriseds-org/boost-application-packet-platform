@@ -75,17 +75,77 @@ export async function todayMetrics(req: HttpRequest, _context: InvocationContext
     )).rows[0]
     const weeklyDelta = weekly.last7 - weekly.prior7
 
-    // --- Outreach throughput (real outreach_message.state) ---
-    // NOTE: schema has no 'replied' state — reply rate is intentionally OMITTED
-    // (no column tracks replies). We report sent vs total, which are real.
+    // --- Outreach throughput + reply rate (real outreach_message columns) ---
+    // A message counts as "sent" once it has a sent_at timestamp (set on send /
+    // 'sent' state) and as "replied" once replied_at is set. replyRate = replied/sent.
+    await client.query(`alter table outreach_message add column if not exists opened_at timestamptz`)
+    await client.query(`alter table outreach_message add column if not exists replied_at timestamptz`)
     const outreach = (await client.query(
       `select
          count(*)::int as total,
-         count(*) filter (where m.state = 'sent')::int as sent
+         count(*) filter (where m.state = 'sent')::int as sent,
+         count(*) filter (where m.sent_at is not null)::int as sent_count,
+         count(*) filter (where m.opened_at is not null)::int as opened_count,
+         count(*) filter (where m.replied_at is not null)::int as replied_count
        from outreach_message m
        join opportunity o on o.id = m.opp_id
       where o.owner_email = $1 and not o.dismissed ${includeDemo ? '' : 'and not o.is_demo'}`, [owner]
     )).rows[0]
+    const replySent = outreach.sent_count
+    const replyRate = {
+      sent: replySent,
+      replied: outreach.replied_count,
+      opened: outreach.opened_count,
+      pct: replySent ? Math.round((outreach.replied_count / replySent) * 100) : 0,
+    }
+
+    // --- Avg days per stage (dwell time) from opportunity_stage_history ---
+    // For each opportunity, the dwell time in a stage is the gap between the
+    // transition INTO it and the next transition OUT. We average those gaps.
+    // If no transitions have been recorded yet, return null + 'accumulating'.
+    await client.query(`create table if not exists opportunity_stage_history (
+      id uuid primary key default gen_random_uuid(),
+      owner_email text,
+      opportunity_id uuid,
+      from_stage text,
+      to_stage text,
+      changed_at timestamptz default now()
+    )`)
+    const histCount = (await client.query(
+      `select count(*)::int as n from opportunity_stage_history where owner_email = $1`, [owner]
+    )).rows[0].n
+    let avgDaysPerStage: any
+    if (histCount === 0) {
+      avgDaysPerStage = null
+    } else {
+      // Dwell in a stage = time from the transition that ENTERED it (to_stage=S)
+      // until the next transition on the same opp. Overall + per-stage averages.
+      const dwell = (await client.query(
+        `with events as (
+           select opportunity_id, to_stage as stage, changed_at,
+                  lead(changed_at) over (partition by opportunity_id order by changed_at) as next_at
+             from opportunity_stage_history
+            where owner_email = $1
+         ),
+         spans as (
+           select stage, extract(epoch from (next_at - changed_at)) / 86400.0 as days
+             from events where next_at is not null
+         )
+         select stage, avg(days)::float8 as avg_days, count(*)::int as n from spans group by stage`, [owner]
+      )).rows
+      const perStage: Record<string, { avgDays: number; transitions: number }> = {}
+      let totalDays = 0, totalN = 0
+      for (const d of dwell) {
+        perStage[d.stage] = { avgDays: Math.round(d.avg_days * 10) / 10, transitions: d.n }
+        totalDays += d.avg_days * d.n
+        totalN += d.n
+      }
+      avgDaysPerStage = {
+        overall: totalN ? Math.round((totalDays / totalN) * 10) / 10 : null,
+        perStage,
+        completedTransitions: totalN,
+      }
+    }
 
     // --- Goals / today's activity (real timestamps) ---
     const reviewedToday = (await client.query(
@@ -116,10 +176,14 @@ export async function todayMetrics(req: HttpRequest, _context: InvocationContext
         prior7: weekly.prior7,                  // created in the 7 days before that
         delta: weeklyDelta,
       },
-      outreach: {                               // reply rate omitted (no 'replied' state)
+      outreach: {
         total: outreach.total,
         sent: outreach.sent,
+        replyRate,                              // { sent, replied, opened, pct } — real counts
       },
+      // Avg dwell time per stage from opportunity_stage_history. null (with
+      // note 'accumulating') until at least one stage transition is recorded.
+      avgDaysPerStage,                          // null | { overall, perStage, completedTransitions }
       goals: {
         reviewedToday,                          // opps updated today
         packetsBuiltToday,                      // packets created today
@@ -129,14 +193,14 @@ export async function todayMetrics(req: HttpRequest, _context: InvocationContext
       present: [
         'pipelineMix', 'kpis.active', 'kpis.hot', 'kpis.interview', 'kpis.rejected',
         'weekly.last7', 'weekly.prior7', 'weekly.delta',
-        'outreach.total', 'outreach.sent',
+        'outreach.total', 'outreach.sent', 'outreach.replyRate',
+        ...(avgDaysPerStage === null ? [] : ['avgDaysPerStage']),
         'goals.reviewedToday', 'goals.packetsBuiltToday', 'goals.outreachSentToday',
       ],
-      // Requested metrics deliberately NOT returned (no backing column):
-      omitted: {
-        replyRate: 'outreach_message.state has no "replied" value — replies are not tracked',
-        avgDaysPerStage: 'no stage-transition history table — only created_at/updated_at exist',
-      },
+      // Metrics not currently derivable (populated as data accumulates):
+      omitted: avgDaysPerStage === null
+        ? { avgDaysPerStage: 'accumulating — no stage transitions recorded yet' }
+        : {},
     }
     return { status: 200, headers: HEADERS, jsonBody: { ok: true, metrics } }
   } catch (err) {

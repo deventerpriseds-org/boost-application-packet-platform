@@ -902,18 +902,147 @@ export async function mailMessages(req: HttpRequest, context: InvocationContext)
     const base = folderId
       ? `https://graph.microsoft.com/v1.0/users/${mailbox}/mailFolders/${folderId}/messages`
       : `https://graph.microsoft.com/v1.0/users/${mailbox}/messages` // whole mailbox, all folders
-    let url: string | null = `${base}?$select=subject,from,receivedDateTime,parentFolderId&$top=100&$orderby=receivedDateTime desc`
+    let url: string | null = `${base}?$select=id,subject,from,receivedDateTime,parentFolderId&$top=100&$orderby=receivedDateTime desc`
     const out: any[] = []
     while (url && out.length < top) {
       const res: any = await fetch(url, { headers: { Authorization: `Bearer ${token}` } })
       if (!res.ok) return { status: 200, headers: HEADERS, jsonBody: { ok: false, detail: `HTTP ${res.status}: ${(await res.text()).slice(0, 200)}` } }
       const j = await res.json() as any
-      for (const m of (j.value || [])) out.push({ subject: m.subject, from: m?.from?.emailAddress?.address, received: m.receivedDateTime, parentFolderId: m.parentFolderId })
+      for (const m of (j.value || [])) out.push({ id: m.id, subject: m.subject, from: m?.from?.emailAddress?.address, received: m.receivedDateTime, parentFolderId: m.parentFolderId })
       url = j['@odata.nextLink'] || null
     }
     const sliced = out.slice(0, top)
     if (subjectsOnly) return { status: 200, headers: HEADERS, jsonBody: { ok: true, count: sliced.length, subjects: sliced.map((m) => m.subject) } }
+    // Mark each message with any persisted per-alert UI state (snoozed/dismissed).
+    const states = await loadAlertStates(resolveOwner(req).owner, sliced.map((m) => m.id).filter(Boolean))
+    for (const m of sliced) {
+      const st = m.id ? states[m.id] : undefined
+      m.alertState = st ? st.state : null
+      m.snoozeUntil = st ? st.snooze_until : null
+    }
     return { status: 200, headers: HEADERS, jsonBody: { ok: true, count: sliced.length, messages: sliced } }
+  } catch (err) { return { status: 500, headers: HEADERS, jsonBody: { error: String(err) } } }
+}
+
+// mail_alert_state: persists per-alert UI state (snooze/dismiss) the Intake screen reads,
+// keyed by (owner_email, message_id). Additive — created on first use.
+async function ensureAlertStateTable(client: any) {
+  await client.query(`create table if not exists mail_alert_state (
+    owner_email text,
+    message_id text,
+    state text,
+    snooze_until timestamptz,
+    updated_at timestamptz default now(),
+    primary key (owner_email, message_id)
+  )`)
+}
+
+// Fetch persisted alert state for a set of message ids → { [messageId]: {state, snooze_until} }.
+// Dismissed rows always show; snoozed rows only while snooze_until is still in the future.
+async function loadAlertStates(owner: string, ids: string[]): Promise<Record<string, any>> {
+  const map: Record<string, any> = {}
+  if (!ids.length) return map
+  let client
+  try {
+    client = await getPgClient()
+    await ensureAlertStateTable(client)
+    const rows = (await client.query(
+      `select message_id, state, snooze_until from mail_alert_state
+        where owner_email = $1 and message_id = any($2::text[])
+          and (state <> 'snoozed' or snooze_until is null or snooze_until > now())`,
+      [owner, ids]
+    )).rows
+    for (const r of rows) map[r.message_id] = { state: r.state, snooze_until: r.snooze_until }
+  } catch { /* best-effort enrichment */ } finally { try { await client?.end() } catch {} }
+  return map
+}
+
+// GET /api/mail/message/{id}?mailbox= — fetch a single message's REAL body from Graph,
+// returned as sanitized plain text (HTML stripped) for the Intake preview panel.
+export async function mailMessageBody(req: HttpRequest, context: InvocationContext): Promise<HttpResponseInit> {
+  if (req.method === 'OPTIONS') return { status: 204, headers: HEADERS }
+  const creds = graphCreds()
+  if (!creds.clientId || !creds.clientSecret) return { status: 200, headers: HEADERS, jsonBody: { error: 'MICROSOFT creds not set' } }
+  try {
+    const id = String(req.params.id || '').trim()
+    if (!id) return { status: 400, headers: HEADERS, jsonBody: { error: 'message id required' } }
+    const mailbox = req.query.get('mailbox') || (await loadConfig(resolveOwner(req).owner)).mailbox
+    const token = await getMicrosoftToken(creds.tenantId, creds.clientId, creds.clientSecret)
+    const res = await fetch(
+      `https://graph.microsoft.com/v1.0/users/${mailbox}/messages/${id}?$select=subject,from,body,receivedDateTime,parentFolderId`,
+      { headers: { Authorization: `Bearer ${token}` } }
+    )
+    if (!res.ok) return { status: 200, headers: HEADERS, jsonBody: { ok: false, detail: `HTTP ${res.status}: ${(await res.text()).slice(0, 200)}` } }
+    const m = await res.json() as any
+    const raw = m?.body?.content || ''
+    // Strip HTML tags + collapse whitespace → readable plain text.
+    const bodyText = String(raw)
+      .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+      .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+      .replace(/<[^>]+>/g, ' ')
+      .replace(/&nbsp;/gi, ' ').replace(/&amp;/gi, '&').replace(/&lt;/gi, '<').replace(/&gt;/gi, '>')
+      .replace(/[ \t]+/g, ' ').replace(/\s*\n\s*/g, '\n').replace(/\n{3,}/g, '\n\n').trim()
+    return {
+      status: 200, headers: HEADERS,
+      jsonBody: {
+        ok: true,
+        id,
+        subject: m?.subject || '',
+        from: m?.from?.emailAddress?.address || '',
+        received: m?.receivedDateTime || null,
+        parentFolderId: m?.parentFolderId || null,
+        bodyType: m?.body?.contentType || 'text',
+        body: bodyText,
+      }
+    }
+  } catch (err) { return { status: 500, headers: HEADERS, jsonBody: { error: String(err) } } }
+}
+
+// Shared upsert for alert state (snooze/dismiss).
+async function upsertAlertState(owner: string, messageId: string, state: string, snoozeUntil: string | null): Promise<any> {
+  let client
+  try {
+    client = await getPgClient()
+    await ensureAlertStateTable(client)
+    const row = (await client.query(
+      `insert into mail_alert_state (owner_email, message_id, state, snooze_until, updated_at)
+       values ($1,$2,$3,$4, now())
+       on conflict (owner_email, message_id) do update set
+         state = excluded.state, snooze_until = excluded.snooze_until, updated_at = now()
+       returning owner_email, message_id, state, snooze_until, updated_at`,
+      [owner, messageId, state, snoozeUntil]
+    )).rows[0]
+    return row
+  } finally { try { await client?.end() } catch {} }
+}
+
+// POST /api/mail/alert/snooze { messageId, hours } — hide an alert until now()+hours.
+export async function mailAlertSnooze(req: HttpRequest, context: InvocationContext): Promise<HttpResponseInit> {
+  if (req.method === 'OPTIONS') return { status: 204, headers: HEADERS }
+  try {
+    const guard = requireWrite(req); if (guard) return guard
+    const owner = resolveOwner(req).owner
+    const b = (await req.json().catch(() => ({}))) as any
+    const messageId = String(b?.messageId || '').trim()
+    if (!messageId) return { status: 400, headers: HEADERS, jsonBody: { error: 'messageId required' } }
+    const hours = Math.min(Math.max(Number(b?.hours) || 24, 1), 24 * 30)
+    const snoozeUntil = new Date(Date.now() + hours * 3600 * 1000).toISOString()
+    const row = await upsertAlertState(owner, messageId, 'snoozed', snoozeUntil)
+    return { status: 200, headers: HEADERS, jsonBody: { ok: true, state: row } }
+  } catch (err) { return { status: 500, headers: HEADERS, jsonBody: { error: String(err) } } }
+}
+
+// POST /api/mail/alert/dismiss { messageId } — permanently dismiss an alert.
+export async function mailAlertDismiss(req: HttpRequest, context: InvocationContext): Promise<HttpResponseInit> {
+  if (req.method === 'OPTIONS') return { status: 204, headers: HEADERS }
+  try {
+    const guard = requireWrite(req); if (guard) return guard
+    const owner = resolveOwner(req).owner
+    const b = (await req.json().catch(() => ({}))) as any
+    const messageId = String(b?.messageId || '').trim()
+    if (!messageId) return { status: 400, headers: HEADERS, jsonBody: { error: 'messageId required' } }
+    const row = await upsertAlertState(owner, messageId, 'dismissed', null)
+    return { status: 200, headers: HEADERS, jsonBody: { ok: true, state: row } }
   } catch (err) { return { status: 500, headers: HEADERS, jsonBody: { error: String(err) } } }
 }
 
@@ -1378,6 +1507,9 @@ app.http('mailIngestTest', { methods: ['POST', 'OPTIONS'], authLevel: 'anonymous
 app.http('mailConfig', { methods: ['GET', 'POST', 'OPTIONS'], authLevel: 'anonymous', route: 'mail/config', handler: mailConfig })
 app.http('mailFolders', { methods: ['GET', 'OPTIONS'], authLevel: 'anonymous', route: 'mail/folders', handler: mailFolders })
 app.http('mailMessages', { methods: ['GET', 'OPTIONS'], authLevel: 'anonymous', route: 'mail/messages', handler: mailMessages })
+app.http('mailMessageBody', { methods: ['GET', 'OPTIONS'], authLevel: 'anonymous', route: 'mail/message/{id}', handler: mailMessageBody })
+app.http('mailAlertSnooze', { methods: ['POST', 'OPTIONS'], authLevel: 'anonymous', route: 'mail/alert/snooze', handler: mailAlertSnooze })
+app.http('mailAlertDismiss', { methods: ['POST', 'OPTIONS'], authLevel: 'anonymous', route: 'mail/alert/dismiss', handler: mailAlertDismiss })
 app.http('mailReclassify', { methods: ['POST', 'OPTIONS'], authLevel: 'anonymous', route: 'mail/folders/reclassify', handler: mailReclassify })
 app.http('mailRouting', { methods: ['GET', 'POST', 'OPTIONS'], authLevel: 'anonymous', route: 'mail/routing', handler: mailRouting })
 app.http('mailReconcileHttp', { methods: ['POST', 'OPTIONS'], authLevel: 'anonymous', route: 'mail/reconcile', handler: mailReconcileHttp })
