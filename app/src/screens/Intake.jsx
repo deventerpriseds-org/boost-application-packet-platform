@@ -270,11 +270,27 @@ export default function Intake() {
                 <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 8 }}>{preview.subject || '(no subject)'}</div>
                 <div className="px-small" style={{ color: 'var(--proto-ink2)', marginBottom: 4 }}><b>From:</b> <span style={{ wordBreak: 'break-all' }}>{preview.from || '(unknown)'}</span></div>
                 <div className="px-small" style={{ color: 'var(--proto-ink2)', marginBottom: 12 }}><b>Received:</b> {preview.received ? new Date(preview.received).toLocaleString() : '—'}</div>
+                {(() => { const b = alertBadge(preview.alertState); return b && (
+                  <div className="px-small" style={{ marginBottom: 12, display: 'flex', gap: 8, alignItems: 'center' }}>
+                    <Pill tone={b.tone}>{b.label}</Pill>
+                    {preview.alertState === 'snoozed' && preview.snoozeUntil && (
+                      <span style={{ color: 'var(--proto-ink2)' }}>until {new Date(preview.snoozeUntil).toLocaleString()}</span>
+                    )}
+                  </div>
+                ) })()}
                 <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
                   <button className="px-btn px-btn-accent" onClick={() => go('/swipe')}>Review in Swipe →</button>
+                  <button className="px-btn" onClick={() => snoozeAlert(preview.id)} disabled={alertBusy || !preview.id || preview.alertState === 'snoozed'}>😴 Snooze 24h</button>
+                  <button className="px-btn" onClick={() => dismissAlert(preview.id)} disabled={alertBusy || !preview.id || preview.alertState === 'dismissed'}>✕ Dismiss</button>
                 </div>
-                <div className="px-small" style={{ color: 'var(--proto-ink2)', borderTop: '1px solid var(--proto-rule-soft)', paddingTop: 10, lineHeight: 1.5 }}>
-                  Message body isn't exposed by the mailbox listing API (subject/sender/date only). Per-alert push-to-swipe, snooze, and dismiss need new backend routes — messages become swipeable opportunities only after ingestion (Pull now / Clear &amp; reload below).
+                <div style={{ borderTop: '1px solid var(--proto-rule-soft)', paddingTop: 12 }}>
+                  {body.loading && <div className="px-small" style={{ color: 'var(--proto-ink2)' }}>Loading message…</div>}
+                  {body.error && <div className="px-small" style={{ color: 'var(--proto-red)' }}>{body.error}</div>}
+                  {!body.loading && !body.error && body.id === preview.id && (
+                    body.bodyType === 'html'
+                      ? <div className="intake-mail-body" style={{ fontSize: 13, lineHeight: 1.5, wordBreak: 'break-word', overflowWrap: 'anywhere' }} dangerouslySetInnerHTML={{ __html: body.html || '' }} />
+                      : <div className="px-small" style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', lineHeight: 1.5 }}>{body.html || '(empty message)'}</div>
+                  )}
                 </div>
               </div>
             )}
