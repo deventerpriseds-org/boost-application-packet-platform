@@ -14,6 +14,10 @@ on:
         description: 'JSON body (for POST/PATCH). Leave empty for GET.'
         required: false
         default: ''
+      omit_auth:
+        description: 'Set true to send NO auth (test the 401 reject path). Default false = authenticated.'
+        required: false
+        default: 'false'
 
 jobs:
   call:
@@ -27,6 +31,7 @@ jobs:
           API_METHOD: ${{ github.event.inputs.method }}
           API_PATH: ${{ github.event.inputs.path }}
           API_BODY: ${{ github.event.inputs.body }}
+          API_OMIT_AUTH: ${{ github.event.inputs.omit_auth }}
         run: |
           python3 - <<'PYEOF'
           import os, json, urllib.request, urllib.parse, hmac, hashlib, base64, time, re
@@ -57,7 +62,11 @@ jobs:
 
           base = 'https://job-platform-api.azurewebsites.net'
           url = base + path
-          headers = {'Authorization': f'Bearer {token}', 'Content-Type': 'application/json'}
+          headers = {'Content-Type': 'application/json'}
+          if os.environ.get('API_OMIT_AUTH', 'false').lower() == 'true':
+            print('omit_auth=true -> sending NO Authorization header (testing the reject path)')
+          else:
+            headers['Authorization'] = f'Bearer {token}'
           req_body = body.encode() if body else None
           req = urllib.request.Request(url, data=req_body, headers=headers, method=method)
           try:
