@@ -305,8 +305,15 @@ EXCEPT that folder routing only fires once the subscription is mailbox-wide (see
 
 **ACT-17 is now fully closed** — the unified multi-source router is live end-to-end: mailbox-wide
 watch → `routeOpportunity` → (folder-mapped role bins via folder_role_map+skip_filter | AI classify),
-with the Settings folder→role UI feeding the mappings. Remaining nice-to-have: ATS scheduler timer
-(still manual-only) — tracked under ACT-12/17, low priority.
+with the Settings folder→role UI feeding the mappings.
+
+**ATS scheduler timer (2026-07-22, done).** Per user "keep manual but auto-run at 6am/12/6pm/9pm."
+Added `atsScheduledIngest` timer (appAts.ts): fires hourly (UTC), self-gates to Eastern hours
+{6,12,18,21} via `Intl` `America/New_York` (DST-aware, no WEBSITE_TIME_ZONE app setting needed).
+Extracted `ingestSources()` shared by the manual endpoint + timer; timer runs every owner's enabled
+sources (exec-only) through `routeOpportunity`. Manual `POST /api/app/ats/ingest` unchanged.
+**Timezone assumed US Eastern** (prod org tz) — change the `Intl` timeZone if the user is elsewhere.
+Nothing to poll until ATS boards are added in Settings (0 configured currently).
 - Folder→role UI so the user can populate `folder_role_map` (they asked to build the mapping UI;
   the deterministic path is live but has no rows to act on until mappings exist).
 - ATS scheduler timer (still manual-only).
