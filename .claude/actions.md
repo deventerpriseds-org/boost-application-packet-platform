@@ -281,7 +281,17 @@ Wired all three seams to it:
 - Extension: `appCapture.ts:42` switched `insertOpp`→`routeOpportunity` (same — capture now role-tagged).
 Additive only: `insertOpp` still exported/used internally; no drops. Build clean.
 
-**Status:** `done` (router core). **Follow-ups still open:**
+**Verified live (2026-07-22):** `POST /api/mail/poll-now` on the deployed router (commit 80ccf0f)
+scanned 2 inbox messages and routed both through `routeOpportunity` with no error (HTTP 200) —
+confirms the unified path ingests cleanly on the Function App.
+
+**Folder→role mapping UI already existed** (Settings ▸ Intake, "Folder → role routing" card,
+commit 7f5bb2b — role-centric picker, multilevel drill-down, many-to-many, saved-as-you-go,
+wired to mailFolderTree + mailFolderMapGet/Set/Delete). It was previously "dead" (mappings saved
+but never read at ingest); the ACT-17 router now consumes them, so the UI is functional end-to-end
+EXCEPT that folder routing only fires once the subscription is mailbox-wide (see follow-up 1).
+
+**Status:** `done` (router core + UI). **Follow-ups still open:**
 - Broaden the Graph subscription from inbox-only to mailbox-wide so role-mapped folders that
   aren't the inbox trigger notifications (currently a rule-moved/funneled mail's notification
   may still carry the inbox `parentFolderId`).
