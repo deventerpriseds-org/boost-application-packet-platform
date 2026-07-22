@@ -272,4 +272,60 @@ schema (`folder_role_map`, `create table if not exists`), no drops/swaps.
 
 ---
 
-*Last updated: 2026-07-21*
+## ACT-18 — Seniority-tier mailbox routing (folders + backfill + forward rules + reconcile)
+
+**Requested:** 2026-07-22
+**Asked for:** "Under each Job Alerts source (Indeed, Ladders, Lensa, LinkedIn) create C Suite /
+VP & Head of / Director subfolders. Add rules that pull in correctly AND backwards-apply
+(retroactively sort existing mail). Sample subjects across the ENTIRE mailbox first. Anything
+not C-suite/VP/Director stays in the general parent source folder. Create a LinkedIn source +
+its 3 subs (LinkedIn mail was landing in Job Alerts root — needs to change now). Have the router
+double-check and re-route if folders/inputs are wrong. Then attempt the keyword rules too —
+'it doesn't hurt to have a first attempt.'"
+**Tiering confirmed by user:** executive → VP (if not chief); deputy chief → C Suite;
+president/founder → C Suite.
+
+**Expected outcome:** New job-alert mail is delivered into the correct seniority subfolder under
+its source; existing ~5,700 emails are sorted the same way; a reconcile pass corrects mis-sorts.
+
+**ACs:**
+- AC-1: Each source (Indeed, Ladders, Lensa, LinkedIn) has C Suite / VP & Head of / Director
+  subfolders. ✅ done (folders created; `seniority_routing` rows hold the folder IDs)
+- AC-2: Existing mail is backfilled into the tiers by a precise classifier that extracts the real
+  role from digest subjects (not the trailing "N more X jobs" label). ✅ done
+  (Indeed 107 moved / 122 stay; Lensa 268 moved / 31 stay; LinkedIn 5,367 moved / 435 → parent)
+- AC-3: A reconcile pass (`/api/mail/reconcile` + 2h timer) re-audits each folder and corrects
+  mis-sorts using the precise classifier. ✅ done (ran clean, 0 corrections — backfill accurate)
+- AC-4: Forward Outlook rules move new arrivals into the seniority subs at delivery.
+  ✅ done — `POST /api/mail/rules/build-seniority` created 12 rules (4 sources × 3 tiers),
+  all `ok:true`, occupying inbox-rule sequences 1–12 ahead of the existing parent-folder
+  sender rules (Indeed seq16, Lensa seq17). Verified via `GET /api/mail/rules`.
+
+**Status:** `done` (rules attempt) — but see **known limitations** below.
+
+**Known limitations (forward rules are a first attempt, as the user framed it):**
+1. Outlook rules can't run the digest-role extractor, so a subject like "…is hiring for Program
+   Manager. 3 more Deputy CIO jobs" can trip the "CIO" keyword and mis-file to C Suite. The 2h
+   **reconcile timer is the backstop** that corrects these.
+2. **No catch-all parent rule for LinkedIn/Ladders** — non-seniority LinkedIn/Ladders mail has no
+   forward rule, so it stays in the inbox until reconcile/intake picks it up. Indeed/Lensa already
+   have parent sender rules (seq 16/17). Follow-up: add source→parent rules for LinkedIn/Ladders.
+3. The old **"LinkedIn Job Alerts" rule (seq 21, id `AQAAAQEGIDQ=`) is an empty no-op** (no
+   condition, no action). Left in place (harmless); should be deleted or rebuilt as the LinkedIn
+   parent catch-all.
+
+**Endpoints added this session (commits db2465b → 104b437, all on main):**
+`mail/messages` (mailbox-wide subject sampling), `mail/folders/create[-bulk]` + `delete`,
+`mail/folders/reclassify` (backfill w/ dry-run), `mail/routing` (GET/POST seniority_routing),
+`mail/reconcile` + `mailReconcileTimer`, `mail/rules` (list), `mail/rules/repoint`,
+`mail/rules/build-seniority`.
+
+**Relationship to ACT-17 (unification — still OPEN):** This seniority reconcile is a *parallel*
+classification path to the ACT-17 `routeOpportunity()` hub, which was never built. Per user
+("we can unify after you finish the rules"), the next step is to fold the seniority double-check
+into the AI router alongside the three input paths: (1) role-mapped folders → route by
+`parentFolderId`, (2) general inbox → sender+keyword, (3) job boards/ATS → Greenhouse/Lever/Ashby.
+
+---
+
+*Last updated: 2026-07-22*

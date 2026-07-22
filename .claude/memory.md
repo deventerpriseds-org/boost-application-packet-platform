@@ -1,5 +1,5 @@
 # Project Memory — boost-application-packet-platform
-Last updated: 2026-07-21
+Last updated: 2026-07-22
 
 ## Purpose & goals
 Executive Engine: AI-powered job application platform for executive-level job seekers.
@@ -61,6 +61,22 @@ Key tables (PostgreSQL):
   (`users/{id}/messages`, not inbox-only), route by `parentFolderId` → `folder_role_map` → role.
   All streams (inbox, folders, ATS) funnel through one `routeOpportunity()` for dedup + role mapping.
   Additive only (new tables via `create table if not exists`; broaden subscription resource; no drops).
+- [2026-07-22] **Seniority-tier mailbox routing (ACT-18).** Each Job Alerts source (Indeed, Ladders,
+  Lensa, LinkedIn) has C Suite / VP & Head of / Director subfolders; folder IDs live in the new
+  `seniority_routing` table. Classifier: `extractRole()` strips the Indeed/LinkedIn digest trailing
+  label ("…is hiring for {ROLE}. N more {term} jobs") THEN `seniorityTier()` ranks C-Suite >
+  VP/Head-of/Executive > Director. Tiering: chief/deputy-chief/president/founder/C*-acronym → C Suite;
+  VP/SVP/EVP/AVP/Head of/executive → VP; director → Director; else stays in parent source folder.
+- [2026-07-22] **Reconcile is the backstop for approximate Outlook rules.** Forward inbox rules can
+  only do literal `subjectContains` keyword matching (no digest-role extraction), so they mis-file
+  digests like "…Program Manager. 3 more Deputy CIO jobs" (trips "CIO"). `mailReconcileTimer` (every
+  2h) + `POST /api/mail/reconcile` re-audit each folder with the PRECISE classifier and correct
+  mis-sorts. Never expect the Outlook rules alone to be exact — they're a delivery-time first pass.
+- [2026-07-22] **Rule ordering:** `build-seniority` creates the 12 tier rules at sequences 1–12 with
+  `stopProcessingRules`, ahead of the pre-existing parent sender rules (Indeed seq16, Lensa seq17),
+  so a tier match wins and stops; non-tier mail falls through to the parent rule. LinkedIn/Ladders
+  have NO parent catch-all rule yet (follow-up). Old "LinkedIn Job Alerts" rule (seq21) is an empty
+  no-op — delete or rebuild as the LinkedIn parent catch-all.
 
 ## Feature status
 | Feature | Status | Notes |
@@ -68,7 +84,8 @@ Key tables (PostgreSQL):
 | LinkedIn alert intake (Graph subscription) | done | Auto-renews (mailRenew, 30-min timer); healthy |
 | Mail intake insert + filter + owner | fixed 2026-07-21 | 3 bugs: `$7` INSERT misalign (6826310), isAlert ignored sender (d02c1a2), webhook owner picked demo config (1488d3c). Was frozen at 218 for 7 days; now 298. |
 | Today screen KPI + InboxScrubHero | done | "0 new today" was ACCURATE — intake was dead, not a UI bug. FRESH_STAGES unified. |
-| Multi-source ingest router (folders+inbox+ATS) | open / planning (ACT-17) | AI router `tagOppRoles` exists; MISSING: mailbox-wide sub, subfolder traversal, folder_role_map + UI, ATS timer |
+| Multi-source ingest router (folders+inbox+ATS) | open / planning (ACT-17) | AI router `tagOppRoles` exists; MISSING: mailbox-wide sub, subfolder traversal, folder_role_map + UI, ATS timer. Unify seniority reconcile (ACT-18) into this hub next. |
+| Seniority-tier mailbox routing (ACT-18) | done | Folders + backfill (~5,700 sorted) + reconcile timer + 12 forward keyword rules (all ok). Limitations: rules approximate (reconcile corrects), no LinkedIn/Ladders parent catch-all rule, old empty LinkedIn rule still present. |
 | Opportunity enrichment | done | POST /api/app/opportunity/:id/enrich |
 | Packet builder (resume+video+cover) | done | HeyGen render + Google Docs template fill |
 | Outreach cadences + Composer | done | |
@@ -98,9 +115,13 @@ Key tables (PostgreSQL):
 - iOS testing: requires macOS runner or BrowserStack; categorically unavailable in Linux CCR
 
 ## Active work
-Current task: ACT-17 — multi-source ingest router (planning; awaiting go on phased build)
-Files in flight: none committed pending; last commits 6826310/d02c1a2/1488d3c (all on main)
-Blocker: none — need user's folder→role mappings + ATS board tokens for final wiring
-Next step: Build ACT-17 phases — (1) routeOpportunity() hub, (2) mailbox-wide sub + subfolder
-  traversal + folder_role_map, (3) ATS scheduler timer, (4) Intake folder-mapping UI. All ADDITIVE.
+Current task: ACT-18 seniority routing DONE (folders + backfill + reconcile + 12 forward rules,
+  all verified live via api-test.yml). Next up: unify with ACT-17 router.
+Files in flight: none pending; all mail endpoints committed db2465b → 104b437 (all on main).
+Blocker: none.
+Next step (per user "unify after the rules"): fold the seniority double-check into the ACT-17
+  `routeOpportunity()` hub instead of running two parallel classifiers. Three input paths to unify:
+  (1) role-mapped folders → route by parentFolderId, (2) general inbox → sender+keyword,
+  (3) job boards/ATS → Greenhouse/Lever/Ashby. Then close ACT-18 follow-ups: add LinkedIn/Ladders
+  parent catch-all rules, delete/rebuild the empty "LinkedIn Job Alerts" rule, delete EDS-Rule-Test folder.
 Design locked: one mailbox-wide Graph subscription, route by parentFolderId. No destructive migrations.
