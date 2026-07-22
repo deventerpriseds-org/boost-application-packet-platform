@@ -8,6 +8,16 @@ on:
       - '.github/workflows/executive-engine-deploy.yml'
   workflow_dispatch:
 
+# Both `main` and the feature branch trigger this workflow, and the session
+# workflow pushes them ~1s apart (feature push, then ff-merge to main). Without
+# serialization the two runs deploy identical content to the SAME Static Web App
+# concurrently and one is rejected with "No matching Static Web App environment
+# was found." A single-slot concurrency group (keyed only to the SWA, not the
+# ref) makes the later push supersede the earlier in-progress one.
+concurrency:
+  group: executive-engine-web-deploy
+  cancel-in-progress: true
+
 jobs:
   build_and_deploy:
     runs-on: ubuntu-latest
