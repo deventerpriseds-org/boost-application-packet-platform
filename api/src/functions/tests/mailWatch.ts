@@ -519,8 +519,11 @@ export async function mailReclassify(req: HttpRequest, context: InvocationContex
     const sourceFolderId = String(body?.sourceFolderId || '').trim()
     if (!sourceFolderId) return { status: 400, headers: HEADERS, jsonBody: { error: 'sourceFolderId required' } }
     const targets = body?.targets || {}
+    // unmatchedTarget: where sender-matched-but-untiered mail goes (e.g. move ALL
+    // LinkedIn mail out of Job Alerts root — tiered → subs, the rest → LinkedIn parent).
+    const unmatchedTarget = body?.unmatchedTarget ? String(body.unmatchedTarget).trim() : null
     const dryRun = body?.dryRun !== false            // default TRUE — safe by default
-    const max = Math.min(Math.max(Number(body?.max) || 2000, 1), 5000)
+    const max = Math.min(Math.max(Number(body?.max) || 2000, 1), 20000)
     const senderContains = String(body?.senderContains || '').trim().toLowerCase()
     const mailbox = String(body?.mailbox || '').trim() || (await loadConfig(resolveOwner(req).owner)).mailbox
     const token = await getMicrosoftToken(creds.tenantId, creds.clientId, creds.clientSecret)
@@ -535,25 +538,37 @@ export async function mailReclassify(req: HttpRequest, context: InvocationContex
       for (const m of (j.value || [])) msgs.push({ id: m.id, subject: m.subject, from: (m?.from?.emailAddress?.address || '').toLowerCase() })
       url = j['@odata.nextLink'] || null
     }
-    // 2. Classify.
+    // 2. Classify → build move list (id + destination folder).
     const counts = { csuite: 0, vp: 0, director: 0, other: 0 }
-    const toMove: { id: string; tier: 'csuite' | 'vp' | 'director' }[] = []
+    const toMove: { id: string; dest: string }[] = []
     for (const m of msgs) {
       if (senderContains && !m.from.includes(senderContains)) { counts.other++; continue }
       const tier = seniorityTier(extractRole(m.subject))
-      if (!tier) { counts.other++; continue }
-      counts[tier]++
-      if (targets[tier]) toMove.push({ id: m.id, tier })
+      if (tier && targets[tier]) { counts[tier]++; toMove.push({ id: m.id, dest: targets[tier] }) }
+      else { counts.other++; if (unmatchedTarget) toMove.push({ id: m.id, dest: unmatchedTarget }) }
     }
-    // 3. Move (unless dry run).
+    // 3. Move (unless dry run) via Graph $batch — 20 moves per request so large
+    //    backfills (thousands) complete inside the function timeout.
     let moved = 0; const errors: string[] = []
     if (!dryRun) {
-      for (const item of toMove) {
-        const r = await fetch(`https://graph.microsoft.com/v1.0/users/${mailbox}/messages/${item.id}/move`, {
+      for (let i = 0; i < toMove.length; i += 20) {
+        const chunk = toMove.slice(i, i + 20)
+        const batch = {
+          requests: chunk.map((it, k) => ({
+            id: String(k), method: 'POST', url: `/users/${mailbox}/messages/${it.id}/move`,
+            headers: { 'Content-Type': 'application/json' }, body: { destinationId: it.dest },
+          })),
+        }
+        const r = await fetch('https://graph.microsoft.com/v1.0/$batch', {
           method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-          body: JSON.stringify({ destinationId: targets[item.tier] }),
+          body: JSON.stringify(batch),
         })
-        if (r.ok) moved++; else if (errors.length < 5) errors.push(`move ${r.status}: ${(await r.text()).slice(0, 120)}`)
+        if (!r.ok) { if (errors.length < 5) errors.push(`batch ${r.status}: ${(await r.text()).slice(0, 120)}`); continue }
+        const jr = await r.json() as any
+        for (const resp of (jr.responses || [])) {
+          if (resp.status >= 200 && resp.status < 300) moved++
+          else if (errors.length < 5) errors.push(`move ${resp.status}: ${JSON.stringify(resp.body).slice(0, 120)}`)
+        }
       }
     }
     return { status: 200, headers: HEADERS, jsonBody: { ok: true, dryRun, scanned: msgs.length, capped: msgs.length >= max, counts, wouldMove: toMove.length, moved, errors } }
