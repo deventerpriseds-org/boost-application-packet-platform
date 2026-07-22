@@ -9,7 +9,25 @@ const FRESH_STAGES = ['discovered', 'saved', 'enriched']
 const ACTIVE_STAGES = ['applied', 'outreach', 'engaged', 'screen', 'r1', 'panel', 'final', 'offer']
 const CUTOFF_TODAY = () => { const d = new Date(); d.setDate(d.getDate() - 1); d.setHours(0, 0, 0, 0); return d.getTime() }
 
-const FILTER_LABELS = { new: 'New today', backlog: 'Backlog', active: 'Active', hot: 'Hot' }
+// Mirror of the canonical stage labels (shared with Pipeline.jsx). Order comes from
+// the `stages` prop (server-provided canonical order), not this map.
+const STAGE_LABELS = {
+  discovered: 'Discovered', saved: 'Saved', enriched: 'Enriched', applied: 'Applied',
+  outreach: 'Outreach', engaged: 'Engaged', screen: 'Screen', r1: 'Round 1',
+  panel: 'Panel', final: 'Final', offer: 'Offer', accepted: 'Accepted',
+}
+
+// Quick filters per spec: All / To-clear / Hot / Strategic / Active.
+// Each maps to an activeFilter token handled in the rows useMemo below.
+const QUICK_FILTERS = [
+  { key: null, label: 'All' },
+  { key: 'toclear', label: 'To-clear' },
+  { key: 'hot', label: 'Hot' },
+  { key: 'strategic', label: 'Strategic' },
+  { key: 'active', label: 'Active' },
+]
+
+const FILTER_LABELS = { new: 'New today', backlog: 'Backlog', active: 'Active', hot: 'Hot', toclear: 'To-clear', strategic: 'Strategic' }
 const filterLabel = (f) => {
   if (!f) return ''
   if (f.startsWith('rolenew:')) return f.slice(8) + ' — new today'
@@ -54,6 +72,10 @@ export default function Opportunities({ opps, filter }) {
       r = r.filter((o) => ACTIVE_STAGES.includes(o.stage))
     } else if (activeFilter === 'hot') {
       r = r.filter((o) => o.urgency === 'Hot')
+    } else if (activeFilter === 'toclear') {
+      r = r.filter((o) => FRESH_STAGES.includes(o.stage))
+    } else if (activeFilter === 'strategic') {
+      r = r.filter((o) => o.fit === 'Strategic')
     } else if (activeFilter?.startsWith('rolenew:')) {
       const fam = activeFilter.slice(8)
       const cutoff = CUTOFF_TODAY()
@@ -75,6 +97,32 @@ export default function Opportunities({ opps, filter }) {
     return r
   }, [opportunities, query, urgency, stage, sort, roleFilter, activeFilter])
 
+  // Live stage counts for the funnel — group ALL loaded opps by stage (ignores filters).
+  const stageCounts = useMemo(() => {
+    const by = {}
+    for (const o of opportunities) by[o.stage] = (by[o.stage] || 0) + 1
+    return by
+  }, [opportunities])
+
+  // Per-role counts for the chip bar — match each persona key against opp.rolesFor.
+  const roleCounts = useMemo(() => {
+    const c = { all: opportunities.length, other: 0 }
+    for (const o of opportunities) {
+      const rf = o.rolesFor || []
+      if (rf.length === 0) c.other += 1
+      for (const k of rf) c[k] = (c[k] || 0) + 1
+    }
+    return c
+  }, [opportunities])
+
+  // Live counts for the quick-filter chips.
+  const quickCounts = useMemo(() => ({
+    toclear: opportunities.filter((o) => FRESH_STAGES.includes(o.stage)).length,
+    hot: opportunities.filter((o) => o.urgency === 'Hot').length,
+    strategic: opportunities.filter((o) => o.fit === 'Strategic').length,
+    active: opportunities.filter((o) => ACTIVE_STAGES.includes(o.stage)).length,
+  }), [opportunities])
+
   // Single-result redirect: if a named filter yields exactly 1 opp, go directly to its detail
   useEffect(() => {
     if (activeFilter && rows.length === 1 && !loading) {
@@ -87,14 +135,60 @@ export default function Opportunities({ opps, filter }) {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+      {/* Live stage funnel — one connected node per pipeline stage, showing the live count. */}
+      {stages.length > 0 && (
+        <div className="px-box" style={{ padding: '12px 14px', overflowX: 'auto' }}>
+          <div style={{ display: 'flex', alignItems: 'flex-start', gap: 0, minWidth: 'min-content' }}>
+            {stages.map((s, i) => (
+              <div key={s} style={{ display: 'flex', alignItems: 'center' }}>
+                <div
+                  onClick={() => { setActiveFilter(null); setUrgency('All'); setQuery(''); setStage(s) }}
+                  title={STAGE_LABELS[s] || s}
+                  style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, cursor: 'pointer' }}>
+                  <span style={{
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    width: 40, height: 40, borderRadius: '50%', fontSize: 14, fontWeight: 700,
+                    background: (stageCounts[s] || 0) > 0 ? 'var(--surface-brand-default)' : 'var(--proto-panel)',
+                    color: (stageCounts[s] || 0) > 0 ? 'var(--text-on-brand)' : 'var(--proto-ink3)',
+                    border: '1px solid var(--proto-rule-soft)',
+                  }}>{stageCounts[s] || 0}</span>
+                  <span className="px-small" style={{ whiteSpace: 'nowrap', fontSize: 10 }}>{STAGE_LABELS[s] || s}</span>
+                </div>
+                {i < stages.length - 1 && (
+                  <span style={{ width: 18, height: 2, background: 'var(--proto-rule-soft)', margin: '0 2px', marginBottom: 18, flexShrink: 0 }} />
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Quick filters (spec: All / To-clear / Hot / Strategic / Active), each with live count. */}
+      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+        {QUICK_FILTERS.map((f) => {
+          const on = (activeFilter || null) === f.key
+          const n = f.key ? quickCounts[f.key] : opportunities.length
+          return (
+            <span key={f.label} className="px-pill"
+              onClick={() => { setActiveFilter(f.key); setStage('All'); setUrgency('All'); setQuery(''); if (!f.key) go('/opportunities') }}
+              style={{ cursor: 'pointer', background: on ? 'var(--surface-brand-default)' : undefined, color: on ? 'var(--text-on-brand)' : undefined }}>
+              {f.label}{typeof n === 'number' ? ` ${n}` : ''}
+            </span>
+          )
+        })}
+      </div>
+
       {roles.length > 0 && (
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-          {[{ key: 'all', name: 'All' }, ...roles, { key: 'other', name: 'Other' }].map((r) => (
-            <span key={r.key} className="px-pill" onClick={() => setRoleFilter(r.key)}
-              style={{ cursor: 'pointer', background: roleFilter === r.key ? 'var(--surface-brand-default)' : undefined, color: roleFilter === r.key ? 'var(--text-on-brand)' : undefined }}>
-              {r.name}
-            </span>
-          ))}
+          {[{ key: 'all', name: 'All' }, ...roles, { key: 'other', name: 'Other' }].map((r) => {
+            const n = roleCounts[r.key] || 0
+            return (
+              <span key={r.key} className="px-pill" onClick={() => setRoleFilter(r.key)}
+                style={{ cursor: 'pointer', background: roleFilter === r.key ? 'var(--surface-brand-default)' : undefined, color: roleFilter === r.key ? 'var(--text-on-brand)' : undefined }}>
+                {r.name} {n}
+              </span>
+            )
+          })}
         </div>
       )}
       {activeFilter && (

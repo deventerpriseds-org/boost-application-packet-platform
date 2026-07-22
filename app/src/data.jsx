@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useState, useRef } from 'react'
 import { api } from './api.js'
-import { PERSONAS } from './state.jsx'
 
 // Loads the opportunity catalog for the active persona from the live service layer.
 // Polls every `pollMs` so real-time-ingested opportunities (LinkedIn alerts) pop

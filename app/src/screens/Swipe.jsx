@@ -1,4 +1,4 @@
-import React, { useMemo, useRef, useState } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { useApp, go } from '../state.jsx'
 import { Pill, UrgencyPill, MatchScore } from '../shell.jsx'
 import { Loading, ErrorBox } from './Today.jsx'
@@ -13,21 +13,43 @@ export default function Swipe({ opps }) {
   const [idx, setIdx] = useState(0)
   const [drag, setDrag] = useState({ x: 0, y: 0, active: false, decision: null })
   const cardRef = useRef(null)
-
-  if (loading) return <Loading />
-  if (error) return <ErrorBox error={error} />
+  const busyRef = useRef(false)
 
   const current = queue[idx]
   const next = queue[idx + 1]
 
-  const decide = (decision) => {
+  const decide = (decision, { build = false } = {}) => {
     if (!current) return
-    if (decision === 'keep') { optimisticMove(current.id, 'saved', (e) => toast(`Failed: ${e.message}`)); toast(`Saved ${current.company}`) }
-    else if (decision === 'maybe') { optimisticMove(current.id, 'enriched', (e) => toast(`Failed: ${e.message}`)); toast(`${current.company} → Maybe`) }
-    else if (decision === 'pass') { optimisticDismiss(current.id, (e) => toast(`Failed: ${e.message}`)); toast(`Dismissed ${current.company}`) }
+    if (busyRef.current) return
+    busyRef.current = true
+    const oppId = current.id
+    if (decision === 'keep') { optimisticMove(oppId, 'saved', (e) => toast(`Failed: ${e.message}`)); toast(build ? `Saved ${current.company} — building packet` : `Saved ${current.company}`) }
+    else if (decision === 'maybe') { optimisticMove(oppId, 'enriched', (e) => toast(`Failed: ${e.message}`)); toast(`${current.company} → Maybe`) }
+    else if (decision === 'pass') { optimisticDismiss(oppId, (e) => toast(`Failed: ${e.message}`)); toast(`Dismissed ${current.company}`) }
     setDrag({ x: 0, y: 0, active: false, decision: null })
     setIdx((i) => i + 1)
+    // release the lock after the card transition so a held/repeated key can't double-act
+    setTimeout(() => { busyRef.current = false }, 240)
+    if (build && oppId) go(`/packet/${oppId}`)
   }
+
+  // Keyboard triage: ← dismiss, → keep, ↓ maybe. Mirrors the action buttons.
+  useEffect(() => {
+    const onKey = (e) => {
+      const el = document.activeElement
+      const tag = el && el.tagName
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || (el && el.isContentEditable)) return
+      if (e.metaKey || e.ctrlKey || e.altKey) return
+      if (e.key === 'ArrowLeft') { e.preventDefault(); decide('pass') }
+      else if (e.key === 'ArrowRight') { e.preventDefault(); decide('keep') }
+      else if (e.key === 'ArrowDown') { e.preventDefault(); decide('maybe') }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  })
+
+  if (loading) return <Loading />
+  if (error) return <ErrorBox error={error} />
 
   const onDown = (e) => { cardRef.current?.setPointerCapture?.(e.pointerId); setDrag({ x: 0, y: 0, active: true, decision: null, startX: e.clientX, startY: e.clientY }) }
   const onMove = (e) => {
@@ -61,9 +83,21 @@ export default function Swipe({ opps }) {
   }
 
   const rotation = drag.x / 14
+  const total = queue.length
+  const done = idx
+  const left = total - idx
+  const pct = total > 0 ? Math.round((done / total) * 100) : 0
   return (
     <div style={{ maxWidth: 460, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 10 }}>
-      <div className="px-small" style={{ textAlign: 'right' }}>{queue.length - idx} left</div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+        <div className="px-small" style={{ display: 'flex', justifyContent: 'space-between' }}>
+          <span>{done} of {total} reviewed</span>
+          <span>{left} left</span>
+        </div>
+        <div style={{ height: 6, borderRadius: 3, background: 'var(--proto-line, rgba(0,0,0,.1))', overflow: 'hidden' }}>
+          <div style={{ width: `${pct}%`, height: '100%', background: 'var(--proto-green)', transition: 'width 220ms ease-out' }} />
+        </div>
+      </div>
       <div style={{ position: 'relative', height: 420 }}>
         {next && <SwipeCard o={next} style={{ position: 'absolute', inset: 0, transform: 'scale(0.96) translateY(8px)', opacity: 0.5, pointerEvents: 'none', zIndex: 1 }} />}
         <SwipeCard o={current} cardRef={cardRef} decision={drag.decision}
@@ -77,6 +111,12 @@ export default function Swipe({ opps }) {
         <ActionBtn label="↓ Maybe" tone="yellow" onClick={() => decide('maybe')} />
         <ActionBtn label="✓ Keep" tone="green" onClick={() => decide('keep')} />
       </div>
+      {current.id && (
+        <button className="px-btn px-btn-accent" onClick={() => decide('keep', { build: true })}
+          style={{ justifyContent: 'center', fontWeight: 700 }}>
+          ✓ Keep &amp; build packet now →
+        </button>
+      )}
       <div style={{ textAlign: 'center', paddingBottom: 8 }}>
         <span className="px-link" style={{ fontSize: 12 }} onClick={() => go(`/opp/${current.id}`)}>Open full detail →</span>
       </div>
