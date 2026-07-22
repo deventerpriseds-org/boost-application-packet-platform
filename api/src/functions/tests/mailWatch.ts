@@ -477,6 +477,38 @@ export async function mailFolderCreate(req: HttpRequest, context: InvocationCont
   } catch (err) { return { status: 200, headers: HEADERS, jsonBody: { error: String(err) } } }
 }
 
+// GET /api/mail/messages?folderId=&top=&mailbox=[&subjectsOnly=1] — list message
+// subjects/senders for sampling seniority patterns. With folderId → that folder;
+// without → the ENTIRE mailbox (Graph /messages spans all folders). subjectsOnly=1
+// returns just an array of subject strings to keep the payload small for large samples.
+export async function mailMessages(req: HttpRequest, context: InvocationContext): Promise<HttpResponseInit> {
+  if (req.method === 'OPTIONS') return { status: 204, headers: HEADERS }
+  const creds = graphCreds()
+  if (!creds.clientId || !creds.clientSecret) return { status: 200, headers: HEADERS, jsonBody: { error: 'MICROSOFT creds not set' } }
+  try {
+    const folderId = req.query.get('folderId')
+    const top = Math.min(Math.max(Number(req.query.get('top')) || 200, 1), 5000)
+    const subjectsOnly = !!req.query.get('subjectsOnly')
+    const mailbox = req.query.get('mailbox') || (await loadConfig(resolveOwner(req).owner)).mailbox
+    const token = await getMicrosoftToken(creds.tenantId, creds.clientId, creds.clientSecret)
+    const base = folderId
+      ? `https://graph.microsoft.com/v1.0/users/${mailbox}/mailFolders/${folderId}/messages`
+      : `https://graph.microsoft.com/v1.0/users/${mailbox}/messages` // whole mailbox, all folders
+    let url: string | null = `${base}?$select=subject,from,receivedDateTime,parentFolderId&$top=100&$orderby=receivedDateTime desc`
+    const out: any[] = []
+    while (url && out.length < top) {
+      const res: any = await fetch(url, { headers: { Authorization: `Bearer ${token}` } })
+      if (!res.ok) return { status: 200, headers: HEADERS, jsonBody: { ok: false, detail: `HTTP ${res.status}: ${(await res.text()).slice(0, 200)}` } }
+      const j = await res.json() as any
+      for (const m of (j.value || [])) out.push({ subject: m.subject, from: m?.from?.emailAddress?.address, received: m.receivedDateTime, parentFolderId: m.parentFolderId })
+      url = j['@odata.nextLink'] || null
+    }
+    const sliced = out.slice(0, top)
+    if (subjectsOnly) return { status: 200, headers: HEADERS, jsonBody: { ok: true, count: sliced.length, subjects: sliced.map((m) => m.subject) } }
+    return { status: 200, headers: HEADERS, jsonBody: { ok: true, count: sliced.length, messages: sliced } }
+  } catch (err) { return { status: 200, headers: HEADERS, jsonBody: { error: String(err) } } }
+}
+
 // POST /api/mail/folders/create-bulk { folders: [{name, parentId?}] } — create many
 // folders in one call. Returns a per-folder result so partial failures are visible.
 export async function mailFoldersBulkCreate(req: HttpRequest, context: InvocationContext): Promise<HttpResponseInit> {
@@ -927,6 +959,7 @@ app.http('mailSubscriptions', { methods: ['GET', 'OPTIONS'], authLevel: 'anonymo
 app.http('mailIngestTest', { methods: ['POST', 'OPTIONS'], authLevel: 'anonymous', route: 'mail/ingest-test', handler: mailIngestTest })
 app.http('mailConfig', { methods: ['GET', 'POST', 'OPTIONS'], authLevel: 'anonymous', route: 'mail/config', handler: mailConfig })
 app.http('mailFolders', { methods: ['GET', 'OPTIONS'], authLevel: 'anonymous', route: 'mail/folders', handler: mailFolders })
+app.http('mailMessages', { methods: ['GET', 'OPTIONS'], authLevel: 'anonymous', route: 'mail/messages', handler: mailMessages })
 app.http('mailFolderCreate', { methods: ['POST', 'OPTIONS'], authLevel: 'anonymous', route: 'mail/folders/create', handler: mailFolderCreate })
 app.http('mailFoldersBulkCreate', { methods: ['POST', 'OPTIONS'], authLevel: 'anonymous', route: 'mail/folders/create-bulk', handler: mailFoldersBulkCreate })
 app.http('mailFolderDelete', { methods: ['POST', 'OPTIONS'], authLevel: 'anonymous', route: 'mail/folders/delete', handler: mailFolderDelete })
