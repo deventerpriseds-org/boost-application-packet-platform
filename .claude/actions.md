@@ -291,10 +291,15 @@ wired to mailFolderTree + mailFolderMapGet/Set/Delete). It was previously "dead"
 but never read at ingest); the ACT-17 router now consumes them, so the UI is functional end-to-end
 EXCEPT that folder routing only fires once the subscription is mailbox-wide (see follow-up 1).
 
-**Status:** `done` (router core + UI). **Follow-ups still open:**
-- Broaden the Graph subscription from inbox-only to mailbox-wide so role-mapped folders that
-  aren't the inbox trigger notifications (currently a rule-moved/funneled mail's notification
-  may still carry the inbox `parentFolderId`).
+**Status:** `done` (router core + UI). **Follow-ups:**
+- ✅ **Mailbox-wide subscription (2026-07-22).** `messagesResource` now `users/{mailbox}/messages`
+  (was `mailFolders('inbox')/messages`) — broadens the subscription AND every fallback poll +
+  renew health check in one change (they all build off it). Added `folderSkipsFilter()`: mail in a
+  role-mapped folder with `skip_filter` bypasses the `isAlert` keyword gate (funneling INTO the
+  folder is the user's "this is a job" signal — the whole point of folder mapping). Requires
+  re-running `POST /api/mail/subscribe` to repoint the live subscription (mailRenew only extends
+  expiry, doesn't change resource). Same Graph permission (Mail.Read Application already covers all
+  folders). Commit pending.
 - Folder→role UI so the user can populate `folder_role_map` (they asked to build the mapping UI;
   the deterministic path is live but has no rows to act on until mappings exist).
 - ATS scheduler timer (still manual-only).

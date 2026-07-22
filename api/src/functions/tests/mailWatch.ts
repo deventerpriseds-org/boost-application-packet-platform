@@ -126,8 +126,12 @@ async function saveConfig(owner: string, patch: Partial<WatchConfig>): Promise<W
   } finally { try { await client?.end() } catch {} }
 }
 
-const folderRef = (cfg: WatchConfig) => `mailFolders('${cfg.folder || 'inbox'}')`
-const messagesResource = (cfg: WatchConfig) => `users/${cfg.mailbox}/${folderRef(cfg)}/messages`
+// The watch spans the ENTIRE mailbox (all folders), not just the inbox: mail the user funnels
+// into a role-mapped folder must be seen even though it never touched the inbox, and seniority
+// rules move alerts into subfolders at delivery. The unified router keys off each message's
+// parentFolderId (folder_role_map) to assign the folder's role. Broadening here also broadens
+// every fallback poll + the renew health check, since they all build off messagesResource.
+const messagesResource = (cfg: WatchConfig) => `users/${cfg.mailbox}/messages`
 
 // Detect which job board sourced a message. Checks folder name first (user mail rules
 // are the cleanest signal), then sender/keyword as a catch-all. Both always run.
@@ -334,13 +338,30 @@ async function ingestText(rawText: string, owner: string, source = 'Email', rece
   } finally { try { await client?.end() } catch {} }
 }
 
+// Is this folder a role-mapped bin the user wants imported even when it fails the keyword
+// filters? (folder_role_map.skip_filter, default true). Funneling mail into such a folder IS
+// the user's signal that it's a job worth keeping — so the isAlert gate is bypassed for it.
+async function folderSkipsFilter(owner: string, folderId?: string): Promise<boolean> {
+  if (!folderId) return false
+  let client
+  try {
+    client = await getPgClient()
+    await ensureFolderMapTable(client)
+    const r = await client.query(`select 1 from folder_role_map where owner_email=$1 and folder_id=$2 and skip_filter limit 1`, [owner, folderId])
+    return (r.rowCount ?? 0) > 0
+  } catch { return false } finally { try { await client?.end() } catch {} }
+}
+
 async function ingestMessageId(token: string, id: string, cfg: WatchConfig) {
   const m = await fetch(`https://graph.microsoft.com/v1.0/users/${cfg.mailbox}/messages/${id}?$select=subject,from,bodyPreview,body,receivedDateTime,parentFolderId`, { headers: { Authorization: `Bearer ${token}` } })
   if (!m.ok) return { error: `fetch message HTTP ${m.status}` }
   const msg = await m.json() as any
   const from = (msg?.from?.emailAddress?.address || '').toLowerCase()
   const text = `From: ${from}\nSubject: ${msg?.subject}\n\n${(msg?.body?.content || msg?.bodyPreview || '').replace(/<[^>]+>/g, ' ')}`
-  if (!isAlert(cfg, from, msg?.subject, msg?.bodyPreview)) return { skipped: 'not a job alert', from }
+  // Mailbox-wide watch: a role-mapped folder (skip_filter) is an explicit "this is a job" signal,
+  // so bypass the keyword gate. Everything else still must look like an alert.
+  const mappedFolder = await folderSkipsFilter(cfg.ownerEmail, msg?.parentFolderId)
+  if (!mappedFolder && !isAlert(cfg, from, msg?.subject, msg?.bodyPreview)) return { skipped: 'not a job alert', from }
   const source = detectSource(from, cfg.folderName)
   const receivedAt = msg?.receivedDateTime || undefined
   // parentFolderId lets the unified router assign a role directly when the mail landed in a
