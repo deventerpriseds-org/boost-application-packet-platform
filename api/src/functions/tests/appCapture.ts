@@ -49,7 +49,7 @@ export async function appCapture(req: HttpRequest, context: InvocationContext): 
     }
     return { status: 200, headers: HEADERS, jsonBody: { ok: true, inserted: r.inserted, reason: r.reason, id: r.id, opportunity: { company: o.company, role: o.role, location: o.location } } }
   } catch (err) {
-    return { status: 200, headers: HEADERS, jsonBody: { error: String(err) } }
+    return { status: 500, headers: HEADERS, jsonBody: { error: String(err) } }
   } finally { try { await client?.end() } catch {} }
 }
 

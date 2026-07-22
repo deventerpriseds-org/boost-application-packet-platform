@@ -2,7 +2,7 @@ import { app, HttpRequest, HttpResponseInit, InvocationContext, Timer } from '@a
 import { getMicrosoftToken } from './googleAuth'
 import { getPgClient } from './pgClient'
 import { logUsage } from './usageMeter'
-import { resolveOwner } from './appSession'
+import { resolveOwner, requireWrite } from './appSession'
 
 const HEADERS = {
   'Content-Type': 'application/json',
@@ -397,6 +397,7 @@ export async function mailSubscribe(req: HttpRequest, context: InvocationContext
   const creds = graphCreds()
   if (!creds.clientId || !creds.clientSecret) return { status: 200, headers: HEADERS, jsonBody: { error: 'MICROSOFT_CLIENT_ID/SECRET not set' } }
   try {
+    const guard = requireWrite(req); if (guard) return guard
     const owner = resolveOwner(req).owner
     const cfg = await loadConfig(owner)
     const token = await getMicrosoftToken(creds.tenantId, creds.clientId, creds.clientSecret)
@@ -429,7 +430,7 @@ export async function mailSubscribe(req: HttpRequest, context: InvocationContext
     await saveConfig(owner, { ownerEmail: cfg.mailbox }).catch(() => {})
     return { status: 200, headers: HEADERS, jsonBody: { ok: true, subscriptionId: sub.id, expires: sub.expirationDateTime, mailbox: cfg.mailbox, folder: cfg.folderName, removedStale: removed } }
   } catch (err) {
-    return { status: 200, headers: HEADERS, jsonBody: { error: String(err) } }
+    return { status: 500, headers: HEADERS, jsonBody: { error: String(err) } }
   }
 }
 
@@ -442,7 +443,7 @@ export async function mailSubscriptions(req: HttpRequest, context: InvocationCon
     const token = await getMicrosoftToken(creds.tenantId, creds.clientId, creds.clientSecret)
     const res = await fetch('https://graph.microsoft.com/v1.0/subscriptions', { headers: { Authorization: `Bearer ${token}` } })
     return { status: 200, headers: HEADERS, jsonBody: await res.json() }
-  } catch (err) { return { status: 200, headers: HEADERS, jsonBody: { error: String(err) } } }
+  } catch (err) { return { status: 500, headers: HEADERS, jsonBody: { error: String(err) } } }
 }
 
 // GET/POST /api/mail/config — read or update the watch configuration.
@@ -451,6 +452,7 @@ export async function mailConfig(req: HttpRequest, context: InvocationContext): 
   try {
     const owner = resolveOwner(req).owner
     if (req.method === 'GET') return { status: 200, headers: HEADERS, jsonBody: { config: await loadConfig(owner) } }
+    const guard = requireWrite(req); if (guard) return guard
     const body = (await req.json().catch(() => ({}))) as any
     const patch: Partial<WatchConfig> = {}
     if (typeof body.mailbox === 'string') patch.mailbox = body.mailbox.trim()
@@ -460,7 +462,7 @@ export async function mailConfig(req: HttpRequest, context: InvocationContext): 
     if (Array.isArray(body.subjectPatterns)) patch.subjectPatterns = body.subjectPatterns.map((s: any) => String(s).trim()).filter(Boolean)
     if (typeof body.enabled === 'boolean') patch.enabled = body.enabled
     return { status: 200, headers: HEADERS, jsonBody: { ok: true, config: await saveConfig(owner, patch) } }
-  } catch (err) { return { status: 200, headers: HEADERS, jsonBody: { error: String(err) } } }
+  } catch (err) { return { status: 500, headers: HEADERS, jsonBody: { error: String(err) } } }
 }
 
 // Recursively walk a mailbox's folder tree. Graph only returns direct children per
@@ -506,7 +508,7 @@ export async function mailFolders(req: HttpRequest, context: InvocationContext):
     const folders = (((await res.json()) as any)?.value || []).map((f: any) => ({ id: f.id, name: f.displayName, count: f.totalItemCount }))
     // 'inbox' is always addressable by its well-known name.
     return { status: 200, headers: HEADERS, jsonBody: { ok: true, mailbox, folders } }
-  } catch (err) { return { status: 200, headers: HEADERS, jsonBody: { error: String(err) } } }
+  } catch (err) { return { status: 500, headers: HEADERS, jsonBody: { error: String(err) } } }
 }
 
 // POST /api/mail/folders/create { name, parentId? } — create a mail folder (nested if
@@ -517,6 +519,7 @@ export async function mailFolderCreate(req: HttpRequest, context: InvocationCont
   const creds = graphCreds()
   if (!creds.clientId || !creds.clientSecret) return { status: 200, headers: HEADERS, jsonBody: { error: 'MICROSOFT creds not set' } }
   try {
+    const guard = requireWrite(req); if (guard) return guard
     const body = (await req.json().catch(() => ({}))) as any
     const name = String(body?.name || '').trim().slice(0, 120)
     if (!name) return { status: 400, headers: HEADERS, jsonBody: { error: 'name required' } }
@@ -538,7 +541,7 @@ export async function mailFolderCreate(req: HttpRequest, context: InvocationCont
       return { status: 200, headers: HEADERS, jsonBody: { ok: false, status: res.status, detail, needsPermission: needsPerm ? 'Mail.ReadWrite' : undefined } }
     }
     return { status: 200, headers: HEADERS, jsonBody: { ok: true, folder: { id: (j as any).id, name: (j as any).displayName, parentId } } }
-  } catch (err) { return { status: 200, headers: HEADERS, jsonBody: { error: String(err) } } }
+  } catch (err) { return { status: 500, headers: HEADERS, jsonBody: { error: String(err) } } }
 }
 
 // Indeed/LinkedIn digests wrap the real role: "{Company} is hiring for {ROLE}. N more
@@ -619,6 +622,7 @@ export async function mailReclassify(req: HttpRequest, context: InvocationContex
   const creds = graphCreds()
   if (!creds.clientId || !creds.clientSecret) return { status: 200, headers: HEADERS, jsonBody: { error: 'MICROSOFT creds not set' } }
   try {
+    const guard = requireWrite(req); if (guard) return guard
     const body = (await req.json().catch(() => ({}))) as any
     const sourceFolderId = String(body?.sourceFolderId || '').trim()
     if (!sourceFolderId) return { status: 400, headers: HEADERS, jsonBody: { error: 'sourceFolderId required' } }
@@ -632,7 +636,7 @@ export async function mailReclassify(req: HttpRequest, context: InvocationContex
       dryRun: body?.dryRun !== false,
     })
     return { status: 200, headers: HEADERS, jsonBody: out }
-  } catch (err) { return { status: 200, headers: HEADERS, jsonBody: { error: String(err) } } }
+  } catch (err) { return { status: 500, headers: HEADERS, jsonBody: { error: String(err) } } }
 }
 
 // seniority_routing: persisted map of each source folder → its seniority subfolders +
@@ -663,6 +667,7 @@ export async function mailRouting(req: HttpRequest, context: InvocationContext):
       const rows = (await client.query(`select source_name, sender_match, parent_id, csuite_id, vp_id, director_id from seniority_routing where owner_email=$1 order by source_name`, [owner])).rows
       return { status: 200, headers: HEADERS, jsonBody: { ok: true, routes: rows } }
     }
+    const guard = requireWrite(req); if (guard) return guard
     const b = (await req.json().catch(() => ({}))) as any
     const src = String(b?.sourceName || '').trim()
     if (!src || !b?.parentId || !b?.csuite || !b?.vp || !b?.director) return { status: 400, headers: HEADERS, jsonBody: { error: 'sourceName, parentId, csuite, vp, director required' } }
@@ -674,7 +679,7 @@ export async function mailRouting(req: HttpRequest, context: InvocationContext):
       [owner, src, String(b?.senderMatch || '').trim().toLowerCase(), b.parentId, b.csuite, b.vp, b.director],
     )
     return { status: 200, headers: HEADERS, jsonBody: { ok: true, sourceName: src } }
-  } catch (err) { return { status: 200, headers: HEADERS, jsonBody: { error: String(err) } } }
+  } catch (err) { return { status: 500, headers: HEADERS, jsonBody: { error: String(err) } } }
   finally { try { await client?.end() } catch {} }
 }
 
@@ -712,9 +717,10 @@ async function runReconcile(owner?: string): Promise<any> {
 export async function mailReconcileHttp(req: HttpRequest, context: InvocationContext): Promise<HttpResponseInit> {
   if (req.method === 'OPTIONS') return { status: 204, headers: HEADERS }
   try {
+    const guard = requireWrite(req); if (guard) return guard
     const owner = resolveOwner(req).owner
     return { status: 200, headers: HEADERS, jsonBody: await runReconcile(owner) }
-  } catch (err) { return { status: 200, headers: HEADERS, jsonBody: { error: String(err) } } }
+  } catch (err) { return { status: 500, headers: HEADERS, jsonBody: { error: String(err) } } }
 }
 
 export async function mailReconcileTimer(_t: any, context: InvocationContext): Promise<void> {
@@ -742,7 +748,7 @@ export async function mailRulesList(req: HttpRequest, context: InvocationContext
     if (!res.ok) return { status: 200, headers: HEADERS, jsonBody: { ok: false, detail: JSON.stringify(j).slice(0, 300) } }
     const rules = (j.value || []).map((r: any) => ({ id: r.id, name: r.displayName, sequence: r.sequence, enabled: r.isEnabled, conditions: r.conditions, moveToFolder: r?.actions?.moveToFolder }))
     return { status: 200, headers: HEADERS, jsonBody: { ok: true, rules } }
-  } catch (err) { return { status: 200, headers: HEADERS, jsonBody: { error: String(err) } } }
+  } catch (err) { return { status: 500, headers: HEADERS, jsonBody: { error: String(err) } } }
 }
 
 // POST /api/mail/rules/repoint { ruleId, destFolderId } — change a rule's move-to target.
@@ -751,6 +757,7 @@ export async function mailRuleRepoint(req: HttpRequest, context: InvocationConte
   const creds = graphCreds()
   if (!creds.clientId || !creds.clientSecret) return { status: 200, headers: HEADERS, jsonBody: { error: 'MICROSOFT creds not set' } }
   try {
+    const guard = requireWrite(req); if (guard) return guard
     const b = (await req.json().catch(() => ({}))) as any
     const ruleId = String(b?.ruleId || '').trim()
     const destFolderId = String(b?.destFolderId || '').trim()
@@ -763,7 +770,7 @@ export async function mailRuleRepoint(req: HttpRequest, context: InvocationConte
     })
     if (!res.ok) return { status: 200, headers: HEADERS, jsonBody: { ok: false, detail: (await res.text()).slice(0, 300) } }
     return { status: 200, headers: HEADERS, jsonBody: { ok: true, ruleId, destFolderId } }
-  } catch (err) { return { status: 200, headers: HEADERS, jsonBody: { error: String(err) } } }
+  } catch (err) { return { status: 500, headers: HEADERS, jsonBody: { error: String(err) } } }
 }
 
 // POST /api/mail/rules/build-seniority — from seniority_routing, create forward inbox rules
@@ -776,6 +783,7 @@ export async function mailRulesBuild(req: HttpRequest, context: InvocationContex
   if (!creds.clientId || !creds.clientSecret) return { status: 200, headers: HEADERS, jsonBody: { error: 'MICROSOFT creds not set' } }
   let client
   try {
+    const guard = requireWrite(req); if (guard) return guard
     const owner = resolveOwner(req).owner
     const mailbox = (await loadConfig(owner)).mailbox
     const token = await getMicrosoftToken(creds.tenantId, creds.clientId, creds.clientSecret)
@@ -803,7 +811,7 @@ export async function mailRulesBuild(req: HttpRequest, context: InvocationContex
       }
     }
     return { status: 200, headers: HEADERS, jsonBody: { ok: true, created: results.filter((x) => x.ok).length, total: results.length, results } }
-  } catch (err) { return { status: 200, headers: HEADERS, jsonBody: { error: String(err) } } }
+  } catch (err) { return { status: 500, headers: HEADERS, jsonBody: { error: String(err) } } }
   finally { try { await client?.end() } catch {} }
 }
 
@@ -820,6 +828,7 @@ export async function mailRulesBuildParents(req: HttpRequest, context: Invocatio
   if (!creds.clientId || !creds.clientSecret) return { status: 200, headers: HEADERS, jsonBody: { error: 'MICROSOFT creds not set' } }
   let client
   try {
+    const guard = requireWrite(req); if (guard) return guard
     const owner = resolveOwner(req).owner
     const mailbox = (await loadConfig(owner)).mailbox
     const token = await getMicrosoftToken(creds.tenantId, creds.clientId, creds.clientSecret)
@@ -852,7 +861,7 @@ export async function mailRulesBuildParents(req: HttpRequest, context: Invocatio
       results.push({ name, sender, ok: res.ok, id: (j as any)?.id, error: res.ok ? undefined : JSON.stringify(j).slice(0, 160) })
     }
     return { status: 200, headers: HEADERS, jsonBody: { ok: true, created: results.filter((x) => x.ok && !x.skipped).length, total: results.length, results } }
-  } catch (err) { return { status: 200, headers: HEADERS, jsonBody: { error: String(err) } } }
+  } catch (err) { return { status: 500, headers: HEADERS, jsonBody: { error: String(err) } } }
   finally { try { await client?.end() } catch {} }
 }
 
@@ -862,6 +871,7 @@ export async function mailRuleDelete(req: HttpRequest, context: InvocationContex
   const creds = graphCreds()
   if (!creds.clientId || !creds.clientSecret) return { status: 200, headers: HEADERS, jsonBody: { error: 'MICROSOFT creds not set' } }
   try {
+    const guard = requireWrite(req); if (guard) return guard
     const b = (await req.json().catch(() => ({}))) as any
     const ruleId = String(b?.ruleId || '').trim()
     if (!ruleId) return { status: 400, headers: HEADERS, jsonBody: { error: 'ruleId required' } }
@@ -872,7 +882,7 @@ export async function mailRuleDelete(req: HttpRequest, context: InvocationContex
     })
     if (!res.ok) return { status: 200, headers: HEADERS, jsonBody: { ok: false, detail: (await res.text()).slice(0, 300) } }
     return { status: 200, headers: HEADERS, jsonBody: { ok: true, ruleId } }
-  } catch (err) { return { status: 200, headers: HEADERS, jsonBody: { error: String(err) } } }
+  } catch (err) { return { status: 500, headers: HEADERS, jsonBody: { error: String(err) } } }
 }
 
 // GET /api/mail/messages?folderId=&top=&mailbox=[&subjectsOnly=1] — list message
@@ -904,7 +914,7 @@ export async function mailMessages(req: HttpRequest, context: InvocationContext)
     const sliced = out.slice(0, top)
     if (subjectsOnly) return { status: 200, headers: HEADERS, jsonBody: { ok: true, count: sliced.length, subjects: sliced.map((m) => m.subject) } }
     return { status: 200, headers: HEADERS, jsonBody: { ok: true, count: sliced.length, messages: sliced } }
-  } catch (err) { return { status: 200, headers: HEADERS, jsonBody: { error: String(err) } } }
+  } catch (err) { return { status: 500, headers: HEADERS, jsonBody: { error: String(err) } } }
 }
 
 // POST /api/mail/folders/create-bulk { folders: [{name, parentId?}] } — create many
@@ -914,6 +924,7 @@ export async function mailFoldersBulkCreate(req: HttpRequest, context: Invocatio
   const creds = graphCreds()
   if (!creds.clientId || !creds.clientSecret) return { status: 200, headers: HEADERS, jsonBody: { error: 'MICROSOFT creds not set' } }
   try {
+    const guard = requireWrite(req); if (guard) return guard
     const body = (await req.json().catch(() => ({}))) as any
     const items = Array.isArray(body?.folders) ? body.folders : []
     if (!items.length) return { status: 400, headers: HEADERS, jsonBody: { error: 'folders[] required' } }
@@ -938,7 +949,7 @@ export async function mailFoldersBulkCreate(req: HttpRequest, context: Invocatio
     }
     const created = results.filter((r) => r.ok).length
     return { status: 200, headers: HEADERS, jsonBody: { ok: true, created, total: results.length, results } }
-  } catch (err) { return { status: 200, headers: HEADERS, jsonBody: { error: String(err) } } }
+  } catch (err) { return { status: 500, headers: HEADERS, jsonBody: { error: String(err) } } }
 }
 
 // POST /api/mail/folders/delete { folderId } — delete a mail folder (cleanup/undo).
@@ -947,6 +958,7 @@ export async function mailFolderDelete(req: HttpRequest, context: InvocationCont
   const creds = graphCreds()
   if (!creds.clientId || !creds.clientSecret) return { status: 200, headers: HEADERS, jsonBody: { error: 'MICROSOFT creds not set' } }
   try {
+    const guard = requireWrite(req); if (guard) return guard
     const body = (await req.json().catch(() => ({}))) as any
     const folderId = String(body?.folderId || '').trim()
     if (!folderId) return { status: 400, headers: HEADERS, jsonBody: { error: 'folderId required' } }
@@ -957,7 +969,7 @@ export async function mailFolderDelete(req: HttpRequest, context: InvocationCont
     })
     if (!res.ok && res.status !== 204) return { status: 200, headers: HEADERS, jsonBody: { ok: false, status: res.status, detail: (await res.text()).slice(0, 300) } }
     return { status: 200, headers: HEADERS, jsonBody: { ok: true, removed: folderId } }
-  } catch (err) { return { status: 200, headers: HEADERS, jsonBody: { error: String(err) } } }
+  } catch (err) { return { status: 500, headers: HEADERS, jsonBody: { error: String(err) } } }
 }
 
 // folder_role_map: maps a mailbox folder → a role bin (persona.key). Rows the router
@@ -993,6 +1005,7 @@ export async function mailFolderMap(req: HttpRequest, context: InvocationContext
       const mappings = rows.map((r: any) => ({ folderId: r.folder_id, folderPath: r.folder_path, roleKey: r.role_key, skipFilter: r.skip_filter }))
       return { status: 200, headers: HEADERS, jsonBody: { ok: true, mappings } }
     }
+    const guard = requireWrite(req); if (guard) return guard
     const body = (await req.json().catch(() => ({}))) as any
     const folderId = String(body?.folderId || '').trim()
     const roleKey = String(body?.roleKey || '').trim()
@@ -1007,7 +1020,7 @@ export async function mailFolderMap(req: HttpRequest, context: InvocationContext
       [owner, folderId, folderPath, roleKey, skipFilter]
     )
     return { status: 200, headers: HEADERS, jsonBody: { ok: true, folderId, roleKey, skipFilter } }
-  } catch (err) { return { status: 200, headers: HEADERS, jsonBody: { error: String(err) } } }
+  } catch (err) { return { status: 500, headers: HEADERS, jsonBody: { error: String(err) } } }
   finally { try { await client?.end() } catch {} }
 }
 
@@ -1017,6 +1030,7 @@ export async function mailFolderMapDelete(req: HttpRequest, context: InvocationC
   if (req.method === 'OPTIONS') return { status: 204, headers: HEADERS }
   let client
   try {
+    const guard = requireWrite(req); if (guard) return guard
     const owner = resolveOwner(req).owner
     const body = (await req.json().catch(() => ({}))) as any
     const folderId = String(body?.folderId || '').trim()
@@ -1028,7 +1042,7 @@ export async function mailFolderMapDelete(req: HttpRequest, context: InvocationC
       ? await client.query(`delete from folder_role_map where owner_email=$1 and folder_id=$2 and role_key=$3`, [owner, folderId, roleKey])
       : await client.query(`delete from folder_role_map where owner_email=$1 and folder_id=$2`, [owner, folderId])
     return { status: 200, headers: HEADERS, jsonBody: { ok: true, removed: r.rowCount ?? 0 } }
-  } catch (err) { return { status: 200, headers: HEADERS, jsonBody: { error: String(err) } } }
+  } catch (err) { return { status: 500, headers: HEADERS, jsonBody: { error: String(err) } } }
   finally { try { await client?.end() } catch {} }
 }
 
@@ -1041,6 +1055,7 @@ export async function mailSelfTest(req: HttpRequest, context: InvocationContext)
   let cfg: WatchConfig | null = null
   const owner = resolveOwner(req).owner
   try {
+    const guard = requireWrite(req); if (guard) return guard
     // 1. Config loads from Postgres
     try { cfg = await loadConfig(owner); add('Config store (Postgres)', true, `owner ${owner}, mailbox ${cfg.mailbox}, folder ${cfg.folderName}`) }
     catch (e) { add('Config store (Postgres)', false, String(e)) }
@@ -1103,11 +1118,12 @@ export async function mailSelfTest(req: HttpRequest, context: InvocationContext)
 export async function mailIngestTest(req: HttpRequest, context: InvocationContext): Promise<HttpResponseInit> {
   if (req.method === 'OPTIONS') return { status: 204, headers: HEADERS }
   try {
+    const guard = requireWrite(req); if (guard) return guard
     const text = (await req.json().catch(() => ({})) as any)?.text
     if (!text || text.length < 20) return { status: 400, headers: HEADERS, jsonBody: { error: 'text required' } }
     const cfg = await loadConfig()
     return { status: 200, headers: HEADERS, jsonBody: await ingestText(text, cfg.ownerEmail) }
-  } catch (err) { return { status: 200, headers: HEADERS, jsonBody: { error: String(err) } } }
+  } catch (err) { return { status: 500, headers: HEADERS, jsonBody: { error: String(err) } } }
 }
 
 // Timer: renew subscriptions nearing expiry + fallback poll for missed alerts.
@@ -1143,6 +1159,7 @@ export async function mailSendTest(req: HttpRequest, context: InvocationContext)
   const creds = graphCreds()
   if (!creds.clientId || !creds.clientSecret) return { status: 200, headers: HEADERS, jsonBody: { error: 'MICROSOFT creds not set' } }
   try {
+    const guard = requireWrite(req); if (guard) return guard
     const cfg = await loadConfig()
     const body = (await req.json().catch(() => ({}))) as any
     const sender = body?.from || process.env.MAIL_SENDER || 'dev@enterpriseds.io'
@@ -1172,7 +1189,7 @@ export async function mailSendTest(req: HttpRequest, context: InvocationContext)
     })
     const detail = res.ok ? 'sent (202)' : `HTTP ${res.status}: ${(await res.text()).slice(0, 400)}`
     return { status: 200, headers: HEADERS, jsonBody: { ok: res.ok, from: sender, to, subject, detail } }
-  } catch (err) { return { status: 200, headers: HEADERS, jsonBody: { error: String(err) } } }
+  } catch (err) { return { status: 500, headers: HEADERS, jsonBody: { error: String(err) } } }
 }
 
 // A few well-known Greenhouse boards to pull a REAL random posting from.
@@ -1247,6 +1264,7 @@ export async function mailSendTestReal(req: HttpRequest, context: InvocationCont
   const creds = graphCreds()
   if (!creds.clientId || !creds.clientSecret) return { status: 200, headers: HEADERS, jsonBody: { error: 'MICROSOFT creds not set' } }
   try {
+    const guard = requireWrite(req); if (guard) return guard
     const body = (await req.json().catch(() => ({}))) as any
     const cfg = await loadConfig()
     const sender = body?.from || process.env.MAIL_SENDER || 'dev@enterpriseds.io'
@@ -1268,7 +1286,7 @@ export async function mailSendTestReal(req: HttpRequest, context: InvocationCont
     })
     const detail = res.ok ? 'sent (202)' : `HTTP ${res.status}: ${(await res.text()).slice(0, 300)}`
     return { status: 200, headers: HEADERS, jsonBody: { ok: res.ok, source, from: sender, to, subject, jobs, count: jobs.length, detail, note: `Realistic ${source} alert emailed to the watched mailbox. Run "pull inbox now" or wait for the watcher to ingest it.` } }
-  } catch (err) { return { status: 200, headers: HEADERS, jsonBody: { error: String(err) } } }
+  } catch (err) { return { status: 500, headers: HEADERS, jsonBody: { error: String(err) } } }
 }
 
 // Collect all messages matching a Graph URL, following @odata.nextLink pages.
@@ -1292,6 +1310,7 @@ export async function mailPollNow(req: HttpRequest, context: InvocationContext):
   const creds = graphCreds()
   if (!creds.clientId || !creds.clientSecret) return { status: 200, headers: HEADERS, jsonBody: { error: 'MICROSOFT creds not set' } }
   try {
+    const guard = requireWrite(req); if (guard) return guard
     const owner = resolveOwner(req).owner
     const cfg = await loadConfig(owner)
     const minutes = Number((await req.json().catch(() => ({})) as any)?.minutes) || 60
@@ -1305,7 +1324,7 @@ export async function mailPollNow(req: HttpRequest, context: InvocationContext):
       trace.push({ subject: m.subject, from: m?.from?.emailAddress?.address, received: m.receivedDateTime, result: r })
     }
     return { status: 200, headers: HEADERS, jsonBody: { ok: true, mailbox: cfg.mailbox, folder: cfg.folderName, scanned: msgs.length, trace } }
-  } catch (err) { return { status: 200, headers: HEADERS, jsonBody: { error: String(err) } } }
+  } catch (err) { return { status: 500, headers: HEADERS, jsonBody: { error: String(err) } } }
 }
 
 // POST /api/mail/clear-reload { days? } — wipe stale opportunities for the owner and
@@ -1316,6 +1335,7 @@ export async function mailClearReload(req: HttpRequest, context: InvocationConte
   const creds = graphCreds()
   if (!creds.clientId || !creds.clientSecret) return { status: 200, headers: HEADERS, jsonBody: { error: 'MICROSOFT creds not set' } }
   try {
+    const guard = requireWrite(req); if (guard) return guard
     const { owner } = resolveOwner(req)
     const cfg = await loadConfig(owner)
     const days = Math.max(1, Math.min(Number((await req.json().catch(() => ({})) as any)?.days) || 7, 30))
@@ -1344,7 +1364,7 @@ export async function mailClearReload(req: HttpRequest, context: InvocationConte
     }
 
     return { status: 200, headers: HEADERS, jsonBody: { ok: true, owner: cfg.ownerEmail, mailbox: cfg.mailbox, days, cleared, scanned: msgs.length, ingested: { parsed, inserted } } }
-  } catch (err) { return { status: 200, headers: HEADERS, jsonBody: { error: String(err) } } }
+  } catch (err) { return { status: 500, headers: HEADERS, jsonBody: { error: String(err) } } }
 }
 
 app.http('mailNotify', { methods: ['GET', 'POST'], authLevel: 'anonymous', route: 'mail/notify', handler: mailNotify })

@@ -1,5 +1,5 @@
 import { app, HttpRequest, HttpResponseInit, InvocationContext } from '@azure/functions'
-import { resolveOwner } from './appSession'
+import { resolveOwner, requireWrite } from './appSession'
 import { getPgClient } from './pgClient'
 import { getGoogleOAuthToken, HAS_GOOGLE_OAUTH } from './googleAuth'
 import { logUsage } from './usageMeter'
@@ -73,7 +73,7 @@ export async function packetGet(req: HttpRequest, context: InvocationContext): P
     const { pkt, artifacts } = await loadPacket(client, oppId)
     return { status: 200, headers: HEADERS, jsonBody: { company: opp.company, role: opp.role, ...packetShape(pkt, artifacts) } }
   } catch (err) {
-    return { status: 200, headers: HEADERS, jsonBody: { error: String(err) } }
+    return { status: 500, headers: HEADERS, jsonBody: { error: String(err) } }
   } finally { try { await client?.end() } catch {} }
 }
 
@@ -101,7 +101,7 @@ export async function packetsList(req: HttpRequest, context: InvocationContext):
       status: r.status, atsScore: r.ats_score, approved: Number(r.approved), total: Number(r.total)
     })) } }
   } catch (err) {
-    return { status: 200, headers: HEADERS, jsonBody: { error: String(err) } }
+    return { status: 500, headers: HEADERS, jsonBody: { error: String(err) } }
   } finally { try { await client?.end() } catch {} }
 }
 
@@ -120,6 +120,7 @@ export async function artifactGenerate(req: HttpRequest, context: InvocationCont
   const key = process.env.OPENAI_API_KEY
   let client
   try {
+    const guard = requireWrite(req); if (guard) return guard
     client = await getPgClient()
     await ensureContentColumn(client)
     const art = (await client.query(`select a.*, p.opp_id from artifact a join packet p on p.id = a.packet_id where a.id = $1`, [artifactId])).rows[0]
@@ -150,7 +151,7 @@ export async function artifactGenerate(req: HttpRequest, context: InvocationCont
     const status = await recomputePacket(client, art.packet_id)
     return { status: 200, headers: HEADERS, jsonBody: { ok: true, artifactId, type: art.type, artifactStatus: 'review', packetStatus: status, content, promptSentToAI: { model: 'gpt-4o-mini', system, user } } }
   } catch (err) {
-    return { status: 200, headers: HEADERS, jsonBody: { error: String(err) } }
+    return { status: 500, headers: HEADERS, jsonBody: { error: String(err) } }
   } finally { try { await client?.end() } catch {} }
 }
 
@@ -160,6 +161,7 @@ export async function artifactStatus(req: HttpRequest, context: InvocationContex
   const artifactId = req.params.artifactId
   let client
   try {
+    const guard = requireWrite(req); if (guard) return guard
     const body = await req.json() as any
     const status = body?.status
     if (!ARTIFACT_STATUSES.includes(status)) return { status: 400, headers: HEADERS, jsonBody: { error: `invalid status; one of ${ARTIFACT_STATUSES.join(', ')}` } }
@@ -169,7 +171,7 @@ export async function artifactStatus(req: HttpRequest, context: InvocationContex
     const packetStatus = await recomputePacket(client, art.packet_id)
     return { status: 200, headers: HEADERS, jsonBody: { ok: true, artifactId, artifactStatus: status, packetStatus } }
   } catch (err) {
-    return { status: 200, headers: HEADERS, jsonBody: { error: String(err) } }
+    return { status: 500, headers: HEADERS, jsonBody: { error: String(err) } }
   } finally { try { await client?.end() } catch {} }
 }
 
@@ -242,6 +244,7 @@ export async function artifactDocument(req: HttpRequest, context: InvocationCont
   const artifactId = req.params.artifactId
   let client
   try {
+    const guard = requireWrite(req); if (guard) return guard
     if (!HAS_GOOGLE_OAUTH) return { status: 200, headers: HEADERS, jsonBody: { error: 'GOOGLE_REFRESH_TOKEN not set — run the Google consent flow first (owns Drive quota).' } }
     client = await getPgClient()
     await ensureContentColumn(client)
@@ -291,7 +294,7 @@ export async function artifactDocument(req: HttpRequest, context: InvocationCont
     await client.query(`update artifact set doc_url = $1, updated_at = now() where id = $2`, [docUrl, artifactId])
     return { status: 200, headers: HEADERS, jsonBody: { ok: true, artifactId, type: art.type, docUrl, title } }
   } catch (err) {
-    return { status: 200, headers: HEADERS, jsonBody: { error: String(err) } }
+    return { status: 500, headers: HEADERS, jsonBody: { error: String(err) } }
   } finally { try { await client?.end() } catch {} }
 }
 
@@ -317,6 +320,7 @@ export async function artifactSlides(req: HttpRequest, context: InvocationContex
   const artifactId = req.params.artifactId
   let client
   try {
+    const guard = requireWrite(req); if (guard) return guard
     if (!HAS_GOOGLE_OAUTH) return { status: 200, headers: HEADERS, jsonBody: { error: 'GOOGLE_REFRESH_TOKEN not set — run the Google consent flow first.' } }
     client = await getPgClient()
     await ensureContentColumn(client)
@@ -393,7 +397,7 @@ export async function artifactSlides(req: HttpRequest, context: InvocationContex
     await client.query(`update artifact set doc_url = $1, updated_at = now() where id = $2`, [deckUrl, artifactId])
     return { status: 200, headers: HEADERS, jsonBody: { ok: true, artifactId, type: art.type, deckUrl, slides: sections.length + 1, title } }
   } catch (err) {
-    return { status: 200, headers: HEADERS, jsonBody: { error: String(err) } }
+    return { status: 500, headers: HEADERS, jsonBody: { error: String(err) } }
   } finally { try { await client?.end() } catch {} }
 }
 
@@ -416,6 +420,7 @@ export async function packetBuildAll(req: HttpRequest, context: InvocationContex
   let body: any = {}; try { body = await req.json() } catch {}
   let client
   try {
+    const guard = requireWrite(req); if (guard) return guard
     if (!HAS_GOOGLE_OAUTH) return { status: 200, headers: HEADERS, jsonBody: { error: 'GOOGLE_REFRESH_TOKEN not set' } }
     client = await getPgClient(); await ensureContentColumn(client)
     const opp = (await client.query(`select company, role, comp_range, why_surfaced, company_signals, pain_hypotheses, persona_key from opportunity where id = $1`, [oppId])).rows[0]
@@ -435,7 +440,7 @@ export async function packetBuildAll(req: HttpRequest, context: InvocationContex
     if (body?.draftOutreach === true) { const r = await selfPost(`app/opportunity/${oppId}/outreach/generate?owner=${encodeURIComponent(owner)}`, { channel: 'coldEmail' }); outreachDrafted = !r?.error }
     return { status: 200, headers: HEADERS, jsonBody: { ok: true, oppId, company: opp.company, artifacts: results, packetStatus, cadenceSeeded, outreachDrafted, sent: false, note: 'Packet built. Nothing was sent.' } }
   } catch (err) {
-    return { status: 200, headers: HEADERS, jsonBody: { error: String(err) } }
+    return { status: 500, headers: HEADERS, jsonBody: { error: String(err) } }
   } finally { try { await client?.end() } catch {} }
 }
 
@@ -447,6 +452,7 @@ export async function jdAnalysis(req: HttpRequest, context: InvocationContext): 
   const key = process.env.OPENAI_API_KEY
   let client
   try {
+    const guard = requireWrite(req); if (guard) return guard
     if (!key) return { status: 200, headers: HEADERS, jsonBody: { error: 'OPENAI_API_KEY not set' } }
     client = await getPgClient(); await ensureContentColumn(client)
     const opp = (await client.query(`select company, role, comp_range, why_surfaced, company_signals, pain_hypotheses from opportunity where id = $1`, [oppId])).rows[0]
@@ -464,7 +470,7 @@ export async function jdAnalysis(req: HttpRequest, context: InvocationContext): 
     await client.query(`update packet set jd_analyzed = true, ats_score = $1, covered_kw = $2, updated_at = now() where id = $3`, [ats, kws, pkt.id])
     return { status: 200, headers: HEADERS, jsonBody: { ok: true, oppId, analysis: { keywords: kws, mustHaves: a.mustHaves || [], atsScore: ats, gaps: a.gaps || [] } } }
   } catch (err) {
-    return { status: 200, headers: HEADERS, jsonBody: { error: String(err) } }
+    return { status: 500, headers: HEADERS, jsonBody: { error: String(err) } }
   } finally { try { await client?.end() } catch {} }
 }
 
@@ -476,6 +482,7 @@ export async function opportunityEnrich(req: HttpRequest, context: InvocationCon
   const key = process.env.OPENAI_API_KEY
   let client
   try {
+    const guard = requireWrite(req); if (guard) return guard
     if (!key) return { status: 200, headers: HEADERS, jsonBody: { error: 'OPENAI_API_KEY not set' } }
     client = await getPgClient()
     const opp = (await client.query(`select company, role, why_surfaced from opportunity where id = $1`, [oppId])).rows[0]
@@ -492,7 +499,7 @@ export async function opportunityEnrich(req: HttpRequest, context: InvocationCon
     await client.query(`update opportunity set company_signals = $1::jsonb, pain_hypotheses = $2::jsonb, updated_at = now() where id = $3`, [JSON.stringify(signals), JSON.stringify(pains), oppId])
     return { status: 200, headers: HEADERS, jsonBody: { ok: true, oppId, enrichment: { companySignals: signals, stakeholders: a.stakeholders || [], painHypotheses: pains } } }
   } catch (err) {
-    return { status: 200, headers: HEADERS, jsonBody: { error: String(err) } }
+    return { status: 500, headers: HEADERS, jsonBody: { error: String(err) } }
   } finally { try { await client?.end() } catch {} }
 }
 

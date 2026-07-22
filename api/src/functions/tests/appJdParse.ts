@@ -1,5 +1,5 @@
 import { app, HttpRequest, HttpResponseInit, InvocationContext, Timer } from '@azure/functions'
-import { resolveOwner } from './appSession'
+import { resolveOwner, requireWrite, serverError } from './appSession'
 import { getPgClient } from './pgClient'
 import { logUsage } from './usageMeter'
 
@@ -94,6 +94,7 @@ export async function jdParse(req: HttpRequest, context: InvocationContext): Pro
   const key = process.env.OPENAI_API_KEY
   let client
   try {
+    const guard = requireWrite(req); if (guard) return guard
     if (!key) return { status: 200, headers: HEADERS, jsonBody: { error: 'OPENAI_API_KEY not set' } }
     client = await getPgClient()
     await ensureJdColumns(client)
@@ -132,7 +133,7 @@ export async function jdParse(req: HttpRequest, context: InvocationContext): Pro
     )
     return { status: 200, headers: HEADERS, jsonBody: { ok: true, oppId, jdTitle: parsed.jdTitle, jdCompany: parsed.jdCompany } }
   } catch (err) {
-    return { status: 200, headers: HEADERS, jsonBody: { error: String(err) } }
+    return { status: 500, headers: HEADERS, jsonBody: { error: String(err) } }
   } finally { try { await client?.end() } catch {} }
 }
 
@@ -145,6 +146,7 @@ export async function jdBackfill(req: HttpRequest, context: InvocationContext): 
   const days = parseInt(req.query.get('days') || '7', 10)
   let client
   try {
+    const guard = requireWrite(req); if (guard) return guard
     if (!key) return { status: 200, headers: HEADERS, jsonBody: { error: 'OPENAI_API_KEY not set' } }
     client = await getPgClient()
     await ensureJdColumns(client)
@@ -200,7 +202,7 @@ export async function jdBackfill(req: HttpRequest, context: InvocationContext): 
     const failed = results.filter((r) => !r.ok).length
     return { status: 200, headers: HEADERS, jsonBody: { ok: true, total: rows.length, succeeded: ok, failed, results } }
   } catch (err) {
-    return { status: 200, headers: HEADERS, jsonBody: { error: String(err) } }
+    return { status: 500, headers: HEADERS, jsonBody: { error: String(err) } }
   } finally { try { await client?.end() } catch {} }
 }
 

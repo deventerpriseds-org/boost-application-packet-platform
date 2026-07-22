@@ -50,8 +50,39 @@ export function resolveOwner(req: HttpRequest): { owner: string; verified: boole
     const v = verifySession(m[1].trim(), Math.floor(Date.now() / 1000))
     if (v?.email) return { owner: v.email, verified: true }
   }
+  // UAT bypass for automated testing — never OAuth. Matches the eds-skills verifier convention
+  // (X-UAT-Token: <UAT_BYPASS_TOKEN>). Only active when UAT_BYPASS_TOKEN is set on the Function
+  // App; lets the Playwright verifier / api-test act as a real owner (?owner=) without a sign-in.
+  const uat = req.headers.get('x-uat-token') || ''
+  const expected = process.env.UAT_BYPASS_TOKEN || ''
+  if (uat && expected) {
+    const a = Buffer.from(uat), b = Buffer.from(expected)
+    // Owner precedence: explicit ?owner= (test any account) → UAT_USER (documented default) → demo.
+    if (a.length === b.length && timingSafeEqual(a, b)) return { owner: req.query.get('owner') || process.env.UAT_USER || DEMO_EMAIL, verified: true }
+  }
   return { owner: req.query.get('owner') || DEMO_EMAIL, verified: false }
 }
+
+// Guard for owner-scoped MUTATIONS. A write is allowed when the request is verified
+// (valid session token) OR it targets the shared demo workspace (open sandbox). A write
+// to a REAL owner without a verified session is rejected — this closes the ?owner= spoof
+// on mutating routes while keeping (a) unauthenticated demo-mode exploration and
+// (b) programmatic testing (api-test.yml mints a session token) fully working.
+// Returns an HttpResponseInit to return immediately, or null to proceed.
+export function requireWrite(req: HttpRequest): HttpResponseInit | null {
+  const { owner, verified } = resolveOwner(req)
+  if (verified || owner === DEMO_EMAIL) return null
+  return { status: 401, headers: HEADERS, jsonBody: { error: 'sign in required to modify this workspace', owner } }
+}
+
+// Standard 5xx for a genuine server/integration failure (DB down, upstream error, unexpected
+// exception). Use in catch blocks instead of returning 200-with-error so uptime monitors and
+// status-code clients see the failure. Business/validation errors should still use 400/404.
+export function serverError(err: unknown, extraHeaders?: Record<string, string>): HttpResponseInit {
+  return { status: 500, headers: { ...HEADERS, ...(extraHeaders || {}) }, jsonBody: { error: String(err) } }
+}
+
+export { DEMO_EMAIL }
 
 // POST /api/auth/session { msAccessToken } — verify a Microsoft Graph access token
 // via /me, then mint a session token. (Google mints via /auth/google/token.)

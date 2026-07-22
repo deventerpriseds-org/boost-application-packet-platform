@@ -1,5 +1,5 @@
 import { app, HttpRequest, HttpResponseInit, InvocationContext } from '@azure/functions'
-import { resolveOwner } from './appSession'
+import { resolveOwner, requireWrite, serverError } from './appSession'
 import { getPgClient } from './pgClient'
 
 const HEADERS = {
@@ -98,6 +98,7 @@ export async function answersVision(req: HttpRequest, context: InvocationContext
   const key = process.env.OPENAI_API_KEY
   let client
   try {
+    const guard = requireWrite(req); if (guard) return guard
     const body = await req.json().catch(() => ({})) as any
     let img = (body?.imageBase64 || '').toString()
     img = img.replace(/^data:image\/\w+;base64,/, '')
@@ -128,7 +129,7 @@ export async function answersVision(req: HttpRequest, context: InvocationContext
     const answers = Array.isArray(parsed.answers) ? parsed.answers.filter((a: any) => a.question && a.answer) : []
     return { status: 200, headers: HEADERS, jsonBody: { ok: true, company: o.company, role: o.role, count: answers.length, answers } }
   } catch (err) {
-    return { status: 200, headers: HEADERS, jsonBody: { error: String(err) } }
+    return { status: 500, headers: HEADERS, jsonBody: { error: String(err) } }
   } finally { try { await client?.end() } catch {} }
 }
 
@@ -138,6 +139,7 @@ export async function personasCreate(req: HttpRequest, _context: InvocationConte
   const owner = resolveOwner(req).owner
   let client
   try {
+    const guard = requireWrite(req); if (guard) return guard
     const body = (await req.json().catch(() => ({}))) as any
     const key = (body?.key || '').toString().trim().toUpperCase().replace(/[^A-Z0-9_]/g, '').slice(0, 20)
     const name = (body?.name || '').toString().trim().slice(0, 100)
@@ -152,7 +154,7 @@ export async function personasCreate(req: HttpRequest, _context: InvocationConte
     )).rows[0]
     return { status: 200, headers: HEADERS, jsonBody: { ok: true, persona: { key: row.key, name: row.name, masterRole: row.master_role, compTarget: row.comp_target, positioning: row.positioning } } }
   } catch (err) {
-    return { status: 200, headers: HEADERS, jsonBody: { error: String(err) } }
+    return { status: 500, headers: HEADERS, jsonBody: { error: String(err) } }
   } finally { try { await client?.end() } catch {} }
 }
 
@@ -163,6 +165,7 @@ export async function personasUpdate(req: HttpRequest, _context: InvocationConte
   const key = req.params.key
   let client
   try {
+    const guard = requireWrite(req); if (guard) return guard
     const body = (await req.json().catch(() => ({}))) as any
     client = await getPgClient()
     const sets: string[] = [], vals: any[] = [owner, key]
@@ -175,7 +178,7 @@ export async function personasUpdate(req: HttpRequest, _context: InvocationConte
     if (!row) return { status: 404, headers: HEADERS, jsonBody: { error: 'persona not found' } }
     return { status: 200, headers: HEADERS, jsonBody: { ok: true, persona: { key: row.key, name: row.name, masterRole: row.master_role, compTarget: row.comp_target, positioning: row.positioning } } }
   } catch (err) {
-    return { status: 200, headers: HEADERS, jsonBody: { error: String(err) } }
+    return { status: 500, headers: HEADERS, jsonBody: { error: String(err) } }
   } finally { try { await client?.end() } catch {} }
 }
 
@@ -186,13 +189,14 @@ export async function personasDelete(req: HttpRequest, _context: InvocationConte
   const key = req.params.key
   let client
   try {
+    const guard = requireWrite(req); if (guard) return guard
     client = await getPgClient()
     await client.query(`delete from persona where owner_email=$1 and key=$2`, [owner, key])
     // Clear orphaned references in opportunities
     await client.query(`update opportunity set roles_for=array_remove(roles_for,$2) where owner_email=$1`, [owner, key])
     return { status: 200, headers: HEADERS, jsonBody: { ok: true } }
   } catch (err) {
-    return { status: 200, headers: HEADERS, jsonBody: { error: String(err) } }
+    return { status: 500, headers: HEADERS, jsonBody: { error: String(err) } }
   } finally { try { await client?.end() } catch {} }
 }
 
@@ -204,6 +208,7 @@ export async function personasTagAll(req: HttpRequest, _context: InvocationConte
   if (!openaiKey) return { status: 200, headers: HEADERS, jsonBody: { error: 'OPENAI_API_KEY not set' } }
   let client
   try {
+    const guard = requireWrite(req); if (guard) return guard
     client = await getPgClient()
     const personas = (await client.query(
       `select key, name, master_role from persona where owner_email = $1 order by key`, [owner]
@@ -245,7 +250,7 @@ export async function personasTagAll(req: HttpRequest, _context: InvocationConte
     }
     return { status: 200, headers: HEADERS, jsonBody: { tagged, failed, total: opps.length, message: `Tagged ${tagged} of ${opps.length} opportunities.` } }
   } catch (err) {
-    return { status: 200, headers: HEADERS, jsonBody: { error: String(err) } }
+    return { status: 500, headers: HEADERS, jsonBody: { error: String(err) } }
   } finally { try { await client?.end() } catch {} }
 }
 

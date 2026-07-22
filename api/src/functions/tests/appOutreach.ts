@@ -1,5 +1,5 @@
 import { app, HttpRequest, HttpResponseInit, InvocationContext, Timer } from '@azure/functions'
-import { resolveOwner } from './appSession'
+import { resolveOwner, requireWrite } from './appSession'
 import { getPgClient } from './pgClient'
 import { getMicrosoftToken } from './googleAuth'
 import { logUsage } from './usageMeter'
@@ -71,7 +71,7 @@ export async function outreachList(req: HttpRequest, context: InvocationContext)
     )).rows
     return { status: 200, headers: HEADERS, jsonBody: { company: opp.company, role: opp.role, channels: Object.entries(CHANNELS).map(([id, c]) => ({ id, label: c.label, limit: c.limit })), tones: TONES, messages: rows.map(msgShape) } }
   } catch (err) {
-    return { status: 200, headers: HEADERS, jsonBody: { error: String(err) } }
+    return { status: 500, headers: HEADERS, jsonBody: { error: String(err) } }
   } finally { try { await client?.end() } catch {} }
 }
 
@@ -82,6 +82,7 @@ export async function outreachGenerate(req: HttpRequest, context: InvocationCont
   const key = process.env.OPENAI_API_KEY
   let client
   try {
+    const guard = requireWrite(req); if (guard) return guard
     const body = await req.json() as any
     const channel = body?.channel
     const tone = TONES.includes(body?.tone) ? body.tone : 'Direct'
@@ -116,7 +117,7 @@ export async function outreachGenerate(req: HttpRequest, context: InvocationCont
     )).rows[0]
     return { status: 200, headers: HEADERS, jsonBody: { ok: true, message: msgShape(inserted), chars: text.length, withinLimit: text.length <= ch.limit, promptSentToAI: { model: 'gpt-4o-mini', system, user } } }
   } catch (err) {
-    return { status: 200, headers: HEADERS, jsonBody: { error: String(err) } }
+    return { status: 500, headers: HEADERS, jsonBody: { error: String(err) } }
   } finally { try { await client?.end() } catch {} }
 }
 
@@ -126,6 +127,7 @@ export async function outreachState(req: HttpRequest, context: InvocationContext
   const messageId = req.params.messageId
   let client
   try {
+    const guard = requireWrite(req); if (guard) return guard
     const body = await req.json() as any
     const state = body?.state
     if (!STATES.includes(state)) return { status: 400, headers: HEADERS, jsonBody: { error: `invalid state; one of ${STATES.join(', ')}` } }
@@ -135,7 +137,7 @@ export async function outreachState(req: HttpRequest, context: InvocationContext
     if (!r) return { status: 404, headers: HEADERS, jsonBody: { error: 'message not found' } }
     return { status: 200, headers: HEADERS, jsonBody: { ok: true, message: msgShape(r) } }
   } catch (err) {
-    return { status: 200, headers: HEADERS, jsonBody: { error: String(err) } }
+    return { status: 500, headers: HEADERS, jsonBody: { error: String(err) } }
   } finally { try { await client?.end() } catch {} }
 }
 
@@ -156,6 +158,7 @@ export async function cadenceSeed(req: HttpRequest, context: InvocationContext):
   const oppId = req.params.id
   let client
   try {
+    const guard = requireWrite(req); if (guard) return guard
     client = await getPgClient()
     const opp = (await client.query(`select id from opportunity where id = $1`, [oppId])).rows[0]
     if (!opp) return { status: 404, headers: HEADERS, jsonBody: { error: 'opportunity not found' } }
@@ -172,7 +175,7 @@ export async function cadenceSeed(req: HttpRequest, context: InvocationContext):
     const rows = (await client.query(`select * from outreach_message where opp_id = $1 order by coalesce(day_offset, 999), created_at`, [oppId])).rows
     return { status: 200, headers: HEADERS, jsonBody: { ok: true, seeded: existing === 0, messages: rows.map(msgShape) } }
   } catch (err) {
-    return { status: 200, headers: HEADERS, jsonBody: { error: String(err) } }
+    return { status: 500, headers: HEADERS, jsonBody: { error: String(err) } }
   } finally { try { await client?.end() } catch {} }
 }
 
@@ -192,7 +195,7 @@ export async function outreachQueue(req: HttpRequest, context: InvocationContext
     )).rows
     return { status: 200, headers: HEADERS, jsonBody: { count: rows.length, messages: rows.map((m: any) => ({ ...msgShape(m), company: m.company, role: m.role })) } }
   } catch (err) {
-    return { status: 200, headers: HEADERS, jsonBody: { error: String(err) } }
+    return { status: 500, headers: HEADERS, jsonBody: { error: String(err) } }
   } finally { try { await client?.end() } catch {} }
 }
 
@@ -204,6 +207,7 @@ export async function outreachSend(req: HttpRequest, context: InvocationContext)
   const messageId = req.params.messageId
   let client
   try {
+    const guard = requireWrite(req); if (guard) return guard
     const body = (await req.json().catch(() => ({}))) as any
     client = await getPgClient()
     await ensureOutreachCols(client)
@@ -248,7 +252,7 @@ export async function outreachSend(req: HttpRequest, context: InvocationContext)
     )).rows[0]
     return { status: 200, headers: HEADERS, jsonBody: { ok: true, delivered: true, from: sender, to, subject, message: msgShape(updated) } }
   } catch (err) {
-    return { status: 200, headers: HEADERS, jsonBody: { error: String(err) } }
+    return { status: 500, headers: HEADERS, jsonBody: { error: String(err) } }
   } finally { try { await client?.end() } catch {} }
 }
 
@@ -277,11 +281,12 @@ export async function outreachTickNow(req: HttpRequest, context: InvocationConte
   if (req.method === 'OPTIONS') return { status: 204, headers: HEADERS }
   let client
   try {
+    const guard = requireWrite(req); if (guard) return guard
     client = await getPgClient()
     await ensureOutreachCols(client)
     const promoted = await promoteDue(client)
     return { status: 200, headers: HEADERS, jsonBody: { ok: true, promoted } }
-  } catch (err) { return { status: 200, headers: HEADERS, jsonBody: { error: String(err) } } } finally { try { await client?.end() } catch {} }
+  } catch (err) { return { status: 500, headers: HEADERS, jsonBody: { error: String(err) } } } finally { try { await client?.end() } catch {} }
 }
 
 app.http('outreachList', { methods: ['GET', 'OPTIONS'], authLevel: 'anonymous', route: 'app/opportunity/{id}/outreach', handler: outreachList })

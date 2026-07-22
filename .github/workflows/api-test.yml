@@ -29,30 +29,31 @@ jobs:
           API_BODY: ${{ github.event.inputs.body }}
         run: |
           python3 - <<'PYEOF'
-          import os, json, urllib.request, urllib.parse
+          import os, json, urllib.request, urllib.parse, hmac, hashlib, base64, time, re
 
-          tenant = os.environ['AZURE_TENANT_ID']
-          client_id = os.environ['AZURE_CLIENT_ID']
           client_secret = os.environ['AZURE_CLIENT_SECRET']
           method = os.environ.get('API_METHOD', 'GET')
           path = os.environ['API_PATH']
           body = os.environ.get('API_BODY', '')
 
-          token_url = f"https://login.microsoftonline.com/{tenant}/oauth2/v2.0/token"
-          token_data = urllib.parse.urlencode({
-            'client_id': client_id,
-            'client_secret': client_secret,
-            'scope': f'{client_id}/.default',
-            'grant_type': 'client_credentials',
-          }).encode()
-          req = urllib.request.Request(token_url, data=token_data, method='POST')
-          with urllib.request.urlopen(req) as resp:
-            token_resp = json.loads(resp.read())
-          token = token_resp.get('access_token')
-          if not token:
-            print('ERROR: token fetch failed:', json.dumps(token_resp, indent=2))
-            exit(1)
-          print(f'Token acquired (expires_in={token_resp.get("expires_in")}s)')
+          # Mint a server-verified session token (same scheme as the API's signSession):
+          # HMAC-SHA256 over base64url(header).base64url(payload) with the app's signing secret.
+          # The Function signs with SESSION_SIGNING_SECRET || MICROSOFT_CLIENT_SECRET (== AZURE_CLIENT_SECRET,
+          # which we have here), so this token verifies server-side and marks the request as an
+          # authenticated owner — programmatic testing without an interactive OAuth sign-in. The owner
+          # is taken from ?owner= in the path (default: the production owner).
+          def b64url(b):
+            if isinstance(b, str): b = b.encode()
+            return base64.urlsafe_b64encode(b).decode().rstrip('=')
+          m = re.search(r'[?&]owner=([^&]+)', path)
+          owner = urllib.parse.unquote(m.group(1)) if m else 'von.ellis@enterpriseds.io'
+          now = int(time.time())
+          header = b64url(json.dumps({'alg': 'HS256', 'typ': 'JWT'}, separators=(',', ':')))
+          payload = b64url(json.dumps({'email': owner, 'provider': 'api-test', 'iat': now, 'exp': now + 12 * 3600}, separators=(',', ':')))
+          signing_input = f'{header}.{payload}'
+          sig = b64url(hmac.new(client_secret.encode(), signing_input.encode(), hashlib.sha256).digest())
+          token = f'{signing_input}.{sig}'
+          print(f'Minted session token for owner={owner}')
 
           base = 'https://job-platform-api.azurewebsites.net'
           url = base + path

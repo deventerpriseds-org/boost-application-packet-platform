@@ -1,5 +1,5 @@
 import { app, HttpRequest, HttpResponseInit, InvocationContext, Timer } from '@azure/functions'
-import { resolveOwner } from './appSession'
+import { resolveOwner, requireWrite } from './appSession'
 import { getPgClient } from './pgClient'
 import { routeOpportunity } from './mailWatch'
 
@@ -65,6 +65,7 @@ export async function atsSources(req: HttpRequest): Promise<HttpResponseInit> {
   try {
     client = await getPgClient(); await ensureTable(client)
     if (req.method === 'POST') {
+      const guard = requireWrite(req); if (guard) return guard
       const body = await req.json() as any
       const provider = String(body?.provider || '').toLowerCase()
       const board = String(body?.board || '').trim()
@@ -77,7 +78,7 @@ export async function atsSources(req: HttpRequest): Promise<HttpResponseInit> {
     }
     const { rows } = await client.query(`select id, provider, board, enabled, last_run from ats_source where owner_email = $1 order by provider, board`, [owner])
     return { status: 200, headers: HEADERS, jsonBody: { sources: rows, providers: PROVIDERS } }
-  } catch (err) { return { status: 200, headers: HEADERS, jsonBody: { error: String(err) } } }
+  } catch (err) { return { status: 500, headers: HEADERS, jsonBody: { error: String(err) } } }
   finally { try { await client?.end() } catch {} }
 }
 
@@ -87,12 +88,13 @@ export async function atsSourceDelete(req: HttpRequest): Promise<HttpResponseIni
   const owner = resolveOwner(req).owner
   let client
   try {
+    const guard = requireWrite(req); if (guard) return guard
     const body = await req.json() as any
     if (!body?.id) return { status: 400, headers: HEADERS, jsonBody: { error: 'id required' } }
     client = await getPgClient(); await ensureTable(client)
     await client.query(`delete from ats_source where id = $1 and owner_email = $2`, [body.id, owner])
     return { status: 200, headers: HEADERS, jsonBody: { ok: true } }
-  } catch (err) { return { status: 200, headers: HEADERS, jsonBody: { error: String(err) } } }
+  } catch (err) { return { status: 500, headers: HEADERS, jsonBody: { error: String(err) } } }
   finally { try { await client?.end() } catch {} }
 }
 
@@ -107,7 +109,7 @@ export async function atsPreview(req: HttpRequest): Promise<HttpResponseInit> {
     const jobs = await fetchBoard(provider, board)
     const exec = jobs.filter((j) => isExecRole(j.role))
     return { status: 200, headers: HEADERS, jsonBody: { total: jobs.length, execRoles: exec.length, sample: exec.slice(0, 8) } }
-  } catch (err) { return { status: 200, headers: HEADERS, jsonBody: { error: String(err) } } }
+  } catch (err) { return { status: 500, headers: HEADERS, jsonBody: { error: String(err) } } }
 }
 
 // Run ingestion for a set of sources under one owner. Shared by the HTTP endpoint and the
@@ -140,6 +142,7 @@ export async function atsIngest(req: HttpRequest, context: InvocationContext): P
   const owner = resolveOwner(req).owner
   let client
   try {
+    const guard = requireWrite(req); if (guard) return guard
     const body = await req.json().catch(() => ({})) as any
     const execOnly = body?.execOnly !== false
     client = await getPgClient(); await ensureTable(client)
@@ -154,7 +157,7 @@ export async function atsIngest(req: HttpRequest, context: InvocationContext): P
 
     const r = await ingestSources(client, owner, sources, execOnly)
     return { status: 200, headers: HEADERS, jsonBody: { ok: true, scanned: r.scanned, inserted: r.inserted, duplicates: r.dupes, sources: r.perSource } }
-  } catch (err) { return { status: 200, headers: HEADERS, jsonBody: { error: String(err) } } }
+  } catch (err) { return { status: 500, headers: HEADERS, jsonBody: { error: String(err) } } }
   finally { try { await client?.end() } catch {} }
 }
 

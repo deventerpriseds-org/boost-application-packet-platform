@@ -1,5 +1,5 @@
 import { app, HttpRequest, HttpResponseInit, InvocationContext } from '@azure/functions'
-import { resolveOwner } from './appSession'
+import { resolveOwner, requireWrite } from './appSession'
 import { coachToolSchemas, executeCoachTool } from './coachTools'
 import { bootstrapMemory, listMemory, recall, remember, deleteMemory, getPool } from './coachMemory'
 
@@ -193,6 +193,7 @@ export async function coachChat(req: HttpRequest, context: InvocationContext): P
   const key = process.env.OPENAI_API_KEY
   if (!key) return { status: 200, headers: HEADERS, jsonBody: { error: 'OPENAI_API_KEY not set' } }
   try {
+    const guard = requireWrite(req); if (guard) return guard
     const body = await req.json() as any
     const _ro = resolveOwner(req); const owner = _ro.verified ? _ro.owner : (body?.owner || DEMO_EMAIL).toString()
     const history = Array.isArray(body?.messages) ? body.messages.slice(-16) : []
@@ -202,13 +203,14 @@ export async function coachChat(req: HttpRequest, context: InvocationContext): P
 
     return { status: 200, headers: HEADERS, jsonBody: { reply: result.reply, toolCalls: result.toolCalls, uiActions: result.uiActions, usedMemory: result.usedMemory, usedVectorStore: result.usedVectorStore } }
   } catch (err) {
-    return { status: 200, headers: HEADERS, jsonBody: { error: String(err) } }
+    return { status: 500, headers: HEADERS, jsonBody: { error: String(err) } }
   }
 }
 
 // POST /api/app/coach/memory/bootstrap
 export async function coachMemoryBootstrap(req: HttpRequest): Promise<HttpResponseInit> {
   if (req.method === 'OPTIONS') return { status: 204, headers: HEADERS }
+  const guard = requireWrite(req); if (guard) return guard
   return { status: 200, headers: HEADERS, jsonBody: await bootstrapMemory() }
 }
 
@@ -217,7 +219,7 @@ export async function coachMemoryList(req: HttpRequest): Promise<HttpResponseIni
   if (req.method === 'OPTIONS') return { status: 204, headers: HEADERS }
   const owner = resolveOwner(req).owner
   try { return { status: 200, headers: HEADERS, jsonBody: { memory: await listMemory({ owner, limit: 100 }) } } }
-  catch (err) { return { status: 200, headers: HEADERS, jsonBody: { error: String(err) } } }
+  catch (err) { return { status: 500, headers: HEADERS, jsonBody: { error: String(err) } } }
 }
 
 // POST /api/app/coach/provision — create (or return) the OpenAI vector store for file_search.
@@ -226,6 +228,7 @@ export async function coachProvision(req: HttpRequest): Promise<HttpResponseInit
   const key = process.env.OPENAI_API_KEY
   if (!key) return { status: 200, headers: HEADERS, jsonBody: { error: 'OPENAI_API_KEY not set' } }
   try {
+    const guard = requireWrite(req); if (guard) return guard
     const existing = await getVectorStoreId()
     if (existing) return { status: 200, headers: HEADERS, jsonBody: { vectorStoreId: existing, created: false } }
     const res = await fetch('https://api.openai.com/v1/vector_stores', {
@@ -240,7 +243,7 @@ export async function coachProvision(req: HttpRequest): Promise<HttpResponseInit
                       ON CONFLICT (id) DO UPDATE SET vector_store_id=$1, updated_at=now()`, [vs.id])
     return { status: 200, headers: HEADERS, jsonBody: { vectorStoreId: vs.id, created: true } }
   } catch (err) {
-    return { status: 200, headers: HEADERS, jsonBody: { error: String(err) } }
+    return { status: 500, headers: HEADERS, jsonBody: { error: String(err) } }
   }
 }
 
@@ -250,6 +253,7 @@ export async function coachUpload(req: HttpRequest): Promise<HttpResponseInit> {
   const key = process.env.OPENAI_API_KEY
   if (!key) return { status: 200, headers: HEADERS, jsonBody: { error: 'OPENAI_API_KEY not set' } }
   try {
+    const guard = requireWrite(req); if (guard) return guard
     const body = await req.json() as any
     const filename = (body?.filename || 'upload.txt').toString()
     const b64 = (body?.contentBase64 || '').toString().replace(/^data:[^;]+;base64,/, '')
@@ -275,7 +279,7 @@ export async function coachUpload(req: HttpRequest): Promise<HttpResponseInit> {
     if (!ares.ok) throw new Error(`vector_stores/files ${ares.status}: ${(await ares.text()).slice(0, 200)}`)
     return { status: 200, headers: HEADERS, jsonBody: { fileId: file.id, vectorStoreId: vsId } }
   } catch (err) {
-    return { status: 200, headers: HEADERS, jsonBody: { error: String(err) } }
+    return { status: 500, headers: HEADERS, jsonBody: { error: String(err) } }
   }
 }
 
@@ -300,6 +304,7 @@ export async function coachConfigGet(req: HttpRequest): Promise<HttpResponseInit
 export async function coachConfigSet(req: HttpRequest): Promise<HttpResponseInit> {
   if (req.method === 'OPTIONS') return { status: 204, headers: HEADERS }
   try {
+    const guard = requireWrite(req); if (guard) return guard
     const body = await req.json() as any
     const pool = getPool()
     await ensureConfigTable(pool)
@@ -314,7 +319,7 @@ export async function coachConfigSet(req: HttpRequest): Promise<HttpResponseInit
     }
     return { status: 200, headers: HEADERS, jsonBody: await getCoachConfig() }
   } catch (err) {
-    return { status: 200, headers: HEADERS, jsonBody: { error: String(err) } }
+    return { status: 500, headers: HEADERS, jsonBody: { error: String(err) } }
   }
 }
 
@@ -322,6 +327,7 @@ export async function coachConfigSet(req: HttpRequest): Promise<HttpResponseInit
 export async function coachMemoryAdd(req: HttpRequest): Promise<HttpResponseInit> {
   if (req.method === 'OPTIONS') return { status: 204, headers: HEADERS }
   try {
+    const guard = requireWrite(req); if (guard) return guard
     const body = await req.json() as any
     const text = (body?.text || '').toString().trim()
     if (!text) return { status: 400, headers: HEADERS, jsonBody: { error: 'text required' } }
@@ -329,17 +335,18 @@ export async function coachMemoryAdd(req: HttpRequest): Promise<HttpResponseInit
     const kind = ['note', 'fact', 'preference', 'decision', 'feedback'].includes(body?.kind) ? body.kind : 'note'
     const r = await remember({ owner, kind, text, source: 'manual:settings' })
     return { status: 200, headers: HEADERS, jsonBody: { ok: true, id: r.id } }
-  } catch (err) { return { status: 200, headers: HEADERS, jsonBody: { error: String(err) } } }
+  } catch (err) { return { status: 500, headers: HEADERS, jsonBody: { error: String(err) } } }
 }
 
 // POST /api/app/coach/memory/delete { id }
 export async function coachMemoryDelete(req: HttpRequest): Promise<HttpResponseInit> {
   if (req.method === 'OPTIONS') return { status: 204, headers: HEADERS }
   try {
+    const guard = requireWrite(req); if (guard) return guard
     const body = await req.json() as any
     if (!body?.id) return { status: 400, headers: HEADERS, jsonBody: { error: 'id required' } }
     return { status: 200, headers: HEADERS, jsonBody: await deleteMemory(String(body.id)) }
-  } catch (err) { return { status: 200, headers: HEADERS, jsonBody: { error: String(err) } } }
+  } catch (err) { return { status: 500, headers: HEADERS, jsonBody: { error: String(err) } } }
 }
 
 // GET /api/app/coach/activity?owner= — the agent's action log (tool calls + prompt sent per turn).
@@ -350,7 +357,7 @@ export async function coachActivity(req: HttpRequest): Promise<HttpResponseInit>
     const pool = getPool(); await ensureOpsTables(pool)
     const { rows } = await pool.query(`select id, user_msg, reply, tools, created_at from coach_activity where owner=$1 order by created_at desc limit 40`, [owner])
     return { status: 200, headers: HEADERS, jsonBody: { activity: rows.map((r: any) => ({ id: r.id, userMsg: r.user_msg, reply: r.reply, tools: r.tools || [], createdAt: r.created_at })) } }
-  } catch (err) { return { status: 200, headers: HEADERS, jsonBody: { error: String(err) } } }
+  } catch (err) { return { status: 500, headers: HEADERS, jsonBody: { error: String(err) } } }
 }
 
 // GET /api/app/coach/thread?owner= — restore the persisted conversation (proof it's DB-backed).
@@ -361,19 +368,20 @@ export async function coachThreadGet(req: HttpRequest): Promise<HttpResponseInit
     const pool = getPool(); await ensureOpsTables(pool)
     const { rows } = await pool.query(`select messages, updated_at from coach_thread where owner=$1`, [owner])
     return { status: 200, headers: HEADERS, jsonBody: { messages: rows[0]?.messages || [], updatedAt: rows[0]?.updated_at || null } }
-  } catch (err) { return { status: 200, headers: HEADERS, jsonBody: { error: String(err) } } }
+  } catch (err) { return { status: 500, headers: HEADERS, jsonBody: { error: String(err) } } }
 }
 
 // POST /api/app/coach/thread/clear { owner }
 export async function coachThreadClear(req: HttpRequest): Promise<HttpResponseInit> {
   if (req.method === 'OPTIONS') return { status: 204, headers: HEADERS }
   try {
+    const guard = requireWrite(req); if (guard) return guard
     const body = await req.json().catch(() => ({})) as any
     const _ro = resolveOwner(req); const owner = _ro.verified ? _ro.owner : (body?.owner || DEMO_EMAIL).toString()
     const pool = getPool(); await ensureOpsTables(pool)
     await pool.query(`delete from coach_thread where owner=$1`, [owner])
     return { status: 200, headers: HEADERS, jsonBody: { ok: true } }
-  } catch (err) { return { status: 200, headers: HEADERS, jsonBody: { error: String(err) } } }
+  } catch (err) { return { status: 500, headers: HEADERS, jsonBody: { error: String(err) } } }
 }
 
 app.http('coachChat', { methods: ['POST', 'OPTIONS'], authLevel: 'anonymous', route: 'app/coach/chat', handler: coachChat })

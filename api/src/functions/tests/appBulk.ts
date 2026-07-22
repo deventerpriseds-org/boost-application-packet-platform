@@ -1,5 +1,5 @@
 import { app, HttpRequest, HttpResponseInit, InvocationContext } from '@azure/functions'
-import { resolveOwner } from './appSession'
+import { resolveOwner, requireWrite } from './appSession'
 import { getPgClient } from './pgClient'
 
 const HEADERS = { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'GET, POST, OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type' }
@@ -33,6 +33,7 @@ export async function bulkPackets(req: HttpRequest, context: InvocationContext):
   const cap = Math.min(Math.max(Number(body?.topN) || (Array.isArray(body?.oppIds) ? body.oppIds.length : 5), 1), 15)
   let client
   try {
+    const guard = requireWrite(req); if (guard) return guard
     client = await getPgClient(); await ensureBulkTable(client)
 
     // Resolve the opportunity list.
@@ -63,7 +64,7 @@ export async function bulkPackets(req: HttpRequest, context: InvocationContext):
     const okCount = results.filter((x) => x.ok).length
     return { status: 200, headers: HEADERS, jsonBody: { ok: true, jobId, total: oppIds.length, built: okCount, sent: false, results, note: 'Bulk build complete. Nothing was sent.' } }
   } catch (err) {
-    return { status: 200, headers: HEADERS, jsonBody: { error: String(err) } }
+    return { status: 500, headers: HEADERS, jsonBody: { error: String(err) } }
   } finally { try { await client?.end() } catch {} }
 }
 
@@ -78,7 +79,7 @@ export async function bulkStatus(req: HttpRequest, context: InvocationContext): 
     if (!j) return { status: 404, headers: HEADERS, jsonBody: { error: 'job not found' } }
     return { status: 200, headers: HEADERS, jsonBody: { jobId: j.id, status: j.status, total: j.total, done: j.done, results: j.results, updatedAt: j.updated_at } }
   } catch (err) {
-    return { status: 200, headers: HEADERS, jsonBody: { error: String(err) } }
+    return { status: 500, headers: HEADERS, jsonBody: { error: String(err) } }
   } finally { try { await client?.end() } catch {} }
 }
 

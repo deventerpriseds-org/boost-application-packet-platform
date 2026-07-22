@@ -1,5 +1,5 @@
 import { app, HttpRequest, HttpResponseInit, InvocationContext } from '@azure/functions'
-import { resolveOwner } from './appSession'
+import { resolveOwner, requireWrite } from './appSession'
 import { getPgClient } from './pgClient'
 
 const HEADERS = {
@@ -33,7 +33,7 @@ export async function assetOpen(req: HttpRequest, context: InvocationContext): P
     await client.query(`insert into asset_event (asset_id, opp_id, viewer, event) values ($1,$2,$3,'open')`, [artifactId, art.opp_id, viewer])
     return { status: 302, headers: { Location: art.doc_url } }
   } catch (err) {
-    return { status: 200, headers: HEADERS, jsonBody: { error: String(err) } }
+    return { status: 500, headers: HEADERS, jsonBody: { error: String(err) } }
   } finally { try { await client?.end() } catch {} }
 }
 
@@ -43,6 +43,7 @@ export async function assetEvent(req: HttpRequest, context: InvocationContext): 
   if (req.method === 'OPTIONS') return { status: 204, headers: HEADERS }
   let client
   try {
+    const guard = requireWrite(req); if (guard) return guard
     const b = (await req.json().catch(() => ({}))) as any
     if (!b?.assetId) return { status: 400, headers: HEADERS, jsonBody: { error: 'assetId required' } }
     const event = ['open', 'view', 'forward', 'download'].includes(b.event) ? b.event : 'view'
@@ -54,7 +55,7 @@ export async function assetEvent(req: HttpRequest, context: InvocationContext): 
     )
     return { status: 200, headers: HEADERS, jsonBody: { ok: true } }
   } catch (err) {
-    return { status: 200, headers: HEADERS, jsonBody: { error: String(err) } }
+    return { status: 500, headers: HEADERS, jsonBody: { error: String(err) } }
   } finally { try { await client?.end() } catch {} }
 }
 
@@ -98,7 +99,7 @@ export async function assetsAnalytics(req: HttpRequest, context: InvocationConte
       }
     }
   } catch (err) {
-    return { status: 200, headers: HEADERS, jsonBody: { error: String(err) } }
+    return { status: 500, headers: HEADERS, jsonBody: { error: String(err) } }
   } finally { try { await client?.end() } catch {} }
 }
 

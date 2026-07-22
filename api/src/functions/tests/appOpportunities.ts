@@ -1,5 +1,5 @@
 import { app, HttpRequest, HttpResponseInit, InvocationContext } from '@azure/functions'
-import { resolveOwner } from './appSession'
+import { resolveOwner, requireWrite, serverError } from './appSession'
 import { getPgClient } from './pgClient'
 
 const HEADERS = {
@@ -77,6 +77,7 @@ export async function opportunityMoveStage(req: HttpRequest, context: Invocation
   const id = req.params.id
   let client
   try {
+    const guard = requireWrite(req); if (guard) return guard
     const body = await req.json() as any
     const stage = body?.stage
     if (!STAGES.includes(stage)) return { status: 400, headers: HEADERS, jsonBody: { error: `invalid stage; must be one of ${STAGES.join(', ')}` } }
@@ -85,7 +86,7 @@ export async function opportunityMoveStage(req: HttpRequest, context: Invocation
     if (!r.rowCount) return { status: 404, headers: HEADERS, jsonBody: { error: 'not found' } }
     return { status: 200, headers: HEADERS, jsonBody: { ok: true, id: r.rows[0].id, stage: r.rows[0].stage } }
   } catch (err) {
-    return { status: 200, headers: HEADERS, jsonBody: { error: String(err) } }
+    return { status: 500, headers: HEADERS, jsonBody: { error: String(err) } }
   } finally { try { await client?.end() } catch {} }
 }
 
@@ -95,12 +96,13 @@ export async function opportunityDismiss(req: HttpRequest, context: InvocationCo
   const id = req.params.id
   let client
   try {
+    const guard = requireWrite(req); if (guard) return guard
     client = await getPgClient()
     const r = await client.query(`update opportunity set dismissed = true, updated_at = now() where id = $1 returning id`, [id])
     if (!r.rowCount) return { status: 404, headers: HEADERS, jsonBody: { error: 'not found' } }
     return { status: 200, headers: HEADERS, jsonBody: { ok: true, id: r.rows[0].id, dismissed: true } }
   } catch (err) {
-    return { status: 200, headers: HEADERS, jsonBody: { error: String(err) } }
+    return { status: 500, headers: HEADERS, jsonBody: { error: String(err) } }
   } finally { try { await client?.end() } catch {} }
 }
 
