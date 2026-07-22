@@ -59,6 +59,7 @@ export const api = {
     return get(`/app/opportunities?${q}${demoParam()}`)
   },
   getOpportunity: (id) => get(`/app/opportunity/${id}`),
+  todayMetrics: ({ owner } = {}) => get(`/app/metrics/today?owner=${encodeURIComponent(owner || _owner)}${demoParam()}`),
   moveStage: (id, stage) => post(`/app/opportunity/${id}/stage`, { stage }),
   dismiss: (id) => post(`/app/opportunity/${id}/dismiss`, {}),
   // Packets / artifacts (production line)
@@ -92,6 +93,7 @@ export const api = {
   generateOutreach: (oppId, { channel, tone, contactId } = {}) => post(`/app/opportunity/${oppId}/outreach/generate`, { channel, tone, contactId }),
   seedCadence: (oppId) => post(`/app/opportunity/${oppId}/cadence`, {}),
   setOutreachState: (messageId, state) => post(`/app/outreach/${messageId}/state`, { state }),
+  updateOutreachBody: (messageId, body) => post(`/app/outreach/${messageId}/body`, { body }),
   sendOutreach: (messageId, { to, subject } = {}) => post(`/app/outreach/${messageId}/send`, { to, subject }),
   outreachQueue: ({ owner } = {}) => get(`/app/outreach?owner=${encodeURIComponent(owner || _owner)}${demoParam()}`),
   // Convert: interview + offer
@@ -102,7 +104,7 @@ export const api = {
   getOffer: (oppId) => get(`/app/opportunity/${oppId}/offer`),
   analyzeOffer: (oppId, { theirOffer, floor } = {}) => post(`/app/opportunity/${oppId}/offer`, { theirOffer, floor }),
   // App Answers (vision autofill)
-  answersVision: (oppId, imageBase64) => post(`/app/opportunity/${oppId}/answers/vision`, { imageBase64 }),
+  answersVision: (oppId, imageBase64, style = 'concise') => post(`/app/opportunity/${oppId}/answers/vision`, { imageBase64, style }),
   // Voice call (ElevenLabs Conversational AI) — signed WebSocket URL
   voiceSession: () => get(`/app/voice/session`),
   // AI Coach (OpenAI Responses operator agent: app tools + memory + Tavily)

@@ -103,12 +103,20 @@ export async function answersVision(req: HttpRequest, context: InvocationContext
     let img = (body?.imageBase64 || '').toString()
     img = img.replace(/^data:image\/\w+;base64,/, '')
     if (img.length < 100) return { status: 400, headers: HEADERS, jsonBody: { error: 'imageBase64 required (a form screenshot)' } }
+    // Optional answer style — changes the drafting instruction (real behavior change).
+    // 'concise' (default, prior behavior) | 'detailed' | 'star'.
+    const STYLES: Record<string, string> = {
+      concise: 'Draft concise, copy-paste-ready answers (1-3 sentences each).',
+      detailed: 'Draft thorough, well-developed answers (one short paragraph each) that expand on the candidate profile with specifics and rationale.',
+      star: 'Draft answers using the STAR method (Situation, Task, Action, Result) where the question is behavioral/experience-based; keep purely factual questions concise.',
+    }
+    const style = STYLES[(body?.style || '').toString().toLowerCase()] ? (body.style as string).toLowerCase() : 'concise'
     if (!key) return { status: 200, headers: HEADERS, jsonBody: { error: 'OPENAI_API_KEY not set' } }
     client = await getPgClient()
     const o = (await client.query(`select company, role, comp_range, location, source, why_surfaced from opportunity where id = $1`, [oppId])).rows[0]
     if (!o) return { status: 404, headers: HEADERS, jsonBody: { error: 'opportunity not found' } }
     const profile = `Candidate is applying for ${o.role} at ${o.company} (${o.location || 'n/a'}). Comp target: ${o.comp_range || 'n/a'}. Source: ${o.source || 'n/a'}. Why a fit: ${o.why_surfaced || 'n/a'}. US work-authorized, no sponsorship needed, ~4 weeks notice.`
-    const instruction = `You detect application-form questions from a screenshot and draft concise, copy-paste-ready answers using the candidate profile. Return ONLY JSON: { "answers": [ { "question": "...", "answer": "..." } ] }. ${profile}`
+    const instruction = `You detect application-form questions from a screenshot and draft answers using the candidate profile. ${STYLES[style]} Return ONLY JSON: { "answers": [ { "question": "...", "answer": "..." } ] }. ${profile}`
 
     const res = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
@@ -127,7 +135,7 @@ export async function answersVision(req: HttpRequest, context: InvocationContext
     const data = await res.json() as any
     const parsed = JSON.parse(data.choices?.[0]?.message?.content || '{}')
     const answers = Array.isArray(parsed.answers) ? parsed.answers.filter((a: any) => a.question && a.answer) : []
-    return { status: 200, headers: HEADERS, jsonBody: { ok: true, company: o.company, role: o.role, count: answers.length, answers } }
+    return { status: 200, headers: HEADERS, jsonBody: { ok: true, company: o.company, role: o.role, style, count: answers.length, answers } }
   } catch (err) {
     return { status: 500, headers: HEADERS, jsonBody: { error: String(err) } }
   } finally { try { await client?.end() } catch {} }

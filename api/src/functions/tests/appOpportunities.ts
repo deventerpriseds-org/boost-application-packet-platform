@@ -35,21 +35,41 @@ export async function opportunitiesList(req: HttpRequest, context: InvocationCon
   let client
   try {
     client = await getPgClient()
-    const conds = ['owner_email = $1', 'not dismissed']
+    // `?stage=rejected` or `?includeDismissed=1|true` surfaces dismissed/rejected
+    // opps (so the Pipeline can render a Rejected lane). Default is unchanged:
+    // dismissed rows stay excluded.
+    const idParam = (req.query.get('includeDismissed') || '').toLowerCase()
+    const wantRejectedOnly = stage === 'rejected'
+    const includeDismissed = wantRejectedOnly || idParam === '1' || idParam === 'true'
+
+    const conds = ['owner_email = $1']
     const params: any[] = [owner]
+    if (wantRejectedOnly) conds.push('dismissed')       // only rejected rows
+    else if (!includeDismissed) conds.push('not dismissed')
     if (!includeDemo) conds.push('not is_demo')
     if (persona) { params.push(persona); conds.push(`$${params.length} = any(roles_for)`) }
-    if (stage) { params.push(stage); conds.push(`stage = $${params.length}`) }
+    if (stage && !wantRejectedOnly) { params.push(stage); conds.push(`stage = $${params.length}`) }
     const rows = (await client.query(
       `select * from opportunity where ${conds.join(' and ')} order by match_score desc nulls last`, params
     )).rows
 
-    // Stage funnel counts for the pipeline board
+    // Stage funnel counts for the pipeline board (+ a 'rejected' lane count)
     const byStage: Record<string, number> = {}
     for (const s of STAGES) byStage[s] = 0
-    for (const r of rows) byStage[r.stage] = (byStage[r.stage] || 0) + 1
+    byStage.rejected = 0
+    for (const r of rows) {
+      if (r.dismissed) byStage.rejected += 1
+      else byStage[r.stage] = (byStage[r.stage] || 0) + 1
+    }
 
-    return { status: 200, headers: HEADERS, jsonBody: { stages: STAGES, byStage, count: rows.length, opportunities: rows.map(rowToOpp) } }
+    return {
+      status: 200, headers: HEADERS,
+      jsonBody: {
+        stages: STAGES, byStage, count: rows.length, includeDismissed,
+        // `rejected` marks dismissed rows so the UI can route them to a Rejected lane.
+        opportunities: rows.map((r: any) => ({ ...rowToOpp(r), rejected: !!r.dismissed })),
+      }
+    }
   } catch (err) {
     return { status: 200, headers: HEADERS, jsonBody: { error: String(err) } }
   } finally { try { await client?.end() } catch {} }

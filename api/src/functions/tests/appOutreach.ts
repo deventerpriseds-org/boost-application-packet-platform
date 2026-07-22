@@ -141,6 +141,25 @@ export async function outreachState(req: HttpRequest, context: InvocationContext
   } finally { try { await client?.end() } catch {} }
 }
 
+// POST /api/app/outreach/{messageId}/body { body } — persist an edited message body.
+export async function outreachUpdateBody(req: HttpRequest, context: InvocationContext): Promise<HttpResponseInit> {
+  if (req.method === 'OPTIONS') return { status: 204, headers: HEADERS }
+  const messageId = req.params.messageId
+  let client
+  try {
+    const guard = requireWrite(req); if (guard) return guard
+    const body = await req.json().catch(() => ({})) as any
+    const text = (body?.body ?? '').toString()
+    if (!text.trim()) return { status: 400, headers: HEADERS, jsonBody: { error: 'body is required' } }
+    client = await getPgClient()
+    const r = (await client.query(`update outreach_message set body = $1 where id = $2 returning *`, [text, messageId])).rows[0]
+    if (!r) return { status: 404, headers: HEADERS, jsonBody: { error: 'message not found' } }
+    return { status: 200, headers: HEADERS, jsonBody: { ok: true, message: msgShape(r) } }
+  } catch (err) {
+    return { status: 500, headers: HEADERS, jsonBody: { error: String(err) } }
+  } finally { try { await client?.end() } catch {} }
+}
+
 // Default 7-touch cadence (day offset, channel, initial state).
 const CADENCE = [
   { d: 0, channel: 'coldEmail', state: 'sent' },
@@ -293,6 +312,7 @@ app.http('outreachList', { methods: ['GET', 'OPTIONS'], authLevel: 'anonymous', 
 app.http('outreachGenerate', { methods: ['POST', 'OPTIONS'], authLevel: 'anonymous', route: 'app/opportunity/{id}/outreach/generate', handler: outreachGenerate })
 app.http('cadenceSeed', { methods: ['POST', 'OPTIONS'], authLevel: 'anonymous', route: 'app/opportunity/{id}/cadence', handler: cadenceSeed })
 app.http('outreachState', { methods: ['POST', 'OPTIONS'], authLevel: 'anonymous', route: 'app/outreach/{messageId}/state', handler: outreachState })
+app.http('outreachUpdateBody', { methods: ['POST', 'OPTIONS'], authLevel: 'anonymous', route: 'app/outreach/{messageId}/body', handler: outreachUpdateBody })
 app.http('outreachSend', { methods: ['POST', 'OPTIONS'], authLevel: 'anonymous', route: 'app/outreach/{messageId}/send', handler: outreachSend })
 app.http('outreachTickNow', { methods: ['POST', 'OPTIONS'], authLevel: 'anonymous', route: 'app/outreach/tick', handler: outreachTickNow })
 app.timer('outreachTick', { schedule: '0 0 */1 * * *', handler: outreachTick })

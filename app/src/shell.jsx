@@ -7,6 +7,7 @@ const NAV = [
   { path: '/pipeline',           label: 'Pipeline',      icon: '▤' },
   { path: '/packets',            label: 'Packets',       icon: '▦' },
   { path: '/outreach',           label: 'Outreach',      icon: '✉' },
+  { path: '/interview',          label: 'Interviews',    icon: '◍' },
   { path: '/library',            label: 'Assets',        icon: '◫' },
   { path: '/library/roles',      label: 'Role Profiles', icon: '◈' },
   { path: '/library/playbooks',  label: 'Playbooks',     icon: '▥' },
