@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { useApp, go } from '../state.jsx'
+import { api } from '../api.js'
 import { Pill, UrgencyPill, MatchScore } from '../shell.jsx'
 import { Loading, ErrorBox } from './Today.jsx'
 
@@ -17,6 +18,22 @@ export default function Swipe({ opps }) {
 
   const current = queue[idx]
   const next = queue[idx + 1]
+
+  // Lazy-load full opportunity detail (incl. JD summary/requirements/ATS table — fields the
+  // list doesn't carry) for the current + next card, cached by id. Real data only; the JD tabs
+  // simply don't appear when the opp has no parsed JD.
+  const [details, setDetails] = useState({})
+  useEffect(() => {
+    let cancelled = false
+    const need = [current, next].filter((o) => o && details[o.id] === undefined)
+    need.forEach((o) => {
+      api.getOpportunity(o.id)
+        .then((full) => { if (!cancelled && full && !full.error) setDetails((d) => ({ ...d, [o.id]: full })) })
+        .catch(() => { if (!cancelled) setDetails((d) => ({ ...d, [o.id]: null })) })
+    })
+    return () => { cancelled = true }
+  }, [current?.id, next?.id]) // eslint-disable-line react-hooks/exhaustive-deps
+  const withDetail = (o) => (o ? { ...o, ...(details[o.id] || {}) } : o)
 
   const decide = (decision, { build = false } = {}) => {
     if (!current) return
@@ -99,8 +116,8 @@ export default function Swipe({ opps }) {
         </div>
       </div>
       <div style={{ position: 'relative', height: 420 }}>
-        {next && <SwipeCard o={next} style={{ position: 'absolute', inset: 0, transform: 'scale(0.96) translateY(8px)', opacity: 0.5, pointerEvents: 'none', zIndex: 1 }} />}
-        <SwipeCard o={current} cardRef={cardRef} decision={drag.decision}
+        {next && <SwipeCard o={withDetail(next)} style={{ position: 'absolute', inset: 0, transform: 'scale(0.96) translateY(8px)', opacity: 0.5, pointerEvents: 'none', zIndex: 1 }} />}
+        <SwipeCard o={withDetail(current)} cardRef={cardRef} decision={drag.decision}
           onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onUp}
           style={{ position: 'absolute', inset: 0, zIndex: 2, touchAction: 'none', cursor: 'grab',
             transform: drag.active ? `translate(${drag.x}px, ${drag.y}px) rotate(${rotation}deg)` : 'none',
@@ -135,41 +152,90 @@ function ActionBtn({ label, tone, onClick }) {
 }
 
 function SwipeCard({ o, decision, cardRef, style, ...handlers }) {
+  // Compact tabs so JD detail lives on the card without a click-through. Only include JD tabs
+  // whose data actually exists (real parsed JD) — no empty/fake tabs.
+  const tabs = useMemo(() => {
+    const t = [{ key: 'overview', label: 'Overview' }]
+    if (o?.jdSummary) t.push({ key: 'summary', label: 'Summary' })
+    if (o?.jdRequirements) t.push({ key: 'reqs', label: 'Requirements' })
+    if (o?.jdTable) t.push({ key: 'ats', label: 'ATS' })
+    return t
+  }, [o?.jdSummary, o?.jdRequirements, o?.jdTable])
+  const [tab, setTab] = useState('overview')
+  useEffect(() => { setTab('overview') }, [o?.id]) // new card resets to Overview
+  const activeTab = tabs.some((t) => t.key === tab) ? tab : 'overview'
+  const stop = (e) => e.stopPropagation() // don't let tab clicks / JD scroll start a card drag
+
   return (
     <div ref={cardRef} {...handlers} className="px-box"
-      style={{ display: 'flex', flexDirection: 'column', padding: 16, gap: 12, userSelect: 'none', boxShadow: '4px 6px 20px rgba(0,0,0,.08)', ...style }}>
+      style={{ display: 'flex', flexDirection: 'column', padding: 16, gap: 10, userSelect: 'none', boxShadow: '4px 6px 20px rgba(0,0,0,.08)', ...style }}>
       {decision === 'keep' && <Overlay tilt={-12} label="KEEP" tone="green" pos="left" />}
       {decision === 'pass' && <Overlay tilt={12} label="PASS" tone="red" pos="right" />}
       {decision === 'maybe' && <Overlay tilt={0} label="MAYBE" tone="yellow" pos="bottom" />}
 
+      {/* Identity header — always visible */}
       <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}>
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontSize: 20, fontWeight: 700 }}>{o.company}</div>
-          <div className="px-small">{o.location || '—'}</div>
+          <div style={{ fontSize: 19, fontWeight: 700 }}>{o.company}</div>
+          <div style={{ fontSize: 14, fontWeight: 700 }}>{o.jdTitle || o.role}</div>
+          <div className="px-small">{[o.location, o.comp].filter(Boolean).join(' · ') || '—'}</div>
         </div>
         <MatchScore value={o.match} size={44} />
       </div>
-      <div className="px-divider" />
-      <div style={{ fontSize: 15, fontWeight: 700 }}>{o.role}</div>
-      <div className="px-small">{o.comp || '—'}</div>
       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
         {o.urgency && <UrgencyPill urgency={o.urgency} />}
         {o.fit && <Pill tone="accent">{o.fit}</Pill>}
         {o.source && <Pill>{o.source}</Pill>}
       </div>
-      <div className="px-divider" />
-      {o.why && (
-        <div>
-          <div className="px-small" style={{ textTransform: 'uppercase', letterSpacing: 1 }}>Why surfaced</div>
-          <div style={{ fontSize: 13, marginTop: 4, lineHeight: 1.45 }}>{o.why}</div>
+
+      {/* Tab bar (only when there's JD detail to tab into) */}
+      {tabs.length > 1 && (
+        <div onPointerDown={stop} style={{ display: 'flex', gap: 4, borderBottom: '1px solid var(--proto-rule-soft)' }}>
+          {tabs.map((t) => (
+            <button key={t.key} onClick={(e) => { stop(e); setTab(t.key) }} onPointerDown={stop}
+              style={{ appearance: 'none', background: 'none', border: 'none', cursor: 'pointer', padding: '6px 8px',
+                fontSize: 12, fontWeight: 700, color: activeTab === t.key ? 'var(--text-brand)' : 'var(--proto-ink3)',
+                borderBottom: activeTab === t.key ? '2px solid var(--surface-brand-default)' : '2px solid transparent', marginBottom: -1 }}>
+              {t.label}
+            </button>
+          ))}
         </div>
       )}
-      {o.hm && o.hm !== '—' && (
-        <div className="px-box" style={{ padding: 8, fontSize: 12 }}>
-          <span className="px-small">Hiring manager</span> · <b>{o.hm}</b>
-        </div>
-      )}
-      <div style={{ marginTop: 'auto', textAlign: 'center' }}>
+
+      {/* Tab content — scrolls within the card so long JD stays compact */}
+      <div onPointerDown={activeTab === 'overview' ? undefined : stop}
+        style={{ flex: 1, minHeight: 0, overflowY: 'auto', paddingRight: 2 }}>
+        {activeTab === 'overview' && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            {o.why && (
+              <div>
+                <div className="px-small" style={{ textTransform: 'uppercase', letterSpacing: 1 }}>Why surfaced</div>
+                <div style={{ fontSize: 13, marginTop: 4, lineHeight: 1.45 }}>{o.why}</div>
+              </div>
+            )}
+            {o.hm && o.hm !== '—' && (
+              <div className="px-box" style={{ padding: 8, fontSize: 12 }}>
+                <span className="px-small">Hiring manager</span> · <b>{o.hm}</b>
+              </div>
+            )}
+            {!o.why && (!o.hm || o.hm === '—') && <div className="px-small">Swipe to triage — open full detail for more.</div>}
+          </div>
+        )}
+        {activeTab === 'summary' && (
+          <div style={{ fontSize: 13, lineHeight: 1.55 }}>
+            {o.jdTitle && <div className="px-small" style={{ marginBottom: 6 }}><b>Title:</b> {o.jdTitle}{o.jdCompany ? ` · ${o.jdCompany}` : ''}</div>}
+            <div>{o.jdSummary}</div>
+          </div>
+        )}
+        {activeTab === 'reqs' && (
+          <div style={{ fontSize: 13, lineHeight: 1.6 }} dangerouslySetInnerHTML={{ __html: o.jdRequirements }} />
+        )}
+        {activeTab === 'ats' && (
+          <div style={{ fontSize: 12 }} dangerouslySetInnerHTML={{ __html: o.jdTable }} />
+        )}
+      </div>
+
+      <div style={{ textAlign: 'center' }}>
         <div className="px-small">⟵ swipe or use the buttons ⟶</div>
       </div>
     </div>
