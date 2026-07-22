@@ -477,6 +477,19 @@ export async function mailFolderCreate(req: HttpRequest, context: InvocationCont
   } catch (err) { return { status: 200, headers: HEADERS, jsonBody: { error: String(err) } } }
 }
 
+// Indeed/LinkedIn digests wrap the real role: "{Company} is hiring for {ROLE}. N more
+// {search-term} jobs." The trailing "N more … jobs" is the SEARCH LABEL, not the role —
+// classifying on it wrongly tags Program Managers etc. as C-suite. Extract just the role.
+function extractRole(subject: string): string {
+  const s = subject || ''
+  const m = s.match(/is hiring for\s+(.+?)(?:\.\s*\d+\s+(?:more|new)\b|$)/i)
+  if (m) return m[1].trim()
+  // Pure digest rollup ("N new <term> job(s)…") — a count, not a specific posting. No role.
+  if (/^\s*\d+\s+new\b/i.test(s)) return ''
+  // Strip a trailing ". N more/new <term> job(s) [in <loc>]" digest summary if present.
+  return s.replace(/\.\s*\d+\s+(?:more|new)\b.*$/i, '').trim()
+}
+
 // Seniority classifier — shared by reclassify (backfill) and rule generation.
 // Priority: C Suite > VP/Head-of/Executive > Director. "Executive" (not Chief) → VP,
 // per confirmed tiering. Deputy Chief → C Suite. Returns null = stays in parent.
@@ -527,7 +540,7 @@ export async function mailReclassify(req: HttpRequest, context: InvocationContex
     const toMove: { id: string; tier: 'csuite' | 'vp' | 'director' }[] = []
     for (const m of msgs) {
       if (senderContains && !m.from.includes(senderContains)) { counts.other++; continue }
-      const tier = seniorityTier(m.subject)
+      const tier = seniorityTier(extractRole(m.subject))
       if (!tier) { counts.other++; continue }
       counts[tier]++
       if (targets[tier]) toMove.push({ id: m.id, tier })
