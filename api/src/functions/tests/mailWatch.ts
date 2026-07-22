@@ -477,6 +477,40 @@ export async function mailFolderCreate(req: HttpRequest, context: InvocationCont
   } catch (err) { return { status: 200, headers: HEADERS, jsonBody: { error: String(err) } } }
 }
 
+// POST /api/mail/folders/create-bulk { folders: [{name, parentId?}] } — create many
+// folders in one call. Returns a per-folder result so partial failures are visible.
+export async function mailFoldersBulkCreate(req: HttpRequest, context: InvocationContext): Promise<HttpResponseInit> {
+  if (req.method === 'OPTIONS') return { status: 204, headers: HEADERS }
+  const creds = graphCreds()
+  if (!creds.clientId || !creds.clientSecret) return { status: 200, headers: HEADERS, jsonBody: { error: 'MICROSOFT creds not set' } }
+  try {
+    const body = (await req.json().catch(() => ({}))) as any
+    const items = Array.isArray(body?.folders) ? body.folders : []
+    if (!items.length) return { status: 400, headers: HEADERS, jsonBody: { error: 'folders[] required' } }
+    const mailbox = String(body?.mailbox || '').trim() || (await loadConfig(resolveOwner(req).owner)).mailbox
+    const token = await getMicrosoftToken(creds.tenantId, creds.clientId, creds.clientSecret)
+    const results: any[] = []
+    for (const it of items) {
+      const name = String(it?.name || '').trim().slice(0, 120)
+      const parentId = it?.parentId ? String(it.parentId).trim() : null
+      if (!name) { results.push({ name: it?.name, ok: false, error: 'name required' }); continue }
+      const url = parentId
+        ? `https://graph.microsoft.com/v1.0/users/${mailbox}/mailFolders/${parentId}/childFolders`
+        : `https://graph.microsoft.com/v1.0/users/${mailbox}/mailFolders`
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ displayName: name, isHidden: false }),
+      })
+      const j = await res.json().catch(() => ({}))
+      if (!res.ok) results.push({ name, parentId, ok: false, status: res.status, error: (j as any)?.error?.message || `HTTP ${res.status}` })
+      else results.push({ name, parentId, ok: true, id: (j as any).id })
+    }
+    const created = results.filter((r) => r.ok).length
+    return { status: 200, headers: HEADERS, jsonBody: { ok: true, created, total: results.length, results } }
+  } catch (err) { return { status: 200, headers: HEADERS, jsonBody: { error: String(err) } } }
+}
+
 // POST /api/mail/folders/delete { folderId } — delete a mail folder (cleanup/undo).
 export async function mailFolderDelete(req: HttpRequest, context: InvocationContext): Promise<HttpResponseInit> {
   if (req.method === 'OPTIONS') return { status: 204, headers: HEADERS }
@@ -894,6 +928,7 @@ app.http('mailIngestTest', { methods: ['POST', 'OPTIONS'], authLevel: 'anonymous
 app.http('mailConfig', { methods: ['GET', 'POST', 'OPTIONS'], authLevel: 'anonymous', route: 'mail/config', handler: mailConfig })
 app.http('mailFolders', { methods: ['GET', 'OPTIONS'], authLevel: 'anonymous', route: 'mail/folders', handler: mailFolders })
 app.http('mailFolderCreate', { methods: ['POST', 'OPTIONS'], authLevel: 'anonymous', route: 'mail/folders/create', handler: mailFolderCreate })
+app.http('mailFoldersBulkCreate', { methods: ['POST', 'OPTIONS'], authLevel: 'anonymous', route: 'mail/folders/create-bulk', handler: mailFoldersBulkCreate })
 app.http('mailFolderDelete', { methods: ['POST', 'OPTIONS'], authLevel: 'anonymous', route: 'mail/folders/delete', handler: mailFolderDelete })
 app.http('mailFolderMap', { methods: ['GET', 'POST', 'OPTIONS'], authLevel: 'anonymous', route: 'mail/folder-map', handler: mailFolderMap })
 app.http('mailFolderMapDelete', { methods: ['POST', 'OPTIONS'], authLevel: 'anonymous', route: 'mail/folder-map/delete', handler: mailFolderMapDelete })
