@@ -156,8 +156,7 @@ function SwipeCard({ o, decision, cardRef, style, ...handlers }) {
   // whose data actually exists (real parsed JD) — no empty/fake tabs.
   const tabs = useMemo(() => {
     const t = [{ key: 'overview', label: 'Overview' }]
-    if (o?.jdSummary) t.push({ key: 'summary', label: 'Summary' })
-    if (o?.jdRequirements) t.push({ key: 'reqs', label: 'Requirements' })
+    if (o?.jdSummary || o?.jdRequirements) t.push({ key: 'summary', label: 'Summary' })
     if (o?.jdTable) t.push({ key: 'ats', label: 'ATS' })
     return t
   }, [o?.jdSummary, o?.jdRequirements, o?.jdTable])
@@ -222,13 +221,16 @@ function SwipeCard({ o, decision, cardRef, style, ...handlers }) {
           </div>
         )}
         {activeTab === 'summary' && (
-          <div style={{ fontSize: 13, lineHeight: 1.55 }}>
-            {o.jdTitle && <div className="px-small" style={{ marginBottom: 6 }}><b>Title:</b> {o.jdTitle}{o.jdCompany ? ` · ${o.jdCompany}` : ''}</div>}
-            <div>{o.jdSummary}</div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10, fontSize: 13, lineHeight: 1.55 }}>
+            {o.jdTitle && <div className="px-small"><b>Title:</b> {o.jdTitle}{o.jdCompany ? ` · ${o.jdCompany}` : ''}</div>}
+            {o.jdSummary && <div>{o.jdSummary}</div>}
+            {o.jdRequirements && (
+              <div>
+                <div className="px-small" style={{ textTransform: 'uppercase', letterSpacing: 1, marginBottom: 4 }}>Requirements &amp; Responsibilities</div>
+                <div style={{ lineHeight: 1.6 }} dangerouslySetInnerHTML={{ __html: o.jdRequirements }} />
+              </div>
+            )}
           </div>
-        )}
-        {activeTab === 'reqs' && (
-          <div style={{ fontSize: 13, lineHeight: 1.6 }} dangerouslySetInnerHTML={{ __html: o.jdRequirements }} />
         )}
         {activeTab === 'ats' && (
           <div style={{ fontSize: 12 }} dangerouslySetInnerHTML={{ __html: o.jdTable }} />
