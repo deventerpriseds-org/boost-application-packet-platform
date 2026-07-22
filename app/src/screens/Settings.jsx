@@ -790,7 +790,180 @@ function RolesSettings() {
   )
 }
 
-const SECTIONS = [{ key: 'account', label: 'Account' }, { key: 'intake', label: 'Intake' }, { key: 'roles', label: 'Roles' }, { key: 'coach', label: 'Coach' }, { key: 'workspace', label: 'Workspace' }, { key: 'usage', label: 'Usage' }, { key: 'system', label: 'System' }]
+// Templates — reusable text/creative assets grouped into 8 fixed categories.
+// Category rail + template cards for the selected category. Real data only:
+// an owner with no templates sees empty categories (no fake cards).
+const TEMPLATE_CATEGORIES = {
+  resume: 'Resume',
+  cover: 'Cover letter',
+  recruiter: 'Recruiter outreach',
+  hm: 'Hiring manager',
+  linkedin: 'LinkedIn',
+  thankyou: 'Thank-you',
+  portfolio: 'Portfolio',
+  video: 'Video script',
+}
+const CATEGORY_ORDER = ['resume', 'cover', 'recruiter', 'hm', 'linkedin', 'thankyou', 'portfolio', 'video']
+const catLabel = (k) => TEMPLATE_CATEGORIES[k] || k
+
+function TemplatesSettings() {
+  const { isDemo } = useApp()
+  const [state, setState] = useState({ loading: true, templates: [], categories: [], error: null })
+  const [cat, setCat] = useState('resume')
+  const [editing, setEditing] = useState(null) // null = list; {} = new; template = edit
+  const [busy, setBusy] = useState(false)
+  const [msg, setMsg] = useState('')
+
+  const load = useCallback(async () => {
+    setState((s) => ({ ...s, loading: true }))
+    try {
+      const r = await api.templatesList()
+      if (r.error) throw new Error(r.error)
+      setState({ loading: false, templates: r.templates || [], categories: r.categories || [], error: null })
+    } catch (e) { setState({ loading: false, templates: [], categories: [], error: String(e.message || e) }) }
+  }, [])
+  useEffect(() => { load() }, [load])
+
+  const countFor = useCallback((key) => {
+    const c = (state.categories || []).find((x) => x.key === key)
+    if (c && typeof c.count === 'number') return c.count
+    return state.templates.filter((t) => t.category === key).length
+  }, [state])
+
+  const save = async (form) => {
+    setBusy(true); setMsg('')
+    try {
+      const r = await api.templateSave(form)
+      if (r.error) throw new Error(r.error)
+      setEditing(null); setMsg('Template saved.'); await load()
+    } catch (e) { setMsg(String(e.message || e)) } finally { setBusy(false) }
+  }
+  const del = async (t) => {
+    if (!window.confirm(`Delete "${t.name}"?`)) return
+    setBusy(true); setMsg('')
+    try { await api.templateDelete(t.id); if (editing?.id === t.id) setEditing(null); setMsg('Template deleted.'); await load() }
+    catch (e) { setMsg(String(e.message || e)) } finally { setBusy(false) }
+  }
+  const setPrimary = async (t) => {
+    setBusy(true); setMsg('')
+    try { const r = await api.templateSave({ id: t.id, category: t.category, name: t.name, body: t.body, isPrimary: true }); if (r.error) throw new Error(r.error); await load() }
+    catch (e) { setMsg(String(e.message || e)) } finally { setBusy(false) }
+  }
+
+  if (isDemo) return (
+    <Card>Sign in to manage your templates.{' '}
+      <span className="px-link" style={{ cursor: 'pointer' }} onClick={() => go('/settings/account')}>Connect account →</span>
+    </Card>
+  )
+  if (state.loading) return <Card style={{ color: 'var(--proto-ink2)' }}>Loading templates…</Card>
+  if (state.error) return <Card style={{ color: 'var(--proto-red)' }}>Couldn't load templates: {state.error}</Card>
+
+  const cards = state.templates.filter((t) => t.category === cat)
+
+  return (
+    <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start', flexWrap: 'wrap' }}>
+      {/* Category rail */}
+      <Card style={{ width: 220, flex: 'none', padding: 8 }}>
+        <div className="px-small" style={{ textTransform: 'uppercase', letterSpacing: 1, color: 'var(--proto-ink3)', padding: '8px 10px 6px' }}>Categories</div>
+        {CATEGORY_ORDER.map((key) => {
+          const on = cat === key
+          const n = countFor(key)
+          return (
+            <div key={key} onClick={() => { setCat(key); setEditing(null) }}
+              style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 8, padding: '9px 10px', borderRadius: 8, fontSize: 13.5, fontWeight: on ? 600 : 500,
+                background: on ? 'var(--proto-accent-soft)' : 'transparent', color: on ? 'var(--text-brand)' : 'var(--proto-ink)' }}>
+              <span style={{ flex: 1 }}>{catLabel(key)}</span>
+              <span className="px-small" style={{ color: on ? 'var(--text-brand)' : 'var(--proto-ink3)', fontVariantNumeric: 'tabular-nums' }}>{n}</span>
+            </div>
+          )
+        })}
+      </Card>
+
+      {/* Templates for the selected category */}
+      <div style={{ flex: 1, minWidth: 320, display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+          <b style={{ fontSize: 16 }}>{catLabel(cat)}</b>
+          <span className="px-small">{cards.length} template{cards.length === 1 ? '' : 's'}</span>
+          <div style={{ flex: 1 }} />
+          {!editing && <button className="px-btn px-btn-accent" onClick={() => setEditing({ category: cat })}>+ New</button>}
+        </div>
+        {msg && <div className="px-small" style={{ color: 'var(--proto-ink2)' }}>{msg}</div>}
+
+        {editing ? (
+          <TemplateForm key={editing.id || 'new'} initial={editing} busy={busy} onCancel={() => setEditing(null)} onSave={save} />
+        ) : cards.length === 0 ? (
+          <Card style={{ color: 'var(--proto-ink2)', textAlign: 'center', padding: 32 }}>
+            <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--proto-ink)' }}>No {catLabel(cat).toLowerCase()} templates yet</div>
+            <div className="px-small" style={{ marginTop: 6 }}>Create one to reuse it across your applications.</div>
+            <button className="px-btn px-btn-accent" style={{ marginTop: 14 }} onClick={() => setEditing({ category: cat })}>+ New template</button>
+          </Card>
+        ) : (
+          cards.map((t) => (
+            <Card key={t.id} style={{ cursor: 'pointer', padding: 14 }} onClick={() => setEditing(t)}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                <b style={{ fontSize: 14.5 }}>{t.name}</b>
+                <Pill tone={t.isPrimary ? 'green' : 'panel'}>{t.isPrimary ? 'Primary' : 'Variant'}</Pill>
+                <div style={{ flex: 1 }} />
+                <span className="px-small" style={{ color: 'var(--proto-ink3)' }}>used {t.usageCount || 0}×</span>
+                {t.replyRate != null && <span className="px-small" style={{ color: 'var(--proto-ink3)' }}>· {Math.round(t.replyRate * 100)}% reply</span>}
+              </div>
+              {t.body && <div className="px-small" style={{ marginTop: 8, color: 'var(--proto-ink2)', whiteSpace: 'pre-wrap', overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>{t.body}</div>}
+              <div style={{ display: 'flex', gap: 8, marginTop: 10 }} onClick={(e) => e.stopPropagation()}>
+                {!t.isPrimary && <button className="px-btn" style={{ fontSize: 12 }} disabled={busy} onClick={() => setPrimary(t)}>Set primary</button>}
+                <button className="px-btn" style={{ fontSize: 12 }} onClick={() => setEditing(t)}>Edit</button>
+                <button className="px-btn" style={{ fontSize: 12, color: 'var(--proto-red)' }} disabled={busy} onClick={() => del(t)}>Delete</button>
+                {t.updatedAt && <span className="px-small" style={{ marginLeft: 'auto', alignSelf: 'center', color: 'var(--proto-ink3)' }}>{new Date(t.updatedAt).toLocaleDateString()}</span>}
+              </div>
+            </Card>
+          ))
+        )}
+      </div>
+    </div>
+  )
+}
+
+function TemplateForm({ initial, busy, onCancel, onSave }) {
+  const [category, setCategory] = useState(initial.category || 'resume')
+  const [name, setName] = useState(initial.name || '')
+  const [body, setBody] = useState(initial.body || '')
+  const [isPrimary, setIsPrimary] = useState(!!initial.isPrimary)
+  const submit = () => {
+    if (!name.trim() || !body.trim()) return
+    onSave({ id: initial.id, category, name: name.trim(), body, isPrimary })
+  }
+  return (
+    <Card>
+      <b style={{ fontSize: 15 }}>{initial.id ? 'Edit template' : 'New template'}</b>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 12, marginTop: 12 }}>
+        <div>
+          <Label>Category</Label>
+          <select className="px-btn" style={{ width: '100%' }} value={category} onChange={(e) => setCategory(e.target.value)}>
+            {CATEGORY_ORDER.map((k) => <option key={k} value={k}>{catLabel(k)}</option>)}
+          </select>
+        </div>
+        <div>
+          <Label>Name</Label>
+          <input className="px-btn" style={{ width: '100%', fontFamily: 'inherit' }} value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. VP Eng — warm intro" />
+        </div>
+      </div>
+      <div style={{ marginTop: 12 }}>
+        <Label>Body</Label>
+        <textarea className="px-input" value={body} onChange={(e) => setBody(e.target.value)} rows={12}
+          style={{ width: '100%', fontFamily: 'ui-monospace, monospace', fontSize: 12.5, lineHeight: 1.5, resize: 'vertical' }} placeholder="Template text…" />
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 12, flexWrap: 'wrap' }}>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontSize: 13 }}>
+          <input type="checkbox" checked={isPrimary} onChange={(e) => setIsPrimary(e.target.checked)} /> Primary for this category
+        </label>
+        <div style={{ flex: 1 }} />
+        <button className="px-btn" onClick={onCancel}>Cancel</button>
+        <button className="px-btn px-btn-accent" disabled={busy || !name.trim() || !body.trim()} onClick={submit}>{busy ? 'Saving…' : 'Save template'}</button>
+      </div>
+    </Card>
+  )
+}
+
+const SECTIONS = [{ key: 'account', label: 'Account' }, { key: 'intake', label: 'Intake' }, { key: 'roles', label: 'Roles' }, { key: 'templates', label: 'Templates' }, { key: 'coach', label: 'Coach' }, { key: 'workspace', label: 'Workspace' }, { key: 'usage', label: 'Usage' }, { key: 'system', label: 'System' }]
 
 export default function Settings({ tab = 'account' }) {
   const active = SECTIONS.find((s) => s.key === tab) ? tab : 'account'
@@ -807,6 +980,7 @@ export default function Settings({ tab = 'account' }) {
       {active === 'account' && <AccountSettings />}
       {active === 'intake' && <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}><IntakeSettings /><AtsSources /></div>}
       {active === 'roles' && <RolesSettings />}
+      {active === 'templates' && <TemplatesSettings />}
       {active === 'coach' && <CoachSettings />}
       {active === 'workspace' && <WorkspaceSettings />}
       {active === 'usage' && <UsageSettings />}

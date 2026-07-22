@@ -37,6 +37,11 @@ function sourceOf(from = '') {
   const hit = SOURCE_PRESETS.find((s) => f.includes(s.key))
   return hit ? { label: hit.label, tone: 'accent' } : { label: 'Other', tone: 'panel' }
 }
+function alertBadge(state) {
+  if (state === 'snoozed') return { label: 'Snoozed', tone: 'yellow' }
+  if (state === 'dismissed') return { label: 'Dismissed', tone: 'panel' }
+  return null
+}
 function Card({ children, style }) {
   return <div style={{ border: '1px solid var(--proto-rule-soft)', borderRadius: 12, background: 'var(--proto-paper)', padding: 16, ...style }}>{children}</div>
 }
@@ -72,6 +77,8 @@ export default function Intake() {
   const [roleSel, setRoleSel] = useState(null) // folderId of selected role, or null = all mail
   const [msgs, setMsgs] = useState({ loading: false, list: [], error: null, at: null })
   const [msgSel, setMsgSel] = useState(null) // index into msgs.list
+  const [body, setBody] = useState({ loading: false, id: null, bodyType: null, html: null, error: null }) // fetched message body
+  const [alertBusy, setAlertBusy] = useState(false) // snooze/dismiss in flight
 
   const loadRoles = useCallback(async () => {
     setRoles((r) => ({ ...r, loading: true, error: null }))
@@ -101,6 +108,33 @@ export default function Intake() {
   }, [])
 
   const selectRole = useCallback((folderId) => { setRoleSel(folderId); loadMessages(folderId) }, [loadMessages])
+
+  // Update a single message's alert fields in place (after snooze/dismiss).
+  const patchMsg = useCallback((id, patch) => {
+    setMsgs((m) => ({ ...m, list: m.list.map((x) => (x.id === id ? { ...x, ...patch } : x)) }))
+  }, [])
+
+  const snoozeAlert = useCallback(async (id) => {
+    if (!id || alertBusy) return
+    setAlertBusy(true)
+    try {
+      const res = await api.mailAlertSnooze(id, 24)
+      if (res.ok === false) throw new Error(res.detail || res.error || 'failed')
+      patchMsg(id, { alertState: 'snoozed', snoozeUntil: res.snoozeUntil || new Date(Date.now() + 24 * 3600e3).toISOString() })
+    } catch (e) { setBody((b) => (b.id === id ? { ...b, error: String(e.message || e) } : b)) }
+    finally { setAlertBusy(false) }
+  }, [alertBusy, patchMsg])
+
+  const dismissAlert = useCallback(async (id) => {
+    if (!id || alertBusy) return
+    setAlertBusy(true)
+    try {
+      const res = await api.mailAlertDismiss(id)
+      if (res.ok === false) throw new Error(res.detail || res.error || 'failed')
+      patchMsg(id, { alertState: 'dismissed', snoozeUntil: null })
+    } catch (e) { setBody((b) => (b.id === id ? { ...b, error: String(e.message || e) } : b)) }
+    finally { setAlertBusy(false) }
+  }, [alertBusy, patchMsg])
 
   const loadSubs = useCallback(async () => {
     setSub((s) => ({ ...s, loading: true }))
@@ -138,6 +172,23 @@ export default function Intake() {
   }
   const selectedRole = roles.list.find((r) => r.folderId === roleSel)
   const preview = msgSel != null ? msgs.list[msgSel] : null
+
+  // Fetch the real sanitized body whenever a message is selected.
+  useEffect(() => {
+    const id = preview?.id
+    if (!id) { setBody({ loading: false, id: null, bodyType: null, html: null, error: null }); return }
+    let cancelled = false
+    setBody({ loading: true, id, bodyType: null, html: null, error: null })
+    api.mailMessage(id, watchMailbox || undefined)
+      .then((res) => {
+        if (cancelled) return
+        if (res.ok === false) throw new Error(res.detail || res.error || 'failed')
+        setBody({ loading: false, id, bodyType: res.bodyType || 'text', html: res.body || '', error: null })
+      })
+      .catch((e) => { if (!cancelled) setBody({ loading: false, id, bodyType: null, html: null, error: String(e.message || e) }) })
+    return () => { cancelled = true }
+    // watchMailbox is derived below; preview.id is the real trigger
+  }, [preview?.id]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const watch = sub.watches[0]
   const watchMailbox = watch ? (watch.resource || '').replace(/^users\//, '').replace(/\/mailFolders.*$/, '') : null
@@ -192,11 +243,13 @@ export default function Intake() {
             {!msgs.loading && !msgs.error && msgs.list.length === 0 && <div className="px-small" style={{ padding: '8px 12px', color: 'var(--proto-ink2)' }}>No messages in this view.</div>}
             {msgs.list.map((m, i) => {
               const src = sourceOf(m.from)
+              const badge = alertBadge(m.alertState)
               return (
-                <div key={i} onClick={() => setMsgSel(i)} style={{ padding: '10px 12px', borderBottom: '1px solid var(--proto-rule-soft)', cursor: 'pointer', background: msgSel === i ? 'var(--proto-paper-2, rgba(127,127,127,0.08))' : 'transparent' }}>
+                <div key={m.id || i} onClick={() => setMsgSel(i)} style={{ padding: '10px 12px', borderBottom: '1px solid var(--proto-rule-soft)', cursor: 'pointer', background: msgSel === i ? 'var(--proto-paper-2, rgba(127,127,127,0.08))' : 'transparent', opacity: m.alertState === 'dismissed' ? 0.6 : 1 }}>
                   <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
                     <Pill tone={src.tone}>{src.label}</Pill>
                     <span style={{ fontWeight: 600, flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{m.subject || '(no subject)'}</span>
+                    {badge && <Pill tone={badge.tone}>{badge.label}</Pill>}
                   </div>
                   <div className="px-small" style={{ marginTop: 4, color: 'var(--proto-ink2)', display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                     <span style={{ wordBreak: 'break-all' }}>{m.from || '(unknown)'}</span><span>·</span><span>{timeAgo(m.received)}</span>

@@ -22,6 +22,8 @@ export default function Composer({ id }) {
   const [toEmail, setToEmail] = useState('')
   const [sending, setSending] = useState(false)
   const [savingDraft, setSavingDraft] = useState(false)
+  const [templates, setTemplates] = useState([])
+  const [templatesLoaded, setTemplatesLoaded] = useState(false)
 
   const load = useCallback(async () => {
     try {
@@ -36,6 +38,35 @@ export default function Composer({ id }) {
     } catch (err) { setMeta({ loading: false, error: String(err.message || err) }) }
   }, [id])
   useEffect(() => { load() }, [load])
+
+  // Load the user's saved templates once; the outreach-relevant categories are
+  // recruiter / hm / linkedin / thankyou. Show those (fall back to all if none
+  // match) so a template row of the user's real templates is available.
+  useEffect(() => {
+    let alive = true
+    ;(async () => {
+      try {
+        const res = await api.templatesList()
+        if (!alive) return
+        const all = (res && res.templates) || []
+        const OUTREACH_CATS = ['recruiter', 'hm', 'linkedin', 'thankyou']
+        const relevant = all.filter((t) => OUTREACH_CATS.includes(t.category))
+        setTemplates(relevant.length ? relevant : all)
+      } catch { /* leave templates empty — shows the empty hint */ }
+      finally { if (alive) setTemplatesLoaded(true) }
+    })()
+    return () => { alive = false }
+  }, [])
+
+  // Insert a template's body into the editable composer body and count a real use.
+  const applyTemplate = async (t) => {
+    setBody((prev) => (prev && prev.trim() ? `${prev.trimEnd()}\n\n${t.body}` : t.body))
+    toast(`Loaded template: ${t.name}`)
+    try { await api.templateUse(t.id) } catch { /* usage bump is best-effort */ }
+    setTemplates((list) => list.map((x) => (x.id === t.id ? { ...x, usageCount: (x.usageCount || 0) + 1 } : x)))
+  }
+
+  const CAT_LABELS = { recruiter: 'Recruiter', hm: 'Hiring mgr', linkedin: 'LinkedIn', thankyou: 'Thank-you' }
 
   const generate = async (ch = channel, tn = tone, cid = contactId) => {
     setBusy(true)
@@ -108,6 +139,30 @@ export default function Composer({ id }) {
         ))}
       </div>
 
+      {/* Template row — the user's saved outreach templates. Clicking one loads
+          its body into the editor and counts a real use via api.templateUse. */}
+      {templatesLoaded && (
+        templates.length ? (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <span className="px-small" style={{ textTransform: 'uppercase', letterSpacing: 1 }}>Templates</span>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+              {templates.map((t) => (
+                <button key={t.id} className="px-chip" onClick={() => applyTemplate(t)}
+                  title={`${CAT_LABELS[t.category] || t.category}${t.replyRate != null ? ` · ${t.replyRate}% reply` : ''}${t.usageCount ? ` · used ${t.usageCount}×` : ''}`}
+                  style={{ cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                  {t.isPrimary ? '★ ' : ''}{t.name}
+                  <span className="px-small" style={{ color: 'var(--proto-ink3)' }}>{CAT_LABELS[t.category] || t.category}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        ) : (
+          <div className="px-small" style={{ color: 'var(--proto-ink3)' }}>
+            No templates yet · <span className="px-link" onClick={() => go('/settings')}>Settings ▸ Templates</span>
+          </div>
+        )
+      )}
+
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 16 }}>
         {/* Editor column */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
@@ -157,14 +212,12 @@ export default function Composer({ id }) {
         </div>
 
         {/* Personalization rail.
-            Spec also called for a Template row (Standard/Value-add POV/Referral/
-            Re-engage), a "Hooks that convert" list, and a reply-rate benchmark.
-            All three are intentionally omitted: generateOutreach only accepts
-            { channel, tone, contactId } (no template param) and no API response
-            (generate, opportunity, contacts, or listOutreach) returns templates,
-            hooks, or a reply-rate number. Per the no-fake-data rule these controls
-            are hidden rather than stubbed; wire them if/when the API exposes the
-            data (e.g. out.templates, res.message.hooks, opp.metrics.replyRate). */}
+            The Template row (above the editor grid) is now wired to the real
+            api.templatesList() / api.templateUse() endpoints. A "Hooks that
+            convert" list and reply-rate benchmark remain omitted: no API
+            response returns hooks, and generateOutreach still only accepts
+            { channel, tone, contactId }. Wire those if/when the API exposes
+            the data. */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
           <div>
             <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--proto-ink2)', marginBottom: 6 }}>Personalization</div>

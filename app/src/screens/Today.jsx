@@ -210,6 +210,9 @@ export default function Today({ opps }) {
       {/* Pulse strip — real platform metrics */}
       {metrics && <PulseStrip metrics={metrics} />}
 
+      {/* Reply rate + Avg days/stage — now-real metrics */}
+      {metrics && <ReplyAndVelocityRow replyRate={metrics.outreach?.replyRate} avgDaysPerStage={metrics.avgDaysPerStage} />}
+
       {/* This morning's goals — real counts */}
       {metrics && <MorningGoals goals={metrics.goals} />}
 
@@ -388,6 +391,39 @@ function MetricsKpiRow({ kpis, weekly }) {
       <MetricKpi label="Interview" value={k.interview ?? 0} tone="purple" />
       <MetricKpi label="Rejected" value={k.rejected ?? 0} tone="ink3" />
       <MetricKpi label="This week" value={weekly?.last7 ?? 0} tone="green" delta={delta} />
+    </div>
+  )
+}
+
+// Reply rate + pipeline velocity (avg days/stage). Both render only from the
+// real metrics object — avg days shows an honest "accumulating" state when the
+// server hasn't yet observed enough completed stage transitions.
+function ReplyAndVelocityRow({ replyRate, avgDaysPerStage }) {
+  const rr = replyRate || {}
+  const rrPct = typeof rr.pct === 'number' ? rr.pct : null
+  const accumulating = avgDaysPerStage == null
+  const overall = accumulating ? null : avgDaysPerStage.overall
+  const overallDays = typeof overall === 'number' ? Math.round(overall) : null
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 12 }}>
+      <div className="px-box" style={{ padding: 16 }}>
+        <div className="px-small" style={{ textTransform: 'uppercase', letterSpacing: 1 }}>Reply rate</div>
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+          <span style={{ fontSize: 28, fontWeight: 700, color: 'var(--proto-accent)' }}>{rrPct != null ? `${rrPct}%` : '—'}</span>
+        </div>
+        <div className="px-small" style={{ marginTop: 2 }}>{rr.replied ?? 0} replied / {rr.sent ?? 0} sent</div>
+      </div>
+      <div className="px-box" style={{ padding: 16 }}>
+        <div className="px-small" style={{ textTransform: 'uppercase', letterSpacing: 1 }}>Avg days/stage</div>
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+          {accumulating || overallDays == null
+            ? <span style={{ fontSize: 15, fontWeight: 600, color: 'var(--proto-ink3)' }}>accumulating</span>
+            : <span style={{ fontSize: 28, fontWeight: 700, color: 'var(--proto-purple)' }}>{overallDays}<span className="px-small" style={{ marginLeft: 4, fontWeight: 400 }}>days</span></span>}
+        </div>
+        {!accumulating && typeof avgDaysPerStage.completedTransitions === 'number' && (
+          <div className="px-small" style={{ marginTop: 2 }}>{avgDaysPerStage.completedTransitions} transitions</div>
+        )}
+      </div>
     </div>
   )
 }

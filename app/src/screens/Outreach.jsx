@@ -4,33 +4,38 @@ import { api } from '../api.js'
 import { Pill } from '../shell.jsx'
 import { Loading, ErrorBox, Empty, roleFamily } from './Today.jsx'
 
-// The only outreach states the backend recognizes (api appOutreach.ts:
-// STATES = ['draft','scheduled','due','sent']). setOutreachState rejects
-// anything else with a 400, so the flow header and the advance button are
-// built strictly from these four — no "approved"/"opened"/"replied" (they
-// are not part of the data model).
+// The full outreach state chain the backend recognizes (api appOutreach.ts:
+// setOutreachState now accepts 'opened' and 'replied' in addition to
+// draft/scheduled/due/sent, stamping opened_at/replied_at). The flow header
+// and the advance button are built strictly from these six real states.
 const FLOW = [
   { key: 'draft', label: 'Draft', tone: 'yellow' },
   { key: 'scheduled', label: 'Scheduled', tone: 'accent' },
   { key: 'due', label: 'Due', tone: 'red' },
   { key: 'sent', label: 'Sent', tone: 'green' },
+  { key: 'opened', label: 'Opened', tone: 'accent' },
+  { key: 'replied', label: 'Replied', tone: 'green' },
 ]
 
-// Groups rendered as sections (queue order: act on due first, sent last).
+// Groups rendered as sections (queue order: act on due first, replied last).
 const GROUPS = [
   { key: 'due', label: 'Due now', tone: 'red' },
   { key: 'scheduled', label: 'Scheduled', tone: 'accent' },
   { key: 'draft', label: 'Drafts', tone: 'yellow' },
   { key: 'sent', label: 'Sent', tone: 'green' },
+  { key: 'opened', label: 'Opened', tone: 'accent' },
+  { key: 'replied', label: 'Replied', tone: 'green' },
 ]
 
 // Linear state machine — each state advances to the next real state, applied
-// via setOutreachState (all four are accepted server-side). 'sent' is terminal
-// because there is no opened/replied state in the model.
+// via setOutreachState (all six are accepted server-side). 'replied' is
+// terminal (end of the outreach lifecycle).
 const NEXT = {
   draft: { to: 'scheduled', label: 'Schedule', cls: 'px-btn' },
   scheduled: { to: 'due', label: 'Mark due', cls: 'px-btn' },
   due: { to: 'sent', label: 'Mark sent', cls: 'px-btn px-btn-green' },
+  sent: { to: 'opened', label: 'Mark opened', cls: 'px-btn' },
+  opened: { to: 'replied', label: 'Log reply', cls: 'px-btn px-btn-green' },
 }
 
 export default function Outreach() {
@@ -48,7 +53,8 @@ export default function Outreach() {
   }, [])
   useEffect(() => { load() }, [load])
 
-  // Advance a message to its next real state (draft→scheduled→due→sent).
+  // Advance a message to its next real state
+  // (draft→scheduled→due→sent→opened→replied).
   const advance = async (m) => {
     const step = NEXT[m.state]
     if (!step) return

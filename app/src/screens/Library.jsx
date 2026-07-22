@@ -105,12 +105,9 @@ function Kpi({ value, label, hint }) {
 
 // Screen 9 — Assets. Renders ONLY metrics the API actually returns:
 //   listAssets  → per asset: id, type, status, oppId, company, role, docUrl, driveUrl, opens, updatedAt
-//   assetsAnalytics → per asset: opens, uniqueViewers, viewSeconds, lastEvent (+ totalOpens)
+//   assetsAnalytics → per asset: opens, uniqueViewers, viewSeconds, lastEvent, forwards, opens7d
+//                     (+ totalOpens, totalForwards, totalOpens7d aggregates)
 // Not backed by any real field, so intentionally omitted (see notes in UI):
-//   - opens in a 7-day window  (analytics returns only aggregate opens + a single
-//     lastEvent timestamp per asset — no per-event feed to window on)
-//   - forwards  (asset_event has a 'forward' event type, but assetsAnalytics does
-//     not aggregate/return a forward count)
 //   - per-slide view %  (no slide-level data anywhere) → most-viewed-slides hidden
 function Assets() {
   const listState = useFetch(() => api.listAssets())
@@ -134,11 +131,15 @@ function Assets() {
       uniqueViewers: e.uniqueViewers || 0,
       viewSeconds: e.viewSeconds || 0,
       lastEvent: e.lastEvent || null,
+      forwards: e.forwards || 0,
+      opens7d: e.opens7d || 0,
     }
   })
 
   // KPIs — every one computed from a real field; ones we can't compute are omitted below.
   const totalOpens = rows.reduce((s, r) => s + r.opens, 0)
+  const totalOpens7d = anaState.data?.totalOpens7d ?? rows.reduce((s, r) => s + r.opens7d, 0)
+  const totalForwards = anaState.data?.totalForwards ?? rows.reduce((s, r) => s + r.forwards, 0)
   const totalSeconds = rows.reduce((s, r) => s + r.viewSeconds, 0)
   const rowsWithTime = rows.filter((r) => r.viewSeconds > 0)
   const avgViewTime = rowsWithTime.length ? totalSeconds / rowsWithTime.length : 0
@@ -150,6 +151,8 @@ function Assets() {
       case 'asset': return `${r.company || ''} ${r.type || ''}`.toLowerCase()
       case 'typerole': return `${r.type || ''} ${r.role || ''}`.toLowerCase()
       case 'opens': return r.opens
+      case 'opens7d': return r.opens7d
+      case 'forwards': return r.forwards
       case 'viewers': return r.uniqueViewers
       case 'dur': return r.viewSeconds
       case 'last': return r.lastEvent ? new Date(r.lastEvent).getTime() : 0
@@ -185,13 +188,10 @@ function Assets() {
       <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
         <Kpi value={rows.length} label="Assets" />
         <Kpi value={totalOpens} label="Total opens" hint="all-time" />
+        <Kpi value={totalOpens7d} label="Opens (7d)" hint="last 7 days" />
+        <Kpi value={totalForwards} label="Forwards" hint="all-time" />
         {avgViewTime > 0 && <Kpi value={fmtDur(avgViewTime)} label="Avg view time" hint="tracked views" />}
         <Kpi value={stale} label="Stale" hint=">21d / never opened" />
-      </div>
-      <div className="px-small" style={{ opacity: 0.8 }}>
-        Opens-in-last-7-days and forwards aren't shown — the analytics API returns only aggregate
-        opens plus a single last-open timestamp per asset (no per-event feed to window on) and no
-        forward count. Those KPIs need the backend to expose a per-event feed / forward tally.
       </div>
 
       {/* Bin-by toggle */}
@@ -220,6 +220,8 @@ function Assets() {
                 <Th col="asset">Asset</Th>
                 <Th col="typerole">Type / Role</Th>
                 <Th col="opens" align="right">Opens</Th>
+                <Th col="opens7d" align="right">7d</Th>
+                <Th col="forwards" align="right">Fwd</Th>
                 <Th col="viewers" align="right">Viewers</Th>
                 <Th col="dur" align="right">Dur</Th>
                 <Th col="last" align="right">Last</Th>
@@ -229,7 +231,7 @@ function Assets() {
               {groupNames.map((g) => (
                 <React.Fragment key={g}>
                   <tr>
-                    <td colSpan={6} style={{ padding: '8px 8px 4px', fontWeight: 700, fontSize: 12, textTransform: 'uppercase', letterSpacing: 0.4, color: 'var(--proto-ink2)' }}>
+                    <td colSpan={8} style={{ padding: '8px 8px 4px', fontWeight: 700, fontSize: 12, textTransform: 'uppercase', letterSpacing: 0.4, color: 'var(--proto-ink2)' }}>
                       {g} <span style={{ opacity: 0.6, fontWeight: 500 }}>({groups[g].length})</span>
                     </td>
                   </tr>
@@ -245,6 +247,8 @@ function Assets() {
                         {r.role && <span className="px-small"> · {r.role}</span>}
                       </td>
                       <td style={{ padding: '6px 8px', textAlign: 'right' }}>{r.opens || '—'}</td>
+                      <td style={{ padding: '6px 8px', textAlign: 'right' }}>{r.opens7d || '—'}</td>
+                      <td style={{ padding: '6px 8px', textAlign: 'right' }}>{r.forwards || '—'}</td>
                       <td style={{ padding: '6px 8px', textAlign: 'right' }}>{r.uniqueViewers || '—'}</td>
                       <td style={{ padding: '6px 8px', textAlign: 'right' }}>{fmtDur(r.viewSeconds)}</td>
                       <td style={{ padding: '6px 8px', textAlign: 'right', whiteSpace: 'nowrap' }}>{timeAgo(r.lastEvent)}</td>
@@ -254,10 +258,6 @@ function Assets() {
               ))}
             </tbody>
           </table>
-          <div className="px-small" style={{ padding: '8px 10px', opacity: 0.7 }}>
-            No Views or Fwd columns — the analytics API returns opens, unique viewers, view-seconds
-            and a last-open per asset, but no distinct in-app view count or forward count.
-          </div>
         </div>
 
         {/* Right rail — recent opens */}
