@@ -2,7 +2,9 @@ import React, { useEffect, useState, useCallback } from 'react'
 import { useApp, go, useRoute } from '../state.jsx'
 import { api } from '../api.js'
 import { Pill, UrgencyPill, MatchScore } from '../shell.jsx'
-import { Loading, ErrorBox } from './Today.jsx'
+import { Loading, ErrorBox, Empty } from './Today.jsx'
+
+const ART_STATUS_TONE = { todo: 'panel', drafting: 'yellow', review: 'accent', changes: 'red', approved: 'green' }
 
 const STAGES = [
   { id: 'discovered', label: 'Discovered' }, { id: 'saved', label: 'Saved' },
@@ -12,8 +14,11 @@ const STAGES = [
   { id: 'panel', label: 'Panel' }, { id: 'final', label: 'Final' },
   { id: 'offer', label: 'Offer' }, { id: 'accepted', label: 'Accepted' },
 ]
-const TABS = ['overview', 'jd', 'contacts', 'outreach']
-const TAB_LABELS = { overview: 'Overview', jd: 'Job Description', contacts: 'Contacts', outreach: 'Outreach' }
+const TABS = ['overview', 'jd', 'contacts', 'resume', 'outreach', 'playbooks', 'interview', 'analytics']
+const TAB_LABELS = {
+  overview: 'Overview', jd: 'Job Description', contacts: 'Contacts', resume: 'Resume',
+  outreach: 'Outreach', playbooks: 'Playbooks', interview: 'Interview prep', analytics: 'Analytics',
+}
 
 export default function OppDetail({ id, tab = 'overview' }) {
   const { toast } = useApp()
@@ -95,7 +100,21 @@ export default function OppDetail({ id, tab = 'overview' }) {
       {tab === 'overview' && <Overview o={o} toast={toast} id={id} reload={load} />}
       {tab === 'jd' && <JdTab o={o} toast={toast} reload={load} />}
       {tab === 'contacts' && <Contacts contacts={o.contacts || []} oppId={o.id} toast={toast} />}
+      {tab === 'resume' && <ResumeTab o={o} toast={toast} />}
       {tab === 'outreach' && <Outreach o={o} />}
+      {tab === 'playbooks' && <PlaybooksTab />}
+      {tab === 'interview' && <InterviewTab o={o} />}
+      {tab === 'analytics' && <AnalyticsTab o={o} />}
+
+      {/* Tabs from the reference spec that have no real per-opportunity data source
+          are intentionally omitted rather than filled with placeholder content:
+          · Templates — no template store/API is wired for opportunities today.
+          · Activity — there is no per-opportunity activity/event feed (the coach
+            activity log is owner-scoped, not scoped to a single opportunity). */}
+      <div className="px-small" style={{ color: 'var(--proto-ink3)', lineHeight: 1.5 }}>
+        Not shown: <b>Templates</b> (no template API) and <b>Activity</b> (no
+        per-opportunity event feed exists yet). These are hidden rather than faked.
+      </div>
     </div>
   )
 }
@@ -353,6 +372,228 @@ function Contacts({ contacts, oppId, toast }) {
           {p.match != null && <Pill tone="accent">{p.match}</Pill>}
         </div>
       ))}
+    </div>
+  )
+}
+
+// Resume tab — the opportunity's resume artifact(s) from the packet. Real data
+// via getPacket; actions (generate / approve / request changes / create Google
+// Doc) reuse the same endpoints the packet builder uses.
+function ResumeTab({ o, toast }) {
+  const [state, setState] = useState({ loading: true, error: null, arts: [] })
+  const [busy, setBusy] = useState(null)
+  const [open, setOpen] = useState({})
+
+  const load = useCallback(async () => {
+    try {
+      const p = await api.getPacket(o.id)
+      if (p.error) throw new Error(p.error)
+      const arts = (p.artifacts || []).filter((a) => a.type === 'resume' || a.type === 'compact_resume')
+      setState({ loading: false, error: null, arts })
+    } catch (e) { setState({ loading: false, error: String(e.message || e), arts: [] }) }
+  }, [o.id])
+  useEffect(() => { load() }, [load])
+
+  const patch = (id, fields) => setState((s) => ({ ...s, arts: s.arts.map((a) => (a.id === id ? { ...a, ...fields } : a)) }))
+
+  const generate = async (a) => {
+    setBusy(a.id)
+    try { const r = await api.generateArtifact(a.id); if (r.error) throw new Error(r.error); patch(a.id, { status: r.artifactStatus, content: r.content }); toast('Resume drafted') }
+    catch (e) { toast(`Generate failed: ${e.message || e}`) } finally { setBusy(null) }
+  }
+  const setStatus = async (a, status) => {
+    const prev = a.status; patch(a.id, { status })
+    try { const r = await api.setArtifactStatus(a.id, status); if (r.error) throw new Error(r.error); toast(`Resume → ${status}`) }
+    catch (e) { patch(a.id, { status: prev }); toast(`Update failed: ${e.message || e}`) }
+  }
+  const makeDoc = async (a) => {
+    setBusy(a.id)
+    try { const r = await api.generateArtifactDocument(a.id); if (r.error) throw new Error(r.error); patch(a.id, { docUrl: r.docUrl }); toast('Google Doc created') }
+    catch (e) { toast(`Doc failed: ${e.message || e}`) } finally { setBusy(null) }
+  }
+
+  if (state.loading) return <Loading />
+  if (state.error) return <ErrorBox error={state.error} />
+  if (!state.arts.length) return (
+    <div className="px-box" style={{ padding: 24, textAlign: 'center', color: 'var(--proto-ink2)' }}>
+      <div>No resume artifact exists for this opportunity yet.</div>
+      <button className="px-btn px-btn-accent" style={{ marginTop: 12, fontSize: 13 }} onClick={() => go(`/packet/${o.id}`)}>Open packet builder →</button>
+    </div>
+  )
+  const label = { resume: 'Resume', compact_resume: 'Compact resume' }
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+      {state.arts.map((a) => (
+        <div key={a.id} className="px-box" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: 14, fontWeight: 700 }}>{label[a.type] || a.type}</div>
+              <div className="px-small" style={{ marginTop: 2 }}>Keyword-tailored from your master resume</div>
+            </div>
+            <Pill tone={ART_STATUS_TONE[a.status] || 'panel'}>{a.status}</Pill>
+          </div>
+          {a.content && (
+            <div>
+              <span className="px-link" style={{ fontSize: 12 }} onClick={() => setOpen((x) => ({ ...x, [a.id]: !x[a.id] }))}>
+                {open[a.id] ? '▾ Hide draft' : '▸ View draft'}
+              </span>
+              {open[a.id] && (
+                <div className="px-box" style={{ padding: 10, marginTop: 6, fontSize: 12, lineHeight: 1.6, whiteSpace: 'pre-wrap', maxHeight: 320, overflow: 'auto', background: 'var(--proto-panel)' }}>{a.content}</div>
+              )}
+            </div>
+          )}
+          {a.docUrl ? (
+            <a href={a.docUrl} target="_blank" rel="noreferrer" className="px-link" style={{ fontSize: 12 }}>✓ Open Google Doc ↗</a>
+          ) : a.content ? (
+            <button className="px-btn" style={{ fontSize: 12, alignSelf: 'flex-start' }} disabled={busy === a.id} onClick={() => makeDoc(a)}>{busy === a.id ? 'Creating Doc…' : '📄 Create Google Doc'}</button>
+          ) : null}
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            {a.status === 'todo' && <button className="px-btn px-btn-accent" disabled={busy === a.id} onClick={() => generate(a)}>{busy === a.id ? 'Generating…' : 'Generate draft'}</button>}
+            {(a.status === 'review' || a.status === 'changes') && (
+              <>
+                <button className="px-btn px-btn-green" onClick={() => setStatus(a, 'approved')}>Approve</button>
+                <button className="px-btn" disabled={busy === a.id} onClick={() => generate(a)}>{busy === a.id ? 'Regenerating…' : 'Regenerate'}</button>
+                {a.status !== 'changes' && <button className="px-btn" onClick={() => setStatus(a, 'changes')}>Request changes</button>}
+              </>
+            )}
+            {a.status === 'approved' && <button className="px-btn" onClick={() => setStatus(a, 'review')}>Reopen</button>}
+            <button className="px-btn" style={{ fontSize: 12 }} onClick={() => go(`/packet/${o.id}`)}>Open in packet builder →</button>
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+// Playbooks tab — real playbook entities from the shared library (listLibrary).
+// There is no per-opportunity or per-role linkage field on library_entity, so
+// these are surfaced as the owner's playbook library with an explicit note that
+// they are not yet linked to this specific opportunity (no fabricated linkage).
+function PlaybooksTab() {
+  const [state, setState] = useState({ loading: true, error: null, entities: [] })
+  useEffect(() => {
+    api.listLibrary('playbook')
+      .then((r) => { if (r.error) throw new Error(r.error); setState({ loading: false, error: null, entities: r.entities || [] }) })
+      .catch((e) => setState({ loading: false, error: String(e.message || e), entities: [] }))
+  }, [])
+  if (state.loading) return <Loading />
+  if (state.error) return <ErrorBox error={state.error} />
+  if (!state.entities.length) return <Empty>No playbooks in your library yet. <span className="px-link" style={{ cursor: 'pointer' }} onClick={() => go('/library/playbooks')}>Open the library →</span></Empty>
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+      <div className="px-small" style={{ color: 'var(--proto-ink3)', lineHeight: 1.5 }}>
+        Your playbook library. Playbooks are not yet linked to individual opportunities,
+        so every real playbook is shown here — pick the narrative that fits this role.
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 12 }}>
+        {state.entities.map((e) => (
+          <div key={e.id} className="px-box" style={{ padding: 14, display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <div style={{ fontSize: 14, fontWeight: 700, flex: 1 }}>{e.name}</div>
+              <Pill tone="accent">{e.kind}</Pill>
+            </div>
+            {e.category && <div className="px-small">{e.category}</div>}
+            {e.content?.thesis && <div style={{ fontSize: 13, lineHeight: 1.5 }}>{e.content.thesis}</div>}
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+// Interview prep tab — real interviews for this opportunity (listInterviews).
+// Summarizes the most recent prep pack and links into the full /interview flow.
+function InterviewTab({ o }) {
+  const [state, setState] = useState({ loading: true, error: null, interviews: [] })
+  useEffect(() => {
+    api.listInterviews(o.id)
+      .then((r) => { if (r.error) throw new Error(r.error); setState({ loading: false, error: null, interviews: r.interviews || [] }) })
+      .catch((e) => setState({ loading: false, error: String(e.message || e), interviews: [] }))
+  }, [o.id])
+  if (state.loading) return <Loading />
+  if (state.error) return <ErrorBox error={state.error} />
+  const iv = state.interviews[0]
+  if (!iv) return (
+    <div className="px-box" style={{ padding: 24, textAlign: 'center', color: 'var(--proto-ink2)' }}>
+      <div>No interview prep generated for this opportunity yet.</div>
+      <button className="px-btn px-btn-accent" style={{ marginTop: 12, fontSize: 13 }} onClick={() => go(`/interview/${o.id}/prep`)}>Generate prep pack →</button>
+    </div>
+  )
+  const questions = iv.questions || []
+  const coverage = iv.coverageMap || []
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+        <div style={{ flex: 1 }}>
+          <div style={{ fontSize: 14, fontWeight: 700 }}>Interview prep{iv.stage ? ` · ${iv.stage}` : ''}</div>
+          <div className="px-small">{questions.length} likely question{questions.length === 1 ? '' : 's'}{state.interviews.length > 1 ? ` · ${state.interviews.length} sessions` : ''}</div>
+        </div>
+        <button className="px-btn px-btn-accent" onClick={() => go(`/interview/${o.id}/prep`)}>Open full prep →</button>
+        <button className="px-btn" onClick={() => go(`/interview/${o.id}/debrief`)}>Debrief</button>
+      </div>
+      {coverage.length > 0 && (
+        <div className="px-box" style={{ padding: 12, display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+          {coverage.map((c, i) => <Pill key={i} tone={c.covered ? 'green' : 'red'}>{c.covered ? '✓' : '△'} {c.theme}</Pill>)}
+        </div>
+      )}
+      {questions.length > 0 && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          {questions.slice(0, 5).map((q, i) => (
+            <div key={i} className="px-box" style={{ padding: 14 }}>
+              <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
+                <div style={{ flex: 1, fontWeight: 600, fontSize: 14 }}>{q.question}</div>
+                {q.strength && <Pill tone={q.strength === 'strong' ? 'green' : q.strength === 'gap' ? 'red' : 'yellow'}>{q.strength}</Pill>}
+              </div>
+              {q.suggestedAnswer && <div className="px-small" style={{ marginTop: 8, lineHeight: 1.5, whiteSpace: 'pre-wrap' }}>{q.suggestedAnswer}</div>}
+            </div>
+          ))}
+          {questions.length > 5 && <div className="px-small px-link" onClick={() => go(`/interview/${o.id}/prep`)}>View all {questions.length} questions →</div>}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// Analytics tab — asset engagement for THIS opportunity. assetsAnalytics is
+// owner-scoped and returns company/role per asset, so we filter down to assets
+// belonging to this opportunity's company+role (the only per-opp key available).
+function AnalyticsTab({ o }) {
+  const [state, setState] = useState({ loading: true, error: null, assets: [] })
+  useEffect(() => {
+    api.assetsAnalytics()
+      .then((r) => {
+        if (r.error) throw new Error(r.error)
+        const mine = (r.assets || []).filter((a) => a.company === o.company && (!a.role || a.role === o.role))
+        setState({ loading: false, error: null, assets: mine })
+      })
+      .catch((e) => setState({ loading: false, error: String(e.message || e), assets: [] }))
+  }, [o.company, o.role])
+  if (state.loading) return <Loading />
+  if (state.error) return <ErrorBox error={state.error} />
+  const totalOpens = state.assets.reduce((s, a) => s + (a.opens || 0), 0)
+  if (!state.assets.length) return (
+    <div className="px-box" style={{ padding: 20, color: 'var(--proto-ink2)', fontSize: 13, lineHeight: 1.5 }}>
+      No tracked engagement for this opportunity yet. Share an asset from the packet
+      builder using <b>"Copy tracked link"</b> (not the raw Drive URL) and opens will appear here.
+    </div>
+  )
+  return (
+    <div className="px-box" style={{ padding: 16 }}>
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 10 }}>
+        <b style={{ fontSize: 14 }}>Engagement</b>
+        <span className="px-small">tracked opens on this opportunity's assets</span>
+        <div style={{ flex: 1 }} />
+        <span style={{ fontSize: 22, fontWeight: 700 }}>{totalOpens}</span>
+        <span className="px-small">total opens</span>
+      </div>
+      <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 4 }}>
+        {state.assets.map((a) => (
+          <div key={a.assetId} style={{ display: 'flex', alignItems: 'baseline', gap: 10, fontSize: 13, padding: '4px 0', borderTop: '1px solid var(--proto-rule-soft)' }}>
+            <span style={{ fontWeight: 600, minWidth: 140 }}>{a.type || 'asset'}</span>
+            <span className="px-small">👁 {a.opens}{a.uniqueViewers ? ` · ${a.uniqueViewers} viewer${a.uniqueViewers === 1 ? '' : 's'}` : ''}</span>
+          </div>
+        ))}
+      </div>
     </div>
   )
 }

@@ -82,31 +82,208 @@ function AssetAnalytics() {
   )
 }
 
-function Assets() {
-  const { loading, error, data } = useFetch(() => api.listAssets())
-  if (loading) return <Loading />
-  if (error) return <ErrorBox error={error} />
-  const assets = data.assets || []
-  if (!assets.length) return (<div><AssetAnalytics /><Empty>No generated assets yet. Build a packet to create tailored resumes, cover letters, and intro videos.</Empty></div>)
+function fmtDur(sec) {
+  if (!sec || sec <= 0) return '—'
+  if (sec < 60) return `${Math.round(sec)}s`
+  const m = Math.floor(sec / 60), s = Math.round(sec % 60)
+  return s ? `${m}m ${s}s` : `${m}m`
+}
+function daysSince(iso) {
+  if (!iso) return Infinity
+  return (Date.now() - new Date(iso).getTime()) / 86400000
+}
+
+function Kpi({ value, label, hint }) {
   return (
-    <div>
-    <AssetAnalytics />
-    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 12 }}>
-      {assets.map((a) => (
-        <div key={a.id} className="px-box" onClick={() => go(`/packet/${a.oppId}`)} style={{ padding: 14, cursor: 'pointer', display: 'flex', flexDirection: 'column', gap: 6 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <div style={{ fontSize: 14, fontWeight: 700, flex: 1 }}>{ASSET_LABEL[a.type] || a.type}</div>
-            <Pill tone={STATUS_TONE[a.status] || 'panel'}>{a.status}</Pill>
-          </div>
-          <div className="px-small">{a.company} · {a.role}</div>
-          <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 2 }}>
-            {a.type === 'video' && a.driveUrl && <a href={a.driveUrl} target="_blank" rel="noreferrer" className="px-link" style={{ fontSize: 12 }} onClick={(e) => e.stopPropagation()}>Drive ↗</a>}
-            {a.type === 'video' && a.docUrl && <span className="px-small">🎬 rendered</span>}
-            {a.opens > 0 && <span className="px-small">👁 {a.opens} opens</span>}
+    <div className="px-box" style={{ padding: 14, flex: '1 1 120px', minWidth: 120, display: 'flex', flexDirection: 'column', gap: 2 }}>
+      <div style={{ fontSize: 24, fontWeight: 800, letterSpacing: -0.5 }}>{value}</div>
+      <div className="px-small" style={{ fontWeight: 600 }}>{label}</div>
+      {hint && <div className="px-small" style={{ opacity: 0.7 }}>{hint}</div>}
+    </div>
+  )
+}
+
+// Screen 9 — Assets. Renders ONLY metrics the API actually returns:
+//   listAssets  → per asset: id, type, status, oppId, company, role, docUrl, driveUrl, opens, updatedAt
+//   assetsAnalytics → per asset: opens, uniqueViewers, viewSeconds, lastEvent (+ totalOpens)
+// Not backed by any real field, so intentionally omitted (see notes in UI):
+//   - opens in a 7-day window  (analytics returns only aggregate opens + a single
+//     lastEvent timestamp per asset — no per-event feed to window on)
+//   - forwards  (asset_event has a 'forward' event type, but assetsAnalytics does
+//     not aggregate/return a forward count)
+//   - per-slide view %  (no slide-level data anywhere) → most-viewed-slides hidden
+function Assets() {
+  const listState = useFetch(() => api.listAssets())
+  const anaState = useFetch(() => api.assetsAnalytics())
+  const [binByRole, setBinByRole] = useState(false)
+  const [sort, setSort] = useState({ col: 'last', dir: 'desc' })
+
+  if (listState.loading) return <Loading />
+  if (listState.error) return <ErrorBox error={listState.error} />
+  const assets = listState.data.assets || []
+  if (!assets.length) return <Empty>No generated assets yet. Build a packet to create tailored resumes, cover letters, and intro videos.</Empty>
+
+  // Merge analytics (uniqueViewers / viewSeconds / lastEvent) onto each asset by id.
+  const anaMap = {}
+  for (const a of anaState.data?.assets || []) anaMap[String(a.assetId)] = a
+  const rows = assets.map((a) => {
+    const e = anaMap[String(a.id)] || {}
+    return {
+      ...a,
+      opens: a.opens || 0,
+      uniqueViewers: e.uniqueViewers || 0,
+      viewSeconds: e.viewSeconds || 0,
+      lastEvent: e.lastEvent || null,
+    }
+  })
+
+  // KPIs — every one computed from a real field; ones we can't compute are omitted below.
+  const totalOpens = rows.reduce((s, r) => s + r.opens, 0)
+  const totalSeconds = rows.reduce((s, r) => s + r.viewSeconds, 0)
+  const rowsWithTime = rows.filter((r) => r.viewSeconds > 0)
+  const avgViewTime = rowsWithTime.length ? totalSeconds / rowsWithTime.length : 0
+  const stale = rows.filter((r) => r.opens === 0 || daysSince(r.lastEvent) > 21).length
+
+  // Sorting
+  const sortVal = (r) => {
+    switch (sort.col) {
+      case 'asset': return `${r.company || ''} ${r.type || ''}`.toLowerCase()
+      case 'typerole': return `${r.type || ''} ${r.role || ''}`.toLowerCase()
+      case 'opens': return r.opens
+      case 'viewers': return r.uniqueViewers
+      case 'dur': return r.viewSeconds
+      case 'last': return r.lastEvent ? new Date(r.lastEvent).getTime() : 0
+      default: return 0
+    }
+  }
+  const sorted = [...rows].sort((a, b) => {
+    const va = sortVal(a), vb = sortVal(b)
+    const cmp = va < vb ? -1 : va > vb ? 1 : 0
+    return sort.dir === 'asc' ? cmp : -cmp
+  })
+  const toggleSort = (col) => setSort((s) => s.col === col ? { col, dir: s.dir === 'asc' ? 'desc' : 'asc' } : { col, dir: 'desc' })
+
+  // Bin-by grouping: assets carry BOTH type and role, so the toggle is supported.
+  const groupKey = (r) => binByRole ? (r.role || '—') : (ASSET_LABEL[r.type] || r.type || '—')
+  const groups = {}
+  for (const r of sorted) { (groups[groupKey(r)] ||= []).push(r) }
+  const groupNames = Object.keys(groups).sort()
+
+  // Right rail — recent opens, built from the real per-asset lastEvent + opens.
+  const recent = rows.filter((r) => r.opens > 0 && r.lastEvent)
+    .sort((a, b) => new Date(b.lastEvent) - new Date(a.lastEvent)).slice(0, 8)
+
+  const Th = ({ col, children, align = 'left' }) => (
+    <th onClick={() => toggleSort(col)} style={{ textAlign: align, padding: '6px 8px', cursor: 'pointer', fontWeight: 600, whiteSpace: 'nowrap', userSelect: 'none' }}>
+      {children}{sort.col === col ? (sort.dir === 'asc' ? ' ↑' : ' ↓') : ''}
+    </th>
+  )
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+      {/* KPI row */}
+      <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+        <Kpi value={rows.length} label="Assets" />
+        <Kpi value={totalOpens} label="Total opens" hint="all-time" />
+        {avgViewTime > 0 && <Kpi value={fmtDur(avgViewTime)} label="Avg view time" hint="tracked views" />}
+        <Kpi value={stale} label="Stale" hint=">21d / never opened" />
+      </div>
+      <div className="px-small" style={{ opacity: 0.8 }}>
+        Opens-in-last-7-days and forwards aren't shown — the analytics API returns only aggregate
+        opens plus a single last-open timestamp per asset (no per-event feed to window on) and no
+        forward count. Those KPIs need the backend to expose a per-event feed / forward tally.
+      </div>
+
+      {/* Bin-by toggle */}
+      <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+        <span className="px-small" style={{ fontWeight: 600 }}>Bin by</span>
+        {[['type', 'Type'], ['role', 'Role']].map(([k, lbl]) => {
+          const active = (k === 'role') === binByRole
+          return (
+            <div key={k} onClick={() => setBinByRole(k === 'role')}
+              style={{ padding: '4px 12px', borderRadius: 999, cursor: 'pointer', fontSize: 12, fontWeight: active ? 600 : 500,
+                border: '1px solid var(--proto-rule-soft)',
+                background: active ? 'var(--surface-brand-default)' : 'transparent',
+                color: active ? '#fff' : 'var(--proto-ink2)' }}>
+              {lbl}
+            </div>
+          )
+        })}
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,2.2fr) minmax(0,1fr)', gap: 16, alignItems: 'start' }}>
+        {/* Library table */}
+        <div className="px-box" style={{ padding: 0, overflowX: 'auto' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+            <thead>
+              <tr style={{ borderBottom: '1px solid var(--proto-rule-soft)', color: 'var(--proto-ink2)' }}>
+                <Th col="asset">Asset</Th>
+                <Th col="typerole">Type / Role</Th>
+                <Th col="opens" align="right">Opens</Th>
+                <Th col="viewers" align="right">Viewers</Th>
+                <Th col="dur" align="right">Dur</Th>
+                <Th col="last" align="right">Last</Th>
+              </tr>
+            </thead>
+            <tbody>
+              {groupNames.map((g) => (
+                <React.Fragment key={g}>
+                  <tr>
+                    <td colSpan={6} style={{ padding: '8px 8px 4px', fontWeight: 700, fontSize: 12, textTransform: 'uppercase', letterSpacing: 0.4, color: 'var(--proto-ink2)' }}>
+                      {g} <span style={{ opacity: 0.6, fontWeight: 500 }}>({groups[g].length})</span>
+                    </td>
+                  </tr>
+                  {groups[g].map((r) => (
+                    <tr key={r.id} onClick={() => go(`/packet/${r.oppId}`)}
+                      style={{ borderTop: '1px solid var(--proto-rule-soft)', cursor: 'pointer' }}>
+                      <td style={{ padding: '6px 8px' }}>
+                        <div style={{ fontWeight: 600 }}>{r.company || (ASSET_LABEL[r.type] || r.type)}</div>
+                        {r.company && <div className="px-small">{r.role}</div>}
+                      </td>
+                      <td style={{ padding: '6px 8px' }}>
+                        <Pill tone={STATUS_TONE[r.status] || 'panel'}>{ASSET_LABEL[r.type] || r.type}</Pill>
+                        {r.role && <span className="px-small"> · {r.role}</span>}
+                      </td>
+                      <td style={{ padding: '6px 8px', textAlign: 'right' }}>{r.opens || '—'}</td>
+                      <td style={{ padding: '6px 8px', textAlign: 'right' }}>{r.uniqueViewers || '—'}</td>
+                      <td style={{ padding: '6px 8px', textAlign: 'right' }}>{fmtDur(r.viewSeconds)}</td>
+                      <td style={{ padding: '6px 8px', textAlign: 'right', whiteSpace: 'nowrap' }}>{timeAgo(r.lastEvent)}</td>
+                    </tr>
+                  ))}
+                </React.Fragment>
+              ))}
+            </tbody>
+          </table>
+          <div className="px-small" style={{ padding: '8px 10px', opacity: 0.7 }}>
+            No Views or Fwd columns — the analytics API returns opens, unique viewers, view-seconds
+            and a last-open per asset, but no distinct in-app view count or forward count.
           </div>
         </div>
-      ))}
-    </div>
+
+        {/* Right rail — recent opens */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <div className="px-box" style={{ padding: 14 }}>
+            <b style={{ fontSize: 13 }}>Recent opens</b>
+            {recent.length === 0 ? (
+              <div className="px-small" style={{ marginTop: 8 }}>No tracked opens yet. Share an asset with <b>"Copy tracked link"</b> to record opens here.</div>
+            ) : (
+              <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                {recent.map((r) => (
+                  <div key={r.id} onClick={() => go(`/packet/${r.oppId}`)} style={{ display: 'flex', alignItems: 'baseline', gap: 8, fontSize: 13, cursor: 'pointer' }}>
+                    <span style={{ fontWeight: 600, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.company || (ASSET_LABEL[r.type] || r.type)}</span>
+                    <span className="px-small">👁 {r.opens}</span>
+                    <span className="px-small">{timeAgo(r.lastEvent)}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+          <div className="px-small" style={{ opacity: 0.75, lineHeight: 1.5 }}>
+            Most-viewed slides is hidden — there's no per-slide view data anywhere in the API
+            (analytics is per-asset only). It needs slide-level tracking on the backend first.
+          </div>
+        </div>
+      </div>
     </div>
   )
 }

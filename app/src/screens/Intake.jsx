@@ -40,6 +40,14 @@ function sourceOf(from = '') {
 function Card({ children, style }) {
   return <div style={{ border: '1px solid var(--proto-rule-soft)', borderRadius: 12, background: 'var(--proto-paper)', padding: 16, ...style }}>{children}</div>
 }
+function RailItem({ active, onClick, label, sub }) {
+  return (
+    <div onClick={onClick} style={{ padding: '8px 12px', cursor: 'pointer', borderLeft: `2px solid ${active ? 'var(--text-brand)' : 'transparent'}`, background: active ? 'var(--proto-paper-2, rgba(127,127,127,0.08))' : 'transparent' }}>
+      <div style={{ fontWeight: 600, fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{label}</div>
+      {sub && <div className="px-small" style={{ color: 'var(--proto-ink2)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{sub}</div>}
+    </div>
+  )
+}
 
 export default function Intake() {
   const { isDemo } = useApp()
@@ -57,6 +65,42 @@ export default function Intake() {
   const [clearDays, setClearDays] = useState(7)
   const [clearing, setClearing] = useState(false)
   const [clearResult, setClearResult] = useState(null)
+
+  // 3-pane inbox monitor state — all real: role bins (folder_role_map), messages
+  // (GET /api/mail/messages), and a header-only preview.
+  const [roles, setRoles] = useState({ loading: true, list: [], error: null })
+  const [roleSel, setRoleSel] = useState(null) // folderId of selected role, or null = all mail
+  const [msgs, setMsgs] = useState({ loading: false, list: [], error: null, at: null })
+  const [msgSel, setMsgSel] = useState(null) // index into msgs.list
+
+  const loadRoles = useCallback(async () => {
+    setRoles((r) => ({ ...r, loading: true, error: null }))
+    try {
+      const res = await api.mailFolderMapGet()
+      // Collapse many-to-many rows into one entry per folder (a folder can feed
+      // several role bins). Each entry carries the real folderId/path and roleKeys.
+      const byFolder = new Map()
+      for (const m of (res.mappings || [])) {
+        const e = byFolder.get(m.folderId) || { folderId: m.folderId, folderPath: m.folderPath, roleKeys: [] }
+        if (m.roleKey && !e.roleKeys.includes(m.roleKey)) e.roleKeys.push(m.roleKey)
+        byFolder.set(m.folderId, e)
+      }
+      setRoles({ loading: false, list: [...byFolder.values()], error: null })
+    } catch (e) { setRoles({ loading: false, list: [], error: String(e.message || e) }) }
+  }, [])
+
+  const loadMessages = useCallback(async (folderId) => {
+    setMsgSel(null)
+    setMsgs((m) => ({ ...m, loading: true, error: null }))
+    try {
+      const res = await api.mailMessages({ folderId: folderId || undefined, top: 50 })
+      if (res.ok === false) throw new Error(res.detail || res.error || 'failed')
+      if (res.error) throw new Error(res.error)
+      setMsgs({ loading: false, list: res.messages || [], error: null, at: new Date().toISOString() })
+    } catch (e) { setMsgs({ loading: false, list: [], error: String(e.message || e), at: null }) }
+  }, [])
+
+  const selectRole = useCallback((folderId) => { setRoleSel(folderId); loadMessages(folderId) }, [loadMessages])
 
   const loadSubs = useCallback(async () => {
     setSub((s) => ({ ...s, loading: true }))
@@ -86,7 +130,14 @@ export default function Intake() {
     finally { setClearing(false) }
   }, [clearDays])
 
-  useEffect(() => { loadSubs() }, [loadSubs])
+  useEffect(() => { loadSubs(); loadRoles(); loadMessages(null) }, [loadSubs, loadRoles, loadMessages])
+
+  const folderLabel = (path = '') => {
+    const seg = String(path).split(/[\\/]/).filter(Boolean)
+    return seg[seg.length - 1] || path || '(folder)'
+  }
+  const selectedRole = roles.list.find((r) => r.folderId === roleSel)
+  const preview = msgSel != null ? msgs.list[msgSel] : null
 
   const watch = sub.watches[0]
   const watchMailbox = watch ? (watch.resource || '').replace(/^users\//, '').replace(/\/mailFolders.*$/, '') : null
@@ -107,8 +158,79 @@ export default function Intake() {
         )}
       </Card>
 
+      {/* 3-pane inbox monitor — roles rail · alerts list · preview. All real. */}
+      <Card style={{ padding: 0, overflow: 'hidden' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '12px 16px', borderBottom: '1px solid var(--proto-rule-soft)', flexWrap: 'wrap' }}>
+          <b style={{ fontSize: 14 }}>Inbox monitor</b>
+          <span className="px-small" style={{ color: 'var(--proto-ink2)' }}>live from watched mailbox</span>
+          <div style={{ flex: 1 }} />
+          <button className="px-btn" onClick={() => { loadRoles(); loadMessages(roleSel) }} disabled={msgs.loading || roles.loading}>↻ Refresh</button>
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(160px, 220px) minmax(220px, 1fr) minmax(220px, 1.2fr)', minHeight: 320 }}>
+          {/* Left rail — monitored role bins (folder_role_map) */}
+          <div style={{ borderRight: '1px solid var(--proto-rule-soft)', overflowY: 'auto', maxHeight: 460 }}>
+            <div className="px-small" style={{ padding: '10px 12px 6px', color: 'var(--proto-ink2)', textTransform: 'uppercase', letterSpacing: 0.4, fontSize: 10 }}>Monitored roles</div>
+            <RailItem active={roleSel === null} onClick={() => selectRole(null)} label="All mail" sub="entire mailbox" />
+            {roles.loading && <div className="px-small" style={{ padding: '8px 12px', color: 'var(--proto-ink2)' }}>Loading roles…</div>}
+            {roles.error && <div className="px-small" style={{ padding: '8px 12px', color: 'var(--proto-red)' }}>{roles.error}</div>}
+            {!roles.loading && !roles.error && roles.list.length === 0 && (
+              <div className="px-small" style={{ padding: '8px 12px', color: 'var(--proto-ink2)' }}>No role folders mapped yet. Map folders → roles in <a style={{ cursor: 'pointer', color: 'var(--text-brand)' }} onClick={() => go('/settings/intake')}>Settings ▸ Intake</a>.</div>
+            )}
+            {roles.list.map((r) => (
+              <RailItem key={r.folderId} active={roleSel === r.folderId} onClick={() => selectRole(r.folderId)}
+                label={folderLabel(r.folderPath)} sub={r.roleKeys.join(', ') || 'router decides'} />
+            ))}
+          </div>
+          {/* Middle — alerts list (real messages) */}
+          <div style={{ borderRight: '1px solid var(--proto-rule-soft)', overflowY: 'auto', maxHeight: 460 }}>
+            <div className="px-small" style={{ padding: '10px 12px 6px', color: 'var(--proto-ink2)', textTransform: 'uppercase', letterSpacing: 0.4, fontSize: 10, display: 'flex', gap: 8, alignItems: 'center' }}>
+              <span>{selectedRole ? folderLabel(selectedRole.folderPath) : 'All mail'}</span>
+              {msgs.at && !msgs.loading && <span style={{ textTransform: 'none', letterSpacing: 0 }}>· {msgs.list.length} message{msgs.list.length === 1 ? '' : 's'}</span>}
+            </div>
+            {msgs.loading && <div className="px-small" style={{ padding: '8px 12px', color: 'var(--proto-ink2)' }}>Loading messages…</div>}
+            {msgs.error && <div className="px-small" style={{ padding: '8px 12px', color: 'var(--proto-red)' }}>{msgs.error}</div>}
+            {!msgs.loading && !msgs.error && msgs.list.length === 0 && <div className="px-small" style={{ padding: '8px 12px', color: 'var(--proto-ink2)' }}>No messages in this view.</div>}
+            {msgs.list.map((m, i) => {
+              const src = sourceOf(m.from)
+              return (
+                <div key={i} onClick={() => setMsgSel(i)} style={{ padding: '10px 12px', borderBottom: '1px solid var(--proto-rule-soft)', cursor: 'pointer', background: msgSel === i ? 'var(--proto-paper-2, rgba(127,127,127,0.08))' : 'transparent' }}>
+                  <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+                    <Pill tone={src.tone}>{src.label}</Pill>
+                    <span style={{ fontWeight: 600, flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{m.subject || '(no subject)'}</span>
+                  </div>
+                  <div className="px-small" style={{ marginTop: 4, color: 'var(--proto-ink2)', display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                    <span style={{ wordBreak: 'break-all' }}>{m.from || '(unknown)'}</span><span>·</span><span>{timeAgo(m.received)}</span>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+          {/* Right — preview (header-only; body not exposed by messages endpoint) */}
+          <div style={{ overflowY: 'auto', maxHeight: 460, padding: 16 }}>
+            {!preview && <div className="px-small" style={{ color: 'var(--proto-ink2)' }}>Select a message to preview.</div>}
+            {preview && (
+              <div>
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 8 }}>
+                  <Pill tone={sourceOf(preview.from).tone}>{sourceOf(preview.from).label}</Pill>
+                  <span className="px-small" style={{ color: 'var(--proto-ink2)' }}>{timeAgo(preview.received)}</span>
+                </div>
+                <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 8 }}>{preview.subject || '(no subject)'}</div>
+                <div className="px-small" style={{ color: 'var(--proto-ink2)', marginBottom: 4 }}><b>From:</b> <span style={{ wordBreak: 'break-all' }}>{preview.from || '(unknown)'}</span></div>
+                <div className="px-small" style={{ color: 'var(--proto-ink2)', marginBottom: 12 }}><b>Received:</b> {preview.received ? new Date(preview.received).toLocaleString() : '—'}</div>
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
+                  <button className="px-btn px-btn-accent" onClick={() => go('/swipe')}>Review in Swipe →</button>
+                </div>
+                <div className="px-small" style={{ color: 'var(--proto-ink2)', borderTop: '1px solid var(--proto-rule-soft)', paddingTop: 10, lineHeight: 1.5 }}>
+                  Message body isn't exposed by the mailbox listing API (subject/sender/date only). Per-alert push-to-swipe, snooze, and dismiss need new backend routes — messages become swipeable opportunities only after ingestion (Pull now / Clear &amp; reload below).
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      </Card>
+
       <Card style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-        <b style={{ fontSize: 14 }}>Incoming feed</b>
+        <b style={{ fontSize: 14 }}>Ingestion trace</b>
         <span className="px-small">scan last</span>
         <select className="px-btn" value={minutes} onChange={(e) => setMinutes(Number(e.target.value))} style={{ fontSize: 12 }}>
           <option value={60}>1 hour</option>
