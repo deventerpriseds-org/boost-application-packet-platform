@@ -447,22 +447,23 @@ export async function mailFolders(req: HttpRequest, context: InvocationContext):
 
 // folder_role_map: maps a mailbox folder → a role bin (persona.key). Rows the router
 // consults when a message's parentFolderId matches, to assign a role directly instead
-// of AI-classifying. Additive table; role_key NULL means "watch this folder but let the
-// router decide the role". PK (owner_email, folder_id) so each folder maps once.
+// of AI-classifying. Many-to-many: a role can pull from several folders and a folder can
+// feed several roles, so the PK is (owner, folder_id, role_key) — one row per assignment.
+// A folder with NO rows here is "router decides" (imported, AI picks the role).
 async function ensureFolderMapTable(client: any) {
   await client.query(`create table if not exists folder_role_map (
     owner_email text not null,
     folder_id text not null,
     folder_path text not null default '',
-    role_key text,
+    role_key text not null,
     skip_filter boolean not null default true,
     updated_at timestamptz not null default now(),
-    primary key (owner_email, folder_id)
+    primary key (owner_email, folder_id, role_key)
   )`)
 }
 
-// GET /api/mail/folder-map — list this owner's folder→role mappings.
-// POST /api/mail/folder-map { folderId, folderPath, roleKey|null, skipFilter? } — upsert one.
+// GET /api/mail/folder-map — list this owner's folder↔role assignments.
+// POST /api/mail/folder-map { folderId, folderPath, roleKey } — add one assignment.
 export async function mailFolderMap(req: HttpRequest, context: InvocationContext): Promise<HttpResponseInit> {
   if (req.method === 'OPTIONS') return { status: 204, headers: HEADERS }
   let client
@@ -479,15 +480,15 @@ export async function mailFolderMap(req: HttpRequest, context: InvocationContext
     }
     const body = (await req.json().catch(() => ({}))) as any
     const folderId = String(body?.folderId || '').trim()
-    if (!folderId) return { status: 400, headers: HEADERS, jsonBody: { error: 'folderId required' } }
+    const roleKey = String(body?.roleKey || '').trim()
+    if (!folderId || !roleKey) return { status: 400, headers: HEADERS, jsonBody: { error: 'folderId and roleKey required' } }
     const folderPath = String(body?.folderPath || '').trim()
-    const roleKey = body?.roleKey ? String(body.roleKey).trim() : null
     const skipFilter = body?.skipFilter === false ? false : true
     await client.query(
       `insert into folder_role_map (owner_email, folder_id, folder_path, role_key, skip_filter, updated_at)
        values ($1,$2,$3,$4,$5, now())
-       on conflict (owner_email, folder_id)
-       do update set folder_path=excluded.folder_path, role_key=excluded.role_key, skip_filter=excluded.skip_filter, updated_at=now()`,
+       on conflict (owner_email, folder_id, role_key)
+       do update set folder_path=excluded.folder_path, skip_filter=excluded.skip_filter, updated_at=now()`,
       [owner, folderId, folderPath, roleKey, skipFilter]
     )
     return { status: 200, headers: HEADERS, jsonBody: { ok: true, folderId, roleKey, skipFilter } }
@@ -495,7 +496,8 @@ export async function mailFolderMap(req: HttpRequest, context: InvocationContext
   finally { try { await client?.end() } catch {} }
 }
 
-// POST /api/mail/folder-map/delete { folderId } — remove a mapping (revert to unmapped).
+// POST /api/mail/folder-map/delete { folderId, roleKey } — remove one assignment
+// (folder reverts to router-decides for that role). Omit roleKey to clear ALL of a folder's roles.
 export async function mailFolderMapDelete(req: HttpRequest, context: InvocationContext): Promise<HttpResponseInit> {
   if (req.method === 'OPTIONS') return { status: 204, headers: HEADERS }
   let client
@@ -503,10 +505,13 @@ export async function mailFolderMapDelete(req: HttpRequest, context: InvocationC
     const owner = resolveOwner(req).owner
     const body = (await req.json().catch(() => ({}))) as any
     const folderId = String(body?.folderId || '').trim()
+    const roleKey = String(body?.roleKey || '').trim()
     if (!folderId) return { status: 400, headers: HEADERS, jsonBody: { error: 'folderId required' } }
     client = await getPgClient()
     await ensureFolderMapTable(client)
-    const r = await client.query(`delete from folder_role_map where owner_email=$1 and folder_id=$2`, [owner, folderId])
+    const r = roleKey
+      ? await client.query(`delete from folder_role_map where owner_email=$1 and folder_id=$2 and role_key=$3`, [owner, folderId, roleKey])
+      : await client.query(`delete from folder_role_map where owner_email=$1 and folder_id=$2`, [owner, folderId])
     return { status: 200, headers: HEADERS, jsonBody: { ok: true, removed: r.rowCount ?? 0 } }
   } catch (err) { return { status: 200, headers: HEADERS, jsonBody: { error: String(err) } } }
   finally { try { await client?.end() } catch {} }

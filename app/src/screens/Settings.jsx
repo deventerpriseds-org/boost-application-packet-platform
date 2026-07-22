@@ -20,6 +20,19 @@ const SOURCE_PRESETS = [
 function Card({ children, style }) {
   return <div style={{ border: '1px solid var(--proto-rule-soft)', borderRadius: 12, background: 'var(--proto-paper)', padding: 16, ...style }}>{children}</div>
 }
+
+// Categorical colors for role bins (cycled by index).
+const ROLE_COLORS = ['#5b4bd6', '#c2410c', '#0e7490', '#9d174d', '#4d7c0f', '#7c3aed', '#b45309', '#0f766e']
+
+// Flat depth-ordered folder list → only rows whose ancestors are all expanded.
+function visibleFolders(list, expanded) {
+  const byId = Object.fromEntries(list.map((f) => [f.id, f]))
+  return list.filter((f) => {
+    let p = f.parentId
+    while (p) { if (!expanded[p]) return false; p = byId[p]?.parentId }
+    return true
+  })
+}
 const Label = ({ children }) => <div className="px-small" style={{ textTransform: 'uppercase', letterSpacing: 1, marginBottom: 4 }}>{children}</div>
 
 function IntakeSettings() {
@@ -33,48 +46,46 @@ function IntakeSettings() {
   const [subscribing, setSubscribing] = useState(false)
   const [test, setTest] = useState({ running: false, result: null })
   const [note, setNote] = useState(null)
-  // Folder → role routing
+  // Folder → role routing (role-centric: each role has a drillable folder picker)
   const [tree, setTree] = useState({ loading: false, list: [], error: null })
-  const [fmap, setFmap] = useState({})            // folderId -> { roleKey, skipFilter }
+  const [assign, setAssign] = useState({})        // roleKey -> [folderId, ...]
   const [roles, setRoles] = useState([])          // persona role bins
-  const [savingMap, setSavingMap] = useState(null) // folderId currently saving
+  const [openPicker, setOpenPicker] = useState(null) // roleKey whose dropdown is open
+  const [expanded, setExpanded] = useState({})    // folderId -> expanded in picker
 
   const loadTree = useCallback(async (mailbox) => {
     if (!mailbox) return
     setTree({ loading: true, list: [], error: null })
     // Load the three feeds independently — a failure in one (e.g. roles) must not
-    // blank the folder tree. Roles are optional; folders can still be watched with
-    // "router decides".
+    // blank the folder tree.
     const [t, m, p] = await Promise.allSettled([api.mailFolderTree(mailbox), api.mailFolderMapGet(), api.listPersonas()])
-    // Mappings (optional)
     if (m.status === 'fulfilled') {
-      const map = {}
-      for (const row of (m.value.mappings || [])) map[row.folderId] = { roleKey: row.roleKey, skipFilter: row.skipFilter }
-      setFmap(map)
+      const a = {}
+      for (const row of (m.value.mappings || [])) (a[row.roleKey] ||= []).push(row.folderId)
+      setAssign(a)
     }
-    // Roles (optional)
     if (p.status === 'fulfilled') setRoles(p.value.personas || p.value.roles || [])
     else setRoles([])
-    // Folder tree (required)
     if (t.status === 'fulfilled' && t.value?.ok) setTree({ loading: false, list: t.value.folders || [], error: null })
     else setTree({ loading: false, list: [], error: String(t.status === 'fulfilled' ? (t.value?.detail || t.value?.error || 'could not list folders') : (t.reason?.message || t.reason)) })
   }, [])
 
-  // Change a folder's mapping. value: '' = not watched (delete), '__router__' = watch/AI-decide,
-  // otherwise a persona key = watch and force that role.
-  const onMapChange = useCallback(async (folder, value) => {
-    setSavingMap(folder.id)
+  // Toggle a folder's assignment to a role (add or remove one folder↔role link).
+  const toggleAssign = useCallback(async (roleKey, folder) => {
+    const has = (assign[roleKey] || []).includes(folder.id)
+    // optimistic
+    setAssign((a) => {
+      const cur = a[roleKey] || []
+      return { ...a, [roleKey]: has ? cur.filter((x) => x !== folder.id) : [...cur, folder.id] }
+    })
     try {
-      if (!value) {
-        await api.mailFolderMapDelete(folder.id)
-        setFmap((m) => { const n = { ...m }; delete n[folder.id]; return n })
-      } else {
-        const roleKey = value === '__router__' ? null : value
-        await api.mailFolderMapSet({ folderId: folder.id, folderPath: folder.path, roleKey, skipFilter: true })
-        setFmap((m) => ({ ...m, [folder.id]: { roleKey, skipFilter: true } }))
-      }
-    } catch (e) { setNote(`Mapping failed: ${e.message || e}`) } finally { setSavingMap(null) }
-  }, [])
+      if (has) await api.mailFolderMapDelete({ folderId: folder.id, roleKey })
+      else await api.mailFolderMapSet({ folderId: folder.id, folderPath: folder.path, roleKey })
+    } catch (e) {
+      setNote(`Mapping failed: ${e.message || e}`)
+      loadTree(cfg?.mailbox) // resync on failure
+    }
+  }, [assign, cfg?.mailbox, loadTree])
 
   const loadCfg = useCallback(async () => {
     try { const r = await api.mailConfigGet(); setCfg(r.config); setDirty(false) }
@@ -100,6 +111,12 @@ function IntakeSettings() {
 
   useEffect(() => { loadCfg(); loadSubs() }, [loadCfg, loadSubs])
   useEffect(() => { if (cfg?.mailbox) { loadFolders(cfg.mailbox); loadTree(cfg.mailbox) } }, [cfg?.mailbox, loadFolders, loadTree])
+  useEffect(() => {
+    if (!openPicker) return
+    const close = () => setOpenPicker(null)
+    document.addEventListener('click', close)
+    return () => document.removeEventListener('click', close)
+  }, [openPicker])
 
   const patch = (p) => { setCfg((c) => ({ ...c, ...p })); setDirty(true) }
   const toggleSender = (key) => {
@@ -239,49 +256,87 @@ function IntakeSettings() {
       <Card>
         <b style={{ fontSize: 15 }}>Folder → role routing</b>
         <div className="px-small" style={{ marginTop: 2, marginBottom: 12 }}>
-          Map the folders your Outlook rules sort job mail into onto a role bin. Mail landing in a
-          mapped folder is imported <b>even if it fails the keyword filters above</b> — and tagged
-          with that role. Leave a folder on <b>Router decides</b> to import it but let the AI
-          classifier pick the role. Nested folders are shown indented.
+          Give each role a folder picker. Open it, drill through your Outlook folders, and tick the
+          ones whose mail should feed that role — imported <b>even if it fails the keyword filters
+          above</b>. Folders you don't assign stay on <b>router decides</b> (imported, AI picks the role).
         </div>
-        {tree.loading && <div className="px-small">Loading folder tree…</div>}
+        {tree.loading && <div className="px-small">Loading folders…</div>}
         {tree.error && <div className="px-small" style={{ color: 'var(--proto-yellow)' }}>Can't list folders: {tree.error}</div>}
-        {!tree.loading && !tree.error && tree.list.filter((f) => (f.name || '').toLowerCase() !== 'inbox').length === 0 && (
-          <div className="px-small" style={{ color: 'var(--proto-ink2)' }}>No subfolders found in this mailbox. Create folders in Outlook and add rules that file job alerts into them, then reload.</div>
-        )}
-        {!tree.loading && tree.list.filter((f) => (f.name || '').toLowerCase() !== 'inbox').length > 0 && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-            {tree.list.filter((f) => (f.name || '').toLowerCase() !== 'inbox').map((f) => {
-              const m = fmap[f.id]
-              const value = !m ? '' : (m.roleKey || '__router__')
-              const mapped = !!m
-              return (
-                <div key={f.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '6px 8px', borderRadius: 8, background: mapped ? 'var(--proto-accent-soft)' : 'transparent', border: `1px solid ${mapped ? 'var(--surface-brand-default)' : 'transparent'}` }}>
-                  <span style={{ paddingLeft: (f.level || 0) * 18, fontSize: 13, flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                    <span style={{ color: 'var(--proto-ink3)' }}>{(f.level || 0) > 0 ? '↳ ' : '📁 '}</span>
-                    {f.name}{typeof f.count === 'number' ? <span className="px-small" style={{ color: 'var(--proto-ink3)' }}> · {f.count}</span> : null}
-                  </span>
-                  <select className="px-btn" style={{ minWidth: 190 }} value={value} disabled={savingMap === f.id}
-                    onChange={(e) => onMapChange(f, e.target.value)}>
-                    <option value="">— Not watched —</option>
-                    <option value="__router__">Watch · router decides</option>
-                    {roles.map((r) => (
-                      <option key={r.key} value={r.key}>Watch · {r.name || r.master_role || r.key}</option>
-                    ))}
-                  </select>
-                  {savingMap === f.id && <span className="px-small" style={{ color: 'var(--proto-ink3)' }}>…</span>}
-                </div>
-              )
-            })}
-          </div>
-        )}
         {roles.length === 0 && !tree.loading && (
-          <div className="px-small" style={{ marginTop: 10, color: 'var(--proto-ink2)' }}>
-            No role bins yet — <span className="px-link" style={{ cursor: 'pointer' }} onClick={() => go('/settings/roles')}>create roles</span> to map folders to them (folders can still be watched with "router decides").
+          <div className="px-small" style={{ color: 'var(--proto-ink2)' }}>
+            No role bins yet — <span className="px-link" style={{ cursor: 'pointer' }} onClick={() => go('/settings/roles')}>create roles</span> first, then assign folders to them here.
           </div>
         )}
+        {roles.length > 0 && (() => {
+          const byId = Object.fromEntries(tree.list.map((f) => [f.id, f]))
+          const pickable = tree.list.filter((f) => (f.name || '').toLowerCase() !== 'inbox')
+          const visible = visibleFolders(pickable, expanded)
+          return (
+            <div style={{ display: 'flex', flexDirection: 'column' }}>
+              {roles.map((role, i) => {
+                const color = ROLE_COLORS[i % ROLE_COLORS.length]
+                const fids = assign[role.key] || []
+                const label = role.name || role.master_role || role.key
+                return (
+                  <div key={role.key} style={{ padding: '12px 2px', borderTop: i ? '1px solid var(--proto-rule-soft)' : 'none' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                      <span style={{ width: 11, height: 11, borderRadius: '50%', background: color, flex: 'none' }} />
+                      <b style={{ fontSize: 14.5 }}>{label}</b>
+                      <div style={{ marginLeft: 'auto', position: 'relative' }}>
+                        <button className="px-btn" onClick={(e) => { e.stopPropagation(); setOpenPicker(openPicker === role.key ? null : role.key) }}>
+                          📁 Assign folders <span style={{ opacity: 0.6 }}>({fids.length})</span> ▾
+                        </button>
+                        {openPicker === role.key && (
+                          <div onClick={(e) => e.stopPropagation()} style={{ position: 'absolute', top: 'calc(100% + 6px)', right: 0, width: 300, maxWidth: '80vw', background: 'var(--proto-paper)', border: '1px solid var(--proto-rule-soft)', borderRadius: 12, boxShadow: '0 10px 30px -12px rgba(0,0,0,.35)', zIndex: 30, maxHeight: 320, overflow: 'auto', padding: 6 }}>
+                            <div className="px-small" style={{ textTransform: 'uppercase', letterSpacing: 1, color: 'var(--proto-ink3)', padding: '6px 8px 4px' }}>Pick folders for {label}</div>
+                            {visible.length === 0 && <div className="px-small" style={{ padding: '6px 8px', color: 'var(--proto-ink2)' }}>No folders found. Create folders in Outlook, then reload.</div>}
+                            {visible.map((f) => {
+                              const kids = (f.childCount || 0) > 0
+                              const on = fids.includes(f.id)
+                              return (
+                                <div key={f.id} onClick={() => toggleAssign(role.key, f)}
+                                  style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 8px', paddingLeft: 8 + (f.level || 0) * 16, borderRadius: 8, cursor: 'pointer' }}>
+                                  <span onClick={(e) => { if (kids) { e.stopPropagation(); setExpanded((x) => ({ ...x, [f.id]: !x[f.id] })) } }}
+                                    style={{ width: 16, textAlign: 'center', color: 'var(--proto-ink3)', fontSize: 10, flex: 'none' }}>
+                                    {kids ? (expanded[f.id] ? '▾' : '▶') : ''}
+                                  </span>
+                                  <span style={{ flex: 'none' }}>{kids ? '📁' : '📄'}</span>
+                                  <span style={{ fontSize: 13, flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{f.name}</span>
+                                  {typeof f.count === 'number' && <span className="px-small" style={{ color: 'var(--proto-ink3)' }}>{f.count}</span>}
+                                  <span style={{ width: 17, height: 17, borderRadius: 5, flex: 'none', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, color: '#fff', border: `1.5px solid ${on ? color : 'var(--proto-rule-soft)'}`, background: on ? color : 'transparent' }}>{on ? '✓' : ''}</span>
+                                </div>
+                              )
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                    {fids.length > 0 ? (
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 9, marginLeft: 21 }}>
+                        {fids.map((fid) => {
+                          const f = byId[fid]
+                          if (!f) return null
+                          const parentPath = (f.path || '').includes('/') ? f.path.slice(0, f.path.lastIndexOf('/')) + ' / ' : ''
+                          return (
+                            <span key={fid} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, fontWeight: 600, padding: '4px 8px', borderRadius: 999, color, background: `${color}18`, border: `1px solid ${color}` }}>
+                              <span style={{ opacity: 0.6, fontWeight: 500 }}>{parentPath}</span>{f.name}
+                              <span style={{ cursor: 'pointer', opacity: 0.6, fontWeight: 800 }} onClick={() => toggleAssign(role.key, f)}>×</span>
+                            </span>
+                          )
+                        })}
+                      </div>
+                    ) : (
+                      <div className="px-small" style={{ marginTop: 8, marginLeft: 21, color: 'var(--proto-ink3)' }}>No folders yet — <b style={{ color: 'var(--proto-ink2)' }}>router decides</b> handles this role.</div>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          )
+        })()}
         <div className="px-small" style={{ marginTop: 12, color: 'var(--proto-ink3)' }}>
-          Mappings are saved as you change them. Routing takes effect once the mailbox-wide watch is live.
+          Saved as you change them. A role can pull from several folders; a folder can feed more than
+          one role. Routing takes effect once the mailbox-wide watch is live.
         </div>
       </Card>
 
