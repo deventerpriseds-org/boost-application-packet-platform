@@ -507,9 +507,49 @@ function seniorityTier(subject: string): 'csuite' | 'vp' | 'director' | null {
   return null
 }
 
-// POST /api/mail/folders/reclassify { sourceFolderId, targets:{csuite,vp,director},
-//   dryRun?, max?, senderContains? } — classify existing mail in a source folder by
-//   seniority and (unless dryRun) move each into the matching subfolder. Unmatched stay.
+// Core reclassify/reconcile logic, shared by the HTTP endpoint and the reconcile timer.
+// Classifies every message in sourceFolderId by seniority and moves it to the right folder.
+// Moves whose destination equals the source folder are SKIPPED — so this is safe to run
+// as a re-audit over the seniority folders themselves (correct placements are no-ops).
+async function reclassifyFolder(
+  mailbox: string, token: string, sourceFolderId: string,
+  opts: { targets: any; unmatchedTarget?: string | null; senderContains?: string; max?: number; dryRun?: boolean },
+): Promise<any> {
+  const { targets = {}, unmatchedTarget = null, senderContains = '', dryRun = true } = opts
+  const max = Math.min(Math.max(Number(opts.max) || 2000, 1), 20000)
+  let url: string | null = `https://graph.microsoft.com/v1.0/users/${mailbox}/mailFolders/${sourceFolderId}/messages?$select=subject,from&$top=100`
+  const msgs: any[] = []
+  while (url && msgs.length < max) {
+    const res: any = await fetch(url, { headers: { Authorization: `Bearer ${token}` } })
+    if (!res.ok) return { ok: false, detail: `list HTTP ${res.status}: ${(await res.text()).slice(0, 200)}` }
+    const j = await res.json() as any
+    for (const m of (j.value || [])) msgs.push({ id: m.id, subject: m.subject, from: (m?.from?.emailAddress?.address || '').toLowerCase() })
+    url = j['@odata.nextLink'] || null
+  }
+  const counts = { csuite: 0, vp: 0, director: 0, other: 0 }
+  const toMove: { id: string; dest: string }[] = []
+  for (const m of msgs) {
+    if (senderContains && !m.from.includes(senderContains)) { counts.other++; continue }
+    const tier = seniorityTier(extractRole(m.subject))
+    const dest = (tier && targets[tier]) ? targets[tier] : unmatchedTarget
+    if (tier && targets[tier]) counts[tier]++; else counts.other++
+    if (dest && dest !== sourceFolderId) toMove.push({ id: m.id, dest })   // skip same-folder (already correct)
+  }
+  let moved = 0; const errors: string[] = []
+  if (!dryRun) {
+    for (let i = 0; i < toMove.length; i += 20) {
+      const chunk = toMove.slice(i, i + 20)
+      const batch = { requests: chunk.map((it, k) => ({ id: String(k), method: 'POST', url: `/users/${mailbox}/messages/${it.id}/move`, headers: { 'Content-Type': 'application/json' }, body: { destinationId: it.dest } })) }
+      const r = await fetch('https://graph.microsoft.com/v1.0/$batch', { method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify(batch) })
+      if (!r.ok) { if (errors.length < 5) errors.push(`batch ${r.status}: ${(await r.text()).slice(0, 120)}`); continue }
+      const jr = await r.json() as any
+      for (const resp of (jr.responses || [])) { if (resp.status >= 200 && resp.status < 300) moved++; else if (errors.length < 5) errors.push(`move ${resp.status}`) }
+    }
+  }
+  return { ok: true, dryRun, scanned: msgs.length, capped: msgs.length >= max, counts, wouldMove: toMove.length, moved, errors }
+}
+
+// POST /api/mail/folders/reclassify — thin wrapper over reclassifyFolder().
 export async function mailReclassify(req: HttpRequest, context: InvocationContext): Promise<HttpResponseInit> {
   if (req.method === 'OPTIONS') return { status: 204, headers: HEADERS }
   const creds = graphCreds()
@@ -518,61 +558,103 @@ export async function mailReclassify(req: HttpRequest, context: InvocationContex
     const body = (await req.json().catch(() => ({}))) as any
     const sourceFolderId = String(body?.sourceFolderId || '').trim()
     if (!sourceFolderId) return { status: 400, headers: HEADERS, jsonBody: { error: 'sourceFolderId required' } }
-    const targets = body?.targets || {}
-    // unmatchedTarget: where sender-matched-but-untiered mail goes (e.g. move ALL
-    // LinkedIn mail out of Job Alerts root — tiered → subs, the rest → LinkedIn parent).
-    const unmatchedTarget = body?.unmatchedTarget ? String(body.unmatchedTarget).trim() : null
-    const dryRun = body?.dryRun !== false            // default TRUE — safe by default
-    const max = Math.min(Math.max(Number(body?.max) || 2000, 1), 20000)
-    const senderContains = String(body?.senderContains || '').trim().toLowerCase()
     const mailbox = String(body?.mailbox || '').trim() || (await loadConfig(resolveOwner(req).owner)).mailbox
     const token = await getMicrosoftToken(creds.tenantId, creds.clientId, creds.clientSecret)
-
-    // 1. Collect message ids + subjects (stable ids, so moves later don't disturb paging).
-    let url: string | null = `https://graph.microsoft.com/v1.0/users/${mailbox}/mailFolders/${sourceFolderId}/messages?$select=subject,from&$top=100`
-    const msgs: any[] = []
-    while (url && msgs.length < max) {
-      const res: any = await fetch(url, { headers: { Authorization: `Bearer ${token}` } })
-      if (!res.ok) return { status: 200, headers: HEADERS, jsonBody: { ok: false, detail: `list HTTP ${res.status}: ${(await res.text()).slice(0, 200)}` } }
-      const j = await res.json() as any
-      for (const m of (j.value || [])) msgs.push({ id: m.id, subject: m.subject, from: (m?.from?.emailAddress?.address || '').toLowerCase() })
-      url = j['@odata.nextLink'] || null
-    }
-    // 2. Classify → build move list (id + destination folder).
-    const counts = { csuite: 0, vp: 0, director: 0, other: 0 }
-    const toMove: { id: string; dest: string }[] = []
-    for (const m of msgs) {
-      if (senderContains && !m.from.includes(senderContains)) { counts.other++; continue }
-      const tier = seniorityTier(extractRole(m.subject))
-      if (tier && targets[tier]) { counts[tier]++; toMove.push({ id: m.id, dest: targets[tier] }) }
-      else { counts.other++; if (unmatchedTarget) toMove.push({ id: m.id, dest: unmatchedTarget }) }
-    }
-    // 3. Move (unless dry run) via Graph $batch — 20 moves per request so large
-    //    backfills (thousands) complete inside the function timeout.
-    let moved = 0; const errors: string[] = []
-    if (!dryRun) {
-      for (let i = 0; i < toMove.length; i += 20) {
-        const chunk = toMove.slice(i, i + 20)
-        const batch = {
-          requests: chunk.map((it, k) => ({
-            id: String(k), method: 'POST', url: `/users/${mailbox}/messages/${it.id}/move`,
-            headers: { 'Content-Type': 'application/json' }, body: { destinationId: it.dest },
-          })),
-        }
-        const r = await fetch('https://graph.microsoft.com/v1.0/$batch', {
-          method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-          body: JSON.stringify(batch),
-        })
-        if (!r.ok) { if (errors.length < 5) errors.push(`batch ${r.status}: ${(await r.text()).slice(0, 120)}`); continue }
-        const jr = await r.json() as any
-        for (const resp of (jr.responses || [])) {
-          if (resp.status >= 200 && resp.status < 300) moved++
-          else if (errors.length < 5) errors.push(`move ${resp.status}: ${JSON.stringify(resp.body).slice(0, 120)}`)
-        }
-      }
-    }
-    return { status: 200, headers: HEADERS, jsonBody: { ok: true, dryRun, scanned: msgs.length, capped: msgs.length >= max, counts, wouldMove: toMove.length, moved, errors } }
+    const out = await reclassifyFolder(mailbox, token, sourceFolderId, {
+      targets: body?.targets || {},
+      unmatchedTarget: body?.unmatchedTarget ? String(body.unmatchedTarget).trim() : null,
+      senderContains: String(body?.senderContains || '').trim().toLowerCase(),
+      max: Number(body?.max) || 2000,
+      dryRun: body?.dryRun !== false,
+    })
+    return { status: 200, headers: HEADERS, jsonBody: out }
   } catch (err) { return { status: 200, headers: HEADERS, jsonBody: { error: String(err) } } }
+}
+
+// seniority_routing: persisted map of each source folder → its seniority subfolders +
+// sender match, so the reconcile timer knows what to re-audit. One row per (owner, source).
+async function ensureRoutingTable(client: any) {
+  await client.query(`create table if not exists seniority_routing (
+    owner_email text not null,
+    source_name text not null,
+    sender_match text not null default '',
+    parent_id text not null,
+    csuite_id text not null,
+    vp_id text not null,
+    director_id text not null,
+    updated_at timestamptz not null default now(),
+    primary key (owner_email, source_name)
+  )`)
+}
+
+// GET/POST /api/mail/routing — read or upsert a source's seniority routing config.
+export async function mailRouting(req: HttpRequest, context: InvocationContext): Promise<HttpResponseInit> {
+  if (req.method === 'OPTIONS') return { status: 204, headers: HEADERS }
+  let client
+  try {
+    const owner = resolveOwner(req).owner
+    client = await getPgClient()
+    await ensureRoutingTable(client)
+    if (req.method === 'GET') {
+      const rows = (await client.query(`select source_name, sender_match, parent_id, csuite_id, vp_id, director_id from seniority_routing where owner_email=$1 order by source_name`, [owner])).rows
+      return { status: 200, headers: HEADERS, jsonBody: { ok: true, routes: rows } }
+    }
+    const b = (await req.json().catch(() => ({}))) as any
+    const src = String(b?.sourceName || '').trim()
+    if (!src || !b?.parentId || !b?.csuite || !b?.vp || !b?.director) return { status: 400, headers: HEADERS, jsonBody: { error: 'sourceName, parentId, csuite, vp, director required' } }
+    await client.query(
+      `insert into seniority_routing (owner_email, source_name, sender_match, parent_id, csuite_id, vp_id, director_id, updated_at)
+       values ($1,$2,$3,$4,$5,$6,$7, now())
+       on conflict (owner_email, source_name) do update set sender_match=excluded.sender_match, parent_id=excluded.parent_id,
+         csuite_id=excluded.csuite_id, vp_id=excluded.vp_id, director_id=excluded.director_id, updated_at=now()`,
+      [owner, src, String(b?.senderMatch || '').trim().toLowerCase(), b.parentId, b.csuite, b.vp, b.director],
+    )
+    return { status: 200, headers: HEADERS, jsonBody: { ok: true, sourceName: src } }
+  } catch (err) { return { status: 200, headers: HEADERS, jsonBody: { error: String(err) } } }
+  finally { try { await client?.end() } catch {} }
+}
+
+// Reconcile timer: every 2h, re-audit each configured source's folders with the precise
+// classifier and correct any mail the (approximate) Outlook rules mis-sorted. Timer
+// triggers aren't subject to the HTTP gateway timeout, so it has headroom for large folders.
+// POST /api/mail/reconcile also runs it on demand.
+async function runReconcile(owner?: string): Promise<any> {
+  const creds = graphCreds()
+  if (!creds.clientId || !creds.clientSecret) return { error: 'MICROSOFT creds not set' }
+  const token = await getMicrosoftToken(creds.tenantId, creds.clientId, creds.clientSecret)
+  let client
+  try {
+    client = await getPgClient()
+    await ensureRoutingTable(client)
+    const rows = owner
+      ? (await client.query(`select * from seniority_routing where owner_email=$1`, [owner])).rows
+      : (await client.query(`select * from seniority_routing`)).rows
+    const summary: any[] = []
+    for (const r of rows) {
+      const mailbox = r.owner_email
+      const targets = { csuite: r.csuite_id, vp: r.vp_id, director: r.director_id }
+      let movedTotal = 0
+      // Audit parent + each seniority sub; unmatched → parent. Same-folder moves are skipped.
+      for (const folder of [r.parent_id, r.csuite_id, r.vp_id, r.director_id]) {
+        const res = await reclassifyFolder(mailbox, token, folder, { targets, unmatchedTarget: r.parent_id, senderContains: r.sender_match, max: 4000, dryRun: false })
+        if (res?.moved) movedTotal += res.moved
+      }
+      summary.push({ source: r.source_name, corrected: movedTotal })
+    }
+    return { ok: true, sources: summary.length, summary }
+  } finally { try { await client?.end() } catch {} }
+}
+
+export async function mailReconcileHttp(req: HttpRequest, context: InvocationContext): Promise<HttpResponseInit> {
+  if (req.method === 'OPTIONS') return { status: 204, headers: HEADERS }
+  try {
+    const owner = resolveOwner(req).owner
+    return { status: 200, headers: HEADERS, jsonBody: await runReconcile(owner) }
+  } catch (err) { return { status: 200, headers: HEADERS, jsonBody: { error: String(err) } } }
+}
+
+export async function mailReconcileTimer(_t: any, context: InvocationContext): Promise<void> {
+  try { const r = await runReconcile(); context.log(`reconcile: ${JSON.stringify(r)}`) } catch (e) { context.log(`reconcile error: ${e}`) }
 }
 
 // GET /api/mail/messages?folderId=&top=&mailbox=[&subjectsOnly=1] — list message
@@ -1059,6 +1141,9 @@ app.http('mailConfig', { methods: ['GET', 'POST', 'OPTIONS'], authLevel: 'anonym
 app.http('mailFolders', { methods: ['GET', 'OPTIONS'], authLevel: 'anonymous', route: 'mail/folders', handler: mailFolders })
 app.http('mailMessages', { methods: ['GET', 'OPTIONS'], authLevel: 'anonymous', route: 'mail/messages', handler: mailMessages })
 app.http('mailReclassify', { methods: ['POST', 'OPTIONS'], authLevel: 'anonymous', route: 'mail/folders/reclassify', handler: mailReclassify })
+app.http('mailRouting', { methods: ['GET', 'POST', 'OPTIONS'], authLevel: 'anonymous', route: 'mail/routing', handler: mailRouting })
+app.http('mailReconcileHttp', { methods: ['POST', 'OPTIONS'], authLevel: 'anonymous', route: 'mail/reconcile', handler: mailReconcileHttp })
+app.timer('mailReconcileTimer', { schedule: '0 15 */2 * * *', handler: mailReconcileTimer })
 app.http('mailFolderCreate', { methods: ['POST', 'OPTIONS'], authLevel: 'anonymous', route: 'mail/folders/create', handler: mailFolderCreate })
 app.http('mailFoldersBulkCreate', { methods: ['POST', 'OPTIONS'], authLevel: 'anonymous', route: 'mail/folders/create-bulk', handler: mailFoldersBulkCreate })
 app.http('mailFolderDelete', { methods: ['POST', 'OPTIONS'], authLevel: 'anonymous', route: 'mail/folders/delete', handler: mailFolderDelete })
