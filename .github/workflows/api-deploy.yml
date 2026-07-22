@@ -68,6 +68,7 @@ jobs:
               "ELEVENLABS_DEFAULT_VOICE_ID=${{ secrets.ELEVENLABS_DEFAULT_VOICE_ID }}" \
               "ELEVENLABS_AGENT_ID=agent_1901kx3w6qd0f1yrr74gevbyhj1k" \
               "TAVILY_API_KEY=${{ secrets.TAVILY_API_KEY }}" \
+              "UAT_BYPASS_TOKEN=${{ secrets.UAT_BYPASS_TOKEN }}" \
               "HEYGEN_CLONE_1_AVATAR_IDENTITY_ID=${{ secrets.HEYGEN_CLONE_1_AVATAR_IDENTITY_ID }}" \
               "HEYGEN_CLONED_VOICE_ID=${{ secrets.HEYGEN_CLONED_VOICE_ID }}" \
               "NODE_ENV=production"

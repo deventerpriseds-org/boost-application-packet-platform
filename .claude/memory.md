@@ -97,6 +97,18 @@ Key tables (PostgreSQL):
 | Packets/Outreach empty-state nav links | open | Need clickable links to Opportunities |
 | Design config applet + verifier agent | done (skill repo) | eds-claude-skills updated |
 
+## Auth / write-protection model (ACT-19, 2026-07-22)
+- `app/*` routes are `authLevel:'anonymous'` with a `?owner=` fallback. **Writes are now gated**:
+  `appSession.requireWrite(req)` allows a mutation only if verified (session token) OR owner is the
+  demo workspace (`demo@executive-engine.local`). Applied to 54 handlers. Reads stay open by `?owner=`.
+- **Programmatic auth WITHOUT OAuth** (do not break this): two paths — (1) `X-UAT-Token` header ==
+  `UAT_BYPASS_TOKEN` env → verified, owner = `?owner` || `UAT_USER` (org convention from eds verifier;
+  UAT_BYPASS_TOKEN is an org secret, now synced via api-deploy.yml). (2) `api-test.yml` MINTS a session
+  token from the app signing secret (MICROSOFT_CLIENT_SECRET==AZURE_CLIENT_SECRET; SESSION_SIGNING_SECRET
+  unset) — so all automated tests authenticate. Never remove these or testing/verifier breaks.
+- Left open by design: `mailNotify` (Graph webhook), timers, ALL reads, `appCapture` (extension uses body.owner).
+- **Errors:** genuine exceptions return 500 (not 200-with-error) via the 69 hardened catch blocks; business/validation stays 400/404.
+
 ## Known issues & gotchas
 - esbuild smart-quote bug: Edit tool inserts curly quotes into JSX; run sed fix after every JSX edit
 - CCR sandbox cannot reach azurewebsites.net directly — use api-test.yml workflow for API calls

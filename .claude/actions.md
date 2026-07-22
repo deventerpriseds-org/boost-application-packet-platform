@@ -384,4 +384,28 @@ into the AI router alongside the three input paths: (1) role-mapped folders → 
 
 ---
 
+## ACT-19 — Production hardening: auth-on-writes (#1) + 5xx-on-failure (#2)
+
+**Requested:** 2026-07-22, after a placeholder/production-readiness scan (0 blockers found).
+**#1 — Auth on owner-scoped writes.** `appSession.requireWrite(req)` allows a write only if verified
+(session token) OR owner is the demo workspace. Applied to 54 mutating handlers across 10 files.
+Preserves programmatic testing without OAuth: implemented the eds-skills `X-UAT-Token`/`UAT_BYPASS_TOKEN`
+convention server-side in `resolveOwner` (owner = ?owner || UAT_USER), and `api-test.yml` now mints a
+session token from the app signing secret. Left open by design: mailNotify (webhook), timers, ALL reads,
+appCapture (extension). **Verified live:** authed write → 200; unauth write to real owner → **401
+"sign in required to modify this workspace"** (api-test omit_auth=true).
+**#2 — 5xx on failures.** 69 top-level catch blocks 200→500; business/validation returns unchanged.
+**UAT_BYPASS_TOKEN** confirmed present in org secrets → added to api-deploy.yml `--settings` sync so the
+Playwright/browser UAT write path is live on the Function App.
+**Status:** `done` (commits 0a750b7, 92975e3, + api-deploy UAT sync; eds-skills 6186435).
+
+## ACT-20 — Finish all design-spec pages; no placeholders/fake data (in progress)
+
+**Requested:** 2026-07-22 — user supplied the full design spec PDF (Boost_Exec_Pipeline.pdf, 13 pp:
+squashed responsive layout + per-page contents/capabilities + clean design views). Audit which spec
+pages are built vs missing, build the missing ones, and make everything functional end-to-end with no
+placeholders or fake data. **Status:** `open` (auditing spec vs built screens).
+
+---
+
 *Last updated: 2026-07-22*
