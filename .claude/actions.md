@@ -404,7 +404,19 @@ Playwright/browser UAT write path is live on the Function App.
 **Requested:** 2026-07-22 — user supplied the full design spec PDF (Boost_Exec_Pipeline.pdf, 13 pp:
 squashed responsive layout + per-page contents/capabilities + clean design views). Audit which spec
 pages are built vs missing, build the missing ones, and make everything functional end-to-end with no
-placeholders or fake data. **Status:** `open` (auditing spec vs built screens).
+placeholders or fake data.
+**Audit result:** all 16 spec screens already EXISTED with NO fake/placeholder data — the gap was
+feature-completeness (every screen was BUILT-PARTIAL). Completed in 4 deployed waves, real-data-only:
+Wave 1 Swipe/Opportunities/Pipeline; Wave 2 Composer/Outreach/Answers/Offer/Library(role detail+playbooks);
+Wave 3 Assets(KPI/bin/table)/Command-Center-tabs/Intake-3-pane; Wave 4 NEW `GET /api/app/metrics/today`
++ ?stage=rejected + answers style + outreach body endpoints, wired into Today pulse-strip/goals/KPI
+(verified live), Pipeline Rejected lane, Answers style toggle, Composer body-persist, + Interviews
+list & real MediaRecorder Record. Anything unbacked was HIDDEN, never faked.
+**Remaining (need deeper backend — flagged, not faked):** reply-rate + days-per-stage (need reply
+tracking + stage-history table); Templates manager (needs templates CRUD); asset forwards/7d/per-slide
+views; mail snooze/dismiss + body preview; Settings hub-card re-layout (cosmetic; tabbed Settings works);
+Packets list table+filter + builder template-pickers/version-history/Send→Applied.
+**Status:** `substantially done` — 12/16 screens completed + Interviews; backend-gated remainder listed.
 
 ---
 
