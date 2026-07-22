@@ -445,6 +445,57 @@ export async function mailFolders(req: HttpRequest, context: InvocationContext):
   } catch (err) { return { status: 200, headers: HEADERS, jsonBody: { error: String(err) } } }
 }
 
+// POST /api/mail/folders/create { name, parentId? } — create a mail folder (nested if
+// parentId given). Needs Mail.ReadWrite app permission on the Graph app — a 403 here means
+// the scope isn't granted yet. Returns the created folder {id, name} on success.
+export async function mailFolderCreate(req: HttpRequest, context: InvocationContext): Promise<HttpResponseInit> {
+  if (req.method === 'OPTIONS') return { status: 204, headers: HEADERS }
+  const creds = graphCreds()
+  if (!creds.clientId || !creds.clientSecret) return { status: 200, headers: HEADERS, jsonBody: { error: 'MICROSOFT creds not set' } }
+  try {
+    const body = (await req.json().catch(() => ({}))) as any
+    const name = String(body?.name || '').trim().slice(0, 120)
+    if (!name) return { status: 400, headers: HEADERS, jsonBody: { error: 'name required' } }
+    const parentId = body?.parentId ? String(body.parentId).trim() : null
+    const mailbox = String(body?.mailbox || '').trim() || (await loadConfig(resolveOwner(req).owner)).mailbox
+    const token = await getMicrosoftToken(creds.tenantId, creds.clientId, creds.clientSecret)
+    const url = parentId
+      ? `https://graph.microsoft.com/v1.0/users/${mailbox}/mailFolders/${parentId}/childFolders`
+      : `https://graph.microsoft.com/v1.0/users/${mailbox}/mailFolders`
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ displayName: name, isHidden: false }),
+    })
+    const j = await res.json().catch(() => ({}))
+    if (!res.ok) {
+      const detail = (j as any)?.error?.message || `HTTP ${res.status}`
+      const needsPerm = res.status === 403
+      return { status: 200, headers: HEADERS, jsonBody: { ok: false, status: res.status, detail, needsPermission: needsPerm ? 'Mail.ReadWrite' : undefined } }
+    }
+    return { status: 200, headers: HEADERS, jsonBody: { ok: true, folder: { id: (j as any).id, name: (j as any).displayName, parentId } } }
+  } catch (err) { return { status: 200, headers: HEADERS, jsonBody: { error: String(err) } } }
+}
+
+// POST /api/mail/folders/delete { folderId } — delete a mail folder (cleanup/undo).
+export async function mailFolderDelete(req: HttpRequest, context: InvocationContext): Promise<HttpResponseInit> {
+  if (req.method === 'OPTIONS') return { status: 204, headers: HEADERS }
+  const creds = graphCreds()
+  if (!creds.clientId || !creds.clientSecret) return { status: 200, headers: HEADERS, jsonBody: { error: 'MICROSOFT creds not set' } }
+  try {
+    const body = (await req.json().catch(() => ({}))) as any
+    const folderId = String(body?.folderId || '').trim()
+    if (!folderId) return { status: 400, headers: HEADERS, jsonBody: { error: 'folderId required' } }
+    const mailbox = String(body?.mailbox || '').trim() || (await loadConfig(resolveOwner(req).owner)).mailbox
+    const token = await getMicrosoftToken(creds.tenantId, creds.clientId, creds.clientSecret)
+    const res = await fetch(`https://graph.microsoft.com/v1.0/users/${mailbox}/mailFolders/${folderId}`, {
+      method: 'DELETE', headers: { Authorization: `Bearer ${token}` },
+    })
+    if (!res.ok && res.status !== 204) return { status: 200, headers: HEADERS, jsonBody: { ok: false, status: res.status, detail: (await res.text()).slice(0, 300) } }
+    return { status: 200, headers: HEADERS, jsonBody: { ok: true, removed: folderId } }
+  } catch (err) { return { status: 200, headers: HEADERS, jsonBody: { error: String(err) } } }
+}
+
 // folder_role_map: maps a mailbox folder → a role bin (persona.key). Rows the router
 // consults when a message's parentFolderId matches, to assign a role directly instead
 // of AI-classifying. Many-to-many: a role can pull from several folders and a folder can
@@ -842,6 +893,8 @@ app.http('mailSubscriptions', { methods: ['GET', 'OPTIONS'], authLevel: 'anonymo
 app.http('mailIngestTest', { methods: ['POST', 'OPTIONS'], authLevel: 'anonymous', route: 'mail/ingest-test', handler: mailIngestTest })
 app.http('mailConfig', { methods: ['GET', 'POST', 'OPTIONS'], authLevel: 'anonymous', route: 'mail/config', handler: mailConfig })
 app.http('mailFolders', { methods: ['GET', 'OPTIONS'], authLevel: 'anonymous', route: 'mail/folders', handler: mailFolders })
+app.http('mailFolderCreate', { methods: ['POST', 'OPTIONS'], authLevel: 'anonymous', route: 'mail/folders/create', handler: mailFolderCreate })
+app.http('mailFolderDelete', { methods: ['POST', 'OPTIONS'], authLevel: 'anonymous', route: 'mail/folders/delete', handler: mailFolderDelete })
 app.http('mailFolderMap', { methods: ['GET', 'POST', 'OPTIONS'], authLevel: 'anonymous', route: 'mail/folder-map', handler: mailFolderMap })
 app.http('mailFolderMapDelete', { methods: ['POST', 'OPTIONS'], authLevel: 'anonymous', route: 'mail/folder-map/delete', handler: mailFolderMapDelete })
 app.http('mailSelfTest', { methods: ['POST', 'OPTIONS'], authLevel: 'anonymous', route: 'mail/self-test', handler: mailSelfTest })
