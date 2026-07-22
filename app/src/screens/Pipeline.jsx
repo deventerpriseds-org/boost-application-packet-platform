@@ -52,10 +52,19 @@ export default function Pipeline({ opps }) {
   const [roles, setRoles] = useState([])
   const [roleFilter, setRoleFilter] = useState('all')
   const [dateFilter, setDateFilter] = useState('any')
+  const [rejected, setRejected] = useState([])
 
   // Same persona source Opportunities uses to build the role chips.
   useEffect(() => {
     api.listPersonas().then((r) => { if (!r.error) setRoles(r.personas || []) }).catch(() => {})
+  }, [])
+
+  // Rejected (dismissed) opps are excluded from the normal board load, so fetch
+  // them separately for the read-only Rejected lane. Real data — empty is real.
+  useEffect(() => {
+    api.listOpportunities({ stage: 'rejected' }).then((r) => {
+      if (!r.error) setRejected(r.opportunities || [])
+    }).catch(() => {})
   }, [])
 
   // Apply role + date filters to the loaded opps (same rolesFor approach as Opportunities).
@@ -185,6 +194,26 @@ export default function Pipeline({ opps }) {
               </div>
             )
           })}
+
+          {/* Rejected lane — real dismissed opps, read-only (they are excluded
+              from the normal board and have no drop target). Empty is real. */}
+          <div style={{ width: 220, flexShrink: 0, background: 'var(--proto-panel)', borderRadius: 10, padding: 8, border: '1px solid var(--proto-rule-soft)', opacity: 0.9 }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '4px 6px 8px' }}>
+              <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--proto-ink2)' }}>Rejected</span>
+              <span className="px-chip">{rejected.length}</span>
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, minHeight: 40 }}>
+              {rejected.map((o) => (
+                <div key={o.id} className="px-box" style={{ padding: 10, display: 'flex', gap: 10, alignItems: 'center' }}>
+                  <MatchScore value={o.match} size={28} />
+                  <div style={{ minWidth: 0, flex: 1 }}>
+                    <div style={{ fontSize: 13, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{o.company}</div>
+                    <div className="px-small" style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{o.role}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
         </div>
       </div>
     </div>

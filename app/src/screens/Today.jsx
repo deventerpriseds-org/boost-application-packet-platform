@@ -161,6 +161,19 @@ export default function Today({ opps }) {
 
   const priorities = useMemo(() => priorityActions(opportunities), [opportunities])
 
+  // Real metrics from the platform metrics endpoint (no client-side derivation).
+  const [metrics, setMetrics] = useState(null)
+  const [metricsErr, setMetricsErr] = useState(null)
+  useEffect(() => {
+    let alive = true
+    api.todayMetrics().then((r) => {
+      if (!alive) return
+      if (r && r.ok && r.metrics) setMetrics(r.metrics)
+      else setMetricsErr('Metrics unavailable')
+    }).catch(() => { if (alive) setMetricsErr('Metrics unavailable') })
+    return () => { alive = false }
+  }, [])
+
   // "This week" — real upcoming outreach touches (due/scheduled) across opps.
   const [week, setWeek] = useState([])
   const [weekError, setWeekError] = useState(null)
@@ -194,13 +207,23 @@ export default function Today({ opps }) {
       {/* Latest inbox scrub — most immediate attention */}
       <InboxScrubHero newToday={newToday} backlog={backlog} toast={toast} />
 
-      {/* KPI strip */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 12 }}>
-        <Kpi label="New today" value={newToday.length} tone="accent" onClick={() => go('/opportunities?filter=new')} />
-        <Kpi label="Backlog" value={backlog.length} tone="default" onClick={() => go('/opportunities?filter=backlog')} />
-        <Kpi label="Active" value={active.length} tone="green" onClick={() => go('/opportunities?filter=active')} />
-        <Kpi label="Hot" value={hot.length} tone="red" onClick={() => go('/opportunities?filter=hot')} />
-      </div>
+      {/* Pulse strip — real platform metrics */}
+      {metrics && <PulseStrip metrics={metrics} />}
+
+      {/* This morning's goals — real counts */}
+      {metrics && <MorningGoals goals={metrics.goals} />}
+
+      {/* KPI row — real server metrics (Active/Hot/Interview/Rejected + weekly delta).
+          New-today + backlog already live in the inbox-scrub hero above, so not repeated here.
+          Falls back to local counts until metrics load. */}
+      {metrics
+        ? <MetricsKpiRow kpis={metrics.kpis} weekly={metrics.weekly} />
+        : (
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 12 }}>
+            <Kpi label="Active" value={active.length} tone="green" onClick={() => go('/opportunities?filter=active')} />
+            <Kpi label="Hot" value={hot.length} tone="red" onClick={() => go('/opportunities?filter=hot')} />
+          </div>
+        )}
 
       {/* Do these next — next-best actions */}
       {priorities.length > 0 && (
@@ -252,6 +275,136 @@ export default function Today({ opps }) {
         {active.length === 0 && <Empty>No active opportunities yet.</Empty>}
         {active.slice(0, 8).map((o) => <OppRow key={o.id} o={o} />)}
       </Section>
+    </div>
+  )
+}
+
+// Status-color convention: reviewing=brand/teal (active/primary), outreach=warning/yellow,
+// interviewing=purple, offer=success/green.
+const MIX_SEGMENTS = [
+  { key: 'reviewing', label: 'Reviewing', color: 'var(--surface-brand-default)' },
+  { key: 'outreach', label: 'Outreach', color: 'var(--proto-yellow)' },
+  { key: 'interviewing', label: 'Interviewing', color: 'var(--proto-purple)' },
+  { key: 'offer', label: 'Offer', color: 'var(--surface-success-default)' },
+]
+
+function PulseStrip({ metrics }) {
+  const mix = metrics.pipelineMix || {}
+  const weekly = metrics.weekly || {}
+  const segs = MIX_SEGMENTS.map((s) => ({ ...s, ...(mix[s.key] || { count: 0, pct: 0 }) }))
+  const mixTotal = segs.reduce((a, s) => a + (s.count || 0), 0)
+  const delta = typeof weekly.delta === 'number' ? weekly.delta : (weekly.last7 - weekly.prior7)
+  const up = delta > 0, down = delta < 0
+  const deltaColor = up ? 'var(--proto-green)' : down ? 'var(--proto-red)' : 'var(--proto-ink3)'
+
+  return (
+    <div className="px-box" style={{ padding: 16, display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 20, alignItems: 'center' }}>
+      {/* Pipeline mix stacked bar + legend */}
+      <div style={{ gridColumn: '1 / -1' }}>
+        <div className="px-small" style={{ textTransform: 'uppercase', letterSpacing: 1, marginBottom: 8 }}>Pipeline mix</div>
+        <div style={{ display: 'flex', width: '100%', height: 12, borderRadius: 99, overflow: 'hidden', background: 'var(--proto-rule-soft)' }}>
+          {mixTotal > 0 && segs.map((s) => s.count > 0 && (
+            <div key={s.key} title={`${s.label}: ${s.count} (${s.pct}%)`} style={{ width: `${(s.count / mixTotal) * 100}%`, background: s.color }} />
+          ))}
+        </div>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 16px', marginTop: 10 }}>
+          {segs.map((s) => (
+            <div key={s.key} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <span style={{ width: 9, height: 9, borderRadius: '50%', background: s.color, flexShrink: 0 }} />
+              <span style={{ fontSize: 13, fontWeight: 600 }}>{s.label}</span>
+              <span className="px-small">{s.count} · {s.pct}%</span>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Weekly number with delta */}
+      <div>
+        <div className="px-small" style={{ textTransform: 'uppercase', letterSpacing: 1 }}>This week</div>
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, marginTop: 4 }}>
+          <span style={{ fontSize: 28, fontWeight: 700 }}>{weekly.last7 ?? 0}</span>
+          {delta !== 0 && (
+            <span style={{ fontSize: 14, fontWeight: 600, color: deltaColor }}>
+              {up ? '▲' : '▼'} {Math.abs(delta)}
+            </span>
+          )}
+          <span className="px-small">vs {weekly.prior7 ?? 0} prior 7d</span>
+        </div>
+      </div>
+
+      {/* Daily goals as real raw counts (no fabricated target) */}
+      <div>
+        <div className="px-small" style={{ textTransform: 'uppercase', letterSpacing: 1 }}>Today's activity</div>
+        <div style={{ display: 'flex', gap: 18, marginTop: 6 }}>
+          <GoalStat n={metrics.goals?.reviewedToday ?? 0} label="reviewed" />
+          <GoalStat n={metrics.goals?.packetsBuiltToday ?? 0} label="packets" />
+          <GoalStat n={metrics.goals?.outreachSentToday ?? 0} label="outreach" />
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function GoalStat({ n, label }) {
+  return (
+    <div>
+      <div style={{ fontSize: 20, fontWeight: 700 }}>{n}</div>
+      <div className="px-small">{label}</div>
+    </div>
+  )
+}
+
+function MorningGoals({ goals }) {
+  const g = goals || {}
+  const items = [
+    { n: g.reviewedToday ?? 0, label: 'Reviewed today', cta: 'Review', to: '/swipe' },
+    { n: g.packetsBuiltToday ?? 0, label: 'Packets built today', cta: 'Build', to: '/opportunities?filter=active' },
+    { n: g.outreachSentToday ?? 0, label: 'Outreach sent today', cta: null, to: null },
+  ]
+  return (
+    <Section title="This morning's goals">
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 8 }}>
+        {items.map((it) => (
+          <div key={it.label} className="px-box" style={{ padding: 14, display: 'flex', alignItems: 'center', gap: 12 }}>
+            <div style={{ fontSize: 28, fontWeight: 700, color: 'var(--proto-accent)' }}>{it.n}</div>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div className="px-small">{it.label}</div>
+            </div>
+            {it.cta && <button className="px-btn" style={{ fontSize: 12 }} onClick={() => go(it.to)}>{it.cta}</button>}
+          </div>
+        ))}
+      </div>
+    </Section>
+  )
+}
+
+function MetricsKpiRow({ kpis, weekly }) {
+  const k = kpis || {}
+  const delta = typeof weekly?.delta === 'number' ? weekly.delta : ((weekly?.last7 ?? 0) - (weekly?.prior7 ?? 0))
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 12 }}>
+      <MetricKpi label="Active" value={k.active ?? 0} tone="accent" />
+      <MetricKpi label="Hot" value={k.hot ?? 0} tone="red" />
+      <MetricKpi label="Interview" value={k.interview ?? 0} tone="purple" />
+      <MetricKpi label="Rejected" value={k.rejected ?? 0} tone="ink3" />
+      <MetricKpi label="This week" value={weekly?.last7 ?? 0} tone="green" delta={delta} />
+    </div>
+  )
+}
+
+function MetricKpi({ label, value, tone, delta }) {
+  const up = delta > 0, down = delta < 0
+  return (
+    <div className="px-box" style={{ padding: 16 }}>
+      <div className="px-small" style={{ textTransform: 'uppercase', letterSpacing: 1 }}>{label}</div>
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+        <span style={{ fontSize: 28, fontWeight: 700, color: `var(--proto-${tone})` }}>{value}</span>
+        {typeof delta === 'number' && delta !== 0 && (
+          <span style={{ fontSize: 13, fontWeight: 600, color: up ? 'var(--proto-green)' : down ? 'var(--proto-red)' : 'var(--proto-ink3)' }}>
+            {up ? '▲' : '▼'} {Math.abs(delta)}
+          </span>
+        )}
+      </div>
     </div>
   )
 }

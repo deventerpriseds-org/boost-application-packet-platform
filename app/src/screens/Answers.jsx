@@ -20,6 +20,7 @@ export default function Answers({ id }) {
   const [preview, setPreview] = useState(null)   // data URL of the uploaded screenshot
   const [busy, setBusy] = useState(false)
   const [answers, setAnswers] = useState(null)     // [{question, answer}]
+  const [style, setStyle] = useState('concise')    // concise | detailed | star
   const fileRef = useRef(null)
 
   const load = useCallback(async () => {
@@ -42,16 +43,30 @@ export default function Answers({ id }) {
     await run(dataUrl)
   }
 
-  const run = async (dataUrl) => {
+  const run = async (dataUrl, st = style) => {
     setBusy(true)
     try {
-      const res = await api.answersVision(id, dataUrl)
+      const res = await api.answersVision(id, dataUrl, st)
       if (res.error) throw new Error(res.error)
       setAnswers(res.answers || [])
       toast(`Detected ${res.count} question${res.count === 1 ? '' : 's'}`)
     } catch (err) { toast(`Autofill failed: ${err.message || err}`) }
     finally { setBusy(false) }
   }
+
+  // Switching style re-generates the answers in that style using the already
+  // uploaded screenshot (real backend param on answers/vision).
+  const chooseStyle = (st) => {
+    if (st === style) return
+    setStyle(st)
+    if (preview && !busy) run(preview, st)
+  }
+
+  const STYLES = [
+    { key: 'concise', label: 'Concise' },
+    { key: 'detailed', label: 'Detailed' },
+    { key: 'star', label: 'STAR' },
+  ]
 
   const onPaste = useCallback(async (e) => {
     const item = [...(e.clipboardData?.items || [])].find((i) => i.type.startsWith('image/'))
@@ -84,6 +99,13 @@ export default function Answers({ id }) {
         <div style={{ flex: 1, minWidth: 200 }}>
           <div style={{ fontSize: 20, fontWeight: 700 }}>Application autofill</div>
           <div className="px-small">Drop a screenshot of the form → copy-paste-ready blocks for every field.</div>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+          <span className="px-small" style={{ textTransform: 'uppercase', letterSpacing: 1 }}>Style</span>
+          {STYLES.map((s) => (
+            <button key={s.key} className={`px-btn${style === s.key ? ' px-btn-accent' : ''}`} style={{ fontSize: 12, padding: '4px 10px' }}
+              disabled={busy} onClick={() => chooseStyle(s.key)}>{s.label}</button>
+          ))}
         </div>
         {answers && answers.length > 0 && <button className="px-btn px-btn-dark" onClick={copyAll}>⧉ Copy all</button>}
       </div>

@@ -77,6 +77,9 @@ export default function Composer({ id }) {
     if (!messageId) { toast('Generate a draft first.'); return }
     setSavingDraft(true)
     try {
+      // Persist any manual textarea edits to the body first, then file it as a draft.
+      const bodyRes = await api.updateOutreachBody(messageId, body)
+      if (bodyRes.error) { toast(`Failed: ${bodyRes.error}`); return }
       const res = await api.setOutreachState(messageId, 'draft')
       if (res.error) toast(`Failed: ${res.error}`); else toast('Saved to Drafts ✓')
     } catch (err) { toast(`Save failed: ${err.message || err}`) }
