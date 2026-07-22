@@ -42,15 +42,22 @@ function IntakeSettings() {
   const loadTree = useCallback(async (mailbox) => {
     if (!mailbox) return
     setTree({ loading: true, list: [], error: null })
-    try {
-      const [t, m, p] = await Promise.all([api.mailFolderTree(mailbox), api.mailFolderMapGet(), api.listPersonas()])
-      if (!t.ok) throw new Error(t.detail || t.error || 'could not list folders')
+    // Load the three feeds independently — a failure in one (e.g. roles) must not
+    // blank the folder tree. Roles are optional; folders can still be watched with
+    // "router decides".
+    const [t, m, p] = await Promise.allSettled([api.mailFolderTree(mailbox), api.mailFolderMapGet(), api.listPersonas()])
+    // Mappings (optional)
+    if (m.status === 'fulfilled') {
       const map = {}
-      for (const row of (m.mappings || [])) map[row.folderId] = { roleKey: row.roleKey, skipFilter: row.skipFilter }
+      for (const row of (m.value.mappings || [])) map[row.folderId] = { roleKey: row.roleKey, skipFilter: row.skipFilter }
       setFmap(map)
-      setRoles(p.personas || p.roles || [])
-      setTree({ loading: false, list: t.folders || [], error: null })
-    } catch (e) { setTree({ loading: false, list: [], error: String(e.message || e) }) }
+    }
+    // Roles (optional)
+    if (p.status === 'fulfilled') setRoles(p.value.personas || p.value.roles || [])
+    else setRoles([])
+    // Folder tree (required)
+    if (t.status === 'fulfilled' && t.value?.ok) setTree({ loading: false, list: t.value.folders || [], error: null })
+    else setTree({ loading: false, list: [], error: String(t.status === 'fulfilled' ? (t.value?.detail || t.value?.error || 'could not list folders') : (t.reason?.message || t.reason)) })
   }, [])
 
   // Change a folder's mapping. value: '' = not watched (delete), '__router__' = watch/AI-decide,

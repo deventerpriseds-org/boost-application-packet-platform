@@ -251,9 +251,20 @@ export async function personasTagAll(req: HttpRequest, _context: InvocationConte
 
 app.http('answersVision', { methods: ['POST', 'OPTIONS'], authLevel: 'anonymous', route: 'app/opportunity/{id}/answers/vision', handler: answersVision })
 app.http('assetsList', { methods: ['GET', 'OPTIONS'], authLevel: 'anonymous', route: 'app/assets', handler: assetsList })
-app.http('personasList', { methods: ['GET', 'OPTIONS'], authLevel: 'anonymous', route: 'app/personas', handler: personasList })
-app.http('personasCreate', { methods: ['POST', 'OPTIONS'], authLevel: 'anonymous', route: 'app/personas', handler: personasCreate })
-app.http('personasUpdate', { methods: ['PATCH', 'OPTIONS'], authLevel: 'anonymous', route: 'app/personas/{key}', handler: personasUpdate })
-app.http('personasDelete', { methods: ['DELETE', 'OPTIONS'], authLevel: 'anonymous', route: 'app/personas/{key}', handler: personasDelete })
+// Two app.http() calls sharing the same route template (personasList GET +
+// personasCreate POST on 'app/personas') collide in the Azure Functions host and
+// BOTH get dropped → 404. Every other route in this codebase uses one registration
+// with multiple methods. Consolidate via method dispatchers so personas match the
+// convention and actually register.
+const personasCollection = async (req: HttpRequest, ctx: InvocationContext): Promise<HttpResponseInit> => {
+  if (req.method === 'OPTIONS') return { status: 204, headers: HEADERS }
+  return req.method === 'POST' ? personasCreate(req, ctx) : personasList(req, ctx)
+}
+const personasItem = async (req: HttpRequest, ctx: InvocationContext): Promise<HttpResponseInit> => {
+  if (req.method === 'OPTIONS') return { status: 204, headers: HEADERS }
+  return req.method === 'DELETE' ? personasDelete(req, ctx) : personasUpdate(req, ctx)
+}
+app.http('personasCollection', { methods: ['GET', 'POST', 'OPTIONS'], authLevel: 'anonymous', route: 'app/personas', handler: personasCollection })
 app.http('personasTagAll', { methods: ['POST', 'OPTIONS'], authLevel: 'anonymous', route: 'app/personas/tag-all', handler: personasTagAll })
+app.http('personasItem', { methods: ['PATCH', 'DELETE', 'OPTIONS'], authLevel: 'anonymous', route: 'app/personas/{key}', handler: personasItem })
 app.http('libraryList', { methods: ['GET', 'OPTIONS'], authLevel: 'anonymous', route: 'app/library', handler: libraryList })
