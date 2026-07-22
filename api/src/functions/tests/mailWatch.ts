@@ -277,24 +277,65 @@ export async function insertOpp(client: any, owner: string, o: any, source = 'Li
   return { inserted: true, id, company: o.company, role: o.role }
 }
 
-async function ingestText(rawText: string, owner: string, source = 'Email', receivedAt?: string) {
+// Role bins mapped to a mailbox folder (empty = "router decides" → AI classify).
+async function folderRoles(client: any, owner: string, folderId?: string): Promise<string[]> {
+  if (!folderId) return []
+  try {
+    await ensureFolderMapTable(client)
+    const rows = (await client.query(
+      `select role_key from folder_role_map where owner_email=$1 and folder_id=$2`, [owner, folderId]
+    )).rows
+    return rows.map((r: any) => r.role_key)
+  } catch { return [] }
+}
+
+// UNIFIED OPPORTUNITY ROUTER — the single entry point every input source funnels through
+// (role-mapped folders, general inbox, ATS boards, browser-extension capture). It inserts via
+// the shared insertOpp primitive, then assigns roles ONE consistent way for every source:
+//   1. folder-mapped: if parentFolderId matches folder_role_map rows, assign those role bins
+//      directly (deterministic — this is how a user funnels jobs that would fail keyword filters)
+//   2. otherwise: AI-classify via tagOppRoles (general inbox, ATS, extension, unmapped folders)
+// Prior to this, tagOppRoles ran only on the mail path and the folder→role signal was dead at
+// ingest; ATS/extension opps got no role at all. Now all three paths route identically.
+export async function routeOpportunity(
+  client: any, owner: string, o: any,
+  opts: { source?: string; parentFolderId?: string; why?: string; receivedAt?: string; rawJd?: string } = {}
+): Promise<{ inserted: boolean; id?: string; reason?: string; company: string; role: string; routed?: string }> {
+  const res = await insertOpp(client, owner, o, opts.source || 'Email', opts.why, opts.receivedAt, opts.rawJd)
+  if (!res.inserted || !res.id) return res
+  // Path 1 — deterministic folder→role bins
+  const mapped = await folderRoles(client, owner, opts.parentFolderId)
+  if (mapped.length) {
+    try {
+      await client.query(
+        `update opportunity set roles_for=$2, why_surfaced=coalesce(nullif(why_surfaced,''), $3) where id=$1`,
+        [res.id, mapped, `Folder-routed from ${opts.source || 'mailbox'}`]
+      )
+      return { ...res, routed: `folder:${mapped.join(',')}` }
+    } catch { /* fall through to AI if the direct assign fails */ }
+  }
+  // Path 2/3 — AI classify (fire-and-forget, never blocks ingest)
+  tagOppRoles(res.id, o, owner).catch(() => {})
+  return { ...res, routed: 'ai' }
+}
+
+async function ingestText(rawText: string, owner: string, source = 'Email', receivedAt?: string, parentFolderId?: string) {
   let client
   try {
     client = await getPgClient()
     const opps = await parseAlert(rawText)
     const results = []
     for (const o of opps) {
-      const r = await insertOpp(client, owner, o, source, undefined, receivedAt, rawText)
+      // Route through the unified hub so folder→role and AI classification are consistent.
+      const r = await routeOpportunity(client, owner, o, { source, parentFolderId, receivedAt, rawJd: rawText })
       results.push(r)
-      // Fire-and-forget role tagging — don't await, never blocks ingest
-      if (r.inserted && r.id) tagOppRoles(r.id, o, owner).catch(() => {})
     }
     return { parsed: opps.length, inserted: results.filter((r) => r.inserted).length, results }
   } finally { try { await client?.end() } catch {} }
 }
 
 async function ingestMessageId(token: string, id: string, cfg: WatchConfig) {
-  const m = await fetch(`https://graph.microsoft.com/v1.0/users/${cfg.mailbox}/messages/${id}?$select=subject,from,bodyPreview,body,receivedDateTime`, { headers: { Authorization: `Bearer ${token}` } })
+  const m = await fetch(`https://graph.microsoft.com/v1.0/users/${cfg.mailbox}/messages/${id}?$select=subject,from,bodyPreview,body,receivedDateTime,parentFolderId`, { headers: { Authorization: `Bearer ${token}` } })
   if (!m.ok) return { error: `fetch message HTTP ${m.status}` }
   const msg = await m.json() as any
   const from = (msg?.from?.emailAddress?.address || '').toLowerCase()
@@ -302,7 +343,9 @@ async function ingestMessageId(token: string, id: string, cfg: WatchConfig) {
   if (!isAlert(cfg, from, msg?.subject, msg?.bodyPreview)) return { skipped: 'not a job alert', from }
   const source = detectSource(from, cfg.folderName)
   const receivedAt = msg?.receivedDateTime || undefined
-  return await ingestText(text, cfg.ownerEmail, source, receivedAt)
+  // parentFolderId lets the unified router assign a role directly when the mail landed in a
+  // role-mapped folder (folder_role_map). Unmapped folders / inbox → AI classify.
+  return await ingestText(text, cfg.ownerEmail, source, receivedAt, msg?.parentFolderId)
 }
 
 // GET/POST /api/mail/notify — Graph webhook: validation handshake + notifications.

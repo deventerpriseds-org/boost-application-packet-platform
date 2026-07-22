@@ -1,7 +1,7 @@
 import { app, HttpRequest, HttpResponseInit, InvocationContext } from '@azure/functions'
 import { resolveOwner } from './appSession'
 import { getPgClient } from './pgClient'
-import { insertOpp } from './mailWatch'
+import { routeOpportunity } from './mailWatch'
 
 // G11 support — the universal-capture endpoint the Chrome extension posts to:
 // "save any job page → opportunity". Normalizes a scraped page into an
@@ -39,7 +39,7 @@ export async function appCapture(req: HttpRequest, context: InvocationContext): 
     if (!o.company || !o.role) return { status: 200, headers: HEADERS, jsonBody: { error: 'could not identify a company + role on this page', parsed: o } }
 
     client = await getPgClient()
-    const r = await insertOpp(client, owner, o, 'Extension', `Saved from ${url || 'a web page'}`)
+    const r = await routeOpportunity(client, owner, o, { source: 'Extension', why: `Saved from ${url || 'a web page'}` })
     // Store raw page text for JD parsing — best-effort, don't fail the insert
     if (r.inserted && r.id && text) {
       try {

@@ -1,7 +1,7 @@
 import { app, HttpRequest, HttpResponseInit, InvocationContext } from '@azure/functions'
 import { resolveOwner } from './appSession'
 import { getPgClient } from './pgClient'
-import { insertOpp } from './mailWatch'
+import { routeOpportunity } from './mailWatch'
 
 // G3 Phase A — ATS ingestion. Greenhouse / Lever / Ashby publish public job-board
 // APIs per company. The user configures board tokens (like the mail watcher);
@@ -138,7 +138,7 @@ export async function atsIngest(req: HttpRequest, context: InvocationContext): P
         jobs = jobs.slice(0, 60) // safety cap per source per run
         let ins = 0, dup = 0
         for (const j of jobs) {
-          const r = await insertOpp(client, owner, j, s.provider, `${s.provider} · ${s.board}${j.url ? ` · ${j.url}` : ''}`)
+          const r = await routeOpportunity(client, owner, j, { source: s.provider, why: `${s.provider} · ${s.board}${j.url ? ` · ${j.url}` : ''}` })
           if (r.inserted) ins++; else dup++
         }
         scanned += jobs.length; inserted += ins; dupes += dup

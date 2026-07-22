@@ -267,8 +267,27 @@ mapping UI with multilevel subfolders.
 - ❌ MISSING: ATS scheduler timer (0 sources configured, no timer; `atsIngest` is manual only)
 **Design decided:** ONE mailbox-wide Graph subscription, route by `parentFolderId`; additive
 schema (`folder_role_map`, `create table if not exists`), no drops/swaps.
-**ACs:** TBD — to define via define-acceptance-criteria before building.
-**Status:** `open` (in planning)
+
+**Unification done (2026-07-22) — the router hub now exists.** Audited the pipeline first
+(no duplication): `insertOpp` was already a shared primitive across all 3 paths, but role
+assignment (`tagOppRoles`) ran ONLY on the mail path, and `folder_role_map`/`parentFolderId`
+was stored but dead at ingest. Added **`routeOpportunity(client, owner, opp, {source,
+parentFolderId, ...})`** (mailWatch.ts) — the single hub every source funnels through:
+inserts via `insertOpp`, then assigns roles ONE way — (1) folder-mapped: `parentFolderId` →
+`folder_role_map` role bins, assigned directly; (2) else AI-classify via `tagOppRoles`.
+Wired all three seams to it:
+- Mail: `ingestText`/`ingestMessageId` now fetch + thread `parentFolderId` through the hub.
+- ATS: `appAts.ts:141` switched `insertOpp`→`routeOpportunity` (ATS opps now get role tagging — previously none).
+- Extension: `appCapture.ts:42` switched `insertOpp`→`routeOpportunity` (same — capture now role-tagged).
+Additive only: `insertOpp` still exported/used internally; no drops. Build clean.
+
+**Status:** `done` (router core). **Follow-ups still open:**
+- Broaden the Graph subscription from inbox-only to mailbox-wide so role-mapped folders that
+  aren't the inbox trigger notifications (currently a rule-moved/funneled mail's notification
+  may still carry the inbox `parentFolderId`).
+- Folder→role UI so the user can populate `folder_role_map` (they asked to build the mapping UI;
+  the deterministic path is live but has no rows to act on until mappings exist).
+- ATS scheduler timer (still manual-only).
 
 ---
 
