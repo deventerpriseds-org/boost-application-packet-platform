@@ -743,6 +743,74 @@ export async function mailRulesBuild(req: HttpRequest, context: InvocationContex
   finally { try { await client?.end() } catch {} }
 }
 
+// POST /api/mail/rules/build-parents { sources?: string[] } — create a catch-all sender rule
+// per source that sweeps any remaining mail from that source's sender into the parent source
+// folder. Sequenced AFTER every existing rule (so the seniority tier rules — which stop on a
+// tier match — win first, and only non-tier mail falls through here). senderContains uses the
+// precise sender_match (fall back to source_name). Idempotent: skips a source whose parent rule
+// (`EDS · {source} · Parent`) already exists. This gives LinkedIn/Ladders the same parent-folder
+// behavior Indeed/Lensa already have from their legacy sender rules.
+export async function mailRulesBuildParents(req: HttpRequest, context: InvocationContext): Promise<HttpResponseInit> {
+  if (req.method === 'OPTIONS') return { status: 204, headers: HEADERS }
+  const creds = graphCreds()
+  if (!creds.clientId || !creds.clientSecret) return { status: 200, headers: HEADERS, jsonBody: { error: 'MICROSOFT creds not set' } }
+  let client
+  try {
+    const owner = resolveOwner(req).owner
+    const mailbox = (await loadConfig(owner)).mailbox
+    const token = await getMicrosoftToken(creds.tenantId, creds.clientId, creds.clientSecret)
+    const b = (await req.json().catch(() => ({}))) as any
+    const only: string[] | null = Array.isArray(b?.sources) ? b.sources.map((s: any) => String(s)) : null
+    client = await getPgClient()
+    await ensureRoutingTable(client)
+    const rows = (await client.query(`select * from seniority_routing where owner_email=$1 order by source_name`, [owner])).rows
+    // Read existing rules to find the max sequence to append after, and skip dup names.
+    const listRes = await fetch(`https://graph.microsoft.com/v1.0/users/${mailbox}/mailFolders/inbox/messageRules`, { headers: { Authorization: `Bearer ${token}` } })
+    const listJson = await listRes.json() as any
+    const existing = listJson.value || []
+    const existingNames = new Set(existing.map((r: any) => r.displayName))
+    let seq = Math.max(0, ...existing.map((r: any) => r.sequence || 0)) + 1
+    const results: any[] = []
+    for (const r of rows) {
+      if (only && !only.includes(r.source_name)) continue
+      const name = `EDS · ${r.source_name} · Parent`
+      if (existingNames.has(name)) { results.push({ name, ok: true, skipped: 'already exists' }); continue }
+      const sender = String(r.sender_match || r.source_name || '').toLowerCase()
+      const rule: any = {
+        displayName: name, sequence: seq++, isEnabled: true,
+        conditions: { senderContains: [sender] },
+        actions: { moveToFolder: r.parent_id, stopProcessingRules: true },
+      }
+      const res = await fetch(`https://graph.microsoft.com/v1.0/users/${mailbox}/mailFolders/inbox/messageRules`, {
+        method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify(rule),
+      })
+      const j = await res.json().catch(() => ({}))
+      results.push({ name, sender, ok: res.ok, id: (j as any)?.id, error: res.ok ? undefined : JSON.stringify(j).slice(0, 160) })
+    }
+    return { status: 200, headers: HEADERS, jsonBody: { ok: true, created: results.filter((x) => x.ok && !x.skipped).length, total: results.length, results } }
+  } catch (err) { return { status: 200, headers: HEADERS, jsonBody: { error: String(err) } } }
+  finally { try { await client?.end() } catch {} }
+}
+
+// POST /api/mail/rules/delete { ruleId } — delete an inbox message rule by id.
+export async function mailRuleDelete(req: HttpRequest, context: InvocationContext): Promise<HttpResponseInit> {
+  if (req.method === 'OPTIONS') return { status: 204, headers: HEADERS }
+  const creds = graphCreds()
+  if (!creds.clientId || !creds.clientSecret) return { status: 200, headers: HEADERS, jsonBody: { error: 'MICROSOFT creds not set' } }
+  try {
+    const b = (await req.json().catch(() => ({}))) as any
+    const ruleId = String(b?.ruleId || '').trim()
+    if (!ruleId) return { status: 400, headers: HEADERS, jsonBody: { error: 'ruleId required' } }
+    const mailbox = String(b?.mailbox || '').trim() || (await loadConfig(resolveOwner(req).owner)).mailbox
+    const token = await getMicrosoftToken(creds.tenantId, creds.clientId, creds.clientSecret)
+    const res = await fetch(`https://graph.microsoft.com/v1.0/users/${mailbox}/mailFolders/inbox/messageRules/${ruleId}`, {
+      method: 'DELETE', headers: { Authorization: `Bearer ${token}` },
+    })
+    if (!res.ok) return { status: 200, headers: HEADERS, jsonBody: { ok: false, detail: (await res.text()).slice(0, 300) } }
+    return { status: 200, headers: HEADERS, jsonBody: { ok: true, ruleId } }
+  } catch (err) { return { status: 200, headers: HEADERS, jsonBody: { error: String(err) } } }
+}
+
 // GET /api/mail/messages?folderId=&top=&mailbox=[&subjectsOnly=1] — list message
 // subjects/senders for sampling seniority patterns. With folderId → that folder;
 // without → the ENTIRE mailbox (Graph /messages spans all folders). subjectsOnly=1
@@ -1233,6 +1301,8 @@ app.timer('mailReconcileTimer', { schedule: '0 15 */2 * * *', handler: mailRecon
 app.http('mailRulesList', { methods: ['GET', 'OPTIONS'], authLevel: 'anonymous', route: 'mail/rules', handler: mailRulesList })
 app.http('mailRuleRepoint', { methods: ['POST', 'OPTIONS'], authLevel: 'anonymous', route: 'mail/rules/repoint', handler: mailRuleRepoint })
 app.http('mailRulesBuild', { methods: ['POST', 'OPTIONS'], authLevel: 'anonymous', route: 'mail/rules/build-seniority', handler: mailRulesBuild })
+app.http('mailRulesBuildParents', { methods: ['POST', 'OPTIONS'], authLevel: 'anonymous', route: 'mail/rules/build-parents', handler: mailRulesBuildParents })
+app.http('mailRuleDelete', { methods: ['POST', 'OPTIONS'], authLevel: 'anonymous', route: 'mail/rules/delete', handler: mailRuleDelete })
 app.http('mailFolderCreate', { methods: ['POST', 'OPTIONS'], authLevel: 'anonymous', route: 'mail/folders/create', handler: mailFolderCreate })
 app.http('mailFoldersBulkCreate', { methods: ['POST', 'OPTIONS'], authLevel: 'anonymous', route: 'mail/folders/create-bulk', handler: mailFoldersBulkCreate })
 app.http('mailFolderDelete', { methods: ['POST', 'OPTIONS'], authLevel: 'anonymous', route: 'mail/folders/delete', handler: mailFolderDelete })
