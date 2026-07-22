@@ -299,7 +299,14 @@ EXCEPT that folder routing only fires once the subscription is mailbox-wide (see
   folder is the user's "this is a job" signal — the whole point of folder mapping). Requires
   re-running `POST /api/mail/subscribe` to repoint the live subscription (mailRenew only extends
   expiry, doesn't change resource). Same Graph permission (Mail.Read Application already covers all
-  folders). Commit pending.
+  folders). Commit 329a8f0. **Verified live:** re-ran `/api/mail/subscribe` (removed stale inbox
+  sub 56e3b60c, created 06f47873); `GET /api/mail/subscriptions` confirms the single live watch's
+  `resource` is now `users/von.ellis@enterpriseds.io/messages` (mailbox-wide), expires 2026-07-24.
+
+**ACT-17 is now fully closed** — the unified multi-source router is live end-to-end: mailbox-wide
+watch → `routeOpportunity` → (folder-mapped role bins via folder_role_map+skip_filter | AI classify),
+with the Settings folder→role UI feeding the mappings. Remaining nice-to-have: ATS scheduler timer
+(still manual-only) — tracked under ACT-12/17, low priority.
 - Folder→role UI so the user can populate `folder_role_map` (they asked to build the mapping UI;
   the deterministic path is live but has no rows to act on until mappings exist).
 - ATS scheduler timer (still manual-only).

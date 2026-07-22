@@ -84,7 +84,7 @@ Key tables (PostgreSQL):
 | LinkedIn alert intake (Graph subscription) | done | Auto-renews (mailRenew, 30-min timer); healthy |
 | Mail intake insert + filter + owner | fixed 2026-07-21 | 3 bugs: `$7` INSERT misalign (6826310), isAlert ignored sender (d02c1a2), webhook owner picked demo config (1488d3c). Was frozen at 218 for 7 days; now 298. |
 | Today screen KPI + InboxScrubHero | done | "0 new today" was ACCURATE — intake was dead, not a UI bug. FRESH_STAGES unified. |
-| Multi-source ingest router (folders+inbox+ATS) | open / planning (ACT-17) | AI router `tagOppRoles` exists; MISSING: mailbox-wide sub, subfolder traversal, folder_role_map + UI, ATS timer. Unify seniority reconcile (ACT-18) into this hub next. |
+| Multi-source ingest router (folders+inbox+ATS) | done (ACT-17, 2026-07-22) | `routeOpportunity()` hub: all 3 paths (mail, ATS, extension) route through it. Mailbox-wide Graph sub (verified `users/{mailbox}/messages`), folder_role_map consulted via parentFolderId + skip_filter bypass, folder→role UI live in Settings. Only ATS scheduler timer remains (manual-only). |
 | Seniority-tier mailbox routing (ACT-18) | done | Folders + backfill (~5,700 sorted) + reconcile timer + 12 forward keyword rules (all ok). Limitations: rules approximate (reconcile corrects), no LinkedIn/Ladders parent catch-all rule, old empty LinkedIn rule still present. |
 | Opportunity enrichment | done | POST /api/app/opportunity/:id/enrich |
 | Packet builder (resume+video+cover) | done | HeyGen render + Google Docs template fill |
