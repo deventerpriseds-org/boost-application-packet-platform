@@ -477,6 +477,76 @@ export async function mailFolderCreate(req: HttpRequest, context: InvocationCont
   } catch (err) { return { status: 200, headers: HEADERS, jsonBody: { error: String(err) } } }
 }
 
+// Seniority classifier — shared by reclassify (backfill) and rule generation.
+// Priority: C Suite > VP/Head-of/Executive > Director. "Executive" (not Chief) → VP,
+// per confirmed tiering. Deputy Chief → C Suite. Returns null = stays in parent.
+const CSUITE_ACRONYMS = ['CEO', 'CTO', 'CIO', 'CFO', 'COO', 'CISO', 'CMO', 'CPO', 'CRO', 'CDO', 'CHRO', 'CSO', 'CCO', 'CXO', 'CAIO', 'CTIO']
+function seniorityTier(subject: string): 'csuite' | 'vp' | 'director' | null {
+  const s = subject || ''
+  if (/\bchief\b/i.test(s)) return 'csuite'
+  if (new RegExp(`\\b(${CSUITE_ACRONYMS.join('|')})\\b`).test(s)) return 'csuite'
+  if (/\bfounder\b/i.test(s)) return 'csuite'
+  if (/\bpresident\b/i.test(s) && !/\bvice\s+president\b/i.test(s)) return 'csuite'
+  if (/\b(vice\s+president|VP|SVP|EVP|AVP)\b/i.test(s)) return 'vp'
+  if (/\bhead of\b/i.test(s)) return 'vp'
+  if (/\bexecutive\b/i.test(s)) return 'vp'   // Executive anything (not Chief) → VP
+  if (/\bdirector\b/i.test(s)) return 'director'
+  return null
+}
+
+// POST /api/mail/folders/reclassify { sourceFolderId, targets:{csuite,vp,director},
+//   dryRun?, max?, senderContains? } — classify existing mail in a source folder by
+//   seniority and (unless dryRun) move each into the matching subfolder. Unmatched stay.
+export async function mailReclassify(req: HttpRequest, context: InvocationContext): Promise<HttpResponseInit> {
+  if (req.method === 'OPTIONS') return { status: 204, headers: HEADERS }
+  const creds = graphCreds()
+  if (!creds.clientId || !creds.clientSecret) return { status: 200, headers: HEADERS, jsonBody: { error: 'MICROSOFT creds not set' } }
+  try {
+    const body = (await req.json().catch(() => ({}))) as any
+    const sourceFolderId = String(body?.sourceFolderId || '').trim()
+    if (!sourceFolderId) return { status: 400, headers: HEADERS, jsonBody: { error: 'sourceFolderId required' } }
+    const targets = body?.targets || {}
+    const dryRun = body?.dryRun !== false            // default TRUE — safe by default
+    const max = Math.min(Math.max(Number(body?.max) || 2000, 1), 5000)
+    const senderContains = String(body?.senderContains || '').trim().toLowerCase()
+    const mailbox = String(body?.mailbox || '').trim() || (await loadConfig(resolveOwner(req).owner)).mailbox
+    const token = await getMicrosoftToken(creds.tenantId, creds.clientId, creds.clientSecret)
+
+    // 1. Collect message ids + subjects (stable ids, so moves later don't disturb paging).
+    let url: string | null = `https://graph.microsoft.com/v1.0/users/${mailbox}/mailFolders/${sourceFolderId}/messages?$select=subject,from&$top=100`
+    const msgs: any[] = []
+    while (url && msgs.length < max) {
+      const res: any = await fetch(url, { headers: { Authorization: `Bearer ${token}` } })
+      if (!res.ok) return { status: 200, headers: HEADERS, jsonBody: { ok: false, detail: `list HTTP ${res.status}: ${(await res.text()).slice(0, 200)}` } }
+      const j = await res.json() as any
+      for (const m of (j.value || [])) msgs.push({ id: m.id, subject: m.subject, from: (m?.from?.emailAddress?.address || '').toLowerCase() })
+      url = j['@odata.nextLink'] || null
+    }
+    // 2. Classify.
+    const counts = { csuite: 0, vp: 0, director: 0, other: 0 }
+    const toMove: { id: string; tier: 'csuite' | 'vp' | 'director' }[] = []
+    for (const m of msgs) {
+      if (senderContains && !m.from.includes(senderContains)) { counts.other++; continue }
+      const tier = seniorityTier(m.subject)
+      if (!tier) { counts.other++; continue }
+      counts[tier]++
+      if (targets[tier]) toMove.push({ id: m.id, tier })
+    }
+    // 3. Move (unless dry run).
+    let moved = 0; const errors: string[] = []
+    if (!dryRun) {
+      for (const item of toMove) {
+        const r = await fetch(`https://graph.microsoft.com/v1.0/users/${mailbox}/messages/${item.id}/move`, {
+          method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ destinationId: targets[item.tier] }),
+        })
+        if (r.ok) moved++; else if (errors.length < 5) errors.push(`move ${r.status}: ${(await r.text()).slice(0, 120)}`)
+      }
+    }
+    return { status: 200, headers: HEADERS, jsonBody: { ok: true, dryRun, scanned: msgs.length, capped: msgs.length >= max, counts, wouldMove: toMove.length, moved, errors } }
+  } catch (err) { return { status: 200, headers: HEADERS, jsonBody: { error: String(err) } } }
+}
+
 // GET /api/mail/messages?folderId=&top=&mailbox=[&subjectsOnly=1] — list message
 // subjects/senders for sampling seniority patterns. With folderId → that folder;
 // without → the ENTIRE mailbox (Graph /messages spans all folders). subjectsOnly=1
@@ -960,6 +1030,7 @@ app.http('mailIngestTest', { methods: ['POST', 'OPTIONS'], authLevel: 'anonymous
 app.http('mailConfig', { methods: ['GET', 'POST', 'OPTIONS'], authLevel: 'anonymous', route: 'mail/config', handler: mailConfig })
 app.http('mailFolders', { methods: ['GET', 'OPTIONS'], authLevel: 'anonymous', route: 'mail/folders', handler: mailFolders })
 app.http('mailMessages', { methods: ['GET', 'OPTIONS'], authLevel: 'anonymous', route: 'mail/messages', handler: mailMessages })
+app.http('mailReclassify', { methods: ['POST', 'OPTIONS'], authLevel: 'anonymous', route: 'mail/folders/reclassify', handler: mailReclassify })
 app.http('mailFolderCreate', { methods: ['POST', 'OPTIONS'], authLevel: 'anonymous', route: 'mail/folders/create', handler: mailFolderCreate })
 app.http('mailFoldersBulkCreate', { methods: ['POST', 'OPTIONS'], authLevel: 'anonymous', route: 'mail/folders/create-bulk', handler: mailFoldersBulkCreate })
 app.http('mailFolderDelete', { methods: ['POST', 'OPTIONS'], authLevel: 'anonymous', route: 'mail/folders/delete', handler: mailFolderDelete })
