@@ -657,6 +657,92 @@ export async function mailReconcileTimer(_t: any, context: InvocationContext): P
   try { const r = await runReconcile(); context.log(`reconcile: ${JSON.stringify(r)}`) } catch (e) { context.log(`reconcile error: ${e}`) }
 }
 
+// Approximate subject keywords for forward Outlook rules (no regex in rules — the
+// reconcile timer corrects any mis-sorts using the precise classifier).
+const TIER_SUBJECT_KEYWORDS: Record<string, string[]> = {
+  csuite: ['Chief', 'CEO', 'CTO', 'CIO', 'CFO', 'COO', 'CISO', 'CMO', 'CPO', 'CRO', 'CDO', 'CHRO', 'Founder'],
+  vp: ['Vice President', 'VP', 'SVP', 'EVP', 'Head of', 'Executive'],
+  director: ['Director'],
+}
+
+// GET /api/mail/rules — list the mailbox's inbox message rules (to find/repoint existing ones).
+export async function mailRulesList(req: HttpRequest, context: InvocationContext): Promise<HttpResponseInit> {
+  if (req.method === 'OPTIONS') return { status: 204, headers: HEADERS }
+  const creds = graphCreds()
+  if (!creds.clientId || !creds.clientSecret) return { status: 200, headers: HEADERS, jsonBody: { error: 'MICROSOFT creds not set' } }
+  try {
+    const mailbox = req.query.get('mailbox') || (await loadConfig(resolveOwner(req).owner)).mailbox
+    const token = await getMicrosoftToken(creds.tenantId, creds.clientId, creds.clientSecret)
+    const res = await fetch(`https://graph.microsoft.com/v1.0/users/${mailbox}/mailFolders/inbox/messageRules`, { headers: { Authorization: `Bearer ${token}` } })
+    const j = await res.json() as any
+    if (!res.ok) return { status: 200, headers: HEADERS, jsonBody: { ok: false, detail: JSON.stringify(j).slice(0, 300) } }
+    const rules = (j.value || []).map((r: any) => ({ id: r.id, name: r.displayName, sequence: r.sequence, enabled: r.isEnabled, conditions: r.conditions, moveToFolder: r?.actions?.moveToFolder }))
+    return { status: 200, headers: HEADERS, jsonBody: { ok: true, rules } }
+  } catch (err) { return { status: 200, headers: HEADERS, jsonBody: { error: String(err) } } }
+}
+
+// POST /api/mail/rules/repoint { ruleId, destFolderId } — change a rule's move-to target.
+export async function mailRuleRepoint(req: HttpRequest, context: InvocationContext): Promise<HttpResponseInit> {
+  if (req.method === 'OPTIONS') return { status: 204, headers: HEADERS }
+  const creds = graphCreds()
+  if (!creds.clientId || !creds.clientSecret) return { status: 200, headers: HEADERS, jsonBody: { error: 'MICROSOFT creds not set' } }
+  try {
+    const b = (await req.json().catch(() => ({}))) as any
+    const ruleId = String(b?.ruleId || '').trim()
+    const destFolderId = String(b?.destFolderId || '').trim()
+    if (!ruleId || !destFolderId) return { status: 400, headers: HEADERS, jsonBody: { error: 'ruleId and destFolderId required' } }
+    const mailbox = String(b?.mailbox || '').trim() || (await loadConfig(resolveOwner(req).owner)).mailbox
+    const token = await getMicrosoftToken(creds.tenantId, creds.clientId, creds.clientSecret)
+    const res = await fetch(`https://graph.microsoft.com/v1.0/users/${mailbox}/mailFolders/inbox/messageRules/${ruleId}`, {
+      method: 'PATCH', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ actions: { moveToFolder: destFolderId, stopProcessingRules: true } }),
+    })
+    if (!res.ok) return { status: 200, headers: HEADERS, jsonBody: { ok: false, detail: (await res.text()).slice(0, 300) } }
+    return { status: 200, headers: HEADERS, jsonBody: { ok: true, ruleId, destFolderId } }
+  } catch (err) { return { status: 200, headers: HEADERS, jsonBody: { error: String(err) } } }
+}
+
+// POST /api/mail/rules/build-seniority — from seniority_routing, create forward inbox rules
+// (per source × tier) that move new arrivals into the seniority subfolders at delivery.
+// senderContains + subjectContains(tier keywords) → move to sub, stop. Approximate; the
+// reconcile timer corrects. Rules are ordered csuite→vp→director so the senior tier wins.
+export async function mailRulesBuild(req: HttpRequest, context: InvocationContext): Promise<HttpResponseInit> {
+  if (req.method === 'OPTIONS') return { status: 204, headers: HEADERS }
+  const creds = graphCreds()
+  if (!creds.clientId || !creds.clientSecret) return { status: 200, headers: HEADERS, jsonBody: { error: 'MICROSOFT creds not set' } }
+  let client
+  try {
+    const owner = resolveOwner(req).owner
+    const mailbox = (await loadConfig(owner)).mailbox
+    const token = await getMicrosoftToken(creds.tenantId, creds.clientId, creds.clientSecret)
+    client = await getPgClient()
+    await ensureRoutingTable(client)
+    const rows = (await client.query(`select * from seniority_routing where owner_email=$1 order by source_name`, [owner])).rows
+    const results: any[] = []
+    let seq = 1
+    const tiers: ('csuite' | 'vp' | 'director')[] = ['csuite', 'vp', 'director']
+    for (const r of rows) {
+      const sender = String(r.sender_match || r.source_name || '').toLowerCase()
+      for (const tier of tiers) {
+        const dest = tier === 'csuite' ? r.csuite_id : tier === 'vp' ? r.vp_id : r.director_id
+        const rule: any = {
+          displayName: `EDS · ${r.source_name} · ${tier === 'csuite' ? 'C Suite' : tier === 'vp' ? 'VP & Head of' : 'Director'}`,
+          sequence: seq++, isEnabled: true,
+          conditions: { subjectContains: TIER_SUBJECT_KEYWORDS[tier], ...(sender ? { senderContains: [sender] } : {}) },
+          actions: { moveToFolder: dest, stopProcessingRules: true },
+        }
+        const res = await fetch(`https://graph.microsoft.com/v1.0/users/${mailbox}/mailFolders/inbox/messageRules`, {
+          method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify(rule),
+        })
+        const j = await res.json().catch(() => ({}))
+        results.push({ name: rule.displayName, ok: res.ok, id: (j as any)?.id, error: res.ok ? undefined : JSON.stringify(j).slice(0, 160) })
+      }
+    }
+    return { status: 200, headers: HEADERS, jsonBody: { ok: true, created: results.filter((x) => x.ok).length, total: results.length, results } }
+  } catch (err) { return { status: 200, headers: HEADERS, jsonBody: { error: String(err) } } }
+  finally { try { await client?.end() } catch {} }
+}
+
 // GET /api/mail/messages?folderId=&top=&mailbox=[&subjectsOnly=1] — list message
 // subjects/senders for sampling seniority patterns. With folderId → that folder;
 // without → the ENTIRE mailbox (Graph /messages spans all folders). subjectsOnly=1
@@ -1144,6 +1230,9 @@ app.http('mailReclassify', { methods: ['POST', 'OPTIONS'], authLevel: 'anonymous
 app.http('mailRouting', { methods: ['GET', 'POST', 'OPTIONS'], authLevel: 'anonymous', route: 'mail/routing', handler: mailRouting })
 app.http('mailReconcileHttp', { methods: ['POST', 'OPTIONS'], authLevel: 'anonymous', route: 'mail/reconcile', handler: mailReconcileHttp })
 app.timer('mailReconcileTimer', { schedule: '0 15 */2 * * *', handler: mailReconcileTimer })
+app.http('mailRulesList', { methods: ['GET', 'OPTIONS'], authLevel: 'anonymous', route: 'mail/rules', handler: mailRulesList })
+app.http('mailRuleRepoint', { methods: ['POST', 'OPTIONS'], authLevel: 'anonymous', route: 'mail/rules/repoint', handler: mailRuleRepoint })
+app.http('mailRulesBuild', { methods: ['POST', 'OPTIONS'], authLevel: 'anonymous', route: 'mail/rules/build-seniority', handler: mailRulesBuild })
 app.http('mailFolderCreate', { methods: ['POST', 'OPTIONS'], authLevel: 'anonymous', route: 'mail/folders/create', handler: mailFolderCreate })
 app.http('mailFoldersBulkCreate', { methods: ['POST', 'OPTIONS'], authLevel: 'anonymous', route: 'mail/folders/create-bulk', handler: mailFoldersBulkCreate })
 app.http('mailFolderDelete', { methods: ['POST', 'OPTIONS'], authLevel: 'anonymous', route: 'mail/folders/delete', handler: mailFolderDelete })
