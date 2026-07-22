@@ -303,16 +303,24 @@ its source; existing ~5,700 emails are sorted the same way; a reconcile pass cor
 
 **Status:** `done` (rules attempt) — but see **known limitations** below.
 
+**Consistency pass (2026-07-22, per "i prefer consistancy, update linkedin/ladders"):**
+- Added `POST /api/mail/rules/build-parents` + `POST /api/mail/rules/delete` endpoints (commit 2b07284).
+- Sampled the LinkedIn & Ladders parent folders to get precise senders: LinkedIn =
+  `jobalerts-noreply@linkedin.com` (NOT the "linkedin" substring — that would also catch
+  `messages-noreply@` notifications), Ladders = `jobs@my.theladders.com`.
+- Set those precise `sender_match` values in `seniority_routing` (improves reconcile precision too).
+- Created **EDS · Ladders · Parent** (seq 22) and **EDS · LinkedIn · Parent** (seq 23), each a
+  senderContains→parent-folder catch-all with stopProcessingRules, sequenced AFTER the tier rules.
+  Now all 4 sources have tier rules + a parent catch-all, matching Indeed/Lensa (seq 16/17). ✅
+- Verified live via `GET /api/mail/rules`: both parents present with the precise senders.
+
 **Known limitations (forward rules are a first attempt, as the user framed it):**
 1. Outlook rules can't run the digest-role extractor, so a subject like "…is hiring for Program
    Manager. 3 more Deputy CIO jobs" can trip the "CIO" keyword and mis-file to C Suite. The 2h
    **reconcile timer is the backstop** that corrects these.
-2. **No catch-all parent rule for LinkedIn/Ladders** — non-seniority LinkedIn/Ladders mail has no
-   forward rule, so it stays in the inbox until reconcile/intake picks it up. Indeed/Lensa already
-   have parent sender rules (seq 16/17). Follow-up: add source→parent rules for LinkedIn/Ladders.
-3. The old **"LinkedIn Job Alerts" rule (seq 21, id `AQAAAQEGIDQ=`) is an empty no-op** (no
-   condition, no action). Left in place (harmless); should be deleted or rebuilt as the LinkedIn
-   parent catch-all.
+2. The old **"LinkedIn Job Alerts" rule (seq 21, id `AQAAAQEGIDQ=`) is an empty no-op** (no
+   condition, no action) that Graph **refuses to delete** (`ErrorNotSupportedMessageRule` — a
+   server-managed rule). Harmless (does nothing); can only be removed manually in Outlook ▸ Rules.
 
 **Endpoints added this session (commits db2465b → 104b437, all on main):**
 `mail/messages` (mailbox-wide subject sampling), `mail/folders/create[-bulk]` + `delete`,
