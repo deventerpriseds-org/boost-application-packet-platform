@@ -10,8 +10,32 @@ const QUEUE_STAGES = ['discovered', 'saved', 'enriched']
 export default function Swipe({ opps }) {
   const { toast } = useApp()
   const { loading, error, opportunities, optimisticMove, optimisticDismiss, optimisticUndismiss } = opps
-  const queue = useMemo(() => opportunities.filter((o) => QUEUE_STAGES.includes(o.stage)), [opportunities])
+  const [roles, setRoles] = useState([])
+  const [roleFilter, setRoleFilter] = useState('all')
+  useEffect(() => { api.listPersonas().then((r) => { if (!r.error) setRoles(r.personas || []) }).catch(() => {}) }, [])
+
+  // Stage-eligible review queue, before the role pill is applied (drives the pill counts).
+  const stageQueue = useMemo(() => opportunities.filter((o) => QUEUE_STAGES.includes(o.stage)), [opportunities])
+  const matchesRole = (o) => {
+    if (roleFilter === 'all') return true
+    const rf = o.rolesFor || []
+    if (roleFilter === 'other') return rf.length === 0
+    return rf.includes(roleFilter)
+  }
+  const queue = useMemo(() => stageQueue.filter(matchesRole), [stageQueue, roleFilter])
+  // Per-role counts for the pill bar.
+  const roleCounts = useMemo(() => {
+    const c = { all: stageQueue.length, other: 0 }
+    for (const o of stageQueue) {
+      const rf = o.rolesFor || []
+      if (rf.length === 0) c.other += 1
+      for (const k of rf) c[k] = (c[k] || 0) + 1
+    }
+    return c
+  }, [stageQueue])
   const [idx, setIdx] = useState(0)
+  // Restart the deck when the role filter changes so idx stays in range.
+  useEffect(() => { setIdx(0) }, [roleFilter])
   const [drag, setDrag] = useState({ x: 0, y: 0, active: false, decision: null })
   const [last, setLast] = useState(null) // { decision, opp, prevStage } — for undo
   const [restoreId, setRestoreId] = useState(null) // after undo, snap the queue back to this card
@@ -109,12 +133,17 @@ export default function Swipe({ opps }) {
     setDrag({ x: 0, y: 0, active: false, decision: null })
   }
 
+  const rolePills = roles.length > 0 ? (
+    <RolePills roles={roles} counts={roleCounts} value={roleFilter} onChange={setRoleFilter} />
+  ) : null
+
   if (!current) {
     return (
-      <div style={{ maxWidth: 460, margin: '0 auto', textAlign: 'center', padding: '48px 20px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 14 }}>
+      <div style={{ maxWidth: 460, margin: '0 auto', textAlign: 'center', padding: '32px 20px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 14 }}>
+        {rolePills}
         <div style={{ fontSize: 48 }}>✓</div>
         <div style={{ fontSize: 20, fontWeight: 700 }}>Inbox zero</div>
-        <div className="px-small">All new opportunities reviewed. Fresh ones arrive overnight.</div>
+        <div className="px-small">{roleFilter === 'all' ? 'All new opportunities reviewed. Fresh ones arrive overnight.' : 'No opportunities left for this role. Switch roles above or clear the filter.'}</div>
         <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
           {last && <button className="px-btn" onClick={undo}>↩ Undo {last.opp.company}</button>}
           {idx > 0 && <button className="px-btn" onClick={() => setIdx(0)}>Re-run queue</button>}
@@ -131,6 +160,7 @@ export default function Swipe({ opps }) {
   const pct = total > 0 ? Math.round((done / total) * 100) : 0
   return (
     <div style={{ maxWidth: 460, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 10 }}>
+      {rolePills}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
         <div className="px-small" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <span>{done} of {total} reviewed</span>
@@ -165,6 +195,26 @@ export default function Swipe({ opps }) {
       <div style={{ textAlign: 'center', paddingBottom: 8 }}>
         <span className="px-link" style={{ fontSize: 12 }} onClick={() => go(`/opp/${current.id}`)}>Open full detail →</span>
       </div>
+    </div>
+  )
+}
+
+// Role priority pills — filter the triage queue so review can be worked one role at a time.
+function RolePills({ roles, counts, value, onChange }) {
+  const items = [{ key: 'all', name: 'All' }, ...roles, { key: 'other', name: 'Other' }]
+  return (
+    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', justifyContent: 'center' }}>
+      {items.map((r) => {
+        const n = counts[r.key] || 0
+        if (r.key === 'other' && n === 0) return null // hide empty Other
+        const on = value === r.key
+        return (
+          <span key={r.key} className="px-pill" onClick={() => onChange(r.key)}
+            style={{ cursor: 'pointer', background: on ? 'var(--surface-brand-default)' : undefined, color: on ? 'var(--text-on-brand)' : undefined }}>
+            {r.name} {n}
+          </span>
+        )
+      })}
     </div>
   )
 }

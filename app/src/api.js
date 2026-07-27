@@ -50,11 +50,12 @@ async function del(path) {
 }
 
 export const api = {
-  listOpportunities: ({ owner, persona, stage } = {}) => {
+  listOpportunities: ({ owner, persona, stage, includeDismissed } = {}) => {
     const qs = new URLSearchParams()
     qs.set('owner', owner || _owner)
     if (persona) qs.set('persona', persona)
     if (stage) qs.set('stage', stage)
+    if (includeDismissed) qs.set('includeDismissed', '1')
     const q = qs.toString()
     return get(`/app/opportunities?${q}${demoParam()}`)
   },

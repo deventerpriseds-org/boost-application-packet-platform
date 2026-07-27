@@ -16,8 +16,8 @@ const NAV = [
 ]
 
 // Shared primitives (ported from the handoff shell.jsx)
-export const Pill = ({ children, tone }) => (
-  <span className="px-pill" style={tone ? { background: `var(--proto-${tone}-soft)`, color: `var(--proto-${tone})` } : undefined}>{children}</span>
+export const Pill = ({ children, tone, style }) => (
+  <span className="px-pill" style={{ ...(tone ? { background: `var(--proto-${tone}-soft)`, color: `var(--proto-${tone})` } : {}), ...style }}>{children}</span>
 )
 
 const STAGE_TONE = { Hot: 'red', Warm: 'yellow', Cool: 'accent' }

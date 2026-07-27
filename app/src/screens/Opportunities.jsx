@@ -1,7 +1,7 @@
-import React, { useMemo, useState, useEffect } from 'react'
-import { go } from '../state.jsx'
+import React, { useMemo, useState, useEffect, useCallback } from 'react'
+import { go, useApp } from '../state.jsx'
 import { api } from '../api.js'
-import { MatchScore, StageBadge, UrgencyPill, Pill } from '../shell.jsx'
+import { MatchScore, UrgencyPill, Pill } from '../shell.jsx'
 import { Loading, ErrorBox, Empty, roleFamily } from './Today.jsx'
 
 const URGENCIES = ['All', 'Hot', 'Warm', 'Cool']
@@ -36,7 +36,8 @@ const filterLabel = (f) => {
 }
 
 export default function Opportunities({ opps, filter }) {
-  const { loading, error, opportunities, stages } = opps
+  const { toast } = useApp()
+  const { loading, error, opportunities: activeOpps, stages, reload } = opps
   const [query, setQuery] = useState('')
   const [urgency, setUrgency] = useState('All')
   const [stage, setStage] = useState('All')
@@ -44,10 +45,54 @@ export default function Opportunities({ opps, filter }) {
   const [roles, setRoles] = useState([])
   const [roleFilter, setRoleFilter] = useState('all')
   const [activeFilter, setActiveFilter] = useState(filter || null)
+  const [showRejected, setShowRejected] = useState(false)
+  const [withDismissed, setWithDismissed] = useState(null) // list incl. dismissed, fetched on demand
+  const [busyId, setBusyId] = useState(null)
 
   useEffect(() => {
     api.listPersonas().then((r) => { if (!r.error) setRoles(r.personas || []) }).catch(() => {})
   }, [])
+
+  // Fetch the dismissed-inclusive list when the toggle is on (and after any mutation).
+  const loadWithDismissed = useCallback(() => {
+    return api.listOpportunities({ includeDismissed: true })
+      .then((r) => { if (!r.error) setWithDismissed(r.opportunities || []) })
+      .catch(() => {})
+  }, [])
+  useEffect(() => { if (showRejected) loadWithDismissed() }, [showRejected, loadWithDismissed])
+
+  // The table source: dismissed-inclusive list when the toggle is on, else the active set.
+  const opportunities = showRejected && withDismissed ? withDismissed : activeOpps
+
+  // Persist a status change, then refresh both the shared list and (if shown) the rejected list.
+  const refreshAll = useCallback(() => { reload?.(); if (showRejected) loadWithDismissed() }, [reload, showRejected, loadWithDismissed])
+  const changeStage = async (id, newStage) => {
+    setBusyId(id)
+    try {
+      const r = await api.moveStage(id, newStage)
+      if (r.error) throw new Error(r.error)
+      toast(`Moved to ${STAGE_LABELS[newStage] || newStage}`)
+      refreshAll()
+    } catch (e) { toast(`Failed: ${e.message}`) } finally { setBusyId(null) }
+  }
+  const rejectOpp = async (id, company) => {
+    setBusyId(id)
+    try {
+      const r = await api.dismiss(id)
+      if (r.error) throw new Error(r.error)
+      toast(`Rejected ${company || ''}`.trim())
+      refreshAll()
+    } catch (e) { toast(`Failed: ${e.message}`) } finally { setBusyId(null) }
+  }
+  const restoreOpp = async (id, company) => {
+    setBusyId(id)
+    try {
+      const r = await api.undismiss(id)
+      if (r.error) throw new Error(r.error)
+      toast(`Restored ${company || ''}`.trim())
+      refreshAll()
+    } catch (e) { toast(`Failed: ${e.message}`) } finally { setBusyId(null) }
+  }
 
   // When navigating here with a new filter prop, apply it and reset manual filters
   useEffect(() => {
@@ -211,25 +256,46 @@ export default function Opportunities({ opps, filter }) {
           <option value="match">Sort: Match</option>
           <option value="company">Sort: Company</option>
         </select>
+        <label className="px-btn" style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}
+          title="Include rejected opportunities in the list">
+          <input type="checkbox" checked={showRejected} onChange={(e) => setShowRejected(e.target.checked)} />
+          Show rejected
+        </label>
         <span className="px-small">{rows.length} of {opportunities.length}</span>
       </div>
 
       <div className="px-box" style={{ padding: 0, overflowX: 'auto' }}>
-        <table style={{ width: '100%', minWidth: 560, borderCollapse: 'collapse', fontSize: 13 }}>
+        <table style={{ width: '100%', minWidth: 680, borderCollapse: 'collapse', fontSize: 13 }}>
           <thead>
             <tr style={{ textAlign: 'left', color: 'var(--proto-ink2)', fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.5 }}>
-              <Th>Match</Th><Th>Company</Th><Th>Role</Th><Th>Comp</Th><Th>Stage</Th><Th>Urgency</Th>
+              <Th>Match</Th><Th>Company</Th><Th>Role</Th><Th>Comp</Th><Th>Stage / status</Th><Th>Urgency</Th><Th>Actions</Th>
             </tr>
           </thead>
           <tbody>
             {rows.map((o) => (
-              <tr key={o.id} onClick={() => go(`/opp/${o.id}`)} style={{ borderTop: '1px solid var(--proto-rule-soft)', cursor: 'pointer' }}>
+              <tr key={o.id} onClick={() => go(`/opp/${o.id}`)}
+                style={{ borderTop: '1px solid var(--proto-rule-soft)', cursor: 'pointer', opacity: o.rejected ? 0.62 : 1 }}>
                 <Td><MatchScore value={o.match} size={30} /></Td>
-                <Td><span style={{ fontWeight: 600 }}>{o.company}</span><div className="px-small">{o.location || '—'}</div></Td>
+                <Td>
+                  <span style={{ fontWeight: 600, textDecoration: o.rejected ? 'line-through' : 'none' }}>{o.company}</span>
+                  {o.rejected && <Pill tone="red" style={{ marginLeft: 6 }}>Rejected</Pill>}
+                  <div className="px-small">{o.location || '—'}</div>
+                </Td>
                 <Td>{o.role}</Td>
                 <Td>{o.comp || '—'}</Td>
-                <Td><StageBadge stage={o.stage} /></Td>
+                <Td onClick={stopRow}>
+                  <select className="px-btn" style={{ fontSize: 12, padding: '4px 6px' }}
+                    value={o.stage} disabled={busyId === o.id}
+                    onChange={(e) => changeStage(o.id, e.target.value)}>
+                    {stages.map((s) => <option key={s} value={s}>{STAGE_LABELS[s] || s}</option>)}
+                  </select>
+                </Td>
                 <Td>{o.urgency ? <UrgencyPill urgency={o.urgency} /> : <span className="px-small">—</span>}</Td>
+                <Td onClick={stopRow}>
+                  {o.rejected
+                    ? <button className="px-btn" style={{ fontSize: 11 }} disabled={busyId === o.id} onClick={() => restoreOpp(o.id, o.company)}>↩ Restore</button>
+                    : <button className="px-btn" style={{ fontSize: 11, color: 'var(--proto-red)', borderColor: 'var(--proto-red)' }} disabled={busyId === o.id} onClick={() => rejectOpp(o.id, o.company)}>✕ Reject</button>}
+                </Td>
               </tr>
             ))}
           </tbody>
@@ -240,5 +306,6 @@ export default function Opportunities({ opps, filter }) {
   )
 }
 
+const stopRow = (e) => e.stopPropagation() // keep in-cell controls from triggering the row's navigate
 const Th = ({ children }) => <th style={{ padding: '10px 14px' }}>{children}</th>
 const Td = ({ children }) => <td style={{ padding: '10px 14px', verticalAlign: 'middle' }}>{children}</td>
