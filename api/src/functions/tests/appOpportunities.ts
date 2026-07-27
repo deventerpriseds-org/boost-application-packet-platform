@@ -139,17 +139,24 @@ export async function opportunityMoveStage(req: HttpRequest, context: Invocation
   } finally { try { await client?.end() } catch {} }
 }
 
-// POST /api/app/opportunity/{id}/dismiss  — soft-remove (swipe "pass")
+// POST /api/app/opportunity/{id}/dismiss  — soft-remove (swipe "pass").
+// Body `{ undo: true }` reverses it (dismissed = false) so a mis-swipe can be
+// restored to its original stage without any data loss.
 export async function opportunityDismiss(req: HttpRequest, context: InvocationContext): Promise<HttpResponseInit> {
   if (req.method === 'OPTIONS') return { status: 204, headers: HEADERS }
   const id = req.params.id
   let client
   try {
     const guard = requireWrite(req); if (guard) return guard
+    const body = await req.json().catch(() => ({})) as any
+    const undo = body?.undo === true
     client = await getPgClient()
-    const r = await client.query(`update opportunity set dismissed = true, updated_at = now() where id = $1 returning id`, [id])
+    const r = await client.query(
+      `update opportunity set dismissed = $2, updated_at = now() where id = $1 returning id`,
+      [id, !undo]
+    )
     if (!r.rowCount) return { status: 404, headers: HEADERS, jsonBody: { error: 'not found' } }
-    return { status: 200, headers: HEADERS, jsonBody: { ok: true, id: r.rows[0].id, dismissed: true } }
+    return { status: 200, headers: HEADERS, jsonBody: { ok: true, id: r.rows[0].id, dismissed: !undo } }
   } catch (err) {
     return { status: 500, headers: HEADERS, jsonBody: { error: String(err) } }
   } finally { try { await client?.end() } catch {} }

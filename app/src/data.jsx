@@ -75,5 +75,19 @@ export function useOpportunities(personaKey, { pollMs = 15000, onNew, includeDem
     }
   }, [])
 
-  return { ...state, reload, optimisticMove, optimisticDismiss }
+  // Undo a dismiss: re-insert the opportunity locally and clear the dismissed
+  // flag server-side. `opp` is the row we removed on dismiss (captured by the caller).
+  const optimisticUndismiss = useCallback(async (opp, onError) => {
+    if (!opp) return
+    setState((s) => (s.opportunities.some((o) => o.id === opp.id) ? s : { ...s, opportunities: [...s.opportunities, opp] }))
+    try {
+      const res = await api.undismiss(opp.id)
+      if (res.error) throw new Error(res.error)
+    } catch (err) {
+      setState((s) => ({ ...s, opportunities: s.opportunities.filter((o) => o.id !== opp.id) }))
+      onError?.(err)
+    }
+  }, [])
+
+  return { ...state, reload, optimisticMove, optimisticDismiss, optimisticUndismiss }
 }

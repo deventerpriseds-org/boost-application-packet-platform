@@ -9,10 +9,12 @@ const QUEUE_STAGES = ['discovered', 'saved', 'enriched']
 // Tinder-style triage: keep (→saved), maybe (→enriched), pass (dismiss).
 export default function Swipe({ opps }) {
   const { toast } = useApp()
-  const { loading, error, opportunities, optimisticMove, optimisticDismiss } = opps
+  const { loading, error, opportunities, optimisticMove, optimisticDismiss, optimisticUndismiss } = opps
   const queue = useMemo(() => opportunities.filter((o) => QUEUE_STAGES.includes(o.stage)), [opportunities])
   const [idx, setIdx] = useState(0)
   const [drag, setDrag] = useState({ x: 0, y: 0, active: false, decision: null })
+  const [last, setLast] = useState(null) // { decision, opp, prevStage } — for undo
+  const [restoreId, setRestoreId] = useState(null) // after undo, snap the queue back to this card
   const cardRef = useRef(null)
   const busyRef = useRef(false)
 
@@ -40,9 +42,11 @@ export default function Swipe({ opps }) {
     if (busyRef.current) return
     busyRef.current = true
     const oppId = current.id
-    if (decision === 'keep') { optimisticMove(oppId, 'saved', (e) => toast(`Failed: ${e.message}`)); toast(build ? `Saved ${current.company} — building packet` : `Saved ${current.company}`) }
-    else if (decision === 'maybe') { optimisticMove(oppId, 'enriched', (e) => toast(`Failed: ${e.message}`)); toast(`${current.company} → Maybe`) }
-    else if (decision === 'pass') { optimisticDismiss(oppId, (e) => toast(`Failed: ${e.message}`)); toast(`Dismissed ${current.company}`) }
+    // snapshot for undo (the full row + its stage before we changed it)
+    setLast({ decision, opp: current, prevStage: current.stage })
+    if (decision === 'keep') { optimisticMove(oppId, 'saved', (e) => toast(`Failed: ${e.message}`)); toast(build ? `Saved ${current.company} — building packet` : `Saved ${current.company} · ⌘Z to undo`) }
+    else if (decision === 'maybe') { optimisticMove(oppId, 'enriched', (e) => toast(`Failed: ${e.message}`)); toast(`${current.company} → Maybe · ⌘Z to undo`) }
+    else if (decision === 'pass') { optimisticDismiss(oppId, (e) => toast(`Failed: ${e.message}`)); toast(`Dismissed ${current.company} · ⌘Z to undo`) }
     setDrag({ x: 0, y: 0, active: false, decision: null })
     setIdx((i) => i + 1)
     // release the lock after the card transition so a held/repeated key can't double-act
@@ -50,12 +54,32 @@ export default function Swipe({ opps }) {
     if (build && oppId) go(`/packet/${oppId}`)
   }
 
+  // Undo the most recent decision: restore the opp to its prior stage / un-dismiss
+  // it, step the queue back one, and re-show the card. Only the last action is undoable.
+  const undo = () => {
+    if (!last || busyRef.current) return
+    const { decision, opp, prevStage } = last
+    if (decision === 'pass') optimisticUndismiss(opp, (e) => toast(`Undo failed: ${e.message}`))
+    else optimisticMove(opp.id, prevStage, (e) => toast(`Undo failed: ${e.message}`))
+    setLast(null)
+    setRestoreId(opp.id) // the queue effect below snaps idx onto this card once it reappears
+    toast(`Restored ${opp.company}`)
+  }
+
+  // Once the restored opp re-enters the (recomputed) queue, point the deck at it.
+  useEffect(() => {
+    if (!restoreId) return
+    const pos = queue.findIndex((o) => o.id === restoreId)
+    if (pos >= 0) { setIdx(pos); setRestoreId(null) }
+  }, [restoreId, queue])
+
   // Keyboard triage: ← dismiss, → keep, ↓ maybe. Mirrors the action buttons.
   useEffect(() => {
     const onKey = (e) => {
       const el = document.activeElement
       const tag = el && el.tagName
       if (tag === 'INPUT' || tag === 'TEXTAREA' || (el && el.isContentEditable)) return
+      if ((e.metaKey || e.ctrlKey) && !e.altKey && (e.key === 'z' || e.key === 'Z')) { e.preventDefault(); undo(); return }
       if (e.metaKey || e.ctrlKey || e.altKey) return
       if (e.key === 'ArrowLeft') { e.preventDefault(); decide('pass') }
       else if (e.key === 'ArrowRight') { e.preventDefault(); decide('keep') }
@@ -92,6 +116,7 @@ export default function Swipe({ opps }) {
         <div style={{ fontSize: 20, fontWeight: 700 }}>Inbox zero</div>
         <div className="px-small">All new opportunities reviewed. Fresh ones arrive overnight.</div>
         <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
+          {last && <button className="px-btn" onClick={undo}>↩ Undo {last.opp.company}</button>}
           {idx > 0 && <button className="px-btn" onClick={() => setIdx(0)}>Re-run queue</button>}
           <button className="px-btn px-btn-accent" onClick={() => go('/pipeline')}>Open pipeline →</button>
         </div>
@@ -107,9 +132,12 @@ export default function Swipe({ opps }) {
   return (
     <div style={{ maxWidth: 460, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 10 }}>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-        <div className="px-small" style={{ display: 'flex', justifyContent: 'space-between' }}>
+        <div className="px-small" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <span>{done} of {total} reviewed</span>
-          <span>{left} left</span>
+          <span style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+            {last && <span className="px-link" title="Undo last swipe (⌘Z / Ctrl+Z)" onClick={undo}>↩ Undo</span>}
+            <span>{left} left</span>
+          </span>
         </div>
         <div style={{ height: 6, borderRadius: 3, background: 'var(--proto-line, rgba(0,0,0,.1))', overflow: 'hidden' }}>
           <div style={{ width: `${pct}%`, height: '100%', background: 'var(--proto-green)', transition: 'width 220ms ease-out' }} />

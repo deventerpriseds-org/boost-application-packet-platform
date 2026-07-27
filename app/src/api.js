@@ -62,6 +62,7 @@ export const api = {
   todayMetrics: ({ owner } = {}) => get(`/app/metrics/today?owner=${encodeURIComponent(owner || _owner)}${demoParam()}`),
   moveStage: (id, stage) => post(`/app/opportunity/${id}/stage`, { stage }),
   dismiss: (id) => post(`/app/opportunity/${id}/dismiss`, {}),
+  undismiss: (id) => post(`/app/opportunity/${id}/dismiss`, { undo: true }),
   // Packets / artifacts (production line)
   listPackets: ({ owner } = {}) => get(`/app/packets?owner=${encodeURIComponent(owner || _owner)}${demoParam()}`),
   getPacket: (oppId) => get(`/app/opportunity/${oppId}/packet`),
