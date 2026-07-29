@@ -34,17 +34,21 @@ export function scraperConfigured(provider?: string): boolean {
 
 // Wrap a target URL into the given (or configured) provider's request URL. Anti-bot/residential is
 // on for hard targets (LinkedIn). Returns null when no provider/key resolves (caller does direct).
-export function buildProxyUrl(targetUrl: string, providerOverride?: string): string | null {
+export function buildProxyUrl(targetUrl: string, providerOverride?: string, saTier?: string): string | null {
   const provider = (providerOverride || activeProvider()).trim().toLowerCase()
   const key = providerKey(provider)
   if (!key || !provider) return null
   const enc = encodeURIComponent(targetUrl)
   switch (provider) {
-    case 'scraperapi':
+    case 'scraperapi': {
       // https://docs.scraperapi.com — ultra_premium=true is ScraperAPI's advanced anti-bot bypass
       // (residential + fingerprint), the equivalent of Scrapfly's asp. Required for LinkedIn.
       // NOTE: ultra_premium bills ~10× credits vs premium. Rotates residential IP per request.
-      return `https://api.scraperapi.com/?api_key=${key}&url=${enc}&ultra_premium=true&country_code=us`
+      // saTier lets us probe premium-only / plain to test whether LinkedIn's block is domain-level.
+      const tier = (saTier || 'ultra').toLowerCase()
+      const flag = tier === 'plain' ? '' : tier === 'premium' ? '&premium=true' : '&ultra_premium=true'
+      return `https://api.scraperapi.com/?api_key=${key}&url=${enc}${flag}&country_code=us`
+    }
     case 'scrapedo':
       // https://scrape.do/documentation — super=true → residential/mobile "super proxy" for hard
       // targets; geoCode=us. Returns raw target HTML. Daily-grab provider (permanent-usable tier).
@@ -87,10 +91,10 @@ export interface FetchResult {
 // else directly with a browser UA. Never throws — returns a structured result with latency + usage.
 export async function scraperFetch(
   targetUrl: string,
-  opts: { force?: 'proxy' | 'direct'; provider?: string } = {},
+  opts: { force?: 'proxy' | 'direct'; provider?: string; saTier?: string } = {},
 ): Promise<FetchResult> {
   const provider = (opts.provider || activeProvider()).trim().toLowerCase()
-  const proxyUrl = opts.force === 'direct' ? null : buildProxyUrl(targetUrl, provider)
+  const proxyUrl = opts.force === 'direct' ? null : buildProxyUrl(targetUrl, provider, opts.saTier)
   const url = proxyUrl || targetUrl
   const via: 'proxy' | 'direct' = proxyUrl ? 'proxy' : 'direct'
   const started = Date.now()

@@ -4,6 +4,12 @@ import { getPgClient } from './pgClient'
 import { logUsage } from './usageMeter'
 import { resolveOwner, requireWrite } from './appSession'
 import { resolveTitle as taxResolve } from './roleTaxonomy'
+import { injectJobMarkers, validateJobId, canonicalJobUrl } from './jdLinks'
+
+// Canonical (tracker-free) job URL for a captured jobId; falls back to the raw anchor URL if no id.
+function jobUrlFor(jobId: string, fallbackUrl?: string): string {
+  return jobId ? canonicalJobUrl(jobId) : (fallbackUrl || '')
+}
 
 const HEADERS = {
   'Content-Type': 'application/json',
@@ -224,17 +230,22 @@ async function embed(text: string): Promise<string | null> {
 async function parseAlert(rawText: string): Promise<any[]> {
   const key = process.env.OPENAI_API_KEY
   if (!key) return []
+  // Ground-truth jobId set for validation — the markers injected by injectJobMarkers at ingest.
+  const jobIdSet = Array.from(new Set((rawText.match(/\{\{JOB:(\d+)\}\}/g) || []).map((s) => s.replace(/\D/g, ''))))
   const system = 'You extract senior executive job opportunities from a job-alert email. Return ONLY JSON. Only include roles at the VP, Director, C-suite, Partner, or equivalent senior leadership level. Skip coordinator, specialist, analyst, manager, support, or entry/mid-level roles.'
-  const user = `From this job-alert email, extract only SENIOR EXECUTIVE roles (VP, Director, C-suite, SVP, EVP, Partner, Head of, GM, President, or equivalent). Skip any role below director level. Return JSON: { "opportunities": [ { "company": "...", "role": "...", "location": "...", "comp": "...", "url": "...", "postedDate": "YYYY-MM-DD or null" } ] }. postedDate: the date the job was posted or listed, NOT the email received date. Look for text like "Posted 3 days ago", "Posted July 10", "2 days ago", etc. and resolve to an ISO date. Use null if no posted date is mentioned. Use null for other unknown fields. If no senior roles exist, return { "opportunities": [] }. Email:\n${rawText.slice(0, 8000)}`
+  const user = `From this job-alert email, extract only SENIOR EXECUTIVE roles (VP, Director, C-suite, SVP, EVP, Partner, Head of, GM, President, or equivalent). Skip any role below director level. Return JSON: { "opportunities": [ { "company": "...", "role": "...", "location": "...", "comp": "...", "jobId": "...", "postedDate": "YYYY-MM-DD or null" } ] }. jobId: each role in the email is followed by a marker like {{JOB:4433165980}} — set jobId to EXACTLY that number for the role it follows (the nearest preceding marker belongs to that role). Use null if the role has no marker. postedDate: the date the job was posted or listed, NOT the email received date. Look for text like "Posted 3 days ago", "Posted July 10", "2 days ago", etc. and resolve to an ISO date. Use null if no posted date is mentioned. Use null for other unknown fields. If no senior roles exist, return { "opportunities": [] }. Email:\n${rawText.slice(0, 8000)}`
   const res = await fetch('https://api.openai.com/v1/chat/completions', {
     method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
-    body: JSON.stringify({ model: 'gpt-4o-mini', messages: [{ role: 'system', content: system }, { role: 'user', content: user }], max_tokens: 1200, response_format: { type: 'json_object' } })
+    body: JSON.stringify({ model: 'gpt-4o-mini', messages: [{ role: 'system', content: system }, { role: 'user', content: user }], max_tokens: 1400, response_format: { type: 'json_object' } })
   })
   if (!res.ok) return []
   const j = (await res.json()) as any
   await logUsage('intake:parse', 'gpt-4o-mini', j?.usage)
   const parsed = JSON.parse(j?.choices?.[0]?.message?.content || '{}')
-  return Array.isArray(parsed.opportunities) ? parsed.opportunities.filter((o: any) => o.company && o.role) : []
+  const opps = Array.isArray(parsed.opportunities) ? parsed.opportunities.filter((o: any) => o.company && o.role) : []
+  // Validate each LLM-assigned jobId against the ground-truth marker set (reject hallucinations).
+  for (const o of opps) o.jobId = validateJobId(o.jobId, jobIdSet)
+  return opps
 }
 
 // Insert one opportunity if it isn't a near-duplicate (pgvector). Returns status.
@@ -293,6 +304,18 @@ export async function insertOpp(client: any, owner: string, o: any, source = 'Li
       await client.query(`update opportunity set raw_jd = $1 where id = $2`, [rawJd, id])
     } catch {}
   }
+  // Capture the LinkedIn jobId + canonical URL so the real JD can be fetched later (ACT-22b).
+  // parseAlert binds o.jobId from the {{JOB:id}} marker; validated against the email's ground-truth
+  // set. This is what was being destroyed at ingest (tags stripped before parse) — the reason
+  // 722/723 opps had no link and the JD had to be fabricated.
+  if (o.jobId) {
+    try {
+      await client.query(`alter table opportunity add column if not exists job_id text`)
+      await client.query(`alter table opportunity add column if not exists job_url text`)
+      await client.query(`update opportunity set job_id = $1, job_url = $2 where id = $3`,
+        [String(o.jobId), jobUrlFor(String(o.jobId), o.url), id])
+    } catch {}
+  }
   return { inserted: true, id, company: o.company, role: o.role }
 }
 
@@ -343,10 +366,11 @@ async function ingestText(rawText: string, owner: string, source = 'Email', rece
   try {
     client = await getPgClient()
     const opps = await parseAlert(rawText)
+    const cleanJd = rawText.replace(/\s*\{\{JOB:\d+\}\}/g, '')  // strip capture markers from stored raw_jd
     const results = []
     for (const o of opps) {
       // Route through the unified hub so folder→role and AI classification are consistent.
-      const r = await routeOpportunity(client, owner, o, { source, parentFolderId, receivedAt, rawJd: rawText })
+      const r = await routeOpportunity(client, owner, o, { source, parentFolderId, receivedAt, rawJd: cleanJd })
       results.push(r)
     }
     return { parsed: opps.length, inserted: results.filter((r) => r.inserted).length, results }
@@ -372,7 +396,11 @@ async function ingestMessageId(token: string, id: string, cfg: WatchConfig) {
   if (!m.ok) return { error: `fetch message HTTP ${m.status}` }
   const msg = await m.json() as any
   const from = (msg?.from?.emailAddress?.address || '').toLowerCase()
-  const text = `From: ${from}\nSubject: ${msg?.subject}\n\n${(msg?.body?.content || msg?.bodyPreview || '').replace(/<[^>]+>/g, ' ')}`
+  // Preserve LinkedIn job anchors as {{JOB:id}} markers BEFORE stripping tags, so parseAlert can bind
+  // a jobId to each role (ACT-22b). Previously tags were stripped here, destroying every job link.
+  const rawHtml = msg?.body?.content || ''
+  const body = rawHtml ? injectJobMarkers(rawHtml).text : (msg?.bodyPreview || '')
+  const text = `From: ${from}\nSubject: ${msg?.subject}\n\n${body}`
   // Mailbox-wide watch: a role-mapped folder (skip_filter) is an explicit "this is a job" signal,
   // so bypass the keyword gate. Everything else still must look like an alert.
   const mappedFolder = await folderSkipsFilter(cfg.ownerEmail, msg?.parentFolderId)
