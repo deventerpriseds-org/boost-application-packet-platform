@@ -2,7 +2,7 @@ import { app, HttpRequest, HttpResponseInit, InvocationContext } from '@azure/fu
 import { requireWrite } from './appSession'
 import { getPgClient } from './pgClient'
 import { getMicrosoftToken } from './googleAuth'
-import { loadConfig, graphCreds, isAlert, parseAlert } from './mailWatch'
+import { loadConfig, graphCreds, isAlert, parseAlert, embedOpp } from './mailWatch'
 import { extractJobAnchors, canonicalJobUrl, normText, tokenSim, injectJobMarkers } from './jdLinks'
 import { scraperFetch, extractGuestJdHtml, classifyResponse } from './scraperProxy'
 import { logJdFetch } from './jdFetchLog'
@@ -86,15 +86,28 @@ export async function jdBackfillScan(req: HttpRequest, _ctx: InvocationContext):
             idsFound++
             const has = await client.query(`select 1 from opportunity where owner_email=$1 and job_id=$2 limit 1`, [cfg.ownerEmail, String(o.jobId)])
             if (has.rowCount) { alreadyHad++; continue }
-            const upd = await client.query(
-              `update opportunity set job_id=$1, job_url=$2
-                 where id = (select id from opportunity
-                              where owner_email=$3 and job_id is null
-                                and lower(company)=lower($4) and lower(role)=lower($5)
-                              order by created_at desc limit 1) returning id`,
-              [String(o.jobId), canonicalJobUrl(String(o.jobId)), cfg.ownerEmail, o.company, o.role],
-            )
-            if (upd.rowCount) linked++
+            // 1) Free fast-path: exact company+role match on an unlinked opp.
+            let target: string | null = (await client.query(
+              `select id from opportunity where owner_email=$1 and job_id is null
+                 and lower(company)=lower($2) and lower(role)=lower($3) order by created_at desc limit 1`,
+              [cfg.ownerEmail, o.company, o.role])).rows[0]?.id || null
+            // 2) Fallback: pgvector nearest-neighbour (same forgiving match insertOpp dedupes with) —
+            //    handles corrupted/varied stored role text that exact match misses.
+            if (!target) {
+              const vec = await embedOpp(`${o.company} — ${o.role}`)
+              if (vec) {
+                const nn = (await client.query(
+                  `select id, (embedding <=> $2::vector) as dist from opportunity
+                     where owner_email=$1 and job_id is null and embedding is not null
+                     order by embedding <=> $2::vector limit 1`, [cfg.ownerEmail, vec])).rows[0]
+                if (nn && Number(nn.dist) < 0.20) target = nn.id
+              }
+            }
+            if (target) {
+              await client.query(`update opportunity set job_id=$1, job_url=$2 where id=$3 and job_id is null`,
+                [String(o.jobId), canonicalJobUrl(String(o.jobId)), target])
+              linked++
+            }
           }
         }
         url = page['@odata.nextLink'] || null
