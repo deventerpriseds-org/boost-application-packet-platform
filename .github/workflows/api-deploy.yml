@@ -73,6 +73,7 @@ jobs:
               "HEYGEN_CLONED_VOICE_ID=${{ secrets.HEYGEN_CLONED_VOICE_ID }}" \
               "SCRAPER_API_PROVIDER=${{ secrets.SCRAPER_API_PROVIDER }}" \
               "SCRAPER_API_KEY=${{ secrets.SCRAPER_API_KEY }}" \
+              "SCRAPE_DO_API_KEY=${{ secrets.scrape_do_api_key }}" \
               "NODE_ENV=production"
 
       - name: Deploy to Azure Functions
