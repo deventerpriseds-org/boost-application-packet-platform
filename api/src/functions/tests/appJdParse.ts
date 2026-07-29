@@ -2,6 +2,7 @@ import { app, HttpRequest, HttpResponseInit, InvocationContext, Timer } from '@a
 import { resolveOwner, requireWrite, serverError } from './appSession'
 import { getPgClient } from './pgClient'
 import { logUsage } from './usageMeter'
+import { openaiFetch } from './mailWatch'
 
 const HEADERS = {
   'Content-Type': 'application/json',
@@ -67,7 +68,7 @@ const JD_SYSTEM = `You are an executive recruiting analyst. Given job descriptio
 Return ONLY valid JSON. No markdown fences.`
 
 async function runJdParse(rawJd: string, key: string): Promise<any> {
-  const res = await fetch('https://api.openai.com/v1/chat/completions', {
+  const res = await openaiFetch('https://api.openai.com/v1/chat/completions', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
     body: JSON.stringify({

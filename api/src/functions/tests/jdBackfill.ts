@@ -2,8 +2,8 @@ import { app, HttpRequest, HttpResponseInit, InvocationContext } from '@azure/fu
 import { requireWrite } from './appSession'
 import { getPgClient } from './pgClient'
 import { getMicrosoftToken } from './googleAuth'
-import { loadConfig, graphCreds, isAlert, parseAlert } from './mailWatch'
-import { injectJobMarkers, canonicalJobUrl } from './jdLinks'
+import { loadConfig, graphCreds, isAlert } from './mailWatch'
+import { extractJobAnchors, canonicalJobUrl, normText, tokenSim } from './jdLinks'
 import { scraperFetch, extractGuestJdHtml, classifyResponse } from './scraperProxy'
 import { logJdFetch } from './jdFetchLog'
 
@@ -24,19 +24,20 @@ async function ensureCols(client: any): Promise<void> {
 const guestUrl = (jobId: string) => `https://www.linkedin.com/jobs-guest/jobs/api/jobPosting/${jobId}`
 
 // ---------------------------------------------------------------------------
-// POST /api/mail/jd-backfill/scan  — recover jobIds for EXISTING opportunities.
+// POST /api/mail/jd-backfill/scan  — recover jobIds for EXISTING opportunities. LLM-FREE.
 // The ingest fix only captures jobIds going forward; opps ingested before it have none. This
-// re-reads the last {days} of alert emails from the mailbox, extracts each role's jobId from the
-// HTML (marker logic), re-parses with the SAME parseAlert, and back-links the jobId onto the
-// existing opportunity row (matched by owner + company + role, where job_id is still null).
-// Body: { days?: 14, maxEmails?: 300 }
+// re-reads the last {days} of alert emails, extracts each job anchor's {jobId, title, tail} from the
+// HTML (no LLM → zero OpenAI exposure, no 504 timeout), and back-links the jobId onto the matching
+// existing opp: the anchor's company must appear in the anchor tail AND its title must overlap the
+// opp's role (or a very strong title match alone). Under-links rather than mis-links when unsure.
+// Body: { days?: 14, maxEmails?: 400 }
 // ---------------------------------------------------------------------------
 export async function jdBackfillScan(req: HttpRequest, _ctx: InvocationContext): Promise<HttpResponseInit> {
   if (req.method === 'OPTIONS') return { status: 204, headers: HEADERS }
   const guard = requireWrite(req); if (guard) return guard
   const body = (await req.json().catch(() => ({}))) as any
   const days = Math.max(1, Math.min(90, Number(body.days) || 14))
-  const maxEmails = Math.max(1, Math.min(1000, Number(body.maxEmails) || 300))
+  const maxEmails = Math.max(1, Math.min(1000, Number(body.maxEmails) || 400))
 
   const creds = graphCreds()
   if (!creds.clientId || !creds.clientSecret) return { status: 200, headers: HEADERS, jsonBody: { ok: false, error: 'Graph app credentials not configured' } }
@@ -48,9 +49,17 @@ export async function jdBackfillScan(req: HttpRequest, _ctx: InvocationContext):
   try {
     client = await getPgClient()
     await ensureCols(client)
-    let url: string | null = `https://graph.microsoft.com/v1.0/users/${cfg.mailbox}/messages?$filter=receivedDateTime ge ${sinceIso}&$select=subject,from,bodyPreview,body,receivedDateTime,parentFolderId&$top=50&$orderby=receivedDateTime desc`
+    // Load the unlinked-opp pool ONCE (owner, no jobId yet, within window). Match in-memory — fast.
+    const pool: Array<{ id: string; company: string; role: string; ncompany: string; used: boolean }> =
+      (await client.query(
+        `select id, company, role from opportunity
+          where owner_email = $1 and job_id is null and created_at >= now() - ($2 || ' days')::interval`,
+        [cfg.ownerEmail, String(days)],
+      )).rows.map((r: any) => ({ id: r.id, company: r.company || '', role: r.role || '', ncompany: normText(r.company || ''), used: false }))
+
+    let url: string | null = `https://graph.microsoft.com/v1.0/users/${cfg.mailbox}/messages?$filter=receivedDateTime ge ${sinceIso}&$select=subject,from,bodyPreview,body,receivedDateTime&$top=50&$orderby=receivedDateTime desc`
     let scanned = 0, alerts = 0, idsFound = 0, linked = 0, alreadyHad = 0
-    const unmatched: Array<{ company: string; role: string; jobId: string }> = []
+    const unmatched: Array<{ jobId: string; title: string }> = []
 
     while (url && scanned < maxEmails) {
       const res: any = await fetch(url, { headers: { Authorization: `Bearer ${token}` } })
@@ -61,36 +70,35 @@ export async function jdBackfillScan(req: HttpRequest, _ctx: InvocationContext):
         scanned++
         const from = (msg?.from?.emailAddress?.address || '').toLowerCase()
         if (!isAlert(cfg, from, msg?.subject || '', msg?.bodyPreview || '')) continue
-        const { text, ids } = injectJobMarkers(msg?.body?.content || '')
-        if (!ids.length) continue
+        const anchors = extractJobAnchors(msg?.body?.content || '')
+        if (!anchors.length) continue
         alerts++
-        const opps = await parseAlert(text)
-        for (const o of opps) {
-          if (!o.jobId) continue
+        for (const a of anchors) {
           idsFound++
-          // Back-link to the existing opp created from this email: exact company+role, id still null.
-          const upd = await client.query(
-            `update opportunity set job_id = $1, job_url = $2
-               where id = (
-                 select id from opportunity
-                  where owner_email = $3 and job_id is null
-                    and lower(company) = lower($4) and lower(role) = lower($5)
-                  order by created_at desc limit 1
-               ) returning id`,
-            [String(o.jobId), canonicalJobUrl(String(o.jobId)), cfg.ownerEmail, o.company, o.role],
-          )
-          if (upd.rowCount) linked++
-          else {
-            // Already linked, or no exact match — check if some row already carries this id.
-            const has = await client.query(`select 1 from opportunity where owner_email=$1 and job_id=$2 limit 1`, [cfg.ownerEmail, String(o.jobId)])
-            if (has.rowCount) alreadyHad++
-            else if (unmatched.length < 50) unmatched.push({ company: o.company, role: o.role, jobId: String(o.jobId) })
+          const already = await client.query(`select 1 from opportunity where owner_email=$1 and job_id=$2 limit 1`, [cfg.ownerEmail, a.jobId])
+          if (already.rowCount) { alreadyHad++; continue }
+          // Score each unused pool opp: company must appear in the anchor's tail, title overlaps role.
+          const ntail = normText(a.tail)
+          let best: typeof pool[number] | null = null, bestScore = 0
+          for (const p of pool) {
+            if (p.used) continue
+            const companyInTail = p.ncompany.length >= 3 && ntail.includes(p.ncompany)
+            const tsim = tokenSim(a.title, p.role)
+            const score = (companyInTail ? 0.5 : 0) + 0.5 * tsim
+            // Accept only a confident match: company+decent title, or a very strong title alone.
+            const accept = (companyInTail && tsim >= 0.4) || tsim >= 0.85
+            if (accept && score > bestScore) { bestScore = score; best = p }
           }
+          if (best) {
+            await client.query(`update opportunity set job_id=$1, job_url=$2 where id=$3 and job_id is null`,
+              [a.jobId, canonicalJobUrl(a.jobId), best.id])
+            best.used = true; linked++
+          } else if (unmatched.length < 60) unmatched.push({ jobId: a.jobId, title: a.title.slice(0, 80) })
         }
       }
       url = page['@odata.nextLink'] || null
     }
-    return { status: 200, headers: HEADERS, jsonBody: { ok: true, days, scanned, alerts, idsFound, linked, alreadyHad, unmatchedCount: unmatched.length, unmatched } }
+    return { status: 200, headers: HEADERS, jsonBody: { ok: true, days, scanned, alerts, idsFound, linked, alreadyHad, poolSize: pool.length, unmatchedCount: unmatched.length, unmatched: unmatched.slice(0, 25) } }
   } catch (e) {
     return { status: 200, headers: HEADERS, jsonBody: { ok: false, error: String(e) } }
   } finally { try { await client?.end() } catch {} }

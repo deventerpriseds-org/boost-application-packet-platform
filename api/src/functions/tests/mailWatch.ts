@@ -211,10 +211,25 @@ export function isAlert(cfg: WatchConfig, from: string, subject: string, preview
 }
 
 // --- OpenAI helpers -------------------------------------------------------
+// fetch() that retries OpenAI 429 (rate limit) + 5xx with exponential backoff, honoring Retry-After.
+// Keeps us from tripping OpenAI's RPM/TPM limits — a throttle pauses-and-retries instead of failing.
+export async function openaiFetch(url: string, init: RequestInit, tries = 4): Promise<Response> {
+  let wait = 1000
+  for (let i = 0; ; i++) {
+    const res = await fetch(url, init)
+    if (res.status !== 429 && res.status < 500) return res
+    if (i >= tries - 1) return res
+    const ra = Number(res.headers.get('retry-after'))
+    const delay = Number.isFinite(ra) && ra > 0 ? ra * 1000 : wait
+    await new Promise((r) => setTimeout(r, delay))
+    wait = Math.min(wait * 2, 16000)
+  }
+}
+
 async function embed(text: string): Promise<string | null> {
   const key = process.env.OPENAI_API_KEY
   if (!key) return null
-  const res = await fetch('https://api.openai.com/v1/embeddings', {
+  const res = await openaiFetch('https://api.openai.com/v1/embeddings', {
     method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
     body: JSON.stringify({ model: 'text-embedding-3-small', input: text.slice(0, 8000) })
   })
@@ -234,7 +249,7 @@ export async function parseAlert(rawText: string): Promise<any[]> {
   const jobIdSet = Array.from(new Set((rawText.match(/\{\{JOB:(\d+)\}\}/g) || []).map((s) => s.replace(/\D/g, ''))))
   const system = 'You extract senior executive job opportunities from a job-alert email. Return ONLY JSON. Only include roles at the VP, Director, C-suite, Partner, or equivalent senior leadership level. Skip coordinator, specialist, analyst, manager, support, or entry/mid-level roles.'
   const user = `From this job-alert email, extract only SENIOR EXECUTIVE roles (VP, Director, C-suite, SVP, EVP, Partner, Head of, GM, President, or equivalent). Skip any role below director level. Return JSON: { "opportunities": [ { "company": "...", "role": "...", "location": "...", "comp": "...", "jobId": "...", "postedDate": "YYYY-MM-DD or null" } ] }. jobId: each role in the email is followed by a marker like {{JOB:4433165980}} — set jobId to EXACTLY that number for the role it follows (the nearest preceding marker belongs to that role). Use null if the role has no marker. postedDate: the date the job was posted or listed, NOT the email received date. Look for text like "Posted 3 days ago", "Posted July 10", "2 days ago", etc. and resolve to an ISO date. Use null if no posted date is mentioned. Use null for other unknown fields. If no senior roles exist, return { "opportunities": [] }. Email:\n${rawText.slice(0, 8000)}`
-  const res = await fetch('https://api.openai.com/v1/chat/completions', {
+  const res = await openaiFetch('https://api.openai.com/v1/chat/completions', {
     method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
     body: JSON.stringify({ model: 'gpt-4o-mini', messages: [{ role: 'system', content: system }, { role: 'user', content: user }], max_tokens: 1400, response_format: { type: 'json_object' } })
   })

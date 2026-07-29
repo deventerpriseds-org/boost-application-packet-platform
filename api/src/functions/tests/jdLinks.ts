@@ -64,6 +64,40 @@ export function injectJobMarkers(html: string): { text: string; ids: string[] } 
   return { text, ids }
 }
 
+// Normalize free text for fuzzy matching: lowercase, strip accents + punctuation, collapse spaces.
+export function normText(s: string): string {
+  return (s || '').toLowerCase().normalize('NFKD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]+/g, ' ').replace(/\s+/g, ' ').trim()
+}
+
+// Overlap coefficient of the significant (>2 char) word sets — 1.0 when one title's words are a
+// subset of the other's. Used to match a LinkedIn anchor's job-title text to an opportunity's role.
+export function tokenSim(a: string, b: string): number {
+  const A = new Set(normText(a).split(' ').filter((w) => w.length > 2))
+  const B = new Set(normText(b).split(' ').filter((w) => w.length > 2))
+  if (!A.size || !B.size) return 0
+  let inter = 0; for (const w of A) if (B.has(w)) inter++
+  return inter / Math.min(A.size, B.size)
+}
+
+// Extract each LinkedIn job anchor with its title (anchor inner text) and the ~300 chars of text
+// that FOLLOW it (which carry company + location). Lets the re-scan associate a jobId to an existing
+// opportunity by string match — NO LLM call, so zero OpenAI exposure and no timeout. Document order.
+export function extractJobAnchors(html: string): Array<{ jobId: string; title: string; tail: string }> {
+  const re = /<a\b[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi
+  const out: Array<{ jobId: string; title: string; tail: string }> = []
+  const seen = new Set<string>()
+  let m: RegExpExecArray | null
+  while ((m = re.exec(html))) {
+    const id = jobIdFromUrl(m[1])
+    if (!id || seen.has(id)) continue
+    seen.add(id)
+    const title = m[2].replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
+    const tail = html.slice(re.lastIndex, re.lastIndex + 300).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
+    out.push({ jobId: id, title, tail })
+  }
+  return out
+}
+
 // Validate an LLM-returned jobId: must be all-digits and present in the ground-truth set from the
 // same email. Returns the clean id or null. Prevents a hallucinated/misread id from being stored.
 export function validateJobId(candidate: unknown, groundTruth: string[]): string | null {
