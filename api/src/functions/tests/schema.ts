@@ -194,6 +194,13 @@ alter table persona        add column if not exists owner_email text not null de
 alter table persona        add column if not exists is_demo boolean not null default false;
 alter table opportunity    add column if not exists owner_email text not null default 'demo@executive-engine.local';
 alter table opportunity    add column if not exists is_demo boolean not null default false;
+-- Role-taxonomy tagging (Phase 1): matched group/role/variation, tier, favorite flag, pre-boost score.
+alter table opportunity    add column if not exists matched_group text;
+alter table opportunity    add column if not exists matched_role text;
+alter table opportunity    add column if not exists matched_variation text;
+alter table opportunity    add column if not exists title_tier text;
+alter table opportunity    add column if not exists is_favorite boolean not null default false;
+alter table opportunity    add column if not exists base_score int;
 alter table library_entity add column if not exists owner_email text not null default 'demo@executive-engine.local';
 alter table library_entity add column if not exists is_demo boolean not null default false;
 create index if not exists opp_owner_idx2 on opportunity(owner_email);

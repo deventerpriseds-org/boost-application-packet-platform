@@ -31,6 +31,8 @@ function rowToOpp(r: any) {
     comp: r.comp_range, match: r.match_score, fit: r.fit, urgency: r.urgency,
     source: r.source, why: r.why_surfaced, hm: r.hiring_manager, recruiter: r.recruiter,
     rolesFor: r.roles_for, stage: r.stage, personaKey: r.persona_key, dismissed: r.dismissed,
+    isFavorite: !!r.is_favorite, tier: r.title_tier, matchedGroup: r.matched_group,
+    matchedRole: r.matched_role, matchedVariation: r.matched_variation, baseScore: r.base_score,
     signals: r.company_signals, pain: r.pain_hypotheses, isDemo: r.is_demo,
     createdAt: r.created_at, sourceDate: r.source_date,
     jdTitle: r.jd_title, jdCompany: r.jd_company, jdSummary: r.jd_summary,
@@ -62,8 +64,11 @@ export async function opportunitiesList(req: HttpRequest, context: InvocationCon
     if (!includeDemo) conds.push('not is_demo')
     if (persona) { params.push(persona); conds.push(`$${params.length} = any(roles_for)`) }
     if (stage && !wantRejectedOnly) { params.push(stage); conds.push(`stage = $${params.length}`) }
+    // Favorites first (priority flagging), then boosted match_score desc. `is_favorite`
+    // is set by the taxonomy tagger; coalesce guards rows not yet tagged.
     const rows = (await client.query(
-      `select * from opportunity where ${conds.join(' and ')} order by match_score desc nulls last`, params
+      `select * from opportunity where ${conds.join(' and ')}
+       order by coalesce(is_favorite,false) desc, match_score desc nulls last`, params
     )).rows
 
     // Stage funnel counts for the pipeline board (+ a 'rejected' lane count)

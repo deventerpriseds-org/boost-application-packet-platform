@@ -3,6 +3,7 @@ import { getMicrosoftToken } from './googleAuth'
 import { getPgClient } from './pgClient'
 import { logUsage } from './usageMeter'
 import { resolveOwner, requireWrite } from './appSession'
+import { resolveTitle as taxResolve } from './roleTaxonomy'
 
 const HEADERS = {
   'Content-Type': 'application/json',
@@ -272,6 +273,20 @@ export async function insertOpp(client: any, owner: string, o: any, source = 'Li
       : [owner, o.company, o.role, o.location || null, o.comp || null, whyText, source, ...(sourceDateVal ? [sourceDateVal] : [])]
   )
   const id = r.rows[0].id
+  // Best-effort taxonomy tag at ingest so favorites flag/boost immediately (AC-36). Columns are
+  // created by schema.ts / taxonomy ensureSchema; if not yet present this throws and is caught —
+  // the /app/taxonomy/retag backfill (and later enrichment) re-tags with the full JD title.
+  try {
+    const m = taxResolve(o.role || '', '')
+    const isFav = m.tier === 'fav' && m.matched && !m.backlog
+    await client.query(
+      `update opportunity set matched_group=$2, matched_role=$3, matched_variation=$4,
+         title_tier=$5, is_favorite=$6, base_score=coalesce(base_score, match_score),
+         match_score=least(100, coalesce(match_score,0) + case when $6 then 15 else 0 end)
+       where id=$1`,
+      [id, m.group, m.role, m.variation, m.tier, isFav]
+    )
+  } catch { /* columns not present yet — retag will catch up */ }
   if (rawJd) {
     try {
       await client.query(`alter table opportunity add column if not exists raw_jd text`)
