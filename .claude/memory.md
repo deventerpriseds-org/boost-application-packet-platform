@@ -127,6 +127,21 @@ Key tables (PostgreSQL):
 - **Classification bugs (proven):** ingest tags on `o.role` (mailWatch.ts:280) but retag tags on `jd_title||role` (appRoleTaxonomy.ts:68); `jd_title` is unreliable (diverges from role) → wrong bins. `normalize()` cuts at first comma (roleTaxonomy.ts:126) → "VP, Product Management" becomes "vp". FIX: classify on `role` consistently; stop cutting at commas.
 - **Target end state:** ONE role source = the taxonomy. Settings ▸ Roles shows taxonomy roles (editable), folder→role map offers taxonomy roles, classification on `role` at ingest+retag, all consumers (incl. Pipeline.jsx) read matched_*.
 
+## CRITICAL known issue — fabricated JD content (ACT-22, 2026-07-29)
+- **The job-description content shown in the app is LLM-fabricated, not extracted.** LinkedIn
+  alert emails are digests (subject=headline job; body=~6 one-line job snippets + links, no JD
+  body). `insertOpp` stores the whole digest as each opp's `raw_jd`; `runJdParse` (appJdParse.ts)
+  only URL-fetches the real posting when `raw_jd` is empty (line 109) — never for digests — so it
+  fabricates jd_summary/jd_requirements/jd_table from a one-line snippet. PROVEN: 738/738 have a
+  jd_summary; 525 raw_jds are the digest; max raw_jd = 3,825 chars (no real JD anywhere).
+- **Field authority (proven via the raw email):** `role`/`company` = correct per-job values
+  (parseAlert extracts each digest job); `jd_title`/`jd_company` = digest HEADLINE (wrong for
+  non-headline siblings — "headline collapse"). So classification/display should use role/company,
+  NOT jd_title. (My earlier flip-flop on FALCON was from not reading the primary source — the rule.)
+- **Real per-opp data:** company, per-job title, location, comp, job URL. Everything richer is
+  fabricated. Packet ATS keywords + JD-based match scoring inherit the fabrication.
+- Open: research a real JD fetch from the per-job link (LinkedIn auth-gated) — ACT-22a.
+
 ## Process discipline
 - **AC TRIAGE (standing rule, 2026-07-28):** the `define-acceptance-criteria` subagent is intentionally
   exhaustive and adversarial — its raw output is a DRAFT, not the final AC set. Before presenting for
