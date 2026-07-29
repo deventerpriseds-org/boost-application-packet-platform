@@ -79,21 +79,24 @@ export function tokenSim(a: string, b: string): number {
   return inter / Math.min(A.size, B.size)
 }
 
-// Extract each LinkedIn job anchor with its title (anchor inner text) and the ~300 chars of text
-// that FOLLOW it (which carry company + location). Lets the re-scan associate a jobId to an existing
-// opportunity by string match — NO LLM call, so zero OpenAI exposure and no timeout. Document order.
-export function extractJobAnchors(html: string): Array<{ jobId: string; title: string; tail: string }> {
+// Extract each LinkedIn job anchor with a CONTEXT window of text around it. In LinkedIn alert emails
+// the anchor inner text is often empty (it wraps an image/button) — the job title + company live in
+// the text just BEFORE and AFTER the anchor. So we capture ~220 chars before + ~420 after, tag-
+// stripped, and match the opportunity's company+role against that. NO LLM → zero OpenAI, no timeout.
+// `title` is the anchor's own inner text when present (may be empty). Document order, deduped by id.
+export function extractJobAnchors(html: string): Array<{ jobId: string; title: string; context: string }> {
   const re = /<a\b[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi
-  const out: Array<{ jobId: string; title: string; tail: string }> = []
+  const out: Array<{ jobId: string; title: string; context: string }> = []
   const seen = new Set<string>()
+  const strip = (s: string) => s.replace(/<[^>]+>/g, ' ').replace(/&nbsp;/gi, ' ').replace(/\s+/g, ' ').trim()
   let m: RegExpExecArray | null
   while ((m = re.exec(html))) {
     const id = jobIdFromUrl(m[1])
     if (!id || seen.has(id)) continue
     seen.add(id)
-    const title = m[2].replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
-    const tail = html.slice(re.lastIndex, re.lastIndex + 300).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
-    out.push({ jobId: id, title, tail })
+    const title = strip(m[2])
+    const context = strip(html.slice(Math.max(0, m.index - 220), re.lastIndex + 420))
+    out.push({ jobId: id, title, context })
   }
   return out
 }

@@ -77,23 +77,24 @@ export async function jdBackfillScan(req: HttpRequest, _ctx: InvocationContext):
           idsFound++
           const already = await client.query(`select 1 from opportunity where owner_email=$1 and job_id=$2 limit 1`, [cfg.ownerEmail, a.jobId])
           if (already.rowCount) { alreadyHad++; continue }
-          // Score each unused pool opp: company must appear in the anchor's tail, title overlaps role.
-          const ntail = normText(a.tail)
+          // Score each unused pool opp against the anchor CONTEXT (title text is often empty in these
+          // emails): company must appear in the context AND the opp's role words must overlap it.
+          const nctx = normText(a.context)
           let best: typeof pool[number] | null = null, bestScore = 0
           for (const p of pool) {
             if (p.used) continue
-            const companyInTail = p.ncompany.length >= 3 && ntail.includes(p.ncompany)
-            const tsim = tokenSim(a.title, p.role)
-            const score = (companyInTail ? 0.5 : 0) + 0.5 * tsim
-            // Accept only a confident match: company+decent title, or a very strong title alone.
-            const accept = (companyInTail && tsim >= 0.4) || tsim >= 0.85
+            const companyInCtx = p.ncompany.length >= 3 && nctx.includes(p.ncompany)
+            const rsim = tokenSim(a.context, p.role)   // role words present in the surrounding text
+            const score = (companyInCtx ? 0.5 : 0) + 0.5 * rsim
+            // Confident match: company present + a decent share of the role's words also present.
+            const accept = companyInCtx && rsim >= 0.5
             if (accept && score > bestScore) { bestScore = score; best = p }
           }
           if (best) {
             await client.query(`update opportunity set job_id=$1, job_url=$2 where id=$3 and job_id is null`,
               [a.jobId, canonicalJobUrl(a.jobId), best.id])
             best.used = true; linked++
-          } else if (unmatched.length < 60) unmatched.push({ jobId: a.jobId, title: a.title.slice(0, 80) })
+          } else if (unmatched.length < 60) unmatched.push({ jobId: a.jobId, title: (a.title || a.context).slice(0, 90) })
         }
       }
       url = page['@odata.nextLink'] || null
