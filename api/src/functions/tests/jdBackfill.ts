@@ -71,6 +71,10 @@ export async function jdBackfillScan(req: HttpRequest, _ctx: InvocationContext):
           if (!isAlert(cfg, from, msg?.subject || '', msg?.bodyPreview || '')) continue
           const { text, ids } = injectJobMarkers(msg?.body?.content || '')
           if (!ids.length) continue
+          // Skip the LLM call entirely if every jobId in this email is already linked (saves OpenAI
+          // + time on the newest emails, which the earlier passes already did).
+          const linkedIds = (await client.query(`select job_id from opportunity where owner_email=$1 and job_id = any($2::text[])`, [cfg.ownerEmail, ids])).rows.map((r: any) => String(r.job_id))
+          if (linkedIds.length >= ids.length) { alreadyHad += ids.length; continue }
           alerts++
           const opps = await parseAlert(text)          // gpt-4o-mini, serial, 429-backoff
           for (const o of opps) {
