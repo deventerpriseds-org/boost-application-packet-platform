@@ -421,3 +421,21 @@ Packets list table+filter + builder template-pickers/version-history/Send→Appl
 ---
 
 *Last updated: 2026-07-22*
+
+---
+
+## ACT-21 — Unify role systems; fix classification + filters + Settings/folder mapping
+
+**Requested:** 2026-07-29 (user screenshots: odd inbox-scrub bins, broken opps filters, Settings ▸ Roles black box)
+**Asked for:** roles the user pasted must be seeded to Settings ▸ Roles AND mapped to Outlook folders; inbox scrub + opps filters + swipe must classify/filter consistently and correctly; prove what's actually happening.
+
+**PROVEN root causes (DB + code map, 2026-07-29):**
+- TWO disconnected role systems: (A) legacy `persona` (roles_for/persona_key, Settings ▸ Roles CTO/VPE/VPP, folder_role_map.role_key=persona key, tagOppRoles LLM) and (B) new `taxonomy` (matched_group/role, opps/swipe/today pills). They never write each other's columns.
+- **Classification field bug:** ingest tag uses `o.role` (mailWatch.ts:280); retag uses `jd_title||role` (appRoleTaxonomy.ts:68). `jd_title` diverges from `role` (FALCON role="CTO" but jd_title="Vice President Information Technology"; Clover role="VP, Product Management" but jd_title="Chief Product Officer") → bins mismatch the displayed ROLE. FIX: classify on `role`, same logic at ingest AND retag.
+- **normalize() comma-cut:** "VP, Product Management" cut at first comma → "vp" → Other roles (roleTaxonomy.ts:126). FIX: don't cut at commas.
+- **folder_role_map.role_key references persona keys, never populated from taxonomy** (mailWatch.ts:1119; Settings folder picker uses listPersonas). Settings ▸ Roles shows personas, not taxonomy (Settings.jsx:717).
+- Pipeline.jsx still filters by rolesFor (System A); other consumers use roleFamily (System B).
+- Swipe has no "view current list" button linking to Opportunities.
+
+**ACs:** TBD (independent AC subagent) before implementation.
+**Status:** `in-progress` — investigation done + proven; plan + AC sign-off next.
