@@ -1,7 +1,7 @@
 import React, { useMemo, useState, useEffect, useCallback } from 'react'
 import { go, useApp } from '../state.jsx'
 import { api } from '../api.js'
-import { MatchScore, UrgencyPill, Pill } from '../shell.jsx'
+import { MatchScore, UrgencyPill, Pill, FavStar } from '../shell.jsx'
 import { Loading, ErrorBox, Empty, roleFamily } from './Today.jsx'
 
 const URGENCIES = ['All', 'Hot', 'Warm', 'Cool']
@@ -42,16 +42,11 @@ export default function Opportunities({ opps, filter }) {
   const [urgency, setUrgency] = useState('All')
   const [stage, setStage] = useState('All')
   const [sort, setSort] = useState('match')
-  const [roles, setRoles] = useState([])
   const [roleFilter, setRoleFilter] = useState('all')
   const [activeFilter, setActiveFilter] = useState(filter || null)
   const [showRejected, setShowRejected] = useState(false)
   const [withDismissed, setWithDismissed] = useState(null) // list incl. dismissed, fetched on demand
   const [busyId, setBusyId] = useState(null)
-
-  useEffect(() => {
-    api.listPersonas().then((r) => { if (!r.error) setRoles(r.personas || []) }).catch(() => {})
-  }, [])
 
   // Fetch the dismissed-inclusive list when the toggle is on (and after any mutation).
   const loadWithDismissed = useCallback(() => {
@@ -136,9 +131,14 @@ export default function Opportunities({ opps, filter }) {
       if (urgency !== 'All') r = r.filter((o) => o.urgency === urgency)
       if (stage !== 'All') r = r.filter((o) => o.stage === stage)
     }
-    if (roleFilter === 'other') r = r.filter((o) => !o.rolesFor || o.rolesFor.length === 0)
-    else if (roleFilter !== 'all') r = r.filter((o) => (o.rolesFor || []).includes(roleFilter))
-    r = [...r].sort((a, b) => (sort === 'match' ? (b.match || 0) - (a.match || 0) : (a.company || '').localeCompare(b.company || '')))
+    // Taxonomy filter: by group (csuite/vp/director), by favorites, or all.
+    if (roleFilter === 'fav') r = r.filter((o) => o.isFavorite)
+    else if (roleFilter === 'other') r = r.filter((o) => !o.matchedGroup)
+    else if (roleFilter !== 'all') r = r.filter((o) => o.matchedGroup === roleFilter)
+    // Favorites first (priority), then by chosen sort.
+    r = [...r].sort((a, b) =>
+      (Number(!!b.isFavorite) - Number(!!a.isFavorite)) ||
+      (sort === 'match' ? (b.match || 0) - (a.match || 0) : (a.company || '').localeCompare(b.company || '')))
     return r
   }, [opportunities, query, urgency, stage, sort, roleFilter, activeFilter])
 
@@ -149,13 +149,18 @@ export default function Opportunities({ opps, filter }) {
     return by
   }, [opportunities])
 
-  // Per-role counts for the chip bar — match each persona key against opp.rolesFor.
+  // Taxonomy group counts for the chip bar (csuite/vp/director) + favorites + unclassified.
+  const GROUP_PILLS = [
+    { key: 'all', name: 'All' }, { key: 'fav', name: '★ Favorites' },
+    { key: 'csuite', name: 'C Suite' }, { key: 'vp', name: 'VP & Head of' },
+    { key: 'director', name: 'Director' }, { key: 'other', name: 'Unclassified' },
+  ]
   const roleCounts = useMemo(() => {
-    const c = { all: opportunities.length, other: 0 }
+    const c = { all: opportunities.length, fav: 0, csuite: 0, vp: 0, director: 0, other: 0 }
     for (const o of opportunities) {
-      const rf = o.rolesFor || []
-      if (rf.length === 0) c.other += 1
-      for (const k of rf) c[k] = (c[k] || 0) + 1
+      if (o.isFavorite) c.fav += 1
+      if (o.matchedGroup && c[o.matchedGroup] != null) c[o.matchedGroup] += 1
+      else if (!o.matchedGroup) c.other += 1
     }
     return c
   }, [opportunities])
@@ -223,19 +228,20 @@ export default function Opportunities({ opps, filter }) {
         })}
       </div>
 
-      {roles.length > 0 && (
-        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-          {[{ key: 'all', name: 'All' }, ...roles, { key: 'other', name: 'Other' }].map((r) => {
-            const n = roleCounts[r.key] || 0
-            return (
-              <span key={r.key} className="px-pill" onClick={() => setRoleFilter(r.key)}
-                style={{ cursor: 'pointer', background: roleFilter === r.key ? 'var(--surface-brand-default)' : undefined, color: roleFilter === r.key ? 'var(--text-on-brand)' : undefined }}>
-                {r.name} {n}
-              </span>
-            )
-          })}
-        </div>
-      )}
+      {/* Taxonomy pills — filter by seniority group / favorites (supersede the old flat personas) */}
+      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+        {GROUP_PILLS.map((r) => {
+          const n = roleCounts[r.key] || 0
+          if ((r.key === 'other' || r.key === 'fav') && n === 0) return null
+          const on = roleFilter === r.key
+          return (
+            <span key={r.key} className="px-pill" onClick={() => setRoleFilter(r.key)}
+              style={{ cursor: 'pointer', background: on ? 'var(--surface-brand-default)' : undefined, color: on ? 'var(--text-on-brand)' : undefined }}>
+              {r.name} {n}
+            </span>
+          )
+        })}
+      </div>
       {activeFilter && (
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px', background: 'var(--proto-paper)', border: '1px solid var(--proto-rule-soft)', borderRadius: 8 }}>
           <span className="px-small">Filtered: <b>{filterLabel(activeFilter)}</b></span>
@@ -277,9 +283,12 @@ export default function Opportunities({ opps, filter }) {
                 style={{ borderTop: '1px solid var(--proto-rule-soft)', cursor: 'pointer', opacity: o.rejected ? 0.62 : 1 }}>
                 <Td><MatchScore value={o.match} size={30} /></Td>
                 <Td>
-                  <span style={{ fontWeight: 600, textDecoration: o.rejected ? 'line-through' : 'none' }}>{o.company}</span>
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+                    <FavStar on={o.isFavorite} />
+                    <span style={{ fontWeight: 600, textDecoration: o.rejected ? 'line-through' : 'none' }}>{o.company}</span>
+                  </span>
                   {o.rejected && <Pill tone="red" style={{ marginLeft: 6 }}>Rejected</Pill>}
-                  <div className="px-small">{o.location || '—'}</div>
+                  <div className="px-small">{o.matchedRole ? o.matchedRole : (o.location || '—')}</div>
                 </Td>
                 <Td>{o.role}</Td>
                 <Td>{o.comp || '—'}</Td>

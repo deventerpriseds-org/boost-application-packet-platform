@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { useApp, go } from '../state.jsx'
 import { api } from '../api.js'
-import { Pill, UrgencyPill, MatchScore } from '../shell.jsx'
+import { Pill, UrgencyPill, MatchScore, FavStar } from '../shell.jsx'
 import { Loading, ErrorBox } from './Today.jsx'
 
 const QUEUE_STAGES = ['discovered', 'saved', 'enriched']
@@ -10,17 +10,19 @@ const QUEUE_STAGES = ['discovered', 'saved', 'enriched']
 export default function Swipe({ opps }) {
   const { toast } = useApp()
   const { loading, error, opportunities, optimisticMove, optimisticDismiss, optimisticUndismiss } = opps
-  const [roles, setRoles] = useState([])
   const [roleFilter, setRoleFilter] = useState('all')
-  useEffect(() => { api.listPersonas().then((r) => { if (!r.error) setRoles(r.personas || []) }).catch(() => {}) }, [])
 
-  // Stage-eligible review queue, before the role pill is applied (drives the pill counts).
-  const stageQueue = useMemo(() => opportunities.filter((o) => QUEUE_STAGES.includes(o.stage)), [opportunities])
+  // Stage-eligible review queue, before the group pill is applied. Favorites first so promoted
+  // roles surface at the top of triage.
+  const stageQueue = useMemo(() => (
+    opportunities.filter((o) => QUEUE_STAGES.includes(o.stage))
+      .sort((a, b) => (Number(!!b.isFavorite) - Number(!!a.isFavorite)) || ((b.match || 0) - (a.match || 0)))
+  ), [opportunities])
   const matchesRole = (o) => {
     if (roleFilter === 'all') return true
-    const rf = o.rolesFor || []
-    if (roleFilter === 'other') return rf.length === 0
-    return rf.includes(roleFilter)
+    if (roleFilter === 'fav') return !!o.isFavorite
+    if (roleFilter === 'other') return !o.matchedGroup
+    return o.matchedGroup === roleFilter
   }
   // Cards already triaged THIS session, tracked by id. Deriving the queue from a
   // reviewed-set (not a positional index) is immune to the 15s poll reordering the
@@ -31,15 +33,15 @@ export default function Swipe({ opps }) {
     () => stageQueue.filter((o) => matchesRole(o) && !reviewed.has(o.id)),
     [stageQueue, roleFilter, reviewed],
   )
-  // Per-role counts for the pill bar (remaining, i.e. not-yet-reviewed).
+  // Taxonomy group counts for the pill bar (remaining, i.e. not-yet-reviewed).
   const roleCounts = useMemo(() => {
-    const c = { all: 0, other: 0 }
+    const c = { all: 0, fav: 0, csuite: 0, vp: 0, director: 0, other: 0 }
     for (const o of stageQueue) {
       if (reviewed.has(o.id)) continue
       c.all += 1
-      const rf = o.rolesFor || []
-      if (rf.length === 0) c.other += 1
-      for (const k of rf) c[k] = (c[k] || 0) + 1
+      if (o.isFavorite) c.fav += 1
+      if (o.matchedGroup && c[o.matchedGroup] != null) c[o.matchedGroup] += 1
+      else if (!o.matchedGroup) c.other += 1
     }
     return c
   }, [stageQueue, reviewed])
@@ -132,9 +134,7 @@ export default function Swipe({ opps }) {
     setDrag({ x: 0, y: 0, active: false, decision: null })
   }
 
-  const rolePills = roles.length > 0 ? (
-    <RolePills roles={roles} counts={roleCounts} value={roleFilter} onChange={setRoleFilter} />
-  ) : null
+  const rolePills = <RolePills counts={roleCounts} value={roleFilter} onChange={setRoleFilter} />
 
   if (!current) {
     return (
@@ -199,13 +199,17 @@ export default function Swipe({ opps }) {
 }
 
 // Role priority pills — filter the triage queue so review can be worked one role at a time.
-function RolePills({ roles, counts, value, onChange }) {
-  const items = [{ key: 'all', name: 'All' }, ...roles, { key: 'other', name: 'Other' }]
+function RolePills({ counts, value, onChange }) {
+  const items = [
+    { key: 'all', name: 'All' }, { key: 'fav', name: '★ Favorites' },
+    { key: 'csuite', name: 'C Suite' }, { key: 'vp', name: 'VP & Head of' },
+    { key: 'director', name: 'Director' }, { key: 'other', name: 'Unclassified' },
+  ]
   return (
     <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', justifyContent: 'center' }}>
       {items.map((r) => {
         const n = counts[r.key] || 0
-        if (r.key === 'other' && n === 0) return null // hide empty Other
+        if ((r.key === 'other' || r.key === 'fav') && n === 0) return null // hide empty Other/Favorites
         const on = value === r.key
         return (
           <span key={r.key} className="px-pill" onClick={() => onChange(r.key)}
@@ -252,9 +256,11 @@ function SwipeCard({ o, decision, cardRef, style, ...handlers }) {
       {/* Identity header — always visible */}
       <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}>
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontSize: 19, fontWeight: 700 }}>{o.company}</div>
+          <div style={{ fontSize: 19, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 6 }}>
+            <FavStar on={o.isFavorite} size={16} />{o.company}
+          </div>
           <div style={{ fontSize: 14, fontWeight: 700 }}>{o.jdTitle || o.role}</div>
-          <div className="px-small">{[o.location, o.comp].filter(Boolean).join(' · ') || '—'}</div>
+          <div className="px-small">{[o.matchedRole, o.location, o.comp].filter(Boolean).join(' · ') || '—'}</div>
         </div>
         <MatchScore value={o.match} size={44} />
       </div>

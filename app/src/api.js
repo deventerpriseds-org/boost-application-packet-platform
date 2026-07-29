@@ -159,6 +159,11 @@ export const api = {
   updatePersona: (key, patch) => patch_(`/app/personas/${key}`, patch),
   deletePersona: (key) => del(`/app/personas/${key}`),
   tagAllRoles: () => post(`/app/personas/tag-all`, {}),
+  // Role taxonomy (3-level: group -> role -> title variant; fav/watch/off tiers)
+  taxonomy: () => get(`/app/taxonomy`),
+  taxonomyRetag: () => post(`/app/taxonomy/retag`, {}),
+  taxonomyAddTitle: (data) => post(`/app/taxonomy/title`, data),
+  taxonomySetTier: (data) => patch_(`/app/taxonomy/title/tier`, data),
   listLibrary: (kind) => get(`/app/library${kind ? `?kind=${encodeURIComponent(kind)}` : ''}`),
 }
 

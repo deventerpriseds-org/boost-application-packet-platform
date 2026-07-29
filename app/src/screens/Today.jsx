@@ -27,6 +27,9 @@ const ACTIVE_STAGES = ['applied', 'outreach', 'engaged', 'screen', 'r1', 'panel'
 
 // Bin an opportunity into a monitored-role family (mirrors the intake design).
 export function roleFamily(o) {
+  // Prefer the taxonomy match (single source of truth) so Today bins consistently with the
+  // matcher; fall back to the legacy string heuristic only for not-yet-tagged rows.
+  if (o.matchedRole) return o.matchedRole
   const r = (o.role || '').toLowerCase()
   if (r.includes('cto')) return 'CTO Roles'
   if (r.includes('ai')) return 'VP AI Transformation'
