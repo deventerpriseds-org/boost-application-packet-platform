@@ -38,7 +38,7 @@ export async function jdBackfillScan(req: HttpRequest, _ctx: InvocationContext):
   const body = (await req.json().catch(() => ({}))) as any
   const days = Math.max(1, Math.min(90, Number(body.days) || 14))
   const llm = body.llm === true          // LLM mode: parseAlert + exact company+role match (reliable)
-  const maxEmails = Math.max(1, Math.min(1000, Number(body.maxEmails) || (llm ? 100 : 400)))
+  const maxEmails = Math.max(1, Math.min(2000, Number(body.maxEmails) || (llm ? 1000 : 400)))  // llm is time-bounded, not count-bounded
   const beforeIso = typeof body.beforeIso === 'string' ? body.beforeIso : null  // pagination cursor
 
   const creds = graphCreds()
@@ -59,7 +59,11 @@ export async function jdBackfillScan(req: HttpRequest, _ctx: InvocationContext):
     if (llm) {
       let url: string | null = `https://graph.microsoft.com/v1.0/users/${cfg.mailbox}/messages?$filter=${filter}&$select=subject,from,bodyPreview,body,receivedDateTime&$top=50&$orderby=receivedDateTime desc`
       let scanned = 0, alerts = 0, idsFound = 0, linked = 0, alreadyHad = 0, oldestIso: string | null = null
+      const startMs = Date.now()
+      const TIME_BUDGET_MS = 200_000   // stop well under Azure's 240s gateway cap; return a cursor
+      let timedOut = false
       while (url && scanned < maxEmails) {
+        if (Date.now() - startMs > TIME_BUDGET_MS) { timedOut = true; break }
         const res: any = await fetch(url, { headers: { Authorization: `Bearer ${token}` } })
         if (!res.ok) return { status: 200, headers: HEADERS, jsonBody: { ok: false, error: `Graph messages HTTP ${res.status}`, detail: (await res.text()).slice(0, 400) } }
         const page = (await res.json()) as any
@@ -95,8 +99,8 @@ export async function jdBackfillScan(req: HttpRequest, _ctx: InvocationContext):
         }
         url = page['@odata.nextLink'] || null
       }
-      const hasMore = scanned >= maxEmails
-      return { status: 200, headers: HEADERS, jsonBody: { ok: true, mode: 'llm', scanned, alerts, idsFound, linked, alreadyHad, oldestIso, hasMore, nextCursor: hasMore ? oldestIso : null } }
+      const hasMore = timedOut || !!url || scanned >= maxEmails
+      return { status: 200, headers: HEADERS, jsonBody: { ok: true, mode: 'llm', scanned, alerts, idsFound, linked, alreadyHad, timedOut, oldestIso, hasMore, nextCursor: hasMore ? oldestIso : null } }
     }
     // Load the unlinked-opp pool ONCE (owner, no jobId yet, within window). Match in-memory — fast.
     const pool: Array<{ id: string; company: string; role: string; ncompany: string; used: boolean }> =
