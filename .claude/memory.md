@@ -96,6 +96,7 @@ Key tables (PostgreSQL):
 | Intake/Settings demo-mode guard | open | Fires API calls unconditionally; errors in demo mode |
 | Packets/Outreach empty-state nav links | open | Need clickable links to Opportunities |
 | Design config applet + verifier agent | done (skill repo) | eds-claude-skills updated |
+| Role taxonomy Phase 1 (3-level + favorites) | backend verified live; UI unverified-from-sandbox (2026-07-29) | roleTaxonomy.ts (3 groups/27 roles/868 titles nested under csuite/vp/director), matcher exact→alias→fuzzy→keyword, COO/Director inclusion gates, +15/cap100. appRoleTaxonomy.ts (per-user editable taxonomy_title, retag backfill, add-title/set-tier endpoints). Favorites-first sort + gold star (FavStar) in Opportunities + Swipe; group pills; Today roleFamily prefers matchedRole. **Live DB evidence (von.ellis): 218 favorites, 330 matched_role, 0 scores>100, boost math exact (0 mismatch, 0 non-fav changed), 651 seeded titles, 3 groups.** UI DOM (gold star/pills/sort render) UNVERIFIED — sandbox egress blocks *.azurestaticapps.net (403); needs user browser or Playwright-in-GHA. Phase 2 deferred: standalone #/roles editor, drafts/publish, folder-binding rebuild, bulk tier UI, off-tier seeding. |
 
 ## Auth / write-protection model (ACT-19, 2026-07-22)
 - `app/*` routes are `authLevel:'anonymous'` with a `?owner=` fallback. **Writes are now gated**:
