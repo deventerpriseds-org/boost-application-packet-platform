@@ -2,8 +2,8 @@ import { app, HttpRequest, HttpResponseInit, InvocationContext } from '@azure/fu
 import { requireWrite } from './appSession'
 import { getPgClient } from './pgClient'
 import { getMicrosoftToken } from './googleAuth'
-import { loadConfig, graphCreds, isAlert } from './mailWatch'
-import { extractJobAnchors, canonicalJobUrl, normText, tokenSim } from './jdLinks'
+import { loadConfig, graphCreds, isAlert, parseAlert } from './mailWatch'
+import { extractJobAnchors, canonicalJobUrl, normText, tokenSim, injectJobMarkers } from './jdLinks'
 import { scraperFetch, extractGuestJdHtml, classifyResponse } from './scraperProxy'
 import { logJdFetch } from './jdFetchLog'
 
@@ -37,18 +37,63 @@ export async function jdBackfillScan(req: HttpRequest, _ctx: InvocationContext):
   const guard = requireWrite(req); if (guard) return guard
   const body = (await req.json().catch(() => ({}))) as any
   const days = Math.max(1, Math.min(90, Number(body.days) || 14))
-  const maxEmails = Math.max(1, Math.min(1000, Number(body.maxEmails) || 400))
+  const llm = body.llm === true          // LLM mode: parseAlert + exact company+role match (reliable)
+  const maxEmails = Math.max(1, Math.min(1000, Number(body.maxEmails) || (llm ? 100 : 400)))
+  const beforeIso = typeof body.beforeIso === 'string' ? body.beforeIso : null  // pagination cursor
 
   const creds = graphCreds()
   if (!creds.clientId || !creds.clientSecret) return { status: 200, headers: HEADERS, jsonBody: { ok: false, error: 'Graph app credentials not configured' } }
   const cfg = await loadConfig()
   const token = await getMicrosoftToken(creds.tenantId, creds.clientId, creds.clientSecret)
   const sinceIso = new Date(Date.now() - days * 86400_000).toISOString()
+  const filter = `receivedDateTime ge ${sinceIso}` + (beforeIso ? ` and receivedDateTime lt ${beforeIso}` : '')
 
   let client: any
   try {
     client = await getPgClient()
     await ensureCols(client)
+
+    // LLM MODE — reads the whole email, gets {company, role, jobId} per role, exact-matches an
+    // existing opp (job_id null). Reliable where anchor-context string matching fails. Paged 100
+    // emails/call via beforeIso so it stays under Azure's 240s cap; OpenAI calls have 429 backoff.
+    if (llm) {
+      let url: string | null = `https://graph.microsoft.com/v1.0/users/${cfg.mailbox}/messages?$filter=${filter}&$select=subject,from,bodyPreview,body,receivedDateTime&$top=50&$orderby=receivedDateTime desc`
+      let scanned = 0, alerts = 0, idsFound = 0, linked = 0, alreadyHad = 0, oldestIso: string | null = null
+      while (url && scanned < maxEmails) {
+        const res: any = await fetch(url, { headers: { Authorization: `Bearer ${token}` } })
+        if (!res.ok) return { status: 200, headers: HEADERS, jsonBody: { ok: false, error: `Graph messages HTTP ${res.status}`, detail: (await res.text()).slice(0, 400) } }
+        const page = (await res.json()) as any
+        for (const msg of (page.value || [])) {
+          if (scanned >= maxEmails) break
+          scanned++
+          if (msg?.receivedDateTime) oldestIso = msg.receivedDateTime  // desc order → last seen is oldest
+          const from = (msg?.from?.emailAddress?.address || '').toLowerCase()
+          if (!isAlert(cfg, from, msg?.subject || '', msg?.bodyPreview || '')) continue
+          const { text, ids } = injectJobMarkers(msg?.body?.content || '')
+          if (!ids.length) continue
+          alerts++
+          const opps = await parseAlert(text)          // gpt-4o-mini, serial, 429-backoff
+          for (const o of opps) {
+            if (!o.jobId) continue
+            idsFound++
+            const has = await client.query(`select 1 from opportunity where owner_email=$1 and job_id=$2 limit 1`, [cfg.ownerEmail, String(o.jobId)])
+            if (has.rowCount) { alreadyHad++; continue }
+            const upd = await client.query(
+              `update opportunity set job_id=$1, job_url=$2
+                 where id = (select id from opportunity
+                              where owner_email=$3 and job_id is null
+                                and lower(company)=lower($4) and lower(role)=lower($5)
+                              order by created_at desc limit 1) returning id`,
+              [String(o.jobId), canonicalJobUrl(String(o.jobId)), cfg.ownerEmail, o.company, o.role],
+            )
+            if (upd.rowCount) linked++
+          }
+        }
+        url = page['@odata.nextLink'] || null
+      }
+      const hasMore = scanned >= maxEmails
+      return { status: 200, headers: HEADERS, jsonBody: { ok: true, mode: 'llm', scanned, alerts, idsFound, linked, alreadyHad, oldestIso, hasMore, nextCursor: hasMore ? oldestIso : null } }
+    }
     // Load the unlinked-opp pool ONCE (owner, no jobId yet, within window). Match in-memory — fast.
     const pool: Array<{ id: string; company: string; role: string; ncompany: string; used: boolean }> =
       (await client.query(
