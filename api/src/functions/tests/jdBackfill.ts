@@ -60,15 +60,15 @@ export async function jdBackfillScan(req: HttpRequest, _ctx: InvocationContext):
       let url: string | null = `https://graph.microsoft.com/v1.0/users/${cfg.mailbox}/messages?$filter=${filter}&$select=subject,from,bodyPreview,body,receivedDateTime&$top=50&$orderby=receivedDateTime desc`
       let scanned = 0, alerts = 0, idsFound = 0, linked = 0, alreadyHad = 0, oldestIso: string | null = null
       const startMs = Date.now()
-      const TIME_BUDGET_MS = 200_000   // stop well under Azure's 240s gateway cap; return a cursor
+      const TIME_BUDGET_MS = 180_000   // stop well under Azure's 240s gateway cap; return a cursor
       let timedOut = false
-      while (url && scanned < maxEmails) {
-        if (Date.now() - startMs > TIME_BUDGET_MS) { timedOut = true; break }
+      while (url && scanned < maxEmails && !timedOut) {
         const res: any = await fetch(url, { headers: { Authorization: `Bearer ${token}` } })
         if (!res.ok) return { status: 200, headers: HEADERS, jsonBody: { ok: false, error: `Graph messages HTTP ${res.status}`, detail: (await res.text()).slice(0, 400) } }
         const page = (await res.json()) as any
         for (const msg of (page.value || [])) {
           if (scanned >= maxEmails) break
+          if (Date.now() - startMs > TIME_BUDGET_MS) { timedOut = true; break }  // per-email check → reliable return
           scanned++
           if (msg?.receivedDateTime) oldestIso = msg.receivedDateTime  // desc order → last seen is oldest
           const from = (msg?.from?.emailAddress?.address || '').toLowerCase()
