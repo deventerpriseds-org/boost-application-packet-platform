@@ -1,25 +1,28 @@
 // Provider-agnostic managed-scraping-API layer (ACT-22a). Routes an outbound fetch through a
 // residential/anti-bot scraping API so LinkedIn never sees our Azure datacenter IP (which its WAF
 // flags within tens of requests). Config via env (synced from GitHub secrets by api-deploy.yml):
-//   SCRAPER_API_PROVIDER = 'scraperapi' | 'scrapedo' | 'scrapfly' | 'scrapingbee' | '' (empty = direct)
-//   SCRAPER_API_KEY      = ScraperAPI key (backfill provider — ultra_premium, LinkedIn-grade)
-//   SCRAPE_DO_API_KEY    = scrape.do key (daily-grab provider — super proxy)
-// Strategy: ScraperAPI (trial credits, multi-thread) for the one-time backfill AND to empirically
-// characterize LinkedIn's undocumented guest-endpoint limits under residential-IP rotation; then
-// scrape.do for the low-volume daily grab. Provider is selectable per request (probe/experiment).
+//   SCRAPER_API_PROVIDER = 'scrapedo' | 'firecrawl' | 'scraperapi' | 'scrapfly' | 'scrapingbee' | ''
+//   SCRAPER_API_KEY      = ScraperAPI key   (NOTE: trial can't scrape LinkedIn — paid-domain 403)
+//   SCRAPE_DO_API_KEY    = scrape.do key    (super proxy — PROVEN working on LinkedIn)
+//   FIRECRAWL_API_KEY    = Firecrawl key    (stealth proxy — second pool to spread credit spend)
+// Strategy: spread load across providers so no single free tier's monthly credits are exhausted —
+// one provider for the high-volume backfill, another for the daily grab. Provider is selectable per
+// request (probe/experiment) so we can compare + measure LinkedIn's undocumented limits per pool.
 //
-// Response shape differs by vendor: scrapfly returns a JSON envelope {result:{content,status_code}};
-// scraperapi / scrapedo / scrapingbee return the raw target HTML. scraperFetch normalizes to raw HTML.
+// Response shape differs by vendor: scrapfly returns {result:{content,status_code}}; firecrawl POSTs
+// and returns {data:{html,metadata:{statusCode}}}; scraperapi/scrapedo/scrapingbee return raw HTML.
+// scraperFetch normalizes all of them to raw target HTML + the target's own status code.
 
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0 Safari/537.36'
 
-export type Provider = 'scraperapi' | 'scrapedo' | 'scrapfly' | 'scrapingbee'
+export type Provider = 'scraperapi' | 'scrapedo' | 'firecrawl' | 'scrapfly' | 'scrapingbee'
 
-// Per-provider key resolution — providers can coexist (ScraperAPI for backfill, scrape.do for daily).
+// Per-provider key resolution — providers coexist so we can spread credit spend across pools.
 function providerKey(provider: string): string {
   switch (provider) {
-    case 'scrapedo': return process.env.SCRAPE_DO_API_KEY || ''
-    default:         return process.env.SCRAPER_API_KEY || ''
+    case 'scrapedo':  return process.env.SCRAPE_DO_API_KEY || ''
+    case 'firecrawl': return process.env.FIRECRAWL_API_KEY || ''
+    default:          return process.env.SCRAPER_API_KEY || ''
   }
 }
 
@@ -87,6 +90,39 @@ export interface FetchResult {
   usage?: Record<string, string>   // scraping-API usage/concurrency headers (LinkedIn-wall vs proxy-wall)
 }
 
+// Firecrawl POST /v1/scrape → {success, data:{html, metadata:{statusCode}}}. proxy:'stealth' is the
+// anti-bot mode needed for hard targets like LinkedIn (costs more credits than a basic scrape).
+async function firecrawlFetch(targetUrl: string): Promise<FetchResult> {
+  const key = providerKey('firecrawl')
+  const started = Date.now()
+  try {
+    const res = await fetch('https://api.firecrawl.dev/v1/scrape', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
+      body: JSON.stringify({ url: targetUrl, formats: ['html'], onlyMainContent: false, proxy: 'stealth', timeout: 30000 }),
+    })
+    const raw = await res.text()
+    let body = raw, status = res.status, ok = res.ok
+    try {
+      const j = JSON.parse(raw)
+      if (j && j.data && typeof j.data.html === 'string') {
+        body = j.data.html
+        const sc = j.data.metadata?.statusCode
+        if (typeof sc === 'number') { status = sc; ok = sc >= 200 && sc < 300 }
+      } else if (j && j.success === false) {
+        ok = false; body = j.error ? String(j.error) : raw
+      }
+    } catch { /* not JSON — leave raw so the caller sees the error */ }
+    const usage: Record<string, string> = {}
+    for (const h of ['x-ratelimit-remaining', 'x-credits-remaining', 'x-ratelimit-limit']) {
+      const v = res.headers.get(h); if (v) usage[h] = v
+    }
+    return { ok, status, body, via: 'proxy', provider: 'firecrawl', latencyMs: Date.now() - started, usage: Object.keys(usage).length ? usage : undefined }
+  } catch (err) {
+    return { ok: false, status: 0, body: '', via: 'proxy', provider: 'firecrawl', latencyMs: Date.now() - started, error: String(err) }
+  }
+}
+
 // Fetch `targetUrl`, through the given/configured scraping API when available (unless force==='direct'),
 // else directly with a browser UA. Never throws — returns a structured result with latency + usage.
 export async function scraperFetch(
@@ -94,6 +130,10 @@ export async function scraperFetch(
   opts: { force?: 'proxy' | 'direct'; provider?: string; saTier?: string } = {},
 ): Promise<FetchResult> {
   const provider = (opts.provider || activeProvider()).trim().toLowerCase()
+  // Firecrawl is a POST + JSON-body API (unlike the GET-URL providers) — handle it separately.
+  if (opts.force !== 'direct' && provider === 'firecrawl' && providerKey('firecrawl')) {
+    return firecrawlFetch(targetUrl)
+  }
   const proxyUrl = opts.force === 'direct' ? null : buildProxyUrl(targetUrl, provider, opts.saTier)
   const url = proxyUrl || targetUrl
   const via: 'proxy' | 'direct' = proxyUrl ? 'proxy' : 'direct'
