@@ -232,6 +232,10 @@ export async function jdBackfillFetch(req: HttpRequest, _ctx: InvocationContext)
       if (outcome === 'ok_jd' && jd.descriptionHtml) {
         await client.query(`update opportunity set jd_real = $1, jd_fetched_at = now() where id = $2`, [jd.descriptionHtml, row.id])
         stored++
+      } else if (outcome === 'auth_required' || outcome === 'not_found') {
+        // Terminal on the guest endpoint (job needs login / is gone). Mark fetched so the sweep skips
+        // it next time — the logged-in Chrome-extension path can capture these later. Leaves jd_real null.
+        await client.query(`update opportunity set jd_fetched_at = now() where id = $1 and jd_real is null`, [row.id])
       }
     }
 

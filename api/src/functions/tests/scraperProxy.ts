@@ -73,10 +73,14 @@ export function buildProxyUrl(targetUrl: string, providerOverride?: string, saTi
 
 // Empirical-limit classification: a 200 can still be a LinkedIn block/challenge page, so status
 // alone lies. Classify the actual body so a block never masquerades as success in the volume log.
-export type Outcome = 'ok_jd' | 'blocked' | 'login_wall' | 'not_found' | 'proxy_error' | 'empty'
+// NOTE: 'blocked' means a RATE-LIMIT/anti-bot wall (429/999/challenge) — the only thing that should
+// stop a sweep. 'auth_required' (401/403) is a PER-JOB condition (job not visible on the guest
+// endpoint), a skip, NOT a rate signal — it must not halt the sweep. 'not_found' (404) is also a skip.
+export type Outcome = 'ok_jd' | 'blocked' | 'auth_required' | 'login_wall' | 'not_found' | 'proxy_error' | 'empty'
 export function classifyResponse(status: number, body: string, jdFound: boolean): Outcome {
   if (status === 0) return 'proxy_error'
   if (status === 404) return 'not_found'
+  if (status === 401 || status === 403) return 'auth_required'    // per-job: not guest-accessible (skip, not a block)
   if (status === 429 || status === 999) return 'blocked'         // 999 = LinkedIn's signature throttle code
   const low = body.slice(0, 4000).toLowerCase()
   if (jdFound) return 'ok_jd'
