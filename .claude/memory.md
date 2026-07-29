@@ -118,6 +118,16 @@ Key tables (PostgreSQL):
 - **DIAGNOSIS DISCIPLINE**: "a count that hasn't changed in days" = data-freshness signal. Check
   `max(created_at)` in the DB BEFORE assuming a UI/KPI bug. In 2026-07-21 the "app shows 0" was dead
   intake (3 stacked bugs), not the frontend — chasing the UI first wasted the loop.
+
+## Process discipline
+- **AC TRIAGE (standing rule, 2026-07-28):** the `define-acceptance-criteria` subagent is intentionally
+  exhaustive and adversarial — its raw output is a DRAFT, not the final AC set. Before presenting for
+  sign-off, the main agent MUST review every suggested AC and label each: **fold** (merge duplicates /
+  near-duplicates into one), **already covered** (an existing AC or existing behavior/test proves it),
+  **redundant** (restates another AC), **out of scope** (Phase 2 / not this task — move to a deferred
+  list), or **keep** (genuinely valuable, distinct, verifiable). Present the CONSOLIDATED set with the
+  triage rationale, not the unfiltered dump. Never blindly accept or blindly build all of them. The
+  verifier later runs against the consolidated, signed-off set.
 - Mail INSERT param bug: placeholders in `mailWatch.ts` are hand-aligned with a conditional array;
   adding a column silently misaligns → `could not determine data type of parameter $N`. Keep in lockstep.
 - ATS ingestion has NO scheduler timer — `atsIngest` is a manual POST route; 0 sources configured.
