@@ -210,25 +210,30 @@ export async function jdBackfillFetch(req: HttpRequest, _ctx: InvocationContext)
     let stored = 0, escalated = 0
     const bump = (k: string) => { tally[k] = (tally[k] || 0) + 1 }
 
-    // Fetch one opp: cheap mode first, escalate to super on a block. Log every attempt.
-    async function one(row: any): Promise<void> {
+    // Fetch one opp. On a genuine block (429/999/challenge), RETRY — each scrape.do request rotates
+    // to a fresh exit IP, and we escalate cheap→super, so a transient block self-heals instead of
+    // stopping the sweep. Every attempt (incl. the blocked ones) is logged so the rate signal is still
+    // visible in jd_fetch_log. Returns the FINAL outcome. maxTries retries only apply to 'blocked'.
+    const maxTries = Math.max(1, Math.min(4, Number(body.maxTries) || 3))
+    async function one(row: any): Promise<'ok_jd' | 'blocked' | 'auth_required' | 'not_found' | 'proxy_error' | 'empty' | 'login_wall'> {
       const url = guestUrl(row.job_id)
-      let r = await scraperFetch(url, { provider: 'scrapedo', sdSuper: false })
-      let jd = extractGuestJdHtml(r.body)
-      let outcome = classifyResponse(r.status, r.body, jd.descriptionHtml != null)
-      let usedSuper = false
-      if (outcome === 'blocked' && superOnBlock) {
-        usedSuper = true; escalated++
-        r = await scraperFetch(url, { provider: 'scrapedo', sdSuper: true })
+      let r: any, jd: any, outcome: any = 'blocked'
+      for (let attempt = 0; attempt < maxTries; attempt++) {
+        // Attempt 0 = cheap (datacenter, ~1 credit); retries escalate to super (residential, rotated).
+        const useSuper = attempt > 0 && superOnBlock
+        if (useSuper) escalated++
+        r = await scraperFetch(url, { provider: 'scrapedo', sdSuper: useSuper })
         jd = extractGuestJdHtml(r.body)
         outcome = classifyResponse(r.status, r.body, jd.descriptionHtml != null)
+        await logJdFetch({
+          jobId: String(row.job_id), provider: r.provider || 'scrapedo', via: r.via, httpStatus: r.status,
+          outcome, jdTextLen: jd.textLen, bytes: r.body.length, latencyMs: r.latencyMs, concurrency,
+          runTag: attempt > 0 ? `${runTag}+retry${attempt}` : runTag, usage: r.usage, error: r.error,
+        })
+        if (outcome !== 'blocked') break   // only a real rate-limit/anti-bot block is worth a fresh-IP retry
+        if (delayMs) await sleep(delayMs)  // brief pause before the next IP
       }
       bump(outcome)
-      await logJdFetch({
-        jobId: String(row.job_id), provider: r.provider || 'scrapedo', via: r.via, httpStatus: r.status,
-        outcome, jdTextLen: jd.textLen, bytes: r.body.length, latencyMs: r.latencyMs,
-        concurrency, runTag: usedSuper ? `${runTag}+super` : runTag, usage: r.usage, error: r.error,
-      })
       if (outcome === 'ok_jd' && jd.descriptionHtml) {
         await client.query(`update opportunity set jd_real = $1, jd_fetched_at = now() where id = $2`, [jd.descriptionHtml, row.id])
         stored++
@@ -237,19 +242,24 @@ export async function jdBackfillFetch(req: HttpRequest, _ctx: InvocationContext)
         // it next time — the logged-in Chrome-extension path can capture these later. Leaves jd_real null.
         await client.query(`update opportunity set jd_fetched_at = now() where id = $1 and jd_real is null`, [row.id])
       }
+      return outcome
     }
 
-    // Run in concurrency-sized waves so we can sweep the block-rate vs request-rate curve. Paced by
-    // delayMs between waves for the safe sweep; stop early the moment a wave still ends 'blocked'
-    // after super-escalation — that's the cap, and we don't hammer past it.
-    let stoppedAtBlock = false
-    for (let i = 0; i < rows.length; i += concurrency) {
-      const before = tally['blocked'] || 0
-      await Promise.all(rows.slice(i, i + concurrency).map(one))
-      if ((tally['blocked'] || 0) > before) { stoppedAtBlock = true; break }
+    // Run in concurrency-sized waves, paced by delayMs. A single job that stays blocked through all
+    // fresh-IP retries is tolerated (skipped); we only STOP when blocks are PERSISTENT across waves
+    // (>= STOP_AFTER consecutive blocked jobs) — that's a real wall, not a one-off. IP rotation +
+    // retry means transient blocks self-heal and the sweep keeps pulling.
+    const STOP_AFTER = 3
+    let stoppedAtBlock = false, consecBlocked = 0
+    for (let i = 0; i < rows.length && !stoppedAtBlock; i += concurrency) {
+      const outcomes = await Promise.all(rows.slice(i, i + concurrency).map(one))
+      for (const o of outcomes) {
+        if (o === 'blocked') { consecBlocked++; if (consecBlocked >= STOP_AFTER) { stoppedAtBlock = true; break } }
+        else consecBlocked = 0
+      }
       if (delayMs && i + concurrency < rows.length) await sleep(delayMs)
     }
-    return { status: 200, headers: HEADERS, jsonBody: { ok: true, runTag, concurrency, delayMs, candidates: rows.length, stored, escalated, stoppedAtBlock, outcomes: tally } }
+    return { status: 200, headers: HEADERS, jsonBody: { ok: true, runTag, concurrency, delayMs, maxTries, candidates: rows.length, stored, escalated, stoppedAtBlock, outcomes: tally } }
   } catch (e) {
     return { status: 200, headers: HEADERS, jsonBody: { ok: false, error: String(e) } }
   } finally { try { await client?.end() } catch {} }
