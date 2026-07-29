@@ -28,8 +28,10 @@ export function buildProxyUrl(targetUrl: string): string | null {
       // envelope {result:{content,status_code}} — scraperFetch unwraps it to raw HTML.
       return `https://api.scrapfly.io/scrape?key=${key}&url=${enc}&asp=true&country=us&render_js=false`
     case 'scraperapi':
-      // https://docs.scraperapi.com — premium=true → residential pool for hard sites
-      return `https://api.scraperapi.com/?api_key=${key}&url=${enc}&premium=true&country_code=us`
+      // https://docs.scraperapi.com — ultra_premium=true is ScraperAPI's advanced anti-bot bypass
+      // (residential + fingerprint), the equivalent of Scrapfly's asp=true, required for hard
+      // targets like LinkedIn. NOTE: ultra_premium bills ~10× credits per request vs premium.
+      return `https://api.scraperapi.com/?api_key=${key}&url=${enc}&ultra_premium=true&country_code=us`
     case 'scrapingbee':
       // https://scrapingbee.com/documentation — premium_proxy=true (residential), no JS render needed
       return `https://app.scrapingbee.com/api/v1/?api_key=${key}&url=${enc}&premium_proxy=true&render_js=false&country_code=us`
