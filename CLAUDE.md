@@ -175,6 +175,40 @@ Checklist before committing a conceptual fix:
 
 **Never tell the user something is fixed, done, or working until you have confirmed it with actual evidence** — a passing test, a DB query result, a successful log, a git log entry, or a live API response. Triggering a workflow and getting a 204 queued response is NOT confirmation — it means the job started. Read the job logs first, then report. If you cannot confirm (sandbox blocks the endpoint, logs not yet available, etc.), say "I cannot confirm this yet" and explain what would confirm it and how the user can check. Do not infer success from absence of errors.
 
+## Ground-truth before answering (strict rule — strengthens "Verify before reporting")
+
+"Confirm with evidence" is not enough — it must be the RIGHT evidence. This rule exists because
+of a real failure: asked which of two fields (`role` vs `jd_title`) was wrong, the agent pulled a
+DB query showing they *differed*, then resolved which-was-correct with an **unstated assumption**
+and reported it as "proven." It had checked a proxy, not the ground truth (the actual JD/email
+subject), and got the answer backwards. The user only caught it because they happened to know the
+truth. When answering any "which is right/wrong / what's actually happening / is X true" question:
+
+1. **State the claim, then name the single source that would prove it true or false — and consult
+   THAT.** For "is field A or B correct," the proof is the **primary source both derive from** (the
+   real JD, the email, the file on disk), never a comparison of the two derived fields. Comparing
+   two proxies tells you they differ, not which is right; never resolve that gap with an assumption.
+2. **Actively seek disconfirming evidence for your leading hypothesis.** Before concluding X, look
+   for what would make X false. If you haven't tried to falsify it, you haven't verified it.
+3. **Calibrate words to proof.** "Proven / confirmed / clearly / definitively" ONLY after reading
+   the ground-truth source. Otherwise say "inference — confidence X; would be confirmed by reading
+   `<source>`."
+4. **No "Recommended" on a factual determination that isn't ground-truthed.** Establish the fact
+   first, advise second. Do not hand the user an option built on an unverified premise.
+5. **Separate Observation from Interpretation** in the answer, so the user can catch a wrong
+   inference even when they don't know the answer themselves.
+
+## Extend, don't duplicate (strict rule)
+
+Before building any new table, model, endpoint, classifier, or subsystem, **grep for an existing
+system that already serves that purpose and EXTEND it.** Never stand up a parallel system. This
+rule exists because of a real failure: given a request to "add my roles," the agent built a new
+`taxonomy_title` system parallel to the existing `persona` / `folder_role_map` / Settings ▸ Roles
+role system — leaving two disconnected role brains and a black-box Settings screen. Memory
+documented the existing system; the agent didn't reconcile against it. Treat every "add X" request
+as "find what already does X and extend it." If a new structure genuinely seems needed, first state
+what exists, why it's insufficient, and get explicit sign-off before creating it.
+
 ## Session start checklist (run these before touching any code)
 
 1. `git log --oneline -10` — compare to what the context summary claims is done.
