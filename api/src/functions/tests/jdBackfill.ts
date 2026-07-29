@@ -250,16 +250,17 @@ export async function jdBackfillFetch(req: HttpRequest, _ctx: InvocationContext)
     // (>= STOP_AFTER consecutive blocked jobs) — that's a real wall, not a one-off. IP rotation +
     // retry means transient blocks self-heal and the sweep keeps pulling.
     const STOP_AFTER = 3
-    let stoppedAtBlock = false, consecBlocked = 0
-    for (let i = 0; i < rows.length && !stoppedAtBlock; i += concurrency) {
+    let stoppedAtBlock = false, quotaExceeded = false, consecBlocked = 0
+    for (let i = 0; i < rows.length && !stoppedAtBlock && !quotaExceeded; i += concurrency) {
       const outcomes = await Promise.all(rows.slice(i, i + concurrency).map(one))
       for (const o of outcomes) {
+        if (o === 'quota_exceeded') { quotaExceeded = true; break }   // account-level: stop now, nothing to retry
         if (o === 'blocked') { consecBlocked++; if (consecBlocked >= STOP_AFTER) { stoppedAtBlock = true; break } }
         else consecBlocked = 0
       }
       if (delayMs && i + concurrency < rows.length) await sleep(delayMs)
     }
-    return { status: 200, headers: HEADERS, jsonBody: { ok: true, runTag, concurrency, delayMs, maxTries, candidates: rows.length, stored, escalated, stoppedAtBlock, outcomes: tally } }
+    return { status: 200, headers: HEADERS, jsonBody: { ok: true, runTag, concurrency, delayMs, maxTries, candidates: rows.length, stored, escalated, stoppedAtBlock, quotaExceeded, outcomes: tally } }
   } catch (e) {
     return { status: 200, headers: HEADERS, jsonBody: { ok: false, error: String(e) } }
   } finally { try { await client?.end() } catch {} }

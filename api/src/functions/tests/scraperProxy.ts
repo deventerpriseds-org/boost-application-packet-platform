@@ -76,9 +76,14 @@ export function buildProxyUrl(targetUrl: string, providerOverride?: string, saTi
 // NOTE: 'blocked' means a RATE-LIMIT/anti-bot wall (429/999/challenge) — the only thing that should
 // stop a sweep. 'auth_required' (401/403) is a PER-JOB condition (job not visible on the guest
 // endpoint), a skip, NOT a rate signal — it must not halt the sweep. 'not_found' (404) is also a skip.
-export type Outcome = 'ok_jd' | 'blocked' | 'auth_required' | 'login_wall' | 'not_found' | 'proxy_error' | 'empty'
+export type Outcome = 'ok_jd' | 'blocked' | 'quota_exceeded' | 'auth_required' | 'login_wall' | 'not_found' | 'proxy_error' | 'empty'
 export function classifyResponse(status: number, body: string, jdFound: boolean): Outcome {
   if (status === 0) return 'proxy_error'
+  // The SCRAPING-API's OWN account/quota error (not the target's) — e.g. scrape.do returns a 401 JSON
+  // {"URL":"...scrape.do","Message":["Monthly request limit exceeded..."]} when the plan is spent.
+  // This is account-level: retrying/rotating IPs can't fix it, and it must NOT mark jobs as skipped.
+  if (/scrape\.do|monthly request limit|request limit exceeded|upgrade your plan|api_key|apikey/i.test(body.slice(0, 600)) && (status === 401 || status === 403 || status === 429))
+    return 'quota_exceeded'
   if (status === 404) return 'not_found'
   if (status === 401 || status === 403) return 'auth_required'    // per-job: not guest-accessible (skip, not a block)
   if (status === 429 || status === 999) return 'blocked'         // 999 = LinkedIn's signature throttle code
