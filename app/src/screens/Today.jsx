@@ -26,26 +26,21 @@ const FRESH_STAGES = ['discovered', 'saved', 'enriched']
 const ACTIVE_STAGES = ['applied', 'outreach', 'engaged', 'screen', 'r1', 'panel', 'final', 'offer']
 
 // Bin an opportunity into a monitored-role family (mirrors the intake design).
+// Roll up strictly by the taxonomy so bins are consistent (no legacy "CTO Roles" vs "CTO"
+// duplicates). Group-prefixed for VP/Director so the same family in different seniority bands
+// stays distinct (e.g. "VP · Engineering" vs "Dir · Engineering"); C-Suite roles show bare
+// (CTO, CIO, Chief Digital Officer). Untagged rows fall into "Other roles".
+const GROUP_PREFIX = { csuite: '', vp: 'VP · ', director: 'Dir · ' }
 export function roleFamily(o) {
-  // Prefer the taxonomy match (single source of truth) so Today bins consistently with the
-  // matcher; fall back to the legacy string heuristic only for not-yet-tagged rows.
-  if (o.matchedRole) return o.matchedRole
-  const r = (o.role || '').toLowerCase()
-  if (r.includes('cto')) return 'CTO Roles'
-  if (r.includes('ai')) return 'VP AI Transformation'
-  if (r.includes('vp engineering')) return 'VP Engineering'
-  if (r.includes('product')) return 'VP Product'
-  if (r.includes('head') || r.includes('digital')) return 'Head of Digital'
-  if (r.includes('engineering')) return 'VP Engineering'
+  if (o.matchedRole) return (GROUP_PREFIX[o.matchedGroup] || '') + o.matchedRole
   return 'Other roles'
 }
-const ROLE_DOT = {
-  'CTO Roles': 'var(--surface-brand-default)',
-  'VP Engineering': 'var(--surface-success-default)',
-  'VP Product': 'var(--proto-purple)',
-  'VP AI Transformation': 'var(--proto-orange)',
-  'Head of Digital': 'var(--surface-error-default)',
-  'Other roles': 'var(--proto-ink3)',
+// Dot color keyed off the seniority group (derived from the label prefix).
+function roleDot(fam) {
+  if (fam === 'Other roles') return 'var(--proto-ink3)'
+  if (fam.startsWith('VP · ')) return 'var(--surface-success-default)'
+  if (fam.startsWith('Dir · ')) return 'var(--proto-purple)'
+  return 'var(--surface-brand-default)' // C-Suite
 }
 
 // "Latest inbox scrub" hero — new roles found overnight, binned by role family,
@@ -119,7 +114,7 @@ function InboxScrubHero({ newToday, backlog, toast }) {
             {bins.length === 0 && <div className="px-small">Inbox is clear — no new roles overnight.</div>}
             {bins.map(([fam, n]) => (
               <div key={fam} onClick={() => go('/opportunities?filter=rolenew:' + encodeURIComponent(fam))} style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', padding: '4px 6px', borderRadius: 6, transition: 'background 0.12s' }} onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--proto-rule-soft)' }} onMouseLeave={(e) => { e.currentTarget.style.background = '' }}>
-                <span style={{ width: 9, height: 9, borderRadius: '50%', background: ROLE_DOT[fam] || 'var(--proto-ink3)', flexShrink: 0 }} />
+                <span style={{ width: 9, height: 9, borderRadius: '50%', background: roleDot(fam), flexShrink: 0 }} />
                 <span style={{ fontSize: 13, fontWeight: 600, flex: 1 }}>{fam}</span>
                 <span className="px-pill">{n} new</span>
               </div>
