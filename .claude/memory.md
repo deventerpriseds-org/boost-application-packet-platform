@@ -183,3 +183,58 @@ Next step (per user "unify after the rules"): fold the seniority double-check in
   (3) job boards/ATS → Greenhouse/Lever/Ashby. Then close ACT-18 follow-ups: add LinkedIn/Ladders
   parent catch-all rules, delete/rebuild the empty "LinkedIn Job Alerts" rule, delete EDS-Rule-Test folder.
 Design locked: one mailbox-wide Graph subscription, route by parentFolderId. No destructive migrations.
+
+## JD anti-fabrication + real-JD backfill (session 2026-07-29) — SOLVED
+**Problem:** JDs were fabricated. Root cause: `ingestMessageId` (mailWatch) stripped ALL HTML tags —
+including `<a href=".../jobs/view/{jobId}">` — BEFORE parsing, so 722/723 opps had no link and the
+summary parser hallucinated from the digest headline. Confirmed via DB: 0/326 unlinked opps had a
+URL in why_surfaced OR raw_jd — genuinely destroyed at ingest; no DB shortcut possible.
+
+**Provider verdict (all ground-truthed live from Azure /api/mail/jd-probe):**
+- scrape.do — WORKS on LinkedIn guest endpoint (jobs-guest/jobs/api/jobPosting/{id}). 200, real JD.
+  CHEAP mode (super=false, ~1 credit) returns the SAME JD as super proxy — use cheap. Secret: scrape_do_api_key.
+- ScraperAPI — 403 at EVERY tier (plain/premium/ultra_premium): LinkedIn is a paid-domain gate. OUT.
+- Firecrawl — 403 "we do not support this site" — hard policy block on LinkedIn. OUT.
+- Provider-agnostic layer: scraperProxy.ts (SCRAPER_API_PROVIDER + per-provider keys). classifyResponse()
+  treats a 200 block-page as blocked (status alone lies). jd_fetch_log table logs every attempt
+  (outcome/latency/concurrency/runTag) for rate measurement.
+
+**The fix (all live):**
+- INGEST (self-healing): mailWatch keeps `{{JOB:id}}` markers before stripping tags; parseAlert binds
+  jobId per role; insertOpp stores job_id + canonical job_url. NEW favorites link ~100% automatically.
+- appJdParse now prefers `jd_real` over the digest text → grounds the summary, no fabrication.
+- Fetch: /api/mail/jd-backfill/fetch — scrape.do cheap-mode, escalate-to-super on block, concurrency+
+  delayMs paced, stop-on-block, stores jd_real+jd_fetched_at, logs to jd_fetch_log. Proven 10/10 ok_jd.
+
+**Historical linking backfill (ONE-TIME, done): /api/mail/jd-backfill/scan {llm:true, beforeIso cursor}**
+- LLM-free anchor match FAILED (this email format keeps title/company in separate table cells, not near
+  the href — anchor inner text is empty). Needed the LLM to read the whole email.
+- Two flaws found by measuring (NOT guessing): (1) exact company+role match failed ~85% → fixed with
+  pgvector nearest-neighbour fallback (embedBatch, dist<0.20) — SAME dedupe insertOpp uses.
+  (2) re-treading already-linked newest emails → fixed with beforeIso cursor paging.
+- 504 root cause was the per-opp embed calls tripping OpenAI 429; backoff stacked inside one email past
+  the time budget. Fixed: embedBatch() = ONE embeddings call per email (array input); openaiFetch() 429
+  backoff on all OpenAI paths; per-email 160s time budget returns a cursor cleanly (no 504).
+- RESULT: linked 219→449 (14d window); FAVORITES 54→128 of 161 (80%). Remaining ~107 unlinked are the
+  non-linkable tail (13 non-LinkedIn + embedding-miss). scan/probe endpoints are throwaway history tooling.
+
+**Process lesson (user called it out, correctly):** I thrashed — tweaked symptoms (batch size, timers)
+without root-causing, and wasted cycles re-scanning already-linked emails. Fix was to MEASURE (read the
+batch's linked/alreadyHad numbers) and to investigate the DATA (query what's actually in the rows) BEFORE
+writing code. "Ground-truth before answering" applies to debugging too.
+
+**Chrome extension is the real long-term ingest path (user: "always part of the plan"):**
+- ALREADY BUILT (repo `extension/`, manifest v3): content.js grabs the LOGGED-IN page innerText,
+  popup.js POSTs to /api/app/capture → routeOpportunity (same pipeline), source='Extension', stores
+  page text as raw_jd. Uses the logged-in page → different/better results than email alerts, AND
+  bypasses scrape.do + LinkedIn rate limits entirely (user is the authenticated browser).
+- REMAINING TWEAKS to make it the JD source: appCapture should (1) capture jobId from the page URL
+  (jdLinks.jobIdFromUrl) and (2) store the captured text as jd_real (not just raw_jd) so it counts as
+  a real JD and feeds the summary parse. Extension already sends url+text; just wire the backend.
+
+## Open follow-ups (JD system)
+- Build a SCHEDULED timer (Azure Functions timer trigger) that fetches jd_real for NEW linked favorites
+  daily — so it's set-and-forget, not manual. Not built yet.
+- Build the Chrome extension + the two appCapture tweaks (jobId from URL, store as jd_real).
+- Optional: paced scrape.do sweep of the 118 pending favorites to (a) fill real JDs now, (b) empirically
+  find LinkedIn's block threshold from jd_fetch_log. Not yet run at volume.
