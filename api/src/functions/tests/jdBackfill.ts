@@ -107,10 +107,12 @@ export async function jdBackfillFetch(req: HttpRequest, _ctx: InvocationContext)
   const guard = requireWrite(req); if (guard) return guard
   const body = (await req.json().catch(() => ({}))) as any
   const limit = Math.max(1, Math.min(200, Number(body.limit) || 20))
-  const concurrency = Math.max(1, Math.min(20, Number(body.concurrency) || 5))
+  const concurrency = Math.max(1, Math.min(20, Number(body.concurrency) || 1))
+  const delayMs = Math.max(0, Math.min(20000, Number(body.delayMs) || 0))  // pause between waves (safe sweep)
   const favoritesOnly = body.favoritesOnly !== false
   const superOnBlock = body.superOnBlock !== false
   const runTag = String(body.runTag || `backfill-c${concurrency}`)
+  const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
   const cfg = await loadConfig()
   let client: any
@@ -154,11 +156,17 @@ export async function jdBackfillFetch(req: HttpRequest, _ctx: InvocationContext)
       }
     }
 
-    // Run in concurrency-sized waves so we can sweep the block-rate vs request-rate curve.
+    // Run in concurrency-sized waves so we can sweep the block-rate vs request-rate curve. Paced by
+    // delayMs between waves for the safe sweep; stop early the moment a wave still ends 'blocked'
+    // after super-escalation — that's the cap, and we don't hammer past it.
+    let stoppedAtBlock = false
     for (let i = 0; i < rows.length; i += concurrency) {
+      const before = tally['blocked'] || 0
       await Promise.all(rows.slice(i, i + concurrency).map(one))
+      if ((tally['blocked'] || 0) > before) { stoppedAtBlock = true; break }
+      if (delayMs && i + concurrency < rows.length) await sleep(delayMs)
     }
-    return { status: 200, headers: HEADERS, jsonBody: { ok: true, runTag, concurrency, candidates: rows.length, stored, escalated, outcomes: tally } }
+    return { status: 200, headers: HEADERS, jsonBody: { ok: true, runTag, concurrency, delayMs, candidates: rows.length, stored, escalated, stoppedAtBlock, outcomes: tally } }
   } catch (e) {
     return { status: 200, headers: HEADERS, jsonBody: { ok: false, error: String(e) } }
   } finally { try { await client?.end() } catch {} }
