@@ -143,6 +143,19 @@ Key tables (PostgreSQL):
 - Open: research a real JD fetch from the per-job link (LinkedIn auth-gated) — ACT-22a.
 
 ## Process discipline
+- **GROUND-TRUTH BEFORE ANSWERING (strict, 2026-07-29):** for any "which is right/wrong / what's
+  happening / is X true" question, name the single PRIMARY source that proves it and read THAT — not
+  a proxy. Comparing two derived fields shows they differ, not which is correct; never fill that gap
+  with an assumption. Seek disconfirming evidence for your own hypothesis. Say "proven/confirmed"
+  ONLY after reading ground truth; else label "inference (confidence X) — confirmed by <source>".
+  No "Recommended" on an ungrounded fact. Separate Observation vs Interpretation. (Failure that
+  spawned this: claimed `role` correct / `jd_title` wrong from a field-diff query; the JD/email
+  subject proved the opposite — `role`/`company` are the corrupted fields.)
+- **EXTEND, DON'T DUPLICATE (strict, 2026-07-29):** before building any new table/model/endpoint/
+  classifier/subsystem, grep for an existing system serving that purpose and EXTEND it. Never build
+  a parallel system. Treat "add X" as "find what already does X and extend it." New structure needs
+  explicit sign-off (state what exists + why insufficient). (Failure: built taxonomy_title parallel
+  to the persona/folder_role_map role system.)
 - **AC TRIAGE (standing rule, 2026-07-28):** the `define-acceptance-criteria` subagent is intentionally
   exhaustive and adversarial — its raw output is a DRAFT, not the final AC set. Before presenting for
   sign-off, the main agent MUST review every suggested AC and label each: **fold** (merge duplicates /
