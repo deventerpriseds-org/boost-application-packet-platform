@@ -71,6 +71,8 @@ jobs:
               "UAT_BYPASS_TOKEN=${{ secrets.UAT_BYPASS_TOKEN }}" \
               "HEYGEN_CLONE_1_AVATAR_IDENTITY_ID=${{ secrets.HEYGEN_CLONE_1_AVATAR_IDENTITY_ID }}" \
               "HEYGEN_CLONED_VOICE_ID=${{ secrets.HEYGEN_CLONED_VOICE_ID }}" \
+              "SCRAPER_API_PROVIDER=${{ secrets.SCRAPER_API_PROVIDER }}" \
+              "SCRAPER_API_KEY=${{ secrets.SCRAPER_API_KEY }}" \
               "NODE_ENV=production"
 
       - name: Deploy to Azure Functions
