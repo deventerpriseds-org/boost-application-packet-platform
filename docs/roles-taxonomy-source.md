@@ -23,9 +23,17 @@ This file is the canonical input for the taxonomy seed + matcher. Three levels:
 
 ## Favorites — user's "ideal roles to be surfaced or promoted"
 
-All title variants listed under the user's "ideal roles" block seed as tier=`fav`. Everything
-else in the taxonomy seeds as `watch`. Favorites (abbreviated + long forms both count as
-variants):
+**The ENTIRE pasted "ideal roles" list seeds as tier=`fav`** — active from launch (gold star +
+`+15` boost capped 100 + priority sort). These are NOT dormant. `watch` (normal, no boost) is only
+for titles that get MATCHED but are not in this list (e.g. an ordinary "Director of X" that doesn't
+qualify, or a generic title outside the favorites block). `off` (exclude from ingestion) seeds for
+NOTHING at launch — reserved for titles the user later chooses to mute.
+
+**Editable, not frozen:** taxonomy is stored as per-user rows (seeded programmatically now) so the
+user can add title variants and change a title's tier (fav/watch/off) themselves — via API/coach in
+Phase 1, via the `#/roles` management screen in Phase 2.
+
+Favorites (abbreviated + long forms both count as variants):
 
 ### C Suite favorites
 CTO / Chief Technology Officer — Enterprise, Divisional, Business Unit, Product, Platform,
