@@ -1,0 +1,37 @@
+name: JD Fetch Test (spike)
+# One-off ground-truth test: can we retrieve a real LinkedIn job description from a job ID
+# via the public guest endpoint, from an open-egress runner with a browser User-Agent?
+# Not part of the app — a verification spike for ACT-22a. Safe to delete after.
+on:
+  workflow_dispatch:
+    inputs:
+      job_id:
+        description: LinkedIn job ID (from a /jobs/view/{id} link)
+        default: '4433165980'
+        required: true
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fetch JD via LinkedIn guest endpoint
+        env:
+          UA: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0 Safari/537.36'
+        run: |
+          JID='${{ github.event.inputs.job_id }}'
+          try() {
+            local url="$1"
+            echo "=================================================="
+            echo "GET $url"
+            code=$(curl -sS -o /tmp/out -w '%{http_code}' -A "$UA" \
+              -H 'Accept-Language: en-US,en;q=0.9' \
+              -H 'Accept: text/html,application/xhtml+xml' "$url" || echo "000")
+            echo "HTTP $code   bytes=$(wc -c < /tmp/out)"
+            echo "--- visible text (tags stripped, first 1600 chars) ---"
+            sed -e 's/<[^>]*>/ /g' /tmp/out | tr -s ' \t\n' ' ' | head -c 1600
+            echo; echo
+          }
+          # Primary: guest job-posting endpoint (documented to return JD HTML, no auth)
+          try "https://www.linkedin.com/jobs-guest/jobs/api/jobPosting/${JID}"
+          # Secondary: the canonical public job view page
+          try "https://www.linkedin.com/jobs/view/${JID}"
