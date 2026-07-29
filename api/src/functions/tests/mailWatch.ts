@@ -240,6 +240,26 @@ async function embed(text: string): Promise<string | null> {
   return Array.isArray(v) ? `[${v.join(',')}]` : null
 }
 
+// Embed MANY texts in ONE embeddings API call (the endpoint accepts an array input). Cuts OpenAI
+// request volume ~N× vs calling embed() per item — critical for staying under rate limits when the
+// backfill embeds every parsed role. Returns a vector-literal (or null) per input, order-aligned.
+export async function embedBatch(texts: string[]): Promise<(string | null)[]> {
+  const key = process.env.OPENAI_API_KEY
+  if (!key || !texts.length) return texts.map(() => null)
+  const res = await openaiFetch('https://api.openai.com/v1/embeddings', {
+    method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
+    body: JSON.stringify({ model: 'text-embedding-3-small', input: texts.map((t) => (t || '').slice(0, 8000)) }),
+  })
+  if (!res.ok) return texts.map(() => null)
+  const j = (await res.json()) as any
+  await logUsage('intake:embed-batch', 'text-embedding-3-small', j?.usage)
+  const data = Array.isArray(j?.data) ? j.data : []
+  return texts.map((_, i) => {
+    const v = data[i]?.embedding
+    return Array.isArray(v) ? `[${v.join(',')}]` : null
+  })
+}
+
 // Parse a (LinkedIn) job-alert email → array of opportunities. Alerts often list
 // several roles, so we extract all of them.
 export async function parseAlert(rawText: string): Promise<any[]> {

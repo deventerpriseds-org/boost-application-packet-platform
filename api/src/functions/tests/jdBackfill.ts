@@ -2,7 +2,7 @@ import { app, HttpRequest, HttpResponseInit, InvocationContext } from '@azure/fu
 import { requireWrite } from './appSession'
 import { getPgClient } from './pgClient'
 import { getMicrosoftToken } from './googleAuth'
-import { loadConfig, graphCreds, isAlert, parseAlert, embedOpp } from './mailWatch'
+import { loadConfig, graphCreds, isAlert, parseAlert, embedBatch } from './mailWatch'
 import { extractJobAnchors, canonicalJobUrl, normText, tokenSim, injectJobMarkers } from './jdLinks'
 import { scraperFetch, extractGuestJdHtml, classifyResponse } from './scraperProxy'
 import { logJdFetch } from './jdFetchLog'
@@ -60,7 +60,7 @@ export async function jdBackfillScan(req: HttpRequest, _ctx: InvocationContext):
       let url: string | null = `https://graph.microsoft.com/v1.0/users/${cfg.mailbox}/messages?$filter=${filter}&$select=subject,from,bodyPreview,body,receivedDateTime&$top=50&$orderby=receivedDateTime desc`
       let scanned = 0, alerts = 0, idsFound = 0, linked = 0, alreadyHad = 0, oldestIso: string | null = null
       const startMs = Date.now()
-      const TIME_BUDGET_MS = 180_000   // stop well under Azure's 240s gateway cap; return a cursor
+      const TIME_BUDGET_MS = 160_000   // stop well under Azure's 240s gateway cap; return a cursor
       let timedOut = false
       while (url && scanned < maxEmails && !timedOut) {
         const res: any = await fetch(url, { headers: { Authorization: `Bearer ${token}` } })
@@ -80,33 +80,37 @@ export async function jdBackfillScan(req: HttpRequest, _ctx: InvocationContext):
           const linkedIds = (await client.query(`select job_id from opportunity where owner_email=$1 and job_id = any($2::text[])`, [cfg.ownerEmail, ids])).rows.map((r: any) => String(r.job_id))
           if (linkedIds.length >= ids.length) { alreadyHad += ids.length; continue }
           alerts++
-          const opps = await parseAlert(text)          // gpt-4o-mini, serial, 429-backoff
+          const opps = (await parseAlert(text)).filter((o: any) => o.jobId)   // gpt-4o-mini, 429-backoff
+          // Pass 1 — free exact match; collect the ones that miss for a single batched embed.
+          const needEmbed: any[] = []
           for (const o of opps) {
-            if (!o.jobId) continue
             idsFound++
             const has = await client.query(`select 1 from opportunity where owner_email=$1 and job_id=$2 limit 1`, [cfg.ownerEmail, String(o.jobId)])
             if (has.rowCount) { alreadyHad++; continue }
-            // 1) Free fast-path: exact company+role match on an unlinked opp.
-            let target: string | null = (await client.query(
+            const exact = (await client.query(
               `select id from opportunity where owner_email=$1 and job_id is null
                  and lower(company)=lower($2) and lower(role)=lower($3) order by created_at desc limit 1`,
               [cfg.ownerEmail, o.company, o.role])).rows[0]?.id || null
-            // 2) Fallback: pgvector nearest-neighbour (same forgiving match insertOpp dedupes with) —
-            //    handles corrupted/varied stored role text that exact match misses.
-            if (!target) {
-              const vec = await embedOpp(`${o.company} — ${o.role}`)
-              if (vec) {
-                const nn = (await client.query(
-                  `select id, (embedding <=> $2::vector) as dist from opportunity
-                     where owner_email=$1 and job_id is null and embedding is not null
-                     order by embedding <=> $2::vector limit 1`, [cfg.ownerEmail, vec])).rows[0]
-                if (nn && Number(nn.dist) < 0.20) target = nn.id
-              }
-            }
-            if (target) {
+            if (exact) {
               await client.query(`update opportunity set job_id=$1, job_url=$2 where id=$3 and job_id is null`,
-                [String(o.jobId), canonicalJobUrl(String(o.jobId)), target])
+                [String(o.jobId), canonicalJobUrl(String(o.jobId)), exact])
               linked++
+            } else needEmbed.push(o)
+          }
+          // Pass 2 — ONE embeddings call for all exact-misses, then pgvector nearest-neighbour each.
+          if (needEmbed.length) {
+            const vecs = await embedBatch(needEmbed.map((o) => `${o.company} — ${o.role}`))
+            for (let k = 0; k < needEmbed.length; k++) {
+              const vec = vecs[k]; if (!vec) continue
+              const nn = (await client.query(
+                `select id, (embedding <=> $2::vector) as dist from opportunity
+                   where owner_email=$1 and job_id is null and embedding is not null
+                   order by embedding <=> $2::vector limit 1`, [cfg.ownerEmail, vec])).rows[0]
+              if (nn && Number(nn.dist) < 0.20) {
+                await client.query(`update opportunity set job_id=$1, job_url=$2 where id=$3 and job_id is null`,
+                  [String(needEmbed[k].jobId), canonicalJobUrl(String(needEmbed[k].jobId)), nn.id])
+                linked++
+              }
             }
           }
         }
