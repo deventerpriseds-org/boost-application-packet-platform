@@ -1,9 +1,12 @@
 // Provider-agnostic managed-scraping-API layer (ACT-22a). Routes an outbound fetch through a
 // residential/anti-bot scraping API so LinkedIn never sees our Azure datacenter IP (which its WAF
 // flags within tens of requests). Config via env (synced from GitHub secrets by api-deploy.yml):
-//   SCRAPER_API_PROVIDER = 'scraperapi' | 'scrapingbee' | '' (empty/none = direct fetch)
+//   SCRAPER_API_PROVIDER = 'scrapfly' | 'scraperapi' | 'scrapingbee' | '' (empty/none = direct fetch)
 //   SCRAPER_API_KEY      = the provider key
-// Not locked to one vendor: add a case to buildProxyUrl to support another.
+// Default recommendation: scrapfly — PERMANENT free tier (recurring monthly, no card) + ASP anti-bot
+// for LinkedIn. Not locked in: add a case to buildProxyUrl (+ envelope handling in scraperFetch).
+// Response differs by vendor: scrapfly returns a JSON envelope {result:{content,status_code}};
+// scraperapi/scrapingbee return raw target HTML. scraperFetch normalizes both to raw HTML.
 
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0 Safari/537.36'
 
@@ -19,6 +22,11 @@ export function buildProxyUrl(targetUrl: string): string | null {
   if (!key || !provider) return null
   const enc = encodeURIComponent(targetUrl)
   switch (provider) {
+    case 'scrapfly':
+      // https://scrapfly.io/docs — PERMANENT free tier. asp=true → anti-scraping-protection
+      // (residential + fingerprint bypass) for hard targets like LinkedIn. Returns a JSON
+      // envelope {result:{content,status_code}} — scraperFetch unwraps it to raw HTML.
+      return `https://api.scrapfly.io/scrape?key=${key}&url=${enc}&asp=true&country=us&render_js=false`
     case 'scraperapi':
       // https://docs.scraperapi.com — premium=true → residential pool for hard sites
       return `https://api.scraperapi.com/?api_key=${key}&url=${enc}&premium=true&country_code=us`
@@ -45,8 +53,21 @@ export async function scraperFetch(targetUrl: string, opts: { force?: 'proxy' | 
       ? { 'User-Agent': UA, 'Accept-Language': 'en-US,en;q=0.9', Accept: 'text/html' }
       : {}
     const res = await fetch(url, { headers })
-    const body = await res.text()
-    return { ok: res.ok, status: res.status, body, via, provider: via === 'proxy' ? provider : undefined }
+    let body = await res.text()
+    let status = res.status
+    let ok = res.ok
+    // Scrapfly wraps the target page in a JSON envelope {result:{content,status_code}}; unwrap to
+    // the raw target HTML + the target's own HTTP status (not Scrapfly's 200 for a delivered scrape).
+    if (via === 'proxy' && provider === 'scrapfly') {
+      try {
+        const j = JSON.parse(body)
+        if (j && j.result && typeof j.result.content === 'string') {
+          body = j.result.content
+          if (typeof j.result.status_code === 'number') { status = j.result.status_code; ok = status >= 200 && status < 300 }
+        }
+      } catch { /* not JSON — leave body as-is so the caller sees the raw error */ }
+    }
+    return { ok, status, body, via, provider: via === 'proxy' ? provider : undefined }
   } catch (err) {
     return { ok: false, status: 0, body: '', via, provider: via === 'proxy' ? provider : undefined, error: String(err) }
   }
