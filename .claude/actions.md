@@ -470,3 +470,18 @@ JD-based match scoring).
 Candidates to evaluate: LinkedIn jobs-guest endpoint, Playwright headless, ATS/company-site
 resolution, scraping API. See research below.
 **Status:** `open` — logged; researching fetch options next; NO fix until direction agreed.
+
+### ACT-22a — JD guest-fetch feasibility: PROVEN (2026-07-29)
+- Email DOES carry the per-job link + job ID (user screenshot: linkedin.com/comm/jobs/view/4433165980/).
+  Our DB lost it: raw_jd is HTML-STRIPPED text → 0/723 opps have any http link. Root = ingest strips <a href>.
+- Guest endpoint PROVEN to return the real JD, no auth: from a GH runner w/ browser UA,
+  GET linkedin.com/jobs-guest/jobs/api/jobPosting/4433165980 → HTTP 200, 63KB, correct GCA
+  "Deputy Program Manager (DPM)" posting. jobs/view/{id} also 200 (295KB). (spike: .github/workflows/jd-fetch-test.yml)
+- Playwright/HuggingFace NOT needed. Caveats: rate-limit ~10/IP (delays/UA/proxy at scale);
+  confirm from Azure Function IP (datacenter IPs sometimes blocked) before mass backfill.
+- Fix path (for sign-off): (1) ingest — extract per-job <a href jobs/view/{id}> from email HTML
+  BEFORE stripping; store per-opp job URL + jobId. (2) jd-parse — GET guest endpoint → real JD text
+  → structure with existing LLM (over REAL content). (3) backfill existing 722 — recover links by
+  re-reading original alert emails via Graph (or search-resolve title+company). (4) STOP fabricating:
+  if no real JD, label "not retrieved", don't invent. (5) classification/display use role/company
+  (per-opp authoritative), not headline jd_title.
