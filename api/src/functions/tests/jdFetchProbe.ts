@@ -24,10 +24,11 @@ export async function jdProbe(req: HttpRequest, context: InvocationContext): Pro
   const via = req.query.get('via') === 'direct' ? 'direct' : req.query.get('via') === 'proxy' ? 'proxy' : undefined
   const provider = (req.query.get('provider') || '').trim().toLowerCase() || undefined
   const saTier = (req.query.get('saTier') || '').trim().toLowerCase() || undefined  // ultra|premium|plain (scraperapi)
+  const sdSuper = req.query.get('sdSuper') === '0' || req.query.get('sdSuper') === 'false' ? false : undefined  // scrape.do cheap mode
   const runTag = req.query.get('runTag') || 'probe'
   const url = `https://www.linkedin.com/jobs-guest/jobs/api/jobPosting/${jobId}`
 
-  const r = await scraperFetch(url, { ...(via ? { force: via } : {}), ...(provider ? { provider } : {}), ...(saTier ? { saTier } : {}) })
+  const r = await scraperFetch(url, { ...(via ? { force: via } : {}), ...(provider ? { provider } : {}), ...(saTier ? { saTier } : {}), ...(sdSuper === false ? { sdSuper: false } : {}) })
   const jd = extractGuestJdHtml(r.body)
   const outcome = classifyResponse(r.status, r.body, jd.descriptionHtml != null)
 

@@ -37,7 +37,7 @@ export function scraperConfigured(provider?: string): boolean {
 
 // Wrap a target URL into the given (or configured) provider's request URL. Anti-bot/residential is
 // on for hard targets (LinkedIn). Returns null when no provider/key resolves (caller does direct).
-export function buildProxyUrl(targetUrl: string, providerOverride?: string, saTier?: string): string | null {
+export function buildProxyUrl(targetUrl: string, providerOverride?: string, saTier?: string, opts: { sdSuper?: boolean } = {}): string | null {
   const provider = (providerOverride || activeProvider()).trim().toLowerCase()
   const key = providerKey(provider)
   if (!key || !provider) return null
@@ -52,10 +52,13 @@ export function buildProxyUrl(targetUrl: string, providerOverride?: string, saTi
       const flag = tier === 'plain' ? '' : tier === 'premium' ? '&premium=true' : '&ultra_premium=true'
       return `https://api.scraperapi.com/?api_key=${key}&url=${enc}${flag}&country_code=us`
     }
-    case 'scrapedo':
-      // https://scrape.do/documentation — super=true → residential/mobile "super proxy" for hard
-      // targets; geoCode=us. Returns raw target HTML. Daily-grab provider (permanent-usable tier).
-      return `https://api.scrape.do/?token=${key}&url=${enc}&super=true&geoCode=us`
+    case 'scrapedo': {
+      // https://scrape.do/documentation — super=true → residential/mobile "super proxy" (many credits)
+      // for hard targets; the public guest JD endpoint may work on a cheap datacenter proxy (~1 credit),
+      // so sdSuper is toggleable to find the cheapest mode that still returns the JD. geoCode=us.
+      const superFlag = opts.sdSuper === false ? '' : '&super=true'
+      return `https://api.scrape.do/?token=${key}&url=${enc}${superFlag}&geoCode=us`
+    }
     case 'scrapfly':
       // https://scrapfly.io/docs — asp=true → anti-scraping-protection (residential + fingerprint).
       // Returns a JSON envelope {result:{content,status_code}} — scraperFetch unwraps it.
@@ -127,14 +130,14 @@ async function firecrawlFetch(targetUrl: string): Promise<FetchResult> {
 // else directly with a browser UA. Never throws — returns a structured result with latency + usage.
 export async function scraperFetch(
   targetUrl: string,
-  opts: { force?: 'proxy' | 'direct'; provider?: string; saTier?: string } = {},
+  opts: { force?: 'proxy' | 'direct'; provider?: string; saTier?: string; sdSuper?: boolean } = {},
 ): Promise<FetchResult> {
   const provider = (opts.provider || activeProvider()).trim().toLowerCase()
   // Firecrawl is a POST + JSON-body API (unlike the GET-URL providers) — handle it separately.
   if (opts.force !== 'direct' && provider === 'firecrawl' && providerKey('firecrawl')) {
     return firecrawlFetch(targetUrl)
   }
-  const proxyUrl = opts.force === 'direct' ? null : buildProxyUrl(targetUrl, provider, opts.saTier)
+  const proxyUrl = opts.force === 'direct' ? null : buildProxyUrl(targetUrl, provider, opts.saTier, { sdSuper: opts.sdSuper })
   const url = proxyUrl || targetUrl
   const via: 'proxy' | 'direct' = proxyUrl ? 'proxy' : 'direct'
   const started = Date.now()
