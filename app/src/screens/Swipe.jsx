@@ -6,6 +6,13 @@ import { Loading, ErrorBox } from './Today.jsx'
 
 const QUEUE_STAGES = ['discovered', 'saved', 'enriched']
 
+// Short date for the swipe card (posting / extraction). Real value only — '—' when absent.
+const fmtDate = (d) => {
+  if (!d) return '—'
+  const dt = new Date(d)
+  return isNaN(dt) ? '—' : dt.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })
+}
+
 // Tinder-style triage: keep (→saved), maybe (→enriched), pass (dismiss).
 export default function Swipe({ opps }) {
   const { toast } = useApp()
@@ -289,6 +296,11 @@ function SwipeCard({ o, decision, cardRef, style, ...handlers }) {
         style={{ flex: 1, minHeight: 0, overflowY: 'auto', paddingRight: 2 }}>
         {activeTab === 'overview' && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            {/* Posting date (when the job was listed) + extraction date (when we ingested it) */}
+            <div className="px-small" style={{ display: 'flex', gap: 14, flexWrap: 'wrap' }}>
+              <span>📅 Posted: <b>{fmtDate(o.sourceDate)}</b></span>
+              <span>⬇ Found: <b>{fmtDate(o.createdAt)}</b></span>
+            </div>
             {o.why && (
               <div>
                 <div className="px-small" style={{ textTransform: 'uppercase', letterSpacing: 1 }}>Why surfaced</div>
