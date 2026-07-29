@@ -439,3 +439,34 @@ Packets list table+filter + builder template-pickers/version-history/Send→Appl
 
 **ACs:** TBD (independent AC subagent) before implementation.
 **Status:** `in-progress` — investigation done + proven; plan + AC sign-off next.
+
+---
+
+## ACT-22 — CRITICAL: JD content is fabricated, not extracted (digest snippet only)
+
+**Found:** 2026-07-29 (tracing "where did the Lunds & Byerlys JD come from?")
+**Severity:** high — violates "no fake data" at the core data layer.
+
+**PROVEN (live DB + code + raw email):**
+- LinkedIn job-alert emails are DIGESTS: subject = headline job; body = ~6 jobs as one-line
+  snippets (company · location · comp · link). NO job description text.
+- `insertOpp` stores the WHOLE digest email as each opp's `raw_jd`. `runJdParse`
+  (appJdParse.ts) only fetches the real posting URL when `raw_jd` is empty (line 109) — never
+  true for digests — so it runs the LLM on the one-line snippet and FABRICATES jd_summary
+  (150-200 words), jd_requirements (bullets), jd_table (ATS keywords).
+- Scale (von.ellis, 738 active opps): 738 have a jd_summary; 525 raw_jds ARE the digest email;
+  **max raw_jd anywhere = 3,825 chars** (real exec JD is 5k-15k+) → NO opp has a real JD.
+  191 opps have no raw_jd → jdParse fabricates from just role/company string (line 121).
+- Also proven: `jd_title`/`jd_company` headline-collapse (all digest siblings get the subject
+  job's title/company); `role`/`company` are the correct per-job values from parseAlert.
+  (FALCON row: role="CTO…"/company="FALCON" = real job #2 in the digest; jd_title="VP IT"/
+  jd_company="Lunds & Byerlys" = the digest headline #1.)
+
+**Real data we actually have per opp:** company, per-job title, location, comp, job URL.
+**Fabricated:** jd_summary, jd_requirements, jd_table (and thus packet ATS keywords + any
+JD-based match scoring).
+
+**Open research (ACT-22a):** how to fetch the REAL JD from the per-job link (LinkedIn auth-gated).
+Candidates to evaluate: LinkedIn jobs-guest endpoint, Playwright headless, ATS/company-site
+resolution, scraping API. See research below.
+**Status:** `open` — logged; researching fetch options next; NO fix until direction agreed.
