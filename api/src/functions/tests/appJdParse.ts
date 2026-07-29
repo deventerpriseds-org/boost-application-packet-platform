@@ -19,7 +19,9 @@ async function ensureJdColumns(client: any) {
       add column if not exists jd_company     text,
       add column if not exists jd_summary     text,
       add column if not exists jd_requirements text,
-      add column if not exists jd_table       text
+      add column if not exists jd_table       text,
+      add column if not exists jd_real         text,
+      add column if not exists jd_fetched_at   timestamptz
   `)
 }
 
@@ -152,7 +154,7 @@ export async function jdBackfill(req: HttpRequest, context: InvocationContext): 
     await ensureJdColumns(client)
 
     const { rows } = await client.query(
-      `select id, company, role, raw_jd, why_surfaced from opportunity
+      `select id, company, role, jd_real, raw_jd, why_surfaced from opportunity
        where owner_email = $1
          and not dismissed
          and jd_summary is null
@@ -165,7 +167,9 @@ export async function jdBackfill(req: HttpRequest, context: InvocationContext): 
     const results: any[] = []
     for (const opp of rows) {
       try {
-        let rawJd: string = opp.raw_jd || ''
+        // Prefer the REAL JD fetched from LinkedIn (jd-backfill/fetch) over the email digest text —
+        // this is the anti-fabrication path: a real JD grounds the parse instead of hallucinating.
+        let rawJd: string = opp.jd_real || opp.raw_jd || ''
 
         if (!rawJd) {
           const url = extractUrl(opp.why_surfaced || '')

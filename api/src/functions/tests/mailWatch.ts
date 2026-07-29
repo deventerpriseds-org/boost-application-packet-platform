@@ -33,14 +33,14 @@ const DEFAULT_SUBJECTS = [
   'jobs matching', 'job match', 'executive role',
 ]
 
-function graphCreds() {
+export function graphCreds() {
   const tenantId = process.env.MICROSOFT_TENANT_ID || 'ee633423-c321-413c-a191-ace8b07e4196'
   const clientId = process.env.MICROSOFT_CLIENT_ID, clientSecret = process.env.MICROSOFT_CLIENT_SECRET
   return { tenantId, clientId, clientSecret }
 }
 
 // --- Watch config (Postgres-backed, singleton keyed by owner_email) ---------
-type WatchConfig = {
+export type WatchConfig = {
   ownerEmail: string
   mailbox: string
   folder: string        // well-known name ('inbox') or a Graph mailFolder id
@@ -72,7 +72,7 @@ function rowToConfig(r: any): WatchConfig {
 
 // Load the live config for a given owner, creating a default row on first use.
 // If no owner is provided (webhook path), loads the first enabled row in the table.
-async function loadConfig(owner?: string): Promise<WatchConfig> {
+export async function loadConfig(owner?: string): Promise<WatchConfig> {
   let client
   try {
     client = await getPgClient()
@@ -194,7 +194,7 @@ async function tagOppRoles(oppId: string, opp: any, owner: string): Promise<void
 // Does a message look like a job alert? Always requires job-related keywords in
 // subject/preview — sender alone is never sufficient, because LinkedIn and other
 // boards also send connection updates, post notifications, etc. that are noise.
-function isAlert(cfg: WatchConfig, from: string, subject: string, preview: string): boolean {
+export function isAlert(cfg: WatchConfig, from: string, subject: string, preview: string): boolean {
   // 1. Configured subject/preview phrases ("is hiring", "new jobs", "recommended job"…).
   const pats = (cfg.subjectPatterns || []).filter(Boolean)
   if (pats.length) {
@@ -227,7 +227,7 @@ async function embed(text: string): Promise<string | null> {
 
 // Parse a (LinkedIn) job-alert email → array of opportunities. Alerts often list
 // several roles, so we extract all of them.
-async function parseAlert(rawText: string): Promise<any[]> {
+export async function parseAlert(rawText: string): Promise<any[]> {
   const key = process.env.OPENAI_API_KEY
   if (!key) return []
   // Ground-truth jobId set for validation — the markers injected by injectJobMarkers at ingest.
