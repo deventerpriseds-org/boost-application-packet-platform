@@ -1,0 +1,133 @@
+import { app, HttpRequest, HttpResponseInit, InvocationContext, Timer } from '@azure/functions'
+import { requireWrite } from './appSession'
+import { getPgClient } from './pgClient'
+import { routeOpportunity, loadConfig } from './mailWatch'
+import { scraperFetch, classifyResponse, sleepJitter } from './scraperProxy'
+import { canonicalJobUrl } from './jdLinks'
+import { SEED } from './roleTaxonomy'
+
+const HEADERS = {
+  'Content-Type': 'application/json',
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Methods': 'POST, OPTIONS',
+  'Access-Control-Allow-Headers': 'Content-Type, X-UAT-Token, Authorization',
+}
+
+const strip = (s: string) =>
+  (s || '').replace(/<[^>]+>/g, ' ').replace(/&amp;/g, '&').replace(/&#39;|&rsquo;/g, "'")
+    .replace(/&quot;/g, '"').replace(/&nbsp;/gi, ' ').replace(/&[a-z]+;/gi, ' ').replace(/\s+/g, ' ').trim()
+
+// LinkedIn public guest job-SEARCH endpoint. f_E=5,6 = Director + Executive experience levels;
+// f_TPR=r{sec} = posted within N seconds (r86400 = 24h). Paginates by start (increments of 25).
+export function buildSearchUrl(keywords: string, opts: { location?: string; tpr?: string; start?: number } = {}): string {
+  const p = new URLSearchParams({
+    keywords, location: opts.location || 'United States',
+    f_E: '5,6', f_TPR: opts.tpr || 'r86400', start: String(opts.start || 0),
+  })
+  return `https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/search?${p.toString()}`
+}
+
+export interface SearchCard { jobId: string; title: string; company: string; location: string; postedDate: string | null }
+
+// Parse the search HTML (a list of job cards) → structured cards. jobId comes from the
+// urn:li:jobPosting:{id} entity-urn (or the /jobs/view/…-{id} link). Dedup by jobId.
+export function parseSearchCards(html: string): SearchCard[] {
+  const out: SearchCard[] = []
+  const seen = new Set<string>()
+  for (const chunk of html.split(/<li[\s>]/i).slice(1)) {
+    const idM = chunk.match(/urn:li:jobPosting:(\d{6,})/) || chunk.match(/jobs\/view\/[^"?]*?-(\d{6,})/)
+    if (!idM) continue
+    const jobId = idM[1]
+    if (seen.has(jobId)) continue
+    seen.add(jobId)
+    const title = strip((chunk.match(/base-search-card__title[^>]*>([\s\S]*?)<\//i) || [])[1] || '')
+    const company = strip((chunk.match(/base-search-card__subtitle[^>]*>([\s\S]*?)<\/h4>/i) || [])[1] || '')
+    const location = strip((chunk.match(/job-search-card__location[^>]*>([\s\S]*?)<\//i) || [])[1] || '')
+    const postedDate = (chunk.match(/datetime="([\d-]+)"/) || [])[1] || null
+    if (title && company) out.push({ jobId, title, company, location, postedDate })
+  }
+  return out
+}
+
+// The user's roles to search for: their favourite role names (taxonomy_title tier=fav) → persona
+// master_role → the seeded taxonomy roles. Deduped, capped. Extends the existing role systems.
+async function loadRoleKeywords(client: any, owner: string, max = 40): Promise<string[]> {
+  const norm = (arr: string[]) => Array.from(new Set(arr.map((s) => (s || '').trim()).filter(Boolean))).slice(0, max)
+  try {
+    const r = await client.query(`select distinct role from taxonomy_title where owner_email=$1 and tier='fav'`, [owner])
+    if (r.rows.length) return norm(r.rows.map((x: any) => x.role))
+  } catch { /* table may not exist */ }
+  try {
+    const r = await client.query(`select distinct master_role from persona where owner_email=$1 and master_role is not null`, [owner])
+    if (r.rows.length) return norm(r.rows.map((x: any) => x.master_role))
+  } catch { /* */ }
+  return norm(SEED.roles.map((r) => r.role))
+}
+
+// Core: search each role on the guest endpoint (direct, hardened, jittered), parse cards, and route
+// each through the SAME opportunity pipeline (dedup + role-tag + jobId/url capture). It only
+// DISCOVERS + inserts — the real JD is filled by the paced direct fetch (jd-backfill/fetch), so this
+// stays fast and bounded. Stops a role's paging on a block; whole run halts on repeated blocks.
+export async function runRoleSearch(owner: string, opts: { tpr?: string; location?: string; pages?: number; roleLimit?: number } = {}) {
+  const pages = Math.max(1, Math.min(3, opts.pages || 1))
+  let client: any
+  const summary = { roles: 0, searched: 0, cardsFound: 0, inserted: 0, duplicate: 0, blocked: 0, byRole: [] as any[] }
+  try {
+    client = await getPgClient()
+    const roles = await loadRoleKeywords(client, owner, opts.roleLimit || 40)
+    summary.roles = roles.length
+    let consecBlocked = 0
+    for (const role of roles) {
+      let roleInserted = 0, roleCards = 0
+      for (let pg = 0; pg < pages; pg++) {
+        const url = buildSearchUrl(role, { tpr: opts.tpr, location: opts.location, start: pg * 25 })
+        const r = await scraperFetch(url, { force: 'direct' })
+        summary.searched++
+        const outcome = classifyResponse(r.status, r.body, false)
+        if (outcome === 'blocked' || outcome === 'quota_exceeded') { summary.blocked++; consecBlocked++; break }
+        consecBlocked = 0
+        const cards = parseSearchCards(r.body)
+        roleCards += cards.length; summary.cardsFound += cards.length
+        for (const c of cards) {
+          const res = await routeOpportunity(client, owner,
+            { company: c.company, role: c.title, location: c.location, url: canonicalJobUrl(c.jobId), postedDate: c.postedDate, jobId: c.jobId },
+            { source: 'LinkedIn Search' })
+          if (res.inserted) { summary.inserted++; roleInserted++ } else summary.duplicate++
+        }
+        if (cards.length < 25) break            // last page for this role
+        await sleepJitter(2500)                 // human pacing between pages
+      }
+      summary.byRole.push({ role, cards: roleCards, inserted: roleInserted })
+      if (consecBlocked >= 3) break             // real wall — stop the run
+      await sleepJitter(3000)                   // human pacing between roles
+    }
+    return summary
+  } finally { try { await client?.end() } catch {} }
+}
+
+// POST /api/mail/jd-search — manual trigger. body: { tpr?, location?, pages?, roleLimit? }
+export async function jdSearch(req: HttpRequest, _ctx: InvocationContext): Promise<HttpResponseInit> {
+  if (req.method === 'OPTIONS') return { status: 204, headers: HEADERS }
+  const guard = requireWrite(req); if (guard) return guard
+  const body = (await req.json().catch(() => ({}))) as any
+  const cfg = await loadConfig()
+  try {
+    const summary = await runRoleSearch(cfg.ownerEmail, body)
+    return { status: 200, headers: HEADERS, jsonBody: { ok: true, ...summary } }
+  } catch (e) {
+    return { status: 200, headers: HEADERS, jsonBody: { ok: false, error: String(e) } }
+  }
+}
+
+// Timer: exec-role search 3×/day. Schedule interpreted in WEBSITE_TIME_ZONE (set it to the owner's
+// zone; without it NCRONTAB is UTC). '0 0 5,13,18 * * *' = 5am, 1pm, 6pm local.
+export async function jdSearchTimer(_t: Timer, context: InvocationContext): Promise<void> {
+  try {
+    const cfg = await loadConfig()
+    const s = await runRoleSearch(cfg.ownerEmail, { tpr: 'r86400', pages: 1 })
+    context.log(`jd-search timer: roles=${s.roles} cards=${s.cardsFound} inserted=${s.inserted} dup=${s.duplicate} blocked=${s.blocked}`)
+  } catch (e) { context.log(`jd-search timer error: ${e}`) }
+}
+
+app.http('jdSearch', { methods: ['POST', 'OPTIONS'], authLevel: 'anonymous', route: 'mail/jd-search', handler: jdSearch })
+app.timer('jdSearchTimer', { schedule: '0 0 5,13,18 * * *', handler: jdSearchTimer })

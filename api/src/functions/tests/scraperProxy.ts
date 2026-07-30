@@ -13,7 +13,42 @@
 // and returns {data:{html,metadata:{statusCode}}}; scraperapi/scrapedo/scrapingbee return raw HTML.
 // scraperFetch normalizes all of them to raw target HTML + the target's own status code.
 
-const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0 Safari/537.36'
+// Realistic UA pool — rotate per request so we don't present one fixed fingerprint (recommended by
+// every LinkedIn-scraping guide to lower the bot fraud-score). Kept current-ish Chrome/Firefox.
+const UA_POOL = [
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+  'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:132.0) Gecko/20100101 Firefox/132.0',
+  'Mozilla/5.0 (Macintosh; Intel Mac OS X 14_1) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.1 Safari/605.1.15',
+]
+function pickUA(): string { return UA_POOL[Math.floor(Math.random() * UA_POOL.length)] }
+
+// Browser-like header set for a DIRECT fetch — Referer (real users navigate from the jobs surface,
+// bots hit URLs cold), Accept-Language, Sec-Fetch-* and Upgrade-Insecure-Requests all lower the
+// fraud score. Rotated UA per call.
+function directHeaders(): Record<string, string> {
+  return {
+    'User-Agent': pickUA(),
+    Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+    'Accept-Language': 'en-US,en;q=0.9',
+    Referer: 'https://www.linkedin.com/jobs/',
+    'Upgrade-Insecure-Requests': '1',
+    'Sec-Fetch-Dest': 'document',
+    'Sec-Fetch-Mode': 'navigate',
+    'Sec-Fetch-Site': 'same-origin',
+  }
+}
+
+// Sleep with jitter — a randomized delay around baseMs (±jitterPct) so request cadence looks human
+// rather than a fixed metronome. Use between search/detail fetches.
+export function jitterMs(baseMs: number, jitterPct = 0.4): number {
+  const delta = baseMs * jitterPct
+  return Math.max(0, Math.round(baseMs - delta + Math.random() * 2 * delta))
+}
+export function sleepJitter(baseMs: number, jitterPct = 0.4): Promise<void> {
+  return new Promise((r) => setTimeout(r, jitterMs(baseMs, jitterPct)))
+}
 
 export type Provider = 'scraperapi' | 'scrapedo' | 'firecrawl' | 'scrapfly' | 'scrapingbee'
 
@@ -152,9 +187,7 @@ export async function scraperFetch(
   const started = Date.now()
   try {
     // The scraping API injects its own residential UA/headers; for a direct call we send a browser UA.
-    const headers: Record<string, string> = via === 'direct'
-      ? { 'User-Agent': UA, 'Accept-Language': 'en-US,en;q=0.9', Accept: 'text/html' }
-      : {}
+    const headers: Record<string, string> = via === 'direct' ? directHeaders() : {}
     const res = await fetch(url, { headers })
     let body = await res.text()
     let status = res.status
