@@ -1,0 +1,64 @@
+name: UI Verify (Playwright)
+
+# Headless-browser verification of the LIVE Executive Engine SPA. Runs on a GitHub runner (open
+# internet + can execute the React bundle), impersonates a real owner via localStorage, opens a hash
+# route, asserts required text is rendered, and uploads a full-page screenshot. This is how the agent
+# confirms UI changes it cannot see from the sandbox (which is blocked from *.azurestaticapps.net).
+on:
+  workflow_dispatch:
+    inputs:
+      route:
+        description: 'Hash route to open (e.g. #/settings/roles)'
+        required: false
+        default: '#/settings/roles'
+      owner:
+        description: 'Owner email to impersonate'
+        required: false
+        default: 'von.ellis@enterpriseds.io'
+      expect:
+        description: "';'-separated substrings that must ALL appear"
+        required: false
+        default: 'Target roles;VP, Product;Dir, Product;Chief AI Officer'
+      count_sel:
+        description: 'Optional CSS selector to count'
+        required: false
+        default: ''
+      count_min:
+        description: 'Optional minimum count for count_sel'
+        required: false
+        default: '0'
+      app_url:
+        description: 'SPA base URL'
+        required: false
+        default: 'https://purple-ground-0f377120f.7.azurestaticapps.net'
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install Playwright + Chromium
+        run: |
+          npm init -y >/dev/null 2>&1 || true
+          npm i -D playwright@latest
+          npx playwright install --with-deps chromium
+      - name: Run UI verification
+        env:
+          APP_URL: ${{ inputs.app_url }}
+          ROUTE: ${{ inputs.route }}
+          OWNER: ${{ inputs.owner }}
+          EXPECT: ${{ inputs.expect }}
+          COUNT_SEL: ${{ inputs.count_sel }}
+          COUNT_MIN: ${{ inputs.count_min }}
+          OUT: ui-verify.png
+        run: node scripts/ui-verify.mjs
+      - name: Upload screenshot
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ui-verify-screenshot
+          path: ui-verify.png
+          if-no-files-found: warn
