@@ -275,3 +275,20 @@ The undocumented limit, ground-truthed via burst test (jd_fetch_log run_tag=burs
    (N regions ≈ N×30 rapid), i.e. buys SPEED for bulk blasts, not sustainability. Not needed for daily.
 Recommendation: build a paced daily fetch timer + retry-on-429-backoff (direct). Hold multi-region
 rotation as a ready-to-flip contingency behind scraperProxy (add only if a fast bulk run is ever wanted).
+
+## LinkedIn exec-role SEARCH ingestion (scheduled 3x/day) — DONE (2026-07-30)
+New discovery source beyond email (jdSearch.ts): LinkedIn public guest SEARCH endpoint
+seeMoreJobPostings/search with f_E=5,6 (Director+Executive) + f_TPR recency, per the user's roles.
+- Role keywords: taxonomy_title tier='fav' distinct role -> persona master_role -> SEED.roles.
+- parseSearchCards() extracts {jobId(urn:li:jobPosting), title, company, location, postedDate} per card.
+- Routes each via the SAME routeOpportunity pipeline (dedup + role-tag + jobId/url capture), source
+  'LinkedIn Search'. Only DISCOVERS+inserts; real JD filled by the paced direct jd-backfill/fetch.
+- Direct-from-Azure, hardened (scraperProxy now rotates a UA pool + sends Referer/Sec-Fetch/
+  Upgrade-Insecure-Requests) + jittered (sleepJitter). Stops a role on block; halts run after 3
+  consecutive blocks. VERIFIED live: 3 roles -> 30 cards -> 22 inserted (all with job_id), 8 dedup, 0 blocked.
+- POST /api/mail/jd-search manual trigger {tpr,location,pages,roleLimit}.
+- TIMER jdSearchTimer: cron '0 0 9,10,17,18,22,23 * * *' (UTC hours bracketing ET), handler gates to
+  ET hour in {5,13,18} via Intl America/New_York → DST-safe, 5am/1pm/6pm ET, NO WEBSITE_TIME_ZONE needed.
+- NOTE: role keywords are taxonomy GROUP/role names ("Data, Analytics & AI") — generic but returned
+  ~10 cards/role. Future refinement: search specific favorite TITLES for tighter targeting.
+- Diag: POST /api/diag/tavily (Tavily extract/search) added to beat bot-403s during research.

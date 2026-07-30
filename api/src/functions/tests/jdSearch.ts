@@ -119,15 +119,26 @@ export async function jdSearch(req: HttpRequest, _ctx: InvocationContext): Promi
   }
 }
 
-// Timer: exec-role search 3×/day. Schedule interpreted in WEBSITE_TIME_ZONE (set it to the owner's
-// zone; without it NCRONTAB is UTC). '0 0 5,13,18 * * *' = 5am, 1pm, 6pm local.
+// The owner's local run-hours (Eastern) — the search fires at these hours ET.
+const SEARCH_HOURS_ET = [5, 13, 18]     // 5am, 1pm, 6pm
+const SEARCH_TZ = 'America/New_York'
+function hourInTz(tz: string): number {
+  return Number(new Intl.DateTimeFormat('en-US', { timeZone: tz, hour: '2-digit', hour12: false }).format(new Date()))
+}
+
+// Timer: exec-role search 3×/day at 5am/1pm/6pm ET. Because NCRONTAB fires in UTC and ET shifts with
+// DST, we fire at the UTC hours that bracket those ET times (09/10, 17/18, 22/23) and then run ONLY
+// when it's actually 5/13/18 in New York — DST-safe and independent of any WEBSITE_TIME_ZONE setting.
 export async function jdSearchTimer(_t: Timer, context: InvocationContext): Promise<void> {
+  const etHour = hourInTz(SEARCH_TZ)
+  if (!SEARCH_HOURS_ET.includes(etHour)) { context.log(`jd-search timer: skip (ET hour ${etHour} not in ${SEARCH_HOURS_ET})`); return }
   try {
     const cfg = await loadConfig()
     const s = await runRoleSearch(cfg.ownerEmail, { tpr: 'r86400', pages: 1 })
-    context.log(`jd-search timer: roles=${s.roles} cards=${s.cardsFound} inserted=${s.inserted} dup=${s.duplicate} blocked=${s.blocked}`)
+    context.log(`jd-search timer @${etHour}:00 ET: roles=${s.roles} cards=${s.cardsFound} inserted=${s.inserted} dup=${s.duplicate} blocked=${s.blocked}`)
   } catch (e) { context.log(`jd-search timer error: ${e}`) }
 }
 
 app.http('jdSearch', { methods: ['POST', 'OPTIONS'], authLevel: 'anonymous', route: 'mail/jd-search', handler: jdSearch })
-app.timer('jdSearchTimer', { schedule: '0 0 5,13,18 * * *', handler: jdSearchTimer })
+// Fire at the UTC hours covering 5am/1pm/6pm ET across DST; the handler gates to the exact ET hour.
+app.timer('jdSearchTimer', { schedule: '0 0 9,10,17,18,22,23 * * *', handler: jdSearchTimer })
