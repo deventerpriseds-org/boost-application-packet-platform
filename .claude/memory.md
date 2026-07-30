@@ -238,3 +238,29 @@ writing code. "Ground-truth before answering" applies to debugging too.
 - Build the Chrome extension + the two appCapture tweaks (jobId from URL, store as jd_real).
 - Optional: paced scrape.do sweep of the 118 pending favorites to (a) fill real JDs now, (b) empirically
   find LinkedIn's block threshold from jd_fetch_log. Not yet run at volume.
+
+## DECISIVE: direct-from-Azure fetch WORKS — no proxy/credits needed (2026-07-30)
+Forced `via=direct` probe + volume test: LinkedIn's guest endpoint (jobs-guest/.../jobPosting/{id})
+serves Azure's datacenter IP CLEAN. 108 direct requests (concurrency 1, ~2s apart), ALL ok_jd, ZERO
+blocks/429/999. So the "LinkedIn blacklists datacenter IPs" premise is FALSE for THIS endpoint at this
+volume. The whole scrape.do/credit saga was unnecessary.
+- scrape.do free tier is TINY: ~33 requests exhausted it (401 "Monthly request limit exceeded" — an
+  ACCOUNT error, not per-job login, not rate limit). Verified I did NOT overuse super (75 reqs, only 1
+  super). A general scraping-API's free tier won't sustain our volume regardless.
+- jd-backfill/fetch now supports: `direct:true` (Azure egress, no proxy/credits, default going forward),
+  retry-through-fresh-IP on genuine blocks (scrape.do auto-rotates exit IP per request), and
+  quota_exceeded detection (halts, never marks jobs). classifyResponse: 401/403 target=auth_required
+  (per-job skip), scrape.do account 401=quota_exceeded, 429/999=blocked.
+- RESULT: 130/164 favorites now have REAL JDs (jd_real), 0 pending. Remaining 34 = no LinkedIn jobId
+  (non-LinkedIn source or genuine login-only) → Chrome-extension territory.
+
+**Egress/IP contingency (NOT needed now, held in reserve):** if direct ever gets blocked at volume,
+the fix is Azure-native + ISOLATED so it never touches the shared Function IP that Graph/OpenAI/PG use:
+a dedicated egress just for LinkedIn — NAT Gateway + swappable Public IP (or Public IP Prefix to
+rotate) on a segregated subnet, OR a tiny ACI/VM fetcher with its own disposable public IP (redeploy =
+new IP). The scraperProxy module already abstracts transport (direct|scrapedo|byoproxy|dedicated-egress),
+so switching is a one-line change with zero impact on other dependencies. BYO residential proxy
+(Webshare/DataImpulse ~$1/GB, no credit-multiplier "LinkedIn premium tax") is the non-Azure alternative.
+LLM-feedback verdict: its premium-tax explanation of scrape.do's burn was credible; its datacenter-IP-
+blacklist premise was empirically FALSE for this endpoint; its BYO-proxy idea is sound but its 1-2/mo
+volume assumption was wrong (ours is ~97 backfill + daily).
