@@ -23,6 +23,38 @@ async function ensureCols(client: any): Promise<void> {
 
 const guestUrl = (jobId: string) => `https://www.linkedin.com/jobs-guest/jobs/api/jobPosting/${jobId}`
 
+// Ensure the jd_real/jd_fetched_at columns exist without needing the full ensureCols dance.
+// Exposed so callers outside this file (e.g. the inline search fetch) can be defensive on first run.
+export async function ensureJdCols(client: any): Promise<void> { await ensureCols(client) }
+
+// Fetch ONE opp's real JD from the LinkedIn guest endpoint, classify, log to jd_fetch_log, and
+// persist. Shared by the paced backfill sweep and the inline search fetch so both stay identical:
+// ok_jd → store jd_real; auth_required/not_found → mark fetched (terminal on guest endpoint) so it
+// isn't retried forever; blocked/empty/etc → leave for a later attempt. Direct-from-Azure, no proxy.
+// Caller is responsible for pacing (jitter/sleep) between calls. Returns the outcome + whether stored.
+export async function fetchAndStoreJd(
+  client: any,
+  row: { id: string; job_id: string },
+  opts: { runTag?: string; concurrency?: number } = {},
+): Promise<{ outcome: string; stored: boolean }> {
+  const r: any = await scraperFetch(guestUrl(String(row.job_id)), { force: 'direct' })
+  const jd = extractGuestJdHtml(r.body)
+  const outcome = classifyResponse(r.status, r.body, jd.descriptionHtml != null)
+  await logJdFetch({
+    jobId: String(row.job_id), provider: r.provider || 'direct', via: r.via, httpStatus: r.status,
+    outcome, jdTextLen: jd.textLen, bytes: r.body.length, latencyMs: r.latencyMs,
+    concurrency: opts.concurrency || 1, runTag: opts.runTag || 'inline', usage: r.usage, error: r.error,
+  })
+  let stored = false
+  if (outcome === 'ok_jd' && jd.descriptionHtml) {
+    await client.query(`update opportunity set jd_real = $1, jd_fetched_at = now() where id = $2`, [jd.descriptionHtml, row.id])
+    stored = true
+  } else if (outcome === 'auth_required' || outcome === 'not_found') {
+    await client.query(`update opportunity set jd_fetched_at = now() where id = $1 and jd_real is null`, [row.id])
+  }
+  return { outcome, stored }
+}
+
 // ---------------------------------------------------------------------------
 // POST /api/mail/jd-backfill/scan  — recover jobIds for EXISTING opportunities. LLM-FREE.
 // The ingest fix only captures jobIds going forward; opps ingested before it have none. This

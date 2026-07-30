@@ -5,6 +5,7 @@ import { routeOpportunity, loadConfig } from './mailWatch'
 import { scraperFetch, classifyResponse, sleepJitter } from './scraperProxy'
 import { canonicalJobUrl } from './jdLinks'
 import { SEED } from './roleTaxonomy'
+import { fetchAndStoreJd, ensureJdCols } from './jdBackfill'
 
 const HEADERS = {
   'Content-Type': 'application/json',
@@ -68,10 +69,13 @@ async function loadRoleKeywords(client: any, owner: string, max = 40): Promise<s
 // each through the SAME opportunity pipeline (dedup + role-tag + jobId/url capture). It only
 // DISCOVERS + inserts — the real JD is filled by the paced direct fetch (jd-backfill/fetch), so this
 // stays fast and bounded. Stops a role's paging on a block; whole run halts on repeated blocks.
-export async function runRoleSearch(owner: string, opts: { tpr?: string; location?: string; pages?: number; roleLimit?: number } = {}) {
+export async function runRoleSearch(owner: string, opts: { tpr?: string; location?: string; pages?: number; roleLimit?: number; fetchJds?: boolean; jdFetchCap?: number } = {}) {
   const pages = Math.max(1, Math.min(3, opts.pages || 1))
+  const fetchJds = opts.fetchJds !== false               // inline-fetch the real JD for each new opp (default on)
+  const jdFetchCap = Math.max(0, Math.min(40, opts.jdFetchCap ?? 20))  // bound the inline burst — usually a handful/cycle
   let client: any
-  const summary = { roles: 0, searched: 0, cardsFound: 0, inserted: 0, duplicate: 0, blocked: 0, byRole: [] as any[] }
+  const summary = { roles: 0, searched: 0, cardsFound: 0, inserted: 0, duplicate: 0, blocked: 0, jdFetched: 0, jdStored: 0, jdOutcomes: {} as Record<string, number>, byRole: [] as any[] }
+  const fresh: Array<{ id: string; job_id: string }> = []   // newly-inserted opps to fill JDs for
   try {
     client = await getPgClient()
     const roles = await loadRoleKeywords(client, owner, opts.roleLimit || 40)
@@ -92,7 +96,7 @@ export async function runRoleSearch(owner: string, opts: { tpr?: string; locatio
           const res = await routeOpportunity(client, owner,
             { company: c.company, role: c.title, location: c.location, url: canonicalJobUrl(c.jobId), postedDate: c.postedDate, jobId: c.jobId },
             { source: 'LinkedIn Search' })
-          if (res.inserted) { summary.inserted++; roleInserted++ } else summary.duplicate++
+          if (res.inserted) { summary.inserted++; roleInserted++; if (res.id) fresh.push({ id: res.id, job_id: c.jobId }) } else summary.duplicate++
         }
         if (cards.length < 25) break            // last page for this role
         await sleepJitter(2500)                 // human pacing between pages
@@ -100,6 +104,23 @@ export async function runRoleSearch(owner: string, opts: { tpr?: string; locatio
       summary.byRole.push({ role, cards: roleCards, inserted: roleInserted })
       if (consecBlocked >= 3) break             // real wall — stop the run
       await sleepJitter(3000)                   // human pacing between roles
+    }
+
+    // Inline JD-fetch phase: fill jd_real for the handful of NEW opps this cycle found, using the
+    // SAME direct-from-Azure paced fetch as the backfill sweep (fetchAndStoreJd). Bounded by
+    // jdFetchCap and paced with jitter so it never approaches the ~30-burst/IP wall. Stops early on
+    // a genuine block/quota wall (leaves the rest for the next cycle rather than hammering).
+    if (fetchJds && fresh.length && jdFetchCap > 0) {
+      await ensureJdCols(client)
+      let consec = 0
+      for (const opp of fresh.slice(0, jdFetchCap)) {
+        const { outcome, stored } = await fetchAndStoreJd(client, opp, { runTag: 'search-inline' })
+        summary.jdFetched++
+        summary.jdOutcomes[outcome] = (summary.jdOutcomes[outcome] || 0) + 1
+        if (stored) summary.jdStored++
+        if (outcome === 'blocked' || outcome === 'quota_exceeded') { if (++consec >= 3) break } else consec = 0
+        await sleepJitter(2500)                 // human pacing between JD fetches
+      }
     }
     return summary
   } finally { try { await client?.end() } catch {} }
@@ -134,8 +155,8 @@ export async function jdSearchTimer(_t: Timer, context: InvocationContext): Prom
   if (!SEARCH_HOURS_ET.includes(etHour)) { context.log(`jd-search timer: skip (ET hour ${etHour} not in ${SEARCH_HOURS_ET})`); return }
   try {
     const cfg = await loadConfig()
-    const s = await runRoleSearch(cfg.ownerEmail, { tpr: 'r86400', pages: 1 })
-    context.log(`jd-search timer @${etHour}:00 ET: roles=${s.roles} cards=${s.cardsFound} inserted=${s.inserted} dup=${s.duplicate} blocked=${s.blocked}`)
+    const s = await runRoleSearch(cfg.ownerEmail, { tpr: 'r86400', pages: 1 })   // inline JD-fetch on by default
+    context.log(`jd-search timer @${etHour}:00 ET: roles=${s.roles} cards=${s.cardsFound} inserted=${s.inserted} dup=${s.duplicate} blocked=${s.blocked} jdFetched=${s.jdFetched} jdStored=${s.jdStored}`)
   } catch (e) { context.log(`jd-search timer error: ${e}`) }
 }
 
