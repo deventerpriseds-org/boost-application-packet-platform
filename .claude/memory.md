@@ -427,3 +427,16 @@ sanitizer to allow '-' when building the Settings taxonomy UI.
   jobalerts-noreply@linkedin.com), NOT from folders. MUST pull the FULL tree (not just tail) and confirm
   whether provider folders actually exist before auto-mapping roles→folders. If they don't, the "automap
   to 3 role-group folders per provider" needs rethinking (provider is a sender facet, not a folder).
+
+## ACT-26 automap DONE + verified (2026-07-30)
+Mailbox is org'd Inbox/Job Alerts/{Indeed,Ladders,Lensa,LinkedIn}/{C Suite,VP & Head of,Director}.
+New POST /api/mail/folders/automap (mailWatch.ts): fetches folder tree, maps each group-named folder
+to its group's persona keys (csuite=7, vp=10, dir=10) into folder_role_map (skip_filter=true).
+VERIFIED live: 12 folders -> 108 rows. Effect: those folders skip_filter-ingest + group-tag; specific
+role still from taxonomy title classifier. Idempotent (ON CONFLICT).
+NUANCE: routeOpportunity Path-1 sets roles_for = ALL mapped keys for the folder (7-10). That's System A
+(roles_for) which is now secondary (persona counts use taxonomy). Acceptable; only Pipeline.jsx (System A)
+shows the breadth. If tighter behavior wanted later: have routeOpportunity use the folder's GROUP as the
+authoritative matched_group prior (code change) instead of tagging all group role_keys.
+STILL PENDING in ACT-26: the Intake folder PICKER (frontend) shows only ROOT folders — must call
+/mail/folders?tree=1 and render the nested Job Alerts tree; and reflect these 108 mappings in the UI.
