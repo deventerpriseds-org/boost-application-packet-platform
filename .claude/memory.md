@@ -407,3 +407,23 @@ a later failure rolls back earlier DDL; do multi-step DDL+DML in a single atomic
 KEY-FORMAT CAVEAT for ACT-26/30: personasCreate strips non-alphanumerics from key (VP-SOFTWARE ->
 VPSOFTWARE), which would break the VP-/DIR- count-prefix logic if roles are added via the UI. Fix the
 sanitizer to allow '-' when building the Settings taxonomy UI.
+
+## Reusable infra + patterns documented in CLAUDE.md (2026-07-30)
+- ui-verify.yml + scripts/ui-verify.mjs: Playwright-in-GHA to VERIFY THE LIVE UI (sandbox is blocked
+  from *.azurestaticapps.net; Tavily can't run JS/auth). Impersonate owner via localStorage.ee_auth_user
+  then RELOAD (hash-only nav won't remount past login gate), assert EXPECT substrings, screenshot.
+  Verified GREEN confirming ACT-25 (27 roles render as von.ellis).
+- Owner model documented: frontend _owner from auth (von.ellis real; demo@ sandbox). EVERY owner-scoped
+  api.js call must pass ?owner= or it falls back to demo (fixed listPersonas + persona CRUD).
+- These are now in CLAUDE.md so future sessions inherit them.
+
+## ACT-26 folder mapping — investigation state (2026-07-30, IN PROGRESS)
+- Backend GET /api/mail/folders?tree=1 ALREADY returns the full recursive folder tree (fetchFolderTree,
+  path+level+childCount). The picker showing only ROOT folders is a FRONTEND bug — it calls the flat
+  version, not tree=1. Fix = point the Intake folder picker at tree=1 + render nested.
+- CAVEAT to verify before building the automap: the live tree tail showed only Sent Items / Sync Issues
+  / Task Reminders at root — did NOT confirm a "Job Alerts" or "Indeed"/"LinkedIn" folder exists. The
+  Inbox-monitor "Indeed"/"LinkedIn" chips are likely derived from SENDER (jobalert.indeed.com /
+  jobalerts-noreply@linkedin.com), NOT from folders. MUST pull the FULL tree (not just tail) and confirm
+  whether provider folders actually exist before auto-mapping roles→folders. If they don't, the "automap
+  to 3 role-group folders per provider" needs rethinking (provider is a sender facet, not a folder).

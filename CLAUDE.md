@@ -128,6 +128,32 @@ curl https://job-platform-api.azurewebsites.net/api/config-status
 ```
 (These work from a browser or the user's terminal — not from this sandbox.)
 
+### Verify the LIVE UI (Playwright-in-GHA) — the sandbox CANNOT see the rendered app
+The sandbox egress is blocked from `*.azurestaticapps.net`, and Tavily/WebFetch can't execute the
+React bundle or authenticate — so neither can confirm what the SPA actually renders. Use
+`.github/workflows/ui-verify.yml` (script `scripts/ui-verify.mjs`): it runs headless Chromium on a GH
+runner (open internet, executes the bundle), **impersonates a real owner** by seeding
+`localStorage.ee_auth_user = {email,name,provider}` then **reloading** (a hash-only nav won't remount
+React past the login gate — you MUST reload after seeding), navigates to a hash route, asserts
+required text is present, and uploads a full-page screenshot artifact.
+```
+mcp__github__actions_run_trigger(method="run_workflow", ..., workflow_id="ui-verify.yml", ref="main",
+  inputs={ "route": "#/settings/roles", "owner": "von.ellis@enterpriseds.io",
+           "expect": "Target roles;VP, Product;Dir, Product" })   # ';'-separated substrings; ALL must appear
+```
+Read `UI_VERIFY_RESULT` in the job log (`ok`, `missingExpect`, `bodySnippet`). conclusion=success ⇒
+every EXPECT rendered. This is the UI half of the same loop db-query.yml / api-test.yml give for data.
+
+### Owner model (multi-tenant) — read this before touching persona / owner-scoped rows
+- The frontend `_owner` (api.js) defaults to `demo@executive-engine.local` and is set from auth
+  (`state.jsx`: `owner = auth.user?.email || DEMO`). **The real production data (opps, mail_watch,
+  the 27 persona Target-roles) is under `von.ellis@enterpriseds.io`; `demo@…` is a shared sandbox.**
+- `resolveOwner(req)` (appSession.ts): verified session Bearer → that email; else `?owner=` (unverified
+  READS ok) else demo. So **every owner-scoped api.js call must pass `?owner=${_owner}`** or it silently
+  falls back to demo (this bit `listPersonas`). Mutations still need a verified session (`requireWrite`).
+- `persona` key is per-owner: `unique(owner_email, key)`. (A stale global `unique(key)` + FK
+  `opportunity.persona_key` once broke this — dropped 2026-07-30.)
+
 ## Deploy Commands
 
 ```bash
