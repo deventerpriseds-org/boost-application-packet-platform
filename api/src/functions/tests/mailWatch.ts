@@ -1253,6 +1253,60 @@ export async function mailFolderMapDelete(req: HttpRequest, context: InvocationC
   finally { try { await client?.end() } catch {} }
 }
 
+// POST /api/mail/folders/automap — auto-map every mailbox folder named a role GROUP
+// ('C Suite' | 'VP & Head of' | 'Director') to that group's persona role keys, across all providers
+// (Indeed/LinkedIn/Lensa/Ladders/…). The user already sorts alerts into provider>group folders; this
+// makes each group folder ingest (skip_filter) + group-tag automatically. Idempotent (ON CONFLICT).
+// The SPECIFIC role still comes from the taxonomy classifier on the title; the folder sets the group.
+const GROUP_FOLDER_NAME: Record<string, 'csuite' | 'vp' | 'director'> = {
+  'c suite': 'csuite', 'csuite': 'csuite', 'c-suite': 'csuite',
+  'vp & head of': 'vp', 'vp and head of': 'vp', 'vp/head': 'vp', 'vp & head': 'vp',
+  'director': 'director', 'dir': 'director',
+}
+export async function mailFoldersAutomap(req: HttpRequest, _ctx: InvocationContext): Promise<HttpResponseInit> {
+  if (req.method === 'OPTIONS') return { status: 204, headers: HEADERS }
+  const guard = requireWrite(req); if (guard) return guard
+  const creds = graphCreds()
+  if (!creds.clientId || !creds.clientSecret) return { status: 200, headers: HEADERS, jsonBody: { ok: false, error: 'MICROSOFT creds not set' } }
+  const owner = resolveOwner(req).owner
+  let client
+  try {
+    const cfg = await loadConfig(owner)
+    const mailbox = req.query.get('mailbox') || cfg.mailbox
+    const token = await getMicrosoftToken(creds.tenantId, creds.clientId, creds.clientSecret)
+    const folders = await fetchFolderTree(mailbox, token)
+    client = await getPgClient()
+    await ensureFolderMapTable(client)
+    // Group → this owner's persona role keys (derive group from the key prefix VP-/DIR-/else csuite).
+    const pkeys = (await client.query(`select key from persona where owner_email=$1`, [owner])).rows.map((r: any) => String(r.key))
+    const byGroup: Record<string, string[]> = { csuite: [], vp: [], director: [] }
+    for (const k of pkeys) byGroup[k.startsWith('VP-') ? 'vp' : k.startsWith('DIR-') ? 'director' : 'csuite'].push(k)
+    let mappedFolders = 0, rows = 0
+    const summary: any[] = []
+    for (const f of folders) {
+      const g = GROUP_FOLDER_NAME[String(f.name || '').trim().toLowerCase()]
+      if (!g) continue
+      const keys = byGroup[g] || []
+      if (!keys.length) continue
+      mappedFolders++
+      for (const key of keys) {
+        await client.query(
+          `insert into folder_role_map (owner_email, folder_id, folder_path, role_key, skip_filter, updated_at)
+           values ($1,$2,$3,$4,true, now())
+           on conflict (owner_email, folder_id, role_key)
+           do update set folder_path=excluded.folder_path, skip_filter=true, updated_at=now()`,
+          [owner, f.id, f.path || f.name, key]
+        )
+        rows++
+      }
+      summary.push({ path: f.path, group: g, keys: keys.length })
+    }
+    return { status: 200, headers: HEADERS, jsonBody: { ok: true, mailbox, mappedFolders, rows, summary } }
+  } catch (err) { return { status: 500, headers: HEADERS, jsonBody: { ok: false, error: String(err) } } }
+  finally { try { await client?.end() } catch {} }
+}
+app.http('mailFoldersAutomap', { methods: ['POST', 'OPTIONS'], authLevel: 'anonymous', route: 'mail/folders/automap', handler: mailFoldersAutomap })
+
 // POST /api/mail/self-test — run the watcher checklist end-to-end and report
 // each check with pass/fail + detail, so the config panel can confirm wiring.
 export async function mailSelfTest(req: HttpRequest, context: InvocationContext): Promise<HttpResponseInit> {
