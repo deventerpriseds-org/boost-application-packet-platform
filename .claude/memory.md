@@ -264,3 +264,14 @@ so switching is a one-line change with zero impact on other dependencies. BYO re
 LLM-feedback verdict: its premium-tax explanation of scrape.do's burn was credible; its datacenter-IP-
 blacklist premise was empirically FALSE for this endpoint; its BYO-proxy idea is sound but its 1-2/mo
 volume assumption was wrong (ours is ~97 backfill + daily).
+
+## EMPIRICAL: LinkedIn guest-endpoint per-IP rate limit FOUND (2026-07-30)
+The undocumented limit, ground-truthed via burst test (jd_fetch_log run_tag=burst-test-1):
+- Burst (concurrency 15, delayMs 0, direct from Azure): 30×HTTP-200 then 15×HTTP-429. Genuine 429
+  Too Many Requests → per-IP RATE limit ≈ ~30 rapid requests, NOT a volume cap.
+- Paced (1 req / 2s, direct): 108 requests, ZERO 429s. Spacing avoids the limit entirely.
+=> Steady-state (paced daily timer, deduped by jd_fetched_at, ~10-50/day spread out) never approaches
+   the limit on ONE Azure region — free, no infra. Multi-region only raises BURST throughput
+   (N regions ≈ N×30 rapid), i.e. buys SPEED for bulk blasts, not sustainability. Not needed for daily.
+Recommendation: build a paced daily fetch timer + retry-on-429-backoff (direct). Hold multi-region
+rotation as a ready-to-flip contingency behind scraperProxy (add only if a fast bulk run is ever wanted).
