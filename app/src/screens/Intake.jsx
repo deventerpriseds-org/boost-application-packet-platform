@@ -179,9 +179,11 @@ export default function Intake() {
   const groupOfKey = (key = '') => {
     // Keys are the 27 taxonomy role keys: VP-<fam> / DIR-<fam> for those two groups,
     // and bare C-suite acronyms (CTO, CIO, COO, CAIO, CDATA, CDIGITAL, CPO) for C Suite.
+    // Tolerate both dash and underscore separators (live keys are dash-form today; a key
+    // sanitizer previously rewrote dashes, so don't hard-depend on one separator).
     const k = String(key).toUpperCase()
-    if (k.startsWith('VP-')) return 'VP & Head of'
-    if (k.startsWith('DIR-')) return 'Director'
+    if (/^VP[-_]/.test(k)) return 'VP & Head of'
+    if (/^DIR[-_]/.test(k)) return 'Director'
     if (/^C[A-Z]/.test(k)) return 'C Suite'
     return null
   }
