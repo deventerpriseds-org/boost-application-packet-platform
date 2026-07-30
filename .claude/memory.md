@@ -450,3 +450,46 @@ in api.js. ui-verify.yml on #/settings/intake = SUCCESS: rendered "Folder → ro
 108 mappings). ACT-26 (data + UI) COMPLETE. NOTE: folder-map mutations (toggle in UI) need a verified
 session (requireWrite); reads work via ?owner=. Next: ACT-27 (inbox-monitor coherence), ACT-28 (JD Graph
 ParseUri fetch error), then re-enable the paused 3x search.
+
+## ACT-27 DONE + Playwright-verified (2026-07-30): inbox-monitor rail coherent
+Intake.jsx "Monitored roles" rail now renders the 12 mapped folders coherently:
+- `folderLabel(path)` shows "Provider / Folder" (e.g. "Indeed / C Suite") when path has a parent —
+  the 12 bins are the SAME 3 group names under 4 providers (Indeed/Ladders/Lensa/LinkedIn), so the
+  last segment alone was ambiguous.
+- `roleSummary(keys)` collapses a folder's 7-10 role keys to "<group> · N roles" via `groupOfKey`.
+- **groupOfKey key formats (from live folder_role_map, von.ellis):** VP-<fam> (10), DIR-<fam> (10),
+  and BARE C-suite acronyms with NO separator: CTO/CIO/COO/CPO/CAIO/CDATA/CDIGITAL (7). First cut used
+  `/^c(suite)?[-_]/` which missed the bare acronyms (rendered "roles · 7 roles"); fixed to
+  startsWith('VP-')/'DIR-' else `/^C[A-Z]/` -> C Suite. Verified live: "Indeed / C Suite … C Suite · 7 roles".
+ui-verify #/intake: "/ C Suite","/ Director","VP & Head of ·" all rendered (only "Monitored roles"
+"missing" = CSS uppercases to MONITORED ROLES in innerText; cosmetic, not a defect).
+
+## Roles & Titles PRD added to repo (2026-07-30): docs/specs/Boost_Exec_Pipeline_Roles_and_Titles_PRD.pdf
+The design spec for the Role Profiles page (ACT-30). Reference impl: proto-compass/roles.jsx +
+proto-compass/taxonomy.js, route #/roles. Key facts to build against:
+- **3 levels:** Role group (3: C Suite/VP & Head of/Director) -> Role (27: 7+10+10) -> Title variant
+  (484 seeded). Tiers: fav(★ promoted)/watch(default)/off(excluded at ingest). FAVORITE_BOOST=15,
+  match_score=least(100, base+boost); is_favorite drives gold star.
+- **Schema (§3):** role_group / role / title_variant / title_tier_draft (draft layer for Save/Revert) /
+  title_match. opportunity gets matched_title_id, role_id, base_score, tier_boost, is_favorite, match_score.
+  NOTE: this is the PRD's target schema (System B taxonomy_title already partially implements it).
+- **Matching (§5):** normalize (lowercase, cut trailing context at | · — , "at" "@", expand abbrev
+  bidirectional longest-match, drop of/the/for, KEEP "global") -> resolve (exact 1.0 / alias 0.95 /
+  fuzzy pg_trgm≥0.82 / else keyword fallback tier=watch conf 0). Inclusion rules jsonb on role/group:
+  COO=require_any_keyword, Director=require_seniority_or_exception. Fail rule -> rule_passed=false,
+  routes to backlog not queue (NOT discarded).
+- **API (§6):** GET /api/taxonomy, PATCH /api/titles/:id/tier, POST /api/roles/:id/titles/bulk-tier
+  (atomic), POST /api/taxonomy/publish, /revert, POST /api/role-groups·/api/roles, PUT /api/roles/:id/folder,
+  POST /api/roles/:id/baseline. Events: taxonomy.published -> rescore_opportunities job.
+- **UI (§7):** 3-pane (tree | title list | role detail), breakpoints ≥1180 three-pane / 720-1179 two-pane
+  / <720 stacked. DOM hooks are STABLE data-* (build against them): [data-group],[data-role],[data-title],
+  [data-star],[data-tiercycle],[data-search],[data-filter],[data-favfirst],[data-bulk],[data-action].
+  Star toggles fav⇄watch; tier label cycles fav->watch->off. 20 screen states R-1..R-20 (§8) each with
+  literal Trigger + Result — build click-through 1:1.
+- **Known gaps (§10, to wire):** G1 #/intake/setup still legacy FAMILY_FOLDER (rebuild from role rows +
+  real folder picker) — NOTE ACT-26 already rebuilt the Settings▸Intake picker from taxonomy; G2 promotion
+  specified-not-wired (+15/pin/star/autostart); G3 +Add role/group are toasts (need creation form);
+  G4 seeded favorites are a guess (onboarding pass); G5 live counts are stubs (real count query);
+  G6 tiers persist to localStorage (ee-role-tiers-v1/-saved-v1) instead of draft/publish tables.
+- **Extend-don't-duplicate:** this taxonomy IS System B (taxonomy_title). Build ACT-30 ON it; do NOT
+  create a parallel roles table. resolveTitle/roleTaxonomy.ts already implement the §5 matcher.

@@ -177,10 +177,12 @@ export default function Intake() {
   // Collapse a folder's 7-10 mapped role keys to a coherent "<group> · N roles" summary
   // instead of dumping every key. Keys are prefixed VP- / DIR- / csuite by group.
   const groupOfKey = (key = '') => {
-    const k = String(key)
-    if (/^vp[-_]/i.test(k)) return 'VP & Head of'
-    if (/^dir[-_]/i.test(k)) return 'Director'
-    if (/^c(suite)?[-_]/i.test(k)) return 'C Suite'
+    // Keys are the 27 taxonomy role keys: VP-<fam> / DIR-<fam> for those two groups,
+    // and bare C-suite acronyms (CTO, CIO, COO, CAIO, CDATA, CDIGITAL, CPO) for C Suite.
+    const k = String(key).toUpperCase()
+    if (k.startsWith('VP-')) return 'VP & Head of'
+    if (k.startsWith('DIR-')) return 'Director'
+    if (/^C[A-Z]/.test(k)) return 'C Suite'
     return null
   }
   const roleSummary = (keys = []) => {

@@ -543,9 +543,15 @@ The picker currently lists only mailbox ROOT folders (Archive/Deleted/Drafts/Sen
 the owner's "Job Alerts" folder and its Indeed + LinkedIn SUBFOLDERS (under Inbox). Fix folder
 enumeration to recurse Inbox children. Routing list must re-render from the ACT-25 roles automatically.
 
-**ACT-27 — Inbox monitoring screen coherent with ACT-25/26.**
-Intake ▸ Inbox monitor "MONITORED ROLES" shows "All mail / No role folders mapped." After ACT-25/26
-it should list the real roles + their mapped folders. Verify the screen reads the aligned data.
+**ACT-27 — Inbox monitoring screen coherent with ACT-25/26. ✅ DONE (2026-07-30, Playwright-verified).**
+Intake ▸ Inbox monitor "MONITORED ROLES" now lists the 12 mapped folders with coherent labels:
+"Provider / Folder" (e.g. "Indeed / C Suite") + "<group> · N roles" summary instead of the raw
+7-10 role-key dump. Fixed groupOfKey for bare C-suite acronym keys (CTO/CIO/… no separator).
+Commit 0a509c9 (+ C-suite label fix). ui-verify #/intake rendered all group labels.
+
+**ACT-30 SPEC ADDED (2026-07-30):** Roles & Titles PRD saved to
+docs/specs/Boost_Exec_Pipeline_Roles_and_Titles_PRD.pdf; key facts distilled in memory.md
+(3-level taxonomy, §5 matcher, §6 API, §7 UI + stable data-* hooks, R-1..R-20 states, G1..G6 gaps).
 
 **ACT-28 — Fix JD-description fetch error post-intake-updates. (searches PAUSED meanwhile.)**
 Observed live (Intake detail pane): HTTP 400 {"code":"RequestBroker--ParseUri","message":"Resource
