@@ -229,10 +229,11 @@ export function resolveTitle(rawTitle: string, context = ''): MatchResult & { ba
   if (!res) {
     // keyword fallback → tier watch (matched but not a seeded favorite)
     const seniority: Group | null = /\bchief\b|\bceo\b|\bcto\b|\bcio\b|\bcpo\b|\bcoo\b|\bcaio\b|\bcdigo\b|\bcdatao\b|\bfounder\b|\bpresident\b/.test(norm) ? 'csuite'
-      // "VP & Head of" band: VP/SVP/EVP/AVP, Head of, Executive/Managing (incl. Executive/Managing
-      // Director), General Manager, Partner. Checked BEFORE plain Director so Managing/Executive
-      // Director land here, not in the Director band (owner decision 2026-07-30).
-      : /\bvp\b|\bsvp\b|\bevp\b|\bavp\b|\bhead\b|\bexecutive\b|\bmanaging\b|\bgeneral manager\b|\bgm\b|\bpartner\b/.test(norm) ? 'vp'
+      // "VP & Head of" band: VP/SVP/EVP/AVP, Head of, and EXECUTIVE (so "Executive Director" /
+      // "Executive Technical Director" land here). Everything else with "director" — incl. Managing
+      // Director, Senior/Global Director — stays in the Director band (owner decision 2026-07-30:
+      // all Director roles are Director UNLESS "Executive Director").
+      : /\bvp\b|\bsvp\b|\bevp\b|\bavp\b|\bhead\b|\bexecutive\b/.test(norm) ? 'vp'
       : /\bdirector\b/.test(norm) ? 'director' : null
     if (seniority) {
       const rk = seniority === 'csuite' ? ROLE_KEYWORDS.find((r) => r.kw.test(norm)) : null
