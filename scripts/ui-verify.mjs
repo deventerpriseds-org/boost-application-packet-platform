@@ -34,8 +34,11 @@ await page.evaluate((owner) => {
   localStorage.setItem('ee_auth_user', JSON.stringify({ email: owner, name: owner, provider: 'microsoft' }))
   localStorage.setItem('ee_show_demo', 'false')   // exclude demo/sample rows from owner-scoped reads
 }, OWNER)
-await page.goto(`${APP_URL}/${ROUTE}`, { waitUntil: 'networkidle' })
-await page.waitForTimeout(4000)   // let the SPA finish its fetch + render
+// Navigate to the target hash, then RELOAD so React re-mounts and reads ee_auth_user on boot (past the
+// login gate as the impersonated owner). A hash-only change would not remount, leaving auth.user null.
+await page.goto(`${APP_URL}/${ROUTE}`, { waitUntil: 'domcontentloaded' })
+await page.reload({ waitUntil: 'networkidle' })
+await page.waitForTimeout(4500)   // let the SPA finish its fetch + render
 
 const bodyText = await page.evaluate(() => document.body.innerText || '')
 const count = COUNT_SEL ? await page.locator(COUNT_SEL).count() : null
@@ -47,6 +50,7 @@ const countOk = !COUNT_SEL || (count != null && count >= COUNT_MIN)
 const ok = missingExpect.length === 0 && countOk
 const result = {
   ok, url: `${APP_URL}/${ROUTE}`, owner: OWNER, bodyLen: bodyText.length,
+  bodySnippet: bodyText.replace(/\s+/g, ' ').slice(0, 500),
   expect: EXPECT, missingExpect, countSel: COUNT_SEL || null, count, countMin: COUNT_MIN,
   consoleErrors: consoleErrors.slice(0, 10), screenshot: OUT,
 }
