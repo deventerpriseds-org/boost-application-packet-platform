@@ -440,3 +440,13 @@ shows the breadth. If tighter behavior wanted later: have routeOpportunity use t
 authoritative matched_group prior (code change) instead of tagging all group role_keys.
 STILL PENDING in ACT-26: the Intake folder PICKER (frontend) shows only ROOT folders — must call
 /mail/folders?tree=1 and render the nested Job Alerts tree; and reflect these 108 mappings in the UI.
+
+## ACT-26 frontend DONE + Playwright-verified (2026-07-30)
+Settings ▸ Intake "Folder → role routing" (Settings.jsx IntakeSettings) was already fully built
+(lists personas, mailFolderTree nested picker, mailFolderMapGet -> assign map, chips per role). Only
+bug was the ?owner= omission on mailFolderTree/mailFolderMapGet/Set/Delete (resolved to demo). Fixed
+in api.js. ui-verify.yml on #/settings/intake = SUCCESS: rendered "Folder → role routing", "VP, Product",
+"C Suite", "VP & Head of", "Director" — i.e. 27 roles each showing its group's provider folders (from the
+108 mappings). ACT-26 (data + UI) COMPLETE. NOTE: folder-map mutations (toggle in UI) need a verified
+session (requireWrite); reads work via ?owner=. Next: ACT-27 (inbox-monitor coherence), ACT-28 (JD Graph
+ParseUri fetch error), then re-enable the paused 3x search.
