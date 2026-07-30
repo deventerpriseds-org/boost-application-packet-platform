@@ -521,3 +521,45 @@ producing loose matches. User wants it aligned to a specific Settings tier and t
    per-slot query config rather than one fixed set.
 4. Switch location from string 'United States' to verified US geoId 103644278 (country-name search is
    unreliable — Medium/Khan). Depends on ACT-23 for the unified tier source.
+
+---
+
+## Role/Folder/Intake alignment — ORDERED PLAN (owner, 2026-07-30). Settle in sequence.
+
+**ACT-25 — Populate persona "Target roles" with the 27 taxonomy ROLES (not group names).**
+Settings ▸ Roles + Intake folder-routing key off the `persona` table (currently CTO/VPE/VPP demo).
+Replace with the 27 seeded roles across the 3 groups, QUALIFIED so VP vs Director families are
+distinguishable (owner: "VP, Product vs Dir, Product"):
+ - C Suite (7): CTO, CIO, Chief Digital Officer, Chief Data Officer, CPO, Chief AI Officer, COO
+ - VP & Head of (10): VP, Software / VP, Engineering / VP, Product / VP, Technology / VP, Digital /
+   VP, Data-Analytics-&-AI / VP, Architecture / VP, Delivery & Ops / VP, Solutions & Automation /
+   VP, Transformation & Strategy
+ - Director (10): Dir, <same 10 families>
+Show owner the list to confirm coverage BEFORE writing persona rows. persona.master_role should map
+to the taxonomy role/group so folder-routing + classification stay in sync.
+
+**ACT-26 — Folder→role routing auto-updates + folder picker shows the Job Alerts tree.**
+The picker currently lists only mailbox ROOT folders (Archive/Deleted/Drafts/Sent…). It must include
+the owner's "Job Alerts" folder and its Indeed + LinkedIn SUBFOLDERS (under Inbox). Fix folder
+enumeration to recurse Inbox children. Routing list must re-render from the ACT-25 roles automatically.
+
+**ACT-27 — Inbox monitoring screen coherent with ACT-25/26.**
+Intake ▸ Inbox monitor "MONITORED ROLES" shows "All mail / No role folders mapped." After ACT-25/26
+it should list the real roles + their mapped folders. Verify the screen reads the aligned data.
+
+**ACT-28 — Fix JD-description fetch error post-intake-updates. (searches PAUSED meanwhile.)**
+Observed live (Intake detail pane): HTTP 400 {"code":"RequestBroker--ParseUri","message":"Resource
+not found for the segment 'AAMk...'"} — a Graph message-fetch with a malformed/stale message-id URI.
+Root-cause the JD/triggering-email fetch path. Automated 3x search PAUSED (jdSearch SEARCH_PAUSED=true)
+until intake is clean.
+
+**ACT-29 — Concatenated favorite-title searches; decide schedule spread.**
+Build OR-concatenated search queries from the LONGER favorite-title list (per role). Confirm working,
+then decide: does the resulting query count fit one 3x/day slot, or must queries be SPREAD across the
+5am/1pm/6pm slots (vs repeating each query 3x/day)? Depends on ACT-25 favorites.
+
+**ACT-30 — Restore the Role Profiles page (rebuilt on the taxonomy).**
+The rich Role-baseline page exists only in the prototype (proto-compass/engine.jsx); the live
+/library/roles is a persona-backed stub that omits narrative/key-wins/linked-assets/comp (no backing
+fields) and is empty now that personas are empty. Rebuild on the taxonomy role with real baseline
+fields (narrative, key wins, linked assets, comp reference) — PRD's role_baseline.

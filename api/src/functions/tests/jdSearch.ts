@@ -150,7 +150,13 @@ function hourInTz(tz: string): number {
 // Timer: exec-role search 3×/day at 5am/1pm/6pm ET. Because NCRONTAB fires in UTC and ET shifts with
 // DST, we fire at the UTC hours that bracket those ET times (09/10, 17/18, 22/23) and then run ONLY
 // when it's actually 5/13/18 in New York — DST-safe and independent of any WEBSITE_TIME_ZONE setting.
+// PAUSE SWITCH (2026-07-30): the automated 3x/day search is held OFF while the role/folder/intake
+// alignment work is in flight (owner request — "pause until everything clean"). Flip to false to
+// resume. The manual POST /api/mail/jd-search still works for testing.
+const SEARCH_PAUSED = true
+
 export async function jdSearchTimer(_t: Timer, context: InvocationContext): Promise<void> {
+  if (SEARCH_PAUSED) { context.log('jd-search timer: PAUSED (SEARCH_PAUSED=true) — skipping'); return }
   const etHour = hourInTz(SEARCH_TZ)
   if (!SEARCH_HOURS_ET.includes(etHour)) { context.log(`jd-search timer: skip (ET hour ${etHour} not in ${SEARCH_HOURS_ET})`); return }
   try {
