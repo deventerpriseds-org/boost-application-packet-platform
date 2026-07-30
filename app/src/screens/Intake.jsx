@@ -167,8 +167,27 @@ export default function Intake() {
   useEffect(() => { loadSubs(); loadRoles(); loadMessages(null) }, [loadSubs, loadRoles, loadMessages])
 
   const folderLabel = (path = '') => {
+    // The 12 mapped bins are the SAME three group names ("C Suite" / "VP & Head of" /
+    // "Director") under four providers (Indeed/Ladders/Lensa/LinkedIn), so the last
+    // segment alone is ambiguous. Show "Provider / Folder" when there's a parent.
     const seg = String(path).split(/[\\/]/).filter(Boolean)
+    if (seg.length >= 2) return `${seg[seg.length - 2]} / ${seg[seg.length - 1]}`
     return seg[seg.length - 1] || path || '(folder)'
+  }
+  // Collapse a folder's 7-10 mapped role keys to a coherent "<group> · N roles" summary
+  // instead of dumping every key. Keys are prefixed VP- / DIR- / csuite by group.
+  const groupOfKey = (key = '') => {
+    const k = String(key)
+    if (/^vp[-_]/i.test(k)) return 'VP & Head of'
+    if (/^dir[-_]/i.test(k)) return 'Director'
+    if (/^c(suite)?[-_]/i.test(k)) return 'C Suite'
+    return null
+  }
+  const roleSummary = (keys = []) => {
+    if (!keys.length) return 'router decides'
+    const groups = [...new Set(keys.map(groupOfKey).filter(Boolean))]
+    const label = groups.length ? groups.join(' + ') : 'roles'
+    return `${label} · ${keys.length} role${keys.length === 1 ? '' : 's'}`
   }
   const selectedRole = roles.list.find((r) => r.folderId === roleSel)
   const preview = msgSel != null ? msgs.list[msgSel] : null
@@ -229,7 +248,7 @@ export default function Intake() {
             )}
             {roles.list.map((r) => (
               <RailItem key={r.folderId} active={roleSel === r.folderId} onClick={() => selectRole(r.folderId)}
-                label={folderLabel(r.folderPath)} sub={r.roleKeys.join(', ') || 'router decides'} />
+                label={folderLabel(r.folderPath)} sub={roleSummary(r.roleKeys)} />
             ))}
           </div>
           {/* Middle — alerts list (real messages) */}
