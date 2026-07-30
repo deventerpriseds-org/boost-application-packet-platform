@@ -317,3 +317,36 @@ not with the effort to go backwards." So:
   country-name search is unreliable). Fold in with search-schedule work.
 - Tavily one-offs: prefer a GH-runner curl with ${{ secrets.TAVILY_API_KEY }} to api.tavily.com/extract
   over deploying a Function endpoint (simpler/faster for research). diag/tavily kept for in-app use.
+
+## Two new discovery/fetch features — SHIPPED + live-verified (2026-07-30)
+### 1. Scheduled LinkedIn exec-role SEARCH (jdSearch.ts) — 3x/day 5am/1pm/6pm ET
+See prior "LinkedIn exec-role SEARCH ingestion" entry. DST-safe timer, direct-from-Azure, jittered.
+LIMITATION: role keywords are group/role-level names ("Data, Analytics & AI", "COO") — generic.
+  The 3x/day cadence may need DIFFERENT concatenated queries per slot as we settle on roles.
+MITIGATION (planned, ACT-24): refine criteria to fit ONE settings tier (favorites), OR-concatenate
+  title variations per role, add US geoId 103644278. NOT done yet.
+
+### 2. Inline JD-fetch inside search (2026-07-30) — commit 0e64751
+After discovery, the search fills jd_real for the handful of NEW opps it just inserted, reusing the
+SAME direct fetch as the backfill sweep (extracted shared fetchAndStoreJd/ensureJdCols in jdBackfill.ts
+— NOT a duplicate). LIVE-VERIFIED on job-platform-api: 2 roles → 20 cards → 16 inserted →
+jdFetched=5 jdStored=5 (ok_jd=5), 0 blocked.
+- LIMITATIONS/MITIGATIONS: jdFetchCap (default 20) bounds the burst; ~2.5s jitter between fetches
+  (stays under the ~30-req/IP wall); stops after 3 consecutive block/quota outcomes; default on,
+  the timer picks it up (logs jdFetched/jdStored).
+- SKIP behavior (confirmed in code): backfill fetch skips jd_fetched_at IS NOT NULL (incl.
+  auth_required/not_found — intentional, extension recovers those); inline fetch only touches
+  freshly-inserted opps, so it never re-fetches existing pipeline items.
+
+## Roles mismatch is INDEPENDENT of the JD fix (clarified 2026-07-30)
+User asked: "if the JDs are now fixed why do roles/variants still have so many mismatches?"
+ANSWER: they are different subsystems.
+- JD fix = fetching the real posting TEXT (jd_real). Anti-fabrication.
+- Role/variant mismatch = CLASSIFICATION of an opp into a role bin, driven by resolveTitle() on the
+  TITLE string via System B (taxonomy_title) — it does NOT read JD text, so fixing jd_real can't fix it.
+- Root causes are the documented "TWO role systems" problem (persona vs taxonomy disconnected) +
+  classification bugs (retag uses unreliable jd_title vs ingest uses role; normalize() cuts at first
+  comma) + the search now injecting group-level names as the role.
+- The plan to resolve is the ACT-21 "Target end state" (unify to ONE taxonomy source). Now that
+  jd_real exists, classification could ALSO improve by using the real title from the fetched JD instead
+  of the digest-collapsed jd_title — but the core fix is still unifying the two brains.

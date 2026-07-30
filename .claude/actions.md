@@ -485,3 +485,39 @@ resolution, scraping API. See research below.
   re-reading original alert emails via Graph (or search-resolve title+company). (4) STOP fabricating:
   if no real JD, label "not retrieved", don't invent. (5) classification/display use role/company
   (per-opp authoritative), not headline jd_title.
+
+---
+
+### ACT-23 — Unify the TWO role systems (persona → taxonomy); kill demo data; restore cross-page role handling
+**Status:** `open` (reaffirming the ACT-21 plan; user re-flagged 2026-07-30)
+**Why:** Two disconnected role brains remain. System A (persona: CTO/VPE/VPP demo seed, folder_role_map,
+Settings ▸ Roles UI, Pipeline filter) vs System B (taxonomy_title: 27 roles/868 titles, matched_* cols,
+drives Today/Opps/Swipe). Neither writes the other's columns → Settings shows demo data, role filtering
+lost across pages when PERSONAS was removed (personaKey undefined; Library Roles tab still crashes).
+This is also why role/variant MISMATCHES persist even though jd_real is now fixed — classification is a
+separate subsystem from JD text.
+**The plan (target end state — ONE role source = the taxonomy):**
+1. Settings ▸ Roles renders taxonomy roles (editable) — remove the persona demo seed.
+2. folder→role map offers taxonomy roles (not persona keys).
+3. Classify on `role` consistently at BOTH ingest (mailWatch.ts:280) and retag (appRoleTaxonomy.ts:68);
+   stop using unreliable jd_title.
+4. Fix normalize() cutting at first comma (roleTaxonomy.ts:126) — "VP, Product Management" → "vp".
+5. All consumers incl. Pipeline.jsx read matched_* columns; fix Library Roles tab crash.
+6. (New, enabled by jd_real) consider classifying on the real title from the fetched JD, not the
+   digest-collapsed jd_title.
+**Extend-don't-duplicate reminder:** this failure WAS a parallel system built instead of extending the
+existing role system. Do NOT add a third path — converge onto the taxonomy.
+
+### ACT-24 — Refine daily 3x search criteria to fit ONE Settings tier (favorites) + OR-concat + geoId
+**Status:** `open` (user request 2026-07-30)
+**Why:** The 3x/day search currently keys on generic GROUP-level names ("Data, Analytics & AI", "COO"),
+producing loose matches. User wants it aligned to a specific Settings tier and tighter.
+**Plan:**
+1. Drive keywords from ONE settings tier (favorites) once ACT-23 unifies the role source — so the
+   search reflects exactly what the user curated in Settings, not seeded group names.
+2. OR-concatenate the tier's title variations per role (keywords='("VP Data" OR "Head of Analytics"…)')
+   to minimize searches fired while keeping recall.
+3. The three daily slots (5am/1pm/6pm) may need DIFFERENT concatenated query sets as roles land — allow
+   per-slot query config rather than one fixed set.
+4. Switch location from string 'United States' to verified US geoId 103644278 (country-name search is
+   unreliable — Medium/Khan). Depends on ACT-23 for the unified tier source.
