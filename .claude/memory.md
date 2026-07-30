@@ -376,3 +376,16 @@ STILL OPEN:
  - Seed marks 868/868 titles 'fav' (favorite meaningless) — PRD intends ~84. Fix during Settings work.
  - Suspected: "Executive Director" may exact/fuzzy-match a SEED director-group title BEFORE the keyword
    band, binning it director instead of vp — under investigation.
+
+## Classifier coverage gaps fixed (2026-07-30, commit 2e65f84, VERIFIED)
+seniorityBand(fullTitle) now authoritative for the GROUP bucket (overrides seed-matched group +
+drives keyword fallback). Fixed & verified live: Executive Director -> vp (was director via seed
+fuzzy-match); CISO/CSO/CFO/CMO/CRO/CHRO/CLO/CDO -> csuite (were NULL); "Administration - SVP - ..."
+-> vp (buried SVP now seen — band scans the un-cut title). Post-retag dist: csuite:261 vp:426
+director:89 NULL:53 (remaining 53 = genuine non-exec noise: "Agile Product Management", "Assistant
+Station Manager", etc.).
+IMPORTANT — Settings ▸ Roles taxonomy UI is NOT BUILT. The screen still renders the legacy persona
+demo (CTO/VPE/VPP from the empty persona table). The 868 seeded titles/27 roles/3 groups exist in
+taxonomy_title + are served by GET /app/taxonomy, but NO Settings screen renders them and there is no
+manual-add UI. That frontend (3 groups + roles + title variants + tier controls + add) is Phase 2 —
+still owed to the user (their "see 3 groups/tiers + add" ask).
