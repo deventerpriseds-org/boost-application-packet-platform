@@ -389,3 +389,21 @@ demo (CTO/VPE/VPP from the empty persona table). The 868 seeded titles/27 roles/
 taxonomy_title + are served by GET /app/taxonomy, but NO Settings screen renders them and there is no
 manual-add UI. That frontend (3 groups + roles + title variants + tier controls + add) is Phase 2 —
 still owed to the user (their "see 3 groups/tiers + add" ask).
+
+## ACT-25 DONE + verified (2026-07-30): 27 taxonomy roles in persona (von.ellis), counts via taxonomy
+Seeded 27 persona rows under von.ellis@enterpriseds.io (keys: CTO,CIO,CDIGITAL,CDATA,CPO,CAIO,COO,
+VP-<10 fams>,DIR-<10 fams>; names "VP, X"/"Dir, X"; master_role = taxonomy role name). personasList
+now counts opps via taxonomy (matched_group from key prefix VP-/DIR-/csuite + matched_role=master_role),
+NOT roles_for. VERIFIED live: VP,Product=59, VP,Technology=24, VP,Software=2, etc.
+OWNER SPLIT discovered: persona demo rows (CTO/VPE/VPP) are under demo@executive-engine.local; the REAL
+data (962 opps, mail_watch) is under von.ellis@enterpriseds.io. Frontend _owner defaults to demo, set
+from auth. The 27 went under von.ellis (real owner). demo rows left as-is.
+SCHEMA BUG FIXED on live DB (had drifted from schema.ts): persona had a GLOBAL unique(key) +
+vestigial FK opportunity.persona_key->persona(key), which broke multi-tenancy (demo CTO blocked
+von.ellis CTO) AND silently broke the "+ Add role" upsert (on conflict(owner_email,key) had no matching
+constraint). Dropped opportunity_persona_key_fkey + persona_key_key, added persona_owner_key_uniq
+(owner_email,key) — now matches schema.ts. NOTE: psql -c runs the whole ; -string as ONE transaction —
+a later failure rolls back earlier DDL; do multi-step DDL+DML in a single atomic batch.
+KEY-FORMAT CAVEAT for ACT-26/30: personasCreate strips non-alphanumerics from key (VP-SOFTWARE ->
+VPSOFTWARE), which would break the VP-/DIR- count-prefix logic if roles are added via the UI. Fix the
+sanitizer to allow '-' when building the Settings taxonomy UI.
