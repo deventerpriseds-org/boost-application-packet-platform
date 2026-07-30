@@ -118,13 +118,17 @@ const ABBREV: [RegExp, string][] = [
   [/\binformation technology\b/g, 'it'],
 ]
 
-export function normalize(sRaw: string): string {
+export function normalize(sRaw: string, opts: { cut?: boolean } = {}): string {
   let s = (sRaw || '').toLowerCase()
   s = s.replace(/&/g, ' and ')
   // cut trailing context (location / dept / remote tags) at the first of these separators:
   // a comma, a spaced dash/pipe/bullet/@, the word "at", or an opening paren.
-  const cut = s.search(/,| [|·\-–—@] |\bat\b|\(/)
-  if (cut > 0) s = s.slice(0, cut)
+  // Skipped (cut:false) for the seniority-band scan, which must see tokens AFTER a separator
+  // (e.g. "Administration - SVP - ..." — the SVP comes after the first dash).
+  if (opts.cut !== false) {
+    const cut = s.search(/,| [|·\-–—@] |\bat\b|\(/)
+    if (cut > 0) s = s.slice(0, cut)
+  }
   s = s.replace(/[^a-z0-9 ]/g, ' ')                 // strip punctuation
   for (const [re, rep] of ABBREV) s = s.replace(re, rep)
   // drop filler tokens (of/the/for) — "global" is KEPT (real qualifier)
@@ -195,6 +199,20 @@ const COO_SIGNAL = /(software|digital|transformation|product|technolog|platform|
 // Director group: ordinary "Director of X" only qualifies as fav when Senior/Executive/Managing/Global.
 const DIR_SENIOR = /\b(senior|executive|managing|global)\b/i
 
+// Seniority band from the FULL title (un-cut, abbrev-expanded). This is authoritative for the GROUP
+// bucket — more reliable than which seed title happened to fuzzy-match. Order matters: a VP-led
+// hybrid ("VP, Chief X") stays vp; any Chief/C-x-O acronym (incl. CISO/CSO/CFO/CMO/CRO/CHRO/CLO/CDO)
+// or President/Founder -> csuite; VP/SVP/EVP/AVP/Head/Executive -> vp (so Executive Director lands in
+// VP & Head of); anything else with Director -> director. null when no seniority signal at all.
+export function seniorityBand(rawTitle: string): Group | null {
+  const s = normalize(rawTitle, { cut: false })
+  if (/^(vp|svp|evp|avp)\b/.test(s)) return 'vp'                                   // VP-led hybrid wins
+  if (/\b(chief|ceo|cto|cio|ciso|cso|cfo|coo|cpo|cmo|cro|chro|clo|cdo|caio|cdigo|cdatao|cxo|founder|president)\b/.test(s)) return 'csuite'
+  if (/\b(vp|svp|evp|avp|head|executive)\b/.test(s)) return 'vp'
+  if (/\bdirector\b/.test(s)) return 'director'
+  return null
+}
+
 function entryResult(e: IndexEntry, method: MatchMethod, confidence: number): MatchResult {
   return { matched: true, group: e.group, roleSlug: e.roleSlug, role: e.role, variation: e.variation, title: e.title, tier: e.tier, isFavorite: e.tier === 'fav', method, confidence }
 }
@@ -227,14 +245,10 @@ export function resolveTitle(rawTitle: string, context = ''): MatchResult & { ba
     if (best && bestSim >= 0.82) res = entryResult(best, 'fuzzy', Number(bestSim.toFixed(3)))
   }
   if (!res) {
-    // keyword fallback → tier watch (matched but not a seeded favorite)
-    const seniority: Group | null = /\bchief\b|\bceo\b|\bcto\b|\bcio\b|\bcpo\b|\bcoo\b|\bcaio\b|\bcdigo\b|\bcdatao\b|\bfounder\b|\bpresident\b/.test(norm) ? 'csuite'
-      // "VP & Head of" band: VP/SVP/EVP/AVP, Head of, and EXECUTIVE (so "Executive Director" /
-      // "Executive Technical Director" land here). Everything else with "director" — incl. Managing
-      // Director, Senior/Global Director — stays in the Director band (owner decision 2026-07-30:
-      // all Director roles are Director UNLESS "Executive Director").
-      : /\bvp\b|\bsvp\b|\bevp\b|\bavp\b|\bhead\b|\bexecutive\b/.test(norm) ? 'vp'
-      : /\bdirector\b/.test(norm) ? 'director' : null
+    // keyword fallback → tier watch (matched but not a seeded favorite). Seniority comes from the
+    // FULL title (seniorityBand) so tokens after a separator ("Administration - SVP - ...") and
+    // C-x-O acronyms (CISO/CSO/…) are seen even though `norm` was cut.
+    const seniority: Group | null = seniorityBand(rawTitle)
     if (seniority) {
       const rk = seniority === 'csuite' ? ROLE_KEYWORDS.find((r) => r.kw.test(norm)) : null
       const fam = seniority !== 'csuite' ? FAMILY_KW.find((f) => f.kw.test(norm)) : null
@@ -244,6 +258,13 @@ export function resolveTitle(rawTitle: string, context = ''): MatchResult & { ba
     }
   }
   if (!res) return { ...NONE, backlog: false }
+
+  // Group override: the seniority band (from the full title) is authoritative for the GROUP bucket,
+  // even when a seed title fuzzy-matched into a different group. Fixes "Executive Director" (which
+  // fuzzy-matches a Director seed title) landing in Director instead of VP & Head of. Keeps the seed's
+  // role/variation/tier — only the coarse group bucket is corrected.
+  const band = seniorityBand(rawTitle)
+  if (band && res.group !== band) res = { ...res, group: band }
 
   // Inclusion rules — a favorite that fails its rule stays matched but goes to backlog (not priority).
   let backlog = false

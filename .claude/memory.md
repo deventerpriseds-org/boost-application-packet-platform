@@ -350,3 +350,29 @@ ANSWER: they are different subsystems.
 - The plan to resolve is the ACT-21 "Target end state" (unify to ONE taxonomy source). Now that
   jd_real exists, classification could ALSO improve by using the real title from the fetched JD instead
   of the digest-collapsed jd_title — but the core fix is still unifying the two brains.
+
+## Role classification — GROUND TRUTH + Phase-1 fix SHIPPED & VERIFIED (2026-07-30, ACT-23)
+Read the REAL posting (jd_real) for 51 opps: `role` matched the real posting 51/51 -> `role` is RELIABLE.
+The broken field was `matched_group` (the bin), because retag classified on `jd_title`, which is
+derived from runJdParse(raw_jd) where raw_jd = the WHOLE digest -> every sibling inherited the digest
+HEADLINE title and got mis-binned. jd_real (fetched by job_id) is the ONLY ground truth; jd_title/
+jd_summary are digest-collapsed = unreliable. PRD (Boost_Exec_Pipeline.PDF = Roles & Titles PRD)
+confirms 3-level taxonomy (group->role->title variant) with fav/watch/off tiers EXPLICITLY replaces the
+flat 8-persona system (= the CTO/VPE/VPP demo still shown in Settings ▸ Roles).
+Owner decisions (2026-07-30): "Head of"/SVP/EVP/Executive Director -> "VP & Head of". ALL Director roles
+(incl. Managing/Senior/Global Director) -> Director, EXCEPT "Executive Director". Personas: leave DORMANT
+(keep persona table+/app/personas endpoints, stop surfacing) — persona table has 0 rows for owner anyway.
+Phase-1 fix (commits 879c259, c3a0034), deployed + retag-all run + VERIFIED live:
+ - appRoleTaxonomy.tagFields classifies on `role` first (never jd_title).
+ - roleTaxonomy keyword band: VP/SVP/EVP/AVP/Head/Executive -> vp; plain/Managing/Senior Director -> director.
+ - appJdParse derives jd_title/jd_summary from jd_real (real posting) not raw_jd (digest) — NEW parses only.
+ - Result: csuite_but_vp_title 54->0; vp_but_chief_title 50->5 (the 5 are legit "VP, Chief X" hybrids).
+   Group dist now csuite:262 vp:412 director:96 null:59. Spot-checks all correct.
+STILL OPEN:
+ - Historical JD panels: ~174 opps with jd_real still show OLD digest-derived jd_summary until re-parsed
+   (~174 OpenAI calls). Not yet run.
+ - Settings ▸ Roles taxonomy UI (3 groups + roles + title variants + tier controls + add) NOT BUILT — that
+   screen still shows the legacy persona demo. This is Phase 2 (the user's "see 3 groups/tiers" ask).
+ - Seed marks 868/868 titles 'fav' (favorite meaningless) — PRD intends ~84. Fix during Settings work.
+ - Suspected: "Executive Director" may exact/fuzzy-match a SEED director-group title BEFORE the keyword
+   band, binning it director instead of vp — under investigation.
