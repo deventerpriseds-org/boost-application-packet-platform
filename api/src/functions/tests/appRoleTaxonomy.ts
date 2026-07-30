@@ -65,7 +65,10 @@ async function loadTierMap(client: any, owner: string): Promise<Map<string, Tier
 // Tag one opportunity row from its title/JD. Returns the columns to persist. Idempotent:
 // base_score is captured once (coalesce) so re-runs don't double-boost.
 export function tagFields(row: any, tierMap?: Map<string, Tier>) {
-  const title = row.jd_title || row.role || ''
+  // Classify on `role` — the per-opp title from parseAlert, PROVEN accurate against the real
+  // posting (51/51 ground-truthed 2026-07-30). NEVER classify on jd_title: it is derived from the
+  // whole digest, so every sibling opp inherits the digest's HEADLINE title and gets mis-binned.
+  const title = row.role || row.jd_title || ''
   const context = `${row.jd_summary || ''} ${row.jd_requirements || ''}`
   const m = resolveTitle(title, context)
   // user tier override (by normalized title) wins over the seed tier

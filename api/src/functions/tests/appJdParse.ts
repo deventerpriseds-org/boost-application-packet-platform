@@ -102,11 +102,15 @@ export async function jdParse(req: HttpRequest, context: InvocationContext): Pro
     client = await getPgClient()
     await ensureJdColumns(client)
     const opp = (await client.query(
-      `select id, company, role, raw_jd, why_surfaced from opportunity where id = $1`, [oppId]
+      `select id, company, role, jd_real, raw_jd, why_surfaced from opportunity where id = $1`, [oppId]
     )).rows[0]
     if (!opp) return { status: 404, headers: HEADERS, jsonBody: { error: 'not found' } }
 
-    let rawJd: string = opp.raw_jd || ''
+    // Prefer the REAL fetched posting (jd_real) over raw_jd. raw_jd is the whole digest email, so
+    // parsing it yields the digest HEADLINE job for every sibling (the fabrication bug). jd_real is
+    // the actual posting fetched by job_id — the ground truth. Strip tags for the LLM.
+    const realJd = opp.jd_real ? String(opp.jd_real).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim() : ''
+    let rawJd: string = realJd || opp.raw_jd || ''
 
     // If no raw_jd stored, try to fetch from URL in why_surfaced
     if (!rawJd) {
