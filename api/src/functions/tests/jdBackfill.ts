@@ -189,8 +189,9 @@ export async function jdBackfillFetch(req: HttpRequest, _ctx: InvocationContext)
   const concurrency = Math.max(1, Math.min(20, Number(body.concurrency) || 1))
   const delayMs = Math.max(0, Math.min(20000, Number(body.delayMs) || 0))  // pause between waves (safe sweep)
   const favoritesOnly = body.favoritesOnly !== false
-  const superOnBlock = body.superOnBlock !== false
-  const runTag = String(body.runTag || `backfill-c${concurrency}`)
+  const direct = body.direct === true            // fetch straight from Azure egress — no proxy, no credits
+  const superOnBlock = !direct && body.superOnBlock !== false
+  const runTag = String(body.runTag || (direct ? 'backfill-direct' : `backfill-c${concurrency}`))
   const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
   const cfg = await loadConfig()
@@ -218,15 +219,19 @@ export async function jdBackfillFetch(req: HttpRequest, _ctx: InvocationContext)
     async function one(row: any): Promise<'ok_jd' | 'blocked' | 'auth_required' | 'not_found' | 'proxy_error' | 'empty' | 'login_wall'> {
       const url = guestUrl(row.job_id)
       let r: any, jd: any, outcome: any = 'blocked'
-      for (let attempt = 0; attempt < maxTries; attempt++) {
+      // Direct mode = one try straight from Azure egress (no proxy, no credits). Proxy mode retries.
+      const tries = direct ? 1 : maxTries
+      for (let attempt = 0; attempt < tries; attempt++) {
         // Attempt 0 = cheap (datacenter, ~1 credit); retries escalate to super (residential, rotated).
         const useSuper = attempt > 0 && superOnBlock
         if (useSuper) escalated++
-        r = await scraperFetch(url, { provider: 'scrapedo', sdSuper: useSuper })
+        r = direct
+          ? await scraperFetch(url, { force: 'direct' })
+          : await scraperFetch(url, { provider: 'scrapedo', sdSuper: useSuper })
         jd = extractGuestJdHtml(r.body)
         outcome = classifyResponse(r.status, r.body, jd.descriptionHtml != null)
         await logJdFetch({
-          jobId: String(row.job_id), provider: r.provider || 'scrapedo', via: r.via, httpStatus: r.status,
+          jobId: String(row.job_id), provider: r.provider || (direct ? 'direct' : 'scrapedo'), via: r.via, httpStatus: r.status,
           outcome, jdTextLen: jd.textLen, bytes: r.body.length, latencyMs: r.latencyMs, concurrency,
           runTag: attempt > 0 ? `${runTag}+retry${attempt}` : runTag, usage: r.usage, error: r.error,
         })
