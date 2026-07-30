@@ -292,3 +292,28 @@ seeMoreJobPostings/search with f_E=5,6 (Director+Executive) + f_TPR recency, per
 - NOTE: role keywords are taxonomy GROUP/role names ("Data, Analytics & AI") — generic but returned
   ~10 cards/role. Future refinement: search specific favorite TITLES for tighter targeting.
 - Diag: POST /api/diag/tavily (Tavily extract/search) added to beat bot-403s during research.
+
+## JD backfill — FINAL decision (2026-07-30, user directive)
+Favorites backfill is DONE (130/164 real jd_real; remainder are not_found/expired postings — nothing
+more to recover). User decided NOT to backfill non-favorites backward: "not sure it's worth grabbing
+anything but my favorites looking backwards... we can capture non favorites from here... but probably
+not with the effort to go backwards." So:
+- DO NOT re-run the ~319 non-favorite backward sweep. That decision is deliberate, not an oversight.
+- Non-favorites are captured GOING FORWARD automatically: both email ingest (injectJobMarkers) and
+  scheduled jd-search capture job_id/job_url at insert; paced direct jd-backfill/fetch fills jd_real.
+- The backward historical sweep is considered CLOSED.
+
+## Unified JD pipeline (the settled operating model)
+- Discovery: (a) email ingest, (b) scheduled exec-role search 5am/1pm/6pm ET → both → routeOpportunity.
+- JD-fetch: paced direct-from-Azure (1 req/~2s + 40% jitter, dedup by jobId, rotating UA + LinkedIn
+  Referer/Sec-Fetch headers). quota_exceeded halts; auth_required/not_found marked-skipped.
+- Rate-safety: measured wall ~30 rapid req/IP → 429; pacing keeps us an order of magnitude under
+  <100/day load. Residential proxy stays in reserve behind scraperProxy. NO multi-region (shares
+  datacenter TLS fingerprint; solves nothing pacing doesn't).
+- Search-term granularity (when wiring schedule for real): role-level, OR-concatenated favorite title
+  variants (keywords='("VP Data" OR "Head of Analytics" OR ...)') to minimize searches while keeping
+  recall. Group-level too broad; title-level too many searches.
+- Location: switch from string 'United States' to verified US geoId 103644278 (Medium/Khan insight:
+  country-name search is unreliable). Fold in with search-schedule work.
+- Tavily one-offs: prefer a GH-runner curl with ${{ secrets.TAVILY_API_KEY }} to api.tavily.com/extract
+  over deploying a Function endpoint (simpler/faster for research). diag/tavily kept for in-app use.
