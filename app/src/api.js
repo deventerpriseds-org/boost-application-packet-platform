@@ -154,11 +154,14 @@ export const api = {
   trackedLink: (artifactId) => `${API_BASE}/app/asset/${artifactId}/open`,
   // Library
   listAssets: () => get(`/app/assets`),
-  listPersonas: () => get(`/app/personas`),
-  createPersona: (data) => post(`/app/personas`, data),
-  updatePersona: (key, patch) => patch_(`/app/personas/${key}`, patch),
-  deletePersona: (key) => del(`/app/personas/${key}`),
-  tagAllRoles: () => post(`/app/personas/tag-all`, {}),
+  // Pass ?owner= like every other data call so personas resolve to the active owner (not the demo
+  // fallback). Without this, /app/personas defaulted server-side to demo@ and showed the demo roles
+  // even when opportunities were showing the real owner's data.
+  listPersonas: () => get(`/app/personas?owner=${encodeURIComponent(_owner)}`),
+  createPersona: (data) => post(`/app/personas?owner=${encodeURIComponent(_owner)}`, data),
+  updatePersona: (key, patch) => patch_(`/app/personas/${key}?owner=${encodeURIComponent(_owner)}`, patch),
+  deletePersona: (key) => del(`/app/personas/${key}?owner=${encodeURIComponent(_owner)}`),
+  tagAllRoles: () => post(`/app/personas/tag-all?owner=${encodeURIComponent(_owner)}`, {}),
   // Role taxonomy (3-level: group -> role -> title variant; fav/watch/off tiers)
   taxonomy: () => get(`/app/taxonomy`),
   taxonomyRetag: () => post(`/app/taxonomy/retag`, {}),
