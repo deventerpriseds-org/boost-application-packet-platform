@@ -130,11 +130,13 @@ export const api = {
   mailClearReload: ({ days = 7 } = {}) => post(`/mail/clear-reload`, { days }),
   mailConfigGet: () => get(`/mail/config`),
   mailConfigSet: (patch) => post(`/mail/config`, patch),
-  mailFolders: (mailbox) => get(`/mail/folders${mailbox ? `?mailbox=${encodeURIComponent(mailbox)}` : ''}`),
-  mailFolderTree: (mailbox) => get(`/mail/folders?tree=1${mailbox ? `&mailbox=${encodeURIComponent(mailbox)}` : ''}`),
-  mailFolderMapGet: () => get(`/mail/folder-map`),
-  mailFolderMapSet: ({ folderId, folderPath, roleKey }) => post(`/mail/folder-map`, { folderId, folderPath, roleKey }),
-  mailFolderMapDelete: ({ folderId, roleKey }) => post(`/mail/folder-map/delete`, { folderId, roleKey }),
+  // Owner-scoped: pass ?owner= so folder tree + folder↔role mappings resolve to the active owner
+  // (not the demo fallback) — same fix as personas. Without it, von.ellis's mappings never load.
+  mailFolders: (mailbox) => get(`/mail/folders?owner=${encodeURIComponent(_owner)}${mailbox ? `&mailbox=${encodeURIComponent(mailbox)}` : ''}`),
+  mailFolderTree: (mailbox) => get(`/mail/folders?tree=1&owner=${encodeURIComponent(_owner)}${mailbox ? `&mailbox=${encodeURIComponent(mailbox)}` : ''}`),
+  mailFolderMapGet: () => get(`/mail/folder-map?owner=${encodeURIComponent(_owner)}`),
+  mailFolderMapSet: ({ folderId, folderPath, roleKey }) => post(`/mail/folder-map?owner=${encodeURIComponent(_owner)}`, { folderId, folderPath, roleKey }),
+  mailFolderMapDelete: ({ folderId, roleKey }) => post(`/mail/folder-map/delete?owner=${encodeURIComponent(_owner)}`, { folderId, roleKey }),
   mailMessages: ({ folderId, top = 50, mailbox } = {}) => get(`/mail/messages?top=${top}${folderId ? `&folderId=${encodeURIComponent(folderId)}` : ''}${mailbox ? `&mailbox=${encodeURIComponent(mailbox)}` : ''}`),
   mailMessage: (id, mailbox) => get(`/mail/message/${encodeURIComponent(id)}${mailbox ? `?mailbox=${encodeURIComponent(mailbox)}` : ''}`),
   mailAlertSnooze: (messageId, hours = 24) => post(`/mail/alert/snooze`, { messageId, hours }),
