@@ -46,9 +46,20 @@ export async function personasList(req: HttpRequest, context: InvocationContext)
   try {
     client = await getPgClient()
     const personas = (await client.query(`select key, name, master_role, comp_target, positioning from persona where owner_email = $1 order by key`, [owner])).rows
-    const counts = (await client.query(`select unnest(roles_for) as pkey, count(*)::int as n from opportunity where owner_email = $1 and not dismissed group by 1`, [owner])).rows
+    // Count opps via the TAXONOMY classification (matched_group + matched_role), not roles_for — so the
+    // Target-roles list reflects real bins. Group is derived from the key prefix (VP-… / DIR-… / else
+    // csuite); master_role holds the taxonomy role name. Falls back to roles_for for any legacy persona.
+    const counts = (await client.query(
+      `select p.key,
+         ( select count(*) from opportunity o
+            where o.owner_email = p.owner_email and not o.dismissed
+              and o.matched_role = p.master_role
+              and o.matched_group = case when p.key like 'VP-%' then 'vp'
+                                         when p.key like 'DIR-%' then 'director' else 'csuite' end
+         )::int as n
+       from persona p where p.owner_email = $1`, [owner])).rows
     const countMap: Record<string, number> = {}
-    for (const c of counts) countMap[c.pkey] = c.n
+    for (const c of counts) countMap[c.key] = c.n
     return { status: 200, headers: HEADERS, jsonBody: { personas: personas.map((p: any) => ({
       key: p.key, name: p.name, masterRole: p.master_role, compTarget: p.comp_target, positioning: p.positioning, opportunities: countMap[p.key] || 0
     })) } }
