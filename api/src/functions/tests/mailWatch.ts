@@ -427,7 +427,9 @@ async function folderSkipsFilter(owner: string, folderId?: string): Promise<bool
 }
 
 async function ingestMessageId(token: string, id: string, cfg: WatchConfig) {
-  const m = await fetch(`https://graph.microsoft.com/v1.0/users/${cfg.mailbox}/messages/${id}?$select=subject,from,bodyPreview,body,receivedDateTime,parentFolderId`, { headers: { Authorization: `Bearer ${token}` } })
+  // Graph message ids contain '/', '+', '=' — must be URL-encoded or Graph reads the id as extra path
+  // segments and 400s with RequestBroker--ParseUri "Resource not found for the segment 'AAMk…'".
+  const m = await fetch(`https://graph.microsoft.com/v1.0/users/${cfg.mailbox}/messages/${encodeURIComponent(id)}?$select=subject,from,bodyPreview,body,receivedDateTime,parentFolderId`, { headers: { Authorization: `Bearer ${token}` } })
   if (!m.ok) return { error: `fetch message HTTP ${m.status}` }
   const msg = await m.json() as any
   const from = (msg?.from?.emailAddress?.address || '').toLowerCase()
@@ -684,7 +686,7 @@ async function reclassifyFolder(
   if (!dryRun) {
     for (let i = 0; i < toMove.length; i += 20) {
       const chunk = toMove.slice(i, i + 20)
-      const batch = { requests: chunk.map((it, k) => ({ id: String(k), method: 'POST', url: `/users/${mailbox}/messages/${it.id}/move`, headers: { 'Content-Type': 'application/json' }, body: { destinationId: it.dest } })) }
+      const batch = { requests: chunk.map((it, k) => ({ id: String(k), method: 'POST', url: `/users/${mailbox}/messages/${encodeURIComponent(it.id)}/move`, headers: { 'Content-Type': 'application/json' }, body: { destinationId: it.dest } })) }
       const r = await fetch('https://graph.microsoft.com/v1.0/$batch', { method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify(batch) })
       if (!r.ok) { if (errors.length < 5) errors.push(`batch ${r.status}: ${(await r.text()).slice(0, 120)}`); continue }
       const jr = await r.json() as any
@@ -1046,8 +1048,10 @@ export async function mailMessageBody(req: HttpRequest, context: InvocationConte
     if (!id) return { status: 400, headers: HEADERS, jsonBody: { error: 'message id required' } }
     const mailbox = req.query.get('mailbox') || (await loadConfig(resolveOwner(req).owner)).mailbox
     const token = await getMicrosoftToken(creds.tenantId, creds.clientId, creds.clientSecret)
+    // Encode the id — Graph message ids contain '/', '+', '=' and an unencoded id 400s with
+    // RequestBroker--ParseUri "Resource not found for the segment 'AAMk…'" (the ACT-28 bug).
     const res = await fetch(
-      `https://graph.microsoft.com/v1.0/users/${mailbox}/messages/${id}?$select=subject,from,body,receivedDateTime,parentFolderId`,
+      `https://graph.microsoft.com/v1.0/users/${mailbox}/messages/${encodeURIComponent(id)}?$select=subject,from,body,receivedDateTime,parentFolderId`,
       { headers: { Authorization: `Bearer ${token}` } }
     )
     if (!res.ok) return { status: 200, headers: HEADERS, jsonBody: { ok: false, detail: `HTTP ${res.status}: ${(await res.text()).slice(0, 200)}` } }
