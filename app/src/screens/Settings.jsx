@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react'
-import { api } from '../api.js'
+import { api, getSessionToken } from '../api.js'
 import { go, useApp } from '../state.jsx'
 import { Pill } from '../shell.jsx'
 
@@ -34,6 +34,18 @@ function visibleFolders(list, expanded) {
   })
 }
 const Label = ({ children }) => <div className="px-small" style={{ textTransform: 'uppercase', letterSpacing: 1, marginBottom: 4 }}>{children}</div>
+
+// Is the server-verified session token present AND unexpired? Writes (requireWrite) need it; it has a
+// 12h TTL and does not silently refresh, so a stale token 401s every owner-scoped mutation while reads
+// still work via ?owner=. Decode the JWT exp locally to warn BEFORE the user loses their edits to a 401.
+function sessionValid() {
+  const t = getSessionToken()
+  if (!t) return false
+  try {
+    const p = JSON.parse(atob(t.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')))
+    return typeof p.exp === 'number' && p.exp > Math.floor(Date.now() / 1000)
+  } catch { return false }
+}
 
 // LinkedIn role sweep — the ACTIVE counterpart to mailbox alert intake. Instead of waiting for
 // LinkedIn alert emails to land, a per-minute timer walks a DB cursor through OR-batches of the
@@ -99,13 +111,23 @@ function SweepSettings() {
   }, [tpq, st.loading, st.err, totals.previewTpq])
 
   const save = useCallback(async () => {
+    // Catch a stale/absent session before the POST so edits aren't lost to a raw 401.
+    if (!sessionValid()) {
+      setNote({ ok: false, msg: 'Your sign-in session expired. Sign out and back in (top-right menu), then Save again — your changes here are still filled in.' })
+      return
+    }
     setSaving(true); setNote(null)
     try {
       const r = await api.searchSweepSet({ enabled, titlesPerQuery: tpq, activeHoursEt: rangeToHours(startH, endH) })
       if (r.ok === false) throw new Error(r.error || 'save failed')
       setNote({ ok: true, msg: enabled ? 'Saved — sweep is ON.' : 'Saved — sweep is OFF.' })
       await load()   // re-pull authoritative cursor/totals from server
-    } catch (e) { setNote({ ok: false, msg: String(e.message || e) }) }
+    } catch (e) {
+      const msg = String(e.message || e)
+      setNote({ ok: false, msg: /401/.test(msg)
+        ? 'Your sign-in session expired. Sign out and back in (top-right menu), then Save again.'
+        : msg })
+    }
     finally { setSaving(false) }
   }, [enabled, tpq, startH, endH, load])
 
@@ -251,6 +273,16 @@ function SweepSettings() {
               {queries.length > 100 && <div className="px-small" style={{ padding: '6px 12px', color: 'var(--proto-ink3)', borderTop: '1px solid var(--proto-rule-soft)' }}>+ {queries.length - 100} more…</div>}
             </div>
           )}
+        </div>
+      )}
+
+      {/* stale-session warning — writes need a live session token (12h TTL, no silent refresh) */}
+      {!sessionValid() && (
+        <div style={{ display: 'flex', gap: 9, alignItems: 'flex-start', marginTop: 14, padding: '10px 12px', borderRadius: 8, fontSize: 12, lineHeight: 1.45,
+          background: 'var(--proto-yellow-soft, color-mix(in srgb, var(--proto-yellow) 12%, transparent))',
+          border: '1px solid color-mix(in srgb, var(--proto-yellow) 45%, transparent)', borderLeft: '3px solid var(--proto-yellow)' }}>
+          <span style={{ color: 'var(--proto-yellow)', fontSize: 14, flex: 'none' }}>🔒</span>
+          <span>Your sign-in session has expired, so changes can't be saved yet. <b>Sign out and back in</b> (top-right menu), then Save — your selections here stay filled in.</span>
         </div>
       )}
 
