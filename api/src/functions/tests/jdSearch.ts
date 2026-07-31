@@ -65,6 +65,40 @@ async function loadRoleKeywords(client: any, owner: string, max = 40): Promise<s
   return norm(SEED.roles.map((r) => r.role))
 }
 
+export interface RoleQuery { role: string; keywords: string; titles: number }
+
+// ACT-29: search on the FAVOURITE TITLE VARIANTS (taxonomy_title tier='fav', the level below role),
+// not the bare role name. Per role, OR-concatenate that role's favourite titles into ONE guest-search
+// query — e.g. `"Chief Technology Officer" OR "Platform CTO" OR "Enterprise CTO"` — so one search
+// covers all of a role's target titles. Results whose title matches a fav variant get is_favorite=true
+// via tagFields, so they surface under the favourite+recent scope; fuzzy near-misses fall to watch/off.
+// Capped at maxTitlesPerQuery phrases/role to keep the keyword string under LinkedIn's length limit.
+// Falls back to role-name search when the user has no favourites yet.
+async function loadFavoriteTitleQueries(
+  client: any, owner: string, opts: { maxRoles?: number; maxTitlesPerQuery?: number } = {},
+): Promise<RoleQuery[]> {
+  const maxRoles = opts.maxRoles || 40
+  const maxTitles = Math.max(1, Math.min(12, opts.maxTitlesPerQuery || 8))
+  try {
+    const r = await client.query(
+      `select role, array_agg(distinct title) as titles
+         from taxonomy_title
+        where owner_email=$1 and tier='fav' and coalesce(title,'') <> ''
+        group by role order by role`,
+      [owner],
+    )
+    const queries: RoleQuery[] = []
+    for (const row of r.rows) {
+      const titles = Array.from(new Set((row.titles || []).map((s: string) => String(s).trim()).filter(Boolean))).slice(0, maxTitles)
+      if (!titles.length) continue
+      queries.push({ role: row.role, keywords: titles.map((t) => `"${t}"`).join(' OR '), titles: titles.length })
+    }
+    if (queries.length) return queries.slice(0, maxRoles)
+  } catch { /* taxonomy_title may not exist */ }
+  // Fallback: search bare role names (previous behaviour).
+  return (await loadRoleKeywords(client, owner, maxRoles)).map((role) => ({ role, keywords: role, titles: 0 }))
+}
+
 // Core: search each role on the guest endpoint (direct, hardened, jittered), parse cards, and route
 // each through the SAME opportunity pipeline (dedup + role-tag + jobId/url capture). It only
 // DISCOVERS + inserts — the real JD is filled by the paced direct fetch (jd-backfill/fetch), so this
@@ -78,13 +112,15 @@ export async function runRoleSearch(owner: string, opts: { tpr?: string; locatio
   const fresh: Array<{ id: string; job_id: string }> = []   // newly-inserted opps to fill JDs for
   try {
     client = await getPgClient()
-    const roles = await loadRoleKeywords(client, owner, opts.roleLimit || 40)
-    summary.roles = roles.length
+    // ACT-29: one OR-concatenated favourite-TITLE query per role (falls back to role names).
+    const queries = await loadFavoriteTitleQueries(client, owner, { maxRoles: opts.roleLimit || 40 })
+    summary.roles = queries.length
     let consecBlocked = 0
-    for (const role of roles) {
+    for (const q of queries) {
+      const role = q.role
       let roleInserted = 0, roleCards = 0
       for (let pg = 0; pg < pages; pg++) {
-        const url = buildSearchUrl(role, { tpr: opts.tpr, location: opts.location, start: pg * 25 })
+        const url = buildSearchUrl(q.keywords, { tpr: opts.tpr, location: opts.location, start: pg * 25 })
         const r = await scraperFetch(url, { force: 'direct' })
         summary.searched++
         const outcome = classifyResponse(r.status, r.body, false)
@@ -101,7 +137,7 @@ export async function runRoleSearch(owner: string, opts: { tpr?: string; locatio
         if (cards.length < 25) break            // last page for this role
         await sleepJitter(2500)                 // human pacing between pages
       }
-      summary.byRole.push({ role, cards: roleCards, inserted: roleInserted })
+      summary.byRole.push({ role, titles: q.titles, cards: roleCards, inserted: roleInserted })
       if (consecBlocked >= 3) break             // real wall — stop the run
       await sleepJitter(3000)                   // human pacing between roles
     }
@@ -150,10 +186,13 @@ function hourInTz(tz: string): number {
 // Timer: exec-role search 3×/day at 5am/1pm/6pm ET. Because NCRONTAB fires in UTC and ET shifts with
 // DST, we fire at the UTC hours that bracket those ET times (09/10, 17/18, 22/23) and then run ONLY
 // when it's actually 5/13/18 in New York — DST-safe and independent of any WEBSITE_TIME_ZONE setting.
-// PAUSE SWITCH (2026-07-30): the automated 3x/day search is held OFF while the role/folder/intake
-// alignment work is in flight (owner request — "pause until everything clean"). Flip to false to
-// resume. The manual POST /api/mail/jd-search still works for testing.
-const SEARCH_PAUSED = true
+// PAUSE SWITCH: was held OFF (2026-07-30) during the role/folder/intake/JD alignment work.
+// RE-ENABLED 2026-07-31 (ACT-29) now that intake+JD are clean (ACT-27/28/35) and search targets the
+// favourite title variants. SCHEDULE DECISION: the favourite-title set is ONE OR-query per role
+// (≤~27 queries/cycle, 1 page each, ~3s-jittered ≈ a couple minutes + a bounded inline JD burst),
+// well under the ~30-fetch/IP block wall — so the WHOLE set fits ONE slot. We therefore run the full
+// favourite set at EACH of the 3 ET slots (5am/1pm/6pm), no per-slot query spreading needed.
+const SEARCH_PAUSED = false
 
 export async function jdSearchTimer(_t: Timer, context: InvocationContext): Promise<void> {
   if (SEARCH_PAUSED) { context.log('jd-search timer: PAUSED (SEARCH_PAUSED=true) — skipping'); return }
