@@ -657,3 +657,14 @@ funnel and reconcile automatically. Hook also exposes allOpportunities (raw) for
 NEW STRICT RULE added to CLAUDE.md: "Trace every dependent — up AND downstream — before declaring a change
 done" (map blast radius; apply shared logic at the ONE core source; grep all consumers; counts across
 Today/Swipe/Pipeline/Opportunities must reconcile). Mismatched numbers ⇒ hunt the hardcode/off-funnel spot.
+
+## EDS setup v3 installed this session (2026-07-31, owner request)
+Installed the eds-claude-skills v3 enforcement into /root/.claude/launcher-settings.json (was NOT present
+before — only generic git-identity/git-check hooks): added the `eds-enforce` v3 SessionStart command hook
+and the v3 Stop AGENT hook (hard verification gate, model claude-haiku-4-5). Existing git hooks preserved.
+Registered 13 skills → /root/.claude/skills and the `verifier` agent → /root/.claude/agents. Appended the
+GLOBAL-RULES + skills overview to /root/.claude/CLAUDE.md. Source: /workspace/eds-claude-skills (also copied
+to /root/.eds-claude-skills). ACTIVATION CAVEAT: hook/agent config is typically read at SESSION START, so
+the Stop gate + Agent(subagent_type="verifier") reliably activate NEXT session. GOING FORWARD: code changes
+need subagent-authored ACs (define-acceptance-criteria) BEFORE + a verifier subagent (verify-work) AFTER;
+every task needs bootstrap(register_repo_root) + memory + actions + a stated plan before risky actions.
