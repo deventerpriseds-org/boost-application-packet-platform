@@ -609,3 +609,19 @@ Owner wants to see the exact per-role OR-concatenated favourite-title queries (l
 output) and approve before SEARCH_PAUSED flips to false. Flag set back to true. ACT-29 code stays
 complete + verified; only the automated timer is gated on the review. Next: ACT-36 = a read-only query
 preview (endpoint + UI) so the owner can approve, THEN unpause.
+
+## ACT-31/32/33/34 DONE (2026-07-31): swipe/location/remote filters + upstream gate
+- ACT-31: Swipe SourcePills from real distinct `source` (LinkedIn 799/LinkedIn Search 185/Indeed 15/
+  Email 5/Extension 2). Verified live.
+- geoMaster.ts: curated US-metro master (name, geoId, aliases) + resolveMetro() + parseWorkMode()/
+  stripWorkMode(). geoIds are published LinkedIn values, OPTIONAL (buildSearch text-fallback) — SPOT-CHECK
+  against live LinkedIn before relying on f_PP; several left null (Denver/Minneapolis/Philadelphia).
+- appOpportunities.rowToOpp now adds metroName, metroGeoId, workMode to every opp.
+- appSearchPrefs.ts: owner_search_prefs table (target_geo_ids[], remote_only) + GET/POST /app/search-prefs.
+- ACT-32: Settings ▸ Locations panel (new SECTIONS key 'locations') = metro multi-select from REAL opp
+  metros + counts (US 71/NYC 23/SF…), persists prefs; Opportunities filters by targetGeoIds; verified live.
+- ACT-33: Swipe WorkPills (remote/hybrid/onsite) + card badge (🌐 Remote/Hybrid/On-site + metro pill);
+  remoteOnly persisted pref.
+- ACT-34: jdSearch keepCard() gate drops off-target/non-remote cards BEFORE insert+JD-fetch (reads
+  search-prefs); summary.skippedLocation. Search still PAUSED (ACT-36 review) so gate is dormant until unpause.
+- All api/app builds clean, deployed (api-deploy + exec-engine-deploy), main synced. Commits 28c3782, 7226e45.

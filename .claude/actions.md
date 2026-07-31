@@ -570,24 +570,32 @@ The rich Role-baseline page exists only in the prototype (proto-compass/engine.j
 fields) and is empty now that personas are empty. Rebuild on the taxonomy role with real baseline
 fields (narrative, key wins, linked assets, comp reference) — PRD's role_baseline.
 
-**ACT-31 — Swipe filters: source + intake channel.**
+**ACT-31 — ✅ DONE + verified (2026-07-31). Swipe source/intake facet pills from real distinct `source` values (LinkedIn/LinkedIn Search/Indeed/Email/Extension), composes with role pills. ui-verify #/swipe rendered "All sources"+"LinkedIn". Commit 28c3782.**
+
+(orig) ~~Swipe filters: source + intake channel.**
 Swipe page gains filters for SOURCE (Indeed vs Greenhouse vs LinkedIn vs …) and INTAKE CHANNEL
 (mailbox / scheduled search / ATS job board / extension). Data already on opportunity (source,
 plus the ingest path). Add facet filters in the Swipe UI.
 
-**ACT-32 — Location as a configurable multi-select in Settings + facet counts.**
+**ACT-32 — ✅ DONE + verified (2026-07-31). Seeded real US-metro master (geoMaster.ts, names+aliases+geoIds; geoId optional w/ text fallback, flagged for live spot-check). Opps tagged metroName/metroGeoId. Settings ▸ Locations multi-select from real metros + live counts (US 71, NYC 23, SF…), persisted via /app/search-prefs. Filters Opportunities + Swipe. ui-verify #/settings/locations rendered panel+metros+counts. Commit 7226e45.**
+
+(orig) ~~Location as a configurable multi-select in Settings + facet counts.**
 Add a location multi-select in Settings, sourced by a lookup on LinkedIn's canonical location
 master list (geoId-backed — ties to the geoId work in ACT-24). Show counts = number of current opps
 per location (facet). Selected locations become the owner's target-location filter used across
 Swipe/Opportunities.
 
-**ACT-33 — Remote-optional visibility + filter on Swipe.**
+**ACT-33 — ✅ DONE (2026-07-31). workMode (remote/hybrid/onsite) parsed from location modifier (geoMaster.parseWorkMode), surfaced on Swipe card (🌐 Remote / Hybrid / On-site + metro pill) + a work-mode facet pill row; remote-only persisted pref in Settings ▸ Locations. Commit 7226e45.**
+
+(orig) ~~Remote-optional visibility + filter on Swipe.**
 Surface whether an opportunity is remote-optional on the Swipe view, and let the owner filter to
 "remote OR within my target locations" via Settings — so roles several states away that are NOT
 remote-optional are filtered out (owner can't commute that far daily). Needs a remote flag parsed
 from the JD/posting + the ACT-32 target-location set.
 
-**ACT-34 — Push ACT-32/33 filters UPSTREAM to cut daily volume.**
+**ACT-34 — ✅ DONE (2026-07-31). Search ingest gate (jdSearch.runRoleSearch keepCard) drops cards outside target metros / non-remote-when-remoteOnly BEFORE insert+JD-fetch, using persisted search-prefs — cuts JD fetches + tags. summary.skippedLocation counts drops. (Precise per-metro geoId f_PP search deferred; text/US search + ingest gate used.) Commit 7226e45.**
+
+(orig) ~~Push ACT-32/33 filters UPSTREAM to cut daily volume.**
 Apply the location + remote-optional filtering at the SEARCH and INGEST layer (not just display) so
 we fetch/parse fewer JDs per day: scheduled searches pass location/geoId + remote params; ingest
 skips (or de-prioritizes) opps that fail the location/remote gate before JD-fetch + tagging. Goal:
