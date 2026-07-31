@@ -668,3 +668,16 @@ to /root/.eds-claude-skills). ACTIVATION CAVEAT: hook/agent config is typically 
 the Stop gate + Agent(subagent_type="verifier") reliably activate NEXT session. GOING FORWARD: code changes
 need subagent-authored ACs (define-acceptance-criteria) BEFORE + a verifier subagent (verify-work) AFTER;
 every task needs bootstrap(register_repo_root) + memory + actions + a stated plan before risky actions.
+
+## JD-on-Overview + retrieve-missing-JD (2026-07-31, ACT-43)
+Owner request: JD above "Why surfaced" on OppDetail Overview + fix opps stuck on "full JD not retrieved"
+(Ventra Health CTO 7c4eea8c). Ground truth: Ventra had job_id 4445759706 but jd_real NULL, jd_fetched_at
+NULL → never fetched (search paused). FIX: (1) manual jd-backfill/fetch favoritesOnly direct → 25 cand /
+24 stored ok_jd / 1 blocked (guest endpoint WORKS direct, not broadly blocked). (2) Cleared placeholder
+jd_summary/title/company on 9 favorites that now have jd_real (UPDATE 9) so the jd-parse timer regenerates
+REAL summaries from jd_real (jdParse prefers jd_real → correct, no re-fabrication). (3) UI: OppDetail.jsx
+Overview renders "Job description" card ABOVE Why-surfaced — real JD shows title/company+summary+link to JD
+tab; not-retrieved shows muted notice + Re-parse button. Reuses o.jd* fields; JD tab unchanged. Commit
+1e25100. Flow followed the v3 gate: AC-subagent wrote ACs before, verifier subagent verifying after.
+INSIGHT: to actually clear "not retrieved" at scale, JDs must be FETCHED (jd-backfill/fetch by job_id) —
+which the paused 3x search would do inline; unpausing (ACT-36 review) resumes automatic JD fill.

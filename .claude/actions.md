@@ -674,3 +674,12 @@ course) and streamline that content into 5-6 PLAYBOOKS automatically. Two parts:
 which playbooks are STANDARD for each of the owner's target roles (a per-role playbook taxonomy), and
 (b) STRATEGY — a repeatable pipeline to turn source material (course content, notes) into assets
 (playbooks, diagrams, etc.). Precedes/feeds ACT-41 templatization.
+
+**ACT-43 — JD on the OppDetail Overview + retrieve missing JDs.** IN PROGRESS (verifier running).
+Owner: opps still show "full JD not retrieved" (e.g. Ventra Health CTO); and the Job Description should
+appear ABOVE the "Why surfaced" section on the Overview tab. DONE: (a) UI — OppDetail.jsx Overview now
+renders a "Job description" card above "Why surfaced", distinct not-retrieved state + Re-parse, reuses
+o.jd* fields, JD tab unchanged (commit 1e25100, AC-subagent authored ACs). (b) DATA — Ventra CTO had
+job_id but jd_real null; ran jd-backfill/fetch (favoritesOnly,direct): 25 candidates → 24 stored (ok_jd),
+then cleared the placeholder jd_summary on 9 now-fetched favorites so the 5-min jd-parse timer regenerates
+real summaries from jd_real. Independent verifier subagent spawned to confirm UI (ui-verify) + Ventra data.
