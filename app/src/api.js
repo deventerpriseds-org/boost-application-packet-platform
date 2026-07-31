@@ -141,6 +141,9 @@ export const api = {
   mailMessage: (id, mailbox) => get(`/mail/message/${encodeURIComponent(id)}${mailbox ? `?mailbox=${encodeURIComponent(mailbox)}` : ''}`),
   mailAlertSnooze: (messageId, hours = 24) => post(`/mail/alert/snooze`, { messageId, hours }),
   mailAlertDismiss: (messageId) => post(`/mail/alert/dismiss`, { messageId }),
+  // Search / filter preferences (target metros + remote-only) — ACT-32/33/34
+  searchPrefsGet: () => get(`/app/search-prefs?owner=${encodeURIComponent(_owner)}`),
+  searchPrefsSet: ({ targetGeoIds, remoteOnly }) => post(`/app/search-prefs?owner=${encodeURIComponent(_owner)}`, { targetGeoIds, remoteOnly }),
   mailSelfTest: () => post(`/mail/self-test`, {}),
   mailSendTestReal: (opts = {}) => post(`/mail/send-test-real`, opts),
   // Templates (reusable text/creative assets)

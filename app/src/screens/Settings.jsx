@@ -963,7 +963,80 @@ function TemplateForm({ initial, busy, onCancel, onSave }) {
   )
 }
 
-const SECTIONS = [{ key: 'account', label: 'Account' }, { key: 'intake', label: 'Intake' }, { key: 'roles', label: 'Roles' }, { key: 'templates', label: 'Templates' }, { key: 'coach', label: 'Coach' }, { key: 'workspace', label: 'Workspace' }, { key: 'usage', label: 'Usage' }, { key: 'system', label: 'System' }]
+// ACT-32/33 — target locations (metros) + remote-optional preference. The metro list + counts are
+// derived from the owner's real opportunities (each opp carries metroName/metroGeoId from the geo
+// master); the selection persists via /app/search-prefs and filters Swipe/Opportunities and (ACT-34)
+// the scheduled search. No fabricated location list — only metros actually present in the pipeline.
+function LocationSettings() {
+  const { toast } = useApp()
+  const [state, setState] = useState({ loading: true, metros: [], error: null })
+  const [selected, setSelected] = useState(() => new Set())
+  const [remoteOnly, setRemoteOnly] = useState(false)
+  const [saving, setSaving] = useState(false)
+
+  useEffect(() => {
+    let alive = true
+    Promise.all([api.listOpportunities(), api.searchPrefsGet()])
+      .then(([opps, prefs]) => {
+        if (!alive) return
+        const list = Array.isArray(opps) ? opps : (opps?.opportunities || [])
+        const by = new Map()
+        for (const o of list) {
+          if (o.dismissed) continue
+          const gid = o.metroGeoId || `name:${o.metroName || 'Unrecognized'}`
+          const cur = by.get(gid) || { geoId: o.metroGeoId || null, name: o.metroName || 'Unrecognized location', count: 0 }
+          cur.count += 1; by.set(gid, cur)
+        }
+        const metros = [...by.values()].filter((m) => m.geoId).sort((a, b) => b.count - a.count)
+        setState({ loading: false, metros, error: null })
+        setSelected(new Set(prefs?.targetGeoIds || []))
+        setRemoteOnly(!!prefs?.remoteOnly)
+      })
+      .catch((e) => { if (alive) setState({ loading: false, metros: [], error: String(e.message || e) }) })
+    return () => { alive = false }
+  }, [])
+
+  const toggle = (geoId) => setSelected((s) => { const n = new Set(s); n.has(geoId) ? n.delete(geoId) : n.add(geoId); return n })
+  const save = useCallback(async () => {
+    setSaving(true)
+    try {
+      const res = await api.searchPrefsSet({ targetGeoIds: [...selected], remoteOnly })
+      if (res.ok === false) throw new Error(res.detail || res.error || 'failed')
+      toast('Target locations saved')
+    } catch (e) { toast(`Save failed: ${e.message || e}`) } finally { setSaving(false) }
+  }, [selected, remoteOnly, toast])
+
+  return (
+    <Card>
+      <Label>Target locations</Label>
+      <div className="px-small" style={{ marginBottom: 10 }}>Pick the metros you'll consider. Selected metros filter Swipe & Opportunities and steer the daily search. Counts are your current opportunities per metro.</div>
+      {state.loading && <div className="px-small">Loading locations…</div>}
+      {state.error && <div className="px-small" style={{ color: 'var(--proto-red)' }}>{state.error}</div>}
+      {!state.loading && !state.error && state.metros.length === 0 && <div className="px-small">No recognized metros in your pipeline yet.</div>}
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+        {state.metros.map((m) => {
+          const on = selected.has(m.geoId)
+          return (
+            <span key={m.geoId} onClick={() => toggle(m.geoId)} className="px-pill"
+              style={{ cursor: 'pointer', background: on ? 'var(--surface-brand-default)' : undefined, color: on ? 'var(--text-on-brand)' : undefined }}>
+              {on ? '✓ ' : ''}{m.name} · {m.count}
+            </span>
+          )
+        })}
+      </div>
+      <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 14, cursor: 'pointer', fontSize: 13 }}>
+        <input type="checkbox" checked={remoteOnly} onChange={(e) => setRemoteOnly(e.target.checked)} />
+        Remote-optional only (drop roles that require on-site outside my target metros)
+      </label>
+      <div style={{ marginTop: 14 }}>
+        <button className="px-btn px-btn-accent" onClick={save} disabled={saving || state.loading}>{saving ? 'Saving…' : 'Save target locations'}</button>
+        {selected.size === 0 && <span className="px-small" style={{ marginLeft: 10 }}>None selected = no location filter (all metros shown).</span>}
+      </div>
+    </Card>
+  )
+}
+
+const SECTIONS = [{ key: 'account', label: 'Account' }, { key: 'intake', label: 'Intake' }, { key: 'roles', label: 'Roles' }, { key: 'locations', label: 'Locations' }, { key: 'templates', label: 'Templates' }, { key: 'coach', label: 'Coach' }, { key: 'workspace', label: 'Workspace' }, { key: 'usage', label: 'Usage' }, { key: 'system', label: 'System' }]
 
 export default function Settings({ tab = 'account' }) {
   const active = SECTIONS.find((s) => s.key === tab) ? tab : 'account'
@@ -980,6 +1053,7 @@ export default function Settings({ tab = 'account' }) {
       {active === 'account' && <AccountSettings />}
       {active === 'intake' && <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}><IntakeSettings /><AtsSources /></div>}
       {active === 'roles' && <RolesSettings />}
+      {active === 'locations' && <LocationSettings />}
       {active === 'templates' && <TemplatesSettings />}
       {active === 'coach' && <CoachSettings />}
       {active === 'workspace' && <WorkspaceSettings />}

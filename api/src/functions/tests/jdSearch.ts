@@ -6,6 +6,8 @@ import { scraperFetch, classifyResponse, sleepJitter } from './scraperProxy'
 import { canonicalJobUrl } from './jdLinks'
 import { SEED } from './roleTaxonomy'
 import { fetchAndStoreJd, ensureJdCols } from './jdBackfill'
+import { getSearchPrefs } from './appSearchPrefs'
+import { resolveMetro, parseWorkMode } from './geoMaster'
 
 const HEADERS = {
   'Content-Type': 'application/json',
@@ -115,6 +117,20 @@ export async function runRoleSearch(owner: string, opts: { tpr?: string; locatio
     // ACT-29: one OR-concatenated favourite-TITLE query per role (falls back to role names).
     const queries = await loadFavoriteTitleQueries(client, owner, { maxRoles: opts.roleLimit || 40 })
     summary.roles = queries.length
+    // ACT-34: location/remote gate applied at INGEST (before insert + JD-fetch) so off-target cards
+    // never cost a JD fetch. Empty target set + no remote-only = keep everything (unchanged behaviour).
+    const prefs = await getSearchPrefs(client, owner)
+    const targets = new Set(prefs.targetGeoIds)
+    const keepCard = (loc: string): boolean => {
+      if (!targets.size && !prefs.remoteOnly) return true
+      const m = resolveMetro(loc || '')
+      const inTarget = !!(m && m.geoId && targets.has(m.geoId))
+      const isRemote = parseWorkMode(loc || '') === 'remote'
+      if (targets.size && prefs.remoteOnly) return inTarget || isRemote
+      if (targets.size) return inTarget
+      return isRemote // remoteOnly, no target metros
+    }
+    ;(summary as any).skippedLocation = 0
     let consecBlocked = 0
     for (const q of queries) {
       const role = q.role
@@ -129,6 +145,7 @@ export async function runRoleSearch(owner: string, opts: { tpr?: string; locatio
         const cards = parseSearchCards(r.body)
         roleCards += cards.length; summary.cardsFound += cards.length
         for (const c of cards) {
+          if (!keepCard(c.location)) { (summary as any).skippedLocation++; continue }  // ACT-34 location/remote gate
           const res = await routeOpportunity(client, owner,
             { company: c.company, role: c.title, location: c.location, url: canonicalJobUrl(c.jobId), postedDate: c.postedDate, jobId: c.jobId },
             { source: 'LinkedIn Search' })

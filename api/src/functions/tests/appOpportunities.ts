@@ -1,6 +1,7 @@
 import { app, HttpRequest, HttpResponseInit, InvocationContext } from '@azure/functions'
 import { resolveOwner, requireWrite, serverError } from './appSession'
 import { getPgClient } from './pgClient'
+import { resolveMetro, parseWorkMode } from './geoMaster'
 
 const HEADERS = {
   'Content-Type': 'application/json',
@@ -26,7 +27,10 @@ async function ensureStageHistory(client: any) {
 }
 
 function rowToOpp(r: any) {
+  const metro = resolveMetro(r.location || '')       // ACT-32: map free-text location → metro
+  const workMode = parseWorkMode(r.location || '')   // ACT-33: remote / hybrid / onsite
   return {
+    metroName: metro?.name || null, metroGeoId: metro?.geoId || null, workMode,
     id: r.id, company: r.company, logo: r.logo_url, role: r.role, location: r.location,
     comp: r.comp_range, match: r.match_score, fit: r.fit, urgency: r.urgency,
     source: r.source, why: r.why_surfaced, hm: r.hiring_manager, recruiter: r.recruiter,
