@@ -593,7 +593,8 @@ we fetch/parse fewer JDs per day: scheduled searches pass location/geoId + remot
 skips (or de-prioritizes) opps that fail the location/remote gate before JD-fetch + tagging. Goal:
 fewer search results and fewer JD tags needed daily.
 
-**ACT-35 — Root-cause & fix why the JD attached to an opportunity is a DIFFERENT job (the JD still doesn't line up).**
+**ACT-35 — ✅ FIXED + verified (2026-07-31). JD was fabricated from the shared LinkedIn alert email; parse now grounds to a single-job source (jd_real) else anchor truth (role/company). Backfilled 409 rows. Commit d0a2d24.**
+(original:)
 Ground-truth evidence (screenshot 15420.jpg, live): opportunity header = "Vice President of Software
 Engineering · The Phoenix Group · sourced from LinkedIn" but its Job Description ▸ Summary reads
 "Title: Managing Vice President, Technology Product Management & Platform Strategy · Gartner" — an

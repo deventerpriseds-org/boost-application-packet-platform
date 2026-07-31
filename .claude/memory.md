@@ -552,3 +552,17 @@ digest (raw_jd contains 'jobalerts-noreply@linkedin.com' / why_surfaced 'New Lin
 NOT parse it. When no real JD: fall back to anchor truth (jd_title=role, jd_company=company), leave
 jd_summary honest-empty ("Full JD not retrieved yet"), don't guess. Backfill: clear the fabricated
 jd_title/jd_company/jd_summary where they were parsed from an alert-email raw_jd (jd_real null).
+
+## ACT-35 FIXED + verified (2026-07-31): JD no longer fabricated from the shared alert email
+CODE (appJdParse.ts, api-deploy d0a2d24 live): added isAlertDigest() + resolveJdSource() + applyAnchorTruth().
+All 3 parse sites (jdParse manual, jdBackfill sweep, jdParseTick TIMER) now ONLY LLM-parse a single-job
+source (jd_real, or a non-alert raw_jd e.g. extension/ATS). When the only source is the LinkedIn alert
+email → NO parse; set jd_title=role, jd_company=company (anchor truth) + honest jd_summary note. The
+timer (was raw_jd-only, the active fabricator) now grounds too; its SELECT gained jd_real.
+DATA BACKFILL (db-query, UPDATE 409): reset all von.ellis opps with jd_real NULL AND raw_jd = alert email
+to anchor truth. Scope was 976 total / 409 alert-fabricated / 194 already grounded (jd_real present).
+VERIFIED: opp 78f50bdf now jd_title="Vice President of Software Engineering" jd_company="The Phoenix Group"
+(was "Managing VP…Gartner"). Mismatch gone.
+FOLLOW-UP: the 194 with jd_real are grounded; the 409 show role-as-title + "not retrieved" note until a
+real JD is fetched (ties to ACT-28 Graph ParseUri fetch error / ACT-29 re-enable search + jd fetch). To
+refresh a single opp after its jd_real lands: hit "Re-parse JD" (jdParse reads jd_real first).
