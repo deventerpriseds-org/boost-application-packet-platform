@@ -70,8 +70,14 @@ function InboxScrubHero({ newToday, backlog, toast }) {
   const bins = useMemo(() => {
     const map = new Map()
     newToday.forEach((o) => {
-      const label = view === 'titles' ? titleFamily(o) : roleFamily(o)
-      const group = (o.matchedRole || o.matchedVariation) ? o.matchedGroup : null
+      let label, group
+      if (view === 'titles') {
+        // Title view shows FAVORITE titles only; everything else rolls into "Other roles".
+        if (o.isFavorite && (o.matchedVariation || o.matchedRole)) { label = titleFamily(o); group = o.matchedGroup }
+        else { label = 'Other roles'; group = null }
+      } else {
+        label = roleFamily(o); group = o.matchedRole ? o.matchedGroup : null
+      }
       const e = map.get(label) || { label, n: 0, group }
       e.n += 1; map.set(label, e)
     })
