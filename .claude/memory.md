@@ -704,3 +704,12 @@ not 651 — LinkedIn token-matches titles so a core catches all seniority varian
 each, 1 req/45-90s, ~8-10/slot, spread across day, stop-on-429. JD FETCH: owner wants it INLINE at inbox
 extraction (routeOpportunity), not a scheduled sweep — opps should rarely enter pipeline w/o a JD (ACT-44
 revised). Open decision: search off cores + add a real star in Settings▸Roles vs literal per-title.
+
+## Function App hosting plan CONFIRMED (2026-07-31, via azure-plan-check.yml)
+job-platform-api runs on **Consumption** plan: EastUSLinuxDynamicPlan, SKU Y1, tier Dynamic, kind
+functionapp,linux. => pay-per-execution w/ free monthly grant (1M exec + 400k GB-s/subscription).
+Timer cost ≈ $0. DESIGN RULE for the search pacer: use "Pattern B" = many SHORT fires (1 query each,
+~2s), NOT one long fire that sleeps between queries — billed GB-s counts in-function sleep on
+Consumption. Pattern B ≈ 2.7k exec + 2.7k GB-s/mo (negligible); Pattern A ≈ 101k GB-s/mo (still in
+grant but wasteful). Reusable read-only workflow: .github/workflows/azure-plan-check.yml (client-secret
+creds like api-deploy; OIDC login is NOT configured for this SP — client-secret only).
