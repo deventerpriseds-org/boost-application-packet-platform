@@ -525,3 +525,10 @@ this is the JD BODY write-path. Investigate fetchAndStoreJd (jdSearch/jdBackfill
 search-result→opp join key + appJdParse deriving Title/company from another opp's jd_real. See actions.md
 ACT-35 for the full investigation checklist. GROUND-TRUTH the specific opp row (role/company/source_url)
 vs its jd_real before concluding.
+
+## CORRECTION (2026-07-31): Title view IS favorites-only
+User: "the titles should only reveal favorite titles despite the label change." So the Today Title
+view bins FAVORITE titles only (o.isFavorite && matched title); all non-favorites collapse to "Other
+roles". Label stays "Title" (default) and keeps the VP·/Dir· qualifier. titlenew: filter matches
+favorites-only ('Other roles' = non-favorites). Supersedes the "no longer favorites-only" note above.
+Commit c19c8f4.
