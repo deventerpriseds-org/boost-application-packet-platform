@@ -625,3 +625,13 @@ preview (endpoint + UI) so the owner can approve, THEN unpause.
 - ACT-34: jdSearch keepCard() gate drops off-target/non-remote cards BEFORE insert+JD-fetch (reads
   search-prefs); summary.skippedLocation. Search still PAUSED (ACT-36 review) so gate is dormant until unpause.
 - All api/app builds clean, deployed (api-deploy + exec-engine-deploy), main synced. Commits 28c3782, 7226e45.
+
+## Owner-notes reconciliation (2026-07-31): added ACT-37..42, kept ACT-35 open
+Captured owner's tracked items (dedup'd against existing): role-hierarchy = already done (ACT-30 step1);
+JD-match = ACT-35 left OPEN pending owner confirmation. NEW: ACT-37 (post/found dates on OppDetail
+Overview — only on swipe card today, NOT OppDetail), ACT-38 (LinkedIn-parity swipe filters + DATE-posted
+filter + owner DEFAULT location=Washington DC-Baltimore Area[DC/NoVA/Baltimore] + remote-only default),
+ACT-39 (scope the NEW page we discussed — needs definition, don't build yet), ACT-40 (packet quality
+testing: resume+cover+pptx portfolio), ACT-41 (sample→template assets, playbooks first), ACT-42 (pipeline
+to turn MBA/MIT/course learnings into per-role playbooks + playbook taxonomy research). NOT auto-applied
+the DC-Baltimore+remote default (outward-facing filter change) — offered to owner.

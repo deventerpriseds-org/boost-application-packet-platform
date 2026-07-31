@@ -601,7 +601,7 @@ we fetch/parse fewer JDs per day: scheduled searches pass location/geoId + remot
 skips (or de-prioritizes) opps that fail the location/remote gate before JD-fetch + tagging. Goal:
 fewer search results and fewer JD tags needed daily.
 
-**ACT-35 — ✅ FIXED + verified (2026-07-31). JD was fabricated from the shared LinkedIn alert email; parse now grounds to a single-job source (jd_real) else anchor truth (role/company). Backfilled 409 rows. Commit d0a2d24.**
+**ACT-35 — ⏳ FIX SHIPPED, AWAITING OWNER CONFIRMATION (owner will verify JD matches before closing). ✅ FIXED + verified (2026-07-31). JD was fabricated from the shared LinkedIn alert email; parse now grounds to a single-job source (jd_real) else anchor truth (role/company). Backfilled 409 rows. Commit d0a2d24.**
 (original:)
 Ground-truth evidence (screenshot 15420.jpg, live): opportunity header = "Vice President of Software
 Engineering · The Phoenix Group · sourced from LinkedIn" but its Job Description ▸ Summary reads
@@ -628,3 +628,49 @@ a simple UI surface (Settings ▸ Intake or a small panel) listing, per role: th
 keyword string that will be sent ("A" OR "B" OR …), and the count. Owner reviews → approves → then
 unpause (ACT-29 stays code-complete; only the pause flag is gated on this review).
 Search is PAUSED (SEARCH_PAUSED=true) until then.
+
+## ── Owner-notes reconciliation (2026-07-31) ──
+
+**Already done (no new action, recorded for tracking):**
+- Role seniority hierarchy (C Suite → VP → Director above/before Director): ✅ done + Playwright-verified
+  (ACT-30 step 1, commit ff6ace7). The Today breakdown and pills order C Suite → VP → Director → Other.
+- JD matches: see ACT-35 — fix shipped + agent-verified, but LEFT OPEN pending OWNER confirmation.
+
+**ACT-37 — Post date + Found date on the OppDetail Overview tab.**
+Owner recalls adding "posted / found (poll) date" to the overview. GROUND TRUTH: the dates
+(📅 Posted / ⬇ Found) render on the SWIPE card's Overview tab, but NOT on the main OppDetail (#/opp/{id})
+Overview tab (grep: OppDetail.jsx has no sourceDate/createdAt render). Add Posted (source_date) + Found
+(created_at) to the OppDetail Overview so it matches the swipe card. Small.
+
+**ACT-38 — Swipe filters at LinkedIn parity + owner defaults (extends ACT-31/32/33).**
+Beyond the shipped source/location/remote facets: (1) RESEARCH LinkedIn's job-filter set (date posted,
+experience level, work type/remote, location radius, salary, etc.) and add the appropriate equivalents
+to Swipe — ESPECIALLY a DATE-POSTED filter (past 24h / week / month, like LinkedIn's f_TPR) which we
+don't have on Swipe yet. (2) DEFAULT selections: owner's default target location = Washington
+DC-Baltimore Area (covers DC + Northern Virginia + Baltimore — all fold into that metro in geoMaster)
+and remote-optional ENABLED by default. Concrete now: set owner_search_prefs for von.ellis to
+{ target_geo_ids:[Washington DC-Baltimore Area geoId 90000097], remote_only:true } as the default, and
+make new owners default to remote-on. (3) Confirm the facets read like LinkedIn's so it feels familiar.
+
+**ACT-39 — Scope the NEW page we discussed (needs definition).**
+Owner recalls we discussed ADDING a new page (distinct from the dropped page being restored in ACT-30).
+Gather the details of what that new page is from our prior discussion / the PRD, write up its purpose,
+route, and content, then convert to a build action. DO NOT build until scoped + owner-confirmed.
+
+**ACT-40 — Packet output QUALITY testing (resume + cover letter + PowerPoint portfolio).**
+Once the pipeline is working end-to-end, actually BUILD packets for a few real favorite opps and review
+the QUALITY of every artifact: the tailored RESUME, the COVER LETTER, and the PowerPoint PORTFOLIO/deck.
+Assess against the owner's bar; iterate the generators (template-fill / artifactDocument / artifactSlides)
+until output quality is satisfactory. One action covering all three artifacts.
+
+**ACT-41 — Sample + template ASSETS (playbooks first).**
+Produce a SAMPLE asset the owner can react to — starting with a PLAYBOOK (also diagrams, etc.). Owner
+wants to SEE one sample, land on a design they like, THEN templatize so we can mass-produce. Deliver:
+(1) one polished sample playbook, (2) owner sign-off on the format, (3) a template + generation flow.
+
+**ACT-42 — Learning-material → playbooks/assets pipeline + per-role playbook taxonomy (research/strategy).**
+Figure out how to take the owner's LEARNINGS (MBA, MIT, and future online courses e.g. a product-management
+course) and streamline that content into 5-6 PLAYBOOKS automatically. Two parts: (a) RESEARCH — identify
+which playbooks are STANDARD for each of the owner's target roles (a per-role playbook taxonomy), and
+(b) STRATEGY — a repeatable pipeline to turn source material (course content, notes) into assets
+(playbooks, diagrams, etc.). Precedes/feeds ACT-41 templatization.
