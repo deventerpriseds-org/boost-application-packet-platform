@@ -186,13 +186,11 @@ function hourInTz(tz: string): number {
 // Timer: exec-role search 3×/day at 5am/1pm/6pm ET. Because NCRONTAB fires in UTC and ET shifts with
 // DST, we fire at the UTC hours that bracket those ET times (09/10, 17/18, 22/23) and then run ONLY
 // when it's actually 5/13/18 in New York — DST-safe and independent of any WEBSITE_TIME_ZONE setting.
-// PAUSE SWITCH: was held OFF (2026-07-30) during the role/folder/intake/JD alignment work.
-// RE-ENABLED 2026-07-31 (ACT-29) now that intake+JD are clean (ACT-27/28/35) and search targets the
-// favourite title variants. SCHEDULE DECISION: the favourite-title set is ONE OR-query per role
-// (≤~27 queries/cycle, 1 page each, ~3s-jittered ≈ a couple minutes + a bounded inline JD burst),
-// well under the ~30-fetch/IP block wall — so the WHOLE set fits ONE slot. We therefore run the full
-// favourite set at EACH of the 3 ET slots (5am/1pm/6pm), no per-slot query spreading needed.
-const SEARCH_PAUSED = false
+// PAUSE SWITCH. Search targets the favourite title variants (ACT-29), one OR-query per role; the full
+// set fits ONE ET slot (5am/1pm/6pm). RE-PAUSED 2026-07-31 at owner request: hold OFF until the owner
+// can REVIEW the exact built queries and explicitly approve (see ACT-36 — query preview). The manual
+// POST /api/mail/jd-search still works for testing. Flip to false only after that sign-off.
+const SEARCH_PAUSED = true
 
 export async function jdSearchTimer(_t: Timer, context: InvocationContext): Promise<void> {
   if (SEARCH_PAUSED) { context.log('jd-search timer: PAUSED (SEARCH_PAUSED=true) — skipping'); return }

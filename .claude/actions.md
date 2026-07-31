@@ -559,7 +559,7 @@ not found for the segment 'AAMk...'"} — a Graph message-fetch with a malformed
 Root-cause the JD/triggering-email fetch path. Automated 3x search PAUSED (jdSearch SEARCH_PAUSED=true)
 until intake is clean.
 
-**ACT-29 — ✅ DONE + verified (2026-07-31). Search now targets FAVOURITE TITLE variants (taxonomy_title tier=fav), OR-concatenated per role (one query/role). SCHEDULE: fits ONE slot (≤~27 queries, ~3s-jittered) → run full set at each 5am/1pm/6pm ET; no spread. SEARCH_PAUSED=false (re-enabled). Live api-test /api/mail/jd-search roleLimit=3: cardsFound=25, inserted=20, blocked=0; byRole shows OR-of-8/6/8 fav titles. Commit 074cff4. (original:)
+**ACT-29 — ✅ DONE + verified (2026-07-31). Search now targets FAVOURITE TITLE variants (taxonomy_title tier=fav), OR-concatenated per role (one query/role). SCHEDULE: fits ONE slot (≤~27 queries, ~3s-jittered) → run full set at each 5am/1pm/6pm ET; no spread. SEARCH_PAUSED re-PAUSED 2026-07-31 pending owner review of built queries (ACT-36). Live api-test /api/mail/jd-search roleLimit=3: cardsFound=25, inserted=20, blocked=0; byRole shows OR-of-8/6/8 fav titles. Commit 074cff4. (original:)
 Build OR-concatenated search queries from the LONGER favorite-title list (per role). Confirm working,
 then decide: does the resulting query count fit one 3x/day slot, or must queries be SPREAD across the
 5am/1pm/6pm slots (vs repeating each query 3x/day)? Depends on ACT-25 favorites.
@@ -610,3 +610,13 @@ before concluding: pull the opp row (role, company, source_url) AND its jd_real/
 opp, compare to the real posting at source_url. Fix the write-path so JD body is stored against the
 opp whose posting it actually came from; add a guard (e.g. verify parsed company/title ~matches the
 opp before overwriting, else flag mismatch instead of silently attaching).
+
+**ACT-36 — Surface the built favourite-title search queries for owner review BEFORE unpausing.**
+Owner wants to SEE exactly what the 3x/day search will query (the per-role OR-concatenated favourite
+title strings from loadFavoriteTitleQueries) and explicitly approve before SEARCH_PAUSED is flipped
+back to false. Build a clear read-only view of the queries: a preview endpoint (e.g. GET
+/api/mail/jd-search/preview → { role, keywords, titles[] } per role, NO LinkedIn call, NO inserts) and
+a simple UI surface (Settings ▸ Intake or a small panel) listing, per role: the role name, the exact
+keyword string that will be sent ("A" OR "B" OR …), and the count. Owner reviews → approves → then
+unpause (ACT-29 stays code-complete; only the pause flag is gated on this review).
+Search is PAUSED (SEARCH_PAUSED=true) until then.

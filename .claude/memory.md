@@ -603,3 +603,9 @@ roleLimit=3 fetchJds=false): roles=3 cardsFound=25 inserted=20 dup=5 blocked=0; 
 (8 titles→4), Chief AI Officer (6→9), Chief Data Officer (8→7). Coheres with fresh-start scope:
 title-matched results get is_favorite=true (tagFields) → visible; fuzzy misses → watch/off → hidden.
 Timer will next fire at the top of the covering UTC hour and run when ET hour ∈ {5,13,18}.
+
+## Search RE-PAUSED 2026-07-31 (owner request): review queries before unpausing (ACT-36)
+Owner wants to see the exact per-role OR-concatenated favourite-title queries (loadFavoriteTitleQueries
+output) and approve before SEARCH_PAUSED flips to false. Flag set back to true. ACT-29 code stays
+complete + verified; only the automated timer is gated on the review. Next: ACT-36 = a read-only query
+preview (endpoint + UI) so the owner can approve, THEN unpause.
