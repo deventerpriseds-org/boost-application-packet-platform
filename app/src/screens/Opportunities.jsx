@@ -120,6 +120,13 @@ export default function Opportunities({ opps, filter }) {
       const fam = activeFilter.slice(8)
       const cutoff = CUTOFF_TODAY()
       r = r.filter((o) => roleFamily(o) === fam && FRESH_STAGES.includes(o.stage) && o.createdAt && new Date(o.createdAt).getTime() >= cutoff)
+    } else if (activeFilter?.startsWith('titlenew:')) {
+      // New-today, binned by favorite job title (matchedVariation). 'Other roles' = non-favorites.
+      const t = activeFilter.slice(9)
+      const cutoff = CUTOFF_TODAY()
+      const isOther = t === 'Other roles'
+      r = r.filter((o) => FRESH_STAGES.includes(o.stage) && o.createdAt && new Date(o.createdAt).getTime() >= cutoff &&
+        (isOther ? !o.isFavorite : (o.isFavorite && (o.matchedVariation || o.matchedRole) === t)))
     } else if (activeFilter?.startsWith('role:')) {
       const fam = activeFilter.slice(5)
       r = r.filter((o) => roleFamily(o) === fam)

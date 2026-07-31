@@ -35,12 +35,15 @@ export function roleFamily(o) {
   if (o.matchedRole) return (GROUP_PREFIX[o.matchedGroup] || '') + o.matchedRole
   return 'Other roles'
 }
-// Dot color keyed off the seniority group (derived from the label prefix).
-function roleDot(fam) {
-  if (fam === 'Other roles') return 'var(--proto-ink3)'
-  if (fam.startsWith('VP · ')) return 'var(--surface-success-default)'
-  if (fam.startsWith('Dir · ')) return 'var(--proto-purple)'
-  return 'var(--surface-brand-default)' // C-Suite
+// Seniority ordering for the breakdown: C Suite → VP → Director → Other.
+const SENIORITY_RANK = { csuite: 0, vp: 1, director: 2 }
+function seniorityRank(group) { return SENIORITY_RANK[group] ?? 3 }
+// Dot color keyed off the seniority group.
+function dotForGroup(group) {
+  if (group === 'vp') return 'var(--surface-success-default)'
+  if (group === 'director') return 'var(--proto-purple)'
+  if (group === 'csuite') return 'var(--surface-brand-default)' // C-Suite
+  return 'var(--proto-ink3)' // other / untagged
 }
 
 // "Latest inbox scrub" hero — new roles found overnight, binned by role family,
@@ -53,11 +56,27 @@ function fmtTime(d) {
 }
 
 function InboxScrubHero({ newToday, backlog, toast }) {
+  // Toggle: 'roles' = the 27 monitored roles (current) · 'titles' = my favorite job
+  // titles, the taxonomy level below (matchedVariation, favorites only).
+  const [view, setView] = useState('roles')
   const bins = useMemo(() => {
-    const map = {}
-    newToday.forEach((o) => { const f = roleFamily(o); map[f] = (map[f] || 0) + 1 })
-    return Object.entries(map).sort((a, b) => b[1] - a[1])
-  }, [newToday])
+    const map = new Map()
+    newToday.forEach((o) => {
+      let label, group
+      if (view === 'titles') {
+        if (o.isFavorite && (o.matchedVariation || o.matchedRole)) {
+          label = o.matchedVariation || o.matchedRole; group = o.matchedGroup
+        } else { label = 'Other roles'; group = null }
+      } else {
+        label = roleFamily(o); group = o.matchedRole ? o.matchedGroup : null
+      }
+      const e = map.get(label) || { label, n: 0, group }
+      e.n += 1; map.set(label, e)
+    })
+    // Seniority order (C Suite → VP → Director → Other); ties broken by count then name.
+    return [...map.values()].sort((a, b) =>
+      seniorityRank(a.group) - seniorityRank(b.group) || b.n - a.n || a.label.localeCompare(b.label))
+  }, [newToday, view])
   const total = newToday.length
   const companies = [...new Set(newToday.slice(0, 6).map((o) => o.company))]
 
@@ -109,14 +128,22 @@ function InboxScrubHero({ newToday, backlog, toast }) {
 
         {/* Middle: per-role breakdown */}
         <div style={{ flex: '2 1 280px', padding: '14px 18px', minWidth: 240 }}>
-          <div className="px-small" style={{ textTransform: 'uppercase', letterSpacing: 1, marginBottom: 8 }}>Discovered by role</div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+            <div className="px-small" style={{ textTransform: 'uppercase', letterSpacing: 1 }}>{view === 'titles' ? 'Discovered by favorite title' : 'Discovered by role'}</div>
+            <div style={{ flex: 1 }} />
+            <div style={{ display: 'inline-flex', border: '1px solid var(--proto-rule-soft)', borderRadius: 6, overflow: 'hidden' }}>
+              {[['roles', 'Roles'], ['titles', '★ Fav titles']].map(([k, lbl]) => (
+                <span key={k} onClick={() => setView(k)} className="px-small" style={{ padding: '2px 9px', cursor: 'pointer', fontWeight: 600, background: view === k ? 'var(--surface-brand-subtle)' : 'transparent', color: view === k ? 'var(--text-brand)' : 'var(--proto-ink2)' }}>{lbl}</span>
+              ))}
+            </div>
+          </div>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '6px 20px' }}>
-            {bins.length === 0 && <div className="px-small">Inbox is clear — no new roles overnight.</div>}
-            {bins.map(([fam, n]) => (
-              <div key={fam} onClick={() => go('/opportunities?filter=rolenew:' + encodeURIComponent(fam))} style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', padding: '4px 6px', borderRadius: 6, transition: 'background 0.12s' }} onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--proto-rule-soft)' }} onMouseLeave={(e) => { e.currentTarget.style.background = '' }}>
-                <span style={{ width: 9, height: 9, borderRadius: '50%', background: roleDot(fam), flexShrink: 0 }} />
-                <span style={{ fontSize: 13, fontWeight: 600, flex: 1 }}>{fam}</span>
-                <span className="px-pill">{n} new</span>
+            {bins.length === 0 && <div className="px-small">{view === 'titles' ? 'No favorite-title matches in the new batch.' : 'Inbox is clear — no new roles overnight.'}</div>}
+            {bins.map((b) => (
+              <div key={b.label} onClick={() => go('/opportunities?filter=' + (view === 'titles' ? 'titlenew:' : 'rolenew:') + encodeURIComponent(b.label))} style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', padding: '4px 6px', borderRadius: 6, transition: 'background 0.12s' }} onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--proto-rule-soft)' }} onMouseLeave={(e) => { e.currentTarget.style.background = '' }}>
+                <span style={{ width: 9, height: 9, borderRadius: '50%', background: dotForGroup(b.group), flexShrink: 0 }} />
+                <span style={{ fontSize: 13, fontWeight: 600, flex: 1 }}>{b.label}</span>
+                <span className="px-pill">{b.n} new</span>
               </div>
             ))}
           </div>
