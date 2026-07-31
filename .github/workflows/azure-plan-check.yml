@@ -1,0 +1,32 @@
+name: Azure Plan Check
+# Read-only: prints the job-platform-api Function App hosting plan SKU/tier so we can
+# reason about Azure cost of scheduled timers. Safe to run any time.
+
+on:
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - name: Login to Azure
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Show Function App plan
+        run: |
+          set -e
+          PLAN_ID=$(az functionapp show -n job-platform-api -g EnterpriseDS_ResourceGRP --query serverFarmId -o tsv)
+          echo "PLAN_ID=$PLAN_ID"
+          echo "----- PLAN DETAILS -----"
+          az appservice plan show --ids "$PLAN_ID" \
+            --query "{name:name, tier:sku.tier, size:sku.size, skuName:sku.name, capacity:sku.capacity, kind:kind, reserved:reserved}" -o json
+          echo "----- FUNCTIONAPP KIND -----"
+          az functionapp show -n job-platform-api -g EnterpriseDS_ResourceGRP \
+            --query "{kind:kind, state:state}" -o json
