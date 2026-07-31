@@ -648,8 +648,8 @@ experience level, work type/remote, location radius, salary, etc.) and add the a
 to Swipe — ESPECIALLY a DATE-POSTED filter (past 24h / week / month, like LinkedIn's f_TPR) which we
 don't have on Swipe yet. (2) DEFAULT selections: owner's default target location = Washington
 DC-Baltimore Area (covers DC + Northern Virginia + Baltimore — all fold into that metro in geoMaster)
-and remote-optional ENABLED by default. Concrete now: set owner_search_prefs for von.ellis to
-{ target_geo_ids:[Washington DC-Baltimore Area geoId 90000097], remote_only:true } as the default, and
+and REMOTE-PLUS enabled by default (remote OR my target metros — NOT remote-only). Concrete now: set owner_search_prefs for von.ellis to
+{ target_geo_ids:[90000097 = Washington DC-Baltimore Area], remote_only:true = REMOTE-PLUS } — seeding a per-owner default the owner can change in Settings ▸ Locations (compliant with the no-hardcoded-config rule) as the default, and
 make new owners default to remote-on. (3) Confirm the facets read like LinkedIn's so it feels familiar.
 
 **ACT-39 — Scope the NEW page we discussed (needs definition).**

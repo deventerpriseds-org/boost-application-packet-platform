@@ -332,3 +332,22 @@ Cloned to `/workspace/eds-claude-skills`. Skills load automatically each session
 3. `/verify-work` before reporting done — this spawns the `verifier` agent automatically
 
 Repo secrets are org-level in `deventerpriseds-org` — no per-repo config needed.
+
+## No hardcoded config — everything user-setting driven (strict rule)
+
+**Never hardcode a configurable value in code only.** Every setting, default, threshold, list,
+preference, or behavior toggle a user would reasonably want to control MUST be exposed as a
+user-changeable setting (Settings UI / config store), and the code may only SEED the *first/default*
+value — which the user can then change. Treat any value you write in code as "the initial value the
+user will override," never as a permanent constant.
+
+- Before hardcoding ANY behavior-affecting value (default location, remote preference, search cadence,
+  caps, tiers, thresholds, feature toggles, etc.), ask: "can the user change this in the UI?" If not,
+  either wire it to a setting first, or get EXPLICIT owner approval to leave it code-only — and record
+  that approval.
+- Seeding a per-owner default (e.g. writing `owner_search_prefs`) is fine because the user can change
+  it in the UI. Baking the same value as a literal in code with no UI path is NOT.
+- When you set a "first value" on the owner's behalf, tell them where to change it.
+
+This exists because the owner wants the product to be fully self-serve/configurable, not dependent on
+a developer to change constants. Violating it creates black-box behavior the owner can't adjust.

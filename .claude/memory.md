@@ -635,3 +635,12 @@ ACT-39 (scope the NEW page we discussed — needs definition, don't build yet), 
 testing: resume+cover+pptx portfolio), ACT-41 (sample→template assets, playbooks first), ACT-42 (pipeline
 to turn MBA/MIT/course learnings into per-role playbooks + playbook taxonomy research). NOT auto-applied
 the DC-Baltimore+remote default (outward-facing filter change) — offered to owner.
+
+## STANDING RULE (2026-07-31, owner): No hardcoded config — everything user-setting driven
+Never hardcode a behavior-affecting value in code only. Every default/threshold/list/preference/toggle
+must be a USER-CHANGEABLE setting (Settings UI + config store); code may only seed the FIRST value the
+user can then change. Before hardcoding anything configurable, wire it to a setting OR get explicit
+owner approval to leave it code-only (and record it). Added to CLAUDE.md ("No hardcoded config" section).
+Owner default request: target location = Washington DC-Baltimore Area (DC/NoVA/Baltimore), and "REMOTE
+PLUS" (remote OR my target metros) — NOT remote-only; leave off if remote-plus isn't UI-settable (it is:
+target metros + the include-remote toggle = remote-plus).

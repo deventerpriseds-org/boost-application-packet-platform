@@ -1026,7 +1026,7 @@ function LocationSettings() {
       </div>
       <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 14, cursor: 'pointer', fontSize: 13 }}>
         <input type="checkbox" checked={remoteOnly} onChange={(e) => setRemoteOnly(e.target.checked)} />
-        Remote-optional only (drop roles that require on-site outside my target metros)
+        Remote plus: also keep remote-anywhere roles, on top of my selected metros (uncheck to show only the metros above)
       </label>
       <div style={{ marginTop: 14 }}>
         <button className="px-btn px-btn-accent" onClick={save} disabled={saving || state.loading}>{saving ? 'Saving…' : 'Save target locations'}</button>
