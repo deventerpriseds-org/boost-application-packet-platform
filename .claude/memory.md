@@ -532,3 +532,23 @@ view bins FAVORITE titles only (o.isFavorite && matched title); all non-favorite
 roles". Label stays "Title" (default) and keeps the VP·/Dir· qualifier. titlenew: filter matches
 favorites-only ('Other roles' = non-favorites). Supersedes the "no longer favorites-only" note above.
 Commit c19c8f4.
+
+## ACT-35 ROOT CAUSE PROVEN (2026-07-31): JD fields fabricated from the shared LinkedIn alert email
+Ground truth (opp 78f50bdf, live raw_jd): raw_jd = the WHOLE LinkedIn alert email
+("From: jobalerts-noreply@linkedin.com", Subject "Managing Vice President, Technology Product
+Management & Platform Strategy at Gartner"), 1961 chars, contains BOTH "Phoenix" and "Gartner".
+opp.role="VP of Software Engineering"/company="The Phoenix Group" (CORRECT, from the per-job anchor).
+opp.jd_title="Managing VP, Tech Product Mgmt…"/jd_company="Gartner" (WRONG = the email's headline/
+subject sibling job). jd_real NULL, jd_fetched_at NULL.
+MECHANISM: appJdParse.jdParseTick (timer, every 5m) parses opp.raw_jd; raw_jd is the shared alert
+email whose subject is a DIFFERENT job → LLM extracts the headline → jd_title/jd_company/jd_summary
+become the sibling job, for EVERY opp sharing that email. jdParse/jdBackfill "prefer jd_real" but the
+TIMER doesn't, and jd_real is empty (guest fetch never populated it). role is reliable; jd_* is the
+digest-headline fabrication. This is DISTINCT from the earlier classify-on-role fix (that fixed
+matched_group only; the JD BODY parse was never grounded).
+FIX DIRECTION (pending user sign-off on fallback display): stop fabricating — only LLM-parse a
+SINGLE-job source (jd_real, or a genuine single JD from extension/ATS). Detect the LinkedIn-alert
+digest (raw_jd contains 'jobalerts-noreply@linkedin.com' / why_surfaced 'New LinkedIn alert') and do
+NOT parse it. When no real JD: fall back to anchor truth (jd_title=role, jd_company=company), leave
+jd_summary honest-empty ("Full JD not retrieved yet"), don't guess. Backfill: clear the fabricated
+jd_title/jd_company/jd_summary where they were parsed from an alert-email raw_jd (jd_real null).
