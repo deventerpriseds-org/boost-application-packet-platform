@@ -559,7 +559,7 @@ not found for the segment 'AAMk...'"} — a Graph message-fetch with a malformed
 Root-cause the JD/triggering-email fetch path. Automated 3x search PAUSED (jdSearch SEARCH_PAUSED=true)
 until intake is clean.
 
-**ACT-29 — Concatenated favorite-title searches; decide schedule spread.**
+**ACT-29 — ✅ DONE + verified (2026-07-31). Search now targets FAVOURITE TITLE variants (taxonomy_title tier=fav), OR-concatenated per role (one query/role). SCHEDULE: fits ONE slot (≤~27 queries, ~3s-jittered) → run full set at each 5am/1pm/6pm ET; no spread. SEARCH_PAUSED=false (re-enabled). Live api-test /api/mail/jd-search roleLimit=3: cardsFound=25, inserted=20, blocked=0; byRole shows OR-of-8/6/8 fav titles. Commit 074cff4. (original:)
 Build OR-concatenated search queries from the LONGER favorite-title list (per role). Confirm working,
 then decide: does the resulting query count fit one 3x/day slot, or must queries be SPREAD across the
 5am/1pm/6pm slots (vs repeating each query 3x/day)? Depends on ACT-25 favorites.

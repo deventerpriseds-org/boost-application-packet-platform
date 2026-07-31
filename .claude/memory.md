@@ -590,3 +590,16 @@ CALIBRATION: the id sampled for the live test happened to be '/'-free (so it may
 too); I did not reproduce a '/'-containing id to show a strict before/after. The encodeURIComponent
 fix is the canonical correct handling for the '/'-in-id ParseUri class and cannot regress the working
 case. Endpoint confirmed healthy post-deploy.
+
+## ACT-29 DONE + verified (2026-07-31): favourite-title search re-enabled
+jdSearch.ts: new loadFavoriteTitleQueries() builds ONE OR-concatenated query per role from that role's
+taxonomy_title tier='fav' titles (e.g. `"Chief Technology Officer" OR "Platform CTO"`), capped 8
+phrases/role (LinkedIn keyword length). runRoleSearch iterates these instead of bare role names;
+byRole now includes titles count. Fallback = role-name search when no favourites. SCHEDULE DECISION:
+≤~27 queries/cycle, 1 page each, ~3s jitter (+bounded inline JD burst) → fits ONE slot; run the full
+favourite set at EACH ET slot (5am/1pm/6pm), no per-slot spreading. SEARCH_PAUSED flipped to FALSE
+(timer live; still self-gates to the 3 ET hours). VERIFIED live (api-test POST /api/mail/jd-search
+roleLimit=3 fetchJds=false): roles=3 cardsFound=25 inserted=20 dup=5 blocked=0; byRole Architecture
+(8 titles→4), Chief AI Officer (6→9), Chief Data Officer (8→7). Coheres with fresh-start scope:
+title-matched results get is_favorite=true (tagFields) → visible; fuzzy misses → watch/off → hidden.
+Timer will next fire at the top of the covering UTC hour and run when ET hour ∈ {5,13,18}.
