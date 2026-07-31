@@ -101,6 +101,95 @@ async function loadFavoriteTitleQueries(
   return (await loadRoleKeywords(client, owner, maxRoles)).map((role) => ({ role, keywords: role, titles: 0 }))
 }
 
+// FULL COVERAGE (Pattern-B sweep): chunk EACH role's ENTIRE favourite-title list into OR-batches of
+// `titlesPerQuery` phrases — so every one of the 651 titles is searched, not just the first 8/role.
+// Deterministic order (role asc, then title asc, stable chunking) so a DB cursor can walk the list
+// across many one-query timer fires and resume exactly where it left off. Returns ~87 queries today.
+export async function buildAllTitleQueries(client: any, owner: string, titlesPerQuery = 8): Promise<RoleQuery[]> {
+  const per = Math.max(1, Math.min(12, titlesPerQuery))
+  try {
+    const r = await client.query(
+      `select role, array_agg(distinct title order by title) as titles
+         from taxonomy_title
+        where owner_email=$1 and tier='fav' and coalesce(title,'') <> ''
+        group by role order by role`,
+      [owner],
+    )
+    const queries: RoleQuery[] = []
+    for (const row of r.rows) {
+      const titles: string[] = Array.from(new Set((row.titles || []).map((s: string) => String(s).trim()).filter(Boolean)))
+      for (let i = 0; i < titles.length; i += per) {
+        const chunk = titles.slice(i, i + per)
+        queries.push({ role: row.role, keywords: chunk.map((t) => `"${t}"`).join(' OR '), titles: chunk.length })
+      }
+    }
+    if (queries.length) return queries
+  } catch { /* taxonomy_title may not exist */ }
+  // Fallback: bare role names.
+  return (await loadRoleKeywords(client, owner, 40)).map((role) => ({ role, keywords: role, titles: 0 }))
+}
+
+// The location/remote keep-gate (ACT-34) as a reusable predicate, built once from prefs.
+export function makeKeepCard(prefs: { targetGeoIds: string[]; remoteOnly: boolean }): (loc: string) => boolean {
+  const targets = new Set(prefs.targetGeoIds)
+  return (loc: string): boolean => {
+    if (!targets.size && !prefs.remoteOnly) return true
+    const m = resolveMetro(loc || '')
+    const inTarget = !!(m && m.geoId && targets.has(m.geoId))
+    const isRemote = parseWorkMode(loc || '') === 'remote'
+    if (targets.size && prefs.remoteOnly) return inTarget || isRemote
+    if (targets.size) return inTarget
+    return isRemote
+  }
+}
+
+// Run ONE query (1..pages pages) on the guest endpoint → route each kept card through the SAME
+// opportunity pipeline. Returns the outcome + the newly-inserted opps that still need a JD fetched.
+// Shared by the manual batch (runRoleSearch) and the Pattern-B sweep (jdSweepTick) — one pipeline.
+export async function runOneQuery(
+  client: any, owner: string, q: RoleQuery, keepCard: (loc: string) => boolean,
+  opts: { tpr?: string; location?: string; pages?: number } = {},
+): Promise<{ cards: number; inserted: number; duplicate: number; blocked: boolean; skippedLocation: number; fresh: Array<{ id: string; job_id: string }> }> {
+  const pages = Math.max(1, Math.min(3, opts.pages || 1))
+  const out = { cards: 0, inserted: 0, duplicate: 0, blocked: false, skippedLocation: 0, fresh: [] as Array<{ id: string; job_id: string }> }
+  for (let pg = 0; pg < pages; pg++) {
+    const url = buildSearchUrl(q.keywords, { tpr: opts.tpr, location: opts.location, start: pg * 25 })
+    const r = await scraperFetch(url, { force: 'direct' })
+    const outcome = classifyResponse(r.status, r.body, false)
+    if (outcome === 'blocked' || outcome === 'quota_exceeded') { out.blocked = true; break }
+    const cards = parseSearchCards(r.body)
+    out.cards += cards.length
+    for (const c of cards) {
+      if (!keepCard(c.location)) { out.skippedLocation++; continue }
+      const res = await routeOpportunity(client, owner,
+        { company: c.company, role: c.title, location: c.location, url: canonicalJobUrl(c.jobId), postedDate: c.postedDate, jobId: c.jobId },
+        { source: 'LinkedIn Search' })
+      if (res.inserted) { out.inserted++; if (res.id) out.fresh.push({ id: res.id, job_id: c.jobId }) } else out.duplicate++
+    }
+    if (cards.length < 25) break         // last page for this query
+    await sleepJitter(2500)              // human pacing between pages
+  }
+  return out
+}
+
+// Fill jd_real for a set of freshly-inserted opps, bounded + paced (same fetch as the backfill sweep).
+export async function fillJdsForFresh(
+  client: any, fresh: Array<{ id: string; job_id: string }>, cap: number,
+): Promise<{ jdFetched: number; jdStored: number; jdOutcomes: Record<string, number> }> {
+  const res = { jdFetched: 0, jdStored: 0, jdOutcomes: {} as Record<string, number> }
+  if (!fresh.length || cap <= 0) return res
+  await ensureJdCols(client)
+  let consec = 0
+  for (const opp of fresh.slice(0, cap)) {
+    const { outcome, stored } = await fetchAndStoreJd(client, opp, { runTag: 'search-inline' })
+    res.jdFetched++; res.jdOutcomes[outcome] = (res.jdOutcomes[outcome] || 0) + 1
+    if (stored) res.jdStored++
+    if (outcome === 'blocked' || outcome === 'quota_exceeded') { if (++consec >= 3) break } else consec = 0
+    await sleepJitter(2500)             // human pacing between JD fetches
+  }
+  return res
+}
+
 // Core: search each role on the guest endpoint (direct, hardened, jittered), parse cards, and route
 // each through the SAME opportunity pipeline (dedup + role-tag + jobId/url capture). It only
 // DISCOVERS + inserts — the real JD is filled by the paced direct fetch (jd-backfill/fetch), so this
@@ -120,60 +209,27 @@ export async function runRoleSearch(owner: string, opts: { tpr?: string; locatio
     // ACT-34: location/remote gate applied at INGEST (before insert + JD-fetch) so off-target cards
     // never cost a JD fetch. Empty target set + no remote-only = keep everything (unchanged behaviour).
     const prefs = await getSearchPrefs(client, owner)
-    const targets = new Set(prefs.targetGeoIds)
-    const keepCard = (loc: string): boolean => {
-      if (!targets.size && !prefs.remoteOnly) return true
-      const m = resolveMetro(loc || '')
-      const inTarget = !!(m && m.geoId && targets.has(m.geoId))
-      const isRemote = parseWorkMode(loc || '') === 'remote'
-      if (targets.size && prefs.remoteOnly) return inTarget || isRemote
-      if (targets.size) return inTarget
-      return isRemote // remoteOnly, no target metros
-    }
+    const keepCard = makeKeepCard(prefs)     // ACT-34 location/remote gate (shared)
     ;(summary as any).skippedLocation = 0
     let consecBlocked = 0
     for (const q of queries) {
-      const role = q.role
-      let roleInserted = 0, roleCards = 0
-      for (let pg = 0; pg < pages; pg++) {
-        const url = buildSearchUrl(q.keywords, { tpr: opts.tpr, location: opts.location, start: pg * 25 })
-        const r = await scraperFetch(url, { force: 'direct' })
-        summary.searched++
-        const outcome = classifyResponse(r.status, r.body, false)
-        if (outcome === 'blocked' || outcome === 'quota_exceeded') { summary.blocked++; consecBlocked++; break }
-        consecBlocked = 0
-        const cards = parseSearchCards(r.body)
-        roleCards += cards.length; summary.cardsFound += cards.length
-        for (const c of cards) {
-          if (!keepCard(c.location)) { (summary as any).skippedLocation++; continue }  // ACT-34 location/remote gate
-          const res = await routeOpportunity(client, owner,
-            { company: c.company, role: c.title, location: c.location, url: canonicalJobUrl(c.jobId), postedDate: c.postedDate, jobId: c.jobId },
-            { source: 'LinkedIn Search' })
-          if (res.inserted) { summary.inserted++; roleInserted++; if (res.id) fresh.push({ id: res.id, job_id: c.jobId }) } else summary.duplicate++
-        }
-        if (cards.length < 25) break            // last page for this role
-        await sleepJitter(2500)                 // human pacing between pages
-      }
-      summary.byRole.push({ role, titles: q.titles, cards: roleCards, inserted: roleInserted })
+      const res = await runOneQuery(client, owner, q, keepCard, { tpr: opts.tpr, location: opts.location, pages })
+      summary.searched++
+      summary.cardsFound += res.cards
+      summary.inserted += res.inserted
+      summary.duplicate += res.duplicate
+      ;(summary as any).skippedLocation += res.skippedLocation
+      if (res.blocked) { summary.blocked++; consecBlocked++ } else consecBlocked = 0
+      fresh.push(...res.fresh)
+      summary.byRole.push({ role: q.role, titles: q.titles, cards: res.cards, inserted: res.inserted })
       if (consecBlocked >= 3) break             // real wall — stop the run
-      await sleepJitter(3000)                   // human pacing between roles
+      await sleepJitter(3000)                    // human pacing between queries
     }
 
-    // Inline JD-fetch phase: fill jd_real for the handful of NEW opps this cycle found, using the
-    // SAME direct-from-Azure paced fetch as the backfill sweep (fetchAndStoreJd). Bounded by
-    // jdFetchCap and paced with jitter so it never approaches the ~30-burst/IP wall. Stops early on
-    // a genuine block/quota wall (leaves the rest for the next cycle rather than hammering).
-    if (fetchJds && fresh.length && jdFetchCap > 0) {
-      await ensureJdCols(client)
-      let consec = 0
-      for (const opp of fresh.slice(0, jdFetchCap)) {
-        const { outcome, stored } = await fetchAndStoreJd(client, opp, { runTag: 'search-inline' })
-        summary.jdFetched++
-        summary.jdOutcomes[outcome] = (summary.jdOutcomes[outcome] || 0) + 1
-        if (stored) summary.jdStored++
-        if (outcome === 'blocked' || outcome === 'quota_exceeded') { if (++consec >= 3) break } else consec = 0
-        await sleepJitter(2500)                 // human pacing between JD fetches
-      }
+    // Inline JD-fetch phase: fill jd_real for the NEW opps this cycle found (shared, bounded, paced).
+    if (fetchJds) {
+      const jd = await fillJdsForFresh(client, fresh, jdFetchCap)
+      summary.jdFetched = jd.jdFetched; summary.jdStored = jd.jdStored; summary.jdOutcomes = jd.jdOutcomes
     }
     return summary
   } finally { try { await client?.end() } catch {} }

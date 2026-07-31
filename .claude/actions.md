@@ -742,3 +742,17 @@ grid, or derive), replace the per-role 8-title OR cap with core-based queries, a
 DECISION NEEDED FROM OWNER: (a) search off discipline cores (recommended, full coverage ~90/day) vs
 (b) literal per-title; and whether to add a REAL "star" in Settings▸Roles so tier='fav' means user-chosen
 (today it means "in the grid").
+
+**ACT-29d (BUILT 2026-07-31) — Pattern-B full-coverage title sweep.** Implemented:
+- jdSearch.ts: buildAllTitleQueries() chunks EACH role's FULL fav-title list into OR-batches of
+  titles_per_query (default 8) → ~87 deterministic queries covering ALL 651 (was 17 queries/8-cap/21%).
+  Extracted shared runOneQuery() + fillJdsForFresh() + makeKeepCard(); refactored runRoleSearch to use them.
+- jdSweep.ts (NEW): per-minute timer jdSweepTick fires ≤1 query/fire walking a DB cursor on
+  owner_search_prefs (EXTENDED, not new table: search_enabled default FALSE, titles_per_query,
+  active_hours_et default 6-16 ET, sweep_index/cycle, backoff_until, consec_blocks, last_fired_at/query).
+  429 → expo backoff (2..60m) + cursor holds; success advances + wraps → cycle++. Small 2-15s jitter.
+  Immune to 10-min Consumption cap (1 query ~2s) + no billed sleep = ~$0 (confirmed Y1 Dynamic plan).
+- GET/POST /api/app/search-sweep: preview the exact ~87 queries + cursor, and set enabled/titlesPerQuery/
+  activeHoursEt (settings-driven per no-hardcoded-config rule). Default DISABLED — owner must flip on.
+- Old jdSearchTimer stays SEARCH_PAUSED=true (superseded); manual POST /mail/jd-search still works.
+NEXT: deploy → verify GET /app/search-sweep shows ~87 queries/651 titles → owner reviews → POST enabled=true.
