@@ -743,7 +743,7 @@ DECISION NEEDED FROM OWNER: (a) search off discipline cores (recommended, full c
 (b) literal per-title; and whether to add a REAL "star" in Settings▸Roles so tier='fav' means user-chosen
 (today it means "in the grid").
 
-**ACT-29d (BUILT 2026-07-31) — Pattern-B full-coverage title sweep.** Implemented:
+**ACT-29d (BUILT + VERIFIED 2026-07-31) — Pattern-B full-coverage title sweep.** DEPLOYED to job-platform-api; GET /app/search-sweep returns 87 queries / 651 titles (was 8/role=21%); sweep_state=false|idx=0|cycle=0|tpq=8 (disabled by default, cursor init, cols created). Implemented:
 - jdSearch.ts: buildAllTitleQueries() chunks EACH role's FULL fav-title list into OR-batches of
   titles_per_query (default 8) → ~87 deterministic queries covering ALL 651 (was 17 queries/8-cap/21%).
   Extracted shared runOneQuery() + fillJdsForFresh() + makeKeepCard(); refactored runRoleSearch to use them.

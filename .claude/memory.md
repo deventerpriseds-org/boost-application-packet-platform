@@ -713,3 +713,14 @@ Timer cost ≈ $0. DESIGN RULE for the search pacer: use "Pattern B" = many SHOR
 Consumption. Pattern B ≈ 2.7k exec + 2.7k GB-s/mo (negligible); Pattern A ≈ 101k GB-s/mo (still in
 grant but wasteful). Reusable read-only workflow: .github/workflows/azure-plan-check.yml (client-secret
 creds like api-deploy; OIDC login is NOT configured for this SP — client-secret only).
+
+## Pattern-B sweep DEPLOYED + VERIFIED (2026-07-31, commit 9c59144)
+jdSweep.ts live on job-platform-api. GET /api/app/search-sweep?owner=... → 87 OR-queries / 651 titles
+(full coverage; last batch partial 2 titles). DB confirms owner_search_prefs extended: search_enabled
+default FALSE, sweep_index=0, cycle=0, titles_per_query=8. Per-minute timer jdSweepTick gated on
+enabled+active-hours(6-16 ET)+backoff, 1 query/fire, cursor advance/wrap, expo backoff on 429. NOT YET
+ENABLED — owner must POST /app/search-sweep {enabled:true} (or via Settings UI once wired). To enable in
+prod: POST with verified session. Old jdSearchTimer still SEARCH_PAUSED (superseded). NEXT: (a) owner
+reviews queries + flips enabled; (b) wire a Settings UI toggle for enabled/titlesPerQuery/activeHours
+(currently API-only — no-hardcoded-config: settings exist in DB, UI control still TODO); (c) ACT-44 JD-at-
+ingest; (d) ACT-45 Analysis section.
