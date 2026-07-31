@@ -319,6 +319,7 @@ function IntakeSettings() {
   const [roles, setRoles] = useState([])          // persona role bins
   const [openPicker, setOpenPicker] = useState(null) // roleKey whose dropdown is open
   const [expanded, setExpanded] = useState({})    // folderId -> expanded in picker
+  const [foldersOpen, setFoldersOpen] = useState(false)  // Folder → role routing section collapsed by default
 
   const loadTree = useCallback(async (mailbox) => {
     if (!mailbox) return
@@ -521,8 +522,13 @@ function IntakeSettings() {
       </Card>
 
       <Card>
-        <b style={{ fontSize: 15 }}>Folder → role routing</b>
-        <div className="px-small" style={{ marginTop: 2, marginBottom: 12 }}>
+        <div onClick={() => setFoldersOpen((v) => !v)} style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
+          <span style={{ color: 'var(--proto-ink3)', transform: foldersOpen ? 'rotate(90deg)' : 'none', transition: 'transform .15s', display: 'inline-block', width: 12 }}>▸</span>
+          <b style={{ fontSize: 15 }}>Folder → role routing</b>
+          {!foldersOpen && <span className="px-small" style={{ color: 'var(--proto-ink3)' }}>{roles.length ? `${roles.length} role${roles.length === 1 ? '' : 's'} · tap to configure` : 'tap to configure'}</span>}
+        </div>
+        {!foldersOpen ? null : (<>
+        <div className="px-small" style={{ marginTop: 10, marginBottom: 12 }}>
           Give each role a folder picker. Open it, drill through your Outlook folders, and tick the
           ones whose mail should feed that role — imported <b>even if it fails the keyword filters
           above</b>. Folders you don't assign stay on <b>router decides</b> (imported, AI picks the role).
@@ -605,6 +611,7 @@ function IntakeSettings() {
           Saved as you change them. A role can pull from several folders; a folder can feed more than
           one role. Routing takes effect once the mailbox-wide watch is live.
         </div>
+        </>)}
       </Card>
 
       <SweepSettings />
