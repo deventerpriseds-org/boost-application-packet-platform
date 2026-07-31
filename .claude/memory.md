@@ -566,3 +566,14 @@ VERIFIED: opp 78f50bdf now jd_title="Vice President of Software Engineering" jd_
 FOLLOW-UP: the 194 with jd_real are grounded; the 409 show role-as-title + "not retrieved" note until a
 real JD is fetched (ties to ACT-28 Graph ParseUri fetch error / ACT-29 re-enable search + jd fetch). To
 refresh a single opp after its jd_real lands: hit "Re-parse JD" (jdParse reads jd_real first).
+
+## Fresh-start scope DECIDED + applied (2026-07-31): keep only FAVORITE + last-14-days opps
+User confirmed the working set = opportunities that are is_favorite AND created within 14 days.
+Applied by DISMISSING (reversible, not deleted) everyone else for von.ellis. Ground-truth counts BEFORE:
+976 total (ingested 2026-07-08..07-31) = 232 fav / 758 recent-14d / 182 fav+recent; 194 grounded
+(jd_real) / 409 alert-fabricated (reset in ACT-35) / 373 no-JD-source. AFTER prune: ~180 active
+(favorite+recent), ~796 dismissed. The 976 were NOT created by any backfill — they are pre-existing
+mail-ingest rows; the backfill only rewrote JD columns. NOTE: favorites OLDER than 14 days (~52) were
+dismissed too per the chosen rule; un-dismiss to restore. STANDING RULE for future work: scope
+JD-fetch / Today / Swipe / counts to favorite+recent; when searches re-enable (ACT-29), apply the same
+gate at ingest so the DB doesn't re-bloat. Un-dismiss = set dismissed=false on the opp.
