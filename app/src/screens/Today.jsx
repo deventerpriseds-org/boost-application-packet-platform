@@ -35,6 +35,14 @@ export function roleFamily(o) {
   if (o.matchedRole) return (GROUP_PREFIX[o.matchedGroup] || '') + o.matchedRole
   return 'Other roles'
 }
+// One level below roleFamily: the matched job-title variant, carrying the SAME seniority
+// qualifier (VP · / Dir ·) so a bare title like "Engineering" reads as "VP · Engineering".
+// Falls back to the role name when no specific variant matched.
+export function titleFamily(o) {
+  const t = o.matchedVariation || o.matchedRole
+  if (t) return (GROUP_PREFIX[o.matchedGroup] || '') + t
+  return 'Other roles'
+}
 // Seniority ordering for the breakdown: C Suite → VP → Director → Other.
 const SENIORITY_RANK = { csuite: 0, vp: 1, director: 2 }
 function seniorityRank(group) { return SENIORITY_RANK[group] ?? 3 }
@@ -56,20 +64,14 @@ function fmtTime(d) {
 }
 
 function InboxScrubHero({ newToday, backlog, toast }) {
-  // Toggle: 'roles' = the 27 monitored roles (current) · 'titles' = my favorite job
-  // titles, the taxonomy level below (matchedVariation, favorites only).
-  const [view, setView] = useState('roles')
+  // Toggle: 'titles' (default) = the matched job title, the taxonomy level below role ·
+  // 'roles' = the 27 monitored roles. Both bin by the same seniority qualifier.
+  const [view, setView] = useState('titles')
   const bins = useMemo(() => {
     const map = new Map()
     newToday.forEach((o) => {
-      let label, group
-      if (view === 'titles') {
-        if (o.isFavorite && (o.matchedVariation || o.matchedRole)) {
-          label = o.matchedVariation || o.matchedRole; group = o.matchedGroup
-        } else { label = 'Other roles'; group = null }
-      } else {
-        label = roleFamily(o); group = o.matchedRole ? o.matchedGroup : null
-      }
+      const label = view === 'titles' ? titleFamily(o) : roleFamily(o)
+      const group = (o.matchedRole || o.matchedVariation) ? o.matchedGroup : null
       const e = map.get(label) || { label, n: 0, group }
       e.n += 1; map.set(label, e)
     })
@@ -129,10 +131,10 @@ function InboxScrubHero({ newToday, backlog, toast }) {
         {/* Middle: per-role breakdown */}
         <div style={{ flex: '2 1 280px', padding: '14px 18px', minWidth: 240 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-            <div className="px-small" style={{ textTransform: 'uppercase', letterSpacing: 1 }}>{view === 'titles' ? 'Discovered by favorite title' : 'Discovered by role'}</div>
+            <div className="px-small" style={{ textTransform: 'uppercase', letterSpacing: 1 }}>{view === 'titles' ? 'Discovered by title' : 'Discovered by role'}</div>
             <div style={{ flex: 1 }} />
             <div style={{ display: 'inline-flex', border: '1px solid var(--proto-rule-soft)', borderRadius: 6, overflow: 'hidden' }}>
-              {[['roles', 'Roles'], ['titles', '★ Fav titles']].map(([k, lbl]) => (
+              {[['titles', 'Title'], ['roles', 'Roles']].map(([k, lbl]) => (
                 <span key={k} onClick={() => setView(k)} className="px-small" style={{ padding: '2px 9px', cursor: 'pointer', fontWeight: 600, background: view === k ? 'var(--surface-brand-subtle)' : 'transparent', color: view === k ? 'var(--text-brand)' : 'var(--proto-ink2)' }}>{lbl}</span>
               ))}
             </div>

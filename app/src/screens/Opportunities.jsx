@@ -2,7 +2,7 @@ import React, { useMemo, useState, useEffect, useCallback } from 'react'
 import { go, useApp } from '../state.jsx'
 import { api } from '../api.js'
 import { MatchScore, UrgencyPill, Pill, FavStar } from '../shell.jsx'
-import { Loading, ErrorBox, Empty, roleFamily } from './Today.jsx'
+import { Loading, ErrorBox, Empty, roleFamily, titleFamily } from './Today.jsx'
 
 const URGENCIES = ['All', 'Hot', 'Warm', 'Cool']
 const FRESH_STAGES = ['discovered', 'saved', 'enriched']
@@ -121,12 +121,10 @@ export default function Opportunities({ opps, filter }) {
       const cutoff = CUTOFF_TODAY()
       r = r.filter((o) => roleFamily(o) === fam && FRESH_STAGES.includes(o.stage) && o.createdAt && new Date(o.createdAt).getTime() >= cutoff)
     } else if (activeFilter?.startsWith('titlenew:')) {
-      // New-today, binned by favorite job title (matchedVariation). 'Other roles' = non-favorites.
+      // New-today, binned by matched job title (titleFamily, same seniority qualifier as roleFamily).
       const t = activeFilter.slice(9)
       const cutoff = CUTOFF_TODAY()
-      const isOther = t === 'Other roles'
-      r = r.filter((o) => FRESH_STAGES.includes(o.stage) && o.createdAt && new Date(o.createdAt).getTime() >= cutoff &&
-        (isOther ? !o.isFavorite : (o.isFavorite && (o.matchedVariation || o.matchedRole) === t)))
+      r = r.filter((o) => titleFamily(o) === t && FRESH_STAGES.includes(o.stage) && o.createdAt && new Date(o.createdAt).getTime() >= cutoff)
     } else if (activeFilter?.startsWith('role:')) {
       const fam = activeFilter.slice(5)
       r = r.filter((o) => roleFamily(o) === fam)

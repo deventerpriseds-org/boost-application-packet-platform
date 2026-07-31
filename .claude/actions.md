@@ -592,3 +592,20 @@ Apply the location + remote-optional filtering at the SEARCH and INGEST layer (n
 we fetch/parse fewer JDs per day: scheduled searches pass location/geoId + remote params; ingest
 skips (or de-prioritizes) opps that fail the location/remote gate before JD-fetch + tagging. Goal:
 fewer search results and fewer JD tags needed daily.
+
+**ACT-35 — Root-cause & fix why the JD attached to an opportunity is a DIFFERENT job (the JD still doesn't line up).**
+Ground-truth evidence (screenshot 15420.jpg, live): opportunity header = "Vice President of Software
+Engineering · The Phoenix Group · sourced from LinkedIn" but its Job Description ▸ Summary reads
+"Title: Managing Vice President, Technology Product Management & Platform Strategy · Gartner" — an
+entirely different company AND title. So `jd_real` / `raw_jd` (and the derived Summary Title +
+company) attached to this opp belong to another posting. This is NOT the earlier classify-on-role
+fix (that fixed matched_group); this is the JD *body* being cross-wired to the wrong opportunity.
+Investigate the JD-fetch/store path: (1) does the scheduled/inline JD fetcher (jdSearch.ts /
+jdBackfill.ts fetchAndStoreJd) resolve the posting URL from the RIGHT opportunity row, or is it
+reusing a stale/searched result and writing it to the wrong opp id? (2) is the search-result→opp
+join keyed on something non-unique (company+title fuzzy) so JD lands on a sibling? (3) does
+appJdParse derive Title/company from jd_real that was populated for a different opp? GROUND-TRUTH
+before concluding: pull the opp row (role, company, source_url) AND its jd_real/raw_jd for this exact
+opp, compare to the real posting at source_url. Fix the write-path so JD body is stored against the
+opp whose posting it actually came from; add a guard (e.g. verify parsed company/title ~matches the
+opp before overwriting, else flag mismatch instead of silently attaching).
