@@ -156,6 +156,16 @@ function Overview({ o, toast, id, reload }) {
     try { const r = await api.applyPrepare(id || o.id, {}); if (r.error) throw new Error(r.error); setApply(r); toast(`Prepared ${r.answers?.length || 0} answers${r.ats ? ` (${r.ats.provider})` : ''}`) }
     catch (e) { toast(`Prepare failed: ${e.message || e}`) } finally { setPreparing(false) }
   }
+  // Re-parse the JD (from the fetched real posting when present). Same action as the JD tab.
+  const [parsing, setParsing] = useState(false)
+  const parseJd = async () => {
+    setParsing(true)
+    try { const r = await api.parseJd(o.id); if (r.error) throw new Error(r.error); toast('JD parsed — reloading…'); reload && reload() }
+    catch (e) { toast(`Parse failed: ${e.message || e}`) } finally { setParsing(false) }
+  }
+  // A JD not yet fetched carries the anchor-truth placeholder (jd_real still null). Distinguish it
+  // from a real parsed summary so the placeholder is never shown as if it were the real description.
+  const jdNotRetrieved = !o.jdSummary || String(o.jdSummary).startsWith('Full job description not yet retrieved')
   return (
     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 16 }}>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
@@ -188,6 +198,25 @@ function Overview({ o, toast, id, reload }) {
             <button className="px-btn" style={{ fontSize: 12 }} onClick={() => go(`/offer/${o.id}`)}>◆ Negotiation tracker</button>
           </div>
         </div>
+
+        {/* Job description — surfaced ABOVE "Why surfaced" on the Overview tab. Reuses the same
+            o.jd* fields as the Job Description tab; the standalone tab is unchanged. */}
+        {jdNotRetrieved ? (
+          <Card title="Job description">
+            <div className="px-small" style={{ color: 'var(--proto-ink2)' }}>
+              Full job description not retrieved yet — showing the role from the alert. Retrieve the posting to parse the real description.
+            </div>
+            <div style={{ marginTop: 10 }}>
+              <button className="px-btn px-btn-accent" style={{ fontSize: 12 }} disabled={parsing} onClick={parseJd}>{parsing ? 'Parsing…' : '↻ Re-parse JD'}</button>
+            </div>
+          </Card>
+        ) : (
+          <Card title="Job description">
+            {o.jdTitle && <div className="px-small" style={{ marginBottom: 6 }}><b>{o.jdTitle}</b>{o.jdCompany ? ` · ${o.jdCompany}` : ''}</div>}
+            <div style={{ fontSize: 13, lineHeight: 1.6 }}>{o.jdSummary}</div>
+            <div className="px-small" style={{ marginTop: 8 }}><span className="px-link" onClick={() => go(`/opp/${o.id}/jd`)}>Full job description →</span></div>
+          </Card>
+        )}
 
         {o.why && (
           <Card title="Why surfaced">
