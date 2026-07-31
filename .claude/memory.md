@@ -720,7 +720,21 @@ jdSweep.ts live on job-platform-api. GET /api/app/search-sweep?owner=... → 87 
 default FALSE, sweep_index=0, cycle=0, titles_per_query=8. Per-minute timer jdSweepTick gated on
 enabled+active-hours(6-16 ET)+backoff, 1 query/fire, cursor advance/wrap, expo backoff on 429. NOT YET
 ENABLED — owner must POST /app/search-sweep {enabled:true} (or via Settings UI once wired). To enable in
-prod: POST with verified session. Old jdSearchTimer still SEARCH_PAUSED (superseded). NEXT: (a) owner
-reviews queries + flips enabled; (b) wire a Settings UI toggle for enabled/titlesPerQuery/activeHours
-(currently API-only — no-hardcoded-config: settings exist in DB, UI control still TODO); (c) ACT-44 JD-at-
-ingest; (d) ACT-45 Analysis section.
+prod: POST with verified session. Old jdSearchTimer still SEARCH_PAUSED (superseded).
+
+## Sweep Settings UI SHIPPED + VERIFIED (2026-07-31, commit 7328546) — closes the "UI control TODO" gap
+Settings ▸ Intake now has a "Active search — LinkedIn role sweep" card (SweepSettings in Settings.jsx),
+placed BELOW "Folder → role routing", above Self-test (owner-chosen placement; prototype approved first).
+Controls: on/off toggle, roles-bundled-per-search stepper (1–12, matches API clamp), active-hours window
+(two hour <select>s → contiguous int[] for active_hours_et). All persist to owner_search_prefs via
+api.js searchSweepGet/searchSweepSet → GET/POST /api/app/search-sweep. Live readout (searches/sweep,
+cadence, full-sweep time, daily coverage) + query preview + a LinkedIn-quota WARNING that escalates
+green→amber→red as searches/sweep approaches/exceeds active-window capacity (hours×60 at 1/min).
+- Backend add: GET /app/search-sweep accepts optional NON-persisting ?titlesPerQuery= preview so the UI
+  shows the REAL query count as the stepper moves (no client-side estimate). Verified live via api-test:
+  tpq=12 → previewTitlesPerQuery=12, totalQueries=60 (vs 87 @ tpq=8), totalTitles=651, enabled=false.
+- Verified: ui-verify Playwright PASS on #/settings/intake (all 4 strings render); api+app deploys green.
+- STILL OFF by default (search_enabled=false). Quota WARNING THRESHOLDS are capacity-based, NOT a verified
+  LinkedIn number — real LinkedIn rate ceiling / auth mechanism still not ground-truthed (open follow-up).
+NEXT: (a) owner reviews queries + flips enabled (toggle On + Save in the UI now, no API call needed);
+(b) ACT-44 JD-at-ingest; (c) ACT-45 Analysis section; (d) confirm real LinkedIn quota to tune warning.
