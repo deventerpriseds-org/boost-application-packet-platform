@@ -644,3 +644,16 @@ owner approval to leave it code-only (and record it). Added to CLAUDE.md ("No ha
 Owner default request: target location = Washington DC-Baltimore Area (DC/NoVA/Baltimore), and "REMOTE
 PLUS" (remote OR my target metros) — NOT remote-only; leave off if remote-plus isn't UI-settable (it is:
 target metros + the include-remote toggle = remote-plus).
+
+## Location-filter consistency fix (2026-07-31): single funnel in useOpportunities
+BUG (owner-caught): location/remote filter was applied ad-hoc in Swipe + Opportunities but NOT in
+Today's Inbox-Scrub counts → same data, different numbers per screen. ROOT: filter bolted onto some
+consumers, not the core source. FIX: applyLocationPrefs() now lives in the shared useOpportunities hook
+(data.jsx) — loads search-prefs (refreshes on poll) and filters DISCOVERY/FRESH_STAGES opps by the SAME
+rule as the backend jdSearch.keepCard (in-target OR remote when remote-plus; in-target when targets set;
+committed/active stages NEVER hidden). Removed the duplicated filters from Swipe (matchesPrefs) and
+Opportunities (targetGeoIds). Now Today scrub + Swipe + Opportunities + Pipeline all read the one filtered
+funnel and reconcile automatically. Hook also exposes allOpportunities (raw) for any future raw need.
+NEW STRICT RULE added to CLAUDE.md: "Trace every dependent — up AND downstream — before declaring a change
+done" (map blast radius; apply shared logic at the ONE core source; grep all consumers; counts across
+Today/Swipe/Pipeline/Opportunities must reconcile). Mismatched numbers ⇒ hunt the hardcode/off-funnel spot.

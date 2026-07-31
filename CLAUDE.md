@@ -351,3 +351,25 @@ user will override," never as a permanent constant.
 
 This exists because the owner wants the product to be fully self-serve/configurable, not dependent on
 a developer to change constants. Violating it creates black-box behavior the owner can't adjust.
+
+## Trace every dependent — up AND downstream — before declaring a change done (strict rule)
+
+When you change ANY shared value, filter, computed field, data source, or endpoint, you MUST map its
+FULL blast radius before shipping: who PRODUCES the data upstream and every consumer DOWNSTREAM that
+reads or re-derives it. A filter/count/field must be applied at the ONE core source that feeds all
+consumers, never bolted onto some screens and not others — or the numbers silently disagree.
+
+Checklist before "done":
+1. Name the core source (the hook / selector / endpoint that everything funnels through). Prefer
+   applying shared logic THERE, once, so every consumer updates automatically from the data.
+2. `grep` every consumer of the thing you changed (both `app/src/` and `api/src/`). List them.
+3. For EACH consumer, ask: does it now agree with the others? Counts on Today vs Swipe vs Pipeline vs
+   Opportunities must reconcile because they read the same funnel.
+4. If a value can differ between screens, that difference must be a deliberate, explained choice
+   (e.g. discovery filter applies to fresh stages, not committed pipeline) — never an accident of
+   where you happened to add the filter.
+
+This exists because a location filter was added to Swipe + Opportunities but NOT to Today's scrub
+counts, so the same underlying data showed different numbers on different screens. Real fix: filter
+in the shared `useOpportunities` source so all consumers reflect it. Stale/mismatched numbers almost
+always mean a value was hardcoded or applied off the core funnel — hunt that, don't patch one screen.

@@ -47,13 +47,9 @@ export default function Opportunities({ opps, filter }) {
   const [showRejected, setShowRejected] = useState(false)
   const [withDismissed, setWithDismissed] = useState(null) // list incl. dismissed, fetched on demand
   const [busyId, setBusyId] = useState(null)
-  // ACT-32: persisted target metros — filter the list to the owner's chosen locations (empty = all).
-  const [targetGeoIds, setTargetGeoIds] = useState(() => new Set())
-  useEffect(() => {
-    let alive = true
-    api.searchPrefsGet().then((p) => { if (alive && p && p.ok !== false) setTargetGeoIds(new Set(p.targetGeoIds || [])) }).catch(() => {})
-    return () => { alive = false }
-  }, [])
+  // NOTE: the persisted target-metro / remote-plus location filter is applied at the SOURCE
+  // (useOpportunities in data.jsx) for discovery-stage opps, so this list and Today's scrub counts
+  // stay in lockstep. Do not re-filter by location here.
 
   // Fetch the dismissed-inclusive list when the toggle is on (and after any mutation).
   const loadWithDismissed = useCallback(() => {
@@ -150,14 +146,12 @@ export default function Opportunities({ opps, filter }) {
     if (roleFilter === 'fav') r = r.filter((o) => o.isFavorite)
     else if (roleFilter === 'other') r = r.filter((o) => !o.matchedGroup)
     else if (roleFilter !== 'all') r = r.filter((o) => o.matchedGroup === roleFilter)
-    // ACT-32: persisted target-location filter (empty selection = no location filtering).
-    if (targetGeoIds.size > 0) r = r.filter((o) => o.metroGeoId && targetGeoIds.has(o.metroGeoId))
     // Favorites first (priority), then by chosen sort.
     r = [...r].sort((a, b) =>
       (Number(!!b.isFavorite) - Number(!!a.isFavorite)) ||
       (sort === 'match' ? (b.match || 0) - (a.match || 0) : (a.company || '').localeCompare(b.company || '')))
     return r
-  }, [opportunities, query, urgency, stage, sort, roleFilter, activeFilter, targetGeoIds])
+  }, [opportunities, query, urgency, stage, sort, roleFilter, activeFilter])
 
   // Live stage counts for the funnel — group ALL loaded opps by stage (ignores filters).
   const stageCounts = useMemo(() => {

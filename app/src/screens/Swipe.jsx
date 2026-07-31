@@ -19,14 +19,9 @@ export default function Swipe({ opps }) {
   const { loading, error, opportunities, optimisticMove, optimisticDismiss, optimisticUndismiss } = opps
   const [roleFilter, setRoleFilter] = useState('all')
   const [sourceFilter, setSourceFilter] = useState('all') // ACT-31: source / intake-channel facet
-  const [workFilter, setWorkFilter] = useState('all')      // ACT-33: remote / hybrid / onsite facet
-  // ACT-32/33: the owner's persisted target metros + remote-only preference (from Settings ▸ Locations).
-  const [prefs, setPrefs] = useState({ targetGeoIds: new Set(), remoteOnly: false })
-  useEffect(() => {
-    let alive = true
-    api.searchPrefsGet().then((p) => { if (alive && p && p.ok !== false) setPrefs({ targetGeoIds: new Set(p.targetGeoIds || []), remoteOnly: !!p.remoteOnly }) }).catch(() => {})
-    return () => { alive = false }
-  }, [])
+  const [workFilter, setWorkFilter] = useState('all')      // ACT-33: remote / hybrid / onsite facet (ad-hoc)
+  // NOTE: the persisted target-metro / remote-plus preference is applied at the SOURCE (useOpportunities
+  // in data.jsx), so the deck here already reflects it — same as Today's scrub counts. Do not re-filter.
 
   // Stage-eligible review queue, before the group pill is applied. Favorites first so promoted
   // roles surface at the top of triage.
@@ -45,58 +40,51 @@ export default function Swipe({ opps }) {
   const matchesSource = (o) => sourceFilter === 'all' || (o.source || 'Unknown') === sourceFilter
   // ACT-33 ad-hoc work-mode facet (from the location's Remote/Hybrid/On-site modifier).
   const matchesWork = (o) => workFilter === 'all' || (o.workMode || 'unspecified') === workFilter
-  // ACT-32/33 persisted prefs: target metros + remote-only. Empty target set = no location filter.
-  const matchesPrefs = (o) => {
-    const inTarget = prefs.targetGeoIds.size === 0 || (o.metroGeoId && prefs.targetGeoIds.has(o.metroGeoId))
-    if (!prefs.remoteOnly) return inTarget
-    // remote-only: keep remote roles OR roles inside a target metro; drop on-site elsewhere.
-    return (o.workMode === 'remote') || (o.metroGeoId && prefs.targetGeoIds.has(o.metroGeoId)) || (prefs.targetGeoIds.size === 0 && o.workMode === 'remote')
-  }
   // Cards already triaged THIS session, tracked by id. Deriving the queue from a
   // reviewed-set (not a positional index) is immune to the 15s poll reordering the
   // array, and to keep/maybe leaving a card in QUEUE_STAGES — a decided card never
   // reappears. `reviewedCount` gives a stable, monotonic "reviewed" tally.
   const [reviewed, setReviewed] = useState(() => new Set())
   const queue = useMemo(
-    () => stageQueue.filter((o) => matchesRole(o) && matchesSource(o) && matchesWork(o) && matchesPrefs(o) && !reviewed.has(o.id)),
-    [stageQueue, roleFilter, sourceFilter, workFilter, prefs, reviewed],
+    () => stageQueue.filter((o) => matchesRole(o) && matchesSource(o) && matchesWork(o) && !reviewed.has(o.id)),
+    [stageQueue, roleFilter, sourceFilter, workFilter, reviewed],
   )
   // Taxonomy group counts for the pill bar (remaining, within the active source facet so the two compose).
   const roleCounts = useMemo(() => {
     const c = { all: 0, fav: 0, csuite: 0, vp: 0, director: 0, other: 0 }
     for (const o of stageQueue) {
-      if (reviewed.has(o.id) || !matchesSource(o) || !matchesWork(o) || !matchesPrefs(o)) continue
+      if (reviewed.has(o.id) || !matchesSource(o) || !matchesWork(o)) continue
       c.all += 1
       if (o.isFavorite) c.fav += 1
       if (o.matchedGroup && c[o.matchedGroup] != null) c[o.matchedGroup] += 1
       else if (!o.matchedGroup) c.other += 1
     }
     return c
-  }, [stageQueue, reviewed, sourceFilter, workFilter, prefs])
+  }, [stageQueue, reviewed, sourceFilter, workFilter])
   // Source facet counts (remaining, within the active role facet). Built from the REAL distinct
   // `source` values present — no hardcoded list.
   const sourceCounts = useMemo(() => {
     const by = new Map()
     let all = 0
     for (const o of stageQueue) {
-      if (reviewed.has(o.id) || !matchesRole(o) || !matchesWork(o) || !matchesPrefs(o)) continue
+      if (reviewed.has(o.id) || !matchesRole(o) || !matchesWork(o)) continue
       all += 1
       const s = o.source || 'Unknown'
       by.set(s, (by.get(s) || 0) + 1)
     }
     return { all, items: [...by.entries()].sort((a, b) => b[1] - a[1]) }
-  }, [stageQueue, reviewed, roleFilter, workFilter, prefs])
-  // ACT-33 work-mode facet counts (remote/hybrid/onsite), composed with role+source+prefs.
+  }, [stageQueue, reviewed, roleFilter, workFilter])
+  // ACT-33 work-mode facet counts (remote/hybrid/onsite), composed with role+source facets.
   const workCounts = useMemo(() => {
     const c = { all: 0, remote: 0, hybrid: 0, onsite: 0 }
     for (const o of stageQueue) {
-      if (reviewed.has(o.id) || !matchesRole(o) || !matchesSource(o) || !matchesPrefs(o)) continue
+      if (reviewed.has(o.id) || !matchesRole(o) || !matchesSource(o)) continue
       c.all += 1
       const w = o.workMode
       if (w && c[w] != null) c[w] += 1
     }
     return c
-  }, [stageQueue, reviewed, roleFilter, sourceFilter, prefs])
+  }, [stageQueue, reviewed, roleFilter, sourceFilter])
   const [drag, setDrag] = useState({ x: 0, y: 0, active: false, decision: null })
   const [last, setLast] = useState(null) // { decision, opp, prevStage } — for undo
   const cardRef = useRef(null)
