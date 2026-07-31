@@ -57,6 +57,35 @@ async function fetchPageText(url: string): Promise<string | null> {
   }
 }
 
+// A LinkedIn job-ALERT email lists several jobs and its subject/headline is usually a SIBLING job, so
+// LLM-parsing it fabricates the wrong jd_title/jd_company for EVERY opp that shares the email (PROVEN:
+// opp "VP Software Eng / The Phoenix Group" got jd_title "Managing VP … / Gartner" — the email subject).
+// Only a SINGLE-job source may be parsed: the real fetched posting (jd_real) or a genuine single JD
+// (extension/ATS). The shared alert email must NEVER feed the JD fields.
+function isAlertDigest(rawJd: string, whySurfaced: string): boolean {
+  const s = (rawJd || '').slice(0, 600).toLowerCase()
+  const w = (whySurfaced || '').toLowerCase()
+  return s.includes('jobalerts-noreply@linkedin.com') || s.includes('new linkedin alert') || w.includes('linkedin alert')
+}
+// The single-job JD text to parse, or '' when the only source is the shared alert email (refuse).
+function resolveJdSource(opp: any): string {
+  const realJd = opp.jd_real ? String(opp.jd_real).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim() : ''
+  if (realJd) return realJd
+  const raw = opp.raw_jd || ''
+  if (raw && !isAlertDigest(raw, opp.why_surfaced || '')) return raw
+  return ''
+}
+const NO_JD_NOTE = 'Full job description not yet retrieved — showing the role from the alert. Use "Re-parse JD" once the full posting is fetched.'
+// Ground the JD fields to the anchor truth (role/company) instead of fabricating from the shared
+// alert email. Returns the anchor jdTitle/jdCompany the caller can echo back.
+async function applyAnchorTruth(client: any, opp: any): Promise<{ jdTitle: string; jdCompany: string }> {
+  await client.query(
+    `update opportunity set jd_title=$1, jd_company=$2, jd_summary=$3, jd_requirements=null, jd_table=null, updated_at=now() where id=$4`,
+    [opp.role || null, opp.company || null, NO_JD_NOTE, opp.id],
+  )
+  return { jdTitle: opp.role || '', jdCompany: opp.company || '' }
+}
+
 const JD_SYSTEM = `You are an executive recruiting analyst. Given job description text, extract and return ONLY JSON with these exact keys:
 {
   "jdTitle": "verbatim job title from the JD",
@@ -106,27 +135,27 @@ export async function jdParse(req: HttpRequest, context: InvocationContext): Pro
     )).rows[0]
     if (!opp) return { status: 404, headers: HEADERS, jsonBody: { error: 'not found' } }
 
-    // Prefer the REAL fetched posting (jd_real) over raw_jd. raw_jd is the whole digest email, so
-    // parsing it yields the digest HEADLINE job for every sibling (the fabrication bug). jd_real is
-    // the actual posting fetched by job_id — the ground truth. Strip tags for the LLM.
-    const realJd = opp.jd_real ? String(opp.jd_real).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim() : ''
-    let rawJd: string = realJd || opp.raw_jd || ''
+    // Only parse a SINGLE-job source (jd_real, or a genuine single JD). The shared LinkedIn alert
+    // email must never feed the JD fields — it fabricates a sibling job. See resolveJdSource.
+    let rawJd: string = resolveJdSource(opp)
 
-    // If no raw_jd stored, try to fetch from URL in why_surfaced
+    // If nothing single-job yet, try the per-posting URL in why_surfaced (a single page, not the digest).
     if (!rawJd) {
       const url = extractUrl(opp.why_surfaced || '')
       if (url) {
         context.log(`jd-parse: fetching ${url}`)
-        rawJd = await fetchPageText(url) || ''
-        if (rawJd) {
-          await client.query(`update opportunity set raw_jd = $1 where id = $2`, [rawJd, oppId])
+        const fetched = await fetchPageText(url) || ''
+        if (fetched && !isAlertDigest(fetched, opp.why_surfaced || '')) {
+          rawJd = fetched
+          await client.query(`update opportunity set raw_jd = $1 where id = $2`, [fetched, oppId])
         }
       }
     }
 
-    // Fall back to using what we know about the role
+    // Still nothing groundable → do NOT fabricate from the shared alert email; use the anchor truth.
     if (!rawJd) {
-      rawJd = `Role: ${opp.role}\nCompany: ${opp.company}\nContext: ${opp.why_surfaced || ''}`
+      const anchor = await applyAnchorTruth(client, opp)
+      return { status: 200, headers: HEADERS, jsonBody: { ok: true, oppId, grounded: false, ...anchor } }
     }
 
     const parsed = await runJdParse(rawJd, key)
@@ -172,22 +201,25 @@ export async function jdBackfill(req: HttpRequest, context: InvocationContext): 
     const results: any[] = []
     for (const opp of rows) {
       try {
-        // Prefer the REAL JD fetched from LinkedIn (jd-backfill/fetch) over the email digest text —
-        // this is the anti-fabrication path: a real JD grounds the parse instead of hallucinating.
-        let rawJd: string = opp.jd_real || opp.raw_jd || ''
+        // Only a SINGLE-job source may ground the parse; never the shared alert email (fabrication).
+        let rawJd: string = resolveJdSource(opp)
 
         if (!rawJd) {
           const url = extractUrl(opp.why_surfaced || '')
           if (url) {
-            rawJd = await fetchPageText(url) || ''
-            if (rawJd) {
-              await client.query(`update opportunity set raw_jd = $1 where id = $2`, [rawJd, opp.id])
+            const fetched = await fetchPageText(url) || ''
+            if (fetched && !isAlertDigest(fetched, opp.why_surfaced || '')) {
+              rawJd = fetched
+              await client.query(`update opportunity set raw_jd = $1 where id = $2`, [fetched, opp.id])
             }
           }
         }
 
         if (!rawJd) {
-          rawJd = `Role: ${opp.role}\nCompany: ${opp.company}\nContext: ${opp.why_surfaced || ''}`
+          // No groundable JD → anchor truth, not a fabricated sibling job.
+          const anchor = await applyAnchorTruth(client, opp)
+          results.push({ id: opp.id, company: opp.company, role: opp.role, ok: true, grounded: false, jdTitle: anchor.jdTitle })
+          continue
         }
 
         const parsed = await runJdParse(rawJd, key)
@@ -255,7 +287,7 @@ export async function jdParseTick(timer: Timer, context: InvocationContext): Pro
     client = await getPgClient()
     await ensureJdColumns(client)
     const { rows } = await client.query(`
-      select id, company, role, raw_jd, why_surfaced, owner_email
+      select id, company, role, jd_real, raw_jd, why_surfaced, owner_email
       from opportunity
       where not dismissed and not is_demo and jd_summary is null
       order by created_at desc
@@ -266,15 +298,25 @@ export async function jdParseTick(timer: Timer, context: InvocationContext): Pro
     let ok = 0, failed = 0
     for (const opp of rows) {
       try {
-        let rawJd: string = opp.raw_jd || ''
+        // Only parse a single-job source; the shared alert email fabricates a sibling job.
+        let rawJd: string = resolveJdSource(opp)
         if (!rawJd) {
           const url = extractUrl(opp.why_surfaced || '')
           if (url) {
-            rawJd = await fetchPageText(url) || ''
-            if (rawJd) await client.query(`update opportunity set raw_jd = $1 where id = $2`, [rawJd, opp.id])
+            const fetched = await fetchPageText(url) || ''
+            if (fetched && !isAlertDigest(fetched, opp.why_surfaced || '')) {
+              rawJd = fetched
+              await client.query(`update opportunity set raw_jd = $1 where id = $2`, [fetched, opp.id])
+            }
           }
         }
-        if (!rawJd) rawJd = `Role: ${opp.role}\nCompany: ${opp.company}\nContext: ${opp.why_surfaced || ''}`
+        if (!rawJd) {
+          // No groundable JD → anchor truth (role/company), stop retrying without fabricating.
+          await applyAnchorTruth(client, opp)
+          context.log(`jd-tick: anchor-truth ${opp.company} / ${opp.role} (no single-job JD)`)
+          ok++
+          continue
+        }
         const parsed = await runJdParse(rawJd, key)
         await client.query(
           `update opportunity set jd_title=$1, jd_company=$2, jd_summary=$3, jd_requirements=$4, jd_table=$5, updated_at=now() where id=$6`,
