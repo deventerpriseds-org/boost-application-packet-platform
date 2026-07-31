@@ -683,3 +683,33 @@ o.jd* fields, JD tab unchanged (commit 1e25100, AC-subagent authored ACs). (b) D
 job_id but jd_real null; ran jd-backfill/fetch (favoritesOnly,direct): 25 candidates → 24 stored (ok_jd),
 then cleared the placeholder jd_summary on 9 now-fetched favorites so the 5-min jd-parse timer regenerates
 real summaries from jd_real. Independent verifier subagent spawned to confirm UI (ui-verify) + Ventra data.
+
+**ACT-44 — Scheduled, source-agnostic JD fetch for ALL job_id opps (fix: folder opps never get jd_real).**
+GROUND TRUTH (2026-07-31): no app.timer fetches jd_real. Only the SEARCH inline fetch (search opps, paused)
+and the MANUAL POST /mail/jd-backfill/fetch populate it. mailWatch.routeOpportunity captures job_id + the
+alert email but NEVER fetches the real posting → every mail/alert-driven opp (e.g. Ventra Health CTO) sits
+at jd_real=NULL until manually fetched. FIX: add a paced app.timer that runs jdBackfillFetch's core
+(fetchAndStoreJd) over opps with job_id AND jd_fetched_at IS NULL, favorites-first, bounded per run
+(e.g. limit 20-25, jittered, stop-after-N-blocks) — independent of search + independent of source
+(mail/search/ATS/extension). Direct-from-Azure worked well today (25 cand → 24 ok_jd, 1 block). This is the
+durable fix that makes JDs auto-fill for folder opps; the search inline fetch stays as an optimization.
+
+**ACT-29b/ACT-36 refinement — DISTRIBUTE the 17 favourite-title queries across the 3 daily slots (once/day
+each), not repeat all 17 three times.** Count today: 17 roles-with-fav-titles → 17 OR-queries/cycle
+(651 fav titles total; each query OR's up to 8). 3x/day = 51 req/day (re-scanning the same 24h window 3×).
+DECISION (owner-approved intent, "can't overwhelm the endpoint"): fire each query ONCE/day, spread ~6 per
+5am/1pm/6pm ET slot → 17 req/day (⅓ load), no gaps (r86400 window), fewer dupes. Implement the per-slot
+partition in jdSearchTimer, THEN unpause (SEARCH_PAUSED=false). Owner is fine turning search on with this
+distribution. Note: 651 favourites is broad → each query samples ~8 titles/role; fuller coverage = more
+queries spread across days (revisit).
+
+**ACT-45 — "Analysis" section: cross-role insights + evolving development strategy.**
+A new section that mines the JD corpus (jd_real / jd_requirements / jd_table across the owner's favourite
++ target-role opps) to surface INSIGHTS on what's demanded across the roles: recurring RESPONSIBILITIES,
+required CERTIFICATIONS, EXPERIENCE/skills, tooling, themes. From that, an EVOLVING STRATEGY personalised
+to the owner: which COURSES to take, which CERTS to pursue, and candidate PLAYBOOKS for recurring
+processes/flows expected of a role (e.g. "CTO standing up an org" — org design, tech strategy, hiring,
+security posture, roadmap). Evolves as new JDs arrive. DEPENDS ON: JDs being fetched at scale (ACT-44) so
+there's a real corpus to analyse. RELATES TO ACT-42 (learnings→playbooks pipeline) — ACT-45 is the
+insight/strategy surface; ACT-42 is the material→asset pipeline; keep them one coherent system, not
+parallel. Scope before building (data source, analysis method, UI, refresh cadence) + owner sign-off.

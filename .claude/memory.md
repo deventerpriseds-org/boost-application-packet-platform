@@ -681,3 +681,15 @@ tab; not-retrieved shows muted notice + Re-parse button. Reuses o.jd* fields; JD
 1e25100. Flow followed the v3 gate: AC-subagent wrote ACs before, verifier subagent verifying after.
 INSIGHT: to actually clear "not retrieved" at scale, JDs must be FETCHED (jd-backfill/fetch by job_id) —
 which the paused 3x search would do inline; unpausing (ACT-36 review) resumes automatic JD fill.
+
+## JD-fetch architecture ground-truth + new actions (2026-07-31)
+Traced all app.timer jobs: jdParseTick(5m, PARSES jd_real→summary, does NOT fetch), jdSearchTimer(3x/day,
+inline fetch, PAUSED), atsScheduledIngest, outreachTick, mailReconcile, mailRenew. NO timer FETCHES jd_real.
+=> folder/alert opps (routeOpportunity) get job_id + alert text but jd_real stays NULL until search-inline
+(paused, search-only) or manual jd-backfill/fetch. CONFIRMED: folder opps do NOT auto-get JD. Fix = ACT-44
+(scheduled source-agnostic JD fetch over job_id + jd_fetched_at NULL opps). Query count: 17 roles-with-fav
+= 17 OR-queries/cycle (651 fav titles; cap 8/query). 3x/day=51 req/day (re-scans same 24h ×3). DECISION:
+distribute 17 queries once/day across the 3 ET slots (~6/slot) = 17 req/day, r86400 = no gaps (ACT-29b/36),
+then unpause. New ACT-45 = Analysis section (cross-role insights: responsibilities/certs/experience +
+evolving strategy: courses/certs/playbooks e.g. "CTO standing up an org"); depends on ACT-44 JD corpus;
+one system with ACT-42.
