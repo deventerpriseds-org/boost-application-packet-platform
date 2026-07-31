@@ -508,3 +508,20 @@ Officer 1 VP · … " — C-suite first, toggle present. (missingExpect "Discove
 uppercases to DISCOVERED BY ROLE; cosmetic.) Commit ff6ace7.
 NOTE: this is the Today-hero slice of ACT-30. The full standalone Role Profiles page (#/roles, PRD §7,
 3-pane, data-* hooks, R-1..R-20) is still TODO — same seniority order + Roles/Fav-titles toggle apply there.
+
+## ACT-30 step 1 refinement (2026-07-31): Title default + qualifier on titles
+Per user (screenshots 15414/15416): Today breakdown toggle relabeled "★ Fav titles" → "Title";
+**Title is now the DEFAULT view** (view init 'titles'). Added `titleFamily(o)` export (Today.jsx) =
+GROUP_PREFIX + (matchedVariation||matchedRole) so VP/Dir title bins carry the SAME qualifier as roles
+("Engineering" → "VP · Engineering"); C-suite titles ("Chief Technology Officer") stay bare. Title view
+no longer favorites-only — bins ALL matched opps by variation (Other = truly unmatched, = roles view's
+Other). titlenew: filter (Opportunities.jsx) now uses titleFamily; import added. Commit 0dc8e9a.
+
+## ACT-35 opened (2026-07-31): JD attached to an opp is a DIFFERENT job (root-cause the real JD mismatch)
+Ground truth (screenshot 15420): opp "VP of Software Engineering · The Phoenix Group · LinkedIn" but its
+JD Summary = "Managing VP, Technology Product Management & Platform Strategy · Gartner". Different company
+AND title → jd_real/raw_jd cross-wired to wrong opp. NOT the classify-on-role fix (that was matched_group);
+this is the JD BODY write-path. Investigate fetchAndStoreJd (jdSearch/jdBackfill) opp-id resolution +
+search-result→opp join key + appJdParse deriving Title/company from another opp's jd_real. See actions.md
+ACT-35 for the full investigation checklist. GROUND-TRUTH the specific opp row (role/company/source_url)
+vs its jd_real before concluding.
