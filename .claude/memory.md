@@ -493,3 +493,18 @@ proto-compass/taxonomy.js, route #/roles. Key facts to build against:
   G6 tiers persist to localStorage (ee-role-tiers-v1/-saved-v1) instead of draft/publish tables.
 - **Extend-don't-duplicate:** this taxonomy IS System B (taxonomy_title). Build ACT-30 ON it; do NOT
   create a parallel roles table. resolveTitle/roleTaxonomy.ts already implement the §5 matcher.
+
+## ACT-30 step 1 DONE + Playwright-verified (2026-07-31): Today role breakdown seniority-ordered + toggle
+Per user (screenshot 15412.jpg), the Today ▸ "Discovered by role" hero list (Today.jsx InboxScrubHero):
+- **Seniority order** C Suite → VP → Director → Other (was count-desc). SENIORITY_RANK{csuite:0,vp:1,
+  director:2} else 3; ties by count then name. dotForGroup(group) replaces label-prefix roleDot.
+- **Toggle** "Roles" (27 monitored roles, current) vs "★ Fav titles" (my favorite job titles = the
+  taxonomy level BELOW; bins favorites by o.matchedVariation, non-favs collapse to "Other roles").
+  Uses existing opportunity fields (matchedGroup/matchedRole/matchedVariation/isFavorite) — NO new system.
+- Click-through wired both modes: rolenew:<fam> (existing) / new titlenew:<variant> branch in
+  Opportunities.jsx (favorites new-today by matchedVariation; 'Other roles' = non-favorites).
+Verified live #/today: "DISCOVERED BY ROLE Roles ★ Fav titles CTO 14 new COO 9 CIO 3 CPO 2 Chief AI
+Officer 1 VP · … " — C-suite first, toggle present. (missingExpect "Discovered by role" = CSS
+uppercases to DISCOVERED BY ROLE; cosmetic.) Commit ff6ace7.
+NOTE: this is the Today-hero slice of ACT-30. The full standalone Role Profiles page (#/roles, PRD §7,
+3-pane, data-* hooks, R-1..R-20) is still TODO — same seniority order + Roles/Fav-titles toggle apply there.
