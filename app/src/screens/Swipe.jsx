@@ -18,6 +18,7 @@ export default function Swipe({ opps }) {
   const { toast } = useApp()
   const { loading, error, opportunities, optimisticMove, optimisticDismiss, optimisticUndismiss } = opps
   const [roleFilter, setRoleFilter] = useState('all')
+  const [sourceFilter, setSourceFilter] = useState('all') // ACT-31: source / intake-channel facet
 
   // Stage-eligible review queue, before the group pill is applied. Favorites first so promoted
   // roles surface at the top of triage.
@@ -31,27 +32,43 @@ export default function Swipe({ opps }) {
     if (roleFilter === 'other') return !o.matchedGroup
     return o.matchedGroup === roleFilter
   }
+  // Source/intake facet. The opportunity `source` already encodes both the board and how it came in
+  // (LinkedIn = mailbox alert · LinkedIn Search = scheduled search · Extension · Email · Indeed).
+  const matchesSource = (o) => sourceFilter === 'all' || (o.source || 'Unknown') === sourceFilter
   // Cards already triaged THIS session, tracked by id. Deriving the queue from a
   // reviewed-set (not a positional index) is immune to the 15s poll reordering the
   // array, and to keep/maybe leaving a card in QUEUE_STAGES — a decided card never
   // reappears. `reviewedCount` gives a stable, monotonic "reviewed" tally.
   const [reviewed, setReviewed] = useState(() => new Set())
   const queue = useMemo(
-    () => stageQueue.filter((o) => matchesRole(o) && !reviewed.has(o.id)),
-    [stageQueue, roleFilter, reviewed],
+    () => stageQueue.filter((o) => matchesRole(o) && matchesSource(o) && !reviewed.has(o.id)),
+    [stageQueue, roleFilter, sourceFilter, reviewed],
   )
-  // Taxonomy group counts for the pill bar (remaining, i.e. not-yet-reviewed).
+  // Taxonomy group counts for the pill bar (remaining, within the active source facet so the two compose).
   const roleCounts = useMemo(() => {
     const c = { all: 0, fav: 0, csuite: 0, vp: 0, director: 0, other: 0 }
     for (const o of stageQueue) {
-      if (reviewed.has(o.id)) continue
+      if (reviewed.has(o.id) || !matchesSource(o)) continue
       c.all += 1
       if (o.isFavorite) c.fav += 1
       if (o.matchedGroup && c[o.matchedGroup] != null) c[o.matchedGroup] += 1
       else if (!o.matchedGroup) c.other += 1
     }
     return c
-  }, [stageQueue, reviewed])
+  }, [stageQueue, reviewed, sourceFilter])
+  // Source facet counts (remaining, within the active role facet). Built from the REAL distinct
+  // `source` values present — no hardcoded list.
+  const sourceCounts = useMemo(() => {
+    const by = new Map()
+    let all = 0
+    for (const o of stageQueue) {
+      if (reviewed.has(o.id) || !matchesRole(o)) continue
+      all += 1
+      const s = o.source || 'Unknown'
+      by.set(s, (by.get(s) || 0) + 1)
+    }
+    return { all, items: [...by.entries()].sort((a, b) => b[1] - a[1]) }
+  }, [stageQueue, reviewed, roleFilter])
   const [drag, setDrag] = useState({ x: 0, y: 0, active: false, decision: null })
   const [last, setLast] = useState(null) // { decision, opp, prevStage } — for undo
   const cardRef = useRef(null)
@@ -141,7 +158,12 @@ export default function Swipe({ opps }) {
     setDrag({ x: 0, y: 0, active: false, decision: null })
   }
 
-  const rolePills = <RolePills counts={roleCounts} value={roleFilter} onChange={setRoleFilter} />
+  const rolePills = (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+      <RolePills counts={roleCounts} value={roleFilter} onChange={setRoleFilter} />
+      <SourcePills counts={sourceCounts} value={sourceFilter} onChange={setSourceFilter} />
+    </div>
+  )
 
   if (!current) {
     return (
@@ -225,6 +247,25 @@ function RolePills({ counts, value, onChange }) {
           </span>
         )
       })}
+    </div>
+  )
+}
+
+// Source / intake-channel pills — filter the triage queue by where the opportunity came from
+// (LinkedIn alert · LinkedIn Search · Indeed · Email · Extension …). Built from the real distinct
+// sources in the deck; hidden entirely when there's only one source to choose from.
+function SourcePills({ counts, value, onChange }) {
+  if (!counts.items.length || (counts.items.length === 1 && value === 'all')) return null
+  const chip = (key, name, n, on) => (
+    <span key={key} className="px-pill" onClick={() => onChange(key)}
+      style={{ cursor: 'pointer', fontSize: 11, background: on ? 'var(--surface-brand-default)' : undefined, color: on ? 'var(--text-on-brand)' : undefined }}>
+      {name} {n}
+    </span>
+  )
+  return (
+    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', justifyContent: 'center' }}>
+      {chip('all', 'All sources', counts.all, value === 'all')}
+      {counts.items.map(([s, n]) => chip(s, s, n, value === s))}
     </div>
   )
 }
