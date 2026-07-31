@@ -553,7 +553,7 @@ Commit 0a509c9 (+ C-suite label fix). ui-verify #/intake rendered all group labe
 docs/specs/Boost_Exec_Pipeline_Roles_and_Titles_PRD.pdf; key facts distilled in memory.md
 (3-level taxonomy, §5 matcher, §6 API, §7 UI + stable data-* hooks, R-1..R-20 states, G1..G6 gaps).
 
-**ACT-28 — Fix JD-description fetch error post-intake-updates. (searches PAUSED meanwhile.)**
+**ACT-28 — ✅ FIXED + verified (2026-07-31). Graph message ids were interpolated UNENCODED into the Graph URL; ids containing '/' made Graph read them as extra path segments → 400 RequestBroker--ParseUri "Resource not found for the segment 'AAMk…'". Fix: encodeURIComponent(id) on all message-by-id Graph URLs (mailMessageBody, ingestMessageId, move-batch). Commit 6af824d. Live api-test GET /api/mail/message/{id} now returns 200 with full body. (original:)
 Observed live (Intake detail pane): HTTP 400 {"code":"RequestBroker--ParseUri","message":"Resource
 not found for the segment 'AAMk...'"} — a Graph message-fetch with a malformed/stale message-id URI.
 Root-cause the JD/triggering-email fetch path. Automated 3x search PAUSED (jdSearch SEARCH_PAUSED=true)

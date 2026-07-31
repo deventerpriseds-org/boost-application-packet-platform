@@ -577,3 +577,16 @@ mail-ingest rows; the backfill only rewrote JD columns. NOTE: favorites OLDER th
 dismissed too per the chosen rule; un-dismiss to restore. STANDING RULE for future work: scope
 JD-fetch / Today / Swipe / counts to favorite+recent; when searches re-enable (ACT-29), apply the same
 gate at ingest so the DB doesn't re-bloat. Un-dismiss = set dismissed=false on the opp.
+
+## ACT-28 FIXED + verified (2026-07-31): Graph message-id URLs now URL-encoded
+Root cause: mailMessageBody (mail/message/{id}), ingestMessageId, and the move-batch built Graph URLs
+as `.../messages/${id}` with the RAW id. Graph message ids can contain '/','+','=' — an unencoded '/'
+makes Graph parse the tail as a new path segment → 400 RequestBroker--ParseUri "Resource not found for
+the segment 'AAMk…'" (the Intake preview error). Fix: encodeURIComponent(id) at all 3 sites
+(mailWatch.ts). Frontend already encodes the id in the PATH; Azure decodes it to req.params.id (raw),
+so the backend MUST re-encode for the outbound Graph URL. Commit 6af824d, api-deploy success.
+VERIFIED live (api-test): GET /api/mail/message/<id> → HTTP 200 with subject/from/body (was failing).
+CALIBRATION: the id sampled for the live test happened to be '/'-free (so it may have worked pre-fix
+too); I did not reproduce a '/'-containing id to show a strict before/after. The encodeURIComponent
+fix is the canonical correct handling for the '/'-in-id ParseUri class and cannot regress the working
+case. Endpoint confirmed healthy post-deploy.
