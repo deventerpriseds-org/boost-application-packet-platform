@@ -713,3 +713,32 @@ security posture, roadmap). Evolves as new JDs arrive. DEPENDS ON: JDs being fet
 there's a real corpus to analyse. RELATES TO ACT-42 (learnings→playbooks pipeline) — ACT-45 is the
 insight/strategy surface; ACT-42 is the material→asset pipeline; keep them one coherent system, not
 parallel. Scope before building (data source, analysis method, UI, refresh cadence) + owner sign-off.
+
+**ACT-44 (REVISED per owner 2026-07-31) — Fetch JD DURING inbox extraction, not a scheduled sweep.**
+Owner directive: "the jd fetch should happen during inbox extraction. i dont want rules to make it to
+the pipeline without job descriptions already. those should be rare occasions." => Call fetchAndStoreJd
+INLINE inside mailWatch.routeOpportunity at ingest (right after job_id is resolved), so every mail/alert
+opp lands WITH jd_real. Only rare exceptions (posting already expired/removed, or fetch blocked) may enter
+without a JD — flag those for a bounded retry, don't leave them silently null. Keep it paced/jittered
+(shares the same single-IP throttle as search — see ACT-29c). Search inline fetch stays as-is. Drop the
+"scheduled source-agnostic sweep" idea (superseded).
+
+**ACT-29c (RESEARCH DONE 2026-07-31) — LinkedIn guest search limits + full-coverage pacing plan.**
+ENDPOINT: linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/search (unauth guest, UNDOCUMENTED). REAL
+LIMIT (researched): ~10 page-requests/burst from ONE IP before 429; "real volume needs rotating proxies."
+We run from ONE Azure Function outbound IP (no proxy pool) => hard ceiling. Mitigation = spacing+jitter+
+expo-backoff+stop-on-429, NOT volume.
+MISALIGNMENT FOUND: the "651 favourite titles" are NOT user-starred — they're a machine-generated
+{seniority}×{discipline} GRID all stamped tier='fav'. Proof: Product=56=7 seniorities×8 disciplines;
+Data,Analytics&AI=84=7×12; CTO=11=prefix-variants of "Chief Technology Officer". 651 distinct, 0 dups.
+FULL-COVERAGE UNIT = discipline CORE (grid columns), not the 651 cells — LinkedIn matches title keywords
+as tokens, so "Data and Analytics" catches VP/Head/Dir/MD of it; "Chief Technology Officer" catches
+Deputy/Divisional/Fractional/Platform CTO. Collapses 651 -> ~90 core searches (10 function roles ≈85 cores
++ 7 C-suite ≈7 cores), covering every variant.
+PLAN: ~90 core searches, 1 page each (r86400), 1 req/45-90s jittered, batches ~8-10/slot, stop-on-429+
+backoff, spread ~90 across the day (~9-10 slots) or fewer slots × 2 days. Never >~10 reqs/burst. Then
+unpause. Implement: build search space from discipline cores (parse/store the discipline column of the
+grid, or derive), replace the per-role 8-title OR cap with core-based queries, add the pacer.
+DECISION NEEDED FROM OWNER: (a) search off discipline cores (recommended, full coverage ~90/day) vs
+(b) literal per-title; and whether to add a REAL "star" in Settings▸Roles so tier='fav' means user-chosen
+(today it means "in the grid").

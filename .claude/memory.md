@@ -693,3 +693,14 @@ distribute 17 queries once/day across the 3 ET slots (~6/slot) = 17 req/day, r86
 then unpause. New ACT-45 = Analysis section (cross-role insights: responsibilities/certs/experience +
 evolving strategy: courses/certs/playbooks e.g. "CTO standing up an org"); depends on ACT-44 JD corpus;
 one system with ACT-42.
+
+## LinkedIn search: endpoint limits + the "651 favourites" misalignment (2026-07-31)
+Search endpoint = linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/search (UNAUTH guest, undocumented).
+Researched limit: ~10 page-reqs/burst per IP -> 429; needs rotating proxies for volume. We have ONE Azure
+Function IP => mitigate by spacing+jitter+backoff+stop-on-429, not volume. THE 651 "fav titles" are a
+generated {seniority}×{discipline} grid all tier='fav' (NOT user-starred): Product 56=7×8, Data 84=7×12,
+CTO 11=CTO prefix-variants; 651 distinct, 0 dups. Full coverage = ~90 DISCIPLINE-CORE searches (columns),
+not 651 — LinkedIn token-matches titles so a core catches all seniority variants. Plan: ~90 cores, 1pg
+each, 1 req/45-90s, ~8-10/slot, spread across day, stop-on-429. JD FETCH: owner wants it INLINE at inbox
+extraction (routeOpportunity), not a scheduled sweep — opps should rarely enter pipeline w/o a JD (ACT-44
+revised). Open decision: search off cores + add a real star in Settings▸Roles vs literal per-title.
