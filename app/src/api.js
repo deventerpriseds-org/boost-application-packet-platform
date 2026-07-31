@@ -144,6 +144,10 @@ export const api = {
   // Search / filter preferences (target metros + remote-only) — ACT-32/33/34
   searchPrefsGet: () => get(`/app/search-prefs?owner=${encodeURIComponent(_owner)}`),
   searchPrefsSet: ({ targetGeoIds, remoteOnly }) => post(`/app/search-prefs?owner=${encodeURIComponent(_owner)}`, { targetGeoIds, remoteOnly }),
+  // LinkedIn role-sweep config + cursor + the exact built queries (preview before enabling).
+  // GET returns { config:{enabled,titlesPerQuery,activeHoursEt}, cursor, totalQueries, totalTitles, queries }.
+  searchSweepGet: (previewTpq) => get(`/app/search-sweep?owner=${encodeURIComponent(_owner)}${Number.isFinite(previewTpq) ? `&titlesPerQuery=${previewTpq}` : ''}`),
+  searchSweepSet: ({ enabled, titlesPerQuery, activeHoursEt }) => post(`/app/search-sweep?owner=${encodeURIComponent(_owner)}`, { enabled, titlesPerQuery, activeHoursEt }),
   mailSelfTest: () => post(`/mail/self-test`, {}),
   mailSendTestReal: (opts = {}) => post(`/mail/send-test-real`, opts),
   // Templates (reusable text/creative assets)

@@ -137,12 +137,18 @@ export async function searchSweep(req: HttpRequest, _ctx: InvocationContext): Pr
     client = await getPgClient()
     if (req.method === 'GET') {
       const st = await getSweepState(client, owner)
-      const queries = await buildAllTitleQueries(client, owner, st.titlesPerQuery)
+      // Optional preview: recompute the query list for a hypothetical titles_per_query WITHOUT
+      // persisting it, so the Settings UI can show the real query count as the owner drags the
+      // stepper (before Save). Falls back to the stored value. Clamped like the POST path.
+      const pv = Number(req.query.get('titlesPerQuery'))
+      const previewTpq = Number.isFinite(pv) && pv > 0 ? Math.max(1, Math.min(12, Math.floor(pv))) : st.titlesPerQuery
+      const queries = await buildAllTitleQueries(client, owner, previewTpq)
       return {
         status: 200, headers: HEADERS,
         jsonBody: {
           ok: true,
           config: { enabled: st.enabled, titlesPerQuery: st.titlesPerQuery, activeHoursEt: st.activeHoursEt },
+          previewTitlesPerQuery: previewTpq,
           cursor: {
             sweepIndex: st.sweepIndex, sweepCycle: st.sweepCycle, backoffUntil: st.backoffUntil,
             consecBlocks: st.consecBlocks, lastFiredAt: st.lastFiredAt, lastQuery: st.lastQuery,

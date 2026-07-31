@@ -35,6 +35,241 @@ function visibleFolders(list, expanded) {
 }
 const Label = ({ children }) => <div className="px-small" style={{ textTransform: 'uppercase', letterSpacing: 1, marginBottom: 4 }}>{children}</div>
 
+// LinkedIn role sweep — the ACTIVE counterpart to mailbox alert intake. Instead of waiting for
+// LinkedIn alert emails to land, a per-minute timer walks a DB cursor through OR-batches of the
+// owner's target roles and files matches automatically. This is the on/off + pacing control for it,
+// backed by owner_search_prefs via GET/POST /api/app/search-sweep. Left OFF by default; nothing
+// searches until the owner enables it here. Sits in Settings ▸ Intake, below Folder → role routing.
+function SweepSettings() {
+  const [st, setSt] = useState({ loading: true, err: null })
+  const [enabled, setEnabled] = useState(false)
+  const [tpq, setTpq] = useState(8)
+  const [startH, setStartH] = useState(6)
+  const [endH, setEndH] = useState(16)
+  const [totals, setTotals] = useState({ queries: null, titles: null, previewTpq: 8 })
+  const [cursor, setCursor] = useState(null)
+  const [queries, setQueries] = useState([])
+  const [savedCfg, setSavedCfg] = useState(null)   // last persisted {enabled,tpq,start,end}
+  const [saving, setSaving] = useState(false)
+  const [note, setNote] = useState(null)
+  const [showQ, setShowQ] = useState(false)
+
+  // active_hours_et is an int[] of ET hours; represent it as a contiguous [start..end] window.
+  const hoursToRange = (hrs) => {
+    if (!Array.isArray(hrs) || !hrs.length) return [6, 16]
+    return [Math.min(...hrs), Math.max(...hrs)]
+  }
+  const rangeToHours = (s, e) => { const out = []; for (let h = Math.min(s, e); h <= Math.max(s, e); h++) out.push(h); return out }
+
+  const applyResp = useCallback((r) => {
+    const cfg = r.config || {}
+    const [s, e] = hoursToRange(cfg.activeHoursEt)
+    setEnabled(!!cfg.enabled); setTpq(cfg.titlesPerQuery ?? 8); setStartH(s); setEndH(e)
+    setTotals({ queries: r.totalQueries ?? null, titles: r.totalTitles ?? null, previewTpq: r.previewTitlesPerQuery ?? cfg.titlesPerQuery ?? 8 })
+    setCursor(r.cursor || null); setQueries(r.queries || [])
+    setSavedCfg({ enabled: !!cfg.enabled, tpq: cfg.titlesPerQuery ?? 8, start: s, end: e })
+  }, [])
+
+  const load = useCallback(async () => {
+    setSt({ loading: true, err: null })
+    try {
+      const r = await api.searchSweepGet()
+      if (r.ok === false) throw new Error(r.error || 'failed')
+      applyResp(r)
+      setSt({ loading: false, err: null })
+    } catch (e) { setSt({ loading: false, err: String(e.message || e) }) }
+  }, [applyResp])
+
+  useEffect(() => { load() }, [load])
+
+  // Live preview: recompute the real query count for the chosen bundle size (server-side, no persist).
+  useEffect(() => {
+    if (st.loading || st.err) return
+    if (tpq === totals.previewTpq) return
+    let cancelled = false
+    const t = setTimeout(async () => {
+      try {
+        const r = await api.searchSweepGet(tpq)
+        if (cancelled || r.ok === false) return
+        setTotals({ queries: r.totalQueries ?? null, titles: r.totalTitles ?? null, previewTpq: r.previewTitlesPerQuery ?? tpq })
+        setQueries(r.queries || [])
+      } catch { /* keep last-known totals */ }
+    }, 300)
+    return () => { cancelled = true; clearTimeout(t) }
+  }, [tpq, st.loading, st.err, totals.previewTpq])
+
+  const save = useCallback(async () => {
+    setSaving(true); setNote(null)
+    try {
+      const r = await api.searchSweepSet({ enabled, titlesPerQuery: tpq, activeHoursEt: rangeToHours(startH, endH) })
+      if (r.ok === false) throw new Error(r.error || 'save failed')
+      setNote({ ok: true, msg: enabled ? 'Saved — sweep is ON.' : 'Saved — sweep is OFF.' })
+      await load()   // re-pull authoritative cursor/totals from server
+    } catch (e) { setNote({ ok: false, msg: String(e.message || e) }) }
+    finally { setSaving(false) }
+  }, [enabled, tpq, startH, endH, load])
+
+  const dirty = savedCfg && (savedCfg.enabled !== enabled || savedCfg.tpq !== tpq || savedCfg.start !== startH || savedCfg.end !== endH)
+
+  // Coverage/quota math — one query per minute over the active window.
+  const activeHrs = Math.max(1, Math.abs(endH - startH) + 1)
+  const capacityPerDay = activeHrs * 60                 // max queries/day at 1/min
+  const q = totals.queries                              // authoritative from server (saved or preview)
+  const sweepMin = q || 0
+  const coverPct = q ? Math.min(100, Math.round((Math.min(sweepMin, capacityPerDay) / sweepMin) * 100)) : null
+  const cyclesPerDay = q ? capacityPerDay / sweepMin : null
+  // LinkedIn quota risk scales with total requests/day vs the active-window capacity.
+  const risk = q == null ? 'none' : q > capacityPerDay ? 'high' : q > capacityPerDay * 0.7 ? 'warn' : 'ok'
+  const hourLabel = (h) => `${String(h).padStart(2, '0')}:00`
+
+  if (st.loading) return <Card style={{ color: 'var(--proto-ink2)' }}>Loading LinkedIn sweep…</Card>
+  if (st.err) return <Card style={{ color: 'var(--proto-red)' }}>Couldn't load sweep config: {st.err}</Card>
+
+  const riskColor = risk === 'high' ? 'var(--proto-red)' : 'var(--proto-yellow)'
+  return (
+    <Card style={{ border: '1px solid var(--text-brand)', boxShadow: '0 0 0 1px var(--text-brand)' }}>
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12, flexWrap: 'wrap' }}>
+        <div style={{ flex: 1, minWidth: 220 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+            <b style={{ fontSize: 15 }}>Active search — LinkedIn role sweep</b>
+            <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: 0.5, color: '#0a66c2', background: 'rgba(10,102,194,0.14)', padding: '2px 8px', borderRadius: 5 }}>in LinkedIn</span>
+          </div>
+          <div className="px-small" style={{ marginTop: 3, color: 'var(--proto-ink2)', maxWidth: 460 }}>
+            The active counterpart to mailbox intake: instead of waiting for LinkedIn alert emails, this searches <b>LinkedIn</b> directly for your target roles and files matches automatically.
+          </div>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flex: 'none' }}>
+          <Pill tone={enabled ? 'green' : 'panel'}>{enabled ? 'On · sweeping' : 'Off'}</Pill>
+          <label style={{ position: 'relative', display: 'inline-block', width: 44, height: 25, cursor: 'pointer' }}>
+            <input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} style={{ opacity: 0, width: 0, height: 0 }} />
+            <span style={{ position: 'absolute', inset: 0, borderRadius: 999, transition: 'background .18s',
+              background: enabled ? 'var(--surface-success-default)' : 'var(--proto-rule)' }} />
+            <span style={{ position: 'absolute', top: 3, left: enabled ? 22 : 3, width: 19, height: 19, borderRadius: '50%',
+              background: '#fff', transition: 'left .18s', boxShadow: '0 1px 3px rgba(0,0,0,.35)' }} />
+          </label>
+        </div>
+      </div>
+
+      <div style={{ height: 1, background: 'var(--proto-rule-soft)', margin: '14px 0' }} />
+
+      {/* roles source (read-only link to the list it uses) */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap' }}>
+        <div>
+          <div style={{ fontSize: 13, fontWeight: 600 }}>Searching your target roles</div>
+          <div className="px-small" style={{ color: 'var(--proto-ink2)', marginTop: 2 }}>
+            Uses the same role list as folder routing{totals.titles != null ? ` — ${totals.titles} target titles` : ''}. Edit it in <span className="px-link" style={{ cursor: 'pointer' }} onClick={() => go('/settings/roles')}>Settings ▸ Roles →</span>
+          </div>
+        </div>
+      </div>
+
+      <div style={{ height: 1, background: 'var(--proto-rule-soft)', margin: '14px 0' }} />
+
+      {/* roles bundled per search */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap' }}>
+        <div style={{ maxWidth: 380 }}>
+          <div style={{ fontSize: 13, fontWeight: 600 }}>Roles bundled per search</div>
+          <div className="px-small" style={{ color: 'var(--proto-ink2)', marginTop: 2 }}>How many titles share one query. Fewer = more precise matches, but more searches per full sweep.</div>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flex: 'none' }}>
+          <button className="px-btn" style={{ width: 30, height: 30, padding: 0, fontSize: 17 }} disabled={tpq <= 1} onClick={() => setTpq((v) => Math.max(1, v - 1))}>−</button>
+          <span style={{ fontFamily: 'ui-monospace, Menlo, monospace', fontSize: 15, fontWeight: 600, minWidth: 22, textAlign: 'center', fontVariantNumeric: 'tabular-nums' }}>{tpq}</span>
+          <button className="px-btn" style={{ width: 30, height: 30, padding: 0, fontSize: 17 }} disabled={tpq >= 12} onClick={() => setTpq((v) => Math.min(12, v + 1))}>+</button>
+        </div>
+      </div>
+
+      {/* LinkedIn quota warning — always present, escalates with request volume */}
+      <div style={{ display: 'flex', gap: 9, alignItems: 'flex-start', marginTop: 12, padding: '10px 12px', borderRadius: 8, fontSize: 12, lineHeight: 1.45,
+        background: risk === 'high' ? 'color-mix(in srgb, var(--proto-red) 18%, transparent)' : 'color-mix(in srgb, var(--proto-red) 10%, transparent)',
+        border: `1px solid color-mix(in srgb, ${riskColor} 40%, transparent)`, borderLeft: `3px solid ${riskColor}` }}>
+        <span style={{ color: riskColor, fontSize: 14, flex: 'none' }}>⚠</span>
+        <span>
+          <b style={{ color: riskColor }}>LinkedIn quota risk.</b>{' '}
+          {q == null ? (
+            'Fewer roles per search means more separate LinkedIn requests per sweep — bundling too few titles raises the chance of tripping LinkedIn rate limits or anti-scraping guardrails.'
+          ) : risk === 'high' ? (
+            <>At <b>{q}</b> LinkedIn searches per sweep, this bundle is <b>too low</b> — that exceeds what your {activeHrs}h active window can run at one query/min ({capacityPerDay}/day), so a full sweep won't finish daily <i>and</i> the extra request volume raises throttling / anti-scraping risk. Raise "roles bundled per search".</>
+          ) : risk === 'warn' ? (
+            <>At <b>{q}</b> LinkedIn searches per sweep you're approaching your {activeHrs}h window's capacity ({capacityPerDay}/day at 1/min). Bundling fewer titles means more separate LinkedIn requests — consider a higher bundle unless you need this precision.</>
+          ) : (
+            <>At <b>{q}</b> LinkedIn searches per sweep you're within a safe rate for your {activeHrs}h window ({capacityPerDay}/day at 1/min). The per-minute pacing spreads the load; bundling too few titles would raise LinkedIn throttling risk.</>
+          )}
+        </span>
+      </div>
+
+      <div style={{ height: 1, background: 'var(--proto-rule-soft)', margin: '14px 0' }} />
+
+      {/* active hours */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap' }}>
+        <div style={{ maxWidth: 380 }}>
+          <div style={{ fontSize: 13, fontWeight: 600 }}>Active hours <span style={{ color: 'var(--proto-ink3)', fontWeight: 500 }}>(Eastern)</span></div>
+          <div className="px-small" style={{ color: 'var(--proto-ink2)', marginTop: 2 }}>Only search during these hours. Outside the window it pauses and resumes where it left off — no roles skipped.</div>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 'none' }}>
+          <select className="px-btn" value={startH} onChange={(e) => setStartH(Number(e.target.value))}>
+            {Array.from({ length: 24 }, (_, h) => <option key={h} value={h}>{hourLabel(h)}</option>)}
+          </select>
+          <span className="px-small" style={{ color: 'var(--proto-ink2)' }}>to</span>
+          <select className="px-btn" value={endH} onChange={(e) => setEndH(Number(e.target.value))}>
+            {Array.from({ length: 24 }, (_, h) => <option key={h} value={h}>{hourLabel(h)}</option>)}
+          </select>
+        </div>
+      </div>
+
+      {/* live readout */}
+      <div style={{ marginTop: 14, border: '1px solid var(--proto-rule-soft)', borderRadius: 10, overflow: 'hidden' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 1, background: 'var(--proto-rule-soft)' }}>
+          {[
+            { k: 'LINKEDIN SEARCHES / SWEEP', v: q == null ? '—' : q, s: `≈ ${tpq} roles each` },
+            { k: 'CADENCE', v: '1 / min', s: 'timer fires every minute' },
+            { k: 'FULL SWEEP TAKES', v: q == null ? '—' : `${(sweepMin / 60).toFixed(1)} hrs`, s: cyclesPerDay ? `≈ ${cyclesPerDay.toFixed(0)}× through all roles / day` : 'within the active window' },
+            { k: 'DAILY COVERAGE', v: coverPct == null ? '—' : `${coverPct}%`, s: `${activeHrs}h window · ${capacityPerDay}/day capacity` },
+          ].map((c) => (
+            <div key={c.k} style={{ background: 'var(--proto-paper)', padding: '12px 14px' }}>
+              <div className="px-small" style={{ color: 'var(--proto-ink3)', fontWeight: 650, letterSpacing: 0.2, fontSize: 10.5 }}>{c.k}</div>
+              <div style={{ fontSize: 19, fontWeight: 700, marginTop: 2, fontVariantNumeric: 'tabular-nums' }}>{c.v}</div>
+              <div className="px-small" style={{ color: 'var(--proto-ink2)', marginTop: 2 }}>{c.s}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* query preview */}
+      {queries.length > 0 && (
+        <div style={{ marginTop: 12 }}>
+          <div className="px-link" style={{ cursor: 'pointer', fontSize: 12.5, fontWeight: 600 }} onClick={() => setShowQ((v) => !v)}>
+            {showQ ? '▾' : '▸'} Preview the generated queries ({queries.length})
+          </div>
+          {showQ && (
+            <div style={{ marginTop: 8, border: '1px solid var(--proto-rule-soft)', borderRadius: 8, maxHeight: 240, overflowY: 'auto' }}>
+              {queries.slice(0, 100).map((qq) => (
+                <div key={qq.index} style={{ display: 'flex', gap: 10, padding: '6px 12px', fontSize: 12, alignItems: 'baseline', borderTop: qq.index ? '1px solid var(--proto-rule-soft)' : 'none' }}>
+                  <span style={{ fontFamily: 'ui-monospace, Menlo, monospace', color: 'var(--proto-ink3)', minWidth: 30, fontVariantNumeric: 'tabular-nums' }}>{String(qq.index).padStart(2, '0')}</span>
+                  <span style={{ fontFamily: 'ui-monospace, Menlo, monospace', color: 'var(--proto-ink)', wordBreak: 'break-word', flex: 1 }}>{qq.keywords}</span>
+                  <span className="px-small" style={{ color: 'var(--proto-ink3)', whiteSpace: 'nowrap' }}>{qq.titles} title{qq.titles === 1 ? '' : 's'}</span>
+                </div>
+              ))}
+              {queries.length > 100 && <div className="px-small" style={{ padding: '6px 12px', color: 'var(--proto-ink3)', borderTop: '1px solid var(--proto-rule-soft)' }}>+ {queries.length - 100} more…</div>}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* footer */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 14, marginTop: 16, flexWrap: 'wrap' }}>
+        <span className="px-small" style={{ color: 'var(--proto-ink3)' }}>
+          {cursor?.lastFiredAt ? `Last fired ${new Date(cursor.lastFiredAt).toLocaleString()}` : 'Never fired yet'}
+          {cursor?.backoffUntil ? ` · backing off until ${new Date(cursor.backoffUntil).toLocaleTimeString()}` : ''}
+        </span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          {note && <span className="px-small" style={{ color: note.ok ? 'var(--surface-success-default)' : 'var(--proto-red)' }}>{note.msg}</span>}
+          {dirty && !note && <span className="px-small" style={{ color: 'var(--proto-yellow)' }}>Unsaved changes</span>}
+          <button className="px-btn px-btn-accent" onClick={save} disabled={saving || !dirty}>{saving ? 'Saving…' : 'Save changes'}</button>
+        </div>
+      </div>
+    </Card>
+  )
+}
+
 function IntakeSettings() {
   const { isDemo } = useApp()
   const [cfg, setCfg] = useState(null)
@@ -339,6 +574,8 @@ function IntakeSettings() {
           one role. Routing takes effect once the mailbox-wide watch is live.
         </div>
       </Card>
+
+      <SweepSettings />
 
       <Card>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
