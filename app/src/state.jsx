@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useEffect, useState, useCallback } from 'react'
-import { api, setOwner, setIncludeDemo } from './api.js'
-import { loadUser, signInMicrosoft, signInGoogle, signOut as authSignOut, providerReady, handleGoogleCallback } from './auth.js'
+import { api, setOwner, setIncludeDemo, setUnauthorizedHandler } from './api.js'
+import { loadUser, signInMicrosoft, signInGoogle, signOut as authSignOut, providerReady, handleGoogleCallback, refreshSessionSilent, maybeRefreshSessionOnLoad } from './auth.js'
 
 // Derive a display first name from an email address or displayName string.
 // "von.ellis@enterpriseds.io" → "Von", "Von Ellis" → "Von"
@@ -54,9 +54,13 @@ export function AppProvider({ children }) {
   // shared demo mode so the app stays usable without login.
   const [auth, setAuth] = useState({ loading: true, user: loadUser() })
   useEffect(() => {
+    // Session auto-refresh: on a 401 anywhere, silently re-mint the token and retry.
+    setUnauthorizedHandler(refreshSessionSilent)
     handleGoogleCallback()
       .then((u) => setAuth({ loading: false, user: u || loadUser() }))
       .catch(() => setAuth({ loading: false, user: loadUser() }))
+      // Then proactively refresh the session ahead of expiry so writes never 401 mid-use.
+      .finally(() => { maybeRefreshSessionOnLoad().catch(() => {}) })
   }, [])
 
   const owner = auth.user?.email || DEMO_OWNER

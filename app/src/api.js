@@ -19,32 +19,60 @@ let _includeDemo = (() => { try { return localStorage.getItem('ee_show_demo') !=
 export function setIncludeDemo(v) { _includeDemo = !!v }
 const demoParam = () => (_includeDemo ? '' : '&includeDemo=false')
 
+// On-401 session refresh hook. The session token has a 12h TTL and doesn't silently
+// refresh, so a stale token 401s every write. The app registers a refresher (Microsoft
+// silent re-mint) via setUnauthorizedHandler; on the first 401 we re-mint once and retry
+// the SAME request with the fresh token. In-flight refreshes are deduped so a burst of
+// parallel 401s triggers a single re-mint. Set null → no refresh (falls through to throw).
+let _onUnauthorized = null
+let _refreshInFlight = null
+export function setUnauthorizedHandler(fn) { _onUnauthorized = fn }
+function tryRefresh() {
+  if (!_onUnauthorized) return Promise.resolve(false)
+  if (!_refreshInFlight) {
+    _refreshInFlight = Promise.resolve()
+      .then(() => _onUnauthorized())
+      .catch(() => false)
+      .finally(() => { _refreshInFlight = null })
+  }
+  return _refreshInFlight
+}
+
+// Single fetch path for every helper: applies auth headers, and on a 401 attempts one
+// silent session re-mint + retry before giving up. authHeaders() is re-read on retry so
+// the retried request carries the freshly-minted Bearer.
+async function authedFetch(path, { method = 'GET', jsonBody, extraHeaders } = {}) {
+  const build = () => ({
+    method,
+    headers: authHeaders(jsonBody !== undefined ? { 'Content-Type': 'application/json', ...(extraHeaders || {}) } : extraHeaders),
+    ...(jsonBody !== undefined ? { body: JSON.stringify(jsonBody) } : {}),
+  })
+  let res = await fetch(`${API_BASE}${path}`, build())
+  if (res.status === 401) {
+    const refreshed = await tryRefresh()
+    if (refreshed) res = await fetch(`${API_BASE}${path}`, build())
+  }
+  return res
+}
+
 async function get(path) {
-  const res = await fetch(`${API_BASE}${path}`, { headers: authHeaders() })
+  const res = await authedFetch(path)
   if (!res.ok) throw new Error(`GET ${path} → HTTP ${res.status}`)
   return res.json()
 }
 async function post(path, body) {
-  const res = await fetch(`${API_BASE}${path}`, {
-    method: 'POST',
-    headers: authHeaders({ 'Content-Type': 'application/json' }),
-    body: JSON.stringify(body || {}),
-  })
+  const res = await authedFetch(path, { method: 'POST', jsonBody: body || {} })
   if (!res.ok) throw new Error(`POST ${path} → HTTP ${res.status}`)
   return res.json()
 }
 
 async function patch_(path, body) {
-  const res = await fetch(`${API_BASE}${path}`, {
-    method: 'PATCH',
-    headers: authHeaders({ 'Content-Type': 'application/json' }),
-    body: JSON.stringify(body || {}),
-  })
+  const res = await authedFetch(path, { method: 'PATCH', jsonBody: body || {} })
   if (!res.ok) throw new Error(`PATCH ${path} → HTTP ${res.status}`)
   return res.json()
 }
 async function del(path) {
-  const res = await fetch(`${API_BASE}${path}`, { method: 'DELETE', headers: authHeaders() })
+  const res = await authedFetch(path, { method: 'DELETE' })
   if (!res.ok) throw new Error(`DELETE ${path} → HTTP ${res.status}`)
   return res.json()
 }

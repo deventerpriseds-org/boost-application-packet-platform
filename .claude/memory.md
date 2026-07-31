@@ -722,6 +722,23 @@ enabled+active-hours(6-16 ET)+backoff, 1 query/fire, cursor advance/wrap, expo b
 ENABLED — owner must POST /app/search-sweep {enabled:true} (or via Settings UI once wired). To enable in
 prod: POST with verified session. Old jdSearchTimer still SEARCH_PAUSED (superseded).
 
+## Session auto-refresh — NOW BUILT (2026-07-31) — it never existed before, despite belief it did
+GROUND TRUTH from auth.js/state.jsx/git history: there was NEVER a user-session auto-refresh. The
+HMAC session token (ee_session, appSession.signSession) has a 12h TTL and was minted ONLY at explicit
+sign-in (auth.js signInMicrosoft / handleGoogleCallback) — never re-minted on load, on a timer, or on
+401. The user object (ee_auth_user) persists forever, so the app LOOKED signed-in while writes 401'd
+(requireWrite) after 12h; reads kept working via ?owner=. (What DOES auto-renew is the Graph MAIL
+SUBSCRIPTION via mailRenew 30-min timer — a different, server-side thing; easy to conflate.)
+NOW IMPLEMENTED: auth.js refreshSessionSilent() = MSAL acquireTokenSilent (no popup) → POST /auth/session
+→ setSessionToken; maybeRefreshSessionOnLoad() gates on >1h-left. api.js authedFetch routes ALL helpers
+(get/post/patch_/del) through a single path that, on 401, calls a registered on-401 handler
+(setUnauthorizedHandler) to re-mint ONCE and retry (in-flight deduped). state.jsx registers the handler
++ refreshes on load. MICROSOFT ONLY — Google uses a server-held refresh token via redirect broker, can't
+re-mint purely client-side (documented follow-up). Settings sweep card keeps its stale-session banner as
+a last-resort fallback (should now rarely show for MS users). LIMIT: end-to-end silent re-mint needs a
+real MSAL cached account — ui-verify's seeded localStorage has none, so only regression (app renders,
+reads work) is CI-verifiable; the actual re-mint proves out in the owner's real browser.
+
 ## Sweep Settings UI SHIPPED + VERIFIED (2026-07-31, commit 7328546) — closes the "UI control TODO" gap
 Settings ▸ Intake now has a "Active search — LinkedIn role sweep" card (SweepSettings in Settings.jsx),
 placed BELOW "Folder → role routing", above Self-test (owner-chosen placement; prototype approved first).

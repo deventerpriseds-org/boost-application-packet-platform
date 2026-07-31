@@ -3,7 +3,7 @@
 // enterpriseds-auth-broker). No secrets in the browser. Client IDs + the shared
 // Google redirect are injected at build.
 import { PublicClientApplication } from '@azure/msal-browser'
-import { API_BASE, setSessionToken } from './api.js'
+import { API_BASE, setSessionToken, getSessionToken } from './api.js'
 
 const TENANT = import.meta.env.VITE_MS_TENANT_ID || 'ee633423-c321-413c-a191-ace8b07e4196'
 const MS_CLIENT_ID = import.meta.env.VITE_MS_CLIENT_ID || ''
@@ -110,6 +110,46 @@ export async function handleGoogleCallback() {
     saveUser(user)
     return user
   } catch (e) { handledCode = null; throw e }
+}
+
+// Does the current session token stay valid for at least `sec` more seconds?
+function sessionFreshFor(sec) {
+  const t = getSessionToken()
+  if (!t) return false
+  try {
+    const p = JSON.parse(fromB64url(t.split('.')[1]))
+    return typeof p.exp === 'number' && p.exp > Math.floor(Date.now() / 1000) + sec
+  } catch { return false }
+}
+
+// Silently re-mint the 12h session token for a Microsoft user using MSAL's cached
+// account (acquireTokenSilent → no popup) → POST /auth/session. Returns true on success.
+// This is the session auto-refresh: registered as api.js's on-401 handler AND called on
+// app load, so a lapsed token renews invisibly instead of 401-ing writes. Google users use
+// a server-held refresh token via a redirect broker and can't be re-minted purely client-
+// side, so they fall through to false (the UI's re-sign-in prompt handles that case).
+export async function refreshSessionSilent() {
+  const u = loadUser()
+  if (!u || u.provider !== 'microsoft' || !MS_CLIENT_ID) return false
+  try {
+    const app = await getMsal()
+    const acct = app.getAllAccounts?.()[0]
+    if (!acct) return false
+    const t = await app.acquireTokenSilent({ scopes: ['User.Read'], account: acct })
+    if (!t?.accessToken) return false
+    const r = await fetch(`${API_BASE}/auth/session`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ msAccessToken: t.accessToken }) })
+    const d = await r.json().catch(() => ({}))
+    if (d?.token) { setSessionToken(d.token); return true }
+    return false
+  } catch { return false }
+}
+
+// Called on app load: refresh the session ahead of expiry (or when already stale/absent)
+// so the user never hits a 401 mid-session. No-op (returns true) when the token is still
+// comfortably fresh, to avoid an unnecessary Graph round-trip on every load.
+export async function maybeRefreshSessionOnLoad() {
+  if (sessionFreshFor(60 * 60)) return true   // >1h left — leave it
+  return refreshSessionSilent()
 }
 
 export async function signOut() {
