@@ -675,7 +675,7 @@ which playbooks are STANDARD for each of the owner's target roles (a per-role pl
 (b) STRATEGY — a repeatable pipeline to turn source material (course content, notes) into assets
 (playbooks, diagrams, etc.). Precedes/feeds ACT-41 templatization.
 
-**ACT-43 — JD on the OppDetail Overview + retrieve missing JDs.** IN PROGRESS (verifier running).
+**ACT-43 — JD on the OppDetail Overview + retrieve missing JDs.** ✅ DONE + verifier-PASS 7/7 (2026-07-31).
 Owner: opps still show "full JD not retrieved" (e.g. Ventra Health CTO); and the Job Description should
 appear ABOVE the "Why surfaced" section on the Overview tab. DONE: (a) UI — OppDetail.jsx Overview now
 renders a "Job description" card above "Why surfaced", distinct not-retrieved state + Re-parse, reuses
