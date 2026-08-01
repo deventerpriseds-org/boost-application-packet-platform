@@ -59,7 +59,19 @@ grouped by created_at day. Ground truth (supersedes the "45/38 no-JD" framing):
 - AFTER (DB-verified): 50 fav-legacy → 24 job_id (was 9, +15), 20 jd_real (was 9, +11). The other
   26 are UNRECOVERABLE via mail (company not in any alert subject — emails aged out); jdBackfillTick
   fetches JD for the 4 linked-but-not-yet-fetched.
-- STILL PLANNED (owner-flagged, not done): expose JD fetch-mode (direct vs proxy) as an owner setting.
+## JD fetch-mode as owner setting — DONE + verified (2026-08-01, commit 732a3c6) ✅
+- Owner approved prototype (kept qualitative status, direct default) → built for real.
+- owner_search_prefs gained jd_fetch_mode ('direct'|'proxy', default direct) + jd_fetch_fallback
+  (bool, default true). Removed the buried force:'direct' constant from fetchAndStoreJd (the ONE core
+  JD fetch) — it now honors the owner's choice; in direct mode a blocked/authwall fetch retries once
+  via scrape.do when fallback is on. BOTH automated JD paths read it: inline-at-ingest
+  (routeOpportunity) + jdBackfillTick, via getJdFetchPrefs(client,owner) in jdSweep.
+- Surfaced in Settings ▸ Intake ▸ Active-search card: segmented Direct/Proxy control, live
+  "what happens" copy + qualitative pills (no fake credit number), fallback toggle (direct only).
+  searchSweep GET/POST carry jdFetchMode/jdFetchFallback; api.js searchSweepSet passes them.
+- VERIFIED: POST proxy/false → returned proxy/false; POST direct/true → returned direct/true
+  (restored prod to direct/true, not left on proxy). ui-verify #/settings/intake success ⇒
+  "Job description source / Direct from LinkedIn / Scraping proxy" all render live.
 
 ## JD-missing ROOT CAUSE (2026-08-01, verified live) — it is BACKLOG, not source
 - 259→262 opps; only ~36% had a real JD. **64% had jd_fetched_at=NULL = never fetch-attempted.**
