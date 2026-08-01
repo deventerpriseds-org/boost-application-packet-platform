@@ -311,6 +311,11 @@ If a feature isn't ready, hide the control — don't fake it.
 Cloned to `/workspace/eds-claude-skills`. Skills load automatically each session via
 `register_repo_root`. **Use these skills proactively** — they encode org-level standards.
 
+> **To modify a skill, edit/commit/push against this local clone directly** — do NOT call
+> `add_repo` for it (that returns MCP `-32003 requires approval` and you don't need it: the
+> clone already has a working git-proxy push remote). Reflexively reaching for `add_repo`
+> instead of the existing clone is a known miss — the repo is already here.
+
 | Skill | When to use |
 |---|---|
 | `define-acceptance-criteria` | **Before coding any feature or fix** — extract verifiable ACs, get sign-off first |
