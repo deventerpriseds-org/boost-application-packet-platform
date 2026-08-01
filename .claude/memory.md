@@ -24,9 +24,16 @@ proof yet, say so and go get it — never fill the gap with a plausible-sounding
   (with_jd 94→104, pending 123→113) — but this is the SCHEDULED SWEEP the owner EXPLICITLY told us
   to DROP (actions.md:717-724: "fetch JD DURING inbox extraction… i dont want rules to make it to the
   pipeline without job descriptions already… Call fetchAndStoreJd INLINE inside routeOpportunity…
-  Drop the scheduled sweep idea"). STILL OWED: inline fetch in routeOpportunity right after job_id
-  resolves, so opps land WITH jd_real; keep the timer ONLY as the bounded retry for the rare
-  blocked/expired exceptions the owner allowed. Do NOT mark ACT-44 done until the inline path exists.
+  Drop the scheduled sweep idea").
+- ✅ ACT-44 INLINE-AT-INGEST DONE + VERIFIED LIVE (commit d8f39a4, 2026-08-01). routeOpportunity now
+  calls fetchAndStoreJd right after job_id resolves (direct-from-Azure, small jitter, best-effort;
+  failure/no-jobId leaves jd_fetched_at null for jdBackfillTick bounded retry, never blocks insert).
+  Dynamic import breaks the mailWatch<->jdBackfill cycle. PROOF (not prose): (1) git log -S
+  'fetchAndStoreJd' -- mailWatch.ts non-empty; (2) deterministic /mail/ingest-test w/ {{JOB:4446746716}}
+  → new opp landed WITH job_id + jd_real (jd_len=2800) at ingest time (jd_fetched_at=13:56:38) +
+  jd_fetch_log run_tag='ingest' ingest_ok=1 (test opp deleted after). Timer now demoted to RETRY only.
+  GOTCHA: send-test-real makes NO-job_id opps (can't test inline) — use a {{JOB:id}} marker in
+  /mail/ingest-test for deterministic verification.
 - JD BACKFILL RAN + CLEARED (2026-08-01, verified live). Mistake first: called the endpoint WITHOUT
   direct → scrape.do proxy (tiny free tier, known-exhausted memory:288) → quota_exceeded, 0 stored,
   and I wrongly told owner it needed a scrape.do top-up. Memory:283-291,337-352 already decided
