@@ -107,6 +107,7 @@ export async function mailRecoverTargeted(req: HttpRequest, _ctx: InvocationCont
   const body = (await req.json().catch(() => ({}))) as any
   const limit = Math.max(1, Math.min(100, Number(body.limit) || 40))
   const doFetchJd = body.fetchJd !== false
+  const debug = body.debug === true
   const creds = graphCreds()
   if (!creds.clientId || !creds.clientSecret) return { status: 200, headers: HEADERS, jsonBody: { ok: false, error: 'Graph creds not configured' } }
   const cfg = await loadConfig()
@@ -124,6 +125,7 @@ export async function mailRecoverTargeted(req: HttpRequest, _ctx: InvocationCont
     const used = new Set<string>()
     let searched = 0, linked = 0, jdStored = 0
     const misses: any[] = []
+    const dbg: any[] = []
     for (const o of opps) {
       if (Date.now() - startMs > 180_000) break   // stay well under Azure's 240s gateway cap
       const cnorm = norm(o.company)
@@ -135,13 +137,18 @@ export async function mailRecoverTargeted(req: HttpRequest, _ctx: InvocationCont
       if (!res.ok) { misses.push({ company: o.company, role: o.role, reason: `graph ${res.status}` }); continue }
       const page = (await res.json()) as any
       let picked: string | null = null
+      const dbgMsgs: any[] = []
       for (const msg of (page.value || [])) {
         const from = (msg?.from?.emailAddress?.address || '').toLowerCase()
-        if (!isAlert(cfg, from, msg?.subject || '', '')) continue
+        const alert = isAlert(cfg, from, msg?.subject || '', '')
+        const anchors = extractJobAnchors(msg?.body?.content || '')
+        if (debug) dbgMsgs.push({ from, subject: (msg?.subject || '').slice(0, 90), alert, anchors: anchors.slice(0, 6).map((a) => ({ jobId: a.jobId, ctx: String(a.context || '').slice(0, 100) })) })
+        if (!alert) continue
         // Anchor whose local context contains this opp's company AND whose id isn't already claimed.
-        const hit = extractJobAnchors(msg?.body?.content || '').find((a) => !used.has(a.jobId) && norm(a.context).includes(cnorm))
+        const hit = anchors.find((a) => !used.has(a.jobId) && norm(a.context).includes(cnorm))
         if (hit) { picked = hit.jobId; break }
       }
+      if (debug) dbg.push({ company: o.company, role: o.role, cnorm, msgs: dbgMsgs })
       if (!picked) { misses.push({ company: o.company, role: o.role, reason: 'no matching anchor in its email' }); continue }
       used.add(picked)
       await client.query(`update opportunity set job_id=$2, job_url=$3 where id=$1 and job_id is null`, [o.id, picked, canonicalJobUrl(picked)])
@@ -150,7 +157,7 @@ export async function mailRecoverTargeted(req: HttpRequest, _ctx: InvocationCont
         try { const r = await fetchAndStoreJd(client, { id: o.id, job_id: picked }, { runTag: 'recover-targeted' }); if (r.stored) jdStored++ } catch { /* timer retries */ }
       }
     }
-    return { status: 200, headers: HEADERS, jsonBody: { ok: true, targeted: opps.length, searched, linked, jdStored, misses: misses.slice(0, 20) } }
+    return { status: 200, headers: HEADERS, jsonBody: { ok: true, targeted: opps.length, searched, linked, jdStored, misses: misses.slice(0, 20), ...(debug ? { debug: dbg } : {}) } }
   } catch (e) {
     return { status: 200, headers: HEADERS, jsonBody: { ok: false, error: String(e) } }
   } finally { try { await client?.end() } catch {} }
