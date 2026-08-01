@@ -250,8 +250,13 @@ export function resolveTitle(rawTitle: string, context = ''): MatchResult & { ba
     // C-x-O acronyms (CISO/CSO/…) are seen even though `norm` was cut.
     const seniority: Group | null = seniorityBand(rawTitle)
     if (seniority) {
-      const rk = seniority === 'csuite' ? ROLE_KEYWORDS.find((r) => r.kw.test(norm)) : null
-      const fam = seniority !== 'csuite' ? FAMILY_KW.find((f) => f.kw.test(norm)) : null
+      // Scan the UN-CUT title for the discipline keyword — the same reason seniorityBand uses cut:false.
+      // `norm` is cut at the first comma/separator, which for stylistic titles like "VP, Product and UX"
+      // or "SVP, Corporate Engineering" throws away the discipline ("...→ 'vp'") and leaves role=null.
+      // The full string keeps "product"/"engineering"/etc. so the family/role keyword can still match.
+      const full = normalize(rawTitle, { cut: false })
+      const rk = seniority === 'csuite' ? ROLE_KEYWORDS.find((r) => r.kw.test(full)) : null
+      const fam = seniority !== 'csuite' ? FAMILY_KW.find((f) => f.kw.test(full)) : null
       const role = rk ? rk.role : fam ? fam.role : null
       const roleSlug = rk ? rk.roleSlug : fam ? `${seniority}-${fam.slug}` : null
       res = { matched: true, group: seniority, roleSlug, role, variation: null, title: null, tier: 'watch', isFavorite: false, method: 'keyword', confidence: 0 }

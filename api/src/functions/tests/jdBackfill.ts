@@ -1,4 +1,4 @@
-import { app, HttpRequest, HttpResponseInit, InvocationContext } from '@azure/functions'
+import { app, HttpRequest, HttpResponseInit, InvocationContext, Timer } from '@azure/functions'
 import { requireWrite } from './appSession'
 import { getPgClient } from './pgClient'
 import { getMicrosoftToken } from './googleAuth'
@@ -54,6 +54,43 @@ export async function fetchAndStoreJd(
   }
   return { outcome, stored }
 }
+
+// ---------------------------------------------------------------------------
+// PACED AUTO-BACKFILL TIMER — the fix for "opps sit in the pipeline with no JD forever".
+// Before this, the ONLY automated JD fetch was the (paused) search sweep and the disabled
+// jd-sweep; mail-ingested opps with a job_id were never fetched unless someone manually POSTed
+// /mail/jd-backfill/fetch with favoritesOnly:false. This timer closes that gap: every 3 min it
+// pulls a SMALL batch of opps that have a job_id but no jd_fetched_at (favorites first, then most
+// recent), fetches each real JD via the shared fetchAndStoreJd, jitters between calls, and STOPS
+// on the first block so we never hammer LinkedIn after a 429. It self-limits — idles the moment
+// the backlog is clear, so steady-state load is ~0. It cannot help opps with NO job_id (non-
+// LinkedIn boards like Ladders/Indeed): those have no fetchable posting id on the guest endpoint.
+export async function jdBackfillTick(_t: Timer, context: InvocationContext): Promise<void> {
+  let client: any
+  try {
+    const owner = (await loadConfig()).ownerEmail
+    client = await getPgClient()
+    await ensureCols(client)
+    const rows = (await client.query(
+      `select id, job_id from opportunity
+         where owner_email=$1 and not dismissed and not is_demo
+           and job_id is not null and jd_fetched_at is null
+         order by is_favorite desc, source_date desc nulls last
+         limit 5`, [owner])).rows
+    if (!rows.length) { context.log('jd-backfill: no pending opps (backlog clear)'); return }
+    let stored = 0, hitBlock = false
+    for (const row of rows) {
+      const { outcome, stored: s } = await fetchAndStoreJd(client, row, { runTag: 'timer-backfill' })
+      if (s) stored++
+      if (/block|rate|429|throttl/i.test(outcome)) { hitBlock = true; break }
+      await new Promise((r) => setTimeout(r, 3000 + Math.floor(Math.random() * 4000)))   // 3–7s jitter
+    }
+    context.log(`jd-backfill: attempted ${rows.length}, stored ${stored}${hitBlock ? ' — stopped on block' : ''}`)
+  } catch (e) { context.log(`jd-backfill error: ${e}`) }
+  finally { try { await client?.end() } catch {} }
+}
+// Every 3 minutes; the handler self-gates on there being pending job_id-having opps and stops on block.
+app.timer('jdBackfillTick', { schedule: '0 */3 * * * *', handler: jdBackfillTick })
 
 // ---------------------------------------------------------------------------
 // POST /api/mail/jd-backfill/scan  — recover jobIds for EXISTING opportunities. LLM-FREE.
