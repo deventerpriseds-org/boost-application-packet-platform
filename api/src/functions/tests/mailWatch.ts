@@ -380,6 +380,20 @@ export async function routeOpportunity(
 ): Promise<{ inserted: boolean; id?: string; reason?: string; company: string; role: string; routed?: string }> {
   const res = await insertOpp(client, owner, o, opts.source || 'Email', opts.why, opts.receivedAt, opts.rawJd)
   if (!res.inserted || !res.id) return res
+  // ACT-44 (owner directive) — fetch the REAL JD inline at ingest, right after job_id resolves, so opps
+  // land WITH jd_real instead of a blank alert placeholder ("i dont want rules to make it to the pipeline
+  // without job descriptions already"). Direct-from-Azure (no proxy/credits — the decided path). Best-
+  // effort + small jitter to share LinkedIn's single-IP throttle: a block/failure/no-jobId just leaves
+  // jd_fetched_at null for the bounded jdBackfillTick retry — it NEVER blocks the insert. Dynamic import
+  // avoids a static cycle (jdBackfill imports parseAlert et al. from this module).
+  if (o.jobId) {
+    try {
+      const { fetchAndStoreJd, ensureJdCols } = await import('./jdBackfill')
+      await ensureJdCols(client)
+      await new Promise((r) => setTimeout(r, 200 + Math.floor(Math.random() * 600)))  // 0.2–0.8s jitter
+      await fetchAndStoreJd(client, { id: res.id, job_id: String(o.jobId) }, { runTag: 'ingest' })
+    } catch { /* best-effort — jdBackfillTick retries any that fail/block */ }
+  }
   // Path 1 — deterministic folder→role bins
   const mapped = await folderRoles(client, owner, opts.parentFolderId)
   if (mapped.length) {
