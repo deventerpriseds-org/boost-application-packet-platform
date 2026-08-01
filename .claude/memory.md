@@ -14,6 +14,25 @@ proof yet, say so and go get it — never fill the gap with a plausible-sounding
   ignored it. Owner caught it. Company="Ladders" is a SEPARATE company-misparse bug (the board name
   stored as the employer), unrelated to the JD.*
 
+## JD backlog — CORRECTED SCOPE (2026-08-01, ground-truthed by DB day-histogram) ⭐
+Ran `select day, count(*), count filter(job_id not null), count filter(len(jd_real|raw_jd)>200)`
+grouped by created_at day. Ground truth (supersedes the "45/38 no-JD" framing):
+- **Going forward = SOLVED.** Every opp ingested **07-21 → 08-01 (843 opps) has JD text —
+  has_jd_text == total on EVERY day.** Inline-at-ingest (d8f39a4) is working; blank-JD is not
+  growing.
+- **The blank-JD backlog is ~209 opps, ALL in the first week 07-08 → 07-14** (pre-pipeline batch;
+  only 29/218 even have a job_id). NOT the 45/38 we chased. That earlier count was a red herring.
+- **`recover-targeted` (e48121b) works but my test sample was misleading.** Sorted newest-first →
+  hit 3 rows from 08-01 that are LinkedIn **networking** emails, not jobs:
+  `messages-noreply@linkedin.com` "…is popular in your network" + `invitations@linkedin.com`
+  "I want to connect" — `isAlert=false`, ZERO job anchors (proven via debug=true dump, commit
+  b873ebc). Roles were people's titles ("CEO & Co Founder", "SVP & Global Head"). ⇒ These no-job_id
+  newest opps are a **data-quality leak** (networking emails saved as opportunities), a DIFFERENT
+  problem from JD backfill — do not try to "recover" JDs for them; there are none.
+- OPEN DECISION for owner: (a) backfill the 209 legacy 07-08..07-14 opps (feasibility unconfirmed —
+  their source emails are 3wk old, may not be job alerts), or treat as pre-launch noise to
+  filter/archive; (b) investigate/plug the networking-email ingestion leak. Awaiting owner steer.
+
 ## JD-missing ROOT CAUSE (2026-08-01, verified live) — it is BACKLOG, not source
 - 259→262 opps; only ~36% had a real JD. **64% had jd_fetched_at=NULL = never fetch-attempted.**
 - Cause: ACT-44 "JD-at-ingest" was NEVER shipped (routeOpportunity/insertOpp make zero
