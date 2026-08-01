@@ -93,6 +93,71 @@ export async function jdBackfillTick(_t: Timer, context: InvocationContext): Pro
 app.timer('jdBackfillTick', { schedule: '0 */3 * * * *', handler: jdBackfillTick })
 
 // ---------------------------------------------------------------------------
+// POST /api/mail/jd-backfill/recover-targeted  { limit?, fetchJd? }  — OPP-FIRST recovery.
+// For legacy LinkedIn opps that have a company+role but no job_id (ingested before job_id capture),
+// this iterates ONLY those opps and, for each, Graph-$searches the mailbox for ITS OWN alert email by
+// company, extracts the job anchors from that one email, and attaches the job_id whose local context
+// matches the opp's company. Bounded to the affected rows — no LLM, no scanning the whole mailbox
+// (the mistake the owner rightly flagged). Non-destructive: only sets job_id where it was null; then
+// optionally fetches the JD inline (direct). Graph + direct only — never touches the LinkedIn search
+// endpoint the sweep uses.
+export async function mailRecoverTargeted(req: HttpRequest, _ctx: InvocationContext): Promise<HttpResponseInit> {
+  if (req.method === 'OPTIONS') return { status: 204, headers: HEADERS }
+  const guard = requireWrite(req); if (guard) return guard
+  const body = (await req.json().catch(() => ({}))) as any
+  const limit = Math.max(1, Math.min(100, Number(body.limit) || 40))
+  const doFetchJd = body.fetchJd !== false
+  const creds = graphCreds()
+  if (!creds.clientId || !creds.clientSecret) return { status: 200, headers: HEADERS, jsonBody: { ok: false, error: 'Graph creds not configured' } }
+  const cfg = await loadConfig()
+  const token = await getMicrosoftToken(creds.tenantId, creds.clientId, creds.clientSecret)
+  const norm = (s: string) => normText(String(s || ''))
+  let client: any
+  try {
+    client = await getPgClient()
+    await ensureCols(client)
+    const opps = (await client.query(
+      `select id, company, role from opportunity
+         where owner_email=$1 and job_id is null and not is_demo and coalesce(source,'') ilike '%linkedin%'
+         order by created_at desc limit $2`, [cfg.ownerEmail, limit])).rows
+    const startMs = Date.now()
+    const used = new Set<string>()
+    let searched = 0, linked = 0, jdStored = 0
+    const misses: any[] = []
+    for (const o of opps) {
+      if (Date.now() - startMs > 180_000) break   // stay well under Azure's 240s gateway cap
+      const cnorm = norm(o.company)
+      if (cnorm.length < 3) { misses.push({ company: o.company, role: o.role, reason: 'company too short to match' }); continue }
+      searched++
+      // $search finds the digest email(s) mentioning this company (subject+body full-text).
+      const url = `https://graph.microsoft.com/v1.0/users/${cfg.mailbox}/messages?$search=${encodeURIComponent(`"${o.company}"`)}&$top=5&$select=subject,from,body`
+      const res: any = await fetch(url, { headers: { Authorization: `Bearer ${token}`, ConsistencyLevel: 'eventual' } })
+      if (!res.ok) { misses.push({ company: o.company, role: o.role, reason: `graph ${res.status}` }); continue }
+      const page = (await res.json()) as any
+      let picked: string | null = null
+      for (const msg of (page.value || [])) {
+        const from = (msg?.from?.emailAddress?.address || '').toLowerCase()
+        if (!isAlert(cfg, from, msg?.subject || '', '')) continue
+        // Anchor whose local context contains this opp's company AND whose id isn't already claimed.
+        const hit = extractJobAnchors(msg?.body?.content || '').find((a) => !used.has(a.jobId) && norm(a.context).includes(cnorm))
+        if (hit) { picked = hit.jobId; break }
+      }
+      if (!picked) { misses.push({ company: o.company, role: o.role, reason: 'no matching anchor in its email' }); continue }
+      used.add(picked)
+      await client.query(`update opportunity set job_id=$2, job_url=$3 where id=$1 and job_id is null`, [o.id, picked, canonicalJobUrl(picked)])
+      linked++
+      if (doFetchJd) {
+        try { const r = await fetchAndStoreJd(client, { id: o.id, job_id: picked }, { runTag: 'recover-targeted' }); if (r.stored) jdStored++ } catch { /* timer retries */ }
+      }
+    }
+    return { status: 200, headers: HEADERS, jsonBody: { ok: true, targeted: opps.length, searched, linked, jdStored, misses: misses.slice(0, 20) } }
+  } catch (e) {
+    return { status: 200, headers: HEADERS, jsonBody: { ok: false, error: String(e) } }
+  } finally { try { await client?.end() } catch {} }
+}
+app.http('mailRecoverTargeted', { methods: ['POST', 'OPTIONS'], authLevel: 'anonymous', route: 'mail/jd-backfill/recover-targeted', handler: mailRecoverTargeted })
+
+// ---------------------------------------------------------------------------
 // POST /api/mail/jd-backfill/scan  — recover jobIds for EXISTING opportunities. LLM-FREE.
 // The ingest fix only captures jobIds going forward; opps ingested before it have none. This
 // re-reads the last {days} of alert emails, extracts each job anchor's {jobId, title, tail} from the
