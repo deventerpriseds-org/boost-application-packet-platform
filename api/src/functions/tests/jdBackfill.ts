@@ -4,8 +4,9 @@ import { getPgClient } from './pgClient'
 import { getMicrosoftToken } from './googleAuth'
 import { loadConfig, graphCreds, isAlert, parseAlert, embedBatch, isLinkedInSocialSender } from './mailWatch'
 import { extractJobAnchors, canonicalJobUrl, normText, tokenSim, injectJobMarkers } from './jdLinks'
-import { scraperFetch, extractGuestJdHtml, classifyResponse } from './scraperProxy'
+import { scraperFetch, extractGuestJdHtml, classifyResponse, scraperConfigured } from './scraperProxy'
 import { logJdFetch } from './jdFetchLog'
+import { getJdFetchPrefs } from './jdSweep'
 
 const HEADERS = {
   'Content-Type': 'application/json',
@@ -35,13 +36,28 @@ export async function ensureJdCols(client: any): Promise<void> { await ensureCol
 export async function fetchAndStoreJd(
   client: any,
   row: { id: string; job_id: string },
-  opts: { runTag?: string; concurrency?: number } = {},
+  opts: { runTag?: string; concurrency?: number; mode?: 'direct' | 'proxy'; fallback?: boolean } = {},
 ): Promise<{ outcome: string; stored: boolean }> {
-  const r: any = await scraperFetch(guestUrl(String(row.job_id)), { force: 'direct' })
-  const jd = extractGuestJdHtml(r.body)
-  const outcome = classifyResponse(r.status, r.body, jd.descriptionHtml != null)
+  // Owner's Job-description-source preference (Settings ▸ Intake ▸ Active search), threaded in by the
+  // caller. Default direct (no credits). 'proxy' routes through scrape.do (spends a credit). In direct
+  // mode, a BLOCKED fetch retries once through the proxy when fallback is on and a proxy is configured —
+  // so an anti-bot wall doesn't leave the JD blank.
+  const mode = opts.mode === 'proxy' ? 'proxy' : 'direct'
+  const fallback = opts.fallback !== false
+  const gUrl = guestUrl(String(row.job_id))
+  let r: any = mode === 'proxy'
+    ? await scraperFetch(gUrl, { provider: 'scrapedo' })
+    : await scraperFetch(gUrl, { force: 'direct' })
+  let jd = extractGuestJdHtml(r.body)
+  let outcome = classifyResponse(r.status, r.body, jd.descriptionHtml != null)
+  if (mode === 'direct' && fallback && (outcome === 'blocked' || outcome === 'login_wall') && scraperConfigured('scrapedo')) {
+    const r2: any = await scraperFetch(gUrl, { provider: 'scrapedo' })
+    const jd2 = extractGuestJdHtml(r2.body)
+    const out2 = classifyResponse(r2.status, r2.body, jd2.descriptionHtml != null)
+    if (out2 === 'ok_jd') { r = r2; jd = jd2; outcome = out2 }   // proxy rescued a direct block
+  }
   await logJdFetch({
-    jobId: String(row.job_id), provider: r.provider || 'direct', via: r.via, httpStatus: r.status,
+    jobId: String(row.job_id), provider: r.provider || (mode === 'proxy' ? 'scrapedo' : 'direct'), via: r.via, httpStatus: r.status,
     outcome, jdTextLen: jd.textLen, bytes: r.body.length, latencyMs: r.latencyMs,
     concurrency: opts.concurrency || 1, runTag: opts.runTag || 'inline', usage: r.usage, error: r.error,
   })
@@ -78,9 +94,10 @@ export async function jdBackfillTick(_t: Timer, context: InvocationContext): Pro
          order by is_favorite desc, source_date desc nulls last
          limit 5`, [owner])).rows
     if (!rows.length) { context.log('jd-backfill: no pending opps (backlog clear)'); return }
+    const jdPrefs = await getJdFetchPrefs(client, owner)   // owner's direct/proxy choice
     let stored = 0, hitBlock = false
     for (const row of rows) {
-      const { outcome, stored: s } = await fetchAndStoreJd(client, row, { runTag: 'timer-backfill' })
+      const { outcome, stored: s } = await fetchAndStoreJd(client, row, { runTag: 'timer-backfill', mode: jdPrefs.mode, fallback: jdPrefs.fallback })
       if (s) stored++
       if (/block|rate|429|throttl/i.test(outcome)) { hitBlock = true; break }
       await new Promise((r) => setTimeout(r, 3000 + Math.floor(Math.random() * 4000)))   // 3–7s jitter

@@ -404,9 +404,11 @@ export async function routeOpportunity(
   if (o.jobId) {
     try {
       const { fetchAndStoreJd, ensureJdCols } = await import('./jdBackfill')
+      const { getJdFetchPrefs } = await import('./jdSweep')
       await ensureJdCols(client)
+      const jdPrefs = await getJdFetchPrefs(client, owner)   // owner's direct/proxy choice
       await new Promise((r) => setTimeout(r, 200 + Math.floor(Math.random() * 600)))  // 0.2–0.8s jitter
-      await fetchAndStoreJd(client, { id: res.id, job_id: String(o.jobId) }, { runTag: 'ingest' })
+      await fetchAndStoreJd(client, { id: res.id, job_id: String(o.jobId) }, { runTag: 'ingest', mode: jdPrefs.mode, fallback: jdPrefs.fallback })
     } catch { /* best-effort — jdBackfillTick retries any that fail/block */ }
   }
   // Path 1 — deterministic folder→role bins

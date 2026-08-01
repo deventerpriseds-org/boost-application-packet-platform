@@ -58,6 +58,8 @@ function SweepSettings() {
   const [tpq, setTpq] = useState(8)
   const [startH, setStartH] = useState(6)
   const [endH, setEndH] = useState(16)
+  const [jdMode, setJdMode] = useState('direct')      // 'direct' | 'proxy' — Job description source
+  const [jdFallback, setJdFallback] = useState(true)   // in direct mode, retry a blocked fetch via proxy
   const [totals, setTotals] = useState({ queries: null, titles: null, previewTpq: 8 })
   const [cursor, setCursor] = useState(null)
   const [queries, setQueries] = useState([])
@@ -77,9 +79,12 @@ function SweepSettings() {
     const cfg = r.config || {}
     const [s, e] = hoursToRange(cfg.activeHoursEt)
     setEnabled(!!cfg.enabled); setTpq(cfg.titlesPerQuery ?? 8); setStartH(s); setEndH(e)
+    const mode = cfg.jdFetchMode === 'proxy' ? 'proxy' : 'direct'
+    const fb = cfg.jdFetchFallback !== false
+    setJdMode(mode); setJdFallback(fb)
     setTotals({ queries: r.totalQueries ?? null, titles: r.totalTitles ?? null, previewTpq: r.previewTitlesPerQuery ?? cfg.titlesPerQuery ?? 8 })
     setCursor(r.cursor || null); setQueries(r.queries || [])
-    setSavedCfg({ enabled: !!cfg.enabled, tpq: cfg.titlesPerQuery ?? 8, start: s, end: e })
+    setSavedCfg({ enabled: !!cfg.enabled, tpq: cfg.titlesPerQuery ?? 8, start: s, end: e, jdMode: mode, jdFallback: fb })
   }, [])
 
   const load = useCallback(async () => {
@@ -118,7 +123,7 @@ function SweepSettings() {
     }
     setSaving(true); setNote(null)
     try {
-      const r = await api.searchSweepSet({ enabled, titlesPerQuery: tpq, activeHoursEt: rangeToHours(startH, endH) })
+      const r = await api.searchSweepSet({ enabled, titlesPerQuery: tpq, activeHoursEt: rangeToHours(startH, endH), jdFetchMode: jdMode, jdFetchFallback: jdFallback })
       if (r.ok === false) throw new Error(r.error || 'save failed')
       setNote({ ok: true, msg: enabled ? 'Saved — sweep is ON.' : 'Saved — sweep is OFF.' })
       await load()   // re-pull authoritative cursor/totals from server
@@ -129,9 +134,9 @@ function SweepSettings() {
         : msg })
     }
     finally { setSaving(false) }
-  }, [enabled, tpq, startH, endH, load])
+  }, [enabled, tpq, startH, endH, jdMode, jdFallback, load])
 
-  const dirty = savedCfg && (savedCfg.enabled !== enabled || savedCfg.tpq !== tpq || savedCfg.start !== startH || savedCfg.end !== endH)
+  const dirty = savedCfg && (savedCfg.enabled !== enabled || savedCfg.tpq !== tpq || savedCfg.start !== startH || savedCfg.end !== endH || savedCfg.jdMode !== jdMode || savedCfg.jdFallback !== jdFallback)
 
   // Coverage/quota math — one query per minute over the active window.
   const activeHrs = Math.max(1, Math.abs(endH - startH) + 1)
@@ -275,6 +280,76 @@ function SweepSettings() {
           )}
         </div>
       )}
+
+      <div style={{ height: 1, background: 'var(--proto-rule-soft)', margin: '14px 0' }} />
+
+      {/* Job description source — direct (no credits) vs scraping proxy. Seeds owner_search_prefs.jd_fetch_mode. */}
+      <div>
+        <div style={{ fontSize: 13, fontWeight: 600 }}>Job description source</div>
+        <div className="px-small" style={{ color: 'var(--proto-ink2)', marginTop: 2, maxWidth: 460 }}>
+          Where the full job description comes from when a role is ingested or backfilled — what fills each opportunity's JD before a packet is built.
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 8, marginTop: 12 }}>
+          {[
+            { m: 'direct', name: 'Direct from LinkedIn', sub: 'Fetches the posting straight from LinkedIn. No credits, no third party.', rec: true },
+            { m: 'proxy', name: 'Scraping proxy', sub: 'Routes through scrape.do. Use only if direct fetches get blocked.', rec: false },
+          ].map((o) => {
+            const on = jdMode === o.m
+            return (
+              <button key={o.m} onClick={() => setJdMode(o.m)} style={{ textAlign: 'left', cursor: 'pointer', font: 'inherit', color: 'var(--proto-ink)',
+                background: on ? 'var(--proto-paper)' : 'transparent', padding: '12px 13px', borderRadius: 9,
+                border: `1px solid ${on ? 'var(--text-brand)' : 'var(--proto-rule-soft)'}`, boxShadow: on ? '0 0 0 3px color-mix(in srgb, var(--text-brand) 18%, transparent)' : 'none', transition: 'border-color .12s, box-shadow .12s' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span style={{ fontSize: 13.5, fontWeight: 650 }}>{o.name}</span>
+                  {o.rec && <span style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: 0.5, textTransform: 'uppercase', padding: '2px 6px', borderRadius: 5, background: 'color-mix(in srgb, var(--surface-success-default) 16%, transparent)', color: 'var(--surface-success-default)' }}>Recommended</span>}
+                  <span style={{ marginLeft: 'auto', width: 16, height: 16, borderRadius: '50%', border: `1.5px solid ${on ? 'var(--text-brand)' : 'var(--proto-rule)'}`, display: 'grid', placeItems: 'center', flex: 'none' }}>
+                    {on && <span style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--text-brand)' }} />}
+                  </span>
+                </div>
+                <div className="px-small" style={{ color: 'var(--proto-ink2)', marginTop: 4 }}>{o.sub}</div>
+              </button>
+            )
+          })}
+        </div>
+
+        {/* what-happens explainer + qualitative status */}
+        <div style={{ marginTop: 12, border: '1px solid var(--proto-rule-soft)', borderLeft: '3px solid var(--text-brand)', borderRadius: 9, padding: '11px 13px', background: 'color-mix(in srgb, var(--text-brand) 5%, var(--proto-paper))' }}>
+          <div className="px-small" style={{ color: 'var(--proto-ink3)', fontWeight: 650, letterSpacing: 0.4, fontSize: 10 }}>WHAT HAPPENS</div>
+          <div className="px-small" style={{ color: 'var(--proto-ink)', marginTop: 5 }}>
+            {jdMode === 'direct'
+              ? "Each job description is pulled directly from LinkedIn's public posting. No scraping credits are spent and nothing leaves for a third party. This is how the pipeline runs today."
+              : "Job descriptions are fetched through scrape.do, a paid scraping proxy — each fetch spends one credit. Keep this in reserve for the rare posting a direct fetch can't reach."}
+          </div>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 9 }}>
+            {(jdMode === 'direct'
+              ? [{ t: 'No credits used', tone: 'ok' }, { t: 'No third-party service', tone: 'ok' }]
+              : [{ t: 'Spends a credit per JD', tone: 'warn' }, { t: 'Held in reserve', tone: 'warn' }]
+            ).map((p) => (
+              <span key={p.t} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 11.5, fontWeight: 600, padding: '4px 9px', borderRadius: 999,
+                background: p.tone === 'ok' ? 'color-mix(in srgb, var(--surface-success-default) 14%, transparent)' : 'color-mix(in srgb, var(--proto-yellow) 16%, transparent)',
+                color: p.tone === 'ok' ? 'var(--surface-success-default)' : 'var(--proto-yellow)' }}>
+                <span style={{ width: 7, height: 7, borderRadius: '50%', background: 'currentColor' }} />{p.t}
+              </span>
+            ))}
+          </div>
+        </div>
+
+        {/* fallback — only meaningful in direct mode */}
+        {jdMode === 'direct' && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 12 }}>
+            <label style={{ position: 'relative', display: 'inline-block', width: 38, height: 22, cursor: 'pointer', flex: 'none' }}>
+              <input type="checkbox" checked={jdFallback} onChange={(e) => setJdFallback(e.target.checked)} style={{ opacity: 0, width: 0, height: 0 }} />
+              <span style={{ position: 'absolute', inset: 0, borderRadius: 999, transition: 'background .18s', background: jdFallback ? 'var(--text-brand)' : 'var(--proto-rule)' }} />
+              <span style={{ position: 'absolute', top: 2, left: jdFallback ? 18 : 2, width: 18, height: 18, borderRadius: '50%', background: '#fff', transition: 'left .18s', boxShadow: '0 1px 2px rgba(0,0,0,.3)' }} />
+            </label>
+            <div>
+              <div style={{ fontSize: 12.5, fontWeight: 600 }}>Fall back to the proxy if a direct fetch is blocked</div>
+              <div className="px-small" style={{ color: 'var(--proto-ink2)', marginTop: 1 }}>A blocked posting quietly retries through scrape.do instead of being left blank.</div>
+            </div>
+          </div>
+        )}
+      </div>
 
       {/* stale-session warning — writes need a live session token (12h TTL, no silent refresh) */}
       {!sessionValid() && (

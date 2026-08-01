@@ -44,13 +44,28 @@ async function ensureSweepCols(client: any) {
     alter table owner_search_prefs add column if not exists consec_blocks    int         not null default 0;
     alter table owner_search_prefs add column if not exists last_fired_at    timestamptz;
     alter table owner_search_prefs add column if not exists last_query       text;
+    alter table owner_search_prefs add column if not exists jd_fetch_mode    text        not null default 'direct';
+    alter table owner_search_prefs add column if not exists jd_fetch_fallback boolean    not null default true;
   `)
+}
+
+// The owner's Job-description-source preference (Settings ▸ Intake ▸ Active search). 'direct' pulls each
+// JD straight from LinkedIn's guest endpoint (no credits); 'proxy' routes through scrape.do (spends a
+// credit). jdFetchFallback: in direct mode, retry a BLOCKED fetch once through the proxy instead of
+// leaving it blank. Read by fetchAndStoreJd (the one core JD fetch). Defaults seed direct/true; the owner
+// changes them in the sweep card. Single source of truth so inline-ingest and the backfill timer agree.
+export async function getJdFetchPrefs(client: any, owner: string): Promise<{ mode: 'direct' | 'proxy'; fallback: boolean }> {
+  await getSearchPrefs(client, owner)
+  await ensureSweepCols(client)
+  const r = (await client.query('select jd_fetch_mode, jd_fetch_fallback from owner_search_prefs where owner_email=$1', [owner])).rows[0]
+  return { mode: r?.jd_fetch_mode === 'proxy' ? 'proxy' : 'direct', fallback: r?.jd_fetch_fallback !== false }
 }
 
 interface SweepState {
   enabled: boolean; titlesPerQuery: number; activeHoursEt: number[]
   sweepIndex: number; sweepCycle: number; backoffUntil: string | null
   consecBlocks: number; lastFiredAt: string | null; lastQuery: string | null
+  jdFetchMode: 'direct' | 'proxy'; jdFetchFallback: boolean
 }
 
 async function getSweepState(client: any, owner: string): Promise<SweepState> {
@@ -58,7 +73,7 @@ async function getSweepState(client: any, owner: string): Promise<SweepState> {
   await ensureSweepCols(client)
   const r = (await client.query(
     `select search_enabled, titles_per_query, active_hours_et, sweep_index, sweep_cycle,
-            backoff_until, consec_blocks, last_fired_at, last_query
+            backoff_until, consec_blocks, last_fired_at, last_query, jd_fetch_mode, jd_fetch_fallback
        from owner_search_prefs where owner_email=$1`, [owner])).rows[0]
   return {
     enabled: !!r?.search_enabled,
@@ -70,6 +85,8 @@ async function getSweepState(client: any, owner: string): Promise<SweepState> {
     consecBlocks: r?.consec_blocks ?? 0,
     lastFiredAt: r?.last_fired_at ? new Date(r.last_fired_at).toISOString() : null,
     lastQuery: r?.last_query ?? null,
+    jdFetchMode: r?.jd_fetch_mode === 'proxy' ? 'proxy' : 'direct',
+    jdFetchFallback: r?.jd_fetch_fallback !== false,
   }
 }
 
@@ -147,7 +164,7 @@ export async function searchSweep(req: HttpRequest, _ctx: InvocationContext): Pr
         status: 200, headers: HEADERS,
         jsonBody: {
           ok: true,
-          config: { enabled: st.enabled, titlesPerQuery: st.titlesPerQuery, activeHoursEt: st.activeHoursEt },
+          config: { enabled: st.enabled, titlesPerQuery: st.titlesPerQuery, activeHoursEt: st.activeHoursEt, jdFetchMode: st.jdFetchMode, jdFetchFallback: st.jdFetchFallback },
           previewTitlesPerQuery: previewTpq,
           cursor: {
             sweepIndex: st.sweepIndex, sweepCycle: st.sweepCycle, backoffUntil: st.backoffUntil,
@@ -169,10 +186,12 @@ export async function searchSweep(req: HttpRequest, _ctx: InvocationContext): Pr
       const hours = b.activeHoursEt.map((n: any) => Math.floor(Number(n))).filter((n: number) => n >= 0 && n <= 23)
       vals.push(hours); sets.push(`active_hours_et=$${vals.length}`)
     }
+    if (b.jdFetchMode === 'direct' || b.jdFetchMode === 'proxy') { vals.push(b.jdFetchMode); sets.push(`jd_fetch_mode=$${vals.length}`) }
+    if (typeof b.jdFetchFallback === 'boolean') { vals.push(b.jdFetchFallback); sets.push(`jd_fetch_fallback=$${vals.length}`) }
     if (!sets.length) return { status: 400, headers: HEADERS, jsonBody: { ok: false, error: 'nothing to update' } }
     await client.query(`update owner_search_prefs set ${sets.join(', ')}, updated_at=now() where owner_email=$1`, vals)
     const st = await getSweepState(client, owner)
-    return { status: 200, headers: HEADERS, jsonBody: { ok: true, config: { enabled: st.enabled, titlesPerQuery: st.titlesPerQuery, activeHoursEt: st.activeHoursEt } } }
+    return { status: 200, headers: HEADERS, jsonBody: { ok: true, config: { enabled: st.enabled, titlesPerQuery: st.titlesPerQuery, activeHoursEt: st.activeHoursEt, jdFetchMode: st.jdFetchMode, jdFetchFallback: st.jdFetchFallback } } }
   } catch (e) {
     return { status: 200, headers: HEADERS, jsonBody: { ok: false, error: String(e) } }
   } finally { try { await client?.end() } catch {} }
