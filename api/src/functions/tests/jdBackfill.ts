@@ -258,7 +258,10 @@ export async function jdBackfillFetch(req: HttpRequest, _ctx: InvocationContext)
   const concurrency = Math.max(1, Math.min(20, Number(body.concurrency) || 1))
   const delayMs = Math.max(0, Math.min(20000, Number(body.delayMs) || 0))  // pause between waves (safe sweep)
   const favoritesOnly = body.favoritesOnly !== false
-  const direct = body.direct === true            // fetch straight from Azure egress — no proxy, no credits
+  const direct = body.direct !== false           // DEFAULT: fetch straight from Azure egress — no proxy, no credits.
+  // Per memory (2026-07-30 DECISIVE + JD-backfill FINAL decision): direct-from-Azure is the decided path
+  // (LinkedIn guest endpoint serves Azure's datacenter IP clean, 108/run zero blocks). scrape.do is a
+  // TINY free tier (~33 reqs) held in RESERVE only — callers must opt IN with {direct:false} to use it.
   const superOnBlock = !direct && body.superOnBlock !== false
   const runTag = String(body.runTag || (direct ? 'backfill-direct' : `backfill-c${concurrency}`))
   const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
