@@ -2,7 +2,7 @@ import { app, HttpRequest, HttpResponseInit, InvocationContext, Timer } from '@a
 import { requireWrite } from './appSession'
 import { getPgClient } from './pgClient'
 import { getMicrosoftToken } from './googleAuth'
-import { loadConfig, graphCreds, isAlert, parseAlert, embedBatch } from './mailWatch'
+import { loadConfig, graphCreds, isAlert, parseAlert, embedBatch, isLinkedInSocialSender } from './mailWatch'
 import { extractJobAnchors, canonicalJobUrl, normText, tokenSim, injectJobMarkers } from './jdLinks'
 import { scraperFetch, extractGuestJdHtml, classifyResponse } from './scraperProxy'
 import { logJdFetch } from './jdFetchLog'
@@ -163,6 +163,82 @@ export async function mailRecoverTargeted(req: HttpRequest, _ctx: InvocationCont
   } finally { try { await client?.end() } catch {} }
 }
 app.http('mailRecoverTargeted', { methods: ['POST', 'OPTIONS'], authLevel: 'anonymous', route: 'mail/jd-backfill/recover-targeted', handler: mailRecoverTargeted })
+
+// ---------------------------------------------------------------------------
+// POST /api/mail/jd-backfill/dismiss-phantoms — clean up phantom opportunities that were
+// mined from LinkedIn SOCIAL emails (networking digests / connection invites), NOT job alerts.
+// Root cause (ground-truthed 2026-08-01): a networking email filed into a role-mapped folder
+// bypassed isAlert; parseAlert's LLM extracted the PEOPLE named in it (their employer+title)
+// as opportunities → rows with no job_id, no jd_real. The ingest gate (isLinkedInSocialSender
+// in mailWatch) now prevents new ones; this cleans up the existing ones.
+//
+// EVIDENCE-BASED + reversible: for each candidate (recent, LinkedIn-source, no job_id, no jd_real)
+// we $search the mailbox for its company. A candidate is a phantom ONLY if matching emails exist
+// AND every one is a LinkedIn social sender / non-alert with no job anchor matching the company.
+// If ANY real job-alert email (isAlert=true) or a matching job anchor exists → it's a REAL opp
+// (job_id extraction merely failed; raw_jd already holds the JD) → KEEP. No emails at all →
+// ambiguous → KEEP. This is why we never blanket-dismiss on the SQL shape alone: a 40-row sample
+// showed only ~4 of the recent no-job_id opps were phantoms; the other 36 were real postings.
+//
+// DRY-RUN by default (apply=false) — returns the phantom candidate list so it can be eyeballed
+// before anything is changed. apply=true sets dismissed=true (a hide, NOT a delete — fully
+// reversible, and preserves any packet/outreach links).
+export async function mailDismissPhantoms(req: HttpRequest, _ctx: InvocationContext): Promise<HttpResponseInit> {
+  if (req.method === 'OPTIONS') return { status: 204, headers: HEADERS }
+  const guard = requireWrite(req); if (guard) return guard
+  const body = (await req.json().catch(() => ({}))) as any
+  const limit = Math.max(1, Math.min(300, Number(body.limit) || 60))
+  const since = typeof body.since === 'string' && body.since ? body.since : '2026-07-21'  // protect the legacy wk1 favorites
+  const apply = body.apply === true
+  const creds = graphCreds()
+  if (!creds.clientId || !creds.clientSecret) return { status: 200, headers: HEADERS, jsonBody: { ok: false, error: 'Graph creds not configured' } }
+  const cfg = await loadConfig()
+  const token = await getMicrosoftToken(creds.tenantId, creds.clientId, creds.clientSecret)
+  const norm = (s: string) => normText(String(s || ''))
+  let client: any
+  try {
+    client = await getPgClient()
+    await ensureCols(client)
+    const opps = (await client.query(
+      `select id, company, role from opportunity
+         where owner_email=$1 and job_id is null and not is_demo and not dismissed
+           and coalesce(length(jd_real),0)=0 and coalesce(source,'') ilike '%linkedin%'
+           and created_at >= $2::timestamptz
+         order by created_at desc limit $3`, [cfg.ownerEmail, since, limit])).rows
+    const startMs = Date.now()
+    let examined = 0, kept = 0, ambiguous = 0, dismissed = 0
+    const phantoms: any[] = []
+    for (const o of opps) {
+      if (Date.now() - startMs > 180_000) break
+      const cnorm = norm(o.company)
+      if (cnorm.length < 3) { ambiguous++; continue }
+      examined++
+      const url = `https://graph.microsoft.com/v1.0/users/${cfg.mailbox}/messages?$search=${encodeURIComponent(`"${o.company}"`)}&$top=5&$select=subject,from,body`
+      const res: any = await fetch(url, { headers: { Authorization: `Bearer ${token}`, ConsistencyLevel: 'eventual' } })
+      if (!res.ok) { ambiguous++; continue }
+      const page = (await res.json()) as any
+      const msgs = page.value || []
+      if (!msgs.length) { ambiguous++; continue }   // email gone → don't touch
+      let realEvidence = false, sawSocial = false
+      for (const msg of msgs) {
+        const from = (msg?.from?.emailAddress?.address || '').toLowerCase()
+        if (isAlert(cfg, from, msg?.subject || '', '')) { realEvidence = true; break }
+        if (isLinkedInSocialSender(from)) sawSocial = true
+        const anchors = extractJobAnchors(msg?.body?.content || '')
+        if (anchors.some((a) => norm(a.context).includes(cnorm))) { realEvidence = true; break }
+      }
+      if (realEvidence) { kept++; continue }
+      if (!sawSocial) { ambiguous++; continue }      // no positive social signal → be conservative, keep
+      // phantom: matching emails exist, all social/non-alert, no job anchor for this company
+      phantoms.push({ id: o.id, company: o.company, role: o.role })
+      if (apply) { await client.query(`update opportunity set dismissed=true, updated_at=now() where id=$1`, [o.id]); dismissed++ }
+    }
+    return { status: 200, headers: HEADERS, jsonBody: { ok: true, apply, examined, kept, ambiguous, phantomCount: phantoms.length, dismissed, phantoms: phantoms.slice(0, 60) } }
+  } catch (e) {
+    return { status: 200, headers: HEADERS, jsonBody: { ok: false, error: String(e) } }
+  } finally { try { await client?.end() } catch {} }
+}
+app.http('mailDismissPhantoms', { methods: ['POST', 'OPTIONS'], authLevel: 'anonymous', route: 'mail/jd-backfill/dismiss-phantoms', handler: mailDismissPhantoms })
 
 // ---------------------------------------------------------------------------
 // POST /api/mail/jd-backfill/scan  — recover jobIds for EXISTING opportunities. LLM-FREE.

@@ -210,6 +210,21 @@ export function isAlert(cfg: WatchConfig, from: string, subject: string, preview
   return false
 }
 
+// LinkedIn SOCIAL/notification senders that are NOT job alerts — networking digests
+// ("… is popular in your network"), connection invites ("I want to connect"), InMail,
+// and general notifications. parseAlert's LLM will happily mine the PEOPLE named in these
+// emails (their employer + current title) into phantom "opportunities" with no job_id and
+// no JD. These must be rejected even when the mail landed in a role-mapped folder (whose
+// skip_filter bypass otherwise waves any content straight past isAlert). Job alerts use
+// jobalerts-noreply@/jobs-noreply@ — explicitly allowed by isAlert above — so this blocklist
+// never touches a real alert. (Ground-truthed 2026-08-01: Sirion/Maat phantom opps traced to
+// messages-noreply@ + invitations@linkedin.com via the folder bypass.)
+export function isLinkedInSocialSender(from: string): boolean {
+  const f = (from || '').toLowerCase()
+  if (!f.includes('linkedin.com')) return false
+  return /(messages-noreply|invitations?|inmail|notifications?-noreply|updates-noreply|group-digests|connectionsuggestions)/.test(f)
+}
+
 // --- OpenAI helpers -------------------------------------------------------
 // fetch() that retries OpenAI 429 (rate limit) + 5xx with exponential backoff, honoring Retry-After.
 // Keeps us from tripping OpenAI's RPM/TPM limits — a throttle pauses-and-retries instead of failing.
@@ -454,6 +469,9 @@ async function ingestMessageId(token: string, id: string, cfg: WatchConfig) {
   const text = `From: ${from}\nSubject: ${msg?.subject}\n\n${body}`
   // Mailbox-wide watch: a role-mapped folder (skip_filter) is an explicit "this is a job" signal,
   // so bypass the keyword gate. Everything else still must look like an alert.
+  // Hard reject LinkedIn social/notification senders BEFORE the folder bypass — a networking
+  // digest filed into a role-mapped folder must NOT be mined into phantom opps (see helper).
+  if (isLinkedInSocialSender(from)) return { skipped: 'linkedin social/notification sender (not a job alert)', from }
   const mappedFolder = await folderSkipsFilter(cfg.ownerEmail, msg?.parentFolderId)
   if (!mappedFolder && !isAlert(cfg, from, msg?.subject, msg?.bodyPreview)) return { skipped: 'not a job alert', from }
   const source = detectSource(from, cfg.folderName)
