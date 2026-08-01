@@ -19,9 +19,14 @@ proof yet, say so and go get it — never fill the gap with a plausible-sounding
 - Cause: ACT-44 "JD-at-ingest" was NEVER shipped (routeOpportunity/insertOpp make zero
   fetchAndStoreJd calls) AND no timer fetched mail opps (jdSearchTimer PAUSED, jdSweepTick disabled).
   So any opp — including LinkedIn-sourced ones WITH a valid job_id — sat at jd_real=NULL forever.
-- FIX SHIPPED (commit 7c3c588): `jdBackfillTick` timer in jdBackfill.ts, every 3 min, reuses shared
-  fetchAndStoreJd, favorites-first, jittered, stop-on-block, self-idles when backlog clears. Covers
-  the backlog AND future LinkedIn opps. Verified draining live: with_jd 94→104, pending 123→113.
+- ⚠️ PARTIAL / WRONG-DESIGN (commit 7c3c588): shipped `jdBackfillTick` timer (every 3 min, reuses
+  fetchAndStoreJd, favorites-first, jittered, stop-on-block). It IS draining the backlog live
+  (with_jd 94→104, pending 123→113) — but this is the SCHEDULED SWEEP the owner EXPLICITLY told us
+  to DROP (actions.md:717-724: "fetch JD DURING inbox extraction… i dont want rules to make it to the
+  pipeline without job descriptions already… Call fetchAndStoreJd INLINE inside routeOpportunity…
+  Drop the scheduled sweep idea"). STILL OWED: inline fetch in routeOpportunity right after job_id
+  resolves, so opps land WITH jd_real; keep the timer ONLY as the bounded retry for the rare
+  blocked/expired exceptions the owner allowed. Do NOT mark ACT-44 done until the inline path exists.
 - REAL remaining gap: ~45 opps have NO job_id (genuinely non-LinkedIn boards / unparsed anchor) →
   the LinkedIn guest endpoint structurally can't fetch them. Needs a source-specific fetcher or the
   logged-in extension capture. DO NOT attribute a specific row to this gap without checking its
