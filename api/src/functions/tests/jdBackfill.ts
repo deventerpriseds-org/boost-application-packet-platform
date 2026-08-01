@@ -150,17 +150,37 @@ export async function mailRecoverTargeted(req: HttpRequest, _ctx: InvocationCont
       const page = (await res.json()) as any
       let picked: string | null = null
       const dbgMsgs: any[] = []
+      // Collect alert emails with their anchors first, so we can rank before picking.
+      const alerts: { subject: string; anchors: any[] }[] = []
       for (const msg of (page.value || [])) {
         const from = (msg?.from?.emailAddress?.address || '').toLowerCase()
-        const alert = isAlert(cfg, from, msg?.subject || '', '')
+        const subject = msg?.subject || ''
+        const alert = isAlert(cfg, from, subject, '')
         const anchors = extractJobAnchors(msg?.body?.content || '')
-        if (debug) dbgMsgs.push({ from, subject: (msg?.subject || '').slice(0, 90), alert, anchors: anchors.slice(0, 6).map((a) => ({ jobId: a.jobId, ctx: String(a.context || '').slice(0, 100) })) })
-        if (!alert) continue
-        // Anchor whose local context contains this opp's company AND whose id isn't already claimed.
-        const hit = anchors.find((a) => !used.has(a.jobId) && norm(a.context).includes(cnorm))
-        if (hit) { picked = hit.jobId; break }
+        if (debug) dbgMsgs.push({ from, subject: subject.slice(0, 90), alert, anchors: anchors.slice(0, 6).map((a) => ({ jobId: a.jobId, ctx: String(a.context || '').slice(0, 100) })) })
+        if (alert && anchors.length) alerts.push({ subject, anchors })
       }
-      if (debug) dbg.push({ company: o.company, role: o.role, cnorm, msgs: dbgMsgs })
+      // Primary match: a LinkedIn job-alert subject is "{Role} at {Company}". The company lives in the
+      // SUBJECT (and the first anchor is that headline job), NOT in the bare /jobs/view/{id} anchor href
+      // — which is why context-substring matching missed these. Rank company-subject alerts by how well
+      // the subject's role half matches this opp's role, then take the headline (first unclaimed) anchor.
+      const subjRole = (s: string) => norm(s.split(/\bat\b/i)[0] || s)
+      const subjMatches = alerts
+        .filter((a) => norm(a.subject).includes(cnorm))
+        .map((a) => ({ a, sim: tokenSim(norm(o.role), subjRole(a.subject)) }))
+        .sort((x, y) => y.sim - x.sim)
+      for (const { a } of subjMatches) {
+        const anc = a.anchors.find((x: any) => !used.has(x.jobId))
+        if (anc) { picked = anc.jobId; break }
+      }
+      // Fallback: an anchor whose local context happens to contain the company (non-LinkedIn digests).
+      if (!picked) {
+        for (const a of alerts) {
+          const hit = a.anchors.find((x: any) => !used.has(x.jobId) && norm(x.context).includes(cnorm))
+          if (hit) { picked = hit.jobId; break }
+        }
+      }
+      if (debug) dbg.push({ company: o.company, role: o.role, cnorm, picked, msgs: dbgMsgs })
       if (!picked) { misses.push({ company: o.company, role: o.role, reason: 'no matching anchor in its email' }); continue }
       used.add(picked)
       await client.query(`update opportunity set job_id=$2, job_url=$3 where id=$1 and job_id is null`, [o.id, picked, canonicalJobUrl(picked)])
