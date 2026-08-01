@@ -27,6 +27,15 @@ proof yet, say so and go get it — never fill the gap with a plausible-sounding
   Drop the scheduled sweep idea"). STILL OWED: inline fetch in routeOpportunity right after job_id
   resolves, so opps land WITH jd_real; keep the timer ONLY as the bounded retry for the rare
   blocked/expired exceptions the owner allowed. Do NOT mark ACT-44 done until the inline path exists.
+- JD BACKFILL RAN + CLEARED (2026-08-01, verified live). Mistake first: called the endpoint WITHOUT
+  direct → scrape.do proxy (tiny free tier, known-exhausted memory:288) → quota_exceeded, 0 stored,
+  and I wrongly told owner it needed a scrape.do top-up. Memory:283-291,337-352 already decided
+  direct-from-Azure (no credits); endpoint just still defaulted direct=false. FIX (commit 9584462):
+  `direct` defaults TRUE (`body.direct !== false`); scrape.do opt-in reserve via {direct:false}. Ran
+  paced waves (direct, concurrency 1, ~2s): 60/60 + 100/100 ok_jd, ZERO blocks/quota. LIVE DB PROOF
+  (db-query): with_jd 94→217/263, pending_fetch=0 (every job_id opp has a JD now).
+- PLANNED (NOT built, owner-flagged): expose JD fetch-mode (direct vs proxy) as an owner setting in the
+  sweep card / owner_search_prefs, not a code default ("shouldn't be buried in code").
 - REAL remaining gap: ~45 opps have NO job_id (genuinely non-LinkedIn boards / unparsed anchor) →
   the LinkedIn guest endpoint structurally can't fetch them. Needs a source-specific fetcher or the
   logged-in extension capture. DO NOT attribute a specific row to this gap without checking its
