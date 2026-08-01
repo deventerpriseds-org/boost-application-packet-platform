@@ -1,5 +1,41 @@
 # Project Memory — boost-application-packet-platform
-Last updated: 2026-07-22
+Last updated: 2026-08-01
+
+## ⛔ STANDING OWNER RULE — no answer to a direct question without ROOT PROOF (2026-08-01)
+When the owner asks a direct factual question ("why is X", "what's the cause", "is X true"), DO NOT
+answer with anything not backed by a primary-source, ground-truthed fact. No inference dressed as
+cause. Name the single source that proves it and read THAT before answering. If you don't have the
+proof yet, say so and go get it — never fill the gap with a plausible-sounding assumption.
+  *Real failure that spawned this (2026-08-01): asked why an opp ("VP, Corporate Engineering",
+  company "Ladders") had no JD, the agent answered "because it's from a non-LinkedIn source" —
+  read off the COMPANY field ("Ladders"). Ground truth (one query): source=**LinkedIn**,
+  job_id=**4446746716**, jd_fetched_at=**NULL** → the JD was simply **never fetched** (backlog),
+  nothing to do with source. The agent HAD source=LinkedIn + job_id in an earlier query result and
+  ignored it. Owner caught it. Company="Ladders" is a SEPARATE company-misparse bug (the board name
+  stored as the employer), unrelated to the JD.*
+
+## JD-missing ROOT CAUSE (2026-08-01, verified live) — it is BACKLOG, not source
+- 259→262 opps; only ~36% had a real JD. **64% had jd_fetched_at=NULL = never fetch-attempted.**
+- Cause: ACT-44 "JD-at-ingest" was NEVER shipped (routeOpportunity/insertOpp make zero
+  fetchAndStoreJd calls) AND no timer fetched mail opps (jdSearchTimer PAUSED, jdSweepTick disabled).
+  So any opp — including LinkedIn-sourced ones WITH a valid job_id — sat at jd_real=NULL forever.
+- FIX SHIPPED (commit 7c3c588): `jdBackfillTick` timer in jdBackfill.ts, every 3 min, reuses shared
+  fetchAndStoreJd, favorites-first, jittered, stop-on-block, self-idles when backlog clears. Covers
+  the backlog AND future LinkedIn opps. Verified draining live: with_jd 94→104, pending 123→113.
+- REAL remaining gap: ~45 opps have NO job_id (genuinely non-LinkedIn boards / unparsed anchor) →
+  the LinkedIn guest endpoint structurally can't fetch them. Needs a source-specific fetcher or the
+  logged-in extension capture. DO NOT attribute a specific row to this gap without checking its
+  actual job_id + source columns first (see standing rule above).
+
+## Role-tagging fix (2026-08-01, commit 7c3c588, verified live)
+- Bug: roleTaxonomy.ts `normalize()` cut the title at the first comma, so "VP, Product and UX" →
+  "vp" before the family-keyword scan → matched_role=null (group tagged, role dropped).
+- Fix: keyword fallback now scans the UN-CUT title (normalize(raw,{cut:false})) like seniorityBand.
+  Verified: Aha "VP, Product and UX"→Product, Ladders "VP, Corporate Engineering"→Engineering,
+  PenFed "SVP Artificial Intelligence"→Data,Analytics&AI. Untagged 47→25 after /app/taxonomy/retag
+  (reprocessed 1064 opps). Remaining 25 are genuinely non-taxonomy titles (e.g. "VP & GM").
+- Note: two role systems still coexist — matched_role (taxonomy) vs roles_for[] (persona). UI opp
+  subtitle shows matched_role, falling back to location when null (why untagged rows showed a city).
 
 ## Purpose & goals
 Executive Engine: AI-powered job application platform for executive-level job seekers.
