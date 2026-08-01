@@ -469,7 +469,11 @@ JD-based match scoring).
 **Open research (ACT-22a):** how to fetch the REAL JD from the per-job link (LinkedIn auth-gated).
 Candidates to evaluate: LinkedIn jobs-guest endpoint, Playwright headless, ATS/company-site
 resolution, scraping API. See research below.
-**Status:** `open` — logged; researching fetch options next; NO fix until direction agreed.
+**Status:** `DONE` (closed 2026-08-01, owner sign-off). Superseded by real-JD fetch: guest-endpoint
+fetch (ACT-22a) → inline-at-ingest JD fetch (d8f39a4) + paced backfill timer + owner-settable
+direct/proxy source (732a3c6). jd_real now holds the REAL posting for opps with a job_id; JD-based
+packet keywords + match scoring run off real JD, not the digest snippet. Remaining no-JD opps are
+the legacy pre-07-21 cohort (tracked separately), not this fabrication bug.
 
 ### ACT-22a — JD guest-fetch feasibility: PROVEN (2026-07-29)
 - Email DOES carry the per-job link + job ID (user screenshot: linkedin.com/comm/jobs/view/4433165980/).
