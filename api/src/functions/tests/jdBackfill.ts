@@ -108,6 +108,12 @@ export async function mailRecoverTargeted(req: HttpRequest, _ctx: InvocationCont
   const limit = Math.max(1, Math.min(100, Number(body.limit) || 40))
   const doFetchJd = body.fetchJd !== false
   const debug = body.debug === true
+  // Optional scoping so the sweep can target a specific cohort (e.g. the legacy favorited opps that
+  // originally never got a JD): favoritesOnly, a created_at window (since/until), and sort order.
+  const favoritesOnly = body.favoritesOnly === true
+  const since = typeof body.since === 'string' && body.since ? body.since : null
+  const until = typeof body.until === 'string' && body.until ? body.until : null
+  const order = body.order === 'asc' ? 'asc' : 'desc'
   const creds = graphCreds()
   if (!creds.clientId || !creds.clientSecret) return { status: 200, headers: HEADERS, jsonBody: { ok: false, error: 'Graph creds not configured' } }
   const cfg = await loadConfig()
@@ -117,10 +123,16 @@ export async function mailRecoverTargeted(req: HttpRequest, _ctx: InvocationCont
   try {
     client = await getPgClient()
     await ensureCols(client)
+    const params: any[] = [cfg.ownerEmail]
+    let where = `owner_email=$1 and job_id is null and not is_demo and coalesce(source,'') ilike '%linkedin%'`
+    if (favoritesOnly) where += ` and is_favorite = true`
+    if (since) { params.push(since); where += ` and created_at >= $${params.length}::timestamptz` }
+    if (until) { params.push(until); where += ` and created_at < $${params.length}::timestamptz` }
+    params.push(limit)
     const opps = (await client.query(
       `select id, company, role from opportunity
-         where owner_email=$1 and job_id is null and not is_demo and coalesce(source,'') ilike '%linkedin%'
-         order by created_at desc limit $2`, [cfg.ownerEmail, limit])).rows
+         where ${where}
+         order by created_at ${order} limit $${params.length}`, params)).rows
     const startMs = Date.now()
     const used = new Set<string>()
     let searched = 0, linked = 0, jdStored = 0
