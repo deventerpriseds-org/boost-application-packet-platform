@@ -29,9 +29,37 @@ grouped by created_at day. Ground truth (supersedes the "45/38 no-JD" framing):
   b873ebc). Roles were people's titles ("CEO & Co Founder", "SVP & Global Head"). ⇒ These no-job_id
   newest opps are a **data-quality leak** (networking emails saved as opportunities), a DIFFERENT
   problem from JD backfill — do not try to "recover" JDs for them; there are none.
-- OPEN DECISION for owner: (a) backfill the 209 legacy 07-08..07-14 opps (feasibility unconfirmed —
-  their source emails are 3wk old, may not be job alerts), or treat as pre-launch noise to
-  filter/archive; (b) investigate/plug the networking-email ingestion leak. Awaiting owner steer.
+- OWNER STEER (2026-08-01): legacy → "we originally filtered on favorite jobs" (scope JD to
+  FAVORITES); networking noise → "both of the first two" (investigate leak + filter out). DONE below.
+
+## Networking-noise phantom leak — ROOT-CAUSED + FIXED + CLEANED (2026-08-01, verified) ✅
+- ROOT CAUSE (ground-truthed): LinkedIn SOCIAL emails (messages-noreply@ "…popular in your network",
+  invitations@ "I want to connect") filed into a role-mapped folder bypassed `isAlert` at
+  mailWatch ingestMessageId (folderSkipsFilter). parseAlert's LLM then mined the PEOPLE named in the
+  email (their employer+title) into phantom opps: source=LinkedIn, why="New LinkedIn alert", no
+  job_id, jd_real=0. Proven via /recover-targeted debug dump (only social senders, 0 job anchors).
+- FIX A (prevent, commit 03d3be2): `isLinkedInSocialSender()` in mailWatch; ingestMessageId hard-
+  rejects those senders BEFORE the folder bypass. Job alerts (jobalerts-noreply@/jobs-noreply@)
+  still pass.
+- FIX B (clean up, commit 03d3be2): POST /api/mail/jd-backfill/dismiss-phantoms — Graph-verified,
+  dry-run default, reversible (sets dismissed=true, NOT delete). Dismiss ONLY if company appears
+  solely in non-alert social emails. Ran: examined 31, KEPT 27 real, dismissed 4 phantoms
+  (Maat Staffing, Sirion×2, BUILD Inc.). 2nd sweep 27/27 kept, 0 phantoms → tail clean.
+  ⚠️ CRITICAL: never blanket-SQL-dismiss no-job_id opps — a 40-row sample showed only ~4/40 were
+  phantoms; the other 36 were REAL postings (job_id extraction merely failed; raw_jd holds the JD).
+
+## Legacy FAVORITED no-JD recovery — DONE (2026-08-01, verified via DB) ✅
+- Target = 50 favorited opps created <07-21 (owner's "favorites" filter). Before: 9 job_id, 9 JD.
+- Matcher fix (commit b81a731): LinkedIn alert subject is "{Role} at {Company}" — company is in the
+  SUBJECT, not the bare /jobs/view/{id} anchor href (why context-substring missed them). Now match
+  alert by subject-company + tokenSim(role) rank, take the headline (first) anchor; skip (null) when
+  no subject names the company (conservative — never mis-binds). Verified on DataAnnotation→4318728538,
+  PERMA FAIR→4421196163 (both correct headline jobs), Alpha Recon→null (correctly skipped).
+- recover-targeted gained favoritesOnly + since/until + order params (commit c6dc815). Ran fetchJd:true.
+- AFTER (DB-verified): 50 fav-legacy → 24 job_id (was 9, +15), 20 jd_real (was 9, +11). The other
+  26 are UNRECOVERABLE via mail (company not in any alert subject — emails aged out); jdBackfillTick
+  fetches JD for the 4 linked-but-not-yet-fetched.
+- STILL PLANNED (owner-flagged, not done): expose JD fetch-mode (direct vs proxy) as an owner setting.
 
 ## JD-missing ROOT CAUSE (2026-08-01, verified live) — it is BACKLOG, not source
 - 259→262 opps; only ~36% had a real JD. **64% had jd_fetched_at=NULL = never fetch-attempted.**
