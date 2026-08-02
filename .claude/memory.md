@@ -73,6 +73,29 @@ grouped by created_at day. Ground truth (supersedes the "45/38 no-JD" framing):
   (restored prod to direct/true, not left on proxy). ui-verify #/settings/intake success ⇒
   "Job description source / Direct from LinkedIn / Scraping proxy" all render live.
 
+## Opportunity SIGNALS reworked — Temperature + Action-priority + Match-to-spec (2026-08-02, verified) ✅
+Owner clarified the two conflated signals; grounded in docs/design_handoff/README.md (spec).
+- **Temperature = RECENCY** (Hot ≤48h / Warm ≤14d / Cooling ≤21d / Cold), derived from source_date at
+  READ time (never stored — ages over time). Owner-editable bands (owner_search_prefs.temp_*; editor in
+  Settings ▸ Intake "Freshness bands"). Replaces the old LLM Hot/Warm/Cool urgency meaning.
+- **Action-priority = journey phase + due event** (urgent/active/ready/new/done). Urgent = offer OR
+  interview stages OR any opp with a DUE outreach touch; Active = applied/outreach/engaged; Ready =
+  saved/enriched; New = discovered; done = accepted. `max(stage, due-touch)`.
+- Both computed in the ONE funnel: signals.ts → rowToOpp (appOpportunities). /app/opportunities returns
+  temperature/postedAgeDays/actionPriority per opp + byTemperature/byPriority tallies + tempThresholds.
+  appMetrics "Hot" KPI = recency (owner threshold), not the old label. Commit 1826c43.
+- **Match to spec**: NEW opportunity.ats_score (+ats_gaps) — real JD vs master baseline via ATS LLM,
+  stored in its OWN column (never overwrites hand-set match_score). POST /app/ats-backfill + atsBackfillTick
+  timer (5m, favorites-first, self-idle). Commit 181220a. VERIFIED: 12 scored, avg 82, range 75–87
+  (spec "opens high ~84%" ✓).
+- Frontend (commit 795445b): TemperaturePill + PriorityPill primitives; wired Today (Hot=recency,
+  do-next left-bar by priority), Opportunities (Hot filter=temp, new Urgent filter, Strategic=favorites,
+  temp dropdown, temp+priority column), Swipe/Pipeline/OppDetail pills, OppDetail Status adds
+  Temperature/Priority/ATS rows. VERIFIED: /app/opportunities returns the fields; ui-verify #/opportunities
+  (Urgent/Strategic/Hot) + #/settings/intake (Freshness bands) both success.
+- ⚠️ Old `urgency` column is now legacy (UrgencyPill kept but unused on the main screens). Temperature is
+  the recency signal; the LLM classifier still writes urgency at ingest but nothing reads it on Today/Opps.
+
 ## JD-missing ROOT CAUSE (2026-08-01, verified live) — it is BACKLOG, not source
 - 259→262 opps; only ~36% had a real JD. **64% had jd_fetched_at=NULL = never fetch-attempted.**
 - Cause: ACT-44 "JD-at-ingest" was NEVER shipped (routeOpportunity/insertOpp make zero
