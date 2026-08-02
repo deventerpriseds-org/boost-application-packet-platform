@@ -2,7 +2,7 @@ import React, { useMemo, useState, useEffect, useCallback } from 'react'
 import { useApp, go } from '../state.jsx'
 import { useOpportunities } from '../data.jsx'
 import { api } from '../api.js'
-import { Pill, UrgencyPill, MatchScore, StageBadge } from '../shell.jsx'
+import { Pill, UrgencyPill, TemperaturePill, PriorityPill, PRIORITY_COLOR, MatchScore, StageBadge } from '../shell.jsx'
 
 // Next-best action per opportunity stage → a real destination in the app.
 function priorityActions(opps) {
@@ -11,7 +11,7 @@ function priorityActions(opps) {
   const hot = first((o) => ['final', 'panel', 'offer'].includes(o.stage))
   const screen = first((o) => o.stage === 'screen' || o.stage === 'r1')
   const reach = first((o) => o.stage === 'outreach' || o.stage === 'engaged')
-  const stale = first((o) => o.urgency === 'Cool')
+  const stale = first((o) => o.temperature === 'cold' || o.temperature === 'cooling')
   if (hot) items.push({ id: hot.id, who: hot.company, t: hot.stage === 'offer' ? 'Offer on the table — open negotiation' : `${hot.stage === 'final' ? 'Final round' : 'Panel'} — prep now`, cta: hot.stage === 'offer' ? 'Negotiate' : 'Prep', to: hot.stage === 'offer' ? `/offer/${hot.id}` : `/interview/${hot.id}`, tone: 'red' })
   if (reach) items.push({ id: reach.id, who: reach.company, t: 'Outreach in flight — send the next touch', cta: 'Compose', to: `/compose/${reach.id}`, tone: 'yellow' })
   if (screen) items.push({ id: screen.id, who: screen.company, t: 'Recorded screen — debrief it', cta: 'Debrief', to: `/interview/${screen.id}/debrief`, tone: 'accent' })
@@ -186,7 +186,7 @@ export default function Today({ opps }) {
     const newToday = fresh.filter((o) => o.createdAt && new Date(o.createdAt).getTime() >= cutoff)
     const backlog = fresh.filter((o) => !o.createdAt || new Date(o.createdAt).getTime() < cutoff)
     const active = opportunities.filter((o) => ACTIVE_STAGES.includes(o.stage))
-    const hot = opportunities.filter((o) => o.urgency === 'Hot')
+    const hot = opportunities.filter((o) => o.temperature === 'hot')
     const scored = opportunities.filter((o) => typeof o.match === 'number')
     const avgMatch = scored.length ? Math.round(scored.reduce((a, o) => a + o.match, 0) / scored.length) : null
     return { newToday, backlog, active, hot, avgMatch }
@@ -498,13 +498,14 @@ function Section({ title, children }) {
 
 function OppRow({ o }) {
   return (
-    <div className="px-box" onClick={() => go(`/opp/${o.id}`)} style={{ padding: 14, display: 'flex', alignItems: 'center', gap: 14, cursor: 'pointer' }}>
+    <div className="px-box" onClick={() => go(`/opp/${o.id}`)} style={{ padding: 14, display: 'flex', alignItems: 'center', gap: 14, cursor: 'pointer', borderLeft: `3px solid ${PRIORITY_COLOR[o.actionPriority] || 'transparent'}` }}>
       <MatchScore value={o.match} />
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <span style={{ fontWeight: 600, fontSize: 14 }}>{o.company}</span>
           <StageBadge stage={o.stage} />
-          {o.urgency && <UrgencyPill urgency={o.urgency} />}
+          {o.temperature && <TemperaturePill temperature={o.temperature} ageDays={o.postedAgeDays} />}
+          {o.actionPriority && o.actionPriority !== 'new' && <PriorityPill priority={o.actionPriority} />}
         </div>
         <div className="px-small" style={{ marginTop: 2 }}>{o.role} · {o.location || '—'} · {o.comp || '—'}</div>
         {o.why && <div className="px-small" style={{ marginTop: 4, color: 'var(--proto-ink2)' }}>{o.why}</div>}

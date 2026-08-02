@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useCallback } from 'react'
 import { useApp, go, useRoute } from '../state.jsx'
 import { api } from '../api.js'
-import { Pill, UrgencyPill, MatchScore } from '../shell.jsx'
+import { Pill, UrgencyPill, TemperaturePill, PriorityPill, MatchScore } from '../shell.jsx'
 import { Loading, ErrorBox, Empty } from './Today.jsx'
 
 const ART_STATUS_TONE = { todo: 'panel', drafting: 'yellow', review: 'accent', changes: 'red', approved: 'green' }
@@ -59,7 +59,8 @@ export default function OppDetail({ id, tab = 'overview' }) {
           <div style={{ flex: '1 1 260px', minWidth: 0 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
               <div style={{ fontSize: 20, fontWeight: 700, letterSpacing: -0.3 }}>{o.role}</div>
-              {o.urgency && <UrgencyPill urgency={o.urgency} />}
+              {o.temperature && <TemperaturePill temperature={o.temperature} ageDays={o.postedAgeDays} />}
+              {o.actionPriority && o.actionPriority !== 'new' && <PriorityPill priority={o.actionPriority} />}
               {o.fit && <Pill tone="accent">{o.fit} fit</Pill>}
             </div>
             <div className="px-small" style={{ marginTop: 4 }}>
@@ -293,8 +294,10 @@ function Overview({ o, toast, id, reload }) {
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             <StatusRow k="Stage" v={<Pill tone="accent">{o.stage}</Pill>} />
             <StatusRow k="Fit" v={o.fit ? <Pill tone="accent">{o.fit}</Pill> : '—'} />
-            <StatusRow k="Urgency" v={o.urgency ? <UrgencyPill urgency={o.urgency} /> : '—'} />
+            <StatusRow k="Temperature" v={o.temperature ? <TemperaturePill temperature={o.temperature} ageDays={o.postedAgeDays} /> : '—'} />
+            <StatusRow k="Priority" v={o.actionPriority ? <PriorityPill priority={o.actionPriority} /> : '—'} />
             <StatusRow k="Match" v={<b>{o.match != null ? `${o.match}%` : '—'}</b>} />
+            <StatusRow k="ATS score" v={o.atsScore != null ? <b>{o.atsScore}%</b> : <span className="px-small">not scored yet</span>} />
           </div>
         </Card>
         <Card title="Compensation target">

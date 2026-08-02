@@ -171,7 +171,7 @@ export const api = {
   mailAlertDismiss: (messageId) => post(`/mail/alert/dismiss`, { messageId }),
   // Search / filter preferences (target metros + remote-only) — ACT-32/33/34
   searchPrefsGet: () => get(`/app/search-prefs?owner=${encodeURIComponent(_owner)}`),
-  searchPrefsSet: ({ targetGeoIds, remoteOnly }) => post(`/app/search-prefs?owner=${encodeURIComponent(_owner)}`, { targetGeoIds, remoteOnly }),
+  searchPrefsSet: ({ targetGeoIds, remoteOnly, tempThresholds }) => post(`/app/search-prefs?owner=${encodeURIComponent(_owner)}`, { targetGeoIds, remoteOnly, tempThresholds }),
   // LinkedIn role-sweep config + cursor + the exact built queries (preview before enabling).
   // GET returns { config:{enabled,titlesPerQuery,activeHoursEt}, cursor, totalQueries, totalTitles, queries }.
   searchSweepGet: (previewTpq) => get(`/app/search-sweep?owner=${encodeURIComponent(_owner)}${Number.isFinite(previewTpq) ? `&titlesPerQuery=${previewTpq}` : ''}`),

@@ -377,6 +377,66 @@ function SweepSettings() {
   )
 }
 
+// Owner-editable TEMPERATURE bands (recency of the posting). Seeds the defaults; the owner retunes
+// the cut-points here. Saved to owner_search_prefs via search-prefs (partial update — never clobbers metros).
+function TemperatureSettings() {
+  const [thr, setThr] = useState(null)
+  const [saved, setSaved] = useState(null)
+  const [saving, setSaving] = useState(false)
+  const [note, setNote] = useState(null)
+  useEffect(() => {
+    api.searchPrefsGet().then((p) => {
+      if (p && p.ok !== false && p.tempThresholds) { setThr(p.tempThresholds); setSaved(p.tempThresholds) }
+      else { const d = { hotMaxHours: 48, warmMaxDays: 14, coolMaxDays: 21 }; setThr(d); setSaved(d) }
+    }).catch(() => { const d = { hotMaxHours: 48, warmMaxDays: 14, coolMaxDays: 21 }; setThr(d); setSaved(d) })
+  }, [])
+  if (!thr) return <Card style={{ color: 'var(--proto-ink2)' }}>Loading temperature bands…</Card>
+  const dirty = saved && (saved.hotMaxHours !== thr.hotMaxHours || saved.warmMaxDays !== thr.warmMaxDays || saved.coolMaxDays !== thr.coolMaxDays)
+  const save = async () => {
+    if (!sessionValid()) { setNote({ ok: false, msg: 'Sign-in expired — sign out and back in, then Save.' }); return }
+    setSaving(true); setNote(null)
+    try {
+      const r = await api.searchPrefsSet({ tempThresholds: thr })
+      if (r.ok === false) throw new Error(r.error || 'save failed')
+      setSaved(r.tempThresholds || thr); setNote({ ok: true, msg: 'Saved.' })
+    } catch (e) { setNote({ ok: false, msg: String(e.message || e) }) } finally { setSaving(false) }
+  }
+  const Num = ({ label, unit, val, min, max, onChange }) => (
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+      <div style={{ fontSize: 13, fontWeight: 600 }}>{label}</div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+        <input className="px-input" type="number" min={min} max={max} value={val}
+          onChange={(e) => onChange(Math.max(min, Math.min(max, Math.round(Number(e.target.value) || min))))}
+          style={{ width: 74, textAlign: 'right' }} />
+        <span className="px-small" style={{ color: 'var(--proto-ink2)', minWidth: 40 }}>{unit}</span>
+      </div>
+    </div>
+  )
+  return (
+    <Card>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <span style={{ fontSize: 17 }}>🌡️</span>
+        <b style={{ fontSize: 15 }}>Freshness bands (temperature)</b>
+      </div>
+      <div className="px-small" style={{ marginTop: 3, color: 'var(--proto-ink2)', maxWidth: 470 }}>
+        How recently a role was posted decides its temperature — Hot roles are freshest and worth acting on first. Retune the cut-points to fit your search.
+      </div>
+      <div style={{ height: 1, background: 'var(--proto-rule-soft)', margin: '14px 0' }} />
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <Num label="🔴 Hot — posted within" unit="hours" min={1} max={720} val={thr.hotMaxHours} onChange={(v) => setThr({ ...thr, hotMaxHours: v })} />
+        <Num label="🟠 Warm — up to" unit="days" min={1} max={120} val={thr.warmMaxDays} onChange={(v) => setThr({ ...thr, warmMaxDays: v })} />
+        <Num label="🟡 Cooling — up to" unit="days" min={thr.warmMaxDays + 1} max={180} val={thr.coolMaxDays} onChange={(v) => setThr({ ...thr, coolMaxDays: v })} />
+        <div className="px-small" style={{ color: 'var(--proto-ink3)' }}>⚪ Cold — anything older than {thr.coolMaxDays} days.</div>
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 10, marginTop: 16 }}>
+        {note && <span className="px-small" style={{ color: note.ok ? 'var(--surface-success-default)' : 'var(--proto-red)' }}>{note.msg}</span>}
+        {dirty && !note && <span className="px-small" style={{ color: 'var(--proto-yellow)' }}>Unsaved changes</span>}
+        <button className="px-btn px-btn-accent" onClick={save} disabled={saving || !dirty}>{saving ? 'Saving…' : 'Save bands'}</button>
+      </div>
+    </Card>
+  )
+}
+
 function IntakeSettings() {
   const { isDemo } = useApp()
   const [cfg, setCfg] = useState(null)
@@ -1402,7 +1462,7 @@ export default function Settings({ tab = 'account' }) {
         ))}
       </div>
       {active === 'account' && <AccountSettings />}
-      {active === 'intake' && <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}><IntakeSettings /><AtsSources /></div>}
+      {active === 'intake' && <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}><IntakeSettings /><TemperatureSettings /><AtsSources /></div>}
       {active === 'roles' && <RolesSettings />}
       {active === 'locations' && <LocationSettings />}
       {active === 'templates' && <TemplatesSettings />}

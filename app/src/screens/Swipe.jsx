@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { useApp, go } from '../state.jsx'
 import { api } from '../api.js'
-import { Pill, UrgencyPill, MatchScore, FavStar } from '../shell.jsx'
+import { Pill, UrgencyPill, TemperaturePill, PriorityPill, MatchScore, FavStar } from '../shell.jsx'
 import { Loading, ErrorBox } from './Today.jsx'
 
 const QUEUE_STAGES = ['discovered', 'saved', 'enriched']
@@ -349,7 +349,8 @@ function SwipeCard({ o, decision, cardRef, style, ...handlers }) {
         <MatchScore value={o.match} size={44} />
       </div>
       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-        {o.urgency && <UrgencyPill urgency={o.urgency} />}
+        {o.temperature && <TemperaturePill temperature={o.temperature} ageDays={o.postedAgeDays} />}
+        {o.actionPriority && o.actionPriority !== 'new' && <PriorityPill priority={o.actionPriority} />}
         {o.fit && <Pill tone="accent">{o.fit}</Pill>}
         {o.workMode === 'remote' && <Pill tone="green">🌐 Remote</Pill>}
         {o.workMode === 'hybrid' && <Pill>Hybrid</Pill>}

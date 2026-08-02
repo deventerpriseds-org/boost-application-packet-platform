@@ -25,6 +25,35 @@ export const UrgencyPill = ({ urgency }) => (
   <span className="px-pill" style={{ background: `var(--proto-${STAGE_TONE[urgency] || 'panel'}-soft)`, color: `var(--proto-${STAGE_TONE[urgency] || 'ink2'})` }}>{urgency}</span>
 )
 
+// TEMPERATURE = posting recency (Hot ≤48h / Warm / Cooling / Cold). ageDays shown as a tooltip.
+const TEMP_META = {
+  hot:     { label: 'Hot',     dot: 'var(--proto-red)',    bg: 'color-mix(in srgb, var(--proto-red) 14%, transparent)',    fg: 'var(--proto-red)' },
+  warm:    { label: 'Warm',    dot: 'var(--proto-yellow)', bg: 'color-mix(in srgb, var(--proto-yellow) 15%, transparent)', fg: 'var(--proto-yellow)' },
+  cooling: { label: 'Cooling', dot: 'var(--proto-ink3)',   bg: 'color-mix(in srgb, var(--proto-ink3) 14%, transparent)',   fg: 'var(--proto-ink2)' },
+  cold:    { label: 'Cold',    dot: 'var(--proto-ink3)',   bg: 'var(--proto-panel-soft, color-mix(in srgb, var(--proto-ink3) 8%, transparent))', fg: 'var(--proto-ink3)' },
+}
+export const TemperaturePill = ({ temperature, ageDays }) => {
+  const m = TEMP_META[temperature]; if (!m) return null
+  const age = ageDays == null ? '' : ageDays < 1 ? ' · <1d' : ` · ${Math.round(ageDays)}d`
+  return <span className="px-pill" title={ageDays != null ? `Posted ~${ageDays}d ago` : undefined}
+    style={{ display: 'inline-flex', alignItems: 'center', gap: 5, background: m.bg, color: m.fg }}>
+    <span style={{ width: 6, height: 6, borderRadius: '50%', background: m.dot }} />{m.label}{age}</span>
+}
+
+// ACTION PRIORITY = what the opp needs from YOU now (Urgent / Active / Ready / New / Done).
+const PRIO_META = {
+  urgent: { label: 'Urgent', fg: 'var(--proto-red)',    bg: 'color-mix(in srgb, var(--proto-red) 14%, transparent)' },
+  active: { label: 'Active', fg: 'var(--proto-accent)', bg: 'color-mix(in srgb, var(--proto-accent) 14%, transparent)' },
+  ready:  { label: 'Ready',  fg: 'var(--proto-green)',  bg: 'color-mix(in srgb, var(--proto-green) 14%, transparent)' },
+  new:    { label: 'New',    fg: 'var(--proto-ink2)',   bg: 'color-mix(in srgb, var(--proto-ink3) 12%, transparent)' },
+  done:   { label: 'Won',    fg: 'var(--proto-green)',  bg: 'color-mix(in srgb, var(--proto-green) 12%, transparent)' },
+}
+export const PRIORITY_COLOR = { urgent: 'var(--proto-red)', active: 'var(--proto-accent)', ready: 'var(--proto-green)', new: 'var(--proto-ink3)', done: 'var(--proto-green)' }
+export const PriorityPill = ({ priority }) => {
+  const m = PRIO_META[priority]; if (!m) return null
+  return <span className="px-pill" style={{ background: m.bg, color: m.fg }}>{m.label}</span>
+}
+
 export const StageBadge = ({ stage }) => <span className="px-chip" style={{ textTransform: 'capitalize' }}>{stage}</span>
 
 // Gold favorite star — rendered only for is_favorite opportunities (priority flag).

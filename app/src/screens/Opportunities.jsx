@@ -1,10 +1,10 @@
 import React, { useMemo, useState, useEffect, useCallback } from 'react'
 import { go, useApp } from '../state.jsx'
 import { api } from '../api.js'
-import { MatchScore, UrgencyPill, Pill, FavStar } from '../shell.jsx'
+import { MatchScore, UrgencyPill, TemperaturePill, PriorityPill, Pill, FavStar } from '../shell.jsx'
 import { Loading, ErrorBox, Empty, roleFamily, titleFamily } from './Today.jsx'
 
-const URGENCIES = ['All', 'Hot', 'Warm', 'Cool']
+const TEMPS = ['All', 'Hot', 'Warm', 'Cooling', 'Cold']
 const FRESH_STAGES = ['discovered', 'saved', 'enriched']
 const ACTIVE_STAGES = ['applied', 'outreach', 'engaged', 'screen', 'r1', 'panel', 'final', 'offer']
 const CUTOFF_TODAY = () => { const d = new Date(); d.setDate(d.getDate() - 1); d.setHours(0, 0, 0, 0); return d.getTime() }
@@ -23,11 +23,12 @@ const QUICK_FILTERS = [
   { key: null, label: 'All' },
   { key: 'toclear', label: 'To-clear' },
   { key: 'hot', label: 'Hot' },
+  { key: 'urgent', label: 'Urgent' },
   { key: 'strategic', label: 'Strategic' },
   { key: 'active', label: 'Active' },
 ]
 
-const FILTER_LABELS = { new: 'New today', backlog: 'Backlog', active: 'Active', hot: 'Hot', toclear: 'To-clear', strategic: 'Strategic' }
+const FILTER_LABELS = { new: 'New today', backlog: 'Backlog', active: 'Active', hot: 'Hot', urgent: 'Urgent', toclear: 'To-clear', strategic: 'Strategic' }
 const filterLabel = (f) => {
   if (!f) return ''
   if (f.startsWith('rolenew:')) return f.slice(8) + ' — new today'
@@ -114,11 +115,13 @@ export default function Opportunities({ opps, filter }) {
     } else if (activeFilter === 'active') {
       r = r.filter((o) => ACTIVE_STAGES.includes(o.stage))
     } else if (activeFilter === 'hot') {
-      r = r.filter((o) => o.urgency === 'Hot')
+      r = r.filter((o) => o.temperature === 'hot')
+    } else if (activeFilter === 'urgent') {
+      r = r.filter((o) => o.actionPriority === 'urgent')
     } else if (activeFilter === 'toclear') {
       r = r.filter((o) => FRESH_STAGES.includes(o.stage))
     } else if (activeFilter === 'strategic') {
-      r = r.filter((o) => o.fit === 'Strategic')
+      r = r.filter((o) => o.isFavorite)
     } else if (activeFilter?.startsWith('rolenew:')) {
       const fam = activeFilter.slice(8)
       const cutoff = CUTOFF_TODAY()
@@ -139,7 +142,7 @@ export default function Opportunities({ opps, filter }) {
         const q = query.toLowerCase()
         r = r.filter((o) => (o.company || '').toLowerCase().includes(q) || (o.role || '').toLowerCase().includes(q))
       }
-      if (urgency !== 'All') r = r.filter((o) => o.urgency === urgency)
+      if (urgency !== 'All') r = r.filter((o) => o.temperature === urgency.toLowerCase())
       if (stage !== 'All') r = r.filter((o) => o.stage === stage)
     }
     // Taxonomy filter: by group (csuite/vp/director), by favorites, or all.
@@ -179,8 +182,9 @@ export default function Opportunities({ opps, filter }) {
   // Live counts for the quick-filter chips.
   const quickCounts = useMemo(() => ({
     toclear: opportunities.filter((o) => FRESH_STAGES.includes(o.stage)).length,
-    hot: opportunities.filter((o) => o.urgency === 'Hot').length,
-    strategic: opportunities.filter((o) => o.fit === 'Strategic').length,
+    hot: opportunities.filter((o) => o.temperature === 'hot').length,
+    urgent: opportunities.filter((o) => o.actionPriority === 'urgent').length,
+    strategic: opportunities.filter((o) => o.isFavorite).length,
     active: opportunities.filter((o) => ACTIVE_STAGES.includes(o.stage)).length,
   }), [opportunities])
 
@@ -263,7 +267,7 @@ export default function Opportunities({ opps, filter }) {
         <input className="px-input" placeholder="Search company or role…" value={query} onChange={(e) => { setActiveFilter(null); setQuery(e.target.value) }}
           style={{ flex: 1, minWidth: 220 }} disabled={!!activeFilter} />
         <select className="px-btn" value={urgency} onChange={(e) => { setActiveFilter(null); setUrgency(e.target.value) }} disabled={!!activeFilter}>
-          {URGENCIES.map((u) => <option key={u}>{u}</option>)}
+          {TEMPS.map((u) => <option key={u}>{u}</option>)}
         </select>
         <select className="px-btn" value={stage} onChange={(e) => { setActiveFilter(null); setStage(e.target.value) }} disabled={!!activeFilter}>
           <option>All</option>
@@ -310,7 +314,7 @@ export default function Opportunities({ opps, filter }) {
                     {stages.map((s) => <option key={s} value={s}>{STAGE_LABELS[s] || s}</option>)}
                   </select>
                 </Td>
-                <Td>{o.urgency ? <UrgencyPill urgency={o.urgency} /> : <span className="px-small">—</span>}</Td>
+                <Td><div style={{ display: 'flex', flexDirection: 'column', gap: 3, alignItems: 'flex-start' }}>{o.temperature ? <TemperaturePill temperature={o.temperature} ageDays={o.postedAgeDays} /> : <span className="px-small">—</span>}{o.actionPriority && o.actionPriority !== 'new' && <PriorityPill priority={o.actionPriority} />}</div></Td>
                 <Td onClick={stopRow}>
                   {o.rejected
                     ? <button className="px-btn" style={{ fontSize: 11 }} disabled={busyId === o.id} onClick={() => restoreOpp(o.id, o.company)}>↩ Restore</button>
