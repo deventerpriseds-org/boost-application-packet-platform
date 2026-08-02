@@ -2,7 +2,7 @@ import React, { useMemo, useState, useEffect, useCallback } from 'react'
 import { useApp, go } from '../state.jsx'
 import { useOpportunities } from '../data.jsx'
 import { api } from '../api.js'
-import { Pill, UrgencyPill, TemperaturePill, PriorityPill, PRIORITY_COLOR, MatchScore, StageBadge } from '../shell.jsx'
+import { Pill, SignalIcon, PRIORITY_COLOR, MatchScore, StageBadge } from '../shell.jsx'
 
 // Next-best action per opportunity stage → a real destination in the app.
 function priorityActions(opps) {
@@ -504,8 +504,8 @@ function OppRow({ o }) {
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <span style={{ fontWeight: 600, fontSize: 14 }}>{o.company}</span>
           <StageBadge stage={o.stage} />
-          {o.temperature && <TemperaturePill temperature={o.temperature} ageDays={o.postedAgeDays} />}
-          {o.actionPriority && o.actionPriority !== 'new' && <PriorityPill priority={o.actionPriority} />}
+          {o.temperature && <SignalIcon kind="temperature" value={o.temperature} ageDays={o.postedAgeDays} />}
+          {o.actionPriority && o.actionPriority !== 'new' && <SignalIcon kind="priority" value={o.actionPriority} />}
         </div>
         <div className="px-small" style={{ marginTop: 2 }}>{o.role} · {o.location || '—'} · {o.comp || '—'}</div>
         {o.why && <div className="px-small" style={{ marginTop: 4, color: 'var(--proto-ink2)' }}>{o.why}</div>}

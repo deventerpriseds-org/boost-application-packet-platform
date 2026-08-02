@@ -247,7 +247,7 @@ export async function personasTagAll(req: HttpRequest, _context: InvocationConte
       const batch = opps.slice(i, i + 10)
       await Promise.all(batch.map(async (opp: any) => {
         try {
-          const prompt = `You are a talent classifier. Given a job title and company, identify which of the user's target roles it matches (zero or more). Return ONLY JSON: { "matched": ["KEY1","KEY2"], "fit": "Strong"|"Possible"|"Stretch", "urgency": "Hot"|"Warm"|"Cool", "why": "one sentence" }.\nJob: ${opp.role} at ${opp.company}\nTarget roles: ${roleList}`
+          const prompt = `You are a talent classifier. Given a job title and company, identify which of the user's target roles it matches (zero or more). Return ONLY JSON: { "matched": ["KEY1","KEY2"], "fit": "Strong"|"Possible"|"Stretch", "why": "one sentence" }.\nJob: ${opp.role} at ${opp.company}\nTarget roles: ${roleList}`
           const res = await fetch('https://api.openai.com/v1/chat/completions', {
             method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${openaiKey}` },
             body: JSON.stringify({ model: 'gpt-4o-mini', messages: [{ role: 'user', content: prompt }], max_tokens: 200, response_format: { type: 'json_object' } })
@@ -259,8 +259,8 @@ export async function personasTagAll(req: HttpRequest, _context: InvocationConte
           const c2 = await getPgClient()
           try {
             await c2.query(
-              `update opportunity set roles_for=$2, fit=$3, urgency=$4, why_surfaced=coalesce(nullif(why_surfaced,''), $5) where id=$1`,
-              [opp.id, matched, parsed.fit || null, parsed.urgency || 'Warm', parsed.why || null]
+              `update opportunity set roles_for=$2, fit=$3, why_surfaced=coalesce(nullif(why_surfaced,''), $4) where id=$1`,
+              [opp.id, matched, parsed.fit || null, parsed.why || null]
             )
             tagged++
           } finally { await c2.end() }

@@ -175,7 +175,7 @@ async function tagOppRoles(oppId: string, opp: any, owner: string): Promise<void
     )).rows
     if (!personas.length) return
     const roleList = personas.map((p: any) => `${p.key}: ${p.name || p.master_role}`).join(', ')
-    const prompt = `You are a talent classifier. Given a job title and company, identify which of the user's target roles it matches (zero or more). Return ONLY JSON: { "matched": ["KEY1","KEY2"], "fit": "Strong"|"Possible"|"Stretch", "urgency": "Hot"|"Warm"|"Cool", "why": "one sentence" }.\nJob: ${opp.role} at ${opp.company}\nTarget roles: ${roleList}`
+    const prompt = `You are a talent classifier. Given a job title and company, identify which of the user's target roles it matches (zero or more). Return ONLY JSON: { "matched": ["KEY1","KEY2"], "fit": "Strong"|"Possible"|"Stretch", "why": "one sentence" }.\nJob: ${opp.role} at ${opp.company}\nTarget roles: ${roleList}`
     const res = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
       body: JSON.stringify({ model: 'gpt-4o-mini', messages: [{ role: 'user', content: prompt }], max_tokens: 200, response_format: { type: 'json_object' } })
@@ -184,9 +184,11 @@ async function tagOppRoles(oppId: string, opp: any, owner: string): Promise<void
     const j = (await res.json()) as any
     const parsed = JSON.parse(j?.choices?.[0]?.message?.content || '{}')
     const matched: string[] = Array.isArray(parsed.matched) ? parsed.matched.filter((k: string) => personas.some((p: any) => p.key === k)) : []
+    // NB: `urgency` is retired — recency Temperature + journey Action-priority are DERIVED (signals.ts),
+    // so the LLM no longer writes an urgency label. `fit` is still surfaced on OppDetail.
     await client.query(
-      `update opportunity set roles_for=$2, fit=$3, urgency=$4, why_surfaced=coalesce(nullif(why_surfaced,''), $5) where id=$1`,
-      [oppId, matched, parsed.fit || null, parsed.urgency || 'Warm', parsed.why || null]
+      `update opportunity set roles_for=$2, fit=$3, why_surfaced=coalesce(nullif(why_surfaced,''), $4) where id=$1`,
+      [oppId, matched, parsed.fit || null, parsed.why || null]
     )
   } catch { /* fire-and-forget: never throw */ } finally { try { await client?.end() } catch {} }
 }

@@ -20,38 +20,61 @@ export const Pill = ({ children, tone, style }) => (
   <span className="px-pill" style={{ ...(tone ? { background: `var(--proto-${tone}-soft)`, color: `var(--proto-${tone})` } : {}), ...style }}>{children}</span>
 )
 
-const STAGE_TONE = { Hot: 'red', Warm: 'yellow', Cool: 'accent' }
-export const UrgencyPill = ({ urgency }) => (
-  <span className="px-pill" style={{ background: `var(--proto-${STAGE_TONE[urgency] || 'panel'}-soft)`, color: `var(--proto-${STAGE_TONE[urgency] || 'ink2'})` }}>{urgency}</span>
-)
-
-// TEMPERATURE = posting recency (Hot ≤48h / Warm / Cooling / Cold). ageDays shown as a tooltip.
+// ── ONE signal indicator, config-driven by `kind` ────────────────────────────────────────────────
+// Two independent per-opp signals share one component (styling/label/tooltip live in one place):
+//  • temperature = posting recency → a FLAME, colored Hot(orange)→Warm(yellow)→Cooling(blue)→Cold(white)
+//  • priority    = journey urgency → a rounded WARNING TRIANGLE w/ white "!", Urgent(red)→Active(green)
+//                  →Ready(yellow)→New(white)
+// Both render together on a card; a new signal later = one more row in these tables, not a 4th component.
 const TEMP_META = {
-  hot:     { label: 'Hot',     dot: 'var(--proto-red)',    bg: 'color-mix(in srgb, var(--proto-red) 14%, transparent)',    fg: 'var(--proto-red)' },
-  warm:    { label: 'Warm',    dot: 'var(--proto-yellow)', bg: 'color-mix(in srgb, var(--proto-yellow) 15%, transparent)', fg: 'var(--proto-yellow)' },
-  cooling: { label: 'Cooling', dot: 'var(--proto-ink3)',   bg: 'color-mix(in srgb, var(--proto-ink3) 14%, transparent)',   fg: 'var(--proto-ink2)' },
-  cold:    { label: 'Cold',    dot: 'var(--proto-ink3)',   bg: 'var(--proto-panel-soft, color-mix(in srgb, var(--proto-ink3) 8%, transparent))', fg: 'var(--proto-ink3)' },
+  hot:     { label: 'Hot',     color: '#ef5a34' },  // fiery orange-red
+  warm:    { label: 'Warm',    color: '#e8a90b' },  // yellow
+  cooling: { label: 'Cooling', color: '#3b82f6' },  // blue
+  cold:    { label: 'Cold',    color: '#cbd2dc', pale: true },  // white/pale — needs a stroke to show
 }
-export const TemperaturePill = ({ temperature, ageDays }) => {
-  const m = TEMP_META[temperature]; if (!m) return null
-  const age = ageDays == null ? '' : ageDays < 1 ? ' · <1d' : ` · ${Math.round(ageDays)}d`
-  return <span className="px-pill" title={ageDays != null ? `Posted ~${ageDays}d ago` : undefined}
-    style={{ display: 'inline-flex', alignItems: 'center', gap: 5, background: m.bg, color: m.fg }}>
-    <span style={{ width: 6, height: 6, borderRadius: '50%', background: m.dot }} />{m.label}{age}</span>
+const PRIO_META = {
+  urgent: { label: 'Urgent', color: '#ef4444' },  // red
+  active: { label: 'Active', color: '#22c55e' },  // green
+  ready:  { label: 'Ready',  color: '#e8a90b' },  // yellow
+  new:    { label: 'New',    color: '#cbd2dc', pale: true },  // white/pale
+  done:   { label: 'Won',    color: '#22c55e' },
+}
+// Left-bar / accent color per priority (used where a full icon is too much, e.g. Today's do-next rail).
+export const PRIORITY_COLOR = { urgent: '#ef4444', active: '#22c55e', ready: '#e8a90b', new: 'var(--proto-ink3)', done: '#22c55e' }
+
+function FlameGlyph({ color, stroke, size = 15 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" aria-hidden="true" style={{ flex: 'none' }}>
+      <path d="M12.5 2c.4 3-1.6 4.2-2.8 5.8C8.4 9.5 8 10.8 8 12.4A4 4 0 0 0 16 13c0-1.4-.5-2.4-1.2-3.3.1 1-.5 1.8-1.3 2 .6-1.6.3-3.6-1-5.5-.3.9-.9 1.4-1.6 1.7.8-1.7 1.3-3.9 1.6-6.1z"
+        fill={color} stroke={stroke || 'none'} strokeWidth={stroke ? 1 : 0} strokeLinejoin="round" />
+    </svg>
+  )
+}
+function WarnTriangle({ color, stroke, size = 15 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" aria-hidden="true" style={{ flex: 'none' }}>
+      <path d="M12 3.6c.72 0 1.38.4 1.73 1.03l7.4 13.2c.68 1.22-.2 2.77-1.73 2.77H4.6c-1.53 0-2.4-1.55-1.73-2.77l7.4-13.2A1.98 1.98 0 0 1 12 3.6z"
+        fill={color} stroke={stroke || 'none'} strokeWidth={stroke ? 1 : 0} strokeLinejoin="round" />
+      <rect x="11.05" y="9" width="1.9" height="5.2" rx="0.95" fill="#fff" />
+      <circle cx="12" cy="16.6" r="1.05" fill="#fff" />
+    </svg>
+  )
 }
 
-// ACTION PRIORITY = what the opp needs from YOU now (Urgent / Active / Ready / New / Done).
-const PRIO_META = {
-  urgent: { label: 'Urgent', fg: 'var(--proto-red)',    bg: 'color-mix(in srgb, var(--proto-red) 14%, transparent)' },
-  active: { label: 'Active', fg: 'var(--proto-accent)', bg: 'color-mix(in srgb, var(--proto-accent) 14%, transparent)' },
-  ready:  { label: 'Ready',  fg: 'var(--proto-green)',  bg: 'color-mix(in srgb, var(--proto-green) 14%, transparent)' },
-  new:    { label: 'New',    fg: 'var(--proto-ink2)',   bg: 'color-mix(in srgb, var(--proto-ink3) 12%, transparent)' },
-  done:   { label: 'Won',    fg: 'var(--proto-green)',  bg: 'color-mix(in srgb, var(--proto-green) 12%, transparent)' },
-}
-export const PRIORITY_COLOR = { urgent: 'var(--proto-red)', active: 'var(--proto-accent)', ready: 'var(--proto-green)', new: 'var(--proto-ink3)', done: 'var(--proto-green)' }
-export const PriorityPill = ({ priority }) => {
-  const m = PRIO_META[priority]; if (!m) return null
-  return <span className="px-pill" style={{ background: m.bg, color: m.fg }}>{m.label}</span>
+// kind: 'temperature' | 'priority'. showLabel toggles the text beside the glyph (default on).
+export function SignalIcon({ kind, value, ageDays, showLabel = true, size = 15 }) {
+  const isTemp = kind === 'temperature'
+  const m = (isTemp ? TEMP_META : PRIO_META)[value]
+  if (!m) return null
+  const stroke = m.pale ? 'var(--proto-rule)' : null   // pale glyphs get an outline so they show on white
+  const age = isTemp && ageDays != null ? (ageDays < 1 ? ' · <1d' : ` · ${Math.round(ageDays)}d`) : ''
+  const tip = isTemp ? (ageDays != null ? `${m.label} — posted ~${ageDays}d ago` : m.label) : `${m.label} — action priority`
+  return (
+    <span title={tip} aria-label={tip} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, whiteSpace: 'nowrap' }}>
+      {isTemp ? <FlameGlyph color={m.color} stroke={stroke} size={size} /> : <WarnTriangle color={m.color} stroke={stroke} size={size} />}
+      {showLabel && <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--proto-ink2)' }}>{m.label}{age}</span>}
+    </span>
+  )
 }
 
 export const StageBadge = ({ stage }) => <span className="px-chip" style={{ textTransform: 'capitalize' }}>{stage}</span>

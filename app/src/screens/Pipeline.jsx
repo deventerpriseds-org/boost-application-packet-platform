@@ -1,7 +1,7 @@
 import React, { useMemo, useState, useEffect } from 'react'
 import { useApp } from '../state.jsx'
 import { api } from '../api.js'
-import { MatchScore, UrgencyPill, TemperaturePill, PriorityPill } from '../shell.jsx'
+import { MatchScore, SignalIcon } from '../shell.jsx'
 import { Loading, ErrorBox } from './Today.jsx'
 
 const STAGE_LABELS = {
@@ -186,7 +186,7 @@ export default function Pipeline({ opps }) {
                       <div style={{ minWidth: 0, flex: 1 }}>
                         <div style={{ fontSize: 13, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{o.company}</div>
                         <div className="px-small" style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{o.role}</div>
-                        {(o.temperature || o.actionPriority) && <div style={{ marginTop: 4, display: 'flex', gap: 4, flexWrap: 'wrap' }}>{o.temperature && <TemperaturePill temperature={o.temperature} ageDays={o.postedAgeDays} />}{o.actionPriority && o.actionPriority !== 'new' && <PriorityPill priority={o.actionPriority} />}</div>}
+                        {(o.temperature || o.actionPriority) && <div style={{ marginTop: 4, display: 'flex', gap: 4, flexWrap: 'wrap' }}>{o.temperature && <SignalIcon kind="temperature" value={o.temperature} ageDays={o.postedAgeDays} showLabel={false} />}{o.actionPriority && o.actionPriority !== 'new' && <SignalIcon kind="priority" value={o.actionPriority} showLabel={false} />}</div>}
                       </div>
                     </div>
                   ))}

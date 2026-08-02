@@ -1,7 +1,7 @@
 import React, { useMemo, useState, useEffect, useCallback } from 'react'
 import { go, useApp } from '../state.jsx'
 import { api } from '../api.js'
-import { MatchScore, UrgencyPill, TemperaturePill, PriorityPill, Pill, FavStar } from '../shell.jsx'
+import { MatchScore, SignalIcon, Pill, FavStar } from '../shell.jsx'
 import { Loading, ErrorBox, Empty, roleFamily, titleFamily } from './Today.jsx'
 
 const TEMPS = ['All', 'Hot', 'Warm', 'Cooling', 'Cold']
@@ -314,7 +314,7 @@ export default function Opportunities({ opps, filter }) {
                     {stages.map((s) => <option key={s} value={s}>{STAGE_LABELS[s] || s}</option>)}
                   </select>
                 </Td>
-                <Td><div style={{ display: 'flex', flexDirection: 'column', gap: 3, alignItems: 'flex-start' }}>{o.temperature ? <TemperaturePill temperature={o.temperature} ageDays={o.postedAgeDays} /> : <span className="px-small">—</span>}{o.actionPriority && o.actionPriority !== 'new' && <PriorityPill priority={o.actionPriority} />}</div></Td>
+                <Td><div style={{ display: 'flex', flexDirection: 'column', gap: 3, alignItems: 'flex-start' }}>{o.temperature ? <SignalIcon kind="temperature" value={o.temperature} ageDays={o.postedAgeDays} /> : <span className="px-small">—</span>}{o.actionPriority && o.actionPriority !== 'new' && <SignalIcon kind="priority" value={o.actionPriority} />}</div></Td>
                 <Td onClick={stopRow}>
                   {o.rejected
                     ? <button className="px-btn" style={{ fontSize: 11 }} disabled={busyId === o.id} onClick={() => restoreOpp(o.id, o.company)}>↩ Restore</button>
