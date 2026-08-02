@@ -1,8 +1,9 @@
-import { app, HttpRequest, HttpResponseInit, InvocationContext } from '@azure/functions'
+import { app, HttpRequest, HttpResponseInit, InvocationContext, Timer } from '@azure/functions'
 import { TableClient } from '@azure/data-tables'
-import { resolveOwner } from './appSession'
+import { resolveOwner, requireWrite } from './appSession'
 import { getPgClient } from './pgClient'
 import { logUsage } from './usageMeter'
+import { loadConfig } from './mailWatch'
 
 // G3 Phase B (structured apply) + Phase C (ATS match score).
 // - match-score: keyword match-rate + gap list per opportunity (Jobscan-style),
@@ -153,6 +154,85 @@ export async function answersFromQuestions(req: HttpRequest): Promise<HttpRespon
   } catch (err) { return { status: 200, headers: HEADERS, jsonBody: { error: String(err) } } }
 }
 
+// ── Initial ATS score (spec) — JD keywords auto-matched against the master baseline ──────────────
+// Design-handoff spec: "keywords auto-matched against the master baseline — ATS opens high (~84%),
+// only gaps flagged red." Distinct from match_score: this scores the REAL JD (not just role/company)
+// vs the candidate master baseline, and is stored in its OWN column so it never overwrites a match_score
+// the owner computed by hand. Populated by a paced timer over opps that have a real JD but no ats_score.
+async function ensureAtsCols(client: any) {
+  await client.query(`alter table opportunity add column if not exists ats_score int`)
+  await client.query(`alter table opportunity add column if not exists ats_gaps text[]`)
+  await client.query(`alter table opportunity add column if not exists ats_scored_at timestamptz`)
+}
+
+// Score ONE opp's real JD against the master baseline. Stores ats_score + ats_gaps; never touches
+// match_score. Returns null when there's no usable JD to score.
+async function atsScoreOne(client: any, o: any, mc: string): Promise<{ atsScore: number | null; gaps: string[] } | null> {
+  const jd = String(o.jd_real || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
+    || [o.jd_summary, o.jd_requirements].filter(Boolean).join('\n').trim()
+  if (jd.length < 200) return null   // no real JD yet → leave for later (timer retries once JD lands)
+  const system = 'You are an ATS match analyst (Jobscan-style). Compare the candidate master baseline to THIS job description and return ONLY JSON: {"atsScore":<0-100 int>,"gaps":[]}. atsScore = % of the role\'s important keywords/requirements the candidate already demonstrably covers. gaps = the specific missing/weak keywords to add. Be realistic: a strong senior match opens in the 80s.'
+  const user = `JOB: ${o.role} at ${o.company}\n\nJOB DESCRIPTION:\n${jd.slice(0, 6000)}\n\nCANDIDATE MASTER BASELINE:\n${mc || '(a senior technology/product executive)'}`
+  const a = await openaiJson(system, user, 'ats:auto-score', 700)
+  const atsScore = Number.isFinite(a.atsScore) ? Math.max(0, Math.min(100, Math.round(a.atsScore))) : null
+  const gaps = Array.isArray(a.gaps) ? a.gaps.map((s: any) => String(s)).slice(0, 12) : []
+  if (atsScore != null) await client.query(`update opportunity set ats_score=$1, ats_gaps=$2, ats_scored_at=now() where id=$3`, [atsScore, gaps, o.id])
+  return { atsScore, gaps }
+}
+
+// POST /api/app/ats-backfill { limit?, favoritesOnly? } — score a batch on demand.
+export async function atsBackfill(req: HttpRequest, _ctx: InvocationContext): Promise<HttpResponseInit> {
+  if (req.method === 'OPTIONS') return { status: 204, headers: HEADERS }
+  const guard = requireWrite(req); if (guard) return guard
+  const body = (await req.json().catch(() => ({}))) as any
+  const limit = Math.max(1, Math.min(50, Number(body.limit) || 20))
+  const favoritesOnly = body.favoritesOnly === true
+  const owner = resolveOwner(req).owner
+  let client
+  try {
+    client = await getPgClient()
+    await ensureAtsCols(client)
+    const favClause = favoritesOnly ? 'and is_favorite = true' : ''
+    const rows = (await client.query(
+      `select id, role, company, jd_real, jd_summary, jd_requirements from opportunity
+         where owner_email=$1 and not dismissed and not is_demo and ats_score is null
+           and coalesce(length(jd_real),0) > 200 ${favClause}
+         order by is_favorite desc, source_date desc nulls last limit $2`, [owner, limit])).rows
+    const mc = await masterContextSummary()
+    let scored = 0; const start = Date.now()
+    for (const o of rows) {
+      if (Date.now() - start > 180_000) break
+      try { const r = await atsScoreOne(client, o, mc); if (r?.atsScore != null) scored++ } catch { /* skip */ }
+    }
+    return { status: 200, headers: HEADERS, jsonBody: { ok: true, candidates: rows.length, scored } }
+  } catch (e) { return { status: 200, headers: HEADERS, jsonBody: { ok: false, error: String(e) } } }
+  finally { try { await client?.end() } catch {} }
+}
+
+// Timer: every 5 min, score a SMALL favorites-first batch of opps that have a real JD but no ats_score.
+// Self-idles when the backlog is clear (steady-state ~0). Mirrors jdBackfillTick's pacing discipline.
+export async function atsBackfillTick(_t: Timer, context: InvocationContext): Promise<void> {
+  let client: any
+  try {
+    const owner = (await loadConfig()).ownerEmail
+    client = await getPgClient()
+    await ensureAtsCols(client)
+    const rows = (await client.query(
+      `select id, role, company, jd_real, jd_summary, jd_requirements from opportunity
+         where owner_email=$1 and not dismissed and not is_demo and ats_score is null
+           and coalesce(length(jd_real),0) > 200
+         order by is_favorite desc, source_date desc nulls last limit 4`, [owner])).rows
+    if (!rows.length) { context.log('ats-backfill: backlog clear'); return }
+    const mc = await masterContextSummary()
+    let scored = 0
+    for (const o of rows) { try { const r = await atsScoreOne(client, o, mc); if (r?.atsScore != null) scored++ } catch { /* skip */ } }
+    context.log(`ats-backfill: scored ${scored}/${rows.length}`)
+  } catch (e) { context.log(`ats-backfill error: ${e}`) }
+  finally { try { await client?.end() } catch {} }
+}
+
 app.http('matchScore', { methods: ['POST', 'OPTIONS'], authLevel: 'anonymous', route: 'app/opportunity/{id}/match-score', handler: matchScore })
+app.http('atsBackfill', { methods: ['POST', 'OPTIONS'], authLevel: 'anonymous', route: 'app/ats-backfill', handler: atsBackfill })
+app.timer('atsBackfillTick', { schedule: '0 */5 * * * *', handler: atsBackfillTick })
 app.http('answersFromQuestions', { methods: ['POST', 'OPTIONS'], authLevel: 'anonymous', route: 'app/answers/from-questions', handler: answersFromQuestions })
 app.http('applyPrepare', { methods: ['POST', 'OPTIONS'], authLevel: 'anonymous', route: 'app/opportunity/{id}/apply/prepare', handler: applyPrepare })
