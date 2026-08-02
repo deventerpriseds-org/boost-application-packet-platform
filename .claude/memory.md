@@ -93,8 +93,18 @@ Owner clarified the two conflated signals; grounded in docs/design_handoff/READM
   temp dropdown, temp+priority column), Swipe/Pipeline/OppDetail pills, OppDetail Status adds
   Temperature/Priority/ATS rows. VERIFIED: /app/opportunities returns the fields; ui-verify #/opportunities
   (Urgent/Strategic/Hot) + #/settings/intake (Freshness bands) both success.
-- ⚠️ Old `urgency` column is now legacy (UrgencyPill kept but unused on the main screens). Temperature is
-  the recency signal; the LLM classifier still writes urgency at ingest but nothing reads it on Today/Opps.
+## Signals CONSOLIDATED (2026-08-02, commit 88667d0, verified) ✅
+Owner pushed back (rightly, "extend don't duplicate"): I'd bolted new fields/pills beside the old urgency.
+Fixed:
+- **ONE `SignalIcon`** (shell.jsx) replaces UrgencyPill/TemperaturePill/PriorityPill. kind-driven:
+  temperature = FLAME (Hot orange→Warm yellow→Cooling blue→Cold white/pale-stroke); priority = rounded
+  WARNING TRIANGLE w/ white "!" (Urgent red→Active green→Ready yellow→New white). Both still render per
+  card (showLabel toggles text; Pipeline uses icon-only). A new signal later = one row in TEMP_META/PRIO_META.
+- **`urgency` retired**: LLM talent classifier (mailWatch + appExtras) no longer emits/writes urgency
+  (kept `fit`). Nothing reads the column now; left in DB (harmless) but no new writes.
+- VERIFIED: API+app build clean; ui-verify #/opportunities success post-refactor (no crash);
+  /app/metrics/today 200 with kpis.hot (recency) present. NOTE the metrics route is `app/metrics/today`
+  NOT `app/metrics` (a wrong-path 404 bit me once).
 
 ## JD-missing ROOT CAUSE (2026-08-01, verified live) — it is BACKLOG, not source
 - 259→262 opps; only ~36% had a real JD. **64% had jd_fetched_at=NULL = never fetch-attempted.**
