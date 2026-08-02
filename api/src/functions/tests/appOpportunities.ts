@@ -2,6 +2,8 @@ import { app, HttpRequest, HttpResponseInit, InvocationContext } from '@azure/fu
 import { resolveOwner, requireWrite, serverError } from './appSession'
 import { getPgClient } from './pgClient'
 import { resolveMetro, parseWorkMode } from './geoMaster'
+import { getSearchPrefs } from './appSearchPrefs'
+import { deriveTemperature, deriveActionPriority, DEFAULT_TEMP_THRESHOLDS, TempThresholds } from './signals'
 
 const HEADERS = {
   'Content-Type': 'application/json',
@@ -26,13 +28,22 @@ async function ensureStageHistory(client: any) {
   )`)
 }
 
-function rowToOpp(r: any) {
+interface SignalCtx { nowMs: number; thr: TempThresholds; dueSet: Set<string> }
+
+function rowToOpp(r: any, ctx?: SignalCtx) {
   const metro = resolveMetro(r.location || '')       // ACT-32: map free-text location → metro
   const workMode = parseWorkMode(r.location || '')   // ACT-33: remote / hybrid / onsite
+  // Derived signals — computed HERE (the one funnel every screen reads) so Today/Opps/Swipe/Pipeline agree.
+  const c = ctx || { nowMs: Date.now(), thr: DEFAULT_TEMP_THRESHOLDS, dueSet: new Set<string>() }
+  const temp = deriveTemperature(r.source_date, r.created_at, c.nowMs, c.thr)
+  const actionPriority = deriveActionPriority(r.stage, c.dueSet.has(r.id))
   return {
     metroName: metro?.name || null, metroGeoId: metro?.geoId || null, workMode,
     id: r.id, company: r.company, logo: r.logo_url, role: r.role, location: r.location,
-    comp: r.comp_range, match: r.match_score, fit: r.fit, urgency: r.urgency,
+    comp: r.comp_range, match: r.match_score, atsScore: r.ats_score ?? null, fit: r.fit, urgency: r.urgency,
+    // recency temperature (+ posting age) and journey action-priority — the new signals
+    temperature: temp.temperature, postedAgeDays: temp.ageDays, actionPriority,
+    hasDueTouch: c.dueSet.has(r.id),
     source: r.source, why: r.why_surfaced, hm: r.hiring_manager, recruiter: r.recruiter,
     rolesFor: r.roles_for, stage: r.stage, personaKey: r.persona_key, dismissed: r.dismissed,
     isFavorite: !!r.is_favorite, tier: r.title_tier, matchedGroup: r.matched_group,
@@ -75,21 +86,40 @@ export async function opportunitiesList(req: HttpRequest, context: InvocationCon
        order by coalesce(is_favorite,false) desc, match_score desc nulls last`, params
     )).rows
 
+    // Signal context — built ONCE per request: owner temperature thresholds + the set of opp ids that
+    // have a DUE outreach touch (the "act today" event that bumps action-priority to urgent).
+    const { tempThresholds } = await getSearchPrefs(client, owner)
+    const dueRows = (await client.query(
+      `select distinct m.opp_id from outreach_message m
+         join opportunity o on o.id = m.opp_id
+        where o.owner_email = $1 and m.state = 'due'`, [owner])).rows
+    const ctx: SignalCtx = { nowMs: Date.now(), thr: tempThresholds, dueSet: new Set(dueRows.map((d: any) => d.opp_id)) }
+
     // Stage funnel counts for the pipeline board (+ a 'rejected' lane count)
     const byStage: Record<string, number> = {}
     for (const s of STAGES) byStage[s] = 0
     byStage.rejected = 0
-    for (const r of rows) {
+    // Signal tallies so Today/Opps can show counts without re-deriving off the same funnel.
+    const byTemperature: Record<string, number> = { hot: 0, warm: 0, cooling: 0, cold: 0 }
+    const byPriority: Record<string, number> = { urgent: 0, active: 0, ready: 0, new: 0, done: 0 }
+    const opps = rows.map((r: any) => {
+      const o = rowToOpp(r, ctx)
       if (r.dismissed) byStage.rejected += 1
-      else byStage[r.stage] = (byStage[r.stage] || 0) + 1
-    }
+      else {
+        byStage[r.stage] = (byStage[r.stage] || 0) + 1
+        if (o.temperature) byTemperature[o.temperature] = (byTemperature[o.temperature] || 0) + 1
+        byPriority[o.actionPriority] = (byPriority[o.actionPriority] || 0) + 1
+      }
+      return { ...o, rejected: !!r.dismissed }
+    })
 
     return {
       status: 200, headers: HEADERS,
       jsonBody: {
-        stages: STAGES, byStage, count: rows.length, includeDismissed,
+        stages: STAGES, byStage, byTemperature, byPriority, count: rows.length, includeDismissed,
+        tempThresholds,
         // `rejected` marks dismissed rows so the UI can route them to a Rejected lane.
-        opportunities: rows.map((r: any) => ({ ...rowToOpp(r), rejected: !!r.dismissed })),
+        opportunities: opps,
       }
     }
   } catch (err) {

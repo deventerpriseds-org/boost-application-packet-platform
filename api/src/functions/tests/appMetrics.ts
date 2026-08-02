@@ -1,6 +1,7 @@
 import { app, HttpRequest, HttpResponseInit, InvocationContext } from '@azure/functions'
 import { resolveOwner, serverError } from './appSession'
 import { getPgClient } from './pgClient'
+import { getSearchPrefs } from './appSearchPrefs'
 
 const HEADERS = {
   'Content-Type': 'application/json',
@@ -53,8 +54,14 @@ export async function todayMetrics(req: HttpRequest, _context: InvocationContext
     }
 
     // --- KPIs (all from real opportunity columns) ---
+    // HOT = recency of the posting (fresh ≤ hotMaxHours), NOT the old LLM urgency label. Uses the
+    // owner's editable temperature threshold so this KPI agrees with the temperature pills everywhere.
+    const { tempThresholds } = await getSearchPrefs(client, owner)
     const hot = (await client.query(
-      `select count(*)::int as n from opportunity where owner_email = $1 and not dismissed and urgency = 'Hot' ${demoFilter}`, [owner]
+      `select count(*)::int as n from opportunity
+        where owner_email = $1 and not dismissed
+          and coalesce(source_date, created_at) >= now() - ($2 || ' hours')::interval ${demoFilter}`,
+      [owner, String(tempThresholds.hotMaxHours)]
     )).rows[0].n
     const interviewCount = (await client.query(
       `select count(*)::int as n from opportunity
