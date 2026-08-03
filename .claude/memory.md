@@ -132,10 +132,19 @@ Fixed:
   counts "3 GROUPS 27 ROLES 651 TITLES", full C-suite tree with per-role counts, "Open role baseline"
   (Pane-3) present. The one missingExpect "How favorites get promoted" = the CSS text-transform:uppercase
   innerText false-negative (Chromium returns UPPERCASED) — cosmetic, documented pattern, NOT a defect.
-- GROUND TRUTH (db-query): taxonomy_title for von.ellis = 651 rows ALL tier='fav'. So "every star gold /
-  Watch+Off filters empty" is REAL DATA, not a prototype bug. PRD seed expects ~84 fav / rest watch → the
-  taxonomy data is in a degenerate all-favorited state = a data-hygiene item to fix in the full build
-  (re-seed/retag). Prototype reads it honestly.
+- GROUND TRUTH + CORRECTION (2026-08-03): the "all-favorited" is BY DESIGN, NOT a bug. Two levels:
+  (a) TITLE level taxonomy_title.tier — the ★ is a saved fuzzy-lookup PATTERN ("promote opps whose title
+  matches this"). docs/roles-taxonomy-source.md:26 EXPLICITLY: the entire ideal-roles list seeds as fav;
+  watch = matched-but-not-in-list; off = nothing at launch. roleTaxonomy.ts:70 buildSeed sets tier:'fav'
+  for all — INTENTIONAL. There is NO curated 84-list anywhere; PRD PDF's "84" was an illustrative
+  screenshot count. DO NOT wipe title favorites.
+  (b) OPPORTUNITY level opportunity.is_favorite — the meaningful subset. db-query von.ellis active opps:
+  is_fav=t/matched=t 197; is_fav=f/matched=t 132; is_fav=f/matched=f 4 (total 333). So 197/333 favorited,
+  136 not — HEALTHY. 132 matched-but-watch = keyword/backlog matches (ordinary Director etc.), working as
+  designed (is_favorite = tier==fav && matched && !backlog, i.e. exact/alias only).
+  MY MISTAKE: prototype header labeled the title-pattern count (651) "Favorites" — redundant/misleading
+  (= total titles). REAL FIX = UI/labeling only: show per-title LIVE matched-opp counts + favorited-opps
+  (197), NOT a title-fav counter. NO data change. Owner confirmed the star is a title-level lookup.
 - DEFERRED to full build (owner go/no-go pending): draft/publish layer (title_tier_draft + bulk-tier/
   publish/revert endpoints), taxonomy.published→rescore-open-opps job, all 20 R-states 1:1, data re-seed.
 - Screenshot artifact: run 30827588678 → artifact 8861525801 (ui-verify-screenshot). Live: 

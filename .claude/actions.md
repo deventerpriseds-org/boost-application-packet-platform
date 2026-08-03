@@ -688,6 +688,10 @@ ADDITIVE INTEGRATION (reuse, do NOT duplicate — grepped 2026-08-03):
   and the `taxonomy.published → rescore open opps` job (tier_boost/is_favorite/match_score recompute).
   Check whether tier writes today are direct-publish; if so, add the draft layer WITHOUT breaking the
   existing PATCH (draft-first, publish flushes to title_variant.tier).
+- NO DATA "FIX" (corrected 2026-08-03): all-651-fav at TITLE level is BY DESIGN (fuzzy-lookup patterns;
+  roles-taxonomy-source.md:26). The meaningful favorite signal is OPPORTUNITY.is_favorite = healthy subset
+  (197/333 for von.ellis). Real fix = show per-title LIVE matched-opp counts + favorited-opps in the read
+  model/header, NOT the redundant title-fav counter my prototype showed. Do NOT wipe title favorites.
 - NEW frontend: `app/src/screens/RolesTitles.jsx` (3-pane) + route + sidebar entry.
 
 ACs (verify-work before done): (1) #/roles renders 3 panes, counters G/R/T/Fav; (2) star toggles
