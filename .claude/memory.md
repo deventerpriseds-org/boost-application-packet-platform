@@ -119,6 +119,28 @@ Fixed:
 - STILL OPEN: ACT-39 (a NEW page per PRD — needs scoping before build; owner deferred). My earlier
   "remaining open actions" rundown had OMITTED ACT-30 + ACT-39 — surface page-items from actions.md next time.
 
+## ACT-39 PROTOTYPE shipped + verified live (2026-08-03, commit 69f4c9c) — owner wanted to SEE it first
+- Owner clarified ACT-39 = the FULL PRD §7 3-pane "Roles & Titles" page at #/roles (the uploaded spec),
+  adapted ADDITIVELY onto existing systems (NOT destructive). It composes with ACT-30: PRD R-16 = Pane-3
+  baseline card links OUT to the ACT-30 /library/roles page. Owner asked for a prototype integrated first.
+- BUILT app/src/screens/RolesTitles.jsx (3-pane: tree | title-variants | role-detail), new sidebar entry
+  "Roles & Titles" + route (App.jsx route==='roles'), responsive 3/2/1-pane grid (theme.css .ee-roles-grid).
+  Reuses EXISTING app/taxonomy read model + PATCH taxonomy/title/tier (prototype = direct-publish, NO draft
+  layer yet). Fixed api.taxonomy() to pass ?owner (was falling back to demo). Star toggle / tier cycle /
+  All-Fav-Watch-Off filter / search / fav-first / bulk bar all wired. Pane-3 baseline btn → ACT-30 page.
+- VERIFIED live: exec-engine-deploy success; ui-verify #/roles rendered header "Roles & Titles",
+  counts "3 GROUPS 27 ROLES 651 TITLES", full C-suite tree with per-role counts, "Open role baseline"
+  (Pane-3) present. The one missingExpect "How favorites get promoted" = the CSS text-transform:uppercase
+  innerText false-negative (Chromium returns UPPERCASED) — cosmetic, documented pattern, NOT a defect.
+- GROUND TRUTH (db-query): taxonomy_title for von.ellis = 651 rows ALL tier='fav'. So "every star gold /
+  Watch+Off filters empty" is REAL DATA, not a prototype bug. PRD seed expects ~84 fav / rest watch → the
+  taxonomy data is in a degenerate all-favorited state = a data-hygiene item to fix in the full build
+  (re-seed/retag). Prototype reads it honestly.
+- DEFERRED to full build (owner go/no-go pending): draft/publish layer (title_tier_draft + bulk-tier/
+  publish/revert endpoints), taxonomy.published→rescore-open-opps job, all 20 R-states 1:1, data re-seed.
+- Screenshot artifact: run 30827588678 → artifact 8861525801 (ui-verify-screenshot). Live: 
+  purple-ground-0f377120f.7.azurestaticapps.net/#/roles
+
 ## JD-missing ROOT CAUSE (2026-08-01, verified live) — it is BACKLOG, not source
 - 259→262 opps; only ~36% had a real JD. **64% had jd_fetched_at=NULL = never fetch-attempted.**
 - Cause: ACT-44 "JD-at-ingest" was NEVER shipped (routeOpportunity/insertOpp make zero
