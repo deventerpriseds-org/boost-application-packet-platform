@@ -106,6 +106,19 @@ Fixed:
   /app/metrics/today 200 with kpis.hot (recency) present. NOTE the metrics route is `app/metrics/today`
   NOT `app/metrics` (a wrong-path 404 bit me once).
 
+## ACT-30 Role Profiles page REBUILT on taxonomy (2026-08-03, commit c16e0c8, verified) ✅
+- The /library/roles Roles tab was a DEAD persona stub (api.listPersonas → empty). Now taxonomy-backed.
+- New api/src/functions/tests/appRoleProfiles.ts → GET/POST /app/role-profiles. Table role_profile
+  (owner_email, role_key='group:role', narrative, key_wins[], comp_reference). Roles DERIVED live from
+  opps (distinct matched_group+matched_role). Detail returns real linked opps (by matched role) + atsScore.
+- Library.jsx RolesTab rewritten: grid (favorites-first, GROUP_LABEL, roleLabel()) + detail (editable
+  baseline: narrative/keyWins/compReference via api.roleProfileSet; Save gated on sessionValid()).
+- Linked ASSETS deferred honestly (no asset→role tag exists — not faked). sessionValid() moved to api.js.
+- VERIFIED: list=28 roles; POST csuite:CTO baseline + GET detail round-trip OK; ui-verify #/library/roles
+  success. Note: this ALSO advances ACT-17/21/23 (Role Profiles now reads taxonomy, not persona).
+- STILL OPEN: ACT-39 (a NEW page per PRD — needs scoping before build; owner deferred). My earlier
+  "remaining open actions" rundown had OMITTED ACT-30 + ACT-39 — surface page-items from actions.md next time.
+
 ## JD-missing ROOT CAUSE (2026-08-01, verified live) — it is BACKLOG, not source
 - 259→262 opps; only ~36% had a real JD. **64% had jd_fetched_at=NULL = never fetch-attempted.**
 - Cause: ACT-44 "JD-at-ingest" was NEVER shipped (routeOpportunity/insertOpp make zero

@@ -568,11 +568,17 @@ Build OR-concatenated search queries from the LONGER favorite-title list (per ro
 then decide: does the resulting query count fit one 3x/day slot, or must queries be SPREAD across the
 5am/1pm/6pm slots (vs repeating each query 3x/day)? Depends on ACT-25 favorites.
 
-**ACT-30 — Restore the Role Profiles page (rebuilt on the taxonomy).**
-The rich Role-baseline page exists only in the prototype (proto-compass/engine.jsx); the live
-/library/roles is a persona-backed stub that omits narrative/key-wins/linked-assets/comp (no backing
-fields) and is empty now that personas are empty. Rebuild on the taxonomy role with real baseline
-fields (narrative, key wins, linked assets, comp reference) — PRD's role_baseline.
+**ACT-30 — Restore the Role Profiles page (rebuilt on the taxonomy). ✅ DONE + verified (2026-08-03, commit c16e0c8).**
+Was a dead persona-backed stub (api.listPersonas, empty). Rebuilt on the taxonomy role
+(matched_group+matched_role, derived live from opps). New /app/role-profiles endpoint + role_profile
+table (owner-editable narrative, key_wins[], comp_reference; seeded empty). Grid = owner's real target
+roles favorites-first w/ counts + baseline snippet; detail = editable baseline + real linked opps (by
+matched role) with ATS score. Linked ASSETS honestly deferred (no asset→role tagging in the data model
+— NOT faked). VERIFIED: GET list (28 taxonomy roles), POST baseline + GET detail round-trip (CTO
+narrative/keyWins/comp saved; linked CTO opps w/ ats 60/75/85), ui-verify #/library/roles success
+(target roles / CTO / Product / Manage titles). sessionValid() promoted to api.js (shared).
+  (orig:) Rebuild on the taxonomy role with real baseline fields (narrative, key wins, linked assets,
+  comp reference) — PRD's role_baseline.
 
 **ACT-31 — ✅ DONE + verified (2026-07-31). Swipe source/intake facet pills from real distinct `source` values (LinkedIn/LinkedIn Search/Indeed/Email/Extension), composes with role pills. ui-verify #/swipe rendered "All sources"+"LinkedIn". Commit 28c3782.**
 
