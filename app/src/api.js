@@ -13,6 +13,15 @@ export function getOwner() { return _owner }
 let _session = (() => { try { return localStorage.getItem('ee_session') || null } catch { return null } })()
 export function setSessionToken(t) { _session = t || null; try { t ? localStorage.setItem('ee_session', t) : localStorage.removeItem('ee_session') } catch {} }
 export function getSessionToken() { return _session }
+// True only if a session token exists AND its JWT exp is still in the future (writes need this).
+export function sessionValid() {
+  const t = _session
+  if (!t) return false
+  try {
+    const p = JSON.parse(atob(t.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')))
+    return typeof p.exp === 'number' && p.exp > Math.floor(Date.now() / 1000)
+  } catch { return false }
+}
 function authHeaders(extra) { return _session ? { ...(extra || {}), Authorization: `Bearer ${_session}` } : (extra || {}) }
 // Whether owner-scoped reads include demo/sample (is_demo) rows.
 let _includeDemo = (() => { try { return localStorage.getItem('ee_show_demo') !== 'false' } catch { return true } })()
@@ -195,6 +204,10 @@ export const api = {
   // fallback). Without this, /app/personas defaulted server-side to demo@ and showed the demo roles
   // even when opportunities were showing the real owner's data.
   listPersonas: () => get(`/app/personas?owner=${encodeURIComponent(_owner)}`),
+  // ACT-30 — taxonomy-backed Role Profiles
+  roleProfilesGet: () => get(`/app/role-profiles?owner=${encodeURIComponent(_owner)}`),
+  roleProfileGet: (key) => get(`/app/role-profiles?owner=${encodeURIComponent(_owner)}&key=${encodeURIComponent(key)}`),
+  roleProfileSet: ({ key, narrative, keyWins, compReference }) => post(`/app/role-profiles?owner=${encodeURIComponent(_owner)}`, { key, narrative, keyWins, compReference }),
   createPersona: (data) => post(`/app/personas?owner=${encodeURIComponent(_owner)}`, data),
   updatePersona: (key, patch) => patch_(`/app/personas/${key}?owner=${encodeURIComponent(_owner)}`, patch),
   deletePersona: (key) => del(`/app/personas/${key}?owner=${encodeURIComponent(_owner)}`),

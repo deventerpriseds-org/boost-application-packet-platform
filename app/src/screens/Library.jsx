@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useCallback } from 'react'
 import { go, useRoute } from '../state.jsx'
-import { api } from '../api.js'
+import { api, sessionValid } from '../api.js'
 import { MatchScore, Pill } from '../shell.jsx'
 import { Loading, ErrorBox, Empty } from './Today.jsx'
 
@@ -288,34 +288,48 @@ function Assets() {
   )
 }
 
-// Roles tab: grid of role profiles, or a detail view at /library/roles/<key>.
+// Roles tab (ACT-30): taxonomy-backed Role Profiles. Grid of the owner's real target roles
+// (matched_group+matched_role from their opps) with owner-editable baseline fields, or a detail
+// view at /library/roles/<encoded key>.
+const roleLabel = (group, role) =>
+  group === 'csuite' ? role : group === 'director' ? `Director · ${role}` : group === 'vp' ? `VP · ${role}` : role
+const GROUP_LABEL = { csuite: 'C-suite', vp: 'VP & Head of', director: 'Director' }
+
 function RolesTab() {
   const { parts } = useRoute()
-  const roleKey = parts[2] // /library/roles/<key>
-  if (roleKey) return <RoleDetail roleKey={roleKey} />
+  const roleKey = parts[2] // /library/roles/<encoded key>
+  if (roleKey) return <RoleDetail roleKey={decodeURIComponent(roleKey)} />
   return <RolesGrid />
 }
 
 function RolesGrid() {
-  const { loading, error, data } = useFetch(() => api.listPersonas())
+  const { loading, error, data } = useFetch(() => api.roleProfilesGet())
   if (loading) return <Loading />
   if (error) return <ErrorBox error={error} />
-  const personas = data.personas || []
-  if (!personas.length) return (
-    <Empty>No target roles configured yet. <span className="px-link" style={{ cursor: 'pointer' }} onClick={() => go('/settings/roles')}>Add one in Settings</span></Empty>
+  const roles = data.roles || []
+  if (!roles.length) return (
+    <Empty>No target roles yet. <span className="px-link" style={{ cursor: 'pointer' }} onClick={() => go('/settings/roles')}>Add titles in Settings</span> — roles appear here once opportunities are classified.</Empty>
   )
   return (
     <div>
-      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 8 }}>
-        <span className="px-link" style={{ fontSize: 12, cursor: 'pointer' }} onClick={() => go('/settings/roles')}>Manage in Settings</span>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 8 }}>
+        <span className="px-small" style={{ color: 'var(--proto-ink2)' }}>{roles.length} target roles · click to open the baseline</span>
+        <span className="px-link" style={{ fontSize: 12, cursor: 'pointer' }} onClick={() => go('/settings/roles')}>Manage titles in Settings</span>
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 12 }}>
-        {personas.map((p) => (
-          <div key={p.key} className="px-box" onClick={() => go(`/library/roles/${p.key}`)} style={{ padding: 16, cursor: 'pointer', display: 'flex', flexDirection: 'column', gap: 8 }}>
-            <div style={{ fontSize: 15, fontWeight: 700 }}>{p.masterRole || p.name}</div>
-            <div className="px-small">{p.name} · {p.compTarget || '—'}</div>
-            {p.positioning && <div style={{ fontSize: 13, lineHeight: 1.5 }}>{p.positioning}</div>}
-            <Pill>{p.opportunities} opportunities</Pill>
+        {roles.map((r) => (
+          <div key={r.key} className="px-box" onClick={() => go(`/library/roles/${encodeURIComponent(r.key)}`)}
+            style={{ padding: 16, cursor: 'pointer', display: 'flex', flexDirection: 'column', gap: 8, borderLeft: r.favorites > 0 ? '3px solid #c08a1e' : '3px solid transparent' }}>
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+              <div style={{ fontSize: 15, fontWeight: 700, flex: 1 }}>{roleLabel(r.group, r.role)}</div>
+              <span className="px-chip" style={{ fontSize: 10.5 }}>{GROUP_LABEL[r.group] || r.group}</span>
+            </div>
+            <div className="px-small" style={{ color: 'var(--proto-ink2)' }}>
+              {r.opportunities} opportunit{r.opportunities === 1 ? 'y' : 'ies'}{r.favorites > 0 ? ` · ★ ${r.favorites} favorite` : ''}{r.compReference ? ` · ${r.compReference}` : ''}
+            </div>
+            {r.narrative
+              ? <div style={{ fontSize: 13, lineHeight: 1.5, color: 'var(--proto-ink)' }}>{r.narrative.length > 140 ? r.narrative.slice(0, 140) + '…' : r.narrative}</div>
+              : <div className="px-small" style={{ color: 'var(--proto-ink3)', fontStyle: 'italic' }}>No baseline written yet — click to add.</div>}
           </div>
         ))}
       </div>
@@ -323,64 +337,108 @@ function RolesGrid() {
   )
 }
 
-// Role detail — renders ONLY the real persona fields (master_role, name, comp
-// target, positioning) plus the live linked opportunities (rolesFor tag match).
-// Narrative / key wins / linked assets / linked playbooks are NOT backed by any
-// field on the persona or library tables yet, so they are omitted (see note).
+// Role detail — baseline (owner-editable: narrative, key wins, comp reference) + real linked opps.
 function RoleDetail({ roleKey }) {
-  const personasState = useFetch(() => api.listPersonas(), [roleKey])
-  const oppsState = useFetch(() => api.listOpportunities({ persona: roleKey }), [roleKey])
-  if (personasState.loading) return <Loading />
-  if (personasState.error) return <ErrorBox error={personasState.error} />
-  const persona = (personasState.data.personas || []).find((p) => p.key === roleKey)
-  if (!persona) return (
-    <div>
-      <BackToRoles />
-      <Empty>Role profile not found.</Empty>
-    </div>
-  )
-  const opps = oppsState.data?.opportunities || []
+  const { loading, error, data } = useFetch(() => api.roleProfileGet(roleKey), [roleKey])
+  const [edit, setEdit] = useState(false)
+  const [form, setForm] = useState(null)
+  const [saving, setSaving] = useState(false)
+  const [note, setNote] = useState(null)
+  const r = data?.role
+  useEffect(() => { if (r) setForm({ narrative: r.narrative || '', keyWins: (r.keyWins || []).join('\n'), compReference: r.compReference || '' }) }, [r])
+  if (loading) return <Loading />
+  if (error) return <ErrorBox error={error} />
+  if (!r) return <div><BackToRoles /><Empty>Role profile not found.</Empty></div>
+  const opps = r.opportunities || []
+  const hasBaseline = r.narrative || (r.keyWins && r.keyWins.length) || r.compReference
+  const save = async () => {
+    if (!sessionValid()) { setNote({ ok: false, msg: 'Sign-in expired — sign out and back in, then Save.' }); return }
+    setSaving(true); setNote(null)
+    try {
+      const body = { key: roleKey, narrative: form.narrative.trim(), keyWins: form.keyWins.split('\n').map((s) => s.trim()).filter(Boolean), compReference: form.compReference.trim() }
+      const res = await api.roleProfileSet(body)
+      if (res.ok === false) throw new Error(res.error || 'save failed')
+      setNote({ ok: true, msg: 'Saved.' }); setEdit(false)
+      r.narrative = body.narrative; r.keyWins = body.keyWins; r.compReference = body.compReference
+    } catch (e) { setNote({ ok: false, msg: String(e.message || e) }) } finally { setSaving(false) }
+  }
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
       <BackToRoles />
       <div className="px-box" style={{ padding: 20, display: 'flex', flexDirection: 'column', gap: 10 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <div style={{ fontSize: 20, fontWeight: 800, letterSpacing: -0.3, flex: 1 }}>{persona.masterRole || persona.name}</div>
-          <Pill>{persona.opportunities} opportunities</Pill>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+          <div style={{ fontSize: 20, fontWeight: 800, letterSpacing: -0.3, flex: 1 }}>{roleLabel(r.group, r.role)}</div>
+          <span className="px-chip">{GROUP_LABEL[r.group] || r.group}</span>
+          <Pill>{opps.length} opportunities</Pill>
+          {!edit && <button className="px-btn" onClick={() => setEdit(true)}>{hasBaseline ? 'Edit baseline' : 'Add baseline'}</button>}
         </div>
-        <div className="px-small">{persona.name} · <b>Comp target:</b> {persona.compTarget || '—'}</div>
-        {persona.positioning
-          ? <div style={{ fontSize: 14, lineHeight: 1.6, marginTop: 4 }}>{persona.positioning}</div>
-          : <div className="px-small" style={{ marginTop: 4 }}>No positioning statement set. Add one in <span className="px-link" style={{ cursor: 'pointer' }} onClick={() => go('/settings/roles')}>Settings → Roles</span>.</div>}
+
+        {edit ? (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginTop: 4 }}>
+            <label style={{ fontSize: 12, fontWeight: 600 }}>Positioning narrative
+              <textarea className="px-input" rows={4} value={form.narrative} onChange={(e) => setForm({ ...form, narrative: e.target.value })}
+                placeholder="How you position for this role — the through-line across your wins." style={{ width: '100%', marginTop: 4, resize: 'vertical' }} />
+            </label>
+            <label style={{ fontSize: 12, fontWeight: 600 }}>Key wins <span style={{ color: 'var(--proto-ink3)', fontWeight: 500 }}>(one per line)</span>
+              <textarea className="px-input" rows={4} value={form.keyWins} onChange={(e) => setForm({ ...form, keyWins: e.target.value })}
+                placeholder={"Scaled platform to 10M users\nCut infra spend 35%\n…"} style={{ width: '100%', marginTop: 4, resize: 'vertical' }} />
+            </label>
+            <label style={{ fontSize: 12, fontWeight: 600 }}>Comp reference
+              <input className="px-input" value={form.compReference} onChange={(e) => setForm({ ...form, compReference: e.target.value })}
+                placeholder="e.g. $280–340K base + equity" style={{ width: '100%', marginTop: 4 }} />
+            </label>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 10 }}>
+              {note && <span className="px-small" style={{ color: note.ok ? 'var(--surface-success-default)' : 'var(--proto-red)' }}>{note.msg}</span>}
+              <button className="px-btn" onClick={() => { setEdit(false); setNote(null); setForm({ narrative: r.narrative || '', keyWins: (r.keyWins || []).join('\n'), compReference: r.compReference || '' }) }}>Cancel</button>
+              <button className="px-btn px-btn-accent" onClick={save} disabled={saving}>{saving ? 'Saving…' : 'Save baseline'}</button>
+            </div>
+          </div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 2 }}>
+            {r.compReference && <div className="px-small"><b>Comp reference:</b> {r.compReference}</div>}
+            {r.narrative
+              ? <div style={{ fontSize: 14, lineHeight: 1.6 }}>{r.narrative}</div>
+              : <div className="px-small" style={{ color: 'var(--proto-ink3)' }}>No positioning narrative yet.</div>}
+            {r.keyWins && r.keyWins.length > 0 && (
+              <div>
+                <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 4 }}>Key wins</div>
+                <ul style={{ margin: 0, paddingLeft: 18, display: 'flex', flexDirection: 'column', gap: 3 }}>
+                  {r.keyWins.map((w, i) => <li key={i} style={{ fontSize: 13, lineHeight: 1.5 }}>{w}</li>)}
+                </ul>
+              </div>
+            )}
+            {note && !edit && <span className="px-small" style={{ color: note.ok ? 'var(--surface-success-default)' : 'var(--proto-red)' }}>{note.msg}</span>}
+          </div>
+        )}
       </div>
 
       <div className="px-box" style={{ padding: 16 }}>
         <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, marginBottom: 10 }}>
           <b style={{ fontSize: 14 }}>Linked opportunities</b>
-          <span className="px-small">tagged to this role</span>
+          <span className="px-small">classified to this role</span>
           <div style={{ flex: 1 }} />
           <span style={{ fontSize: 18, fontWeight: 700 }}>{opps.length}</span>
         </div>
-        {oppsState.loading ? <Loading /> : opps.length === 0 ? (
-          <div className="px-small">No opportunities are currently tagged to this role.</div>
+        {opps.length === 0 ? (
+          <div className="px-small">No opportunities are currently classified to this role.</div>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-            {opps.map((o) => (
+            {opps.slice(0, 60).map((o) => (
               <div key={o.id} onClick={() => go(`/opp/${o.id}`)} style={{ display: 'flex', alignItems: 'baseline', gap: 10, fontSize: 13, cursor: 'pointer', padding: '4px 0', borderTop: '1px solid var(--proto-rule-soft)' }}>
-                <span style={{ fontWeight: 600, minWidth: 180 }}>{o.company}</span>
-                <span className="px-small">{o.role}</span>
-                <div style={{ flex: 1 }} />
+                {o.isFavorite && <span style={{ color: '#c08a1e' }}>★</span>}
+                <span style={{ fontWeight: 600, minWidth: 160 }}>{o.company}</span>
+                <span className="px-small" style={{ flex: 1 }}>{o.role}</span>
+                {o.atsScore != null && <span className="px-small" style={{ color: 'var(--proto-ink3)' }}>ATS {o.atsScore}</span>}
                 {o.stage && <Pill tone="panel">{o.stage}</Pill>}
               </div>
             ))}
+            {opps.length > 60 && <div className="px-small" style={{ color: 'var(--proto-ink3)', paddingTop: 6 }}>+ {opps.length - 60} more</div>}
           </div>
         )}
       </div>
 
-      <div className="px-small" style={{ lineHeight: 1.5 }}>
-        Narrative, key wins, linked assets, comp reference, and linked playbooks are not yet
-        stored on the role profile — this view shows every real field the persona currently has.
-        Those richer fields need backend support before they can be displayed.
+      <div className="px-small" style={{ color: 'var(--proto-ink3)', lineHeight: 1.5 }}>
+        Linked assets aren't shown yet — assets aren't tagged to roles in the data model. That link comes when asset→role tagging lands.
       </div>
     </div>
   )
