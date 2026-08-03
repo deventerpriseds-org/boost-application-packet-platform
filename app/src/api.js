@@ -213,7 +213,7 @@ export const api = {
   deletePersona: (key) => del(`/app/personas/${key}?owner=${encodeURIComponent(_owner)}`),
   tagAllRoles: () => post(`/app/personas/tag-all?owner=${encodeURIComponent(_owner)}`, {}),
   // Role taxonomy (3-level: group -> role -> title variant; fav/watch/off tiers)
-  taxonomy: () => get(`/app/taxonomy`),
+  taxonomy: () => get(`/app/taxonomy?owner=${encodeURIComponent(_owner)}${demoParam()}`),
   taxonomyRetag: () => post(`/app/taxonomy/retag`, {}),
   taxonomyAddTitle: (data) => post(`/app/taxonomy/title`, data),
   taxonomySetTier: (data) => patch_(`/app/taxonomy/title/tier`, data),

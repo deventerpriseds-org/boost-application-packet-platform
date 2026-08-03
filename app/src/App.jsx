@@ -16,10 +16,11 @@ import Offer from './screens/Offer.jsx'
 import Answers from './screens/Answers.jsx'
 import Call from './screens/Call.jsx'
 import Library from './screens/Library.jsx'
+import RolesTitles from './screens/RolesTitles.jsx'
 import Intake from './screens/Intake.jsx'
 import Settings from './screens/Settings.jsx'
 
-const TITLES = { today: 'Today', intake: 'Intake', settings: 'Settings', opportunities: 'Opportunities', pipeline: 'Pipeline', swipe: 'Swipe', opp: 'Opportunity', packets: 'Packets', packet: 'Packet', outreach: 'Outreach', compose: 'Composer', interview: 'Interview', offer: 'Offer', answers: 'App answers', call: 'Voice coach', library: 'Library' }
+const TITLES = { today: 'Today', intake: 'Intake', settings: 'Settings', opportunities: 'Opportunities', pipeline: 'Pipeline', swipe: 'Swipe', opp: 'Opportunity', packets: 'Packets', packet: 'Packet', outreach: 'Outreach', compose: 'Composer', interview: 'Interview', offer: 'Offer', answers: 'App answers', call: 'Voice coach', library: 'Library', roles: 'Roles & Titles' }
 
 function Router() {
   const { toast, showDemo } = useApp()
@@ -44,6 +45,7 @@ function Router() {
   else if (route === 'answers' && parts[1]) screen = <Answers id={parts[1]} />
   else if (route === 'call') screen = <Call />
   else if (route === 'library') screen = <Library tab={parts[1] || 'assets'} />
+  else if (route === 'roles') screen = <RolesTitles />
   else if (route === 'opp' && parts[1]) screen = <OppDetail id={parts[1]} tab={parts[2] || 'overview'} />
   else screen = <Today opps={opps} />
 

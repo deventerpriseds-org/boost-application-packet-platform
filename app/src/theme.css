@@ -137,3 +137,26 @@
       .px-btn, .px-input { max-width: 100%; }
       select.px-btn { text-overflow: ellipsis; }
     }
+
+/* ── ACT-39 Roles & Titles: 3-pane responsive grid (PRD §7 breakpoints) ───────────── */
+.ee-roles-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: 220px minmax(360px, 1fr) minmax(270px, 320px);
+  grid-template-areas: "tree list detail";
+  align-items: start;
+}
+.ee-pane { padding: 12px; max-height: calc(100vh - 190px); overflow-y: auto; }
+.ee-pane[data-pane="tree"]   { grid-area: tree; }
+.ee-pane[data-pane="list"]   { grid-area: list; }
+.ee-pane[data-pane="detail"] { grid-area: detail; }
+@media (max-width: 1179px) {
+  .ee-roles-grid {
+    grid-template-columns: 200px minmax(0, 1fr);
+    grid-template-areas: "tree list" "detail detail";
+  }
+  .ee-pane { max-height: none; }
+}
+@media (max-width: 719px) {
+  .ee-roles-grid { grid-template-columns: 1fr; grid-template-areas: "tree" "list" "detail"; }
+}
