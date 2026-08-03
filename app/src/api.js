@@ -217,6 +217,9 @@ export const api = {
   taxonomyRetag: () => post(`/app/taxonomy/retag`, {}),
   taxonomyAddTitle: (data) => post(`/app/taxonomy/title`, data),
   taxonomySetTier: (data) => patch_(`/app/taxonomy/title/tier`, data),
+  taxonomyBulkTier: ({ group, roleSlug, tier }) => post(`/app/taxonomy/roles/bulk-tier`, { group, roleSlug, tier }),
+  taxonomyPublish: () => post(`/app/taxonomy/publish`, {}),
+  taxonomyRevert: () => post(`/app/taxonomy/revert`, {}),
   listLibrary: (kind) => get(`/app/library${kind ? `?kind=${encodeURIComponent(kind)}` : ''}`),
 }
 

@@ -38,6 +38,8 @@ export default function RolesTitles() {
   const [q, setQ] = useState('')
   const [favFirst, setFavFirst] = useState(true)
   const [busyTitle, setBusyTitle] = useState(null)
+  const [dirty, setDirty] = useState(0)
+  const [saving, setSaving] = useState(false)
   const canEdit = sessionValid()
 
   const load = useCallback(async () => {
@@ -45,7 +47,8 @@ export default function RolesTitles() {
     try {
       const res = await api.taxonomy()
       const groups = (res.groups || []).slice().sort((a, b) => (GROUP_RANK[a.slug] ?? 9) - (GROUP_RANK[b.slug] ?? 9))
-      setData({ groups, counts: res.counts || {} })
+      setDirty(res.dirty || 0)
+      setData({ groups, counts: res.counts || {}, favoritedOpps: res.favoritedOpps || 0 })
       // preselect first role of first group (PRD R-1: C Suite -> CTO)
       setSel((s) => {
         if (s.role) return s
@@ -84,15 +87,43 @@ export default function RolesTitles() {
       groups.forEach((g) => g.roles.forEach((r) => r.titles.forEach((t) => { totals[t.tier]++ })))
       return { groups, counts: { ...d.counts, ...totals } }
     })
-    try { await api.taxonomySetTier({ title: title.title, tier }) }
-    catch (e) { setErr(`Save failed: ${String(e?.message || e)}`); await load() }
+    try { const r = await api.taxonomySetTier({ title: title.title, tier }); if (typeof r?.dirty === 'number') setDirty(r.dirty) }
+    catch (e) { setErr(`Stage failed: ${String(e?.message || e)}`); await load() }
     finally { setBusyTitle(null) }
   }
   const cycleTier = (t) => setTier(t, NEXT_TIER[t.tier] || 'fav')
   const toggleStar = (t) => setTier(t, t.tier === 'fav' ? 'watch' : 'fav')
   const bulkTier = async (tier) => {
     if (!canEdit || !selRole) return
-    for (const t of selRole.role.titles) { if (t.tier !== tier) await setTier(t, tier) }
+    setBusyTitle('__bulk__')
+    // optimistic: set every title in the selected role to `tier`
+    setData((d) => {
+      const groups = d.groups.map((g) => g.slug !== sel.group ? g : ({
+        ...g, roles: g.roles.map((r) => r.slug !== sel.role ? r : (() => {
+          const titles = r.titles.map((t) => ({ ...t, tier }))
+          const counts = { fav: 0, watch: 0, off: 0 }; titles.forEach((t) => counts[t.tier]++)
+          return { ...r, titles, ...counts }
+        })()),
+      }))
+      return { ...d, groups }
+    })
+    try { const r = await api.taxonomyBulkTier({ group: sel.group, roleSlug: sel.role, tier }); if (typeof r?.dirty === 'number') setDirty(r.dirty) }
+    catch (e) { setErr(`Bulk failed: ${String(e?.message || e)}`); await load() }
+    finally { setBusyTitle(null) }
+  }
+  const publish = async () => {
+    if (!canEdit || saving) return
+    setSaving(true)
+    try { await api.taxonomyPublish(); await load() }
+    catch (e) { setErr(`Save failed: ${String(e?.message || e)}`) }
+    finally { setSaving(false) }
+  }
+  const revert = async () => {
+    if (!canEdit || saving) return
+    setSaving(true)
+    try { await api.taxonomyRevert(); await load() }
+    catch (e) { setErr(`Revert failed: ${String(e?.message || e)}`) }
+    finally { setSaving(false) }
   }
 
   if (err) return <ErrorBox msg={err} onRetry={load} />
@@ -118,13 +149,26 @@ export default function RolesTitles() {
             {!canEdit && <span style={{ color: 'var(--proto-red, #ef4444)' }}> · Sign in to edit tiers</span>}
           </div>
         </div>
-        <div style={{ display: 'flex', gap: 18 }}>
-          {[['Groups', c.groups ?? data.groups.length], ['Roles', roleCount], ['Titles', c.titles ?? 0], ['Favorites', c.fav ?? 0]].map(([lbl, n]) => (
+        <div style={{ display: 'flex', gap: 18, alignItems: 'center' }}>
+          {[['Groups', c.groups ?? data.groups.length], ['Roles', roleCount], ['Titles', c.titles ?? 0]].map(([lbl, n]) => (
             <div key={lbl} style={{ textAlign: 'right' }}>
-              <div style={{ fontSize: 18, fontWeight: 800, color: lbl === 'Favorites' ? '#c08a1e' : 'var(--text-default)' }}>{n}</div>
+              <div style={{ fontSize: 18, fontWeight: 800 }}>{n}</div>
               <div className="px-small" style={{ textTransform: 'uppercase', letterSpacing: 0.4, fontSize: 10 }}>{lbl}</div>
             </div>
           ))}
+          {/* Priority opps = live opportunities matched to a favorite title — the meaningful signal,
+              clickable straight to the filtered Opportunities view (extends the existing 'strategic' filter). */}
+          <div data-priority-opps onClick={() => go('/opportunities?filter=strategic')} title="View these opportunities"
+            style={{ textAlign: 'right', cursor: 'pointer', paddingLeft: 14, borderLeft: '1px solid var(--proto-rule-soft)' }}>
+            <div style={{ fontSize: 18, fontWeight: 800, color: '#c08a1e' }}>{data.favoritedOpps} ★</div>
+            <div className="px-small" style={{ textTransform: 'uppercase', letterSpacing: 0.4, fontSize: 10, color: 'var(--text-brand)' }}>Priority opps →</div>
+          </div>
+          {dirty > 0 && (
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center', paddingLeft: 14, borderLeft: '1px solid var(--proto-rule-soft)' }}>
+              {canEdit && <button className="px-btn-ghost" style={{ fontSize: 12 }} disabled={saving} onClick={revert} data-action="revert">Revert {dirty}</button>}
+              {canEdit && <button className="px-btn" style={{ fontSize: 12 }} disabled={saving} onClick={publish} data-action="save">{saving ? 'Saving…' : 'Save favorites'}</button>}
+            </div>
+          )}
         </div>
       </div>
 
@@ -199,6 +243,11 @@ export default function RolesTitles() {
                       style={{ cursor: canEdit ? 'pointer' : 'default', color: t.tier === 'fav' ? '#c08a1e' : 'var(--proto-ink4, #cbd2dc)', fontSize: 15, width: 16 }}>★</span>
                     <span style={{ flex: 1, fontSize: 12.5, fontWeight: t.tier === 'fav' ? 600 : 400,
                       textDecoration: t.tier === 'off' ? 'line-through' : 'none' }}>{t.title}</span>
+                    {t.live > 0 && (
+                      <span data-live title={`${t.live} open opportunit${t.live === 1 ? 'y' : 'ies'} matched — click to view`}
+                        onClick={() => go('/opportunities?filter=strategic')}
+                        style={{ cursor: 'pointer', fontSize: 10.5, fontWeight: 700, color: '#c08a1e', background: 'rgba(192,138,30,.10)', borderRadius: 10, padding: '1px 7px' }}>{t.live} live</span>
+                    )}
                     <span data-tiercycle onClick={() => cycleTier(t)}
                       style={{ cursor: canEdit ? 'pointer' : 'default', fontSize: 11, fontWeight: 600, color: TIER_META[t.tier].color,
                         opacity: busyTitle === t.title ? 0.4 : 1, minWidth: 64, textAlign: 'right' }}>{TIER_META[t.tier].label}</span>
@@ -215,7 +264,7 @@ export default function RolesTitles() {
                 </div>
               )}
               <div className="px-small" style={{ marginTop: 8, color: 'var(--proto-ink3)' }}>
-                Changes save immediately (prototype — draft/publish layer coming next).
+                Tier changes are staged as a draft — hit <b>Save favorites</b> to publish &amp; re-score your opportunities, or <b>Revert</b> to discard.
               </div>
             </>
           )}
