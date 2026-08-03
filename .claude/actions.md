@@ -662,10 +662,41 @@ and REMOTE-PLUS enabled by default (remote OR my target metros — NOT remote-on
 { target_geo_ids:[90000097 = Washington DC-Baltimore Area], remote_only:true = REMOTE-PLUS } — seeding a per-owner default the owner can change in Settings ▸ Locations (compliant with the no-hardcoded-config rule) as the default, and
 make new owners default to remote-on. (3) Confirm the facets read like LinkedIn's so it feels familiar.
 
-**ACT-39 — Scope the NEW page we discussed (needs definition).**
-Owner recalls we discussed ADDING a new page (distinct from the dropped page being restored in ACT-30).
-Gather the details of what that new page is from our prior discussion / the PRD, write up its purpose,
-route, and content, then convert to a build action. DO NOT build until scoped + owner-confirmed.
+**ACT-39 — SCOPED (2026-08-03): build the PRD §7 3-pane "Roles & Titles" taxonomy page at `#/roles`.**
+The "new page we discussed" = the FULL PRD §7/§8 page (`docs/specs/Boost_Exec_Pipeline_Roles_and_Titles_PRD.pdf`),
+which memory line 671 already flagged as "still TODO." Distinct from ACT-30 (Role Profiles/baseline grid):
+ACT-30 is the role BASELINE detail; ACT-39 is the TITLE-VARIANT manager that links OUT to it (PRD R-16:
+Pane-3 baseline card → the existing ACT-30 screen; "← Back returns to #/roles"). They COMPOSE — additive,
+nothing destructive. Owner constraint (2026-08-03): adapt the spec onto what's already built, non-destructive.
+
+PURPOSE: let the owner browse the 3-level taxonomy (group→role→title variant, 484 titles), mark FAVORITE
+titles, cycle tiers (fav/watch/off), search/filter, bulk-tier a whole role, then Save (publish) → re-score
+open opps. ROUTE: `#/roles` (+ new sidebar entry "Roles & Titles"; keep "Role Profiles" → /library/roles).
+LAYOUT: 3-pane ≥1180 / 2-pane 720–1179 / stacked <720 (PRD §7 grid).
+CONTENT: Pane1 tree (group carets + role rows, data-group/data-role); Pane2 title variants (star, tier
+cycle, All/Fav/Watch/Off filter chips, favorites-first toggle, search, bulk bar, inclusion-rule note);
+Pane3 role detail (5 cards: Role / Watched folder / Favorites-in-role progress / How favorites promoted /
+Role baseline → links to ACT-30). Stable data-* hooks per PRD §7. 20 screen states R-1..R-20 built 1:1.
+
+ADDITIVE INTEGRATION (reuse, do NOT duplicate — grepped 2026-08-03):
+- REUSE `appRoleTaxonomy.ts`: `GET app/taxonomy` (read model), `PATCH app/taxonomy/title/tier`,
+  `POST app/taxonomy/title`, `POST app/taxonomy/retag`. This already covers PRD §6 read + per-title tier.
+- REUSE `appRoleProfiles.ts` (ACT-30) for the Pane-3 baseline card target — link, don't rebuild.
+- REUSE `roleTaxonomy.ts` §5 matcher; GROUP_LABEL/roleLabel/sessionValid from Library.jsx/api.js.
+- NEW (the only net-new backend): draft/publish layer — `title_tier_draft` table + `POST
+  app/taxonomy/roles/:id/bulk-tier` (atomic), `POST app/taxonomy/publish`, `POST app/taxonomy/revert`,
+  and the `taxonomy.published → rescore open opps` job (tier_boost/is_favorite/match_score recompute).
+  Check whether tier writes today are direct-publish; if so, add the draft layer WITHOUT breaking the
+  existing PATCH (draft-first, publish flushes to title_variant.tier).
+- NEW frontend: `app/src/screens/RolesTitles.jsx` (3-pane) + route + sidebar entry.
+
+ACs (verify-work before done): (1) #/roles renders 3 panes, counters G/R/T/Fav; (2) star toggles
+fav⇄watch + dirty→Revert appears; (3) tier label cycles fav→watch→off; (4) filter chips + search +
+fav-first all work per R-6..R-11; (5) bulk Favorite-all/Watch-all/Turn-off per R-12..R-13; (6) Save
+publishes + re-scores open opps (verify via db-query: an opp under a newly-favorited title gets
+tier_boost=15/is_favorite); (7) Revert discards drafts (R-14); (8) Pane-3 baseline card links to the
+ACT-30 screen and back; (9) responsive 2-pane/stacked; (10) ui-verify #/roles success. DO NOT mark done
+till owner confirms live. Owner go/no-go + phasing requested 2026-08-03 before starting the build.
 
 **ACT-40 — Packet output QUALITY testing (resume + cover letter + PowerPoint portfolio).**
 Once the pipeline is working end-to-end, actually BUILD packets for a few real favorite opps and review
