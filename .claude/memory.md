@@ -119,6 +119,28 @@ Fixed:
 - STILL OPEN: ACT-39 (a NEW page per PRD — needs scoping before build; owner deferred). My earlier
   "remaining open actions" rundown had OMITTED ACT-30 + ACT-39 — surface page-items from actions.md next time.
 
+## ACT-39 FULL BUILD shipped + verified live end-to-end (2026-08-03, commit dc660d8 on main) ✅
+- Owner green-lit full build. Draft/publish taxonomy layer + priority-opps highlight. All 651 titles stay
+  tier=fav (BY DESIGN — no data change). PR #3 merged; main == branch == dc660d8.
+- Backend (appRoleTaxonomy.ts): NEW title_tier_draft working set. tier writes (PATCH title/tier + bulk-tier)
+  now STAGE to draft (row kept only when differing from published). NEW routes: POST app/taxonomy/roles/
+  bulk-tier (atomic per-role), POST app/taxonomy/publish (flush drafts→published + clear + rescoreOpps),
+  POST app/taxonomy/revert. Read model returns effective tier (draft over published), dirty, favoritedOpps,
+  per-title live matched-opp counts. rescoreOpps() extracted + shared with retag.
+- Frontend (RolesTitles.jsx): header shows "197 ★ PRIORITY OPPS →" (= favoritedOpps, live favorited opps),
+  clickable → /opportunities?filter=strategic (reuses existing 'strategic'=isFavorite filter — extend not
+  duplicate). Replaced the redundant title-fav counter. Per-title "N live" badge → same filtered view.
+  Save favorites / Revert N (dirty-gated) call publish/revert. api.js: taxonomyBulkTier/Publish/Revert.
+- VERIFIED LIVE (api-deploy+exec-engine-deploy both success on dc660d8):
+  • GET taxonomy von.ellis → favoritedOpps:197, dirty:0, per-title tier/published/live present ✓
+  • ui-verify #/roles → bodySnippet "651 TITLES 197 ★ PRIORITY OPPS →", "live" + "Open role baseline"
+    matched (missingExpect "Priority opps" = CSS uppercase innerText quirk, cosmetic) ✓
+  • revert → 200 {reverted:0} ✓
+  • demo owner cycle: bulk-tier cto→watch 200 {count:11,dirty:11} → publish 200 {published:11,rescored:7,
+    favoritedOpps:5} → draft/publish/rescore proven end-to-end ✓. Restored demo cto→fav after.
+- STILL DEFERRED (not blocking): full R-1..R-20 1:1 pixel parity, inclusion-rule notes in panes, Add
+  role/group creation forms (PRD G3), folder-change deep-link. Core PRD §7 interactions all live.
+
 ## ACT-39 PROTOTYPE shipped + verified live (2026-08-03, commit 69f4c9c) — owner wanted to SEE it first
 - Owner clarified ACT-39 = the FULL PRD §7 3-pane "Roles & Titles" page at #/roles (the uploaded spec),
   adapted ADDITIVELY onto existing systems (NOT destructive). It composes with ACT-30: PRD R-16 = Pane-3

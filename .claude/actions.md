@@ -662,7 +662,7 @@ and REMOTE-PLUS enabled by default (remote OR my target metros — NOT remote-on
 { target_geo_ids:[90000097 = Washington DC-Baltimore Area], remote_only:true = REMOTE-PLUS } — seeding a per-owner default the owner can change in Settings ▸ Locations (compliant with the no-hardcoded-config rule) as the default, and
 make new owners default to remote-on. (3) Confirm the facets read like LinkedIn's so it feels familiar.
 
-**ACT-39 — SCOPED (2026-08-03): build the PRD §7 3-pane "Roles & Titles" taxonomy page at `#/roles`.**
+**ACT-39 — ✅ DONE + verified live end-to-end (2026-08-03, commit dc660d8, PR #3 merged). Build the PRD §7 3-pane "Roles & Titles" taxonomy page at `#/roles`.**
 The "new page we discussed" = the FULL PRD §7/§8 page (`docs/specs/Boost_Exec_Pipeline_Roles_and_Titles_PRD.pdf`),
 which memory line 671 already flagged as "still TODO." Distinct from ACT-30 (Role Profiles/baseline grid):
 ACT-30 is the role BASELINE detail; ACT-39 is the TITLE-VARIANT manager that links OUT to it (PRD R-16:
