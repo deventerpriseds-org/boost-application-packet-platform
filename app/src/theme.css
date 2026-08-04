@@ -27,6 +27,12 @@
       --proto-density: 1;
       --proto-radius: 12px;
       --proto-radius-sm: 8px;
+      /* Recency-temperature palette (light) — muted text/border + low-alpha tint so chips blend
+         with the teal/slate UI. Cooling is nudged toward the brand teal. */
+      --temp-hot: #c15b3c;   --temp-hot-tint: rgba(193,91,60,.14);
+      --temp-warm: #a9812f;  --temp-warm-tint: rgba(169,129,47,.15);
+      --temp-cooling: #4f88a0; --temp-cooling-tint: rgba(79,136,160,.15);
+      --temp-cold: #7f8b99;  --temp-cold-tint: rgba(127,139,153,.14);
     }
     /* Dark mode — self-contained. The Compass bundle ships a "preview pin"
        that strips [data-theme="dark"] / .dark, so we drive dark ourselves via
@@ -50,6 +56,11 @@
       --surface-brand-subtle: var(--brand-950);
       --surface-success-subtle: var(--green-950);
       --surface-error-subtle: var(--red-950);
+      /* Recency-temperature palette (dark) — lightened for contrast on the dark ground. */
+      --temp-hot: #dd8064;   --temp-hot-tint: rgba(221,128,100,.16);
+      --temp-warm: #c9a252;  --temp-warm-tint: rgba(201,161,80,.16);
+      --temp-cooling: #74a8c0; --temp-cooling-tint: rgba(116,168,192,.16);
+      --temp-cold: #9aa6b4;  --temp-cold-tint: rgba(154,166,180,.15);
       --surface-warning-subtle: var(--yellow-950);
       --surface-info-subtle: var(--blue-950);
       --text-info: var(--blue-400);

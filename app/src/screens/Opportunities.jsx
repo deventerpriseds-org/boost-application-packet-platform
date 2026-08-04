@@ -9,7 +9,6 @@ const TEMPS = ['All', 'Hot', 'Warm', 'Cooling', 'Cold']
 const TEMP_KEYS = ['hot', 'warm', 'cooling', 'cold']
 const TEMP_ORDER = { hot: 0, warm: 1, cooling: 2, cold: 3 }
 const TEMP_LABEL = { hot: 'Hot', warm: 'Warm', cooling: 'Cooling', cold: 'Cold' }
-const TEMP_COLOR = { hot: '#ef5a34', warm: '#e8a90b', cooling: '#3b82f6', cold: '#cbd2dc' }
 const FRESH_STAGES = ['discovered', 'saved', 'enriched']
 const ACTIVE_STAGES = ['applied', 'outreach', 'engaged', 'screen', 'r1', 'panel', 'final', 'offer']
 const CUTOFF_TODAY = () => { const d = new Date(); d.setDate(d.getDate() - 1); d.setHours(0, 0, 0, 0); return d.getTime() }
@@ -300,11 +299,13 @@ export default function Opportunities({ opps, filter }) {
         <div style={{ display: 'inline-flex', gap: 4 }} title="Filter by recency temperature">
           {TEMP_KEYS.map((k) => {
             const on = temps.has(k)
+            // Soft tint fill when on; colored outline + dot kept in both states so the temp reads at a glance.
             return (
               <span key={k} onClick={() => { setActiveFilter(null); toggleTemp(k) }} className="px-pill"
-                style={{ cursor: 'pointer', fontSize: 12, opacity: on ? 1 : 0.4,
-                  background: on ? TEMP_COLOR[k] : 'transparent', color: on ? '#fff' : 'var(--proto-ink2)',
-                  border: `1px solid ${TEMP_COLOR[k]}` }}>
+                style={{ cursor: 'pointer', fontSize: 12, fontWeight: 600, gap: 5,
+                  background: on ? `var(--temp-${k}-tint)` : 'transparent',
+                  color: `var(--temp-${k})`, border: `1px solid var(--temp-${k})` }}>
+                <span style={{ width: 7, height: 7, borderRadius: '50%', background: `var(--temp-${k})`, opacity: on ? 1 : 0.6 }} />
                 {TEMP_LABEL[k]}
               </span>
             )

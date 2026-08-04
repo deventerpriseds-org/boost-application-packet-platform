@@ -27,7 +27,6 @@ const ACTIVE_STAGES = ['applied', 'outreach', 'engaged', 'screen', 'r1', 'panel'
 // Recency temperature (mirrors shell.jsx TEMP_META). Warmer → cooler.
 const TEMP_KEYS = ['hot', 'warm', 'cooling', 'cold']
 const TEMP_LABEL = { hot: 'Hot', warm: 'Warm', cooling: 'Cooling', cold: 'Cold' }
-const TEMP_COLOR = { hot: '#ef5a34', warm: '#e8a90b', cooling: '#3b82f6', cold: '#cbd2dc' }
 
 // Bin an opportunity into a monitored-role family (mirrors the intake design).
 // Roll up strictly by the taxonomy so bins are consistent (no legacy "CTO Roles" vs "CTO"
@@ -143,11 +142,13 @@ function InboxScrubHero({ fresh = [], newToday, backlog, toast }) {
           <div style={{ display: 'flex', gap: 4, marginTop: 8, flexWrap: 'wrap' }}>
             {TEMP_KEYS.map((k) => {
               const on = selTemps.has(k)
+              // Soft tint fill when on; colored outline + dot kept in both states (per design review).
               return (
                 <span key={k} onClick={() => toggleTemp(k)} className="px-small"
-                  style={{ cursor: 'pointer', padding: '2px 8px', borderRadius: 10, fontWeight: 600, fontSize: 11,
-                    background: on ? TEMP_COLOR[k] : 'transparent', color: on ? '#fff' : 'var(--proto-ink2)',
-                    border: `1px solid ${TEMP_COLOR[k]}`, opacity: on ? 1 : 0.5 }}>
+                  style={{ cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 5, padding: '2px 9px', borderRadius: 10, fontWeight: 600, fontSize: 11,
+                    background: on ? `var(--temp-${k}-tint)` : 'transparent',
+                    color: `var(--temp-${k})`, border: `1px solid var(--temp-${k})` }}>
+                  <span style={{ width: 6, height: 6, borderRadius: '50%', background: `var(--temp-${k})`, opacity: on ? 1 : 0.6 }} />
                   {TEMP_LABEL[k]}
                 </span>
               )
