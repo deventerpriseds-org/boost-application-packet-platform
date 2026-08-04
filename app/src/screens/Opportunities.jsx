@@ -358,14 +358,15 @@ export default function Opportunities({ opps, filter }) {
                 </Td>
                 <Td><div style={{ display: 'flex', flexDirection: 'column', gap: 3, alignItems: 'flex-start' }}>{o.temperature ? <SignalIcon kind="temperature" value={o.temperature} ageDays={o.postedAgeDays} /> : <span className="px-small">—</span>}{o.actionPriority && o.actionPriority !== 'new' && <SignalIcon kind="priority" value={o.actionPriority} />}</div></Td>
                 <Td onClick={stopRow}>
+                  {/* Quick actions EXECUTE in place — stopPropagation so a tap never drills into the detail. */}
                   {o.rejected
-                    ? <button className="px-btn" style={{ fontSize: 11 }} disabled={busyId === o.id} onClick={() => restoreOpp(o.id, o.company)}>↩ Restore</button>
+                    ? <button className="px-btn" style={{ fontSize: 11 }} disabled={busyId === o.id} onClick={(e) => { e.stopPropagation(); restoreOpp(o.id, o.company) }}>↩ Restore</button>
                     : (
                       // Same 3-way triage as the Swipe deck: Keep → saved, Maybe → enriched, Dismiss → reject.
                       <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-                        <button className="px-btn" title="Keep — move to Saved" style={{ fontSize: 11, color: '#16794a', borderColor: '#16794a' }} disabled={busyId === o.id} onClick={() => keepOpp(o.id, o.company)}>✓ Keep</button>
-                        <button className="px-btn" title="Maybe — move to Enriched" style={{ fontSize: 11, color: '#a8730a', borderColor: '#a8730a' }} disabled={busyId === o.id} onClick={() => maybeOpp(o.id, o.company)}>↓ Maybe</button>
-                        <button className="px-btn" title="Dismiss — reject" style={{ fontSize: 11, color: 'var(--proto-red)', borderColor: 'var(--proto-red)' }} disabled={busyId === o.id} onClick={() => rejectOpp(o.id, o.company)}>✕ Dismiss</button>
+                        <button className="px-btn" title="Keep — move to Saved" style={{ fontSize: 11, padding: '6px 10px', color: '#16794a', borderColor: '#16794a' }} disabled={busyId === o.id} onClick={(e) => { e.stopPropagation(); keepOpp(o.id, o.company) }}>✓ Keep</button>
+                        <button className="px-btn" title="Maybe — move to Enriched" style={{ fontSize: 11, padding: '6px 10px', color: '#a8730a', borderColor: '#a8730a' }} disabled={busyId === o.id} onClick={(e) => { e.stopPropagation(); maybeOpp(o.id, o.company) }}>↓ Maybe</button>
+                        <button className="px-btn" title="Dismiss — reject" style={{ fontSize: 11, padding: '6px 10px', color: 'var(--proto-red)', borderColor: 'var(--proto-red)' }} disabled={busyId === o.id} onClick={(e) => { e.stopPropagation(); rejectOpp(o.id, o.company) }}>✕ Dismiss</button>
                       </div>
                     )}
                 </Td>
