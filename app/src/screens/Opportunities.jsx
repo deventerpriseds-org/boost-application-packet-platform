@@ -79,7 +79,26 @@ export default function Opportunities({ opps, filter }) {
     try {
       const r = await api.dismiss(id)
       if (r.error) throw new Error(r.error)
-      toast(`Rejected ${company || ''}`.trim())
+      toast(`Dismissed ${company || ''}`.trim())
+      refreshAll()
+    } catch (e) { toast(`Failed: ${e.message}`) } finally { setBusyId(null) }
+  }
+  // Keep / Maybe — the positive triage decisions (mirror Swipe): advance the stage rather than reject.
+  const keepOpp = async (id, company) => {
+    setBusyId(id)
+    try {
+      const r = await api.moveStage(id, 'saved')
+      if (r.error) throw new Error(r.error)
+      toast(`Kept ${company || ''} → Saved`.trim())
+      refreshAll()
+    } catch (e) { toast(`Failed: ${e.message}`) } finally { setBusyId(null) }
+  }
+  const maybeOpp = async (id, company) => {
+    setBusyId(id)
+    try {
+      const r = await api.moveStage(id, 'enriched')
+      if (r.error) throw new Error(r.error)
+      toast(`${company || ''} → Maybe`.trim())
       refreshAll()
     } catch (e) { toast(`Failed: ${e.message}`) } finally { setBusyId(null) }
   }
@@ -318,7 +337,14 @@ export default function Opportunities({ opps, filter }) {
                 <Td onClick={stopRow}>
                   {o.rejected
                     ? <button className="px-btn" style={{ fontSize: 11 }} disabled={busyId === o.id} onClick={() => restoreOpp(o.id, o.company)}>↩ Restore</button>
-                    : <button className="px-btn" style={{ fontSize: 11, color: 'var(--proto-red)', borderColor: 'var(--proto-red)' }} disabled={busyId === o.id} onClick={() => rejectOpp(o.id, o.company)}>✕ Reject</button>}
+                    : (
+                      // Same 3-way triage as the Swipe deck: Keep → saved, Maybe → enriched, Dismiss → reject.
+                      <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                        <button className="px-btn" title="Keep — move to Saved" style={{ fontSize: 11, color: '#16794a', borderColor: '#16794a' }} disabled={busyId === o.id} onClick={() => keepOpp(o.id, o.company)}>✓ Keep</button>
+                        <button className="px-btn" title="Maybe — move to Enriched" style={{ fontSize: 11, color: '#a8730a', borderColor: '#a8730a' }} disabled={busyId === o.id} onClick={() => maybeOpp(o.id, o.company)}>↓ Maybe</button>
+                        <button className="px-btn" title="Dismiss — reject" style={{ fontSize: 11, color: 'var(--proto-red)', borderColor: 'var(--proto-red)' }} disabled={busyId === o.id} onClick={() => rejectOpp(o.id, o.company)}>✕ Dismiss</button>
+                      </div>
+                    )}
                 </Td>
               </tr>
             ))}

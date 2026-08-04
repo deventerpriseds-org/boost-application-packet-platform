@@ -42,6 +42,12 @@ export default function OppDetail({ id, tab = 'overview' }) {
     if (res.error) { toast(`Move failed: ${res.error}`); load() }
     else toast(`${state.opp?.company} → ${STAGES.find((x) => x.id === stage)?.label}`)
   }
+  // 3-way triage (mirrors the Swipe deck): Keep → saved, Maybe → enriched, Dismiss → reject + back to list.
+  const dismissOpp = async () => {
+    const res = await api.dismiss(id)
+    if (res?.error) toast(`Dismiss failed: ${res.error}`)
+    else { toast(`Dismissed ${state.opp?.company}`); go('/opportunities') }
+  }
 
   if (state.loading) return <Loading />
   if (state.error) return <ErrorBox error={state.error} />
@@ -83,6 +89,13 @@ export default function OppDetail({ id, tab = 'overview' }) {
               {s.label}
             </div>
           ))}
+        </div>
+
+        {/* 3-way triage — the same decision as the Swipe deck, available on the detail page */}
+        <div style={{ display: 'flex', gap: 8, marginTop: 14, flexWrap: 'wrap' }}>
+          <button className="px-btn" style={{ fontSize: 12, color: '#16794a', borderColor: '#16794a' }} onClick={() => move('saved')}>✓ Keep</button>
+          <button className="px-btn" style={{ fontSize: 12, color: '#a8730a', borderColor: '#a8730a' }} onClick={() => move('enriched')}>↓ Maybe</button>
+          <button className="px-btn" style={{ fontSize: 12, color: 'var(--proto-red)', borderColor: 'var(--proto-red)' }} onClick={dismissOpp}>✕ Dismiss</button>
         </div>
       </div>
 
