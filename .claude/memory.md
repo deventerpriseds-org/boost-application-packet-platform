@@ -993,3 +993,18 @@ NEXT: (a) owner reviews queries + flips enabled (toggle On + Save in the UI now,
   "INBOX SCRUB 42 Hot · 43 new today Hot Warm Cooling Cold" — defaults Hot(42) + 4 chips (missingExpect
   "Inbox scrub" = CSS-uppercase innerText quirk, cosmetic). exec-engine-deploy 9979945 success.
 - NOT persisted: temp selections are per-session (not owner_search_prefs yet). Offered to wire persistence.
+
+## Softened temperature palette shipped (2026-08-04, commit 24a936c, PR #6) — approved via prototype
+- Owner process note: PROTOTYPE before deploying visual changes. Built an Artifact mock (temp-palette.html)
+  → owner approved tint direction + "keep the colored outlines, particularly in inbox scrub hero".
+- Applied: new --temp-{hot,warm,cooling,cold}(-tint) tokens in theme.css (light :root + dark .proto-dark).
+  Chips (Today scrub + Opps facet): selected = soft ~14% tint fill + colored text + colored OUTLINE + dot;
+  off = colored outline + text + dot, NO fill (identity stays visible). Cooling nudged toward brand teal.
+  Removed old bright TEMP_COLOR consts. VERIFIED LIVE: exec-engine-deploy 24a936c success; ui-verify
+  #/opportunities success (Hot/Warm/Cooling/Cold/Warmer). Color itself is owner's visual call.
+- ALSO fixed earlier same session: opp-list quick actions drilled into detail → added e.stopPropagation()
+  per button + bigger tap target (commit f4158f4). Behavior-only.
+- KNOWN CI NOISE: web-deploy.yml (LEGACY console web/dist → job-platform-web SWA) fails on PRs with
+  "maximum number of staging environments" (Azure per-PR staging cap). NOT the product, NOT our change —
+  exec-engine-deploy.yml is the product deploy and is green. Durable fix = drop pull_request trigger from
+  web-deploy.yml (legacy console needs no per-PR staging) OR clean stale staging envs. Offered to owner.
