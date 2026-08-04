@@ -979,3 +979,17 @@ green→amber→red as searches/sweep approaches/exceeds active-window capacity 
   LinkedIn number — real LinkedIn rate ceiling / auth mechanism still not ground-truthed (open follow-up).
 NEXT: (a) owner reviews queries + flips enabled (toggle On + Save in the UI now, no API call needed);
 (b) ACT-44 JD-at-ingest; (c) ACT-45 Analysis section; (d) confirm real LinkedIn quota to tune warning.
+
+## Temperature-driven scrub + Opps temp facet/sort (2026-08-04, commit 9979945, PR #5) — prototype
+- Owner: shift inbox scrub + opp views to piggyback the age/temp signal. Inbox scrub default HOT (not 24h)
+  w/ single|multi-select of other temps; Opps default ALL temps on w/ toggle-off, sorted warmer→cooler.
+- Today.jsx InboxScrubHero: now receives `fresh` (fresh-stage opps) from Today; scrub set = fresh filtered
+  by selTemps (default Set(['hot'])). Temp chips Hot/Warm/Cooling/Cold (TEMP_COLOR). Count+bins+sources from
+  scrub. "N new today" kept as secondary label. Empty-state text temp-aware.
+- Opportunities.jsx: removed single-select urgency dropdown → multi-select temp pill facet (default all on,
+  toggle off; empty→reset all). New default sort 'temp' = warmer→cooler (TEMP_ORDER hot0/warm1/cooling2/
+  cold3), favorites still first; Match/Company still options. Reuses o.temperature — NO backend change.
+- VERIFIED LIVE: ui-verify #/opportunities success (Warmer/Hot/Warm/Cooling/Cold). #/today bodySnippet
+  "INBOX SCRUB 42 Hot · 43 new today Hot Warm Cooling Cold" — defaults Hot(42) + 4 chips (missingExpect
+  "Inbox scrub" = CSS-uppercase innerText quirk, cosmetic). exec-engine-deploy 9979945 success.
+- NOT persisted: temp selections are per-session (not owner_search_prefs yet). Offered to wire persistence.
