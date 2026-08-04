@@ -119,6 +119,14 @@ Fixed:
 - STILL OPEN: ACT-39 (a NEW page per PRD — needs scoping before build; owner deferred). My earlier
   "remaining open actions" rundown had OMITTED ACT-30 + ACT-39 — surface page-items from actions.md next time.
 
+## Triage fix (2026-08-03, commit faf9def, PR #4) — Keep/Maybe/Dismiss on Opps list + OppDetail
+- Owner (mobile screenshots): Opportunities list ACTIONS had ONLY Reject; OppDetail had NO triage
+  (only Advance stage + stepper). "the three options" = Swipe deck's ✕ Dismiss / ↓ Maybe / ✓ Keep.
+- FIX (extend Swipe semantics, no new endpoints): Opportunities.jsx ACTIONS now ✓ Keep(→saved) /
+  ↓ Maybe(→enriched) / ✕ Dismiss(reject); Restore when already rejected. OppDetail.jsx triage row
+  under the stage stepper, same 3. Reuses api.moveStage/api.dismiss. Semantics mirror Swipe.decide()
+  (keep→saved, maybe→enriched, pass→dismiss). App build clean. PR #4 open; verify live after deploy.
+
 ## ACT-39 FULL BUILD shipped + verified live end-to-end (2026-08-03, commit dc660d8 on main) ✅
 - Owner green-lit full build. Draft/publish taxonomy layer + priority-opps highlight. All 651 titles stay
   tier=fav (BY DESIGN — no data change). PR #3 merged; main == branch == dc660d8.
