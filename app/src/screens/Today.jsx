@@ -24,6 +24,10 @@ function priorityActions(opps) {
 // immediately; without it the KPI shows 0 even when opportunities exist.
 const FRESH_STAGES = ['discovered', 'saved', 'enriched']
 const ACTIVE_STAGES = ['applied', 'outreach', 'engaged', 'screen', 'r1', 'panel', 'final', 'offer']
+// Recency temperature (mirrors shell.jsx TEMP_META). Warmer → cooler.
+const TEMP_KEYS = ['hot', 'warm', 'cooling', 'cold']
+const TEMP_LABEL = { hot: 'Hot', warm: 'Warm', cooling: 'Cooling', cold: 'Cold' }
+const TEMP_COLOR = { hot: '#ef5a34', warm: '#e8a90b', cooling: '#3b82f6', cold: '#cbd2dc' }
 
 // Bin an opportunity into a monitored-role family (mirrors the intake design).
 // Roll up strictly by the taxonomy so bins are consistent (no legacy "CTO Roles" vs "CTO"
@@ -63,13 +67,18 @@ function fmtTime(d) {
   return dt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
 }
 
-function InboxScrubHero({ newToday, backlog, toast }) {
+function InboxScrubHero({ fresh = [], newToday, backlog, toast }) {
   // Toggle: 'titles' (default) = the matched job title, the taxonomy level below role ·
   // 'roles' = the 27 monitored roles. Both bin by the same seniority qualifier.
   const [view, setView] = useState('titles')
+  // Temperature multi-select — DEFAULT Hot (single-select feel; click to add/remove others).
+  const [selTemps, setSelTemps] = useState(() => new Set(['hot']))
+  const toggleTemp = (k) => setSelTemps((prev) => { const n = new Set(prev); n.has(k) ? n.delete(k) : n.add(k); return n.size ? n : new Set(['hot']) })
+  // The scrub set is now temperature-driven (piggybacks the age/temp signal) instead of a fixed 24h window.
+  const scrub = useMemo(() => fresh.filter((o) => o.temperature && selTemps.has(o.temperature)), [fresh, selTemps])
   const bins = useMemo(() => {
     const map = new Map()
-    newToday.forEach((o) => {
+    scrub.forEach((o) => {
       let label, group
       if (view === 'titles') {
         // Title view shows FAVORITE titles only; everything else rolls into "Other roles".
@@ -84,9 +93,9 @@ function InboxScrubHero({ newToday, backlog, toast }) {
     // Seniority order (C Suite → VP → Director → Other); ties broken by count then name.
     return [...map.values()].sort((a, b) =>
       seniorityRank(a.group) - seniorityRank(b.group) || b.n - a.n || a.label.localeCompare(b.label))
-  }, [newToday, view])
-  const total = newToday.length
-  const companies = [...new Set(newToday.slice(0, 6).map((o) => o.company))]
+  }, [scrub, view])
+  const total = scrub.length
+  const companies = [...new Set(scrub.slice(0, 6).map((o) => o.company))]
 
   const [watch, setWatch] = useState(null)
   const [scanning, setScanning] = useState(false)
@@ -127,7 +136,23 @@ function InboxScrubHero({ newToday, backlog, toast }) {
             <span className="px-small" style={{ textTransform: 'uppercase', letterSpacing: 1, color: 'var(--text-brand)' }}>Inbox scrub</span>
           </div>
           <div style={{ fontSize: 44, fontWeight: 700, lineHeight: 1, marginTop: 8, color: 'var(--text-brand)' }}>{total}</div>
-          <div className="px-small" style={{ marginTop: 2 }}>new today{backlog.length > 0 ? ` · ${backlog.length} backlog` : ''}</div>
+          <div className="px-small" style={{ marginTop: 2 }}>
+            {[...selTemps].map((k) => TEMP_LABEL[k]).join(' + ') || 'Hot'} · {newToday.length} new today
+          </div>
+          {/* Temperature chips — default Hot; single- or multi-select to widen the scrub. */}
+          <div style={{ display: 'flex', gap: 4, marginTop: 8, flexWrap: 'wrap' }}>
+            {TEMP_KEYS.map((k) => {
+              const on = selTemps.has(k)
+              return (
+                <span key={k} onClick={() => toggleTemp(k)} className="px-small"
+                  style={{ cursor: 'pointer', padding: '2px 8px', borderRadius: 10, fontWeight: 600, fontSize: 11,
+                    background: on ? TEMP_COLOR[k] : 'transparent', color: on ? '#fff' : 'var(--proto-ink2)',
+                    border: `1px solid ${TEMP_COLOR[k]}`, opacity: on ? 1 : 0.5 }}>
+                  {TEMP_LABEL[k]}
+                </span>
+              )
+            })}
+          </div>
           <div className="px-small" style={{ marginTop: 6, color: 'var(--proto-ink3)' }}>
             Checked {fmtTime(lastChecked) || '—'}
             {lastIngest && <span> · ingested {fmtTime(lastIngest)}</span>}
@@ -146,7 +171,7 @@ function InboxScrubHero({ newToday, backlog, toast }) {
             </div>
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '6px 20px' }}>
-            {bins.length === 0 && <div className="px-small">{view === 'titles' ? 'No favorite-title matches in the new batch.' : 'Inbox is clear — no new roles overnight.'}</div>}
+            {bins.length === 0 && <div className="px-small">No {[...selTemps].map((k) => TEMP_LABEL[k].toLowerCase()).join('/')} matches right now — widen the temperature above.</div>}
             {bins.map((b) => (
               <div key={b.label} onClick={() => go('/opportunities?filter=' + (view === 'titles' ? 'titlenew:' : 'rolenew:') + encodeURIComponent(b.label))} style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', padding: '4px 6px', borderRadius: 6, transition: 'background 0.12s' }} onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--proto-rule-soft)' }} onMouseLeave={(e) => { e.currentTarget.style.background = '' }}>
                 <span style={{ width: 9, height: 9, borderRadius: '50%', background: dotForGroup(b.group), flexShrink: 0 }} />
@@ -178,7 +203,7 @@ export default function Today({ opps }) {
   const { displayName, toast } = useApp()
   const { loading, error, opportunities } = opps
 
-  const { newToday, backlog, active, hot, avgMatch } = useMemo(() => {
+  const { newToday, backlog, active, hot, avgMatch, fresh } = useMemo(() => {
     // Cutoff = start of yesterday so overnight ingest is captured without sliding.
     const yesterday = new Date(); yesterday.setDate(yesterday.getDate() - 1); yesterday.setHours(0, 0, 0, 0)
     const cutoff = yesterday.getTime()
@@ -189,7 +214,7 @@ export default function Today({ opps }) {
     const hot = opportunities.filter((o) => o.temperature === 'hot')
     const scored = opportunities.filter((o) => typeof o.match === 'number')
     const avgMatch = scored.length ? Math.round(scored.reduce((a, o) => a + o.match, 0) / scored.length) : null
-    return { newToday, backlog, active, hot, avgMatch }
+    return { newToday, backlog, active, hot, avgMatch, fresh }
   }, [opportunities])
 
   const priorities = useMemo(() => priorityActions(opportunities), [opportunities])
@@ -238,7 +263,7 @@ export default function Today({ opps }) {
       </div>
 
       {/* Latest inbox scrub — most immediate attention */}
-      <InboxScrubHero newToday={newToday} backlog={backlog} toast={toast} />
+      <InboxScrubHero fresh={fresh} newToday={newToday} backlog={backlog} toast={toast} />
 
       {/* Pulse strip — real platform metrics */}
       {metrics && <PulseStrip metrics={metrics} />}

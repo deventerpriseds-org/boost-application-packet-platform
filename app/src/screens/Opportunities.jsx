@@ -5,6 +5,11 @@ import { MatchScore, SignalIcon, Pill, FavStar } from '../shell.jsx'
 import { Loading, ErrorBox, Empty, roleFamily, titleFamily } from './Today.jsx'
 
 const TEMPS = ['All', 'Hot', 'Warm', 'Cooling', 'Cold']
+// Recency temperature — shared order + palette (mirrors shell.jsx TEMP_META). Warmer → cooler.
+const TEMP_KEYS = ['hot', 'warm', 'cooling', 'cold']
+const TEMP_ORDER = { hot: 0, warm: 1, cooling: 2, cold: 3 }
+const TEMP_LABEL = { hot: 'Hot', warm: 'Warm', cooling: 'Cooling', cold: 'Cold' }
+const TEMP_COLOR = { hot: '#ef5a34', warm: '#e8a90b', cooling: '#3b82f6', cold: '#cbd2dc' }
 const FRESH_STAGES = ['discovered', 'saved', 'enriched']
 const ACTIVE_STAGES = ['applied', 'outreach', 'engaged', 'screen', 'r1', 'panel', 'final', 'offer']
 const CUTOFF_TODAY = () => { const d = new Date(); d.setDate(d.getDate() - 1); d.setHours(0, 0, 0, 0); return d.getTime() }
@@ -40,10 +45,12 @@ export default function Opportunities({ opps, filter }) {
   const { toast } = useApp()
   const { loading, error, opportunities: activeOpps, stages, reload } = opps
   const [query, setQuery] = useState('')
-  const [urgency, setUrgency] = useState('All')
   const [stage, setStage] = useState('All')
-  const [sort, setSort] = useState('match')
+  const [sort, setSort] = useState('temp')   // default: warmer → cooler
+  const [temps, setTemps] = useState(() => new Set(TEMP_KEYS))  // multi-select, all ON by default
   const [roleFilter, setRoleFilter] = useState('all')
+  const allTempsOn = temps.size === TEMP_KEYS.length
+  const toggleTemp = (k) => setTemps((prev) => { const n = new Set(prev); n.has(k) ? n.delete(k) : n.add(k); return n.size ? n : new Set(TEMP_KEYS) })
   const [activeFilter, setActiveFilter] = useState(filter || null)
   const [showRejected, setShowRejected] = useState(false)
   const [withDismissed, setWithDismissed] = useState(null) // list incl. dismissed, fetched on demand
@@ -117,7 +124,7 @@ export default function Opportunities({ opps, filter }) {
     if (filter) {
       setActiveFilter(filter)
       setStage('All')
-      setUrgency('All')
+      setTemps(new Set(TEMP_KEYS))
       setQuery('')
     }
   }, [filter])
@@ -161,19 +168,23 @@ export default function Opportunities({ opps, filter }) {
         const q = query.toLowerCase()
         r = r.filter((o) => (o.company || '').toLowerCase().includes(q) || (o.role || '').toLowerCase().includes(q))
       }
-      if (urgency !== 'All') r = r.filter((o) => o.temperature === urgency.toLowerCase())
+      // Temperature multi-select — all on by default; an opp with no temperature always shows.
+      if (!allTempsOn) r = r.filter((o) => !o.temperature || temps.has(o.temperature))
       if (stage !== 'All') r = r.filter((o) => o.stage === stage)
     }
     // Taxonomy filter: by group (csuite/vp/director), by favorites, or all.
     if (roleFilter === 'fav') r = r.filter((o) => o.isFavorite)
     else if (roleFilter === 'other') r = r.filter((o) => !o.matchedGroup)
     else if (roleFilter !== 'all') r = r.filter((o) => o.matchedGroup === roleFilter)
-    // Favorites first (priority), then by chosen sort.
+    // Favorites first (priority), then by chosen sort. Default 'temp' = warmer → cooler.
+    const tempRank = (o) => (o.temperature != null ? (TEMP_ORDER[o.temperature] ?? 9) : 9)
     r = [...r].sort((a, b) =>
       (Number(!!b.isFavorite) - Number(!!a.isFavorite)) ||
-      (sort === 'match' ? (b.match || 0) - (a.match || 0) : (a.company || '').localeCompare(b.company || '')))
+      (sort === 'temp' ? (tempRank(a) - tempRank(b)) || ((b.match || 0) - (a.match || 0))
+        : sort === 'match' ? (b.match || 0) - (a.match || 0)
+        : (a.company || '').localeCompare(b.company || '')))
     return r
-  }, [opportunities, query, urgency, stage, sort, roleFilter, activeFilter])
+  }, [opportunities, query, temps, allTempsOn, stage, sort, roleFilter, activeFilter])
 
   // Live stage counts for the funnel — group ALL loaded opps by stage (ignores filters).
   const stageCounts = useMemo(() => {
@@ -226,7 +237,7 @@ export default function Opportunities({ opps, filter }) {
             {stages.map((s, i) => (
               <div key={s} style={{ display: 'flex', alignItems: 'center' }}>
                 <div
-                  onClick={() => { setActiveFilter(null); setUrgency('All'); setQuery(''); setStage(s) }}
+                  onClick={() => { setActiveFilter(null); setTemps(new Set(TEMP_KEYS)); setQuery(''); setStage(s) }}
                   title={STAGE_LABELS[s] || s}
                   style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, cursor: 'pointer' }}>
                   <span style={{
@@ -254,7 +265,7 @@ export default function Opportunities({ opps, filter }) {
           const n = f.key ? quickCounts[f.key] : opportunities.length
           return (
             <span key={f.label} className="px-pill"
-              onClick={() => { setActiveFilter(f.key); setStage('All'); setUrgency('All'); setQuery(''); if (!f.key) go('/opportunities') }}
+              onClick={() => { setActiveFilter(f.key); setStage('All'); setTemps(new Set(TEMP_KEYS)); setQuery(''); if (!f.key) go('/opportunities') }}
               style={{ cursor: 'pointer', background: on ? 'var(--surface-brand-default)' : undefined, color: on ? 'var(--text-on-brand)' : undefined }}>
               {f.label}{typeof n === 'number' ? ` ${n}` : ''}
             </span>
@@ -285,14 +296,26 @@ export default function Opportunities({ opps, filter }) {
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
         <input className="px-input" placeholder="Search company or role…" value={query} onChange={(e) => { setActiveFilter(null); setQuery(e.target.value) }}
           style={{ flex: 1, minWidth: 220 }} disabled={!!activeFilter} />
-        <select className="px-btn" value={urgency} onChange={(e) => { setActiveFilter(null); setUrgency(e.target.value) }} disabled={!!activeFilter}>
-          {TEMPS.map((u) => <option key={u}>{u}</option>)}
-        </select>
+        {/* Temperature multi-select — all ON by default; click to toggle a temp off/on. */}
+        <div style={{ display: 'inline-flex', gap: 4 }} title="Filter by recency temperature">
+          {TEMP_KEYS.map((k) => {
+            const on = temps.has(k)
+            return (
+              <span key={k} onClick={() => { setActiveFilter(null); toggleTemp(k) }} className="px-pill"
+                style={{ cursor: 'pointer', fontSize: 12, opacity: on ? 1 : 0.4,
+                  background: on ? TEMP_COLOR[k] : 'transparent', color: on ? '#fff' : 'var(--proto-ink2)',
+                  border: `1px solid ${TEMP_COLOR[k]}` }}>
+                {TEMP_LABEL[k]}
+              </span>
+            )
+          })}
+        </div>
         <select className="px-btn" value={stage} onChange={(e) => { setActiveFilter(null); setStage(e.target.value) }} disabled={!!activeFilter}>
           <option>All</option>
           {stages.map((s) => <option key={s} value={s}>{s}</option>)}
         </select>
         <select className="px-btn" value={sort} onChange={(e) => setSort(e.target.value)}>
+          <option value="temp">Sort: Warmer → cooler</option>
           <option value="match">Sort: Match</option>
           <option value="company">Sort: Company</option>
         </select>
