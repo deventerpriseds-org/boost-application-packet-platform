@@ -55,9 +55,11 @@ const FAMILIES: { role: string; slug: string; subs: string[]; extra?: string[] }
 ]
 
 const VP_PREFIXES = ['Vice President of', 'VP of', 'Head of', 'Global Head of']
-// Director group primarily Senior/Executive/Managing/Global Director (ordinary "Director of X"
-// is NOT seeded fav — it only matches via the watch fallback unless exceptional).
-const DIR_PREFIXES = ['Senior Director of', 'Executive Director of', 'Managing Director of', 'Global Director of']
+// Director group: plain "Director of X" AND Senior/Executive/Managing/Global Director are all
+// seeded fav. A bare "Director of <discipline>" is a favorite because the FAMILIES below are the
+// owner's own target disciplines — an off-discipline Director (e.g. "Director of Facilities") still
+// won't favorite, since it exact-matches no family seed and the keyword fallback returns 'watch'.
+const DIR_PREFIXES = ['Director of', 'Senior Director of', 'Executive Director of', 'Managing Director of', 'Global Director of']
 
 export interface SeedTitle { group: Group; roleSlug: string; role: string; variation: string; title: string; tier: Tier }
 export interface SeedRole { group: Group; slug: string; role: string; variations: string[] }
@@ -196,8 +198,6 @@ const NONE: MatchResult = { matched: false, group: null, roleSlug: null, role: n
 // COO inclusion rule: only counts (fav) when a software/transformation signal is present in the
 // title+JD text. Absent → routed to backlog (matched=false-priority) as a watch under COO.
 const COO_SIGNAL = /(software|digital|transformation|product|technolog|platform|engineering|automation|data|ai)/i
-// Director group: ordinary "Director of X" only qualifies as fav when Senior/Executive/Managing/Global.
-const DIR_SENIOR = /\b(senior|executive|managing|global)\b/i
 
 // Seniority band from the FULL title (un-cut, abbrev-expanded). This is authoritative for the GROUP
 // bucket — more reliable than which seed title happened to fuzzy-match. Order matters: a VP-led
@@ -222,7 +222,7 @@ function entryResult(e: IndexEntry, method: MatchMethod, confidence: number): Ma
  * Order: exact → alias(abbrev-expanded, same normalization) → fuzzy(trigram ≥ 0.82) → keyword.
  * `context` (optional JD text) is used only for the COO inclusion signal.
  * `backlog=true` in the result means matched a favorite role BUT failed its inclusion rule
- *   (COO w/o signal, ordinary Director) → should go to the role backlog, not the priority queue.
+ *   (COO w/o software/transformation signal) → should go to the role backlog, not the priority queue.
  */
 export function resolveTitle(rawTitle: string, context = ''): MatchResult & { backlog: boolean } {
   const norm = normalize(rawTitle)
@@ -274,10 +274,7 @@ export function resolveTitle(rawTitle: string, context = ''): MatchResult & { ba
   // Inclusion rules — a favorite that fails its rule stays matched but goes to backlog (not priority).
   let backlog = false
   if (res.roleSlug === 'coo' && !COO_SIGNAL.test(`${rawTitle} ${context}`)) { backlog = true; res = { ...res, isFavorite: false } }
-  if (res.group === 'director' && !DIR_SENIOR.test(norm)) {
-    // ordinary Director → not a promoted favorite; backlog unless exceptional (exceptional handled upstream)
-    if (res.tier === 'fav') { backlog = true; res = { ...res, isFavorite: false } }
-  }
+  // (Bare "Director of X" is no longer demoted — plain Director in a target discipline is a favorite.)
   return { ...res, backlog }
 }
 
