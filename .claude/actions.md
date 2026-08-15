@@ -801,3 +801,20 @@ DECISION NEEDED FROM OWNER: (a) search off discipline cores (recommended, full c
   activeHoursEt (settings-driven per no-hardcoded-config rule). Default DISABLED — owner must flip on.
 - Old jdSearchTimer stays SEARCH_PAUSED=true (superseded); manual POST /mail/jd-search still works.
 NEXT: deploy → verify GET /app/search-sweep shows ~87 queries/651 titles → owner reviews → POST enabled=true.
+
+## ACT-23 — Resume tab: full labeled preview + inline/AI (Luna) edit + auto-refresh + empty-section fix
+**Requested:** 2026-08-15
+**Asked for:** preview missing sections (not just skills/education — ALL), can't edit preview manually or
+with AI, finished doc/link not surfacing after screen sleep, modern UI (not plain text), AI edits on Luna
+(OpenAI gpt-5.6, selectable effort default medium).
+**Expected outcome:** structured all-sections preview; per-section manual + AI edit; auto-refresh; sections
+stop coming back empty.
+- AC-1: getPacket returns pkg_json; preview renders every labeled section incl. visible empty-state — DONE (getPacket pkg verified live)
+- AC-2: POST /app/artifact/{id}/ai-edit uses gpt-5.6-luna via Responses API w/ effort low|medium|high|max — DONE (verified live: HTTP200, model gpt-5.6-luna, effort medium)
+- AC-3: POST /app/artifact/{id}/content persists manual edits into pkg_json/content — DONE (built; shares verified persistence path)
+- AC-4: auto-refresh polls while generating + refetch on focus/visibility — DONE (built; frontend deployed)
+- AC-5: resumeParser/assemblePackage no longer silently blank sections — DONE (built)
+**Status:** `done` (backend VERIFIED LIVE on commit d009c1c; frontend built+deployed+code-reviewed;
+rendered ResumeTab UI is internal-state, not ui-verify-addressable → owner to eyeball live)
+**Layout note:** the generated-doc "distortion" was the MOBILE browser's Google Docs viewer, not the
+generator (proved byte-identical geometry via /diag/doc-structure). No code change.

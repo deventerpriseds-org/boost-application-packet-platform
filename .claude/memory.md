@@ -1008,3 +1008,59 @@ NEXT: (a) owner reviews queries + flips enabled (toggle On + Save in the UI now,
   "maximum number of staging environments" (Azure per-PR staging cap). NOT the product, NOT our change —
   exec-engine-deploy.yml is the product deploy and is green. Durable fix = drop pull_request trigger from
   web-deploy.yml (legacy console needs no per-PR staging) OR clean stale staging envs. Offered to owner.
+
+## Resume packet overhaul: labeled preview + inline/AI edit + auto-refresh + empty-fix (2026-08-15, commit d009c1c) — backend VERIFIED LIVE
+- OppDetail ResumeTab (app/src/screens/OppDetail.jsx) + appPackets.ts. Four features:
+  - B (preview): renders STRUCTURED pkg_json — getPacket now returns `pkg`. Labeled sections
+    Summary/Skills1+2/Expertise/Relevant1-3/WorkHistory1-4/Education; empty sections show a visible
+    "No content generated" note so nothing silently drops. Replaced the raw `content` text dump.
+  - KEY INSIGHT: "missing sections" was a PREVIEW-SOURCE bug, not empty data. pkg_json had SkillsBullets1/2
+    filled all along; the old preview read artifact.content (flat prose from artifactGenerate, coalesced so
+    makeDoc never overwrote it). Verified: getPacket pkg for Trinnex opp has ALL sections populated.
+  - A (auto-refresh): poll getPacket every 8s while generating + refetch on visibilitychange/window focus,
+    so a finished Google Doc link surfaces without a manual reload. Root cause of "buttons reset, no link":
+    old ResumeTab fetched once on mount, never re-polled/refetched.
+  - C (editing): per-section manual edit POST /app/artifact/{id}/content (writes artifact.content &/or
+    merges into packet.pkg_json — buildTemplatedArtifact reuses pkg_json unless regen, so Create-Doc uses
+    edits) + AI edit POST /app/artifact/{id}/ai-edit.
+  - D (empty-section robustness): loosened resumeParser.ts TITLE_MAP heading regexes + mt17.ts
+    assemblePackage firstNonEmpty fallbacks + splitSkills; pipeline.ts silent catches now console.warn.
+
+### LUNA / AI-edit model — REUSABLE ACROSS THE PRODUCT (mirror of huddle-extension-app)
+- Model `gpt-5.6-luna` (OpenAI GPT-5.6, cheap/fast tier; siblings terra=balanced, sol=flagship; bare
+  `gpt-5.6` routes to sol — ALWAYS use the explicit -luna/-terra/-sol suffix).
+- Endpoint: OpenAI **Responses API** POST https://api.openai.com/v1/responses (NOT chat/completions;
+  Assistants + stored prompts deprecated, v1/prompts shuts 2026-11-30).
+- Auth: the SAME existing OPENAI_API_KEY (Function App key HAS GPT-5.6 access — verified live HTTP 200).
+- Body: { model, instructions, input:[{role,content}], reasoning:{effort, summary:'auto'} (gate via
+  isReasoningModel: /^o\d/.test(m) || m.startsWith('gpt-5')), service_tier:'priority' (luna allow-listed) }.
+- Effort ∈ low|medium|high|max (NO xhigh), default medium; UI <select> in ResumeField. Raising effort on
+  the cheap model is the cost-effective lever before jumping tiers (luna+high ~ terra+medium at ~1/9 cost).
+- Extract text: json.output_text || first output[].content[] where type==='output_text' || .text.
+- Model overridable via env AI_EDIT_MODEL (default 'gpt-5.6-luna'), const in appPackets.ts.
+- Source read over PUBLIC WEB (huddle-extension-app/src/features/huddle/lib/openai-responses.server.ts) —
+  add_repo is gated (-32003 requires approval) in CCR; repo is public so WebFetch raw.githubusercontent.
+- VERIFIED LIVE (api-test.yml on d009c1c): ai-edit → HTTP200 {revised, model:gpt-5.6-luna, effort:medium};
+  getPacket → pkg with all sections. Both builds green.
+- NOT independently UI-verified: rendered ResumeTab (resume tab is internal component state, not a hash
+  route → ui-verify.yml can't land on it without a tab click). Owner to eyeball live.
+
+## Director-tier taxonomy fix (2026-08-14, commit 54d6395) — VERIFIED LIVE
+- roleTaxonomy.ts: plain "Director of <discipline>" was DELIBERATELY excluded from favorites (DIR_PREFIXES
+  = Senior/Exec/Managing/Global only; DIR_SENIOR backlog demotion). Now 'Director of' seeded across target
+  families + removed the backlog demotion. Off-discipline Directors (Facilities etc.) still stay watch via
+  keyword fallback. Retag: 84 titles seeded, 1625 opps rescored; 9 plain-Director opps flipped watch→fav,
+  22 stayed (off-discipline/long-form incl. the Trinnex long title). It was NOT "digital > director" — the
+  plain-Director exclusion was the cause; Technology-vs-Digital group label = FAMILIES array order artifact.
+
+## Resume doc "layout distortion" = MOBILE BROWSER, not the generator (2026-08-14)
+- Built read-only /diag/doc-structure (diagDocStructure.ts): fingerprints table col widths + image
+  sizes/crops for template vs pure-copy vs generated → ALL byte-identical. copyTemplate + replaceAllText +
+  strip changes ZERO geometry. Owner confirmed desktop renders fine; distortion is the MOBILE Google Docs
+  viewer. No code fix. RESUME_TEMPLATE_ID=1bwOcxvkbihRTUjOzVjrWSPnDomwqy6gOz6229mdzbZw.
+
+## Trinnex opp manual-create + why-not-found (2026-08-14)
+- Opp 9f9c370a "Director of Digital Technology Operations & Innovation" @ Trinnex created via POST
+  /app/capture (reuses routeOpportunity embed→dedupe→insert). Why neither pipeline caught it: scheduled
+  search (jdSweep) only queries taxonomy_title tier='fav' EXACT quoted phrases — that title was never in
+  the query set. owner_search_prefs: remote_only=true (so remote roles ARE kept; location wasn't the block).
