@@ -47,19 +47,47 @@ const MOCK_INPUTS = {
   }
 }
 
+// First non-empty string among the candidates, else null. Arrays are joined
+// with newlines so a Call-3 array field and a Call-1 string field are handled
+// uniformly. Guarantees a section is only null when EVERY source is empty.
+function firstNonEmpty(...cands: any[]): string | null {
+  for (const c of cands) {
+    if (Array.isArray(c)) { const s = c.filter(Boolean).join('\n').trim(); if (s) return s }
+    else if (c != null && String(c).trim()) return String(c).trim()
+  }
+  return null
+}
+
+// Split a single combined skills block into two halves so a resume that only
+// produced one "Skills" section still fills both SkillsBullets1/2 slots rather
+// than leaving the second empty. Splits on lines/bullets; falls back to the
+// whole block in slot 1 when it cannot be halved.
+function splitSkills(block: any): [string | null, string | null] {
+  const s = block == null ? '' : String(block).trim()
+  if (!s) return [null, null]
+  const lines = s.split(/\r?\n|(?:\s*[|•·]\s*)/).map((l) => l.trim()).filter(Boolean)
+  if (lines.length < 2) return [s, null]
+  const mid = Math.ceil(lines.length / 2)
+  return [lines.slice(0, mid).join('\n'), lines.slice(mid).join('\n')]
+}
+
 export function assemblePackage(call1: any, call2: any, call3: any): Record<string, string | null> {
+  // Skills: prefer the QC'd Call-3 arrays, then Call-1 per-slot fields, then a
+  // split of any single combined skills block (call1.skills / call3.finalSkills).
+  const combined = firstNonEmpty(call1.skills, call3.finalSkills, call1.skillsCombined)
+  const [splitS1, splitS2] = splitSkills(combined)
   return {
-    ResumeSummary: call3.updatedResumeSummary || call1.resumeSummary || null,
-    SkillsBullets1: Array.isArray(call3.finalSkills1) ? call3.finalSkills1.join('\n') : (call1.skills1 || null),
-    SkillsBullets2: Array.isArray(call3.finalSkills2) ? call3.finalSkills2.join('\n') : (call1.skills2 || null),
-    ExpertiseBullets: call1.expertise || null,
-    WorkHistoryBullets1: call1.workHistory1 || null,
-    WorkHistoryBullets2: call1.workHistory2 || null,
-    WorkHistoryBullets3: call1.workHistory3 || null,
-    WorkHistoryBullets4: call1.workHistory4 || null,
-    RelevantBullets1: call3.finalRelevant1 || call1.relevant1 || null,
-    RelevantBullets2: call3.finalRelevant2 || call1.relevant2 || null,
-    RelevantBullets3: call3.finalRelevant3 || call1.relevant3 || null,
+    ResumeSummary: firstNonEmpty(call3.updatedResumeSummary, call1.resumeSummary, call2.resumeSummary),
+    SkillsBullets1: firstNonEmpty(call3.finalSkills1, call1.skills1, splitS1),
+    SkillsBullets2: firstNonEmpty(call3.finalSkills2, call1.skills2, splitS2),
+    ExpertiseBullets: firstNonEmpty(call1.expertise, call3.finalExpertise, call3.expertise),
+    WorkHistoryBullets1: firstNonEmpty(call1.workHistory1, call3.workHistory1),
+    WorkHistoryBullets2: firstNonEmpty(call1.workHistory2, call3.workHistory2),
+    WorkHistoryBullets3: firstNonEmpty(call1.workHistory3, call3.workHistory3),
+    WorkHistoryBullets4: firstNonEmpty(call1.workHistory4, call3.workHistory4),
+    RelevantBullets1: firstNonEmpty(call3.finalRelevant1, call1.relevant1),
+    RelevantBullets2: firstNonEmpty(call3.finalRelevant2, call1.relevant2),
+    RelevantBullets3: firstNonEmpty(call3.finalRelevant3, call1.relevant3),
     '@Company': call1.targetCompany || null,
     '@CoverLetterDate': call1.date || null,
     '@CoverLetterBody': call2.coverLetter || call1.coverLetter || null,

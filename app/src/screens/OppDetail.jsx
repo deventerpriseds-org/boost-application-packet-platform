@@ -421,29 +421,119 @@ function Contacts({ contacts, oppId, toast }) {
   )
 }
 
+// Ordered, labeled resume sections — covers the FULL resume so no section is
+// ever silently dropped. Each field is a key on the structured packet (pkg).
+const RESUME_SECTIONS = [
+  { label: 'Summary', fields: [{ key: 'ResumeSummary', name: '' }] },
+  { label: 'Skills', fields: [{ key: 'SkillsBullets1', name: 'Column 1' }, { key: 'SkillsBullets2', name: 'Column 2' }] },
+  { label: 'Areas of Expertise', fields: [{ key: 'ExpertiseBullets', name: '' }] },
+  { label: 'Relevant Experience', fields: [{ key: 'RelevantBullets1', name: 'Bullet 1' }, { key: 'RelevantBullets2', name: 'Bullet 2' }, { key: 'RelevantBullets3', name: 'Bullet 3' }] },
+  { label: 'Work History', fields: [{ key: 'WorkHistoryBullets1', name: 'Role 1' }, { key: 'WorkHistoryBullets2', name: 'Role 2' }, { key: 'WorkHistoryBullets3', name: 'Role 3' }, { key: 'WorkHistoryBullets4', name: 'Role 4' }] },
+]
+const EDUCATION_KEYS = ['Education', 'EducationBullets', 'education']
+const AI_EFFORTS = [['low', 'Low'], ['medium', 'Medium'], ['high', 'High'], ['max', 'Max']]
+
+// One editable resume field: shows the text (or an explicit "no content" note so
+// missing sections are visible), an Edit textarea (Save → saveArtifactContent),
+// and an AI-edit row (instruction + effort → aiEditArtifact).
+function ResumeField({ artifactId, fieldKey, name, value, onPatch, toast }) {
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState(value || '')
+  const [instruction, setInstruction] = useState('')
+  const [effort, setEffort] = useState('medium')
+  const [saving, setSaving] = useState(false)
+  const [aiBusy, setAiBusy] = useState(false)
+  useEffect(() => { setDraft(value || '') }, [value])
+  const empty = !value || !String(value).trim()
+
+  const save = async () => {
+    setSaving(true)
+    try { const r = await api.saveArtifactContent(artifactId, { pkg: { [fieldKey]: draft } }); if (r.error) throw new Error(r.error); onPatch(fieldKey, draft); setEditing(false); toast('Section saved') }
+    catch (e) { toast(`Save failed: ${e.message || e}`) } finally { setSaving(false) }
+  }
+  const aiEdit = async () => {
+    if (!instruction.trim()) { toast('Enter an instruction for the AI'); return }
+    setAiBusy(true)
+    try {
+      const r = await api.aiEditArtifact(artifactId, { instruction, effort, section: fieldKey })
+      if (r.error) throw new Error(r.error)
+      onPatch(fieldKey, r.revised); setDraft(r.revised); setInstruction(''); toast('AI edit applied')
+    } catch (e) { toast(`AI edit failed: ${e.message || e}`) } finally { setAiBusy(false) }
+  }
+
+  return (
+    <div style={{ marginTop: name ? 12 : 0 }}>
+      {name && <div className="px-small" style={{ color: 'var(--proto-ink3)', marginBottom: 4, fontWeight: 600 }}>{name}</div>}
+      {editing ? (
+        <>
+          <textarea className="px-input" style={{ width: '100%', minHeight: 110, lineHeight: 1.5, resize: 'vertical' }} value={draft} onChange={(e) => setDraft(e.target.value)} />
+          <div style={{ display: 'flex', gap: 8, marginTop: 6 }}>
+            <button className="px-btn px-btn-accent" style={{ fontSize: 12 }} disabled={saving} onClick={save}>{saving ? 'Saving…' : 'Save'}</button>
+            <button className="px-btn px-btn-ghost" style={{ fontSize: 12 }} onClick={() => { setDraft(value || ''); setEditing(false) }}>Cancel</button>
+          </div>
+        </>
+      ) : (
+        <>
+          {empty
+            ? <div className="px-small" style={{ color: 'var(--proto-ink3)', fontStyle: 'italic' }}>No content generated — Regenerate or edit</div>
+            : <div style={{ fontSize: 13, lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>{value}</div>}
+          <button className="px-btn px-btn-ghost" style={{ fontSize: 12, marginTop: 6 }} onClick={() => setEditing(true)}>✎ Edit</button>
+        </>
+      )}
+      <div style={{ display: 'flex', gap: 6, marginTop: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+        <input className="px-input" style={{ flex: 1, minWidth: 160, fontSize: 12 }} placeholder="Tell AI how to revise this section…" value={instruction} onChange={(e) => setInstruction(e.target.value)} />
+        <select className="px-input" style={{ fontSize: 12 }} value={effort} onChange={(e) => setEffort(e.target.value)}>
+          {AI_EFFORTS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+        </select>
+        <button className="px-btn" style={{ fontSize: 12 }} disabled={aiBusy} onClick={aiEdit}>{aiBusy ? '✦ Editing…' : '✦ AI edit'}</button>
+      </div>
+    </div>
+  )
+}
+
 // Resume tab — the opportunity's resume artifact(s) from the packet. Real data
 // via getPacket; actions (generate / approve / request changes / create Google
-// Doc) reuse the same endpoints the packet builder uses.
+// Doc) reuse the same endpoints the packet builder uses. Renders every labeled
+// resume section from the structured pkg (Feature B) with per-section edit + AI
+// edit (Feature C) and auto-refreshes while generation is in flight (Feature A).
 function ResumeTab({ o, toast }) {
-  const [state, setState] = useState({ loading: true, error: null, arts: [] })
+  const [state, setState] = useState({ loading: true, error: null, arts: [], pkg: null })
   const [busy, setBusy] = useState(null)
   const [open, setOpen] = useState({})
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (opts = {}) => {
     try {
       const p = await api.getPacket(o.id)
       if (p.error) throw new Error(p.error)
       const arts = (p.artifacts || []).filter((a) => a.type === 'resume' || a.type === 'compact_resume')
-      setState({ loading: false, error: null, arts })
-    } catch (e) { setState({ loading: false, error: String(e.message || e), arts: [] }) }
+      setState((s) => ({ loading: false, error: null, arts, pkg: p.pkg || s.pkg || null }))
+    } catch (e) { if (!opts.silent) setState({ loading: false, error: String(e.message || e), arts: [], pkg: null }) }
   }, [o.id])
   useEffect(() => { load() }, [load])
 
+  // Feature A — poll while any artifact is mid-generation (drafting) or an action
+  // is in flight; stop as soon as nothing is generating.
+  const anyGenerating = busy !== null || state.arts.some((a) => a.status === 'drafting')
+  useEffect(() => {
+    if (!anyGenerating) return
+    const t = setInterval(() => load({ silent: true }), 8000)
+    return () => clearInterval(t)
+  }, [anyGenerating, load])
+  // Feature A — refresh when the tab regains focus / visibility.
+  useEffect(() => {
+    const onVis = () => { if (!document.hidden) load({ silent: true }) }
+    const onFocus = () => load({ silent: true })
+    document.addEventListener('visibilitychange', onVis)
+    window.addEventListener('focus', onFocus)
+    return () => { document.removeEventListener('visibilitychange', onVis); window.removeEventListener('focus', onFocus) }
+  }, [load])
+
   const patch = (id, fields) => setState((s) => ({ ...s, arts: s.arts.map((a) => (a.id === id ? { ...a, ...fields } : a)) }))
+  const patchPkg = (key, val) => setState((s) => ({ ...s, pkg: { ...(s.pkg || {}), [key]: val } }))
 
   const generate = async (a) => {
     setBusy(a.id)
-    try { const r = await api.generateArtifact(a.id); if (r.error) throw new Error(r.error); patch(a.id, { status: r.artifactStatus, content: r.content }); toast('Resume drafted') }
+    try { const r = await api.generateArtifact(a.id); if (r.error) throw new Error(r.error); patch(a.id, { status: r.artifactStatus, content: r.content }); toast('Resume drafted'); load({ silent: true }) }
     catch (e) { toast(`Generate failed: ${e.message || e}`) } finally { setBusy(null) }
   }
   const setStatus = async (a, status) => {
@@ -453,7 +543,7 @@ function ResumeTab({ o, toast }) {
   }
   const makeDoc = async (a) => {
     setBusy(a.id)
-    try { const r = await api.generateArtifactDocument(a.id); if (r.error) throw new Error(r.error); patch(a.id, { docUrl: r.docUrl }); toast('Google Doc created') }
+    try { const r = await api.generateArtifactDocument(a.id); if (r.error) throw new Error(r.error); patch(a.id, { docUrl: r.docUrl }); toast('Google Doc created'); load({ silent: true }) }
     catch (e) { toast(`Doc failed: ${e.message || e}`) } finally { setBusy(null) }
   }
 
@@ -466,6 +556,10 @@ function ResumeTab({ o, toast }) {
     </div>
   )
   const label = { resume: 'Resume', compact_resume: 'Compact resume' }
+  const pkg = state.pkg
+  const anchor = state.arts.find((a) => a.type === 'resume') || state.arts[0]
+  const eduKey = pkg ? EDUCATION_KEYS.find((k) => pkg[k] != null) : null
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
       {state.arts.map((a) => (
@@ -477,7 +571,8 @@ function ResumeTab({ o, toast }) {
             </div>
             <Pill tone={ART_STATUS_TONE[a.status] || 'panel'}>{a.status}</Pill>
           </div>
-          {a.content && (
+          {/* Fallback raw-content view only when there is no structured pkg. */}
+          {!pkg && a.content && (
             <div>
               <span className="px-link" style={{ fontSize: 12 }} onClick={() => setOpen((x) => ({ ...x, [a.id]: !x[a.id] }))}>
                 {open[a.id] ? '▾ Hide draft' : '▸ View draft'}
@@ -506,6 +601,28 @@ function ResumeTab({ o, toast }) {
           </div>
         </div>
       ))}
+
+      {/* Feature B — modern, all-sections-labeled preview from the structured pkg. */}
+      {pkg && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <div className="px-small" style={{ color: 'var(--proto-ink3)', textTransform: 'uppercase', letterSpacing: 1 }}>Resume sections</div>
+          {RESUME_SECTIONS.map((sec) => (
+            <div key={sec.label} className="px-box" style={{ padding: 14 }}>
+              <div className="px-label">{sec.label}</div>
+              {sec.fields.map((f) => (
+                <ResumeField key={f.key} artifactId={anchor.id} fieldKey={f.key} name={sec.fields.length > 1 ? f.name : ''} value={pkg[f.key]} onPatch={patchPkg} toast={toast} />
+              ))}
+            </div>
+          ))}
+          {/* Education is not generated per-opportunity — surface it so it is not silently absent. */}
+          <div className="px-box" style={{ padding: 14 }}>
+            <div className="px-label">Education</div>
+            {eduKey
+              ? <ResumeField artifactId={anchor.id} fieldKey={eduKey} name="" value={pkg[eduKey]} onPatch={patchPkg} toast={toast} />
+              : <div className="px-small" style={{ color: 'var(--proto-ink3)', marginTop: 6 }}>Education — from template (not generated per-opportunity).</div>}
+          </div>
+        </div>
+      )}
     </div>
   )
 }

@@ -14,6 +14,24 @@ const HEADERS = {
 }
 
 const DEMO_EMAIL = 'demo@executive-engine.local'
+// AI-edit model — seeded/default in code, overridable via the AI_EDIT_MODEL env
+// var (OpenAI Responses API / GPT-5.6 Luna). Mirrors the Huddle app's edit call.
+const AI_EDIT_MODEL = process.env.AI_EDIT_MODEL || 'gpt-5.6-luna'
+const AI_EDIT_EFFORTS = ['low', 'medium', 'high', 'max']
+
+// Reasoning models accept a `reasoning` block; sending it to a non-reasoning
+// model is a hard API error, so gate on the model family.
+function isReasoningModel(model: string): boolean {
+  const m = model.replace(/^openai\//, '')
+  return /^o\d/.test(m) || m.startsWith('gpt-5')
+}
+// Extract the revised text from a Responses-API payload.
+function extractResponseText(json: any): string {
+  if (json?.output_text) return json.output_text
+  const parts = (json?.output || []).flatMap((o: any) => o?.content || [])
+  const hit = parts.find((p: any) => p?.type === 'output_text' || p?.text)
+  return hit?.text || ''
+}
 // Artifact types a packet is built from (matches the schema CHECK constraint).
 const ARTIFACT_TYPES = ['resume', 'compact_resume', 'cover', 'portfolio', 'video']
 const ARTIFACT_STATUSES = ['todo', 'drafting', 'review', 'changes', 'approved']
@@ -68,10 +86,13 @@ export async function packetGet(req: HttpRequest, context: InvocationContext): P
   try {
     client = await getPgClient()
     await ensureContentColumn(client)
+    await ensurePkgColumn(client)
     const opp = (await client.query(`select id, company, role from opportunity where id = $1`, [oppId])).rows[0]
     if (!opp) return { status: 404, headers: HEADERS, jsonBody: { error: 'opportunity not found' } }
     const { pkt, artifacts } = await loadPacket(client, oppId)
-    return { status: 200, headers: HEADERS, jsonBody: { company: opp.company, role: opp.role, ...packetShape(pkt, artifacts) } }
+    // Include the assembled structured resume package so the frontend can render
+    // every labeled section (Feature B) instead of only the raw content dump.
+    return { status: 200, headers: HEADERS, jsonBody: { company: opp.company, role: opp.role, pkg: pkt.pkg_json || null, ...packetShape(pkt, artifacts) } }
   } catch (err) {
     return { status: 500, headers: HEADERS, jsonBody: { error: String(err) } }
   } finally { try { await client?.end() } catch {} }
@@ -503,7 +524,104 @@ export async function opportunityEnrich(req: HttpRequest, context: InvocationCon
   } finally { try { await client?.end() } catch {} }
 }
 
+// POST /api/app/artifact/{artifactId}/content — save manual edits to an artifact.
+// Body { content?: string, pkg?: object }. Content is written to artifact.content;
+// pkg is merged into packet.pkg_json so Create-Doc reuses the edits (the templated
+// builder reuses cached pkg_json unless regen).
+export async function artifactContent(req: HttpRequest, context: InvocationContext): Promise<HttpResponseInit> {
+  if (req.method === 'OPTIONS') return { status: 204, headers: HEADERS }
+  const artifactId = req.params.artifactId
+  let client
+  try {
+    const guard = requireWrite(req); if (guard) return guard
+    const body = (await req.json().catch(() => ({}))) as any
+    client = await getPgClient()
+    await ensureContentColumn(client)
+    await ensurePkgColumn(client)
+    const art = (await client.query(`select a.id, a.packet_id, a.content from artifact a where a.id = $1`, [artifactId])).rows[0]
+    if (!art) return { status: 404, headers: HEADERS, jsonBody: { error: 'artifact not found' } }
+
+    let content = art.content
+    if (typeof body?.content === 'string') {
+      content = body.content
+      await client.query(`update artifact set content = $1, updated_at = now() where id = $2`, [content, artifactId])
+    }
+
+    let pkg: any = null
+    if (body?.pkg && typeof body.pkg === 'object') {
+      const cur = (await client.query(`select pkg_json from packet where id = $1`, [art.packet_id])).rows[0]?.pkg_json || {}
+      pkg = { ...cur, ...body.pkg }
+      await client.query(`update packet set pkg_json = $1, updated_at = now() where id = $2`, [JSON.stringify(pkg), art.packet_id])
+    }
+    return { status: 200, headers: HEADERS, jsonBody: { ok: true, content, pkg } }
+  } catch (err) {
+    return { status: 500, headers: HEADERS, jsonBody: { error: String(err) } }
+  } finally { try { await client?.end() } catch {} }
+}
+
+// POST /api/app/artifact/{artifactId}/ai-edit — apply a natural-language edit to a
+// resume section via the OpenAI Responses API (GPT-5.6 Luna). Body
+// { instruction, effort?, section?, content? }. Persists the revised text into the
+// named packet.pkg_json[section] (or artifact.content when no section given).
+export async function artifactAiEdit(req: HttpRequest, context: InvocationContext): Promise<HttpResponseInit> {
+  if (req.method === 'OPTIONS') return { status: 204, headers: HEADERS }
+  const artifactId = req.params.artifactId
+  let client
+  try {
+    const guard = requireWrite(req); if (guard) return guard
+    const key = process.env.OPENAI_API_KEY
+    if (!key) return { status: 200, headers: HEADERS, jsonBody: { error: 'OPENAI_API_KEY not set' } }
+    const body = (await req.json().catch(() => ({}))) as any
+    const instruction = String(body?.instruction || '').trim()
+    if (!instruction) return { status: 400, headers: HEADERS, jsonBody: { error: 'instruction required' } }
+    const effort = AI_EDIT_EFFORTS.includes(body?.effort) ? body.effort : 'medium'
+    const section = typeof body?.section === 'string' && body.section ? body.section : null
+
+    client = await getPgClient()
+    await ensureContentColumn(client)
+    await ensurePkgColumn(client)
+    const art = (await client.query(`select a.id, a.packet_id, a.content from artifact a where a.id = $1`, [artifactId])).rows[0]
+    if (!art) return { status: 404, headers: HEADERS, jsonBody: { error: 'artifact not found' } }
+    const pkgRow = (await client.query(`select pkg_json from packet where id = $1`, [art.packet_id])).rows[0]
+    const pkg: any = pkgRow?.pkg_json || {}
+
+    const currentText = (typeof body?.content === 'string' && body.content)
+      || (section && pkg[section] != null ? String(pkg[section]) : '')
+      || art.content || ''
+
+    const instructions = 'You are editing a professional resume. Apply the user instruction to the provided section text and return ONLY the revised text, no preamble.'
+    const reqBody: any = {
+      model: AI_EDIT_MODEL,
+      instructions,
+      input: [{ role: 'user', content: `Instruction: ${instruction}\n\nCurrent text:\n${currentText}` }],
+      ...(isReasoningModel(AI_EDIT_MODEL) ? { reasoning: { effort, summary: 'auto' } } : {}),
+      ...(AI_EDIT_MODEL === 'gpt-5.6-luna' ? { service_tier: 'priority' } : {}),
+    }
+    const res = await fetch('https://api.openai.com/v1/responses', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
+      body: JSON.stringify(reqBody)
+    })
+    if (!res.ok) throw new Error(`OpenAI HTTP ${res.status}: ${await res.text()}`)
+    const data = await res.json() as any
+    const revised = extractResponseText(data).trim()
+    await logUsage('packet:ai-edit', AI_EDIT_MODEL, data.usage)
+
+    if (section) {
+      const merged = { ...pkg, [section]: revised }
+      await client.query(`update packet set pkg_json = $1, updated_at = now() where id = $2`, [JSON.stringify(merged), art.packet_id])
+    } else {
+      await client.query(`update artifact set content = $1, updated_at = now() where id = $2`, [revised, artifactId])
+    }
+    return { status: 200, headers: HEADERS, jsonBody: { ok: true, revised, section, effort, model: AI_EDIT_MODEL } }
+  } catch (err) {
+    return { status: 500, headers: HEADERS, jsonBody: { error: String(err) } }
+  } finally { try { await client?.end() } catch {} }
+}
+
 app.http('packetGet', { methods: ['GET', 'OPTIONS'], authLevel: 'anonymous', route: 'app/opportunity/{id}/packet', handler: packetGet })
+app.http('artifactContent', { methods: ['POST', 'OPTIONS'], authLevel: 'anonymous', route: 'app/artifact/{artifactId}/content', handler: artifactContent })
+app.http('artifactAiEdit', { methods: ['POST', 'OPTIONS'], authLevel: 'anonymous', route: 'app/artifact/{artifactId}/ai-edit', handler: artifactAiEdit })
 app.http('packetsList', { methods: ['GET', 'OPTIONS'], authLevel: 'anonymous', route: 'app/packets', handler: packetsList })
 app.http('packetBuildAll', { methods: ['POST', 'OPTIONS'], authLevel: 'anonymous', route: 'app/opportunity/{id}/packet/build-all', handler: packetBuildAll })
 app.http('jdAnalysis', { methods: ['POST', 'OPTIONS'], authLevel: 'anonymous', route: 'app/opportunity/{id}/jd-analysis', handler: jdAnalysis })

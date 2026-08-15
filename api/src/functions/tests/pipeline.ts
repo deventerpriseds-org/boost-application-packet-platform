@@ -65,12 +65,12 @@ export async function buildPackageForJD(opts: { key: string; jd: string; roleTyp
 
   const r2 = await openai(prompts['portfolio_system'] || 'You are a helpful assistant.', roleDirective(roleFocus) + `${prompts['portfolio_user'] || 'Portfolio JSON.'}\n\nCALL1:\n${JSON.stringify(c1)}`, 16000) as any
   let c2: any = {}
-  try { const m = (r2.choices?.[0]?.message?.content || '').match(/\{[\s\S]*\}/); if (m) c2 = JSON.parse(m[0]) } catch {}
+  try { const m = (r2.choices?.[0]?.message?.content || '').match(/\{[\s\S]*\}/); if (m) c2 = JSON.parse(m[0]) } catch (e) { console.warn('[pipeline] Call-2 (portfolio) JSON parse failed — portfolio/cover fields may be empty:', String(e)) }
   steps.push('Agent Call 2 (portfolio + cold email)')
 
   const r3 = await openai(prompts['ats_system'] || 'You are a helpful assistant.', `${prompts['ats_user'] || 'ATS QC.'}\n\nINPUTS:\n${JSON.stringify({ ...c1, ...c2 })}`, 15500) as any
   let c3: any = {}
-  try { const m = (r3.choices?.[0]?.message?.content || '').match(/\{[\s\S]*\}/); if (m) c3 = JSON.parse(m[0]) } catch {}
+  try { const m = (r3.choices?.[0]?.message?.content || '').match(/\{[\s\S]*\}/); if (m) c3 = JSON.parse(m[0]) } catch (e) { console.warn('[pipeline] Call-3 (ATS QC) JSON parse failed — falling back to Call-1 skills/summary:', String(e)) }
   steps.push('Agent Call 3 (ATS QC + skills merge)')
 
   const pkg = assemblePackage(c1, c2, c3) as Record<string, string | null>
