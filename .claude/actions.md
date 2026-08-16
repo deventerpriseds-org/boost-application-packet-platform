@@ -818,3 +818,26 @@ stop coming back empty.
 rendered ResumeTab UI is internal-state, not ui-verify-addressable → owner to eyeball live)
 **Layout note:** the generated-doc "distortion" was the MOBILE browser's Google Docs viewer, not the
 generator (proved byte-identical geometry via /diag/doc-structure). No code change.
+
+## ACT-46 — Session handoff doc for this repo (rewrite from verified ground truth)
+**Requested:** 2026-08-16
+**Asked for:** Create a session handoff the same way as the Executive Engine one — investigate with
+parallel subagents (don't assume the stack), then write `.claude/SESSION-HANDOFF.md` covering: what the
+app is, repo map, how to verify live state from the sandbox, deploy + git flow, mandatory workflow,
+efficiency rules, ground-truth rule, AI/model facts + config/secrets, current state. Plus a paste-ready
+kickoff prompt. Commit on the session feature branch.
+**Expected outcome:** a concise, pointer-heavy map + operating procedure whose every cited command,
+path, and workflow input has been confirmed to exist.
+- AC-1: every build/test/lint command cited exists in a package.json — DONE (verified: app has only
+  dev/build/preview, api only build/watch/start/dev; documented that lint+test DO NOT exist)
+- AC-2: every workflow input name/default cited matches the YAML — DONE (db-query `sql`; api-test
+  `method`/`path`/`body`/`omit_auth`; ui-verify `route`/`owner`/`expect`/`count_sel`/`count_min`/`app_url`)
+- AC-3: deploy triggers stated per-branch and per-path from the YAML — DONE (found + documented the
+  branch trap: session branches deploy nothing; app/** vs api/** asymmetry)
+- AC-4: file paths in the repo map exist on disk — DONE (app/src/*, api/src/functions/tests/*,
+  scripts/ui-verify.mjs all confirmed)
+- AC-5: skills-location claim ground-truthed rather than copied from CLAUDE.md — DONE (corrected:
+  /workspace clone absent; skills at /home/user/eds-claude-skills/.claude/skills/)
+**Status:** `done` — doc-only change (no code touched, so no AC/verifier subagent gate applies).
+**Evidence:** commit on `claude/session-handoff-setup-ctozd3`; three Explore agents' file-level findings
+recorded in `.claude/memory.md` (2026-08-16 entry).

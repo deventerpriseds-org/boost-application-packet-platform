@@ -1064,3 +1064,31 @@ NEXT: (a) owner reviews queries + flips enabled (toggle On + Save in the UI now,
   /app/capture (reuses routeOpportunity embed→dedupe→insert). Why neither pipeline caught it: scheduled
   search (jdSweep) only queries taxonomy_title tier='fav' EXACT quoted phrases — that title was never in
   the query set. owner_search_prefs: remote_only=true (so remote roles ARE kept; location wasn't the block).
+
+## SESSION-HANDOFF.md rewritten from verified ground truth (2026-08-16)
+Rebuilt `.claude/SESSION-HANDOFF.md` (was 77 L, now ~11 sections) using three parallel Explore agents
+over the actual files, not the prior doc. Corrections found vs what CLAUDE.md / the old handoff implied:
+- **Deploy-branch trap:** executive-engine-deploy.yml triggers on `main` + `claude/git-push-main-1zcqw5`
+  ONLY (paths app/**); api-deploy.yml on `main` ONLY (paths api/**). A push to any other branch —
+  including a session branch like `claude/session-handoff-setup-ctozd3` — deploys NOTHING. Also
+  asymmetric: app/** on the feature branch ships to prod, api/** on it does not.
+- **No automated converge step exists.** api-deploy.yml has 9 steps, none of them restart/sleep/health-poll;
+  it greens the moment config-zip returns. The trailing `Set Function App settings` step restarts workers
+  only incidentally (appsettings write). The ~90-120s new-route 404 window is a human discipline, not CI.
+- **No test or lint script exists anywhere.** app/: only dev/build/preview (no tsconfig under app/ — plain
+  JSX). api/: only build/watch/start/dev. No jest/vitest/playwright config in the repo. "Run the tests" is
+  not an available verification path — the GHA loops are.
+- **Skills are NOT at /workspace/eds-claude-skills** in this container (path absent) and NOT in
+  /root/.claude/skills/ (only Anthropic-synced ones there). They live in the attached repo at
+  /home/user/eds-claude-skills/.claude/skills/*.md — read those directly. The `verifier` agent IS
+  available as a spawnable subagent type.
+- db-query.yml/api-test.yml emit NO `-----` markers (raw psql table / `HTTP {status} {method} {url}` +
+  JSON; api-test exits 1 on >=400). Only ui-verify.yml has a marker: `UI_VERIFY_RESULT`.
+- api/src/functions/tests/ is ~101 PRODUCTION modules (misnomer); 193 self-registering app.http calls,
+  no single entry point. No migrations/ dir — schema.ts SCHEMA_SQL applied via diag/pg-migrate.
+- AI inventory: gpt-4o-mini x45 (workhorse), gpt-4o x11, gpt-5.6-luna x2 (AI_EDIT_MODEL, Responses API),
+  text-embedding-3-small, whisper-1; coachAgent.ts uses COACH_MODEL default gpt-4o + PG coach_config
+  override. No Anthropic/Claude integration in the repo.
+- Sharp edges recorded: all routes authLevel 'anonymous' (in-code authz only); appSession.ts HMAC falls
+  back to 'dev-only-insecure-secret' if 3 env vars unset; many handlers return 200 with {error} body;
+  ui-verify installs playwright@latest unpinned; db-query.yml interpolates `sql` into a shell string.
