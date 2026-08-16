@@ -258,39 +258,50 @@ what exists, why it's insufficient, and get explicit sign-off before creating it
 
 ## Git workflow (branch discipline)
 
-**HARD RULE: NEVER commit directly to `main`.** All development happens on the
-session's designated feature branch (`claude/git-push-main-1zcqw5` unless told
-otherwise). `main` only ever moves forward via fast-forward from the feature branch
-— never by a direct commit or push of new work.
+**OWNER STANDING RULE (2026-08-16): a NEW branch per feature, and `main` ALWAYS ends up
+carrying the work — we deploy from `main`.**
 
-> **Why this is safe:** `executive-engine-deploy.yml` triggers on both
-> `main` and `claude/git-push-main-1zcqw5`, so the live app deploys from either
-> branch. You see changes on the live app immediately without `main` needing to move.
+**HARD RULE: NEVER commit directly to `main`.** New work is always committed on a feature
+branch first; `main` only ever moves forward by **fast-forward** from that branch — never by
+a direct commit of new work. The two rules compose: branch → commit → push branch → FF `main`
+→ push `main` → deploy.
 
-### One-branch workflow (follow every session):
+> **Why `main` must move (this is the important part):** deploy triggers are branch- AND
+> path-specific. `api-deploy.yml` fires on **`main` only** (paths `api/**`), and
+> `executive-engine-deploy.yml` fires on `main` **or** the legacy `claude/git-push-main-1zcqw5`
+> (paths `app/**`). **A push to any other branch — including a fresh `claude/<feature>` branch —
+> deploys NOTHING.** Do not rely on the old "the feature branch deploys too" shortcut: it is true
+> only for that one legacy branch name and only for `app/**`. Landing on `main` is what makes a
+> change live.
 
-1. **Before any work**, sync the feature branch with `main`:
+### Per-feature workflow (follow every time):
+
+1. **Start from current `main`** — never from a stale tree:
    ```bash
    git fetch origin
-   git checkout claude/git-push-main-1zcqw5
-   git merge origin/main   # bring in any main commits first
+   git checkout main && git merge --ff-only origin/main
+   git checkout -b claude/<short-feature-name>
    ```
-2. **Develop** on the feature branch only. Commit and push there.
+2. **Develop** on that feature branch only. Commit there.
 3. **Before each push**, fetch again and merge `origin/main` to stay current:
    ```bash
    git fetch origin && git merge origin/main
-   git push -u origin claude/git-push-main-1zcqw5
+   git push -u origin claude/<short-feature-name>
    ```
-4. **At the end of every session**, fast-forward `main` to match the feature branch
-   so `main` stays up to date. This is routine — do it every session, not just at
-   milestones:
+   Open a PR for the branch if one isn't already open.
+4. **Land it on `main` and deploy** — routine, not a milestone step. Do this as soon as the
+   work is verified, not only at session end:
    ```bash
-   git checkout main && git merge --ff-only claude/git-push-main-1zcqw5
-   git push origin main
-   git checkout claude/git-push-main-1zcqw5
+   git checkout main && git merge --ff-only claude/<short-feature-name>
+   git push origin main          # THIS is what triggers the deploy
+   git checkout claude/<short-feature-name>
    ```
-   If `--ff-only` fails (branches have diverged), resolve on the feature branch
-   first (merge `origin/main` into it, fix conflicts), then retry the fast-forward.
+   If `--ff-only` fails (branches diverged), resolve on the feature branch first
+   (merge `origin/main` into it, fix conflicts), then retry the fast-forward.
+   Pushing `main` auto-closes the branch's PR as merged — expected, not an error.
+5. **Then verify the deploy actually happened** — a green push is not a deployed app. Check the
+   workflow run, and remember a NEW api route needs ~90–120s of worker converge before it stops
+   404ing (nothing in CI waits for this).
 
 - Resolve conflicts by understanding both sides. For the legacy `web/` console
   (not the product), preferring one side wholesale is acceptable; for `app/`,

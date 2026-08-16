@@ -846,3 +846,18 @@ fails with ResourceNotFound — the `job-platform-web` SWA no longer exists. Pre
 PR via its `pull_request` trigger, unrelated to this docs-only diff. Blocker stated on the PR; NOT fixed
 here (needs owner decision — retire the workflow's PR trigger, or recreate the SWA). See memory.md
 2026-08-16 entry.
+
+## ACT-47 — Branch/deploy policy: new branch per feature, always land on main, deploy from main
+**Requested:** 2026-08-16 (owner, verbatim: "create a new branch for features we discuss and always
+push to main and deploy from there")
+**Expected outcome:** the rule is written where a future session will actually read it, reconciled with
+the existing never-commit-to-main hard rule, and the deploy-trigger reason is stated so it isn't
+mistaken for ceremony.
+- AC-1: CLAUDE.md Git-workflow section states branch-per-feature + FF main + push main, with the
+  per-feature commands — DONE
+- AC-2: the stale "the feature branch deploys too" claim is corrected as a trap (true only for the
+  legacy branch name, only for app/**) — DONE (CLAUDE.md + SESSION-HANDOFF.md §5)
+- AC-3: SESSION-HANDOFF.md carries the same rule so a new session gets it from the fast map — DONE
+- AC-4: applied in practice this session — DONE (main fast-forwarded to 0e9fd8e and pushed; PR #7
+  auto-closed as merged)
+**Status:** `done` — doc-only change (no code touched; AC/verifier subagent gate does not apply).

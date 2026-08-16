@@ -1109,3 +1109,20 @@ then staging-cap failures (24a936c, 8fad16a), now ResourceNotFound.
   web-deploy.yml — the durable fix already offered to the owner; (2) recreate/repoint the SWA.
 - Lesson: a documented "known noise" explanation goes stale. Read the current job log before reusing a
   prior root cause — the symptom (red build_and_deploy on a PR) was identical, the cause was not.
+
+## OWNER STANDING RULE (2026-08-16): new branch per feature + always land on main + deploy from main
+Owner directive, verbatim intent: "create a new branch for features we discuss and always push to main
+and deploy from there." Recorded in CLAUDE.md (Git workflow section) and SESSION-HANDOFF.md §5.
+- Reconciles with the existing "NEVER commit directly to main" hard rule: work is still committed on a
+  feature branch; main moves only by FAST-FORWARD. Loop = branch off current main → commit → push branch
+  (+PR) → `git merge --ff-only` into main → `git push origin main` → verify the deploy run.
+- Land it as soon as the work is VERIFIED, not only at session end.
+- WHY main must move (the substantive reason, not ceremony): deploys are branch+path specific.
+  api-deploy.yml fires on main ONLY (api/**); executive-engine-deploy.yml on main OR the legacy
+  claude/git-push-main-1zcqw5 (app/**). A fresh claude/<feature> branch deploys NOTHING. The old
+  "the feature branch deploys too" shortcut in CLAUDE.md was true only for that one legacy branch name
+  and only for app/** — it is now explicitly flagged as a trap.
+- Pushing main auto-closes the branch's PR as merged (observed: PR #7 closed as `merged` the moment
+  main was fast-forwarded to 0e9fd8e). Expected, not an error.
+- Superseded: CLAUDE.md previously named claude/git-push-main-1zcqw5 as THE session branch. Now it is
+  a per-feature branch name of the session's choosing.
