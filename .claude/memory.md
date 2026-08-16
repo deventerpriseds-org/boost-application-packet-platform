@@ -1092,3 +1092,20 @@ over the actual files, not the prior doc. Corrections found vs what CLAUDE.md / 
 - Sharp edges recorded: all routes authLevel 'anonymous' (in-code authz only); appSession.ts HMAC falls
   back to 'dev-only-insecure-secret' if 3 env vars unset; many handlers return 200 with {error} body;
   ui-verify installs playwright@latest unpinned; db-query.yml interpolates `sql` into a shell string.
+
+## Legacy `job-platform-web` SWA is GONE — web-deploy.yml now fails ResourceNotFound (2026-08-16)
+Superseding the older "KNOWN CI NOISE = Azure per-PR staging cap" note. On PR #7 (docs-only) the
+`build_and_deploy` check failed at the token-fetch step with:
+  ERROR: (ResourceNotFound) The Resource 'Microsoft.Web/staticSites/job-platform-web' under resource
+  group 'EnterpriseDS_ResourceGRP' was not found.  → exit code 3
+GROUND TRUTH (read the job log, not inferred): the staging-cap explanation was WRONG for this failure —
+the Static Web App resource itself no longer exists. Run history: green through 2026-08-04 (e703f99),
+then staging-cap failures (24a936c, 8fad16a), now ResourceNotFound.
+- web-deploy.yml carries a `pull_request` trigger, so it runs on EVERY PR regardless of path filters →
+  it will red every future PR until fixed. It is the LEGACY console, not the product.
+- Product deploys unaffected: executive-engine-deploy.yml (app/**) and api-deploy.yml (api/**) are
+  path-filtered and did not run on a .claude/-only diff.
+- Two fixes, both need owner sign-off (NOT done): (1) drop the pull_request trigger / retire
+  web-deploy.yml — the durable fix already offered to the owner; (2) recreate/repoint the SWA.
+- Lesson: a documented "known noise" explanation goes stale. Read the current job log before reusing a
+  prior root cause — the symptom (red build_and_deploy on a PR) was identical, the cause was not.

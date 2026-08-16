@@ -841,3 +841,8 @@ path, and workflow input has been confirmed to exist.
 **Status:** `done` — doc-only change (no code touched, so no AC/verifier subagent gate applies).
 **Evidence:** commit on `claude/session-handoff-setup-ctozd3`; three Explore agents' file-level findings
 recorded in `.claude/memory.md` (2026-08-16 entry).
+**CI note (ACT-46):** PR #7 opened; its only check (`build_and_deploy` from the LEGACY web-deploy.yml)
+fails with ResourceNotFound — the `job-platform-web` SWA no longer exists. Pre-existing, fires on every
+PR via its `pull_request` trigger, unrelated to this docs-only diff. Blocker stated on the PR; NOT fixed
+here (needs owner decision — retire the workflow's PR trigger, or recreate the SWA). See memory.md
+2026-08-16 entry.
