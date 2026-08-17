@@ -1167,3 +1167,11 @@ workflow comment describes. Changes made:
 - The full zap is TOO BIG for the Prompts Azure Table (110KB > ~32KB per-property cap) — it lives in
   git, which is also where a future session looks. If asked "the zap we migrated," read that file.
 - Reusable: `.github/workflows/prompts-load-file.yml` loads a repo file into the Prompts table.
+
+## Zapier artifacts in the boost repo — catalog vs the boost zap (2026-08-17)
+- FULL CATALOG (reference, all ~40 zaps): `docs/zapier-archive/full-zapier-zap-catalog.json` (+ README
+  index). **Secrets REDACTED** — a live OpenAI key in zap 271167289 was masked (`<REDACTED:input-openaiApiKey>`)
+  because the boost repo is PUBLIC and GitHub push-protection blocks live secrets. Reference archive only.
+- THE BOOST APP ZAP = **289877647** "(Copy)(Copy) Jotform (Latest) Engineering Screen Job Description
+  Analysis (w Google Doc)" → `docs/zap-289877647/` (full zap + per-node prompts + review_email). This is
+  what boost development references. Catalog ≠ boost zap. (The boost zap files contain NO secrets — verified.)
