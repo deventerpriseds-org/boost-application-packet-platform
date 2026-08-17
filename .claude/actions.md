@@ -861,3 +861,20 @@ mistaken for ceremony.
 - AC-4: applied in practice this session — DONE (main fast-forwarded to 0e9fd8e and pushed; PR #7
   auto-closed as merged)
 **Status:** `done` — doc-only change (no code touched; AC/verifier subagent gate does not apply).
+
+## ACT-48 — Deploy from `main` only: remove legacy branch trigger + delete the branch
+**Requested:** 2026-08-16 (owner: "remove the branch trigger and revert any incorrect edits", after
+questioning whether feature-branch deploys are best practice)
+**Expected outcome:** production SWA `executive-engine-web` deploys from `main` only; no branch can
+push straight to prod; docs stop claiming otherwise.
+- AC-1: executive-engine-deploy.yml `branches:` is `[main]` only; 0 hits for the legacy branch name — DONE
+- AC-2: diff touches ONLY the `branches:` list and the concurrency comment; all job steps byte-identical — DONE
+- AC-3: `concurrency` group + `cancel-in-progress` retained (rationale narrowed, need remains) — DONE
+- AC-4: legacy branch's own workflow copy can no longer self-trigger — DONE (branch deleted; was
+  0 ahead/3 behind main, verified with `git merge-base --is-ancestor` before deleting)
+- AC-5: no present-tense doc claims the feature branch deploys (CLAUDE.md, SESSION-HANDOFF.md) — DONE
+- AC-6: `main` push produces a successful executive-engine-deploy run — PENDING (verify after landing)
+**Revert scope (owner-confirmed):** revert my unrequested CLAUDE.md rewrite BUT do not re-introduce the
+now-false claims it had removed. CLAUDE.md is back to its original concise shape with the "deploys from
+either branch" rationale replaced by the true main-only one. memory/actions ledger retained per owner.
+**Status:** `in progress` — implementation done, awaiting deploy-run evidence + independent verifier.

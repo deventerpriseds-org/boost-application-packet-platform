@@ -1126,3 +1126,23 @@ and deploy from there." Recorded in CLAUDE.md (Git workflow section) and SESSION
   main was fast-forwarded to 0e9fd8e). Expected, not an error.
 - Superseded: CLAUDE.md previously named claude/git-push-main-1zcqw5 as THE session branch. Now it is
   a per-feature branch name of the session's choosing.
+
+## SUPERSEDES the deploy-branch trap (2026-08-16): production now deploys from `main` ONLY
+Owner call: feature branches deploying to production is not best practice — unreviewed code reaching
+prod, `main` no longer the source of truth for what's live, and it caused the concurrency race the
+workflow comment describes. Changes made:
+- `.github/workflows/executive-engine-deploy.yml`: `branches: [main, claude/git-push-main-1zcqw5]` →
+  `branches: [main]`. The `concurrency` block STAYS (its rationale narrowed, not eliminated: rapid
+  back-to-back `main` pushes and `workflow_dispatch`-overlapping-push still race into one SWA).
+- Branch `claude/git-push-main-1zcqw5` DELETED from origin (was 0 ahead / 3 behind main — fully merged,
+  nothing lost).
+- CRITICAL MECHANIC (caught by the independent AC agent, would have made the change a no-op): GitHub
+  evaluates `on:` from the workflow file AT THE PUSHED REF, not from `main`. Editing only main's copy
+  leaves the legacy branch's own copy still listing itself → it would STILL deploy prod. Deleting (or
+  fast-forwarding) the branch is what actually closes the hole. Remember this for any future trigger
+  narrowing: changing the trigger on main does NOT retroactively govern other branches.
+- Both deploy workflows now fire on `main` only (api-deploy.yml paths api/**, executive-engine-deploy.yml
+  paths app/**). Any other branch deploys NOTHING. The earlier "asymmetry" note is obsolete.
+- If pre-merge previews are wanted later, the right mechanism is Azure SWA per-PR staging environments
+  (the pattern legacy web-deploy.yml already uses via its pull_request trigger), NOT a branch trigger
+  pointed at the production SWA.

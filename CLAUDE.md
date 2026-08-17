@@ -258,21 +258,15 @@ what exists, why it's insufficient, and get explicit sign-off before creating it
 
 ## Git workflow (branch discipline)
 
-**OWNER STANDING RULE (2026-08-16): a NEW branch per feature, and `main` ALWAYS ends up
-carrying the work — we deploy from `main`.**
+**HARD RULE: NEVER commit directly to `main`.** All development happens on a feature branch
+(a new one per feature); `main` only ever moves forward via fast-forward from that branch —
+never by a direct commit or push of new work.
 
-**HARD RULE: NEVER commit directly to `main`.** New work is always committed on a feature
-branch first; `main` only ever moves forward by **fast-forward** from that branch — never by
-a direct commit of new work. The two rules compose: branch → commit → push branch → FF `main`
-→ push `main` → deploy.
-
-> **Why `main` must move (this is the important part):** deploy triggers are branch- AND
-> path-specific. `api-deploy.yml` fires on **`main` only** (paths `api/**`), and
-> `executive-engine-deploy.yml` fires on `main` **or** the legacy `claude/git-push-main-1zcqw5`
-> (paths `app/**`). **A push to any other branch — including a fresh `claude/<feature>` branch —
-> deploys NOTHING.** Do not rely on the old "the feature branch deploys too" shortcut: it is true
-> only for that one legacy branch name and only for `app/**`. Landing on `main` is what makes a
-> change live.
+> **Production deploys from `main` only.** `api-deploy.yml` fires on `main` (paths `api/**`)
+> and `executive-engine-deploy.yml` fires on `main` (paths `app/**`). **A push to any other
+> branch deploys nothing** — landing on `main` is what makes a change live. (Until 2026-08-16
+> `executive-engine-deploy.yml` also deployed production from `claude/git-push-main-1zcqw5`;
+> that trigger and the branch were removed — unreviewed branch pushes should not reach prod.)
 
 ### Per-feature workflow (follow every time):
 

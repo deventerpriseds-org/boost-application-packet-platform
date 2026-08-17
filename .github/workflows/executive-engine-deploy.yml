@@ -2,18 +2,19 @@ name: Deploy Executive Engine to Azure Static Web Apps
 
 on:
   push:
-    branches: [main, claude/git-push-main-1zcqw5]
+    branches: [main]
     paths:
       - 'app/**'
       - '.github/workflows/executive-engine-deploy.yml'
   workflow_dispatch:
 
-# Both `main` and the feature branch trigger this workflow, and the session
-# workflow pushes them ~1s apart (feature push, then ff-merge to main). Without
-# serialization the two runs deploy identical content to the SAME Static Web App
-# concurrently and one is rejected with "No matching Static Web App environment
-# was found." A single-slot concurrency group (keyed only to the SWA, not the
-# ref) makes the later push supersede the earlier in-progress one.
+# Production deploys from `main` only — a push to any other branch deploys
+# nothing. Serialization is still required: two `main` pushes landing inside one
+# run's duration, or a `workflow_dispatch` overlapping a push, otherwise deploy
+# concurrently to the SAME Static Web App and one is rejected with "No matching
+# Static Web App environment was found." A single-slot concurrency group (keyed
+# to the SWA, not the ref) makes the later push supersede the earlier in-progress
+# one. Do NOT remove this block.
 concurrency:
   group: executive-engine-web-deploy
   cancel-in-progress: true
