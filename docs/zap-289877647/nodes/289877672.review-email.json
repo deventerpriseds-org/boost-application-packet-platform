@@ -1,0 +1,63 @@
+{
+  "id": 289877672,
+  "account_id": 1611264,
+  "customuser_id": 1611264,
+  "paused": true,
+  "type_of": "write",
+  "params": {
+    "sender": "dev@enterpriseds.io",
+    "recipients": [
+      "{{289877647__answers__Send to (Email)}}",
+      "dev@enterpriseds.io"
+    ],
+    "subject": "Application Prep: {{289877667__Target Company}} - {{289877667__Target Role}}",
+    "bodyFormat": "HTML",
+    "body": "<html>\n<body>\n<p>\nHi {{289877647__answers__Send to (Name)}},\n<br>\nBelow, you will find a summary of the analysis performed on the role you selected. \n<br>\n<br>\nJob Link: {{289877647__answers__Target Job URL}}\n<br>\n<br>\nATS Resume Link: {{293026322__alternateLink}}<br>\nResume Link: {{289877670__alternateLink}}\n<br>\n<br>\nCover Letter Link: {{291230258__alternateLink}}\n<br>\n<br>\nPortfolio Link: {{289877671__alternateLink}}\n</p>\n<br><br>\nCold Email <br>\n{{290709250__output__Item 24}}\n{{290709250__output__Item 25}}<br>\n<br><br>\n\n\n<p>\nJob Requirements :<br>\n{{289877662__output__Item 32}}<br>{{289877662__output__Item 33}}\n <br><br>\nResume Summary:<br>\n{{289877662__output__Item 9}}<br>\n<br>{{290709250__output__Item 15}}<br>\n<br> Updated Resume Summary:{{290709250__output__Item 17}}\n<br><br>\n\n<br><br>\n{{289877662__output__Item 34}}<br>\n{{289877662__output__Item 35}}<br><br> \n{{289877662__output__Item 36}}\n{{289877662__output__Item 37}}\n\n{{289877662__output__Item 48}}<br>\n{{289877662__output__Item 49}}<br><br>\n\n<br><br>\n<table>      <--\n  <thead>\n    <tr>\n      <th>Skill Category</th>\n      <th>Original Skills</th>\n      <th>Updated Skills</th>\n      <th>Merged Skills</th>\n    </tr>\n  </thead>\n  <tbody>\n    <tr>\n      <td>Skills 1</td>\n      <td>{{290709249__output__Item 3}}</td>\n      <td>{{290709249__output__Item 13}}</td>\n      <td>{{290709250__output__Item 5}}</td>\n    </tr>\n    <tr>\n      <td>Skills 2</td>\n      <td>{{290709249__output__Item 5}}</td>\n      <td>{{290709249__output__Item 15}}</td>\n     <td>{{290709250__output__Item 7}}</td>\n    </tr>\n    <tr>\n      <td>Rel Skills 1</td>\n      <td>{{290709249__output__Item 7}}</td>\n      <td>{{290709249__output__Item 17}}</td>\n     <td>{{290709250__output__Item 9}}</td>\n    </tr>\n    <tr>\n      <td>Rel Skills 2</td>\n      <td>{{290709249__output__Item 9}}</td>\n      <td>{{290709249__output__Item 19}}</td>\n     <td>{{290709250__output__Item 11}}</td>\n    </tr>\n    <tr>\n      <td>Rel Skills 3</td>\n      <td>{{290709249__output__Item 11}}</td>\n      <td>{{290709249__output__Item 21}}</td>\n     <td>{{290709250__output__Item 13}}</td>\n    </tr>\n  </tbody>\n</table>\n<br><br><br>\n\nCompact Skills Lists <br>\nOriginal Skills: <br>{{293026316__output}}<br><br>\nFinal Skills: {{291230257__output__Item 15}}\n<br><br>\n\nFinal Skills 1 <br>\n<br> {{290709250__output__Item 4}}<br>{{290709250__output__Item 5}}<br>\nFinal Skills 2 <br>\n<br>{{290709250__output__Item 6}} <br>{{290709250__output__Item 7}}<br>\nRelevant Skills 1 <br><br>\n{{290709250__output__Item 8}} <br>{{290709250__output__Item 9}}<br>\nRelevant Skills 2 <br>\n<br>{{290709250__output__Item 10}}<br>{{290709250__output__Item 11}}<br>\nRelevant Skills 3 <br>\n<br>{{290709250__output__Item 12}}<br>{{290709250__output__Item 13}}<br>\n<br><br>\n\n<br>\nRequirements Verification:<br>      <--\n{{290709250__output__Item 9}}<br>\nJob Requirements & ATS Keywords:<br>\n{{289877662__output__Item 33}}<br>\n{{289877662__output__Item 35}}<br>\n<br><br>\nResume Summary Validation:<br>\n{{290709250__output__Item 5}}<br><br>\n<br><br>\nMissing ATS Skills:<br>\n{{289877662__output__Item 37}}<br>\nATS Distribution:<br>\n{{289877662__output__Item 37}}<br>\nATS Swap Suggestions:<br>\n{{289877662__output__Item 39}}<br>\nRelevant Skills Check:<br>\n{{289877663__output__Item 45}}<br>\nWord Counts:<br>\n{{289877662__output__Item 51}}<br><br>\n<br>\n</p>\n\n<p>\n<br>\n<br>\n<br>\nA - Resume Summary Update <br>\nB - Skills Update, <br>\nC - Expertise Update, <br>\nD - Work Experience Update, <br>\nE -Relevant Proficiencies Update, <br>\nF - Cover letter Update sections.\n</p>\n\n<p>\n<br>\n<br>\nResume Output:<br><br>\nA - Resume Summary Update <br>\n{{289877667__ResumeSummary}}<br>\n<br>\nB - Skills Update, <br>\nSkills 1: \n<table>      \n  <thead>\n    <tr>\n      <th>Skill Category</th>\n      <th>Original Skills</th>\n      <th>Updated Skills</th>\n      <th>Merged Skills</th>\n    </tr>\n  </thead>\n  <tbody>\n    <tr>\n      <td>Skills 1</td>\n      <td>{{290709249__output__Item 3}}</td>\n      <td>{{290709249__output__Item 13}}</td>\n      <td>{{290709250__output__Item 5}}</td>\n    </tr>\n  </tbody>\n</table>\n<br>\n\nSkills 2:\n<table>      \n  <thead>\n    <tr>\n      <th>Skill Category</th>\n      <th>Original Skills</th>\n      <th>Updated Skills</th>\n      <th>Merged Skills</th>\n    </tr>\n  </thead>\n  <tbody>\n    <tr>\n      <td>Skills 2</td>\n      <td>{{290709249__output__Item 5}}</td>\n      <td>{{290709249__output__Item 15}}</td>\n     <td>{{290709250__output__Item 7}}</td>\n    </tr>\n  </tbody>\n</table>\n<br>\n\nC - Expertise Update, <br>             \n{{290709249__output__Item 29}}<br>\n<br>\n\nE -Relevant Proficiencies Update, <br>\nRelevant 1:<br>\n<table>      \n  <thead>\n    <tr>\n      <th>Skill Category</th>\n      <th>Original Skills</th>\n      <th>Updated Skills</th>\n      <th>Merged Skills</th>\n    </tr>\n  </thead>\n  <tbody>\n    <tr>\n      <td>Rel Skills 1</td>\n      <td>{{290709249__output__Item 7}}</td>\n      <td>{{290709249__output__Item 17}}</td>\n     <td>{{290709250__output__Item 9}}</td>\n    </tr>\n  </tbody>\n</table>\n<br>\n\nRelevant 2:<br>\n<table>      \n  <thead>\n    <tr>\n      <th>Skill Category</th>\n      <th>Original Skills</th>\n      <th>Updated Skills</th>\n      <th>Merged Skills</th>\n    </tr>\n  </thead>\n  <tbody>\n    <tr>\n      <td>Rel Skills 2</td>\n      <td>{{290709249__output__Item 3}}</td>\n      <td>{{290709249__output__Item 13}}</td>\n      <td>{{290709250__output__Item 11}}</td>\n    </tr>\n  </tbody>\n</table>\n<br>\n\nRelevant 3:<br>\n<table>      \n  <thead>\n    <tr>\n      <th>Skill Category</th>\n      <th>Original Skills</th>\n      <th>Updated Skills</th>\n      <th>Merged Skills</th>\n    </tr>\n  </thead>\n  <tbody>\n    <tr>\n      <td>Rel Skills 3</td>\n      <td>{{290709249__output__Item 11}}</td>\n      <td>{{290709249__output__Item 21}}</td>\n     <td>{{290709250__output__Item 13}}</td>\n    </tr>\n  </tbody>\n</table>\n<br>\n\nF - Cover letter Update sections. <br>\n{{289877667__Cover Letter}}<br>\n<br><br>\n\nCold Email <br>\n{{290709250__output__Item 25}}<br>\n<br><br>\n\nPortfolio Output:<br><br>\nAbout Me 1<br>\n{{289877667__About Me pt 1}}<br>\n<br>\nAbout Me 2<br>\n{{289877667__About Me pt 2}}<br>\n<br>\nExecutive Intro<br>\n{{289877667__Exec  Profile pgrph}}<br>\n<br>\nCore Achievements <br>                                                                                                            <--\n{{290709249__output__Item 31}}<br>\n<br>\n\n</p>\n\n</body>\n</html>\n\n<!DOCTYPE html>\n<html>\n<body>\n    <table border=\"1\" cellpadding=\"6\" cellspacing=\"0\">\n        <tr>\n            <th>Item</th>\n            <th>Original</th>\n            <th>Update</th>\n        </tr>\n        <tr><td>Exec Resume Summary</td><td>{{289877648__value}}</td><td>{{289877667__ResumeSummary}}</td></tr>\n        <tr><td>Skills</td><td>{{290709249__output__Item 23}}<br></td><td>Skills1:<br>{{290709249__output__Item 13}}<br>Skills2:<br>{{290709249__output__Item 15}}</td></tr>\n        <tr><td>Expertise</td><td>{{290709249__output__Item 27}}</td><td>Expertise<br>{{290709249__output__Item 29}}</td></tr>\n        <tr><td>Work History</td><td>{{289877649__value}}</td><td>{Hard Coded}</td></tr>\n        <tr><td>Relevant Skills</td><td>{{290709249__output__Item 25}}</td><td>Relevant Skills1<br>{{290709249__output__Item 17}}<br>Relevant Skills2<br>{{290709249__output__Item 19}}<br>Relevant Skills3<br>{{290709249__output__Item 21}}</td></tr>\n        <tr><td>Cover Letter</td><td>{{289877653__value}}</td><td>{{289877667__Cover Letter}}</td></tr>\n        <tr><td>About Me Pt1</td><td>{{289877654__value}}</td><td>{{289877667__About Me pt 1}}</td></tr>\n        <tr><td>About Me Pt2</td><td>{{289877655__value}}</td><td>{{289877667__About Me pt 2}}</td></tr>\n        <tr><td>Exec Profile</td><td>{{289877656__value}}</td><td>{{289877667__Exec  Profile pgrph}}</td></tr>\n        <tr><td>Core Accomplishments</td><td>{{290709249__output__Item 31}}</td><td>{{290709249__output__Item 33}}</td></tr>\n    </table>\n</body>\n</html>",
+    "ccRecipients": [],
+    "file": [
+      "{{293026322__exportLinks__application/pdf}}",
+      "{{291230258__exportLinks__application/pdf}}"
+    ]
+  },
+  "meta": {
+    "$editor": {
+      "has_automatic_issues": true,
+      "$zap_guesser": {
+        "$ai_field_suggestions": {
+          "fields": {
+            "recipients": [
+              "275535892__answers__Send to (Email)"
+            ],
+            "file": [
+              "275535908__exportLinks__application/pdf",
+              "275535908__exportLinks__application/vnd.openxmlformats-officedocument.presentationml.presentation",
+              "275535908__exportLinks__application/pdf",
+              "275535908__exportLinks__application/pdf"
+            ],
+            "body": [
+              "275535908__alternateLink"
+            ]
+          }
+        }
+      }
+    },
+    "parammap": {},
+    "stepTitle": "Send Email"
+  },
+  "triple_stores": {
+    "copied_from": null,
+    "created_by": null,
+    "polling_interval_override": 0,
+    "block_and_release_limit_override": 0,
+    "spread_tasks": 1
+  },
+  "folders": null,
+  "parent_id": 291230258,
+  "root_id": 289877647,
+  "action": "send_email",
+  "selected_api": "MicrosoftOutlookCLIAPI@2.20.2",
+  "title": null,
+  "authentication_id": 52527394,
+  "created_at": "2025-04-02T21:31:39+00:00",
+  "last_changed": "2026-06-29T17:31:59+00:00"
+}
