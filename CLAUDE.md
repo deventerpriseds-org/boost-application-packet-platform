@@ -266,7 +266,11 @@ never by a direct commit or push of new work.
 > and `executive-engine-deploy.yml` fires on `main` (paths `app/**`). **A push to any other
 > branch deploys nothing** — landing on `main` is what makes a change live. (Until 2026-08-16
 > `executive-engine-deploy.yml` also deployed production from `claude/git-push-main-1zcqw5`;
-> that trigger and the branch were removed — unreviewed branch pushes should not reach prod.)
+> that trigger was removed — unreviewed branch pushes should not reach prod. The branch itself still
+> exists, fast-forwarded to `main`: deleting a ref is rejected by the CCR git proxy, so the control is
+> the workflow file AT that ref now reading `branches: [main]`, not the branch's absence. Consequence:
+> force-pushing that branch back to a commit older than `da7eb5e` would restore the self-listing
+> workflow and re-open production deploys from it.)
 
 ### Per-feature workflow (follow every time):
 

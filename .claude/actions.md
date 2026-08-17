@@ -878,3 +878,10 @@ push straight to prod; docs stop claiming otherwise.
 now-false claims it had removed. CLAUDE.md is back to its original concise shape with the "deploys from
 either branch" rationale replaced by the true main-only one. memory/actions ledger retained per owner.
 **Status:** `in progress` — implementation done, awaiting deploy-run evidence + independent verifier.
+**ACT-48 correction (2026-08-16):** branch deletion FAILED (CCR git proxy rejects ref deletes; no
+delete-branch MCP tool). Fast-forwarded `claude/git-push-main-1zcqw5` to `da7eb5e` instead — its workflow
+copy now reads `branches: [main]`, verified by zero runs despite the push touching the workflow's own
+paths filter. Docs that claimed the branch was "deleted"/"gone" corrected (caught by the independent
+verifier, not the implementer). AC-6 CLOSED: run 31985821773 on `main`/`da7eb5e` conclusion=success, job
+log shows "Deployment Complete" + "Status: Succeeded" to purple-ground-0f377120f. Independent verifier:
+9/9 PASS. Residual: branch still exists — delete via GitHub UI outside CCR for the durable fix.

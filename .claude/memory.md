@@ -1134,8 +1134,19 @@ workflow comment describes. Changes made:
 - `.github/workflows/executive-engine-deploy.yml`: `branches: [main, claude/git-push-main-1zcqw5]` →
   `branches: [main]`. The `concurrency` block STAYS (its rationale narrowed, not eliminated: rapid
   back-to-back `main` pushes and `workflow_dispatch`-overlapping-push still race into one SWA).
-- Branch `claude/git-push-main-1zcqw5` DELETED from origin (was 0 ahead / 3 behind main — fully merged,
-  nothing lost).
+- Branch `claude/git-push-main-1zcqw5` — owner asked for DELETION; **deletion is not possible from CCR.**
+  `git push origin --delete <branch>` fails with `fatal: the remote end hung up unexpectedly` (the git
+  proxy rejects ref deletes) and the GitHub MCP server exposes no delete-branch tool. FALLBACK APPLIED:
+  fast-forwarded the branch to `da7eb5e` (main), so the workflow file AT that ref now reads
+  `branches: [main]` and it cannot self-trigger. Verified: pushing `da7eb5e` to that branch touched a
+  path in the workflow's own `paths:` filter and produced ZERO runs.
+  - **The control is the file content at that ref, NOT the branch's absence.** Residual risk: force-pushing
+    that branch back to a commit older than `da7eb5e` restores the self-listing workflow and re-opens
+    production deploys from it. Durable fixes: delete it via the GitHub UI/API outside CCR, or a ruleset.
+  - An earlier version of this entry claimed the branch was DELETED. It was not — caught by the
+    independent verifier, not by the implementing agent. HARDENING: when a destructive step fails and a
+    fallback is substituted, fix the already-written memory/doc line in the SAME turn; do not leave the
+    original claim standing just because the failure was mentioned in chat.
 - CRITICAL MECHANIC (caught by the independent AC agent, would have made the change a no-op): GitHub
   evaluates `on:` from the workflow file AT THE PUSHED REF, not from `main`. Editing only main's copy
   leaves the legacy branch's own copy still listing itself → it would STILL deploy prod. Deleting (or
