@@ -32,3 +32,6 @@ sections in git — the live app only migrated the resume/portfolio/ATS generati
 - node 289877668 *Post Analysis QA* → `ats_user` (JD analysis).
 - node 289877672 *send_email* (review/grade email) → **NOT migrated** — lived only in the zap until now.
 - KNOWN BUG in the live table: `portfolio_user` is byte-identical to `resume_user` (bad seed).
+
+## Full zap
+- **`zap-289877647.full.json`** — the ENTIRE zap (all 40 nodes) in one file. This is the canonical "the zap we migrated" artifact.

@@ -1,0 +1,1642 @@
+{
+  "id": 289877647,
+  "title": "(Copy) (Copy) Jotform (Latest) Engineering Screen Job Description Analysis (w Google Doc)",
+  "status": "on",
+  "nodes": {
+    "289877647": {
+      "id": 289877647,
+      "account_id": 1611264,
+      "customuser_id": 1611264,
+      "paused": false,
+      "type_of": "read",
+      "params": {
+        "formID": "250428403353147"
+      },
+      "meta": {
+        "$editor": {
+          "has_automatic_issues": false
+        },
+        "parammap": {
+          "formID": "Engineering Job Application Prep Form"
+        }
+      },
+      "triple_stores": {
+        "copied_from": null,
+        "created_by": null,
+        "polling_interval_override": 0,
+        "block_and_release_limit_override": 0,
+        "spread_tasks": 1
+      },
+      "folders": null,
+      "parent_id": null,
+      "root_id": null,
+      "action": "new_submission",
+      "selected_api": "JotFormCLIAPI@2.0.3",
+      "title": "(Copy) (Copy) Jotform (Latest) Engineering Screen Job Description Analysis (w Google Doc)",
+      "authentication_id": 51350032,
+      "created_at": "2025-04-02T21:31:38+00:00",
+      "last_changed": "2025-06-04T00:09:07+00:00"
+    },
+    "298124586": {
+      "id": 298124586,
+      "account_id": 1611264,
+      "customuser_id": 1611264,
+      "paused": true,
+      "type_of": "write",
+      "params": {
+        "code": "// Get input value from the field \"RoleTypeFolder\"\nlet role = inputData.RoleTypeFolder.trim().toLowerCase(); // Normalize input\n\nlet result = '';\n\nif (role === 'engineering') {\n  result = '1iER8mCSeOfChAqtNNSarq-ZGzlcsBe77';\n} else if (role === 'product management') {\n  result = '1w8wqPvE3fnUSV39-1ILDVNGDZqU4y8Ja';\n} else {\n  result = 'Unknown';\n}\n\nreturn { result };\n",
+        "input": {
+          "RoleTypeFolder": "{{289877647__answers__Role Type:}}"
+        }
+      },
+      "meta": {
+        "$editor": {
+          "has_automatic_issues": false
+        },
+        "parammap": {},
+        "stepTitle": "If / Then - Template Folder (Code is Case Sensitive, keep lowercase)"
+      },
+      "triple_stores": {
+        "copied_from": null,
+        "created_by": null,
+        "polling_interval_override": 0,
+        "block_and_release_limit_override": 0,
+        "spread_tasks": 1
+      },
+      "folders": null,
+      "parent_id": 289877647,
+      "root_id": 289877647,
+      "action": "01929fad-d3dd-62c2-52ed-7868d5fcc691",
+      "selected_api": "CodeCLIAPI@1.0.1",
+      "title": "If / Then - Template Folder (Code is Case Sensitive, keep lowercase)",
+      "authentication_id": null,
+      "created_at": "2025-05-16T20:04:09+00:00",
+      "last_changed": "2025-05-26T16:24:51+00:00"
+    },
+    "289877648": {
+      "id": 289877648,
+      "account_id": 1611264,
+      "customuser_id": 1611264,
+      "paused": true,
+      "type_of": "write",
+      "params": {
+        "key": "Current Resume Summary",
+        "value": "Visionary executive leader with a track record of aligning top-level goals to technology strategy and execution to drive continuous value creation, operational efficiency, and enterprise transformations. Adept at leading high-impact initiatives, optimizing digital ecosystems, and strengthening governance frameworks. Expertise spans software lifecycles, AI, cloud computing, cybersecurity, customer-centric innovation, and data-driven decision-making. Passionate about bridging vision and execution, I empower teams to deliver measurable business outcomes, accelerate digital evolution, and create sustainable growth in dynamic, global organizations."
+      },
+      "meta": {
+        "$editor": {
+          "has_automatic_issues": false
+        },
+        "parammap": {},
+        "stepTitle": "Current Resume Summary"
+      },
+      "triple_stores": {
+        "copied_from": null,
+        "created_by": null,
+        "polling_interval_override": 0,
+        "block_and_release_limit_override": 0,
+        "spread_tasks": 1
+      },
+      "folders": null,
+      "parent_id": 298124586,
+      "root_id": 289877647,
+      "action": "set_value",
+      "selected_api": "StorageCLIAPI@1.2.1",
+      "title": "Current Resume Summary",
+      "authentication_id": 51376286,
+      "created_at": "2025-04-02T21:31:38+00:00",
+      "last_changed": "2025-05-26T16:24:51+00:00"
+    },
+    "289877649": {
+      "id": 289877649,
+      "account_id": 1611264,
+      "customuser_id": 1611264,
+      "paused": true,
+      "type_of": "write",
+      "params": {
+        "key": "Current Work Experience",
+        "value": "VICE PRESIDENT, ENTERPRISE SOFTWARE STRATEGY AUG 2021 – PRESENT\n\n▪  Co-led a multi-year digital transformation, enhancing platform interoperability, cross-unit collaboration, and customer-centric roadmaps. Optimized the SaaS solution pipeline, cutting $3M in costs. \n• Established a security-first engineering culture, streamlining monitoring and reducing compliance risks by 40%, ensuring adherence to SOC 2 and GDPR, and mitigating critical security vulnerabilities.\n• Led an enterprise-wide Agile transformation, streamlining workflows across functions and business units. Ensured requirements alignment, architecture compliance, security integration, and full stakeholder transparency from kickoff to deployment, reducing time-to-market by 40%.\n• Constant collaboration with the CTO & CPO to design a 3-year technology roadmap, aligning engineering investments with business growth and securing a $13M budget increase for a Software Center of Excellence.\n• Negotiated high-impact strategic alliances with AWS, ESRI, and Cloud BI Vendors to optimize data strategy, enabling adoption of AI-powered analytics.\n\nSR. DIRECTOR, DIGITAL STRATEGY AND ENGINEERING FEB 2019 – AUG 2021\n\n• Led an acquired business's cloud migration to AWS and Kubernetes, increasing system reliability to 99.99% uptime while reducing infrastructure spend by 30%.\n• Spearheaded technical due diligence for multiple acquisitions, seamlessly integrating engineering teams and technology stacks, enabling a 15% faster time-to-market for acquired products.\n• Established a partnership for the development of a white-labeled BI and analytics platform, contributing to a 25% increase in operational response times and overall retention rates.\n• Designed and implemented OKRs & monthly executive ops reviews, increasing engineering efficiency and aligning execution with business goals.\n\nDIRECTOR OF SOFTWARE ENGINEERING, ENTERPRISE ARCHITECT,\nCORPORATE INFORMATION SOLUTIONS MANAGER APR 2014 – FEB 2019\n\n• Led a major operational overhaul, modernizing legacy infrastructure and improving engineering efficiency by 45% through standardization, custom tool development, automation and third-party DevOps contracts.\n• Implemented complex report automation, eliminating manual data entry and transformation, reducing operational costs by $3M annually.\n• Redesigned a predictive analytics suite, converting a consultative service into a scalable digital experience. Drove 60% revenue growth and 30% higher retention rates through personalized insights and real-time decision support.\n\nPRINCIPAL SOLUTIONS ARCHITECT (GLOBAL MANAGER)     \nINFORMATION SYSTEMS MANAGER / DATABASE ADMINISTRATOR\nGIS INFORMATION ANALYST SEP 2006 – APR 2014\n\n•  Architected a real-time asset tracking platform, reducing data retrieval time by 70% and enabling data-driven operational decision-making.\n• Deployed a GIS-powered field operations information system, increasing efficiency by 50% and enabling real-time mobile workflows for hundreds of field engineers and customers.\n• Implemented automated reporting systems, including governance policies, ensuring regulatory compliance and reducing manual reporting efforts by 80%.\n• Developed a SaaS platform integrating real-time data collection, mobile applications, data modeling, and automated reporting. Built a scalable database architecture, enhancing data accessibility and governance while improving revenue-earning operational efficiency by 60% through predictive analytics and data-driven ins\n"
+      },
+      "meta": {
+        "$editor": {
+          "has_automatic_issues": false
+        },
+        "parammap": {},
+        "stepTitle": "Current Work Experience"
+      },
+      "triple_stores": {
+        "copied_from": null,
+        "created_by": null,
+        "polling_interval_override": 0,
+        "block_and_release_limit_override": 0,
+        "spread_tasks": 1
+      },
+      "folders": null,
+      "parent_id": 289877648,
+      "root_id": 289877647,
+      "action": "set_value",
+      "selected_api": "StorageCLIAPI@1.2.1",
+      "title": "Current Work Experience",
+      "authentication_id": 51376286,
+      "created_at": "2025-04-02T21:31:38+00:00",
+      "last_changed": "2025-05-26T16:24:51+00:00"
+    },
+    "289877650": {
+      "id": 289877650,
+      "account_id": 1611264,
+      "customuser_id": 1611264,
+      "paused": true,
+      "type_of": "write",
+      "params": {
+        "key": "Current Skills",
+        "value": "Skills1\n\t• Enterprise Governance\n\t• Technology Strategy\n\t• Risk Management\n\t• Digital Transformation\n\t• Business Alignment\n\t• Cybersecurity Compliance\n\t• Cloud Architecture\n\t• Agile Transformation\n\t• AI/Data Science Strategy\n\t• Change Management\n\t• Global Operations\nSkills2\n\t• Strategic Roadmaps\n\t• Stakeholder Engagement\n\t• Revenue Optimization\n\t• SaaS Leadership\n\t• Process Improvement\n\t• Regulatory Compliance\n\t• Platform Engineering\n\t• Software Development\n\t• M&A Due Diligence\nProduct Management"
+      },
+      "meta": {
+        "$editor": {
+          "has_automatic_issues": false
+        },
+        "parammap": {},
+        "stepTitle": "Current Skills"
+      },
+      "triple_stores": {
+        "copied_from": null,
+        "created_by": null,
+        "polling_interval_override": 0,
+        "block_and_release_limit_override": 0,
+        "spread_tasks": 1
+      },
+      "folders": null,
+      "parent_id": 289877649,
+      "root_id": 289877647,
+      "action": "set_value",
+      "selected_api": "StorageCLIAPI@1.2.1",
+      "title": "Current Skills",
+      "authentication_id": 51376286,
+      "created_at": "2025-04-02T21:31:38+00:00",
+      "last_changed": "2025-05-26T16:24:51+00:00"
+    },
+    "289877651": {
+      "id": 289877651,
+      "account_id": 1611264,
+      "customuser_id": 1611264,
+      "paused": true,
+      "type_of": "write",
+      "params": {
+        "key": "Current Expertise",
+        "value": "• Budget Development and P&L Management\n• KPI-driven performance management\n• Enterprise alignment of strategy and execution\n• Governance frameworks for compliance\n• Optimizing scaled agile operations\n• Strategic roadmaps for customer-centric innovation\n• M&A due diligence and technology integration\n"
+      },
+      "meta": {
+        "$editor": {
+          "has_automatic_issues": false
+        },
+        "parammap": {},
+        "stepTitle": "Current Expertise"
+      },
+      "triple_stores": {
+        "copied_from": null,
+        "created_by": null,
+        "polling_interval_override": 0,
+        "block_and_release_limit_override": 0,
+        "spread_tasks": 1
+      },
+      "folders": null,
+      "parent_id": 289877650,
+      "root_id": 289877647,
+      "action": "set_value",
+      "selected_api": "StorageCLIAPI@1.2.1",
+      "title": "Current Expertise",
+      "authentication_id": 51376286,
+      "created_at": "2025-04-02T21:31:38+00:00",
+      "last_changed": "2025-05-26T16:24:51+00:00"
+    },
+    "289877652": {
+      "id": 289877652,
+      "account_id": 1611264,
+      "customuser_id": 1611264,
+      "paused": true,
+      "type_of": "write",
+      "params": {
+        "key": "Current Expertise",
+        "value": "Governance & Compliance:\n- Standards & Compliance\n- AI/ML Strategy\n- Cybersecurity Leadership\n- Data Strategy\n- Policy Development\n- Customer-Centricity\n\nTechnology Strategy & Transformation:\n- Digital Platform Maturity\n- SaaS Growth Strategy\n- Tech-Driven Innovation\n- Corporate AI Use Cases\n\nBusiness & Financial Impact:\n- P&L Optimization\n- Budget & Cost Control\n- Investment Strategy\n- Business Decision Modeling\n- M&A Integrations\n- Strategic Partnerships\n- Portfolio Management\n- Profitability Analysis\n\nData, Analytics & AI:\n- Enterprise Data Strategy\n- Data Insights Automation\n- AI/ML Advancements\n- Data-Driven Decisioning\n- Predictive Analytics\n- BI & Visualization\n- KPI-Driven Execution\n- Real-Time Intelligence\n\nExecution & Operations:\n- Scaled Agile Engineering\n- Business Process Re-Engineering\n- Strategic Roadmapping\n- Product Design\n- Innovation Frameworks\n- Cost Optimization\n- AI in Operations\n- Platform Scalability\n- Global Leadership\n- Tech Talent Strategy"
+      },
+      "meta": {
+        "$editor": {
+          "has_automatic_issues": false
+        },
+        "parammap": {},
+        "stepTitle": "Relevant Skills"
+      },
+      "triple_stores": {
+        "copied_from": null,
+        "created_by": null,
+        "polling_interval_override": 0,
+        "block_and_release_limit_override": 0,
+        "spread_tasks": 1
+      },
+      "folders": null,
+      "parent_id": 289877651,
+      "root_id": 289877647,
+      "action": "set_value",
+      "selected_api": "StorageCLIAPI@1.2.1",
+      "title": "Relevant Skills",
+      "authentication_id": 51376286,
+      "created_at": "2025-04-02T21:31:38+00:00",
+      "last_changed": "2025-05-26T16:24:51+00:00"
+    },
+    "289877653": {
+      "id": 289877653,
+      "account_id": 1611264,
+      "customuser_id": 1611264,
+      "paused": true,
+      "type_of": "write",
+      "params": {
+        "key": "Current Expertise",
+        "value": "Dear Leadership Team,\n\nResideo’s commitment to driving smart home innovation and enterprise-scale digital transformation resonates deeply with my leadership approach. As a technology executive with a track record of optimizing SaaS ecosystems, leading large-scale software organizations, and aligning technology strategy with business objectives, I bring deep expertise in scalable software engineering, data-driven decision-making, and enterprise-wide transformation.\n\nIn my role as Vice President of Enterprise Software Strategy, I co-led a multi-year digital transformation, streamlining platform interoperability and aligning cross-functional engineering efforts. By modernizing cloud infrastructure and enhancing AI-powered analytics, my teams delivered a 40% acceleration in product development cycles while reducing operational costs by $3M. Additionally, by establishing enterprise-wide governance frameworks, I strengthened cybersecurity posture and regulatory compliance, mitigating security risks by 50%.\n\nBeyond technology execution, I focus on customer-centric innovation and scalable business impact. At the intersection of software, AI, and data strategy, I have developed and implemented growth-driven SaaS strategies, securing strategic partnerships with AWS, ESRI, and Cloud BI providers to optimize cloud scalability and AI-driven analytics. These initiatives not only improved platform reliability to 99.99% uptime but also enabled new revenue streams, boosting subscription adoption rates by 25%.\n\nA strong advocate for collaborative leadership and cross-functional synergy, I thrive in dynamic environments that emphasize operational agility, strategic vision, and measurable business impact. Resideo’s focus on smart home technology and digital solutions aligns with my expertise in building high-performing global teams, fostering innovation-driven cultures, and delivering customer-first enterprise solutions.\nI welcome the opportunity to explore how my experience in scaling technology operations, driving revenue growth, and executing strategic software initiatives can contribute to Resideo’s continued success. Let’s connect to discuss how I can add value to your leadership team.\n\nSincerely,\nVon Ellis"
+      },
+      "meta": {
+        "$editor": {
+          "has_automatic_issues": false
+        },
+        "parammap": {},
+        "stepTitle": "Cover Letter"
+      },
+      "triple_stores": {
+        "copied_from": null,
+        "created_by": null,
+        "polling_interval_override": 0,
+        "block_and_release_limit_override": 0,
+        "spread_tasks": 1
+      },
+      "folders": null,
+      "parent_id": 289877652,
+      "root_id": 289877647,
+      "action": "set_value",
+      "selected_api": "StorageCLIAPI@1.2.1",
+      "title": "Cover Letter",
+      "authentication_id": 51376286,
+      "created_at": "2025-04-02T21:31:38+00:00",
+      "last_changed": "2025-05-26T16:24:51+00:00"
+    },
+    "289877654": {
+      "id": 289877654,
+      "account_id": 1611264,
+      "customuser_id": 1611264,
+      "paused": true,
+      "type_of": "write",
+      "params": {
+        "key": "About Me Passage 1",
+        "value": "I have always maintained the philosophy that innovation flourishes when vision, strategy, and execution move in lockstep, driving continuous progress. Throughout my career, I have championed technology as a force multiplier for business growth, operational efficiency, and customer impact. By aligning enterprise strategy with execution, I have led digital and agile transformations that empowered teams, streamlined operations, and unlocked new market opportunities. Passionate about customer-centric product design, I have fostered high-performing teams that deliver scalable solutions, ensuring technology serves as an engine for measurable, lasting business success."
+      },
+      "meta": {
+        "$editor": {
+          "has_automatic_issues": false
+        },
+        "parammap": {},
+        "stepTitle": "About Me Passage 1"
+      },
+      "triple_stores": {
+        "copied_from": null,
+        "created_by": null,
+        "polling_interval_override": 0,
+        "block_and_release_limit_override": 0,
+        "spread_tasks": 1
+      },
+      "folders": null,
+      "parent_id": 289877653,
+      "root_id": 289877647,
+      "action": "set_value",
+      "selected_api": "StorageCLIAPI@1.2.1",
+      "title": "About Me Passage 1",
+      "authentication_id": 51376286,
+      "created_at": "2025-04-02T21:31:38+00:00",
+      "last_changed": "2025-05-26T16:24:51+00:00"
+    },
+    "289877655": {
+      "id": 289877655,
+      "account_id": 1611264,
+      "customuser_id": 1611264,
+      "paused": true,
+      "type_of": "write",
+      "params": {
+        "key": "About Me Passage 2",
+        "value": "My career has been defined by leading global organizations through complex transformations with a balance of strategic foresight and hands-on execution. From modernizing enterprise platforms to integrating advanced analytics and automation, I have driven measurable outcomes—enhancing efficiency, optimizing costs, and strengthening competitive advantage. I thrive in dynamic environments where technology, strategy, and leadership converge, empowering teams to push boundaries and execute with purpose. By fostering collaboration and ensuring alignment across business and technical stakeholders, I have built resilient, scalable, and forward-thinking organizations poised for long-term success."
+      },
+      "meta": {
+        "$editor": {
+          "has_automatic_issues": false
+        },
+        "parammap": {},
+        "stepTitle": "About Me Passage 2"
+      },
+      "triple_stores": {
+        "copied_from": null,
+        "created_by": null,
+        "polling_interval_override": 0,
+        "block_and_release_limit_override": 0,
+        "spread_tasks": 1
+      },
+      "folders": null,
+      "parent_id": 289877654,
+      "root_id": 289877647,
+      "action": "set_value",
+      "selected_api": "StorageCLIAPI@1.2.1",
+      "title": "About Me Passage 2",
+      "authentication_id": 51376286,
+      "created_at": "2025-04-02T21:31:38+00:00",
+      "last_changed": "2025-05-26T16:24:51+00:00"
+    },
+    "289877656": {
+      "id": 289877656,
+      "account_id": 1611264,
+      "customuser_id": 1611264,
+      "paused": true,
+      "type_of": "write",
+      "params": {
+        "key": "Executive Profile Paragraph",
+        "value": "I am a results-driven technology leader with a track record of driving large-scale digital transformation, enterprise software innovation, and strategic decision-making. I'm Adept at scaling global teams, optimizing operations, and delivering AI, cloud, and cybersecurity-enabled solutions that accelerate revenue, reduce costs, and enhance market position. I offer a proven ability to align technology with business objectives for sustained competitive advantage."
+      },
+      "meta": {
+        "$editor": {
+          "has_automatic_issues": false
+        },
+        "parammap": {},
+        "stepTitle": "Exceutive Profile Paragraph"
+      },
+      "triple_stores": {
+        "copied_from": null,
+        "created_by": null,
+        "polling_interval_override": 0,
+        "block_and_release_limit_override": 0,
+        "spread_tasks": 1
+      },
+      "folders": null,
+      "parent_id": 289877655,
+      "root_id": 289877647,
+      "action": "set_value",
+      "selected_api": "StorageCLIAPI@1.2.1",
+      "title": "Exceutive Profile Paragraph",
+      "authentication_id": 51376286,
+      "created_at": "2025-04-02T21:31:38+00:00",
+      "last_changed": "2025-05-26T16:24:51+00:00"
+    },
+    "289877657": {
+      "id": 289877657,
+      "account_id": 1611264,
+      "customuser_id": 1611264,
+      "paused": true,
+      "type_of": "write",
+      "params": {
+        "key": "Core Accomplishments",
+        "value": "• Led a multi-year digital transformation, enhancing platform interoperability, customer-centric product roadmaps, and SaaS scalability, reducing $3M in costs and accelerating cross-unit collaboration.\n• Executed a cloud migration strategy for an acquired business, transitioning 70% of infrastructure to AWS, improving security, compliance, and 99.99% uptime, while reducing infrastructure spend by 30%.\n• Developed a predictive analytics and reporting platform, automating governance processes using ML & AI,  increasing decision-making efficiency by 80%.\n• Established a security-first engineering culture, embedding DevSecOps practices within SDLC workflows, reducing compliance risks by 40%, and strengthening policies for regulatory alignment (i.e. SOC 2/GDPR).\nOrchestrated high-value strategic partnerships and M&A integrations, aligning technology ecosystems, streamlining product integration, and reducing time-to-market for acquired solutions by 15%."
+      },
+      "meta": {
+        "$editor": {
+          "has_automatic_issues": false
+        },
+        "parammap": {},
+        "stepTitle": "Executive Profile Core Accomplishments"
+      },
+      "triple_stores": {
+        "copied_from": null,
+        "created_by": null,
+        "polling_interval_override": 0,
+        "block_and_release_limit_override": 0,
+        "spread_tasks": 1
+      },
+      "folders": null,
+      "parent_id": 289877656,
+      "root_id": 289877647,
+      "action": "set_value",
+      "selected_api": "StorageCLIAPI@1.2.1",
+      "title": "Executive Profile Core Accomplishments",
+      "authentication_id": 51376286,
+      "created_at": "2025-04-02T21:31:38+00:00",
+      "last_changed": "2025-05-26T16:24:51+00:00"
+    },
+    "289877658": {
+      "id": 289877658,
+      "account_id": 1611264,
+      "customuser_id": 1611264,
+      "paused": true,
+      "type_of": "write",
+      "params": {
+        "key": "Soft/Hard Skills",
+        "value": "Acquisitions\nAdobe XD\nAmazon Redshift\nAmazon S3\nAmazon Web Services (AWS)\nAnalytical Skills\nArchitecture\nArtificial Intelligence (AI)\nAWS CloudFormation\nBig Data\nBudget Management\nBusiness Acumen\nBusiness Administration\nBusiness Intelligence\nBusiness Relationship Management\nBusiness Strategy \nChange Management\nCloud Computing\nCloud Infrastructure\nCloud Services\nCoding Experience\nCommunication\nComputer Network Operations\nComputer Science\nConcept Development\nConceptual Design\nContent Management Systems (CMS)\nContract Management\nCustomer Advocacy\nCustomer Engagement\nCybersecurity\nData Analytics\nData Engineering\nData Governance\nData Infrastructure\nData Management\nData Modeling\nData Operations\nData Privacy\nData Quality\nData Science\nData Strategies\nData Transformation\nDatabase Administration\nDataBricks\nData-driven Decision Making\nDevice Integration\nDevOps\nDigital Strategy\nDocument Management\nEmerging Technologies\nEmerging Trends\nEngineering Management\nEnterprise Software\nEnterprise Solution Design\nExecutive Management\nExtract, Transform, Load (ETL)\nFigma \nFinancial Performance\nGeneral Data Protection Regulation (GDPR)\nGeographic Information Systems (GIS)\nGeotechnical Engineering\nGoogle Cloud Platform (GCP)\nGraphics\nHealthcare Information Technology (HIT)\nHigh Performance Teams\nInformation Security\nInformation Technology\nInfrastructure Management\nInfrastructure Projects\nIT Management\nIT Operations\nIT Portfolio\nIT Risk Management\nIT Security Assessments\nIT Strategy\nITIL\nJava\nJavaScript\nKey Performance Indicators\nLeadership\nLeading transformational change\nLocal Government\nMachine Learning\nMaps\nMaster Data Management\nMentoring\nMicrosoft Azure\nMicrosoft Power BI\nMobile Applications\nModel-View-Controller (MVC)\nNegotiation\nNetwork Security\nOperations\nOptimizing Performance\nP&L Management\nPCI\nPeople Management\nPerformance Measurement\nPHP\nPlatform Architecture\nPlatform Development\nPortfolio Management\nPredictive Analytics\nPresentations\nProblem Solving\nProduct Design\nProduct Development\nProduct Lifecycle Management\nProduct Management\nProfit & Loss\nProgram Management\nProject Management\nPython\nPyTorch\nQuality Assurance\nResource Management\nRisk Assessment\nSecurity Information and Event Management (SIEM)\nSecurity Policy\nSoftware Architecture\nSoftware as a Service (SaaS)\nSoftware Development\nSolution Delivery\nSQL\nStakeholder Management\nStatistics\nStrategic Communications\nStrategic Leadership\nStrategic Thinking\nStrategic Vision\nStrategy\nSystem Architecture\nTableau\nTeam Management\nTechnical Documentation\nTechnology Leadership\nTest Automation\nU.S. Health Insurance Portability and Accountability Act (HIPAA)\nUnix\nUser Experience (UX)\nUser Interface Design\nVendor Management\nVulnerability"
+      },
+      "meta": {
+        "$editor": {
+          "has_automatic_issues": false
+        },
+        "parammap": {},
+        "stepTitle": "Soft/Hard Skills"
+      },
+      "triple_stores": {
+        "copied_from": null,
+        "created_by": null,
+        "polling_interval_override": 0,
+        "block_and_release_limit_override": 0,
+        "spread_tasks": 1
+      },
+      "folders": null,
+      "parent_id": 289877657,
+      "root_id": 289877647,
+      "action": "set_value",
+      "selected_api": "StorageCLIAPI@1.2.1",
+      "title": "Soft/Hard Skills",
+      "authentication_id": 51376286,
+      "created_at": "2025-04-02T21:31:38+00:00",
+      "last_changed": "2025-05-26T16:24:51+00:00"
+    },
+    "289877659": {
+      "id": 289877659,
+      "account_id": 1611264,
+      "customuser_id": 1611264,
+      "paused": true,
+      "type_of": "write",
+      "params": {
+        "key": "Items to Omit",
+        "value": "(Health related, Fintech Related, Tech due diligence, AI Reg Frameworks)"
+      },
+      "meta": {
+        "$editor": {
+          "has_automatic_issues": false
+        },
+        "parammap": {},
+        "stepTitle": "Items to Omit"
+      },
+      "triple_stores": {
+        "copied_from": null,
+        "created_by": null,
+        "polling_interval_override": 0,
+        "block_and_release_limit_override": 0,
+        "spread_tasks": 1
+      },
+      "folders": null,
+      "parent_id": 289877658,
+      "root_id": 289877647,
+      "action": "set_value",
+      "selected_api": "StorageCLIAPI@1.2.1",
+      "title": "Items to Omit",
+      "authentication_id": 51376286,
+      "created_at": "2025-04-02T21:31:38+00:00",
+      "last_changed": "2025-05-26T16:24:51+00:00"
+    },
+    "294827237": {
+      "id": 294827237,
+      "account_id": 1611264,
+      "customuser_id": 1611264,
+      "paused": true,
+      "type_of": "write",
+      "params": {
+        "key": "Executive Profile Paragraph",
+        "value": "Hello Kylie,\nI trust this message finds you well. Scott Jackson is a part of my network and I have recently become aware of the Head of Engineering opportunity at SafetyIQ. The opportunity to lead a high-impact, secure platform build fits perfectly with my background and leadership experience.\n\nI have led globally distributed engineering teams, delivering secure, scalable platforms that increased delivery speed, strengthened SOC 2 and ISO 27001 compliance, and aligned product strategy with critical business goals. I have attached my resume and portfolio for your review.\n\nIf you believe there may be a possible fit, I would be delighted to connect for an initial conversation. Alternatively, if there is someone else you recommend I speak with, I would greatly appreciate any guidance.\nThank you in advance for your time and consideration. I look forward to hearing from you.\n\nWarm regards,\nVon Ellis\n"
+      },
+      "meta": {
+        "$editor": {
+          "has_automatic_issues": false
+        },
+        "parammap": {},
+        "stepTitle": "Sample Cover Letter"
+      },
+      "triple_stores": {
+        "copied_from": null,
+        "created_by": null,
+        "polling_interval_override": 0,
+        "block_and_release_limit_override": 0,
+        "spread_tasks": 1
+      },
+      "folders": null,
+      "parent_id": 289877659,
+      "root_id": 289877647,
+      "action": "set_value",
+      "selected_api": "StorageCLIAPI@1.2.1",
+      "title": "Sample Cover Letter",
+      "authentication_id": 51376286,
+      "created_at": "2025-04-30T03:32:12+00:00",
+      "last_changed": "2025-05-26T16:24:51+00:00"
+    },
+    "289877660": {
+      "id": 289877660,
+      "account_id": 1611264,
+      "customuser_id": 1611264,
+      "paused": true,
+      "type_of": "write",
+      "params": {
+        "code": "// this is wrapped in an `async` function\n// you can use await throughout the function \n\nlet date = new Date();\nlet currentHour = date.getHours(); // 24-hour format\nreturn { hour: currentHour };"
+      },
+      "meta": {
+        "$editor": {
+          "has_automatic_issues": false
+        },
+        "parammap": {},
+        "stepTitle": "Temp: Current Hour"
+      },
+      "triple_stores": {
+        "copied_from": null,
+        "created_by": null,
+        "polling_interval_override": 0,
+        "block_and_release_limit_override": 0,
+        "spread_tasks": 1
+      },
+      "folders": null,
+      "parent_id": 294827237,
+      "root_id": 289877647,
+      "action": "01929fad-d3dd-62c2-52ed-7868d5fcc691",
+      "selected_api": "CodeCLIAPI@1.0.1",
+      "title": "Temp: Current Hour",
+      "authentication_id": null,
+      "created_at": "2025-04-02T21:31:39+00:00",
+      "last_changed": "2025-05-26T16:24:51+00:00"
+    },
+    "289877661": {
+      "id": 289877661,
+      "account_id": 1611264,
+      "customuser_id": 1611264,
+      "paused": true,
+      "type_of": "write",
+      "params": {
+        "model": "gpt-4o-mini",
+        "user_name": "",
+        "assistant_name": "Resume assistant",
+        "system_message": "You are an executive recruiter such as Andrew LaCivita, Linda Raynier, Madelinne Mann, or Marie Forleo. The goal is to create a tailored resume that will be appropriate for a top-level executive but also be attractive in order to stand out to executive recruiters from the crowd.  The tailored resume should be optimized for ATS.\n\n",
+        "max_tokens": "16000",
+        "temperature": "1.0",
+        "top_p": "1.0",
+        "user_message": "Objective:\nYou are an executive recruiter such as Andrew LaCivita, Linda Raynier, Madelinne Mann, or Marie Forleo. Your goal is to create a tailored resume that will be appropriate for a top-level executive while ensuring it stands out to executive recruiters and is optimized for ATS.\n\nPlease provide the following responses in 14 structured sections with no fluff.  Avoid redundancy and using hyphens or words known to be an indicator of AI chatbot assistance.  Stick to common words, pairings, and phrases without suggesting any uncommon terms.   \n\nEach section should be clearly labeled using ### at the beginning and end of the section title, minimizing space between the title and content. All outputs should be in plain text with no markup.  \n\nDo not include any skills related to the list below:\n{{289877659__Items to Omit}}\n\nInputs to use:  \n1. Job Description (Parsed Page): {{289877647__answers__Target Job Description}}\n2. Current Resume Summary: {{289877648__value}}\n3. Existing Skills List:{{289877650__value}}\n4. Existing Expertise List: {{289877651__value}}5. Current Work Experience: {{289877649__value}}\n6.  Current About Me (First Paragraph): {{289877654__value}}\n7. Current About Me (Second Paragraph):{{289877655__value}}\n8. Existing Executive Profile: {{289877656__value}}\n9. Current Core Accomplishments (5 bullets, 180 words): {{289877657__value}}\n10. Input Relavant List: {{289877652__value}}\n\nExtract and summarize the job description data first.  Then use the same extracted data as inputs for generating the final structured outputs sections.\n\n### Sections to Generate:  \nSpecial Note: Bookend each Header with ### in front and back with plain text just flat structure.  \nDo not use Numbered bullets, but rather hyphen formatted bullets \n\nDate, Job Title & Company  \n### Date ### - Return todays date ({{zap_meta_human_now}}) in Full month name, day, year format without the time. \n### Target Job Title - Extract and return the job title from the job description.  \n### Target Company - Extract and return the hiring company’s name from the job description.  \n\nResume Summary & Skills Updates  [Originally 65-68]\n### Resume Summary (55-60 words) -  Using the style and best practices for executive resume summaries from resume.supply on the web, generate an executive resume summary section for the ideal candidate for the job description, to emphasize my most relevant qualifications, maintaining 55-60 words. Use my (current resume summary) from the input section as a model. This passage should declare who I am and what I bring to the job as an impactful executive, not specific examples of what I have done.  For context, I am a visionary leader with decades of experience leading initiatives  and customer-centric product design to achieve measurable business impact aligned with business goals.  I have led several digital transformations as well as agile transformations.  Ensure ATS optimization and alignment with the key requirements and skills from the job description. Tone should convey executive presence, business impact, and strategic leadership aligned to ATS optimization and the job description. Use a voice that blends leadership, strategic execution, transformation, and behavioral depth.\n\n(Do not output the soft skills extracted only use them for building the summary)\n🔹 Soft Skill Integration (Jobscan-Aligned)\nStep 1 – Extract Soft Skills\nBefore generating the summary, extract all soft skills as defined by Jobscan, explicitly stated or functionally described in the job description using Jobscan-style logic. Store the source phrases or text from the JD for each of the skills, this will be recalled later in the prompt. \n\nDefinition of a Soft Skill:\nA soft skill is an interpersonal, behavioral, emotional, or mindset-related trait. These often describe how a person collaborates, adapts, decides, communicates, or influences — rather than what they do.\n\nExtraction Instructions:\n✅ Include all phrases that describe:\nInterpersonal interaction (e.g., “builds relationships across teams” → collaboration)\n\nDisqualifiers:\n❌ Do not extract job titles, degrees, or time-based experience\n❌ Do not include technical tools or task-based actions (e.g., “develops roadmaps”)\n\nImportant:\nInclude inferred interpersonal or mindset-based trait for the ideal candidate based on the JD. be ready to show what text went into your choices when prompted.  \n\n🔸 Optional Seed Set (for Pattern Recognition Only — Do Not Output Blindly)\nYou may use this list to recognize phrasing patterns. Do not insert these unless they are clearly implied or present in the JD.\n\nSoft skill seed set:\nCollaboration, Leadership, Accountability, Adaptability, Customer Orientation, Strategic Thinking, Critical Thinking, Communication, Resilience, Stakeholder Engagement, Team Influence, Empathy, Ownership, Integrity, Cultural Awareness, Emotional Intelligence, Flexibility, Innovation Mindset, Transparency\n\nStep 2 – Summary Construction (55–60Words)\nUsing the extracted soft skills:\n✅ Integrate every soft skill naturally into the summary\n✅ Rephrase or compress other content if space is limited\n✅ Avoid “I” statements or first-person language\n✅ Ensure the tone reflects an executive candidate aligned with the ideal profile\n\nThe summary must:\n✅ Use all extracted soft skills\n✅ Be between 55 and 60 words as a hard requirement\n- Avoids using first person terms like \"I\" to begin sentences\n✅ Dynamic and engaging \n - maintains the style and best practices for executive resume summaries from resume.supply on the web. \n✅ Balances leadership & execution \n✅ Industry relevance \n✅ Impact-driven\nMore outcome-focused \n✅ Stronger leadership positioning → \"Aligning technology investments with business objectives\" adds a C-level strategic perspective.\n✅ Maintain logical sentence flow and business relevance\n✅ Use executive language — e.g., “Aligning transformation efforts with customer-centric outcomes to drive growth...”\n✅ Dynamic and engaging \n - maintains the style and best practices for executive resume summaries from resume.supply on the web. \n✅ Balances leadership & execution \n✅ Industry relevance \n✅ Impact-driven\nMore outcome-focused \n✅ Stronger leadership positioning → \"Aligning technology investments with business objectives\" adds a C-level strategic perspective.\n✅ More ATS-optimized keywords → \"Enterprise transformation,\" \"operational efficiency,\" and \"revenue growth\" enhance executive recruiter visibility.\n\n\n\n Skills Lists\nGenerate two skill lists: ### Skills1 ### and ### Skills2 ### (20-22 skills total, evenly split), ensuring:\n🔹 Two-Step Validation Process:\nStep 1: Generate Initial Draft\n1️⃣ Extract all required skills from the job description.\n2️⃣ Apply executive-level phrasing with a strict limit of 30 characters per skill, including spaces.\n3️⃣ Prioritize, leadership related competencies towards the top of the list before splitting across Skills1 and Skills2.\n\nStep 2: Review & Update for Missing Items\n4️⃣ Cross-check against the job description to map requirements to ATS optimized keywords and confirm 100% coverage of these verbatim ATS keywords. Override any requirements to ensure ATS keywords are included in the list. \n5️⃣ Identify missing or overlooked executive-level competencies by comparing the generated skills against the job description requirements.\n✅ Replace lower-priority skills with missing required skills to ensure 100% job description alignment.\n - Replace skills included but not explicitly required by the JD with missing required skills to ensure 100% job description alignment.\n\nStep 3— Inferred Skills\nReplace the skills with the lowest match confidence—those furthest from verbatim, near-verbatim, or reasonably inferred from the job description—with common ATS hard skills that are clearly implied by the job description, possibly embedded in longer sentences.\nEach item must be ≤30 characters, including spaces. Use abbreviations or restructure wording if needed.\nMust align with the Jobscan definition of hard skills and reflect senior-level scope (strategy, governance, transformation, etc.).\n\nStep 4— Near-Verbatim Skills\nIf near-verbatim hard skills are present in the job description, extract them—even if embedded within longer statements. Reformat each into a standalone, executive-style skill label (≤30 characters, including spaces). Replace the least relevant or loosely aligned skills from previous outputs with these refined phrases.\n\nStep 5 — Verbatim Skills (No Alterations)\nExtract only hard skills per the Jobscan definition, written exactly as they appear in the job description.\nDo not modify, rephrase, shorten, pluralize, or change tense.\nUse the Jobscan definition of a hard skill:\nA hard skill is a teachable, measurable ability such as a software tool, business method, framework, platform, or process.\nExclude:\n• Educational requirements (e.g., “Bachelor’s degree,” “MBA”)\n• Time-based experience (e.g., “12 years,” “10+ years”)\n• Soft skills (e.g., leadership, collaboration, communication)\n• Values or personal traits\nReplace the skills with the lowest match confidence from the previous steps with these items. All verbatim skills must be included as a hard requirement.  Double check to confirm all verbatim skills included \n\n🔹 Hard Requirements:\n✅ Strict character limit: Each skill must be ≤30 characters, including spaces – Any skill that isn't a ATS keyword and is exceeding this limit must be reworded concisely, abbreviated where appropriate, or replaced with an equally relevant ATS keyword.\n✅ Ensure 100% job relevance – Directly extract required skills from the job description while ensuring direct or indirect alignment with items defensible within my work history.\n✅ Only senior executive competencies – Prioritize leadership, strategy, governance, risk management, and business transformation. Exclude mid-level technical skills (e.g., \"CI/CD,\" \"Secure Coding,\" \"Microservices\").  This can be ignored if in favor of 100% ATS keywords from job requirements. \n✅ Ensure ATS Optimization – Integrate all critical keywords for the role in the job description while ensuring executive-level phrasing that recruiters search for.\n✅ Avoid redundancy – No duplicate skills across Skills1, Skills2, or other resume sections (e.g., Expertise, relevant skills, Proficiencies).\n- Avoid overusing AI as it is not a core competency\n(ignore this line as it is a note) ✅ Cover all transformation and impact areas – Include technology roadmapping, process improvement, innovation, agile transformation, and compliance frameworks.\n✅ Balanced distribution – Skills must be evenly split across Skills1 and Skills2, with 10-11 skills in each.\n\nExpertise \n### Expertise - Using both the job description and my work history as inputs, generate 6 five-word expertise phrases that accurately represent my executive-level capabilities while being fully ATS-optimized for recruiter search relevance.\nStrict Requirements for Output:\n-  Each phrase must be exactly 5 words to ensure concise, high-impact descriptions.\n-  Balance strategic leadership & execution to demonstrate visionary thinking + hands-on results.\n-  No generic phrases (e.g., “Leadership” or “Technology”) – instead, focus on high-value, role-specific competencies.\n-  No duplication from Skills1 or Skills2 bins to ensure variety across resume sections.\n-  Include a mix of technology, business, and governance areas relevant to enterprise-wide impact.\n-  Must include ATS-optimized keywords that align with the job description and recruiter search terms.\n\n\n\nRelevant Proficiencies \nStep 1: Select 9 proficiencies to align with the ATS optimized keywords that are most relevant to the job description. Only use options that are not already covered by the Skills1 or Skills2 lists.  Balance the selections to cover any unused ATS optimized hard skills this role and order them by the highest match score to the job description. Split the results into 3 lists ensuring that as a hard requirement, limit each list to have no more than 1 bullet with more than 20 characters. Replace terms with the next most related or relevant item from the Input Relevance list if needed to meet this requirement.\nFormat the Output as Three Separate Lists (Ensuring no more than one item per list is greater than 20 characters including spaces, as a hard requirement):\n### Relevant Skills bullet list 1\n### Relevant Skills bullet list 2\n### Relevant Skills bullet list 3 \n\nStep 2:\nReview the current relevant skills lists and if there are any unused ATS optimization keywords suggested earlier, replace the least relevant items with any remaining ATS optimization keywords.  Maintain the Split results in 3 lists ensuring that as a hard requirement, each list (Relevant Skills 1,  Relevant Skills 2, and  Relevant Skills 3) must not have more than 1 bullet with more than 20 characters, including spaces as a hard requirement. It is important not to include items already covered in Skills1 and Skills2 lists.  \nMaintain the Output as Three Separate Lists (Hard requirement - Each list should be no more than 3 items and no more than one item greater than 24 characters, including spaces in any list.):\n\n\n### Cover Letter - Using the Refined Cover Letter Prompt for Executive Roles, generate a concise, results-driven, and engaging cover letter for the role at the company found in the job description,  based on my work history, the job description, and industry trends while ensuring ATS optimization, recruiter alignment, and measurable leadership impact. The cover letter must strictly follow the prompt structure below, maintain 250-400 words, and align with executive hiring best practices. Address it to \"Dear Leadership Team\" and end with \"Sincerely, Von Ellis.\"\n\nPrompt Structure:\nObjective:\nCraft a high-impact, ATS-optimized, and engaging cover letter tailored to the job description, company, and industry trends while ensuring it stands out to hiring managers and executive recruiters by demonstrating strategic leadership, measurable business impact, and cultural fit.\n\n🔹 Final Cover Letter Prompt:\nUsing my work history, job description, and company background as inputs, generate a concise, results-driven, and engaging cover letter for a VP of Software, CTO, CDO, CIO, or Deputy Executive role that aligns with executive hiring best practices from top career experts (Andrew LaCivita, Madeline Mann, Linda Raynier, Harvard Business Review, The Muse).\n\nThe cover letter must be addressed to \"Dear Leadership Team\" and end with \"Sincerely, Von Ellis.\"\n\n🔹 Strict Requirements for Output:\n✅ Length: 250-400 words (strict) – No more than one page\n✅ 4 Key Sections: Opening Hook, Why You’re the Right Fit, Cultural Fit, and Strong Closing\n✅ No generic openings – Hook the reader immediately with a compelling value-driven statement\n✅ Focus on results, not responsibilities – Highlight 2-3 of my strongest, most RELEVANT leadership achievements with measurable impact (metrics, cost savings, revenue growth, efficiency improvements, etc.)\n✅ Demonstrate cultural alignment – Show how my leadership aligns with the company’s mission, industry, and goals\n✅ Include a strong closing with a call to action – Encourage a discussion/interview without sounding desperate\n✅ No first-person overuse (avoid \"I\" at the start of every sentence)\n✅ ATS Optimization – Ensure it is fully keyword-optimized for executive-level hiring and recruiter searches\n✅ Maintain a confident, polished tone – No passive or overly humble language\n✅ Replace, adjust, or refine sentences if missing key leadership or technology themes\n\n🔹 Cover Letter Structure & Best Practices:\n1️⃣ Strong Opening Hook (First 1-2 Sentences)\n✅ Immediately capture interest – Avoid “I am writing to apply for…”\n✅ Connect with the company’s mission, products, or industry impact\n✅ Mention a referral (if applicable)\n✅ Showcase a defining leadership quality or achievement in the first line\n\n2️⃣ Why You’re the Right Fit (2-3 Short Paragraphs)\n✅ Highlight 2-3 executive-level achievements directly tied to the company’s goals and pain points\n✅ Use metrics and business outcomes – Show how you’ve delivered results (e.g., revenue growth, cost savings, efficiency gains, customer acquisition, etc.)\n✅ Align with role-specific expectations (governance, security, compliance, M&A, innovation, product development, etc.)\n✅ Ensure clarity and flow – Avoid long, run-on sentences\n\n3️⃣ Cultural Fit & Personal Connection (1 Paragraph)\n✅ Show you understand the company’s mission, leadership style, and values\n✅ Position yourself as a long-term, strategic leader who fits into their culture\n✅ If applicable, align with company values such as innovation, customer-first strategies, or market expansion\n\n4️⃣ Strong Closing & Call to Action (Final 2 Sentences)\n✅ Express confidence and enthusiasm for next steps\n✅ Suggest a conversation/interview without sounding desperate\n✅ No passive phrases like “I hope to hear from you”\n\n🔹 Final Output Verification:\n✅ 250-400 words max – No longer than one page\n✅ Includes strong, metric-driven achievements (not just responsibilities)\n✅ Uses executive-level ATS keywords for optimal search visibility\n✅ Aligns with the job description’s leadership and technology themes\n✅ Has a confident, engaging, and persuasive tone\n✅ Ensures variety in sentence structure for clarity and impact\n\n\nEnsure Executive Presence in These Sections:  \nUtilize the tips and best practices of the leading experts for executive portfolios on the web, youtube, and books.  \n\nDevelop a two-paragraph section for my portfolio (### About Me 1, ### About Me 2) that establishes what I believe as a professional, how I operate, the impact, and how I will utilize my passion for sustained success. The two paragraphs should flow together as one continuous stream of thought.  It should have a natural tone as well as come off as personal, inspirational, motivational, and admirable while signaling high-level leadership impact. Maintain warmth and authenticity.  The first sentence should be \"I have always maintained a philosophy that innovation flourishes when vision, strategy, and execution move in lockstep, driving continuous progress.\".  The narrative should draw admiration from a potential hiring manager while aligning to the role in the job description, VP of Software, CTO, CDO, CIO, and Deputy Chief Executive roles.   Don't make up compound words that aren't regularly found as common language or used by authors like \"Agile-driven\". \n\nThe first passage (45-48 words as a hard requirement) should be primarily past tense establishing who I am and what I have always believed, and how I have operated to drive innovation and transformation.  It should depict what I am passionate about and how that impacts business success:\n\nSample first passage:  \nI've always embraced continuous learning and skill refinement to deliver transformative solutions. I've leveraged technology to drive operational efficiency, business growth, and customer impact. By bridging strategic vision with agile execution, I build high-performing teams and foster innovation, consistently delivering measurable value across global organizations.\n\nThe second passage (75-80 words) should avoid being redundant with the first and begin with \"My career\". It should focus on my career so far, what type of leader I have been.  It should mention the approach I've taken, to achieve measurable results, and what I thrive at doing \n\nSample second passage:\n  My career reflects a dedication to leading transformative initiatives through technical leadership and strategic vision. From modernizing systems to pioneering Agile transformations, I have driven measurable results, including enhanced team performance, operational efficiency, and strategic alignment. I thrive at the nexus of technology, business strategy, and leadership, empowering teams to deliver scalable, impactful solutions.\n\nContext:\nI am a visionary leader who achieves success by aligning strategy and execution across global teams.  I have spearheaded several digital and agile transformations and believe in customer-centric product design.  You can also look to my work history for context.  \n\n### 10 - Analyze and refine the executive profile introduction to align with VP of Software, CTO, CDO, CIO, and Deputy Chief Executive roles.  \n- Tone: Confident yet humble, avoiding self-promotion (using words like excellence) while emphasizing measurable, high-impact leadership.  \n- Hard Requirement: 50-55 words.  \n- Ensure alignment with the role highlighted in the job description and enterprise software leadership, large-scale digital transformation, and strategic decision-making.  \n- Balance visionary leadership with execution-driven impact.  \n- Emphasize business outcomes such as revenue growth, operational efficiency, cost savings, market expansion, and technology innovation.  \n- Showcase global team leadership and enterprise decision-making.  \n- Naturally integrate AI, cloud, and cybersecurity as supporting elements rather than primary themes.  \n- Use action-oriented phrasing and ensure full ATS optimization.  \n- The sentences should be about me so begin with terms like  I am, I have, I do, etc.\n- The first sentence should begin with \"As a\"\n\n### 11 - Core Accomplishments (98-100 words, five bullets). Using my work history as a foundation,  select the five most relevant items to the Job description as core accomplishments bullet points that align with VP of Software, CTO, CDO, CIO, or Deputy Chief Executive roles. \n\nEach bullet must be restructured to strictly follow this formula:\n[Strong Action Verb] + [Business Initiative] + [Technology/Process Focus] + [Quantifiable Impact]\n\nStrict Requirements for Output:\n- Stay as close to verbatim to the original work history items as possible \n- Exactly five bullets\n- Total word count: 98-125 words (hard requirement)\n- No more than two lines per bullet\n- Maintain executive-level leadership presence\n- Align with business priorities and ATS relevance across industries\n- Balance vision and execution to reinforce strategic and hands-on leadership\n- Use powerful, results-oriented language that is applicable across leadership roles\n- AI, Cloud, and Cybersecurity must be naturally integrated as supporting elements, not primary themes\n- Tie each achievement to measurable business outcomes such as efficiency, scalability, cost reduction, or revenue growth\n- Be defensible according to my true work history\n- Ensure each bullet directly aligns with my actual projects and leadership contributions to be fully authentic and defensible in interviews\n- Include key themes such as:\n-- Platform interoperability\n-- Cloud migration\n-- AI-powered analytics\n-- Security governance\n-- M&A integration\n- Ensure broad industry appeal by using language that resonates across multiple sectors while keeping a strong business alignment\n- Maximize executive positioning by maintaining a structured, high-impact format\n\nATS Optimization & Final Adjustments  \n### Job Description Summary ### - Extract Key Job Description Data (Ensure 100% Coverage)  \nFirst, Return a comprehensive summary in a paragraph including the key points, required responsibilities, experience, requirements and skills extracted from the job description. \n\n Second, Include a bullet list summary of 100% grouped by required responsibilities, experience, requirements and skills mentioned. The bullet list must use proper HTML table tags <ul> (unordered list) tag along with <li> (list item) tags for each item in the list.\n\nThird, add a HTML table formatting below that. (Generate a table formatted with html tags) DO NOT summarize—Extract a complete, fully detailed breakdown of the role.  \n\nStep 1: Initial Extraction\n✅ Extract all required responsibilities, experience, requirements and skills from the job description, ensuring no omissions.\nJob analysis → Consolidated list of everything required for the role grouped by categories of responsibilities, experience, requirements and skills \n\n✅ Structure into:\n-Column 1: The group category for the skill, of either responsibilities, experience, requirements or skills \n-Column 2: 100% of the required responsibilities, experience, requirements and skills\n\nStep 2: Validation Against Job Description\n✅ Cross-check extracted responsibilities & skills against the full job description to ensure nothing is missing.\n✅ If any required skill or responsibility is missing, correct it by adding it back verbatim from the job description.\n\nStep 3: Final Adjustments for ATS Optimization\n-Column 3: Generate ATS-optimized skills, each with a limited length of 25 characters or less. \n✅ Ensure 100% of  responsibilities, experience, requirements and skills are covered with an ATS optimized skill per job description requirements.\n\nStep 4: Remove any rows with items focused on years of experience or college degrees from the table, but keep them in the paragraph summary and bullet list.  \n\n\n\n### Second Job Description Check ### - Extract Key Job Description Data (Ensure 100% Coverage)  \nFirst, Return a comprehensive summary in a paragraph including the key points, required responsibilities, experience, requirements and skills extracted from the job description. \n\n Second, Include a bullet list summary of 100% all required responsibilities, experience, requirements and skills mentioned.  The bullet list must use proper HTML table tags <ul> (unordered list) tag along with <li> (list item) tags for each item in the list.\n\nGenerate an HTML table with proper <table>, <tr>, <th>, and <td> tags.  Do not format it as markdown or plain text. I need this output for embedding in an HTML document. Include column headers and make sure it's valid HTML\n\n- initial step, include a table with the requirement category (responsibilities, experience, requirements and skills) in column 1 and the required responsibilities, experience, requirements and skills in column 2 (omit years of experience items).   \n- Next step, generate an ATS optimized keywords to match each row in column 3 (hard requirement is they must be less than 30 characters in length) \n- Next step, update column 4 with the current list location if that skill is covered by the current skills lists (skills Lists: Skills1 or Skills2, Relevant Skills 1, 2, or 3) or \"Missing\" if that ATS keyword is not found in these lists. \n\n\n\n\n### Missing ATS Skills ### - Generate a table formatted with html tags\n✅ Review Skills, Expertise, and Relevant skills lists and note which of the recommended ATS keywords they cover. Don't include any items focused on years of experience or college degrees in this section.  \n✅ Recommend specific items to swap or add to ensure full ATS coverage.\nStep 1\nColumn 1: The full list of ATS optimized keywords \nColumn 2:  Blank\nColumn 3: Blank\nStep 2\nColumn 2: Update with the Skills & Relevent Skills items that cover that ATS keyword, else \"Missing\"\nColumn 3: List location of the matching skill or use \"Missing\" \n\n\n### Missing ATS Swap Suggestions ### - Generate a table formatted with html tags\n✅ For all ATS keywords tagged as missing a skill covering it, identify the Skills & Relevant Skills items that are the least relevant to the job description, making them good candidates to be swapped with the ATS keywords that were not covered. \nStep 1\nColumn 1: The full list of ATS optimized keywords tagged as missing a skill covering it,\nColumn 2:  Blank\nColumn 3: Blank\nStep 2\nColumn 2: The least relevant Skills & Relevent Skills items to be replaced\nColumn 3: List location of the skill to be swapped\n \nProvide an updated  ### Skills1 ### , ### Skills2 ###, ### Relevant Skills 1 ###, 2, & 3 with the adjustments suggested swaps . The lists must use proper HTML table tags <ul> (unordered list) tag along with <li> (list item) tags for each item in the list.\n\n\n (Don't output this as a header - Skills Lists)\nGenerate two skill lists: ### Skills1 ### and ### Skills2 ### (20-22 skills total, evenly split), ensuring:\nreturn \"Moved\" for both lists \n\n\n### Word and Character Requirements Check ### - Generate a table formatted with html tags\nreturn \"Removed\"\n\n### Jobscan Extraction\nCreate a 5 column table \ncolumn 1 - category hard skills or soft skills \ncolumn 2 - all hard skills that were extracted for the skills section from the JD.  do not recreate, list use what has already be done, but do not include any skills not requested in the JD. Also, all soft skills that were extracted for the summary section. do not recreate, list what has already be done, but do not include any skills not requested in the JD. \ncolumn 3 - Status of: \n       ✅ Direct — Exact or clearly aligned phrase is found in both JD and the  resume\n       ❌  Indirect - Somewhat related to phrase in both the JD and resume\n       ❌ Missing — Skill is mentioned in JD but not found in resume\n       ⚪ Not Required — Skill is in the resume but not mentioned in the job description\ncolumn 4 - The source phrases or text from the JD for each of the skills, this was stored earlier in the prompt.\ncolumn 5 - The destination phase or text used in the new Resume.\n---        \n",
+        "memory_key": "{{289877647__id}}{{289877660__hour}}",
+        "use_latest_stable_model": "false",
+        "image": ""
+      },
+      "meta": {
+        "$editor": {
+          "$zap_guesser": {
+            "$ai_field_suggestions": {
+              "fields": {
+                "memory_key": [
+                  "280504866__created_at"
+                ]
+              },
+              "choices": {
+                "model": [
+                  "gpt-4-turbo",
+                  "gpt-4",
+                  "gpt-4o",
+                  "gpt-4.5-preview",
+                  "gpt-4o",
+                  "gpt-4"
+                ]
+              }
+            }
+          },
+          "has_automatic_issues": false
+        },
+        "parammap": {
+          "model": "gpt-4o-mini"
+        },
+        "stepTitle": "Update Resume/Portfolio Fields (Prompt)"
+      },
+      "triple_stores": {
+        "copied_from": null,
+        "created_by": null,
+        "polling_interval_override": 0,
+        "block_and_release_limit_override": 0,
+        "spread_tasks": 1
+      },
+      "folders": null,
+      "parent_id": 289877660,
+      "root_id": 289877647,
+      "action": "chat_completion_memory",
+      "selected_api": "ChatGPTCLIAPI@2.56.0",
+      "title": "Update Resume/Portfolio Fields (Prompt)",
+      "authentication_id": 51374407,
+      "created_at": "2025-04-02T21:31:39+00:00",
+      "last_changed": "2026-03-02T16:55:37+00:00"
+    },
+    "299599701": {
+      "id": 299599701,
+      "account_id": 1611264,
+      "customuser_id": 1611264,
+      "paused": true,
+      "type_of": "write",
+      "params": {
+        "model": "gpt-4o-mini",
+        "user_name": "",
+        "assistant_name": "Resume assistant",
+        "system_message": "You are an executive recruiter such as Andrew LaCivita, Linda Raynier, Madelinne Mann, or Marie Forleo. The goal is to create a tailored resume that will be appropriate for a top-level executive but also be attractive in order to stand out to executive recruiters from the crowd.  The tailored resume should be optimized for ATS.\n\n",
+        "max_tokens": "16000",
+        "temperature": "1.0",
+        "top_p": "1.0",
+        "user_message": "Objective:\nYou are an executive recruiter such as Andrew LaCivita, Linda Raynier, Madelinne Mann, or Marie Forleo. Your goal is to create a tailored resume that will be appropriate for a top-level executive while ensuring it stands out to executive recruiters and is optimized for ATS.\n\nPlease provide the following responses in structured sections with no fluff.  Avoid redundancy and using em-dashes nor hyphens nor words known to be an indicator of AI chatbot assistance.  Stick to common words, pairings, and phrases without suggesting any uncommon terms.   \n\nEach section should be clearly labeled using ### at the beginning and end of the section title, minimizing space between the title and content. All outputs should be in plain text with no markup.  \n\nDo not include any skills related to the list below:\n{{289877659__Items to Omit}}\n\nInputs to use:  \n1. Job Description (Parsed Page): {{289877647__answers__Target Job Description}}\n2. Current Resume Summary: {{289877648__value}}\n3. Existing Skills List:{{289877650__value}}\n4. Existing Expertise List: {{289877651__value}}\n5. Current Work Experience: {{289877649__value}}\n6.  Current About Me (First Paragraph): {{289877654__value}}\n7. Current About Me (Second Paragraph):{{289877655__value}}\n8. Existing Executive Profile: {{289877656__value}}\n9. Current Core Accomplishments (5 bullets, 180 words): {{289877657__value}}\n10. Input Relavant List: {{289877652__value}}\n\nExtract and summarize the job description data first.  Then use the same extracted data as inputs for generating the final structured outputs sections.\n\n### Sections to Generate:  \nSpecial Note: Bookend each Header with ### in front and back with plain text just flat structure.  \nDo not use Numbered bullets, but rather hyphen formatted bullets \n\n (Don't output this as a header - Skills Lists)\nGenerate two skill lists: ### Skills1 ### and ### Skills2 ### (20-22 skills total, evenly split), ensuring:\n🔹 Two-Step Validation Process:\nStep 1: Generate Initial Draft\n1️⃣ For any of the skills that would make sense to include in a resume skills list and were tagged as Missing, swap them with the more relevant ATS keywords identified in the previous step.\n2️⃣ Ensure executive-level phrasing, ATS compliance, and strict ≤30-character limit.\n3️⃣ Prioritize, leadership related competencies towards the top of the list before splitting across Skills1 and Skills2.\nStep 2: Review & Update for Missing Items\n4️⃣ Cross-check against the job description to map requirements to ATS optimized keywords and confirm 100% coverage of these verbatim ATS keywords. Override any requirements to ensure ATS keywords are included in the list. \n5️⃣ Identify missing or overlooked executive-level competencies by comparing the generated skills against the job description requirements.\n✅ Replace lower-priority skills with missing required skills to ensure 100% job description alignment.\n - Replace skills included but not explicitly required by the JD with missing required skills to ensure 100% job description alignment.\n\nStep 5— Inferred Skills\nReplace the skills with the lowest match confidence—those furthest from verbatim, near-verbatim, or reasonably inferred from the job description—with common ATS hard skills that are clearly implied by the job responsibilities but not directly stated.\nMust align with the Jobscan definition and reflect senior-level scope (strategy, governance, transformation, etc.).\n\nStep 4— Near-Verbatim Skills\nIf near-verbatim hard skills are present in the job description, extract them—even if embedded within longer statements. Reformat each into a standalone, executive-style skill label (≤30 characters). Replace the least relevant or loosely aligned skills from previous outputs with these refined phrases.\n\nStep 3 — Verbatim Skills (No Alterations)\nExtract only hard skills per the Jobscan definition, written exactly as they appear in the job description.\nDo not modify, rephrase, shorten, pluralize, or change tense.\nUse the Jobscan definition of a hard skill:\nA hard skill is a teachable, measurable ability such as a software tool, business method, framework, platform, or process.\nExclude:\n• Educational requirements (e.g., “Bachelor’s degree,” “MBA”)\n• Time-based experience (e.g., “12 years,” “10+ years”)\n• Soft skills (e.g., leadership, collaboration, communication)\n• Values or personal traits\nReplace the skills with the lowest match confidence from the previous steps with these items. All verbatim skills must be included as a hard requirement.  Double check to confirm all verbatim skills included \n\n🔹 Hard Requirements:\n✅ Strict character limit: Each skill must be ≤30 characters – Any skill that isn't a ATS keyword and is exceeding this limit must be reworded concisely, abbreviated where appropriate, or replaced with an equally relevant ATS keyword.\n✅ Ensure 100% job relevance – Directly extract required skills from the job description while ensuring direct or indirect alignment with items defensible within my work history.\n✅ Only senior executive competencies – Prioritize leadership, strategy, governance, risk management, and business transformation. Exclude mid-level technical skills (e.g., \"CI/CD,\" \"Secure Coding,\" \"Microservices\").  This can be ignored if in favor of 100% ATS keywords from job requirements. \n✅ Ensure ATS Optimization – Integrate all critical keywords for the role in the job description while ensuring executive-level phrasing that recruiters search for.\n✅ Avoid redundancy – No duplicate skills across Skills1, Skills2, or other resume sections (e.g., Expertise, relevant skills, Proficiencies).\n- Avoid overusing AI as it is not a core competency\n(ignore this line as it is a note) ✅ Cover all transformation and impact areas – Include technology roadmapping, process improvement, innovation, agile transformation, and compliance frameworks.\n✅ Balanced distribution – Skills must be evenly split across Skills1 and Skills2, with 10-11 skills in each.\n\n\n(Don't output this as a header Relevant Proficiencies)\nReview the current relevant skills lists and if there are any unused ATS optimization keywords suggested earlier, replace the least relevant items with any remaining ATS optimization keywords to ensure all keywords are covered.  Communicate if any still remain uncovered by Skils1, Skills2, Relevant Skills 1,  Relevant Skills 2, and  Relevant Skills 3.  Maintain the Split results in 3 lists ensuring that as a hard requirement, each list (Relevant Skills 1,  Relevant Skills 2, and  Relevant Skills 3) must not have more than 1 bullet with more than 20 characters. It is important not to include items already covered in Skills1 and Skills2 lists.  \nMaintain the Output as Three Separate Lists (Hard requirement - Each list should be no more than 3 items and no more than one item greater than 24 characters in any list.):\n### Relevant Skills 1 ###\n### Relevant Skills 2 ###\n### Relevant Skills 3 ###\n\ngenerate a table formatted with html tags Using the results from the previous two step process, \nStep one:\nColumn 2: Insert The full list of Skill1, Skills2, relevant skills 1 , relevant skills 2 , and relevant skills 3 items before any swaps\nStep two :\nColumn 1: Every row, updated with the source list name for the original item on the same row\nColumn 3: Updated with the swapped skill for that row, if no swap needed, use \"Same\"\nColumn 4: Indicate whether \"Same\" or \"Swapped\" item for that row\nColumn 5: A detailed reason why the skill was swapped or not, Including why it was chosen to be swapped and why the replacement is better than the original for that row. \n\n\n### Word and Character Requirements Check ### - Generate a table formatted with html tags\nreturn \"Removed\"\n\n---        \n",
+        "memory_key": "{{289877647__id}}{{289877660__hour}}",
+        "use_latest_stable_model": "false"
+      },
+      "meta": {
+        "$editor": {
+          "$zap_guesser": {
+            "$ai_field_suggestions": {
+              "fields": {
+                "memory_key": [
+                  "280504866__created_at"
+                ]
+              },
+              "choices": {
+                "model": [
+                  "gpt-4-turbo",
+                  "gpt-4",
+                  "gpt-4o",
+                  "gpt-4.5-preview",
+                  "gpt-4o",
+                  "gpt-4"
+                ]
+              }
+            }
+          },
+          "has_automatic_issues": false
+        },
+        "parammap": {
+          "model": "gpt-4o-mini"
+        },
+        "stepTitle": "Copy: Update Resume/Portfolio Fields (Prompt)"
+      },
+      "triple_stores": {
+        "copied_from": null,
+        "created_by": null,
+        "polling_interval_override": 0,
+        "block_and_release_limit_override": 0,
+        "spread_tasks": 1
+      },
+      "folders": null,
+      "parent_id": 289877661,
+      "root_id": 289877647,
+      "action": "chat_completion_memory",
+      "selected_api": "ChatGPTCLIAPI@2.56.0",
+      "title": "Copy: Update Resume/Portfolio Fields (Prompt)",
+      "authentication_id": 51374407,
+      "created_at": "2025-05-24T18:52:51+00:00",
+      "last_changed": "2026-03-02T16:55:37+00:00"
+    },
+    "289877662": {
+      "id": 289877662,
+      "account_id": 1611264,
+      "customuser_id": 1611264,
+      "paused": true,
+      "type_of": "write",
+      "params": {
+        "transform": "string.split",
+        "inputs": "{{289877661__response__content}}{{299599701__response__content}}",
+        "separator": "###",
+        "index": "fields"
+      },
+      "meta": {
+        "$editor": {
+          "has_automatic_issues": false
+        },
+        "parammap": {
+          "transform": "Split Text"
+        },
+        "stepTitle": "Break Resume Response into Seperate Fields"
+      },
+      "triple_stores": {
+        "copied_from": null,
+        "created_by": null,
+        "polling_interval_override": 0,
+        "block_and_release_limit_override": 0,
+        "spread_tasks": 1
+      },
+      "folders": null,
+      "parent_id": 299599701,
+      "root_id": 289877647,
+      "action": "text_line_item",
+      "selected_api": "ZapierFormatterCLIAPI@1.0.7",
+      "title": "Copy: Break Resume Response into Seperate Fields",
+      "authentication_id": null,
+      "created_at": "2025-04-02T21:31:39+00:00",
+      "last_changed": "2025-05-27T13:44:07+00:00"
+    },
+    "290709248": {
+      "id": 290709248,
+      "account_id": 1611264,
+      "customuser_id": 1611264,
+      "paused": true,
+      "type_of": "write",
+      "params": {
+        "model": "gpt-4o-mini",
+        "user_name": "user",
+        "assistant_name": "assistant",
+        "system_message": "You are a helpful assistant.",
+        "max_tokens": "2000",
+        "temperature": "1.0",
+        "top_p": "1.0",
+        "user_message": "Generate 15+ seperate outputs as instructed below, with headers bookended by ###.  Do not output as a single html table. . Respond with no fluff, just the output \n\n### Original Skills 1 ### - Re-format this bullet list to include the <ul> (unordered list) tag along with <li> (list item) tags for each item in the list {{289877662__output__Item 11}}<br><br>\n### Original Skills 2 ### - Re-format this bullet list to include the <ul> (unordered list) tag along with <li> (list item) tags for each item in the list{{289877662__output__Item 13}}<br><br>\n### Relevant Skills 1 ### - Re-format this bullet list to include the <ul> (unordered list) tag along with <li> (list item) tags for each item in the list{{289877662__output__Item 17}}<br><br>\n### Relevant Skills 2 ### - Re-format this bullet list to include the <ul> (unordered list) tag along with <li> (list item) tags for each item in the list{{289877662__output__Item 19}}<br><br>\n### Relevant Skills 3 ### - Re-format this bullet list to include the <ul> (unordered list) tag along with <li> (list item) tags for each item in the list{{289877662__output__Item 21}}<br><br>\n\n\n\n### Updated Skills 1 ### - Re-format this bullet list to include the <ul> (unordered list) tag along with <li> (list item) tags for each item in the list {{289877662__output__Item 39}}<br><br>\n### Updated Skills 2 ### - Re-format this bullet list to include the <ul> (unordered list) tag along with <li> (list item) tags for each item in the list {{289877662__output__Item 41}}<br><br>\n### Updated Relevant Skills 1 ### - Re-format this bullet list to include the <ul> (unordered list) tag along with <li> (list item) tags for each item in the list {{289877662__output__Item 43}}<br><br>\n### Updated Relevant Skills 2 ### - Re-format this bullet list to include the <ul> (unordered list) tag along with <li> (list item) tags for each item in the list {{289877662__output__Item 45}}<br><br>\n### Updated Relevant Skills 3 ### - Re-format this bullet list to include the <ul> (unordered list) tag along with <li> (list item) tags for each item in the list {{289877662__output__Item 47}}<br><br>\n\n\n\n### Stored Skills ### - Re-format this bullet list to include the <ul> (unordered list) tag along with <li> (list item) tags for each item in the list {{289877650__value}}<br><br>\n### Stored Relevant Skills ### - Re-format this bullet list to include the <ul> (unordered list) tag along with <li> (list item) tags for each item in the list {{289877652__value}}<br><br>\n\n\n\n### Expertise ### - Re-format this bullet list to include the <ul> (unordered list) tag along with <li> (list item) tags for each item in the list {{289877651__value}}<br><br>\n### Updated Expertise ### - Re-format this bullet list to include the <ul> (unordered list) tag along with <li> (list item) tags for each item in the list {{289877662__output__Item 15}}<br><br>\n\n\n\n### Core Achievements ### - Re-format this bullet list to include the <ul> (unordered list) tag along with <li> (list item) tags for each item in the list {{289877657__value}}<br><br> \n### Updated Core Achievements ### - Re-format this bullet list to include the <ul> (unordered list) tag along with <li> (list item) tags for each item in the list {{289877662__output__Item 31}}<br><br> \n\n",
+        "use_latest_stable_model": "false"
+      },
+      "meta": {
+        "$editor": {
+          "has_automatic_issues": true
+        },
+        "parammap": {
+          "model": "gpt-4o-mini"
+        },
+        "stepTitle": " HTML Bullet List Formatting"
+      },
+      "triple_stores": {
+        "copied_from": null,
+        "created_by": null,
+        "polling_interval_override": 0,
+        "block_and_release_limit_override": 0,
+        "spread_tasks": 1
+      },
+      "folders": null,
+      "parent_id": 289877662,
+      "root_id": 289877647,
+      "action": "chat_completion_memory",
+      "selected_api": "ChatGPTCLIAPI@2.56.0",
+      "title": "Skills HTML Bullet List Formatting",
+      "authentication_id": 51374407,
+      "created_at": "2025-04-07T22:56:18+00:00",
+      "last_changed": "2026-03-02T16:55:37+00:00"
+    },
+    "290709249": {
+      "id": 290709249,
+      "account_id": 1611264,
+      "customuser_id": 1611264,
+      "paused": true,
+      "type_of": "write",
+      "params": {
+        "transform": "string.split",
+        "inputs": "{{290709248__response__content}}",
+        "separator": "###",
+        "index": "fields"
+      },
+      "meta": {
+        "$editor": {
+          "has_automatic_issues": false
+        },
+        "parammap": {
+          "transform": "Split Text"
+        },
+        "stepTitle": "Copy: Break Resume Response into Seperate Fields"
+      },
+      "triple_stores": {
+        "copied_from": null,
+        "created_by": null,
+        "polling_interval_override": 0,
+        "block_and_release_limit_override": 0,
+        "spread_tasks": 1
+      },
+      "folders": null,
+      "parent_id": 290709248,
+      "root_id": 289877647,
+      "action": "text_line_item",
+      "selected_api": "ZapierFormatterCLIAPI@1.0.7",
+      "title": "Copy: Break Resume Response into Seperate Fields",
+      "authentication_id": null,
+      "created_at": "2025-04-07T22:56:18+00:00",
+      "last_changed": "2025-05-27T13:44:07+00:00"
+    },
+    "289877664": {
+      "id": 289877664,
+      "account_id": 1611264,
+      "customuser_id": 1611264,
+      "paused": true,
+      "type_of": "write",
+      "params": {
+        "transform": "string.replace",
+        "inputs": "{{289877663__output__Item 54}}<br>{{289877663__output__Item 55}}<br><br>{{289877663__output__Item 46}}<br>{{289877663__output__Item 47}}<br><br>{{289877663__output__Item 48}}<br>{{289877663__output__Item 49}}<br><br>{{289877663__output__Item 50}}<br>{{289877663__output__Item 51}}<br><br>{{289877663__output__Item 52}}<br>{{289877663__output__Item 53}}<br><br>{{289877663__output__Item 44}}<br>{{289877663__output__Item 45}}<br><br>\n\n",
+        "old": "```html",
+        "new": " "
+      },
+      "meta": {
+        "$editor": {
+          "has_automatic_issues": true
+        },
+        "parammap": {
+          "transform": "Replace"
+        },
+        "stepTitle": "Cleanup HTML 1 - Table Labels (```html)"
+      },
+      "triple_stores": {
+        "copied_from": null,
+        "created_by": null,
+        "polling_interval_override": 0,
+        "block_and_release_limit_override": 0,
+        "spread_tasks": 1
+      },
+      "folders": null,
+      "parent_id": 290709249,
+      "root_id": 289877647,
+      "action": "text_line_item",
+      "selected_api": "ZapierFormatterCLIAPI@1.0.5",
+      "title": "Cleanup HTML 1 - Table Labels (```html)",
+      "authentication_id": null,
+      "created_at": "2025-04-02T21:31:39+00:00",
+      "last_changed": "2025-05-26T16:24:51+00:00"
+    },
+    "289877665": {
+      "id": 289877665,
+      "account_id": 1611264,
+      "customuser_id": 1611264,
+      "paused": true,
+      "type_of": "write",
+      "params": {
+        "transform": "string.replace",
+        "inputs": "{{289877664__output}}",
+        "old": "</table>\n```",
+        "new": " </table>\n "
+      },
+      "meta": {
+        "$editor": {
+          "has_automatic_issues": false
+        },
+        "parammap": {
+          "transform": "Replace"
+        },
+        "stepTitle": " Cleanup HTML 2 - Table Labels (```)"
+      },
+      "triple_stores": {
+        "copied_from": null,
+        "created_by": null,
+        "polling_interval_override": 0,
+        "block_and_release_limit_override": 0,
+        "spread_tasks": 1
+      },
+      "folders": null,
+      "parent_id": 289877664,
+      "root_id": 289877647,
+      "action": "text_line_item",
+      "selected_api": "ZapierFormatterCLIAPI@1.0.5",
+      "title": " Cleanup HTML 2 - Table Labels (```)",
+      "authentication_id": null,
+      "created_at": "2025-04-02T21:31:39+00:00",
+      "last_changed": "2025-05-26T16:24:51+00:00"
+    },
+    "289877666": {
+      "id": 289877666,
+      "account_id": 1611264,
+      "customuser_id": 1611264,
+      "paused": true,
+      "type_of": "write",
+      "params": {
+        "transform": "string.replace",
+        "inputs": "{{289877662__output__Item 31}}",
+        "new": "",
+        "old": "-"
+      },
+      "meta": {
+        "$editor": {
+          "has_automatic_issues": false
+        },
+        "parammap": {
+          "transform": "Replace"
+        },
+        "stepTitle": "Remove Dash in Core Accomplishments"
+      },
+      "triple_stores": {
+        "copied_from": null,
+        "created_by": null,
+        "polling_interval_override": 0,
+        "block_and_release_limit_override": 0,
+        "spread_tasks": 1
+      },
+      "folders": null,
+      "parent_id": 289877665,
+      "root_id": 289877647,
+      "action": "text_line_item",
+      "selected_api": "ZapierFormatterCLIAPI@1.0.5",
+      "title": "Remove Dash in Core Accomplishments",
+      "authentication_id": null,
+      "created_at": "2025-04-02T21:31:39+00:00",
+      "last_changed": "2025-05-26T16:24:51+00:00"
+    },
+    "289877667": {
+      "id": 289877667,
+      "account_id": 1611264,
+      "customuser_id": 1611264,
+      "paused": true,
+      "type_of": "write",
+      "params": {
+        "trim_whitespace": "True",
+        "iteration_start": "1",
+        "iteration_limit": "500",
+        "loop_values": {
+          "ResumeSummary": "{{289877662__output__Item 9}}",
+          "skills list 1": "{{289877662__output__Item 11}}",
+          "skills list 2": "{{289877662__output__Item 13}}",
+          "Expertise": "{{289877662__output__Item 15}}",
+          "Relevant 1": "{{289877662__output__Item 17}}",
+          "Relevant 2": "{{289877662__output__Item 19}}",
+          "Target Company": "{{289877662__output__Item 7}}",
+          "Target Role": "{{289877662__output__Item 5}}",
+          "About Me pt 1": "{{289877662__output__Item 25}}",
+          "About Me pt 2": "{{289877662__output__Item 27}}",
+          "Exec  Profile pgrph": "{{289877662__output__Item 29}}",
+          "Core Accomplishments": "{{289877662__output__Item 31}}",
+          "Today's Date": "{{289877662__output__Item 3}}",
+          "Relevant 3": "{{289877662__output__Item 21}}",
+          "Cover Letter": "{{289877662__output__Item 23}}"
+        }
+      },
+      "meta": {
+        "$editor": {
+          "has_automatic_issues": false
+        },
+        "parammap": {},
+        "stepTitle": "Create Loop to Trim whitespace"
+      },
+      "triple_stores": {
+        "copied_from": null,
+        "created_by": null,
+        "polling_interval_override": 0,
+        "block_and_release_limit_override": 0,
+        "spread_tasks": 1
+      },
+      "folders": null,
+      "parent_id": 289877666,
+      "root_id": 289877647,
+      "action": "loop_values_line_items",
+      "selected_api": "ZapierLoopingCLIAPI@1.2.6",
+      "title": "Create Loop to Trim whitespace",
+      "authentication_id": null,
+      "created_at": "2025-04-02T21:31:39+00:00",
+      "last_changed": "2025-05-26T16:24:51+00:00"
+    },
+    "289877668": {
+      "id": 289877668,
+      "account_id": 1611264,
+      "customuser_id": 1611264,
+      "paused": true,
+      "type_of": "write",
+      "params": {
+        "model": "gpt-4o-mini",
+        "user_name": "user",
+        "assistant_name": "assistant",
+        "system_message": "You are a helpful assistant.",
+        "max_tokens": "15500",
+        "temperature": "1.0",
+        "top_p": "1.0",
+        "memory_key": "{{289877647__id}}{{289877660__hour}}",
+        "user_message": "(Input - Job Responsibilities & Skills) \nStore but don't output the column items from the html table included here so that they can be recalled as the \"Job Responsibilities & Skills list\" in upcoming tasks: {{289877662__output__Item 33}}\n\n(Input - Resume Summary) \nStore but don't output this passage as the \"Resume Summary\" to be referenced in tasks below: {{289877667__ResumeSummary}}\n\n( Input - Skills & Relevent Skills )\nSkills 1:{{289877667__skills list 1}}Skills 2: {{289877667__skills list 2}}Expertise: {{289877667__Expertise}} Relevant Skills 1: {{289877667__Relevant 1}}Relevant Skills 2:{{289877667__Relevant 2}}Relevant Skills 3:{{289877667__Relevant 3}}\n\n\nThe tables below reference data from a previous prompt sharing memory key {{289877647__id}}{{289877660__hour}}\n\n### Final Skills QC  ### (Incude Final Skills QC as a header)\nCompare the following skill lists against the provided job description\n\n**Objectives:**\n1. Identify and eliminate redundancy across Skills Lists A (1,2), Skills Lists B (1,2),  and the Relevant Skills Lists (1, 2, and 3).\n2. Compare each skill in Lists A to Lists B, and Relevant Skills. When merging, replace it only if a more relevant, non-redundant, critical skills for the ideal candidate for the JD and ATS-optimized term exists.\n3. Skills A (from lists 1,2) and Skills B (from lists 1,2) items must be 24 characters or fewer.\n4. All Relevant Skills (from lists 1, 2, and 3) must be 20 characters or fewer.\n5. Produce an **HTML table** with the following columns:\n   - List A Skills (1,2) and relevant list a skills (1,2 and 3)\n   - List B Skills (1,2) and  relevant list b skills (1,2 and 3)\n   - Merged list, with chosen value (if swapped; if not insert original List A value)\n   - Detailed Reasoning / JD text for Alignment\n\n6. At the bottom of the output, Bookend each header below with ###, and use <ul> and <li> html list tags for each to include the skills for the final merged bullet lists of:\n   1 - ###  <h3>  Skills 1 <h3> ###  (Seperate output bookended with ### is a hard requirement)\n   2 - ###  <h3>  Skills 2 <h3> ###  (Seperate output bookended with ### is a hard requirement)  \n   3 - ###  <h3> Relevant Skills 1 <h3> ###  (Seperate output bookended with ### is a hard requirement) \n   4 - ###  <h3> Relevant Skills 2 <h3> ###  (Seperate output bookended with ### is a hard requirement) \n   5 - ###  <h3> Relevant Skills 3 <h3> ###  (Seperate output bookended with ### is a hard requirement) \n\n\n\n**Evaluation Criteria:**\n- Retain skills from List A only if they are clearly aligned with job responsibilities and not already covered more effectively in Skills 1, Skills 2, or the Relevant Skills lists.\n- Swaps should prioritize ATS keyword coverage, clarity, and conciseness.\n- Use phrasing that mirrors language in the job description when possible.\n\n**Skill Lists:**\n\nList A\nSkills 1 (≤ 24 characters)\n{{289877667__skills list 1}}\nSkills 2 (≤ 24 characters)\n{{289877667__skills list 2}}\n\nList B\nSkills 1 (≤ 24 characters)\n{{290709249__output__Item 13}}\nSkills 2 (≤ 24 characters)\n{{290709249__output__Item 15}}\n\n\nRelevant skills a (lists 1, 2 and 3)\nRelevant Skills 1 (≤ 20 characters)\n{{289877667__Relevant 1}}\nRelevant Skills 2 (≤ 20 characters)\n{{289877667__Relevant 2}}\nRelevant Skills 3 (≤ 20 characters)\n{{289877667__Relevant 3}}\n\nRelevant skills b (lists 1, 2 and 3)\nRelevant Skills 1 (≤ 20 characters)\n{{289877662__output__Item 41}}\nRelevant Skills 2 (≤ 20 characters)\n{{289877662__output__Item 43}}\nRelevant Skills 3 (≤ 20 characters)\n{{289877662__output__Item 45}}\n\n\n### Resume Summary Validation ### (Output this as the header)\n✅ Analyze whether the resume summary fully covers the full item list of extracted job responsibilities and skills. Return the output as raw, plain text with an HTML table formatting below that. Do not ask me to fill in the rest, fill in all yourself.\n\nGenerate a table formatted with html tags (Generate a clean HTML table without wrapping it in triple backticks or any code formatting. I need raw HTML output only, suitable for pasting directly into an HTML document or web page.)\nStep 1\nColumn 1: All items you listed in the Job Responsibilities & Skills List\nColumn 2: Blank\nStep 2\nUpdate Column 2 to Matching text covering the requirement found in the resume summary text (or label as \"Missing\") \n### Updated Resume Summary ###\nMaintaining the structure, style, and flow of the original, provide an updated resume summary covering the missing that also covers the missing items but in the same word count\n\n### Missing ATS Skills ### - Generate a table formatted with html tags\nReturn text \"Removed\"\n\n### ATS Distribution Check ###  - Generate a table formatted with html tags\nReturn text \"Removed\"\n\n### Missing ATS Skills ###  - Generate a table formatted with html tags\nReturn text \"Removed\"\n\n### Cold Email Template ###\nWrite a professional cold email to [Contact Name] expressing interest in the [Job Title] role at [Company Name] very similar to the example below. If a connection exists, Mention that [Connection Name] is in my network and that I recently became aware of the opportunity.  Highlight that the role aligns with my experience leading and delivering Key outcomes relevant to the role.  Emphasize results including Metrics or Achievements if relevant examples exist from my resume portfolio or experience.  Mention that I’ve attached my resume and portfolio.  Close with a warm, low-pressure ask to connect or be directed to the appropriate contact. Use a tone that is executive, concise, and respectful, without using em dashes anywhere in the message. Sign off as Von Ellis.  \n\nInputs: \nCold Contact name: {{289877647__answers__Hiring Contact Name}} \nCompany name: {{289877662__output__Item 7}} \nLinkedIn Connection Name to Mention:  {{289877647__answers__LinkedIn Connection to Mention?}} \nRole: {{289877662__output__Item 5}}\n\nExample cover letter:\nHello Kylie, \n\nI trust this message finds you well. Scott Jackson is a part of my network and I have recently become aware of the Head of Engineering opportunity at SafetyIQ. The opportunity to lead a high-impact, secure platform build fits perfectly with my background and leadership experience. I have led globally distributed engineering teams, delivering secure, scalable platforms that increased delivery speed, strengthened SOC 2 and ISO 27001 compliance, and aligned product strategy with critical business goals. \n\nI have attached my resume and portfolio for your review. If you believe there may be a possible fit, I would be delighted to connect for an initial conversation. Alternatively, if there is someone else you recommend I speak with, I would greatly appreciate any guidance. Thank you in advance for your time and consideration. I look forward to hearing from you. \n\nWarm regards, Von Ellis  \n\n###Jobscan check \nFollow the steps below to generate a full QC Check Table. Extract all hard and soft skills from the job description. Check whether they are included in the resume. Output a 5-column HTML table, formatted using <table>, <tr>, <td>, <thead>, and <tbody> tags.t. Do not wrap it in code blocks, markdown, or triple backticks.\n\nStep 1: Extract Skills from Job Description\nUsing all explicitly skills previously extracted from the job description({{289877662__output__Item 53}}).\nClassify each as:\nHard Skill — teachable, measurable, technical (e.g., frameworks, software, delivery practices)\nSoft Skill — interpersonal, behavioral, or leadership qualities (e.g., collaboration, communication, ambiguity tolerance)\n\nStep 2: Evaluate Resume Alignment\nFor each hard skill:\nSearch the resume sections skills, and relevant skills for matching content.\nFor each soft skill:\nSearch the resume summary for matching content.\nMark each skill with one of the following statuses:\n✅ Direct — Exact or clearly aligned phrase is found in both JD and resume\n❌  Indirect - Somewhat related to phrase in both the JD and resume\n❌ Missing — Skill is mentioned in JD but not found in resume\n⚪ Not Required — Skill is in the resume but not mentioned in the job description\n\nStep 3: Build the Table (in HTML)\nOutput the table using standard HTML elements:\nFormat with <table>, <tr>, <td>, <thead>, and <tbody> tags\nDo not include markdown or triple backticks\nDo not wrap the result in <pre> or any <code> blocks\nEnsure the table includes all five columns:\n| Category (Hard/Soft) | Skill | Status | JD Quote | Resume Quote |\nEnsure the columns with quotes show phrases for context of how the skill was mentioned\n\nStep 4: Match Score Breakdown (in Table Footer)\nAdd a final <tr> to the table to summarize:\n✅ Number and % of required hard skills covered\n✅ Number and % of required soft skills covered\n✅ Total match rate (exclude Not Required rows from total)\n\n**Job Description:**\n{{289877647__answers__Target Job Description}}\n",
+        "image": "",
+        "use_latest_stable_model": "false"
+      },
+      "meta": {
+        "$editor": {
+          "$zap_guesser": {
+            "$ai_field_suggestions": {
+              "fields": {
+                "memory_key": [
+                  "282874733__id"
+                ],
+                "user_message": [
+                  "282874734__value",
+                  "282874733__answers__Target Job Description"
+                ]
+              },
+              "choices": {
+                "model": [
+                  "gpt-4o",
+                  "gpt-4"
+                ]
+              }
+            }
+          },
+          "has_automatic_issues": true
+        },
+        "parammap": {
+          "model": "gpt-4o-mini"
+        },
+        "stepTitle": "Post Analysis QA"
+      },
+      "triple_stores": {
+        "copied_from": null,
+        "created_by": null,
+        "polling_interval_override": 0,
+        "block_and_release_limit_override": 0,
+        "spread_tasks": 1
+      },
+      "folders": null,
+      "parent_id": 289877667,
+      "root_id": 289877647,
+      "action": "chat_completion_memory",
+      "selected_api": "ChatGPTCLIAPI@2.56.0",
+      "title": "Post Analysis QA",
+      "authentication_id": 51374407,
+      "created_at": "2025-04-02T21:31:39+00:00",
+      "last_changed": "2026-03-02T16:55:37+00:00"
+    },
+    "290709250": {
+      "id": 290709250,
+      "account_id": 1611264,
+      "customuser_id": 1611264,
+      "paused": true,
+      "type_of": "write",
+      "params": {
+        "transform": "string.split",
+        "inputs": "{{289877668__response__content}}",
+        "separator": "###",
+        "index": "fields"
+      },
+      "meta": {
+        "$editor": {
+          "has_automatic_issues": false
+        },
+        "parammap": {
+          "transform": "Split Text"
+        },
+        "stepTitle": "Copy: Copy: Break Resume Response into Seperate Fields"
+      },
+      "triple_stores": {
+        "copied_from": null,
+        "created_by": null,
+        "polling_interval_override": 0,
+        "block_and_release_limit_override": 0,
+        "spread_tasks": 1
+      },
+      "folders": null,
+      "parent_id": 289877668,
+      "root_id": 289877647,
+      "action": "text_line_item",
+      "selected_api": "ZapierFormatterCLIAPI@1.0.7",
+      "title": "Copy: Copy: Break Resume Response into Seperate Fields",
+      "authentication_id": null,
+      "created_at": "2025-04-07T22:56:18+00:00",
+      "last_changed": "2025-05-27T13:44:07+00:00"
+    },
+    "291230256": {
+      "id": 291230256,
+      "account_id": 1611264,
+      "customuser_id": 1611264,
+      "paused": true,
+      "type_of": "write",
+      "params": {
+        "model": "gpt-4o-mini",
+        "user_name": "user",
+        "assistant_name": "assistant",
+        "system_message": "You are a helpful assistant.",
+        "max_tokens": "2000",
+        "temperature": "1.0",
+        "top_p": "1.0",
+        "user_message": "Generate 5+ seperate outputs as instructed below, with headers bookended by ###.  Do not output as a single html table. . Respond with no fluff, just the output \n\n### Final Skills 1 ### - Re-format this bullet list to remove all html tags and leave a plain text bullet list {{290709250__output__Item 5}}\n### Final Skills 2 ### - Re-format this bullet list to remove all html tags and leave a plain text bullet list {{290709250__output__Item 7}}\n### Final Relevant Skills 1 ### - Re-format this bullet list to remove all html tags and leave a plain text bullet list {{290709250__output__Item 9}}\n### Final Relevant Skills 2 ### - Re-format this bullet list to remove all html tags and leave a plain text bullet list {{290709250__output__Item 11}}\n### Final Relevant Skills 3 ### - Re-format this bullet list to remove all html tags and leave a plain text bullet list {{290709250__output__Item 13}}\n\n### Pipe Separated Original Skills ### Re-format these two bullet lists to be a single block, separated by | symbols instead of bullet or comma \n1: {{289877667__skills list 1}}\n2:{{289877667__skills list 2}}\n\n### Pipe Separated Final Skills ### Re-format these two bullet lists to be a single block, separated by | symbols instead of bullet or comma \n1: {{290709250__output__Item 5}}\n2:{{290709250__output__Item 7}}\n",
+        "use_latest_stable_model": "false",
+        "memory_key": ""
+      },
+      "meta": {
+        "$editor": {
+          "has_automatic_issues": false
+        },
+        "parammap": {
+          "model": "gpt-4o-mini"
+        },
+        "stepTitle": "Strip  HTML Skills Bullet List Formatting"
+      },
+      "triple_stores": {
+        "copied_from": null,
+        "created_by": null,
+        "polling_interval_override": 0,
+        "block_and_release_limit_override": 0,
+        "spread_tasks": 1
+      },
+      "folders": null,
+      "parent_id": 290709250,
+      "root_id": 289877647,
+      "action": "chat_completion_memory",
+      "selected_api": "ChatGPTCLIAPI@2.56.0",
+      "title": "Strip  HTML Skills Bullet List Formatting",
+      "authentication_id": 51374407,
+      "created_at": "2025-04-10T05:29:34+00:00",
+      "last_changed": "2026-03-02T16:55:37+00:00"
+    },
+    "291230257": {
+      "id": 291230257,
+      "account_id": 1611264,
+      "customuser_id": 1611264,
+      "paused": true,
+      "type_of": "write",
+      "params": {
+        "transform": "string.split",
+        "inputs": "{{291230256__response__content}}",
+        "separator": "###",
+        "index": "fields"
+      },
+      "meta": {
+        "$editor": {
+          "has_automatic_issues": false
+        },
+        "parammap": {
+          "transform": "Split Text"
+        },
+        "stepTitle": "Break Final Skills into Seperate Fields"
+      },
+      "triple_stores": {
+        "copied_from": null,
+        "created_by": null,
+        "polling_interval_override": 0,
+        "block_and_release_limit_override": 0,
+        "spread_tasks": 1
+      },
+      "folders": null,
+      "parent_id": 291230256,
+      "root_id": 289877647,
+      "action": "text_line_item",
+      "selected_api": "ZapierFormatterCLIAPI@1.0.7",
+      "title": "Break Final Skills into Seperate Fields",
+      "authentication_id": null,
+      "created_at": "2025-04-10T05:29:34+00:00",
+      "last_changed": "2025-05-27T13:44:07+00:00"
+    },
+    "293026316": {
+      "id": 293026316,
+      "account_id": 1611264,
+      "customuser_id": 1611264,
+      "paused": true,
+      "type_of": "write",
+      "params": {
+        "transform": "string.trim_space",
+        "inputs": "{{291230257__output__Item 13}}"
+      },
+      "meta": {
+        "$editor": {
+          "has_automatic_issues": false
+        },
+        "parammap": {
+          "transform": "Trim Whitespace"
+        },
+        "stepTitle": "Trim ATS Skills"
+      },
+      "triple_stores": {
+        "copied_from": null,
+        "created_by": null,
+        "polling_interval_override": 0,
+        "block_and_release_limit_override": 0,
+        "spread_tasks": 1
+      },
+      "folders": null,
+      "parent_id": 291230257,
+      "root_id": 289877647,
+      "action": "text_line_item",
+      "selected_api": "ZapierFormatterCLIAPI@1.0.7",
+      "title": "Trim ATS Skills",
+      "authentication_id": null,
+      "created_at": "2025-04-20T22:31:42+00:00",
+      "last_changed": "2025-05-27T13:44:07+00:00"
+    },
+    "293026317": {
+      "id": 293026317,
+      "account_id": 1611264,
+      "customuser_id": 1611264,
+      "paused": true,
+      "type_of": "write",
+      "params": {
+        "transform": "string.trim_space",
+        "inputs": "{{291230257__output__Item 3}}"
+      },
+      "meta": {
+        "$editor": {
+          "has_automatic_issues": false
+        },
+        "parammap": {
+          "transform": "Trim Whitespace"
+        },
+        "stepTitle": "Trim Final Skills"
+      },
+      "triple_stores": {
+        "copied_from": null,
+        "created_by": null,
+        "polling_interval_override": 0,
+        "block_and_release_limit_override": 0,
+        "spread_tasks": 1
+      },
+      "folders": null,
+      "parent_id": 293026316,
+      "root_id": 289877647,
+      "action": "text_line_item",
+      "selected_api": "ZapierFormatterCLIAPI@1.0.7",
+      "title": "Trim Final Skills",
+      "authentication_id": null,
+      "created_at": "2025-04-20T22:31:42+00:00",
+      "last_changed": "2025-05-27T13:44:07+00:00"
+    },
+    "293026318": {
+      "id": 293026318,
+      "account_id": 1611264,
+      "customuser_id": 1611264,
+      "paused": true,
+      "type_of": "write",
+      "params": {
+        "transform": "string.trim_space",
+        "inputs": "{{291230257__output__Item 5}}"
+      },
+      "meta": {
+        "$editor": {
+          "has_automatic_issues": false
+        },
+        "parammap": {
+          "transform": "Trim Whitespace"
+        },
+        "stepTitle": "Trim Final Skills 2"
+      },
+      "triple_stores": {
+        "copied_from": null,
+        "created_by": null,
+        "polling_interval_override": 0,
+        "block_and_release_limit_override": 0,
+        "spread_tasks": 1
+      },
+      "folders": null,
+      "parent_id": 293026317,
+      "root_id": 289877647,
+      "action": "text_line_item",
+      "selected_api": "ZapierFormatterCLIAPI@1.0.7",
+      "title": "Trim Final Skills 2",
+      "authentication_id": null,
+      "created_at": "2025-04-20T22:31:42+00:00",
+      "last_changed": "2025-05-27T13:44:07+00:00"
+    },
+    "293026319": {
+      "id": 293026319,
+      "account_id": 1611264,
+      "customuser_id": 1611264,
+      "paused": true,
+      "type_of": "write",
+      "params": {
+        "transform": "string.trim_space",
+        "inputs": "{{291230257__output__Item 7}}"
+      },
+      "meta": {
+        "$editor": {
+          "has_automatic_issues": false
+        },
+        "parammap": {
+          "transform": "Trim Whitespace"
+        },
+        "stepTitle": "Final Relevant  Skills 1"
+      },
+      "triple_stores": {
+        "copied_from": null,
+        "created_by": null,
+        "polling_interval_override": 0,
+        "block_and_release_limit_override": 0,
+        "spread_tasks": 1
+      },
+      "folders": null,
+      "parent_id": 293026318,
+      "root_id": 289877647,
+      "action": "text_line_item",
+      "selected_api": "ZapierFormatterCLIAPI@1.0.7",
+      "title": "Final Relevant  Skills 1",
+      "authentication_id": null,
+      "created_at": "2025-04-20T22:31:42+00:00",
+      "last_changed": "2025-05-27T13:44:07+00:00"
+    },
+    "293026320": {
+      "id": 293026320,
+      "account_id": 1611264,
+      "customuser_id": 1611264,
+      "paused": true,
+      "type_of": "write",
+      "params": {
+        "transform": "string.trim_space",
+        "inputs": "{{291230257__output__Item 9}}"
+      },
+      "meta": {
+        "$editor": {
+          "has_automatic_issues": false
+        },
+        "parammap": {
+          "transform": "Trim Whitespace"
+        },
+        "stepTitle": "Trim Final Relevant Skills 2"
+      },
+      "triple_stores": {
+        "copied_from": null,
+        "created_by": null,
+        "polling_interval_override": 0,
+        "block_and_release_limit_override": 0,
+        "spread_tasks": 1
+      },
+      "folders": null,
+      "parent_id": 293026319,
+      "root_id": 289877647,
+      "action": "text_line_item",
+      "selected_api": "ZapierFormatterCLIAPI@1.0.7",
+      "title": "Trim Final Relevant Skills 2",
+      "authentication_id": null,
+      "created_at": "2025-04-20T22:31:42+00:00",
+      "last_changed": "2025-05-27T13:44:07+00:00"
+    },
+    "293026321": {
+      "id": 293026321,
+      "account_id": 1611264,
+      "customuser_id": 1611264,
+      "paused": true,
+      "type_of": "write",
+      "params": {
+        "transform": "string.trim_space",
+        "inputs": "{{291230257__output__Item 11}}"
+      },
+      "meta": {
+        "$editor": {
+          "has_automatic_issues": false
+        },
+        "parammap": {
+          "transform": "Trim Whitespace"
+        },
+        "stepTitle": "Trim Final Relevant Skills 3"
+      },
+      "triple_stores": {
+        "copied_from": null,
+        "created_by": null,
+        "polling_interval_override": 0,
+        "block_and_release_limit_override": 0,
+        "spread_tasks": 1
+      },
+      "folders": null,
+      "parent_id": 293026320,
+      "root_id": 289877647,
+      "action": "text_line_item",
+      "selected_api": "ZapierFormatterCLIAPI@1.0.7",
+      "title": "Trim Final Relevant Skills 3",
+      "authentication_id": null,
+      "created_at": "2025-04-20T22:31:42+00:00",
+      "last_changed": "2025-05-27T13:44:07+00:00"
+    },
+    "289877670": {
+      "id": 289877670,
+      "account_id": 1611264,
+      "customuser_id": 1611264,
+      "paused": true,
+      "type_of": "write",
+      "params": {
+        "folder": "1MlVLMSQ0EQJoAtpKC1Mv7mDCAJDmdJTt",
+        "empty_fields_preference": "keep",
+        "file": "1bwOcxvkbihRTUjOzVjrWSPnDomwqy6gOz6229mdzbZw",
+        "title": "Custom Prep: {{289877667__Target Company}}-{{289877667__Target Role}}- {{289877647__created_at}}",
+        "sharing_preference": "writer",
+        "export_formats": [
+          "vnd.openxmlformats-officedocument.wordprocessingml.document"
+        ],
+        "template_field__ResumeSummary": "{{289877667__ResumeSummary}}",
+        "template_field__SkillsBullets1": "{{293026317__output}}",
+        "template_field__SkillsBullets2": "{{293026318__output}}",
+        "template_field__ExpertiseBullets": "{{289877667__Expertise}}",
+        "template_field__RelevantBullets1": "{{293026319__output}}",
+        "template_field__RelevantBullets2": "{{293026320__output}}",
+        "template_folder": "1iER8mCSeOfChAqtNNSarq-ZGzlcsBe77",
+        "template_field__RelevantBullets3": "{{293026321__output}}",
+        "template_drive": ""
+      },
+      "meta": {
+        "$editor": {
+          "has_automatic_issues": false,
+          "$zap_guesser": {
+            "$ai_field_suggestions": {
+              "fields": {
+                "template_field__WorkHistoryBullets1": [
+                  "271499350__value"
+                ],
+                "title": [
+                  "280504866__created_at"
+                ]
+              }
+            }
+          }
+        },
+        "parammap": {
+          "folder": "Zapier Automated Docs",
+          "template_folder": "Engineering",
+          "template_drive": "My Google Drive"
+        },
+        "stepTitle": "Create Sample Resume Template in Google Docs"
+      },
+      "triple_stores": {
+        "copied_from": null,
+        "created_by": null,
+        "polling_interval_override": 0,
+        "block_and_release_limit_override": 0,
+        "spread_tasks": 1
+      },
+      "folders": null,
+      "parent_id": 293026321,
+      "root_id": 289877647,
+      "action": "create_from_template",
+      "selected_api": "GoogleDocsV2CLIAPI@1.11.1",
+      "title": "Create Sample Resume Template in Google Docs",
+      "authentication_id": 51389515,
+      "created_at": "2025-04-02T21:31:39+00:00",
+      "last_changed": "2026-05-21T17:15:36+00:00"
+    },
+    "293026322": {
+      "id": 293026322,
+      "account_id": 1611264,
+      "customuser_id": 1611264,
+      "paused": true,
+      "type_of": "write",
+      "params": {
+        "folder": "1MlVLMSQ0EQJoAtpKC1Mv7mDCAJDmdJTt",
+        "empty_fields_preference": "keep",
+        "file": "{{289877647__answers__Hidden Role Type Value Output for Zapier}}",
+        "title": "Von Ellis Compact Resume: {{289877667__Target Company}}-{{289877667__Target Role}}- {{289877647__created_at}}",
+        "sharing_preference": "writer",
+        "export_formats": [
+          "vnd.openxmlformats-officedocument.wordprocessingml.document"
+        ],
+        "template_field__ResumeSummary": "{{289877667__ResumeSummary}}",
+        "template_field__SkillsBullets1": "",
+        "template_field__SkillsBullets2": "",
+        "template_field__ExpertiseBullets": "{{289877667__Expertise}}",
+        "template_field__RelevantBullets1": "{{291230257__output__Item 7}}",
+        "template_field__RelevantBullets2": "{{291230257__output__Item 9}}",
+        "template_folder": "{{298124586__result}}",
+        "template_field__RelevantBullets3": "{{291230257__output__Item 11}}",
+        "template_drive": "",
+        "template_field__SkillsBullets": "{{293026316__output}}",
+        "drive": ""
+      },
+      "meta": {
+        "$editor": {
+          "has_automatic_issues": false,
+          "$zap_guesser": {
+            "$ai_field_suggestions": {
+              "fields": {
+                "template_field__WorkHistoryBullets1": [
+                  "271499350__value"
+                ],
+                "title": [
+                  "280504866__created_at"
+                ]
+              }
+            }
+          }
+        },
+        "parammap": {
+          "folder": "Zapier Automated Docs",
+          "template_drive": "My Google Drive",
+          "drive": "My Google Drive"
+        },
+        "stepTitle": "Create ATS Compact Sample Resume Template in Google Docs"
+      },
+      "triple_stores": {
+        "copied_from": null,
+        "created_by": null,
+        "polling_interval_override": 0,
+        "block_and_release_limit_override": 0,
+        "spread_tasks": 1
+      },
+      "folders": null,
+      "parent_id": 289877670,
+      "root_id": 289877647,
+      "action": "create_from_template",
+      "selected_api": "GoogleDocsV2CLIAPI@1.11.1",
+      "title": "Create ATS Compact Sample Resume Template in Google Docs",
+      "authentication_id": 51389515,
+      "created_at": "2025-04-20T22:31:42+00:00",
+      "last_changed": "2026-05-21T17:15:36+00:00"
+    },
+    "289877671": {
+      "id": 289877671,
+      "account_id": 1611264,
+      "customuser_id": 1611264,
+      "paused": true,
+      "type_of": "write",
+      "params": {
+        "title": "VonEllis_Portfolio_{{289877667__Target Company}}_{{zap_meta_human_now}} ",
+        "presentation_id": "1ULZZLBs9zwLEN6c8hcXvBCNPk0YyTGg0yIlFSYkGIec",
+        "is_shared": false,
+        "template_fields__@AboutMe1_50words": "{{289877667__About Me pt 1}}",
+        "template_fields__@AboutMe2_60words": "{{289877667__About Me pt 2}}",
+        "template_fields__@ExecutiveProfile_55words": "{{289877667__Exec  Profile pgrph}}",
+        "template_fields__@CoreAccomplishments_5blts_180words": "{{289877666__output}}",
+        "template_fields__@Company": "{{289877667__Target Company}}",
+        "template_fields__@CoverLetterDate": "{{289877667__Today's Date}}",
+        "template_fields__@CoverLetterBody": "{{289877667__Cover Letter}}"
+      },
+      "meta": {
+        "$editor": {
+          "has_automatic_issues": false
+        },
+        "parammap": {
+          "presentation_id": "Engineering Portfolio Template (Latest)"
+        }
+      },
+      "triple_stores": {
+        "copied_from": null,
+        "created_by": null,
+        "polling_interval_override": 0,
+        "block_and_release_limit_override": 0,
+        "spread_tasks": 1
+      },
+      "folders": null,
+      "parent_id": 293026322,
+      "root_id": 289877647,
+      "action": "create_presentation_from_template",
+      "selected_api": "GoogleSlidesCLIAPI@1.1.0",
+      "title": null,
+      "authentication_id": 52074374,
+      "created_at": "2025-04-02T21:31:39+00:00",
+      "last_changed": "2026-05-28T20:06:09+00:00"
+    },
+    "291230258": {
+      "id": 291230258,
+      "account_id": 1611264,
+      "customuser_id": 1611264,
+      "paused": true,
+      "type_of": "write",
+      "params": {
+        "title": "VonEllis_CV_{{289877667__Target Company}}_{{zap_meta_human_now}} ",
+        "presentation_id": "1QN4Cnw4R9krUH4kEpl_lnhoPOkY5PG2oUKRMjxBfWV0",
+        "is_shared": false,
+        "template_fields__@Company": "{{289877667__Target Company}}",
+        "template_fields__@CoverLetterDate": "{{289877667__Today's Date}}",
+        "template_fields__@CoverLetterBody": "{{289877667__Cover Letter}}"
+      },
+      "meta": {
+        "$editor": {
+          "has_automatic_issues": false
+        },
+        "parammap": {
+          "presentation_id": "Engineering Cover Letter Template (Latest)"
+        },
+        "stepTitle": "Create Cover Letter From Template in Google Slides"
+      },
+      "triple_stores": {
+        "copied_from": null,
+        "created_by": null,
+        "polling_interval_override": 0,
+        "block_and_release_limit_override": 0,
+        "spread_tasks": 1
+      },
+      "folders": null,
+      "parent_id": 289877671,
+      "root_id": 289877647,
+      "action": "create_presentation_from_template",
+      "selected_api": "GoogleSlidesCLIAPI@1.1.0",
+      "title": "Create Cover Letter From Template in Google Slides",
+      "authentication_id": 52074374,
+      "created_at": "2025-04-10T05:29:34+00:00",
+      "last_changed": "2026-05-28T20:06:09+00:00"
+    },
+    "289877672": {
+      "id": 289877672,
+      "account_id": 1611264,
+      "customuser_id": 1611264,
+      "paused": true,
+      "type_of": "write",
+      "params": {
+        "sender": "dev@enterpriseds.io",
+        "recipients": [
+          "{{289877647__answers__Send to (Email)}}",
+          "dev@enterpriseds.io"
+        ],
+        "subject": "Application Prep: {{289877667__Target Company}} - {{289877667__Target Role}}",
+        "bodyFormat": "HTML",
+        "body": "<html>\n<body>\n<p>\nHi {{289877647__answers__Send to (Name)}},\n<br>\nBelow, you will find a summary of the analysis performed on the role you selected. \n<br>\n<br>\nJob Link: {{289877647__answers__Target Job URL}}\n<br>\n<br>\nATS Resume Link: {{293026322__alternateLink}}<br>\nResume Link: {{289877670__alternateLink}}\n<br>\n<br>\nCover Letter Link: {{291230258__alternateLink}}\n<br>\n<br>\nPortfolio Link: {{289877671__alternateLink}}\n</p>\n<br><br>\nCold Email <br>\n{{290709250__output__Item 24}}\n{{290709250__output__Item 25}}<br>\n<br><br>\n\n\n<p>\nJob Requirements :<br>\n{{289877662__output__Item 32}}<br>{{289877662__output__Item 33}}\n <br><br>\nResume Summary:<br>\n{{289877662__output__Item 9}}<br>\n<br>{{290709250__output__Item 15}}<br>\n<br> Updated Resume Summary:{{290709250__output__Item 17}}\n<br><br>\n\n<br><br>\n{{289877662__output__Item 34}}<br>\n{{289877662__output__Item 35}}<br><br> \n{{289877662__output__Item 36}}\n{{289877662__output__Item 37}}\n\n{{289877662__output__Item 48}}<br>\n{{289877662__output__Item 49}}<br><br>\n\n<br><br>\n<table>      <--\n  <thead>\n    <tr>\n      <th>Skill Category</th>\n      <th>Original Skills</th>\n      <th>Updated Skills</th>\n      <th>Merged Skills</th>\n    </tr>\n  </thead>\n  <tbody>\n    <tr>\n      <td>Skills 1</td>\n      <td>{{290709249__output__Item 3}}</td>\n      <td>{{290709249__output__Item 13}}</td>\n      <td>{{290709250__output__Item 5}}</td>\n    </tr>\n    <tr>\n      <td>Skills 2</td>\n      <td>{{290709249__output__Item 5}}</td>\n      <td>{{290709249__output__Item 15}}</td>\n     <td>{{290709250__output__Item 7}}</td>\n    </tr>\n    <tr>\n      <td>Rel Skills 1</td>\n      <td>{{290709249__output__Item 7}}</td>\n      <td>{{290709249__output__Item 17}}</td>\n     <td>{{290709250__output__Item 9}}</td>\n    </tr>\n    <tr>\n      <td>Rel Skills 2</td>\n      <td>{{290709249__output__Item 9}}</td>\n      <td>{{290709249__output__Item 19}}</td>\n     <td>{{290709250__output__Item 11}}</td>\n    </tr>\n    <tr>\n      <td>Rel Skills 3</td>\n      <td>{{290709249__output__Item 11}}</td>\n      <td>{{290709249__output__Item 21}}</td>\n     <td>{{290709250__output__Item 13}}</td>\n    </tr>\n  </tbody>\n</table>\n<br><br><br>\n\nCompact Skills Lists <br>\nOriginal Skills: <br>{{293026316__output}}<br><br>\nFinal Skills: {{291230257__output__Item 15}}\n<br><br>\n\nFinal Skills 1 <br>\n<br> {{290709250__output__Item 4}}<br>{{290709250__output__Item 5}}<br>\nFinal Skills 2 <br>\n<br>{{290709250__output__Item 6}} <br>{{290709250__output__Item 7}}<br>\nRelevant Skills 1 <br><br>\n{{290709250__output__Item 8}} <br>{{290709250__output__Item 9}}<br>\nRelevant Skills 2 <br>\n<br>{{290709250__output__Item 10}}<br>{{290709250__output__Item 11}}<br>\nRelevant Skills 3 <br>\n<br>{{290709250__output__Item 12}}<br>{{290709250__output__Item 13}}<br>\n<br><br>\n\n<br>\nRequirements Verification:<br>      <--\n{{290709250__output__Item 9}}<br>\nJob Requirements & ATS Keywords:<br>\n{{289877662__output__Item 33}}<br>\n{{289877662__output__Item 35}}<br>\n<br><br>\nResume Summary Validation:<br>\n{{290709250__output__Item 5}}<br><br>\n<br><br>\nMissing ATS Skills:<br>\n{{289877662__output__Item 37}}<br>\nATS Distribution:<br>\n{{289877662__output__Item 37}}<br>\nATS Swap Suggestions:<br>\n{{289877662__output__Item 39}}<br>\nRelevant Skills Check:<br>\n{{289877663__output__Item 45}}<br>\nWord Counts:<br>\n{{289877662__output__Item 51}}<br><br>\n<br>\n</p>\n\n<p>\n<br>\n<br>\n<br>\nA - Resume Summary Update <br>\nB - Skills Update, <br>\nC - Expertise Update, <br>\nD - Work Experience Update, <br>\nE -Relevant Proficiencies Update, <br>\nF - Cover letter Update sections.\n</p>\n\n<p>\n<br>\n<br>\nResume Output:<br><br>\nA - Resume Summary Update <br>\n{{289877667__ResumeSummary}}<br>\n<br>\nB - Skills Update, <br>\nSkills 1: \n<table>      \n  <thead>\n    <tr>\n      <th>Skill Category</th>\n      <th>Original Skills</th>\n      <th>Updated Skills</th>\n      <th>Merged Skills</th>\n    </tr>\n  </thead>\n  <tbody>\n    <tr>\n      <td>Skills 1</td>\n      <td>{{290709249__output__Item 3}}</td>\n      <td>{{290709249__output__Item 13}}</td>\n      <td>{{290709250__output__Item 5}}</td>\n    </tr>\n  </tbody>\n</table>\n<br>\n\nSkills 2:\n<table>      \n  <thead>\n    <tr>\n      <th>Skill Category</th>\n      <th>Original Skills</th>\n      <th>Updated Skills</th>\n      <th>Merged Skills</th>\n    </tr>\n  </thead>\n  <tbody>\n    <tr>\n      <td>Skills 2</td>\n      <td>{{290709249__output__Item 5}}</td>\n      <td>{{290709249__output__Item 15}}</td>\n     <td>{{290709250__output__Item 7}}</td>\n    </tr>\n  </tbody>\n</table>\n<br>\n\nC - Expertise Update, <br>             \n{{290709249__output__Item 29}}<br>\n<br>\n\nE -Relevant Proficiencies Update, <br>\nRelevant 1:<br>\n<table>      \n  <thead>\n    <tr>\n      <th>Skill Category</th>\n      <th>Original Skills</th>\n      <th>Updated Skills</th>\n      <th>Merged Skills</th>\n    </tr>\n  </thead>\n  <tbody>\n    <tr>\n      <td>Rel Skills 1</td>\n      <td>{{290709249__output__Item 7}}</td>\n      <td>{{290709249__output__Item 17}}</td>\n     <td>{{290709250__output__Item 9}}</td>\n    </tr>\n  </tbody>\n</table>\n<br>\n\nRelevant 2:<br>\n<table>      \n  <thead>\n    <tr>\n      <th>Skill Category</th>\n      <th>Original Skills</th>\n      <th>Updated Skills</th>\n      <th>Merged Skills</th>\n    </tr>\n  </thead>\n  <tbody>\n    <tr>\n      <td>Rel Skills 2</td>\n      <td>{{290709249__output__Item 3}}</td>\n      <td>{{290709249__output__Item 13}}</td>\n      <td>{{290709250__output__Item 11}}</td>\n    </tr>\n  </tbody>\n</table>\n<br>\n\nRelevant 3:<br>\n<table>      \n  <thead>\n    <tr>\n      <th>Skill Category</th>\n      <th>Original Skills</th>\n      <th>Updated Skills</th>\n      <th>Merged Skills</th>\n    </tr>\n  </thead>\n  <tbody>\n    <tr>\n      <td>Rel Skills 3</td>\n      <td>{{290709249__output__Item 11}}</td>\n      <td>{{290709249__output__Item 21}}</td>\n     <td>{{290709250__output__Item 13}}</td>\n    </tr>\n  </tbody>\n</table>\n<br>\n\nF - Cover letter Update sections. <br>\n{{289877667__Cover Letter}}<br>\n<br><br>\n\nCold Email <br>\n{{290709250__output__Item 25}}<br>\n<br><br>\n\nPortfolio Output:<br><br>\nAbout Me 1<br>\n{{289877667__About Me pt 1}}<br>\n<br>\nAbout Me 2<br>\n{{289877667__About Me pt 2}}<br>\n<br>\nExecutive Intro<br>\n{{289877667__Exec  Profile pgrph}}<br>\n<br>\nCore Achievements <br>                                                                                                            <--\n{{290709249__output__Item 31}}<br>\n<br>\n\n</p>\n\n</body>\n</html>\n\n<!DOCTYPE html>\n<html>\n<body>\n    <table border=\"1\" cellpadding=\"6\" cellspacing=\"0\">\n        <tr>\n            <th>Item</th>\n            <th>Original</th>\n            <th>Update</th>\n        </tr>\n        <tr><td>Exec Resume Summary</td><td>{{289877648__value}}</td><td>{{289877667__ResumeSummary}}</td></tr>\n        <tr><td>Skills</td><td>{{290709249__output__Item 23}}<br></td><td>Skills1:<br>{{290709249__output__Item 13}}<br>Skills2:<br>{{290709249__output__Item 15}}</td></tr>\n        <tr><td>Expertise</td><td>{{290709249__output__Item 27}}</td><td>Expertise<br>{{290709249__output__Item 29}}</td></tr>\n        <tr><td>Work History</td><td>{{289877649__value}}</td><td>{Hard Coded}</td></tr>\n        <tr><td>Relevant Skills</td><td>{{290709249__output__Item 25}}</td><td>Relevant Skills1<br>{{290709249__output__Item 17}}<br>Relevant Skills2<br>{{290709249__output__Item 19}}<br>Relevant Skills3<br>{{290709249__output__Item 21}}</td></tr>\n        <tr><td>Cover Letter</td><td>{{289877653__value}}</td><td>{{289877667__Cover Letter}}</td></tr>\n        <tr><td>About Me Pt1</td><td>{{289877654__value}}</td><td>{{289877667__About Me pt 1}}</td></tr>\n        <tr><td>About Me Pt2</td><td>{{289877655__value}}</td><td>{{289877667__About Me pt 2}}</td></tr>\n        <tr><td>Exec Profile</td><td>{{289877656__value}}</td><td>{{289877667__Exec  Profile pgrph}}</td></tr>\n        <tr><td>Core Accomplishments</td><td>{{290709249__output__Item 31}}</td><td>{{290709249__output__Item 33}}</td></tr>\n    </table>\n</body>\n</html>",
+        "ccRecipients": [],
+        "file": [
+          "{{293026322__exportLinks__application/pdf}}",
+          "{{291230258__exportLinks__application/pdf}}"
+        ]
+      },
+      "meta": {
+        "$editor": {
+          "has_automatic_issues": true,
+          "$zap_guesser": {
+            "$ai_field_suggestions": {
+              "fields": {
+                "recipients": [
+                  "275535892__answers__Send to (Email)"
+                ],
+                "file": [
+                  "275535908__exportLinks__application/pdf",
+                  "275535908__exportLinks__application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                  "275535908__exportLinks__application/pdf",
+                  "275535908__exportLinks__application/pdf"
+                ],
+                "body": [
+                  "275535908__alternateLink"
+                ]
+              }
+            }
+          }
+        },
+        "parammap": {},
+        "stepTitle": "Send Email"
+      },
+      "triple_stores": {
+        "copied_from": null,
+        "created_by": null,
+        "polling_interval_override": 0,
+        "block_and_release_limit_override": 0,
+        "spread_tasks": 1
+      },
+      "folders": null,
+      "parent_id": 291230258,
+      "root_id": 289877647,
+      "action": "send_email",
+      "selected_api": "MicrosoftOutlookCLIAPI@2.20.2",
+      "title": null,
+      "authentication_id": 52527394,
+      "created_at": "2025-04-02T21:31:39+00:00",
+      "last_changed": "2026-06-29T17:31:59+00:00"
+    }
+  }
+}

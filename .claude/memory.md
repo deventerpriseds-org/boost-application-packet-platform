@@ -1157,3 +1157,13 @@ workflow comment describes. Changes made:
 - If pre-merge previews are wanted later, the right mechanism is Azure SWA per-PR staging environments
   (the pattern legacy web-deploy.yml already uses via its pull_request trigger), NOT a branch trigger
   pointed at the production SWA.
+
+## THE MIGRATED ZAP is stored in the repo (2026-08-17) — for "find the zap we migrated"
+- Source of the whole Executive Engine pipeline = **Zapier Zap 289877647** "(Copy)(Copy) Jotform
+  (Latest) Engineering Screen Job Description Analysis (w Google Doc)", 40 nodes.
+- FULL ZAP JSON (all 40 nodes, in its entirety): `docs/zap-289877647/zap-289877647.full.json`.
+- Extracted sections + index: `docs/zap-289877647/` (README maps each node → live Prompts-table key;
+  prompts/, baseline/, nodes/). Individual review-email node also in Prompts table key `review_email`.
+- The full zap is TOO BIG for the Prompts Azure Table (110KB > ~32KB per-property cap) — it lives in
+  git, which is also where a future session looks. If asked "the zap we migrated," read that file.
+- Reusable: `.github/workflows/prompts-load-file.yml` loads a repo file into the Prompts table.
