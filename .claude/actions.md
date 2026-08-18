@@ -894,8 +894,27 @@ nothing is live from that branch without pushing to main")
 - AC-3: "NOTHING IS LIVE FROM ANY BRANCH EXCEPT main" note present in all 3 deploy workflows + CLAUDE.md — DONE
 - AC-4: `executive-engine-deploy.yml` concurrency block still intact (regression guard) — DONE (verified)
 - AC-5: no new PR triggers a web-deploy run — PENDING (needs a PR after this lands)
-- AC-6: does removing the trigger on `main` stop ALREADY-OPEN PRs (e.g. PR #2) from firing it? — PENDING
-  (depends on which ref GitHub resolves the workflow file from for `pull_request` events; being checked
-  independently — the analogous `push` case resolves from the PUSHED ref, which would mean stale PR
-  branches keep firing until rebased)
+- AC-6: does removing the trigger on `main` stop ALREADY-OPEN PRs from firing it? — ANSWERED: YES, at
+  each PR's NEXT pull_request event. `pull_request` resolves from the PR MERGE REF (base merged with
+  head), NOT the head branch and NOT base alone — GitHub docs source
+  `content/actions/reference/workflows-and-actions/events-that-trigger-workflows.md`: GITHUB_REF =
+  `refs/pull/N/merge`, GITHUB_SHA = last merge commit on it. (Contrast `push` = "tip commit pushed to
+  the ref", which is why the legacy-branch fix required editing that branch's own copy.) Because every
+  active PR branch has web-deploy.yml byte-identical to main, the merge ref carries main's
+  trigger-less version. CAVEAT: it does not retroactively clear existing red checks — a push to main
+  fires no pull_request events.
+- AC-7: PREMISE CORRECTED — PR #2 (`claude/job-platform-azure-deploy-s46c4f`) was NOT a source of red
+  checks. It has UNRELATED HISTORIES with main (`git merge-base` exits 1; base `ddf937b` is not an
+  ancestor of main), so no merge ref is computable, and it produced ZERO of the 47 web-deploy runs. The
+  PRs that actually reddened were this session's, now closed. This change protects FUTURE PRs.
+- AC-8: landing on `main` reds `main` once — web-deploy's retained `push` trigger still lists its OWN
+  file in `paths:`, so the merge commit fires it and it fails ResourceNotFound. Also fires api-deploy +
+  executive-engine-deploy (their paths include their own files, and the banner touches all three);
+  both redeploy IDENTICAL source. AWAITING OWNER GO/NO-GO.
+- AC-9: `closed` PR type orphaned no teardown — grep over .github/ finds no `action: close` /
+  `close_pull_request` step; those runs were always no-op `skipped`. VERIFIED.
+- AC-10: no other workflow deploys to a live Azure resource on a PR event — repo-wide `pull_request`
+  count in .github/workflows/ is now ZERO. VERIFIED.
+- NOTE: this does NOT repair web-deploy. Every `main` push touching web/** and every workflow_dispatch
+  still fails at the token step. Do not report it as fixed.
 **Status:** `in progress` — committed on `claude/web-deploy-drop-pr-trigger`, NOT yet landed on `main`.
