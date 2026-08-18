@@ -1,5 +1,7 @@
 name: Deploy Executive Engine to Azure Static Web Apps
 
+# NOTHING IS LIVE FROM ANY BRANCH EXCEPT `main`. This workflow fires on `main` only —
+# pushing a feature branch deploys nothing. Land the change on `main` to make it live.
 on:
   push:
     branches: [main]

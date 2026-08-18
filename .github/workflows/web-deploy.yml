@@ -1,19 +1,26 @@
 name: Deploy Web to Azure Static Web Apps
 
+# LEGACY dev console (`web/`) -> Static Web App `job-platform-web`. NOT the product.
+#
+# NOTHING IS LIVE FROM ANY BRANCH EXCEPT `main`. Every deploy workflow in this repo
+# fires on `main` only; pushing a branch (or opening a PR) deploys nothing anywhere.
+# If you need a change live, land it on `main`.
+#
+# The `pull_request` trigger was REMOVED 2026-08-16: it ran on every PR regardless of
+# paths and failed each one, because the `job-platform-web` SWA no longer exists in
+# Azure (ResourceNotFound). It also provisioned per-PR staging environments on a live
+# resource, which is what exhausted Azure's staging-environment cap. Restoring it
+# requires recreating that SWA first — otherwise it only re-reds every PR.
 on:
   push:
     branches: [main]
     paths:
       - 'web/**'
       - '.github/workflows/web-deploy.yml'
-  pull_request:
-    types: [opened, synchronize, reopened, closed]
-    branches: [main]
   workflow_dispatch:
 
 jobs:
   build_and_deploy:
-    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.event.action != 'closed')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

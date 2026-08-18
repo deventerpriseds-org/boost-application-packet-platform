@@ -1,5 +1,11 @@
 # Job Application Platform
 
+> **NOTHING IS LIVE FROM ANY BRANCH EXCEPT `main`.** All three deploy workflows
+> (`api-deploy.yml`, `executive-engine-deploy.yml`, `web-deploy.yml`) fire on `main` only.
+> Pushing a feature branch — or opening a PR — deploys nothing, anywhere. To make a change
+> live you must land it on `main` (see "Git workflow" below). Do not tell the owner a change
+> is live off the back of a branch push.
+
 ## Azure Infrastructure
 
 - **Resource Group**: EnterpriseDS_ResourceGRP

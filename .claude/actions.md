@@ -885,3 +885,17 @@ paths filter. Docs that claimed the branch was "deleted"/"gone" corrected (caugh
 verifier, not the implementer). AC-6 CLOSED: run 31985821773 on `main`/`da7eb5e` conclusion=success, job
 log shows "Deployment Complete" + "Status: Succeeded" to purple-ground-0f377120f. Independent verifier:
 9/9 PASS. Residual: branch still exists — delete via GitHub UI outside CCR for the durable fix.
+
+## ACT-49 — Drop web-deploy.yml `pull_request` trigger + "main-only" notes for other agents
+**Requested:** 2026-08-16 (owner: "drop the pull request trigger and leave a note so other agents know
+nothing is live from that branch without pushing to main")
+- AC-1: `web-deploy.yml` has no `pull_request:` trigger; push(main)+workflow_dispatch remain — DONE
+- AC-2: the dead `if:` guard referencing `github.event_name == 'pull_request'` is gone — DONE
+- AC-3: "NOTHING IS LIVE FROM ANY BRANCH EXCEPT main" note present in all 3 deploy workflows + CLAUDE.md — DONE
+- AC-4: `executive-engine-deploy.yml` concurrency block still intact (regression guard) — DONE (verified)
+- AC-5: no new PR triggers a web-deploy run — PENDING (needs a PR after this lands)
+- AC-6: does removing the trigger on `main` stop ALREADY-OPEN PRs (e.g. PR #2) from firing it? — PENDING
+  (depends on which ref GitHub resolves the workflow file from for `pull_request` events; being checked
+  independently — the analogous `push` case resolves from the PUSHED ref, which would mean stale PR
+  branches keep firing until rebased)
+**Status:** `in progress` — committed on `claude/web-deploy-drop-pr-trigger`, NOT yet landed on `main`.

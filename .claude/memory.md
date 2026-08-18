@@ -1175,3 +1175,25 @@ workflow comment describes. Changes made:
 - THE BOOST APP ZAP = **289877647** "(Copy)(Copy) Jotform (Latest) Engineering Screen Job Description
   Analysis (w Google Doc)" → `docs/zap-289877647/` (full zap + per-node prompts + review_email). This is
   what boost development references. Catalog ≠ boost zap. (The boost zap files contain NO secrets — verified.)
+
+## web-deploy.yml `pull_request` trigger REMOVED + main-only notes added (2026-08-16)
+- `.github/workflows/web-deploy.yml`: dropped `pull_request:` (types opened/synchronize/reopened/closed,
+  branches [main]). It fired on EVERY PR regardless of paths and failed each one (target SWA
+  `job-platform-web` is gone — ResourceNotFound), and it provisioned per-PR staging environments on a
+  live Azure resource, which is what exhausted the staging-env cap. Remaining triggers: push to `main`
+  (paths web/**) + workflow_dispatch.
+- Removed the now-dead job guard `if: github.event_name == 'push' || ... || (pull_request && action != 'closed')`
+  — with `pull_request` gone only push/workflow_dispatch can reach the job, so the condition was always true.
+- Added a "NOTHING IS LIVE FROM ANY BRANCH EXCEPT `main`" banner to all three deploy workflows and to the
+  top of CLAUDE.md, per owner request, so an agent hits it wherever it looks.
+- GROUND-TRUTH established before recommending removal (not assumed from "it's legacy"): nothing else
+  references `web/` (only this workflow); `AZURE_STATIC_WEB_APPS_API_TOKEN` has ZERO consumers in any
+  workflow (so CLAUDE.md line ~56 calling it "legacy console deploy" is STALE — web-deploy fetches its own
+  token via `az staticwebapp secrets list`); `web/` has 1 commit in 6 months vs 16 for `app/`.
+- STILL UNKNOWN and only the owner can answer: whether the `job-platform-web` SWA was deleted deliberately
+  or by accident. If deliberate → retire the workflow + `web/` + stale docs. If accidental → recreate the
+  SWA. Dropping the PR trigger is the reversible middle that commits to neither.
+- CAUTION: landing this on `main` re-triggers api-deploy AND executive-engine-deploy, because each
+  workflow's `paths:` filter includes its own file and the banner edits touch all three. Both redeploy
+  IDENTICAL source (no api/ or app/ change) but they are real deploys — api-deploy also rewrites app
+  settings, which restarts the Function App workers.
