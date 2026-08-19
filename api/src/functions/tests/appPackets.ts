@@ -6,6 +6,7 @@ import { logUsage } from './usageMeter'
 import { groundingText, resolvePostingSource } from './jdText'
 import { metaFor, varsForType, copyTemplate, injectValues, stripLeftoverTokens, shareAnyone } from './packetTemplates'
 import { buildPackageForJD } from './pipeline'
+import { writeSwaps } from './appSwaps'
 
 const HEADERS = {
   'Content-Type': 'application/json',
@@ -305,6 +306,14 @@ async function buildTemplatedArtifact(client: any, art: any, opp: any, regen: bo
     await logUsage(`packet:${art.type}:generate`, 'gpt-4o-mini', {})
     await client.query(`update packet set pkg_json = $1, jd_grounded = $2, updated_at = now() where id = $3`,
       [JSON.stringify(pkg), grounded, art.packet_id])
+    // P1.3 — record what the two passes changed, while both payloads are still in hand. They are
+    // discarded once this scope ends, and the merged package alone cannot show what it replaced.
+    // Never fatal: this is provenance about a package that is already built and stored.
+    try {
+      await writeSwaps(client, art.packet_id, opp.id, {
+        call1: built.calls.c1, call3: built.calls.c3, pkg, profileText: built.profileText,
+      })
+    } catch (e) { console.warn('[packets] swap provenance not recorded:', String(e)) }
   }
 
   const token = await getGoogleOAuthToken()

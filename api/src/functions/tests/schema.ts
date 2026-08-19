@@ -320,6 +320,47 @@ create table if not exists requirement (
 create index if not exists requirement_opp_idx on requirement(opp_id);
 create index if not exists requirement_kind_idx on requirement(opp_id, kind);
 
+-- P1.3 — what the pipeline CHANGED, and whether the posting explains it.
+-- One candidate row per item in every list, INCLUDING unchanged ones: the packet screen shows all
+-- originals against all finals, so "we looked at this and kept it" is a different statement from
+-- "we never considered it". Both are data.
+create table if not exists skill_candidate (
+  id           uuid primary key default uuid_generate_v4(),
+  packet_id    uuid not null references packet(id) on delete cascade,
+  list         text not null check (list in ('skills_1','skills_2','relevant_1','relevant_2','relevant_3')),
+  label        text not null,
+  origin       text not null check (origin in ('profile_original','pass_a','pass_b')),
+  char_len     int not null,
+  created_at   timestamptz not null default now()
+);
+create index if not exists skill_cand_packet_idx on skill_candidate(packet_id, list);
+
+-- One row per original (kept/swapped/merged/dropped) plus one per item the ATS pass introduced.
+-- driver: 'posting' means a requirement quote justifies the change. There is no omission list in
+-- this pipeline, so a change nothing explains is 'unattributed' - NOT 'rule', which would invent an
+-- authority for a model's unexplained choice. P2.2 blocks on the unattributed count.
+create table if not exists swap_decision (
+  id             uuid primary key default uuid_generate_v4(),
+  packet_id      uuid not null references packet(id) on delete cascade,
+  list           text not null check (list in ('skills_1','skills_2','relevant_1','relevant_2','relevant_3')),
+  seq            int not null,
+  action         text not null check (action in ('kept','swapped','merged','dropped','added')),
+  from_candidate_id uuid references skill_candidate(id) on delete set null,
+  to_candidate_id   uuid references skill_candidate(id) on delete set null,
+  from_label     text,
+  to_label       text,
+  requirement_id uuid references requirement(id) on delete set null,
+  verbatim_quote text,                 -- the EMPLOYER's words, never a paraphrase
+  confidence     numeric(4,3) not null default 0,
+  driver         text not null check (driver in ('posting','rule','unattributed')),
+  rationale      text,
+  created_at     timestamptz not null default now(),
+  unique (packet_id, list, seq),
+  -- A citation needs a source: a posting-driven row must carry both, and no other row may claim one.
+  check ((driver = 'posting') = (verbatim_quote is not null))
+);
+create index if not exists swap_dec_packet_idx on swap_decision(packet_id, list, seq);
+
 -- Idempotent multi-tenant column adds (safe on tables that predate them)
 alter table persona        add column if not exists owner_email text not null default 'demo@executive-engine.local';
 alter table persona        add column if not exists is_demo boolean not null default false;
@@ -350,5 +391,6 @@ create index if not exists opp_owner_idx2 on opportunity(owner_email);
 export const EXPECTED_TABLES = [
   'persona', 'opportunity', 'contact', 'packet', 'artifact', 'outreach_message',
   'interview', 'offer', 'library_entity', 'asset_event', 'usage_metering',
-  'term_library', 'term_library_entry', 'term_candidate', 'requirement'
+  'term_library', 'term_library_entry', 'term_candidate', 'requirement',
+  'skill_candidate', 'swap_decision'
 ]

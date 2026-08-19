@@ -41,7 +41,10 @@ async function copyAndInject(token: string, templateId: string, name: string, va
 // assembled placeholder package. Extracted from pipelineRun so BOTH the MT-22
 // test flow and the production Executive Engine packet builder use the identical
 // engine (this is what produced the correctly-filled portfolio files).
-export async function buildPackageForJD(opts: { key: string; jd: string; roleType: string; company: string; jobTitle: string }): Promise<{ pkg: Record<string, string | null>; steps: string[]; roleFocus: any }> {
+// Returns `calls` alongside the package because P1.3 cannot reconstruct what changed from the merged
+// output alone: assemblePackage's per-slot preference for Call 3 over Call 1 IS the swap decision,
+// and both sides are needed to see it. These were previously discarded at the end of this function.
+export async function buildPackageForJD(opts: { key: string; jd: string; roleType: string; company: string; jobTitle: string }): Promise<{ pkg: Record<string, string | null>; steps: string[]; roleFocus: any; calls: { c1: any; c2: any; c3: any }; profileText: string }> {
   const { key, jd, roleType, company, jobTitle } = opts
   const steps: string[] = []
   const roleFocus = await getRoleFocus(roleType)
@@ -74,7 +77,10 @@ export async function buildPackageForJD(opts: { key: string; jd: string; roleTyp
   steps.push('Agent Call 3 (ATS QC + skills merge)')
 
   const pkg = assemblePackage(c1, c2, c3) as Record<string, string | null>
-  return { pkg, steps, roleFocus }
+  // The standing profile, so an item that predates this application can be marked profile_original
+  // rather than credited to a pass that merely repeated it.
+  const profileText = Object.values(mc || {}).filter(v => typeof v === 'string').join(' ')
+  return { pkg, steps, roleFocus, calls: { c1, c2, c3 }, profileText }
 }
 
 // GET /api/jobs?status=received — list jobs for the approval queue
