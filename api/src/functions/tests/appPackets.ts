@@ -69,10 +69,17 @@ async function recomputePacket(client: any, packetId: string) {
   return status
 }
 
-function packetShape(pkt: any, artifacts: any[]) {
+function packetShape(pkt: any, artifacts: any[], opp?: any) {
   return {
     id: pkt.id, oppId: pkt.opp_id, status: pkt.status, round: pkt.round,
     jdAnalyzed: pkt.jd_analyzed, coveredKw: pkt.covered_kw || [], atsScore: pkt.ats_score,
+    mustHaves: pkt.must_haves || [],
+    // missingKw is DERIVED from opportunity.ats_gaps — the posting-grounded gap list produced by
+    // atsScoreOne() against jd_real. It is deliberately NOT a packet column: a second gap list
+    // sourced from jdAnalysis (which never reads the posting) would be a weaker parallel truth.
+    // atsGapsScoredAt distinguishes "scored, no gaps" from "never scored" so the UI can say which.
+    missingKw: (opp && opp.ats_gaps) || [],
+    atsGapsScoredAt: (opp && opp.ats_scored_at) || null,
     approved: artifacts.filter((a) => a.status === 'approved').length, total: artifacts.length,
     artifacts: artifacts.map((a) => ({ id: a.id, type: a.type, status: a.status, templateId: a.template_id, docUrl: a.doc_url, driveUrl: a.drive_url, content: a.content, updatedAt: a.updated_at }))
   }
@@ -87,12 +94,13 @@ export async function packetGet(req: HttpRequest, context: InvocationContext): P
     client = await getPgClient()
     await ensureContentColumn(client)
     await ensurePkgColumn(client)
-    const opp = (await client.query(`select id, company, role from opportunity where id = $1`, [oppId])).rows[0]
+    await ensureAnalysisCols(client)
+    const opp = (await client.query(`select id, company, role, ats_gaps, ats_scored_at from opportunity where id = $1`, [oppId])).rows[0]
     if (!opp) return { status: 404, headers: HEADERS, jsonBody: { error: 'opportunity not found' } }
     const { pkt, artifacts } = await loadPacket(client, oppId)
     // Include the assembled structured resume package so the frontend can render
     // every labeled section (Feature B) instead of only the raw content dump.
-    return { status: 200, headers: HEADERS, jsonBody: { company: opp.company, role: opp.role, pkg: pkt.pkg_json || null, ...packetShape(pkt, artifacts) } }
+    return { status: 200, headers: HEADERS, jsonBody: { company: opp.company, role: opp.role, pkg: pkt.pkg_json || null, ...packetShape(pkt, artifacts, opp) } }
   } catch (err) {
     return { status: 500, headers: HEADERS, jsonBody: { error: String(err) } }
   } finally { try { await client?.end() } catch {} }
@@ -216,6 +224,15 @@ const DOC_TITLE: Record<string, string> = {
 
 // Cache the assembled package on the packet so building resume + cover +
 // portfolio shares ONE 3-agent generation (unless regen is requested).
+// must_haves is the ONLY jdAnalysis output with no existing home. `gaps` deliberately gets no
+// column: opportunity.ats_gaps already holds a posting-grounded gap list (appApply.atsScoreOne),
+// and a second list derived from a job title would be a weaker parallel truth.
+async function ensureAnalysisCols(client: any) {
+  await client.query(`alter table packet add column if not exists must_haves text[]`)
+  await client.query(`alter table packet add column if not exists jd_grounded boolean`)
+  await client.query(`alter table packet add column if not exists jd_analyzed_at timestamptz`)
+}
+
 async function ensurePkgColumn(client: any) {
   await client.query(`alter table packet add column if not exists pkg_json jsonb`)
 }
@@ -475,12 +492,28 @@ export async function jdAnalysis(req: HttpRequest, context: InvocationContext): 
   try {
     const guard = requireWrite(req); if (guard) return guard
     if (!key) return { status: 200, headers: HEADERS, jsonBody: { error: 'OPENAI_API_KEY not set' } }
-    client = await getPgClient(); await ensureContentColumn(client)
-    const opp = (await client.query(`select company, role, comp_range, why_surfaced, company_signals, pain_hypotheses from opportunity where id = $1`, [oppId])).rows[0]
+    client = await getPgClient(); await ensureContentColumn(client); await ensureAnalysisCols(client)
+    const opp = (await client.query(`select company, role, comp_range, why_surfaced, company_signals, pain_hypotheses, jd_real, jd_summary, jd_requirements from opportunity where id = $1`, [oppId])).rows[0]
     if (!opp) return { status: 404, headers: HEADERS, jsonBody: { error: 'opportunity not found' } }
     const { pkt } = await loadPacket(client, oppId)
+
+    // IDEMPOTENT: re-running without {force:true} returns what was stored and makes NO model call.
+    // Previously every invocation hit OpenAI even though the result was already persisted.
+    const force = (await req.json().catch(() => ({})) as any)?.force === true
+    if (!force && pkt.jd_analyzed) {
+      return { status: 200, headers: HEADERS, jsonBody: { ok: true, oppId, cached: true, grounded: pkt.jd_grounded, analysis: { keywords: pkt.covered_kw || [], mustHaves: pkt.must_haves || [], atsScore: pkt.ats_score, gaps: [] } } }
+    }
+
+    // GROUNDING: prefer the real posting. The previous prompt saw only role/company/comp/why_surfaced
+    // and signals, so its "ATS keywords" described a job TITLE, not this posting. Same normalization
+    // as appApply.atsScoreOne so the two agree on what the posting text is.
+    const postingText = String(opp.jd_real || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
+      || [opp.jd_summary, opp.jd_requirements].filter(Boolean).join('\n').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
+    const grounded = postingText.length >= 200
     const system = 'You are an ATS/JD analyst. Return ONLY JSON: {"keywords":[],"mustHaves":[],"atsScore":<0-100 int>,"gaps":[]}. keywords = ATS keywords for this role; mustHaves = hard requirements; gaps = likely gaps for a senior exec candidate.'
-    const user = `Role: ${opp.role} at ${opp.company}\nComp: ${opp.comp_range || 'n/a'}\nContext: ${opp.why_surfaced || ''}\nSignals: ${(opp.company_signals || []).join('; ')}\nPains: ${(opp.pain_hypotheses || []).join('; ')}`
+    const user = grounded
+      ? `Role: ${opp.role} at ${opp.company}\nComp: ${opp.comp_range || 'n/a'}\n\nJOB DESCRIPTION:\n${postingText.slice(0, 6000)}`
+      : `Role: ${opp.role} at ${opp.company}\nComp: ${opp.comp_range || 'n/a'}\nContext: ${opp.why_surfaced || ''}\nSignals: ${(opp.company_signals || []).join('; ')}\nPains: ${(opp.pain_hypotheses || []).join('; ')}`
     const res = await fetch('https://api.openai.com/v1/chat/completions', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` }, body: JSON.stringify({ model: 'gpt-4o-mini', response_format: { type: 'json_object' }, messages: [{ role: 'system', content: system }, { role: 'user', content: user }], max_tokens: 900 }) })
     if (!res.ok) throw new Error(`OpenAI HTTP ${res.status}`)
     const data = await res.json() as any
@@ -488,8 +521,13 @@ export async function jdAnalysis(req: HttpRequest, context: InvocationContext): 
     await logUsage('packet:jd-analysis', 'gpt-4o-mini', data.usage)
     const kws = Array.isArray(a.keywords) ? a.keywords.map(String) : []
     const ats = Number.isFinite(a.atsScore) ? Math.round(a.atsScore) : null
-    await client.query(`update packet set jd_analyzed = true, ats_score = $1, covered_kw = $2, updated_at = now() where id = $3`, [ats, kws, pkt.id])
-    return { status: 200, headers: HEADERS, jsonBody: { ok: true, oppId, analysis: { keywords: kws, mustHaves: a.mustHaves || [], atsScore: ats, gaps: a.gaps || [] } } }
+    const mustHaves = Array.isArray(a.mustHaves) ? a.mustHaves.map(String) : []
+    // must_haves persisted (nothing else holds it). `gaps` deliberately NOT persisted — see
+    // ensureAnalysisCols: opportunity.ats_gaps is the posting-grounded gap list and stays the one source.
+    await client.query(
+      `update packet set jd_analyzed = true, ats_score = $1, covered_kw = $2, must_haves = $3, jd_grounded = $4, jd_analyzed_at = now(), updated_at = now() where id = $5`,
+      [ats, kws, mustHaves, grounded, pkt.id])
+    return { status: 200, headers: HEADERS, jsonBody: { ok: true, oppId, cached: false, grounded, sourceChars: postingText.length, analysis: { keywords: kws, mustHaves, atsScore: ats, gaps: a.gaps || [] } } }
   } catch (err) {
     return { status: 500, headers: HEADERS, jsonBody: { error: String(err) } }
   } finally { try { await client?.end() } catch {} }

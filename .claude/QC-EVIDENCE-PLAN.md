@@ -11,9 +11,9 @@ where the train currently is. Read it first on any resume; it is written to surv
 
 ```
 CURRENT PHASE : P0
-STATUS        : starting
-LAST LANDED   : (none yet)
-NEXT ACTION   : P0.3 tone map, then P0.1+P0.2 merged
+STATUS        : code complete, landing
+LAST LANDED   : (pending this push)
+NEXT ACTION   : verify live, then D2 (route-driven step) + D3 (harness), then P1
 ```
 *Update this block on every landing. It is the single place to look after a restart.*
 
@@ -31,6 +31,17 @@ corrected below. One agent made live production calls; those results are marked 
 re-checking the code yourself.** The backlog is the intent; this file is the contract.
 
 ---
+
+## 0b. Standing directives from the owner (2026-08-19)
+
+1. **On any spec-vs-codebase divergence, DEFAULT TO WHAT IS ALREADY BUILT.** The design agent wrote
+   the spec without the depth this codebase survey has. Depart from an existing pattern only for a
+   concrete, named defect — and record why in the commit.
+2. **Do not stop for per-item sign-off.** Accumulate owner decisions in §11 and surface them in
+   batches so several can be cleared at once.
+3. **Aim for one-shot deployment.** Batch a phase's `app/` and `api/` work into ONE landing on `main`
+   so both deploy workflows fire once, then verify once (a new API route needs ~90–120s converge).
+   Look upstream and downstream before landing, not after.
 
 ## 1. Cross-cutting decisions (taken — do not re-litigate)
 
@@ -225,3 +236,25 @@ One severity selector feeds every count. Every count deep-links. No hardcoded co
 - **Unit** → needs X4 (Node 22 built-in runner).
 - A new API route needs **~90–120s** of worker converge before it stops 404ing.
 - Every code phase runs the repo gate: independent AC subagent → implement → independent `verifier`.
+
+
+---
+
+## 11. DECISIONS NEEDED (batched — answer by number)
+
+Accumulated so I don't stop-start. Each carries my recommendation; "agree" is a valid answer to all.
+
+| # | Decision | Recommendation |
+|---|---|---|
+| **1** | **Two ATS numbers.** `packet.ats_score` (jd-analysis; now posting-grounded when a JD exists) vs `opportunity.ats_score` (atsScoreOne, always posting-grounded). The packet header shows the former; OppDetail/Library show the latter. | **Collapse to `opportunity.ats_score`** and make the packet header read it. One posting-grounded score, one producer, one number. |
+| **2** | **Ungrounded score display.** When an opp has no posting, should the header show a score at all? Today it does; it is now labelled `grounded:false`. | **Suppress the number, show "not scored against a posting yet."** A score derived from a job title invites false confidence. |
+| **3** | **Grandfathering when the gate ships (P2.2).** Every already-approved artifact has zero check rows. Does "no rows" mean `pass` or `warn`? | **`not_applicable` → treated as pass for EXISTING approvals only**, with a one-time backfill run. Otherwise every historical packet drops out of `ready` on deploy day. |
+| **4** | **Send blocking scope (P2.2).** Should cold outreach be blocked when a packet gate is `fail`? An outreach email is not the packet. | **No.** Block packet approval and `ready`; leave outreach send alone. Blocking it conflates two things. |
+| **5** | **Drawer tabs (D5).** Prototype/SPEC say Fields·Checks·Swaps·Review·Match; BACKLOG says Score·Checks·Blocks·Original-vs-final·Review. | **Blocks & provenance · Checks · Original vs final · Independent review · Match.** Prototype order, plain-language labels. |
+| **6** | **Reviewer disagreement (D6).** Can the blind reviewer ever produce a gate `fail`? | **No — `warn` only.** Deterministic rules decide pass/fail; the reviewer grades. |
+| **7** | **`promptsApi` POST auth (D7).** It is unauthenticated today and a POST rewrites live document generation. | **Add `requireWrite`.** One line, same pattern as every other mutation. Flagged because it is a security change to a shared endpoint outside P4's nominal scope. |
+| **8** | **Term library sourcing (P1.2b).** The spec wants a curated, versioned library (O*NET / Lightcast / scraped postings), explicitly NOT model-generated. This is a sourcing/licensing task before it is a coding one. | **Start with O*NET** (public domain, free, exec-thin but real) and seed from it; treat `jd_table` keywords as candidates only. Needs your call on whether to pay for Lightcast-class coverage. |
+| **9** | **`compact_resume` is a byte-identical duplicate of `resume`** (same template id, same 7 placeholders). | **Retire it** until a genuinely different template exists. Scoring and rendering two identical assets produces two identical numbers on two cards. |
+| **10** | **Two zap baseline nodes were never migrated** (`289877653`, `294827237` — cover-letter samples). | **Record as intentionally dropped** unless you want the sample letters back as profile fields. |
+| **11** | **`softHardSkillsPool`** is stored, required by the health check, read by nothing. | **Wire it as the swap bank** for P8.6's "swap for another skill" — that is its natural consumer. |
+| **12** | **`/app/usage` totals will JUMP** once `logUsage` is fixed (D8) — the production packet build has never been metered and `packet:ai-edit` almost certainly records zero rows. | **Proceed.** It is a correction, not a regression, but the cost dashboard will visibly change. |

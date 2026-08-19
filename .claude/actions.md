@@ -1071,3 +1071,30 @@ not here.
 **Standing authorization:** owner asked for continuous P0→P8 execution without per-step check-ins.
 Still honoured regardless: the repo gate (independent ACs → implement → independent verifier) on every
 code change, and branch → push → FF main per the ACT-47 rule.
+
+## ACT-53 — P0 wiring bugs (QC evidence layer)
+**Status:** `code complete` — landing as ONE deployment (app/** + api/** together per the owner's
+one-shot-deploy directive). Verifier + live checks follow the landing.
+- **P0.3 tone map — DONE.** `shell.jsx` `Pill` used `var(--proto-${tone}-soft)` string interpolation.
+  Only accent/green/red/yellow/purple have a `-soft` token, so `panel` (every `todo` artifact),
+  `orange`, `ok` and `warn` produced INVALID declarations — `panel` also gave near-white text on a
+  near-white pill (invisible). Replaced with an explicit `TONE` map covering all 9 tones; unknown tone
+  now falls back to readable `.px-pill` default. Radius was wider than the backlog said: 17 call sites
+  across PacketBuilder/Library/OppDetail/Opportunities/Interview/Today/Swipe/Offer.
+- **`--proto-ink1` — DONE.** `PacketBuilder.jsx:621` used an undefined token with NO fallback (invalid
+  declaration). Now `--proto-ink`. Audit added: zero dangling `--proto-*` without a fallback remain.
+- **P0.1 — DONE, backlog bullet REJECTED.** Backlog said add `packet.missing_kw`. Rejected:
+  `opportunity.ats_gaps` already holds a posting-grounded gap list (`appApply.atsScoreOne` vs
+  `jd_real`) that no endpoint returned. `packetShape` now derives `missingKw` from it, plus
+  `atsGapsScoredAt` so the UI can tell "scored, no gaps" from "never scored".
+- **P0.2 — DONE, premise corrected + one bullet REJECTED.** Backlog claimed it "persists none of it";
+  false — `ats_score`/`covered_kw`/`jd_analyzed` were always persisted. Real defects fixed: (a) it was
+  NON-IDEMPOTENT (an OpenAI call on every invocation) — now returns the stored analysis unless
+  `{force:true}`; (b) it never read the posting — now grounds in `jd_real` (same normalization as
+  `atsScoreOne`) and records `jd_grounded`; (c) `mustHaves` was discarded — now persisted. "Persist
+  gaps" REJECTED for the same reason as P0.1: it would be a second, weaker gap list.
+- **R4 fix not in the backlog.** The ATS legend printed `{covered}/{covered+missing}` — but covered and
+  missing now come from DIFFERENT producers. A combined ratio implies one population. Now prints
+  "N covered · M gaps" as separately labelled numbers.
+**Verification:** `api` tsc green, `app` vite build green, smart-quote check clean, greps for the
+banned patterns all zero. Live + independent verifier after landing.

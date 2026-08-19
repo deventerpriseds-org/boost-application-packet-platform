@@ -18,9 +18,33 @@ const NAV = [
 ]
 
 // Shared primitives (ported from the handoff shell.jsx)
-export const Pill = ({ children, tone, style }) => (
-  <span className="px-pill" style={{ ...(tone ? { background: `var(--proto-${tone}-soft)`, color: `var(--proto-${tone})` } : {}), ...style }}>{children}</span>
-)
+//
+// TONE is an EXPLICIT map, not string interpolation into a custom property.
+// The old form interpolated the tone name into a custom-property name at render time, which
+// silently produced INVALID declarations for every tone lacking a `-soft` token. Only
+// accent/green/red/yellow/purple have one, so `panel` (every `todo` artifact), `orange`, `ok` and
+// `warn` all rendered as an invalid background plus, for `panel`, near-white text on a near-white
+// pill — i.e. invisible. A missing token must fall back to the readable `.px-pill` default, never
+// to an unrendered declaration, so every tone is listed here with a real bg/fg pair.
+const TONE = {
+  accent: { bg: 'var(--proto-accent-soft)', fg: 'var(--proto-accent)' },
+  green: { bg: 'var(--proto-green-soft)', fg: 'var(--proto-green)' },
+  red: { bg: 'var(--proto-red-soft)', fg: 'var(--proto-red)' },
+  yellow: { bg: 'var(--proto-yellow-soft)', fg: 'var(--proto-yellow)' },
+  purple: { bg: 'var(--proto-purple-soft)', fg: 'var(--proto-purple)' },
+  // No -soft token exists for these; pair them with defined tokens instead of inventing one.
+  panel: { bg: 'var(--proto-panel-deep)', fg: 'var(--proto-ink2)' },
+  orange: { bg: 'var(--proto-yellow-soft)', fg: 'var(--proto-orange)' },
+  ok: { bg: 'var(--proto-green-soft)', fg: 'var(--proto-green)' },
+  warn: { bg: 'var(--proto-yellow-soft)', fg: 'var(--proto-yellow)' },
+}
+
+export const Pill = ({ children, tone, style }) => {
+  const t = TONE[tone]
+  return (
+    <span className="px-pill" style={{ ...(t ? { background: t.bg, color: t.fg } : {}), ...style }}>{children}</span>
+  )
+}
 
 // ── ONE signal indicator, config-driven by `kind` ────────────────────────────────────────────────
 // Two independent per-opp signals share one component (styling/label/tooltip live in one place):

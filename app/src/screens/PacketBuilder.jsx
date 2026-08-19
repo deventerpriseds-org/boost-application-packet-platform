@@ -476,12 +476,16 @@ export default function PacketBuilder({ id }) {
             ))}
           </div>
           <div className="px-small" style={{ color: 'var(--proto-ink3)' }}>
-            ! = missing · ✓ = covered · {coveredKw.length}/{coveredKw.length + missingKw.length}
+            {coveredKw.length} covered · {missingKw.length} {missingKw.length === 1 ? 'gap' : 'gaps'}
           </div>
         </>
       ) : (
         <div className="px-small" style={{ color: 'var(--proto-ink2)' }}>
-          {p.jdAnalyzed ? 'No keyword gaps found.' : 'Run ATS analysis to see keyword coverage.'}
+          {!p.jdAnalyzed
+            ? 'Run ATS analysis to see keyword coverage.'
+            : p.atsGapsScoredAt
+              ? 'No keyword gaps found against this posting.'
+              : 'This posting has not been gap-scored yet — coverage is unknown.'}
         </div>
       )}
 
@@ -618,7 +622,7 @@ export default function PacketBuilder({ id }) {
                 }}>
                 <StepCircle num={step.num} done={done} active={active} />
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 13, fontWeight: active ? 600 : 500, color: active ? 'var(--text-brand)' : 'var(--proto-ink1)' }}>
+                  <div style={{ fontSize: 13, fontWeight: active ? 600 : 500, color: active ? 'var(--text-brand)' : 'var(--proto-ink)' }}>
                     {step.label}
                   </div>
                   <div className="px-small" style={{ marginTop: 1, color: 'var(--proto-ink2)', fontSize: 11 }}>{step.sub}</div>
