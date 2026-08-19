@@ -1,0 +1,44 @@
+/* Compass Design System — Typography
+   The source file defines NO discrete text styles; type is fully token-driven
+   (--fontsize-*, --lineheight-*, --letterspacing-*, --fontweight-*, --fontfamily-*).
+   This file resolves those unitless tokens into a usable base + a semantic type scale.
+   Length tokens are unitless in fig-tokens.css → consume with calc(var(--x) * 1px).
+   Line-height tokens are percentages (130 = 130%) → calc(var(--x) / 100). */
+
+:root {
+  --font-body: var(--fontfamily-body), -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-display: var(--fontfamily-display), -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --font-mono: var(--fontfamily-mono), "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+html {
+  font-family: var(--font-body);
+  font-size: calc(var(--fontsize-md) * 1px);   /* 14px base */
+  line-height: calc(var(--lineheight-normal) / 100);
+  color: var(--text-primary);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* ── Semantic type scale ─────────────────────────────────────────── */
+.type-display-2xl { font-family: var(--font-display); font-weight: var(--fontweight-bold);     font-size: calc(var(--fontsize-9xl) * 1px); line-height: calc(var(--lineheight-none) / 100);  letter-spacing: calc(var(--letterspacing-tighter) * 1px); }
+.type-display-xl  { font-family: var(--font-display); font-weight: var(--fontweight-bold);     font-size: calc(var(--fontsize-8xl) * 1px); line-height: calc(var(--lineheight-tight) / 100);  letter-spacing: calc(var(--letterspacing-tighter) * 1px); }
+.type-display-lg  { font-family: var(--font-display); font-weight: var(--fontweight-bold);     font-size: calc(var(--fontsize-7xl) * 1px); line-height: calc(var(--lineheight-tight) / 100);  letter-spacing: calc(var(--letterspacing-tight) * 1px); }
+.type-display-md  { font-family: var(--font-display); font-weight: var(--fontweight-semibold); font-size: calc(var(--fontsize-6xl) * 1px); line-height: calc(var(--lineheight-tight) / 100);  letter-spacing: calc(var(--letterspacing-tight) * 1px); }
+
+.type-heading-lg  { font-family: var(--font-display); font-weight: var(--fontweight-semibold); font-size: calc(var(--fontsize-5xl) * 1px); line-height: calc(var(--lineheight-snug) / 100);   letter-spacing: calc(var(--letterspacing-tight) * 1px); }
+.type-heading-md  { font-family: var(--font-display); font-weight: var(--fontweight-semibold); font-size: calc(var(--fontsize-4xl) * 1px); line-height: calc(var(--lineheight-snug) / 100);   letter-spacing: calc(var(--letterspacing-tight) * 1px); }
+.type-heading-sm  { font-family: var(--font-display); font-weight: var(--fontweight-semibold); font-size: calc(var(--fontsize-2xl) * 1px); line-height: calc(var(--lineheight-normal) / 100); letter-spacing: calc(var(--letterspacing-normal) * 1px); }
+.type-heading-xs  { font-family: var(--font-display); font-weight: var(--fontweight-semibold); font-size: calc(var(--fontsize-lg) * 1px);  line-height: calc(var(--lineheight-normal) / 100); letter-spacing: calc(var(--letterspacing-normal) * 1px); }
+
+.type-body-lg     { font-family: var(--font-body); font-weight: var(--fontweight-regular); font-size: calc(var(--fontsize-lg) * 1px);   line-height: calc(var(--lineheight-loose) / 100);  }
+.type-body-md     { font-family: var(--font-body); font-weight: var(--fontweight-regular); font-size: calc(var(--fontsize-md) * 1px);   line-height: calc(var(--lineheight-loose) / 100);  }
+.type-body-sm     { font-family: var(--font-body); font-weight: var(--fontweight-regular); font-size: calc(var(--fontsize-sm) * 1px);   line-height: calc(var(--lineheight-relaxed) / 100);}
+
+.type-label-lg    { font-family: var(--font-body); font-weight: var(--fontweight-medium); font-size: calc(var(--fontsize-md) * 1px);  line-height: calc(var(--lineheight-normal) / 100); }
+.type-label-md    { font-family: var(--font-body); font-weight: var(--fontweight-medium); font-size: calc(var(--fontsize-sm) * 1px);  line-height: calc(var(--lineheight-normal) / 100); }
+.type-label-sm    { font-family: var(--font-body); font-weight: var(--fontweight-medium); font-size: calc(var(--fontsize-xs) * 1px);  line-height: calc(var(--lineheight-normal) / 100); }
+
+.type-overline    { font-family: var(--font-body); font-weight: var(--fontweight-semibold); font-size: calc(var(--fontsize-2xs) * 1px); line-height: calc(var(--lineheight-normal) / 100); letter-spacing: calc(var(--letterspacing-xwide) * 1px); text-transform: uppercase; color: var(--text-overline); }
+
+.type-mono        { font-family: var(--font-mono); font-weight: var(--fontweight-regular); font-size: calc(var(--fontsize-sm) * 1px);  line-height: calc(var(--lineheight-relaxed) / 100); }

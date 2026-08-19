@@ -1,0 +1,338 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Zap 289877647 — workflow baseline</title>
+<link rel="stylesheet" href="_ds/compass-design-system-03277a8e-7275-4ccc-af18-f3a1dd3ffc61/tokens/fonts.css">
+<link rel="stylesheet" href="_ds/compass-design-system-03277a8e-7275-4ccc-af18-f3a1dd3ffc61/tokens/fig-tokens.css">
+<link rel="stylesheet" href="_ds/compass-design-system-03277a8e-7275-4ccc-af18-f3a1dd3ffc61/tokens/typography.css">
+<link rel="stylesheet" href="_ds/compass-design-system-03277a8e-7275-4ccc-af18-f3a1dd3ffc61/styles.css">
+<style>
+body{margin:0;background:var(--surface-background-secondary);color:var(--text-primary);font-family:'Inter',system-ui,sans-serif;line-height:1.5}
+.wrap{max-width:1180px;margin:0 auto;padding:48px 40px 96px}
+h1{font-size:30px;font-weight:700;letter-spacing:-.4px;margin:0 0 6px}
+h2{font-size:20px;font-weight:700;margin:40px 0 6px;padding-top:20px;border-top:1px solid var(--border-default)}
+h3{font-size:15px;font-weight:700;margin:22px 0 6px;color:var(--text-brand)}
+p,li{font-size:14px;color:var(--text-secondary)}
+.lead{font-size:15px;color:var(--text-secondary)}
+code{font-family:'JetBrains Mono',monospace;font-size:12px;background:var(--surface-background-tertiary);padding:1px 5px;border-radius:4px;color:var(--text-primary)}
+table{width:100%;border-collapse:collapse;margin:10px 0;font-size:13px}
+th,td{text-align:left;padding:7px 10px;border-bottom:1px solid var(--border-default);vertical-align:top}
+th{font-size:11px;text-transform:uppercase;letter-spacing:.4px;color:var(--text-tertiary)}
+ul{margin:4px 0;padding-left:20px}li{margin:2px 0}
+.tag{display:inline-block;font-size:10.5px;font-weight:700;padding:1px 7px;border-radius:99px;background:var(--surface-brand-subtle);color:var(--text-brand);white-space:nowrap}
+.tag.in{background:var(--surface-info-subtle);color:var(--text-info)}
+.tag.tf{background:var(--surface-background-tertiary);color:var(--text-secondary)}
+.tag.ai{background:var(--surface-ai-subtle,rgba(124,58,237,.12));color:var(--purple-700,#6d28d9)}
+.tag.out{background:var(--surface-success-subtle);color:var(--text-success)}
+.tag.qa{background:rgba(192,138,30,.16);color:#8a6212}
+.tag.off{background:var(--surface-background-tertiary);color:var(--text-tertiary)}
+.note{background:var(--surface-info-subtle);border:1px solid var(--blue-200);border-radius:8px;padding:10px 14px;font-size:13px;color:var(--text-info);margin:12px 0}
+.gap{background:var(--surface-warning-subtle);border:1px solid var(--yellow-200);border-radius:8px;padding:10px 14px;font-size:13px;color:var(--text-warning);margin:12px 0}
+.tl{display:flex;flex-direction:column;gap:0;margin:16px 0}
+.step{display:grid;grid-template-columns:56px 1fr;gap:14px}
+.rail{position:relative;display:flex;flex-direction:column;align-items:center}
+.rail .n{width:30px;height:30px;border-radius:99px;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;background:var(--surface-brand-default);color:var(--text-on-brand);flex-shrink:0;margin-top:12px}
+.rail .line{flex:1;width:2px;background:var(--border-default)}
+.step.in .rail .n{background:var(--blue-600,#2563eb)}
+.step.tf .rail .n{background:var(--neutral-500,#64748b)}
+.step.ai .rail .n{background:var(--purple-600,#7c3aed)}
+.step.out .rail .n{background:var(--green-600,#16a34a)}
+.card{background:var(--surface-background-primary);border-radius:12px;box-shadow:inset 0 0 0 1px var(--border-default);padding:12px 14px;margin:8px 0}
+.card .hd{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}
+.card .hd .t{font-size:14px;font-weight:700;color:var(--text-primary)}
+.card .hd .id{font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--text-tertiary)}
+.card dl{margin:8px 0 0;display:grid;grid-template-columns:104px 1fr;gap:3px 10px}
+.card dt{font-size:10.5px;text-transform:uppercase;letter-spacing:.4px;color:var(--text-tertiary);padding-top:2px}
+.card dd{margin:0;font-size:12.5px;color:var(--text-secondary)}
+.card dd code{font-size:11px}
+.grp{font-size:11px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--text-tertiary);margin:22px 0 2px}
+a{color:var(--text-brand)}a:hover{color:var(--brand-900)}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<h1>Zap 289877647 — workflow baseline</h1>
+<p class="lead"><b>(Copy) (Copy) Jotform (Latest) Engineering Screen Job Description Analysis (w Google Doc)</b> · status <code>on</code> · 40 nodes, single linear chain (every node has exactly one parent). Baselined from <code>uploads/Copy Copy Jotform Latest Engineering Screen Job Description.json</code>, cross-checked against <code>docs/zap-289877647/</code> in <code>deventerpriseds-org/boost-application-packet-platform</code>.</p>
+
+<div class="note"><b>Read this as the pre-migration inventory.</b> Sections 2–4 list every input, transformation and output in execution order. Section 5 pulls out the QA/QC checks that today happen invisibly inside prompts and formatter steps — those are the candidates for surfacing in the UI. Section 6 lists defects found while reading the export. Nothing here is a design proposal yet.</div>
+
+<h2>1. Shape of the workflow</h2>
+<table>
+<tr><th>Property</th><th>Value</th></tr>
+<tr><td>Trigger</td><td>Jotform new submission — form <code>250428403353147</code> "Engineering Job Application Prep Form"</td></tr>
+<tr><td>Topology</td><td>Strictly linear, 40 steps, no branches, no error paths, no conditional skips</td></tr>
+<tr><td>Step types</td><td>1 trigger · 2 code · 13 storage writes · 12 formatter transforms · 1 looping · 5 LLM calls · 4 document generators · 1 email send · 1 utility (hour)</td></tr>
+<tr><td>Model used</td><td><code>gpt-4o-mini</code> for all 5 LLM calls · <code>temperature 1.0</code> · <code>top_p 1.0</code> · max tokens 2,000–16,000</td></tr>
+<tr><td>Shared LLM memory</td><td><code>memory_key = {{form id}}{{current hour}}</code> across steps 17, 18, 26 (not 20, 28)</td></tr>
+<tr><td>Run state</td><td><span class="tag off">paused: true</span> on all 39 non-trigger nodes — the zap is on, every step is paused</td></tr>
+<tr><td>Repo numbering</td><td><code>docs/zap-289877647/README.md</code> numbers 1–39 and omits step 2 (If/Then folder), so its #16/#17/#19/#25/#27/#39 are this document's 17/18/20/26/28/40</td></tr>
+</table>
+
+<h2>2. Inputs</h2>
+
+<h3>2a. From the form submission (per run)</h3>
+<table>
+<tr><th>Field</th><th>Reference</th><th>Consumed by</th></tr>
+<tr><td>Role Type:</td><td><code>289877647__answers__Role Type:</code></td><td>Step 2 — folder routing</td></tr>
+<tr><td>Target Job Description (parsed page)</td><td><code>__answers__Target Job Description</code></td><td>Steps 17, 18 — the only job-side input</td></tr>
+<tr><td>Target Job URL</td><td><code>__answers__Target Job URL</code></td><td>Step 40 — email body</td></tr>
+<tr><td>Hidden Role Type Value Output for Zapier</td><td><code>__answers__Hidden Role Type Value Output…</code></td><td>Step 37 — ATS template file id</td></tr>
+<tr><td>Send to (Name) / Send to (Email)</td><td><code>__answers__Send to (Name)</code>, <code>(Email)</code></td><td>Step 40 — recipient + salutation</td></tr>
+<tr><td>Submission id / created_at</td><td><code>__id</code>, <code>__created_at</code></td><td>Memory key (17, 18, 26) and document titles (36, 37)</td></tr>
+</table>
+
+<h3>2b. Standing candidate baseline (13 storage writes, steps 3–15)</h3>
+<p>These are hardcoded <code>set_value</code> steps — the candidate's own material, identical on every run. They are the migration's real payload: in the platform they become editable profile records, not workflow steps.</p>
+<table>
+<tr><th>#</th><th>Step title</th><th>Storage key</th><th>Used downstream by</th></tr>
+<tr><td>3</td><td>Current Resume Summary</td><td><code>Current Resume Summary</code></td><td>17, 18</td></tr>
+<tr><td>4</td><td>Current Work Experience</td><td><code>Current Work Experience</code></td><td>17, 18</td></tr>
+<tr><td>5</td><td>Current Skills</td><td><code>Current Skills</code></td><td>17, 18</td></tr>
+<tr><td>6</td><td>Current Expertise</td><td><code>Current Expertise</code></td><td>17, 18</td></tr>
+<tr><td>7</td><td>Relevant Skills</td><td><code>Current Expertise</code> <span class="tag qa">key collision</span></td><td>17, 18 (as "Input Relevant List")</td></tr>
+<tr><td>8</td><td>Cover Letter (sample)</td><td><code>Current Expertise</code> <span class="tag qa">key collision</span></td><td>none — value read by <code>__value</code> only</td></tr>
+<tr><td>9</td><td>About Me Passage 1</td><td><code>About Me Passage 1</code></td><td>17, 18</td></tr>
+<tr><td>10</td><td>About Me Passage 2</td><td><code>About Me Passage 2</code></td><td>17, 18</td></tr>
+<tr><td>11</td><td>Executive Profile Paragraph</td><td><code>Executive Profile Paragraph</code></td><td>17, 18</td></tr>
+<tr><td>12</td><td>Executive Profile Core Accomplishments</td><td><code>Core Accomplishments</code></td><td>17, 18</td></tr>
+<tr><td>13</td><td>Soft/Hard Skills</td><td><code>Soft/Hard Skills</code></td><td><b>nothing</b> — dead input (~2,871 chars)</td></tr>
+<tr><td>14</td><td>Items to Omit</td><td><code>Items to Omit</code></td><td>17, 18 — exclusion rule</td></tr>
+<tr><td>15</td><td>Sample Cover Letter</td><td><code>Executive Profile Paragraph</code> <span class="tag qa">key collision</span></td><td>nothing</td></tr>
+</table>
+
+<h3>2c. Configuration constants</h3>
+<ul>
+<li>Template folder ids: Engineering <code>1iER8mCSeOfChAqtNNSarq-ZGzlcsBe77</code>, Product Management <code>1w8wqPvE3fnUSV39-1ILDVNGDZqU4y8Ja</code>, else literal <code>Unknown</code>.</li>
+<li>Output folder <code>1MlVLMSQ0EQJoAtpKC1Mv7mDCAJDmdJTt</code> ("Zapier Automated Docs").</li>
+<li>Resume Doc template <code>1bwOcxvkbihRTUjOzVjrWSPnDomwqy6gOz6229mdzbZw</code>; Portfolio deck <code>1ULZZLBs9zwLEN6c8hcXvBCNPk0YyTGg0yIlFSYkGIec</code>; Cover-letter deck <code>1QN4Cnw4R9krUH4kEpl_lnhoPOkY5PG2oUKRMjxBfWV0</code>.</li>
+<li>Sender <code>dev@enterpriseds.io</code>; every run also BCC-equivalents itself as a second recipient.</li>
+</ul>
+
+<h2>3. Linear timeline — all 40 steps</h2>
+<p><span class="tag in">input</span> <span class="tag tf">transform</span> <span class="tag ai">llm</span> <span class="tag out">output</span> <span class="tag qa">carries a QA/QC rule</span></p>
+
+<div class="tl">
+
+<div class="grp">Trigger &amp; routing</div>
+<div class="step in"><div class="rail"><div class="n">1</div><div class="line"></div></div><div class="card">
+<div class="hd"><span class="t">New Jotform submission</span><span class="id">289877647 · JotForm new_submission</span><span class="tag in">input</span></div>
+<dl><dt>Out</dt><dd>Role Type, Target Job Description, Target Job URL, hidden role value, send-to name/email, submission id, created_at</dd></dl>
+</div></div>
+
+<div class="step tf"><div class="rail"><div class="n">2</div><div class="line"></div></div><div class="card">
+<div class="hd"><span class="t">If / Then — Template Folder</span><span class="id">298124586 · Code (JS)</span><span class="tag tf">transform</span><span class="tag qa">QA</span></div>
+<dl><dt>In</dt><dd><code>Role Type:</code></dd>
+<dt>Logic</dt><dd><code>trim().toLowerCase()</code> then equality match: <code>engineering</code> → Engineering folder id, <code>product management</code> → PM folder id, else <code>'Unknown'</code></dd>
+<dt>Out</dt><dd><code>result</code> = Drive folder id, consumed only by step 37</dd>
+<dt>QA rule</dt><dd>Case/whitespace normalization; unmatched role degrades to the string <code>Unknown</code> rather than failing</dd></dl>
+</div></div>
+
+<div class="grp">Standing baseline loaded into storage</div>
+<div class="step in"><div class="rail"><div class="n">3</div><div class="line"></div></div><div class="card">
+<div class="hd"><span class="t">Steps 3–15 — 13 × Storage <code>set_value</code></span><span class="id">289877648–289877659, 294827237</span><span class="tag in">input</span></div>
+<dl><dt>What</dt><dd>Resume summary · work experience · skills · expertise · relevant skills · cover letter · about-me 1 &amp; 2 · executive profile · core accomplishments · soft/hard skills · items to omit · sample cover letter</dd>
+<dt>Detail</dt><dd>Full table in section 2b, including the three storage-key collisions and the one dead value</dd></dl>
+</div></div>
+
+<div class="step tf"><div class="rail"><div class="n">16</div><div class="line"></div></div><div class="card">
+<div class="hd"><span class="t">Temp: Current Hour</span><span class="id">289877660 · Code (JS)</span><span class="tag tf">transform</span></div>
+<dl><dt>Logic</dt><dd><code>new Date().getHours()</code> → <code>hour</code></dd>
+<dt>Out</dt><dd>Second half of the LLM <code>memory_key</code> — the only thing scoping conversation memory per run</dd></dl>
+</div></div>
+
+<div class="grp">Generation pass 1 — resume, portfolio, cover letter fields</div>
+<div class="step ai"><div class="rail"><div class="n">17</div><div class="line"></div></div><div class="card">
+<div class="hd"><span class="t">Update Resume/Portfolio Fields (Prompt)</span><span class="id">289877661 · ChatGPT chat_completion_memory · 16,000 max tokens</span><span class="tag ai">llm</span><span class="tag qa">QA</span></div>
+<dl><dt>In</dt><dd>Job description + 9 baseline values + Items to Omit + <code>zap_meta_human_now</code></dd>
+<dt>Asks for</dt><dd>14 structured sections, each header bookended with <code>###</code>: date, target job title, target company, resume summary, Skills1/Skills2, expertise, relevant skills 1–3, cover letter, about-me 1–2, executive profile, core accomplishments, JD requirement tables</dd>
+<dt>QA rules</dt><dd>Exclude everything on the Items to Omit list · no fluff, no redundancy · no hyphens or known AI-tell words · common phrasing only · plain text, no markup · hyphen bullets, never numbered</dd>
+<dt>Memory</dt><dd><code>{{form id}}{{hour}}</code> — shared with 18 and 26</dd></dl>
+</div></div>
+
+<div class="step ai"><div class="rail"><div class="n">18</div><div class="line"></div></div><div class="card">
+<div class="hd"><span class="t">Copy: Update Resume/Portfolio Fields (Prompt)</span><span class="id">299599701 · ChatGPT · 16,000 max tokens</span><span class="tag ai">llm</span><span class="tag qa">QA</span></div>
+<dl><dt>In</dt><dd>Same 10 inputs as step 17</dd>
+<dt>Asks for</dt><dd>The skills half again — <code>### Skills1 ###</code> / <code>### Skills2 ###</code>, 20–22 skills evenly split, plus updated relevant-skill lists</dd>
+<dt>QA rules</dt><dd>As step 17, plus explicit "no em-dashes nor hyphens" and two-step relevance screening</dd>
+<dt>Note</dt><dd>Produces the "B" side that step 26 later reconciles against the "A" side from step 17</dd></dl>
+</div></div>
+
+<div class="step tf"><div class="rail"><div class="n">19</div><div class="line"></div></div><div class="card">
+<div class="hd"><span class="t">Break Resume Response into Separate Fields</span><span class="id">289877662 · Formatter <code>string.split</code></span><span class="tag tf">transform</span></div>
+<dl><dt>In</dt><dd>Step 17 content <b>concatenated with</b> step 18 content</dd>
+<dt>Logic</dt><dd>Split on <code>###</code>, index as line-item <code>fields</code></dd>
+<dt>Out</dt><dd><code>Item 1 … Item 55+</code>. Downstream steps address content <b>by position</b>: Item 3 date, 5 role, 7 company, 9 summary, 11/13 skills, 15 expertise, 17/19/21 relevant, 23 cover letter, 25/27 about-me, 29 exec profile, 31 accomplishments, 32–37 JD tables, 39–49 the step-18 copies</dd></dl>
+</div></div>
+
+<div class="grp">Skills formatting pass</div>
+<div class="step ai"><div class="rail"><div class="n">20</div><div class="line"></div></div><div class="card">
+<div class="hd"><span class="t">Skills HTML Bullet List Formatting</span><span class="id">290709248 · ChatGPT · 2,000 max tokens</span><span class="tag ai">llm</span></div>
+<dl><dt>In</dt><dd>Items 11, 13, 17, 19, 21 (original) and 39, 41, 43, 45, 47 (updated)</dd>
+<dt>Logic</dt><dd>Re-emit each bullet list as <code>&lt;ul&gt;/&lt;li&gt;</code>; 15+ sections, headers bookended with <code>###</code>; "do not output as a single html table"</dd>
+<dt>Out</dt><dd>HTML fragments for the email comparison table</dd>
+<dt>Flag</dt><dd>Node carries <code>has_automatic_issues: true</code> in the export</dd></dl>
+</div></div>
+
+<div class="step tf"><div class="rail"><div class="n">21</div><div class="line"></div></div><div class="card">
+<div class="hd"><span class="t">Split step 20 into fields</span><span class="id">290709249 · Formatter <code>string.split</code> on <code>###</code></span><span class="tag tf">transform</span></div>
+<dl><dt>Out</dt><dd>Items 3–19 — original vs updated skill lists as HTML, used only by the email in step 40</dd></dl>
+</div></div>
+
+<div class="step tf"><div class="rail"><div class="n">22</div><div class="line"></div></div><div class="card">
+<div class="hd"><span class="t">Cleanup HTML 1 — Table Labels (```html)</span><span class="id">289877664 · Formatter <code>string.replace</code></span><span class="tag tf">transform</span><span class="tag qa">QA</span></div>
+<dl><dt>In</dt><dd><code>289877663__output__Item 44–55</code> — <b>node 289877663 does not exist in the export</b></dd>
+<dt>Logic</dt><dd>Strip the <code>```html</code> code fence the model sometimes emits</dd>
+<dt>Flag</dt><dd><code>has_automatic_issues: true</code>; broken reference (see section 6)</dd></dl>
+</div></div>
+
+<div class="step tf"><div class="rail"><div class="n">23</div><div class="line"></div></div><div class="card">
+<div class="hd"><span class="t">Cleanup HTML 2 — Table Labels (```)</span><span class="id">289877665 · Formatter <code>string.replace</code></span><span class="tag tf">transform</span><span class="tag qa">QA</span></div>
+<dl><dt>Logic</dt><dd><code>"&lt;/table&gt;\n```"</code> → <code>"&lt;/table&gt;"</code> on step 22's output</dd>
+<dt>Out</dt><dd>Not referenced by any later step — orphaned branch</dd></dl>
+</div></div>
+
+<div class="step tf"><div class="rail"><div class="n">24</div><div class="line"></div></div><div class="card">
+<div class="hd"><span class="t">Remove Dash in Core Accomplishments</span><span class="id">289877666 · Formatter <code>string.replace</code></span><span class="tag tf">transform</span><span class="tag qa">QA</span></div>
+<dl><dt>Logic</dt><dd>Item 31: replace <code>-</code> with empty string (all occurrences, not just leading bullets)</dd>
+<dt>Out</dt><dd>Portfolio deck field <code>@CoreAccomplishments_5blts_180words</code> (step 38)</dd></dl>
+</div></div>
+
+<div class="step tf"><div class="rail"><div class="n">25</div><div class="line"></div></div><div class="card">
+<div class="hd"><span class="t">Create Loop to Trim whitespace</span><span class="id">289877667 · Looping <code>loop_values_line_items</code></span><span class="tag tf">transform</span><span class="tag qa">QA</span></div>
+<dl><dt>In</dt><dd>15 named values mapped off step 19's positional items</dd>
+<dt>Logic</dt><dd><code>trim_whitespace: True</code>, iterations 1–500</dd>
+<dt>Out</dt><dd>The named handles everything downstream actually uses: <code>ResumeSummary</code>, <code>skills list 1/2</code>, <code>Expertise</code>, <code>Relevant 1/2/3</code>, <code>Target Company</code>, <code>Target Role</code>, <code>About Me pt 1/2</code>, <code>Exec Profile pgrph</code>, <code>Core Accomplishments</code>, <code>Today's Date</code>, <code>Cover Letter</code></dd></dl>
+</div></div>
+
+<div class="grp">QA pass — the reconciliation the UI needs to show</div>
+<div class="step ai"><div class="rail"><div class="n">26</div><div class="line"></div></div><div class="card">
+<div class="hd"><span class="t">Post Analysis QA</span><span class="id">289877668 · ChatGPT · 15,500 max tokens</span><span class="tag ai">llm</span><span class="tag qa">QA</span></div>
+<dl><dt>In</dt><dd>JD responsibilities/skills table (Item 33), trimmed resume summary, skills 1/2, expertise, relevant 1–3 — plus shared memory from steps 17/18</dd>
+<dt>Checks</dt><dd>1. Eliminate redundancy across List A (17) and List B (18) and the three relevant lists · 2. Swap a term only when a more JD-relevant, ATS-optimized, non-redundant term exists · 3. Skills items ≤ 24 characters · 4. Relevant-skills items ≤ 20 characters</dd>
+<dt>Out</dt><dd><code>### Final Skills QC ###</code> — an HTML table with columns <i>List A</i>, <i>List B</i>, <i>merged choice</i>, <i>reasoning / JD text for alignment</i>; then final merged lists as <code>&lt;ul&gt;</code> under <code>###</code> headers, plus an updated resume summary and cold-email copy</dd>
+<dt>Flag</dt><dd><code>has_automatic_issues: true</code>. This step is the single richest source of UI-visible QC data and today it exists only as HTML inside one email.</dd></dl>
+</div></div>
+
+<div class="step tf"><div class="rail"><div class="n">27</div><div class="line"></div></div><div class="card">
+<div class="hd"><span class="t">Split QA response into fields</span><span class="id">290709250 · Formatter <code>string.split</code> on <code>###</code></span><span class="tag tf">transform</span></div>
+<dl><dt>Out</dt><dd>Items 5/7 final skills, 9/11/13 final relevant skills, 15/17 resume summary before/after, 24/25 cold email</dd></dl>
+</div></div>
+
+<div class="step ai"><div class="rail"><div class="n">28</div><div class="line"></div></div><div class="card">
+<div class="hd"><span class="t">Strip HTML Skills Bullet List Formatting</span><span class="id">291230256 · ChatGPT · 2,000 max tokens</span><span class="tag ai">llm</span></div>
+<dl><dt>Logic</dt><dd>Reverse of step 20 — HTML lists back to plain-text bullets, for the Docs templates. Also emits <code>Pipe Separated Original Skills</code> and <code>Pipe Separated Final Skills</code> (the ATS keyword block)</dd>
+<dt>Note</dt><dd>No memory key — this call is stateless</dd></dl>
+</div></div>
+
+<div class="step tf"><div class="rail"><div class="n">29</div><div class="line"></div></div><div class="card">
+<div class="hd"><span class="t">Break Final Skills into Separate Fields</span><span class="id">291230257 · Formatter <code>string.split</code> on <code>###</code></span><span class="tag tf">transform</span></div>
+<dl><dt>Out</dt><dd>Items 3/5 final skills, 7/9/11 final relevant skills, 13 pipe-separated ATS block</dd></dl>
+</div></div>
+
+<div class="step tf"><div class="rail"><div class="n">30</div><div class="line"></div></div><div class="card">
+<div class="hd"><span class="t">Steps 30–35 — six <code>trim_space</code> transforms</span><span class="id">293026316–293026321 · Formatter</span><span class="tag tf">transform</span><span class="tag qa">QA</span></div>
+<dl><dt>What</dt><dd>Trim ATS skills (Item 13) · final skills 1 (3) · final skills 2 (5) · relevant 1 (7) · relevant 2 (9) · relevant 3 (11)</dd>
+<dt>Why</dt><dd>Whitespace from the <code>###</code> splits would otherwise land inside Google Docs template fields</dd></dl>
+</div></div>
+
+<div class="grp">Outputs</div>
+<div class="step out"><div class="rail"><div class="n">36</div><div class="line"></div></div><div class="card">
+<div class="hd"><span class="t">Create Sample Resume Template in Google Docs</span><span class="id">289877670 · Google Docs create_from_template</span><span class="tag out">output</span></div>
+<dl><dt>Title</dt><dd><code>Custom Prep: {Company}-{Role}-{created_at}</code></dd>
+<dt>Fields</dt><dd>ResumeSummary, SkillsBullets1/2, ExpertiseBullets, RelevantBullets1/2/3</dd>
+<dt>Config</dt><dd>Template folder hardcoded to Engineering · export DOCX · sharing <code>writer</code> · <code>empty_fields_preference: keep</code></dd></dl>
+</div></div>
+
+<div class="step out"><div class="rail"><div class="n">37</div><div class="line"></div></div><div class="card">
+<div class="hd"><span class="t">Create ATS Compact Resume in Google Docs</span><span class="id">293026322 · Google Docs create_from_template</span><span class="tag out">output</span></div>
+<dl><dt>Title</dt><dd><code>Von Ellis Compact Resume: {Company}-{Role}-{created_at}</code></dd>
+<dt>Fields</dt><dd>ResumeSummary, ExpertiseBullets, RelevantBullets1/2/3, <code>SkillsBullets</code> = the pipe-separated ATS block; SkillsBullets1/2 deliberately empty</dd>
+<dt>Config</dt><dd>Template file from the form's hidden role value; template folder from step 2 (so <code>Unknown</code> reaches Google unvalidated)</dd></dl>
+</div></div>
+
+<div class="step out"><div class="rail"><div class="n">38</div><div class="line"></div></div><div class="card">
+<div class="hd"><span class="t">Create Portfolio from template</span><span class="id">289877671 · Google Slides</span><span class="tag out">output</span></div>
+<dl><dt>Title</dt><dd><code>VonEllis_Portfolio_{Company}_{now}</code></dd>
+<dt>Fields</dt><dd>@AboutMe1_50words, @AboutMe2_60words, @ExecutiveProfile_55words, @CoreAccomplishments_5blts_180words (step 24 output), @Company, @CoverLetterDate, @CoverLetterBody</dd>
+<dt>Note</dt><dd>Field names carry the word-count contract, but nothing verifies it</dd></dl>
+</div></div>
+
+<div class="step out"><div class="rail"><div class="n">39</div><div class="line"></div></div><div class="card">
+<div class="hd"><span class="t">Create Cover Letter from template</span><span class="id">291230258 · Google Slides</span><span class="tag out">output</span></div>
+<dl><dt>Title</dt><dd><code>VonEllis_CV_{Company}_{now}</code></dd>
+<dt>Fields</dt><dd>@Company, @CoverLetterDate, @CoverLetterBody</dd></dl>
+</div></div>
+
+<div class="step out"><div class="rail"><div class="n">40</div><div class="line"></div></div><div class="card">
+<div class="hd"><span class="t">Send Email</span><span class="id">289877672 · Microsoft Outlook send_email</span><span class="tag out">output</span><span class="tag qa">QA</span></div>
+<dl><dt>To</dt><dd>Form's send-to address + <code>dev@enterpriseds.io</code></dd>
+<dt>Subject</dt><dd><code>Application Prep: {Company} - {Role}</code></dd>
+<dt>Body</dt><dd>Job link · four document links (ATS resume, resume, cover letter, portfolio) · cold email draft · JD requirements tables · resume summary original vs updated · a 4-column skills table (category / original / updated / merged) for Skills 1–2 and Relevant 1–3</dd>
+<dt>Attach</dt><dd>PDF exports of the ATS resume and the cover letter</dd>
+<dt>Flag</dt><dd><code>has_automatic_issues: true</code>; body contains a stray <code>&lt;-- </code> marker inside the table markup. Per the repo README this node was <b>not migrated</b>.</dd></dl>
+</div></div>
+
+</div>
+
+<h2>4. Outputs inventory</h2>
+<table>
+<tr><th>Artifact</th><th>Produced by</th><th>Where it lands</th></tr>
+<tr><td>Full resume (Google Doc + DOCX export)</td><td>36</td><td>Drive "Zapier Automated Docs"</td></tr>
+<tr><td>ATS compact resume (Google Doc + DOCX + PDF)</td><td>37</td><td>Drive, folder chosen by role</td></tr>
+<tr><td>Portfolio deck (Google Slides)</td><td>38</td><td>Drive, private</td></tr>
+<tr><td>Cover letter deck (Google Slides + PDF)</td><td>39</td><td>Drive, private</td></tr>
+<tr><td>Cold outreach email draft</td><td>26 → 40</td><td>Email body only — never persisted</td></tr>
+<tr><td>Skills reconciliation table (A / B / merged / reasoning)</td><td>26 → 40</td><td>Email body only — never persisted</td></tr>
+<tr><td>JD requirements &amp; responsibilities tables</td><td>17 → 40</td><td>Email body only — never persisted</td></tr>
+<tr><td>Resume summary, original vs updated</td><td>19, 27 → 40</td><td>Email body only — never persisted</td></tr>
+</table>
+
+<h2>5. QA/QC checks in the current workflow</h2>
+<p>Every check below runs today. None of them has a UI: they either live as an instruction inside a prompt, or as a formatter step whose effect is invisible, and their results are only legible by reading one long email. This is the list to work from when deciding what to surface.</p>
+<table>
+<tr><th>#</th><th>Check</th><th>Where it lives</th><th>Evidence available today</th></tr>
+<tr><td>Q1</td><td>Exclusion list — omit anything health, fintech, tech due diligence, AI reg frameworks</td><td>Prompts 17, 18 (from step 14)</td><td>None — silent</td></tr>
+<tr><td>Q2</td><td>Skills items ≤ 24 characters</td><td>Prompt 26 rule 3</td><td>Merged table, no pass/fail marking</td></tr>
+<tr><td>Q3</td><td>Relevant-skills items ≤ 20 characters</td><td>Prompt 26 rule 4</td><td>Merged table, no pass/fail marking</td></tr>
+<tr><td>Q4</td><td>Redundancy elimination across skill lists A and B</td><td>Prompt 26 rules 1–2</td><td>Merged column in email table</td></tr>
+<tr><td>Q5</td><td>Swap justification against JD text</td><td>Prompt 26 column 4</td><td>"Reasoning / JD text for alignment" column</td></tr>
+<tr><td>Q6</td><td>Skill count 20–22, evenly split across two lists</td><td>Prompt 18</td><td>None — silent</td></tr>
+<tr><td>Q7</td><td>No AI-tell vocabulary; no em-dashes or hyphens; common phrasing only</td><td>Prompts 17, 18</td><td>None — silent</td></tr>
+<tr><td>Q8</td><td>Plain text, no markup; <code>###</code> header bookending; hyphen bullets not numbers</td><td>Prompts 17, 18, 20, 26, 28</td><td>Failure shows up as split misalignment</td></tr>
+<tr><td>Q9</td><td>Code-fence cleanup (<code>```html</code>, <code>```</code>)</td><td>Steps 22, 23</td><td>Silent, and currently orphaned</td></tr>
+<tr><td>Q10</td><td>Dash stripping in core accomplishments</td><td>Step 24</td><td>Silent</td></tr>
+<tr><td>Q11</td><td>Whitespace trimming before template fill</td><td>Step 25 loop + steps 30–35</td><td>Silent</td></tr>
+<tr><td>Q12</td><td>Role-type normalization and unknown-role fallback</td><td>Step 2</td><td>Folder id or the string <code>Unknown</code></tr>
+<tr><td>Q13</td><td>Word-count contracts on portfolio fields (50 / 60 / 55 / 180 words)</td><td>Template field names, step 38</td><td>None — never verified</td></tr>
+<tr><td>Q14</td><td>Empty template fields preserved rather than collapsed</td><td>Steps 36, 37 <code>empty_fields_preference: keep</code></td><td>Visible only in the finished document</td></tr>
+<tr><td>Q15</td><td>Before/after resume summary comparison</td><td>Steps 19 + 27 → email</td><td>Two blocks in the email, no diff</td></tr>
+<tr><td>Q16</td><td>Original vs updated vs merged skills, per list</td><td>Steps 21 + 27 → email</td><td>4-column HTML table in the email</td></tr>
+</table>
+
+<h2>6. Defects and fragilities found in the export</h2>
+<div class="gap"><b>Broken reference.</b> Step 22 reads <code>289877663__output__Item 44–55</code>, but node <code>289877663</code> is absent from the export. Steps 22–23 therefore produce nothing usable, and nothing downstream reads them — the HTML-cleanup branch is dead.</div>
+<div class="gap"><b>Everything is paused.</b> All 39 non-trigger nodes carry <code>paused: true</code> while the zap status is <code>on</code>. The baseline describes intent, not a currently-running pipeline.</div>
+<ul>
+<li><b>Storage key collisions.</b> Steps 6, 7, 8 all write the key <code>Current Expertise</code>; steps 11 and 15 both write <code>Executive Profile Paragraph</code>. Prompts read by node id (<code>__value</code>) so they still get the right text, but the storage table itself is unreliable as a source of truth.</li>
+<li><b>Positional coupling.</b> Content is addressed as <code>Item 3 … Item 55</code> after splitting on <code>###</code>. Any prompt change that adds, drops or reorders a section silently shifts every downstream field, including which text lands in which resume slot.</li>
+<li><b>Concatenated split.</b> Step 19 splits the <i>joined</i> output of steps 17 and 18, so the two prompts' section counts are load-bearing on each other.</li>
+<li><b>Memory key is hour-based.</b> <code>{{form id}}{{hour}}</code> means two runs of the same form in one hour share conversation memory, and a run that crosses the hour boundary loses it mid-chain.</li>
+<li><b>Duplicate generation.</b> Steps 17 and 18 are near-identical 16k-token calls; step 20 converts skills to HTML and step 28 converts them back to plain text.</li>
+<li><b>Unvalidated fallback.</b> <code>Unknown</code> from step 2 is passed straight to Google Docs as a folder id in step 37.</li>
+<li><b>Single-tenant constants.</b> "Von Ellis" in document titles, one hardcoded Engineering template folder in step 36, and role routing that only knows Engineering and Product Management.</li>
+<li><b>Dead input.</b> Step 13 Soft/Hard Skills (~2,871 chars) is never read.</li>
+<li><b>No failure path.</b> No retries, no validation that any <code>Item N</code> exists, no notification when a document or an LLM call fails; the email is the only signal that the run happened.</li>
+<li><b>Model and temperature.</b> All five calls use <code>gpt-4o-mini</code> at <code>temperature 1.0</code>, including the QA reconciliation step.</li>
+<li><b>Editor warnings.</b> Nodes 20, 22, 26 and 40 carry <code>has_automatic_issues: true</code>; node 40's body also contains a stray <code>&lt;--</code> inside the table markup.</li>
+</ul>
+
+<h2>7. What this implies for the migration</h2>
+<p>The workflow is three things stacked: a <b>profile store</b> (steps 3–15), a <b>generation pipeline</b> (17–35), and a <b>review surface</b> (40). Only the middle third was migrated to the app's Prompts table; the profile store is still hardcoded workflow steps, and the review surface is still an email.</p>
+<p>The QA/QC list in section 5 is what the review surface has to become: sixteen checks, of which four (Q2, Q3, Q4, Q5) already produce structured per-item evidence that is being thrown into an email table, and nine produce no evidence at all. Making them UI-visible means giving each one a pass/fail state and a place to show its reasoning, which in turn means the pipeline has to persist what it currently only prints.</p>
+
+</div>
+</body>
+</html>

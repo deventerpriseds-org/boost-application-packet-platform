@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Packet builder — QC &amp; evidence (additive prototype)</title>
+<link rel="stylesheet" href="app/src/theme.css">
+<style>
+/* Prototype-only chrome. Nothing here ships. */
+body[data-mode="asis"] .qc-new{display:none !important}
+body[data-hl="on"] .qc-new{position:relative;outline:1.5px dashed #7c3aed;outline-offset:3px;border-radius:8px}
+body[data-hl="on"] div.qc-new{padding-top:11px}
+body[data-hl="on"] .qc-new::after{content:attr(data-newlabel);position:absolute;top:0;left:6px;z-index:5;background:#7c3aed;color:#fff;font-size:9px;font-weight:700;letter-spacing:.4px;text-transform:uppercase;padding:1px 6px;border-radius:99px;white-space:nowrap;pointer-events:none}
+body[data-hl="on"] span.qc-new::after{top:-14px}
+body[data-hl="on"] span.qc-new{display:inline-flex;align-items:center}
+a{color:var(--text-link)}a:hover{color:var(--text-link-hover)}
+table code{font-size:11px}
+/* Keyword marks: highlighter yellow at rest, darker orange on hover / when selected in the margin. */
+mark.kw-mark{background:#fff03a;color:var(--proto-ink);padding:0 2px;border-radius:3px;box-shadow:inset 0 -2px 0 #d4c400;transition:background 120ms,box-shadow 120ms}
+mark.kw-mark:hover,mark.kw-mark.is-on{background:#d4a017;box-shadow:inset 0 -2px 0 #8a6410}
+/* Posting echoes: pale tan, so a keyword and an echo never read as the same thing. */
+mark.echo-mark{background:transparent;color:inherit;border-radius:3px;padding:0 2px;box-shadow:inset 0 -1px 0 #c9b27a;transition:background 120ms}
+mark.echo-mark:hover,mark.echo-mark.is-on{background:#fbf2da;box-shadow:inset 0 -2px 0 #a1852f}
+/* theme.css ships no border-box reset; inline width:100% fields would overflow their panels. */
+textarea,input,select{box-sizing:border-box}
+/* theme.css sets .px-label to ink3 at weight 600, which disappears against panel fills. */
+.px-label{color:var(--proto-ink2);font-weight:700}
+</style>
+</head>
+<body data-mode="additive" data-hl="on">
+<div id="root"></div>
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+<script src="qc/data.js"></script>
+<script type="text/babel" src="qc/shell.jsx"></script>
+<script type="text/babel" src="qc/assets.jsx"></script>
+<script type="text/babel" src="qc/assist.jsx"></script>
+<script type="text/babel" src="qc/evidence.jsx"></script>
+<script type="text/babel" src="qc/packet.jsx"></script>
+</body>
+</html>

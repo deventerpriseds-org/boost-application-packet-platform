@@ -1,0 +1,326 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Evidence model &amp; QC lineage</title>
+<link rel="stylesheet" href="_ds/compass-design-system-03277a8e-7275-4ccc-af18-f3a1dd3ffc61/tokens/fonts.css">
+<link rel="stylesheet" href="_ds/compass-design-system-03277a8e-7275-4ccc-af18-f3a1dd3ffc61/tokens/fig-tokens.css">
+<link rel="stylesheet" href="_ds/compass-design-system-03277a8e-7275-4ccc-af18-f3a1dd3ffc61/tokens/typography.css">
+<link rel="stylesheet" href="_ds/compass-design-system-03277a8e-7275-4ccc-af18-f3a1dd3ffc61/styles.css">
+<style>
+body{margin:0;background:var(--surface-background-secondary);color:var(--text-primary);font-family:'Inter',system-ui,sans-serif;line-height:1.5}
+.wrap{max-width:1240px;margin:0 auto;padding:48px 40px 96px}
+h1{font-size:30px;font-weight:700;letter-spacing:-.4px;margin:0 0 6px}
+h2{font-size:20px;font-weight:700;margin:44px 0 8px;padding-top:20px;border-top:1px solid var(--border-default)}
+h3{font-size:14px;font-weight:700;margin:24px 0 6px;color:var(--text-brand)}
+p,li{font-size:14px;color:var(--text-secondary)}
+.lead{font-size:15px}
+code{font-family:'JetBrains Mono',monospace;font-size:11.5px;background:var(--surface-background-tertiary);padding:1px 5px;border-radius:4px;color:var(--text-primary)}
+table{width:100%;border-collapse:collapse;margin:10px 0;font-size:13px}
+th,td{text-align:left;padding:7px 10px;border-bottom:1px solid var(--border-default);vertical-align:top}
+th{font-size:11px;text-transform:uppercase;letter-spacing:.4px;color:var(--text-tertiary)}
+ul{margin:4px 0;padding-left:20px}li{margin:2px 0}
+a{color:var(--text-brand)}a:hover{color:var(--brand-900)}
+.note{background:var(--surface-info-subtle);border:1px solid var(--blue-200);border-radius:8px;padding:10px 14px;font-size:13px;color:var(--text-info);margin:12px 0}
+.ask{background:var(--surface-brand-subtle);border:1px solid var(--brand-200,#b6d4da);border-radius:8px;padding:12px 14px;font-size:13px;margin:12px 0}
+.tag{display:inline-block;font-size:10px;font-weight:700;padding:1px 6px;border-radius:99px;letter-spacing:.2px;white-space:nowrap}
+.t-silent{background:var(--surface-error-subtle);color:var(--text-error)}
+.t-weak{background:var(--surface-warning-subtle);color:var(--text-warning)}
+.t-vis{background:var(--surface-success-subtle);color:var(--text-success)}
+.t-new{background:var(--surface-brand-subtle);color:var(--text-brand)}
+.t-ai{background:rgba(124,58,237,.12);color:#6d28d9}
+/* swimlane */
+.lane{display:grid;grid-template-columns:118px repeat(5,1fr);gap:8px;align-items:stretch}
+.lane+.lane{margin-top:8px}
+.lh{font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--text-tertiary);display:flex;align-items:center;padding-right:4px}
+.cellhd{font-size:11px;font-weight:700;letter-spacing:.4px;text-transform:uppercase;color:var(--text-on-brand);background:var(--surface-brand-default);border-radius:8px;padding:7px 10px;text-align:center}
+.cell{background:var(--surface-background-primary);border-radius:10px;box-shadow:inset 0 0 0 1px var(--border-default);padding:9px 10px;font-size:11.5px;color:var(--text-secondary);display:flex;flex-direction:column;gap:5px}
+.cell b{color:var(--text-primary);font-size:11.5px}
+.cell.q{background:var(--surface-background-tertiary)}
+.cell ul{padding-left:14px;margin:0}
+.cell li{font-size:11px;margin:1px 0}
+/* entity cards */
+.ents{display:grid;grid-template-columns:repeat(auto-fit,minmax(268px,1fr));gap:12px;margin:14px 0}
+.ent{background:var(--surface-background-primary);border-radius:12px;box-shadow:inset 0 0 0 1px var(--border-default);overflow:hidden}
+.ent .eh{background:var(--surface-background-tertiary);padding:8px 12px;display:flex;align-items:center;gap:8px;justify-content:space-between}
+.ent .eh .nm{font-family:'JetBrains Mono',monospace;font-size:12px;font-weight:700;color:var(--text-brand)}
+.ent .eb{padding:10px 12px}
+.ent dl{margin:0;display:grid;grid-template-columns:1fr;gap:3px}
+.ent .f{font-size:11.5px;color:var(--text-secondary)}
+.ent .f b{font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--text-primary);font-weight:600}
+.ent .rel{margin-top:8px;padding-top:8px;border-top:1px solid var(--border-default);font-size:11px;color:var(--text-tertiary)}
+/* gate pipeline */
+.pipe{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:10px;margin:14px 0}
+.pnode{background:var(--surface-background-primary);border-radius:10px;box-shadow:inset 0 0 0 1px var(--border-default);padding:11px 12px}
+.pnode .pn{font-size:10.5px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--text-tertiary)}
+.pnode h4{margin:3px 0 5px;font-size:13px;font-weight:700}
+.pnode p{font-size:11.5px;margin:0}
+.pnode.acc{box-shadow:inset 0 0 0 2px var(--surface-brand-default)}
+.pnode.ai{box-shadow:inset 0 0 0 2px #7c3aed}
+/* wireframe */
+.wf{background:var(--surface-background-primary);border-radius:12px;box-shadow:inset 0 0 0 1px var(--border-default);padding:14px;margin:14px 0}
+.wfrow{display:grid;gap:10px}
+.box{border:1.5px dashed var(--border-strong);border-radius:8px;padding:10px;font-size:11.5px;color:var(--text-secondary);background:var(--surface-background-secondary);min-width:0}
+.box>b:first-child{display:block;font-size:11px;text-transform:uppercase;letter-spacing:.4px;color:var(--text-tertiary);margin-bottom:4px}
+.box.solid{border-style:solid;background:var(--surface-background-primary)}
+.mono{font-family:'JetBrains Mono',monospace;font-size:11px}
+.f-right{display:flex;gap:6px;flex-wrap:wrap}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<h1>Evidence model &amp; QC lineage</h1>
+<p class="lead">Step one of two. This document fixes <b>what evidence the pipeline must produce and persist</b> so the QC story can be shown rather than asserted. Once you sign off on §2 (the evidence model) and §4 (the score), I build the clickable prototype against the current repo screens — packet-builder rail step plus per-asset badges and drawer, as chosen.</p>
+
+<div class="note"><b>Grounding.</b> As-is behavior from <code>Zap 289877647 Workflow Baseline.html</code> (16 checks, Q1–Q16). Current UI from <code>app/src/screens/PacketBuilder.jsx</code> — a 6-step rail (<code>jd → resume → cover → portfolio → video → send</code>), one <code>atsScore</code> number, and <code>coveredKw</code>/<code>missingKw</code> chips in the right panel. That single number and two chip lists are the entire QC surface today. §1b reconciles the target model against what the repo already stores.</div>
+
+<h2>1. As-is lineage — where the checks disappear</h2>
+<p>Five stages, three lanes. The <span class="tag t-silent">silent</span> markers are checks that run and leave no trace; <span class="tag t-weak">weak</span> leaves unlabelled evidence in an email; <span class="tag t-vis">visible</span> reaches a screen.</p>
+
+<div class="lane">
+<div class="lh"></div>
+<div class="cellhd">1 · Intake</div>
+<div class="cellhd">2 · Analyze JD</div>
+<div class="cellhd">3 · Generate</div>
+<div class="cellhd">4 · Reconcile</div>
+<div class="cellhd">5 · Deliver</div>
+</div>
+
+<div class="lane">
+<div class="lh">Data</div>
+<div class="cell"><b>Posting + profile</b><ul><li>JD text / URL</li><li>13 baseline values</li><li>Items to omit</li><li>Role type → folder</li></ul></div>
+<div class="cell"><b>JD extraction</b><ul><li>Requirements table</li><li>Responsibilities table</li><li>Target title, company</li></ul></div>
+<div class="cell"><b>Two prompt passes</b><ul><li>Pass A: 14 sections</li><li>Pass B: skills only</li><li>Split on <code>###</code> → Item N</li></ul></div>
+<div class="cell"><b>Merge decision</b><ul><li>List A vs List B</li><li>Merged term chosen</li><li>Reasoning string</li></ul></div>
+<div class="cell"><b>Assets</b><ul><li>Resume, ATS resume</li><li>Portfolio, cover letter</li><li>Email digest</li></ul></div>
+</div>
+
+<div class="lane">
+<div class="lh">Checks that run</div>
+<div class="cell q"><span class="tag t-silent">Q1 omit list</span><span class="tag t-vis">Q12 role normalize</span></div>
+<div class="cell q"><span class="tag t-silent">Q8 format contract</span><span class="tag t-silent">no requirement IDs kept</span></div>
+<div class="cell q"><span class="tag t-silent">Q6 count 20–22</span><span class="tag t-silent">Q7 AI-tell words</span><span class="tag t-silent">Q13 word counts</span></div>
+<div class="cell q"><span class="tag t-weak">Q2 ≤24 chars</span><span class="tag t-weak">Q3 ≤20 chars</span><span class="tag t-weak">Q4 redundancy</span><span class="tag t-weak">Q5 JD justification</span></div>
+<div class="cell q"><span class="tag t-silent">Q9 fence cleanup</span><span class="tag t-silent">Q10 dash strip</span><span class="tag t-silent">Q11 trim</span><span class="tag t-silent">Q14 empty fields</span></div>
+</div>
+
+<div class="lane">
+<div class="lh">What a human sees</div>
+<div class="cell">Nothing — steps are hardcoded</div>
+<div class="cell">JD summary text · <code>atsScore</code></div>
+<div class="cell">Draft text in an artifact card</div>
+<div class="cell">One HTML table inside one email <span class="tag t-weak">Q16</span></div>
+<div class="cell">Four Drive links, two PDFs <span class="tag t-weak">Q15</span></div>
+</div>
+
+<p style="margin-top:14px">Reading across the bottom lane is the whole problem: <b>13 of 16 checks produce no artifact a reviewer could inspect</b>, and the four that do produce one dump it into an email table with no pass/fail marking and no link back to the posting.</p>
+
+<h2>1b. What the app already has</h2>
+<p>Grep of <code>api/src/functions/tests/schema.ts</code>, <code>appJdParse.ts</code>, <code>appPackets.ts</code>, <code>appApply.ts</code>, <code>promptsApi.ts</code>. The app already generates a resume and already computes an ATS number — the gap is not extraction, it is that <b>what it extracted is stored as HTML blobs with no ids, and what it decided is not stored at all</b>.</p>
+<table>
+<tr><th>Evidence record</th><th>Already in the repo</th><th>Verdict</th></tr>
+<tr><td><code>requirement</code></td><td><code>opportunity.jd_real</code> (raw posting text), <code>jd_summary</code>, <code>jd_requirements</code> (an <code>&lt;ul&gt;&lt;li&gt;</code> of every responsibility/requirement/skill), <code>jd_table</code> (an HTML table of <i>Category | Item | ATS Keyword</i>, category one of responsibilities/experience/requirements/skills)</td><td><span class="tag t-weak">70% there</span> The extraction already happens and is already categorized. Needs splitting into rows with ids, char offsets into <code>jd_real</code>, and a must-have/nice-to-have weight. <b>No new model work.</b></td></tr>
+<tr><td><code>ats_term</code></td><td><code>jd_table</code>'s third column already emits an ATS keyword per requirement, already capped at ≤25 chars. <code>jd-analysis</code> returns <code>keywords[]</code>, <code>mustHaves[]</code>, <code>gaps[]</code>. <code>packet.covered_kw text[]</code>, <code>opportunity.ats_gaps</code></td><td><span class="tag t-weak">60% there</span> Terms exist but untyped and unlinked: no <code>requirement_id</code>, no explicit-vs-inferred source, and the ATS keyword column of <code>jd_table</code> is thrown away rather than becoming the term set.</td></tr>
+<tr><td><code>match_score</code></td><td><code>opportunity.ats_score</code> + <code>ats_gaps</code> + <code>ats_scored_at</code>, <code>opportunity.match_score</code>, <code>base_score</code>, <code>packet.ats_score</code>. Scoring prompt already asks for a 0–100 with gaps</td><td><span class="tag t-weak">1 of 3 dims</span> The composite exists as an opaque model-estimated integer. Needs decomposition into the three sub-scores and <code>uncovered_requirement_ids</code> so the number is auditable rather than asserted.</td></tr>
+<tr><td><code>insertion</code></td><td><code>artifact.version_history jsonb</code> exists and is unused for this</td><td><span class="tag t-weak">has a home</span> Before/after passages can land here for the prototype; a real table is better once the shape settles.</td></tr>
+<tr><td><code>check_result</code></td><td><code>packet.feedback jsonb</code> exists (approval-round feedback)</td><td><span class="tag t-silent">net new</span> No per-check rows anywhere. The rules engine itself is new code, but needs no model call.</td></tr>
+<tr><td><code>review_verdict</code></td><td>Prompts live in an Azure Table with real versioning — <code>partitionKey</code>, <code>version</code>, <code>is_active</code>, <code>notes</code> (<code>promptsApi.ts</code>). <code>usage_metering</code> already logs model/tokens/cost per feature</td><td><span class="tag t-silent">net new</span> The reviewer needs one new prompt row and one new endpoint. <code>prompt_version</code> and cost metering come free from what exists.</td></tr>
+<tr><td><code>skill_candidate</code></td><td>Nothing — the A-side and B-side lists exist only inside prompt output</td><td><span class="tag t-silent">net new</span></td></tr>
+<tr><td><code>swap_decision</code></td><td>Nothing — the merge reasoning exists only as prose inside the model's HTML table</td><td><span class="tag t-silent">net new</span> This is the record your core question depends on.</td></tr>
+</table>
+<p><b>Also reusable as-is:</b> the approval gate has a hook point already — <code>artifact.status</code> ('todo→drafting→review→changes→approved'), <code>stepDone()</code> in <code>PacketBuilder.jsx</code>, and <code>packet.status='ready'</code> when all artifacts are approved. The QC gate reads those, it does not replace them.</p>
+<div class="note"><b>Bug found while grepping.</b> <code>PacketBuilder.jsx</code> renders <code>p.missingKw</code> as the red "! missing" chips, but <code>packet</code> has only <code>covered_kw</code> — there is no <code>missing_kw</code> column and <code>appPackets.ts</code> does not return one. The gap chips are therefore always empty, and <code>jd-analysis</code> returns <code>keywords/mustHaves/gaps</code> to the caller without persisting them. So the one QC surface that exists today is half wired.</div>
+<h3>So how much of §2 do we still need?</h3>
+<p>Three of the eight records are substantially present but unstructured, five are net new. Weighted by effort the split is roughly: <b>structuring work</b> (parse <code>jd_table</code>/<code>jd_requirements</code> into <code>requirement</code> + <code>ats_term</code> rows, decompose the score) — no new extraction, no new prompts; <b>capture work</b> (persist candidates, swaps, insertions, check results) — the pipeline already computes all of this and discards it; <b>genuinely new</b> — the deterministic rules engine and the one blind-reviewer call. Nothing here requires re-architecting generation.</p>
+
+<h2>2. Target evidence model</h2>
+<p>Eight records. Everything the UI needs is derivable from these; nothing in the UI is allowed to be a claim without a row behind it. Ids are stable so a badge, a drawer row, and a posting highlight all address the same object.</p>
+
+<div class="ents">
+
+<div class="ent"><div class="eh"><span class="nm">requirement</span><span class="tag t-new">new</span></div><div class="eb">
+<div class="f"><b>id</b> · stable per posting</div>
+<div class="f"><b>packet_id</b></div>
+<div class="f"><b>verbatim</b> — exact posting line, never paraphrased</div>
+<div class="f"><b>char_start / char_end</b> — offsets into stored posting text</div>
+<div class="f"><b>kind</b> — must_have | nice_to_have | responsibility</div>
+<div class="f"><b>competency</b> — normalized concept label</div>
+<div class="f"><b>weight</b> — 1–3, drives the score</div>
+<div class="rel">The anchor record. Every claim of "posting-driven" resolves to one of these.</div>
+</div></div>
+
+<div class="ent"><div class="eh"><span class="nm">ats_term</span><span class="tag t-new">new</span></div><div class="eb">
+<div class="f"><b>id</b> · <b>packet_id</b></div>
+<div class="f"><b>term</b> — the literal string an ATS would match</div>
+<div class="f"><b>requirement_ids[]</b> — which lines it came from</div>
+<div class="f"><b>source</b> — posting_explicit | posting_inferred | profile_only</div>
+<div class="f"><b>frequency_in_posting</b></div>
+<div class="f"><b>status</b> — covered | missing | inserted</div>
+<div class="rel">Replaces today's untyped <code>coveredKw</code>/<code>missingKw</code> string arrays.</div>
+</div></div>
+
+<div class="ent"><div class="eh"><span class="nm">skill_candidate</span><span class="tag t-new">new</span></div><div class="eb">
+<div class="f"><b>id</b> · <b>packet_id</b></div>
+<div class="f"><b>label</b></div>
+<div class="f"><b>list</b> — skills_1 | skills_2 | relevant_1 | relevant_2 | relevant_3</div>
+<div class="f"><b>origin</b> — profile_original | pass_a | pass_b</div>
+<div class="f"><b>char_len</b> — for the 24/20 rules</div>
+<div class="rel">The A-side and B-side of today's reconciliation, as rows instead of two HTML lists.</div>
+</div></div>
+
+<div class="ent"><div class="eh"><span class="nm">swap_decision</span><span class="tag t-new">new</span></div><div class="eb">
+<div class="f"><b>id</b> · <b>packet_id</b></div>
+<div class="f"><b>from_candidate_id</b> → <b>to_candidate_id</b></div>
+<div class="f"><b>action</b> — kept | swapped | merged | dropped | added</div>
+<div class="f"><b>requirement_id</b> — the driving line <span class="tag t-new">required for swapped/added</span></div>
+<div class="f"><b>verbatim_quote</b> — the posting text shown in the row</div>
+<div class="f"><b>confidence</b> — 0–1, from the reviewer</div>
+<div class="f"><b>rationale</b> — one sentence, must reference the quote</div>
+<div class="rel">This is the row your swap table renders. <b>No <code>requirement_id</code> ⇒ the swap fails Q5 and is flagged, not shown as justified.</b></div>
+</div></div>
+
+<div class="ent"><div class="eh"><span class="nm">insertion</span><span class="tag t-new">new</span></div><div class="eb">
+<div class="f"><b>id</b> · <b>artifact_id</b></div>
+<div class="f"><b>ats_term_id</b> or <b>skill_candidate_id</b></div>
+<div class="f"><b>target</b> — executive_summary | skills_1 | skills_2 | relevant_n | experience_bullet | about_me_1 | about_me_2 | core_accomplishment_n | cover_body</div>
+<div class="f"><b>before_text</b> / <b>after_text</b> — the passage, not the whole doc</div>
+<div class="f"><b>method</b> — model_rewrite | template_fill | manual</div>
+<div class="rel">Answers "where was it added, and what did the passage look like before". Feeds the passage diff view.</div>
+</div></div>
+
+<div class="ent"><div class="eh"><span class="nm">check_result</span><span class="tag t-new">new</span></div><div class="eb">
+<div class="f"><b>id</b> · <b>artifact_id</b> (or packet-level)</div>
+<div class="f"><b>check_key</b> — Q1 … Q16, R1 … Rn</div>
+<div class="f"><b>engine</b> — deterministic | reviewer</div>
+<div class="f"><b>state</b> — pass | warn | fail | not_applicable</div>
+<div class="f"><b>observed</b> / <b>expected</b> — e.g. <code>26</code> vs <code>≤24</code></div>
+<div class="f"><b>offenders[]</b> — the specific items that failed</div>
+<div class="rel">One row per check per asset. The badge is an aggregate of these; the drawer is a list of them.</div>
+</div></div>
+
+<div class="ent"><div class="eh"><span class="nm">review_verdict</span><span class="tag t-ai">reviewer</span></div><div class="eb">
+<div class="f"><b>id</b> · <b>artifact_id</b></div>
+<div class="f"><b>reviewer_model</b> · <b>prompt_version</b> · <b>ran_at</b></div>
+<div class="f"><b>grade</b> — A–F or 0–100, the reviewer's own call</div>
+<div class="f"><b>agreed_with_generator</b> — bool per swap, plus a count</div>
+<div class="f"><b>citations[]</b> — {requirement_id, verbatim_quote, claim}</div>
+<div class="f"><b>critique[]</b> — findings the rules engine cannot see</div>
+<div class="f"><b>blind</b> — true if the reviewer never saw the generator's rationale</div>
+<div class="rel">Independence is mechanical: different prompt, no access to the generator's reasoning, and every claim must carry a <code>requirement_id</code> or it is discarded.</div>
+</div></div>
+
+<div class="ent"><div class="eh"><span class="nm">match_score</span><span class="tag t-new">new</span></div><div class="eb">
+<div class="f"><b>id</b> · <b>artifact_id</b> · <b>computed_at</b></div>
+<div class="f"><b>must_have_coverage</b> — 0–100 + covered/total</div>
+<div class="f"><b>keyword_coverage</b> — 0–100 + covered/total</div>
+<div class="f"><b>seniority_alignment</b> — 0–100</div>
+<div class="f"><b>composite</b> — weighted, see §4</div>
+<div class="f"><b>uncovered_requirement_ids[]</b></div>
+<div class="f"><b>engine_version</b> — so a score can be reproduced</div>
+<div class="rel">Replaces the single opaque <code>atsScore</code>. Every sub-score expands to the requirement rows behind it.</div>
+</div></div>
+
+</div>
+
+<h2>3. Gate sequence — what happens when an asset is generated</h2>
+<p>Today: generate → status <code>review</code> → a human approves. Target: generate → deterministic rules → blind reviewer → aggregate → gate. The gate state is what the badge shows and what the rail step enforces.</p>
+
+<div class="pipe">
+<div class="pnode"><div class="pn">step 1</div><h4>Generate draft</h4><p>Unchanged. Produces artifact content plus <code>skill_candidate</code> and <code>insertion</code> rows instead of only text.</p></div>
+<div class="pnode acc"><div class="pn">step 2 · deterministic</div><h4>Rules engine</h4><p>No model. Char limits (Q2, Q3), list counts (Q6), omit-list membership (Q1), AI-tell vocabulary and em-dash scan (Q7), word-count contracts (Q13), markup residue (Q8, Q9), empty template fields (Q14), whitespace (Q11). Emits <code>check_result</code> rows with offenders.</p></div>
+<div class="pnode ai"><div class="pn">step 3 · independent</div><h4>Blind reviewer</h4><p>Separate prompt, separate call, does <b>not</b> receive the generator's rationale. Gets: posting text, requirement rows, the finished asset. Returns a grade, per-swap agreement, and citations that must resolve to a <code>requirement_id</code>.</p></div>
+<div class="pnode acc"><div class="pn">step 4</div><h4>Aggregate</h4><p>Any <code>fail</code> ⇒ gate <b>fail</b>. No fails but any <code>warn</code> or reviewer disagreement ⇒ gate <b>warn</b>. Otherwise <b>pass</b>. Uncited swaps are always a fail, not a warn.</p></div>
+<div class="pnode"><div class="pn">step 5</div><h4>Score</h4><p>Compute <code>match_score</code> against the requirement set. Stored per generation so regenerations are comparable.</p></div>
+<div class="pnode"><div class="pn">step 6</div><h4>Gate the approval</h4><p>Approve stays disabled on a <b>fail</b>; a <b>warn</b> requires an explicit "approve with exceptions" that records who and why.</p></div>
+</div>
+
+<div class="ask"><b>Decision for you.</b> Should a <b>warn</b> block approval too, or only a <b>fail</b>? I've assumed fail blocks, warn requires an explicit override that gets recorded.</div>
+
+<h2>4. Match score</h2>
+<p>Three dimensions, as chosen. Weighted so a missing must-have cannot be papered over with keyword stuffing.</p>
+<table>
+<tr><th>Dimension</th><th>Weight</th><th>Definition</th><th>Expands to</th></tr>
+<tr><td>Must-have requirement coverage</td><td>50%</td><td>Σ(weight of covered <code>must_have</code>) ÷ Σ(weight of all <code>must_have</code>). Covered = at least one <code>insertion</code> or existing passage the reviewer maps to that requirement.</td><td>Requirement list, each row green/red with the passage that covers it</td></tr>
+<tr><td>Keyword / ATS term coverage</td><td>30%</td><td>Covered <code>ats_term</code> ÷ all <code>ats_term</code> where <code>source = posting_explicit</code>. Terms only inferred by the model are excluded from the denominator and shown separately.</td><td>Term chips, each linking to the posting line and the insert location</td></tr>
+<tr><td>Seniority &amp; scope alignment</td><td>20%</td><td>Reviewer-graded against posting signals (title band, team size, budget/P&amp;L language, reporting line) versus what the asset evidences.</td><td>Four signal rows with the posting quote and the asset quote side by side</td></tr>
+</table>
+<p><code>composite = 0.5·must_have + 0.3·keyword + 0.2·seniority</code>, banded <b>≥85 strong</b> · <b>70–84 acceptable</b> · <b>&lt;70 needs work</b>. Both the composite and the three parts are stored — the number in the header is clickable down to the requirement that moved it.</p>
+<div class="ask"><b>Decision for you.</b> Weights 50/30/20 and the banding thresholds. Also: score the ATS-compact resume separately from the full resume (they carry different skill blocks), which I've assumed yes.</div>
+
+<h2>5. Where it surfaces</h2>
+
+<h3>5a. Packet rail — new step 7, "QC &amp; evidence"</h3>
+<p>Existing rail is <code>jd · resume · cover · portfolio · video · send</code>. The new step sits between <b>video</b> and <b>review &amp; send</b>, and <code>send</code> reads its gate.</p>
+<div class="wf">
+<div class="wfrow" style="grid-template-columns:minmax(150px,220px) minmax(0,1fr) minmax(0,280px)">
+<div class="box"><b>Left rail (existing)</b>1 JD analysis<br>2 Resume<br>3 Cover letter<br>4 Portfolio<br>5 Intro video<br><span class="mono" style="color:var(--text-brand)">6 QC &amp; evidence ← new</span><br>7 Review &amp; send</div>
+<div class="box solid"><b>Center — evidence tabs</b>
+<div class="f-right" style="margin:6px 0"><span class="tag t-new">Requirement coverage</span><span class="tag t-new">Skills &amp; swaps</span><span class="tag t-new">Insert map</span><span class="tag t-new">Checks</span><span class="tag t-ai">Reviewer</span></div>
+Coverage tab: the posting rendered as text, each requirement line highlighted green (covered) / amber (partial) / red (uncovered). Clicking a line filters the other tabs to it.</div>
+<div class="box"><b>Right (existing panel, extended)</b>Composite score, large<br>3 sub-score bars<br>Gate state chip<br>Per-asset badges<br>"Re-run QC" button</div>
+</div>
+</div>
+
+<h3>5b. Asset badge → drawer</h3>
+<p>Every artifact card in the existing rail gains a badge next to its status pill: <span class="tag t-vis">QC 92 · pass</span> <span class="tag t-weak">QC 74 · 2 warnings</span> <span class="tag t-silent">QC · 1 failure</span>. Clicking opens a right drawer over the current screen.</p>
+<div class="wf">
+<div class="wfrow" style="grid-template-columns:minmax(0,1fr) minmax(0,420px)">
+<div class="box"><b>Screen behind</b>Packet builder, unchanged. Card list keeps its Generate / Approve / Regenerate actions; Approve is disabled while the gate is <span class="tag t-silent">fail</span>.</div>
+<div class="box solid"><b>Drawer — five stacked sections</b>
+<div style="margin-top:6px"><b style="color:var(--text-primary);text-transform:none;letter-spacing:0">1 · Score</b> composite + 3 bars, each expandable to its requirement rows.</div>
+<div><b style="color:var(--text-primary);text-transform:none;letter-spacing:0">2 · Checks</b> Q/R list, one row each: key, state, observed vs expected, offenders.</div>
+<div><b style="color:var(--text-primary);text-transform:none;letter-spacing:0">3 · Swaps</b> the table in §5c.</div>
+<div><b style="color:var(--text-primary);text-transform:none;letter-spacing:0">4 · Insert map</b> per target passage: before / after, and which term or requirement drove it.</div>
+<div><b style="color:var(--text-primary);text-transform:none;letter-spacing:0">5 · Independent review</b> grade, agreement count, citations, critique, and a "blind" indicator.</div>
+</div>
+</div>
+</div>
+
+<h3>5c. The swap table — the row you asked for</h3>
+<table>
+<tr><th>Original</th><th></th><th>Final</th><th>Posting line (verbatim)</th><th>Conf.</th><th>Reviewer</th></tr>
+<tr><td>Agile Transformation</td><td>→</td><td>Platform Modernization</td><td>"lead modernization of our core platform across three business units"</td><td>0.91</td><td><span class="tag t-vis">agrees</span></td></tr>
+<tr><td>Change Management</td><td>→</td><td>Change Management</td><td>kept — matched by "drive organizational change"</td><td>0.78</td><td><span class="tag t-vis">agrees</span></td></tr>
+<tr><td>M&amp;A Due Diligence</td><td>→</td><td><i>dropped</i></td><td>no matching line</td><td>—</td><td><span class="tag t-weak">flag: on omit list</span></td></tr>
+<tr><td><i>added</i></td><td>→</td><td>FedRAMP Compliance</td><td><i>no citation returned</i></td><td>0.44</td><td><span class="tag t-silent">fail Q5 — unjustified</span></td></tr>
+</table>
+<p>Sort defaults to unjustified first, then lowest confidence. That ordering is the answer to "are the swaps truly posting-driven" — anything without a verbatim line floats to the top instead of hiding in a list of 22.</p>
+
+<h3>5d. Intake — collecting the inputs up front</h3>
+<p>You left the intake scope open, so this is my call: the 13 hardcoded baseline values become a <b>reusable profile</b> edited in Settings, and the packet's JD step gains a short per-run block for what genuinely varies. Nothing per-run gets re-typed if the profile already has it.</p>
+<table>
+<tr><th>Where</th><th>Fields</th><th>Why there</th></tr>
+<tr><td>Profile (reusable, Settings → Master profile)</td><td>Resume summary · work experience · skills &amp; expertise lists · about-me 1–2 · executive profile · core accomplishments · items to omit · soft/hard skill bank</td><td>Identical on every run today; editing it should not require touching a workflow</td></tr>
+<tr><td>Per run (JD step, existing screen)</td><td>Posting URL / paste / file · role type → template routing · recipient name &amp; email · optional per-run overrides of any profile field</td><td>The only things that actually change per application</td></tr>
+<tr><td>Derived, never typed</td><td>Target title · company · today's date · requirement and ATS-term sets</td><td>Extracted from the posting; typing them invites drift</td></tr>
+</table>
+<div class="ask"><b>Decision for you.</b> Per-run overrides: show them inline on the JD step (my assumption), or keep the run strictly profile-driven and force edits back into the profile?</div>
+
+<h2>6. What has to be persisted for any of this to render</h2>
+<table>
+<tr><th>Record</th><th>Written by</th><th>Read by</th><th>Exists today?</th></tr>
+<tr><td><code>posting_text</code> + offsets</td><td>JD parse</td><td>Coverage tab, every verbatim quote</td><td><b>Yes</b> — <code>jd_real</code> holds raw text; offsets missing</td></tr>
+<tr><td><code>requirement</code></td><td>JD analysis</td><td>Coverage tab, score, swap citations</td><td>Extracted into <code>jd_table</code>/<code>jd_requirements</code> HTML; no rows, no ids</td></tr>
+<tr><td><code>ats_term</code></td><td>JD analysis</td><td>Term chips, keyword sub-score</td><td>In <code>jd_table</code> col 3 + <code>covered_kw</code>; untyped, unlinked, <code>missing_kw</code> absent</td></tr>
+<tr><td><code>skill_candidate</code></td><td>Generation passes</td><td>Swap table columns</td><td>No</td></tr>
+<tr><td><code>swap_decision</code></td><td>Reconcile step</td><td>Swap table, Q4/Q5 checks</td><td>No — email HTML only</td></tr>
+<tr><td><code>insertion</code></td><td>Generation / template fill</td><td>Insert map, passage diffs</td><td>No — <code>artifact.version_history</code> is an empty home</td></tr>
+<tr><td><code>check_result</code></td><td>Rules engine + reviewer</td><td>Badges, Checks section</td><td>No</td></tr>
+<tr><td><code>review_verdict</code></td><td>Blind reviewer</td><td>Reviewer section, agreement counts</td><td>No — but prompt versioning + cost metering exist</td></tr>
+<tr><td><code>match_score</code></td><td>Score engine</td><td>Header, sub-score bars</td><td><code>ats_score</code> only — one model-estimated integer, not decomposable</td></tr>
+</table>
+
+<h2>7. Confirm these five and I'll build the prototype</h2>
+<ol>
+<li>The eight records in §2, and specifically that an uncited swap is a <b>failure</b> rather than a warning.</li>
+<li>Score weights 50 / 30 / 20 and bands 85 / 70.</li>
+<li>Whether a <b>warn</b> gate blocks approval or only requires a recorded override.</li>
+<li>The new rail step sits at position 6, before Review &amp; send, and <code>send</code> reads its gate.</li>
+<li>Intake split: 13 baseline values move to a reusable profile; per-run block holds posting, routing, recipient, overrides.</li>
+</ol>
+
+</div>
+</body>
+</html>
