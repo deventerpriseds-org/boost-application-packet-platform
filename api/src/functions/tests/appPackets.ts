@@ -3,6 +3,7 @@ import { resolveOwner, requireWrite } from './appSession'
 import { getPgClient } from './pgClient'
 import { getGoogleOAuthToken, HAS_GOOGLE_OAUTH } from './googleAuth'
 import { logUsage } from './usageMeter'
+import { groundingText } from './jdText'
 import { metaFor, varsForType, copyTemplate, injectValues, stripLeftoverTokens, shareAnyone } from './packetTemplates'
 import { buildPackageForJD } from './pipeline'
 
@@ -227,13 +228,6 @@ const DOC_TITLE: Record<string, string> = {
 // must_haves is the ONLY jdAnalysis output with no existing home. `gaps` deliberately gets no
 // column: opportunity.ats_gaps already holds a posting-grounded gap list (appApply.atsScoreOne),
 // and a second list derived from a job title would be a weaker parallel truth.
-// ONE definition of "the posting text we ground against" — same normalization as
-// appApply.atsScoreOne, so the two scorers cannot disagree about what the posting is.
-function groundingText(opp: any): string {
-  const strip = (v: any) => String(v || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
-  return strip(opp.jd_real) || strip([opp.jd_summary, opp.jd_requirements].filter(Boolean).join('\n'))
-}
-
 async function ensureAnalysisCols(client: any) {
   await client.query(`alter table packet add column if not exists must_haves text[]`)
   await client.query(`alter table packet add column if not exists jd_grounded boolean`)

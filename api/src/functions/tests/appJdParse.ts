@@ -1,6 +1,7 @@
 import { app, HttpRequest, HttpResponseInit, InvocationContext, Timer } from '@azure/functions'
 import { resolveOwner, requireWrite, serverError } from './appSession'
 import { getPgClient } from './pgClient'
+import { normalizePostingText } from './jdText'
 import { logUsage } from './usageMeter'
 import { openaiFetch } from './mailWatch'
 
@@ -44,14 +45,8 @@ async function fetchPageText(url: string): Promise<string | null> {
     })
     if (!res.ok) return null
     const html = await res.text()
-    // Strip tags, collapse whitespace
-    const text = html
-      .replace(/<script[\s\S]*?<\/script>/gi, ' ')
-      .replace(/<style[\s\S]*?<\/style>/gi, ' ')
-      .replace(/<[^>]+>/g, ' ')
-      .replace(/\s+/g, ' ')
-      .trim()
-    return text.slice(0, 12000)
+    // Shared normalizer: tags out AND entities decoded (a tag-only strip left "P&amp;L" encoded).
+    return normalizePostingText(html).slice(0, 12000)
   } catch {
     return null
   }
@@ -69,7 +64,7 @@ function isAlertDigest(rawJd: string, whySurfaced: string): boolean {
 }
 // The single-job JD text to parse, or '' when the only source is the shared alert email (refuse).
 function resolveJdSource(opp: any): string {
-  const realJd = opp.jd_real ? String(opp.jd_real).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim() : ''
+  const realJd = normalizePostingText(opp.jd_real)
   if (realJd) return realJd
   const raw = opp.raw_jd || ''
   if (raw && !isAlertDigest(raw, opp.why_surfaced || '')) return raw

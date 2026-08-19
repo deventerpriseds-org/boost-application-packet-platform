@@ -1275,3 +1275,18 @@ WITHOUT stopping to check in.
 - CORRECTION to an earlier memory entry: memory said `opportunity.match_score` is "hand-set". It is
   NOT — `appRoleTaxonomy.ts:109` rewrites it for every opportunity on every taxonomy publish. There are
   FOUR numbers today claiming to score fit; P2.3 must reconcile them, not add a fifth.
+
+## LIVE BUG FOUND + FIXED: HTML entities were never decoded in posting text (2026-08-19)
+`opportunity.jd_real` stores `descriptionHtml` (jdBackfill.ts). Every consumer stripped TAGS but never
+decoded ENTITIES, so the live ATS scorer literally saw `P&amp;L`. Measured via db-query on the live
+corpus: **`&amp;` appears in 872 of 1,230 real postings (71%)**, and **`P&L` is present in 83 postings
+but matched in ZERO**. Same for M&A (62), R&D, "Risk & Compliance". The keyword gaps shown to the owner
+were wrong as a direct result.
+- FIX: `api/src/functions/tests/jdText.ts` — ONE exported `normalizePostingText()` (tags out, entities
+  decoded incl. double-encoded `&amp;amp;` + numeric/hex refs, whitespace collapsed) and
+  `groundingText(opp)`. Repointed: `appApply.atsScoreOne` (live scorer), `appPackets.jdAnalysis`,
+  `appJdParse` fetch + `resolveJdSource`. 11/11 unit assertions pass, incl. a before/after on P&L.
+- Left alone deliberately (different concern): jdLinks, jdSearch (already decodes some), mailWatch,
+  jdFetchProbe, mt15/mt16.
+- LESSON: "strip tags" is not "get the text". Any future matcher / offset / quote / figure-scan work
+  must go through jdText.ts, never a local regex. Closes plan prerequisite X3.

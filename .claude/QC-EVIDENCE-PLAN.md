@@ -68,7 +68,7 @@ re-checking the code yourself.** The backlog is the intent; this file is the con
 |---|---|---|---|
 | **X1** | **Feed the real posting into generation.** `buildTemplatedArtifact` (`appPackets.ts:236-240`) synthesises a pseudo-JD from role/company/why_surfaced. `jd_real` is never selected. | P1.3, P1.4, P8.2 — every provenance row and every `verbatim_quote` would otherwise record a fabrication, and P8.2's acceptance passes VACUOUSLY. | ACT-51 A3 |
 | **X2** | **Make `regen` reachable.** `appPackets.ts:234` reuses cached `pkg_json`; `:454` hardcodes `regen=false`; the UI never sends it. | P3.1 (a loop on today's code runs 4 passes, closes nothing, and reports looping), P8.1-AC7. | ACT-51 A2 |
-| **X3** | **Canonical `jd_text`.** `jd_real` is HTML (`jdBackfill.ts:66` stores `descriptionHtml`); three different strip-regexes exist. | P1.1 offsets, P4.1 citation validation, P8.2 figure scan, P8.3 evidence substrings — none can work against HTML. Export ONE `normalizePostingText()` extending `appJdParse.ts`'s. |
+| ~~X3~~ | **DONE (2026-08-19)** — `api/src/functions/tests/jdText.ts` exports `normalizePostingText` / `groundingText` / `decodeEntities`; consumers repointed: `appApply.atsScoreOne` (LIVE scorer), `appPackets.jdAnalysis`, `appJdParse` (fetch + `resolveJdSource`). Original: Canonical `jd_text`. `jd_real` is HTML (`jdBackfill.ts:66` stores `descriptionHtml`); three different strip-regexes exist. | P1.1 offsets, P4.1 citation validation, P8.2 figure scan, P8.3 evidence substrings — none can work against HTML. Export ONE `normalizePostingText()` extending `appJdParse.ts`'s. |
 | **X4** | **A test runner.** `api/package.json` has build/watch/start/dev only — no test script, no framework. | Every `node --test` AC. Node 22 ships a built-in runner: zero new dependency. |
 | **X5** | **Documents render ONCE, after the loop.** Each `buildTemplatedArtifact` call does a Drive `files/{id}/copy`. | P3.1 — 4 passes × 4 templated artifacts = **16 orphaned Drive files per packet** on a quota-bearing OAuth account. |
 | **X6** | **Prompt `version` must be loaded.** `pipeline.ts:49` projects only `partitionKey`→`content`, discarding `version`/`rowKey`. | P4.1's "`prompt_version` on every verdict" is unmeetable reusing that line. |
@@ -258,3 +258,49 @@ Accumulated so I don't stop-start. Each carries my recommendation; "agree" is a 
 | **10** | **Two zap baseline nodes were never migrated** (`289877653`, `294827237` — cover-letter samples). | **Record as intentionally dropped** unless you want the sample letters back as profile fields. |
 | **11** | **`softHardSkillsPool`** is stored, required by the health check, read by nothing. | **Wire it as the swap bank** for P8.6's "swap for another skill" — that is its natural consumer. |
 | **12** | **`/app/usage` totals will JUMP** once `logUsage` is fixed (D8) — the production packet build has never been metered and `packet:ai-edit` almost certainly records zero rows. | **Proceed.** It is a correction, not a regression, but the cost dashboard will visibly change. |
+
+
+---
+
+## 12. O*NET research outcome (decision #8) — and the live bug it found
+
+### It found a LIVE production bug, now fixed (X3)
+`jd_real` stores `descriptionHtml`; every consumer stripped TAGS but never decoded ENTITIES, so the
+scorer saw the literal `P&amp;L`. Measured live: **`&amp;` in 872 of 1,230 real postings (71%)**;
+**`P&L` present in 83 postings, matched in ZERO.** Same for M&A, R&D, "Risk & Compliance". The gap
+lists shown to the owner were wrong because of it. Fixed; 11/11 assertions pass.
+
+### Corrections to decision #8's premise
+- **O*NET is CC BY 4.0, NOT public domain.** Commercial use/derivatives fine, but attribution to the
+  release + USDOL/ETA is REQUIRED wherever derived terms surface; "O*NET" is a USDOL trademark. The
+  Web Services API carries a SEPARATE licence from the bulk download.
+- **O*NET cannot supply the exec vocabulary.** No occupation exists for CDO, CPO or CAIO — 9 of ~19
+  target roles collapse into `11-1011.00 Chief Executives`, which lists **16** Hot Technologies total.
+  Its `Essential Skills` file is psychometric constructs ("Systems Evaluation"), not ATS keywords —
+  **the file that sounds like the term library is the one you cannot score with.** Nothing covers
+  board reporting, P&L, M&A diligence, platform modernization, SOC 2 / FedRAMP / ISO 27001.
+- **PLAN CHANGE (a correction, not a decision):** our own `jd_real` corpus is the **PRIMARY** exec term
+  source; O*NET is the **supplement** — inverting the backlog's assumption. Evidence: 1,230 real
+  postings, **876 (71%) C-level/VP/Head-of**, measured DF — roadmap 626, board 480, budget 416,
+  operating model 222, digital transformation 153, P&L 83, M&A 66, due diligence 56, SOC 2 34. All
+  absent from O*NET. Mining n-grams is **extraction, not generation**, so it satisfies the
+  "not model-generated" rule when gated on DF>=5 + human approval.
+- **Free consolation for declining paid data:** O*NET's `Hot Technology`/`In Demand` flags are
+  **Lightcast-derived** — the demand signal we declined to pay for is already in the free dataset.
+- **Licensing line:** storing the TOKEN `TOGAF`/`ITIL`/`SAFe` is nominative use and fine; **importing
+  their taxonomies is not** (TOGAF commercial use is paid; SAFe/ITIL content restricted). Safe to
+  ingest wholesale: **NIST CSF 2.0 + NICE** (US Gov work, 17 U.S.C. 105) and **CNCF landscape**
+  (Apache 2.0, 2,501 names verified) — but NOT CNCF's Crunchbase-derived fields.
+- `SAFe` needs **case-sensitive** matching: `safe` appears in 302 postings, `scaled agile` in 8.
+
+### Revised seeding order
+0. ~~Canonical normalizer~~ DONE. 1. Tables + immutability trigger + `scoreable`.
+2. **Corpus miner + curation queue (highest yield).** 3. O*NET ingest. 4. NIST/CNCF/cloud packs.
+5. Hand-curated exec competency pack. 6. Cut `atsScoreOne` over to the pinned library.
+
+### New decisions (13-15)
+| # | Decision | Recommendation |
+|---|---|---|
+| **13** | **O*NET attribution placement** — CC BY 4.0 requires crediting release + USDOL/ETA wherever derived terms surface. | Footer of the ATS/keyword modal, beside the library id + version (the spec already shows a provenance line there). |
+| **14** | **O*NET 31.0 lands within days**, renaming files and shipping a migration crosswalk. Seed from 30.3 now and migrate, or wait? | **Wait for 31.0.** O*NET is phase 3 and phases 0-2 are weeks; avoids writing the ingest twice. |
+| **15** | **ESCO (EU) is FREE, not paid** — ~1,201 digital concepts, targets exactly O*NET's exec/digital weakness. "O*NET only" was aimed at paid vendors. | **Include it.** Costs nothing, no approval needed. Verify licence terms before ingest. |

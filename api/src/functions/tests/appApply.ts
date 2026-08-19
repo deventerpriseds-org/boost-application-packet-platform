@@ -2,6 +2,7 @@ import { app, HttpRequest, HttpResponseInit, InvocationContext, Timer } from '@a
 import { TableClient } from '@azure/data-tables'
 import { resolveOwner, requireWrite } from './appSession'
 import { getPgClient } from './pgClient'
+import { groundingText } from './jdText'
 import { logUsage } from './usageMeter'
 import { loadConfig } from './mailWatch'
 
@@ -168,8 +169,9 @@ async function ensureAtsCols(client: any) {
 // Score ONE opp's real JD against the master baseline. Stores ats_score + ats_gaps; never touches
 // match_score. Returns null when there's no usable JD to score.
 async function atsScoreOne(client: any, o: any, mc: string): Promise<{ atsScore: number | null; gaps: string[] } | null> {
-  const jd = String(o.jd_real || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
-    || [o.jd_summary, o.jd_requirements].filter(Boolean).join('\n').trim()
+  // Was: strip tags only. That left HTML entities encoded, so "P&L" (83 postings) matched ZERO and
+  // every &-term was invisible across 71% of the corpus. groundingText decodes entities.
+  const jd = groundingText(o)
   if (jd.length < 200) return null   // no real JD yet → leave for later (timer retries once JD lands)
   const system = 'You are an ATS match analyst (Jobscan-style). Compare the candidate master baseline to THIS job description and return ONLY JSON: {"atsScore":<0-100 int>,"gaps":[]}. atsScore = % of the role\'s important keywords/requirements the candidate already demonstrably covers. gaps = the specific missing/weak keywords to add. Be realistic: a strong senior match opens in the 80s.'
   const user = `JOB: ${o.role} at ${o.company}\n\nJOB DESCRIPTION:\n${jd.slice(0, 6000)}\n\nCANDIDATE MASTER BASELINE:\n${mc || '(a senior technology/product executive)'}`
