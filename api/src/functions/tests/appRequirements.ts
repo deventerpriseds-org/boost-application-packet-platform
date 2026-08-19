@@ -74,7 +74,7 @@ export async function clearRequirements(client: any, oppId: string) {
 // GET /api/app/opportunity/{id}/requirements
 export async function requirementsGet(req: HttpRequest, context: InvocationContext): Promise<HttpResponseInit> {
   if (req.method === 'OPTIONS') return { status: 204, headers: HEADERS }
-  const owner = resolveOwner(req)
+  const { owner } = resolveOwner(req)
   let client
   try {
     client = await getPgClient()
@@ -106,7 +106,7 @@ export async function requirementsGet(req: HttpRequest, context: InvocationConte
 export async function requirementsBackfill(req: HttpRequest, context: InvocationContext): Promise<HttpResponseInit> {
   if (req.method === 'OPTIONS') return { status: 204, headers: HEADERS }
   const guard = requireWrite(req); if (guard) return guard
-  const owner = resolveOwner(req)
+  const { owner } = resolveOwner(req)
   const body: any = await req.json().catch(() => ({}))
   const limit = Math.min(Number(body?.limit) || 50, 500)
   let client
