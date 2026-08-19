@@ -1247,3 +1247,31 @@ writing a third) is the extend-don't-duplicate move for the upgrade.
 ### Where the model prices live
 `docs/model-ab-findings.md` (imported from huddle, ACT-50). Luna $0.20/$1.20 per 1M — `usageMeter.ts`
 has no entry for it and the production 3-agent build is unmetered entirely (ACT-51 D1/D2).
+
+## QC & EVIDENCE LAYER — plan committed, build starting (2026-08-19)
+Owner delivered `Boost_Exec_Pipeline.zip` (spec + P0-P8 backlog + 47 screens + runnable prototype),
+committed verbatim at `docs/qc-evidence/`. Owner directive: get ACs for everything UP FRONT, commit a
+plan + tracking list so place is not lost between agent/context changes, then run P0→P8 continuously
+WITHOUT stopping to check in.
+- **THE OPERATING CONTRACT IS `.claude/QC-EVIDENCE-PLAN.md`** — read it first on any resume. It carries
+  a RESUME MARKER block (current phase / last landed / next action), 12 cross-cutting decisions, 6
+  prerequisites the backlog omits, the premise corrections, the conflict register and the harness gaps.
+- Four independent AC agents reconciled the backlog against the real code. **The backlog was written
+  without full codebase knowledge and several premises are FALSE** — they are corrected in the plan.
+  Do not implement a backlog bullet the plan marks rejected without re-checking the code.
+- LIVE ground truth measured this session (not inferred): the duplicate-prompt defect is REAL in
+  production — `GET /api/prompts` run 32290705438 shows resume_user 29068 == portfolio_user 29068 and
+  resume_system 329 == portfolio_system 329, with ats_system a 28-char stub. Two of the three agent
+  calls run the same 29k prompt. The candidate profile lives in the **MasterContext Azure Table**
+  (15 fields, mt-13 run 32290483525 pass:true), NOT library_entity (zero rows, no writer, no UI). The
+  zap is effectively dead: 39 of 40 nodes paused.
+- Biggest structural catches: `opportunity.ats_gaps` ALREADY holds a real-JD gap list nothing returns
+  (so P0.1's proposed `packet.missing_kw` is REJECTED as a duplicate); `artifactStatus` has NO state
+  machine and no ownership check (P2.2's premise understates it); the loop needs THREE prerequisites
+  not one (cache, a field-scoped generation primitive, and render-once or it orphans 16 Drive files per
+  packet); and **the prototype itself carries the R4 bug** — `gateFor` reads CHECKS while the badge
+  reads ATTENTION, so an open question with no failing check shows gate=pass AND "1 to fix". Porting it
+  faithfully ships that bug; the sample data hides it because all reviewer rows pass.
+- CORRECTION to an earlier memory entry: memory said `opportunity.match_score` is "hand-set". It is
+  NOT — `appRoleTaxonomy.ts:109` rewrites it for every opportunity on every taxonomy publish. There are
+  FOUR numbers today claiming to score fit; P2.3 must reconcile them, not add a fifth.

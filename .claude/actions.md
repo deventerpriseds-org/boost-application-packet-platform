@@ -1053,3 +1053,21 @@ individually by id (e.g. "ACT-51.A2 done"). Severity: **P1** = user-visible wron
   trigger because the `job-platform-web` SWA no longer exists. See ACT-48/ACT-46.
 - **G2** Legacy branch `claude/git-push-main-1zcqw5` still exists (fast-forwarded, cannot self-trigger).
   Deletion requires a GitHub-UI click — the CCR git proxy rejects ref deletes. See ACT-48.
+
+## ACT-52 — QC & evidence layer: full P0-P8 plan + ACs committed, build starting
+**Requested:** 2026-08-19 (owner: "commit to memory so we can move from p0 to the end continuously…
+get the ac for everything up front and commit a plan and tracking list so you dont loose your place
+between agent changes… then you can start with p0 once the full framework is laid out")
+**Delivered this turn:**
+- AC-1: spec package committed verbatim + provenance — DONE (`docs/qc-evidence/`, 64 files, `697fc74`)
+- AC-2: ACs produced for EVERY phase P0-P8 by four INDEPENDENT agents reconciled against real code — DONE
+- AC-3: a durable plan + tracker with a resume marker exists — DONE (`.claude/QC-EVIDENCE-PLAN.md`)
+- AC-4: cross-phase decisions recorded so they are not re-litigated per phase — DONE (D1-D12)
+- AC-5: prerequisites the backlog omits are named and mapped to what they gate — DONE (X1-X6)
+- AC-6: P8 override conflicts registered — DONE (C1-C13)
+- AC-7: harness gaps named so no AC is claimed as covered when it is not verifiable — DONE (§6)
+**Status:** `in progress` — framework laid; P0 starting. Track position in the plan's RESUME MARKER,
+not here.
+**Standing authorization:** owner asked for continuous P0→P8 execution without per-step check-ins.
+Still honoured regardless: the repo gate (independent ACs → implement → independent verifier) on every
+code change, and branch → push → FF main per the ACT-47 rule.
