@@ -885,3 +885,15 @@ paths filter. Docs that claimed the branch was "deleted"/"gone" corrected (caugh
 verifier, not the implementer). AC-6 CLOSED: run 31985821773 on `main`/`da7eb5e` conclusion=success, job
 log shows "Deployment Complete" + "Status: Succeeded" to purple-ground-0f377120f. Independent verifier:
 9/9 PASS. Residual: branch still exists — delete via GitHub UI outside CCR for the durable fix.
+
+## ACT-50 — Import the sourced GPT-5.6 model/price findings into this repo
+**Requested:** 2026-08-19 (owner: "bring the model findings doc into boost as well")
+- AC-1: doc present at `docs/model-ab-findings.md` — DONE
+- AC-2: body byte-identical to the huddle source — DONE (`diff` against
+  /workspace/deventerpriseds-org/huddle-extension-app/docs/model-ab-findings.md returned no differences)
+- AC-3: provenance recorded (source repo, path, sha ef67eb5, import date) — DONE
+- AC-4: applicability to THIS repo stated, not left as a bare copy — DONE (usageMeter.ts PRICES gap,
+  quantified: 1.33× input / 2× output under-report on the AI-edit path)
+**Status:** `done` — doc-only import; no code touched, nothing deployed (docs/** matches no deploy path).
+**Not done (deliberately, no owner sign-off yet):** adding the `gpt-5.6-luna` entry to
+`usageMeter.ts` PRICES. That is a code change and would need ACs + verifier.

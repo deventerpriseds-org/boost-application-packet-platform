@@ -1175,3 +1175,21 @@ workflow comment describes. Changes made:
 - THE BOOST APP ZAP = **289877647** "(Copy)(Copy) Jotform (Latest) Engineering Screen Job Description
   Analysis (w Google Doc)" → `docs/zap-289877647/` (full zap + per-node prompts + review_email). This is
   what boost development references. Catalog ≠ boost zap. (The boost zap files contain NO secrets — verified.)
+
+## GPT-5.6 PRICES — sourced, imported from huddle (2026-08-19)
+Question "where did we store the model prices" resolved: NOT in this repo — in
+`deventerpriseds-org/huddle-extension-app` → `docs/model-ab-findings.md` (public repo; clone it, don't
+guess). Now COPIED here as `docs/model-ab-findings.md` with a provenance header (source repo + sha
+ef67eb5); body verified byte-identical to the source.
+- Prices ($/1M in/out), confirmed via Tavily 2026-08-10 across 5 sources, verified against OpenAI's
+  pricing page reflecting the July-30-2026 cut: **Sol $5/$30 · Terra $2/$12 · Luna $0.20/$1.20**.
+  o3 $2/$8, o3-mini $1.1/$4.4 (best-known list, NOT re-confirmed that pass).
+- APPLIES HERE: `usageMeter.ts` PRICES has no `gpt-5.6-luna` key → `costOf()` falls back to gpt-4o-mini
+  ($0.15/$0.60), so the AI-edit path is under-reported 1.33× on input and 2× on output. NOT fixed yet.
+- Cross-check: memory's earlier "luna+high ~ terra+medium at ~1/9 cost" is consistent — Luna is exactly
+  1/10 of Terra on both axes at these prices.
+- Headline A/B finding (directional, n=4 prompts, one judge, one run): o3-high beat gpt-5.6-sol-high on
+  BOTH quality (80.5 vs 63.0) and cost ($0.022 vs $0.146/turn). Only relevant if this repo ever
+  escalates above Luna — today AI_EDIT_MODEL is the sole 5.6 call site.
+- Reusable harness (in huddle, not here): .claude/skills/test-agent-serverfn/scripts/model-ab.mjs +
+  .github/workflows/model-ab.yml — runs in GHA because the sandbox can't reach OpenAI.
