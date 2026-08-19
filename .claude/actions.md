@@ -1198,5 +1198,39 @@ without gaining a spine. `applyAnchorTruth`, which nulls `jd_table`, now also dr
 quoted it. `jd_text` + `jd_text_sha256` are persisted so one SQL statement can re-verify every
 offset, and a re-fetched posting makes its rows visibly stale rather than silently wrong.
 
-**Open:** `located_rate` on real postings is the acceptance that matters — **below 50% is a failed
-acceptance, not a warning**. Not yet measured (the first backfill selected zero rows).
+**Measured live (api-test `32307998141`, db-query `32308138249`), 200 postings / 3,090 rows:**
+`located 2,907 = 94.1%` (threshold 50%) · offsets that don't re-slice in SQL **0** · out-of-bounds
+**0** · null `kind`/`match_method`/`kind_source` **0** · faked coverage/competency **0** · one quote
+cited twice **0**.
+
+**Defect found by the independent verifier, not by the tests — and it was the worst kind this table
+can make.** `mapKind` tested `OPTIONAL_RE` before `REQUIRED_RE` over a flat 400-char look-back, so a
+single "preferred" anywhere in the preceding window beat an explicit gate in the row's OWN quoted
+text. **78 of 541** `nice_to_have` rows carried a mandatory marker in their own verbatim and no
+optional marker in it — *"Security Clearance: Candidate must be US citizen"*, *"must be a U.S.
+Citizen or Green Card Holder"*, *"Minimum of 8 years of experience in commercial lending"*,
+*"15+ years of progressive technology leadership experience"*. This is the one field P1.3 and P4
+cite as "the employer said this was optional".
+Fixed in `23197df`: (i) the row's own words decide first and REQUIRED beats OPTIONAL within them —
+a span straddling both clauses resolves to `must_have`, because hiding a real gate is worse than
+surfacing a dismissible one; (ii) only a HEADING (`Preferred qualifications:`, `Preferred:`,
+`Bonus points`) may reach back through the window, since a bare "preferred" mid-sentence governs its
+own clause and nothing after it; (iii) the window is now the text BEFORE the span, not including it.
+`kind_source` gains `posting_required_marker` / `posting_section_heading` so which evidence decided
+each kind stays visible. **Re-measured: hard-gate-filed-as-optional 0; `nice_to_have` 541 → 240.**
+The five live verbatims are now regression tests (58/58).
+*Hardening: unit tests written alongside an implementation encode the implementer's own reading of
+the rule. The precedence bug passed every one of them. Only reading REAL ROWS caught it — for any
+classifier, sample the live output and judge it, don't just assert the branches.*
+*Second hardening: `create table if not exists` cannot widen a CHECK constraint on a table that
+already exists. Adding an enum value needs an explicit `drop constraint` / `add constraint`, or
+every insert is rejected in already-migrated environments.*
+
+**Verifier also confirmed (independently, from live evidence):** the astral fix is real and not a
+deletion (3090 total in both the pre-fix and post-fix runs); no two rows share, overlap or duplicate
+a quote; all six `jd_table`/`jd_requirements` consumers are byte-identical and the live API still
+returns both fields as the model's HTML; and the normalizer change causes **no** regression in the
+live ATS scorer (it prompts a model rather than matching in code, and the fold can only insert
+whitespace, never merge tokens). Two latent mechanisms were found and measured at zero: NFKC
+math-alphanumeric styling in postings (0 in corpus) and pre-fix mined terms containing astral chars
+(0 of 2,734).

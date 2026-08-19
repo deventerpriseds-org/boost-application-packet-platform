@@ -11,9 +11,9 @@ where the train currently is. Read it first on any resume; it is written to surv
 
 ```
 CURRENT PHASE : P1 (evidence spine)
-STATUS        : P1.2 miner landed; P1.1 requirement rows landed, awaiting live measurement
-LAST LANDED   : f84d539 requirement table + extractor wired into all 3 parse paths
-NEXT ACTION   : migrate, backfill, MEASURE located_rate (<50% = failed acceptance), then P1.3
+STATUS        : P1.1 landed + verified live (94.1% located, all invariants 0)
+LAST LANDED   : 23197df kind-precedence fix (78 hard gates were filed as nice_to_have)
+NEXT ACTION   : P1.3 skill_candidate + swap_decision (blocked on X1 — check it first)
 DONE SO FAR   : P0 wiring · X3 entity normalizer · X4 test runner · D1 D2 D3
                 P1.2b term_library · P1.2 corpus miner + curation queue · P1.1 requirement rows
 ```
