@@ -37,6 +37,24 @@ const STOP = new Set(('a an the and or but if then else of in on at to for with 
 // deliberately NOT part of this test: `P&L` normalizes to `p and l`, whose first and last tokens are
 // single characters, and a length rule silently discards the single highest-value exec term in the
 // corpus (83 postings). Short tokens are only rejected as standalone 1-grams, below.
+// EEO / benefits / hiring-process boilerplate. Every posting carries an equal-opportunity statement
+// and a benefits list, so these dominate any frequency ranking — the first live run put "sexual
+// orientation gender identity" (222), "color religion" (239) and "medical dental" (214) above every
+// real term. They are matched as PHRASES, not tokens, on purpose: blocking the token `identity` would
+// also destroy "identity and access management", and `color` would break design vocabulary.
+const BOILERPLATE = [
+  'sexual orientation', 'gender identity', 'gender expression', 'national origin', 'protected veteran',
+  'veteran status', 'disability status', 'equal opportunity', 'equal employment', 'affirmative action',
+  'without regard', 'color religion', 'religion sex', 'race color', 'marital status', 'genetic information',
+  'qualified applicants', 'reasonable accommodation', 'background check', 'drug screen', 'e verify',
+  'criminal history', 'arrest record', 'citizenship status', 'work authorization', 'visa sponsorship',
+  'medical dental', 'dental vision', 'vision insurance', 'life insurance', 'health insurance',
+  'paid time', 'time off', 'parental leave', 'flexible spending', 'wellness program', 'employee assistance',
+  'stock options', 'base salary', 'salary range', 'compensation package', 'total rewards',
+  'click here', 'learn more', 'apply now', 'join us', 'about us', 'our mission', 'our values',
+]
+const isBoilerplate = (phrase: string) => BOILERPLATE.some((b) => phrase.includes(b))
+
 const isNoise = (tok: string) => !tok || STOP.has(tok) || /^\d+$/.test(tok)
 
 /** n-grams (1..maxN) from one posting, deduped WITHIN the posting so df counts documents not hits. */
@@ -58,7 +76,9 @@ export function ngramsForDoc(text: string, maxN = 4): Set<string> {
         if (isNoise(win[0]) || isNoise(win[n - 1])) continue
         if (win.every(isNoise)) continue
         if (n === 1 && win[0].length < 2) continue   // a lone letter is not a term; `p and l` is
-        out.add(win.join(' '))
+        const phrase = win.join(' ')
+        if (isBoilerplate(phrase)) continue
+        out.add(phrase)
       }
     }
   }
@@ -106,6 +126,19 @@ export async function termsMine(req: HttpRequest, context: InvocationContext): P
     const kept = [...df.entries()].filter(([, v]) => v.count >= minDf)
       .sort((a, b) => specificity(b[1].n, b[1].count) - specificity(a[1].n, a[1].count)).slice(0, limit)
 
+    // Purge PENDING candidates that the current filters would no longer produce (e.g. boilerplate
+    // added to the blocklist after an earlier run). Reviewed rows are never touched — a human
+    // decision outranks a filter change.
+    const stale = (await client.query(
+      `select id, normalized from term_candidate where owner_email = $1 and status = 'pending'`, [owner])).rows
+    let purged = 0
+    for (const row of stale) {
+      if (!df.has(row.normalized)) {
+        await client.query(`delete from term_candidate where id = $1 and status = 'pending'`, [row.id])
+        purged++
+      }
+    }
+
     let upserted = 0
     for (const [norm, v] of kept) {
       await client.query(
@@ -121,7 +154,7 @@ export async function termsMine(req: HttpRequest, context: InvocationContext): P
 
     return { status: 200, headers: HEADERS, jsonBody: {
       ok: true, owner, corpusSize: rows.length, distinctNgrams: df.size, minDf, maxN,
-      candidatesUpserted: upserted,
+      candidatesUpserted: upserted, staleRemoved: purged,
       top: kept.slice(0, 40).map(([norm, v]) => ({
         term: norm, df: v.count, n: v.n,
         dfPct: Math.round((v.count / Math.max(1, rows.length)) * 100),   // context for the reviewer

@@ -74,3 +74,13 @@ test('miner sees &-terms only because entities are decoded first', () => {
   const g = ngramsForDoc('Owned P&amp;L across the division')
   assert.ok(g.has('p and l'), 'P&L survives as a mineable term')
 })
+
+test('miner drops EEO/benefits boilerplate but keeps real terms that share tokens', () => {
+  const g = ngramsForDoc('Equal opportunity employer. We consider applicants without regard to sexual orientation, gender identity, race color religion. Benefits include medical dental vision and paid time off.')
+  assert.ok(!g.has('sexual orientation'), 'EEO phrase dropped')
+  assert.ok(!g.has('gender identity'), 'EEO phrase dropped')
+  assert.ok(!g.has('medical dental'), 'benefits phrase dropped')
+  const real = ngramsForDoc('Own identity and access management and the product roadmap.')
+  assert.ok(real.has('identity and access management'), 'a real term sharing the token "identity" survives')
+  assert.ok(real.has('product roadmap'), 'real term survives')
+})
