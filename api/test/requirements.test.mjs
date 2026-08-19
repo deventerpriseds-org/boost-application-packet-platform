@@ -233,3 +233,18 @@ test('buildRequirements is pure: same input twice, identical output', () => {
   const opp = { jd_real: POSTING, jd_table: TABLE }
   assert.deepEqual(buildRequirements(opp), buildRequirements(opp))
 })
+
+test('every located row is addressable from SQL: JS index == Postgres character index', () => {
+  const r = buildRequirements({
+    jd_real: '<p>🚀 Responsibilities: You will own our integrated product roadmap for the '
+      + 'corporate hiring technology suite. 📈 Requirements: 10+ years of product management experience.</p>',
+    jd_table: TABLE,
+  })
+  assert.equal([...r.jd_text].length, r.jd_text.length, 'jd_text must contain no astral characters')
+  for (const row of r.rows) {
+    if (row.char_start === null) continue
+    assert.equal(r.jd_text.slice(row.char_start, row.char_end), row.verbatim)
+    // What Postgres substring(jd_text from char_start+1 for len) would return.
+    assert.equal([...r.jd_text].slice(row.char_start, row.char_end).join(''), row.verbatim)
+  }
+})

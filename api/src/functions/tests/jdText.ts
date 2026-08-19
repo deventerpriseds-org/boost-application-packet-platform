@@ -24,16 +24,37 @@ export function decodeEntities(input: string): string {
 }
 
 /**
- * Tags out, entities decoded, whitespace collapsed. This is the string that offsets, quotes and
- * keyword matches are all resolved against.
+ * Characters outside the Basic Multilingual Plane — emoji, mostly, which postings use decoratively
+ * ("Join our rocket ship 🚀"). Each one is TWO UTF-16 code units in JavaScript but ONE character in
+ * Postgres, so a `char_start` measured with `String.prototype.slice` does not address the same place
+ * as `substring(jd_text from char_start+1)`. Measured: 63 of 3,090 requirement rows (2%) failed the
+ * SQL re-verification for exactly this reason, on postings where `octet_length` exceeded `length`.
+ *
+ * Replacing each with a single space makes the two indexings identical, which is what lets one SQL
+ * statement re-verify every stored offset. Nothing is lost: an emoji is never part of a requirement.
+ * Lone surrogates are stripped too — they are invalid on their own and break the same invariant.
  */
+const ASTRAL = /[\u{10000}-\u{10FFFF}]/gu
+const LONE_SURROGATE = /[\uD800-\uDFFF]/g
+
+/**
+ * Tags out, entities decoded, astral characters folded, whitespace collapsed. This is the string
+ * that offsets, quotes and keyword matches are all resolved against.
+ *
+ * Invariant this guarantees: `[...text].length === text.length`, so a JavaScript index and a
+ * Postgres character index address the same position.
+ */
+export function toBmp(text: string): string {
+  return String(text).replace(ASTRAL, ' ').replace(LONE_SURROGATE, ' ')
+}
+
 export function normalizePostingText(html: any): string {
   if (!html) return ''
   return decodeEntities(
     String(html)
       .replace(/<(script|style)[\s\S]*?<\/\1>/gi, ' ')
       .replace(/<[^>]+>/g, ' ')
-  ).replace(/\s+/g, ' ').trim()
+  ).replace(ASTRAL, ' ').replace(LONE_SURROGATE, ' ').replace(/\s+/g, ' ').trim()
 }
 
 /**
@@ -65,6 +86,8 @@ export function resolvePostingSource(opp: any): { text: string; source: 'jd_real
   const real = normalizePostingText(opp?.jd_real)
   if (real) return { text: real, source: 'jd_real' }
   const raw = opp?.raw_jd || ''
-  if (raw && !isAlertDigest(raw, opp?.why_surfaced || '')) return { text: String(raw), source: 'raw_jd' }
+  // raw_jd skips the HTML normalizer, so fold astral characters here or its offsets stop being
+  // addressable from SQL — the same invariant normalizePostingText guarantees for jd_real.
+  if (raw && !isAlertDigest(raw, opp?.why_surfaced || '')) return { text: toBmp(raw), source: 'raw_jd' }
   return { text: '', source: null }
 }

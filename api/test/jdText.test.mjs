@@ -21,3 +21,28 @@ test('null safe', () => assert.equal(normalizePostingText(null), ''))
 test('groundingText prefers jd_real', () => assert.equal(groundingText({ jd_real: '<b>P&amp;L</b>' }), 'P&L'))
 test('groundingText falls back to summary', () => assert.equal(groundingText({ jd_real: '', jd_summary: 'Owns M&amp;A' }), 'Owns M&A'))
 test('does not over-decode', () => assert.equal(decodeEntities('5 &lt; 6'), '5 < 6'))
+
+// A JavaScript string index and a Postgres character index must address the SAME position, or the
+// stored offsets cannot be re-verified in SQL — which is the entire point of storing them.
+// Measured failure: 63 of 3,090 requirement rows (db-query 32305629147) on emoji-bearing postings.
+import { toBmp } from '../dist/functions/tests/jdText.js'
+
+test('normalizePostingText yields text whose JS length equals its character count', () => {
+  const t = normalizePostingText('<p>Join our rocket ship 🚀 and own the 📈 roadmap</p>')
+  assert.equal([...t].length, t.length, 'astral chars would make JS index != Postgres index')
+  assert.match(t, /Join our rocket ship/)
+  assert.match(t, /own the/)
+})
+
+test('an offset taken after an emoji still slices back to the same text', () => {
+  const t = normalizePostingText('<p>🚀 Requirements: 10+ years of product leadership.</p>')
+  const i = t.indexOf('10+ years')
+  assert.equal(t.slice(i, i + 9), '10+ years')
+  assert.equal([...t].length, t.length)
+})
+
+test('toBmp folds astral chars and lone surrogates without touching ordinary text', () => {
+  assert.equal(toBmp('P&L and M&A'), 'P&L and M&A')
+  assert.equal([...toBmp('a😀b')].length, toBmp('a😀b').length)
+  assert.equal([...toBmp('a\ud800b')].length, toBmp('a\ud800b').length)
+})
