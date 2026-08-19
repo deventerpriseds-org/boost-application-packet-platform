@@ -84,3 +84,12 @@ test('miner drops EEO/benefits boilerplate but keeps real terms that share token
   assert.ok(real.has('identity and access management'), 'a real term sharing the token "identity" survives')
   assert.ok(real.has('product roadmap'), 'real term survives')
 })
+
+test('EEO variants created by keeping the token "and" are also blocked', () => {
+  // termNormalize keeps `and` so P&L survives; the blocklist must cover the resulting surface forms.
+  const g = ngramsForDoc('without regard to race, color, religion, sex, sexual orientation, gender identity. Benefits: medical, dental and vision.')
+  for (const bad of ['regard to race', 'orientation gender', 'sex sexual', 'dental and vision']) {
+    assert.ok(!g.has(bad), `blocked: ${bad}`)
+  }
+  assert.ok(ngramsForDoc('Owned P&amp;L').has('p and l'), 'P&L still survives — the reason `and` is kept')
+})

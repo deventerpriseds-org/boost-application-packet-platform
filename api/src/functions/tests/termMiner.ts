@@ -52,6 +52,12 @@ const BOILERPLATE = [
   'paid time', 'time off', 'parental leave', 'flexible spending', 'wellness program', 'employee assistance',
   'stock options', 'base salary', 'salary range', 'compensation package', 'total rewards',
   'click here', 'learn more', 'apply now', 'join us', 'about us', 'our mission', 'our values',
+  // Variants that only exist because termNormalize KEEPS the token `and` (required so P&L survives
+  // as `p and l`). The blocklist above was written as if `and` were dropped, so these leaked through
+  // on the live run: "dental and vision" 177, "regard to race" 220, "orientation gender" 239.
+  'dental and vision', 'medical and dental', 'regard to', 'orientation gender', 'sex sexual',
+  'gender national', 'religion national', 'race and', 'and gender', 'and religion', 'and veteran',
+  'protected by law', 'applicable law', 'applicable laws', 'employment opportunity',
 ]
 const isBoilerplate = (phrase: string) => BOILERPLATE.some((b) => phrase.includes(b))
 
