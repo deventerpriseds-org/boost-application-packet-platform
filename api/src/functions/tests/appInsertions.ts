@@ -1,0 +1,88 @@
+// P1.4 persistence + read API. All derivation lives in `insertions.ts`, which imports neither
+// @azure/functions nor pg and is exercised by `api/test/insertions.test.mjs`.
+import { app, HttpRequest, HttpResponseInit, InvocationContext } from '@azure/functions'
+import { resolveOwner } from './appSession'
+import { getPgClient } from './pgClient'
+import { buildInsertions } from './insertions'
+import { RequirementRef } from './swaps'
+
+const HEADERS = { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': '*', 'Access-Control-Allow-Methods': 'GET,OPTIONS' }
+
+/**
+ * Record what was injected into one artifact's merge fields.
+ *
+ * Loops ACCUMULATE rather than replace: the whole point of a remediation loop is to show what a
+ * later pass changed, so overwriting loop 0 would erase the before-text that makes loop 1 legible.
+ * The unique (artifact_id, merge_field, loop) key means re-running the SAME loop is idempotent.
+ */
+export async function writeInsertions(client: any, artifactId: string, oppId: string, args: {
+  type: string; pkg: Record<string, any>
+}): Promise<{ artifact_id: string; loop: number; filled: number; unfilled: number; attributed: number }> {
+  const prev = (await client.query(
+    `select merge_field, after_text, loop from insertion where artifact_id=$1
+      and loop = (select max(loop) from insertion where artifact_id=$1)`, [artifactId])).rows
+  const loop = prev.length ? Number(prev[0].loop) + 1 : 0
+  const prevPkg: Record<string, any> = {}
+  for (const r of prev) prevPkg[r.merge_field] = r.after_text
+
+  const reqRows = (await client.query(
+    `select id, seq, verbatim, item_text, kind from requirement where opp_id=$1 order by seq`, [oppId])).rows
+  const refs: RequirementRef[] = reqRows.map((r: any) => ({ seq: r.seq, verbatim: r.verbatim, item_text: r.item_text, kind: r.kind }))
+  const idBySeq = new Map<number, string>(reqRows.map((r: any) => [r.seq, r.id]))
+
+  const built = buildInsertions({ type: args.type, pkg: args.pkg, prevPkg, requirements: refs, loop })
+
+  await client.query('begin')
+  try {
+    await client.query(`delete from insertion where artifact_id=$1 and loop=$2`, [artifactId, loop])
+    for (const r of built.rows) {
+      await client.query(
+        `insert into insertion
+           (artifact_id, merge_field, generated, before_text, after_text, method, loop, list,
+            item_count, requirement_id, verbatim_quote, confidence)
+         values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
+        [artifactId, r.merge_field, r.generated, r.before_text, r.after_text, r.method, r.loop, r.list,
+         r.item_count, r.requirement_seq === null ? null : idBySeq.get(r.requirement_seq) || null,
+         r.verbatim_quote, r.confidence])
+    }
+    await client.query('commit')
+  } catch (e) { await client.query('rollback'); throw e }
+
+  return { artifact_id: artifactId, loop, filled: built.filled, unfilled: built.unfilled, attributed: built.attributed }
+}
+
+// GET /api/app/artifact/{id}/insertions — every block, generated or not, naming its merge field.
+export async function insertionsGet(req: HttpRequest, context: InvocationContext): Promise<HttpResponseInit> {
+  if (req.method === 'OPTIONS') return { status: 204, headers: HEADERS }
+  const { owner } = resolveOwner(req)
+  let client
+  try {
+    client = await getPgClient()
+    const art = (await client.query(
+      `select a.id, a.type from artifact a
+         join packet p on p.id = a.packet_id
+         join opportunity o on o.id = p.opp_id
+        where a.id=$1 and o.owner_email=$2`, [req.params.id, owner])).rows[0]
+    if (!art) return { status: 404, headers: HEADERS, jsonBody: { error: 'not found' } }
+    const rows = (await client.query(
+      `select i.*, r.verbatim as requirement_verbatim, r.kind as requirement_kind
+         from insertion i left join requirement r on r.id = i.requirement_id
+        where i.artifact_id=$1 order by i.loop, i.merge_field`, [art.id])).rows
+    const latest = rows.length ? Math.max(...rows.map((r: any) => Number(r.loop))) : 0
+    const current = rows.filter((r: any) => Number(r.loop) === latest)
+    return {
+      status: 200, headers: HEADERS,
+      jsonBody: {
+        artifactId: art.id, type: art.type, loop: latest, insertions: rows,
+        filled: current.filter((r: any) => r.generated).length,
+        unfilled: current.filter((r: any) => !r.generated).length,
+        attributed: current.filter((r: any) => r.verbatim_quote !== null).length,
+      },
+    }
+  } catch (e: any) {
+    context.error('insertionsGet', e)
+    return { status: 500, headers: HEADERS, jsonBody: { error: String(e?.message || e) } }
+  } finally { try { await client?.end() } catch {} }
+}
+
+app.http('insertionsGet', { methods: ['GET', 'OPTIONS'], authLevel: 'anonymous', route: 'app/artifact/{id}/insertions', handler: insertionsGet })

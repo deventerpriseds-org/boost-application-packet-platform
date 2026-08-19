@@ -7,6 +7,7 @@ import { groundingText, resolvePostingSource } from './jdText'
 import { metaFor, varsForType, copyTemplate, injectValues, stripLeftoverTokens, shareAnyone } from './packetTemplates'
 import { buildPackageForJD } from './pipeline'
 import { writeSwaps } from './appSwaps'
+import { writeInsertions } from './appInsertions'
 
 const HEADERS = {
   'Content-Type': 'application/json',
@@ -325,6 +326,13 @@ async function buildTemplatedArtifact(client: any, art: any, opp: any, regen: bo
   const url = meta.isSlides ? `https://docs.google.com/presentation/d/${id}/edit` : `https://docs.google.com/document/d/${id}/edit`
 
   // Store a readable preview of what was injected + the doc url.
+  // P1.4 — record what landed in each merge field. Runs on EVERY build, including one that reused a
+  // cached package: a cached package is still injected into a fresh document, so the artifact still
+  // gains rows. Never fatal — the document exists either way, and losing provenance must not lose it.
+  try {
+    await writeInsertions(client, art.id, opp.id, { type: art.type, pkg: pkg! })
+  } catch (e) { console.warn('[packets] insertion provenance not recorded:', String(e)) }
+
   const preview = meta.placeholders.map((p) => (pkg![p] ? `${p}:\n${pkg![p]}` : '')).filter(Boolean).join('\n\n')
   await client.query(`update artifact set doc_url = $1, content = coalesce(nullif(content,''), $2), status = case when status = 'todo' then 'review' else status end, updated_at = now() where id = $3`, [url, preview, art.id])
   return { url, isSlides: meta.isSlides, cleaned, kindLabel: meta.kindLabel, title: name }

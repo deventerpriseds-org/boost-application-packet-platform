@@ -361,6 +361,34 @@ create table if not exists swap_decision (
 );
 create index if not exists swap_dec_packet_idx on swap_decision(packet_id, list, seq);
 
+-- P1.4 — what text landed in which REAL merge field of which artifact, what it replaced, and which
+-- requirement justifies it. Each asset is modelled as ITS merge fields, not as invented sections:
+-- merge_field values come from TEMPLATE_META, the same table varsForType injects from, so a row can
+-- never name a slot the document does not have.
+-- A field the package could not fill still gets a row with generated=false. That is the point - the
+-- UI lists what the pipeline CANNOT reach beside what it filled, so static template text is visible
+-- as static instead of being mistaken for generated content.
+create table if not exists insertion (
+  id             uuid primary key default uuid_generate_v4(),
+  artifact_id    uuid not null references artifact(id) on delete cascade,
+  merge_field    text not null,
+  generated      boolean not null,
+  before_text    text,
+  after_text     text,
+  method         text not null check (method in ('model_rewrite','template_fill','manual')),
+  loop           int not null default 0,
+  list           text check (list in ('skills_1','skills_2','relevant_1','relevant_2','relevant_3')),
+  item_count     int not null default 0,
+  requirement_id uuid references requirement(id) on delete set null,
+  verbatim_quote text,
+  confidence     numeric(4,3) not null default 0,
+  created_at     timestamptz not null default now(),
+  unique (artifact_id, merge_field, loop),
+  -- An ungenerated block has no content and can cite nothing.
+  check (generated or (after_text is null and verbatim_quote is null and item_count = 0))
+);
+create index if not exists insertion_artifact_idx on insertion(artifact_id, loop);
+
 -- Idempotent multi-tenant column adds (safe on tables that predate them)
 alter table persona        add column if not exists owner_email text not null default 'demo@executive-engine.local';
 alter table persona        add column if not exists is_demo boolean not null default false;
@@ -392,5 +420,5 @@ export const EXPECTED_TABLES = [
   'persona', 'opportunity', 'contact', 'packet', 'artifact', 'outreach_message',
   'interview', 'offer', 'library_entity', 'asset_event', 'usage_metering',
   'term_library', 'term_library_entry', 'term_candidate', 'requirement',
-  'skill_candidate', 'swap_decision'
+  'skill_candidate', 'swap_decision', 'insertion'
 ]
