@@ -1234,3 +1234,79 @@ live ATS scorer (it prompts a model rather than matching in code, and the fold c
 whitespace, never merge tokens). Two latent mechanisms were found and measured at zero: NFKC
 math-alphanumeric styling in postings (0 in corpus) and pre-fix mined terms containing astral chars
 (0 of 2,734).
+
+## ACT-57 — X1 + X2 (prerequisites that were silently poisoning everything downstream)
+**Status:** `landed` (`25a741a`).
+
+**X1 — generation was never grounded in the posting.** `buildTemplatedArtifact` was fed a pseudo-JD
+assembled from `role + company + why_surfaced + company_signals + pain_hypotheses`. `jd_real` was
+never selected — the opportunity projection was **duplicated across FOUR call sites and all four
+omitted it**. Every figure, quote and claim the pipeline produced therefore came from our own
+metadata *about* the job rather than the employer's words, so P1.4's provenance rows would have
+recorded fabrications as evidence and P8.2's figure scan would have passed vacuously (no real
+figures to scan).
+Fixed: the posting leads (bounded 12k), research context is kept but labelled *"our notes, NOT from
+the posting"* and placed after, `why_surfaced` is dropped once a posting exists (it is the alert
+email describing SIBLING jobs — exactly what `resolveJdSource` already refuses to parse), and
+`packet.jd_grounded` records which happened.
+**The part that makes it real:** cache invalidation. `pkg_json` cached before this change was built
+from the pseudo-JD; without invalidation the fix is inert for every existing packet and the cache
+serves ungrounded content forever. A package is regenerated when it can now be grounded and
+previously could not.
+The four duplicated projections are now one `OPP_FIELDS` constant — four copies drifting is exactly
+how `jd_real` came to be missing from all of them.
+
+**X2 — `packetBuildAll` hardcoded `regen=false`,** so a rebuild-all could never escape the cache and
+every P3.1 remediation loop would have reported looping while changing nothing. Now honours
+`body.regen`.
+
+## ACT-58 — P1.3 skill_candidate + swap_decision
+**Status:** `landed` (`aea512d`). Tables migrated live (pg-migrate run `32311027980`, 17/17).
+
+Mapped onto the pipeline that **actually exists**: Call 1 (resume writer) = `pass_a`, Call 3
+(ATS QC merge) = `pass_b`, and `assemblePackage`'s per-slot preference for Call 3 over Call 1 **is**
+the swap decision — recoverable from the three payloads with **zero model calls**, which is what the
+acceptance demands. `buildPackageForJD` now returns those payloads; it discarded them, so the merged
+package alone could never show what it replaced.
+
+**Premise correction:** the backlog wants `driver='rule'` on omission-list drops. **There is no
+omission list** — the only de-emphasis is one sentence inside `roleDirective()`, a prompt
+instruction, not a deterministic rule. Recording an unexplained model change as `rule` would invent
+an authority for it, so a change no requirement explains is **`unattributed`** — the count P2.2
+blocks on. A DB constraint enforces the honesty: `driver='posting'` **iff** a `verbatim_quote` exists.
+
+Other decisions worth keeping:
+- Attribution matches a requirement's **verbatim**, never its `item_text` — a requirement with no
+  located span can never supply a citation, because a citation needs a source, not a paraphrase.
+- A `kept` row is never posting-driven even when its text resembles a requirement: nothing changed,
+  so the posting did not drive anything.
+- Similarity is **containment of the shorter item, not Jaccard**. Jaccard divides by the union and so
+  punishes length asymmetry — the exact shape a rewrite takes. *"Led roadmap work"* → *"Owned the
+  integrated product roadmap for corporate hiring technology"* scores 0.25 by Jaccard and would have
+  been filed as an unrelated drop + add, losing the fact that one became the other.
+- **Bug the tests caught:** the `merged` branch was unreachable — the first original claimed the
+  final, so a second original collapsing onto it could only ever read as `dropped`, telling the
+  reviewer its content was missing from a document that contains it.
+
+## ACT-59 — P1.4 insertion rows
+**Status:** `landed` (`ab6f371`). Table migrated live.
+
+Merge-field names come from `TEMPLATE_META` — the same table `varsForType` injects from — so a row
+can never name a slot the document does not have. **Measured against that table rather than the
+backlog: resume 7 · compact_resume 7 · portfolio 7 · cover 3.** The backlog says the compact resume
+has 6; it has 7 and is a **byte-identical duplicate of `resume`** (same templateId, same
+placeholders). Pinned as a test rather than silently reconciled.
+
+- A field the package could not fill still gets a row with `generated=false`, and a DB constraint
+  stops such a row carrying content or a citation. That is the point: the UI lists what the pipeline
+  **cannot reach** beside what it filled, so static template text is visible as static instead of
+  being mistaken for generated content.
+- `method` is **derived**: `template_fill` on a first fill, `model_rewrite` when a previous loop held
+  different text. **`manual` is never inferred** — guessing "a human did this" would launder a model
+  change as human judgement.
+- Loops **accumulate** rather than replace: overwriting loop 0 would erase the before-text that makes
+  loop 1 legible, which is the only reason the remediation loop is inspectable at all.
+  `unique(artifact_id, merge_field, loop)` keeps re-running the same loop idempotent.
+
+**92/92 unit assertions green** across jdText / termMatch / termMiner / requirements / generationJd /
+swaps / insertions.

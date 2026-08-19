@@ -11,10 +11,10 @@ where the train currently is. Read it first on any resume; it is written to surv
 
 ```
 CURRENT PHASE : P1 (evidence spine)
-STATUS        : P1.1 landed + verified live (94.1% located, all invariants 0)
-LAST LANDED   : 23197df kind-precedence fix (78 hard gates were filed as nice_to_have)
-NEXT ACTION   : P1.3 skill_candidate + swap_decision (blocked on X1 — check it first)
-DONE SO FAR   : P0 wiring · X3 entity normalizer · X4 test runner · D1 D2 D3
+STATUS        : P1 COMPLETE (1.1-1.4 landed) + X1/X2 closed; 1.5 defers into P2.1
+LAST LANDED   : ab6f371 insertion rows; 17/17 tables live (pg-migrate 32311027980)
+NEXT ACTION   : rebuild ONE artifact to populate swap/insertion rows, verify, then P2
+DONE SO FAR   : P0 wiring · X1 grounding · X2 regen · X3 normalizer · X4 tests · D1 D2 D3
                 P1.2b term_library · P1.2 corpus miner + curation queue · P1.1 requirement rows
 ```
 *Update this block on every landing. It is the single place to look after a restart.*
