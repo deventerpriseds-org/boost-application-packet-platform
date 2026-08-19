@@ -1290,3 +1290,22 @@ were wrong as a direct result.
   jdFetchProbe, mt15/mt16.
 - LESSON: "strip tags" is not "get the text". Any future matcher / offset / quote / figure-scan work
   must go through jdText.ts, never a local regex. Closes plan prerequisite X3.
+
+## Owner decisions 1, 13, 14, 15 + the term-library source model (2026-08-19)
+- **#1 collapse the ATS score to `opportunity.ats_score`** (posting-grounded). MEASURED impact
+  (db-query 32299229257): of 38 opps with a packet, only **3** have `packet.ats_score` (header today,
+  needs a manual click) vs **20** with `opportunity.ats_score` (auto, 5-min timer); 24 have a real
+  posting; exactly **3** would lose their displayed number. Net 3/38 -> 20/38, manual -> automatic.
+- **#13 (delegated to agent): O*NET attribution** renders in the ATS/keyword modal footer on the
+  library-provenance line: "Includes information from O*NET <release> by USDOL/ETA, used under CC BY
+  4.0" + licence link. One surface, always visible where derived terms appear, no legal text per chip.
+- **#14/#15: use BOTH O*NET and ESCO.** Owner: being in both = higher confidence; neither may be a
+  BLOCKER, only a helper; use when available; they may serve as a MODEL when generating values to
+  complete a packet; and **we must know how an ATS keyword was sourced**.
+- BINDING DESIGN CONSEQUENCES for P1.2/P1.2b: `sources text[]` (not a single source) + per-source ref;
+  `confidence` derived from how many INDEPENDENT sources corroborate; O*NET/ESCO absence never blocks a
+  term (the corpus supplies most exec vocabulary) and never blocks a packet build; per-keyword
+  provenance is USER-VISIBLE (extend the spec's keyword detail panel, don't add a second surface).
+- FLAGGED TENSION (decide before P3/P8.2): "serve as a model if we need to generate values" vs SPEC R2
+  "evidence or escalate". Reconciles ONLY if O*NET/ESCO shape the PHRASING of already-evidenced
+  content, never the EXISTENCE of a claim. Recorded so it is decided, not drifted into.

@@ -246,7 +246,13 @@ Accumulated so I don't stop-start. Each carries my recommendation; "agree" is a 
 
 | # | Decision | Recommendation |
 |---|---|---|
-| **1** | **AWAITING IMPACT ANALYSIS (owner asked for it before deciding).** Two ATS numbers. `packet.ats_score` (jd-analysis; now posting-grounded when a JD exists) vs `opportunity.ats_score` (atsScoreOne, always posting-grounded). The packet header shows the former; OppDetail/Library show the latter. | **Collapse to `opportunity.ats_score`** and make the packet header read it. One posting-grounded score, one producer, one number. |
+| ~~1~~ | **DECIDED (owner, 2026-08-19): collapse to `opportunity.ats_score`** — the posting-grounded one. The packet header reads it; `jdAnalysis` keeps producing keywords/mustHaves but stops owning a score. **IMPACT MEASURED** (db-query run 32299229257, live): of 38 opportunities with a packet — 3 have
+`packet.ats_score` (what the header shows today, requires a manual "Run ATS analysis" click), 20 have
+`opportunity.ats_score` (posting-grounded, populated automatically by the 5-min timer), 24 have a real
+posting, and exactly **3 would lose their currently-displayed number**. So the change takes score
+coverage from **3/38 to 20/38** and from manual to automatic, at the cost of 3 packets showing nothing
+until the timer scores them (those with a posting will recover; those without stay blank, which is
+decision #2's honest behaviour). Original: `packet.ats_score` (jd-analysis; now posting-grounded when a JD exists) vs `opportunity.ats_score` (atsScoreOne, always posting-grounded). The packet header shows the former; OppDetail/Library show the latter. | **Collapse to `opportunity.ats_score`** and make the packet header read it. One posting-grounded score, one producer, one number. |
 | **2** | **Ungrounded score display.** When an opp has no posting, should the header show a score at all? Today it does; it is now labelled `grounded:false`. | **Suppress the number, show "not scored against a posting yet."** A score derived from a job title invites false confidence. |
 | ~~3~~ | **DECIDED (owner, 2026-08-19): reset status, never lose the packet.** Reset every packet/artifact status when the gate ships — do NOT grandfather approvals as `pass`. But a packet must never disappear or become hard to find: **`opportunity.stage` is NOT touched**, packets are never deleted, and every started packet must still surface in its stage list (saved / reached) at the beginning of that stage. Owner's words: "I don't wanna have to research through the list to find those I was interested in and start it over again." ⇒ P2.2 constraint: status reset is a STATE change only; findability and stage placement are preserved. |
 | **4** | **Send blocking scope (P2.2).** Should cold outreach be blocked when a packet gate is `fail`? An outreach email is not the packet. | **No.** Block packet approval and `ready`; leave outreach send alone. Blocking it conflates two things. |
@@ -302,5 +308,38 @@ lists shown to the owner were wrong because of it. Fixed; 11/11 assertions pass.
 | # | Decision | Recommendation |
 |---|---|---|
 | **13** | **O*NET attribution placement** — CC BY 4.0 requires crediting release + USDOL/ETA wherever derived terms surface. | Footer of the ATS/keyword modal, beside the library id + version (the spec already shows a provenance line there). |
-| **14** | **O*NET 31.0 lands within days**, renaming files and shipping a migration crosswalk. Seed from 30.3 now and migrate, or wait? | **Wait for 31.0.** O*NET is phase 3 and phases 0-2 are weeks; avoids writing the ingest twice. |
-| **15** | **ESCO (EU) is FREE, not paid** — ~1,201 digital concepts, targets exactly O*NET's exec/digital weakness. "O*NET only" was aimed at paid vendors. | **Include it.** Costs nothing, no approval needed. Verify licence terms before ingest. |
+| ~~14~~ | **DECIDED (owner): use BOTH O*NET and ESCO as sources**, neither a blocker. Original:, renaming files and shipping a migration crosswalk. Seed from 30.3 now and migrate, or wait? | **Wait for 31.0.** O*NET is phase 3 and phases 0-2 are weeks; avoids writing the ingest twice. |
+| ~~15~~ | **DECIDED (owner): include ESCO.** Original: — ~1,201 digital concepts, targets exactly O*NET's exec/digital weakness. "O*NET only" was aimed at paid vendors. | **Include it.** Costs nothing, no approval needed. Verify licence terms before ingest. |
+
+
+---
+
+## 13. Source model for the term library (owner directive, 2026-08-19)
+
+Owner: *"go with both as sources. being in both should give higher confidence. onet/esco can't be a
+blocker rather a helper, it should be used when we can and serve as a model if we need to generate
+values to complete a packet. we should know how an ats keyword was sourced."*
+
+Four design consequences, binding on P1.2/P1.2b:
+
+1. **A term has MANY sources, not one.** `term_library_entry.source text` becomes
+   **`sources text[]`** plus a per-source `source_ref` map. A term attested in O*NET AND ESCO AND the
+   corpus is a different confidence object from one seen once.
+2. **Corroboration drives confidence.** Store `confidence` derived from *how many independent sources
+   agree*, not from a model's opinion. Corpus DF is one input; O*NET/ESCO membership are others.
+   Ranking and the scoring numerator should prefer corroborated terms.
+3. **O*NET/ESCO are HELPERS, never gates.** A term missing from both is still valid if the corpus
+   attests it (that is the majority of exec vocabulary — see §12). Absence from O*NET must never block
+   a term, and an O*NET/ESCO outage or a pinned-release lag must never block a packet build.
+4. **Provenance is user-visible and per-keyword.** "We should know how an ATS keyword was sourced" is
+   a UI requirement, not just a column: every keyword chip must be able to show its source set
+   (`O*NET 31.0 · ESCO · corpus DF 83`) and, where applicable, its `scoreable` status. This is the
+   same affordance the spec's keyword detail panel already defines — extend that, don't add a second.
+
+**Tension to resolve before P3/P8.2 (flagged, not decided):** "serve as a model if we need to generate
+values to complete a packet" points at using O*NET/ESCO vocabulary to *shape* generated wording. SPEC
+R2 ("evidence or escalate") forbids writing a claim the profile cannot support. These reconcile only
+if O*NET/ESCO influence **phrasing of evidenced content** — never the existence of a claim. i.e. it may
+choose the word "platform modernization" over "system upgrade" for something the profile already
+evidences; it may never assert an unevidenced capability because O*NET says the role usually has it.
+Recorded here so it is decided deliberately rather than drifting.
