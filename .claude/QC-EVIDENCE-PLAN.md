@@ -11,10 +11,11 @@ where the train currently is. Read it first on any resume; it is written to surv
 
 ```
 CURRENT PHASE : P1 (evidence spine)
-STATUS        : term library foundation landed; corpus miner next
-LAST LANDED   : term_library + term_library_entry + termMatch + npm test
-NEXT ACTION   : P1.2 corpus miner + curation queue (highest-yield source per §12)
-DONE SO FAR   : P0 wiring · X3 entity normalizer · X4 test runner · D1 · D2 · D3
+STATUS        : P1.2 miner landed; P1.1 requirement rows landed, awaiting live measurement
+LAST LANDED   : f84d539 requirement table + extractor wired into all 3 parse paths
+NEXT ACTION   : migrate, backfill, MEASURE located_rate (<50% = failed acceptance), then P1.3
+DONE SO FAR   : P0 wiring · X3 entity normalizer · X4 test runner · D1 D2 D3
+                P1.2b term_library · P1.2 corpus miner + curation queue · P1.1 requirement rows
 ```
 *Update this block on every landing. It is the single place to look after a restart.*
 
@@ -95,6 +96,8 @@ re-checking the code yourself.** The backlog is the intent; this file is the con
 | P0.3 | "in `PacketBuilder.jsx`" | **INCOMPLETE.** `tone="panel"` is also passed at `Library.jsx:246,432` and `OppDetail.jsx:572`. One-file fix in `shell.jsx`, 17-call-site read radius. |
 | P1.1 | "map `jd_table` Category to `kind`" | **CANNOT produce `nice_to_have`** — the prompt (`appJdParse.ts:89-97`, an inline literal) has no such category. Prompt change required first. |
 | P1.1 | "`char_start/end` against `jd_real`" | **UNWORKABLE** — `jd_real` is HTML and the model sees a stripped, 12,000-char-TRUNCATED rendering. Needs X3 + a truncation flag. |
+| P1.1 | "map `jd_table` Category to `kind`" (2nd correction) | **`nice_to_have` needs no prompt change.** It is read off the POSTING ("Preferred:", "is a plus") in a 400-char window before the located span. Deterministic, and it backfills the 1349 already-parsed rows with zero model calls. `kind_source` records why each kind was chosen. |
+| P1.1 | "each row's `verbatim` is a substring of `jd_real`" | **UNSATISFIABLE AS WRITTEN — the Item column is a model PARAPHRASE.** Live rows (db-query `32303342032`) read "Lead the operational performance of the renewable-generation portfolio." Storing Items as `verbatim` fabricates quotes. Resolution: `item_text` = the model's words, `verbatim` = the posting span the paraphrase was located in. A row that cannot be located keeps null offsets. |
 | P1.1 | "the packet screen never reads them" | True only of `PacketBuilder`. `jd_requirements`/`jd_table` have **4 live consumers** (`OppDetail.jsx:378,384` and `Swipe.jsx:408,411` via `dangerouslySetInnerHTML`; `appRoleTaxonomy.ts:81`; `appApply.ts:172`). |
 | P1.4 | "6 merge fields for the compact resume" | **FALSE** — it has 7, and is a **byte-identical duplicate** of `resume` (same templateId, same placeholders). |
 | P2.1 | "ports Q1–Q16" | Its own bullet list silently **omits Q5, Q10, Q12, Q15, Q16**. Four listed checks (coverage/responsibilities/terms/traceability) are NOT deterministic-from-text and are hard-blocked on P1. |
