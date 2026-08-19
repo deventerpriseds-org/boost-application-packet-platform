@@ -2,7 +2,7 @@ import React, { useMemo, useState, useEffect, useCallback } from 'react'
 import { useApp, go } from '../state.jsx'
 import { useOpportunities } from '../data.jsx'
 import { api } from '../api.js'
-import { Pill, SignalIcon, PRIORITY_COLOR, MatchScore, StageBadge } from '../shell.jsx'
+import { Pill, SignalIcon, PRIORITY_COLOR, MatchScore, StageBadge, toneColor } from '../shell.jsx'
 
 // Next-best action per opportunity stage → a real destination in the app.
 function priorityActions(opps) {
@@ -292,7 +292,7 @@ export default function Today({ opps }) {
         <Section title="Do these next">
           {priorities.map((a) => (
             <div key={a.id + a.cta} className="px-box" onClick={() => go(a.to)} style={{ padding: 12, display: 'flex', alignItems: 'center', gap: 12, cursor: 'pointer' }}>
-              <div style={{ width: 5, alignSelf: 'stretch', borderRadius: 3, background: `var(--proto-${a.tone})` }} />
+              <div style={{ width: 5, alignSelf: 'stretch', borderRadius: 3, background: toneColor(a.tone) }} />
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontWeight: 600, fontSize: 14 }}>{a.who}</div>
                 <div className="px-small">{a.t}</div>
@@ -493,7 +493,7 @@ function MetricKpi({ label, value, tone, delta }) {
     <div className="px-box" style={{ padding: 16 }}>
       <div className="px-small" style={{ textTransform: 'uppercase', letterSpacing: 1 }}>{label}</div>
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
-        <span style={{ fontSize: 28, fontWeight: 700, color: `var(--proto-${tone})` }}>{value}</span>
+        <span style={{ fontSize: 28, fontWeight: 700, color: toneColor(tone) }}>{value}</span>
         {typeof delta === 'number' && delta !== 0 && (
           <span style={{ fontSize: 13, fontWeight: 600, color: up ? 'var(--proto-green)' : down ? 'var(--proto-red)' : 'var(--proto-ink3)' }}>
             {up ? '▲' : '▼'} {Math.abs(delta)}
@@ -508,7 +508,7 @@ function Kpi({ label, value, tone, onClick }) {
   return (
     <div className="px-box" onClick={onClick} style={{ padding: 16, cursor: onClick ? 'pointer' : 'default' }}>
       <div className="px-small" style={{ textTransform: 'uppercase', letterSpacing: 1 }}>{label}</div>
-      <div style={{ fontSize: 28, fontWeight: 700, color: `var(--proto-${tone})` }}>{value}</div>
+      <div style={{ fontSize: 28, fontWeight: 700, color: toneColor(tone) }}>{value}</div>
     </div>
   )
 }

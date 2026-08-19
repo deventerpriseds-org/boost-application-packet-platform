@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { useApp, go } from '../state.jsx'
 import { api } from '../api.js'
-import { Pill, SignalIcon, MatchScore, FavStar } from '../shell.jsx'
+import { Pill, SignalIcon, MatchScore, FavStar, toneColor } from '../shell.jsx'
 import { Loading, ErrorBox } from './Today.jsx'
 
 const QUEUE_STAGES = ['discovered', 'saved', 'enriched']
@@ -310,7 +310,7 @@ function ActionBtn({ label, tone, onClick }) {
   return (
     <button onClick={onClick} className="px-btn"
       style={{ padding: '10px 18px', fontSize: 14, fontWeight: 700, minWidth: 92, justifyContent: 'center',
-        color: `var(--proto-${tone})`, borderColor: `var(--proto-${tone})` }}>
+        color: toneColor(tone), borderColor: toneColor(tone) }}>
       {label}
     </button>
   )
@@ -426,7 +426,7 @@ function Overlay({ label, tone, tilt, pos }) {
       left: pos === 'left' ? 16 : (pos === 'bottom' ? 0 : 'auto'),
       right: pos === 'right' ? 16 : (pos === 'bottom' ? 0 : 'auto'),
       margin: pos === 'bottom' ? '0 auto' : 0, width: pos === 'bottom' ? 'fit-content' : 'auto',
-      padding: '6px 16px', border: `3px solid var(--proto-${tone})`, color: `var(--proto-${tone})`,
+      padding: '6px 16px', border: `3px solid ${toneColor(tone)}`, color: toneColor(tone),
       fontSize: 26, fontWeight: 900, transform: `rotate(${tilt}deg)`, background: 'var(--proto-paper)', borderRadius: 8, zIndex: 5 }}>
       {label}
     </div>

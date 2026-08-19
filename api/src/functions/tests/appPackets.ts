@@ -227,6 +227,13 @@ const DOC_TITLE: Record<string, string> = {
 // must_haves is the ONLY jdAnalysis output with no existing home. `gaps` deliberately gets no
 // column: opportunity.ats_gaps already holds a posting-grounded gap list (appApply.atsScoreOne),
 // and a second list derived from a job title would be a weaker parallel truth.
+// ONE definition of "the posting text we ground against" — same normalization as
+// appApply.atsScoreOne, so the two scorers cannot disagree about what the posting is.
+function groundingText(opp: any): string {
+  const strip = (v: any) => String(v || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
+  return strip(opp.jd_real) || strip([opp.jd_summary, opp.jd_requirements].filter(Boolean).join('\n'))
+}
+
 async function ensureAnalysisCols(client: any) {
   await client.query(`alter table packet add column if not exists must_haves text[]`)
   await client.query(`alter table packet add column if not exists jd_grounded boolean`)
@@ -501,14 +508,21 @@ export async function jdAnalysis(req: HttpRequest, context: InvocationContext): 
     // Previously every invocation hit OpenAI even though the result was already persisted.
     const force = (await req.json().catch(() => ({})) as any)?.force === true
     if (!force && pkt.jd_analyzed) {
-      return { status: 200, headers: HEADERS, jsonBody: { ok: true, oppId, cached: true, grounded: pkt.jd_grounded, analysis: { keywords: pkt.covered_kw || [], mustHaves: pkt.must_haves || [], atsScore: pkt.ats_score, gaps: [] } } }
+      // jd_grounded is NULL for every packet analyzed before this shipped, and the writer below is
+      // skipped on this path — so it would stay NULL forever. Grounding is a property of the STORED
+      // posting, not of the analysis, so it can be backfilled here with no model call.
+      let g = pkt.jd_grounded
+      if (g === null || g === undefined) {
+        g = groundingText(opp).length >= 200
+        await client.query(`update packet set jd_grounded = $1 where id = $2`, [g, pkt.id])
+      }
+      return { status: 200, headers: HEADERS, jsonBody: { ok: true, oppId, cached: true, grounded: g, analysis: { keywords: pkt.covered_kw || [], mustHaves: pkt.must_haves || [], atsScore: pkt.ats_score, gaps: [] } } }
     }
 
     // GROUNDING: prefer the real posting. The previous prompt saw only role/company/comp/why_surfaced
     // and signals, so its "ATS keywords" described a job TITLE, not this posting. Same normalization
     // as appApply.atsScoreOne so the two agree on what the posting text is.
-    const postingText = String(opp.jd_real || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
-      || [opp.jd_summary, opp.jd_requirements].filter(Boolean).join('\n').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
+    const postingText = groundingText(opp)
     const grounded = postingText.length >= 200
     const system = 'You are an ATS/JD analyst. Return ONLY JSON: {"keywords":[],"mustHaves":[],"atsScore":<0-100 int>,"gaps":[]}. keywords = ATS keywords for this role; mustHaves = hard requirements; gaps = likely gaps for a senior exec candidate.'
     const user = grounded

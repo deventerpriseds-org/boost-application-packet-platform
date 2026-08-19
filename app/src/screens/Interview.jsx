@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useCallback, useRef, useMemo } from 'react'
 import { useApp, go } from '../state.jsx'
 import { api } from '../api.js'
-import { Pill, StageBadge } from '../shell.jsx'
+import { Pill, StageBadge, toneFill } from '../shell.jsx'
 import { Loading, ErrorBox, Empty, roleFamily } from './Today.jsx'
 
 const STRENGTH_TONE = { strong: 'green', medium: 'yellow', gap: 'red' }
@@ -103,8 +103,7 @@ function InterviewList() {
                   <span style={{
                     display: 'flex', alignItems: 'center', justifyContent: 'center',
                     width: 40, height: 40, borderRadius: '50%', fontSize: 14, fontWeight: 700,
-                    background: n > 0 ? `var(--proto-${f.tone}-soft)` : 'var(--proto-panel)',
-                    color: n > 0 ? `var(--proto-${f.tone})` : 'var(--proto-ink3)',
+                    ...(n > 0 ? toneFill(f.tone) : { background: 'var(--proto-panel)', color: 'var(--proto-ink3)' }),
                     border: on ? '2px solid var(--surface-brand-default)' : '1px solid var(--proto-rule-soft)',
                   }}>{n}</span>
                   <span className="px-small" style={{ whiteSpace: 'nowrap', fontSize: 10 }}>{f.label}</span>

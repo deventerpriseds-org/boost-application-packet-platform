@@ -46,6 +46,25 @@ export const Pill = ({ children, tone, style }) => {
   )
 }
 
+// Resolve a tone to real tokens. EVERY tone consumer must go through these — building
+// interpolating a tone into a custom-property name is the bug that made todo pills invisible,
+// and it stayed live wherever done by hand (tone 'orange' has no -soft token at all).
+// toneFill  → { background, color } for a filled chip.
+// toneColor → a single solid color for a rail/border/number.
+export const toneFill = (tone) => {
+  const t = TONE[tone]
+  return t ? { background: t.bg, color: t.fg } : { background: 'var(--proto-panel)', color: 'var(--proto-ink2)' }
+}
+const TONE_SOLID = {
+  accent: 'var(--proto-accent)', green: 'var(--proto-green)', red: 'var(--proto-red)',
+  yellow: 'var(--proto-yellow)', purple: 'var(--proto-purple)', orange: 'var(--proto-orange)',
+  ok: 'var(--proto-green)', warn: 'var(--proto-yellow)',
+  // `panel` as a solid was painting a rail in the panel background — invisible by construction.
+  // ink3 is the intended "no signal" grey and is actually visible.
+  panel: 'var(--proto-ink3)',
+}
+export const toneColor = (tone) => TONE_SOLID[tone] || 'var(--proto-ink3)'
+
 // ── ONE signal indicator, config-driven by `kind` ────────────────────────────────────────────────
 // Two independent per-opp signals share one component (styling/label/tooltip live in one place):
 //  • temperature = posting recency → a FLAME, colored Hot(orange)→Warm(yellow)→Cooling(blue)→Cold(white)
