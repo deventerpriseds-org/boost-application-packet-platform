@@ -6,7 +6,8 @@
     "build": "tsc",
     "watch": "tsc -w",
     "start": "func start",
-    "dev": "npm run build && func start"
+    "dev": "npm run build && func start",
+    "test": "npm run build && node --test test/*.test.mjs"
   },
   "dependencies": {
     "@azure/data-tables": "^13.2.0",

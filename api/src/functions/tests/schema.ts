@@ -189,6 +189,76 @@ create table if not exists usage_metering (
   ts                timestamptz not null default now()
 );
 
+-- ── Term library (QC & evidence layer, P1.2b) ────────────────────────────────────────────────────
+-- A VERSIONED, CURATED vocabulary that ATS keyword scoring resolves against. Deliberately NOT
+-- owner-scoped: it is shared reference data, unlike library_entity (per-owner content) and
+-- taxonomy_title (per-owner job-TITLE tiers, a different axis — "is this one of my target roles?"
+-- rather than "which skills does this posting demand?").
+--
+-- Immutability is the point: a published version and its entries can never change, so a score
+-- recorded against version N re-renders identically forever. Adding an alias creates version N+1.
+create table if not exists term_library (
+  id              uuid primary key default uuid_generate_v4(),
+  library_key     text not null,
+  version         int not null,
+  status          text not null default 'draft' check (status in ('draft','published','archived')),
+  -- Per-source audit: name, exact release, retrieval URL + date, licence, required attribution.
+  -- CC BY 4.0 (O*NET) obliges us to name the release and USDOL/ETA wherever terms surface.
+  source_manifest jsonb not null default '{}',
+  entry_count     int not null default 0,
+  notes           text,
+  created_at      timestamptz not null default now(),
+  published_at    timestamptz,
+  unique (library_key, version)
+);
+
+create table if not exists term_library_entry (
+  id                uuid primary key default uuid_generate_v4(),
+  library_id        uuid not null references term_library(id) on delete cascade,
+  term_key          text not null,              -- stable identity ACROSS versions (soc_2, p_and_l)
+  display_term      text not null,              -- what the UI shows: "SOC 2"
+  normalized        text not null,              -- canonical match form
+  aliases           text[] not null default '{}',
+  alias_normalized  text[] not null default '{}',   -- what the matcher indexes
+  family            text not null,              -- compliance | security | cloud_platform | data_ai | ...
+  term_type         text not null,              -- technology | certification | framework | competency | ...
+  match_mode        text not null default 'exact_norm'
+                    check (match_mode in ('exact_norm','case_sensitive_acronym','token_subset')),
+  -- MANY sources, not one. Owner directive: corroboration across sources raises confidence, and every
+  -- keyword must be able to show HOW it was sourced. O*NET/ESCO are helpers, never gates — a term the
+  -- corpus attests is valid even if neither lists it (most exec vocabulary is in that position).
+  sources           text[] not null default '{}',   -- onet | esco | jd_corpus | nist_csf | cncf | curated
+  source_refs       jsonb not null default '{}',    -- per-source id: UNSPSC code, ESCO URI, CSF subcat
+  soc_codes         text[] not null default '{}',
+  scoreable         boolean not null default true,  -- false = display-only; enforces "model terms never score"
+  confidence        numeric(4,3),               -- derived from independent-source corroboration, not a model
+  evidence_df       int,                        -- document frequency in jd_real at seed time
+  weight            numeric,
+  added_at          timestamptz not null default now(),
+  unique (library_id, term_key)
+);
+create index if not exists term_entry_lib_idx on term_library_entry(library_id);
+create index if not exists term_entry_alias_idx on term_library_entry using gin (alias_normalized);
+create index if not exists term_entry_norm_idx on term_library_entry(normalized);
+
+-- Enforce immutability in the DATABASE, not by convention: the acceptance criterion "adding an alias
+-- does not change any historical score" is only true if published entries genuinely cannot be edited.
+create or replace function term_entry_guard() returns trigger as $$
+begin
+  if exists (select 1 from term_library l
+             where l.id = coalesce(old.library_id, new.library_id) and l.status = 'published') then
+    raise exception 'term_library_entry is immutable once its library version is published (library_id=%)',
+      coalesce(old.library_id, new.library_id);
+  end if;
+  return coalesce(new, old);
+end;
+$$ language plpgsql;
+
+drop trigger if exists term_entry_guard_trg on term_library_entry;
+create trigger term_entry_guard_trg
+  before update or delete on term_library_entry
+  for each row execute function term_entry_guard();
+
 -- Idempotent multi-tenant column adds (safe on tables that predate them)
 alter table persona        add column if not exists owner_email text not null default 'demo@executive-engine.local';
 alter table persona        add column if not exists is_demo boolean not null default false;
@@ -212,5 +282,6 @@ create index if not exists opp_owner_idx2 on opportunity(owner_email);
 // Tables we expect to exist after migration (used by the runner to report).
 export const EXPECTED_TABLES = [
   'persona', 'opportunity', 'contact', 'packet', 'artifact', 'outreach_message',
-  'interview', 'offer', 'library_entity', 'asset_event', 'usage_metering'
+  'interview', 'offer', 'library_entity', 'asset_event', 'usage_metering',
+  'term_library', 'term_library_entry'
 ]

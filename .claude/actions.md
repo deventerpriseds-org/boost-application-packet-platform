@@ -1098,3 +1098,27 @@ one-shot-deploy directive). Verifier + live checks follow the landing.
   "N covered · M gaps" as separately labelled numbers.
 **Verification:** `api` tsc green, `app` vite build green, smart-quote check clean, greps for the
 banned patterns all zero. Live + independent verifier after landing.
+
+## ACT-54 — P1 foundation: term library schema + matcher + test runner
+**Status:** `done` (landed). Part of P1 (evidence spine).
+- **`term_library` + `term_library_entry` in `schema.ts` SCHEMA_SQL + EXPECTED_TABLES** (per D1 — these
+  are first-class relational tables, not the ad-hoc `ensure*()` column pattern). Shared reference data,
+  deliberately NOT owner-scoped: distinct from `library_entity` (per-owner content) and
+  `taxonomy_title` (per-owner job-TITLE tiers — a different axis).
+- **Owner's source model implemented in the schema:** `sources text[]` (not a single source) +
+  `source_refs jsonb` per-source ids + `confidence` derived from corroboration + `scoreable` flag.
+  O*NET/ESCO are helpers, never gates.
+- **Immutability enforced by a DB TRIGGER**, not convention — `term_entry_guard()` raises on
+  UPDATE/DELETE once the parent version is `published`. This is what makes "adding an alias does not
+  change any historical score" mechanically true instead of aspirational.
+- **`termMatch.ts`** — `termNormalize` / `normalizeAliases` / `confidenceFor` / `matchesEntry` with
+  three match modes. Deliberately does NOT reuse `roleTaxonomy.normalize()`: that drops the token
+  `and`, which is right for job titles and fatal for terms (`P&L`→`p l`, `M&A`→`m a`).
+- **Bug caught by the tests, not by review:** the first version stripped bare trailing integers as
+  "versions", collapsing `SOC 2` into `SOC` — a real false positive (SOC also = Security Operations
+  Center). There is no rule that folds `TOGAF 9` while keeping `SOC 2` distinct, so version stripping
+  is now conservative (only `v2`, dotted `4.0`, `:2022`, `Type II`, impact levels) and bare-integer
+  variants fold via an EXPLICIT per-entry alias where a human decided.
+- **X4 closed:** `npm test` in `api/` = Node 22's built-in runner, zero new deps. **22 assertions
+  green**, covering the measured live failures (P&L/M&A entity decode) and the SAFe case-sensitivity
+  trap (302 live "safe" vs 8 "scaled agile").

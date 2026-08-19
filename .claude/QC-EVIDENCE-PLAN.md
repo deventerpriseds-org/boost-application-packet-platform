@@ -10,10 +10,11 @@ where the train currently is. Read it first on any resume; it is written to surv
 ## ▶ RESUME MARKER — where the train is
 
 ```
-CURRENT PHASE : P0
-STATUS        : code complete, landing
-LAST LANDED   : (pending this push)
-NEXT ACTION   : verify live, then D2 (route-driven step) + D3 (harness), then P1
+CURRENT PHASE : P1 (evidence spine)
+STATUS        : term library foundation landed; corpus miner next
+LAST LANDED   : term_library + term_library_entry + termMatch + npm test
+NEXT ACTION   : P1.2 corpus miner + curation queue (highest-yield source per §12)
+DONE SO FAR   : P0 wiring · X3 entity normalizer · X4 test runner · D1 · D2 · D3
 ```
 *Update this block on every landing. It is the single place to look after a restart.*
 
@@ -69,7 +70,7 @@ re-checking the code yourself.** The backlog is the intent; this file is the con
 | **X1** | **Feed the real posting into generation.** `buildTemplatedArtifact` (`appPackets.ts:236-240`) synthesises a pseudo-JD from role/company/why_surfaced. `jd_real` is never selected. | P1.3, P1.4, P8.2 — every provenance row and every `verbatim_quote` would otherwise record a fabrication, and P8.2's acceptance passes VACUOUSLY. | ACT-51 A3 |
 | **X2** | **Make `regen` reachable.** `appPackets.ts:234` reuses cached `pkg_json`; `:454` hardcodes `regen=false`; the UI never sends it. | P3.1 (a loop on today's code runs 4 passes, closes nothing, and reports looping), P8.1-AC7. | ACT-51 A2 |
 | ~~X3~~ | **DONE (2026-08-19)** — `api/src/functions/tests/jdText.ts` exports `normalizePostingText` / `groundingText` / `decodeEntities`; consumers repointed: `appApply.atsScoreOne` (LIVE scorer), `appPackets.jdAnalysis`, `appJdParse` (fetch + `resolveJdSource`). Original: Canonical `jd_text`. `jd_real` is HTML (`jdBackfill.ts:66` stores `descriptionHtml`); three different strip-regexes exist. | P1.1 offsets, P4.1 citation validation, P8.2 figure scan, P8.3 evidence substrings — none can work against HTML. Export ONE `normalizePostingText()` extending `appJdParse.ts`'s. |
-| **X4** | **A test runner.** `api/package.json` has build/watch/start/dev only — no test script, no framework. | Every `node --test` AC. Node 22 ships a built-in runner: zero new dependency. |
+| ~~X4~~ | **DONE (2026-08-19)** — `npm test` in `api/` runs Node 22's built-in runner over `test/*.test.mjs`; 22 assertions green. Zero new dependencies. Original: A test runner. `api/package.json` has build/watch/start/dev only — no test script, no framework. | Every `node --test` AC. Node 22 ships a built-in runner: zero new dependency. |
 | **X5** | **Documents render ONCE, after the loop.** Each `buildTemplatedArtifact` call does a Drive `files/{id}/copy`. | P3.1 — 4 passes × 4 templated artifacts = **16 orphaned Drive files per packet** on a quota-bearing OAuth account. |
 | **X6** | **Prompt `version` must be loaded.** `pipeline.ts:49` projects only `partitionKey`→`content`, discarding `version`/`rowKey`. | P4.1's "`prompt_version` on every verdict" is unmeetable reusing that line. |
 
