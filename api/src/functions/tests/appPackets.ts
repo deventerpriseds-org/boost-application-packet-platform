@@ -312,7 +312,8 @@ async function buildTemplatedArtifact(client: any, art: any, opp: any, regen: bo
     // Never fatal: this is provenance about a package that is already built and stored.
     try {
       await writeSwaps(client, art.packet_id, opp.id, {
-        call1: built.calls.c1, call3: built.calls.c3, pkg, profileText: built.profileText,
+        call1: built.calls.c1, call3: built.calls.c3, pkg,
+        profileText: built.profileText, omitList: built.omitList,
       })
     } catch (e) { console.warn('[packets] swap provenance not recorded:', String(e)) }
   }

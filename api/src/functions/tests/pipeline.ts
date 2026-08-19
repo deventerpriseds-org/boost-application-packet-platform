@@ -44,7 +44,7 @@ async function copyAndInject(token: string, templateId: string, name: string, va
 // Returns `calls` alongside the package because P1.3 cannot reconstruct what changed from the merged
 // output alone: assemblePackage's per-slot preference for Call 3 over Call 1 IS the swap decision,
 // and both sides are needed to see it. These were previously discarded at the end of this function.
-export async function buildPackageForJD(opts: { key: string; jd: string; roleType: string; company: string; jobTitle: string }): Promise<{ pkg: Record<string, string | null>; steps: string[]; roleFocus: any; calls: { c1: any; c2: any; c3: any }; profileText: string }> {
+export async function buildPackageForJD(opts: { key: string; jd: string; roleType: string; company: string; jobTitle: string }): Promise<{ pkg: Record<string, string | null>; steps: string[]; roleFocus: any; calls: { c1: any; c2: any; c3: any }; profileText: string; omitList: string }> {
   const { key, jd, roleType, company, jobTitle } = opts
   const steps: string[] = []
   const roleFocus = await getRoleFocus(roleType)
@@ -78,9 +78,14 @@ export async function buildPackageForJD(opts: { key: string; jd: string; roleTyp
 
   const pkg = assemblePackage(c1, c2, c3) as Record<string, string | null>
   // The standing profile, so an item that predates this application can be marked profile_original
-  // rather than credited to a pass that merely repeated it.
-  const profileText = Object.values(mc || {}).filter(v => typeof v === 'string').join(' ')
-  return { pkg, steps, roleFocus, calls: { c1, c2, c3 }, profileText }
+  // rather than credited to a pass that merely repeated it. `itemsToOmit` is EXCLUDED: it is the
+  // owner's do-not-use list, injected into the resume prompt as {{289877659__Items to Omit}}.
+  // Leaving it in would mark a banned item as part of the profile — the exact inverse of the truth.
+  const omitList = String((mc as any)?.itemsToOmit || '')
+  const profileText = Object.entries(mc || {})
+    .filter(([k, v]) => typeof v === 'string' && k !== 'itemsToOmit')
+    .map(([, v]) => v as string).join(' ')
+  return { pkg, steps, roleFocus, calls: { c1, c2, c3 }, profileText, omitList }
 }
 
 // GET /api/jobs?status=received — list jobs for the approval queue

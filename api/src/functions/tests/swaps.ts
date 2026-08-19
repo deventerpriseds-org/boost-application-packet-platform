@@ -10,11 +10,15 @@
 //   it is recoverable from the three payloads with no model call, which is what the acceptance
 //   ("rendering the swap table requires no model call") demands.
 //
-// PREMISE CORRECTION: the backlog asks for `driver='rule'` on omission-list drops "so they are never
-// presented as posting-driven". There IS no omission list in this pipeline — the only de-emphasis is
-// a sentence inside roleDirective(), a prompt instruction, not a deterministic rule. Recording an
-// unexplained model change as `rule` would invent an authority for it. So a change that no
-// requirement explains is `unattributed`, which is exactly the failure P2.2 needs to see.
+// DRIVER, and a correction to an earlier correction. The backlog asks for `driver='rule'` on
+// omission-list drops "so they are never presented as posting-driven", and this module first claimed
+// no omission list existed. That was wrong, and confirmed wrong against the source: the resume prompt
+// interpolates {{289877659__Items to Omit}}, zapVars.ts maps it to MasterContext.itemsToOmit, and
+// mt-13 verifies live that all 15 MasterContext fields including that one are present and non-empty.
+// So a drop that matches the owner's do-not-use list IS rule-driven, and is recorded as such.
+// `unattributed` remains for the genuinely unexplained: a change that neither a requirement nor the
+// omission list accounts for. That is the failure P2.2 needs to see, and it must not be diluted by
+// laundering rule-driven drops into it — or by inventing a rule for a model's unexplained choice.
 import { normalizePostingText } from './jdText'
 
 export type ListKey = 'skills_1' | 'skills_2' | 'relevant_1' | 'relevant_2' | 'relevant_3'
@@ -117,6 +121,7 @@ export interface BuildSwapsInput {
   pkg: Record<string, any>
   requirements?: RequirementRef[]
   profileText?: string      // MasterContext profile, when available — marks items as pre-existing
+  omitList?: string         // MasterContext.itemsToOmit — the owner's do-not-use list
 }
 
 export interface BuildSwapsResult {
@@ -136,7 +141,13 @@ export interface BuildSwapsResult {
  * two bullets where it contains one.
  */
 export function buildSwaps(input: BuildSwapsInput): BuildSwapsResult {
-  const { call1 = {}, call3 = {}, pkg = {}, requirements = [], profileText = '' } = input
+  const { call1 = {}, call3 = {}, pkg = {}, requirements = [], profileText = '', omitList = '' } = input
+  const omitted = splitItems(omitList).map(normItem).filter(x => x.length > 2)
+  /** A dropped item the owner told us never to use. Its removal is a rule, not a posting decision. */
+  const onOmitList = (label: string) => {
+    const n = normItem(label)
+    return omitted.some(o => n === o || n.includes(o) || similarity(label, o) >= 0.75)
+  }
   const profileNorm = normItem(profileText || '')
   const candidates: CandidateRow[] = []
   const swaps: SwapRow[] = []
@@ -190,6 +201,13 @@ export function buildSwaps(input: BuildSwapsInput): BuildSwapsResult {
       if (mergeI >= 0 && mergeC >= SWAP_THRESHOLD) {
         swaps.push(row(list, 'merged', o, finals[mergeI], attribute(finals[mergeI], requirements),
           'folded into an item that already covers it'))
+      } else if (onOmitList(o)) {
+        // Never presented as posting-driven: the owner's list removed it, not the employer's words.
+        swaps.push({
+          list, action: 'dropped', from_label: o, to_label: null, requirement_seq: null,
+          verbatim_quote: null, confidence: 0, driver: 'rule',
+          rationale: 'on the owner do-not-use list (MasterContext.itemsToOmit)',
+        })
       } else {
         swaps.push(row(list, 'dropped', o, null, attribute(o, requirements), 'not carried into the final list'))
       }

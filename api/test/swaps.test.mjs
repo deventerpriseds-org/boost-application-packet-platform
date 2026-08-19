@@ -97,6 +97,41 @@ test('two originals collapsing onto one final give swapped + merged, never two s
   assert.equal(r.itemCount, 1, 'the document contains ONE bullet — the table must not claim two')
 })
 
+// The omission list is real: the resume prompt interpolates {{289877659__Items to Omit}},
+// zapVars maps it to MasterContext.itemsToOmit, and mt-13 verifies live that it is non-empty.
+test('a drop the owner do-not-use list explains is rule-driven, never posting-driven', () => {
+  const r = buildSwaps({
+    call1: { skills1: 'Roadmap ownership\nCI/CD pipeline tuning' },
+    call3: {}, pkg: { SkillsBullets1: 'Roadmap ownership' },
+    requirements: REQS,
+    omitList: 'CI/CD pipeline tuning\nSecure coding',
+  })
+  const dropped = r.swaps.find(x => x.action === 'dropped')
+  assert.equal(dropped.driver, 'rule')
+  assert.equal(dropped.verbatim_quote, null, 'a rule drop must never carry a posting citation')
+  assert.match(dropped.rationale, /do-not-use list/)
+  assert.equal(r.unattributed, 0, 'a rule-driven drop is explained, so it is not an unexplained change')
+})
+
+test('a drop NOT on the omission list stays unattributed — rule is not a catch-all', () => {
+  const r = buildSwaps({
+    call1: { skills1: 'Roadmap ownership\nVendor negotiation' },
+    call3: {}, pkg: { SkillsBullets1: 'Roadmap ownership' },
+    omitList: 'Secure coding',
+  })
+  const dropped = r.swaps.find(x => x.action === 'dropped')
+  assert.equal(dropped.driver, 'unattributed')
+})
+
+test('an omitted item is NOT marked profile_original even if it sits in the profile blob', () => {
+  // itemsToOmit is excluded from profileText upstream; this pins the intent at this layer too.
+  const r = buildSwaps({
+    call1: { skills1: 'Secure coding' }, call3: {}, pkg: { SkillsBullets1: '' },
+    omitList: 'Secure coding', profileText: 'Enterprise architecture governance',
+  })
+  assert.notEqual(r.candidates[0].origin, 'profile_original')
+})
+
 test('an added item no requirement explains is UNATTRIBUTED, never laundered as rule-driven', () => {
   const r = buildSwaps({
     call1: { skills1: 'Roadmap ownership' },

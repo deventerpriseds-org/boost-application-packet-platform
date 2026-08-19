@@ -15,7 +15,7 @@ const HEADERS = { 'Content-Type': 'application/json', 'Access-Control-Allow-Orig
  * record — a partial swap table is worse than none, because it reads as complete.
  */
 export async function writeSwaps(client: any, packetId: string, oppId: string, args: {
-  call1: any; call3: any; pkg: Record<string, any>; profileText?: string
+  call1: any; call3: any; pkg: Record<string, any>; profileText?: string; omitList?: string
 }): Promise<{ packet_id: string; candidates: number; swaps: number; items: number; unattributed: number }> {
   // Requirements are matched by `seq`, then resolved to real ids here — swaps.ts is pure and never
   // sees a database id.
@@ -24,7 +24,7 @@ export async function writeSwaps(client: any, packetId: string, oppId: string, a
   const refs: RequirementRef[] = reqRows.map((r: any) => ({ seq: r.seq, verbatim: r.verbatim, item_text: r.item_text, kind: r.kind }))
   const idBySeq = new Map<number, string>(reqRows.map((r: any) => [r.seq, r.id]))
 
-  const built = buildSwaps({ call1: args.call1, call3: args.call3, pkg: args.pkg, requirements: refs, profileText: args.profileText })
+  const built = buildSwaps({ call1: args.call1, call3: args.call3, pkg: args.pkg, requirements: refs, profileText: args.profileText, omitList: args.omitList })
 
   await client.query('begin')
   try {

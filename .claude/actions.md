@@ -1269,11 +1269,23 @@ the swap decision — recoverable from the three payloads with **zero model call
 acceptance demands. `buildPackageForJD` now returns those payloads; it discarded them, so the merged
 package alone could never show what it replaced.
 
-**Premise correction:** the backlog wants `driver='rule'` on omission-list drops. **There is no
-omission list** — the only de-emphasis is one sentence inside `roleDirective()`, a prompt
-instruction, not a deterministic rule. Recording an unexplained model change as `rule` would invent
-an authority for it, so a change no requirement explains is **`unattributed`** — the count P2.2
-blocks on. A DB constraint enforces the honesty: `driver='posting'` **iff** a `verbatim_quote` exists.
+**Premise correction — and then a correction to that correction (I got this wrong first).**
+I claimed no omission list existed, so `driver='rule'` had no honest source. **Wrong, and the source
+disproves it:** the resume prompt interpolates `{{289877659__Items to Omit}}`, `zapVars.ts:43` maps
+that to `MasterContext.itemsToOmit`, and **mt-13 confirms live** (api-test `32311753528`) that all 15
+MasterContext fields *including that one* are present and non-empty. A drop matching the owner's
+do-not-use list is now `driver='rule'`, exactly as the backlog asked, so it is never presented as
+posting-driven. `unattributed` is reserved for the genuinely unexplained — a change neither a
+requirement nor the omission list accounts for — and must not be diluted by laundering rule drops
+into it. A DB constraint enforces the other half: `driver='posting'` **iff** a `verbatim_quote` exists.
+*How I got it wrong: I grepped the pipeline source for "omission/omit/banned" and concluded from
+the absence of a hit. The list is not in code — it is DATA in an Azure Table, reached through a
+Zapier-era token name that no keyword search for "omission" would ever match. Absence of a code hit
+is not absence of the thing; for anything the prompts interpolate, read the PROMPT and follow its
+tokens.*
+**A bug that followed from the same miss:** `profileText` was built from every string field in
+MasterContext, `itemsToOmit` included — so an item on the do-not-use list would have been labelled
+`profile_original`, the exact inverse of the truth. It is now excluded.
 
 Other decisions worth keeping:
 - Attribution matches a requirement's **verbatim**, never its `item_text` — a requirement with no
