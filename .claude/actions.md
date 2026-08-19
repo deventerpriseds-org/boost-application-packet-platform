@@ -897,3 +897,159 @@ log shows "Deployment Complete" + "Status: Succeeded" to purple-ground-0f377120f
 **Status:** `done` — doc-only import; no code touched, nothing deployed (docs/** matches no deploy path).
 **Not done (deliberately, no owner sign-off yet):** adding the `gpt-5.6-luna` entry to
 `usageMeter.ts` PRICES. That is a code change and would need ACs + verifier.
+
+## ACT-51 — Baseline defect register (from the 2026-08-19 end-to-end survey)
+**Requested:** 2026-08-19 (owner: full end-to-end baseline before a major Packets UI upgrade —
+"i dont want what's already built trampled, broken, or duplicated", then "log the items that you
+found needing addressing").
+**How produced:** five parallel read-only Explore surveys (screens/routes · design system · packet
+backend · prompts/AI config · API+data model). Every item below is OBSERVED with a file:line.
+**Status:** `open` — this is a REGISTER, nothing here is fixed. No code was touched. Close sub-items
+individually by id (e.g. "ACT-51.A2 done"). Severity: **P1** = user-visible wrong output/data,
+**P2** = correctness/security/consistency, **P3** = hygiene.
+
+### A. Packets — user-visible wrong behaviour (the upgrade sits on these)
+- **A1 (P1) `missingKw` is never returned by any endpoint.** `PacketBuilder.jsx:324` reads
+  `p.missingKw || []`; `packetShape` (`appPackets.ts:72-79`) has no such key and grep for
+  `missingKw|missing_kw` across `api/` returns nothing. Effects: red gap chips (`:474-476`) never
+  render; legend `{coveredKw.length}/{coveredKw.length + missingKw.length}` (`:479`) always prints
+  N/N = a permanent fake 100% coverage; the "Fill N gaps" card (`:639-648`) is unreachable.
+  `jdAnalysis` DOES compute `gaps` (`appPackets.ts:492`) but persists only `covered_kw` (`:491`).
+- **A2 (P1) "Regenerate" regenerates nothing.** `appPackets.ts:234` reuses cached `pkg_json` unless
+  `regen`; `packetBuildAll` hardcodes `regen=false` (`:454`); the frontend never sends `{regen:true}`
+  (`api.js:125`, `PacketBuilder.jsx:195/209`). Once a bad/empty `pkg_json` is written it is reused
+  FOREVER — the most likely root cause of recurring "sections come back empty".
+- **A3 (P1) The packet is not built from the real JD.** `appPackets.ts:237-239` synthesises a pseudo-JD
+  from role/company/comp/why_surfaced/signals/pain. `raw_jd`, `jd_summary`, `jd_requirements`, `jd_real`
+  exist (`appJdParse.ts:18-25`) and are never read. Same omission in ATS analysis (`:479`) and
+  `artifactGenerate` (`:453`) — so the header ATS % is derived from a title + blurb, not the posting.
+- **A4 (P2) Work History edits go nowhere.** `pkg_json` carries `WorkHistoryBullets1-4` (`mt17.ts:84-87`)
+  and `OppDetail.jsx:431` edits them, but they are absent from `TEMPLATE_META.resume.placeholders`
+  (`packetTemplates.ts:25`), so `varsForType` never injects them. Silent no-op ("No dead UI" violation).
+- **A5 (P2) A read creates data.** `packetGet` has no `requireWrite` and `loadPacket` INSERTs a packet +
+  5 artifact rows when absent (`appPackets.ts:47-57`). `OppDetail.jsx:155-157` calls it on mount, so
+  merely opening any opportunity creates a packet that then sits in `#/packets` as `building 0/5`
+  forever. The Packets list is "opportunities you once opened", not "packets you are building".
+- **A6 (P2) `compact_resume` is a byte-identical duplicate of `resume`** — same `templateId` and same
+  placeholder set (`packetTemplates.ts:27-30`).
+- **A7 (P2) Three disagreeing definitions of "complete".** `recomputePacket` ready = all 5 approved
+  (`appPackets.ts:63-70`); `OppDetail.jsx:192-198` calls `approved >= 4` "Complete"; `Packets.jsx:8-13`
+  splits into 4 groups. A 4/5 packet reads "Complete", "In review" and `review` simultaneously.
+- **A8 (P3) `Packets.jsx` "Sent" group can never populate** — no code anywhere writes
+  `packet.status='sent'`. Same for `artifact.status='drafting'` (never set; `artifactGenerate` jumps
+  todo→review, `appPackets.ts:172`) and `artifact.template_id` (never written, exposed as `templateId`).
+- **A9 (P3) "⚡ Auto-optimize resume" (`PacketBuilder.jsx:488`) is the same handler as "Build entire
+  packet" (`:387`)** — `buildAll`. Two labels, one action, and it optimises nothing against keywords.
+- **A10 (P3) Wizard step is not routable.** `activeStep` is component state (`PacketBuilder.jsx:167`)
+  while OppDetail/Library/Interview/Settings all hash-route their tabs. No deep-link, no back-button.
+
+### B. Data / tenancy / auth
+- **B1 (P1) Six `api.js` reads omit `?owner=` and silently read the DEMO tenant:** `atsSources:118`,
+  `listAssets:204`, `listLibrary:225`, `mailConfigGet:170`, `mailMessages:179`, `mailMessage:180`.
+  Note `api.js:172-178` already passes owner for mail-folder calls with a comment about this exact
+  bug — these six were missed by that fix. `listAssets` means the Assets view may show demo artifacts.
+- **B2 (P2) No ownership check on artifact routes.** `packet`/`artifact` have no `owner_email`; ownership
+  is only derivable by joining through `opportunity`. `requireWrite` (`appSession.ts:72`) proves only
+  that SOME verified session exists, not that it owns that artifact. `artifactVideoGenerate`,
+  `artifactVideoStatus`, `artifactArchive` and `pipelineRun` have no `requireWrite` at all.
+- **B3 (P2) `POST /api/prompts` is unauthenticated** (`promptsApi.ts:42,76`) and writes the LIVE
+  production agent prompts.
+- **B4 (P2) Schema drift — `schema.ts` is not a reliable description of the live DB.** 11 tables in
+  `SCHEMA_SQL`; **18 more** are created ad-hoc inside handlers. `usage_metering` has 4 definitions;
+  `asset_event` has 2 with DIVERGENT DDL (`appAssets.ts:14` lacks the CHECK and the FK). Packet-relevant
+  columns outside SCHEMA_SQL: `packet.pkg_json`, `artifact.content`, `artifact.drive_url`,
+  `artifact.heygen_video_id`. Any new endpoint reading them must repeat the `ensure*()` ALTER or it
+  500s on a fresh database.
+
+### C. Prompts / AI configuration
+- **C1 (P1) `portfolio_user` is byte-identical to `resume_user` in the live Prompts table** (bad seed,
+  documented in `docs/zap-289877647/README.md`) → agent 2 is being fed the resume prompt. Confirm with
+  `GET /api/prompts` before fixing.
+- **C2 (P2) The editor for the LIVE production prompts exists only in the deprecated dev console**
+  (`web/src/App.jsx:1075-1120`, 6 keys). The product app has no `/prompts` call at all.
+- **C3 (P2) Three disconnected prompt systems.** (1) Azure Table `Prompts` — versioned, activation
+  flags, `prompts-load-file.yml` loader; **LIVE on the Google Doc/Slides path** via `appPackets.ts:7`
+  → `pipeline.ts:49-51`. (2) ~25 inline literals with no override (`appPackets.ts:153,212`,
+  `appJdParse.ts:89`, `mailWatch.ts:178,287`, `appApply.ts`, `appOutreach.ts:102`, …). (3) Postgres
+  `coach_config` — the only one with a UI + reset. The fork is `metaFor(art.type)`. A prompt-editing UI
+  must EXTEND `promptsApi.ts`, not become a fourth store.
+- **C4 (P2) `gpt-4o-mini` hardcoded with no override at 12+ sites incl. the production packet path**
+  (`pipeline.ts:58`), plus every `max_tokens`. Violates the no-hardcoded-config rule. Only
+  `AI_EDIT_MODEL` (env) and `coach_config.model` (env+DB+UI) are overridable.
+
+### D. Cost metering
+- **D1 (P1) The production 3-agent build is completely unmetered.** `pipeline.ts:56-58` never calls
+  `logUsage`, and `appPackets.ts:242` passes an empty usage object which `usageMeter.ts:22` early-returns
+  on. The most expensive feature in the product (max_tokens 16000/16000/15500) is invisible in the cost
+  dashboard.
+- **D2 (P2) `gpt-5.6-luna` is missing from `PRICES`** (`usageMeter.ts:4-9`) so `costOf()` falls back to
+  gpt-4o-mini ($0.15/$0.60). Sourced Luna rate is $0.20/$1.20 → under-reported 1.33× input, 2× output.
+  Sourced prices now live in `docs/model-ab-findings.md` (ACT-50).
+- **D3 (P3) Also unmetered:** every coach turn (`coachAgent.ts`, incl. tool loops), memory embeddings
+  (`coachMemory.ts:86`), `appConvert.ts`, `appCapture.ts`, `appExtras.ts`, `appVoice.ts`.
+
+### E. Error handling / observability
+- **E1 (P1) Agent-2 / Agent-3 JSON parse failure is a `console.warn` and nothing else**
+  (`pipeline.ts:68,73`). Neither call sets `response_format:{type:'json_object'}` (unlike `jdAnalysis`,
+  which does). On failure the portfolio/cover/aboutMe fields and the entire ATS/skills QC silently
+  vanish and the response is still `{ok:true}`.
+- **E2 (P1) `build-all` swallows per-artifact errors into a 200 OK** (`appPackets.ts:456`, response
+  `{ok:true}` at `:462`). The UI counts only successes (`PacketBuilder.jsx:263`), so a build where all
+  artifacts failed reports "Built 0 documents" as success.
+- **E3 (P2) HTTP 200 with an `{error}` body** across `appPackets.ts` (`:150,269,345,379,409,445,477,507`),
+  `appVideo.ts`, `appConvert.ts`, `pipeline.ts`. `appSession.ts:81` ships a `serverError()` helper
+  expressly to fix this; `appPackets.ts` does not use it.
+- **E4 (P2) The Google "review agent" hides its own failures.** `stripLeftoverTokens` returns `[]` when
+  the document read fails (`packetTemplates.ts:89`) — indistinguishable from "nothing to clean"; the
+  follow-up batchUpdate (`:96`) has no `res.ok` check; `shareAnyone` (`:103`) ignores its response, so a
+  permission failure yields a `doc_url` the user cannot open, reported as success.
+- **E5 (P3) The one parsing diagnostic is discarded.** `_parsedFieldCount` (`resumeParser.ts:89`) is put
+  into `steps[]` by `pipeline.ts:64`, but `buildTemplatedArtifact` destructures only `built.pkg`
+  (`appPackets.ts:240`) — so it never reaches the API response on the production path.
+- **E6 (P3) Video polling has no bound.** Recursive 9s `setTimeout` (`PacketBuilder.jsx:267-283`), no max
+  attempts, no cancel; a thrown fetch retries forever. On success it writes the video URL into `docUrl`,
+  conflating two fields (`:275`).
+
+### F. Frontend consistency / dead UI
+- **F1 (P2) Dead wiring:** `Call.jsx:19` writes `sessionStorage.ee_coach_autorecord` that nothing ever
+  reads, while toasting "starting your mic…" — the toast lies.
+- **F2 (P2) `RolesTitles.jsx:129`** passes `msg`/`onRetry` to `ErrorBox({error})` (`Today.jsx:547`) →
+  taxonomy load failures render a blank error with no retry button.
+- **F3 (P3) `Opportunities.jsx:36-41`** `filterLabel` handles `rolenew:`/`role:` but not `titlenew:`,
+  which Today's default hero emits (`Today.jsx:177`) → the raw token is shown to the user.
+- **F4 (P3)** Composer's "Settings ▸ Templates" hint goes to `/settings` (Account tab), not
+  `/settings/templates` (`Composer.jsx:160-163`).
+- **F5 (P3)** `Offer.jsx:57-60` never sends the "Your counter" column to the backend — typing a counter
+  only recomputes a local total; the AI counter draft ignores it.
+- **F6 (P3) Nav double-highlight:** on `#/library/roles`, `shell.jsx:131` highlights BOTH "Assets" and
+  "Role Profiles"; `BottomNav` (`:149`) uses `parts[0]` only and disagrees with `SideNav`.
+- **F7 (P3) Funnel bypasses** — `Pipeline.jsx:65` (rejected lane) and `Opportunities.jsx:63`
+  (includeDismissed) fetch `listOpportunities` directly, so neither is location-filtered. Also
+  `data.jsx:31-33` claims prefs refresh on the poll but the effect (`:63-67`) only re-runs `reload`,
+  so a Settings location change does not propagate until reload.
+- **F8 (P3) Duplication register** (consolidate, do not add a third): `FRESH_STAGES` ×4 (`data.jsx:6`,
+  `Today.jsx:25`, `Opportunities.jsx:12`, `Swipe.jsx:7`); `STAGE_LABELS` ×3; `STATUS_TONE` ×3
+  (`PacketBuilder.jsx:18`, `Library.jsx:13`, `OppDetail.jsx:7`); `Card` ×3; underline tab bar ×5 while
+  `.px-tab`/`.px-tab-active` sit unused; connected-circles funnel ×4; `sessionValid` re-implemented in
+  `Settings.jsx:41-48`; the 5-button artifact action row ×2 (`PacketBuilder.jsx:131-151`,
+  `OppDetail.jsx:590-601`); `timeAgo` ×3.
+- **F9 (P3) `AssetAnalytics` (`Library.jsx:54-83`) is defined and never rendered.**
+- **F10 (P3) Built-but-unwired client methods:** `jdStatus`, `bulkRun`, `bulkStatus`,
+  `coachMemoryBootstrap`, `coachUpload`, `assetEvent`, `taxonomyRetag`, `taxonomyAddTitle`. The entire
+  bulk-packet subsystem (`POST /app/bulk/packets`) has a working backend + client and NO UI — wire a
+  button rather than building an endpoint. Same for `build-all`'s unused `seedCadence`/`draftOutreach`
+  flags and the returned-but-unrendered `atsScore`/`stage` on the packets list payload.
+- **F11 (P3) Dangling CSS tokens:** `--proto-ink1` used with NO fallback (`PacketBuilder.jsx:621`, the
+  declaration is simply invalid), plus `--proto-ink4`, `--proto-line`, `--proto-paper-2`.
+- **F12 (P3) Two competing temperature palettes:** `theme.css:32-35` `--temp-*` (`#c15b3c`…) vs
+  `shell.jsx:32-36` `TEMP_META` (`#ef5a34`…). Same state renders different oranges, and the JS hex map
+  does not respond to dark mode. Same pattern in `PRIO_META`/`PRIORITY_COLOR`/`TIER_META`/`ROLE_COLORS`.
+- **F13 (P2) Unsanitised `dangerouslySetInnerHTML` of server-supplied HTML** in 4 places:
+  `OppDetail.jsx:378,384` and `Swipe.jsx:408,411`.
+
+### G. Already-open infrastructure items (carried, not new)
+- **G1** `web-deploy.yml` PR-trigger removal — implemented on branch `claude/web-deploy-drop-pr-trigger`
+  (pushed, NOT landed) pending owner choice; the workflow still fails `ResourceNotFound` under any
+  trigger because the `job-platform-web` SWA no longer exists. See ACT-48/ACT-46.
+- **G2** Legacy branch `claude/git-push-main-1zcqw5` still exists (fast-forwarded, cannot self-trigger).
+  Deletion requires a GitHub-UI click — the CCR git proxy rejects ref deletes. See ACT-48.

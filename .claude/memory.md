@@ -1193,3 +1193,57 @@ ef67eb5); body verified byte-identical to the source.
   escalates above Luna — today AI_EDIT_MODEL is the sole 5.6 call site.
 - Reusable harness (in huddle, not here): .claude/skills/test-agent-serverfn/scripts/model-ab.mjs +
   .github/workflows/model-ab.yml — runs in GHA because the sandbox can't reach OpenAI.
+
+## END-TO-END BASELINE SURVEY (2026-08-19) — read this before touching Packets
+Owner asked for a full baseline before a major Packets UI upgrade, explicitly so existing work is not
+"trampled, broken, or duplicated". Five parallel read-only Explore surveys: screens/routes · design
+system · packet backend · prompts/AI config · API+data model. **Full defect register = ACT-51 in
+`.claude/actions.md`** (grouped A-G, each item id'd with file:line, closable individually). Nothing was
+fixed; nothing was touched. The durable structural facts:
+
+### There is already an authoritative Packets design spec in this repo
+`docs/design_handoff/` — README + a 36K `proto-compass/packet.jsx` (`PacketBuilderScreen`). It specifies
+the step-rail (JD → resume → cover → portfolio → video → review), a live ATS %, a per-artifact template
+picker with an explicit default, a keyword-coverage meter, version history, and REVIEW ROUNDS: request-
+changes bumps a round + appends to a feedback thread; approve-all gates send; send moves the opp to
+`applied`. Artifact machine `todo→drafting→review→changes→approved`; packet machine
+`none→building→review→changes→approved→sent`. README says the `.jsx` is the BEHAVIOURAL source of truth
+and the Compass tokens the VISUAL one — and `app/src/tokens/fig-tokens.css` IS that Compass set, so the
+shipped app already derives from it. **The DB has the columns for the review layer (`packet.feedback`,
+`packet.round`, `artifact.template_id`) and NOTHING WRITES THEM.** Scaffolded, unimplemented — so review
+rounds are greenfield on existing columns: extend, do not rebuild.
+
+### The three highest-leverage facts for anyone editing packets
+1. **Regenerate is a no-op** (cached `pkg_json`, `regen=false` hardcoded, UI never sends it) — a bad
+   `pkg_json` is permanent. This, not the generator, is the likely cause of "sections come back empty".
+2. **The packet is built from a synthesised pseudo-JD**, not `jd_real`/`jd_summary`/`jd_requirements`,
+   which exist and are never read.
+3. **`GET /packet` lazily CREATES the packet + 5 artifacts**, and OppDetail calls it on mount — so the
+   Packets list is "opportunities you once opened".
+
+### Prompt architecture (the part most likely to be duplicated by mistake)
+The Azure Table `Prompts` is NOT legacy cruft — it is LIVE on the primary Google Doc/Slides path
+(`appPackets.ts:7` imports `buildPackageForJD` from `pipeline.ts`, which loads `is_active` prompts at
+`:49-51` and makes the 3 agent calls). Its only editor is in the DEPRECATED `web/` console. A second,
+disconnected inline-prompt path serves the "Draft" button and video. `coach_config` is a third store and
+the only one with a product UI. Extend `promptsApi.ts`; a new store would be the fourth brain.
+
+### Design-system reality (build against this, not the token dump)
+Only ~15 `.px-*` classes are actually used; 19 are dead, ALL 16 `.type-*` classes are unused, and every
+`--spacing-*`/`--radius-*`/`--fontsize-*`/component token is unused. Convention: `className` carries
+surface identity (`px-box`/`px-btn`/`px-small`), inline `style={{}}` carries ALL layout+spacing (de-facto
+scale 4/6/8/10/12/14/16/20/24; radii 8 control / 12 card / 99 pill). NO modals, NO drawers, NO skeletons,
+NO icon library (Unicode glyphs + 3 hand-written SVGs incl. the `MatchScore` ring). Dark mode = a
+`.proto-dark` class on `<html>` overriding a SUBSET of tokens — `--surface-brand-default` is NOT flipped,
+so `.px-btn-accent` is the same teal in both themes.
+
+### Two editors for the same endpoints
+`ArtifactCard` (PacketBuilder) and `ResumeTab`/`ResumeField` (OppDetail) both drive
+`/artifact/{id}/generate|status|content|ai-edit|document`. The RICHER one — structured `pkg` sections,
+per-field save, AI edit with effort, 8s polling + focus refresh — is in OppDetail, where users are least
+likely to find it. PacketBuilder cannot reach `content` or `ai-edit` at all. Consolidating these (not
+writing a third) is the extend-don't-duplicate move for the upgrade.
+
+### Where the model prices live
+`docs/model-ab-findings.md` (imported from huddle, ACT-50). Luna $0.20/$1.20 per 1M — `usageMeter.ts`
+has no entry for it and the production 3-agent build is unmetered entirely (ACT-51 D1/D2).
