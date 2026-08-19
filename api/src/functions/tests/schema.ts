@@ -259,6 +259,30 @@ create trigger term_entry_guard_trg
   before update or delete on term_library_entry
   for each row execute function term_entry_guard();
 
+-- Candidate terms mined from the real posting corpus, awaiting human curation.
+-- This is the EXTRACTION side of the term library: every row is a literal substring of a real
+-- employer's posting with a countable document frequency, never model output. That is what lets it
+-- satisfy "terms must not be model-generated" while still supplying the exec vocabulary O*NET lacks
+-- (measured: roadmap 626, board 480, budget 416, operating model 222, P&L 83 — none in O*NET).
+create table if not exists term_candidate (
+  id            uuid primary key default uuid_generate_v4(),
+  owner_email   text not null,
+  ngram         text not null,        -- the literal surface form as it appears in postings
+  normalized    text not null,        -- termNormalize(ngram)
+  n             int not null,         -- 1..4
+  df            int not null,         -- document frequency across scanned postings
+  sample_opp_ids uuid[] not null default '{}',
+  status        text not null default 'pending'
+                check (status in ('pending','approved','rejected','merged')),
+  merged_into   text,                 -- term_key it was folded into, when status='merged'
+  reviewed_at   timestamptz,
+  reviewed_by   text,
+  mined_at      timestamptz not null default now(),
+  corpus_size   int not null default 0,   -- postings scanned, so df is interpretable later
+  unique (owner_email, normalized)
+);
+create index if not exists term_cand_status_idx on term_candidate(owner_email, status, df desc);
+
 -- Idempotent multi-tenant column adds (safe on tables that predate them)
 alter table persona        add column if not exists owner_email text not null default 'demo@executive-engine.local';
 alter table persona        add column if not exists is_demo boolean not null default false;
@@ -283,5 +307,5 @@ create index if not exists opp_owner_idx2 on opportunity(owner_email);
 export const EXPECTED_TABLES = [
   'persona', 'opportunity', 'contact', 'packet', 'artifact', 'outreach_message',
   'interview', 'offer', 'library_entity', 'asset_event', 'usage_metering',
-  'term_library', 'term_library_entry'
+  'term_library', 'term_library_entry', 'term_candidate'
 ]

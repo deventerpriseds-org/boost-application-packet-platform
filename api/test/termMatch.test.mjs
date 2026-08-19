@@ -50,3 +50,27 @@ test('token_subset matches competency phrasing', () => {
   assert.ok(matchesEntry(board, 'regular reporting to the Board of Directors'))
   assert.ok(!matchesEntry(board, 'quarterly reporting'))
 })
+
+// ── corpus miner ────────────────────────────────────────────────────────────────────────────────
+import { ngramsForDoc } from '../dist/functions/tests/termMiner.js'
+
+test('miner extracts real phrases and rejects stopword-edged ones', () => {
+  const g = ngramsForDoc('Own the product roadmap and the operating model for the platform.')
+  assert.ok(g.has('product roadmap'), 'keeps a real 2-gram')
+  assert.ok(g.has('operating model'), 'keeps the highest-value exec 2-gram')
+  assert.ok(!g.has('the product roadmap'), 'rejects leading stopword')
+  assert.ok(!g.has('roadmap and'), 'rejects trailing stopword')
+  assert.ok(!g.has('and the'), 'rejects all-noise')
+})
+test('miner does not span clause boundaries', () => {
+  const g = ngramsForDoc('Owns budget. Reports to the board.')
+  assert.ok(!g.has('budget reports'), 'a phrase must not straddle a sentence break')
+})
+test('miner counts documents, not occurrences', () => {
+  const g = ngramsForDoc('roadmap roadmap roadmap')
+  assert.equal([...g].filter((x) => x === 'roadmap').length, 1)
+})
+test('miner sees &-terms only because entities are decoded first', () => {
+  const g = ngramsForDoc('Owned P&amp;L across the division')
+  assert.ok(g.has('p and l'), 'P&L survives as a mineable term')
+})

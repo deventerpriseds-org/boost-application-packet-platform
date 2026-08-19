@@ -1122,3 +1122,24 @@ banned patterns all zero. Live + independent verifier after landing.
 - **X4 closed:** `npm test` in `api/` = Node 22's built-in runner, zero new deps. **22 assertions
   green**, covering the measured live failures (P&L/M&A entity decode) and the SAFe case-sensitivity
   trap (302 live "safe" vs 8 "scaled agile").
+
+## ACT-55 — P1.2 corpus term miner + curation queue
+**Status:** `done` (landed). The extraction half of the term library.
+- **`term_candidate` table** (SCHEMA_SQL + EXPECTED_TABLES, per D1): ngram, normalized, n, df,
+  sample_opp_ids, status(pending|approved|rejected|merged), merged_into, reviewed_at/by, corpus_size.
+  `unique(owner_email, normalized)`.
+- **`termMiner.ts`** — `ngramsForDoc()` + 3 routes: `POST app/qc/terms/mine`,
+  `GET app/qc/terms/candidates`, `POST app/qc/terms/candidate/{id}`.
+- **Why this satisfies "terms must not be model-generated":** every candidate is a literal substring
+  of a real posting with a countable document frequency. Extraction, not generation. Human approval
+  is required before anything becomes scoreable.
+- Re-mining **never overwrites a human decision** (`where status='pending'` on the upsert).
+- **Two real bugs the tests caught, both of which would have silently destroyed the flagship term:**
+  1. The edge-noise rule rejected any token under 2 chars, so `P&L` (normalizes to `p and l`, single-
+     char edges) was discarded entirely — 83 postings lost. Length is now only a rule for standalone
+     1-grams.
+  2. **Ordering bug:** clause-splitting ran BEFORE entity decoding, and `&amp;` contains a semicolon —
+     so the entity was torn in half, yielding junk tokens like `amp` and losing the term. Decode now
+     happens first. Same class as X3; this is why X3 had to land before the miner.
+**Verification:** 26/26 assertions green, incl. clause-boundary containment, document-not-occurrence
+counting, stopword-edge rejection, and P&L surviving the pipeline.
