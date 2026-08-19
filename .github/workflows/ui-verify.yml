@@ -27,6 +27,30 @@ on:
         description: 'Optional minimum count for count_sel'
         required: false
         default: '0'
+      count_max:
+        description: 'Optional maximum count for count_sel (0 asserts the element is absent)'
+        required: false
+        default: ''
+      expect_absent:
+        description: "';'-separated substrings that must NOT appear (proves a stale/duplicate surface is gone)"
+        required: false
+        default: ''
+      click_sel:
+        description: 'Optional CSS selector to click before asserting (reaches surfaces behind an interaction)'
+        required: false
+        default: ''
+      measure_sel:
+        description: 'Optional CSS selector to measure (reports width/height/visible)'
+        required: false
+        default: ''
+      viewport_w:
+        description: 'Viewport width (assert responsive breakpoints)'
+        required: false
+        default: '1440'
+      viewport_h:
+        description: 'Viewport height'
+        required: false
+        default: '1700'
       app_url:
         description: 'SPA base URL'
         required: false
@@ -53,6 +77,12 @@ jobs:
           EXPECT: ${{ inputs.expect }}
           COUNT_SEL: ${{ inputs.count_sel }}
           COUNT_MIN: ${{ inputs.count_min }}
+          COUNT_MAX: ${{ inputs.count_max }}
+          EXPECT_ABSENT: ${{ inputs.expect_absent }}
+          CLICK_SEL: ${{ inputs.click_sel }}
+          MEASURE_SEL: ${{ inputs.measure_sel }}
+          VIEWPORT_W: ${{ inputs.viewport_w }}
+          VIEWPORT_H: ${{ inputs.viewport_h }}
           OUT: ui-verify.png
         run: node scripts/ui-verify.mjs
       - name: Upload screenshot

@@ -153,7 +153,7 @@ function ArtifactCard({ a, busy, setBusy, onGenerate, onSetStatus, onMakeDoc, on
   )
 }
 
-export default function PacketBuilder({ id }) {
+export default function PacketBuilder({ id, step }) {
   const { toast } = useApp()
   const mobile = useIsMobile()
   const [pState, setPState] = useState({ loading: true, error: null, packet: null })
@@ -164,7 +164,17 @@ export default function PacketBuilder({ id }) {
   const [jdBusy, setJdBusy] = useState(false)
   const [parseBusy, setParseBusy] = useState(false)
   const [allBusy, setAllBusy] = useState(false)
-  const [activeStep, setActiveStep] = useState('jd')
+  // The wizard step lives in the ROUTE (#/packet/:id/:step), matching every other multi-view screen
+  // (OppDetail, Interview, Library, Settings). It was component state, which meant no deep-link, no
+  // back-button, and nothing behind a step was reachable by the UI verifier.
+  // `setActiveStep` is kept as the local API - including the functional form - so every existing
+  // call site works unchanged; it now navigates instead of setting state.
+  const explicitStep = STEPS.some((s) => s.key === step) ? step : null
+  const activeStep = explicitStep || 'jd'
+  const setActiveStep = (next) => {
+    const key = typeof next === 'function' ? next(activeStep) : next
+    if (STEPS.some((s) => s.key === key)) go(`/packet/${id}/${key}`)
+  }
   const [atsOpen, setAtsOpen] = useState(false)
   const pollers = useRef({})
 
@@ -175,7 +185,7 @@ export default function PacketBuilder({ id }) {
       setPState({ loading: false, error: null, packet: p })
       if (!o.error) setOpp(o)
       // Auto-advance past JD step if already analyzed
-      if (p.jdAnalyzed) setActiveStep((s) => s === 'jd' ? 'resume' : s)
+      if (p.jdAnalyzed && !explicitStep) setActiveStep('resume')   // only when no step was deep-linked
     } catch (err) {
       setPState({ loading: false, error: String(err.message || err), packet: null })
     }

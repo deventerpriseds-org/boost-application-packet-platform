@@ -37,7 +37,7 @@ function Router() {
   else if (route === 'pipeline') screen = <Pipeline opps={opps} />
   else if (route === 'swipe') screen = <Swipe opps={opps} />
   else if (route === 'packets') screen = <Packets />
-  else if (route === 'packet' && parts[1]) screen = <PacketBuilder id={parts[1]} />
+  else if (route === 'packet' && parts[1]) screen = <PacketBuilder id={parts[1]} step={parts[2]} />
   else if (route === 'outreach') screen = <Outreach />
   else if (route === 'compose' && parts[1]) screen = <Composer id={parts[1]} />
   else if (route === 'interview') screen = <Interview id={parts[1]} tab={parts[2] || 'prep'} />
