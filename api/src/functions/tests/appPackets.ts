@@ -3,7 +3,7 @@ import { resolveOwner, requireWrite } from './appSession'
 import { getPgClient } from './pgClient'
 import { getGoogleOAuthToken, HAS_GOOGLE_OAUTH } from './googleAuth'
 import { logUsage } from './usageMeter'
-import { groundingText } from './jdText'
+import { groundingText, resolvePostingSource } from './jdText'
 import { metaFor, varsForType, copyTemplate, injectValues, stripLeftoverTokens, shareAnyone } from './packetTemplates'
 import { buildPackageForJD } from './pipeline'
 
@@ -155,7 +155,7 @@ export async function artifactGenerate(req: HttpRequest, context: InvocationCont
     await ensureContentColumn(client)
     const art = (await client.query(`select a.*, p.opp_id from artifact a join packet p on p.id = a.packet_id where a.id = $1`, [artifactId])).rows[0]
     if (!art) return { status: 404, headers: HEADERS, jsonBody: { error: 'artifact not found' } }
-    const opp = (await client.query(`select company, role, comp_range, why_surfaced, company_signals, pain_hypotheses, persona_key from opportunity where id = $1`, [art.opp_id])).rows[0]
+    const opp = (await client.query(`${OPP_FIELDS} where id = $1`, [art.opp_id])).rows[0]
     if (!key) return { status: 200, headers: HEADERS, jsonBody: { error: 'OPENAI_API_KEY not set' } }
 
     const brief = ARTIFACT_BRIEF[art.type] || 'a tailored application asset'
@@ -238,6 +238,47 @@ async function ensurePkgColumn(client: any) {
   await client.query(`alter table packet add column if not exists pkg_json jsonb`)
 }
 
+// ONE projection for every caller that grounds generation in an opportunity. It was duplicated
+// across four call sites and all four omitted jd_real, which is how generation ended up reading a
+// synthesised pseudo-JD instead of the posting (X1). A single constant is what stops that recurring.
+const OPP_FIELDS = `select id, company, role, comp_range, why_surfaced, company_signals,
+  pain_hypotheses, persona_key, jd_real, raw_jd from opportunity`
+
+/**
+ * The text the generator is grounded in.
+ *
+ * Was: a pseudo-JD assembled from role + company + why_surfaced + company_signals + pain_hypotheses,
+ * with `jd_real` never selected. Every figure, quote and claim the pipeline produced was therefore
+ * derived from our own metadata about the job rather than from the employer's posting — and P1.4's
+ * provenance rows would have recorded those fabrications as evidence, with P8.2's figure scan
+ * passing vacuously because there were no real figures to scan.
+ *
+ * Now: the employer's posting leads. The synthesised context is kept, clearly labelled and AFTER the
+ * posting, because comp_range / company_signals / pain_hypotheses are real research the posting does
+ * not carry. `grounded` says which happened, so a packet built without a posting is never presented
+ * as posting-grounded. why_surfaced is dropped when a posting exists: it is the alert email, which
+ * describes SIBLING jobs and is exactly what resolveJdSource refuses to parse.
+ */
+export function generationJd(opp: any): { jd: string; grounded: boolean } {
+  const posting = resolvePostingSource(opp).text
+  const context = [
+    `${opp.role} at ${opp.company}.`,
+    opp.comp_range ? `Comp: ${opp.comp_range}.` : '',
+    (opp.company_signals || []).length ? `Company signals: ${(opp.company_signals || []).join('; ')}.` : '',
+    (opp.pain_hypotheses || []).length ? `Pain hypotheses: ${(opp.pain_hypotheses || []).join('; ')}.` : '',
+  ].filter(Boolean).join(' ')
+
+  if (!posting) {
+    // No posting at all: fall back to the old behaviour rather than refusing to build, but say so.
+    return { jd: [context, opp.why_surfaced || ''].filter(Boolean).join(' '), grounded: false }
+  }
+  return {
+    jd: `JOB POSTING (the employer's own words - ground every claim in this):\n${posting.slice(0, 12000)}`
+      + `\n\nRESEARCH CONTEXT (our notes, NOT from the posting):\n${context}`,
+    grounded: true,
+  }
+}
+
 // G6 — build a real artifact by COPYING its template and filling {{placeholders}}
 // with the proven pipeline package (assemblePackage). Returns null if the type
 // has no template (caller falls back to the legacy prose path).
@@ -248,17 +289,22 @@ async function buildTemplatedArtifact(client: any, art: any, opp: any, regen: bo
   if (!key) throw new Error('OPENAI_API_KEY not set')
 
   await ensurePkgColumn(client)
-  const pkt = (await client.query(`select pkg_json from packet where id = $1`, [art.packet_id])).rows[0]
-  let pkg: Record<string, string | null> | null = (!regen && pkt?.pkg_json) ? pkt.pkg_json : null
+  await ensureAnalysisCols(client)
+  const pkt = (await client.query(`select pkg_json, jd_grounded from packet where id = $1`, [art.packet_id])).rows[0]
+  const { jd, grounded } = generationJd(opp)
+
+  // A package cached BEFORE X1 was generated from the synthesised pseudo-JD. Reusing it would make
+  // the fix inert for every packet that already exists — the cache would keep serving ungrounded
+  // content forever. Regenerate when we can now ground it and previously could not.
+  const staleUngrounded = grounded && pkt?.jd_grounded !== true
+  let pkg: Record<string, string | null> | null = (!regen && !staleUngrounded && pkt?.pkg_json) ? pkt.pkg_json : null
   if (!pkg) {
     const roleType = opp.persona_key || opp.role || 'Executive'
-    const jd = [`${opp.role} at ${opp.company}.`, opp.comp_range ? `Comp: ${opp.comp_range}.` : '',
-      opp.why_surfaced || '', (opp.company_signals || []).length ? `Company signals: ${(opp.company_signals || []).join('; ')}.` : '',
-      (opp.pain_hypotheses || []).length ? `Pain hypotheses: ${(opp.pain_hypotheses || []).join('; ')}.` : ''].filter(Boolean).join(' ')
     const built = await buildPackageForJD({ key, jd, roleType, company: opp.company, jobTitle: opp.role })
     pkg = built.pkg
     await logUsage(`packet:${art.type}:generate`, 'gpt-4o-mini', {})
-    await client.query(`update packet set pkg_json = $1, updated_at = now() where id = $2`, [JSON.stringify(pkg), art.packet_id])
+    await client.query(`update packet set pkg_json = $1, jd_grounded = $2, updated_at = now() where id = $3`,
+      [JSON.stringify(pkg), grounded, art.packet_id])
   }
 
   const token = await getGoogleOAuthToken()
@@ -290,7 +336,7 @@ export async function artifactDocument(req: HttpRequest, context: InvocationCont
     const art = (await client.query(`select a.*, p.opp_id from artifact a join packet p on p.id = a.packet_id where a.id = $1`, [artifactId])).rows[0]
     if (!art) return { status: 404, headers: HEADERS, jsonBody: { error: 'artifact not found' } }
     if (art.type === 'video') return { status: 400, headers: HEADERS, jsonBody: { error: 'video artifacts are rendered via the HeyGen video action, not a document' } }
-    const opp = (await client.query(`select company, role, comp_range, why_surfaced, company_signals, pain_hypotheses, persona_key from opportunity where id = $1`, [art.opp_id])).rows[0]
+    const opp = (await client.query(`${OPP_FIELDS} where id = $1`, [art.opp_id])).rows[0]
     if (!opp) return { status: 404, headers: HEADERS, jsonBody: { error: 'opportunity not found' } }
 
     // G6: if this type has a designed template, COPY it and fill placeholders.
@@ -365,7 +411,7 @@ export async function artifactSlides(req: HttpRequest, context: InvocationContex
     await ensureContentColumn(client)
     const art = (await client.query(`select a.*, p.opp_id from artifact a join packet p on p.id = a.packet_id where a.id = $1`, [artifactId])).rows[0]
     if (!art) return { status: 404, headers: HEADERS, jsonBody: { error: 'artifact not found' } }
-    const opp = (await client.query(`select company, role, comp_range, why_surfaced, company_signals, pain_hypotheses, persona_key from opportunity where id = $1`, [art.opp_id])).rows[0]
+    const opp = (await client.query(`${OPP_FIELDS} where id = $1`, [art.opp_id])).rows[0]
     if (!opp) return { status: 404, headers: HEADERS, jsonBody: { error: 'opportunity not found' } }
 
     // G6: COPY the designed Slides template and fill its placeholders.
@@ -462,14 +508,16 @@ export async function packetBuildAll(req: HttpRequest, context: InvocationContex
     const guard = requireWrite(req); if (guard) return guard
     if (!HAS_GOOGLE_OAUTH) return { status: 200, headers: HEADERS, jsonBody: { error: 'GOOGLE_REFRESH_TOKEN not set' } }
     client = await getPgClient(); await ensureContentColumn(client)
-    const opp = (await client.query(`select company, role, comp_range, why_surfaced, company_signals, pain_hypotheses, persona_key from opportunity where id = $1`, [oppId])).rows[0]
+    const opp = (await client.query(`${OPP_FIELDS} where id = $1`, [oppId])).rows[0]
     if (!opp) return { status: 404, headers: HEADERS, jsonBody: { error: 'opportunity not found' } }
     const { pkt, artifacts } = await loadPacket(client, oppId)
     const results: any[] = []
     for (const a of artifacts) {
       if (!metaFor(a.type)) continue // skip video (HeyGen) + non-templated
       try {
-        const built = await buildTemplatedArtifact(client, { ...a, packet_id: pkt.id, opp_id: oppId }, opp, false)
+        // X2: this was hardcoded `false`, so a rebuild-all could never escape the cache and every
+        // remediation loop (P3.1) would have reported looping while changing nothing.
+        const built = await buildTemplatedArtifact(client, { ...a, packet_id: pkt.id, opp_id: oppId }, opp, body?.regen === true)
         results.push({ type: a.type, url: built!.url, cleanedTokens: built!.cleaned })
       } catch (e) { results.push({ type: a.type, error: String(e) }) }
     }
