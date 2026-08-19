@@ -1143,3 +1143,60 @@ banned patterns all zero. Live + independent verifier after landing.
      happens first. Same class as X3; this is why X3 had to land before the miner.
 **Verification:** 26/26 assertions green, incl. clause-boundary containment, document-not-occurrence
 counting, stopword-edge rejection, and P&L surviving the pipeline.
+
+## ACT-56 — P1.1 requirement rows (the evidence spine)
+**Status:** `landed, live measurement in progress`. Commits `f84d539`, `ec5f2b4`.
+
+**The premise the backlog got wrong, caught by reading live rows (db-query `32303342032`):**
+`jd_table`'s Item column is a model **paraphrase**, not a posting quote — real row reads
+*"Lead the operational performance of the renewable-generation portfolio."* So the backlog's
+acceptance ("each row's `verbatim` is a substring of `jd_real` at its recorded offsets") is
+**unsatisfiable by storing Items**. Storing them as `verbatim` would have fabricated quotes that
+P1.3's `verbatim_quote` and P4's citation validator would then cite as the employer's words.
+Resolution: `item_text` = the model's words; `verbatim` = the posting span the paraphrase was
+located in, a literal substring of `opportunity.jd_text` at `[char_start, char_end)` by construction.
+
+**Live corpus shape (db-query `32303334849`, `32304876196`):** 1821 opportunities · 1349 with a
+`jd_table` · 1233 with `jd_real` · 1351 under `von.ellis@enterpriseds.io`. So ~116 have a parsed
+table but **no employer posting at all** — those get `match_method='no_posting'` and null offsets.
+
+**What it refuses to fake** (each of these was an available shortcut):
+- Offsets are never resolved against `groundingText()`, whose fallback is `jd_summary`/
+  `jd_requirements` — **model output**. An offset into the model's own summary quotes the model.
+  `resolvePostingSource()` was added to `jdText.ts` (and `appJdParse.resolveJdSource` now delegates
+  to it, so the extractor cannot drift from what the parser actually read) and returns `null` rather
+  than falling back.
+- Unlocatable rows are **kept**, not dropped. Dropping them would make the substring invariant pass
+  100% while silently shrinking the requirement count.
+- `coverage` is never `covered`/`partial` — no evidence engine exists until P2/P3.
+- `competency` stays null until the term library resolves it. `jd_table`'s ATS Keyword is stored as
+  `model_keyword`: a P1.2 candidate, **never scoreable**.
+- Repeated bullets claim **distinct** spans, so one quote can never be counted as two evidences.
+
+**`nice_to_have` without a prompt change.** `JD_SYSTEM`'s Category enum has no such value. Rather
+than re-parsing 1349 postings through OpenAI, the kind is read off the **posting's own wording**
+("Preferred:", "is a plus") in a 400-char window before the located span — deterministic, and it
+backfills every existing row at zero model cost. `kind_source` records *why* each kind was chosen,
+so a defaulted one is visible instead of masquerading as something the posting asserted. An unknown
+Category falls back to the **weakest** kind, so model drift cannot invent hard requirements.
+
+**Bug the live run caught that TypeScript could not:** `resolveOwner()` returns
+`{owner, verified}`, and the whole object was passed as the `owner_email` query parameter —
+`client.query` takes `any[]`, so it compiled clean and selected **0 of 1351** eligible rows
+(api-test `32304769136`). Fixed in `ec5f2b4`. *Hardening: destructure `{ owner }` at every
+`resolveOwner` call site; a 200 with a zero count is a result to investigate, not a pass.*
+
+**Blast radius traced before landing:** `jd_table`/`jd_requirements` content and the
+`appOpportunities.ts:54` field names are **unchanged**, so all six live consumers are untouched —
+`OppDetail.jsx:378,384` and `Swipe.jsx:408,411` (`dangerouslySetInnerHTML`), `appRoleTaxonomy.ts:81`,
+`appApply.ts:199,223`, `appPackets.ts:497`, `termMiner.ts:111`. This extends that pipeline; it does
+not stand up a second one.
+
+**Wiring:** extraction runs from **all three** parse paths — `jdParse`, `jdBackfill`, and the
+5-minute `jdParseTick` that actually works the production backlog — so a posting cannot be parsed
+without gaining a spine. `applyAnchorTruth`, which nulls `jd_table`, now also drops the rows that
+quoted it. `jd_text` + `jd_text_sha256` are persisted so one SQL statement can re-verify every
+offset, and a re-fetched posting makes its rows visibly stale rather than silently wrong.
+
+**Open:** `located_rate` on real postings is the acceptance that matters — **below 50% is a failed
+acceptance, not a warning**. Not yet measured (the first backfill selected zero rows).
