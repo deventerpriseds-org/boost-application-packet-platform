@@ -1309,3 +1309,23 @@ were wrong as a direct result.
 - FLAGGED TENSION (decide before P3/P8.2): "serve as a model if we need to generate values" vs SPEC R2
   "evidence or escalate". Reconciles ONLY if O*NET/ESCO shape the PHRASING of already-evidenced
   content, never the EXISTENCE of a claim. Recorded so it is decided, not drifted into.
+
+## CORRECTION (2026-08-19): do NOT collapse the ATS scores — they measure different things
+An earlier memory entry recorded "collapse the ATS score to opportunity.ats_score". **That was wrong**
+and the owner caught it before any code was written. Ground truth in the spec:
+- `SPEC.md:366` — "Reserve 'ATS' for the keyword library and its coverage; requirements and
+  responsibilities are posting analysis."
+- `SPEC.md:324` — `score: must, kw, sen, composite` → **kw is ONE of four components**.
+- `BACKLOG:178` — `composite = 0.5*must_have + 0.3*keyword + 0.2*seniority`.
+So the spec's **ATS score = keyword coverage only = 30% of the composite**.
+Whereas `opportunity.ats_score` (appApply.atsScoreOne, prompt at :174) asks for "% of the role's
+important keywords/REQUIREMENTS the candidate demonstrably covers" — keywords AND requirements vs the
+master baseline. It is a broad MATCH score that happens to be named `ats_score`.
+**They are different populations. Keep both; fix the labels.** R4 says "say what a number counts" and
+that two labels for the SAME population must agree — not that different populations must merge.
+- `opportunity.ats_score` → surface as **Match**, never "ATS".
+- Packet header "ATS Match %" → becomes the spec's KEYWORD COVERAGE once P1.2 ships; until then it
+  must not claim to be ATS.
+- Broad per-artifact number → P2.3 `composite`.
+LESSON: "two numbers with the same label" is not automatically a one-source-per-number violation. Check
+what each MEASURES before merging. The label was the bug, not the duplication.
