@@ -96,8 +96,15 @@ export async function termsMine(req: HttpRequest, context: InvocationContext): P
       }
     }
 
+    // RANK BY SPECIFICITY, NOT RAW FREQUENCY. Sorting by df alone puts posting boilerplate on top —
+    // the first live run surfaced product(584), building(581), develop(580), systems(574),
+    // culture(569) ahead of every real term. df cannot separate "operating model" from "product"
+    // because both are frequent; phrase LENGTH can, because multi-word n-grams are far more likely to
+    // be something an employer actually asks for. df remains the stored truth; this only orders the
+    // curation queue so a human reviews the plausible terms first.
+    const specificity = (n: number, count: number) => count * (n === 1 ? 0.25 : n === 2 ? 1.0 : n === 3 ? 1.2 : 1.1)
     const kept = [...df.entries()].filter(([, v]) => v.count >= minDf)
-      .sort((a, b) => b[1].count - a[1].count).slice(0, limit)
+      .sort((a, b) => specificity(b[1].n, b[1].count) - specificity(a[1].n, a[1].count)).slice(0, limit)
 
     let upserted = 0
     for (const [norm, v] of kept) {
@@ -115,7 +122,10 @@ export async function termsMine(req: HttpRequest, context: InvocationContext): P
     return { status: 200, headers: HEADERS, jsonBody: {
       ok: true, owner, corpusSize: rows.length, distinctNgrams: df.size, minDf, maxN,
       candidatesUpserted: upserted,
-      top: kept.slice(0, 40).map(([norm, v]) => ({ term: norm, df: v.count, n: v.n })),
+      top: kept.slice(0, 40).map(([norm, v]) => ({
+        term: norm, df: v.count, n: v.n,
+        dfPct: Math.round((v.count / Math.max(1, rows.length)) * 100),   // context for the reviewer
+      })),
     } }
   } catch (err) {
     return { status: 500, headers: HEADERS, jsonBody: { error: String(err) } }
@@ -131,10 +141,13 @@ export async function termsCandidates(req: HttpRequest, context: InvocationConte
     const status = req.query.get('status') || 'pending'
     const limit = Math.min(1000, parseInt(req.query.get('limit') || '200', 10))
     client = await getPgClient()
+    const minN = Math.max(1, parseInt(req.query.get('minN') || '1', 10))
     const r = await client.query(
-      `select id, ngram, normalized, n, df, corpus_size, status, merged_into, mined_at
-         from term_candidate where owner_email = $1 and status = $2
-        order by df desc, normalized limit $3`, [owner, status, limit])
+      `select id, ngram, normalized, n, df, corpus_size, status, merged_into, mined_at,
+              round(100.0 * df / greatest(corpus_size, 1)) as df_pct,
+              df * (case n when 1 then 0.25 when 2 then 1.0 when 3 then 1.2 else 1.1 end) as specificity
+         from term_candidate where owner_email = $1 and status = $2 and n >= $3
+        order by specificity desc, normalized limit $4`, [owner, status, minN, limit])
     return { status: 200, headers: HEADERS, jsonBody: { count: r.rows.length, status, candidates: r.rows } }
   } catch (err) {
     return { status: 500, headers: HEADERS, jsonBody: { error: String(err) } }
