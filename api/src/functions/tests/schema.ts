@@ -283,6 +283,43 @@ create table if not exists term_candidate (
 );
 create index if not exists term_cand_status_idx on term_candidate(owner_email, status, df desc);
 
+-- P1.1 — the evidence spine. One row per line the employer asked for, anchored to a character range
+-- in the posting so any downstream claim can be re-read at its source.
+--
+-- item_text is what the MODEL wrote (jd_table's Item column is a paraphrase, measured on live
+-- rows). verbatim is the EMPLOYER'S own words at [char_start, char_end) in opportunity.jd_text.
+-- They are separate columns on purpose: conflating them fabricates evidence that P1.3's
+-- verbatim_quote and P4's citation validator would then cite as if the employer had written it.
+-- A row that could not be located keeps null offsets and a null verbatim rather than inventing either.
+create table if not exists requirement (
+  id             uuid primary key default uuid_generate_v4(),
+  opp_id         uuid not null references opportunity(id) on delete cascade,
+  seq            int not null,              -- jd_table row order, so re-extraction is a stable upsert
+  item_text      text not null,             -- model paraphrase. NEVER presented as a quote.
+  verbatim       text,                      -- posting substring at the offsets below, or null
+  char_start     int,
+  char_end       int,
+  match_method   text not null check (match_method in ('exact','anchored','unlocatable','beyond_model_window','no_posting')),
+  kind           text not null check (kind in ('must_have','nice_to_have','responsibility')),
+  kind_source    text not null check (kind_source in ('posting_optional_marker','category','category_default','fallback')),
+  model_keyword  text,                      -- jd_table ATS Keyword: a P1.2 candidate, never scoreable
+  competency     text,                      -- resolved by the term library (P1.2); null until then
+  coverage       text check (coverage in ('covered','partial','escalated')),
+  closed_on_loop int,
+  weight         int not null check (weight between 1 and 3),
+  source_category text,
+  jd_source      text check (jd_source in ('jd_real','raw_jd')),
+  jd_text_sha256 text not null,             -- offsets are only valid against THIS posting body
+  extractor_version int not null,
+  created_at     timestamptz not null default now(),
+  unique (opp_id, seq),
+  check ((char_start is null) = (char_end is null)),
+  check ((char_start is null) = (verbatim is null)),
+  check (char_start is null or (char_start >= 0 and char_end > char_start))
+);
+create index if not exists requirement_opp_idx on requirement(opp_id);
+create index if not exists requirement_kind_idx on requirement(opp_id, kind);
+
 -- Idempotent multi-tenant column adds (safe on tables that predate them)
 alter table persona        add column if not exists owner_email text not null default 'demo@executive-engine.local';
 alter table persona        add column if not exists is_demo boolean not null default false;
@@ -295,6 +332,12 @@ alter table opportunity    add column if not exists matched_variation text;
 alter table opportunity    add column if not exists title_tier text;
 alter table opportunity    add column if not exists is_favorite boolean not null default false;
 alter table opportunity    add column if not exists base_score int;
+-- The canonical posting text every requirement offset indexes, plus its digest. Stored, not
+-- recomputed: an offset is only meaningful against the exact string it was measured on, and jd_real
+-- is re-fetched by the backfill timer.
+alter table opportunity    add column if not exists jd_text text;
+alter table opportunity    add column if not exists jd_text_sha256 text;
+alter table opportunity    add column if not exists jd_text_truncated boolean;
 alter table packet         add column if not exists must_haves text[];
 alter table packet         add column if not exists jd_grounded boolean;
 alter table packet         add column if not exists jd_analyzed_at timestamptz;
@@ -307,5 +350,5 @@ create index if not exists opp_owner_idx2 on opportunity(owner_email);
 export const EXPECTED_TABLES = [
   'persona', 'opportunity', 'contact', 'packet', 'artifact', 'outreach_message',
   'interview', 'offer', 'library_entity', 'asset_event', 'usage_metering',
-  'term_library', 'term_library_entry', 'term_candidate'
+  'term_library', 'term_library_entry', 'term_candidate', 'requirement'
 ]

@@ -1,7 +1,8 @@
 import { app, HttpRequest, HttpResponseInit, InvocationContext, Timer } from '@azure/functions'
 import { resolveOwner, requireWrite, serverError } from './appSession'
 import { getPgClient } from './pgClient'
-import { normalizePostingText } from './jdText'
+import { normalizePostingText, resolvePostingSource, isAlertDigest } from './jdText'
+import { writeRequirements, clearRequirements, ensureRequirementCols } from './appRequirements'
 import { logUsage } from './usageMeter'
 import { openaiFetch } from './mailWatch'
 
@@ -57,19 +58,11 @@ async function fetchPageText(url: string): Promise<string | null> {
 // opp "VP Software Eng / The Phoenix Group" got jd_title "Managing VP … / Gartner" — the email subject).
 // Only a SINGLE-job source may be parsed: the real fetched posting (jd_real) or a genuine single JD
 // (extension/ATS). The shared alert email must NEVER feed the JD fields.
-function isAlertDigest(rawJd: string, whySurfaced: string): boolean {
-  const s = (rawJd || '').slice(0, 600).toLowerCase()
-  const w = (whySurfaced || '').toLowerCase()
-  return s.includes('jobalerts-noreply@linkedin.com') || s.includes('new linkedin alert') || w.includes('linkedin alert')
-}
+
 // The single-job JD text to parse, or '' when the only source is the shared alert email (refuse).
-function resolveJdSource(opp: any): string {
-  const realJd = normalizePostingText(opp.jd_real)
-  if (realJd) return realJd
-  const raw = opp.raw_jd || ''
-  if (raw && !isAlertDigest(raw, opp.why_surfaced || '')) return raw
-  return ''
-}
+// Single definition now lives in jdText.ts so the requirement extractor cannot drift from what the
+// parser actually read. Kept as a thin alias — every existing call site is unchanged.
+function resolveJdSource(opp: any): string { return resolvePostingSource(opp).text }
 const NO_JD_NOTE = 'Full job description not yet retrieved — showing the role from the alert. Use "Re-parse JD" once the full posting is fetched.'
 // Ground the JD fields to the anchor truth (role/company) instead of fabricating from the shared
 // alert email. Returns the anchor jdTitle/jdCompany the caller can echo back.
@@ -78,7 +71,24 @@ async function applyAnchorTruth(client: any, opp: any): Promise<{ jdTitle: strin
     `update opportunity set jd_title=$1, jd_company=$2, jd_summary=$3, jd_requirements=null, jd_table=null, updated_at=now() where id=$4`,
     [opp.role || null, opp.company || null, NO_JD_NOTE, opp.id],
   )
+  // jd_table is now null, so the requirement rows quote a posting this opportunity no longer has.
+  // Stale evidence is worse than none — drop it in the same call that drops the posting.
+  await clearRequirements(client, opp.id).catch(() => {})
   return { jdTitle: opp.role || '', jdCompany: opp.company || '' }
+}
+
+
+// Structure the freshly-parsed posting into requirement rows. Called from ALL THREE parse paths —
+// the HTTP handler, the backfill, and the 5-minute timer that actually works the production
+// backlog — so a posting can never be parsed without gaining a spine. Never throws: this is
+// deterministic structuring of text already stored, and a failure here must not lose the parse.
+async function structureRequirements(client: any, oppId: string, ctx?: any) {
+  try {
+    await ensureRequirementCols(client)
+    const opp = (await client.query(
+      `select id, jd_real, raw_jd, why_surfaced, jd_table from opportunity where id=$1`, [oppId])).rows[0]
+    if (opp) await writeRequirements(client, opp)
+  } catch (e) { ctx?.log?.(`requirements: skipped for ${oppId}: ${e}`) }
 }
 
 const JD_SYSTEM = `You are an executive recruiting analyst. Given job description text, extract and return ONLY JSON with these exact keys:
@@ -162,6 +172,7 @@ export async function jdParse(req: HttpRequest, context: InvocationContext): Pro
       [parsed.jdTitle || null, parsed.jdCompany || null, parsed.jdSummary || null,
        parsed.jdRequirements || null, parsed.jdTable || null, oppId]
     )
+    await structureRequirements(client, oppId, context)
     return { status: 200, headers: HEADERS, jsonBody: { ok: true, oppId, jdTitle: parsed.jdTitle, jdCompany: parsed.jdCompany } }
   } catch (err) {
     return { status: 500, headers: HEADERS, jsonBody: { error: String(err) } }
@@ -226,6 +237,7 @@ export async function jdBackfill(req: HttpRequest, context: InvocationContext): 
           [parsed.jdTitle || null, parsed.jdCompany || null, parsed.jdSummary || null,
            parsed.jdRequirements || null, parsed.jdTable || null, opp.id]
         )
+        await structureRequirements(client, opp.id, context)
         results.push({ id: opp.id, company: opp.company, role: opp.role, ok: true, jdTitle: parsed.jdTitle })
         context.log(`jd-backfill: done ${opp.company} / ${opp.role}`)
       } catch (err) {
@@ -317,6 +329,7 @@ export async function jdParseTick(timer: Timer, context: InvocationContext): Pro
           `update opportunity set jd_title=$1, jd_company=$2, jd_summary=$3, jd_requirements=$4, jd_table=$5, updated_at=now() where id=$6`,
           [parsed.jdTitle || null, parsed.jdCompany || null, parsed.jdSummary || null, parsed.jdRequirements || null, parsed.jdTable || null, opp.id]
         )
+        await structureRequirements(client, opp.id, context)
         context.log(`jd-tick: ok ${opp.company} / ${opp.role}`)
         ok++
       } catch (err) {
