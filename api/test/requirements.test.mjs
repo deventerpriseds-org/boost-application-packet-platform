@@ -96,13 +96,46 @@ test('locate is deterministic: identical inputs give identical output', () => {
 
 // ---------------------------------------------------------------- kind
 
-test('mapKind: category maps, and the POSTING is what downgrades to nice_to_have', () => {
+test('mapKind: the row OWN words decide, and say which way they decided', () => {
   assert.deepEqual(mapKind('responsibilities', 'anything'), { kind: 'responsibility', kind_source: 'category' })
-  assert.deepEqual(mapKind('experience', 'Required: 10 years'), { kind: 'must_have', kind_source: 'category' })
-  assert.deepEqual(mapKind('requirements', 'Preferred qualifications: MBA'), { kind: 'nice_to_have', kind_source: 'posting_optional_marker' })
+  assert.deepEqual(mapKind('experience', 'Minimum 10 years required'), { kind: 'must_have', kind_source: 'posting_required_marker' })
   assert.deepEqual(mapKind('skills', 'Kubernetes is a plus'), { kind: 'nice_to_have', kind_source: 'posting_optional_marker' })
   // A responsibility is never downgraded — an optional duty is still a duty.
   assert.deepEqual(mapKind('responsibilities', 'Preferred: mentor the team'), { kind: 'responsibility', kind_source: 'category' })
+})
+
+// These are the ACTUAL verbatims of rows that a live run filed as nice_to_have (78 of 541) because
+// a "preferred" up to 400 chars earlier outranked the row's own words. A citizenship gate and hard
+// year-minimums stored as optional is the worst failure this table can produce.
+test('mapKind: a hard gate in the row OWN text is never downgraded by an earlier "preferred"', () => {
+  const window = 'Preferred qualifications: MBA or advanced degree. Familiarity with FedRAMP. '
+  for (const own of [
+    'Security Clearance: Candidate must be US citizen and have the ability to obtain',
+    'must be a U.S. Citizen or Green Card Holder',
+    'Minimum of 8 years of experience in commercial lending, banking operations',
+    '15+ years of progressive technology leadership experience',
+    '10+ years of progressive leadership experience in engineering, product development',
+  ]) {
+    const r = mapKind('experience', own, window)
+    assert.equal(r.kind, 'must_have', `hard gate filed as optional: ${own}`)
+    assert.equal(r.kind_source, 'posting_required_marker')
+  }
+})
+
+test('mapKind: a span straddling both clauses resolves to the HARDER reading', () => {
+  // One located span crossing a bullet boundary: the "preferred" belongs to the degree, the
+  // "12+ years" is a gate. Hiding a real gate is worse than surfacing a dismissible one.
+  const r = mapKind('experience', "related field (Master's or MBA preferred) 12+ years of experience in data management", '')
+  assert.equal(r.kind, 'must_have')
+})
+
+test('mapKind: only a HEADING may reach back; a mid-sentence "preferred" governs its own clause', () => {
+  const own = 'Familiarity with distributed systems'
+  assert.deepEqual(mapKind('skills', own, 'Preferred qualifications: MBA or equivalent. '),
+    { kind: 'nice_to_have', kind_source: 'posting_section_heading' })
+  assert.deepEqual(mapKind('skills', own, 'A background in fintech is preferred for this role. '),
+    { kind: 'must_have', kind_source: 'category_default' },
+    'a bare "preferred" in a previous sentence must not downgrade an unrelated later bullet')
 })
 
 test('mapKind: an unstated hardness is DEFAULTED VISIBLY, never asserted as if the posting said it', () => {
@@ -113,7 +146,7 @@ test('mapKind: an unstated hardness is DEFAULTED VISIBLY, never asserted as if t
 
 test('mapKind: unknown category falls back to the WEAKEST kind, and never to null', () => {
   for (const c of ['', 'other', undefined, 'Responsibilties']) {
-    const r = mapKind(c, '')
+    const r = mapKind(c, '', '')
     assert.equal(r.kind, 'responsibility', 'model drift must not silently invent hard requirements')
     assert.equal(r.kind_source, 'fallback')
   }

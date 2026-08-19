@@ -9,10 +9,12 @@
 // The backlog's acceptance ("each row's verbatim is a substring of jd_real at its offsets") is
 // therefore NOT satisfiable by storing Items — a paraphrase has no offsets in the posting.
 //
-// So the Item is kept as `paraphrase`, and `verbatim` is resolved back to the posting's OWN words by
+// So the Item is kept as `item_text`, and `verbatim` is resolved back to the posting's OWN words by
 // locating the span the paraphrase was derived from. `verbatim` is then a literal substring of
-// `groundingText(opp)` at [char_start, char_end) by construction, and a row that cannot be located
-// says so (`match_method='unlocated'`, null offsets) instead of quoting text the employer never wrote.
+// `resolvePostingSource(opp).text` at [char_start, char_end) by construction — NOT of
+// `groundingText()`, whose fallback is the model's own summary. A row that cannot be located says so
+// (`match_method='unlocatable'` / `'no_posting'`, null offsets) instead of quoting text the employer
+// never wrote.
 //
 // Nothing here calls a model. Re-running it on unchanged inputs produces identical rows.
 import { createHash } from 'node:crypto'
@@ -25,7 +27,13 @@ export type MatchMethod =
   | 'unlocatable'           // nothing reached the threshold, though a posting was available
   | 'beyond_model_window'   // unlocatable AND the posting is longer than the parser ever saw
   | 'no_posting'            // no employer text exists to offset into at all
-export type KindSource = 'posting_optional_marker' | 'category' | 'category_default' | 'fallback'
+export type KindSource =
+  | 'posting_required_marker'  // the row's OWN text says must/required/N+ years
+  | 'posting_optional_marker'  // the row's OWN text says preferred/a plus
+  | 'posting_section_heading'  // a "Preferred qualifications" heading precedes it
+  | 'category'                 // the jd_table Category, corroborated by wording nearby
+  | 'category_default'         // the category's default; the posting asserted neither way
+  | 'fallback'                 // unrecognised Category — weakest kind, never a hard requirement
 
 /** Bump when the extraction rules change, so rows made under old rules are identifiable. */
 export const EXTRACTOR_VERSION = 1
@@ -94,7 +102,13 @@ export function parseJdTable(html: any): JdTableRow[] {
 // already-parsed rows without re-running a single model call.
 const OPTIONAL_RE = /\b(preferred|preferable|preferably|nice[- ]to[- ]have|a plus|bonus|desirable|desired|ideally|advantageous|not required|would be great)\b/i
 
-const REQUIRED_RE = /\b(must have|must be|required|requirement|minimum|at least|you have|proven)\b/i
+const REQUIRED_RE = /\b(must have|must be|must possess|required|requirement|minimum|at least|\d+\+?\s*years|you have|proven)\b/i
+
+// A HEADING says the whole section is optional ("Preferred qualifications:"). A bare "preferred"
+// mid-sentence does not — it qualifies its own clause and nothing after it. Only heading-shaped
+// matches are allowed to reach back and downgrade a later bullet, because the look-back window
+// crosses bullet boundaries by design (the heading it is looking for sits before them).
+const OPTIONAL_SECTION_RE = /\b((preferred|desired|desirable|bonus|additional|nice[- ]to[- ]have)\s+(qualification|skill|experience|requirement|competenc|attribute)\w*|(preferred|desired|desirable|bonus|optional|nice[- ]to[- ]have)s?\s*:|bonus points|pluses)/i
 
 const CATEGORY_KIND: Record<string, Kind> = {
   responsibilities: 'responsibility',
@@ -107,25 +121,41 @@ const CATEGORY_KIND: Record<string, Kind> = {
 }
 
 /**
- * Map a jd_table Category to a kind, then let the posting's own wording downgrade it to
- * `nice_to_have`. `context` is the posting text around the located span (the section heading that
- * says "Preferred qualifications" usually sits BEFORE the bullet, which is why a window is used and
- * not the bullet alone). Responsibilities are never downgraded — an optional duty is still a duty.
- * Unknown categories fall back to must_have rather than null: zero rows may have a null kind.
+ * Map a jd_table Category to a kind, letting the posting's own wording decide.
+ *
+ * `ownText` is the requirement's own quoted text. `windowText` is the ~400 characters of posting
+ * before it, which exists ONLY to find a section heading ("Preferred qualifications:") — headings
+ * sit before the bullets they govern, so the window necessarily crosses bullet boundaries.
+ *
+ * PRECEDENCE MATTERS, and it was wrong the first time. Testing the window's "preferred" before the
+ * row's own words filed hard gates as optional: measured 78 of 541 nice_to_have rows carried a
+ * mandatory marker in their OWN text and no optional marker in it — including "must be a U.S.
+ * Citizen" and "Minimum of 8 years of experience". A row's own words now beat anything the window
+ * says, and only heading-shaped window matches may downgrade at all.
+ *
+ * When a row's own text contains BOTH ("Master's or MBA preferred ... 12+ years of experience" — one
+ * span straddling two clauses), it resolves to must_have. Hiding a real gate is the worse error:
+ * an inflated requirement produces a visible gap a human can dismiss, while a missed one produces a
+ * confident application against a bar the candidate does not clear.
+ *
+ * Responsibilities are never downgraded — an optional duty is still a duty. Unknown categories fall
+ * back to `responsibility`, the WEAKEST claim, so model drift can never silently invent hard
+ * requirements. Zero rows may have a null kind.
  */
-export function mapKind(category: string, context: string): { kind: Kind; kind_source: KindSource } {
+export function mapKind(category: string, ownText: string, windowText = ''): { kind: Kind; kind_source: KindSource } {
   const key = (category || '').toLowerCase().trim()
   const base = CATEGORY_KIND[key]
-  // Unknown Category (model drift, casing, a new value) must still produce a kind — zero rows may
-  // be null. It falls back to `responsibility`, the WEAKEST claim, so drift can never silently
-  // invent hard requirements.
   if (base === undefined) return { kind: 'responsibility', kind_source: 'fallback' }
   if (base === 'responsibility') return { kind: 'responsibility', kind_source: 'category' }
-  if (OPTIONAL_RE.test(context || '')) return { kind: 'nice_to_have', kind_source: 'posting_optional_marker' }
-  if (REQUIRED_RE.test(context || '')) return { kind: 'must_have', kind_source: 'category' }
-  // The posting said neither "preferred" nor "required". The enum has no neutral member, so the
-  // category's default stands — but `kind_source` records that nothing in the posting asserted it,
-  // and `weight` stays 2 rather than 3. A reader can filter these out; they are not disguised.
+
+  const own = ownText || ''
+  if (REQUIRED_RE.test(own)) return { kind: 'must_have', kind_source: 'posting_required_marker' }
+  if (OPTIONAL_RE.test(own)) return { kind: 'nice_to_have', kind_source: 'posting_optional_marker' }
+  if (OPTIONAL_SECTION_RE.test(windowText)) return { kind: 'nice_to_have', kind_source: 'posting_section_heading' }
+  if (REQUIRED_RE.test(windowText)) return { kind: 'must_have', kind_source: 'category' }
+  // The posting asserted neither. The enum has no neutral member, so the category's default stands —
+  // but `kind_source` records that nothing in the posting said so, and `weight` stays 2 rather
+  // than 3. A reader can filter these out; they are not disguised.
   return { kind: 'must_have', kind_source: 'category_default' }
 }
 
@@ -283,13 +313,11 @@ export function buildRequirements(opp: any): BuildResult {
     if (method === 'unlocatable' && truncated) method = 'beyond_model_window'
     if (loc.char_start !== null && loc.char_end !== null) taken.push({ start: loc.char_start, end: loc.char_end })
 
-    // A section heading ("Preferred qualifications:") sits BEFORE the bullet, so read a window back
-    // through the posting. With no located span there is no posting context to read — fall back to
-    // the model's own item text, and `kind_source` will record that the category defaulted.
-    const context = loc.char_start === null
-      ? r.item
-      : `${jdText.slice(Math.max(0, loc.char_start - 400), loc.char_end as number)} ${r.item}`
-    const { kind, kind_source } = mapKind(r.category, context)
+    // The row's OWN words: the posting's text when located, else the model's item. The window is
+    // only ever consulted for a section heading, and only when the row's own words say nothing.
+    const ownText = `${loc.verbatim || ''} ${r.item}`
+    const windowText = loc.char_start === null ? '' : jdText.slice(Math.max(0, loc.char_start - 400), loc.char_start)
+    const { kind, kind_source } = mapKind(r.category, ownText, windowText)
 
     return {
       item_text: r.item,

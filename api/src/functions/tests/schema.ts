@@ -301,7 +301,7 @@ create table if not exists requirement (
   char_end       int,
   match_method   text not null check (match_method in ('exact','anchored','unlocatable','beyond_model_window','no_posting')),
   kind           text not null check (kind in ('must_have','nice_to_have','responsibility')),
-  kind_source    text not null check (kind_source in ('posting_optional_marker','category','category_default','fallback')),
+  kind_source    text not null check (kind_source in ('posting_required_marker','posting_optional_marker','posting_section_heading','category','category_default','fallback')),
   model_keyword  text,                      -- jd_table ATS Keyword: a P1.2 candidate, never scoreable
   competency     text,                      -- resolved by the term library (P1.2); null until then
   coverage       text check (coverage in ('covered','partial','escalated')),

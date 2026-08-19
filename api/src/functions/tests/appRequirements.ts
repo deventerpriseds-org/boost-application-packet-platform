@@ -18,6 +18,12 @@ export async function ensureRequirementCols(client: any) {
       add column if not exists jd_text text,
       add column if not exists jd_text_sha256 text,
       add column if not exists jd_text_truncated boolean`)
+  // kind_source gained three values when mapKind's precedence was corrected. `create table if not
+  // exists` cannot widen a CHECK on a table that already exists, so an environment migrated before
+  // that change would reject every insert. Drop and re-add explicitly.
+  await client.query(`alter table requirement drop constraint if exists requirement_kind_source_check`)
+  await client.query(`alter table requirement add constraint requirement_kind_source_check
+    check (kind_source in ('posting_required_marker','posting_optional_marker','posting_section_heading','category','category_default','fallback'))`)
 }
 
 /**
