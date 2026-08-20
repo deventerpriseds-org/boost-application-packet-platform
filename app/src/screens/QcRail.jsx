@@ -503,7 +503,15 @@ export default function QcRail({ packetId, company, role, entries, setResult, re
         {/* The score. A composite is only shown when the server computed one; today it never does,
             because two of its three parts have no source. The parts say why, in the server's words. */}
         <div style={{ width: 230, flexShrink: 0 }}>
+          {/* The packet has NO composite of its own, and averaging three artifacts into one would be
+              exactly the fabricated number computeArtifactScore refuses to produce. So this is one
+              asset's score, and it says which. */}
           <div className="px-small" style={{ letterSpacing: '.4px', textTransform: 'uppercase' }}>Match</div>
+          <div className="px-small">
+            {scoreEntry
+              ? scoreEntry.label + ' only - there is no packet-wide score, and averaging the assets would invent one'
+              : 'no asset in this packet has a score'}
+          </div>
           <div data-qc={QC_HOOKS.headline} style={{ marginTop: 2 }}>
             {headline.hasNumber
               ? <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
