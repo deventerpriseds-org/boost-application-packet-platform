@@ -43,14 +43,25 @@ export function GateBadge({ result, loading, error, onClick, compact = false }) 
   // The badge shows the SERVER's own count, read through the one selector rather than re-derived
   // here. Where that number and the rows it sent disagree, reconcile() reports the disagreement in
   // the drawer; the badge never quietly substitutes a number of its own.
-  const n = attentionSplit(result).counted
+  // `fix` and `review` SEPARATELY, never the total under one label.
+  //
+  // This read `.counted` — the server's total across both engines — and rendered it as "N to fix".
+  // With 1 deterministic finding and 3 reviewer ones it said "4 to fix", telling the reader to fix
+  // three things the reviewer merely raised and that can never fail an artifact (D6). R4's second
+  // sentence is that fixes and reviews are always counted separately AND LABELLED; the badge that
+  // rule exists to protect was the surface breaking it.
+  //
+  // `counted` is still the server's own number and still worth showing where it DISAGREES with the
+  // rows — that is what reconcile() reports in the drawer. It is just not a count of things to fix.
+  const split = attentionSplit(result)
   const title = m.word + ' - ' + m.blurb + (result.computedAt ? ' (checked ' + fmtWhen(result.computedAt) + ')' : '')
   return (
     <span onClick={onClick} title={title} role={onClick ? 'button' : undefined} tabIndex={onClick ? 0 : undefined}
       onKeyDown={onClick ? (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClick(e) } } : undefined}
       style={{ display: 'inline-flex', alignItems: 'center', gap: 6, cursor: onClick ? 'pointer' : 'default' }}>
       <Pill tone={m.tone}>{m.word}</Pill>
-      {n > 0 && <Pill tone={result.gate === 'fail' ? 'red' : 'yellow'}>{n} to fix</Pill>}
+      {split.fix > 0 && <Pill tone={result.gate === 'fail' ? 'red' : 'yellow'}>{split.fix} to fix</Pill>}
+      {split.review > 0 && <Pill tone="yellow">{split.review} to review</Pill>}
       {!compact && result.override && <Pill tone="accent">exception</Pill>}
     </span>
   )

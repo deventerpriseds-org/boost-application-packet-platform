@@ -330,10 +330,13 @@ export default function PacketBuilder({ id, step }) {
     finally { setParseBusy(false) }
   }
 
-  const buildAll = async () => {
+  // X2's remaining half. `api.buildFullPacket` has always forwarded its options and the API has
+  // always read `regen` — the UI simply never set it, so a control labelled "Rebuild" replayed the
+  // cached package. Same shape as the Re-run button: a server capability with no consumer.
+  const buildAll = async (opts = {}) => {
     setAllBusy(true)
     try {
-      const r = await api.buildFullPacket(id, {})
+      const r = await api.buildFullPacket(id, opts.regen ? { regen: true } : {})
       if (r.error) throw new Error(r.error)
       toast(`Built ${(r.artifacts || []).filter((x) => x.url).length} documents — nothing sent`)
       load()
@@ -550,7 +553,7 @@ export default function PacketBuilder({ id, step }) {
       open={atsOpen} onClose={() => setAtsOpen(false)}
       req={req.data} keywordScore={keywordScore}
       coveredKw={coveredKw} missingKw={missingKw} gapsScoredAt={p.atsGapsScoredAt} atsScore={atsScore}
-      onBuildAll={buildAll} buildBusy={allBusy}
+      onBuildAll={() => buildAll({ regen: true })} buildBusy={allBusy}
       onGoResume={() => { setAtsOpen(false); setActiveStep('resume') }} />
   )
 

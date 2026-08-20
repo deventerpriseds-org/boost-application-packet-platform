@@ -266,3 +266,30 @@ test('unknown keys degrade to something readable rather than disappearing', () =
   assert.equal(assetLabel('some_new_type'), 'some new type')
   assert.equal(assetLabel(null), 'Asset')
 })
+
+// The badge labelled the SERVER'S TOTAL as "to fix". With 1 deterministic finding and 3 reviewer
+// ones it rendered "4 to fix" — telling the reader to fix three things the reviewer merely raised,
+// which under D6 can never fail an artifact. R4's second sentence is that fixes and reviews are
+// always counted separately AND LABELLED, and the badge that rule exists to protect was the surface
+// breaking it. Found by the independent P8 acceptance author reading shipped code, not by any test
+// here: the split selector was built correctly and then the badge did not use it.
+test('the badge labels fixes and reviews separately — never the total under one label', () => {
+  const row = (engine, state) => ({ check_key: 'k', engine, state, observed: '', expected: '', offenders: [] })
+  const payload = {
+    gate: 'warn', attention: 4,
+    results: [row('deterministic', 'fail'), row('reviewer', 'warn'), row('reviewer', 'warn'), row('reviewer', 'fail')],
+  }
+  const s = attentionSplit(payload)
+  assert.equal(s.fix, 1, 'only the deterministic finding is a thing to FIX')
+  assert.equal(s.review, 3, 'the three reviewer rows are things to REVIEW')
+  assert.notEqual(s.fix, s.counted, 'the fix count must not be the server total')
+
+  // The structural half: the badge must read the split, not `.counted`. Comments stripped so the
+  // guard cannot fire on the explanation of the bug it forbids.
+  const src = readFileSync(new URL('../src/screens/AssetGateDrawer.jsx', import.meta.url), 'utf8')
+    .replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/[^\n]*$/gm, '')
+  const badge = src.slice(src.indexOf('function GateBadge'), src.indexOf('function GateBadge') + 1600)
+  assert.ok(!/\{\s*n\s*\}\s*to fix/.test(badge), 'the badge must not render a single total as "to fix"')
+  assert.match(badge, /split\.fix[\s\S]{0,80}to fix/, 'it must render the deterministic count as the fix count')
+  assert.match(badge, /split\.review[\s\S]{0,80}to review/, 'and the reviewer count under its own label')
+})
