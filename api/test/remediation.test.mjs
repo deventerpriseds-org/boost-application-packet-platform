@@ -388,6 +388,8 @@ test('a second run starts after the highest pass already recorded', () => {
 // whatever it is called.
 import { runChecks, COVERAGE_THRESHOLD, coversText } from '../dist/functions/tests/checks.js'
 
+const COVERAGE_REQ = 'led a platform modernization programme across four business units'
+
 const COVERAGE_CASES = [
   ['exact restatement',        'led a platform modernization programme across four business units'],
   ['partial overlap',          'led a modernization programme'],
@@ -397,25 +399,57 @@ const COVERAGE_CASES = [
   ['single short word',        'led'],
 ]
 
-test('P3-15 the loop and the gate agree on every input — one rule, not two', () => {
-  const requirement = 'led a platform modernization programme across four business units'
-  for (const [label, text] of COVERAGE_CASES) {
-    // The gate's verdict, from the engine that actually sets must_have_coverage.
-    const rs = runChecks({
-      type: 'resume',
-      pkg: { ResumeSummary: text, SkillsBullets1: '', SkillsBullets2: '', ExpertiseBullets: '',
-             RelevantBullets1: '', RelevantBullets2: '', RelevantBullets3: '' },
-      company: 'Trinnex',
-      requirements: [{ id: 'r1', seq: 1, verbatim: requirement, item_text: requirement, kind: 'must_have' }],
-      postingText: requirement, profileText: '',
-    })
-    const mh = rs.find(r => r.check_key === 'must_have_coverage')
-    const gateSaysCovered = mh.state === 'pass'
-    // The loop's verdict, from the predicate it credits closes with.
-    const loopSaysCovered = coversText(text, { verbatim: requirement, item_text: requirement })
-    assert.equal(loopSaysCovered, gateSaysCovered,
-      `${label}: the loop says ${loopSaysCovered} and the gate says ${gateSaysCovered} — that is two definitions of "covered"`)
-  }
+// ---------------------------------------------------------------------------------------------
+// P3-15 — BLOCKING CONFLICT WITH P8.3 (conflict-register C6). Pinned, not papered over.
+//
+// P8.3 landed on main and moved what `must_have_coverage` MEASURES. It no longer looks at the
+// generated document at all: it asks whether an evidence row resolved for that requirement from the
+// owner's stored profile. Measured on the merged engine:
+//
+//   document restates the requirement VERBATIM, no evidence rows      -> not_applicable
+//   document restates the requirement VERBATIM, req unevidenced       -> fail
+//   document is "I enjoy sailing and baking bread", req evidenced     -> pass
+//
+// P3's loop closes requirements by REWRITING MERGE FIELDS. Under this model no rewrite can move the
+// gate, so the loop as built will rewrite, observe zero closes, halt `no_progress` after one pass
+// and escalate everything. It invents nothing and reports honestly — but it cannot close anything.
+//
+// That is a design conflict between two lanes, not a bug in either, and it needs an owner decision
+// (see .claude/QC-EVIDENCE-PLAN.md). It is pinned here so it CANNOT be forgotten: if anyone changes
+// the coverage model again in either direction, these fail and name what moved.
+// ---------------------------------------------------------------------------------------------
+
+const evidenceRun = (text, evidence) => runChecks({
+  type: 'resume',
+  pkg: { ResumeSummary: text, SkillsBullets1: '', SkillsBullets2: '', ExpertiseBullets: '',
+         RelevantBullets1: '', RelevantBullets2: '', RelevantBullets3: '' },
+  company: 'Trinnex',
+  requirements: [{ id: 'r1', seq: 1, verbatim: COVERAGE_REQ, item_text: COVERAGE_REQ, kind: 'must_have' }],
+  postingText: COVERAGE_REQ, profileText: 'a profile', evidence,
+}).find(r => r.check_key === 'must_have_coverage')
+
+test('P3-15 CONFLICT: the gate now ignores the document — a verbatim restatement does not cover', () => {
+  assert.equal(evidenceRun(COVERAGE_REQ, undefined).state, 'not_applicable',
+    'no evidence rows: absent evidence is not_applicable, never pass')
+  assert.equal(evidenceRun(COVERAGE_REQ, { profileReadable: true, bySeq: {} }).state, 'fail',
+    'the document restates the requirement word for word and the gate still calls it uncovered')
+})
+
+test('P3-15 CONFLICT: an unrelated document passes when the requirement is evidenced', () => {
+  const r = evidenceRun('I enjoy sailing and baking bread.',
+    { profileReadable: true, bySeq: { 1: { excerpt: 'ran a platform modernization programme' } } })
+  assert.equal(r.state, 'pass',
+    'coverage is decided by the evidence row alone; the generated text is not consulted')
+})
+
+test('P3-15 CONSEQUENCE: no merge-field rewrite can close a requirement under the merged gate', () => {
+  // This is the sentence that matters for P3: the loop\'s closing mechanism is inert. Asserted so
+  // that the day the models are reconciled, this test fails and someone re-reads the loop.
+  const before = evidenceRun('nothing relevant here', { profileReadable: true, bySeq: {} })
+  const after = evidenceRun(COVERAGE_REQ, { profileReadable: true, bySeq: {} })
+  assert.equal(before.state, after.state,
+    'rewriting the document from irrelevant to a verbatim restatement changed the gate — the conflict is resolved and P3 should be revisited')
+  assert.equal(after.state, 'fail')
 })
 
 test('P3-15 creditClosures itself obeys the gate — a renamed second rule cannot hide', () => {

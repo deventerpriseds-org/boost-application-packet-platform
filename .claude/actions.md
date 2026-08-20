@@ -1770,6 +1770,99 @@ or worse, assumed P3 was underway and built on top of nothing.
 
 P3 restarted 2026-08-20 as a fresh lane on `claude/qc-p3-remediation` — a restart, not a resume.
 
+---
+
+## ACT-67 — P8.3 / R2: evidence excerpts on every coverage claim (branch `claude/qc-p8-3-evidence`)
+
+**Cold ACs:** `docs/qc-evidence/AC-P8.3.md`, written by an independent AC session against `main` at
+`f4c2f43` with no sight of the implementation plan (branch `claude/qc-p8-3-acs`, commit `e778c82`).
+
+**What changed.** Conflict-register **C6** — "coverage counts recomputed from evidence rows, not from
+term placement" — is now true in the code. `checks.must_have_coverage` and
+`responsibilities_addressed` count a requirement as covered only when a verbatim excerpt of the
+candidate's *stored profile* resolves against it. A new pure module `evidence.ts` finds that excerpt;
+`requirement_evidence` stores it; `appFacts.sourceText()` — still the ONE profile reader — was
+extended to return named records rather than only a joined blob.
+
+**Four defects found while doing it, each now an H-case (proved by reverting the fix):**
+
+- **H28** — the must-have numerator credited requirements nothing measured. The check's fail branch
+  divided by `mustHaves.length` while its numerator came from `coverable` alone, and
+  `computeArtifactScore` recomputed the wider denominator a third time. On the live Trinnex shape
+  (4 must-haves, 3 of them eligibility clauses `template_reach` had just reported as
+  `not_applicable`, 1 judged and failing) it printed **"3/4 must-haves covered"** and scored **75**.
+  Revert-proof: restoring either half fires the case — `75 !== 0`, and
+  `got "3/4 must-haves evidenced"`.
+- **H29** — an evidence quote must be a substring of the record it NAMES. Validating against
+  `sourceText().text` (the join of the template and every MasterContext field) accepts a sentence
+  half in one job's history and half in another's. This is H16 in a new place. Revert-proof:
+  resolving against the concatenation returns a row where the correct code returns `null`.
+- **H30** — an unreadable profile is not an empty profile. Resolving against a failed Google/Table
+  read yields zero evidence rows for every requirement, and zero rows presented as a number is "0%
+  covered" meaning "we did not look". The mirror error is equally available: filing a *readable*
+  profile that supports nothing as `not_applicable` drops the row from the denominator and the packet
+  reads 100% with a hard requirement unmet. Revert-proof: both directions fire the case.
+
+- **H32** — see D-A below.
+- **H31** — `covers()` returns false for a requirement it CANNOT judge (fewer than three content
+  words), which is the right answer for coverage and the wrong one for the new `evidence_placed`
+  check. Live Trinnex row #5 "Experience in leading technology operations" reduces to two tokens,
+  both of which the resume summary contains verbatim — and the first version of the check named it
+  "absent from this asset". Caught in a live-shaped reproduction before merge. Revert-proof: putting
+  unjudgeable rows back in the offender list fires the case with the exact string.
+
+**Independent verification:** `docs/qc-evidence/VERIFY-P8.3.md` (branch `claude/qc-p8-3-verify`,
+commit `8edd575`), by a separate agent against `8bf2b59`. All five revert-proofs reproduced
+independently; 637 adversarial probes against the substring claim found zero violations; the live
+`1/5` / score `20` defect confirmed from the stored rows without taking this lane's word for it.
+It found **seven** things this lane had not, and five are now fixed here:
+
+- **D-C, the significant one — the 75% H28 killed was still on screen.** `app/src/qcRail.js`
+  `coverageCards` computed `closed = total - |offenders|` over EVERY must_have row. That agreed with
+  the old check by construction; moving the check's denominator to `coverable` and leaving the rail
+  on the full population made them disagree by exactly the excluded rows — "3 of 4 closed", 75%,
+  from the same three rows, while the check beside it said 0/1. The fix was applied where the
+  H-case looked and not at the other consumer, which is the "fix all consumers" rule's own named
+  failure mode. Now fixed: the rail reads the excluded seqs off the same offender contract
+  (`template_reach`, `facts_needed`, `fact_shortfall`) and reports them `unmeasured`, never
+  `closed`. Two app tests, revert-proven.
+- **D-A → H32 — a quote can be a TRUE SUBSTRING and still be the wrong five characters.**
+  `locate`'s exact branch indexed `postingText.toLowerCase()`; `toLowerCase()` is not
+  length-preserving (U+0130 → two code units), so every such character before a match shifted the
+  offset. Measured: char_start 20 for a phrase beginning at 15, storing an excerpt with "led t" cut
+  off the front and " and " glued on the end — and `slice(20,86) === verbatim` is TRUE, so every
+  substring guard in the codebase passed it. Pre-existing and live on `requirement.verbatim`; P8.3
+  pointed it at the candidate's own words, where a garbled "your own words" is worse.
+  `EXTRACTOR_VERSION` bumped to 2 so rows extracted under the old rule are findable.
+- **D-E** — H4b greps only `checks.ts`; the accusation had moved to `evidence.ts` and gone
+  unguarded. Extended.
+- **D-F** — `EVIDENCE_THRESHOLD` and `MIN_JUDGEABLE_TOKENS` decide whether a requirement counts as
+  evidenced, and `writeEvidence` was called with no options, so they were overridable in principle
+  and fixed in production. Now on `CheckThresholds`, stored in
+  `owner_search_prefs.chk_evidence_threshold` / `chk_evidence_min_tokens`, and passed to the
+  resolver on the production path.
+- **D-G-1** — `evaluateArtifact` rebuilt `EvidenceRow` with `record_sha256: ''` and
+  `resolver_version: 0` while the real columns sat in the row it had already selected. Inert, and
+  one edit away from a digest field holding a value no digest produced. Now reads the columns.
+- **D-B** — the substring guard is a tautology (`locate` constructs its verbatim by slicing), so
+  `refused` is structurally always 0. Kept as defence in depth, and the comment now says so instead
+  of implying a population that cannot be non-zero.
+- **D-D, NOT fixed** — stored evidence is never re-validated on read, so after the owner edits a
+  MasterContext block the JD payload serves the old quote at the old offsets with no `stale` flag.
+  A real fix reads the profile on every requirements GET, which is a design decision about cost, not
+  a patch. Recorded rather than rushed.
+
+**Deliberately not fixed, recorded instead:** `appReviewer.ts:183` computes `engineJudged` as every
+must-have row, while the check judges only `coverable` — so reviewer agreement is still measured
+against a wider population than the engine judged. Pre-existing, unchanged by this lane, and a real
+fix needs `artifact_score` to store which rows were judged. P4's surface, not this one's.
+
+**Left for the UI lanes:** `app/src/assetGate.js:53` labels the check "Must-haves this document
+covers", which is no longer what it measures ("evidenced by your profile" is). The JD-step expansion
+(SPEC §4.1, ACs 42-50) is served by the API — `GET /api/app/opportunity/{id}/requirements` now
+returns `evidenced`, `evidence{quote,sourceKind,sourceLabel,...}` and `evidenceNote` per row — but the
+disclosure control itself is P5.4/P8.7 territory and is not built here.
+
 
 ## ACT — P3 remediation loop built (PR #14, `claude/qc-p3-remediation`, 2026-08-20)
 
@@ -1792,12 +1885,12 @@ with the fix reverted before it was kept:**
 
 | ID | The defect | Why it mattered |
 |---|---|---|
-| H29 | `writeSwaps` ran `delete from swap_decision where packet_id=$1` on every build, and the table had no `loop` column | pass 2 destroyed pass 1's swap record — the loop deleting its own justification for every change it had just made |
-| H30 | generation and rendering were one function | 4 passes x 4 templated artifacts = 16 Drive copies per packet, and there is no Drive `DELETE` anywhere in this codebase, so 15 would be orphaned on the quota-bearing OAuth account |
-| H31 | `insertion.loop` derived as `max(loop)+1` INSIDE the writer | it counted document RENDERS, advancing even on a cache hit that made zero model calls. The same guard caught `packet.round`: read by `loadPacket`'s ORDER BY and by `packetShape`, written by nothing, so the ordering was a no-op and the API reported `round: 1` forever |
-| H32 | `converged` was a word the writer could simply choose | now a table CHECK plus a composite FK into `check_result`, so the coverage state on a loop row can only be COPIED from a check the engine really recorded |
-| H33 | the loop could have grown a second definition of "covered" | `checks.covers()` decides the GATE; a second implementation drifts, and the day it drifts the loop claims closes the gate does not recognise |
-| H34 | **the composite FK's UNIQUE target was added at the FOOT of `SCHEMA_SQL`** | Postgres wants it at CREATE TABLE time, so `create table remediation_loop` **aborts the entire migration on any database where `check_result` already exists — i.e. production**. A fresh DB was fine. No test here could catch it: the schema is never executed in the sandbox |
+| H34 | `writeSwaps` ran `delete from swap_decision where packet_id=$1` on every build, and the table had no `loop` column | pass 2 destroyed pass 1's swap record — the loop deleting its own justification for every change it had just made |
+| H35 | generation and rendering were one function | 4 passes x 4 templated artifacts = 16 Drive copies per packet, and there is no Drive `DELETE` anywhere in this codebase, so 15 would be orphaned on the quota-bearing OAuth account |
+| H36 | `insertion.loop` derived as `max(loop)+1` INSIDE the writer | it counted document RENDERS, advancing even on a cache hit that made zero model calls. The same guard caught `packet.round`: read by `loadPacket`'s ORDER BY and by `packetShape`, written by nothing, so the ordering was a no-op and the API reported `round: 1` forever |
+| H37 | `converged` was a word the writer could simply choose | now a table CHECK plus a composite FK into `check_result`, so the coverage state on a loop row can only be COPIED from a check the engine really recorded |
+| H38 | the loop could have grown a second definition of "covered" | `checks.covers()` decides the GATE; a second implementation drifts, and the day it drifts the loop claims closes the gate does not recognise |
+| H39 | **the composite FK's UNIQUE target was added at the FOOT of `SCHEMA_SQL`** | Postgres wants it at CREATE TABLE time, so `create table remediation_loop` **aborts the entire migration on any database where `check_result` already exists — i.e. production**. A fresh DB was fine. No test here could catch it: the schema is never executed in the sandbox |
 
 Plus one found while reviewing: a SECOND loop run restarted numbering at `n=1` and would have
 upserted over the first run's ledger — the H28 defect one table over, and worst exactly where it is
@@ -1852,7 +1945,7 @@ P3 tables created: 0
 ```
 `create index ... on swap_decision(packet_id, loop, ...)` named a column the idempotent ALTER only
 added 350 lines later. Fresh database fine; every existing database dead. Same class as the FK
-ordering bug, second instance in one file — so **H34b** generalises the guard from "composite FK
+ordering bug, second instance in one file — so **H39b** generalises the guard from "composite FK
 targets" to "any statement naming a column added later in the same script."
 
 **Standing rule from this: a schema change is not verified until it has been EXECUTED against a
@@ -1862,16 +1955,16 @@ about. The upgrade path is now proven: `BRANCH exit=0`, both P3 tables created, 
 its second unique, existing rows preserved.
 
 ### Three of my guards were INERT — they passed with their defect reinstated
-- **H29b** (all three assertions): `unique (packet_id, list, seq, loop)` occurs TWICE in `SCHEMA_SQL`
+- **H34b** (all three assertions): `unique (packet_id, list, seq, loop)` occurs TWICE in `SCHEMA_SQL`
   (inline and in the idempotent ALTER), so deleting the inline one still matched; and two
   `[\s\S]*?` spans ran past the end of their own table and matched the NEXT table that had a
   `loop int not null default 0`.
-- **H32's FK-target line and H34's "fresh database" line**, same cause. H34's was added by the very
+- **H37's FK-target line and H39's "fresh database" line**, same cause. H39's was added by the very
   commit that says an inert guard "is worse than none" — reintroduced one line below the fix.
 - All now assert on a bounded `createTable()` slice, revert-proven.
 
 ### A guard that tested spelling, not behaviour
-**H33** grepped for `COVERAGE_THRESHOLD =` and the literal `hit.length / toks.length`. The verifier
+**H38** grepped for `COVERAGE_THRESHOLD =` and the literal `hit.length / toks.length`. The verifier
 evaded it in one move: a second coverage rule named `localCovers` at threshold 0.5, wired into the
 credit decision. The grep passed and all 37 behavioural tests passed, with the loop and the gate
 disagreeing about what "covered" means. **P3-15 now pins `creditClosures` itself to the gate** across
@@ -1916,3 +2009,32 @@ That is the only step that separates a guard from a comment, and it caught two i
 in one session. One D-4 revert was attempted with a `sed` that silently failed to match; the "pass"
 that produced was recorded as **no evidence**, not as a proof, and redone with an asserting Python
 mutation. A mutation that did not apply proves nothing.
+
+
+## ACT — BLOCKING: P3's closing mechanism is inert against the post-C6 gate (2026-08-20)
+
+Found at merge time by the P3-15 agreement test, which is exactly what it was written for.
+
+P8.3 landed **C6** and `must_have_coverage` no longer reads the generated document. Measured on the
+merged engine, not inferred:
+
+```
+document restates the requirement VERBATIM, no evidence rows   -> not_applicable
+document restates the requirement VERBATIM, req unevidenced    -> fail
+document is "I enjoy sailing and baking bread", req evidenced  -> pass
+```
+
+**P3's loop closes requirements by rewriting merge fields. No rewrite can move that gate.** As built
+the loop will rewrite, observe zero closes, halt `no_progress` after one pass and escalate
+everything. It invents nothing, renders once, and reports honestly — it simply cannot close
+anything. Landing it is not harmful; presenting it as a working remediation loop would be false.
+
+Neither lane is wrong. C6 is deliberate and is the more honest model (R2: evidence or escalate). P3
+was designed against the pre-C6 gate. The likely resolution is that the loop's job becomes surfacing
+profile evidence that EXISTS but was not resolved — `profileEvidenceFor` already computes exactly
+that (P3-18) — and escalating the rest, i.e. the loop writes evidence rows rather than merge fields.
+**That is a redesign of the closing mechanism and it is NOT done. Owner decision needed.**
+
+Pinned as three tests (`P3-15 CONFLICT` / `P3-15 CONSEQUENCE`) so that whichever way the models are
+reconciled, the change fails a test that names what moved rather than silently un-breaking or
+further breaking the loop.

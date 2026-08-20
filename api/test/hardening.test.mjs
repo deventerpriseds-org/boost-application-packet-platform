@@ -17,13 +17,14 @@ import { join } from 'node:path'
 
 import { normalizePostingText, decodeEntities, groundingText } from '../dist/functions/tests/jdText.js'
 import { buildRequirements, locate, mapKind, sentenceBounds } from '../dist/functions/tests/requirements.js'
-import { onOmitList, omitEntries, similarity } from '../dist/functions/tests/swaps.js'
+import { onOmitList, omitEntries, similarity, itemTokens } from '../dist/functions/tests/swaps.js'
 import { runChecks, gateFor, attentionCount, COVERAGE_THRESHOLD, MIN_JUDGEABLE_TOKENS } from '../dist/functions/tests/checks.js'
 import { computeArtifactScore } from '../dist/functions/tests/artifactScore.js'
 import { deriveFacts } from '../dist/functions/tests/ownerFacts.js'
 import { parseResumePackage } from '../dist/functions/tests/resumeParser.js'
 import { validateCitations, reviewerChecks } from '../dist/functions/tests/reviewer.js'
 import { extractFigures, scanEcho, claimKey, isMarked } from '../dist/functions/tests/figureEcho.js'
+import { profileRecords, resolveEvidence } from '../dist/functions/tests/evidence.js'
 
 const SRC = new URL('../src/functions/tests/', import.meta.url).pathname
 const src = (f) => readFileSync(join(SRC, f), 'utf8')
@@ -115,6 +116,14 @@ test('H4b: no accusation-grade check reaches for similarity()', () => {
   const accusing = checks.slice(checks.indexOf('const covers ='))
   assert.ok(!/\bsimilarity\(/.test(accusing),
     'coverage decides a gate; it must not be decided by a ranking heuristic')
+
+  // P8.3 moved the coverage numerator into `evidence.ts`, so the accusation moved with it. The
+  // module's own header makes "fuzzy for RANKING, never for ACCUSING" its central claim; without
+  // this line nothing stopped `similarity()` — which H4 shows rates "Skill number 0" and "Skill
+  // number 3" above 0.9 — from being wired into the path that decides whether a candidate's
+  // requirement is evidenced. Found absent by the independent verifier of P8.3.
+  assert.ok(!/\bsimilarity\(/.test(stripComments(src('evidence.ts'))),
+    'evidence decides coverage, which decides the gate; it must not be decided by a ranking heuristic')
 })
 
 // ---------------------------------------------------------------------------------------------
@@ -244,7 +253,7 @@ test('H10: SCHEMA_SQL contains no backticks and no template interpolation', () =
 // ensure*() ALTERs that pgMigrate never sees.
 test('H11: every table this layer added is registered for migration', () => {
   const schema = src('schema.ts')
-  for (const t of ['requirement', 'skill_candidate', 'swap_decision', 'insertion',
+  for (const t of ['requirement', 'requirement_evidence', 'skill_candidate', 'swap_decision', 'insertion',
                    'check_result', 'artifact_gate', 'artifact_score',
                    'term_library', 'term_library_entry', 'term_candidate']) {
     assert.ok(schema.includes(`create table if not exists ${t} `) || schema.includes(`create table if not exists ${t}(`),
@@ -258,7 +267,7 @@ test('H11: every table this layer added is registered for migration', () => {
 // H12 — Pure rule modules must stay testable without Azure or a database, or the rules stop being
 // tested and start being hoped for.
 test('H12: rule modules import neither @azure/functions nor pg', () => {
-  for (const f of ['checks.ts', 'requirements.ts', 'swaps.ts', 'insertions.ts', 'artifactScore.ts', 'jdText.ts', 'termMatch.ts']) {
+  for (const f of ['checks.ts', 'requirements.ts', 'swaps.ts', 'insertions.ts', 'artifactScore.ts', 'jdText.ts', 'termMatch.ts', 'evidence.ts']) {
     const body = src(f)
     assert.ok(!/@azure\/functions/.test(body), `${f} must stay pure`)
     assert.ok(!/from '\.\/pgClient'/.test(body), `${f} must stay pure`)
@@ -760,7 +769,227 @@ test('H26: every hardening case has its own ID', () => {
 })
 
 // ---------------------------------------------------------------------------------------------
-// H28 — A behaviour toggle the server reads and NOTHING can send. Third shipping of this class.
+// H28 — The must-have numerator credited requirements that the engine had just declared it was NOT
+// judging. `must_have_coverage`'s fail branch divided by `mustHaves.length` while its numerator came
+// from `coverable` alone (checks.ts, pre-P8.3), and `computeArtifactScore` repeated the wider
+// denominator a third time with `mustHaveTotal = reqs.filter(r => r.kind === 'must_have').length`.
+//
+// Evidence, on the shape the live Trinnex posting actually has (opp 9f9c370a: 4 must-haves, of which
+// "Reside in the East Coast of the United States", "must be a U.S. Citizen or Green Card Holder" and
+// "Active Secret security clearance required" are eligibility clauses no merge field can carry, and
+// one is judgeable): the check printed "3/4 must-haves covered" and the score returned 75 — while
+// exactly ONE requirement had been measured and it had FAILED. `template_reach` reported those three
+// as not_applicable in the same run, and the numerator counted them as covered anyway.
+//
+// This is `not_applicable` laundered into a numerator: the same defect as a check going green on
+// absent evidence (H6), one layer up, and it inflates the single number a reviewer trusts most.
+//
+// The invariant: every branch of a coverage check divides by the population it actually judged, the
+// score takes BOTH numbers from that check rather than recomputing either, and a row excluded from
+// the judgement is counted by name instead of being absorbed into the numerator.
+test('H28: a requirement nothing measured is never counted as covered', () => {
+  const reqs = [
+    { seq: 0, verbatim: 'Reside in the East Coast of the United States', item_text: '', kind: 'must_have' },
+    { seq: 1, verbatim: 'must be a U.S. Citizen or Green Card Holder', item_text: '', kind: 'must_have' },
+    { seq: 2, verbatim: 'Active Secret security clearance required', item_text: '', kind: 'must_have' },
+    { seq: 3, verbatim: 'Deep experience with roadmap strategy and execution', item_text: '', kind: 'must_have' },
+  ]
+  const results = runChecks({
+    type: 'resume',
+    pkg: { ResumeSummary: 'Owns roadmap strategy and execution with deep experience.' },
+    requirements: reqs,
+    evidence: { profileReadable: true, bySeq: {} },   // the profile supports none of them
+  })
+  const cov = results.find(r => r.check_key === 'must_have_coverage')
+  assert.equal(cov.state, 'fail')
+  assert.match(cov.observed, /^0\/1 /, `judged one requirement and it failed, so the numerator is 0/1, not 3/4 — got "${cov.observed}"`)
+  assert.match(cov.observed, /3 not reachable by any generated field/, 'the excluded rows must be counted by name, not absorbed')
+
+  // The score must reach the same conclusion, because it reads BOTH numbers off that check.
+  const score = computeArtifactScore({ requirements: reqs, checks: results })
+  assert.equal(score.must_have_coverage.value, 0,
+    'recomputing the denominator from every must_have row scores this 75 for an artifact that covered nothing')
+
+  // The structural half: the score must not grow its own denominator back. Deleting the parse and
+  // restoring `reqs.filter(r => r.kind === 'must_have').length` reproduces the incident exactly, and
+  // no runtime assertion above would notice on an input with no excluded rows.
+  const scoreSrc = stripComments(src('artifactScore.ts'))
+  assert.ok(!/kind\s*===\s*'must_have'/.test(scoreSrc),
+    'the score recomputed the must-have population instead of reading the checks denominator')
+})
+
+// ---------------------------------------------------------------------------------------------
+// H29 — An evidence quote must be a substring of the profile record it NAMES, not of the profile.
+//
+// This is H16 arriving in a new place. H16 records that `postingText.includes(quote) &&
+// requirementExists(id)` accepted a reviewer citation lifted from an unrelated part of the document,
+// and the fix was to require the quote to land inside the CITED requirement's span. P8.3's
+// acceptance sentence — "an evidence quote is a substring of the stored profile record it names" —
+// is the same rule, and the same shortcut is available: `sourceText().text` is a single blob of the
+// resume template joined to every MasterContext field, so a quote validated against IT can span two
+// unrelated records and still pass. A sentence half in one job's history and half in another's is
+// not something the candidate ever wrote.
+//
+// The invariant: resolution is per-record. A span is only evidence if the record it names contains
+// exactly those bytes at exactly those offsets; a quote that exists only in the concatenation is
+// refused rather than attributed to whichever record it started in.
+test('H29: evidence resolves against ONE named record, never against the joined profile', () => {
+  // Deliberately split across two records: the phrase exists in the concatenation and in neither
+  // record on its own.
+  const split = [
+    { key: 'workHistory1', kind: 'work_history', label: 'Work history 1', text: 'VP Engineering, Resideo. Led the platform modernization' },
+    { key: 'workHistory2', kind: 'work_history', label: 'Work history 2', text: 'programme across four product lines and retired the mainframe.' },
+  ]
+  const req = 'Led the platform modernization programme across four product lines'
+  // sourceText joins records with '\n\n'; the citation validator's match is whitespace-tolerant
+  // (reviewer.findQuoteSpans), so the separator is no protection at all.
+  const blob = split.map(r => r.text).join('\n\n').replace(/\s+/g, ' ')
+  assert.ok(blob.includes(req), 'the phrase IS in the joined profile — that is the trap')
+  assert.equal(resolveEvidence(req, split), null, 'and it is in no single record, so it is not evidence')
+
+  // And when a record genuinely does contain it, the row is the record's own bytes at its offsets.
+  const whole = profileRecords({ workHistory1: `VP Engineering, Resideo. ${req} and retired the mainframe.` }, null)
+  const ev = resolveEvidence(req, whole)
+  assert.ok(ev, 'a real match must still resolve — a guard that refuses everything is not a guard')
+  assert.equal(ev.source_key, 'workHistory1')
+  assert.equal(whole[0].text.slice(ev.char_start, ev.char_end), ev.quote)
+})
+
+// ---------------------------------------------------------------------------------------------
+// H30 — "your profile does not support this" and "we could not read your profile" are different
+// statements, and only one of them is a measurement.
+//
+// C6 moved the coverage numerator onto evidence rows. That creates a state the old numerator could
+// not reach: a run where the profile could not be read at all (the resume template is fetched live
+// over Google OAuth and MasterContext over a storage connection string — appFacts.sourceText records
+// both failures in `sources` and returns an empty string). Resolving against an empty profile
+// produces zero evidence rows for every requirement, and zero rows reported as a number is "0%
+// covered" meaning "we did not look" — an accusation against the candidate for an outage.
+//
+// The opposite error is just as available: filing a READ profile that genuinely supports nothing as
+// not_applicable drops those requirements out of the denominator, and the packet reads 100% covered
+// with a hard requirement unmet. That is H6's failure with the sign flipped.
+//
+// The invariant: an unreadable profile is not_applicable and a NULL score component (never 0, never
+// pass, never fail); a readable profile with no support is a determinate gap — fail, named, and
+// still in the denominator.
+test('H30: an unreadable profile measures nothing; a readable one that supports nothing is a gap', () => {
+  const reqs = [{ seq: 0, verbatim: 'Deep experience with Kubernetes cluster federation', item_text: '', kind: 'must_have' }]
+
+  for (const evidence of [undefined, { profileReadable: false, bySeq: {} }]) {
+    const rs = runChecks({ type: 'resume', pkg: { ResumeSummary: 'x' }, requirements: reqs, evidence })
+    const cov = rs.find(r => r.check_key === 'must_have_coverage')
+    assert.equal(cov.state, 'not_applicable', 'a run that could not read the profile measured nothing')
+    assert.notEqual(cov.state, 'pass')
+    assert.notEqual(cov.state, 'fail')
+    const score = computeArtifactScore({ requirements: reqs, checks: rs })
+    assert.equal(score.must_have_coverage.value, null, 'unknown is null, never zero')
+    assert.equal(score.composite, null)
+    assert.equal(gateFor([cov]), 'warn', 'and an unmeasured coverage row can never carry a gate to pass')
+  }
+
+  const read = runChecks({
+    type: 'resume', pkg: { ResumeSummary: 'x' }, requirements: reqs,
+    evidence: { profileReadable: true, bySeq: { 0: null } },
+  })
+  const cov = read.find(r => r.check_key === 'must_have_coverage')
+  assert.equal(cov.state, 'fail', 'we looked and found nothing — that is a gap, not an unknown')
+  assert.match(cov.observed, /^0\/1 /, 'and it stays in the denominator; dropping it reads 100%')
+  assert.match(cov.offenders[0], /no evidence found in your profile/)
+})
+
+// ---------------------------------------------------------------------------------------------
+// H31 — `covers()` returns false for a requirement it CANNOT judge, and that answer is only correct
+// for the question it was written for.
+//
+// `covers()` refuses any requirement with fewer than MIN_JUDGEABLE_TOKENS content words (H5b). For
+// COVERAGE that is right: an unjudgeable requirement must surface to a human rather than pass
+// quietly. `evidence_placed` asks the opposite-facing question — "the profile supports this and did
+// this asset say it?" — and reusing the same false there accuses a document of omitting something it
+// states.
+//
+// Evidence, live: Trinnex requirement #5 (opp 9f9c370a) is "Experience in leading technology
+// operations". `itemTokens` drops the stopwords and leaves exactly two — technology, operations —
+// and the resume summary contains both, verbatim, in that order. The first version of this check
+// printed "0/2 evidenced requirements appear in this document" and named #5 as absent from an asset
+// whose first sentence is the requirement.
+//
+// The invariant: a check reporting an offender must have been able to judge it. A row the measure
+// cannot reach is counted apart and named as unjudged, never folded into the offenders.
+test('H31: a requirement too short to measure is never reported as missing from a document', () => {
+  const req = { seq: 5, kind: 'must_have', verbatim: null, item_text: 'Experience in leading technology operations' }
+  const evidence = {
+    profileReadable: true,
+    bySeq: { 5: { quote: 'led technology operations for a regional utility', source_kind: 'work_history',
+                  source_label: 'Work history 1', source_key: 'workHistory1', char_start: 0, char_end: 47,
+                  extra: null, ratio: 1, method: 'anchored', record_sha256: '', resolver_version: 1 } },
+  }
+  const rs = runChecks({
+    type: 'resume',
+    pkg: { ResumeSummary: 'Experience in leading technology operations for utility platforms.' },
+    requirements: [req], evidence,
+  })
+  const placed = rs.find(r => r.check_key === 'evidence_placed')
+  assert.ok(!placed.offenders.some(o => /^#5\b/.test(o)),
+    `the summary literally says it; naming it absent is an accusation on absent evidence — got ${JSON.stringify(placed.offenders)}`)
+  assert.equal(placed.state, 'not_applicable')
+  assert.match(placed.observed, /none long enough to judge placement/)
+
+  // And the reason really is the token floor — the same one `covers()` publishes.
+  assert.ok(itemTokens('Experience in leading technology operations').length < MIN_JUDGEABLE_TOKENS)
+})
+
+// ---------------------------------------------------------------------------------------------
+// H32 — A quote can be a TRUE SUBSTRING at the offsets recorded and still be the wrong five
+// characters, because `toLowerCase()` is not length-preserving.
+//
+// `locate`'s exact branch searched `postingText.toLowerCase()` and used the index into that COPY as
+// an offset into the ORIGINAL. U+0130 (Turkish dotted capital I) lowercases to two code units, so
+// every one of them before a match shifts the recorded offset by one.
+//
+// Measured, found by the independent verifier of P8.3 with a record beginning
+// "İİİİİ Resideo. led the platform modernization programme across four product lines and more.":
+//     orig len 91, lower len 96
+//     locate -> char_start 20, char_end 86     (the phrase actually begins at 15)
+//     verbatim = "he platform modernization programme across four product lines and "
+// "led t" cut off the front, " and " glued on the end — and `s.slice(20, 86) === verbatim` is TRUE,
+// so every substring guard in the codebase passes it. It cleared MIN_QUOTE_CHARS, MIN_QUOTE_WORDS
+// and the 0.7 ratio. `toBmp` does not help: U+0130 is BMP.
+//
+// It matters twice over. It has always been live on `requirement.verbatim`, where it garbles the
+// employer's words; P8.3 points the same function at the candidate's own profile, where a garbled
+// "your own words" is the worse failure of the two.
+//
+// The invariant: an offset is measured on the string it indexes. A case-insensitive search runs
+// over the ORIGINAL — `m.index` and `m[0].length` are the original's — never over a folded copy,
+// because no case fold is guaranteed to preserve length.
+test('H32: an offset is measured on the string it indexes, never on a folded copy', () => {
+  const phrase = 'led the platform modernization programme across four product lines'
+  // One case-expanding character per prefix length, so a shifted offset is off by exactly that many.
+  for (const pad of ['', 'İ', 'İİ', 'İİİİİ', 'ẞ', 'ﬁﬁﬁ']) {
+    const text = `${pad} Resideo. ${phrase} and more.`
+    const truth = text.indexOf(phrase)
+    const r = locate(phrase, text)
+    assert.equal(r.char_start, truth, `pad ${JSON.stringify(pad)}: offset drifted with the fold`)
+    assert.equal(r.verbatim, phrase, `pad ${JSON.stringify(pad)}: the excerpt is the wrong characters`)
+    // The substring property held even when it was WRONG — which is why it cannot be the only test.
+    assert.equal(text.slice(r.char_start, r.char_end), r.verbatim)
+  }
+
+  // And the search is still case-insensitive, which is what the fold was there for.
+  const upper = 'RESIDEO. LED THE PLATFORM MODERNIZATION PROGRAMME ACROSS FOUR PRODUCT LINES and more.'
+  const u = locate(phrase, upper)
+  assert.equal(u.match_method, 'exact')
+  assert.equal(upper.slice(u.char_start, u.char_end), u.verbatim)
+  assert.equal(u.verbatim.toLowerCase(), phrase.toLowerCase())
+
+  // Structural: the folded-copy search must not come back. Nothing above would notice on ASCII.
+  const body = stripComments(src('requirements.ts'))
+  assert.ok(!/postingText\.toLowerCase\(\)/.test(body),
+    'the exact branch indexed a lower-cased copy again')
+})
+
+// H33 — A behaviour toggle the server reads and NOTHING can send. Third shipping of this class.
 //
 //   actions.md A2   `regen` honoured server-side, `appPackets.ts:454` hardcoded it false
 //   actions.md X2   made `regen` reachable — from ONE of the three routes that read it
@@ -794,17 +1023,70 @@ const UNREACHABLE_BY_DESIGN = [
   { toggle: 'direct', route: 'mail/jd-backfill/fetch', why: 'operator fetch strategy, hand-invoked' },
   { toggle: 'superOnBlock', route: 'mail/jd-backfill/fetch', why: 'operator fallback on a blocked fetch, hand-invoked' },
   { toggle: 'dryRun', route: 'mail/folders/reclassify', why: 'operator reclassify preview — the safe half of a destructive op' },
+  // Both surfaced only after the grammar widened and the route-unscoped coach fallback was removed.
+  // `apply` is the one a verifier found sitting outside this list precisely because the guard could
+  // not see it: `\bapply\b` matched `/apply/` in an unrelated coach tool's URL and certified it.
+  { toggle: 'apply', route: 'mail/jd-backfill/dismiss-phantoms', why: 'operator phantom-dismissal — preview vs apply, hand-invoked' },
+  { toggle: 'skipFilter', route: 'mail/folder-map', why: 'operator folder-map override, hand-invoked' },
 ]
 
-test('H28: every server-side body toggle has a caller that can send it', () => {
+test('H33: every server-side body toggle has a caller that can send it', () => {
   const API_JS = readFileSync(new URL('../../app/src/api.js', import.meta.url), 'utf8')
   const apiCode = stripComments(API_JS)
-  const coachCode = stripComments(src('coachTools.ts'))
+  // The legacy `web/` console is a real caller surface. Omitting it made the guard report the whole
+  // MT harness family as unreachable — correct code, accused, because the search looked in one of
+  // the two clients that exist.
+  const WEB_DIR = new URL('../../web/', import.meta.url).pathname
+  const webCode = (() => {
+    const read = (d) => readdirSync(d, { withFileTypes: true }).flatMap(e =>
+      e.isDirectory() ? (e.name === 'node_modules' ? [] : read(join(d, e.name)))
+        : /\.(js|jsx|html)$/.test(e.name) ? [readFileSync(join(d, e.name), 'utf8')] : [])
+    try { return stripComments(read(WEB_DIR).join('\n')) } catch { return '' }
+  })()
+  const COACH_SRC = src('coachTools.ts')
 
   // Both grammars actually in use. Comments stripped FIRST: this case's own header names `regen`
   // and `force` half a dozen times, and a scan that counted those would fire on the description of
   // the bug rather than the bug — the cry-wolf failure, from inside the guard meant to prevent it.
-  const TOGGLE = /\b(?:body|b|json|payload)\s*\??\.\s*([a-zA-Z_]\w*)\s*(?:===\s*true|!==\s*false)|\(await\s+req\.json\(\)[^;]*?\)\s*\??\.\s*([a-zA-Z_]\w*)\s*===\s*true/g
+  // A verifier slipped SIX shapes past the first grammar, every one of them a real way this
+  // codebase already writes a toggle:
+  //   const { deepScan } = body            destructured, never touches `.x`
+  //   flag(body, 'deepScan')               read through a helper
+  //   (await req.json())?.x !== false      the inline form accepted `=== true` only — an asymmetry,
+  //                                        since the `body.x` form already accepted both
+  //   input?.deepScan === true             receiver named something other than body/b/json/payload
+  //   if (body?.deepScan)                  bare truthy — NOT hypothetical: appFacts.ts:232 reads
+  //                                        `body.confirm` exactly this way and was invisible
+  //   body?.deepScan === false             the negative comparison
+  // Widened to any receiver, any of the four comparison forms, and the destructured and
+  // helper-read shapes. A grammar that only sees the canonical spelling measures the author's
+  // habits, not the codebase.
+  // The receiver is not guessed from a name list — it is RESOLVED per file to the variables actually
+  // assigned from `req.json()`. Widening to a plausible-sounding list (`opts`, `args`, `input`,
+  // `parsed`) instead made the guard cry wolf on eighteen internal destructurings — `const {
+  // agreement, dropped, ran } = …` in reviewer.ts among them, which touch no request at all. A
+  // guard that fires on internal variable names is one people learn to ignore.
+  const receiversIn = (code) => {
+    const names = new Set(['body'])
+    for (const m of code.matchAll(/(?:const|let|var)\s+(\w+)\s*(?::[^=]+)?=\s*(?:\(?\s*await\s+)?req\.json\(\)/g)) names.add(m[1])
+    for (const m of code.matchAll(/(?:const|let|var)\s+(\w+)\s*(?::[^=]+)?=\s*\(\s*await\s+req\.json\(\)/g)) names.add(m[1])
+    return [...names]
+  }
+  // Six shapes a verifier slipped past the first grammar, each a real way this codebase writes a
+  // toggle: destructured (`const { x } = body`); read through a helper; the inline
+  // `(await req.json())?.x !== false`, which the first version accepted only as `=== true` while
+  // already accepting both for `body.x` — an asymmetry, not a scope choice; a differently-named
+  // receiver; a bare truthy `if (body?.x)`, which is NOT hypothetical (appFacts.ts:232 reads
+  // `body.confirm` exactly that way and was invisible); and `=== false`.
+  const toggleRe = (code) => {
+    const R = `(?:${receiversIn(code).join('|')})`
+    const CMP = '(?:===\\s*(?:true|false)|!==\\s*(?:false|true))'
+    return new RegExp([
+      `\\b${R}\\s*\\??\\.\\s*([a-zA-Z_]\\w*)\\s*${CMP}`,
+      `\\(await\\s+req\\.json\\(\\)[^;]*?\\)\\s*\\??\\.\\s*([a-zA-Z_]\\w*)\\s*${CMP}`,
+      `\\bconst\\s*\\{([^}]+)\\}\\s*=\\s*${R}\\b`,
+    ].join('|'), 'g')
+  }
 
   // A toggle is only answerable together with the ROUTE that reads it: "can anything send `regen`"
   // has no answer, but "can anything send `regen` to /artifact/{id}/document" does. So resolve each
@@ -827,16 +1109,48 @@ test('H28: every server-side body toggle has a caller that can send it', () => {
       const caller = f1 || f2
       if (caller && routeOf.has(caller) && !routeOf.has(callee)) routeOf.set(callee, routeOf.get(caller))
     }
-    for (const m of code.matchAll(TOGGLE)) {
-      const name = (m[1] || m[2])
+    for (const m of code.matchAll(toggleRe(code))) {
+      // A DESTRUCTURED name is only a toggle if it is later used as one. `const { roleType,
+      // jobTitle } = body` is ordinary input, and counting it turns this into "every body field
+      // must be sendable" — a different, far noisier rule that fired on eight data fields in the
+      // legacy MT harness. Require a boolean use of the name in the same file.
+      // EXPLICIT comparison only. Bare truthiness (`if (alertText)`) is how you test that a STRING
+      // arrived, not how you read a flag, and accepting it re-flagged `alertText`, `imageB64` and
+      // `demoState` — three data fields — as behaviour toggles.
+      const usedAsBoolean = (n) => new RegExp(
+        `\\b${n}\\s*(?:===\\s*(?:true|false)|!==\\s*(?:true|false))`
+      ).test(code)
+      const names = m[3]
+        ? m[3].split(',').map(x => x.trim().split(':')[0].trim()).filter(Boolean).filter(usedAsBoolean)
+        : [(m[1] || m[2] || m[4])]
+      for (const name of names) {
+      if (!name) continue
       const owner = fns.filter(f => f.at < m.index).pop()
       found.push({ toggle: name, file, handler: owner?.name || '(top level)', route: routeOf.get(owner?.name) || null })
+      }
     }
   }
-  assert.ok(found.length >= 8, `only ${found.length} toggle reads found — the scan has gone stale (measured 2026-08-20: 11 reads, 7 distinct names)`)
+  // A TIGHT BAND, not a floor. `>= 8` against a real 24 could not detect staleness at all: a
+  // verifier amputated the `!== false` grammar (24 reads -> 16) and then optional chaining
+  // (-> 12), and the guard went green both times — blinding it to the dominant idiom in this
+  // codebase without a single failure. A floor set far below the real number is decoration.
+  //
+  // Measured 2026-08-20 on this branch: 24 reads, 18 distinct names —
+  //   apply debug direct draftOutreach dryRun enabled execOnly favoritesOnly fetchJd force
+  //   isPrimary llm regen reset seedCadence skipFilter superOnBlock undo
+  // (The first version of this comment recorded "11 reads, 7 distinct names" — off by more than
+  // 2x, which breaks the H-case rule that the recorded evidence must be the measured value.)
+  const distinct = new Set(found.map(x => x.toggle)).size
+  assert.ok(found.length >= 20 && found.length <= 40,
+    `${found.length} toggle reads — expected ~24. Below the band the grammar has gone blind; above it, widen deliberately and re-record the count here.`)
+  assert.ok(distinct >= 15, `only ${distinct} distinct toggle names — expected ~18; the grammar has narrowed`)
 
   // `{param}` in a route matches `${param}` in an api.js template literal.
-  const routeRe = (r) => new RegExp('`/' + r.replace(/[.*+?^$()|[\]\\]/g, '\\$&').replace(/\{[^}]+\}/g, '\\$\\{[^}]+\\}') + '`')
+  // The closing anchor allows a QUERY STRING. Anchoring hard on the backtick made every helper
+  // that appends `?owner=…` invisible, so `helpersFor` returned nothing and the guard accused
+  // correct code: tightening `body.confirm` to an explicit comparison would have reported
+  // `confirm -> app/qc/facts/set` unreachable while `api.js:125` forwards a bag to it.
+  const routeRe = (r) => new RegExp('`/' + r.replace(/[.*+?^$()|[\]\\]/g, '\\$&').replace(/\{[^}]+\}/g, '\\$\\{[^}]+\\}') + '(?:\\?[^`]*)?`')
 
   // Two ways to send, and rule TWO is mandatory. The string `regen` appears ZERO times in api.js,
   // yet `regen` on packet/build-all is genuinely reachable because `buildFullPacket` forwards an
@@ -871,7 +1185,18 @@ test('H28: every server-side body toggle has a caller that can send it', () => {
     // A route we could not resolve is not evidence of anything — fall back to naming it anywhere in
     // api.js rather than reporting an unresolved route as an unreachable toggle.
     if (!route && named.test(apiCode)) return true
-    if (named.test(coachCode)) return true                                   // the coach agent is a caller too
+    if (named.test(webCode)) return true                                     // the legacy console is a client
+    // The coach agent is a caller too, but ROUTE-SCOPED. Matching its source by bare name was the
+    // single worst bug in this guard: `\bapply\b` matched the substring `/apply/` inside the URL
+    // path of an unrelated coach tool on a different route, and certified `apply` on
+    // `mail/jd-backfill/dismiss-phantoms` — a genuinely unsendable operator toggle that therefore
+    // never reached the allowlist for review. A global name test is the vacuous shape this guard
+    // has now had three times.
+    if (route) {
+      const tail = route.replace(/\{[^}]+\}/g, '')
+      const tool = stripComments(COACH_SRC).split('\n').find(l => l.includes('path:') && tail.split('/').filter(x => x.length > 3).every(seg => l.includes(seg)))
+      if (tool && named.test(tool)) return true
+    }
     return false
   }
 
@@ -896,7 +1221,7 @@ test('H28: every server-side body toggle has a caller that can send it', () => {
 })
 
 // -----------------------------------------------------------------------------------------------
-// H29 — the swap writer deleted the whole packet's provenance on every build, and swap_decision had
+// H34 — the swap writer deleted the whole packet's provenance on every build, and swap_decision had
 // no pass dimension at all. Evidence: `appSwaps.writeSwaps` ran
 // `delete from swap_decision where packet_id=$1` unconditionally, and the table's unique key was
 // `(packet_id, list, seq)`. A remediation loop calling it on pass 2 therefore DESTROYED pass 1's
@@ -904,7 +1229,7 @@ test('H28: every server-side body toggle has a caller that can send it', () => {
 // packet screen showing only the last pass's decisions as if they were the whole story.
 // The invariant, not the incident: any writer that clears provenance for a packet must scope the
 // clear to the pass it is rewriting.
-test('H29: provenance deletes are scoped to a pass, never to a whole packet', () => {
+test('H34: provenance deletes are scoped to a pass, never to a whole packet', () => {
   const offenders = []
   for (const [file, body] of allSources()) {
     const code = stripComments(body)
@@ -919,7 +1244,7 @@ test('H29: provenance deletes are scoped to a pass, never to a whole packet', ()
   assert.deepEqual(offenders, [], 'a packet-wide provenance delete erases every earlier pass')
 })
 
-test('H29b: swap_decision and skill_candidate carry the pass in their key', () => {
+test('H34b: swap_decision and skill_candidate carry the pass in their key', () => {
   // Asserted on the CREATE TABLE block ALONE. The first version searched the whole of SCHEMA_SQL and
   // was inert three ways over: the unique also appears in the idempotent ALTER, and the two
   // `[\s\S]*?` spans ran past the end of their table into the next one that happened to have a
@@ -934,12 +1259,12 @@ test('H29b: swap_decision and skill_candidate carry the pass in their key', () =
 })
 
 // ---------------------------------------------------------------------------------------------
-// H30 — generation and RENDERING were the same function, so the only way to regenerate content was
+// H35 — generation and RENDERING were the same function, so the only way to regenerate content was
 // to also issue a Drive `files/{id}/copy`. Evidence: `buildTemplatedArtifact` did both. A four-pass
 // remediation loop over the four templated artifacts would have created 16 Google files per packet,
 // and since there is no Drive DELETE anywhere in this codebase (D-9) 15 of them would be orphaned
 // on the quota-bearing OAuth account. X5 / P3-25: documents render ONCE, after the loop.
-test('H30: the remediation loop body contains no Drive call — rendering is a separate step', () => {
+test('H35: the remediation loop body contains no Drive call — rendering is a separate step', () => {
   const loop = stripComments(src('appRemediation.ts'))
   // The pass loop is everything between the `for (let pass` header and the render call that follows
   // it. A Drive call inside that span is the 4N defect returning.
@@ -952,7 +1277,7 @@ test('H30: the remediation loop body contains no Drive call — rendering is a s
   }
 })
 
-test('H30b: ensurePackage generates without rendering, so a pass can run without a Drive copy', () => {
+test('H35b: ensurePackage generates without rendering, so a pass can run without a Drive copy', () => {
   const packets = stripComments(src('appPackets.ts'))
   const start = packets.indexOf('export async function ensurePackage')
   const end = packets.indexOf('export async function renderArtifact')
@@ -964,13 +1289,13 @@ test('H30b: ensurePackage generates without rendering, so a pass can run without
 })
 
 // ---------------------------------------------------------------------------------------------
-// H31 — `insertion.loop` was DERIVED inside the writer as `max(loop) + 1`, so it counted document
+// H36 — `insertion.loop` was DERIVED inside the writer as `max(loop) + 1`, so it counted document
 // RENDERS: every build advanced it, including a build that served a cached package and made zero
 // model calls. Three loop-ish counters already existed (`packet.round`, never incremented;
 // `insertion.loop`; `check_result.run_id`) and P3 wanted a fourth. Decision 14: give this one the
 // meaning P3 needs and let the CALLER own it — loop 0 is the baseline, 1..n are remediation passes.
 // The invariant: no provenance writer may invent a pass number for itself.
-test('H31: the pass number is supplied by the caller, never derived from max(loop)', () => {
+test('H36: the pass number is supplied by the caller, never derived from max(loop)', () => {
   const offenders = allSources()
     .filter(([, body]) => /max\(loop\)/i.test(stripComments(body)))
     .map(([f]) => f)
@@ -983,7 +1308,7 @@ test('H31: the pass number is supplied by the caller, never derived from max(loo
   assert.match(ins, /loop=\$2`, \[artifactId, loop - 1\]/, 'before_text must come from the PREVIOUS pass')
 })
 
-test('H31b: every loop/pass/round counter column has a writer — no dead counter', () => {
+test('H36b: every loop/pass/round counter column has a writer — no dead counter', () => {
   // The invariant, not the incident. `packet.round` was READ by loadPacket's ORDER BY and by
   // packetShape and written by NOTHING, so it was always 1: the ordering was a no-op and the API
   // reported round 1 forever. A counter nobody increments is worse than no counter, because every
@@ -994,7 +1319,7 @@ test('H31b: every loop/pass/round counter column has a writer — no dead counte
     .map(m => m[1].toLowerCase()))]
   const code = allSources().filter(([f]) => f !== 'schema.ts').map(([, b]) => stripComments(b)).join('\n')
   const unwritten = columns.filter(c => {
-    if (c === 'loop') return false            // supplied by the caller on every insert (H31 above)
+    if (c === 'loop') return false            // supplied by the caller on every insert (H36 above)
     if (c === 'n') return false               // remediation_loop.n, inserted per pass
     return !new RegExp(`set\\s+${c}\\s*=|\\b${c}\\s*=\\s*${c}\\s*\\+`, 'i').test(code)
   })
@@ -1002,13 +1327,13 @@ test('H31b: every loop/pass/round counter column has a writer — no dead counte
 })
 
 // ---------------------------------------------------------------------------------------------
-// H32 — `converged` is the one word a user trusts without reading anything else, so it must not be
+// H37 — `converged` is the one word a user trusts without reading anything else, so it must not be
 // storable by a writer that merely intends to be honest. The guard is structural: a CHECK that
 // refuses the word while anything is open, and a composite FOREIGN KEY into `check_result` so the
 // coverage state on the row cannot be ASSERTED — only copied from a check the engine really recorded
 // for that exact run. Evidence for why this is needed: `evaluateArtifact` writes check_result rows
 // keyed by run_id, and nothing else in the schema tied a summary row back to them.
-test('H32: converged is unforgeable in the schema, not just in the writer', () => {
+test('H37: converged is unforgeable in the schema, not just in the writer', () => {
   const schema = src('schema.ts')
   assert.match(schema, /check \(halt_reason is distinct from 'converged'\s*\n?\s*or \(cardinality\(remaining\) = 0 and must_have_state = 'pass'\)\)/,
     'the converged CHECK is gone; the word becomes whatever the writer says')
@@ -1028,11 +1353,11 @@ test('H32: converged is unforgeable in the schema, not just in the writer', () =
 })
 
 // ---------------------------------------------------------------------------------------------
-// H33 — the loop must not become a second definition of "covered". `checks.covers()` decides
+// H38 — the loop must not become a second definition of "covered". `checks.covers()` decides
 // `must_have_coverage`, which decides the GATE; if the loop implemented its own token-overlap rule
 // to decide what a pass closed, the two would drift and the loop would start claiming closes the
 // gate does not recognise. The predicate is exported from `checks.ts` and imported, once.
-test('H33: the loop decides coverage with the gate\'s predicate, never its own', () => {
+test('H38: the loop decides coverage with the gate\'s predicate, never its own', () => {
   const rem = stripComments(src('remediation.ts'))
   assert.match(rem, /import \{[^}]*coversText[^}]*\} from '\.\/checks'/,
     'the loop must import the gate\'s coverage predicate')
@@ -1042,7 +1367,7 @@ test('H33: the loop decides coverage with the gate\'s predicate, never its own',
 })
 
 // ---------------------------------------------------------------------------------------------
-// H34 — a composite FOREIGN KEY was declared against `check_result (artifact_id, run_id, check_key,
+// H39 — a composite FOREIGN KEY was declared against `check_result (artifact_id, run_id, check_key,
 // state)` while the UNIQUE that makes that tuple a legal FK target was added with the idempotent
 // alters at the FOOT of the same script. On a FRESH database that works (check_result carries the
 // constraint inline). On the LIVE database, where check_result has existed since P2 WITHOUT it,
@@ -1056,8 +1381,8 @@ test('H33: the loop decides coverage with the gate\'s predicate, never its own',
 //
 // The invariant, not the incident: for EVERY composite FK in SCHEMA_SQL, the constraint that makes
 // its target tuple unique must appear EARLIER in the script than the table that references it.
-test('H34b: a schema statement never depends on a column added later in the same script', () => {
-  // The general form of H34, and the reason it is stated generally: the FK was one instance, and
+test('H39b: a schema statement never depends on a column added later in the same script', () => {
+  // The general form of H39, and the reason it is stated generally: the FK was one instance, and
   // executing SCHEMA_SQL against a real PostgreSQL 16.13 seeded with `main`'s schema turned up a
   // SECOND — `create index swap_dec_packet_idx on swap_decision(packet_id, loop, ...)` referencing
   // a `loop` column that the idempotent ALTER only added 350 lines further down. On a fresh database
@@ -1091,7 +1416,7 @@ test('H34b: a schema statement never depends on a column added later in the same
     'a statement runs before the column it names exists — fine on a fresh database, fatal on every existing one')
 })
 
-test('H34: a composite FK\'s unique target is established before the table that references it', () => {
+test('H39: a composite FK\'s unique target is established before the table that references it', () => {
   const whole = src('schema.ts')
   const sql = whole.slice(whole.indexOf('SCHEMA_SQL = '))
   const offenders = []

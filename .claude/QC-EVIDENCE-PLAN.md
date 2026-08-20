@@ -13,7 +13,7 @@ where the train currently is. Read it first on any resume; it is written to surv
 UPDATED       : 2026-08-20 16:10Z
 CURRENT PHASE : P8 (review decisions) — running in parallel with P3 and P8.3
 STATUS        : P3 (remediation loop) COMPLETE on its branch — PR #14, merged with main,
-                H-cases renumbered H29-H34. NOT landed, NOT deployed, NOT confirmed live.
+                H-cases renumbered H34-H39. NOT landed, NOT deployed, NOT confirmed live.
 LAST LANDED   : 44d1cfc (H26 one-ID-one-case + contiguity)
 NEXT ACTION   : land PR #14; then deploy and run the loop against the
                 Trinnex opportunity 9f9c370a-4ac9-441e-b58e-02e3ffcf669e
@@ -42,7 +42,7 @@ being discovered by a reader. Allocate a RANGE per lane, not a number.
 |---|---|---|---|
 | P8.2 R3 figure echo | `claude/qc-p8-2-figures` (PR #10) | `figureEcho.ts`, `checks.ts`, `appChecks.ts`, `appFacts.ts` | H24, H25 |
 | P8.7 UI remainder | subagent worktree | `app/` (theme.css, PostingAnalysis, Today, packetBuilder) | — |
-| P3 remediation loop | `claude/qc-p3-remediation` (PR #14) | `pipeline.ts`, `appPackets.ts`, `appSwaps.ts`, `appInsertions.ts`, `remediation.ts`, `appRemediation.ts` | **H29-H34** |
+| P3 remediation loop | `claude/qc-p3-remediation` (PR #14) | `pipeline.ts`, `appPackets.ts`, `appSwaps.ts`, `appInsertions.ts`, `remediation.ts`, `appRemediation.ts` | **H34-H39** |
 | P8.3 evidence excerpts | `claude/qc-p8-3-evidence` | `requirements.ts`, evidence schema | H27 |
 
 **The P3 lane was lost once.** A subagent ran it, died without pushing, and left no branch — the
@@ -209,7 +209,32 @@ artifact has zero check rows; decide grandfathering explicitly or `ready` flips 
 P2.3: name the table `artifact_score`, NOT `match_score` (that column exists with a different live
 meaning). Reconcile all four existing scores or don't ship a fifth.
 
-### P3 — Remediation loop  ◀ BUILT (PR #14), NOT LANDED, NOT LIVE
+### P3 — Remediation loop  ◀ BUILT (PR #14), NOT LANDED, AND BLOCKED ON A CONFLICT WITH P8.3
+
+> **BLOCKING — needs an owner decision before P3 is worth landing.** P8.3 landed conflict-register
+> **C6** ("coverage counts recomputed from evidence rows, not from term placement") and it moved what
+> `must_have_coverage` MEASURES. It no longer reads the generated document at all. Measured on the
+> merged engine (`api/test/remediation.test.mjs`, the three `P3-15 CONFLICT/CONSEQUENCE` cases):
+>
+> | document text | evidence rows | `must_have_coverage` |
+> |---|---|---|
+> | restates the requirement VERBATIM | none | `not_applicable` |
+> | restates the requirement VERBATIM | present, this req unevidenced | **`fail`** |
+> | "I enjoy sailing and baking bread" | present, this req evidenced | **`pass`** |
+>
+> **P3's loop closes requirements by rewriting merge fields, and no rewrite can move that gate.** As
+> built, the loop will rewrite, observe zero closes, halt `no_progress` after one pass, and escalate
+> everything. It invents nothing and reports honestly - it simply cannot close anything.
+>
+> This is not a bug in either lane. C6 is a deliberate override and it is the more honest model (R2:
+> evidence or escalate). But P3 was designed against the pre-C6 gate, and the two must be reconciled
+> before the loop is useful. The plausible resolution is that the loop's job becomes **surfacing
+> profile evidence that exists but was not resolved** (which `profileEvidenceFor` already does,
+> P3-18) and escalating the rest - i.e. it writes `owner_fact`/evidence rows, not merge fields. That
+> is a redesign of the closing mechanism, not a tweak, and it is NOT done.
+>
+> The conflict is pinned as three tests so it cannot be forgotten: if anyone changes the coverage
+> model in either direction, they fail and name what moved.
 **X2 re-verified by grep, not taken on faith:** `regen` is read from the body at `appPackets.ts:382/457/558`,
 honoured at `:319`, and `PacketBuilder.jsx:584` sends it. The X2 text below is STALE — the cache is
 reachable-through, so no loop AC passes vacuously against it.
@@ -221,7 +246,7 @@ wall clock in `appRemediation.ts`. New tables `remediation_loop` (one row per ar
 recorded, never asserted. Field-scoped regeneration built as new capability (decision 17): the model's
 out-of-scope keys are REJECTED on the way in, not requested in a prompt.
 
-**Six defects found and fixed with it, each an H-case (H26-H31):** `writeSwaps` deleted the whole
+**Six defects found and fixed with it, each an H-case (H34-H39):** `writeSwaps` deleted the whole
 packet's swap history on every build (the loop deleting its own justification); generation and
 rendering were one function (16 Drive copies per packet at 4 passes, on a codebase with no Drive
 DELETE anywhere); `insertion.loop` counted RENDERS because the writer derived it; `packet.round` was

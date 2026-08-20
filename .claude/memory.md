@@ -1440,6 +1440,34 @@ What made it work:
 - **Don't take agent results at face value.** Spot-checking found one of my own greps crying wolf
   (it matched comments describing an old assertion, not the assertion). Strip comments first.
 
+## P8.3 — evidence excerpts (R2 / C6) — branch `claude/qc-p8-3-evidence`, NOT yet on main
+
+Coverage is no longer "did the generated document repeat enough of the requirement's words". It is
+"can a verbatim excerpt of the stored profile be shown beside it". The pieces:
+
+- `api/src/functions/tests/evidence.ts` — pure (no azure, no pg). `profileRecords()` turns the
+  profile into NAMED records; `resolveEvidence()` finds the excerpt and guarantees it is exactly
+  `record.text.slice(char_start, char_end)`. Reuses `requirements.locate()` and `swaps.itemTokens()`
+  rather than growing a second matcher.
+- `appFacts.sourceText()` now returns `{ text, sources, records }` — still the ONLY profile reader,
+  and `text` is now the RECORDS JOINED. It used to apply a second, slightly different filter of its
+  own; two rules for "what is the profile" is two profiles, and an offset into one is meaningless
+  against the other.
+- `requirement_evidence` table (in SCHEMA_SQL + EXPECTED_TABLES; H11 extended). NOT columns on
+  `requirement`, and nothing writes `requirement.coverage` — that column already means "could not be
+  located in the POSTING" and merging a second population into it makes both unreadable.
+- `POST /api/app/opportunity/{id}/evidence` resolves and stores; `evaluateArtifact` resolves,
+  stores and reads back, so the gate and the JD step read the same rows.
+- New check `evidence_placed` (warn) keeps the signal the old numerator carried — the profile
+  supports it and THIS asset still never said it — as its own number rather than folded into
+  coverage. It is also what keeps P2.3's per-asset score per-asset once coverage becomes
+  opportunity-level.
+
+**H28, H29, H30, H31, H32** in `api/test/hardening.test.mjs`; all five proved by reverting the fix.
+H32 came from the independent verifier (`docs/qc-evidence/VERIFY-P8.3.md`), as did the qcRail fix.
+(Renumbered from H27-H30 on merge: `main` had already taken H26 and H27, and H26 asserts one-ID-one-case.)
+316/316 api tests, app builds clean.
+
 
 ## P3 — remediation loop (2026-08-20, PR #14, NOT landed, NOT live)
 
@@ -1458,7 +1486,7 @@ raw would burn every pass chasing "must reside on the East Coast".
 `check_result (artifact_id, run_id, check_key, state)`, so the coverage state on a loop row can only
 be copied from a check the engine really recorded for that exact run.
 
-**Hardening — the six that became H26-H31**, all in `api/test/hardening.test.mjs`:
+**Hardening — the six that became H34-H39**, all in `api/test/hardening.test.mjs`:
 swap history deleted packet-wide on every build; generation welded to rendering (16 Drive copies per
 packet, and there is NO Drive DELETE anywhere in this repo); `insertion.loop` counting renders because
 the writer derived it; `packet.round` read by two consumers and written by none; the loop growing a
@@ -1496,7 +1524,7 @@ the previous schema.** Fresh-database success proves almost nothing: every `crea
 exists` is skipped on the database you actually care about, taking its inline constraints with it.
 Two migration-killing defects in one file were found this way and neither was visible by reading —
 a composite FK whose UNIQUE target was created later, and an index naming a column added later.
-H34/H34b encode the general rule.
+H39/H39b encode the general rule.
 
 **Three of my own guards were INERT** — they passed with their defect deliberately reinstated. Causes
 worth remembering: (a) a constraint appears TWICE in `SCHEMA_SQL`, inline and in the idempotent

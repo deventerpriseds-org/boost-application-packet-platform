@@ -80,7 +80,6 @@ export function bandFor(composite: number | null, bands = DEFAULT_BANDS): Band |
 export function computeArtifactScore(input: ScoreInput): ArtifactScore {
   const weights = { ...DEFAULT_WEIGHTS, ...(input.weights || {}) }
   const bands = { ...DEFAULT_BANDS, ...(input.bands || {}) }
-  const reqs = input.requirements || []
   const checks = input.checks || []
 
   // --- must-have coverage: read from the CHECK, not recomputed --------------------------------
@@ -91,7 +90,6 @@ export function computeArtifactScore(input: ScoreInput): ArtifactScore {
   // Without this filter a reviewer row keyed `must_have_coverage` would feed a model's opinion into
   // a number the gate and the UI both present as measured.
   const mh = checks.find(c => c.check_key === 'must_have_coverage' && c.engine === 'deterministic')
-  const mustHaveTotal = reqs.filter(r => r.kind === 'must_have').length
   let mustHave: ScoreComponent
   const uncovered: number[] = []
 
@@ -103,11 +101,24 @@ export function computeArtifactScore(input: ScoreInput): ArtifactScore {
       const m = /^#(\d+)\b/.exec(o)
       if (m) uncovered.push(Number(m[1]))
     }
-    const covered = Math.max(0, mustHaveTotal - uncovered.length)
-    mustHave = {
-      value: mustHaveTotal ? Math.round((covered / mustHaveTotal) * 100) : null,
-      source: mustHaveTotal ? `${covered}/${mustHaveTotal} must-have requirements covered` : 'the posting produced no must-haves',
-    }
+    // BOTH numbers come from the check. The denominator used to be recomputed here as "every row of
+    // kind must_have", which is a DIFFERENT population from the one the check judged: the check
+    // deliberately excludes the requirements `template_reach` reports as unreachable and the ones the
+    // owner's facts already settled. Recomputing it counted every excluded row as covered — 3/4 on a
+    // posting where exactly one requirement was judged and it FAILED. That is a not_applicable row
+    // laundered into the numerator, which is the same defect as a check passing on absent evidence,
+    // and it inflated the one number a reviewer trusts most. The check's `observed` leads with
+    // "<covered>/<judged>" for exactly this reason; a form this cannot read produces null, not a
+    // guess.
+    const m = /^(\d+)\/(\d+)\b/.exec(String(mh.observed || ''))
+    const judged = m ? Number(m[2]) : null
+    const covered = m ? Number(m[1]) : null
+    mustHave = (judged === null || covered === null)
+      ? { value: null, source: `must_have_coverage reported "${mh.observed}", which does not state how many requirements it judged` }
+      : {
+        value: judged ? Math.round((covered / judged) * 100) : null,
+        source: judged ? `${covered}/${judged} must-have requirements evidenced` : 'the posting produced no must-haves',
+      }
   }
 
   // --- keyword coverage: only from a PUBLISHED term library ------------------------------------
