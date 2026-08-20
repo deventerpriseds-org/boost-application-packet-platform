@@ -8,3 +8,6 @@ api/dist/
 web/dist/
 *.js.map
 local.settings.json
+
+# Subagent worktrees — transient, never part of the repo
+.claude/worktrees/

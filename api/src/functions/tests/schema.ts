@@ -389,6 +389,82 @@ create table if not exists insertion (
 );
 create index if not exists insertion_artifact_idx on insertion(artifact_id, loop);
 
+-- P2.1 — one row per check per artifact per run. offenders names the specific items, never a
+-- count: a count tells a reviewer something is wrong without telling them what to fix.
+-- not_applicable is a first-class state and NOT a pass. A coverage check that "passed" because
+-- there were no requirement rows to check against is how a gate goes green on an artifact nobody
+-- verified - the single most dangerous row this table could hold.
+create table if not exists check_result (
+  id           uuid primary key default uuid_generate_v4(),
+  artifact_id  uuid not null references artifact(id) on delete cascade,
+  run_id       uuid not null,        -- one id per engine run, so a run is inspectable as a set
+  check_key    text not null,
+  engine       text not null check (engine in ('deterministic','reviewer')),
+  state        text not null check (state in ('pass','warn','fail','not_applicable')),
+  observed     text,
+  expected     text,
+  offenders    text[] not null default '{}',
+  created_at   timestamptz not null default now(),
+  unique (artifact_id, run_id, check_key)
+);
+create index if not exists check_result_artifact_idx on check_result(artifact_id, created_at desc);
+
+-- The aggregated verdict for one artifact, plus the override trail. A warn may be overridden by a
+-- human; a fail may not, because only deterministic rows produce fail and those are facts about
+-- the text. Actor is resolved SERVER-side from the session - a client-supplied actor would make the
+-- audit row worthless.
+create table if not exists artifact_gate (
+  artifact_id     uuid primary key references artifact(id) on delete cascade,
+  run_id          uuid not null,
+  gate            text not null check (gate in ('pass','warn','fail')),
+  attention_count int not null default 0,
+  computed_at     timestamptz not null default now(),
+  override_by     text,
+  override_at     timestamptz,
+  override_reason text,
+  -- An override needs all three parts or none: a reason with no actor is not an audit trail.
+  check ((override_by is null) = (override_at is null)),
+  check ((override_by is null) = (override_reason is null))
+);
+
+-- P2.3 - the decomposed per-artifact score. Named artifact_score, NOT match_score: that column
+-- already exists on opportunity with a different live meaning, and reusing the name is how two
+-- numbers come to disagree while looking like one.
+--
+-- Reconciled against the four scores that already exist, none of which is per-artifact:
+--   opportunity.match_score  model fit for the ROLE, NOT posting-grounded, then boosted in place
+--   opportunity.base_score   the same number captured before that boost
+--   opportunity.ats_score    posting-grounded, from atsScoreOne against the real posting
+--   packet.ats_score         packet-level, from jdAnalysis
+-- match answers "is this role worth pursuing"; ats_score answers "does the candidate match the
+-- posting"; this answers "does THIS DOCUMENT cover this posting's requirements".
+--
+-- A component with no honest source is NULL and the composite is NULL unless all three exist. A
+-- composite built from one of three components is a fabricated number wearing a score's clothes -
+-- and it is exactly the number a reviewer would trust most.
+create table if not exists artifact_score (
+  id             uuid primary key default uuid_generate_v4(),
+  artifact_id    uuid not null references artifact(id) on delete cascade,
+  run_id         uuid not null,
+  must_have_coverage int,
+  must_have_source   text,
+  keyword_coverage   int,
+  keyword_source     text,
+  seniority_alignment int,
+  seniority_source    text,
+  composite      int,
+  band           text check (band in ('strong','acceptable','needs_work')),
+  uncovered_requirement_ids uuid[] not null default '{}',
+  engine_version int not null,
+  weights        jsonb not null,
+  computed_at    timestamptz not null default now(),
+  -- Every historical score is kept so regenerations are comparable; nothing is overwritten.
+  unique (artifact_id, run_id),
+  check (composite is null or (must_have_coverage is not null and keyword_coverage is not null and seniority_alignment is not null)),
+  check ((band is null) = (composite is null))
+);
+create index if not exists artifact_score_idx on artifact_score(artifact_id, computed_at desc);
+
 -- Idempotent multi-tenant column adds (safe on tables that predate them)
 alter table persona        add column if not exists owner_email text not null default 'demo@executive-engine.local';
 alter table persona        add column if not exists is_demo boolean not null default false;
@@ -420,5 +496,5 @@ export const EXPECTED_TABLES = [
   'persona', 'opportunity', 'contact', 'packet', 'artifact', 'outreach_message',
   'interview', 'offer', 'library_entity', 'asset_event', 'usage_metering',
   'term_library', 'term_library_entry', 'term_candidate', 'requirement',
-  'skill_candidate', 'swap_decision', 'insertion'
+  'skill_candidate', 'swap_decision', 'insertion', 'check_result', 'artifact_gate', 'artifact_score'
 ]

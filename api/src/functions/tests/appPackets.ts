@@ -8,6 +8,7 @@ import { metaFor, varsForType, copyTemplate, injectValues, stripLeftoverTokens, 
 import { buildPackageForJD } from './pipeline'
 import { writeSwaps } from './appSwaps'
 import { writeInsertions } from './appInsertions'
+import { approvalBlock } from './appChecks'
 
 const HEADERS = {
   'Content-Type': 'application/json',
@@ -67,7 +68,13 @@ async function recomputePacket(client: any, packetId: string) {
   const arts = (await client.query(`select status from artifact where packet_id = $1`, [packetId])).rows
   const allApproved = arts.length > 0 && arts.every((a: any) => a.status === 'approved')
   const anyStarted = arts.some((a: any) => a.status !== 'todo')
-  const status = allApproved ? 'ready' : anyStarted ? 'review' : 'building'
+  // P2.2 — `ready` additionally requires no asset sitting at a `fail` gate. Approval is already
+  // gated, but a re-run AFTER approval can turn a gate red (a new run also clears any override), and
+  // without this a packet would stay `ready` while carrying a blocking finding.
+  const failing = Number((await client.query(
+    `select count(*)::int as n from artifact_gate g join artifact a on a.id = g.artifact_id
+      where a.packet_id = $1 and g.gate = 'fail'`, [packetId])).rows[0]?.n || 0)
+  const status = (allApproved && failing === 0) ? 'ready' : anyStarted ? 'review' : 'building'
   await client.query(`update packet set status = $1, updated_at = now() where id = $2`, [status, packetId])
   return status
 }
@@ -198,6 +205,16 @@ export async function artifactStatus(req: HttpRequest, context: InvocationContex
     const status = body?.status
     if (!ARTIFACT_STATUSES.includes(status)) return { status: 400, headers: HEADERS, jsonBody: { error: `invalid status; one of ${ARTIFACT_STATUSES.join(', ')}` } }
     client = await getPgClient()
+    // P2.2 — the gate blocks approval SERVER-side, not merely in the UI. Checked BEFORE the update,
+    // so a direct API call cannot approve an artifact whose findings block it. Only `approved` is
+    // gated: moving to todo/review/rejected is how a user responds to findings, and blocking that
+    // would trap the artifact in the state the findings are about.
+    if (status === 'approved') {
+      const block = await approvalBlock(client, artifactId)
+      if (block.blocked) {
+        return { status: 409, headers: HEADERS, jsonBody: { error: block.reason, gate: block.gate, artifactId } }
+      }
+    }
     const art = (await client.query(`update artifact set status = $1, updated_at = now() where id = $2 returning packet_id`, [status, artifactId])).rows[0]
     if (!art) return { status: 404, headers: HEADERS, jsonBody: { error: 'artifact not found' } }
     const packetStatus = await recomputePacket(client, art.packet_id)

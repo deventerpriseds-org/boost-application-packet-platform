@@ -245,6 +245,25 @@ export async function outreachSend(req: HttpRequest, context: InvocationContext)
     )).rows[0]
     if (!m) return { status: 404, headers: HEADERS, jsonBody: { error: 'message not found' } }
 
+    // P2.2 — the send step cannot be reached with a blocking finding open. This is the ONLY real
+    // outbound path in the product, and it previously had no packet gate at all: every check and
+    // every gate could be red and the message still went to the employer. Scoped to this
+    // opportunity's packets, and silent when there is no packet (outreach can precede one).
+    const blocking = (await client.query(
+      `select a.type, g.gate, g.attention_count from artifact_gate g
+         join artifact a on a.id = g.artifact_id
+         join packet p on p.id = a.packet_id
+        where p.opp_id = $1 and g.gate = 'fail'`, [m.opp_id])).rows
+    if (blocking.length) {
+      return {
+        status: 409, headers: HEADERS,
+        jsonBody: {
+          error: `${blocking.length} packet asset(s) have blocking findings — resolve them before sending`,
+          blocked: blocking.map((b: any) => ({ type: b.type, gate: b.gate, findings: b.attention_count })),
+        },
+      }
+    }
+
     // LinkedIn / call channels: no send API — copy-paste by design.
     if (!EMAIL_CHANNELS.has(m.channel)) {
       return { status: 200, headers: HEADERS, jsonBody: { ok: true, delivered: false, copyPaste: true, channel: m.channel, note: `${CHANNELS[m.channel]?.label || m.channel} has no send API — copy the text and send it manually, then mark it sent.` } }

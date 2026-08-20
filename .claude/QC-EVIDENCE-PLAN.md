@@ -10,16 +10,17 @@ where the train currently is. Read it first on any resume; it is written to surv
 ## ▶ RESUME MARKER — where the train is
 
 ```
-CURRENT PHASE : P1 (evidence spine)
-STATUS        : P1 COMPLETE (1.1-1.4 landed) + X1/X2 closed; 1.5 defers into P2.1
-LAST LANDED   : ab6f371 insertion rows; 17/17 tables live (pg-migrate 32311027980)
-NEXT ACTION   : rebuild ONE artifact to populate swap/insertion rows, verify, then P2
+CURRENT PHASE : P2 (checks and gate)
+STATUS        : P2 COMPLETE (2.1 engine, 2.2 gate+block, 2.3 score) — all verified live
+LAST LANDED   : 1605021 artifact_score; 20/20 tables live; composite correctly null
+NEXT ACTION   : P3 remediation loop (X5 trap: render documents ONCE, after the loop)
 DONE SO FAR   : P0 wiring · X1 grounding · X2 regen · X3 normalizer · X4 tests · D1 D2 D3
                 P1.2b term_library · P1.2 corpus miner + curation queue · P1.1 requirement rows
 ```
 *Update this block on every landing. It is the single place to look after a restart.*
 
-Phase status: P0 `in progress` · P1…P8 `not started`.
+Phase status: P0 `done` · P1 `done` · P2 `done` · P3-P8 `not started`.
+Parallel streams in flight: P7 hygiene, D10 overlay primitive (subagents, own branches).
 
 ---
 
