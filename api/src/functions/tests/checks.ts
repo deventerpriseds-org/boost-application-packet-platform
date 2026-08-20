@@ -21,6 +21,7 @@
 import { splitItems, itemTokens, omitEntries, onOmitList } from './swaps'
 import { mergeFieldsFor } from './insertions'
 import { normalizePostingText } from './jdText'
+import { checkAgainstFacts, OwnerFact } from './ownerFacts'
 
 export type CheckState = 'pass' | 'warn' | 'fail' | 'not_applicable'
 export type CheckEngine = 'deterministic' | 'reviewer'
@@ -92,6 +93,8 @@ export interface CheckInput {
   profileText?: string
   requirements?: Array<{ seq: number; verbatim: string | null; item_text: string; kind: string }>
   swaps?: Array<{ action: string; driver: string; to_label: string | null; from_label: string | null }>
+  /** The owner's confirmed facts. A requirement a FACT settles is not a document-coverage question. */
+  facts?: OwnerFact[]
   thresholds?: Partial<CheckThresholds>
 }
 
@@ -346,9 +349,46 @@ export function runChecks(input: CheckInput): CheckResult[] {
     out.push(na('must_have_coverage', 'no requirement rows for this opportunity', 'every must-have requirement is covered'))
     out.push(na('responsibilities_addressed', 'no requirement rows for this opportunity', 'every responsibility is addressed'))
   } else {
-    // Split eligibility preconditions out BEFORE judging coverage — see ELIGIBILITY_RE.
-    const eligibility = mustHaves.filter(r => ELIGIBILITY_RE.test(r.verbatim || r.item_text))
-    const coverable = mustHaves.filter(r => !eligibility.includes(r))
+    // A requirement the owner's FACTS settle is not a document-coverage question at all. "10+ years"
+    // is answered by the profile, not by whether the resume happens to repeat the number — measured:
+    // 511 of 7,559 requirement rows ask for years and 466 for a degree, 13% of the corpus. Facts are
+    // consulted BEFORE coverage so those rows stop being judged by token overlap.
+    const facts = input.facts || []
+    const factVerdicts = mustHaves
+      .map(r => ({ r, v: facts.length ? checkAgainstFacts(r.verbatim || r.item_text, facts) : null }))
+      .filter(x => x.v !== null) as Array<{ r: typeof mustHaves[0]; v: NonNullable<ReturnType<typeof checkAgainstFacts>> }>
+
+    const settled = factVerdicts.filter(x => x.v.verdict === 'satisfied')
+    const shortfalls = factVerdicts.filter(x => x.v.verdict === 'not_satisfied')
+    const needsAnswer = factVerdicts.filter(x => x.v.verdict === 'unknown')
+
+    if (factVerdicts.length) {
+      out.push(settled.length
+        ? ok('facts_settled', `${settled.length} requirement(s) answered from your profile`,
+             'requirements about you are answered by your facts, not by document wording')
+        : na('facts_settled', 'no requirement was settled by a recorded fact',
+             'requirements about you are answered by your facts, not by document wording'))
+
+      // A shortfall is a FIT problem, not a document defect — rewriting the resume cannot create
+      // years you do not have. It warns rather than fails, and names the arithmetic.
+      if (shortfalls.length) {
+        out.push(bad('fact_shortfall', `${shortfalls.length} requirement(s) your profile does not meet`,
+          'the posting asks for more than your recorded facts',
+          shortfalls.map(x => `#${x.r.seq} ${(x.r.verbatim || x.r.item_text).slice(0, 60)} — ${x.v.detail}`), 'warn'))
+      }
+      if (needsAnswer.length) {
+        out.push(na('facts_needed', `${needsAnswer.length} requirement(s) need a fact you have not recorded or confirmed`,
+          'every requirement about you resolves to a confirmed fact'))
+        const last = out[out.length - 1]
+        last.offenders = needsAnswer.map(x => `#${x.r.seq} ${(x.r.verbatim || x.r.item_text).slice(0, 60)} — ${x.v.detail}`)
+      }
+    }
+
+    // Split preconditions out BEFORE judging coverage — see ELIGIBILITY_RE — and drop anything the
+    // facts already resolved either way. What remains is genuinely a question about the DOCUMENT.
+    const resolvedByFact = new Set(factVerdicts.filter(x => x.v.verdict !== 'unknown').map(x => x.r.seq))
+    const eligibility = mustHaves.filter(r => ELIGIBILITY_RE.test(r.verbatim || r.item_text) && !resolvedByFact.has(r.seq))
+    const coverable = mustHaves.filter(r => !eligibility.includes(r) && !resolvedByFact.has(r.seq))
     out.push(eligibility.length
       ? na('template_reach',
            `${eligibility.length} requirement(s) no generated merge field can carry — confirm against the static template`,

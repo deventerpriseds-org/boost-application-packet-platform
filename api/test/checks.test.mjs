@@ -190,6 +190,61 @@ test('a posting whose requirements are all reachable says so', () => {
   assert.equal(find(rs, 'template_reach').state, 'pass')
 })
 
+// ---- facts settle requirements about the CANDIDATE, not about the document -------------------
+const ownerFact = (key, value, value_num = null) =>
+  ({ key, value, value_num, source: 'owner_stated', confirmed_at: '2026-08-20T00:00:00Z' })
+
+test('a years requirement is settled by the profile, not by whether the resume repeats the number', () => {
+  const rs = runChecks({
+    type: 'resume', pkg: RESUME_FULL,
+    requirements: [{ seq: 0, verbatim: 'Minimum of 10 years of leadership experience', item_text: '', kind: 'must_have' }],
+    facts: [ownerFact('experience.years_total', '24 years', 24)],
+  })
+  assert.equal(find(rs, 'facts_settled').state, 'pass')
+  // It must NOT also be judged as uncovered document text — that would double-count one requirement.
+  assert.equal(find(rs, 'must_have_coverage').state, 'not_applicable')
+})
+
+test('a shortfall WARNS and shows the arithmetic — it is a fit problem, not a document defect', () => {
+  const rs = runChecks({
+    type: 'resume', pkg: RESUME_FULL,
+    requirements: [{ seq: 3, verbatim: '30+ years of experience required', item_text: '', kind: 'must_have' }],
+    facts: [ownerFact('experience.years_total', '24 years', 24)],
+  })
+  const f = find(rs, 'fact_shortfall')
+  assert.equal(f.state, 'warn', 'rewriting a resume cannot create years you do not have')
+  assert.match(f.offenders[0], /24 years recorded, 30 required/)
+})
+
+test('a requirement needing an unrecorded fact is surfaced, never guessed', () => {
+  const rs = runChecks({
+    type: 'resume', pkg: RESUME_FULL,
+    requirements: [{ seq: 0, verbatim: 'Active Secret security clearance required', item_text: '', kind: 'must_have' }],
+    facts: [ownerFact('experience.years_total', '24 years', 24)],
+  })
+  const f = find(rs, 'facts_needed')
+  assert.equal(f.state, 'not_applicable')
+  assert.match(f.offenders[0], /clearance/)
+})
+
+test('an UNCONFIRMED fact does not settle anything, and the requirement stays surfaced', () => {
+  const unconfirmed = { key: 'experience.years_total', value: '24 years', value_num: 24, source: 'derived', confirmed_at: null }
+  const rs = runChecks({
+    type: 'resume', pkg: RESUME_FULL,
+    requirements: [{ seq: 0, verbatim: 'Minimum of 10 years of experience', item_text: '', kind: 'must_have' }],
+    facts: [unconfirmed],
+  })
+  assert.equal(find(rs, 'facts_settled').state, 'not_applicable')
+  assert.match(find(rs, 'facts_needed').offenders[0], /unconfirmed/)
+})
+
+test('with no facts recorded the engine behaves exactly as before', () => {
+  const reqs = [{ seq: 0, verbatim: 'Deep experience with roadmap strategy and execution', item_text: '', kind: 'must_have' }]
+  const withNone = runChecks({ type: 'resume', pkg: RESUME_FULL, requirements: reqs })
+  assert.equal(withNone.find(r => r.check_key === 'facts_settled'), undefined, 'no fact rows, no fact checks')
+  assert.ok(find(withNone, 'must_have_coverage'))
+})
+
 // ---- P2.2 inputs ---------------------------------------------------------------------------
 test('an uncited change is a FAIL, never a warn', () => {
   const swaps = [

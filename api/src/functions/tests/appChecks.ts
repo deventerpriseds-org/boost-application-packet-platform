@@ -9,6 +9,7 @@ import { resolveOwner, requireWrite } from './appSession'
 import { getPgClient } from './pgClient'
 import { runChecks, gateFor, attentionCount, CheckResult, CheckThresholds, DEFAULT_THRESHOLDS } from './checks'
 import { computeArtifactScore, ArtifactScore } from './artifactScore'
+import { loadFacts } from './appFacts'
 
 const HEADERS = { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': '*', 'Access-Control-Allow-Methods': 'GET,POST,OPTIONS' }
 
@@ -79,6 +80,7 @@ export async function evaluateArtifact(client: any, artifactId: string, owner: s
     company: art.company,
     requirements,
     swaps,
+    facts: await loadFacts(client, owner || art.owner_email),
     thresholds: await loadThresholds(client, owner || art.owner_email),
   })
 
