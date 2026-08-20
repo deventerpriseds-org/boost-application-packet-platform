@@ -36,6 +36,15 @@ export interface CheckResult {
   expected: string
   /** The specific offending items. NEVER a count — a count cannot be acted on. */
   offenders: string[]
+  /**
+   * The requirement ids this check actually reached a verdict ON, when that set is narrower than
+   * the population a reader would assume. Published by the check that owns the predicate so nobody
+   * downstream has to re-derive it — `appReviewer` counted every must-have as judged, including the
+   * eligibility and fact-owned rows the coverage check had EXCLUDED, and scored those as agreeing
+   * or disagreeing with the reviewer instead of `not_comparable`. Recomputing `coverable` at the
+   * consumer would be a second copy of this file's predicate: R4, one source per number.
+   */
+  judged?: string[]
 }
 
 export interface CheckThresholds {
@@ -544,12 +553,15 @@ export function runChecks(input: CheckInput): CheckResult[] {
       const factOwned = mustHaves.length - coverable.length - eligibility.length
       if (factOwned > 0) excluded.push(`${factOwned} answered from your profile facts`)
       const tail = excluded.length ? ` (${excluded.join(', ')}, not counted either way)` : ''
+      // `judged` is exactly `coverable` — the rows this check formed an opinion about. The
+      // not_applicable branch below deliberately carries none: nothing was judged there.
+      const judgedIds = coverable.map(r => String((r as any).id))
       out.push(!coverable.length
         ? na('must_have_coverage', 'the posting produced no must-have requirements to judge', COVERAGE_EXPECT)
         : unevidenced.length
-          ? bad('must_have_coverage', `${coverable.length - unevidenced.length}/${coverable.length} must-haves evidenced${tail}`,
-                COVERAGE_EXPECT, unevidenced.map(r => `${label(r)} — ${NO_EVIDENCE_NOTE}`))
-          : ok('must_have_coverage', `${coverable.length}/${coverable.length} must-haves evidenced${tail}`, COVERAGE_EXPECT))
+          ? { ...bad('must_have_coverage', `${coverable.length - unevidenced.length}/${coverable.length} must-haves evidenced${tail}`,
+                COVERAGE_EXPECT, unevidenced.map(r => `${label(r)} — ${NO_EVIDENCE_NOTE}`)), judged: judgedIds }
+          : { ...ok('must_have_coverage', `${coverable.length}/${coverable.length} must-haves evidenced${tail}`, COVERAGE_EXPECT), judged: judgedIds })
 
       const unaddressed = resp.filter(r => !evidenceOf(r))
       out.push(!resp.length

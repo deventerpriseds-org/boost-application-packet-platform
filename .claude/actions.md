@@ -2200,3 +2200,66 @@ built `SET` clauses) — it now reads the SQL instead of the JavaScript around i
 **Not done, with rows in `.claude/DEFERRED.md`:** D21 schema registration (lane could not touch
 `schema.ts`), D22 the `years_leadership` shadow (still reaches the gate), D23 no `people`/`usd`
 comparator, D24 no Settings control, D25 nothing verified live.
+
+---
+
+## QC live defects — D22 and D16 (`claude/qc-live-defects`, off `9a9830e`)
+
+**Request:** fix the two confirmed-live defects recorded in `.claude/DEFERRED.md` — D22
+(`experience.years_leadership` structurally unreachable, and it reaches the GATE) and D16
+(`appReviewer`'s `engineJudged` counts every must-have while the check judged only `coverable`).
+Files in lane: `ownerFacts.ts`, `appReviewer.ts`, `artifactScore.ts` and their tests. `schema.ts`,
+`appPackets.ts`, `checks.ts`, `appChecks.ts` and `correction.ts` belong to a concurrent lane.
+
+**ACs were NOT written by an independent subagent.** No agent-spawning tool is exposed in this
+session — the process step could not be performed, and it is recorded as `not_applicable` rather
+than claimed. The criteria this lane worked to were written by the implementing agent, which is
+exactly the cold-read the rule exists to prevent; the compensating evidence is the revert proof
+below, not a self-assessment.
+
+**D22 — fixed.** Selection is no longer by catalogue POSITION. `FactDef.refines` declares that
+`experience.years_leadership` narrows `experience.years_total`; `selectFactDef` collects every
+matching def and drops any that another matching def refines. Declared, not inferred — ranking by
+longest match or regex complexity guesses at a relationship the catalogue can state, and this
+decides a gate. Non-refinement co-matches (`"Bachelor's degree required; PMP certification
+preferred"` matches both education entries) are untouched: catalogue order still breaks that tie.
+
+**Blast radius, traced.** `checkAgainstFacts` funnels into `checks.ts` (`facts_settled`,
+`fact_shortfall`, `facts_needed`) and thence to `coverable`. `coverable` membership is UNCHANGED:
+`ownedByFacts` already absorbed `unknown` and resolved verdicts alike, so the same rows leave it
+either way. What changed is which fact the verdict is about, and the three fact rows that report it.
+`dimensions.ts` (P8.4) reads `FACT_BY_KEY`/`demandedNumber` directly and works around the shadow by
+selecting the axis's own fact — unaffected, its 36 tests still pass. `appFacts.ts` uses
+`proposeMissingFacts`, which still proposes every matching def and was not narrowed.
+
+**D16 — partially fixed; the blocker is named, not worked around.** `judgedMustHaveIds`
+(artifactScore.ts) reads the denominator the check published in `must_have_source` plus
+`uncovered_requirement_ids`, and never re-derives `coverable` (R4). It is sound in one direction
+only — a row it omits is `not_comparable`, never silently agreed. The complete fix needs
+`judged_requirement_ids uuid[]` on `artifact_score` (**schema.ts**) filled in `evaluateArtifact`
+(**appChecks.ts**), both out of lane. The helper already PREFERS that column when present, so those
+two lines complete it with no change here. See DEFERRED D16.
+
+**Proved by reverting — five defects reinstated one at a time, each failing a NAMED assertion:**
+1. `refines` declaration deleted → H41 "an undeclared subset relation…", H41b, H43, 3 unit tests.
+2. Declaration KEPT, first-match scan restored → H41's *behavioural* half fires ("a general def
+   answered a requirement its own refinement also matched"), H41b, H43. The guard cannot be
+   satisfied by the declaration alone, which is how two guards were defeated earlier this session.
+3. `judgedMustHaveIds` returns every must-have → H44 "rows the engine excluded from coverage were
+   counted as agreeing with the reviewer", plus 4 unit tests.
+4. The ORIGINAL expression restored at the appReviewer CALL SITE, helper untouched → only
+   `appReviewer.test.mjs` fires. H44 does not catch this, which is why that end-to-end test exists.
+5. A denominator recompute reinstated inside `computeArtifactScore` → H28 fires on the structural
+   half alone, after it was rescoped.
+
+**H28 was rescoped, not weakened.** Its structural half grepped the whole of `artifactScore.ts` for
+`kind === 'must_have'` and fired on `judgedMustHaveIds`, which reads that field to answer a
+different question and touches no denominator. It now slices `computeArtifactScore`'s own body via a
+new `functionBody()` helper. Proof 5 above is the evidence it still fires.
+
+**NOT verified live.** The sandbox cannot reach the Function App, the database or the SPA, and
+`db-query.yml` / `api-test.yml` / `ui-verify.yml` are `main`-only. No before/after count of
+gate-affected postings exists. D22 changes gate-visible rows on real data and that count is still
+owed.
+
+482 api tests pass (461 on `main`; +21 added). Branch pushed, NOT landed on `main`.

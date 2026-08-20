@@ -579,6 +579,12 @@ create table if not exists artifact_score (
   composite      int,
   band           text check (band in ('strong','acceptable','needs_work')),
   uncovered_requirement_ids uuid[] not null default '{}',
+  -- The rows the coverage check actually reached a verdict ON, which is NARROWER than the
+  -- must-haves: eligibility clauses no merge field can carry, and rows the owner's facts own, are
+  -- excluded by "coverable". Without this column the reviewer-agreement calculation assumed every
+  -- must-have was judged and scored the excluded ones as agreeing or disagreeing rather than
+  -- not_comparable — an accusation-grade number built on rows the engine had no opinion about.
+  judged_requirement_ids    uuid[] not null default '{}',
   engine_version int not null,
   weights        jsonb not null,
   computed_at    timestamptz not null default now(),
@@ -844,6 +850,14 @@ create index if not exists escalation_packet_idx on escalation(packet_id, state)
 create index if not exists escalation_artifact_idx on escalation(artifact_id, state);
 
 -- Idempotent multi-tenant column adds (safe on tables that predate them)
+-- artifact_score gained judged_requirement_ids AFTER the table shipped, so the inline column in the
+-- create above reaches a FRESH database only. On every database that already has artifact_score --
+-- which is the one production runs -- "create table if not exists" is skipped and takes the new
+-- column with it. Measured: applying this file to a database carrying main's schema left
+-- artifact_score with uncovered_requirement_ids and no judged_requirement_ids, exit 0, silently.
+-- The ALTER is what actually delivers it. H39/H39b are the general form of this trap.
+alter table artifact_score add column if not exists judged_requirement_ids uuid[] not null default '{}';
+
 alter table persona        add column if not exists owner_email text not null default 'demo@executive-engine.local';
 alter table persona        add column if not exists is_demo boolean not null default false;
 alter table opportunity    add column if not exists owner_email text not null default 'demo@executive-engine.local';

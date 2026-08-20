@@ -246,10 +246,14 @@ test('a posting whose requirements are all reachable says so', () => {
 const ownerFact = (key, value, value_num = null) =>
   ({ key, value, value_num, source: 'owner_stated', confirmed_at: '2026-08-20T00:00:00Z' })
 
+// The fixture asked for LEADERSHIP years and recorded only TOTAL years, and asserted a pass. That
+// passed because `checkAgainstFacts` could not reach `experience.years_leadership` at all (D22 /
+// H41) — the assertion was encoding the defect. The requirement is now a plain years one, which is
+// what this test is about; the leadership case is H43, where it belongs.
 test('a years requirement is settled by the profile, not by whether the resume repeats the number', () => {
   const rs = runChecks({
     type: 'resume', pkg: RESUME_FULL,
-    requirements: [{ seq: 0, verbatim: 'Minimum of 10 years of leadership experience', item_text: '', kind: 'must_have' }],
+    requirements: [{ seq: 0, verbatim: 'Minimum of 10 years of professional experience', item_text: '', kind: 'must_have' }],
     facts: [ownerFact('experience.years_total', '24 years', 24)],
   })
   assert.equal(find(rs, 'facts_settled').state, 'pass')

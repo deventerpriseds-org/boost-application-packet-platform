@@ -23,6 +23,18 @@ export interface FactDef {
   unit?: 'years' | 'usd' | 'people' | 'percent'
   /** What a posting says when it needs this fact — used to propose the fact when one is missing. */
   asks: RegExp
+  /**
+   * The key of a MORE GENERAL def this one narrows.
+   *
+   * Declared, never inferred. `selectFactDef` reads it to decide which of several matching defs
+   * answers a requirement, so the answer no longer depends on catalogue ORDER — which is what made
+   * `experience.years_leadership` unreachable (D22 / H41): its matcher is a strict subset of
+   * `experience.years_total`'s and the scan returned on the first match.
+   *
+   * A subset relationship that is NOT declared here is a shadow, and H41 fails on it by measurement
+   * rather than by naming the two entries that collided when it was written.
+   */
+  refines?: string
   help: string
 }
 
@@ -33,6 +45,7 @@ export const FACT_CATALOGUE: FactDef[] = [
     help: '511 requirement rows ask for a number of years. Answering once settles all of them.' },
   { key: 'experience.years_leadership', label: 'Years in leadership / management', category: 'experience',
     unit: 'years', asks: /\b\d+\+?\s*(years|yrs)[^.]{0,40}\b(leader|leadership|manage|managing|management)\b/i,
+    refines: 'experience.years_total',
     help: 'Many postings separate total experience from years spent leading.' },
   { key: 'education.highest_degree', label: 'Highest degree (and field)', category: 'education',
     asks: /\b(bachelor|master|mba|phd|doctorate|degree)\b/i,
@@ -97,12 +110,48 @@ export interface FactCheck {
  * same rule as absent evidence being `not_applicable` rather than `pass`. `unknown` is what causes
  * the fact to be PROPOSED, which is how the table grows.
  */
+/**
+ * Which catalogue entry answers this requirement, when several match.
+ *
+ * D22: the scan this replaces walked `FACT_CATALOGUE` in order and returned on the FIRST matching
+ * def, so a def whose matcher is a strict subset of an earlier one could never be selected by ANY
+ * input. `experience.years_leadership` was exactly that, and the consequences were live in both
+ * directions: "10+ years of engineering leadership" was answered by TOTAL years, so 22 total years
+ * satisfied it for someone who had led for three; and an owner who recorded leadership years but
+ * not total years was told "no value recorded" for a fact they had recorded.
+ *
+ * Selection is now by DECLARED refinement, not by position and not by a similarity heuristic. Among
+ * the defs that match, any def that another matching def `refines` is the more general one and is
+ * dropped; what survives is the narrowest question the text asks. Two defs that match for unrelated
+ * reasons — "Bachelor's degree; PMP certification" matches both education entries — have no
+ * refinement link between them, both survive, and catalogue order still breaks the tie, so this
+ * changes nothing about cases that were never a shadow.
+ *
+ * Declared rather than inferred on purpose. Ranking by longest match or by regex complexity guesses
+ * at a relationship the catalogue can simply state, and a guess here decides a GATE: `checks.ts`
+ * routes `facts_settled`, `fact_shortfall` and `facts_needed` through this function.
+ */
+export function selectFactDef(text: string): FactDef | null {
+  const matching = FACT_CATALOGUE.filter(def => def.asks.test(text))
+  if (!matching.length) return null
+  const present = new Set(matching.map(d => d.key))
+  // The keys some OTHER matching def declares itself a refinement of. Only links between defs that
+  // BOTH match count: refining an entry the text never asked about says nothing about this text.
+  const generalised = new Set(
+    matching.map(d => d.refines).filter((k): k is string => !!k && present.has(k)))
+  const survivors = matching.filter(d => !generalised.has(d.key))
+  // `survivors` is non-empty unless the catalogue declares a refinement cycle; falling back to the
+  // first match keeps a malformed catalogue answering rather than returning null, and H41 is what
+  // fails on the cycle.
+  return survivors[0] || matching[0]
+}
+
 export function checkAgainstFacts(requirementText: string, facts: OwnerFact[]): FactCheck | null {
   const text = String(requirementText || '')
   const byKey = new Map(facts.map(f => [f.key, f]))
 
-  for (const def of FACT_CATALOGUE) {
-    if (!def.asks.test(text)) continue
+  const def = selectFactDef(text)
+  if (def) {
     const fact = byKey.get(def.key)
 
     if (!fact || fact.value == null || fact.value === '') {

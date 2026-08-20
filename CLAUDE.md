@@ -310,6 +310,17 @@ while the same class stayed live in three others — one of which decided a gate
 edit applied" lesson was written down and then broken two edits later. A note explains a mistake to
 someone who happens to read it; a test refuses to let it come back.
 
+**Naming an H-case: use a SLUG, never a number.** `H1`-`H44` are frozen — they are referenced from
+`.claude/actions.md`, from code comments and from each other. Every new case takes a slug saying what
+it guards: `test('H:schema-parity: ...')`, `test('H:no-vacuous-gate: ...')`. At least two words.
+
+The global counter is retired because it collided three times in one session and each fix failed in
+turn: one ID per lane (lanes find several defects), ranges per lane (lanes overrun, new lanes appear),
+claim-at-merge (worked, but cost a hand renumber on every merge — three of them, plus one bad splice
+that left the file unparseable). The counter requires coordination between branches that cannot see
+each other. Slugs need none, and two lanes minting the same slug means they guard the same thing,
+which is information rather than an accident. `H26` enforces this — a new numeric ID fails the suite.
+
 Rules for an H-case:
 1. **Assert the invariant, not the incident.** H4 forbids fuzzy matching in any accusation-grade
    check, not just the one line that was wrong.

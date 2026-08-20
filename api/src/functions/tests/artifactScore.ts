@@ -117,7 +117,7 @@ export function computeArtifactScore(input: ScoreInput): ArtifactScore {
       ? { value: null, source: `must_have_coverage reported "${mh.observed}", which does not state how many requirements it judged` }
       : {
         value: judged ? Math.round((covered / judged) * 100) : null,
-        source: judged ? `${covered}/${judged} must-have requirements evidenced` : 'the posting produced no must-haves',
+        source: judged ? mustHaveSource(covered, judged) : 'the posting produced no must-haves',
       }
   }
 
@@ -147,4 +147,84 @@ export function computeArtifactScore(input: ScoreInput): ArtifactScore {
     engine_version: ENGINE_VERSION,
     weights,
   }
+}
+
+// ---------------------------------------------------------------------------------------------
+// WHICH ROWS THE ENGINE JUDGED — written once, read once, never re-derived.
+//
+// D16. `appReviewer` compares the reviewer's per-requirement judgements against the deterministic
+// engine's, and it needs the set of requirements the engine actually reached a coverage verdict on.
+// It used every row of `kind === 'must_have'`, but `checks.ts` judges only `coverable` — must-haves
+// minus the eligibility clauses `template_reach` reports as unreachable, minus the rows the owner's
+// facts own. So requirements the engine never had an opinion about were counted as AGREED or
+// DISAGREED with the reviewer. Reviewer agreement is an accusation-grade number; a row nobody
+// judged belongs in `not_comparable`, which is the same rule as absent evidence being
+// `not_applicable` rather than `pass`.
+//
+// The fix does NOT recompute `coverable` here. That predicate belongs to `checks.ts` and a second
+// implementation of it is the R4 defect this codebase has been bitten by repeatedly — one source
+// per number. Instead it reads what the check already PUBLISHED about the population it judged:
+//   * `artifact_score.must_have_source` states the denominator, "<covered>/<judged> ...";
+//   * `artifact_score.uncovered_requirement_ids` names the judged rows that failed.
+//
+// That yields two sound cases and no guess in between:
+//   * judged === the number of must-have rows  -> `coverable` WAS every must-have, exactly.
+//   * judged  <  the number of must-have rows  -> the engine excluded some rows and the score row
+//     does not say which. The uncovered ids are still known to have been judged; the covered ones
+//     are not identifiable, so they stay `not_comparable`. That UNDERSTATES agreement rather than
+//     inventing it, which is the direction every other check in this codebase errs in.
+//
+// The honest, complete fix is for the writer to record the judged ids alongside the uncovered ones
+// (`artifact_score` needs the column and `appChecks.evaluateArtifact` needs to fill it). This
+// function is written so that lands as a one-line addition: pass the recorded ids and they win.
+
+/** The one place the `must_have_source` string is BUILT. `parseMustHaveSource` is its inverse. */
+export function mustHaveSource(covered: number, judged: number): string {
+  return `${covered}/${judged} must-have requirements evidenced`
+}
+
+/**
+ * Read `<covered>/<judged>` back out of a stored `must_have_source`.
+ *
+ * Paired with `mustHaveSource` in this file so the writer and the reader cannot drift apart — a
+ * hardening case asserts the round trip. Anything it cannot read returns null, never a default:
+ * a fabricated denominator is worse than an absent one.
+ */
+export function parseMustHaveSource(source: string | null | undefined): { covered: number; judged: number } | null {
+  const m = /^(\d+)\/(\d+)\b/.exec(String(source || ''))
+  if (!m) return null
+  return { covered: Number(m[1]), judged: Number(m[2]) }
+}
+
+export interface JudgedScoreRow {
+  must_have_coverage: number | null
+  must_have_source: string | null
+  uncovered_requirement_ids?: unknown
+  /** Recorded judged ids, when the writer stores them. Preferred over every inference below. */
+  judged_requirement_ids?: unknown
+}
+
+/**
+ * The requirement ids the deterministic coverage check is KNOWN to have judged.
+ *
+ * Never a superset of the truth. A caller may treat everything outside the returned set as
+ * `not_comparable`; it may not treat membership as a guess.
+ */
+export function judgedMustHaveIds(
+  requirements: Array<{ id: unknown; kind: string }>,
+  score: JudgedScoreRow | null | undefined,
+): string[] {
+  // No coverage verdict at all (not_applicable, or no row) means nothing was judged.
+  if (!score || score.must_have_coverage === null || score.must_have_coverage === undefined) return []
+
+  const asIds = (v: unknown): string[] => (Array.isArray(v) ? v.map(String) : [])
+  const recorded = asIds(score.judged_requirement_ids)
+  if (recorded.length) return recorded
+
+  const mustHaves = requirements.filter(r => r.kind === 'must_have').map(r => String(r.id))
+  const parsed = parseMustHaveSource(score.must_have_source)
+  if (parsed && parsed.judged === mustHaves.length) return mustHaves
+
+  const uncovered = new Set(asIds(score.uncovered_requirement_ids))
+  return mustHaves.filter(id => uncovered.has(id))
 }

@@ -19,22 +19,37 @@ import { normalizePostingText, decodeEntities, groundingText } from '../dist/fun
 import { buildRequirements, locate, mapKind, sentenceBounds } from '../dist/functions/tests/requirements.js'
 import { onOmitList, omitEntries, similarity, itemTokens } from '../dist/functions/tests/swaps.js'
 import { runChecks, gateFor, attentionCount, COVERAGE_THRESHOLD, MIN_JUDGEABLE_TOKENS } from '../dist/functions/tests/checks.js'
-import { computeArtifactScore } from '../dist/functions/tests/artifactScore.js'
+import { computeArtifactScore, judgedMustHaveIds, mustHaveSource, parseMustHaveSource } from '../dist/functions/tests/artifactScore.js'
 import { deriveFacts } from '../dist/functions/tests/ownerFacts.js'
 import { parseResumePackage } from '../dist/functions/tests/resumeParser.js'
-import { validateCitations, reviewerChecks } from '../dist/functions/tests/reviewer.js'
+import { validateCitations, reviewerChecks, agreementFor } from '../dist/functions/tests/reviewer.js'
 import { extractFigures, scanEcho, claimKey, isMarked } from '../dist/functions/tests/figureEcho.js'
 import { profileRecords, resolveEvidence } from '../dist/functions/tests/evidence.js'
 
 const SRC = new URL('../src/functions/tests/', import.meta.url).pathname
 const src = (f) => readFileSync(join(SRC, f), 'utf8')
-const src_ = (f) => src(f)
 const allSources = () => readdirSync(SRC).filter(f => f.endsWith('.ts')).map(f => [f, src(f)])
 
 /** Source with comments removed. A guard that fires on prose is one people learn to ignore. */
 const stripComments = (body) => body
   .replace(/\/\*[\s\S]*?\*\//g, ' ')
   .split('\n').map(l => l.replace(/(^|[^:])\/\/.*$/, '$1')).join('\n')
+
+/**
+ * The body of ONE top-level `export function <name>(` declaration, and nothing else.
+ *
+ * Structural guards that search a whole MODULE accuse every other function in it. H28's did, the
+ * moment a second function in `artifactScore.ts` legitimately needed the construct H28 forbids
+ * inside the scorer. Sliced to the closing brace in column 0, which is what this codebase's
+ * formatting guarantees; a name that does not resolve returns '' so the caller's own staleness
+ * assertion fires rather than the guard passing on nothing.
+ */
+const functionBody = (body, name) => {
+  const start = body.indexOf(`export function ${name}(`)
+  if (start < 0) return ''
+  const end = body.indexOf('\n}', start)
+  return end < 0 ? body.slice(start) : body.slice(start, end + 2)
+}
 
 /**
  * The text of ONE `create table if not exists <name> ( ... );` block, and nothing else.
@@ -728,45 +743,66 @@ test('H27: the check reports the scanner\'s not_applicable, it does not re-deriv
 })
 
 // ---------------------------------------------------------------------------------------------
-// H26 — This file could carry two different cases under one ID, and nothing would notice.
+// H26 — Two cases under one ID, and nothing noticed. Then the FIX for that failed three more times.
 //
-// Not a hypothetical. Measured 2026-08-20 across three live lane branches:
+// The original failure, measured 2026-08-20 across three live lane branches:
 //     qc-p8-2-figures   H24 H25 H28
 //     qc-p8-3-evidence  H27 H28 H29 H30
 //     qc-p3-remediation H26 H27 H28 H29 H30 H31
-// `H28` meant three different defects; `H27`, `H29` and `H30` two each. IDs had been pre-allocated
-// one per lane precisely to prevent this, which was never going to be enough — each lane found
-// several defects, not one. Ranges, not single IDs.
+// `H28` meant three different defects; `H27`, `H29` and `H30` two each.
 //
-// The reason it goes unnoticed is structural: this file is append-only by convention, so three
-// branches each appending at the end MERGE CLEANLY. Git reports no conflict, every branch is green
-// in isolation, and the duplicates land silently. An ID that names two things is an ID that names
-// nothing — `.claude/actions.md` points at these numbers, and the whole scheme depends on the
-// pointer resolving to exactly one case.
+// WHY THE OBVIOUS FIXES ALL FAILED, in order, in one session:
+//   1. Pre-allocate one ID per lane   -> each lane found SEVERAL defects, not one.
+//   2. Pre-allocate RANGES per lane   -> lanes overran their range, and new lanes appeared.
+//   3. Claim IDs at merge time        -> worked, but cost a manual renumber on every merge. Three
+//                                        of them, by hand, plus a bad splice that left the file
+//                                        unparseable.
+//   4. This guard, checking one file  -> STRUCTURALLY BLIND to the actual failure. Within a single
+//                                        branch there are never duplicates; the collision exists
+//                                        only in the union of branches that cannot see each other,
+//                                        and by then both are green. It also never matched the
+//                                        `b`-variants at all: 44 of 52 cases were scanned, and
+//                                        H4b/H5b/H34b/H35b/H36b/H39b/H41b/H44b were invisible.
 //
-// The invariant: one ID, one case, and no gaps that hide a case lost in a merge.
-test('H26: every hardening case has its own ID', () => {
+// The root cause is not coordination. It is a GLOBAL COUNTER assigned on branches that cannot see
+// each other — a design that requires coordination to be correct, in a workflow that has none.
+//
+// So the counter is retired. H1-H44 are FROZEN: they are referenced from `.claude/actions.md`, from
+// code comments and from each other, and renaming them would break every pointer for no gain. Every
+// NEW case takes a SLUG naming what it guards — `H:schema-parity`, `H:no-vacuous-gate`. Two lanes
+// can mint slugs simultaneously without collision, and if they DO collide it is because they guard
+// the same thing, which is information rather than an accident.
+//
+// The invariant: one ID one case, across every form, and no new number can be minted.
+const FROZEN_MAX = 44
+test('H26: every hardening case has its own ID, and the counter stays retired', () => {
   const self = readFileSync(new URL('./hardening.test.mjs', import.meta.url), 'utf8')
-  // Read the ID off the test NAME, which is what a reader and actions.md both use. Comments are
-  // stripped first: this very comment block lists six duplicate IDs, and a scan that counted those
-  // would fire on the description of the bug rather than the bug.
-  const ids = [...stripComments(self).matchAll(/test\('(H(\d+)):/g)].map(m => ({ id: m[1], n: Number(m[2]) }))
-  assert.ok(ids.length >= 26, `only ${ids.length} cases found — the scan has gone stale`)
+  // Comments stripped first: this block lists six duplicate IDs, and a scan counting those would
+  // fire on the description of the bug rather than the bug.
+  const ids = [...stripComments(self).matchAll(/test\('(H(?:\d+b?|:[a-z0-9-]+)):/g)].map(m => m[1])
+  assert.ok(ids.length >= 52, `only ${ids.length} cases found — the scan has gone stale`)
 
-  const seen = new Map()
-  const dupes = []
-  for (const { id } of ids) {
-    if (seen.has(id)) dupes.push(id); else seen.set(id, true)
-  }
+  const seen = new Set(); const dupes = []
+  for (const id of ids) { if (seen.has(id)) dupes.push(id); else seen.add(id) }
   assert.deepEqual(dupes, [], 'two cases share an ID — actions.md now points at both and resolves to neither')
 
-  // A GAP is the other half of the same accident: a merge that dropped a case leaves its number
-  // unused, and the next lane reuses it for something unrelated. Numbering must be contiguous from
-  // H1, so a hole is visible at the moment it appears rather than at the moment it is reused.
-  const nums = ids.map(x => x.n).sort((a, b) => a - b)
+  // THE MECHANISM. A new numeric ID cannot be minted, so two lanes cannot pick the same next number.
+  const minted = ids.filter(id => /^H\d+b?$/.test(id) && Number(id.match(/\d+/)[0]) > FROZEN_MAX)
+  assert.deepEqual(minted, [],
+    `H1-H${FROZEN_MAX} are frozen. A new case takes a SLUG naming what it guards — test('H:what-it-guards: ...') ` +
+    `— because a shared counter assigned on branches that cannot see each other collides by design, ` +
+    `and did so three times in one session.`)
+
+  // Gaps in the FROZEN range only: a merge that dropped a case leaves its number unused, and the
+  // pointer in actions.md then resolves to nothing.
+  const nums = ids.filter(id => /^H\d+$/.test(id)).map(id => Number(id.slice(1)))
   const missing = []
-  for (let i = 1; i <= nums[nums.length - 1]; i++) if (!nums.includes(i)) missing.push(`H${i}`)
-  assert.deepEqual(missing, [], 'a hardening case was lost in a merge — its ID is unused')
+  for (let i = 1; i <= FROZEN_MAX; i++) if (!nums.includes(i)) missing.push(`H${i}`)
+  assert.deepEqual(missing, [], 'a frozen hardening case was lost in a merge — its ID is unused')
+
+  // Slugs must say what they guard, so the ID stays a pointer rather than becoming a new counter.
+  const badSlugs = ids.filter(id => id.startsWith('H:') && id.slice(2).split('-').length < 2)
+  assert.deepEqual(badSlugs, [], 'a slug that is a single word is a counter with extra steps')
 })
 
 // ---------------------------------------------------------------------------------------------
@@ -814,8 +850,16 @@ test('H28: a requirement nothing measured is never counted as covered', () => {
   // The structural half: the score must not grow its own denominator back. Deleting the parse and
   // restoring `reqs.filter(r => r.kind === 'must_have').length` reproduces the incident exactly, and
   // no runtime assertion above would notice on an input with no excluded rows.
-  const scoreSrc = stripComments(src('artifactScore.ts'))
-  assert.ok(!/kind\s*===\s*'must_have'/.test(scoreSrc),
+  //
+  // Scoped to `computeArtifactScore`'s OWN BODY, not the whole file. The first version searched the
+  // module and would have fired on `judgedMustHaveIds` (H44), which reads `kind === 'must_have'` to
+  // answer a different question — WHICH must-have rows the reviewer may be compared against — and
+  // never touches a denominator. A guard that accuses correct code is one people switch off, and
+  // this one is still exact: reinstating the recompute inside the function reintroduces the string
+  // inside this slice and fails.
+  const fnBody = functionBody(stripComments(src('artifactScore.ts')), 'computeArtifactScore')
+  assert.ok(fnBody.length > 400, 'computeArtifactScore body not found — the slice has gone stale')
+  assert.ok(!/kind\s*===\s*'must_have'/.test(fnBody),
     'the score recomputed the must-have population instead of reading the checks denominator')
 })
 
@@ -1619,60 +1663,133 @@ test('H39d: EVERY named CHECK on remediation_loop has an idempotent replacement'
 
 // ---------------------------------------------------------------------------------------------
 // H41 — A first-match scan over an ORDERED catalogue made one of its entries unreachable, and the
-// unreachable entry was the more specific one.
+// unreachable entry was the more specific one. FIXED; this case now guards the fix.
 //
-// Measured against the built module, not inferred. `checkAgainstFacts` (ownerFacts.ts) walks
-// `FACT_CATALOGUE` in order and returns on the FIRST def whose `asks` matches. Entry 0 is
+// Measured against the built module, not inferred. `checkAgainstFacts` (ownerFacts.ts) used to walk
+// `FACT_CATALOGUE` in order and return on the FIRST def whose `asks` matched. Entry 0 is
 // `experience.years_total` (`/\d+\+?\s*(years|yrs)/`); entry 1 is `experience.years_leadership`
 // (the same, PLUS a leadership word) — a strict subset. So:
 //
 //   checkAgainstFacts('Requires 10+ years of engineering leadership experience', facts)
 //     -> { fact_key: 'experience.years_total', ... }        every time, for every input
 //
-// and no counterexample can exist by construction. Two consequences, both live:
-//   * a posting asking for 10 years of LEADERSHIP is answered by TOTAL years of experience, so
-//     22 total years "satisfies" it for someone who has led for three;
-//   * an owner who recorded their leadership years and not their total years gets
-//     "no value recorded" — the fact they DID record is invisible.
+// and no counterexample could exist by construction. Two consequences, both live until this fix:
+//   * a posting asking for 10 years of LEADERSHIP was answered by TOTAL years of experience, so
+//     22 total years "satisfied" it for someone who had led for three;
+//   * an owner who recorded their leadership years and not their total years got
+//     "no value recorded" — the fact they DID record was invisible.
 //
-// The invariant, asserted rather than the incident: in any first-match catalogue, a def whose
-// matcher is a strict subset of an earlier def's can never be selected. That is a property of the
-// catalogue's ORDER, so it is checked by ordering, not by naming the two entries that collide
-// today. Ordering the catalogue most-specific-first would change which requirements the GATE treats
-// as settled (`checks.ts` drops fact-resolved rows from `coverable`), which is why it is recorded
-// here and in .claude/DEFERRED.md rather than changed inside the P8.4 lane.
-test('H41: a first-match fact catalogue never hides a specific entry behind a general one', async () => {
-  const { FACT_CATALOGUE, checkAgainstFacts } = await import('../dist/functions/tests/ownerFacts.js')
+// Selection is now by DECLARED refinement (`FactDef.refines`), read by `selectFactDef`, so it does
+// not depend on catalogue position at all. The invariant asserted here is the general one, not the
+// incident: **a def whose matcher is a strict subset of another def's must DECLARE that it refines
+// it, and the narrower def must be the one selected.** An undeclared subset is a shadow — the def
+// can never be chosen for any text, whatever the order happens to be today.
+//
+// Measured over a corpus rather than named pairs, so a THIRTEENTH catalogue entry whose matcher is
+// accidentally narrower than an existing one fails here on the day it is added. The corpus also
+// contains a line that matches two defs for unrelated reasons ("Bachelor's degree required; PMP
+// certification preferred" matches both education entries): neither is a subset of the other, both
+// stay selectable, and the guard must NOT fire on it. A guard that accuses correct code is one
+// people learn to ignore.
+const H41_CORPUS = [
+  'Requires 10+ years of engineering leadership experience',
+  '15 years managing engineering teams',
+  '20+ years in leadership roles',
+  'Minimum of 10 years of professional experience',
+  '8 yrs of relevant industry experience required',
+  "Bachelor's degree in Computer Science or equivalent",
+  'MBA or advanced degree preferred',
+  'PMP certification required',
+  'AWS Certified Solutions Architect strongly preferred',
+  "Bachelor's degree required; PMP certification preferred",
+  'Must be a U.S. Citizen or Green Card Holder',
+  'No visa sponsorship is available for this position',
+  'Active Secret security clearance required',
+  'TS/SCI with polygraph',
+  'Must reside in the East Coast of the United States',
+  'Candidate must be based in Austin, Texas',
+  'Willing to relocate to Denver',
+  'Hybrid, 3 days a week onsite in Chicago',
+  'Fully remote position',
+  'Willing to travel up to 25%',
+  'Able to travel domestically',
+  'Has led a team of 40 engineers',
+  'Manages 12 direct reports',
+  'Owned a budget of $18M',
+  'P&L responsibility for the division',
+]
 
-  // Probe strings that a HUMAN would file under the more specific entry. If an earlier, broader
-  // entry answers them, the later one is dead for that input.
-  const PROBES = [
-    'Requires 10+ years of engineering leadership experience',
-    '15 years managing engineering teams',
-    '20+ years in leadership roles',
-  ]
-  const shadowed = []
-  for (const probe of PROBES) {
-    const matching = FACT_CATALOGUE.filter(d => d.asks.test(probe))
-    if (matching.length < 2) continue
-    // Every def after the first that matches this probe is unreachable FOR THIS PROBE.
-    for (const d of matching.slice(1)) shadowed.push({ probe, hidden: d.key, by: matching[0].key })
+test('H41: no catalogue entry is hidden behind a more general one', async () => {
+  const { FACT_CATALOGUE, selectFactDef } = await import('../dist/functions/tests/ownerFacts.js')
+  assert.ok(FACT_CATALOGUE.length >= 12, `only ${FACT_CATALOGUE.length} fact defs — the scan has gone stale`)
+
+  const matches = new Map(FACT_CATALOGUE.map(d => [d.key, new Set(H41_CORPUS.filter(t => d.asks.test(t)))]))
+  assert.ok([...matches.values()].every(m => m.size > 0),
+    'a catalogue entry matches nothing in the corpus, so this case cannot see it — extend H41_CORPUS')
+
+  // --- the structural half: every strict-subset relation must be DECLARED ----------------------
+  const undeclared = []
+  for (const a of FACT_CATALOGUE) {
+    for (const b of FACT_CATALOGUE) {
+      if (a === b) continue
+      const A = matches.get(a.key), B = matches.get(b.key)
+      if (A.size >= B.size) continue
+      if (![...A].every(t => B.has(t))) continue          // not a subset — two unrelated questions
+      if (a.refines === b.key) continue                   // declared, and honoured below
+      undeclared.push(`${a.key} is a strict subset of ${b.key} and does not declare refines`)
+    }
   }
+  assert.deepEqual(undeclared, [],
+    'an undeclared subset relation: the narrower def can never be selected for any text')
 
-  // This is a KNOWN, RECORDED shadow (DEFERRED). The guard's job is to stop a NEW one appearing
-  // and to fail the moment the known one is fixed without this case being updated — so it pins the
-  // exact set rather than asserting "none", which would be red on arrival and get switched off.
-  const KNOWN = 'experience.years_leadership behind experience.years_total'
-  const found = [...new Set(shadowed.map(s => `${s.hidden} behind ${s.by}`))]
-  assert.deepEqual(found, [KNOWN],
-    `the set of shadowed fact defs changed: ${JSON.stringify(found)} — either a new one appeared, or the known one was fixed and this case must be updated`)
+  // --- the behavioural half: the narrower def is the one SELECTED ------------------------------
+  // Not "is it declared" — what the function DOES. Deleting `refines` or restoring the first-match
+  // scan makes every one of these come back as the general entry.
+  const wrong = []
+  for (const t of H41_CORPUS) {
+    const matching = FACT_CATALOGUE.filter(d => d.asks.test(t))
+    if (matching.length < 2) continue
+    const selected = selectFactDef(t)
+    // The selected def must not be one that another matching def declares it refines.
+    const generalised = new Set(matching.map(d => d.refines).filter(k => k && matching.some(m => m.key === k)))
+    if (generalised.has(selected.key)) wrong.push(`${JSON.stringify(t)} selected the general ${selected.key}`)
+  }
+  assert.deepEqual(wrong, [], 'a general def answered a requirement its own refinement also matched')
 
-  // And the behavioural half, so the case is about what the function DOES, not how it is spelled:
-  // with ONLY the specific fact recorded, the scan still answers with the general one.
-  const facts = [{ key: 'experience.years_leadership', value: '14', value_num: 14, source: 'owner_stated', confirmed_at: 'x' }]
-  const v = checkAgainstFacts(PROBES[0], facts)
-  assert.equal(v.fact_key, 'experience.years_total')
-  assert.equal(v.verdict, 'unknown', 'the recorded leadership fact is invisible to this scan')
+  // --- the incident, in both directions it actually broke --------------------------------------
+  const probe = 'Requires 10+ years of engineering leadership experience'
+  assert.equal(selectFactDef(probe).key, 'experience.years_leadership',
+    'the leadership requirement is answered by the leadership fact, not by total years')
+  assert.equal(selectFactDef('Minimum of 10 years of professional experience').key, 'experience.years_total',
+    'a plain years requirement still resolves to total years — the fix must not invert the pair')
+})
+
+test('H41b: the leadership fact settles a leadership requirement, and total years cannot stand in', async () => {
+  const { checkAgainstFacts } = await import('../dist/functions/tests/ownerFacts.js')
+  const probe = 'Requires 10+ years of engineering leadership experience'
+  const fact = (key, n) => ({ key, value: String(n), value_num: n, source: 'owner_stated', confirmed_at: 'x' })
+
+  // Direction 1 — the recorded leadership fact was invisible; it now answers, with its own number.
+  const onlyLeadership = checkAgainstFacts(probe, [fact('experience.years_leadership', 14)])
+  assert.equal(onlyLeadership.fact_key, 'experience.years_leadership')
+  assert.equal(onlyLeadership.verdict, 'satisfied')
+  assert.match(onlyLeadership.detail, /14 years recorded, 10 required/)
+
+  // Direction 2 — the costly one. 22 total years must NOT satisfy a 10-year LEADERSHIP requirement
+  // for someone who has led for three. Before the fix this returned satisfied on years_total.
+  const bothRecorded = checkAgainstFacts(probe, [
+    fact('experience.years_total', 22), fact('experience.years_leadership', 3),
+  ])
+  assert.equal(bothRecorded.fact_key, 'experience.years_leadership')
+  assert.equal(bothRecorded.verdict, 'not_satisfied',
+    '22 total years answered a leadership requirement for someone who has led for three')
+  assert.match(bothRecorded.detail, /3 years recorded, 10 required/)
+
+  // Direction 3 — total years alone no longer settles it either way; it is a fact the owner has not
+  // recorded, which is `unknown`, which is what PROPOSES the fact. Absent evidence, not a pass.
+  const onlyTotal = checkAgainstFacts(probe, [fact('experience.years_total', 22)])
+  assert.equal(onlyTotal.fact_key, 'experience.years_leadership')
+  assert.equal(onlyTotal.verdict, 'unknown')
 })
 
 // ---------------------------------------------------------------------------------------------
@@ -1737,8 +1854,159 @@ test('H42: every per-owner settings column production reads has a writer that ca
   assert.ok(written.has('cmp_dimensions'), 'the dimension set shipped with no writer — the exact shape this case exists to stop')
 })
 
+
 // ---------------------------------------------------------------------------------------------
-// H43 — a correction pass placed beside the check that motivates it produces a document the user
+// H43 — H41's defect where it did damage: the GATE.
+//
+// H41 guards the SELECTION (`selectFactDef` picks the narrower def). This case guards the
+// consequence, because the selection only mattered because `checks.ts` routes `facts_settled`,
+// `fact_shortfall` and `facts_needed` through `checkAgainstFacts`, and those rows move the badge.
+//
+// Evidence, the shape D22 recorded: a posting asking for "10+ years of engineering leadership"
+// against an owner with 22 total years and three years of leadership. Before the fix the scan
+// returned `experience.years_total`, the arithmetic was 22 >= 10, and the run reported
+// `facts_settled: pass` — a confident, correctly formatted, TRUE statement about the wrong fact.
+// `checks.test.mjs` encoded that as an expectation, which is how it survived: the fixture asked for
+// LEADERSHIP years and recorded only TOTAL years, and asserted a pass.
+//
+// The invariant: a fact verdict that reaches the gate is about the fact the posting actually asked
+// for. A years-of-leadership requirement is never settled by a total-years figure.
+test('H43: a fact verdict that reaches the gate is about the fact the posting asked for', () => {
+  const LEADERSHIP = 'Requires 10+ years of engineering leadership experience'
+  const reqs = [{ seq: 0, verbatim: LEADERSHIP, item_text: '', kind: 'must_have' }]
+  const fact = (key, n) => ({ key, value: String(n), value_num: n, source: 'owner_stated', confirmed_at: 'x' })
+  const run = (facts) => runChecks({
+    type: 'resume',
+    pkg: { ResumeSummary: 'Owns roadmap strategy and execution with deep experience.' },
+    requirements: reqs, facts, evidence: { profileReadable: true, bySeq: {} },
+  })
+  const find = (rs, k) => rs.find(r => r.check_key === k)
+
+  // 1. Total years alone must not settle it. It is a fact the owner has not recorded — surfaced for
+  //    them to answer, which is what proposes the row, not laundered into a pass.
+  const totalOnly = run([fact('experience.years_total', 22)])
+  assert.equal(find(totalOnly, 'facts_settled').state, 'not_applicable',
+    '22 total years settled a LEADERSHIP requirement — the gate read the wrong fact')
+  assert.match(find(totalOnly, 'facts_needed').offenders[0], /Years in leadership/,
+    'the unanswered fact must be named as the leadership one, not as total years')
+
+  // 2. Recorded and short: a WARN naming the LEADERSHIP arithmetic. Before the fix this was a pass.
+  const ledThree = run([fact('experience.years_total', 22), fact('experience.years_leadership', 3)])
+  assert.equal(find(ledThree, 'facts_settled').state, 'not_applicable')
+  const shortfall = find(ledThree, 'fact_shortfall')
+  assert.equal(shortfall.state, 'warn', 'three years of leadership satisfied a ten-year requirement')
+  assert.match(shortfall.offenders[0], /3 years recorded, 10 required/,
+    'the arithmetic on screen must be the leadership figure, not the total-years one')
+
+  // 3. Recorded and sufficient: it settles, off its own number.
+  const ledTwelve = run([fact('experience.years_total', 22), fact('experience.years_leadership', 12)])
+  assert.equal(find(ledTwelve, 'facts_settled').state, 'pass')
+  assert.equal(find(ledTwelve, 'fact_shortfall'), undefined)
+
+  // 4. And the pair is not inverted: a plain years requirement is still total years.
+  const plain = runChecks({
+    type: 'resume',
+    pkg: { ResumeSummary: 'Owns roadmap strategy and execution with deep experience.' },
+    requirements: [{ seq: 0, verbatim: 'Minimum of 10 years of professional experience', item_text: '', kind: 'must_have' }],
+    facts: [fact('experience.years_total', 22)], evidence: { profileReadable: true, bySeq: {} },
+  })
+  assert.equal(find(plain, 'facts_settled').state, 'pass')
+})
+
+// ---------------------------------------------------------------------------------------------
+// H44 — Reviewer agreement was measured against requirements the engine never judged.
+//
+// `appReviewer` compares the reviewer's per-requirement judgements with the deterministic engine's
+// and stores `agreed` / `disagreed` / `reviewer_stricter` / `reviewer_looser`. It built the
+// comparable set as every row of `kind === 'must_have'`:
+//
+//   const engineJudged = scoreRow?.must_have_coverage == null ? []
+//     : requirements.filter(r => r.kind === 'must_have').map(r => String(r.id))
+//
+// but `checks.ts` judges `coverable` — must-haves MINUS the eligibility clauses `template_reach`
+// reports as unreachable, MINUS the rows the owner's facts own. On the shape the live Trinnex
+// posting has (4 must-haves, 3 eligibility, 1 judged) that is 4 rows compared against an engine that
+// had an opinion about 1. The three the engine never judged are not in `uncovered_requirement_ids`,
+// so `engineCovered` computed `true` for them, and a reviewer saying "covered" was recorded as
+// AGREEING with a verdict that was never reached. Reviewer agreement is an accusation-grade number.
+//
+// The invariant, and it has two halves that must both hold:
+//   * a requirement the engine did not judge is `not_comparable`, never agreed and never disagreed;
+//   * the comparable set is READ from what the check published, never re-derived. `coverable` is
+//     checks.ts's predicate and a second implementation of it is the R4 defect this codebase keeps
+//     being bitten by — one source per number.
+test('H44: reviewer agreement counts only requirements the engine actually judged', () => {
+  // r0 an eligibility clause, r1 owned by the owner's facts — checks.ts excludes both from
+  // `coverable`. r2 judged and covered, r3 judged and uncovered: "1/2 must-have requirements
+  // evidenced" is exactly what the check publishes for that population.
+  const requirements = [
+    { id: 'r0', seq: 0, kind: 'must_have' },
+    { id: 'r1', seq: 1, kind: 'must_have' },
+    { id: 'r2', seq: 2, kind: 'must_have' },
+    { id: 'r3', seq: 3, kind: 'must_have' },
+  ]
+  const scoreRow = {
+    must_have_coverage: 50,
+    must_have_source: mustHaveSource(1, 2),
+    uncovered_requirement_ids: ['r3'],
+  }
+
+  const judged = judgedMustHaveIds(requirements, scoreRow)
+  assert.ok(!judged.includes('r0') && !judged.includes('r1'),
+    'rows the engine excluded from coverage were offered to the reviewer comparison as judged')
+
+  // The behavioural half, through the function that produces the stored numbers. The reviewer
+  // claims all three are covered; the engine judged only r3, and said it was not.
+  const judgements = [
+    { requirement_id: 'r0', covered: true },
+    { requirement_id: 'r1', covered: true },
+    { requirement_id: 'r3', covered: false },
+  ]
+  const a = agreementFor(judgements, [3], requirements, judged)
+  assert.equal(a.not_comparable, 2,
+    'a requirement the engine never judged was counted as agreement with the reviewer')
+  assert.equal(a.agreed, 1, 'the one genuinely comparable row must still be compared')
+  assert.equal(a.disagreed, 0)
+
+  // When the check DID judge every must-have, the whole set is comparable — the fix must not throw
+  // the measurement away to be safe.
+  const all = judgedMustHaveIds(requirements, {
+    must_have_coverage: 75, must_have_source: mustHaveSource(3, 4), uncovered_requirement_ids: ['r3'],
+  })
+  assert.deepEqual([...all].sort(), ['r0', 'r1', 'r2', 'r3'])
+
+  // No coverage verdict at all means nothing was judged — absent evidence, not a pass.
+  assert.deepEqual(judgedMustHaveIds(requirements, { must_have_coverage: null, must_have_source: null }), [])
+  assert.deepEqual(judgedMustHaveIds(requirements, null), [])
+
+  // A recorded judged set, when the writer stores one, wins over every inference above.
+  assert.deepEqual(judgedMustHaveIds(requirements, { ...scoreRow, judged_requirement_ids: ['r2', 'r3'] }), ['r2', 'r3'])
+})
+
+test('H44b: the must_have_source denominator survives the round trip it is read back through', () => {
+  // H44's conservative branch turns on parsing `<covered>/<judged>` out of a string the scorer
+  // wrote. Writer and reader live in one file for that reason, and this is what stops them drifting:
+  // change the wording of `mustHaveSource` without changing `parseMustHaveSource` and the reviewer
+  // silently falls back to the uncovered rows for every artifact, with no error anywhere.
+  assert.deepEqual(parseMustHaveSource(mustHaveSource(3, 7)), { covered: 3, judged: 7 })
+  assert.equal(parseMustHaveSource('the posting produced no must-haves'), null,
+    'an unreadable source must be null, never a defaulted denominator')
+
+  // And the string the scorer ACTUALLY stores is one the reader can read — asserted through
+  // computeArtifactScore rather than through the helper, so a caller that stops using the helper is
+  // caught too.
+  const checks = [{
+    check_key: 'must_have_coverage', engine: 'deterministic', state: 'fail',
+    observed: '1/2 must-haves evidenced (2 not reachable by any generated field, not counted either way)',
+    expected: '', offenders: ['#3 something — no evidence'],
+  }]
+  const score = computeArtifactScore({ requirements: [], checks })
+  assert.deepEqual(parseMustHaveSource(score.must_have_coverage.source), { covered: 1, judged: 2 },
+    'the scorer stored a must_have_source the reviewer cannot read back')
+})
+
+// ---------------------------------------------------------------------------------------------
+// H:corrections-before-store — a correction pass placed beside the check that motivates it produces a document the user
 // reads and a record that disagrees with it.
 //
 // The natural home for R1 is `appChecks.ts`, next to `posting_figure_echo`. Put it there and
@@ -1753,18 +2021,20 @@ test('H42: every per-owner settings column production reads has a writer that ca
 // The invariant, not the incident: the correction pass must run before the package is persisted,
 // in the ONE function every build funnels through, so that the stored package, the provenance
 // writers and every check all read the same corrected text.
-test('H43: corrections are applied before the package is stored, not beside the check', () => {
+test('H:corrections-before-store: corrections are applied before the package is stored, not beside the check', () => {
   // The CALL, not the import. The first version of this guard searched for the bare identifier and
   // found the `import` line at the top of the file — which precedes everything, so the ordering
   // assertion was trivially true and the guard passed with the pass moved after the store. Caught
   // by reverting it; an inert guard is worse than none.
-  const src = stripComments(src_('appPackets.ts')).replace(/^\s*import[^\n]*\n/gm, '')
-  const iPass = src.search(/await\s+applyCorrectionPass\s*\(/)
+  // Named 'code', not 'src': a local 'src' shadows the module-level helper of the same name and
+  // throws "Cannot access 'src' before initialization" at the call inside its own initialiser.
+  const code = stripComments(src('appPackets.ts')).replace(/^\s*import[^\n]*\n/gm, '')
+  const iPass = code.search(/await\s+applyCorrectionPass\s*\(/)
   assert.ok(iPass > 0, 'the correction pass is not CALLED from the package builder at all')
 
   // It must precede the pkg_json write, the swap writer and the insertion writer.
   for (const after of ['update packet set pkg_json', 'writeSwaps(', 'writeInsertions(']) {
-    const iAfter = src.indexOf(after)
+    const iAfter = code.indexOf(after)
     assert.ok(iAfter > 0, `${after} not found — this guard has gone stale`)
     assert.ok(iPass < iAfter,
       `applyCorrectionPass runs AFTER ${after}, so what is stored is not what the user reads`)
@@ -1772,15 +2042,15 @@ test('H43: corrections are applied before the package is stored, not beside the 
 
   // And it must NOT be called from the checks layer, which runs after the package is already
   // persisted — that placement is the defect this case exists to prevent.
-  assert.ok(!/applyCorrectionPass/.test(stripComments(src_('appChecks.ts'))),
+  assert.ok(!/applyCorrectionPass/.test(stripComments(src('appChecks.ts'))),
     'the correction pass moved into appChecks, where it can only correct text already stored')
 })
 
-// H43b — the pure layer stays pure, because that is what makes every offset and revert path
+// H:correction-layer-pure — the pure layer stays pure, because that is what makes every offset and revert path
 // testable without a database. A correction whose rules can only be exercised through pg is a
 // correction whose revert path is exercised by nobody.
-test('H43b: the correction judgement layer takes no database or HTTP dependency', () => {
-  const pure = stripComments(src_('correction.ts'))
+test('H:correction-layer-pure: the correction judgement layer takes no database or HTTP dependency', () => {
+  const pure = stripComments(src('correction.ts'))
   for (const banned of ['pgClient', '@azure/functions', 'logUsage', 'fetch(']) {
     assert.ok(!pure.includes(banned), `correction.ts references ${banned} — it is no longer pure`)
   }
