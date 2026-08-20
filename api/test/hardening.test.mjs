@@ -738,8 +738,144 @@ test('H26: every hardening case has its own ID', () => {
   assert.deepEqual(missing, [], 'a hardening case was lost in a merge — its ID is unused')
 })
 
+// ---------------------------------------------------------------------------------------------
+// H28 — A behaviour toggle the server reads and NOTHING can send. Third shipping of this class.
+//
+//   actions.md A2   `regen` honoured server-side, `appPackets.ts:454` hardcoded it false
+//   actions.md X2   made `regen` reachable — from ONE of the three routes that read it
+//   actions.md      "Re-run ATS analysis": server read `force`, `api.js` helper took no argument
+//
+// Measured 2026-08-20, after X2 was recorded as closed: `appPackets.ts:382` (document) and `:457`
+// (slides) both read `regen` from the body and `:319` honours it, yet NO caller on ANY path could
+// send it. Not the UI — `api.js` posted `{}` with no options parameter. Not the coach agent —
+// `coachTools.ts:28/29` post no body to those routes and their tool schemas declare only
+// `artifactId`. A parameterised cache bypass with zero senders, on the two routes a user reaches
+// when they want exactly that.
+//
+// Fixing instances is what failed the first two times, so this asserts the CLASS: a toggle the
+// server reads must have some caller able to send it, or be listed as unreachable by design with a
+// reason. It is a source rule because the absence of a caller cannot be exercised at runtime.
+// Routes with NO committed caller anywhere — not `app/src/api.js`, not the legacy `web/` console,
+// not `.github/workflows/`, not `scripts/` (all four searched 2026-08-20). They are operator
+// endpoints, invoked by hand with a written-out body through `api-test.yml`, so there is no caller
+// for this guard to find and its absence is not evidence of a defect.
+//
+// This list is the guard's pressure valve, and it is exactly where a real gap would go to hide.
+// Two assertions below keep it honest: every entry must carry a reason, and no entry may name a
+// toggle something CAN send — so an entry cannot be parked here and quietly outlive its fix.
+const UNREACHABLE_BY_DESIGN = [
+  { toggle: 'favoritesOnly', route: 'app/ats-backfill', why: 'operator backfill, invoked by hand via api-test.yml' },
+  { toggle: 'fetchJd', route: 'mail/jd-backfill/recover-targeted', why: 'operator JD recovery, hand-invoked' },
+  { toggle: 'debug', route: 'mail/jd-backfill/recover-targeted', why: 'operator diagnostic dump, hand-invoked' },
+  { toggle: 'favoritesOnly', route: 'mail/jd-backfill/recover-targeted', why: 'operator JD recovery scope, hand-invoked' },
+  { toggle: 'llm', route: 'mail/jd-backfill/scan', why: 'operator scan mode, hand-invoked' },
+  { toggle: 'favoritesOnly', route: 'mail/jd-backfill/fetch', why: 'operator fetch scope, hand-invoked' },
+  { toggle: 'direct', route: 'mail/jd-backfill/fetch', why: 'operator fetch strategy, hand-invoked' },
+  { toggle: 'superOnBlock', route: 'mail/jd-backfill/fetch', why: 'operator fallback on a blocked fetch, hand-invoked' },
+  { toggle: 'dryRun', route: 'mail/folders/reclassify', why: 'operator reclassify preview — the safe half of a destructive op' },
+]
+
+test('H28: every server-side body toggle has a caller that can send it', () => {
+  const API_JS = readFileSync(new URL('../../app/src/api.js', import.meta.url), 'utf8')
+  const apiCode = stripComments(API_JS)
+  const coachCode = stripComments(src('coachTools.ts'))
+
+  // Both grammars actually in use. Comments stripped FIRST: this case's own header names `regen`
+  // and `force` half a dozen times, and a scan that counted those would fire on the description of
+  // the bug rather than the bug — the cry-wolf failure, from inside the guard meant to prevent it.
+  const TOGGLE = /\b(?:body|b|json|payload)\s*\??\.\s*([a-zA-Z_]\w*)\s*(?:===\s*true|!==\s*false)|\(await\s+req\.json\(\)[^;]*?\)\s*\??\.\s*([a-zA-Z_]\w*)\s*===\s*true/g
+
+  // A toggle is only answerable together with the ROUTE that reads it: "can anything send `regen`"
+  // has no answer, but "can anything send `regen` to /artifact/{id}/document" does. So resolve each
+  // occurrence to its enclosing handler, and each handler to the route it is registered under.
+  const found = []
+  for (const [file, body] of allSources()) {
+    const code = stripComments(body)
+    const routeOf = new Map()
+    for (const m of code.matchAll(/route:\s*'([^']+)'[^}]*handler:\s*(\w+)/g)) routeOf.set(m[2], m[1])
+    for (const m of code.matchAll(/handler:\s*(\w+)[^}]*route:\s*'([^']+)'/g)) routeOf.set(m[1], m[2])
+    const fns = [...code.matchAll(/(?:export\s+)?async\s+function\s+(\w+)/g)].map(m => ({ name: m[1], at: m.index }))
+    // A handler reached through a DISPATCHER has no `app.http` of its own — `templatesUpsert` is
+    // called by a registered function that switches on `req.method`. Reporting its route as
+    // unresolved made a healthy toggle look unreachable, so inherit the dispatcher's route.
+    // Matches both spellings a dispatcher is written in — `async function name(req` and
+    // `const name = async (req`. Requiring the `function` keyword missed `templatesCollection`,
+    // which is the const-arrow form, and left `isPrimary` reported as unreachable while
+    // Settings.jsx sends it on every click.
+    for (const [, f1, f2, callee] of code.matchAll(/(?:function\s+(\w+)|const\s+(\w+)\s*=\s*async)[\s\S]{0,600}?\b(\w+)\(req[,)]/g)) {
+      const caller = f1 || f2
+      if (caller && routeOf.has(caller) && !routeOf.has(callee)) routeOf.set(callee, routeOf.get(caller))
+    }
+    for (const m of code.matchAll(TOGGLE)) {
+      const name = (m[1] || m[2])
+      const owner = fns.filter(f => f.at < m.index).pop()
+      found.push({ toggle: name, file, handler: owner?.name || '(top level)', route: routeOf.get(owner?.name) || null })
+    }
+  }
+  assert.ok(found.length >= 8, `only ${found.length} toggle reads found — the scan has gone stale (measured 2026-08-20: 11 reads, 7 distinct names)`)
+
+  // `{param}` in a route matches `${param}` in an api.js template literal.
+  const routeRe = (r) => new RegExp('`/' + r.replace(/[.*+?^$()|[\]\\]/g, '\\$&').replace(/\{[^}]+\}/g, '\\$\\{[^}]+\\}') + '`')
+
+  // Two ways to send, and rule TWO is mandatory. The string `regen` appears ZERO times in api.js,
+  // yet `regen` on packet/build-all is genuinely reachable because `buildFullPacket` forwards an
+  // opaque `opts`. A name-only scan would accuse correct code on its first run — which guards in
+  // this repo have now done twice. But the forwarding check must be scoped to the helper for THAT
+  // route: taken globally, one forwarding helper anywhere certifies every toggle everywhere, and
+  // the guard passes while a brand-new unreachable toggle sits in the tree. It did exactly that on
+  // its first version, caught by adding an unsendable `deepScan` and watching nothing happen.
+  // EVERY helper on that route, not the first. `.find()` was the first version and it was wrong in
+  // the quietest possible way: `dismiss` sits above `undismiss` and `coachConfigGet` above
+  // `coachConfigSet`, so the read-only sibling matched first and the guard reported the real sender
+  // missing. It named four healthy toggles as defects — the cry-wolf failure, in the guard whose
+  // entire purpose is to not cry wolf.
+  const helpersFor = (route) => {
+    if (!route) return []
+    const re = routeRe(route)
+    return apiCode.split('\n').filter(l => re.test(l))
+  }
+  const canSend = ({ toggle, route }) => {
+    const named = new RegExp(`\\b${toggle}\\b`)
+    // A helper for this route that either names the toggle or forwards a caller-supplied object.
+    // A bare identifier as the body argument is a caller-supplied bag, whatever it is named —
+    // `opts`, `body`, `data`. Enumerating the names missed `templateSave: (data) => post(…, data)`
+    // and reported `isPrimary` unreachable when Settings.jsx sends it on every click.
+    // Anchored to the CALL, not the line. `/,\s*\w+\s*\)/` alone matched the arrow function's own
+    // PARAMETER list — `atsSourceAdd: (provider, board) => post(…, { provider, board })` was read
+    // as forwarding a bag because of `, board)` in its signature, and the guard cleared a toggle
+    // that route cannot send. A guard too permissive in one spot is indistinguishable from no
+    // guard, and this one had already been vacuous once.
+    const FORWARDS = /post(?:Detailed)?\(`[^`]*`,\s*[a-zA-Z_]\w*\s*\)/
+    if (helpersFor(route).some(l => named.test(l) || FORWARDS.test(l))) return true
+    // A route we could not resolve is not evidence of anything — fall back to naming it anywhere in
+    // api.js rather than reporting an unresolved route as an unreachable toggle.
+    if (!route && named.test(apiCode)) return true
+    if (named.test(coachCode)) return true                                   // the coach agent is a caller too
+    return false
+  }
+
+  const unreachable = found.filter(x => !canSend(x))
+    .filter(x => !UNREACHABLE_BY_DESIGN.some(u => u.toggle === x.toggle && u.route === x.route))
+    .map(x => `${x.toggle} -> ${x.route || x.handler} (read in ${x.file}, no caller can send it)`)
+  assert.deepEqual([...new Set(unreachable)], [], 'a server toggle has no caller that can send it')
+
+  for (const u of UNREACHABLE_BY_DESIGN) {
+    assert.ok(u.why && u.why.length > 10, `${u.toggle} is allowlisted with no reason`)
+    assert.ok(!canSend(u), `${u.toggle} is allowlisted but a caller CAN send it — the allowlist is hiding a real gap`)
+  }
+
+  // The two instances that prompted this, pinned by name so a revert is caught even if the class
+  // scan above is later loosened.
+  for (const helper of ['generateArtifactDocument', 'generateArtifactSlides']) {
+    const line = apiCode.split('\n').find(l => l.includes(`${helper}:`))
+    assert.ok(line, `${helper} not found in api.js`)
+    assert.match(line, /opts\s*=\s*\{\}/, `${helper} takes no options argument — it cannot send regen`)
+    assert.match(line, /opts\.regen/, `${helper} does not forward regen`)
+  }
+})
+
 // -----------------------------------------------------------------------------------------------
-// H28 — the swap writer deleted the whole packet's provenance on every build, and swap_decision had
+// H29 — the swap writer deleted the whole packet's provenance on every build, and swap_decision had
 // no pass dimension at all. Evidence: `appSwaps.writeSwaps` ran
 // `delete from swap_decision where packet_id=$1` unconditionally, and the table's unique key was
 // `(packet_id, list, seq)`. A remediation loop calling it on pass 2 therefore DESTROYED pass 1's
@@ -747,7 +883,7 @@ test('H26: every hardening case has its own ID', () => {
 // packet screen showing only the last pass's decisions as if they were the whole story.
 // The invariant, not the incident: any writer that clears provenance for a packet must scope the
 // clear to the pass it is rewriting.
-test('H28: provenance deletes are scoped to a pass, never to a whole packet', () => {
+test('H29: provenance deletes are scoped to a pass, never to a whole packet', () => {
   const offenders = []
   for (const [file, body] of allSources()) {
     const code = stripComments(body)
@@ -762,7 +898,7 @@ test('H28: provenance deletes are scoped to a pass, never to a whole packet', ()
   assert.deepEqual(offenders, [], 'a packet-wide provenance delete erases every earlier pass')
 })
 
-test('H28b: swap_decision and skill_candidate carry the pass in their key', () => {
+test('H29b: swap_decision and skill_candidate carry the pass in their key', () => {
   const schema = src('schema.ts')
   assert.match(schema, /unique \(packet_id, list, seq, loop\)/,
     'without loop in the key, pass 2 overwrites pass 1 row for row')
@@ -773,12 +909,12 @@ test('H28b: swap_decision and skill_candidate carry the pass in their key', () =
 })
 
 // ---------------------------------------------------------------------------------------------
-// H29 — generation and RENDERING were the same function, so the only way to regenerate content was
+// H30 — generation and RENDERING were the same function, so the only way to regenerate content was
 // to also issue a Drive `files/{id}/copy`. Evidence: `buildTemplatedArtifact` did both. A four-pass
 // remediation loop over the four templated artifacts would have created 16 Google files per packet,
 // and since there is no Drive DELETE anywhere in this codebase (D-9) 15 of them would be orphaned
 // on the quota-bearing OAuth account. X5 / P3-25: documents render ONCE, after the loop.
-test('H29: the remediation loop body contains no Drive call — rendering is a separate step', () => {
+test('H30: the remediation loop body contains no Drive call — rendering is a separate step', () => {
   const loop = stripComments(src('appRemediation.ts'))
   // The pass loop is everything between the `for (let pass` header and the render call that follows
   // it. A Drive call inside that span is the 4N defect returning.
@@ -791,7 +927,7 @@ test('H29: the remediation loop body contains no Drive call — rendering is a s
   }
 })
 
-test('H29b: ensurePackage generates without rendering, so a pass can run without a Drive copy', () => {
+test('H30b: ensurePackage generates without rendering, so a pass can run without a Drive copy', () => {
   const packets = stripComments(src('appPackets.ts'))
   const start = packets.indexOf('export async function ensurePackage')
   const end = packets.indexOf('export async function renderArtifact')
@@ -803,13 +939,13 @@ test('H29b: ensurePackage generates without rendering, so a pass can run without
 })
 
 // ---------------------------------------------------------------------------------------------
-// H30 — `insertion.loop` was DERIVED inside the writer as `max(loop) + 1`, so it counted document
+// H31 — `insertion.loop` was DERIVED inside the writer as `max(loop) + 1`, so it counted document
 // RENDERS: every build advanced it, including a build that served a cached package and made zero
 // model calls. Three loop-ish counters already existed (`packet.round`, never incremented;
 // `insertion.loop`; `check_result.run_id`) and P3 wanted a fourth. Decision 14: give this one the
 // meaning P3 needs and let the CALLER own it — loop 0 is the baseline, 1..n are remediation passes.
 // The invariant: no provenance writer may invent a pass number for itself.
-test('H30: the pass number is supplied by the caller, never derived from max(loop)', () => {
+test('H31: the pass number is supplied by the caller, never derived from max(loop)', () => {
   const offenders = allSources()
     .filter(([, body]) => /max\(loop\)/i.test(stripComments(body)))
     .map(([f]) => f)
@@ -822,7 +958,7 @@ test('H30: the pass number is supplied by the caller, never derived from max(loo
   assert.match(ins, /loop=\$2`, \[artifactId, loop - 1\]/, 'before_text must come from the PREVIOUS pass')
 })
 
-test('H30b: every loop/pass/round counter column has a writer — no dead counter', () => {
+test('H31b: every loop/pass/round counter column has a writer — no dead counter', () => {
   // The invariant, not the incident. `packet.round` was READ by loadPacket's ORDER BY and by
   // packetShape and written by NOTHING, so it was always 1: the ordering was a no-op and the API
   // reported round 1 forever. A counter nobody increments is worse than no counter, because every
@@ -833,7 +969,7 @@ test('H30b: every loop/pass/round counter column has a writer — no dead counte
     .map(m => m[1].toLowerCase()))]
   const code = allSources().filter(([f]) => f !== 'schema.ts').map(([, b]) => stripComments(b)).join('\n')
   const unwritten = columns.filter(c => {
-    if (c === 'loop') return false            // supplied by the caller on every insert (H30 above)
+    if (c === 'loop') return false            // supplied by the caller on every insert (H31 above)
     if (c === 'n') return false               // remediation_loop.n, inserted per pass
     return !new RegExp(`set\\s+${c}\\s*=|\\b${c}\\s*=\\s*${c}\\s*\\+`, 'i').test(code)
   })
@@ -841,13 +977,13 @@ test('H30b: every loop/pass/round counter column has a writer — no dead counte
 })
 
 // ---------------------------------------------------------------------------------------------
-// H31 — `converged` is the one word a user trusts without reading anything else, so it must not be
+// H32 — `converged` is the one word a user trusts without reading anything else, so it must not be
 // storable by a writer that merely intends to be honest. The guard is structural: a CHECK that
 // refuses the word while anything is open, and a composite FOREIGN KEY into `check_result` so the
 // coverage state on the row cannot be ASSERTED — only copied from a check the engine really recorded
 // for that exact run. Evidence for why this is needed: `evaluateArtifact` writes check_result rows
 // keyed by run_id, and nothing else in the schema tied a summary row back to them.
-test('H31: converged is unforgeable in the schema, not just in the writer', () => {
+test('H32: converged is unforgeable in the schema, not just in the writer', () => {
   const schema = src('schema.ts')
   assert.match(schema, /check \(halt_reason is distinct from 'converged'\s*\n?\s*or \(cardinality\(remaining\) = 0 and must_have_state = 'pass'\)\)/,
     'the converged CHECK is gone; the word becomes whatever the writer says')
@@ -864,11 +1000,11 @@ test('H31: converged is unforgeable in the schema, not just in the writer', () =
 })
 
 // ---------------------------------------------------------------------------------------------
-// H32 — the loop must not become a second definition of "covered". `checks.covers()` decides
+// H33 — the loop must not become a second definition of "covered". `checks.covers()` decides
 // `must_have_coverage`, which decides the GATE; if the loop implemented its own token-overlap rule
 // to decide what a pass closed, the two would drift and the loop would start claiming closes the
 // gate does not recognise. The predicate is exported from `checks.ts` and imported, once.
-test('H32: the loop decides coverage with the gate\'s predicate, never its own', () => {
+test('H33: the loop decides coverage with the gate\'s predicate, never its own', () => {
   const rem = stripComments(src('remediation.ts'))
   assert.match(rem, /import \{[^}]*coversText[^}]*\} from '\.\/checks'/,
     'the loop must import the gate\'s coverage predicate')
@@ -878,7 +1014,7 @@ test('H32: the loop decides coverage with the gate\'s predicate, never its own',
 })
 
 // ---------------------------------------------------------------------------------------------
-// H33 — a composite FOREIGN KEY was declared against `check_result (artifact_id, run_id, check_key,
+// H34 — a composite FOREIGN KEY was declared against `check_result (artifact_id, run_id, check_key,
 // state)` while the UNIQUE that makes that tuple a legal FK target was added with the idempotent
 // alters at the FOOT of the same script. On a FRESH database that works (check_result carries the
 // constraint inline). On the LIVE database, where check_result has existed since P2 WITHOUT it,
@@ -892,7 +1028,7 @@ test('H32: the loop decides coverage with the gate\'s predicate, never its own',
 //
 // The invariant, not the incident: for EVERY composite FK in SCHEMA_SQL, the constraint that makes
 // its target tuple unique must appear EARLIER in the script than the table that references it.
-test('H33: a composite FK\'s unique target is established before the table that references it', () => {
+test('H34: a composite FK\'s unique target is established before the table that references it', () => {
   const whole = src('schema.ts')
   const sql = whole.slice(whole.indexOf('SCHEMA_SQL = '))
   const offenders = []

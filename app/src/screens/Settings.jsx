@@ -938,6 +938,15 @@ function AtsSources() {
     catch (e) { setMsg(`Couldn't add: ${e.message || e}`) } finally { setBusy(false) }
   }
   const del = async (id) => { try { await api.atsSourceDelete(id); load() } catch {} }
+  // Pausing a board is not the same decision as forgetting it. The column, the upsert and the scan
+  // query have all supported this since the table was created; only the control was missing, so
+  // "stop pulling from this board" and "delete its history" were the same button.
+  const setEnabled = async (s, enabled) => {
+    setBusy(true); setMsg('')
+    try { const r = await api.atsSourceAdd(s.provider, s.board, { enabled }); if (r.error) throw new Error(r.error)
+      setMsg(`${s.board} ${enabled ? 'resumed' : 'paused'}`); load() }
+    catch (e) { setMsg(`Couldn't update: ${e.message || e}`) } finally { setBusy(false) }
+  }
   const ingest = async (s) => {
     setBusy(true); setMsg('')
     try { const r = s ? await api.atsIngest({ provider: s.provider, board: s.board }) : await api.atsIngest({})
@@ -963,9 +972,14 @@ function AtsSources() {
           {sources.map((s) => (
             <div key={s.id} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13 }}>
               <Pill tone="panel">{s.provider}</Pill>
-              <span style={{ flex: 1 }}>{s.board}</span>
+              <span style={{ flex: 1, opacity: s.enabled === false ? 0.55 : 1 }}>{s.board}</span>
+              {s.enabled === false && <Pill tone="panel">paused</Pill>}
               {s.last_run && <span className="px-small">ran {new Date(s.last_run).toLocaleDateString()}</span>}
-              <button className="px-btn" style={{ fontSize: 11 }} disabled={busy} onClick={() => ingest(s)}>Ingest</button>
+              <span className="px-link" style={{ fontSize: 12, cursor: busy ? 'default' : 'pointer' }} role="button"
+                onClick={() => { if (!busy) setEnabled(s, s.enabled === false) }}>
+                {s.enabled === false ? 'Resume' : 'Pause'}
+              </span>
+              <button className="px-btn" style={{ fontSize: 11 }} disabled={busy || s.enabled === false} onClick={() => ingest(s)}>Ingest</button>
               <span className="px-link" style={{ fontSize: 12, cursor: 'pointer', color: 'var(--proto-red)' }} onClick={() => del(s.id)}>✕</span>
             </div>
           ))}

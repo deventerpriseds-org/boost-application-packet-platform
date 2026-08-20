@@ -32,15 +32,15 @@ Rules:
 
 | # | Not done | What makes it look done | Trigger |
 |---|---|---|---|
-| D7 | **No independent verifier has checked this lane.** Every other lane this session got one, and every one of them found something. | Builds clean, 146/146 app tests, three real defects fixed. | Before merge |
-| D8 | **The structural guard is not written.** The AC pass asked for a hardening case asserting *every* server body toggle has a caller or is allowlisted — that is the part that stops a fourth recurrence. Only the two known instances are fixed. | Two instances fixed and a commit message explaining the class. This is the third shipping of this defect; fixing instances is what did not work the first two times. | Before merge |
+| D7 | ~~No independent verifier~~ **RUNNING** as of 16:15Z. | — | — |
+| D8 | ~~Structural guard not written~~ **DONE** — H34 (`a38c94f`). Took four wrong versions: vacuous, cried wolf, missed a dispatcher, too permissive again. Found a real fourth instance (`ats_source.enabled`), now wired. | — | — |
 | D9 | **No live verification.** `regen:true` has not been shown to bypass cache on the deployed Function. | The wiring is obviously correct by inspection. `appPackets.ts:319` also short-circuits on `staleUngrounded`, so a naive test passes identically with the fix absent. | After merge, via `api-test.yml` + `db-query.yml` |
 
 ## Cross-lane
 
 | # | Not done | What makes it look done | Trigger |
 |---|---|---|---|
-| D10 | **H-case IDs collide across three branches.** PARTLY CLOSED: `H26` now asserts one-ID-one-case AND contiguity, and it fired on its first run. P8.2 renumbered to land contiguous at H1..H27. **The other two lanes still collide and must renumber before merging: P8.3 starts at H28, P3 after it.** | Every branch is green in isolation, and `hardening.test.mjs` is append-only by convention, so the merges apply CLEANLY and duplicate silently. | Each remaining merge, in merge order |
+| D10 | **H-case IDs. PRE-ALLOCATION HAS NOW FAILED THREE TIMES** — one-per-lane (too few), then a reserved RANGE for a branch that had not landed, which `H26`'s contiguity rule correctly rejected as a gap and turned PR #14 red. My instruction, not the lane's error. **The rule is now: numbers are claimed AT MERGE TIME, never reserved. Merge `origin/main`, run `H26`, take the next contiguous numbers.** Earlier state: `H26` now asserts one-ID-one-case AND contiguity, and it fired on its first run. P8.2 renumbered to land contiguous at H1..H27. **The other two lanes still collide and must renumber before merging: P8.3 starts at H28, P3 after it.** | Every branch is green in isolation, and `hardening.test.mjs` is append-only by convention, so the merges apply CLEANLY and duplicate silently. | Each remaining merge, in merge order |
 | D11 | **P7 items 4, 6, 8** — duplicate 29k prompt, no failure path (`ok:true` on partial), hardcoded template ids / single-tenant sender. | P7 is listed as "partial" with item 1 landed. | P3 lands (they touch `pipeline.ts` / `appPackets.ts`) |
 | D12 | **`POST /api/pipeline/run` returns 200 with `pass:false`**, so a failed run shows GREEN in Actions. | The workflow conclusion is `success`. | P7 item 6 |
 | D13 | **`Promise.all(docJobs)` orphans Drive files** — no DELETE anywhere on the failure path. | Nothing errors; the files are simply never cleaned up. | P7 close-out |

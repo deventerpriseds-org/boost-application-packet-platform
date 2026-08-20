@@ -143,7 +143,6 @@ export async function artifactRemediate(req: HttpRequest, context: InvocationCon
       } }
     }
 
-    const body = (await req.json().catch(() => ({}))) as any
     const requirements: RequirementRow[] = (await client.query(
       `select id, seq, verbatim, item_text, kind from requirement where opp_id=$1 order by seq`, [art.opp_id])).rows
 
@@ -155,7 +154,15 @@ export async function artifactRemediate(req: HttpRequest, context: InvocationCon
       `select max(n) as m from remediation_loop where artifact_id=$1`, [art.id])).rows[0]?.m ?? -1))
 
     // Loop 0 — the baseline package. A whole-package generation is not a remediation pass.
-    const base = await ensurePackage(client, art, opp, body?.regen === true)
+    // `regen` DELIBERATELY NOT ACCEPTED HERE, and the omission is the point. A whole-package
+    // regeneration is the exact thing P3.1 exists to prevent — "re-run generation scoped to the open
+    // requirements only, do not rewrite closed blocks". Forcing one before the loop starts would
+    // throw away content that is already correct and already evidenced, which is the failure this
+    // lane was built to stop. The endpoints that legitimately rebuild everything
+    // (`/artifact/{id}/document`, `/packet/build-all`) still take it; the remediation loop must not.
+    // It was also caught by H28: a body toggle no caller can send is a parameterised bypass nobody
+    // asked for.
+    const base = await ensurePackage(client, art, opp, false)
     let pkg: Record<string, any> = { ...base.pkg }
     // The baseline is loop 0 on the FIRST run only. On a later run the package already on the
     // packet is the previous run's output, and rewriting loop 0 would restate history.
@@ -339,12 +346,15 @@ export async function artifactRemediate(req: HttpRequest, context: InvocationCon
          where artifact_id=$1 and state='open' and requirement_id = any($2::uuid[])`, [art.id, closedIds])
     }
 
-    // X5 / P3-25 — ONE Drive copy, here, after every pass has finished.
+    // X5 / P3-25 — ONE Drive copy, here, after every pass has finished. Not zero, and not N.
+    // There was a `render:false` escape here to skip it. Removed: X5's contract is that documents
+    // render ONCE after the loop, and skipping the render leaves `artifact.doc_url` pointing at
+    // pre-loop content while `packet.pkg_json` has moved on — the document and the package
+    // disagreeing is precisely the divergence this evidence layer exists to make impossible. It had
+    // no caller either (H28).
     let rendered: any = null
-    if (body?.render !== false) {
-      try { rendered = await renderArtifact(client, art, opp, pkg as any, { loop: finalLoop }) }
-      catch (e: any) { rendered = { error: String(e?.message || e) } }
-    }
+    try { rendered = await renderArtifact(client, art, opp, pkg as any, { loop: finalLoop }) }
+    catch (e: any) { rendered = { error: String(e?.message || e) } }
 
     // P3-44 / D-4. `packet.round` counts REMEDIATION RUNS - one per run, not one per pass. It was a
     // column read by `loadPacket`'s ORDER BY and by `packetShape` while nothing on earth wrote it.

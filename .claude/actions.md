@@ -1792,12 +1792,12 @@ with the fix reverted before it was kept:**
 
 | ID | The defect | Why it mattered |
 |---|---|---|
-| H28 | `writeSwaps` ran `delete from swap_decision where packet_id=$1` on every build, and the table had no `loop` column | pass 2 destroyed pass 1's swap record — the loop deleting its own justification for every change it had just made |
-| H29 | generation and rendering were one function | 4 passes x 4 templated artifacts = 16 Drive copies per packet, and there is no Drive `DELETE` anywhere in this codebase, so 15 would be orphaned on the quota-bearing OAuth account |
-| H30 | `insertion.loop` derived as `max(loop)+1` INSIDE the writer | it counted document RENDERS, advancing even on a cache hit that made zero model calls. The same guard caught `packet.round`: read by `loadPacket`'s ORDER BY and by `packetShape`, written by nothing, so the ordering was a no-op and the API reported `round: 1` forever |
-| H31 | `converged` was a word the writer could simply choose | now a table CHECK plus a composite FK into `check_result`, so the coverage state on a loop row can only be COPIED from a check the engine really recorded |
-| H32 | the loop could have grown a second definition of "covered" | `checks.covers()` decides the GATE; a second implementation drifts, and the day it drifts the loop claims closes the gate does not recognise |
-| H33 | **the composite FK's UNIQUE target was added at the FOOT of `SCHEMA_SQL`** | Postgres wants it at CREATE TABLE time, so `create table remediation_loop` **aborts the entire migration on any database where `check_result` already exists — i.e. production**. A fresh DB was fine. No test here could catch it: the schema is never executed in the sandbox |
+| H29 | `writeSwaps` ran `delete from swap_decision where packet_id=$1` on every build, and the table had no `loop` column | pass 2 destroyed pass 1's swap record — the loop deleting its own justification for every change it had just made |
+| H30 | generation and rendering were one function | 4 passes x 4 templated artifacts = 16 Drive copies per packet, and there is no Drive `DELETE` anywhere in this codebase, so 15 would be orphaned on the quota-bearing OAuth account |
+| H31 | `insertion.loop` derived as `max(loop)+1` INSIDE the writer | it counted document RENDERS, advancing even on a cache hit that made zero model calls. The same guard caught `packet.round`: read by `loadPacket`'s ORDER BY and by `packetShape`, written by nothing, so the ordering was a no-op and the API reported `round: 1` forever |
+| H32 | `converged` was a word the writer could simply choose | now a table CHECK plus a composite FK into `check_result`, so the coverage state on a loop row can only be COPIED from a check the engine really recorded |
+| H33 | the loop could have grown a second definition of "covered" | `checks.covers()` decides the GATE; a second implementation drifts, and the day it drifts the loop claims closes the gate does not recognise |
+| H34 | **the composite FK's UNIQUE target was added at the FOOT of `SCHEMA_SQL`** | Postgres wants it at CREATE TABLE time, so `create table remediation_loop` **aborts the entire migration on any database where `check_result` already exists — i.e. production**. A fresh DB was fine. No test here could catch it: the schema is never executed in the sandbox |
 
 Plus one found while reviewing: a SECOND loop run restarted numbering at `n=1` and would have
 upserted over the first run's ledger — the H28 defect one table over, and worst exactly where it is

@@ -13,7 +13,7 @@ where the train currently is. Read it first on any resume; it is written to surv
 UPDATED       : 2026-08-20 16:10Z
 CURRENT PHASE : P8 (review decisions) — running in parallel with P3 and P8.3
 STATUS        : P3 (remediation loop) COMPLETE on its branch — PR #14, merged with main,
-                H-cases renumbered H28-H33. NOT landed, NOT deployed, NOT confirmed live.
+                H-cases renumbered H29-H34. NOT landed, NOT deployed, NOT confirmed live.
 LAST LANDED   : 44d1cfc (H26 one-ID-one-case + contiguity)
 NEXT ACTION   : land PR #14; then deploy and run the loop against the
                 Trinnex opportunity 9f9c370a-4ac9-441e-b58e-02e3ffcf669e
@@ -42,7 +42,7 @@ being discovered by a reader. Allocate a RANGE per lane, not a number.
 |---|---|---|---|
 | P8.2 R3 figure echo | `claude/qc-p8-2-figures` (PR #10) | `figureEcho.ts`, `checks.ts`, `appChecks.ts`, `appFacts.ts` | H24, H25 |
 | P8.7 UI remainder | subagent worktree | `app/` (theme.css, PostingAnalysis, Today, packetBuilder) | — |
-| P3 remediation loop | `claude/qc-p3-remediation` (PR #14) | `pipeline.ts`, `appPackets.ts`, `appSwaps.ts`, `appInsertions.ts`, `remediation.ts`, `appRemediation.ts` | **H28-H33** |
+| P3 remediation loop | `claude/qc-p3-remediation` (PR #14) | `pipeline.ts`, `appPackets.ts`, `appSwaps.ts`, `appInsertions.ts`, `remediation.ts`, `appRemediation.ts` | **H29-H34** |
 | P8.3 evidence excerpts | `claude/qc-p8-3-evidence` | `requirements.ts`, evidence schema | H27 |
 
 **The P3 lane was lost once.** A subagent ran it, died without pushing, and left no branch — the
