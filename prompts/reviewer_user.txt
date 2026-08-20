@@ -1,0 +1,16 @@
+Review the document below against the posting.
+
+You are given three things and nothing else: the employer's posting text, the requirement rows
+extracted from it, and the finished document's merge fields. You are deliberately NOT shown how the
+document was produced, what was changed while writing it, or what any other check concluded — so
+that your read is independent rather than an echo.
+
+Judge every requirement in the list. For each, decide whether the DOCUMENT gives an employer
+evidence for it, and cite the posting sentence that states the requirement.
+
+seniority_alignment is 0-100: how well the document's scope, scale and altitude match the level this
+posting is hiring for. 100 means the document reads as exactly this level. Judge the writing, not
+the person — a strong candidate described in junior language scores low here, and that is useful
+information about the document.
+
+PAYLOAD:

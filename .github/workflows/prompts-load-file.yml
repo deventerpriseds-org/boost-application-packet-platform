@@ -2,7 +2,13 @@ name: Load Prompt File
 
 # Upserts a repo file's contents into the Azure Table `Prompts` (via POST /api/prompts).
 # Reads the file on the runner, so large/quoted content (HTML, JSON) needs no escaping —
-# unlike api-test.yml whose body is a single fixed input. POST /api/prompts is anonymous.
+# unlike api-test.yml whose body is a single fixed input.
+#
+# POST /api/prompts is NO LONGER anonymous (D7). The Prompts table is global shared state with no
+# demo partition, and an unauthenticated POST there rewrites live document generation for every
+# owner — so the route now requires a verified session. This workflow mints one the same way
+# api-test.yml does: an HMAC-SHA256 session token over the app's own signing secret, which the
+# Function verifies server-side. Without this block every dispatch would 403 the moment D7 deploys.
 on:
   workflow_dispatch:
     inputs:
@@ -27,9 +33,11 @@ jobs:
           FILE: ${{ github.event.inputs.path }}
           PK: ${{ github.event.inputs.partitionKey }}
           NOTES: ${{ github.event.inputs.notes }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+          PROMPT_OWNER: von.ellis@enterpriseds.io
         run: |
           python3 - <<'PYEOF'
-          import os, json, urllib.request, urllib.error
+          import os, json, time, base64, hmac, hashlib, urllib.request, urllib.error
           content = open(os.environ['FILE'], encoding='utf-8').read()
           payload = json.dumps({
             'partitionKey': os.environ['PK'],
@@ -37,8 +45,23 @@ jobs:
             'notes': os.environ.get('NOTES', ''),
           }).encode()
           url = 'https://job-platform-api.azurewebsites.net/api/prompts'
+          # Same scheme as the API's signSession: HMAC-SHA256 over
+          # base64url(header).base64url(payload). The Function signs with
+          # SESSION_SIGNING_SECRET || MICROSOFT_CLIENT_SECRET (== AZURE_CLIENT_SECRET, which we have
+          # here), so this verifies server-side and marks the request as an authenticated owner.
+          def b64url(b):
+            if isinstance(b, str): b = b.encode()
+            return base64.urlsafe_b64encode(b).decode().rstrip('=')
+          now = int(time.time())
+          header = b64url(json.dumps({'alg': 'HS256', 'typ': 'JWT'}, separators=(',', ':')))
+          claims = b64url(json.dumps({'email': os.environ['PROMPT_OWNER'], 'provider': 'prompts-load-file',
+                                      'iat': now, 'exp': now + 3600}, separators=(',', ':')))
+          signing_input = f'{header}.{claims}'
+          sig = b64url(hmac.new(os.environ['AZURE_CLIENT_SECRET'].encode(), signing_input.encode(), hashlib.sha256).digest())
+          token = f'{signing_input}.{sig}'
+
           req = urllib.request.Request(url, data=payload,
-                headers={'Content-Type': 'application/json'}, method='POST')
+                headers={'Content-Type': 'application/json', 'Authorization': f'Bearer {token}'}, method='POST')
           print(f"loading {os.environ['FILE']} ({len(content)} chars) -> partitionKey={os.environ['PK']}")
           try:
             with urllib.request.urlopen(req) as r:

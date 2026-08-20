@@ -1,0 +1,85 @@
+name: Tests
+
+# The repo had NO workflow that ran its own tests. Measured 2026-08-20:
+# `grep -rln "npm test" .github/workflows/` returned nothing, while `api/` alone carried 262
+# assertions — including the whole hardening suite, which exists specifically so that past mistakes
+# cannot come back. They ran only where somebody ran them by hand, which means nothing stopped a
+# regression reaching `main`.
+#
+# Deliberately NOT a deploy workflow: no Azure login, no secrets, no cloud access. It builds and
+# tests, and that is all it can do.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  api:
+    name: api — build + test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'          # matches the Function App runtime
+          cache: npm
+          cache-dependency-path: api/package-lock.json
+      - run: npm ci
+        working-directory: api
+      # The tests import from `dist/`, so the build is a prerequisite, not a separate nicety.
+      - run: npm run build
+        working-directory: api
+      - run: npm test
+        working-directory: api
+
+  app:
+    name: app — build + unit + browser
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+      - run: npm ci
+        working-directory: app
+      - run: npm run build
+        working-directory: app
+      - run: npm test
+        working-directory: app
+      # Chromium is preinstalled on the runner image via Playwright's own download; the browser
+      # probe boots its own Vite server. Non-fatal for now: it is newer than the unit suite and a
+      # flake here should not block a correct change. Promote to required once it has a track record.
+      - run: npm run test:browser
+        working-directory: app
+        continue-on-error: true
+
+  # Smart quotes are a real, repeated failure here: the Edit tool inserts U+2018/2019/201C/201D into
+  # JSX and esbuild rejects them at build time. The build above would catch it — this names it.
+  hygiene:
+    name: no smart quotes in source
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: scan
+        run: |
+          python3 - <<'PY'
+          import pathlib, sys
+          BAD = {0x2018: "'", 0x2019: "'", 0x201C: '"', 0x201D: '"'}
+          hits = []
+          for root in ('app/src', 'api/src', 'web/src'):
+            for f in pathlib.Path(root).rglob('*'):
+              if f.suffix not in {'.js', '.jsx', '.ts', '.tsx'} or not f.is_file():
+                continue
+              for n, line in enumerate(f.read_text(encoding='utf-8', errors='replace').splitlines(), 1):
+                for ch in line:
+                  if ord(ch) in BAD:
+                    hits.append(f'{f}:{n}: U+{ord(ch):04X} {ch!r}')
+                    break
+          if hits:
+            print('\n'.join(hits)); print(f'\n{len(hits)} line(s) carry a smart quote'); sys.exit(1)
+          print('clean')
+          PY

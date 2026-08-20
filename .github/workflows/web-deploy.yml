@@ -9,6 +9,13 @@ on:
   pull_request:
     types: [opened, synchronize, reopened, closed]
     branches: [main]
+    # Scoped to match the push trigger above. Without this the job ran on EVERY pull request to
+    # main regardless of what changed — measured 2026-08-20: five consecutive commits touching
+    # nothing but Markdown each fired a `web/` deploy, and each failed. The push trigger has always
+    # been scoped; only this one was not.
+    paths:
+      - 'web/**'
+      - '.github/workflows/web-deploy.yml'
   workflow_dispatch:
 
 jobs:
