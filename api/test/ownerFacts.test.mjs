@@ -165,3 +165,16 @@ test('an implausible span is rejected rather than recorded', () => {
     .find(x => x.key === 'experience.years_total')
   assert.ok(f === undefined || f.value_num < 60)
 })
+
+// The real template writes "AUG 2021 – Present" and "JAN 2015 – JUL 2021". Without an optional
+// month before the END year, only the current role matched and a decades-long career derived as
+// "5 years (since 2021)" — measured live on the production resume template.
+test('a month before the END year does not break the range match', () => {
+  const cv = `EXPERIENCE
+    VP ENTERPRISE SOFTWARE STRATEGY  AUG 2021 - Present
+    DIRECTOR OF ENGINEERING          JAN 2015 - JUL 2021
+    SENIOR MANAGER                   Mar. 2008 - Dec 2014`
+  const f = deriveFacts(cv, 2026).find(x => x.key === 'experience.years_total')
+  assert.equal(f.value_num, 18, 'earliest dated role is 2008, not the current one')
+  assert.match(f.evidence, /2008/)
+})

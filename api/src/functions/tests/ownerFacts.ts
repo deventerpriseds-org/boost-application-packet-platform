@@ -162,7 +162,13 @@ const THIS_YEAR = 2026   // passed in by callers that have a clock; see deriveFa
 /** Year ranges a work-history line states: "2003 - 2010", "2015 to Present", "Jan 2019 – Present". */
 function yearRanges(text: string): Array<{ from: number; to: number | null; at: string }> {
   const out: Array<{ from: number; to: number | null; at: string }> = []
-  const re = /\b(19[7-9]\d|20[0-4]\d)\s*(?:-|–|—|to|until)\s*(present|current|now|(?:19[7-9]\d|20[0-4]\d))\b/gi
+  // A month may sit on EITHER side of the separator: "AUG 2021 - Present", "JAN 2015 - JUL 2021".
+  // Without the optional trailing month the second form does not match, and on the real template
+  // that left only the CURRENT role matching — deriving "5 years" for a career spanning decades.
+  const MONTH = '(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\\.?\\s*'
+  const re = new RegExp(
+    `\\b(19[7-9]\\d|20[0-4]\\d)\\s*(?:-|–|—|to|until)\\s*(?:${MONTH})?(present|current|now|19[7-9]\\d|20[0-4]\\d)\\b`,
+    'gi')
   let m: RegExpExecArray | null
   while ((m = re.exec(text)) !== null) {
     const from = Number(m[1])

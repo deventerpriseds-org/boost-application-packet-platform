@@ -62,6 +62,12 @@ export async function factsDerive(req: HttpRequest, context: InvocationContext):
     }
     const year = Number(new Date().getUTCFullYear())
     const derived = deriveFacts(text, year)
+    // Echo what the reader actually SAW. A derived number is only confirmable if the owner can
+    // check it against the source without opening the document — and the first live run derived
+    // "5 years" from a decades-long career because only one date range matched.
+    const dateRanges = Array.from(new Set(
+      (text.match(/\b(?:19[7-9]\d|20[0-4]\d)\s*(?:-|–|—|to|until)\s*(?:[A-Za-z.]+\s*)?(?:present|current|now|19[7-9]\d|20[0-4]\d)\b/gi) || [])
+        .map(x => x.replace(/\s+/g, ' ').trim())))
 
     client = await getPgClient()
     const written: any[] = []
@@ -92,6 +98,7 @@ export async function factsDerive(req: HttpRequest, context: InvocationContext):
       status: 200, headers: HEADERS,
       jsonBody: {
         ok: true, sources, sourceChars: text.length,
+        dateRangesSeen: dateRanges,
         derived: written,
         stillNeeded: missing.map(m => ({ key: m.key, label: m.label, help: m.help })),
         note: 'derived facts are UNCONFIRMED — confirm each one before it can settle a requirement',
