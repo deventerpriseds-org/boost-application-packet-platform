@@ -737,3 +737,139 @@ test('H26: every hardening case has its own ID', () => {
   for (let i = 1; i <= nums[nums.length - 1]; i++) if (!nums.includes(i)) missing.push(`H${i}`)
   assert.deepEqual(missing, [], 'a hardening case was lost in a merge — its ID is unused')
 })
+
+// ---------------------------------------------------------------------------------------------
+// H28 — A behaviour toggle the server reads and NOTHING can send. Third shipping of this class.
+//
+//   actions.md A2   `regen` honoured server-side, `appPackets.ts:454` hardcoded it false
+//   actions.md X2   made `regen` reachable — from ONE of the three routes that read it
+//   actions.md      "Re-run ATS analysis": server read `force`, `api.js` helper took no argument
+//
+// Measured 2026-08-20, after X2 was recorded as closed: `appPackets.ts:382` (document) and `:457`
+// (slides) both read `regen` from the body and `:319` honours it, yet NO caller on ANY path could
+// send it. Not the UI — `api.js` posted `{}` with no options parameter. Not the coach agent —
+// `coachTools.ts:28/29` post no body to those routes and their tool schemas declare only
+// `artifactId`. A parameterised cache bypass with zero senders, on the two routes a user reaches
+// when they want exactly that.
+//
+// Fixing instances is what failed the first two times, so this asserts the CLASS: a toggle the
+// server reads must have some caller able to send it, or be listed as unreachable by design with a
+// reason. It is a source rule because the absence of a caller cannot be exercised at runtime.
+// Routes with NO committed caller anywhere — not `app/src/api.js`, not the legacy `web/` console,
+// not `.github/workflows/`, not `scripts/` (all four searched 2026-08-20). They are operator
+// endpoints, invoked by hand with a written-out body through `api-test.yml`, so there is no caller
+// for this guard to find and its absence is not evidence of a defect.
+//
+// This list is the guard's pressure valve, and it is exactly where a real gap would go to hide.
+// Two assertions below keep it honest: every entry must carry a reason, and no entry may name a
+// toggle something CAN send — so an entry cannot be parked here and quietly outlive its fix.
+const UNREACHABLE_BY_DESIGN = [
+  { toggle: 'favoritesOnly', route: 'app/ats-backfill', why: 'operator backfill, invoked by hand via api-test.yml' },
+  { toggle: 'fetchJd', route: 'mail/jd-backfill/recover-targeted', why: 'operator JD recovery, hand-invoked' },
+  { toggle: 'debug', route: 'mail/jd-backfill/recover-targeted', why: 'operator diagnostic dump, hand-invoked' },
+  { toggle: 'favoritesOnly', route: 'mail/jd-backfill/recover-targeted', why: 'operator JD recovery scope, hand-invoked' },
+  { toggle: 'llm', route: 'mail/jd-backfill/scan', why: 'operator scan mode, hand-invoked' },
+  { toggle: 'favoritesOnly', route: 'mail/jd-backfill/fetch', why: 'operator fetch scope, hand-invoked' },
+  { toggle: 'direct', route: 'mail/jd-backfill/fetch', why: 'operator fetch strategy, hand-invoked' },
+  { toggle: 'superOnBlock', route: 'mail/jd-backfill/fetch', why: 'operator fallback on a blocked fetch, hand-invoked' },
+  { toggle: 'dryRun', route: 'mail/folders/reclassify', why: 'operator reclassify preview — the safe half of a destructive op' },
+]
+
+test('H28: every server-side body toggle has a caller that can send it', () => {
+  const API_JS = readFileSync(new URL('../../app/src/api.js', import.meta.url), 'utf8')
+  const apiCode = stripComments(API_JS)
+  const coachCode = stripComments(src('coachTools.ts'))
+
+  // Both grammars actually in use. Comments stripped FIRST: this case's own header names `regen`
+  // and `force` half a dozen times, and a scan that counted those would fire on the description of
+  // the bug rather than the bug — the cry-wolf failure, from inside the guard meant to prevent it.
+  const TOGGLE = /\b(?:body|b|json|payload)\s*\??\.\s*([a-zA-Z_]\w*)\s*(?:===\s*true|!==\s*false)|\(await\s+req\.json\(\)[^;]*?\)\s*\??\.\s*([a-zA-Z_]\w*)\s*===\s*true/g
+
+  // A toggle is only answerable together with the ROUTE that reads it: "can anything send `regen`"
+  // has no answer, but "can anything send `regen` to /artifact/{id}/document" does. So resolve each
+  // occurrence to its enclosing handler, and each handler to the route it is registered under.
+  const found = []
+  for (const [file, body] of allSources()) {
+    const code = stripComments(body)
+    const routeOf = new Map()
+    for (const m of code.matchAll(/route:\s*'([^']+)'[^}]*handler:\s*(\w+)/g)) routeOf.set(m[2], m[1])
+    for (const m of code.matchAll(/handler:\s*(\w+)[^}]*route:\s*'([^']+)'/g)) routeOf.set(m[1], m[2])
+    const fns = [...code.matchAll(/(?:export\s+)?async\s+function\s+(\w+)/g)].map(m => ({ name: m[1], at: m.index }))
+    // A handler reached through a DISPATCHER has no `app.http` of its own — `templatesUpsert` is
+    // called by a registered function that switches on `req.method`. Reporting its route as
+    // unresolved made a healthy toggle look unreachable, so inherit the dispatcher's route.
+    // Matches both spellings a dispatcher is written in — `async function name(req` and
+    // `const name = async (req`. Requiring the `function` keyword missed `templatesCollection`,
+    // which is the const-arrow form, and left `isPrimary` reported as unreachable while
+    // Settings.jsx sends it on every click.
+    for (const [, f1, f2, callee] of code.matchAll(/(?:function\s+(\w+)|const\s+(\w+)\s*=\s*async)[\s\S]{0,600}?\b(\w+)\(req[,)]/g)) {
+      const caller = f1 || f2
+      if (caller && routeOf.has(caller) && !routeOf.has(callee)) routeOf.set(callee, routeOf.get(caller))
+    }
+    for (const m of code.matchAll(TOGGLE)) {
+      const name = (m[1] || m[2])
+      const owner = fns.filter(f => f.at < m.index).pop()
+      found.push({ toggle: name, file, handler: owner?.name || '(top level)', route: routeOf.get(owner?.name) || null })
+    }
+  }
+  assert.ok(found.length >= 8, `only ${found.length} toggle reads found — the scan has gone stale (measured 2026-08-20: 11 reads, 7 distinct names)`)
+
+  // `{param}` in a route matches `${param}` in an api.js template literal.
+  const routeRe = (r) => new RegExp('`/' + r.replace(/[.*+?^$()|[\]\\]/g, '\\$&').replace(/\{[^}]+\}/g, '\\$\\{[^}]+\\}') + '`')
+
+  // Two ways to send, and rule TWO is mandatory. The string `regen` appears ZERO times in api.js,
+  // yet `regen` on packet/build-all is genuinely reachable because `buildFullPacket` forwards an
+  // opaque `opts`. A name-only scan would accuse correct code on its first run — which guards in
+  // this repo have now done twice. But the forwarding check must be scoped to the helper for THAT
+  // route: taken globally, one forwarding helper anywhere certifies every toggle everywhere, and
+  // the guard passes while a brand-new unreachable toggle sits in the tree. It did exactly that on
+  // its first version, caught by adding an unsendable `deepScan` and watching nothing happen.
+  // EVERY helper on that route, not the first. `.find()` was the first version and it was wrong in
+  // the quietest possible way: `dismiss` sits above `undismiss` and `coachConfigGet` above
+  // `coachConfigSet`, so the read-only sibling matched first and the guard reported the real sender
+  // missing. It named four healthy toggles as defects — the cry-wolf failure, in the guard whose
+  // entire purpose is to not cry wolf.
+  const helpersFor = (route) => {
+    if (!route) return []
+    const re = routeRe(route)
+    return apiCode.split('\n').filter(l => re.test(l))
+  }
+  const canSend = ({ toggle, route }) => {
+    const named = new RegExp(`\\b${toggle}\\b`)
+    // A helper for this route that either names the toggle or forwards a caller-supplied object.
+    // A bare identifier as the body argument is a caller-supplied bag, whatever it is named —
+    // `opts`, `body`, `data`. Enumerating the names missed `templateSave: (data) => post(…, data)`
+    // and reported `isPrimary` unreachable when Settings.jsx sends it on every click.
+    // Anchored to the CALL, not the line. `/,\s*\w+\s*\)/` alone matched the arrow function's own
+    // PARAMETER list — `atsSourceAdd: (provider, board) => post(…, { provider, board })` was read
+    // as forwarding a bag because of `, board)` in its signature, and the guard cleared a toggle
+    // that route cannot send. A guard too permissive in one spot is indistinguishable from no
+    // guard, and this one had already been vacuous once.
+    const FORWARDS = /post(?:Detailed)?\(`[^`]*`,\s*[a-zA-Z_]\w*\s*\)/
+    if (helpersFor(route).some(l => named.test(l) || FORWARDS.test(l))) return true
+    // A route we could not resolve is not evidence of anything — fall back to naming it anywhere in
+    // api.js rather than reporting an unresolved route as an unreachable toggle.
+    if (!route && named.test(apiCode)) return true
+    if (named.test(coachCode)) return true                                   // the coach agent is a caller too
+    return false
+  }
+
+  const unreachable = found.filter(x => !canSend(x))
+    .filter(x => !UNREACHABLE_BY_DESIGN.some(u => u.toggle === x.toggle && u.route === x.route))
+    .map(x => `${x.toggle} -> ${x.route || x.handler} (read in ${x.file}, no caller can send it)`)
+  assert.deepEqual([...new Set(unreachable)], [], 'a server toggle has no caller that can send it')
+
+  for (const u of UNREACHABLE_BY_DESIGN) {
+    assert.ok(u.why && u.why.length > 10, `${u.toggle} is allowlisted with no reason`)
+    assert.ok(!canSend(u), `${u.toggle} is allowlisted but a caller CAN send it — the allowlist is hiding a real gap`)
+  }
+
+  // The two instances that prompted this, pinned by name so a revert is caught even if the class
+  // scan above is later loosened.
+  for (const helper of ['generateArtifactDocument', 'generateArtifactSlides']) {
+    const line = apiCode.split('\n').find(l => l.includes(`${helper}:`))
+    assert.ok(line, `${helper} not found in api.js`)
+    assert.match(line, /opts\s*=\s*\{\}/, `${helper} takes no options argument — it cannot send regen`)
+    assert.match(line, /opts\.regen/, `${helper} does not forward regen`)
+  }
+})

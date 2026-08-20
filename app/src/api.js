@@ -150,7 +150,12 @@ export const api = {
   appHealth: () => get(`/app/health`),
   appSelftest: () => get(`/app/selftest`),
   atsSources: () => get(`/app/ats/sources`),
-  atsSourceAdd: (provider, board) => post(`/app/ats/sources`, { provider, board }),
+  // `enabled` is an upsert field on this route: `appAts.ts:74-76` does
+  // `on conflict (owner_email, provider, board) do update set enabled = $4`, and `:154` scans only
+  // `where ... and enabled`. The server has always honoured it; nothing could send it, so the only
+  // way to stop scanning a board was to DELETE it and lose its history. Found by H28.
+  atsSourceAdd: (provider, board, opts = {}) =>
+    post(`/app/ats/sources`, opts.enabled === undefined ? { provider, board } : { provider, board, enabled: opts.enabled }),
   atsSourceDelete: (id) => post(`/app/ats/sources/delete`, { id }),
   atsPreview: (provider, board) => post(`/app/ats/preview`, { provider, board }),
   atsIngest: (opts = {}) => post(`/app/ats/ingest`, opts),
