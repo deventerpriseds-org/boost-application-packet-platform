@@ -151,7 +151,28 @@ export async function factsGet(req: HttpRequest, context: InvocationContext): Pr
   } finally { try { await client?.end() } catch {} }
 }
 
+/** Upsert one owner-stated fact. Shared by the single and bulk paths so they cannot diverge. */
+async function upsertStated(client: any, owner: string, f: any) {
+  const key = String(f?.key || '').trim()
+  if (!key) throw new Error('key is required')
+  const def = FACT_BY_KEY.get(key)
+  const value = f.value === null || f.value === undefined ? null : String(f.value)
+  const valueNum = f.valueNum === undefined || f.valueNum === null ? null : Number(f.valueNum)
+  const confirmed = value ? 'now()' : 'null'
+  const r = await client.query(
+    `insert into owner_fact (owner_email, key, label, category, value, value_num, unit, source, evidence, confirmed_at)
+     values ($1,$2,$3,$4,$5,$6,$7,'owner_stated',$8, ${confirmed})
+     on conflict (owner_email, key) do update set
+       value = excluded.value, value_num = excluded.value_num, source = 'owner_stated',
+       evidence = excluded.evidence, confirmed_at = ${confirmed}, updated_at = now()
+     returning key, value, value_num, source, confirmed_at`,
+    [owner, key, def?.label || f.label || key, def?.category || f.category || 'experience',
+     value, valueNum, def?.unit || null, f.evidence || 'stated by the owner'])
+  return r.rows[0]
+}
+
 // POST /api/app/qc/facts  { key, value, valueNum?, confirm?: boolean }
+// or bulk: { facts: [{ key, value, valueNum? }, ...] }
 // Setting a value the owner typed makes it owner_stated and confirmed — they are the source.
 // Confirming without a value is rejected: confirming an empty field asserts nothing.
 export async function factsSet(req: HttpRequest, context: InvocationContext): Promise<HttpResponseInit> {
@@ -159,12 +180,20 @@ export async function factsSet(req: HttpRequest, context: InvocationContext): Pr
   const guard = requireWrite(req); if (guard) return guard
   const { owner, verified } = resolveOwner(req)
   const body: any = await req.json().catch(() => ({}))
-  const key = String(body?.key || '').trim()
-  if (!key) return { status: 400, headers: HEADERS, jsonBody: { error: 'key is required' } }
-  const def = FACT_BY_KEY.get(key)
   let client
   try {
     client = await getPgClient()
+
+    // Bulk: the owner answering the whole catalogue at once. Each row is owner_stated and therefore
+    // confirmed — they are the source, so there is nobody else to confirm against.
+    if (Array.isArray(body?.facts)) {
+      const written = []
+      for (const f of body.facts) written.push(await upsertStated(client, owner, f))
+      return { status: 200, headers: HEADERS, jsonBody: { ok: true, written: written.length, facts: written } }
+    }
+
+    const key = String(body?.key || '').trim()
+    if (!key) return { status: 400, headers: HEADERS, jsonBody: { error: 'key is required, or pass facts: []' } }
     const existing = (await client.query(`select * from owner_fact where owner_email=$1 and key=$2`, [owner, key])).rows[0]
 
     if (body.value === undefined && body.confirm) {
@@ -176,19 +205,7 @@ export async function factsSet(req: HttpRequest, context: InvocationContext): Pr
       return { status: 200, headers: HEADERS, jsonBody: { ok: true, fact: r.rows[0] } }
     }
 
-    const value = body.value === null || body.value === undefined ? null : String(body.value)
-    const valueNum = body.valueNum === undefined || body.valueNum === null ? null : Number(body.valueNum)
-    const confirmed = value ? 'now()' : 'null'
-    const r = await client.query(
-      `insert into owner_fact (owner_email, key, label, category, value, value_num, unit, source, evidence, confirmed_at)
-       values ($1,$2,$3,$4,$5,$6,$7,'owner_stated',$8, ${confirmed})
-       on conflict (owner_email, key) do update set
-         value = excluded.value, value_num = excluded.value_num, source = 'owner_stated',
-         evidence = excluded.evidence, confirmed_at = ${confirmed}, updated_at = now()
-       returning *`,
-      [owner, key, def?.label || body.label || key, def?.category || body.category || 'experience',
-       value, valueNum, def?.unit || null, 'stated by the owner'])
-    return { status: 200, headers: HEADERS, jsonBody: { ok: true, fact: r.rows[0] } }
+    return { status: 200, headers: HEADERS, jsonBody: { ok: true, fact: await upsertStated(client, owner, body) } }
   } catch (e: any) {
     context.error('factsSet', e)
     return { status: 500, headers: HEADERS, jsonBody: { error: String(e?.message || e) } }
