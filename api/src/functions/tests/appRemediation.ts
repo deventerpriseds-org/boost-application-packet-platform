@@ -38,7 +38,7 @@ import {
   DEFAULT_LOOP_PREFS, LoopPrefs, Spend, ZERO_SPEND, addCall, coverageView, creditClosures,
   decidePass, scopeForRequirements, applyScopedFields, escalationFor, reportedOutcome,
   assertEvidenceIntact, evidenceRemoved, REMEDIATION_VERSION, HaltReason, RequirementRow, nextPassNumber,
-  CLOSE_CHECK_KEY,
+  CLOSE_CHECK_KEY, unjudgeableSeqs,
   profileEvidenceFor,
 } from './remediation'
 
@@ -189,6 +189,12 @@ export async function artifactRemediate(req: HttpRequest, context: InvocationCon
     let cov = coverageView(ev.results)
     let spend: Spend = { ...ZERO_SPEND }
     let progressedLastPass: boolean | null = null
+    // F3. Requirements the placement check cannot judge either way. They are in NEITHER the open
+    // list nor the closed set — `evidence_placed` drops them from both sides as `tooThin` — so
+    // without naming them here a run reports "every requirement ... is now stated in this document"
+    // over rows nothing measured, and no escalation is raised because both loops iterate empty
+    // lists. Computed with the engine's own predicate so it cannot drift.
+    const unjudged = unjudgeableSeqs(requirements)
     // D-7/D-8. Requirements that left the open list with no edit of this run carrying the evidence.
     // They are neither credited nor open, so without this they vanish from BOTH lists and the run
     // reports convergence it did not produce.
@@ -331,6 +337,22 @@ export async function artifactRemediate(req: HttpRequest, context: InvocationCon
     const after = await evidenceSnapshot(client, art.opp_id, cov.state)
     assertEvidenceIntact(before, after)
 
+    // ONE TRANSACTION FOR THE WHOLE LEDGER, and the reason is F1's second half.
+    //
+    // These writes are the record of what the run did. Written unwrapped, a failure part-way leaves
+    // a packet whose pkg_json has already moved beside a ledger that describes only some of the
+    // passes that moved it, or none — and a partial provenance record is worse than none, because
+    // it reads as complete. The halt_reason CHECK drift proved that is not hypothetical: the insert
+    // threw at exactly the moment the loop refused a claim, and the refusal went unrecorded.
+    //
+    // NOT ATOMIC WITH THE PACKAGE MUTATION, deliberately and with the residual recorded in
+    // DEFERRED.md: `evaluateArtifact` runs its own begin/commit between passes, so a transaction
+    // spanning a pass would nest. Closing that needs `evaluateArtifact` to stop owning its
+    // transaction, and that is another lane's file. The window is therefore "package mutated, no
+    // ledger", and the catch below REPORTS that state rather than returning a bare 500.
+    let escalations = 0
+    await client.query('begin')
+    try {
     for (const r of rows) {
       await client.query(
         `insert into remediation_loop
@@ -358,7 +380,7 @@ export async function artifactRemediate(req: HttpRequest, context: InvocationCon
 
     // P3.2 — one open escalation per still-open requirement per artifact, stating what was searched.
     const stillOpen = rows[rows.length - 1].remainingSeqs as number[]
-    let escalations = 0
+    escalations = 0
     for (const seq of stillOpen) {
       const r: any = requirements.find(q => Number(q.seq) === seq)
       if (!r) continue
@@ -402,6 +424,30 @@ export async function artifactRemediate(req: HttpRequest, context: InvocationCon
       escalations++
     }
 
+    // F3. Every requirement the placement check could not judge gets an escalation. The loop can
+    // neither place it nor confirm it is placed, and silence over it is the completeness claim this
+    // finding was about.
+    for (const seq of unjudged) {
+      const r: any = requirements.find(q => Number(q.seq) === seq)
+      if (!r) continue
+      const quoted = r.verbatim ? `"${r.verbatim}"` : r.item_text
+      await client.query(
+        `insert into escalation (packet_id, artifact_id, requirement_id, state, title, detail, ask, loop, halt_reason)
+         values ($1,$2,$3,'open',$4,$5,$6,$7,$8)
+         on conflict (artifact_id, requirement_id) do update set
+           title=excluded.title, detail=excluded.detail, ask=excluded.ask, loop=excluded.loop,
+           halt_reason=excluded.halt_reason, updated_at=now()
+         where escalation.state = 'open'`,
+        [art.packet_id, art.id, r.id,
+         `Requirement #${seq} is too short for the placement check to judge`,
+         `The posting asks: ${quoted}. After stopwords it carries too few content words for the placement `
+         + `check to decide either way, so it was counted as neither done nor outstanding and this run makes `
+         + `no claim about it. Nothing was invented and nothing was hidden - it needs a human eye.`,
+         'Read the ' + art.type + ' and confirm whether this requirement is actually stated in it.',
+         finalLoop, haltReason])
+      escalations++
+    }
+
     // A requirement the loop DID close must not keep an open escalation from an earlier run.
     const closedIds = rows.flatMap(r => r.closed)
     if (closedIds.length) {
@@ -409,6 +455,20 @@ export async function artifactRemediate(req: HttpRequest, context: InvocationCon
         `update escalation set state='accepted', resolution_note='closed by the remediation loop',
            resolved_by='remediation-loop', resolved_at=now(), updated_at=now()
          where artifact_id=$1 and state='open' and requirement_id = any($2::uuid[])`, [art.id, closedIds])
+    }
+
+      await client.query('commit')
+    } catch (e: any) {
+      await client.query('rollback').catch(() => {})
+      // Say what state the caller is actually in. A bare 500 here reads as "nothing happened", and
+      // the one thing that is certain is that something did.
+      return { status: 500, headers: HEADERS, jsonBody: {
+        error: `the remediation ledger could not be written: ${String(e?.message || e)}`,
+        packageMutated: true, ledgerWritten: false, passesRun: rows.length,
+        detail: 'The package on this packet HAS been modified by this run and no ledger row records it. '
+          + 'Re-running the loop is safe (it continues the ledger from max(n)+1) but this run is unrecorded. '
+          + 'Nothing was rendered and no escalation was raised.',
+      } }
     }
 
     // X5 / P3-25 — ONE Drive copy, here, after every pass has finished. Not zero, and not N.
@@ -436,11 +496,12 @@ export async function artifactRemediate(req: HttpRequest, context: InvocationCon
     const outcome = reportedOutcome(rows.map(r => ({
       n: r.n, halted: r.halted, halt_reason: r.halt_reason, remaining: r.remainingSeqs,
       close_state: r.close_state, phantom_closes: r.phantom_closes,
-    })))
+    })), unjudged)
     return {
       status: 200, headers: HEADERS,
       jsonBody: {
         ok: true, artifactId, type: art.type, ...outcome,
+        unjudgedSeqs: unjudged,
         gate: ev.gate, attention: ev.attention, escalations,
         spend: { usd: spend.unpricedCalls ? null : Number(spend.usd.toFixed(6)), unpricedCalls: spend.unpricedCalls, tokens: spend.tokens, elapsedMs: Date.now() - startedAt, model: prefs.model },
         clearedOverride: rows.map(r => r.cleared_override).find(Boolean) || null,

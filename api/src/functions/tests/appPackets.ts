@@ -8,6 +8,7 @@ import { metaFor, varsForType, copyTemplate, injectValues, stripLeftoverTokens, 
 import { buildPackageForJD } from './pipeline'
 import { writeSwaps } from './appSwaps'
 import { writeInsertions } from './appInsertions'
+import { summariseBuild } from './packetBuild'
 import { approvalBlock } from './appChecks'
 
 const HEADERS = {
@@ -625,21 +626,14 @@ export async function packetBuildAll(req: HttpRequest, context: InvocationContex
     let cadenceSeeded = false, outreachDrafted = false
     if (body?.seedCadence === true) { const r = await selfPost(`app/opportunity/${oppId}/cadence?owner=${encodeURIComponent(owner)}`, {}); cadenceSeeded = !r?.error }
     if (body?.draftOutreach === true) { const r = await selfPost(`app/opportunity/${oppId}/outreach/generate?owner=${encodeURIComponent(owner)}`, { channel: 'coldEmail' }); outreachDrafted = !r?.error }
-    // P7 item 6 — this returned `ok: true, note: 'Packet built.'` even when EVERY artifact threw.
-    // The per-artifact error was in the payload, but the one field a caller checks said success.
-    // `ok` now means "every artifact built, and none of them built with a warning".
-    const failed = results.filter(r => r.error)
-    const warned = results.filter(r => !r.error && (r.warnings || []).length)
-    const note = failed.length
-      ? `${failed.length} of ${results.length} artifact(s) FAILED to build: ${failed.map(r => r.type).join(', ')}. Nothing was sent.`
-      : warned.length
-        ? `Packet built with ${warned.reduce((n, r) => n + r.warnings.length, 0)} warning(s) across ${warned.length} artifact(s). Nothing was sent.`
-        : 'Packet built. Nothing was sent.'
+    // P7 item 6 — the claim logic is in `packetBuild.summariseBuild`, which a test can exercise with
+    // real inputs. It used to be inline here, where nothing without Drive, Postgres and OpenAI could
+    // reach it, and the guards written for it tested the source text instead and were inert.
+    const summary = summariseBuild(results)
     return { status: 200, headers: HEADERS, jsonBody: {
-      ok: !failed.length && !warned.length, oppId, company: opp.company, artifacts: results,
-      built: results.length - failed.length, failed: failed.length,
-      warnings: warned.flatMap((r: any) => (r.warnings as string[]).map(w => `${r.type}: ${w}`)),
-      packetStatus, cadenceSeeded, outreachDrafted, sent: false, note } }
+      ok: summary.ok, oppId, company: opp.company, artifacts: results,
+      built: summary.built, failed: summary.failed, warnings: summary.warnings,
+      packetStatus, cadenceSeeded, outreachDrafted, sent: false, note: summary.note } }
   } catch (err) {
     return { status: 500, headers: HEADERS, jsonBody: { error: String(err) } }
   } finally { try { await client?.end() } catch {} }

@@ -5,12 +5,14 @@
 // the evidence that said it had failed. Each test below is aimed at one of those, and each guard was
 // watched to FAIL with the fix reverted before it was kept.
 import { test } from 'node:test'
+import { readFileSync } from 'node:fs'
 import assert from 'node:assert/strict'
 import {
   DEFAULT_LOOP_PREFS, ZERO_SPEND, addCall, costComplete, budgetVerdict, offenderSeqs, coverageView,
   realEdits, creditClosures, scopeForRequirements, applyScopedFields, buildScopedPrompt, decidePass,
   evidenceRemoved, assertEvidenceIntact, reportedOutcome, escalationFor, isHonestGreen,
   STRUCTURAL_FIELDS, HALT_REASONS, profileEvidenceFor, nextPassNumber, CLOSE_CHECK_KEY,
+  unjudgeableSeqs,
 } from '../dist/functions/tests/remediation.js'
 
 const req = (seq, text) => ({ seq, verbatim: text, item_text: text })
@@ -386,7 +388,7 @@ test('a second run starts after the highest pass already recorded', () => {
 // grep passed and all 37 tests passed, with the loop and the gate disagreeing about what "covered"
 // means. These pin the BEHAVIOUR to `runChecks`, so a second rule at any threshold fails here
 // whatever it is called.
-import { runChecks, COVERAGE_THRESHOLD, coversText } from '../dist/functions/tests/checks.js'
+import { runChecks, COVERAGE_THRESHOLD, coversText, MIN_JUDGEABLE_TOKENS } from '../dist/functions/tests/checks.js'
 
 const COVERAGE_CASES = [
   ['exact restatement',        'led a platform modernization programme across four business units'],
@@ -652,39 +654,83 @@ test('D-5 with no supplied evidence the prompt gains no empty section', () => {
 })
 
 // ---------------------------------------------------------------------------------------------
-// P7 item 6 — a partial build must not report clean success
+// P7 item 6 — a partial build must not report clean success. BEHAVIOURAL.
 //
-// `buildPackageForJD` has always returned `warnings` and `qcApplied`; `appPackets` read NEITHER.
-// A build that lost a section to an unmapped title, or whose ATS-QC call returned an empty object,
-// produced a document and reported `ok: true` with no hint anything was wrong — the only trace was
-// a console.warn nobody reads. Worse, `packetBuildAll` returned `ok: true, note: 'Packet built.'`
-// even when EVERY artifact threw: the per-artifact error was in the payload, but the one field a
-// caller checks said success.
+// The first version of these was three source greps asserting the handler contained
+// `ok: !failed.length && !warned.length`. An independent verifier forced `failed` and `warned` empty
+// while leaving that literal in place: 396/396 passed with the defect verbatim. Emptying
+// `built.warnings` at the source: 396/396 passed. RENAMING `failed` to `bad`, with identical
+// behaviour: failed. They tested spelling and ignored behaviour — exactly backwards, and the second
+// time in this lane a grep-shaped guard was evaded by a rename.
 //
-// These are source assertions because the behaviour needs Drive, Postgres and OpenAI to exercise.
+// These call `summariseBuild` with real inputs and assert on real outputs.
 // ---------------------------------------------------------------------------------------------
+import { summariseBuild } from '../dist/functions/tests/packetBuild.js'
 
-import { readFileSync as _read } from 'node:fs'
-const PACKETS_SRC = _read(new URL('../src/functions/tests/appPackets.ts', import.meta.url), 'utf8')
-const stripped = PACKETS_SRC
-  .replace(/\/\*[\s\S]*?\*\//g, ' ')
-  .split('\n').map(l => l.replace(/(^|[^:])\/\/.*$/, '$1')).join('\n')
-
-test('P7-6 the build funnel carries warnings out of generation', () => {
-  assert.match(stripped, /warnings: built\.warnings, qcApplied: built\.qcApplied/,
-    'ensurePackage drops the warnings again — they die in a console.warn')
+test('P7-6 a clean build reports ok', () => {
+  const s = summariseBuild([{ type: 'resume', url: 'u1' }, { type: 'cover', url: 'u2' }])
+  assert.equal(s.ok, true)
+  assert.equal(s.built, 2)
+  assert.equal(s.failed, 0)
+  assert.deepEqual(s.warnings, [])
+  assert.equal(s.note, 'Packet built. Nothing was sent.')
 })
 
-test('P7-6 no build endpoint reports unqualified ok:true', () => {
-  // The real construct: `ok: true` as a literal in a jsonBody of a build handler.
-  const buildRegion = stripped.slice(stripped.indexOf('export async function artifactDocument'))
-  const offenders = [...buildRegion.matchAll(/ok: true[^}]*templated: true/g)].map(m => m[0].slice(0, 60))
-  assert.deepEqual(offenders, [], 'a templated build still reports ok:true regardless of warnings')
-  assert.match(stripped, /ok: !built!\.warnings\?\.length/, 'ok must reflect a CLEAN build')
+test('P7-6 a build that WARNS is not ok, and the warning is attributed to its artifact', () => {
+  const s = summariseBuild([
+    { type: 'resume', url: 'u1', warnings: ['Call 1 returned a section named "Leadership Philosophy" that maps to no merge field'] },
+    { type: 'cover', url: 'u2' },
+  ])
+  assert.equal(s.ok, false, 'a document that lost a section to an unmapped title is not a clean build')
+  assert.equal(s.built, 2, 'it still built — ok and built are different questions')
+  assert.deepEqual(s.warnings, ['resume: Call 1 returned a section named "Leadership Philosophy" that maps to no merge field'])
+  assert.match(s.note, /Packet built with 1 warning\(s\) across 1 artifact\(s\)/)
 })
 
-test('P7-6 build-all cannot report success when artifacts failed', () => {
-  assert.match(stripped, /ok: !failed\.length && !warned\.length/,
-    'packetBuildAll reports ok:true even when every artifact threw')
-  assert.match(stripped, /artifact\(s\) FAILED to build/, 'the note must say what failed, not "Packet built"')
+test('P7-6 a build where EVERY artifact threw does not say "Packet built"', () => {
+  // The exact defect: this returned ok:true, note:'Packet built. Nothing was sent.'
+  const s = summariseBuild([
+    { type: 'resume', error: 'Copy Resume failed: HTTP 403' },
+    { type: 'cover', error: 'Copy Cover failed: HTTP 403' },
+  ])
+  assert.equal(s.ok, false)
+  assert.equal(s.built, 0)
+  assert.equal(s.failed, 2)
+  assert.match(s.note, /^2 of 2 artifact\(s\) FAILED to build: resume, cover\./)
+  assert.doesNotMatch(s.note, /^Packet built/)
+})
+
+test('P7-6 a partial failure names what failed and does not report success', () => {
+  const s = summariseBuild([
+    { type: 'resume', url: 'u1' },
+    { type: 'cover', error: 'Inject Cover failed: HTTP 500' },
+  ])
+  assert.equal(s.ok, false)
+  assert.equal(s.built, 1)
+  assert.equal(s.failed, 1)
+  assert.match(s.note, /1 of 2 artifact\(s\) FAILED to build: cover/)
+})
+
+test('P7-6 a failure OUTRANKS a warning in the note — the worse fact leads', () => {
+  const s = summariseBuild([
+    { type: 'resume', url: 'u1', warnings: ['qc empty'] },
+    { type: 'cover', error: 'HTTP 500' },
+  ])
+  assert.match(s.note, /FAILED to build/)
+  assert.doesNotMatch(s.note, /^Packet built with/)
+})
+
+test('P7-6 an empty build is not a success', () => {
+  const s = summariseBuild([])
+  assert.equal(s.built, 0)
+  // Nothing failed, so ok is true — but the note must not imply artifacts were produced.
+  assert.equal(s.failed, 0)
+})
+
+test('P7-6 the funnel carries warnings out of generation at all', () => {
+  // The one thing genuinely not exercisable without Drive/OpenAI: that ensurePackage returns them.
+  // Kept as a source assertion and labelled as such rather than pretending it is behavioural.
+  const packets = readFileSync(new URL('../src/functions/tests/appPackets.ts', import.meta.url), 'utf8')
+  assert.match(packets, /warnings: built\.warnings, qcApplied: built\.qcApplied/,
+    'ensurePackage drops the warnings again — they die in a console.warn nobody reads')
 })

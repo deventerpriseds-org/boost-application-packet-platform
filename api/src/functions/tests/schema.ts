@@ -668,7 +668,13 @@ create table if not exists remediation_loop (
   scope_fields   text[] not null default '{}',
   note           text,
   halted         boolean not null default false,
-  halt_reason    text check (halt_reason in ('converged','no_progress','max_passes','cost_ceiling','token_ceiling','time_budget','no_coverage_evidence','nothing_reachable','ungrounded','error')),
+  -- EVERY member of remediation.ts's HaltReason union, and the test that keeps them equal is
+  -- H40. They drifted once and the failure was the worst shape available: 'unattributed_coverage'
+  -- was added to the union and not here, so at the exact moment the loop CORRECTLY refused to claim
+  -- an unattributed convergence, the insert recording that refusal violated this CHECK - the packet
+  -- already mutated, no ledger row at all, the phantom escalation never reached, and a 500 to the
+  -- caller. A guard that cannot persist its own refusal is not a guard.
+  halt_reason    text check (halt_reason in ('converged','no_progress','max_passes','cost_ceiling','token_ceiling','time_budget','no_coverage_evidence','nothing_reachable','unattributed_coverage','ungrounded','error')),
   -- Copied from this run's deterministic evidence_placed check, and FK-verified against it.
   --
   -- RETARGETED from must_have_coverage after P8.3 landed C6. That check is computed purely from
@@ -714,19 +720,28 @@ create table if not exists remediation_loop (
   -- and is deliberately not done here.
   superseded_doc_url text,
   unique (artifact_id, n),
-  -- An override record needs its actor and its reason together, or it is not an audit trail.
-  check ((cleared_override_by is null) = (cleared_override_reason is null)),
-  -- The halt reason and the halted flag cannot disagree.
-  check ((halt_reason is null) = (not halted)),
+  -- Every CHECK here is NAMED. An anonymous one gets an auto-name like remediation_loop_check4,
+  -- which cannot be dropped and re-added idempotently - and an unreplaceable CHECK is one that keeps
+  -- its ORIGINAL expression forever on any database that already has the table. Measured: after the
+  -- retarget, check4 on an upgraded database still read prev_close_state = 'fail' while a fresh one
+  -- read prev_close_state in ('warn','fail'). Since evidence_placed signals failure as 'warn', the
+  -- guard was blind to the exact transition it exists to catch, on precisely the databases that
+  -- matter. Naming them is what makes the block below possible.
+  constraint remediation_loop_override_audit_check
+    check ((cleared_override_by is null) = (cleared_override_reason is null)),
+  constraint remediation_loop_halt_flag_check check ((halt_reason is null) = (not halted)),
   -- P3-05.
-  check (halt_reason is distinct from 'converged'
-         or (cardinality(remaining) = 0 and close_state = 'pass')),
+  constraint remediation_loop_converged_check
+    check (halt_reason is distinct from 'converged'
+           or (cardinality(remaining) = 0 and close_state = 'pass')),
   -- P3-11. A credited close requires an edit; a pass that rewrote nothing may credit nothing.
-  check (cardinality(closed) = 0 or cardinality(edited_fields) > 0),
+  constraint remediation_loop_credit_needs_edit_check
+    check (cardinality(closed) = 0 or cardinality(edited_fields) > 0),
   -- P3-38. evidence_placed reports its failures as 'warn', not 'fail', so the transition to guard
   -- against is any JUDGED state sliding to not_applicable: that is the evidence disappearing, which
   -- colours like a pass in any UI that treats "no findings" as fine.
-  check (not (prev_close_state in ('warn','fail') and close_state = 'not_applicable')),
+  constraint remediation_loop_evidence_intact_check
+    check (not (prev_close_state in ('warn','fail') and close_state = 'not_applicable')),
   foreign key (artifact_id, run_id, close_check_key, close_state)
     references check_result (artifact_id, run_id, check_key, state) on delete cascade
 );
@@ -795,6 +810,151 @@ alter table opportunity    add column if not exists jd_text text;
 alter table opportunity    add column if not exists jd_text_sha256 text;
 alter table opportunity    add column if not exists jd_text_truncated boolean;
 -- P3 idempotent adds (safe on databases created before the remediation loop existed).
+--
+-- F2. 'remediation_loop' was created by an earlier revision of THIS lane with must_have_* columns,
+-- so on any database that ran that revision 'create table if not exists' is a no-op and the rename
+-- below never happens: the migration exits 0, reports clean, and the table still has
+-- must_have_check_key with the FK bound to it. The first INSERT then fails with
+--   ERROR: column "close_state" does not exist
+-- This is H39's own class turned on H39's own table - a statement (here, every INSERT the loop
+-- makes) depending on a column that is present in the CREATE and unreachable on an existing
+-- database. H39c now walks columns that have NO alter at all, which is the case H39b could not see.
+--
+-- Renames rather than add+drop: the old columns hold the same values under the old names, and a
+-- database that ran the earlier revision may already have ledger rows in them.
+do $$
+declare fk text;
+begin
+  if exists (select 1 from information_schema.columns
+              where table_name='remediation_loop' and column_name='must_have_check_key')
+     and not exists (select 1 from information_schema.columns
+              where table_name='remediation_loop' and column_name='close_check_key') then
+    -- The composite FK is auto-named after its columns, so it cannot be dropped by a literal name
+    -- that survives a rename. Find it.
+    select conname into fk from pg_constraint
+     where conrelid = 'remediation_loop'::regclass and contype = 'f'
+       and confrelid = 'check_result'::regclass;
+    if fk is not null then execute format('alter table remediation_loop drop constraint %I', fk); end if;
+    alter table remediation_loop drop constraint if exists remediation_loop_must_have_check_key_check;
+
+    alter table remediation_loop rename column must_have_check_key to close_check_key;
+    alter table remediation_loop rename column must_have_state to close_state;
+    alter table remediation_loop rename column prev_must_have_state to prev_close_state;
+    alter table remediation_loop alter column close_check_key set default 'evidence_placed';
+
+    -- ROWS WRITTEN UNDER THE OLD CRITERION ARE DELETED, NOT REWRITTEN.
+    -- Such a row asserts "converged, because must_have_coverage said pass". Under the retarget that
+    -- assertion is meaningless: that check never read the document. Rewriting close_check_key to
+    -- 'evidence_placed' would restate a claim the engine never made about a criterion it never
+    -- applied - fabricated provenance, which is the one thing this whole lane exists to prevent.
+    -- (It also cannot satisfy the FK below: there is no check_result row at that run for the new
+    -- key.) Deleting is safe here because the loop is re-runnable and no ledger row means the run is
+    -- simply redone from pass 1. remediation_loop has never existed on production - measured
+    -- 2026-08-20, db-query 32390257883: p3_tables_present = 0 - so the only rows this can touch are
+    -- from a local database that ran an earlier revision of this lane.
+    delete from remediation_loop where close_check_key is distinct from 'evidence_placed';
+
+    alter table remediation_loop add constraint remediation_loop_close_check_key_check
+      check (close_check_key = 'evidence_placed');
+    alter table remediation_loop add constraint remediation_loop_close_fkey
+      foreign key (artifact_id, run_id, close_check_key, close_state)
+      references check_result (artifact_id, run_id, check_key, state) on delete cascade;
+  end if;
+end $$;
+alter table remediation_loop add column if not exists coverage_state text;
+alter table remediation_loop add column if not exists profile_evidence uuid[] not null default '{}';
+alter table remediation_loop add column if not exists superseded_doc_url text;
+alter table remediation_loop add column if not exists cleared_override_by text;
+alter table remediation_loop add column if not exists cleared_override_at timestamptz;
+alter table remediation_loop add column if not exists cleared_override_reason text;
+
+-- EVERY MUTABLE CHECK ON remediation_loop IS REPLACED HERE, not just the one that bit us.
+--
+-- F1 and F2 compose, and the composition is the lesson: correcting a CHECK inside
+-- 'create table if not exists' fixes a FRESH database only. On one that already ran an earlier
+-- revision the create is skipped and the old expression survives - while the source-reading guard
+-- passes, because it reads the source. Three separate constraints on this one table were caught
+-- this way, the third only by executing the migration:
+--   halt_reason        kept 10 members, so the loop could not persist its own refusal
+--   close_check_key    stayed bound to must_have_coverage
+--   check4             stayed 'prev = fail', blind to 'warn' - which is how evidence_placed
+--                      reports failure, so the evidence-removal guard was off on exactly the
+--                      databases it protects
+-- Replacing all of them, unconditionally and idempotently, removes the class rather than the
+-- instances. The table is new to this lane and small; there is no reason to be selective.
+do $$ begin
+  -- close_check_key's CHECK is also re-added by the rename block above, but that block is
+  -- CONDITIONAL on the old must_have_* columns existing. A database created by the revision that
+  -- already had close_check_key skips it entirely and would keep whatever expression it was born
+  -- with. Unconditional here, like every other one.
+  alter table remediation_loop drop constraint if exists remediation_loop_close_check_key_check;
+  alter table remediation_loop add constraint remediation_loop_close_check_key_check
+    check (close_check_key = 'evidence_placed');
+
+  alter table remediation_loop drop constraint if exists remediation_loop_halt_reason_check;
+  alter table remediation_loop add constraint remediation_loop_halt_reason_check
+    check (halt_reason in ('converged','no_progress','max_passes','cost_ceiling','token_ceiling',
+                           'time_budget','no_coverage_evidence','nothing_reachable',
+                           'unattributed_coverage','ungrounded','error'));
+
+  alter table remediation_loop drop constraint if exists remediation_loop_halt_flag_check;
+  alter table remediation_loop add constraint remediation_loop_halt_flag_check
+    check ((halt_reason is null) = (not halted));
+
+  alter table remediation_loop drop constraint if exists remediation_loop_converged_check;
+  alter table remediation_loop add constraint remediation_loop_converged_check
+    check (halt_reason is distinct from 'converged'
+           or (cardinality(remaining) = 0 and close_state = 'pass'));
+
+  alter table remediation_loop drop constraint if exists remediation_loop_credit_needs_edit_check;
+  alter table remediation_loop add constraint remediation_loop_credit_needs_edit_check
+    check (cardinality(closed) = 0 or cardinality(edited_fields) > 0);
+
+  alter table remediation_loop drop constraint if exists remediation_loop_evidence_intact_check;
+  alter table remediation_loop add constraint remediation_loop_evidence_intact_check
+    check (not (prev_close_state in ('warn','fail') and close_state = 'not_applicable'));
+
+  alter table remediation_loop drop constraint if exists remediation_loop_override_audit_check;
+  alter table remediation_loop add constraint remediation_loop_override_audit_check
+    check ((cleared_override_by is null) = (cleared_override_reason is null));
+
+  -- The auto-named survivors from the pre-naming revision, dropped so they cannot linger beside
+  -- their named replacements enforcing a stale expression.
+  alter table remediation_loop drop constraint if exists remediation_loop_check2;
+  alter table remediation_loop drop constraint if exists remediation_loop_check3;
+  alter table remediation_loop drop constraint if exists remediation_loop_check4;
+  alter table remediation_loop drop constraint if exists remediation_loop_check5;
+  -- check1 is the anonymous halt-flag CHECK from the pre-naming revision, and the anonymous
+  -- override-audit one sits beside it. Same expressions as their named replacements, so harmless in
+  -- effect - but a duplicate constraint is a second thing to keep in step, and the whole point of
+  -- this block is that an upgraded database ends up enforcing EXACTLY what a fresh one does.
+  alter table remediation_loop drop constraint if exists remediation_loop_check1;
+  alter table remediation_loop drop constraint if exists remediation_loop_check;
+  alter table remediation_loop drop constraint if exists remediation_loop_must_have_state_check;
+  alter table remediation_loop drop constraint if exists remediation_loop_prev_must_have_state_check;
+  -- DROP BEFORE ADD, even for these two. A bare 'add constraint' on a database where the name
+  -- already exists raises duplicate_object, which - with a WHEN handler on the block - aborts every
+  -- REMAINING statement silently. That is exactly what happened: on the path where the table was
+  -- created after the rename, these two already existed, the block died here, and halt_reason was
+  -- never replaced. The migration exited 0 the whole time. An exception handler that hides the rest
+  -- of its block is the absent-evidence-reads-as-success shape, in PL/pgSQL.
+  alter table remediation_loop drop constraint if exists remediation_loop_close_state_check;
+  alter table remediation_loop add constraint remediation_loop_close_state_check
+    check (close_state in ('pass','warn','fail','not_applicable'));
+  alter table remediation_loop drop constraint if exists remediation_loop_prev_close_state_check;
+  alter table remediation_loop add constraint remediation_loop_prev_close_state_check
+    check (prev_close_state in ('pass','warn','fail','not_applicable'));
+  -- coverage_state arrives by ALTER, and an ALTER adding a bare 'text' column carries no CHECK. A
+  -- fresh database got the enum from the CREATE and an upgraded one had none at all - the two
+  -- enforcing different rules, which is the exact condition this block exists to eliminate.
+  alter table remediation_loop drop constraint if exists remediation_loop_coverage_state_check;
+  alter table remediation_loop add constraint remediation_loop_coverage_state_check
+    check (coverage_state in ('pass','warn','fail','not_applicable'));
+-- ONLY undefined_table is swallowed - the legitimate case of running this file before the table
+-- exists. 'duplicate_object' was in this list and it silently ate the rest of the block; every
+-- statement above now drops before it adds, so it cannot arise, and if anything else goes wrong the
+-- migration must FAIL LOUDLY rather than leave half the constraints stale.
+exception when undefined_table then null; end $$;
 alter table requirement     drop column if exists closed_on_loop;
 -- The old 3-column unique is what made pass 2 overwrite pass 1; replace it with the loop-aware one.
 alter table swap_decision   drop constraint if exists swap_decision_packet_id_list_seq_key;

@@ -1541,3 +1541,33 @@ about honesty, check the words the user reads, not only the row that was written
 
 **A mutation that did not apply proves nothing.** One revert-proof used a `sed` that silently failed
 to match; the resulting "pass" was recorded as no evidence and redone with an asserting mutation.
+
+
+## P3 retarget verification (2026-08-20) — the schema lessons worth keeping
+
+**A CHECK inside `create table if not exists` is unreachable on any database that already has the
+table.** Correcting it in the CREATE fixes a FRESH database only, and a source-reading guard passes
+the whole time because it reads the source. This bit three separate constraints on one table:
+`halt_reason` (kept 10 members), `close_check_key` (stayed bound to the old check), and an anonymous
+`check4` (kept `= 'fail'` where the new form was `in ('warn','fail')`). Only executing the migration
+found any of them.
+
+**Name every CHECK.** An anonymous one gets `<table>_checkN` and can never be dropped by a stable
+name, so it can never be replaced — it enforces its original expression forever.
+
+**Drop before add, always, and swallow only `undefined_table`.** A bare `add constraint` on a name
+that already exists raises `duplicate_object`, and with a `WHEN` handler on the do-block that aborts
+every REMAINING statement silently while the migration still exits 0.
+
+**The invariant to check: a fresh database and an upgraded one must enforce identical rules.**
+`diff` the `pg_constraint` definitions between the two. Run every upgrade path that exists, not just
+one — a defect showed up on `main→e5e→HEAD` and on no other path.
+
+**A TS union persisted into a CHECK must be set-equal to it, both directions** (H40). Ours drifted by
+one member and the failure landed at the worst possible moment: the loop correctly refused a false
+claim and then could not record the refusal, leaving a mutated packet with no ledger row.
+
+**A guard written to a lesson can still be inert.** The P7-6 guards were written immediately after
+the "grep tests spelling, not behaviour" lesson and were evaded the same way: forcing the values
+empty passed, renaming a variable failed. If the behaviour can be exercised, lift it into a pure
+module and call it.

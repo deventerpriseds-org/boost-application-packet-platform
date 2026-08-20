@@ -47,7 +47,8 @@
 //
 // If the engine could not judge placement at all, the loop stops rather than optimising against
 // nothing — absent evidence is not a target.
-import { CheckResult, CheckState, coversText } from './checks'
+import { CheckResult, CheckState, coversText, MIN_JUDGEABLE_TOKENS } from './checks'
+import { itemTokens } from './swaps'
 import { mergeFieldsFor } from './insertions'
 
 export const REMEDIATION_VERSION = 1
@@ -448,6 +449,29 @@ export function applyScopedFields(
  * able to close from evidence already held - and if a pass fails to close it anyway, that is a
  * different and more damning finding than "the candidate does not have it".
  */
+/**
+ * Can the placement check judge this requirement AT ALL?
+ *
+ * `covers()` needs MIN_JUDGEABLE_TOKENS content words; below that it returns false for everything,
+ * which is why `evidence_placed` drops such rows from BOTH sides as `tooThin`. That exclusion is
+ * right for the check and it is a trap for the loop: a run where the only unplaced requirement was
+ * too thin reports `evidence_placed: pass`, the open list is empty, and the summary tells the user
+ * "every requirement the profile evidences is now stated in this document" — over a row nothing
+ * measured. That is the laundering H28 exists to prevent, one layer up, in prose instead of a
+ * numerator.
+ *
+ * Uses `itemTokens` and `MIN_JUDGEABLE_TOKENS` — the SAME function and constant the check uses, so
+ * the loop's idea of "unjudgeable" cannot drift from the engine's.
+ */
+export function judgeableForPlacement(r: { verbatim: string | null; item_text: string }): boolean {
+  return itemTokens(r.verbatim || r.item_text).length >= MIN_JUDGEABLE_TOKENS
+}
+
+/** Requirements the placement check cannot judge either way. Never open work, never closed. */
+export function unjudgeableSeqs(requirements: RequirementRow[]): number[] {
+  return (requirements || []).filter(r => !judgeableForPlacement(r)).map(r => r.seq).sort((a, b) => a - b)
+}
+
 export function profileEvidenceFor(profileText: string, open: RequirementRow[]): number[] {
   const text = String(profileText || '')
   if (!text.trim()) return []
@@ -654,6 +678,11 @@ export interface LoopRowLike {
 
 export interface Outcome {
   converged: boolean
+  /**
+   * Requirements the placement check could not judge either way. Reported ALWAYS, because a summary
+   * that omits them claims completeness over rows nothing measured.
+   */
+  unjudged: number
   openMustHaves: number
   passes: number
   haltReason: HaltReason | null
@@ -668,7 +697,7 @@ export interface Outcome {
  * exists so that no caller has to remember to write that sentence correctly — the one place that
  * decides whether "converged" appears is here, and it cannot say it while anything is open.
  */
-export function reportedOutcome(rows: LoopRowLike[]): Outcome {
+export function reportedOutcome(rows: LoopRowLike[], unjudged: number[] = []): Outcome {
   const last = rows.length ? rows[rows.length - 1] : null
   const open = last ? last.remaining.length : 0
   const reason = last ? last.halt_reason : null
@@ -676,22 +705,33 @@ export function reportedOutcome(rows: LoopRowLike[]): Outcome {
   // row that says 'converged' while any pass left an unattributed flip is a row that should never
   // have been written. Recomputing here means a bad row cannot talk this function into the sentence.
   const phantom = rows.reduce((n, r) => n + ((r.phantom_closes || []).length), 0)
+  const unmeasured = (unjudged || []).length
   const converged = !!last && reason === 'converged' && open === 0
     && last.close_state === 'pass' && phantom === 0
+  // The caveat MUST reach the sentence. `evidence_placed` carries "(N too short to judge either
+  // way)" in its own `observed` and this function used to drop it, so the user read an unqualified
+  // "every requirement ... is now stated in this document" over rows nothing had measured.
+  const caveat = unmeasured
+    ? ` ${unmeasured} requirement(s) were too short for the placement check to judge either way — they were `
+      + `neither counted as done nor as outstanding, and this run makes no claim about them; each is raised as `
+      + `an escalation for you to confirm by eye.`
+    : ''
   return {
     converged,
+    unjudged: unmeasured,
     openMustHaves: open,
     passes: rows.length,
     haltReason: reason,
     summary: converged
-      ? `Converged after ${rows.length} pass(es): every requirement the profile evidences is now stated in this document, `
-        + `and the run's placement check passed. This says nothing about requirements the profile does not evidence — `
-        + `those are a gap in the profile, which this loop cannot close.`
+      ? `Converged after ${rows.length} pass(es): every requirement the profile evidences AND the placement check could `
+        + `judge is now stated in this document, and the run's placement check passed. This says nothing about `
+        + `requirements the profile does not evidence — those are a gap in the profile, which this loop cannot close.`
+        + caveat
       : open === 0 && phantom > 0
         ? `Halted after ${rows.length} pass(es): every evidenced requirement now appears in the document, but ${phantom} left `
           + `the open list with no edit from this run carrying the evidence — so this run cannot claim to have placed them. `
-          + `The gate stays as the checks left it.`
-        : `Halted after ${rows.length} pass(es) (${reason || 'unknown'}) with ${open} evidenced requirement(s) still absent from this document. The gate stays as the checks left it; nothing was placed by stopping.`,
+          + `The gate stays as the checks left it.` + caveat
+        : `Halted after ${rows.length} pass(es) (${reason || 'unknown'}) with ${open} evidenced requirement(s) still absent from this document. The gate stays as the checks left it; nothing was placed by stopping.` + caveat,
   }
 }
 
@@ -738,6 +778,7 @@ export function escalationFor(input: EscalationInput): EscalationText {
     no_coverage_evidence: `placement could not be judged for this artifact - your profile does not yet evidence this requirement, so there is nothing for the document to state. That is a gap in the profile, and this loop cannot close it`,
     error: `the pass failed with an error before this requirement could be evidenced`,
     unattributed_coverage: `it left the open list without any edit from this run carrying the evidence, so this run cannot claim to have placed it - the document may have been stating it already`,
+    unjudgeable: `it is too short for the placement check to judge either way (fewer than ${MIN_JUDGEABLE_TOKENS} content words), so the loop can neither place it nor confirm it is placed - a human has to read it`,
     ungrounded: `this opportunity has no job posting on file, so there was nothing to remediate against - a package built from our own metadata about the job cannot evidence the employer's requirements`,
     converged: `recorded for completeness — the run converged, so this should not have been raised`,
   }

@@ -1468,3 +1468,150 @@ test('H39: a composite FK\'s unique target is established before the table that 
   }
   assert.deepEqual(offenders, [], 'a composite FK whose unique target is not established, for an EXISTING database, before it')
 })
+
+// ---------------------------------------------------------------------------------------------
+// H40 — a TypeScript union and the schema CHECK that STORES it drifted, and the drift was invisible
+// until the exact case it mattered.
+//
+// `HaltReason` gained `unattributed_coverage` — the guard that stops the loop claiming a convergence
+// nothing this run produced — and the CHECK on `remediation_loop.halt_reason` did not. Both TS
+// guards were live and correct: `decidePass` refused the claim and `appRemediation` assigned the
+// reason. Then the INSERT recording that refusal violated
+//     remediation_loop_halt_reason_check
+// so the packet was already mutated, NO ledger row existed at all, the phantom escalation written
+// for exactly this case was never reached, and the caller got a 500. The loop refused the claim in
+// memory and could not record the refusal.
+//
+// The invariant, not the incident: any TS union persisted into a CHECK must be SET-EQUAL to it, in
+// both directions. A member missing from the CHECK is an unstorable state; a member missing from the
+// union is a state nothing can produce and no reader expects.
+test('H40: every persisted union is set-equal to the CHECK that stores it', () => {
+  const sql = src('schema.ts')
+  const rem = src('remediation.ts')
+
+  // Read the CHECK's members off the column definition, not off the whole file: `in ('a','b')`
+  // appears in several constraints and matching the wrong one would compare two unrelated lists.
+  const checkMembers = (table, column) => {
+    const block = createTable(sql, table)
+    const m = new RegExp(`\\n\\s*${column}\\s+text[^\\n]*?check \\(${column} in \\(([^)]*)\\)\\)`).exec(block)
+    assert.ok(m, `no CHECK found for ${table}.${column} — the scan has gone stale`)
+    return new Set(m[1].split(',').map(x => x.trim().replace(/^'|'$/g, '')))
+  }
+  // ...and the union's members off its exported literal array, which is the list the code uses.
+  const unionMembers = (name) => {
+    const m = new RegExp(`export const ${name}[^=]*=\\s*\\[([\\s\\S]*?)\\]`).exec(stripComments(rem))
+    assert.ok(m, `no ${name} array found`)
+    return new Set([...m[1].matchAll(/'([a-z_]+)'/g)].map(x => x[1]))
+  }
+
+  const inCheck = checkMembers('remediation_loop', 'halt_reason')
+  const inUnion = unionMembers('HALT_REASONS')
+  const missingFromCheck = [...inUnion].filter(x => !inCheck.has(x)).sort()
+  const missingFromUnion = [...inCheck].filter(x => !inUnion.has(x)).sort()
+
+  assert.deepEqual(missingFromCheck, [],
+    'a halt reason the code can emit but the table refuses to store — the insert throws at exactly the moment the reason fires')
+  assert.deepEqual(missingFromUnion, [],
+    'a halt reason the table allows that no code produces — a state no reader expects and nothing can create')
+  // Guard against the scan silently matching nothing on both sides at once.
+  assert.ok(inUnion.size >= 11, `only ${inUnion.size} halt reasons found — the scan has gone stale`)
+})
+
+// ---------------------------------------------------------------------------------------------
+// H39c — H39b walks columns that HAVE an idempotent ALTER and checks nothing runs before it. A
+// column with NO ALTER AT ALL falls outside that loop entirely, and that is the case that shipped.
+//
+// The retarget renamed three columns and added a fourth INSIDE `create table if not exists`, with no
+// ALTER. Proven by execution on a seeded cluster: seed main -> apply the pre-retarget revision ->
+// apply the retarget. The migration EXITS 0 AND REPORTS CLEAN, and the table still carries
+// must_have_check_key with the FK bound to it. The first INSERT the loop makes then dies with
+//     ERROR: column "close_state" does not exist
+// Every guard passed. Only running it found this.
+//
+// The invariant: a column the code WRITES must be reachable on an EXISTING database, not merely
+// present in the CREATE. Scoped to the tables this lane created and has already shipped a revision
+// of — a blanket rule over every table in the file would fire on columns that have only ever had
+// one shape, which is the cry-wolf failure this file exists to avoid.
+test('H39c: every column this lane CHANGED is reachable on an existing database', () => {
+  const sql = src('schema.ts')
+  const app = stripComments(src('appRemediation.ts'))
+
+  // SCOPED TO THE COLUMNS THAT CHANGED, and deliberately not to every column in the table. A rule
+  // over all columns fires on ones that have only ever had a single shape — the cry-wolf failure
+  // this file exists to prevent; the first version of this case did exactly that, naming eleven
+  // healthy columns. The general form ("does this column exist on a database built from an earlier
+  // revision") cannot be answered from one source snapshot at all. It is answered by EXECUTION
+  // instead: see CLAUDE.md — seed main's schema, apply the previous revision, apply this one. That
+  // is how F2 was found, and no source guard would have found it.
+  const CHANGED = [
+    'close_check_key', 'close_state', 'prev_close_state',   // renamed from must_have_*
+    'coverage_state', 'profile_evidence', 'superseded_doc_url',
+    'cleared_override_by', 'cleared_override_at', 'cleared_override_reason',
+  ]
+  const offenders = []
+  for (const col of CHANGED) {
+    const reachable = new RegExp(`alter table remediation_loop\\s+add column if not exists\\s+${col}\\b`).test(sql)
+      || new RegExp(`rename column \\w+ to ${col}\\b`).test(sql)
+    if (!reachable) offenders.push(`remediation_loop.${col}`)
+    // ...and it must be in the CREATE too, or a fresh database lacks it.
+    assert.match(createTable(sql, 'remediation_loop'), new RegExp(`\\n\\s*${col}\\s`),
+      `${col} is reachable by ALTER but absent from the CREATE — a fresh database would not have it`)
+  }
+  assert.deepEqual(offenders, [],
+    'a column this lane renamed or added exists only in the CREATE — on a database where the table '
+    + 'already exists, "create table if not exists" skips it and every INSERT naming it fails')
+
+  // A staleness anchor: close_state IS written on every ledger insert, so if it ever stops being
+  // named there this list has drifted from the code. close_check_key is deliberately NOT checked —
+  // it carries a DEFAULT and the writer never names it, which is correct.
+  assert.ok(app.includes('close_state'), 'close_state is not written by appRemediation — the CHANGED list is stale')
+})
+
+// ---------------------------------------------------------------------------------------------
+// H39d — the same class for a CONSTRAINT rather than a column, and it is how F1's fix was inert.
+//
+// Adding 'unattributed_coverage' to the halt_reason CHECK in the CREATE fixes a FRESH database only.
+// On one that already ran an earlier revision the create is skipped, the 10-member CHECK survives,
+// and the insert still throws — while H40 passes, because H40 reads the SOURCE, not the database.
+// A constraint whose membership can change needs an idempotent replacement exactly as a column does.
+test('H39d: EVERY named CHECK on remediation_loop has an idempotent replacement', () => {
+  // Not "the one that bit us" — all of them. Three separate constraints on this table kept a stale
+  // expression on an upgraded database, and the third was found only by executing the migration:
+  //   halt_reason   kept 10 members, so the loop could not persist its own refusal
+  //   close_check_key  stayed bound to must_have_coverage
+  //   check4        stayed `prev = 'fail'`, blind to 'warn' — which is how evidence_placed reports
+  //                 failure, so the evidence-removal guard was off on exactly the databases it protects
+  // A CHECK inside `create table if not exists` is skipped wholesale on a database that already has
+  // the table, so its ORIGINAL expression is the one that runs, forever. Naming every constraint is
+  // what makes a replacement possible; asserting every named one is replaced removes the class.
+  const sql = src('schema.ts')
+  const create = createTable(sql, 'remediation_loop')
+  const named = [...create.matchAll(/constraint (remediation_loop_\w+)\s*\n?\s*check/g)].map(m => m[1])
+  assert.ok(named.length >= 5, `only ${named.length} named CHECKs found on remediation_loop — the scan has gone stale`)
+
+  const missing = named.filter(c => {
+    const dropped = sql.includes(`alter table remediation_loop drop constraint if exists ${c};`)
+    const readded = new RegExp(`alter table remediation_loop add constraint ${c}\\s*\\n?\\s*check`).test(sql)
+    return !(dropped && readded)
+  })
+  assert.deepEqual(missing, [],
+    'a CHECK exists only in the CREATE — a database that already has the table keeps its original expression forever')
+
+  // The COLUMN-LEVEL checks are a second form and were the two that actually bit: `halt_reason text
+  // check (...)` and `close_check_key text ... check (...)`. They get auto-names too, so they need
+  // the same replacement, and matching only the `constraint <name> check` form would have missed
+  // both of them — which is how the first version of this case passed while halt_reason was stale.
+  for (const col of ['halt_reason', 'close_check_key']) {
+    assert.match(create, new RegExp(`\\n\\s*${col}\\s+text[^\\n]*check \\(${col} `),
+      `${col} has no inline CHECK in the CREATE — a fresh database would not constrain it`)
+    assert.ok(sql.includes(`alter table remediation_loop drop constraint if exists remediation_loop_${col}_check;`)
+      && new RegExp(`alter table remediation_loop add constraint remediation_loop_${col}_check\\s*\\n?\\s*check`).test(sql),
+      `${col}'s column-level CHECK has no idempotent replacement — an upgraded database keeps the original members forever`)
+  }
+
+  // ...and no ANONYMOUS table-level check may be added back, because an auto-named one cannot be
+  // dropped by a stable name and so cannot be replaced at all.
+  const anon = [...create.matchAll(/\n\s{2}check \(/g)]
+  assert.equal(anon.length, 0,
+    'an anonymous CHECK on remediation_loop — it gets an auto-name like remediation_loop_check4 and becomes unreplaceable')
+})

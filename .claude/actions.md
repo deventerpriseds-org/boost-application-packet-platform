@@ -2092,3 +2092,80 @@ failed.
 The "no Postgres in the sandbox" assumption is now explicitly corrected in CLAUDE.md, with the
 standing rule and a runnable recipe: **a schema change is not verified until it has been executed
 against a POPULATED database with the previous schema already applied.**
+
+
+## ACT — the retarget verifier found four defects; two were severe, and one class recurred three times (2026-08-20)
+
+An independent verifier reinstated the defect behind **every** guard added in the retarget — 20
+mutations, 16 fired. Four findings. Fixed on `claude/qc-p3-remediation`, all revert-proven.
+
+### F1 — the best guard in the lane could not persist its own refusal
+`HALT_REASONS` had 11 members; the schema CHECK had 10. `unattributed_coverage` — the guard that
+stops the loop claiming a convergence nothing this run produced — was missing. Both TS guards were
+live and correct, so at the exact moment the loop refused the claim, the INSERT recording that
+refusal violated `remediation_loop_halt_reason_check`: packet already mutated, **no ledger row at
+all**, the D-7 phantom escalation never reached, 500 to the caller.
+
+**H40** now asserts the TS union and the CHECK are SET-EQUAL in both directions. Revert-proven both
+ways (member removed from the CHECK; member removed from the union).
+
+### F2 — H39's own class, on H39's own table, three times over
+The retarget renamed three columns and added a fourth *inside* `create table if not exists`, with no
+ALTER. On a database that ran the previous revision the create is skipped: **migration exits 0,
+reports clean**, table keeps `must_have_check_key`, and the first INSERT dies with
+`column "close_state" does not exist`. H39b only walks columns that HAVE an ALTER, so a column with
+none fell outside its loop entirely.
+
+Then the same class twice more, each found ONLY by executing the migration:
+- the `halt_reason` CHECK: fixing it in the CREATE fixes a FRESH database only. H40 passed the whole
+  time, because H40 reads the source.
+- `check4`: after the rename it read `prev_close_state = 'fail'` on an upgraded database and
+  `prev_close_state in ('warn','fail')` on a fresh one. Since `evidence_placed` reports failure as
+  **`warn`**, the evidence-removal guard was switched off on exactly the databases it protects.
+
+And one inside the fix itself: the do-block's `exception when duplicate_object` **silently aborted
+every remaining statement**. On one upgrade path two constraints already existed, the block died
+there, and `halt_reason` was never replaced — migration exit 0 throughout. That is
+absent-evidence-reads-as-success, in PL/pgSQL. Every statement now drops before it adds, and only
+`undefined_table` is swallowed.
+
+**Every CHECK on `remediation_loop` is now named and unconditionally replaced.** Naming is what makes
+replacement possible — an anonymous constraint gets an auto-name and can never be dropped by a stable
+one. **H39c** (columns this lane changed are reachable on an existing database) and **H39d** (every
+named CHECK *and* both column-level CHECKs have an idempotent replacement; no anonymous CHECKs)
+encode it. Both revert-proven.
+
+**Proven by execution across five migration paths** — fresh, `main→HEAD`, `main→895→HEAD`,
+`main→e5e→HEAD`, `main→895→e5e→HEAD`, and HEAD applied twice — all exit 0 and all reach a constraint
+set **identical to a fresh database**. That equality is the invariant worth keeping: a fresh database
+and an upgraded one must enforce exactly the same rules, and diffing `pg_constraint` between the two
+is how you check it.
+
+### F3 — the tooThin exclusion laundered a pass
+Two evidenced must-haves, one judgeable and present, one under `MIN_JUDGEABLE_TOKENS` and **absent**
+from the document → `evidence_placed: pass`, `converged: true`, and the user read *"every requirement
+the profile evidences is now stated in this document."* The `(1 too short to judge either way)`
+caveat lived in `decidePass`'s detail and `reportedOutcome` dropped it. No escalation: both loops
+iterate empty lists.
+
+The claim is now qualified **at its source** — "every requirement the profile evidences AND the
+placement check could judge" — the count is carried on `Outcome.unjudged`, the caveat reaches every
+summary including halted ones, and each unjudgeable requirement raises its own escalation saying a
+human has to read it. `unjudgeableSeqs` uses `itemTokens` and `MIN_JUDGEABLE_TOKENS`, the engine's
+own function and constant, so the loop's idea of "unmeasurable" cannot drift from the check's.
+
+### F4 — all three P7-6 guards were inert, and backwards
+Forcing `failed`/`warned` empty while keeping the literal `ok:` expression → 396/396 passed with the
+defect verbatim. Emptying `built.warnings` → 396/396 passed. RENAMING `failed` to `bad` with
+identical behaviour → failed. They tested spelling and ignored behaviour — **the second time in this
+lane a grep-shaped guard was evaded by a rename, in code written after that lesson.**
+
+The claim logic is lifted into `packetBuild.summariseBuild` (pure: no @azure/functions, no pg, no
+network — the `checks.ts` / `appChecks.ts` split) and tested with real inputs. Re-running the
+verifier's three mutations now: evasion 1 fails 4 tests, evasion 2 fails 1, and the rename stays
+green. Exactly inverted.
+
+### The standing lesson
+A guard written *to* a lesson can still be inert — F4 is the proof. And three of the four findings
+share one root: **source-reading guards cannot see what a database already has.** The only thing that
+found them was running the migration against a populated database that had the previous revision.
