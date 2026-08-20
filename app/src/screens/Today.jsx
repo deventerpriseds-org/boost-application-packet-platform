@@ -2,7 +2,7 @@ import React, { useMemo, useState, useEffect, useCallback } from 'react'
 import { useApp, go } from '../state.jsx'
 import { useOpportunities } from '../data.jsx'
 import { api } from '../api.js'
-import { Pill, SignalIcon, PRIORITY_COLOR, MatchScore, StageBadge, toneColor } from '../shell.jsx'
+import { Pill, SignalIcon, PRIORITY_COLOR, MatchScore, StageBadge, toneColor, tempChipStyle, tempColor } from '../shell.jsx'
 
 // Next-best action per opportunity stage → a real destination in the app.
 function priorityActions(opps) {
@@ -146,9 +146,8 @@ function InboxScrubHero({ fresh = [], newToday, backlog, toast }) {
               return (
                 <span key={k} onClick={() => toggleTemp(k)} className="px-small"
                   style={{ cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 5, padding: '2px 9px', borderRadius: 10, fontWeight: 600, fontSize: 11,
-                    background: on ? `var(--temp-${k}-tint)` : 'transparent',
-                    color: `var(--temp-${k})`, border: `1px solid var(--temp-${k})` }}>
-                  <span style={{ width: 6, height: 6, borderRadius: '50%', background: `var(--temp-${k})`, opacity: on ? 1 : 0.6 }} />
+                    ...tempChipStyle(k, on) }}>
+                  <span style={{ width: 6, height: 6, borderRadius: '50%', background: tempColor(k).solid, opacity: on ? 1 : 0.6 }} />
                   {TEMP_LABEL[k]}
                 </span>
               )

@@ -28,6 +28,16 @@
          A token pair, not a literal: the prototype's single rgba(15,23,42,.34) all but disappears
          against the near-black dark ground, leaving the drawer with no separation from the page. */
       --qc-scrim: rgba(15, 23, 42, 0.34);
+      /* D11's other two token pairs — the two in-text highlights. They are pairs, and they are
+         tokens, for the same reason --qc-scrim is: the design handoff says to carry #fff03a
+         (keyword) and #fbf2da/#c9b27a (posting echo) verbatim, and a raw literal in a component is
+         exactly what breaks in dark mode. The background alone is not enough — a highlight painted
+         #fff03a inherits --proto-ink for its text, which flips to near-white in dark mode and puts
+         near-white on yellow. The FOREGROUND therefore ships with the background, always.
+         The two treatments are also never the same treatment (P8.7): keyword is a filled highlight,
+         posting echo is a pale wash under a rule. */
+      --qc-kw-bg: #fff03a;    --qc-kw-fg: #2b2607;
+      --qc-echo-bg: #fbf2da;  --qc-echo-rule: #c9b27a;
       --proto-density: 1;
       --proto-radius: 12px;
       --proto-radius-sm: 8px;
@@ -74,6 +84,11 @@
       /* Darker and more opaque than the light scrim: on a near-black page a 34% slate wash reads
          as nothing, so the overlay would appear to float with the page still fully lit behind it. */
       --qc-scrim: rgba(2, 6, 12, 0.62);
+      /* Dark: the highlighter stays yellow but loses the glare of a full-strength #fff03a on a
+         near-black ground, and its ink stays DARK rather than inheriting the near-white --proto-ink.
+         The echo wash goes to a dark tan so the rule under it still reads as tan, not as grey. */
+      --qc-kw-bg: #d9c34a;    --qc-kw-fg: #1c1804;
+      --qc-echo-bg: #2e2716;  --qc-echo-rule: #8a7748;
     }
     html, body, #root { height: 100%; }
     body { background: var(--surface-background-secondary); color: var(--proto-ink); font-family:'Inter', system-ui, sans-serif; overflow:hidden; -webkit-font-smoothing:antialiased; }
@@ -134,6 +149,13 @@
       linear-gradient(to top right, transparent calc(50% - 1px), var(--proto-rule-soft) 50%, transparent calc(50% + 1px)),
       linear-gradient(to top left,  transparent calc(50% - 1px), var(--proto-rule-soft) 50%, transparent calc(50% + 1px));
     }
+
+    /* The two in-text highlights (D11 / P8.7). Defined ONCE here so no component re-types a
+       colour, and so the "never the same treatment" rule is a property of the stylesheet rather
+       than of whoever wrote the last component: .qc-kw is a filled highlight, .qc-echo is a pale
+       wash under a rule. Both carry their own foreground, so neither inherits --proto-ink. */
+    .qc-kw { background: var(--qc-kw-bg); color: var(--qc-kw-fg); border-radius: 3px; padding: 0 4px; box-decoration-break: clone; -webkit-box-decoration-break: clone; }
+    .qc-echo { background: var(--qc-echo-bg); color: var(--proto-ink); border-bottom: 2px solid var(--qc-echo-rule); border-radius: 3px 3px 0 0; padding: 1px 4px; box-decoration-break: clone; -webkit-box-decoration-break: clone; }
 
     .px-note { background: var(--surface-info-subtle); border:1px solid var(--blue-200); padding:8px 10px; font-size:12px; color: var(--text-info); border-radius: var(--proto-radius-sm); }
 

@@ -10,21 +10,55 @@ where the train currently is. Read it first on any resume; it is written to surv
 ## ▶ RESUME MARKER — where the train is
 
 ```
-CURRENT PHASE : P3 (remediation loop) — BUILT, on a branch, NOT landed and NOT confirmed live
-STATUS        : PR #14 (claude/qc-p3-remediation). 313 assertions green. Independent AC agent
-                wrote P3-01..P3-46 cold (branch claude/qc-p3-ac); independent verifier run.
-LAST LANDED   : 1605021 artifact_score; 20/20 tables live; composite correctly null
-NEXT ACTION   : land PR #14, then deploy and run the loop against the Trinnex opportunity
-                (opp 9f9c370a-4ac9-441e-b58e-02e3ffcf669e / artifact cfdd82e7-...). Nothing in
-                P3 is confirmed live: the sandbox has no Postgres, no Drive, no Function.
-DONE SO FAR   : P0 wiring · X1 grounding · X2 regen · X3 normalizer · X4 tests · D1 D2 D3
-                P1.2b term_library · P1.2 corpus miner + curation queue · P1.1 requirement rows
-                X5 render-once (P3) · D8 metering per pass (P3)
+UPDATED       : 2026-08-20 16:10Z
+CURRENT PHASE : P8 (review decisions) — running in parallel with P3 and P8.3
+STATUS        : P3 (remediation loop) COMPLETE on its branch — PR #14, merged with main,
+                H-cases renumbered H32-H37. NOT landed, NOT deployed, NOT confirmed live.
+LAST LANDED   : 44d1cfc (H26 one-ID-one-case + contiguity)
+NEXT ACTION   : land P8.3 (H28-H31), then PR #14; then deploy and run the loop against the
+                Trinnex opportunity 9f9c370a-4ac9-441e-b58e-02e3ffcf669e
+DONE + LIVE   : P0 · P1 · P2 · P4 · P5 · P6 · X1 X2 X3 X4 · D1 D2 D3 D6 D7 D8 D11
+DONE, NOT LIVE: P3 (X5 render-once, D8 per-pass metering, scoped regeneration)
 ```
 *Update this block on every landing. It is the single place to look after a restart.*
 
-Phase status: P0 `done` · P1 `done` · P2 `done` · P3 `built, PR #14, not landed` · P4-P8 see their branches.
-Parallel streams in flight: P7 hygiene, D10 overlay primitive (subagents, own branches).
+Phase status: P0 `done` · P1 `done` · P2 `done` · P3 `RESTARTED` · P4 `done` · P5 `done` ·
+P6 `done` · P7 `partial (item 1 landed; 4, 6, 8 held behind P3)` · P8 `in progress`.
+P3 `built, PR #14, merged with main, NOT landed`.
+
+### Lanes in flight — who owns which files
+
+A lane may not touch a file another lane owns. `api/test/hardening.test.mjs` is shared and
+APPEND-ONLY. H-case IDs are pre-allocated so two lanes cannot collide on one number.
+
+**ONE ID PER LANE DID NOT HOLD, and the failure mode is worth naming.** Each lane finds SEVERAL
+defects, so P3 needed six ids and P8.3 four. Append-only is exactly what hid it: every lane appends
+at the end of the file, so the branches MERGE CLEANLY, each is green in isolation, and the duplicate
+ids land unnoticed while `actions.md` points at numbers that name two things. `H26` on `main` now
+asserts one-id-one-case AND contiguity from H1, so the next collision fails a build instead of
+being discovered by a reader. Allocate a RANGE per lane, not a number.
+
+| Lane | Branch | Owns | H-ids |
+|---|---|---|---|
+| P8.2 R3 figure echo | `claude/qc-p8-2-figures` (PR #10) | `figureEcho.ts`, `checks.ts`, `appChecks.ts`, `appFacts.ts` | H24, H25 |
+| P8.7 UI remainder | subagent worktree | `app/` (theme.css, PostingAnalysis, Today, packetBuilder) | — |
+| P3 remediation loop | `claude/qc-p3-remediation` (PR #14) | `pipeline.ts`, `appPackets.ts`, `appSwaps.ts`, `appInsertions.ts`, `remediation.ts`, `appRemediation.ts` | **H32-H37** |
+| P8.3 evidence excerpts | `claude/qc-p8-3-evidence` | `requirements.ts`, evidence schema | H27 |
+
+**The P3 lane was lost once.** A subagent ran it, died without pushing, and left no branch — the
+work was gone with no trace but a stale entry in this file. Restarted 2026-08-20 as a fresh lane,
+not a resume. Lesson applied to every lane above: a lane that has not pushed a branch has produced
+nothing, whatever a summary says about it.
+
+### Blocked, and on what
+
+| Item | Blocked on |
+|---|---|
+| P8.2 rewrite/generalize half | P8.1 correction table (to log and revert a replacement) |
+| P8.6 correction affordances | P8.1 |
+| P7 items 4, 6, 8 | P3 (they touch `pipeline.ts` / `appPackets.ts`) |
+| P8.4 comparison dimensions | P8.7 landing (both are in `app/`) |
+| P0.3 residual + its H-case | P8.7 landing (`app/src/theme.css`) |
 
 ---
 
