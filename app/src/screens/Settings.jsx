@@ -1447,7 +1447,113 @@ function LocationSettings() {
   )
 }
 
-const SECTIONS = [{ key: 'account', label: 'Account' }, { key: 'intake', label: 'Intake' }, { key: 'roles', label: 'Roles' }, { key: 'locations', label: 'Locations' }, { key: 'templates', label: 'Templates' }, { key: 'coach', label: 'Coach' }, { key: 'workspace', label: 'Workspace' }, { key: 'usage', label: 'Usage' }, { key: 'system', label: 'System' }]
+
+// P6 — the owner fact table. These settle requirements about the CANDIDATE ("10+ years",
+// "must be a US citizen", "reside on the East Coast") that no amount of resume wording can answer.
+// Measured across 7,559 live requirement rows: years 511, degrees 466, work-auth 43, clearance 36.
+//
+// Confirmation is the point of the screen, not decoration. A DERIVED value is the system's reading
+// of the resume template and cannot settle anything until a human vouches for it; an OWNER-STATED
+// value is testimony and is confirmed on save.
+function FactsSettings() {
+  const [state, setState] = useState({ loading: true, facts: [], err: null })
+  const [edits, setEdits] = useState({})
+  const [busy, setBusy] = useState(null)
+
+  const load = async () => {
+    setState((s) => ({ ...s, loading: true }))
+    try {
+      const r = await api.ownerFacts()
+      setState({ loading: false, facts: r.facts || [], err: null })
+    } catch (e) { setState({ loading: false, facts: [], err: String(e.message || e) }) }
+  }
+  useEffect(() => { load() }, [])
+
+  const save = async (f, value) => {
+    setBusy(f.key)
+    try {
+      const num = Number(String(value).replace(/[^0-9.]/g, ''))
+      await api.setOwnerFact({ key: f.key, value, valueNum: Number.isFinite(num) && /[0-9]/.test(String(value)) ? num : null })
+      setEdits((e) => ({ ...e, [f.key]: undefined }))
+      await load()
+    } catch (e) { setState((s) => ({ ...s, err: String(e.message || e) })) }
+    finally { setBusy(null) }
+  }
+
+  const rederive = async () => {
+    setBusy('__derive')
+    try { await api.deriveOwnerFacts(); await load() }
+    catch (e) { setState((s) => ({ ...s, err: String(e.message || e) })) }
+    finally { setBusy(null) }
+  }
+
+  const groups = ['identity', 'eligibility', 'experience', 'education', 'scope', 'preference']
+  const LABELS = { identity: 'Identity', eligibility: 'Eligibility', experience: 'Experience', education: 'Education', scope: 'Scope', preference: 'Preferences' }
+  const unconfirmed = state.facts.filter((f) => f.value && !f.confirmed).length
+  const empty = state.facts.filter((f) => !f.value).length
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+      <Card>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+          <b style={{ fontSize: 15 }}>Facts about you</b>
+          {unconfirmed > 0 && <Pill tone="yellow">{unconfirmed} to confirm</Pill>}
+          {empty > 0 && <Pill tone="panel">{empty} not set</Pill>}
+          <button className="px-btn" style={{ marginLeft: 'auto' }} disabled={busy === '__derive'} onClick={rederive}>
+            {busy === '__derive' ? 'Reading resume…' : 'Re-read from resume template'}
+          </button>
+        </div>
+        <div className="px-small" style={{ marginTop: 8 }}>
+          These answer requirements about you rather than about your documents — years of experience,
+          degrees, citizenship, location. A value read from your resume template is shown as
+          <b> derived</b> and does not count until you confirm it.
+        </div>
+        {state.err && <div className="px-small" style={{ marginTop: 8, color: 'var(--proto-red)' }}>{state.err}</div>}
+      </Card>
+
+      {state.loading ? (
+        <Card><div className="px-small">Loading…</div></Card>
+      ) : groups.map((g) => {
+        const rows = state.facts.filter((f) => f.category === g)
+        if (!rows.length) return null
+        return (
+          <Card key={g}>
+            <b style={{ fontSize: 14 }}>{LABELS[g]}</b>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 14, marginTop: 12 }}>
+              {rows.map((f) => {
+                const draft = edits[f.key] !== undefined ? edits[f.key] : (f.value || '')
+                const dirty = edits[f.key] !== undefined && edits[f.key] !== (f.value || '')
+                return (
+                  <div key={f.key} style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                      <span style={{ fontWeight: 600, fontSize: 13 }}>{f.label}</span>
+                      {f.confirmed && <Pill tone="green">confirmed</Pill>}
+                      {f.value && !f.confirmed && <Pill tone="yellow">derived — confirm</Pill>}
+                      {!f.value && <Pill tone="panel">not set</Pill>}
+                    </div>
+                    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                      <input className="px-input" style={{ flex: '1 1 320px' }} value={draft}
+                        placeholder={f.help}
+                        onChange={(e) => setEdits((x) => ({ ...x, [f.key]: e.target.value }))} />
+                      <button className="px-btn" disabled={busy === f.key || (!dirty && f.confirmed)}
+                        onClick={() => save(f, draft)}>
+                        {busy === f.key ? 'Saving…' : f.confirmed ? 'Update' : 'Confirm'}
+                      </button>
+                    </div>
+                    {f.evidence && <div className="px-small">{f.source === 'derived' ? 'Read from your resume: ' : ''}{f.evidence}</div>}
+                    {!f.evidence && f.help && <div className="px-small">{f.help}</div>}
+                  </div>
+                )
+              })}
+            </div>
+          </Card>
+        )
+      })}
+    </div>
+  )
+}
+
+const SECTIONS = [{ key: 'account', label: 'Account' }, { key: 'intake', label: 'Intake' }, { key: 'roles', label: 'Roles' }, { key: 'facts', label: 'Facts' }, { key: 'locations', label: 'Locations' }, { key: 'templates', label: 'Templates' }, { key: 'coach', label: 'Coach' }, { key: 'workspace', label: 'Workspace' }, { key: 'usage', label: 'Usage' }, { key: 'system', label: 'System' }]
 
 export default function Settings({ tab = 'account' }) {
   const active = SECTIONS.find((s) => s.key === tab) ? tab : 'account'
@@ -1464,6 +1570,7 @@ export default function Settings({ tab = 'account' }) {
       {active === 'account' && <AccountSettings />}
       {active === 'intake' && <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}><IntakeSettings /><TemperatureSettings /><AtsSources /></div>}
       {active === 'roles' && <RolesSettings />}
+      {active === 'facts' && <FactsSettings />}
       {active === 'locations' && <LocationSettings />}
       {active === 'templates' && <TemplatesSettings />}
       {active === 'coach' && <CoachSettings />}

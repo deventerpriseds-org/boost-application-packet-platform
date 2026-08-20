@@ -102,6 +102,9 @@ export const api = {
   dismiss: (id) => post(`/app/opportunity/${id}/dismiss`, {}),
   undismiss: (id) => post(`/app/opportunity/${id}/dismiss`, { undo: true }),
   // Packets / artifacts (production line)
+  ownerFacts: ({ owner } = {}) => get(`/app/qc/facts?owner=${encodeURIComponent(owner || _owner)}`),
+  setOwnerFact: (fact, { owner } = {}) => post(`/app/qc/facts/set?owner=${encodeURIComponent(owner || _owner)}`, fact),
+  deriveOwnerFacts: ({ owner } = {}) => post(`/app/qc/facts/derive?owner=${encodeURIComponent(owner || _owner)}`, {}),
   listPackets: ({ owner } = {}) => get(`/app/packets?owner=${encodeURIComponent(owner || _owner)}${demoParam()}`),
   getPacket: (oppId) => get(`/app/opportunity/${oppId}/packet`),
   analyzeJd: (oppId) => post(`/app/opportunity/${oppId}/jd-analysis`, {}),

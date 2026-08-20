@@ -248,14 +248,17 @@ test('with no facts recorded the engine behaves exactly as before', () => {
 test('a requirement the facts own is reported ONCE, not under template_reach as well', () => {
   // Live Trinnex: "Reside in the East Coast" appeared under BOTH facts_needed and template_reach.
   // One requirement, two entries, two jobs for the reader where there is one.
+  // Maryland IS on the East Coast, so this now SETTLES rather than asking. What the test pins is
+  // that whichever way it resolves, the requirement appears in exactly one place.
   const rs = runChecks({
     type: 'resume', pkg: RESUME_FULL,
     requirements: [{ seq: 6, verbatim: 'Reside in the East Coast of the United States', item_text: '', kind: 'must_have' }],
     facts: [ownerFact('identity.location', 'Westminster, MD 21158')],
   })
   const named = k => (find(rs, k)?.offenders || []).join(' ')
-  assert.match(named('facts_needed'), /East Coast/, 'the fact system owns it')
+  assert.equal(find(rs, 'facts_settled').state, 'pass', 'geography is looked up, not asked about')
   assert.ok(!/East Coast/.test(named('template_reach')), 'and it must not be listed a second time')
+  assert.ok(!/East Coast/.test(named('facts_needed')), 'nor asked about once it is settled')
 })
 
 // ---- P2.2 inputs ---------------------------------------------------------------------------

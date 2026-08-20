@@ -51,11 +51,14 @@ test('an UNCONFIRMED fact cannot settle a requirement', () => {
   assert.match(r.detail, /unconfirmed/)
 })
 
-test('a non-numeric fact is surfaced for a human, never inferred', () => {
-  const r = checkAgainstFacts('Reside in the East Coast of the United States',
-    [fact('identity.location', 'Boston, MA')])
-  assert.equal(r.verdict, 'unknown', 'the system must not decide that Boston satisfies "East Coast"')
-  assert.match(r.detail, /"Boston, MA" recorded/)
+test('a fact whose fit depends on the PERSON is surfaced, never inferred', () => {
+  // The line is not "never infer" — geography is reference data and is settled below. It is: never
+  // infer what depends on the person. Whether this clearance level counts, or how far someone will
+  // commute, is theirs to answer.
+  const r = checkAgainstFacts('Active TS/SCI clearance required',
+    [fact('eligibility.security_clearance', 'Secret (inactive)')])
+  assert.equal(r.verdict, 'unknown')
+  assert.match(r.detail, /"Secret \(inactive\)" recorded/)
 })
 
 test('a requirement no fact covers returns null rather than a fabricated verdict', () => {
@@ -177,4 +180,30 @@ test('a month before the END year does not break the range match', () => {
   const f = deriveFacts(cv, 2026).find(x => x.key === 'experience.years_total')
   assert.equal(f.value_num, 18, 'earliest dated role is 2008, not the current one')
   assert.match(f.evidence, /2008/)
+})
+
+// ---- geography is reference data, not a question for the owner --------------------------------
+test('a state on the Atlantic seaboard SATISFIES an East Coast requirement outright', () => {
+  const r = checkAgainstFacts('Reside in the East Coast of the United States',
+    [fact('identity.location', 'Westminster, MD 21158 (Maryland)')])
+  assert.equal(r.verdict, 'satisfied', 'Maryland is on the East Coast — that is lookup, not judgement')
+  assert.match(r.detail, /Maryland \(MD\) is on the East Coast/)
+})
+
+test('a state that is NOT on the coast fails the same requirement, with the reason', () => {
+  const r = checkAgainstFacts('Must reside on the East Coast',
+    [fact('identity.location', 'Denver, Colorado')])
+  assert.equal(r.verdict, 'not_satisfied')
+  assert.match(r.detail, /not on the East Coast/)
+})
+
+test('a named state in the requirement is compared to the recorded state', () => {
+  assert.equal(checkAgainstFacts('Must reside in Texas', [fact('identity.location', 'Austin, TX')]).verdict, 'satisfied')
+  assert.equal(checkAgainstFacts('Must reside in Texas', [fact('identity.location', 'Westminster, MD')]).verdict, 'not_satisfied')
+})
+
+test('a commute radius still ASKS — that depends on the person, not on geography', () => {
+  const r = checkAgainstFacts('Must live within 30 miles of our Baltimore office',
+    [fact('identity.location', 'Westminster, MD 21158')])
+  assert.equal(r.verdict, 'unknown', 'how far someone will commute is theirs to decide')
 })

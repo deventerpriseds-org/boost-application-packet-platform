@@ -12,6 +12,8 @@
 // system proposes new ones when a posting asks something nothing answers. This is the starting set
 // the measurement justifies.
 
+import { locationSatisfies } from './geo'
+
 export type FactCategory = 'identity' | 'eligibility' | 'experience' | 'education' | 'scope' | 'preference'
 
 export interface FactDef {
@@ -118,8 +120,16 @@ export function checkAgainstFacts(requirementText: string, facts: OwnerFact[]): 
         : { fact_key: def.key, verdict: 'not_satisfied', detail: `${fact.value_num} years recorded, ${demanded} required` }
     }
 
-    // Everything else is surfaced with the fact beside the requirement, for a human to judge. The
-    // system states what it knows; it does not infer that "Boston, MA" satisfies "East Coast".
+    // Geography is REFERENCE DATA, not judgement. Whether Maryland is on the East Coast is a fact
+    // anyone can look up, and asking the owner to confirm it is the system failing to do its job.
+    // The line is narrower than "never infer": never infer things that depend on the PERSON. A
+    // commute radius or whether they would take the role is theirs; the Atlantic seaboard is not.
+    if (def.key === 'identity.location') {
+      const geo = locationSatisfies(text, fact.value)
+      if (geo) return { fact_key: def.key, verdict: geo.satisfied ? 'satisfied' : 'not_satisfied', detail: geo.detail }
+    }
+
+    // Everything else is surfaced with the fact beside the requirement, for a human to judge.
     return { fact_key: def.key, verdict: 'unknown', detail: `"${fact.value}" recorded — confirm this satisfies the requirement` }
   }
   return null
