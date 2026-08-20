@@ -2,6 +2,8 @@
 // source is null, and the composite is null unless all three are present.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
+import { runChecks } from '../dist/functions/tests/checks.js'
 import {
   computeArtifactScore, bandFor, DEFAULT_WEIGHTS, ENGINE_VERSION,
   judgedMustHaveIds, mustHaveSource, parseMustHaveSource,
@@ -179,4 +181,60 @@ test('the source the scorer actually stores is one the parser can read', () => {
     checks: [check('fail', '1/2 must-haves evidenced (2 not reachable by any generated field, not counted either way)', ['#3 x'])],
   })
   assert.deepEqual(parseMustHaveSource(score.must_have_coverage.source), { covered: 1, judged: 2 })
+})
+
+test('the coverage check publishes exactly the rows it judged, and the writer stores them', () => {
+  // D16's completion. `judged_requirement_ids` closes the gap `judgedMustHaveIds` could only
+  // half-infer: without it, a run where SOME must-haves were excluded leaves the judged-and-covered
+  // rows unknown, so they fall to `not_comparable` — understating agreement rather than inventing
+  // it, but still not the truth.
+  //
+  // The set must come FROM the check. `coverable` is checks.ts's predicate; a second copy of it in
+  // the writer or in appReviewer is the R4 defect this column exists to close.
+  const reqs = [
+    { id: 'a1', seq: 1, kind: 'must_have', item_text: 'Lead a platform engineering organisation at scale' },
+    { id: 'a2', seq: 2, kind: 'must_have', item_text: 'Reside in the East Coast of the United States' },
+  ]
+  const rows = runChecks({ type: 'resume', pkg: { ResumeSummary: 'Led platform engineering.' }, requirements: reqs, swaps: [],
+    postingText: 'Lead a platform engineering organisation at scale. Reside in the East Coast of the United States.',
+    profileText: 'Led platform engineering organisations at scale.',
+    // The REAL EvidenceInput shape: { profileReadable, bySeq }, keyed by seq. My first version of
+    // this fixture invented `{ readable, byRequirement }`, so profileReadable was undefined, the
+    // check bailed to not_applicable, and the whole test passed while measuring nothing — it stayed
+    // green with the defect reinstated. A fixture in the wrong shape is a test that cannot fail.
+    evidence: {
+      profileReadable: true,
+      bySeq: {
+        1: { quote: 'Led platform engineering organisations at scale', source_kind: 'work_history',
+             source_label: 'Platform lead', source_key: 'work:1', char_start: 0, char_end: 46,
+             method: 'exact', ratio: 1, extra: null, record_sha256: 'f'.repeat(64), resolver_version: 1 },
+        2: null,
+      },
+    } })
+
+  const cov = rows.find(r => r.check_key === 'must_have_coverage')
+  assert.ok(cov, 'no coverage row at all')
+  if (cov.state === 'not_applicable') {
+    assert.ok(!cov.judged || cov.judged.length === 0,
+      'a check that reached NO verdict must not claim to have judged anything')
+  } else {
+    assert.ok(Array.isArray(cov.judged), 'the coverage check did not publish its judged set')
+    // The eligibility row is excluded from `coverable`, so it must NOT appear as judged — that is
+    // the whole defect: it was being scored as agreeing or disagreeing with the reviewer.
+    assert.ok(!cov.judged.includes('a2'),
+      'an eligibility row the check EXCLUDED was published as judged')
+    assert.ok(cov.judged.length < reqs.length,
+      'judged equals every must-have — the exclusion is not reflected, which is the defect')
+  }
+})
+
+test('the writer stores what the check published, never its own recomputation', () => {
+  // A source rule, because the assertion is about where a value COMES FROM, which no runtime test
+  // can see: both a read and a recomputation produce a plausible array.
+  const src = readFileSync(new URL('../src/functions/tests/appChecks.ts', import.meta.url), 'utf8')
+    .replace(/\/\/[^\n]*/g, '').replace(/\/\*[\s\S]*?\*\//g, '')
+  assert.match(src, /results\.find\(r => r\.check_key === 'must_have_coverage'\)\?\.judged/,
+    'the writer no longer reads the judged set from the check')
+  assert.ok(!/kind === 'must_have'/.test(src),
+    'appChecks recomputes the must-have population — that is the second copy of the predicate')
 })
