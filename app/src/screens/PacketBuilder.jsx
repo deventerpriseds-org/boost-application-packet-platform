@@ -7,6 +7,7 @@ import AssetBlocks, { useAssetProvenance } from './AssetBlocks.jsx'
 import { registerListOwners } from '../assetBlocks.js'
 import {
   PostingAnalysisCard, AnalysisRunCard, KeywordTallyOverlay, MatchEstimateButton, ProfileLink,
+  ProfileCompareCard,
 } from './PostingAnalysis.jsx'
 import { postingBody } from '../postingAnalysis.js'
 import { PACKET_HOOKS, ASSET_HEADER_DEFAULT_OPEN } from '../packetBuilder.js'
@@ -513,6 +514,20 @@ export default function PacketBuilder({ id, step }) {
               </div>
             )
           })()}
+
+          {/* P8.4 / SPEC 4.2 - the two-sided comparison. It sits ABOVE the extraction card
+              deliberately: this is the ANSWER the JD step gives, and the card below it is the
+              source the answer was built from. Nothing below is deleted - the extraction
+              provenance strip ("N lines extracted / N located / N characters stored") is the only
+              surface reporting how much of the employer's text was located, and P5.4 built it on
+              purpose. The comparison replaces the counter strip the SPEC names ("6 of 12 posting
+              lines / 3 passes"), which never existed on this screen. */}
+          <ProfileCompareCard
+            comparison={req.data?.comparison}
+            onOpenRequirements={() => {
+              const el = document.querySelector('[data-qc="posting-analysis"]')
+              if (el && el.scrollIntoView) el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+            }} />
 
           <PostingAnalysisCard
             req={req.data} reqError={req.error} reloadReq={loadReq}

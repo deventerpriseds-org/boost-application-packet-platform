@@ -1467,3 +1467,40 @@ Coverage is no longer "did the generated document repeat enough of the requireme
 H32 came from the independent verifier (`docs/qc-evidence/VERIFY-P8.3.md`), as did the qcRail fix.
 (Renumbered from H27-H30 on merge: `main` had already taken H26 and H27, and H26 asserts one-ID-one-case.)
 316/316 api tests, app builds clean.
+
+## P8.4 — posting-vs-profile comparison, graded (`claude/qc-p8-4-dimensions`)
+
+**What the JD step now answers.** SPEC 4.2's two-sided comparison, above the extraction card:
+`Dimension · The posting asks for · Your profile evidences · Fit`, one row per configured dimension,
+every moderate/weak row carrying the reason it is not strong.
+
+- `dimensions.ts` (pure, model-free) — the eight seeded axes, their matchers, and `buildComparison`.
+  Extends rather than duplicates: the posting side is the requirement spine, the profile side is
+  P8.3's `requirement_evidence` row judged by the SAME rule `requirementsGet` uses, the numeric side
+  reuses `ownerFacts.demandedNumber` and its confirmation rule, and the judgeability floor is
+  imported from `evidence.ts`.
+- `comparison_dimension` table via `ensureDimensionTable` (appDimensions.ts). The acceptance
+  sentence is a **DB CHECK**, not an `if`: `fit not in ('moderate','weak') or note is not null`.
+  Three more in the same shape (a `not_applicable` row must say why; a graded row must have a
+  denominator; an ungraded one may not invent one). **NOT in `SCHEMA_SQL`/`EXPECTED_TABLES`** — see
+  DEFERRED D21.
+- `GET/POST /api/app/dimension-prefs` — the set per role family, merged per family, on
+  `owner_search_prefs.cmp_dimensions`. Role family comes from `roleTaxonomy.resolveTitle`.
+- Served by `requirementsGet` (the ONE endpoint the JD step reads) and rebuilt by `evidenceResolve`
+  and `requirementsBackfill` in the same call that rebuilds evidence.
+
+**Three prototype defects deliberately not ported** (`docs/qc-evidence/qc/data.js`): `fit(0,0)`
+returning `'strong'`; `FIT_LABEL.weak` = `'No evidence'` printed over a measured shortfall; and a
+grade derived from a number nobody compared.
+
+**Two live defects found and NOT fixed here** (out of lane, gate blast radius — D22, D23):
+`experience.years_leadership` is structurally unreachable in `checkAgainstFacts`, and `people`/`usd`
+have no numeric comparator. `H34` pins the shadow set; `H35` pins the set of per-owner settings
+columns production reads and nothing writes (all ten `chk_*`).
+
+**H34, H35** in `api/test/hardening.test.mjs`, both proved by reverting. 372 api + 172 app tests.
+Store proven against a POPULATED database with `origin/main`'s schema already applied — a fresh
+database skips every `create table if not exists` and proves nothing.
+
+**NOT verified live.** Nothing has run against the Function App, the real database or the deployed
+SPA (D25).
