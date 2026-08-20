@@ -86,6 +86,25 @@ async function del(path) {
   return res.json()
 }
 
+// Same fetch path as post(), but it PRESERVES the server's own error body.
+//
+// The QC gate is a server decision and its refusals carry the reason with them: a 409 from
+// /artifact/{id}/status says WHICH findings block approval, a 409 from /gate-override says a fail
+// cannot be overridden, a 403 says an override needs a verified session. post() collapses all of
+// those into "HTTP 409", which forces the UI to invent a generic message and, worse, to guess at a
+// rule the server already decided. Anything that surfaces a server verdict must use this.
+async function postDetailed(path, body) {
+  const res = await authedFetch(path, { method: 'POST', jsonBody: body || {} })
+  const json = await res.json().catch(() => ({}))
+  if (!res.ok) {
+    const err = new Error(String(json?.error || `POST ${path} → HTTP ${res.status}`))
+    err.status = res.status
+    err.body = json
+    throw err
+  }
+  return json
+}
+
 export const api = {
   listOpportunities: ({ owner, persona, stage, includeDismissed } = {}) => {
     const qs = new URLSearchParams()
@@ -131,6 +150,22 @@ export const api = {
   oppRequirements: (oppId) => get(`/app/opportunity/${oppId}/requirements?owner=${encodeURIComponent(_owner)}`),
   generateArtifact: (artifactId) => post(`/app/artifact/${artifactId}/generate`, {}),
   setArtifactStatus: (artifactId, status) => post(`/app/artifact/${artifactId}/status`, { status }),
+  // ── QC gate (P2.2/P2.3) ────────────────────────────────────────────────────────────────────
+  // Every GET here is owner-scoped server-side via resolveOwner(), which falls back to the DEMO
+  // owner when no ?owner= is present — so omitting it silently 404s the real owner's artifacts.
+  //
+  // The three POSTs below deliberately carry NO ?owner=. requireWrite() rejects any write that is
+  // not either a verified session or the shared demo workspace, and for a verified session
+  // resolveOwner() returns the SESSION email and ignores ?owner= entirely (appSession.ts:46-76).
+  // So on a write the parameter is either inert or a spoof attempt the server already refuses -
+  // sending it would suggest the client picks the owner for a mutation, which it must never do.
+  artifactChecksResult: (artifactId) => get(`/app/artifact/${artifactId}/checks-result?owner=${encodeURIComponent(_owner)}`),
+  runArtifactChecks: (artifactId) => postDetailed(`/app/artifact/${artifactId}/checks`, {}),
+  artifactGateOverride: (artifactId, reason) => postDetailed(`/app/artifact/${artifactId}/gate-override`, { reason }),
+  // Approval is gated server-side and answers 409 with the blocking reason; the caller must show it.
+  setArtifactStatusDetailed: (artifactId, status) => postDetailed(`/app/artifact/${artifactId}/status`, { status }),
+  artifactInsertions: (artifactId) => get(`/app/artifact/${artifactId}/insertions?owner=${encodeURIComponent(_owner)}`),
+  packetSwaps: (packetId) => get(`/app/packet/${packetId}/swaps?owner=${encodeURIComponent(_owner)}`),
   generateArtifactDocument: (artifactId) => post(`/app/artifact/${artifactId}/document`, {}),
   saveArtifactContent: (id, body) => post(`/app/artifact/${id}/content`, body),
   aiEditArtifact: (id, body) => post(`/app/artifact/${id}/ai-edit`, body),
