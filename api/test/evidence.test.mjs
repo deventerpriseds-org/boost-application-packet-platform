@@ -13,6 +13,7 @@ import {
   EVIDENCE_THRESHOLD, MIN_JUDGEABLE_TOKENS, RESOLVER_VERSION, NO_EVIDENCE_NOTE, MC_KIND,
 } from '../dist/functions/tests/evidence.js'
 import { MIN_QUOTE_CHARS, MIN_QUOTE_WORDS } from '../dist/functions/tests/reviewer.js'
+import { runChecks } from '../dist/functions/tests/checks.js'
 
 const MC = {
   partitionKey: 'context', rowKey: '1', etag: 'W/"x"', timestamp: '2026-01-01',
@@ -194,4 +195,24 @@ test('an unreadable profile is not an empty profile', () => {
   assert.equal(toCheckInput(out, false).profileReadable, false,
     'the caller, not this module, decides whether the profile was READ — a resolver cannot tell')
   assert.equal(NO_EVIDENCE_NOTE, 'no evidence found in your profile')
+})
+
+// ------------------------------------------------------------------ the offender contract
+
+test('the "#<seq> ..." offender prefix survives the numerator change', () => {
+  // AC-31: this prefix is a three-way contract. It is WRITTEN by checks.ts, parsed by
+  // `artifactScore.ts` (`/^#(\d+)\b/`, to recover uncovered_requirement_ids) and parsed again by
+  // `app/src/qcRail.js` `offenderSeq` (the same regex, to filter the coverage cards). Appending the
+  // no-evidence note after the text must not disturb it, and a two-digit seq must not be read as a
+  // one-digit one.
+  const reqs = [
+    { seq: 3, kind: 'must_have', verbatim: 'Deep experience with Kubernetes cluster federation', item_text: '' },
+    { seq: 30, kind: 'must_have', verbatim: 'Proven record of building geospatial data platforms', item_text: '' },
+  ]
+  const rs = runChecks({ type: 'resume', pkg: { ResumeSummary: 'x' }, requirements: reqs,
+                         evidence: { profileReadable: true, bySeq: {} } })
+  const cov = rs.find(r => r.check_key === 'must_have_coverage')
+  const parse = o => { const m = /^#(\d+)\b/.exec(String(o).trim()); return m ? Number(m[1]) : null }
+  assert.deepEqual(cov.offenders.map(parse).sort((a, b) => a - b), [3, 30])
+  for (const o of cov.offenders) assert.match(o, /no evidence found in your profile$/)
 })
