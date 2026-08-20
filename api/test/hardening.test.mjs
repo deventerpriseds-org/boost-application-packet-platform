@@ -739,7 +739,7 @@ test('H26: every hardening case has its own ID', () => {
 })
 
 // -----------------------------------------------------------------------------------------------
-// H32 — the swap writer deleted the whole packet's provenance on every build, and swap_decision had
+// H28 — the swap writer deleted the whole packet's provenance on every build, and swap_decision had
 // no pass dimension at all. Evidence: `appSwaps.writeSwaps` ran
 // `delete from swap_decision where packet_id=$1` unconditionally, and the table's unique key was
 // `(packet_id, list, seq)`. A remediation loop calling it on pass 2 therefore DESTROYED pass 1's
@@ -747,7 +747,7 @@ test('H26: every hardening case has its own ID', () => {
 // packet screen showing only the last pass's decisions as if they were the whole story.
 // The invariant, not the incident: any writer that clears provenance for a packet must scope the
 // clear to the pass it is rewriting.
-test('H32: provenance deletes are scoped to a pass, never to a whole packet', () => {
+test('H28: provenance deletes are scoped to a pass, never to a whole packet', () => {
   const offenders = []
   for (const [file, body] of allSources()) {
     const code = stripComments(body)
@@ -762,7 +762,7 @@ test('H32: provenance deletes are scoped to a pass, never to a whole packet', ()
   assert.deepEqual(offenders, [], 'a packet-wide provenance delete erases every earlier pass')
 })
 
-test('H32b: swap_decision and skill_candidate carry the pass in their key', () => {
+test('H28b: swap_decision and skill_candidate carry the pass in their key', () => {
   const schema = src('schema.ts')
   assert.match(schema, /unique \(packet_id, list, seq, loop\)/,
     'without loop in the key, pass 2 overwrites pass 1 row for row')
@@ -773,12 +773,12 @@ test('H32b: swap_decision and skill_candidate carry the pass in their key', () =
 })
 
 // ---------------------------------------------------------------------------------------------
-// H33 — generation and RENDERING were the same function, so the only way to regenerate content was
+// H29 — generation and RENDERING were the same function, so the only way to regenerate content was
 // to also issue a Drive `files/{id}/copy`. Evidence: `buildTemplatedArtifact` did both. A four-pass
 // remediation loop over the four templated artifacts would have created 16 Google files per packet,
 // and since there is no Drive DELETE anywhere in this codebase (D-9) 15 of them would be orphaned
 // on the quota-bearing OAuth account. X5 / P3-25: documents render ONCE, after the loop.
-test('H33: the remediation loop body contains no Drive call — rendering is a separate step', () => {
+test('H29: the remediation loop body contains no Drive call — rendering is a separate step', () => {
   const loop = stripComments(src('appRemediation.ts'))
   // The pass loop is everything between the `for (let pass` header and the render call that follows
   // it. A Drive call inside that span is the 4N defect returning.
@@ -791,7 +791,7 @@ test('H33: the remediation loop body contains no Drive call — rendering is a s
   }
 })
 
-test('H33b: ensurePackage generates without rendering, so a pass can run without a Drive copy', () => {
+test('H29b: ensurePackage generates without rendering, so a pass can run without a Drive copy', () => {
   const packets = stripComments(src('appPackets.ts'))
   const start = packets.indexOf('export async function ensurePackage')
   const end = packets.indexOf('export async function renderArtifact')
@@ -803,13 +803,13 @@ test('H33b: ensurePackage generates without rendering, so a pass can run without
 })
 
 // ---------------------------------------------------------------------------------------------
-// H34 — `insertion.loop` was DERIVED inside the writer as `max(loop) + 1`, so it counted document
+// H30 — `insertion.loop` was DERIVED inside the writer as `max(loop) + 1`, so it counted document
 // RENDERS: every build advanced it, including a build that served a cached package and made zero
 // model calls. Three loop-ish counters already existed (`packet.round`, never incremented;
 // `insertion.loop`; `check_result.run_id`) and P3 wanted a fourth. Decision 14: give this one the
 // meaning P3 needs and let the CALLER own it — loop 0 is the baseline, 1..n are remediation passes.
 // The invariant: no provenance writer may invent a pass number for itself.
-test('H34: the pass number is supplied by the caller, never derived from max(loop)', () => {
+test('H30: the pass number is supplied by the caller, never derived from max(loop)', () => {
   const offenders = allSources()
     .filter(([, body]) => /max\(loop\)/i.test(stripComments(body)))
     .map(([f]) => f)
@@ -822,7 +822,7 @@ test('H34: the pass number is supplied by the caller, never derived from max(loo
   assert.match(ins, /loop=\$2`, \[artifactId, loop - 1\]/, 'before_text must come from the PREVIOUS pass')
 })
 
-test('H34b: every loop/pass/round counter column has a writer — no dead counter', () => {
+test('H30b: every loop/pass/round counter column has a writer — no dead counter', () => {
   // The invariant, not the incident. `packet.round` was READ by loadPacket's ORDER BY and by
   // packetShape and written by NOTHING, so it was always 1: the ordering was a no-op and the API
   // reported round 1 forever. A counter nobody increments is worse than no counter, because every
@@ -833,7 +833,7 @@ test('H34b: every loop/pass/round counter column has a writer — no dead counte
     .map(m => m[1].toLowerCase()))]
   const code = allSources().filter(([f]) => f !== 'schema.ts').map(([, b]) => stripComments(b)).join('\n')
   const unwritten = columns.filter(c => {
-    if (c === 'loop') return false            // supplied by the caller on every insert (H34 above)
+    if (c === 'loop') return false            // supplied by the caller on every insert (H30 above)
     if (c === 'n') return false               // remediation_loop.n, inserted per pass
     return !new RegExp(`set\\s+${c}\\s*=|\\b${c}\\s*=\\s*${c}\\s*\\+`, 'i').test(code)
   })
@@ -841,13 +841,13 @@ test('H34b: every loop/pass/round counter column has a writer — no dead counte
 })
 
 // ---------------------------------------------------------------------------------------------
-// H35 — `converged` is the one word a user trusts without reading anything else, so it must not be
+// H31 — `converged` is the one word a user trusts without reading anything else, so it must not be
 // storable by a writer that merely intends to be honest. The guard is structural: a CHECK that
 // refuses the word while anything is open, and a composite FOREIGN KEY into `check_result` so the
 // coverage state on the row cannot be ASSERTED — only copied from a check the engine really recorded
 // for that exact run. Evidence for why this is needed: `evaluateArtifact` writes check_result rows
 // keyed by run_id, and nothing else in the schema tied a summary row back to them.
-test('H35: converged is unforgeable in the schema, not just in the writer', () => {
+test('H31: converged is unforgeable in the schema, not just in the writer', () => {
   const schema = src('schema.ts')
   assert.match(schema, /check \(halt_reason is distinct from 'converged'\s*\n?\s*or \(cardinality\(remaining\) = 0 and must_have_state = 'pass'\)\)/,
     'the converged CHECK is gone; the word becomes whatever the writer says')
@@ -864,11 +864,11 @@ test('H35: converged is unforgeable in the schema, not just in the writer', () =
 })
 
 // ---------------------------------------------------------------------------------------------
-// H36 — the loop must not become a second definition of "covered". `checks.covers()` decides
+// H32 — the loop must not become a second definition of "covered". `checks.covers()` decides
 // `must_have_coverage`, which decides the GATE; if the loop implemented its own token-overlap rule
 // to decide what a pass closed, the two would drift and the loop would start claiming closes the
 // gate does not recognise. The predicate is exported from `checks.ts` and imported, once.
-test('H36: the loop decides coverage with the gate\'s predicate, never its own', () => {
+test('H32: the loop decides coverage with the gate\'s predicate, never its own', () => {
   const rem = stripComments(src('remediation.ts'))
   assert.match(rem, /import \{[^}]*coversText[^}]*\} from '\.\/checks'/,
     'the loop must import the gate\'s coverage predicate')
@@ -878,7 +878,7 @@ test('H36: the loop decides coverage with the gate\'s predicate, never its own',
 })
 
 // ---------------------------------------------------------------------------------------------
-// H37 — a composite FOREIGN KEY was declared against `check_result (artifact_id, run_id, check_key,
+// H33 — a composite FOREIGN KEY was declared against `check_result (artifact_id, run_id, check_key,
 // state)` while the UNIQUE that makes that tuple a legal FK target was added with the idempotent
 // alters at the FOOT of the same script. On a FRESH database that works (check_result carries the
 // constraint inline). On the LIVE database, where check_result has existed since P2 WITHOUT it,
@@ -892,7 +892,7 @@ test('H36: the loop decides coverage with the gate\'s predicate, never its own',
 //
 // The invariant, not the incident: for EVERY composite FK in SCHEMA_SQL, the constraint that makes
 // its target tuple unique must appear EARLIER in the script than the table that references it.
-test('H37: a composite FK\'s unique target is established before the table that references it', () => {
+test('H33: a composite FK\'s unique target is established before the table that references it', () => {
   const whole = src('schema.ts')
   const sql = whole.slice(whole.indexOf('SCHEMA_SQL = '))
   const offenders = []
