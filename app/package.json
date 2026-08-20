@@ -6,7 +6,9 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test": "node --test test/*.test.mjs",
+    "test:browser": "node test/browser/run.mjs"
   },
   "dependencies": {
     "@azure/msal-browser": "^3.30.0",

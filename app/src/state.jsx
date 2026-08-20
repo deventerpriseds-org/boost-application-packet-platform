@@ -123,9 +123,11 @@ export function AppProvider({ children }) {
   )
 }
 
+// zIndex comes from the token scale, not a literal: overlays now sit at 200/300 (--zindex-overlay /
+// --zindex-modal), so the old hardcoded 100 would have hidden every toast behind an open drawer.
 function ToastTray({ toasts }) {
   return (
-    <div style={{ position: 'fixed', bottom: 20, right: 20, display: 'flex', flexDirection: 'column', gap: 8, zIndex: 100 }}>
+    <div style={{ position: 'fixed', bottom: 20, right: 20, display: 'flex', flexDirection: 'column', gap: 8, zIndex: 'var(--zindex-toast)' }}>
       {toasts.map((t) => (
         <div key={t.id} className="px-box" style={{ padding: '10px 14px', fontSize: 13, boxShadow: '0 4px 16px rgba(0,0,0,0.12)', animation: 'toast-in 200ms ease-out' }}>
           {t.msg}

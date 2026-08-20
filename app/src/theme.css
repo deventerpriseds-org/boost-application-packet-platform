@@ -24,6 +24,10 @@
       --proto-yellow: var(--surface-warning-default);  --proto-yellow-soft: var(--surface-warning-subtle);
       --proto-purple: var(--purple-600);               --proto-purple-soft: var(--purple-100);
       --proto-orange: var(--orange-600);
+      /* Overlay scrim (D11's --qc-scrim pair, needed now by the Overlay primitive in shell.jsx).
+         A token pair, not a literal: the prototype's single rgba(15,23,42,.34) all but disappears
+         against the near-black dark ground, leaving the drawer with no separation from the page. */
+      --qc-scrim: rgba(15, 23, 42, 0.34);
       --proto-density: 1;
       --proto-radius: 12px;
       --proto-radius-sm: 8px;
@@ -67,9 +71,16 @@
       --blue-200: var(--blue-800);
       --proto-purple: var(--purple-400);  --proto-purple-soft: var(--purple-950);
       --proto-orange: var(--orange-400);
+      /* Darker and more opaque than the light scrim: on a near-black page a 34% slate wash reads
+         as nothing, so the overlay would appear to float with the page still fully lit behind it. */
+      --qc-scrim: rgba(2, 6, 12, 0.62);
     }
     html, body, #root { height: 100%; }
     body { background: var(--surface-background-secondary); color: var(--proto-ink); font-family:'Inter', system-ui, sans-serif; overflow:hidden; -webkit-font-smoothing:antialiased; }
+    /* Set by the Overlay primitive while any overlay is open. The pane freeze is done in JS (it has
+       to save/restore scrollTop); this belongs to any future body-level scroll and is the hook a
+       screen can use to suppress its own sticky affordances behind an overlay. */
+    body.ee-overlay-open { overflow: hidden; }
 
     /* utility classes — Compass aesthetic */
     .px-root { background: var(--surface-background-secondary); color: var(--proto-ink); font-family:'Inter', system-ui, sans-serif; width:100%; height:100%; display:flex; flex-direction:column; overflow:hidden; }
