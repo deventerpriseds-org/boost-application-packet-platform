@@ -94,6 +94,23 @@ export async function factsDerive(req: HttpRequest, context: InvocationContext):
       written.push(r.rows[0])
     }
 
+    // What the SOURCE says, beside what is STORED. A confirmed fact is deliberately protected from
+    // overwrite, which means a re-read can silently find something different and report nothing —
+    // the owner would never learn that their resume now says something else. Conflicts are surfaced
+    // instead of resolved: the $30M-vs-$8M budget disagreement was caught by hand, and by hand does
+    // not scale.
+    const stored = await loadFacts(client, owner)
+    const storedByKey = new Map(stored.map(f => [f.key, f]))
+    const conflicts = derived
+      .map(d => ({ d, s: storedByKey.get(d.key) }))
+      .filter(x => x.s?.confirmed_at && String(x.s.value || '').trim() !== String(x.d.value || '').trim())
+      .map(x => ({
+        key: x.d.key,
+        confirmed: x.s!.value,
+        sourceSays: x.d.value,
+        evidence: x.d.evidence,
+      }))
+
     // What the corpus asks for that nothing answers yet — the rows worth proposing.
     const reqTexts = (await client.query(
       `select coalesce(r.verbatim, r.item_text) as t from requirement r
@@ -105,9 +122,13 @@ export async function factsDerive(req: HttpRequest, context: InvocationContext):
       jsonBody: {
         ok: true, sources, sourceChars: text.length,
         dateRangesSeen: dateRanges,
+        readFromSource: derived.map(d => ({ key: d.key, value: d.value, evidence: d.evidence })),
+        conflicts,
         derived: written,
         stillNeeded: missing.map(m => ({ key: m.key, label: m.label, help: m.help })),
-        note: 'derived facts are UNCONFIRMED — confirm each one before it can settle a requirement',
+        note: conflicts.length
+          ? `${conflicts.length} confirmed fact(s) DISAGREE with what the source now says — see conflicts`
+          : 'derived facts are UNCONFIRMED — confirm each one before it can settle a requirement',
       },
     }
   } catch (e: any) {
