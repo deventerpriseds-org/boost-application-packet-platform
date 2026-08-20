@@ -16,7 +16,7 @@ import { TableClient } from '@azure/data-tables'
 import { resolveOwner, requireWrite } from './appSession'
 import { getPgClient } from './pgClient'
 import { gateFor, attentionCount, CheckResult } from './checks'
-import { computeArtifactScore } from './artifactScore'
+import { computeArtifactScore, judgedMustHaveIds } from './artifactScore'
 import { resolvePostingSource } from './jdText'
 import { parseAgentJson } from './agentJson'
 import { logUsage } from './usageMeter'
@@ -172,17 +172,22 @@ export async function runReview(
   // Read from the stored score row rather than recomputed, so agreement is measured against the
   // number the gate was built on (R4).
   const scoreRow = (await client.query(
-    `select uncovered_requirement_ids, must_have_coverage from artifact_score where artifact_id=$1 and run_id=$2`,
+    `select uncovered_requirement_ids, must_have_coverage, must_have_source from artifact_score
+      where artifact_id=$1 and run_id=$2`,
     [artifactId, runId])).rows[0]
   const uncoveredIds: string[] = scoreRow?.uncovered_requirement_ids || []
   const uncoveredSeqs = requirements.filter(r => uncoveredIds.includes(String(r.id))).map(r => r.seq)
-  // A coverage verdict exists only when the check produced a percentage. When it did, the engine
-  // judged exactly the must-haves it did not hand to the facts system or to template_reach — and
-  // those are unrecoverable from the score row, so the comparable set is the must-haves. Anything
-  // the engine did not decide lands in `not_comparable` rather than being counted as agreement.
-  const engineJudged = scoreRow?.must_have_coverage === null || scoreRow?.must_have_coverage === undefined
-    ? []
-    : requirements.filter(r => r.kind === 'must_have').map(r => String(r.id))
+  // D16. This used to be "every row of kind must_have", which is a DIFFERENT population from the one
+  // `checks.ts` judged: the coverage check scores `coverable` only — must-haves minus the
+  // eligibility clauses no merge field can carry, minus the rows the owner's facts own. Requirements
+  // the engine never had an opinion about were therefore counted as agreeing or disagreeing with the
+  // reviewer, in a number that names a disagreement.
+  //
+  // `judgedMustHaveIds` reads what the check PUBLISHED about the population it judged (the
+  // denominator in `must_have_source`, and the uncovered ids) and never re-derives `coverable` —
+  // that predicate belongs to checks.ts, and a second copy of it is the R4 defect. It is sound in
+  // one direction only: a row it does not return is `not_comparable`, never silently agreed.
+  const engineJudged = judgedMustHaveIds(requirements, scoreRow)
   const agreement = agreementFor(review.judgements, uncoveredSeqs, requirements, engineJudged)
 
   const rows = [promptRow, ...reviewerChecks({ review, agreement, accepted, dropped, requirements, ran: true })]

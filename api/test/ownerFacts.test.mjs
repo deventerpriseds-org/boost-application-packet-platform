@@ -4,7 +4,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
-  FACT_CATALOGUE, FACT_BY_KEY, demandedNumber, checkAgainstFacts, proposeMissingFacts,
+  FACT_CATALOGUE, FACT_BY_KEY, demandedNumber, checkAgainstFacts, proposeMissingFacts, selectFactDef,
 } from '../dist/functions/tests/ownerFacts.js'
 
 const fact = (key, value, value_num = null, confirmed = true, source = 'owner_stated') =>
@@ -214,4 +214,64 @@ test('a cert cut off by the length cap gets its parenthesis closed', () => {
   const f = deriveFacts('CERTIFICATIONS: Certified Scrum Product Owner (CSPO), Six Sigma Black Belt', 2026)
     .find(x => x.key === 'education.certifications')
   assert.ok(!/\([A-Z]+$/.test(f.value.split(',')[0].trim()), `unbalanced: ${f.value}`)
+})
+
+// ---- D22: selection is by declared refinement, never by catalogue position -------------------
+
+test('a leadership requirement selects the leadership fact, not total years', () => {
+  assert.equal(selectFactDef('Requires 10+ years of engineering leadership experience').key,
+    'experience.years_leadership')
+  assert.equal(selectFactDef('15 years managing engineering teams').key, 'experience.years_leadership')
+  assert.equal(selectFactDef('20+ years in leadership roles').key, 'experience.years_leadership')
+})
+
+test('a plain years requirement still selects total years — the pair is not inverted', () => {
+  assert.equal(selectFactDef('Minimum of 10 years of professional experience').key, 'experience.years_total')
+  assert.equal(selectFactDef('8 yrs of relevant industry experience required').key, 'experience.years_total')
+})
+
+test('two defs that match for unrelated reasons keep catalogue order — no refinement link exists', () => {
+  // "Bachelor's degree required; PMP certification preferred" asks two questions. Neither matcher is
+  // a subset of the other, so this must behave exactly as it did before selection changed.
+  const t = "Bachelor's degree required; PMP certification preferred"
+  const matching = FACT_CATALOGUE.filter(d => d.asks.test(t)).map(d => d.key)
+  assert.ok(matching.includes('education.highest_degree') && matching.includes('education.certifications'))
+  assert.equal(selectFactDef(t).key, 'education.highest_degree', 'catalogue order still breaks a non-refinement tie')
+})
+
+test('a requirement no def matches selects nothing', () => {
+  assert.equal(selectFactDef('Deep experience with roadmap strategy and execution'), null)
+})
+
+test('every declared refines target is a real catalogue key', () => {
+  for (const d of FACT_CATALOGUE) {
+    if (!d.refines) continue
+    assert.ok(FACT_BY_KEY.has(d.refines), `${d.key} refines "${d.refines}", which is not in the catalogue`)
+    assert.notEqual(d.refines, d.key, `${d.key} refines itself`)
+  }
+})
+
+test('the recorded leadership fact answers, with its own number', () => {
+  const v = checkAgainstFacts('Requires 10+ years of engineering leadership experience',
+    [fact('experience.years_leadership', '14', 14)])
+  assert.equal(v.fact_key, 'experience.years_leadership')
+  assert.equal(v.verdict, 'satisfied')
+  assert.match(v.detail, /14 years recorded, 10 required/)
+})
+
+test('total years cannot stand in for leadership years, in either direction', () => {
+  // The costly direction: 22 total years must not satisfy a ten-year leadership requirement for
+  // someone who has led for three.
+  const short = checkAgainstFacts('Requires 10+ years of engineering leadership experience',
+    [fact('experience.years_total', '22', 22), fact('experience.years_leadership', '3', 3)])
+  assert.equal(short.verdict, 'not_satisfied')
+  assert.match(short.detail, /3 years recorded, 10 required/)
+
+  // The quieter direction: with only total years recorded, the leadership fact is simply unrecorded.
+  // `unknown` is what proposes it; a pass here would be a guess settling a gate.
+  const missing = checkAgainstFacts('Requires 10+ years of engineering leadership experience',
+    [fact('experience.years_total', '22', 22)])
+  assert.equal(missing.fact_key, 'experience.years_leadership')
+  assert.equal(missing.verdict, 'unknown')
+  assert.match(missing.detail, /no value recorded/)
 })

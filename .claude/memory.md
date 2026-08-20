@@ -1608,3 +1608,36 @@ database skips every `create table if not exists` and proves nothing.
 
 **NOT verified live.** Nothing has run against the Function App, the real database or the deployed
 SPA (D25).
+
+## QC live defects — D22 / D16 (`claude/qc-live-defects`, not landed)
+
+**Fact selection is by DECLARED refinement, not catalogue order.** `FactDef.refines` +
+`selectFactDef` (ownerFacts.ts). `experience.years_leadership` refines `experience.years_total`; a
+matching def that another matching def refines is dropped. Before this, the first-match scan made
+`years_leadership` unreachable for every input: a 10-year LEADERSHIP requirement was answered by
+TOTAL years (22 total "satisfied" it for someone who had led three), and a recorded leadership year
+count was invisible. `coverable` membership is unchanged by the fix — only which fact the verdict is
+about, and the `facts_settled` / `fact_shortfall` / `facts_needed` rows that report it.
+Guards: `H41` (undeclared strict-subset relations, measured over a corpus, + the behavioural half),
+`H41b`, `H43` (the same defect at the GATE, through `runChecks`).
+
+**Which rows the engine judged is READ, never re-derived.** `judgedMustHaveIds` (artifactScore.ts)
+answers "which must-haves did the coverage check reach a verdict on" from `must_have_source`'s
+`<covered>/<judged>` denominator and `uncovered_requirement_ids`. `appReviewer` uses it for the
+reviewer-agreement comparison; it used to compare against EVERY must-have while `checks.ts` judges
+only `coverable`, so rows nobody judged were recorded as agreeing with the reviewer.
+**Still open (DEFERRED D16):** `artifact_score` has no `judged_requirement_ids` column, so the
+helper falls back to a conservative subset. `judgedMustHaveIds` already prefers that column when the
+row carries it — adding it in `schema.ts` and filling it in `appChecks.evaluateArtifact` completes
+the fix with no change to appReviewer.
+Guards: `H44`, `H44b` (the `mustHaveSource`/`parseMustHaveSource` round trip), and
+`api/test/appReviewer.test.mjs`, which exercises `runReview` against a fake pg client — H44 alone
+does NOT catch reverting the call site.
+
+**A structural guard must be scoped to the function it means.** `H28`'s module-wide grep for
+`kind === 'must_have'` in `artifactScore.ts` accused a new, correct function. It now slices
+`computeArtifactScore`'s body (`functionBody()` in hardening.test.mjs). A guard that fires on
+correct code is one people switch off.
+
+**NOT verified live**, and no independent AC subagent was spawned — no agent-spawning tool is
+exposed in that session type. Recorded as `not_applicable`, not as done.

@@ -19,10 +19,10 @@ import { normalizePostingText, decodeEntities, groundingText } from '../dist/fun
 import { buildRequirements, locate, mapKind, sentenceBounds } from '../dist/functions/tests/requirements.js'
 import { onOmitList, omitEntries, similarity, itemTokens } from '../dist/functions/tests/swaps.js'
 import { runChecks, gateFor, attentionCount, COVERAGE_THRESHOLD, MIN_JUDGEABLE_TOKENS } from '../dist/functions/tests/checks.js'
-import { computeArtifactScore } from '../dist/functions/tests/artifactScore.js'
+import { computeArtifactScore, judgedMustHaveIds, mustHaveSource, parseMustHaveSource } from '../dist/functions/tests/artifactScore.js'
 import { deriveFacts } from '../dist/functions/tests/ownerFacts.js'
 import { parseResumePackage } from '../dist/functions/tests/resumeParser.js'
-import { validateCitations, reviewerChecks } from '../dist/functions/tests/reviewer.js'
+import { validateCitations, reviewerChecks, agreementFor } from '../dist/functions/tests/reviewer.js'
 import { extractFigures, scanEcho, claimKey, isMarked } from '../dist/functions/tests/figureEcho.js'
 import { profileRecords, resolveEvidence } from '../dist/functions/tests/evidence.js'
 
@@ -34,6 +34,22 @@ const allSources = () => readdirSync(SRC).filter(f => f.endsWith('.ts')).map(f =
 const stripComments = (body) => body
   .replace(/\/\*[\s\S]*?\*\//g, ' ')
   .split('\n').map(l => l.replace(/(^|[^:])\/\/.*$/, '$1')).join('\n')
+
+/**
+ * The body of ONE top-level `export function <name>(` declaration, and nothing else.
+ *
+ * Structural guards that search a whole MODULE accuse every other function in it. H28's did, the
+ * moment a second function in `artifactScore.ts` legitimately needed the construct H28 forbids
+ * inside the scorer. Sliced to the closing brace in column 0, which is what this codebase's
+ * formatting guarantees; a name that does not resolve returns '' so the caller's own staleness
+ * assertion fires rather than the guard passing on nothing.
+ */
+const functionBody = (body, name) => {
+  const start = body.indexOf(`export function ${name}(`)
+  if (start < 0) return ''
+  const end = body.indexOf('\n}', start)
+  return end < 0 ? body.slice(start) : body.slice(start, end + 2)
+}
 
 /**
  * The text of ONE `create table if not exists <name> ( ... );` block, and nothing else.
@@ -813,8 +829,16 @@ test('H28: a requirement nothing measured is never counted as covered', () => {
   // The structural half: the score must not grow its own denominator back. Deleting the parse and
   // restoring `reqs.filter(r => r.kind === 'must_have').length` reproduces the incident exactly, and
   // no runtime assertion above would notice on an input with no excluded rows.
-  const scoreSrc = stripComments(src('artifactScore.ts'))
-  assert.ok(!/kind\s*===\s*'must_have'/.test(scoreSrc),
+  //
+  // Scoped to `computeArtifactScore`'s OWN BODY, not the whole file. The first version searched the
+  // module and would have fired on `judgedMustHaveIds` (H44), which reads `kind === 'must_have'` to
+  // answer a different question — WHICH must-have rows the reviewer may be compared against — and
+  // never touches a denominator. A guard that accuses correct code is one people switch off, and
+  // this one is still exact: reinstating the recompute inside the function reintroduces the string
+  // inside this slice and fails.
+  const fnBody = functionBody(stripComments(src('artifactScore.ts')), 'computeArtifactScore')
+  assert.ok(fnBody.length > 400, 'computeArtifactScore body not found — the slice has gone stale')
+  assert.ok(!/kind\s*===\s*'must_have'/.test(fnBody),
     'the score recomputed the must-have population instead of reading the checks denominator')
 })
 
@@ -1618,60 +1642,133 @@ test('H39d: EVERY named CHECK on remediation_loop has an idempotent replacement'
 
 // ---------------------------------------------------------------------------------------------
 // H41 — A first-match scan over an ORDERED catalogue made one of its entries unreachable, and the
-// unreachable entry was the more specific one.
+// unreachable entry was the more specific one. FIXED; this case now guards the fix.
 //
-// Measured against the built module, not inferred. `checkAgainstFacts` (ownerFacts.ts) walks
-// `FACT_CATALOGUE` in order and returns on the FIRST def whose `asks` matches. Entry 0 is
+// Measured against the built module, not inferred. `checkAgainstFacts` (ownerFacts.ts) used to walk
+// `FACT_CATALOGUE` in order and return on the FIRST def whose `asks` matched. Entry 0 is
 // `experience.years_total` (`/\d+\+?\s*(years|yrs)/`); entry 1 is `experience.years_leadership`
 // (the same, PLUS a leadership word) — a strict subset. So:
 //
 //   checkAgainstFacts('Requires 10+ years of engineering leadership experience', facts)
 //     -> { fact_key: 'experience.years_total', ... }        every time, for every input
 //
-// and no counterexample can exist by construction. Two consequences, both live:
-//   * a posting asking for 10 years of LEADERSHIP is answered by TOTAL years of experience, so
-//     22 total years "satisfies" it for someone who has led for three;
-//   * an owner who recorded their leadership years and not their total years gets
-//     "no value recorded" — the fact they DID record is invisible.
+// and no counterexample could exist by construction. Two consequences, both live until this fix:
+//   * a posting asking for 10 years of LEADERSHIP was answered by TOTAL years of experience, so
+//     22 total years "satisfied" it for someone who had led for three;
+//   * an owner who recorded their leadership years and not their total years got
+//     "no value recorded" — the fact they DID record was invisible.
 //
-// The invariant, asserted rather than the incident: in any first-match catalogue, a def whose
-// matcher is a strict subset of an earlier def's can never be selected. That is a property of the
-// catalogue's ORDER, so it is checked by ordering, not by naming the two entries that collide
-// today. Ordering the catalogue most-specific-first would change which requirements the GATE treats
-// as settled (`checks.ts` drops fact-resolved rows from `coverable`), which is why it is recorded
-// here and in .claude/DEFERRED.md rather than changed inside the P8.4 lane.
-test('H41: a first-match fact catalogue never hides a specific entry behind a general one', async () => {
-  const { FACT_CATALOGUE, checkAgainstFacts } = await import('../dist/functions/tests/ownerFacts.js')
+// Selection is now by DECLARED refinement (`FactDef.refines`), read by `selectFactDef`, so it does
+// not depend on catalogue position at all. The invariant asserted here is the general one, not the
+// incident: **a def whose matcher is a strict subset of another def's must DECLARE that it refines
+// it, and the narrower def must be the one selected.** An undeclared subset is a shadow — the def
+// can never be chosen for any text, whatever the order happens to be today.
+//
+// Measured over a corpus rather than named pairs, so a THIRTEENTH catalogue entry whose matcher is
+// accidentally narrower than an existing one fails here on the day it is added. The corpus also
+// contains a line that matches two defs for unrelated reasons ("Bachelor's degree required; PMP
+// certification preferred" matches both education entries): neither is a subset of the other, both
+// stay selectable, and the guard must NOT fire on it. A guard that accuses correct code is one
+// people learn to ignore.
+const H41_CORPUS = [
+  'Requires 10+ years of engineering leadership experience',
+  '15 years managing engineering teams',
+  '20+ years in leadership roles',
+  'Minimum of 10 years of professional experience',
+  '8 yrs of relevant industry experience required',
+  "Bachelor's degree in Computer Science or equivalent",
+  'MBA or advanced degree preferred',
+  'PMP certification required',
+  'AWS Certified Solutions Architect strongly preferred',
+  "Bachelor's degree required; PMP certification preferred",
+  'Must be a U.S. Citizen or Green Card Holder',
+  'No visa sponsorship is available for this position',
+  'Active Secret security clearance required',
+  'TS/SCI with polygraph',
+  'Must reside in the East Coast of the United States',
+  'Candidate must be based in Austin, Texas',
+  'Willing to relocate to Denver',
+  'Hybrid, 3 days a week onsite in Chicago',
+  'Fully remote position',
+  'Willing to travel up to 25%',
+  'Able to travel domestically',
+  'Has led a team of 40 engineers',
+  'Manages 12 direct reports',
+  'Owned a budget of $18M',
+  'P&L responsibility for the division',
+]
 
-  // Probe strings that a HUMAN would file under the more specific entry. If an earlier, broader
-  // entry answers them, the later one is dead for that input.
-  const PROBES = [
-    'Requires 10+ years of engineering leadership experience',
-    '15 years managing engineering teams',
-    '20+ years in leadership roles',
-  ]
-  const shadowed = []
-  for (const probe of PROBES) {
-    const matching = FACT_CATALOGUE.filter(d => d.asks.test(probe))
-    if (matching.length < 2) continue
-    // Every def after the first that matches this probe is unreachable FOR THIS PROBE.
-    for (const d of matching.slice(1)) shadowed.push({ probe, hidden: d.key, by: matching[0].key })
+test('H41: no catalogue entry is hidden behind a more general one', async () => {
+  const { FACT_CATALOGUE, selectFactDef } = await import('../dist/functions/tests/ownerFacts.js')
+  assert.ok(FACT_CATALOGUE.length >= 12, `only ${FACT_CATALOGUE.length} fact defs — the scan has gone stale`)
+
+  const matches = new Map(FACT_CATALOGUE.map(d => [d.key, new Set(H41_CORPUS.filter(t => d.asks.test(t)))]))
+  assert.ok([...matches.values()].every(m => m.size > 0),
+    'a catalogue entry matches nothing in the corpus, so this case cannot see it — extend H41_CORPUS')
+
+  // --- the structural half: every strict-subset relation must be DECLARED ----------------------
+  const undeclared = []
+  for (const a of FACT_CATALOGUE) {
+    for (const b of FACT_CATALOGUE) {
+      if (a === b) continue
+      const A = matches.get(a.key), B = matches.get(b.key)
+      if (A.size >= B.size) continue
+      if (![...A].every(t => B.has(t))) continue          // not a subset — two unrelated questions
+      if (a.refines === b.key) continue                   // declared, and honoured below
+      undeclared.push(`${a.key} is a strict subset of ${b.key} and does not declare refines`)
+    }
   }
+  assert.deepEqual(undeclared, [],
+    'an undeclared subset relation: the narrower def can never be selected for any text')
 
-  // This is a KNOWN, RECORDED shadow (DEFERRED). The guard's job is to stop a NEW one appearing
-  // and to fail the moment the known one is fixed without this case being updated — so it pins the
-  // exact set rather than asserting "none", which would be red on arrival and get switched off.
-  const KNOWN = 'experience.years_leadership behind experience.years_total'
-  const found = [...new Set(shadowed.map(s => `${s.hidden} behind ${s.by}`))]
-  assert.deepEqual(found, [KNOWN],
-    `the set of shadowed fact defs changed: ${JSON.stringify(found)} — either a new one appeared, or the known one was fixed and this case must be updated`)
+  // --- the behavioural half: the narrower def is the one SELECTED ------------------------------
+  // Not "is it declared" — what the function DOES. Deleting `refines` or restoring the first-match
+  // scan makes every one of these come back as the general entry.
+  const wrong = []
+  for (const t of H41_CORPUS) {
+    const matching = FACT_CATALOGUE.filter(d => d.asks.test(t))
+    if (matching.length < 2) continue
+    const selected = selectFactDef(t)
+    // The selected def must not be one that another matching def declares it refines.
+    const generalised = new Set(matching.map(d => d.refines).filter(k => k && matching.some(m => m.key === k)))
+    if (generalised.has(selected.key)) wrong.push(`${JSON.stringify(t)} selected the general ${selected.key}`)
+  }
+  assert.deepEqual(wrong, [], 'a general def answered a requirement its own refinement also matched')
 
-  // And the behavioural half, so the case is about what the function DOES, not how it is spelled:
-  // with ONLY the specific fact recorded, the scan still answers with the general one.
-  const facts = [{ key: 'experience.years_leadership', value: '14', value_num: 14, source: 'owner_stated', confirmed_at: 'x' }]
-  const v = checkAgainstFacts(PROBES[0], facts)
-  assert.equal(v.fact_key, 'experience.years_total')
-  assert.equal(v.verdict, 'unknown', 'the recorded leadership fact is invisible to this scan')
+  // --- the incident, in both directions it actually broke --------------------------------------
+  const probe = 'Requires 10+ years of engineering leadership experience'
+  assert.equal(selectFactDef(probe).key, 'experience.years_leadership',
+    'the leadership requirement is answered by the leadership fact, not by total years')
+  assert.equal(selectFactDef('Minimum of 10 years of professional experience').key, 'experience.years_total',
+    'a plain years requirement still resolves to total years — the fix must not invert the pair')
+})
+
+test('H41b: the leadership fact settles a leadership requirement, and total years cannot stand in', async () => {
+  const { checkAgainstFacts } = await import('../dist/functions/tests/ownerFacts.js')
+  const probe = 'Requires 10+ years of engineering leadership experience'
+  const fact = (key, n) => ({ key, value: String(n), value_num: n, source: 'owner_stated', confirmed_at: 'x' })
+
+  // Direction 1 — the recorded leadership fact was invisible; it now answers, with its own number.
+  const onlyLeadership = checkAgainstFacts(probe, [fact('experience.years_leadership', 14)])
+  assert.equal(onlyLeadership.fact_key, 'experience.years_leadership')
+  assert.equal(onlyLeadership.verdict, 'satisfied')
+  assert.match(onlyLeadership.detail, /14 years recorded, 10 required/)
+
+  // Direction 2 — the costly one. 22 total years must NOT satisfy a 10-year LEADERSHIP requirement
+  // for someone who has led for three. Before the fix this returned satisfied on years_total.
+  const bothRecorded = checkAgainstFacts(probe, [
+    fact('experience.years_total', 22), fact('experience.years_leadership', 3),
+  ])
+  assert.equal(bothRecorded.fact_key, 'experience.years_leadership')
+  assert.equal(bothRecorded.verdict, 'not_satisfied',
+    '22 total years answered a leadership requirement for someone who has led for three')
+  assert.match(bothRecorded.detail, /3 years recorded, 10 required/)
+
+  // Direction 3 — total years alone no longer settles it either way; it is a fact the owner has not
+  // recorded, which is `unknown`, which is what PROPOSES the fact. Absent evidence, not a pass.
+  const onlyTotal = checkAgainstFacts(probe, [fact('experience.years_total', 22)])
+  assert.equal(onlyTotal.fact_key, 'experience.years_leadership')
+  assert.equal(onlyTotal.verdict, 'unknown')
 })
 
 // ---------------------------------------------------------------------------------------------
@@ -1734,4 +1831,155 @@ test('H42: every per-owner settings column production reads has a writer that ca
 
   // P8.4's own setting is NOT in that set, and its writer is exercised by dimensionsDb.test.mjs.
   assert.ok(written.has('cmp_dimensions'), 'the dimension set shipped with no writer — the exact shape this case exists to stop')
+})
+
+
+// ---------------------------------------------------------------------------------------------
+// H43 — H41's defect where it did damage: the GATE.
+//
+// H41 guards the SELECTION (`selectFactDef` picks the narrower def). This case guards the
+// consequence, because the selection only mattered because `checks.ts` routes `facts_settled`,
+// `fact_shortfall` and `facts_needed` through `checkAgainstFacts`, and those rows move the badge.
+//
+// Evidence, the shape D22 recorded: a posting asking for "10+ years of engineering leadership"
+// against an owner with 22 total years and three years of leadership. Before the fix the scan
+// returned `experience.years_total`, the arithmetic was 22 >= 10, and the run reported
+// `facts_settled: pass` — a confident, correctly formatted, TRUE statement about the wrong fact.
+// `checks.test.mjs` encoded that as an expectation, which is how it survived: the fixture asked for
+// LEADERSHIP years and recorded only TOTAL years, and asserted a pass.
+//
+// The invariant: a fact verdict that reaches the gate is about the fact the posting actually asked
+// for. A years-of-leadership requirement is never settled by a total-years figure.
+test('H43: a fact verdict that reaches the gate is about the fact the posting asked for', () => {
+  const LEADERSHIP = 'Requires 10+ years of engineering leadership experience'
+  const reqs = [{ seq: 0, verbatim: LEADERSHIP, item_text: '', kind: 'must_have' }]
+  const fact = (key, n) => ({ key, value: String(n), value_num: n, source: 'owner_stated', confirmed_at: 'x' })
+  const run = (facts) => runChecks({
+    type: 'resume',
+    pkg: { ResumeSummary: 'Owns roadmap strategy and execution with deep experience.' },
+    requirements: reqs, facts, evidence: { profileReadable: true, bySeq: {} },
+  })
+  const find = (rs, k) => rs.find(r => r.check_key === k)
+
+  // 1. Total years alone must not settle it. It is a fact the owner has not recorded — surfaced for
+  //    them to answer, which is what proposes the row, not laundered into a pass.
+  const totalOnly = run([fact('experience.years_total', 22)])
+  assert.equal(find(totalOnly, 'facts_settled').state, 'not_applicable',
+    '22 total years settled a LEADERSHIP requirement — the gate read the wrong fact')
+  assert.match(find(totalOnly, 'facts_needed').offenders[0], /Years in leadership/,
+    'the unanswered fact must be named as the leadership one, not as total years')
+
+  // 2. Recorded and short: a WARN naming the LEADERSHIP arithmetic. Before the fix this was a pass.
+  const ledThree = run([fact('experience.years_total', 22), fact('experience.years_leadership', 3)])
+  assert.equal(find(ledThree, 'facts_settled').state, 'not_applicable')
+  const shortfall = find(ledThree, 'fact_shortfall')
+  assert.equal(shortfall.state, 'warn', 'three years of leadership satisfied a ten-year requirement')
+  assert.match(shortfall.offenders[0], /3 years recorded, 10 required/,
+    'the arithmetic on screen must be the leadership figure, not the total-years one')
+
+  // 3. Recorded and sufficient: it settles, off its own number.
+  const ledTwelve = run([fact('experience.years_total', 22), fact('experience.years_leadership', 12)])
+  assert.equal(find(ledTwelve, 'facts_settled').state, 'pass')
+  assert.equal(find(ledTwelve, 'fact_shortfall'), undefined)
+
+  // 4. And the pair is not inverted: a plain years requirement is still total years.
+  const plain = runChecks({
+    type: 'resume',
+    pkg: { ResumeSummary: 'Owns roadmap strategy and execution with deep experience.' },
+    requirements: [{ seq: 0, verbatim: 'Minimum of 10 years of professional experience', item_text: '', kind: 'must_have' }],
+    facts: [fact('experience.years_total', 22)], evidence: { profileReadable: true, bySeq: {} },
+  })
+  assert.equal(find(plain, 'facts_settled').state, 'pass')
+})
+
+// ---------------------------------------------------------------------------------------------
+// H44 — Reviewer agreement was measured against requirements the engine never judged.
+//
+// `appReviewer` compares the reviewer's per-requirement judgements with the deterministic engine's
+// and stores `agreed` / `disagreed` / `reviewer_stricter` / `reviewer_looser`. It built the
+// comparable set as every row of `kind === 'must_have'`:
+//
+//   const engineJudged = scoreRow?.must_have_coverage == null ? []
+//     : requirements.filter(r => r.kind === 'must_have').map(r => String(r.id))
+//
+// but `checks.ts` judges `coverable` — must-haves MINUS the eligibility clauses `template_reach`
+// reports as unreachable, MINUS the rows the owner's facts own. On the shape the live Trinnex
+// posting has (4 must-haves, 3 eligibility, 1 judged) that is 4 rows compared against an engine that
+// had an opinion about 1. The three the engine never judged are not in `uncovered_requirement_ids`,
+// so `engineCovered` computed `true` for them, and a reviewer saying "covered" was recorded as
+// AGREEING with a verdict that was never reached. Reviewer agreement is an accusation-grade number.
+//
+// The invariant, and it has two halves that must both hold:
+//   * a requirement the engine did not judge is `not_comparable`, never agreed and never disagreed;
+//   * the comparable set is READ from what the check published, never re-derived. `coverable` is
+//     checks.ts's predicate and a second implementation of it is the R4 defect this codebase keeps
+//     being bitten by — one source per number.
+test('H44: reviewer agreement counts only requirements the engine actually judged', () => {
+  // r0 an eligibility clause, r1 owned by the owner's facts — checks.ts excludes both from
+  // `coverable`. r2 judged and covered, r3 judged and uncovered: "1/2 must-have requirements
+  // evidenced" is exactly what the check publishes for that population.
+  const requirements = [
+    { id: 'r0', seq: 0, kind: 'must_have' },
+    { id: 'r1', seq: 1, kind: 'must_have' },
+    { id: 'r2', seq: 2, kind: 'must_have' },
+    { id: 'r3', seq: 3, kind: 'must_have' },
+  ]
+  const scoreRow = {
+    must_have_coverage: 50,
+    must_have_source: mustHaveSource(1, 2),
+    uncovered_requirement_ids: ['r3'],
+  }
+
+  const judged = judgedMustHaveIds(requirements, scoreRow)
+  assert.ok(!judged.includes('r0') && !judged.includes('r1'),
+    'rows the engine excluded from coverage were offered to the reviewer comparison as judged')
+
+  // The behavioural half, through the function that produces the stored numbers. The reviewer
+  // claims all three are covered; the engine judged only r3, and said it was not.
+  const judgements = [
+    { requirement_id: 'r0', covered: true },
+    { requirement_id: 'r1', covered: true },
+    { requirement_id: 'r3', covered: false },
+  ]
+  const a = agreementFor(judgements, [3], requirements, judged)
+  assert.equal(a.not_comparable, 2,
+    'a requirement the engine never judged was counted as agreement with the reviewer')
+  assert.equal(a.agreed, 1, 'the one genuinely comparable row must still be compared')
+  assert.equal(a.disagreed, 0)
+
+  // When the check DID judge every must-have, the whole set is comparable — the fix must not throw
+  // the measurement away to be safe.
+  const all = judgedMustHaveIds(requirements, {
+    must_have_coverage: 75, must_have_source: mustHaveSource(3, 4), uncovered_requirement_ids: ['r3'],
+  })
+  assert.deepEqual([...all].sort(), ['r0', 'r1', 'r2', 'r3'])
+
+  // No coverage verdict at all means nothing was judged — absent evidence, not a pass.
+  assert.deepEqual(judgedMustHaveIds(requirements, { must_have_coverage: null, must_have_source: null }), [])
+  assert.deepEqual(judgedMustHaveIds(requirements, null), [])
+
+  // A recorded judged set, when the writer stores one, wins over every inference above.
+  assert.deepEqual(judgedMustHaveIds(requirements, { ...scoreRow, judged_requirement_ids: ['r2', 'r3'] }), ['r2', 'r3'])
+})
+
+test('H44b: the must_have_source denominator survives the round trip it is read back through', () => {
+  // H44's conservative branch turns on parsing `<covered>/<judged>` out of a string the scorer
+  // wrote. Writer and reader live in one file for that reason, and this is what stops them drifting:
+  // change the wording of `mustHaveSource` without changing `parseMustHaveSource` and the reviewer
+  // silently falls back to the uncovered rows for every artifact, with no error anywhere.
+  assert.deepEqual(parseMustHaveSource(mustHaveSource(3, 7)), { covered: 3, judged: 7 })
+  assert.equal(parseMustHaveSource('the posting produced no must-haves'), null,
+    'an unreadable source must be null, never a defaulted denominator')
+
+  // And the string the scorer ACTUALLY stores is one the reader can read — asserted through
+  // computeArtifactScore rather than through the helper, so a caller that stops using the helper is
+  // caught too.
+  const checks = [{
+    check_key: 'must_have_coverage', engine: 'deterministic', state: 'fail',
+    observed: '1/2 must-haves evidenced (2 not reachable by any generated field, not counted either way)',
+    expected: '', offenders: ['#3 something — no evidence'],
+  }]
+  const score = computeArtifactScore({ requirements: [], checks })
+  assert.deepEqual(parseMustHaveSource(score.must_have_coverage.source), { covered: 1, judged: 2 },
+    'the scorer stored a must_have_source the reviewer cannot read back')
 })

@@ -2,7 +2,10 @@
 // source is null, and the composite is null unless all three are present.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { computeArtifactScore, bandFor, DEFAULT_WEIGHTS, ENGINE_VERSION } from '../dist/functions/tests/artifactScore.js'
+import {
+  computeArtifactScore, bandFor, DEFAULT_WEIGHTS, ENGINE_VERSION,
+  judgedMustHaveIds, mustHaveSource, parseMustHaveSource,
+} from '../dist/functions/tests/artifactScore.js'
 
 const check = (state, observed = '', offenders = []) =>
   ({ check_key: 'must_have_coverage', engine: 'deterministic', state, observed, expected: '', offenders })
@@ -113,4 +116,67 @@ test('recomputing with the same inputs and engine_version reproduces the number 
   const args = { requirements: REQS, checks: [check('fail', '3/4', ['#1 x'])], keyword: { covered: 7, scoreable: 9 }, seniority: 71 }
   assert.deepEqual(computeArtifactScore(args), computeArtifactScore(args))
   assert.equal(computeArtifactScore(args).engine_version, ENGINE_VERSION)
+})
+
+// ---- D16: which rows the engine judged, read rather than re-derived --------------------------
+
+const JUDGED_REQS = [
+  { id: 'r0', seq: 0, kind: 'must_have' },      // eligibility — checks.ts excludes it from coverable
+  { id: 'r1', seq: 1, kind: 'must_have' },      // owned by the owner's facts — also excluded
+  { id: 'r2', seq: 2, kind: 'must_have' },      // judged, covered
+  { id: 'r3', seq: 3, kind: 'must_have' },      // judged, uncovered
+  { id: 'r4', seq: 4, kind: 'responsibility' }, // never part of must-have coverage
+]
+
+test('the judged set never includes a row the check excluded from its denominator', () => {
+  const judged = judgedMustHaveIds(JUDGED_REQS, {
+    must_have_coverage: 50, must_have_source: mustHaveSource(1, 2), uncovered_requirement_ids: ['r3'],
+  })
+  assert.ok(!judged.includes('r0'), 'an eligibility clause the engine never judged')
+  assert.ok(!judged.includes('r1'), 'a fact-owned row the engine never judged')
+  assert.ok(!judged.includes('r4'), 'a responsibility is not a must-have')
+  assert.deepEqual(judged, ['r3'],
+    'the covered judged row is not identifiable from the score row, so it stays out — understating, never inventing')
+})
+
+test('when the check judged every must-have, every must-have is comparable', () => {
+  const judged = judgedMustHaveIds(JUDGED_REQS, {
+    must_have_coverage: 75, must_have_source: mustHaveSource(3, 4), uncovered_requirement_ids: ['r3'],
+  })
+  assert.deepEqual([...judged].sort(), ['r0', 'r1', 'r2', 'r3'])
+})
+
+test('no coverage verdict means nothing was judged', () => {
+  assert.deepEqual(judgedMustHaveIds(JUDGED_REQS, { must_have_coverage: null, must_have_source: null }), [])
+  assert.deepEqual(judgedMustHaveIds(JUDGED_REQS, undefined), [])
+})
+
+test('an unreadable must_have_source falls back to the named rows, never to every must-have', () => {
+  const judged = judgedMustHaveIds(JUDGED_REQS, {
+    must_have_coverage: 50, must_have_source: 'coverage was measured somehow', uncovered_requirement_ids: ['r3'],
+  })
+  assert.deepEqual(judged, ['r3'])
+})
+
+test('a recorded judged set wins over every inference', () => {
+  const judged = judgedMustHaveIds(JUDGED_REQS, {
+    must_have_coverage: 50, must_have_source: mustHaveSource(1, 2),
+    uncovered_requirement_ids: ['r3'], judged_requirement_ids: ['r2', 'r3'],
+  })
+  assert.deepEqual(judged, ['r2', 'r3'])
+})
+
+test('must_have_source round-trips through its own parser', () => {
+  assert.deepEqual(parseMustHaveSource(mustHaveSource(3, 7)), { covered: 3, judged: 7 })
+  assert.deepEqual(parseMustHaveSource(mustHaveSource(0, 1)), { covered: 0, judged: 1 })
+  assert.equal(parseMustHaveSource('the posting produced no must-haves'), null)
+  assert.equal(parseMustHaveSource(null), null)
+})
+
+test('the source the scorer actually stores is one the parser can read', () => {
+  const score = computeArtifactScore({
+    requirements: REQS,
+    checks: [check('fail', '1/2 must-haves evidenced (2 not reachable by any generated field, not counted either way)', ['#3 x'])],
+  })
+  assert.deepEqual(parseMustHaveSource(score.must_have_coverage.source), { covered: 1, judged: 2 })
 })
