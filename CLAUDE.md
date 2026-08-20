@@ -181,7 +181,41 @@ The Edit tool silently inserts Unicode smart quotes (U+2018/U+2019 curly apostro
 ```bash
 sed -i "s/\xe2\x80\x98/'/g; s/\xe2\x80\x99/'/g; s/\xe2\x80\x9c/\"/g; s/\xe2\x80\x9d/\"/g" <file>
 ```
-Then verify with `grep -P '[\x{2018}\x{2019}\x{201C}\x{201D}]' <file>` (should return nothing). Never skip this step — the build will fail silently at deploy time.
+Then verify with a **Python codepoint scan**, not `grep -P` — `grep -P` fails in this container's
+locale with "character code point value too large" and reports nothing, which reads as clean:
+```bash
+python3 -c "
+import sys
+BAD={0x2018,0x2019,0x201C,0x201D}
+for n,l in enumerate(open(sys.argv[1],encoding='utf-8'),1):
+    for c in l:
+        if ord(c) in BAD: print(f'{sys.argv[1]}:{n}: U+{ord(c):04X}'); break
+" <file>
+```
+
+### Two traps in this recipe — both bit us, both cost a build
+
+**1. The `sed` sweep can CREATE a syntax error.** It rewrites a curly apostrophe to a straight one
+*everywhere*, including inside a single-quoted JS string, where it terminates the string:
+```js
+const s = 'one model’s estimate'   // before the sweep: valid
+const s = 'one model's estimate'   // after: broken, and the sweep "succeeded"
+```
+Run the sweep, then **build**. If a file's copy contains an apostrophe inside a single-quoted
+string, rephrase the copy or switch that string to double quotes/backticks BEFORE sweeping.
+
+**2. Do NOT add a repo-wide smart-quote linter. One was written and deleted the same night.**
+It failed on its first CI run against 8 lines, every one correct: typographic quotes in
+**user-facing copy** (where curly is right), curly apostrophes in rendered prose, and — the purest
+false positive available — `termMatch.ts:21`, `t.replace(/[‘’‛]/g, "'")`, the smart-quote
+*normalizer*, flagged for containing the characters it exists to strip. Both builds passed with all
+8 present.
+
+The reason is structural: the failure this rule describes is a smart quote **in a syntax position**,
+and `esbuild` already rejects exactly those — with a parser, precisely, no false positives, in the
+build that already runs. A regex cannot tell a syntax position from a string literal, so it either
+misses real breakage or fires on correct code. **The build is the guard.** Anything else is the
+cry-wolf failure hardening rule 2 forbids.
 
 ## Fix all consumers, not just the one you found (strict rule)
 
