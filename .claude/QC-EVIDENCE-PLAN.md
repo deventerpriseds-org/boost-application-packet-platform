@@ -10,17 +10,44 @@ where the train currently is. Read it first on any resume; it is written to surv
 ## ▶ RESUME MARKER — where the train is
 
 ```
-CURRENT PHASE : P2 (checks and gate)
-STATUS        : P2 COMPLETE (2.1 engine, 2.2 gate+block, 2.3 score) — all verified live
-LAST LANDED   : 1605021 artifact_score; 20/20 tables live; composite correctly null
-NEXT ACTION   : P3 remediation loop (X5 trap: render documents ONCE, after the loop)
-DONE SO FAR   : P0 wiring · X1 grounding · X2 regen · X3 normalizer · X4 tests · D1 D2 D3
-                P1.2b term_library · P1.2 corpus miner + curation queue · P1.1 requirement rows
+UPDATED       : 2026-08-20 15:05Z
+CURRENT PHASE : P8 (review decisions) — running in parallel with P3 restart and P8.3
+STATUS        : P8.2 (R3 figure echo) COMPLETE — PR #10, 292/292 green, awaiting CI + land
+LAST LANDED   : f4c2f43 (P7 item 1, resume section parser / H23)
+NEXT ACTION   : land PR #10; then P8.1 correction table (P8.2's rewrite half depends on it)
+DONE + LIVE   : P0 · P1 · P2 · P4 · P5 · P6 · X1 X2 X3 X4 · D1 D2 D3 D6 D7 D8 D11
 ```
 *Update this block on every landing. It is the single place to look after a restart.*
 
-Phase status: P0 `done` · P1 `done` · P2 `done` · P3-P8 `not started`.
-Parallel streams in flight: P7 hygiene, D10 overlay primitive (subagents, own branches).
+Phase status: P0 `done` · P1 `done` · P2 `done` · P3 `RESTARTED` · P4 `done` · P5 `done` ·
+P6 `done` · P7 `partial (item 1 landed; 4, 6, 8 held behind P3)` · P8 `in progress`.
+
+### Lanes in flight — who owns which files
+
+A lane may not touch a file another lane owns. `api/test/hardening.test.mjs` is shared and
+APPEND-ONLY. H-case IDs are pre-allocated so two lanes cannot collide on one number.
+
+| Lane | Branch | Owns | H-ids |
+|---|---|---|---|
+| P8.2 R3 figure echo | `claude/qc-p8-2-figures` (PR #10) | `figureEcho.ts`, `checks.ts`, `appChecks.ts`, `appFacts.ts` | H24, H25 |
+| P8.7 UI remainder | subagent worktree | `app/` (theme.css, PostingAnalysis, Today, packetBuilder) | — |
+| P3 remediation loop | `claude/qc-p3-remediation` | `pipeline.ts`, `appPackets.ts` | H26 |
+| P8.3 evidence excerpts | `claude/qc-p8-3-evidence` | `requirements.ts`, evidence schema | H27 |
+
+**The P3 lane was lost once.** A subagent ran it, died without pushing, and left no branch — the
+work was gone with no trace but a stale entry in this file. Restarted 2026-08-20 as a fresh lane,
+not a resume. Lesson applied to every lane above: a lane that has not pushed a branch has produced
+nothing, whatever a summary says about it.
+
+### Blocked, and on what
+
+| Item | Blocked on |
+|---|---|
+| P8.2 rewrite/generalize half | P8.1 correction table (to log and revert a replacement) |
+| P8.6 correction affordances | P8.1 |
+| P7 items 4, 6, 8 | P3 (they touch `pipeline.ts` / `appPackets.ts`) |
+| P8.4 comparison dimensions | P8.7 landing (both are in `app/`) |
+| P0.3 residual + its H-case | P8.7 landing (`app/src/theme.css`) |
 
 ---
 
