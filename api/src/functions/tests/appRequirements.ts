@@ -8,7 +8,8 @@ import { resolveOwner, requireWrite } from './appSession'
 import { getPgClient } from './pgClient'
 import { buildRequirements } from './requirements'
 import { resolveAll, ProfileRecord, ResolveOptions, NO_EVIDENCE_NOTE, RESOLVER_VERSION } from './evidence'
-import { sourceText } from './appFacts'
+import { sourceText, loadFacts } from './appFacts'
+import { writeComparison, comparisonPayload } from './appDimensions'
 
 const HEADERS = { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': '*', 'Access-Control-Allow-Methods': 'GET,POST,OPTIONS' }
 
@@ -214,6 +215,25 @@ export async function loadRequirementsWithEvidence(client: any, oppId: string): 
       where r.opp_id=$1 order by r.seq`, [oppId])).rows
 }
 
+
+/**
+ * Rebuild one opportunity's comparison from the rows that are in the database RIGHT NOW.
+ *
+ * The ONE place the comparison's inputs are assembled, so the requirement spine, the evidence and
+ * the facts that feed a grade are always the same rows the rest of this file serves. `stale` is the
+ * same derivation `requirementsGet` publishes: offsets measured against a different posting body.
+ */
+export async function rebuildComparison(client: any, oppId: string, owner: string, profileReadable: boolean) {
+  const opp = (await client.query(`select id, role, owner_email, jd_text_sha256 from opportunity where id=$1`, [oppId])).rows[0]
+  if (!opp) return null
+  const rows = await loadRequirementsWithEvidence(client, oppId)
+  const stale = rows.some((r: any) => r.jd_text_sha256 !== opp.jd_text_sha256)
+  const facts = await loadFacts(client, owner)
+  const out = await writeComparison(client, { id: opp.id, role: opp.role, owner_email: owner },
+    rows, profileReadable, facts, stale)
+  return { rows: out.rows, graded: out.graded, family: out.set.family, setSource: out.set.source, warning: out.set.warning || null }
+}
+
 // GET /api/app/opportunity/{id}/requirements
 export async function requirementsGet(req: HttpRequest, context: InvocationContext): Promise<HttpResponseInit> {
   if (req.method === 'OPTIONS') return { status: 204, headers: HEADERS }
@@ -223,7 +243,7 @@ export async function requirementsGet(req: HttpRequest, context: InvocationConte
     client = await getPgClient()
     await ensureRequirementCols(client)
     const opp = (await client.query(
-      `select id, jd_text, jd_text_sha256, jd_text_truncated from opportunity where id=$1 and owner_email=$2`,
+      `select id, role, jd_text, jd_text_sha256, jd_text_truncated from opportunity where id=$1 and owner_email=$2`,
       [req.params.id, owner])).rows[0]
     if (!opp) return { status: 404, headers: HEADERS, jsonBody: { error: 'not found' } }
     const rows = await loadRequirementsWithEvidence(client, opp.id)
@@ -254,10 +274,15 @@ export async function requirementsGet(req: HttpRequest, context: InvocationConte
       evidenceNote: r.evidence_quote == null ? NO_EVIDENCE_NOTE : null,
     }))
     const evidencedRows = rows.filter((r: any) => r.evidence_quote != null).length
+    // P8.4 — the comparison, from the SAME rows this response already carries. Served by the ONE
+    // endpoint the JD step reads, so a dimension row and a requirement row cannot come from two
+    // queries that disagree (R4).
+    const comparison = await comparisonPayload(client, opp.id, owner, opp.role)
     return {
       status: 200, headers: HEADERS,
       jsonBody: {
         oppId: opp.id, jdTextLen: (opp.jd_text || '').length, jdTextTruncated: !!opp.jd_text_truncated,
+        comparison,
         stale, located: rows.filter((r: any) => r.char_start !== null).length, total: rows.length,
         // The coverage numerator (C6). `evidenced` is a COUNT OF EVIDENCE ROWS, never of term
         // placement; `evidenceResolved` distinguishes "your profile does not support these" from
@@ -287,8 +312,8 @@ export async function requirementsBackfill(req: HttpRequest, context: Invocation
     await ensureRequirementCols(client)
     const opps = (await client.query(
       body?.oppId
-        ? `select id, jd_real, raw_jd, why_surfaced, jd_table from opportunity where id=$1 and owner_email=$2`
-        : `select id, jd_real, raw_jd, why_surfaced, jd_table from opportunity
+        ? `select id, role, jd_real, raw_jd, why_surfaced, jd_table from opportunity where id=$1 and owner_email=$2`
+        : `select id, role, jd_real, raw_jd, why_surfaced, jd_table from opportunity
              where owner_email=$2 and jd_table is not null order by updated_at desc limit $1`,
       body?.oppId ? [body.oppId, owner] : [limit, owner])).rows
 
@@ -305,6 +330,14 @@ export async function requirementsBackfill(req: HttpRequest, context: Invocation
     if (profile.records.length) {
       for (const opp of opps) ev.push(await writeEvidence(client, opp.id, profile.records))
     }
+    // P8.4 / AC54 — re-extraction REPLACED the requirement rows, which the comparison is graded
+    // over. Rebuilding here is what stops a backfill leaving grades keyed to lines that no longer
+    // exist; the same reason the evidence re-resolve above is in this call rather than a later one.
+    let comparisons = 0
+    for (const opp of opps) {
+      const c = await rebuildComparison(client, opp.id, owner, profile.records.length > 0)
+      if (c) comparisons += c.rows
+    }
 
     const rows = results.reduce((a, r) => a + r.rows, 0)
     const located = results.reduce((a, r) => a + r.located, 0)
@@ -319,6 +352,7 @@ export async function requirementsBackfill(req: HttpRequest, context: Invocation
         profileRecords: profile.records.length,
         evidenced: ev.reduce((a, r) => a + r.evidenced, 0),
         evidenceResolved: ev.length > 0,
+        comparisonRows: comparisons,
       },
     }
   } catch (e: any) {
@@ -338,7 +372,7 @@ export async function evidenceResolve(req: HttpRequest, context: InvocationConte
     client = await getPgClient()
     await ensureRequirementCols(client)
     const opp = (await client.query(
-      `select id from opportunity where id=$1 and owner_email=$2`, [req.params.id, owner])).rows[0]
+      `select id, role, owner_email from opportunity where id=$1 and owner_email=$2`, [req.params.id, owner])).rows[0]
     if (!opp) return { status: 404, headers: HEADERS, jsonBody: { error: 'not found' } }
 
     const profile = await sourceText()
@@ -352,10 +386,14 @@ export async function evidenceResolve(req: HttpRequest, context: InvocationConte
       }
     }
     const out = await writeEvidence(client, opp.id, profile.records)
+    // P8.4 / AC54 — the comparison is keyed to these requirement rows and their evidence, so it is
+    // rebuilt in the SAME call. Leaving it behind would serve grades over evidence that has just
+    // been replaced — the trap `requirementsBackfill` already documents for evidence itself.
+    const cmp = await rebuildComparison(client, opp.id, owner, profile.records.length > 0)
     return {
       status: 200, headers: HEADERS,
       jsonBody: {
-        ok: true, ...out, sources: profile.sources,
+        ok: true, ...out, sources: profile.sources, comparison: cmp,
         unevidenced: out.total - out.evidenced,
         note: out.evidenced === out.total
           ? 'every requirement is evidenced by a verbatim excerpt of your profile'
