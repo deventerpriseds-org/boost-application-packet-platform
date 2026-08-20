@@ -8,6 +8,7 @@ import { randomUUID } from 'node:crypto'
 import { resolveOwner, requireWrite } from './appSession'
 import { getPgClient } from './pgClient'
 import { runChecks, gateFor, attentionCount, CheckResult, CheckThresholds, DEFAULT_THRESHOLDS } from './checks'
+import { computeArtifactScore, ArtifactScore } from './artifactScore'
 
 const HEADERS = { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': '*', 'Access-Control-Allow-Methods': 'GET,POST,OPTIONS' }
 
@@ -59,7 +60,7 @@ export async function loadThresholds(client: any, owner: string): Promise<Partia
  * overwritten in place.
  */
 export async function evaluateArtifact(client: any, artifactId: string, owner: string): Promise<{
-  artifact_id: string; run_id: string; gate: string; attention: number; results: CheckResult[]
+  artifact_id: string; run_id: string; gate: string; attention: number; results: CheckResult[]; score: ArtifactScore
 }> {
   const art = (await client.query(
     `select a.id, a.type, a.packet_id, p.opp_id, p.pkg_json, o.company, o.owner_email
@@ -68,7 +69,7 @@ export async function evaluateArtifact(client: any, artifactId: string, owner: s
   if (!art) throw new Error('artifact not found')
 
   const requirements = (await client.query(
-    `select seq, verbatim, item_text, kind from requirement where opp_id=$1 order by seq`, [art.opp_id])).rows
+    `select id, seq, verbatim, item_text, kind from requirement where opp_id=$1 order by seq`, [art.opp_id])).rows
   const swaps = (await client.query(
     `select action, driver, to_label, from_label from swap_decision where packet_id=$1`, [art.packet_id])).rows
 
@@ -84,6 +85,24 @@ export async function evaluateArtifact(client: any, artifactId: string, owner: s
   const runId = randomUUID()
   const gate = gateFor(results)
   const attention = attentionCount(results)
+
+  // The score is computed in the SAME run as the checks and reads must-have coverage OUT of them,
+  // rather than recomputing it. Two implementations of one rule drift, and the day they drift is the
+  // day the gate and the score describe different states of the same artifact (R4).
+  // Published, scoreable term-library entries are what keyword coverage needs; there are none yet,
+  // so that component stays null rather than defaulting to a number.
+  const scoreable = Number((await client.query(
+    `select count(*)::int as n from term_library_entry e join term_library l on l.id = e.library_id
+      where e.scoreable = true and l.published_at is not null`).catch(() => ({ rows: [{ n: 0 }] }))).rows[0]?.n || 0)
+  const score = computeArtifactScore({
+    requirements,
+    checks: results,
+    keyword: scoreable > 0 ? { covered: 0, scoreable } : null,
+    seniority: null,          // reviewer-graded; P4 supplies it as a stored input
+  })
+  const uncoveredIds = score.uncovered_requirement_seqs
+    .map(seq => requirements.find((r: any) => r.seq === seq))
+    .filter(Boolean).map((r: any) => r.id).filter(Boolean)
 
   await client.query('begin')
   try {
@@ -104,10 +123,21 @@ export async function evaluateArtifact(client: any, artifactId: string, owner: s
          attention_count = excluded.attention_count, computed_at = now(),
          override_by = null, override_at = null, override_reason = null`,
       [artifactId, runId, gate, attention])
+    await client.query(
+      `insert into artifact_score
+         (artifact_id, run_id, must_have_coverage, must_have_source, keyword_coverage, keyword_source,
+          seniority_alignment, seniority_source, composite, band, uncovered_requirement_ids,
+          engine_version, weights)
+       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+       on conflict (artifact_id, run_id) do nothing`,
+      [artifactId, runId, score.must_have_coverage.value, score.must_have_coverage.source,
+       score.keyword_coverage.value, score.keyword_coverage.source,
+       score.seniority_alignment.value, score.seniority_alignment.source,
+       score.composite, score.band, uncoveredIds, score.engine_version, JSON.stringify(score.weights)])
     await client.query('commit')
   } catch (e) { await client.query('rollback'); throw e }
 
-  return { artifact_id: artifactId, run_id: runId, gate, attention, results }
+  return { artifact_id: artifactId, run_id: runId, gate, attention, results, score }
 }
 
 /**
@@ -161,6 +191,12 @@ export async function artifactChecksGet(req: HttpRequest, context: InvocationCon
     const results = g
       ? (await client.query(`select * from check_result where artifact_id=$1 and run_id=$2 order by check_key`, [art.id, g.run_id])).rows
       : []
+    const score = g
+      ? (await client.query(`select * from artifact_score where artifact_id=$1 and run_id=$2`, [art.id, g.run_id])).rows[0] || null
+      : null
+    const history = (await client.query(
+      `select composite, band, must_have_coverage, computed_at from artifact_score
+        where artifact_id=$1 order by computed_at desc limit 10`, [art.id])).rows
     return {
       status: 200, headers: HEADERS,
       jsonBody: {
@@ -169,6 +205,7 @@ export async function artifactChecksGet(req: HttpRequest, context: InvocationCon
         attention: g?.attention_count ?? 0,
         computedAt: g?.computed_at ?? null,
         override: g?.override_by ? { by: g.override_by, at: g.override_at, reason: g.override_reason } : null,
+        score, history,
         results,
       },
     }
