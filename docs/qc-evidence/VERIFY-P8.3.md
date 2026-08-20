@@ -476,3 +476,77 @@ no-hardcoded-config rule.
 6. **Whether the live MasterContext really has no certification-named field.** I read the required
    15 field names from `mt13.ts:12-17`; I did not enumerate the live entity's actual property list.
    The AC-12 note depends on that source, not on the storage account.
+
+---
+
+## ADDENDUM — re-verified against the current PR head, `30a236b`
+
+The assigned scope was `8bf2b59` (the two commits named in the task). Everything above was measured
+there. While this report was being written, `origin/claude/qc-p8-3-evidence` — the head of **PR #13**
+— advanced by 13 commits to **`30a236b`**, several of which name findings in this report. Reporting a
+defect that has already been fixed would be worse than not reporting it, so I checked out `30a236b`,
+rebuilt, and re-ran every probe that could have been affected.
+
+**Baseline at `30a236b`:** `npm run build` exit 0; **`npm test` → tests 328 · pass 328 · fail 0 ·
+skipped 0** (up from 316 — twelve added, none removed).
+
+**Unchanged since `8bf2b59`** (`git diff --stat 8bf2b59..30a236b -- …` empty for each):
+`evidence.ts`, `requirements.ts`, `artifactScore.ts`, `app/src/qcRail.js`. The `checks.ts` delta is
+entirely P8.2's `posting_figure_echo` block; the coverage block is untouched. So every §2 and §3
+measurement transfers directly, and I re-ran them anyway.
+
+### Fixed since `8bf2b59` — these findings no longer stand
+
+| Was | Now at `30a236b` |
+|---|---|
+| **D-G2** — `text` and `records` were two constructions of one profile | **Fixed** by `8db5c00`. `sourceText()` now builds `text` as `records.map(r => r.text).join(…)`; the exclusion rule exists once, in `profileRecords`. Guarded by a new structural test in `evidence.test.mjs` ("there is ONE rule for what counts as the profile") that greps the comment-stripped `sourceText` body for the join and asserts `itemsToOmit` does **not** reappear there. |
+| **D-G4** — the H-series skipped H26 | **Fixed** by `44d1cfc` + `de4bc91`. `grep -o "^test('H[0-9]*"` now yields H1…H31 with no gaps. **The four cases verified in §1 are renumbered: H27→H28, H28→H29, H29→H30, H30→H31.** The §1 revert evidence stands unchanged in substance; only the ids moved. |
+| **AC-31** — no test round-tripped the `#<seq>` contract | **Now passes.** `06caa09` adds `evidence.test.mjs` "the `#<seq> ...` offender prefix survives the numerator change": it runs `checks.ts` for real with seqs 3 and 30, applies `artifactScore`'s `/^#(\d+)\b/`, and asserts `[3, 30]` — catching the `#3`-inside-`#30` prefix bug — plus `/no evidence found in your profile$/`. *Caveat:* the third site is asserted by a **duplicated copy** of the regex rather than by importing `qcRail.offenderSeq`, because the api and app test suites cannot import each other. Two of three sites are exercised for real; the third is pinned by replication. |
+
+### Still standing at `30a236b` — re-measured, not inferred
+
+- **D-A** (mis-anchored quote) and **D-B** (tautological guard): `evidence.ts` and `requirements.ts`
+  are byte-identical to `8bf2b59`. Re-ran both harnesses against the `30a236b` build: 637 probes /
+  557 resolved / **0** substring violations, and `locate()` still returns
+  `verbatim = "he platform modernization programme across four product lines and "` at `[20,86)` for
+  a record whose true match index is 15 — the five `İ` characters still cost five characters of the
+  candidate's own words. 4,000 `locate()` rounds, **0** cases where the guard could have fired.
+- **D-C — the 75% is still on screen.** Re-ran the cross-consumer probe against the `30a236b` build:
+
+  ```
+  SCORE  must_have_coverage : 0 | 0/1 must-have requirements evidenced
+  RAIL   must_have card     : total=4 closed=3 openSeqs=[3]
+  RAIL   source             : 3 of 4 closed by at least one asset in this packet…
+  RAIL   req #0 -> closed/closed   req #1 -> closed/closed   req #2 -> closed/closed   req #3 -> open/open
+  VERDICT: check says 0/1, score says 0%, rail says 3/4 closed (75%)
+  ```
+
+  `qcRail.js` has not been touched. **This is the finding that matters, and it is unfixed on the
+  branch that is up for merge.**
+- **D-D** (no read-time revalidation): `appRequirements.ts:226` still computes `stale` from
+  `jd_text_sha256` alone; `record_sha256` is still stored and served and never recomputed. ACs 14 and
+  22 still fail.
+- **D-E** (H4b not extended): `hardening.test.mjs`'s H4b still reads only
+  `src('checks.ts').slice(indexOf('const covers ='))`. ACs 19 and 61(c) still fail.
+- **D-F** (thresholds not owner-overridable): `writeEvidence` still calls `resolveAll(rows, records)`
+  with no options, and none of the five constants appears in `CheckThresholds` or `loadThresholds`.
+  AC-20 still fails.
+- **AC-3**: `8db5c00`'s title — "one membership rule for what counts as the profile" — resolves the
+  `text`/`records` split **inside `appFacts.ts`**, not AC-3's actual subject. `pipeline.ts:149-151`
+  is unchanged at `30a236b`: `.filter(([k, v]) => typeof v === 'string' && k !== 'itemsToOmit')
+  .map(([, v]) => v).join(' ')` — still a third membership rule that admits `rowKey`, `etag` and
+  `timestamp` as prose and joins with a single space. Still fails.
+- **ACs 35, 36, 38, 41, 42, 43, 44, 47, 48, 59** and **D-G1/3/5**: unchanged. `PostingAnalysis.jsx`
+  did change (99 lines) but from P8.7 arriving via the `origin/main` merge — `grep -n "evidenced\|
+  evidenceNote\|sourceLabel"` over it returns no evidence-layer hit, so the JD-step criteria are
+  still unmet.
+
+### Revised tally at `30a236b`
+
+**41 pass · 18 fail · 4 not_applicable** (AC-31 moves pass; D-G2 and D-G4 drop off the defect list).
+The eighteen failures and the six substantive defects D-A through D-F are, apart from the two
+retractions above, exactly as reported.
+
+Every measurement in this addendum was taken on a detached checkout of `30a236b` with a fresh `tsc`
+build. The tree was returned to `claude/qc-p8-3-verify` afterwards and `npm test` re-confirmed at
+316/316 for this branch's own snapshot. Nothing was fixed here either.
