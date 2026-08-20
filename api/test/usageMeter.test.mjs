@@ -25,11 +25,23 @@ test('a missing or unusable usage object reads as zero rather than NaN', () => {
   }
 })
 
+test('the sourced GPT-5.6 prices are used, not a fallback', () => {
+  // The rates were researched, confirmed across 5 sources, imported into `docs/model-ab-findings.md`
+  // and recorded in memory as APPLYING HERE — and were then not applied, because the agent looked at
+  // the code and concluded "I do not know this model's price" without reading its own memory.
+  // Luna is AI_EDIT_MODEL's default; the gpt-4o-mini fallback under-reported it 1.33x in / 2x out.
+  assert.equal(costOf('gpt-5.6-luna', 1e6, 1e6), 0.20 + 1.20)
+  assert.equal(costOf('gpt-5.6-terra', 1e6, 1e6), 2 + 12)
+  assert.equal(costOf('gpt-5.6-sol', 1e6, 1e6), 5 + 30)
+  assert.notEqual(costOf('gpt-5.6-luna', 1e6, 1e6), costOf('gpt-4o-mini', 1e6, 1e6))
+  // Luna is exactly one tenth of Terra on both axes — the cross-check memory records.
+  assert.ok(Math.abs(costOf('gpt-5.6-luna', 1e6, 0) * 10 - costOf('gpt-5.6-terra', 1e6, 0)) < 1e-9)
+})
+
 test('an unpriced model costs null — never the price of a different model', () => {
   // The old code fell back to gpt-4o-mini's rate for any unknown model. That is a fabricated number:
   // wrong by whatever the real model costs, and indistinguishable in the table from a real price.
-  // AI_EDIT_MODEL defaults to 'gpt-5.6-luna', which is not in PRICES.
-  assert.equal(costOf('gpt-5.6-luna', 1e6, 1e6), null)
+  assert.equal(costOf('genuinely-unknown-model-v9', 1e6, 1e6), null)
   assert.equal(priceFor('totally-unknown-model'), null)
   assert.notEqual(costOf('totally-unknown-model', 1e6, 1e6), costOf('gpt-4o-mini', 1e6, 1e6))
 })
@@ -42,10 +54,14 @@ test('a known model still costs what it costs', () => {
 test('a new model can be priced without a deploy, and a malformed override never throws', () => {
   const prev = process.env[PRICE_OVERRIDE_ENV]
   try {
-    process.env[PRICE_OVERRIDE_ENV] = JSON.stringify({ 'gpt-5.6-luna': { in: 1 / 1e6, out: 4 / 1e6 } })
-    assert.equal(costOf('gpt-5.6-luna', 1e6, 1e6), 1 + 4)
+    // A model the table does not know, so the override is the ONLY source of a price for it.
+    process.env[PRICE_OVERRIDE_ENV] = JSON.stringify({ 'some-future-model': { in: 1 / 1e6, out: 4 / 1e6 } })
+    assert.equal(costOf('some-future-model', 1e6, 1e6), 1 + 4)
     process.env[PRICE_OVERRIDE_ENV] = '{not json'
-    assert.equal(costOf('gpt-5.6-luna', 1e6, 1e6), null)
+    assert.equal(costOf('some-future-model', 1e6, 1e6), null, 'a malformed override falls through, it does not throw')
+    // An override also WINS over a table entry, so a price correction needs no deploy.
+    process.env[PRICE_OVERRIDE_ENV] = JSON.stringify({ 'gpt-5.6-luna': { in: 9 / 1e6, out: 9 / 1e6 } })
+    assert.equal(costOf('gpt-5.6-luna', 1e6, 0), 9)
   } finally {
     if (prev === undefined) delete process.env[PRICE_OVERRIDE_ENV]; else process.env[PRICE_OVERRIDE_ENV] = prev
   }

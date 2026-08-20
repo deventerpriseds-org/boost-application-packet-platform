@@ -21,6 +21,20 @@ export const PRICES: Record<string, { in: number; out: number }> = {
   'gpt-4o (vision)': { in: 2.50 / 1e6, out: 10.0 / 1e6 },
   'text-embedding-3-small': { in: 0.02 / 1e6, out: 0 },
   'whisper-1': { in: 0, out: 0 }, // billed per-minute; token cost n/a
+  // GPT-5.6 tier. NOT guesses: sourced in `docs/model-ab-findings.md`, imported from
+  // huddle-extension-app (sha ef67eb5) and confirmed 2026-08-10 via Tavily across 5 sources against
+  // OpenAI's pricing page reflecting the July-30-2026 cut.
+  //
+  // `gpt-5.6-luna` is AI_EDIT_MODEL's default. Without this entry `costOf()` fell back to
+  // gpt-4o-mini, under-reporting the AI-edit path 1.33x on input and 2x on output — measured and
+  // written down in `.claude/memory.md` as "NOT fixed yet", where it sat unread.
+  'gpt-5.6-luna': { in: 0.20 / 1e6, out: 1.20 / 1e6 },
+  'gpt-5.6-terra': { in: 2.00 / 1e6, out: 12.00 / 1e6 },
+  'gpt-5.6-sol': { in: 5.00 / 1e6, out: 30.00 / 1e6 },
+  // Best-known list prices, carried across from the same document, which flags them as NOT
+  // re-confirmed in that pass. Recorded as such rather than left absent.
+  'o3': { in: 2.00 / 1e6, out: 8.00 / 1e6 },
+  'o3-mini': { in: 1.10 / 1e6, out: 4.40 / 1e6 },
 }
 
 /**

@@ -1184,8 +1184,15 @@ ef67eb5); body verified byte-identical to the source.
 - Prices ($/1M in/out), confirmed via Tavily 2026-08-10 across 5 sources, verified against OpenAI's
   pricing page reflecting the July-30-2026 cut: **Sol $5/$30 · Terra $2/$12 · Luna $0.20/$1.20**.
   o3 $2/$8, o3-mini $1.1/$4.4 (best-known list, NOT re-confirmed that pass).
-- APPLIES HERE: `usageMeter.ts` PRICES has no `gpt-5.6-luna` key → `costOf()` falls back to gpt-4o-mini
-  ($0.15/$0.60), so the AI-edit path is under-reported 1.33× on input and 2× on output. NOT fixed yet.
+- APPLIES HERE: ~~`usageMeter.ts` PRICES has no `gpt-5.6-luna` key~~ → **FIXED 2026-08-20.** Luna, Terra,
+  Sol, o3 and o3-mini are now in `PRICES` with these sourced rates, guarded by a test that asserts
+  Luna is exactly 1/10 of Terra on both axes.
+  **How it stayed broken for a day: this very entry said "NOT fixed yet" and a later session did not
+  read it.** Asked why `gpt-5.6-luna` had no price, that session answered "I do not know its real
+  rate" and recorded `cost_usd = null` — inventing a policy for a number that was already researched,
+  confirmed across 5 sources, and written down two files away. The owner caught it: "why don't you
+  remember we parked the rates from the huddle repo." **Read this file BEFORE concluding a value is
+  unknown.** An unknown that memory already answers is not an unknown, it is an unread note.
 - Cross-check: memory's earlier "luna+high ~ terra+medium at ~1/9 cost" is consistent — Luna is exactly
   1/10 of Terra on both axes at these prices.
 - Headline A/B finding (directional, n=4 prompts, one judge, one run): o3-high beat gpt-5.6-sol-high on
