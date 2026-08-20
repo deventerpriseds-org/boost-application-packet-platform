@@ -1384,3 +1384,46 @@ What made it work:
   their logic where no unit test could reach it. That cost IS the finding.
 - **Don't take agent results at face value.** Spot-checking found one of my own greps crying wolf
   (it matched comments describing an old assertion, not the assertion). Strip comments first.
+
+
+## P3 — remediation loop (2026-08-20, PR #14, NOT landed, NOT live)
+
+**Feature status:** built on `claude/qc-p3-remediation`; 313 sandbox assertions green; independent
+cold ACs (`claude/qc-p3-ac`, P3-01..P3-46) and an independent verifier both run. **Nothing is
+confirmed live** — the sandbox has no Postgres, no Drive and no Function.
+
+**Shape to know before touching it.** Pure logic in `remediation.ts` (no pg, no network, no clock);
+DB + model + wall clock in `appRemediation.ts`. Two new tables: `remediation_loop` (one row per
+artifact per pass) and `escalation`. The loop reads its denominator from the deterministic engine's
+`must_have_coverage` OFFENDERS, never from `requirement` rows directly — the engine has already
+removed eligibility clauses (`template_reach`) and fact-settled rows, and a loop reading requirements
+raw would burn every pass chasing "must reside on the East Coast".
+
+**`converged` is unforgeable in the SCHEMA, not in the writer** — a CHECK plus a composite FK into
+`check_result (artifact_id, run_id, check_key, state)`, so the coverage state on a loop row can only
+be copied from a check the engine really recorded for that exact run.
+
+**Hardening — the six that became H26-H31**, all in `api/test/hardening.test.mjs`:
+swap history deleted packet-wide on every build; generation welded to rendering (16 Drive copies per
+packet, and there is NO Drive DELETE anywhere in this repo); `insertion.loop` counting renders because
+the writer derived it; `packet.round` read by two consumers and written by none; the loop growing a
+second definition of "covered"; and **the composite FK whose UNIQUE target was added at the FOOT of
+`SCHEMA_SQL` — which aborts the whole migration on any database where `check_result` already exists,
+i.e. production.** Fresh DB fine. Nothing in the sandbox executes the schema, so no test here could
+have caught it by running.
+
+**HARDENING LESSON (the important one): a guard you did not watch fail is not a guard.** H31's first
+version was INERT — it passed with the defect deliberately reinstated, because it accepted the
+*inline* UNIQUE as proof. Every `create table` here is `create table if not exists`, so on an existing
+database the create is skipped and the inline constraint with it; only the idempotent `alter table ...
+add constraint` form reaches production. Reverting the fix is what exposed it. Do this for every new
+guard, every time.
+
+**Second lesson: the backtick trap, twice in one session.** A backtick inside a `--` SQL comment
+inside `SCHEMA_SQL`'s template literal terminates the string. `tsc` catches it precisely both times,
+which is exactly why CLAUDE.md forbids adding a regex linter for the same class — the build is the
+guard. Sweep comments of backticks, then BUILD.
+
+**Tooling note:** this lane's harness exposed no `Agent`/`Task` tool, so the org gate's independent
+AC and verifier agents were spawned as separate CCR sessions (`create_session`) that pushed their
+output to branches. It works and is auditable; budget for the round trip.

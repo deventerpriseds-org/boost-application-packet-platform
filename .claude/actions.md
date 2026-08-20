@@ -1674,3 +1674,65 @@ additions; both sides kept). 89/89 app tests, 30/30 overlay probe, 16/16 asset-b
    role` with no candidate comparison anywhere; the array renders as green "N covered" chips.
 3. **Dark-mode `accent` pills measure 1.90:1.** `.proto-dark` overrides `--surface-brand-subtle` but
    not `--surface-brand-default`, across 15+ live sites.
+
+
+## ACT — P3 remediation loop built (PR #14, `claude/qc-p3-remediation`, 2026-08-20)
+
+**Not landed, not deployed, not confirmed live.** 313 assertions green in the sandbox; the sandbox
+has no Postgres, no Drive and no Function, so every criterion needing them is `not_applicable`.
+
+**The gate, honestly:** ACs written COLD by an independent agent before any P3 code existed — the
+surviving fragment is `docs/qc-evidence/P3-ACCEPTANCE.md` on `main`, and the full P3-01..P3-46 list
+was reconstructed by a second independent agent on branch `claude/qc-p3-ac`. An independent verifier
+session was run against the branch. **No `Agent`/`Task` tool was exposed in this lane's harness**, so
+both were spawned as separate CCR sessions that pushed their output to branches — auditable, and
+genuinely cold, but worth knowing the mechanism differed.
+
+**X2 re-verified rather than assumed.** The plan says `appPackets.ts` hardcodes `regen=false`. It
+does not: `regen` is read from the body at `:382/457/558`, honoured at `:319`, and
+`PacketBuilder.jsx:584` sends it. The plan text is stale; recorded there.
+
+**Six defects found, each fixed in the same commit as its H-case, and each guard watched to FAIL
+with the fix reverted before it was kept:**
+
+| ID | The defect | Why it mattered |
+|---|---|---|
+| H26 | `writeSwaps` ran `delete from swap_decision where packet_id=$1` on every build, and the table had no `loop` column | pass 2 destroyed pass 1's swap record — the loop deleting its own justification for every change it had just made |
+| H27 | generation and rendering were one function | 4 passes x 4 templated artifacts = 16 Drive copies per packet, and there is no Drive `DELETE` anywhere in this codebase, so 15 would be orphaned on the quota-bearing OAuth account |
+| H28 | `insertion.loop` derived as `max(loop)+1` INSIDE the writer | it counted document RENDERS, advancing even on a cache hit that made zero model calls. The same guard caught `packet.round`: read by `loadPacket`'s ORDER BY and by `packetShape`, written by nothing, so the ordering was a no-op and the API reported `round: 1` forever |
+| H29 | `converged` was a word the writer could simply choose | now a table CHECK plus a composite FK into `check_result`, so the coverage state on a loop row can only be COPIED from a check the engine really recorded |
+| H30 | the loop could have grown a second definition of "covered" | `checks.covers()` decides the GATE; a second implementation drifts, and the day it drifts the loop claims closes the gate does not recognise |
+| H31 | **the composite FK's UNIQUE target was added at the FOOT of `SCHEMA_SQL`** | Postgres wants it at CREATE TABLE time, so `create table remediation_loop` **aborts the entire migration on any database where `check_result` already exists — i.e. production**. A fresh DB was fine. No test here could catch it: the schema is never executed in the sandbox |
+
+Plus one found while reviewing: a SECOND loop run restarted numbering at `n=1` and would have
+upserted over the first run's ledger — the H26 defect one table over, and worst exactly where it is
+least visible, because resolving an escalation reopens the loop, making the second run the normal
+case rather than the edge case. `nextPassNumber` continues the ledger.
+
+**The lesson worth keeping: H31's first version was INERT.** It passed with the defect deliberately
+reinstated, because it accepted `check_result`'s *inline* UNIQUE as proof the target existed. On an
+existing database `create table if not exists` skips the create and the inline constraint with it, so
+the inline form proves nothing. **Only the revert-proof caught it.** A guard that cannot fail is
+worse than no guard, and writing one is easy enough to do by accident that reverting every fix to
+watch its test go red is not ceremony — it is the only thing that distinguishes a guard from a
+comment.
+
+**Departures from the acceptance list, each recorded in the commit:**
+- `requirement.closed_on_loop` dropped rather than written (plan decision 16 — one `int` on a
+  per-OPPORTUNITY row cannot express per-ARTIFACT coverage, and "covered in the resume but not the
+  cover letter" is the normal case). Zero writers, zero readers, so nothing depended on it.
+- Loop escalations get their own table (decision 15): `requirement.coverage='escalated'` is already
+  set at EXTRACTION and means "the quote could not be located in the posting".
+- The cleared-override record (decision 19) lives on `remediation_loop`, NOT on `artifact_gate`.
+  `evaluateArtifact` clearing an override is deliberate and correct for a MANUAL re-check; the LOOP
+  is what turns one considered clear into four silent ones, so the loop carries the record and
+  `appChecks.ts` (another lane's file) is untouched.
+
+**Deliberately NOT claimed:** P3-45 (the Passes tab) — P5 is unmerged and `ui-verify.mjs` cannot
+click or assert absence. P3-21/25's live half — blocked on `diagFolders` listing the packet output
+folder `1MlVLMSQ0EQJoAtpKC1Mv7mDCAJDmdJTt`. P3-40 (posting figures) — that is P8.2's `figureEcho`.
+
+**Open follow-up for the P5/P8.7 lane:** `app/src/qcRail.js:423` and `:599` read the FULL
+`swaps`/`insertions` arrays as though they were one pass. That double-counts the moment a second pass
+exists, which P3 makes routine. Both endpoints now also return a `current` array (latest pass only)
+and a `passes` list so the UI can be corrected without guessing.

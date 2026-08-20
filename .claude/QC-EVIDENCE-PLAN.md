@@ -10,16 +10,20 @@ where the train currently is. Read it first on any resume; it is written to surv
 ## ▶ RESUME MARKER — where the train is
 
 ```
-CURRENT PHASE : P2 (checks and gate)
-STATUS        : P2 COMPLETE (2.1 engine, 2.2 gate+block, 2.3 score) — all verified live
+CURRENT PHASE : P3 (remediation loop) — BUILT, on a branch, NOT landed and NOT confirmed live
+STATUS        : PR #14 (claude/qc-p3-remediation). 313 assertions green. Independent AC agent
+                wrote P3-01..P3-46 cold (branch claude/qc-p3-ac); independent verifier run.
 LAST LANDED   : 1605021 artifact_score; 20/20 tables live; composite correctly null
-NEXT ACTION   : P3 remediation loop (X5 trap: render documents ONCE, after the loop)
+NEXT ACTION   : land PR #14, then deploy and run the loop against the Trinnex opportunity
+                (opp 9f9c370a-4ac9-441e-b58e-02e3ffcf669e / artifact cfdd82e7-...). Nothing in
+                P3 is confirmed live: the sandbox has no Postgres, no Drive, no Function.
 DONE SO FAR   : P0 wiring · X1 grounding · X2 regen · X3 normalizer · X4 tests · D1 D2 D3
                 P1.2b term_library · P1.2 corpus miner + curation queue · P1.1 requirement rows
+                X5 render-once (P3) · D8 metering per pass (P3)
 ```
 *Update this block on every landing. It is the single place to look after a restart.*
 
-Phase status: P0 `done` · P1 `done` · P2 `done` · P3-P8 `not started`.
+Phase status: P0 `done` · P1 `done` · P2 `done` · P3 `built, PR #14, not landed` · P4-P8 see their branches.
 Parallel streams in flight: P7 hygiene, D10 overlay primitive (subagents, own branches).
 
 ---
@@ -171,7 +175,35 @@ artifact has zero check rows; decide grandfathering explicitly or `ready` flips 
 P2.3: name the table `artifact_score`, NOT `match_score` (that column exists with a different live
 meaning). Reconcile all four existing scores or don't ship a fifth.
 
-### P3 — Remediation loop
+### P3 — Remediation loop  ◀ BUILT (PR #14), NOT LANDED, NOT LIVE
+**X2 re-verified by grep, not taken on faith:** `regen` is read from the body at `appPackets.ts:382/457/558`,
+honoured at `:319`, and `PacketBuilder.jsx:584` sends it. The X2 text below is STALE — the cache is
+reachable-through, so no loop AC passes vacuously against it.
+
+**Shipped shape.** Pure logic in `remediation.ts` (no pg / no network / no clock); DB, model calls and
+wall clock in `appRemediation.ts`. New tables `remediation_loop` (one row per artifact per pass) and
+`escalation`. `converged` is unforgeable in the SCHEMA — a CHECK plus a composite FK into
+`check_result`, so the coverage state on a loop row can only be COPIED from a check the engine really
+recorded, never asserted. Field-scoped regeneration built as new capability (decision 17): the model's
+out-of-scope keys are REJECTED on the way in, not requested in a prompt.
+
+**Six defects found and fixed with it, each an H-case (H26-H31):** `writeSwaps` deleted the whole
+packet's swap history on every build (the loop deleting its own justification); generation and
+rendering were one function (16 Drive copies per packet at 4 passes, on a codebase with no Drive
+DELETE anywhere); `insertion.loop` counted RENDERS because the writer derived it; `packet.round` was
+read by two consumers and written by nothing; and — the one that would have taken production down —
+**the composite FK's UNIQUE target was added at the FOOT of `SCHEMA_SQL`, so `create table
+remediation_loop` aborts the whole migration on any database where `check_result` already exists.**
+A fresh DB was fine. Nothing here could catch it: there is no Postgres in the sandbox.
+
+**Departures, each named:** `requirement.closed_on_loop` dropped rather than written (decision 16 —
+it cannot express the artifact dimension, and had zero writers and zero readers); loop escalations
+get their own table (decision 15); the cleared-override record lives on `remediation_loop`, NOT on
+`artifact_gate`, because `evaluateArtifact`'s clear is correct for a MANUAL re-check and it is the
+LOOP that turns one considered clear into four silent ones — so `appChecks.ts` is untouched.
+**P3-45 is NOT claimable** (P5 unmerged, harness cannot click or assert absence). **P3-21/25's live
+half is blocked** on `diagFolders` listing the packet output folder.
+
 **AC 3.1.0 (X2) blocks everything else** — without it every loop AC passes vacuously against a cache.
 Needs a field-scoped generation primitive (`pipeline.ts` is monolithic; calls 2/3 consume the whole
 prior payload). Documents render once (X5). Meter every pass (D8) — `grep -n "logUsage(.*, {})" api/src/` → 0.
