@@ -67,6 +67,31 @@ const TONE_SOLID = {
 }
 export const toneColor = (tone) => TONE_SOLID[tone] || 'var(--proto-ink3)'
 
+// Recency-temperature chips, resolved the SAME way and for the same reason.
+//
+// Today.jsx and Opportunities.jsx each built these declarations by interpolating the temperature
+// key into the custom-property name — `var(--temp-${k}-tint)` — which is the exact construct that
+// made the `todo` pill invisible: a key with no matching token produces an INVALID declaration,
+// and CSS drops an invalid declaration without a word. It happened to resolve here only because
+// all four keys have tokens today; the day a fifth temperature is added it silently paints
+// nothing. Listing them makes the failure a missing entry in this table instead.
+//
+// Both screens also hand-built the same chip style, so this returns the whole style and the two
+// can no longer drift apart.
+const TEMP_TOKENS = {
+  hot: { solid: 'var(--temp-hot)', tint: 'var(--temp-hot-tint)' },
+  warm: { solid: 'var(--temp-warm)', tint: 'var(--temp-warm-tint)' },
+  cooling: { solid: 'var(--temp-cooling)', tint: 'var(--temp-cooling-tint)' },
+  cold: { solid: 'var(--temp-cold)', tint: 'var(--temp-cold-tint)' },
+}
+/** A temperature's two tokens. An unknown key falls back to visible ink, never to nothing. */
+export const tempColor = (key) => (TEMP_TOKENS[key] || { solid: 'var(--proto-ink3)', tint: 'transparent' })
+/** The chip style, tinted when the filter is on and outlined in both states. */
+export const tempChipStyle = (key, on) => {
+  const t = tempColor(key)
+  return { background: on ? t.tint : 'transparent', color: t.solid, border: `1px solid ${t.solid}` }
+}
+
 // ── ONE signal indicator, config-driven by `kind` ────────────────────────────────────────────────
 // Two independent per-opp signals share one component (styling/label/tooltip live in one place):
 //  • temperature = posting recency → a FLAME, colored Hot(orange)→Warm(yellow)→Cooling(blue)→Cold(white)

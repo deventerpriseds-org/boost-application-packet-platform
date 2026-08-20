@@ -1,7 +1,7 @@
 import React, { useMemo, useState, useEffect, useCallback } from 'react'
 import { go, useApp } from '../state.jsx'
 import { api } from '../api.js'
-import { MatchScore, SignalIcon, Pill, FavStar } from '../shell.jsx'
+import { MatchScore, SignalIcon, Pill, FavStar, tempChipStyle, tempColor } from '../shell.jsx'
 import { Loading, ErrorBox, Empty, roleFamily, titleFamily } from './Today.jsx'
 
 const TEMPS = ['All', 'Hot', 'Warm', 'Cooling', 'Cold']
@@ -302,10 +302,8 @@ export default function Opportunities({ opps, filter }) {
             // Soft tint fill when on; colored outline + dot kept in both states so the temp reads at a glance.
             return (
               <span key={k} onClick={() => { setActiveFilter(null); toggleTemp(k) }} className="px-pill"
-                style={{ cursor: 'pointer', fontSize: 12, fontWeight: 600, gap: 5,
-                  background: on ? `var(--temp-${k}-tint)` : 'transparent',
-                  color: `var(--temp-${k})`, border: `1px solid var(--temp-${k})` }}>
-                <span style={{ width: 7, height: 7, borderRadius: '50%', background: `var(--temp-${k})`, opacity: on ? 1 : 0.6 }} />
+                style={{ cursor: 'pointer', fontSize: 12, fontWeight: 600, gap: 5, ...tempChipStyle(k, on) }}>
+                <span style={{ width: 7, height: 7, borderRadius: '50%', background: tempColor(k).solid, opacity: on ? 1 : 0.6 }} />
                 {TEMP_LABEL[k]}
               </span>
             )

@@ -29,10 +29,13 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { api } from '../api.js'
 import {
-  KIND_ABBR, KIND_WORD, METHOD_LABEL,
+  BLOCK_HOOKS, KIND_ABBR, KIND_WORD, METHOD_LABEL,
   countMismatchNote, deriveItems, draftSizeText, expectationFor, latestRows, listBodyModel, listsOf,
   meterModel, reqsForRow, scopeSwaps, shapeOf, sharedSourceNote, statPct, wordCount,
 } from '../assetBlocks.js'
+import { HIGHLIGHT_CLASS } from '../highlight.js'
+
+export { BLOCK_HOOKS }
 
 // ── shared provenance loader ────────────────────────────────────────────────────────────────────
 
@@ -98,9 +101,13 @@ function ReqChip({ req }) {
 // cannot check against the ad is not an attribution.
 function Verbatim({ text }) {
   if (!text) return null
+  // The POSTING ECHO highlight (D11): a pale wash under a rule, painted through the shared .qc-echo
+  // class. It is deliberately a different KIND of treatment from the keyword highlight - a filled
+  // highlighter - so the two cannot be confused by a reader who cannot separate the two hues.
   return (
-    <div className="px-small" style={{ marginTop: 6, textTransform: 'none', fontStyle: 'italic', lineHeight: 1.5, color: 'var(--proto-ink2)' }}>
-      Posting says: &quot;{text}&quot;
+    <div className="px-small" data-qc={BLOCK_HOOKS.quote}
+      style={{ marginTop: 6, textTransform: 'none', fontStyle: 'italic', lineHeight: 1.5, color: 'var(--proto-ink2)' }}>
+      Posting says: <span className={HIGHLIGHT_CLASS.postingEcho}>&quot;{text}&quot;</span>
     </div>
   )
 }
@@ -110,7 +117,7 @@ function Verbatim({ text }) {
 function CountMismatch({ note }) {
   if (!note) return null
   return (
-    <div className="px-note" style={{ marginTop: 8, borderColor: 'var(--proto-yellow, var(--proto-rule-soft))' }}>
+    <div className="px-note" data-qc={BLOCK_HOOKS.mismatch} style={{ marginTop: 8, borderColor: 'var(--proto-yellow, var(--proto-rule-soft))' }}>
       <div className="px-small" style={{ textTransform: 'none', lineHeight: 1.5 }}>{note}</div>
     </div>
   )
@@ -120,7 +127,7 @@ function Stat({ label, n, d, sub }) {
   const pct = statPct(n, d)
   const all = d > 0 && n === d
   return (
-    <div style={{ minWidth: 150, flex: '1 1 150px' }}>
+    <div data-qc={BLOCK_HOOKS.stat} data-qc-stat={label} style={{ minWidth: 150, flex: '1 1 150px' }}>
       <div className="px-label">{label}</div>
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 4, margin: '2px 0 5px' }}>
         <b style={{ fontSize: 18, lineHeight: 1, color: all ? 'var(--proto-green)' : 'var(--text-brand)' }}>{n}</b>
@@ -142,7 +149,7 @@ function DistributionMeter({ rows, filled, unfilled, requirements, scopedSwaps, 
   if (!stats.length && !notes.length) return null
 
   return (
-    <div className="px-box" style={{ padding: 14, display: 'flex', flexDirection: 'column', gap: 10 }}>
+    <div className="px-box" data-qc={BLOCK_HOOKS.meter} style={{ padding: 14, display: 'flex', flexDirection: 'column', gap: 10 }}>
       <div style={{ fontSize: 13, fontWeight: 700 }}>What is in this asset</div>
       {stats.length > 0 && (
         <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap' }}>
@@ -150,7 +157,7 @@ function DistributionMeter({ rows, filled, unfilled, requirements, scopedSwaps, 
         </div>
       )}
       {notes.map((n, i) => (
-        <div key={i} className="px-small" style={{ textTransform: 'none' }}>{n}</div>
+        <div key={i} className="px-small" data-qc={BLOCK_HOOKS.note} style={{ textTransform: 'none' }}>{n}</div>
       ))}
     </div>
   )
@@ -190,7 +197,7 @@ function ListBody({ row, swapsForList, artifactId, listOwners }) {
       {/* Decision 9: swap_decision is keyed by PACKET, so this same row renders on every asset that
           renders this list. Saying so is what stops two cards reading as two separate changes. */}
       {model.sharedNote && (
-        <div className="px-small" style={{ textTransform: 'none', lineHeight: 1.5, marginTop: 8, color: 'var(--proto-ink2)' }}>
+        <div className="px-small" data-qc={BLOCK_HOOKS.shared} style={{ textTransform: 'none', lineHeight: 1.5, marginTop: 8, color: 'var(--proto-ink2)' }}>
           {model.sharedNote}
         </div>
       )}
@@ -278,13 +285,13 @@ function AssetBlock({ row, reqs, swapsForList, wide, artifactId, listOwners }) {
       <CountMismatch note={countNote} />
 
       {sharedNote && (
-        <div className="px-small" style={{ textTransform: 'none', lineHeight: 1.5, marginTop: 8, color: 'var(--proto-ink2)' }}>
+        <div className="px-small" data-qc={BLOCK_HOOKS.shared} style={{ textTransform: 'none', lineHeight: 1.5, marginTop: 8, color: 'var(--proto-ink2)' }}>
           {sharedNote}
         </div>
       )}
 
       {showBefore && row.before_text && (
-        <div className="px-note" style={{ marginTop: 9 }}>
+        <div className="px-note" data-qc={BLOCK_HOOKS.before} style={{ marginTop: 9 }}>
           <div className="px-label" style={{ color: 'var(--text-info)', marginBottom: 3 }}>Original - before this posting</div>
           <div style={{ fontSize: 12, lineHeight: 1.6, whiteSpace: 'pre-line' }}>{row.before_text}</div>
         </div>
@@ -292,7 +299,8 @@ function AssetBlock({ row, reqs, swapsForList, wide, artifactId, listOwners }) {
 
       {row.before_text && (
         <div style={{ marginTop: 8 }}>
-          <span className="px-link" style={{ fontSize: 11.5 }} onClick={() => setShowBefore((v) => !v)}>
+          <span className="px-link" data-qc={BLOCK_HOOKS.compareToggle} data-qc-open={showBefore ? '1' : '0'}
+            style={{ fontSize: 11.5 }} onClick={() => setShowBefore((v) => !v)}>
             {showBefore ? 'Hide original' : 'Compare with original'}
           </span>
         </div>
@@ -349,7 +357,9 @@ function AssetBlock({ row, reqs, swapsForList, wide, artifactId, listOwners }) {
   )
 
   return (
-    <div className={isStatic ? 'px-dashed' : 'px-box'} style={{
+    <div className={isStatic ? 'px-dashed' : 'px-box'}
+      data-qc={BLOCK_HOOKS.field} data-qc-field={row.merge_field} data-qc-static={isStatic ? '1' : '0'}
+      style={{
       padding: 14, display: 'grid', gridTemplateColumns: wide ? 'minmax(0,1fr) 250px' : '1fr', gap: 16,
       background: isStatic ? 'var(--proto-panel)' : 'var(--proto-paper)',
     }}>
@@ -412,7 +422,7 @@ export default function AssetBlocks({ artifact, provenance, fallback, defaultOpe
   if (!rows.length) {
     if (!fallback) {
       return (
-        <div className="px-small" style={{ textTransform: 'none' }}>
+        <div className="px-small" data-qc={BLOCK_HOOKS.empty} style={{ textTransform: 'none' }}>
           {state.error
             ? `Block provenance could not be read for this asset (${state.error}).`
             : 'Nothing has been generated for this asset yet, so there are no blocks to show.'}
@@ -420,7 +430,7 @@ export default function AssetBlocks({ artifact, provenance, fallback, defaultOpe
       )
     }
     return (
-      <div>
+      <div data-qc={BLOCK_HOOKS.fallback}>
         <div className="px-small" style={{ textTransform: 'none', marginBottom: 6 }}>
           {state.error
             ? `Block provenance could not be read (${state.error}) - showing the stored draft.`
@@ -434,12 +444,14 @@ export default function AssetBlocks({ artifact, provenance, fallback, defaultOpe
   }
 
   return (
-    <div ref={ref} style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+    <div ref={ref} data-qc={BLOCK_HOOKS.root} data-qc-open={open ? '1' : '0'}
+      style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
         <div style={{ fontSize: 13, fontWeight: 700, flex: 1 }}>
           {rows.length} merge {rows.length === 1 ? 'field' : 'fields'}
         </div>
-        <span className="px-link" style={{ fontSize: 11.5 }} onClick={() => setOpen((v) => !v)}>
+        <span className="px-link" data-qc={BLOCK_HOOKS.toggle} data-qc-open={open ? '1' : '0'}
+          style={{ fontSize: 11.5 }} onClick={() => setOpen((v) => !v)}>
           {open ? 'Hide blocks' : 'Show blocks'}
         </span>
       </div>

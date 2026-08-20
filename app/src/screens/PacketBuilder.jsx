@@ -9,6 +9,7 @@ import {
   PostingAnalysisCard, AnalysisRunCard, KeywordTallyOverlay, MatchEstimateButton, ProfileLink,
 } from './PostingAnalysis.jsx'
 import { postingBody } from '../postingAnalysis.js'
+import { PACKET_HOOKS, ASSET_HEADER_DEFAULT_OPEN } from '../packetBuilder.js'
 import QcRail, { useQcEntries } from './QcRail.jsx'
 import { qcStepState, packetGate, railGateMeta } from '../qcRail.js'
 
@@ -74,22 +75,45 @@ function stepDone(key, p, artifacts, qc) {
   })
 }
 
-function ArtifactCard({ a, busy, setBusy, onGenerate, onSetStatus, onMakeDoc, onMakeSlides, onGenVideo, onArchiveVideo, doc, video, provenance, listOwners, onListsRendered }) {
+// Exported so the browser probe can mount the REAL card (test/browser/run-asset-blocks.mjs). The
+// header's collapsed default is a rendering fact; asserting it against a replica of this component
+// would prove only that the replica was written to match.
+export function ArtifactCard({ a, busy, setBusy, onGenerate, onSetStatus, onMakeDoc, onMakeSlides, onGenVideo, onArchiveVideo, doc, video, provenance, listOwners, onListsRendered }) {
   const v = video[a.id] || {}
   const d = doc[a.id] || {}
   const videoUrl = v.url || a.docUrl
   const driveUrl = v.driveUrl || a.driveUrl
+  // P8.7: "Asset headers are collapsed by default." The default is a named constant in
+  // ../packetBuilder.js, not a bare `false`, so one test can assert it beside AssetBlocks'
+  // opposite default and fail if a fix flips the wrong one.
+  //
+  // This is NOT in tension with the block's `defaultOpen = true` below. They are two disclosures
+  // around two different objects: this one wraps the whole ARTIFACT, that one wraps the merge
+  // FIELDS inside it. Opening this header therefore reveals the fields already open - one click,
+  // not two - which is exactly the arrangement the plan describes and warns is easy to misread.
+  const [open, setOpen] = useState(ASSET_HEADER_DEFAULT_OPEN)
+  const toggle = () => setOpen((o) => !o)
 
   return (
-    <div className="px-box" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
-      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+    <div className="px-box" data-qc={PACKET_HOOKS.assetCard} data-qc-type={a.type}
+      style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
+      <div data-qc={PACKET_HOOKS.assetHeader} data-qc-open={open ? '1' : '0'} data-qc-type={a.type}
+        style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
         <div style={{ flex: 1 }}>
           <div style={{ fontSize: 14, fontWeight: 700 }}>{TYPE_LABEL[a.type]}</div>
           <div className="px-small" style={{ marginTop: 2 }}>{TYPE_SUB[a.type]}</div>
         </div>
         <Pill tone={STATUS_TONE[a.status]}>{a.status}</Pill>
+        <span className="px-link" role="button" tabIndex={0} onClick={toggle}
+          data-qc={PACKET_HOOKS.assetToggle} data-qc-open={open ? '1' : '0'}
+          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle() } }}
+          aria-expanded={open} style={{ fontSize: 12, whiteSpace: 'nowrap' }}>
+          {open ? 'Hide' : 'Show'}
+        </span>
       </div>
 
+      {open && (
+      <div data-qc={PACKET_HOOKS.assetBody} style={{ display: 'flex', flexDirection: 'column', gap: 12, flex: 1 }}>
       {/* P5.2 — the draft is the point of the screen, so it renders OPEN, one card per merge field,
           with the provenance for that field beside it. It replaced a collapsed `content` dump that
           could not distinguish generated text from static template text. */}
@@ -164,6 +188,8 @@ function ArtifactCard({ a, busy, setBusy, onGenerate, onSetStatus, onMakeDoc, on
           <button className="px-btn" onClick={() => onSetStatus(a, 'review')}>Reopen</button>
         )}
       </div>
+      </div>
+      )}
     </div>
   )
 }
@@ -458,7 +484,7 @@ export default function PacketBuilder({ id, step }) {
           {(() => {
             const pb = postingBody({ jdSummary: opp?.jdSummary, why: opp?.why, jdTextLen: req.data?.jdTextLen })
             return (
-              <div className="px-box" data-qc="posting-body" data-qc-body={pb.kind} style={{ padding: 16 }}>
+              <div className="px-box" data-qc={PACKET_HOOKS.postingBody} data-qc-body={pb.kind} style={{ padding: 16 }}>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6, gap: 8, flexWrap: 'wrap' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
                     <div style={{ fontSize: 14, fontWeight: 700 }}>{pb.heading}</div>
@@ -468,7 +494,7 @@ export default function PacketBuilder({ id, step }) {
                     {parseBusy ? 'Parsing…' : (opp?.jdSummary ? '↻ Re-parse posting' : 'Parse posting')}
                   </button>
                 </div>
-                <div className="px-small" data-qc="posting-body-provenance" style={{ marginBottom: 10, color: 'var(--proto-ink2)', lineHeight: 1.6 }}>
+                <div className="px-small" data-qc={PACKET_HOOKS.postingBodyProvenance} style={{ marginBottom: 10, color: 'var(--proto-ink2)', lineHeight: 1.6 }}>
                   {pb.provenance}
                 </div>
                 {pb.body

@@ -13,6 +13,35 @@
 // gate was computed from. The split below still runs — a list has to draw its lines from somewhere —
 // but it never supplies the count, and when the two disagree the disagreement is SHOWN.
 
+/**
+ * Every `data-qc` selector the asset-blocks card renders.
+ *
+ * Same constant, same rule, same reason as GATE_HOOKS (assetGate.js) and QC_HOOKS (qcRail.js):
+ * ui-verify.yml selects by CSS only, this card had ZERO hooks, and so every claim P5.2 makes about
+ * it - the row's count wins, a shared swap says it is packet-level, an unmeasurable stat reads as
+ * unknown - was only assertable by matching prose. The component hand-types none of these.
+ *
+ * `root` also carries data-qc-open. The card's field blocks default OPEN; the ASSET header in
+ * PacketBuilder defaults CLOSED (PACKET_HOOKS.assetHeader). They are different objects and the two
+ * defaults are deliberately opposite, which is exactly why both are readable from the DOM: a fix
+ * that flips the wrong one has to be visible.
+ */
+export const BLOCK_HOOKS = {
+  root: 'asset-blocks',            // the card root (carries data-qc-open)
+  toggle: 'blocks-toggle',         // show/hide the blocks
+  meter: 'blocks-meter',           // "what is in this asset"
+  stat: 'blocks-stat',             // one measured stat
+  note: 'blocks-note',             // a stat that could not be measured, stated as unknown
+  field: 'blocks-field',           // one merge field (carries data-qc-field / data-qc-static)
+  mismatch: 'blocks-count-mismatch',
+  shared: 'blocks-packet-level',   // a swap recorded against the packet, not this asset
+  quote: 'blocks-posting-quote',   // the posting's own words echoed onto this asset
+  compareToggle: 'blocks-compare-toggle',
+  before: 'blocks-before',
+  fallback: 'blocks-fallback',     // the stored content dump, when there are no rows at all
+  empty: 'blocks-empty',
+}
+
 // ── text shaping ────────────────────────────────────────────────────────────────────────────────
 
 /**
