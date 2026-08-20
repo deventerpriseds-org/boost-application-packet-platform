@@ -33,35 +33,36 @@ export async function loadFacts(client: any, owner: string): Promise<OwnerFact[]
  * accusing people of echoing their own achievements.
  */
 export async function sourceText(): Promise<{ text: string; sources: string[]; records: ProfileRecord[] }> {
-  const parts: string[] = []
   const sources: string[] = []
   let template: { id: string; text: string } | null = null
   let mc: any = {}
   try {
     const token = await getGoogleOAuthToken()
     const t = await templateText(token, RESUME_TEMPLATE_ID, false)
-    if (t.trim()) { parts.push(t); sources.push(`resume template ${RESUME_TEMPLATE_ID}`); template = { id: RESUME_TEMPLATE_ID, text: t } }
+    if (t.trim()) { sources.push(`resume template ${RESUME_TEMPLATE_ID}`); template = { id: RESUME_TEMPLATE_ID, text: t } }
   } catch (e) { sources.push(`resume template UNREADABLE: ${String((e as any)?.message || e)}`) }
 
   try {
     const ctx = TableClient.fromConnectionString(CONN, 'MasterContext')
     for await (const e of ctx.listEntities({ queryOptions: { filter: "PartitionKey eq 'context'" } })) mc = e
-    // EVERY profile block except the do-not-use list. The first pass read only work history and the
-    // prose blocks and missed certifications that live in the skills/expertise pools — a cert stated
-    // in `softHardSkillsPool` is just as much a fact about the owner as one in the resume template.
-    // `itemsToOmit` stays excluded: it is what the owner has banned, so reading facts out of it
-    // would record a banned item as something they hold.
-    const blocks = Object.entries(mc || {})
-      .filter(([k, v]) => typeof v === 'string' && k !== 'itemsToOmit' && !k.startsWith('odata') && !['partitionKey', 'rowKey', 'etag', 'timestamp'].includes(k))
-      .map(([, v]) => v as string).filter(Boolean)
-    if (blocks.length) { parts.push(blocks.join('\n\n')); sources.push(`MasterContext (${blocks.length} blocks)`) }
   } catch (e) { sources.push(`MasterContext UNREADABLE: ${String((e as any)?.message || e)}`) }
 
-  // P8.3 - the SAME two sources, given names and boundaries. A quote has to be a substring of a
-  // STORED RECORD to be re-checkable, and an offset into the joined blob above names no record.
-  // Built here rather than by a second reader so `text` and `records` can never disagree about
-  // what the profile says.
-  return { text: parts.join('\n\n'), sources, records: profileRecords(mc, template) }
+  // ONE membership rule, in ONE place. `profileRecords` decides what counts as the profile — EVERY
+  // block except the do-not-use list (a certification stated in `softHardSkillsPool` is as much a
+  // fact about the owner as one in the resume template; `itemsToOmit` is what they have BANNED, so
+  // reading facts out of it would record a banned item as something they hold) — and `text` is those
+  // same records joined.
+  //
+  // It used to be the other way round: `text` applied its own filter and `records` applied a second
+  // one. They agreed on almost everything, which is the dangerous kind of divergence — a
+  // whitespace-only field was in one and not the other, and `records` were astral-stripped for
+  // offset safety while `text` was not. Two rules for "what is the profile" is two profiles, and an
+  // offset measured against one is meaningless against the other.
+  const records = profileRecords(mc, template)
+  const blocks = records.filter(r => !r.key.startsWith('resume_template:')).length
+  if (blocks) sources.push(`MasterContext (${blocks} blocks)`)
+
+  return { text: records.map(r => r.text).join('\n\n'), sources, records }
 }
 
 // POST /api/app/qc/facts/derive — read the source documents and record what they state.

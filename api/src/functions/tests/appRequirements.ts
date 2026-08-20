@@ -7,27 +7,24 @@ import { app, HttpRequest, HttpResponseInit, InvocationContext } from '@azure/fu
 import { resolveOwner, requireWrite } from './appSession'
 import { getPgClient } from './pgClient'
 import { buildRequirements } from './requirements'
-import { resolveAll, ProfileRecord, NO_EVIDENCE_NOTE, RESOLVER_VERSION } from './evidence'
+import { resolveAll, ProfileRecord, ResolveOptions, NO_EVIDENCE_NOTE, RESOLVER_VERSION } from './evidence'
 import { sourceText } from './appFacts'
 
 const HEADERS = { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': '*', 'Access-Control-Allow-Methods': 'GET,POST,OPTIONS' }
 
 // Columns the requirement spine needs on `opportunity`. Also declared in schema.ts SCHEMA_SQL (D1
 // puts NEW TABLES there); this keeps environments that have not re-migrated from 500ing.
-export async function ensureRequirementCols(client: any) {
-  await client.query(`
-    alter table opportunity
-      add column if not exists jd_text text,
-      add column if not exists jd_text_sha256 text,
-      add column if not exists jd_text_truncated boolean`)
-  // kind_source gained three values when mapKind's precedence was corrected. `create table if not
-  // exists` cannot widen a CHECK on a table that already exists, so an environment migrated before
-  // that change would reject every insert. Drop and re-add explicitly.
-  await client.query(`alter table requirement drop constraint if exists requirement_kind_source_check`)
-  await client.query(`alter table requirement add constraint requirement_kind_source_check
-    check (kind_source in ('posting_required_marker','posting_optional_marker','posting_section_heading','category','category_default','fallback'))`)
-  // P8.3 — the evidence store. Declared in schema.ts SCHEMA_SQL and registered in EXPECTED_TABLES;
-  // repeated here so an environment that has not re-migrated cannot 500 on the first evidence write.
+/**
+ * The P8.3 evidence store. Declared in schema.ts SCHEMA_SQL and registered in EXPECTED_TABLES;
+ * repeated here so an environment that has not re-migrated cannot 500 on the first evidence write.
+ *
+ * SEPARATE from `ensureRequirementCols` on purpose. That function drops and re-adds a CHECK
+ * constraint, which takes an ACCESS EXCLUSIVE lock on `requirement` — fine in the backfill and the
+ * requirements GET, and not fine in `evaluateArtifact`, which four artifacts of one packet can enter
+ * at the same moment. `create table if not exists` takes no lock on an existing table, so the hot
+ * path calls only this.
+ */
+export async function ensureEvidenceTable(client: any) {
   await client.query(`
     create table if not exists requirement_evidence (
       id             uuid primary key default uuid_generate_v4(),
@@ -51,6 +48,21 @@ export async function ensureRequirementCols(client: any) {
   await client.query(`create index if not exists req_evidence_req_idx on requirement_evidence(requirement_id)`)
 }
 
+export async function ensureRequirementCols(client: any) {
+  await client.query(`
+    alter table opportunity
+      add column if not exists jd_text text,
+      add column if not exists jd_text_sha256 text,
+      add column if not exists jd_text_truncated boolean`)
+  // kind_source gained three values when mapKind's precedence was corrected. `create table if not
+  // exists` cannot widen a CHECK on a table that already exists, so an environment migrated before
+  // that change would reject every insert. Drop and re-add explicitly.
+  await client.query(`alter table requirement drop constraint if exists requirement_kind_source_check`)
+  await client.query(`alter table requirement add constraint requirement_kind_source_check
+    check (kind_source in ('posting_required_marker','posting_optional_marker','posting_section_heading','category','category_default','fallback'))`)
+  await ensureEvidenceTable(client)
+}
+
 /**
  * Resolve and persist the evidence excerpt behind every requirement of one opportunity (P8.3 / R2).
  *
@@ -67,13 +79,13 @@ export async function ensureRequirementCols(client: any) {
  * Deterministic and model-free, so it is safe to re-run; each run REPLACES the previous row's
  * evidence rather than accumulating.
  */
-export async function writeEvidence(client: any, oppId: string, records: ProfileRecord[]): Promise<{
+export async function writeEvidence(client: any, oppId: string, records: ProfileRecord[], opts: ResolveOptions = {}): Promise<{
   opp_id: string; total: number; evidenced: number; unevidenced: number
   refused: number; profile_records: number
 }> {
   const rows = (await client.query(
     `select id, seq, verbatim, item_text from requirement where opp_id=$1 order by seq`, [oppId])).rows
-  const resolved = resolveAll(rows, records)
+  const resolved = resolveAll(rows, records, opts)
   const bySeq = new Map(resolved.map(r => [r.seq, r.evidence]))
   const byKey = new Map(records.map(r => [r.key, r]))
   let refused = 0
@@ -90,9 +102,15 @@ export async function writeEvidence(client: any, oppId: string, records: Profile
       if (!e) continue
       // The accusation-grade assertion, at the last moment before the claim becomes stored fact:
       // the quote must BE the named record's own bytes at those offsets. A candidate that is not is
-      // REFUSED and counted — never stored with a caveat, never rendered, never counted covered.
-      // A quote that resolves against some other record, or only against the concatenated profile,
-      // is the same defect H16 records for posting citations, in a new place.
+      // REFUSED — never stored with a caveat, never rendered, never counted covered.
+      //
+      // HONEST ABOUT WHAT THIS IS. It has never rejected anything and structurally cannot today:
+      // `locate` CONSTRUCTS its verbatim by slicing the haystack, so the comparison is a tautology
+      // (measured by the independent verifier: 4,000 randomized rounds, 0 mismatches, including
+      // every mis-anchored case H32 covers). The guarantee comes from that construction, not from
+      // this line. It stays as defence in depth against a future resolver that builds a quote some
+      // other way — but `refused` is not evidence of anything, and a population that cannot be
+      // non-zero must not be presented as a measurement.
       const rec = byKey.get(e.source_key)
       if (!rec || rec.text.slice(e.char_start, e.char_end) !== e.quote) { refused++; continue }
       await client.query(

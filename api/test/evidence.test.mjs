@@ -7,12 +7,14 @@
 // re-read. Everything else is a document repeating words back at itself.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 
 import {
   profileRecords, resolveEvidence, resolveAll, toCheckInput,
   EVIDENCE_THRESHOLD, MIN_JUDGEABLE_TOKENS, RESOLVER_VERSION, NO_EVIDENCE_NOTE, MC_KIND,
 } from '../dist/functions/tests/evidence.js'
 import { MIN_QUOTE_CHARS, MIN_QUOTE_WORDS } from '../dist/functions/tests/reviewer.js'
+import { runChecks, DEFAULT_THRESHOLDS } from '../dist/functions/tests/checks.js'
 
 const MC = {
   partitionKey: 'context', rowKey: '1', etag: 'W/"x"', timestamp: '2026-01-01',
@@ -194,4 +196,99 @@ test('an unreadable profile is not an empty profile', () => {
   assert.equal(toCheckInput(out, false).profileReadable, false,
     'the caller, not this module, decides whether the profile was READ — a resolver cannot tell')
   assert.equal(NO_EVIDENCE_NOTE, 'no evidence found in your profile')
+})
+
+// ------------------------------------------------------------------ the offender contract
+
+test('the "#<seq> ..." offender prefix survives the numerator change', () => {
+  // AC-31: this prefix is a three-way contract. It is WRITTEN by checks.ts, parsed by
+  // `artifactScore.ts` (`/^#(\d+)\b/`, to recover uncovered_requirement_ids) and parsed again by
+  // `app/src/qcRail.js` `offenderSeq` (the same regex, to filter the coverage cards). Appending the
+  // no-evidence note after the text must not disturb it, and a two-digit seq must not be read as a
+  // one-digit one.
+  const reqs = [
+    { seq: 3, kind: 'must_have', verbatim: 'Deep experience with Kubernetes cluster federation', item_text: '' },
+    { seq: 30, kind: 'must_have', verbatim: 'Proven record of building geospatial data platforms', item_text: '' },
+  ]
+  const rs = runChecks({ type: 'resume', pkg: { ResumeSummary: 'x' }, requirements: reqs,
+                         evidence: { profileReadable: true, bySeq: {} } })
+  const cov = rs.find(r => r.check_key === 'must_have_coverage')
+  const parse = o => { const m = /^#(\d+)\b/.exec(String(o).trim()); return m ? Number(m[1]) : null }
+  assert.deepEqual(cov.offenders.map(parse).sort((a, b) => a - b), [3, 30])
+  for (const o of cov.offenders) assert.match(o, /no evidence found in your profile$/)
+})
+
+// ------------------------------------------------------------------ one membership rule
+
+test('there is ONE rule for what counts as the profile, and it lives in profileRecords', () => {
+  // `sourceText()` used to apply its own filter to build `text` and hand a second, slightly
+  // different one to `profileRecords` — they disagreed on whitespace-only fields, and `records` were
+  // astral-stripped for offset safety while `text` was not. Two rules for "what is the profile" is
+  // two profiles, and an offset measured against one is meaningless against the other.
+  //
+  // Structural, because a runtime test cannot reach the Azure table this reads.
+  const body = readFileSync(new URL('../src/functions/tests/appFacts.ts', import.meta.url), 'utf8')
+  const fn = body.slice(body.indexOf('export async function sourceText'), body.indexOf('// POST /api/app/qc/facts/derive'))
+  const code = fn.split('\n').map(l => l.replace(/(^|[^:])\/\/.*$/, '$1')).join('\n')
+  assert.ok(/records\.map\(r => r\.text\)\.join/.test(code),
+    'text must be the records joined, so the two cannot describe different profiles')
+  assert.ok(!/itemsToOmit/.test(code),
+    'a second copy of the exclusion rule in sourceText is how the two filters drifted the first time')
+})
+
+// ------------------------------------------------------------------ the correction is targeted
+
+test('the denominator moves ONLY where a row was being credited that nothing measured', () => {
+  // C6 changes what the numerator COUNTS (evidence rows instead of words in the document). It must
+  // not quietly change what the numerator is counted OUT OF. Differentially verified against
+  // checks.ts at main 44d1cfc: with no excluded rows the two engines print the same "N/M" and differ
+  // only in the word ("covered" -> "evidenced"); with one eligibility row the old engine printed
+  // 1/2 and 1/5 where the new one prints 0/1 and 0/4. That gap IS the H28 defect, and it is the only
+  // place the number is allowed to move.
+  const mh = (seq, verbatim) => ({ seq, kind: 'must_have', verbatim, item_text: '' })
+  const denom = rs => Number(/(\d+)\/(\d+)/.exec(rs.find(r => r.check_key === 'must_have_coverage').observed)[2])
+  const run = reqs => denom(runChecks({
+    type: 'resume', pkg: { ResumeSummary: 'nothing relevant here' }, requirements: reqs,
+    evidence: { profileReadable: true, bySeq: {} },
+  }))
+
+  // Nothing excluded: the denominator is every must-have, exactly as before.
+  for (const n of [1, 2, 5]) {
+    const reqs = Array.from({ length: n }, (_, i) => mh(i, `Deep experience with roadmap strategy number ${i}`))
+    assert.equal(run(reqs), n, `${n} must-haves, none excluded — the denominator must still be ${n}`)
+  }
+
+  // One eligibility row: it leaves the denominator instead of being counted as covered.
+  const live = [
+    mh(0, 'Experience in leading technology operations across utilities'),
+    mh(1, 'Reside in the East Coast of the United States'),
+    mh(2, 'Strong understanding of software engineering practices'),
+    mh(3, 'IoT data, models, geospatial data, and AI/ML'),
+    mh(4, 'Ability to manage remote engineering teams'),
+  ]
+  assert.equal(run(live), 4, 'the live Trinnex shape: 5 must-haves, 1 unreachable, 4 judged')
+})
+
+// ------------------------------------------------------------------ the thresholds have an owner
+
+test('the evidence thresholds are seeded defaults with a real owner path, not constants', () => {
+  // They decide whether a candidate's requirement counts as evidenced, so CLAUDE.md's
+  // no-hardcoded-config rule applies to them exactly as it does to every threshold in checks.ts.
+  // `ResolveOptions` being overridable in principle while every shipped caller passed the literal
+  // is that rule broken with a settings hook attached — found by the independent verifier (D-F).
+  assert.equal(DEFAULT_THRESHOLDS.evidenceThreshold, EVIDENCE_THRESHOLD)
+  assert.equal(DEFAULT_THRESHOLDS.evidenceMinTokens, MIN_JUDGEABLE_TOKENS)
+
+  // The production caller passes them through, and the store column exists to hold them.
+  const appChecks = readFileSync(new URL('../src/functions/tests/appChecks.ts', import.meta.url), 'utf8')
+  assert.match(appChecks, /chk_evidence_threshold/, 'no per-owner column, no owner path')
+  assert.match(appChecks, /chk_evidence_min_tokens/)
+  assert.match(appChecks, /writeEvidence\([\s\S]{0,200}threshold: thresholds\.evidenceThreshold/,
+    'the resolver must receive the owner value, not just the checks')
+
+  // And an owner value actually changes the answer.
+  const recs = profileRecords(MC, TEMPLATE)
+  const req = 'Owned the digital water technology roadmap with Product across three business units'
+  assert.equal(resolveEvidence(req, recs, { threshold: 0.99 }), null)
+  assert.ok(resolveEvidence(req, recs, { threshold: 0.4 }))
 })

@@ -176,8 +176,13 @@ export function profileRecords(
  *
  * SEEDED at 0.7 — deliberately the same value `checks.COVERAGE_THRESHOLD` used for the numerator
  * this replaces, so moving the numerator from the document to the profile does not quietly loosen
- * or tighten it at the same time. Overridable per call; nothing here may become a permanent
- * constant.
+ * or tighten it at the same time.
+ *
+ * A SEEDED DEFAULT, not a constant, and reachable as one: it is carried on `CheckThresholds` as
+ * `evidenceThreshold`, stored per owner in `owner_search_prefs.chk_evidence_threshold`, and passed
+ * into `writeEvidence` on the production path. `ResolveOptions` being overridable in principle
+ * while every shipped caller used the literal is the no-hardcoded-config rule broken with a
+ * settings hook attached.
  */
 export const EVIDENCE_THRESHOLD = 0.7
 /** Below this many content words a requirement carries too little signal to evidence either way. */
@@ -214,8 +219,10 @@ export function resolveEvidence(
   records: ProfileRecord[],
   opts: ResolveOptions = {},
 ): EvidenceRow | null {
-  const threshold = opts.threshold ?? EVIDENCE_THRESHOLD
-  const minTokens = opts.minTokens ?? MIN_JUDGEABLE_TOKENS
+  // `??` not `||`: a caller passing 0 means 0, and an owner who has not set the column passes
+  // undefined, which is what the seeded default is for.
+  const threshold = typeof opts.threshold === 'number' ? opts.threshold : EVIDENCE_THRESHOLD
+  const minTokens = typeof opts.minTokens === 'number' ? opts.minTokens : MIN_JUDGEABLE_TOKENS
 
   const text = String(requirementText || '')
   const want = wantTokens(text)

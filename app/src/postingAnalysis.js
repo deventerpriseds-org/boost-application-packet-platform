@@ -13,6 +13,41 @@
 //      looked" are different states and must print differently.
 //   4. Model output is never presented under a heading that claims the employer wrote it.
 
+/**
+ * Every `data-qc` selector the posting-analysis surfaces render.
+ *
+ * Same constant, same rule, same reason as QC_HOOKS (qcRail.js), GATE_HOOKS (assetGate.js),
+ * BLOCK_HOOKS (assetBlocks.js) and PACKET_HOOKS (packetBuilder.js). This screen was the one that
+ * ALREADY had hooks - 28 of them - and so was left hand-typing every one while the screens that had
+ * none were given constants. That gap is not cosmetic: the cross-screen collision test unions the
+ * hook CONSTANTS, so 28 of the app's selectors were the only ones never checked for collisions, and
+ * P8.7 hand-typed a 29th (`keyword-columns`) rather than closing it.
+ */
+export const POSTING_HOOKS = {
+  card: 'posting-analysis',
+  stale: 'posting-stale',
+  tab: 'jd-tab',
+  panel: 'jd-tabpanel',
+  legend: 'req-legend',
+  group: 'req-group',
+  groupCount: 'group-count',
+  kindSourceSplit: 'kind-source-split',
+  row: 'req-row',
+  quote: 'req-quote',
+  paraphrase: 'req-paraphrase',
+  kindSource: 'kind-source',
+  keywords: 'ats-keywords',
+  libraryState: 'keyword-library-state',
+  modelKeywords: 'model-keywords',
+  keywordColumns: 'keyword-columns',   // carries data-qc-cols - P8.7's breakpoint, selectable
+  keywordGroup: 'keyword-group',
+  tally: 'keyword-tally',
+  matchEstimate: 'match-estimate',
+  matchEstimateButton: 'match-estimate-button',
+  analysisRunning: 'analysis-running',
+  analysisResult: 'analysis-result',
+}
+
 // ── requirement rows ────────────────────────────────────────────────────────────────────────────
 
 export const KIND_ABBR = { must_have: 'MH', nice_to_have: 'NTH', responsibility: 'RESP' }
@@ -156,6 +191,32 @@ export function keywordLibraryState(score) {
     headline: `ATS keyword coverage: ${coverage}%`,
     detail: 'Measured against the published term library, counting only scoreable entries.',
   }
+}
+
+// ── the keyword list's breakpoint (P8.7) ────────────────────────────────────────────────────────
+// "the ATS list is 2-up >= 1040px and 1-up below". The number lives HERE, and the component reads
+// its column count from keywordColumns() rather than from a CSS media query, for two reasons:
+//   1. one source. A media query in theme.css plus a threshold in a module is two numbers that
+//      have to agree, and nothing would notice the day they stopped.
+//   2. it is assertable. The column count is rendered as `data-qc-cols`, so ui-verify.yml - which
+//      can set a viewport width but can only SELECT, never read a computed style - can prove the
+//      breakpoint with `[data-qc="keyword-columns"][data-qc-cols="2"]`. A media query is invisible
+//      to it.
+// The measured width is the VIEWPORT's, matching the sibling rule in the same backlog item ("the
+// right column is the assistant, docked >= 1440px only"), which is a viewport rule too.
+export const KEYWORD_2UP_MIN = 1040
+
+/** 2 columns at or above the breakpoint, 1 below. An unusable width is 1 - never 0, never NaN. */
+export function keywordColumns(width) {
+  const w = Number(width)
+  return Number.isFinite(w) && w >= KEYWORD_2UP_MIN ? 2 : 1
+}
+
+/** The grid track list for that count. Kept beside the rule so the two cannot describe different
+ *  layouts, and `minmax(0, 1fr)` rather than `1fr` so a long unbroken term cannot widen a column
+ *  past its share and push the card into a horizontal scroll. */
+export function keywordGridTemplate(width) {
+  return keywordColumns(width) === 2 ? 'minmax(0, 1fr) minmax(0, 1fr)' : 'minmax(0, 1fr)'
 }
 
 // ── the posting body on the JD step (AC31) ──────────────────────────────────────────────────────

@@ -23,7 +23,7 @@ import { mergeFieldsFor } from './insertions'
 import { normalizePostingText } from './jdText'
 import { checkAgainstFacts, OwnerFact } from './ownerFacts'
 import { scanEcho } from './figureEcho'
-import { EvidenceInput, NO_EVIDENCE_NOTE } from './evidence'
+import { EvidenceInput, NO_EVIDENCE_NOTE, EVIDENCE_THRESHOLD, MIN_JUDGEABLE_TOKENS as EVIDENCE_MIN_TOKENS } from './evidence'
 
 export type CheckState = 'pass' | 'warn' | 'fail' | 'not_applicable'
 export type CheckEngine = 'deterministic' | 'reviewer'
@@ -51,6 +51,14 @@ export interface CheckThresholds {
   execProfileWords: [number, number]
   coreAccomplishmentsWords: [number, number]
   coverWords: [number, number]
+  /**
+   * P8.3 — how much of a requirement a profile excerpt must account for before it evidences it,
+   * and how short an excerpt may be. They decide whether a candidate's requirement counts as
+   * covered, which makes them exactly the kind of value this interface exists to keep out of the
+   * code: the same seeded-default-then-owner-overridable rule as every threshold above it.
+   */
+  evidenceThreshold: number
+  evidenceMinTokens: number
 }
 
 /** Seeded first values, taken from the live prompt. The owner can change every one of them. */
@@ -67,6 +75,8 @@ export const DEFAULT_THRESHOLDS: CheckThresholds = {
   execProfileWords: [50, 55],
   coreAccomplishmentsWords: [98, 125],
   coverWords: [250, 400],
+  evidenceThreshold: EVIDENCE_THRESHOLD,
+  evidenceMinTokens: EVIDENCE_MIN_TOKENS,
 }
 
 // Phrases and punctuation that read as machine-written. Kept as data so they can move to the
@@ -257,20 +267,27 @@ export function runChecks(input: CheckInput): CheckResult[] {
   //     BOTH documents can be legitimate, and the offender list is the point: it names the field
   //     and the exact string so a human decides in one look. A gate that reddens on a shared number
   //     is a gate people learn to click past.
-  const echoFields = present.length ? present : []
+  const echoFields = present
   if (echoFields.length) {
     const scans = echoFields.map(f => ({ f, r: scanEcho(String(pkg[f]), input.postingText || '', input.profileText || '') }))
-    const naReason = !String(input.postingText || '').trim()
-      ? 'no employer posting text for this opportunity'
-      : !String(input.profileText || '').trim()
-        ? 'no profile text — an echo cannot be told from the candidate\'s own figure'
-        : ''
-    if (naReason) {
-      out.push(na('posting_figure_echo', naReason, "no generated field states a figure that appears only in the posting"))
+    // The SCAN decides whether it could look, not this function. Re-deriving it here from the raw
+    // strings tested a different thing: `jd_real` is HTML, so a markup-only posting (`<p></p>`) is a
+    // non-empty raw string and an empty posting — and this check reported `pass` on a document it
+    // had never compared to anything, then `gateFor` turned that into a green gate. The profile
+    // half was worse: a markup-only profile produced false ACCUSATIONS, naming figures as stolen
+    // because the thing that would have exonerated them read as absent.
+    const blocked = scans.find(x => x.r.notApplicable)
+    if (blocked) {
+      out.push(na('posting_figure_echo', blocked.r.reason || 'nothing to compare against',
+                   'no generated field states a figure that appears only in the posting'))
     } else {
       const hits = scans.flatMap(({ f, r }) => r.echoes.map(e => `${f}: ${e.figure.raw}`))
-      const kept = scans.reduce((n, { r }) => n + r.shared.length, 0)
-      const keptNote = kept ? `; ${kept} figure(s) kept — also in the profile` : ''
+      // CITE, do not count. C5 says a shared figure is kept AND cited, and R2 defines evidenced as
+      // "a verbatim excerpt from the stored profile can be shown next to it". "2 figure(s) kept"
+      // told the owner nothing they could check — which figures, and on what evidence, was thrown
+      // away with `profileRaw`.
+      const kept = scans.flatMap(({ f, r }) => r.shared.map(e => `${f}: ${e.figure.raw} (your profile states ${e.profileRaw})`))
+      const keptNote = kept.length ? `; kept as yours — ${kept.join(', ')}` : ''
       out.push(hits.length
         ? bad('posting_figure_echo', `${hits.length} figure(s) taken from the posting${keptNote}`,
               "no generated field states a figure that appears only in the posting", hits, 'warn')
@@ -278,7 +295,6 @@ export function runChecks(input: CheckInput): CheckResult[] {
              "no generated field states a figure that appears only in the posting"))
     }
   }
-
 
   const tells = AI_TELLS.filter(p => allText.toLowerCase().includes(p))
   const emDashes = (allText.match(/—/g) || []).length

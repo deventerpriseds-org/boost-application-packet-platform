@@ -1,5 +1,60 @@
 # Project Memory — boost-application-packet-platform
-Last updated: 2026-08-01
+Last updated: 2026-08-20
+
+## P8.2 / R3 — a check that NAMES people must err toward silence (2026-08-20) ✅
+`api/src/functions/tests/figureEcho.ts` + `posting_figure_echo` in `checks.ts`. PR #10, 292/292
+green, CI green (run 32384079631). Pure module — no pg, no network, no model call, so it costs no
+tokens and can state a byte offset.
+
+**Three-way split, and the middle case is the whole point:** posting-only → `echo`; posting AND
+profile → `shared_with_profile`, **KEPT and citable** (C5: R2 evidence beats a literal R3 — if the
+profile genuinely says 60 and the posting asks for 60+, stripping it deletes the candidate's own
+true achievement); not in the posting → untouched.
+
+**Wiring facts worth not rediscovering:**
+- Posting text MUST come from `resolvePostingSource` (the employer's own bytes), NEVER
+  `groundingText` — which falls back to `jd_summary`, i.e. OUR model's output. Accusing a candidate
+  of echoing our own summary is an accusation built on a fabrication.
+- Profile text comes from `appFacts.sourceText()`, now **exported rather than duplicated**. A second
+  profile reader is a second answer to "what does the candidate own", and the day they disagree the
+  check accuses people of echoing their own achievements.
+- Missing either side ⇒ `not_applicable`, never `pass` and never an accusation.
+- `warn`, not `fail` — a shared number can be legitimate and P8.1's correction path supersedes it.
+
+**Five defects found while building it, each proven by revert. The pattern in all of them: a
+scanner that is right about the rare case and wrong about the common one.**
+- **H24** — the scanner reported a figure that was NOT IN THE TEXT. `/(\d…)\s*(%|percent)\b/`
+  never matches "40% growth" (`%` and the following space are both non-word, so the trailing `\b`
+  has no boundary), and the count scanner then **backtracked past its own failing lookahead** to
+  match "4". General rule: **a regex tail that can FAIL is a tail the engine backtracks past.**
+  Exclude by span/overlap guard, never by a lookahead over characters you also match.
+- **H25** — the backlog's literal rule ("no numeric string that also appears in `jd_real`") accused
+  "Skill number 3", "Other skill 3" and "One two three four five" of stealing "three business
+  units". **A bare number is not a claim; "3 business units" is.** Unmarked figures key on the
+  number AND the noun; marked ones (`$18M`, `60+`) key on themselves — decided by the GENERATED
+  figure, so an unmarked answer to a marked ask ("60 sites" vs "60+ sites") still lands.
+- Years excluded (1900-2099, bare, no `+`) — "since 2019" vs "founded in 2019" is the calendar.
+- A spelled multiplier is ONE figure ("one million" = 1e6) and the bare word never is, so "a million
+  things to fix" claims nothing.
+- `/e?s$/` stemmed "sites" → "sit" and split "business" from "businesses".
+
+### The discipline that caught all of it — REVERT-PROVE EVERY GUARD
+After writing each test, undo the fix in the source, rebuild, and confirm the test FAILS. Two of my
+own guards turned out to be **vacuous** and would have shipped as untested belt-and-braces:
+1. a `(?!\d)` anti-backtrack guard that another fix already made unreachable — removed, and the
+   comment now says plainly which fix the test actually pins;
+2. a source-grep whose own regex used `[^)]*` to reach a construct in a pattern **containing `)`**,
+   so it could never match what it was scanning for — rewritten line-scoped.
+A test that cannot fail is worse than no test, and you only find out by reverting.
+
+## Lane hygiene — a lane that has not pushed a branch has produced NOTHING (2026-08-20) ⚠
+The P3 remediation subagent ran, died without pushing, and left **no branch on origin** — the work
+was gone with no trace except `.claude/QC-EVIDENCE-PLAN.md` still listing it as in flight, and that
+file's RESUME MARKER six phases stale (said P2 while the train was at P8). Restarted as a fresh
+lane, not a resume. **Verify a lane by `git branch -r`, never by a summary or a tracker entry.**
+The plan file now carries a lane table (file ownership per lane, pre-allocated H-ids so two lanes
+cannot collide on one number) and a blocked-on table.
+
 
 ## ⛔ STANDING OWNER RULE — no answer to a direct question without ROOT PROOF (2026-08-01)
 When the owner asks a direct factual question ("why is X", "what's the cause", "is X true"), DO NOT
@@ -1394,7 +1449,10 @@ Coverage is no longer "did the generated document repeat enough of the requireme
   profile into NAMED records; `resolveEvidence()` finds the excerpt and guarantees it is exactly
   `record.text.slice(char_start, char_end)`. Reuses `requirements.locate()` and `swaps.itemTokens()`
   rather than growing a second matcher.
-- `appFacts.sourceText()` now returns `{ text, sources, records }` — still the ONLY profile reader.
+- `appFacts.sourceText()` now returns `{ text, sources, records }` — still the ONLY profile reader,
+  and `text` is now the RECORDS JOINED. It used to apply a second, slightly different filter of its
+  own; two rules for "what is the profile" is two profiles, and an offset into one is meaningless
+  against the other.
 - `requirement_evidence` table (in SCHEMA_SQL + EXPECTED_TABLES; H11 extended). NOT columns on
   `requirement`, and nothing writes `requirement.coverage` — that column already means "could not be
   located in the POSTING" and merging a second population into it makes both unreadable.
@@ -1405,5 +1463,7 @@ Coverage is no longer "did the generated document repeat enough of the requireme
   coverage. It is also what keeps P2.3's per-asset score per-asset once coverage becomes
   opportunity-level.
 
-**H27, H28, H29, H30** in `api/test/hardening.test.mjs`; all four proved by reverting the fix.
+**H28, H29, H30, H31, H32** in `api/test/hardening.test.mjs`; all five proved by reverting the fix.
+H32 came from the independent verifier (`docs/qc-evidence/VERIFY-P8.3.md`), as did the qcRail fix.
+(Renumbered from H27-H30 on merge: `main` had already taken H26 and H27, and H26 asserts one-ID-one-case.)
 316/316 api tests, app builds clean.
