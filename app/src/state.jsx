@@ -99,7 +99,27 @@ export function AppProvider({ children }) {
   }, [])
 
   useEffect(() => {
+    // BOTH, and the second one is the fix.
+    //
+    // The Compass dark palette in `tokens/fig-tokens.css` is defined on
+    // `:root[data-theme="dark"], .dark` — 104 tokens. This effect toggled only `.proto-dark`,
+    // which matches NEITHER selector, so that palette had never once applied. `theme.css`'s
+    // `.proto-dark` block is a later hand-written patch covering 33 tokens, about a third of it,
+    // and everything outside those 33 kept its LIGHT value in dark mode.
+    //
+    // That is why an accent pill was unreadable: `--surface-brand-subtle` is one of the 33 and
+    // went near-black, while `--surface-brand-default` is one of the missing 71 and stayed a
+    // mid-dark teal — so the pill rendered dark teal on near-black teal, measured at 1.90:1
+    // against a 4.5:1 requirement, across 15+ live sites. The pills were the visible symptom;
+    // the disease was dark mode running on a third of its palette.
+    //
+    // `theme.css` still says dark "just works ... without a separate .proto-dark block". It was
+    // right about the mechanism and wrong about the trigger. Setting the attribute makes the
+    // comment true. `.proto-dark` stays: its 33 overrides are deliberate skin choices that layer
+    // ON TOP of the real palette, and removing them is a separate, visual decision.
     document.documentElement.classList.toggle('proto-dark', dark)
+    if (dark) document.documentElement.setAttribute('data-theme', 'dark')
+    else document.documentElement.removeAttribute('data-theme')
   }, [dark])
 
   const toast = useCallback((msg) => {
