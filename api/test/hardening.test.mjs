@@ -1615,3 +1615,123 @@ test('H39d: EVERY named CHECK on remediation_loop has an idempotent replacement'
   assert.equal(anon.length, 0,
     'an anonymous CHECK on remediation_loop — it gets an auto-name like remediation_loop_check4 and becomes unreplaceable')
 })
+
+// ---------------------------------------------------------------------------------------------
+// H41 — A first-match scan over an ORDERED catalogue made one of its entries unreachable, and the
+// unreachable entry was the more specific one.
+//
+// Measured against the built module, not inferred. `checkAgainstFacts` (ownerFacts.ts) walks
+// `FACT_CATALOGUE` in order and returns on the FIRST def whose `asks` matches. Entry 0 is
+// `experience.years_total` (`/\d+\+?\s*(years|yrs)/`); entry 1 is `experience.years_leadership`
+// (the same, PLUS a leadership word) — a strict subset. So:
+//
+//   checkAgainstFacts('Requires 10+ years of engineering leadership experience', facts)
+//     -> { fact_key: 'experience.years_total', ... }        every time, for every input
+//
+// and no counterexample can exist by construction. Two consequences, both live:
+//   * a posting asking for 10 years of LEADERSHIP is answered by TOTAL years of experience, so
+//     22 total years "satisfies" it for someone who has led for three;
+//   * an owner who recorded their leadership years and not their total years gets
+//     "no value recorded" — the fact they DID record is invisible.
+//
+// The invariant, asserted rather than the incident: in any first-match catalogue, a def whose
+// matcher is a strict subset of an earlier def's can never be selected. That is a property of the
+// catalogue's ORDER, so it is checked by ordering, not by naming the two entries that collide
+// today. Ordering the catalogue most-specific-first would change which requirements the GATE treats
+// as settled (`checks.ts` drops fact-resolved rows from `coverable`), which is why it is recorded
+// here and in .claude/DEFERRED.md rather than changed inside the P8.4 lane.
+test('H41: a first-match fact catalogue never hides a specific entry behind a general one', async () => {
+  const { FACT_CATALOGUE, checkAgainstFacts } = await import('../dist/functions/tests/ownerFacts.js')
+
+  // Probe strings that a HUMAN would file under the more specific entry. If an earlier, broader
+  // entry answers them, the later one is dead for that input.
+  const PROBES = [
+    'Requires 10+ years of engineering leadership experience',
+    '15 years managing engineering teams',
+    '20+ years in leadership roles',
+  ]
+  const shadowed = []
+  for (const probe of PROBES) {
+    const matching = FACT_CATALOGUE.filter(d => d.asks.test(probe))
+    if (matching.length < 2) continue
+    // Every def after the first that matches this probe is unreachable FOR THIS PROBE.
+    for (const d of matching.slice(1)) shadowed.push({ probe, hidden: d.key, by: matching[0].key })
+  }
+
+  // This is a KNOWN, RECORDED shadow (DEFERRED). The guard's job is to stop a NEW one appearing
+  // and to fail the moment the known one is fixed without this case being updated — so it pins the
+  // exact set rather than asserting "none", which would be red on arrival and get switched off.
+  const KNOWN = 'experience.years_leadership behind experience.years_total'
+  const found = [...new Set(shadowed.map(s => `${s.hidden} behind ${s.by}`))]
+  assert.deepEqual(found, [KNOWN],
+    `the set of shadowed fact defs changed: ${JSON.stringify(found)} — either a new one appeared, or the known one was fixed and this case must be updated`)
+
+  // And the behavioural half, so the case is about what the function DOES, not how it is spelled:
+  // with ONLY the specific fact recorded, the scan still answers with the general one.
+  const facts = [{ key: 'experience.years_leadership', value: '14', value_num: 14, source: 'owner_stated', confirmed_at: 'x' }]
+  const v = checkAgainstFacts(PROBES[0], facts)
+  assert.equal(v.fact_key, 'experience.years_total')
+  assert.equal(v.verdict, 'unknown', 'the recorded leadership fact is invisible to this scan')
+})
+
+// ---------------------------------------------------------------------------------------------
+// H42 — A stored setting that production READS and nothing WRITES is a constant wearing a
+// settings-shaped costume.
+//
+// Measured at c360e6e: `owner_search_prefs.chk_skill_max_chars … chk_evidence_min_tokens` are added
+// by `ensureCheckPrefs` and read by `loadThresholds` (appChecks.ts), and the only route that writes
+// that table (`appSearchPrefs.ts`) sets `target_geo_ids`, `remote_only` and three `temp_*` columns —
+// none of the `chk_*` ones. `grep -rn "chk_" app/src` returns nothing. So every threshold the
+// checks engine calls "overridable per owner" is changeable only by hand-written SQL, which is the
+// no-hardcoded-config rule satisfied on paper and not in the product.
+//
+// The invariant: a per-owner settings column that production reads must have a writer somewhere in
+// the API. Asserted by READING THE COLUMN NAMES OUT OF THE ENSURE STATEMENT rather than listing
+// them here, so adding a tenth column cannot escape the guard by not being in a hardcoded list —
+// the way H11's hand-maintained table array can.
+test('H42: every per-owner settings column production reads has a writer that can set it', () => {
+  const apiDir = new URL('../src/functions/tests/', import.meta.url)
+  const read = (f) => readFileSync(new URL(f, apiDir), 'utf8')
+  const sources = ['appChecks.ts', 'appSearchPrefs.ts', 'appDimensions.ts', 'jdSweep.ts', 'appFacts.ts']
+    .map(f => { try { return [f, read(f)] } catch { return null } })
+    .filter(Boolean)
+
+  // Columns any module ADDS to owner_search_prefs.
+  const declared = new Set()
+  for (const [, body] of sources) {
+    for (const m in [] ) void m
+    for (const m of stripComments(body).matchAll(/add column if not exists\s+([a-z0-9_]+)/g)) declared.add(m[1])
+  }
+  assert.ok(declared.size >= 5, `only ${declared.size} settings columns found — the scan has gone stale`)
+
+  // Columns any module WRITES.
+  //
+  // Read the SQL, do not pattern-match the JavaScript around it. The first version of this scan
+  // looked for `col=$1` and missed every clause built dynamically — `sets.push(\`temp_hot_hours=$${
+  // vals.length}\`)` in appSearchPrefs, `backoff_until=now() + …` in jdSweep — and so accused six
+  // settings that DO have writers. A guard that names innocent offenders is one people switch off.
+  // So: take the SQL text (every backtick string in these files), and collect `col =` assignments
+  // from it.
+  const written = new Set()
+  for (const [, body] of sources) {
+    const b = stripComments(body)
+    for (const lit of b.match(/`[^`]*`/g) || []) {
+      for (const m of lit.matchAll(/\b([a-z][a-z0-9_]*)\s*=\s*(?!=)/g)) written.add(m[1])
+    }
+  }
+
+  const unwritable = [...declared].filter(c => !written.has(c)).sort()
+  // The KNOWN set, pinned. Same reasoning as H41: asserting "none" would be red on arrival for a
+  // pre-existing gap this lane did not create, and a guard that is red on arrival gets switched
+  // off. Pinning it fails on a NEW unwritable setting AND on the known ones being fixed.
+  const KNOWN = [
+    'chk_cover_words_max', 'chk_cover_words_min', 'chk_evidence_min_tokens', 'chk_evidence_threshold',
+    'chk_expertise_words', 'chk_relevant_allowance', 'chk_relevant_max_chars', 'chk_skill_max_chars',
+    'chk_skills_total_max', 'chk_skills_total_min',
+  ]
+  assert.deepEqual(unwritable, KNOWN,
+    `the set of unwritable per-owner settings changed: ${JSON.stringify(unwritable)} — a new setting shipped with no way for the owner to change it, or the known ones were fixed and this case must be updated`)
+
+  // P8.4's own setting is NOT in that set, and its writer is exercised by dimensionsDb.test.mjs.
+  assert.ok(written.has('cmp_dimensions'), 'the dimension set shipped with no writer — the exact shape this case exists to stop')
+})

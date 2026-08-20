@@ -21,6 +21,8 @@ import {
   KIND_ABBR, kindSourceNote, noQuoteReason, isQuoted,
   groupRequirements, modelKeywords, summarizeKindSource, keywordLibraryState,
   keywordColumns, keywordGridTemplate, POSTING_HOOKS,
+  fitLabel, FIT_COLOR, comparisonState, compareColumns, compareGridTemplate,
+  COMPARE_COLUMNS, COMPARE_SCOPE_NOTE,
 } from '../postingAnalysis.js'
 import { HIGHLIGHT_CLASS } from '../highlight.js'
 
@@ -51,6 +53,149 @@ export function ProfileLink({ children }) {
 }
 
 const fmt = (n) => (typeof n === 'number' ? n.toLocaleString() : n)
+
+// ── the comparison: posting on the left, profile on the right (SPEC 4.2, P8.4) ──────────────────
+//
+// This is what the JD step is FOR. The extraction card below it says what the parser pulled out of
+// the ad; this says how those lines compare to what the candidate's stored profile can evidence.
+//
+// Every cell is a stored value. The posting cell is `requirement.verbatim` where the employer's
+// words were located and `item_text` where they were not - and the row SAYS which, because
+// requirements.ts is explicit that the paraphrase is "Never presented as a quote". The profile cell
+// is a `requirement_evidence` excerpt or a confirmed `owner_fact`, named either way. Nothing here is
+// model prose, and nothing here is computed in the browser: the grade and the reason are read off
+// the row the API stored, so the number on screen and the number a reviewer can query with one SQL
+// statement are the same number.
+function CompareRow({ r, vw }) {
+  const na = r.fit === 'not_applicable'
+  const wide = compareColumns(vw) === 4
+  return (
+    <div data-qc={POSTING_HOOKS.compareRow} data-qc-dimension={r.key} data-qc-fit={r.fit}
+      style={{ display: 'grid', gridTemplateColumns: compareGridTemplate(vw), gap: 10, padding: '11px 14px',
+               borderBottom: '1px solid var(--proto-rule-soft)', alignItems: 'baseline' }}>
+      <span style={{ fontSize: 12.5, fontWeight: 600 }}>{r.label}</span>
+
+      <span style={{ fontSize: 12, color: 'var(--proto-ink2)' }}>
+        {r.posting ? r.posting.text : <em style={{ color: 'var(--proto-ink3)' }}>this posting does not ask</em>}
+        {r.posting && !r.posting.quoted && (
+          <span className="px-small" style={{ display: 'block', color: 'var(--proto-ink3)' }}>
+            Model paraphrase - not the employer's wording.
+          </span>
+        )}
+      </span>
+
+      <span style={{ fontSize: 12 }}>
+        {r.profile ? r.profile.value : <em style={{ color: 'var(--proto-ink3)' }}>nothing recorded on this axis</em>}
+        {r.profile && (
+          <span className="px-small" style={{ display: 'block', color: 'var(--proto-ink3)' }}>
+            {r.profile.source === 'fact' ? 'From your profile facts: ' : 'From '}{r.profile.source_label}
+          </span>
+        )}
+      </span>
+
+      <span style={{ display: 'flex', flexDirection: 'column', gap: 3, alignItems: wide ? 'flex-end' : 'flex-start' }}>
+        <span data-qc={POSTING_HOOKS.compareFit} style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+          <span style={{ width: 7, height: 7, borderRadius: '50%', background: FIT_COLOR[r.fit] }} />
+          <span style={{ fontSize: 11.5, fontWeight: 700, color: FIT_COLOR[r.fit] }}>
+            {fitLabel(r.fit, r.shortfall)}
+          </span>
+        </span>
+        {!na && r.total ? (
+          <span className="px-small" style={{ color: 'var(--proto-ink3)' }}>{r.covered} of {r.total} line(s)</span>
+        ) : null}
+      </span>
+
+      {/* The reason. Mandatory for every moderate and weak grade, and for every ungraded row - a
+          row that says "not measured" with no reason is indistinguishable on screen from one that
+          says "measured and fine". It spans the whole row rather than sitting in the Fit column,
+          because it is a sentence about both sides. */}
+      {(r.note || r.reason) && (
+        <span data-qc={POSTING_HOOKS.compareNote} className="px-small"
+          style={{ gridColumn: '1 / -1', color: na ? 'var(--proto-ink3)' : 'var(--proto-ink2)',
+                   textTransform: 'none', lineHeight: 1.55, marginTop: 2 }}>
+          {r.note || r.reason}
+        </span>
+      )}
+    </div>
+  )
+}
+
+export function ProfileCompareCard({ comparison, onOpenRequirements }) {
+  const vw = useViewportWidth()
+  const cols = compareColumns(vw)
+  const st = comparisonState(comparison)
+  const rows = st.rows || []
+  const summary = comparison && comparison.summary ? comparison.summary : null
+  const set = comparison && comparison.set ? comparison.set : null
+
+  return (
+    <div className="px-box" data-qc={POSTING_HOOKS.compare} data-qc-state={st.state} style={{ padding: 16 }}>
+      <div style={{ fontSize: 15, fontWeight: 700 }}>This posting, against your profile</div>
+      <div className="px-small" style={{ marginTop: 3, color: 'var(--proto-ink2)', lineHeight: 1.6 }}>
+        {st.headline}{st.detail ? ' ' : ''}{st.detail}
+      </div>
+
+      {/* Where the dimension set came from. A silent fallback and a chosen configuration produce
+          identical rows, and the difference is exactly what a reader needs to know. */}
+      {set && (
+        <div className="px-small" data-qc={POSTING_HOOKS.compareSetSource} data-qc-source={set.source}
+          style={{ marginTop: 8, color: 'var(--proto-ink3)' }}>
+          {set.source === 'owner'
+            ? `Your dimension set for ${set.family}.`
+            : `Seeded dimension set for ${set.family} - you have not changed it yet.`}
+          {set.warning ? ` ${set.warning}` : ''}
+        </div>
+      )}
+
+      {rows.length === 0 ? (
+        <div className="px-note" data-qc={POSTING_HOOKS.compareEmpty} style={{ marginTop: 12 }}>
+          {st.headline} {st.detail}
+        </div>
+      ) : (
+        <>
+          {/* The summary counts what it says it counts, and names what it excluded rather than
+              absorbing it. `ratio` is null whenever any dimension went ungraded - a composite over
+              a population with holes in it is the number a reviewer trusts most and the one most
+              likely to be wrong. */}
+          {summary && (
+            <div className="px-small" data-qc={POSTING_HOOKS.compareSummary} style={{ marginTop: 10, color: 'var(--proto-ink2)' }}>
+              {summary.strong} strong · {summary.moderate} moderate · {summary.weak} weak
+              {summary.notApplicable > 0 && (
+                <> · {summary.notApplicable} not compared ({summary.notApplicableLabels.join(', ')}), not counted either way</>
+              )}
+            </div>
+          )}
+
+          <div data-qc={POSTING_HOOKS.compareCols} data-qc-cols={cols}
+            style={{ marginTop: 12, border: '1px solid var(--proto-rule-soft)', borderRadius: 8, overflow: 'hidden' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: compareGridTemplate(vw), gap: 10,
+                          padding: '9px 14px', background: 'var(--proto-panel)',
+                          borderBottom: '1px solid var(--proto-rule-soft)' }}>
+              {(cols === 4 ? COMPARE_COLUMNS : [COMPARE_COLUMNS[0]]).map((c, i) => (
+                <span key={c} className="px-label" style={{ textAlign: i === 3 ? 'right' : 'left' }}>{c}</span>
+              ))}
+            </div>
+            {rows.map((r) => <CompareRow key={r.key} r={r} vw={vw} />)}
+          </div>
+        </>
+      )}
+
+      <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', marginTop: 12 }}>
+        <span className="px-small" data-qc={POSTING_HOOKS.compareScope}
+          style={{ textTransform: 'none', flex: 1, color: 'var(--proto-ink2)' }}>
+          {COMPARE_SCOPE_NOTE}
+        </span>
+        {/* R5: a count that cannot be opened is a dead end, so the only control here lands
+            somewhere real - the extracted lines the comparison was built from. */}
+        {rows.length > 0 && (
+          <button className="px-btn" style={{ fontSize: 12 }} onClick={onOpenRequirements}>
+            See the lines this was built from
+          </button>
+        )}
+      </div>
+    </div>
+  )
+}
 
 // ── one extracted line ──────────────────────────────────────────────────────────────────────────
 function RequirementRow({ r }) {

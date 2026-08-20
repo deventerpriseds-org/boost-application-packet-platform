@@ -2169,3 +2169,34 @@ green. Exactly inverted.
 A guard written *to* a lesson can still be inert — F4 is the proof. And three of the four findings
 share one root: **source-reading guards cannot see what a database already has.** The only thing that
 found them was running the migration against a populated database that had the previous revision.
+
+---
+
+## P8.4 — comparison dimensions (`claude/qc-p8-4-dimensions`, off `c360e6e`)
+
+**Request:** backlog P8.4 — persist the comparison dimensions with the posting requirement, the
+profile value, a graded fit and an optional qualifier note; make the JD step show the comparison
+rather than pipeline counters.
+
+**ACs written cold by an independent session** before any code: `docs/qc-evidence/AC-P8.4.md`
+(55 criteria, branch `claude/qc-p8-4-ac`). Three of its findings were ground-truthed defects in what
+already existed, not predictions — and one of them (`chk_*` has no writer) is now `H35`.
+
+**Built:** `dimensions.ts` (engine), `appDimensions.ts` (store + config route), the comparison card
+on the JD step, `dimensions.test.mjs` (36), `dimensionsDb.test.mjs` (5, real PostgreSQL),
+`postingCompare.test.mjs` (22), `H34`/`H35`.
+
+**Proved by reverting — 28 defects reinstated one at a time, each failing a named assertion.**
+Three guards were INERT when first written and are recorded because that is the whole point:
+- the per-family config merge test ran its own copy of the SQL, so clobbering the handler's merge
+  failed nothing → the write is now `setDimensionPrefs()`, called by both the route and the test;
+- `assert.match(SRC, /COMPARE_SCOPE_NOTE/)` survived the sentence being deleted from the JSX,
+  because the import kept the name alive → the guard now ties the constant to its render site;
+- `/<ProfileCompareCard/` survived renaming the mount to `<ProfileCompareCardXX` → the guard now
+  requires the tag to END and cross-checks the exported component.
+`H35`'s first writer-detector accused six settings that DO have writers (it missed dynamically
+built `SET` clauses) — it now reads the SQL instead of the JavaScript around it.
+
+**Not done, with rows in `.claude/DEFERRED.md`:** D21 schema registration (lane could not touch
+`schema.ts`), D22 the `years_leadership` shadow (still reaches the gate), D23 no `people`/`usd`
+comparator, D24 no Settings control, D25 nothing verified live.

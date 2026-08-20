@@ -46,7 +46,114 @@ export const POSTING_HOOKS = {
   matchEstimateButton: 'match-estimate-button',
   analysisRunning: 'analysis-running',
   analysisResult: 'analysis-result',
+  // P8.4 - the posting-vs-profile comparison (SPEC 4.2). Declared here rather than hand-typed in
+  // the component so the two existing guards can see them: postingAnalysis.test.mjs asserts every
+  // hook is rendered and none is hand-typed, and assetGate.test.mjs unions the HOOKS constants to
+  // catch a value colliding with another screen's. A hook outside a constant is invisible to both.
+  compare: 'posting-compare',
+  compareRow: 'compare-row',            // carries data-qc-dimension and data-qc-fit
+  compareFit: 'compare-fit',
+  compareNote: 'compare-note',
+  compareScope: 'compare-scope',
+  compareEmpty: 'compare-empty',
+  compareSetSource: 'compare-set-source',
+  compareCols: 'compare-cols',          // carries data-qc-cols - the responsive rule, selectable
+  compareSummary: 'compare-summary',
 }
+
+// -- the comparison's grade vocabulary (P8.4) ---------------------------------------------------
+// `weak` deliberately renders as TWO different labels. The prototype maps it to a single
+// 'No evidence' (docs/qc-evidence/qc/data.js:583) and its one weak fixture happens to be a true
+// absence, so the fixture cannot expose the case where the profile DOES speak to the axis and falls
+// short - where "No evidence" is a false statement about the candidate.
+export const FIT_LABEL = {
+  strong: 'Strong match',
+  moderate: 'Moderate match',
+  weak_nothing_found: 'Nothing found',
+  weak_falls_short: 'Falls short',
+  not_applicable: 'Not compared',
+}
+
+export function fitLabel(fit, shortfall) {
+  if (fit !== 'weak') return FIT_LABEL[fit] || 'Not compared'
+  return shortfall === 'nothing_found' ? FIT_LABEL.weak_nothing_found : FIT_LABEL.weak_falls_short
+}
+
+/** Semantic colour per grade. `not_applicable` is NEUTRAL - it is an absence, not a bad result. */
+export const FIT_COLOR = {
+  strong: 'var(--proto-green)',
+  moderate: 'var(--proto-yellow)',
+  weak: 'var(--proto-red)',
+  not_applicable: 'var(--proto-ink3)',
+}
+
+/**
+ * What the comparison surface says about itself, derived from the payload rather than hardcoded.
+ *
+ * Four states, and they are four different sentences. "Nothing has been resolved yet" and "the
+ * comparison ran and found nothing to compare" are not the same claim, and printing one for both is
+ * how absent evidence gets read as a measurement.
+ */
+export function comparisonState(comparison) {
+  if (!comparison) return { state: 'loading', headline: 'Loading the comparison...', detail: '' }
+  const rows = Array.isArray(comparison.dimensions) ? comparison.dimensions : []
+  if (!comparison.resolved || !rows.length) {
+    return {
+      state: 'unresolved', rows: [],
+      headline: 'This posting has not been compared to your profile yet.',
+      detail: 'Nothing has been measured - which is not the same as nothing matching. Run the evidence resolve for this opportunity to build the comparison.',
+    }
+  }
+  const graded = rows.filter((r) => r && r.fit !== 'not_applicable')
+  if (!graded.length) {
+    return {
+      state: 'none_graded', rows,
+      headline: 'None of these dimensions could be compared for this posting.',
+      detail: 'Every row below says which state it is in. An ungraded row is a measurement nobody made, not a shortfall.',
+    }
+  }
+  return {
+    state: 'graded', rows,
+    headline: `${graded.length} of ${rows.length} dimension(s) compared`,
+    detail: 'Each row shows what this posting asks and what your stored profile evidences.',
+  }
+}
+
+/**
+ * The comparison table's responsive rule.
+ *
+ * The number lives HERE, not in a CSS media query, for the reason `keywordColumns` already records:
+ * ui-verify.yml can set a viewport width but can only SELECT, never read a computed style, so a
+ * media query is invisible to it. The column count is rendered as `data-qc-cols` and is therefore
+ * provable. SPEC 4.2's own prototype uses the same width via useWide(); this is that number, made assertable.
+ */
+export const COMPARE_WIDE_MIN = 900
+
+/** 4 columns at or above the breakpoint, 1 below. Never 0, never NaN. */
+export function compareColumns(width) {
+  const w = Number(width)
+  return Number.isFinite(w) && w >= COMPARE_WIDE_MIN ? 4 : 1
+}
+
+export function compareGridTemplate(width) {
+  return compareColumns(width) === 4
+    ? '150px minmax(0, 1fr) minmax(0, 1fr) 130px'
+    : 'minmax(0, 1fr)'
+}
+
+/**
+ * The four column headings, verbatim from SPEC.md:140-141.
+ * Exported so a test can assert the rendered headings ARE the spec's, rather than something that
+ * merely reads like them.
+ */
+export const COMPARE_COLUMNS = ['Dimension', 'The posting asks for', 'Your profile evidences', 'Fit']
+
+/**
+ * The scoping sentence SPEC.md:145-146 requires. Without it a strong grade reads as a claim about
+ * the finished packet, and at this step nothing has been written into an asset at all.
+ */
+export const COMPARE_SCOPE_NOTE =
+  'Fit is graded against your stored profile only - nothing here has been written into an asset yet.'
 
 // ── requirement rows ────────────────────────────────────────────────────────────────────────────
 
