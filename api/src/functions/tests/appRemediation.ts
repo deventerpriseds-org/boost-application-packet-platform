@@ -178,6 +178,10 @@ export async function artifactRemediate(req: HttpRequest, context: InvocationCon
     let cov = coverageView(ev.results)
     let spend: Spend = { ...ZERO_SPEND }
     let progressedLastPass: boolean | null = null
+    // D-7/D-8. Requirements that left the open list with no edit of this run carrying the evidence.
+    // They are neither credited nor open, so without this they vanish from BOTH lists and the run
+    // reports convergence it did not produce.
+    const phantomSeqs = new Set<number>()
     const profile = await loadProfile().catch(() => ({ profileText: '', omitList: '' }))
     const rows: any[] = []
     let lastScope: ReturnType<typeof scopeForRequirements> = { fields: [], protected: [] }
@@ -190,7 +194,7 @@ export async function artifactRemediate(req: HttpRequest, context: InvocationCon
       lastScope = scopeForRequirements(art.type, pkg, requirements, cov.openSeqs)
       const decision = decidePass({
         pass: pass - firstPass + 1, coverage: cov, remaining: cov.openSeqs, progressedLastPass,
-        spend, prefs, scope: lastScope.fields,
+        phantomSoFar: phantomSeqs.size, spend, prefs, scope: lastScope.fields,
       })
       if (decision.action === 'halt') { haltReason = decision.reason; haltDetail = decision.detail; break }
 
@@ -239,6 +243,10 @@ export async function artifactRemediate(req: HttpRequest, context: InvocationCon
         `select merge_field, before_text, after_text from insertion where artifact_id=$1 and loop=$2`, [art.id, pass])).rows
       const credit = creditClosures({ wasOpen, nowOpen: cov.openSeqs, edits, requirements })
       progressedLastPass = credit.closed.length > 0
+      for (const s2 of credit.phantom) phantomSeqs.add(s2)
+      // A requirement genuinely closed by a LATER pass stops being a phantom: the run can account
+      // for it after all.
+      for (const s2 of credit.closed) phantomSeqs.delete(s2)
 
       const reqCountNow = Number((await client.query(`select count(*)::int as n from requirement where opp_id=$1`, [art.opp_id])).rows[0]?.n || 0)
       const row = {
@@ -273,7 +281,11 @@ export async function artifactRemediate(req: HttpRequest, context: InvocationCon
       last.note = `${last.note} — halted: ${haltDetail}`
     } else {
       rows.push({
-        packet_id: art.packet_id, artifact_id: art.id, n: 0, run_id: ev.run_id,
+        // A run that halted before any pass still gets a ledger row, and it gets its OWN number.
+        // `n: 0` was wrong twice over: 0 is the baseline package's slot, and on a second run it
+        // would upsert over the previous immediate-halt row and restate history. `firstPass` is the
+        // number this run would have used had it done anything.
+        packet_id: art.packet_id, artifact_id: art.id, n: firstPass, run_id: ev.run_id,
         closed: [], phantom_closes: [], remaining: idsForSeqs(requirements, cov.openSeqs),
         edited_fields: [], scope_fields: lastScope.fields, profile_evidence: [], note: haltDetail,
         halted: true, halt_reason: haltReason,
@@ -337,6 +349,31 @@ export async function artifactRemediate(req: HttpRequest, context: InvocationCon
         [art.packet_id, art.id, r.id, text.title, text.detail, text.ask, finalLoop, haltReason])
       escalations++
     }
+    // D-7. A phantom-flipped requirement is in NEITHER `closed` nor `remaining`, so the loop above
+    // never sees it. It reads as covered to the gate while no pass can say what covered it - which
+    // is exactly the state a human should look at, not the state that should disappear quietly.
+    for (const seq of phantomSeqs) {
+      const r: any = requirements.find(q => Number(q.seq) === seq)
+      if (!r) continue
+      const quoted = r.verbatim ? `"${r.verbatim}"` : r.item_text
+      await client.query(
+        `insert into escalation (packet_id, artifact_id, requirement_id, state, title, detail, ask, loop, halt_reason)
+         values ($1,$2,$3,'open',$4,$5,$6,$7,$8)
+         on conflict (artifact_id, requirement_id) do update set
+           title=excluded.title, detail=excluded.detail, ask=excluded.ask, loop=excluded.loop,
+           halt_reason=excluded.halt_reason, updated_at=now()
+         where escalation.state = 'open'`,
+        [art.packet_id, art.id, r.id,
+         `Requirement #${seq} reads as covered, but this run cannot say what covered it`,
+         `The posting asks: ${quoted}. The coverage check no longer lists it as open, but no edit this run made `
+         + `carries the evidence for it — the coverage predicate matches across the whole assembled document, so `
+         + `text elsewhere in the ${art.type} is what satisfies it. This run did not close it and does not claim to. `
+         + `Nothing was invented.`,
+         'Confirm the existing wording really evidences this requirement, or supply the evidence you want cited for it.',
+         finalLoop, haltReason])
+      escalations++
+    }
+
     // A requirement the loop DID close must not keep an open escalation from an earlier run.
     const closedIds = rows.flatMap(r => r.closed)
     if (closedIds.length) {
@@ -369,7 +406,8 @@ export async function artifactRemediate(req: HttpRequest, context: InvocationCon
     }
 
     const outcome = reportedOutcome(rows.map(r => ({
-      n: r.n, halted: r.halted, halt_reason: r.halt_reason, remaining: r.remainingSeqs, must_have_state: r.must_have_state,
+      n: r.n, halted: r.halted, halt_reason: r.halt_reason, remaining: r.remainingSeqs,
+      must_have_state: r.must_have_state, phantom_closes: r.phantom_closes,
     })))
     return {
       status: 200, headers: HEADERS,

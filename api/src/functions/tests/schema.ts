@@ -374,6 +374,14 @@ create table if not exists swap_decision (
   -- A citation needs a source: a posting-driven row must carry both, and no other row may claim one.
   check ((driver = 'posting') = (verbatim_quote is not null))
 );
+-- ORDER IS LOAD-BEARING, for the same reason as the check_result unique further down (H34).
+-- On a database where these tables ALREADY exist - production, since P1 - 'create table if not
+-- exists' is a NO-OP and the inline 'loop' column above is never added. The index on the next line
+-- then references a column that does not exist and ABORTS THE WHOLE MIGRATION:
+--   ERROR: column "loop" does not exist
+-- Measured by executing this file against PostgreSQL 16.13 seeded with 'main''s schema.
+alter table swap_decision   add column if not exists loop int not null default 0;
+alter table skill_candidate add column if not exists loop int not null default 0;
 create index if not exists swap_dec_packet_idx on swap_decision(packet_id, loop, list, seq);
 
 -- P1.4 — what text landed in which REAL merge field of which artifact, what it replaced, and which
@@ -726,8 +734,6 @@ alter table opportunity    add column if not exists jd_text text;
 alter table opportunity    add column if not exists jd_text_sha256 text;
 alter table opportunity    add column if not exists jd_text_truncated boolean;
 -- P3 idempotent adds (safe on databases created before the remediation loop existed).
-alter table swap_decision   add column if not exists loop int not null default 0;
-alter table skill_candidate add column if not exists loop int not null default 0;
 alter table requirement     drop column if exists closed_on_loop;
 -- The old 3-column unique is what made pass 2 overwrite pass 1; replace it with the loop-aware one.
 alter table swap_decision   drop constraint if exists swap_decision_packet_id_list_seq_key;

@@ -376,3 +376,169 @@ test('a second run starts after the highest pass already recorded', () => {
   assert.equal(nextPassNumber(undefined), 1)
   assert.equal(nextPassNumber(NaN), 1)
 })
+
+// ---------------------------------------------------------------------------------------------
+// P3-15 — ONE definition of "covered". Behavioural, because spelling is not behaviour.
+//
+// The source-grep guard (H33) matched on `COVERAGE_THRESHOLD =` and the literal `hit.length /
+// toks.length`. An independent verifier evaded it in one move: a second rule with different
+// identifiers and a threshold of 0.5 instead of the gate's 0.7, wired into the credit decision. The
+// grep passed and all 37 tests passed, with the loop and the gate disagreeing about what "covered"
+// means. These pin the BEHAVIOUR to `runChecks`, so a second rule at any threshold fails here
+// whatever it is called.
+import { runChecks, COVERAGE_THRESHOLD, coversText } from '../dist/functions/tests/checks.js'
+
+const COVERAGE_CASES = [
+  ['exact restatement',        'led a platform modernization programme across four business units'],
+  ['partial overlap',          'led a modernization programme'],
+  ['distinctive token absent', 'led a programme across four business units'],
+  ['unrelated',                'managed vendor contracts and quarterly budgets'],
+  ['empty',                    ''],
+  ['single short word',        'led'],
+]
+
+test('P3-15 the loop and the gate agree on every input — one rule, not two', () => {
+  const requirement = 'led a platform modernization programme across four business units'
+  for (const [label, text] of COVERAGE_CASES) {
+    // The gate's verdict, from the engine that actually sets must_have_coverage.
+    const rs = runChecks({
+      type: 'resume',
+      pkg: { ResumeSummary: text, SkillsBullets1: '', SkillsBullets2: '', ExpertiseBullets: '',
+             RelevantBullets1: '', RelevantBullets2: '', RelevantBullets3: '' },
+      company: 'Trinnex',
+      requirements: [{ id: 'r1', seq: 1, verbatim: requirement, item_text: requirement, kind: 'must_have' }],
+      postingText: requirement, profileText: '',
+    })
+    const mh = rs.find(r => r.check_key === 'must_have_coverage')
+    const gateSaysCovered = mh.state === 'pass'
+    // The loop's verdict, from the predicate it credits closes with.
+    const loopSaysCovered = coversText(text, { verbatim: requirement, item_text: requirement })
+    assert.equal(loopSaysCovered, gateSaysCovered,
+      `${label}: the loop says ${loopSaysCovered} and the gate says ${gateSaysCovered} — that is two definitions of "covered"`)
+  }
+})
+
+test('P3-15 creditClosures itself obeys the gate — a renamed second rule cannot hide', () => {
+  // THIS is the assertion that closes the evasion. Testing `coversText` directly proves only that
+  // the gate's predicate behaves; it says nothing about what `creditClosures` reaches for INTERNALLY.
+  // The verifier's bypass swapped in `localCovers` at threshold 0.5 under a different name, and the
+  // grep guard AND a coversText-only test both passed. So drive `creditClosures` on inputs where a
+  // looser rule and the gate DISAGREE, and require it to side with the gate every time.
+  const REQ = 'led a platform modernization programme across four business units'
+  // Measured against the live predicate: a 0.5-threshold rule credits every one of these; the gate
+  // (COVERAGE_THRESHOLD 0.7 + a distinctive-token requirement) credits none of them.
+  const GATE_SAYS_NO = [
+    'led a platform modernization programme',
+    'led a platform modernization programme across four',
+    'led a platform modernization programme across business',
+    'led platform modernization across four units',
+    'led a modernization programme across four business',
+  ]
+  // ...and these the gate DOES credit, so the test cannot pass by simply never crediting anything.
+  const GATE_SAYS_YES = [
+    'platform modernization across four business units',
+    'led the platform programme across four business units',
+  ]
+
+  for (const text of GATE_SAYS_NO) {
+    assert.equal(coversText(text, { verbatim: REQ, item_text: REQ }), false, `fixture drifted: ${text}`)
+    const r = creditClosures({
+      wasOpen: [1], nowOpen: [],
+      edits: [{ merge_field: 'ResumeSummary', before_text: 'x', after_text: text }],
+      requirements: [req(1, REQ)],
+    })
+    assert.deepEqual(r.closed, [],
+      `creditClosures banked "${text}" as a close, but the gate does not consider it covered — that is a second definition of "covered"`)
+    assert.deepEqual(r.phantom, [1])
+  }
+
+  for (const text of GATE_SAYS_YES) {
+    assert.equal(coversText(text, { verbatim: REQ, item_text: REQ }), true, `fixture drifted: ${text}`)
+    const r = creditClosures({
+      wasOpen: [1], nowOpen: [],
+      edits: [{ merge_field: 'ResumeSummary', before_text: 'x', after_text: text }],
+      requirements: [req(1, REQ)],
+    })
+    assert.deepEqual(r.closed, [1], `creditClosures refused "${text}" that the gate does credit`)
+  }
+})
+
+test('P3-15 the loop credits at the GATE\'s threshold, not one of its own', () => {
+  // A rule at a lower threshold would credit this; the gate does not, so the loop must not either.
+  const requirement = 'owns regulatory reporting to the audit committee every quarter'
+  const halfEvidenced = 'owns regulatory reporting'
+  assert.equal(coversText(halfEvidenced, { verbatim: requirement, item_text: requirement }), false,
+    'a loop-local threshold below the gate\'s would bank this as a close the gate does not recognise')
+  assert.equal(COVERAGE_THRESHOLD, 0.7, 'the gate threshold moved; these cases were chosen against 0.7')
+
+  const r = creditClosures({
+    wasOpen: [1], nowOpen: [1],
+    edits: [{ merge_field: 'ResumeSummary', before_text: 'x', after_text: halfEvidenced }],
+    requirements: [req(1, requirement)],
+  })
+  assert.deepEqual(r.closed, [], 'credited a close the gate would not agree with')
+})
+
+// ---------------------------------------------------------------------------------------------
+// D-8 — the loop may not SAY "converged" for a close it did not make
+//
+// The P3-11 guard protects the `closed[]` COLUMN, and it does that correctly. It does not protect
+// the SENTENCE. An independent verifier demonstrated the gap on the real compiled functions: a pass
+// rewrites one unrelated field, `creditClosures` correctly credits nothing and records a phantom,
+// the engine's whole-document predicate now reports the requirement covered, `remaining` is empty —
+// and the run told the user "Converged after 1 pass(es): every must-have requirement is covered."
+// Refusing the credit is not the same as refusing the claim. Taking credit in a sentence is still
+// taking credit.
+// ---------------------------------------------------------------------------------------------
+
+test('D-8 nothing open, engine passes, but the flip was a phantom — that is NOT convergence', () => {
+  const d = decidePass({
+    pass: 1, coverage: coverageView([det('must_have_coverage', 'pass')]),
+    remaining: [], progressedLastPass: false, phantomSoFar: 1,
+    spend: ZERO_SPEND, prefs: DEFAULT_LOOP_PREFS, scope: ['ResumeSummary'],
+  })
+  assert.equal(d.action, 'halt')
+  assert.equal(d.reason, 'unattributed_coverage')
+  assert.notEqual(d.reason, 'converged')
+  assert.match(d.detail, /no edit from this run carrying the evidence/)
+})
+
+test('D-8 with no phantoms the same state IS convergence — the guard is not blanket', () => {
+  const d = decidePass({
+    pass: 1, coverage: coverageView([det('must_have_coverage', 'pass')]),
+    remaining: [], progressedLastPass: true, phantomSoFar: 0,
+    spend: ZERO_SPEND, prefs: DEFAULT_LOOP_PREFS, scope: ['ResumeSummary'],
+  })
+  assert.equal(d.reason, 'converged')
+})
+
+test('D-8 reportedOutcome refuses the word even if a row claims it', () => {
+  // Belt and braces: this is the one place the sentence is produced, so a row that should never
+  // have been written cannot talk it into saying converged.
+  const o = reportedOutcome([
+    { n: 1, halted: true, halt_reason: 'converged', remaining: [], must_have_state: 'pass', phantom_closes: [7] },
+  ])
+  assert.equal(o.converged, false)
+  assert.doesNotMatch(o.summary, /^Converged/)
+  assert.match(o.summary, /no edit from this run carrying the evidence/)
+  assert.match(o.summary, /cannot claim to have closed them/)
+})
+
+test('D-8 a clean converged run still reads as converged', () => {
+  const o = reportedOutcome([
+    { n: 1, halted: true, halt_reason: 'converged', remaining: [], must_have_state: 'pass', phantom_closes: [] },
+  ])
+  assert.equal(o.converged, true)
+  assert.match(o.summary, /^Converged after 1 pass\(es\)/)
+})
+
+test('D-8 unattributed_coverage is not honest green, and has its own escalation sentence', () => {
+  assert.equal(isHonestGreen('unattributed_coverage'), false)
+  const e = escalationFor({
+    requirement: { seq: 1, verbatim: 'own a P&L', item_text: 'own a P&L', kind: 'must_have' },
+    artifactType: 'resume', pass: 1, haltReason: 'unattributed_coverage',
+    searched: ['ResumeSummary'], withheld: [], profileSearched: true,
+  })
+  assert.match(e.detail, /without any edit from this run carrying the evidence/)
+  assert.doesNotMatch(e.detail, /Why it is still open: unattributed_coverage\./)
+})

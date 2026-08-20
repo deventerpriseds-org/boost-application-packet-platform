@@ -64,12 +64,14 @@ export type HaltReason =
   | 'time_budget'           // the Functions consumption-plan timeout guard
   | 'no_coverage_evidence'  // coverage could not be judged; there is nothing honest to optimise
   | 'nothing_reachable'     // every field the loop could rewrite is the sole evidence for a closed requirement
+  | 'unattributed_coverage' // the open list emptied, but nothing this run wrote accounts for it
   | 'ungrounded'            // no posting: remediating toward our own metadata is what X1 forbids
   | 'error'                 // the pass threw; recorded rather than swallowed
 
 export const HALT_REASONS: HaltReason[] = [
   'converged', 'no_progress', 'max_passes', 'cost_ceiling', 'token_ceiling',
-  'time_budget', 'no_coverage_evidence', 'nothing_reachable', 'ungrounded', 'error',
+  'time_budget', 'no_coverage_evidence', 'nothing_reachable', 'unattributed_coverage',
+  'ungrounded', 'error',
 ]
 
 /** A halt that is not `converged` leaves whatever the gate said standing. Never re-coloured here. */
@@ -474,6 +476,16 @@ export interface PassState {
   remaining: number[]
   /** Did the previous pass close anything? `null` before any pass has run. */
   progressedLastPass: boolean | null
+  /**
+   * Requirements that LEFT the open list without any pass's own writing accounting for them.
+   *
+   * This is the hole the P3-11 column guard does not cover. `creditClosures` correctly refuses to
+   * put a phantom flip in `closed[]` - but refusing the CREDIT is not the same as refusing the
+   * CLAIM. With `remaining` empty and the engine's check passing, the run would go on to report
+   * "Converged: every must-have requirement is covered" having credited nothing and written one
+   * unrelated field. Taking credit in a sentence is still taking credit.
+   */
+  phantomSoFar: number
   spend: Spend
   prefs: LoopPrefs
   /** Fields the next pass would be allowed to rewrite. */
@@ -498,10 +510,19 @@ export function decidePass(s: PassState): PassDecision {
       detail: `must_have_coverage is ${cov.state} — ${cov.observed}. Absent evidence is not a target and never a pass.` }
   }
   if (!s.remaining.length) {
-    return cov.state === 'pass'
-      ? { action: 'halt', reason: 'converged', detail: `every must-have is covered — ${cov.observed}` }
-      : { action: 'halt', reason: 'no_coverage_evidence',
-          detail: `nothing is listed open but must_have_coverage is ${cov.state}; that is not convergence` }
+    if (cov.state !== 'pass') {
+      return { action: 'halt', reason: 'no_coverage_evidence',
+        detail: `nothing is listed open but must_have_coverage is ${cov.state}; that is not convergence` }
+    }
+    // Nothing open AND the engine says pass - but if requirements left the open list that no pass's
+    // own writing accounts for, this run did not close them and must not say it did.
+    if (s.phantomSoFar > 0) {
+      return { action: 'halt', reason: 'unattributed_coverage',
+        detail: `every must-have now reads as covered, but ${s.phantomSoFar} of them left the open list `
+          + `with no edit from this run carrying the evidence. The document may have been covering them `
+          + `already. Nothing was closed by this run.` }
+    }
+    return { action: 'halt', reason: 'converged', detail: `every must-have is covered — ${cov.observed}` }
   }
   const b = budgetVerdict(s.spend, s.prefs)
   if (b.halt) return { action: 'halt', reason: b.reason, detail: b.detail }
@@ -553,7 +574,12 @@ export function assertEvidenceIntact(before: EvidenceSnapshot, after: EvidenceSn
   if (why) throw new Error(`remediation refused: ${why}`)
 }
 
-export interface LoopRowLike { n: number; halted: boolean; halt_reason: HaltReason | null; remaining: number[]; must_have_state: CheckState }
+export interface LoopRowLike {
+  n: number; halted: boolean; halt_reason: HaltReason | null; remaining: number[]
+  must_have_state: CheckState
+  /** Flips no pass's own writing accounted for. A run carrying any of these did not converge. */
+  phantom_closes?: number[]
+}
 
 export interface Outcome {
   converged: boolean
@@ -575,7 +601,12 @@ export function reportedOutcome(rows: LoopRowLike[]): Outcome {
   const last = rows.length ? rows[rows.length - 1] : null
   const open = last ? last.remaining.length : 0
   const reason = last ? last.halt_reason : null
-  const converged = !!last && reason === 'converged' && open === 0 && last.must_have_state === 'pass'
+  // Belt and braces with decidePass, on purpose: this is the one place the WORD is produced, and a
+  // row that says 'converged' while any pass left an unattributed flip is a row that should never
+  // have been written. Recomputing here means a bad row cannot talk this function into the sentence.
+  const phantom = rows.reduce((n, r) => n + ((r.phantom_closes || []).length), 0)
+  const converged = !!last && reason === 'converged' && open === 0
+    && last.must_have_state === 'pass' && phantom === 0
   return {
     converged,
     openMustHaves: open,
@@ -583,7 +614,11 @@ export function reportedOutcome(rows: LoopRowLike[]): Outcome {
     haltReason: reason,
     summary: converged
       ? `Converged after ${rows.length} pass(es): every must-have requirement is covered and the run's coverage check passed.`
-      : `Halted after ${rows.length} pass(es) (${reason || 'unknown'}) with ${open} must-have requirement(s) still open. The gate stays as the checks left it; nothing was closed by stopping.`,
+      : open === 0 && phantom > 0
+        ? `Halted after ${rows.length} pass(es): every must-have now reads as covered, but ${phantom} left the open list `
+          + `with no edit from this run carrying the evidence — so this run cannot claim to have closed them. `
+          + `The gate stays as the checks left it.`
+        : `Halted after ${rows.length} pass(es) (${reason || 'unknown'}) with ${open} must-have requirement(s) still open. The gate stays as the checks left it; nothing was closed by stopping.`,
   }
 }
 
@@ -629,6 +664,7 @@ export function escalationFor(input: EscalationInput): EscalationText {
     nothing_reachable: `every rewritable field was the only evidence for a requirement that is already covered, so there was no edit available that did not cost evidence already held`,
     no_coverage_evidence: `coverage could not be judged for this artifact, so the loop had nothing honest to optimise against`,
     error: `the pass failed with an error before this requirement could be evidenced`,
+    unattributed_coverage: `it left the open list without any edit from this run carrying the evidence, so this run cannot claim to have closed it - the document may have been covering it already`,
     ungrounded: `this opportunity has no job posting on file, so there was nothing to remediate against - a package built from our own metadata about the job cannot evidence the employer's requirements`,
     converged: `recorded for completeness — the run converged, so this should not have been raised`,
   }

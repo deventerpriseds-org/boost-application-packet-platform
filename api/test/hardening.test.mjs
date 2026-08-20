@@ -34,6 +34,27 @@ const stripComments = (body) => body
   .replace(/\/\*[\s\S]*?\*\//g, ' ')
   .split('\n').map(l => l.replace(/(^|[^:])\/\/.*$/, '$1')).join('\n')
 
+/**
+ * The text of ONE `create table if not exists <name> ( ... );` block, and nothing else.
+ *
+ * Every schema assertion below needs this, and the two that did not have it were INERT. Both failed
+ * the same way and it is worth stating once: `SCHEMA_SQL` contains each constraint TWICE — inline on
+ * the CREATE TABLE, and again in the idempotent `alter table ... add constraint` that carries it to
+ * a database which already exists. A substring search over the whole string therefore cannot tell
+ * "inline on the create" from "in the alter", so deleting the inline one changed nothing and the
+ * guard passed. A `[\s\S]*?` span was worse: with the real column deleted it simply walked on to
+ * the NEXT table that had a column by that name and matched there.
+ * Verified by an independent verifier, 2026-08-20, who deleted each constraint in turn and watched
+ * NO TEST FAIL four times.
+ */
+const createTable = (schema, name) => {
+  const start = schema.indexOf(`create table if not exists ${name} (`)
+  assert.notEqual(start, -1, `no create table for ${name} — the scan has gone stale`)
+  const end = schema.indexOf('\n);', start)
+  assert.notEqual(end, -1, `unterminated create table for ${name}`)
+  return schema.slice(start, end)
+}
+
 // ---------------------------------------------------------------------------------------------
 // H1 — HTML entities were never decoded, so every &-term was invisible to matching.
 // Evidence: 872 of 1,230 live postings (71%) contain `&amp;`; "P&L" was present in 83 postings and
@@ -899,12 +920,16 @@ test('H29: provenance deletes are scoped to a pass, never to a whole packet', ()
 })
 
 test('H29b: swap_decision and skill_candidate carry the pass in their key', () => {
-  const schema = src('schema.ts')
-  assert.match(schema, /unique \(packet_id, list, seq, loop\)/,
+  // Asserted on the CREATE TABLE block ALONE. The first version searched the whole of SCHEMA_SQL and
+  // was inert three ways over: the unique also appears in the idempotent ALTER, and the two
+  // `[\s\S]*?` spans ran past the end of their table into the next one that happened to have a
+  // `loop int not null default 0` (the `escalation` table). All three passed with the column deleted.
+  const swap = createTable(src('schema.ts'), 'swap_decision')
+  const skill = createTable(src('schema.ts'), 'skill_candidate')
+  assert.match(swap, /unique \(packet_id, list, seq, loop\)/,
     'without loop in the key, pass 2 overwrites pass 1 row for row')
-  assert.match(schema, /create table if not exists swap_decision[\s\S]*?loop\s+int not null default 0/,
-    'swap_decision must have a loop column')
-  assert.match(schema, /create table if not exists skill_candidate[\s\S]*?loop\s+int not null default 0/,
+  assert.match(swap, /\n\s*loop\s+int not null default 0/, 'swap_decision must have a loop column')
+  assert.match(skill, /\n\s*loop\s+int not null default 0/,
     'skill_candidate rows are the FK targets of swap_decision; deleting them packet-wide nulls the links')
 })
 
@@ -989,8 +1014,11 @@ test('H32: converged is unforgeable in the schema, not just in the writer', () =
     'the converged CHECK is gone; the word becomes whatever the writer says')
   assert.match(schema, /foreign key \(artifact_id, run_id, must_have_check_key, must_have_state\)\s*\n?\s*references check_result \(artifact_id, run_id, check_key, state\)/,
     'without the composite FK, must_have_state is an assertion rather than a copy of a real check')
-  assert.match(schema, /unique \(artifact_id, run_id, check_key, state\)/,
-    'the FK needs this unique on check_result as its target')
+  // On check_result's OWN create block. Searching all of SCHEMA_SQL matched the idempotent ALTER
+  // instead, so this assertion could not fail while that ALTER existed — inert, and inert in the
+  // guard whose whole subject is a constraint that must be in two places at once.
+  assert.match(createTable(schema, 'check_result'), /unique \(artifact_id, run_id, check_key, state\)/,
+    'the FK needs this unique inline on check_result, for a database created from scratch')
   // P3-38: going green by turning a failure into "nothing to check" is refused by the table.
   assert.match(schema, /check \(not \(prev_must_have_state = 'fail' and must_have_state = 'not_applicable'\)\)/,
     'fail -> not_applicable is evidence disappearing, not coverage being achieved')
@@ -1028,6 +1056,41 @@ test('H33: the loop decides coverage with the gate\'s predicate, never its own',
 //
 // The invariant, not the incident: for EVERY composite FK in SCHEMA_SQL, the constraint that makes
 // its target tuple unique must appear EARLIER in the script than the table that references it.
+test('H34b: a schema statement never depends on a column added later in the same script', () => {
+  // The general form of H34, and the reason it is stated generally: the FK was one instance, and
+  // executing SCHEMA_SQL against a real PostgreSQL 16.13 seeded with `main`'s schema turned up a
+  // SECOND — `create index swap_dec_packet_idx on swap_decision(packet_id, loop, ...)` referencing
+  // a `loop` column that the idempotent ALTER only added 350 lines further down. On a fresh database
+  // both were fine, because the inline CREATE TABLE carries the column. On an EXISTING one — which
+  // is every production database — `create table if not exists` is a no-op, the column is absent,
+  // and the statement aborts the whole migration:
+  //     ERROR:  column "loop" does not exist
+  // The invariant, not the incident: if a column is added by an idempotent ALTER, every statement
+  // that NAMES that column must come after the ALTER.
+  const whole = src('schema.ts')
+  const sql = whole.slice(whole.indexOf('SCHEMA_SQL = '))
+  const offenders = []
+  for (const m of sql.matchAll(/alter table\s+(\w+)\s+add column if not exists\s+(\w+)/g)) {
+    const [, table, col] = m
+    const addedAt = m.index
+    // Index creations are the statements that bit us; they name columns directly and run inline.
+    const idxRe = new RegExp(`create index if not exists \\w+ on ${table}\\s*\\(([^)]*)\\)`, 'g')
+    for (const ix of sql.matchAll(idxRe)) {
+      if (!new RegExp(`\\b${col}\\b`).test(ix[1])) continue
+      if (ix.index < addedAt) {
+        offenders.push(`index on ${table}(${ix[1].trim()}) at ${ix.index} names "${col}", which is only added at ${addedAt}`)
+      }
+    }
+    // ...and so do constraint additions that reference the column.
+    const conRe = new RegExp(`alter table ${table} add constraint \\w+ [^;]*?\\b${col}\\b[^;]*;`, 'g')
+    for (const c of sql.matchAll(conRe)) {
+      if (c.index < addedAt) offenders.push(`constraint on ${table} at ${c.index} names "${col}", only added at ${addedAt}`)
+    }
+  }
+  assert.deepEqual(offenders, [],
+    'a statement runs before the column it names exists — fine on a fresh database, fatal on every existing one')
+})
+
 test('H34: a composite FK\'s unique target is established before the table that references it', () => {
   const whole = src('schema.ts')
   const sql = whole.slice(whole.indexOf('SCHEMA_SQL = '))
@@ -1067,7 +1130,11 @@ test('H34: a composite FK\'s unique target is established before the table that 
       offenders.push(`FK into ${table}(${cols}) is declared at ${fkAt} but its idempotent unique only runs at ${alterAt}`
         + ` — this aborts the whole migration on any database where ${table} already exists`)
     }
-    assert.ok(sql.includes(inline), `${table} should also carry ${inline} inline, for a fresh database`)
+    // On the CREATE TABLE block, not on the whole script: the ALTER a few lines up contains this
+    // exact substring, so `sql.includes(inline)` matched it and the line could never fail. That is
+    // the same inertness this very case was rewritten to remove, reintroduced one line below it.
+    assert.match(createTable(sql, table), new RegExp(inline.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')),
+      `${table} should also carry ${inline} inline, for a database created from scratch`)
   }
   assert.deepEqual(offenders, [], 'a composite FK whose unique target is not established, for an EXISTING database, before it')
 })
