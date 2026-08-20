@@ -1519,3 +1519,25 @@ scale past a dozen facts.*
 **`dateRangesSeen` confirms the H14 fix on real data:** all four roles now match
 (2021–Present, 2019–Aug 2021, 2015–Feb 2019, 2006–Apr 2015) where only the first did before.
 **`stillNeeded` is empty** — every fact the live corpus asks for is answered.
+
+
+## OWNER-ACTION-1 — update the education section of the resume template
+**Status:** `open — owner action, not a code task`. Raised 2026-08-20.
+
+The fact deriver read the live resume template and the confirmed profile, and they disagree:
+
+| | template says | owner states |
+|---|---|---|
+| Highest education | **"Master of Business Administration Coursework"** | **Doctoral candidate, University of Michigan (Ross) business school** |
+| Earliest dated role | **2006** (→ 20 years) | **24 years** |
+
+The template is what actually reaches employers, so the template is the thing to fix — the profile
+facts are already correct and confirmed. Two edits:
+1. **Education section** — replace the MBA-coursework line with the current doctoral candidacy.
+2. **Work history** — the earliest dated role starts 2006; if the 24-year figure counts earlier
+   experience, that role is missing from the template (or its dates are).
+
+Detected automatically by the derive endpoint's conflict surfacing
+(`POST /api/app/qc/facts/derive`, run `32324596666`: *"3 confirmed fact(s) DISAGREE with what the
+source now says"*). Re-running that endpoint after the template edit is how to confirm the fix —
+conflicts should drop to zero.
