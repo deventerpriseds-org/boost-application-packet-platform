@@ -147,6 +147,12 @@ export const api = {
   // ── QC gate (P2.2/P2.3) ────────────────────────────────────────────────────────────────────
   // Every GET here is owner-scoped server-side via resolveOwner(), which falls back to the DEMO
   // owner when no ?owner= is present — so omitting it silently 404s the real owner's artifacts.
+  //
+  // The three POSTs below deliberately carry NO ?owner=. requireWrite() rejects any write that is
+  // not either a verified session or the shared demo workspace, and for a verified session
+  // resolveOwner() returns the SESSION email and ignores ?owner= entirely (appSession.ts:46-76).
+  // So on a write the parameter is either inert or a spoof attempt the server already refuses -
+  // sending it would suggest the client picks the owner for a mutation, which it must never do.
   artifactChecksResult: (artifactId) => get(`/app/artifact/${artifactId}/checks-result?owner=${encodeURIComponent(_owner)}`),
   runArtifactChecks: (artifactId) => postDetailed(`/app/artifact/${artifactId}/checks`, {}),
   artifactGateOverride: (artifactId, reason) => postDetailed(`/app/artifact/${artifactId}/gate-override`, { reason }),

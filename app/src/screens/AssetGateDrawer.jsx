@@ -4,7 +4,7 @@ import { Overlay, Pill } from '../shell.jsx'
 import {
   ASSET_LABEL, assetLabel, STATUS_TONE, GATE_META, gateMeta, STATE_META, stateMeta,
   CHECK_LABEL, checkLabel, FIELD_LABEL, fieldLabel, METHOD_LABEL,
-  footerFor, reconcile, reviewerAttention, scoreParts, fmtWhen, arr, errText,
+  footerFor, reconcile, attentionSplit, engineRows, scoreParts, fmtWhen, arr, errText,
 } from '../assetGate.js'
 
 // P5.3 - the per-asset gate drawer.
@@ -27,7 +27,7 @@ import {
 // import to reach for.
 export {
   ASSET_LABEL, assetLabel, STATUS_TONE, GATE_META, gateMeta, STATE_META, stateMeta,
-  CHECK_LABEL, checkLabel, FIELD_LABEL, fieldLabel, footerFor, reconcile,
+  CHECK_LABEL, checkLabel, FIELD_LABEL, fieldLabel, footerFor, reconcile, attentionSplit, engineRows,
 }
 
 // Small presentational pieces -------------------------------------------------------------------
@@ -40,7 +40,10 @@ export function GateBadge({ result, loading, error, onClick, compact = false }) 
   if (error) return <Pill tone="panel" title={String(error)}>gate unavailable</Pill>
   if (!result) return <Pill tone="panel">{loading ? 'checking...' : 'not loaded'}</Pill>
   const m = gateMeta(result.gate)
-  const n = Number(result.attention || 0)
+  // The badge shows the SERVER's own count, read through the one selector rather than re-derived
+  // here. Where that number and the rows it sent disagree, reconcile() reports the disagreement in
+  // the drawer; the badge never quietly substitutes a number of its own.
+  const n = attentionSplit(result).counted
   const title = m.word + ' - ' + m.blurb + (result.computedAt ? ' (checked ' + fmtWhen(result.computedAt) + ')' : '')
   return (
     <span onClick={onClick} title={title} role={onClick ? 'button' : undefined} tabIndex={onClick ? 0 : undefined}
@@ -141,20 +144,20 @@ function BlocksTab({ data, loading, error }) {
 // The deterministic half. The reviewer's rows live on their own tab (engine is the top-level
 // grouping, per the P4.2 correction), and the note below keeps the two counts reconciled with the
 // badge so a reader is never left wondering where the missing findings went.
-function ChecksTab({ result, reviewerCount }) {
+function ChecksTab({ result }) {
   if (!result) return <Quiet>Loading the checks...</Quiet>
   if (result.gate == null) return <Quiet>The checks have not been run for this asset. Run them from the footer.</Quiet>
-  const rows = arr(result.results).filter((r) => r.engine !== 'reviewer')
+  const rows = engineRows(result, 'deterministic')
   const order = { fail: 0, warn: 1, not_applicable: 2, pass: 3 }
   const sorted = [...rows].sort((a, b) => (order[a.state] ?? 9) - (order[b.state] ?? 9))
-  const here = rows.filter((r) => r.state === 'fail' || r.state === 'warn').length
+  const split = attentionSplit(result)
   const na = rows.filter((r) => r.state === 'not_applicable').length
   if (!sorted.length) return <Quiet>No deterministic checks were recorded for this asset.</Quiet>
   return (
     <div>
       <Section title="Rules measured against the text"
-        note={here + ' of the ' + result.attention + ' finding(s) in the badge are here'
-          + (reviewerCount ? '; the other ' + reviewerCount + ' are on Independent review' : '')
+        note={split.fix + ' of the ' + split.listed + ' listed finding(s) are here'
+          + (split.review ? '; the other ' + split.review + ' are on Independent review' : '')
           + (na ? '. ' + na + ' check(s) had nothing to test against and are marked not checked - that is not a pass' : '')} />
       {sorted.map((r, i) => <CheckRow key={r.check_key + ':' + i} row={r} />)}
     </div>
@@ -227,7 +230,7 @@ function CompareTab({ swaps, swapsLoading, swapsError, insertions }) {
 // sees a red reviewer row must be able to tell why the asset is not blocked.
 function ReviewTab({ result }) {
   if (!result) return <Quiet>Loading...</Quiet>
-  const rows = arr(result.results).filter((r) => r.engine === 'reviewer')
+  const rows = engineRows(result, 'reviewer')
   return (
     <div>
       <Section title="Independent review"
@@ -415,7 +418,7 @@ export default function AssetGateDrawer({
 
   const f = footerFor(result)
   const problems = reconcile(result)
-  const reviewerN = reviewerAttention(result)
+  const split = attentionSplit(result)
   const reasonTooShort = reason.trim().length < 8
 
   const footer = (
@@ -480,10 +483,12 @@ export default function AssetGateDrawer({
             </span>
             {artifact.status && <Pill tone={STATUS_TONE[artifact.status] || 'panel'}>{artifact.status}</Pill>}
           </div>
-          {Number(result.attention || 0) > 0 && (
+          {(split.listed > 0 || split.counted > 0) && (
             <div className="px-small" style={{ marginTop: 6 }}>
-              {result.attention} finding(s) need attention: {Number(result.attention || 0) - reviewerN} from the measured rules,
-              {' '}{reviewerN} from the independent reviewer.
+              {split.listed} finding(s) need attention: {split.fix} from the measured rules,
+              {' '}{split.review} from the independent reviewer.
+              {split.counted !== split.listed
+                && ' The server reported ' + split.counted + ' - the note below reports that disagreement rather than resolving it here.'}
             </div>
           )}
           {result.override && (
@@ -511,7 +516,7 @@ export default function AssetGateDrawer({
       </div>
 
       {tab === 'blocks' && <BlocksTab data={insertions.data} loading={insertions.loading} error={insertions.error} />}
-      {tab === 'checks' && <ChecksTab result={result} reviewerCount={reviewerN} />}
+      {tab === 'checks' && <ChecksTab result={result} />}
       {tab === 'compare' && <CompareTab swaps={swaps.data} swapsLoading={swaps.loading} swapsError={swaps.error} insertions={insertions.data} />}
       {tab === 'review' && <ReviewTab result={result} />}
       {tab === 'match' && <MatchTab result={result} />}

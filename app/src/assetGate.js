@@ -123,27 +123,71 @@ export function footerFor(result) {
  */
 export function reconcile(result) {
   if (!result || result.gate == null) return null
-  const rows = Array.isArray(result.results) ? result.results : []
-  const listed = rows.filter((r) => r.state === 'fail' || r.state === 'warn').length
+  const split = attentionSplit(result)
   const out = []
-  if (listed !== Number(result.attention || 0)) {
-    out.push('the server counted ' + result.attention + ' finding(s) needing attention but sent ' + listed + ' such row(s)')
+  if (split.listed !== split.counted) {
+    out.push('the server counted ' + result.attention + ' finding(s) needing attention but sent ' + split.listed + ' such row(s)')
   }
-  if (result.gate === 'pass' && Number(result.attention || 0) > 0) {
+  if (result.gate === 'pass' && split.counted > 0) {
     out.push('the gate reads pass while ' + result.attention + ' finding(s) still need attention')
   }
-  const reviewerFail = rows.some((r) => r.engine === 'reviewer' && r.state === 'fail')
-  const deterministicFail = rows.some((r) => r.engine === 'deterministic' && r.state === 'fail')
+  const reviewerFail = engineRows(result, 'reviewer').some((r) => r.state === 'fail')
+  const deterministicFail = engineRows(result, 'deterministic').some((r) => r.state === 'fail')
   if (result.gate === 'fail' && reviewerFail && !deterministicFail) {
     out.push('the only failing rows come from the independent reviewer, which may never block an asset on its own')
   }
   return out.length ? out : null
 }
 
-/** How many of the badge's `attention` findings came from the reviewer rather than the rules. */
-export function reviewerAttention(result) {
+/**
+ * The rows belonging to ONE engine, taken from the SERVER's own grouping whenever it sends one.
+ *
+ * P4.2 made `engines.deterministic.results` / `engines.reviewer.results` a top-level part of
+ * GET /artifact/{id}/checks-result exactly so a client stops re-partitioning a set the server has
+ * already split. Two clients partitioning independently is how one screen comes to show a model's
+ * opinion as a measured rule and another does not.
+ *
+ * The `results`-filter branch is a FALLBACK for a server that predates P4 (the flat payload with no
+ * `engines` key), not a second opinion: it only runs when the key is absent. In that branch
+ * `deterministic` is deliberately "everything that is not the reviewer" rather than
+ * `engine === 'deterministic'`, so a row from an engine added later is still shown somewhere
+ * instead of silently vanishing from both tabs.
+ */
+export function engineRows(result, engine) {
+  const grouped = result && result.engines && result.engines[engine]
+  if (grouped && Array.isArray(grouped.results)) return grouped.results
   const rows = Array.isArray(result && result.results) ? result.results : []
-  return rows.filter((r) => r.engine === 'reviewer' && (r.state === 'fail' || r.state === 'warn')).length
+  return engine === 'reviewer'
+    ? rows.filter((r) => r.engine === 'reviewer')
+    : rows.filter((r) => r.engine !== 'reviewer')
+}
+
+const needsAttention = (r) => r.state === 'fail' || r.state === 'warn'
+
+/**
+ * THE one split of the findings into rules-side and reviewer-side. Every surface that shows either
+ * half - the badge, the drawer summary, the Checks tab - reads it from here.
+ *
+ * Both halves are COUNTED from their own rows. Neither is ever derived by subtracting the other
+ * from `attention`, which is what produced a rendered "-2 from the measured rules": the server's
+ * `attention` and the rows it sent can genuinely disagree, and subtraction turns that disagreement
+ * into a negative finding count instead of reporting it. A count of rows cannot go below zero, so
+ * the clamp is structural rather than a Math.max bolted on afterwards, and `fix + review === listed`
+ * holds for every payload.
+ *
+ * `counted` is the server's own `attention` number, carried alongside rather than mixed in, so a
+ * caller that wants the server's figure asks for it explicitly. When `counted !== listed` the
+ * payload contradicts itself and reconcile() says so - nothing here quietly picks a winner.
+ */
+export function attentionSplit(result) {
+  const fix = engineRows(result, 'deterministic').filter(needsAttention).length
+  const review = engineRows(result, 'reviewer').filter(needsAttention).length
+  return { fix, review, listed: fix + review, counted: Number((result && result.attention) || 0) }
+}
+
+/** How many of the listed findings came from the reviewer rather than the rules. */
+export function reviewerAttention(result) {
+  return attentionSplit(result).review
 }
 
 /**
