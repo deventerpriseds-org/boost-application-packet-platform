@@ -71,6 +71,7 @@ export async function loadProfile(): Promise<{ profileText: string; omitList: st
   return profileFromMasterContext(mc)
 }
 
+/** Fallback only. The live value is the owner's `rem_model` on `owner_search_prefs` (D-4). */
 export const SCOPED_REGEN_MODEL = 'gpt-4o-mini'
 
 /**
@@ -99,16 +100,20 @@ export async function regenerateFields(opts: {
   omitList?: string
   temperature?: number
   maxTokens?: number
+  model?: string
+  profileChars?: number
+  suppliedEvidence?: Array<{ seq: number | null; note: string }>
 }): Promise<{ fields: Record<string, any>; usage: any; model: string; via: string; detail: string }> {
   const { system, user } = buildScopedPrompt({
     company: opts.company, role: opts.role, pass: opts.pass, fields: opts.fields,
     current: opts.current, open: opts.open, profileText: opts.profileText, omitList: opts.omitList,
+    profileChars: opts.profileChars, suppliedEvidence: opts.suppliedEvidence,
   })
   const res = await fetch('https://api.openai.com/v1/chat/completions', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${opts.key}` },
     body: JSON.stringify({
-      model: SCOPED_REGEN_MODEL,
+      model: opts.model || SCOPED_REGEN_MODEL,
       messages: [{ role: 'system', content: system }, { role: 'user', content: user }],
       max_tokens: opts.maxTokens ?? 4000,
       temperature: opts.temperature ?? 0.4,
@@ -123,7 +128,7 @@ export async function regenerateFields(opts: {
   return {
     fields: parsed.value && typeof parsed.value === 'object' ? parsed.value as Record<string, any> : {},
     usage: json?.usage,
-    model: SCOPED_REGEN_MODEL,
+    model: opts.model || SCOPED_REGEN_MODEL,
     via: parsed.via,
     detail: parsed.value ? '' : `scoped regeneration returned no JSON object (${parsed.detail})`,
   }

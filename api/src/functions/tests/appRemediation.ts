@@ -31,7 +31,7 @@ import { resolveOwner, requireWrite } from './appSession'
 import { getPgClient } from './pgClient'
 import { evaluateArtifact } from './appChecks'
 import { ensurePackage, renderArtifact, generationJd, OPP_FIELDS } from './appPackets'
-import { regenerateFields, loadProfile, SCOPED_REGEN_MODEL } from './pipeline'
+import { regenerateFields, loadProfile } from './pipeline'
 import { writeInsertions } from './appInsertions'
 import { costOf, tokensOf, logUsage } from './usageMeter'
 import {
@@ -64,13 +64,18 @@ export async function ensureLoopPrefs(client: any) {
       add column if not exists rem_cost_ceiling_usd numeric(10,4) not null default ${DEFAULT_LOOP_PREFS.costCeilingUsd},
       add column if not exists rem_wall_clock_ms   int     not null default ${DEFAULT_LOOP_PREFS.wallClockMs},
       add column if not exists rem_token_ceiling   int     not null default ${DEFAULT_LOOP_PREFS.tokenCeiling},
+      add column if not exists rem_model           text    not null default '${DEFAULT_LOOP_PREFS.model}',
+      add column if not exists rem_max_tokens      int     not null default ${DEFAULT_LOOP_PREFS.maxTokens},
+      add column if not exists rem_temperature     numeric(4,2) not null default ${DEFAULT_LOOP_PREFS.temperature},
+      add column if not exists rem_profile_chars   int     not null default ${DEFAULT_LOOP_PREFS.profileChars},
       add column if not exists rem_enabled         boolean not null default true`)
 }
 
 export async function loadLoopPrefs(client: any, owner: string): Promise<LoopPrefs & { enabled: boolean }> {
   await ensureLoopPrefs(client)
   const r = (await client.query(
-    `select rem_max_passes, rem_cost_ceiling_usd, rem_wall_clock_ms, rem_token_ceiling, rem_enabled
+    `select rem_max_passes, rem_cost_ceiling_usd, rem_wall_clock_ms, rem_token_ceiling,
+            rem_model, rem_max_tokens, rem_temperature, rem_profile_chars, rem_enabled
        from owner_search_prefs where owner_email=$1`, [owner])).rows[0]
   if (!r) return { ...DEFAULT_LOOP_PREFS, enabled: true }
   return {
@@ -78,6 +83,10 @@ export async function loadLoopPrefs(client: any, owner: string): Promise<LoopPre
     costCeilingUsd: Number(r.rem_cost_ceiling_usd),
     wallClockMs: Number(r.rem_wall_clock_ms),
     tokenCeiling: Number(r.rem_token_ceiling),
+    model: String(r.rem_model || DEFAULT_LOOP_PREFS.model),
+    maxTokens: Number(r.rem_max_tokens),
+    temperature: Number(r.rem_temperature),
+    profileChars: Number(r.rem_profile_chars),
     enabled: r.rem_enabled !== false,
   }
 }
@@ -199,6 +208,14 @@ export async function artifactRemediate(req: HttpRequest, context: InvocationCon
       if (decision.action === 'halt') { haltReason = decision.reason; haltDetail = decision.detail; break }
 
       const wasOpen = cov.openSeqs.slice()
+      // Re-read each pass: a resolution can land between runs, and it is scoped to the requirements
+      // still open so the model is not handed evidence for things it is not being asked to fix.
+      const suppliedEvidence = (await client.query(
+        `select r.seq, e.resolution_note from escalation e left join requirement r on r.id = e.requirement_id
+          where e.artifact_id=$1 and e.state='resolved' and coalesce(e.resolution_note,'') <> ''
+          order by r.seq`, [art.id])).rows
+        .filter((x: any) => x.seq === null || wasOpen.includes(Number(x.seq)))
+        .map((x: any) => ({ seq: x.seq === null ? null : Number(x.seq), note: String(x.resolution_note) }))
       const profileHits = profileEvidenceFor(profile.profileText, requirements.filter(r => wasOpen.includes(Number(r.seq))))
       const openRows = requirements.filter(r => wasOpen.includes(Number(r.seq)))
         .map((r: any) => ({ seq: Number(r.seq), verbatim: r.verbatim, item_text: r.item_text, kind: r.kind }))
@@ -212,6 +229,14 @@ export async function artifactRemediate(req: HttpRequest, context: InvocationCon
           key, company: opp.company, role: opp.role, pass,
           fields: lastScope.fields, current: pkg, open: openRows,
           profileText: profile.profileText, omitList: profile.omitList,
+          // D-4 — every one of these was a code-only literal until the verifier listed them.
+          model: prefs.model, maxTokens: prefs.maxTokens, temperature: prefs.temperature,
+          profileChars: prefs.profileChars,
+          // D-5 — the evidence the user supplied when resolving an escalation. `escalationResolve`
+          // REFUSES a resolution without it and tells the user "the loop re-runs against it"; it was
+          // stored and read by nothing, so the next run mined the same profile that had already
+          // failed and the user's answer was thrown away.
+          suppliedEvidence,
         })
         // D8 — every pass is metered. `logUsage` writes the row; the loop keeps its own running
         // total because a ceiling that reads back from the metering table would be a second source.
@@ -414,7 +439,7 @@ export async function artifactRemediate(req: HttpRequest, context: InvocationCon
       jsonBody: {
         ok: true, artifactId, type: art.type, ...outcome,
         gate: ev.gate, attention: ev.attention, escalations,
-        spend: { usd: spend.unpricedCalls ? null : Number(spend.usd.toFixed(6)), unpricedCalls: spend.unpricedCalls, tokens: spend.tokens, elapsedMs: Date.now() - startedAt, model: SCOPED_REGEN_MODEL },
+        spend: { usd: spend.unpricedCalls ? null : Number(spend.usd.toFixed(6)), unpricedCalls: spend.unpricedCalls, tokens: spend.tokens, elapsedMs: Date.now() - startedAt, model: prefs.model },
         clearedOverride: rows.map(r => r.cleared_override).find(Boolean) || null,
         rendered,
         loop: rows.map(r => ({ n: r.n, closed: r.closed.length, phantomCloses: r.phantom_closes.length, remaining: r.remaining.length, editedFields: r.edited_fields, note: r.note, halted: r.halted, haltReason: r.halt_reason })),
@@ -525,12 +550,14 @@ export async function remediationPrefs(req: HttpRequest, context: InvocationCont
       await client.query(`insert into owner_search_prefs (owner_email) values ($1) on conflict (owner_email) do nothing`, [owner])
       const map: Record<string, string> = {
         maxPasses: 'rem_max_passes', costCeilingUsd: 'rem_cost_ceiling_usd',
-        wallClockMs: 'rem_wall_clock_ms', tokenCeiling: 'rem_token_ceiling', enabled: 'rem_enabled',
+        wallClockMs: 'rem_wall_clock_ms', tokenCeiling: 'rem_token_ceiling',
+        model: 'rem_model', maxTokens: 'rem_max_tokens', temperature: 'rem_temperature',
+        profileChars: 'rem_profile_chars', enabled: 'rem_enabled',
       }
       const sets: string[] = []; const vals: any[] = [owner]
       for (const [k, col] of Object.entries(map)) {
         if (b[k] === undefined) continue
-        vals.push(k === 'enabled' ? !!b[k] : Number(b[k]))
+        vals.push(k === 'enabled' ? !!b[k] : k === 'model' ? String(b[k]) : Number(b[k]))
         sets.push(`${col}=$${vals.length}`)
       }
       if (sets.length) await client.query(`update owner_search_prefs set ${sets.join(', ')} where owner_email=$1`, vals)

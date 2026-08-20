@@ -1831,3 +1831,88 @@ folder `1MlVLMSQ0EQJoAtpKC1Mv7mDCAJDmdJTt`. P3-40 (posting figures) — that is 
 `swaps`/`insertions` arrays as though they were one pass. That double-counts the moment a second pass
 exists, which P3 makes routine. Both endpoints now also return a `current` array (latest pass only)
 and a `passes` list so the UI can be corrected without guessing.
+
+
+## ACT — the P3 verifier disproved eight claims; four were real defects (2026-08-20)
+
+An independent verifier (`docs/qc-evidence/P3-VERIFICATION.md`, branch `claude/qc-p3-verify`) ran
+against the branch, applied mutations, and executed the schema. It disproved **eight** claims. Four
+were defects in the code or its guards and are fixed; the rest are recorded below as open.
+
+### The finding that changes how this repo verifies schema work
+**This container ships PostgreSQL 16.13.** `CLAUDE.md` says the sandbox cannot reach the live Azure
+database — true — and that was carried over as "there is no Postgres here," which is false and was
+never tested. A throwaway cluster is one `initdb` away (as an unprivileged user; `initdb` refuses to
+run as root). Executing `SCHEMA_SQL` against a database seeded with `main`'s schema **immediately
+found a second migration-killing defect that reading had not**:
+
+```
+psql:schema.sql:367: ERROR:  column "loop" does not exist
+P3 tables created: 0
+```
+`create index ... on swap_decision(packet_id, loop, ...)` named a column the idempotent ALTER only
+added 350 lines later. Fresh database fine; every existing database dead. Same class as the FK
+ordering bug, second instance in one file — so **H34b** generalises the guard from "composite FK
+targets" to "any statement naming a column added later in the same script."
+
+**Standing rule from this: a schema change is not verified until it has been EXECUTED against a
+populated database with the previous schema already applied.** Fresh-database success proves almost
+nothing, because every `create table if not exists` is skipped on the database you actually care
+about. The upgrade path is now proven: `BRANCH exit=0`, both P3 tables created, `check_result` gains
+its second unique, existing rows preserved.
+
+### Three of my guards were INERT — they passed with their defect reinstated
+- **H29b** (all three assertions): `unique (packet_id, list, seq, loop)` occurs TWICE in `SCHEMA_SQL`
+  (inline and in the idempotent ALTER), so deleting the inline one still matched; and two
+  `[\s\S]*?` spans ran past the end of their own table and matched the NEXT table that had a
+  `loop int not null default 0`.
+- **H32's FK-target line and H34's "fresh database" line**, same cause. H34's was added by the very
+  commit that says an inert guard "is worse than none" — reintroduced one line below the fix.
+- All now assert on a bounded `createTable()` slice, revert-proven.
+
+### A guard that tested spelling, not behaviour
+**H33** grepped for `COVERAGE_THRESHOLD =` and the literal `hit.length / toks.length`. The verifier
+evaded it in one move: a second coverage rule named `localCovers` at threshold 0.5, wired into the
+credit decision. The grep passed and all 37 behavioural tests passed, with the loop and the gate
+disagreeing about what "covered" means. **P3-15 now pins `creditClosures` itself to the gate** across
+inputs measured to make a 0.5 rule and the gate's 0.7 disagree — in both directions, so it cannot
+pass by never crediting anything either.
+
+### The one that mattered most: the loop could still SAY it converged
+The P3-11 guard protects the `closed[]` COLUMN and does it correctly. It does not protect the
+SENTENCE. Demonstrated on the real compiled functions: a pass rewrites one unrelated field, credits
+nothing, records a phantom; the whole-document predicate reports the requirement covered, `remaining`
+empties, and the run tells the user *"Converged after 1 pass(es): every must-have requirement is
+covered."* **Refusing the credit is not refusing the claim.** `converged` now additionally requires
+that nothing left the open list unattributed — refused in `decidePass` (new halt reason
+`unattributed_coverage`) AND recomputed in `reportedOutcome`, so a bad row cannot talk the sentence
+into existence. A phantom-flipped requirement also used to sit in NEITHER `closed` nor `remaining`
+and got no escalation (P3-07); it now raises one saying plainly that the run cannot say what covered
+it.
+
+### Also fixed
+- **D-4** — `model`, `maxTokens`, `temperature` and the profile truncation were code-only literals
+  while only the four ceilings were owner-owned. All four are now on `owner_search_prefs`. "No
+  hardcoded config" is not satisfied by owning the ceilings and baking in what the model is.
+- **D-5** — `escalationResolve` REFUSES a resolution without evidence and tells the user "the loop
+  re-runs against it". The evidence was stored and **read by nothing**: three writes, zero reads. The
+  next run mined the same profile that had already failed. It now reaches the scoped prompt, scoped
+  to the requirements still open.
+
+### Still open, recorded not fixed
+- **D-6** — P3-09 ("no row with `n > max` for that packet") and P3-33 ("a resolution continues the
+  ledger at `max(n)+1`") are contradictory as written. The implementation follows P3-33 and the
+  ceiling is per-RUN. Neither acceptance document reconciles them; this needs an owner decision, not
+  a code change.
+- **P3-07's union property** is still false by construction: a phantom flip is in neither list. It is
+  now visible (`phantom_closes` + an escalation) rather than silent, but the stated invariant does
+  not hold and the criterion should be reworded to match.
+- `STRUCTURAL_FIELDS` stays code-only deliberately: rewriting `@Company` breaks `company_named`, so
+  it is a correctness invariant rather than a preference.
+
+### The discipline that caught all of it
+Every fix above was revert-proven — the fix removed, the test watched to FAIL, the fix restored.
+That is the only step that separates a guard from a comment, and it caught two inert guards of mine
+in one session. One D-4 revert was attempted with a `sed` that silently failed to match; the "pass"
+that produced was recorded as **no evidence**, not as a proof, and redone with an asserting Python
+mutation. A mutation that did not apply proves nothing.

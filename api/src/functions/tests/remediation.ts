@@ -86,6 +86,18 @@ export interface LoopPrefs {
   costCeilingUsd: number
   wallClockMs: number
   tokenCeiling: number
+  /**
+   * D-4. These four were code-only literals, and the repo's "No hardcoded config" rule is not
+   * satisfied by owning the CEILINGS while the model, its caps and how much profile it may read
+   * stay baked in. Each is behaviour-affecting: `model` decides what every pass runs on,
+   * `profileChars` directly bounds what P3-18 can surface (the whole point of the loop is that the
+   * evidence is usually already in the profile), and temperature on a remediation pass is the
+   * difference between rephrasing evidence and inventing it.
+   */
+  model: string
+  maxTokens: number
+  temperature: number
+  profileChars: number
 }
 
 /**
@@ -101,6 +113,12 @@ export const DEFAULT_LOOP_PREFS: LoopPrefs = {
   costCeilingUsd: 0.50,
   wallClockMs: 180_000,
   tokenCeiling: 400_000,
+  model: 'gpt-4o-mini',
+  maxTokens: 4000,
+  // Low on purpose: a remediation pass rewrites evidenced claims, and the one call in the run that
+  // should be least creative is the one asked not to invent anything.
+  temperature: 0.4,
+  profileChars: 12_000,
 }
 
 /**
@@ -411,6 +429,10 @@ export interface ScopedPromptInput {
   open: Array<{ seq: number; verbatim: string | null; item_text: string; kind: string }>
   profileText?: string
   omitList?: string
+  /** D-4 — owner-owned; was a bare `.slice(0, 12000)`. It bounds what P3-18 can surface. */
+  profileChars?: number
+  /** D-5 — evidence the user supplied when resolving an escalation. */
+  suppliedEvidence?: Array<{ seq: number | null; note: string }>
 }
 
 /**
@@ -452,14 +474,19 @@ export function buildScopedPrompt(input: ScopedPromptInput): { system: string; u
     currentLines,
     '',
     'THE CANDIDATE\'S STANDING PROFILE — mine this FIRST. Evidence that closes a requirement is usually already here and simply was not pulled forward:',
-    (input.profileText || '(no profile supplied)').slice(0, 12000),
+    (input.profileText || '(no profile supplied)').slice(0, Math.max(500, Number(input.profileChars) || 12000)),
     '',
+    (input.suppliedEvidence || []).length
+      ? 'EVIDENCE THE CANDIDATE SUPPLIED FOR THESE REQUIREMENTS (they wrote this themselves when asked; treat it as profile fact and use it):\n'
+        + (input.suppliedEvidence || []).map(e => `- ${e.seq === null ? '(general)' : `#${e.seq}`}: ${e.note}`).join('\n')
+      : '',
+    (input.suppliedEvidence || []).length ? '' : null,
     input.omitList && String(input.omitList).trim()
       ? `NEVER USE ANY OF THE FOLLOWING (the candidate's own do-not-use list):\n${input.omitList}`
       : 'NEVER USE: (no do-not-use list configured)',
     '',
     `Return JSON with exactly these keys: ${JSON.stringify(input.fields)}`,
-  ].join('\n')
+  ].filter(l => l !== null && l !== '').join('\n')
 
   return { system, user }
 }

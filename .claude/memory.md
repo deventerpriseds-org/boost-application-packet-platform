@@ -1482,3 +1482,34 @@ guard. Sweep comments of backticks, then BUILD.
 **Tooling note:** this lane's harness exposed no `Agent`/`Task` tool, so the org gate's independent
 AC and verifier agents were spawned as separate CCR sessions (`create_session`) that pushed their
 output to branches. It works and is auditable; budget for the round trip.
+
+
+## P3 verification round (2026-08-20) — what it changed about how to verify
+
+**THE SANDBOX HAS POSTGRESQL 16.13.** `CLAUDE.md`'s "you cannot reach the live Postgres" is about the
+Azure database and is true; it does NOT mean there is no Postgres locally. `initdb` refuses to run as
+root — `su postgres -c "initdb -D /tmp/pgd -U postgres -A trust"` then `pg_ctl ... -k /tmp/pgsock`.
+`pgvector` is absent, so stub `create extension vector` and `vector(1536)` to run `SCHEMA_SQL`.
+
+**A schema change is not verified until it is EXECUTED against a POPULATED database that already has
+the previous schema.** Fresh-database success proves almost nothing: every `create table if not
+exists` is skipped on the database you actually care about, taking its inline constraints with it.
+Two migration-killing defects in one file were found this way and neither was visible by reading —
+a composite FK whose UNIQUE target was created later, and an index naming a column added later.
+H34/H34b encode the general rule.
+
+**Three of my own guards were INERT** — they passed with their defect deliberately reinstated. Causes
+worth remembering: (a) a constraint appears TWICE in `SCHEMA_SQL`, inline and in the idempotent
+ALTER, so a whole-file substring search cannot tell them apart; (b) `[\s\S]*?` spans run past the
+end of their table into the next one. Assert on a bounded `createTable()` slice, never on the file.
+
+**A source grep tests spelling, not behaviour.** A guard matching `COVERAGE_THRESHOLD =` was evaded
+by renaming the variable. Where the behaviour can be exercised, pin the BEHAVIOUR — compare the two
+functions' verdicts on inputs measured to make them disagree.
+
+**Refusing the credit is not refusing the claim.** The loop's `closed[]` column was correctly
+guarded while the summary sentence still said "Converged" on a close it did not make. When a rule is
+about honesty, check the words the user reads, not only the row that was written.
+
+**A mutation that did not apply proves nothing.** One revert-proof used a `sed` that silently failed
+to match; the resulting "pass" was recorded as no evidence and redone with an asserting mutation.

@@ -542,3 +542,53 @@ test('D-8 unattributed_coverage is not honest green, and has its own escalation 
   assert.match(e.detail, /without any edit from this run carrying the evidence/)
   assert.doesNotMatch(e.detail, /Why it is still open: unattributed_coverage\./)
 })
+
+// ---------------------------------------------------------------------------------------------
+// D-4 / D-5 — the settings the verifier found baked in, and the evidence that was never read
+// ---------------------------------------------------------------------------------------------
+
+test('D-4 the model, its caps and the profile budget are settings, not constants', () => {
+  for (const k of ['model', 'maxTokens', 'temperature', 'profileChars']) {
+    assert.ok(k in DEFAULT_LOOP_PREFS, `${k} is not an owner setting — it is a code-only literal`)
+  }
+  assert.equal(typeof DEFAULT_LOOP_PREFS.model, 'string')
+  assert.ok(DEFAULT_LOOP_PREFS.temperature < 1,
+    'a remediation pass rewrites evidenced claims; it is the call that should least invent')
+})
+
+test('D-4 the profile budget actually bounds the prompt', () => {
+  const long = 'evidence '.repeat(5000)
+  const small = buildScopedPrompt({
+    company: 'Trinnex', role: 'CTO', pass: 1, fields: ['ResumeSummary'], current: {}, open: [],
+    profileText: long, profileChars: 600,
+  })
+  const big = buildScopedPrompt({
+    company: 'Trinnex', role: 'CTO', pass: 1, fields: ['ResumeSummary'], current: {}, open: [],
+    profileText: long, profileChars: 9000,
+  })
+  assert.ok(big.user.length > small.user.length + 5000,
+    'profileChars does not change how much profile the model sees — it is still a literal somewhere')
+})
+
+test('D-5 evidence the user supplied when resolving an escalation reaches the model', () => {
+  // The resolve endpoint REFUSES a resolution without a note and tells the user the loop will
+  // re-run against it. It was stored and read by nothing, so the next run mined the same profile
+  // that had already failed and the user's answer was silently discarded.
+  const { user } = buildScopedPrompt({
+    company: 'Trinnex', role: 'CTO', pass: 2, fields: ['ResumeSummary'],
+    current: { ResumeSummary: 'current' },
+    open: [{ seq: 4, verbatim: 'FedRAMP authorization experience', item_text: 'FedRAMP', kind: 'must_have' }],
+    profileText: 'A profile with no FedRAMP in it.',
+    suppliedEvidence: [{ seq: 4, note: 'I led the FedRAMP Moderate ATO for the platform in 2023.' }],
+  })
+  assert.match(user, /EVIDENCE THE CANDIDATE SUPPLIED/)
+  assert.match(user, /#4: I led the FedRAMP Moderate ATO for the platform in 2023\./)
+})
+
+test('D-5 with no supplied evidence the prompt gains no empty section', () => {
+  const { user } = buildScopedPrompt({
+    company: 'Trinnex', role: 'CTO', pass: 1, fields: ['ResumeSummary'], current: {}, open: [],
+    profileText: 'profile',
+  })
+  assert.doesNotMatch(user, /EVIDENCE THE CANDIDATE SUPPLIED/)
+})
