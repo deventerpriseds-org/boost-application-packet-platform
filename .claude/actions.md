@@ -1372,3 +1372,38 @@ re-reading everything; a false name destroys that.*
 
 *Housekeeping note: a `git add -A` swept the two subagent worktrees into a commit as gitlinks;
 untracked and `.claude/worktrees/` is now gitignored.*
+
+## ACT-61 — P2.3 decomposed artifact score
+**Status:** `landed + verified live` (`1605021`). 20/20 tables live (pg-migrate `32316307279`).
+
+**Reconciled against the four existing scores BEFORE shipping a fifth** (the plan forbids otherwise).
+None is per-artifact, so this is a new **grain**, not a duplicate:
+
+| score | grain | what it actually is |
+|---|---|---|
+| `opportunity.match_score` | opportunity | model fit for the ROLE. **NOT posting-grounded** — `appApply` prompts from role/company/why_surfaced/signals/pains + MasterContext summary, never reads `jd_real`. Then **mutated in place** by the role-taxonomy boost. |
+| `opportunity.base_score` | opportunity | the same number captured once *before* that boost |
+| `opportunity.ats_score` | opportunity | posting-grounded, from `atsScoreOne` |
+| `packet.ats_score` | packet | packet-level, from `jdAnalysis` |
+| **`artifact_score`** | **artifact** | does THIS DOCUMENT cover this posting's requirements |
+
+Named `artifact_score`, **not** `match_score` — that column exists with a different live meaning, and
+reusing the name is how two numbers come to disagree while looking like one.
+
+**The rule that matters, enforced by a DB constraint and not just in code:** a component with no
+honest source is `null`, and the **composite is null unless all three exist**.
+**Verified live** on the Trinnex resume (api-test `32316337445`):
+`must_have_coverage 100 ("2/2 must-have requirements covered")` · `keyword_coverage null
+("no published term-library version has scoreable entries yet")` · `seniority_alignment null
+("not graded — the independent reviewer (P4) has not run")` · **`composite null`, `band null`**.
+A composite from one of three components — or from a zero standing in for "unknown" — is a
+fabricated number wearing a score's clothes, and it is exactly the number a reviewer trusts most.
+Every unavailable component records WHY, so the UI explains the gap instead of showing a blank.
+
+`must_have_coverage` is **read out of the deterministic check, not recomputed**. Two implementations
+of one rule drift, and the day they drift is the day the gate and the score describe different states
+of the same artifact (R4). Same `run_id` as the checks, for the same reason. Every historical score is
+kept so regenerations are comparable; uncovered requirements are stored as real ids so the number
+expands to the rows behind it.
+
+**P2 COMPLETE** — 2.1 engine · 2.2 gate + server-side block · 2.3 score. 131/131 assertions green.

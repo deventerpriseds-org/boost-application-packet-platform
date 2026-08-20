@@ -11,15 +11,15 @@ where the train currently is. Read it first on any resume; it is written to surv
 
 ```
 CURRENT PHASE : P2 (checks and gate)
-STATUS        : P2.1 + P2.2 landed and PROVEN live (409 on approve, 409 on override)
-LAST LANDED   : 4b9ce4d checks engine + gate; 19/19 tables live
-NEXT ACTION   : P2.3 artifact_score (reconcile the 4 existing scores FIRST)
+STATUS        : P2 COMPLETE (2.1 engine, 2.2 gate+block, 2.3 score) — all verified live
+LAST LANDED   : 1605021 artifact_score; 20/20 tables live; composite correctly null
+NEXT ACTION   : P3 remediation loop (X5 trap: render documents ONCE, after the loop)
 DONE SO FAR   : P0 wiring · X1 grounding · X2 regen · X3 normalizer · X4 tests · D1 D2 D3
                 P1.2b term_library · P1.2 corpus miner + curation queue · P1.1 requirement rows
 ```
 *Update this block on every landing. It is the single place to look after a restart.*
 
-Phase status: P0 `done` · P1 `done` · P2 `2 of 3` · P3-P8 `not started`.
+Phase status: P0 `done` · P1 `done` · P2 `done` · P3-P8 `not started`.
 Parallel streams in flight: P7 hygiene, D10 overlay primitive (subagents, own branches).
 
 ---
