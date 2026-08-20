@@ -8,6 +8,39 @@
 //   1. the badge count, the gate word and the footer action all read ONE server payload;
 //   2. `not_applicable` is never folded into a pass, and a composite is never fabricated.
 
+/**
+ * Every `data-qc` selector the gate drawer renders.
+ *
+ * ui-verify.yml (scripts/ui-verify.mjs) selects by CSS ONLY - COUNT_SEL, CLICK_SEL and MEASURE_SEL
+ * are raw selectors handed to `document.querySelector`. A surface with no stable hook is therefore
+ * unprovable on the live site by anything except matching body TEXT, which breaks on a copy edit
+ * and can never distinguish two surfaces that say the same words. This drawer had ZERO hooks while
+ * PostingAnalysis.jsx had 24, so P8.5's deep link and P5.3's badge/gate agreement were only ever
+ * assertable by prose.
+ *
+ * This is the same constant QC_HOOKS (qcRail.js) is, for the same reason and with the same rule:
+ * the component renders NO hand-typed `data-qc` string, so the verifier's selector and the DOM
+ * cannot drift apart. app/test/assetGate.test.mjs holds both halves to it.
+ */
+export const GATE_HOOKS = {
+  drawer: 'gate-drawer',               // the drawer root (also carries data-qc-tab)
+  badge: 'gate-badge',                 // the gate pill group, header and card alike
+  gate: 'gate-word',                   // the gate word itself
+  toFix: 'gate-to-fix',                // findings from the measured rules
+  toReview: 'gate-to-review',          // findings from the independent reviewer - never added to toFix
+  summary: 'gate-summary',             // the one reconciled strip shown above every tab
+  disagreement: 'gate-disagreement',   // reconcile(): the server's own numbers do not agree
+  exception: 'gate-exception',         // a recorded override
+  tab: 'gate-tab',
+  panel: 'gate-tabpanel',
+  block: 'gate-block',                 // one merge field on the Blocks tab (carries data-qc-field)
+  check: 'gate-check',                 // one check row (carries data-qc-state)
+  quote: 'gate-posting-quote',         // the posting's own words echoed onto an asset
+  runChecks: 'gate-run-checks',
+  approve: 'gate-approve',
+  reason: 'gate-reason',               // the exception textarea
+}
+
 // Asset labels. The same map is currently inlined in Library.jsx, OppDetail.jsx and
 // PacketBuilder.jsx; it lives here so those three can converge on one copy rather than a fourth
 // being added. An unknown type falls through to the raw type - never to a blank.

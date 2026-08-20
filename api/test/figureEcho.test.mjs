@@ -213,3 +213,122 @@ test('a plural folds onto its singular, and nothing else does', () => {
   // Folding is exact-suffix, never similarity — two different nouns stay two different claims.
   assert.deepEqual(scanEcho('Led three divisions.', 'Own three business units.', 'P.').echoes, [])
 })
+
+// Everything below was found by an independent verifier AFTER the module was written, tested and
+// its PR opened. It constructed one realistic cover letter in which every figure was the
+// candidate's own, and R3 named five offenders — four of them wrong. 11 of 31 constructed-innocent
+// inputs were accused. This is the exact failure H25 was supposed to have prevented: H25 pinned the
+// specific incident strings, not the class.
+
+const INNOCENT = [
+  // Ordinals. Both documents write "3rd-party", so the noun rule does not save it — it CONFIRMS the
+  // match. The spelled form ("third-party") was silent, so the verdict flipped on typography alone.
+  ['Owned 3rd-party vendor integrations end to end.', 'You will manage 3rd-party vendor relationships.'],
+  ['Promoted in my 3rd year; delivered a 3rd-party integration layer.', 'Manage 3rd-party vendor relationships.'],
+  // Ranges. "5-7 years" was split, and the SEVEN inherited "years" as its noun.
+  ['I bring 5-7 years of direct platform leadership.', 'Requires 5-7 years of experience.'],
+  ['7 years leading platform organizations.', 'We require 5-7 years of platform experience.'],
+  ['Seven years leading platform organizations.', 'We require 5-7 years of platform experience.'],
+  // Percentages. `isMarked` exempted ALL of them from the noun rule on the reasoning that "nobody
+  // writes $18M incidentally" — true of $18M, false of 20% and 100%.
+  ['Cut infrastructure spend 20% in one year.', 'Help us reduce customer churn by 20%.'],
+  ['Delivered 100% of committed roadmap items.', 'We are 100% remote.'],
+  // Bare currency. Postings are dense with comp bands and benefit amounts; resumes with budgets the
+  // candidate really owned. Same number, unrelated subject.
+  ['Owned a $180,000 vendor budget.', 'Compensation: $180,000 - $220,000 depending on experience.'],
+  ['Administered the $5,000 training stipend.', 'We offer a 401(k) match and a $5,000 learning budget.'],
+  // A hyphenated adjective: the figure counts the release train, not the day.
+  ['Introduced a 4-day release train.', 'We operate a 4-day workweek.'],
+  // Small spelled numbers are prose. The module already excluded "million" for this reason; the
+  // argument applies with far more force to "one".
+  ['One of the first product hires; owned one platform.', 'You will be one of the first product hires on one platform team.'],
+  ['Split the roadmap into two tracks.', 'The role spans two tracks of work.'],
+  // An address is not an achievement.
+  ['Based near 2400 Congress Ave, Austin.', 'Offices at 2400 Congress Ave, Austin.'],
+]
+
+test('every one of the verifier\'s innocent documents is left alone', () => {
+  for (const [generated, posting] of INNOCENT) {
+    const hits = scanEcho(generated, posting, 'Profile: led platform engineering.').echoes
+    assert.deepEqual(hits.map(e => e.figure.raw), [],
+      `accused ${JSON.stringify(generated)} of echoing ${JSON.stringify(posting)}`)
+  }
+})
+
+test('and the check is still a check — every real echo lands', () => {
+  // The other half of the discipline. A scanner made silent enough to pass the corpus above and
+  // nothing else would be worse than the cry-wolf version, because it would look like it worked.
+  for (const [generated, posting, expected] of [
+    ['Managed a $18M portfolio across three business units.', 'Own a $18M portfolio across three business units.', ['$18M', 'three']],
+    ['Ran 60 sites.', 'Seeking 60+ sites experience.', ['60']],          // unmarked answer to a marked ask
+    ['Ran 60+ sites.', 'Seeking 60 sites experience.', ['60+']],         // and the reverse
+    ['Org Scaling 60+', 'We need 60+ operators.', ['60+']],              // C3: a list item, no noun at all
+    ['P&L $18M', 'A $18M P&L.', ['$18M']],
+    ['Scaled to one hundred engineers.', 'We have 100 engineers.', ['one hundred']],
+    ['Ran sixty sites.', 'Seeking 60+ sites.', ['sixty']],
+    ['Supported 400+ industrial operators.', 'Serving 400+ industrial operators.', ['400+']],
+    ['Managed a $18 million portfolio.', 'A $18M portfolio.', ['$18 million']],
+  ]) {
+    assert.deepEqual(scanEcho(generated, posting, 'Profile: led platform engineering.').echoes.map(e => e.figure.raw),
+      expected, `missed the echo in ${JSON.stringify(generated)}`)
+  }
+})
+
+test('"one hundred" is a hundred, not one', () => {
+  // `hundred` was in the spelled-number ALTERNATION but missing from MULT, so `MULT['hundred']` was
+  // undefined and `|| 1` took over. Both failure directions were live: a real "100 engineers" echo
+  // went unseen, AND "one hundred engineers" collided with a posting saying "the one engineer who
+  // owns this". A multiplier must appear in both places or neither.
+  assert.deepEqual(keys('one hundred engineers'), ['num:100'])
+  assert.deepEqual(keys('two hundred fifty clients')[0], 'num:200')
+  assert.deepEqual(keys('one thousand engineers'), ['num:1000'])
+  assert.deepEqual(keys('one million engineers'), ['num:1000000'])
+  assert.deepEqual(scanEcho('Scaled to one hundred engineers.', 'You will be the one engineer who owns this.', 'P.').echoes, [])
+})
+
+test('a range never accuses — it exists to stop the splitter', () => {
+  assert.deepEqual(raws('Requires 5-7 years of experience'), ['5-7'], 'the range is ONE figure, not 5 and 7')
+  assert.deepEqual(raws('Compensation: $180,000 - $220,000'), ['$180,000', '$220,000'])
+  // Nobody claims to have accomplished a range, so it matches nothing — not even an identical one.
+  assert.deepEqual(scanEcho('I bring 5-7 years.', 'Requires 5-7 years.', 'P.').echoes, [])
+})
+
+test('the noun a figure counts skips stopwords, hyphens and proper nouns', () => {
+  const unitOf = (t) => extractFigures(t)[0].unit
+  assert.equal(unitOf('Delivered 100% of committed roadmap items'), 'committed', 'the "of" told us nothing')
+  assert.equal(unitOf('a 4-day release train'), 'release', 'the figure counts the train, not the day')
+  assert.equal(unitOf('60+ sites'), 'sites')
+  assert.equal(unitOf('2400 Congress Ave'), '', 'a capitalised word is a proper noun, not a counted thing')
+})
+
+test('missing either side is decided against the NORMALIZED text, in one place', () => {
+  // `jd_real` is HTML, so `<p></p>` is a non-empty raw string and an empty posting. A caller that
+  // re-derived emptiness from the raw string disagreed with the scanner and reported a clean PASS
+  // on a document it had never compared to anything.
+  for (const posting of ['<p></p>', '<div><br/></div>', '&nbsp;&nbsp;', '  <br>  ', '<script>var x=1</script>']) {
+    const r = scanEcho('Managed a $18M portfolio.', posting, 'Profile.')
+    assert.equal(r.notApplicable, true, `posting ${JSON.stringify(posting)} read as applicable`)
+  }
+  // The profile half was worse: markup-only produced false ACCUSATIONS, because the thing that
+  // would have exonerated the figures read as absent rather than as unreadable.
+  for (const profile of ['<p></p>', '<div></div>', '&nbsp;']) {
+    const r = scanEcho('Ran 60 sites.', 'Seeking 60+ sites.', profile)
+    assert.equal(r.notApplicable, true, `profile ${JSON.stringify(profile)} read as applicable`)
+    assert.deepEqual(r.echoes, [], 'an unreadable profile must never produce an accusation')
+    assert.match(r.reason, /profile/i)
+  }
+})
+
+test('there is ONE implementation of what two documents must share', () => {
+  // `scanEcho` inlined the claim rule and never called `claimKey`, so H25's structural guard was
+  // watching dead code — it would have gone on passing while the real logic beside it was reverted.
+  const src = readFileSync(new URL('../src/functions/tests/figureEcho.ts', import.meta.url), 'utf8')
+    .replace(/\/\/[^\n]*/g, '').replace(/\/\*[\s\S]*?\*\//g, '')
+  assert.ok(/postingFigures\.filter\(f => f\.unit\)\.map\(unitKey\)/.test(src), 'the posting index must build through unitKey')
+  assert.ok(/return unitKey\(f\)/.test(src), 'claimKey must delegate, not restate')
+  // And the LOOKUP must go through claimKey, or claimKey is production-dead and H25's structural
+  // guard watches nothing. The first fix for this left it dead a second time: the inline branch was
+  // replaced by an inline call to unitKey, which is claimKey's tail rather than claimKey.
+  assert.ok(/\.has\(claimKey\(figure\)\)/.test(src), 'scanEcho must decide through claimKey itself')
+  assert.ok(!/postingClaims\.has\(unitKey\(figure\)\)/.test(src), 'the claim rule was inlined again')
+})

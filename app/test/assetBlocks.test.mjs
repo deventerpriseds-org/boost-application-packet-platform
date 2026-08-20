@@ -347,3 +347,58 @@ test('draftSizeText omits bullets when the field name never asked for them', () 
   assert.equal(draftSizeText(row, { words: null, bullets: 4 }), '3 bullets, 5 words')
   assert.equal(draftSizeText(row, null), null)
 })
+
+// ── P8.7: the blocks card is selectable by CSS, and the two disclosures stay opposite ───────────
+import { BLOCK_HOOKS } from '../src/assetBlocks.js'
+import { ASSET_HEADER_DEFAULT_OPEN, PACKET_HOOKS } from '../src/packetBuilder.js'
+
+const BLOCKS_SRC = src('../src/screens/AssetBlocks.jsx')
+const PACKET_SRC = src('../src/screens/PacketBuilder.jsx')
+
+test('every BLOCK_HOOKS selector is rendered, and the card hand-types none of them', () => {
+  for (const [name, value] of Object.entries(BLOCK_HOOKS)) {
+    assert.ok(BLOCKS_SRC.includes('BLOCK_HOOKS.' + name),
+      `BLOCK_HOOKS.${name} ("${value}") is declared but never rendered`)
+  }
+  const stripped = stripComments(BLOCKS_SRC)
+  for (const value of Object.values(BLOCK_HOOKS)) {
+    assert.ok(!new RegExp(`data-qc=["']${value}["']`).test(stripped),
+      `data-qc="${value}" is hand-typed — it must come from BLOCK_HOOKS`)
+  }
+  const values = Object.values(BLOCK_HOOKS)
+  assert.equal(new Set(values).size, values.length)
+})
+
+test('the asset HEADER defaults collapsed and the field BLOCK defaults open — both, in one place', () => {
+  // The plan states them together and warns they are trivially misread as a conflict: "Blocks
+  // default OPEN; asset headers default COLLAPSED (different objects - not a conflict)". Asserting
+  // them in ONE test is the point: a change that collapses the blocks, or that opens the headers,
+  // fails here whichever way it goes. Asserting only one of the two is how a fix flips the wrong
+  // object and still shows green.
+  assert.equal(ASSET_HEADER_DEFAULT_OPEN, false, 'P8.7: asset headers are collapsed by default')
+
+  const packet = stripComments(PACKET_SRC)
+  assert.match(packet, /useState\(ASSET_HEADER_DEFAULT_OPEN\)/,
+    'the header must seed its state from the named default, not from a bare literal')
+  assert.match(packet, /data-qc=\{PACKET_HOOKS\.assetHeader\}[\s\S]{0,200}data-qc-open=/,
+    'the header must publish its open state, or "collapsed by default" is unprovable on the live site')
+  assert.ok(!/useState\(true\)[\s\S]{0,120}assetHeader/.test(packet))
+
+  const blocks = stripComments(BLOCKS_SRC)
+  assert.match(blocks, /defaultOpen = true/, 'the field block must still default OPEN')
+  assert.match(blocks, /useState\(defaultOpen\)/)
+  assert.match(blocks, /data-qc=\{BLOCK_HOOKS\.root\}[\s\S]{0,160}data-qc-open=/,
+    'the block must publish its open state too, so the pair can be read off the DOM at once')
+
+  // And the two are separate hooks, so a verifier can select them independently.
+  assert.notEqual(PACKET_HOOKS.assetHeader, BLOCK_HOOKS.root)
+  assert.equal(PACKET_HOOKS.assetHeader, 'asset-header')
+})
+
+test('collapsing the header hides the asset BODY, not just its label', () => {
+  // A disclosure that reports data-qc-open="0" while still rendering everything underneath is a
+  // lie the attribute makes look verified.
+  const packet = stripComments(PACKET_SRC)
+  assert.match(packet, /\{open && \([\s\S]{0,200}data-qc=\{PACKET_HOOKS\.assetBody\}/,
+    'the body must be rendered conditionally on the header state')
+})

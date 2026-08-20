@@ -1677,7 +1677,102 @@ additions; both sides kept). 89/89 app tests, 30/30 overlay probe, 16/16 asset-b
 
 ---
 
-## ACT-65 — P8.3 / R2: evidence excerpts on every coverage claim (branch `claude/qc-p8-3-evidence`)
+## ACT-65 — P8.2 / R3: the posting's figures are the employer's, not the candidate's
+
+**Request:** "obviously take care of p0 and continue with the rest. can any of it be done in
+parallel?" → P8, item 8.2. Branch `claude/qc-p8-2-figures`, **PR #10**, commits `fe4bcc5`, `40e77fb`.
+
+**What it is.** `api/src/functions/tests/figureEcho.ts` scans every generated merge field for
+figures that appear in the employer's posting, and `checks.ts` reports them as
+`posting_figure_echo`. Pure — no pg, no network, no model call — so it is deterministic, costs no
+tokens, and can state a byte offset. Three-way split; the middle case is the point (C5):
+
+| generated figure | disposition |
+|---|---|
+| in the posting, not the profile | `echo` — named, field + exact string |
+| in the posting **and** the profile | `shared_with_profile` — **KEPT** and citable |
+| not in the posting | `profile_only` — untouched |
+
+**Evidence.** `npm --prefix api test` → **292 pass, 0 fail**. CI green both jobs, run
+`32384079631` (`api — build + test`, `app — build + unit + browser`) against `fe4bcc55`.
+Not yet landed on `main` at time of writing — an independent verifier is still running, and
+`main` is what deploys.
+
+### Guard rails chosen deliberately, each against a way this check could become noise
+- **Posting text is `resolvePostingSource`, never `groundingText`.** `groundingText` falls back to
+  `jd_summary` — MODEL OUTPUT. Accusing a candidate of echoing our own summary is an accusation
+  built on a fabrication.
+- **Profile text EXTENDS `appFacts.sourceText()`** (now exported) rather than adding a reader. A
+  second answer to "what does the candidate own" is how this check starts accusing people of
+  echoing their own achievements.
+- **Missing either side ⇒ `not_applicable`**, never `pass`, never an accusation.
+- **`warn`, not `fail`.** A shared number can be legitimate and P8.1's correction path supersedes
+  this state. A gate that reddens on it is a gate people learn to click past.
+
+### Defects found while building it → tests, per the hardening rule
+
+**H24 — the scanner reported a figure that was not in the text.** `extractFigures('40% growth')`
+returned exactly `{raw:'4', key:'num:4'}`. Two defects composed: `/(\d…)\s*(%|percent)\b/` never
+matches, because `%` and the space after it are both non-word so the trailing `\b` has no boundary
+to sit on; and the bare-count scanner ended in `(?!\s*(?:%|percent))` — **a tail that can FAIL is a
+tail the engine backtracks past**, so refused "40" it matched "4" and the leftover "0%" satisfied
+the lookahead. Invariant asserted: every figure is exactly the text at its own span, and no two
+figures overlap. Structural half added because once the percent scanner works the runtime cannot
+see the defect at all — the backtracked "4" lands inside the span the percent scanner claimed.
+
+**H25 — an accusation-grade check fired on innocent text.** The backlog's literal rule ("no numeric
+string that also appears in `jd_real`") measured against a real package with a posting reading
+"three business units" produced three offenders: `SkillsBullets1: 3`, `SkillsBullets2: 3`,
+`ExpertiseBullets: three` — from "Skill number 3", "Other skill 3", "One two three four five". Not
+one mentions a business unit. **A bare number is not a claim; "3 business units" is.** Unmarked
+figures now key on the number AND the noun they count; marked ones (`$18M`, `60+`) key on
+themselves — and which rule applies is decided by the **generated** figure, so a posting asking
+"60+ sites" answered by a resume writing "60 sites" (the commonest echo of all) still lands.
+
+Three more, covered by the new module's own suite rather than an H-id: years excluded (1900–2099,
+bare, no `+`) because "since 2019" vs "founded in 2019" is the calendar; a spelled multiplier is one
+figure ("one million" = 1e6) and the bare word never is; `/e?s$/` stemmed "sites" → "sit" and split
+"business" from "businesses".
+
+### The discipline that caught all of it — and caught me twice
+Every guard was **revert-proven**: undo the fix, rebuild, confirm the test FAILS. Two of my own
+guards were **vacuous** and would have shipped as untested belt-and-braces —
+(1) an anti-backtrack `(?!\d)` that another fix had already made unreachable, and (2) a source-grep
+whose own regex used `[^)]*` to reach a construct inside a pattern **containing `)`**, so it could
+never match the thing it scanned for. Both were removed or rewritten. A test that cannot fail is
+worse than no test, and reverting is the only way you find out.
+
+### Deliberately NOT in this change
+The **rewrite/generalize half** of P8.2 (replace `60+` with the candidate's `62`, generalize `$18M`
+to "8-figure", log each replacement, make it revertible) needs **P8.1's correction table** to store
+and undo a replacement. `generalize()` is built and tested and returns `null` rather than inventing
+a substitute — silence over a fabricated number. Recorded here so it is not mistaken for done.
+
+---
+
+## ACT-66 — A lane that has not pushed a branch has produced nothing
+
+**Found while answering "what is the status of the other parallel fan outs?"** The P3 remediation
+subagent had run, died without pushing, and left **no `qc-p3-*` branch on origin** — `git branch -r`
+proved it. The only trace was `.claude/QC-EVIDENCE-PLAN.md` still listing the lane as in flight,
+with a RESUME MARKER **six phases stale** (`CURRENT PHASE : P2` while the train was at P8).
+
+Had that entry been trusted, the next session would have gone looking for work that does not exist,
+or worse, assumed P3 was underway and built on top of nothing.
+
+**Corrections applied:**
+1. RESUME MARKER rewritten to true state, with a dated `UPDATED` line.
+2. A **lane table** added: branch, files owned, and **pre-allocated H-case ids** (H24/H25 P8.2,
+   H26 P3, H27 P8.3) so two parallel lanes cannot collide on one number or one file.
+3. A **blocked-on table**, so the reason a phase is idle is written down rather than rediscovered.
+4. The rule itself recorded in `.claude/memory.md`: **verify a lane with `git branch -r`, never with
+   a summary or a tracker entry.**
+
+P3 restarted 2026-08-20 as a fresh lane on `claude/qc-p3-remediation` — a restart, not a resume.
+
+---
+
+## ACT-67 — P8.3 / R2: evidence excerpts on every coverage claim (branch `claude/qc-p8-3-evidence`)
 
 **Cold ACs:** `docs/qc-evidence/AC-P8.3.md`, written by an independent AC session against `main` at
 `f4c2f43` with no sight of the implementation plan (branch `claude/qc-p8-3-acs`, commit `e778c82`).
@@ -1689,26 +1784,26 @@ candidate's *stored profile* resolves against it. A new pure module `evidence.ts
 `requirement_evidence` stores it; `appFacts.sourceText()` — still the ONE profile reader — was
 extended to return named records rather than only a joined blob.
 
-**Three defects found while doing it, each now an H-case (proved by reverting the fix):**
+**Four defects found while doing it, each now an H-case (proved by reverting the fix):**
 
-- **H27** — the must-have numerator credited requirements nothing measured. The check's fail branch
+- **H28** — the must-have numerator credited requirements nothing measured. The check's fail branch
   divided by `mustHaves.length` while its numerator came from `coverable` alone, and
   `computeArtifactScore` recomputed the wider denominator a third time. On the live Trinnex shape
   (4 must-haves, 3 of them eligibility clauses `template_reach` had just reported as
   `not_applicable`, 1 judged and failing) it printed **"3/4 must-haves covered"** and scored **75**.
   Revert-proof: restoring either half fires the case — `75 !== 0`, and
   `got "3/4 must-haves evidenced"`.
-- **H28** — an evidence quote must be a substring of the record it NAMES. Validating against
+- **H29** — an evidence quote must be a substring of the record it NAMES. Validating against
   `sourceText().text` (the join of the template and every MasterContext field) accepts a sentence
   half in one job's history and half in another's. This is H16 in a new place. Revert-proof:
   resolving against the concatenation returns a row where the correct code returns `null`.
-- **H29** — an unreadable profile is not an empty profile. Resolving against a failed Google/Table
+- **H30** — an unreadable profile is not an empty profile. Resolving against a failed Google/Table
   read yields zero evidence rows for every requirement, and zero rows presented as a number is "0%
   covered" meaning "we did not look". The mirror error is equally available: filing a *readable*
   profile that supports nothing as `not_applicable` drops the row from the denominator and the packet
   reads 100% with a hard requirement unmet. Revert-proof: both directions fire the case.
 
-- **H30** — `covers()` returns false for a requirement it CANNOT judge (fewer than three content
+- **H31** — `covers()` returns false for a requirement it CANNOT judge (fewer than three content
   words), which is the right answer for coverage and the wrong one for the new `evidence_placed`
   check. Live Trinnex row #5 "Experience in leading technology operations" reduces to two tokens,
   both of which the resume summary contains verbatim — and the first version of the check named it

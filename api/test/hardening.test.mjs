@@ -628,8 +628,13 @@ test('H25: R3 accuses a claim, never a coincidence of digits', () => {
     assert.deepEqual(scanEcho(guilty, posting, profile).echoes.map(e => e.figure.raw), expected, guilty)
   }
 
-  // The structural half: an unmarked figure may never key on the number alone. Deleting the unit
-  // from `claimKey` restores the incident exactly, and nothing else in this file would notice.
+  // The structural half: an unmarked figure may never key on the number alone.
+  //
+  // This comment used to claim "deleting the unit from claimKey restores the incident exactly".
+  // A verifier proved that false: `scanEcho` INLINED the same rule and never called `claimKey`, so
+  // reverting `claimKey` changed nothing in production and only this assertion fired. The guard was
+  // watching dead code and would have kept passing while the real logic beside it was reverted.
+  // `scanEcho` now decides through `claimKey` itself — reverting it fails nine cases, not one.
   const bare = extractFigures('three business units')[0]
   assert.ok(!isMarked(bare))
   assert.notEqual(claimKey(bare), bare.key, 'an unmarked figure keyed on the bare number again')
@@ -638,7 +643,104 @@ test('H25: R3 accuses a claim, never a coincidence of digits', () => {
 })
 
 // ---------------------------------------------------------------------------------------------
-// H27 — The must-have numerator credited requirements that the engine had just declared it was NOT
+// H27 — A check reported PASS on evidence it never read, because the caller and the scanner
+// disagreed about what "empty" means.
+//
+// `scanEcho` decides emptiness against the NORMALIZED posting; `runChecks` re-derived it from the
+// RAW string. `opportunity.jd_real` stores `descriptionHtml`, so `<p></p>` is a non-empty raw
+// string and an empty posting. Measured before the fix, with a generated summary stating an $18M
+// P&L and 60 engineers:
+//     runChecks(postingText: '<p></p>')      -> state=pass  "no posting-only figures across 1 field(s)"
+//     scanEcho (same input)                  -> notApplicable=true "no employer posting text..."
+// and `gateFor([pass])` turned that into a green gate. The scanner got it right and the caller
+// threw the answer away — `notApplicable` had ZERO readers in src/.
+//
+// The profile side was worse, because it does not go quiet, it ACCUSES:
+//     profile '<p></p>' -> warn, offenders ["ResumeSummary: 60", "ResumeSummary: $18M"]
+//     profile '  '      -> not_applicable
+// An unreadable profile named the candidate's own figures as stolen, because the evidence that
+// would have exonerated them read as absent rather than as unreadable.
+//
+// The invariant is not "trim harder". It is that ONE component owns the question "could this be
+// judged", and every caller reports that component's answer rather than computing its own.
+test('H27: the check reports the scanner\'s not_applicable, it does not re-derive it', () => {
+  const pkg = { ResumeSummary: 'Scaled the org to 60 engineers and owned an $18M P&L.' }
+  const posting = 'We manage a $18M portfolio with 60+ engineers.'
+  const profile = 'Von scaled the org to 60 engineers and owned an $18M P&L at Acme.'
+  const row = (rs) => rs.find(r => r.check_key === 'posting_figure_echo')
+
+  // A posting that is markup and nothing else was never compared to anything.
+  for (const empty of ['<p></p>', '<div><br/></div>', '&nbsp;&nbsp;', '  <br>  ', '<script>var x=1</script>']) {
+    const r = row(runChecks({ type: 'resume', pkg, postingText: empty, profileText: profile }))
+    assert.equal(r.state, 'not_applicable', `posting ${JSON.stringify(empty)} produced ${r.state}`)
+    assert.notEqual(gateFor([r]), 'pass', 'and it may never turn into a green gate')
+  }
+
+  // A profile that is markup and nothing else cannot exonerate — and must not accuse.
+  for (const empty of ['<p></p>', '<div></div>', '&nbsp;']) {
+    const r = row(runChecks({ type: 'resume', pkg, postingText: posting, profileText: empty }))
+    assert.equal(r.state, 'not_applicable', `profile ${JSON.stringify(empty)} produced ${r.state}`)
+    assert.deepEqual(r.offenders, [], 'an unreadable profile named an offender')
+  }
+
+  // Both readable: the check does its job, and the kept figures are CITED rather than counted.
+  const good = row(runChecks({ type: 'resume', pkg, postingText: posting, profileText: profile }))
+  assert.equal(good.state, 'pass')
+  assert.match(good.observed, /your profile states/, 'C5 says kept AND cited; a count is not an excerpt')
+
+  // Structural: no caller may re-implement the emptiness test the scanner already owns.
+  const offenders = allSources()
+    .filter(([f]) => f !== 'figureEcho.ts')
+    .filter(([, body]) => /scanEcho\(/.test(stripComments(body)))
+    .filter(([, body]) => /(postingText|profileText)\s*\|\|\s*''\s*\)\s*\.trim\(\)|String\(\s*input\.(postingText|profileText)[^)]*\)\.trim\(\)/.test(stripComments(body)))
+    .map(([f]) => f)
+  assert.deepEqual(offenders, [], 'a caller is deciding emptiness for itself again')
+})
+
+// ---------------------------------------------------------------------------------------------
+// H26 — This file could carry two different cases under one ID, and nothing would notice.
+//
+// Not a hypothetical. Measured 2026-08-20 across three live lane branches:
+//     qc-p8-2-figures   H24 H25 H28
+//     qc-p8-3-evidence  H27 H28 H29 H30
+//     qc-p3-remediation H26 H27 H28 H29 H30 H31
+// `H28` meant three different defects; `H27`, `H29` and `H30` two each. IDs had been pre-allocated
+// one per lane precisely to prevent this, which was never going to be enough — each lane found
+// several defects, not one. Ranges, not single IDs.
+//
+// The reason it goes unnoticed is structural: this file is append-only by convention, so three
+// branches each appending at the end MERGE CLEANLY. Git reports no conflict, every branch is green
+// in isolation, and the duplicates land silently. An ID that names two things is an ID that names
+// nothing — `.claude/actions.md` points at these numbers, and the whole scheme depends on the
+// pointer resolving to exactly one case.
+//
+// The invariant: one ID, one case, and no gaps that hide a case lost in a merge.
+test('H26: every hardening case has its own ID', () => {
+  const self = readFileSync(new URL('./hardening.test.mjs', import.meta.url), 'utf8')
+  // Read the ID off the test NAME, which is what a reader and actions.md both use. Comments are
+  // stripped first: this very comment block lists six duplicate IDs, and a scan that counted those
+  // would fire on the description of the bug rather than the bug.
+  const ids = [...stripComments(self).matchAll(/test\('(H(\d+)):/g)].map(m => ({ id: m[1], n: Number(m[2]) }))
+  assert.ok(ids.length >= 26, `only ${ids.length} cases found — the scan has gone stale`)
+
+  const seen = new Map()
+  const dupes = []
+  for (const { id } of ids) {
+    if (seen.has(id)) dupes.push(id); else seen.set(id, true)
+  }
+  assert.deepEqual(dupes, [], 'two cases share an ID — actions.md now points at both and resolves to neither')
+
+  // A GAP is the other half of the same accident: a merge that dropped a case leaves its number
+  // unused, and the next lane reuses it for something unrelated. Numbering must be contiguous from
+  // H1, so a hole is visible at the moment it appears rather than at the moment it is reused.
+  const nums = ids.map(x => x.n).sort((a, b) => a - b)
+  const missing = []
+  for (let i = 1; i <= nums[nums.length - 1]; i++) if (!nums.includes(i)) missing.push(`H${i}`)
+  assert.deepEqual(missing, [], 'a hardening case was lost in a merge — its ID is unused')
+})
+
+// ---------------------------------------------------------------------------------------------
+// H28 — The must-have numerator credited requirements that the engine had just declared it was NOT
 // judging. `must_have_coverage`'s fail branch divided by `mustHaves.length` while its numerator came
 // from `coverable` alone (checks.ts, pre-P8.3), and `computeArtifactScore` repeated the wider
 // denominator a third time with `mustHaveTotal = reqs.filter(r => r.kind === 'must_have').length`.
@@ -656,7 +758,7 @@ test('H25: R3 accuses a claim, never a coincidence of digits', () => {
 // The invariant: every branch of a coverage check divides by the population it actually judged, the
 // score takes BOTH numbers from that check rather than recomputing either, and a row excluded from
 // the judgement is counted by name instead of being absorbed into the numerator.
-test('H27: a requirement nothing measured is never counted as covered', () => {
+test('H28: a requirement nothing measured is never counted as covered', () => {
   const reqs = [
     { seq: 0, verbatim: 'Reside in the East Coast of the United States', item_text: '', kind: 'must_have' },
     { seq: 1, verbatim: 'must be a U.S. Citizen or Green Card Holder', item_text: '', kind: 'must_have' },
@@ -688,7 +790,7 @@ test('H27: a requirement nothing measured is never counted as covered', () => {
 })
 
 // ---------------------------------------------------------------------------------------------
-// H28 — An evidence quote must be a substring of the profile record it NAMES, not of the profile.
+// H29 — An evidence quote must be a substring of the profile record it NAMES, not of the profile.
 //
 // This is H16 arriving in a new place. H16 records that `postingText.includes(quote) &&
 // requirementExists(id)` accepted a reviewer citation lifted from an unrelated part of the document,
@@ -702,7 +804,7 @@ test('H27: a requirement nothing measured is never counted as covered', () => {
 // The invariant: resolution is per-record. A span is only evidence if the record it names contains
 // exactly those bytes at exactly those offsets; a quote that exists only in the concatenation is
 // refused rather than attributed to whichever record it started in.
-test('H28: evidence resolves against ONE named record, never against the joined profile', () => {
+test('H29: evidence resolves against ONE named record, never against the joined profile', () => {
   // Deliberately split across two records: the phrase exists in the concatenation and in neither
   // record on its own.
   const split = [
@@ -725,7 +827,7 @@ test('H28: evidence resolves against ONE named record, never against the joined 
 })
 
 // ---------------------------------------------------------------------------------------------
-// H29 — "your profile does not support this" and "we could not read your profile" are different
+// H30 — "your profile does not support this" and "we could not read your profile" are different
 // statements, and only one of them is a measurement.
 //
 // C6 moved the coverage numerator onto evidence rows. That creates a state the old numerator could
@@ -742,7 +844,7 @@ test('H28: evidence resolves against ONE named record, never against the joined 
 // The invariant: an unreadable profile is not_applicable and a NULL score component (never 0, never
 // pass, never fail); a readable profile with no support is a determinate gap — fail, named, and
 // still in the denominator.
-test('H29: an unreadable profile measures nothing; a readable one that supports nothing is a gap', () => {
+test('H30: an unreadable profile measures nothing; a readable one that supports nothing is a gap', () => {
   const reqs = [{ seq: 0, verbatim: 'Deep experience with Kubernetes cluster federation', item_text: '', kind: 'must_have' }]
 
   for (const evidence of [undefined, { profileReadable: false, bySeq: {} }]) {
@@ -768,7 +870,7 @@ test('H29: an unreadable profile measures nothing; a readable one that supports 
 })
 
 // ---------------------------------------------------------------------------------------------
-// H30 — `covers()` returns false for a requirement it CANNOT judge, and that answer is only correct
+// H31 — `covers()` returns false for a requirement it CANNOT judge, and that answer is only correct
 // for the question it was written for.
 //
 // `covers()` refuses any requirement with fewer than MIN_JUDGEABLE_TOKENS content words (H5b). For
@@ -785,7 +887,7 @@ test('H29: an unreadable profile measures nothing; a readable one that supports 
 //
 // The invariant: a check reporting an offender must have been able to judge it. A row the measure
 // cannot reach is counted apart and named as unjudged, never folded into the offenders.
-test('H30: a requirement too short to measure is never reported as missing from a document', () => {
+test('H31: a requirement too short to measure is never reported as missing from a document', () => {
   const req = { seq: 5, kind: 'must_have', verbatim: null, item_text: 'Experience in leading technology operations' }
   const evidence = {
     profileReadable: true,

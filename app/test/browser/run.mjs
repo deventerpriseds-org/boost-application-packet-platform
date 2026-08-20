@@ -1,10 +1,16 @@
-// Browser probe for the <Overlay> primitive (src/shell.jsx + src/overlay.js).
+// Browser probe for the presentation layer: the <Overlay> primitive (src/shell.jsx +
+// src/overlay.js), the D11 highlight tokens, and P8.7's keyword-list breakpoint.
 //
 //   cd app && npm run test:browser
 //
 // It boots its own Vite dev server, drives the real component in headless Chromium and asserts the
 // behaviours that `npm test` cannot reach without a DOM: Escape, focus movement and trapping,
 // backdrop dismissal, close-on-navigation, scroll locking, nesting, both themes and two viewports.
+//
+// Sections 13-14 are here for the same reason and not because they are overlays: a colour that
+// resolves through a var() chain and a layout that changes with the viewport can only be answered
+// by a real CSS engine at a real width. `npm test` can prove theme.css DEFINES the tokens; only
+// getComputedStyle can prove the two highlights come out as different colours in both themes.
 // Nothing here ships: `vite build` builds index.html only, so the harness page is dev-server only.
 //
 // The CCR sandbox has Chromium at /opt/pw-browsers but at a build the installed playwright package
@@ -218,6 +224,76 @@ await page.keyboard.press('Escape')
 await page.waitForFunction(() => document.querySelectorAll('[role="dialog"]').length === 0)
 const afterAll = await page.evaluate(() => ({ body: document.body.className, pane: document.querySelector('#pane').style.overflow }))
 ok('lock released only when the last overlay closes', !afterAll.body.includes('ee-overlay-open') && afterAll.pane === 'auto', JSON.stringify(afterAll))
+
+// ---------- 13. D11: the two highlights resolve to different colours, in BOTH themes ----------
+// The defect: carry #fff03a as a literal and the keyword highlight is correct in light mode and
+// unreadable in dark, because the text keeps inheriting --proto-ink, which flips to near-white.
+const readHighlights = () => page.evaluate(() => {
+  const cs = (id) => {
+    const s = getComputedStyle(document.getElementById(id))
+    return { bg: s.backgroundColor, fg: s.color, rule: s.borderBottomColor, ruleW: s.borderBottomWidth }
+  }
+  return { kw: cs('kw-highlight'), echo: cs('echo-highlight') }
+})
+const parseRgb = (c) => (c.match(/[\d.]+/g) || []).slice(0, 3).map(Number)
+// WCAG relative luminance — the only way to say "this ink is readable on that ground" rather than
+// "these two strings differ", which is what a colour-vs-colour comparison actually proves.
+const lum = (c) => {
+  const [r, g, b] = parseRgb(c).map((v) => { const x = v / 255; return x <= 0.03928 ? x / 12.92 : ((x + 0.055) / 1.055) ** 2.4 })
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b
+}
+const contrast = (a, b) => { const l1 = lum(a), l2 = lum(b); const [hi, lo] = l1 > l2 ? [l1, l2] : [l2, l1]; return (hi + 0.05) / (lo + 0.05) }
+
+const lightHl = await readHighlights()
+await page.click('#toggle-dark')
+await page.waitForFunction(() => document.documentElement.getAttribute('data-theme') === 'dark')
+const darkHl = await readHighlights()
+await page.click('#toggle-dark')
+await page.waitForFunction(() => document.documentElement.getAttribute('data-theme') === null)
+
+for (const [theme, hl] of [['light', lightHl], ['dark', darkHl]]) {
+  ok(`${theme}: the keyword highlight and the posting echo are different backgrounds`,
+    hl.kw.bg !== hl.echo.bg && hl.kw.bg !== 'rgba(0, 0, 0, 0)' && hl.echo.bg !== 'rgba(0, 0, 0, 0)',
+    JSON.stringify(hl))
+  ok(`${theme}: they are different TREATMENTS - only the echo draws a rule`,
+    parseFloat(hl.echo.ruleW) >= 1 && hl.echo.rule !== hl.echo.bg && parseFloat(hl.kw.ruleW) === 0,
+    JSON.stringify({ kwRule: hl.kw.ruleW, echoRule: hl.echo.ruleW + ' ' + hl.echo.rule }))
+  ok(`${theme}: the keyword ink is readable ON the keyword ground (>= 4.5:1)`,
+    contrast(hl.kw.fg, hl.kw.bg) >= 4.5, `${hl.kw.fg} on ${hl.kw.bg} = ${contrast(hl.kw.fg, hl.kw.bg).toFixed(2)}:1`)
+  ok(`${theme}: the echo ink is readable on the echo wash (>= 4.5:1)`,
+    contrast(hl.echo.fg, hl.echo.bg) >= 4.5, `${hl.echo.fg} on ${hl.echo.bg} = ${contrast(hl.echo.fg, hl.echo.bg).toFixed(2)}:1`)
+}
+ok('the highlights actually CHANGE between the two themes (the .proto-dark block is not decorative)',
+  lightHl.kw.bg !== darkHl.kw.bg && lightHl.echo.bg !== darkHl.echo.bg,
+  JSON.stringify({ light: [lightHl.kw.bg, lightHl.echo.bg], dark: [darkHl.kw.bg, darkHl.echo.bg] }))
+
+// ---------- 14. P8.7: the keyword list is 2-up at >= 1040px and 1-up below ----------
+await page.click('#posting-card [data-qc="jd-tab"][data-qc-tab="keywords"]')
+await page.waitForSelector('#posting-card [data-qc="keyword-columns"]')
+const columnsAt = async (w) => {
+  await page.setViewportSize({ width: w, height: 900 })
+  await page.waitForTimeout(120)
+  return page.evaluate(() => {
+    const el = document.querySelector('[data-qc="keyword-columns"]')
+    return {
+      attr: el.getAttribute('data-qc-cols'),
+      tracks: getComputedStyle(el).gridTemplateColumns.split(' ').filter(Boolean).length,
+      groups: [...el.querySelectorAll('[data-qc="keyword-group"]')].map((g) => Math.round(g.getBoundingClientRect().top)),
+    }
+  })
+}
+const wide = await columnsAt(1040)
+const justUnder = await columnsAt(1039)
+const oneUp = await columnsAt(720)
+ok('1040px is 2-up (the breakpoint itself, not one pixel above it)', wide.attr === '2' && wide.tracks === 2, JSON.stringify(wide))
+ok('1039px is 1-up', justUnder.attr === '1' && justUnder.tracks === 1, JSON.stringify(justUnder))
+ok('720px is 1-up', oneUp.attr === '1' && oneUp.tracks === 1, JSON.stringify(oneUp))
+// The attribute is what ui-verify selects on, so it must describe the layout that was actually
+// drawn - two groups sharing a row - and not merely agree with the track count it also sets.
+ok('2-up really places two groups side by side',
+  new Set(wide.groups).size < wide.groups.length, JSON.stringify(wide.groups))
+ok('1-up stacks them', new Set(oneUp.groups).size === oneUp.groups.length, JSON.stringify(oneUp.groups))
+await page.setViewportSize({ width: 1280, height: 800 })
 
 console.log(out.join('\n'))
 const failed = out.filter((l) => !l.startsWith('PASS'))

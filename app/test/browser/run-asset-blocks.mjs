@@ -15,6 +15,7 @@
 import { readdirSync, existsSync } from 'node:fs'
 import { chromium } from 'playwright'
 import { createServer } from 'vite'
+import { HIGHLIGHT_CLASS } from '../../src/highlight.js'
 
 function chromiumPath() {
   if (process.env.PW_CHROMIUM) return process.env.PW_CHROMIUM
@@ -152,6 +153,50 @@ ok('the list-owner registry settles instead of looping', first === second, `${fi
 // ---------- 5. static fields still read as static ----------
 ok('an ungenerated merge field is still shown as static template text',
   /static template · not generated/.test(resumeText))
+
+// ---------- 6. the two disclosures default OPPOSITE ways (P8.7 + P5), asserted TOGETHER ----------
+// The plan states them in one breath and warns they read as a conflict: "Blocks default OPEN; asset
+// headers default COLLAPSED (different objects - not a conflict, but trivially misread as one)."
+// Checking them in ONE place is the point: a fix that collapses the blocks, or that opens the
+// headers, fails here whichever way it went wrong. The card mounted below is the REAL
+// <ArtifactCard> from PacketBuilder.jsx, not a stand-in written to match the assertion.
+await page.waitForSelector('#card-artifact [data-qc="asset-header"]')
+const disclosures = await page.evaluate(() => {
+  const header = document.querySelector('#card-artifact [data-qc="asset-header"]')
+  const body = document.querySelector('#card-artifact [data-qc="asset-body"]')
+  return { headerOpen: header && header.getAttribute('data-qc-open'), bodyPresent: !!body }
+})
+ok('the asset HEADER is collapsed by default', disclosures.headerOpen === '0', JSON.stringify(disclosures))
+ok('and collapsing it actually hides the body, not just the label', disclosures.bodyPresent === false, JSON.stringify(disclosures))
+
+// Open it from whatever state it is in, rather than assuming the click opens it. A probe that
+// blind-clicks turns a flipped default into a 30-second selector timeout - a real failure, but one
+// whose message names a missing element instead of the default that moved.
+if (disclosures.headerOpen !== '1') await page.click('#card-artifact [data-qc="asset-header-toggle"]')
+await page.waitForSelector('#card-artifact [data-qc="asset-blocks"]', { timeout: 10000 }).catch(() => {})
+const opened = await page.evaluate(() => {
+  const header = document.querySelector('#card-artifact [data-qc="asset-header"]')
+  const blocks = document.querySelector('#card-artifact [data-qc="asset-blocks"]')
+  return {
+    headerOpen: header.getAttribute('data-qc-open'),
+    blocksOpen: blocks ? blocks.getAttribute('data-qc-open') : 'no blocks rendered',
+    fields: document.querySelectorAll('#card-artifact [data-qc="blocks-field"]').length,
+  }
+})
+ok('opening the header reveals the field BLOCKS already open - one click, not two',
+  opened.headerOpen === '1' && opened.blocksOpen === '1' && opened.fields > 0, JSON.stringify(opened))
+
+// ---------- 7. the posting echo is painted through the shared class, not by hand ----------
+// The class comes from the module, not from a string typed here: a probe that hardcodes the class
+// name keeps passing after the product renames it, which is the drift the source guard forbids.
+const echo = await page.evaluate((cls) => {
+  const el = document.querySelector(`#card-resume [data-qc="blocks-posting-quote"] .${cls}`)
+  if (!el) return null
+  const s = getComputedStyle(el)
+  return { bg: s.backgroundColor, rule: s.borderBottomColor, ruleW: s.borderBottomWidth, text: el.textContent.slice(0, 40) }
+}, HIGHLIGHT_CLASS.postingEcho)
+ok('the posting quote carries the echo treatment (a wash under a rule)',
+  !!echo && echo.bg !== 'rgba(0, 0, 0, 0)' && parseFloat(echo.ruleW) >= 1, JSON.stringify(echo))
 
 console.log(out.join('\n'))
 const failed = out.filter((l) => !l.startsWith('PASS'))
