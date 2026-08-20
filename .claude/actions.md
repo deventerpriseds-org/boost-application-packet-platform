@@ -1407,3 +1407,40 @@ kept so regenerations are comparable; uncovered requirements are stored as real 
 expands to the rows behind it.
 
 **P2 COMPLETE** — 2.1 engine · 2.2 gate + server-side block · 2.3 score. 131/131 assertions green.
+
+## ACT-62 — Hardening harness: failures become tests (answers "are we mitigating as we go?")
+**Status:** `landed` (`0ac9aa2`). `api/test/hardening.test.mjs`, 13 cases (H1–H13).
+
+**The honest answer to the question was NO.** The fuzzy-matcher bug was fixed in the one place a
+test caught it; the *class* was never audited. `similarity()` was load-bearing in **four** places
+and only one was corrected. The worst of the remaining three decided a **gate**.
+
+**What the audit found — a live defect I had already reported as evidence.** Ground truth
+(db-query `32316984998`, Trinnex opp `9f9c370a`): one of the two stored must-haves reads
+> `digital water technology). Role: Director of Digital Technology Operations`
+
+That is not a requirement — it is a span that crossed a clause boundary and swallowed the role-title
+line. It then counted as **covered**, because a resume for that role naturally contains those words.
+**My report of "must_have_coverage = pass 2/2 — real rows, not vacuous" was wrong.**
+
+Fixes:
+- `locate()` clips a span to the sentence it starts in, re-measures coverage inside the clipped span,
+  and returns `unlocatable` if clipping cost the match.
+- `covers()` is now accusation-grade: **0.7** of content words (was 0.5), **≥3** content words before
+  any judgement is possible, and ≥1 distinctive (≥6 char) token present. All three err toward
+  surfacing, because this decides a gate.
+
+**The standing rule:** *fuzzy matching is for RANKING, never for ACCUSING.*
+
+**The harness.** Prose does not run. Lessons written into this file were not applied — twice in one
+session. Each past failure is now an assertion with an ID, the evidence, and the invariant:
+H1 entity decoding · H2 SQL-addressable offsets · H3 no offsets into model output · H4/H4b no fuzzy
+accusations · H5/H5b no cross-sentence spans · H6 absent evidence ≠ pass · H7 no fabricated composite
+· H8 hard gates not downgraded · H9 resolveOwner destructuring · H10 no backticks in SCHEMA_SQL ·
+H11 every table registered for migration · H12 rule modules stay pure · H13 one grounded projection.
+The rule is now in `CLAUDE.md`: **a mistake becomes an H-case in the same commit that fixes it.**
+
+*Two guards fired on a comment and on correct code when first written and had to be made precise —
+a guard people learn to ignore is worse than none.*
+*Also caught: my own `sentenceBounds` edit silently did nothing, because a Python `.replace()` that
+does not match is a no-op and I did not check. Edits now assert the file changed.*

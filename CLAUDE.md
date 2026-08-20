@@ -197,6 +197,46 @@ Checklist before committing a conceptual fix:
 3. If a child component re-derives what the parent already computed, pass the
    pre-computed value down rather than letting each component diverge independently
 
+## Hardening — a mistake becomes a TEST, not a note (strict rule)
+
+`api/test/hardening.test.mjs` is the failure memory. Every past mistake is encoded there as an
+assertion with an ID (H1, H2, …), the evidence that it was real, and the invariant that now prevents
+it. `.claude/actions.md` tells the story; the H-case enforces it. They point at each other.
+
+**When you find a mistake — yours or the system's — add an H-case in the same commit that fixes it.**
+Not a paragraph in a doc. A test.
+
+This rule exists because prose does not run. Lessons were being written into `actions.md` and then
+not applied, twice in one session: a fuzzy-matcher bug was fixed in the one place a test caught it
+while the same class stayed live in three others — one of which decided a gate — and a "verify the
+edit applied" lesson was written down and then broken two edits later. A note explains a mistake to
+someone who happens to read it; a test refuses to let it come back.
+
+Rules for an H-case:
+1. **Assert the invariant, not the incident.** H4 forbids fuzzy matching in any accusation-grade
+   check, not just the one line that was wrong.
+2. **Make it precise enough never to cry wolf.** Two guards fired on a comment and on correct code
+   when first written. A guard people learn to ignore is worse than none — strip comments, match the
+   real construct.
+3. **Record the evidence in the comment** — the run id, the measured count, the actual bad value.
+   The next reader must be able to tell a real rule from a guess.
+4. **Prefer a test over a grep** where the behaviour can be exercised; use a source grep only for
+   structural rules a runtime test cannot express (imports, projections, schema registration).
+
+### Standing rules distilled from those failures
+- **Fuzzy matching is for RANKING, never for ACCUSING.** Similarity drops stopwords, so near-identical
+  labels score 1.0. Anything that names an offender, blocks a gate, or asserts coverage must be
+  exact, whole-phrase, or thresholded high enough to err toward surfacing.
+- **Absent evidence is `not_applicable`, never `pass`.** A check that passed because there was
+  nothing to check against is how a gate goes green on unverified work.
+- **Never fabricate a composite.** If a component of a score has no source, the score is null — a
+  partial composite is the number a reviewer trusts most and the one most likely to be wrong.
+- **Verify that an edit applied.** A `.replace()` that does not match is a silent no-op. Assert the
+  file changed, then re-read the region.
+- **A 200 with a zero count is a result to investigate, not a pass.**
+
+---
+
 ## Verify before reporting (strict rule)
 
 **Never tell the user something is fixed, done, or working until you have confirmed it with actual evidence** — a passing test, a DB query result, a successful log, a git log entry, or a live API response. Triggering a workflow and getting a 204 queued response is NOT confirmation — it means the job started. Read the job logs first, then report. If you cannot confirm (sandbox blocks the endpoint, logs not yet available, etc.), say "I cannot confirm this yet" and explain what would confirm it and how the user can check. Do not infer success from absence of errors.
