@@ -585,7 +585,17 @@ function ResumeTab({ o, toast }) {
             </div>
           )}
           {a.docUrl ? (
-            <a href={a.docUrl} target="_blank" rel="noreferrer" className="px-link" style={{ fontSize: 12 }}>✓ Open Google Doc ↗</a>
+            <div style={{ display: 'flex', gap: 14, alignItems: 'center', flexWrap: 'wrap' }}>
+              <a href={a.docUrl} target="_blank" rel="noreferrer" className="px-link" style={{ fontSize: 12 }}>✓ Open Google Doc ↗</a>
+              {/* This consumer got the `opts` parameter and no way to reach it — the same dead-UI
+                  shape the fix exists to remove, left live in the second screen while the first was
+                  repaired. Fix all consumers, not just the one that was reported. */}
+              <span data-qc="asset-rebuild" className="px-link" role="button"
+                style={{ fontSize: 12, cursor: busy === a.id ? 'default' : 'pointer', opacity: busy === a.id ? 0.6 : 1 }}
+                onClick={() => { if (busy !== a.id) makeDoc(a, { regen: true }) }}>
+                {busy === a.id ? '↻ Rebuilding…' : '↻ Rebuild from current draft'}
+              </span>
+            </div>
           ) : a.content ? (
             <button className="px-btn" style={{ fontSize: 12, alignSelf: 'flex-start' }} disabled={busy === a.id} onClick={() => makeDoc(a)}>{busy === a.id ? 'Creating Doc…' : '📄 Create Google Doc'}</button>
           ) : null}

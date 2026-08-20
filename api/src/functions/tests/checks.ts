@@ -23,6 +23,7 @@ import { mergeFieldsFor } from './insertions'
 import { normalizePostingText } from './jdText'
 import { checkAgainstFacts, OwnerFact } from './ownerFacts'
 import { scanEcho } from './figureEcho'
+import { EvidenceInput, NO_EVIDENCE_NOTE, EVIDENCE_THRESHOLD, MIN_JUDGEABLE_TOKENS as EVIDENCE_MIN_TOKENS } from './evidence'
 
 export type CheckState = 'pass' | 'warn' | 'fail' | 'not_applicable'
 export type CheckEngine = 'deterministic' | 'reviewer'
@@ -50,6 +51,14 @@ export interface CheckThresholds {
   execProfileWords: [number, number]
   coreAccomplishmentsWords: [number, number]
   coverWords: [number, number]
+  /**
+   * P8.3 — how much of a requirement a profile excerpt must account for before it evidences it,
+   * and how short an excerpt may be. They decide whether a candidate's requirement counts as
+   * covered, which makes them exactly the kind of value this interface exists to keep out of the
+   * code: the same seeded-default-then-owner-overridable rule as every threshold above it.
+   */
+  evidenceThreshold: number
+  evidenceMinTokens: number
 }
 
 /** Seeded first values, taken from the live prompt. The owner can change every one of them. */
@@ -66,6 +75,8 @@ export const DEFAULT_THRESHOLDS: CheckThresholds = {
   execProfileWords: [50, 55],
   coreAccomplishmentsWords: [98, 125],
   coverWords: [250, 400],
+  evidenceThreshold: EVIDENCE_THRESHOLD,
+  evidenceMinTokens: EVIDENCE_MIN_TOKENS,
 }
 
 // Phrases and punctuation that read as machine-written. Kept as data so they can move to the
@@ -103,6 +114,13 @@ export interface CheckInput {
   swaps?: Array<{ action: string; driver: string; to_label: string | null; from_label: string | null }>
   /** The owner's confirmed facts. A requirement a FACT settles is not a document-coverage question. */
   facts?: OwnerFact[]
+  /**
+   * P8.3 / R2 / conflict-register C6 — the resolved evidence rows, which are now what decides
+   * coverage. Absent (or with `profileReadable: false`) every coverage check reports
+   * `not_applicable`: an unevidenced requirement and an unreadable profile are different
+   * statements, and reporting the second as the first is a measurement nobody made.
+   */
+  evidence?: EvidenceInput
   thresholds?: Partial<CheckThresholds>
 }
 
@@ -400,10 +418,15 @@ export function runChecks(input: CheckInput): CheckResult[] {
     return distinctive.length === 0 || distinctive.some(tk => covText.includes(tk))
   }
 
+  const COVERAGE_EXPECT = 'every must-have requirement is evidenced by a verbatim excerpt from your profile'
+  const RESP_EXPECT = 'every responsibility is evidenced by a verbatim excerpt from your profile'
+  const PLACED_EXPECT = 'every requirement your profile evidences is actually stated in this document'
+
   if (!reqs.length) {
     // AC 2.1.9 — the safety rule. A coverage check with nothing to check against is unknown, not OK.
-    out.push(na('must_have_coverage', 'no requirement rows for this opportunity', 'every must-have requirement is covered'))
-    out.push(na('responsibilities_addressed', 'no requirement rows for this opportunity', 'every responsibility is addressed'))
+    out.push(na('must_have_coverage', 'no requirement rows for this opportunity', COVERAGE_EXPECT))
+    out.push(na('responsibilities_addressed', 'no requirement rows for this opportunity', RESP_EXPECT))
+    out.push(na('evidence_placed', 'no requirement rows for this opportunity', PLACED_EXPECT))
   } else {
     // A requirement the owner's FACTS settle is not a document-coverage question at all. "10+ years"
     // is answered by the profile, not by whether the resume happens to repeat the number — measured:
@@ -460,24 +483,93 @@ export function runChecks(input: CheckInput): CheckResult[] {
     const elig = out[out.length - 1]
     if (eligibility.length) elig.offenders = eligibility.map(r => `#${r.seq} ${(r.verbatim || r.item_text).slice(0, 80)}`)
 
-    const uncovered = coverable.filter(r => !covers(r))
-    out.push(!coverable.length
-      ? na('must_have_coverage', 'the posting produced no must-have requirements', 'every must-have requirement is covered')
-      : uncovered.length
-        ? bad('must_have_coverage', `${mustHaves.length - uncovered.length}/${mustHaves.length} must-haves covered`,
-              'every must-have requirement is covered',
-              uncovered.map(r => `#${r.seq} ${(r.verbatim || r.item_text).slice(0, 80)}`))
-        : ok('must_have_coverage', `${coverable.length}/${coverable.length} must-haves covered`, 'every must-have requirement is covered'))
-
     const resp = reqs.filter(r => r.kind === 'responsibility')
-    const unaddressed = resp.filter(r => !covers(r))
-    out.push(!resp.length
-      ? na('responsibilities_addressed', 'the posting produced no responsibilities', 'every responsibility is addressed')
-      : unaddressed.length
-        ? bad('responsibilities_addressed', `${resp.length - unaddressed.length}/${resp.length} responsibilities addressed`,
-              'every responsibility is addressed',
-              unaddressed.map(r => `#${r.seq} ${(r.verbatim || r.item_text).slice(0, 80)}`), 'warn')
-        : ok('responsibilities_addressed', `${resp.length}/${resp.length} addressed`, 'every responsibility is addressed'))
+
+    /**
+     * P8.3 / R2, and conflict-register C6: "coverage counts recomputed from evidence rows, not from
+     * term placement."
+     *
+     * A requirement is covered when a VERBATIM excerpt of the candidate's stored profile can be
+     * shown beside it — not when the generated document happens to repeat enough of its words. The
+     * old numerator was a statement about the document, and a document can be made to contain any
+     * words at all; that is precisely how a claim the profile cannot support got counted as
+     * coverage. `covers()` is kept below, where it answers the different question it is actually
+     * good for: of the things the profile DOES evidence, which ones reached this asset.
+     */
+    const ev = input.evidence
+    const evidenceOf = (r: { seq: number }) => (ev && ev.bySeq ? ev.bySeq[r.seq] || null : null)
+    const label = (r: { seq: number; verbatim: string | null; item_text: string }) =>
+      `#${r.seq} ${(r.verbatim || r.item_text).slice(0, 80)}`
+
+    if (!ev || !ev.profileReadable) {
+      // Absent evidence is not_applicable, NEVER pass — and never `fail` either. "Your profile does
+      // not support this" and "we could not read your profile" are different statements, and a run
+      // that could not read the profile has measured nothing.
+      const why = ev
+        ? 'your stored profile could not be read, so no coverage claim can be evidenced'
+        : 'no evidence rows were resolved for this opportunity'
+      out.push(na('must_have_coverage', why, COVERAGE_EXPECT))
+      out.push(na('responsibilities_addressed', why, RESP_EXPECT))
+      out.push(na('evidence_placed', why, PLACED_EXPECT))
+    } else {
+      const unevidenced = coverable.filter(r => !evidenceOf(r))
+      // ONE denominator on every branch, and it says in words which population it is.
+      //
+      // The fail branch used to divide by `mustHaves.length` while its numerator came from
+      // `coverable` alone, so the requirements this engine had just declared unscoreable —
+      // eligibility clauses no merge field can carry, and rows the owner's facts own — were counted
+      // as COVERED. Measured on the shape the live Trinnex posting has: 4 must-haves, 3 of them
+      // eligibility, 1 judged and failing, printed "3/4 must-haves covered" and scored 75, when
+      // exactly one requirement was measured and it did not pass. That is a not_applicable row
+      // laundered into a numerator — the same defect as a check going green on absent evidence, and
+      // it inflated the one number a reviewer trusts most. Both branches now divide by `coverable`,
+      // and the excluded rows are counted by name so they are visible rather than absorbed.
+      const excluded: string[] = []
+      if (eligibility.length) excluded.push(`${eligibility.length} not reachable by any generated field`)
+      const factOwned = mustHaves.length - coverable.length - eligibility.length
+      if (factOwned > 0) excluded.push(`${factOwned} answered from your profile facts`)
+      const tail = excluded.length ? ` (${excluded.join(', ')}, not counted either way)` : ''
+      out.push(!coverable.length
+        ? na('must_have_coverage', 'the posting produced no must-have requirements to judge', COVERAGE_EXPECT)
+        : unevidenced.length
+          ? bad('must_have_coverage', `${coverable.length - unevidenced.length}/${coverable.length} must-haves evidenced${tail}`,
+                COVERAGE_EXPECT, unevidenced.map(r => `${label(r)} — ${NO_EVIDENCE_NOTE}`))
+          : ok('must_have_coverage', `${coverable.length}/${coverable.length} must-haves evidenced${tail}`, COVERAGE_EXPECT))
+
+      const unaddressed = resp.filter(r => !evidenceOf(r))
+      out.push(!resp.length
+        ? na('responsibilities_addressed', 'the posting produced no responsibilities', RESP_EXPECT)
+        : unaddressed.length
+          ? bad('responsibilities_addressed', `${resp.length - unaddressed.length}/${resp.length} responsibilities evidenced`,
+                RESP_EXPECT, unaddressed.map(r => `${label(r)} — ${NO_EVIDENCE_NOTE}`), 'warn')
+          : ok('responsibilities_addressed', `${resp.length}/${resp.length} evidenced`, RESP_EXPECT))
+
+      // The signal the old numerator carried, kept as its OWN number rather than folded back into
+      // coverage (R4: two counts describing different populations are never merged). The profile can
+      // support this requirement and this asset still failed to say it — which is a defect the
+      // remediation loop can close, unlike a gap in the profile, which it cannot.
+      const evidenced = [...coverable, ...resp].filter(r => evidenceOf(r))
+      // `covers()` cannot judge a requirement with fewer than MIN_JUDGEABLE_TOKENS content words —
+      // it returns false for them, which is the right answer for COVERAGE (an unjudgeable
+      // requirement must surface, not pass quietly) and the WRONG one here. Measured on the live
+      // Trinnex row #5, "Experience in leading technology operations": itemTokens drops the
+      // stopwords and leaves two words, both of which the resume summary contains verbatim — and
+      // this check called it "absent from this asset". Accusing a document of omitting something it
+      // says, because the requirement was too short to measure, is absent evidence read as a
+      // finding, one layer down from where the rest of this file guards against it.
+      const placeable = evidenced.filter(r => itemTokens(r.verbatim || r.item_text).length >= MIN_JUDGEABLE_TOKENS)
+      const unplaced = placeable.filter(r => !covers(r))
+      const tooThin = evidenced.length - placeable.length
+      const thinNote = tooThin ? ` (${tooThin} too short to judge either way)` : ''
+      out.push(!evidenced.length
+        ? na('evidence_placed', 'no requirement in this posting is evidenced by your profile yet', PLACED_EXPECT)
+        : !placeable.length
+          ? na('evidence_placed', `${evidenced.length} evidenced requirement(s), none long enough to judge placement`, PLACED_EXPECT)
+          : unplaced.length
+            ? bad('evidence_placed', `${placeable.length - unplaced.length}/${placeable.length} evidenced requirements appear in this document${thinNote}`,
+                  PLACED_EXPECT, unplaced.map(r => `${label(r)} — evidenced by ${evidenceOf(r)!.source_label}, absent from this asset`), 'warn')
+            : ok('evidence_placed', `${placeable.length}/${placeable.length} evidenced requirements appear in this document${thinNote}`, PLACED_EXPECT))
+    }
   }
 
   // --- uncited changes. P2.2: always a fail, never a warn. ---------------------------------

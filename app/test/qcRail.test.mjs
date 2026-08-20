@@ -577,3 +577,58 @@ test('every owner-scoped GET the rail uses appends ?owner=', () => {
   const src = stripComments(readSrc('screens/QcRail.jsx'))
   assert.ok(!/fetch\(/.test(src), 'the rail must go through api.js, which is where the owner rule lives')
 })
+
+// ── P8.3 / C6: the rail counts the population the engine judged ────────────────────────────────
+
+test('a requirement nothing measured is never CLOSED on the rail (the 75% again)', () => {
+  // The live Trinnex shape. `must_have_coverage` judges one row and fails it; `template_reach`
+  // reports three as unreachable in the same run. Counting `total - |offenders|` over every
+  // must_have row credits those three as closed and prints "3 of 4" — 75%, the same number, from
+  // the same three rows, that H28 removed from the server. Applying that fix only on the server
+  // left it on this screen.
+  const reqs = [
+    { seq: 0, kind: 'must_have', item_text: 'Reside in the East Coast of the United States' },
+    { seq: 1, kind: 'must_have', item_text: 'must be a U.S. Citizen or Green Card Holder' },
+    { seq: 2, kind: 'must_have', item_text: 'Active Secret security clearance required' },
+    { seq: 3, kind: 'must_have', item_text: 'Deep experience with roadmap strategy and execution' },
+  ]
+  const entry = entryWith([
+    { engine: 'deterministic', check_key: 'must_have_coverage', state: 'fail',
+      observed: '0/1 must-haves evidenced (3 not reachable by any generated field, not counted either way)',
+      offenders: ['#3 Deep experience with roadmap strategy and execution — no evidence found in your profile'] },
+    { engine: 'deterministic', check_key: 'template_reach', state: 'not_applicable',
+      observed: '3 requirement(s) no generated merge field can carry',
+      offenders: ['#0 Reside in the East Coast of the United States',
+                  '#1 must be a U.S. Citizen or Green Card Holder',
+                  '#2 Active Secret security clearance required'] },
+  ])
+  const card = coverageCards(reqs, [entry]).find((c) => c.key === 'must_have')
+
+  assert.equal(card.closed, 0, 'nothing is closed here')
+  assert.equal(card.total, 1, 'the denominator is the judged population, as the check prints it')
+  assert.equal(card.classTotal, 4, 'and the class size is still visible')
+  assert.notEqual(card.closed + '/' + card.total, '3/4', 'the incident number must not be reachable')
+
+  for (const seq of [0, 1, 2]) {
+    assert.equal(requirementState(card, { seq }).state, 'unmeasured',
+      `#${seq} was excluded from the coverage question — green "closed" claims something nobody checked`)
+  }
+  assert.equal(requirementState(card, { seq: 3 }).state, 'open')
+})
+
+test('a fact-owned requirement is not counted closed by the rail either', () => {
+  const reqs = [
+    { seq: 0, kind: 'must_have', item_text: 'Minimum of 30 years of experience' },
+    { seq: 1, kind: 'must_have', item_text: 'Deep experience with roadmap strategy and execution' },
+  ]
+  const entry = entryWith([
+    { engine: 'deterministic', check_key: 'must_have_coverage', state: 'pass', observed: '1/1 must-haves evidenced', offenders: [] },
+    { engine: 'deterministic', check_key: 'fact_shortfall', state: 'warn', observed: '1 requirement(s) your profile does not meet',
+      offenders: ['#0 Minimum of 30 years of experience — 24 years recorded, 30 required'] },
+  ])
+  const card = coverageCards(reqs, [entry]).find((c) => c.key === 'must_have')
+  assert.equal(card.total, 1)
+  assert.equal(card.closed, 1)
+  assert.equal(requirementState(card, { seq: 0 }).state, 'unmeasured',
+    'a shortfall is a fit problem the coverage check never judged — it is not closed')
+})

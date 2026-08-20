@@ -32,7 +32,8 @@ Rules:
 
 | # | Not done | What makes it look done | Trigger |
 |---|---|---|---|
-| D7 | ~~No independent verifier~~ **RUNNING** as of 16:15Z. | — | — |
+| D7 | ~~No independent verifier~~ **DONE.** It found six defects in the guard itself, all fixed: a live false negative (`apply`), a surviving global-name fallback, six missed grammars, a cry-wolf on query-string routes, a staleness floor that could not detect staleness, and the Rebuild affordance having zero test coverage. | — | — |
+| D20 | **A bare truthy body read (`if (body?.x)`) is out of H33's scope.** `appFacts.ts:232` reads `body.confirm` that way and is invisible to the guard. | H33 is green and its band is tight, so it reads as complete coverage. | Any future toggle written in the truthy form. Deliberate: including it accused three string-presence checks (`alertText`, `imageB64`, `demoState`) of being unreachable toggles |
 | D8 | ~~Structural guard not written~~ **DONE** — H34 (`a38c94f`). Took four wrong versions: vacuous, cried wolf, missed a dispatcher, too permissive again. Found a real fourth instance (`ats_source.enabled`), now wired. | — | — |
 | D9 | **No live verification.** `regen:true` has not been shown to bypass cache on the deployed Function. | The wiring is obviously correct by inspection. `appPackets.ts:319` also short-circuits on `staleUngrounded`, so a naive test passes identically with the fix absent. | After merge, via `api-test.yml` + `db-query.yml` |
 
@@ -54,3 +55,4 @@ Rules:
 |---|---|---|---|
 | D17 | **Nothing from this session is deployed.** `origin/main` is at `f4c2f43`; six branches are stacked behind it. Production deploys from `main` only — by design. | Six green PRs. | Draining the merge queue |
 | D18 | **P0.3 dark-mode accent pills at 1.90:1** — `.proto-dark` overrides `--surface-brand-subtle` but not `--surface-brand-default`, across 15+ live sites. P8.7 fixed the `var(--temp-${k}-tint)` interpolations, NOT this. | P0 is marked `done`, and P8.7's report mentions fixing a P0.3-class defect — a different one. | P8.7 deploys |
+| D19 | **Stored evidence is never re-validated on read.** `requirement_evidence.record_sha256` is written and served but never recomputed; `requirementsGet`'s `stale` flag covers the posting hash only. After the owner edits a MasterContext block the JD payload keeps serving the old quote at the old offsets. | The excerpt renders normally and is a true substring of what the record USED to say. | a design decision about reading the profile on every requirements GET |
