@@ -47,8 +47,15 @@ async function ensureContentColumn(client: any) {
 }
 
 // Load (or lazily create) a packet + its 5 artifact rows for an opportunity.
+//
+// P3-44 / D-4. `round` was READ here and in `packetShape` and written by NOTHING, so it was always
+// 1: this ORDER BY was a no-op, the pick among several packets was whatever the planner returned,
+// and the API reported `round: 1` forever. It is now incremented once per remediation RUN
+// (`appRemediation`), which is the only thing that puts a packet through another cycle - so the
+// column means something and no fourth counter was added beside insertion.loop / swap_decision.loop.
+// `created_at desc` is the tiebreak the all-equal column was silently relying on.
 async function loadPacket(client: any, oppId: string) {
-  let pkt = (await client.query(`select * from packet where opp_id = $1 order by round desc limit 1`, [oppId])).rows[0]
+  let pkt = (await client.query(`select * from packet where opp_id = $1 order by round desc, created_at desc limit 1`, [oppId])).rows[0]
   if (!pkt) {
     pkt = (await client.query(`insert into packet (opp_id) values ($1) returning *`, [oppId])).rows[0]
   }
@@ -260,7 +267,7 @@ async function ensurePkgColumn(client: any) {
 // ONE projection for every caller that grounds generation in an opportunity. It was duplicated
 // across four call sites and all four omitted jd_real, which is how generation ended up reading a
 // synthesised pseudo-JD instead of the posting (X1). A single constant is what stops that recurring.
-const OPP_FIELDS = `select id, company, role, comp_range, why_surfaced, company_signals,
+export const OPP_FIELDS = `select id, company, role, comp_range, why_surfaced, company_signals,
   pain_hypotheses, persona_key, jd_real, raw_jd from opportunity`
 
 /**
@@ -298,12 +305,21 @@ export function generationJd(opp: any): { jd: string; grounded: boolean } {
   }
 }
 
-// G6 — build a real artifact by COPYING its template and filling {{placeholders}}
-// with the proven pipeline package (assemblePackage). Returns null if the type
-// has no template (caller falls back to the legacy prose path).
-async function buildTemplatedArtifact(client: any, art: any, opp: any, regen: boolean) {
-  const meta = metaFor(art.type)
-  if (!meta) return null
+/**
+ * The package this artifact will be built from — generated once and cached on the packet.
+ *
+ * P3-25 SPLIT THIS OUT OF `buildTemplatedArtifact`. Generation and RENDERING used to be one
+ * function, so the only way to regenerate content was to also issue a Drive `files/{id}/copy`. A
+ * four-pass remediation loop over four templated artifacts would therefore have created 16 Google
+ * files per packet on the quota-bearing OAuth account. Worse, per D-9 there is no Drive DELETE
+ * anywhere in this codebase and `artifact.doc_url` is simply overwritten, so all 15 superseded files
+ * would be orphaned rather than replaced. Every rebuild already orphans ONE file today — the loop
+ * would have multiplied an existing leak, not introduced a new one, which is why the fix is to make
+ * rendering a separate step the loop calls exactly once at the end.
+ */
+export async function ensurePackage(client: any, art: any, opp: any, regen: boolean): Promise<{
+  pkg: Record<string, string | null>; generated: boolean; grounded: boolean
+}> {
   const key = process.env.OPENAI_API_KEY
   if (!key) throw new Error('OPENAI_API_KEY not set')
 
@@ -316,28 +332,48 @@ async function buildTemplatedArtifact(client: any, art: any, opp: any, regen: bo
   // the fix inert for every packet that already exists — the cache would keep serving ungrounded
   // content forever. Regenerate when we can now ground it and previously could not.
   const staleUngrounded = grounded && pkt?.jd_grounded !== true
-  let pkg: Record<string, string | null> | null = (!regen && !staleUngrounded && pkt?.pkg_json) ? pkt.pkg_json : null
-  if (!pkg) {
-    const roleType = opp.persona_key || opp.role || 'Executive'
-    const built = await buildPackageForJD({ key, jd, roleType, company: opp.company, jobTitle: opp.role })
-    pkg = built.pkg
-    // D8 - this used to pass `{}`, which logUsage discards, so every production packet build
-    // recorded nothing. Each of the three generation passes is metered on its own so the cost of
-    // the QC pass is separable from the cost of writing the resume.
-    for (const u of built.usage) await logUsage(`packet:${art.type}:generate:${u.pass}`, 'gpt-4o-mini', u.usage)
-    await client.query(`update packet set pkg_json = $1, jd_grounded = $2, updated_at = now() where id = $3`,
-      [JSON.stringify(pkg), grounded, art.packet_id])
-    // P1.3 — record what the two passes changed, while both payloads are still in hand. They are
-    // discarded once this scope ends, and the merged package alone cannot show what it replaced.
-    // Never fatal: this is provenance about a package that is already built and stored.
-    try {
-      await writeSwaps(client, art.packet_id, opp.id, {
-        call1: built.calls.c1, call3: built.calls.c3, pkg,
-        profileText: built.profileText, omitList: built.omitList,
-      })
-    } catch (e) { console.warn('[packets] swap provenance not recorded:', String(e)) }
-  }
+  const cached: Record<string, string | null> | null = (!regen && !staleUngrounded && pkt?.pkg_json) ? pkt.pkg_json : null
+  if (cached) return { pkg: cached, generated: false, grounded: pkt?.jd_grounded === true }
 
+  const roleType = opp.persona_key || opp.role || 'Executive'
+  const built = await buildPackageForJD({ key, jd, roleType, company: opp.company, jobTitle: opp.role })
+  const pkg = built.pkg
+  // D8 - this used to pass `{}`, which logUsage discards, so every production packet build
+  // recorded nothing. Each of the three generation passes is metered on its own so the cost of
+  // the QC pass is separable from the cost of writing the resume.
+  for (const u of built.usage) await logUsage(`packet:${art.type}:generate:${u.pass}`, 'gpt-4o-mini', u.usage)
+  await client.query(`update packet set pkg_json = $1, jd_grounded = $2, updated_at = now() where id = $3`,
+    [JSON.stringify(pkg), grounded, art.packet_id])
+  // P1.3 — record what the two passes changed, while both payloads are still in hand. They are
+  // discarded once this scope ends, and the merged package alone cannot show what it replaced.
+  // Never fatal: this is provenance about a package that is already built and stored.
+  // `loop: 0` — the baseline. A whole-package generation is not a remediation pass; passes 1..n are
+  // scoped and are written by the loop (decision 14).
+  try {
+    await writeSwaps(client, art.packet_id, opp.id, {
+      call1: built.calls.c1, call3: built.calls.c3, pkg,
+      profileText: built.profileText, omitList: built.omitList, loop: 0,
+    })
+  } catch (e) { console.warn('[packets] swap provenance not recorded:', String(e)) }
+  return { pkg, generated: true, grounded }
+}
+
+/**
+ * Copy the template, inject the package, and record what landed where. ONE Drive copy per call.
+ *
+ * The remediation loop calls this exactly once per artifact, AFTER its passes have finished — so a
+ * packet completing an N-pass loop over 4 templated artifacts issues 4 copies, not 4N (P3-25).
+ * `loop` is the remediation pass the rendered package came from, and it is what the insertion rows
+ * are keyed on; it does NOT count renders.
+ */
+export async function renderArtifact(client: any, art: any, opp: any, pkg: Record<string, string | null>, opts?: { loop?: number }) {
+  const meta = metaFor(art.type)
+  if (!meta) return null
+  // P3-24 / D-9. There is no Drive DELETE anywhere in this codebase and doc_url is simply
+  // overwritten, so every rebuild ALREADY orphans a file - the loop would only multiply it. The id
+  // being superseded is returned so the caller can RECORD it: an orphan population nobody can query
+  // is one nobody can ever clean up. Deleting them is a separate owner decision (plan 11-18).
+  const superseded = (await client.query(`select doc_url from artifact where id=$1`, [art.id])).rows[0]?.doc_url || null
   const token = await getGoogleOAuthToken()
   const name = `${opp.company || 'Opportunity'} — ${meta.kindLabel}`
   const id = await copyTemplate(token, meta.templateId, name)
@@ -351,12 +387,23 @@ async function buildTemplatedArtifact(client: any, art: any, opp: any, regen: bo
   // cached package: a cached package is still injected into a fresh document, so the artifact still
   // gains rows. Never fatal — the document exists either way, and losing provenance must not lose it.
   try {
-    await writeInsertions(client, art.id, opp.id, { type: art.type, pkg: pkg! })
+    await writeInsertions(client, art.id, opp.id, { type: art.type, pkg, loop: Math.max(0, Number(opts?.loop ?? 0) | 0) })
   } catch (e) { console.warn('[packets] insertion provenance not recorded:', String(e)) }
 
-  const preview = meta.placeholders.map((p) => (pkg![p] ? `${p}:\n${pkg![p]}` : '')).filter(Boolean).join('\n\n')
+  const preview = meta.placeholders.map((p) => (pkg[p] ? `${p}:\n${pkg[p]}` : '')).filter(Boolean).join('\n\n')
   await client.query(`update artifact set doc_url = $1, content = coalesce(nullif(content,''), $2), status = case when status = 'todo' then 'review' else status end, updated_at = now() where id = $3`, [url, preview, art.id])
-  return { url, isSlides: meta.isSlides, cleaned, kindLabel: meta.kindLabel, title: name }
+  return { url, isSlides: meta.isSlides, cleaned, kindLabel: meta.kindLabel, title: name, supersededDocUrl: superseded }
+}
+
+// G6 — build a real artifact by COPYING its template and filling {{placeholders}}
+// with the proven pipeline package (assemblePackage). Returns null if the type
+// has no template (caller falls back to the legacy prose path).
+// Composition of the two steps above, so the single-artifact endpoints keep their exact behaviour
+// while the loop can take the two halves separately.
+async function buildTemplatedArtifact(client: any, art: any, opp: any, regen: boolean) {
+  if (!metaFor(art.type)) return null
+  const { pkg } = await ensurePackage(client, art, opp, regen)
+  return renderArtifact(client, art, opp, pkg)
 }
 
 // POST /api/app/artifact/{artifactId}/document — turn the generated text into a

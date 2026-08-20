@@ -304,8 +304,15 @@ create table if not exists requirement (
   kind_source    text not null check (kind_source in ('posting_required_marker','posting_optional_marker','posting_section_heading','category','category_default','fallback')),
   model_keyword  text,                      -- jd_table ATS Keyword: a P1.2 candidate, never scoreable
   competency     text,                      -- resolved by the term library (P1.2); null until then
+  -- 'escalated' here means THE QUOTE COULD NOT BE LOCATED IN THE POSTING, decided at extraction
+  -- before any loop exists (requirements.ts). P3's "the loop gave up" is a DIFFERENT population and
+  -- lives in the 'escalation' table (decision 15). Two populations in one column is how a gate comes
+  -- to count the wrong thing.
   coverage       text check (coverage in ('covered','partial','escalated')),
-  closed_on_loop int,
+  -- 'closed_on_loop int' used to sit here. It could not express the artifact dimension: coverage is
+  -- judged per-ARTIFACT by evaluateArtifact, and "covered in the resume but not the cover letter" is
+  -- the normal case. It had zero writers and zero readers (decision 16), so it is replaced rather
+  -- than migrated - by remediation_loop.closed, which is per (artifact, pass) by construction.
   weight         int not null check (weight between 1 and 3),
   source_category text,
   jd_source      text check (jd_source in ('jd_real','raw_jd')),
@@ -331,6 +338,9 @@ create table if not exists skill_candidate (
   label        text not null,
   origin       text not null check (origin in ('profile_original','pass_a','pass_b')),
   char_len     int not null,
+  -- The remediation pass that produced these candidates. Without it writeSwaps' packet-wide DELETE
+  -- takes pass 1's candidates with it, and pass 1's swap rows lose the ids they point at.
+  loop         int not null default 0,
   created_at   timestamptz not null default now()
 );
 create index if not exists skill_cand_packet_idx on skill_candidate(packet_id, list);
@@ -354,12 +364,17 @@ create table if not exists swap_decision (
   confidence     numeric(4,3) not null default 0,
   driver         text not null check (driver in ('posting','rule','unattributed')),
   rationale      text,
+  -- P3-21. 'writeSwaps' deleted 'where packet_id=$1' on EVERY build and this table had no loop
+  -- column, so pass 2 destroyed pass 1's swap record - the loop deleting its own justification for
+  -- every change it had just made. 'loop' is part of the key so each pass keeps its own history and
+  -- re-running one pass stays idempotent.
+  loop           int not null default 0,
   created_at     timestamptz not null default now(),
-  unique (packet_id, list, seq),
+  unique (packet_id, list, seq, loop),
   -- A citation needs a source: a posting-driven row must carry both, and no other row may claim one.
   check ((driver = 'posting') = (verbatim_quote is not null))
 );
-create index if not exists swap_dec_packet_idx on swap_decision(packet_id, list, seq);
+create index if not exists swap_dec_packet_idx on swap_decision(packet_id, loop, list, seq);
 
 -- P1.4 — what text landed in which REAL merge field of which artifact, what it replaced, and which
 -- requirement justifies it. Each asset is modelled as ITS merge fields, not as invented sections:
@@ -405,7 +420,11 @@ create table if not exists check_result (
   expected     text,
   offenders    text[] not null default '{}',
   created_at   timestamptz not null default now(),
-  unique (artifact_id, run_id, check_key)
+  unique (artifact_id, run_id, check_key),
+  -- A superset of the key above, existing only so remediation_loop can FOREIGN KEY into it (P3-05).
+  -- It makes 'halt_reason='converged'' unforgeable: the loop row can only name a state that a real
+  -- check_result row for that exact run already holds.
+  unique (artifact_id, run_id, check_key, state)
 );
 create index if not exists check_result_artifact_idx on check_result(artifact_id, created_at desc);
 
@@ -541,6 +560,141 @@ create table if not exists review_verdict (
 );
 create index if not exists review_verdict_artifact_idx on review_verdict(artifact_id, ran_at desc);
 
+-- P3.1 - one row per remediation PASS per ARTIFACT. The loop's ledger.
+--
+-- GRAIN. Per artifact, because coverage is judged per artifact by evaluateArtifact and "covered in
+-- the resume but not the cover letter" is the normal case, not the edge case (decision 16). The
+-- pass number is 'n', and it is the SAME number written to insertion.loop and swap_decision.loop -
+-- decision 14: one counter, joined to the before/after evidence, not a fourth counter beside two
+-- that already disagree.
+--
+-- P3-05 - 'converged' IS UNFORGEABLE HERE, not by the writer's good intentions:
+--   * the CHECK below requires cardinality(remaining) = 0, and
+--   * the composite FOREIGN KEY requires a REAL check_result row at (artifact_id, run_id,
+--     'must_have_coverage', must_have_state). So must_have_state cannot be asserted - it can only
+--     be copied from a check the engine actually recorded for that exact run.
+-- Together: a row may say 'converged' only when nothing was open AND that pass's own coverage check
+-- passed. Not 'not_applicable', not 'warn'. "Converged" is the one word a user trusts without
+-- reading anything else.
+--
+-- P3-38 - the fail -> not_applicable transition is refused in the table. A run that goes green by
+-- turning a failed coverage check into "nothing to check" has removed evidence, not fixed anything.
+create table if not exists remediation_loop (
+  id             uuid primary key default uuid_generate_v4(),
+  packet_id      uuid not null references packet(id) on delete cascade,
+  artifact_id    uuid not null references artifact(id) on delete cascade,
+  n              int not null check (n >= 0),
+  run_id         uuid not null,
+  ran_at         timestamptz not null default now(),
+  -- Requirement ids, matching artifact_score.uncovered_requirement_ids' precedent. 'closed' is what
+  -- this pass may TAKE CREDIT FOR; 'phantom_closes' is what flipped to covered with no edit of this
+  -- pass carrying the evidence - recorded, never credited (P3-11).
+  closed         uuid[] not null default '{}',
+  phantom_closes uuid[] not null default '{}',
+  remaining      uuid[] not null default '{}',
+  -- The merge fields this pass genuinely rewrote (after_text <> before_text). A close is only
+  -- creditable when this is non-empty, so the two travel together.
+  edited_fields  text[] not null default '{}',
+  scope_fields   text[] not null default '{}',
+  note           text,
+  halted         boolean not null default false,
+  halt_reason    text check (halt_reason in ('converged','no_progress','max_passes','cost_ceiling','token_ceiling','time_budget','no_coverage_evidence','nothing_reachable','ungrounded','error')),
+  -- Copied from this run's deterministic must_have_coverage check, and FK-verified against it.
+  must_have_check_key text not null default 'must_have_coverage' check (must_have_check_key = 'must_have_coverage'),
+  must_have_state     text not null check (must_have_state in ('pass','warn','fail','not_applicable')),
+  prev_must_have_state text check (prev_must_have_state in ('pass','warn','fail','not_applicable')),
+  -- Evidence must survive the loop (P3-38). Recorded per pass so db-query can verify it after merge.
+  req_count      int not null default 0,
+  -- Metering (D8). cost_usd is NULL when any call in the pass ran on an unpriced model - never 0,
+  -- which would read as free and would let the cost ceiling pass on an undercount.
+  prompt_tokens  int not null default 0,
+  completion_tokens int not null default 0,
+  cost_usd       numeric(12,8),
+  unpriced_calls int not null default 0,
+  elapsed_ms     int not null default 0,
+  engine_version int not null default 1,
+  -- Decision 19 / D-10. 'evaluateArtifact' clears override_by/at/reason on EVERY upsert. That is
+  -- deliberate and correct for a MANUAL re-check: an override approves a specific set of findings,
+  -- not the artifact forever. A remediation loop re-checks up to four times automatically, so the
+  -- same clause would silently discard a human's recorded reason four times inside one run.
+  -- The LOOP is the offender, so the loop carries the record: the override standing before this
+  -- pass evaluated is copied here before it is cleared. 'evaluateArtifact' itself is untouched -
+  -- the standing directive is to default to what is already built, and its behaviour is not a
+  -- defect on the path it was written for.
+  cleared_override_by     text,
+  cleared_override_at     timestamptz,
+  cleared_override_reason text,
+  -- P3-18. Open requirements the STANDING PROFILE already evidences, judged with the same predicate
+  -- as the gate. The backlog's own example: the $18M budget and the 60+ team size were in the work
+  -- history and were simply never pulled forward. A pass that fails to close one of these is a
+  -- different and more damning finding than 'the candidate does not have it'.
+  profile_evidence uuid[] not null default '{}',
+  -- P3-24. The Drive file this run superseded. There is no Drive DELETE anywhere in this codebase
+  -- (D-9), so every rebuild already orphans a file; recording the id makes the orphan population
+  -- MEASURABLE instead of merely growing. Deleting them is a separate owner decision (plan 11-18)
+  -- and is deliberately not done here.
+  superseded_doc_url text,
+  unique (artifact_id, n),
+  -- An override record needs its actor and its reason together, or it is not an audit trail.
+  check ((cleared_override_by is null) = (cleared_override_reason is null)),
+  -- The halt reason and the halted flag cannot disagree.
+  check ((halt_reason is null) = (not halted)),
+  -- P3-05.
+  check (halt_reason is distinct from 'converged'
+         or (cardinality(remaining) = 0 and must_have_state = 'pass')),
+  -- P3-11. A credited close requires an edit; a pass that rewrote nothing may credit nothing.
+  check (cardinality(closed) = 0 or cardinality(edited_fields) > 0),
+  -- P3-38.
+  check (not (prev_must_have_state = 'fail' and must_have_state = 'not_applicable')),
+  foreign key (artifact_id, run_id, must_have_check_key, must_have_state)
+    references check_result (artifact_id, run_id, check_key, state) on delete cascade
+);
+create index if not exists remediation_loop_packet_idx on remediation_loop(packet_id, n);
+create index if not exists remediation_loop_artifact_idx on remediation_loop(artifact_id, n);
+
+-- P3.2 - what the loop could not close, stated as an ask rather than a silent gap.
+--
+-- A SEPARATE TABLE ON PURPOSE (decision 15). requirement.coverage='escalated' is already set at
+-- EXTRACTION and means "the quote could not be located in the posting" - decided before any loop
+-- exists. Writing loop-escalations into the same column would make two populations indistinguishable
+-- and the coverage denominator would start counting the wrong thing.
+--
+-- 'detail' must state WHAT WAS SEARCHED and WHY IT COULD NOT BE CLOSED. An escalation that only says
+-- "not covered" asks the user to redo the search the loop already did.
+--
+-- Two resolutions, per the backlog: the user supplies evidence (state -> 'resolved', which reopens
+-- the loop) or accepts the gap (state -> 'accepted', and the score keeps reporting it).
+create table if not exists escalation (
+  id             uuid primary key default uuid_generate_v4(),
+  packet_id      uuid not null references packet(id) on delete cascade,
+  artifact_id    uuid not null references artifact(id) on delete cascade,
+  requirement_id uuid references requirement(id) on delete cascade,
+  ats_term_id    uuid,          -- P1.2 term_library_entry; no FK until a library version is published
+  state          text not null default 'open' check (state in ('open','resolved','accepted')),
+  title          text not null,
+  detail         text not null,
+  ask            text not null,
+  loop           int not null default 0,      -- the pass the loop gave up on
+  halt_reason    text,
+  resolution_note text,
+  resolved_by    text,
+  resolved_at    timestamptz,
+  created_at     timestamptz not null default now(),
+  updated_at     timestamptz not null default now(),
+  -- One open escalation per requirement per artifact: the acceptance says an uncoverable
+  -- nice-to-have produces EXACTLY ONE open escalation, and a loop that re-runs must update it
+  -- rather than stack duplicates.
+  unique (artifact_id, requirement_id),
+  -- A resolution needs an actor and a time, or it is not a resolution.
+  check ((state = 'open') = (resolved_at is null)),
+  check ((resolved_at is null) = (resolved_by is null)),
+  -- P3-35. Every escalation resolves to the exact object it is about, so the count can deep-link
+  -- (R5). A bare title with no target is a dead end for the person being asked to act on it.
+  check (requirement_id is not null or ats_term_id is not null)
+);
+create index if not exists escalation_packet_idx on escalation(packet_id, state);
+create index if not exists escalation_artifact_idx on escalation(artifact_id, state);
+
 -- Idempotent multi-tenant column adds (safe on tables that predate them)
 alter table persona        add column if not exists owner_email text not null default 'demo@executive-engine.local';
 alter table persona        add column if not exists is_demo boolean not null default false;
@@ -559,6 +713,18 @@ alter table opportunity    add column if not exists base_score int;
 alter table opportunity    add column if not exists jd_text text;
 alter table opportunity    add column if not exists jd_text_sha256 text;
 alter table opportunity    add column if not exists jd_text_truncated boolean;
+-- P3 idempotent adds (safe on databases created before the remediation loop existed).
+alter table swap_decision   add column if not exists loop int not null default 0;
+alter table skill_candidate add column if not exists loop int not null default 0;
+alter table requirement     drop column if exists closed_on_loop;
+-- The old 3-column unique is what made pass 2 overwrite pass 1; replace it with the loop-aware one.
+alter table swap_decision   drop constraint if exists swap_decision_packet_id_list_seq_key;
+do $$ begin
+  alter table swap_decision add constraint swap_decision_packet_list_seq_loop_key unique (packet_id, list, seq, loop);
+exception when duplicate_table or duplicate_object then null; end $$;
+do $$ begin
+  alter table check_result add constraint check_result_artifact_run_key_state_key unique (artifact_id, run_id, check_key, state);
+exception when duplicate_table or duplicate_object then null; end $$;
 alter table packet         add column if not exists must_haves text[];
 alter table packet         add column if not exists jd_grounded boolean;
 alter table packet         add column if not exists jd_analyzed_at timestamptz;
@@ -572,5 +738,6 @@ export const EXPECTED_TABLES = [
   'persona', 'opportunity', 'contact', 'packet', 'artifact', 'outreach_message',
   'interview', 'offer', 'library_entity', 'asset_event', 'usage_metering',
   'term_library', 'term_library_entry', 'term_candidate', 'requirement',
-  'skill_candidate', 'swap_decision', 'insertion', 'check_result', 'artifact_gate', 'artifact_score', 'owner_fact', 'review_verdict'
+  'skill_candidate', 'swap_decision', 'insertion', 'check_result', 'artifact_gate', 'artifact_score', 'owner_fact', 'review_verdict',
+  'remediation_loop', 'escalation'
 ]

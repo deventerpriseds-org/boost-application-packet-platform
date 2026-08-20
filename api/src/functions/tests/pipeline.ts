@@ -7,6 +7,7 @@ import { assemblePackage } from './mt17'
 import { parseResumePackage } from './resumeParser'
 import { parseAgentJson, isEmptyResult } from './agentJson'
 import { loadPipelineSettings, requireDriveId, isDriveId, CONFIG_KEYS, PipelineSettings } from './pipelineConfig'
+import { buildScopedPrompt } from './remediation'
 
 const CONN = process.env.AZURE_STORAGE_CONNECTION_STRING!
 const HEADERS = {
@@ -40,6 +41,92 @@ async function copyAndInject(token: string, templateId: string, name: string, va
   })
   if (!batchRes.ok) throw new Error(`Inject ${name} failed: HTTP ${batchRes.status}`)
   return id
+}
+
+/**
+ * The standing profile as two strings, from a MasterContext row.
+ *
+ * `itemsToOmit` is EXCLUDED from `profileText`: it is the owner's do-not-use list, injected into the
+ * resume prompt as {{289877659__Items to Omit}}. Leaving it in would mark a banned item as part of
+ * the profile — the exact inverse of the truth — and P1.3 would then file a rule-driven drop as
+ * `profile_original`.
+ *
+ * Extracted from `buildPackageForJD` (it was inline there) so the remediation loop can read the same
+ * profile without running a whole 3-agent generation to get at it. One projection, two callers.
+ */
+export function profileFromMasterContext(mc: any): { profileText: string; omitList: string } {
+  return {
+    omitList: String((mc as any)?.itemsToOmit || ''),
+    profileText: Object.entries(mc || {})
+      .filter(([k, v]) => typeof v === 'string' && k !== 'itemsToOmit')
+      .map(([, v]) => v as string).join(' '),
+  }
+}
+
+/** Load the MasterContext profile on its own. The loop needs it; a full generation does not. */
+export async function loadProfile(): Promise<{ profileText: string; omitList: string }> {
+  const ctxClient = TableClient.fromConnectionString(CONN, 'MasterContext')
+  let mc: any = {}
+  for await (const e of ctxClient.listEntities({ queryOptions: { filter: "PartitionKey eq 'context'" } })) mc = e
+  return profileFromMasterContext(mc)
+}
+
+export const SCOPED_REGEN_MODEL = 'gpt-4o-mini'
+
+/**
+ * FIELD-SCOPED REGENERATION — the primitive that did not exist (D-8 / decision 17).
+ *
+ * `buildPackageForJD` takes a job description and returns a whole package; `assemblePackage(c1,c2,c3)`
+ * takes three whole payloads and returns a whole package. Call 2 consumes `JSON.stringify(c1)` and
+ * call 3 consumes `{...c1, ...c2}`. There is one generation entry point, it is all-or-nothing, and
+ * nothing anywhere could regenerate a single merge field. That is not a wiring gap — P3.1's "re-run
+ * generation scoped to the open requirements only, do not rewrite closed blocks" cannot be built on
+ * top of it, because pass 2 would regenerate everything and destroy content that was already correct.
+ *
+ * This makes ONE model call for a NAMED SUBSET of merge fields and returns only those fields. It
+ * does not touch the package: `remediation.applyScopedFields` merges the result and REFUSES any key
+ * outside the scope, so "scoped" is enforced on the way in rather than requested in a prompt.
+ */
+export async function regenerateFields(opts: {
+  key: string
+  company: string
+  role: string
+  pass: number
+  fields: string[]
+  current: Record<string, any>
+  open: Array<{ seq: number; verbatim: string | null; item_text: string; kind: string }>
+  profileText?: string
+  omitList?: string
+  temperature?: number
+  maxTokens?: number
+}): Promise<{ fields: Record<string, any>; usage: any; model: string; via: string; detail: string }> {
+  const { system, user } = buildScopedPrompt({
+    company: opts.company, role: opts.role, pass: opts.pass, fields: opts.fields,
+    current: opts.current, open: opts.open, profileText: opts.profileText, omitList: opts.omitList,
+  })
+  const res = await fetch('https://api.openai.com/v1/chat/completions', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${opts.key}` },
+    body: JSON.stringify({
+      model: SCOPED_REGEN_MODEL,
+      messages: [{ role: 'system', content: system }, { role: 'user', content: user }],
+      max_tokens: opts.maxTokens ?? 4000,
+      temperature: opts.temperature ?? 0.4,
+      response_format: { type: 'json_object' },
+    }),
+  })
+  if (!res.ok) throw new Error(`scoped regeneration HTTP ${res.status}: ${(await res.text()).slice(0, 300)}`)
+  const json = await res.json() as any
+  const parsed = parseAgentJson(json?.choices?.[0]?.message?.content)
+  // A pass that returned nothing usable is NOT an empty edit — it is a failed call, and reporting it
+  // as "changed nothing" would let a broken model key read as "the document was already fine".
+  return {
+    fields: parsed.value && typeof parsed.value === 'object' ? parsed.value as Record<string, any> : {},
+    usage: json?.usage,
+    model: SCOPED_REGEN_MODEL,
+    via: parsed.via,
+    detail: parsed.value ? '' : `scoped regeneration returned no JSON object (${parsed.detail})`,
+  }
 }
 
 // The proven 3-agent packet generation (resume → portfolio/cover → ATS QC),
@@ -145,10 +232,7 @@ export async function buildPackageForJD(opts: { key: string; jd: string; roleTyp
   // rather than credited to a pass that merely repeated it. `itemsToOmit` is EXCLUDED: it is the
   // owner's do-not-use list, injected into the resume prompt as {{289877659__Items to Omit}}.
   // Leaving it in would mark a banned item as part of the profile — the exact inverse of the truth.
-  const omitList = String((mc as any)?.itemsToOmit || '')
-  const profileText = Object.entries(mc || {})
-    .filter(([k, v]) => typeof v === 'string' && k !== 'itemsToOmit')
-    .map(([, v]) => v as string).join(' ')
+  const { profileText, omitList } = profileFromMasterContext(mc)
   // The MT-22 route returns `warnings` to its caller; the production packet builder
   // (appPackets.buildTemplatedArtifact) does not read them, so emit them here too — otherwise a
   // config gap or an inert QC call is invisible on the path that actually ships documents.

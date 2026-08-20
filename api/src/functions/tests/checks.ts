@@ -127,6 +127,28 @@ export const COVERAGE_THRESHOLD = 0.7
 /** Below this many content words a requirement carries too little signal to judge either way. */
 export const MIN_JUDGEABLE_TOKENS = 3
 
+/**
+ * Does `covText` — ALREADY normalized and lower-cased — cover this requirement?
+ *
+ * Exported because P3's remediation loop must decide "did the text this pass actually WROTE close
+ * this requirement", and the only honest way to answer that is with the SAME predicate that decides
+ * `must_have_coverage` and therefore the gate. A second implementation drifts, and the day it drifts
+ * the loop claims a close the gate does not recognise.
+ */
+export function coversIn(covText: string, r: { verbatim: string | null; item_text: string }): boolean {
+  const toks = itemTokens(r.verbatim || r.item_text)
+  if (toks.length < MIN_JUDGEABLE_TOKENS) return false
+  const hit = toks.filter(tk => covText.includes(tk))
+  if (hit.length / toks.length < COVERAGE_THRESHOLD) return false
+  const distinctive = toks.filter(tk => tk.length >= 6)
+  return distinctive.length === 0 || distinctive.some(tk => covText.includes(tk))
+}
+
+/** Same predicate, taking RAW text. Normalises exactly as `runChecks` does before comparing. */
+export function coversText(text: string, r: { verbatim: string | null; item_text: string }): boolean {
+  return coversIn(normalizePostingText(String(text || '')).toLowerCase(), r)
+}
+
 const SKILL_FIELDS = ['SkillsBullets1', 'SkillsBullets2']
 const RELEVANT_FIELDS = ['RelevantBullets1', 'RelevantBullets2', 'RelevantBullets3']
 
@@ -335,14 +357,7 @@ export function runChecks(input: CheckInput): CheckResult[] {
    *    short words carry almost no evidence, and a requirement made only of them is exactly the
    *    fragment case above.
    */
-  const covers = (r: { verbatim: string | null; item_text: string }) => {
-    const toks = itemTokens(r.verbatim || r.item_text)
-    if (toks.length < MIN_JUDGEABLE_TOKENS) return false
-    const hit = toks.filter(tk => covText.includes(tk))
-    if (hit.length / toks.length < COVERAGE_THRESHOLD) return false
-    const distinctive = toks.filter(tk => tk.length >= 6)
-    return distinctive.length === 0 || distinctive.some(tk => covText.includes(tk))
-  }
+  const covers = (r: { verbatim: string | null; item_text: string }) => coversIn(covText, r)
 
   if (!reqs.length) {
     // AC 2.1.9 — the safety rule. A coverage check with nothing to check against is unknown, not OK.

@@ -519,3 +519,142 @@ test('H23: a section never contributes text to a field it does not title', () =>
     .map(([f]) => f)
   assert.deepEqual(offenders, [], 'the positional pair-walk is back in a section parser')
 })
+
+// ---------------------------------------------------------------------------------------------
+// H26 — the swap writer deleted the whole packet's provenance on every build, and swap_decision had
+// no pass dimension at all. Evidence: `appSwaps.writeSwaps` ran
+// `delete from swap_decision where packet_id=$1` unconditionally, and the table's unique key was
+// `(packet_id, list, seq)`. A remediation loop calling it on pass 2 therefore DESTROYED pass 1's
+// swap rows — the loop deleting its own justification for every change it had just made, and the
+// packet screen showing only the last pass's decisions as if they were the whole story.
+// The invariant, not the incident: any writer that clears provenance for a packet must scope the
+// clear to the pass it is rewriting.
+test('H26: provenance deletes are scoped to a pass, never to a whole packet', () => {
+  const offenders = []
+  for (const [file, body] of allSources()) {
+    const code = stripComments(body)
+    // The real construct: a DELETE from a provenance table keyed by packet alone.
+    const re = /delete\s+from\s+(swap_decision|skill_candidate|insertion)\s+where\s+([^`'"]*)/gi
+    let m
+    while ((m = re.exec(code))) {
+      const [, table, predicate] = m
+      if (!/\bloop\s*=/.test(predicate)) offenders.push(`${file}: delete from ${table} where ${predicate.trim().slice(0, 60)}`)
+    }
+  }
+  assert.deepEqual(offenders, [], 'a packet-wide provenance delete erases every earlier pass')
+})
+
+test('H26: swap_decision and skill_candidate carry the pass in their key', () => {
+  const schema = src('schema.ts')
+  assert.match(schema, /unique \(packet_id, list, seq, loop\)/,
+    'without loop in the key, pass 2 overwrites pass 1 row for row')
+  assert.match(schema, /create table if not exists swap_decision[\s\S]*?loop\s+int not null default 0/,
+    'swap_decision must have a loop column')
+  assert.match(schema, /create table if not exists skill_candidate[\s\S]*?loop\s+int not null default 0/,
+    'skill_candidate rows are the FK targets of swap_decision; deleting them packet-wide nulls the links')
+})
+
+// ---------------------------------------------------------------------------------------------
+// H27 — generation and RENDERING were the same function, so the only way to regenerate content was
+// to also issue a Drive `files/{id}/copy`. Evidence: `buildTemplatedArtifact` did both. A four-pass
+// remediation loop over the four templated artifacts would have created 16 Google files per packet,
+// and since there is no Drive DELETE anywhere in this codebase (D-9) 15 of them would be orphaned
+// on the quota-bearing OAuth account. X5 / P3-25: documents render ONCE, after the loop.
+test('H27: the remediation loop body contains no Drive call — rendering is a separate step', () => {
+  const loop = stripComments(src('appRemediation.ts'))
+  // The pass loop is everything between the `for (let pass` header and the render call that follows
+  // it. A Drive call inside that span is the 4N defect returning.
+  const start = loop.indexOf('for (let pass')
+  const end = loop.indexOf('renderArtifact(client, art, opp, pkg')
+  assert.ok(start > 0 && end > start, 'the loop and the single render call must both be present')
+  const body = loop.slice(start, end)
+  for (const call of ['copyTemplate', 'injectValues', 'buildTemplatedArtifact', 'googleapis.com/drive']) {
+    assert.ok(!body.includes(call), `${call} is reachable from inside the pass loop — that is 4N Drive copies`)
+  }
+})
+
+test('H27: ensurePackage generates without rendering, so a pass can run without a Drive copy', () => {
+  const packets = stripComments(src('appPackets.ts'))
+  const start = packets.indexOf('export async function ensurePackage')
+  const end = packets.indexOf('export async function renderArtifact')
+  assert.ok(start > 0 && end > start, 'the two halves must be separate exported functions')
+  const gen = packets.slice(start, end)
+  for (const call of ['copyTemplate', 'injectValues', 'getGoogleOAuthToken']) {
+    assert.ok(!gen.includes(call), `ensurePackage still calls ${call}; generation and rendering are welded together again`)
+  }
+})
+
+// ---------------------------------------------------------------------------------------------
+// H28 — `insertion.loop` was DERIVED inside the writer as `max(loop) + 1`, so it counted document
+// RENDERS: every build advanced it, including a build that served a cached package and made zero
+// model calls. Three loop-ish counters already existed (`packet.round`, never incremented;
+// `insertion.loop`; `check_result.run_id`) and P3 wanted a fourth. Decision 14: give this one the
+// meaning P3 needs and let the CALLER own it — loop 0 is the baseline, 1..n are remediation passes.
+// The invariant: no provenance writer may invent a pass number for itself.
+test('H28: the pass number is supplied by the caller, never derived from max(loop)', () => {
+  const offenders = allSources()
+    .filter(([, body]) => /max\(loop\)/i.test(stripComments(body)))
+    .map(([f]) => f)
+  assert.deepEqual(offenders, [], 'a writer deriving its own pass number counts renders, not passes')
+
+  const ins = stripComments(src('appInsertions.ts'))
+  assert.match(ins, /const loop = Math\.max\(0, Number\(args\.loop \?\? 0\) \| 0\)/,
+    'writeInsertions must take the pass from its caller')
+  // ...and pass n's "before" must be pass n-1's "after", never its own.
+  assert.match(ins, /loop=\$2`, \[artifactId, loop - 1\]/, 'before_text must come from the PREVIOUS pass')
+})
+
+test('H28: every loop/pass/round counter column has a writer — no dead counter', () => {
+  // The invariant, not the incident. `packet.round` was READ by loadPacket's ORDER BY and by
+  // packetShape and written by NOTHING, so it was always 1: the ordering was a no-op and the API
+  // reported round 1 forever. A counter nobody increments is worse than no counter, because every
+  // reader believes it. Decision 14 forbids adding a fourth beside two that already disagree; this
+  // asserts the general rule that any counter that EXISTS is advanced by something.
+  const schema = stripComments(src('schema.ts'))
+  const columns = [...new Set([...schema.matchAll(/^\s*(\w*(?:loop|pass|round)\w*)\s+int\b/gim)]
+    .map(m => m[1].toLowerCase()))]
+  const code = allSources().filter(([f]) => f !== 'schema.ts').map(([, b]) => stripComments(b)).join('\n')
+  const unwritten = columns.filter(c => {
+    if (c === 'loop') return false            // supplied by the caller on every insert (H28 above)
+    if (c === 'n') return false               // remediation_loop.n, inserted per pass
+    return !new RegExp(`set\\s+${c}\\s*=|\\b${c}\\s*=\\s*${c}\\s*\\+`, 'i').test(code)
+  })
+  assert.deepEqual(unwritten, [], 'a counter column that no code ever advances — readers will trust it anyway')
+})
+
+// ---------------------------------------------------------------------------------------------
+// H29 — `converged` is the one word a user trusts without reading anything else, so it must not be
+// storable by a writer that merely intends to be honest. The guard is structural: a CHECK that
+// refuses the word while anything is open, and a composite FOREIGN KEY into `check_result` so the
+// coverage state on the row cannot be ASSERTED — only copied from a check the engine really recorded
+// for that exact run. Evidence for why this is needed: `evaluateArtifact` writes check_result rows
+// keyed by run_id, and nothing else in the schema tied a summary row back to them.
+test('H29: converged is unforgeable in the schema, not just in the writer', () => {
+  const schema = src('schema.ts')
+  assert.match(schema, /check \(halt_reason is distinct from 'converged'\s*\n?\s*or \(cardinality\(remaining\) = 0 and must_have_state = 'pass'\)\)/,
+    'the converged CHECK is gone; the word becomes whatever the writer says')
+  assert.match(schema, /foreign key \(artifact_id, run_id, must_have_check_key, must_have_state\)\s*\n?\s*references check_result \(artifact_id, run_id, check_key, state\)/,
+    'without the composite FK, must_have_state is an assertion rather than a copy of a real check')
+  assert.match(schema, /unique \(artifact_id, run_id, check_key, state\)/,
+    'the FK needs this unique on check_result as its target')
+  // P3-38: going green by turning a failure into "nothing to check" is refused by the table.
+  assert.match(schema, /check \(not \(prev_must_have_state = 'fail' and must_have_state = 'not_applicable'\)\)/,
+    'fail -> not_applicable is evidence disappearing, not coverage being achieved')
+  // P3-11: a credited close requires an edit.
+  assert.match(schema, /check \(cardinality\(closed\) = 0 or cardinality\(edited_fields\) > 0\)/,
+    'a pass that rewrote nothing may credit nothing')
+})
+
+// ---------------------------------------------------------------------------------------------
+// H30 — the loop must not become a second definition of "covered". `checks.covers()` decides
+// `must_have_coverage`, which decides the GATE; if the loop implemented its own token-overlap rule
+// to decide what a pass closed, the two would drift and the loop would start claiming closes the
+// gate does not recognise. The predicate is exported from `checks.ts` and imported, once.
+test('H30: the loop decides coverage with the gate\'s predicate, never its own', () => {
+  const rem = stripComments(src('remediation.ts'))
+  assert.match(rem, /import \{[^}]*coversText[^}]*\} from '\.\/checks'/,
+    'the loop must import the gate\'s coverage predicate')
+  // The real construct of a home-grown re-implementation: a local overlap ratio.
+  assert.ok(!/COVERAGE_THRESHOLD\s*=/.test(rem), 'the loop redefined the coverage threshold')
+  assert.ok(!/hit\.length \/ toks\.length/.test(rem), 'the loop re-implemented the overlap rule')
+})
