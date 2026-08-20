@@ -94,21 +94,62 @@ export function isHeading(part: string): boolean {
   return headingKeysFor(part).length > 0
 }
 
-export function parseResumePackage(content: string, mc: MC, jobTitle: string, company: string): any {
-  const parts = content.split('###').map((s) => s.trim()).filter(Boolean)
-  const fields: Record<string, string> = {}
+/**
+ * A heading line, by the delimiter GRAMMAR rather than by guesswork: `### Title ###`, bracketed on
+ * both sides, alone on its line.
+ *
+ * Splitting on a single `###` throws that structure away, and two different defects follow:
+ *   1. a lone `###` mid-sentence ("Also delivered ### platform rebuilds") produces a short fragment
+ *      that any length-based heuristic mistakes for a heading, and
+ *   2. a genuine heading whose title matches no TITLE_MAP entry becomes indistinguishable from body.
+ * Matching the PAIR settles both without a heuristic: bracketed means heading, whatever the words.
+ */
+const HEADING_LINE = /^\s*###\s*(.+?)\s*###\s*$/
 
-  // Classify every part ONCE, then let each heading claim the run of body parts that follows it.
-  // Nothing depends on a part's index parity, so a stray delimiter cannot re-align what comes after.
-  const keys = parts.map(headingKeysFor)
-  for (let i = 0; i < parts.length; i++) {
-    if (!keys[i].length) continue
-    const body: string[] = []
-    for (let j = i + 1; j < parts.length && !keys[j].length; j++) body.push(parts[j])
-    if (!body.length) continue                      // heading with no body — leave the field open
+export interface ParsedSection { title: string; body: string }
+
+/**
+ * Split the reply into `### Title ###`-delimited sections, in order.
+ *
+ * Text before the first heading is returned as a preamble section with an empty title; a lone `###`
+ * inside a line is left alone, because it is not a heading and never was.
+ */
+export function splitSections(content: string): ParsedSection[] {
+  const out: ParsedSection[] = []
+  let title = ''
+  let buf: string[] = []
+  const flush = () => {
+    const body = buf.join('\n').trim()
+    if (title || body) out.push({ title, body })
+    buf = []
+  }
+  for (const line of String(content || '').split(/\r?\n/)) {
+    const m = line.match(HEADING_LINE)
+    if (m) { flush(); title = m[1]; } else { buf.push(line) }
+  }
+  flush()
+  return out
+}
+
+export function parseResumePackage(content: string, mc: MC, jobTitle: string, company: string): any {
+  const sections = splitSections(content)
+  const fields: Record<string, string> = {}
+  // Sections whose title is a real heading but maps to no field. They are NOT silently folded into
+  // the previous field — that is how a prompt edit that adds a section moves content into the wrong
+  // resume slot, which is precisely what P7's acceptance line forbids. Losing them silently and
+  // misfiling them silently are the same defect, so they are returned and warned about instead.
+  const unmapped: ParsedSection[] = []
+
+  for (const sec of sections) {
+    if (!sec.body) continue                          // heading with no body — leave the field open
+    const keys = headingKeysFor(sec.title)
+    if (!keys.length) {
+      if (sec.title) unmapped.push(sec)              // a real heading nobody claims
+      continue                                       // untitled preamble is dropped, as before
+    }
     // First unfilled candidate wins, mirroring the original loop's fall-through.
-    const key = keys[i].find((k) => !fields[k])
-    if (key) fields[key] = body.join('\n\n')
+    const key = keys.find((k) => !fields[k])
+    if (key) fields[key] = sec.body
   }
 
   const val = (k: string) => (mc && mc[k] != null ? String(mc[k]) : '')
@@ -117,6 +158,7 @@ export function parseResumePackage(content: string, mc: MC, jobTitle: string, co
     date: fields.date || new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' }),
     targetRole: fields.targetRole || jobTitle,
     targetCompany: fields.targetCompany || company,
+    _unmapped: unmapped,
     resumeSummary: fields.resumeSummary || '',
     skills1: fields.skills1 || '',
     skills2: fields.skills2 || '',

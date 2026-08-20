@@ -1,5 +1,6 @@
 import { app, HttpRequest, HttpResponseInit, InvocationContext } from '@azure/functions'
 import { TableClient } from '@azure/data-tables'
+import { splitSections } from './resumeParser'
 
 const CONN = process.env.AZURE_STORAGE_CONNECTION_STRING!
 const HEADERS = {
@@ -59,11 +60,14 @@ export async function mt15(req: HttpRequest, context: InvocationContext): Promis
 
     // The real prompt returns ###-delimited sections, not JSON. Parse into
     // { header: body } and locate the portfolio content sections.
+    // Uses the SAME splitter as the production parser (`resumeParser.splitSections`) rather than a
+    // third copy of the positional `i += 2` walk. That walk steps in pairs, so one stray `###`
+    // inside a sentence flips the parity of every section after it — the P7 defect. Two of these
+    // copies were left behind when `resumeParser` was fixed; "fix all consumers" is the rule.
     const sections: Record<string, string> = {}
-    const parts = content.split('###').map((s: string) => s.trim()).filter(Boolean)
-    for (let i = 0; i < parts.length - 1; i += 2) {
-      const header = parts[i].replace(/<[^>]+>/g, '').trim().toLowerCase()
-      sections[header] = parts[i + 1]
+    for (const sec of splitSections(content)) {
+      if (!sec.title) continue
+      sections[sec.title.replace(/<[^>]+>/g, '').trim().toLowerCase()] = sec.body
     }
     const find = (needle: string) => Object.entries(sections).find(([h, b]) => h.includes(needle) && b && b.length > 5)?.[1] || ''
 

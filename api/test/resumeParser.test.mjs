@@ -112,3 +112,42 @@ test('an empty or heading-free document yields no parsed fields, not a misfiled 
   assert.equal(p.targetRole, 'VP of Engineering', 'falls back to the caller-supplied role')
   assert.equal(p.targetCompany, 'TechVenture Inc')
 })
+
+// P7 item 1 — the backlog's own acceptance line: "a prompt edit that adds a section cannot silently
+// move content into the wrong resume slot." Measured on main before this fix: a `### Title ###`
+// section whose title matched no TITLE_MAP entry was classified as BODY and absorbed into the field
+// above it, TITLE INCLUDED, so `resumeSummary` came back as
+//   "Executive who modernizes regulated platforms.\n\nLeadership Philosophy\n\nI build teams that ship."
+// and that string went into the document.
+test('a section the map does not know is never folded into the field above it', () => {
+  const p = parse([
+    '### Resume Summary ###', 'Executive who modernizes regulated platforms.',
+    '### Leadership Philosophy ###', 'I build teams that ship.',
+    '### Skills 1 ###', 'Cloud Strategy | DevSecOps',
+  ].join('\n'))
+  assert.equal(p.resumeSummary, 'Executive who modernizes regulated platforms.')
+  assert.ok(!/Leadership Philosophy/.test(p.resumeSummary), 'the unknown TITLE leaked into the summary')
+  assert.ok(!/I build teams/.test(p.resumeSummary), 'the unknown BODY leaked into the summary')
+  assert.equal(p.skills1, 'Cloud Strategy | DevSecOps', 'later sections are unaffected')
+})
+
+test('an unknown section is surfaced, not silently dropped', () => {
+  // Losing it quietly and misfiling it quietly are the same defect: in both cases a prompt edit
+  // changes the document and nothing says so.
+  const p = parse(['### Resume Summary ###', 'Summary text.', '### Leadership Philosophy ###', 'Body text.'].join('\n'))
+  assert.deepEqual(p._unmapped, [{ title: 'Leadership Philosophy', body: 'Body text.' }])
+})
+
+test('a lone ### inside a sentence is still prose, not a heading', () => {
+  // The guard for the fix above must not promote every short fragment to a heading. This is the
+  // case that makes a length-based heuristic wrong: splitting "Also delivered ### platform
+  // rebuilds" yields "Also delivered" — short, no terminal punctuation, and NOT a heading.
+  const p = parse([
+    '### Resume Summary ###', 'Executive who modernizes regulated platforms.',
+    'Also delivered ### platform rebuilds across three regions.',
+    '### Skills 1 ###', 'Cloud Strategy | DevSecOps',
+  ].join('\n'))
+  assert.match(p.resumeSummary, /Executive who modernizes/)
+  assert.equal(p.skills1, 'Cloud Strategy | DevSecOps', 'a stray delimiter must not re-align later sections')
+  assert.deepEqual(p._unmapped, [], 'a mid-sentence ### is not an unknown section')
+})

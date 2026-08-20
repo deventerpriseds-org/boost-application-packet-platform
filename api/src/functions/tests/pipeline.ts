@@ -97,6 +97,14 @@ export async function buildPackageForJD(opts: { key: string; jd: string; roleTyp
   const c1: any = parseResumePackage(r1.choices?.[0]?.message?.content || '', mc, jobTitle, company)
   steps.push(`Agent Call 1 (resume) — parsed ${c1._parsedFieldCount} fields by title`)
   if (!c1._parsedFieldCount) warnings.push('Call 1 produced no recognisable ### sections — the package is MasterContext only')
+  // P7 item 1. A `### Title ###` section whose title maps to no merge field used to be swallowed
+  // by the field above it, title and all — so a prompt edit that ADDED a section silently moved
+  // content into the wrong resume slot, which is exactly what P7's acceptance line forbids. The
+  // parser now keeps it separate; this makes it visible, because silently dropping it and silently
+  // misfiling it are the same defect.
+  for (const u of (c1._unmapped || [])) {
+    warnings.push(`Call 1 returned a section named "${u.title}" that maps to no merge field — its ${u.body.length} characters were NOT placed in any document`)
+  }
 
   // Calls 2 and 3 were sending their prompts RAW: every `{{node__field}}` token the seeded Zapier
   // prompts carry reached the model as a literal. For Call 3 that included the job description

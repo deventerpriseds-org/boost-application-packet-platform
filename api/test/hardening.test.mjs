@@ -21,6 +21,7 @@ import { onOmitList, omitEntries, similarity } from '../dist/functions/tests/swa
 import { runChecks, gateFor, attentionCount, COVERAGE_THRESHOLD, MIN_JUDGEABLE_TOKENS } from '../dist/functions/tests/checks.js'
 import { computeArtifactScore } from '../dist/functions/tests/artifactScore.js'
 import { deriveFacts } from '../dist/functions/tests/ownerFacts.js'
+import { parseResumePackage } from '../dist/functions/tests/resumeParser.js'
 import { validateCitations, reviewerChecks } from '../dist/functions/tests/reviewer.js'
 
 const SRC = new URL('../src/functions/tests/', import.meta.url).pathname
@@ -476,4 +477,45 @@ test('H22: no rows is never a pass — the gate cannot go green on an unchecked 
   const rows = runChecks({ type: 'resume', pkg: {}, requirements: [], swaps: [] })
   assert.ok(rows.length > 0)
   assert.equal(gateFor(rows), 'fail')
+})
+
+// ---------------------------------------------------------------------------------------------
+// H23 — A `### Title ###` section whose title mapped to no merge field was classified as BODY and
+// absorbed into the field above it, title included. Measured on main before the fix:
+//   parse('### Resume Summary ###\nExecutive who modernizes...\n### Leadership Philosophy ###\nI
+//   build teams that ship.\n### Skills 1 ###\n...')
+//   → resumeSummary === "Executive who modernizes regulated platforms.\n\nLeadership Philosophy\n\nI
+//     build teams that ship."
+// and that string went into the document. So a PROMPT EDIT THAT ADDED A SECTION silently moved
+// content into the wrong resume slot — precisely what P7's own acceptance line forbids, still true
+// after the parity half of the fix had landed and been called done.
+//
+// The root cause was the delimiter GRAMMAR being discarded: `split('###')` cannot tell
+// `### Title ###` (bracketed both sides, a heading) from a lone `###` inside a sentence. Matching
+// the pair settles it without a length heuristic — which matters, because the obvious heuristic
+// ("short and unpunctuated is a heading") misclassifies the fragment "Also delivered" produced by
+// splitting "Also delivered ### platform rebuilds".
+//
+// The invariant: no `###` section may contribute text to a field it does not title.
+test('H23: a section never contributes text to a field it does not title', () => {
+  const p = parseResumePackage([
+    '### Resume Summary ###', 'Executive who modernizes regulated platforms.',
+    '### Leadership Philosophy ###', 'I build teams that ship.',
+    '### Skills 1 ###', 'Cloud Strategy | DevSecOps',
+  ].join('\n'), {}, 'Director', 'Trinnex')
+
+  for (const [field, text] of Object.entries(p)) {
+    if (typeof text !== 'string' || !text) continue
+    assert.ok(!/Leadership Philosophy/.test(text), `the unknown section's TITLE reached ${field}`)
+    assert.ok(!/I build teams to ship|I build teams that ship/.test(text), `its BODY reached ${field}`)
+  }
+  // ...and it is surfaced rather than silently dropped: both failures change the document without
+  // saying so, and only one of them is visible to a reader of the output.
+  assert.deepEqual(p._unmapped, [{ title: 'Leadership Philosophy', body: 'I build teams that ship.' }])
+
+  // The same walk lived in two more files when resumeParser was "fixed". Fix all consumers.
+  const offenders = allSources()
+    .filter(([f, body]) => /parts\[i \+ 1\]/.test(stripComments(body)))
+    .map(([f]) => f)
+  assert.deepEqual(offenders, [], 'the positional pair-walk is back in a section parser')
 })
