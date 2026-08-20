@@ -5,7 +5,9 @@ import {
   ASSET_LABEL, assetLabel, STATUS_TONE, GATE_META, gateMeta, STATE_META, stateMeta,
   CHECK_LABEL, checkLabel, FIELD_LABEL, fieldLabel, METHOD_LABEL,
   footerFor, reconcile, attentionSplit, engineRows, scoreParts, fmtWhen, arr, errText,
+  GATE_HOOKS,
 } from '../assetGate.js'
+import { HIGHLIGHT_CLASS } from '../highlight.js'
 
 // P5.3 - the per-asset gate drawer.
 //
@@ -28,6 +30,7 @@ import {
 export {
   ASSET_LABEL, assetLabel, STATUS_TONE, GATE_META, gateMeta, STATE_META, stateMeta,
   CHECK_LABEL, checkLabel, FIELD_LABEL, fieldLabel, footerFor, reconcile, attentionSplit, engineRows,
+  GATE_HOOKS,
 }
 
 // Small presentational pieces -------------------------------------------------------------------
@@ -37,8 +40,8 @@ export {
  * attention as two separate props is exactly how a caller ends up sourcing them from two places.
  */
 export function GateBadge({ result, loading, error, onClick, compact = false }) {
-  if (error) return <Pill tone="panel" title={String(error)}>gate unavailable</Pill>
-  if (!result) return <Pill tone="panel">{loading ? 'checking...' : 'not loaded'}</Pill>
+  if (error) return <span data-qc={GATE_HOOKS.badge} data-qc-gate="unavailable" title={String(error)}><Pill tone="panel">gate unavailable</Pill></span>
+  if (!result) return <span data-qc={GATE_HOOKS.badge} data-qc-gate="unloaded"><Pill tone="panel">{loading ? 'checking...' : 'not loaded'}</Pill></span>
   const m = gateMeta(result.gate)
   // The badge shows the SERVER's own count, read through the one selector rather than re-derived
   // here. Where that number and the rows it sent disagree, reconcile() reports the disagreement in
@@ -57,12 +60,13 @@ export function GateBadge({ result, loading, error, onClick, compact = false }) 
   const title = m.word + ' - ' + m.blurb + (result.computedAt ? ' (checked ' + fmtWhen(result.computedAt) + ')' : '')
   return (
     <span onClick={onClick} title={title} role={onClick ? 'button' : undefined} tabIndex={onClick ? 0 : undefined}
+      data-qc={GATE_HOOKS.badge} data-qc-gate={result.gate == null ? 'unchecked' : String(result.gate)}
       onKeyDown={onClick ? (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClick(e) } } : undefined}
       style={{ display: 'inline-flex', alignItems: 'center', gap: 6, cursor: onClick ? 'pointer' : 'default' }}>
-      <Pill tone={m.tone}>{m.word}</Pill>
-      {split.fix > 0 && <Pill tone={result.gate === 'fail' ? 'red' : 'yellow'}>{split.fix} to fix</Pill>}
-      {split.review > 0 && <Pill tone="yellow">{split.review} to review</Pill>}
-      {!compact && result.override && <Pill tone="accent">exception</Pill>}
+      <span data-qc={GATE_HOOKS.gate}><Pill tone={m.tone}>{m.word}</Pill></span>
+      {split.fix > 0 && <span data-qc={GATE_HOOKS.toFix} data-qc-n={split.fix}><Pill tone={result.gate === 'fail' ? 'red' : 'yellow'}>{split.fix} to fix</Pill></span>}
+      {split.review > 0 && <span data-qc={GATE_HOOKS.toReview} data-qc-n={split.review}><Pill tone="yellow">{split.review} to review</Pill></span>}
+      {!compact && result.override && <span data-qc={GATE_HOOKS.exception}><Pill tone="accent">exception</Pill></span>}
     </span>
   )
 }
@@ -94,7 +98,8 @@ const Offenders = ({ items }) => {
 function CheckRow({ row }) {
   const m = stateMeta(row.state)
   return (
-    <div className="px-box-soft" style={{ padding: 10, marginBottom: 8 }}>
+    <div className="px-box-soft" data-qc={GATE_HOOKS.check} data-qc-state={row.state || 'unknown'}
+      data-qc-engine={row.engine || 'unrecorded'} style={{ padding: 10, marginBottom: 8 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
         <span style={{ fontSize: 13, fontWeight: 600, flex: 1, minWidth: 140 }}>{checkLabel(row.check_key)}</span>
         <Pill tone={m.tone}>{m.label}</Pill>
@@ -147,7 +152,8 @@ function BlocksTab({ data, loading, error, focusField }) {
         <Quiet>The finding you opened names {fieldLabel(focusField)}, but this asset has no recorded block for that field.</Quiet>
       )}
       {rows.map((r) => (
-        <div key={r.merge_field} className="px-box-soft" data-qc-section={r.merge_field}
+        <div key={r.merge_field} className="px-box-soft" data-qc={GATE_HOOKS.block} data-qc-section={r.merge_field}
+          data-qc-field={r.merge_field} data-qc-generated={r.generated ? '1' : '0'}
           ref={r.merge_field === focusField ? focusRef : undefined}
           style={{ padding: 10, marginBottom: 8, boxShadow: r.merge_field === focusField ? 'inset 0 0 0 2px var(--border-brand)' : undefined }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
@@ -162,7 +168,7 @@ function BlocksTab({ data, loading, error, focusField }) {
             how it got here: {METHOD_LABEL[r.method] || String(r.method || 'unrecorded')}
           </div>
           {r.verbatim_quote
-            ? <div className="px-small">because the posting says: &quot;{r.verbatim_quote}&quot;{r.requirement_kind ? ' (' + String(r.requirement_kind).replace(/_/g, ' ') + ')' : ''}{r.confidence != null ? ' - match strength ' + r.confidence : ''}</div>
+            ? <div className="px-small" data-qc={GATE_HOOKS.quote}>because the posting says: <span className={HIGHLIGHT_CLASS.postingEcho}>&quot;{r.verbatim_quote}&quot;</span>{r.requirement_kind ? ' (' + String(r.requirement_kind).replace(/_/g, ' ') + ')' : ''}{r.confidence != null ? ' - match strength ' + r.confidence : ''}</div>
             : r.generated ? <div className="px-small">no line of the posting could be tied to this block.</div> : null}
         </div>
       ))}
@@ -225,7 +231,7 @@ function CompareTab({ swaps, swapsLoading, swapsError, insertions }) {
                       <td style={{ padding: '6px 8px', borderBottom: '1px solid var(--proto-rule-soft)' }}><Pill tone={s.action === 'dropped' ? 'red' : s.action === 'kept' ? 'panel' : 'accent'}>{s.action}</Pill></td>
                       <td style={{ fontSize: 12, padding: '6px 8px', borderBottom: '1px solid var(--proto-rule-soft)' }}>
                         {s.verbatim_quote
-                          ? <span>the posting says &quot;{s.verbatim_quote}&quot;</span>
+                          ? <span data-qc={GATE_HOOKS.quote}>the posting says <span className={HIGHLIGHT_CLASS.postingEcho}>&quot;{s.verbatim_quote}&quot;</span></span>
                           : <span className="px-small">{s.driver === 'unattributed' ? 'no line of the posting backs this change' : s.rationale || String(s.driver || '')}</span>}
                       </td>
                     </tr>
@@ -461,7 +467,7 @@ export default function AssetGateDrawer({
       {reasonOpen && (
         <div style={{ flexBasis: '100%' }}>
           <label htmlFor="ee-gate-reason" className="px-small">Why is it acceptable to ship this asset with these findings? Recorded against your name.</label>
-          <textarea id="ee-gate-reason" className="px-input" rows={2} value={reason} onChange={(e) => setReason(e.target.value)}
+          <textarea id="ee-gate-reason" data-qc={GATE_HOOKS.reason} className="px-input" rows={2} value={reason} onChange={(e) => setReason(e.target.value)}
             style={{ width: '100%', marginTop: 4, resize: 'vertical' }} />
           <div className="px-small">{reasonTooShort ? 'at least 8 characters (' + reason.trim().length + ' so far)' : 'this reason will be stored with the approval'}</div>
         </div>
@@ -470,23 +476,23 @@ export default function AssetGateDrawer({
         <div style={{ fontSize: 12, fontWeight: 600 }}>{f.headline}</div>
         {f.reason && <div className="px-small">{f.reason}</div>}
       </div>
-      <button type="button" className="px-btn" onClick={runChecks} disabled={!!busy}>
+      <button type="button" className="px-btn" data-qc={GATE_HOOKS.runChecks} onClick={runChecks} disabled={!!busy}>
         {busy === 'checks' ? 'Running...' : (result && result.gate != null ? 'Re-run checks' : 'Run checks')}
       </button>
       {f.needsReason ? (
         reasonOpen ? (
           <>
             <button type="button" className="px-btn" onClick={() => { setReasonOpen(false); setReason('') }} disabled={!!busy}>Cancel</button>
-            <button type="button" className="px-btn px-btn-yellow" onClick={approveWithException} disabled={!!busy || reasonTooShort}>
+            <button type="button" className="px-btn px-btn-yellow" data-qc={GATE_HOOKS.approve} data-qc-kind="exception" onClick={approveWithException} disabled={!!busy || reasonTooShort}>
               {busy === 'override' ? 'Recording...' : 'Record and approve'}
             </button>
           </>
         ) : (
-          <button type="button" className="px-btn px-btn-yellow" onClick={() => { setReasonOpen(true); setActionError(null) }} disabled={!!busy}>{f.label}</button>
+          <button type="button" className="px-btn px-btn-yellow" data-qc={GATE_HOOKS.approve} data-qc-kind="needs-reason" onClick={() => { setReasonOpen(true); setActionError(null) }} disabled={!!busy}>{f.label}</button>
         )
       ) : (
-        <button type="button" className="px-btn px-btn-green" onClick={approve} disabled={f.disabled || !!busy}
-          title={f.disabled ? f.reason : undefined}>
+        <button type="button" className="px-btn px-btn-green" data-qc={GATE_HOOKS.approve} data-qc-kind="approve"
+          onClick={approve} disabled={f.disabled || !!busy} title={f.disabled ? f.reason : undefined}>
           {busy === 'approve' ? 'Approving...' : f.label}
         </button>
       )}
@@ -503,12 +509,17 @@ export default function AssetGateDrawer({
       headerRight={<GateBadge result={result} loading={resultLoading} error={resultError} />}
       footer={footer}
     >
+      {/* One root for the whole drawer body, carrying the state a verifier needs to select on:
+          which tab is showing and which asset it is showing it for. Without it the only way to
+          tell two open drawers apart on the live site is the prose in their headers. */}
+      <div data-qc={GATE_HOOKS.drawer} data-qc-tab={tab} data-qc-asset={artifact.type || 'unknown'}>
+
       {resultError && <Quiet>The gate could not be read: {resultError}</Quiet>}
 
       {/* One reconciled summary, visible on every tab: the same numbers the badge and the footer
           use, plus the split by engine so no finding can appear to go missing between tabs. */}
       {result && (
-        <div className="px-box-soft" style={{ padding: 10, marginBottom: 12 }}>
+        <div className="px-box-soft" data-qc={GATE_HOOKS.summary} style={{ padding: 10, marginBottom: 12 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
             <GateBadge result={result} />
             <span className="px-small" style={{ flex: 1 }}>
@@ -525,7 +536,7 @@ export default function AssetGateDrawer({
             </div>
           )}
           {result.override && (
-            <div className="px-small" style={{ marginTop: 6 }}>
+            <div className="px-small" data-qc={GATE_HOOKS.exception} style={{ marginTop: 6 }}>
               exception recorded by {result.override.by} on {fmtWhen(result.override.at)}: {result.override.reason}
             </div>
           )}
@@ -533,7 +544,7 @@ export default function AssetGateDrawer({
       )}
 
       {problems && (
-        <div className="px-note" style={{ marginBottom: 12 }}>
+        <div className="px-note" data-qc={GATE_HOOKS.disagreement} style={{ marginBottom: 12 }}>
           <b>The gate and its findings do not agree.</b> Showing the server&apos;s decision unchanged rather than
           choosing between them:
           <ul style={{ margin: '4px 0 0 0', paddingLeft: 18 }}>{problems.map((p, i) => <li key={i}>{p}</li>)}</ul>
@@ -543,16 +554,20 @@ export default function AssetGateDrawer({
       <div style={{ display: 'flex', gap: 2, borderBottom: '1px solid var(--proto-rule-soft)', overflowX: 'auto', marginBottom: 12 }}>
         {TABS.map((t) => (
           <div key={t.key} role="button" tabIndex={0} onClick={() => setTab(t.key)}
+            data-qc={GATE_HOOKS.tab} data-qc-tab={t.key} data-qc-active={tab === t.key ? '1' : '0'}
             onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setTab(t.key) } }}
             className={'px-tab ' + (tab === t.key ? 'px-tab-active' : 'px-tab-idle')}>{t.label}</div>
         ))}
       </div>
 
-      {tab === 'blocks' && <BlocksTab data={insertions.data} loading={insertions.loading} error={insertions.error} focusField={focusSection} />}
-      {tab === 'checks' && <ChecksTab result={result} />}
-      {tab === 'compare' && <CompareTab swaps={swaps.data} swapsLoading={swaps.loading} swapsError={swaps.error} insertions={insertions.data} />}
-      {tab === 'review' && <ReviewTab result={result} />}
-      {tab === 'match' && <MatchTab result={result} />}
+      <div data-qc={GATE_HOOKS.panel} data-qc-panel={tab}>
+        {tab === 'blocks' && <BlocksTab data={insertions.data} loading={insertions.loading} error={insertions.error} focusField={focusSection} />}
+        {tab === 'checks' && <ChecksTab result={result} />}
+        {tab === 'compare' && <CompareTab swaps={swaps.data} swapsLoading={swaps.loading} swapsError={swaps.error} insertions={insertions.data} />}
+        {tab === 'review' && <ReviewTab result={result} />}
+        {tab === 'match' && <MatchTab result={result} />}
+      </div>
+      </div>
     </Overlay>
   )
 }

@@ -158,6 +158,32 @@ export function keywordLibraryState(score) {
   }
 }
 
+// ── the keyword list's breakpoint (P8.7) ────────────────────────────────────────────────────────
+// "the ATS list is 2-up >= 1040px and 1-up below". The number lives HERE, and the component reads
+// its column count from keywordColumns() rather than from a CSS media query, for two reasons:
+//   1. one source. A media query in theme.css plus a threshold in a module is two numbers that
+//      have to agree, and nothing would notice the day they stopped.
+//   2. it is assertable. The column count is rendered as `data-qc-cols`, so ui-verify.yml - which
+//      can set a viewport width but can only SELECT, never read a computed style - can prove the
+//      breakpoint with `[data-qc="keyword-columns"][data-qc-cols="2"]`. A media query is invisible
+//      to it.
+// The measured width is the VIEWPORT's, matching the sibling rule in the same backlog item ("the
+// right column is the assistant, docked >= 1440px only"), which is a viewport rule too.
+export const KEYWORD_2UP_MIN = 1040
+
+/** 2 columns at or above the breakpoint, 1 below. An unusable width is 1 - never 0, never NaN. */
+export function keywordColumns(width) {
+  const w = Number(width)
+  return Number.isFinite(w) && w >= KEYWORD_2UP_MIN ? 2 : 1
+}
+
+/** The grid track list for that count. Kept beside the rule so the two cannot describe different
+ *  layouts, and `minmax(0, 1fr)` rather than `1fr` so a long unbroken term cannot widen a column
+ *  past its share and push the card into a horizontal scroll. */
+export function keywordGridTemplate(width) {
+  return keywordColumns(width) === 2 ? 'minmax(0, 1fr) minmax(0, 1fr)' : 'minmax(0, 1fr)'
+}
+
 // ── the posting body on the JD step (AC31) ──────────────────────────────────────────────────────
 // `jdSummary` is opportunity.jd_summary and `why` is opportunity.why_surfaced. BOTH are model
 // output. Neither may appear under a heading that says it is the posting. The employer's own text

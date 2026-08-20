@@ -293,3 +293,54 @@ test('the badge labels fixes and reviews separately — never the total under on
   assert.match(badge, /split\.fix[\s\S]{0,80}to fix/, 'it must render the deterministic count as the fix count')
   assert.match(badge, /split\.review[\s\S]{0,80}to review/, 'and the reviewer count under its own label')
 })
+
+// ── P8.7: the drawer is selectable by CSS ───────────────────────────────────────────────────────
+// It had ZERO `data-qc` hooks while PostingAnalysis.jsx had 24, so every claim P5.3 makes about it
+// was only assertable on the live site by matching body TEXT — which breaks on a copy edit and can
+// never tell two surfaces apart that say the same words. ui-verify.mjs hands COUNT_SEL / CLICK_SEL
+// / MEASURE_SEL straight to querySelector; there is no text-matching escape hatch that is stable.
+import { GATE_HOOKS } from '../src/assetGate.js'
+import { fileURLToPath as gateUrl } from 'node:url'
+
+const GATE_SRC = readFileSync(gateUrl(new URL('../src/screens/AssetGateDrawer.jsx', import.meta.url)), 'utf8')
+const gateStrip = (s) => s.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/(^|[^:])\/\/[^\n]*/g, '$1')
+
+test('every GATE_HOOKS selector is rendered, and the drawer hand-types none of them', () => {
+  for (const [name, value] of Object.entries(GATE_HOOKS)) {
+    assert.ok(GATE_SRC.includes('GATE_HOOKS.' + name),
+      `GATE_HOOKS.${name} ("${value}") is declared but never rendered — a selector that matches nothing`)
+  }
+  const stripped = gateStrip(GATE_SRC)
+  for (const value of Object.values(GATE_HOOKS)) {
+    assert.ok(!new RegExp(`data-qc=["']${value}["']`).test(stripped),
+      `data-qc="${value}" is hand-typed — it must come from GATE_HOOKS so the verifier's selector cannot drift`)
+  }
+  const values = Object.values(GATE_HOOKS)
+  assert.equal(new Set(values).size, values.length, 'two hooks share a value — one selector would match two surfaces')
+})
+
+test('no hook value collides across the three screens that own one', async () => {
+  // A verifier selector is a bare `[data-qc="..."]`; it does not know which screen it is on. Two
+  // screens sharing a value makes every count assertion on either of them ambiguous.
+  const { QC_HOOKS } = await import('../src/qcRail.js')
+  const { BLOCK_HOOKS } = await import('../src/assetBlocks.js')
+  const { PACKET_HOOKS } = await import('../src/packetBuilder.js')
+  const all = [
+    ...Object.values(QC_HOOKS), ...Object.values(GATE_HOOKS),
+    ...Object.values(BLOCK_HOOKS), ...Object.values(PACKET_HOOKS),
+  ]
+  const dupes = all.filter((v, i) => all.indexOf(v) !== i)
+  assert.deepEqual(dupes, [], `hook values used by more than one screen: ${dupes.join(', ')}`)
+})
+
+test('the two counts stay two hooks — a blended one is not addable back by accident', () => {
+  // R4/D6: fixes and reviews are counted AND LABELLED separately. The badge once rendered the
+  // server's combined `counted` as "N to fix"; separate hooks mean a verifier can catch a
+  // regression by selecting each number, not by reading a sentence.
+  assert.notEqual(GATE_HOOKS.toFix, GATE_HOOKS.toReview)
+  const stripped = gateStrip(GATE_SRC)
+  assert.match(stripped, /GATE_HOOKS\.toFix[\s\S]{0,200}split\.fix/)
+  assert.match(stripped, /GATE_HOOKS\.toReview[\s\S]{0,200}split\.review/)
+  assert.ok(!/data-qc-n=\{split\.counted\}/.test(stripped),
+    'the badge is publishing the blended server total as a count of things to fix')
+})

@@ -15,12 +15,32 @@
 // All pure logic (grouping, counts, kind_source split, the library state, the posting-body
 // provenance) lives in ../postingAnalysis.js so it can be tested without a DOM. This file is the
 // rendering only. Stable `data-qc` hooks are on every surface the acceptance criteria name.
-import React, { useState } from 'react'
+import React, { useEffect, useState } from 'react'
 import { Pill, Overlay } from '../shell.jsx'
 import {
   KIND_ABBR, kindSourceNote, noQuoteReason, isQuoted,
   groupRequirements, modelKeywords, summarizeKindSource, keywordLibraryState,
+  keywordColumns, keywordGridTemplate,
 } from '../postingAnalysis.js'
+import { HIGHLIGHT_CLASS } from '../highlight.js'
+
+/**
+ * The viewport width, for the keyword list's 2-up / 1-up rule (P8.7).
+ *
+ * The RULE is not here - keywordColumns() owns it, in a module `node --test` can load. This hook
+ * only reports the width, so the breakpoint itself stays provable without a DOM.
+ */
+function useViewportWidth() {
+  const [w, setW] = useState(() => (typeof window === 'undefined' ? 0 : window.innerWidth))
+  useEffect(() => {
+    if (typeof window === 'undefined') return undefined
+    const onResize = () => setW(window.innerWidth)
+    onResize()
+    window.addEventListener('resize', onResize)
+    return () => window.removeEventListener('resize', onResize)
+  }, [])
+  return w
+}
 
 // Where the user's side of the comparison actually lives, so "the profile" always has a referent.
 export const PROFILE_HREF = '#/settings/facts'
@@ -117,13 +137,21 @@ function KeywordLibraryState({ score }) {
   )
 }
 
+// A keyword with no tone gets the KEYWORD HIGHLIGHT (D11): highlighter yellow, through the shared
+// .qc-kw class rather than a colour typed here. The class carries its own foreground, which is the
+// whole point of the token pair - a background alone leaves the text inheriting --proto-ink, and
+// --proto-ink in dark mode is near-white, on yellow.
+//
+// A TONED chip is a different statement ("flagged as thin"), so it keeps the semantic tokens: the
+// highlight means "this is a keyword", never "this keyword is good or bad".
 function KeywordChips({ items, tone }) {
-  const bg = tone === 'green' ? 'var(--proto-green-soft)' : tone === 'red' ? 'var(--proto-red-soft)' : 'var(--proto-panel)'
-  const fg = tone === 'green' ? 'var(--proto-green)' : tone === 'red' ? 'var(--proto-red)' : 'var(--proto-ink2)'
+  const bg = tone === 'green' ? 'var(--proto-green-soft)' : tone === 'red' ? 'var(--proto-red-soft)' : null
+  const fg = tone === 'green' ? 'var(--proto-green)' : tone === 'red' ? 'var(--proto-red)' : null
   return (
     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, marginTop: 6 }}>
       {items.map((k) => (
-        <span key={k} style={{ fontSize: 11, padding: '3px 8px', borderRadius: 99, background: bg, color: fg, fontWeight: 600 }}>{k}</span>
+        <span key={k} className={bg ? undefined : HIGHLIGHT_CLASS.keyword}
+          style={{ fontSize: 11, padding: '3px 8px', borderRadius: 99, fontWeight: 600, background: bg || undefined, color: fg || undefined }}>{k}</span>
       ))}
     </div>
   )
@@ -133,6 +161,11 @@ function KeywordChips({ items, tone }) {
 // because a bare "(4)" next to anything keyword-shaped reads as a measurement.
 function ModelKeywords({ parsedKeywords, coveredKw, missingKw, gapsScoredAt }) {
   const nothing = !parsedKeywords.length && !coveredKw.length && !missingKw.length
+  // P8.7: the keyword list is 2-up at >= 1040px and 1-up below. The count comes from
+  // keywordColumns() and is RENDERED as data-qc-cols, so the breakpoint is selectable by CSS - a
+  // media query would leave ui-verify.yml, which cannot read a computed style, unable to prove it.
+  const vw = useViewportWidth()
+  const cols = keywordColumns(vw)
   return (
     <div style={{ marginTop: 14 }} data-qc="model-keywords">
       <div style={{ fontSize: 13, fontWeight: 700 }}>Model-inferred words from this posting</div>
@@ -142,8 +175,11 @@ function ModelKeywords({ parsedKeywords, coveredKw, missingKw, gapsScoredAt }) {
         mattered.
       </div>
       {nothing && <div className="px-small" style={{ marginTop: 8, color: 'var(--proto-ink3)' }}>None yet - parse the posting and run the analysis.</div>}
+      <div data-qc="keyword-columns" data-qc-cols={cols} style={{
+        display: 'grid', gridTemplateColumns: keywordGridTemplate(vw), gap: 14, alignItems: 'start',
+      }}>
       {parsedKeywords.length > 0 && (
-        <div style={{ marginTop: 10 }}>
+        <div style={{ marginTop: 10 }} data-qc="keyword-group" data-qc-group="parsed">
           <div className="px-small" style={{ fontWeight: 600 }}>
             From the posting parse, one per extracted line - {parsedKeywords.length} model-suggested
           </div>
@@ -151,7 +187,7 @@ function ModelKeywords({ parsedKeywords, coveredKw, missingKw, gapsScoredAt }) {
         </div>
       )}
       {coveredKw.length > 0 && (
-        <div style={{ marginTop: 10 }}>
+        <div style={{ marginTop: 10 }} data-qc="keyword-group" data-qc-group="from-run">
           <div className="px-small" style={{ fontWeight: 600 }}>
             Terms the analysis run pulled out of the posting - {coveredKw.length} model-suggested
           </div>
@@ -176,7 +212,7 @@ function ModelKeywords({ parsedKeywords, coveredKw, missingKw, gapsScoredAt }) {
         </div>
       )}
       {missingKw.length > 0 ? (
-        <div style={{ marginTop: 10 }}>
+        <div style={{ marginTop: 10 }} data-qc="keyword-group" data-qc-group="thin">
           <div className="px-small" style={{ fontWeight: 600 }}>
             Compared against your profile and flagged as thin - {missingKw.length} model-suggested
           </div>
@@ -185,12 +221,13 @@ function ModelKeywords({ parsedKeywords, coveredKw, missingKw, gapsScoredAt }) {
       ) : (
         // "Scored and found nothing" and "never scored" are different states. Printing an empty
         // list for both is how absent evidence gets read as a pass.
-        <div className="px-small" style={{ marginTop: 10, color: 'var(--proto-ink3)' }}>
+        <div className="px-small" style={{ marginTop: 10, color: 'var(--proto-ink3)' }} data-qc="keyword-group" data-qc-group="thin">
           {gapsScoredAt
             ? 'The gap scorer has run against this posting and flagged nothing as thin.'
             : 'This posting has not been gap-scored yet, so the thin list is unknown, not empty.'}
         </div>
       )}
+      </div>
     </div>
   )
 }

@@ -9,7 +9,11 @@ import React, { useCallback, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import '../../src/theme.css'
 import AssetBlocks from '../../src/screens/AssetBlocks.jsx'
+import { ArtifactCard } from '../../src/screens/PacketBuilder.jsx'
 import { registerListOwners } from '../../src/assetBlocks.js'
+
+// The no-op handlers the card needs. Nothing here is under test - the card's DISCLOSURE is.
+const noop = () => {}
 
 const TYPE_LABEL = { resume: 'Resume', compact_resume: 'Compact resume' }
 
@@ -49,6 +53,15 @@ function Probe() {
           />
         </div>
       ))}
+      {/* The REAL packet-builder card, for the two disclosures that must default OPPOSITE ways:
+          the asset header collapsed (P8.7), the field blocks inside it open (P5). */}
+      <div id="card-artifact">
+        <ArtifactCard
+          a={{ id: 'art-resume', type: 'resume', status: 'review', content: null }}
+          busy={null} setBusy={noop} onGenerate={noop} onSetStatus={noop} onMakeDoc={noop}
+          onMakeSlides={noop} onGenVideo={noop} onArchiveVideo={noop} doc={{}} video={{}}
+          provenance={provenance} listOwners={listOwners} onListsRendered={register} />
+      </div>
     </div>
   )
 }
