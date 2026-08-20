@@ -1588,3 +1588,36 @@ implementation it is writing criteria for.
 
 **Nothing in P5 or P4 may be called done until its verifier reports, and none of it is confirmed live
 until it is on `main` and checked with `ui-verify.yml` / `api-test.yml` / `db-query.yml`.**
+
+
+## ACT — live measurements settling three P4 unknowns (db-query run 32328208553, 2026-08-20)
+
+Read from the job log, not inferred:
+
+```
+review_verdict_exists | check_result_exists | artifact_gate_exists | usage_rows | packet_generate_rows | ai_edit_rows | luna_rows
+                      | check_result        | artifact_gate        |      14693 |                    0 |            0 |         0
+```
+
+**1. `review_verdict` does NOT exist on the live database.** `check_result` and `artifact_gate` do.
+The independent verifier flagged that `appChecks.artifactChecksGet` queried `review_verdict`
+unconditionally, which would 500 a currently-working route for the whole window between deploying P4
+and someone calling `pgMigrate`. That was real, and the tolerant `.catch(() => ({ rows: [] }))` now in
+that query is load-bearing rather than defensive padding.
+
+> **ON MERGE OF P4: call `/api/diag/pg-migrate` immediately after the deploy.** Until it runs, the
+> reviewer has nowhere to write. `EXPECTED_TABLES` already lists `review_verdict`, so the migration
+> reports it.
+
+**2. `packet:*:generate` rows = 0 and `packet:ai-edit` rows = 0, against 14,693 total.** Both were
+ASSERTED in the P4 commit message and flagged there as unverified. They are now measured. Metering
+works everywhere else in the product; those two paths — the production packet build (three OpenAI
+calls per packet, the most expensive operation the product performs) and the AI-edit path — have
+recorded nothing, ever. `logUsage(..., {})` and the Responses-API token-shape mismatch respectively.
+
+**3. `gpt-5.6-luna` rows = 0.** So the 1.33x/2x under-reporting the memory recorded had no rows to
+apply to — there is nothing to reprice retroactively. Cost accrues correctly from the fix forward.
+
+**Method note worth keeping:** the D8 claims sat in a commit message as unverified assertions for
+several commits. One read-only `db-query.yml` dispatch settled all three in about ninety seconds.
+When a claim is about production state, the workflow is cheaper than the hedge.
