@@ -35,8 +35,16 @@ export type KindSource =
   | 'category_default'         // the category's default; the posting asserted neither way
   | 'fallback'                 // unrecognised Category — weakest kind, never a hard requirement
 
-/** Bump when the extraction rules change, so rows made under old rules are identifiable. */
-export const EXTRACTOR_VERSION = 1
+/**
+ * Bump when the extraction rules change, so rows made under old rules are identifiable.
+ *
+ * 2 — the exact branch of `locate` used to index a lower-cased COPY of the posting. Every row
+ * extracted at version 1 from a posting containing a character whose lowercase is longer than
+ * itself carries offsets shifted by that difference, and a `verbatim` that is a true substring of
+ * the posting at the wrong place. Re-extraction is what fixes those rows; the version is how they
+ * are found.
+ */
+export const EXTRACTOR_VERSION = 2
 
 export interface JdTableRow { category: string; item: string; keyword: string }
 
@@ -260,13 +268,23 @@ export function locate(paraphrase: string, postingText: string, taken: Span[] = 
   if (!paraphrase || !postingText) return miss
 
   // 1. exact — scan every occurrence, take the first not already claimed.
+  //
+  // Searched case-insensitively over the ORIGINAL string, never over a lower-cased copy.
+  // `toLowerCase()` is not length-preserving — U+0130 (Turkish dotted I) lowercases to TWO code
+  // units — so an index into the copy is not an index into the original, and every such character
+  // before a match shifts the recorded offset. Measured: a record beginning "İİİİİ Resideo. led
+  // the platform modernization ..." returned char_start 20 for a phrase that starts at 15, so the
+  // stored quote had "led t" cut off its front and " and " glued on its end. It was still a true
+  // substring of the record at the offsets recorded, which is why no substring guard could catch
+  // it — the excerpt was simply the wrong five characters. `m.index` and `m[0].length` are
+  // measured on the original, so the span is correct by construction.
   const needle = paraphrase.trim().replace(/[.;:,]+$/, '')
   if (needle.length >= 8) {
-    const hay = postingText.toLowerCase()
-    const nee = needle.toLowerCase()
-    for (let i = hay.indexOf(nee); i >= 0; i = hay.indexOf(nee, i + 1)) {
-      const span = { start: i, end: i + needle.length }
-      if (overlaps(span, taken)) continue
+    const re = new RegExp(needle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi')
+    let m: RegExpExecArray | null
+    while ((m = re.exec(postingText)) !== null) {
+      const span = { start: m.index, end: m.index + m[0].length }
+      if (overlaps(span, taken)) { re.lastIndex = m.index + 1; continue }
       return { verbatim: postingText.slice(span.start, span.end), char_start: span.start, char_end: span.end, match_method: 'exact' }
     }
   }

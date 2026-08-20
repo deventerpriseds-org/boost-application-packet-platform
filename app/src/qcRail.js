@@ -492,6 +492,39 @@ export function openSeqs(entries, checkKey) {
   return { measured, open: open === null ? null : [...open].sort((a, b) => a - b), reason }
 }
 
+/**
+ * Seqs the deterministic engine deliberately did NOT judge for coverage.
+ *
+ * P8.3 / C6 moved `must_have_coverage`'s denominator to the rows it actually judges — it excludes
+ * requirements no generated merge field can carry (`template_reach`) and requirements waiting on an
+ * unconfirmed owner fact (`facts_needed`). This card was left counting `total - |offenders|` over
+ * EVERY row of the kind, which credits every excluded row as closed. On the live Trinnex shape that
+ * printed "3 of 4 closed" — 75%, from three rows nothing measured — while the check beside it said
+ * 0/1. It is the same arithmetic, and the same three rows, as the defect H28 removed from the
+ * server; applying that fix only where the H-case looked would have left it on screen.
+ *
+ * Read off the SAME offender contract (`#<seq> …`) and the same run as the coverage check, so the
+ * two cannot describe different populations. A row excluded here is `unmeasured`, never `closed`:
+ * "nothing measured this" and "this is fine" are different statements.
+ *
+ * `facts_settled` is deliberately NOT in this list. A must-have the owner's confirmed facts SATISFY
+ * is answered — closed is the truthful state for it.
+ */
+export const UNJUDGED_CHECKS = ['template_reach', 'facts_needed', 'fact_shortfall']
+
+export function unjudgedSeqs(entries) {
+  const out = new Set()
+  for (const e of arr(entries)) {
+    const rows = engineRows(e && e.result, 'deterministic')
+    for (const key of UNJUDGED_CHECKS) {
+      const row = rows.find((r) => r && r.check_key === key)
+      if (!row) continue
+      for (const n of arr(row.offenders).map(offenderSeq)) if (n !== null) out.add(n)
+    }
+  }
+  return out
+}
+
 export function coverageCards(requirements, entries) {
   const rows = arr(requirements)
   return COVERAGE_KINDS.map((k) => {
@@ -516,13 +549,30 @@ export function coverageCards(requirements, entries) {
         source: reason || 'no asset in this packet has run the checks, so coverage is unknown - not zero',
       }
     }
-    const openHere = mine.filter((r) => open.includes(Number(r.seq)))
-    const closed = total - openHere.length
+    // Only the rows the engine judged are in the ratio. `total` is the JUDGED population, so the
+    // card and the `must_have_coverage` check print the same denominator; `classTotal` keeps the
+    // size of the class so the excluded rows are visible rather than absorbed.
+    const unjudged = unjudgedSeqs(entries)
+    const judged = mine.filter((r) => !unjudged.has(Number(r.seq)))
+    const unjudgedHere = mine.filter((r) => unjudged.has(Number(r.seq)))
+    const openHere = judged.filter((r) => open.includes(Number(r.seq)))
+    const closed = judged.length - openHere.length
+    if (!judged.length) {
+      return {
+        key: k.key, label: k.label, total: 0, classTotal: total, closed: null, rows: mine,
+        unjudgedSeqs: unjudgedHere.map((r) => Number(r.seq)), empty: false, note: 'not measured',
+        source: 'all ' + total + ' line(s) of this class were excluded from the coverage question - '
+          + 'nothing measured them, which is not the same as covering them',
+      }
+    }
     return {
-      key: k.key, label: k.label, total, closed, rows: mine, empty: false, note: '',
+      key: k.key, label: k.label, total: judged.length, classTotal: total, closed, rows: mine,
+      empty: false, note: '',
       openSeqs: openHere.map((r) => Number(r.seq)),
-      source: closed + ' of ' + total + ' closed by at least one asset in this packet, measured by '
-        + k.check.replace(/_/g, ' ') + ' across ' + measured + ' asset(s)',
+      unjudgedSeqs: unjudgedHere.map((r) => Number(r.seq)),
+      source: closed + ' of ' + judged.length + ' closed by at least one asset in this packet, measured by '
+        + k.check.replace(/_/g, ' ') + ' across ' + measured + ' asset(s)'
+        + (unjudgedHere.length ? ' (' + unjudgedHere.length + ' more not judged either way)' : ''),
     }
   })
 }
@@ -530,7 +580,11 @@ export function coverageCards(requirements, entries) {
 /** Is one requirement row still open, per the cards above? Unknown stays unknown. */
 export function requirementState(card, row) {
   if (!card || card.closed === null) return { state: 'unmeasured', tone: 'panel', label: 'not measured' }
-  return arr(card.openSeqs).includes(Number(row && row.seq))
+  const seq = Number(row && row.seq)
+  // A row the engine excluded from the coverage question is UNMEASURED. Falling through to the
+  // green `closed` below is how three rows nothing looked at rendered as covered on this screen.
+  if (arr(card.unjudgedSeqs).includes(seq)) return { state: 'unmeasured', tone: 'panel', label: 'not measured' }
+  return arr(card.openSeqs).includes(seq)
     ? { state: 'open', tone: 'red', label: 'open' }
     : { state: 'closed', tone: 'green', label: 'closed' }
 }

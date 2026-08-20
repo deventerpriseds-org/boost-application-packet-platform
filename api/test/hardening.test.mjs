@@ -95,6 +95,14 @@ test('H4b: no accusation-grade check reaches for similarity()', () => {
   const accusing = checks.slice(checks.indexOf('const covers ='))
   assert.ok(!/\bsimilarity\(/.test(accusing),
     'coverage decides a gate; it must not be decided by a ranking heuristic')
+
+  // P8.3 moved the coverage numerator into `evidence.ts`, so the accusation moved with it. The
+  // module's own header makes "fuzzy for RANKING, never for ACCUSING" its central claim; without
+  // this line nothing stopped `similarity()` — which H4 shows rates "Skill number 0" and "Skill
+  // number 3" above 0.9 — from being wired into the path that decides whether a candidate's
+  // requirement is evidenced. Found absent by the independent verifier of P8.3.
+  assert.ok(!/\bsimilarity\(/.test(stripComments(src('evidence.ts'))),
+    'evidence decides coverage, which decides the gate; it must not be decided by a ranking heuristic')
 })
 
 // ---------------------------------------------------------------------------------------------
@@ -908,4 +916,54 @@ test('H31: a requirement too short to measure is never reported as missing from 
 
   // And the reason really is the token floor — the same one `covers()` publishes.
   assert.ok(itemTokens('Experience in leading technology operations').length < MIN_JUDGEABLE_TOKENS)
+})
+
+// ---------------------------------------------------------------------------------------------
+// H32 — A quote can be a TRUE SUBSTRING at the offsets recorded and still be the wrong five
+// characters, because `toLowerCase()` is not length-preserving.
+//
+// `locate`'s exact branch searched `postingText.toLowerCase()` and used the index into that COPY as
+// an offset into the ORIGINAL. U+0130 (Turkish dotted capital I) lowercases to two code units, so
+// every one of them before a match shifts the recorded offset by one.
+//
+// Measured, found by the independent verifier of P8.3 with a record beginning
+// "İİİİİ Resideo. led the platform modernization programme across four product lines and more.":
+//     orig len 91, lower len 96
+//     locate -> char_start 20, char_end 86     (the phrase actually begins at 15)
+//     verbatim = "he platform modernization programme across four product lines and "
+// "led t" cut off the front, " and " glued on the end — and `s.slice(20, 86) === verbatim` is TRUE,
+// so every substring guard in the codebase passes it. It cleared MIN_QUOTE_CHARS, MIN_QUOTE_WORDS
+// and the 0.7 ratio. `toBmp` does not help: U+0130 is BMP.
+//
+// It matters twice over. It has always been live on `requirement.verbatim`, where it garbles the
+// employer's words; P8.3 points the same function at the candidate's own profile, where a garbled
+// "your own words" is the worse failure of the two.
+//
+// The invariant: an offset is measured on the string it indexes. A case-insensitive search runs
+// over the ORIGINAL — `m.index` and `m[0].length` are the original's — never over a folded copy,
+// because no case fold is guaranteed to preserve length.
+test('H32: an offset is measured on the string it indexes, never on a folded copy', () => {
+  const phrase = 'led the platform modernization programme across four product lines'
+  // One case-expanding character per prefix length, so a shifted offset is off by exactly that many.
+  for (const pad of ['', 'İ', 'İİ', 'İİİİİ', 'ẞ', 'ﬁﬁﬁ']) {
+    const text = `${pad} Resideo. ${phrase} and more.`
+    const truth = text.indexOf(phrase)
+    const r = locate(phrase, text)
+    assert.equal(r.char_start, truth, `pad ${JSON.stringify(pad)}: offset drifted with the fold`)
+    assert.equal(r.verbatim, phrase, `pad ${JSON.stringify(pad)}: the excerpt is the wrong characters`)
+    // The substring property held even when it was WRONG — which is why it cannot be the only test.
+    assert.equal(text.slice(r.char_start, r.char_end), r.verbatim)
+  }
+
+  // And the search is still case-insensitive, which is what the fold was there for.
+  const upper = 'RESIDEO. LED THE PLATFORM MODERNIZATION PROGRAMME ACROSS FOUR PRODUCT LINES and more.'
+  const u = locate(phrase, upper)
+  assert.equal(u.match_method, 'exact')
+  assert.equal(upper.slice(u.char_start, u.char_end), u.verbatim)
+  assert.equal(u.verbatim.toLowerCase(), phrase.toLowerCase())
+
+  // Structural: the folded-copy search must not come back. Nothing above would notice on ASCII.
+  const body = stripComments(src('requirements.ts'))
+  assert.ok(!/postingText\.toLowerCase\(\)/.test(body),
+    'the exact branch indexed a lower-cased copy again')
 })

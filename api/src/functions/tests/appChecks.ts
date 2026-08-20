@@ -36,14 +36,17 @@ export async function ensureCheckPrefs(client: any) {
       add column if not exists chk_relevant_allowance   int not null default ${DEFAULT_THRESHOLDS.relevantOverLimitAllowance},
       add column if not exists chk_expertise_words      int not null default ${DEFAULT_THRESHOLDS.expertiseWords},
       add column if not exists chk_cover_words_min      int not null default ${DEFAULT_THRESHOLDS.coverWords[0]},
-      add column if not exists chk_cover_words_max      int not null default ${DEFAULT_THRESHOLDS.coverWords[1]}`)
+      add column if not exists chk_cover_words_max      int not null default ${DEFAULT_THRESHOLDS.coverWords[1]},
+      add column if not exists chk_evidence_threshold   numeric not null default ${DEFAULT_THRESHOLDS.evidenceThreshold},
+      add column if not exists chk_evidence_min_tokens  int not null default ${DEFAULT_THRESHOLDS.evidenceMinTokens}`)
 }
 
 export async function loadThresholds(client: any, owner: string): Promise<Partial<CheckThresholds>> {
   await ensureCheckPrefs(client)
   const r = (await client.query(
     `select chk_skill_max_chars, chk_skills_total_min, chk_skills_total_max, chk_relevant_max_chars,
-            chk_relevant_allowance, chk_expertise_words, chk_cover_words_min, chk_cover_words_max
+            chk_relevant_allowance, chk_expertise_words, chk_cover_words_min, chk_cover_words_max,
+            chk_evidence_threshold, chk_evidence_min_tokens
        from owner_search_prefs where owner_email=$1`, [owner])).rows[0]
   if (!r) return {}
   return {
@@ -54,6 +57,8 @@ export async function loadThresholds(client: any, owner: string): Promise<Partia
     relevantOverLimitAllowance: r.chk_relevant_allowance,
     expertiseWords: r.chk_expertise_words,
     coverWords: [r.chk_cover_words_min, r.chk_cover_words_max],
+    evidenceThreshold: r.chk_evidence_threshold === null ? undefined : Number(r.chk_evidence_threshold),
+    evidenceMinTokens: r.chk_evidence_min_tokens ?? undefined,
   }
 }
 
@@ -96,8 +101,15 @@ export async function evaluateArtifact(client: any, artifactId: string, owner: s
   // empty profile would produce zero evidence rows for every requirement, and zero rows presented as
   // a measurement is the "0% covered" that means "we did not look".
   await ensureEvidenceTable(client)
+  const thresholds = await loadThresholds(client, owner || art.owner_email)
   if (profileRead.records.length) {
-    await writeEvidence(client, art.opp_id, profileRead.records)
+    // The owner's thresholds reach the RESOLVER, not just the checks. `writeEvidence` used to be
+    // called with no options, so `ResolveOptions` was overridable in principle and fixed in
+    // production — which is the no-hardcoded-config rule broken with a settings hook attached.
+    await writeEvidence(client, art.opp_id, profileRead.records, {
+      threshold: thresholds.evidenceThreshold,
+      minTokens: thresholds.evidenceMinTokens,
+    })
   }
   const requirements = await loadRequirementsWithEvidence(client, art.opp_id)
   const evidence: EvidenceInput = {
@@ -109,11 +121,15 @@ export async function evaluateArtifact(client: any, artifactId: string, owner: s
       source_key: r.evidence_source_key,
       char_start: r.evidence_char_start,
       char_end: r.evidence_char_end,
-      extra: null,
+      // The REAL stored values. These were being synthesized — `extra: null`, `record_sha256: ''`,
+      // `resolver_version: 0` — while the columns sat in the row already selected. Inert today
+      // because nothing downstream reads them, and one edit away from a digest field holding a
+      // value no digest produced.
+      extra: r.evidence_extra,
       ratio: r.evidence_ratio === null ? 0 : Number(r.evidence_ratio),
       method: r.evidence_method,
-      record_sha256: '',
-      resolver_version: 0,
+      record_sha256: r.evidence_record_sha256,
+      resolver_version: r.evidence_resolver_version,
     } as EvidenceRow)])),
   }
 
@@ -127,7 +143,7 @@ export async function evaluateArtifact(client: any, artifactId: string, owner: s
     profileText: profile,
     evidence,
     facts: await loadFacts(client, owner || art.owner_email),
-    thresholds: await loadThresholds(client, owner || art.owner_email),
+    thresholds,
   })
 
   const runId = randomUUID()

@@ -1463,6 +1463,7 @@ Coverage is no longer "did the generated document repeat enough of the requireme
   coverage. It is also what keeps P2.3's per-asset score per-asset once coverage becomes
   opportunity-level.
 
-**H28, H29, H30, H31** in `api/test/hardening.test.mjs`; all four proved by reverting the fix.
+**H28, H29, H30, H31, H32** in `api/test/hardening.test.mjs`; all five proved by reverting the fix.
+H32 came from the independent verifier (`docs/qc-evidence/VERIFY-P8.3.md`), as did the qcRail fix.
 (Renumbered from H27-H30 on merge: `main` had already taken H26 and H27, and H26 asserts one-ID-one-case.)
 316/316 api tests, app builds clean.

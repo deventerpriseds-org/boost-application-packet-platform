@@ -23,7 +23,7 @@ import { mergeFieldsFor } from './insertions'
 import { normalizePostingText } from './jdText'
 import { checkAgainstFacts, OwnerFact } from './ownerFacts'
 import { scanEcho } from './figureEcho'
-import { EvidenceInput, NO_EVIDENCE_NOTE } from './evidence'
+import { EvidenceInput, NO_EVIDENCE_NOTE, EVIDENCE_THRESHOLD, MIN_JUDGEABLE_TOKENS as EVIDENCE_MIN_TOKENS } from './evidence'
 
 export type CheckState = 'pass' | 'warn' | 'fail' | 'not_applicable'
 export type CheckEngine = 'deterministic' | 'reviewer'
@@ -51,6 +51,14 @@ export interface CheckThresholds {
   execProfileWords: [number, number]
   coreAccomplishmentsWords: [number, number]
   coverWords: [number, number]
+  /**
+   * P8.3 — how much of a requirement a profile excerpt must account for before it evidences it,
+   * and how short an excerpt may be. They decide whether a candidate's requirement counts as
+   * covered, which makes them exactly the kind of value this interface exists to keep out of the
+   * code: the same seeded-default-then-owner-overridable rule as every threshold above it.
+   */
+  evidenceThreshold: number
+  evidenceMinTokens: number
 }
 
 /** Seeded first values, taken from the live prompt. The owner can change every one of them. */
@@ -67,6 +75,8 @@ export const DEFAULT_THRESHOLDS: CheckThresholds = {
   execProfileWords: [50, 55],
   coreAccomplishmentsWords: [98, 125],
   coverWords: [250, 400],
+  evidenceThreshold: EVIDENCE_THRESHOLD,
+  evidenceMinTokens: EVIDENCE_MIN_TOKENS,
 }
 
 // Phrases and punctuation that read as machine-written. Kept as data so they can move to the

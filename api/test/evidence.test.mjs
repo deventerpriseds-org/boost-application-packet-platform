@@ -14,7 +14,7 @@ import {
   EVIDENCE_THRESHOLD, MIN_JUDGEABLE_TOKENS, RESOLVER_VERSION, NO_EVIDENCE_NOTE, MC_KIND,
 } from '../dist/functions/tests/evidence.js'
 import { MIN_QUOTE_CHARS, MIN_QUOTE_WORDS } from '../dist/functions/tests/reviewer.js'
-import { runChecks } from '../dist/functions/tests/checks.js'
+import { runChecks, DEFAULT_THRESHOLDS } from '../dist/functions/tests/checks.js'
 
 const MC = {
   partitionKey: 'context', rowKey: '1', etag: 'W/"x"', timestamp: '2026-01-01',
@@ -267,4 +267,28 @@ test('the denominator moves ONLY where a row was being credited that nothing mea
     mh(4, 'Ability to manage remote engineering teams'),
   ]
   assert.equal(run(live), 4, 'the live Trinnex shape: 5 must-haves, 1 unreachable, 4 judged')
+})
+
+// ------------------------------------------------------------------ the thresholds have an owner
+
+test('the evidence thresholds are seeded defaults with a real owner path, not constants', () => {
+  // They decide whether a candidate's requirement counts as evidenced, so CLAUDE.md's
+  // no-hardcoded-config rule applies to them exactly as it does to every threshold in checks.ts.
+  // `ResolveOptions` being overridable in principle while every shipped caller passed the literal
+  // is that rule broken with a settings hook attached — found by the independent verifier (D-F).
+  assert.equal(DEFAULT_THRESHOLDS.evidenceThreshold, EVIDENCE_THRESHOLD)
+  assert.equal(DEFAULT_THRESHOLDS.evidenceMinTokens, MIN_JUDGEABLE_TOKENS)
+
+  // The production caller passes them through, and the store column exists to hold them.
+  const appChecks = readFileSync(new URL('../src/functions/tests/appChecks.ts', import.meta.url), 'utf8')
+  assert.match(appChecks, /chk_evidence_threshold/, 'no per-owner column, no owner path')
+  assert.match(appChecks, /chk_evidence_min_tokens/)
+  assert.match(appChecks, /writeEvidence\([\s\S]{0,200}threshold: thresholds\.evidenceThreshold/,
+    'the resolver must receive the owner value, not just the checks')
+
+  // And an owner value actually changes the answer.
+  const recs = profileRecords(MC, TEMPLATE)
+  const req = 'Owned the digital water technology roadmap with Product across three business units'
+  assert.equal(resolveEvidence(req, recs, { threshold: 0.99 }), null)
+  assert.ok(resolveEvidence(req, recs, { threshold: 0.4 }))
 })
