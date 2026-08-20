@@ -3,6 +3,7 @@ import { useApp, go, useIsMobile } from '../state.jsx'
 import { api } from '../api.js'
 import { Pill } from '../shell.jsx'
 import { Loading, ErrorBox } from './Today.jsx'
+import AssetBlocks, { useAssetProvenance } from './AssetBlocks.jsx'
 
 const TYPE_LABEL = {
   resume: 'Resume', compact_resume: 'Compact resume', cover: 'Cover letter',
@@ -53,8 +54,7 @@ function stepDone(key, p, artifacts) {
   })
 }
 
-function ArtifactCard({ a, busy, setBusy, onGenerate, onSetStatus, onMakeDoc, onMakeSlides, onGenVideo, onArchiveVideo, doc, video }) {
-  const [open, setOpen] = useState(false)
+function ArtifactCard({ a, busy, setBusy, onGenerate, onSetStatus, onMakeDoc, onMakeSlides, onGenVideo, onArchiveVideo, doc, video, provenance }) {
   const v = video[a.id] || {}
   const d = doc[a.id] || {}
   const videoUrl = v.url || a.docUrl
@@ -70,17 +70,11 @@ function ArtifactCard({ a, busy, setBusy, onGenerate, onSetStatus, onMakeDoc, on
         <Pill tone={STATUS_TONE[a.status]}>{a.status}</Pill>
       </div>
 
-      {a.content && (
-        <div>
-          <span className="px-link" style={{ fontSize: 12 }} onClick={() => setOpen((x) => !x)}>
-            {open ? '▾ Hide draft' : '▸ View draft'}
-          </span>
-          {open && (
-            <div className="px-box" style={{ padding: 10, marginTop: 6, fontSize: 12, lineHeight: 1.6, whiteSpace: 'pre-wrap', maxHeight: 320, overflow: 'auto', background: 'var(--proto-panel)' }}>
-              {a.content}
-            </div>
-          )}
-        </div>
+      {/* P5.2 — the draft is the point of the screen, so it renders OPEN, one card per merge field,
+          with the provenance for that field beside it. It replaced a collapsed `content` dump that
+          could not distinguish generated text from static template text. */}
+      {(a.status !== 'todo' || a.content) && (
+        <AssetBlocks artifact={a} provenance={provenance} fallback={a.content} />
       )}
 
       {/* Video */}
@@ -177,6 +171,11 @@ export default function PacketBuilder({ id, step }) {
   }
   const [atsOpen, setAtsOpen] = useState(false)
   const pollers = useRef({})
+  // Requirements and swaps are scoped to the OPPORTUNITY and the PACKET, not to one artifact, so
+  // they are loaded once here and handed down. Loading them inside each card would issue the same
+  // two requests for the resume and the compact resume (one packet, identical merge fields) and let
+  // the two cards disagree if one call failed. Hooks run before the loading/error returns below.
+  const provenance = useAssetProvenance(id, pState.packet ? pState.packet.id : null)
 
   const load = useCallback(async () => {
     try {
@@ -422,7 +421,7 @@ export default function PacketBuilder({ id, step }) {
                 onGenerate={generate} onSetStatus={setStatus}
                 onMakeDoc={makeDoc} onMakeSlides={makeSlides}
                 onGenVideo={genVideo} onArchiveVideo={archiveVideo}
-                doc={doc} video={video} />
+                doc={doc} video={video} provenance={provenance} />
             ))}
             {nextStep && (
               <div style={{ display: 'flex', justifyContent: 'flex-end' }}>

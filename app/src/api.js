@@ -123,6 +123,12 @@ export const api = {
   atsSourceDelete: (id) => post(`/app/ats/sources/delete`, { id }),
   atsPreview: (provider, board) => post(`/app/ats/preview`, { provider, board }),
   atsIngest: (opts = {}) => post(`/app/ats/ingest`, opts),
+  // QC evidence reads (P5.2 asset blocks). All three are owner-scoped server-side (resolveOwner →
+  // `where o.owner_email = $2`), so they MUST carry ?owner= or they resolve to the demo owner and
+  // 404 on the real owner's rows — the same trap that bit listPersonas.
+  artifactInsertions: (artifactId) => get(`/app/artifact/${artifactId}/insertions?owner=${encodeURIComponent(_owner)}`),
+  packetSwaps: (packetId) => get(`/app/packet/${packetId}/swaps?owner=${encodeURIComponent(_owner)}`),
+  oppRequirements: (oppId) => get(`/app/opportunity/${oppId}/requirements?owner=${encodeURIComponent(_owner)}`),
   generateArtifact: (artifactId) => post(`/app/artifact/${artifactId}/generate`, {}),
   setArtifactStatus: (artifactId, status) => post(`/app/artifact/${artifactId}/status`, { status }),
   generateArtifactDocument: (artifactId) => post(`/app/artifact/${artifactId}/document`, {}),
