@@ -7,6 +7,7 @@
 // re-read. Everything else is a document repeating words back at itself.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 
 import {
   profileRecords, resolveEvidence, resolveAll, toCheckInput,
@@ -215,4 +216,22 @@ test('the "#<seq> ..." offender prefix survives the numerator change', () => {
   const parse = o => { const m = /^#(\d+)\b/.exec(String(o).trim()); return m ? Number(m[1]) : null }
   assert.deepEqual(cov.offenders.map(parse).sort((a, b) => a - b), [3, 30])
   for (const o of cov.offenders) assert.match(o, /no evidence found in your profile$/)
+})
+
+// ------------------------------------------------------------------ one membership rule
+
+test('there is ONE rule for what counts as the profile, and it lives in profileRecords', () => {
+  // `sourceText()` used to apply its own filter to build `text` and hand a second, slightly
+  // different one to `profileRecords` — they disagreed on whitespace-only fields, and `records` were
+  // astral-stripped for offset safety while `text` was not. Two rules for "what is the profile" is
+  // two profiles, and an offset measured against one is meaningless against the other.
+  //
+  // Structural, because a runtime test cannot reach the Azure table this reads.
+  const body = readFileSync(new URL('../src/functions/tests/appFacts.ts', import.meta.url), 'utf8')
+  const fn = body.slice(body.indexOf('export async function sourceText'), body.indexOf('// POST /api/app/qc/facts/derive'))
+  const code = fn.split('\n').map(l => l.replace(/(^|[^:])\/\/.*$/, '$1')).join('\n')
+  assert.ok(/records\.map\(r => r\.text\)\.join/.test(code),
+    'text must be the records joined, so the two cannot describe different profiles')
+  assert.ok(!/itemsToOmit/.test(code),
+    'a second copy of the exclusion rule in sourceText is how the two filters drifted the first time')
 })

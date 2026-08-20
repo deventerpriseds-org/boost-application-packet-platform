@@ -1394,7 +1394,10 @@ Coverage is no longer "did the generated document repeat enough of the requireme
   profile into NAMED records; `resolveEvidence()` finds the excerpt and guarantees it is exactly
   `record.text.slice(char_start, char_end)`. Reuses `requirements.locate()` and `swaps.itemTokens()`
   rather than growing a second matcher.
-- `appFacts.sourceText()` now returns `{ text, sources, records }` — still the ONLY profile reader.
+- `appFacts.sourceText()` now returns `{ text, sources, records }` — still the ONLY profile reader,
+  and `text` is now the RECORDS JOINED. It used to apply a second, slightly different filter of its
+  own; two rules for "what is the profile" is two profiles, and an offset into one is meaningless
+  against the other.
 - `requirement_evidence` table (in SCHEMA_SQL + EXPECTED_TABLES; H11 extended). NOT columns on
   `requirement`, and nothing writes `requirement.coverage` — that column already means "could not be
   located in the POSTING" and merging a second population into it makes both unreadable.
