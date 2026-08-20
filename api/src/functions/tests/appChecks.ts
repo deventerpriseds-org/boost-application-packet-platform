@@ -9,8 +9,9 @@ import { resolveOwner, requireWrite } from './appSession'
 import { getPgClient } from './pgClient'
 import { runChecks, gateFor, attentionCount, CheckResult, CheckThresholds, DEFAULT_THRESHOLDS } from './checks'
 import { computeArtifactScore, ArtifactScore } from './artifactScore'
-import { loadFacts } from './appFacts'
+import { loadFacts, sourceText } from './appFacts'
 import { shapeVerdict } from './appReviewer'
+import { resolvePostingSource } from './jdText'
 
 const HEADERS = { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': '*', 'Access-Control-Allow-Methods': 'GET,POST,OPTIONS' }
 
@@ -65,7 +66,8 @@ export async function evaluateArtifact(client: any, artifactId: string, owner: s
   artifact_id: string; run_id: string; gate: string; attention: number; results: CheckResult[]; score: ArtifactScore
 }> {
   const art = (await client.query(
-    `select a.id, a.type, a.packet_id, p.opp_id, p.pkg_json, o.company, o.owner_email
+    `select a.id, a.type, a.packet_id, p.opp_id, p.pkg_json, o.company, o.owner_email,
+            o.jd_real, o.raw_jd, o.why_surfaced
        from artifact a join packet p on p.id = a.packet_id join opportunity o on o.id = p.opp_id
       where a.id = $1`, [artifactId])).rows[0]
   if (!art) throw new Error('artifact not found')
@@ -75,12 +77,23 @@ export async function evaluateArtifact(client: any, artifactId: string, owner: s
   const swaps = (await client.query(
     `select action, driver, to_label, from_label from swap_decision where packet_id=$1`, [art.packet_id])).rows
 
+  // R3 needs BOTH sides or it must not judge. The posting side is the employer's own text —
+  // `resolvePostingSource`, never `groundingText`, which falls back to `jd_summary` and would have
+  // the check accuse a candidate of echoing OUR OWN model's summary. The profile side is the same
+  // reader the fact deriver uses, so "what the candidate owns" has exactly one answer; if it is
+  // unreadable the check reports not_applicable rather than treating an empty profile as proof the
+  // candidate owns nothing, which would flag every figure they legitimately hold.
+  const posting = resolvePostingSource(art)
+  const profile = await sourceText().then(r => r.text).catch(() => '')
+
   const results = runChecks({
     type: art.type,
     pkg: art.pkg_json || {},
     company: art.company,
     requirements,
     swaps,
+    postingText: posting.text,
+    profileText: profile,
     facts: await loadFacts(client, owner || art.owner_email),
     thresholds: await loadThresholds(client, owner || art.owner_email),
   })

@@ -23,6 +23,7 @@ import { computeArtifactScore } from '../dist/functions/tests/artifactScore.js'
 import { deriveFacts } from '../dist/functions/tests/ownerFacts.js'
 import { parseResumePackage } from '../dist/functions/tests/resumeParser.js'
 import { validateCitations, reviewerChecks } from '../dist/functions/tests/reviewer.js'
+import { extractFigures, scanEcho, claimKey, isMarked } from '../dist/functions/tests/figureEcho.js'
 
 const SRC = new URL('../src/functions/tests/', import.meta.url).pathname
 const src = (f) => readFileSync(join(SRC, f), 'utf8')
@@ -518,4 +519,119 @@ test('H23: a section never contributes text to a field it does not title', () =>
     .filter(([f, body]) => /parts\[i \+ 1\]/.test(stripComments(body)))
     .map(([f]) => f)
   assert.deepEqual(offenders, [], 'the positional pair-walk is back in a section parser')
+})
+
+// ---------------------------------------------------------------------------------------------
+// H24 — A scanner reported a figure that does not appear in the text it scanned.
+//
+// `extractFigures('40% growth')` returned exactly one figure: `{raw:'4', key:'num:4'}`. Two defects
+// composed, and each one alone was survivable:
+//   (a) `/(\d[\d,]*(?:\.\d+)?)\s*(%|percent)\b/` never matches "40% growth" at all. `%` is a
+//       non-word character and so is the space after it, so the trailing `\b` has no boundary to
+//       sit on. The percent scanner was dead code against the commonest way to write a percentage.
+//   (b) the bare-count scanner ended in `(?!\s*(?:%|percent))`. A TAIL THAT CAN FAIL IS A TAIL THE
+//       ENGINE BACKTRACKS PAST: refused "40" because of the `%`, it retried with "4", found "0%"
+//       after it, and the lookahead was satisfied. The number four was never in the sentence.
+//
+// This is accusation-grade output — R3 names the figure a candidate supposedly stole from the
+// posting. A phantom figure means accusing a resume of echoing a number neither document contains,
+// which is the cry-wolf failure hardening rule 2 exists to forbid.
+//
+// The invariant is not "fix the percent regex". It is that a scanner may only report substrings it
+// actually found: every figure must be exactly the text at its own span, and no two figures may
+// claim overlapping ground — because a figure counted twice is a second way to invent one.
+test('H24: a figure scanner only ever reports text that is actually there', () => {
+  const corpus = [
+    'Manage a $18M portfolio across three business units, 60+ direct reports, 40% growth.',
+    'Drive 12.5% margin improvement over 1,200 accounts and $400k of tooling spend.',
+    '400+ industrial operators, sixty sites, one million monthly users, 99.9% uptime.',
+    'Own a $2.5B P&L. Reduce cost 30 percent. Ship 4 releases a quarter.',
+    'A million things to fix, hundreds of thousands of rows, no numbers at all here.',
+    '',
+  ]
+  for (const text of corpus) {
+    const figs = extractFigures(text)
+    for (const f of figs) {
+      assert.equal(text.slice(f.start, f.end), f.raw,
+        `reported ${JSON.stringify(f.raw)} but the text at [${f.start},${f.end}) is ` +
+        `${JSON.stringify(text.slice(f.start, f.end))} — in: ${text}`)
+      assert.ok(text.includes(f.raw), `${JSON.stringify(f.raw)} is not in: ${text}`)
+    }
+    for (let i = 1; i < figs.length; i++) {
+      assert.ok(figs[i].start >= figs[i - 1].end,
+        `${figs[i - 1].raw} and ${figs[i].raw} overlap — one figure counted twice in: ${text}`)
+    }
+  }
+  // The exact incident, pinned: 40% is a rate, and there is no four.
+  assert.deepEqual(extractFigures('40% growth').map(f => f.raw), ['40%'])
+  assert.equal(extractFigures('40% growth').filter(f => f.kind === 'count').length, 0)
+
+  // And the structural half — no scanner in this layer may end a pattern in a failing lookahead
+  // over the SAME characters it is trying to skip. Use a span/overlap guard instead, which cannot
+  // backtrack because there is nothing left to backtrack into.
+  // This half is a SOURCE rule because the runtime cannot see the defect once the percent scanner
+  // works: the backtracked "4" lands inside the span the percent scanner already claimed, so the
+  // overlap guard silently eats it and every assertion above still passes. Verified by reverting —
+  // restoring the lookahead alone leaves all 27 hardening cases green. The hazard is real and
+  // invisible, which is exactly the kind that needs a structural guard.
+  //
+  // `[^)]*` cannot be used to reach the lookahead: the pattern it must cross contains `)` of its
+  // own (`(?:\.\d+)`), so the scan has to be line-scoped.
+  const offenders = []
+  for (const [f, body] of allSources()) {
+    for (const line of stripComments(body).split('\n')) {
+      if (/matchAll\(/.test(line) && /\(\?!/.test(line) && /%|percent/.test(line)) offenders.push(`${f}: ${line.trim()}`)
+    }
+  }
+  assert.deepEqual(offenders, [], 'a backtrackable exclusion lookahead is back in a figure scanner')
+})
+
+// ---------------------------------------------------------------------------------------------
+// H25 — An accusation-grade check fired on text that had done nothing wrong.
+//
+// R3 names the field and the exact string a candidate supposedly lifted from the employer's ad. Its
+// first rule was the backlog's literal wording — "no numeric string that also appears in jd_real" —
+// and measured against a real resume package with a posting reading "three business units" it
+// produced three offenders:
+//     ResumeSummary: (none)   SkillsBullets1: 3   SkillsBullets2: 3   ExpertiseBullets: three
+// from the bullets "Skill number 3", "Other skill 3" and "One two three four five". Not one of them
+// mentions a business unit. The document was clean and the check called it a thief.
+//
+// A guard people learn to ignore is worse than no guard (hardening rule 2), and this is the shape
+// that gets ignored fastest: a check that is right about the rare case and wrong about the common
+// one. The rule that fixes it is not a threshold or a similarity score — it is that a bare number
+// is not a claim. "3" claims nothing; "3 business units" does.
+//
+// The invariant: a check that names an offender must fire on the CLAIM, not on a number that
+// happens to appear in both documents — and it must still catch the real echo.
+test('H25: R3 accuses a claim, never a coincidence of digits', () => {
+  const posting = 'You will own three business units, a $18M portfolio and 60+ sites.'
+  const profile = 'Ran platform engineering for a regional utility.'
+
+  // The exact incident. Every one of these is innocent.
+  for (const clean of [
+    'Skill number 3', 'Other skill 3', 'One two three four five', 'Ran 3 marathons.',
+    'Three times a week.', 'Cut cost 18%.', 'Shipped 60 releases of the scheduler.',
+  ]) {
+    const hits = scanEcho(clean, posting, profile).echoes
+    assert.deepEqual(hits, [], `${JSON.stringify(clean)} was accused of echoing: ${hits.map(e => e.figure.raw)}`)
+  }
+
+  // And the check is still a check. Each of these IS the employer's number.
+  for (const [guilty, expected] of [
+    ['Led three business units.', ['three']],
+    ['Managed a $18M portfolio.', ['$18M']],
+    ['Ran 60 sites.', ['60']],                 // unmarked answer to a marked ask — the commonest echo
+    ['Owned three business unit rebuilds and a $18M budget.', ['three', '$18M']],
+  ]) {
+    assert.deepEqual(scanEcho(guilty, posting, profile).echoes.map(e => e.figure.raw), expected, guilty)
+  }
+
+  // The structural half: an unmarked figure may never key on the number alone. Deleting the unit
+  // from `claimKey` restores the incident exactly, and nothing else in this file would notice.
+  const bare = extractFigures('three business units')[0]
+  assert.ok(!isMarked(bare))
+  assert.notEqual(claimKey(bare), bare.key, 'an unmarked figure keyed on the bare number again')
+  assert.notEqual(claimKey(bare), claimKey(extractFigures('three marathons')[0]),
+    'two different nouns must be two different claims')
 })

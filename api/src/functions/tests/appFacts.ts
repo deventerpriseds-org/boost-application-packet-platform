@@ -24,8 +24,14 @@ export async function loadFacts(client: any, owner: string): Promise<OwnerFact[]
  * certification lines are already written. MasterContext's prose blocks are the secondary source for
  * anything the template does not state. Asking the owner to retype either is the fallback, not the
  * starting point.
+ *
+ * EXPORTED because R3 (P8.2) needs the same text: to tell a figure the candidate STOLE from the
+ * posting from one they genuinely own, something has to say what they own. This is already that
+ * something, so it is extended rather than duplicated - a second profile reader would be a second
+ * answer to "what does the profile say", and the day the two disagree the figure check starts
+ * accusing people of echoing their own achievements.
  */
-async function sourceText(): Promise<{ text: string; sources: string[] }> {
+export async function sourceText(): Promise<{ text: string; sources: string[] }> {
   const parts: string[] = []
   const sources: string[] = []
   try {

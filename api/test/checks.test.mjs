@@ -318,3 +318,67 @@ test('the engine is deterministic and costs no tokens', () => {
   assert.deepEqual(runChecks(input), runChecks(input))
   assert.ok(runChecks(input).every(r => r.engine === 'deterministic'))
 })
+
+// --- R3 / P8.2: the posting's figures are the employer's, not the candidate's -------------------
+
+const POSTING = 'You will manage a $18M portfolio across three business units and 60+ sites.'
+const PROFILE = 'Operated 60 sites for a regional utility. Ran platform engineering.'
+const echoPkg = (summary) => ({ ...RESUME_FULL, ResumeSummary: summary })
+
+test('R3 names the field and the exact figure taken from the posting', () => {
+  const rs = runChecks({ type: 'resume', pkg: echoPkg('Managed a $18M portfolio across three business units.'),
+                         postingText: POSTING, profileText: PROFILE })
+  const r = find(rs, 'posting_figure_echo')
+  assert.equal(r.state, 'warn')
+  assert.deepEqual(r.offenders, ['ResumeSummary: $18M', 'ResumeSummary: three'])
+  assert.ok(r.offenders.every(o => /^[A-Za-z]\w*: \S/.test(o)), 'an offender must name a field and a string')
+})
+
+test('R3 keeps a figure the profile also states, and says so', () => {
+  // C5: a figure in BOTH posting and profile is kept and citable — R2 (evidence) beats a literal
+  // reading of R3. Stripping "60" would delete the candidate's own true achievement because the
+  // employer happened to ask for 60+.
+  const rs = runChecks({ type: 'resume', pkg: echoPkg('Ran 60 sites across the Midwest.'),
+                         postingText: POSTING, profileText: PROFILE })
+  const r = find(rs, 'posting_figure_echo')
+  assert.equal(r.state, 'pass')
+  assert.deepEqual(r.offenders, [])
+  assert.match(r.observed, /1 figure\(s\) kept/, 'the carve-out must be visible, not silent')
+})
+
+test('R3 without a posting or without a profile is not_applicable — never pass, never an accusation', () => {
+  const pkg = echoPkg('Managed a $18M portfolio across three business units.')
+  for (const [posting, profile, why] of [
+    ['', PROFILE, /posting text/i],
+    [POSTING, '', /profile/i],
+    ['', '', /posting text/i],
+  ]) {
+    const r = find(runChecks({ type: 'resume', pkg, postingText: posting, profileText: profile }), 'posting_figure_echo')
+    assert.equal(r.state, 'not_applicable', `posting=${!!posting} profile=${!!profile}`)
+    assert.match(r.observed, why, 'not_applicable must say which side was missing')
+    assert.deepEqual(r.offenders, [], 'nothing may be named when nothing could be judged')
+  }
+})
+
+test('R3 warns rather than reddening the gate', () => {
+  // C5 again, and the cry-wolf rule. A figure present in both documents can be legitimate, and the
+  // P8.1 correction path supersedes this state. A gate that goes red on a shared number is a gate
+  // people learn to click past — the offender list is what makes this actionable.
+  const rs = runChecks({ type: 'resume', pkg: echoPkg('Managed a $18M portfolio across three business units.'),
+                         postingText: POSTING, profileText: PROFILE })
+  assert.equal(find(rs, 'posting_figure_echo').state, 'warn')
+  assert.ok(!rs.some(r => r.state === 'fail'), 'nothing else in this package should fail')
+  assert.equal(gateFor(rs), 'warn')
+})
+
+test('R3 scans every populated field, not just the summary', () => {
+  // C3: the prototype shipped a swap reading `P&L $18M` because it "matches the figure in the
+  // posting". A list item is exactly as indefensible in an interview as a summary sentence.
+  const rs = runChecks({ type: 'resume',
+    pkg: { ...RESUME_FULL, SkillsBullets1: 'Short one\nP&L $18M', RelevantBullets1: 'Org Scaling 60+\nShort two' },
+    postingText: POSTING, profileText: 'Ran platform engineering.' })
+  const r = find(rs, 'posting_figure_echo')
+  assert.equal(r.state, 'warn')
+  assert.ok(r.offenders.includes('SkillsBullets1: $18M'), `list items were not scanned: ${r.offenders}`)
+  assert.ok(r.offenders.includes('RelevantBullets1: 60+'), `list items were not scanned: ${r.offenders}`)
+})
