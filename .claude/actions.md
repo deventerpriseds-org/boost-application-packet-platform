@@ -1708,6 +1708,13 @@ extended to return named records rather than only a joined blob.
   profile that supports nothing as `not_applicable` drops the row from the denominator and the packet
   reads 100% with a hard requirement unmet. Revert-proof: both directions fire the case.
 
+- **H30** — `covers()` returns false for a requirement it CANNOT judge (fewer than three content
+  words), which is the right answer for coverage and the wrong one for the new `evidence_placed`
+  check. Live Trinnex row #5 "Experience in leading technology operations" reduces to two tokens,
+  both of which the resume summary contains verbatim — and the first version of the check named it
+  "absent from this asset". Caught in a live-shaped reproduction before merge. Revert-proof: putting
+  unjudgeable rows back in the offender list fires the case with the exact string.
+
 **Deliberately not fixed, recorded instead:** `appReviewer.ts:183` computes `engineJudged` as every
 must-have row, while the check judges only `coverable` — so reviewer agreement is still measured
 against a wider population than the engine judged. Pre-existing, unchanged by this lane, and a real

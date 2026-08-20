@@ -17,7 +17,7 @@ import { join } from 'node:path'
 
 import { normalizePostingText, decodeEntities, groundingText } from '../dist/functions/tests/jdText.js'
 import { buildRequirements, locate, mapKind, sentenceBounds } from '../dist/functions/tests/requirements.js'
-import { onOmitList, omitEntries, similarity } from '../dist/functions/tests/swaps.js'
+import { onOmitList, omitEntries, similarity, itemTokens } from '../dist/functions/tests/swaps.js'
 import { runChecks, gateFor, attentionCount, COVERAGE_THRESHOLD, MIN_JUDGEABLE_TOKENS } from '../dist/functions/tests/checks.js'
 import { computeArtifactScore } from '../dist/functions/tests/artifactScore.js'
 import { deriveFacts } from '../dist/functions/tests/ownerFacts.js'
@@ -765,4 +765,45 @@ test('H29: an unreadable profile measures nothing; a readable one that supports 
   assert.equal(cov.state, 'fail', 'we looked and found nothing — that is a gap, not an unknown')
   assert.match(cov.observed, /^0\/1 /, 'and it stays in the denominator; dropping it reads 100%')
   assert.match(cov.offenders[0], /no evidence found in your profile/)
+})
+
+// ---------------------------------------------------------------------------------------------
+// H30 — `covers()` returns false for a requirement it CANNOT judge, and that answer is only correct
+// for the question it was written for.
+//
+// `covers()` refuses any requirement with fewer than MIN_JUDGEABLE_TOKENS content words (H5b). For
+// COVERAGE that is right: an unjudgeable requirement must surface to a human rather than pass
+// quietly. `evidence_placed` asks the opposite-facing question — "the profile supports this and did
+// this asset say it?" — and reusing the same false there accuses a document of omitting something it
+// states.
+//
+// Evidence, live: Trinnex requirement #5 (opp 9f9c370a) is "Experience in leading technology
+// operations". `itemTokens` drops the stopwords and leaves exactly two — technology, operations —
+// and the resume summary contains both, verbatim, in that order. The first version of this check
+// printed "0/2 evidenced requirements appear in this document" and named #5 as absent from an asset
+// whose first sentence is the requirement.
+//
+// The invariant: a check reporting an offender must have been able to judge it. A row the measure
+// cannot reach is counted apart and named as unjudged, never folded into the offenders.
+test('H30: a requirement too short to measure is never reported as missing from a document', () => {
+  const req = { seq: 5, kind: 'must_have', verbatim: null, item_text: 'Experience in leading technology operations' }
+  const evidence = {
+    profileReadable: true,
+    bySeq: { 5: { quote: 'led technology operations for a regional utility', source_kind: 'work_history',
+                  source_label: 'Work history 1', source_key: 'workHistory1', char_start: 0, char_end: 47,
+                  extra: null, ratio: 1, method: 'anchored', record_sha256: '', resolver_version: 1 } },
+  }
+  const rs = runChecks({
+    type: 'resume',
+    pkg: { ResumeSummary: 'Experience in leading technology operations for utility platforms.' },
+    requirements: [req], evidence,
+  })
+  const placed = rs.find(r => r.check_key === 'evidence_placed')
+  assert.ok(!placed.offenders.some(o => /^#5\b/.test(o)),
+    `the summary literally says it; naming it absent is an accusation on absent evidence — got ${JSON.stringify(placed.offenders)}`)
+  assert.equal(placed.state, 'not_applicable')
+  assert.match(placed.observed, /none long enough to judge placement/)
+
+  // And the reason really is the token floor — the same one `covers()` publishes.
+  assert.ok(itemTokens('Experience in leading technology operations').length < MIN_JUDGEABLE_TOKENS)
 })

@@ -1405,5 +1405,5 @@ Coverage is no longer "did the generated document repeat enough of the requireme
   coverage. It is also what keeps P2.3's per-asset score per-asset once coverage becomes
   opportunity-level.
 
-**H27, H28, H29** in `api/test/hardening.test.mjs`; all three proved by reverting the fix.
-315/315 api tests, app builds clean.
+**H27, H28, H29, H30** in `api/test/hardening.test.mjs`; all four proved by reverting the fix.
+316/316 api tests, app builds clean.

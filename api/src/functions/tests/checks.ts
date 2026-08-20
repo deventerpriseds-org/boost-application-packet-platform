@@ -533,13 +533,26 @@ export function runChecks(input: CheckInput): CheckResult[] {
       // support this requirement and this asset still failed to say it — which is a defect the
       // remediation loop can close, unlike a gap in the profile, which it cannot.
       const evidenced = [...coverable, ...resp].filter(r => evidenceOf(r))
-      const unplaced = evidenced.filter(r => !covers(r))
+      // `covers()` cannot judge a requirement with fewer than MIN_JUDGEABLE_TOKENS content words —
+      // it returns false for them, which is the right answer for COVERAGE (an unjudgeable
+      // requirement must surface, not pass quietly) and the WRONG one here. Measured on the live
+      // Trinnex row #5, "Experience in leading technology operations": itemTokens drops the
+      // stopwords and leaves two words, both of which the resume summary contains verbatim — and
+      // this check called it "absent from this asset". Accusing a document of omitting something it
+      // says, because the requirement was too short to measure, is absent evidence read as a
+      // finding, one layer down from where the rest of this file guards against it.
+      const placeable = evidenced.filter(r => itemTokens(r.verbatim || r.item_text).length >= MIN_JUDGEABLE_TOKENS)
+      const unplaced = placeable.filter(r => !covers(r))
+      const tooThin = evidenced.length - placeable.length
+      const thinNote = tooThin ? ` (${tooThin} too short to judge either way)` : ''
       out.push(!evidenced.length
         ? na('evidence_placed', 'no requirement in this posting is evidenced by your profile yet', PLACED_EXPECT)
-        : unplaced.length
-          ? bad('evidence_placed', `${evidenced.length - unplaced.length}/${evidenced.length} evidenced requirements appear in this document`,
-                PLACED_EXPECT, unplaced.map(r => `${label(r)} — evidenced by ${evidenceOf(r)!.source_label}, absent from this asset`), 'warn')
-          : ok('evidence_placed', `${evidenced.length}/${evidenced.length} evidenced requirements appear in this document`, PLACED_EXPECT))
+        : !placeable.length
+          ? na('evidence_placed', `${evidenced.length} evidenced requirement(s), none long enough to judge placement`, PLACED_EXPECT)
+          : unplaced.length
+            ? bad('evidence_placed', `${placeable.length - unplaced.length}/${placeable.length} evidenced requirements appear in this document${thinNote}`,
+                  PLACED_EXPECT, unplaced.map(r => `${label(r)} — evidenced by ${evidenceOf(r)!.source_label}, absent from this asset`), 'warn')
+            : ok('evidence_placed', `${placeable.length}/${placeable.length} evidenced requirements appear in this document${thinNote}`, PLACED_EXPECT))
     }
   }
 
