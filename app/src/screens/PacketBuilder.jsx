@@ -522,8 +522,13 @@ export default function PacketBuilder({ id, step }) {
 
           <AnalysisRunCard
             busy={jdBusy} onRun={runJd} hasRun={!!p.jdAnalyzed} result={runResult}
+            /* `onClick={buildAll}` handed React's SyntheticEvent straight into `opts`, so
+               `opts.regen` was a property read off an event object. It is undefined, so the
+               behaviour was right by accident — but an event is not an options bag, and the next
+               option added there would have been silently ungettable. Both call sites are now
+               explicit that they send nothing. */
             extra={(
-              <button className="px-btn" style={{ fontSize: 12 }} disabled={allBusy} onClick={buildAll}>
+              <button className="px-btn" style={{ fontSize: 12 }} disabled={allBusy} onClick={() => buildAll()}>
                 {allBusy ? 'Building…' : 'Build entire packet'}
               </button>
             )} />
@@ -543,7 +548,7 @@ export default function PacketBuilder({ id, step }) {
             {stepArtifacts.length === 0 && (
               <div className="px-box" style={{ padding: 20, textAlign: 'center', color: 'var(--proto-ink2)', fontSize: 13 }}>
                 No artifact yet for this step.{' '}
-                <span className="px-link" onClick={buildAll}>Build entire packet</span> to generate all at once.
+                <span className="px-link" onClick={() => buildAll()}>Build entire packet</span> to generate all at once.
               </div>
             )}
             {stepArtifacts.map((a) => (
