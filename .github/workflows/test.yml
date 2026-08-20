@@ -57,29 +57,20 @@ jobs:
         working-directory: app
         continue-on-error: true
 
-  # Smart quotes are a real, repeated failure here: the Edit tool inserts U+2018/2019/201C/201D into
-  # JSX and esbuild rejects them at build time. The build above would catch it — this names it.
-  hygiene:
-    name: no smart quotes in source
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: scan
-        run: |
-          python3 - <<'PY'
-          import pathlib, sys
-          BAD = {0x2018: "'", 0x2019: "'", 0x201C: '"', 0x201D: '"'}
-          hits = []
-          for root in ('app/src', 'api/src', 'web/src'):
-            for f in pathlib.Path(root).rglob('*'):
-              if f.suffix not in {'.js', '.jsx', '.ts', '.tsx'} or not f.is_file():
-                continue
-              for n, line in enumerate(f.read_text(encoding='utf-8', errors='replace').splitlines(), 1):
-                for ch in line:
-                  if ord(ch) in BAD:
-                    hits.append(f'{f}:{n}: U+{ord(ch):04X} {ch!r}')
-                    break
-          if hits:
-            print('\n'.join(hits)); print(f'\n{len(hits)} line(s) carry a smart quote'); sys.exit(1)
-          print('clean')
-          PY
+  # NO SMART-QUOTE JOB HERE, DELIBERATELY — one was written and removed the same night.
+  #
+  # It failed on its first run against 8 lines, and every one was correct code:
+  #   Call.jsx:245-247,356  typographic quotes inside USER-FACING COPY, where curly is right
+  #   Call.jsx:166,314,399  curly apostrophes in rendered prose ("the coach's actions")
+  #   termMatch.ts:21       `t.replace(/[‘’‛]/g, "'")` — the smart-quote NORMALIZER, flagged for
+  #                         containing the smart quotes it exists to strip
+  # Both `npm run build` jobs passed with all 8 present, because none of them is in a syntax
+  # position. That is the whole point: the failure CLAUDE.md describes is smart quotes where JSX
+  # needs a straight quote, and `esbuild` already rejects exactly those — precisely, with a parser,
+  # with no false positives, in a job that already runs above.
+  #
+  # A scanner cannot tell a syntax position from a string literal without parsing, so it either
+  # misses real breakage or fires on correct code. This one fired on correct code, which by the
+  # repo's own hardening rule #2 makes it worse than nothing: "a guard people learn to ignore is
+  # worse than none." The build IS the guard. Duplicating it with a blunter instrument was an
+  # extend-don't-duplicate violation as well as a cry-wolf one.
