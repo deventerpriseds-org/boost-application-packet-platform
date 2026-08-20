@@ -5,6 +5,10 @@ import { Pill } from '../shell.jsx'
 import { Loading, ErrorBox } from './Today.jsx'
 import AssetBlocks, { useAssetProvenance } from './AssetBlocks.jsx'
 import { registerListOwners } from '../assetBlocks.js'
+import {
+  PostingAnalysisCard, AnalysisRunCard, KeywordTallyOverlay, MatchEstimateButton, ProfileLink,
+} from './PostingAnalysis.jsx'
+import { postingBody } from '../postingAnalysis.js'
 
 const TYPE_LABEL = {
   resume: 'Resume', compact_resume: 'Compact resume', cover: 'Cover letter',
@@ -21,7 +25,9 @@ const STATUS_TONE = { todo: 'panel', drafting: 'yellow', review: 'accent', chang
 
 // Steps in the packet workflow
 const STEPS = [
-  { key: 'jd',       num: 1, label: 'JD analysis',   sub: 'Extract keywords & ATS terms' },
+  // "ATS" is reserved for the keyword library and its coverage (P5.4). Step 1 extracts
+  // responsibilities and requirements from the posting — that is posting analysis, not ATS.
+  { key: 'jd',       num: 1, label: 'Posting analysis', sub: 'Requirements, responsibilities, keywords' },
   { key: 'resume',   num: 2, label: 'Resume',         sub: 'Keyword-tailored from master' },
   { key: 'cover',    num: 3, label: 'Cover letter',   sub: 'Tailored narrative' },
   { key: 'portfolio',num: 4, label: 'Portfolio',      sub: 'Assemble work samples' },
@@ -171,7 +177,14 @@ export default function PacketBuilder({ id, step }) {
     const key = typeof next === 'function' ? next(activeStep) : next
     if (STEPS.some((s) => s.key === key)) go(`/packet/${id}/${key}`)
   }
+  // D4: the 280px right keyword panel is gone; its content is now the tally modal opened from the
+  // header match estimate. `atsOpen` means "the tally is open", on desktop and mobile alike.
   const [atsOpen, setAtsOpen] = useState(false)
+  // The posting's requirement spine — P5.4's source data for step 1.
+  const [req, setReq] = useState({ data: null, error: null })
+  // The run result strip. It persists; the toast it replaces vanished after 2.2s, which is why
+  // "the re-run button visibly does something" kept reading as unmet.
+  const [runResult, setRunResult] = useState(null)
   const pollers = useRef({})
   // Requirements and swaps are scoped to the OPPORTUNITY and the PACKET, not to one artifact, so
   // they are loaded once here and handed down. Loading them inside each card would issue the same
@@ -186,6 +199,10 @@ export default function PacketBuilder({ id, step }) {
   const registerLists = useCallback((artifactId, label, lists) => {
     setListOwners((prev) => registerListOwners(prev, artifactId, label, lists))
   }, [])
+  // The checks engine's score for this packet's resume, read ONCE here and handed to both keyword
+  // surfaces, so the card's tab and the tally modal can never print different words about the same
+  // library. `null` means no run has been read yet, which is a state of its own - not zero.
+  const [keywordScore, setKeywordScore] = useState(null)
 
   const load = useCallback(async () => {
     try {
@@ -193,14 +210,34 @@ export default function PacketBuilder({ id, step }) {
       if (p.error) throw new Error(p.error)
       setPState({ loading: false, error: null, packet: p })
       if (!o.error) setOpp(o)
-      // Auto-advance past JD step if already analyzed
-      if (p.jdAnalyzed && !explicitStep) setActiveStep('resume')   // only when no step was deep-linked
+      // NO auto-advance. It used to jump an already-analysed packet straight to the resume step,
+      // which meant the single most common case - opening a packet analysed in an earlier session -
+      // never saw the posting-analysis card at all. Step 1 is a destination, not a toll gate; the
+      // route (#/packet/:id/:step) is what decides which step is shown, and only the reader writes it.
     } catch (err) {
       setPState({ loading: false, error: String(err.message || err), packet: null })
     }
   }, [id])
 
+  const loadReq = useCallback(async () => {
+    try {
+      const r = await api.requirements(id)
+      if (r.error) throw new Error(r.error)
+      setReq({ data: r, error: null })
+    } catch (err) { setReq({ data: null, error: String(err.message || err) }) }
+  }, [id])
+
   useEffect(() => { load() }, [load])
+  useEffect(() => { loadReq() }, [loadReq])
+  const resumeArtifactId = (pState.packet?.artifacts || []).find((a) => a.type === 'resume')?.id || null
+  useEffect(() => {
+    if (!resumeArtifactId) { setKeywordScore(null); return undefined }
+    let dead = false
+    api.artifactChecksResult(resumeArtifactId)
+      .then((r) => { if (!dead) setKeywordScore(r && !r.error ? (r.score || null) : null) })
+      .catch(() => { if (!dead) setKeywordScore(null) })
+    return () => { dead = true }
+  }, [resumeArtifactId])
   useEffect(() => () => Object.values(pollers.current).forEach(clearTimeout), [])
 
   const patchArtifact = (artifactId, fields) => setPState((s) => ({
@@ -248,15 +285,30 @@ export default function PacketBuilder({ id, step }) {
     finally { setBusy(null) }
   }
 
+  // The run result is recorded in state, not only announced in a toast, so the strip on the card
+  // still says what happened long after the toast has gone. `cached`/`grounded`/`sourceChars` come
+  // straight off the endpoint — they are what distinguishes a real re-read of the posting from a
+  // replay of the stored analysis.
   const runJd = async () => {
     setJdBusy(true)
+    const at = new Date().toLocaleTimeString()
     try {
       const r = await api.analyzeJd(id)
       if (r.error) throw new Error(r.error)
-      toast(`ATS ${r.analysis?.atsScore ?? '—'} · ${(r.analysis?.keywords || []).length} keywords`)
+      const a = r.analysis || {}
+      setRunResult({
+        at,
+        atsScore: typeof a.atsScore === 'number' ? a.atsScore : null,
+        keywords: (a.keywords || []).length,
+        mustHaves: (a.mustHaves || []).length,
+        cached: !!r.cached, grounded: !!r.grounded, sourceChars: r.sourceChars ?? null,
+      })
+      toast(`Analysis run — match estimate ${a.atsScore ?? '—'}`)
       load()
-      setActiveStep('resume')
-    } catch (e) { toast(`JD analysis failed: ${e.message || e}`) }
+    } catch (e) {
+      setRunResult({ at, error: String(e.message || e) })
+      toast(`Analysis failed: ${e.message || e}`)
+    }
     finally { setJdBusy(false) }
   }
 
@@ -265,9 +317,12 @@ export default function PacketBuilder({ id, step }) {
     try {
       const r = await api.parseJd(id)
       if (r.error) throw new Error(r.error)
-      toast('JD parsed — summary and requirements updated')
+      toast('Posting parsed — summary and extracted lines updated')
       const o2 = await api.getOpportunity(id)
       if (!o2.error) setOpp(o2)
+      // Re-parsing rewrites the requirement spine, so the source card has to re-read it or it
+      // keeps showing offsets measured against the previous posting text.
+      loadReq()
     } catch (e) { toast(`Parse failed: ${e.message || e}`) }
     finally { setParseBusy(false) }
   }
@@ -374,39 +429,49 @@ export default function PacketBuilder({ id, step }) {
             </div>
           </div>
 
-          <div className="px-box" style={{ padding: 16 }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10, gap: 8, flexWrap: 'wrap' }}>
-              <div style={{ fontSize: 14, fontWeight: 700 }}>
-                Job description
-                <span className="px-small" style={{ marginLeft: 8, fontWeight: 400, color: 'var(--proto-ink2)' }}>
-                  {opp?.jdTitle ? 'parsed' : 'from email'}
-                </span>
+          {/* AC31 - this box is MODEL OUTPUT and says so.
+              `opp.jdSummary` is opportunity.jd_summary and `opp.why` is opportunity.why_surfaced;
+              both are written by a model. Printing either under a heading reading "The posting"
+              attributed the model's words to the employer, and for the ~116 opportunities with no
+              stored posting text it was why_surfaced - a note about why WE surfaced the row - being
+              passed off as what the employer wrote. The employer's own text is opportunity.jd_text,
+              and the only place it is ever shown is a located line in the card below. */}
+          {(() => {
+            const pb = postingBody({ jdSummary: opp?.jdSummary, why: opp?.why, jdTextLen: req.data?.jdTextLen })
+            return (
+              <div className="px-box" data-qc="posting-body" data-qc-body={pb.kind} style={{ padding: 16 }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6, gap: 8, flexWrap: 'wrap' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                    <div style={{ fontSize: 14, fontWeight: 700 }}>{pb.heading}</div>
+                    {pb.badge && <Pill tone="yellow">{pb.badge}</Pill>}
+                  </div>
+                  <button className="px-btn" style={{ fontSize: 12 }} disabled={parseBusy} onClick={parseJd}>
+                    {parseBusy ? 'Parsing…' : (opp?.jdSummary ? '↻ Re-parse posting' : 'Parse posting')}
+                  </button>
+                </div>
+                <div className="px-small" data-qc="posting-body-provenance" style={{ marginBottom: 10, color: 'var(--proto-ink2)', lineHeight: 1.6 }}>
+                  {pb.provenance}
+                </div>
+                {pb.body
+                  ? <div style={{ fontSize: 13, lineHeight: 1.7, whiteSpace: 'pre-wrap' }}>{pb.body}</div>
+                  : <div className="px-small" style={{ color: 'var(--proto-ink3)' }}>Use "Parse posting" to fetch it from the source URL.</div>}
               </div>
-              <button className="px-btn" style={{ fontSize: 12 }} disabled={parseBusy} onClick={parseJd}>
-                {parseBusy ? 'Parsing…' : (opp?.jdSummary ? '↻ Re-parse JD' : 'Parse JD')}
-              </button>
-            </div>
-            {opp?.jdSummary ? (
-              <div style={{ fontSize: 13, lineHeight: 1.7 }}>{opp.jdSummary}</div>
-            ) : (
-              <div style={{ fontSize: 13, lineHeight: 1.6, color: 'var(--proto-ink2)', whiteSpace: 'pre-wrap' }}>
-                {opp?.why || 'No job description text available. Use "Parse JD" to extract it from the source URL.'}
-              </div>
-            )}
-          </div>
+            )
+          })()}
 
-          <div className="px-box" style={{ padding: 16, display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-            <div style={{ flex: 1 }}>
-              <div style={{ fontSize: 13, fontWeight: 600 }}>ATS keyword analysis</div>
-              <div className="px-small">Match your master baseline against this JD to find coverage gaps</div>
-            </div>
-            <button className="px-btn px-btn-accent" disabled={jdBusy} onClick={runJd}>
-              {jdBusy ? 'Analyzing…' : (p.jdAnalyzed ? '↻ Re-run ATS analysis' : '⚡ Run ATS analysis')}
-            </button>
-            <button className="px-btn" style={{ fontSize: 12 }} disabled={allBusy} onClick={buildAll}>
-              {allBusy ? 'Building…' : 'Build entire packet'}
-            </button>
-          </div>
+          <PostingAnalysisCard
+            req={req.data} reqError={req.error} reloadReq={loadReq}
+            coveredKw={coveredKw} missingKw={missingKw} gapsScoredAt={p.atsGapsScoredAt}
+            onParse={parseJd} parseBusy={parseBusy} hasSummary={!!opp?.jdSummary}
+            keywordScore={keywordScore} />
+
+          <AnalysisRunCard
+            busy={jdBusy} onRun={runJd} hasRun={!!p.jdAnalyzed} result={runResult}
+            extra={(
+              <button className="px-btn" style={{ fontSize: 12 }} disabled={allBusy} onClick={buildAll}>
+                {allBusy ? 'Building…' : 'Build entire packet'}
+              </button>
+            )} />
 
           <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
             <button className="px-btn px-btn-accent" onClick={() => setActiveStep('resume')}>Next: Resume →</button>
@@ -472,60 +537,18 @@ export default function PacketBuilder({ id, step }) {
     </>
   )
 
-  const atsPanel = (
-    <div className="px-box" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 10 }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-        <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1, color: 'var(--proto-ink2)' }}>
-          Keywords &amp; ATS terms
-        </div>
-        {atsScore !== null && (
-          <div style={{ fontSize: 20, fontWeight: 800, color: atsScore >= 80 ? 'var(--proto-green)' : atsScore >= 60 ? 'var(--proto-accent)' : 'var(--proto-red)' }}>
-            {atsScore}%
-          </div>
-        )}
-      </div>
-
-      {coveredKw.length > 0 || missingKw.length > 0 ? (
-        <>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
-            {coveredKw.map((kw) => (
-              <span key={kw} style={{ fontSize: 11, padding: '3px 8px', borderRadius: 99, background: 'var(--proto-green-soft)', color: 'var(--proto-green)', fontWeight: 600 }}>✓ {kw}</span>
-            ))}
-            {missingKw.map((kw) => (
-              <span key={kw} style={{ fontSize: 11, padding: '3px 8px', borderRadius: 99, background: 'var(--proto-red-soft)', color: 'var(--proto-red)', fontWeight: 600 }}>! {kw}</span>
-            ))}
-          </div>
-          <div className="px-small" style={{ color: 'var(--proto-ink3)' }}>
-            {coveredKw.length} covered · {missingKw.length} {missingKw.length === 1 ? 'gap' : 'gaps'}
-          </div>
-        </>
-      ) : (
-        <div className="px-small" style={{ color: 'var(--proto-ink2)' }}>
-          {!p.jdAnalyzed
-            ? 'Run ATS analysis to see keyword coverage.'
-            : p.atsGapsScoredAt
-              ? 'No keyword gaps found against this posting.'
-              : 'This posting has not been gap-scored yet — coverage is unknown.'}
-        </div>
-      )}
-
-      <button className="px-btn px-btn-accent" style={{ width: '100%' }} disabled={allBusy} onClick={buildAll}>
-        {allBusy ? 'Building…' : '⚡ Auto-optimize resume'}
-      </button>
-
-      {!ready && STEPS.filter((s) => s.key !== 'jd' && s.key !== 'send').map((step) => {
-        const sa = getArtifactsByStep(step.key)
-        const allApproved = sa.length > 0 && sa.every((a) => a.status === 'approved')
-        return (
-          <div key={step.key} onClick={() => setActiveStep(step.key)}
-            style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '5px 0', cursor: 'pointer', borderTop: '1px solid var(--proto-rule-soft)' }}>
-            <div style={{ width: 8, height: 8, borderRadius: '50%', flexShrink: 0, background: allApproved ? 'var(--proto-green)' : sa.some((a) => a.status !== 'todo') ? 'var(--proto-accent)' : 'var(--proto-ink3)' }} />
-            <span style={{ fontSize: 12, flex: 1 }}>{step.label}</span>
-            <span className="px-small">{allApproved ? '✓' : sa.length === 0 ? '—' : sa.find((a) => a.status !== 'todo')?.status || 'todo'}</span>
-          </div>
-        )
-      })}
-    </div>
+  // D4 — the 280px right column is GONE and this modal is where its content lives, rendered once
+  // for the whole screen (mobile and desktop share it), which is what "the panel appears exactly
+  // once per screen" means now. The step-progress list the old panel carried is not reproduced:
+  // the desktop left rail and the mobile step scroller already render it, and a third copy is the
+  // duplicate-surface problem P5.4 is trying to end.
+  const keywordTally = (
+    <KeywordTallyOverlay
+      open={atsOpen} onClose={() => setAtsOpen(false)}
+      req={req.data} keywordScore={keywordScore}
+      coveredKw={coveredKw} missingKw={missingKw} gapsScoredAt={p.atsGapsScoredAt} atsScore={atsScore}
+      onBuildAll={buildAll} buildBusy={allBusy}
+      onGoResume={() => { setAtsOpen(false); setActiveStep('resume') }} />
   )
 
   if (mobile) {
@@ -535,11 +558,14 @@ export default function PacketBuilder({ id, step }) {
     const nextStep = activeIdx < STEPS.length - 1 ? STEPS[activeIdx + 1] : null
     return (
       <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-        {/* Header */}
-        <div>
-          <div className="px-small px-link" style={{ marginBottom: 6 }} onClick={() => go('/packets')}>← Packets</div>
-          <div style={{ fontSize: 17, fontWeight: 700 }}>{p.company} · {p.role}</div>
-          {ready && <Pill tone="green">Ready to ship ✓</Pill>}
+        {/* Header — the match estimate is the one entry point to the keyword tally on mobile too */}
+        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div className="px-small px-link" style={{ marginBottom: 6 }} onClick={() => go('/packets')}>← Packets</div>
+            <div style={{ fontSize: 17, fontWeight: 700 }}>{p.company} · {p.role}</div>
+            {ready && <Pill tone="green">Ready to ship ✓</Pill>}
+          </div>
+          <MatchEstimateButton atsScore={atsScore} compact onClick={() => setAtsOpen(true)} />
         </div>
 
         {/* Horizontal step scroller */}
@@ -563,24 +589,12 @@ export default function PacketBuilder({ id, step }) {
           })}
         </div>
 
-        {/* ATS bar — collapsible */}
-        {atsScore !== null && (
-          <div className="px-box" style={{ padding: '10px 14px' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer' }} onClick={() => setAtsOpen((x) => !x)}>
-              <div style={{ flex: 1, fontSize: 13, fontWeight: 600 }}>Keywords &amp; ATS terms</div>
-              <div style={{ fontSize: 18, fontWeight: 800, color: atsScore >= 80 ? 'var(--proto-green)' : atsScore >= 60 ? 'var(--proto-accent)' : 'var(--proto-red)' }}>
-                {atsScore}%
-              </div>
-              <span style={{ fontSize: 12, color: 'var(--proto-ink2)' }}>{atsOpen ? '▲' : '▼'}</span>
-            </div>
-            {atsOpen && <div style={{ marginTop: 12 }}>{atsPanel}</div>}
-          </div>
-        )}
-
         {/* Step content */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
           {stepContent}
         </div>
+
+        {keywordTally}
 
         {/* Prev / Next nav */}
         <div style={{ display: 'flex', gap: 10, marginTop: 4 }}>
@@ -611,22 +625,20 @@ export default function PacketBuilder({ id, step }) {
               Packet — {p.company}
             </div>
             <div style={{ fontSize: 20, fontWeight: 700, marginTop: 2 }}>{p.company} · {p.role}</div>
-            <div className="px-small" style={{ marginTop: 2, color: 'var(--proto-ink2)' }}>ATS keyword optimization + tailored assets</div>
-          </div>
-          {atsScore !== null && (
-            <div style={{ textAlign: 'right' }}>
-              <div className="px-small" style={{ textTransform: 'uppercase', letterSpacing: 1, color: 'var(--text-brand)', marginBottom: 2 }}>ATS Match</div>
-              <div style={{ fontSize: 32, fontWeight: 800, lineHeight: 1, color: atsScore >= 80 ? 'var(--proto-green)' : atsScore >= 60 ? 'var(--proto-accent)' : 'var(--proto-red)' }}>
-                {atsScore}%
-              </div>
+            <div className="px-small" style={{ marginTop: 2, color: 'var(--proto-ink2)' }}>
+              Posting analysis against <ProfileLink />, then tailored assets
             </div>
-          )}
+          </div>
+          {/* Not "ATS Match": nothing here came from an applicant tracking system, and the number is
+              a model estimate, not keyword coverage. It is also the door to the keyword tally. */}
+          <MatchEstimateButton atsScore={atsScore} onClick={() => setAtsOpen(true)} />
           {ready ? <Pill tone="green">Ready to ship ✓</Pill> : allBusy ? <Pill tone="yellow">building</Pill> : null}
           {ready && <button className="px-btn px-btn-accent" onClick={() => go(`/compose/${id}`)}>Send packet →</button>}
         </div>
       </div>
 
-      {/* 3-column */}
+      {/* Two columns since D4: nav rail + content. The old 280px right keyword column is gone, which is
+          what gives the centre its width back (1280 shell cap - 196 nav leaves ~664px at 1440). */}
       <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start' }}>
         {/* Left: step list */}
         <div style={{ width: 220, flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 2 }}>
@@ -657,21 +669,9 @@ export default function PacketBuilder({ id, step }) {
           {stepContent}
         </div>
 
-        {/* Right: ATS panel */}
-        <div style={{ width: 280, flexShrink: 0 }}>
-          {atsPanel}
-          {atsScore !== null && missingKw.length > 0 && (
-            <div className="px-box" style={{ padding: 14, marginTop: 12 }}>
-              <div className="px-small" style={{ fontWeight: 600, marginBottom: 6 }}>
-                Fill {missingKw.length} gap{missingKw.length !== 1 ? 's' : ''} to top out your score.
-              </div>
-              <button className="px-btn" style={{ width: '100%', fontSize: 12 }} onClick={() => setActiveStep('resume')}>
-                Next: Resume →
-              </button>
-            </div>
-          )}
-        </div>
       </div>
+
+      {keywordTally}
     </div>
   )
 }

@@ -128,6 +128,13 @@ export const api = {
   getPacket: (oppId) => get(`/app/opportunity/${oppId}/packet`),
   analyzeJd: (oppId) => post(`/app/opportunity/${oppId}/jd-analysis`, {}),
   parseJd: (oppId) => post(`/app/opportunity/${oppId}/jd-parse`, {}),
+  // P5.4 — the posting's requirement spine: one row per extracted line, with the employer's
+  // located span (`verbatim`) where there is one and the model's paraphrase (`item_text`) always.
+  // Owner-scoped like every other read: without ?owner= resolveOwner() silently falls back to demo.
+  requirements: (oppId) => get(`/app/opportunity/${oppId}/requirements?owner=${encodeURIComponent(_owner)}`),
+  // The stored verdict of the last checks run for one artifact — gate, attention count, score
+  // components (including the term library's own words about why keyword coverage is null).
+  artifactChecksResult: (artifactId) => get(`/app/artifact/${artifactId}/checks-result?owner=${encodeURIComponent(_owner)}`),
   jdStatus: () => get('/app/opportunities/jd-status'),
   enrichOpportunity: (oppId) => post(`/app/opportunity/${oppId}/enrich`, {}),
   matchScore: (oppId) => post(`/app/opportunity/${oppId}/match-score`, {}),
