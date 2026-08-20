@@ -83,7 +83,12 @@ export const CHECK_LABEL = {
   cross_list_redundancy: 'Nothing repeated across lists',
   company_named: 'The company is named',
   company_in_body: 'The right company in the body',
-  must_have_coverage: 'Must-haves this document covers',
+  // C6 moved this number's meaning and the label did not follow. It counts must-haves your PROFILE
+  // can evidence with a quote — not must-haves the document happens to repeat, which is what the
+  // old wording promised and what the pre-C6 numerator actually measured. A label that describes
+  // the previous definition is worse than no label: the number is right and the sentence next to
+  // it is wrong, so a reader trusts the wrong one.
+  must_have_coverage: 'Must-haves your profile can evidence',
   responsibilities_addressed: 'Responsibilities addressed',
   changes_cited: 'Every change cites the posting',
   omission_list: 'Nothing you asked to omit appears',
@@ -232,7 +237,7 @@ export function reviewerAttention(result) {
 export function scoreParts(score) {
   if (!score) return []
   return [
-    { key: 'must', label: 'Must-haves covered', value: score.must_have_coverage, source: score.must_have_source },
+    { key: 'must', label: 'Must-haves evidenced', value: score.must_have_coverage, source: score.must_have_source },
     { key: 'kw', label: 'Keywords present', value: score.keyword_coverage, source: score.keyword_source },
     { key: 'sen', label: 'Seniority fit', value: score.seniority_alignment, source: score.seniority_source },
   ]
