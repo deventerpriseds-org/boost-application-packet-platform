@@ -96,15 +96,23 @@ export interface CheckInput {
 }
 
 /**
- * Requirements a DOCUMENT cannot evidence.
+ * Preconditions that NO GENERATED MERGE FIELD can carry — P1.5 template reach.
  *
- * "Reside in the East Coast of the United States", "must be a U.S. Citizen", "active Secret
- * clearance", "authorized to work" — these are facts about the candidate, not claims a resume can
- * make true by containing words. Scoring them as uncovered must-haves guarantees a permanently red
- * gate on every posting that has one, and a gate that is always red is a gate people learn to
- * ignore. They are reported as `not_applicable` for coverage, which keeps them VISIBLE as
- * requirements the human must confirm separately, without pretending the document failed to cover
- * something no document could.
+ * The requirement is real and stays raw: "Reside in the East Coast of the United States" is
+ * extracted, stored as a must_have, quoted from the posting, and shown. Nothing filters it. What is
+ * measured here is narrower — whether any field the pipeline can WRITE could evidence it.
+ *
+ * It cannot. The resume's seven merge fields are ResumeSummary, SkillsBullets1/2, ExpertiseBullets
+ * and RelevantBullets1-3 (TEMPLATE_META); none carries location, citizenship or clearance. A resume
+ * absolutely COULD state "Boston, MA" — but only in static template text the pipeline never
+ * touches. So a coverage failure here is not the document falling short of the requirement, it is
+ * the pipeline having no slot for it, and reporting it as uncovered coverage would make the gate
+ * permanently red on every posting carrying such a clause. An always-red gate is one people learn
+ * to ignore.
+ *
+ * Reported as not_applicable FOR COVERAGE, with every one named, so the human confirms them against
+ * the static template — which is exactly the decision P1.5 asks for per template: edit the static
+ * bullets once, or add a merge field.
  *
  * Deliberately narrow and marker-driven: each pattern is an explicit phrase employers use for a
  * legal or logistical precondition. This is not a general "is this hard to match" heuristic.
@@ -342,10 +350,11 @@ export function runChecks(input: CheckInput): CheckResult[] {
     const eligibility = mustHaves.filter(r => ELIGIBILITY_RE.test(r.verbatim || r.item_text))
     const coverable = mustHaves.filter(r => !eligibility.includes(r))
     out.push(eligibility.length
-      ? na('eligibility_preconditions',
-           `${eligibility.length} requirement(s) a document cannot evidence — confirm these yourself`,
-           'each is a fact about the candidate, not something the artifact can cover')
-      : ok('eligibility_preconditions', 'none in this posting', 'eligibility preconditions are surfaced, not scored'))
+      ? na('template_reach',
+           `${eligibility.length} requirement(s) no generated merge field can carry — confirm against the static template`,
+           'every requirement is reachable by a field the pipeline can write')
+      : ok('template_reach', 'every requirement is reachable by a generated field',
+           'every requirement is reachable by a field the pipeline can write'))
     // The offender list still names them, so "not scored" never means "not shown".
     const elig = out[out.length - 1]
     if (eligibility.length) elig.offenders = eligibility.map(r => `#${r.seq} ${(r.verbatim || r.item_text).slice(0, 80)}`)

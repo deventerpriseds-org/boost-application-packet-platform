@@ -156,7 +156,7 @@ test('a posting with requirements but no must-haves is not_applicable, not pass'
   assert.equal(find(runChecks({ type: 'resume', pkg: RESUME_FULL, requirements: reqs }), 'must_have_coverage').state, 'not_applicable')
 })
 
-test('eligibility preconditions are surfaced, not scored as uncovered coverage', () => {
+test('P1.5 template reach: preconditions no merge field can carry are surfaced, not scored', () => {
   // Live Trinnex must-have: "Reside in the East Coast of the United States". No resume can evidence
   // where someone lives; scoring it guarantees a permanently red gate, and an always-red gate is one
   // people learn to ignore.
@@ -171,7 +171,7 @@ test('eligibility preconditions are surfaced, not scored as uncovered coverage',
     pkg: { ...RESUME_FULL, ResumeSummary: 'Owns roadmap strategy and execution with deep experience.' },
     requirements: reqs,
   })
-  const elig = find(rs, 'eligibility_preconditions')
+  const elig = find(rs, 'template_reach')
   assert.equal(elig.state, 'not_applicable')
   assert.equal(elig.offenders.length, 3, 'they are still NAMED — not scored never means not shown')
   assert.match(elig.offenders[0], /Reside in the East Coast/)
@@ -182,12 +182,12 @@ test('eligibility preconditions are surfaced, not scored as uncovered coverage',
   assert.equal(cov.state, 'pass')
 })
 
-test('a posting with no eligibility preconditions says so', () => {
+test('a posting whose requirements are all reachable says so', () => {
   const rs = runChecks({
     type: 'resume', pkg: RESUME_FULL,
     requirements: [{ seq: 0, verbatim: 'Deep experience with roadmap strategy', item_text: '', kind: 'must_have' }],
   })
-  assert.equal(find(rs, 'eligibility_preconditions').state, 'pass')
+  assert.equal(find(rs, 'template_reach').state, 'pass')
 })
 
 // ---- P2.2 inputs ---------------------------------------------------------------------------
