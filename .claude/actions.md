@@ -1322,3 +1322,53 @@ placeholders). Pinned as a test rather than silently reconciled.
 
 **92/92 unit assertions green** across jdText / termMatch / termMiner / requirements / generationJd /
 swaps / insertions.
+
+## ACT-60 — P2.1 checks engine + P2.2 gate and approval block
+**Status:** `landed + verified live` (`4b9ce4d`). 19/19 tables live (pg-migrate `32315795329`).
+
+**Thresholds came from the LIVE PROMPT, not the backlog** (`GET /api/prompts`, api-test
+`32311693658`) — the prompt is the system that produced every artifact in the database:
+`skills ≤ 30 chars` (**the backlog says 24 and is wrong**) · `20–22 total, evenly split` ·
+relevant = *at most ONE item per list over 20 chars* (**an allowance, not a flat cap**) ·
+aboutMe1 45–48 · aboutMe2 75–80 · execProfile 50–55 · cover 250–400.
+**The prompt contradicts itself** on core accomplishments — heading says 98–100, requirement list
+says "98–125 words (hard requirement)". The wider bound wins because it is the one labelled hard;
+recorded rather than silently resolved.
+All thresholds are seeded defaults on **`owner_search_prefs` — EXTENDED, not a new settings table**
+(same as `jdSweep.ts`). Nothing in `checks.ts` is a permanent constant.
+
+**AC 2.1.9 honoured:** a coverage check with no requirement rows returns `not_applicable`, never
+`pass`. An artifact whose checks are ALL `not_applicable` aggregates to **`warn`** — nothing was
+verified, which is not the same as everything passing.
+
+**Grandfathering resolved by measurement, not by a decision** (db-query `32315364200`): 175
+artifacts `todo`, 15 `review`, **zero `approved`**, zero packets `ready`. There is nothing to
+grandfather, so the gate shipped with no migration and no risk of flipping existing state.
+
+**PROVEN LIVE on the Trinnex resume** (`cfdd82e7`):
+- checks ran (api-test `32315827849`), gate = **`fail`**, 4 attention items:
+  `skill_char_limit=fail · relevant_char_limit=fail · expertise_phrase_length=warn · whitespace=warn`
+- direct API approve → **HTTP 409** `"4 blocking finding(s); a fail cannot be overridden"`
+  (api-test `32315891857`) — this is the P2.2 headline acceptance
+- override on a `fail` → **HTTP 409** `"a fail cannot be overridden"` (api-test `32315925934`)
+- `must_have_coverage=pass 2/2`, `responsibilities_addressed=pass 6/6` — real rows, not vacuous
+
+**Real defect the engine surfaced on live content:** all **6** expertise phrases violate the
+prompt's "exactly 5 words" hard requirement (3–4 words each). The prompt asks; nothing enforced it
+until now.
+
+**Bug the tests caught before it shipped:** the omission-list matcher used fuzzy similarity, which
+drops stopwords and short tokens — so `Skill number 0` and `Skill number 3` both reduce to
+`{skill, number}` and score 1.0. **One banned item would have accused nine innocent ones.** Now
+exact-or-whole-phrase only, and **shared with the swap engine** so the two can never disagree about
+what "on the omission list" means. *Hardening: a fuzzy matcher is acceptable for RANKING and
+unacceptable for ACCUSING. The value of an offender list is that it can be acted on without
+re-reading everything; a false name destroys that.*
+
+**Two gates the backlog asked for and were missing entirely:**
+- packet `ready` now also requires no asset at `fail` (a re-run AFTER approval can turn a gate red).
+- **`outreachSend` had no packet gate at all** — the only real outbound path in the product, and
+  every check could have been red with the message still going to the employer.
+
+*Housekeeping note: a `git add -A` swept the two subagent worktrees into a commit as gitlinks;
+untracked and `.claude/worktrees/` is now gitignored.*
