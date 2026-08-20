@@ -6,6 +6,7 @@ import { Loading, ErrorBox } from './Today.jsx'
 import {
   PostingAnalysisCard, AnalysisRunCard, KeywordTallyOverlay, MatchEstimateButton, ProfileLink,
 } from './PostingAnalysis.jsx'
+import { postingBody } from '../postingAnalysis.js'
 
 const TYPE_LABEL = {
   resume: 'Resume', compact_resume: 'Compact resume', cover: 'Cover letter',
@@ -180,7 +181,7 @@ export default function PacketBuilder({ id, step }) {
     const key = typeof next === 'function' ? next(activeStep) : next
     if (STEPS.some((s) => s.key === key)) go(`/packet/${id}/${key}`)
   }
-  // D4: the 280px right ATS panel is gone; its content is now the tally modal opened from the
+  // D4: the 280px right keyword panel is gone; its content is now the tally modal opened from the
   // header match estimate. `atsOpen` means "the tally is open", on desktop and mobile alike.
   const [atsOpen, setAtsOpen] = useState(false)
   // The posting's requirement spine — P5.4's source data for step 1.
@@ -188,10 +189,11 @@ export default function PacketBuilder({ id, step }) {
   // The run result strip. It persists; the toast it replaces vanished after 2.2s, which is why
   // "the re-run button visibly does something" kept reading as unmet.
   const [runResult, setRunResult] = useState(null)
-  // A manual run must leave the reader on step 1 so that strip is legible. The auto-advance below
-  // is for a packet that was already analysed before the screen opened, not for a run they just did.
-  const ranManuallyRef = useRef(false)
   const pollers = useRef({})
+  // The checks engine's score for this packet's resume, read ONCE here and handed to both keyword
+  // surfaces, so the card's tab and the tally modal can never print different words about the same
+  // library. `null` means no run has been read yet, which is a state of its own - not zero.
+  const [keywordScore, setKeywordScore] = useState(null)
 
   const load = useCallback(async () => {
     try {
@@ -199,9 +201,10 @@ export default function PacketBuilder({ id, step }) {
       if (p.error) throw new Error(p.error)
       setPState({ loading: false, error: null, packet: p })
       if (!o.error) setOpp(o)
-      // Auto-advance past the posting step if it was already analyzed BEFORE this visit. After a
-      // run the reader stays put, or they never see what the run returned.
-      if (p.jdAnalyzed && !explicitStep && !ranManuallyRef.current) setActiveStep('resume')
+      // NO auto-advance. It used to jump an already-analysed packet straight to the resume step,
+      // which meant the single most common case - opening a packet analysed in an earlier session -
+      // never saw the posting-analysis card at all. Step 1 is a destination, not a toll gate; the
+      // route (#/packet/:id/:step) is what decides which step is shown, and only the reader writes it.
     } catch (err) {
       setPState({ loading: false, error: String(err.message || err), packet: null })
     }
@@ -217,6 +220,15 @@ export default function PacketBuilder({ id, step }) {
 
   useEffect(() => { load() }, [load])
   useEffect(() => { loadReq() }, [loadReq])
+  const resumeArtifactId = (pState.packet?.artifacts || []).find((a) => a.type === 'resume')?.id || null
+  useEffect(() => {
+    if (!resumeArtifactId) { setKeywordScore(null); return undefined }
+    let dead = false
+    api.artifactChecksResult(resumeArtifactId)
+      .then((r) => { if (!dead) setKeywordScore(r && !r.error ? (r.score || null) : null) })
+      .catch(() => { if (!dead) setKeywordScore(null) })
+    return () => { dead = true }
+  }, [resumeArtifactId])
   useEffect(() => () => Object.values(pollers.current).forEach(clearTimeout), [])
 
   const patchArtifact = (artifactId, fields) => setPState((s) => ({
@@ -270,7 +282,6 @@ export default function PacketBuilder({ id, step }) {
   // replay of the stored analysis.
   const runJd = async () => {
     setJdBusy(true)
-    ranManuallyRef.current = true
     const at = new Date().toLocaleTimeString()
     try {
       const r = await api.analyzeJd(id)
@@ -409,31 +420,41 @@ export default function PacketBuilder({ id, step }) {
             </div>
           </div>
 
-          <div className="px-box" style={{ padding: 16 }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10, gap: 8, flexWrap: 'wrap' }}>
-              <div style={{ fontSize: 14, fontWeight: 700 }}>
-                The posting
-                <span className="px-small" style={{ marginLeft: 8, fontWeight: 400, color: 'var(--proto-ink2)' }}>
-                  {opp?.jdTitle ? 'parsed' : 'from email'}
-                </span>
+          {/* AC31 - this box is MODEL OUTPUT and says so.
+              `opp.jdSummary` is opportunity.jd_summary and `opp.why` is opportunity.why_surfaced;
+              both are written by a model. Printing either under a heading reading "The posting"
+              attributed the model's words to the employer, and for the ~116 opportunities with no
+              stored posting text it was why_surfaced - a note about why WE surfaced the row - being
+              passed off as what the employer wrote. The employer's own text is opportunity.jd_text,
+              and the only place it is ever shown is a located line in the card below. */}
+          {(() => {
+            const pb = postingBody({ jdSummary: opp?.jdSummary, why: opp?.why, jdTextLen: req.data?.jdTextLen })
+            return (
+              <div className="px-box" data-qc="posting-body" data-qc-body={pb.kind} style={{ padding: 16 }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6, gap: 8, flexWrap: 'wrap' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                    <div style={{ fontSize: 14, fontWeight: 700 }}>{pb.heading}</div>
+                    {pb.badge && <Pill tone="yellow">{pb.badge}</Pill>}
+                  </div>
+                  <button className="px-btn" style={{ fontSize: 12 }} disabled={parseBusy} onClick={parseJd}>
+                    {parseBusy ? 'Parsing…' : (opp?.jdSummary ? '↻ Re-parse posting' : 'Parse posting')}
+                  </button>
+                </div>
+                <div className="px-small" data-qc="posting-body-provenance" style={{ marginBottom: 10, color: 'var(--proto-ink2)', lineHeight: 1.6 }}>
+                  {pb.provenance}
+                </div>
+                {pb.body
+                  ? <div style={{ fontSize: 13, lineHeight: 1.7, whiteSpace: 'pre-wrap' }}>{pb.body}</div>
+                  : <div className="px-small" style={{ color: 'var(--proto-ink3)' }}>Use "Parse posting" to fetch it from the source URL.</div>}
               </div>
-              <button className="px-btn" style={{ fontSize: 12 }} disabled={parseBusy} onClick={parseJd}>
-                {parseBusy ? 'Parsing…' : (opp?.jdSummary ? '↻ Re-parse posting' : 'Parse posting')}
-              </button>
-            </div>
-            {opp?.jdSummary ? (
-              <div style={{ fontSize: 13, lineHeight: 1.7 }}>{opp.jdSummary}</div>
-            ) : (
-              <div style={{ fontSize: 13, lineHeight: 1.6, color: 'var(--proto-ink2)', whiteSpace: 'pre-wrap' }}>
-                {opp?.why || 'No posting text available. Use "Parse posting" to extract it from the source URL.'}
-              </div>
-            )}
-          </div>
+            )
+          })()}
 
           <PostingAnalysisCard
             req={req.data} reqError={req.error} reloadReq={loadReq}
             coveredKw={coveredKw} missingKw={missingKw} gapsScoredAt={p.atsGapsScoredAt}
-            onParse={parseJd} parseBusy={parseBusy} hasSummary={!!opp?.jdSummary} />
+            onParse={parseJd} parseBusy={parseBusy} hasSummary={!!opp?.jdSummary}
+            keywordScore={keywordScore} />
 
           <AnalysisRunCard
             busy={jdBusy} onRun={runJd} hasRun={!!p.jdAnalyzed} result={runResult}
@@ -514,7 +535,7 @@ export default function PacketBuilder({ id, step }) {
   const keywordTally = (
     <KeywordTallyOverlay
       open={atsOpen} onClose={() => setAtsOpen(false)}
-      packet={p} req={req.data}
+      req={req.data} keywordScore={keywordScore}
       coveredKw={coveredKw} missingKw={missingKw} gapsScoredAt={p.atsGapsScoredAt} atsScore={atsScore}
       onBuildAll={buildAll} buildBusy={allBusy}
       onGoResume={() => { setAtsOpen(false); setActiveStep('resume') }} />
@@ -606,7 +627,7 @@ export default function PacketBuilder({ id, step }) {
         </div>
       </div>
 
-      {/* Two columns since D4: nav rail + content. The old 280px right ATS column is gone, which is
+      {/* Two columns since D4: nav rail + content. The old 280px right keyword column is gone, which is
           what gives the centre its width back (1280 shell cap - 196 nav leaves ~664px at 1440). */}
       <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start' }}>
         {/* Left: step list */}
