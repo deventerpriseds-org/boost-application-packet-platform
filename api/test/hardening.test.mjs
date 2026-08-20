@@ -743,45 +743,66 @@ test('H27: the check reports the scanner\'s not_applicable, it does not re-deriv
 })
 
 // ---------------------------------------------------------------------------------------------
-// H26 — This file could carry two different cases under one ID, and nothing would notice.
+// H26 — Two cases under one ID, and nothing noticed. Then the FIX for that failed three more times.
 //
-// Not a hypothetical. Measured 2026-08-20 across three live lane branches:
+// The original failure, measured 2026-08-20 across three live lane branches:
 //     qc-p8-2-figures   H24 H25 H28
 //     qc-p8-3-evidence  H27 H28 H29 H30
 //     qc-p3-remediation H26 H27 H28 H29 H30 H31
-// `H28` meant three different defects; `H27`, `H29` and `H30` two each. IDs had been pre-allocated
-// one per lane precisely to prevent this, which was never going to be enough — each lane found
-// several defects, not one. Ranges, not single IDs.
+// `H28` meant three different defects; `H27`, `H29` and `H30` two each.
 //
-// The reason it goes unnoticed is structural: this file is append-only by convention, so three
-// branches each appending at the end MERGE CLEANLY. Git reports no conflict, every branch is green
-// in isolation, and the duplicates land silently. An ID that names two things is an ID that names
-// nothing — `.claude/actions.md` points at these numbers, and the whole scheme depends on the
-// pointer resolving to exactly one case.
+// WHY THE OBVIOUS FIXES ALL FAILED, in order, in one session:
+//   1. Pre-allocate one ID per lane   -> each lane found SEVERAL defects, not one.
+//   2. Pre-allocate RANGES per lane   -> lanes overran their range, and new lanes appeared.
+//   3. Claim IDs at merge time        -> worked, but cost a manual renumber on every merge. Three
+//                                        of them, by hand, plus a bad splice that left the file
+//                                        unparseable.
+//   4. This guard, checking one file  -> STRUCTURALLY BLIND to the actual failure. Within a single
+//                                        branch there are never duplicates; the collision exists
+//                                        only in the union of branches that cannot see each other,
+//                                        and by then both are green. It also never matched the
+//                                        `b`-variants at all: 44 of 52 cases were scanned, and
+//                                        H4b/H5b/H34b/H35b/H36b/H39b/H41b/H44b were invisible.
 //
-// The invariant: one ID, one case, and no gaps that hide a case lost in a merge.
-test('H26: every hardening case has its own ID', () => {
+// The root cause is not coordination. It is a GLOBAL COUNTER assigned on branches that cannot see
+// each other — a design that requires coordination to be correct, in a workflow that has none.
+//
+// So the counter is retired. H1-H44 are FROZEN: they are referenced from `.claude/actions.md`, from
+// code comments and from each other, and renaming them would break every pointer for no gain. Every
+// NEW case takes a SLUG naming what it guards — `H:schema-parity`, `H:no-vacuous-gate`. Two lanes
+// can mint slugs simultaneously without collision, and if they DO collide it is because they guard
+// the same thing, which is information rather than an accident.
+//
+// The invariant: one ID one case, across every form, and no new number can be minted.
+const FROZEN_MAX = 44
+test('H26: every hardening case has its own ID, and the counter stays retired', () => {
   const self = readFileSync(new URL('./hardening.test.mjs', import.meta.url), 'utf8')
-  // Read the ID off the test NAME, which is what a reader and actions.md both use. Comments are
-  // stripped first: this very comment block lists six duplicate IDs, and a scan that counted those
-  // would fire on the description of the bug rather than the bug.
-  const ids = [...stripComments(self).matchAll(/test\('(H(\d+)):/g)].map(m => ({ id: m[1], n: Number(m[2]) }))
-  assert.ok(ids.length >= 26, `only ${ids.length} cases found — the scan has gone stale`)
+  // Comments stripped first: this block lists six duplicate IDs, and a scan counting those would
+  // fire on the description of the bug rather than the bug.
+  const ids = [...stripComments(self).matchAll(/test\('(H(?:\d+b?|:[a-z0-9-]+)):/g)].map(m => m[1])
+  assert.ok(ids.length >= 52, `only ${ids.length} cases found — the scan has gone stale`)
 
-  const seen = new Map()
-  const dupes = []
-  for (const { id } of ids) {
-    if (seen.has(id)) dupes.push(id); else seen.set(id, true)
-  }
+  const seen = new Set(); const dupes = []
+  for (const id of ids) { if (seen.has(id)) dupes.push(id); else seen.add(id) }
   assert.deepEqual(dupes, [], 'two cases share an ID — actions.md now points at both and resolves to neither')
 
-  // A GAP is the other half of the same accident: a merge that dropped a case leaves its number
-  // unused, and the next lane reuses it for something unrelated. Numbering must be contiguous from
-  // H1, so a hole is visible at the moment it appears rather than at the moment it is reused.
-  const nums = ids.map(x => x.n).sort((a, b) => a - b)
+  // THE MECHANISM. A new numeric ID cannot be minted, so two lanes cannot pick the same next number.
+  const minted = ids.filter(id => /^H\d+b?$/.test(id) && Number(id.match(/\d+/)[0]) > FROZEN_MAX)
+  assert.deepEqual(minted, [],
+    `H1-H${FROZEN_MAX} are frozen. A new case takes a SLUG naming what it guards — test('H:what-it-guards: ...') ` +
+    `— because a shared counter assigned on branches that cannot see each other collides by design, ` +
+    `and did so three times in one session.`)
+
+  // Gaps in the FROZEN range only: a merge that dropped a case leaves its number unused, and the
+  // pointer in actions.md then resolves to nothing.
+  const nums = ids.filter(id => /^H\d+$/.test(id)).map(id => Number(id.slice(1)))
   const missing = []
-  for (let i = 1; i <= nums[nums.length - 1]; i++) if (!nums.includes(i)) missing.push(`H${i}`)
-  assert.deepEqual(missing, [], 'a hardening case was lost in a merge — its ID is unused')
+  for (let i = 1; i <= FROZEN_MAX; i++) if (!nums.includes(i)) missing.push(`H${i}`)
+  assert.deepEqual(missing, [], 'a frozen hardening case was lost in a merge — its ID is unused')
+
+  // Slugs must say what they guard, so the ID stays a pointer rather than becoming a new counter.
+  const badSlugs = ids.filter(id => id.startsWith('H:') && id.slice(2).split('-').length < 2)
+  assert.deepEqual(badSlugs, [], 'a slug that is a single word is a counter with extra steps')
 })
 
 // ---------------------------------------------------------------------------------------------
