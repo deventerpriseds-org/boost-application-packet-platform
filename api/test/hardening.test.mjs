@@ -110,6 +110,26 @@ test('H5: a requirement span never crosses a sentence boundary', () => {
   assert.ok(posting.slice(b.start, b.end).startsWith('You will own'))
 })
 
+// H5c — the FIX for H5 introduced the mirror-image bug: sentence clipping treated an
+// abbreviation's period as a sentence end. Measured on live rows: "must be a U.S. Citizen",
+// "SaaS vs. Services margin tracking", "e.g. Apple, Nest, Sonos". Truncating a real requirement
+// fabricates a quote just as surely as running past its end does.
+test('H5c: an abbreviation period does not end a sentence', () => {
+  for (const [text, needle] of [
+    ['Candidates must be a U.S. Citizen or Green Card Holder for this role.', 'must be a U.S. Citizen'],
+    ['Implement SaaS vs. Services margin tracking across the portfolio.', 'SaaS vs. Services margin tracking'],
+    ['Experience at a consumer company (e.g. Apple, Nest) is required.', 'e.g. Apple'],
+  ]) {
+    const b = sentenceBounds(text, text.indexOf(needle))
+    assert.ok(text.slice(b.start, b.end).includes(needle),
+      `clipped mid-abbreviation: ${JSON.stringify(text.slice(b.start, b.end))}`)
+  }
+  // A real sentence end still ends the sentence.
+  const t = 'We build water technology. Role: Director of Operations'
+  const b = sentenceBounds(t, 0)
+  assert.ok(!t.slice(b.start, b.end).includes('Role:'))
+})
+
 test('H5b: a garbage fragment is NOT reported as a covered must-have', () => {
   const garbage = { seq: 7, verbatim: 'digital water technology). Role: Director of Digital Technology Operations', item_text: '', kind: 'must_have' }
   const rs = runChecks({

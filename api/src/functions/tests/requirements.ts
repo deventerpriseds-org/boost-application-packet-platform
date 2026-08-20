@@ -195,9 +195,35 @@ export interface Span { start: number; end: number }
  * line and then counted as a COVERED must-have, because a resume for the role naturally contains
  * those words. A gate went green on text the employer never wrote as a requirement.
  */
+const ABBREV = new Set(['vs', 'eg', 'ie', 'etc', 'inc', 'ltd', 'llc', 'corp', 'co', 'dr', 'mr', 'mrs',
+  'ms', 'st', 'jr', 'sr', 'no', 'approx', 'est', 'dept', 'univ', 'assoc', 'ph', 'ba', 'bs', 'ms', 'mba'])
+
+/**
+ * Is the period at `i` an abbreviation's period rather than a sentence end?
+ *
+ * Measured on live rows: without this, `must be a U.S. Citizen` clips to `must be a U.S.` and
+ * `SaaS vs. Services margin tracking` clips to `SaaS vs.` — a fabricated quote in the opposite
+ * direction from the one sentence-clipping was added to prevent. Truncating a real requirement is
+ * the same class of error as extending past its end.
+ */
+function isAbbreviation(text: string, i: number): boolean {
+  let j = i - 1
+  while (j >= 0 && /[A-Za-z.]/.test(text[j])) j--
+  const word = text.slice(j + 1, i)
+  if (!word) return false
+  if (word.includes('.')) return true                 // U.S. / e.g. / i.e.
+  if (word.length <= 2 && /^[A-Za-z]+$/.test(word)) return true   // initials, "vs", "No"
+  return ABBREV.has(word.toLowerCase().replace(/\./g, ''))
+}
+
 export function sentenceBounds(text: string, pos: number): Span {
-  const isBoundary = (i: number) =>
-    i >= 0 && i < text.length && /[.!?;:]/.test(text[i]) && (i + 1 >= text.length || /\s/.test(text[i + 1]))
+  const isBoundary = (i: number) => {
+    if (i < 0 || i >= text.length) return false
+    if (!/[.!?;:]/.test(text[i])) return false
+    if (i + 1 < text.length && !/\s/.test(text[i + 1])) return false
+    if (text[i] === '.' && isAbbreviation(text, i)) return false
+    return true
+  }
   let start = 0
   for (let i = Math.min(pos, text.length - 1); i > 0; i--) {
     if (isBoundary(i - 1)) { start = i; break }
