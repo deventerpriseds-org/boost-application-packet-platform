@@ -80,6 +80,27 @@ export const SWAP_THRESHOLD = 0.5
 /** Byte-level identity after normalisation — a `kept` row. */
 export const normItem = (s: string) => normalizePostingText(s).toLowerCase().replace(/[.;:,]+$/, '').trim()
 
+/** The owner's do-not-use list, normalised once. Entries shorter than 3 chars are ignored. */
+export function omitEntries(omitList: string): string[] {
+  return splitItems(omitList || '').map(normItem).filter(x => x.length > 2)
+}
+
+/**
+ * Is this item on the owner's do-not-use list?
+ *
+ * Exact match or whole-phrase containment ONLY — deliberately not fuzzy similarity. Similarity
+ * compares content tokens after dropping stopwords and short tokens, so "Skill number 0" and
+ * "Skill number 3" both reduce to {skill, number} and score 1.0. A fuzzy rule therefore accuses
+ * every near-identical label of being banned when one of them is. Naming an innocent item as a
+ * violation is worse than missing one, because the whole value of this check is that its offender
+ * list can be acted on without re-reading everything.
+ */
+export function onOmitList(label: string, omitted: string[]): boolean {
+  const n = normItem(label)
+  if (!n) return false
+  return omitted.some(o => n === o || new RegExp(`(^|\\W)${o.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(\\W|$)`).test(n))
+}
+
 export interface CandidateRow { list: ListKey; label: string; origin: Origin; char_len: number }
 
 export interface SwapRow {
@@ -142,12 +163,7 @@ export interface BuildSwapsResult {
  */
 export function buildSwaps(input: BuildSwapsInput): BuildSwapsResult {
   const { call1 = {}, call3 = {}, pkg = {}, requirements = [], profileText = '', omitList = '' } = input
-  const omitted = splitItems(omitList).map(normItem).filter(x => x.length > 2)
-  /** A dropped item the owner told us never to use. Its removal is a rule, not a posting decision. */
-  const onOmitList = (label: string) => {
-    const n = normItem(label)
-    return omitted.some(o => n === o || n.includes(o) || similarity(label, o) >= 0.75)
-  }
+  const omitted = omitEntries(omitList)
   const profileNorm = normItem(profileText || '')
   const candidates: CandidateRow[] = []
   const swaps: SwapRow[] = []
@@ -201,7 +217,7 @@ export function buildSwaps(input: BuildSwapsInput): BuildSwapsResult {
       if (mergeI >= 0 && mergeC >= SWAP_THRESHOLD) {
         swaps.push(row(list, 'merged', o, finals[mergeI], attribute(finals[mergeI], requirements),
           'folded into an item that already covers it'))
-      } else if (onOmitList(o)) {
+      } else if (onOmitList(o, omitted)) {
         // Never presented as posting-driven: the owner's list removed it, not the employer's words.
         swaps.push({
           list, action: 'dropped', from_label: o, to_label: null, requirement_seq: null,

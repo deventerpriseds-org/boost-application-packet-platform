@@ -389,6 +389,44 @@ create table if not exists insertion (
 );
 create index if not exists insertion_artifact_idx on insertion(artifact_id, loop);
 
+-- P2.1 — one row per check per artifact per run. offenders names the specific items, never a
+-- count: a count tells a reviewer something is wrong without telling them what to fix.
+-- not_applicable is a first-class state and NOT a pass. A coverage check that "passed" because
+-- there were no requirement rows to check against is how a gate goes green on an artifact nobody
+-- verified - the single most dangerous row this table could hold.
+create table if not exists check_result (
+  id           uuid primary key default uuid_generate_v4(),
+  artifact_id  uuid not null references artifact(id) on delete cascade,
+  run_id       uuid not null,        -- one id per engine run, so a run is inspectable as a set
+  check_key    text not null,
+  engine       text not null check (engine in ('deterministic','reviewer')),
+  state        text not null check (state in ('pass','warn','fail','not_applicable')),
+  observed     text,
+  expected     text,
+  offenders    text[] not null default '{}',
+  created_at   timestamptz not null default now(),
+  unique (artifact_id, run_id, check_key)
+);
+create index if not exists check_result_artifact_idx on check_result(artifact_id, created_at desc);
+
+-- The aggregated verdict for one artifact, plus the override trail. A warn may be overridden by a
+-- human; a fail may not, because only deterministic rows produce fail and those are facts about
+-- the text. Actor is resolved SERVER-side from the session - a client-supplied actor would make the
+-- audit row worthless.
+create table if not exists artifact_gate (
+  artifact_id     uuid primary key references artifact(id) on delete cascade,
+  run_id          uuid not null,
+  gate            text not null check (gate in ('pass','warn','fail')),
+  attention_count int not null default 0,
+  computed_at     timestamptz not null default now(),
+  override_by     text,
+  override_at     timestamptz,
+  override_reason text,
+  -- An override needs all three parts or none: a reason with no actor is not an audit trail.
+  check ((override_by is null) = (override_at is null)),
+  check ((override_by is null) = (override_reason is null))
+);
+
 -- Idempotent multi-tenant column adds (safe on tables that predate them)
 alter table persona        add column if not exists owner_email text not null default 'demo@executive-engine.local';
 alter table persona        add column if not exists is_demo boolean not null default false;
@@ -420,5 +458,5 @@ export const EXPECTED_TABLES = [
   'persona', 'opportunity', 'contact', 'packet', 'artifact', 'outreach_message',
   'interview', 'offer', 'library_entity', 'asset_event', 'usage_metering',
   'term_library', 'term_library_entry', 'term_candidate', 'requirement',
-  'skill_candidate', 'swap_decision', 'insertion'
+  'skill_candidate', 'swap_decision', 'insertion', 'check_result', 'artifact_gate'
 ]
