@@ -245,6 +245,19 @@ test('with no facts recorded the engine behaves exactly as before', () => {
   assert.ok(find(withNone, 'must_have_coverage'))
 })
 
+test('a requirement the facts own is reported ONCE, not under template_reach as well', () => {
+  // Live Trinnex: "Reside in the East Coast" appeared under BOTH facts_needed and template_reach.
+  // One requirement, two entries, two jobs for the reader where there is one.
+  const rs = runChecks({
+    type: 'resume', pkg: RESUME_FULL,
+    requirements: [{ seq: 6, verbatim: 'Reside in the East Coast of the United States', item_text: '', kind: 'must_have' }],
+    facts: [ownerFact('identity.location', 'Westminster, MD 21158')],
+  })
+  const named = k => (find(rs, k)?.offenders || []).join(' ')
+  assert.match(named('facts_needed'), /East Coast/, 'the fact system owns it')
+  assert.ok(!/East Coast/.test(named('template_reach')), 'and it must not be listed a second time')
+})
+
 // ---- P2.2 inputs ---------------------------------------------------------------------------
 test('an uncited change is a FAIL, never a warn', () => {
   const swaps = [

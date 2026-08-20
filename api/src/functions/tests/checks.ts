@@ -386,9 +386,14 @@ export function runChecks(input: CheckInput): CheckResult[] {
 
     // Split preconditions out BEFORE judging coverage — see ELIGIBILITY_RE — and drop anything the
     // facts already resolved either way. What remains is genuinely a question about the DOCUMENT.
+    // ANY fact verdict means the fact system owns this requirement — including `unknown`, whose
+    // resolution is "confirm the fact", not "edit the static template". Listing it under both
+    // facts_needed and template_reach reports one requirement twice and gives the reader two jobs
+    // where there is one. Only rows no fact touches fall through to the template-reach question.
+    const ownedByFacts = new Set(factVerdicts.map(x => x.r.seq))
     const resolvedByFact = new Set(factVerdicts.filter(x => x.v.verdict !== 'unknown').map(x => x.r.seq))
-    const eligibility = mustHaves.filter(r => ELIGIBILITY_RE.test(r.verbatim || r.item_text) && !resolvedByFact.has(r.seq))
-    const coverable = mustHaves.filter(r => !eligibility.includes(r) && !resolvedByFact.has(r.seq))
+    const eligibility = mustHaves.filter(r => ELIGIBILITY_RE.test(r.verbatim || r.item_text) && !ownedByFacts.has(r.seq))
+    const coverable = mustHaves.filter(r => !eligibility.includes(r) && !resolvedByFact.has(r.seq) && !ownedByFacts.has(r.seq))
     out.push(eligibility.length
       ? na('template_reach',
            `${eligibility.length} requirement(s) no generated merge field can carry — confirm against the static template`,
