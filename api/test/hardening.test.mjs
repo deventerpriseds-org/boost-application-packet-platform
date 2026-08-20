@@ -627,11 +627,71 @@ test('H25: R3 accuses a claim, never a coincidence of digits', () => {
     assert.deepEqual(scanEcho(guilty, posting, profile).echoes.map(e => e.figure.raw), expected, guilty)
   }
 
-  // The structural half: an unmarked figure may never key on the number alone. Deleting the unit
-  // from `claimKey` restores the incident exactly, and nothing else in this file would notice.
+  // The structural half: an unmarked figure may never key on the number alone.
+  //
+  // This comment used to claim "deleting the unit from claimKey restores the incident exactly".
+  // A verifier proved that false: `scanEcho` INLINED the same rule and never called `claimKey`, so
+  // reverting `claimKey` changed nothing in production and only this assertion fired. The guard was
+  // watching dead code and would have kept passing while the real logic beside it was reverted.
+  // `scanEcho` now decides through `claimKey` itself — reverting it fails nine cases, not one.
   const bare = extractFigures('three business units')[0]
   assert.ok(!isMarked(bare))
   assert.notEqual(claimKey(bare), bare.key, 'an unmarked figure keyed on the bare number again')
   assert.notEqual(claimKey(bare), claimKey(extractFigures('three marathons')[0]),
     'two different nouns must be two different claims')
+})
+
+// ---------------------------------------------------------------------------------------------
+// H28 — A check reported PASS on evidence it never read, because the caller and the scanner
+// disagreed about what "empty" means.
+//
+// `scanEcho` decides emptiness against the NORMALIZED posting; `runChecks` re-derived it from the
+// RAW string. `opportunity.jd_real` stores `descriptionHtml`, so `<p></p>` is a non-empty raw
+// string and an empty posting. Measured before the fix, with a generated summary stating an $18M
+// P&L and 60 engineers:
+//     runChecks(postingText: '<p></p>')      -> state=pass  "no posting-only figures across 1 field(s)"
+//     scanEcho (same input)                  -> notApplicable=true "no employer posting text..."
+// and `gateFor([pass])` turned that into a green gate. The scanner got it right and the caller
+// threw the answer away — `notApplicable` had ZERO readers in src/.
+//
+// The profile side was worse, because it does not go quiet, it ACCUSES:
+//     profile '<p></p>' -> warn, offenders ["ResumeSummary: 60", "ResumeSummary: $18M"]
+//     profile '  '      -> not_applicable
+// An unreadable profile named the candidate's own figures as stolen, because the evidence that
+// would have exonerated them read as absent rather than as unreadable.
+//
+// The invariant is not "trim harder". It is that ONE component owns the question "could this be
+// judged", and every caller reports that component's answer rather than computing its own.
+test('H28: the check reports the scanner\'s not_applicable, it does not re-derive it', () => {
+  const pkg = { ResumeSummary: 'Scaled the org to 60 engineers and owned an $18M P&L.' }
+  const posting = 'We manage a $18M portfolio with 60+ engineers.'
+  const profile = 'Von scaled the org to 60 engineers and owned an $18M P&L at Acme.'
+  const row = (rs) => rs.find(r => r.check_key === 'posting_figure_echo')
+
+  // A posting that is markup and nothing else was never compared to anything.
+  for (const empty of ['<p></p>', '<div><br/></div>', '&nbsp;&nbsp;', '  <br>  ', '<script>var x=1</script>']) {
+    const r = row(runChecks({ type: 'resume', pkg, postingText: empty, profileText: profile }))
+    assert.equal(r.state, 'not_applicable', `posting ${JSON.stringify(empty)} produced ${r.state}`)
+    assert.notEqual(gateFor([r]), 'pass', 'and it may never turn into a green gate')
+  }
+
+  // A profile that is markup and nothing else cannot exonerate — and must not accuse.
+  for (const empty of ['<p></p>', '<div></div>', '&nbsp;']) {
+    const r = row(runChecks({ type: 'resume', pkg, postingText: posting, profileText: empty }))
+    assert.equal(r.state, 'not_applicable', `profile ${JSON.stringify(empty)} produced ${r.state}`)
+    assert.deepEqual(r.offenders, [], 'an unreadable profile named an offender')
+  }
+
+  // Both readable: the check does its job, and the kept figures are CITED rather than counted.
+  const good = row(runChecks({ type: 'resume', pkg, postingText: posting, profileText: profile }))
+  assert.equal(good.state, 'pass')
+  assert.match(good.observed, /your profile states/, 'C5 says kept AND cited; a count is not an excerpt')
+
+  // Structural: no caller may re-implement the emptiness test the scanner already owns.
+  const offenders = allSources()
+    .filter(([f]) => f !== 'figureEcho.ts')
+    .filter(([, body]) => /scanEcho\(/.test(stripComments(body)))
+    .filter(([, body]) => /(postingText|profileText)\s*\|\|\s*''\s*\)\s*\.trim\(\)|String\(\s*input\.(postingText|profileText)[^)]*\)\.trim\(\)/.test(stripComments(body)))
+    .map(([f]) => f)
+  assert.deepEqual(offenders, [], 'a caller is deciding emptiness for itself again')
 })

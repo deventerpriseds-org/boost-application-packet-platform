@@ -22,7 +22,12 @@ export interface Figure {
   key: string
   start: number
   end: number
-  kind: 'currency' | 'count' | 'percent' | 'spelled'
+  kind: 'currency' | 'count' | 'percent' | 'range'  | 'spelled'
+  /**
+   * The literal announces a QUANTITY by itself: a `+` suffix, or currency carrying a magnitude
+   * ("$18M", "$18 million"). Set at extraction, never re-derived from `raw`.
+   */
+  marked: boolean
   /**
    * The word the figure counts - "business" in "three business units", "" when nothing follows.
    *
@@ -37,7 +42,7 @@ export interface Figure {
  * safe - nobody writes "$18M" incidentally.
  */
 export function isMarked(f: Figure): boolean {
-  return f.kind === 'currency' || f.kind === 'percent' || /\+\s*$/.test(f.raw)
+  return f.marked
 }
 
 /**
@@ -57,13 +62,17 @@ export function isMarked(f: Figure): boolean {
  * Singulars and plurals fold together so "three business unit" and "three business units" are one
  * claim. That is a suffix rule on an exact word, not fuzzy similarity - nothing here RANKS.
  */
+export function unitKey(f: Figure): string {
+  return `${f.key}|${stem(f.unit)}`
+}
+
 export function claimKey(f: Figure): string {
   if (isMarked(f)) return f.key
   // An unmarked figure with nothing after it counts nothing, so there is no claim to echo. The
   // sentinel cannot equal any other key, so such a figure simply never matches - the deliberate
   // silence this check prefers over a guess.
   if (!f.unit) return `${f.key}|<none>${f.start}`
-  return `${f.key}|${stem(f.unit)}`
+  return unitKey(f)
 }
 
 /**
@@ -87,12 +96,17 @@ export function stem(w: string): string {
 // figure 1,000,000 would accuse it of echoing any posting that priced anything in millions. They
 // appear below as MULTIPLIERS instead, so "one million" is ONE figure worth 1e6 rather than two.
 const SPELLED: Record<string, number> = {
-  one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10,
-  eleven: 11, twelve: 12, fifteen: 15, twenty: 20, thirty: 30, forty: 40, fifty: 50,
-  sixty: 60, seventy: 70, eighty: 80, ninety: 90,
+  three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10,
+  eleven: 11, twelve: 12, thirteen: 13, fourteen: 14, fifteen: 15, sixteen: 16,
+  seventeen: 17, eighteen: 18, nineteen: 19, twenty: 20, thirty: 30, forty: 40,
+  fifty: 50, sixty: 60, seventy: 70, eighty: 80, ninety: 90,
 }
 
-const MULT: Record<string, number> = { k: 1e3, m: 1e6, b: 1e9, bn: 1e9, thousand: 1e3, million: 1e6, billion: 1e9 }
+// `hundred` was in the spelled-number ALTERNATION but not in this table, so `MULT['hundred']` was
+// undefined, `|| 1` took over, and "one hundred engineers" evaluated to the figure ONE. That is both
+// a miss (a real "100 engineers" echo went unseen) and an accusation (it collided with a posting
+// that said "the one engineer who owns this"). A multiplier must appear in both places or neither.
+const MULT: Record<string, number> = { hundred: 100, k: 1e3, m: 1e6, b: 1e9, bn: 1e9, thousand: 1e3, million: 1e6, billion: 1e9 }
 
 /**
  * Every figure in a body of text.
@@ -102,15 +116,51 @@ const MULT: Record<string, number> = { k: 1e3, m: 1e6, b: 1e9, bn: 1e9, thousand
  * `400+`), percentages, and SPELLED-OUT numbers — because "three business units" echoes just as
  * badly as "3 business units" and a digit-only scanner misses it entirely.
  */
+/** Words that are never what a figure counts — skip them and take the next real noun. */
+const UNIT_STOP = new Set(['of', 'the', 'a', 'an', 'to', 'in', 'on', 'for', 'and', 'or', 'per', 'my', 'our', 'their', 'its'])
+
+/**
+ * The noun a figure counts, starting at `end`. "" when there is none.
+ *
+ * Three rules, each paid for by a false positive found in verification:
+ *  - The gap may not cross a NEWLINE. "Skill number 3" ends a bullet; the first word of the next
+ *    bullet is not what the 3 counts, and treating it as such invents a claim out of layout.
+ *  - A HYPHEN-JOINED word is an adjective, not the subject: in "4-day release train" the figure
+ *    counts the release train, not the day. Without this, "Introduced a 4-day release train" was
+ *    accused of echoing a posting's "We operate a 4-day workweek" — same number, same "day",
+ *    entirely different claim.
+ *  - STOPWORDS are skipped. "Delivered 100% of committed roadmap items" counts roadmap items; the
+ *    word "of" told us nothing, and matching on it accused that line of echoing "We are 100% remote".
+ */
+export function unitAfter(text: string, end: number): string {
+  // A CAPITALISED word is a proper noun, not something being counted. "Based near 2400 Congress
+  // Ave" and a posting's "Offices at 2400 Congress Ave" share a street address, and the noun rule
+  // matched them on "Congress". An address is not an achievement. Reported as no unit, which for an
+  // unmarked figure means it can never match anything.
+  const raw = unitWordAfter(text, end)
+  return /^[A-Z]/.test(raw) ? '' : raw.toLowerCase()
+}
+
+function unitWordAfter(text: string, end: number): string {
+  let rest = text.slice(end)
+  const hyphen = rest.match(/^-([A-Za-z][\w]*)/)          // "4-day release" -> skip "day"
+  if (hyphen) rest = rest.slice(hyphen[0].length)
+  for (let i = 0; i < 3; i++) {
+    const m = rest.match(/^[^\n\w]*([A-Za-z][\w-]*)/)
+    if (!m) return ''
+    const w = m[1]
+    if (!UNIT_STOP.has(w.toLowerCase())) return w
+    rest = rest.slice(m[0].length)
+  }
+  return ''
+}
+
 export function extractFigures(text: string): Figure[] {
   const s = String(text || '')
   const out: Figure[] = []
-  const push = (raw: string, key: string, start: number, kind: Figure['kind']) => {
+  const push = (raw: string, key: string, start: number, kind: Figure['kind'], marked = false) => {
     const end = start + raw.length
-    // The gap may not cross a newline. "Skill number 3" ends a bullet; the word starting the NEXT
-    // bullet is not what the 3 counts, and treating it as such invents a claim out of layout.
-    const unit = (s.slice(end).match(/^[^\n\w]*([A-Za-z][\w-]*)/) || ['', ''])[1].toLowerCase()
-    out.push({ raw, key, start, end, kind, unit })
+    out.push({ raw, key, start, end, kind, unit: unitAfter(s, end), marked })
   }
 
   // $18M · $18 million · $18.5M · £18M
@@ -119,7 +169,11 @@ export function extractFigures(text: string): Figure[] {
     // `\s*` before the optional magnitude word swallows the space even when no word follows, so
     // "$2019 spend" yielded the raw "$2019 " - trailing space and all - and that string is what a
     // correction would search for and what the drawer would print back at the user.
-    push(m[0].trimEnd(), `cur:${n}`, m.index!, 'currency')
+    // MARKED only with a magnitude ("$18M", "$18 million"). A bare amount is NOT self-announcing:
+    // postings are dense with comp bands and benefit amounts, resumes with budgets they really
+    // owned, and exempting those from the noun rule accused "$5,000 training stipend" of echoing
+    // "a $5,000 learning budget", and "$180,000 vendor budget" of echoing a salary range.
+    push(m[0].trimEnd(), `cur:${n}`, m.index!, 'currency', !!m[3])
   }
   // 40% · 40 percent
   //
@@ -129,7 +183,27 @@ export function extractFigures(text: string): Figure[] {
   // count scanner below as the figure FOUR. Measured before the fix: "40% growth" produced exactly
   // one figure, `{raw:"4", key:"num:4"}`.
   for (const m of s.matchAll(/(\d[\d,]*(?:\.\d+)?)\s*(?:%|percent\b)/gi)) {
+    // Never marked. "100% remote" and "Delivered 100% of committed items" share a number and
+    // nothing else; a percentage without its subject is not a claim about anything.
     push(m[0], `pct:${Number(m[1].replace(/,/g, ''))}`, m.index!, 'percent')
+  }
+  // 5-7 years · 10 - 15 sites — ONE figure, not two.
+  //
+  // Extracted before the bare-count scanner so it claims the span first. Left to that scanner, a
+  // posting's "Requires 5-7 years of experience" yielded a figure SEVEN carrying the unit "years",
+  // which then matched a resume's honest "7 years leading platform organizations" — an accusation
+  // built on half of a range the candidate never quoted. A range keys as a range, so a bare number
+  // inside it collides with nothing.
+  for (const m of s.matchAll(/\b(\d[\d,]*)\s?-\s?(\d[\d,]*)\b/g)) {
+    const at = m.index!
+    if (out.some(f => at >= f.start && at < f.end)) continue
+    const lo = Number(m[1].replace(/,/g, '')), hi = Number(m[2].replace(/,/g, ''))
+    if (!Number.isFinite(lo) || !Number.isFinite(hi)) continue
+    // Keyed so it matches NOTHING, deliberately. A range is a requirement shape — "5-7 years",
+    // "$180,000 - $220,000" — not an achievement; nobody claims to have accomplished a range. This
+    // figure exists solely to claim the span so the bare-count scanner cannot split "5-7 years"
+    // into a figure SEVEN that then matches an honest "7 years leading platform organizations".
+    push(m[0], `range:${lo}-${hi}@${at}`, at, 'range')
   }
   // 60+ · 400 + · 1,200 — a bare count. The `+` is part of the literal but NOT of the key, so a
   // resume saying "60" still collides with a posting saying "60+": echoing the number is the
@@ -155,7 +229,13 @@ export function extractFigures(text: string): Figure[] {
     // and a comma or decimal means it was never written as a year ("1,987 accounts").
     const bareFourDigit = /^\d{4}$/.test(m[1])
     if (bareFourDigit && !m[2] && n >= 1900 && n <= 2099) continue
-    push(m[0].trimEnd(), `num:${n}`, at, 'count')
+    // AN ORDINAL IS NOT A QUANTITY. "3rd-party vendor integrations" contains no figure three, and
+    // because BOTH documents write "3rd-party" the noun rule does not save it — it actively
+    // confirms the match. Measured: "Owned 3rd-party vendor integrations" was accused of echoing
+    // "You will manage 3rd-party vendor relationships". The spelled form ("third-party") was
+    // silent, so the check's verdict flipped on typography alone.
+    if (/^(st|nd|rd|th)\b/i.test(s.slice(at + m[1].length))) continue
+    push(m[0].trimEnd(), `num:${n}`, at, 'count', !!m[2])
   }
   // three business units · sixty engineers
   //
@@ -164,12 +244,20 @@ export function extractFigures(text: string): Figure[] {
   // can currently tell whether it is present. It earns its place by making the SPELLED table safe
   // to extend - put "million" back in it and this line is the only thing stopping `$18 million`
   // from also yielding a free-floating `num:1000000`.
+  // `one` and `two` are NOT in SPELLED: as standalone words they are prose, not claims. "One of the
+  // first product hires" and "split into two tracks" were both accused of echoing a posting that
+  // said the same ordinary thing, which is the `million` lesson applied where it bites hardest.
+  // They return here ONLY in front of a multiplier, because "one hundred engineers" is a quantity
+  // and dropping it lost a real echo of a posting's "100 engineers".
   const SPELLED_RE = new RegExp(
-    `\\b(${Object.keys(SPELLED).join('|')})(?:[ -](hundred|thousand|million|billion))?\\b`, 'gi')
+    `\\b(?:(one|two)[ -](hundred|thousand|million|billion)|(${Object.keys(SPELLED).join('|')})(?:[ -](hundred|thousand|million|billion))?)\\b`, 'gi')
   for (const m of s.matchAll(SPELLED_RE)) {
     const at = m.index!
     if (out.some(f => at >= f.start && at < f.end)) continue
-    const n = SPELLED[m[1].toLowerCase()] * (m[2] ? MULT[m[2].toLowerCase()] || 1 : 1)
+    const unitWord = (m[1] || m[3])!.toLowerCase()
+    const multWord = (m[2] || m[4] || '').toLowerCase()
+    const base = m[1] ? (unitWord === 'one' ? 1 : 2) : SPELLED[unitWord]
+    const n = base * (multWord ? MULT[multWord] || 1 : 1)
     push(m[0], `num:${n}`, at, 'spelled')
   }
   return out.sort((a, b) => a.start - b.start)
@@ -217,14 +305,32 @@ export function scanEcho(generated: string, postingText: string, profileText: st
   if (!posting.trim()) {
     return { echoes: [], shared: [], notApplicable: true, reason: 'no employer posting text to compare against' }
   }
+  // BOTH sides are decided here, against the NORMALIZED string, because a caller that re-derives
+  // "is there text" from the raw one gets a different answer: `jd_real` is HTML, so `<p></p>` is a
+  // non-empty raw string and an empty posting. A caller testing the raw string called that a clean
+  // PASS on a document it had never compared to anything — the vacuous green this layer exists to
+  // prevent — and the profile half was worse, producing false ACCUSATIONS off a markup-only
+  // profile. One emptiness test, in the place that knows what emptiness means.
+  const profileNorm = normalizePostingText(profileText)
+  if (!profileNorm.trim()) {
+    return { echoes: [], shared: [], notApplicable: true, reason: "no profile text — an echo cannot be told from the candidate's own figure" }
+  }
   // TWO indexes, because which one applies is decided by the GENERATED figure, never by how the
   // employer happened to punctuate theirs. A posting writing "60+ sites" and a resume writing "60
   // sites" is the echo this check exists to catch; keying both through `claimKey` missed it
   // entirely, since the posting's `+` marked it and the resume's absence of one did not.
   const postingFigures = extractFigures(posting)
+  // Both indexes are built THROUGH `claimKey`, so there is exactly one implementation of "what
+  // must two documents share". An earlier version inlined the rule here and left `claimKey`
+  // uncalled — the H25 structural guard was then watching dead code, and would have gone on passing
+  // while the real logic beside it was reverted. One rule, one function, one place to break.
   const postingBare = new Set(postingFigures.map(f => f.key))
-  const postingClaims = new Set(postingFigures.filter(f => f.unit).map(f => `${f.key}|${stem(f.unit)}`))
-  const profile = extractFigures(normalizePostingText(profileText))
+  // EVERY posting figure with a noun, marked or not. Filtering marked ones out here re-broke the
+  // asymmetry: a posting asking "60+ sites" answered by a resume writing "60 sites" — the
+  // commonest echo there is — stopped matching, because the posting's figure went only into the
+  // bare index while the resume's unmarked one looked only at this one.
+  const postingClaims = new Set(postingFigures.filter(f => f.unit).map(unitKey))
+  const profile = extractFigures(profileNorm)
   // The PROFILE side keys on the bare figure, not the claim. If the candidate's record says they ran
   // 60 sites, that licenses the number wherever they state it - insisting they phrase it with the
   // posting's noun would strip a true achievement over a wording difference, which is the exact
@@ -234,9 +340,11 @@ export function scanEcho(generated: string, postingText: string, profileText: st
   const echoes: Echo[] = []
   const shared: Echo[] = []
   for (const figure of extractFigures(generated)) {
-    const inPosting = isMarked(figure)
-      ? postingBare.has(figure.key)                              // the literal announces a quantity
-      : !!figure.unit && postingClaims.has(`${figure.key}|${stem(figure.unit)}`)
+    // `claimKey` IS the branch: it returns the bare key for a marked figure and the noun-qualified
+    // one otherwise, so the only thing left to choose is which index to look in. Written any other
+    // way, `claimKey` becomes dead code and the H25 guard that watches it stops watching anything —
+    // which is exactly what a verifier found the first time, when this line inlined the rule.
+    const inPosting = (isMarked(figure) ? postingBare : postingClaims).has(claimKey(figure))
     if (!inPosting) continue                                     // profile_only — not our business
     const owned = profileByKey.get(figure.key)
     if (owned) shared.push({ figure, disposition: 'shared_with_profile', profileRaw: owned.raw })

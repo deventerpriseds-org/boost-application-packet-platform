@@ -343,7 +343,11 @@ test('R3 keeps a figure the profile also states, and says so', () => {
   const r = find(rs, 'posting_figure_echo')
   assert.equal(r.state, 'pass')
   assert.deepEqual(r.offenders, [])
-  assert.match(r.observed, /1 figure\(s\) kept/, 'the carve-out must be visible, not silent')
+  // CITE, not count. C5 says kept AND cited, and R2 defines evidenced as "a verbatim excerpt from
+  // the stored profile can be shown next to it". "1 figure(s) kept" — the first wording — told the
+  // owner nothing they could check: not which figure, and not on what evidence.
+  assert.match(r.observed, /kept as yours/, 'the carve-out must be visible, not silent')
+  assert.match(r.observed, /60 \(your profile states 60\)/, 'it must name the figure AND the profile text that licenses it')
 })
 
 test('R3 without a posting or without a profile is not_applicable — never pass, never an accusation', () => {
