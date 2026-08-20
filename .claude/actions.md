@@ -1621,3 +1621,56 @@ apply to — there is nothing to reprice retroactively. Cost accrues correctly f
 **Method note worth keeping:** the D8 claims sat in a commit message as unverified assertions for
 several commits. One read-only `db-query.yml` dispatch settled all three in about ninety seconds.
 When a claim is about production state, the workflow is cheaper than the hedge.
+
+
+## ACT — P4 and P5 shipped and confirmed in production (2026-08-20)
+
+Everything below was read from job logs, not inferred.
+
+### P4 — merged (785c82b), deployed, migrated, verified end to end
+`api-deploy` succeeded for that exact SHA (run 32330851706, waited with `sha:`, never `latest:`).
+
+**A trap worth remembering: `pgMigrate` ran the OLD bundle.** Called ~60s after the deploy went
+green, it reported `"22/22 tables present"` — but the merged `EXPECTED_TABLES` has 23. That count is
+the fingerprint of pre-merge code. The retry a minute later created `review_verdict`. CLAUDE.md
+documents this ~90-120s converge window and I walked into it anyway. **Do not call a route
+immediately after a green deploy; check a value that differs between the two bundles.**
+
+**The reviewer ran live against the Trinnex resume and justified the whole phase on its first run:**
+```
+grade  | seniority | agreed | disagreed | prompt_key      | version | source        | blind | kept | dropped | gate | attention | reviewer_fails | metered
+strong |        95 |      1 |         4 | reviewer_system |       1 | prompts_table | t     |    3 |       4 | fail |        11 |              0 |       1
+```
+- **4 of 7 citations failed validation** — three quotes the model INVENTED (`quote_not_in_posting`)
+  plus one naming a requirement with no anchor. Without this layer all seven would have been
+  rendered to the owner as the employer's verbatim words.
+- `prompt_source = prompts_table` v1 — running on the authored prompt, not the builtin.
+- `reviewer_fails = 0` with `gate = fail`: D6 holds live. The fail is deterministic; the reviewer
+  contributed three warns and could never have caused it.
+- H20 holds live: dropped citations appear as `requirement <id>: <reason>`, no fabricated text.
+- `not_comparable` works: "1 agreed, 4 disagreed; **5 not comparable**".
+- Both engines independently found the same real gap (East Coast residency) — one via
+  `template_reach`, one in the reviewer's critique.
+
+**D7 proven live, paired, same minute:** unauthenticated `POST /api/prompts` → **403**; the
+token-minting workflow → **200 v1**. The hole the plan's prescribed `requireWrite` would have left
+open is closed.
+
+### P5 — merged (653064f), deployed, all three surfaces confirmed on the live SPA
+Integrated on one branch so the two `PacketBuilder.jsx` conflicts were resolved once (both pure
+additions; both sides kept). 89/89 app tests, 30/30 overlay probe, 16/16 asset-blocks probe.
+
+| Feature | Live evidence | consoleErrors |
+|---|---|---|
+| P5.4 posting analysis | "Posting analysis" + "Model paraphrase" render; "ATS keywords", "Run ATS analysis", "Re-run ATS analysis" ABSENT | `[]` |
+| P5.2 asset blocks | all 7 merge-field cards render; no `0 of 0`, `NaN`, `[object Object]` | `[]` |
+| P5.3 gate drawer | "Assets & gate" renders; no negative finding count | `[]` |
+
+### Still open in production, recorded and NOT yet fixed
+1. **The "Re-run ATS analysis" button cannot re-run.** `api.js` `analyzeJd: (oppId) => post(..., {})`
+   takes no argument and never sends `force`, so the server returns cache. Dead UI created by P0.2's
+   own idempotency fix.
+2. **`covered_kw` does not mean covered.** The prompt asks for `keywords = ATS keywords for this
+   role` with no candidate comparison anywhere; the array renders as green "N covered" chips.
+3. **Dark-mode `accent` pills measure 1.90:1.** `.proto-dark` overrides `--surface-brand-subtle` but
+   not `--surface-brand-default`, across 15+ live sites.
