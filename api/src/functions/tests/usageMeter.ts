@@ -1,24 +1,75 @@
 import { getPgClient } from './pgClient'
 
-// Per-token USD pricing by model (input, output). Embeddings bill input only.
-const PRICES: Record<string, { in: number; out: number }> = {
+// D8 - what this file gets wrong when it is left alone.
+//
+// 1. SHAPE. The Chat Completions API returns `prompt_tokens`/`completion_tokens`; the Responses API
+//    returns `input_tokens`/`output_tokens`. This function read only the first pair, so every call
+//    made through the Responses API - `packet:ai-edit` among them - matched neither field, hit the
+//    `if (!promptTokens && !completionTokens) return` guard, and recorded NOTHING. The dashboard was
+//    not under-reporting those calls, it had never seen one.
+// 2. PRICE. An unknown model silently billed at gpt-4o-mini's rate. That is a fabricated number: it
+//    is wrong by whatever the real model costs, and it is indistinguishable in the table from a
+//    price we actually know. An unpriced model now records `cost_usd = null` and says which model
+//    needs a price, rather than inventing one.
+//
+// Expect `/app/usage` totals to JUMP once this lands. That is a correction, not a regression.
+
+/** Per-token USD pricing by model (input, output). Seeded defaults - see PRICE_OVERRIDE_ENV. */
+export const PRICES: Record<string, { in: number; out: number }> = {
   'gpt-4o-mini': { in: 0.15 / 1e6, out: 0.60 / 1e6 },
   'gpt-4o': { in: 2.50 / 1e6, out: 10.0 / 1e6 },
+  'gpt-4o (vision)': { in: 2.50 / 1e6, out: 10.0 / 1e6 },
   'text-embedding-3-small': { in: 0.02 / 1e6, out: 0 },
   'whisper-1': { in: 0, out: 0 }, // billed per-minute; token cost n/a
 }
 
-export function costOf(model: string, promptTokens: number, completionTokens: number): number {
-  const p = PRICES[model] || PRICES['gpt-4o-mini']
+/**
+ * Owner-supplied prices for models this table does not know, as JSON:
+ *   {"gpt-5.6-luna":{"in":0.00000125,"out":0.00001}}
+ * A new model must not require a code change to become costable, and it must not be priced by
+ * guesswork in the meantime. Read once per call; malformed JSON is ignored, never thrown.
+ */
+export const PRICE_OVERRIDE_ENV = 'MODEL_PRICES_JSON'
+
+export function priceFor(model: string): { in: number; out: number } | null {
+  try {
+    const raw = process.env[PRICE_OVERRIDE_ENV]
+    if (raw) {
+      const o = JSON.parse(raw)
+      const p = o?.[model]
+      if (p && Number.isFinite(Number(p.in)) && Number.isFinite(Number(p.out))) {
+        return { in: Number(p.in), out: Number(p.out) }
+      }
+    }
+  } catch { /* a malformed override must not stop metering */ }
+  return PRICES[model] || null
+}
+
+/**
+ * Cost in USD, or null when the model has no known price.
+ *
+ * Null is the honest answer and the useful one: it makes the unpriced model visible in the table
+ * instead of hiding it inside a total that looks measured.
+ */
+export function costOf(model: string, promptTokens: number, completionTokens: number): number | null {
+  const p = priceFor(model)
+  if (!p) return null
   return promptTokens * p.in + completionTokens * p.out
+}
+
+/** Both OpenAI usage shapes, plus the nested `usage.input_tokens_details` variants. */
+export function tokensOf(usage: any): { prompt: number; completion: number } {
+  const u: any = usage || {}
+  const prompt = Number(u.prompt_tokens ?? u.input_tokens ?? u.promptTokens ?? u.inputTokens ?? 0) || 0
+  const completion = Number(u.completion_tokens ?? u.output_tokens ?? u.completionTokens ?? u.outputTokens ?? 0) || 0
+  return { prompt, completion }
 }
 
 // Best-effort: log one metered call to usage_metering. Never throws — metering
 // must not break the feature it measures. Opens its own short-lived client.
 export async function logUsage(feature: string, model: string, usage: any): Promise<void> {
   try {
-    const promptTokens = usage?.prompt_tokens || 0
-    const completionTokens = usage?.completion_tokens || 0
+    const { prompt: promptTokens, completion: completionTokens } = tokensOf(usage)
     if (!promptTokens && !completionTokens) return
     const cost = costOf(model, promptTokens, completionTokens)
     let client

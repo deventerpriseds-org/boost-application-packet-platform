@@ -86,7 +86,11 @@ export function computeArtifactScore(input: ScoreInput): ArtifactScore {
   // --- must-have coverage: read from the CHECK, not recomputed --------------------------------
   // Recomputing it here would create a second implementation of the same rule, and the day the two
   // drift is the day the gate and the score disagree about the same artifact.
-  const mh = checks.find(c => c.check_key === 'must_have_coverage')
+  // ENGINE-FILTERED on purpose (P4.2). `check_key` is not unique across engines by accident — it is
+  // kept unique by convention (reviewer keys are `reviewer_*`), and a convention is not a guarantee.
+  // Without this filter a reviewer row keyed `must_have_coverage` would feed a model's opinion into
+  // a number the gate and the UI both present as measured.
+  const mh = checks.find(c => c.check_key === 'must_have_coverage' && c.engine === 'deterministic')
   const mustHaveTotal = reqs.filter(r => r.kind === 'must_have').length
   let mustHave: ScoreComponent
   const uncovered: number[] = []

@@ -10,6 +10,7 @@ import { getPgClient } from './pgClient'
 import { runChecks, gateFor, attentionCount, CheckResult, CheckThresholds, DEFAULT_THRESHOLDS } from './checks'
 import { computeArtifactScore, ArtifactScore } from './artifactScore'
 import { loadFacts } from './appFacts'
+import { shapeVerdict } from './appReviewer'
 
 const HEADERS = { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': '*', 'Access-Control-Allow-Methods': 'GET,POST,OPTIONS' }
 
@@ -199,6 +200,13 @@ export async function artifactChecksGet(req: HttpRequest, context: InvocationCon
     const history = (await client.query(
       `select composite, band, must_have_coverage, computed_at from artifact_score
         where artifact_id=$1 order by computed_at desc limit 10`, [art.id])).rows
+    // P4.2 - the two engines are separated at the TOP LEVEL of the response, not left as one flat
+    // array for each client to partition. Two clients partitioning independently is how one screen
+    // comes to show a model's opinion as a rule and another does not. `results` is kept as the
+    // union for existing callers.
+    const review = g
+      ? (await client.query(`select * from review_verdict where artifact_id=$1 and run_id=$2`, [art.id, g.run_id])).rows[0] || null
+      : null
     return {
       status: 200, headers: HEADERS,
       jsonBody: {
@@ -209,6 +217,19 @@ export async function artifactChecksGet(req: HttpRequest, context: InvocationCon
         override: g?.override_by ? { by: g.override_by, at: g.override_at, reason: g.override_reason } : null,
         score, history,
         results,
+        engines: {
+          deterministic: {
+            // Only these rows can produce a gate `fail` (D6). Said here so a reader of the API
+            // never has to infer it from the states they happen to see.
+            decides: 'pass/warn/fail',
+            results: results.filter((r: any) => r.engine === 'deterministic'),
+          },
+          reviewer: {
+            decides: 'warn at most - the reviewer grades and critiques, it never fails an artifact',
+            results: results.filter((r: any) => r.engine === 'reviewer'),
+            verdict: review ? shapeVerdict(review) : null,
+          },
+        },
       },
     }
   } catch (e: any) {

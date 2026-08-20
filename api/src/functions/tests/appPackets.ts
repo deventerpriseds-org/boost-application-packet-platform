@@ -321,7 +321,10 @@ async function buildTemplatedArtifact(client: any, art: any, opp: any, regen: bo
     const roleType = opp.persona_key || opp.role || 'Executive'
     const built = await buildPackageForJD({ key, jd, roleType, company: opp.company, jobTitle: opp.role })
     pkg = built.pkg
-    await logUsage(`packet:${art.type}:generate`, 'gpt-4o-mini', {})
+    // D8 - this used to pass `{}`, which logUsage discards, so every production packet build
+    // recorded nothing. Each of the three generation passes is metered on its own so the cost of
+    // the QC pass is separable from the cost of writing the resume.
+    for (const u of built.usage) await logUsage(`packet:${art.type}:generate:${u.pass}`, 'gpt-4o-mini', u.usage)
     await client.query(`update packet set pkg_json = $1, jd_grounded = $2, updated_at = now() where id = $3`,
       [JSON.stringify(pkg), grounded, art.packet_id])
     // P1.3 — record what the two passes changed, while both payloads are still in hand. They are

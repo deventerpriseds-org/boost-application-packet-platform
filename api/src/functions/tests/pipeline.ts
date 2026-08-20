@@ -50,7 +50,7 @@ async function copyAndInject(token: string, templateId: string, name: string, va
 // Returns `calls` alongside the package because P1.3 cannot reconstruct what changed from the merged
 // output alone: assemblePackage's per-slot preference for Call 3 over Call 1 IS the swap decision,
 // and both sides are needed to see it. These were previously discarded at the end of this function.
-export async function buildPackageForJD(opts: { key: string; jd: string; roleType: string; company: string; jobTitle: string }): Promise<{ pkg: Record<string, string | null>; steps: string[]; roleFocus: any; roleFocusSource: string; calls: { c1: any; c2: any; c3: any }; profileText: string; omitList: string; warnings: string[]; qcApplied: boolean; settings: PipelineSettings }> {
+export async function buildPackageForJD(opts: { key: string; jd: string; roleType: string; company: string; jobTitle: string }): Promise<{ pkg: Record<string, string | null>; steps: string[]; roleFocus: any; roleFocusSource: string; calls: { c1: any; c2: any; c3: any }; usage: Array<{ pass: string; usage: any }>; promptVersions: Record<string, number>; profileText: string; omitList: string; warnings: string[]; qcApplied: boolean; settings: PipelineSettings }> {
   const { key, jd, roleType, company, jobTitle } = opts
   const steps: string[] = []
   const warnings: string[] = []
@@ -146,7 +146,16 @@ export async function buildPackageForJD(opts: { key: string; jd: string; roleTyp
   // config gap or an inert QC call is invisible on the path that actually ships documents.
   if (warnings.length) console.warn(`[pipeline] ${warnings.length} warning(s) for ${jobTitle} @ ${company}:\n - ${warnings.join('\n - ')}`)
 
-  return { pkg, steps, roleFocus, roleFocusSource: role.source, calls: { c1, c2, c3 }, profileText, omitList, warnings, qcApplied, settings }
+  // D8 - the three generation calls were never metered. Their `usage` objects were read from the
+  // OpenAI reply and then dropped on the floor here, so the production packet build recorded ZERO
+  // rows in usage_metering while being the most expensive thing the product does. They are returned
+  // rather than logged here so metering stays in the HTTP layer that owns the pg client.
+  const usage = [
+    { pass: 'resume', usage: (r1 as any)?.usage },
+    { pass: 'portfolio', usage: (r2 as any)?.usage },
+    { pass: 'ats-qc', usage: (r3 as any)?.usage },
+  ]
+  return { pkg, steps, roleFocus, roleFocusSource: role.source, calls: { c1, c2, c3 }, usage, promptVersions, profileText, omitList, warnings, qcApplied, settings }
 }
 
 // GET /api/jobs?status=received — list jobs for the approval queue

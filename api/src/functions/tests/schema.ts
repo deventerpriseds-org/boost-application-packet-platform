@@ -498,6 +498,49 @@ create table if not exists owner_fact (
 );
 create index if not exists owner_fact_owner_idx on owner_fact(owner_email, category);
 
+-- P4.1 - one blind review of one artifact, per run.
+--
+-- Joined to check_result by (artifact_id, run_id): the reviewer ATTACHES to the run the
+-- deterministic engine already produced, so a run is one set of findings from two engines rather
+-- than two runs that have to be reconciled later.
+--
+-- citations holds only the citations that VERIFIED against the employer's posting text.
+-- dropped_citations holds the rest, each with the reason it failed. Both are stored because a
+-- model that fabricates quotes is itself a finding, and a drop count that is computed and thrown
+-- away is a finding nobody can act on.
+--
+-- prompt_version is NOT NULL. 0 means no active row existed in the Prompts table and the built-in
+-- fallback was used - which prompt_source records explicitly. A null here would be indistinguishable
+-- from "we forgot to record it".
+create table if not exists review_verdict (
+  id            uuid primary key default uuid_generate_v4(),
+  artifact_id   uuid not null references artifact(id) on delete cascade,
+  run_id        uuid not null,
+  grade         text check (grade in ('strong','acceptable','needs_work')),
+  seniority_alignment int check (seniority_alignment between 0 and 100),
+  agreed        int not null default 0,
+  disagreed     int not null default 0,
+  reviewer_stricter int[] not null default '{}',
+  reviewer_looser   int[] not null default '{}',
+  citations         jsonb not null default '[]',
+  dropped_citations jsonb not null default '[]',
+  critique      text[] not null default '{}',
+  reviewer_model text not null,
+  prompt_key     text not null,
+  prompt_version int not null,
+  prompt_source  text not null check (prompt_source in ('prompts_table','builtin')),
+  -- False would mean the payload carried generator reasoning. The code throws rather than writing
+  -- that row, so this column exists to make the claim auditable in SQL, not to allow the state.
+  blind         boolean not null default true,
+  -- Which column the posting text came from, and the digest of the exact string the citations were
+  -- verified against. A citation is only meaningful against THAT body.
+  posting_source text,
+  jd_text_sha256 text,
+  ran_at        timestamptz not null default now(),
+  unique (artifact_id, run_id)
+);
+create index if not exists review_verdict_artifact_idx on review_verdict(artifact_id, ran_at desc);
+
 -- Idempotent multi-tenant column adds (safe on tables that predate them)
 alter table persona        add column if not exists owner_email text not null default 'demo@executive-engine.local';
 alter table persona        add column if not exists is_demo boolean not null default false;
@@ -529,5 +572,5 @@ export const EXPECTED_TABLES = [
   'persona', 'opportunity', 'contact', 'packet', 'artifact', 'outreach_message',
   'interview', 'offer', 'library_entity', 'asset_event', 'usage_metering',
   'term_library', 'term_library_entry', 'term_candidate', 'requirement',
-  'skill_candidate', 'swap_decision', 'insertion', 'check_result', 'artifact_gate', 'artifact_score', 'owner_fact'
+  'skill_candidate', 'swap_decision', 'insertion', 'check_result', 'artifact_gate', 'artifact_score', 'owner_fact', 'review_verdict'
 ]

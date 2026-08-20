@@ -1,5 +1,6 @@
 import { app, HttpRequest, HttpResponseInit, InvocationContext } from '@azure/functions'
 import { TableClient } from '@azure/data-tables'
+import { resolveOwner } from './appSession'
 
 const CONN = process.env.AZURE_STORAGE_CONNECTION_STRING!
 const HEADERS = {
@@ -40,6 +41,22 @@ export async function promptsApi(req: HttpRequest, context: InvocationContext): 
     }
 
     if (req.method === 'POST') {
+      // D7 - a POST here rewrites live document generation for six partition keys, and the route is
+      // authLevel:'anonymous' with no guard at all.
+      //
+      // DEPARTURE FROM THE PLAN, DELIBERATE. The plan prescribed `requireWrite`, "one line, same
+      // pattern as every other mutation". That would NOT have closed this: `requireWrite` allows a
+      // write when `verified || owner === DEMO_EMAIL`, and `resolveOwner` DEFAULTS owner to
+      // DEMO_EMAIL when no ?owner= is supplied. An unauthenticated POST resolves to demo and is
+      // waved through. That guard is correct for owner-scoped tables, which have a demo partition;
+      // the Prompts table is global shared state with no such partition, so a "demo" write here
+      // edits the real owner's live prompts. The guard used is the one from artifactGateOverride:
+      // verified session or nothing. Placed inside the POST branch so GET and OPTIONS still work
+      // unauthenticated - the dev console's preflight and the prompt list both depend on that.
+      const { verified } = resolveOwner(req)
+      if (!verified) {
+        return { status: 403, headers: HEADERS, jsonBody: { error: 'a verified session is required to change prompts - this table drives live document generation' } }
+      }
       const body = await req.json() as { partitionKey?: string; content?: string; notes?: string }
       if (!body.partitionKey || typeof body.content !== 'string') {
         return { status: 400, headers: HEADERS, jsonBody: { error: 'partitionKey and content are required' } }

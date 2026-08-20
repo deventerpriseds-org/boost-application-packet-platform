@@ -21,6 +21,7 @@ import { onOmitList, omitEntries, similarity } from '../dist/functions/tests/swa
 import { runChecks, gateFor, COVERAGE_THRESHOLD, MIN_JUDGEABLE_TOKENS } from '../dist/functions/tests/checks.js'
 import { computeArtifactScore } from '../dist/functions/tests/artifactScore.js'
 import { deriveFacts } from '../dist/functions/tests/ownerFacts.js'
+import { validateCitations, reviewerChecks } from '../dist/functions/tests/reviewer.js'
 
 const SRC = new URL('../src/functions/tests/', import.meta.url).pathname
 const src = (f) => readFileSync(join(SRC, f), 'utf8')
@@ -191,7 +192,11 @@ test('H9: a resolveOwner result is never used as if it were the email string', (
   for (const [f, body] of allSources()) {
     for (const line of body.split('\n')) {
       if (!/resolveOwner\(req\)/.test(line)) continue
-      if (/\{\s*owner/.test(line)) continue                       // destructured
+      // Any destructuring is correct — `{ owner }`, `{ verified }`, `{ owner, verified }`. The
+      // first version of this guard accepted only `{ owner`, so `const { verified } =
+      // resolveOwner(req)` (promptsApi's D7 guard, which is right) was reported as the bug. A guard
+      // that fires on correct code is one people learn to ignore.
+      if (/\{\s*(owner|verified)\b/.test(line)) continue          // destructured
       if (/resolveOwner\(req\)\.(owner|verified)/.test(line)) continue  // field read inline
       const m = /(?:const|let)\s+([A-Za-z_$][\w$]*)\s*=\s*resolveOwner\(req\)/.exec(line)
       if (m && new RegExp(`\\b${m[1].replace('$', '\\$')}\\.(owner|verified)\\b`).test(body)) continue
@@ -280,4 +285,106 @@ test('H15: the deploy-wait helper refuses latest: and demands a commit', () => {
   assert.match(sh, /refusing latest:/, 'and refuse the racy form outright')
   const guard = sh.slice(sh.indexOf('*deploy*)'), sh.indexOf('*deploy*)') + 400)
   assert.match(guard, /exit 2/, 'refusing means a non-zero exit, not a printed warning')
+})
+
+// ---------------------------------------------------------------------------------------------
+// H16 — A citation validator of the shape `postingText.includes(quote) && requirementExists(id)`
+// accepts real, verifiable, employer-authored text as evidence for the WRONG requirement. Measured
+// on the live corpus: a phrase such as "ten years of leadership experience" occurs both in the
+// requirements block and in the culture paragraph of the same posting, and `locate()` carries a
+// `taken` parameter precisely because repeated phrasing is the norm, not the exception.
+// The invariant: an accepted citation's quote must OVERLAP the span of the requirement it names.
+test('H16: a citation only validates inside the span of the requirement it cites', () => {
+  const posting = 'Requirements: candidates need eight years of regulated utility leadership experience. '
+    + 'Culture: we prize eight years of regulated utility leadership experience in every hire we make.'
+  const quote = 'eight years of regulated utility leadership experience'
+  const first = posting.indexOf(quote)
+  const second = posting.indexOf(quote, first + 1)
+  assert.notEqual(second, -1, 'the fixture must contain the phrase twice')
+  const reqs = [{ id: 'r1', seq: 0, kind: 'must_have', item_text: 'Eight years in regulated utilities',
+                  verbatim: quote, char_start: first, char_end: first + quote.length }]
+
+  const inSpan = validateCitations([{ requirement_id: 'r1', verbatim_quote: quote, claim: 'x' }], posting, reqs)
+  assert.equal(inSpan.accepted.length, 1, 'the requirement\'s own words must validate')
+
+  // The naive check passes this: the words ARE in the posting. They are evidence for nothing.
+  const outOfSpan = validateCitations(
+    [{ requirement_id: 'r1', verbatim_quote: posting.slice(second, second + quote.length + 25), claim: 'x' }], posting, reqs)
+  assert.equal(outOfSpan.accepted.length, 0)
+  assert.equal(outOfSpan.dropped[0].reason, 'quote_does_not_resolve_to_requirement')
+
+  // And structurally: the validator must resolve by OFFSET, not by presence alone.
+  const body = stripComments(src('reviewer.ts'))
+  assert.match(body, /char_start/, 'validation must consult the requirement offsets')
+  assert.ok(!/\bsimilarity\s*\(/.test(body), 'a citation accuses — fuzzy matching may never decide one')
+})
+
+// ---------------------------------------------------------------------------------------------
+// H17 — `check_result` is unique on (artifact_id, run_id, check_key) and the reviewer writes into
+// the SAME run as the deterministic engine (it must, or `artifactChecksGet` cannot see its rows).
+// A reviewer key colliding with a deterministic one therefore either aborts the run or REPLACES the
+// rules engine's verdict with a model's opinion under the rules engine's key — which `gateFor` and
+// `computeArtifactScore` would then read as deterministic.
+// The invariant: reviewer keys are namespaced, and the score filters on engine regardless.
+test('H17: reviewer check keys cannot collide with deterministic ones, and the score filters anyway', () => {
+  const det = new Set(runChecks({ type: 'resume', pkg: {}, requirements: [], swaps: [] }).map(r => r.check_key))
+  const rev = reviewerChecks({
+    review: { grade: 'needs_work', seniority_alignment: 10, judgements: [], citations: [], critique: ['x'] },
+    agreement: { agreed: 0, disagreed: 0, reviewer_stricter: [], reviewer_looser: [], unmatched: 0, not_comparable: 0 },
+    accepted: [], dropped: [], requirements: [], ran: true,
+  })
+  for (const r of rev) {
+    assert.match(r.check_key, /^reviewer_/, `${r.check_key} is not namespaced`)
+    assert.ok(!det.has(r.check_key), `${r.check_key} collides with a deterministic key`)
+    assert.notEqual(r.state, 'fail', 'D6: a reviewer row may never be a fail')
+  }
+  // Belt and braces: even a colliding row must not reach the score.
+  const s = computeArtifactScore({
+    requirements: [{ seq: 0, kind: 'must_have' }],
+    checks: [{ check_key: 'must_have_coverage', engine: 'reviewer', state: 'pass', observed: '', expected: '', offenders: [] }],
+  })
+  assert.equal(s.must_have_coverage.value, null, 'a model opinion must never become a measured number')
+  assert.match(stripComments(src('artifactScore.ts')), /engine === 'deterministic'/)
+})
+
+// ---------------------------------------------------------------------------------------------
+// H18 — `artifactChecksGet` selects check rows by `run_id = artifact_gate.run_id`. A second engine
+// that mints its own `randomUUID()` run stores rows that NO reader can ever see: the database looks
+// correct, every insert returns success, and the product shows nothing. The same shape bites the
+// score row, which the deterministic pass inserts with `on conflict (artifact_id, run_id) do
+// nothing` — a reviewer INSERTing seniority into that run is silently discarded, with a 200.
+// The invariant: the reviewer attaches to the existing run, and updates the score rather than
+// inserting over it.
+test('H18: the reviewer attaches to the deterministic run and UPDATES the score row', () => {
+  const body = stripComments(src('appReviewer.ts'))
+  assert.ok(!/randomUUID/.test(body), 'the reviewer must not mint its own run_id')
+  assert.match(body, /select run_id[\s\S]{0,80}from artifact_gate/, 'it must read the run it attaches to')
+  assert.match(body, /update artifact_score set seniority_alignment/,
+    'seniority must be an UPDATE — an insert is swallowed by the deterministic pass\'s do-nothing conflict clause')
+  assert.ok(!/insert into artifact_score/.test(body), 'inserting here would be silently discarded')
+  // And the gate must be recomputed over the whole run, or the badge and the gate describe
+  // different sets of findings (R4).
+  assert.match(body, /attentionCount\(all\)/)
+  assert.match(body, /gateFor\(all\)/)
+})
+
+// ---------------------------------------------------------------------------------------------
+// H19 — `requireWrite` allows a write when `verified || owner === DEMO_EMAIL`, and `resolveOwner`
+// DEFAULTS owner to DEMO_EMAIL when no ?owner= is supplied. So dropping `requireWrite` onto an
+// endpoint that has no demo partition leaves it fully open to an unauthenticated caller while
+// reading as guarded in the diff. The `Prompts` table is global shared state — a POST there rewrites
+// live document generation for every owner.
+// The invariant: a global-state mutation guards on `verified`, never on requireWrite alone.
+test('H19: the prompts POST guards on a verified session, not on requireWrite', () => {
+  const body = stripComments(src('promptsApi.ts'))
+  const post = body.slice(body.indexOf("req.method === 'POST'"))
+  assert.match(post, /const \{ verified \} = resolveOwner\(req\)/, 'the guard must read `verified`')
+  assert.match(post, /if \(!verified\)[\s\S]{0,120}status: 403/, 'and refuse without one')
+  // requireWrite alone would be the broken fix; assert it is not what is relied on here.
+  assert.ok(!/requireWrite/.test(body),
+    'requireWrite waves through the demo default — it cannot guard a table with no demo partition')
+  // The guard belongs INSIDE the POST branch: at the top it would 401 the CORS preflight and the
+  // unauthenticated GET the prompts console and the reviewer both need.
+  assert.ok(body.indexOf('const { verified }') > body.indexOf("req.method === 'GET'"),
+    'the guard must not sit above the GET/OPTIONS branches')
 })
