@@ -1480,3 +1480,42 @@ from stale code and read like an application bug. The helper now lives in `scrip
 `CLAUDE.md` step 5 now documents the correct command.
 *Hardening: a fix that only lives in my habits is not a fix. It has to be in the repo, and it has to
 fail loudly when misused.*
+
+## ACT-64 — P6 finished: geography looked up, facts editable, conflicts surfaced
+**Status:** `landed + live`.
+
+**Geography is reference data, not a question.** The system had asked the owner to confirm that
+Westminster MD satisfies "Reside in the East Coast" — over-conservative to the point of uselessness.
+`geo.ts` carries the 50 states with region and coast; location requirements now resolve outright
+with the reason ("Maryland (MD) is on the East Coast").
+**The line turned out to be narrower than "never infer": never infer what depends on the PERSON.**
+A commute radius ("within 30 miles of our Baltimore office") still asks, because how far someone
+travels is theirs to decide — as does whether an inactive Secret counts against a TS/SCI requirement.
+Two tests that encoded the old behaviour were rewritten, not deleted, keeping the principle on a case
+where it genuinely applies.
+
+**The seeded values were editable nowhere** — API with no screen, which is the "no dead UI" rule
+failing in the other direction. `Settings ▸ Facts` groups every fact by category, shows
+confirmed / derived-awaiting-confirmation / unset, prints the resume evidence beneath a derived
+value, and offers "Re-read from resume template" which never touches a confirmed value.
+
+**Derivation now reads all 14 MasterContext blocks** (was 7 named ones), excluding only
+`itemsToOmit` — a cert in the skills pool is as much a fact as one in the template. The fuller read
+surfaced **no additional certifications**: Six Sigma Black Belt and CSPO remain the complete set.
+**Prompts checked once, not wired in** (owner's call): the stored `resume_user` prompt states the
+candidate context as prose and its certification mentions are *instructions for extracting skills
+from a posting*, not a list of what the owner holds. Nothing to seed.
+
+**Conflict surfacing added.** A confirmed fact is protected from overwrite, so a re-read could find
+something different and report nothing. The derive response now carries `readFromSource` and
+`conflicts` (both sides + evidence). **Live: "3 confirmed fact(s) DISAGREE with what the source now
+says"** — the owner's 24 years against the template's earliest dated role (2006 → 20), the doctoral
+candidacy against the template's "MBA Coursework", and a cert string differing by one character.
+That last one was an artefact of the cert regex truncating before a closing paren, now balanced —
+a conflict detector that reports its own noise is a detector people learn to ignore.
+*This generalises what was done by hand for the $30M-vs-$8M budget disagreement; by hand does not
+scale past a dozen facts.*
+
+**`dateRangesSeen` confirms the H14 fix on real data:** all four roles now match
+(2021–Present, 2019–Aug 2021, 2015–Feb 2019, 2006–Apr 2015) where only the first did before.
+**`stillNeeded` is empty** — every fact the live corpus asks for is answered.

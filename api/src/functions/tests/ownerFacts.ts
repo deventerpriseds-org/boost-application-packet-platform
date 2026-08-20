@@ -237,7 +237,11 @@ export function deriveFacts(text: string, now: number = THIS_YEAR): DerivedFact[
   }
 
   // --- certifications -------------------------------------------------------------------------
-  const certs = Array.from(new Set((src.match(CERT_RE) || []).map(c => c.replace(/\s+/g, ' ').trim())))
+  // Close a parenthesis the length cap cut off: "Certified Scrum Product Owner (CSPO" would
+  // otherwise differ from the same cert typed properly by one character, and the conflict detector
+  // would report a disagreement that is entirely an artefact of this regex.
+  const balance = (c: string) => (c.includes('(') && !c.includes(')') ? `${c})` : c)
+  const certs = Array.from(new Set((src.match(CERT_RE) || []).map(c => balance(c.replace(/\s+/g, ' ').trim()))))
   if (certs.length) {
     out.push({ key: 'education.certifications', value: certs.join(', '), value_num: null, evidence: `${certs.length} match(es) in the source` })
   }

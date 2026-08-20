@@ -207,3 +207,11 @@ test('a commute radius still ASKS — that depends on the person, not on geograp
     [fact('identity.location', 'Westminster, MD 21158')])
   assert.equal(r.verdict, 'unknown', 'how far someone will commute is theirs to decide')
 })
+
+test('a cert cut off by the length cap gets its parenthesis closed', () => {
+  // Otherwise "Certified Scrum Product Owner (CSPO" differs from the same cert typed properly by one
+  // character, and the conflict detector reports a disagreement that is purely a regex artefact.
+  const f = deriveFacts('CERTIFICATIONS: Certified Scrum Product Owner (CSPO), Six Sigma Black Belt', 2026)
+    .find(x => x.key === 'education.certifications')
+  assert.ok(!/\([A-Z]+$/.test(f.value.split(',')[0].trim()), `unbalanced: ${f.value}`)
+})
