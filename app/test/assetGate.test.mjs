@@ -325,9 +325,12 @@ test('no hook value collides across the three screens that own one', async () =>
   const { QC_HOOKS } = await import('../src/qcRail.js')
   const { BLOCK_HOOKS } = await import('../src/assetBlocks.js')
   const { PACKET_HOOKS } = await import('../src/packetBuilder.js')
+  // POSTING_HOOKS was the gap: PostingAnalysis.jsx hand-typed all 29 of its selectors, so the 29
+  // that had existed longest were the only ones this union never checked.
+  const { POSTING_HOOKS } = await import('../src/postingAnalysis.js')
   const all = [
-    ...Object.values(QC_HOOKS), ...Object.values(GATE_HOOKS),
-    ...Object.values(BLOCK_HOOKS), ...Object.values(PACKET_HOOKS),
+    ...Object.values(QC_HOOKS), ...Object.values(GATE_HOOKS), ...Object.values(BLOCK_HOOKS),
+    ...Object.values(PACKET_HOOKS), ...Object.values(POSTING_HOOKS),
   ]
   const dupes = all.filter((v, i) => all.indexOf(v) !== i)
   assert.deepEqual(dupes, [], `hook values used by more than one screen: ${dupes.join(', ')}`)

@@ -43,16 +43,96 @@ function walk(dir, out = []) {
   return out
 }
 const ALL_SRC = walk(SRC)
-const JSX = ALL_SRC.filter((f) => f.endsWith('.jsx'))
+// Every module, .js AND .jsx. The first version of the swatch guard scanned .jsx only, and a
+// verifier put `export const KW_SWATCH = '#fff03a'` — the exact literal D11 names — into
+// postingAnalysis.js, a .js file, with the whole suite still green.
+const MODULES = ALL_SRC.filter((f) => /\.(js|jsx)$/.test(f))
 const stripComments = (s) => s.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/(^|[^:])\/\/[^\n]*/g, '$1')
+
+// ── the two parsers the guards below stand on ───────────────────────────────────────────────────
+
+/**
+ * Every `var(...)` in the source, with its NAME argument extracted by brace-matching rather than
+ * by a pattern that has to anticipate how the name was written.
+ *
+ * The name is everything up to the first TOP-LEVEL comma, so a fallback — `var(--x, var(--y))` —
+ * yields `--x` and the nested call is returned as its own entry. Nothing about the name's contents
+ * is assumed here; the caller decides what a legal name looks like, which is what makes the check
+ * a whitelist instead of a list of forbidden spellings.
+ */
+function varCalls(code) {
+  const out = []
+  for (const m of code.matchAll(/\bvar\(/gi)) {
+    const open = m.index + m[0].length - 1
+    let depth = 0, end = -1
+    for (let i = open; i < code.length; i++) {
+      if (code[i] === '(') depth++
+      else if (code[i] === ')' && --depth === 0) { end = i; break }
+    }
+    if (end === -1) {
+      // An unclosed var( means the call is completed somewhere else — by concatenation, or across
+      // a literal boundary. That is assembly by definition, so report it rather than skip it.
+      out.push({ name: code.slice(open + 1, Math.min(code.length, open + 60)), line: lineOf(code, open) })
+      continue
+    }
+    const inner = code.slice(open + 1, end)
+    let d = 0, comma = inner.length
+    for (let i = 0; i < inner.length; i++) {
+      if (inner[i] === '(') d++
+      else if (inner[i] === ')') d--
+      else if (inner[i] === ',' && d === 0) { comma = i; break }
+    }
+    out.push({ name: inner.slice(0, comma), line: lineOf(code, open) })
+  }
+  return out
+}
+const lineOf = (code, index) => code.slice(0, index).split('\n').length
+
+/** #rgb / #rrggbb / #rrggbbaa / rgb() / rgba() → the same three numbers, whatever the spelling. */
+function rgbOf(text) {
+  const hex = /^#([0-9a-f]{3,8})$/i.exec(text.trim())
+  if (hex) {
+    let h = hex[1]
+    if (h.length === 3 || h.length === 4) h = h.slice(0, 3).split('').map((c) => c + c).join('')
+    return [0, 2, 4].map((i) => parseInt(h.slice(i, i + 2), 16))
+  }
+  const fn = /^rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/i.exec(text.trim())
+  return fn ? [Number(fn[1]), Number(fn[2]), Number(fn[3])] : null
+}
+/** Every colour literal in a file, in either notation, canonicalised. */
+function colorsIn(code) {
+  const out = []
+  for (const m of code.matchAll(/#[0-9a-fA-F]{3,8}\b|rgba?\(\s*\d+\s*,\s*\d+\s*,\s*\d+[^)]*\)/g)) {
+    // NO alpha pre-strip here. An earlier version ran .replace(/,\s*[\d.]+\s*\)$/, ')') to drop
+    // the alpha channel, which on a three-argument rgb() ate the BLUE channel instead — so
+    // 'rgb(255, 240, 58)' became 'rgb(255, 240)', failed to parse, and the identical colour to
+    // #fff03a slipped through. rgbOf already reads only the first three numbers and ignores
+    // whatever follows, so alpha needs no special handling at all.
+    const rgb = rgbOf(m[0])
+    if (rgb) out.push({ text: m[0], rgb })
+  }
+  return out
+}
+const distance = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2])
 
 // ── the pairs exist, on :root AND under .proto-dark ─────────────────────────────────────────────
 
 test('both highlights ship as a PAIR — never a background on its own', () => {
-  // A background with no foreground is the whole defect: the text falls through to --proto-ink.
-  assert.deepEqual(HIGHLIGHT_TOKENS.keyword, ['--qc-kw-bg', '--qc-kw-fg'])
-  assert.deepEqual(HIGHLIGHT_TOKENS.postingEcho, ['--qc-echo-bg', '--qc-echo-rule'])
-  for (const pair of Object.values(HIGHLIGHT_TOKENS)) assert.equal(pair.length, 2)
+  // This used to compare HIGHLIGHT_TOKENS to a hardcoded copy of itself, which proves only that
+  // two literals in the repo match. The invariant is about the STYLESHEET: a background with no
+  // second token beside it is the whole defect, because the text then falls through to
+  // --proto-ink, and --proto-ink in dark mode is near-white. So assert that every token declared
+  // here is actually DRAWN by the class that paints its treatment, and that no treatment paints a
+  // background alone.
+  for (const [treatment, tokens] of Object.entries(HIGHLIGHT_TOKENS)) {
+    assert.ok(tokens.length >= 2, `${treatment} declares a single token — a background with nothing beside it`)
+    const body = ruleBody(CSS, `.${HIGHLIGHT_CLASS[treatment]} {`)
+    assert.ok(body, `.${HIGHLIGHT_CLASS[treatment]} is not defined in theme.css`)
+    const drawn = tokens.filter((t) => body.includes(`var(${t})`))
+    assert.deepEqual(drawn, tokens,
+      `${treatment}: declared but never drawn by .${HIGHLIGHT_CLASS[treatment]}: ${tokens.filter((t) => !drawn.includes(t)).join(', ')}`)
+    assert.ok(/background:/.test(body), `${treatment} paints no background at all`)
+  }
 })
 
 test('every highlight token is defined on :root AND redefined under .proto-dark', () => {
@@ -86,7 +166,15 @@ test('within a theme the two highlights are different colours AND different trea
   // is a wash under a rule. So the two rules must not have the same shape either.
   for (const [name, sel] of [['light', ':root {'], ['dark', '.proto-dark {']]) {
     const body = ruleBody(CSS, sel)
-    const valueOf = (t) => (new RegExp(`${t}\\s*:\\s*([^;]+);`).exec(body) || [])[1].trim()
+    // Assert the token is THERE before reading it. Reading first threw a TypeError when a token
+    // was missing, which fails the test but reports "cannot read properties of undefined" instead
+    // of naming the token that vanished - a guard whose failure message does not name the cause
+    // costs the next reader the diagnosis this file exists to hand them.
+    const valueOf = (t) => {
+      const m = new RegExp(`${t}\\s*:\\s*([^;]+);`).exec(body)
+      assert.ok(m, `${name}: ${t} is not defined at all`)
+      return m[1].trim()
+    }
     assert.notEqual(valueOf('--qc-kw-bg'), valueOf('--qc-echo-bg'),
       `${name}: the keyword highlight and the posting echo paint the same background`)
   }
@@ -102,43 +190,93 @@ test('within a theme the two highlights are different colours AND different trea
 
 // ── nothing paints a highlight by hand ──────────────────────────────────────────────────────────
 
-test('no component contains a highlight swatch as a literal', () => {
-  // The criterion, generalised: not only the handoff's three, but every swatch either treatment
-  // resolves to — so a dark-mode value pasted into a component is caught too. theme.css is the one
-  // file allowed to hold them.
-  for (const file of JSX) {
-    const code = readFileSync(file, 'utf8')
-    for (const lit of HIGHLIGHT_LITERALS) {
-      assert.ok(!code.toLowerCase().includes(lit.toLowerCase()),
-        `${file.slice(SRC.length)} contains the literal ${lit} — it belongs to theme.css as a token`)
+test('no module contains a highlight swatch, in any spelling of the same colour', () => {
+  // Three holes, all found by a verifier against the first version of this guard:
+  //   1. it scanned .jsx ONLY, so `export const KW_SWATCH = '#fff03a'` in postingAnalysis.js — a
+  //      .js module — passed. That is the exact literal D11 names as the defect.
+  //   2. `'rgb(255, 240, 58)'` is #fff03a written another way and was not matched at all.
+  //   3. `'#fff03b'` is one digit off and indistinguishable on screen.
+  // So the guard no longer matches SPELLINGS. It extracts every colour literal in the file,
+  // canonicalises it to r/g/b, and measures distance to each swatch.
+  //
+  // THRESHOLD EVIDENCE (measured over all of src/ at 6f6a0b3, both file types): the nearest
+  // non-swatch colour in the entire codebase is #ffe in RolesTitles.jsx at 24.2; the next are
+  // #f6f6f6 at 28.7 and #333 at 31.8. #fff03b is at 1.0. A cutoff of 12 catches the near-miss with
+  // room to spare and still leaves a 2x margin under the closest legitimate colour, so it cannot
+  // cry wolf on code that is right.
+  const NEAR = 12
+  const swatches = HIGHLIGHT_LITERALS.map(rgbOf)
+  for (const file of MODULES) {
+    if (file === join(SRC, 'highlight.js')) continue   // the declaration itself
+    const code = stripComments(readFileSync(file, 'utf8'))
+    for (const { text, rgb } of colorsIn(code)) {
+      for (let i = 0; i < swatches.length; i++) {
+        const d = distance(rgb, swatches[i])
+        assert.ok(d > NEAR,
+          `${file.slice(SRC.length)} contains ${text} — that is ${d === 0 ? 'exactly' : `within ${d.toFixed(1)} of`} `
+          + `the highlight swatch ${HIGHLIGHT_LITERALS[i]}, which belongs to theme.css as a token`)
+      }
     }
   }
 })
 
-test('no custom-property name is assembled by interpolation, anywhere in src', () => {
+test('no custom-property name is assembled at runtime, in any form', () => {
   // P0.3: `var(--qc-kw-${tone})` is not an error. CSS drops a declaration it cannot parse without
-  // a word of warning, so the highlight simply does not appear — which is how the `todo` pill
-  // became invisible. Comments are stripped first so this guard can never fire on the note that
-  // explains it.
-  for (const file of ALL_SRC.filter((f) => /\.(js|jsx)$/.test(f))) {
+  // a word of warning, so the rule simply does not appear — which is how the `todo` pill became
+  // invisible.
+  //
+  // THIS GUARD WAS REWRITTEN. The first version matched ONE spelling — /var\(--[a-z0-9-]*\$\{/ —
+  // and a verifier walked through it five different ways, every one of them valid CSS confirmed in
+  // real Chromium:
+  //     background: `var( --temp-${k}-tint )`      whitespace inside var()
+  //     background: `var(\n  --temp-${k}\n)`       a newline inside var()
+  //     background: `var(--my_prop-${k})`          _ in the name; [a-z0-9-]* excludes it
+  //     background: 'var(--temp-' + k + '-tint)'   built by string concatenation
+  //     const p = `--temp-${k}`; `var(${p})`       name built first, wrapped after
+  // Enumerating five more alternatives would leave a sixth. So this no longer describes what is
+  // FORBIDDEN. It parses each `var(` — brace-matching to that call's own closing paren — and
+  // requires the NAME to be a plain custom-property identifier and nothing else. A whitelist has
+  // no sixth spelling to miss: whitespace, newlines, quotes, `+` and `${` all fail it identically,
+  // while a legitimate `var(--x)` and a legitimate fallback `var(--x, var(--y))` pass untouched.
+  for (const file of MODULES) {
     const code = stripComments(readFileSync(file, 'utf8'))
-    const hit = /var\(--[a-z0-9-]*\$\{/i.exec(code)
-    assert.equal(hit, null, `${file.slice(SRC.length)}: interpolated custom-property name "${hit && hit[0]}"`)
+    for (const call of varCalls(code)) {
+      assert.match(call.name, /^\s*--[A-Za-z0-9_-]+\s*$/,
+        `${file.slice(SRC.length)}:${call.line} builds a custom-property name at runtime: var(${call.name.trim()})`)
+    }
+    // And the same name assembled BEFORE it is wrapped — `const p = `--temp-${k}`` — which is a
+    // var() whose own argument looks innocent by the time it is written.
+    const built = /--[A-Za-z0-9_-]*\$\{/.exec(code)
+    assert.equal(built, null,
+      `${file.slice(SRC.length)}: a custom-property name is assembled before it reaches var(): "${built && built[0]}"`)
   }
 })
 
 test('every consumer paints through HIGHLIGHT_CLASS, never a hand-typed class name', () => {
-  const users = JSX.filter((f) => readFileSync(f, 'utf8').includes('HIGHLIGHT_CLASS'))
-  assert.ok(users.length >= 2, `both highlights must actually be used; found ${users.length} consumer(s)`)
-  for (const file of JSX) {
+  // The first version required the `className="..."` form, so `className={"qc-kw"}` and
+  // `className={`qc-kw ${x}`}` both walked past it. (A verifier's first attempt LOOKED caught —
+  // but the failure it saw was the collateral "both treatments are used" check at the bottom of
+  // this test, not the hand-typing assertion.)
+  //
+  // Matching more className spellings is the same losing game as the var() guard above, so this
+  // does not look at className at all. There is NO legitimate reason for the token `qc-kw` or
+  // `qc-echo` to appear anywhere in a module except the one line of highlight.js that declares it
+  // — not in a className, not in a querySelector, not in a string being concatenated. Absence is
+  // the rule, and absence has only one spelling.
+  for (const file of MODULES) {
+    if (file === join(SRC, 'highlight.js')) continue   // the declaration itself
     const code = stripComments(readFileSync(file, 'utf8'))
     for (const cls of Object.values(HIGHLIGHT_CLASS)) {
-      assert.ok(!new RegExp(`className=["'][^"']*\\b${cls}\\b`).test(code),
-        `${file.slice(SRC.length)} hand-types "${cls}" — use HIGHLIGHT_CLASS so the class and the stylesheet cannot drift`)
+      const hit = new RegExp(`(^|[^\\w-])${cls}([^\\w-]|$)`).exec(code)
+      assert.equal(hit, null,
+        `${file.slice(SRC.length)} names the class "${cls}" directly — it must come from `
+        + 'HIGHLIGHT_CLASS so the class and the stylesheet cannot drift apart')
     }
   }
   // Both treatments are used, or the pair that is not used is a colour nobody can see is wrong.
-  const all = JSX.map((f) => readFileSync(f, 'utf8')).join('\n')
+  const all = MODULES.map((f) => readFileSync(f, 'utf8')).join('\n')
   assert.match(all, /HIGHLIGHT_CLASS\.keyword/)
   assert.match(all, /HIGHLIGHT_CLASS\.postingEcho/)
+  const users = MODULES.filter((f) => readFileSync(f, 'utf8').includes('HIGHLIGHT_CLASS.'))
+  assert.ok(users.length >= 2, `both highlights must actually be used; found ${users.length} consumer(s)`)
 })

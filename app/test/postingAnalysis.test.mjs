@@ -12,7 +12,7 @@ import {
   KIND_ABBR, KIND_SOURCE_NOTE, KIND_SOURCE_SHORT, NO_QUOTE_REASON,
   kindSourceNote, noQuoteReason, isQuoted, modelKeywords, groupRequirements,
   summarizeKindSource, isEvidencedKindSource, keywordLibraryState, postingBody,
-  KEYWORD_2UP_MIN, keywordColumns, keywordGridTemplate,
+  KEYWORD_2UP_MIN, keywordColumns, keywordGridTemplate, POSTING_HOOKS,
 } from '../src/postingAnalysis.js'
 
 // The fixture from the AC7 reproduction: one line the posting MARKED required, two the parser
@@ -315,8 +315,11 @@ test('every surface the acceptance criteria name carries a stable data-qc hook',
   // the cry-wolf failure that got two guards deleted from this repo.
   const rendered = (file, hook) => {
     if (file.includes(`data-qc="${hook}"`)) return true
-    const key = Object.entries(PACKET_HOOKS).find(([, v]) => v === hook)
-    return !!key && file.includes(`data-qc={PACKET_HOOKS.${key[0]}}`)
+    for (const [name, table] of [['PACKET_HOOKS', PACKET_HOOKS], ['POSTING_HOOKS', POSTING_HOOKS]]) {
+      const key = Object.entries(table).find(([, v]) => v === hook)
+      if (key && file.includes(`data-qc={${name}.${key[0]}}`)) return true
+    }
+    return false
   }
   for (const [hook, file] of Object.entries(required)) {
     assert.ok(rendered(file, hook), `data-qc="${hook}" is missing`)
@@ -346,6 +349,20 @@ test('the grid template and the column count are the same decision, not two', ()
   // minmax(0, 1fr), not 1fr: a single unbroken term must not be able to widen a track past its
   // share and push the card into a horizontal scroll.
   assert.ok(keywordGridTemplate(1440).startsWith('minmax(0, 1fr)'))
+})
+
+test('every POSTING_HOOKS selector is rendered, and the card hand-types none of them', () => {
+  // This screen was the exception: 29 hand-typed selectors, no constant, and therefore the only
+  // ones the cross-screen collision check (assetGate.test.mjs) could not see.
+  for (const [name, value] of Object.entries(POSTING_HOOKS)) {
+    assert.ok(POSTING_ANALYSIS.includes('POSTING_HOOKS.' + name),
+      `POSTING_HOOKS.${name} ("${value}") is declared but never rendered`)
+  }
+  const code = stripComments(POSTING_ANALYSIS)
+  const handTyped = code.match(/data-qc="[a-z0-9-]+"/g)
+  assert.equal(handTyped, null, `hand-typed hooks are back: ${handTyped && handTyped.join(', ')}`)
+  const values = Object.values(POSTING_HOOKS)
+  assert.equal(new Set(values).size, values.length)
 })
 
 test('the breakpoint number exists in exactly one place', () => {
@@ -400,7 +417,12 @@ test('the JD step renders its body through postingBody, not by falling through t
 test('the group count is rendered from the kind_source split, not from rows.length', () => {
   const code = stripComments(POSTING_ANALYSIS)
   assert.match(code, /const split = summarizeKindSource\(rows\)/)
-  assert.match(code, /data-qc="kind-source-split"/)
+  // Asserted through the constant, not the literal string. This guard matched
+  // `data-qc="kind-source-split"` and so failed the moment the screen adopted POSTING_HOOKS - i.e.
+  // it called a correct refactor a regression. That is the second time a hook-literal assertion has
+  // cried wolf here (the first was `posting-body` when PacketBuilder adopted PACKET_HOOKS); the
+  // invariant is that the SPLIT is what gets rendered, never how the attribute is spelled.
+  assert.match(code, /data-qc=\{POSTING_HOOKS\.kindSourceSplit\}/)
   assert.ok(!/px-chip">\{rows\.length\}/.test(code), 'a bare blended count is back')
 })
 

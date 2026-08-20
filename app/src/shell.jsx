@@ -70,7 +70,7 @@ export const toneColor = (tone) => TONE_SOLID[tone] || 'var(--proto-ink3)'
 // Recency-temperature chips, resolved the SAME way and for the same reason.
 //
 // Today.jsx and Opportunities.jsx each built these declarations by interpolating the temperature
-// key into the custom-property name — `var(--temp-<key>-tint)` — which is the exact construct that
+// key into the custom-property name — `var(--temp-${k}-tint)` — which is the exact construct that
 // made the `todo` pill invisible: a key with no matching token produces an INVALID declaration,
 // and CSS drops an invalid declaration without a word. It happened to resolve here only because
 // all four keys have tokens today; the day a fifth temperature is added it silently paints

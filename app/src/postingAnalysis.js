@@ -13,6 +13,41 @@
 //      looked" are different states and must print differently.
 //   4. Model output is never presented under a heading that claims the employer wrote it.
 
+/**
+ * Every `data-qc` selector the posting-analysis surfaces render.
+ *
+ * Same constant, same rule, same reason as QC_HOOKS (qcRail.js), GATE_HOOKS (assetGate.js),
+ * BLOCK_HOOKS (assetBlocks.js) and PACKET_HOOKS (packetBuilder.js). This screen was the one that
+ * ALREADY had hooks - 28 of them - and so was left hand-typing every one while the screens that had
+ * none were given constants. That gap is not cosmetic: the cross-screen collision test unions the
+ * hook CONSTANTS, so 28 of the app's selectors were the only ones never checked for collisions, and
+ * P8.7 hand-typed a 29th (`keyword-columns`) rather than closing it.
+ */
+export const POSTING_HOOKS = {
+  card: 'posting-analysis',
+  stale: 'posting-stale',
+  tab: 'jd-tab',
+  panel: 'jd-tabpanel',
+  legend: 'req-legend',
+  group: 'req-group',
+  groupCount: 'group-count',
+  kindSourceSplit: 'kind-source-split',
+  row: 'req-row',
+  quote: 'req-quote',
+  paraphrase: 'req-paraphrase',
+  kindSource: 'kind-source',
+  keywords: 'ats-keywords',
+  libraryState: 'keyword-library-state',
+  modelKeywords: 'model-keywords',
+  keywordColumns: 'keyword-columns',   // carries data-qc-cols - P8.7's breakpoint, selectable
+  keywordGroup: 'keyword-group',
+  tally: 'keyword-tally',
+  matchEstimate: 'match-estimate',
+  matchEstimateButton: 'match-estimate-button',
+  analysisRunning: 'analysis-running',
+  analysisResult: 'analysis-result',
+}
+
 // ── requirement rows ────────────────────────────────────────────────────────────────────────────
 
 export const KIND_ABBR = { must_have: 'MH', nice_to_have: 'NTH', responsibility: 'RESP' }

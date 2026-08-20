@@ -4,7 +4,7 @@
 // Nothing here touches window/document — anything that does stays in the component.
 
 // Variant → real design tokens. This is an EXPLICIT map for the same reason TONE in shell.jsx is:
-// building a custom-property name by interpolation (`var(--zindex-<variant>)`) silently emits an
+// building a custom-property name by interpolation (`var(--zindex-${variant})`) silently emits an
 // INVALID declaration for any variant without a matching token, and CSS drops invalid declarations
 // without warning. That bug already shipped once in Pill. Every variant is spelled out, and an
 // unknown variant falls back to a real, defined token rather than to nothing.
