@@ -8,6 +8,8 @@ import { metaFor, varsForType, copyTemplate, injectValues, stripLeftoverTokens, 
 import { buildPackageForJD } from './pipeline'
 import { writeSwaps } from './appSwaps'
 import { writeInsertions } from './appInsertions'
+import { applyCorrectionPass } from './appCorrections'
+import { sourceText } from './appFacts'
 import { summariseBuild } from './packetBuild'
 import { approvalBlock } from './appChecks'
 
@@ -352,6 +354,22 @@ export async function ensurePackage(client: any, art: any, opp: any, regen: bool
   // recorded nothing. Each of the three generation passes is metered on its own so the cost of
   // the QC pass is separable from the cost of writing the resume.
   for (const u of built.usage) await logUsage(`packet:${art.type}:generate:${u.pass}`, 'gpt-4o-mini', u.usage)
+
+  // P8.1 / R1 — correct before the user sees it, and HERE rather than beside the check that
+  // motivates it. Everything below this line reads the corrected package: the update, writeSwaps,
+  // writeInsertions and every later check. Run it in appChecks instead and pkg_json and
+  // insertion.after_text are both written from the ORIGINAL text while the user reads the
+  // corrected document — and the remediation loop credits closures against text that never
+  // shipped, because realEdits() and creditClosures() both read after_text.
+  const posting = resolvePostingSource(opp)
+  const profileRead = await sourceText().catch(() => ({ text: '' }))
+  const corrections = await applyCorrectionPass(client, {
+    artifactId: art.id, pkg, postingText: posting.text, profileText: profileRead.text,
+    // loop 0 — the baseline, for the same reason writeSwaps uses it here: a whole-package
+    // generation is not a remediation pass. Passes 1..n are scoped and are written by the loop.
+    loop: 0,
+  })
+
   await client.query(`update packet set pkg_json = $1, jd_grounded = $2, updated_at = now() where id = $3`,
     [JSON.stringify(pkg), grounded, art.packet_id])
   // P1.3 — record what the two passes changed, while both payloads are still in hand. They are

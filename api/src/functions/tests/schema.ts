@@ -349,6 +349,58 @@ create index if not exists requirement_kind_idx on requirement(opp_id, kind);
 -- [char_start, char_end). Same discipline as requirement.verbatim, pointed at the candidate's
 -- profile instead of the employer's posting. record_sha256 is what makes a stale offset detectable
 -- after the owner edits their profile, exactly as jd_text_sha256 does for the posting.
+-- P8.1 / R1 — what the engine fixed before the user saw it, and how to put it back.
+--
+-- ONE ROW PER CHANGED SPAN, not per field: a ResumeSummary can carry three independently undoable
+-- corrections. That grain is why this is its own table rather than an extension of "insertion"
+-- (unique per artifact/field/loop, so it structurally cannot hold three) or "swap_decision" (its
+-- "list" CHECK admits only the five list fields, and prose fields like ResumeSummary are not among
+-- them, and there is no ordinal to put in "seq"). Both were probed with real INSERTs against a
+-- live cluster before this table was written; both rejected the row.
+--
+-- EVERY OFFSET IS RELATIVE TO THE ORIGINAL, PRE-CORRECTION FIELD TEXT, and stays that way forever.
+-- Applying is a right-to-left splice so no pending offset can move; undoing one correction is a
+-- replay of the list minus that row. Neither needs the offsets to survive a later rewrite, which
+-- is what lets a revert months later be exact instead of approximate.
+--
+-- before_sha256 is the whole ORIGINAL field text, and it is RECOMPUTED on revert, not merely
+-- stored. That is the difference between a guard and a decoration: a field edited by hand after the
+-- correction is DETECTED and the revert refuses, rather than splicing into text that has moved.
+-- (D19 records the sibling case where a hash is written and served but never recomputed.)
+create table if not exists correction (
+  id            uuid primary key default uuid_generate_v4(),
+  artifact_id   uuid not null references artifact(id) on delete cascade,
+  merge_field   text not null,
+  phrase        text not null,          -- the exact original substring replaced
+  replacement   text not null,
+  char_start    int not null,
+  char_end      int not null,
+  before_sha256 text not null,
+  applied_seq   int not null,           -- ascending by char_start, so the change log reads in document order
+  reason        text not null,
+  source        text not null check (source in ('profile_figure','generalized')),
+  run_id        uuid,
+  loop          int not null default 0,
+  reverted_by   text,
+  reverted_at   timestamptz,
+  created_at    timestamptz not null default now(),
+  -- A row that cannot fund its own undo must not exist. Enforced by the DATABASE, not by a writer's
+  -- good intentions: the offsets must describe the phrase they claim to replace.
+  constraint correction_span_matches_phrase check (char_end - char_start = length(phrase)),
+  constraint correction_span_ordered        check (char_start >= 0 and char_end > char_start),
+  constraint correction_sha_shaped          check (before_sha256 ~ '^[0-9a-f]{64}$'),
+  -- Reverting is never a DELETE — the change log must still show the row as Undone. Both columns
+  -- are set together or neither is.
+  constraint correction_revert_paired       check ((reverted_by is null) = (reverted_at is null))
+);
+-- NULLS NOT DISTINCT is load-bearing and was found by execution, not by reading. Postgres treats
+-- NULL as distinct from NULL in a UNIQUE, so with run_id NULL — every correction applied outside a
+-- remediation loop, which is the COMMON case — the plain unique permitted unlimited duplicates. A
+-- byte-exact duplicate inserted twice and the table held both.
+create unique index if not exists correction_unique_seq
+  on correction (artifact_id, merge_field, applied_seq, coalesce(run_id, '00000000-0000-0000-0000-000000000000'::uuid));
+create index if not exists correction_by_artifact on correction (artifact_id, reverted_at);
+
 create table if not exists requirement_evidence (
   id             uuid primary key default uuid_generate_v4(),
   requirement_id uuid not null references requirement(id) on delete cascade,
@@ -971,6 +1023,7 @@ create index if not exists opp_owner_idx2 on opportunity(owner_email);
 
 // Tables we expect to exist after migration (used by the runner to report).
 export const EXPECTED_TABLES = [
+  'correction',
   'persona', 'opportunity', 'contact', 'packet', 'artifact', 'outreach_message',
   'interview', 'offer', 'library_entity', 'asset_event', 'usage_metering',
   'term_library', 'term_library_entry', 'term_candidate', 'requirement',

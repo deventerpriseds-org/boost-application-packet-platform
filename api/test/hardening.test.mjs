@@ -28,6 +28,7 @@ import { profileRecords, resolveEvidence } from '../dist/functions/tests/evidenc
 
 const SRC = new URL('../src/functions/tests/', import.meta.url).pathname
 const src = (f) => readFileSync(join(SRC, f), 'utf8')
+const src_ = (f) => src(f)
 const allSources = () => readdirSync(SRC).filter(f => f.endsWith('.ts')).map(f => [f, src(f)])
 
 /** Source with comments removed. A guard that fires on prose is one people learn to ignore. */
@@ -1734,4 +1735,53 @@ test('H42: every per-owner settings column production reads has a writer that ca
 
   // P8.4's own setting is NOT in that set, and its writer is exercised by dimensionsDb.test.mjs.
   assert.ok(written.has('cmp_dimensions'), 'the dimension set shipped with no writer — the exact shape this case exists to stop')
+})
+
+// ---------------------------------------------------------------------------------------------
+// H43 — a correction pass placed beside the check that motivates it produces a document the user
+// reads and a record that disagrees with it.
+//
+// The natural home for R1 is `appChecks.ts`, next to `posting_figure_echo`. Put it there and
+// everything looks right: the check goes green, the change log renders, every test written
+// alongside passes. What breaks is invisible from that vantage — `packet.pkg_json` and
+// `insertion.after_text` were both written BEFORE the correction, so they describe text nobody
+// will ever see. Downstream it compounds: `remediation.realEdits()` decides whether a pass edited
+// anything by comparing `after_text` to `before_text`, and `creditClosures()` joins `after_text`
+// to decide which requirements a pass may credit — so the loop credits closures against text that
+// never shipped.
+//
+// The invariant, not the incident: the correction pass must run before the package is persisted,
+// in the ONE function every build funnels through, so that the stored package, the provenance
+// writers and every check all read the same corrected text.
+test('H43: corrections are applied before the package is stored, not beside the check', () => {
+  // The CALL, not the import. The first version of this guard searched for the bare identifier and
+  // found the `import` line at the top of the file — which precedes everything, so the ordering
+  // assertion was trivially true and the guard passed with the pass moved after the store. Caught
+  // by reverting it; an inert guard is worse than none.
+  const src = stripComments(src_('appPackets.ts')).replace(/^\s*import[^\n]*\n/gm, '')
+  const iPass = src.search(/await\s+applyCorrectionPass\s*\(/)
+  assert.ok(iPass > 0, 'the correction pass is not CALLED from the package builder at all')
+
+  // It must precede the pkg_json write, the swap writer and the insertion writer.
+  for (const after of ['update packet set pkg_json', 'writeSwaps(', 'writeInsertions(']) {
+    const iAfter = src.indexOf(after)
+    assert.ok(iAfter > 0, `${after} not found — this guard has gone stale`)
+    assert.ok(iPass < iAfter,
+      `applyCorrectionPass runs AFTER ${after}, so what is stored is not what the user reads`)
+  }
+
+  // And it must NOT be called from the checks layer, which runs after the package is already
+  // persisted — that placement is the defect this case exists to prevent.
+  assert.ok(!/applyCorrectionPass/.test(stripComments(src_('appChecks.ts'))),
+    'the correction pass moved into appChecks, where it can only correct text already stored')
+})
+
+// H43b — the pure layer stays pure, because that is what makes every offset and revert path
+// testable without a database. A correction whose rules can only be exercised through pg is a
+// correction whose revert path is exercised by nobody.
+test('H43b: the correction judgement layer takes no database or HTTP dependency', () => {
+  const pure = stripComments(src_('correction.ts'))
+  for (const banned of ['pgClient', '@azure/functions', 'logUsage', 'fetch(']) {
+    assert.ok(!pure.includes(banned), `correction.ts references ${banned} — it is no longer pure`)
+  }
 })
