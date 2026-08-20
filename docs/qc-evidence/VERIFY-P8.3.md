@@ -550,3 +550,102 @@ retractions above, exactly as reported.
 Every measurement in this addendum was taken on a detached checkout of `30a236b` with a fresh `tsc`
 build. The tree was returned to `claude/qc-p8-3-verify` afterwards and `npm test` re-confirmed at
 316/316 for this branch's own snapshot. Nothing was fixed here either.
+
+---
+
+## ADDENDUM 2 — re-verification of the fix commit `30bb129`
+
+`30bb129 fix(qc-p8.3): the defects the independent verifier found — including the 75% still on screen`
+landed on `claude/qc-p8-3-evidence` in response to this report. A fix that answers a verification is
+not verified by the fact that it was written, so every defect above was re-measured on a detached
+checkout of `30bb129`, and every guard the commit adds was revert-proofed the same way §1 did.
+
+**Baseline at `30bb129`:** `api` build exit 0, **330/330 · 0 fail · 0 skipped**; `app` build exit 0,
+**149/149 · 0 fail · 0 skipped**.
+
+### Fixed — measured, not accepted
+
+| Defect | Verified how | Result |
+|---|---|---|
+| **D-C** — the 75% on the rail | Re-ran the cross-consumer probe unchanged against the `30bb129` build | **Fixed.** `RAIL must_have card : total=1 closed=0`, source `0 of 1 closed … (3 more not judged either way)`, and requirements #0/#1/#2 now render **`unmeasured/not measured`** instead of green `closed`. All three surfaces agree: check `0/1`, score `0%`, rail `0/1`. The new `unjudgedSeqs()` reads the excluded rows off the same `#<seq>` offender contract and the same run as the check (`template_reach`, `facts_needed`, `fact_shortfall`), and `classTotal` keeps the class size visible rather than absorbing it. |
+| **D-A** — the mis-anchored quote | Re-ran the `İ` probe | **Fixed.** `locate` now returns `char_start = 15` against a true index of 15 and `verbatim = "led the platform modernization programme across four product lines"` — the whole phrase, no truncation, no glued tail. Same for the one-`İ` case (`start = 5`, true index 5). The exact branch now runs a case-insensitive `RegExp` over the **original** string, so `m.index` and `m[0].length` are measured on the string they index. |
+| **D-E** — H4b never followed the accusation | Read the case | **Fixed.** H4b now also asserts `!/\bsimilarity\(/.test(stripComments(src('evidence.ts')))`. |
+| **D-G1** — fabricated `record_sha256: ''` / `resolver_version: 0` | Read the diff | **Fixed.** `appChecks` now reads `r.evidence_record_sha256`, `r.evidence_resolver_version` and `r.evidence_extra` from the row it had already selected. |
+| **D-B** — the tautological guard | Read the comment | **Addressed as asked.** The guard is kept as defence in depth and the comment now says plainly that it "has never rejected anything and structurally cannot today", rather than implying a `refused` population that cannot be non-zero. That is the honest version of the same code. |
+| **D-D** — no read-time revalidation | `.claude/DEFERRED.md` | **Deferred and disclosed** as D19, with the symptom stated ("the excerpt renders normally and is a true substring of what the record USED to say") and the reason (reading the profile on every requirements GET is a cost decision). ACs 14 and 22 still fail; they now fail *knowingly*. |
+
+### The new guards are real
+
+Same method as §1 — revert the fix, rebuild, record the assertion.
+
+| Revert | Result |
+|---|---|
+| **H32** — restore the lower-cased-copy search in `requirements.locate` | **fires.** `AssertionError: pad "İ": offset drifted with the fold`; `actual: 12`, `expected: 11`. 34 pass / 1 fail. |
+| **H4b's new half** — import `similarity` into `evidence.ts` | **fires.** `AssertionError: evidence decides coverage, which decides the gate; it must not be decided by a ranking heuristic`. 34 pass / 1 fail. |
+| **the rail fix** — `unjudgedSeqs(entries)` → `new Set()` | **fires twice.** `a requirement nothing measured is never CLOSED on the rail (the 75% again)` → `actual: 3, expected: 0`; and `a fact-owned requirement is not counted closed by the rail either` → `actual: 2, expected: 1`. 34 pass / 2 fail; restored, 36/36. |
+
+### The substring claim survives the `locate` rewrite
+
+Changing the exact branch is exactly the kind of change that could break the property §2 established, so
+the whole harness was re-run against the `30bb129` build: **637 probes, 591 resolved, 0 substring
+violations** — and 591 resolved rather than 557, because the fold fix now anchors correctly in cases
+that previously drifted. Reader properties (AC-4/5/6/7/13/21) and the AC-28 identity re-measured
+unchanged. H3, H5, H5b and H5c stay green, so AC-51's guarantee — `verbatim` is exactly
+`jd_text.slice(char_start, char_end)` — survives the extractor change.
+
+### NEW FINDING — D-H: the threshold fix reaches one of three writers
+
+D-F is **partially** fixed. `evidenceThreshold` and `evidenceMinTokens` are now real
+`CheckThresholds` entries with seeded defaults, persisted per owner as `chk_evidence_threshold` /
+`chk_evidence_min_tokens` on `owner_search_prefs`, read by `loadThresholds`, and passed into
+`writeEvidence` — **from `appChecks.ts:109` only.** There are three call sites:
+
+| Call site | Passes the owner's thresholds? |
+|---|---|
+| `appChecks.ts:109` — `evaluateArtifact`, the checks hot path | **yes** |
+| `appRequirements.ts:306` — `requirementsBackfill` | **no** — `writeEvidence(client, opp.id, profile.records)` |
+| `appRequirements.ts:354` — **`POST /api/app/opportunity/{id}/evidence`**, the endpoint whose entire purpose is resolving evidence | **no** — same bare call |
+
+`grep -c loadThresholds api/src/functions/tests/appRequirements.ts` → **0**; the module never loads
+them. This is worse than two paths ignoring a setting, because `writeEvidence` **deletes and replaces
+every evidence row for the opportunity**: whichever writer ran last wins, so calling the evidence
+endpoint silently overwrites the threshold-respecting rows the checks path wrote with default-threshold
+ones. The owner's setting is not just unhonoured on those paths — it is destroyed by them. This is the
+same shape as D-C ("the fix was applied where the guard looks"), one layer down, and nothing asserts
+that the three writers agree.
+
+AC-20 itself remains **fail** on its own terms regardless: it names `MIN_QUOTE_CHARS` and
+`MIN_QUOTE_WORDS`, and those (with `DISTINCTIVE_LEN`) are still module constants with no owner path.
+
+### Scope note — the AC's "must NOT touch" list
+
+`AC-P8.3.md` closes with: *"What P8.3 must NOT touch: `requirements.ts` extraction rules and
+`EXTRACTOR_VERSION` …"*. `30bb129` changes both — the exact branch of `locate`, and
+`EXTRACTOR_VERSION` 1 → 2.
+
+Recording this as a crossing, not as a wrong call. The change fixes a real defect that this
+verification found, it is guarded by H32, and every extraction invariant it could have broken (H3, H5,
+H5b, H5c) is still green. Two consequences the owner should decide on rather than inherit:
+
+1. `EXTRACTOR_VERSION` is **written and never read** (`grep` finds it only in the `requirement` INSERT
+   and the schema column), so the bump changes no behaviour — it is purely a marker. That is what the
+   comment claims, and it is accurate.
+2. **Nothing re-extracts the version-1 rows.** The live Trinnex requirements were extracted under the
+   old rule, so any of them drawn from a posting containing a case-expanding character still carry
+   shifted offsets. The marker makes them findable; no backfill makes them correct.
+
+### Revised tally at `30bb129`
+
+**45 pass · 14 fail · 4 not_applicable.** Moved to pass: **AC-19** and **AC-61** (H4b now covers
+`evidence.ts`, closing 61(c) — the one quarter of the four that was missing), **AC-32** and **AC-36**
+(the rail now reports the judged population and never renders an unjudged row green).
+
+Still failing, unchanged: ACs 3, 14, 20, 22, 23, 33, 35, 38, 41, 42, 43, 44, 47, 48, 59.
+**AC-59** in particular is still open for two of its three consumers — `assetGate.js:86` still labels
+the check *"Must-haves this document covers"*, which is no longer what it measures, and
+`appReviewer.ts:183` still builds `engineJudged` from every must-have row while the check judges only
+`coverable`. Both are disclosed by the author as out-of-lane, and the third — the rail — is fixed.
+
+Measurements taken on a detached checkout of `30bb129`; the tree was restored after every revert and
+re-confirmed at 330/330 and 149/149. Nothing was fixed in this pass either — D-H is reported, not
+patched.
