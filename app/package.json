@@ -8,7 +8,8 @@
     "build": "vite build",
     "preview": "vite preview",
     "test": "node --test test/*.test.mjs",
-    "test:browser": "node test/browser/run.mjs"
+    "test:browser": "node test/browser/run.mjs",
+    "test:blocks": "node test/browser/run-asset-blocks.mjs"
   },
   "dependencies": {
     "@azure/msal-browser": "^3.30.0",

@@ -14,76 +14,25 @@
 //                                          from_label, to_label, verbatim_quote, rationale.
 //   GET /app/opportunity/{id}/requirements -> the posting's requirement rows (seq, kind, verbatim).
 //
-// A count with no source is NOT rendered. Library-term placement has no per-asset endpoint and
-// `term_library_entry` has no published scoreable rows (appChecks.ts leaves keyword_coverage null
-// for exactly this reason), so the meter omits a terms stat rather than printing a zero that reads
-// like a measurement.
+// EVERY COUNT PRINTED HERE COMES OFF THE ROW, not off a re-measurement of the row's text. The
+// derivation lives in ../assetBlocks.js so `node --test` can hold it to that; this file is the
+// rendering only. See that module's header for why the browser is not allowed to supply a count.
+//
+// A count with no source is NOT rendered as a zero. `term_library_entry` has no published scoreable
+// rows (appChecks.ts leaves keyword_coverage null for exactly this reason) and there is no per-asset
+// term-placement endpoint, so the meter STATES that library-term placement is unknown rather than
+// omitting the stat — an omitted stat and a measured zero read the same to a reader.
 //
 // A merge field the pipeline could not fill still gets a card, dashed and marked
 // "static template - not generated". `generated: false` is the API's own word for it. A block that
 // was not changed has to SAY so; looking generated is the failure this screen exists to prevent.
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { api } from '../api.js'
-
-// ── text shaping ────────────────────────────────────────────────────────────────────────────────
-
-// Mirrors splitItems() in api/src/functions/tests/swaps.ts exactly. If this split disagreed with
-// the one that produced `item_count`, a block would show a different number of lines than its own
-// row claims, and the row is what the checks were run against.
-export function splitItems(block) {
-  const s = block == null ? '' : String(block).trim()
-  if (!s) return []
-  return s
-    .split(/\r?\n|(?:\s*[|•·]\s*)/)
-    .map((l) => l.replace(/^[-*•·\s]+/, '').trim())
-    .filter(Boolean)
-}
-
-const wordCount = (s) => (String(s || '').trim().match(/\S+/g) || []).length
-
-// Loose comparison used ONLY to line a document item up with the swap row that produced it. It
-// never decides anything: a miss just means the item renders without its arrow.
-const normLabel = (s) => String(s || '').toLowerCase().replace(/[.;:,]+$/, '').replace(/\s+/g, ' ').trim()
-
-/**
- * How the document lays this field out, derived from the row rather than from a field-name list:
- *  - `list`  — the row names a skill_candidate list, or its text splits into more than one item.
- *  - `pipe`  — a single line of pipe-separated terms; the document prints it as an ATS run.
- *  - `prose` — everything else.
- * A field-name allow-list would go stale the moment a template gains a placeholder.
- */
-export function shapeOf(row) {
-  if (!row.generated) return 'static'
-  const text = row.after_text || ''
-  const pipes = (text.match(/\s\|\s/g) || []).length
-  if (!/\r?\n/.test(text) && pipes >= 2) return 'pipe'
-  if (row.list || splitItems(text).length > 1) return 'list'
-  return 'prose'
-}
-
-/**
- * The portfolio and cover merge fields carry their own size expectation in their NAME
- * (`@AboutMe1_50words`, `@CoreAccomplishments_5blts_180words`). That name is the only place the
- * expectation exists — no API field carries it — so it is read off the field and attributed to the
- * field, never presented as an independent measurement.
- */
-export function expectationFor(field) {
-  const w = /(\d+)\s*words/i.exec(field || '')
-  const b = /(\d+)\s*blts?/i.exec(field || '')
-  if (!w && !b) return null
-  return { words: w ? Number(w[1]) : null, bullets: b ? Number(b[1]) : null }
-}
-
-const KIND_ABBR = { must_have: 'M', nice_to_have: 'N', responsibility: 'R' }
-const KIND_WORD = { must_have: 'must-have', nice_to_have: 'nice-to-have', responsibility: 'responsibility' }
-
-// How the row's own `method` reads in plain language. `manual` is never inferred by the pipeline —
-// it exists so a human edit can be told apart from a model rewrite, and it is shown as what it is.
-const METHOD_LABEL = {
-  template_fill: 'written for this posting',
-  model_rewrite: 'rewritten by a later pass',
-  manual: 'edited by hand',
-}
+import {
+  KIND_ABBR, KIND_WORD, METHOD_LABEL,
+  countMismatchNote, deriveItems, draftSizeText, expectationFor, latestRows, listBodyModel, listsOf,
+  meterModel, reqsForRow, scopeSwaps, shapeOf, sharedSourceNote, statPct, wordCount,
+} from '../assetBlocks.js'
 
 // ── shared provenance loader ────────────────────────────────────────────────────────────────────
 
@@ -156,8 +105,19 @@ function Verbatim({ text }) {
   )
 }
 
+// A statement the card makes about itself that its own source contradicts. Shown, never resolved
+// in the browser's favour.
+function CountMismatch({ note }) {
+  if (!note) return null
+  return (
+    <div className="px-note" style={{ marginTop: 8, borderColor: 'var(--proto-yellow, var(--proto-rule-soft))' }}>
+      <div className="px-small" style={{ textTransform: 'none', lineHeight: 1.5 }}>{note}</div>
+    </div>
+  )
+}
+
 function Stat({ label, n, d, sub }) {
-  const pct = d > 0 ? Math.round((n / d) * 100) : 0
+  const pct = statPct(n, d)
   const all = d > 0 && n === d
   return (
     <div style={{ minWidth: 150, flex: '1 1 150px' }}>
@@ -174,75 +134,71 @@ function Stat({ label, n, d, sub }) {
 
 /**
  * The distribution meter. Every stat here has a denominator that came out of an API response; a
- * stat whose source is missing is dropped from the row entirely rather than shown as 0 of 0.
+ * stat whose source is missing is not shown as 0 of 0 — it is stated as unknown in the notes
+ * underneath, so "nothing was placed" and "nothing was measured" cannot be confused.
  */
-function DistributionMeter({ rows, filled, unfilled, requirements, scopedSwaps }) {
-  const placedReqIds = new Set(rows.map((r) => r.requirement_id).filter(Boolean))
-  const totalReqs = requirements && Number.isFinite(Number(requirements.total)) ? Number(requirements.total) : null
-  const changed = scopedSwaps.filter((s) => s.action === 'swapped' || s.action === 'added')
-  const postingDriven = changed.filter((s) => s.driver === 'posting')
-  const fields = filled + unfilled
-
-  const stats = []
-  if (totalReqs !== null && totalReqs > 0) {
-    stats.push(<Stat key="lines" label="Posting lines placed" n={placedReqIds.size} d={totalReqs} sub="requirement rows this asset cites" />)
-  }
-  if (changed.length > 0) {
-    stats.push(<Stat key="driven" label="Changes the posting drove" n={postingDriven.length} d={changed.length} sub="list changes citing a posting line" />)
-  }
-  if (fields > 0) {
-    stats.push(<Stat key="fields" label="Fields generated" n={filled} d={fields} sub={`${unfilled} static template ${unfilled === 1 ? 'field' : 'fields'}`} />)
-  }
-  if (!stats.length) return null
+function DistributionMeter({ rows, filled, unfilled, requirements, scopedSwaps, terms }) {
+  const { stats, notes } = meterModel({ rows, filled, unfilled, requirements, scopedSwaps, terms })
+  if (!stats.length && !notes.length) return null
 
   return (
     <div className="px-box" style={{ padding: 14, display: 'flex', flexDirection: 'column', gap: 10 }}>
       <div style={{ fontSize: 13, fontWeight: 700 }}>What is in this asset</div>
-      <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap' }}>{stats}</div>
-      {totalReqs === null && (
-        <div className="px-small" style={{ textTransform: 'none' }}>
-          This posting has no requirement rows yet, so how much of it this asset answers is unknown - not zero.
+      {stats.length > 0 && (
+        <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap' }}>
+          {stats.map((s) => <Stat key={s.key} label={s.label} n={s.n} d={s.d} sub={s.sub} />)}
         </div>
       )}
+      {notes.map((n, i) => (
+        <div key={i} className="px-small" style={{ textTransform: 'none' }}>{n}</div>
+      ))}
     </div>
   )
 }
 
 // ── one merge field ─────────────────────────────────────────────────────────────────────────────
 
-function ListBody({ row, swapsForList }) {
-  const items = splitItems(row.after_text)
-  const byTo = new Map()
-  for (const s of swapsForList) if (s.to_label) byTo.set(normLabel(s.to_label), s)
-  const dropped = swapsForList.filter((s) => s.action === 'dropped' && s.from_label)
+function ListBody({ row, swapsForList, artifactId, listOwners }) {
+  const model = listBodyModel(row, swapsForList, { artifactId, listOwners })
   return (
     <div>
-      {items.map((item, i) => {
-        const s = byTo.get(normLabel(item))
-        const from = s && s.from_label && s.from_label !== s.to_label ? s.from_label : null
-        return (
-          <div key={i} style={{
-            display: 'grid', gridTemplateColumns: 'minmax(0,1fr) auto', gap: 10, alignItems: 'baseline',
-            padding: '6px 0', borderBottom: '1px solid var(--proto-rule-soft)',
-          }}>
-            <div style={{ fontSize: 12.5, lineHeight: 1.5, minWidth: 0 }}>
-              {from && (
-                <span style={{ color: 'var(--proto-ink3)' }}>
-                  {from} <span style={{ padding: '0 4px' }}>&rarr;</span>
-                </span>
-              )}
-              <span style={{ fontWeight: from ? 600 : 400 }}>{item}</span>
-            </div>
-            <span className="px-small" style={{ whiteSpace: 'nowrap' }}>
-              {s ? (s.action === 'kept' ? 'unchanged' : `${s.action} · ${s.driver}`) : ''}
-            </span>
+      {model.lines.map((line, i) => (
+        <div key={i} style={{
+          display: 'grid', gridTemplateColumns: 'minmax(0,1fr) auto', gap: 10, alignItems: 'baseline',
+          padding: '6px 0', borderBottom: '1px solid var(--proto-rule-soft)',
+        }}>
+          <div style={{ fontSize: 12.5, lineHeight: 1.5, minWidth: 0 }}>
+            {line.from && (
+              <span style={{ color: 'var(--proto-ink3)' }}>
+                {line.from} <span style={{ padding: '0 4px' }}>&rarr;</span>
+              </span>
+            )}
+            <span style={{ fontWeight: line.from ? 600 : 400 }}>{line.text}</span>
           </div>
-        )
-      })}
-      {dropped.length > 0 && (
+          {/* The status and the packet-level marker stack rather than run on, so the column stays
+              as narrow as its longest token on a phone. */}
+          <span className="px-small" style={{ textAlign: 'right' }}
+            title={line.sharedSource ? 'packet-level decision - recorded once for the whole packet' : undefined}>
+            <span style={{ whiteSpace: 'nowrap' }}>{line.status}</span>
+            {line.sharedSource && (
+              <span style={{ display: 'block', whiteSpace: 'nowrap', color: 'var(--proto-ink3)' }}>packet-level</span>
+            )}
+          </span>
+        </div>
+      ))}
+
+      {/* Decision 9: swap_decision is keyed by PACKET, so this same row renders on every asset that
+          renders this list. Saying so is what stops two cards reading as two separate changes. */}
+      {model.sharedNote && (
+        <div className="px-small" style={{ textTransform: 'none', lineHeight: 1.5, marginTop: 8, color: 'var(--proto-ink2)' }}>
+          {model.sharedNote}
+        </div>
+      )}
+
+      {model.dropped.length > 0 && (
         <div style={{ marginTop: 8 }}>
           <div className="px-label" style={{ marginBottom: 3 }}>Taken out of this list</div>
-          {dropped.map((s, i) => (
+          {model.dropped.map((s, i) => (
             <div key={i} className="px-small" style={{ textTransform: 'none', lineHeight: 1.5 }}>
               <s>{s.from_label}</s>{s.rationale ? ` - ${s.rationale}` : ''}
             </div>
@@ -253,7 +209,7 @@ function ListBody({ row, swapsForList }) {
   )
 }
 
-function BlockBody({ row, shape, swapsForList }) {
+function BlockBody({ row, shape, swapsForList, artifactId, listOwners }) {
   if (shape === 'static') {
     return (
       <div className="px-small" style={{ textTransform: 'none', lineHeight: 1.6 }}>
@@ -262,7 +218,7 @@ function BlockBody({ row, shape, swapsForList }) {
       </div>
     )
   }
-  if (shape === 'list') return <ListBody row={row} swapsForList={swapsForList} />
+  if (shape === 'list') return <ListBody row={row} swapsForList={swapsForList} artifactId={artifactId} listOwners={listOwners} />
   if (shape === 'pipe') {
     return (
       <div style={{ fontFamily: 'var(--font-mono)', fontSize: 11.5, lineHeight: 1.9, wordBreak: 'break-word', whiteSpace: 'pre-line' }}>
@@ -275,13 +231,18 @@ function BlockBody({ row, shape, swapsForList }) {
   )
 }
 
-function AssetBlock({ row, reqs, swapsForList, wide }) {
+function AssetBlock({ row, reqs, swapsForList, wide, artifactId, listOwners }) {
   const [showBefore, setShowBefore] = useState(false)
   const shape = shapeOf(row)
   const isStatic = shape === 'static'
   const expect = expectationFor(row.merge_field)
-  const items = splitItems(row.after_text)
+  // The ROW's count, not a re-split of its text. When the two disagree the card says so rather
+  // than printing the browser's number over the one the checks were run against.
+  const measured = deriveItems(row)
+  const count = measured.count
+  const countNote = countMismatchNote(measured.recorded, measured.splitCount)
   const words = wordCount(row.after_text)
+  const sharedNote = swapsForList.length && shape !== 'list' ? sharedSourceNote(row.list, artifactId, listOwners) : null
 
   // The reason this block reads the way it does. For a list field the swap rows carry the pipeline's
   // own rationale; for every other field the reason is the attribution (or the honest absence of one).
@@ -301,18 +262,26 @@ function AssetBlock({ row, reqs, swapsForList, wide }) {
         <span style={{ fontSize: 13, fontWeight: 600 }}>{row.merge_field}</span>
         {!isStatic && (
           <span className="px-small">
-            {row.item_count > 1 ? `${row.item_count} lines - ` : ''}{words} words
+            {count > 1 ? `${count} lines - ` : ''}{words} words
           </span>
         )}
         {expect && (
           <span className="px-small" style={{ textTransform: 'none' }}>
             field name asks for {expect.bullets ? `${expect.bullets} bullets` : ''}{expect.bullets && expect.words ? ' - ' : ''}{expect.words ? `${expect.words} words` : ''}
-            {isStatic ? '' : ` - this draft has ${expect.bullets ? `${items.length} bullets, ` : ''}${words} words`}
+            {isStatic ? '' : ` - this draft has ${draftSizeText(row, expect)}`}
           </span>
         )}
       </div>
 
-      <BlockBody row={row} shape={shape} swapsForList={swapsForList} />
+      <BlockBody row={row} shape={shape} swapsForList={swapsForList} artifactId={artifactId} listOwners={listOwners} />
+
+      <CountMismatch note={countNote} />
+
+      {sharedNote && (
+        <div className="px-small" style={{ textTransform: 'none', lineHeight: 1.5, marginTop: 8, color: 'var(--proto-ink2)' }}>
+          {sharedNote}
+        </div>
+      )}
 
       {showBefore && row.before_text && (
         <div className="px-note" style={{ marginTop: 9 }}>
@@ -362,6 +331,9 @@ function AssetBlock({ row, reqs, swapsForList, wide }) {
           {rationales.map((r, i) => (
             <div key={i} style={{ fontSize: 11.5, lineHeight: 1.5, color: 'var(--proto-ink2)', marginTop: i ? 4 : 0 }}>{r}</div>
           ))}
+          <div className="px-small" style={{ textTransform: 'none', marginTop: 4 }}>
+            recorded against the packet, not this asset alone
+          </div>
         </div>
       )}
 
@@ -394,8 +366,13 @@ function AssetBlock({ row, reqs, swapsForList, wide }) {
  * `fallback` is the artifact's stored content string. It is rendered only when the artifact has no
  * insertion rows at all — a draft written before P1.4, or a type with no template (the intro video
  * has no merge fields). Showing the old dump beats showing an empty screen, and it says which it is.
+ *
+ * `listOwners` / `onListsRendered` are how a card learns that another asset in the same packet
+ * renders the same list, so a packet-level swap can name the assets it is shared with instead of
+ * appearing twice as two separate changes. Both are optional: without them a shared swap still says
+ * it is packet-level, it just cannot name the sibling.
  */
-export default function AssetBlocks({ artifact, provenance, fallback, defaultOpen = true }) {
+export default function AssetBlocks({ artifact, provenance, fallback, defaultOpen = true, label, listOwners, onListsRendered }) {
   const [open, setOpen] = useState(defaultOpen)
   const [state, setState] = useState({ loading: true, error: null, data: null })
   const [ref, wide] = useWideRef(700)
@@ -417,36 +394,18 @@ export default function AssetBlocks({ artifact, provenance, fallback, defaultOpe
 
   const allSwaps = (provenance && provenance.swaps && provenance.swaps.swaps) || []
 
-  const rows = useMemo(() => {
-    const all = (state.data && state.data.insertions) || []
-    if (!all.length) return []
-    // The endpoint returns every loop; `loop` is the latest. Older loops are the history behind
-    // `before_text`, not extra blocks to draw.
-    const latest = Number(state.data.loop)
-    return all.filter((r) => Number(r.loop) === latest)
-  }, [state.data])
+  const rows = useMemo(() => latestRows(state.data), [state.data])
 
-  // Swaps are recorded per PACKET and per list; `insertion.list` is what ties a list back to the
-  // merge field that renders it, so only the lists this asset actually renders are in scope.
-  const listsInAsset = useMemo(() => new Set(rows.map((r) => r.list).filter(Boolean)), [rows])
-  const scopedSwaps = useMemo(() => allSwaps.filter((s) => listsInAsset.has(s.list)), [allSwaps, listsInAsset])
+  const listsInAsset = useMemo(() => listsOf(rows), [rows])
+  const scopedSwaps = useMemo(() => scopeSwaps(allSwaps, listsInAsset), [allSwaps, listsInAsset])
 
-  // A block cites the requirement its own insertion row names, plus the requirements the swap rows
-  // for the list it renders name. Both are stored requirement_ids — a chip is never derived from a
-  // keyword match made in the browser.
-  const reqsFor = (row) => {
-    const ids = [row.requirement_id]
-    if (row.list) for (const s of scopedSwaps) if (s.list === row.list && s.requirement_id) ids.push(s.requirement_id)
-    const out = []
-    const seen = new Set()
-    for (const id of ids) {
-      if (!id || seen.has(id)) continue
-      seen.add(id)
-      const r = reqById.get(id)
-      if (r) out.push(r)
-    }
-    return out.sort((a, b) => Number(a.seq) - Number(b.seq))
-  }
+  // Report which lists this asset renders, so sibling cards can say a swap is shared with it. Keyed
+  // on the sorted list names so an unchanged set never re-fires.
+  const listsKey = useMemo(() => Array.from(listsInAsset).sort().join(','), [listsInAsset])
+  useEffect(() => {
+    if (!onListsRendered) return
+    onListsRendered(artifact.id, label || artifact.type, listsKey ? listsKey.split(',') : [])
+  }, [artifact.id, artifact.type, label, listsKey, onListsRendered])
 
   if (state.loading) return <div className="px-small">Loading blocks...</div>
 
@@ -493,14 +452,17 @@ export default function AssetBlocks({ artifact, provenance, fallback, defaultOpe
             unfilled={Number(state.data.unfilled) || 0}
             requirements={provenance && provenance.requirements}
             scopedSwaps={scopedSwaps}
+            terms={null}
           />
           {rows.map((r) => (
             <AssetBlock
               key={`${r.merge_field}-${r.loop}`}
               row={r}
-              reqs={reqsFor(r)}
+              reqs={reqsForRow(r, scopedSwaps, reqById)}
               swapsForList={r.list ? scopedSwaps.filter((s) => s.list === r.list) : []}
               wide={wide}
+              artifactId={artifact.id}
+              listOwners={listOwners}
             />
           ))}
         </>

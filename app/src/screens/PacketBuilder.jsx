@@ -4,6 +4,7 @@ import { api } from '../api.js'
 import { Pill } from '../shell.jsx'
 import { Loading, ErrorBox } from './Today.jsx'
 import AssetBlocks, { useAssetProvenance } from './AssetBlocks.jsx'
+import { registerListOwners } from '../assetBlocks.js'
 
 const TYPE_LABEL = {
   resume: 'Resume', compact_resume: 'Compact resume', cover: 'Cover letter',
@@ -54,7 +55,7 @@ function stepDone(key, p, artifacts) {
   })
 }
 
-function ArtifactCard({ a, busy, setBusy, onGenerate, onSetStatus, onMakeDoc, onMakeSlides, onGenVideo, onArchiveVideo, doc, video, provenance }) {
+function ArtifactCard({ a, busy, setBusy, onGenerate, onSetStatus, onMakeDoc, onMakeSlides, onGenVideo, onArchiveVideo, doc, video, provenance, listOwners, onListsRendered }) {
   const v = video[a.id] || {}
   const d = doc[a.id] || {}
   const videoUrl = v.url || a.docUrl
@@ -74,7 +75,8 @@ function ArtifactCard({ a, busy, setBusy, onGenerate, onSetStatus, onMakeDoc, on
           with the provenance for that field beside it. It replaced a collapsed `content` dump that
           could not distinguish generated text from static template text. */}
       {(a.status !== 'todo' || a.content) && (
-        <AssetBlocks artifact={a} provenance={provenance} fallback={a.content} />
+        <AssetBlocks artifact={a} provenance={provenance} fallback={a.content}
+          label={TYPE_LABEL[a.type] || a.type} listOwners={listOwners} onListsRendered={onListsRendered} />
       )}
 
       {/* Video */}
@@ -176,6 +178,14 @@ export default function PacketBuilder({ id, step }) {
   // two requests for the resume and the compact resume (one packet, identical merge fields) and let
   // the two cards disagree if one call failed. Hooks run before the loading/error returns below.
   const provenance = useAssetProvenance(id, pState.packet ? pState.packet.id : null)
+  // Which asset in this packet renders which skill_candidate list, reported by each card from its
+  // OWN insertion rows. A swap_decision row is keyed by packet, never by artifact, so the resume and
+  // the compact resume render the SAME change; this registry is what lets each card name the other
+  // instead of the one decision reading as two (decision 9, sharedSource).
+  const [listOwners, setListOwners] = useState({})
+  const registerLists = useCallback((artifactId, label, lists) => {
+    setListOwners((prev) => registerListOwners(prev, artifactId, label, lists))
+  }, [])
 
   const load = useCallback(async () => {
     try {
@@ -421,7 +431,8 @@ export default function PacketBuilder({ id, step }) {
                 onGenerate={generate} onSetStatus={setStatus}
                 onMakeDoc={makeDoc} onMakeSlides={makeSlides}
                 onGenVideo={genVideo} onArchiveVideo={archiveVideo}
-                doc={doc} video={video} provenance={provenance} />
+                doc={doc} video={video} provenance={provenance}
+                listOwners={listOwners} onListsRendered={registerLists} />
             ))}
             {nextStep && (
               <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
