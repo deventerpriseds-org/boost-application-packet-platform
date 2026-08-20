@@ -465,6 +465,39 @@ create table if not exists artifact_score (
 );
 create index if not exists artifact_score_idx on artifact_score(artifact_id, computed_at desc);
 
+-- P6 - the candidate fact table. Atomic, checkable facts about the OWNER, as opposed to
+-- MasterContext, which holds prose blocks (resume summary, work history, about-me). Both are the
+-- standing profile; they are not duplicates. MasterContext answers "what do we write"; this answers
+-- "what is true", and a requirement like "10+ years" or "must be a U.S. Citizen" can be settled
+-- against it deterministically instead of guessed at from document text.
+--
+-- Measured demand across 7,559 live requirement rows: years-of-experience 511, degree/certification
+-- 466, citizenship/work-auth 43, clearance 36, scope 24, onsite/remote 20, travel 14, location 14.
+-- Years and degrees alone are 13% of every requirement in the corpus.
+--
+-- GROWING BY DESIGN. source='proposed' rows are written by the system when a posting asks something
+-- no fact answers; the owner confirms or corrects them, which promotes them to 'owner_stated'.
+-- confirmed_at null means nobody has vouched for it yet, and an unconfirmed fact must never settle a
+-- gate - the same rule as absent evidence being not_applicable rather than pass.
+create table if not exists owner_fact (
+  id           uuid primary key default uuid_generate_v4(),
+  owner_email  text not null,
+  key          text not null,        -- stable machine key, e.g. experience.years_total
+  label        text not null,        -- human label for the settings screen
+  category     text not null check (category in ('identity','eligibility','experience','education','scope','preference')),
+  value        text,                 -- canonical string form, always set when known
+  value_num    numeric,              -- numeric form when comparable, e.g. 22 for years
+  unit         text,                 -- years | usd | people | percent | none
+  source       text not null default 'proposed' check (source in ('owner_stated','derived','proposed')),
+  evidence     text,                 -- where a derived or proposed value came from
+  confirmed_at timestamptz,          -- null = nobody has vouched for it
+  updated_at   timestamptz not null default now(),
+  unique (owner_email, key),
+  -- A confirmed fact must have a value; confirming an empty field asserts nothing.
+  check (confirmed_at is null or value is not null)
+);
+create index if not exists owner_fact_owner_idx on owner_fact(owner_email, category);
+
 -- Idempotent multi-tenant column adds (safe on tables that predate them)
 alter table persona        add column if not exists owner_email text not null default 'demo@executive-engine.local';
 alter table persona        add column if not exists is_demo boolean not null default false;
@@ -496,5 +529,5 @@ export const EXPECTED_TABLES = [
   'persona', 'opportunity', 'contact', 'packet', 'artifact', 'outreach_message',
   'interview', 'offer', 'library_entity', 'asset_event', 'usage_metering',
   'term_library', 'term_library_entry', 'term_candidate', 'requirement',
-  'skill_candidate', 'swap_decision', 'insertion', 'check_result', 'artifact_gate', 'artifact_score'
+  'skill_candidate', 'swap_decision', 'insertion', 'check_result', 'artifact_gate', 'artifact_score', 'owner_fact'
 ]
