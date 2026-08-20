@@ -64,9 +64,18 @@ export async function buildPackageForJD(opts: { key: string; jd: string; roleTyp
   if (role.warning) warnings.push(`role focus: ${role.warning}`)
   steps.push(`Role focus "${roleFocus}" (source: ${role.source})`)
 
+  // X6 — the version is loaded alongside the content. This projection took `content` only, so
+  // nothing downstream could say WHICH prompt produced a given package. P4 requires a
+  // prompt_version on every verdict, and "the active one at the time" is not recoverable after the
+  // fact once a prompt is superseded.
   const promptClient = TableClient.fromConnectionString(CONN, 'Prompts')
   const prompts: Record<string, string> = {}
-  for await (const e of promptClient.listEntities({ queryOptions: { filter: 'is_active eq true' } })) prompts[(e as any).partitionKey] = (e as any).content || ''
+  const promptVersions: Record<string, number> = {}
+  for await (const e of promptClient.listEntities({ queryOptions: { filter: 'is_active eq true' } })) {
+    const key = (e as any).partitionKey
+    prompts[key] = (e as any).content || ''
+    promptVersions[key] = Number((e as any).version ?? 0)
+  }
   const ctxClient = TableClient.fromConnectionString(CONN, 'MasterContext')
   let mc: any = {}
   for await (const e of ctxClient.listEntities({ queryOptions: { filter: "PartitionKey eq 'context'" } })) mc = e
