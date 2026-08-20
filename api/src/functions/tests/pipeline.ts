@@ -2,9 +2,11 @@ import { app, HttpRequest, HttpResponseInit, InvocationContext } from '@azure/fu
 import { TableClient } from '@azure/data-tables'
 import { getGoogleToken, getGoogleOAuthToken, HAS_GOOGLE_OAUTH, IMPERSONATE_SUBJECT, getMicrosoftToken } from './googleAuth'
 import { resolveZapVars } from './zapVars'
-import { getRoleFocus, roleDirective } from './roleFocus'
+import { resolveRoleFocus, roleDirective } from './roleFocus'
 import { assemblePackage } from './mt17'
 import { parseResumePackage } from './resumeParser'
+import { parseAgentJson, isEmptyResult } from './agentJson'
+import { loadPipelineSettings, requireDriveId, isDriveId, CONFIG_KEYS, PipelineSettings } from './pipelineConfig'
 
 const CONN = process.env.AZURE_STORAGE_CONNECTION_STRING!
 const HEADERS = {
@@ -21,9 +23,13 @@ const OUTPUT_FOLDER_ID = '1MlVLMSQ0EQJoAtpKC1Mv7mDCAJDmdJTt'
 const TEST_PDF_BASE64 = 'JVBERi0xLjQKMSAwIG9iago8PAovVHlwZSAvQ2F0YWxvZwovUGFnZXMgMiAwIFIKPj4KZW5kb2JqCjIgMCBvYmoKPDwKL1R5cGUgL1BhZ2VzCi9LaWRzIFszIDAgUl0KL0NvdW50IDEKPD4KZW5kb2JqCjMgMCBvYmoKPDwKL1R5cGUgL1BhZ2UKL1BhcmVudCAyIDAgUgovTWVkaWFCb3ggWzAgMCA2MTIgNzkyXQo+PgplbmRvYmoKeHJlZgowIDQKMDAwMDAwMDAwMCA2NTUzNSBmCjAwMDAwMDAwMDkgMDAwMDAgbgowMDAwMDAwMDU4IDAwMDAwIG4KMDAwMDAwMDExNSAwMDAwMCBuCnRyYWlsZXIKPDwKL1NpemUgNAovUm9vdCAxIDAgUgo+PgpzdGFydHhyZWYKMTkwCiUlRU9G'
 
 async function copyAndInject(token: string, templateId: string, name: string, varMap: Record<string, string>, isSlides: boolean) {
-  const copyRes = await fetch(`https://www.googleapis.com/drive/v3/files/${templateId}/copy`, {
+  // Validate BEFORE the request so a missing/blank/sentinel id is reported as the configuration gap
+  // it is, naming the document, instead of arriving at Drive as an opaque 404 on `files//copy`.
+  const tpl = requireDriveId(templateId, `Template id for "${name}"`)
+  const parent = requireDriveId(OUTPUT_FOLDER_ID, 'Output folder id', 'google.outputFolderId')
+  const copyRes = await fetch(`https://www.googleapis.com/drive/v3/files/${tpl}/copy`, {
     method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-    body: JSON.stringify({ name, parents: [OUTPUT_FOLDER_ID] })
+    body: JSON.stringify({ name, parents: [parent] })
   })
   if (!copyRes.ok) throw new Error(`Copy ${name} failed: HTTP ${copyRes.status}`)
   const { id } = await copyRes.json() as any
@@ -44,10 +50,19 @@ async function copyAndInject(token: string, templateId: string, name: string, va
 // Returns `calls` alongside the package because P1.3 cannot reconstruct what changed from the merged
 // output alone: assemblePackage's per-slot preference for Call 3 over Call 1 IS the swap decision,
 // and both sides are needed to see it. These were previously discarded at the end of this function.
-export async function buildPackageForJD(opts: { key: string; jd: string; roleType: string; company: string; jobTitle: string }): Promise<{ pkg: Record<string, string | null>; steps: string[]; roleFocus: any; calls: { c1: any; c2: any; c3: any }; profileText: string; omitList: string }> {
+export async function buildPackageForJD(opts: { key: string; jd: string; roleType: string; company: string; jobTitle: string }): Promise<{ pkg: Record<string, string | null>; steps: string[]; roleFocus: any; roleFocusSource: string; calls: { c1: any; c2: any; c3: any }; profileText: string; omitList: string; warnings: string[]; qcApplied: boolean; settings: PipelineSettings }> {
   const { key, jd, roleType, company, jobTitle } = opts
   const steps: string[] = []
-  const roleFocus = await getRoleFocus(roleType)
+  const warnings: string[] = []
+
+  // Runtime knobs come from the existing AppConfig/auth store (Auth & Config screen), not from code.
+  const settings = await loadPipelineSettings()
+  warnings.push(...settings.warnings)
+
+  const role = await resolveRoleFocus(roleType, settings.defaultRoleFocus)
+  const roleFocus = role.focus
+  if (role.warning) warnings.push(`role focus: ${role.warning}`)
+  steps.push(`Role focus "${roleFocus}" (source: ${role.source})`)
 
   const promptClient = TableClient.fromConnectionString(CONN, 'Prompts')
   const prompts: Record<string, string> = {}
@@ -56,25 +71,57 @@ export async function buildPackageForJD(opts: { key: string; jd: string; roleTyp
   let mc: any = {}
   for await (const e of ctxClient.listEntities({ queryOptions: { filter: "PartitionKey eq 'context'" } })) mc = e
 
-  const openai = (system: string, user: string, maxTokens: number) => fetch('https://api.openai.com/v1/chat/completions', {
+  // `temperature` was never sent, so the Chat Completions default applied to all three calls —
+  // including the reconciliation pass, which is the one call in the run that should be the least
+  // creative. Both values are configurable (AppConfig/auth), seeded from `SEED_TEMPERATURES`.
+  const openai = (system: string, user: string, maxTokens: number, temperature: number) => fetch('https://api.openai.com/v1/chat/completions', {
     method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
-    body: JSON.stringify({ model: 'gpt-4o-mini', messages: [{ role: 'system', content: system }, { role: 'user', content: user }], max_tokens: maxTokens })
+    body: JSON.stringify({ model: 'gpt-4o-mini', messages: [{ role: 'system', content: system }, { role: 'user', content: user }], max_tokens: maxTokens, temperature })
   }).then(r => r.ok ? r.json() : r.text().then(t => { throw new Error(`OpenAI HTTP ${r.status}: ${t}`) }))
 
+  const tGen = settings.generateTemperature.value
+  const tQc = settings.qcTemperature.value
+  steps.push(`Temperatures — generation ${tGen} (${settings.generateTemperature.source}), QC ${tQc} (${settings.qcTemperature.source})`)
+
   const base1 = resolveZapVars(prompts['resume_user'] || 'Write resume package with ### sections.', mc, jd)
-  const r1 = await openai(prompts['resume_system'] || 'You are an executive resume writer.', roleDirective(roleFocus) + base1, 16000) as any
+  const r1 = await openai(prompts['resume_system'] || 'You are an executive resume writer.', roleDirective(roleFocus) + base1, 16000, tGen) as any
   const c1: any = parseResumePackage(r1.choices?.[0]?.message?.content || '', mc, jobTitle, company)
   steps.push(`Agent Call 1 (resume) — parsed ${c1._parsedFieldCount} fields by title`)
+  if (!c1._parsedFieldCount) warnings.push('Call 1 produced no recognisable ### sections — the package is MasterContext only')
 
-  const r2 = await openai(prompts['portfolio_system'] || 'You are a helpful assistant.', roleDirective(roleFocus) + `${prompts['portfolio_user'] || 'Portfolio JSON.'}\n\nCALL1:\n${JSON.stringify(c1)}`, 16000) as any
-  let c2: any = {}
-  try { const m = (r2.choices?.[0]?.message?.content || '').match(/\{[\s\S]*\}/); if (m) c2 = JSON.parse(m[0]) } catch (e) { console.warn('[pipeline] Call-2 (portfolio) JSON parse failed — portfolio/cover fields may be empty:', String(e)) }
-  steps.push('Agent Call 2 (portfolio + cold email)')
+  // Calls 2 and 3 were sending their prompts RAW: every `{{node__field}}` token the seeded Zapier
+  // prompts carry reached the model as a literal. For Call 3 that included the job description
+  // itself, so the ATS-QC pass was asked to compare two lists against a posting it never saw.
+  // `extra` supplies the tokens that only exist mid-run (Call-1's own output, the target company
+  // and role); everything still unmapped is blanked rather than shown to the model.
+  const base2 = resolveZapVars(prompts['portfolio_user'] || 'Portfolio JSON.', mc, jd)
+  const r2 = await openai(prompts['portfolio_system'] || 'You are a helpful assistant.', roleDirective(roleFocus) + `${base2}\n\nCALL1:\n${JSON.stringify(c1)}`, 16000, tGen) as any
+  const p2 = parseAgentJson(r2.choices?.[0]?.message?.content)
+  const c2: any = p2.value || {}
+  if (!p2.value) warnings.push(`Call 2 (portfolio) returned no JSON object (${p2.detail}) — portfolio/cover fields fall back to Call 1`)
+  steps.push(`Agent Call 2 (portfolio + cold email) — JSON via ${p2.via}`)
 
-  const r3 = await openai(prompts['ats_system'] || 'You are a helpful assistant.', `${prompts['ats_user'] || 'ATS QC.'}\n\nINPUTS:\n${JSON.stringify({ ...c1, ...c2 })}`, 15500) as any
-  let c3: any = {}
-  try { const m = (r3.choices?.[0]?.message?.content || '').match(/\{[\s\S]*\}/); if (m) c3 = JSON.parse(m[0]) } catch (e) { console.warn('[pipeline] Call-3 (ATS QC) JSON parse failed — falling back to Call-1 skills/summary:', String(e)) }
-  steps.push('Agent Call 3 (ATS QC + skills merge)')
+  const atsExtra: Record<string, string> = {
+    '289877667__ResumeSummary': c1.resumeSummary || '',
+    '289877667__skills list 1': c1.skills1 || '',
+    '289877667__skills list 2': c1.skills2 || '',
+    '289877667__Expertise': c1.expertise || '',
+    '289877667__Relevant 1': c1.relevant1 || '',
+    '289877667__Relevant 2': c1.relevant2 || '',
+    '289877667__Relevant 3': c1.relevant3 || '',
+    '289877662__output__Item 7': company || '',
+    '289877662__output__Item 5': jobTitle || '',
+  }
+  const base3 = resolveZapVars(prompts['ats_user'] || 'ATS QC.', mc, jd, undefined, atsExtra)
+  const r3 = await openai(prompts['ats_system'] || 'You are a helpful assistant.', `${base3}\n\nINPUTS:\n${JSON.stringify({ ...c1, ...c2 })}`, 15500, tQc) as any
+  const p3 = parseAgentJson(r3.choices?.[0]?.message?.content)
+  const c3: any = p3.value || {}
+  // An inert Call 3 is the difference between "QC ran and agreed" and "QC never landed". It used to
+  // be swallowed by a `catch` and reported as neither; every downstream swap row then reads `kept`.
+  const qcApplied = !!p3.value && !isEmptyResult(p3.value)
+  if (!p3.value) warnings.push(`Call 3 (ATS QC) returned no JSON object (${p3.detail}) — the package is Call 1 unreviewed`)
+  else if (!qcApplied) warnings.push('Call 3 (ATS QC) returned an empty object — no skill merge or summary update was applied')
+  steps.push(`Agent Call 3 (ATS QC + skills merge) — JSON via ${p3.via}, applied: ${qcApplied}`)
 
   const pkg = assemblePackage(c1, c2, c3) as Record<string, string | null>
   // The standing profile, so an item that predates this application can be marked profile_original
@@ -85,7 +132,12 @@ export async function buildPackageForJD(opts: { key: string; jd: string; roleTyp
   const profileText = Object.entries(mc || {})
     .filter(([k, v]) => typeof v === 'string' && k !== 'itemsToOmit')
     .map(([, v]) => v as string).join(' ')
-  return { pkg, steps, roleFocus, calls: { c1, c2, c3 }, profileText, omitList }
+  // The MT-22 route returns `warnings` to its caller; the production packet builder
+  // (appPackets.buildTemplatedArtifact) does not read them, so emit them here too — otherwise a
+  // config gap or an inert QC call is invisible on the path that actually ships documents.
+  if (warnings.length) console.warn(`[pipeline] ${warnings.length} warning(s) for ${jobTitle} @ ${company}:\n - ${warnings.join('\n - ')}`)
+
+  return { pkg, steps, roleFocus, roleFocusSource: role.source, calls: { c1, c2, c3 }, profileText, omitList, warnings, qcApplied, settings }
 }
 
 // GET /api/jobs?status=received — list jobs for the approval queue
@@ -135,17 +187,40 @@ export async function pipelineRun(req: HttpRequest, context: InvocationContext):
 
     await jobsClient.updateEntity({ partitionKey: 'applications', rowKey: jobId, Status: 'processing' } as any, 'Merge')
 
-    // AppConfig: role-specific compact resume template
+    // 2-4. Proven 3-agent generation (shared with the production packet builder).
+    const built = await buildPackageForJD({ key, jd, roleType, company, jobTitle })
+    const { pkg, steps: genSteps, roleFocus } = built
+    const warnings: string[] = [...built.warnings]
+    steps.push(...genSteps)
+
+    // AppConfig: role-specific compact resume template, then the owner's configured default. A role
+    // with neither used to skip the 4th document in silence — `pass` only counts >= 3 docs, so a
+    // packet could ship without the ATS resume and still report success.
+    const roleRow = roleType.toLowerCase().replace(/\s+/g, '-')
     let compactResumeTemplateId = ''
+    let compactSource = 'none'
     try {
       const cfg = TableClient.fromConnectionString(CONN, 'AppConfig')
-      const row = await cfg.getEntity('templates', roleType.toLowerCase().replace(/\s+/g, '-')) as any
-      compactResumeTemplateId = row.compactResumeTemplateId || ''
-    } catch {}
-
-    // 2-4. Proven 3-agent generation (shared with the production packet builder).
-    const { pkg, steps: genSteps, roleFocus } = await buildPackageForJD({ key, jd, roleType, company, jobTitle })
-    steps.push(...genSteps)
+      const row = await cfg.getEntity('templates', roleRow) as any
+      compactResumeTemplateId = String(row.compactResumeTemplateId || '')
+      if (compactResumeTemplateId) compactSource = `templates/${roleRow}`
+    } catch (e) {
+      const status = (e as any)?.statusCode
+      if (status !== 404) warnings.push(`AppConfig templates/${roleRow} lookup failed: ${String((e as any)?.message || e).slice(0, 160)}`)
+    }
+    if (!compactResumeTemplateId && built.settings.compactResumeTemplateId) {
+      compactResumeTemplateId = built.settings.compactResumeTemplateId
+      compactSource = CONFIG_KEYS.compactResumeTemplateId
+    }
+    if (compactResumeTemplateId && !isDriveId(compactResumeTemplateId)) {
+      warnings.push(`Compact resume template id from ${compactSource} is not a Drive id (${JSON.stringify(compactResumeTemplateId)}) — the compact ATS resume was NOT generated`)
+      compactResumeTemplateId = ''
+      compactSource = 'invalid'
+    }
+    if (!compactResumeTemplateId) {
+      warnings.push(`No compact ATS resume template for role "${roleType}" — add compactResumeTemplateId to AppConfig templates/${roleRow}, or set ${CONFIG_KEYS.compactResumeTemplateId} in Auth & Config. The compact ATS resume was NOT generated.`)
+    }
+    steps.push(`Compact ATS resume template: ${compactResumeTemplateId ? compactSource : 'NOT CONFIGURED'}`)
 
     // 5. Generate documents (role-routed compact resume as 4th)
     const token = HAS_GOOGLE_OAUTH ? await getGoogleOAuthToken() : await getGoogleToken(saJson!, 'https://www.googleapis.com/auth/drive https://www.googleapis.com/auth/documents https://www.googleapis.com/auth/presentations', IMPERSONATE_SUBJECT)
@@ -210,9 +285,13 @@ export async function pipelineRun(req: HttpRequest, context: InvocationContext):
     return {
       status: 200, headers: HEADERS,
       jsonBody: {
-        pass: ids.length >= 3 && emailsSent >= 1,
-        detail: `Pipeline complete for ${jobTitle} @ ${company} (${roleType}): ${ids.length} docs, ${emailsSent}/2 emails.`,
-        jobId, roleType, roleFocus, urls, emailsSent, steps
+        // A run that produced documents but hit a config gap or an inert agent call is not a clean
+        // pass. It still returns its artifacts — but it says so, instead of reporting bare success.
+        pass: ids.length >= 3 && emailsSent >= 1 && warnings.length === 0,
+        detail: `Pipeline complete for ${jobTitle} @ ${company} (${roleType}): ${ids.length} docs, ${emailsSent}/2 emails.`
+          + (warnings.length ? ` ${warnings.length} warning(s).` : ''),
+        jobId, roleType, roleFocus, roleFocusSource: built.roleFocusSource, qcApplied: built.qcApplied,
+        urls, emailsSent, steps, warnings
       }
     }
   } catch (err) {
