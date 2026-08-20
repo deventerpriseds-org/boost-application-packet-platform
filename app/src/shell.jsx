@@ -1,5 +1,7 @@
-import React from 'react'
+import React, { useEffect, useRef } from 'react'
+import { createPortal } from 'react-dom'
 import { useApp, useRoute, go, useIsMobile } from './state.jsx'
+import { overlayVariant, FOCUSABLE_SELECTOR, wrapFocusIndex, routeKeyOf, hasNavigated } from './overlay.js'
 
 const NAV = [
   { path: '/today',              label: 'Today',        icon: '◉' },
@@ -144,6 +146,171 @@ export function MatchScore({ value, size = 34 }) {
   )
 }
 
+// ── Overlay: the ONE drawer/modal primitive (D10) ────────────────────────────────────────────────
+//
+// It lives here, beside Pill/MatchScore, because the behaviours below are GLOBAL rules that must
+// not be re-implemented (or forgotten) by whichever screen happens to open a panel:
+//   • close on navigation (P8.5) — see the route effect;
+//   • Escape closes the TOPMOST overlay only;
+//   • focus enters on open, is trapped while open, and returns to the trigger on close;
+//   • backdrop click closes;
+//   • the page behind stops scrolling.
+// Variant geometry and the token map live in overlay.js so they can be unit-tested without a DOM.
+//
+// Rendered through a portal onto <body>. Inline `position:fixed` is NOT reliable in this shell:
+// the content pane carries `.px-fade`, whose keyframes animate `transform`, and an ancestor with a
+// transform becomes the containing block for fixed descendants. A portal removes that class of
+// bug entirely. The theme class lives on <html>, so a portalled overlay still themes correctly.
+
+// Mounted overlays, oldest first. Escape must dismiss only the topmost one, or a modal opened from
+// a drawer would close both on one key press.
+const OVERLAY_STACK = []
+
+// Page-scroll lock, reference-counted so closing an inner overlay does not unlock while an outer
+// one is still open. NOTE: `body` is already `overflow:hidden` (theme.css) — the element that
+// actually scrolls is the shell's content pane, so that is what has to be frozen. Its scrollTop is
+// saved and restored, because flipping overflow auto -> hidden -> auto can otherwise drop the
+// reader back at the top of a long packet.
+let scrollLocks = 0
+let lockedPanes = null
+function lockPageScroll() {
+  if (++scrollLocks > 1) return
+  lockedPanes = Array.from(document.querySelectorAll('.ee-scrollpane')).map((el) => ({ el, overflow: el.style.overflow, top: el.scrollTop }))
+  lockedPanes.forEach((s) => { s.el.style.overflow = 'hidden' })
+  document.body.classList.add('ee-overlay-open')
+}
+function unlockPageScroll() {
+  if (scrollLocks > 0) scrollLocks -= 1
+  if (scrollLocks > 0) return
+  ;(lockedPanes || []).forEach((s) => {
+    s.el.style.overflow = s.overflow
+    // Chromium keeps scrollTop across an overflow auto->hidden->auto round trip, so this is a
+    // belt-and-braces restore rather than the load-bearing part; it costs nothing and guards
+    // engines that clamp instead.
+    if (s.el.scrollTop !== s.top) s.el.scrollTop = s.top
+  })
+  lockedPanes = null
+  document.body.classList.remove('ee-overlay-open')
+}
+
+export function Overlay({
+  open = true,          // `{cond && <Overlay/>}` also works: unmount runs the same cleanup
+  onClose,
+  variant = 'modal',    // 'drawer' | 'modal'
+  title,
+  subtitle,
+  headerRight,          // e.g. a gate badge, rendered left of the close button
+  footer,
+  width,                // optional override; the variant default already clamps to the viewport
+  ariaLabel,            // required only when no `title` is given
+  children,
+}) {
+  const v = overlayVariant(variant)
+  const panelRef = useRef(null)
+  const instanceRef = useRef({})     // stable identity for this overlay in OVERLAY_STACK
+  const onCloseRef = useRef(onClose)
+  onCloseRef.current = onClose
+  const titleId = React.useId()
+
+  // Close on navigation (P8.5). Read from the SAME hash router every screen uses (state.jsx
+  // `useRoute`), so "the route" has one definition in the app. Query-string changes are ignored on
+  // purpose — see routeKeyOf() in overlay.js.
+  const { parts } = useRoute()
+  const routeKey = routeKeyOf(parts)
+  const routeAtOpen = useRef(null)
+  useEffect(() => {
+    if (!open) { routeAtOpen.current = null; return }
+    if (routeAtOpen.current == null) { routeAtOpen.current = routeKey; return }
+    if (hasNavigated(routeAtOpen.current, routeKey)) onCloseRef.current && onCloseRef.current()
+  }, [open, routeKey])
+
+  // Stack registration, scroll lock, Escape, focus in / focus back.
+  useEffect(() => {
+    if (!open) return
+    const id = instanceRef.current
+    OVERLAY_STACK.push(id)
+    lockPageScroll()
+    const trigger = document.activeElement
+    if (panelRef.current) panelRef.current.focus({ preventScroll: true })
+
+    const isTop = () => OVERLAY_STACK[OVERLAY_STACK.length - 1] === id
+    const onKeyDown = (e) => {
+      if (e.key !== 'Escape' || !isTop()) return
+      e.preventDefault()
+      e.stopPropagation()
+      onCloseRef.current && onCloseRef.current()
+    }
+    // Second half of the trap: Tab is handled on the panel, but focus can also arrive from a click
+    // or from the browser chrome. If it lands outside while we are topmost, pull it back.
+    const onFocusIn = (e) => {
+      if (!isTop()) return
+      const p = panelRef.current
+      if (p && !p.contains(e.target)) p.focus({ preventScroll: true })
+    }
+    document.addEventListener('keydown', onKeyDown, true)
+    document.addEventListener('focusin', onFocusIn, true)
+    return () => {
+      document.removeEventListener('keydown', onKeyDown, true)
+      document.removeEventListener('focusin', onFocusIn, true)
+      const i = OVERLAY_STACK.indexOf(id)
+      if (i >= 0) OVERLAY_STACK.splice(i, 1)
+      unlockPageScroll()
+      if (trigger && typeof trigger.focus === 'function' && document.contains(trigger)) trigger.focus({ preventScroll: true })
+    }
+  }, [open])
+
+  // Tab / Shift+Tab wrap inside the panel. The index arithmetic is wrapFocusIndex() in overlay.js.
+  const onPanelKeyDown = (e) => {
+    if (e.key !== 'Tab') return
+    const panel = panelRef.current
+    if (!panel) return
+    const nodes = Array.from(panel.querySelectorAll(FOCUSABLE_SELECTOR)).filter((el) => el.offsetParent !== null)
+    e.preventDefault()
+    if (!nodes.length) { panel.focus({ preventScroll: true }); return }
+    const next = wrapFocusIndex(nodes.length, nodes.indexOf(document.activeElement), e.shiftKey)
+    if (nodes[next]) nodes[next].focus({ preventScroll: true })
+  }
+
+  if (!open) return null
+
+  const label = title ? { 'aria-labelledby': titleId } : { 'aria-label': ariaLabel || (variant === 'drawer' ? 'Panel' : 'Dialog') }
+  const close = () => onCloseRef.current && onCloseRef.current()
+
+  return createPortal(
+    <div style={{ position: 'fixed', inset: 0, zIndex: v.zIndex, display: 'flex', alignItems: v.align, justifyContent: v.justify, padding: v.padding }}>
+      <div onClick={close} aria-hidden="true"
+        style={{ position: 'absolute', inset: 0, background: 'var(--qc-scrim)', backdropFilter: 'blur(2px)' }} />
+      <div ref={panelRef} className="px-fade" role="dialog" aria-modal="true" tabIndex={-1} onKeyDown={onPanelKeyDown} {...label}
+        style={{
+          // border-box, or the 1px frame is ADDED to the width and a `min(680px, 100vw)` drawer
+          // measures 681px on a 680px allowance — one pixel of horizontal overflow on a phone.
+          position: 'relative', display: 'flex', flexDirection: 'column', outline: 'none', boxSizing: 'border-box',
+          width: width || v.width, maxWidth: '100%', height: v.height, maxHeight: v.maxHeight,
+          background: 'var(--proto-paper)', color: 'var(--proto-ink)', overflow: 'hidden',
+          boxShadow: v.shadow, ...v.frame,
+        }}>
+        {(title || subtitle || headerRight || onClose) && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '13px 16px', flexShrink: 0, borderBottom: '1px solid var(--proto-rule-soft)' }}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              {title && <div id={titleId} style={{ fontSize: 15, fontWeight: 700 }}>{title}</div>}
+              {subtitle && <div className="px-small">{subtitle}</div>}
+            </div>
+            {headerRight}
+            {onClose && (
+              <button type="button" className="px-btn" onClick={close} aria-label="Close" title="Close" style={{ padding: '2px 8px' }}>✕</button>
+            )}
+          </div>
+        )}
+        <div style={{ flex: 1, minHeight: 0, overflow: 'auto', padding: 14 }}>{children}</div>
+        {footer && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', padding: '10px 14px', flexShrink: 0, borderTop: '1px solid var(--proto-rule-soft)' }}>{footer}</div>
+        )}
+      </div>
+    </div>,
+    document.body,
+  )
+}
+
 function TopBar({ title }) {
   const { dark, setDark, auth } = useApp()
   const signedIn = !!auth?.user
@@ -217,7 +384,9 @@ export function DesktopShell({ children, title }) {
       <TopBar title={title} />
       <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
         {!mobile && <SideNav />}
-        <div className="px-fade" key={active} style={{ flex: 1, overflow: 'auto', padding: mobile ? 14 : 24 }}>
+        {/* `ee-scrollpane` marks the element that actually scrolls (body is overflow:hidden), so
+            Overlay can freeze the page behind it and restore the position on close. */}
+        <div className="px-fade ee-scrollpane" key={active} style={{ flex: 1, overflow: 'auto', padding: mobile ? 14 : 24 }}>
           <div style={{ maxWidth: 1280, margin: '0 auto' }}>{children}</div>
         </div>
       </div>
