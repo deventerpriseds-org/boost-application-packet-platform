@@ -642,7 +642,7 @@ test('H25: R3 accuses a claim, never a coincidence of digits', () => {
 })
 
 // ---------------------------------------------------------------------------------------------
-// H28 — A check reported PASS on evidence it never read, because the caller and the scanner
+// H27 — A check reported PASS on evidence it never read, because the caller and the scanner
 // disagreed about what "empty" means.
 //
 // `scanEcho` decides emptiness against the NORMALIZED posting; `runChecks` re-derived it from the
@@ -662,7 +662,7 @@ test('H25: R3 accuses a claim, never a coincidence of digits', () => {
 //
 // The invariant is not "trim harder". It is that ONE component owns the question "could this be
 // judged", and every caller reports that component's answer rather than computing its own.
-test('H28: the check reports the scanner\'s not_applicable, it does not re-derive it', () => {
+test('H27: the check reports the scanner\'s not_applicable, it does not re-derive it', () => {
   const pkg = { ResumeSummary: 'Scaled the org to 60 engineers and owned an $18M P&L.' }
   const posting = 'We manage a $18M portfolio with 60+ engineers.'
   const profile = 'Von scaled the org to 60 engineers and owned an $18M P&L at Acme.'
@@ -694,4 +694,46 @@ test('H28: the check reports the scanner\'s not_applicable, it does not re-deriv
     .filter(([, body]) => /(postingText|profileText)\s*\|\|\s*''\s*\)\s*\.trim\(\)|String\(\s*input\.(postingText|profileText)[^)]*\)\.trim\(\)/.test(stripComments(body)))
     .map(([f]) => f)
   assert.deepEqual(offenders, [], 'a caller is deciding emptiness for itself again')
+})
+
+// ---------------------------------------------------------------------------------------------
+// H26 — This file could carry two different cases under one ID, and nothing would notice.
+//
+// Not a hypothetical. Measured 2026-08-20 across three live lane branches:
+//     qc-p8-2-figures   H24 H25 H28
+//     qc-p8-3-evidence  H27 H28 H29 H30
+//     qc-p3-remediation H26 H27 H28 H29 H30 H31
+// `H28` meant three different defects; `H27`, `H29` and `H30` two each. IDs had been pre-allocated
+// one per lane precisely to prevent this, which was never going to be enough — each lane found
+// several defects, not one. Ranges, not single IDs.
+//
+// The reason it goes unnoticed is structural: this file is append-only by convention, so three
+// branches each appending at the end MERGE CLEANLY. Git reports no conflict, every branch is green
+// in isolation, and the duplicates land silently. An ID that names two things is an ID that names
+// nothing — `.claude/actions.md` points at these numbers, and the whole scheme depends on the
+// pointer resolving to exactly one case.
+//
+// The invariant: one ID, one case, and no gaps that hide a case lost in a merge.
+test('H26: every hardening case has its own ID', () => {
+  const self = readFileSync(new URL('./hardening.test.mjs', import.meta.url), 'utf8')
+  // Read the ID off the test NAME, which is what a reader and actions.md both use. Comments are
+  // stripped first: this very comment block lists six duplicate IDs, and a scan that counted those
+  // would fire on the description of the bug rather than the bug.
+  const ids = [...stripComments(self).matchAll(/test\('(H(\d+)):/g)].map(m => ({ id: m[1], n: Number(m[2]) }))
+  assert.ok(ids.length >= 26, `only ${ids.length} cases found — the scan has gone stale`)
+
+  const seen = new Map()
+  const dupes = []
+  for (const { id } of ids) {
+    if (seen.has(id)) dupes.push(id); else seen.set(id, true)
+  }
+  assert.deepEqual(dupes, [], 'two cases share an ID — actions.md now points at both and resolves to neither')
+
+  // A GAP is the other half of the same accident: a merge that dropped a case leaves its number
+  // unused, and the next lane reuses it for something unrelated. Numbering must be contiguous from
+  // H1, so a hole is visible at the moment it appears rather than at the moment it is reused.
+  const nums = ids.map(x => x.n).sort((a, b) => a - b)
+  const missing = []
+  for (let i = 1; i <= nums[nums.length - 1]; i++) if (!nums.includes(i)) missing.push(`H${i}`)
+  assert.deepEqual(missing, [], 'a hardening case was lost in a merge — its ID is unused')
 })

@@ -40,7 +40,7 @@ Rules:
 
 | # | Not done | What makes it look done | Trigger |
 |---|---|---|---|
-| D10 | **H-case IDs collide across three branches.** `H28` means three different things; `H27`/`H29`/`H30` two each. `hardening.test.mjs` is append-only by convention, so the merges apply cleanly and produce duplicates SILENTLY. | Every branch is green in isolation. Nothing tests for duplicate IDs. | Every merge, in merge order. A duplicate-ID assertion belongs in `hardening.test.mjs` itself |
+| D10 | **H-case IDs collide across three branches.** PARTLY CLOSED: `H26` now asserts one-ID-one-case AND contiguity, and it fired on its first run. P8.2 renumbered to land contiguous at H1..H27. **The other two lanes still collide and must renumber before merging: P8.3 starts at H28, P3 after it.** | Every branch is green in isolation, and `hardening.test.mjs` is append-only by convention, so the merges apply CLEANLY and duplicate silently. | Each remaining merge, in merge order |
 | D11 | **P7 items 4, 6, 8** — duplicate 29k prompt, no failure path (`ok:true` on partial), hardcoded template ids / single-tenant sender. | P7 is listed as "partial" with item 1 landed. | P3 lands (they touch `pipeline.ts` / `appPackets.ts`) |
 | D12 | **`POST /api/pipeline/run` returns 200 with `pass:false`**, so a failed run shows GREEN in Actions. | The workflow conclusion is `success`. | P7 item 6 |
 | D13 | **`Promise.all(docJobs)` orphans Drive files** — no DELETE anywhere on the failure path. | Nothing errors; the files are simply never cleaned up. | P7 close-out |
