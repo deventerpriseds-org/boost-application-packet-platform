@@ -579,6 +579,18 @@ create index if not exists review_verdict_artifact_idx on review_verdict(artifac
 --
 -- P3-38 - the fail -> not_applicable transition is refused in the table. A run that goes green by
 -- turning a failed coverage check into "nothing to check" has removed evidence, not fixed anything.
+-- The FK target for remediation_loop below, established HERE and not with the other idempotent
+-- alters at the foot of this file. ORDER IS LOAD-BEARING: on a database where check_result already
+-- exists (i.e. production, since P2), 'create table remediation_loop' fails outright with
+--   ERROR: there is no unique constraint matching given keys for referenced table "check_result"
+-- because Postgres requires a UNIQUE on the referenced tuple at CREATE TABLE time. A fresh database
+-- gets it from check_result's own inline constraint; an existing one needs it added first, and
+-- "first" means before line the create below, not at the end of the script. Nothing in the
+-- sandbox can catch this - there is no Postgres here - so it is asserted structurally (H31).
+do $$ begin
+  alter table check_result add constraint check_result_artifact_run_key_state_key unique (artifact_id, run_id, check_key, state);
+exception when duplicate_table or duplicate_object then null; end $$;
+
 create table if not exists remediation_loop (
   id             uuid primary key default uuid_generate_v4(),
   packet_id      uuid not null references packet(id) on delete cascade,
@@ -721,9 +733,6 @@ alter table requirement     drop column if exists closed_on_loop;
 alter table swap_decision   drop constraint if exists swap_decision_packet_id_list_seq_key;
 do $$ begin
   alter table swap_decision add constraint swap_decision_packet_list_seq_loop_key unique (packet_id, list, seq, loop);
-exception when duplicate_table or duplicate_object then null; end $$;
-do $$ begin
-  alter table check_result add constraint check_result_artifact_run_key_state_key unique (artifact_id, run_id, check_key, state);
 exception when duplicate_table or duplicate_object then null; end $$;
 alter table packet         add column if not exists must_haves text[];
 alter table packet         add column if not exists jd_grounded boolean;

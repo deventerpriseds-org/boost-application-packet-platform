@@ -658,3 +658,62 @@ test('H30: the loop decides coverage with the gate\'s predicate, never its own',
   assert.ok(!/COVERAGE_THRESHOLD\s*=/.test(rem), 'the loop redefined the coverage threshold')
   assert.ok(!/hit\.length \/ toks\.length/.test(rem), 'the loop re-implemented the overlap rule')
 })
+
+// ---------------------------------------------------------------------------------------------
+// H31 — a composite FOREIGN KEY was declared against `check_result (artifact_id, run_id, check_key,
+// state)` while the UNIQUE that makes that tuple a legal FK target was added with the idempotent
+// alters at the FOOT of the same script. On a FRESH database that works (check_result carries the
+// constraint inline). On the LIVE database, where check_result has existed since P2 WITHOUT it,
+// `create table remediation_loop` aborts the whole migration with
+//   ERROR: there is no unique constraint matching given keys for referenced table "check_result"
+// — Postgres requires the UNIQUE at CREATE TABLE time, not by the end of the transaction.
+//
+// This is invisible to every test in this repo: there is no Postgres in the sandbox, so the schema
+// is never executed here. It is exactly the case CLAUDE.md's H-case rule reserves for a source
+// assertion — "structural rules a runtime test cannot express".
+//
+// The invariant, not the incident: for EVERY composite FK in SCHEMA_SQL, the constraint that makes
+// its target tuple unique must appear EARLIER in the script than the table that references it.
+test('H31: a composite FK\'s unique target is established before the table that references it', () => {
+  const whole = src('schema.ts')
+  const sql = whole.slice(whole.indexOf('SCHEMA_SQL = '))
+  const offenders = []
+  const fkRe = /foreign key \(([^)]+)\)\s*\n?\s*references (\w+) \(([^)]+)\)/g
+  let m
+  while ((m = fkRe.exec(sql))) {
+    const [, , table, cols] = m
+    const tuple = cols.split(',').map(c => c.trim())
+    if (tuple.length < 2) continue                 // a single-column FK may target a primary key
+    const fkAt = m.index
+    const inline = `unique (${tuple.join(', ')})`
+
+    // THE INLINE CONSTRAINT DOES NOT COUNT, and that is the whole point of this case. Every CREATE
+    // here is `create table if not exists`, so on a database where the referenced table ALREADY
+    // exists — production, for every table older than the current phase — the create is a no-op and
+    // its inline UNIQUE is never applied. Only an idempotent `alter table ... add constraint ...
+    // unique (...)` reaches an existing database, and Postgres wants the UNIQUE in place at CREATE
+    // TABLE time, so that alter must run BEFORE the table carrying the FK is created.
+    //
+    // The first version of this guard accepted the inline constraint and was therefore INERT: it
+    // passed with the defect deliberately reinstated. It is written this way because it was watched
+    // to fail.
+    const alterAt = (() => {
+      for (let i = sql.indexOf(`alter table ${table} add constraint`); i !== -1;
+           i = sql.indexOf(`alter table ${table} add constraint`, i + 1)) {
+        if (sql.slice(i, i + 400).includes(inline)) return i
+      }
+      return -1
+    })()
+    if (alterAt === -1) {
+      offenders.push(`FK into ${table}(${cols}): no idempotent "alter table ${table} add constraint ... ${inline}"`
+        + ` anywhere — a fresh database gets the inline UNIQUE, an existing one never does`)
+      continue
+    }
+    if (alterAt > fkAt) {
+      offenders.push(`FK into ${table}(${cols}) is declared at ${fkAt} but its idempotent unique only runs at ${alterAt}`
+        + ` — this aborts the whole migration on any database where ${table} already exists`)
+    }
+    assert.ok(sql.includes(inline), `${table} should also carry ${inline} inline, for a fresh database`)
+  }
+  assert.deepEqual(offenders, [], 'a composite FK whose unique target is not established, for an EXISTING database, before it')
+})
