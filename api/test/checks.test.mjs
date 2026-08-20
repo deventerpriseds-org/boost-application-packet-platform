@@ -140,15 +140,63 @@ test('coverage with NO requirement rows is not_applicable — never pass', () =>
   assert.ok(!rs.some(r => ['must_have_coverage', 'responsibilities_addressed'].includes(r.check_key) && r.state === 'pass'))
 })
 
-test('an uncovered must-have fails and names the requirement', () => {
+// P8.3 / C6: coverage is decided by EVIDENCE rows, not by whether the document repeats the words.
+// `evidence` is now a required input for any coverage verdict; these helpers shape it.
+const evRow = (label = 'Work history 1 · stored profile') =>
+  ({ quote: 'led the platform modernization programme end to end', source_kind: 'work_history',
+     source_label: label, source_key: 'workHistory1', char_start: 0, char_end: 51,
+     extra: null, ratio: 1, method: 'anchored', record_sha256: '', resolver_version: 1 })
+const evidenceFor = (...seqs) => ({ profileReadable: true, bySeq: Object.fromEntries(seqs.map(n => [n, evRow()])) })
+
+test('an unevidenced must-have fails and names the requirement', () => {
+  // Was: "an uncovered must-have fails and names the requirement", where covered meant the words
+  // appeared in the generated document. C6 moved the numerator to evidence rows; the assertion the
+  // test was written to make — one uncovered must-have, a fail, and the requirement named — is
+  // unchanged.
   const reqs = [
     { seq: 0, verbatim: 'Deep experience with Kubernetes cluster federation', item_text: 'k8s', kind: 'must_have' },
     { seq: 1, verbatim: 'Owns roadmap strategy and measurable outcomes', item_text: 'roadmap', kind: 'must_have' },
   ]
-  const r = find(runChecks({ type: 'resume', pkg: RESUME_FULL, requirements: reqs }), 'must_have_coverage')
+  const r = find(runChecks({ type: 'resume', pkg: RESUME_FULL, requirements: reqs, evidence: evidenceFor(1) }), 'must_have_coverage')
   assert.equal(r.state, 'fail')
   assert.equal(r.offenders.length, 1)
   assert.match(r.offenders[0], /#0 Deep experience with Kubernetes/)
+  assert.match(r.offenders[0], /no evidence found in your profile/)
+  assert.equal(r.observed, '1/2 must-haves evidenced')
+})
+
+test('a document containing the words does NOT make a requirement covered without evidence (C6)', () => {
+  // The whole of P8.3 in one assertion. RESUME_FULL literally contains "roadmap strategy and
+  // execution", which is what the pre-C6 numerator counted; with no evidence row it is not coverage.
+  const reqs = [{ seq: 0, verbatim: 'Deep experience with roadmap strategy and execution', item_text: '', kind: 'must_have' }]
+  const withoutEvidence = runChecks({
+    type: 'resume', pkg: { ...RESUME_FULL, ResumeSummary: 'Deep experience with roadmap strategy and execution.' },
+    requirements: reqs, evidence: { profileReadable: true, bySeq: {} },
+  })
+  const c = find(withoutEvidence, 'must_have_coverage')
+  assert.equal(c.state, 'fail', 'the document says it; the profile does not support it')
+  assert.match(c.offenders[0], /no evidence found in your profile/)
+  // And the placement signal the old numerator carried is not lost — it is its own number.
+  assert.equal(find(withoutEvidence, 'evidence_placed').state, 'not_applicable')
+})
+
+test('an evidenced requirement absent from the document is a placement warning, not a coverage gap', () => {
+  const reqs = [{ seq: 0, verbatim: 'Deep experience with Kubernetes cluster federation', item_text: '', kind: 'must_have' }]
+  const rs = runChecks({ type: 'resume', pkg: RESUME_FULL, requirements: reqs, evidence: evidenceFor(0) })
+  assert.equal(find(rs, 'must_have_coverage').state, 'pass', 'the profile supports it')
+  const placed = find(rs, 'evidence_placed')
+  assert.equal(placed.state, 'warn', 'and this asset never says it')
+  assert.match(placed.offenders[0], /#0 Deep experience with Kubernetes/)
+})
+
+test('coverage with NO evidence input at all is not_applicable — never pass, never fail', () => {
+  const reqs = [{ seq: 0, verbatim: 'Deep experience with Kubernetes cluster federation', item_text: '', kind: 'must_have' }]
+  for (const evidence of [undefined, { profileReadable: false, bySeq: {} }]) {
+    const rs = runChecks({ type: 'resume', pkg: RESUME_FULL, requirements: reqs, evidence })
+    for (const k of ['must_have_coverage', 'responsibilities_addressed', 'evidence_placed']) {
+      assert.equal(find(rs, k).state, 'not_applicable', `${k} must not judge what it could not read`)
+    }
+  }
 })
 
 test('a posting with requirements but no must-haves is not_applicable, not pass', () => {
@@ -170,6 +218,7 @@ test('P1.5 template reach: preconditions no merge field can carry are surfaced, 
     type: 'resume',
     pkg: { ...RESUME_FULL, ResumeSummary: 'Owns roadmap strategy and execution with deep experience.' },
     requirements: reqs,
+    evidence: evidenceFor(3),
   })
   const elig = find(rs, 'template_reach')
   assert.equal(elig.state, 'not_applicable')
@@ -178,14 +227,17 @@ test('P1.5 template reach: preconditions no merge field can carry are surfaced, 
 
   // Only the coverable one is judged, and it IS covered, so the gate is not permanently red.
   const cov = find(rs, 'must_have_coverage')
-  assert.equal(cov.observed, '1/1 must-haves covered')
   assert.equal(cov.state, 'pass')
+  // ONE denominator, and it names what it left out. The fail branch used to divide by all four
+  // must-haves while judging one, which credited the three unreachable rows as covered.
+  assert.equal(cov.observed, '1/1 must-haves evidenced (3 not reachable by any generated field, not counted either way)')
 })
 
 test('a posting whose requirements are all reachable says so', () => {
   const rs = runChecks({
     type: 'resume', pkg: RESUME_FULL,
     requirements: [{ seq: 0, verbatim: 'Deep experience with roadmap strategy', item_text: '', kind: 'must_have' }],
+    evidence: evidenceFor(0),
   })
   assert.equal(find(rs, 'template_reach').state, 'pass')
 })

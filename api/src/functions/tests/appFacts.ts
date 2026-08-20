@@ -8,6 +8,7 @@ import { getPgClient } from './pgClient'
 import { FACT_CATALOGUE, FACT_BY_KEY, deriveFacts, proposeMissingFacts, OwnerFact } from './ownerFacts'
 import { getGoogleOAuthToken } from './googleAuth'
 import { templateText, RESUME_TEMPLATE_ID } from './packetTemplates'
+import { profileRecords, ProfileRecord } from './evidence'
 
 const CONN = process.env.AZURE_STORAGE_CONNECTION_STRING!
 const HEADERS = { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': '*', 'Access-Control-Allow-Methods': 'GET,POST,OPTIONS' }
@@ -31,18 +32,19 @@ export async function loadFacts(client: any, owner: string): Promise<OwnerFact[]
  * answer to "what does the profile say", and the day the two disagree the figure check starts
  * accusing people of echoing their own achievements.
  */
-export async function sourceText(): Promise<{ text: string; sources: string[] }> {
+export async function sourceText(): Promise<{ text: string; sources: string[]; records: ProfileRecord[] }> {
   const parts: string[] = []
   const sources: string[] = []
+  let template: { id: string; text: string } | null = null
+  let mc: any = {}
   try {
     const token = await getGoogleOAuthToken()
     const t = await templateText(token, RESUME_TEMPLATE_ID, false)
-    if (t.trim()) { parts.push(t); sources.push(`resume template ${RESUME_TEMPLATE_ID}`) }
+    if (t.trim()) { parts.push(t); sources.push(`resume template ${RESUME_TEMPLATE_ID}`); template = { id: RESUME_TEMPLATE_ID, text: t } }
   } catch (e) { sources.push(`resume template UNREADABLE: ${String((e as any)?.message || e)}`) }
 
   try {
     const ctx = TableClient.fromConnectionString(CONN, 'MasterContext')
-    let mc: any = {}
     for await (const e of ctx.listEntities({ queryOptions: { filter: "PartitionKey eq 'context'" } })) mc = e
     // EVERY profile block except the do-not-use list. The first pass read only work history and the
     // prose blocks and missed certifications that live in the skills/expertise pools — a cert stated
@@ -55,7 +57,11 @@ export async function sourceText(): Promise<{ text: string; sources: string[] }>
     if (blocks.length) { parts.push(blocks.join('\n\n')); sources.push(`MasterContext (${blocks.length} blocks)`) }
   } catch (e) { sources.push(`MasterContext UNREADABLE: ${String((e as any)?.message || e)}`) }
 
-  return { text: parts.join('\n\n'), sources }
+  // P8.3 - the SAME two sources, given names and boundaries. A quote has to be a substring of a
+  // STORED RECORD to be re-checkable, and an offset into the joined blob above names no record.
+  // Built here rather than by a second reader so `text` and `records` can never disagree about
+  // what the profile says.
+  return { text: parts.join('\n\n'), sources, records: profileRecords(mc, template) }
 }
 
 // POST /api/app/qc/facts/derive — read the source documents and record what they state.

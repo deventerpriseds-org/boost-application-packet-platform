@@ -1384,3 +1384,26 @@ What made it work:
   their logic where no unit test could reach it. That cost IS the finding.
 - **Don't take agent results at face value.** Spot-checking found one of my own greps crying wolf
   (it matched comments describing an old assertion, not the assertion). Strip comments first.
+
+## P8.3 — evidence excerpts (R2 / C6) — branch `claude/qc-p8-3-evidence`, NOT yet on main
+
+Coverage is no longer "did the generated document repeat enough of the requirement's words". It is
+"can a verbatim excerpt of the stored profile be shown beside it". The pieces:
+
+- `api/src/functions/tests/evidence.ts` — pure (no azure, no pg). `profileRecords()` turns the
+  profile into NAMED records; `resolveEvidence()` finds the excerpt and guarantees it is exactly
+  `record.text.slice(char_start, char_end)`. Reuses `requirements.locate()` and `swaps.itemTokens()`
+  rather than growing a second matcher.
+- `appFacts.sourceText()` now returns `{ text, sources, records }` — still the ONLY profile reader.
+- `requirement_evidence` table (in SCHEMA_SQL + EXPECTED_TABLES; H11 extended). NOT columns on
+  `requirement`, and nothing writes `requirement.coverage` — that column already means "could not be
+  located in the POSTING" and merging a second population into it makes both unreadable.
+- `POST /api/app/opportunity/{id}/evidence` resolves and stores; `evaluateArtifact` resolves,
+  stores and reads back, so the gate and the JD step read the same rows.
+- New check `evidence_placed` (warn) keeps the signal the old numerator carried — the profile
+  supports it and THIS asset still never said it — as its own number rather than folded into
+  coverage. It is also what keeps P2.3's per-asset score per-asset once coverage becomes
+  opportunity-level.
+
+**H27, H28, H29** in `api/test/hardening.test.mjs`; all three proved by reverting the fix.
+315/315 api tests, app builds clean.

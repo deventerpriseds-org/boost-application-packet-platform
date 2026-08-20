@@ -1674,3 +1674,47 @@ additions; both sides kept). 89/89 app tests, 30/30 overlay probe, 16/16 asset-b
    role` with no candidate comparison anywhere; the array renders as green "N covered" chips.
 3. **Dark-mode `accent` pills measure 1.90:1.** `.proto-dark` overrides `--surface-brand-subtle` but
    not `--surface-brand-default`, across 15+ live sites.
+
+---
+
+## ACT-65 — P8.3 / R2: evidence excerpts on every coverage claim (branch `claude/qc-p8-3-evidence`)
+
+**Cold ACs:** `docs/qc-evidence/AC-P8.3.md`, written by an independent AC session against `main` at
+`f4c2f43` with no sight of the implementation plan (branch `claude/qc-p8-3-acs`, commit `e778c82`).
+
+**What changed.** Conflict-register **C6** — "coverage counts recomputed from evidence rows, not from
+term placement" — is now true in the code. `checks.must_have_coverage` and
+`responsibilities_addressed` count a requirement as covered only when a verbatim excerpt of the
+candidate's *stored profile* resolves against it. A new pure module `evidence.ts` finds that excerpt;
+`requirement_evidence` stores it; `appFacts.sourceText()` — still the ONE profile reader — was
+extended to return named records rather than only a joined blob.
+
+**Three defects found while doing it, each now an H-case (proved by reverting the fix):**
+
+- **H27** — the must-have numerator credited requirements nothing measured. The check's fail branch
+  divided by `mustHaves.length` while its numerator came from `coverable` alone, and
+  `computeArtifactScore` recomputed the wider denominator a third time. On the live Trinnex shape
+  (4 must-haves, 3 of them eligibility clauses `template_reach` had just reported as
+  `not_applicable`, 1 judged and failing) it printed **"3/4 must-haves covered"** and scored **75**.
+  Revert-proof: restoring either half fires the case — `75 !== 0`, and
+  `got "3/4 must-haves evidenced"`.
+- **H28** — an evidence quote must be a substring of the record it NAMES. Validating against
+  `sourceText().text` (the join of the template and every MasterContext field) accepts a sentence
+  half in one job's history and half in another's. This is H16 in a new place. Revert-proof:
+  resolving against the concatenation returns a row where the correct code returns `null`.
+- **H29** — an unreadable profile is not an empty profile. Resolving against a failed Google/Table
+  read yields zero evidence rows for every requirement, and zero rows presented as a number is "0%
+  covered" meaning "we did not look". The mirror error is equally available: filing a *readable*
+  profile that supports nothing as `not_applicable` drops the row from the denominator and the packet
+  reads 100% with a hard requirement unmet. Revert-proof: both directions fire the case.
+
+**Deliberately not fixed, recorded instead:** `appReviewer.ts:183` computes `engineJudged` as every
+must-have row, while the check judges only `coverable` — so reviewer agreement is still measured
+against a wider population than the engine judged. Pre-existing, unchanged by this lane, and a real
+fix needs `artifact_score` to store which rows were judged. P4's surface, not this one's.
+
+**Left for the UI lanes:** `app/src/assetGate.js:53` labels the check "Must-haves this document
+covers", which is no longer what it measures ("evidenced by your profile" is). The JD-step expansion
+(SPEC §4.1, ACs 42-50) is served by the API — `GET /api/app/opportunity/{id}/requirements` now
+returns `evidenced`, `evidence{quote,sourceKind,sourceLabel,...}` and `evidenceNote` per row — but the
+disclosure control itself is P5.4/P8.7 territory and is not built here.

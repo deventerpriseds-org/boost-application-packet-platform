@@ -320,6 +320,51 @@ create table if not exists requirement (
 create index if not exists requirement_opp_idx on requirement(opp_id);
 create index if not exists requirement_kind_idx on requirement(opp_id, kind);
 
+-- P8.3 / R2 - the evidence excerpt behind a coverage claim.
+--
+-- R2: a requirement is "evidenced" only when a VERBATIM excerpt of the candidate's stored profile
+-- can be shown beside it with its source named. Conflict-register C6 makes that the coverage
+-- numerator: counts are recomputed from THESE rows, not from whether the generated document happens
+-- to repeat the requirement's words. A requirement with no row here renders as "no evidence found in
+-- your profile" and cannot be counted as covered anywhere.
+--
+-- A TABLE rather than columns on requirement, for three reasons that each bit something already:
+--   1. requirement.coverage is TAKEN. requirements.ts writes 'escalated' there to mean "the
+--      quote could not be located in the POSTING" - nothing to do with the profile. Two populations
+--      in one column makes both unreadable, so nothing here writes it.
+--   2. The acceptance sentence counts "requirements with A resolvable evidence quote" - an existence
+--      test over many, not a single nullable field. One row is written per requirement today; the
+--      shape does not have to change when a second source corroborates one.
+--   3. D1/H11: a new store is declared in SCHEMA_SQL and registered in EXPECTED_TABLES, so a
+--      migration that silently skipped it is a failing test rather than a 500 at runtime.
+--
+-- quote is a literal substring of the STORED PROFILE RECORD named by source_key, at
+-- [char_start, char_end). Same discipline as requirement.verbatim, pointed at the candidate's
+-- profile instead of the employer's posting. record_sha256 is what makes a stale offset detectable
+-- after the owner edits their profile, exactly as jd_text_sha256 does for the posting.
+create table if not exists requirement_evidence (
+  id             uuid primary key default uuid_generate_v4(),
+  requirement_id uuid not null references requirement(id) on delete cascade,
+  quote          text not null,
+  source_kind    text not null check (source_kind in ('work_history','accomplishment','profile_field','certification')),
+  source_label   text not null,
+  source_key     text not null,          -- the stored record the offsets index. NEVER a concatenation.
+  char_start     int not null,
+  char_end       int not null,
+  extra          text,                   -- SPEC 4.1's optional supporting note. Never a second quote.
+  ratio          numeric,                -- how much of the requirement the excerpt accounts for. RANKING ONLY.
+  method         text not null check (method in ('exact','anchored')),
+  record_sha256  text not null,
+  resolver_version int not null,
+  resolved_at    timestamptz not null default now(),
+  -- The same offset discipline the requirement spine enforces.
+  check (char_start >= 0 and char_end > char_start),
+  check (length(quote) = char_end - char_start),
+  -- One quote from one place in one record is one piece of evidence, however many times it resolves.
+  unique (requirement_id, source_key, char_start, char_end)
+);
+create index if not exists req_evidence_req_idx on requirement_evidence(requirement_id);
+
 -- P1.3 — what the pipeline CHANGED, and whether the posting explains it.
 -- One candidate row per item in every list, INCLUDING unchanged ones: the packet screen shows all
 -- originals against all finals, so "we looked at this and kept it" is a different statement from
@@ -572,5 +617,6 @@ export const EXPECTED_TABLES = [
   'persona', 'opportunity', 'contact', 'packet', 'artifact', 'outreach_message',
   'interview', 'offer', 'library_entity', 'asset_event', 'usage_metering',
   'term_library', 'term_library_entry', 'term_candidate', 'requirement',
-  'skill_candidate', 'swap_decision', 'insertion', 'check_result', 'artifact_gate', 'artifact_score', 'owner_fact', 'review_verdict'
+  'skill_candidate', 'swap_decision', 'insertion', 'check_result', 'artifact_gate', 'artifact_score', 'owner_fact', 'review_verdict',
+  'requirement_evidence'
 ]

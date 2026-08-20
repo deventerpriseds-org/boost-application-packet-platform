@@ -24,6 +24,7 @@ import { deriveFacts } from '../dist/functions/tests/ownerFacts.js'
 import { parseResumePackage } from '../dist/functions/tests/resumeParser.js'
 import { validateCitations, reviewerChecks } from '../dist/functions/tests/reviewer.js'
 import { extractFigures, scanEcho, claimKey, isMarked } from '../dist/functions/tests/figureEcho.js'
+import { profileRecords, resolveEvidence } from '../dist/functions/tests/evidence.js'
 
 const SRC = new URL('../src/functions/tests/', import.meta.url).pathname
 const src = (f) => readFileSync(join(SRC, f), 'utf8')
@@ -223,7 +224,7 @@ test('H10: SCHEMA_SQL contains no backticks and no template interpolation', () =
 // ensure*() ALTERs that pgMigrate never sees.
 test('H11: every table this layer added is registered for migration', () => {
   const schema = src('schema.ts')
-  for (const t of ['requirement', 'skill_candidate', 'swap_decision', 'insertion',
+  for (const t of ['requirement', 'requirement_evidence', 'skill_candidate', 'swap_decision', 'insertion',
                    'check_result', 'artifact_gate', 'artifact_score',
                    'term_library', 'term_library_entry', 'term_candidate']) {
     assert.ok(schema.includes(`create table if not exists ${t} `) || schema.includes(`create table if not exists ${t}(`),
@@ -237,7 +238,7 @@ test('H11: every table this layer added is registered for migration', () => {
 // H12 — Pure rule modules must stay testable without Azure or a database, or the rules stop being
 // tested and start being hoped for.
 test('H12: rule modules import neither @azure/functions nor pg', () => {
-  for (const f of ['checks.ts', 'requirements.ts', 'swaps.ts', 'insertions.ts', 'artifactScore.ts', 'jdText.ts', 'termMatch.ts']) {
+  for (const f of ['checks.ts', 'requirements.ts', 'swaps.ts', 'insertions.ts', 'artifactScore.ts', 'jdText.ts', 'termMatch.ts', 'evidence.ts']) {
     const body = src(f)
     assert.ok(!/@azure\/functions/.test(body), `${f} must stay pure`)
     assert.ok(!/from '\.\/pgClient'/.test(body), `${f} must stay pure`)
@@ -634,4 +635,134 @@ test('H25: R3 accuses a claim, never a coincidence of digits', () => {
   assert.notEqual(claimKey(bare), bare.key, 'an unmarked figure keyed on the bare number again')
   assert.notEqual(claimKey(bare), claimKey(extractFigures('three marathons')[0]),
     'two different nouns must be two different claims')
+})
+
+// ---------------------------------------------------------------------------------------------
+// H27 — The must-have numerator credited requirements that the engine had just declared it was NOT
+// judging. `must_have_coverage`'s fail branch divided by `mustHaves.length` while its numerator came
+// from `coverable` alone (checks.ts, pre-P8.3), and `computeArtifactScore` repeated the wider
+// denominator a third time with `mustHaveTotal = reqs.filter(r => r.kind === 'must_have').length`.
+//
+// Evidence, on the shape the live Trinnex posting actually has (opp 9f9c370a: 4 must-haves, of which
+// "Reside in the East Coast of the United States", "must be a U.S. Citizen or Green Card Holder" and
+// "Active Secret security clearance required" are eligibility clauses no merge field can carry, and
+// one is judgeable): the check printed "3/4 must-haves covered" and the score returned 75 — while
+// exactly ONE requirement had been measured and it had FAILED. `template_reach` reported those three
+// as not_applicable in the same run, and the numerator counted them as covered anyway.
+//
+// This is `not_applicable` laundered into a numerator: the same defect as a check going green on
+// absent evidence (H6), one layer up, and it inflates the single number a reviewer trusts most.
+//
+// The invariant: every branch of a coverage check divides by the population it actually judged, the
+// score takes BOTH numbers from that check rather than recomputing either, and a row excluded from
+// the judgement is counted by name instead of being absorbed into the numerator.
+test('H27: a requirement nothing measured is never counted as covered', () => {
+  const reqs = [
+    { seq: 0, verbatim: 'Reside in the East Coast of the United States', item_text: '', kind: 'must_have' },
+    { seq: 1, verbatim: 'must be a U.S. Citizen or Green Card Holder', item_text: '', kind: 'must_have' },
+    { seq: 2, verbatim: 'Active Secret security clearance required', item_text: '', kind: 'must_have' },
+    { seq: 3, verbatim: 'Deep experience with roadmap strategy and execution', item_text: '', kind: 'must_have' },
+  ]
+  const results = runChecks({
+    type: 'resume',
+    pkg: { ResumeSummary: 'Owns roadmap strategy and execution with deep experience.' },
+    requirements: reqs,
+    evidence: { profileReadable: true, bySeq: {} },   // the profile supports none of them
+  })
+  const cov = results.find(r => r.check_key === 'must_have_coverage')
+  assert.equal(cov.state, 'fail')
+  assert.match(cov.observed, /^0\/1 /, `judged one requirement and it failed, so the numerator is 0/1, not 3/4 — got "${cov.observed}"`)
+  assert.match(cov.observed, /3 not reachable by any generated field/, 'the excluded rows must be counted by name, not absorbed')
+
+  // The score must reach the same conclusion, because it reads BOTH numbers off that check.
+  const score = computeArtifactScore({ requirements: reqs, checks: results })
+  assert.equal(score.must_have_coverage.value, 0,
+    'recomputing the denominator from every must_have row scores this 75 for an artifact that covered nothing')
+
+  // The structural half: the score must not grow its own denominator back. Deleting the parse and
+  // restoring `reqs.filter(r => r.kind === 'must_have').length` reproduces the incident exactly, and
+  // no runtime assertion above would notice on an input with no excluded rows.
+  const scoreSrc = stripComments(src('artifactScore.ts'))
+  assert.ok(!/kind\s*===\s*'must_have'/.test(scoreSrc),
+    'the score recomputed the must-have population instead of reading the checks denominator')
+})
+
+// ---------------------------------------------------------------------------------------------
+// H28 — An evidence quote must be a substring of the profile record it NAMES, not of the profile.
+//
+// This is H16 arriving in a new place. H16 records that `postingText.includes(quote) &&
+// requirementExists(id)` accepted a reviewer citation lifted from an unrelated part of the document,
+// and the fix was to require the quote to land inside the CITED requirement's span. P8.3's
+// acceptance sentence — "an evidence quote is a substring of the stored profile record it names" —
+// is the same rule, and the same shortcut is available: `sourceText().text` is a single blob of the
+// resume template joined to every MasterContext field, so a quote validated against IT can span two
+// unrelated records and still pass. A sentence half in one job's history and half in another's is
+// not something the candidate ever wrote.
+//
+// The invariant: resolution is per-record. A span is only evidence if the record it names contains
+// exactly those bytes at exactly those offsets; a quote that exists only in the concatenation is
+// refused rather than attributed to whichever record it started in.
+test('H28: evidence resolves against ONE named record, never against the joined profile', () => {
+  // Deliberately split across two records: the phrase exists in the concatenation and in neither
+  // record on its own.
+  const split = [
+    { key: 'workHistory1', kind: 'work_history', label: 'Work history 1', text: 'VP Engineering, Resideo. Led the platform modernization' },
+    { key: 'workHistory2', kind: 'work_history', label: 'Work history 2', text: 'programme across four product lines and retired the mainframe.' },
+  ]
+  const req = 'Led the platform modernization programme across four product lines'
+  // sourceText joins records with '\n\n'; the citation validator's match is whitespace-tolerant
+  // (reviewer.findQuoteSpans), so the separator is no protection at all.
+  const blob = split.map(r => r.text).join('\n\n').replace(/\s+/g, ' ')
+  assert.ok(blob.includes(req), 'the phrase IS in the joined profile — that is the trap')
+  assert.equal(resolveEvidence(req, split), null, 'and it is in no single record, so it is not evidence')
+
+  // And when a record genuinely does contain it, the row is the record's own bytes at its offsets.
+  const whole = profileRecords({ workHistory1: `VP Engineering, Resideo. ${req} and retired the mainframe.` }, null)
+  const ev = resolveEvidence(req, whole)
+  assert.ok(ev, 'a real match must still resolve — a guard that refuses everything is not a guard')
+  assert.equal(ev.source_key, 'workHistory1')
+  assert.equal(whole[0].text.slice(ev.char_start, ev.char_end), ev.quote)
+})
+
+// ---------------------------------------------------------------------------------------------
+// H29 — "your profile does not support this" and "we could not read your profile" are different
+// statements, and only one of them is a measurement.
+//
+// C6 moved the coverage numerator onto evidence rows. That creates a state the old numerator could
+// not reach: a run where the profile could not be read at all (the resume template is fetched live
+// over Google OAuth and MasterContext over a storage connection string — appFacts.sourceText records
+// both failures in `sources` and returns an empty string). Resolving against an empty profile
+// produces zero evidence rows for every requirement, and zero rows reported as a number is "0%
+// covered" meaning "we did not look" — an accusation against the candidate for an outage.
+//
+// The opposite error is just as available: filing a READ profile that genuinely supports nothing as
+// not_applicable drops those requirements out of the denominator, and the packet reads 100% covered
+// with a hard requirement unmet. That is H6's failure with the sign flipped.
+//
+// The invariant: an unreadable profile is not_applicable and a NULL score component (never 0, never
+// pass, never fail); a readable profile with no support is a determinate gap — fail, named, and
+// still in the denominator.
+test('H29: an unreadable profile measures nothing; a readable one that supports nothing is a gap', () => {
+  const reqs = [{ seq: 0, verbatim: 'Deep experience with Kubernetes cluster federation', item_text: '', kind: 'must_have' }]
+
+  for (const evidence of [undefined, { profileReadable: false, bySeq: {} }]) {
+    const rs = runChecks({ type: 'resume', pkg: { ResumeSummary: 'x' }, requirements: reqs, evidence })
+    const cov = rs.find(r => r.check_key === 'must_have_coverage')
+    assert.equal(cov.state, 'not_applicable', 'a run that could not read the profile measured nothing')
+    assert.notEqual(cov.state, 'pass')
+    assert.notEqual(cov.state, 'fail')
+    const score = computeArtifactScore({ requirements: reqs, checks: rs })
+    assert.equal(score.must_have_coverage.value, null, 'unknown is null, never zero')
+    assert.equal(score.composite, null)
+    assert.equal(gateFor([cov]), 'warn', 'and an unmeasured coverage row can never carry a gate to pass')
+  }
+
+  const read = runChecks({
+    type: 'resume', pkg: { ResumeSummary: 'x' }, requirements: reqs,
+    evidence: { profileReadable: true, bySeq: { 0: null } },
+  })
+  const cov = read.find(r => r.check_key === 'must_have_coverage')
+  assert.equal(cov.state, 'fail', 'we looked and found nothing — that is a gap, not an unknown')
+  assert.match(cov.observed, /^0\/1 /, 'and it stays in the denominator; dropping it reads 100%')
+  assert.match(cov.offenders[0], /no evidence found in your profile/)
 })

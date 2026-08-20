@@ -12,6 +12,8 @@ import { computeArtifactScore, ArtifactScore } from './artifactScore'
 import { loadFacts, sourceText } from './appFacts'
 import { shapeVerdict } from './appReviewer'
 import { resolvePostingSource } from './jdText'
+import { ensureRequirementCols, writeEvidence, loadRequirementsWithEvidence } from './appRequirements'
+import { EvidenceInput, EvidenceRow } from './evidence'
 
 const HEADERS = { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': '*', 'Access-Control-Allow-Methods': 'GET,POST,OPTIONS' }
 
@@ -72,8 +74,6 @@ export async function evaluateArtifact(client: any, artifactId: string, owner: s
       where a.id = $1`, [artifactId])).rows[0]
   if (!art) throw new Error('artifact not found')
 
-  const requirements = (await client.query(
-    `select id, seq, verbatim, item_text, kind from requirement where opp_id=$1 order by seq`, [art.opp_id])).rows
   const swaps = (await client.query(
     `select action, driver, to_label, from_label from swap_decision where packet_id=$1`, [art.packet_id])).rows
 
@@ -84,7 +84,38 @@ export async function evaluateArtifact(client: any, artifactId: string, owner: s
   // unreadable the check reports not_applicable rather than treating an empty profile as proof the
   // candidate owns nothing, which would flag every figure they legitimately hold.
   const posting = resolvePostingSource(art)
-  const profile = await sourceText().then(r => r.text).catch(() => '')
+  const profileRead = await sourceText().catch(() => ({ text: '', sources: ['profile UNREADABLE'], records: [] as any[] }))
+  const profile = profileRead.text
+
+  // P8.3 / C6 — coverage is decided by evidence rows, so they are resolved and PERSISTED here and
+  // then read back, rather than computed in memory for the checks alone. The JD step and the gate
+  // must be looking at the same rows; two resolutions of the same question are two answers waiting
+  // to disagree.
+  //
+  // An unreadable profile writes nothing and reports `profileReadable: false`. Resolving against an
+  // empty profile would produce zero evidence rows for every requirement, and zero rows presented as
+  // a measurement is the "0% covered" that means "we did not look".
+  await ensureRequirementCols(client)
+  if (profileRead.records.length) {
+    await writeEvidence(client, art.opp_id, profileRead.records)
+  }
+  const requirements = await loadRequirementsWithEvidence(client, art.opp_id)
+  const evidence: EvidenceInput = {
+    profileReadable: profileRead.records.length > 0,
+    bySeq: Object.fromEntries(requirements.map((r: any) => [r.seq, r.evidence_quote == null ? null : ({
+      quote: r.evidence_quote,
+      source_kind: r.evidence_source_kind,
+      source_label: r.evidence_source_label,
+      source_key: r.evidence_source_key,
+      char_start: r.evidence_char_start,
+      char_end: r.evidence_char_end,
+      extra: null,
+      ratio: r.evidence_ratio === null ? 0 : Number(r.evidence_ratio),
+      method: r.evidence_method,
+      record_sha256: '',
+      resolver_version: 0,
+    } as EvidenceRow)])),
+  }
 
   const results = runChecks({
     type: art.type,
@@ -94,6 +125,7 @@ export async function evaluateArtifact(client: any, artifactId: string, owner: s
     swaps,
     postingText: posting.text,
     profileText: profile,
+    evidence,
     facts: await loadFacts(client, owner || art.owner_email),
     thresholds: await loadThresholds(client, owner || art.owner_email),
   })
