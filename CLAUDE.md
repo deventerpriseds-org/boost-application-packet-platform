@@ -338,8 +338,17 @@ never by a direct commit or push of new work.
    (merge `origin/main` into it, fix conflicts), then retry the fast-forward.
    Pushing `main` auto-closes the branch's PR as merged — expected, not an error.
 5. **Then verify the deploy actually happened** — a green push is not a deployed app. Check the
-   workflow run, and remember a NEW api route needs ~90–120s of worker converge before it stops
-   404ing (nothing in CI waits for this).
+   workflow run **for YOUR commit**, and remember a NEW api route needs ~90–120s of worker converge
+   before it stops 404ing (nothing in CI waits for this).
+   ```bash
+   ./scripts/wait-run.sh sha:api-deploy.yml:$(git rev-parse HEAD)   # blocks until THAT run finishes
+   ```
+   **Never verify a deploy against "the latest run."** Immediately after a push the newest run is
+   still the PREVIOUS commit's — GitHub has not created yours yet — so waiting on it reports success
+   for code that was never deployed. This bit us: a "deployed" confirmation was followed by two 400s
+   from stale code that read like an application bug. `wait-run.sh` now refuses `latest:` for any
+   deploy workflow (H15). Use `sha:` and it waits for the run to exist before waiting for it to
+   finish.
 
 - Resolve conflicts by understanding both sides. For the legacy `web/` console
   (not the product), preferring one side wholesale is acceptable; for `app/`,

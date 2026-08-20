@@ -1444,3 +1444,39 @@ The rule is now in `CLAUDE.md`: **a mistake becomes an H-case in the same commit
 a guard people learn to ignore is worse than none.*
 *Also caught: my own `sentenceBounds` edit silently did nothing, because a Python `.replace()` that
 does not match is a no-op and I did not check. Edits now assert the file changed.*
+
+## ACT-63 — P6 owner facts: derived from the template, seeded by the owner
+**Status:** `landed + seeded live`. 21/21 tables (`owner_fact`).
+
+**Derivation reads the SOURCE, manual entry is the fallback** — the owner's correction. The resume
+template's static sections (work history with dates, education, certifications) are read via the
+Docs API, then MasterContext's prose blocks for anything the template omits. Derived rows are
+`source='derived'`, `confirmed_at=null`: a derived fact is the system's *reading* of a document —
+evidence, not testimony — and cannot settle a requirement until a human vouches for it. A re-read
+never overwrites a confirmed value.
+
+**9 facts seeded and confirmed** from the owner (api-test `32322146388`): 24 years total ·
+16 leadership · Doctoral candidate, U. Michigan (Ross) · US citizen · no clearance ·
+Westminster MD 21158 · relocation "leans no unless C-suite" · any work mode with onsite ≤1.5h ·
+no travel max.
+
+**Two open conflicts, deliberately NOT resolved by the system:**
+- `scope.largest_budget` — template says **$30M** (largest of 8 dollar figures); owner believes
+  **~$8M**. Surfaced, not silently picked.
+- `scope.largest_team` — owner believes **300+**; the deriver found **nothing**, so the template does
+  not state a headcount in a recognisable form.
+
+**Bug found by the first live run — H14.** `experience.years_total` derived as **"5 years (since
+2021)"** for a 24-year career. The date-range pattern allowed a month before the START year but not
+the END year, so `AUG 2021 – Present` matched while `JAN 2015 – JUL 2021` did not; only the current
+role matched and the earliest-role rule had one row to choose from. Fixed, and the derive response
+now echoes `dateRangesSeen` so a derived number is checkable without opening the document.
+
+**Tooling bug that cost two confusing rounds — H15.** `wait-run.sh latest:` reported a deploy
+"deployed" while the previous commit's run was what it actually watched, so two `400`s came back
+from stale code and read like an application bug. The helper now lives in `scripts/wait-run.sh`
+(it was in an ephemeral scratchpad, so it would not have survived the session), supports
+`sha:<workflow>:<sha>`, and **refuses `latest:` for any deploy workflow** with a non-zero exit.
+`CLAUDE.md` step 5 now documents the correct command.
+*Hardening: a fix that only lives in my habits is not a fix. It has to be in the repo, and it has to
+fail loudly when misused.*

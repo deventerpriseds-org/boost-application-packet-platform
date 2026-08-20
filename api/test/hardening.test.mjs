@@ -20,6 +20,7 @@ import { buildRequirements, locate, mapKind, sentenceBounds } from '../dist/func
 import { onOmitList, omitEntries, similarity } from '../dist/functions/tests/swaps.js'
 import { runChecks, gateFor, COVERAGE_THRESHOLD, MIN_JUDGEABLE_TOKENS } from '../dist/functions/tests/checks.js'
 import { computeArtifactScore } from '../dist/functions/tests/artifactScore.js'
+import { deriveFacts } from '../dist/functions/tests/ownerFacts.js'
 
 const SRC = new URL('../src/functions/tests/', import.meta.url).pathname
 const src = (f) => readFileSync(join(SRC, f), 'utf8')
@@ -246,4 +247,37 @@ test('H13: there is ONE opportunity projection for generation, and it selects th
   assert.ok(/jd_real/.test(proj), 'the projection must carry the employer posting')
   assert.ok(!/select company, role, comp_range, why_surfaced, company_signals, pain_hypotheses, persona_key from opportunity/.test(body),
     'the old jd_real-less projection must not reappear')
+})
+
+// ---------------------------------------------------------------------------------------------
+// H14 — A date-range pattern allowed a month before the START year but not the END year, so
+// "AUG 2021 - Present" matched while "JAN 2015 - JUL 2021" did not. On the real resume template
+// only the current role matched, and the earliest-dated-role rule then derived
+// "experience.years_total = 5 years (since 2021)" for a 24-year career.
+// The invariant: a derived span must come from the EARLIEST dated role, whatever the date format.
+test('H14: month-qualified date ranges on both sides are read, so the earliest role wins', () => {
+  const formats = [
+    'Lead  AUG 2021 - Present\nDirector  JAN 2015 - JUL 2021\nManager  Mar. 2008 - Dec 2014',
+    'Lead  2021 to Present\nDirector  2015 to 2021\nManager  2008 to 2014',
+    'Lead  2021 – Present\nDirector  Jan 2015 – Jul 2021\nManager  2008 – 2014',
+  ]
+  for (const cv of formats) {
+    const f = deriveFacts(cv, 2026).find(x => x.key === 'experience.years_total')
+    assert.ok(f, `no span derived from:\n${cv}`)
+    assert.equal(f.value_num, 18, `earliest role is 2008, not the current one:\n${cv}`)
+  }
+})
+
+// ---------------------------------------------------------------------------------------------
+// H15 — Verifying a deploy with `latest:` asks GitHub for the newest run, which immediately after a
+// push is still the PREVIOUS commit's. It reported "deployed" while the old worker was serving, and
+// the resulting 400s from stale code read like an application bug for two rounds.
+// The invariant: the deploy-wait helper must refuse the racy form rather than rely on remembering.
+test('H15: the deploy-wait helper refuses latest: and demands a commit', () => {
+  const sh = readFileSync(new URL('../../scripts/wait-run.sh', import.meta.url).pathname, 'utf8')
+  assert.match(sh, /sha:/, 'the helper must support waiting on a specific commit')
+  assert.match(sh, /\*deploy\*\)/, 'the helper must special-case deploy workflows')
+  assert.match(sh, /refusing latest:/, 'and refuse the racy form outright')
+  const guard = sh.slice(sh.indexOf('*deploy*)'), sh.indexOf('*deploy*)') + 400)
+  assert.match(guard, /exit 2/, 'refusing means a non-zero exit, not a printed warning')
 })
