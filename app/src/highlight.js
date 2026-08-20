@@ -4,7 +4,7 @@
 // component that paints a highlight. It exists for the same reason qcRail.js's QC_HOOKS does — a
 // name that three files hand-type is a name that drifts, and here the thing that drifts is a
 // COLOUR, which fails silently. CSS drops a declaration it cannot parse without a word of warning,
-// so `var(--qc-kw-<tone>)` renders as "no highlight at all" rather than as an error.
+// so `var(--qc-kw-${tone})` renders as "no highlight at all" rather than as an error.
 //
 // WHY THESE ARE TOKEN PAIRS AND NOT LITERALS
 // The design handoff says to carry #fff03a (keyword) and #fbf2da / #c9b27a (posting echo)

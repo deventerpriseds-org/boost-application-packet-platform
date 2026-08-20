@@ -15,6 +15,7 @@
 import { readdirSync, existsSync } from 'node:fs'
 import { chromium } from 'playwright'
 import { createServer } from 'vite'
+import { HIGHLIGHT_CLASS } from '../../src/highlight.js'
 
 function chromiumPath() {
   if (process.env.PW_CHROMIUM) return process.env.PW_CHROMIUM
@@ -186,12 +187,14 @@ ok('opening the header reveals the field BLOCKS already open - one click, not tw
   opened.headerOpen === '1' && opened.blocksOpen === '1' && opened.fields > 0, JSON.stringify(opened))
 
 // ---------- 7. the posting echo is painted through the shared class, not by hand ----------
-const echo = await page.evaluate(() => {
-  const el = document.querySelector('#card-resume [data-qc="blocks-posting-quote"] .qc-echo')
+// The class comes from the module, not from a string typed here: a probe that hardcodes the class
+// name keeps passing after the product renames it, which is the drift the source guard forbids.
+const echo = await page.evaluate((cls) => {
+  const el = document.querySelector(`#card-resume [data-qc="blocks-posting-quote"] .${cls}`)
   if (!el) return null
   const s = getComputedStyle(el)
   return { bg: s.backgroundColor, rule: s.borderBottomColor, ruleW: s.borderBottomWidth, text: el.textContent.slice(0, 40) }
-})
+}, HIGHLIGHT_CLASS.postingEcho)
 ok('the posting quote carries the echo treatment (a wash under a rule)',
   !!echo && echo.bg !== 'rgba(0, 0, 0, 0)' && parseFloat(echo.ruleW) >= 1, JSON.stringify(echo))
 

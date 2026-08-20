@@ -22,6 +22,7 @@ import { splitItems, itemTokens, omitEntries, onOmitList } from './swaps'
 import { mergeFieldsFor } from './insertions'
 import { normalizePostingText } from './jdText'
 import { checkAgainstFacts, OwnerFact } from './ownerFacts'
+import { scanEcho } from './figureEcho'
 
 export type CheckState = 'pass' | 'warn' | 'fail' | 'not_applicable'
 export type CheckEngine = 'deterministic' | 'reviewer'
@@ -90,7 +91,14 @@ export interface CheckInput {
   pkg: Record<string, any>
   company?: string                   // the opportunity's company, for the stale-name check
   omitList?: string
+  /**
+   * The candidate's own standing profile. Now LOAD-BEARING rather than decorative: R3 uses it to
+   * tell a figure taken from the posting from one the candidate genuinely owns. Absent, the figure
+   * check reports not_applicable — it will not guess.
+   */
   profileText?: string
+  /** The EMPLOYER'S OWN text (resolvePostingSource), never `groundingText`. See the R3 check. */
+  postingText?: string
   requirements?: Array<{ seq: number; verbatim: string | null; item_text: string; kind: string }>
   swaps?: Array<{ action: string; driver: string; to_label: string | null; from_label: string | null }>
   /** The owner's confirmed facts. A requirement a FACT settles is not a document-coverage question. */
@@ -221,6 +229,54 @@ export function runChecks(input: CheckInput): CheckResult[] {
   // --- text hygiene, across every field this artifact actually has -------------------------
   const present = fields.filter(f => pkg[f] != null && String(pkg[f]).trim() !== '')
   const allText = present.map(f => String(pkg[f])).join('\n')
+
+  // --- R3: the posting's figures are the employer's, not the candidate's ------------------
+  //
+  // "Managed a $18M portfolio across three business units" is the posting's own sentence with the
+  // candidate's name on it. Nothing about length, tone or keyword coverage catches it, and to a
+  // hiring manager reading their own ad back it is the most damaging line in the document.
+  //
+  // Three deliberate constraints, each protecting against a way this check could become noise:
+  //
+  //  1. The posting text MUST be the employer's own (`resolvePostingSource`), never `groundingText`
+  //     — which falls back to `jd_summary`, i.e. MODEL OUTPUT. Accusing a candidate of echoing a
+  //     figure that only ever existed in our own summary is an accusation built on a fabrication.
+  //  2. No profile text, or no posting text, is `not_applicable`. Without the profile there is no
+  //     way to tell theft from a true, evidenced achievement, and a check that fires anyway would
+  //     accuse people of echoing their own numbers. Absent evidence is not_applicable, never pass —
+  //     and never a fail either.
+  //  3. `warn`, not `fail` (C5, and the P8.1 correction path supersedes it). A figure present in
+  //     BOTH documents can be legitimate, and the offender list is the point: it names the field
+  //     and the exact string so a human decides in one look. A gate that reddens on a shared number
+  //     is a gate people learn to click past.
+  const echoFields = present
+  if (echoFields.length) {
+    const scans = echoFields.map(f => ({ f, r: scanEcho(String(pkg[f]), input.postingText || '', input.profileText || '') }))
+    // The SCAN decides whether it could look, not this function. Re-deriving it here from the raw
+    // strings tested a different thing: `jd_real` is HTML, so a markup-only posting (`<p></p>`) is a
+    // non-empty raw string and an empty posting — and this check reported `pass` on a document it
+    // had never compared to anything, then `gateFor` turned that into a green gate. The profile
+    // half was worse: a markup-only profile produced false ACCUSATIONS, naming figures as stolen
+    // because the thing that would have exonerated them read as absent.
+    const blocked = scans.find(x => x.r.notApplicable)
+    if (blocked) {
+      out.push(na('posting_figure_echo', blocked.r.reason || 'nothing to compare against',
+                   'no generated field states a figure that appears only in the posting'))
+    } else {
+      const hits = scans.flatMap(({ f, r }) => r.echoes.map(e => `${f}: ${e.figure.raw}`))
+      // CITE, do not count. C5 says a shared figure is kept AND cited, and R2 defines evidenced as
+      // "a verbatim excerpt from the stored profile can be shown next to it". "2 figure(s) kept"
+      // told the owner nothing they could check — which figures, and on what evidence, was thrown
+      // away with `profileRaw`.
+      const kept = scans.flatMap(({ f, r }) => r.shared.map(e => `${f}: ${e.figure.raw} (your profile states ${e.profileRaw})`))
+      const keptNote = kept.length ? `; kept as yours — ${kept.join(', ')}` : ''
+      out.push(hits.length
+        ? bad('posting_figure_echo', `${hits.length} figure(s) taken from the posting${keptNote}`,
+              "no generated field states a figure that appears only in the posting", hits, 'warn')
+        : ok('posting_figure_echo', `no posting-only figures across ${echoFields.length} field(s)${keptNote}`,
+             "no generated field states a figure that appears only in the posting"))
+    }
+  }
 
   const tells = AI_TELLS.filter(p => allText.toLowerCase().includes(p))
   const emDashes = (allText.match(/—/g) || []).length
