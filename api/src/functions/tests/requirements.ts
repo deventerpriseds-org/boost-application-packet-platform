@@ -186,6 +186,30 @@ export const ANCHOR_THRESHOLD = 0.6
 
 export interface Span { start: number; end: number }
 
+/**
+ * The sentence/bullet containing `pos`.
+ *
+ * A requirement is ONE statement. Without this the window sweep spans a boundary and produces a
+ * "requirement" like `digital water technology). Role: Director of Digital Technology Operations`
+ * — measured on live Trinnex data (opp 9f9c370a, seq 7). That fragment swallowed the role-title
+ * line and then counted as a COVERED must-have, because a resume for the role naturally contains
+ * those words. A gate went green on text the employer never wrote as a requirement.
+ */
+export function sentenceBounds(text: string, pos: number): Span {
+  const isBoundary = (i: number) =>
+    i >= 0 && i < text.length && /[.!?;:]/.test(text[i]) && (i + 1 >= text.length || /\s/.test(text[i + 1]))
+  let start = 0
+  for (let i = Math.min(pos, text.length - 1); i > 0; i--) {
+    if (isBoundary(i - 1)) { start = i; break }
+  }
+  let end = text.length
+  for (let i = pos; i < text.length; i++) {
+    if (isBoundary(i)) { end = i + 1; break }
+  }
+  while (start < end && /\s/.test(text[start])) start++
+  return { start, end }
+}
+
 const overlaps = (a: Span, taken: Span[]) => taken.some(t => a.start < t.end && t.start < a.end)
 
 /**
@@ -254,10 +278,20 @@ export function locate(paraphrase: string, postingText: string, taken: Span[] = 
   }
   if (!best) return miss
 
-  return {
-    verbatim: postingText.slice(best.span.start, best.span.end),
-    char_start: best.span.start, char_end: best.span.end, match_method: 'anchored',
-  }
+  // Clip to the sentence the span STARTS in. A span crossing a boundary is not a requirement, it is
+  // two fragments glued together, and everything downstream then quotes it as one statement.
+  const bounds = sentenceBounds(postingText, best.span.start)
+  const from = Math.max(best.span.start, bounds.start)
+  const to = Math.min(best.span.end, bounds.end)
+  if (to <= from) return miss
+
+  // Re-measure inside the clipped span. If clipping cost the coverage that justified the match, it
+  // was never a match — better unlocatable than a confident half-quote.
+  const clipped = postingText.slice(from, to).replace(/\s+$/, '')
+  const kept = new Set(tokenize(clipped).map(x => x.t).filter(x => want.has(x)))
+  if (kept.size / want.size < ANCHOR_THRESHOLD) return miss
+
+  return { verbatim: clipped, char_start: from, char_end: from + clipped.length, match_method: 'anchored' }
 }
 
 // --- weight ----------------------------------------------------------------------------------

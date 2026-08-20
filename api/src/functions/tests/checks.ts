@@ -95,6 +95,11 @@ export interface CheckInput {
   thresholds?: Partial<CheckThresholds>
 }
 
+/** Share of a requirement's content words that must appear before it counts as covered. */
+export const COVERAGE_THRESHOLD = 0.7
+/** Below this many content words a requirement carries too little signal to judge either way. */
+export const MIN_JUDGEABLE_TOKENS = 3
+
 const SKILL_FIELDS = ['SkillsBullets1', 'SkillsBullets2']
 const RELEVANT_FIELDS = ['RelevantBullets1', 'RelevantBullets2', 'RelevantBullets3']
 
@@ -285,12 +290,31 @@ export function runChecks(input: CheckInput): CheckResult[] {
   const reqs = input.requirements || []
   const mustHaves = reqs.filter(r => r.kind === 'must_have')
   const covText = normalizePostingText(allText).toLowerCase()
+  /**
+   * Does the artifact cover this requirement?
+   *
+   * This decides `must_have_coverage`, which decides the GATE, so it is an accusation-grade test and
+   * errs toward "not covered". The first version accepted half the requirement's content words
+   * appearing ANYWHERE in the document, which on live Trinnex data marked a garbage requirement
+   * ("digital water technology). Role: Director of Digital Technology Operations") as covered —
+   * because a resume for that role naturally contains those words. That turned a gate green on text
+   * that was never a requirement.
+   *
+   * Three tightenings, all of which push toward surfacing rather than silently passing:
+   *  - COVERAGE_THRESHOLD is 0.7, not 0.5.
+   *  - a requirement with fewer than MIN_JUDGEABLE_TOKENS content words cannot be judged, and an
+   *    unjudgeable requirement is reported as uncovered so a human sees it.
+   *  - at least one DISTINCTIVE token (>= 6 chars) must appear when the requirement has any. Common
+   *    short words carry almost no evidence, and a requirement made only of them is exactly the
+   *    fragment case above.
+   */
   const covers = (r: { verbatim: string | null; item_text: string }) => {
-    const src = r.verbatim || r.item_text
-    const toks = itemTokens(src)
-    if (!toks.length) return false
-    const hit = toks.filter(tk => covText.includes(tk)).length
-    return hit / toks.length >= 0.5
+    const toks = itemTokens(r.verbatim || r.item_text)
+    if (toks.length < MIN_JUDGEABLE_TOKENS) return false
+    const hit = toks.filter(tk => covText.includes(tk))
+    if (hit.length / toks.length < COVERAGE_THRESHOLD) return false
+    const distinctive = toks.filter(tk => tk.length >= 6)
+    return distinctive.length === 0 || distinctive.some(tk => covText.includes(tk))
   }
 
   if (!reqs.length) {
