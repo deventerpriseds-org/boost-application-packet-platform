@@ -293,7 +293,10 @@ export default function PacketBuilder({ id, step }) {
     setJdBusy(true)
     const at = new Date().toLocaleTimeString()
     try {
-      const r = await api.analyzeJd(id)
+      // force:true, always. This function is reached only from the analysis button, and that button
+      // exists to run the analysis on demand — so a click must re-read the posting rather than
+      // replay the stored result. The idempotency guard still protects every automatic path.
+      const r = await api.analyzeJd(id, { force: true })
       if (r.error) throw new Error(r.error)
       const a = r.analysis || {}
       setRunResult({

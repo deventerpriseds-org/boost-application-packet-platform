@@ -126,7 +126,12 @@ export const api = {
   deriveOwnerFacts: ({ owner } = {}) => post(`/app/qc/facts/derive?owner=${encodeURIComponent(owner || _owner)}`, {}),
   listPackets: ({ owner } = {}) => get(`/app/packets?owner=${encodeURIComponent(owner || _owner)}${demoParam()}`),
   getPacket: (oppId) => get(`/app/opportunity/${oppId}/packet`),
-  analyzeJd: (oppId) => post(`/app/opportunity/${oppId}/jd-analysis`, {}),
+  // `force` is the whole point of the control that calls this. P0.2 made the endpoint idempotent —
+  // correct, it stops an automatic re-analysis burning a model call — but this helper took no
+  // argument and never sent `force`, so the server returned the cache every time. The button that
+  // reads "Re-run analysis" provably could not re-run: a server-side fix shipped without its one
+  // consumer. An EXPLICIT click means "do it now", which is exactly the case the cache is not for.
+  analyzeJd: (oppId, opts = {}) => post(`/app/opportunity/${oppId}/jd-analysis`, opts.force ? { force: true } : {}),
   parseJd: (oppId) => post(`/app/opportunity/${oppId}/jd-parse`, {}),
   // P5.4 — the posting's requirement spine: one row per extracted line, with the employer's
   // located span (`verbatim`) where there is one and the model's paraphrase (`item_text`) always.

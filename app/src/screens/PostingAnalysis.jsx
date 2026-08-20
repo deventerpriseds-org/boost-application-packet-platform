@@ -153,15 +153,32 @@ function ModelKeywords({ parsedKeywords, coveredKw, missingKw, gapsScoredAt }) {
       {coveredKw.length > 0 && (
         <div style={{ marginTop: 10 }}>
           <div className="px-small" style={{ fontWeight: 600 }}>
-            The analysis run thinks your profile already shows these - {coveredKw.length} model-suggested
+            Terms the analysis run pulled out of the posting - {coveredKw.length} model-suggested
           </div>
-          <KeywordChips items={coveredKw} tone="green" />
+          {/*
+            NOT green, and NOT described as covered. This list is `packet.covered_kw`, and the column
+            name is a misnomer: the prompt that fills it (appPackets.jdAnalysis) asks for
+            "ATS keywords for this role" and its user message carries Role/Company/Comp plus the job
+            description - NO candidate input of any kind. Nothing in that call compares the posting
+            to the profile, so nothing in it can establish coverage.
+
+            The thin list below IS candidate-compared (appApply.atsScoreOne sends a CANDIDATE MASTER
+            BASELINE and asks what is missing). Rendering the two as a green/red pair made them look
+            like two halves of one measurement when only one half was ever measured - which lends the
+            unmeasured half the credibility of the measured one. They are now visibly different
+            kinds of thing.
+          */}
+          <KeywordChips items={coveredKw} />
+          <div className="px-small" style={{ marginTop: 4, color: 'var(--proto-ink3)' }}>
+            Read from the posting only - this run never compared them to your profile, so it is not a
+            coverage list.
+          </div>
         </div>
       )}
       {missingKw.length > 0 ? (
         <div style={{ marginTop: 10 }}>
           <div className="px-small" style={{ fontWeight: 600 }}>
-            The analysis run flagged these as thin - {missingKw.length} model-suggested
+            Compared against your profile and flagged as thin - {missingKw.length} model-suggested
           </div>
           <KeywordChips items={missingKw} tone="red" />
         </div>
