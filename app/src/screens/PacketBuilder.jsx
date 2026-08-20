@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react'
 import { useApp, go, useIsMobile } from '../state.jsx'
 import { api } from '../api.js'
-import { Pill } from '../shell.jsx'
+import { Pill, toneColor } from '../shell.jsx'
 import { Loading, ErrorBox } from './Today.jsx'
 import AssetBlocks, { useAssetProvenance } from './AssetBlocks.jsx'
 import { registerListOwners } from '../assetBlocks.js'
@@ -9,6 +9,8 @@ import {
   PostingAnalysisCard, AnalysisRunCard, KeywordTallyOverlay, MatchEstimateButton, ProfileLink,
 } from './PostingAnalysis.jsx'
 import { postingBody } from '../postingAnalysis.js'
+import QcRail, { useQcEntries } from './QcRail.jsx'
+import { qcStepState, packetGate, railGateMeta } from '../qcRail.js'
 
 const TYPE_LABEL = {
   resume: 'Resume', compact_resume: 'Compact resume', cover: 'Cover letter',
@@ -32,14 +34,20 @@ const STEPS = [
   { key: 'cover',    num: 3, label: 'Cover letter',   sub: 'Tailored narrative' },
   { key: 'portfolio',num: 4, label: 'Portfolio',      sub: 'Assemble work samples' },
   { key: 'video',    num: 5, label: 'Intro video',    sub: 'Script + record 60s' },
-  { key: 'send',     num: 6, label: 'Review & send',  sub: 'Approval rounds' },
+  // P5.1 - QC sits between the assets and sending, because it is the step that decides whether the
+  // packet may be sent at all. Its circle takes the PACKET GATE colour rather than the generic
+  // green tick: a step that is complete and a step that is clear are different statements.
+  { key: 'qc',       num: 6, label: 'QC & evidence',  sub: 'Coverage, checks, review' },
+  { key: 'send',     num: 7, label: 'Review & send',  sub: 'Approval rounds' },
 ]
 
 // Shared artifact step for compact_resume — rendered inside Resume step
 const ARTIFACT_TYPES = ['resume', 'compact_resume', 'cover', 'portfolio', 'video']
 
-function StepCircle({ num, done, active }) {
-  const bg = done ? 'var(--proto-green)' : active ? 'var(--surface-brand-default)' : 'var(--proto-panel-deep)'
+function StepCircle({ num, done, active, tone }) {
+  // `tone` is resolved through toneColor() - never by interpolating the tone into a custom-property
+  // name, which is the bug that made the `todo` pill invisible.
+  const bg = tone ? toneColor(tone) : done ? 'var(--proto-green)' : active ? 'var(--surface-brand-default)' : 'var(--proto-panel-deep)'
   const color = done || active ? '#fff' : 'var(--proto-ink2)'
   return (
     <div style={{
@@ -51,8 +59,13 @@ function StepCircle({ num, done, active }) {
   )
 }
 
-function stepDone(key, p, artifacts) {
+// `qc` is deliberately NOT the rule the asset steps use. An asset step is done when the artifact is
+// `approved`, and every historical approved artifact in this database has ZERO check rows - approval
+// predates the checks engine. So the QC step is GATE-driven instead: qcStepState() restates
+// approvalBlock() over the whole packet, and an unchecked asset keeps the step open.
+function stepDone(key, p, artifacts, qc) {
   if (key === 'jd') return !!p?.jdAnalyzed
+  if (key === 'qc') return !!(qc && qc.done)
   if (key === 'send') return p?.status === 'ready'
   const types = key === 'resume' ? ['resume', 'compact_resume'] : [key]
   return types.every((t) => {
@@ -199,10 +212,19 @@ export default function PacketBuilder({ id, step }) {
   const registerLists = useCallback((artifactId, label, lists) => {
     setListOwners((prev) => registerListOwners(prev, artifactId, label, lists))
   }, [])
-  // The checks engine's score for this packet's resume, read ONCE here and handed to both keyword
-  // surfaces, so the card's tab and the tally modal can never print different words about the same
-  // library. `null` means no run has been read yet, which is a state of its own - not zero.
-  const [keywordScore, setKeywordScore] = useState(null)
+  // ONE source for every asset's QC payload (P5.1). The step circle, the QC rail, the per-asset
+  // drawer and the keyword surfaces all read this same map, so no two of them can show different
+  // gates for the same artifact. Insertions are only fetched while the QC step is open - the loops
+  // and compare tabs are the only readers.
+  //
+  // It REPLACES the resume-only checks-result fetch this screen used to run for the keyword tally:
+  // that was a second copy of the same payload, and the tally now reads the resume's entry out of
+  // this one map. `null` still means no run has been read yet - a state of its own, not zero.
+  const artifactList = pState.packet ? pState.packet.artifacts : null
+  const { entries: qcEntries, setResult: setQcResult } = useQcEntries(artifactList, { withInsertions: activeStep === 'qc' })
+  const qc = qcStepState(qcEntries)
+  const resumeEntry = qcEntries.find((e) => e.artifact.type === 'resume') || null
+  const keywordScore = (resumeEntry && resumeEntry.result && resumeEntry.result.score) || null
 
   const load = useCallback(async () => {
     try {
@@ -229,15 +251,6 @@ export default function PacketBuilder({ id, step }) {
 
   useEffect(() => { load() }, [load])
   useEffect(() => { loadReq() }, [loadReq])
-  const resumeArtifactId = (pState.packet?.artifacts || []).find((a) => a.type === 'resume')?.id || null
-  useEffect(() => {
-    if (!resumeArtifactId) { setKeywordScore(null); return undefined }
-    let dead = false
-    api.artifactChecksResult(resumeArtifactId)
-      .then((r) => { if (!dead) setKeywordScore(r && !r.error ? (r.score || null) : null) })
-      .catch(() => { if (!dead) setKeywordScore(null) })
-    return () => { dead = true }
-  }, [resumeArtifactId])
   useEffect(() => () => Object.values(pollers.current).forEach(clearTimeout), [])
 
   const patchArtifact = (artifactId, fields) => setPState((s) => ({
@@ -513,6 +526,21 @@ export default function PacketBuilder({ id, step }) {
         )
       })()}
 
+      {/* P5.1 - the QC & evidence rail. It reads the SAME qcEntries the step circle does, so the
+          circle's colour and the rail's gate can never be two different opinions. */}
+      {activeStep === 'qc' && (
+        <>
+          <QcRail
+            packetId={p.id} company={p.company} role={p.role}
+            entries={qcEntries} setResult={setQcResult}
+            requirements={req.data ? req.data.requirements : null} reqError={req.error}
+            reqLoading={!req.data && !req.error} />
+          <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+            <button className="px-btn px-btn-accent" onClick={() => setActiveStep('send')}>Next: Review &amp; send →</button>
+          </div>
+        </>
+      )}
+
       {/* Review & send step */}
       {activeStep === 'send' && (
         <div className="px-box" style={{ padding: 20, display: 'flex', flexDirection: 'column', gap: 14 }}>
@@ -574,7 +602,7 @@ export default function PacketBuilder({ id, step }) {
         {/* Horizontal step scroller */}
         <div style={{ display: 'flex', gap: 8, overflowX: 'auto', paddingBottom: 4, WebkitOverflowScrolling: 'touch' }}>
           {STEPS.map((step) => {
-            const done = stepDone(step.key, p, artifacts)
+            const done = stepDone(step.key, p, artifacts, qc)
             const active = activeStep === step.key
             return (
               <div key={step.key} onClick={() => setActiveStep(step.key)}
@@ -646,7 +674,7 @@ export default function PacketBuilder({ id, step }) {
         {/* Left: step list */}
         <div style={{ width: 220, flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 2 }}>
           {STEPS.map((step) => {
-            const done = stepDone(step.key, p, artifacts)
+            const done = stepDone(step.key, p, artifacts, qc)
             const active = activeStep === step.key
             return (
               <div key={step.key} onClick={() => setActiveStep(step.key)}
@@ -655,7 +683,8 @@ export default function PacketBuilder({ id, step }) {
                   cursor: 'pointer', background: active ? 'var(--proto-accent-soft)' : 'transparent',
                   border: active ? '1px solid var(--surface-brand-default)' : '1px solid transparent',
                 }}>
-                <StepCircle num={step.num} done={done} active={active} />
+                <StepCircle num={step.num} done={done} active={active}
+                  tone={step.key === 'qc' ? railGateMeta({ gate: packetGate(qcEntries) }).tone : null} />
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontSize: 13, fontWeight: active ? 600 : 500, color: active ? 'var(--text-brand)' : 'var(--proto-ink)' }}>
                     {step.label}

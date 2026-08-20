@@ -109,18 +109,36 @@ export const TABS = [
 ]
 
 // Blocks default OPEN (P5 note) - nothing here is behind a disclosure.
-function BlocksTab({ data, loading, error }) {
+//
+// `focusField` is the landing point for a P8.5 deep link: a count on the QC rail resolves to a
+// merge field, and the click has to arrive AT that field rather than merely at the asset. The row
+// scrolls itself into view and is outlined; nothing else about the tab changes, and a null
+// focusField leaves the tab exactly as it was.
+function BlocksTab({ data, loading, error, focusField }) {
+  const focusRef = useRef(null)
+  useEffect(() => {
+    const el = focusRef.current
+    if (focusField && el && typeof el.scrollIntoView === 'function') {
+      el.scrollIntoView({ block: 'center' })
+    }
+  }, [focusField, data])
   if (loading) return <Quiet>Loading the blocks...</Quiet>
   if (error) return <Quiet>Could not load the blocks: {error}</Quiet>
   if (!data) return <Quiet>No block record for this asset.</Quiet>
   const rows = arr(data.insertions).filter((r) => Number(r.loop) === Number(data.loop))
   if (!rows.length) return <Quiet>This asset has no recorded blocks yet - nothing has been generated into its merge fields.</Quiet>
+  const missing = focusField && !rows.some((r) => r.merge_field === focusField)
   return (
     <div>
       <Section title={'Pass ' + Number(data.loop)}
         note={data.filled + ' filled, ' + data.unfilled + ' left to the static template, ' + data.attributed + ' quoting the posting'} />
+      {missing && (
+        <Quiet>The finding you opened names {fieldLabel(focusField)}, but this asset has no recorded block for that field.</Quiet>
+      )}
       {rows.map((r) => (
-        <div key={r.merge_field} className="px-box-soft" style={{ padding: 10, marginBottom: 8 }}>
+        <div key={r.merge_field} className="px-box-soft" data-qc-section={r.merge_field}
+          ref={r.merge_field === focusField ? focusRef : undefined}
+          style={{ padding: 10, marginBottom: 8, boxShadow: r.merge_field === focusField ? 'inset 0 0 0 2px var(--border-brand)' : undefined }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
             <span style={{ fontSize: 13, fontWeight: 600, flex: 1, minWidth: 140 }}>{fieldLabel(r.merge_field)}</span>
             <Pill tone={r.generated ? 'green' : 'panel'}>{r.generated ? 'generated' : 'static template text'}</Pill>
@@ -314,7 +332,7 @@ function MatchTab({ result }) {
  * ever one gate object in play.
  */
 export default function AssetGateDrawer({
-  open = true, artifact, packetId, company, role,
+  open = true, artifact, packetId, company, role, focusSection = null,
   result, resultLoading, resultError, onResult, onClose,
 }) {
   const [tab, setTab] = useState('blocks')
@@ -341,6 +359,10 @@ export default function AssetGateDrawer({
     setSwaps({ loading: false, error: null, data: null })
     setActionError(null); setNotice(null); setReasonOpen(false); setReason('')
   }, [artifactId])
+
+  // A deep link names a field, and fields live on the Blocks tab - so arriving with a section
+  // returns there even if the reader had switched tabs.
+  useEffect(() => { if (focusSection) setTab('blocks') }, [focusSection])
 
   useEffect(() => {
     if (!open || !artifactId) return
@@ -515,7 +537,7 @@ export default function AssetGateDrawer({
         ))}
       </div>
 
-      {tab === 'blocks' && <BlocksTab data={insertions.data} loading={insertions.loading} error={insertions.error} />}
+      {tab === 'blocks' && <BlocksTab data={insertions.data} loading={insertions.loading} error={insertions.error} focusField={focusSection} />}
       {tab === 'checks' && <ChecksTab result={result} />}
       {tab === 'compare' && <CompareTab swaps={swaps.data} swapsLoading={swaps.loading} swapsError={swaps.error} insertions={insertions.data} />}
       {tab === 'review' && <ReviewTab result={result} />}
