@@ -156,6 +156,16 @@ export function ArtifactCard({ a, busy, setBusy, onGenerate, onSetStatus, onMake
               onClick={() => { try { navigator.clipboard?.writeText(api.trackedLink(a.id)) } catch {} }}>
               ⎘ Copy tracked link
             </span>
+            {/* Fixing `api.js` alone would have changed nothing a user can reach. This branch USED to
+                end here: once the artifact had a docUrl the create button was replaced by a link, so
+                on precisely the artifacts where a cache bypass matters there was no control to press
+                — the dead-UI defect moved one layer up, where the api.js diff makes it look solved. */}
+            <span data-qc={PACKET_HOOKS.assetRebuild} className="px-link"
+              style={{ fontSize: 12, cursor: d.busy ? 'default' : 'pointer', opacity: d.busy ? 0.6 : 1 }}
+              role="button" aria-disabled={d.busy ? 'true' : 'false'}
+              onClick={() => { if (!d.busy) ((a.type === 'portfolio' || a.type === 'cover') ? onMakeSlides : onMakeDoc)(a, { regen: true }) }}>
+              {d.busy && d.regen ? '↻ Rebuilding…' : '↻ Rebuild from current draft'}
+            </span>
           </div>
         ) : (
           <button className="px-btn" style={{ fontSize: 12, alignSelf: 'flex-start' }} disabled={d.busy}
@@ -284,28 +294,28 @@ export default function PacketBuilder({ id, step }) {
     packet: { ...s.packet, artifacts: s.packet.artifacts.map((a) => (a.id === artifactId ? { ...a, ...fields } : a)) },
   }))
 
-  const makeDoc = async (a) => {
-    setDoc((d) => ({ ...d, [a.id]: { busy: true } }))
+  const makeDoc = async (a, opts = {}) => {
+    setDoc((d) => ({ ...d, [a.id]: { busy: true, regen: opts.regen === true } }))
     try {
-      const res = await api.generateArtifactDocument(a.id)
+      const res = await api.generateArtifactDocument(a.id, opts)
       if (res.error) throw new Error(res.error)
       patchArtifact(a.id, { docUrl: res.docUrl })
       setDoc((d) => ({ ...d, [a.id]: { busy: false } }))
-      toast(`Google Doc created for ${TYPE_LABEL[a.type]}`)
+      toast(opts.regen ? `Google Doc rebuilt for ${TYPE_LABEL[a.type]}` : `Google Doc created for ${TYPE_LABEL[a.type]}`)
     } catch (err) {
       setDoc((d) => ({ ...d, [a.id]: { busy: false, error: String(err.message || err) } }))
       toast(`Doc failed: ${err.message || err}`)
     }
   }
 
-  const makeSlides = async (a) => {
-    setDoc((d) => ({ ...d, [a.id]: { busy: true } }))
+  const makeSlides = async (a, opts = {}) => {
+    setDoc((d) => ({ ...d, [a.id]: { busy: true, regen: opts.regen === true } }))
     try {
-      const res = await api.generateArtifactSlides(a.id)
+      const res = await api.generateArtifactSlides(a.id, opts)
       if (res.error) throw new Error(res.error)
       patchArtifact(a.id, { docUrl: res.deckUrl || res.docUrl })
       setDoc((d) => ({ ...d, [a.id]: { busy: false } }))
-      toast('Slides deck created')
+      toast(opts.regen ? 'Slides deck rebuilt' : 'Slides deck created')
     } catch (err) {
       setDoc((d) => ({ ...d, [a.id]: { busy: false, error: String(err.message || err) } }))
       toast(`Deck failed: ${err.message || err}`)

@@ -541,9 +541,11 @@ function ResumeTab({ o, toast }) {
     try { const r = await api.setArtifactStatus(a.id, status); if (r.error) throw new Error(r.error); toast(`Resume → ${status}`) }
     catch (e) { patch(a.id, { status: prev }); toast(`Update failed: ${e.message || e}`) }
   }
-  const makeDoc = async (a) => {
+  // The SECOND consumer of generateArtifactDocument. A reachability fix present in PacketBuilder and
+  // absent here is the "fix all consumers" failure, so it takes the same options argument.
+  const makeDoc = async (a, opts = {}) => {
     setBusy(a.id)
-    try { const r = await api.generateArtifactDocument(a.id); if (r.error) throw new Error(r.error); patch(a.id, { docUrl: r.docUrl }); toast('Google Doc created'); load({ silent: true }) }
+    try { const r = await api.generateArtifactDocument(a.id, opts); if (r.error) throw new Error(r.error); patch(a.id, { docUrl: r.docUrl }); toast(opts.regen ? 'Google Doc rebuilt' : 'Google Doc created'); load({ silent: true }) }
     catch (e) { toast(`Doc failed: ${e.message || e}`) } finally { setBusy(null) }
   }
 
