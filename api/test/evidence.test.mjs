@@ -235,3 +235,36 @@ test('there is ONE rule for what counts as the profile, and it lives in profileR
   assert.ok(!/itemsToOmit/.test(code),
     'a second copy of the exclusion rule in sourceText is how the two filters drifted the first time')
 })
+
+// ------------------------------------------------------------------ the correction is targeted
+
+test('the denominator moves ONLY where a row was being credited that nothing measured', () => {
+  // C6 changes what the numerator COUNTS (evidence rows instead of words in the document). It must
+  // not quietly change what the numerator is counted OUT OF. Differentially verified against
+  // checks.ts at main 44d1cfc: with no excluded rows the two engines print the same "N/M" and differ
+  // only in the word ("covered" -> "evidenced"); with one eligibility row the old engine printed
+  // 1/2 and 1/5 where the new one prints 0/1 and 0/4. That gap IS the H28 defect, and it is the only
+  // place the number is allowed to move.
+  const mh = (seq, verbatim) => ({ seq, kind: 'must_have', verbatim, item_text: '' })
+  const denom = rs => Number(/(\d+)\/(\d+)/.exec(rs.find(r => r.check_key === 'must_have_coverage').observed)[2])
+  const run = reqs => denom(runChecks({
+    type: 'resume', pkg: { ResumeSummary: 'nothing relevant here' }, requirements: reqs,
+    evidence: { profileReadable: true, bySeq: {} },
+  }))
+
+  // Nothing excluded: the denominator is every must-have, exactly as before.
+  for (const n of [1, 2, 5]) {
+    const reqs = Array.from({ length: n }, (_, i) => mh(i, `Deep experience with roadmap strategy number ${i}`))
+    assert.equal(run(reqs), n, `${n} must-haves, none excluded — the denominator must still be ${n}`)
+  }
+
+  // One eligibility row: it leaves the denominator instead of being counted as covered.
+  const live = [
+    mh(0, 'Experience in leading technology operations across utilities'),
+    mh(1, 'Reside in the East Coast of the United States'),
+    mh(2, 'Strong understanding of software engineering practices'),
+    mh(3, 'IoT data, models, geospatial data, and AI/ML'),
+    mh(4, 'Ability to manage remote engineering teams'),
+  ]
+  assert.equal(run(live), 4, 'the live Trinnex shape: 5 must-haves, 1 unreachable, 4 judged')
+})
