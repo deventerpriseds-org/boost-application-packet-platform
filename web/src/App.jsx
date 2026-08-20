@@ -66,6 +66,7 @@ const AUTH_CONFIGS = [
       { key: "resumeTemplateId", label: "Resume Template Doc ID", placeholder: "1bwOcxvkb...", type: "text" },
       { key: "portfolioTemplateId", label: "Portfolio Slides ID", placeholder: "1ULZZLBs9...", type: "text" },
       { key: "coverLetterTemplateId", label: "Cover Letter Slides ID", placeholder: "1QN4Cnw4R...", type: "text" },
+      { key: "compactResumeTemplateId", label: "Compact ATS Resume Doc ID (default for roles with no template)", placeholder: "1bwOcxvkb...", type: "text" },
       { key: "videoFolderId", label: "Video Archive Folder ID", placeholder: "1cpwe85zurj...", type: "text" },
     ],
   },
@@ -77,6 +78,9 @@ const AUTH_CONFIGS = [
       { key: "apiKey", label: "API Key", placeholder: "sk-••••••••", type: "password" },
       { key: "model", label: "Default Model", placeholder: "gpt-4o-mini", type: "text" },
       { key: "maxTokens", label: "Max Tokens", placeholder: "16000", type: "text" },
+      { key: "generateTemperature", label: "Generation Temperature (calls 1-2, 0-2)", placeholder: "0.7", type: "text" },
+      { key: "qcTemperature", label: "ATS QC Temperature (call 3, 0-2)", placeholder: "0.15", type: "text" },
+      { key: "defaultRoleFocus", label: "Default Role Focus (unmatched roles)", placeholder: "engineering", type: "text" },
     ],
   },
   {

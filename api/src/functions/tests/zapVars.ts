@@ -13,7 +13,11 @@
 
 type MasterContext = Record<string, any>
 
-export function resolveZapVars(promptText: string, mc: MasterContext, jobDescription: string, nowIso?: string): string {
+// `extra` supplies token values that are NOT derivable from MasterContext because they are produced
+// mid-run (Call-1's output lists, the target company/role). Without it the ATS-QC prompt's own input
+// tokens resolve to nothing and the QC call reviews an empty list. Callers pass what they hold; any
+// token still unmapped is blanked, exactly as before.
+export function resolveZapVars(promptText: string, mc: MasterContext, jobDescription: string, nowIso?: string, extra?: Record<string, string>): string {
   const now = nowIso || new Date().toISOString()
   const humanDate = new Date(now).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })
 
@@ -44,6 +48,11 @@ export function resolveZapVars(promptText: string, mc: MasterContext, jobDescrip
     '289877647__answers__Target Job Description': jobDescription || '',
     'zap_meta_human_now': humanDate,
   }
+
+  // Run-scoped values win over the MasterContext baseline: when a caller supplies Call-1's actual
+  // output for a token, that is the text the next call must review — the standing profile value is
+  // what Call 1 already replaced.
+  if (extra) for (const [k, v] of Object.entries(extra)) map[k] = v == null ? '' : String(v)
 
   // Replace every {{ key }} (tolerating internal whitespace). Any unmapped
   // {{...}} token is blanked out so no literal placeholder reaches the model.

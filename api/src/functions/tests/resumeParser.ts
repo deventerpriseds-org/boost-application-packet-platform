@@ -6,6 +6,18 @@
 // First occurrence wins, so the clean plain-text sections beat the later
 // HTML-duplicated ones. Work history is NOT produced by the agent — it comes
 // from MasterContext.
+//
+// P7 residual (the narrowed half of "positional coupling"): mapping by title fixed WHICH field a
+// section lands in, but the walk was still positional — it stepped `i += 2` and took `parts[i+1]`
+// as the body. That makes the ALTERNATION load-bearing: one stray `###` anywhere in prose (the
+// prompt itself instructs the model to bookend headers with `###`, and models emit "### " inside
+// generated bullets) shifts the parity of every following pair, so from that point on titles are
+// read as bodies and bodies as titles, and every later section is silently lost or misfiled.
+//
+// The walk below is heading-driven instead: each part is independently classified as a heading or
+// not, and a heading takes everything up to the NEXT heading as its body. Parity is no longer
+// carried across sections, so a stray delimiter costs at most the fragment it split — never the
+// alignment of the rest of the document.
 
 type MC = Record<string, any>
 
@@ -49,16 +61,54 @@ const TITLE_MAP: Array<[RegExp, string]> = [
   [/core\s*accomplishments/, 'coreAccomplishments'],
 ]
 
+// A heading is a SHORT, SINGLE-LINE fragment that matches one of the TITLE_MAP patterns. Both shape
+// tests matter: the patterns are deliberately loose (unanchored, to tolerate heading variants), so
+// without them a long body paragraph that happens to contain "relevant … 1" would be promoted to a
+// heading and swallow the section that follows it.
+const HEADING_MAX_CHARS = 80
+
+/**
+ * Every field this part could title, in TITLE_MAP order. Empty array ⇒ the part is body text.
+ *
+ * ALL matches are returned, not just the first, because the patterns genuinely overlap: `QUAL`
+ * includes "relevant", so the heading "Relevant Skills 1" matches the `skills1` pattern BEFORE the
+ * `relevant1` one. The original walk relied on that — it only broke out of the pattern loop when it
+ * actually assigned, so a heading whose first match was already filled fell through to its later,
+ * more specific match. Returning one key here would silently drop every Relevant Skills section.
+ * (The overlap itself is a latent defect: a document that lists Relevant Skills 1 BEFORE Skills 1
+ * still misfiles it. Left as-is deliberately — the live prompts emit Skills first, and changing the
+ * table changes generation, which is outside this fix.)
+ */
+export function headingKeysFor(part: string): string[] {
+  const raw = String(part ?? '').trim()
+  if (!raw || /[\r\n]/.test(raw)) return []
+  const title = normalize(raw)
+  if (!title || title.length > HEADING_MAX_CHARS) return []
+  const keys: string[] = []
+  for (const [rx, key] of TITLE_MAP) if (rx.test(title) && !keys.includes(key)) keys.push(key)
+  return keys
+}
+
+/** True when this part is a section heading rather than body text. */
+export function isHeading(part: string): boolean {
+  return headingKeysFor(part).length > 0
+}
+
 export function parseResumePackage(content: string, mc: MC, jobTitle: string, company: string): any {
   const parts = content.split('###').map((s) => s.trim()).filter(Boolean)
   const fields: Record<string, string> = {}
 
-  for (let i = 0; i + 1 < parts.length; i += 2) {
-    const title = normalize(parts[i])
-    const body = parts[i + 1]
-    for (const [rx, key] of TITLE_MAP) {
-      if (rx.test(title) && !fields[key]) { fields[key] = body; break }
-    }
+  // Classify every part ONCE, then let each heading claim the run of body parts that follows it.
+  // Nothing depends on a part's index parity, so a stray delimiter cannot re-align what comes after.
+  const keys = parts.map(headingKeysFor)
+  for (let i = 0; i < parts.length; i++) {
+    if (!keys[i].length) continue
+    const body: string[] = []
+    for (let j = i + 1; j < parts.length && !keys[j].length; j++) body.push(parts[j])
+    if (!body.length) continue                      // heading with no body — leave the field open
+    // First unfilled candidate wins, mirroring the original loop's fall-through.
+    const key = keys[i].find((k) => !fields[k])
+    if (key) fields[key] = body.join('\n\n')
   }
 
   const val = (k: string) => (mc && mc[k] != null ? String(mc[k]) : '')
