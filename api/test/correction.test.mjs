@@ -2,6 +2,7 @@
 // way the document never reveals.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import { scanEcho } from '../dist/functions/tests/figureEcho.js'
 import {
   planCorrections, applyCorrections, originalOf, revertOne, isWellFormed, sha256,
@@ -153,4 +154,42 @@ test('the module is pure — no pg, no HTTP, no model call', () => {
   // Deterministic by construction: the same field corrects the same way forever, which is what lets
   // a revert months later be exact rather than approximate.
   assert.equal(applyCorrections(FIELD, plan()), applyCorrections(FIELD, plan()))
+})
+
+test('the route contract: a refusal is a 200 the UI can render, not an error it swallows', () => {
+  // `revertOne` declining is a SUCCESSFUL outcome — the system worked and said no. Returning 4xx
+  // would put it down a generic error path where the user is told nothing, and the reason ("this
+  // field was edited after the correction was applied") is the whole content of the interaction.
+  //
+  // Source rules, because the distinction is about which branch produces which status, and both
+  // branches return a well-formed body.
+  const src = readFileSync(new URL('../src/functions/tests/appCorrections.ts', import.meta.url), 'utf8')
+  const code = src.replace(/\/\/[^\n]*/g, '').replace(/\/\*[\s\S]*?\*\//g, '')
+
+  assert.match(code, /if \(!result\.ok\)[\s\S]{0,220}status: 200[\s\S]{0,120}ok: false/,
+    'a declined revert no longer returns 200 with the reason — the user will be shown nothing')
+
+  // A declined revert must write NOTHING. A row stamped `reverted_by` whose text never changed is
+  // worse than either outcome alone: the log says undone and the document disagrees.
+  const declineBranch = code.slice(code.indexOf('if (!result.ok)'), code.indexOf('const pkg = {'))
+  assert.ok(!/update /i.test(declineBranch), 'the decline branch writes to the database')
+
+  // The stamp is the session owner, never the client's word for it.
+  assert.match(code, /set reverted_by = \$1[\s\S]{0,200}\[owner, correctionId\]/,
+    'reverted_by is not taken from the resolved session owner')
+  assert.ok(!/body\?\.reverted_by|body\.reverted_by/.test(code), 'reverted_by is read from the request body')
+
+  // The write pair is atomic: the package text and the undone stamp cannot disagree.
+  assert.ok(code.includes("client.query('begin')") && code.includes("client.query('rollback')"),
+    'the package update and the revert stamp are not in one transaction')
+
+  // Mutations need a verified session; `resolveOwner` alone DEFAULTS to the demo account, so
+  // requireWrite is what actually closes the route.
+  assert.match(code, /requireWrite\(req\); if \(guard\) return guard/, 'the revert route is unguarded')
+})
+
+test('the change log always ships an array, so "none" and "not asked" stay distinguishable', () => {
+  const src = readFileSync(new URL('../src/functions/tests/appCorrections.ts', import.meta.url), 'utf8')
+  assert.match(src, /jsonBody: \{ artifact_id: artifactId, corrections: rows \}/,
+    'the corrections key is conditional — an absent key and an empty list are different states')
 })

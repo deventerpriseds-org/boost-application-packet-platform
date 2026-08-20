@@ -145,3 +145,104 @@ export async function listCorrections(client: any, artifactId: string): Promise<
 }
 
 export { getPgClient }
+
+// ---------------------------------------------------------------------------------------------
+// The routes. Reading the change log, and undoing one entry.
+
+import { app, HttpRequest, HttpResponseInit, InvocationContext } from '@azure/functions'
+import { resolveOwner, requireWrite } from './appSession'
+import { revertOne } from './correction'
+
+const HEADERS = { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': '*', 'Access-Control-Allow-Methods': 'GET,POST,OPTIONS' }
+
+/** GET /api/app/artifact/{artifactId}/corrections — the change log, undone rows included. */
+export async function artifactCorrectionsGet(req: HttpRequest, _c: InvocationContext): Promise<HttpResponseInit> {
+  if (req.method === 'OPTIONS') return { status: 204, headers: HEADERS }
+  const artifactId = req.params.artifactId
+  let client
+  try {
+    client = await getPgClient()
+    const rows = await listCorrections(client, artifactId)
+    // `corrections` is the key P8.6's change log reads. An artifact with none returns an EMPTY
+    // ARRAY, never an absent key: the UI distinguishes "nothing needed correcting" from "nobody
+    // asked", and it can only do that if the two states look different on the wire.
+    return { status: 200, headers: HEADERS, jsonBody: { artifact_id: artifactId, corrections: rows } }
+  } catch (e: any) {
+    return { status: 500, headers: HEADERS, jsonBody: { error: String(e?.message || e) } }
+  } finally { try { await client?.end() } catch {} }
+}
+
+/**
+ * POST /api/app/correction/{correctionId}/revert — put one phrase back.
+ *
+ * A REFUSAL IS A SUCCESSFUL OUTCOME OF THIS ROUTE, not an error. `revertOne` declines when the
+ * field was rewritten after the correction was applied, because the recovered original no longer
+ * hashes to `before_sha256` — splicing into text that has moved would corrupt the document silently.
+ * The refusal comes back 200 with `ok:false` and the reason in the user's words, because the UI has
+ * to show it: a 4xx would be swallowed by a generic error path and the user would be told nothing.
+ *
+ * Every other failure IS a status code. The distinction is deliberate: `ok:false` means the system
+ * worked and declined; a 4xx/5xx means it did not work.
+ */
+export async function correctionRevert(req: HttpRequest, _c: InvocationContext): Promise<HttpResponseInit> {
+  if (req.method === 'OPTIONS') return { status: 204, headers: HEADERS }
+  const guard = requireWrite(req); if (guard) return guard
+  const { owner } = resolveOwner(req)
+  const correctionId = req.params.correctionId
+  let client
+  try {
+    client = await getPgClient()
+    await ensureCorrectionTable(client)
+    const target = (await client.query(
+      `select * from correction where id = $1`, [correctionId])).rows[0]
+    if (!target) return { status: 404, headers: HEADERS, jsonBody: { error: 'no such correction' } }
+    if (target.reverted_at) {
+      return { status: 200, headers: HEADERS, jsonBody: { ok: false, reason: 'this correction was already undone' } }
+    }
+
+    // Every correction still applied to THIS field, which is what `revertOne` replays. A revert is
+    // computed against the whole set, never against the one row: the offsets are original-relative
+    // and only the full list can reconstruct the original text.
+    const siblings = (await client.query(
+      `select * from correction where artifact_id = $1 and merge_field = $2 and reverted_at is null
+       order by applied_seq`, [target.artifact_id, target.merge_field])).rows
+    const applied: Correction[] = siblings.map(r => ({
+      merge_field: r.merge_field, phrase: r.phrase, replacement: r.replacement,
+      char_start: r.char_start, char_end: r.char_end, before_sha256: r.before_sha256,
+      applied_seq: r.applied_seq, reason: r.reason, source: r.source,
+    }))
+
+    const art = (await client.query(
+      `select a.id, a.packet_id, p.pkg_json from artifact a join packet p on p.id = a.packet_id
+        where a.id = $1`, [target.artifact_id])).rows[0]
+    if (!art?.pkg_json) return { status: 409, headers: HEADERS, jsonBody: { error: 'this artifact has no stored package to revert in' } }
+
+    const current = String(art.pkg_json[target.merge_field] ?? '')
+    const result = revertOne(current, applied, target.applied_seq)
+    if (!result.ok) {
+      // Declined, and NOTHING is written — not the text, not the reverted_by stamp. A row marked
+      // undone whose text never changed is the worst of both.
+      return { status: 200, headers: HEADERS, jsonBody: { ok: false, reason: result.reason } }
+    }
+
+    const pkg = { ...art.pkg_json, [target.merge_field]: result.text }
+    await client.query('begin')
+    try {
+      await client.query(`update packet set pkg_json = $1, updated_at = now() where id = $2`,
+        [JSON.stringify(pkg), art.packet_id])
+      // reverted_by is the SESSION-resolved owner, never a client-supplied value — the same rule
+      // artifact_gate's override applies, for the same reason.
+      await client.query(
+        `update correction set reverted_by = $1, reverted_at = now() where id = $2 and reverted_at is null`,
+        [owner, correctionId])
+      await client.query('commit')
+    } catch (e) { await client.query('rollback'); throw e }
+
+    return { status: 200, headers: HEADERS, jsonBody: { ok: true, merge_field: target.merge_field, text: result.text } }
+  } catch (e: any) {
+    return { status: 500, headers: HEADERS, jsonBody: { error: String(e?.message || e) } }
+  } finally { try { await client?.end() } catch {} }
+}
+
+app.http('artifactCorrectionsGet', { methods: ['GET', 'OPTIONS'], authLevel: 'anonymous', route: 'app/artifact/{artifactId}/corrections', handler: artifactCorrectionsGet })
+app.http('correctionRevert', { methods: ['POST', 'OPTIONS'], authLevel: 'anonymous', route: 'app/correction/{correctionId}/revert', handler: correctionRevert })
