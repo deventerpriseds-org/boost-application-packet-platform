@@ -35,6 +35,27 @@ const stripComments = (body) => body
   .replace(/\/\*[\s\S]*?\*\//g, ' ')
   .split('\n').map(l => l.replace(/(^|[^:])\/\/.*$/, '$1')).join('\n')
 
+/**
+ * The text of ONE `create table if not exists <name> ( ... );` block, and nothing else.
+ *
+ * Every schema assertion below needs this, and the two that did not have it were INERT. Both failed
+ * the same way and it is worth stating once: `SCHEMA_SQL` contains each constraint TWICE — inline on
+ * the CREATE TABLE, and again in the idempotent `alter table ... add constraint` that carries it to
+ * a database which already exists. A substring search over the whole string therefore cannot tell
+ * "inline on the create" from "in the alter", so deleting the inline one changed nothing and the
+ * guard passed. A `[\s\S]*?` span was worse: with the real column deleted it simply walked on to
+ * the NEXT table that had a column by that name and matched there.
+ * Verified by an independent verifier, 2026-08-20, who deleted each constraint in turn and watched
+ * NO TEST FAIL four times.
+ */
+const createTable = (schema, name) => {
+  const start = schema.indexOf(`create table if not exists ${name} (`)
+  assert.notEqual(start, -1, `no create table for ${name} — the scan has gone stale`)
+  const end = schema.indexOf('\n);', start)
+  assert.notEqual(end, -1, `unterminated create table for ${name}`)
+  return schema.slice(start, end)
+}
+
 // ---------------------------------------------------------------------------------------------
 // H1 — HTML entities were never decoded, so every &-term was invisible to matching.
 // Evidence: 872 of 1,230 live postings (71%) contain `&amp;`; "P&L" was present in 83 postings and
@@ -1197,4 +1218,400 @@ test('H33: every server-side body toggle has a caller that can send it', () => {
     assert.match(line, /opts\s*=\s*\{\}/, `${helper} takes no options argument — it cannot send regen`)
     assert.match(line, /opts\.regen/, `${helper} does not forward regen`)
   }
+})
+
+// -----------------------------------------------------------------------------------------------
+// H34 — the swap writer deleted the whole packet's provenance on every build, and swap_decision had
+// no pass dimension at all. Evidence: `appSwaps.writeSwaps` ran
+// `delete from swap_decision where packet_id=$1` unconditionally, and the table's unique key was
+// `(packet_id, list, seq)`. A remediation loop calling it on pass 2 therefore DESTROYED pass 1's
+// swap rows — the loop deleting its own justification for every change it had just made, and the
+// packet screen showing only the last pass's decisions as if they were the whole story.
+// The invariant, not the incident: any writer that clears provenance for a packet must scope the
+// clear to the pass it is rewriting.
+test('H34: provenance deletes are scoped to a pass, never to a whole packet', () => {
+  const offenders = []
+  for (const [file, body] of allSources()) {
+    const code = stripComments(body)
+    // The real construct: a DELETE from a provenance table keyed by packet alone.
+    const re = /delete\s+from\s+(swap_decision|skill_candidate|insertion)\s+where\s+([^`'"]*)/gi
+    let m
+    while ((m = re.exec(code))) {
+      const [, table, predicate] = m
+      if (!/\bloop\s*=/.test(predicate)) offenders.push(`${file}: delete from ${table} where ${predicate.trim().slice(0, 60)}`)
+    }
+  }
+  assert.deepEqual(offenders, [], 'a packet-wide provenance delete erases every earlier pass')
+})
+
+test('H34b: swap_decision and skill_candidate carry the pass in their key', () => {
+  // Asserted on the CREATE TABLE block ALONE. The first version searched the whole of SCHEMA_SQL and
+  // was inert three ways over: the unique also appears in the idempotent ALTER, and the two
+  // `[\s\S]*?` spans ran past the end of their table into the next one that happened to have a
+  // `loop int not null default 0` (the `escalation` table). All three passed with the column deleted.
+  const swap = createTable(src('schema.ts'), 'swap_decision')
+  const skill = createTable(src('schema.ts'), 'skill_candidate')
+  assert.match(swap, /unique \(packet_id, list, seq, loop\)/,
+    'without loop in the key, pass 2 overwrites pass 1 row for row')
+  assert.match(swap, /\n\s*loop\s+int not null default 0/, 'swap_decision must have a loop column')
+  assert.match(skill, /\n\s*loop\s+int not null default 0/,
+    'skill_candidate rows are the FK targets of swap_decision; deleting them packet-wide nulls the links')
+})
+
+// ---------------------------------------------------------------------------------------------
+// H35 — generation and RENDERING were the same function, so the only way to regenerate content was
+// to also issue a Drive `files/{id}/copy`. Evidence: `buildTemplatedArtifact` did both. A four-pass
+// remediation loop over the four templated artifacts would have created 16 Google files per packet,
+// and since there is no Drive DELETE anywhere in this codebase (D-9) 15 of them would be orphaned
+// on the quota-bearing OAuth account. X5 / P3-25: documents render ONCE, after the loop.
+test('H35: the remediation loop body contains no Drive call — rendering is a separate step', () => {
+  const loop = stripComments(src('appRemediation.ts'))
+  // The pass loop is everything between the `for (let pass` header and the render call that follows
+  // it. A Drive call inside that span is the 4N defect returning.
+  const start = loop.indexOf('for (let pass')
+  const end = loop.indexOf('renderArtifact(client, art, opp, pkg')
+  assert.ok(start > 0 && end > start, 'the loop and the single render call must both be present')
+  const body = loop.slice(start, end)
+  for (const call of ['copyTemplate', 'injectValues', 'buildTemplatedArtifact', 'googleapis.com/drive']) {
+    assert.ok(!body.includes(call), `${call} is reachable from inside the pass loop — that is 4N Drive copies`)
+  }
+})
+
+test('H35b: ensurePackage generates without rendering, so a pass can run without a Drive copy', () => {
+  const packets = stripComments(src('appPackets.ts'))
+  const start = packets.indexOf('export async function ensurePackage')
+  const end = packets.indexOf('export async function renderArtifact')
+  assert.ok(start > 0 && end > start, 'the two halves must be separate exported functions')
+  const gen = packets.slice(start, end)
+  for (const call of ['copyTemplate', 'injectValues', 'getGoogleOAuthToken']) {
+    assert.ok(!gen.includes(call), `ensurePackage still calls ${call}; generation and rendering are welded together again`)
+  }
+})
+
+// ---------------------------------------------------------------------------------------------
+// H36 — `insertion.loop` was DERIVED inside the writer as `max(loop) + 1`, so it counted document
+// RENDERS: every build advanced it, including a build that served a cached package and made zero
+// model calls. Three loop-ish counters already existed (`packet.round`, never incremented;
+// `insertion.loop`; `check_result.run_id`) and P3 wanted a fourth. Decision 14: give this one the
+// meaning P3 needs and let the CALLER own it — loop 0 is the baseline, 1..n are remediation passes.
+// The invariant: no provenance writer may invent a pass number for itself.
+test('H36: the pass number is supplied by the caller, never derived from max(loop)', () => {
+  const offenders = allSources()
+    .filter(([, body]) => /max\(loop\)/i.test(stripComments(body)))
+    .map(([f]) => f)
+  assert.deepEqual(offenders, [], 'a writer deriving its own pass number counts renders, not passes')
+
+  const ins = stripComments(src('appInsertions.ts'))
+  assert.match(ins, /const loop = Math\.max\(0, Number\(args\.loop \?\? 0\) \| 0\)/,
+    'writeInsertions must take the pass from its caller')
+  // ...and pass n's "before" must be pass n-1's "after", never its own.
+  assert.match(ins, /loop=\$2`, \[artifactId, loop - 1\]/, 'before_text must come from the PREVIOUS pass')
+})
+
+test('H36b: every loop/pass/round counter column has a writer — no dead counter', () => {
+  // The invariant, not the incident. `packet.round` was READ by loadPacket's ORDER BY and by
+  // packetShape and written by NOTHING, so it was always 1: the ordering was a no-op and the API
+  // reported round 1 forever. A counter nobody increments is worse than no counter, because every
+  // reader believes it. Decision 14 forbids adding a fourth beside two that already disagree; this
+  // asserts the general rule that any counter that EXISTS is advanced by something.
+  const schema = stripComments(src('schema.ts'))
+  const columns = [...new Set([...schema.matchAll(/^\s*(\w*(?:loop|pass|round)\w*)\s+int\b/gim)]
+    .map(m => m[1].toLowerCase()))]
+  const code = allSources().filter(([f]) => f !== 'schema.ts').map(([, b]) => stripComments(b)).join('\n')
+  const unwritten = columns.filter(c => {
+    if (c === 'loop') return false            // supplied by the caller on every insert (H36 above)
+    if (c === 'n') return false               // remediation_loop.n, inserted per pass
+    return !new RegExp(`set\\s+${c}\\s*=|\\b${c}\\s*=\\s*${c}\\s*\\+`, 'i').test(code)
+  })
+  assert.deepEqual(unwritten, [], 'a counter column that no code ever advances — readers will trust it anyway')
+})
+
+// ---------------------------------------------------------------------------------------------
+// H37 — `converged` is the one word a user trusts without reading anything else, so it must not be
+// storable by a writer that merely intends to be honest. The guard is structural: a CHECK that
+// refuses the word while anything is open, and a composite FOREIGN KEY into `check_result` so the
+// coverage state on the row cannot be ASSERTED — only copied from a check the engine really recorded
+// for that exact run. Evidence for why this is needed: `evaluateArtifact` writes check_result rows
+// keyed by run_id, and nothing else in the schema tied a summary row back to them.
+test('H37: converged is unforgeable in the schema, not just in the writer', () => {
+  const schema = src('schema.ts')
+  assert.match(schema, /check \(halt_reason is distinct from 'converged'\s*\n?\s*or \(cardinality\(remaining\) = 0 and close_state = 'pass'\)\)/,
+    'the converged CHECK is gone; the word becomes whatever the writer says')
+  assert.match(schema, /foreign key \(artifact_id, run_id, close_check_key, close_state\)\s*\n?\s*references check_result \(artifact_id, run_id, check_key, state\)/,
+    'without the composite FK, close_state is an assertion rather than a copy of a real check')
+  // The loop must be tied to the DOCUMENT-side check. `must_have_coverage` is computed from the
+  // owner's profile alone and no rewrite can move it, so binding convergence to it would make
+  // convergence unreachable and every run would halt having closed nothing.
+  assert.match(schema, /close_check_key text not null default 'evidence_placed' check \(close_check_key = 'evidence_placed'\)/,
+    'the loop is bound to a check other than evidence_placed')
+  // On check_result's OWN create block. Searching all of SCHEMA_SQL matched the idempotent ALTER
+  // instead, so this assertion could not fail while that ALTER existed — inert, and inert in the
+  // guard whose whole subject is a constraint that must be in two places at once.
+  assert.match(createTable(schema, 'check_result'), /unique \(artifact_id, run_id, check_key, state\)/,
+    'the FK needs this unique inline on check_result, for a database created from scratch')
+  // P3-38: going green by turning a failure into "nothing to check" is refused by the table.
+  assert.match(schema, /check \(not \(prev_close_state in \('warn','fail'\) and close_state = 'not_applicable'\)\)/,
+    'a judged state sliding to not_applicable is evidence disappearing, not placement being achieved')
+  // P3-11: a credited close requires an edit.
+  assert.match(schema, /check \(cardinality\(closed\) = 0 or cardinality\(edited_fields\) > 0\)/,
+    'a pass that rewrote nothing may credit nothing')
+})
+
+// ---------------------------------------------------------------------------------------------
+// H38 — the loop must not become a second definition of "covered". `checks.covers()` decides
+// `must_have_coverage`, which decides the GATE; if the loop implemented its own token-overlap rule
+// to decide what a pass closed, the two would drift and the loop would start claiming closes the
+// gate does not recognise. The predicate is exported from `checks.ts` and imported, once.
+test('H38: the loop decides coverage with the gate\'s predicate, never its own', () => {
+  const rem = stripComments(src('remediation.ts'))
+  assert.match(rem, /import \{[^}]*coversText[^}]*\} from '\.\/checks'/,
+    'the loop must import the gate\'s coverage predicate')
+  // The real construct of a home-grown re-implementation: a local overlap ratio.
+  assert.ok(!/COVERAGE_THRESHOLD\s*=/.test(rem), 'the loop redefined the coverage threshold')
+  assert.ok(!/hit\.length \/ toks\.length/.test(rem), 'the loop re-implemented the overlap rule')
+})
+
+// ---------------------------------------------------------------------------------------------
+// H39 — a composite FOREIGN KEY was declared against `check_result (artifact_id, run_id, check_key,
+// state)` while the UNIQUE that makes that tuple a legal FK target was added with the idempotent
+// alters at the FOOT of the same script. On a FRESH database that works (check_result carries the
+// constraint inline). On the LIVE database, where check_result has existed since P2 WITHOUT it,
+// `create table remediation_loop` aborts the whole migration with
+//   ERROR: there is no unique constraint matching given keys for referenced table "check_result"
+// — Postgres requires the UNIQUE at CREATE TABLE time, not by the end of the transaction.
+//
+// This is invisible to every test in this repo: there is no Postgres in the sandbox, so the schema
+// is never executed here. It is exactly the case CLAUDE.md's H-case rule reserves for a source
+// assertion — "structural rules a runtime test cannot express".
+//
+// The invariant, not the incident: for EVERY composite FK in SCHEMA_SQL, the constraint that makes
+// its target tuple unique must appear EARLIER in the script than the table that references it.
+test('H39b: a schema statement never depends on a column added later in the same script', () => {
+  // The general form of H39, and the reason it is stated generally: the FK was one instance, and
+  // executing SCHEMA_SQL against a real PostgreSQL 16.13 seeded with `main`'s schema turned up a
+  // SECOND — `create index swap_dec_packet_idx on swap_decision(packet_id, loop, ...)` referencing
+  // a `loop` column that the idempotent ALTER only added 350 lines further down. On a fresh database
+  // both were fine, because the inline CREATE TABLE carries the column. On an EXISTING one — which
+  // is every production database — `create table if not exists` is a no-op, the column is absent,
+  // and the statement aborts the whole migration:
+  //     ERROR:  column "loop" does not exist
+  // The invariant, not the incident: if a column is added by an idempotent ALTER, every statement
+  // that NAMES that column must come after the ALTER.
+  const whole = src('schema.ts')
+  const sql = whole.slice(whole.indexOf('SCHEMA_SQL = '))
+  const offenders = []
+  for (const m of sql.matchAll(/alter table\s+(\w+)\s+add column if not exists\s+(\w+)/g)) {
+    const [, table, col] = m
+    const addedAt = m.index
+    // Index creations are the statements that bit us; they name columns directly and run inline.
+    const idxRe = new RegExp(`create index if not exists \\w+ on ${table}\\s*\\(([^)]*)\\)`, 'g')
+    for (const ix of sql.matchAll(idxRe)) {
+      if (!new RegExp(`\\b${col}\\b`).test(ix[1])) continue
+      if (ix.index < addedAt) {
+        offenders.push(`index on ${table}(${ix[1].trim()}) at ${ix.index} names "${col}", which is only added at ${addedAt}`)
+      }
+    }
+    // ...and so do constraint additions that reference the column.
+    const conRe = new RegExp(`alter table ${table} add constraint \\w+ [^;]*?\\b${col}\\b[^;]*;`, 'g')
+    for (const c of sql.matchAll(conRe)) {
+      if (c.index < addedAt) offenders.push(`constraint on ${table} at ${c.index} names "${col}", only added at ${addedAt}`)
+    }
+  }
+  assert.deepEqual(offenders, [],
+    'a statement runs before the column it names exists — fine on a fresh database, fatal on every existing one')
+})
+
+test('H39: a composite FK\'s unique target is established before the table that references it', () => {
+  const whole = src('schema.ts')
+  const sql = whole.slice(whole.indexOf('SCHEMA_SQL = '))
+  const offenders = []
+  const fkRe = /foreign key \(([^)]+)\)\s*\n?\s*references (\w+) \(([^)]+)\)/g
+  let m
+  while ((m = fkRe.exec(sql))) {
+    const [, , table, cols] = m
+    const tuple = cols.split(',').map(c => c.trim())
+    if (tuple.length < 2) continue                 // a single-column FK may target a primary key
+    const fkAt = m.index
+    const inline = `unique (${tuple.join(', ')})`
+
+    // THE INLINE CONSTRAINT DOES NOT COUNT, and that is the whole point of this case. Every CREATE
+    // here is `create table if not exists`, so on a database where the referenced table ALREADY
+    // exists — production, for every table older than the current phase — the create is a no-op and
+    // its inline UNIQUE is never applied. Only an idempotent `alter table ... add constraint ...
+    // unique (...)` reaches an existing database, and Postgres wants the UNIQUE in place at CREATE
+    // TABLE time, so that alter must run BEFORE the table carrying the FK is created.
+    //
+    // The first version of this guard accepted the inline constraint and was therefore INERT: it
+    // passed with the defect deliberately reinstated. It is written this way because it was watched
+    // to fail.
+    const alterAt = (() => {
+      for (let i = sql.indexOf(`alter table ${table} add constraint`); i !== -1;
+           i = sql.indexOf(`alter table ${table} add constraint`, i + 1)) {
+        if (sql.slice(i, i + 400).includes(inline)) return i
+      }
+      return -1
+    })()
+    if (alterAt === -1) {
+      offenders.push(`FK into ${table}(${cols}): no idempotent "alter table ${table} add constraint ... ${inline}"`
+        + ` anywhere — a fresh database gets the inline UNIQUE, an existing one never does`)
+      continue
+    }
+    if (alterAt > fkAt) {
+      offenders.push(`FK into ${table}(${cols}) is declared at ${fkAt} but its idempotent unique only runs at ${alterAt}`
+        + ` — this aborts the whole migration on any database where ${table} already exists`)
+    }
+    // On the CREATE TABLE block, not on the whole script: the ALTER a few lines up contains this
+    // exact substring, so `sql.includes(inline)` matched it and the line could never fail. That is
+    // the same inertness this very case was rewritten to remove, reintroduced one line below it.
+    assert.match(createTable(sql, table), new RegExp(inline.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')),
+      `${table} should also carry ${inline} inline, for a database created from scratch`)
+  }
+  assert.deepEqual(offenders, [], 'a composite FK whose unique target is not established, for an EXISTING database, before it')
+})
+
+// ---------------------------------------------------------------------------------------------
+// H40 — a TypeScript union and the schema CHECK that STORES it drifted, and the drift was invisible
+// until the exact case it mattered.
+//
+// `HaltReason` gained `unattributed_coverage` — the guard that stops the loop claiming a convergence
+// nothing this run produced — and the CHECK on `remediation_loop.halt_reason` did not. Both TS
+// guards were live and correct: `decidePass` refused the claim and `appRemediation` assigned the
+// reason. Then the INSERT recording that refusal violated
+//     remediation_loop_halt_reason_check
+// so the packet was already mutated, NO ledger row existed at all, the phantom escalation written
+// for exactly this case was never reached, and the caller got a 500. The loop refused the claim in
+// memory and could not record the refusal.
+//
+// The invariant, not the incident: any TS union persisted into a CHECK must be SET-EQUAL to it, in
+// both directions. A member missing from the CHECK is an unstorable state; a member missing from the
+// union is a state nothing can produce and no reader expects.
+test('H40: every persisted union is set-equal to the CHECK that stores it', () => {
+  const sql = src('schema.ts')
+  const rem = src('remediation.ts')
+
+  // Read the CHECK's members off the column definition, not off the whole file: `in ('a','b')`
+  // appears in several constraints and matching the wrong one would compare two unrelated lists.
+  const checkMembers = (table, column) => {
+    const block = createTable(sql, table)
+    const m = new RegExp(`\\n\\s*${column}\\s+text[^\\n]*?check \\(${column} in \\(([^)]*)\\)\\)`).exec(block)
+    assert.ok(m, `no CHECK found for ${table}.${column} — the scan has gone stale`)
+    return new Set(m[1].split(',').map(x => x.trim().replace(/^'|'$/g, '')))
+  }
+  // ...and the union's members off its exported literal array, which is the list the code uses.
+  const unionMembers = (name) => {
+    const m = new RegExp(`export const ${name}[^=]*=\\s*\\[([\\s\\S]*?)\\]`).exec(stripComments(rem))
+    assert.ok(m, `no ${name} array found`)
+    return new Set([...m[1].matchAll(/'([a-z_]+)'/g)].map(x => x[1]))
+  }
+
+  const inCheck = checkMembers('remediation_loop', 'halt_reason')
+  const inUnion = unionMembers('HALT_REASONS')
+  const missingFromCheck = [...inUnion].filter(x => !inCheck.has(x)).sort()
+  const missingFromUnion = [...inCheck].filter(x => !inUnion.has(x)).sort()
+
+  assert.deepEqual(missingFromCheck, [],
+    'a halt reason the code can emit but the table refuses to store — the insert throws at exactly the moment the reason fires')
+  assert.deepEqual(missingFromUnion, [],
+    'a halt reason the table allows that no code produces — a state no reader expects and nothing can create')
+  // Guard against the scan silently matching nothing on both sides at once.
+  assert.ok(inUnion.size >= 11, `only ${inUnion.size} halt reasons found — the scan has gone stale`)
+})
+
+// ---------------------------------------------------------------------------------------------
+// H39c — H39b walks columns that HAVE an idempotent ALTER and checks nothing runs before it. A
+// column with NO ALTER AT ALL falls outside that loop entirely, and that is the case that shipped.
+//
+// The retarget renamed three columns and added a fourth INSIDE `create table if not exists`, with no
+// ALTER. Proven by execution on a seeded cluster: seed main -> apply the pre-retarget revision ->
+// apply the retarget. The migration EXITS 0 AND REPORTS CLEAN, and the table still carries
+// must_have_check_key with the FK bound to it. The first INSERT the loop makes then dies with
+//     ERROR: column "close_state" does not exist
+// Every guard passed. Only running it found this.
+//
+// The invariant: a column the code WRITES must be reachable on an EXISTING database, not merely
+// present in the CREATE. Scoped to the tables this lane created and has already shipped a revision
+// of — a blanket rule over every table in the file would fire on columns that have only ever had
+// one shape, which is the cry-wolf failure this file exists to avoid.
+test('H39c: every column this lane CHANGED is reachable on an existing database', () => {
+  const sql = src('schema.ts')
+  const app = stripComments(src('appRemediation.ts'))
+
+  // SCOPED TO THE COLUMNS THAT CHANGED, and deliberately not to every column in the table. A rule
+  // over all columns fires on ones that have only ever had a single shape — the cry-wolf failure
+  // this file exists to prevent; the first version of this case did exactly that, naming eleven
+  // healthy columns. The general form ("does this column exist on a database built from an earlier
+  // revision") cannot be answered from one source snapshot at all. It is answered by EXECUTION
+  // instead: see CLAUDE.md — seed main's schema, apply the previous revision, apply this one. That
+  // is how F2 was found, and no source guard would have found it.
+  const CHANGED = [
+    'close_check_key', 'close_state', 'prev_close_state',   // renamed from must_have_*
+    'coverage_state', 'profile_evidence', 'superseded_doc_url',
+    'cleared_override_by', 'cleared_override_at', 'cleared_override_reason',
+  ]
+  const offenders = []
+  for (const col of CHANGED) {
+    const reachable = new RegExp(`alter table remediation_loop\\s+add column if not exists\\s+${col}\\b`).test(sql)
+      || new RegExp(`rename column \\w+ to ${col}\\b`).test(sql)
+    if (!reachable) offenders.push(`remediation_loop.${col}`)
+    // ...and it must be in the CREATE too, or a fresh database lacks it.
+    assert.match(createTable(sql, 'remediation_loop'), new RegExp(`\\n\\s*${col}\\s`),
+      `${col} is reachable by ALTER but absent from the CREATE — a fresh database would not have it`)
+  }
+  assert.deepEqual(offenders, [],
+    'a column this lane renamed or added exists only in the CREATE — on a database where the table '
+    + 'already exists, "create table if not exists" skips it and every INSERT naming it fails')
+
+  // A staleness anchor: close_state IS written on every ledger insert, so if it ever stops being
+  // named there this list has drifted from the code. close_check_key is deliberately NOT checked —
+  // it carries a DEFAULT and the writer never names it, which is correct.
+  assert.ok(app.includes('close_state'), 'close_state is not written by appRemediation — the CHANGED list is stale')
+})
+
+// ---------------------------------------------------------------------------------------------
+// H39d — the same class for a CONSTRAINT rather than a column, and it is how F1's fix was inert.
+//
+// Adding 'unattributed_coverage' to the halt_reason CHECK in the CREATE fixes a FRESH database only.
+// On one that already ran an earlier revision the create is skipped, the 10-member CHECK survives,
+// and the insert still throws — while H40 passes, because H40 reads the SOURCE, not the database.
+// A constraint whose membership can change needs an idempotent replacement exactly as a column does.
+test('H39d: EVERY named CHECK on remediation_loop has an idempotent replacement', () => {
+  // Not "the one that bit us" — all of them. Three separate constraints on this table kept a stale
+  // expression on an upgraded database, and the third was found only by executing the migration:
+  //   halt_reason   kept 10 members, so the loop could not persist its own refusal
+  //   close_check_key  stayed bound to must_have_coverage
+  //   check4        stayed `prev = 'fail'`, blind to 'warn' — which is how evidence_placed reports
+  //                 failure, so the evidence-removal guard was off on exactly the databases it protects
+  // A CHECK inside `create table if not exists` is skipped wholesale on a database that already has
+  // the table, so its ORIGINAL expression is the one that runs, forever. Naming every constraint is
+  // what makes a replacement possible; asserting every named one is replaced removes the class.
+  const sql = src('schema.ts')
+  const create = createTable(sql, 'remediation_loop')
+  const named = [...create.matchAll(/constraint (remediation_loop_\w+)\s*\n?\s*check/g)].map(m => m[1])
+  assert.ok(named.length >= 5, `only ${named.length} named CHECKs found on remediation_loop — the scan has gone stale`)
+
+  const missing = named.filter(c => {
+    const dropped = sql.includes(`alter table remediation_loop drop constraint if exists ${c};`)
+    const readded = new RegExp(`alter table remediation_loop add constraint ${c}\\s*\\n?\\s*check`).test(sql)
+    return !(dropped && readded)
+  })
+  assert.deepEqual(missing, [],
+    'a CHECK exists only in the CREATE — a database that already has the table keeps its original expression forever')
+
+  // The COLUMN-LEVEL checks are a second form and were the two that actually bit: `halt_reason text
+  // check (...)` and `close_check_key text ... check (...)`. They get auto-names too, so they need
+  // the same replacement, and matching only the `constraint <name> check` form would have missed
+  // both of them — which is how the first version of this case passed while halt_reason was stale.
+  for (const col of ['halt_reason', 'close_check_key']) {
+    assert.match(create, new RegExp(`\\n\\s*${col}\\s+text[^\\n]*check \\(${col} `),
+      `${col} has no inline CHECK in the CREATE — a fresh database would not constrain it`)
+    assert.ok(sql.includes(`alter table remediation_loop drop constraint if exists remediation_loop_${col}_check;`)
+      && new RegExp(`alter table remediation_loop add constraint remediation_loop_${col}_check\\s*\\n?\\s*check`).test(sql),
+      `${col}'s column-level CHECK has no idempotent replacement — an upgraded database keeps the original members forever`)
+  }
+
+  // ...and no ANONYMOUS table-level check may be added back, because an auto-named one cannot be
+  // dropped by a stable name and so cannot be replaced at all.
+  const anon = [...create.matchAll(/\n\s{2}check \(/g)]
+  assert.equal(anon.length, 0,
+    'an anonymous CHECK on remediation_loop — it gets an auto-name like remediation_loop_check4 and becomes unreplaceable')
 })

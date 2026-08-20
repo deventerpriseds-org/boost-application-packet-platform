@@ -74,6 +74,70 @@ mismatch silently blanks the setting).
 Claude Code sandbox** — the egress proxy blocks `azurewebsites.net` and DB
 credentials are not available as env vars here. Use GitHub Actions instead.
 
+> **But the sandbox DOES have a local PostgreSQL.** This distinction cost a
+> near-miss and is the reason for the section below. "Cannot reach the LIVE
+> database" is true; "there is no Postgres here" is false, and reading the first
+> as the second means schema work never gets executed at all.
+
+### Run the schema locally — a schema change is not verified until it is EXECUTED (strict rule)
+
+The container ships **PostgreSQL 16.13** (`/usr/bin/psql`, `/usr/lib/postgresql/16`).
+`SCHEMA_SQL` can and must be run against it before any schema change is called done.
+
+**The rule, and it is not optional:**
+
+> **A schema change is not verified until it has been executed against a POPULATED database
+> with the previous schema already applied.** Fresh-database success proves almost nothing,
+> because every `create table if not exists` is skipped on the database you actually care
+> about — taking its inline constraints, columns and indexes with it.
+
+This is not theoretical. Two migration-killing defects were found this way in one file, and
+**neither was visible by reading**, both passed on a fresh database, and both would have
+aborted the entire migration on production:
+
+- a composite `foreign key` whose `UNIQUE` target was only added by an idempotent `ALTER`
+  further down the file → `ERROR: there is no unique constraint matching given keys`
+- a `create index ... (packet_id, loop, ...)` naming a column an idempotent `ALTER` added
+  350 lines later → `ERROR: column "loop" does not exist`
+
+`H39`/`H39b` encode the general invariant: **any statement naming a column or constraint added
+by an idempotent ALTER must come after that ALTER.**
+
+```bash
+# initdb refuses to run as root — use the postgres user.
+rm -rf /tmp/pgd /tmp/pgsock && mkdir -p /tmp/pgd /tmp/pgsock && chown -R postgres /tmp/pgd /tmp/pgsock
+su postgres -c "/usr/lib/postgresql/16/bin/initdb -D /tmp/pgd -U postgres -A trust"
+su postgres -c "/usr/lib/postgresql/16/bin/pg_ctl -D /tmp/pgd -o '-p 55432 -k /tmp/pgsock -c listen_addresses=' -l /tmp/pg.log start"
+export PGHOST=/tmp/pgsock PGPORT=55432 PGUSER=postgres
+
+# Dump SCHEMA_SQL from the built module (never hand-copy it).
+cd api && npm run build
+node -e "import('./dist/functions/tests/schema.js').then(m=>require('fs').writeFileSync('/tmp/schema.sql', m.SCHEMA_SQL))"
+
+# pgvector is NOT installed here. Stub it — the rest of the schema still executes for real.
+sed 's/^create extension if not exists vector;/-- stubbed/' /tmp/schema.sql \
+  | sed 's/vector(1536)/text/g; /using hnsw (embedding vector_cosine_ops)/d' > /tmp/schema_nv.sql
+
+# main's SCHEMA_SQL, extracted from the file rather than from a build of your own branch.
+git show origin/main:api/src/functions/tests/schema.ts > /tmp/main_schema.ts
+python3 - <<'EOF'
+s = open('/tmp/main_schema.ts', encoding='utf-8').read()
+i = s.index('SCHEMA_SQL = `') + len('SCHEMA_SQL = `')
+open('/tmp/schema_main.sql', 'w', encoding='utf-8').write(s[i:s.index('\n`;', i)])
+EOF
+sed 's/^create extension if not exists vector;/-- stubbed/' /tmp/schema_main.sql \
+  | sed 's/vector(1536)/text/g; /using hnsw (embedding vector_cosine_ops)/d' > /tmp/schema_main_nv.sql
+
+# THE TEST THAT MATTERS: apply main's schema, seed rows, then apply yours ON TOP.
+psql -c "create database upg" postgres
+psql -v ON_ERROR_STOP=1 -q -d upg -f /tmp/schema_main_nv.sql     # main's SCHEMA_SQL
+psql -q -d upg -c "insert into ..."                              # seed a few real rows
+psql -v ON_ERROR_STOP=1 -q -d upg -f /tmp/schema_nv.sql          # YOURS — exit 0 or it is broken
+```
+
+`ON_ERROR_STOP=1` is required: without it `psql` reports success having skipped every
+statement after the first error.
+
 ### Query the live DB
 Trigger `.github/workflows/db-query.yml` via `workflow_dispatch` (it's on `main`).
 The default SQL is `SELECT stage, COUNT(*) FROM opportunity GROUP BY stage`.

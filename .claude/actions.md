@@ -1862,3 +1862,310 @@ covers", which is no longer what it measures ("evidenced by your profile" is). T
 (SPEC §4.1, ACs 42-50) is served by the API — `GET /api/app/opportunity/{id}/requirements` now
 returns `evidenced`, `evidence{quote,sourceKind,sourceLabel,...}` and `evidenceNote` per row — but the
 disclosure control itself is P5.4/P8.7 territory and is not built here.
+
+
+## ACT — P3 remediation loop built (PR #14, `claude/qc-p3-remediation`, 2026-08-20)
+
+**Not landed, not deployed, not confirmed live.** 313 assertions green in the sandbox; the sandbox
+has no Postgres, no Drive and no Function, so every criterion needing them is `not_applicable`.
+
+**The gate, honestly:** ACs written COLD by an independent agent before any P3 code existed — the
+surviving fragment is `docs/qc-evidence/P3-ACCEPTANCE.md` on `main`, and the full P3-01..P3-46 list
+was reconstructed by a second independent agent on branch `claude/qc-p3-ac`. An independent verifier
+session was run against the branch. **No `Agent`/`Task` tool was exposed in this lane's harness**, so
+both were spawned as separate CCR sessions that pushed their output to branches — auditable, and
+genuinely cold, but worth knowing the mechanism differed.
+
+**X2 re-verified rather than assumed.** The plan says `appPackets.ts` hardcodes `regen=false`. It
+does not: `regen` is read from the body at `:382/457/558`, honoured at `:319`, and
+`PacketBuilder.jsx:584` sends it. The plan text is stale; recorded there.
+
+**Six defects found, each fixed in the same commit as its H-case, and each guard watched to FAIL
+with the fix reverted before it was kept:**
+
+| ID | The defect | Why it mattered |
+|---|---|---|
+| H34 | `writeSwaps` ran `delete from swap_decision where packet_id=$1` on every build, and the table had no `loop` column | pass 2 destroyed pass 1's swap record — the loop deleting its own justification for every change it had just made |
+| H35 | generation and rendering were one function | 4 passes x 4 templated artifacts = 16 Drive copies per packet, and there is no Drive `DELETE` anywhere in this codebase, so 15 would be orphaned on the quota-bearing OAuth account |
+| H36 | `insertion.loop` derived as `max(loop)+1` INSIDE the writer | it counted document RENDERS, advancing even on a cache hit that made zero model calls. The same guard caught `packet.round`: read by `loadPacket`'s ORDER BY and by `packetShape`, written by nothing, so the ordering was a no-op and the API reported `round: 1` forever |
+| H37 | `converged` was a word the writer could simply choose | now a table CHECK plus a composite FK into `check_result`, so the coverage state on a loop row can only be COPIED from a check the engine really recorded |
+| H38 | the loop could have grown a second definition of "covered" | `checks.covers()` decides the GATE; a second implementation drifts, and the day it drifts the loop claims closes the gate does not recognise |
+| H39 | **the composite FK's UNIQUE target was added at the FOOT of `SCHEMA_SQL`** | Postgres wants it at CREATE TABLE time, so `create table remediation_loop` **aborts the entire migration on any database where `check_result` already exists — i.e. production**. A fresh DB was fine. No test here could catch it: the schema is never executed in the sandbox |
+
+Plus one found while reviewing: a SECOND loop run restarted numbering at `n=1` and would have
+upserted over the first run's ledger — the H28 defect one table over, and worst exactly where it is
+least visible, because resolving an escalation reopens the loop, making the second run the normal
+case rather than the edge case. `nextPassNumber` continues the ledger.
+
+**The lesson worth keeping: H33's first version was INERT.** It passed with the defect deliberately
+reinstated, because it accepted `check_result`'s *inline* UNIQUE as proof the target existed. On an
+existing database `create table if not exists` skips the create and the inline constraint with it, so
+the inline form proves nothing. **Only the revert-proof caught it.** A guard that cannot fail is
+worse than no guard, and writing one is easy enough to do by accident that reverting every fix to
+watch its test go red is not ceremony — it is the only thing that distinguishes a guard from a
+comment.
+
+**Departures from the acceptance list, each recorded in the commit:**
+- `requirement.closed_on_loop` dropped rather than written (plan decision 16 — one `int` on a
+  per-OPPORTUNITY row cannot express per-ARTIFACT coverage, and "covered in the resume but not the
+  cover letter" is the normal case). Zero writers, zero readers, so nothing depended on it.
+- Loop escalations get their own table (decision 15): `requirement.coverage='escalated'` is already
+  set at EXTRACTION and means "the quote could not be located in the posting".
+- The cleared-override record (decision 19) lives on `remediation_loop`, NOT on `artifact_gate`.
+  `evaluateArtifact` clearing an override is deliberate and correct for a MANUAL re-check; the LOOP
+  is what turns one considered clear into four silent ones, so the loop carries the record and
+  `appChecks.ts` (another lane's file) is untouched.
+
+**Deliberately NOT claimed:** P3-45 (the Passes tab) — P5 is unmerged and `ui-verify.mjs` cannot
+click or assert absence. P3-21/25's live half — blocked on `diagFolders` listing the packet output
+folder `1MlVLMSQ0EQJoAtpKC1Mv7mDCAJDmdJTt`. P3-40 (posting figures) — that is P8.2's `figureEcho`.
+
+**Open follow-up for the P5/P8.7 lane:** `app/src/qcRail.js:423` and `:599` read the FULL
+`swaps`/`insertions` arrays as though they were one pass. That double-counts the moment a second pass
+exists, which P3 makes routine. Both endpoints now also return a `current` array (latest pass only)
+and a `passes` list so the UI can be corrected without guessing.
+
+
+## ACT — the P3 verifier disproved eight claims; four were real defects (2026-08-20)
+
+An independent verifier (`docs/qc-evidence/P3-VERIFICATION.md`, branch `claude/qc-p3-verify`) ran
+against the branch, applied mutations, and executed the schema. It disproved **eight** claims. Four
+were defects in the code or its guards and are fixed; the rest are recorded below as open.
+
+### The finding that changes how this repo verifies schema work
+**This container ships PostgreSQL 16.13.** `CLAUDE.md` says the sandbox cannot reach the live Azure
+database — true — and that was carried over as "there is no Postgres here," which is false and was
+never tested. A throwaway cluster is one `initdb` away (as an unprivileged user; `initdb` refuses to
+run as root). Executing `SCHEMA_SQL` against a database seeded with `main`'s schema **immediately
+found a second migration-killing defect that reading had not**:
+
+```
+psql:schema.sql:367: ERROR:  column "loop" does not exist
+P3 tables created: 0
+```
+`create index ... on swap_decision(packet_id, loop, ...)` named a column the idempotent ALTER only
+added 350 lines later. Fresh database fine; every existing database dead. Same class as the FK
+ordering bug, second instance in one file — so **H39b** generalises the guard from "composite FK
+targets" to "any statement naming a column added later in the same script."
+
+**Standing rule from this: a schema change is not verified until it has been EXECUTED against a
+populated database with the previous schema already applied.** Fresh-database success proves almost
+nothing, because every `create table if not exists` is skipped on the database you actually care
+about. The upgrade path is now proven: `BRANCH exit=0`, both P3 tables created, `check_result` gains
+its second unique, existing rows preserved.
+
+### Three of my guards were INERT — they passed with their defect reinstated
+- **H34b** (all three assertions): `unique (packet_id, list, seq, loop)` occurs TWICE in `SCHEMA_SQL`
+  (inline and in the idempotent ALTER), so deleting the inline one still matched; and two
+  `[\s\S]*?` spans ran past the end of their own table and matched the NEXT table that had a
+  `loop int not null default 0`.
+- **H37's FK-target line and H39's "fresh database" line**, same cause. H39's was added by the very
+  commit that says an inert guard "is worse than none" — reintroduced one line below the fix.
+- All now assert on a bounded `createTable()` slice, revert-proven.
+
+### A guard that tested spelling, not behaviour
+**H38** grepped for `COVERAGE_THRESHOLD =` and the literal `hit.length / toks.length`. The verifier
+evaded it in one move: a second coverage rule named `localCovers` at threshold 0.5, wired into the
+credit decision. The grep passed and all 37 behavioural tests passed, with the loop and the gate
+disagreeing about what "covered" means. **P3-15 now pins `creditClosures` itself to the gate** across
+inputs measured to make a 0.5 rule and the gate's 0.7 disagree — in both directions, so it cannot
+pass by never crediting anything either.
+
+### The one that mattered most: the loop could still SAY it converged
+The P3-11 guard protects the `closed[]` COLUMN and does it correctly. It does not protect the
+SENTENCE. Demonstrated on the real compiled functions: a pass rewrites one unrelated field, credits
+nothing, records a phantom; the whole-document predicate reports the requirement covered, `remaining`
+empties, and the run tells the user *"Converged after 1 pass(es): every must-have requirement is
+covered."* **Refusing the credit is not refusing the claim.** `converged` now additionally requires
+that nothing left the open list unattributed — refused in `decidePass` (new halt reason
+`unattributed_coverage`) AND recomputed in `reportedOutcome`, so a bad row cannot talk the sentence
+into existence. A phantom-flipped requirement also used to sit in NEITHER `closed` nor `remaining`
+and got no escalation (P3-07); it now raises one saying plainly that the run cannot say what covered
+it.
+
+### Also fixed
+- **D-4** — `model`, `maxTokens`, `temperature` and the profile truncation were code-only literals
+  while only the four ceilings were owner-owned. All four are now on `owner_search_prefs`. "No
+  hardcoded config" is not satisfied by owning the ceilings and baking in what the model is.
+- **D-5** — `escalationResolve` REFUSES a resolution without evidence and tells the user "the loop
+  re-runs against it". The evidence was stored and **read by nothing**: three writes, zero reads. The
+  next run mined the same profile that had already failed. It now reaches the scoped prompt, scoped
+  to the requirements still open.
+
+### Still open, recorded not fixed
+- **D-6** — P3-09 ("no row with `n > max` for that packet") and P3-33 ("a resolution continues the
+  ledger at `max(n)+1`") are contradictory as written. The implementation follows P3-33 and the
+  ceiling is per-RUN. Neither acceptance document reconciles them; this needs an owner decision, not
+  a code change.
+- **P3-07's union property** is still false by construction: a phantom flip is in neither list. It is
+  now visible (`phantom_closes` + an escalation) rather than silent, but the stated invariant does
+  not hold and the criterion should be reworded to match.
+- `STRUCTURAL_FIELDS` stays code-only deliberately: rewriting `@Company` breaks `company_named`, so
+  it is a correctness invariant rather than a preference.
+
+### The discipline that caught all of it
+Every fix above was revert-proven — the fix removed, the test watched to FAIL, the fix restored.
+That is the only step that separates a guard from a comment, and it caught two inert guards of mine
+in one session. One D-4 revert was attempted with a `sed` that silently failed to match; the "pass"
+that produced was recorded as **no evidence**, not as a proof, and redone with an asserting Python
+mutation. A mutation that did not apply proves nothing.
+
+
+## ACT — BLOCKING: P3's closing mechanism is inert against the post-C6 gate (2026-08-20)
+
+Found at merge time by the P3-15 agreement test, which is exactly what it was written for.
+
+P8.3 landed **C6** and `must_have_coverage` no longer reads the generated document. Measured on the
+merged engine, not inferred:
+
+```
+document restates the requirement VERBATIM, no evidence rows   -> not_applicable
+document restates the requirement VERBATIM, req unevidenced    -> fail
+document is "I enjoy sailing and baking bread", req evidenced  -> pass
+```
+
+**P3's loop closes requirements by rewriting merge fields. No rewrite can move that gate.** As built
+the loop will rewrite, observe zero closes, halt `no_progress` after one pass and escalate
+everything. It invents nothing, renders once, and reports honestly — it simply cannot close
+anything. Landing it is not harmful; presenting it as a working remediation loop would be false.
+
+Neither lane is wrong. C6 is deliberate and is the more honest model (R2: evidence or escalate). P3
+was designed against the pre-C6 gate. The likely resolution is that the loop's job becomes surfacing
+profile evidence that EXISTS but was not resolved — `profileEvidenceFor` already computes exactly
+that (P3-18) — and escalating the rest, i.e. the loop writes evidence rows rather than merge fields.
+**That is a redesign of the closing mechanism and it is NOT done. Owner decision needed.**
+
+Pinned as three tests (`P3-15 CONFLICT` / `P3-15 CONSEQUENCE`) so that whichever way the models are
+reconciled, the change fails a test that names what moved rather than silently un-breaking or
+further breaking the loop.
+
+
+## ACT — the C6 "blocker" was a retarget, not a redesign (2026-08-20)
+
+I reported P3 as blocked by P8.3's C6. The analysis was right and the conclusion was one step too
+far: **C6 split coverage into two numbers on purpose, and P3 was pointed at the wrong one.**
+
+| check | question | can a merge-field rewrite move it? |
+|---|---|---|
+| `must_have_coverage` | does the owner's PROFILE evidence this requirement? | **No** |
+| `evidence_placed` | is every profile-evidenced requirement actually STATED in this document? | **Yes** |
+
+`evidence_placed` is the document-side half P8.3 built for exactly this purpose. The loop now targets
+it (`CLOSE_CHECK_KEY`), and `remediation_loop`'s composite FK binds to it. `must_have_coverage` is
+carried as `coverage_state` for reporting only, in no constraint — binding convergence to a check the
+loop cannot move would make convergence unreachable.
+
+**The lesson is the near-miss.** I was about to propose redesigning another lane's model when the
+affordance already existed, one function below the one I was reading. "Extend, don't duplicate" is
+usually cited against building a parallel system; this is the same rule one step earlier — before
+declaring a blocker, read what the other lane actually built. The escalation was still correct: I
+reported it and stopped rather than redesigning unilaterally, and that is what surfaced the answer.
+
+Four things that made the retarget non-trivial, each now an invariant rather than prose:
+- `evidence_placed` reports failure as **`warn`**, not `fail`. Reading `fail` alone would have left
+  the loop seeing no work at all, and P3-38's evidence-removal guard blind. The open list is read
+  from any judged non-pass state; the guard is `('warn','fail') -> not_applicable`.
+- `placeable` excludes rows under `MIN_JUDGEABLE_TOKENS`. Those are in neither numerator nor
+  denominator — counting them either way is the laundering defect the coverage check was fixed for.
+- A requirement the profile does not evidence is not the loop's to close. It escalates unchanged.
+- The `unattributed_coverage` guard carried across untouched: refusing the credit is not refusing
+  the claim, and that holds for placement exactly as it did for coverage.
+
+The three pinned tests were INVERTED rather than deleted: they used to record that the loop was
+blocked; they now fail if the loop is ever pointed back at `must_have_coverage`, and one asserts the
+premise directly — a rewrite must move the check the loop targets.
+
+**Proven against PostgreSQL 16.13 on a populated upgrade**, not asserted: forged `run_id` refused by
+the FK; `converged` with a non-empty `remaining` by check2; binding to `must_have_coverage` by the
+`close_check_key` CHECK; crediting a close with no edited field by check3. Only the legitimate row
+was stored.
+
+### P7 item 6 landed with this lane
+`buildPackageForJD` has always returned `warnings` and `qcApplied`; `appPackets` read neither, so a
+build that lost a section to an unmapped title or whose ATS-QC call returned empty reported
+`ok: true`. Worse, `packetBuildAll` returned `ok: true, note: 'Packet built.'` **even when every
+artifact threw** — the per-artifact error was in the payload, but the one field a caller checks said
+success. `ok` now means "every artifact built, and none with a warning", and the note names what
+failed.
+
+### CLAUDE.md corrected
+The "no Postgres in the sandbox" assumption is now explicitly corrected in CLAUDE.md, with the
+standing rule and a runnable recipe: **a schema change is not verified until it has been executed
+against a POPULATED database with the previous schema already applied.**
+
+
+## ACT — the retarget verifier found four defects; two were severe, and one class recurred three times (2026-08-20)
+
+An independent verifier reinstated the defect behind **every** guard added in the retarget — 20
+mutations, 16 fired. Four findings. Fixed on `claude/qc-p3-remediation`, all revert-proven.
+
+### F1 — the best guard in the lane could not persist its own refusal
+`HALT_REASONS` had 11 members; the schema CHECK had 10. `unattributed_coverage` — the guard that
+stops the loop claiming a convergence nothing this run produced — was missing. Both TS guards were
+live and correct, so at the exact moment the loop refused the claim, the INSERT recording that
+refusal violated `remediation_loop_halt_reason_check`: packet already mutated, **no ledger row at
+all**, the D-7 phantom escalation never reached, 500 to the caller.
+
+**H40** now asserts the TS union and the CHECK are SET-EQUAL in both directions. Revert-proven both
+ways (member removed from the CHECK; member removed from the union).
+
+### F2 — H39's own class, on H39's own table, three times over
+The retarget renamed three columns and added a fourth *inside* `create table if not exists`, with no
+ALTER. On a database that ran the previous revision the create is skipped: **migration exits 0,
+reports clean**, table keeps `must_have_check_key`, and the first INSERT dies with
+`column "close_state" does not exist`. H39b only walks columns that HAVE an ALTER, so a column with
+none fell outside its loop entirely.
+
+Then the same class twice more, each found ONLY by executing the migration:
+- the `halt_reason` CHECK: fixing it in the CREATE fixes a FRESH database only. H40 passed the whole
+  time, because H40 reads the source.
+- `check4`: after the rename it read `prev_close_state = 'fail'` on an upgraded database and
+  `prev_close_state in ('warn','fail')` on a fresh one. Since `evidence_placed` reports failure as
+  **`warn`**, the evidence-removal guard was switched off on exactly the databases it protects.
+
+And one inside the fix itself: the do-block's `exception when duplicate_object` **silently aborted
+every remaining statement**. On one upgrade path two constraints already existed, the block died
+there, and `halt_reason` was never replaced — migration exit 0 throughout. That is
+absent-evidence-reads-as-success, in PL/pgSQL. Every statement now drops before it adds, and only
+`undefined_table` is swallowed.
+
+**Every CHECK on `remediation_loop` is now named and unconditionally replaced.** Naming is what makes
+replacement possible — an anonymous constraint gets an auto-name and can never be dropped by a stable
+one. **H39c** (columns this lane changed are reachable on an existing database) and **H39d** (every
+named CHECK *and* both column-level CHECKs have an idempotent replacement; no anonymous CHECKs)
+encode it. Both revert-proven.
+
+**Proven by execution across five migration paths** — fresh, `main→HEAD`, `main→895→HEAD`,
+`main→e5e→HEAD`, `main→895→e5e→HEAD`, and HEAD applied twice — all exit 0 and all reach a constraint
+set **identical to a fresh database**. That equality is the invariant worth keeping: a fresh database
+and an upgraded one must enforce exactly the same rules, and diffing `pg_constraint` between the two
+is how you check it.
+
+### F3 — the tooThin exclusion laundered a pass
+Two evidenced must-haves, one judgeable and present, one under `MIN_JUDGEABLE_TOKENS` and **absent**
+from the document → `evidence_placed: pass`, `converged: true`, and the user read *"every requirement
+the profile evidences is now stated in this document."* The `(1 too short to judge either way)`
+caveat lived in `decidePass`'s detail and `reportedOutcome` dropped it. No escalation: both loops
+iterate empty lists.
+
+The claim is now qualified **at its source** — "every requirement the profile evidences AND the
+placement check could judge" — the count is carried on `Outcome.unjudged`, the caveat reaches every
+summary including halted ones, and each unjudgeable requirement raises its own escalation saying a
+human has to read it. `unjudgeableSeqs` uses `itemTokens` and `MIN_JUDGEABLE_TOKENS`, the engine's
+own function and constant, so the loop's idea of "unmeasurable" cannot drift from the check's.
+
+### F4 — all three P7-6 guards were inert, and backwards
+Forcing `failed`/`warned` empty while keeping the literal `ok:` expression → 396/396 passed with the
+defect verbatim. Emptying `built.warnings` → 396/396 passed. RENAMING `failed` to `bad` with
+identical behaviour → failed. They tested spelling and ignored behaviour — **the second time in this
+lane a grep-shaped guard was evaded by a rename, in code written after that lesson.**
+
+The claim logic is lifted into `packetBuild.summariseBuild` (pure: no @azure/functions, no pg, no
+network — the `checks.ts` / `appChecks.ts` split) and tested with real inputs. Re-running the
+verifier's three mutations now: evasion 1 fails 4 tests, evasion 2 fails 1, and the rename stays
+green. Exactly inverted.
+
+### The standing lesson
+A guard written *to* a lesson can still be inert — F4 is the proof. And three of the four findings
+share one root: **source-reading guards cannot see what a database already has.** The only thing that
+found them was running the migration against a populated database that had the previous revision.
