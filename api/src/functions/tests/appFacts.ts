@@ -38,8 +38,14 @@ async function sourceText(): Promise<{ text: string; sources: string[] }> {
     const ctx = TableClient.fromConnectionString(CONN, 'MasterContext')
     let mc: any = {}
     for await (const e of ctx.listEntities({ queryOptions: { filter: "PartitionKey eq 'context'" } })) mc = e
-    const blocks = ['workHistory1', 'workHistory2', 'workHistory3', 'workHistory4', 'coreAccomplishments', 'executiveProfile', 'resumeSummary']
-      .map(k => String(mc?.[k] || '')).filter(Boolean)
+    // EVERY profile block except the do-not-use list. The first pass read only work history and the
+    // prose blocks and missed certifications that live in the skills/expertise pools — a cert stated
+    // in `softHardSkillsPool` is just as much a fact about the owner as one in the resume template.
+    // `itemsToOmit` stays excluded: it is what the owner has banned, so reading facts out of it
+    // would record a banned item as something they hold.
+    const blocks = Object.entries(mc || {})
+      .filter(([k, v]) => typeof v === 'string' && k !== 'itemsToOmit' && !k.startsWith('odata') && !['partitionKey', 'rowKey', 'etag', 'timestamp'].includes(k))
+      .map(([, v]) => v as string).filter(Boolean)
     if (blocks.length) { parts.push(blocks.join('\n\n')); sources.push(`MasterContext (${blocks.length} blocks)`) }
   } catch (e) { sources.push(`MasterContext UNREADABLE: ${String((e as any)?.message || e)}`) }
 
