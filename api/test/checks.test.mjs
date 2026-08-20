@@ -156,6 +156,40 @@ test('a posting with requirements but no must-haves is not_applicable, not pass'
   assert.equal(find(runChecks({ type: 'resume', pkg: RESUME_FULL, requirements: reqs }), 'must_have_coverage').state, 'not_applicable')
 })
 
+test('eligibility preconditions are surfaced, not scored as uncovered coverage', () => {
+  // Live Trinnex must-have: "Reside in the East Coast of the United States". No resume can evidence
+  // where someone lives; scoring it guarantees a permanently red gate, and an always-red gate is one
+  // people learn to ignore.
+  const reqs = [
+    { seq: 0, verbatim: 'Reside in the East Coast of the United States', item_text: '', kind: 'must_have' },
+    { seq: 1, verbatim: 'must be a U.S. Citizen or Green Card Holder', item_text: '', kind: 'must_have' },
+    { seq: 2, verbatim: 'Active Secret security clearance required', item_text: '', kind: 'must_have' },
+    { seq: 3, verbatim: 'Deep experience with roadmap strategy and execution', item_text: '', kind: 'must_have' },
+  ]
+  const rs = runChecks({
+    type: 'resume',
+    pkg: { ...RESUME_FULL, ResumeSummary: 'Owns roadmap strategy and execution with deep experience.' },
+    requirements: reqs,
+  })
+  const elig = find(rs, 'eligibility_preconditions')
+  assert.equal(elig.state, 'not_applicable')
+  assert.equal(elig.offenders.length, 3, 'they are still NAMED — not scored never means not shown')
+  assert.match(elig.offenders[0], /Reside in the East Coast/)
+
+  // Only the coverable one is judged, and it IS covered, so the gate is not permanently red.
+  const cov = find(rs, 'must_have_coverage')
+  assert.equal(cov.observed, '1/1 must-haves covered')
+  assert.equal(cov.state, 'pass')
+})
+
+test('a posting with no eligibility preconditions says so', () => {
+  const rs = runChecks({
+    type: 'resume', pkg: RESUME_FULL,
+    requirements: [{ seq: 0, verbatim: 'Deep experience with roadmap strategy', item_text: '', kind: 'must_have' }],
+  })
+  assert.equal(find(rs, 'eligibility_preconditions').state, 'pass')
+})
+
 // ---- P2.2 inputs ---------------------------------------------------------------------------
 test('an uncited change is a FAIL, never a warn', () => {
   const swaps = [

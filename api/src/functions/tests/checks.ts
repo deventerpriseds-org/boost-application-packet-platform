@@ -95,6 +95,22 @@ export interface CheckInput {
   thresholds?: Partial<CheckThresholds>
 }
 
+/**
+ * Requirements a DOCUMENT cannot evidence.
+ *
+ * "Reside in the East Coast of the United States", "must be a U.S. Citizen", "active Secret
+ * clearance", "authorized to work" — these are facts about the candidate, not claims a resume can
+ * make true by containing words. Scoring them as uncovered must-haves guarantees a permanently red
+ * gate on every posting that has one, and a gate that is always red is a gate people learn to
+ * ignore. They are reported as `not_applicable` for coverage, which keeps them VISIBLE as
+ * requirements the human must confirm separately, without pretending the document failed to cover
+ * something no document could.
+ *
+ * Deliberately narrow and marker-driven: each pattern is an explicit phrase employers use for a
+ * legal or logistical precondition. This is not a general "is this hard to match" heuristic.
+ */
+export const ELIGIBILITY_RE = /\b(reside|residing|residency|relocat\w*|must live|based in|citizen|citizenship|green card|permanent resident|work authoriz\w*|authorized to work|visa|sponsorship|security clearance|clearance|itar|willing to travel|able to travel|travel \d+%)\b/i
+
 /** Share of a requirement's content words that must appear before it counts as covered. */
 export const COVERAGE_THRESHOLD = 0.7
 /** Below this many content words a requirement carries too little signal to judge either way. */
@@ -322,14 +338,26 @@ export function runChecks(input: CheckInput): CheckResult[] {
     out.push(na('must_have_coverage', 'no requirement rows for this opportunity', 'every must-have requirement is covered'))
     out.push(na('responsibilities_addressed', 'no requirement rows for this opportunity', 'every responsibility is addressed'))
   } else {
-    const uncovered = mustHaves.filter(r => !covers(r))
-    out.push(!mustHaves.length
+    // Split eligibility preconditions out BEFORE judging coverage — see ELIGIBILITY_RE.
+    const eligibility = mustHaves.filter(r => ELIGIBILITY_RE.test(r.verbatim || r.item_text))
+    const coverable = mustHaves.filter(r => !eligibility.includes(r))
+    out.push(eligibility.length
+      ? na('eligibility_preconditions',
+           `${eligibility.length} requirement(s) a document cannot evidence — confirm these yourself`,
+           'each is a fact about the candidate, not something the artifact can cover')
+      : ok('eligibility_preconditions', 'none in this posting', 'eligibility preconditions are surfaced, not scored'))
+    // The offender list still names them, so "not scored" never means "not shown".
+    const elig = out[out.length - 1]
+    if (eligibility.length) elig.offenders = eligibility.map(r => `#${r.seq} ${(r.verbatim || r.item_text).slice(0, 80)}`)
+
+    const uncovered = coverable.filter(r => !covers(r))
+    out.push(!coverable.length
       ? na('must_have_coverage', 'the posting produced no must-have requirements', 'every must-have requirement is covered')
       : uncovered.length
         ? bad('must_have_coverage', `${mustHaves.length - uncovered.length}/${mustHaves.length} must-haves covered`,
               'every must-have requirement is covered',
               uncovered.map(r => `#${r.seq} ${(r.verbatim || r.item_text).slice(0, 80)}`))
-        : ok('must_have_coverage', `${mustHaves.length}/${mustHaves.length} must-haves covered`, 'every must-have requirement is covered'))
+        : ok('must_have_coverage', `${coverable.length}/${coverable.length} must-haves covered`, 'every must-have requirement is covered'))
 
     const resp = reqs.filter(r => r.kind === 'responsibility')
     const unaddressed = resp.filter(r => !covers(r))
