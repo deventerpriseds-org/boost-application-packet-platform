@@ -14,20 +14,17 @@ const HEADERS = { 'Content-Type': 'application/json', 'Access-Control-Allow-Orig
 
 // Columns the requirement spine needs on `opportunity`. Also declared in schema.ts SCHEMA_SQL (D1
 // puts NEW TABLES there); this keeps environments that have not re-migrated from 500ing.
-export async function ensureRequirementCols(client: any) {
-  await client.query(`
-    alter table opportunity
-      add column if not exists jd_text text,
-      add column if not exists jd_text_sha256 text,
-      add column if not exists jd_text_truncated boolean`)
-  // kind_source gained three values when mapKind's precedence was corrected. `create table if not
-  // exists` cannot widen a CHECK on a table that already exists, so an environment migrated before
-  // that change would reject every insert. Drop and re-add explicitly.
-  await client.query(`alter table requirement drop constraint if exists requirement_kind_source_check`)
-  await client.query(`alter table requirement add constraint requirement_kind_source_check
-    check (kind_source in ('posting_required_marker','posting_optional_marker','posting_section_heading','category','category_default','fallback'))`)
-  // P8.3 — the evidence store. Declared in schema.ts SCHEMA_SQL and registered in EXPECTED_TABLES;
-  // repeated here so an environment that has not re-migrated cannot 500 on the first evidence write.
+/**
+ * The P8.3 evidence store. Declared in schema.ts SCHEMA_SQL and registered in EXPECTED_TABLES;
+ * repeated here so an environment that has not re-migrated cannot 500 on the first evidence write.
+ *
+ * SEPARATE from `ensureRequirementCols` on purpose. That function drops and re-adds a CHECK
+ * constraint, which takes an ACCESS EXCLUSIVE lock on `requirement` — fine in the backfill and the
+ * requirements GET, and not fine in `evaluateArtifact`, which four artifacts of one packet can enter
+ * at the same moment. `create table if not exists` takes no lock on an existing table, so the hot
+ * path calls only this.
+ */
+export async function ensureEvidenceTable(client: any) {
   await client.query(`
     create table if not exists requirement_evidence (
       id             uuid primary key default uuid_generate_v4(),
@@ -49,6 +46,21 @@ export async function ensureRequirementCols(client: any) {
       unique (requirement_id, source_key, char_start, char_end)
     )`)
   await client.query(`create index if not exists req_evidence_req_idx on requirement_evidence(requirement_id)`)
+}
+
+export async function ensureRequirementCols(client: any) {
+  await client.query(`
+    alter table opportunity
+      add column if not exists jd_text text,
+      add column if not exists jd_text_sha256 text,
+      add column if not exists jd_text_truncated boolean`)
+  // kind_source gained three values when mapKind's precedence was corrected. `create table if not
+  // exists` cannot widen a CHECK on a table that already exists, so an environment migrated before
+  // that change would reject every insert. Drop and re-add explicitly.
+  await client.query(`alter table requirement drop constraint if exists requirement_kind_source_check`)
+  await client.query(`alter table requirement add constraint requirement_kind_source_check
+    check (kind_source in ('posting_required_marker','posting_optional_marker','posting_section_heading','category','category_default','fallback'))`)
+  await ensureEvidenceTable(client)
 }
 
 /**

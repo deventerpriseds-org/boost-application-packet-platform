@@ -12,7 +12,7 @@ import { computeArtifactScore, ArtifactScore } from './artifactScore'
 import { loadFacts, sourceText } from './appFacts'
 import { shapeVerdict } from './appReviewer'
 import { resolvePostingSource } from './jdText'
-import { ensureRequirementCols, writeEvidence, loadRequirementsWithEvidence } from './appRequirements'
+import { ensureEvidenceTable, writeEvidence, loadRequirementsWithEvidence } from './appRequirements'
 import { EvidenceInput, EvidenceRow } from './evidence'
 
 const HEADERS = { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': '*', 'Access-Control-Allow-Methods': 'GET,POST,OPTIONS' }
@@ -95,7 +95,7 @@ export async function evaluateArtifact(client: any, artifactId: string, owner: s
   // An unreadable profile writes nothing and reports `profileReadable: false`. Resolving against an
   // empty profile would produce zero evidence rows for every requirement, and zero rows presented as
   // a measurement is the "0% covered" that means "we did not look".
-  await ensureRequirementCols(client)
+  await ensureEvidenceTable(client)
   if (profileRead.records.length) {
     await writeEvidence(client, art.opp_id, profileRead.records)
   }
