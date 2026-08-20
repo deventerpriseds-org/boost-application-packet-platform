@@ -183,6 +183,18 @@ export const api = {
   setArtifactStatusDetailed: (artifactId, status) => postDetailed(`/app/artifact/${artifactId}/status`, { status }),
   artifactInsertions: (artifactId) => get(`/app/artifact/${artifactId}/insertions?owner=${encodeURIComponent(_owner)}`),
   packetSwaps: (packetId) => get(`/app/packet/${packetId}/swaps?owner=${encodeURIComponent(_owner)}`),
+  // P8.1/P8.6 - undo ONE correction. The change log itself rides on artifactChecksResult above, so
+  // the log and the counters beside it are the same payload rather than two.
+  //
+  // postDetailed, not post: revertOne can REFUSE - the field was edited after the correction was
+  // applied, so the recovered original no longer hashes to `before_sha256` and it declines rather
+  // than splicing text into a document nobody can check. That refusal is a fact about the user's own
+  // document and it is rendered in the server's own words; post() would collapse it into "HTTP 409".
+  //
+  // No ?owner=, deliberately: this is a write, requireWrite() takes the owner from the verified
+  // session and resolveOwner() ignores ?owner= entirely for one, so sending it would suggest the
+  // client picks the owner for a mutation.
+  revertCorrection: (correctionId) => postDetailed(`/app/correction/${correctionId}/revert`, {}),
   // Same defect as `analyzeJd` above, shipped a second time and found by a reachability sweep.
   // `appPackets.ts:382` reads `regen` off this route's body and `:319` honours it; this helper took
   // no options argument, so it could not send it. Nor could anything else: `coachTools.ts:28` posts

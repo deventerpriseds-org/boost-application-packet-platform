@@ -18,6 +18,7 @@
 import { readdirSync, existsSync } from 'node:fs'
 import { chromium } from 'playwright'
 import { createServer } from 'vite'
+import { contrast } from './contrast.mjs'
 
 function chromiumPath() {
   if (process.env.PW_CHROMIUM) return process.env.PW_CHROMIUM
@@ -235,14 +236,10 @@ const readHighlights = () => page.evaluate(() => {
   }
   return { kw: cs('kw-highlight'), echo: cs('echo-highlight') }
 })
-const parseRgb = (c) => (c.match(/[\d.]+/g) || []).slice(0, 3).map(Number)
-// WCAG relative luminance — the only way to say "this ink is readable on that ground" rather than
-// "these two strings differ", which is what a colour-vs-colour comparison actually proves.
-const lum = (c) => {
-  const [r, g, b] = parseRgb(c).map((v) => { const x = v / 255; return x <= 0.03928 ? x / 12.92 : ((x + 0.055) / 1.055) ** 2.4 })
-  return 0.2126 * r + 0.7152 * g + 0.0722 * b
-}
-const contrast = (a, b) => { const l1 = lum(a), l2 = lum(b); const [hi, lo] = l1 > l2 ? [l1, l2] : [l2, l1]; return (hi + 0.05) / (lo + 0.05) }
+// The WCAG contrast function now lives in ./contrast.mjs so the QC-rail probe measures readability
+// with the SAME definition rather than a second copy of the formula. Nothing about the numbers below
+// changed when it moved; they are re-measured on every run.
+
 
 const lightHl = await readHighlights()
 await page.click('#toggle-dark')

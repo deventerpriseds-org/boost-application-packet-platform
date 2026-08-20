@@ -2,12 +2,13 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api } from '../api.js'
 import { Pill, toneColor } from '../shell.jsx'
 import AssetGateDrawer from './AssetGateDrawer.jsx'
-import { assetLabel, checkLabel, fieldLabel, stateMeta } from '../assetGate.js'
+import { assetLabel, checkLabel, fieldLabel, stateMeta, fmtWhen } from '../assetGate.js'
 import {
   QC_HOOKS, RAIL_TABS, railGate, railGateMeta, railAttention, railCounts, railTotals, railBody,
   railHeadline, verdictLine, railVerdict, engineRows, countLink, coverageCards,
   requirementState, qcStepState, packetGate, loopsModel, notApplicableRows, rowsForRequirement,
   swapsForRequirement, pctWidth, arr, errText,
+  railChangeLog, undoAvailability, revertOutcome, suggestScope, CHANGE_LOG_HEADLINE,
 } from '../qcRail.js'
 
 // P5.1 - the packet-level QC & evidence rail.
@@ -414,6 +415,180 @@ function ReviewTab({ entries, onOpen, filtered }) {
   )
 }
 
+// P8.6-CHANGELOG-BEGIN
+// A structural marker, not a decoration: app/test/corrections.test.mjs slices the change-log region
+// out of this file by these two sentinels rather than by a component name, so renaming anything in
+// here cannot move the region a guard is looking at - or quietly shrink it.
+/**
+ * P8.6 / R1 - the change log. "The user reviews a change log, not a to-do list."
+ *
+ * ONE CORRECTION, and everything about it comes from the module. This component decides no count, no
+ * ordering, no availability and no wording; it renders `railChangeLog(result)` and the row models
+ * inside it. `result.corrections` is never read here - the moment a .jsx reads that property there
+ * are two definitions of how many corrections there are, which is the exact bug the counts strip
+ * above it already shipped twice.
+ *
+ * The two affordances the backlog names, and what each is actually wired to:
+ *
+ *   Undo                       -> POST /app/correction/{id}/revert, and ONLY when the row carries the
+ *                                 id that route needs. No id, no control: a button that cannot make a
+ *                                 request is dead UI, and the row says why instead.
+ *   Suggest something different -> POST /app/artifact/{id}/ai-edit with `section`, the SAME
+ *                                 field-scoped edit path the resume editor already uses. Not a second
+ *                                 way to ask for a change.
+ */
+function CorrectionRow({ row, artifactId, onOpen, onUndid, busy, setBusy }) {
+  const [refusal, setRefusal] = useState(null)
+  const [askOpen, setAskOpen] = useState(false)
+  const [ask, setAsk] = useState('')
+  const undo = undoAvailability(row)
+  const scope = suggestScope(row)
+  const mine = busy && busy.key === row.key
+  const canSend = ask.trim().length > 0
+
+  const doUndo = async () => {
+    setBusy({ key: row.key, what: 'undo' }); setRefusal(null)
+    try {
+      // The server's answer decides, on `ok` alone - a correction can revert a field back to the
+      // empty string, so branching on the returned text would report a phantom refusal.
+      const outcome = revertOutcome(await api.revertCorrection(row.id))
+      if (!outcome.ok) { setRefusal(outcome.reason); return }
+      await onUndid()
+    } catch (e) {
+      // A thrown error still carries the server's own body through postDetailed. It is a refusal
+      // with a reason, not a generic failure, and it is shown as one.
+      setRefusal(revertOutcome((e && e.body) || { reason: errText(e) }).reason)
+    } finally { setBusy(null) }
+  }
+
+  const doAsk = async () => {
+    setBusy({ key: row.key, what: 'ask' }); setRefusal(null)
+    try {
+      await api.aiEditArtifact(artifactId, { instruction: ask.trim(), section: row.merge_field })
+      setAsk(''); setAskOpen(false)
+      await onUndid()
+    } catch (e) { setRefusal(errText(e)) } finally { setBusy(null) }
+  }
+
+  return (
+    <div className="px-box-soft" data-qc={QC_HOOKS.correction} data-qc-field={row.merge_field}
+      data-qc-state={row.undone ? 'undone' : 'corrected'} data-qc-seq={row.seqKnown ? row.seq : ''}
+      style={{ padding: 10, marginBottom: 8, borderLeft: '3px solid ' + toneColor(row.undone ? 'panel' : 'accent') }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+        {/* NOT a <Pill>. Measured in test/browser/run-qc-rail.mjs: of the nine px-pill tones, eight
+            fall below 4.5:1 in at least one theme - `accent` is 2.90:1 in dark and `panel` is
+            4.04:1 dark / 4.28:1 light, which are the two this row would have used. That is a live
+            defect in the shared tones and it is reported as one; what it is NOT is a reason to add
+            a ninth unreadable pill. The state is the row's own ink, which measures well in both
+            themes, and the colour is a RULE rather than the text - so the two states are told apart
+            by their word first and their colour second, which is also the only way a reader who
+            cannot see the difference gets the information at all. */}
+        <b style={{ fontSize: 12, letterSpacing: '.3px' }}>{row.undone ? 'Undone' : 'Corrected'}</b>
+        <span data-qc-part="sentence" style={{ fontSize: 13, flex: 1, minWidth: 180, color: 'var(--proto-ink)' }}>{row.sentence}</span>
+        <span className="px-small" style={{ fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace' }}>{row.merge_field}</span>
+        {artifactId && row.merge_field && (
+          <button type="button" className="px-btn" data-qc={QC_HOOKS.correctionOpen}
+            data-qc-artifact={artifactId} data-qc-section={row.merge_field}
+            onClick={() => onOpen(artifactId, row.merge_field)}
+            style={{ fontSize: 12, padding: '1px 8px' }}>Open {row.fieldName || row.merge_field}</button>
+        )}
+      </div>
+      {/* The reason is the SUBSTANCE of a change log - R1's whole claim is that the user can see why
+          each change was made - so it is primary ink, not the `px-small` tertiary token, which
+          measured 2.56:1 in light in this file's own contrast section. Metadata below it stays
+          quiet; the reason does not. */}
+      <div data-qc-part="why" style={{ marginTop: 4, fontSize: 12, color: 'var(--proto-ink)' }}>
+        why: {row.reason || 'no reason was recorded for this change'}
+      </div>
+      <div data-qc-part="source" style={{ fontSize: 12, color: 'var(--proto-ink)' }}>the replacement was {row.sourceText}</div>
+      {row.undone && row.undoneAt && (
+        <div className="px-small">undone {fmtWhen(row.undoneAt)}{row.undoneBy ? ' by ' + row.undoneBy : ''}</div>
+      )}
+      {refusal && (
+        <div className="px-note" data-qc={QC_HOOKS.correctionRefusal} style={{ marginTop: 6 }}>
+          <b>This was not undone.</b> {refusal}
+        </div>
+      )}
+      <div style={{ display: 'flex', gap: 6, marginTop: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+        {undo.can
+          ? <button type="button" className="px-btn" data-qc={QC_HOOKS.correctionUndo} data-qc-id={row.id}
+              onClick={doUndo} disabled={!!busy}>{mine && busy.what === 'undo' ? 'Undoing...' : 'Undo'}</button>
+          : <span className="px-small" data-qc={QC_HOOKS.correctionUndo} data-qc-available="0">{undo.reason}</span>}
+        <button type="button" className="px-btn" data-qc={QC_HOOKS.correctionSuggest}
+          data-qc-section={row.merge_field} onClick={() => setAskOpen((v) => !v)} disabled={!!busy}
+          style={{ fontSize: 12 }}>Suggest something different</button>
+      </div>
+      {askOpen && (
+        <div style={{ marginTop: 6 }}>
+          <div className="px-small" style={{ letterSpacing: '.4px' }}>{scope.label}</div>
+          <div className="px-small">{scope.scope}</div>
+          <textarea className="px-input" rows={2} value={ask} placeholder={scope.placeholder}
+            onChange={(e) => setAsk(e.target.value)} style={{ width: '100%', marginTop: 4, resize: 'vertical' }} />
+          <div className="px-small">{scope.caveat}</div>
+          <div style={{ display: 'flex', gap: 6, marginTop: 4 }}>
+            <button type="button" className="px-btn" onClick={() => { setAskOpen(false); setAsk('') }} disabled={!!busy}>Cancel</button>
+            <button type="button" className="px-btn px-btn-accent" onClick={doAsk} disabled={!!busy || !canSend}>
+              {mine && busy.what === 'ask' ? 'Sending...' : 'Send'}
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+/**
+ * The change log for the whole packet, on the page rather than behind a tab (SPEC 4.8).
+ *
+ * FOUR STATES, four sentences, and they are not interchangeable. An asset whose payload carried no
+ * change log at all is not an asset with nothing to correct: it is an asset nobody asked. Saying
+ * "nothing needed correcting" about it would be this feature's version of the vacuous green, and it
+ * is the only state that exists until the correction API lands.
+ */
+function ChangeLog({ entries, onOpen, onRefresh }) {
+  const [busy, setBusy] = useState(null)
+  const logs = entries.map((e) => ({ entry: e, log: railChangeLog(e.result) }))
+  const anyRows = logs.some((l) => l.log.rows.length)
+  return (
+    <div className="px-box" data-qc={QC_HOOKS.changeLog} style={{ padding: 16 }}>
+      <Head title={CHANGE_LOG_HEADLINE}
+        note="Everything the run could settle on its own, already applied to your text. Change or revert any of it." />
+      {logs.map(({ entry, log }) => (
+        <div key={entry.artifact.id} data-qc={QC_HOOKS.asset} data-qc-artifact={entry.artifact.id} style={{ marginTop: 10 }}>
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap' }}>
+            <span style={{ fontSize: 13, fontWeight: 600 }}>{entry.label}</span>
+            {log.hasNumber && (
+              <span className="px-small" data-qc={QC_HOOKS.corrected} data-qc-n={log.count}>{log.count} corrected</span>
+            )}
+            {log.hasNumber && log.undone > 0 && (
+              <span className="px-small" data-qc={QC_HOOKS.correctionsUndone} data-qc-n={log.undone}>{log.undone} undone</span>
+            )}
+          </div>
+          {entry.resultLoading
+            ? <Quiet>Reading the change log for this asset...</Quiet>
+            : log.rows.length
+              ? log.rows.map((row) => (
+                <CorrectionRow key={row.key} row={row} artifactId={entry.artifact.id} onOpen={onOpen}
+                  busy={busy} setBusy={setBusy} onUndid={() => onRefresh(entry.artifact.id)} />
+              ))
+              : <Quiet hook={QC_HOOKS.correctionNote}>{log.body}</Quiet>}
+          {log.anomalies.map((a, i) => (
+            <div key={i} className="px-note" data-qc={QC_HOOKS.correctionAnomaly} style={{ marginTop: 6 }}>{a}</div>
+          ))}
+        </div>
+      ))}
+      {!anyRows && (
+        <div className="px-small" style={{ marginTop: 10 }}>
+          Nothing above is waiting on you. Corrections are counted on their own and are never added
+          to the numbers beside the gate.
+        </div>
+      )}
+    </div>
+  )
+}
+
+// P8.6-CHANGELOG-END
+
 // ── the rail ────────────────────────────────────────────────────────────────────────────────────
 
 export default function QcRail({ packetId, company, role, entries, setResult, requirements, reqError, reqLoading = false }) {
@@ -440,6 +615,15 @@ export default function QcRail({ packetId, company, role, entries, setResult, re
   const meta = railGateMeta({ gate })
   const step = qcStepState(entries)
   const openField = useCallback((artifactId, section) => setDrawer({ artifactId, section }), [])
+
+  // After an undo or a scoped rewrite, RE-READ the payload the counters and the log both come from.
+  // Splicing the row out of local state would leave the change log, the corrections number and the
+  // gate describing three different moments - and the gate is the one that moves, because reverting
+  // a correction puts the figure back and re-opens the check that named it.
+  const refreshOne = useCallback(async (artifactId) => {
+    const fresh = await api.artifactChecksResult(artifactId)
+    setResult(artifactId, fresh)
+  }, [setResult])
 
   // The headline is the RESUME's score when there is one - the packet has no composite of its own,
   // and inventing one by averaging three artifacts would be exactly the fabricated composite the
@@ -472,11 +656,28 @@ export default function QcRail({ packetId, company, role, entries, setResult, re
               <b data-qc={QC_HOOKS.unchecked} style={{ fontSize: 18 }}>{totals.unchecked}</b>
               <span className="px-small">never checked</span>
             </span>
+            {/* The corrections number. A THIRD number, never folded into either counter: a
+                correction is work already done, and adding it to "to fix" would tell the reader to
+                fix something that is already fixed. It appears only when at least one asset sent a
+                change log - printing 0 for assets nobody asked is the reviewer's "0 disagreements". */}
+            {totals.correctionsMeasured > 0 && (
+              <span style={{ display: 'flex', alignItems: 'baseline', gap: 5 }}>
+                <b data-qc={QC_HOOKS.corrected} data-qc-n={totals.corrected} style={{ fontSize: 18 }}>{totals.corrected}</b>
+                <span className="px-small">corrected for you</span>
+              </span>
+            )}
+            {totals.correctionsMeasured > 0 && totals.correctionsUndone > 0 && (
+              <span style={{ display: 'flex', alignItems: 'baseline', gap: 5 }}>
+                <b data-qc={QC_HOOKS.correctionsUndone} data-qc-n={totals.correctionsUndone} style={{ fontSize: 18 }}>{totals.correctionsUndone}</b>
+                <span className="px-small">undone by you</span>
+              </span>
+            )}
           </div>
           <div className="px-small" data-qc={QC_HOOKS.body} style={{ marginTop: 8 }}>
             The two numbers answer different questions and are never added together: only the measured
             rules can block an asset, and a reviewer disagreement asks for a decision instead. An asset
             that was never checked is counted on its own - it is the absence of a verdict, not a pass.
+            Changes already made for you are counted separately again, and are in neither number.
           </div>
           <div style={{ display: 'flex', gap: 6, marginTop: 10, flexWrap: 'wrap' }}>
             {entries.map((e) => {
@@ -538,6 +739,11 @@ export default function QcRail({ packetId, company, role, entries, setResult, re
           </div>
         </div>
       </div>
+
+      {/* The change log, ON THE PAGE (SPEC 4.8) - not behind a tab and not behind a search. What the
+          run settled by itself is the first thing a reader should see, because R1's whole claim is
+          that they are reviewing finished work rather than a list of chores. */}
+      <ChangeLog entries={entries} onOpen={openField} onRefresh={refreshOne} />
 
       {/* Tabs. The picked requirement filters the other tabs, and the clear affordance appears with it. */}
       <div style={{ display: 'flex', gap: 2, borderBottom: '1px solid var(--proto-rule-soft)', overflowX: 'auto', alignItems: 'center' }}>
