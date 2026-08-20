@@ -427,6 +427,44 @@ create table if not exists artifact_gate (
   check ((override_by is null) = (override_reason is null))
 );
 
+-- P2.3 - the decomposed per-artifact score. Named artifact_score, NOT match_score: that column
+-- already exists on opportunity with a different live meaning, and reusing the name is how two
+-- numbers come to disagree while looking like one.
+--
+-- Reconciled against the four scores that already exist, none of which is per-artifact:
+--   opportunity.match_score  model fit for the ROLE, NOT posting-grounded, then boosted in place
+--   opportunity.base_score   the same number captured before that boost
+--   opportunity.ats_score    posting-grounded, from atsScoreOne against the real posting
+--   packet.ats_score         packet-level, from jdAnalysis
+-- match answers "is this role worth pursuing"; ats_score answers "does the candidate match the
+-- posting"; this answers "does THIS DOCUMENT cover this posting's requirements".
+--
+-- A component with no honest source is NULL and the composite is NULL unless all three exist. A
+-- composite built from one of three components is a fabricated number wearing a score's clothes -
+-- and it is exactly the number a reviewer would trust most.
+create table if not exists artifact_score (
+  id             uuid primary key default uuid_generate_v4(),
+  artifact_id    uuid not null references artifact(id) on delete cascade,
+  run_id         uuid not null,
+  must_have_coverage int,
+  must_have_source   text,
+  keyword_coverage   int,
+  keyword_source     text,
+  seniority_alignment int,
+  seniority_source    text,
+  composite      int,
+  band           text check (band in ('strong','acceptable','needs_work')),
+  uncovered_requirement_ids uuid[] not null default '{}',
+  engine_version int not null,
+  weights        jsonb not null,
+  computed_at    timestamptz not null default now(),
+  -- Every historical score is kept so regenerations are comparable; nothing is overwritten.
+  unique (artifact_id, run_id),
+  check (composite is null or (must_have_coverage is not null and keyword_coverage is not null and seniority_alignment is not null)),
+  check ((band is null) = (composite is null))
+);
+create index if not exists artifact_score_idx on artifact_score(artifact_id, computed_at desc);
+
 -- Idempotent multi-tenant column adds (safe on tables that predate them)
 alter table persona        add column if not exists owner_email text not null default 'demo@executive-engine.local';
 alter table persona        add column if not exists is_demo boolean not null default false;
@@ -458,5 +496,5 @@ export const EXPECTED_TABLES = [
   'persona', 'opportunity', 'contact', 'packet', 'artifact', 'outreach_message',
   'interview', 'offer', 'library_entity', 'asset_event', 'usage_metering',
   'term_library', 'term_library_entry', 'term_candidate', 'requirement',
-  'skill_candidate', 'swap_decision', 'insertion', 'check_result', 'artifact_gate'
+  'skill_candidate', 'swap_decision', 'insertion', 'check_result', 'artifact_gate', 'artifact_score'
 ]
