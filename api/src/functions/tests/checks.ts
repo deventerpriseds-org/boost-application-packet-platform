@@ -452,6 +452,16 @@ export function runChecks(input: CheckInput): CheckResult[] {
  * never block an approval on its own.
  */
 export function gateFor(results: CheckResult[]): CheckState {
+  // NO ROWS IS NOT A PASS. Falling through to `pass` on an empty array made this function - the one
+  // that IS the gate - answer "everything passed" to the question "what was checked?" when the
+  // answer was "nothing". Every other branch here already honours that rule; this one leaked
+  // underneath them, because `results.length &&` on the not_applicable branch short-circuits and
+  // the final `return 'pass'` catches it.
+  //
+  // Latent while the only caller was `evaluateArtifact`, which always feeds a non-empty runChecks
+  // result (10 rows even for an empty input). P4 made it reachable: appReviewer re-aggregates from a
+  // DATABASE read, and a query returning no rows would have set the gate to pass.
+  if (!results.length) return 'warn'
   if (results.some(r => r.state === 'fail' && r.engine === 'deterministic')) return 'fail'
   if (results.some(r => r.state === 'warn' || (r.state === 'fail' && r.engine === 'reviewer'))) return 'warn'
   if (results.length && results.every(r => r.state === 'not_applicable')) return 'warn'

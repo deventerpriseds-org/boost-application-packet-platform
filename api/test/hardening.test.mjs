@@ -18,7 +18,7 @@ import { join } from 'node:path'
 import { normalizePostingText, decodeEntities, groundingText } from '../dist/functions/tests/jdText.js'
 import { buildRequirements, locate, mapKind, sentenceBounds } from '../dist/functions/tests/requirements.js'
 import { onOmitList, omitEntries, similarity } from '../dist/functions/tests/swaps.js'
-import { runChecks, gateFor, COVERAGE_THRESHOLD, MIN_JUDGEABLE_TOKENS } from '../dist/functions/tests/checks.js'
+import { runChecks, gateFor, attentionCount, COVERAGE_THRESHOLD, MIN_JUDGEABLE_TOKENS } from '../dist/functions/tests/checks.js'
 import { computeArtifactScore } from '../dist/functions/tests/artifactScore.js'
 import { deriveFacts } from '../dist/functions/tests/ownerFacts.js'
 import { validateCitations, reviewerChecks } from '../dist/functions/tests/reviewer.js'
@@ -447,4 +447,33 @@ test('H21: an accepted citation stores the employer\'s bytes, not the model\'s r
   assert.equal(accepted[0].verbatim_quote, quote, 'the stored quote must be the posting\'s own text')
   assert.notEqual(accepted[0].verbatim_quote, SHOUTED)
   assert.equal(posting.slice(accepted[0].char_start, accepted[0].char_end), accepted[0].verbatim_quote)
+})
+
+// ---------------------------------------------------------------------------------------------
+// H22 — `gateFor([])` returned 'pass'. The function that IS the gate answered "everything passed"
+// to the question "what was checked?" when the answer was "nothing".
+//
+// Every branch of gateFor already honoured "absent evidence is never a pass" — including the
+// explicit `results.length && results.every(not_applicable)` one — and the rule leaked underneath
+// all of them, because that `results.length &&` short-circuits on an empty array and the final
+// `return 'pass'` catches it. Measured 2026-08-20: `gateFor([]) === 'pass'`.
+//
+// Latent while `evaluateArtifact` was the only caller (runChecks returns 10 rows even for empty
+// input, so it never passed []). P4 made it reachable: appReviewer re-aggregates the gate from a
+// DATABASE read, and a query returning no rows would have written gate='pass'.
+//
+// The invariant: an empty check set can never produce a passing gate, from any caller, ever.
+test('H22: no rows is never a pass — the gate cannot go green on an unchecked artifact', () => {
+  assert.notEqual(gateFor([]), 'pass', 'an empty check set means nothing was checked')
+  assert.equal(gateFor([]), 'warn')
+  assert.equal(attentionCount([]), 0, 'but there is nothing to COUNT — the gate carries the meaning')
+
+  // The neighbouring rule this one hid under, still intact.
+  const na = [{ check_key: 'x', engine: 'deterministic', state: 'not_applicable', observed: '', expected: '', offenders: [] }]
+  assert.equal(gateFor(na), 'warn', 'all-not_applicable was already warn; empty must not be weaker')
+
+  // And the real paths are unchanged.
+  const rows = runChecks({ type: 'resume', pkg: {}, requirements: [], swaps: [] })
+  assert.ok(rows.length > 0)
+  assert.equal(gateFor(rows), 'fail')
 })

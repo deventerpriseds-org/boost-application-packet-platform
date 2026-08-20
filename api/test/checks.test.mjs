@@ -288,7 +288,12 @@ test('gate: any deterministic fail wins; a reviewer fail can only warn', () => {
   assert.equal(gateFor([d('pass'), d('warn')]), 'warn')
   assert.equal(gateFor([d('pass'), d('fail', 'reviewer')]), 'warn', 'a model opinion must never block on its own')
   assert.equal(gateFor([d('pass'), d('pass')]), 'pass')
-  assert.equal(gateFor([]), 'pass')
+  // CORRECTED 2026-08-20. This asserted 'pass' — the only assertion in this block with no message,
+  // recording what the implementation happened to do rather than a decision. The test immediately
+  // below states the opposite principle in the author's own words: "nothing was verified — that is
+  // not the same as everything passing." An empty set is strictly LESS verified than an
+  // all-not_applicable set, so it cannot be the one that passes. See H22.
+  assert.equal(gateFor([]), 'warn', 'no rows means nothing was checked, which is not a pass')
 })
 
 test('gate: not_applicable neither helps nor hurts, but an ALL-unknown artifact is not a pass', () => {
