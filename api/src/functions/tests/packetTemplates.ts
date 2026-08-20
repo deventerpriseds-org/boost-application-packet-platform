@@ -81,6 +81,24 @@ function collectText(node: any, out: string[]) {
   for (const k of Object.keys(node)) collectText(node[k], out)
 }
 
+/**
+ * The plain text of a Google Doc or Slides file.
+ *
+ * Exported so the fact deriver can read the RESUME TEMPLATE — its static sections (work history
+ * with dates, education, certifications) are the primary source for facts like total years of
+ * experience, and asking the owner to retype what the template already states is exactly the
+ * fallback-instead-of-source mistake.
+ */
+export async function templateText(token: string, id: string, isSlides = false): Promise<string> {
+  const url = isSlides ? `https://slides.googleapis.com/v1/presentations/${id}` : `https://docs.googleapis.com/v1/documents/${id}`
+  const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } })
+  if (!res.ok) throw new Error(`Google ${res.status} reading ${id}`)
+  const doc = await res.json() as any
+  const chunks: string[] = []
+  collectText(doc, chunks)
+  return chunks.join('')
+}
+
 // Review-agent cleanup: strip any leftover {{...}} tokens (unmapped placeholders)
 // so dynamic-text gaps don't leave eyesores in the finished packet.
 export async function stripLeftoverTokens(token: string, id: string, isSlides: boolean): Promise<string[]> {

@@ -100,3 +100,68 @@ test('the catalogue patterns match the real phrasings measured in the corpus', (
     assert.ok(FACT_BY_KEY.get(key).asks.test(text), `${key} did not match: ${text}`)
   }
 })
+
+// ---- derivation: read the facts off the source, don't ask for them ---------------------------
+import { deriveFacts } from '../dist/functions/tests/ownerFacts.js'
+
+const RESUME = `
+VON ELLIS
+Senior Technology Executive
+
+EXPERIENCE
+Vice President, Software Engineering | Acme Corp | 2018 - Present
+  Led an org of 120 engineers across four product lines. Owned a $14M budget.
+Director of Engineering | Globex | 2011 - 2018
+  Managed 45 direct reports and delivered the platform re-architecture.
+Senior Engineering Manager | Initech | 2003 - 2011
+
+EDUCATION
+Master of Science in Computer Science, State University
+Bachelor of Science in Electrical Engineering, State University
+
+CERTIFICATIONS
+PMP, AWS Certified Solutions Architect, SAFe 5
+`
+
+test('years of experience derive from the earliest DATED role, not from any stray year', () => {
+  const f = deriveFacts(RESUME, 2026).find(x => x.key === 'experience.years_total')
+  assert.equal(f.value_num, 23, '2003 to 2026')
+  assert.match(f.evidence, /2003/, 'the evidence names the role it came from')
+})
+
+test('the highest degree wins, and lesser ones are kept as evidence', () => {
+  const f = deriveFacts(RESUME, 2026).find(x => x.key === 'education.highest_degree')
+  assert.match(f.value, /^Master/, 'Master outranks Bachelor')
+  assert.match(f.evidence, /Bachelor/, 'the others stay visible for confirmation')
+})
+
+test('certifications are collected', () => {
+  const f = deriveFacts(RESUME, 2026).find(x => x.key === 'education.certifications')
+  for (const c of ['PMP', 'AWS Certified', 'SAFe']) assert.match(f.value, new RegExp(c, 'i'))
+})
+
+test('the LARGEST team and budget win, not the first mentioned', () => {
+  const facts = deriveFacts(RESUME, 2026)
+  assert.equal(facts.find(x => x.key === 'scope.largest_team').value_num, 120, '120 beats 45')
+  assert.equal(facts.find(x => x.key === 'scope.largest_budget').value, '$14M')
+})
+
+test('derivation is reproducible — the clock is injected, never read', () => {
+  assert.deepEqual(deriveFacts(RESUME, 2026), deriveFacts(RESUME, 2026))
+  assert.notEqual(
+    deriveFacts(RESUME, 2026).find(x => x.key === 'experience.years_total').value_num,
+    deriveFacts(RESUME, 2030).find(x => x.key === 'experience.years_total').value_num)
+})
+
+test('empty or fact-free text yields nothing rather than a guess', () => {
+  assert.deepEqual(deriveFacts(''), [])
+  assert.deepEqual(deriveFacts('   '), [])
+  assert.deepEqual(deriveFacts('A paragraph about leadership philosophy with no dates or degrees.'), [])
+})
+
+test('an implausible span is rejected rather than recorded', () => {
+  // A copyright line "1975 - 2026" must not become 51 years of experience.
+  const f = deriveFacts('Founded 1899 - 1905. Senior Engineer | 2015 - Present', 2026)
+    .find(x => x.key === 'experience.years_total')
+  assert.ok(f === undefined || f.value_num < 60)
+})

@@ -136,3 +136,114 @@ export function proposeMissingFacts(requirementTexts: string[], facts: OwnerFact
   }
   return FACT_CATALOGUE.filter(d => wanted.has(d.key))
 }
+
+// ---------------------------------------------------------------------------------------------
+// DERIVATION — read the facts off the source instead of asking for them.
+//
+// The resume template's STATIC sections already state the work history with dates, the education
+// line and any certifications. MasterContext's workHistory1-4 state the same thing in prose. Asking
+// the owner to retype what those already say is the fallback-instead-of-source mistake; manual entry
+// is the fallback, not the starting point.
+//
+// Everything derived here is written as source='derived' with confirmed_at NULL. A derived fact is
+// the system's reading of a document — it is evidence, not testimony — and per the rule above it
+// cannot settle a requirement until the owner confirms it. Each one carries the snippet it came
+// from, so confirming is a glance rather than an investigation.
+
+export interface DerivedFact {
+  key: string
+  value: string
+  value_num: number | null
+  evidence: string
+}
+
+const THIS_YEAR = 2026   // passed in by callers that have a clock; see deriveFacts(text, now)
+
+/** Year ranges a work-history line states: "2003 - 2010", "2015 to Present", "Jan 2019 – Present". */
+function yearRanges(text: string): Array<{ from: number; to: number | null; at: string }> {
+  const out: Array<{ from: number; to: number | null; at: string }> = []
+  const re = /\b(19[7-9]\d|20[0-4]\d)\s*(?:-|–|—|to|until)\s*(present|current|now|(?:19[7-9]\d|20[0-4]\d))\b/gi
+  let m: RegExpExecArray | null
+  while ((m = re.exec(text)) !== null) {
+    const from = Number(m[1])
+    const toRaw = m[2].toLowerCase()
+    const to = /^\d{4}$/.test(toRaw) ? Number(toRaw) : null
+    out.push({ from, to, at: text.slice(Math.max(0, m.index - 40), m.index + m[0].length + 10).replace(/\s+/g, ' ').trim() })
+  }
+  return out
+}
+
+const DEGREE_RE = /\b(ph\.?d\.?|doctorate|m\.?b\.?a\.?|master(?:'?s)?(?: of| in| degree)?|bachelor(?:'?s)?(?: of| in| degree)?|b\.?s\.?c?\.?|m\.?s\.?c?\.?|b\.?a\.?)\b[^.\n]{0,60}/gi
+const DEGREE_RANK: Array<[RegExp, string]> = [
+  [/ph\.?d|doctorate/i, 'Doctorate'],
+  [/m\.?b\.?a/i, 'MBA'],
+  [/master|m\.?s\.?c?\.?\b|m\.?a\.?\b/i, 'Master'],
+  [/bachelor|b\.?s\.?c?\.?\b|b\.?a\.?\b/i, 'Bachelor'],
+]
+
+const CERT_RE = /\b(pmp|cissp|cisa|cism|csm|safe\s*\d*|itil|togaf|aws certified[^,.\n]{0,40}|azure[^,.\n]{0,30}certified|google cloud[^,.\n]{0,30}certified|six sigma[^,.\n]{0,20}|prince2|certified scrum[^,.\n]{0,30})\b/gi
+
+/**
+ * Derive what the source documents already state.
+ *
+ * `now` is injected rather than read from a clock so the result is reproducible and testable — the
+ * same input always yields the same facts, which is the property every other engine here keeps.
+ */
+export function deriveFacts(text: string, now: number = THIS_YEAR): DerivedFact[] {
+  const src = String(text || '')
+  const out: DerivedFact[] = []
+  if (!src.trim()) return out
+
+  // --- total years, from the earliest work-history start year ---------------------------------
+  const ranges = yearRanges(src)
+  if (ranges.length) {
+    const earliest = ranges.reduce((a, b) => (b.from < a.from ? b : a))
+    const years = now - earliest.from
+    if (years > 0 && years < 60) {
+      out.push({
+        key: 'experience.years_total',
+        value: `${years} years (since ${earliest.from})`,
+        value_num: years,
+        evidence: `earliest dated role: ...${earliest.at}...`,
+      })
+    }
+  }
+
+  // --- highest degree -------------------------------------------------------------------------
+  const degrees = Array.from(new Set((src.match(DEGREE_RE) || []).map(d => d.replace(/\s+/g, ' ').trim())))
+  if (degrees.length) {
+    let best: string | null = null
+    for (const [re, label] of DEGREE_RANK) {
+      const hit = degrees.find(d => re.test(d))
+      if (hit) { best = `${label} — ${hit}`; break }
+    }
+    if (best) out.push({ key: 'education.highest_degree', value: best, value_num: null, evidence: degrees.slice(0, 4).join(' | ') })
+  }
+
+  // --- certifications -------------------------------------------------------------------------
+  const certs = Array.from(new Set((src.match(CERT_RE) || []).map(c => c.replace(/\s+/g, ' ').trim())))
+  if (certs.length) {
+    out.push({ key: 'education.certifications', value: certs.join(', '), value_num: null, evidence: `${certs.length} match(es) in the source` })
+  }
+
+  // --- largest team / budget scope ------------------------------------------------------------
+  const teams = Array.from(src.matchAll(/\b(?:team|org|organization)s?\s+of\s+(\d{1,4})\b|\b(\d{1,4})\s*(?:\+\s*)?(?:direct reports|engineers|developers|people|staff|FTEs?)\b/gi))
+    .map(m => Number(m[1] || m[2])).filter(n => n > 0 && n < 100000)
+  if (teams.length) {
+    const largest = Math.max(...teams)
+    out.push({ key: 'scope.largest_team', value: String(largest), value_num: largest, evidence: `largest of ${teams.length} team-size mention(s)` })
+  }
+
+  const budgets = Array.from(src.matchAll(/\$\s?(\d+(?:\.\d+)?)\s*(k|m|mm|million|b|bn|billion)\b/gi))
+    .map(m => {
+      const n = Number(m[1]); const u = m[2].toLowerCase()
+      return u === 'k' ? n * 1e3 : u.startsWith('b') ? n * 1e9 : n * 1e6
+    })
+  if (budgets.length) {
+    const largest = Math.max(...budgets)
+    const pretty = largest >= 1e9 ? `$${(largest / 1e9).toFixed(1)}B` : largest >= 1e6 ? `$${(largest / 1e6).toFixed(0)}M` : `$${Math.round(largest / 1e3)}K`
+    out.push({ key: 'scope.largest_budget', value: pretty, value_num: largest, evidence: `largest of ${budgets.length} figure(s) in the source` })
+  }
+
+  return out
+}
