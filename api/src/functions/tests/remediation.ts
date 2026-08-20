@@ -22,13 +22,31 @@
 //   P3-37  Green because fixed, never because stopped. `reportedOutcome` cannot say converged while
 //   /38    anything is open, and `evidenceRemoved` names a run that got greener by deleting rows.
 //
-// THE DENOMINATOR (D-12). The loop's `remaining` is read from the deterministic engine's
-// `must_have_coverage` offenders — NOT from `requirement` rows directly. That is deliberate: the
-// engine has already removed the requirements no merge field can carry (`template_reach`) and the
-// ones the owner's facts settle (`facts_settled` / `facts_needed`). A loop reading requirement rows
-// would chase clauses like "must reside on the East Coast" that no generated field can ever
-// evidence, and burn all four passes on them. If the engine could not judge coverage at all, the
-// loop stops rather than optimising against nothing — absent evidence is not a target.
+// THE DENOMINATOR (D-12, and RETARGETED after P8.3's C6 landed).
+//
+// The loop's `remaining` is read from the deterministic engine's `evidence_placed` offenders — NOT
+// from `must_have_coverage`, and NOT from `requirement` rows directly.
+//
+// WHY NOT `must_have_coverage`. Since C6 it is computed purely from `evidenceOf(r)` — whether the
+// owner's stored PROFILE evidences the requirement — and never consults the generated document.
+// Measured on the merged engine: a document restating a requirement verbatim scores `fail` if no
+// evidence row resolved, and a document reading "I enjoy sailing and baking bread" scores `pass` if
+// one did. No merge-field rewrite can move it. A loop targeting it would rewrite, close nothing,
+// and halt — every time.
+//
+// WHY `evidence_placed`. It is the document-side half that P8.3 split out for exactly this purpose:
+// `PLACED_EXPECT` is "every requirement your profile evidences is actually stated in this document",
+// and it divides `evidenced` (the profile supports it) by `covers(r)` (the document says it). That
+// is precisely and only what a rewrite can move. A requirement with NO evidence row is not
+// closeable by this loop at all — that is a gap in the profile, and it escalates unchanged.
+//
+// `placeable` already excludes requirements under MIN_JUDGEABLE_TOKENS (`tooThin`), which `covers()`
+// cannot judge either way. They are absent from the offender list and so absent from this
+// denominator — they must never be counted as open work OR as closed, which is the laundering
+// defect the coverage check itself was fixed for, one layer down.
+//
+// If the engine could not judge placement at all, the loop stops rather than optimising against
+// nothing — absent evidence is not a target.
 import { CheckResult, CheckState, coversText } from './checks'
 import { mergeFieldsFor } from './insertions'
 
@@ -202,13 +220,23 @@ export function offenderSeqs(offenders: string[] | null | undefined): number[] {
   return [...new Set(out)].sort((a, b) => a - b)
 }
 
+/** The check whose offenders the loop works from. Named once, because it is the whole argument. */
+export const CLOSE_CHECK_KEY = 'evidence_placed'
+
 export interface CoverageView {
-  /** The `must_have_coverage` state for this run, verbatim. `not_applicable` is NOT a pass. */
+  /** The `evidence_placed` state for this run, verbatim. `not_applicable` is NOT a pass. */
   state: CheckState
   /** True when the engine reached a verdict at all. `not_applicable` and a missing row are both false. */
   judged: boolean
-  /** The uncovered must-haves the engine named — already net of eligibility and fact-settled rows. */
+  /** Requirements the profile evidences that this document does NOT state. The loop's work. */
   openSeqs: number[]
+  /**
+   * `must_have_coverage`, carried for REPORTING ONLY. The loop cannot move it and must never
+   * optimise against it; it is here so a summary can say honestly that the profile still does not
+   * evidence something, which is a different problem with a different owner.
+   */
+  coverageState: CheckState
+  coverageObserved: string
   /** Named so an escalation can say what was excluded and why, rather than silently narrowing. */
   eligibilitySeqs: number[]
   factsNeededSeqs: number[]
@@ -217,17 +245,23 @@ export interface CoverageView {
 
 export function coverageView(results: CheckResult[]): CoverageView {
   const find = (k: string) => (results || []).find(r => r.check_key === k && r.engine === 'deterministic')
+  const placed = find(CLOSE_CHECK_KEY)
   const mh = find('must_have_coverage')
   const reach = find('template_reach')
   const need = find('facts_needed')
-  const state: CheckState = mh ? mh.state : 'not_applicable'
+  const state: CheckState = placed ? placed.state : 'not_applicable'
   return {
     state,
-    judged: !!mh && state !== 'not_applicable',
-    openSeqs: mh && state === 'fail' ? offenderSeqs(mh.offenders) : [],
+    judged: !!placed && state !== 'not_applicable',
+    // `evidence_placed` reports its failures as `warn` (a document that omits an evidenced claim is
+    // a defect, not a hard block), so the open list is read from any non-pass judged state rather
+    // than from `fail` alone. Reading only `fail` would have made the loop see nothing to do.
+    openSeqs: placed && state !== 'pass' && state !== 'not_applicable' ? offenderSeqs(placed.offenders) : [],
+    coverageState: mh ? mh.state : 'not_applicable',
+    coverageObserved: mh ? mh.observed : 'no must_have_coverage check was run',
     eligibilitySeqs: reach && reach.state === 'not_applicable' ? offenderSeqs(reach.offenders) : [],
     factsNeededSeqs: need ? offenderSeqs(need.offenders) : [],
-    observed: mh ? mh.observed : 'no must_have_coverage check was run',
+    observed: placed ? placed.observed : `no ${CLOSE_CHECK_KEY} check was run`,
   }
 }
 
@@ -533,23 +567,30 @@ export interface PassDecision { action: 'regenerate' | 'halt'; reason: HaltReaso
 export function decidePass(s: PassState): PassDecision {
   const cov = s.coverage
   if (!cov.judged) {
+    // `evidence_placed` is not_applicable when the profile evidences nothing yet, or when every
+    // evidenced requirement is too short to judge. Either way there is nothing this loop can place,
+    // and that is a gap in the PROFILE, not in the document — a different problem with a different
+    // owner. Optimising against it would mean rewriting text to satisfy a check that is not looking.
     return { action: 'halt', reason: 'no_coverage_evidence',
-      detail: `must_have_coverage is ${cov.state} — ${cov.observed}. Absent evidence is not a target and never a pass.` }
+      detail: `${CLOSE_CHECK_KEY} is ${cov.state} — ${cov.observed}. Absent evidence is not a target and never a pass.` }
   }
   if (!s.remaining.length) {
     if (cov.state !== 'pass') {
       return { action: 'halt', reason: 'no_coverage_evidence',
-        detail: `nothing is listed open but must_have_coverage is ${cov.state}; that is not convergence` }
+        detail: `nothing is listed open but ${CLOSE_CHECK_KEY} is ${cov.state}; that is not convergence` }
     }
     // Nothing open AND the engine says pass - but if requirements left the open list that no pass's
     // own writing accounts for, this run did not close them and must not say it did.
+    // Carried over from must_have_coverage unchanged, because it was the sharpest guard here and it
+    // applies identically to placement: refusing the CREDIT is not refusing the CLAIM.
     if (s.phantomSoFar > 0) {
       return { action: 'halt', reason: 'unattributed_coverage',
-        detail: `every must-have now reads as covered, but ${s.phantomSoFar} of them left the open list `
-          + `with no edit from this run carrying the evidence. The document may have been covering them `
-          + `already. Nothing was closed by this run.` }
+        detail: `every evidenced requirement now appears in the document, but ${s.phantomSoFar} of them left `
+          + `the open list with no edit from this run carrying the evidence. The document may have been `
+          + `stating them already. Nothing was placed by this run.` }
     }
-    return { action: 'halt', reason: 'converged', detail: `every must-have is covered — ${cov.observed}` }
+    return { action: 'halt', reason: 'converged',
+      detail: `every requirement your profile evidences is stated in this document — ${cov.observed}` }
   }
   const b = budgetVerdict(s.spend, s.prefs)
   if (b.halt) return { action: 'halt', reason: b.reason, detail: b.detail }
@@ -573,7 +614,8 @@ export function decidePass(s: PassState): PassDecision {
 export interface EvidenceSnapshot {
   /** Rows in `requirement` for this opportunity. */
   reqCount: number
-  mustHaveState: CheckState
+  /** The `evidence_placed` state — the one the loop moves, so the one it could cheat on. */
+  closeState: CheckState
 }
 
 /**
@@ -589,8 +631,9 @@ export function evidenceRemoved(before: EvidenceSnapshot, after: EvidenceSnapsho
   if (after.reqCount !== before.reqCount) {
     return `requirement rows changed during the loop: ${before.reqCount} -> ${after.reqCount}. The loop may not add or remove the evidence it is judged against.`
   }
-  if (before.mustHaveState === 'fail' && after.mustHaveState === 'not_applicable') {
-    return 'must_have_coverage went fail -> not_applicable. That is evidence disappearing, not coverage being achieved.'
+  // `evidence_placed` reports failure as `warn`, so guard every judged state, not `fail` alone.
+  if ((before.closeState === 'warn' || before.closeState === 'fail') && after.closeState === 'not_applicable') {
+    return `${CLOSE_CHECK_KEY} went ${before.closeState} -> not_applicable. That is evidence disappearing, not placement being achieved.`
   }
   return null
 }
@@ -603,7 +646,8 @@ export function assertEvidenceIntact(before: EvidenceSnapshot, after: EvidenceSn
 
 export interface LoopRowLike {
   n: number; halted: boolean; halt_reason: HaltReason | null; remaining: number[]
-  must_have_state: CheckState
+  /** The `evidence_placed` state for that pass — the check the loop can actually move. */
+  close_state: CheckState
   /** Flips no pass's own writing accounted for. A run carrying any of these did not converge. */
   phantom_closes?: number[]
 }
@@ -633,19 +677,21 @@ export function reportedOutcome(rows: LoopRowLike[]): Outcome {
   // have been written. Recomputing here means a bad row cannot talk this function into the sentence.
   const phantom = rows.reduce((n, r) => n + ((r.phantom_closes || []).length), 0)
   const converged = !!last && reason === 'converged' && open === 0
-    && last.must_have_state === 'pass' && phantom === 0
+    && last.close_state === 'pass' && phantom === 0
   return {
     converged,
     openMustHaves: open,
     passes: rows.length,
     haltReason: reason,
     summary: converged
-      ? `Converged after ${rows.length} pass(es): every must-have requirement is covered and the run's coverage check passed.`
+      ? `Converged after ${rows.length} pass(es): every requirement the profile evidences is now stated in this document, `
+        + `and the run's placement check passed. This says nothing about requirements the profile does not evidence — `
+        + `those are a gap in the profile, which this loop cannot close.`
       : open === 0 && phantom > 0
-        ? `Halted after ${rows.length} pass(es): every must-have now reads as covered, but ${phantom} left the open list `
-          + `with no edit from this run carrying the evidence — so this run cannot claim to have closed them. `
+        ? `Halted after ${rows.length} pass(es): every evidenced requirement now appears in the document, but ${phantom} left `
+          + `the open list with no edit from this run carrying the evidence — so this run cannot claim to have placed them. `
           + `The gate stays as the checks left it.`
-        : `Halted after ${rows.length} pass(es) (${reason || 'unknown'}) with ${open} must-have requirement(s) still open. The gate stays as the checks left it; nothing was closed by stopping.`,
+        : `Halted after ${rows.length} pass(es) (${reason || 'unknown'}) with ${open} evidenced requirement(s) still absent from this document. The gate stays as the checks left it; nothing was placed by stopping.`,
   }
 }
 
@@ -689,9 +735,9 @@ export function escalationFor(input: EscalationInput): EscalationText {
     token_ceiling: `the token ceiling was reached before this requirement could be evidenced`,
     time_budget: `the wall-clock guard stopped the run before this requirement could be evidenced`,
     nothing_reachable: `every rewritable field was the only evidence for a requirement that is already covered, so there was no edit available that did not cost evidence already held`,
-    no_coverage_evidence: `coverage could not be judged for this artifact, so the loop had nothing honest to optimise against`,
+    no_coverage_evidence: `placement could not be judged for this artifact - your profile does not yet evidence this requirement, so there is nothing for the document to state. That is a gap in the profile, and this loop cannot close it`,
     error: `the pass failed with an error before this requirement could be evidenced`,
-    unattributed_coverage: `it left the open list without any edit from this run carrying the evidence, so this run cannot claim to have closed it - the document may have been covering it already`,
+    unattributed_coverage: `it left the open list without any edit from this run carrying the evidence, so this run cannot claim to have placed it - the document may have been stating it already`,
     ungrounded: `this opportunity has no job posting on file, so there was nothing to remediate against - a package built from our own metadata about the job cannot evidence the employer's requirements`,
     converged: `recorded for completeness — the run converged, so this should not have been raised`,
   }

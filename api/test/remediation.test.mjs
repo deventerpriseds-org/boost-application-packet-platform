@@ -10,7 +10,7 @@ import {
   DEFAULT_LOOP_PREFS, ZERO_SPEND, addCall, costComplete, budgetVerdict, offenderSeqs, coverageView,
   realEdits, creditClosures, scopeForRequirements, applyScopedFields, buildScopedPrompt, decidePass,
   evidenceRemoved, assertEvidenceIntact, reportedOutcome, escalationFor, isHonestGreen,
-  STRUCTURAL_FIELDS, HALT_REASONS, profileEvidenceFor, nextPassNumber,
+  STRUCTURAL_FIELDS, HALT_REASONS, profileEvidenceFor, nextPassNumber, CLOSE_CHECK_KEY,
 } from '../dist/functions/tests/remediation.js'
 
 const req = (seq, text) => ({ seq, verbatim: text, item_text: text })
@@ -70,9 +70,9 @@ test('P3-11 realEdits ignores a row whose after_text is blank or unchanged', () 
 // P3-05 / P3-37 — converged is unfalsifiable; green because fixed, never because stopped
 // ---------------------------------------------------------------------------------------------
 
-test('P3-05 nothing open but must_have_coverage is not_applicable is NOT convergence', () => {
+test('P3-05 nothing open but evidence_placed is not_applicable is NOT convergence', () => {
   const d = decidePass({
-    pass: 1, coverage: coverageView([det('must_have_coverage', 'not_applicable')]),
+    pass: 1, coverage: coverageView([det('evidence_placed', 'not_applicable')]),
     remaining: [], progressedLastPass: null, spend: ZERO_SPEND, prefs: DEFAULT_LOOP_PREFS, scope: ['ResumeSummary'],
   })
   assert.equal(d.action, 'halt')
@@ -80,33 +80,33 @@ test('P3-05 nothing open but must_have_coverage is not_applicable is NOT converg
   assert.notEqual(d.reason, 'converged')
 })
 
-test('P3-05 converged requires BOTH an empty open list and a passing coverage check', () => {
+test('P3-05 converged requires BOTH an empty open list and a passing placement check', () => {
   const conv = decidePass({
-    pass: 1, coverage: coverageView([det('must_have_coverage', 'pass')]),
+    pass: 1, coverage: coverageView([det('evidence_placed', 'pass')]),
     remaining: [], progressedLastPass: null, spend: ZERO_SPEND, prefs: DEFAULT_LOOP_PREFS, scope: ['ResumeSummary'],
   })
   assert.equal(conv.reason, 'converged')
   const warn = decidePass({
-    pass: 1, coverage: coverageView([det('must_have_coverage', 'warn')]),
+    pass: 1, coverage: coverageView([det('evidence_placed', 'fail')]),
     remaining: [], progressedLastPass: null, spend: ZERO_SPEND, prefs: DEFAULT_LOOP_PREFS, scope: ['ResumeSummary'],
   })
-  assert.notEqual(warn.reason, 'converged', 'a warn coverage check is not convergence')
+  assert.notEqual(warn.reason, 'converged', 'a fail placement check is not convergence')
 })
 
-test('P3-37 a halted run with must-haves open never reports converged, and says so in words', () => {
+test('P3-37 a halted run with requirements still unplaced never reports converged, and says so in words', () => {
   const o = reportedOutcome([
-    { n: 1, halted: false, halt_reason: null, remaining: [3, 4], must_have_state: 'fail' },
-    { n: 2, halted: true, halt_reason: 'no_progress', remaining: [3, 4], must_have_state: 'fail' },
+    { n: 1, halted: false, halt_reason: null, remaining: [3, 4], close_state: 'fail' },
+    { n: 2, halted: true, halt_reason: 'no_progress', remaining: [3, 4], close_state: 'fail' },
   ])
   assert.equal(o.converged, false)
   assert.equal(o.openMustHaves, 2)
-  assert.match(o.summary, /Halted after 2 pass\(es\) \(no_progress\) with 2 must-have/)
+  assert.match(o.summary, /Halted after 2 pass\(es\) \(no_progress\) with 2 evidenced requirement/)
   assert.doesNotMatch(o.summary, /Converged/)
 })
 
 test('P3-37 reportedOutcome refuses converged when the last row still lists open requirements', () => {
   // The row could only exist if the table CHECK were bypassed; the reader must not trust it anyway.
-  const o = reportedOutcome([{ n: 1, halted: true, halt_reason: 'converged', remaining: [9], must_have_state: 'pass' }])
+  const o = reportedOutcome([{ n: 1, halted: true, halt_reason: 'converged', remaining: [9], close_state: 'pass' }])
   assert.equal(o.converged, false, 'converged with something open is a contradiction, not a result')
 })
 
@@ -120,41 +120,41 @@ test('only converged is honest green', () => {
 // ---------------------------------------------------------------------------------------------
 
 test('P3-38 requirement rows disappearing during a loop is refused', () => {
-  const why = evidenceRemoved({ reqCount: 12, mustHaveState: 'fail' }, { reqCount: 9, mustHaveState: 'pass' })
+  const why = evidenceRemoved({ reqCount: 12, closeState: 'fail' }, { reqCount: 9, closeState: 'pass' })
   assert.match(why, /requirement rows changed during the loop: 12 -> 9/)
-  assert.throws(() => assertEvidenceIntact({ reqCount: 12, mustHaveState: 'fail' }, { reqCount: 9, mustHaveState: 'pass' }),
+  assert.throws(() => assertEvidenceIntact({ reqCount: 12, closeState: 'fail' }, { reqCount: 9, closeState: 'pass' }),
     /remediation refused/)
 })
 
 test('P3-38 must_have_coverage sliding fail -> not_applicable is refused', () => {
-  const why = evidenceRemoved({ reqCount: 12, mustHaveState: 'fail' }, { reqCount: 12, mustHaveState: 'not_applicable' })
+  const why = evidenceRemoved({ reqCount: 12, closeState: 'fail' }, { reqCount: 12, closeState: 'not_applicable' })
   assert.match(why, /fail -> not_applicable/)
 })
 
 test('P3-38 an honest fail -> pass with the evidence intact is allowed', () => {
-  assert.equal(evidenceRemoved({ reqCount: 12, mustHaveState: 'fail' }, { reqCount: 12, mustHaveState: 'pass' }), null)
+  assert.equal(evidenceRemoved({ reqCount: 12, closeState: 'fail' }, { reqCount: 12, closeState: 'pass' }), null)
 })
 
 // ---------------------------------------------------------------------------------------------
 // The denominator (D-12) — read from the engine, not from requirement rows
 // ---------------------------------------------------------------------------------------------
 
-test('the open list comes from the engine offenders, and only when it FAILED', () => {
-  const v = coverageView([det('must_have_coverage', 'fail', { offenders: ['#3 lead the portfolio', '#7 board reporting', '#3 dupe'] })])
+test('the open list comes from the engine offenders, and only when placement did NOT pass', () => {
+  const v = coverageView([det('evidence_placed', 'warn', { offenders: ['#3 lead the portfolio', '#7 board reporting', '#3 dupe'] })])
   assert.deepEqual(v.openSeqs, [3, 7])
   assert.equal(v.judged, true)
   const passing = coverageView([det('must_have_coverage', 'pass', { offenders: ['#3 stale'] })])
   assert.deepEqual(passing.openSeqs, [], 'a passing check has no open list, whatever it left in offenders')
 })
 
-test('a missing must_have_coverage row is not_applicable and not judged', () => {
+test('a missing evidence_placed row is not_applicable and not judged', () => {
   const v = coverageView([det('skill_char_limit', 'pass')])
   assert.equal(v.state, 'not_applicable')
   assert.equal(v.judged, false)
 })
 
 test('a reviewer-engine coverage row never supplies the denominator', () => {
-  const v = coverageView([{ check_key: 'must_have_coverage', engine: 'reviewer', state: 'fail', observed: '', expected: '', offenders: ['#1 x'] }])
+  const v = coverageView([{ check_key: 'evidence_placed', engine: 'reviewer', state: 'warn', observed: '', expected: '', offenders: ['#1 x'] }])
   assert.equal(v.judged, false, 'the loop optimises against deterministic rows only (D6)')
 })
 
@@ -263,7 +263,7 @@ test('the pass ceiling is the owner\'s, not a constant', () => {
 
 test('a budget halt is never mislabelled as no_progress', () => {
   const d = decidePass({
-    pass: 3, coverage: coverageView([det('must_have_coverage', 'fail', { offenders: ['#1 x'] })]),
+    pass: 3, coverage: coverageView([det('evidence_placed', 'warn', { offenders: ['#1 x'] })]),
     remaining: [1], progressedLastPass: false,
     spend: { ...ZERO_SPEND, elapsedMs: 999_999 }, prefs: DEFAULT_LOOP_PREFS, scope: ['ResumeSummary'],
   })
@@ -272,7 +272,7 @@ test('a budget halt is never mislabelled as no_progress', () => {
 
 test('a pass that closed nothing halts as no_progress', () => {
   const d = decidePass({
-    pass: 2, coverage: coverageView([det('must_have_coverage', 'fail', { offenders: ['#1 x'] })]),
+    pass: 2, coverage: coverageView([det('evidence_placed', 'warn', { offenders: ['#1 x'] })]),
     remaining: [1], progressedLastPass: false, spend: { ...ZERO_SPEND, passesDone: 1 },
     prefs: DEFAULT_LOOP_PREFS, scope: ['ResumeSummary'],
   })
@@ -281,7 +281,7 @@ test('a pass that closed nothing halts as no_progress', () => {
 
 test('an empty scope halts rather than rewriting evidence already held', () => {
   const d = decidePass({
-    pass: 1, coverage: coverageView([det('must_have_coverage', 'fail', { offenders: ['#1 x'] })]),
+    pass: 1, coverage: coverageView([det('evidence_placed', 'warn', { offenders: ['#1 x'] })]),
     remaining: [1], progressedLastPass: null, spend: ZERO_SPEND, prefs: DEFAULT_LOOP_PREFS, scope: [],
   })
   assert.equal(d.reason, 'nothing_reachable')
@@ -289,7 +289,7 @@ test('an empty scope halts rather than rewriting evidence already held', () => {
 
 test('with work to do and budget left, the loop regenerates', () => {
   const d = decidePass({
-    pass: 1, coverage: coverageView([det('must_have_coverage', 'fail', { offenders: ['#1 x', '#2 y'] })]),
+    pass: 1, coverage: coverageView([det('evidence_placed', 'warn', { offenders: ['#1 x', '#2 y'] })]),
     remaining: [1, 2], progressedLastPass: null, spend: ZERO_SPEND, prefs: DEFAULT_LOOP_PREFS, scope: ['ResumeSummary'],
   })
   assert.equal(d.action, 'regenerate')
@@ -388,8 +388,6 @@ test('a second run starts after the highest pass already recorded', () => {
 // whatever it is called.
 import { runChecks, COVERAGE_THRESHOLD, coversText } from '../dist/functions/tests/checks.js'
 
-const COVERAGE_REQ = 'led a platform modernization programme across four business units'
-
 const COVERAGE_CASES = [
   ['exact restatement',        'led a platform modernization programme across four business units'],
   ['partial overlap',          'led a modernization programme'],
@@ -400,56 +398,82 @@ const COVERAGE_CASES = [
 ]
 
 // ---------------------------------------------------------------------------------------------
-// P3-15 — BLOCKING CONFLICT WITH P8.3 (conflict-register C6). Pinned, not papered over.
+// P3-15 — THE LOOP'S CLOSE-CRITERION IS THE DOCUMENT-SIDE CHECK. Pinned as an invariant.
 //
-// P8.3 landed on main and moved what `must_have_coverage` MEASURES. It no longer looks at the
-// generated document at all: it asks whether an evidence row resolved for that requirement from the
-// owner's stored profile. Measured on the merged engine:
+// These were written when P8.3's C6 landing looked like a blocker. It was not: C6 split coverage
+// into two numbers ON PURPOSE, and P3 was pointed at the wrong one.
 //
-//   document restates the requirement VERBATIM, no evidence rows      -> not_applicable
-//   document restates the requirement VERBATIM, req unevidenced       -> fail
-//   document is "I enjoy sailing and baking bread", req evidenced     -> pass
+//   `must_have_coverage`  does the owner's PROFILE evidence this requirement?
+//                         Computed from `evidenceOf(r)` alone; never reads the document. A
+//                         merge-field rewrite cannot move it, and it should not — a gap in the
+//                         profile is not something a document rewrite may paper over.
+//   `evidence_placed`     "every requirement your profile evidences is actually stated in this
+//                         document" — `evidenced` divided by `covers(r)`. This is exactly and only
+//                         what a rewrite can move, and it is what the loop now targets.
 //
-// P3's loop closes requirements by REWRITING MERGE FIELDS. Under this model no rewrite can move the
-// gate, so the loop as built will rewrite, observe zero closes, halt `no_progress` after one pass
-// and escalate everything. It invents nothing and reports honestly — but it cannot close anything.
-//
-// That is a design conflict between two lanes, not a bug in either, and it needs an owner decision
-// (see .claude/QC-EVIDENCE-PLAN.md). It is pinned here so it CANNOT be forgotten: if anyone changes
-// the coverage model again in either direction, these fail and name what moved.
+// The direction of these tests is INVERTED from their first version: they used to record that the
+// loop was blocked; they now fail if the loop is ever pointed back at `must_have_coverage`.
 // ---------------------------------------------------------------------------------------------
 
-const evidenceRun = (text, evidence) => runChecks({
+const COVERAGE_REQ = 'led a platform modernization programme across four business units'
+
+const placedRun = (text, evidence) => runChecks({
   type: 'resume',
   pkg: { ResumeSummary: text, SkillsBullets1: '', SkillsBullets2: '', ExpertiseBullets: '',
          RelevantBullets1: '', RelevantBullets2: '', RelevantBullets3: '' },
   company: 'Trinnex',
   requirements: [{ id: 'r1', seq: 1, verbatim: COVERAGE_REQ, item_text: COVERAGE_REQ, kind: 'must_have' }],
   postingText: COVERAGE_REQ, profileText: 'a profile', evidence,
-}).find(r => r.check_key === 'must_have_coverage')
+})
+const checkOf = (rs, key) => rs.find(r => r.check_key === key)
 
-test('P3-15 CONFLICT: the gate now ignores the document — a verbatim restatement does not cover', () => {
-  assert.equal(evidenceRun(COVERAGE_REQ, undefined).state, 'not_applicable',
-    'no evidence rows: absent evidence is not_applicable, never pass')
-  assert.equal(evidenceRun(COVERAGE_REQ, { profileReadable: true, bySeq: {} }).state, 'fail',
-    'the document restates the requirement word for word and the gate still calls it uncovered')
+test('P3-15 the loop targets evidence_placed, never must_have_coverage', () => {
+  assert.equal(CLOSE_CHECK_KEY, 'evidence_placed')
+  // The denominator function must read the document-side check and ignore the profile-side one.
+  const evidenced = { profileReadable: true, bySeq: { 1: { excerpt: 'ran a platform modernization programme', source_label: 'work history' } } }
+  const v = coverageView(placedRun('nothing relevant here at all', evidenced))
+  assert.equal(v.judged, true, 'the loop must be able to judge placement')
+  assert.deepEqual(v.openSeqs, [1], 'the evidenced-but-unstated requirement is the loop\'s work')
+  // ...and must_have_coverage is carried for reporting only, never as the target.
+  assert.equal(v.coverageState, 'pass', 'the profile DOES evidence it — that is a different number')
 })
 
-test('P3-15 CONFLICT: an unrelated document passes when the requirement is evidenced', () => {
-  const r = evidenceRun('I enjoy sailing and baking bread.',
-    { profileReadable: true, bySeq: { 1: { excerpt: 'ran a platform modernization programme' } } })
-  assert.equal(r.state, 'pass',
-    'coverage is decided by the evidence row alone; the generated text is not consulted')
+test('P3-15 a rewrite MOVES the check the loop targets — the whole premise', () => {
+  const evidenced = { profileReadable: true, bySeq: { 1: { excerpt: 'ran a platform modernization programme', source_label: 'work history' } } }
+  const before = checkOf(placedRun('I enjoy sailing and baking bread.', evidenced), 'evidence_placed')
+  const after = checkOf(placedRun(COVERAGE_REQ, evidenced), 'evidence_placed')
+  assert.notEqual(before.state, 'pass', 'a document that omits the evidenced claim must not pass')
+  assert.equal(after.state, 'pass', 'stating it must close it — otherwise the loop can never converge')
+  // The same rewrite must NOT move the profile-side check, which is why targeting it was wrong.
+  assert.equal(checkOf(placedRun('I enjoy sailing and baking bread.', evidenced), 'must_have_coverage').state,
+               checkOf(placedRun(COVERAGE_REQ, evidenced), 'must_have_coverage').state,
+               'must_have_coverage moved with the document — the two checks have been merged and the loop must be re-read')
 })
 
-test('P3-15 CONSEQUENCE: no merge-field rewrite can close a requirement under the merged gate', () => {
-  // This is the sentence that matters for P3: the loop\'s closing mechanism is inert. Asserted so
-  // that the day the models are reconciled, this test fails and someone re-reads the loop.
-  const before = evidenceRun('nothing relevant here', { profileReadable: true, bySeq: {} })
-  const after = evidenceRun(COVERAGE_REQ, { profileReadable: true, bySeq: {} })
-  assert.equal(before.state, after.state,
-    'rewriting the document from irrelevant to a verbatim restatement changed the gate — the conflict is resolved and P3 should be revisited')
-  assert.equal(after.state, 'fail')
+test('P3-15 a requirement the profile does not evidence is NOT the loop\'s to close', () => {
+  const unevidenced = { profileReadable: true, bySeq: {} }
+  const v = coverageView(placedRun(COVERAGE_REQ, unevidenced))
+  assert.deepEqual(v.openSeqs, [], 'nothing evidenced means nothing placeable; the loop must not chase it')
+  assert.equal(v.judged, false, 'not_applicable is not a target and never a pass')
+  assert.equal(v.coverageState, 'fail', 'the profile gap is REPORTED — it is simply not the loop\'s work')
+})
+
+test('P3-15 a requirement too short to judge is in neither the numerator nor the denominator', () => {
+  // `placeable` drops rows under MIN_JUDGEABLE_TOKENS. They must not count as open work OR as
+  // closed — counting them either way is the laundering defect the coverage check was fixed for.
+  const THIN = 'leading operations'
+  const rs = runChecks({
+    type: 'resume',
+    pkg: { ResumeSummary: 'unrelated text', SkillsBullets1: '', SkillsBullets2: '', ExpertiseBullets: '',
+           RelevantBullets1: '', RelevantBullets2: '', RelevantBullets3: '' },
+    company: 'Trinnex',
+    requirements: [{ id: 'r1', seq: 1, verbatim: THIN, item_text: THIN, kind: 'must_have' }],
+    postingText: THIN, profileText: 'a profile',
+    evidence: { profileReadable: true, bySeq: { 1: { excerpt: 'led operations', source_label: 'work history' } } },
+  })
+  const v = coverageView(rs)
+  assert.deepEqual(v.openSeqs, [], 'a too-thin requirement must never enter the loop\'s denominator')
+  assert.equal(checkOf(rs, 'evidence_placed').state, 'not_applicable')
 })
 
 test('P3-15 creditClosures itself obeys the gate — a renamed second rule cannot hide', () => {
@@ -527,7 +551,7 @@ test('P3-15 the loop credits at the GATE\'s threshold, not one of its own', () =
 
 test('D-8 nothing open, engine passes, but the flip was a phantom — that is NOT convergence', () => {
   const d = decidePass({
-    pass: 1, coverage: coverageView([det('must_have_coverage', 'pass')]),
+    pass: 1, coverage: coverageView([det('evidence_placed', 'pass')]),
     remaining: [], progressedLastPass: false, phantomSoFar: 1,
     spend: ZERO_SPEND, prefs: DEFAULT_LOOP_PREFS, scope: ['ResumeSummary'],
   })
@@ -539,7 +563,7 @@ test('D-8 nothing open, engine passes, but the flip was a phantom — that is NO
 
 test('D-8 with no phantoms the same state IS convergence — the guard is not blanket', () => {
   const d = decidePass({
-    pass: 1, coverage: coverageView([det('must_have_coverage', 'pass')]),
+    pass: 1, coverage: coverageView([det('evidence_placed', 'pass')]),
     remaining: [], progressedLastPass: true, phantomSoFar: 0,
     spend: ZERO_SPEND, prefs: DEFAULT_LOOP_PREFS, scope: ['ResumeSummary'],
   })
@@ -550,17 +574,17 @@ test('D-8 reportedOutcome refuses the word even if a row claims it', () => {
   // Belt and braces: this is the one place the sentence is produced, so a row that should never
   // have been written cannot talk it into saying converged.
   const o = reportedOutcome([
-    { n: 1, halted: true, halt_reason: 'converged', remaining: [], must_have_state: 'pass', phantom_closes: [7] },
+    { n: 1, halted: true, halt_reason: 'converged', remaining: [], close_state: 'pass', phantom_closes: [7] },
   ])
   assert.equal(o.converged, false)
   assert.doesNotMatch(o.summary, /^Converged/)
   assert.match(o.summary, /no edit from this run carrying the evidence/)
-  assert.match(o.summary, /cannot claim to have closed them/)
+  assert.match(o.summary, /cannot claim to have placed them/)
 })
 
 test('D-8 a clean converged run still reads as converged', () => {
   const o = reportedOutcome([
-    { n: 1, halted: true, halt_reason: 'converged', remaining: [], must_have_state: 'pass', phantom_closes: [] },
+    { n: 1, halted: true, halt_reason: 'converged', remaining: [], close_state: 'pass', phantom_closes: [] },
   ])
   assert.equal(o.converged, true)
   assert.match(o.summary, /^Converged after 1 pass\(es\)/)
@@ -625,4 +649,42 @@ test('D-5 with no supplied evidence the prompt gains no empty section', () => {
     profileText: 'profile',
   })
   assert.doesNotMatch(user, /EVIDENCE THE CANDIDATE SUPPLIED/)
+})
+
+// ---------------------------------------------------------------------------------------------
+// P7 item 6 — a partial build must not report clean success
+//
+// `buildPackageForJD` has always returned `warnings` and `qcApplied`; `appPackets` read NEITHER.
+// A build that lost a section to an unmapped title, or whose ATS-QC call returned an empty object,
+// produced a document and reported `ok: true` with no hint anything was wrong — the only trace was
+// a console.warn nobody reads. Worse, `packetBuildAll` returned `ok: true, note: 'Packet built.'`
+// even when EVERY artifact threw: the per-artifact error was in the payload, but the one field a
+// caller checks said success.
+//
+// These are source assertions because the behaviour needs Drive, Postgres and OpenAI to exercise.
+// ---------------------------------------------------------------------------------------------
+
+import { readFileSync as _read } from 'node:fs'
+const PACKETS_SRC = _read(new URL('../src/functions/tests/appPackets.ts', import.meta.url), 'utf8')
+const stripped = PACKETS_SRC
+  .replace(/\/\*[\s\S]*?\*\//g, ' ')
+  .split('\n').map(l => l.replace(/(^|[^:])\/\/.*$/, '$1')).join('\n')
+
+test('P7-6 the build funnel carries warnings out of generation', () => {
+  assert.match(stripped, /warnings: built\.warnings, qcApplied: built\.qcApplied/,
+    'ensurePackage drops the warnings again — they die in a console.warn')
+})
+
+test('P7-6 no build endpoint reports unqualified ok:true', () => {
+  // The real construct: `ok: true` as a literal in a jsonBody of a build handler.
+  const buildRegion = stripped.slice(stripped.indexOf('export async function artifactDocument'))
+  const offenders = [...buildRegion.matchAll(/ok: true[^}]*templated: true/g)].map(m => m[0].slice(0, 60))
+  assert.deepEqual(offenders, [], 'a templated build still reports ok:true regardless of warnings')
+  assert.match(stripped, /ok: !built!\.warnings\?\.length/, 'ok must reflect a CLEAN build')
+})
+
+test('P7-6 build-all cannot report success when artifacts failed', () => {
+  assert.match(stripped, /ok: !failed\.length && !warned\.length/,
+    'packetBuildAll reports ok:true even when every artifact threw')
+  assert.match(stripped, /artifact\(s\) FAILED to build/, 'the note must say what failed, not "Packet built"')
 })

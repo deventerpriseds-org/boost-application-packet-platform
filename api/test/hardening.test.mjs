@@ -1335,18 +1335,23 @@ test('H36b: every loop/pass/round counter column has a writer — no dead counte
 // keyed by run_id, and nothing else in the schema tied a summary row back to them.
 test('H37: converged is unforgeable in the schema, not just in the writer', () => {
   const schema = src('schema.ts')
-  assert.match(schema, /check \(halt_reason is distinct from 'converged'\s*\n?\s*or \(cardinality\(remaining\) = 0 and must_have_state = 'pass'\)\)/,
+  assert.match(schema, /check \(halt_reason is distinct from 'converged'\s*\n?\s*or \(cardinality\(remaining\) = 0 and close_state = 'pass'\)\)/,
     'the converged CHECK is gone; the word becomes whatever the writer says')
-  assert.match(schema, /foreign key \(artifact_id, run_id, must_have_check_key, must_have_state\)\s*\n?\s*references check_result \(artifact_id, run_id, check_key, state\)/,
-    'without the composite FK, must_have_state is an assertion rather than a copy of a real check')
+  assert.match(schema, /foreign key \(artifact_id, run_id, close_check_key, close_state\)\s*\n?\s*references check_result \(artifact_id, run_id, check_key, state\)/,
+    'without the composite FK, close_state is an assertion rather than a copy of a real check')
+  // The loop must be tied to the DOCUMENT-side check. `must_have_coverage` is computed from the
+  // owner's profile alone and no rewrite can move it, so binding convergence to it would make
+  // convergence unreachable and every run would halt having closed nothing.
+  assert.match(schema, /close_check_key text not null default 'evidence_placed' check \(close_check_key = 'evidence_placed'\)/,
+    'the loop is bound to a check other than evidence_placed')
   // On check_result's OWN create block. Searching all of SCHEMA_SQL matched the idempotent ALTER
   // instead, so this assertion could not fail while that ALTER existed — inert, and inert in the
   // guard whose whole subject is a constraint that must be in two places at once.
   assert.match(createTable(schema, 'check_result'), /unique \(artifact_id, run_id, check_key, state\)/,
     'the FK needs this unique inline on check_result, for a database created from scratch')
   // P3-38: going green by turning a failure into "nothing to check" is refused by the table.
-  assert.match(schema, /check \(not \(prev_must_have_state = 'fail' and must_have_state = 'not_applicable'\)\)/,
-    'fail -> not_applicable is evidence disappearing, not coverage being achieved')
+  assert.match(schema, /check \(not \(prev_close_state in \('warn','fail'\) and close_state = 'not_applicable'\)\)/,
+    'a judged state sliding to not_applicable is evidence disappearing, not placement being achieved')
   // P3-11: a credited close requires an edit.
   assert.match(schema, /check \(cardinality\(closed\) = 0 or cardinality\(edited_fields\) > 0\)/,
     'a pass that rewrote nothing may credit nothing')

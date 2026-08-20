@@ -209,32 +209,43 @@ artifact has zero check rows; decide grandfathering explicitly or `ready` flips 
 P2.3: name the table `artifact_score`, NOT `match_score` (that column exists with a different live
 meaning). Reconcile all four existing scores or don't ship a fifth.
 
-### P3 — Remediation loop  ◀ BUILT (PR #14), NOT LANDED, AND BLOCKED ON A CONFLICT WITH P8.3
+### P3 — Remediation loop  ◀ BUILT (PR #14), NOT LANDED, NOT LIVE
 
-> **BLOCKING — needs an owner decision before P3 is worth landing.** P8.3 landed conflict-register
-> **C6** ("coverage counts recomputed from evidence rows, not from term placement") and it moved what
-> `must_have_coverage` MEASURES. It no longer reads the generated document at all. Measured on the
-> merged engine (`api/test/remediation.test.mjs`, the three `P3-15 CONFLICT/CONSEQUENCE` cases):
+> **The C6 "blocker" was not a blocker — P3 was pointed at the wrong check, and P8.3 had already
+> built the right one.** Recorded because the near-miss is the lesson: I was one step from proposing
+> a redesign of another lane's model when the affordance already existed.
 >
-> | document text | evidence rows | `must_have_coverage` |
+> C6 split coverage into TWO numbers on purpose, and R4 forbids merging counts over different
+> populations:
+>
+> | check | question | can a rewrite move it? |
 > |---|---|---|
-> | restates the requirement VERBATIM | none | `not_applicable` |
-> | restates the requirement VERBATIM | present, this req unevidenced | **`fail`** |
-> | "I enjoy sailing and baking bread" | present, this req evidenced | **`pass`** |
+> | `must_have_coverage` | does the owner's PROFILE evidence this requirement? | **No** — computed from `evidenceOf(r)` alone, never reads the document |
+> | `evidence_placed` | "every requirement your profile evidences is actually stated in this document" | **Yes** — `evidenced` ÷ `covers(r)`. This is the loop's work |
 >
-> **P3's loop closes requirements by rewriting merge fields, and no rewrite can move that gate.** As
-> built, the loop will rewrite, observe zero closes, halt `no_progress` after one pass, and escalate
-> everything. It invents nothing and reports honestly - it simply cannot close anything.
+> **The loop now targets `evidence_placed`** (`CLOSE_CHECK_KEY`), and the `remediation_loop` composite
+> FK binds to it, so a row cannot claim convergence against a check the engine did not record.
+> `must_have_coverage` is carried on the ledger as `coverage_state` for REPORTING only and is
+> deliberately in no constraint: binding convergence to a check the loop cannot move would make
+> convergence unreachable.
 >
-> This is not a bug in either lane. C6 is a deliberate override and it is the more honest model (R2:
-> evidence or escalate). But P3 was designed against the pre-C6 gate, and the two must be reconciled
-> before the loop is useful. The plausible resolution is that the loop's job becomes **surfacing
-> profile evidence that exists but was not resolved** (which `profileEvidenceFor` already does,
-> P3-18) and escalating the rest - i.e. it writes `owner_fact`/evidence rows, not merge fields. That
-> is a redesign of the closing mechanism, not a tweak, and it is NOT done.
+> Consequences that are now invariants, not prose:
+> - A requirement the profile does not evidence is **not the loop's to close**. It escalates
+>   unchanged — that is a gap in the profile, a different problem with a different owner.
+> - `placeable` excludes rows under `MIN_JUDGEABLE_TOKENS`, so a too-thin requirement is in neither
+>   the numerator nor the denominator. Counting it either way is the laundering defect the coverage
+>   check itself was fixed for, one layer down.
+> - `evidence_placed` reports failure as **`warn`**, not `fail`. The open list is read from any judged
+>   non-pass state, and P3-38's guard is `('warn','fail') -> not_applicable`. Reading `fail` alone
+>   would have left the loop seeing no work and the evidence-removal guard blind.
+> - The `unattributed_coverage` guard carries across unchanged: refusing the credit is not refusing
+>   the claim.
 >
-> The conflict is pinned as three tests so it cannot be forgotten: if anyone changes the coverage
-> model in either direction, they fail and name what moved.
+> Proven against **PostgreSQL 16.13** (the sandbox has one — see CLAUDE.md), on a populated upgrade
+> from `main`'s schema: forged `run_id` refused by the FK; `converged` with a non-empty `remaining`
+> by check2; binding to `must_have_coverage` by the `close_check_key` CHECK; crediting a close with
+> no edited field by check3. Only the legitimate row stored.
+
 **X2 re-verified by grep, not taken on faith:** `regen` is read from the body at `appPackets.ts:382/457/558`,
 honoured at `:319`, and `PacketBuilder.jsx:584` sends it. The X2 text below is STALE — the cache is
 reachable-through, so no loop AC passes vacuously against it.

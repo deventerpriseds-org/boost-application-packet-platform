@@ -319,6 +319,12 @@ export function generationJd(opp: any): { jd: string; grounded: boolean } {
  */
 export async function ensurePackage(client: any, art: any, opp: any, regen: boolean): Promise<{
   pkg: Record<string, string | null>; generated: boolean; grounded: boolean
+  // P7 item 6 - THE FAILURE PATH. `buildPackageForJD` returns `warnings` and `qcApplied` and this
+  // file read NEITHER, so a build that hit a config gap, lost a section to an unmapped title, or
+  // had its ATS-QC call come back empty returned `ok:true` with no hint anything was wrong. The
+  // only trace was a console.warn nobody reads. They travel with the package now, so every endpoint
+  // that builds one can say so.
+  warnings: string[]; qcApplied: boolean | null
 }> {
   const key = process.env.OPENAI_API_KEY
   if (!key) throw new Error('OPENAI_API_KEY not set')
@@ -333,7 +339,10 @@ export async function ensurePackage(client: any, art: any, opp: any, regen: bool
   // content forever. Regenerate when we can now ground it and previously could not.
   const staleUngrounded = grounded && pkt?.jd_grounded !== true
   const cached: Record<string, string | null> | null = (!regen && !staleUngrounded && pkt?.pkg_json) ? pkt.pkg_json : null
-  if (cached) return { pkg: cached, generated: false, grounded: pkt?.jd_grounded === true }
+  // A cached package carries no warnings of its own: they described the run that PRODUCED it, and
+  // reporting them again would attribute a past run's problems to this one. `qcApplied: null` says
+  // "not measured on this call" rather than false, which would read as "QC ran and did nothing".
+  if (cached) return { pkg: cached, generated: false, grounded: pkt?.jd_grounded === true, warnings: [], qcApplied: null }
 
   const roleType = opp.persona_key || opp.role || 'Executive'
   const built = await buildPackageForJD({ key, jd, roleType, company: opp.company, jobTitle: opp.role })
@@ -355,7 +364,7 @@ export async function ensurePackage(client: any, art: any, opp: any, regen: bool
       profileText: built.profileText, omitList: built.omitList, loop: 0,
     })
   } catch (e) { console.warn('[packets] swap provenance not recorded:', String(e)) }
-  return { pkg, generated: true, grounded }
+  return { pkg, generated: true, grounded, warnings: built.warnings, qcApplied: built.qcApplied }
 }
 
 /**
@@ -402,8 +411,10 @@ export async function renderArtifact(client: any, art: any, opp: any, pkg: Recor
 // while the loop can take the two halves separately.
 async function buildTemplatedArtifact(client: any, art: any, opp: any, regen: boolean) {
   if (!metaFor(art.type)) return null
-  const { pkg } = await ensurePackage(client, art, opp, regen)
-  return renderArtifact(client, art, opp, pkg)
+  const { pkg, warnings, qcApplied } = await ensurePackage(client, art, opp, regen)
+  const rendered = await renderArtifact(client, art, opp, pkg)
+  // P7 item 6 - carried to the caller so a partial build cannot report clean success.
+  return rendered && { ...rendered, warnings, qcApplied }
 }
 
 // POST /api/app/artifact/{artifactId}/document — turn the generated text into a
@@ -429,7 +440,10 @@ export async function artifactDocument(req: HttpRequest, context: InvocationCont
       const regen = ((await req.json().catch(() => ({}))) as any)?.regen === true
       const built = await buildTemplatedArtifact(client, art, opp, regen)
       const packetStatus = await recomputePacket(client, art.packet_id)
-      return { status: 200, headers: HEADERS, jsonBody: { ok: true, artifactId, type: art.type, docUrl: built!.url, deckUrl: built!.isSlides ? built!.url : undefined, title: built!.title, cleanedTokens: built!.cleaned, templated: true, packetStatus } }
+      // P7 item 6 — `ok` says whether the build was CLEAN, not merely whether it returned. A run
+      // that lost a section to an unmapped title, or whose ATS-QC call came back empty, still
+      // produces a document; it must not also report unqualified success.
+      return { status: 200, headers: HEADERS, jsonBody: { ok: !built!.warnings?.length, artifactId, type: art.type, docUrl: built!.url, deckUrl: built!.isSlides ? built!.url : undefined, title: built!.title, cleanedTokens: built!.cleaned, templated: true, packetStatus, warnings: built!.warnings || [], qcApplied: built!.qcApplied } }
     }
 
     if (!art.content || !art.content.trim()) return { status: 400, headers: HEADERS, jsonBody: { error: 'generate the content first, then create the document' } }
@@ -504,7 +518,7 @@ export async function artifactSlides(req: HttpRequest, context: InvocationContex
       const regen = ((await req.json().catch(() => ({}))) as any)?.regen === true
       const built = await buildTemplatedArtifact(client, art, opp, regen)
       const packetStatus = await recomputePacket(client, art.packet_id)
-      return { status: 200, headers: HEADERS, jsonBody: { ok: true, artifactId, type: art.type, deckUrl: built!.url, docUrl: built!.url, title: built!.title, cleanedTokens: built!.cleaned, templated: true, packetStatus } }
+      return { status: 200, headers: HEADERS, jsonBody: { ok: !built!.warnings?.length, artifactId, type: art.type, deckUrl: built!.url, docUrl: built!.url, title: built!.title, cleanedTokens: built!.cleaned, templated: true, packetStatus, warnings: built!.warnings || [], qcApplied: built!.qcApplied } }
     }
 
     if (!art.content || !art.content.trim()) return { status: 400, headers: HEADERS, jsonBody: { error: 'generate the content first, then create the deck' } }
@@ -603,14 +617,29 @@ export async function packetBuildAll(req: HttpRequest, context: InvocationContex
         // X2: this was hardcoded `false`, so a rebuild-all could never escape the cache and every
         // remediation loop (P3.1) would have reported looping while changing nothing.
         const built = await buildTemplatedArtifact(client, { ...a, packet_id: pkt.id, opp_id: oppId }, opp, body?.regen === true)
-        results.push({ type: a.type, url: built!.url, cleanedTokens: built!.cleaned })
+        results.push({ type: a.type, url: built!.url, cleanedTokens: built!.cleaned,
+                       warnings: built!.warnings || [], qcApplied: built!.qcApplied })
       } catch (e) { results.push({ type: a.type, error: String(e) }) }
     }
     const packetStatus = await recomputePacket(client, pkt.id)
     let cadenceSeeded = false, outreachDrafted = false
     if (body?.seedCadence === true) { const r = await selfPost(`app/opportunity/${oppId}/cadence?owner=${encodeURIComponent(owner)}`, {}); cadenceSeeded = !r?.error }
     if (body?.draftOutreach === true) { const r = await selfPost(`app/opportunity/${oppId}/outreach/generate?owner=${encodeURIComponent(owner)}`, { channel: 'coldEmail' }); outreachDrafted = !r?.error }
-    return { status: 200, headers: HEADERS, jsonBody: { ok: true, oppId, company: opp.company, artifacts: results, packetStatus, cadenceSeeded, outreachDrafted, sent: false, note: 'Packet built. Nothing was sent.' } }
+    // P7 item 6 — this returned `ok: true, note: 'Packet built.'` even when EVERY artifact threw.
+    // The per-artifact error was in the payload, but the one field a caller checks said success.
+    // `ok` now means "every artifact built, and none of them built with a warning".
+    const failed = results.filter(r => r.error)
+    const warned = results.filter(r => !r.error && (r.warnings || []).length)
+    const note = failed.length
+      ? `${failed.length} of ${results.length} artifact(s) FAILED to build: ${failed.map(r => r.type).join(', ')}. Nothing was sent.`
+      : warned.length
+        ? `Packet built with ${warned.reduce((n, r) => n + r.warnings.length, 0)} warning(s) across ${warned.length} artifact(s). Nothing was sent.`
+        : 'Packet built. Nothing was sent.'
+    return { status: 200, headers: HEADERS, jsonBody: {
+      ok: !failed.length && !warned.length, oppId, company: opp.company, artifacts: results,
+      built: results.length - failed.length, failed: failed.length,
+      warnings: warned.flatMap((r: any) => (r.warnings as string[]).map(w => `${r.type}: ${w}`)),
+      packetStatus, cadenceSeeded, outreachDrafted, sent: false, note } }
   } catch (err) {
     return { status: 500, headers: HEADERS, jsonBody: { error: String(err) } }
   } finally { try { await client?.end() } catch {} }

@@ -624,14 +624,19 @@ create index if not exists review_verdict_artifact_idx on review_verdict(artifac
 -- P3-05 - 'converged' IS UNFORGEABLE HERE, not by the writer's good intentions:
 --   * the CHECK below requires cardinality(remaining) = 0, and
 --   * the composite FOREIGN KEY requires a REAL check_result row at (artifact_id, run_id,
---     'must_have_coverage', must_have_state). So must_have_state cannot be asserted - it can only
---     be copied from a check the engine actually recorded for that exact run.
--- Together: a row may say 'converged' only when nothing was open AND that pass's own coverage check
--- passed. Not 'not_applicable', not 'warn'. "Converged" is the one word a user trusts without
--- reading anything else.
+--     'evidence_placed', close_state). So close_state cannot be asserted - it can only be copied
+--     from a check the engine actually recorded for that exact run.
+-- Together: a row may say 'converged' only when nothing was open AND that pass's own PLACEMENT
+-- check passed. Not 'not_applicable', not 'warn'. "Converged" is the one word a user trusts
+-- without reading anything else.
+-- Proven against PostgreSQL 16.13, not asserted: a forged run_id is refused by the FK, converged
+-- with a non-empty remaining by check2, binding to must_have_coverage by the close_check_key
+-- CHECK, and crediting a close with no edited field by check3. Only the legitimate row stored.
 --
--- P3-38 - the fail -> not_applicable transition is refused in the table. A run that goes green by
--- turning a failed coverage check into "nothing to check" has removed evidence, not fixed anything.
+-- P3-38 - a JUDGED state sliding to not_applicable is refused in the table. evidence_placed reports
+-- its failures as 'warn', so guarding 'fail' alone would have missed the real transition. A run that
+-- goes green by turning a judged check into "nothing to check" has removed evidence, not fixed
+-- anything.
 -- The FK target for remediation_loop below, established HERE and not with the other idempotent
 -- alters at the foot of this file. ORDER IS LOAD-BEARING: on a database where check_result already
 -- exists (i.e. production, since P2), 'create table remediation_loop' fails outright with
@@ -664,10 +669,19 @@ create table if not exists remediation_loop (
   note           text,
   halted         boolean not null default false,
   halt_reason    text check (halt_reason in ('converged','no_progress','max_passes','cost_ceiling','token_ceiling','time_budget','no_coverage_evidence','nothing_reachable','ungrounded','error')),
-  -- Copied from this run's deterministic must_have_coverage check, and FK-verified against it.
-  must_have_check_key text not null default 'must_have_coverage' check (must_have_check_key = 'must_have_coverage'),
-  must_have_state     text not null check (must_have_state in ('pass','warn','fail','not_applicable')),
-  prev_must_have_state text check (prev_must_have_state in ('pass','warn','fail','not_applicable')),
+  -- Copied from this run's deterministic evidence_placed check, and FK-verified against it.
+  --
+  -- RETARGETED from must_have_coverage after P8.3 landed C6. That check is computed purely from
+  -- whether the owner's PROFILE evidences a requirement and never reads the generated document, so
+  -- no merge-field rewrite can move it and a loop tied to it could never honestly converge.
+  -- evidence_placed is the document-side half - 'every requirement your profile evidences is
+  -- actually stated in this document' - which is precisely what a rewrite can move.
+  close_check_key text not null default 'evidence_placed' check (close_check_key = 'evidence_placed'),
+  close_state     text not null check (close_state in ('pass','warn','fail','not_applicable')),
+  prev_close_state text check (prev_close_state in ('pass','warn','fail','not_applicable')),
+  -- must_have_coverage, recorded for REPORTING only and deliberately NOT part of any constraint
+  -- below: the loop cannot move it, so binding convergence to it would make convergence unreachable.
+  coverage_state  text check (coverage_state in ('pass','warn','fail','not_applicable')),
   -- Evidence must survive the loop (P3-38). Recorded per pass so db-query can verify it after merge.
   req_count      int not null default 0,
   -- Metering (D8). cost_usd is NULL when any call in the pass ran on an unpriced model - never 0,
@@ -706,12 +720,14 @@ create table if not exists remediation_loop (
   check ((halt_reason is null) = (not halted)),
   -- P3-05.
   check (halt_reason is distinct from 'converged'
-         or (cardinality(remaining) = 0 and must_have_state = 'pass')),
+         or (cardinality(remaining) = 0 and close_state = 'pass')),
   -- P3-11. A credited close requires an edit; a pass that rewrote nothing may credit nothing.
   check (cardinality(closed) = 0 or cardinality(edited_fields) > 0),
-  -- P3-38.
-  check (not (prev_must_have_state = 'fail' and must_have_state = 'not_applicable')),
-  foreign key (artifact_id, run_id, must_have_check_key, must_have_state)
+  -- P3-38. evidence_placed reports its failures as 'warn', not 'fail', so the transition to guard
+  -- against is any JUDGED state sliding to not_applicable: that is the evidence disappearing, which
+  -- colours like a pass in any UI that treats "no findings" as fine.
+  check (not (prev_close_state in ('warn','fail') and close_state = 'not_applicable')),
+  foreign key (artifact_id, run_id, close_check_key, close_state)
     references check_result (artifact_id, run_id, check_key, state) on delete cascade
 );
 create index if not exists remediation_loop_packet_idx on remediation_loop(packet_id, n);

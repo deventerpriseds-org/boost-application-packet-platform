@@ -38,6 +38,7 @@ import {
   DEFAULT_LOOP_PREFS, LoopPrefs, Spend, ZERO_SPEND, addCall, coverageView, creditClosures,
   decidePass, scopeForRequirements, applyScopedFields, escalationFor, reportedOutcome,
   assertEvidenceIntact, evidenceRemoved, REMEDIATION_VERSION, HaltReason, RequirementRow, nextPassNumber,
+  CLOSE_CHECK_KEY,
   profileEvidenceFor,
 } from './remediation'
 
@@ -99,9 +100,9 @@ const idsForSeqs = (reqs: any[], seqs: number[]): string[] =>
   seqs.map(s => reqs.find(r => Number(r.seq) === s)).filter(Boolean).map((r: any) => r.id)
 
 /** The evidence the loop is judged against. Snapshotted before and after so its removal is visible. */
-async function evidenceSnapshot(client: any, oppId: string, mustHaveState: string) {
+async function evidenceSnapshot(client: any, oppId: string, closeState: string) {
   const n = Number((await client.query(`select count(*)::int as n from requirement where opp_id=$1`, [oppId])).rows[0]?.n || 0)
-  return { reqCount: n, mustHaveState: mustHaveState as any }
+  return { reqCount: n, closeState: closeState as any }
 }
 
 /**
@@ -182,7 +183,8 @@ export async function artifactRemediate(req: HttpRequest, context: InvocationCon
 
     let overrideBefore = await standingOverride(client, artifactId)
     let ev = await evaluateArtifact(client, artifactId, owner)
-    const before = await evidenceSnapshot(client, art.opp_id, ev.results.find(r => r.check_key === 'must_have_coverage')?.state || 'not_applicable')
+    const before = await evidenceSnapshot(client, art.opp_id,
+      ev.results.find(r => r.check_key === CLOSE_CHECK_KEY && r.engine === 'deterministic')?.state || 'not_applicable')
 
     let cov = coverageView(ev.results)
     let spend: Spend = { ...ZERO_SPEND }
@@ -283,7 +285,7 @@ export async function artifactRemediate(req: HttpRequest, context: InvocationCon
         profile_evidence: idsForSeqs(requirements, profileHits),
         note: passErr ? `${note} — pass failed: ${passErr}` : `${note}${rejected.length ? ` — rejected ${rejected.length} out-of-scope/blank field(s): ${rejected.map(r => r.field).join(', ')}` : ''}${applied.length ? ` — applied ${applied.join(', ')}` : ''}`,
         halted: false, halt_reason: null as string | null,
-        must_have_state: cov.state, prev_must_have_state: prevState,
+        close_state: cov.state, prev_close_state: prevState, coverage_state: cov.coverageState,
         req_count: reqCountNow,
         prompt_tokens: 0, completion_tokens: 0,
         cost_usd: spend.unpricedCalls ? null : spend.usd,
@@ -314,7 +316,7 @@ export async function artifactRemediate(req: HttpRequest, context: InvocationCon
         closed: [], phantom_closes: [], remaining: idsForSeqs(requirements, cov.openSeqs),
         edited_fields: [], scope_fields: lastScope.fields, profile_evidence: [], note: haltDetail,
         halted: true, halt_reason: haltReason,
-        must_have_state: cov.state, prev_must_have_state: null,
+        close_state: cov.state, prev_close_state: null, coverage_state: cov.coverageState,
         req_count: before.reqCount, prompt_tokens: 0, completion_tokens: 0,
         cost_usd: spend.unpricedCalls ? null : spend.usd, unpriced_calls: spend.unpricedCalls,
         elapsed_ms: Date.now() - startedAt, cleared_override: overrideBefore,
@@ -333,22 +335,23 @@ export async function artifactRemediate(req: HttpRequest, context: InvocationCon
       await client.query(
         `insert into remediation_loop
            (packet_id, artifact_id, n, run_id, closed, phantom_closes, remaining, edited_fields,
-            scope_fields, profile_evidence, note, halted, halt_reason, must_have_state, prev_must_have_state, req_count,
+            scope_fields, profile_evidence, note, halted, halt_reason, close_state, prev_close_state, coverage_state, req_count,
             prompt_tokens, completion_tokens, cost_usd, unpriced_calls, elapsed_ms, engine_version,
             cleared_override_by, cleared_override_at, cleared_override_reason)
-         values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25)
+         values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26)
          on conflict (artifact_id, n) do update set
            run_id=excluded.run_id, closed=excluded.closed, phantom_closes=excluded.phantom_closes,
            remaining=excluded.remaining, edited_fields=excluded.edited_fields,
            scope_fields=excluded.scope_fields, profile_evidence=excluded.profile_evidence,
            note=excluded.note, halted=excluded.halted,
-           halt_reason=excluded.halt_reason, must_have_state=excluded.must_have_state,
-           prev_must_have_state=excluded.prev_must_have_state, req_count=excluded.req_count,
+           halt_reason=excluded.halt_reason, close_state=excluded.close_state,
+           prev_close_state=excluded.prev_close_state, coverage_state=excluded.coverage_state,
+           req_count=excluded.req_count,
            cost_usd=excluded.cost_usd, unpriced_calls=excluded.unpriced_calls,
            elapsed_ms=excluded.elapsed_ms, ran_at=now()`,
         [r.packet_id, r.artifact_id, r.n, r.run_id, r.closed, r.phantom_closes, r.remaining,
-         r.edited_fields, r.scope_fields, r.profile_evidence, r.note, r.halted, r.halt_reason, r.must_have_state,
-         r.prev_must_have_state, r.req_count, r.prompt_tokens, r.completion_tokens, r.cost_usd,
+         r.edited_fields, r.scope_fields, r.profile_evidence, r.note, r.halted, r.halt_reason, r.close_state,
+         r.prev_close_state, r.coverage_state, r.req_count, r.prompt_tokens, r.completion_tokens, r.cost_usd,
          r.unpriced_calls, r.elapsed_ms, REMEDIATION_VERSION,
          r.cleared_override?.by ?? null, r.cleared_override?.at ?? null, r.cleared_override?.reason ?? null])
     }
@@ -432,7 +435,7 @@ export async function artifactRemediate(req: HttpRequest, context: InvocationCon
 
     const outcome = reportedOutcome(rows.map(r => ({
       n: r.n, halted: r.halted, halt_reason: r.halt_reason, remaining: r.remainingSeqs,
-      must_have_state: r.must_have_state, phantom_closes: r.phantom_closes,
+      close_state: r.close_state, phantom_closes: r.phantom_closes,
     })))
     return {
       status: 200, headers: HEADERS,
@@ -474,7 +477,7 @@ export async function artifactRemediationGet(req: HttpRequest, context: Invocati
     // The outcome sentence is produced by the SAME function the run used, so the ledger and the run
     // can never disagree about whether the loop converged.
     const outcome = reportedOutcome(rows.map((r: any) => ({
-      n: r.n, halted: r.halted, halt_reason: r.halt_reason, remaining: r.remaining || [], must_have_state: r.must_have_state,
+      n: r.n, halted: r.halted, halt_reason: r.halt_reason, remaining: r.remaining || [], close_state: r.close_state,
     })))
     return { status: 200, headers: HEADERS, jsonBody: { artifactId: art.id, type: art.type, ...outcome, passes: rows, escalations } }
   } catch (e: any) {

@@ -2038,3 +2038,57 @@ that (P3-18) — and escalating the rest, i.e. the loop writes evidence rows rat
 Pinned as three tests (`P3-15 CONFLICT` / `P3-15 CONSEQUENCE`) so that whichever way the models are
 reconciled, the change fails a test that names what moved rather than silently un-breaking or
 further breaking the loop.
+
+
+## ACT — the C6 "blocker" was a retarget, not a redesign (2026-08-20)
+
+I reported P3 as blocked by P8.3's C6. The analysis was right and the conclusion was one step too
+far: **C6 split coverage into two numbers on purpose, and P3 was pointed at the wrong one.**
+
+| check | question | can a merge-field rewrite move it? |
+|---|---|---|
+| `must_have_coverage` | does the owner's PROFILE evidence this requirement? | **No** |
+| `evidence_placed` | is every profile-evidenced requirement actually STATED in this document? | **Yes** |
+
+`evidence_placed` is the document-side half P8.3 built for exactly this purpose. The loop now targets
+it (`CLOSE_CHECK_KEY`), and `remediation_loop`'s composite FK binds to it. `must_have_coverage` is
+carried as `coverage_state` for reporting only, in no constraint — binding convergence to a check the
+loop cannot move would make convergence unreachable.
+
+**The lesson is the near-miss.** I was about to propose redesigning another lane's model when the
+affordance already existed, one function below the one I was reading. "Extend, don't duplicate" is
+usually cited against building a parallel system; this is the same rule one step earlier — before
+declaring a blocker, read what the other lane actually built. The escalation was still correct: I
+reported it and stopped rather than redesigning unilaterally, and that is what surfaced the answer.
+
+Four things that made the retarget non-trivial, each now an invariant rather than prose:
+- `evidence_placed` reports failure as **`warn`**, not `fail`. Reading `fail` alone would have left
+  the loop seeing no work at all, and P3-38's evidence-removal guard blind. The open list is read
+  from any judged non-pass state; the guard is `('warn','fail') -> not_applicable`.
+- `placeable` excludes rows under `MIN_JUDGEABLE_TOKENS`. Those are in neither numerator nor
+  denominator — counting them either way is the laundering defect the coverage check was fixed for.
+- A requirement the profile does not evidence is not the loop's to close. It escalates unchanged.
+- The `unattributed_coverage` guard carried across untouched: refusing the credit is not refusing
+  the claim, and that holds for placement exactly as it did for coverage.
+
+The three pinned tests were INVERTED rather than deleted: they used to record that the loop was
+blocked; they now fail if the loop is ever pointed back at `must_have_coverage`, and one asserts the
+premise directly — a rewrite must move the check the loop targets.
+
+**Proven against PostgreSQL 16.13 on a populated upgrade**, not asserted: forged `run_id` refused by
+the FK; `converged` with a non-empty `remaining` by check2; binding to `must_have_coverage` by the
+`close_check_key` CHECK; crediting a close with no edited field by check3. Only the legitimate row
+was stored.
+
+### P7 item 6 landed with this lane
+`buildPackageForJD` has always returned `warnings` and `qcApplied`; `appPackets` read neither, so a
+build that lost a section to an unmapped title or whose ATS-QC call returned empty reported
+`ok: true`. Worse, `packetBuildAll` returned `ok: true, note: 'Packet built.'` **even when every
+artifact threw** — the per-artifact error was in the payload, but the one field a caller checks said
+success. `ok` now means "every artifact built, and none with a warning", and the note names what
+failed.
+
+### CLAUDE.md corrected
+The "no Postgres in the sandbox" assumption is now explicitly corrected in CLAUDE.md, with the
+standing rule and a runnable recipe: **a schema change is not verified until it has been executed
+against a POPULATED database with the previous schema already applied.**
