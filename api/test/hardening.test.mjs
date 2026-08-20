@@ -388,3 +388,63 @@ test('H19: the prompts POST guards on a verified session, not on requireWrite', 
   assert.ok(body.indexOf('const { verified }') > body.indexOf("req.method === 'GET'"),
     'the guard must not sit above the GET/OPTIONS branches')
 })
+
+// ---------------------------------------------------------------------------------------------
+// H20 — A refused citation reached the user anyway, through a SECOND door.
+//
+// `validateCitations` correctly dropped a fabricated quote, and `scrubCritique` correctly deleted
+// the critique line that rested on it. Then `reviewerChecks` wrote the quote into `offenders`, and
+// the scrubbed sentence was re-emitted whole into `reviewer_citations_scrubbed.offenders`. Those
+// rows are stored on `check_result` and read back verbatim by THREE endpoints (`/review`,
+// `/review-result`, `/checks`), so a UI rendering offenders generically printed the fabricated text
+// as a reviewer finding — unmarked, exactly as if it were real.
+//
+// Measured by the independent verifier on 6046b6f:
+//   offenders: ['quote_not_in_posting: "the company operates fourteen research hospitals worldwide"']
+//   offenders: ['The posting says the company operates fourteen research hospitals worldwide, ...']
+//
+// The invariant: text that failed verification never appears in ANY stored field. Closing one exit
+// while leaving another open is not a fix — the guard must be about the text, not about the field.
+test('H20: text that failed verification never appears in any stored field', () => {
+  const FABRICATED = 'the company operates fourteen research hospitals worldwide'
+  const rows = reviewerChecks({
+    review: {
+      grade: 'needs_work', seniority_alignment: 40, judgements: [], citations: [],
+      critique: ['The summary is thin on scale.'],   // already scrubbed by the caller
+    },
+    agreement: { agreed: 0, disagreed: 0, reviewer_stricter: [], reviewer_looser: [], unmatched: 0, not_comparable: 0 },
+    accepted: [],
+    dropped: [{ requirement_id: 'r1', verbatim_quote: FABRICATED, claim: 'x', reason: 'quote_not_in_posting', detail: '' }],
+    requirements: [], ran: true,
+  })
+  const serialized = JSON.stringify(rows)
+  assert.ok(!serialized.includes(FABRICATED),
+    `a refused quote reached a stored field: ${serialized}`)
+  // The finding must still exist — suppressing the quote must not suppress the fact of the drop.
+  const cit = rows.find(r => r.check_key === 'reviewer_citations')
+  assert.equal(cit.state, 'warn')
+  assert.match(cit.observed, /did not verify/)
+})
+
+// ---------------------------------------------------------------------------------------------
+// H21 — `verbatim_quote` held the MODEL's string, not the employer's.
+//
+// `findQuoteSpans` matches case-insensitively (the `i` flag) because models title-case and
+// upper-case what they quote. Storing the model's rendering under a field named `verbatim_quote`
+// meant a case-shifted paraphrase of the employer's words was presented to the user as verbatim —
+// a small lie in precisely the place this module exists to prevent one.
+// Measured: 'DEMONSTRATED OWNERSHIP OF A MULTI REGION' accepted against a lowercase posting.
+// The invariant: an accepted citation carries the posting's own bytes at the matched span.
+test('H21: an accepted citation stores the employer\'s bytes, not the model\'s rendering', () => {
+  const posting = 'Requirements: demonstrated ownership of a multi region platform at scale.'
+  const quote = 'demonstrated ownership of a multi region platform'
+  const start = posting.indexOf(quote)
+  const reqs = [{ id: 'r1', seq: 0, kind: 'must_have', item_text: 'Multi-region ownership',
+                  verbatim: quote, char_start: start, char_end: start + quote.length }]
+  const SHOUTED = quote.toUpperCase()
+  const { accepted } = validateCitations([{ requirement_id: 'r1', verbatim_quote: SHOUTED, claim: 'x' }], posting, reqs)
+  assert.equal(accepted.length, 1, 'case-shifted quotes must still validate')
+  assert.equal(accepted[0].verbatim_quote, quote, 'the stored quote must be the posting\'s own text')
+  assert.notEqual(accepted[0].verbatim_quote, SHOUTED)
+  assert.equal(posting.slice(accepted[0].char_start, accepted[0].char_end), accepted[0].verbatim_quote)
+})

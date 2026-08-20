@@ -128,8 +128,12 @@ export async function runReview(
     return finish(false, why, reviewerChecks({ review: emptyReview(), agreement: emptyAgreement(), accepted: [], dropped: [], requirements, ran: false, skippedReason: why }), null)
   }
   const digest = sha256(postingText)
-  const recorded = reqRows.find(r => r.jd_text_sha256)?.jd_text_sha256 || undefined
-  if (recorded && recorded !== digest) {
+  // Every recorded sha, not just the first non-null one. Rows can carry different shas when a
+  // re-extraction partially completed, and consulting only the first would let a stale set through.
+  // The opportunity's own digest counts too — it is the posting the offsets were measured against.
+  const recorded = Array.from(new Set(
+    [...reqRows.map(r => r.jd_text_sha256), art.jd_text_sha256].filter(Boolean) as string[]))
+  if (recorded.length && !recorded.includes(digest)) {
     // Requirement offsets are only valid against the exact body they were measured on (schema).
     // The posting has been re-fetched since; every span citation would resolve against a different
     // string, so the honest move is to say the evidence is stale, not to review anyway.
@@ -183,11 +187,15 @@ export async function runReview(
 
   const rows = [promptRow, ...reviewerChecks({ review, agreement, accepted, dropped, requirements, ran: true })]
   if (scrub.removed.length) {
+    // NO offenders. The removed lines are exactly the text that must not reach a reader — echoing
+    // them here re-published the whole sentence `scrubCritique` had just deleted, unmarked, where a
+    // UI rendering offenders generically prints it as a reviewer finding. The count is the finding;
+    // the fabricated sentence is not evidence of anything.
     rows.push({
       check_key: 'reviewer_citations_scrubbed', engine: 'reviewer', state: 'warn',
-      observed: `${scrub.removed.length} critique point(s) were removed because they repeated a quote that does not exist in the posting`,
+      observed: `${scrub.removed.length} critique point(s) were removed: they rested on a quote that does not occur in the posting`,
       expected: 'every critique point stands on text the posting actually contains',
-      offenders: scrub.removed.map(l => l.slice(0, 140)),
+      offenders: [],
     })
   }
 
@@ -315,10 +323,18 @@ async function persist(
     // An override approves a SPECIFIC set of findings. The reviewer just changed that set, so the
     // override no longer describes what was approved and is cleared — but the caller is told, so it
     // is never a silent revert of a human decision.
+    // `run_id=$4` matters: the run id was read BEFORE this transaction opened, so a deterministic
+    // re-run interleaving in between would otherwise stamp a gate computed over the OLD run onto the
+    // new run's row. With the predicate the update simply matches nothing and the newer run stands.
+    //
+    // The override is cleared only when the review actually produced findings. A refusal path — no
+    // posting text, no model call, only not_applicable rows — revoking a human's recorded approval
+    // is a side effect nobody asked for; it changed no finding, so it invalidates no approval.
+    const clearOverride = ran && rows.some(r => r.state === 'warn' || r.state === 'fail')
     await client.query(
-      `update artifact_gate set gate=$1, attention_count=$2, computed_at=now(),
-         override_by=null, override_at=null, override_reason=null
-        where artifact_id=$3`, [gate, attention, artifactId])
+      `update artifact_gate set gate=$1, attention_count=$2, computed_at=now()`
+        + (clearOverride ? `, override_by=null, override_at=null, override_reason=null` : ``)
+        + ` where artifact_id=$3 and run_id=$4`, [gate, attention, artifactId, runId])
     await client.query('commit')
 
     return {
@@ -330,7 +346,7 @@ async function persist(
       citations_received: (verdict?.accepted.length ?? 0) + (verdict?.dropped.length ?? 0),
       citations_kept: verdict?.accepted.length ?? 0,
       citations_dropped: verdict?.dropped.length ?? 0,
-      gate, attention, override_cleared: hadOverride, results: rows,
+      gate, attention, override_cleared: hadOverride && clearOverride, results: rows,
     }
   } catch (e) { await client.query('rollback'); throw e }
 }
@@ -373,7 +389,11 @@ export async function artifactReviewGet(req: HttpRequest, context: InvocationCon
     if (!art) return { status: 404, headers: HEADERS, jsonBody: { error: 'not found' } }
     const g = (await client.query(`select run_id from artifact_gate where artifact_id=$1`, [art.id])).rows[0]
     if (!g) return { status: 200, headers: HEADERS, jsonBody: { verdict: null, results: [], note: 'no checks have been run for this artifact' } }
-    const v = (await client.query(`select * from review_verdict where artifact_id=$1 and run_id=$2`, [art.id, g.run_id])).rows[0] || null
+    // Tolerant of the table not existing yet: it is created by pgMigrate, which runs on demand, so
+    // between a deploy and that migration this route would otherwise 500. A missing table means no
+    // review has ever been stored — which is `null`, not an error.
+    const v = (await client.query(`select * from review_verdict where artifact_id=$1 and run_id=$2`, [art.id, g.run_id])
+      .catch(() => ({ rows: [] }))).rows[0] || null
     const results = (await client.query(
       `select * from check_result where artifact_id=$1 and run_id=$2 and engine='reviewer' order by check_key`,
       [art.id, g.run_id])).rows

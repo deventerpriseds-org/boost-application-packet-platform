@@ -187,9 +187,18 @@ const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 /**
  * Every occurrence of `quote` in `postingText`, as spans into that exact string.
  *
- * Whitespace-flexible and nothing else: the model re-wraps lines, so `\s+` between tokens is the
- * one tolerance allowed. No stemming, no stopword removal, no similarity threshold. The returned
- * spans index the ORIGINAL string, so they are directly comparable to `requirement.char_start`.
+ * TWO tolerances, and no others: whitespace between tokens (`\s+`, because the model re-wraps
+ * lines) and letter case (the `i` flag, because the model title-cases and upper-cases what it
+ * quotes). No stemming, no stopword removal, no similarity threshold, no token dropping — one
+ * changed word is a different quote and does not match.
+ *
+ * Because case is tolerated, the model's own string is NOT what gets stored: the caller slices the
+ * posting at the returned span, so what reaches the user is the employer's bytes. A field named
+ * `verbatim_quote` holding a case-shifted paraphrase of the employer's words would be a small lie
+ * in exactly the place this module exists to prevent one.
+ *
+ * The returned spans index the ORIGINAL string, so they are directly comparable to
+ * `requirement.char_start`.
  */
 export function findQuoteSpans(quote: string, postingText: string): Array<{ start: number; end: number }> {
   const tokens = String(quote || '').trim().split(/\s+/).filter(Boolean)
@@ -253,7 +262,9 @@ export function validateCitations(
         `the quote occurs at ${spans.map(s => `${s.start}-${s.end}`).join(', ')} but requirement #${req.seq} spans ${reqSpan.start}-${reqSpan.end}`)
       continue
     }
-    accepted.push({ ...base, seq: req.seq, char_start: hit.start, char_end: hit.end })
+    // The employer's actual bytes at the matched span — not `quote`, which is the model's
+    // rendering of them and may differ in case and whitespace.
+    accepted.push({ ...base, verbatim_quote: postingText.slice(hit.start, hit.end), seq: req.seq, char_start: hit.start, char_end: hit.end })
   }
   return { accepted, dropped }
 }
@@ -511,10 +522,17 @@ export function reviewerChecks(input: ReviewerCheckInput): CheckResult[] {
   if (!total) {
     out.push(row('reviewer_citations', 'not_applicable', 'the reviewer cited nothing', 'every claim carries a quote from the posting'))
   } else if (dropped.length) {
+    // The offender names the REQUIREMENT and the reason, never the refused quote.
+    //
+    // Putting the quote here was a real leak, found by the independent verifier: `offenders` is
+    // stored on `check_result` and read back verbatim by three endpoints, so a fabricated quote
+    // that `validateCitations` had just refused was rendered to the user anyway — through a second
+    // door, and with no marking to say it was refuted. Scrubbing it out of `critique[]` and then
+    // re-emitting it here defeats the entire point of scrubbing.
     out.push(row('reviewer_citations', 'warn',
       `${dropped.length} of ${total} citations did not verify against the employer posting`,
       'every cited quote occurs in the posting and resolves to the requirement it names',
-      dropped.map(d => `${d.reason}: "${d.verbatim_quote.slice(0, 90)}"`)))
+      dropped.map(d => `requirement ${d.requirement_id || '(unknown)'}: ${d.reason}`)))
   } else {
     out.push(row('reviewer_citations', 'pass', `${accepted.length} of ${total} citations verified`,
       'every cited quote occurs in the posting and resolves to the requirement it names'))
