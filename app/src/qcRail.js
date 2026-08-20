@@ -13,9 +13,23 @@
 // stateMeta() are the P5.3 selectors and stay the single definition of "which engine sent this row",
 // "what are the three score parts" and "what colour is a state". Only what is genuinely new to the
 // PACKET-level rail lives here.
-import { engineRows, scoreParts, gateMeta, stateMeta, arr } from './assetGate.js'
+import {
+  engineRows, scoreParts, gateMeta, stateMeta, arr,
+  correctionsState, orderCorrections, correctionRow, correctionSentence, correctionAnomalies,
+  correctionSourceText, undoAvailability, revertOutcome, suggestScope,
+  CHANGE_LOG_HEADLINE, CORRECTION_SOURCE, CORRECTION_REVERT_ROUTE,
+} from './assetGate.js'
 
 export { engineRows, scoreParts, gateMeta, stateMeta }
+
+// P8.6's change log reads the SAME payload the gate and the counters read, so its selectors live
+// beside theirs in assetGate.js and are re-exported here rather than reimplemented. A second
+// definition of "how many corrections" is the whole failure this rail was built to prevent.
+export {
+  correctionsState, orderCorrections, correctionRow, correctionSentence, correctionAnomalies,
+  correctionSourceText, undoAvailability, revertOutcome, suggestScope,
+  CHANGE_LOG_HEADLINE, CORRECTION_SOURCE, CORRECTION_REVERT_ROUTE,
+}
 
 /**
  * Every `data-qc` selector this rail renders.
@@ -50,6 +64,18 @@ export const QC_HOOKS = {
   review: 'qc-review',
   loops: 'qc-loops',
   empty: 'qc-empty',
+  // P8.6 - the change log (R1). `corrected` is a THIRD number beside toFix and toReview, never
+  // added into either: a correction is something already done, not something to do.
+  changeLog: 'qc-change-log',            // the change-log region
+  corrected: 'qc-corrected',             // how many changes were made for the user
+  correctionsUndone: 'qc-corrections-undone',
+  correctionNote: 'qc-correction-note',  // the sentence for a log that is absent, empty or unreadable
+  correction: 'qc-correction',           // one change (carries data-qc-field and data-qc-state)
+  correctionOpen: 'qc-correction-open',  // opens the field the change was made in
+  correctionUndo: 'qc-correction-undo',
+  correctionSuggest: 'qc-correction-suggest',
+  correctionRefusal: 'qc-correction-refusal',   // the server's own words when an undo is declined
+  correctionAnomaly: 'qc-correction-anomaly',
 }
 
 // The five tabs P5.1 specifies, in the backlog's order.
@@ -134,6 +160,11 @@ export function railCounts(result) {
 export function railTotals(entries) {
   const list = arr(entries)
   let toFix = 0, toReview = 0, unchecked = 0, checked = 0
+  // P8.6 / R4. Corrections are summed in their OWN accumulators and are added to neither counter.
+  // `correctionsMeasured` is how many assets sent a readable change log; when it is zero the rail
+  // prints no corrections number at all, because a total of 0 over assets that were never asked is
+  // the reviewer's "0 disagreements" - a measurement reported that was never taken.
+  let corrected = 0, correctionsUndone = 0, correctionsMeasured = 0, correctionsUnread = 0
   for (const e of list) {
     const result = e && e.result
     if (railGate(result) === 'unchecked') { unchecked += 1; continue }
@@ -141,8 +172,25 @@ export function railTotals(entries) {
     const c = railCounts(result)
     toFix += c.toFix
     toReview += c.toReview
+    const log = correctionsState(result)
+    if (log.hasNumber) { correctionsMeasured += 1; corrected += log.count; correctionsUndone += log.undone }
+    else correctionsUnread += 1
   }
-  return { toFix, toReview, unchecked, checked, assets: list.length }
+  return {
+    toFix, toReview, unchecked, checked, assets: list.length,
+    corrected, correctionsUndone, correctionsMeasured, correctionsUnread,
+  }
+}
+
+/**
+ * The change log for ONE asset, and the sentence to print when there is not one.
+ *
+ * A thin pass-through on purpose: it exists so every surface reaches the change log through the rail
+ * module the way it reaches the gate, rather than a component reading `result.corrections` itself.
+ * The moment a `.jsx` touches that property directly there are two definitions of the number.
+ */
+export function railChangeLog(result) {
+  return correctionsState(result)
 }
 
 /**

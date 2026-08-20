@@ -13,13 +13,19 @@
 //      produced no rows for;
 //   5. an all-not_applicable asset shows the server's warn and says nothing could be checked;
 //   6. a null composite prints no number at all, and the three parts print the stored prose;
-//   7. a null reviewer verdict says the reviewer has not run and never prints a zero.
+//   7. a null reviewer verdict says the reviewer has not run and never prints a zero;
+//   8. P8.6 - the change log renders the SERVER's corrections in document order, an undone row stays
+//      and is excluded from the count, an asset whose payload carried NO corrections key says so
+//      rather than "nothing needed correcting", an undo refusal is rendered in the server's own
+//      words, and the corrections number never moves the fix/review counters (R4);
+//   9. every change-log ink/ground pairing measures >= 4.5:1 in BOTH themes, from getComputedStyle.
 //
 // Every API response is fulfilled from a fixture by playwright's router, so no request leaves the
 // machine and the rows under test are exactly the rows asserted about.
 import { readdirSync, existsSync } from 'node:fs'
 import { chromium } from 'playwright'
 import { createServer } from 'vite'
+import { contrast } from './contrast.mjs'
 
 function chromiumPath() {
   if (process.env.PW_CHROMIUM) return process.env.PW_CHROMIUM
@@ -66,6 +72,23 @@ const RESUME = {
   },
 }
 
+// P8.6 - the change log the resume carries. Three changes in document order, deliberately sent OUT
+// of order so the ordering is the module's and not the payload's, and the third already undone: an
+// undone change stays in the log and leaves the corrected count, it does not disappear.
+//
+// The middle row carries NO `id`. That is not a malformed row - it is what a build of the API that
+// records corrections but cannot yet revert one sends, and the UI must offer no undo for it and say
+// why, rather than render a button that cannot make a request.
+RESUME.corrections = [
+  { merge_field: 'ResumeSummary', phrase: '60+', replacement: 'multiple', char_start: 40, char_end: 43,
+    applied_seq: 2, reason: 'the posting states 60+; your profile does not evidence it', source: 'generalized' },
+  { id: 'corr-3', merge_field: 'SkillsBullets1', phrase: 'three business units', replacement: 'multiple business units',
+    char_start: 0, char_end: 20, applied_seq: 3, reason: 'the posting states three business units; your profile does not evidence it',
+    source: 'generalized', reverted_at: '2026-08-19T13:00:00Z', reverted_by: 'von.ellis@enterpriseds.io' },
+  { id: 'corr-1', merge_field: 'ResumeSummary', phrase: '$18M', replacement: '8-figure', char_start: 10, char_end: 14,
+    applied_seq: 1, reason: 'the posting states $18M; your profile does not evidence it', source: 'generalized' },
+]
+
 // The cover letter has never been checked at all.
 const COVER = { artifactId: 'art-cover', gate: null, attention: 0, computedAt: null, override: null, score: null, history: [], results: [], engines: { deterministic: { results: [] }, reviewer: { results: [], verdict: null } } }
 
@@ -111,6 +134,10 @@ page.on('console', (m) => {
 })
 
 const seenUrls = []
+const revertCalls = []
+// Default: the refusal. It is the state that must not be swallowed, so it is the default rather
+// than the afterthought; the success branch is switched on explicitly further down.
+let revertAnswer = () => ({ ok: false, reason: 'this field was edited after the correction was applied, so the original cannot be restored safely' })
 // The whole body runs inside a try: a locator that never resolves is itself a rendering failure
 // (a count that lands nowhere leaves no dialog to wait for), and an uncaught throw would print a
 // stack instead of the checks that already passed. It is reported as a FAIL like any other.
@@ -122,6 +149,11 @@ await page.route('**/api/app/**', async (route) => {
   if (m) return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(CHECKS[m[1]] || COVER) })
   m = /\/artifact\/([^/?]+)\/insertions/.exec(url)
   if (m) return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(insertions(m[1])) })
+  // The undo. `revertAnswer` is what the server says next; both branches are exercised below, and a
+  // REFUSAL is a 200 with ok:false - the shape revertOne actually returns when the recovered original
+  // no longer hashes to before_sha256.
+  m = /\/correction\/([^/?]+)\/revert/.exec(url)
+  if (m) { revertCalls.push(url); return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(revertAnswer(m[1])) }) }
   if (/\/packet\/[^/?]+\/swaps/.test(url)) {
     return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ packetId: 'pkt-1', candidates: [], swaps: [], changed: 0, unattributed: 0 }) })
   }
@@ -268,6 +300,200 @@ const loops = await page.locator('[data-qc="qc-loops"]').innerText()
 ok('the loops tab says the loop controller is not built', /not built/.test(loops), JSON.stringify(loops.slice(0, 200)))
 ok('and shows the real pass record instead of an invented log', /generation pass/.test(loops))
 ok('it reports the honest empty state', /nothing has been remediated/.test(loops))
+
+// ---------- 9. P8.6: the change log ----------
+// The module is proven by npm test; what only a DOM can settle is that the screen RENDERS what the
+// module returned - in the right order, with the right row still present, and with the number the
+// module computed rather than one the component worked out for itself.
+const changeLog = page.locator('[data-qc="qc-change-log"]')
+ok('the change log is on the page, not behind a tab', await changeLog.count() === 1)
+
+const logRows = await page.evaluate(() => [...document.querySelectorAll('[data-qc="qc-change-log"] [data-qc="qc-correction"]')].map((el) => ({
+  seq: el.getAttribute('data-qc-seq'),
+  state: el.getAttribute('data-qc-state'),
+  field: el.getAttribute('data-qc-field'),
+  text: el.innerText.replace(/\n/g, ' '),
+  undo: !!el.querySelector('button[data-qc="qc-correction-undo"]'),
+  undoNote: (el.querySelector('[data-qc="qc-correction-undo"][data-qc-available="0"]') || {}).innerText || '',
+})))
+ok('every correction the payload carried is rendered', logRows.length === 3, JSON.stringify(logRows.map((r) => r.seq)))
+ok('they read in DOCUMENT order, not payload order',
+  JSON.stringify(logRows.map((r) => r.seq)) === JSON.stringify(['1', '2', '3']), JSON.stringify(logRows.map((r) => r.seq)))
+ok('an undone change STAYS in the log and is marked Undone',
+  logRows[2].state === 'undone' && /Undone/.test(logRows[2].text), JSON.stringify(logRows[2].text.slice(0, 120)))
+ok('a row shows the original, the replacement, the reason verbatim and the raw merge field',
+  /\$18M/.test(logRows[0].text) && /8-figure/.test(logRows[0].text)
+  && /the posting states \$18M; your profile does not evidence it/.test(logRows[0].text)
+  && /ResumeSummary/.test(logRows[0].text) && /Summary/.test(logRows[0].text),
+  JSON.stringify(logRows[0].text.slice(0, 220)))
+ok('it says where the replacement came from', /generalised/.test(logRows[0].text), JSON.stringify(logRows[0].text.slice(0, 220)))
+ok('nothing in the change log is framed as work still to do',
+  !/needs fixing|action required|to-do/i.test(await changeLog.innerText()))
+
+// The number the screen prints is the number the MODULE computed from the same payload - checked
+// across the boundary, so a component that counted the array itself would disagree here.
+const { correctionsState } = await import('../../src/assetGate.js')
+const expected = correctionsState(RESUME)
+const shown = await page.evaluate(() => {
+  const el = document.querySelector('[data-qc="qc-change-log"] [data-qc="qc-corrected"]')
+  const un = document.querySelector('[data-qc="qc-change-log"] [data-qc="qc-corrections-undone"]')
+  return { corrected: el && el.getAttribute('data-qc-n'), undone: un && un.getAttribute('data-qc-n') }
+})
+ok('the corrected number is the module\'s, and excludes the undone row',
+  Number(shown.corrected) === expected.count && expected.count === 2, JSON.stringify([shown, expected.count, expected.undone]))
+ok('the undone row is counted on its own', Number(shown.undone) === expected.undone && expected.undone === 1, JSON.stringify(shown))
+
+// R4 at the DOM level: the very same render carries the fix/review numbers, and 3 corrections did
+// not move either of them. This is the third available shape of the badge-vs-gate contradiction.
+const countsAfter = await page.evaluate(() => ({
+  toFix: document.querySelector('[data-qc="qc-to-fix"]').innerText,
+  toReview: document.querySelector('[data-qc="qc-to-review"]').innerText,
+  corrected: document.querySelector('[data-qc="qc-counts"] [data-qc="qc-corrected"]').innerText,
+}))
+ok('3 corrections did not move "to fix"', countsAfter.toFix === '3', JSON.stringify(countsAfter))
+ok('nor "to review"', countsAfter.toReview === '1', JSON.stringify(countsAfter))
+ok('and the corrections number stands beside them as its own labelled number',
+  countsAfter.corrected === '2', JSON.stringify(countsAfter))
+const countsText = await page.locator('[data-qc="qc-counts"]').innerText()
+ok('no blended total appears beside the three', !/\b6\b|\b5\b/.test(countsText.replace(/\n/g, ' ')), JSON.stringify(countsText.replace(/\n/g, ' ')))
+
+// ---------- 9b. absent is not empty ----------
+// The cover letter was never checked; the portfolio WAS checked and its payload carried no
+// corrections key at all - the live shape today. Neither may read as "nothing needed correcting".
+const notes = await page.evaluate(() => [...document.querySelectorAll('[data-qc="qc-change-log"] [data-qc="qc-asset"]')].map((el) => ({
+  artifact: el.getAttribute('data-qc-artifact'),
+  note: (el.querySelector('[data-qc="qc-correction-note"]') || {}).innerText || '',
+  hasNumber: !!el.querySelector('[data-qc="qc-corrected"]'),
+})))
+const coverLog = notes.find((n) => n.artifact === 'art-cover')
+const portfolioLog = notes.find((n) => n.artifact === 'art-portfolio')
+ok('an asset whose run sent NO change log says the question was not answered',
+  /did not answer|reported no change log/i.test(portfolioLog.note), JSON.stringify(portfolioLog.note))
+ok('and it never reads as "nothing needed correcting"',
+  !/nothing needed correcting/i.test(portfolioLog.note), JSON.stringify(portfolioLog.note))
+ok('and it claims no number at all - not even 0',
+  portfolioLog.hasNumber === false, JSON.stringify(portfolioLog))
+ok('a never-checked asset says the checks have not run, which is a different sentence again',
+  /have not been run/i.test(coverLog.note) && coverLog.note !== portfolioLog.note, JSON.stringify(coverLog.note))
+
+// ---------- 9c. NO DEAD UI: the undo exists only where it can make a request ----------
+ok('a row carrying an id offers an undo', logRows[0].undo === true && logRows[1].undo === false,
+  JSON.stringify(logRows.map((r) => [r.seq, r.undo])))
+ok('a row with no id offers NO button, and says why instead',
+  logRows[1].undo === false && /nothing for an undo to name|cannot revert/i.test(logRows[1].undoNote),
+  JSON.stringify(logRows[1].undoNote))
+ok('an already-undone row offers no undo either', logRows[2].undo === false, JSON.stringify(logRows[2].undoNote))
+
+// ---------- 9d. a refusal is rendered, in the server's own words ----------
+await page.click('[data-qc="qc-change-log"] button[data-qc="qc-correction-undo"]')
+await page.waitForSelector('[data-qc="qc-correction-refusal"]')
+const refusal = await page.locator('[data-qc="qc-correction-refusal"]').innerText()
+ok('the undo actually called the route', revertCalls.length === 1 && /\/correction\/corr-1\/revert/.test(revertCalls[0]), JSON.stringify(revertCalls))
+ok('a write carries no ?owner= - the session decides the owner', !/[?&]owner=/.test(revertCalls[0] || ''), JSON.stringify(revertCalls))
+ok('the refusal is rendered in the server\'s own words, verbatim',
+  /this field was edited after the correction was applied, so the original cannot be restored safely/.test(refusal),
+  JSON.stringify(refusal))
+const afterRefusal = await page.evaluate(() => ({
+  rows: document.querySelectorAll('[data-qc="qc-change-log"] [data-qc="qc-correction"]').length,
+  corrected: document.querySelector('[data-qc="qc-change-log"] [data-qc="qc-corrected"]').getAttribute('data-qc-n'),
+  undone: [...document.querySelectorAll('[data-qc="qc-change-log"] [data-qc="qc-correction"]')].map((e) => e.getAttribute('data-qc-state')),
+}))
+ok('a refused undo leaves the row where it was', afterRefusal.rows === 3, JSON.stringify(afterRefusal))
+ok('and does not mark it Undone', afterRefusal.undone[0] === 'corrected', JSON.stringify(afterRefusal))
+ok('and does not move the corrections number', afterRefusal.corrected === '2', JSON.stringify(afterRefusal))
+
+// ---------- 9e. a successful undo re-reads the payload rather than patching the row ----------
+// ok:true with an EMPTY text - a correction can revert a field back to nothing, and an
+// implementation branching on the returned text would report a phantom refusal here.
+revertAnswer = () => ({ ok: true, text: '' })
+RESUME.corrections = RESUME.corrections.map((c) => (c.id === 'corr-1'
+  ? { ...c, reverted_at: '2026-08-19T14:00:00Z', reverted_by: 'von.ellis@enterpriseds.io' } : c))
+const checksBefore = seenUrls.filter((u) => /checks-result/.test(u)).length
+await page.click('[data-qc="qc-change-log"] button[data-qc="qc-correction-undo"]')
+await page.waitForFunction(() => document.querySelectorAll('[data-qc="qc-change-log"] [data-qc="qc-correction"][data-qc-state="undone"]').length === 2)
+const afterUndo = await page.evaluate(() => ({
+  rows: document.querySelectorAll('[data-qc="qc-change-log"] [data-qc="qc-correction"]').length,
+  corrected: document.querySelector('[data-qc="qc-change-log"] [data-qc="qc-corrected"]').getAttribute('data-qc-n'),
+  undoneN: document.querySelector('[data-qc="qc-change-log"] [data-qc="qc-corrections-undone"]').getAttribute('data-qc-n'),
+  refusal: document.querySelectorAll('[data-qc="qc-correction-refusal"]').length,
+}))
+ok('ok:true with an empty text is a SUCCESS, not a phantom refusal', afterUndo.refusal === 0, JSON.stringify(afterUndo))
+ok('the undone row stays in the log', afterUndo.rows === 3, JSON.stringify(afterUndo))
+ok('the corrected number drops and the undone number rises, both from the re-read payload',
+  afterUndo.corrected === '1' && afterUndo.undoneN === '2', JSON.stringify(afterUndo))
+ok('the payload was RE-READ rather than patched locally',
+  seenUrls.filter((u) => /checks-result/.test(u)).length > checksBefore,
+  'checks-result GETs before ' + checksBefore + ', after ' + seenUrls.filter((u) => /checks-result/.test(u)).length)
+
+// ---------- 9f. R5: the change log deep-links to the field it changed ----------
+await page.click('[data-qc="qc-change-log"] [data-qc="qc-correction-open"][data-qc-section="ResumeSummary"]')
+await page.waitForSelector('[role="dialog"]')
+await page.waitForSelector('[role="dialog"] [data-qc-section="ResumeSummary"]')
+const landedLog = await page.evaluate(() => {
+  const el = document.querySelector('[role="dialog"] [data-qc-section="ResumeSummary"]')
+  return { present: !!el, outlined: el ? getComputedStyle(el).boxShadow : null }
+})
+ok('a change opens the field it was made in, outlined', landedLog.present && landedLog.outlined !== 'none', JSON.stringify(landedLog))
+await page.keyboard.press('Escape')
+await page.waitForSelector('[role="dialog"]', { state: 'detached' })
+
+// ---------- 10. the change log is readable in BOTH themes, measured ----------
+// Measured here rather than in run.mjs because run.mjs's harness page does not render this surface,
+// and a contrast number taken from a page that does not show the thing proves nothing about it.
+// Same WCAG function, imported so there is one definition of "readable" in this repo.
+const readLog = () => page.evaluate(() => {
+  const pick = (sel) => { const el = document.querySelector(sel); if (!el) return null; const cs = getComputedStyle(el); return { fg: cs.color, bg: cs.backgroundColor } }
+  const ground = getComputedStyle(document.querySelector('[data-qc="qc-change-log"]')).backgroundColor
+  const solid = (c) => (c === 'rgba(0, 0, 0, 0)' ? ground : c)
+  const rowEl = document.querySelector('[data-qc="qc-correction"]')
+  const rowBg = getComputedStyle(rowEl).backgroundColor
+  const on = (sel) => { const p = pick(sel); return p ? { fg: p.fg, bg: p.bg === 'rgba(0, 0, 0, 0)' ? (rowBg === 'rgba(0, 0, 0, 0)' ? ground : rowBg) : p.bg } : null }
+  return {
+    correctedWord: on('[data-qc="qc-correction"][data-qc-state="corrected"] b'),
+    undoneWord: on('[data-qc="qc-correction"][data-qc-state="undone"] b'),
+    sentence: on('[data-qc="qc-correction"] [data-qc-part="sentence"]'),
+    why: on('[data-qc="qc-correction"] [data-qc-part="why"]'),
+    source: on('[data-qc="qc-correction"] [data-qc-part="source"]'),
+    number: on('[data-qc="qc-counts"] [data-qc="qc-corrected"]'),
+    refusalOrNote: on('[data-qc="qc-correction-note"]'),
+    ground, rowBg: solid(rowBg),
+  }
+})
+const lightLog = await readLog()
+await page.evaluate(() => document.documentElement.setAttribute('data-theme', 'dark'))
+await page.waitForFunction(() => document.documentElement.getAttribute('data-theme') === 'dark')
+const darkLog = await readLog()
+await page.evaluate(() => document.documentElement.removeAttribute('data-theme'))
+
+for (const [theme, m] of [['light', lightLog], ['dark', darkLog]]) {
+  for (const name of ['correctedWord', 'undoneWord', 'sentence', 'why', 'source', 'number', 'refusalOrNote']) {
+    const pair = m[name]
+    ok(`${theme}: the change log's ${name} is readable on its own ground (>= 4.5:1)`,
+      !!pair && contrast(pair.fg, pair.bg) >= 4.5,
+      pair ? `${pair.fg} on ${pair.bg} = ${contrast(pair.fg, pair.bg).toFixed(2)}:1` : 'element not found')
+  }
+}
+
+// The two states are told apart by their WORD, not by a colour a reader may not be able to see.
+// Colour is carried on the row's rule as a second, redundant channel.
+const stateWords = await page.evaluate(() => [...document.querySelectorAll('[data-qc="qc-correction"]')].map((el) => ({
+  state: el.getAttribute('data-qc-state'),
+  word: (el.querySelector('b') || {}).innerText || '',
+  rule: getComputedStyle(el).borderLeftColor,
+})))
+ok('a corrected change and an undone one are told apart by their words, not only by colour',
+  stateWords.some((w) => w.state === 'corrected' && w.word === 'Corrected')
+  && stateWords.some((w) => w.state === 'undone' && w.word === 'Undone'),
+  JSON.stringify(stateWords.map((w) => [w.state, w.word])))
+ok('and the colour rule is a second channel that also differs',
+  new Set(stateWords.map((w) => w.rule)).size === 2, JSON.stringify(stateWords.map((w) => w.rule)))
+
+// The measurement that produced the decision above, kept as a standing check: this surface does not
+// use a px-pill tone, and the reason is that eight of the nine fail 4.5:1 in at least one theme.
+const anyPill = await page.locator('[data-qc="qc-change-log"] .px-pill').count()
+ok('the change log adds no px-pill tone (eight of the nine measure under 4.5:1 in a theme)', anyPill === 0, 'pills found: ' + anyPill)
+ok('the change log actually repaints between the two themes',
+  lightLog.ground !== darkLog.ground, JSON.stringify({ light: lightLog.ground, dark: darkLog.ground }))
 
 } catch (e) {
   out.push('FAIL  the probe could not finish :: ' + String(e && e.message ? e.message.split('\n')[0] : e))
