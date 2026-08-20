@@ -1336,3 +1336,51 @@ that two labels for the SAME population must agree — not that different popula
 - Broad per-artifact number → P2.3 `composite`.
 LESSON: "two numbers with the same label" is not automatically a one-source-per-number violation. Check
 what each MEASURES before merging. The label was the bug, not the duplication.
+
+## TOOLING TRAPS IN THIS CONTAINER — three agents hit the same one independently (2026-08-20)
+
+- **`grep -P '[\x{2018}...]'` DOES NOT WORK HERE.** It fails with "character code point value too
+  large" and prints nothing, which reads as clean. The smart-quote verification step in `CLAUDE.md`
+  therefore verified NOTHING for every agent that followed it. Three separate agents discovered this
+  independently in one night, each worked around it locally, and none fixed the instruction. Now
+  corrected in `CLAUDE.md` to a Python codepoint scan. **When a documented check reports clean, ask
+  whether it can report anything else.**
+- **The `sed` smart-quote sweep can CREATE a build failure.** It rewrites a curly apostrophe
+  everywhere, including inside a single-quoted JS string, terminating it:
+  `'one model's estimate'` was valid before the sweep and broken after. Build after sweeping.
+- **Do NOT add a repo-wide smart-quote linter.** One was written and deleted the same night — it
+  fired on 8 correct lines including `termMatch.ts`'s smart-quote NORMALIZER. `esbuild` already
+  rejects the real failure with a parser. The build is the guard.
+- **`pull_request` workflow triggers are read from the BASE branch, not the PR head.** A `paths`
+  filter added in a PR does not take effect for that PR. Measured: a commit touching only
+  `test.yml` still fired `web-deploy`, which the filter should have suppressed.
+
+## A TEST THAT CANNOT FAIL IS WORSE THAN NO TEST (2026-08-20)
+
+A P5.3 unit test claimed to guard "the badge count splits without losing a finding" and asserted:
+```js
+assert.equal((result.attention - rev) + rev, result.attention)
+```
+`(x - y) + y === x` for every pair of numbers. It could not fail. It was the exact assertion that
+would have had to catch the bug that shipped — a finding count rendering as **-2** on screen.
+**Whenever a new guard is added, revert the fix and watch the guard fail.** Every fix agent this
+session was made to do this and each reported the specific failing assertion. It is cheap and it is
+the only thing that distinguishes a guard from decoration.
+
+## THE AC / VERIFIER GATE EARNS ITS COST — run it per stream, fanned separately (2026-08-20)
+
+Six agents: four wrote acceptance criteria COLD (explicitly forbidden from reading the
+implementation they were writing criteria for), five verified in isolated worktrees. ~135 criteria.
+It found ~20 real defects including one in the session agent's own just-written code.
+
+What made it work:
+- **Blindness is the active ingredient.** Cold AC authors reasoned from the API contract and found
+  things invisible from the feature's own code: `swap_decision` is per-PACKET while `insertion` is
+  per-ARTIFACT (so the obvious join renders resume swaps inside the cover letter), and POST /checks
+  vs GET /checks-result return DIFFERENT score shapes (so adopting the POST body renders
+  `[object Object]` on the next refresh). An AC author who has seen the diff writes criteria the
+  diff passes.
+- **Verifiers must build their own probes.** Every one had to, because the implementations put
+  their logic where no unit test could reach it. That cost IS the finding.
+- **Don't take agent results at face value.** Spot-checking found one of my own greps crying wolf
+  (it matched comments describing an old assertion, not the assertion). Strip comments first.
