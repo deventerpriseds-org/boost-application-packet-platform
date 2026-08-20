@@ -1541,3 +1541,50 @@ Detected automatically by the derive endpoint's conflict surfacing
 (`POST /api/app/qc/facts/derive`, run `32324596666`: *"3 confirmed fact(s) DISAGREE with what the
 source now says"*). Re-running that endpoint after the template edit is how to confirm the fix —
 conflicts should drop to zero.
+
+
+## ACT — P4 independent reviewer, and the AC/verifier gate across the parallel streams
+**Status:** `P4 implemented and pushed (6046b6f, branch claude/qc-p4-reviewer) — NOT yet independently
+verified, NOT yet on main, NOT yet confirmed live.` Raised 2026-08-20.
+
+### What landed
+The blind reviewer (`reviewer.ts` judgement + `appReviewer.ts` persistence), P4.2's engine
+separation, and the D6/D7/D8 decisions. 259/259 api assertions pass. Detail is in the commit body.
+
+Four things in it are worth remembering rather than rediscovering:
+
+1. **A citation must resolve to the requirement it NAMES, not merely occur in the posting.** The
+   obvious validator — `posting.includes(quote) && requirementExists(id)` — accepts real,
+   employer-authored, perfectly verifiable text as evidence for the *wrong* requirement, because
+   postings repeat their own phrasing (the requirements block and the culture paragraph). Encoded as
+   **H16**.
+2. **The reviewer must attach to the deterministic `run_id`.** `artifactChecksGet` selects by
+   `run_id = artifact_gate.run_id`, so a reviewer minting its own would store rows no reader can ever
+   see — every insert succeeding, the product showing nothing. The same shape bites the score: the
+   deterministic pass inserts it `on conflict do nothing`, so an INSERT of seniority is silently
+   discarded with a 200. It is an UPDATE. Encoded as **H18**.
+3. **`requireWrite` would NOT have closed the `promptsApi` hole** the plan asked it to close — see
+   plan §11 #7. Encoded as **H19**.
+4. **The production packet build had never metered a single call.** `logUsage(..., {})` early-returns
+   on zero tokens. Three passes, the most expensive operation in the product, invisible in the cost
+   dashboard since it was built.
+
+### The gate — what is owed, and to whom
+The org gate needs an independent AC-writing subagent BEFORE implementation and an independent
+`verifier` subagent AFTER, per code change. Tracking honestly:
+
+| Stream | ACs by an independent agent | Verified by an independent agent |
+|---|---|---|
+| P4 reviewer | **done** — written cold before implementation; it found the H16/H17/H18/H19 traps | **running** |
+| P5.2 asset blocks | **running** — written cold, spec-only, forbidden from reading the branch | pending its ACs |
+| P5.3 gate drawer | **running** — same | pending its ACs |
+| P5.4 JD step | **running** — same | pending its ACs |
+| P0 wiring | done | **STILL OWED** — the P0 verifier never reported back; P0's live behaviour is unconfirmed |
+
+The three P5 subagents each reported build- and unit-verified only, and P5.3 said explicitly that no
+`Agent` tool was exposed inside its worktree so it could not run the gate itself. That half is the
+parent's to run, and it is running now — cold, one agent per stream, each forbidden from reading the
+implementation it is writing criteria for.
+
+**Nothing in P5 or P4 may be called done until its verifier reports, and none of it is confirmed live
+until it is on `main` and checked with `ui-verify.yml` / `api-test.yml` / `db-query.yml`.**
