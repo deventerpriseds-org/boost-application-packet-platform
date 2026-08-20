@@ -35,11 +35,16 @@ const TONE = {
   yellow: { bg: 'var(--proto-yellow-soft)', fg: 'var(--proto-yellow)' },
   purple: { bg: 'var(--proto-purple-soft)', fg: 'var(--proto-purple)' },
   // No -soft token exists for these; pair them with defined tokens instead of inventing one.
-  panel: { bg: 'var(--proto-panel-deep)', fg: 'var(--proto-ink2)' },
+  panel: { bg: 'var(--proto-panel-deep)', fg: 'var(--proto-ink-on-panel)' },
   orange: { bg: 'var(--proto-yellow-soft)', fg: 'var(--proto-orange)' },
   ok: { bg: 'var(--proto-green-soft)', fg: 'var(--proto-green)' },
   warn: { bg: 'var(--proto-yellow-soft)', fg: 'var(--proto-yellow)' },
 }
+
+// Exported so the contrast sweep (test/browser/run-tones.mjs) measures THE table rather than a
+// copy of it. A guard holding its own copy of the thing it checks cannot fail when the real one
+// changes; three inert guards shipped in this repo that way before this rule was written.
+export const TONE_TABLE = TONE
 
 export const Pill = ({ children, tone, style }) => {
   const t = TONE[tone]
