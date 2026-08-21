@@ -59,3 +59,43 @@ test('every non-appconfig outcome carries a warning; the appconfig one never doe
 test('roleDirective is unchanged and always names the resolved focus', () => {
   assert.match(roleDirective('engineering'), /senior engineering executive/)
 })
+
+test('the owner’s own curated role beats every guess below it', () => {
+  // THE DEFECT: this resolver looked in AppConfig/templates, missed, and fell to a hardcoded seed,
+  // while the roles the owner curates in Settings > Roles sat unread in `persona.master_role`.
+  // Measured live: CTO -> "CTO", CDIGITAL -> "Chief Digital Officer", VP-ENGINEERING ->
+  // "Engineering", VP-PRODUCT -> "Product", VP-TECHNOLOGY -> "Technology". Those ARE role focuses.
+  //
+  // On the live Trinnex build the warning read: `no roleFocus configured for
+  // templates/director-of-digital-technology-operations-&-innovation; used the code seed
+  // "engineering"` — a second role brain beside the persona system, which is the extend-don't-
+  // duplicate failure, not a configuration the owner forgot.
+  const r = decideRoleFocus('Director of Digital Technology Operations & Innovation', null, null, null, 'Technology')
+  assert.equal(r.focus, 'Technology')
+  assert.equal(r.source, 'persona')
+  assert.equal(r.warning, undefined, 'resolving from the owner’s own data is not a fallback and must not warn')
+})
+
+test('an explicit per-template roleFocus still outranks the persona', () => {
+  // The template row is the owner being MORE specific for one role, so it stays on top.
+  const r = decideRoleFocus('VP Product', 'product management', null, null, 'Product')
+  assert.equal(r.focus, 'product management')
+  assert.equal(r.source, 'appconfig')
+})
+
+test('the persona beats the inferred guess, because evidence beats a regex', () => {
+  // `inferred` is /product/i on the job title. A curated persona is the owner stating their target
+  // role. If those two ever disagree, the owner is right.
+  const r = decideRoleFocus('Head of Product Engineering', null, null, null, 'Engineering')
+  assert.equal(r.focus, 'Engineering')
+  assert.equal(r.source, 'persona')
+})
+
+test('no persona still falls through exactly as before', () => {
+  // The whole ladder below the new rung is unchanged — this fix adds a source, it does not
+  // re-order the ones that were already there.
+  assert.equal(decideRoleFocus('VP Product', null, null, null, null).source, 'inferred')
+  assert.equal(decideRoleFocus('VP Sales', null, 'revenue', null, '').source, 'configured_default')
+  assert.equal(decideRoleFocus('VP Sales', null, null, null, undefined).source, 'seed')
+  assert.ok(decideRoleFocus('VP Sales', null, null, null, null).warning, 'the seed path still warns')
+})
