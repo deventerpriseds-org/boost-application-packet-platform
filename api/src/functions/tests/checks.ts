@@ -598,6 +598,29 @@ export function runChecks(input: CheckInput): CheckResult[] {
      */
     const ev = input.evidence
     const evidenceOf = (r: { seq: number }) => (ev && ev.bySeq ? ev.bySeq[r.seq] || null : null)
+    /**
+     * A MODEL chose this excerpt. THE GATE MUST NOT TREAT IT AS A RULE'S FINDING.
+     *
+     * This is the one place the escalation tier could have loosened the whole engine silently, and
+     * the reasoning is worth stating because the row LOOKS identical: `verifyProposal` accepts a
+     * proposal only if the quote is byte-exact in the record it names, so a proposed excerpt is
+     * every bit as verbatim as a deterministic one, correctly attributed, with real offsets.
+     *
+     * But byte-exactness is not RELEVANCE. The deterministic path clears a lexical floor as well —
+     * token overlap at `EVIDENCE_THRESHOLD`, a distinctive token, the conjunction and negation
+     * rules — and a proposed row clears none of them, by design: it exists precisely for the cases
+     * where no word is shared. Its only judge of relevance is the model, and `reasoning` is stored,
+     * never verified. Counting it in the numerator would move this check's standard from "verbatim
+     * AND lexically supported" to "verbatim", and nothing on any surface would say so.
+     *
+     * So: a proposed row is evidence to SHOW, never evidence to PASS ON. It moves a requirement out
+     * of "nothing found" and into "a model found this — confirm it", which is a strictly better
+     * place for the owner than a blank, and it cannot turn the gate green by itself. That is the
+     * house rule at the only altitude where it decides anything: a model may PROPOSE, only an exact
+     * rule may ACCUSE, and `must_have_coverage` is the accusation.
+     */
+    const isProposed = (r: { seq: number }) => evidenceOf(r)?.method === 'proposed'
+    const ruleEvidenceOf = (r: { seq: number }) => (isProposed(r) ? null : evidenceOf(r))
     const label = (r: { seq: number; verbatim: string | null; item_text: string }) =>
       `#${r.seq} ${(r.verbatim || r.item_text).slice(0, 80)}`
 
@@ -612,7 +635,11 @@ export function runChecks(input: CheckInput): CheckResult[] {
       out.push(na('responsibilities_addressed', why, RESP_EXPECT))
       out.push(na('evidence_placed', why, PLACED_EXPECT))
     } else {
-      const unevidenced = coverable.filter(r => !evidenceOf(r))
+      // `ruleEvidenceOf`, not `evidenceOf`: a proposed row leaves the requirement in the
+      // unevidenced list, where it surfaces to the owner with its excerpt attached rather than
+      // being counted as settled. Erring toward surfacing is what every other tightening in this
+      // check does.
+      const unevidenced = coverable.filter(r => !ruleEvidenceOf(r))
       // ONE denominator on every branch, and it says in words which population it is.
       //
       // The fail branch used to divide by `mustHaves.length` while its numerator came from
@@ -625,6 +652,11 @@ export function runChecks(input: CheckInput): CheckResult[] {
       // it inflated the one number a reviewer trusts most. Both branches now divide by `coverable`,
       // and the excluded rows are counted by name so they are visible rather than absorbed.
       const excluded: string[] = []
+      // Named in the observed string rather than absorbed into it. A count that changed because a
+      // model was consulted must say so on the surface a reviewer reads, or "coverage rose" is not
+      // falsifiable — the reviewer cannot tell a better profile from a chattier model.
+      const proposed = coverable.filter(isProposed)
+      if (proposed.length) excluded.push(`${proposed.length} model-proposed, awaiting your confirmation`)
       if (eligibility.length) excluded.push(`${eligibility.length} not reachable by any generated field`)
       const factOwned = mustHaves.length - coverable.length - eligibility.length
       if (factOwned > 0) excluded.push(`${factOwned} answered from your profile facts`)
@@ -636,7 +668,9 @@ export function runChecks(input: CheckInput): CheckResult[] {
         ? na('must_have_coverage', 'the posting produced no must-have requirements to judge', COVERAGE_EXPECT)
         : unevidenced.length
           ? { ...bad('must_have_coverage', `${coverable.length - unevidenced.length}/${coverable.length} must-haves evidenced${tail}`,
-                COVERAGE_EXPECT, unevidenced.map(r => `${label(r)} — ${NO_EVIDENCE_NOTE}`)), judged: judgedIds }
+                COVERAGE_EXPECT, unevidenced.map(r => isProposed(r)
+                  ? `${label(r)} — a model proposes "${(evidenceOf(r)!.quote || '').slice(0, 90)}" from ${evidenceOf(r)!.source_label}; confirm it`
+                  : `${label(r)} — ${NO_EVIDENCE_NOTE}`)), judged: judgedIds }
           : { ...ok('must_have_coverage', `${coverable.length}/${coverable.length} must-haves evidenced${tail}`, COVERAGE_EXPECT), judged: judgedIds })
 
       const unaddressed = resp.filter(r => !evidenceOf(r))

@@ -1865,6 +1865,7 @@ test('H42: every per-owner settings column production reads has a writer that ca
   // off. Pinning it fails on a NEW unwritable setting AND on the known ones being fixed.
   const KNOWN = [
     'chk_cover_words_max', 'chk_cover_words_min', 'chk_evidence_bullet_run',
+    'chk_evidence_escalate', 'chk_evidence_escalate_max',
     'chk_evidence_max_sentences',
     'chk_evidence_min_tokens', 'chk_evidence_threshold',
     'chk_expertise_words', 'chk_relevant_allowance', 'chk_relevant_max_chars', 'chk_skill_max_chars',
@@ -1874,6 +1875,15 @@ test('H42: every per-owner settings column production reads has a writer that ca
   // pre-existing gap `chk_evidence_threshold`/`chk_evidence_min_tokens` already sit in — parity
   // with its siblings, not a new regression. `chk_evidence_generic_recs` deliberately does NOT
   // exist: see `requirementSupport.GENERIC_RECORDS` for why that knob is unsafe to expose at all.
+  //
+  // `chk_evidence_escalate` / `chk_evidence_escalate_max` (2026-08-21) are the WORST entries in this
+  // list, and calling them "parity with their siblings" would be the wrong reading. Every other
+  // unwritable setting tunes a rule; the escalation toggle SPENDS MONEY and admits model judgement
+  // into the evidence spine. It is safe to ship unwritable only because its unconfigured state is
+  // OFF and `resolveOptionsFrom` reads it with `=== true` rather than `??` — so an owner who cannot
+  // reach the setting is an owner for whom the tier never runs. That is a safe default, not a
+  // working feature: until `D:chk-settings-have-no-writer` is done, turning escalation on requires
+  // an agent to run one SQL statement.
   //
   // `chk_evidence_bullet_run` (2026-08-21) is the FOURTH evidence knob to land in this list, and the
   // repetition is the finding: four settings in one subsystem now share one missing writer, so the
