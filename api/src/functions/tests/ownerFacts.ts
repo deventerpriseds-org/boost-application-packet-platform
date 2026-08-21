@@ -88,11 +88,133 @@ export interface OwnerFact {
   confirmed_at: string | null
 }
 
-/** The number a requirement demands, when it states one ("10+ years" -> 10). */
-export function demandedNumber(text: string): number | null {
-  const m = /\b(\d{1,2})\s*\+?\s*(years|yrs)\b/i.exec(String(text || ''))
-  return m ? Number(m[1]) : null
+/**
+ * THE demand parser. One function, one answer, for every unit that has arithmetic.
+ *
+ * D23. Before this, only `years` could be compared: `checkAgainstFacts` gated the arithmetic on
+ * `def.unit === 'years'`, so `scope.largest_team` (people) and `scope.largest_budget` (usd) fell
+ * through to `unknown` and the two of the eight comparison dimensions that are ABOUT numbers could
+ * only ever be graded by token overlap. It is extended here rather than answered again in
+ * `dimensions.ts`, because a second numeric parser is a second answer and the two disagree on the
+ * first posting worded unusually. `H:one-demand-parser` fails the suite if one appears.
+ *
+ * Each unit gets its OWN pattern, and that is the point rather than an implementation detail:
+ *  - `years` keeps `\d{1,2}` exactly as it was. A three-digit year figure is a parse error, not a
+ *    career, and this path is 511 of 7,559 live requirement rows — it does not change.
+ *  - `people` must NOT cap at two digits. The org sizes this dimension exists for are three and
+ *    four figures ("an organization of 450"), and a two-digit cap reads 1,200 as 1 or 12 in
+ *    silence. Thousands separators are accepted because postings write them.
+ *  - `usd` must return DOLLARS, never the bare digits. A comparator that reads "$18M" as 18 is
+ *    comparing eighteen dollars, and it will tell someone running an $18M budget they fall short.
+ *
+ * Anchoring is deliberate. `people` requires a people-noun and `usd` requires a currency marker, so
+ * "10+ years leading teams" cannot be read as ten people, and a bare year count cannot be read as
+ * dollars. A number with no unit attached to it is not a demand this function knows how to grade.
+ */
+export type Quantity = 'years' | 'people' | 'usd' | 'percent'
+
+const MAGNITUDE: Record<string, number> = {
+  k: 1e3, thousand: 1e3, m: 1e6, mm: 1e6, million: 1e6, b: 1e9, bn: 1e9, billion: 1e9,
 }
+
+/** "1,200" -> 1200. Postings write separators; a parser that does not is off by a factor of ten. */
+const digits = (s: string) => Number(String(s).replace(/,/g, ''))
+
+const DEMAND_RE: Partial<Record<Quantity, RegExp>> = {
+  // unchanged from the original demandedNumber, deliberately
+  years: /\b(\d{1,2})\s*\+?\s*(?:years|yrs)\b/i,
+  // "team of 250", "org of 1,200", "60+ engineers", "12 direct reports", "450 people"
+  people: /\b(?:team|org|organi[sz]ation|group|department)\s+of\s+(\d[\d,]*)\b|\b(\d[\d,]*)\s*\+?\s*(?:direct reports|engineers|developers|people|staff|employees|ftes?|headcount)\b/i,
+  // "$18M", "$1.5B", "$750K", "$10 million", "2.4 billion" (with a nearby currency/P&L word)
+  usd: /(?:[$£€]\s?(\d[\d,]*(?:\.\d+)?)\s*(k|mm|m|bn|b|thousand|million|billion)?)|(?:\b(\d[\d,]*(?:\.\d+)?)\s*(k|mm|m|bn|b|thousand|million|billion)\b)/i,
+}
+
+/**
+ * The figure a piece of text states in `unit`, or null when it states none.
+ *
+ * Returns `explicit: false` for a usd figure written as bare digits with no magnitude word. That
+ * distinction is load-bearing rather than decorative — see `factQuantity`.
+ */
+export function parseQuantity(text: string, unit: Quantity = 'years'): { value: number; explicit: boolean } | null {
+  const src = String(text || '')
+  const re = DEMAND_RE[unit]
+  if (!re) return null
+  const m = re.exec(src)
+  if (!m) return null
+  if (unit === 'usd') {
+    const raw = m[1] ?? m[3]
+    const suffix = (m[2] ?? m[4] ?? '').toLowerCase()
+    if (raw == null) return null
+    const mult = MAGNITUDE[suffix] || 1
+    // "$18M" and "$750K" carry their own scale; "$18" and "18" do not.
+    return { value: digits(raw) * mult, explicit: !!suffix }
+  }
+  const raw = m.slice(1).find(x => x != null)
+  if (raw == null) return null
+  return { value: digits(raw), explicit: true }
+}
+
+/**
+ * The number a requirement demands, when it states one ("10+ years" -> 10).
+ *
+ * Kept as the years-defaulted face of `parseQuantity` so every existing caller and every existing
+ * expectation in `ownerFacts.test.mjs` is byte-for-byte unchanged. The years path was not touched.
+ */
+export function demandedNumber(text: string, unit: Quantity = 'years'): number | null {
+  const q = parseQuantity(text, unit)
+  return q ? q.value : null
+}
+
+/**
+ * The OWNER's figure, on the same scale as the demand — and this is where the live defect is.
+ *
+ * MEASURED, not supposed. The same logical fact is written by two paths that disagree by six orders
+ * of magnitude:
+ *   - Settings > Facts (`Settings.jsx:1489`) does `Number(String(value).replace(/[^0-9.]/g, ''))`,
+ *     so an owner who types "$18M" is stored as `value: '$18M', value_num: 18`.
+ *   - `deriveFacts` (below) reads the same "$18M" off the resume and stores `value_num: 18000000`.
+ * `upsertStated` (appFacts.ts) takes the client's `valueNum` verbatim, so both land in `owner_fact`.
+ *
+ * Trusting `value_num` for usd therefore compares 18 against 10000000 and tells an owner who runs an
+ * $18M budget that they fall short — an ACCUSATION produced by a unit bug. So for usd the magnitude
+ * is re-derived from the fact's own TEXT first, and `value_num` is only the fallback. Nothing is
+ * rescaled upward: "$18K" parses to 18000 and still falls short of $10M, which is the mirror case
+ * that must not be "fixed" into a pass.
+ *
+ * `people` and `years` are bare counts on both paths and are NOT rescaled — the correction is
+ * unit-scoped on purpose.
+ */
+export function factQuantity(fact: { value: string | null; value_num: number | null }, unit: Quantity):
+  { value: number; explicit: boolean } | null {
+  if (unit === 'usd') {
+    const fromText = parseQuantity(String(fact.value || ''), 'usd')
+    if (fromText && fromText.explicit) return fromText
+    if (fact.value_num != null) return { value: Number(fact.value_num), explicit: !!fromText?.explicit }
+    return fromText
+  }
+  if (fact.value_num != null) return { value: Number(fact.value_num), explicit: true }
+  const fromText = parseQuantity(String(fact.value || ''), unit)
+  return fromText
+}
+
+/** Money and headcount read back the way they were written, never as raw enum units. */
+export function formatQuantity(n: number, unit: Quantity): string {
+  if (unit === 'usd') {
+    const a = Math.abs(n)
+    if (a >= 1e9) return `$${Number((n / 1e9).toFixed(2))}B`
+    if (a >= 1e6) return `$${Number((n / 1e6).toFixed(2))}M`
+    if (a >= 1e3) return `$${Number((n / 1e3).toFixed(2))}K`
+    return `$${n}`
+  }
+  if (unit === 'people') return `${n} ${n === 1 ? 'person' : 'people'}`
+  if (unit === 'years') return `${n} years`
+  return String(n)
+}
+
+/** The units this system can actually do arithmetic in. The ONE answer to that question. */
+export const COMPARABLE_UNITS: Quantity[] = ['years', 'people', 'usd']
+export const isComparableUnit = (u: string | undefined | null): u is Quantity =>
+  !!u && (COMPARABLE_UNITS as string[]).includes(u)
 
 export type FactVerdict = 'satisfied' | 'not_satisfied' | 'unknown'
 
