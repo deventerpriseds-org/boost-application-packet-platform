@@ -129,6 +129,12 @@ jobs:
           except Exception as e:
               print(f'FAILED: migrate response was not JSON ({e})')
               sys.exit(1)
+          # `[]` and `null` are valid JSON. Without this the next line raises AttributeError and the
+          # step still fails — the safe direction — but it fails with a traceback instead of saying
+          # what was wrong, which is the difference between a diagnosis and a puzzle at 3am.
+          if not isinstance(r, dict):
+              print(f'FAILED: migrate response was not a JSON object, got {type(r).__name__}')
+              sys.exit(1)
           if r.get('ok') is not True:
               print(f"FAILED: schema did not apply - {r.get('error') or r.get('detail') or '(no detail)'}")
               sys.exit(1)
