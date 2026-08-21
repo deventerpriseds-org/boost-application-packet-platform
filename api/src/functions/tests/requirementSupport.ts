@@ -395,6 +395,27 @@ export function segments(text: string, maxSegments = 1): Span[] {
     pos = end > pos ? end : pos + 1
   }
 
+  // BOTH granularities, deliberately. Splitting a `|`-separated field into items is right — the
+  // first row production stored quoted a 400-character skills blob whole — but item-only was a
+  // REGRESSION: the live `expertise` items are shorter than `reviewer.MIN_QUOTE_WORDS`, so every
+  // candidate failed the quote floor and the one working match went back to zero (measured, run
+  // 32508310532, evidenced 1 -> 0).
+  //
+  // Emitting the enclosing LINE as well as its items costs nothing and cannot resurrect the blob
+  // problem: a line and an item that both carry the requirement's tokens tie on ratio, and the
+  // tie-break in `supportIn` prefers the SHORTER span, so the focused item still wins. The line is
+  // reached only when no item on it clears the floors — which is exactly the case that regressed.
+  for (let i = 0; i < base.length; i++) {
+    const lineStart = base[i].start
+    let j = i
+    while (j + 1 < base.length && !t.slice(base[j].end, base[j + 1].start).includes('\n')) j++
+    if (j > i) {
+      const whole = t.slice(lineStart, base[j].end).replace(/\s+$/, '')
+      if (whole) base.push({ start: lineStart, end: lineStart + whole.length })
+    }
+    i = j
+  }
+
   const n = Math.max(1, Math.min(3, Math.floor(maxSegments) || 1))
   const out: Span[] = [...base]
   // Contiguous runs. The span runs from the first segment's start to the last one's end, so the

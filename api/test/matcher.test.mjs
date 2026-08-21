@@ -1003,7 +1003,12 @@ test('H:bullet-blob-not-one-quote: a pipe-separated field splits into items, not
   const BLOB = 'Budget Development and P&L Management|KPI-driven performance management|Enterprise alignment of strategy and execution|Global technology operations leadership'
   const spans = segments(BLOB, 1).map(s => BLOB.slice(s.start, s.end))
   assert.ok(spans.includes('Global technology operations leadership'), `got ${JSON.stringify(spans)}`)
-  assert.ok(spans.every(x => !x.includes('|')), 'no candidate may span a bullet separator')
+  // NOT "no candidate may span a separator" — the enclosing line is emitted too, deliberately, as
+  // the fallback for items shorter than the quote floor. Item-only was a regression: the live
+  // `expertise` items are under MIN_QUOTE_WORDS, every candidate failed the floor and production
+  // went from 1 evidenced back to 0 (run 32508310532). The invariant is that the WINNER is the
+  // item whenever an item qualifies, which the tie-break on shorter span guarantees.
+  assert.ok(spans.some(x => x.includes('|')), 'the enclosing line is kept as a fallback candidate')
 
   const recs = profileRecords({ expertise: BLOB }, null)
   const ev = resolveEvidence('Experience in leading technology operations', recs)
