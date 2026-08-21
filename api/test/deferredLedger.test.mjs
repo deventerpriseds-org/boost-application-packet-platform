@@ -53,7 +53,7 @@ export function parse (lines) {
     if (lines[i].startsWith('## ')) section = lines[i].slice(3).trim()
     const m = ROW_STRICT.exec(lines[i])
     if (!m) continue
-    rows.push({ n: i + 1, section, id: m[1], cells: m[2].split('|').map(c => c.trim()) })
+    rows.push({ n: i + 1, section, id: m[1], cells: m[2].split(/(?<!\\)\|/).map(c => c.trim()) })
   }
   return rows
 }
@@ -61,8 +61,8 @@ const claimOf = r => r.cells[1]
 const triggerOf = r => r.cells[3]
 
 export function checkOf (row) {
-  const m = /`check:\s*(grep|absent|manual|owner)\s+([^\s`]+)\s*(?:—\s*)?([^`]*)`/.exec(triggerOf(row) || '')
-  return m ? { kind: m[1], arg: m[2], rest: m[3].trim() } : null
+  const m = /`check:\s*(grep|absent|manual)\s+([^\s`]+)\s*(?:—\s*)?([^`]*)`/.exec(triggerOf(row) || '')
+  return m ? { kind: m[1], arg: m[2], rest: m[3].trim().replace(/\\\|/g, '|') } : null
 }
 
 const A = {}   // assertion name -> (lines, rows) => string[] of problems
@@ -127,17 +127,24 @@ A['manual-names-its-vehicle'] = (lines, rows) => {
 A['check-names-a-construct'] = (lines, rows) =>
   // D20 cited `appFacts.ts:232`; the construct now lives at :239 and the claim never changed. A
   // check pinned to a line number is a guaranteed future false positive.
-  rows.map(r => ({ r, c: checkOf(r) })).filter(x => x.c && /:\d+\b/.test(x.c.rest + ' ' + x.c.arg))
+  rows.map(r => ({ r, c: checkOf(r) })).filter(x => x.c && x.c.kind !== 'manual' && /:\d+\b/.test(x.c.rest + ' ' + x.c.arg))
     .map(x => `L${x.r.n} ${x.r.id}: check names a line coordinate, which rots while the defect stands`)
+
+A['check-pattern-is-real'] = (lines, rows) =>
+  rows.map(r => ({ r, c: checkOf(r) })).filter(x => x.c && x.c.kind !== 'manual' && x.c.rest.length < 3)
+    .map(x => `L${x.r.n} ${x.r.id}: pattern ${JSON.stringify(x.c.rest)} is empty or too short — ` +
+      'an empty pattern compiles to /(?:)/, matches every file, and is counted as machine-checked')
 
 A['stale-row-fails'] = (lines, rows) => {
   const out = []
   for (const r of rows) {
     const c = checkOf(r)
-    if (!c || c.kind === 'manual' || c.kind === 'owner') continue
+    if (!c || c.kind === 'manual') continue
     const path = join(REPO, c.arg)
     if (!existsSync(path) || !statSync(path).isFile()) { out.push(`L${r.n} ${r.id}: check names ${c.arg}, not a file in this repo`); continue }
-    const hit = new RegExp(c.rest, 'm').test(readFileSync(path, 'utf8'))
+    let hit
+    try { hit = new RegExp(c.rest, 'm').test(readFileSync(path, 'utf8')) }
+    catch (e) { out.push(`L${r.n} ${r.id}: pattern /${c.rest}/ does not compile — ${e.message}`); continue }
     const closed = r.cells[0] === 'CLOSED'
     if (c.kind === 'grep' && !hit) out.push(closed
       ? `L${r.n} ${r.id}: /${c.rest}/ no longer in ${c.arg} — the fix REGRESSED, reopen the row`
@@ -178,15 +185,22 @@ test('D:ledger-closed-carries-evidence: a closed row names something concrete', 
 test('D:ledger-open-carries-check: every open row carries exactly one check', () => run('open-carries-check'))
 test('D:ledger-manual-names-its-vehicle: a row nothing here can settle says what would', () => run('manual-names-its-vehicle'))
 test('D:ledger-check-names-a-construct: a check is never pinned to a line number', () => run('check-names-a-construct'))
+test('D:ledger-check-pattern-is-real: an empty pattern matches every file and is not a check', () => run('check-pattern-is-real'))
 test('D:ledger-no-duplicate-section: a bad merge splice fails', () => run('no-duplicate-section'))
 test('D:ledger-table-header: every table holding rows declares the five columns', () => run('table-header'))
 
 test('D:ledger-stale-row-fails: a row whose claim no longer holds fails, in both directions', () => {
-  const machine = ROWS.filter(r => { const c = checkOf(r); return c && (c.kind === 'grep' || c.kind === 'absent') }).length
-  const manual = ROWS.filter(r => { const c = checkOf(r); return c && (c.kind === 'manual' || c.kind === 'owner') })
-  assert.ok(machine >= 8, `only ${machine} rows are machine-checked — a ledger of manual rows checks nothing`)
-  console.log(`[D:ledger] ${ROWS.length} rows: ${machine} machine-checked, ${manual.length} NOT CHECKED HERE ` +
-    `(not_applicable, not pass) — ${manual.map(r => r.id).join(', ')}`)
+  const kind = r => (checkOf(r) || {}).kind
+  const machine = ROWS.filter(r => kind(r) === 'grep' || kind(r) === 'absent')
+  const manual = ROWS.filter(r => kind(r) === 'manual')
+  const none = ROWS.filter(r => !kind(r))
+  assert.ok(machine.length >= 8, `only ${machine.length} rows are machine-checked — a ledger of manual rows checks nothing`)
+  // Every row lands in exactly one bucket. The first census printed machine and manual and omitted
+  // the rest, so 16 closed-by-prose rows read as covered by a green run.
+  assert.equal(machine.length + manual.length + none.length, ROWS.length, 'the census does not account for every row')
+  console.log(`[D:ledger] ${ROWS.length} rows: ${machine.length} machine-checked, ` +
+    `${manual.length} NOT CHECKED HERE (not_applicable, not pass) — ${manual.map(r => r.id).join(', ')}; ` +
+    `${none.length} closed with NO check, re-checked by nothing — ${none.map(r => r.id).join(', ')}`)
   run('stale-row-fails')
 })
 
@@ -202,7 +216,7 @@ test('D:ledger-citation-resolves: every D-id cited from source resolves to exact
     if (st.isFile()) { if (['.ts', '.mjs', '.js', '.jsx', '.md', '.sh'].includes(extname(p))) files.push(p); return }
     for (const e of readdirSync(p)) walk(join(p, e))
   }
-  for (const r of ['api/src', 'api/test', 'app/src', 'scripts', '.claude/actions.md']) {
+  for (const r of ['api/src', 'api/test', 'app/src', 'scripts', '.claude/actions.md', '.claude/DEFERRED.md']) {
     const p = join(REPO, r)
     if (existsSync(p)) walk(p)
   }
@@ -224,7 +238,9 @@ test('D:ledger-guard-not-vacuous: every assertion above is proven by reinstating
   const swap = (find, replace) => {
     const i = LINES.findIndex(l => l.startsWith(find))
     assert.notEqual(i, -1, `fixture anchor ${find} not found — the fixture has gone stale`)
-    const out = [...LINES]; out[i] = replace(out[i]); return out
+    const out = [...LINES]; out[i] = replace(out[i])
+    assert.notEqual(out[i], LINES[i], `fixture for ${find} applied no change — it would report the guard inert`)
+    return out
   }
   const firstOpen = ROWS.find(r => r.cells[0] === 'OPEN')
   const fixtures = [
@@ -238,13 +254,13 @@ test('D:ledger-guard-not-vacuous: every assertion above is proven by reinstating
     ['open-carries-check', swap(`| ${firstOpen.id} |`, l => l.replace(/`check:[^`]*`/, ''))],
     ['manual-names-its-vehicle', swap('| D34 |', l => l.replace('`check: manual lane', '`check: manual someday'))],
     ['check-names-a-construct', swap('| D20 |', l => l.replace('`check: grep api/src/functions/tests/appFacts.ts', '`check: grep api/src/functions/tests/appFacts.ts:232'))],
+    ['check-pattern-is-real', swap('| D3 |', l => l.replace(/`check: absent (\S+) [^`]*`/, '`check: absent $1 `'))],
     ['stale-row-fails', swap('| D20 |', l => l.replace('body\\.confirm', 'a_construct_that_is_not_there'))],
-    ['no-duplicate-section', [...LINES, '## Contrast']],
-    ['table-header', swap('| D1 |', l => l)]   // handled below with a header mutation
+    ['no-duplicate-section', [...LINES, '## Contrast']]
+    // table-header is proven below: it needs the HEADER mutated, not a row.
   ]
   const proven = []
   for (const [name, lines] of fixtures) {
-    if (name === 'table-header') continue
     const problems = A[name](lines, parse(lines))
     assert.ok(problems.length > 0, `${name} did NOT fire on its own reinstated defect — the guard is inert`)
     proven.push(`${name}: ${problems[0].slice(0, 72)}`)

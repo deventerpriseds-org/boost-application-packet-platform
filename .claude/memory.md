@@ -1682,3 +1682,42 @@ runs (`D:ledger-guard-not-vacuous`), and the proof prints on every run.
 
 **NOT verified live** — nothing here touches production; it is a test-suite and doc change. 571 api
 tests pass (556 on `main`; +15). 14 of 42 rows are reported `not_applicable`, never `pass`.
+
+### The independent verifier found the guard's own rot vector — three checks that could never go false
+
+It confirmed all eight claims (571 tests, 13/13 assertions firing on its OWN fixtures, both staleness
+directions from real source edits, the re-key correct against every citation, no row body dropped)
+and then found what self-verification would not have:
+
+**Three of the first four checks written could never go false**, two proven by execution — reinstate
+the exact regression the row names and the suite stays green:
+- `D2` grepped `generalize`, which survives the import, the `'generalized'` type literal and a
+  comment after the last CALLER is gone. Now `= generalize\(`. Reinstated: identifier still present
+  4 times, suite RED.
+- `D10` grepped `H26`, which survives in comments after the case itself is deleted. Now
+  `test\('H26:`. Reinstated: `H26` still present twice, suite RED. `H26` strips comments before
+  scanning for this exact reason; the check had done the opposite.
+- `D14`'s defect is what `covered_kw` MEANS — semantic, so no source grep can settle it. Now
+  `manual`.
+**A check whose pattern cannot go false is not a check.** An empty pattern is the degenerate case:
+`/(?:)/` matches every file, passes forever, and was being COUNTED as machine-checked — the vacuous
+gate class, inside the vacuity guard. Rejected now.
+
+**The census omitted 16 rows.** 12 machine + 14 manual = 26 of 42; the other 16 were closed by prose
+with no check, invisible in a green run. All three buckets print, and the accounting must be
+complete.
+
+**Two cry-wolf defects of my own.** The line-coordinate ban ran on `manual` reasons too, so a clock
+time (`02:03`) or a run id read as a line number — scoped to `grep`/`absent` now. And `swap()`
+asserted its ANCHOR existed but never that the replacement APPLIED, so a legal ledger edit made a
+no-op fixture accuse the guard of being inert — the repo's own "verify that an edit applied" rule,
+broken by the helper that enforces that class. Adding the assertion immediately caught a real no-op
+placeholder fixture I had left in.
+
+Also fixed: a `|` in a check pattern split the row and reported "6 columns, expected 5" (escape it
+`\|`); `check: owner` was an undocumented fourth kind that bypassed vehicle validation (one spelling,
+`manual owner`); the ledger itself was not in the citation-scan roots, the one place a re-key is
+most likely to strand a pointer; an invalid regex threw naming no row; and `D20`'s prose still cited
+the `appFacts.ts:232` coordinate that had already rotted to `:239`.
+
+572 api tests pass. **NOT verified live** — nothing here deploys.

@@ -2295,3 +2295,11 @@ citation guard now proves they reconcile.
 own file, so an `H:` slug in a second test file is invisible to it. Latent, not live.
 
 **NOT verified live** — a test-suite and documentation change; nothing deploys.
+
+**The verifier found what self-verification would not.** Eight claims CONFIRMED, and then eleven
+defects — the worst being that three of the first four `check:` directives I wrote could never go
+false, two proven by reinstating the exact regression while the suite stayed green. That is the rot
+vector the whole remedy exists to close, and it was open in the remedy itself. All fixed and each
+re-proved by reinstatement. Two of the defects were my own cry-wolf: a line-coordinate ban that fired
+on clock times in prose, and a fixture helper that never asserted its own edit applied.
+Deferred as rows rather than notes: `D:hslug-scan-one-file`, `D:id-hygiene-duplicated`.
