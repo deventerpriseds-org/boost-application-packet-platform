@@ -6,7 +6,8 @@ import { resolveRoleFocus, roleDirective } from './roleFocus'
 import { assemblePackage } from './mt17'
 import { parseResumePackage } from './resumeParser'
 import { parseAgentJson, isEmptyResult } from './agentJson'
-import { loadPipelineSettings, requireDriveId, isDriveId, CONFIG_KEYS, PipelineSettings } from './pipelineConfig'
+import { loadPipelineSettings, requireDriveId, isDriveId, isEmailish, CONFIG_KEYS, PipelineSettings } from './pipelineConfig'
+import { copyThen, deleteDriveFile } from './packetTemplates'
 import { buildScopedPrompt } from './remediation'
 
 const CONN = process.env.AZURE_STORAGE_CONNECTION_STRING!
@@ -17,30 +18,65 @@ const HEADERS = {
   'Access-Control-Allow-Headers': 'Content-Type'
 }
 
-const RESUME_TEMPLATE_ID = '1bwOcxvkbihRTUjOzVjrWSPnDomwqy6gOz6229mdzbZw'
-const PORTFOLIO_TEMPLATE_ID = '1ULZZLBs9zwLEN6c8hcXvBCNPk0YyTGg0yIlFSYkGIec'
-const COVER_LETTER_TEMPLATE_ID = '1QN4Cnw4R9krUH4kEpl_lnhoPOkY5PG2oUKRMjxBfWV0'
-const OUTPUT_FOLDER_ID = '1MlVLMSQ0EQJoAtpKC1Mv7mDCAJDmdJTt'
+// P7 item 8. The four Drive ids used to be declared HERE as well as in `packetTemplates.ts` — two
+// byte-identical copies of the same four literals, which is how one of them goes stale without
+// anyone noticing. They are now resolved per run from `PipelineSettings` (owner value if set,
+// `SEED_DRIVE_IDS` otherwise), and the seeds have exactly one home.
 const TEST_PDF_BASE64 = 'JVBERi0xLjQKMSAwIG9iago8PAovVHlwZSAvQ2F0YWxvZwovUGFnZXMgMiAwIFIKPj4KZW5kb2JqCjIgMCBvYmoKPDwKL1R5cGUgL1BhZ2VzCi9LaWRzIFszIDAgUl0KL0NvdW50IDEKPD4KZW5kb2JqCjMgMCBvYmoKPDwKL1R5cGUgL1BhZ2UKL1BhcmVudCAyIDAgUgovTWVkaWFCb3ggWzAgMCA2MTIgNzkyXQo+PgplbmRvYmoKeHJlZgowIDQKMDAwMDAwMDAwMCA2NTUzNSBmCjAwMDAwMDAwMDkgMDAwMDAgbgowMDAwMDAwMDU4IDAwMDAwIG4KMDAwMDAwMDExNSAwMDAwMCBuCnRyYWlsZXIKPDwKL1NpemUgNAovUm9vdCAxIDAgUgo+PgpzdGFydHhyZWYKMTkwCiUlRU9G'
 
-async function copyAndInject(token: string, templateId: string, name: string, varMap: Record<string, string>, isSlides: boolean) {
+/**
+ * Copy a template and inject the merge values, returning the new file id.
+ *
+ * D13, first half. The old body did `copy` then `batchUpdate` and threw on an injection failure —
+ * leaving a real Google file whose id existed only in a local variable inside the function that had
+ * just thrown. The caller could not clean it up because the caller never learned the id. `copyThen`
+ * owns both halves so the id is in scope at the moment it is needed, and deletes the copy before
+ * rethrowing; the rethrown message says whether the delete worked.
+ */
+async function copyAndInject(token: string, templateId: string, name: string, varMap: Record<string, string>, isSlides: boolean, outputFolderId: string) {
   // Validate BEFORE the request so a missing/blank/sentinel id is reported as the configuration gap
   // it is, naming the document, instead of arriving at Drive as an opaque 404 on `files//copy`.
   const tpl = requireDriveId(templateId, `Template id for "${name}"`)
-  const parent = requireDriveId(OUTPUT_FOLDER_ID, 'Output folder id', 'google.outputFolderId')
-  const copyRes = await fetch(`https://www.googleapis.com/drive/v3/files/${tpl}/copy`, {
-    method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-    body: JSON.stringify({ name, parents: [parent] })
+  const parent = requireDriveId(outputFolderId, 'Output folder id', CONFIG_KEYS.outputFolderId)
+  const { id } = await copyThen(token, tpl, name, parent, async (fileId: string) => {
+    const requests = Object.entries(varMap).map(([find, replace]) => ({ replaceAllText: { containsText: { text: find, matchCase: true }, replaceText: replace } }))
+    const apiBase = isSlides ? 'https://slides.googleapis.com/v1/presentations' : 'https://docs.googleapis.com/v1/documents'
+    const batchRes = await fetch(`${apiBase}/${fileId}:batchUpdate`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify({ requests })
+    })
+    if (!batchRes.ok) throw new Error(`Inject ${name} failed: HTTP ${batchRes.status}`)
   })
-  if (!copyRes.ok) throw new Error(`Copy ${name} failed: HTTP ${copyRes.status}`)
-  const { id } = await copyRes.json() as any
-  const requests = Object.entries(varMap).map(([find, replace]) => ({ replaceAllText: { containsText: { text: find, matchCase: true }, replaceText: replace } }))
-  const apiBase = isSlides ? 'https://slides.googleapis.com/v1/presentations' : 'https://docs.googleapis.com/v1/documents'
-  const batchRes = await fetch(`${apiBase}/${id}:batchUpdate`, {
-    method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify({ requests })
-  })
-  if (!batchRes.ok) throw new Error(`Inject ${name} failed: HTTP ${batchRes.status}`)
   return id
+}
+
+/**
+ * D13, second half — build every document, and leave no file behind if any of them fails.
+ *
+ * `Promise.all` was the defect and the reason it was invisible: it rejects on the FIRST rejection
+ * while every other job keeps running to completion in the background. At the catch site there was
+ * therefore nothing to enumerate — the sibling copies had not finished yet, and when they did, their
+ * ids went nowhere. `allSettled` waits for all of them, which is what makes the successful ids
+ * enumerable at all, and only then is cleanup even possible.
+ *
+ * Exported and pure of Drive-specific knowledge (it takes a `remove` callback) so the behaviour can
+ * be exercised in a test without a Google token — the guard has to prove the CLEANUP, not the
+ * spelling of `allSettled`.
+ */
+export async function buildAllOrCleanUp(
+  jobs: Array<Promise<string>>,
+  remove: (id: string) => Promise<boolean>,
+): Promise<{ ids: string[]; cleanedUp: string[]; orphaned: string[]; errors: string[] }> {
+  const settled = await Promise.allSettled(jobs)
+  const ids = settled.flatMap((r) => (r.status === 'fulfilled' ? [r.value as string] : []))
+  const errors = settled.flatMap((r) => (r.status === 'rejected' ? [String((r.reason as any)?.message || r.reason)] : []))
+  if (!errors.length) return { ids, cleanedUp: [], orphaned: [], errors }
+  const cleanedUp: string[] = []
+  const orphaned: string[] = []
+  for (const id of ids) {
+    // Sequential, not Promise.all: a cleanup loop that fails halfway is the bug this closes.
+    ;(await remove(id).catch(() => false)) ? cleanedUp.push(id) : orphaned.push(id)
+  }
+  return { ids: [], cleanedUp, orphaned, errors }
 }
 
 /**
@@ -61,6 +97,45 @@ export function profileFromMasterContext(mc: any): { profileText: string; omitLi
       .filter(([k, v]) => typeof v === 'string' && k !== 'itemsToOmit')
       .map(([, v]) => v as string).join(' '),
   }
+}
+
+/**
+ * P7 item 4 — two prompt roles backed by byte-identical text.
+ *
+ * THE FACT, ESTABLISHED BEFORE THE CODE (the backlog claim rested on equal LENGTHS and had never
+ * been checked). `GET /api/prompts` on the live Function App, run 32435525197, 2026-08-21, sha256
+ * over the raw response bytes:
+ *
+ *     resume_user       29,068 chars  335aef44caddc15ab318cf5d…  \
+ *     portfolio_user    29,068 chars  335aef44caddc15ab318cf5d…  /  IDENTICAL
+ *     resume_system        329 chars  803330a27620b65c9303c1e7…  \
+ *     portfolio_system     329 chars  803330a27620b65c9303c1e7…  /  IDENTICAL
+ *     ats_user           8,807 chars  88a350d0b5b05021f1ed7834…     (control: differs)
+ *
+ * So the claim is TRUE and it is BIGGER than the backlog said: not "two near-identical prompts" but
+ * two byte-identical PAIRS, the user prompt and the system prompt both. `portfolio_user` is the
+ * resume prompt — 42 `###` section markers, no mention of JSON — while Call 2 parses its reply with
+ * `parseAgentJson`. Call 2 therefore cannot return a JSON object, and the portfolio and cover letter
+ * are built from Call 1's fallback on every single run, at the cost of a second 16,000-token call.
+ *
+ * WHAT THIS FUNCTION DOES AND DOES NOT DO. Authoring a real portfolio prompt is the owner's content
+ * and inventing 29k characters of it would be a worse defect than the one being fixed, so this does
+ * not attempt it. What it does is make the condition impossible to hold silently: identical text
+ * under two different partition keys means one of the two roles is not being performed, and the run
+ * now says so by name. Deterministic, exact, zero tokens.
+ *
+ * Exact equality, never similarity — an accusation-grade check (H4). Blank rows are skipped: two
+ * unset prompts both defaulting to '' are absent, not duplicated.
+ */
+export function duplicatePromptPairs(prompts: Record<string, string>): Array<[string, string]> {
+  const keys = Object.keys(prompts).filter((k) => (prompts[k] || '').trim().length > 0).sort()
+  const pairs: Array<[string, string]> = []
+  for (let i = 0; i < keys.length; i++) {
+    for (let j = i + 1; j < keys.length; j++) {
+      if (prompts[keys[i]] === prompts[keys[j]]) pairs.push([keys[i], keys[j]])
+    }
+  }
+  return pairs
 }
 
 /** Load the MasterContext profile on its own. The loop needs it; a full generation does not. */
@@ -168,6 +243,13 @@ export async function buildPackageForJD(opts: { key: string; jd: string; roleTyp
     prompts[key] = (e as any).content || ''
     promptVersions[key] = Number((e as any).version ?? 0)
   }
+  // P7 item 4 — see `duplicatePromptPairs`. Proven live: `resume_user` and `portfolio_user` are
+  // byte-identical, as are `resume_system` and `portfolio_system`, so Call 2 runs the resume prompt
+  // and its JSON parse can never succeed. Nothing in the run said so; it now does, by name.
+  for (const [a, b] of duplicatePromptPairs(prompts)) {
+    warnings.push(`Prompts "${a}" and "${b}" are byte-identical (${prompts[a].length} chars) — one of the two roles is not being performed. Edit it in the dev console's Prompts screen.`)
+  }
+
   const ctxClient = TableClient.fromConnectionString(CONN, 'MasterContext')
   let mc: any = {}
   for await (const e of ctxClient.listEntities({ queryOptions: { filter: "PartitionKey eq 'context'" } })) mc = e
@@ -280,13 +362,15 @@ export async function pipelineRun(req: HttpRequest, context: InvocationContext):
   if (req.method === 'OPTIONS') return { status: 204, headers: HEADERS }
   const key = process.env.OPENAI_API_KEY
   const saJson = process.env.GOOGLE_SERVICE_ACCOUNT_JSON
-  if (!key) return { status: 200, headers: HEADERS, jsonBody: { pass: false, detail: 'OPENAI_API_KEY not set' } }
+  // D12, first of three exits. A missing key is a configuration error on the server: nothing ran,
+  // there is no result, and 200 told every caller the opposite. 500 with the same body.
+  if (!key) return { status: 500, headers: HEADERS, jsonBody: { pass: false, outcome: 'error', detail: 'OPENAI_API_KEY not set' } }
 
   const steps: string[] = []
   try {
     const body = await req.json() as any
     const jobId = body?.jobId
-    if (!jobId) return { status: 400, headers: HEADERS, jsonBody: { pass: false, detail: 'jobId required' } }
+    if (!jobId) return { status: 400, headers: HEADERS, jsonBody: { pass: false, outcome: 'error', detail: 'jobId required' } }
 
     // 1. Load the approved job
     const jobsClient = TableClient.fromConnectionString(CONN, 'JobApplications')
@@ -297,7 +381,6 @@ export async function pipelineRun(req: HttpRequest, context: InvocationContext):
     let jd = ''
     try { jd = JSON.parse(job.Payload || '{}').jobDescription || '' } catch {}
     if (!jd) jd = `${jobTitle} at ${company}`
-    const sendTo = job.SendToEmail || 'von.ellis@enterpriseds.io'
     steps.push(`Loaded job ${jobId} (${jobTitle} @ ${company}, ${roleType})`)
 
     await jobsClient.updateEntity({ partitionKey: 'applications', rowKey: jobId, Status: 'processing' } as any, 'Merge')
@@ -307,6 +390,20 @@ export async function pipelineRun(req: HttpRequest, context: InvocationContext):
     const { pkg, steps: genSteps, roleFocus } = built
     const warnings: string[] = [...built.warnings]
     steps.push(...genSteps)
+
+    // P7 item 8 — the four Drive ids and the two mailboxes now come from AppConfig/auth, which the
+    // Auth & Config screen has been writing all along. `source` is printed so an owner who set a
+    // template id and got a different document back can see which value the run actually used.
+    const cfg = built.settings
+    steps.push(`Drive ids — resume ${cfg.resumeTemplateId.source}, portfolio ${cfg.portfolioTemplateId.source}, `
+      + `cover ${cfg.coverLetterTemplateId.source}, output folder ${cfg.outputFolderId.source}`)
+    // A job row's own address wins; otherwise the owner's configured recipient; the seed is the
+    // last resort and it is reported as such. `isEmailish` refuses a blank or placeholder row.
+    const jobAddress = String(job.SendToEmail || '').trim()
+    if (jobAddress && !isEmailish(jobAddress)) warnings.push(`Job ${jobId} SendToEmail is not an email address (${JSON.stringify(jobAddress)}) — using ${cfg.recipientEmail.value}`)
+    const sendTo = isEmailish(jobAddress) ? jobAddress : cfg.recipientEmail.value
+    const sendFrom = cfg.senderEmail.value
+    steps.push(`Mail — from ${sendFrom} (${cfg.senderEmail.source}), to ${sendTo} (${isEmailish(jobAddress) ? 'job row' : cfg.recipientEmail.source})`)
 
     // AppConfig: role-specific compact resume template, then the owner's configured default. A role
     // with neither used to skip the 4th document in silence — `pass` only counts >= 3 docs, so a
@@ -342,13 +439,24 @@ export async function pipelineRun(req: HttpRequest, context: InvocationContext):
     const resumeVars: Record<string, string> = { '{{ResumeSummary}}': pkg.ResumeSummary || '', '{{SkillsBullets1}}': pkg.SkillsBullets1 || '', '{{SkillsBullets2}}': pkg.SkillsBullets2 || '', '{{ExpertiseBullets}}': pkg.ExpertiseBullets || '', '{{WorkHistoryBullets1}}': pkg.WorkHistoryBullets1 || '', '{{WorkHistoryBullets2}}': pkg.WorkHistoryBullets2 || '', '{{WorkHistoryBullets3}}': pkg.WorkHistoryBullets3 || '', '{{WorkHistoryBullets4}}': pkg.WorkHistoryBullets4 || '', '{{RelevantBullets1}}': pkg.RelevantBullets1 || '', '{{RelevantBullets2}}': pkg.RelevantBullets2 || '', '{{RelevantBullets3}}': pkg.RelevantBullets3 || '' }
     const portfolioVars: Record<string, string> = { '{{@Company}}': pkg['@Company'] || '', '{{@CoverLetterDate}}': pkg['@CoverLetterDate'] || '', '{{@CoverLetterBody}}': pkg['@CoverLetterBody'] || '', '{{@AboutMe1_50words}}': pkg['@AboutMe1_50words'] || '', '{{@AboutMe2_60words}}': pkg['@AboutMe2_60words'] || '', '{{@ExecutiveProfile_55words}}': pkg['@ExecutiveProfile_55words'] || '', '{{@CoreAccomplishments_5blts_180words}}': pkg['@CoreAccomplishments_5blts_180words'] || '' }
 
+    const folder = cfg.outputFolderId.value
     const docJobs = [
-      copyAndInject(token, RESUME_TEMPLATE_ID, `Full Resume — ${company}`, resumeVars, false),
-      copyAndInject(token, PORTFOLIO_TEMPLATE_ID, `Portfolio — ${company}`, portfolioVars, true),
-      copyAndInject(token, COVER_LETTER_TEMPLATE_ID, `Cover Letter — ${company}`, portfolioVars, true),
+      copyAndInject(token, cfg.resumeTemplateId.value, `Full Resume — ${company}`, resumeVars, false, folder),
+      copyAndInject(token, cfg.portfolioTemplateId.value, `Portfolio — ${company}`, portfolioVars, true, folder),
+      copyAndInject(token, cfg.coverLetterTemplateId.value, `Cover Letter — ${company}`, portfolioVars, true, folder),
     ]
-    if (compactResumeTemplateId) docJobs.push(copyAndInject(token, compactResumeTemplateId, `Compact ATS Resume (${roleType}) — ${company}`, resumeVars, false))
-    const ids = await Promise.all(docJobs)
+    if (compactResumeTemplateId) docJobs.push(copyAndInject(token, compactResumeTemplateId, `Compact ATS Resume (${roleType}) — ${company}`, resumeVars, false, folder))
+    // D13 — `Promise.all` here rejected on the first failure while the other copies ran to
+    // completion in the background, so the files they created were never referenced by anything and
+    // leaked onto the owner's Drive on every failed build. See `buildAllOrCleanUp`.
+    const build = await buildAllOrCleanUp(docJobs, (id) => deleteDriveFile(token, id))
+    if (build.errors.length) {
+      const cleanup = build.orphaned.length
+        ? `${build.cleanedUp.length} deleted, ${build.orphaned.length} ORPHANED (${build.orphaned.join(', ')}) — delete them by hand`
+        : `${build.cleanedUp.length} partial document(s) deleted, none orphaned`
+      throw new Error(`Document generation failed: ${build.errors.join(' | ')}. Cleanup: ${cleanup}`)
+    }
+    const ids = build.ids
     const [resumeId, portfolioId, coverLetterId, compactId] = ids
     const urls = {
       fullResume: `https://docs.google.com/document/d/${resumeId}/edit`,
@@ -384,7 +492,7 @@ export async function pipelineRun(req: HttpRequest, context: InvocationContext):
         </ul>
         <h3>Cold Email Draft</h3><pre style="background:#f5f5f5;padding:12px">${(pkg.coldEmail || '').slice(0, 2000)}</pre>
         </body></html>`
-      const sendMail = (subject: string, contentHtml: string, withPdf: boolean) => fetch(`https://graph.microsoft.com/v1.0/users/dev@enterpriseds.io/sendMail`, {
+      const sendMail = (subject: string, contentHtml: string, withPdf: boolean) => fetch(`https://graph.microsoft.com/v1.0/users/${encodeURIComponent(sendFrom)}/sendMail`, {
         method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${mtoken}` },
         body: JSON.stringify({ message: { subject, body: { contentType: 'HTML', content: contentHtml }, toRecipients: [{ emailAddress: { address: sendTo } }], ...(withPdf ? { attachments: [{ '@odata.type': '#microsoft.graph.fileAttachment', name: 'application.pdf', contentType: 'application/pdf', contentBytes: TEST_PDF_BASE64 }] } : {}) } })
       })
@@ -397,12 +505,27 @@ export async function pipelineRun(req: HttpRequest, context: InvocationContext):
       steps.push('Microsoft creds not set — skipped delivery emails')
     }
 
+    // D12, and the decision is deliberately SPLIT, because two different things were both being
+    // reported as 200 and only one of them is a transport-layer success.
+    //
+    // THIS exit: the run completed. Documents exist, the mail was attempted, the request succeeded.
+    // `pass:false` here means "the RESULT is not clean" — a config gap, an inert QC call, a prompt
+    // pair that is byte-identical — not "the call failed". Turning that into a 4xx/5xx would be
+    // lying about the transport and would make the artifacts this run DID produce look undelivered
+    // to a client reading the status alone. So it stays 2xx, and the caller is fixed instead:
+    // `api-test.yml` now fails the job when the body self-reports `pass:false`, which is the generic
+    // half — 85 routes in this repo return a `pass` boolean and the workflow was ignoring all of
+    // them, so a status change here would have closed exactly one of 85.
+    //
+    // The CATCH exit below is the other half, and there 200 was simply wrong.
+    //
+    // `outcome` exists so a caller does not have to infer the difference from the shape of the body.
+    const clean = ids.length >= 3 && emailsSent >= 1 && warnings.length === 0
     return {
       status: 200, headers: HEADERS,
       jsonBody: {
-        // A run that produced documents but hit a config gap or an inert agent call is not a clean
-        // pass. It still returns its artifacts — but it says so, instead of reporting bare success.
-        pass: ids.length >= 3 && emailsSent >= 1 && warnings.length === 0,
+        pass: clean,
+        outcome: clean ? 'pass' : 'completed_with_findings',
         detail: `Pipeline complete for ${jobTitle} @ ${company} (${roleType}): ${ids.length} docs, ${emailsSent}/2 emails.`
           + (warnings.length ? ` ${warnings.length} warning(s).` : ''),
         jobId, roleType, roleFocus, roleFocusSource: built.roleFocusSource, qcApplied: built.qcApplied,
@@ -410,7 +533,17 @@ export async function pipelineRun(req: HttpRequest, context: InvocationContext):
       }
     }
   } catch (err) {
-    return { status: 200, headers: HEADERS, jsonBody: { pass: false, detail: String(err), steps } }
+    // D12, the other half. NOTHING here completed: an exception aborted the run partway, there are
+    // no urls, and the job row may still say `processing`. Returning 200 told every caller — the
+    // dev console, `api-test.yml`, any future client — that the request had succeeded, and a fully
+    // failed pipeline therefore produced a GREEN Actions run. That is not a "result", it is an
+    // error, and it takes an error status.
+    //
+    // 502 rather than 500: every realistic failure on this path is an upstream call — OpenAI, Drive,
+    // Docs/Slides, Graph, Table Storage. The body is unchanged so nothing that reads `detail`/`steps`
+    // loses anything; `web/src/App.jsx` parses the body regardless of status and reads `data.pass`,
+    // so the console is unaffected (checked at App.jsx:438).
+    return { status: 502, headers: HEADERS, jsonBody: { pass: false, outcome: 'error', detail: String(err), steps } }
   }
 }
 
