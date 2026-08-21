@@ -53,6 +53,23 @@ export async function ensureEvidenceTable(client: any) {
       unique (requirement_id, source_key, char_start, char_end)
     )`)
   await client.query(`create index if not exists req_evidence_req_idx on requirement_evidence(requirement_id)`)
+  // THE SAME TRAP `requirement_kind_source_check` FELL INTO, and the reason it is fixed here rather
+  // than only in `schema.ts`. `create table if not exists` is a no-op on an environment that already
+  // has the table, so the inline CHECK above is frozen at whatever it said the day that environment
+  // was first migrated — widening it in the CREATE reaches new databases and nothing else. This
+  // function is on the hot path and runs on every request, so it must be able to state the current
+  // shape by itself and not depend on `pgMigrate` having run first.
+  //
+  // Without this, the first `method='proposed'` insert fails a CHECK on production, and because the
+  // insert loop below shares one transaction with the DELETE that precedes it, the whole
+  // opportunity's evidence write aborts and the route 500s — one model row costing every
+  // deterministic row of that run.
+  await client.query(`alter table requirement_evidence drop constraint if exists requirement_evidence_method_check`)
+  await client.query(`alter table requirement_evidence add constraint requirement_evidence_method_check
+    check (method in ('exact','anchored','proposed'))`)
+  // Nullable and NOT defaulted: null means no model was involved, which is what every row already
+  // in the table means. A default would backfill model provenance onto work a rule did alone.
+  await client.query(`alter table requirement_evidence add column if not exists proposal_version int`)
 }
 
 export async function ensureRequirementCols(client: any) {

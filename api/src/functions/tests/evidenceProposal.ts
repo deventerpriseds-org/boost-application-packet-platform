@@ -91,9 +91,20 @@ export const PROPOSAL_SYSTEM = [
   '5. "reasoning" is one sentence explaining why this excerpt supports the requirement.',
 ].join('\n')
 
-/** The records, rendered for the model with the keys it must quote back. */
-export function buildProposalUser(requirement: string, records: ProfileRecord[]): string {
-  const body = records
+/**
+ * The records, rendered for the model with the keys it must quote back.
+ *
+ * A BANNED record is not shown at all, rather than shown and rejected afterwards. `verifyProposal`
+ * refuses one with `banned_source` and that refusal must stay — but a model cannot decline to quote
+ * what it was never given, and rendering the owner's do-not-use list into a prompt in order to throw
+ * the answer away spends a call to reach a refusal that was certain, and puts text the owner
+ * excluded in front of a model for no reason. Two independent guards, in the right order.
+ */
+export function buildProposalUser(
+  requirement: string, records: ProfileRecord[], neverEvidence: Set<string> = new Set(),
+): string {
+  const body = (records || [])
+    .filter(r => r && !neverEvidence.has(r.key))
     .map(r => `--- source_key: ${r.key} (${r.label})\n${r.text}`)
     .join('\n\n')
   return `REQUIREMENT:\n${requirement}\n\nPROFILE RECORDS:\n${body}`
@@ -157,4 +168,102 @@ export function verifyProposal(
 export function worthEscalating(requirement: string, minTokens: number): boolean {
   if (requirementClass(requirement)) return false
   return claimTokens(requirement).length >= minTokens
+}
+
+// --- the runner ------------------------------------------------------------------------------
+//
+// Everything above is pure judgement over an answer someone else obtained. This is the part that
+// obtains it — and it is still transport-injected, so the whole tier is exercisable without a
+// network. `appRequirements` supplies the real transport from `openaiJson`.
+
+import { sha256, type EvidenceRow } from './evidence'
+import { contentJson, type FetchJson } from './openaiJson'
+
+/**
+ * Why a row was not escalated, or what happened when it was.
+ *
+ * `transport_failed` is deliberately its OWN outcome and never collapses into `model_declined`.
+ * "We never reached the model" and "the model said no" are different facts, and a tier that stores
+ * them the same way records an outage as an absence of evidence — the house rule about absent
+ * evidence, broken one layer below where anyone would look.
+ */
+export type EscalationOutcome =
+  | { kind: 'accepted'; row: EvidenceRow; reasoning: string }
+  | { kind: 'refused'; reason: ProposalRefusal }
+  | { kind: 'skipped' }
+  | { kind: 'transport_failed'; error: string }
+  | { kind: 'unparseable' }
+
+export interface EscalateOptions {
+  fetchJson: FetchJson
+  neverEvidence: Set<string>
+  minQuoteChars: number
+  /** The resolver's own token floor — a requirement too thin to judge is too thin to escalate. */
+  minTokens: number
+  resolverVersion: number
+}
+
+/**
+ * Escalate ONE requirement.
+ *
+ * The order is not arbitrary. `worthEscalating` runs BEFORE the call, so a row whose answer is
+ * already known — a class no excerpt can settle, a requirement too thin to judge — costs nothing.
+ * Then the model is asked. Then `verifyProposal` applies the SAME gate the deterministic path uses,
+ * and the row is built from the RECORD's bytes rather than from the model's string: `rec.text.slice`
+ * on the offsets `verifyProposal` measured, so the stored quote cannot be the model's text even if
+ * the two ever disagreed.
+ */
+export async function escalateOne(
+  requirement: string,
+  records: ProfileRecord[],
+  opts: EscalateOptions,
+): Promise<EscalationOutcome> {
+  if (!worthEscalating(requirement, opts.minTokens)) return { kind: 'skipped' }
+
+  let raw: any
+  try {
+    raw = await opts.fetchJson(PROPOSAL_SYSTEM, buildProposalUser(requirement, records, opts.neverEvidence))
+  } catch (e: any) {
+    // NOT a refusal. The row stays unevidenced and the caller can tell the owner the tier could not
+    // run, rather than reporting that the profile does not support the requirement.
+    return { kind: 'transport_failed', error: String(e?.message || e).slice(0, 300) }
+  }
+
+  const parsed = contentJson(raw)
+  if (!parsed || typeof parsed !== 'object') return { kind: 'unparseable' }
+
+  const outcome = verifyProposal(requirement, records, parsed as ModelProposal, {
+    neverEvidence: opts.neverEvidence,
+    minQuoteChars: opts.minQuoteChars,
+  })
+  if (!outcome.accepted) return { kind: 'refused', reason: outcome.refusal as ProposalRefusal }
+
+  const a = outcome.accepted
+  const rec = records.find(r => r.key === a.source_key)!
+  return {
+    kind: 'accepted',
+    reasoning: a.reasoning,
+    row: {
+      // The record's own bytes at the verified offsets — never the model's string. On this path the
+      // two are equal by construction (verifyProposal found the quote with indexOf), which is
+      // exactly why re-slicing costs nothing and closes the gap if that ever stops being true.
+      quote: rec.text.slice(a.char_start, a.char_end),
+      source_kind: rec.kind,
+      source_label: rec.label,
+      source_key: a.source_key,
+      char_start: a.char_start,
+      char_end: a.char_end,
+      // The model's one sentence, in SPEC 4.1's supporting-note column. Prose about the quote,
+      // never a second quote — which is the only thing `extra` is allowed to hold.
+      extra: a.reasoning,
+      // NOT a similarity score. There is no ratio to report for a proposed row, and inventing one
+      // would be a fabricated composite: the number a reviewer trusts most and the one most likely
+      // to be wrong. `method` and `proposal_version` carry the provenance instead.
+      ratio: null,
+      method: 'proposed',
+      record_sha256: sha256(rec.text),
+      resolver_version: opts.resolverVersion,
+      proposal_version: PROPOSAL_VERSION,
+    },
+  }
 }

@@ -34,7 +34,9 @@ export async function ensureCheckPrefs(client: any) {
       add column if not exists chk_evidence_threshold   numeric not null default ${DEFAULT_THRESHOLDS.evidenceThreshold},
       add column if not exists chk_evidence_min_tokens  int not null default ${DEFAULT_THRESHOLDS.evidenceMinTokens},
       add column if not exists chk_evidence_max_sentences int not null default ${DEFAULT_THRESHOLDS.evidenceMaxSentences},
-      add column if not exists chk_evidence_bullet_run  int not null default ${DEFAULT_THRESHOLDS.evidenceBulletRun}`)
+      add column if not exists chk_evidence_bullet_run  int not null default ${DEFAULT_THRESHOLDS.evidenceBulletRun},
+      add column if not exists chk_evidence_escalate  boolean not null default ${DEFAULT_THRESHOLDS.evidenceEscalate},
+      add column if not exists chk_evidence_escalate_max int not null default ${DEFAULT_THRESHOLDS.evidenceEscalateMax}`)
 }
 
 export async function loadThresholds(client: any, owner: string): Promise<Partial<CheckThresholds>> {
@@ -43,7 +45,8 @@ export async function loadThresholds(client: any, owner: string): Promise<Partia
     `select chk_skill_max_chars, chk_skills_total_min, chk_skills_total_max, chk_relevant_max_chars,
             chk_relevant_allowance, chk_expertise_words, chk_cover_words_min, chk_cover_words_max,
             chk_evidence_threshold, chk_evidence_min_tokens,
-            chk_evidence_max_sentences, chk_evidence_bullet_run
+            chk_evidence_max_sentences, chk_evidence_bullet_run,
+            chk_evidence_escalate, chk_evidence_escalate_max
        from owner_search_prefs where owner_email=$1`, [owner])).rows[0]
   if (!r) return {}
   return {
@@ -58,6 +61,8 @@ export async function loadThresholds(client: any, owner: string): Promise<Partia
     evidenceMinTokens: r.chk_evidence_min_tokens ?? undefined,
     evidenceMaxSentences: r.chk_evidence_max_sentences ?? undefined,
     evidenceBulletRun: r.chk_evidence_bullet_run ?? undefined,
+    evidenceEscalate: r.chk_evidence_escalate === true,
+    evidenceEscalateMax: r.chk_evidence_escalate_max ?? undefined,
   }
 }
 
@@ -87,5 +92,14 @@ export function resolveOptionsFrom(t: Partial<CheckThresholds>): ResolveOptions 
     minTokens: t.evidenceMinTokens,
     maxSentences: t.evidenceMaxSentences,
     bulletRunMax: t.evidenceBulletRun,
+    // THE ONE FIELD THAT DOES NOT FALL THROUGH TO A SEEDED DEFAULT, and the asymmetry is deliberate.
+    // Every option above it is a threshold: an owner who has never been written to
+    // `owner_search_prefs` gets `undefined` and `resolveEvidence` supplies the seeded value, which
+    // is right, because a missing threshold must not mean zero. This one is a spend-and-trust
+    // toggle, so the unconfigured state must be OFF rather than whatever the code currently seeds —
+    // `=== true`, not `??`. A future seed of `true` would otherwise silently enrol every owner who
+    // has never opened the setting.
+    escalate: t.evidenceEscalate === true,
+    escalateMax: t.evidenceEscalateMax,
   }
 }

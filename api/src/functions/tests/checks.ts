@@ -87,6 +87,17 @@ export interface CheckThresholds {
    */
   evidenceMaxSentences: number
   evidenceBulletRun: number
+  /**
+   * THE ESCALATION TIER'S OWN SETTINGS, and the toggle is different in kind from every threshold
+   * above it: those tune a rule, this one SPENDS MONEY and admits model judgement into the evidence
+   * spine. So its unconfigured state is the SAFE one rather than the seeded one — see
+   * `resolveOptionsFrom`, where it is the single field that does not fall through to a default.
+   *
+   * `evidenceEscalateMax` caps calls per run. A posting with 38 unevidenced requirements would
+   * otherwise make 38 calls the first time the owner opened it.
+   */
+  evidenceEscalate: boolean
+  evidenceEscalateMax: number
 }
 
 /** Seeded first values, taken from the live prompt. The owner can change every one of them. */
@@ -108,6 +119,8 @@ export const DEFAULT_THRESHOLDS: CheckThresholds = {
   evidenceMinTokens: EVIDENCE_MIN_TOKENS,
   evidenceMaxSentences: EVIDENCE_MAX_SENTENCES,
   evidenceBulletRun: EVIDENCE_BULLET_RUN,
+  evidenceEscalate: false,
+  evidenceEscalateMax: 12,
 }
 
 // Phrases and punctuation that read as machine-written. Kept as data so they can move to the

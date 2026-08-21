@@ -80,9 +80,24 @@ export interface EvidenceRow {
   char_end: number
   /** A deterministic supporting note (SPEC 4.1's "optional supporting note"), or null. */
   extra: string | null
-  /** How much of the requirement the quote accounts for. RANKING ONLY — never the accusation. */
-  ratio: number
-  method: 'exact' | 'anchored'
+  /**
+   * How much of the requirement the quote accounts for. RANKING ONLY — never the accusation.
+   *
+   * NULL for a `proposed` row, and that is not a gap to fill later. There is no similarity score to
+   * report when a model chose the excerpt, and inventing one would be a fabricated composite — the
+   * number a reviewer trusts most and the one most likely to be wrong. `loadRequirementsWithEvidence`
+   * already orders `ratio desc NULLS LAST`, so an unscored row sorts behind every scored one rather
+   * than ahead of them.
+   */
+  ratio: number | null
+  /**
+   * How the excerpt was found. `proposed` means a MODEL named it and an exact substring check
+   * accepted it — the quote is every bit as verbatim, but a rule did not choose it, and a reader
+   * must be able to tell. The database CHECK enforces the same three values.
+   */
+  method: 'exact' | 'anchored' | 'proposed'
+  /** The proposal ruleset that judged a `proposed` row. NULL means no model was involved. */
+  proposal_version?: number | null
   /** Digest of the record body the offsets index. Offsets rot silently without it. */
   record_sha256: string
   resolver_version: number
@@ -257,6 +272,10 @@ export interface ResolveOptions {
   minTokens?: number
   maxSentences?: number
   bulletRunMax?: number
+  /** Escalation is OPT-IN. Absent means off — never "unset, so use the default". */
+  escalate?: boolean
+  /** Maximum model calls one run may make. */
+  escalateMax?: number
   /**
    * Token->record-count map for the WHOLE profile, computed once by `resolveAll`.
    *
@@ -338,8 +357,14 @@ export function resolveEvidence(
 
     if (best) {
       const r = Math.round(res.ratio * 1000) / 1000
-      if (r < best.ratio) continue
-      if (r === best.ratio) {
+      // `best.ratio` is non-null on THIS path by construction — every candidate below is built with
+      // a measured ratio, and a `proposed` row (the only null one) is never a candidate here because
+      // this function makes no model call. Narrowed rather than asserted with `!`, so that if a
+      // future unscored candidate ever reaches this loop it sorts behind the scored ones instead of
+      // throwing at runtime.
+      const bestRatio = best.ratio ?? -1
+      if (r < bestRatio) continue
+      if (r === bestRatio) {
         if (rec.key > best.source_key) continue
         if (rec.key === best.source_key && res.span.start >= best.char_start) continue
       }
