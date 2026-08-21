@@ -4,8 +4,9 @@ import { getPgClient } from './pgClient'
 import { getGoogleOAuthToken, HAS_GOOGLE_OAUTH } from './googleAuth'
 import { logUsage } from './usageMeter'
 import { groundingText, resolvePostingSource } from './jdText'
-import { metaFor, varsForType, copyTemplate, injectValues, stripLeftoverTokens, shareAnyone } from './packetTemplates'
+import { metaFor, varsForType, copyThen, injectValues, stripLeftoverTokens, shareAnyone } from './packetTemplates'
 import { buildPackageForJD } from './pipeline'
+import { loadPipelineSettings } from './pipelineConfig'
 import { writeSwaps } from './appSwaps'
 import { writeInsertions } from './appInsertions'
 import { applyCorrectionPass } from './appCorrections'
@@ -395,7 +396,16 @@ export async function ensurePackage(client: any, art: any, opp: any, regen: bool
  * are keyed on; it does NOT count renders.
  */
 export async function renderArtifact(client: any, art: any, opp: any, pkg: Record<string, string | null>, opts?: { loop?: number }) {
-  const meta = metaFor(art.type)
+  // P7 item 8 - `TEMPLATE_META` is the SEED table, not the answer. `google.resumeTemplateId`,
+  // `google.portfolioTemplateId`, `google.coverLetterTemplateId` and `google.outputFolderId` have
+  // been writable in Auth & Config all along and were read by nothing, so an owner could set a
+  // template id and watch the production packet builder copy a different document.
+  const settings = await loadPipelineSettings()
+  const meta = metaFor(art.type, {
+    resumeTemplateId: settings.resumeTemplateId.value,
+    portfolioTemplateId: settings.portfolioTemplateId.value,
+    coverLetterTemplateId: settings.coverLetterTemplateId.value,
+  })
   if (!meta) return null
   // P3-24 / D-9. There is no Drive DELETE anywhere in this codebase and doc_url is simply
   // overwritten, so every rebuild ALREADY orphans a file - the loop would only multiply it. The id
@@ -404,10 +414,19 @@ export async function renderArtifact(client: any, art: any, opp: any, pkg: Recor
   const superseded = (await client.query(`select doc_url from artifact where id=$1`, [art.id])).rows[0]?.doc_url || null
   const token = await getGoogleOAuthToken()
   const name = `${opp.company || 'Opportunity'} — ${meta.kindLabel}`
-  const id = await copyTemplate(token, meta.templateId, name)
-  await injectValues(token, id, varsForType(art.type, pkg), meta.isSlides)
-  const cleaned = await stripLeftoverTokens(token, id, meta.isSlides)
-  await shareAnyone(token, id)
+  // D13 - the same orphan class the MT-22 path had, in the path that actually ships. The copy
+  // succeeds, then `injectValues` / `stripLeftoverTokens` / `shareAnyone` can throw, and the id of
+  // the file already created lived only in this frame: `artifact.doc_url` is not written until the
+  // bottom of this function, so a throw above it left a real Google file referenced by nothing at
+  // all. `copyThen` deletes the copy before rethrowing. Deliberately NOT the superseded-file case -
+  // `supersededDocUrl` is still returned for the caller to record, and reaping those is a separate
+  // owner decision (P3-24 / D-9).
+  const { id, result: cleaned } = await copyThen(token, meta.templateId, name, settings.outputFolderId.value, async (fileId: string) => {
+    await injectValues(token, fileId, varsForType(art.type, pkg), meta.isSlides)
+    const stripped = await stripLeftoverTokens(token, fileId, meta.isSlides)
+    await shareAnyone(token, fileId)
+    return stripped
+  })
   const url = meta.isSlides ? `https://docs.google.com/presentation/d/${id}/edit` : `https://docs.google.com/document/d/${id}/edit`
 
   // Store a readable preview of what was injected + the doc url.

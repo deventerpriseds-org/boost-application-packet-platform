@@ -13,6 +13,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync, readdirSync } from 'node:fs'
+import { execFileSync } from 'node:child_process'
 import { join } from 'node:path'
 
 import { normalizePostingText, decodeEntities, groundingText } from '../dist/functions/tests/jdText.js'
@@ -2054,4 +2055,316 @@ test('H:correction-layer-pure: the correction judgement layer takes no database 
   for (const banned of ['pgClient', '@azure/functions', 'logUsage', 'fetch(']) {
     assert.ok(!pure.includes(banned), `correction.ts references ${banned} — it is no longer pure`)
   }
+})
+
+// ---------------------------------------------------------------------------------------------
+// P7 hygiene — D11 items 4 and 8, D12, D13.
+//
+// The body of ONE top-level `export async function <name>(`. `functionBody` above matches the
+// synchronous form only, and every function these cases care about is async — a guard that silently
+// searched '' would have passed on nothing, which is the failure mode this file exists to refuse.
+const asyncFunctionBody = (body, name) => {
+  const start = body.indexOf(`export async function ${name}(`)
+  if (start < 0) return ''
+  const end = body.indexOf('\n}', start)
+  return end < 0 ? body.slice(start) : body.slice(start, end + 2)
+}
+
+// H:pipeline-error-status — `POST /api/pipeline/run` returned HTTP 200 with `pass:false` when an
+// exception had aborted the run. `api-test.yml` exits 1 only on status >= 400, so a fully failed
+// pipeline produced a GREEN Actions run: the one vehicle that verifies this API reported success for
+// a run that had failed, and nobody reading the Actions list could tell the two apart.
+//
+// The invariant, and it is about the CALLER not the number: a run that produced nothing must be
+// distinguishable from one that produced a packet, by a caller that reads only the HTTP status. The
+// completed-but-not-clean case is deliberately NOT covered here — it keeps a 2xx because documents
+// exist and the request did succeed, and it is the api-test.yml assertion (H:pass-false-is-red) that
+// makes that case red. Two exits, two mechanisms, on purpose.
+test('H:pipeline-error-status: a run that aborted does not report an HTTP success', async () => {
+  const prev = { conn: process.env.AZURE_STORAGE_CONNECTION_STRING, key: process.env.OPENAI_API_KEY }
+  try {
+    // A connection string this malformed makes the first TableClient throw inside the handler's
+    // try — the real abort path, no network, no Azure.
+    process.env.AZURE_STORAGE_CONNECTION_STRING = 'this-is-not-a-connection-string'
+    process.env.OPENAI_API_KEY = 'sk-test-not-a-real-key'
+    const { pipelineRun } = await import('../dist/functions/tests/pipeline.js')
+    const req = { method: 'POST', query: new Map(), params: {}, json: async () => ({ jobId: 'does-not-exist' }) }
+    const res = await pipelineRun(req, {})
+
+    assert.ok(res.status >= 400,
+      `the run aborted and returned HTTP ${res.status} — a caller reading the status cannot tell this from a delivered packet`)
+    assert.equal(res.jsonBody.pass, false)
+    assert.equal(res.jsonBody.outcome, 'error', 'the body must name the outcome, not leave it to be inferred')
+    // The body still carries the diagnosis: an error status must not cost the caller the reason.
+    assert.ok(String(res.jsonBody.detail || '').length > 0, 'the failure detail was dropped along with the 200')
+    assert.ok(Array.isArray(res.jsonBody.steps), 'steps must survive the error path')
+
+    // A missing model key is a configuration error on the server, and it too returned 200.
+    delete process.env.OPENAI_API_KEY
+    const noKey = await pipelineRun(req, {})
+    assert.ok(noKey.status >= 400, `a missing OPENAI_API_KEY returned HTTP ${noKey.status}`)
+    assert.equal(noKey.jsonBody.outcome, 'error')
+  } finally {
+    if (prev.conn === undefined) delete process.env.AZURE_STORAGE_CONNECTION_STRING
+    else process.env.AZURE_STORAGE_CONNECTION_STRING = prev.conn
+    if (prev.key === undefined) delete process.env.OPENAI_API_KEY
+    else process.env.OPENAI_API_KEY = prev.key
+  }
+})
+
+// H:pass-false-is-red — the caller half of the same defect, and the general one. 85 routes in this
+// repo return a `pass` boolean; `api-test.yml` exited 1 on status >= 400 and ignored every one of
+// them. Changing one route's status code would have closed one case out of eighty-five.
+//
+// This EXECUTES the real assertion out of the workflow file rather than grepping for it. A guard
+// that checked the YAML contained the string "pass" would be defeated by any rewrite that kept the
+// word and lost the behaviour — which is exactly how two guards were defeated today, by renaming a
+// constant while keeping the defect.
+test('H:pass-false-is-red: api-test.yml fails the job on a body that self-reports failure', () => {
+  const yml = readFileSync(new URL('../../.github/workflows/api-test.yml', import.meta.url).pathname, 'utf8')
+  const start = yml.indexOf('def body_failed(result):')
+  assert.notEqual(start, -1, 'api-test.yml no longer defines body_failed — the D12 caller fix is gone')
+  // From the START OF THE LINE, not from the match: slicing at the match drops the indent that the
+  // block-extent test depends on, and the loop then stops on its own first line.
+  const lineStart = yml.lastIndexOf('\n', start) + 1
+  const indent = start - lineStart
+  const lines = []
+  for (const line of yml.slice(lineStart).split('\n')) {
+    if (line.trim() && !line.startsWith(' '.repeat(indent))) break
+    lines.push(line.slice(indent))
+    if (lines.length > 1 && line.trim() === '') break
+  }
+  const fn = lines.join('\n')
+  assert.match(fn, /^def body_failed\(result\):\n\s+if/, `body_failed did not extract cleanly:\n${fn}`)
+
+  const cases = [
+    // The exact shape D12 names: the pipeline's completed-but-not-clean body.
+    [{ pass: false, outcome: 'completed_with_findings', detail: 'x', warnings: ['w'] }, 'pass'],
+    [{ pass: false, outcome: 'error', detail: 'boom' }, 'pass'],
+    [{ pass: true, detail: 'clean' }, null],
+    // `ok:false` is a REFUSAL in this codebase (appRemediation: "the loop is switched off for this
+    // owner"). A refusal is an outcome, not an error — firing on it is the cry-wolf failure.
+    [{ ok: false, detail: 'the remediation loop is switched off for this owner (Settings)' }, null],
+    // Not a verdict: a string, a count, an absent field, a non-object body.
+    [{ pass: 'false' }, null],
+    [{ pass: 0 }, null],
+    [{ analysis: {} }, null],
+    [[1, 2, 3], null],
+  ]
+  const script = fn + '\nimport json,sys\n'
+    + 'cases = json.loads(sys.stdin.read())\n'
+    + 'print(json.dumps([body_failed(c) for c in cases]))\n'
+  const out = execFileSync('python3', ['-c', script], { input: JSON.stringify(cases.map(c => c[0])), encoding: 'utf8' })
+  assert.deepEqual(JSON.parse(out), cases.map(c => c[1]),
+    'the workflow assertion no longer distinguishes a failed body from a passing or refusing one')
+})
+
+// H:orphan-drive-files — D13. `Promise.all(docJobs)` rejects on the FIRST rejection while every
+// other copy runs to completion in the background, so at the catch site there was nothing to
+// enumerate: the sibling files had not finished being created yet, and when they did their ids went
+// nowhere. There is no Drive DELETE anywhere in `api/src` (measured 2026-08-21: zero hits for a
+// DELETE against `drive/v3/files`), so every failed multi-document build leaked real Google files
+// onto the quota-bearing OAuth account, permanently and unenumerably.
+//
+// The invariant is the CLEANUP, not the spelling of `allSettled`: when any job fails, every file
+// that WAS created is deleted, none is reported as delivered, and anything the delete could not
+// remove is named so a human can.
+test('H:orphan-drive-files: a failed multi-document build leaves no file behind', async () => {
+  const { buildAllOrCleanUp } = await import('../dist/functions/tests/pipeline.js')
+
+  const removed = []
+  const remove = async (id) => { removed.push(id); return true }
+  // Job 0 fails FAST; jobs 1 and 2 succeed LATER — the ordering that made the ids unenumerable.
+  const slow = (v) => new Promise((res) => setTimeout(() => res(v), 15))
+  const out = await buildAllOrCleanUp(
+    [Promise.reject(new Error('Inject Portfolio failed: HTTP 500')), slow('FILE_B'), slow('FILE_C')],
+    remove,
+  )
+  assert.deepEqual(removed.sort(), ['FILE_B', 'FILE_C'],
+    'a sibling copy that completed after the first failure was not deleted — this is the leak')
+  assert.deepEqual(out.ids, [], 'a failed build must not report documents as delivered')
+  assert.deepEqual(out.orphaned, [])
+  assert.equal(out.errors.length, 1)
+
+  // A delete that FAILS is reported as an orphan, never silently counted as cleaned. Absent
+  // evidence is not_applicable, never pass.
+  const stubborn = await buildAllOrCleanUp(
+    [Promise.reject(new Error('boom')), slow('FILE_D')],
+    async () => false,
+  )
+  assert.deepEqual(stubborn.orphaned, ['FILE_D'], 'a delete that failed was counted as cleanup')
+  assert.deepEqual(stubborn.cleanedUp, [])
+
+  // The happy path is untouched: nothing is deleted and every id is returned.
+  const clean = await buildAllOrCleanUp([slow('A'), slow('B')], async () => {
+    throw new Error('cleanup must not run when every job succeeded')
+  })
+  assert.deepEqual(clean.ids, ['A', 'B'])
+  assert.deepEqual(clean.cleanedUp, [])
+})
+
+// H:orphan-after-copy — the half that is invisible from the caller. `copyAndInject` and
+// `renderArtifact` both copied a template and then did more work on the new file; a throw in that
+// later work left a real file whose id existed ONLY in the frame that had just thrown, so no catch
+// block anywhere could have cleaned it up. `copyThen` owns both halves for exactly that reason.
+test('H:orphan-after-copy: a failure after the copy deletes the file it created', async () => {
+  const { copyThen } = await import('../dist/functions/tests/packetTemplates.js')
+  const calls = []
+  const realFetch = globalThis.fetch
+  globalThis.fetch = async (url, init) => {
+    calls.push(`${init?.method || 'GET'} ${String(url)}`)
+    if (String(url).includes('/copy')) return { ok: true, status: 200, json: async () => ({ id: 'NEW_FILE_ID' }) }
+    return { ok: true, status: 204, json: async () => ({}) }
+  }
+  try {
+    await assert.rejects(
+      () => copyThen('tok', 'TPL', 'Portfolio', 'FOLDER', async () => { throw new Error('inject HTTP 500') }),
+      (err) => {
+        assert.match(err.message, /inject HTTP 500/, 'the original failure must survive the cleanup')
+        assert.match(err.message, /NEW_FILE_ID/, 'the message must name the file, or nobody can check it is gone')
+        return true
+      })
+    assert.ok(calls.includes('DELETE https://www.googleapis.com/drive/v3/files/NEW_FILE_ID'),
+      `the copy created before the failure was never deleted — calls were: ${calls.join(' | ')}`)
+    assert.ok(calls.some((c) => c.includes('/copy')), 'no copy was issued')
+  } finally { globalThis.fetch = realFetch }
+})
+
+// H:owner-config-is-read — P7 item 8. The Auth & Config screen has offered `google.resumeTemplateId`,
+// `google.portfolioTemplateId`, `google.coverLetterTemplateId`, `google.outputFolderId`,
+// `microsoft.senderEmail` and `microsoft.recipientEmail` since it was written; `POST /api/config`
+// stored every one of them; `CONFIG_KEYS` listed four keys and none of these six. The pipeline used
+// module constants, so an owner could set a template id and watch the run copy a different document.
+//
+// A setting that exists and is not read is worse than one that does not exist: it tells the owner
+// they are in control when they are not. The invariant is therefore about the READ — not that a
+// constant was renamed, which is a rejection rather than a fix.
+test('H:owner-config-is-read: every pipeline setting the console writes is actually read', async () => {
+  const { settingsFromConfig, CONFIG_KEYS, SEED_DRIVE_IDS, SEED_MAILBOXES } =
+    await import('../dist/functions/tests/pipelineConfig.js')
+
+  // Distinct, VALID owner values — a shared value could not tell a real read from a copy of one key.
+  const owner = {
+    [CONFIG_KEYS.resumeTemplateId]: '1ownerRESUMEaaaaaaaaaaaaaaaaaaaaaaaa',
+    [CONFIG_KEYS.portfolioTemplateId]: '1ownerPORTFOLIObbbbbbbbbbbbbbbbbbbb',
+    [CONFIG_KEYS.coverLetterTemplateId]: '1ownerCOVERcccccccccccccccccccccccc',
+    [CONFIG_KEYS.outputFolderId]: '1ownerFOLDERdddddddddddddddddddddddd',
+    [CONFIG_KEYS.senderEmail]: 'ops@another-tenant.example',
+    [CONFIG_KEYS.recipientEmail]: 'candidate@another-tenant.example',
+  }
+  const s = settingsFromConfig(owner)
+  for (const [field, key] of [
+    ['resumeTemplateId', CONFIG_KEYS.resumeTemplateId], ['portfolioTemplateId', CONFIG_KEYS.portfolioTemplateId],
+    ['coverLetterTemplateId', CONFIG_KEYS.coverLetterTemplateId], ['outputFolderId', CONFIG_KEYS.outputFolderId],
+    ['senderEmail', CONFIG_KEYS.senderEmail], ['recipientEmail', CONFIG_KEYS.recipientEmail],
+  ]) {
+    assert.equal(s[field].value, owner[key], `${key} is written by the console and still not read`)
+    assert.equal(s[field].source, 'config', `${field} did not report where its value came from`)
+  }
+
+  // Unset falls back to the SEED and says so — the code seeds a first value, it does not own it.
+  const seeded = settingsFromConfig({})
+  assert.equal(seeded.resumeTemplateId.value, SEED_DRIVE_IDS.resumeTemplateId)
+  assert.equal(seeded.resumeTemplateId.source, 'default')
+  assert.equal(seeded.senderEmail.value, SEED_MAILBOXES.sender)
+  assert.deepEqual(seeded.warnings, [], 'an unset setting is absent, not a misconfiguration')
+
+  // A junk value is REFUSED and REPORTED, never sent to Drive or Graph as a URL path segment.
+  const junk = settingsFromConfig({
+    [CONFIG_KEYS.resumeTemplateId]: 'Unknown',
+    [CONFIG_KEYS.senderEmail]: 'not an address',
+  })
+  assert.equal(junk.resumeTemplateId.value, SEED_DRIVE_IDS.resumeTemplateId)
+  assert.equal(junk.senderEmail.value, SEED_MAILBOXES.sender)
+  assert.equal(junk.warnings.length, 2, `a refused setting was not reported: ${JSON.stringify(junk.warnings)}`)
+  assert.ok(junk.warnings.every((w) => /google\.resumeTemplateId|microsoft\.senderEmail/.test(w)),
+    'a warning that does not name the setting cannot be acted on')
+})
+
+// H:no-second-id-copy — the same four Drive ids were declared in `pipeline.ts` AND in
+// `packetTemplates.ts`, byte-identical, which is how one copy goes stale without anyone noticing;
+// the Graph sender was a bare literal on the send path, which is what made the pipeline
+// single-tenant. Structural rather than behavioural on purpose: this guards the RETURN of a second
+// copy, which no runtime test can observe.
+//
+// `packetTemplates.ts` is exempt — it is the one home the seeds are allowed to have. The legacy
+// MT-XX and diag routes are also exempt and deliberately untouched: they are the dev-console test
+// harness, not the product, and are recorded in DEFERRED.md instead of half-fixed here.
+test('H:no-second-id-copy: the product paths carry no Drive id or mailbox literal', () => {
+  const DRIVE_IDS = [
+    '1bwOcxvkbihRTUjOzVjrWSPnDomwqy6gOz6229mdzbZw',
+    '1ULZZLBs9zwLEN6c8hcXvBCNPk0YyTGg0yIlFSYkGIec',
+    '1QN4Cnw4R9krUH4kEpl_lnhoPOkY5PG2oUKRMjxBfWV0',
+    '1MlVLMSQ0EQJoAtpKC1Mv7mDCAJDmdJTt',
+  ]
+  for (const file of ['pipeline.ts', 'appPackets.ts']) {
+    const code = stripComments(src(file))
+    for (const id of DRIVE_IDS) {
+      assert.ok(!code.includes(id), `${file} has its own copy of Drive id ${id} again`)
+    }
+    assert.ok(!/['"`]dev@enterpriseds\.io['"`]|users\/dev@enterpriseds\.io/.test(code),
+      `${file} hardcodes the Graph sender again — the pipeline is single-tenant`)
+    assert.ok(!/['"`]von\.ellis@enterpriseds\.io['"`]/.test(code),
+      `${file} hardcodes the recipient again`)
+  }
+  // The seeds still exist, in one place. A "fix" that deleted them is not a fix.
+  assert.ok(DRIVE_IDS.every((id) => src('packetTemplates.ts').includes(id)),
+    'the seeded Drive ids are gone — the owner now has no first value at all')
+})
+
+// H:duplicate-prompt-roles — P7 item 4, and the fact was established BEFORE the code, which is the
+// only reason it is in this file rather than a note. `GET /api/prompts` on the live Function App
+// (Actions run 32435525197, 2026-08-21), sha256 over the raw response bytes:
+//
+//     resume_user     29,068 chars  335aef44caddc15ab318cf5d...  \ IDENTICAL
+//     portfolio_user  29,068 chars  335aef44caddc15ab318cf5d...  /
+//     resume_system      329 chars  803330a27620b65c9303c1e7...  \ IDENTICAL
+//     portfolio_system   329 chars  803330a27620b65c9303c1e7...  /
+//     ats_user         8,807 chars  88a350d0b5b05021f1ed7834...    (control: differs)
+//
+// The backlog claim rested on equal LENGTHS and had never been checked; it is true, and larger than
+// stated — two identical PAIRS, not one near-identical pair. `portfolio_user` is the resume prompt
+// (42 `###` markers, no mention of JSON) while Call 2 parses its reply with `parseAgentJson`, so the
+// portfolio and cover letter fall back to Call 1 on every run, at the cost of a second 16,000-token
+// call. Authoring a real portfolio prompt is owner content; naming the condition is not.
+//
+// EXACT equality, never similarity: this names an offender, and H4's rule is that fuzzy matching is
+// for ranking, never for accusing.
+test('H:duplicate-prompt-roles: two prompt roles backed by identical text are named', async () => {
+  const { duplicatePromptPairs } = await import('../dist/functions/tests/pipeline.js')
+
+  // The live shape, reduced. Two identical pairs and one row that only LOOKS close.
+  const live = {
+    resume_user: 'Objective:\nYou are an executive recruiter...### Section ###',
+    portfolio_user: 'Objective:\nYou are an executive recruiter...### Section ###',
+    resume_system: 'You are an executive recruiter such as Andrew LaCivita.',
+    portfolio_system: 'You are an executive recruiter such as Andrew LaCivita.',
+    ats_user: 'You are the ATS quality-control reviewer.',
+  }
+  assert.deepEqual(duplicatePromptPairs(live), [
+    ['portfolio_system', 'resume_system'],
+    ['portfolio_user', 'resume_user'],
+  ])
+
+  // Near-identical is NOT identical. A similarity score would have called these a duplicate; an
+  // accusation may not be made on a score.
+  assert.deepEqual(duplicatePromptPairs({
+    a: 'You are an executive recruiter such as Andrew LaCivita.',
+    b: 'You are an executive recruiter such as Andrew LaCivita!',
+  }), [])
+
+  // Two prompts that are simply UNSET are absent, not duplicated. Absent evidence is never a finding.
+  assert.deepEqual(duplicatePromptPairs({ a: '', b: '', c: '   ' }), [])
+  assert.deepEqual(duplicatePromptPairs({}), [])
+
+  // AND IT IS CALLED. A detector nothing invokes is the tested dead code D2 already records; the
+  // check is on the BODY of the generator, not the module, because an import line is not a call site.
+  const body = asyncFunctionBody(stripComments(src('pipeline.ts')), 'buildPackageForJD')
+  assert.ok(body.length > 500, 'buildPackageForJD not found — this guard has gone stale')
+  assert.ok(/duplicatePromptPairs\(prompts\)/.test(body),
+    'the duplicate-prompt detector is not called from the generator that loads the prompts')
+  // And the finding reaches the caller rather than a console.warn nobody reads (P7 item 6).
+  const call = body.indexOf('duplicatePromptPairs(prompts)')
+  assert.ok(/warnings\.push\(/.test(body.slice(call, call + 500)),
+    'the duplicate-prompt finding is not pushed onto warnings, so no caller can see it')
 })
