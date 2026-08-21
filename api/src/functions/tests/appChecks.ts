@@ -7,7 +7,8 @@ import { app, HttpRequest, HttpResponseInit, InvocationContext } from '@azure/fu
 import { randomUUID } from 'node:crypto'
 import { resolveOwner, requireWrite } from './appSession'
 import { getPgClient } from './pgClient'
-import { runChecks, gateFor, attentionCount, CheckResult, CheckThresholds, DEFAULT_THRESHOLDS } from './checks'
+import { runChecks, gateFor, attentionCount, CheckResult } from './checks'
+import { loadThresholds } from './checkPrefs'
 import { computeArtifactScore, ArtifactScore } from './artifactScore'
 import { loadFacts, sourceText } from './appFacts'
 import { shapeVerdict } from './appReviewer'
@@ -17,50 +18,9 @@ import { EvidenceInput, EvidenceRow } from './evidence'
 
 const HEADERS = { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': '*', 'Access-Control-Allow-Methods': 'GET,POST,OPTIONS' }
 
-/**
- * Per-owner check thresholds.
- *
- * EXTENDS `owner_search_prefs` rather than creating a settings table — that is the established
- * per-owner settings store and `jdSweep.ts` already extended it the same way. Code seeds the first
- * value (from the live prompt); the owner changes it from there. No threshold in `checks.ts` may
- * become a permanent constant.
- */
-export async function ensureCheckPrefs(client: any) {
-  await client.query(`create table if not exists owner_search_prefs (owner_email text primary key)`)
-  await client.query(`
-    alter table owner_search_prefs
-      add column if not exists chk_skill_max_chars      int not null default ${DEFAULT_THRESHOLDS.skillMaxChars},
-      add column if not exists chk_skills_total_min     int not null default ${DEFAULT_THRESHOLDS.skillsTotalMin},
-      add column if not exists chk_skills_total_max     int not null default ${DEFAULT_THRESHOLDS.skillsTotalMax},
-      add column if not exists chk_relevant_max_chars   int not null default ${DEFAULT_THRESHOLDS.relevantMaxChars},
-      add column if not exists chk_relevant_allowance   int not null default ${DEFAULT_THRESHOLDS.relevantOverLimitAllowance},
-      add column if not exists chk_expertise_words      int not null default ${DEFAULT_THRESHOLDS.expertiseWords},
-      add column if not exists chk_cover_words_min      int not null default ${DEFAULT_THRESHOLDS.coverWords[0]},
-      add column if not exists chk_cover_words_max      int not null default ${DEFAULT_THRESHOLDS.coverWords[1]},
-      add column if not exists chk_evidence_threshold   numeric not null default ${DEFAULT_THRESHOLDS.evidenceThreshold},
-      add column if not exists chk_evidence_min_tokens  int not null default ${DEFAULT_THRESHOLDS.evidenceMinTokens}`)
-}
-
-export async function loadThresholds(client: any, owner: string): Promise<Partial<CheckThresholds>> {
-  await ensureCheckPrefs(client)
-  const r = (await client.query(
-    `select chk_skill_max_chars, chk_skills_total_min, chk_skills_total_max, chk_relevant_max_chars,
-            chk_relevant_allowance, chk_expertise_words, chk_cover_words_min, chk_cover_words_max,
-            chk_evidence_threshold, chk_evidence_min_tokens
-       from owner_search_prefs where owner_email=$1`, [owner])).rows[0]
-  if (!r) return {}
-  return {
-    skillMaxChars: r.chk_skill_max_chars,
-    skillsTotalMin: r.chk_skills_total_min,
-    skillsTotalMax: r.chk_skills_total_max,
-    relevantMaxChars: r.chk_relevant_max_chars,
-    relevantOverLimitAllowance: r.chk_relevant_allowance,
-    expertiseWords: r.chk_expertise_words,
-    coverWords: [r.chk_cover_words_min, r.chk_cover_words_max],
-    evidenceThreshold: r.chk_evidence_threshold === null ? undefined : Number(r.chk_evidence_threshold),
-    evidenceMinTokens: r.chk_evidence_min_tokens ?? undefined,
-  }
-}
+// `ensureCheckPrefs` / `loadThresholds` moved to `checkPrefs.ts` (see the note there: it broke an
+// appChecks <-> appRequirements import cycle). Re-exported so every existing importer is unchanged.
+export { ensureCheckPrefs, loadThresholds, resolveOptionsFor } from './checkPrefs'
 
 /**
  * Run the engine for one artifact and store the results plus the aggregated gate.
@@ -109,6 +69,7 @@ export async function evaluateArtifact(client: any, artifactId: string, owner: s
     await writeEvidence(client, art.opp_id, profileRead.records, {
       threshold: thresholds.evidenceThreshold,
       minTokens: thresholds.evidenceMinTokens,
+      maxSentences: thresholds.evidenceMaxSentences,
     })
   }
   const requirements = await loadRequirementsWithEvidence(client, art.opp_id)

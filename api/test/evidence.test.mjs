@@ -153,7 +153,12 @@ test('resolution is deterministic — the same inputs give byte-identical rows',
 
 test('the supporting note says what the excerpt does NOT cover, and never smuggles a second quote', () => {
   const recs = profileRecords(MC, TEMPLATE)
-  const ev = resolveEvidence('Owned the digital water technology roadmap with Product and Design', recs)
+  // NOT 'with Product and Design' — 'Design' capitalized mid-sentence now reads as a named entity
+  // (M11's exact-name rule, added 2026-08-21 with the purpose-made matcher) and a genuinely absent
+  // name is correctly refused rather than partially credited. That is a stricter, more correct
+  // resolver, not a broken one; this test is about the shape of `extra`, so it uses ordinary
+  // lowercase vocabulary that is missing instead.
+  const ev = resolveEvidence('Owned the digital water technology roadmap with product operations oversight', recs)
   assert.ok(ev)
   if (ev.extra !== null) {
     assert.match(ev.extra, /^the excerpt does not mention: /)
@@ -282,9 +287,12 @@ test('the evidence thresholds are seeded defaults with a real owner path, not co
   assert.equal(DEFAULT_THRESHOLDS.evidenceMinTokens, MIN_JUDGEABLE_TOKENS)
 
   // The production caller passes them through, and the store column exists to hold them.
+  // `ensureCheckPrefs`/`loadThresholds` moved to `checkPrefs.ts` (see its own header: it broke an
+  // appChecks <-> appRequirements import cycle) — `appChecks.ts` now only re-exports them.
+  const checkPrefs = readFileSync(new URL('../src/functions/tests/checkPrefs.ts', import.meta.url), 'utf8')
   const appChecks = readFileSync(new URL('../src/functions/tests/appChecks.ts', import.meta.url), 'utf8')
-  assert.match(appChecks, /chk_evidence_threshold/, 'no per-owner column, no owner path')
-  assert.match(appChecks, /chk_evidence_min_tokens/)
+  assert.match(checkPrefs, /chk_evidence_threshold/, 'no per-owner column, no owner path')
+  assert.match(checkPrefs, /chk_evidence_min_tokens/)
   assert.match(appChecks, /writeEvidence\([\s\S]{0,200}threshold: thresholds\.evidenceThreshold/,
     'the resolver must receive the owner value, not just the checks')
 

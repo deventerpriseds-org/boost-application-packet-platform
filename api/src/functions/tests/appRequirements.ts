@@ -12,6 +12,7 @@ import {
   verifyEvidence, tallyHealth, EvidenceHealth, EvidenceVerdict, EvidenceState,
 } from './evidence'
 import { sourceText, loadFacts } from './appFacts'
+import { resolveOptionsFor } from './checkPrefs'
 import { writeComparison, comparisonPayload } from './appDimensions'
 
 const HEADERS = { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': '*', 'Access-Control-Allow-Methods': 'GET,POST,OPTIONS' }
@@ -83,13 +84,22 @@ export async function ensureRequirementCols(client: any) {
  * Deterministic and model-free, so it is safe to re-run; each run REPLACES the previous row's
  * evidence rather than accumulating.
  */
-export async function writeEvidence(client: any, oppId: string, records: ProfileRecord[], opts: ResolveOptions = {}): Promise<{
+export async function writeEvidence(
+  client: any, oppId: string, records: ProfileRecord[], opts: ResolveOptions = {},
+  // THE SEAM THAT MAKES THE REFUSAL GUARD TESTABLE, and the reason it is a parameter rather than a
+  // mock. The pre-store assertion below can only fire when the resolver hands back a quote that is
+  // not the record's bytes, and every shipped resolver produces its quote BY slicing the record.
+  // Without an injection point the guard is untestable, and an untested guard is `not_applicable`
+  // rather than `pass` — the exact conflation this file's own comments forbid one level up.
+  // Production passes nothing and gets `resolveAll`.
+  resolver: typeof resolveAll = resolveAll,
+): Promise<{
   opp_id: string; total: number; evidenced: number; unevidenced: number
   refused: number; profile_records: number
 }> {
   const rows = (await client.query(
     `select id, seq, verbatim, item_text from requirement where opp_id=$1 order by seq`, [oppId])).rows
-  const resolved = resolveAll(rows, records, opts)
+  const resolved = resolver(rows, records, opts)
   const bySeq = new Map(resolved.map(r => [r.seq, r.evidence]))
   const byKey = new Map(records.map(r => [r.key, r]))
   let refused = 0
@@ -108,13 +118,16 @@ export async function writeEvidence(client: any, oppId: string, records: Profile
       // the quote must BE the named record's own bytes at those offsets. A candidate that is not is
       // REFUSED — never stored with a caveat, never rendered, never counted covered.
       //
-      // HONEST ABOUT WHAT THIS IS. It has never rejected anything and structurally cannot today:
-      // `locate` CONSTRUCTS its verbatim by slicing the haystack, so the comparison is a tautology
-      // (measured by the independent verifier: 4,000 randomized rounds, 0 mismatches, including
-      // every mis-anchored case H32 covers). The guarantee comes from that construction, not from
-      // this line. It stays as defence in depth against a future resolver that builds a quote some
-      // other way — but `refused` is not evidence of anything, and a population that cannot be
-      // non-zero must not be presented as a measurement.
+      // HONEST ABOUT WHAT THIS IS, CORRECTED 2026-08-21. This comment used to say the check
+      // "structurally cannot" reject anything, because `locate` constructed its verbatim by slicing
+      // the haystack (measured by the independent verifier: 4,000 randomized rounds, 0 mismatches).
+      // That sentence described `locate`, which is no longer the matcher, and a false comment about
+      // a guard is worse than no comment. The replacement (`requirementSupport`) also produces its
+      // quote by slicing, so on the resolve path the comparison is STILL a tautology — but this
+      // function re-slices the records IT was handed, which are not necessarily the records the row
+      // was resolved against, so the assertion is live for a caller that passes a mismatched pair.
+      // Exercised by `H:refusal-guard-fires`, which drives it through the `resolver` seam above and
+      // asserts `refused` increments and nothing is inserted. `refused` is now a real measurement.
       const rec = byKey.get(e.source_key)
       if (!rec || rec.text.slice(e.char_start, e.char_end) !== e.quote) { refused++; continue }
       await client.query(
@@ -436,9 +449,14 @@ export async function requirementsBackfill(req: HttpRequest, context: Invocation
     // from "the profile supports nothing" unless it is fixed here. The profile is read ONCE for the
     // whole batch.
     const profile = await sourceText().catch(() => ({ text: '', sources: ['profile UNREADABLE'], records: [] as ProfileRecord[] }))
+    const evOpts = await resolveOptionsFor(client, owner)
     const ev = []
     if (profile.records.length) {
-      for (const opp of opps) ev.push(await writeEvidence(client, opp.id, profile.records))
+      // The owner's thresholds, on THIS path too. They used to reach `writeEvidence` from
+      // `appChecks.evaluateArtifact` alone, so the backfill and the resolve route silently used the
+      // seeded literals instead — the owner's settings applied on one of three call sites. Found by
+      // grepping every `writeEvidence(` rather than by reading the one file the guard watched.
+      for (const opp of opps) ev.push(await writeEvidence(client, opp.id, profile.records, evOpts))
     }
     // P8.4 / AC54 — re-extraction REPLACED the requirement rows, which the comparison is graded
     // over. Rebuilding here is what stops a backfill leaving grades keyed to lines that no longer
@@ -495,7 +513,7 @@ export async function evidenceResolve(req: HttpRequest, context: InvocationConte
                     sources: profile.sources, wrote: 0 },
       }
     }
-    const out = await writeEvidence(client, opp.id, profile.records)
+    const out = await writeEvidence(client, opp.id, profile.records, await resolveOptionsFor(client, owner))
     // P8.4 / AC54 — the comparison is keyed to these requirement rows and their evidence, so it is
     // rebuilt in the SAME call. Leaving it behind would serve grades over evidence that has just
     // been replaced — the trap `requirementsBackfill` already documents for evidence itself.
