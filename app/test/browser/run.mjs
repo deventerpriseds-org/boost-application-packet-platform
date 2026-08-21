@@ -18,6 +18,7 @@
 import { readdirSync, existsSync } from 'node:fs'
 import { chromium } from 'playwright'
 import { createServer } from 'vite'
+import { contrast } from './contrast.mjs'
 
 function chromiumPath() {
   if (process.env.PW_CHROMIUM) return process.env.PW_CHROMIUM
@@ -235,14 +236,10 @@ const readHighlights = () => page.evaluate(() => {
   }
   return { kw: cs('kw-highlight'), echo: cs('echo-highlight') }
 })
-const parseRgb = (c) => (c.match(/[\d.]+/g) || []).slice(0, 3).map(Number)
-// WCAG relative luminance — the only way to say "this ink is readable on that ground" rather than
-// "these two strings differ", which is what a colour-vs-colour comparison actually proves.
-const lum = (c) => {
-  const [r, g, b] = parseRgb(c).map((v) => { const x = v / 255; return x <= 0.03928 ? x / 12.92 : ((x + 0.055) / 1.055) ** 2.4 })
-  return 0.2126 * r + 0.7152 * g + 0.0722 * b
-}
-const contrast = (a, b) => { const l1 = lum(a), l2 = lum(b); const [hi, lo] = l1 > l2 ? [l1, l2] : [l2, l1]; return (hi + 0.05) / (lo + 0.05) }
+// The WCAG contrast function now lives in ./contrast.mjs so the QC-rail probe measures readability
+// with the SAME definition rather than a second copy of the formula. Nothing about the numbers below
+// changed when it moved; they are re-measured on every run.
+
 
 const lightHl = await readHighlights()
 await page.click('#toggle-dark')
@@ -266,6 +263,53 @@ for (const [theme, hl] of [['light', lightHl], ['dark', darkHl]]) {
 ok('the highlights actually CHANGE between the two themes (the .proto-dark block is not decorative)',
   lightHl.kw.bg !== darkHl.kw.bg && lightHl.echo.bg !== darkHl.echo.bg,
   JSON.stringify({ light: [lightHl.kw.bg, lightHl.echo.bg], dark: [darkHl.kw.bg, darkHl.echo.bg] }))
+
+// ---------- 13b. D18: every brand surface is readable, in BOTH themes ----------
+// The ledger carried this as "dark accent pills at 1.90:1". Measured here, all four brand pairings
+// are >= 5.5:1 in dark and I could NOT reproduce 1.90 with any of them — see the D18 row, which now
+// says so. The likeliest explanation is that the number predates P0: the Compass dark block is
+// `:root[data-theme="dark"], .dark` (fig-tokens.css:512), P0 made state.jsx stamp that attribute,
+// and `:root[data-theme=...]` (0,2,0) outranks `.proto-dark` (0,1,0) regardless of source order — so
+// a whole palette that had never applied started applying, and took this defect with it. Nobody
+// fixed D18; it was fixed incidentally, which is exactly why it sat on the ledger reading unfixed.
+//
+// The pairs are ENUMERATED FROM theme.css, not chosen: `.px-ava` is the pill, and probing only the
+// button I first thought of would have proved nothing about the element the row named.
+const BRAND_PAIRS = [
+  ['px-btn px-btn-accent', 'accent button'],
+  ['px-btn px-btn-dark', 'dark button'],
+  ['px-ava', 'avatar pill'],
+  ['px-tab px-tab-active', 'active tab'],
+]
+const readBrand = () => page.evaluate((pairs) => pairs.map(([cls, name]) => {
+  const el = document.createElement('span')
+  el.className = cls
+  el.textContent = 'Ap'
+  document.body.appendChild(el)
+  const st = getComputedStyle(el)
+  // A transparent ground is read against what is actually behind it, or the measurement is of a
+  // colour no eye ever sees.
+  const bg = st.backgroundColor === 'rgba(0, 0, 0, 0)' || st.backgroundColor === 'transparent'
+    ? getComputedStyle(document.body).backgroundColor
+    : st.backgroundColor
+  const out = { name, cls, bg, fg: st.color }
+  el.remove()
+  return out
+}), BRAND_PAIRS)
+
+const lightBrand = await readBrand()
+await page.click('#toggle-dark')
+await page.waitForFunction(() => document.documentElement.getAttribute('data-theme') === 'dark')
+const darkBrand = await readBrand()
+await page.click('#toggle-dark')
+await page.waitForFunction(() => document.documentElement.getAttribute('data-theme') === null)
+
+for (const [theme, list] of [['light', lightBrand], ['dark', darkBrand]]) {
+  for (const b of list) {
+    ok(`${theme}: the ${b.name} is readable on its own ground (>= 4.5:1)`,
+      contrast(b.fg, b.bg) >= 4.5, `${b.fg} on ${b.bg} = ${contrast(b.fg, b.bg).toFixed(2)}:1`)
+  }
+}
 
 // ---------- 14. P8.7: the keyword list is 2-up at >= 1040px and 1-up below ----------
 await page.click('#posting-card [data-qc="jd-tab"][data-qc-tab="keywords"]')

@@ -191,13 +191,17 @@ export async function evaluateArtifact(client: any, artifactId: string, owner: s
       `insert into artifact_score
          (artifact_id, run_id, must_have_coverage, must_have_source, keyword_coverage, keyword_source,
           seniority_alignment, seniority_source, composite, band, uncovered_requirement_ids,
-          engine_version, weights)
-       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+          judged_requirement_ids, engine_version, weights)
+       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
        on conflict (artifact_id, run_id) do nothing`,
       [artifactId, runId, score.must_have_coverage.value, score.must_have_coverage.source,
        score.keyword_coverage.value, score.keyword_coverage.source,
        score.seniority_alignment.value, score.seniority_alignment.source,
-       score.composite, score.band, uncoveredIds, score.engine_version, JSON.stringify(score.weights)])
+       score.composite, score.band, uncoveredIds,
+       // READ from the check, never re-derived here. `coverable` is checks.ts's predicate and a
+       // second copy of it in this file is precisely the R4 defect this column exists to close.
+       results.find(r => r.check_key === 'must_have_coverage')?.judged || [],
+       score.engine_version, JSON.stringify(score.weights)])
     await client.query('commit')
   } catch (e) { await client.query('rollback'); throw e }
 

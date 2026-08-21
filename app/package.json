@@ -10,7 +10,9 @@
     "test": "node --test test/*.test.mjs",
     "test:browser": "node test/browser/run.mjs",
     "test:blocks": "node test/browser/run-asset-blocks.mjs",
-    "test:qc": "node test/browser/run-qc-rail.mjs"
+    "test:qc": "node test/browser/run-qc-rail.mjs",
+    "test:tones": "node test/browser/run-contrast.mjs",
+    "test:contrast": "node test/browser/run-contrast.mjs"
   },
   "dependencies": {
     "@azure/msal-browser": "^3.30.0",

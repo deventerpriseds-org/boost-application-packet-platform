@@ -317,3 +317,194 @@ export function toCheckInput(resolved: ResolvedEvidence[], profileReadable: bool
   for (const r of resolved) bySeq[r.seq] = r.evidence
   return { profileReadable, bySeq }
 }
+
+// --- re-validation on read (D19) ----------------------------------------------------------------
+//
+// `record_sha256` exists so that a stale offset is DETECTABLE after the owner edits their profile. It
+// was written on resolve, served on read, and never recomputed — which makes it a decoration rather
+// than a guard. The same shape as `correction.before_sha256`, which IS recomputed: `revertOne`
+// refuses rather than guesses when the text has moved. This is that discipline applied to evidence.
+//
+// THE DECISION, deliberately, and it is REFUSE — DO NOT GUESS — AND SAY WHICH:
+//   - A stale row is NOT re-resolved on the read path. Re-resolving means WRITING, and the
+//     requirements GET is readable without a verified session (`resolveOwner` accepts an unverified
+//     `?owner=`), so a GET that repaired rows would be an unauthenticated write. It is also a RANKING
+//     decision — an edited record may now have a better excerpt — and ranking belongs in
+//     `resolveEvidence`, behind `requireWrite`, on `POST /evidence`. The read names the fix instead.
+//   - A row that cannot be shown as proof is NOT rendered as proof. The excerpt is WITHHELD, not
+//     caveated: an excerpt printed beside a requirement IS the claim "your profile says this,
+//     verbatim", and a caveat under it does not unmake that claim.
+//   - Every failing state is DISTINGUISHABLE from "no evidence found". "Your profile does not support
+//     this" and "we can no longer check what your profile said" are different claims about the
+//     candidate, and printing one sentence for both is exactly the conflation this module's
+//     `profileReadable` comment already forbids one level up.
+//
+// THE OFFSETS ARE THE CLAIM; THE DIGEST IS ONLY THE ALARM. The row asserts "quote Q is the bytes of
+// record K at [start,end)". That assertion is settled by slicing the CURRENT record — the same
+// assertion `writeEvidence` makes before storing — and not by the digest. A digest mismatch whose
+// offsets still yield Q byte-for-byte means the owner edited somewhere ELSE in that record: the quote
+// is still verbatim and still proof, and demoting it would be a false accusation, which is the half
+// of "fuzzy matching is for ranking, never for accusing" that gets forgotten. It is reported as
+// `recordChanged` because it does mean the RANKING is stale — a reason to re-resolve, not to withhold.
+//
+// Records must be the ones `profileRecords()` produces, never raw MasterContext values: the stored
+// offsets and the stored digest were both measured on `toBmp(...)`-folded text, and an offset measured
+// against one folding is meaningless against another. (H32's lower-casing defect is the same class one
+// level down, and is why `locate` measures on the original string; a folding applied HERE would
+// reintroduce it on the read side, where no substring guard could catch it either.)
+
+/** Bump when these verification rules change, so a verdict can be attributed to a ruleset. */
+export const VERIFY_VERSION = 1
+
+/**
+ * What a stored evidence row is, right now, measured against the profile as it stands.
+ *
+ * `none` is the ABSENCE of a row. Every other non-`verified` value is a row that EXISTS and cannot be
+ * shown, and collapsing those into `none` loses the distinction the owner needs in order to act.
+ */
+export type EvidenceState = 'none' | 'verified' | 'stale' | 'misresolved' | 'source_missing' | 'unverified'
+
+/** The stored columns verification needs. A subset of `EvidenceRow`, so a DB row satisfies it too. */
+export interface StoredEvidence {
+  quote: string
+  source_key: string
+  char_start: number
+  char_end: number
+  record_sha256?: string | null
+}
+
+export interface EvidenceVerdict {
+  state: EvidenceState
+  /** The ONE field a caller may read as "this may be shown as a verbatim quote". */
+  proof: boolean
+  /** The record body differs from the one this row was resolved against — the ranking is stale. */
+  recordChanged: boolean
+  /** The quote is still somewhere in the record, but no longer at the offsets stored. */
+  quoteMoved: boolean
+  /** The sentence to show the owner. Null only when `state` is `verified`. */
+  note: string | null
+}
+
+/** A row exists, its record exists, and the excerpt is no longer that record's bytes at its offsets. */
+export const EVIDENCE_STALE_NOTE =
+  'your profile changed after this excerpt was resolved, so it can no longer be shown as a verbatim quote — re-resolve the evidence for this opportunity'
+/** A row exists and names a profile record that is no longer in the profile at all. */
+export const EVIDENCE_SOURCE_MISSING_NOTE =
+  'the profile record this excerpt was taken from is no longer in your profile — re-resolve the evidence for this opportunity'
+/**
+ * A row exists, the record is BYTE-IDENTICAL to the one it was resolved against, and the offsets
+ * still do not name the quote. Nothing changed, so the offsets were wrong when they were written.
+ *
+ * This is not hypothetical and it is why the state exists rather than being folded into `stale`.
+ * H32: `locate`'s exact branch indexed a LOWER-CASED copy of the haystack, and `toLowerCase()` is
+ * not length-preserving (U+0130 lowercases to two code units), so every such character before a
+ * match shifted the recorded offset — the stored excerpt was a true substring of the record at the
+ * offsets recorded and simply the wrong characters. That was fixed at the WRITE side
+ * (`EXTRACTOR_VERSION` 1 -> 2); rows written before it are still in the table, and re-validation on
+ * read is the first thing that can see them. Telling that owner "your profile changed" would be a
+ * false statement about them — the digest proves it did not — so it gets its own sentence.
+ */
+export const EVIDENCE_MISRESOLVED_NOTE =
+  'this excerpt does not match the profile record it names, and that record has not changed — it was recorded against the wrong position and needs re-resolving'
+/** A row exists and the profile could not be read, so nothing about it could be checked. */
+export const EVIDENCE_UNVERIFIED_NOTE =
+  'your profile could not be read, so this excerpt could not be re-verified and is not shown as a quote'
+
+/**
+ * The sentence for each non-provable state, in ONE place, so every surface prints the same words and
+ * no two states can accidentally print the same sentence.
+ */
+export const EVIDENCE_NOTE: Record<Exclude<EvidenceState, 'verified'>, string> = {
+  none: NO_EVIDENCE_NOTE,
+  stale: EVIDENCE_STALE_NOTE,
+  misresolved: EVIDENCE_MISRESOLVED_NOTE,
+  source_missing: EVIDENCE_SOURCE_MISSING_NOTE,
+  unverified: EVIDENCE_UNVERIFIED_NOTE,
+}
+
+/**
+ * Re-validate one stored evidence row against the profile as it stands NOW.
+ *
+ * `records` is `null` when the profile could not be read — which is NOT the same as a profile that
+ * contains no records, and must never be passed as `[]`. The convention is the one already in this
+ * file: `profileReadable` is `records.length > 0`, so a caller passes `readable ? records : null`.
+ * An unreadable profile yields `unverified`, never `verified` and never `stale`: absent evidence is
+ * `not_applicable` — never a pass, and never an accusation either.
+ */
+export function verifyEvidence(
+  stored: StoredEvidence | null | undefined,
+  records: ProfileRecord[] | null,
+): EvidenceVerdict {
+  const miss = (state: Exclude<EvidenceState, 'verified'>, extra: Partial<EvidenceVerdict> = {}): EvidenceVerdict =>
+    ({ state, proof: false, recordChanged: false, quoteMoved: false, note: EVIDENCE_NOTE[state], ...extra })
+
+  if (!stored || typeof stored.quote !== 'string' || !stored.quote) return miss('none')
+  if (records == null) return miss('unverified')
+
+  const rec = records.find(r => r && r.key === stored.source_key)
+  if (!rec || typeof rec.text !== 'string') return miss('source_missing')
+
+  // No usable digest stored: the ranking cannot be attributed to a known record body, so it is
+  // reported as changed rather than silently claimed current. It does not affect `proof`.
+  const changed = typeof stored.record_sha256 === 'string' && /^[0-9a-f]{64}$/.test(stored.record_sha256)
+    ? sha256(rec.text) !== stored.record_sha256
+    : true
+
+  // THE CLAIM, re-made against today's text.
+  if (rec.text.slice(stored.char_start, stored.char_end) === stored.quote) {
+    return { state: 'verified', proof: true, recordChanged: changed, quoteMoved: false, note: null }
+  }
+  // The record is byte-identical and the offsets STILL do not name the quote: nothing moved, so the
+  // row was recorded wrong. Attributing that to an edit the owner did not make is a false statement
+  // about them, and the digest is exactly the evidence that separates the two.
+  const moved = rec.text.includes(stored.quote)
+  if (!changed) return miss('misresolved', { recordChanged: false, quoteMoved: moved })
+  return miss('stale', { recordChanged: true, quoteMoved: moved })
+}
+
+/** How many rows are in each state — the honest denominator behind any coverage claim. */
+export interface EvidenceHealth {
+  total: number
+  verified: number
+  stale: number
+  /** Offsets that were wrong when written, against a record that has not changed since (see H32). */
+  misresolved: number
+  sourceMissing: number
+  unverified: number
+  none: number
+  /** Rows still provable whose record has since changed — a reason to re-resolve, not to withhold. */
+  recordChanged: number
+  profileReadable: boolean
+  verifyVersion: number
+}
+
+export function emptyHealth(profileReadable: boolean): EvidenceHealth {
+  return {
+    total: 0, verified: 0, stale: 0, misresolved: 0, sourceMissing: 0, unverified: 0, none: 0,
+    recordChanged: 0, profileReadable, verifyVersion: VERIFY_VERSION,
+  }
+}
+
+/**
+ * The buckets always sum to `total` — a row is in exactly one state.
+ *
+ * Written as a lookup off the state rather than an `if` chain ending in `else h.none++`, because
+ * that ending is how a state added later gets silently counted as "no evidence" — which is the one
+ * miscount this whole module exists to prevent. An unknown state throws instead.
+ */
+const HEALTH_BUCKET: Record<EvidenceState, keyof EvidenceHealth> = {
+  verified: 'verified', stale: 'stale', misresolved: 'misresolved',
+  source_missing: 'sourceMissing', unverified: 'unverified', none: 'none',
+}
+
+export function tallyHealth(verdicts: EvidenceVerdict[], profileReadable: boolean): EvidenceHealth {
+  const h = emptyHealth(profileReadable)
+  for (const v of verdicts) {
+    h.total++
+    const bucket = HEALTH_BUCKET[v.state]
+    if (!bucket) throw new Error(`unknown evidence state '${v.state}' — it has no bucket and would be miscounted`)
+    ;(h as any)[bucket]++
+    if (v.recordChanged) h.recordChanged++
+  }
+  return h
+}

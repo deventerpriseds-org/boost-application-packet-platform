@@ -14,6 +14,7 @@
  * strings for the old ones.
  */
 export const PACKET_HOOKS = {
+  assetRebuild: 'asset-rebuild',
   assetCard: 'asset-card',            // one artifact's card (carries data-qc-type)
   assetHeader: 'asset-header',        // its header - the disclosure (carries data-qc-open)
   assetToggle: 'asset-header-toggle',

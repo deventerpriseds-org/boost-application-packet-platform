@@ -343,10 +343,10 @@ export default function Today({ opps }) {
 // Status-color convention: reviewing=brand/teal (active/primary), outreach=warning/yellow,
 // interviewing=purple, offer=success/green.
 const MIX_SEGMENTS = [
-  { key: 'reviewing', label: 'Reviewing', color: 'var(--surface-brand-default)' },
+  { key: 'reviewing', label: 'Reviewing', color: 'var(--proto-accent)' },
   { key: 'outreach', label: 'Outreach', color: 'var(--proto-yellow)' },
   { key: 'interviewing', label: 'Interviewing', color: 'var(--proto-purple)' },
-  { key: 'offer', label: 'Offer', color: 'var(--surface-success-default)' },
+  { key: 'offer', label: 'Offer', color: 'var(--proto-green)' },
 ]
 
 function PulseStrip({ metrics }) {

@@ -258,7 +258,11 @@ test('a score component with no value carries the server prose for WHY, never a 
 })
 
 test('unknown keys degrade to something readable rather than disappearing', () => {
-  assert.equal(checkLabel('must_have_coverage'), 'Must-haves this document covers')
+  // C6 moved this number to what the PROFILE can evidence. The label followed; a label describing
+  // the previous definition sits next to a correct number and is the half a reader believes.
+  assert.equal(checkLabel('must_have_coverage'), 'Must-haves your profile can evidence')
+  assert.ok(!/this document covers/.test(checkLabel('must_have_coverage')),
+    'the label promises document repetition again — that is the pre-C6 numerator')
   assert.equal(checkLabel('a_check_added_later'), 'a check added later')
   assert.equal(fieldLabel('SkillsBullets1'), 'Skills, column 1')
   assert.equal(fieldLabel('SomeNewMergeField'), 'SomeNewMergeField')

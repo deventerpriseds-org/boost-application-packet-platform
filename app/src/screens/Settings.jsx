@@ -159,7 +159,7 @@ function SweepSettings() {
         <div style={{ flex: 1, minWidth: 220 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
             <b style={{ fontSize: 15 }}>Active search — LinkedIn role sweep</b>
-            <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: 0.5, color: '#0a66c2', background: 'rgba(10,102,194,0.14)', padding: '2px 8px', borderRadius: 5 }}>in LinkedIn</span>
+            <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: 0.5, color: 'var(--linkedin)', background: 'var(--linkedin-tint)', padding: '2px 8px', borderRadius: 5 }}>in LinkedIn</span>
           </div>
           <div className="px-small" style={{ marginTop: 3, color: 'var(--proto-ink2)', maxWidth: 460 }}>
             The active counterpart to mailbox intake: instead of waiting for LinkedIn alert emails, this searches <b>LinkedIn</b> directly for your target roles and files matches automatically.
@@ -302,7 +302,7 @@ function SweepSettings() {
                 border: `1px solid ${on ? 'var(--text-brand)' : 'var(--proto-rule-soft)'}`, boxShadow: on ? '0 0 0 3px color-mix(in srgb, var(--text-brand) 18%, transparent)' : 'none', transition: 'border-color .12s, box-shadow .12s' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                   <span style={{ fontSize: 13.5, fontWeight: 650 }}>{o.name}</span>
-                  {o.rec && <span style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: 0.5, textTransform: 'uppercase', padding: '2px 6px', borderRadius: 5, background: 'color-mix(in srgb, var(--surface-success-default) 16%, transparent)', color: 'var(--surface-success-default)' }}>Recommended</span>}
+                  {o.rec && <span style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: 0.5, textTransform: 'uppercase', padding: '2px 6px', borderRadius: 5, background: 'color-mix(in srgb, var(--surface-success-default) 16%, transparent)', color: 'var(--proto-green)' }}>Recommended</span>}
                   <span style={{ marginLeft: 'auto', width: 16, height: 16, borderRadius: '50%', border: `1.5px solid ${on ? 'var(--text-brand)' : 'var(--proto-rule)'}`, display: 'grid', placeItems: 'center', flex: 'none' }}>
                     {on && <span style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--text-brand)' }} />}
                   </span>
@@ -938,6 +938,15 @@ function AtsSources() {
     catch (e) { setMsg(`Couldn't add: ${e.message || e}`) } finally { setBusy(false) }
   }
   const del = async (id) => { try { await api.atsSourceDelete(id); load() } catch {} }
+  // Pausing a board is not the same decision as forgetting it. The column, the upsert and the scan
+  // query have all supported this since the table was created; only the control was missing, so
+  // "stop pulling from this board" and "delete its history" were the same button.
+  const setEnabled = async (s, enabled) => {
+    setBusy(true); setMsg('')
+    try { const r = await api.atsSourceAdd(s.provider, s.board, { enabled }); if (r.error) throw new Error(r.error)
+      setMsg(`${s.board} ${enabled ? 'resumed' : 'paused'}`); load() }
+    catch (e) { setMsg(`Couldn't update: ${e.message || e}`) } finally { setBusy(false) }
+  }
   const ingest = async (s) => {
     setBusy(true); setMsg('')
     try { const r = s ? await api.atsIngest({ provider: s.provider, board: s.board }) : await api.atsIngest({})
@@ -963,9 +972,14 @@ function AtsSources() {
           {sources.map((s) => (
             <div key={s.id} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13 }}>
               <Pill tone="panel">{s.provider}</Pill>
-              <span style={{ flex: 1 }}>{s.board}</span>
+              <span style={{ flex: 1, opacity: s.enabled === false ? 0.55 : 1 }}>{s.board}</span>
+              {s.enabled === false && <Pill tone="panel">paused</Pill>}
               {s.last_run && <span className="px-small">ran {new Date(s.last_run).toLocaleDateString()}</span>}
-              <button className="px-btn" style={{ fontSize: 11 }} disabled={busy} onClick={() => ingest(s)}>Ingest</button>
+              <span className="px-link" style={{ fontSize: 12, cursor: busy ? 'default' : 'pointer' }} role="button"
+                onClick={() => { if (!busy) setEnabled(s, s.enabled === false) }}>
+                {s.enabled === false ? 'Resume' : 'Pause'}
+              </span>
+              <button className="px-btn" style={{ fontSize: 11 }} disabled={busy || s.enabled === false} onClick={() => ingest(s)}>Ingest</button>
               <span className="px-link" style={{ fontSize: 12, cursor: 'pointer', color: 'var(--proto-red)' }} onClick={() => del(s.id)}>✕</span>
             </div>
           ))}

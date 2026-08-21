@@ -246,10 +246,14 @@ test('a posting whose requirements are all reachable says so', () => {
 const ownerFact = (key, value, value_num = null) =>
   ({ key, value, value_num, source: 'owner_stated', confirmed_at: '2026-08-20T00:00:00Z' })
 
+// The fixture asked for LEADERSHIP years and recorded only TOTAL years, and asserted a pass. That
+// passed because `checkAgainstFacts` could not reach `experience.years_leadership` at all (D22 /
+// H41) — the assertion was encoding the defect. The requirement is now a plain years one, which is
+// what this test is about; the leadership case is H43, where it belongs.
 test('a years requirement is settled by the profile, not by whether the resume repeats the number', () => {
   const rs = runChecks({
     type: 'resume', pkg: RESUME_FULL,
-    requirements: [{ seq: 0, verbatim: 'Minimum of 10 years of leadership experience', item_text: '', kind: 'must_have' }],
+    requirements: [{ seq: 0, verbatim: 'Minimum of 10 years of professional experience', item_text: '', kind: 'must_have' }],
     facts: [ownerFact('experience.years_total', '24 years', 24)],
   })
   assert.equal(find(rs, 'facts_settled').state, 'pass')
@@ -437,4 +441,97 @@ test('R3 scans every populated field, not just the summary', () => {
   assert.equal(r.state, 'warn')
   assert.ok(r.offenders.includes('SkillsBullets1: $18M'), `list items were not scanned: ${r.offenders}`)
   assert.ok(r.offenders.includes('RelevantBullets1: 60+'), `list items were not scanned: ${r.offenders}`)
+})
+
+// ---------------------------------------------------------------------------------------------
+// D5 — a swap recorded but not yet rendered was text nobody checked.
+
+test('D5: R3 scans swap labels that have not been rendered into a field yet', () => {
+  // The backlog is explicit: "a list item may not read `Org Scaling 60+` or `P&L $18M`". Before
+  // this, `runChecks` scanned `pkg` only, so a swap sitting in `swap_decision.to_label` passed R3
+  // simply because the rendering had not caught up. The label is text the user will read.
+  const rs = runChecks({
+    type: 'resume', pkg: echoPkg('Led platform engineering for a regional utility.'),
+    postingText: POSTING, profileText: PROFILE,
+    swaps: [{ action: 'swapped', driver: 'posting', from_label: 'Team Leadership', to_label: 'P&L $18M' }],
+  })
+  const r = find(rs, 'posting_figure_echo')
+  assert.equal(r.state, 'warn', 'an unrendered swap label carrying the posting\'s figure must surface')
+  assert.deepEqual(r.offenders, ['swap: P&L $18M: $18M'])
+})
+
+test('D5: a swap label ALREADY rendered is reported once, not twice', () => {
+  // The cry-wolf half. Adding the labels to the scan naively prints every offender twice — once as
+  // the field and once as the label — under two different names for one string in one document.
+  // A check that names people may not inflate its own count.
+  const rs = runChecks({
+    type: 'resume', pkg: echoPkg('Owned P&L $18M for the region.'),
+    postingText: POSTING, profileText: PROFILE,
+    swaps: [{ action: 'swapped', driver: 'posting', from_label: 'x', to_label: 'P&L $18M' }],
+  })
+  const r = find(rs, 'posting_figure_echo')
+  assert.deepEqual(r.offenders, ['ResumeSummary: $18M'], 'the rendered field owns it; the label must not repeat it')
+})
+
+test('D5: swap labels do not manufacture an R3 verdict out of nothing', () => {
+  // A clean label must not turn a pass into a warn, and `not_applicable` must survive: absent
+  // posting text is still "could not look", never "looked and found nothing".
+  const clean = [{ action: 'swapped', driver: 'posting', from_label: 'x', to_label: 'Platform Engineering' }]
+  const passed = find(runChecks({ type: 'resume', pkg: echoPkg('Led platform engineering.'),
+                                  postingText: POSTING, profileText: PROFILE, swaps: clean }), 'posting_figure_echo')
+  assert.equal(passed.state, 'pass')
+  assert.deepEqual(passed.offenders, [])
+  const blind = find(runChecks({ type: 'resume', pkg: echoPkg('Led platform engineering.'),
+                                 postingText: '', profileText: PROFILE, swaps: clean }), 'posting_figure_echo')
+  assert.equal(blind.state, 'not_applicable', 'no posting text is not a clean scan')
+})
+
+// ---------------------------------------------------------------------------------------------
+// D4 — wording kept from the posting, surfaced as its own check.
+
+test('D4: wording kept from the posting is its own check, not more figure offenders', () => {
+  // The spec separates them because the REMEDY differs: a figure gets auto-corrected (R1/P8.1), a
+  // phrase never does. Folding them together would put prose into the auto-correct path.
+  const posting = 'You will manage a portfolio of enterprise customers across three business units and report to the COO.'
+  const rs = runChecks({ type: 'resume',
+    pkg: echoPkg('Managed a portfolio of enterprise customers across three business units for a utility.'),
+    postingText: posting, profileText: 'Operated 60 sites for a regional utility.' })
+  const w = find(rs, 'posting_wording_kept')
+  assert.equal(w.state, 'warn')
+  assert.equal(w.offenders.length, 1)
+  assert.match(w.offenders[0], /^ResumeSummary: "a portfolio of enterprise customers across three business units"$/)
+  // The figure check is a SEPARATE row and does not absorb the phrase.
+  const f = find(rs, 'posting_figure_echo')
+  assert.ok(!f.offenders.some(o => /portfolio of enterprise/.test(o)), 'wording must not leak into the figure check')
+})
+
+test('D4: no posting text is not_applicable, never "no wording was kept"', () => {
+  const rs = runChecks({ type: 'resume', pkg: echoPkg('Managed a portfolio of enterprise customers across three business units.'),
+                         postingText: '<p></p>', profileText: PROFILE })
+  assert.equal(find(rs, 'posting_wording_kept').state, 'not_applicable')
+})
+
+test('D4: the new check stays silent across every existing fixture in this file', () => {
+  // The cry-wolf budget, measured rather than asserted. A new WARN-state check raises
+  // attentionCount and can move a gate, so it must not fire on prose nobody copied.
+  const fixtures = [
+    ['Led platform engineering for a regional utility.', POSTING, PROFILE],
+    ['Ran 60 sites across the Midwest.', POSTING, PROFILE],
+    ['Managed a $18M portfolio across three business units.', POSTING, PROFILE],
+    ['Cut incident volume 37% and shipped 14 releases.', POSTING, PROFILE],
+    ['Built and led platform engineering teams across three regions.', POSTING, PROFILE],
+  ]
+  for (const [summary, posting, profile] of fixtures) {
+    const w = find(runChecks({ type: 'resume', pkg: echoPkg(summary), postingText: posting, profileText: profile }), 'posting_wording_kept')
+    assert.equal(w.state, 'pass', `${summary} -> ${JSON.stringify(w.offenders)}`)
+  }
+})
+
+test('D4: the run length comes from thresholds, not from a constant', () => {
+  const posting = 'We need someone to drive operational excellence across the enterprise every day.'
+  const pkg = echoPkg('Drove operational excellence across the enterprise every day.')
+  const base = { type: 'resume', pkg, postingText: posting, profileText: PROFILE }
+  assert.equal(find(runChecks(base), 'posting_wording_kept').state, 'pass', 'silent at the seeded default')
+  assert.equal(find(runChecks({ ...base, thresholds: { wordingRunTokens: 5 } }), 'posting_wording_kept').state, 'warn',
+    'an owner lowering the threshold surfaces it — the value is not code-only')
 })

@@ -538,6 +538,16 @@ test('QcRail.jsx renders values and computes NO gate, NO severity, NO count', ()
   for (const fn of ['railGate(', 'railCounts(', 'railBody(', 'coverageCards(', 'countLink(']) {
     assert.ok(src.includes(fn), `it must actually call ${fn}`)
   }
+  // P8.6 closed a MEASURED hole in the four regexes above. `arr(result.corrections).length` - a
+  // component counting the change log itself - matches none of them: the first needs a trailing `+`,
+  // the second is about states, the third about engines, the fourth about two function names. The
+  // corrections number is the cheapest count yet to compute inline, because unlike every other
+  // number on this screen it is a plain array length with no filtering to make it feel expensive.
+  // Any payload list read straight off `result` in this component is the same class of defect.
+  assert.ok(!/\bresult\.corrections\b|\.result\.corrections\b/.test(src),
+    'the component must reach the change log through the module, never read result.corrections itself')
+  assert.ok(!/arr\(\s*\w+\.result\.\w+\s*\)\.length/.test(src),
+    'a count taken off the raw payload in the component is the bug this whole split exists to prevent')
 })
 
 test('every QC_HOOKS selector is rendered, and the component hand-types none of them', () => {

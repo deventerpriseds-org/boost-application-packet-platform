@@ -304,8 +304,15 @@ create table if not exists requirement (
   kind_source    text not null check (kind_source in ('posting_required_marker','posting_optional_marker','posting_section_heading','category','category_default','fallback')),
   model_keyword  text,                      -- jd_table ATS Keyword: a P1.2 candidate, never scoreable
   competency     text,                      -- resolved by the term library (P1.2); null until then
+  -- 'escalated' here means THE QUOTE COULD NOT BE LOCATED IN THE POSTING, decided at extraction
+  -- before any loop exists (requirements.ts). P3's "the loop gave up" is a DIFFERENT population and
+  -- lives in the 'escalation' table (decision 15). Two populations in one column is how a gate comes
+  -- to count the wrong thing.
   coverage       text check (coverage in ('covered','partial','escalated')),
-  closed_on_loop int,
+  -- 'closed_on_loop int' used to sit here. It could not express the artifact dimension: coverage is
+  -- judged per-ARTIFACT by evaluateArtifact, and "covered in the resume but not the cover letter" is
+  -- the normal case. It had zero writers and zero readers (decision 16), so it is replaced rather
+  -- than migrated - by remediation_loop.closed, which is per (artifact, pass) by construction.
   weight         int not null check (weight between 1 and 3),
   source_category text,
   jd_source      text check (jd_source in ('jd_real','raw_jd')),
@@ -342,6 +349,58 @@ create index if not exists requirement_kind_idx on requirement(opp_id, kind);
 -- [char_start, char_end). Same discipline as requirement.verbatim, pointed at the candidate's
 -- profile instead of the employer's posting. record_sha256 is what makes a stale offset detectable
 -- after the owner edits their profile, exactly as jd_text_sha256 does for the posting.
+-- P8.1 / R1 — what the engine fixed before the user saw it, and how to put it back.
+--
+-- ONE ROW PER CHANGED SPAN, not per field: a ResumeSummary can carry three independently undoable
+-- corrections. That grain is why this is its own table rather than an extension of "insertion"
+-- (unique per artifact/field/loop, so it structurally cannot hold three) or "swap_decision" (its
+-- "list" CHECK admits only the five list fields, and prose fields like ResumeSummary are not among
+-- them, and there is no ordinal to put in "seq"). Both were probed with real INSERTs against a
+-- live cluster before this table was written; both rejected the row.
+--
+-- EVERY OFFSET IS RELATIVE TO THE ORIGINAL, PRE-CORRECTION FIELD TEXT, and stays that way forever.
+-- Applying is a right-to-left splice so no pending offset can move; undoing one correction is a
+-- replay of the list minus that row. Neither needs the offsets to survive a later rewrite, which
+-- is what lets a revert months later be exact instead of approximate.
+--
+-- before_sha256 is the whole ORIGINAL field text, and it is RECOMPUTED on revert, not merely
+-- stored. That is the difference between a guard and a decoration: a field edited by hand after the
+-- correction is DETECTED and the revert refuses, rather than splicing into text that has moved.
+-- (D19 records the sibling case where a hash is written and served but never recomputed.)
+create table if not exists correction (
+  id            uuid primary key default uuid_generate_v4(),
+  artifact_id   uuid not null references artifact(id) on delete cascade,
+  merge_field   text not null,
+  phrase        text not null,          -- the exact original substring replaced
+  replacement   text not null,
+  char_start    int not null,
+  char_end      int not null,
+  before_sha256 text not null,
+  applied_seq   int not null,           -- ascending by char_start, so the change log reads in document order
+  reason        text not null,
+  source        text not null check (source in ('profile_figure','generalized')),
+  run_id        uuid,
+  loop          int not null default 0,
+  reverted_by   text,
+  reverted_at   timestamptz,
+  created_at    timestamptz not null default now(),
+  -- A row that cannot fund its own undo must not exist. Enforced by the DATABASE, not by a writer's
+  -- good intentions: the offsets must describe the phrase they claim to replace.
+  constraint correction_span_matches_phrase check (char_end - char_start = length(phrase)),
+  constraint correction_span_ordered        check (char_start >= 0 and char_end > char_start),
+  constraint correction_sha_shaped          check (before_sha256 ~ '^[0-9a-f]{64}$'),
+  -- Reverting is never a DELETE — the change log must still show the row as Undone. Both columns
+  -- are set together or neither is.
+  constraint correction_revert_paired       check ((reverted_by is null) = (reverted_at is null))
+);
+-- NULLS NOT DISTINCT is load-bearing and was found by execution, not by reading. Postgres treats
+-- NULL as distinct from NULL in a UNIQUE, so with run_id NULL — every correction applied outside a
+-- remediation loop, which is the COMMON case — the plain unique permitted unlimited duplicates. A
+-- byte-exact duplicate inserted twice and the table held both.
+create unique index if not exists correction_unique_seq
+  on correction (artifact_id, merge_field, applied_seq, coalesce(run_id, '00000000-0000-0000-0000-000000000000'::uuid));
+create index if not exists correction_by_artifact on correction (artifact_id, reverted_at);
+
 create table if not exists requirement_evidence (
   id             uuid primary key default uuid_generate_v4(),
   requirement_id uuid not null references requirement(id) on delete cascade,
@@ -376,6 +435,9 @@ create table if not exists skill_candidate (
   label        text not null,
   origin       text not null check (origin in ('profile_original','pass_a','pass_b')),
   char_len     int not null,
+  -- The remediation pass that produced these candidates. Without it writeSwaps' packet-wide DELETE
+  -- takes pass 1's candidates with it, and pass 1's swap rows lose the ids they point at.
+  loop         int not null default 0,
   created_at   timestamptz not null default now()
 );
 create index if not exists skill_cand_packet_idx on skill_candidate(packet_id, list);
@@ -399,12 +461,25 @@ create table if not exists swap_decision (
   confidence     numeric(4,3) not null default 0,
   driver         text not null check (driver in ('posting','rule','unattributed')),
   rationale      text,
+  -- P3-21. 'writeSwaps' deleted 'where packet_id=$1' on EVERY build and this table had no loop
+  -- column, so pass 2 destroyed pass 1's swap record - the loop deleting its own justification for
+  -- every change it had just made. 'loop' is part of the key so each pass keeps its own history and
+  -- re-running one pass stays idempotent.
+  loop           int not null default 0,
   created_at     timestamptz not null default now(),
-  unique (packet_id, list, seq),
+  unique (packet_id, list, seq, loop),
   -- A citation needs a source: a posting-driven row must carry both, and no other row may claim one.
   check ((driver = 'posting') = (verbatim_quote is not null))
 );
-create index if not exists swap_dec_packet_idx on swap_decision(packet_id, list, seq);
+-- ORDER IS LOAD-BEARING, for the same reason as the check_result unique further down (H34).
+-- On a database where these tables ALREADY exist - production, since P1 - 'create table if not
+-- exists' is a NO-OP and the inline 'loop' column above is never added. The index on the next line
+-- then references a column that does not exist and ABORTS THE WHOLE MIGRATION:
+--   ERROR: column "loop" does not exist
+-- Measured by executing this file against PostgreSQL 16.13 seeded with 'main''s schema.
+alter table swap_decision   add column if not exists loop int not null default 0;
+alter table skill_candidate add column if not exists loop int not null default 0;
+create index if not exists swap_dec_packet_idx on swap_decision(packet_id, loop, list, seq);
 
 -- P1.4 — what text landed in which REAL merge field of which artifact, what it replaced, and which
 -- requirement justifies it. Each asset is modelled as ITS merge fields, not as invented sections:
@@ -450,7 +525,11 @@ create table if not exists check_result (
   expected     text,
   offenders    text[] not null default '{}',
   created_at   timestamptz not null default now(),
-  unique (artifact_id, run_id, check_key)
+  unique (artifact_id, run_id, check_key),
+  -- A superset of the key above, existing only so remediation_loop can FOREIGN KEY into it (P3-05).
+  -- It makes 'halt_reason='converged'' unforgeable: the loop row can only name a state that a real
+  -- check_result row for that exact run already holds.
+  unique (artifact_id, run_id, check_key, state)
 );
 create index if not exists check_result_artifact_idx on check_result(artifact_id, created_at desc);
 
@@ -500,6 +579,12 @@ create table if not exists artifact_score (
   composite      int,
   band           text check (band in ('strong','acceptable','needs_work')),
   uncovered_requirement_ids uuid[] not null default '{}',
+  -- The rows the coverage check actually reached a verdict ON, which is NARROWER than the
+  -- must-haves: eligibility clauses no merge field can carry, and rows the owner's facts own, are
+  -- excluded by "coverable". Without this column the reviewer-agreement calculation assumed every
+  -- must-have was judged and scored the excluded ones as agreeing or disagreeing rather than
+  -- not_comparable — an accusation-grade number built on rows the engine had no opinion about.
+  judged_requirement_ids    uuid[] not null default '{}',
   engine_version int not null,
   weights        jsonb not null,
   computed_at    timestamptz not null default now(),
@@ -586,7 +671,251 @@ create table if not exists review_verdict (
 );
 create index if not exists review_verdict_artifact_idx on review_verdict(artifact_id, ran_at desc);
 
+-- P3.1 - one row per remediation PASS per ARTIFACT. The loop's ledger.
+--
+-- GRAIN. Per artifact, because coverage is judged per artifact by evaluateArtifact and "covered in
+-- the resume but not the cover letter" is the normal case, not the edge case (decision 16). The
+-- pass number is 'n', and it is the SAME number written to insertion.loop and swap_decision.loop -
+-- decision 14: one counter, joined to the before/after evidence, not a fourth counter beside two
+-- that already disagree.
+--
+-- P3-05 - 'converged' IS UNFORGEABLE HERE, not by the writer's good intentions:
+--   * the CHECK below requires cardinality(remaining) = 0, and
+--   * the composite FOREIGN KEY requires a REAL check_result row at (artifact_id, run_id,
+--     'evidence_placed', close_state). So close_state cannot be asserted - it can only be copied
+--     from a check the engine actually recorded for that exact run.
+-- Together: a row may say 'converged' only when nothing was open AND that pass's own PLACEMENT
+-- check passed. Not 'not_applicable', not 'warn'. "Converged" is the one word a user trusts
+-- without reading anything else.
+-- Proven against PostgreSQL 16.13, not asserted: a forged run_id is refused by the FK, converged
+-- with a non-empty remaining by check2, binding to must_have_coverage by the close_check_key
+-- CHECK, and crediting a close with no edited field by check3. Only the legitimate row stored.
+--
+-- P3-38 - a JUDGED state sliding to not_applicable is refused in the table. evidence_placed reports
+-- its failures as 'warn', so guarding 'fail' alone would have missed the real transition. A run that
+-- goes green by turning a judged check into "nothing to check" has removed evidence, not fixed
+-- anything.
+-- The FK target for remediation_loop below, established HERE and not with the other idempotent
+-- alters at the foot of this file. ORDER IS LOAD-BEARING: on a database where check_result already
+-- exists (i.e. production, since P2), 'create table remediation_loop' fails outright with
+--   ERROR: there is no unique constraint matching given keys for referenced table "check_result"
+-- because Postgres requires a UNIQUE on the referenced tuple at CREATE TABLE time. A fresh database
+-- gets it from check_result's own inline constraint; an existing one needs it added first, and
+-- "first" means before line the create below, not at the end of the script. Nothing in the
+-- sandbox can catch this - there is no Postgres here - so it is asserted structurally (H31).
+do $$ begin
+  alter table check_result add constraint check_result_artifact_run_key_state_key unique (artifact_id, run_id, check_key, state);
+exception when duplicate_table or duplicate_object then null; end $$;
+
+create table if not exists remediation_loop (
+  id             uuid primary key default uuid_generate_v4(),
+  packet_id      uuid not null references packet(id) on delete cascade,
+  artifact_id    uuid not null references artifact(id) on delete cascade,
+  n              int not null check (n >= 0),
+  run_id         uuid not null,
+  ran_at         timestamptz not null default now(),
+  -- Requirement ids, matching artifact_score.uncovered_requirement_ids' precedent. 'closed' is what
+  -- this pass may TAKE CREDIT FOR; 'phantom_closes' is what flipped to covered with no edit of this
+  -- pass carrying the evidence - recorded, never credited (P3-11).
+  closed         uuid[] not null default '{}',
+  phantom_closes uuid[] not null default '{}',
+  remaining      uuid[] not null default '{}',
+  -- The merge fields this pass genuinely rewrote (after_text <> before_text). A close is only
+  -- creditable when this is non-empty, so the two travel together.
+  edited_fields  text[] not null default '{}',
+  scope_fields   text[] not null default '{}',
+  note           text,
+  halted         boolean not null default false,
+  -- EVERY member of remediation.ts's HaltReason union, and the test that keeps them equal is
+  -- H40. They drifted once and the failure was the worst shape available: 'unattributed_coverage'
+  -- was added to the union and not here, so at the exact moment the loop CORRECTLY refused to claim
+  -- an unattributed convergence, the insert recording that refusal violated this CHECK - the packet
+  -- already mutated, no ledger row at all, the phantom escalation never reached, and a 500 to the
+  -- caller. A guard that cannot persist its own refusal is not a guard.
+  halt_reason    text check (halt_reason in ('converged','no_progress','max_passes','cost_ceiling','token_ceiling','time_budget','no_coverage_evidence','nothing_reachable','unattributed_coverage','ungrounded','error')),
+  -- Copied from this run's deterministic evidence_placed check, and FK-verified against it.
+  --
+  -- RETARGETED from must_have_coverage after P8.3 landed C6. That check is computed purely from
+  -- whether the owner's PROFILE evidences a requirement and never reads the generated document, so
+  -- no merge-field rewrite can move it and a loop tied to it could never honestly converge.
+  -- evidence_placed is the document-side half - 'every requirement your profile evidences is
+  -- actually stated in this document' - which is precisely what a rewrite can move.
+  close_check_key text not null default 'evidence_placed' check (close_check_key = 'evidence_placed'),
+  close_state     text not null check (close_state in ('pass','warn','fail','not_applicable')),
+  prev_close_state text check (prev_close_state in ('pass','warn','fail','not_applicable')),
+  -- must_have_coverage, recorded for REPORTING only and deliberately NOT part of any constraint
+  -- below: the loop cannot move it, so binding convergence to it would make convergence unreachable.
+  coverage_state  text check (coverage_state in ('pass','warn','fail','not_applicable')),
+  -- Evidence must survive the loop (P3-38). Recorded per pass so db-query can verify it after merge.
+  req_count      int not null default 0,
+  -- Metering (D8). cost_usd is NULL when any call in the pass ran on an unpriced model - never 0,
+  -- which would read as free and would let the cost ceiling pass on an undercount.
+  prompt_tokens  int not null default 0,
+  completion_tokens int not null default 0,
+  cost_usd       numeric(12,8),
+  unpriced_calls int not null default 0,
+  elapsed_ms     int not null default 0,
+  engine_version int not null default 1,
+  -- Decision 19 / D-10. 'evaluateArtifact' clears override_by/at/reason on EVERY upsert. That is
+  -- deliberate and correct for a MANUAL re-check: an override approves a specific set of findings,
+  -- not the artifact forever. A remediation loop re-checks up to four times automatically, so the
+  -- same clause would silently discard a human's recorded reason four times inside one run.
+  -- The LOOP is the offender, so the loop carries the record: the override standing before this
+  -- pass evaluated is copied here before it is cleared. 'evaluateArtifact' itself is untouched -
+  -- the standing directive is to default to what is already built, and its behaviour is not a
+  -- defect on the path it was written for.
+  cleared_override_by     text,
+  cleared_override_at     timestamptz,
+  cleared_override_reason text,
+  -- P3-18. Open requirements the STANDING PROFILE already evidences, judged with the same predicate
+  -- as the gate. The backlog's own example: the $18M budget and the 60+ team size were in the work
+  -- history and were simply never pulled forward. A pass that fails to close one of these is a
+  -- different and more damning finding than 'the candidate does not have it'.
+  profile_evidence uuid[] not null default '{}',
+  -- P3-24. The Drive file this run superseded. There is no Drive DELETE anywhere in this codebase
+  -- (D-9), so every rebuild already orphans a file; recording the id makes the orphan population
+  -- MEASURABLE instead of merely growing. Deleting them is a separate owner decision (plan 11-18)
+  -- and is deliberately not done here.
+  superseded_doc_url text,
+  unique (artifact_id, n),
+  -- Every CHECK here is NAMED. An anonymous one gets an auto-name like remediation_loop_check4,
+  -- which cannot be dropped and re-added idempotently - and an unreplaceable CHECK is one that keeps
+  -- its ORIGINAL expression forever on any database that already has the table. Measured: after the
+  -- retarget, check4 on an upgraded database still read prev_close_state = 'fail' while a fresh one
+  -- read prev_close_state in ('warn','fail'). Since evidence_placed signals failure as 'warn', the
+  -- guard was blind to the exact transition it exists to catch, on precisely the databases that
+  -- matter. Naming them is what makes the block below possible.
+  constraint remediation_loop_override_audit_check
+    check ((cleared_override_by is null) = (cleared_override_reason is null)),
+  constraint remediation_loop_halt_flag_check check ((halt_reason is null) = (not halted)),
+  -- P3-05.
+  constraint remediation_loop_converged_check
+    check (halt_reason is distinct from 'converged'
+           or (cardinality(remaining) = 0 and close_state = 'pass')),
+  -- P3-11. A credited close requires an edit; a pass that rewrote nothing may credit nothing.
+  constraint remediation_loop_credit_needs_edit_check
+    check (cardinality(closed) = 0 or cardinality(edited_fields) > 0),
+  -- P3-38. evidence_placed reports its failures as 'warn', not 'fail', so the transition to guard
+  -- against is any JUDGED state sliding to not_applicable: that is the evidence disappearing, which
+  -- colours like a pass in any UI that treats "no findings" as fine.
+  constraint remediation_loop_evidence_intact_check
+    check (not (prev_close_state in ('warn','fail') and close_state = 'not_applicable')),
+  foreign key (artifact_id, run_id, close_check_key, close_state)
+    references check_result (artifact_id, run_id, check_key, state) on delete cascade
+);
+create index if not exists remediation_loop_packet_idx on remediation_loop(packet_id, n);
+create index if not exists remediation_loop_artifact_idx on remediation_loop(artifact_id, n);
+
+-- P3.2 - what the loop could not close, stated as an ask rather than a silent gap.
+--
+-- A SEPARATE TABLE ON PURPOSE (decision 15). requirement.coverage='escalated' is already set at
+-- EXTRACTION and means "the quote could not be located in the posting" - decided before any loop
+-- exists. Writing loop-escalations into the same column would make two populations indistinguishable
+-- and the coverage denominator would start counting the wrong thing.
+--
+-- 'detail' must state WHAT WAS SEARCHED and WHY IT COULD NOT BE CLOSED. An escalation that only says
+-- "not covered" asks the user to redo the search the loop already did.
+--
+-- Two resolutions, per the backlog: the user supplies evidence (state -> 'resolved', which reopens
+-- the loop) or accepts the gap (state -> 'accepted', and the score keeps reporting it).
+create table if not exists escalation (
+  id             uuid primary key default uuid_generate_v4(),
+  packet_id      uuid not null references packet(id) on delete cascade,
+  artifact_id    uuid not null references artifact(id) on delete cascade,
+  requirement_id uuid references requirement(id) on delete cascade,
+  ats_term_id    uuid,          -- P1.2 term_library_entry; no FK until a library version is published
+  state          text not null default 'open' check (state in ('open','resolved','accepted')),
+  title          text not null,
+  detail         text not null,
+  ask            text not null,
+  loop           int not null default 0,      -- the pass the loop gave up on
+  halt_reason    text,
+  resolution_note text,
+  resolved_by    text,
+  resolved_at    timestamptz,
+  created_at     timestamptz not null default now(),
+  updated_at     timestamptz not null default now(),
+  -- One open escalation per requirement per artifact: the acceptance says an uncoverable
+  -- nice-to-have produces EXACTLY ONE open escalation, and a loop that re-runs must update it
+  -- rather than stack duplicates.
+  unique (artifact_id, requirement_id),
+  -- A resolution needs an actor and a time, or it is not a resolution.
+  check ((state = 'open') = (resolved_at is null)),
+  check ((resolved_at is null) = (resolved_by is null)),
+  -- P3-35. Every escalation resolves to the exact object it is about, so the count can deep-link
+  -- (R5). A bare title with no target is a dead end for the person being asked to act on it.
+  check (requirement_id is not null or ats_term_id is not null)
+);
+create index if not exists escalation_packet_idx on escalation(packet_id, state);
+create index if not exists escalation_artifact_idx on escalation(artifact_id, state);
+
+-- P8.4 -- the posting-vs-profile comparison, one row per dimension per opportunity.
+--
+-- REGISTERED HERE, not only in an ensure-path (D21 / D1 / H11). The table shipped created solely by
+-- ensureDimensionTable (appDimensions.ts), so it worked at runtime while diag/pg-migrate never
+-- listed it and H11 could not guard it -- a store that exists in production but not in the
+-- migration's completeness report is a gap nothing signals.
+--
+-- THIS DDL AND ensureDimensionTable's MUST STAY IDENTICAL, and a comment saying so is not what
+-- keeps them identical. Every database that ran the ensure-path ALREADY HAS this table, so the
+-- create-table-if-not-exists below is SKIPPED there -- exactly the trap that shipped three times in
+-- one session. A CHECK that differed between the two paths would therefore be enforced on fresh
+-- installs and absent on production, silently and forever. What actually holds them together is
+-- H:dimension-ddl-parity in api/test/dimensionsDb.test.mjs, which builds the table BOTH ways
+-- against a real cluster and diffs every column, constraint and index the database reports.
+--
+-- Deliberately NOT interpolated from a shared constant, though that would make drift impossible:
+-- SCHEMA_SQL is extracted as RAW SOURCE TEXT by three consumers (api/test/schemaParity.test.mjs,
+-- api/test/dimensionsDb.test.mjs, and the local-schema procedure in CLAUDE.md), and a JS
+-- interpolation left unexpanded in that text is invalid SQL. Note also that a backtick anywhere in
+-- this file's SQL would END the template literal -- writing this comment with backticks in it broke
+-- the build once, in this very block. The executed test is the guard; the literal is the contract.
+create table if not exists comparison_dimension (
+  id              uuid primary key default uuid_generate_v4(),
+  opp_id          uuid not null references opportunity(id) on delete cascade,
+  dimension_key   text not null,
+  label           text not null,
+  fit             text not null check (fit in ('strong','moderate','weak','not_applicable')),
+  basis           text not null check (basis in ('fact','evidence','none')),
+  numeric_verdict text check (numeric_verdict in ('satisfied','not_satisfied','unavailable')),
+  shortfall       text check (shortfall in ('nothing_found','falls_short')),
+  posting_seq     int,
+  posting_text    text,
+  posting_quoted  boolean,
+  profile_value   text,
+  profile_source_label text,
+  profile_source  text check (profile_source in ('evidence','fact')),
+  note            text,
+  reason          text,
+  covered         int,
+  total           int,
+  matched_seqs    int[] not null default '{}',
+  set_source      text not null check (set_source in ('owner','seed_family','seed_default')),
+  role_family     text not null,
+  dimension_version int not null,
+  resolved_at     timestamptz not null default now(),
+  unique (opp_id, dimension_key),
+  -- The acceptance sentence, as a constraint: every moderate/weak grade carries the reason.
+  check (fit not in ('moderate','weak') or (note is not null and btrim(note) <> '')),
+  -- Its mirror: a row that measured nothing must say which state it was in.
+  check (fit <> 'not_applicable' or (reason is not null and btrim(reason) <> '')),
+  -- A graded row has a denominator; an ungraded one must not invent one.
+  check (fit = 'not_applicable' or (covered is not null and total is not null and total > 0)),
+  check (fit <> 'not_applicable' or (covered is null and total is null)),
+  -- The posting cell must say whether it is the employer's words or the model's paraphrase.
+  check (posting_text is null or posting_quoted is not null)
+);
+create index if not exists comparison_dimension_opp_idx on comparison_dimension(opp_id);
+
 -- Idempotent multi-tenant column adds (safe on tables that predate them)
+-- artifact_score gained judged_requirement_ids AFTER the table shipped, so the inline column in the
+-- create above reaches a FRESH database only. On every database that already has artifact_score --
+-- which is the one production runs -- "create table if not exists" is skipped and takes the new
+-- column with it. Measured: applying this file to a database carrying main's schema left
+-- artifact_score with uncovered_requirement_ids and no judged_requirement_ids, exit 0, silently.
+-- The ALTER is what actually delivers it. H39/H39b are the general form of this trap.
+alter table artifact_score add column if not exists judged_requirement_ids uuid[] not null default '{}';
+
 alter table persona        add column if not exists owner_email text not null default 'demo@executive-engine.local';
 alter table persona        add column if not exists is_demo boolean not null default false;
 alter table opportunity    add column if not exists owner_email text not null default 'demo@executive-engine.local';
@@ -604,6 +933,158 @@ alter table opportunity    add column if not exists base_score int;
 alter table opportunity    add column if not exists jd_text text;
 alter table opportunity    add column if not exists jd_text_sha256 text;
 alter table opportunity    add column if not exists jd_text_truncated boolean;
+-- P3 idempotent adds (safe on databases created before the remediation loop existed).
+--
+-- F2. 'remediation_loop' was created by an earlier revision of THIS lane with must_have_* columns,
+-- so on any database that ran that revision 'create table if not exists' is a no-op and the rename
+-- below never happens: the migration exits 0, reports clean, and the table still has
+-- must_have_check_key with the FK bound to it. The first INSERT then fails with
+--   ERROR: column "close_state" does not exist
+-- This is H39's own class turned on H39's own table - a statement (here, every INSERT the loop
+-- makes) depending on a column that is present in the CREATE and unreachable on an existing
+-- database. H39c now walks columns that have NO alter at all, which is the case H39b could not see.
+--
+-- Renames rather than add+drop: the old columns hold the same values under the old names, and a
+-- database that ran the earlier revision may already have ledger rows in them.
+do $$
+declare fk text;
+begin
+  if exists (select 1 from information_schema.columns
+              where table_name='remediation_loop' and column_name='must_have_check_key')
+     and not exists (select 1 from information_schema.columns
+              where table_name='remediation_loop' and column_name='close_check_key') then
+    -- The composite FK is auto-named after its columns, so it cannot be dropped by a literal name
+    -- that survives a rename. Find it.
+    select conname into fk from pg_constraint
+     where conrelid = 'remediation_loop'::regclass and contype = 'f'
+       and confrelid = 'check_result'::regclass;
+    if fk is not null then execute format('alter table remediation_loop drop constraint %I', fk); end if;
+    alter table remediation_loop drop constraint if exists remediation_loop_must_have_check_key_check;
+
+    alter table remediation_loop rename column must_have_check_key to close_check_key;
+    alter table remediation_loop rename column must_have_state to close_state;
+    alter table remediation_loop rename column prev_must_have_state to prev_close_state;
+    alter table remediation_loop alter column close_check_key set default 'evidence_placed';
+
+    -- ROWS WRITTEN UNDER THE OLD CRITERION ARE DELETED, NOT REWRITTEN.
+    -- Such a row asserts "converged, because must_have_coverage said pass". Under the retarget that
+    -- assertion is meaningless: that check never read the document. Rewriting close_check_key to
+    -- 'evidence_placed' would restate a claim the engine never made about a criterion it never
+    -- applied - fabricated provenance, which is the one thing this whole lane exists to prevent.
+    -- (It also cannot satisfy the FK below: there is no check_result row at that run for the new
+    -- key.) Deleting is safe here because the loop is re-runnable and no ledger row means the run is
+    -- simply redone from pass 1. remediation_loop has never existed on production - measured
+    -- 2026-08-20, db-query 32390257883: p3_tables_present = 0 - so the only rows this can touch are
+    -- from a local database that ran an earlier revision of this lane.
+    delete from remediation_loop where close_check_key is distinct from 'evidence_placed';
+
+    alter table remediation_loop add constraint remediation_loop_close_check_key_check
+      check (close_check_key = 'evidence_placed');
+    alter table remediation_loop add constraint remediation_loop_close_fkey
+      foreign key (artifact_id, run_id, close_check_key, close_state)
+      references check_result (artifact_id, run_id, check_key, state) on delete cascade;
+  end if;
+end $$;
+alter table remediation_loop add column if not exists coverage_state text;
+alter table remediation_loop add column if not exists profile_evidence uuid[] not null default '{}';
+alter table remediation_loop add column if not exists superseded_doc_url text;
+alter table remediation_loop add column if not exists cleared_override_by text;
+alter table remediation_loop add column if not exists cleared_override_at timestamptz;
+alter table remediation_loop add column if not exists cleared_override_reason text;
+
+-- EVERY MUTABLE CHECK ON remediation_loop IS REPLACED HERE, not just the one that bit us.
+--
+-- F1 and F2 compose, and the composition is the lesson: correcting a CHECK inside
+-- 'create table if not exists' fixes a FRESH database only. On one that already ran an earlier
+-- revision the create is skipped and the old expression survives - while the source-reading guard
+-- passes, because it reads the source. Three separate constraints on this one table were caught
+-- this way, the third only by executing the migration:
+--   halt_reason        kept 10 members, so the loop could not persist its own refusal
+--   close_check_key    stayed bound to must_have_coverage
+--   check4             stayed 'prev = fail', blind to 'warn' - which is how evidence_placed
+--                      reports failure, so the evidence-removal guard was off on exactly the
+--                      databases it protects
+-- Replacing all of them, unconditionally and idempotently, removes the class rather than the
+-- instances. The table is new to this lane and small; there is no reason to be selective.
+do $$ begin
+  -- close_check_key's CHECK is also re-added by the rename block above, but that block is
+  -- CONDITIONAL on the old must_have_* columns existing. A database created by the revision that
+  -- already had close_check_key skips it entirely and would keep whatever expression it was born
+  -- with. Unconditional here, like every other one.
+  alter table remediation_loop drop constraint if exists remediation_loop_close_check_key_check;
+  alter table remediation_loop add constraint remediation_loop_close_check_key_check
+    check (close_check_key = 'evidence_placed');
+
+  alter table remediation_loop drop constraint if exists remediation_loop_halt_reason_check;
+  alter table remediation_loop add constraint remediation_loop_halt_reason_check
+    check (halt_reason in ('converged','no_progress','max_passes','cost_ceiling','token_ceiling',
+                           'time_budget','no_coverage_evidence','nothing_reachable',
+                           'unattributed_coverage','ungrounded','error'));
+
+  alter table remediation_loop drop constraint if exists remediation_loop_halt_flag_check;
+  alter table remediation_loop add constraint remediation_loop_halt_flag_check
+    check ((halt_reason is null) = (not halted));
+
+  alter table remediation_loop drop constraint if exists remediation_loop_converged_check;
+  alter table remediation_loop add constraint remediation_loop_converged_check
+    check (halt_reason is distinct from 'converged'
+           or (cardinality(remaining) = 0 and close_state = 'pass'));
+
+  alter table remediation_loop drop constraint if exists remediation_loop_credit_needs_edit_check;
+  alter table remediation_loop add constraint remediation_loop_credit_needs_edit_check
+    check (cardinality(closed) = 0 or cardinality(edited_fields) > 0);
+
+  alter table remediation_loop drop constraint if exists remediation_loop_evidence_intact_check;
+  alter table remediation_loop add constraint remediation_loop_evidence_intact_check
+    check (not (prev_close_state in ('warn','fail') and close_state = 'not_applicable'));
+
+  alter table remediation_loop drop constraint if exists remediation_loop_override_audit_check;
+  alter table remediation_loop add constraint remediation_loop_override_audit_check
+    check ((cleared_override_by is null) = (cleared_override_reason is null));
+
+  -- The auto-named survivors from the pre-naming revision, dropped so they cannot linger beside
+  -- their named replacements enforcing a stale expression.
+  alter table remediation_loop drop constraint if exists remediation_loop_check2;
+  alter table remediation_loop drop constraint if exists remediation_loop_check3;
+  alter table remediation_loop drop constraint if exists remediation_loop_check4;
+  alter table remediation_loop drop constraint if exists remediation_loop_check5;
+  -- check1 is the anonymous halt-flag CHECK from the pre-naming revision, and the anonymous
+  -- override-audit one sits beside it. Same expressions as their named replacements, so harmless in
+  -- effect - but a duplicate constraint is a second thing to keep in step, and the whole point of
+  -- this block is that an upgraded database ends up enforcing EXACTLY what a fresh one does.
+  alter table remediation_loop drop constraint if exists remediation_loop_check1;
+  alter table remediation_loop drop constraint if exists remediation_loop_check;
+  alter table remediation_loop drop constraint if exists remediation_loop_must_have_state_check;
+  alter table remediation_loop drop constraint if exists remediation_loop_prev_must_have_state_check;
+  -- DROP BEFORE ADD, even for these two. A bare 'add constraint' on a database where the name
+  -- already exists raises duplicate_object, which - with a WHEN handler on the block - aborts every
+  -- REMAINING statement silently. That is exactly what happened: on the path where the table was
+  -- created after the rename, these two already existed, the block died here, and halt_reason was
+  -- never replaced. The migration exited 0 the whole time. An exception handler that hides the rest
+  -- of its block is the absent-evidence-reads-as-success shape, in PL/pgSQL.
+  alter table remediation_loop drop constraint if exists remediation_loop_close_state_check;
+  alter table remediation_loop add constraint remediation_loop_close_state_check
+    check (close_state in ('pass','warn','fail','not_applicable'));
+  alter table remediation_loop drop constraint if exists remediation_loop_prev_close_state_check;
+  alter table remediation_loop add constraint remediation_loop_prev_close_state_check
+    check (prev_close_state in ('pass','warn','fail','not_applicable'));
+  -- coverage_state arrives by ALTER, and an ALTER adding a bare 'text' column carries no CHECK. A
+  -- fresh database got the enum from the CREATE and an upgraded one had none at all - the two
+  -- enforcing different rules, which is the exact condition this block exists to eliminate.
+  alter table remediation_loop drop constraint if exists remediation_loop_coverage_state_check;
+  alter table remediation_loop add constraint remediation_loop_coverage_state_check
+    check (coverage_state in ('pass','warn','fail','not_applicable'));
+-- ONLY undefined_table is swallowed - the legitimate case of running this file before the table
+-- exists. 'duplicate_object' was in this list and it silently ate the rest of the block; every
+-- statement above now drops before it adds, so it cannot arise, and if anything else goes wrong the
+-- migration must FAIL LOUDLY rather than leave half the constraints stale.
+exception when undefined_table then null; end $$;
+alter table requirement     drop column if exists closed_on_loop;
+-- The old 3-column unique is what made pass 2 overwrite pass 1; replace it with the loop-aware one.
+alter table swap_decision   drop constraint if exists swap_decision_packet_id_list_seq_key;
+do $$ begin
+  alter table swap_decision add constraint swap_decision_packet_list_seq_loop_key unique (packet_id, list, seq, loop);
+exception when duplicate_table or duplicate_object then null; end $$;
 alter table packet         add column if not exists must_haves text[];
 alter table packet         add column if not exists jd_grounded boolean;
 alter table packet         add column if not exists jd_analyzed_at timestamptz;
@@ -614,9 +1095,10 @@ create index if not exists opp_owner_idx2 on opportunity(owner_email);
 
 // Tables we expect to exist after migration (used by the runner to report).
 export const EXPECTED_TABLES = [
+  'correction',
   'persona', 'opportunity', 'contact', 'packet', 'artifact', 'outreach_message',
   'interview', 'offer', 'library_entity', 'asset_event', 'usage_metering',
   'term_library', 'term_library_entry', 'term_candidate', 'requirement',
   'skill_candidate', 'swap_decision', 'insertion', 'check_result', 'artifact_gate', 'artifact_score', 'owner_fact', 'review_verdict',
-  'requirement_evidence'
+  'remediation_loop', 'escalation', 'requirement_evidence', 'comparison_dimension'
 ]

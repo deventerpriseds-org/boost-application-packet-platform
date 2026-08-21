@@ -23,6 +23,18 @@ export interface FactDef {
   unit?: 'years' | 'usd' | 'people' | 'percent'
   /** What a posting says when it needs this fact — used to propose the fact when one is missing. */
   asks: RegExp
+  /**
+   * The key of a MORE GENERAL def this one narrows.
+   *
+   * Declared, never inferred. `selectFactDef` reads it to decide which of several matching defs
+   * answers a requirement, so the answer no longer depends on catalogue ORDER — which is what made
+   * `experience.years_leadership` unreachable (D22 / H41): its matcher is a strict subset of
+   * `experience.years_total`'s and the scan returned on the first match.
+   *
+   * A subset relationship that is NOT declared here is a shadow, and H41 fails on it by measurement
+   * rather than by naming the two entries that collided when it was written.
+   */
+  refines?: string
   help: string
 }
 
@@ -33,6 +45,7 @@ export const FACT_CATALOGUE: FactDef[] = [
     help: '511 requirement rows ask for a number of years. Answering once settles all of them.' },
   { key: 'experience.years_leadership', label: 'Years in leadership / management', category: 'experience',
     unit: 'years', asks: /\b\d+\+?\s*(years|yrs)[^.]{0,40}\b(leader|leadership|manage|managing|management)\b/i,
+    refines: 'experience.years_total',
     help: 'Many postings separate total experience from years spent leading.' },
   { key: 'education.highest_degree', label: 'Highest degree (and field)', category: 'education',
     asks: /\b(bachelor|master|mba|phd|doctorate|degree)\b/i,
@@ -75,11 +88,133 @@ export interface OwnerFact {
   confirmed_at: string | null
 }
 
-/** The number a requirement demands, when it states one ("10+ years" -> 10). */
-export function demandedNumber(text: string): number | null {
-  const m = /\b(\d{1,2})\s*\+?\s*(years|yrs)\b/i.exec(String(text || ''))
-  return m ? Number(m[1]) : null
+/**
+ * THE demand parser. One function, one answer, for every unit that has arithmetic.
+ *
+ * D23. Before this, only `years` could be compared: `checkAgainstFacts` gated the arithmetic on
+ * `def.unit === 'years'`, so `scope.largest_team` (people) and `scope.largest_budget` (usd) fell
+ * through to `unknown` and the two of the eight comparison dimensions that are ABOUT numbers could
+ * only ever be graded by token overlap. It is extended here rather than answered again in
+ * `dimensions.ts`, because a second numeric parser is a second answer and the two disagree on the
+ * first posting worded unusually. `H:one-demand-parser` fails the suite if one appears.
+ *
+ * Each unit gets its OWN pattern, and that is the point rather than an implementation detail:
+ *  - `years` keeps `\d{1,2}` exactly as it was. A three-digit year figure is a parse error, not a
+ *    career, and this path is 511 of 7,559 live requirement rows — it does not change.
+ *  - `people` must NOT cap at two digits. The org sizes this dimension exists for are three and
+ *    four figures ("an organization of 450"), and a two-digit cap reads 1,200 as 1 or 12 in
+ *    silence. Thousands separators are accepted because postings write them.
+ *  - `usd` must return DOLLARS, never the bare digits. A comparator that reads "$18M" as 18 is
+ *    comparing eighteen dollars, and it will tell someone running an $18M budget they fall short.
+ *
+ * Anchoring is deliberate. `people` requires a people-noun and `usd` requires a currency marker, so
+ * "10+ years leading teams" cannot be read as ten people, and a bare year count cannot be read as
+ * dollars. A number with no unit attached to it is not a demand this function knows how to grade.
+ */
+export type Quantity = 'years' | 'people' | 'usd' | 'percent'
+
+const MAGNITUDE: Record<string, number> = {
+  k: 1e3, thousand: 1e3, m: 1e6, mm: 1e6, million: 1e6, b: 1e9, bn: 1e9, billion: 1e9,
 }
+
+/** "1,200" -> 1200. Postings write separators; a parser that does not is off by a factor of ten. */
+const digits = (s: string) => Number(String(s).replace(/,/g, ''))
+
+const DEMAND_RE: Partial<Record<Quantity, RegExp>> = {
+  // unchanged from the original demandedNumber, deliberately
+  years: /\b(\d{1,2})\s*\+?\s*(?:years|yrs)\b/i,
+  // "team of 250", "org of 1,200", "60+ engineers", "12 direct reports", "450 people"
+  people: /\b(?:team|org|organi[sz]ation|group|department)\s+of\s+(\d[\d,]*)\b|\b(\d[\d,]*)\s*\+?\s*(?:direct reports|engineers|developers|people|staff|employees|ftes?|headcount)\b/i,
+  // "$18M", "$1.5B", "$750K", "$10 million", "2.4 billion" (with a nearby currency/P&L word)
+  usd: /(?:[$£€]\s?(\d[\d,]*(?:\.\d+)?)\s*(k|mm|m|bn|b|thousand|million|billion)?)|(?:\b(\d[\d,]*(?:\.\d+)?)\s*(k|mm|m|bn|b|thousand|million|billion)\b)/i,
+}
+
+/**
+ * The figure a piece of text states in `unit`, or null when it states none.
+ *
+ * Returns `explicit: false` for a usd figure written as bare digits with no magnitude word. That
+ * distinction is load-bearing rather than decorative — see `factQuantity`.
+ */
+export function parseQuantity(text: string, unit: Quantity = 'years'): { value: number; explicit: boolean } | null {
+  const src = String(text || '')
+  const re = DEMAND_RE[unit]
+  if (!re) return null
+  const m = re.exec(src)
+  if (!m) return null
+  if (unit === 'usd') {
+    const raw = m[1] ?? m[3]
+    const suffix = (m[2] ?? m[4] ?? '').toLowerCase()
+    if (raw == null) return null
+    const mult = MAGNITUDE[suffix] || 1
+    // "$18M" and "$750K" carry their own scale; "$18" and "18" do not.
+    return { value: digits(raw) * mult, explicit: !!suffix }
+  }
+  const raw = m.slice(1).find(x => x != null)
+  if (raw == null) return null
+  return { value: digits(raw), explicit: true }
+}
+
+/**
+ * The number a requirement demands, when it states one ("10+ years" -> 10).
+ *
+ * Kept as the years-defaulted face of `parseQuantity` so every existing caller and every existing
+ * expectation in `ownerFacts.test.mjs` is byte-for-byte unchanged. The years path was not touched.
+ */
+export function demandedNumber(text: string, unit: Quantity = 'years'): number | null {
+  const q = parseQuantity(text, unit)
+  return q ? q.value : null
+}
+
+/**
+ * The OWNER's figure, on the same scale as the demand — and this is where the live defect is.
+ *
+ * MEASURED, not supposed. The same logical fact is written by two paths that disagree by six orders
+ * of magnitude:
+ *   - Settings > Facts (`Settings.jsx:1489`) does `Number(String(value).replace(/[^0-9.]/g, ''))`,
+ *     so an owner who types "$18M" is stored as `value: '$18M', value_num: 18`.
+ *   - `deriveFacts` (below) reads the same "$18M" off the resume and stores `value_num: 18000000`.
+ * `upsertStated` (appFacts.ts) takes the client's `valueNum` verbatim, so both land in `owner_fact`.
+ *
+ * Trusting `value_num` for usd therefore compares 18 against 10000000 and tells an owner who runs an
+ * $18M budget that they fall short — an ACCUSATION produced by a unit bug. So for usd the magnitude
+ * is re-derived from the fact's own TEXT first, and `value_num` is only the fallback. Nothing is
+ * rescaled upward: "$18K" parses to 18000 and still falls short of $10M, which is the mirror case
+ * that must not be "fixed" into a pass.
+ *
+ * `people` and `years` are bare counts on both paths and are NOT rescaled — the correction is
+ * unit-scoped on purpose.
+ */
+export function factQuantity(fact: { value: string | null; value_num: number | null }, unit: Quantity):
+  { value: number; explicit: boolean } | null {
+  if (unit === 'usd') {
+    const fromText = parseQuantity(String(fact.value || ''), 'usd')
+    if (fromText && fromText.explicit) return fromText
+    if (fact.value_num != null) return { value: Number(fact.value_num), explicit: !!fromText?.explicit }
+    return fromText
+  }
+  if (fact.value_num != null) return { value: Number(fact.value_num), explicit: true }
+  const fromText = parseQuantity(String(fact.value || ''), unit)
+  return fromText
+}
+
+/** Money and headcount read back the way they were written, never as raw enum units. */
+export function formatQuantity(n: number, unit: Quantity): string {
+  if (unit === 'usd') {
+    const a = Math.abs(n)
+    if (a >= 1e9) return `$${Number((n / 1e9).toFixed(2))}B`
+    if (a >= 1e6) return `$${Number((n / 1e6).toFixed(2))}M`
+    if (a >= 1e3) return `$${Number((n / 1e3).toFixed(2))}K`
+    return `$${n}`
+  }
+  if (unit === 'people') return `${n} ${n === 1 ? 'person' : 'people'}`
+  if (unit === 'years') return `${n} years`
+  return String(n)
+}
+
+/** The units this system can actually do arithmetic in. The ONE answer to that question. */
+export const COMPARABLE_UNITS: Quantity[] = ['years', 'people', 'usd']
+export const isComparableUnit = (u: string | undefined | null): u is Quantity =>
+  !!u && (COMPARABLE_UNITS as string[]).includes(u)
 
 export type FactVerdict = 'satisfied' | 'not_satisfied' | 'unknown'
 
@@ -97,12 +232,48 @@ export interface FactCheck {
  * same rule as absent evidence being `not_applicable` rather than `pass`. `unknown` is what causes
  * the fact to be PROPOSED, which is how the table grows.
  */
+/**
+ * Which catalogue entry answers this requirement, when several match.
+ *
+ * D22: the scan this replaces walked `FACT_CATALOGUE` in order and returned on the FIRST matching
+ * def, so a def whose matcher is a strict subset of an earlier one could never be selected by ANY
+ * input. `experience.years_leadership` was exactly that, and the consequences were live in both
+ * directions: "10+ years of engineering leadership" was answered by TOTAL years, so 22 total years
+ * satisfied it for someone who had led for three; and an owner who recorded leadership years but
+ * not total years was told "no value recorded" for a fact they had recorded.
+ *
+ * Selection is now by DECLARED refinement, not by position and not by a similarity heuristic. Among
+ * the defs that match, any def that another matching def `refines` is the more general one and is
+ * dropped; what survives is the narrowest question the text asks. Two defs that match for unrelated
+ * reasons — "Bachelor's degree; PMP certification" matches both education entries — have no
+ * refinement link between them, both survive, and catalogue order still breaks the tie, so this
+ * changes nothing about cases that were never a shadow.
+ *
+ * Declared rather than inferred on purpose. Ranking by longest match or by regex complexity guesses
+ * at a relationship the catalogue can simply state, and a guess here decides a GATE: `checks.ts`
+ * routes `facts_settled`, `fact_shortfall` and `facts_needed` through this function.
+ */
+export function selectFactDef(text: string): FactDef | null {
+  const matching = FACT_CATALOGUE.filter(def => def.asks.test(text))
+  if (!matching.length) return null
+  const present = new Set(matching.map(d => d.key))
+  // The keys some OTHER matching def declares itself a refinement of. Only links between defs that
+  // BOTH match count: refining an entry the text never asked about says nothing about this text.
+  const generalised = new Set(
+    matching.map(d => d.refines).filter((k): k is string => !!k && present.has(k)))
+  const survivors = matching.filter(d => !generalised.has(d.key))
+  // `survivors` is non-empty unless the catalogue declares a refinement cycle; falling back to the
+  // first match keeps a malformed catalogue answering rather than returning null, and H41 is what
+  // fails on the cycle.
+  return survivors[0] || matching[0]
+}
+
 export function checkAgainstFacts(requirementText: string, facts: OwnerFact[]): FactCheck | null {
   const text = String(requirementText || '')
   const byKey = new Map(facts.map(f => [f.key, f]))
 
-  for (const def of FACT_CATALOGUE) {
-    if (!def.asks.test(text)) continue
+  const def = selectFactDef(text)
+  if (def) {
     const fact = byKey.get(def.key)
 
     if (!fact || fact.value == null || fact.value === '') {
@@ -112,12 +283,40 @@ export function checkAgainstFacts(requirementText: string, facts: OwnerFact[]): 
       return { fact_key: def.key, verdict: 'unknown', detail: `"${def.label}" is unconfirmed — confirm it to let it settle requirements` }
     }
 
-    // Numeric demands are comparable: "10+ years" against a recorded total.
-    const demanded = def.unit === 'years' ? demandedNumber(text) : null
-    if (demanded !== null && fact.value_num !== null) {
-      return fact.value_num >= demanded
-        ? { fact_key: def.key, verdict: 'satisfied', detail: `${fact.value_num} years recorded, ${demanded} required` }
-        : { fact_key: def.key, verdict: 'not_satisfied', detail: `${fact.value_num} years recorded, ${demanded} required` }
+    // Numeric demands are comparable: "10+ years" against a recorded total, and — since D23 — an
+    // org size against the largest team led and a budget against the largest P&L owned.
+    //
+    // The years branch is preserved EXACTLY, including its wording, because it decides 511 of the
+    // 7,559 live requirement rows and every expectation in ownerFacts.test.mjs asserts that string.
+    if (def.unit === 'years') {
+      const demanded = demandedNumber(text)
+      if (demanded !== null && fact.value_num !== null) {
+        return fact.value_num >= demanded
+          ? { fact_key: def.key, verdict: 'satisfied', detail: `${fact.value_num} years recorded, ${demanded} required` }
+          : { fact_key: def.key, verdict: 'not_satisfied', detail: `${fact.value_num} years recorded, ${demanded} required` }
+      }
+    } else if (isComparableUnit(def.unit)) {
+      const unit = def.unit
+      const demanded = parseQuantity(text, unit)
+      const owned = factQuantity(fact, unit)
+      if (demanded && owned) {
+        // THE SCALE GUARD. `Settings.jsx` stores "$18M" as value_num 18 while `deriveFacts` stores
+        // the same figure as 18000000, so for usd an owner's number whose magnitude is not stated
+        // anywhere is not known to be on the demand's scale. Grading it would either accuse an
+        // owner who runs an $18M budget of falling short of $10M, or — worse, and the reason this
+        // is a refusal rather than a rescale — turn a genuine shortfall into a pass. A comparison
+        // whose units are unknown is `unknown`, which is what PROPOSES the fact for confirmation.
+        if (unit === 'usd' && !owned.explicit && demanded.value >= 1000 && owned.value < 1000) {
+          return {
+            fact_key: def.key, verdict: 'unknown',
+            detail: `"${fact.value}" recorded — it does not say whether that is dollars, thousands or millions, so it was NOT compared to ${formatQuantity(demanded.value, unit)}. Re-enter it with its magnitude (for example "$18M")`,
+          }
+        }
+        const detail = `${formatQuantity(owned.value, unit)} recorded, ${formatQuantity(demanded.value, unit)} required`
+        return owned.value >= demanded.value
+          ? { fact_key: def.key, verdict: 'satisfied', detail }
+          : { fact_key: def.key, verdict: 'not_satisfied', detail }
+      }
     }
 
     // Geography is REFERENCE DATA, not judgement. Whether Maryland is on the East Coast is a fact

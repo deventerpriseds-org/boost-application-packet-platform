@@ -83,7 +83,12 @@ export const CHECK_LABEL = {
   cross_list_redundancy: 'Nothing repeated across lists',
   company_named: 'The company is named',
   company_in_body: 'The right company in the body',
-  must_have_coverage: 'Must-haves this document covers',
+  // C6 moved this number's meaning and the label did not follow. It counts must-haves your PROFILE
+  // can evidence with a quote — not must-haves the document happens to repeat, which is what the
+  // old wording promised and what the pre-C6 numerator actually measured. A label that describes
+  // the previous definition is worse than no label: the number is right and the sentence next to
+  // it is wrong, so a reader trusts the wrong one.
+  must_have_coverage: 'Must-haves your profile can evidence',
   responsibilities_addressed: 'Responsibilities addressed',
   changes_cited: 'Every change cites the posting',
   omission_list: 'Nothing you asked to omit appears',
@@ -232,7 +237,7 @@ export function reviewerAttention(result) {
 export function scoreParts(score) {
   if (!score) return []
   return [
-    { key: 'must', label: 'Must-haves covered', value: score.must_have_coverage, source: score.must_have_source },
+    { key: 'must', label: 'Must-haves evidenced', value: score.must_have_coverage, source: score.must_have_source },
     { key: 'kw', label: 'Keywords present', value: score.keyword_coverage, source: score.keyword_source },
     { key: 'sen', label: 'Seniority fit', value: score.seniority_alignment, source: score.seniority_source },
   ]
@@ -241,3 +246,268 @@ export function scoreParts(score) {
 export const fmtWhen = (v) => { if (!v) return 'never'; const d = new Date(v); return Number.isNaN(d.getTime()) ? String(v) : d.toLocaleString() }
 export const arr = (v) => (Array.isArray(v) ? v : [])
 export const errText = (e) => String((e && e.message) || e)
+
+// ── P8.6 / P8.1 R1: the change log ───────────────────────────────────────────────────────────────
+//
+// R1 says the user reviews a CHANGE LOG, not a to-do list: anything the engine could fix it fixed
+// before the user saw it, and it records the fix. This half is the reading of that record.
+//
+// THE CONTRACT THIS RENDERS, and where it comes from. `correction.ts` on the P8.1 branch is the
+// pure engine: it plans corrections, applies them right-to-left so every stored offset stays
+// relative to the ORIGINAL field text, and reverts by replaying the list minus one row. A row
+// carries `merge_field, phrase, replacement, char_start, char_end, before_sha256, applied_seq,
+// reason, source`. The wire shape this module expects is that row plus the database `id` the revert
+// route needs, and `reverted_by` / `reverted_at` once it has been undone:
+//
+//     GET  /api/app/artifact/{id}/checks-result   ->  { ..., corrections?: Correction[] }
+//     POST /api/app/correction/{correctionId}/revert  ->  { ok: true, text } | { ok: false, reason }
+//
+// `corrections` IS AN ARRAY OR IT IS ABSENT. There is no object form and no envelope, because the
+// four states below have to stay four states, and every extra shape is another way for two of them
+// to collapse into one.
+//
+// THE ONE THING THIS MODULE EXISTS TO GET RIGHT: **absent is not empty.** `checks-result` carries no
+// `corrections` key today - not on main and not on the API branch - so `undefined` is the only value
+// this code will see until that lane merges. Rendering it as "nothing needed correcting" would tell
+// every user, on every artifact, that their text was audited and found clean by an audit that never
+// ran. That is P8.1 AC-14's vacuous green moved from the engine onto the screen, and it is the same
+// rule the rest of this file already keeps: absent evidence is `not_applicable`, never `pass`.
+//
+// The trap is mechanical rather than conceptual. `arr()` two lines above is
+// `Array.isArray(v) ? v : []`, it is what every neighbouring line does to a list, and it maps
+// `undefined`, `null`, `7` and `[]` to the same value. So `corrections` is NEVER passed through it:
+// the kind is decided from the raw property first, and only a value already proven to be an array
+// is read as a list.
+
+/** The revert route this module's undo names. Stated once so the client and the API can be diffed. */
+export const CORRECTION_REVERT_ROUTE = '/app/correction/{correctionId}/revert'
+
+/**
+ * Where a replacement came from, in the user's words.
+ *
+ * An unrecognised value falls through to ITSELF rather than to either known one - the assetLabel
+ * rule. Defaulting an unknown source to `generalized` would tell a reader a number was invented when
+ * the server said it came from their profile, or the exact reverse; both are worse than showing the
+ * raw word and letting them ask.
+ */
+export const CORRECTION_SOURCE = {
+  generalized: 'generalised, because your profile does not evidence a figure of your own',
+  profile_figure: 'taken from your own profile',
+}
+export const correctionSourceText = (s) => CORRECTION_SOURCE[s] || String(s || 'no source was recorded')
+
+/** Finished framing (R1). These are the words the change log is allowed to use about itself. */
+export const CHANGE_LOG_HEADLINE = 'Changes made for you'
+
+/**
+ * The four states a change log can be in, decided from the RAW payload key.
+ *
+ * unchecked  the checks never ran, so no run could have reported corrections
+ * absent     the run reported, and said nothing about corrections at all
+ * malformed  `corrections` arrived as something that is not a list
+ * empty      the run reported a change log and it is empty - nothing needed correcting
+ * ok         rows
+ *
+ * Only `empty` and `ok` may print a number. `absent` printing 0 would be the reviewer's
+ * "0 disagreements" bug: a measurement reported that was never taken.
+ */
+export function correctionsState(result) {
+  if (!result || result.gate == null) {
+    return correctionsShape('unchecked', [],
+      'The checks have not been run for this asset, so there is no change log. That is not the same as nothing needing correction.')
+  }
+  // The raw key, before anything can normalise it away.
+  const raw = result.corrections
+  if (raw === undefined) {
+    return correctionsShape('absent', [],
+      'This run reported no change log, so nothing here says whether any figure was rewritten for you. '
+      + 'That is not the same as nothing needing correction - it means this build of the API did not answer the question.')
+  }
+  if (!Array.isArray(raw)) {
+    const t = raw === null ? 'null' : typeof raw
+    return correctionsShape('malformed', [],
+      'The run sent a change log that is not a list - it arrived as ' + t + ' - so it cannot be read. No number is shown for it.',
+      t)
+  }
+  if (!raw.length) {
+    return correctionsShape('empty', [],
+      'Nothing needed correcting: this run reported a change log and it is empty.')
+  }
+  const rows = orderCorrections(raw)
+  const undone = rows.filter((r) => r.undone).length
+  const corrected = rows.length - undone
+  // correctionsShape counts the rows; nothing here recounts them. `corrected` and `undone` are read
+  // back out of the shape below rather than computed twice, so the sentence and the number cannot
+  // disagree - the same rule the gate keeps with `attention`.
+  const shape = correctionsShape('ok', rows,
+    corrected + ' change(s) already applied to your text' + (undone ? ', and ' + undone + ' you have undone' : '')
+    + '. Change or revert any of them.')
+  shape.anomalies = correctionAnomalies(rows)
+  return shape
+}
+
+function correctionsShape(kind, rows, body, observedType = '') {
+  const measured = kind === 'ok' || kind === 'empty'
+  return {
+    kind,
+    hasNumber: measured,
+    count: measured ? rows.filter((r) => !r.undone).length : null,
+    undone: measured ? rows.filter((r) => r.undone).length : null,
+    listed: measured ? rows.length : null,
+    rows,
+    anomalies: [],
+    headline: CHANGE_LOG_HEADLINE,
+    body,
+    observedType,
+  }
+}
+
+/**
+ * Rows in DOCUMENT order, which is what `applied_seq` means.
+ *
+ * `planCorrections` numbers rows ascending by `char_start` precisely "so a change log reads in
+ * document order for a human", so ordering by `applied_seq` is reading the server's own ordering
+ * rather than inventing one. A row with no usable seq keeps its payload position instead of sorting
+ * to an arbitrary end, and `correctionAnomalies` reports it - a silently reordered log is a log a
+ * reader cannot check against the document in front of them.
+ *
+ * Stable within an equal weight, the bySeverity rule, so two renders of one payload are identical.
+ */
+export function orderCorrections(rows) {
+  return arr(rows)
+    .map((r, i) => ({ r, i }))
+    .sort((a, b) => {
+      const as = Number(a.r && a.r.applied_seq)
+      const bs = Number(b.r && b.r.applied_seq)
+      const ao = Number.isFinite(as) ? as : Number.POSITIVE_INFINITY
+      const bo = Number.isFinite(bs) ? bs : Number.POSITIVE_INFINITY
+      return (ao - bo) || (a.i - b.i)
+    })
+    .map((x, n) => correctionRow(x.r, n))
+}
+
+/** One row, everything the screen needs, nothing the screen has to work out for itself. */
+export function correctionRow(row, index) {
+  const r = row || {}
+  const seq = Number(r.applied_seq)
+  const seqKnown = Number.isFinite(seq)
+  const field = String(r.merge_field || '')
+  const phrase = String(r.phrase == null ? '' : r.phrase)
+  const replacement = String(r.replacement == null ? '' : r.replacement)
+  const undone = !!(r.reverted_at || r.reverted_by)
+  return {
+    key: (r.id ? String(r.id) : 'seq') + ':' + (seqKnown ? seq : 'n' + index),
+    id: typeof r.id === 'string' && r.id ? r.id : null,
+    seq: seqKnown ? seq : null,
+    seqKnown,
+    merge_field: field,
+    fieldName: fieldLabel(field),
+    phrase,
+    replacement,
+    reason: String(r.reason == null ? '' : r.reason),
+    source: String(r.source == null ? '' : r.source),
+    sourceText: correctionSourceText(r.source),
+    undone,
+    undoneBy: r.reverted_by || null,
+    undoneAt: r.reverted_at || null,
+    sentence: correctionSentence({ phrase, replacement, fieldName: fieldLabel(field), undone }),
+  }
+}
+
+/**
+ * The row's own sentence, in finished framing - "Corrected", never "needs fixing".
+ *
+ * An undone row keeps its place in the log and says what it now reads, because SPEC 5 asks the
+ * revert to flip the row to Undone rather than remove it: a revert that deletes the row deletes the
+ * record that the change was ever made, which is the one thing a change log is for.
+ */
+export function correctionSentence({ phrase, replacement, fieldName, undone }) {
+  const where = fieldName ? ' in ' + fieldName : ''
+  return undone
+    ? 'Undone: "' + replacement + '" is back to "' + phrase + '"' + where + '.'
+    : 'Corrected: "' + phrase + '" rewritten as "' + replacement + '"' + where + '.'
+}
+
+/**
+ * Anomalies in the ordering key, REPORTED rather than smoothed over.
+ *
+ * Two rows sharing an `applied_seq`, or a row without one, means the record of what was applied to
+ * one field is not a total order - and the revert replays that order. Saying so beside the log is
+ * how a reader learns the record is imperfect; hiding it is how they learn it after an undo lands
+ * in the wrong place.
+ */
+export function correctionAnomalies(rows) {
+  const list = arr(rows)
+  const out = []
+  const missing = list.filter((r) => !r.seqKnown).length
+  if (missing) out.push(missing + ' change(s) carry no position in the field, so they are listed where the run sent them')
+  const seen = new Map()
+  for (const r of list) if (r.seqKnown) seen.set(r.seq, (seen.get(r.seq) || 0) + 1)
+  const dupes = [...seen.entries()].filter(([, n]) => n > 1).map(([s]) => s)
+  if (dupes.length) out.push('two or more changes share position ' + dupes.join(', ') + ' in their field, so their order here is the order the run sent them')
+  return out
+}
+
+/**
+ * May this row be undone, and if not, WHY not.
+ *
+ * NO DEAD UI. The revert route names a correction by its database id, so a row that carries no id
+ * cannot be the subject of a real request - and a button that cannot make a request is a button that
+ * teaches the reader the trail is broken. The control is not rendered in that case and this sentence
+ * is rendered instead. When the API lane ships rows with ids the control appears on real data, with
+ * no change here.
+ */
+export function undoAvailability(row) {
+  if (!row) return { can: false, reason: 'there is no change to undo' }
+  if (row.undone) {
+    return { can: false, reason: 'this change was already undone' + (row.undoneBy ? ' by ' + row.undoneBy : '') }
+  }
+  if (!row.id) {
+    return { can: false,
+      reason: 'this change log was sent without an identifier for this row, so there is nothing for an undo to name - '
+        + 'the build of the API that sent it cannot revert a correction yet' }
+  }
+  return { can: true, reason: '' }
+}
+
+/**
+ * The outcome of an undo, decided by `ok` and NOTHING else.
+ *
+ * `revertOne` answers `{ok:true, text}` or `{ok:false, reason}`, and a correction can legitimately
+ * revert a field back to the empty string - so branching on `res.text` reports a phantom refusal,
+ * with no reason attached, for a revert that actually succeeded.
+ *
+ * A REFUSAL IS A REAL STATE, not an error to swallow. `revertOne` declines when the recovered
+ * original does not hash to `before_sha256`, which means somebody edited that field after the
+ * correction was applied and the original can no longer be restored safely. That is the server
+ * telling the user something true about their own document, and it is rendered in the server's own
+ * words beside the row it concerns.
+ */
+export function revertOutcome(res) {
+  if (!res || typeof res !== 'object') {
+    return { ok: false, reason: 'the server sent no answer to the undo, so nothing about this change has been established' }
+  }
+  if (res.ok === true) return { ok: true, text: typeof res.text === 'string' ? res.text : null, reason: '' }
+  const stated = [res.reason, res.error].find((v) => typeof v === 'string' && v.trim())
+  return { ok: false, reason: stated ? String(stated).trim() : 'the server refused the undo without stating a reason' }
+}
+
+/**
+ * "Suggest something different", scoped to ONE merge field (R6, SPEC 4.7).
+ *
+ * It EXTENDS the ai-edit path the resume editor already uses - POST /app/artifact/{id}/ai-edit with
+ * a `section` - rather than standing up a second way to ask for a change. The caveat is not
+ * decoration: an ai-edit rewrites the whole field, so the recovered original stops hashing to
+ * `before_sha256` and every undo on that field will refuse afterwards. The user is told that before
+ * they send, not after they try to undo.
+ */
+export function suggestScope(row) {
+  const name = (row && row.fieldName) || 'this field'
+  return {
+    label: 'ASK FOR A CHANGE · ' + String(name).toUpperCase(),
+    scope: 'Scoped to this field only.',
+    caveat: 'Rewriting this field means the changes already applied to it can no longer be undone - '
+      + 'an undo needs the field to be exactly as the run left it.',
+    placeholder: 'What should this say instead?',
+  }
+}

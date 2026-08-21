@@ -319,7 +319,7 @@ function RolesGrid() {
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 12 }}>
         {roles.map((r) => (
           <div key={r.key} className="px-box" onClick={() => go(`/library/roles/${encodeURIComponent(r.key)}`)}
-            style={{ padding: 16, cursor: 'pointer', display: 'flex', flexDirection: 'column', gap: 8, borderLeft: r.favorites > 0 ? '3px solid #c08a1e' : '3px solid transparent' }}>
+            style={{ padding: 16, cursor: 'pointer', display: 'flex', flexDirection: 'column', gap: 8, borderLeft: r.favorites > 0 ? '3px solid var(--gold)' : '3px solid transparent' }}>
             <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
               <div style={{ fontSize: 15, fontWeight: 700, flex: 1 }}>{roleLabel(r.group, r.role)}</div>
               <span className="px-chip" style={{ fontSize: 10.5 }}>{GROUP_LABEL[r.group] || r.group}</span>
@@ -425,7 +425,7 @@ function RoleDetail({ roleKey }) {
           <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
             {opps.slice(0, 60).map((o) => (
               <div key={o.id} onClick={() => go(`/opp/${o.id}`)} style={{ display: 'flex', alignItems: 'baseline', gap: 10, fontSize: 13, cursor: 'pointer', padding: '4px 0', borderTop: '1px solid var(--proto-rule-soft)' }}>
-                {o.isFavorite && <span style={{ color: '#c08a1e' }}>★</span>}
+                {o.isFavorite && <span style={{ color: 'var(--gold)' }}>★</span>}
                 <span style={{ fontWeight: 600, minWidth: 160 }}>{o.company}</span>
                 <span className="px-small" style={{ flex: 1 }}>{o.role}</span>
                 {o.atsScore != null && <span className="px-small" style={{ color: 'var(--proto-ink3)' }}>ATS {o.atsScore}</span>}

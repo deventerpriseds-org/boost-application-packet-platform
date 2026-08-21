@@ -1467,3 +1467,257 @@ Coverage is no longer "did the generated document repeat enough of the requireme
 H32 came from the independent verifier (`docs/qc-evidence/VERIFY-P8.3.md`), as did the qcRail fix.
 (Renumbered from H27-H30 on merge: `main` had already taken H26 and H27, and H26 asserts one-ID-one-case.)
 316/316 api tests, app builds clean.
+
+
+## P3 — remediation loop (2026-08-20, PR #14, NOT landed, NOT live)
+
+**Feature status:** built on `claude/qc-p3-remediation`; 313 sandbox assertions green; independent
+cold ACs (`claude/qc-p3-ac`, P3-01..P3-46) and an independent verifier both run. **Nothing is
+confirmed live** — the sandbox has no Postgres, no Drive and no Function.
+
+**Shape to know before touching it.** Pure logic in `remediation.ts` (no pg, no network, no clock);
+DB + model + wall clock in `appRemediation.ts`. Two new tables: `remediation_loop` (one row per
+artifact per pass) and `escalation`. The loop reads its denominator from the deterministic engine's
+`must_have_coverage` OFFENDERS, never from `requirement` rows directly — the engine has already
+removed eligibility clauses (`template_reach`) and fact-settled rows, and a loop reading requirements
+raw would burn every pass chasing "must reside on the East Coast".
+
+**`converged` is unforgeable in the SCHEMA, not in the writer** — a CHECK plus a composite FK into
+`check_result (artifact_id, run_id, check_key, state)`, so the coverage state on a loop row can only
+be copied from a check the engine really recorded for that exact run.
+
+**Hardening — the six that became H34-H39**, all in `api/test/hardening.test.mjs`:
+swap history deleted packet-wide on every build; generation welded to rendering (16 Drive copies per
+packet, and there is NO Drive DELETE anywhere in this repo); `insertion.loop` counting renders because
+the writer derived it; `packet.round` read by two consumers and written by none; the loop growing a
+second definition of "covered"; and **the composite FK whose UNIQUE target was added at the FOOT of
+`SCHEMA_SQL` — which aborts the whole migration on any database where `check_result` already exists,
+i.e. production.** Fresh DB fine. Nothing in the sandbox executes the schema, so no test here could
+have caught it by running.
+
+**HARDENING LESSON (the important one): a guard you did not watch fail is not a guard.** H31's first
+version was INERT — it passed with the defect deliberately reinstated, because it accepted the
+*inline* UNIQUE as proof. Every `create table` here is `create table if not exists`, so on an existing
+database the create is skipped and the inline constraint with it; only the idempotent `alter table ...
+add constraint` form reaches production. Reverting the fix is what exposed it. Do this for every new
+guard, every time.
+
+**Second lesson: the backtick trap, twice in one session.** A backtick inside a `--` SQL comment
+inside `SCHEMA_SQL`'s template literal terminates the string. `tsc` catches it precisely both times,
+which is exactly why CLAUDE.md forbids adding a regex linter for the same class — the build is the
+guard. Sweep comments of backticks, then BUILD.
+
+**Tooling note:** this lane's harness exposed no `Agent`/`Task` tool, so the org gate's independent
+AC and verifier agents were spawned as separate CCR sessions (`create_session`) that pushed their
+output to branches. It works and is auditable; budget for the round trip.
+
+
+## P3 verification round (2026-08-20) — what it changed about how to verify
+
+**THE SANDBOX HAS POSTGRESQL 16.13.** `CLAUDE.md`'s "you cannot reach the live Postgres" is about the
+Azure database and is true; it does NOT mean there is no Postgres locally. `initdb` refuses to run as
+root — `su postgres -c "initdb -D /tmp/pgd -U postgres -A trust"` then `pg_ctl ... -k /tmp/pgsock`.
+`pgvector` is absent, so stub `create extension vector` and `vector(1536)` to run `SCHEMA_SQL`.
+
+**A schema change is not verified until it is EXECUTED against a POPULATED database that already has
+the previous schema.** Fresh-database success proves almost nothing: every `create table if not
+exists` is skipped on the database you actually care about, taking its inline constraints with it.
+Two migration-killing defects in one file were found this way and neither was visible by reading —
+a composite FK whose UNIQUE target was created later, and an index naming a column added later.
+H39/H39b encode the general rule.
+
+**Three of my own guards were INERT** — they passed with their defect deliberately reinstated. Causes
+worth remembering: (a) a constraint appears TWICE in `SCHEMA_SQL`, inline and in the idempotent
+ALTER, so a whole-file substring search cannot tell them apart; (b) `[\s\S]*?` spans run past the
+end of their table into the next one. Assert on a bounded `createTable()` slice, never on the file.
+
+**A source grep tests spelling, not behaviour.** A guard matching `COVERAGE_THRESHOLD =` was evaded
+by renaming the variable. Where the behaviour can be exercised, pin the BEHAVIOUR — compare the two
+functions' verdicts on inputs measured to make them disagree.
+
+**Refusing the credit is not refusing the claim.** The loop's `closed[]` column was correctly
+guarded while the summary sentence still said "Converged" on a close it did not make. When a rule is
+about honesty, check the words the user reads, not only the row that was written.
+
+**A mutation that did not apply proves nothing.** One revert-proof used a `sed` that silently failed
+to match; the resulting "pass" was recorded as no evidence and redone with an asserting mutation.
+
+
+## P3 retarget verification (2026-08-20) — the schema lessons worth keeping
+
+**A CHECK inside `create table if not exists` is unreachable on any database that already has the
+table.** Correcting it in the CREATE fixes a FRESH database only, and a source-reading guard passes
+the whole time because it reads the source. This bit three separate constraints on one table:
+`halt_reason` (kept 10 members), `close_check_key` (stayed bound to the old check), and an anonymous
+`check4` (kept `= 'fail'` where the new form was `in ('warn','fail')`). Only executing the migration
+found any of them.
+
+**Name every CHECK.** An anonymous one gets `<table>_checkN` and can never be dropped by a stable
+name, so it can never be replaced — it enforces its original expression forever.
+
+**Drop before add, always, and swallow only `undefined_table`.** A bare `add constraint` on a name
+that already exists raises `duplicate_object`, and with a `WHEN` handler on the do-block that aborts
+every REMAINING statement silently while the migration still exits 0.
+
+**The invariant to check: a fresh database and an upgraded one must enforce identical rules.**
+`diff` the `pg_constraint` definitions between the two. Run every upgrade path that exists, not just
+one — a defect showed up on `main→e5e→HEAD` and on no other path.
+
+**A TS union persisted into a CHECK must be set-equal to it, both directions** (H40). Ours drifted by
+one member and the failure landed at the worst possible moment: the loop correctly refused a false
+claim and then could not record the refusal, leaving a mutated packet with no ledger row.
+
+**A guard written to a lesson can still be inert.** The P7-6 guards were written immediately after
+the "grep tests spelling, not behaviour" lesson and were evaded the same way: forcing the values
+empty passed, renaming a variable failed. If the behaviour can be exercised, lift it into a pure
+module and call it.
+
+## P8.4 — posting-vs-profile comparison, graded (`claude/qc-p8-4-dimensions`)
+
+**What the JD step now answers.** SPEC 4.2's two-sided comparison, above the extraction card:
+`Dimension · The posting asks for · Your profile evidences · Fit`, one row per configured dimension,
+every moderate/weak row carrying the reason it is not strong.
+
+- `dimensions.ts` (pure, model-free) — the eight seeded axes, their matchers, and `buildComparison`.
+  Extends rather than duplicates: the posting side is the requirement spine, the profile side is
+  P8.3's `requirement_evidence` row judged by the SAME rule `requirementsGet` uses, the numeric side
+  reuses `ownerFacts.demandedNumber` and its confirmation rule, and the judgeability floor is
+  imported from `evidence.ts`.
+- `comparison_dimension` table via `ensureDimensionTable` (appDimensions.ts). The acceptance
+  sentence is a **DB CHECK**, not an `if`: `fit not in ('moderate','weak') or note is not null`.
+  Three more in the same shape (a `not_applicable` row must say why; a graded row must have a
+  denominator; an ungraded one may not invent one). **NOT in `SCHEMA_SQL`/`EXPECTED_TABLES`** — see
+  DEFERRED D21.
+- `GET/POST /api/app/dimension-prefs` — the set per role family, merged per family, on
+  `owner_search_prefs.cmp_dimensions`. Role family comes from `roleTaxonomy.resolveTitle`.
+- Served by `requirementsGet` (the ONE endpoint the JD step reads) and rebuilt by `evidenceResolve`
+  and `requirementsBackfill` in the same call that rebuilds evidence.
+
+**Three prototype defects deliberately not ported** (`docs/qc-evidence/qc/data.js`): `fit(0,0)`
+returning `'strong'`; `FIT_LABEL.weak` = `'No evidence'` printed over a measured shortfall; and a
+grade derived from a number nobody compared.
+
+**Two live defects found and NOT fixed here** (out of lane, gate blast radius — D22, D23):
+`experience.years_leadership` is structurally unreachable in `checkAgainstFacts`, and `people`/`usd`
+have no numeric comparator. `H34` pins the shadow set; `H35` pins the set of per-owner settings
+columns production reads and nothing writes (all ten `chk_*`).
+
+**H34, H35** in `api/test/hardening.test.mjs`, both proved by reverting. 372 api + 172 app tests.
+Store proven against a POPULATED database with `origin/main`'s schema already applied — a fresh
+database skips every `create table if not exists` and proves nothing.
+
+**NOT verified live.** Nothing has run against the Function App, the real database or the deployed
+SPA (D25).
+
+## QC live defects — D22 / D16 (`claude/qc-live-defects`, not landed)
+
+**Fact selection is by DECLARED refinement, not catalogue order.** `FactDef.refines` +
+`selectFactDef` (ownerFacts.ts). `experience.years_leadership` refines `experience.years_total`; a
+matching def that another matching def refines is dropped. Before this, the first-match scan made
+`years_leadership` unreachable for every input: a 10-year LEADERSHIP requirement was answered by
+TOTAL years (22 total "satisfied" it for someone who had led three), and a recorded leadership year
+count was invisible. `coverable` membership is unchanged by the fix — only which fact the verdict is
+about, and the `facts_settled` / `fact_shortfall` / `facts_needed` rows that report it.
+Guards: `H41` (undeclared strict-subset relations, measured over a corpus, + the behavioural half),
+`H41b`, `H43` (the same defect at the GATE, through `runChecks`).
+
+**Which rows the engine judged is READ, never re-derived.** `judgedMustHaveIds` (artifactScore.ts)
+answers "which must-haves did the coverage check reach a verdict on" from `must_have_source`'s
+`<covered>/<judged>` denominator and `uncovered_requirement_ids`. `appReviewer` uses it for the
+reviewer-agreement comparison; it used to compare against EVERY must-have while `checks.ts` judges
+only `coverable`, so rows nobody judged were recorded as agreeing with the reviewer.
+**Still open (DEFERRED D16):** `artifact_score` has no `judged_requirement_ids` column, so the
+helper falls back to a conservative subset. `judgedMustHaveIds` already prefers that column when the
+row carries it — adding it in `schema.ts` and filling it in `appChecks.evaluateArtifact` completes
+the fix with no change to appReviewer.
+Guards: `H44`, `H44b` (the `mustHaveSource`/`parseMustHaveSource` round trip), and
+`api/test/appReviewer.test.mjs`, which exercises `runReview` against a fake pg client — H44 alone
+does NOT catch reverting the call site.
+
+**A structural guard must be scoped to the function it means.** `H28`'s module-wide grep for
+`kind === 'must_have'` in `artifactScore.ts` accused a new, correct function. It now slices
+`computeArtifactScore`'s body (`functionBody()` in hardening.test.mjs). A guard that fires on
+correct code is one people switch off.
+
+**NOT verified live**, and no independent AC subagent was spawned — no agent-spawning tool is
+exposed in that session type. Recorded as `not_applicable`, not as done.
+
+## The ledger is machine-checked now (`api/test/deferredLedger.test.mjs`)
+
+`.claude/DEFERRED.md` exists to catch "a claim about state that nothing re-checks". It had become
+that claim: status was prose only (`CLOSED.` / `DONE.` / `FIXED` / `DONE, proven live.` — nothing
+could tell open from closed), four ids named two defects each, and the `a9f23a3` merge duplicated
+`## Contrast` and D26 verbatim while orphaning D35 under a headerless table.
+
+Three causes of its staleness, all measured rather than guessed:
+1. **Updating it is a step separate from the fix.** The contrast commit was scoped `-- app/`, which
+   excluded `.claude/DEFERRED.md`. The rewind guard reported ZERO drift — this was scoping, not a
+   container reclaim.
+2. **Parallel lanes fix things without touching it.**
+3. **Rows carry claims nothing re-checks.** Three were false when written or fixed later.
+
+The remedy is the one that retired the H-counter: `OPEN`/`CLOSED`/`WONTDO` as a TOKEN, `D1`-`D37`
+frozen with slugs for everything new, and **every open row carries a `check:` the suite RUNS** —
+`grep` (defect still present), `absent` (thing still missing), or `manual <vehicle>` for what this
+sandbox cannot settle. A row whose defect no longer reproduces FAILS, in both directions: a closed
+row's `grep` means the fix must still be there, so a regression reopens it.
+
+**Re-key by CITATION, not by commit date.** The first migration ordered the D21/D22 collisions by
+which commit came first and picked the wrong side of both. Ground truth is what points at the id:
+`appDimensions.ts:14`, `schema.ts:854`, `dimensionsDb.test.mjs`, `hardening.test.mjs:277` all mean
+the P8.4 schema row by `D21`; `ownerFacts.ts:31,238`, `dimensions.ts:311`, `checks.test.mjs:250`,
+`hardening.test.mjs:1874,2282` all mean `years_leadership` by `D22`. `D:ledger-citation-resolves`
+now fails on any id cited from source that resolves to no row.
+
+**Two cry-wolf near-misses, both caught before landing.** A citation scan flagged `D97706` — the
+amber hex in `theme.css`; bounding the id to two digits and refusing a hex-ish left neighbour fixes
+it. A row-census regex counted the format doc's `| Directive |` header as a row. Both are the shape
+this repo has already deleted a linter for.
+
+**A check is never pinned to a line number.** `D20` cited `appFacts.ts:232`; the construct now lives
+at `:239` and the claim never changed. `D:ledger-check-names-a-construct` bans the coordinate.
+
+All 13 assertion functions are proven by reinstating their own defect through the SAME parser CI
+runs (`D:ledger-guard-not-vacuous`), and the proof prints on every run.
+
+**NOT verified live** — nothing here touches production; it is a test-suite and doc change. 571 api
+tests pass (556 on `main`; +15). 14 of 42 rows are reported `not_applicable`, never `pass`.
+
+### The independent verifier found the guard's own rot vector — three checks that could never go false
+
+It confirmed all eight claims (571 tests, 13/13 assertions firing on its OWN fixtures, both staleness
+directions from real source edits, the re-key correct against every citation, no row body dropped)
+and then found what self-verification would not have:
+
+**Three of the first four checks written could never go false**, two proven by execution — reinstate
+the exact regression the row names and the suite stays green:
+- `D2` grepped `generalize`, which survives the import, the `'generalized'` type literal and a
+  comment after the last CALLER is gone. Now `= generalize\(`. Reinstated: identifier still present
+  4 times, suite RED.
+- `D10` grepped `H26`, which survives in comments after the case itself is deleted. Now
+  `test\('H26:`. Reinstated: `H26` still present twice, suite RED. `H26` strips comments before
+  scanning for this exact reason; the check had done the opposite.
+- `D14`'s defect is what `covered_kw` MEANS — semantic, so no source grep can settle it. Now
+  `manual`.
+**A check whose pattern cannot go false is not a check.** An empty pattern is the degenerate case:
+`/(?:)/` matches every file, passes forever, and was being COUNTED as machine-checked — the vacuous
+gate class, inside the vacuity guard. Rejected now.
+
+**The census omitted 16 rows.** 12 machine + 14 manual = 26 of 42; the other 16 were closed by prose
+with no check, invisible in a green run. All three buckets print, and the accounting must be
+complete.
+
+**Two cry-wolf defects of my own.** The line-coordinate ban ran on `manual` reasons too, so a clock
+time (`02:03`) or a run id read as a line number — scoped to `grep`/`absent` now. And `swap()`
+asserted its ANCHOR existed but never that the replacement APPLIED, so a legal ledger edit made a
+no-op fixture accuse the guard of being inert — the repo's own "verify that an edit applied" rule,
+broken by the helper that enforces that class. Adding the assertion immediately caught a real no-op
+placeholder fixture I had left in.
+
+Also fixed: a `|` in a check pattern split the row and reported "6 columns, expected 5" (escape it
+`\|`); `check: owner` was an undocumented fourth kind that bypassed vehicle validation (one spelling,
+`manual owner`); the ledger itself was not in the citation-scan roots, the one place a re-key is
+most likely to strand a pointer; an invalid regex threw naming no row; and `D20`'s prose still cited
+the `appFacts.ts:232` coordinate that had already rotted to `:239`.
+
+572 api tests pass. **NOT verified live** — nothing here deploys.

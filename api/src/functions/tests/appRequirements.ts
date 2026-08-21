@@ -7,8 +7,12 @@ import { app, HttpRequest, HttpResponseInit, InvocationContext } from '@azure/fu
 import { resolveOwner, requireWrite } from './appSession'
 import { getPgClient } from './pgClient'
 import { buildRequirements } from './requirements'
-import { resolveAll, ProfileRecord, ResolveOptions, NO_EVIDENCE_NOTE, RESOLVER_VERSION } from './evidence'
-import { sourceText } from './appFacts'
+import {
+  resolveAll, ProfileRecord, ResolveOptions, NO_EVIDENCE_NOTE, RESOLVER_VERSION,
+  verifyEvidence, tallyHealth, EvidenceHealth, EvidenceVerdict, EvidenceState,
+} from './evidence'
+import { sourceText, loadFacts } from './appFacts'
+import { writeComparison, comparisonPayload } from './appDimensions'
 
 const HEADERS = { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': '*', 'Access-Control-Allow-Methods': 'GET,POST,OPTIONS' }
 
@@ -214,6 +218,138 @@ export async function loadRequirementsWithEvidence(client: any, oppId: string): 
       where r.opp_id=$1 order by r.seq`, [oppId])).rows
 }
 
+/**
+ * Re-validate the evidence on joined requirement rows against the profile as it stands NOW (D19).
+ *
+ * `loadRequirementsWithEvidence` returns what the DATABASE says; this returns what is still TRUE.
+ * They are deliberately two steps: the join is the one place the query lives, and this is the one
+ * place a stored excerpt becomes — or stops being — something a surface may print as a quote.
+ *
+ * REDACTION, NOT ANNOTATION. Every `evidence_*` column of a row that is not `verified` is nulled,
+ * so a consumer that only knows the old shape (`r.evidence_quote == null` means unevidenced — which
+ * is what `appDimensions.shapeRequirement` and `appChecks` both read) cannot render a broken excerpt
+ * as proof by not having been updated. The state that was lost by nulling is republished on
+ * `evidence_state` / `evidence_note`, which is what keeps "stale" distinguishable from "none".
+ *
+ * The redaction is BY CONSTRUCTION, not by a hand-written list of columns: it nulls every key on the
+ * row whose name begins with `evidence_`, so a column added to the join later is redacted the day it
+ * is added rather than the day someone remembers to add it here. A hand-list is exactly the shape
+ * that goes stale in silence — and a leaked column here is a fragment of a withdrawn excerpt, which
+ * is the thing this function exists to prevent.
+ *
+ * `records` is `null` when the profile could not be read; see `verifyEvidence`. It must be the
+ * `profileRecords()` output, because that is what the stored offsets and digest were measured on.
+ */
+export const EVIDENCE_COL_PREFIX = 'evidence_'
+
+export function verifyRequirementRows(rows: any[], records: ProfileRecord[] | null): {
+  rows: any[]; health: EvidenceHealth; verdicts: EvidenceVerdict[]
+} {
+  const verdicts: EvidenceVerdict[] = []
+  const out = (rows || []).map((r: any) => {
+    const v = verifyEvidence(r.evidence_quote == null ? null : {
+      quote: r.evidence_quote,
+      source_key: r.evidence_source_key,
+      char_start: r.evidence_char_start,
+      char_end: r.evidence_char_end,
+      record_sha256: r.evidence_record_sha256,
+    }, records)
+    verdicts.push(v)
+
+    const shaped: any = { ...r }
+    if (!v.proof) {
+      for (const k of Object.keys(shaped)) {
+        if (k.startsWith(EVIDENCE_COL_PREFIX)) shaped[k] = null
+      }
+    }
+    // The verdict is written AFTER the redaction, so these four are never nulled by it.
+    shaped.evidence_state = v.state as EvidenceState
+    shaped.evidence_note = v.note
+    shaped.evidence_record_changed = v.recordChanged
+    shaped.evidence_quote_moved = v.quoteMoved
+    return shaped
+  })
+  return { rows: out, health: tallyHealth(verdicts, records != null), verdicts }
+}
+
+/**
+ * Rebuild one opportunity's comparison from the rows that are in the database RIGHT NOW.
+ *
+ * The ONE place the comparison's inputs are assembled, so the requirement spine, the evidence and
+ * the facts that feed a grade are always the same rows the rest of this file serves. `stale` is the
+ * same derivation `requirementsGet` publishes: offsets measured against a different posting body.
+ *
+ * Takes the profile RECORDS rather than a `profileReadable` boolean, because it needs both facts and
+ * they must not be able to disagree: `profileReadable` IS `records != null`, and the grade is built
+ * only from evidence those same records still support. Both callers write the evidence from these
+ * records moments earlier, so the re-validation is a no-op there by construction — it is here so
+ * that a future caller that has NOT just re-resolved cannot grade a comparison on a stale excerpt.
+ */
+export async function rebuildComparison(client: any, oppId: string, owner: string, records: ProfileRecord[] | null) {
+  const opp = (await client.query(`select id, role, owner_email, jd_text_sha256 from opportunity where id=$1`, [oppId])).rows[0]
+  if (!opp) return null
+  const joined = await loadRequirementsWithEvidence(client, oppId)
+  const { rows, health } = verifyRequirementRows(joined, records)
+  const stale = rows.some((r: any) => r.jd_text_sha256 !== opp.jd_text_sha256)
+  const facts = await loadFacts(client, owner)
+  const out = await writeComparison(client, { id: opp.id, role: opp.role, owner_email: owner },
+    rows, records != null, facts, stale)
+  return {
+    rows: out.rows, graded: out.graded, family: out.set.family, setSource: out.set.source,
+    warning: out.set.warning || null, evidenceHealth: health,
+  }
+}
+
+/**
+ * The requirement spine as the JD step reads it — the ONE shaping of stored rows into served rows.
+ *
+ * Pure, and exported, so the D19 decision is exercisable without a Function App: every state a stored
+ * excerpt can be in is reachable by handing this the same joined rows with a different profile.
+ *
+ * WHAT `evidenced` MEANS HERE, and it is narrower than it was: a row is evidenced when its excerpt is
+ * STILL the named profile record's own bytes at the offsets stored — not merely when a row exists.
+ * Before D19 the two were the same statement; after an owner edits their profile they are not, and
+ * the old reading served the excerpt at the OLD offsets as a verbatim quote of the NEW record.
+ *
+ * `unevidenced` keeps its arithmetic (`total - evidenced`), so nothing that consumes it starts
+ * disagreeing with `total`. It is now a SUPERSET of "no evidence found": `evidenceHealth` is where a
+ * caller reads WHY each row is not evidenced, and `evidenceNote` is what a reader is shown.
+ */
+export function shapeRequirementsForApi(joined: any[], records: ProfileRecord[] | null): {
+  requirements: any[]; evidenced: number; unevidenced: number; evidenceHealth: EvidenceHealth
+} {
+  const { rows, health } = verifyRequirementRows(joined, records)
+  const requirements = rows.map((r: any) => ({
+    ...r,
+    // Derived from the excerpt that SURVIVED re-validation, never trusted as a stored flag.
+    evidenced: r.evidence_quote != null,
+    evidence: r.evidence_quote == null ? null : {
+      quote: r.evidence_quote,
+      sourceKind: r.evidence_source_kind,
+      sourceLabel: r.evidence_source_label,
+      sourceKey: r.evidence_source_key,
+      charStart: r.evidence_char_start,
+      charEnd: r.evidence_char_end,
+      extra: r.evidence_extra,
+      ratio: r.evidence_ratio === null ? null : Number(r.evidence_ratio),
+      method: r.evidence_method,
+      recordSha256: r.evidence_record_sha256,
+      resolverVersion: r.evidence_resolver_version,
+      resolvedAt: r.evidence_resolved_at,
+      // A provable excerpt whose record has since changed: the quote still holds, the RANKING does
+      // not. Surfaced rather than suppressed — it is a reason to re-resolve, not to withhold.
+      recordChanged: r.evidence_record_changed === true,
+    },
+    // The state, and the sentence for it, from the ONE map in evidence.ts. `evidenceNote` is null
+    // only when the excerpt is provable; "no evidence found in your profile" is now ONE of five
+    // possible sentences rather than the only one, because it is one of five different claims.
+    evidenceState: r.evidence_state,
+    evidenceNote: r.evidence_note,
+  }))
+  const evidenced = requirements.filter(r => r.evidenced).length
+  return { requirements, evidenced, unevidenced: requirements.length - evidenced, evidenceHealth: health }
+}
+
 // GET /api/app/opportunity/{id}/requirements
 export async function requirementsGet(req: HttpRequest, context: InvocationContext): Promise<HttpResponseInit> {
   if (req.method === 'OPTIONS') return { status: 204, headers: HEADERS }
@@ -223,48 +359,47 @@ export async function requirementsGet(req: HttpRequest, context: InvocationConte
     client = await getPgClient()
     await ensureRequirementCols(client)
     const opp = (await client.query(
-      `select id, jd_text, jd_text_sha256, jd_text_truncated from opportunity where id=$1 and owner_email=$2`,
+      `select id, role, jd_text, jd_text_sha256, jd_text_truncated from opportunity where id=$1 and owner_email=$2`,
       [req.params.id, owner])).rows[0]
     if (!opp) return { status: 404, headers: HEADERS, jsonBody: { error: 'not found' } }
     const rows = await loadRequirementsWithEvidence(client, opp.id)
     // A stored sha that no longer matches the posting means the offsets were measured against a
     // different body. Say so rather than serving quotes that may no longer be in the posting.
+    // This is the POSTING half and it keeps its own name: the profile half is `evidenceHealth`, and
+    // merging them would give one flag two meanings and the reader no way to tell which fired.
     const stale = rows.some((r: any) => r.jd_text_sha256 !== opp.jd_text_sha256)
-    // P8.3 — the JD step expands an "evidenced" row to its quote and source, and says
-    // NO_EVIDENCE_NOTE for the rest. Both are shaped HERE so every surface prints the same
-    // sentence, and `evidenced` is derived from the quote rather than trusted as a flag: a row is
-    // evidenced when it HAS an excerpt, and there is no other way to be.
-    const shaped = rows.map((r: any) => ({
-      ...r,
-      evidenced: r.evidence_quote != null,
-      evidence: r.evidence_quote == null ? null : {
-        quote: r.evidence_quote,
-        sourceKind: r.evidence_source_kind,
-        sourceLabel: r.evidence_source_label,
-        sourceKey: r.evidence_source_key,
-        charStart: r.evidence_char_start,
-        charEnd: r.evidence_char_end,
-        extra: r.evidence_extra,
-        ratio: r.evidence_ratio === null ? null : Number(r.evidence_ratio),
-        method: r.evidence_method,
-        recordSha256: r.evidence_record_sha256,
-        resolverVersion: r.evidence_resolver_version,
-        resolvedAt: r.evidence_resolved_at,
-      },
-      evidenceNote: r.evidence_quote == null ? NO_EVIDENCE_NOTE : null,
-    }))
-    const evidencedRows = rows.filter((r: any) => r.evidence_quote != null).length
+
+    // D19 — the profile as it stands NOW, so a stored excerpt is re-validated rather than trusted.
+    // THE COST, DELIBERATELY ACCEPTED: one `sourceText()` (a Docs read and a Table read) per GET.
+    // The alternative is serving `record_sha256` without ever recomputing it, which is what made the
+    // digest a decoration; there is no cheaper ground truth than the record itself, because the owner
+    // edits their profile outside this API and nothing here is notified when they do. A failed read
+    // is NOT treated as an empty profile — `records` goes null and every stored row reports
+    // `unverified`, which is a different claim from "your profile does not support this".
+    const profile = await sourceText().catch(() => ({ text: '', sources: ['profile UNREADABLE'], records: [] as ProfileRecord[] }))
+    const records = profile.records.length ? profile.records : null
+    const { requirements, evidenced, unevidenced, evidenceHealth } = shapeRequirementsForApi(rows, records)
+
+    // P8.4 — the comparison, from the SAME rows this response already carries. Served by the ONE
+    // endpoint the JD step reads, so a dimension row and a requirement row cannot come from two
+    // queries that disagree (R4).
+    const comparison = await comparisonPayload(client, opp.id, owner, opp.role)
     return {
       status: 200, headers: HEADERS,
       jsonBody: {
         oppId: opp.id, jdTextLen: (opp.jd_text || '').length, jdTextTruncated: !!opp.jd_text_truncated,
+        comparison,
         stale, located: rows.filter((r: any) => r.char_start !== null).length, total: rows.length,
-        // The coverage numerator (C6). `evidenced` is a COUNT OF EVIDENCE ROWS, never of term
-        // placement; `evidenceResolved` distinguishes "your profile does not support these" from
-        // "nobody has looked yet", which are different states and must not print the same number.
-        evidenced: evidencedRows,
-        unevidenced: rows.length - evidencedRows,
-        requirements: shaped,
+        // The coverage numerator (C6). `evidenced` is a COUNT OF EVIDENCE ROWS THAT ARE STILL TRUE,
+        // never of term placement and never of rows that merely exist; `evidenceHealth` distinguishes
+        // "your profile does not support these" from "your profile changed since we looked" from
+        // "we could not read your profile at all" — three different claims that must not print the
+        // same number or the same sentence.
+        evidenced,
+        unevidenced,
+        evidenceHealth,
+        profileSources: profile.sources,
+        requirements,
       },
     }
   } catch (e: any) {
@@ -287,8 +422,8 @@ export async function requirementsBackfill(req: HttpRequest, context: Invocation
     await ensureRequirementCols(client)
     const opps = (await client.query(
       body?.oppId
-        ? `select id, jd_real, raw_jd, why_surfaced, jd_table from opportunity where id=$1 and owner_email=$2`
-        : `select id, jd_real, raw_jd, why_surfaced, jd_table from opportunity
+        ? `select id, role, jd_real, raw_jd, why_surfaced, jd_table from opportunity where id=$1 and owner_email=$2`
+        : `select id, role, jd_real, raw_jd, why_surfaced, jd_table from opportunity
              where owner_email=$2 and jd_table is not null order by updated_at desc limit $1`,
       body?.oppId ? [body.oppId, owner] : [limit, owner])).rows
 
@@ -305,6 +440,14 @@ export async function requirementsBackfill(req: HttpRequest, context: Invocation
     if (profile.records.length) {
       for (const opp of opps) ev.push(await writeEvidence(client, opp.id, profile.records))
     }
+    // P8.4 / AC54 — re-extraction REPLACED the requirement rows, which the comparison is graded
+    // over. Rebuilding here is what stops a backfill leaving grades keyed to lines that no longer
+    // exist; the same reason the evidence re-resolve above is in this call rather than a later one.
+    let comparisons = 0
+    for (const opp of opps) {
+      const c = await rebuildComparison(client, opp.id, owner, profile.records.length ? profile.records : null)
+      if (c) comparisons += c.rows
+    }
 
     const rows = results.reduce((a, r) => a + r.rows, 0)
     const located = results.reduce((a, r) => a + r.located, 0)
@@ -319,6 +462,7 @@ export async function requirementsBackfill(req: HttpRequest, context: Invocation
         profileRecords: profile.records.length,
         evidenced: ev.reduce((a, r) => a + r.evidenced, 0),
         evidenceResolved: ev.length > 0,
+        comparisonRows: comparisons,
       },
     }
   } catch (e: any) {
@@ -338,7 +482,7 @@ export async function evidenceResolve(req: HttpRequest, context: InvocationConte
     client = await getPgClient()
     await ensureRequirementCols(client)
     const opp = (await client.query(
-      `select id from opportunity where id=$1 and owner_email=$2`, [req.params.id, owner])).rows[0]
+      `select id, role, owner_email from opportunity where id=$1 and owner_email=$2`, [req.params.id, owner])).rows[0]
     if (!opp) return { status: 404, headers: HEADERS, jsonBody: { error: 'not found' } }
 
     const profile = await sourceText()
@@ -352,10 +496,14 @@ export async function evidenceResolve(req: HttpRequest, context: InvocationConte
       }
     }
     const out = await writeEvidence(client, opp.id, profile.records)
+    // P8.4 / AC54 — the comparison is keyed to these requirement rows and their evidence, so it is
+    // rebuilt in the SAME call. Leaving it behind would serve grades over evidence that has just
+    // been replaced — the trap `requirementsBackfill` already documents for evidence itself.
+    const cmp = await rebuildComparison(client, opp.id, owner, profile.records.length ? profile.records : null)
     return {
       status: 200, headers: HEADERS,
       jsonBody: {
-        ok: true, ...out, sources: profile.sources,
+        ok: true, ...out, sources: profile.sources, comparison: cmp,
         unevidenced: out.total - out.evidenced,
         note: out.evidenced === out.total
           ? 'every requirement is evidenced by a verbatim excerpt of your profile'

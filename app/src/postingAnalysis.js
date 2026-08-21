@@ -46,7 +46,115 @@ export const POSTING_HOOKS = {
   matchEstimateButton: 'match-estimate-button',
   analysisRunning: 'analysis-running',
   analysisResult: 'analysis-result',
+  // P8.4 - the posting-vs-profile comparison (SPEC 4.2). Declared here rather than hand-typed in
+  // the component so the two existing guards can see them: postingAnalysis.test.mjs asserts every
+  // hook is rendered and none is hand-typed, and assetGate.test.mjs unions the HOOKS constants to
+  // catch a value colliding with another screen's. A hook outside a constant is invisible to both.
+  compare: 'posting-compare',
+  compareRow: 'compare-row',            // carries data-qc-dimension and data-qc-fit
+  compareFit: 'compare-fit',
+  compareNote: 'compare-note',
+  compareScope: 'compare-scope',
+  compareEmpty: 'compare-empty',
+  compareSetSource: 'compare-set-source',
+  compareCols: 'compare-cols',          // carries data-qc-cols - the responsive rule, selectable
+  compareSummary: 'compare-summary',
+  compareStale: 'compare-stale',        // carries data-qc-stale - why the stored rows are not current
 }
+
+// -- the comparison's grade vocabulary (P8.4) ---------------------------------------------------
+// `weak` deliberately renders as TWO different labels. The prototype maps it to a single
+// 'No evidence' (docs/qc-evidence/qc/data.js:583) and its one weak fixture happens to be a true
+// absence, so the fixture cannot expose the case where the profile DOES speak to the axis and falls
+// short - where "No evidence" is a false statement about the candidate.
+export const FIT_LABEL = {
+  strong: 'Strong match',
+  moderate: 'Moderate match',
+  weak_nothing_found: 'Nothing found',
+  weak_falls_short: 'Falls short',
+  not_applicable: 'Not compared',
+}
+
+export function fitLabel(fit, shortfall) {
+  if (fit !== 'weak') return FIT_LABEL[fit] || 'Not compared'
+  return shortfall === 'nothing_found' ? FIT_LABEL.weak_nothing_found : FIT_LABEL.weak_falls_short
+}
+
+/** Semantic colour per grade. `not_applicable` is NEUTRAL - it is an absence, not a bad result. */
+export const FIT_COLOR = {
+  strong: 'var(--proto-green)',
+  moderate: 'var(--proto-yellow)',
+  weak: 'var(--proto-red)',
+  not_applicable: 'var(--proto-ink3)',
+}
+
+/**
+ * What the comparison surface says about itself, derived from the payload rather than hardcoded.
+ *
+ * Four states, and they are four different sentences. "Nothing has been resolved yet" and "the
+ * comparison ran and found nothing to compare" are not the same claim, and printing one for both is
+ * how absent evidence gets read as a measurement.
+ */
+export function comparisonState(comparison) {
+  if (!comparison) return { state: 'loading', headline: 'Loading the comparison...', detail: '' }
+  const rows = Array.isArray(comparison.dimensions) ? comparison.dimensions : []
+  if (!comparison.resolved || !rows.length) {
+    return {
+      state: 'unresolved', rows: [],
+      headline: 'This posting has not been compared to your profile yet.',
+      detail: 'Nothing has been measured - which is not the same as nothing matching. Run the evidence resolve for this opportunity to build the comparison.',
+    }
+  }
+  const graded = rows.filter((r) => r && r.fit !== 'not_applicable')
+  if (!graded.length) {
+    return {
+      state: 'none_graded', rows,
+      headline: 'None of these dimensions could be compared for this posting.',
+      detail: 'Every row below says which state it is in. An ungraded row is a measurement nobody made, not a shortfall.',
+    }
+  }
+  return {
+    state: 'graded', rows,
+    headline: `${graded.length} of ${rows.length} dimension(s) compared`,
+    detail: 'Each row shows what this posting asks and what your stored profile evidences.',
+  }
+}
+
+/**
+ * The comparison table's responsive rule.
+ *
+ * The number lives HERE, not in a CSS media query, for the reason `keywordColumns` already records:
+ * ui-verify.yml can set a viewport width but can only SELECT, never read a computed style, so a
+ * media query is invisible to it. The column count is rendered as `data-qc-cols` and is therefore
+ * provable. SPEC 4.2's own prototype uses the same width via useWide(); this is that number, made assertable.
+ */
+export const COMPARE_WIDE_MIN = 900
+
+/** 4 columns at or above the breakpoint, 1 below. Never 0, never NaN. */
+export function compareColumns(width) {
+  const w = Number(width)
+  return Number.isFinite(w) && w >= COMPARE_WIDE_MIN ? 4 : 1
+}
+
+export function compareGridTemplate(width) {
+  return compareColumns(width) === 4
+    ? '150px minmax(0, 1fr) minmax(0, 1fr) 130px'
+    : 'minmax(0, 1fr)'
+}
+
+/**
+ * The four column headings, verbatim from SPEC.md:140-141.
+ * Exported so a test can assert the rendered headings ARE the spec's, rather than something that
+ * merely reads like them.
+ */
+export const COMPARE_COLUMNS = ['Dimension', 'The posting asks for', 'Your profile evidences', 'Fit']
+
+/**
+ * The scoping sentence SPEC.md:145-146 requires. Without it a strong grade reads as a claim about
+ * the finished packet, and at this step nothing has been written into an asset at all.
+ */
+export const COMPARE_SCOPE_NOTE =
+  'Fit is graded against your stored profile only - nothing here has been written into an asset yet.'
 
 // ── requirement rows ────────────────────────────────────────────────────────────────────────────
 
@@ -160,6 +268,85 @@ export function summarizeKindSource(rows) {
   }
 }
 
+// -- D14: the three keyword lists, and WHICH OF THEM WAS EVER COMPARED TO THE CANDIDATE ---------
+//
+// `packet.covered_kw` used to render as green "N covered" chips. Nothing in the call that fills it
+// (appPackets.jdAnalysis) is given the candidate: its user message carries Role, Company, Comp and
+// the job description, and no profile input of any kind - which the API side now proves rather than
+// asserts, by assembling that message from labelled fragments and exposing `comparesToProfile`.
+// So a confident green count was being shown for something nobody had measured.
+//
+// The fix is (b) RELABEL, not (a) compare. Three systems already measure coverage against the
+// candidate - requirement_evidence + the P8.3 resolver, artifact_score.keyword_coverage against the
+// published term library, and the P8.4 posting-vs-profile comparison - and `requirements.ts`
+// declares `model_keyword` never scoreable. A fourth coverage number derived from a model's guess
+// would have to agree with those three and could not.
+//
+// The relabel lived as a paragraph of JSX comment, which is prose, and prose does not run. It lives
+// here instead, DERIVED from one field per group: did the producer of this list see the profile?
+// The label, the tone and the disclaimer all follow from that boolean, so a rename cannot detach
+// them from it, and flipping the boolean is what changes the screen.
+//
+// The rule has NO carve-outs: every uncompared list gets the neutral tone and the disclaimer, even
+// the one whose section paragraph already says so. A carve-out - "this group is obvious, it does
+// not need the note" - is how the from-run group lost its disclaimer the first time.
+
+/**
+ * `profileCompared` is the load-bearing field, and each value is a claim about a specific producer:
+ *   parsed    requirements.model_keyword, written by the JD parse. Posting in, keywords out.
+ *   from_run  packet.covered_kw, written by appPackets.jdAnalysis. Posting in, keywords out.
+ *   thin      packet.missing_kw, written by appApply.atsScoreOne, which sends a CANDIDATE MASTER
+ *             BASELINE and asks what the posting wants that the baseline does not evidence.
+ * `qcGroup` is the rendered data-qc-group value; it stays hyphenated because ui-verify.yml selects
+ * on it and those selectors are already in use.
+ */
+export const KEYWORD_GROUPS = {
+  parsed: {
+    key: 'parsed', qcGroup: 'parsed', profileCompared: false, tone: null,
+    what: 'From the posting parse, one per extracted line',
+  },
+  from_run: {
+    key: 'from_run', qcGroup: 'from-run', profileCompared: false, tone: null,
+    what: 'Terms the analysis run pulled out of the posting',
+  },
+  thin: {
+    key: 'thin', qcGroup: 'thin', profileCompared: true, tone: 'red',
+    what: 'Compared against your profile and flagged as thin',
+  },
+}
+
+/** The disclaimer every uncompared list carries. One sentence, one place. */
+export const NOT_COMPARED_NOTE =
+  'Read from the posting only - nothing here compared these terms to your profile, so this is not a coverage list.'
+
+/**
+ * What a keyword group may say about itself, given how many terms it holds.
+ *
+ * Pass a group KEY for the real groups, or a descriptor object to exercise the derivation - the
+ * guard does exactly that, because a test that only reads the three shipped constants proves the
+ * constants, not the rule.
+ */
+export function keywordGroupMeaning(group, count) {
+  const g = typeof group === 'string' ? KEYWORD_GROUPS[group] : group
+  if (!g) return null
+  const n = Number.isFinite(Number(count)) ? Number(count) : 0
+  const compared = g.profileCompared === true
+  return {
+    key: g.key,
+    qcGroup: g.qcGroup,
+    profileCompared: compared,
+    // 'posting_only' is the whole of D14 in one field: a list nothing compared may not be counted
+    // as coverage, whatever its column in the database happens to be called.
+    claim: compared ? 'profile_compared' : 'posting_only',
+    // Every count on this surface says what kind of number it is on the same line as the number.
+    label: g.what + ' - ' + n + ' model-suggested',
+    // A TONE IS A VERDICT. Only a list something actually compared may carry one; an untoned chip
+    // means "this is a keyword", never "this keyword is good or bad".
+    tone: compared ? (g.tone || null) : null,
+    note: compared ? null : NOT_COMPARED_NOTE,
+  }
+}
+
 // ── the keyword term library (the latent lie: this used to be hardcoded) ────────────────────────
 // Derived from the checks engine's artifact_score row, never asserted. `keyword_coverage` is an int
 // or null; the row itself is null when no checks run has been read at all. Those are three states.
@@ -258,5 +445,37 @@ export function postingBody({ jdSummary, why, jdTextLen } = {}) {
     badge: null,
     provenance: 'No posting text and no summary are stored for this opportunity.',
     body: null,
+  }
+}
+
+// -- is what is on screen still how the comparison would be built today? (D23/D24) --------------
+//
+// The payload's `set` is read LIVE from the owner's prefs; `dimensions` are the rows stored when the
+// comparison was last resolved. Those two can disagree, and when they do the card would otherwise
+// print "Your dimension set for engineering." above rows built from a different set entirely. The
+// API decides this (appDimensions.comparisonStaleness) so one answer serves every caller; this
+// function only turns it into the sentence, and returns null when there is nothing to say.
+//
+// Two causes, and they are NOT the same sentence, because the fix differs: the owner changed their
+// set (re-resolve to grade the axes they now want) versus the grading rules changed underneath the
+// stored rows (re-resolve to get grades the old rules could not produce). D23 created the second
+// one for every row already in the database.
+export function comparisonStaleNote(comparison) {
+  const st = comparison && comparison.stale
+  if (!st) return null
+  const parts = []
+  if (st.set_changed) {
+    const bits = []
+    if (st.missing && st.missing.length) bits.push(`${st.missing.length} dimension(s) you have since turned on were never graded here`)
+    if (st.extra && st.extra.length) bits.push(`${st.extra.length} below are no longer in your set`)
+    parts.push(`Your dimension set has changed since this posting was compared - ${bits.join(', ')}.`)
+  }
+  if (st.rules_changed) {
+    parts.push('These rows were graded by an older version of the comparison rules, which could not compare figures like org size and budget.')
+  }
+  parts.push('Re-resolve the evidence for this opportunity to rebuild it.')
+  return {
+    kind: st.set_changed && st.rules_changed ? 'both' : st.set_changed ? 'set' : 'rules',
+    text: parts.join(' '),
   }
 }

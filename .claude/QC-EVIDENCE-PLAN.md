@@ -10,28 +10,39 @@ where the train currently is. Read it first on any resume; it is written to surv
 ## ▶ RESUME MARKER — where the train is
 
 ```
-UPDATED       : 2026-08-20 15:05Z
-CURRENT PHASE : P8 (review decisions) — running in parallel with P3 restart and P8.3
-STATUS        : P8.2 (R3 figure echo) COMPLETE — PR #10, 292/292 green, awaiting CI + land
-LAST LANDED   : f4c2f43 (P7 item 1, resume section parser / H23)
-NEXT ACTION   : land PR #10; then P8.1 correction table (P8.2's rewrite half depends on it)
+UPDATED       : 2026-08-20 16:10Z
+CURRENT PHASE : P8 (review decisions) — running in parallel with P3 and P8.3
+STATUS        : P3 (remediation loop) COMPLETE on its branch — PR #14, merged with main,
+                H-cases renumbered H34-H39. NOT landed, NOT deployed, NOT confirmed live.
+LAST LANDED   : 44d1cfc (H26 one-ID-one-case + contiguity)
+NEXT ACTION   : land PR #14; then deploy and run the loop against the
+                Trinnex opportunity 9f9c370a-4ac9-441e-b58e-02e3ffcf669e
 DONE + LIVE   : P0 · P1 · P2 · P4 · P5 · P6 · X1 X2 X3 X4 · D1 D2 D3 D6 D7 D8 D11
+DONE, NOT LIVE: P3 (X5 render-once, D8 per-pass metering, scoped regeneration)
 ```
 *Update this block on every landing. It is the single place to look after a restart.*
 
 Phase status: P0 `done` · P1 `done` · P2 `done` · P3 `RESTARTED` · P4 `done` · P5 `done` ·
 P6 `done` · P7 `partial (item 1 landed; 4, 6, 8 held behind P3)` · P8 `in progress`.
+P3 `built, PR #14, merged with main, NOT landed`.
 
 ### Lanes in flight — who owns which files
 
 A lane may not touch a file another lane owns. `api/test/hardening.test.mjs` is shared and
 APPEND-ONLY. H-case IDs are pre-allocated so two lanes cannot collide on one number.
 
+**ONE ID PER LANE DID NOT HOLD, and the failure mode is worth naming.** Each lane finds SEVERAL
+defects, so P3 needed six ids and P8.3 four. Append-only is exactly what hid it: every lane appends
+at the end of the file, so the branches MERGE CLEANLY, each is green in isolation, and the duplicate
+ids land unnoticed while `actions.md` points at numbers that name two things. `H26` on `main` now
+asserts one-id-one-case AND contiguity from H1, so the next collision fails a build instead of
+being discovered by a reader. Allocate a RANGE per lane, not a number.
+
 | Lane | Branch | Owns | H-ids |
 |---|---|---|---|
 | P8.2 R3 figure echo | `claude/qc-p8-2-figures` (PR #10) | `figureEcho.ts`, `checks.ts`, `appChecks.ts`, `appFacts.ts` | H24, H25 |
 | P8.7 UI remainder | subagent worktree | `app/` (theme.css, PostingAnalysis, Today, packetBuilder) | — |
-| P3 remediation loop | `claude/qc-p3-remediation` | `pipeline.ts`, `appPackets.ts` | H26 |
+| P3 remediation loop | `claude/qc-p3-remediation` (PR #14) | `pipeline.ts`, `appPackets.ts`, `appSwaps.ts`, `appInsertions.ts`, `remediation.ts`, `appRemediation.ts` | **H34-H39** |
 | P8.3 evidence excerpts | `claude/qc-p8-3-evidence` | `requirements.ts`, evidence schema | H27 |
 
 **The P3 lane was lost once.** A subagent ran it, died without pushing, and left no branch — the
@@ -198,7 +209,71 @@ artifact has zero check rows; decide grandfathering explicitly or `ready` flips 
 P2.3: name the table `artifact_score`, NOT `match_score` (that column exists with a different live
 meaning). Reconcile all four existing scores or don't ship a fifth.
 
-### P3 — Remediation loop
+### P3 — Remediation loop  ◀ BUILT (PR #14), NOT LANDED, NOT LIVE
+
+> **The C6 "blocker" was not a blocker — P3 was pointed at the wrong check, and P8.3 had already
+> built the right one.** Recorded because the near-miss is the lesson: I was one step from proposing
+> a redesign of another lane's model when the affordance already existed.
+>
+> C6 split coverage into TWO numbers on purpose, and R4 forbids merging counts over different
+> populations:
+>
+> | check | question | can a rewrite move it? |
+> |---|---|---|
+> | `must_have_coverage` | does the owner's PROFILE evidence this requirement? | **No** — computed from `evidenceOf(r)` alone, never reads the document |
+> | `evidence_placed` | "every requirement your profile evidences is actually stated in this document" | **Yes** — `evidenced` ÷ `covers(r)`. This is the loop's work |
+>
+> **The loop now targets `evidence_placed`** (`CLOSE_CHECK_KEY`), and the `remediation_loop` composite
+> FK binds to it, so a row cannot claim convergence against a check the engine did not record.
+> `must_have_coverage` is carried on the ledger as `coverage_state` for REPORTING only and is
+> deliberately in no constraint: binding convergence to a check the loop cannot move would make
+> convergence unreachable.
+>
+> Consequences that are now invariants, not prose:
+> - A requirement the profile does not evidence is **not the loop's to close**. It escalates
+>   unchanged — that is a gap in the profile, a different problem with a different owner.
+> - `placeable` excludes rows under `MIN_JUDGEABLE_TOKENS`, so a too-thin requirement is in neither
+>   the numerator nor the denominator. Counting it either way is the laundering defect the coverage
+>   check itself was fixed for, one layer down.
+> - `evidence_placed` reports failure as **`warn`**, not `fail`. The open list is read from any judged
+>   non-pass state, and P3-38's guard is `('warn','fail') -> not_applicable`. Reading `fail` alone
+>   would have left the loop seeing no work and the evidence-removal guard blind.
+> - The `unattributed_coverage` guard carries across unchanged: refusing the credit is not refusing
+>   the claim.
+>
+> Proven against **PostgreSQL 16.13** (the sandbox has one — see CLAUDE.md), on a populated upgrade
+> from `main`'s schema: forged `run_id` refused by the FK; `converged` with a non-empty `remaining`
+> by check2; binding to `must_have_coverage` by the `close_check_key` CHECK; crediting a close with
+> no edited field by check3. Only the legitimate row stored.
+
+**X2 re-verified by grep, not taken on faith:** `regen` is read from the body at `appPackets.ts:382/457/558`,
+honoured at `:319`, and `PacketBuilder.jsx:584` sends it. The X2 text below is STALE — the cache is
+reachable-through, so no loop AC passes vacuously against it.
+
+**Shipped shape.** Pure logic in `remediation.ts` (no pg / no network / no clock); DB, model calls and
+wall clock in `appRemediation.ts`. New tables `remediation_loop` (one row per artifact per pass) and
+`escalation`. `converged` is unforgeable in the SCHEMA — a CHECK plus a composite FK into
+`check_result`, so the coverage state on a loop row can only be COPIED from a check the engine really
+recorded, never asserted. Field-scoped regeneration built as new capability (decision 17): the model's
+out-of-scope keys are REJECTED on the way in, not requested in a prompt.
+
+**Six defects found and fixed with it, each an H-case (H34-H39):** `writeSwaps` deleted the whole
+packet's swap history on every build (the loop deleting its own justification); generation and
+rendering were one function (16 Drive copies per packet at 4 passes, on a codebase with no Drive
+DELETE anywhere); `insertion.loop` counted RENDERS because the writer derived it; `packet.round` was
+read by two consumers and written by nothing; and — the one that would have taken production down —
+**the composite FK's UNIQUE target was added at the FOOT of `SCHEMA_SQL`, so `create table
+remediation_loop` aborts the whole migration on any database where `check_result` already exists.**
+A fresh DB was fine. Nothing here could catch it: there is no Postgres in the sandbox.
+
+**Departures, each named:** `requirement.closed_on_loop` dropped rather than written (decision 16 —
+it cannot express the artifact dimension, and had zero writers and zero readers); loop escalations
+get their own table (decision 15); the cleared-override record lives on `remediation_loop`, NOT on
+`artifact_gate`, because `evaluateArtifact`'s clear is correct for a MANUAL re-check and it is the
+LOOP that turns one considered clear into four silent ones — so `appChecks.ts` is untouched.
+**P3-45 is NOT claimable** (P5 unmerged, harness cannot click or assert absence). **P3-21/25's live
+half is blocked** on `diagFolders` listing the packet output folder.
+
 **AC 3.1.0 (X2) blocks everything else** — without it every loop AC passes vacuously against a cache.
 Needs a field-scoped generation primitive (`pipeline.ts` is monolithic; calls 2/3 consume the whole
 prior payload). Documents render once (X5). Meter every pass (D8) — `grep -n "logUsage(.*, {})" api/src/` → 0.

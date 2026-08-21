@@ -14,14 +14,25 @@ const HEADERS = { 'Content-Type': 'application/json', 'Access-Control-Allow-Orig
  * Loops ACCUMULATE rather than replace: the whole point of a remediation loop is to show what a
  * later pass changed, so overwriting loop 0 would erase the before-text that makes loop 1 legible.
  * The unique (artifact_id, merge_field, loop) key means re-running the SAME loop is idempotent.
+ *
+ * DECISION 14 - `loop` IS THE REMEDIATION-PASS NUMBER, AND THE CALLER OWNS IT.
+ * It used to be derived here as `max(loop) + 1`, which meant it counted DOCUMENT RENDERS: every
+ * build incremented it, including a build that served a cached package and made zero model calls.
+ * Three loop-ish counters already existed (packet.round - dead, insertion.loop, check_result.run_id)
+ * and P3 wanted a fourth. Instead this one is given the meaning P3 needs, and the caller passes it:
+ *   loop 0     the baseline package, whether freshly generated or served from cache
+ *   loop 1..n  remediation pass n
+ * A re-render at the same loop rewrites that loop's rows identically instead of inventing a pass.
+ * `before_text` comes from loop-1, so pass n's before is pass n-1's after - never its own.
  */
 export async function writeInsertions(client: any, artifactId: string, oppId: string, args: {
-  type: string; pkg: Record<string, any>
+  type: string; pkg: Record<string, any>; loop?: number
 }): Promise<{ artifact_id: string; loop: number; filled: number; unfilled: number; attributed: number }> {
-  const prev = (await client.query(
-    `select merge_field, after_text, loop from insertion where artifact_id=$1
-      and loop = (select max(loop) from insertion where artifact_id=$1)`, [artifactId])).rows
-  const loop = prev.length ? Number(prev[0].loop) + 1 : 0
+  const loop = Math.max(0, Number(args.loop ?? 0) | 0)
+  const prev = loop > 0
+    ? (await client.query(
+        `select merge_field, after_text from insertion where artifact_id=$1 and loop=$2`, [artifactId, loop - 1])).rows
+    : []
   const prevPkg: Record<string, any> = {}
   for (const r of prev) prevPkg[r.merge_field] = r.after_text
 
@@ -73,7 +84,12 @@ export async function insertionsGet(req: HttpRequest, context: InvocationContext
     return {
       status: 200, headers: HEADERS,
       jsonBody: {
-        artifactId: art.id, type: art.type, loop: latest, insertions: rows,
+        // `insertions` is EVERY pass (the audit trail); `current` is the latest pass alone (what the
+        // document says now). Both are returned because a caller reading the full array and treating
+        // it as one-row-per-merge-field will double-count the moment a second pass exists - and P3
+        // makes a second pass the normal case rather than a rarity.
+        artifactId: art.id, type: art.type, loop: latest, insertions: rows, current,
+        passes: [...new Set(rows.map((r: any) => Number(r.loop)))].sort((a, b) => a - b),
         filled: current.filter((r: any) => r.generated).length,
         unfilled: current.filter((r: any) => !r.generated).length,
         attributed: current.filter((r: any) => r.verbatim_quote !== null).length,

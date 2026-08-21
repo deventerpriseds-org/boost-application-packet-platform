@@ -14,6 +14,10 @@ on:
         description: 'JSON body (for POST/PATCH). Leave empty for GET.'
         required: false
         default: ''
+      digest:
+        description: 'Set true to print a DIGEST instead of the full body: every string over 200 chars becomes "<N chars, sha256 ...>". For endpoints returning large text (prompts, packages) where the length and identity are the evidence, not the content.'
+        required: false
+        default: 'false'
       omit_auth:
         description: 'Set true to send NO auth (test the 401 reject path). Default false = authenticated.'
         required: false
@@ -31,6 +35,7 @@ jobs:
           API_METHOD: ${{ github.event.inputs.method }}
           API_PATH: ${{ github.event.inputs.path }}
           API_BODY: ${{ github.event.inputs.body }}
+          API_DIGEST: ${{ github.event.inputs.digest }}
           API_OMIT_AUTH: ${{ github.event.inputs.omit_auth }}
         run: |
           python3 - <<'PYEOF'
@@ -81,7 +86,54 @@ jobs:
               result = {'http_error': str(e)}
 
           print(f'\nHTTP {status} {method} {url}')
-          print(json.dumps(result, indent=2))
+
+          # A large body is unreadable in a log and floods whatever reads it. When the question is
+          # "which prompt is installed", the LENGTH and a hash answer it exactly; the 29,000
+          # characters do not. Applied to the PRINTED copy only - `result` itself is untouched, so
+          # the pass/fail check below still sees the real body.
+          def digest(v):
+            if isinstance(v, str) and len(v) > 200:
+              return f'<{len(v)} chars, sha256 {hashlib.sha256(v.encode()).hexdigest()[:16]}>'
+            if isinstance(v, dict):  return {k: digest(x) for k, x in v.items()}
+            if isinstance(v, list):  return [digest(x) for x in v]
+            return v
+
+          shown = digest(result) if os.environ.get('API_DIGEST', '').lower() == 'true' else result
+          print(json.dumps(shown, indent=2))
+
+          # ---- D12 -------------------------------------------------------------------------
+          # A body that self-reports failure must not produce a GREEN Actions run.
+          #
+          # `POST /api/pipeline/run` returned HTTP 200 with `pass:false` on a fully failed run, and
+          # this workflow exited 1 only on status >= 400 - so the definitive verification vehicle
+          # reported success for a run that had failed. A vehicle that cannot tell the two apart is
+          # worse than no vehicle. This is the GENERIC half of the fix: 85 routes in this repo
+          # return a `pass` boolean and every one of them was being ignored here, so changing one
+          # route's status code would have closed one case out of eighty-five.
+          #
+          # `pass` ONLY, deliberately. `ok:false` is overloaded in this codebase - `appRemediation`
+          # returns it for "the remediation loop is switched off for this owner", which is a
+          # REFUSAL, and a refusal is an outcome rather than an error. Failing the job on `ok`
+          # would fire on correct behaviour, which is the cry-wolf failure hardening rule 2 forbids.
+          # `pass` has one meaning everywhere it appears: this check did not pass.
+          #
+          # Only an actual boolean counts. A route returning a `pass` STRING or a count named `pass`
+          # is not making this claim, and coercing it would be inventing a verdict.
+          def body_failed(result):
+            if not isinstance(result, dict):
+              return None
+            v = result.get('pass')
+            if isinstance(v, bool) and v is False:
+              return 'pass'
+            return None
+
+          failed_key = body_failed(result)
           if status >= 400:
+            exit(1)
+          if failed_key:
+            print(f'\nFAILED: HTTP {status} but the response body reports {failed_key}=false.')
+            print(f'detail: {result.get("detail") or result.get("error") or "(none)"}')
+            for w in (result.get('warnings') or [])[:20]:
+              print(f'  warning: {w}')
             exit(1)
           PYEOF

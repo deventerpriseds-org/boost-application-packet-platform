@@ -4,7 +4,8 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
-  FACT_CATALOGUE, FACT_BY_KEY, demandedNumber, checkAgainstFacts, proposeMissingFacts,
+  FACT_CATALOGUE, FACT_BY_KEY, demandedNumber, checkAgainstFacts, proposeMissingFacts, selectFactDef,
+  parseQuantity, factQuantity, formatQuantity, isComparableUnit,
 } from '../dist/functions/tests/ownerFacts.js'
 
 const fact = (key, value, value_num = null, confirmed = true, source = 'owner_stated') =>
@@ -214,4 +215,134 @@ test('a cert cut off by the length cap gets its parenthesis closed', () => {
   const f = deriveFacts('CERTIFICATIONS: Certified Scrum Product Owner (CSPO), Six Sigma Black Belt', 2026)
     .find(x => x.key === 'education.certifications')
   assert.ok(!/\([A-Z]+$/.test(f.value.split(',')[0].trim()), `unbalanced: ${f.value}`)
+})
+
+// ---- D22: selection is by declared refinement, never by catalogue position -------------------
+
+test('a leadership requirement selects the leadership fact, not total years', () => {
+  assert.equal(selectFactDef('Requires 10+ years of engineering leadership experience').key,
+    'experience.years_leadership')
+  assert.equal(selectFactDef('15 years managing engineering teams').key, 'experience.years_leadership')
+  assert.equal(selectFactDef('20+ years in leadership roles').key, 'experience.years_leadership')
+})
+
+test('a plain years requirement still selects total years — the pair is not inverted', () => {
+  assert.equal(selectFactDef('Minimum of 10 years of professional experience').key, 'experience.years_total')
+  assert.equal(selectFactDef('8 yrs of relevant industry experience required').key, 'experience.years_total')
+})
+
+test('two defs that match for unrelated reasons keep catalogue order — no refinement link exists', () => {
+  // "Bachelor's degree required; PMP certification preferred" asks two questions. Neither matcher is
+  // a subset of the other, so this must behave exactly as it did before selection changed.
+  const t = "Bachelor's degree required; PMP certification preferred"
+  const matching = FACT_CATALOGUE.filter(d => d.asks.test(t)).map(d => d.key)
+  assert.ok(matching.includes('education.highest_degree') && matching.includes('education.certifications'))
+  assert.equal(selectFactDef(t).key, 'education.highest_degree', 'catalogue order still breaks a non-refinement tie')
+})
+
+test('a requirement no def matches selects nothing', () => {
+  assert.equal(selectFactDef('Deep experience with roadmap strategy and execution'), null)
+})
+
+test('every declared refines target is a real catalogue key', () => {
+  for (const d of FACT_CATALOGUE) {
+    if (!d.refines) continue
+    assert.ok(FACT_BY_KEY.has(d.refines), `${d.key} refines "${d.refines}", which is not in the catalogue`)
+    assert.notEqual(d.refines, d.key, `${d.key} refines itself`)
+  }
+})
+
+test('the recorded leadership fact answers, with its own number', () => {
+  const v = checkAgainstFacts('Requires 10+ years of engineering leadership experience',
+    [fact('experience.years_leadership', '14', 14)])
+  assert.equal(v.fact_key, 'experience.years_leadership')
+  assert.equal(v.verdict, 'satisfied')
+  assert.match(v.detail, /14 years recorded, 10 required/)
+})
+
+test('total years cannot stand in for leadership years, in either direction', () => {
+  // The costly direction: 22 total years must not satisfy a ten-year leadership requirement for
+  // someone who has led for three.
+  const short = checkAgainstFacts('Requires 10+ years of engineering leadership experience',
+    [fact('experience.years_total', '22', 22), fact('experience.years_leadership', '3', 3)])
+  assert.equal(short.verdict, 'not_satisfied')
+  assert.match(short.detail, /3 years recorded, 10 required/)
+
+  // The quieter direction: with only total years recorded, the leadership fact is simply unrecorded.
+  // `unknown` is what proposes it; a pass here would be a guess settling a gate.
+  const missing = checkAgainstFacts('Requires 10+ years of engineering leadership experience',
+    [fact('experience.years_total', '22', 22)])
+  assert.equal(missing.fact_key, 'experience.years_leadership')
+  assert.equal(missing.verdict, 'unknown')
+  assert.match(missing.detail, /no value recorded/)
+})
+
+// ── D23: what the comparator does NOT reach, pinned so nobody reports it as reached ────────────
+//
+// A line that asks for BOTH years and an org size matches `experience.years_total` AND
+// `scope.largest_team`. Neither refines the other — they are unrelated questions, not a
+// subset relation — so `selectFactDef`'s survivor set holds both and catalogue ORDER breaks the
+// tie, which puts years first.
+//
+// CONSEQUENCE, stated rather than discovered: on a mixed line the org-size fact is still never
+// selected by `checkAgainstFacts`, so D23's arithmetic reaches the JD step's comparison (which
+// selects by `DimensionDef.factKeys`, not by the catalogue scan) but NOT the gate. This is a
+// deliberate limit, not an oversight, and the two available "fixes" are both worse:
+//   * reordering FACT_CATALOGUE silently changes which requirements EVERY gate treats as settled,
+//     across all 7,559 live requirement rows;
+//   * declaring a `refines` link between them would be false — H41 measures undeclared strict-subset
+//     relations by construction and a fabricated declaration is a lie told to that guard.
+// Fixing it properly needs multi-fact resolution per requirement, which is its own change.
+test('D23 limit: a mixed years+org-size line still resolves to years, and that is pinned', () => {
+  const mixed = 'Lead a team of 60 engineers and bring 10+ years of experience'
+  const def = selectFactDef(mixed)
+  assert.equal(def.key, 'experience.years_total',
+    'catalogue order stopped deciding the mixed-line tie — if this was changed deliberately, the ' +
+    'gate now settles a different population and that needs its own blast-radius trace')
+
+  // Both defs really do match, or the pin above is about nothing.
+  assert.ok(FACT_BY_KEY.get('experience.years_total').asks.test(mixed))
+  assert.ok(FACT_BY_KEY.get('scope.largest_team').asks.test(mixed))
+
+  // And the arithmetic that IS reached is the years one, on the years figure.
+  const v = checkAgainstFacts(mixed, [
+    { key: 'experience.years_total', value: '24 years', value_num: 24, source: 'owner_stated', confirmed_at: '2026-08-20T00:00:00Z' },
+    { key: 'scope.largest_team', value: '62 engineers', value_num: 62, source: 'owner_stated', confirmed_at: '2026-08-20T00:00:00Z' },
+  ])
+  assert.equal(v.fact_key, 'experience.years_total')
+  assert.equal(v.verdict, 'satisfied')
+  assert.match(v.detail, /24 years recorded, 10 required/)
+})
+
+// ── D23: the parser, at its own level ─────────────────────────────────────────────────────────
+
+test('D23: parseQuantity reports whether a usd figure carries its own magnitude', () => {
+  assert.deepEqual(parseQuantity('$18M', 'usd'), { value: 18000000, explicit: true })
+  assert.deepEqual(parseQuantity('$18', 'usd'), { value: 18, explicit: false })
+  assert.deepEqual(parseQuantity('team of 250', 'people'), { value: 250, explicit: true })
+  assert.equal(parseQuantity('no figure at all', 'usd'), null)
+  // `percent` has no arithmetic and must not acquire one by accident.
+  assert.equal(parseQuantity('travel up to 25%', 'percent'), null)
+  assert.equal(isComparableUnit('percent'), false)
+  assert.equal(isComparableUnit('usd'), true)
+})
+
+test('D23: factQuantity prefers the fact TEXT for money and value_num for counts', () => {
+  // The Settings writer strips the magnitude into value_num; the text still has it.
+  assert.deepEqual(factQuantity({ value: '$18M', value_num: 18 }, 'usd'), { value: 18000000, explicit: true })
+  // The derive writer agrees, from the other direction.
+  assert.deepEqual(factQuantity({ value: '$18M', value_num: 18000000 }, 'usd'), { value: 18000000, explicit: true })
+  // People are bare counts on both paths and are NOT rescaled.
+  assert.deepEqual(factQuantity({ value: '62 engineers', value_num: 62 }, 'people'), { value: 62, explicit: true })
+  // Nothing recorded is null, never zero — zero is a figure and would grade.
+  assert.equal(factQuantity({ value: null, value_num: null }, 'usd'), null)
+})
+
+test('D23: formatQuantity prints what the owner reads, not the raw enum', () => {
+  assert.equal(formatQuantity(18000000, 'usd'), '$18M')
+  assert.equal(formatQuantity(1500000000, 'usd'), '$1.5B')
+  assert.equal(formatQuantity(750000, 'usd'), '$750K')
+  assert.equal(formatQuantity(250, 'people'), '250 people')
+  assert.equal(formatQuantity(1, 'people'), '1 person')
+  assert.equal(formatQuantity(14, 'years'), '14 years')
 })

@@ -35,11 +35,16 @@ const TONE = {
   yellow: { bg: 'var(--proto-yellow-soft)', fg: 'var(--proto-yellow)' },
   purple: { bg: 'var(--proto-purple-soft)', fg: 'var(--proto-purple)' },
   // No -soft token exists for these; pair them with defined tokens instead of inventing one.
-  panel: { bg: 'var(--proto-panel-deep)', fg: 'var(--proto-ink2)' },
+  panel: { bg: 'var(--proto-panel-deep)', fg: 'var(--proto-ink-on-panel)' },
   orange: { bg: 'var(--proto-yellow-soft)', fg: 'var(--proto-orange)' },
   ok: { bg: 'var(--proto-green-soft)', fg: 'var(--proto-green)' },
   warn: { bg: 'var(--proto-yellow-soft)', fg: 'var(--proto-yellow)' },
 }
+
+// Exported so the contrast sweep (test/browser/run-tones.mjs) measures THE table rather than a
+// copy of it. A guard holding its own copy of the thing it checks cannot fail when the real one
+// changes; three inert guards shipped in this repo that way before this rule was written.
+export const TONE_TABLE = TONE
 
 export const Pill = ({ children, tone, style }) => {
   const t = TONE[tone]
@@ -84,6 +89,9 @@ const TEMP_TOKENS = {
   cooling: { solid: 'var(--temp-cooling)', tint: 'var(--temp-cooling-tint)' },
   cold: { solid: 'var(--temp-cold)', tint: 'var(--temp-cold-tint)' },
 }
+// Exported for the SAME reason as TONE_TABLE: the contrast sweep measures THESE keys, not a copy
+// of them, so a fifth temperature is swept the day it is added and cannot ship below threshold.
+export const TEMP_KEYS = Object.keys(TEMP_TOKENS)
 /** A temperature's two tokens. An unknown key falls back to visible ink, never to nothing. */
 export const tempColor = (key) => (TEMP_TOKENS[key] || { solid: 'var(--proto-ink3)', tint: 'transparent' })
 /** The chip style, tinted when the filter is on and outlined in both states. */
@@ -153,7 +161,7 @@ export const StageBadge = ({ stage }) => <span className="px-chip" style={{ text
 
 // Gold favorite star — rendered only for is_favorite opportunities (priority flag).
 export const FavStar = ({ on, title = 'Favorite role — promoted', size = 14 }) =>
-  on ? <span title={title} aria-label="favorite" style={{ color: '#c08a1e', fontSize: size, lineHeight: 1 }}>★</span> : null
+  on ? <span title={title} aria-label="favorite" style={{ color: 'var(--gold)', fontSize: size, lineHeight: 1 }}>★</span> : null
 
 export function MatchScore({ value, size = 34 }) {
   const r = (size - 6) / 2

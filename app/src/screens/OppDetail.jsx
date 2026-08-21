@@ -93,8 +93,8 @@ export default function OppDetail({ id, tab = 'overview' }) {
 
         {/* 3-way triage — the same decision as the Swipe deck, available on the detail page */}
         <div style={{ display: 'flex', gap: 8, marginTop: 14, flexWrap: 'wrap' }}>
-          <button className="px-btn" style={{ fontSize: 12, color: '#16794a', borderColor: '#16794a' }} onClick={() => move('saved')}>✓ Keep</button>
-          <button className="px-btn" style={{ fontSize: 12, color: '#a8730a', borderColor: '#a8730a' }} onClick={() => move('enriched')}>↓ Maybe</button>
+          <button className="px-btn" style={{ fontSize: 12, color: 'var(--triage-keep)', borderColor: 'var(--triage-keep)' }} onClick={() => move('saved')}>✓ Keep</button>
+          <button className="px-btn" style={{ fontSize: 12, color: 'var(--triage-maybe)', borderColor: 'var(--triage-maybe)' }} onClick={() => move('enriched')}>↓ Maybe</button>
           <button className="px-btn" style={{ fontSize: 12, color: 'var(--proto-red)', borderColor: 'var(--proto-red)' }} onClick={dismissOpp}>✕ Dismiss</button>
         </div>
       </div>
@@ -541,9 +541,11 @@ function ResumeTab({ o, toast }) {
     try { const r = await api.setArtifactStatus(a.id, status); if (r.error) throw new Error(r.error); toast(`Resume → ${status}`) }
     catch (e) { patch(a.id, { status: prev }); toast(`Update failed: ${e.message || e}`) }
   }
-  const makeDoc = async (a) => {
+  // The SECOND consumer of generateArtifactDocument. A reachability fix present in PacketBuilder and
+  // absent here is the "fix all consumers" failure, so it takes the same options argument.
+  const makeDoc = async (a, opts = {}) => {
     setBusy(a.id)
-    try { const r = await api.generateArtifactDocument(a.id); if (r.error) throw new Error(r.error); patch(a.id, { docUrl: r.docUrl }); toast('Google Doc created'); load({ silent: true }) }
+    try { const r = await api.generateArtifactDocument(a.id, opts); if (r.error) throw new Error(r.error); patch(a.id, { docUrl: r.docUrl }); toast(opts.regen ? 'Google Doc rebuilt' : 'Google Doc created'); load({ silent: true }) }
     catch (e) { toast(`Doc failed: ${e.message || e}`) } finally { setBusy(null) }
   }
 
@@ -583,7 +585,17 @@ function ResumeTab({ o, toast }) {
             </div>
           )}
           {a.docUrl ? (
-            <a href={a.docUrl} target="_blank" rel="noreferrer" className="px-link" style={{ fontSize: 12 }}>✓ Open Google Doc ↗</a>
+            <div style={{ display: 'flex', gap: 14, alignItems: 'center', flexWrap: 'wrap' }}>
+              <a href={a.docUrl} target="_blank" rel="noreferrer" className="px-link" style={{ fontSize: 12 }}>✓ Open Google Doc ↗</a>
+              {/* This consumer got the `opts` parameter and no way to reach it — the same dead-UI
+                  shape the fix exists to remove, left live in the second screen while the first was
+                  repaired. Fix all consumers, not just the one that was reported. */}
+              <span data-qc="asset-rebuild" className="px-link" role="button"
+                style={{ fontSize: 12, cursor: busy === a.id ? 'default' : 'pointer', opacity: busy === a.id ? 0.6 : 1 }}
+                onClick={() => { if (busy !== a.id) makeDoc(a, { regen: true }) }}>
+                {busy === a.id ? '↻ Rebuilding…' : '↻ Rebuild from current draft'}
+              </span>
+            </div>
           ) : a.content ? (
             <button className="px-btn" style={{ fontSize: 12, alignSelf: 'flex-start' }} disabled={busy === a.id} onClick={() => makeDoc(a)}>{busy === a.id ? 'Creating Doc…' : '📄 Create Google Doc'}</button>
           ) : null}

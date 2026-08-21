@@ -150,7 +150,12 @@ export const api = {
   appHealth: () => get(`/app/health`),
   appSelftest: () => get(`/app/selftest`),
   atsSources: () => get(`/app/ats/sources`),
-  atsSourceAdd: (provider, board) => post(`/app/ats/sources`, { provider, board }),
+  // `enabled` is an upsert field on this route: `appAts.ts:74-76` does
+  // `on conflict (owner_email, provider, board) do update set enabled = $4`, and `:154` scans only
+  // `where ... and enabled`. The server has always honoured it; nothing could send it, so the only
+  // way to stop scanning a board was to DELETE it and lose its history. Found by H28.
+  atsSourceAdd: (provider, board, opts = {}) =>
+    post(`/app/ats/sources`, opts.enabled === undefined ? { provider, board } : { provider, board, enabled: opts.enabled }),
   atsSourceDelete: (id) => post(`/app/ats/sources/delete`, { id }),
   atsPreview: (provider, board) => post(`/app/ats/preview`, { provider, board }),
   atsIngest: (opts = {}) => post(`/app/ats/ingest`, opts),
@@ -178,10 +183,28 @@ export const api = {
   setArtifactStatusDetailed: (artifactId, status) => postDetailed(`/app/artifact/${artifactId}/status`, { status }),
   artifactInsertions: (artifactId) => get(`/app/artifact/${artifactId}/insertions?owner=${encodeURIComponent(_owner)}`),
   packetSwaps: (packetId) => get(`/app/packet/${packetId}/swaps?owner=${encodeURIComponent(_owner)}`),
-  generateArtifactDocument: (artifactId) => post(`/app/artifact/${artifactId}/document`, {}),
+  // P8.1/P8.6 - undo ONE correction. The change log itself rides on artifactChecksResult above, so
+  // the log and the counters beside it are the same payload rather than two.
+  //
+  // postDetailed, not post: revertOne can REFUSE - the field was edited after the correction was
+  // applied, so the recovered original no longer hashes to `before_sha256` and it declines rather
+  // than splicing text into a document nobody can check. That refusal is a fact about the user's own
+  // document and it is rendered in the server's own words; post() would collapse it into "HTTP 409".
+  //
+  // No ?owner=, deliberately: this is a write, requireWrite() takes the owner from the verified
+  // session and resolveOwner() ignores ?owner= entirely for one, so sending it would suggest the
+  // client picks the owner for a mutation.
+  revertCorrection: (correctionId) => postDetailed(`/app/correction/${correctionId}/revert`, {}),
+  // Same defect as `analyzeJd` above, shipped a second time and found by a reachability sweep.
+  // `appPackets.ts:382` reads `regen` off this route's body and `:319` honours it; this helper took
+  // no options argument, so it could not send it. Nor could anything else: `coachTools.ts:28` posts
+  // no body to the same route and its schema declares only `artifactId`. A parameterised cache
+  // bypass existed on the server with ZERO callers on any path, UI or agent.
+  generateArtifactDocument: (artifactId, opts = {}) => post(`/app/artifact/${artifactId}/document`, opts.regen ? { regen: true } : {}),
   saveArtifactContent: (id, body) => post(`/app/artifact/${id}/content`, body),
   aiEditArtifact: (id, body) => post(`/app/artifact/${id}/ai-edit`, body),
-  generateArtifactSlides: (artifactId) => post(`/app/artifact/${artifactId}/slides`, {}),
+  // As `generateArtifactDocument` — `appPackets.ts:457` is the slides half of the same gap.
+  generateArtifactSlides: (artifactId, opts = {}) => post(`/app/artifact/${artifactId}/slides`, opts.regen ? { regen: true } : {}),
   generateArtifactVideo: (artifactId) => post(`/app/artifact/${artifactId}/video`, {}),
   artifactVideoStatus: (artifactId) => get(`/app/artifact/${artifactId}/video/status`),
   archiveArtifactVideo: (artifactId) => post(`/app/artifact/${artifactId}/archive`, {}),

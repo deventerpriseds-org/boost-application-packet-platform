@@ -12,18 +12,21 @@
 // Each ID is referenced from `.claude/actions.md` so the story and the guard point at each other.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { readFileSync, readdirSync } from 'node:fs'
+import { readFileSync, readdirSync, existsSync } from 'node:fs'
+import { execFileSync } from 'node:child_process'
+import { createHash } from 'node:crypto'
 import { join } from 'node:path'
 
 import { normalizePostingText, decodeEntities, groundingText } from '../dist/functions/tests/jdText.js'
 import { buildRequirements, locate, mapKind, sentenceBounds } from '../dist/functions/tests/requirements.js'
 import { onOmitList, omitEntries, similarity, itemTokens } from '../dist/functions/tests/swaps.js'
 import { runChecks, gateFor, attentionCount, COVERAGE_THRESHOLD, MIN_JUDGEABLE_TOKENS } from '../dist/functions/tests/checks.js'
-import { computeArtifactScore } from '../dist/functions/tests/artifactScore.js'
+import { computeArtifactScore, judgedMustHaveIds, mustHaveSource, parseMustHaveSource } from '../dist/functions/tests/artifactScore.js'
 import { deriveFacts } from '../dist/functions/tests/ownerFacts.js'
-import { parseResumePackage } from '../dist/functions/tests/resumeParser.js'
-import { validateCitations, reviewerChecks } from '../dist/functions/tests/reviewer.js'
-import { extractFigures, scanEcho, claimKey, isMarked } from '../dist/functions/tests/figureEcho.js'
+import { parseResumePackage, headingKeysFor } from '../dist/functions/tests/resumeParser.js'
+import { validateCitations, reviewerChecks, agreementFor } from '../dist/functions/tests/reviewer.js'
+import { extractFigures, scanEcho, claimKey, isMarked, generalize } from '../dist/functions/tests/figureEcho.js'
+import { planCorrections } from '../dist/functions/tests/correction.js'
 import { profileRecords, resolveEvidence } from '../dist/functions/tests/evidence.js'
 
 const SRC = new URL('../src/functions/tests/', import.meta.url).pathname
@@ -34,6 +37,43 @@ const allSources = () => readdirSync(SRC).filter(f => f.endsWith('.ts')).map(f =
 const stripComments = (body) => body
   .replace(/\/\*[\s\S]*?\*\//g, ' ')
   .split('\n').map(l => l.replace(/(^|[^:])\/\/.*$/, '$1')).join('\n')
+
+/**
+ * The body of ONE top-level `export function <name>(` declaration, and nothing else.
+ *
+ * Structural guards that search a whole MODULE accuse every other function in it. H28's did, the
+ * moment a second function in `artifactScore.ts` legitimately needed the construct H28 forbids
+ * inside the scorer. Sliced to the closing brace in column 0, which is what this codebase's
+ * formatting guarantees; a name that does not resolve returns '' so the caller's own staleness
+ * assertion fires rather than the guard passing on nothing.
+ */
+const functionBody = (body, name) => {
+  const start = body.indexOf(`export function ${name}(`)
+  if (start < 0) return ''
+  const end = body.indexOf('\n}', start)
+  return end < 0 ? body.slice(start) : body.slice(start, end + 2)
+}
+
+/**
+ * The text of ONE `create table if not exists <name> ( ... );` block, and nothing else.
+ *
+ * Every schema assertion below needs this, and the two that did not have it were INERT. Both failed
+ * the same way and it is worth stating once: `SCHEMA_SQL` contains each constraint TWICE — inline on
+ * the CREATE TABLE, and again in the idempotent `alter table ... add constraint` that carries it to
+ * a database which already exists. A substring search over the whole string therefore cannot tell
+ * "inline on the create" from "in the alter", so deleting the inline one changed nothing and the
+ * guard passed. A `[\s\S]*?` span was worse: with the real column deleted it simply walked on to
+ * the NEXT table that had a column by that name and matched there.
+ * Verified by an independent verifier, 2026-08-20, who deleted each constraint in turn and watched
+ * NO TEST FAIL four times.
+ */
+const createTable = (schema, name) => {
+  const start = schema.indexOf(`create table if not exists ${name} (`)
+  assert.notEqual(start, -1, `no create table for ${name} — the scan has gone stale`)
+  const end = schema.indexOf('\n);', start)
+  assert.notEqual(end, -1, `unterminated create table for ${name}`)
+  return schema.slice(start, end)
+}
 
 // ---------------------------------------------------------------------------------------------
 // H1 — HTML entities were never decoded, so every &-term was invisible to matching.
@@ -234,7 +274,14 @@ test('H11: every table this layer added is registered for migration', () => {
   const schema = src('schema.ts')
   for (const t of ['requirement', 'requirement_evidence', 'skill_candidate', 'swap_decision', 'insertion',
                    'check_result', 'artifact_gate', 'artifact_score',
-                   'term_library', 'term_library_entry', 'term_candidate']) {
+                   'term_library', 'term_library_entry', 'term_candidate',
+                   // D21. Shipped created by an ensure-path only (appDimensions.ts), so it worked at
+                   // runtime while pg-migrate never reported it and THIS array — the third place, and
+                   // the one that gets forgotten — did not name it. Proved by reinstating both halves
+                   // of the defect: dropping the name from EXPECTED_TABLES fails this case on
+                   // "not in EXPECTED_TABLES", and renaming the CREATE in SCHEMA_SQL fails it on
+                   // "not in SCHEMA_SQL".
+                   'comparison_dimension']) {
     assert.ok(schema.includes(`create table if not exists ${t} `) || schema.includes(`create table if not exists ${t}(`),
       `${t} is not in SCHEMA_SQL`)
     assert.ok(new RegExp(`'${t}'`).test(schema.slice(schema.indexOf('EXPECTED_TABLES'))),
@@ -706,45 +753,66 @@ test('H27: the check reports the scanner\'s not_applicable, it does not re-deriv
 })
 
 // ---------------------------------------------------------------------------------------------
-// H26 — This file could carry two different cases under one ID, and nothing would notice.
+// H26 — Two cases under one ID, and nothing noticed. Then the FIX for that failed three more times.
 //
-// Not a hypothetical. Measured 2026-08-20 across three live lane branches:
+// The original failure, measured 2026-08-20 across three live lane branches:
 //     qc-p8-2-figures   H24 H25 H28
 //     qc-p8-3-evidence  H27 H28 H29 H30
 //     qc-p3-remediation H26 H27 H28 H29 H30 H31
-// `H28` meant three different defects; `H27`, `H29` and `H30` two each. IDs had been pre-allocated
-// one per lane precisely to prevent this, which was never going to be enough — each lane found
-// several defects, not one. Ranges, not single IDs.
+// `H28` meant three different defects; `H27`, `H29` and `H30` two each.
 //
-// The reason it goes unnoticed is structural: this file is append-only by convention, so three
-// branches each appending at the end MERGE CLEANLY. Git reports no conflict, every branch is green
-// in isolation, and the duplicates land silently. An ID that names two things is an ID that names
-// nothing — `.claude/actions.md` points at these numbers, and the whole scheme depends on the
-// pointer resolving to exactly one case.
+// WHY THE OBVIOUS FIXES ALL FAILED, in order, in one session:
+//   1. Pre-allocate one ID per lane   -> each lane found SEVERAL defects, not one.
+//   2. Pre-allocate RANGES per lane   -> lanes overran their range, and new lanes appeared.
+//   3. Claim IDs at merge time        -> worked, but cost a manual renumber on every merge. Three
+//                                        of them, by hand, plus a bad splice that left the file
+//                                        unparseable.
+//   4. This guard, checking one file  -> STRUCTURALLY BLIND to the actual failure. Within a single
+//                                        branch there are never duplicates; the collision exists
+//                                        only in the union of branches that cannot see each other,
+//                                        and by then both are green. It also never matched the
+//                                        `b`-variants at all: 44 of 52 cases were scanned, and
+//                                        H4b/H5b/H34b/H35b/H36b/H39b/H41b/H44b were invisible.
 //
-// The invariant: one ID, one case, and no gaps that hide a case lost in a merge.
-test('H26: every hardening case has its own ID', () => {
+// The root cause is not coordination. It is a GLOBAL COUNTER assigned on branches that cannot see
+// each other — a design that requires coordination to be correct, in a workflow that has none.
+//
+// So the counter is retired. H1-H44 are FROZEN: they are referenced from `.claude/actions.md`, from
+// code comments and from each other, and renaming them would break every pointer for no gain. Every
+// NEW case takes a SLUG naming what it guards — `H:schema-parity`, `H:no-vacuous-gate`. Two lanes
+// can mint slugs simultaneously without collision, and if they DO collide it is because they guard
+// the same thing, which is information rather than an accident.
+//
+// The invariant: one ID one case, across every form, and no new number can be minted.
+const FROZEN_MAX = 44
+test('H26: every hardening case has its own ID, and the counter stays retired', () => {
   const self = readFileSync(new URL('./hardening.test.mjs', import.meta.url), 'utf8')
-  // Read the ID off the test NAME, which is what a reader and actions.md both use. Comments are
-  // stripped first: this very comment block lists six duplicate IDs, and a scan that counted those
-  // would fire on the description of the bug rather than the bug.
-  const ids = [...stripComments(self).matchAll(/test\('(H(\d+)):/g)].map(m => ({ id: m[1], n: Number(m[2]) }))
-  assert.ok(ids.length >= 26, `only ${ids.length} cases found — the scan has gone stale`)
+  // Comments stripped first: this block lists six duplicate IDs, and a scan counting those would
+  // fire on the description of the bug rather than the bug.
+  const ids = [...stripComments(self).matchAll(/test\('(H(?:\d+b?|:[a-z0-9-]+)):/g)].map(m => m[1])
+  assert.ok(ids.length >= 52, `only ${ids.length} cases found — the scan has gone stale`)
 
-  const seen = new Map()
-  const dupes = []
-  for (const { id } of ids) {
-    if (seen.has(id)) dupes.push(id); else seen.set(id, true)
-  }
+  const seen = new Set(); const dupes = []
+  for (const id of ids) { if (seen.has(id)) dupes.push(id); else seen.add(id) }
   assert.deepEqual(dupes, [], 'two cases share an ID — actions.md now points at both and resolves to neither')
 
-  // A GAP is the other half of the same accident: a merge that dropped a case leaves its number
-  // unused, and the next lane reuses it for something unrelated. Numbering must be contiguous from
-  // H1, so a hole is visible at the moment it appears rather than at the moment it is reused.
-  const nums = ids.map(x => x.n).sort((a, b) => a - b)
+  // THE MECHANISM. A new numeric ID cannot be minted, so two lanes cannot pick the same next number.
+  const minted = ids.filter(id => /^H\d+b?$/.test(id) && Number(id.match(/\d+/)[0]) > FROZEN_MAX)
+  assert.deepEqual(minted, [],
+    `H1-H${FROZEN_MAX} are frozen. A new case takes a SLUG naming what it guards — test('H:what-it-guards: ...') ` +
+    `— because a shared counter assigned on branches that cannot see each other collides by design, ` +
+    `and did so three times in one session.`)
+
+  // Gaps in the FROZEN range only: a merge that dropped a case leaves its number unused, and the
+  // pointer in actions.md then resolves to nothing.
+  const nums = ids.filter(id => /^H\d+$/.test(id)).map(id => Number(id.slice(1)))
   const missing = []
-  for (let i = 1; i <= nums[nums.length - 1]; i++) if (!nums.includes(i)) missing.push(`H${i}`)
-  assert.deepEqual(missing, [], 'a hardening case was lost in a merge — its ID is unused')
+  for (let i = 1; i <= FROZEN_MAX; i++) if (!nums.includes(i)) missing.push(`H${i}`)
+  assert.deepEqual(missing, [], 'a frozen hardening case was lost in a merge — its ID is unused')
+
+  // Slugs must say what they guard, so the ID stays a pointer rather than becoming a new counter.
+  const badSlugs = ids.filter(id => id.startsWith('H:') && id.slice(2).split('-').length < 2)
+  assert.deepEqual(badSlugs, [], 'a slug that is a single word is a counter with extra steps')
 })
 
 // ---------------------------------------------------------------------------------------------
@@ -792,8 +860,16 @@ test('H28: a requirement nothing measured is never counted as covered', () => {
   // The structural half: the score must not grow its own denominator back. Deleting the parse and
   // restoring `reqs.filter(r => r.kind === 'must_have').length` reproduces the incident exactly, and
   // no runtime assertion above would notice on an input with no excluded rows.
-  const scoreSrc = stripComments(src('artifactScore.ts'))
-  assert.ok(!/kind\s*===\s*'must_have'/.test(scoreSrc),
+  //
+  // Scoped to `computeArtifactScore`'s OWN BODY, not the whole file. The first version searched the
+  // module and would have fired on `judgedMustHaveIds` (H44), which reads `kind === 'must_have'` to
+  // answer a different question — WHICH must-have rows the reviewer may be compared against — and
+  // never touches a denominator. A guard that accuses correct code is one people switch off, and
+  // this one is still exact: reinstating the recompute inside the function reintroduces the string
+  // inside this slice and fails.
+  const fnBody = functionBody(stripComments(src('artifactScore.ts')), 'computeArtifactScore')
+  assert.ok(fnBody.length > 400, 'computeArtifactScore body not found — the slice has gone stale')
+  assert.ok(!/kind\s*===\s*'must_have'/.test(fnBody),
     'the score recomputed the must-have population instead of reading the checks denominator')
 })
 
@@ -966,4 +1042,2118 @@ test('H32: an offset is measured on the string it indexes, never on a folded cop
   const body = stripComments(src('requirements.ts'))
   assert.ok(!/postingText\.toLowerCase\(\)/.test(body),
     'the exact branch indexed a lower-cased copy again')
+})
+
+// H33 — A behaviour toggle the server reads and NOTHING can send. Third shipping of this class.
+//
+//   actions.md A2   `regen` honoured server-side, `appPackets.ts:454` hardcoded it false
+//   actions.md X2   made `regen` reachable — from ONE of the three routes that read it
+//   actions.md      "Re-run ATS analysis": server read `force`, `api.js` helper took no argument
+//
+// Measured 2026-08-20, after X2 was recorded as closed: `appPackets.ts:382` (document) and `:457`
+// (slides) both read `regen` from the body and `:319` honours it, yet NO caller on ANY path could
+// send it. Not the UI — `api.js` posted `{}` with no options parameter. Not the coach agent —
+// `coachTools.ts:28/29` post no body to those routes and their tool schemas declare only
+// `artifactId`. A parameterised cache bypass with zero senders, on the two routes a user reaches
+// when they want exactly that.
+//
+// Fixing instances is what failed the first two times, so this asserts the CLASS: a toggle the
+// server reads must have some caller able to send it, or be listed as unreachable by design with a
+// reason. It is a source rule because the absence of a caller cannot be exercised at runtime.
+// Routes with NO committed caller anywhere — not `app/src/api.js`, not the legacy `web/` console,
+// not `.github/workflows/`, not `scripts/` (all four searched 2026-08-20). They are operator
+// endpoints, invoked by hand with a written-out body through `api-test.yml`, so there is no caller
+// for this guard to find and its absence is not evidence of a defect.
+//
+// This list is the guard's pressure valve, and it is exactly where a real gap would go to hide.
+// Two assertions below keep it honest: every entry must carry a reason, and no entry may name a
+// toggle something CAN send — so an entry cannot be parked here and quietly outlive its fix.
+const UNREACHABLE_BY_DESIGN = [
+  { toggle: 'favoritesOnly', route: 'app/ats-backfill', why: 'operator backfill, invoked by hand via api-test.yml' },
+  { toggle: 'fetchJd', route: 'mail/jd-backfill/recover-targeted', why: 'operator JD recovery, hand-invoked' },
+  { toggle: 'debug', route: 'mail/jd-backfill/recover-targeted', why: 'operator diagnostic dump, hand-invoked' },
+  { toggle: 'favoritesOnly', route: 'mail/jd-backfill/recover-targeted', why: 'operator JD recovery scope, hand-invoked' },
+  { toggle: 'llm', route: 'mail/jd-backfill/scan', why: 'operator scan mode, hand-invoked' },
+  { toggle: 'favoritesOnly', route: 'mail/jd-backfill/fetch', why: 'operator fetch scope, hand-invoked' },
+  { toggle: 'direct', route: 'mail/jd-backfill/fetch', why: 'operator fetch strategy, hand-invoked' },
+  { toggle: 'superOnBlock', route: 'mail/jd-backfill/fetch', why: 'operator fallback on a blocked fetch, hand-invoked' },
+  { toggle: 'dryRun', route: 'mail/folders/reclassify', why: 'operator reclassify preview — the safe half of a destructive op' },
+  // Both surfaced only after the grammar widened and the route-unscoped coach fallback was removed.
+  // `apply` is the one a verifier found sitting outside this list precisely because the guard could
+  // not see it: `\bapply\b` matched `/apply/` in an unrelated coach tool's URL and certified it.
+  { toggle: 'apply', route: 'mail/jd-backfill/dismiss-phantoms', why: 'operator phantom-dismissal — preview vs apply, hand-invoked' },
+  { toggle: 'skipFilter', route: 'mail/folder-map', why: 'operator folder-map override, hand-invoked' },
+]
+
+test('H33: every server-side body toggle has a caller that can send it', () => {
+  const API_JS = readFileSync(new URL('../../app/src/api.js', import.meta.url), 'utf8')
+  const apiCode = stripComments(API_JS)
+  // The legacy `web/` console is a real caller surface. Omitting it made the guard report the whole
+  // MT harness family as unreachable — correct code, accused, because the search looked in one of
+  // the two clients that exist.
+  const WEB_DIR = new URL('../../web/', import.meta.url).pathname
+  const webCode = (() => {
+    const read = (d) => readdirSync(d, { withFileTypes: true }).flatMap(e =>
+      e.isDirectory() ? (e.name === 'node_modules' ? [] : read(join(d, e.name)))
+        : /\.(js|jsx|html)$/.test(e.name) ? [readFileSync(join(d, e.name), 'utf8')] : [])
+    try { return stripComments(read(WEB_DIR).join('\n')) } catch { return '' }
+  })()
+  const COACH_SRC = src('coachTools.ts')
+
+  // Both grammars actually in use. Comments stripped FIRST: this case's own header names `regen`
+  // and `force` half a dozen times, and a scan that counted those would fire on the description of
+  // the bug rather than the bug — the cry-wolf failure, from inside the guard meant to prevent it.
+  // A verifier slipped SIX shapes past the first grammar, every one of them a real way this
+  // codebase already writes a toggle:
+  //   const { deepScan } = body            destructured, never touches `.x`
+  //   flag(body, 'deepScan')               read through a helper
+  //   (await req.json())?.x !== false      the inline form accepted `=== true` only — an asymmetry,
+  //                                        since the `body.x` form already accepted both
+  //   input?.deepScan === true             receiver named something other than body/b/json/payload
+  //   if (body?.deepScan)                  bare truthy — NOT hypothetical: appFacts.ts:232 reads
+  //                                        `body.confirm` exactly this way and was invisible
+  //   body?.deepScan === false             the negative comparison
+  // Widened to any receiver, any of the four comparison forms, and the destructured and
+  // helper-read shapes. A grammar that only sees the canonical spelling measures the author's
+  // habits, not the codebase.
+  // The receiver is not guessed from a name list — it is RESOLVED per file to the variables actually
+  // assigned from `req.json()`. Widening to a plausible-sounding list (`opts`, `args`, `input`,
+  // `parsed`) instead made the guard cry wolf on eighteen internal destructurings — `const {
+  // agreement, dropped, ran } = …` in reviewer.ts among them, which touch no request at all. A
+  // guard that fires on internal variable names is one people learn to ignore.
+  const receiversIn = (code) => {
+    const names = new Set(['body'])
+    for (const m of code.matchAll(/(?:const|let|var)\s+(\w+)\s*(?::[^=]+)?=\s*(?:\(?\s*await\s+)?req\.json\(\)/g)) names.add(m[1])
+    for (const m of code.matchAll(/(?:const|let|var)\s+(\w+)\s*(?::[^=]+)?=\s*\(\s*await\s+req\.json\(\)/g)) names.add(m[1])
+    return [...names]
+  }
+  // Six shapes a verifier slipped past the first grammar, each a real way this codebase writes a
+  // toggle: destructured (`const { x } = body`); read through a helper; the inline
+  // `(await req.json())?.x !== false`, which the first version accepted only as `=== true` while
+  // already accepting both for `body.x` — an asymmetry, not a scope choice; a differently-named
+  // receiver; a bare truthy `if (body?.x)`, which is NOT hypothetical (appFacts.ts:232 reads
+  // `body.confirm` exactly that way and was invisible); and `=== false`.
+  const toggleRe = (code) => {
+    const R = `(?:${receiversIn(code).join('|')})`
+    const CMP = '(?:===\\s*(?:true|false)|!==\\s*(?:false|true))'
+    return new RegExp([
+      `\\b${R}\\s*\\??\\.\\s*([a-zA-Z_]\\w*)\\s*${CMP}`,
+      `\\(await\\s+req\\.json\\(\\)[^;]*?\\)\\s*\\??\\.\\s*([a-zA-Z_]\\w*)\\s*${CMP}`,
+      `\\bconst\\s*\\{([^}]+)\\}\\s*=\\s*${R}\\b`,
+    ].join('|'), 'g')
+  }
+
+  // A toggle is only answerable together with the ROUTE that reads it: "can anything send `regen`"
+  // has no answer, but "can anything send `regen` to /artifact/{id}/document" does. So resolve each
+  // occurrence to its enclosing handler, and each handler to the route it is registered under.
+  const found = []
+  for (const [file, body] of allSources()) {
+    const code = stripComments(body)
+    const routeOf = new Map()
+    for (const m of code.matchAll(/route:\s*'([^']+)'[^}]*handler:\s*(\w+)/g)) routeOf.set(m[2], m[1])
+    for (const m of code.matchAll(/handler:\s*(\w+)[^}]*route:\s*'([^']+)'/g)) routeOf.set(m[1], m[2])
+    const fns = [...code.matchAll(/(?:export\s+)?async\s+function\s+(\w+)/g)].map(m => ({ name: m[1], at: m.index }))
+    // A handler reached through a DISPATCHER has no `app.http` of its own — `templatesUpsert` is
+    // called by a registered function that switches on `req.method`. Reporting its route as
+    // unresolved made a healthy toggle look unreachable, so inherit the dispatcher's route.
+    // Matches both spellings a dispatcher is written in — `async function name(req` and
+    // `const name = async (req`. Requiring the `function` keyword missed `templatesCollection`,
+    // which is the const-arrow form, and left `isPrimary` reported as unreachable while
+    // Settings.jsx sends it on every click.
+    for (const [, f1, f2, callee] of code.matchAll(/(?:function\s+(\w+)|const\s+(\w+)\s*=\s*async)[\s\S]{0,600}?\b(\w+)\(req[,)]/g)) {
+      const caller = f1 || f2
+      if (caller && routeOf.has(caller) && !routeOf.has(callee)) routeOf.set(callee, routeOf.get(caller))
+    }
+    for (const m of code.matchAll(toggleRe(code))) {
+      // A DESTRUCTURED name is only a toggle if it is later used as one. `const { roleType,
+      // jobTitle } = body` is ordinary input, and counting it turns this into "every body field
+      // must be sendable" — a different, far noisier rule that fired on eight data fields in the
+      // legacy MT harness. Require a boolean use of the name in the same file.
+      // EXPLICIT comparison only. Bare truthiness (`if (alertText)`) is how you test that a STRING
+      // arrived, not how you read a flag, and accepting it re-flagged `alertText`, `imageB64` and
+      // `demoState` — three data fields — as behaviour toggles.
+      const usedAsBoolean = (n) => new RegExp(
+        `\\b${n}\\s*(?:===\\s*(?:true|false)|!==\\s*(?:true|false))`
+      ).test(code)
+      const names = m[3]
+        ? m[3].split(',').map(x => x.trim().split(':')[0].trim()).filter(Boolean).filter(usedAsBoolean)
+        : [(m[1] || m[2] || m[4])]
+      for (const name of names) {
+      if (!name) continue
+      const owner = fns.filter(f => f.at < m.index).pop()
+      found.push({ toggle: name, file, handler: owner?.name || '(top level)', route: routeOf.get(owner?.name) || null })
+      }
+    }
+  }
+  // A TIGHT BAND, not a floor. `>= 8` against a real 24 could not detect staleness at all: a
+  // verifier amputated the `!== false` grammar (24 reads -> 16) and then optional chaining
+  // (-> 12), and the guard went green both times — blinding it to the dominant idiom in this
+  // codebase without a single failure. A floor set far below the real number is decoration.
+  //
+  // Measured 2026-08-20 on this branch: 24 reads, 18 distinct names —
+  //   apply debug direct draftOutreach dryRun enabled execOnly favoritesOnly fetchJd force
+  //   isPrimary llm regen reset seedCadence skipFilter superOnBlock undo
+  // (The first version of this comment recorded "11 reads, 7 distinct names" — off by more than
+  // 2x, which breaks the H-case rule that the recorded evidence must be the measured value.)
+  const distinct = new Set(found.map(x => x.toggle)).size
+  assert.ok(found.length >= 20 && found.length <= 40,
+    `${found.length} toggle reads — expected ~24. Below the band the grammar has gone blind; above it, widen deliberately and re-record the count here.`)
+  assert.ok(distinct >= 15, `only ${distinct} distinct toggle names — expected ~18; the grammar has narrowed`)
+
+  // `{param}` in a route matches `${param}` in an api.js template literal.
+  // The closing anchor allows a QUERY STRING. Anchoring hard on the backtick made every helper
+  // that appends `?owner=…` invisible, so `helpersFor` returned nothing and the guard accused
+  // correct code: tightening `body.confirm` to an explicit comparison would have reported
+  // `confirm -> app/qc/facts/set` unreachable while `api.js:125` forwards a bag to it.
+  const routeRe = (r) => new RegExp('`/' + r.replace(/[.*+?^$()|[\]\\]/g, '\\$&').replace(/\{[^}]+\}/g, '\\$\\{[^}]+\\}') + '(?:\\?[^`]*)?`')
+
+  // Two ways to send, and rule TWO is mandatory. The string `regen` appears ZERO times in api.js,
+  // yet `regen` on packet/build-all is genuinely reachable because `buildFullPacket` forwards an
+  // opaque `opts`. A name-only scan would accuse correct code on its first run — which guards in
+  // this repo have now done twice. But the forwarding check must be scoped to the helper for THAT
+  // route: taken globally, one forwarding helper anywhere certifies every toggle everywhere, and
+  // the guard passes while a brand-new unreachable toggle sits in the tree. It did exactly that on
+  // its first version, caught by adding an unsendable `deepScan` and watching nothing happen.
+  // EVERY helper on that route, not the first. `.find()` was the first version and it was wrong in
+  // the quietest possible way: `dismiss` sits above `undismiss` and `coachConfigGet` above
+  // `coachConfigSet`, so the read-only sibling matched first and the guard reported the real sender
+  // missing. It named four healthy toggles as defects — the cry-wolf failure, in the guard whose
+  // entire purpose is to not cry wolf.
+  const helpersFor = (route) => {
+    if (!route) return []
+    const re = routeRe(route)
+    return apiCode.split('\n').filter(l => re.test(l))
+  }
+  const canSend = ({ toggle, route }) => {
+    const named = new RegExp(`\\b${toggle}\\b`)
+    // A helper for this route that either names the toggle or forwards a caller-supplied object.
+    // A bare identifier as the body argument is a caller-supplied bag, whatever it is named —
+    // `opts`, `body`, `data`. Enumerating the names missed `templateSave: (data) => post(…, data)`
+    // and reported `isPrimary` unreachable when Settings.jsx sends it on every click.
+    // Anchored to the CALL, not the line. `/,\s*\w+\s*\)/` alone matched the arrow function's own
+    // PARAMETER list — `atsSourceAdd: (provider, board) => post(…, { provider, board })` was read
+    // as forwarding a bag because of `, board)` in its signature, and the guard cleared a toggle
+    // that route cannot send. A guard too permissive in one spot is indistinguishable from no
+    // guard, and this one had already been vacuous once.
+    const FORWARDS = /post(?:Detailed)?\(`[^`]*`,\s*[a-zA-Z_]\w*\s*\)/
+    if (helpersFor(route).some(l => named.test(l) || FORWARDS.test(l))) return true
+    // A route we could not resolve is not evidence of anything — fall back to naming it anywhere in
+    // api.js rather than reporting an unresolved route as an unreachable toggle.
+    if (!route && named.test(apiCode)) return true
+    if (named.test(webCode)) return true                                     // the legacy console is a client
+    // The coach agent is a caller too, but ROUTE-SCOPED. Matching its source by bare name was the
+    // single worst bug in this guard: `\bapply\b` matched the substring `/apply/` inside the URL
+    // path of an unrelated coach tool on a different route, and certified `apply` on
+    // `mail/jd-backfill/dismiss-phantoms` — a genuinely unsendable operator toggle that therefore
+    // never reached the allowlist for review. A global name test is the vacuous shape this guard
+    // has now had three times.
+    if (route) {
+      const tail = route.replace(/\{[^}]+\}/g, '')
+      const tool = stripComments(COACH_SRC).split('\n').find(l => l.includes('path:') && tail.split('/').filter(x => x.length > 3).every(seg => l.includes(seg)))
+      if (tool && named.test(tool)) return true
+    }
+    return false
+  }
+
+  const unreachable = found.filter(x => !canSend(x))
+    .filter(x => !UNREACHABLE_BY_DESIGN.some(u => u.toggle === x.toggle && u.route === x.route))
+    .map(x => `${x.toggle} -> ${x.route || x.handler} (read in ${x.file}, no caller can send it)`)
+  assert.deepEqual([...new Set(unreachable)], [], 'a server toggle has no caller that can send it')
+
+  for (const u of UNREACHABLE_BY_DESIGN) {
+    assert.ok(u.why && u.why.length > 10, `${u.toggle} is allowlisted with no reason`)
+    assert.ok(!canSend(u), `${u.toggle} is allowlisted but a caller CAN send it — the allowlist is hiding a real gap`)
+  }
+
+  // The two instances that prompted this, pinned by name so a revert is caught even if the class
+  // scan above is later loosened.
+  for (const helper of ['generateArtifactDocument', 'generateArtifactSlides']) {
+    const line = apiCode.split('\n').find(l => l.includes(`${helper}:`))
+    assert.ok(line, `${helper} not found in api.js`)
+    assert.match(line, /opts\s*=\s*\{\}/, `${helper} takes no options argument — it cannot send regen`)
+    assert.match(line, /opts\.regen/, `${helper} does not forward regen`)
+  }
+})
+
+// -----------------------------------------------------------------------------------------------
+// H34 — the swap writer deleted the whole packet's provenance on every build, and swap_decision had
+// no pass dimension at all. Evidence: `appSwaps.writeSwaps` ran
+// `delete from swap_decision where packet_id=$1` unconditionally, and the table's unique key was
+// `(packet_id, list, seq)`. A remediation loop calling it on pass 2 therefore DESTROYED pass 1's
+// swap rows — the loop deleting its own justification for every change it had just made, and the
+// packet screen showing only the last pass's decisions as if they were the whole story.
+// The invariant, not the incident: any writer that clears provenance for a packet must scope the
+// clear to the pass it is rewriting.
+test('H34: provenance deletes are scoped to a pass, never to a whole packet', () => {
+  const offenders = []
+  for (const [file, body] of allSources()) {
+    const code = stripComments(body)
+    // The real construct: a DELETE from a provenance table keyed by packet alone.
+    const re = /delete\s+from\s+(swap_decision|skill_candidate|insertion)\s+where\s+([^`'"]*)/gi
+    let m
+    while ((m = re.exec(code))) {
+      const [, table, predicate] = m
+      if (!/\bloop\s*=/.test(predicate)) offenders.push(`${file}: delete from ${table} where ${predicate.trim().slice(0, 60)}`)
+    }
+  }
+  assert.deepEqual(offenders, [], 'a packet-wide provenance delete erases every earlier pass')
+})
+
+test('H34b: swap_decision and skill_candidate carry the pass in their key', () => {
+  // Asserted on the CREATE TABLE block ALONE. The first version searched the whole of SCHEMA_SQL and
+  // was inert three ways over: the unique also appears in the idempotent ALTER, and the two
+  // `[\s\S]*?` spans ran past the end of their table into the next one that happened to have a
+  // `loop int not null default 0` (the `escalation` table). All three passed with the column deleted.
+  const swap = createTable(src('schema.ts'), 'swap_decision')
+  const skill = createTable(src('schema.ts'), 'skill_candidate')
+  assert.match(swap, /unique \(packet_id, list, seq, loop\)/,
+    'without loop in the key, pass 2 overwrites pass 1 row for row')
+  assert.match(swap, /\n\s*loop\s+int not null default 0/, 'swap_decision must have a loop column')
+  assert.match(skill, /\n\s*loop\s+int not null default 0/,
+    'skill_candidate rows are the FK targets of swap_decision; deleting them packet-wide nulls the links')
+})
+
+// ---------------------------------------------------------------------------------------------
+// H35 — generation and RENDERING were the same function, so the only way to regenerate content was
+// to also issue a Drive `files/{id}/copy`. Evidence: `buildTemplatedArtifact` did both. A four-pass
+// remediation loop over the four templated artifacts would have created 16 Google files per packet,
+// and since there is no Drive DELETE anywhere in this codebase (D-9) 15 of them would be orphaned
+// on the quota-bearing OAuth account. X5 / P3-25: documents render ONCE, after the loop.
+test('H35: the remediation loop body contains no Drive call — rendering is a separate step', () => {
+  const loop = stripComments(src('appRemediation.ts'))
+  // The pass loop is everything between the `for (let pass` header and the render call that follows
+  // it. A Drive call inside that span is the 4N defect returning.
+  const start = loop.indexOf('for (let pass')
+  const end = loop.indexOf('renderArtifact(client, art, opp, pkg')
+  assert.ok(start > 0 && end > start, 'the loop and the single render call must both be present')
+  const body = loop.slice(start, end)
+  for (const call of ['copyTemplate', 'injectValues', 'buildTemplatedArtifact', 'googleapis.com/drive']) {
+    assert.ok(!body.includes(call), `${call} is reachable from inside the pass loop — that is 4N Drive copies`)
+  }
+})
+
+test('H35b: ensurePackage generates without rendering, so a pass can run without a Drive copy', () => {
+  const packets = stripComments(src('appPackets.ts'))
+  const start = packets.indexOf('export async function ensurePackage')
+  const end = packets.indexOf('export async function renderArtifact')
+  assert.ok(start > 0 && end > start, 'the two halves must be separate exported functions')
+  const gen = packets.slice(start, end)
+  for (const call of ['copyTemplate', 'injectValues', 'getGoogleOAuthToken']) {
+    assert.ok(!gen.includes(call), `ensurePackage still calls ${call}; generation and rendering are welded together again`)
+  }
+})
+
+// ---------------------------------------------------------------------------------------------
+// H36 — `insertion.loop` was DERIVED inside the writer as `max(loop) + 1`, so it counted document
+// RENDERS: every build advanced it, including a build that served a cached package and made zero
+// model calls. Three loop-ish counters already existed (`packet.round`, never incremented;
+// `insertion.loop`; `check_result.run_id`) and P3 wanted a fourth. Decision 14: give this one the
+// meaning P3 needs and let the CALLER own it — loop 0 is the baseline, 1..n are remediation passes.
+// The invariant: no provenance writer may invent a pass number for itself.
+test('H36: the pass number is supplied by the caller, never derived from max(loop)', () => {
+  const offenders = allSources()
+    .filter(([, body]) => /max\(loop\)/i.test(stripComments(body)))
+    .map(([f]) => f)
+  assert.deepEqual(offenders, [], 'a writer deriving its own pass number counts renders, not passes')
+
+  const ins = stripComments(src('appInsertions.ts'))
+  assert.match(ins, /const loop = Math\.max\(0, Number\(args\.loop \?\? 0\) \| 0\)/,
+    'writeInsertions must take the pass from its caller')
+  // ...and pass n's "before" must be pass n-1's "after", never its own.
+  assert.match(ins, /loop=\$2`, \[artifactId, loop - 1\]/, 'before_text must come from the PREVIOUS pass')
+})
+
+test('H36b: every loop/pass/round counter column has a writer — no dead counter', () => {
+  // The invariant, not the incident. `packet.round` was READ by loadPacket's ORDER BY and by
+  // packetShape and written by NOTHING, so it was always 1: the ordering was a no-op and the API
+  // reported round 1 forever. A counter nobody increments is worse than no counter, because every
+  // reader believes it. Decision 14 forbids adding a fourth beside two that already disagree; this
+  // asserts the general rule that any counter that EXISTS is advanced by something.
+  const schema = stripComments(src('schema.ts'))
+  const columns = [...new Set([...schema.matchAll(/^\s*(\w*(?:loop|pass|round)\w*)\s+int\b/gim)]
+    .map(m => m[1].toLowerCase()))]
+  const code = allSources().filter(([f]) => f !== 'schema.ts').map(([, b]) => stripComments(b)).join('\n')
+  const unwritten = columns.filter(c => {
+    if (c === 'loop') return false            // supplied by the caller on every insert (H36 above)
+    if (c === 'n') return false               // remediation_loop.n, inserted per pass
+    return !new RegExp(`set\\s+${c}\\s*=|\\b${c}\\s*=\\s*${c}\\s*\\+`, 'i').test(code)
+  })
+  assert.deepEqual(unwritten, [], 'a counter column that no code ever advances — readers will trust it anyway')
+})
+
+// ---------------------------------------------------------------------------------------------
+// H37 — `converged` is the one word a user trusts without reading anything else, so it must not be
+// storable by a writer that merely intends to be honest. The guard is structural: a CHECK that
+// refuses the word while anything is open, and a composite FOREIGN KEY into `check_result` so the
+// coverage state on the row cannot be ASSERTED — only copied from a check the engine really recorded
+// for that exact run. Evidence for why this is needed: `evaluateArtifact` writes check_result rows
+// keyed by run_id, and nothing else in the schema tied a summary row back to them.
+test('H37: converged is unforgeable in the schema, not just in the writer', () => {
+  const schema = src('schema.ts')
+  assert.match(schema, /check \(halt_reason is distinct from 'converged'\s*\n?\s*or \(cardinality\(remaining\) = 0 and close_state = 'pass'\)\)/,
+    'the converged CHECK is gone; the word becomes whatever the writer says')
+  assert.match(schema, /foreign key \(artifact_id, run_id, close_check_key, close_state\)\s*\n?\s*references check_result \(artifact_id, run_id, check_key, state\)/,
+    'without the composite FK, close_state is an assertion rather than a copy of a real check')
+  // The loop must be tied to the DOCUMENT-side check. `must_have_coverage` is computed from the
+  // owner's profile alone and no rewrite can move it, so binding convergence to it would make
+  // convergence unreachable and every run would halt having closed nothing.
+  assert.match(schema, /close_check_key text not null default 'evidence_placed' check \(close_check_key = 'evidence_placed'\)/,
+    'the loop is bound to a check other than evidence_placed')
+  // On check_result's OWN create block. Searching all of SCHEMA_SQL matched the idempotent ALTER
+  // instead, so this assertion could not fail while that ALTER existed — inert, and inert in the
+  // guard whose whole subject is a constraint that must be in two places at once.
+  assert.match(createTable(schema, 'check_result'), /unique \(artifact_id, run_id, check_key, state\)/,
+    'the FK needs this unique inline on check_result, for a database created from scratch')
+  // P3-38: going green by turning a failure into "nothing to check" is refused by the table.
+  assert.match(schema, /check \(not \(prev_close_state in \('warn','fail'\) and close_state = 'not_applicable'\)\)/,
+    'a judged state sliding to not_applicable is evidence disappearing, not placement being achieved')
+  // P3-11: a credited close requires an edit.
+  assert.match(schema, /check \(cardinality\(closed\) = 0 or cardinality\(edited_fields\) > 0\)/,
+    'a pass that rewrote nothing may credit nothing')
+})
+
+// ---------------------------------------------------------------------------------------------
+// H38 — the loop must not become a second definition of "covered". `checks.covers()` decides
+// `must_have_coverage`, which decides the GATE; if the loop implemented its own token-overlap rule
+// to decide what a pass closed, the two would drift and the loop would start claiming closes the
+// gate does not recognise. The predicate is exported from `checks.ts` and imported, once.
+test('H38: the loop decides coverage with the gate\'s predicate, never its own', () => {
+  const rem = stripComments(src('remediation.ts'))
+  assert.match(rem, /import \{[^}]*coversText[^}]*\} from '\.\/checks'/,
+    'the loop must import the gate\'s coverage predicate')
+  // The real construct of a home-grown re-implementation: a local overlap ratio.
+  assert.ok(!/COVERAGE_THRESHOLD\s*=/.test(rem), 'the loop redefined the coverage threshold')
+  assert.ok(!/hit\.length \/ toks\.length/.test(rem), 'the loop re-implemented the overlap rule')
+})
+
+// ---------------------------------------------------------------------------------------------
+// H39 — a composite FOREIGN KEY was declared against `check_result (artifact_id, run_id, check_key,
+// state)` while the UNIQUE that makes that tuple a legal FK target was added with the idempotent
+// alters at the FOOT of the same script. On a FRESH database that works (check_result carries the
+// constraint inline). On the LIVE database, where check_result has existed since P2 WITHOUT it,
+// `create table remediation_loop` aborts the whole migration with
+//   ERROR: there is no unique constraint matching given keys for referenced table "check_result"
+// — Postgres requires the UNIQUE at CREATE TABLE time, not by the end of the transaction.
+//
+// This is invisible to every test in this repo: there is no Postgres in the sandbox, so the schema
+// is never executed here. It is exactly the case CLAUDE.md's H-case rule reserves for a source
+// assertion — "structural rules a runtime test cannot express".
+//
+// The invariant, not the incident: for EVERY composite FK in SCHEMA_SQL, the constraint that makes
+// its target tuple unique must appear EARLIER in the script than the table that references it.
+test('H39b: a schema statement never depends on a column added later in the same script', () => {
+  // The general form of H39, and the reason it is stated generally: the FK was one instance, and
+  // executing SCHEMA_SQL against a real PostgreSQL 16.13 seeded with `main`'s schema turned up a
+  // SECOND — `create index swap_dec_packet_idx on swap_decision(packet_id, loop, ...)` referencing
+  // a `loop` column that the idempotent ALTER only added 350 lines further down. On a fresh database
+  // both were fine, because the inline CREATE TABLE carries the column. On an EXISTING one — which
+  // is every production database — `create table if not exists` is a no-op, the column is absent,
+  // and the statement aborts the whole migration:
+  //     ERROR:  column "loop" does not exist
+  // The invariant, not the incident: if a column is added by an idempotent ALTER, every statement
+  // that NAMES that column must come after the ALTER.
+  const whole = src('schema.ts')
+  const sql = whole.slice(whole.indexOf('SCHEMA_SQL = '))
+  const offenders = []
+  for (const m of sql.matchAll(/alter table\s+(\w+)\s+add column if not exists\s+(\w+)/g)) {
+    const [, table, col] = m
+    const addedAt = m.index
+    // Index creations are the statements that bit us; they name columns directly and run inline.
+    const idxRe = new RegExp(`create index if not exists \\w+ on ${table}\\s*\\(([^)]*)\\)`, 'g')
+    for (const ix of sql.matchAll(idxRe)) {
+      if (!new RegExp(`\\b${col}\\b`).test(ix[1])) continue
+      if (ix.index < addedAt) {
+        offenders.push(`index on ${table}(${ix[1].trim()}) at ${ix.index} names "${col}", which is only added at ${addedAt}`)
+      }
+    }
+    // ...and so do constraint additions that reference the column.
+    const conRe = new RegExp(`alter table ${table} add constraint \\w+ [^;]*?\\b${col}\\b[^;]*;`, 'g')
+    for (const c of sql.matchAll(conRe)) {
+      if (c.index < addedAt) offenders.push(`constraint on ${table} at ${c.index} names "${col}", only added at ${addedAt}`)
+    }
+  }
+  assert.deepEqual(offenders, [],
+    'a statement runs before the column it names exists — fine on a fresh database, fatal on every existing one')
+})
+
+test('H39: a composite FK\'s unique target is established before the table that references it', () => {
+  const whole = src('schema.ts')
+  const sql = whole.slice(whole.indexOf('SCHEMA_SQL = '))
+  const offenders = []
+  const fkRe = /foreign key \(([^)]+)\)\s*\n?\s*references (\w+) \(([^)]+)\)/g
+  let m
+  while ((m = fkRe.exec(sql))) {
+    const [, , table, cols] = m
+    const tuple = cols.split(',').map(c => c.trim())
+    if (tuple.length < 2) continue                 // a single-column FK may target a primary key
+    const fkAt = m.index
+    const inline = `unique (${tuple.join(', ')})`
+
+    // THE INLINE CONSTRAINT DOES NOT COUNT, and that is the whole point of this case. Every CREATE
+    // here is `create table if not exists`, so on a database where the referenced table ALREADY
+    // exists — production, for every table older than the current phase — the create is a no-op and
+    // its inline UNIQUE is never applied. Only an idempotent `alter table ... add constraint ...
+    // unique (...)` reaches an existing database, and Postgres wants the UNIQUE in place at CREATE
+    // TABLE time, so that alter must run BEFORE the table carrying the FK is created.
+    //
+    // The first version of this guard accepted the inline constraint and was therefore INERT: it
+    // passed with the defect deliberately reinstated. It is written this way because it was watched
+    // to fail.
+    const alterAt = (() => {
+      for (let i = sql.indexOf(`alter table ${table} add constraint`); i !== -1;
+           i = sql.indexOf(`alter table ${table} add constraint`, i + 1)) {
+        if (sql.slice(i, i + 400).includes(inline)) return i
+      }
+      return -1
+    })()
+    if (alterAt === -1) {
+      offenders.push(`FK into ${table}(${cols}): no idempotent "alter table ${table} add constraint ... ${inline}"`
+        + ` anywhere — a fresh database gets the inline UNIQUE, an existing one never does`)
+      continue
+    }
+    if (alterAt > fkAt) {
+      offenders.push(`FK into ${table}(${cols}) is declared at ${fkAt} but its idempotent unique only runs at ${alterAt}`
+        + ` — this aborts the whole migration on any database where ${table} already exists`)
+    }
+    // On the CREATE TABLE block, not on the whole script: the ALTER a few lines up contains this
+    // exact substring, so `sql.includes(inline)` matched it and the line could never fail. That is
+    // the same inertness this very case was rewritten to remove, reintroduced one line below it.
+    assert.match(createTable(sql, table), new RegExp(inline.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')),
+      `${table} should also carry ${inline} inline, for a database created from scratch`)
+  }
+  assert.deepEqual(offenders, [], 'a composite FK whose unique target is not established, for an EXISTING database, before it')
+})
+
+// ---------------------------------------------------------------------------------------------
+// H40 — a TypeScript union and the schema CHECK that STORES it drifted, and the drift was invisible
+// until the exact case it mattered.
+//
+// `HaltReason` gained `unattributed_coverage` — the guard that stops the loop claiming a convergence
+// nothing this run produced — and the CHECK on `remediation_loop.halt_reason` did not. Both TS
+// guards were live and correct: `decidePass` refused the claim and `appRemediation` assigned the
+// reason. Then the INSERT recording that refusal violated
+//     remediation_loop_halt_reason_check
+// so the packet was already mutated, NO ledger row existed at all, the phantom escalation written
+// for exactly this case was never reached, and the caller got a 500. The loop refused the claim in
+// memory and could not record the refusal.
+//
+// The invariant, not the incident: any TS union persisted into a CHECK must be SET-EQUAL to it, in
+// both directions. A member missing from the CHECK is an unstorable state; a member missing from the
+// union is a state nothing can produce and no reader expects.
+test('H40: every persisted union is set-equal to the CHECK that stores it', () => {
+  const sql = src('schema.ts')
+  const rem = src('remediation.ts')
+
+  // Read the CHECK's members off the column definition, not off the whole file: `in ('a','b')`
+  // appears in several constraints and matching the wrong one would compare two unrelated lists.
+  const checkMembers = (table, column) => {
+    const block = createTable(sql, table)
+    const m = new RegExp(`\\n\\s*${column}\\s+text[^\\n]*?check \\(${column} in \\(([^)]*)\\)\\)`).exec(block)
+    assert.ok(m, `no CHECK found for ${table}.${column} — the scan has gone stale`)
+    return new Set(m[1].split(',').map(x => x.trim().replace(/^'|'$/g, '')))
+  }
+  // ...and the union's members off its exported literal array, which is the list the code uses.
+  const unionMembers = (name) => {
+    const m = new RegExp(`export const ${name}[^=]*=\\s*\\[([\\s\\S]*?)\\]`).exec(stripComments(rem))
+    assert.ok(m, `no ${name} array found`)
+    return new Set([...m[1].matchAll(/'([a-z_]+)'/g)].map(x => x[1]))
+  }
+
+  const inCheck = checkMembers('remediation_loop', 'halt_reason')
+  const inUnion = unionMembers('HALT_REASONS')
+  const missingFromCheck = [...inUnion].filter(x => !inCheck.has(x)).sort()
+  const missingFromUnion = [...inCheck].filter(x => !inUnion.has(x)).sort()
+
+  assert.deepEqual(missingFromCheck, [],
+    'a halt reason the code can emit but the table refuses to store — the insert throws at exactly the moment the reason fires')
+  assert.deepEqual(missingFromUnion, [],
+    'a halt reason the table allows that no code produces — a state no reader expects and nothing can create')
+  // Guard against the scan silently matching nothing on both sides at once.
+  assert.ok(inUnion.size >= 11, `only ${inUnion.size} halt reasons found — the scan has gone stale`)
+})
+
+// ---------------------------------------------------------------------------------------------
+// H39c — H39b walks columns that HAVE an idempotent ALTER and checks nothing runs before it. A
+// column with NO ALTER AT ALL falls outside that loop entirely, and that is the case that shipped.
+//
+// The retarget renamed three columns and added a fourth INSIDE `create table if not exists`, with no
+// ALTER. Proven by execution on a seeded cluster: seed main -> apply the pre-retarget revision ->
+// apply the retarget. The migration EXITS 0 AND REPORTS CLEAN, and the table still carries
+// must_have_check_key with the FK bound to it. The first INSERT the loop makes then dies with
+//     ERROR: column "close_state" does not exist
+// Every guard passed. Only running it found this.
+//
+// The invariant: a column the code WRITES must be reachable on an EXISTING database, not merely
+// present in the CREATE. Scoped to the tables this lane created and has already shipped a revision
+// of — a blanket rule over every table in the file would fire on columns that have only ever had
+// one shape, which is the cry-wolf failure this file exists to avoid.
+test('H39c: every column this lane CHANGED is reachable on an existing database', () => {
+  const sql = src('schema.ts')
+  const app = stripComments(src('appRemediation.ts'))
+
+  // SCOPED TO THE COLUMNS THAT CHANGED, and deliberately not to every column in the table. A rule
+  // over all columns fires on ones that have only ever had a single shape — the cry-wolf failure
+  // this file exists to prevent; the first version of this case did exactly that, naming eleven
+  // healthy columns. The general form ("does this column exist on a database built from an earlier
+  // revision") cannot be answered from one source snapshot at all. It is answered by EXECUTION
+  // instead: see CLAUDE.md — seed main's schema, apply the previous revision, apply this one. That
+  // is how F2 was found, and no source guard would have found it.
+  const CHANGED = [
+    'close_check_key', 'close_state', 'prev_close_state',   // renamed from must_have_*
+    'coverage_state', 'profile_evidence', 'superseded_doc_url',
+    'cleared_override_by', 'cleared_override_at', 'cleared_override_reason',
+  ]
+  const offenders = []
+  for (const col of CHANGED) {
+    const reachable = new RegExp(`alter table remediation_loop\\s+add column if not exists\\s+${col}\\b`).test(sql)
+      || new RegExp(`rename column \\w+ to ${col}\\b`).test(sql)
+    if (!reachable) offenders.push(`remediation_loop.${col}`)
+    // ...and it must be in the CREATE too, or a fresh database lacks it.
+    assert.match(createTable(sql, 'remediation_loop'), new RegExp(`\\n\\s*${col}\\s`),
+      `${col} is reachable by ALTER but absent from the CREATE — a fresh database would not have it`)
+  }
+  assert.deepEqual(offenders, [],
+    'a column this lane renamed or added exists only in the CREATE — on a database where the table '
+    + 'already exists, "create table if not exists" skips it and every INSERT naming it fails')
+
+  // A staleness anchor: close_state IS written on every ledger insert, so if it ever stops being
+  // named there this list has drifted from the code. close_check_key is deliberately NOT checked —
+  // it carries a DEFAULT and the writer never names it, which is correct.
+  assert.ok(app.includes('close_state'), 'close_state is not written by appRemediation — the CHANGED list is stale')
+})
+
+// ---------------------------------------------------------------------------------------------
+// H39d — the same class for a CONSTRAINT rather than a column, and it is how F1's fix was inert.
+//
+// Adding 'unattributed_coverage' to the halt_reason CHECK in the CREATE fixes a FRESH database only.
+// On one that already ran an earlier revision the create is skipped, the 10-member CHECK survives,
+// and the insert still throws — while H40 passes, because H40 reads the SOURCE, not the database.
+// A constraint whose membership can change needs an idempotent replacement exactly as a column does.
+test('H39d: EVERY named CHECK on remediation_loop has an idempotent replacement', () => {
+  // Not "the one that bit us" — all of them. Three separate constraints on this table kept a stale
+  // expression on an upgraded database, and the third was found only by executing the migration:
+  //   halt_reason   kept 10 members, so the loop could not persist its own refusal
+  //   close_check_key  stayed bound to must_have_coverage
+  //   check4        stayed `prev = 'fail'`, blind to 'warn' — which is how evidence_placed reports
+  //                 failure, so the evidence-removal guard was off on exactly the databases it protects
+  // A CHECK inside `create table if not exists` is skipped wholesale on a database that already has
+  // the table, so its ORIGINAL expression is the one that runs, forever. Naming every constraint is
+  // what makes a replacement possible; asserting every named one is replaced removes the class.
+  const sql = src('schema.ts')
+  const create = createTable(sql, 'remediation_loop')
+  const named = [...create.matchAll(/constraint (remediation_loop_\w+)\s*\n?\s*check/g)].map(m => m[1])
+  assert.ok(named.length >= 5, `only ${named.length} named CHECKs found on remediation_loop — the scan has gone stale`)
+
+  const missing = named.filter(c => {
+    const dropped = sql.includes(`alter table remediation_loop drop constraint if exists ${c};`)
+    const readded = new RegExp(`alter table remediation_loop add constraint ${c}\\s*\\n?\\s*check`).test(sql)
+    return !(dropped && readded)
+  })
+  assert.deepEqual(missing, [],
+    'a CHECK exists only in the CREATE — a database that already has the table keeps its original expression forever')
+
+  // The COLUMN-LEVEL checks are a second form and were the two that actually bit: `halt_reason text
+  // check (...)` and `close_check_key text ... check (...)`. They get auto-names too, so they need
+  // the same replacement, and matching only the `constraint <name> check` form would have missed
+  // both of them — which is how the first version of this case passed while halt_reason was stale.
+  for (const col of ['halt_reason', 'close_check_key']) {
+    assert.match(create, new RegExp(`\\n\\s*${col}\\s+text[^\\n]*check \\(${col} `),
+      `${col} has no inline CHECK in the CREATE — a fresh database would not constrain it`)
+    assert.ok(sql.includes(`alter table remediation_loop drop constraint if exists remediation_loop_${col}_check;`)
+      && new RegExp(`alter table remediation_loop add constraint remediation_loop_${col}_check\\s*\\n?\\s*check`).test(sql),
+      `${col}'s column-level CHECK has no idempotent replacement — an upgraded database keeps the original members forever`)
+  }
+
+  // ...and no ANONYMOUS table-level check may be added back, because an auto-named one cannot be
+  // dropped by a stable name and so cannot be replaced at all.
+  const anon = [...create.matchAll(/\n\s{2}check \(/g)]
+  assert.equal(anon.length, 0,
+    'an anonymous CHECK on remediation_loop — it gets an auto-name like remediation_loop_check4 and becomes unreplaceable')
+})
+
+// ---------------------------------------------------------------------------------------------
+// H41 — A first-match scan over an ORDERED catalogue made one of its entries unreachable, and the
+// unreachable entry was the more specific one. FIXED; this case now guards the fix.
+//
+// Measured against the built module, not inferred. `checkAgainstFacts` (ownerFacts.ts) used to walk
+// `FACT_CATALOGUE` in order and return on the FIRST def whose `asks` matched. Entry 0 is
+// `experience.years_total` (`/\d+\+?\s*(years|yrs)/`); entry 1 is `experience.years_leadership`
+// (the same, PLUS a leadership word) — a strict subset. So:
+//
+//   checkAgainstFacts('Requires 10+ years of engineering leadership experience', facts)
+//     -> { fact_key: 'experience.years_total', ... }        every time, for every input
+//
+// and no counterexample could exist by construction. Two consequences, both live until this fix:
+//   * a posting asking for 10 years of LEADERSHIP was answered by TOTAL years of experience, so
+//     22 total years "satisfied" it for someone who had led for three;
+//   * an owner who recorded their leadership years and not their total years got
+//     "no value recorded" — the fact they DID record was invisible.
+//
+// Selection is now by DECLARED refinement (`FactDef.refines`), read by `selectFactDef`, so it does
+// not depend on catalogue position at all. The invariant asserted here is the general one, not the
+// incident: **a def whose matcher is a strict subset of another def's must DECLARE that it refines
+// it, and the narrower def must be the one selected.** An undeclared subset is a shadow — the def
+// can never be chosen for any text, whatever the order happens to be today.
+//
+// Measured over a corpus rather than named pairs, so a THIRTEENTH catalogue entry whose matcher is
+// accidentally narrower than an existing one fails here on the day it is added. The corpus also
+// contains a line that matches two defs for unrelated reasons ("Bachelor's degree required; PMP
+// certification preferred" matches both education entries): neither is a subset of the other, both
+// stay selectable, and the guard must NOT fire on it. A guard that accuses correct code is one
+// people learn to ignore.
+const H41_CORPUS = [
+  'Requires 10+ years of engineering leadership experience',
+  '15 years managing engineering teams',
+  '20+ years in leadership roles',
+  'Minimum of 10 years of professional experience',
+  '8 yrs of relevant industry experience required',
+  "Bachelor's degree in Computer Science or equivalent",
+  'MBA or advanced degree preferred',
+  'PMP certification required',
+  'AWS Certified Solutions Architect strongly preferred',
+  "Bachelor's degree required; PMP certification preferred",
+  'Must be a U.S. Citizen or Green Card Holder',
+  'No visa sponsorship is available for this position',
+  'Active Secret security clearance required',
+  'TS/SCI with polygraph',
+  'Must reside in the East Coast of the United States',
+  'Candidate must be based in Austin, Texas',
+  'Willing to relocate to Denver',
+  'Hybrid, 3 days a week onsite in Chicago',
+  'Fully remote position',
+  'Willing to travel up to 25%',
+  'Able to travel domestically',
+  'Has led a team of 40 engineers',
+  'Manages 12 direct reports',
+  'Owned a budget of $18M',
+  'P&L responsibility for the division',
+]
+
+test('H41: no catalogue entry is hidden behind a more general one', async () => {
+  const { FACT_CATALOGUE, selectFactDef } = await import('../dist/functions/tests/ownerFacts.js')
+  assert.ok(FACT_CATALOGUE.length >= 12, `only ${FACT_CATALOGUE.length} fact defs — the scan has gone stale`)
+
+  const matches = new Map(FACT_CATALOGUE.map(d => [d.key, new Set(H41_CORPUS.filter(t => d.asks.test(t)))]))
+  assert.ok([...matches.values()].every(m => m.size > 0),
+    'a catalogue entry matches nothing in the corpus, so this case cannot see it — extend H41_CORPUS')
+
+  // --- the structural half: every strict-subset relation must be DECLARED ----------------------
+  const undeclared = []
+  for (const a of FACT_CATALOGUE) {
+    for (const b of FACT_CATALOGUE) {
+      if (a === b) continue
+      const A = matches.get(a.key), B = matches.get(b.key)
+      if (A.size >= B.size) continue
+      if (![...A].every(t => B.has(t))) continue          // not a subset — two unrelated questions
+      if (a.refines === b.key) continue                   // declared, and honoured below
+      undeclared.push(`${a.key} is a strict subset of ${b.key} and does not declare refines`)
+    }
+  }
+  assert.deepEqual(undeclared, [],
+    'an undeclared subset relation: the narrower def can never be selected for any text')
+
+  // --- the behavioural half: the narrower def is the one SELECTED ------------------------------
+  // Not "is it declared" — what the function DOES. Deleting `refines` or restoring the first-match
+  // scan makes every one of these come back as the general entry.
+  const wrong = []
+  for (const t of H41_CORPUS) {
+    const matching = FACT_CATALOGUE.filter(d => d.asks.test(t))
+    if (matching.length < 2) continue
+    const selected = selectFactDef(t)
+    // The selected def must not be one that another matching def declares it refines.
+    const generalised = new Set(matching.map(d => d.refines).filter(k => k && matching.some(m => m.key === k)))
+    if (generalised.has(selected.key)) wrong.push(`${JSON.stringify(t)} selected the general ${selected.key}`)
+  }
+  assert.deepEqual(wrong, [], 'a general def answered a requirement its own refinement also matched')
+
+  // --- the incident, in both directions it actually broke --------------------------------------
+  const probe = 'Requires 10+ years of engineering leadership experience'
+  assert.equal(selectFactDef(probe).key, 'experience.years_leadership',
+    'the leadership requirement is answered by the leadership fact, not by total years')
+  assert.equal(selectFactDef('Minimum of 10 years of professional experience').key, 'experience.years_total',
+    'a plain years requirement still resolves to total years — the fix must not invert the pair')
+})
+
+test('H41b: the leadership fact settles a leadership requirement, and total years cannot stand in', async () => {
+  const { checkAgainstFacts } = await import('../dist/functions/tests/ownerFacts.js')
+  const probe = 'Requires 10+ years of engineering leadership experience'
+  const fact = (key, n) => ({ key, value: String(n), value_num: n, source: 'owner_stated', confirmed_at: 'x' })
+
+  // Direction 1 — the recorded leadership fact was invisible; it now answers, with its own number.
+  const onlyLeadership = checkAgainstFacts(probe, [fact('experience.years_leadership', 14)])
+  assert.equal(onlyLeadership.fact_key, 'experience.years_leadership')
+  assert.equal(onlyLeadership.verdict, 'satisfied')
+  assert.match(onlyLeadership.detail, /14 years recorded, 10 required/)
+
+  // Direction 2 — the costly one. 22 total years must NOT satisfy a 10-year LEADERSHIP requirement
+  // for someone who has led for three. Before the fix this returned satisfied on years_total.
+  const bothRecorded = checkAgainstFacts(probe, [
+    fact('experience.years_total', 22), fact('experience.years_leadership', 3),
+  ])
+  assert.equal(bothRecorded.fact_key, 'experience.years_leadership')
+  assert.equal(bothRecorded.verdict, 'not_satisfied',
+    '22 total years answered a leadership requirement for someone who has led for three')
+  assert.match(bothRecorded.detail, /3 years recorded, 10 required/)
+
+  // Direction 3 — total years alone no longer settles it either way; it is a fact the owner has not
+  // recorded, which is `unknown`, which is what PROPOSES the fact. Absent evidence, not a pass.
+  const onlyTotal = checkAgainstFacts(probe, [fact('experience.years_total', 22)])
+  assert.equal(onlyTotal.fact_key, 'experience.years_leadership')
+  assert.equal(onlyTotal.verdict, 'unknown')
+})
+
+// ---------------------------------------------------------------------------------------------
+// H42 — A stored setting that production READS and nothing WRITES is a constant wearing a
+// settings-shaped costume.
+//
+// Measured at c360e6e: `owner_search_prefs.chk_skill_max_chars … chk_evidence_min_tokens` are added
+// by `ensureCheckPrefs` and read by `loadThresholds` (appChecks.ts), and the only route that writes
+// that table (`appSearchPrefs.ts`) sets `target_geo_ids`, `remote_only` and three `temp_*` columns —
+// none of the `chk_*` ones. `grep -rn "chk_" app/src` returns nothing. So every threshold the
+// checks engine calls "overridable per owner" is changeable only by hand-written SQL, which is the
+// no-hardcoded-config rule satisfied on paper and not in the product.
+//
+// The invariant: a per-owner settings column that production reads must have a writer somewhere in
+// the API. Asserted by READING THE COLUMN NAMES OUT OF THE ENSURE STATEMENT rather than listing
+// them here, so adding a tenth column cannot escape the guard by not being in a hardcoded list —
+// the way H11's hand-maintained table array can.
+test('H42: every per-owner settings column production reads has a writer that can set it', () => {
+  const apiDir = new URL('../src/functions/tests/', import.meta.url)
+  const read = (f) => readFileSync(new URL(f, apiDir), 'utf8')
+  const sources = ['appChecks.ts', 'appSearchPrefs.ts', 'appDimensions.ts', 'jdSweep.ts', 'appFacts.ts']
+    .map(f => { try { return [f, read(f)] } catch { return null } })
+    .filter(Boolean)
+
+  // Columns any module ADDS to owner_search_prefs.
+  const declared = new Set()
+  for (const [, body] of sources) {
+    for (const m in [] ) void m
+    for (const m of stripComments(body).matchAll(/add column if not exists\s+([a-z0-9_]+)/g)) declared.add(m[1])
+  }
+  assert.ok(declared.size >= 5, `only ${declared.size} settings columns found — the scan has gone stale`)
+
+  // Columns any module WRITES.
+  //
+  // Read the SQL, do not pattern-match the JavaScript around it. The first version of this scan
+  // looked for `col=$1` and missed every clause built dynamically — `sets.push(\`temp_hot_hours=$${
+  // vals.length}\`)` in appSearchPrefs, `backoff_until=now() + …` in jdSweep — and so accused six
+  // settings that DO have writers. A guard that names innocent offenders is one people switch off.
+  // So: take the SQL text (every backtick string in these files), and collect `col =` assignments
+  // from it.
+  const written = new Set()
+  for (const [, body] of sources) {
+    const b = stripComments(body)
+    for (const lit of b.match(/`[^`]*`/g) || []) {
+      for (const m of lit.matchAll(/\b([a-z][a-z0-9_]*)\s*=\s*(?!=)/g)) written.add(m[1])
+    }
+  }
+
+  const unwritable = [...declared].filter(c => !written.has(c)).sort()
+  // The KNOWN set, pinned. Same reasoning as H41: asserting "none" would be red on arrival for a
+  // pre-existing gap this lane did not create, and a guard that is red on arrival gets switched
+  // off. Pinning it fails on a NEW unwritable setting AND on the known ones being fixed.
+  const KNOWN = [
+    'chk_cover_words_max', 'chk_cover_words_min', 'chk_evidence_min_tokens', 'chk_evidence_threshold',
+    'chk_expertise_words', 'chk_relevant_allowance', 'chk_relevant_max_chars', 'chk_skill_max_chars',
+    'chk_skills_total_max', 'chk_skills_total_min',
+  ]
+  assert.deepEqual(unwritable, KNOWN,
+    `the set of unwritable per-owner settings changed: ${JSON.stringify(unwritable)} — a new setting shipped with no way for the owner to change it, or the known ones were fixed and this case must be updated`)
+
+  // P8.4's own setting is NOT in that set, and its writer is exercised by dimensionsDb.test.mjs.
+  assert.ok(written.has('cmp_dimensions'), 'the dimension set shipped with no writer — the exact shape this case exists to stop')
+})
+
+
+// ---------------------------------------------------------------------------------------------
+// H43 — H41's defect where it did damage: the GATE.
+//
+// H41 guards the SELECTION (`selectFactDef` picks the narrower def). This case guards the
+// consequence, because the selection only mattered because `checks.ts` routes `facts_settled`,
+// `fact_shortfall` and `facts_needed` through `checkAgainstFacts`, and those rows move the badge.
+//
+// Evidence, the shape D22 recorded: a posting asking for "10+ years of engineering leadership"
+// against an owner with 22 total years and three years of leadership. Before the fix the scan
+// returned `experience.years_total`, the arithmetic was 22 >= 10, and the run reported
+// `facts_settled: pass` — a confident, correctly formatted, TRUE statement about the wrong fact.
+// `checks.test.mjs` encoded that as an expectation, which is how it survived: the fixture asked for
+// LEADERSHIP years and recorded only TOTAL years, and asserted a pass.
+//
+// The invariant: a fact verdict that reaches the gate is about the fact the posting actually asked
+// for. A years-of-leadership requirement is never settled by a total-years figure.
+test('H43: a fact verdict that reaches the gate is about the fact the posting asked for', () => {
+  const LEADERSHIP = 'Requires 10+ years of engineering leadership experience'
+  const reqs = [{ seq: 0, verbatim: LEADERSHIP, item_text: '', kind: 'must_have' }]
+  const fact = (key, n) => ({ key, value: String(n), value_num: n, source: 'owner_stated', confirmed_at: 'x' })
+  const run = (facts) => runChecks({
+    type: 'resume',
+    pkg: { ResumeSummary: 'Owns roadmap strategy and execution with deep experience.' },
+    requirements: reqs, facts, evidence: { profileReadable: true, bySeq: {} },
+  })
+  const find = (rs, k) => rs.find(r => r.check_key === k)
+
+  // 1. Total years alone must not settle it. It is a fact the owner has not recorded — surfaced for
+  //    them to answer, which is what proposes the row, not laundered into a pass.
+  const totalOnly = run([fact('experience.years_total', 22)])
+  assert.equal(find(totalOnly, 'facts_settled').state, 'not_applicable',
+    '22 total years settled a LEADERSHIP requirement — the gate read the wrong fact')
+  assert.match(find(totalOnly, 'facts_needed').offenders[0], /Years in leadership/,
+    'the unanswered fact must be named as the leadership one, not as total years')
+
+  // 2. Recorded and short: a WARN naming the LEADERSHIP arithmetic. Before the fix this was a pass.
+  const ledThree = run([fact('experience.years_total', 22), fact('experience.years_leadership', 3)])
+  assert.equal(find(ledThree, 'facts_settled').state, 'not_applicable')
+  const shortfall = find(ledThree, 'fact_shortfall')
+  assert.equal(shortfall.state, 'warn', 'three years of leadership satisfied a ten-year requirement')
+  assert.match(shortfall.offenders[0], /3 years recorded, 10 required/,
+    'the arithmetic on screen must be the leadership figure, not the total-years one')
+
+  // 3. Recorded and sufficient: it settles, off its own number.
+  const ledTwelve = run([fact('experience.years_total', 22), fact('experience.years_leadership', 12)])
+  assert.equal(find(ledTwelve, 'facts_settled').state, 'pass')
+  assert.equal(find(ledTwelve, 'fact_shortfall'), undefined)
+
+  // 4. And the pair is not inverted: a plain years requirement is still total years.
+  const plain = runChecks({
+    type: 'resume',
+    pkg: { ResumeSummary: 'Owns roadmap strategy and execution with deep experience.' },
+    requirements: [{ seq: 0, verbatim: 'Minimum of 10 years of professional experience', item_text: '', kind: 'must_have' }],
+    facts: [fact('experience.years_total', 22)], evidence: { profileReadable: true, bySeq: {} },
+  })
+  assert.equal(find(plain, 'facts_settled').state, 'pass')
+})
+
+// ---------------------------------------------------------------------------------------------
+// H44 — Reviewer agreement was measured against requirements the engine never judged.
+//
+// `appReviewer` compares the reviewer's per-requirement judgements with the deterministic engine's
+// and stores `agreed` / `disagreed` / `reviewer_stricter` / `reviewer_looser`. It built the
+// comparable set as every row of `kind === 'must_have'`:
+//
+//   const engineJudged = scoreRow?.must_have_coverage == null ? []
+//     : requirements.filter(r => r.kind === 'must_have').map(r => String(r.id))
+//
+// but `checks.ts` judges `coverable` — must-haves MINUS the eligibility clauses `template_reach`
+// reports as unreachable, MINUS the rows the owner's facts own. On the shape the live Trinnex
+// posting has (4 must-haves, 3 eligibility, 1 judged) that is 4 rows compared against an engine that
+// had an opinion about 1. The three the engine never judged are not in `uncovered_requirement_ids`,
+// so `engineCovered` computed `true` for them, and a reviewer saying "covered" was recorded as
+// AGREEING with a verdict that was never reached. Reviewer agreement is an accusation-grade number.
+//
+// The invariant, and it has two halves that must both hold:
+//   * a requirement the engine did not judge is `not_comparable`, never agreed and never disagreed;
+//   * the comparable set is READ from what the check published, never re-derived. `coverable` is
+//     checks.ts's predicate and a second implementation of it is the R4 defect this codebase keeps
+//     being bitten by — one source per number.
+test('H44: reviewer agreement counts only requirements the engine actually judged', () => {
+  // r0 an eligibility clause, r1 owned by the owner's facts — checks.ts excludes both from
+  // `coverable`. r2 judged and covered, r3 judged and uncovered: "1/2 must-have requirements
+  // evidenced" is exactly what the check publishes for that population.
+  const requirements = [
+    { id: 'r0', seq: 0, kind: 'must_have' },
+    { id: 'r1', seq: 1, kind: 'must_have' },
+    { id: 'r2', seq: 2, kind: 'must_have' },
+    { id: 'r3', seq: 3, kind: 'must_have' },
+  ]
+  const scoreRow = {
+    must_have_coverage: 50,
+    must_have_source: mustHaveSource(1, 2),
+    uncovered_requirement_ids: ['r3'],
+  }
+
+  const judged = judgedMustHaveIds(requirements, scoreRow)
+  assert.ok(!judged.includes('r0') && !judged.includes('r1'),
+    'rows the engine excluded from coverage were offered to the reviewer comparison as judged')
+
+  // The behavioural half, through the function that produces the stored numbers. The reviewer
+  // claims all three are covered; the engine judged only r3, and said it was not.
+  const judgements = [
+    { requirement_id: 'r0', covered: true },
+    { requirement_id: 'r1', covered: true },
+    { requirement_id: 'r3', covered: false },
+  ]
+  const a = agreementFor(judgements, [3], requirements, judged)
+  assert.equal(a.not_comparable, 2,
+    'a requirement the engine never judged was counted as agreement with the reviewer')
+  assert.equal(a.agreed, 1, 'the one genuinely comparable row must still be compared')
+  assert.equal(a.disagreed, 0)
+
+  // When the check DID judge every must-have, the whole set is comparable — the fix must not throw
+  // the measurement away to be safe.
+  const all = judgedMustHaveIds(requirements, {
+    must_have_coverage: 75, must_have_source: mustHaveSource(3, 4), uncovered_requirement_ids: ['r3'],
+  })
+  assert.deepEqual([...all].sort(), ['r0', 'r1', 'r2', 'r3'])
+
+  // No coverage verdict at all means nothing was judged — absent evidence, not a pass.
+  assert.deepEqual(judgedMustHaveIds(requirements, { must_have_coverage: null, must_have_source: null }), [])
+  assert.deepEqual(judgedMustHaveIds(requirements, null), [])
+
+  // A recorded judged set, when the writer stores one, wins over every inference above.
+  assert.deepEqual(judgedMustHaveIds(requirements, { ...scoreRow, judged_requirement_ids: ['r2', 'r3'] }), ['r2', 'r3'])
+})
+
+test('H44b: the must_have_source denominator survives the round trip it is read back through', () => {
+  // H44's conservative branch turns on parsing `<covered>/<judged>` out of a string the scorer
+  // wrote. Writer and reader live in one file for that reason, and this is what stops them drifting:
+  // change the wording of `mustHaveSource` without changing `parseMustHaveSource` and the reviewer
+  // silently falls back to the uncovered rows for every artifact, with no error anywhere.
+  assert.deepEqual(parseMustHaveSource(mustHaveSource(3, 7)), { covered: 3, judged: 7 })
+  assert.equal(parseMustHaveSource('the posting produced no must-haves'), null,
+    'an unreadable source must be null, never a defaulted denominator')
+
+  // And the string the scorer ACTUALLY stores is one the reader can read — asserted through
+  // computeArtifactScore rather than through the helper, so a caller that stops using the helper is
+  // caught too.
+  const checks = [{
+    check_key: 'must_have_coverage', engine: 'deterministic', state: 'fail',
+    observed: '1/2 must-haves evidenced (2 not reachable by any generated field, not counted either way)',
+    expected: '', offenders: ['#3 something — no evidence'],
+  }]
+  const score = computeArtifactScore({ requirements: [], checks })
+  assert.deepEqual(parseMustHaveSource(score.must_have_coverage.source), { covered: 1, judged: 2 },
+    'the scorer stored a must_have_source the reviewer cannot read back')
+})
+
+// ---------------------------------------------------------------------------------------------
+// H:corrections-before-store — a correction pass placed beside the check that motivates it produces a document the user
+// reads and a record that disagrees with it.
+//
+// The natural home for R1 is `appChecks.ts`, next to `posting_figure_echo`. Put it there and
+// everything looks right: the check goes green, the change log renders, every test written
+// alongside passes. What breaks is invisible from that vantage — `packet.pkg_json` and
+// `insertion.after_text` were both written BEFORE the correction, so they describe text nobody
+// will ever see. Downstream it compounds: `remediation.realEdits()` decides whether a pass edited
+// anything by comparing `after_text` to `before_text`, and `creditClosures()` joins `after_text`
+// to decide which requirements a pass may credit — so the loop credits closures against text that
+// never shipped.
+//
+// The invariant, not the incident: the correction pass must run before the package is persisted,
+// in the ONE function every build funnels through, so that the stored package, the provenance
+// writers and every check all read the same corrected text.
+test('H:corrections-before-store: corrections are applied before the package is stored, not beside the check', () => {
+  // The CALL, not the import. The first version of this guard searched for the bare identifier and
+  // found the `import` line at the top of the file — which precedes everything, so the ordering
+  // assertion was trivially true and the guard passed with the pass moved after the store. Caught
+  // by reverting it; an inert guard is worse than none.
+  // Named 'code', not 'src': a local 'src' shadows the module-level helper of the same name and
+  // throws "Cannot access 'src' before initialization" at the call inside its own initialiser.
+  const code = stripComments(src('appPackets.ts')).replace(/^\s*import[^\n]*\n/gm, '')
+  const iPass = code.search(/await\s+applyCorrectionPass\s*\(/)
+  assert.ok(iPass > 0, 'the correction pass is not CALLED from the package builder at all')
+
+  // It must precede the pkg_json write, the swap writer and the insertion writer.
+  for (const after of ['update packet set pkg_json', 'writeSwaps(', 'writeInsertions(']) {
+    const iAfter = code.indexOf(after)
+    assert.ok(iAfter > 0, `${after} not found — this guard has gone stale`)
+    assert.ok(iPass < iAfter,
+      `applyCorrectionPass runs AFTER ${after}, so what is stored is not what the user reads`)
+  }
+
+  // And it must NOT be called from the checks layer, which runs after the package is already
+  // persisted — that placement is the defect this case exists to prevent.
+  assert.ok(!/applyCorrectionPass/.test(stripComments(src('appChecks.ts'))),
+    'the correction pass moved into appChecks, where it can only correct text already stored')
+})
+
+// H:correction-layer-pure — the pure layer stays pure, because that is what makes every offset and revert path
+// testable without a database. A correction whose rules can only be exercised through pg is a
+// correction whose revert path is exercised by nobody.
+test('H:correction-layer-pure: the correction judgement layer takes no database or HTTP dependency', () => {
+  const pure = stripComments(src('correction.ts'))
+  for (const banned of ['pgClient', '@azure/functions', 'logUsage', 'fetch(']) {
+    assert.ok(!pure.includes(banned), `correction.ts references ${banned} — it is no longer pure`)
+  }
+})
+
+// ---------------------------------------------------------------------------------------------
+// D3 — the substitute figure. THE ANSWER IS THAT THERE IS NO RESOLVER, AND THESE GUARD THAT.
+//
+// The backlog asks for an echoed figure to be replaced with the candidate's own ("60+" -> "62")
+// where one exists. `scanEcho` structurally cannot supply it: the profile side is indexed by the
+// EXACT figure (`profileByKey`), so it answers "does the profile also say 60?" and a hit there is
+// the KEEP branch (`shared_with_profile`) -- the opposite of a substitute. Answering "what is the
+// candidate's corresponding number?" is a different question, keyed on the UNIT, and no such index
+// exists for the profile.
+//
+// `docs/qc-evidence/P8.1-ACCEPTANCE.md` §4 records the accepted resolution: GENERALIZATION ONLY.
+// Substitution may be written only as the AC-10 resolver -- exactly one profile figure sharing the
+// stemmed, exact unit, with `profile_source_key` and offsets recorded, and the substring at those
+// offsets equal to the substituted figure. Zero or two-or-more matches fall through to generalize.
+//
+// Anything that RANKS is forbidden outright. A guessed number in a resume is worse than a false
+// accusation: the candidate has to defend it in an interview. These cases are dormant-but-armed --
+// they cost nothing today and fail the moment someone implements the tempting version.
+
+test('H:no-figure-ranking: nothing in the figure path may rank a candidate substitute', () => {
+  // "Fuzzy matching is for RANKING, never for ACCUSING" already governs this codebase. A figure
+  // SUBSTITUTION is stricter still: it does not merely accuse, it writes a number into the resume,
+  // which the candidate then has to defend in an interview. Nearest-magnitude, most-recent and
+  // best-fuzzy-unit are all forbidden.
+  //
+  // THIS GUARD WAS INERT WHEN FIRST WRITTEN, and was caught by reinstating the defect it names.
+  // It banned the word `nearest` as /\bnearest\b/, which does not match `nearestProfileFigure` --
+  // the trailing \b fails against a camelCase capital, exactly the way the percent regex's trailing
+  // \b never matched "40% growth". A word list is the wrong instrument. These rules match the
+  // CONSTRUCT instead, and are measured against the files as they stand: `Math.abs` appears zero
+  // times in all three, and every `.sort(` in them orders by a document OFFSET.
+  for (const f of ['figureEcho.ts', 'correction.ts', 'appCorrections.ts']) {
+    const code = stripComments(src(f))
+
+    // 1. Absolute difference has no honest use in an EXACT-match figure path. Its only purpose
+    //    here would be "how far is this profile figure from the posting's?", which is ranking.
+    assert.ok(!/Math\.abs\s*\(/.test(code), `${f} uses Math.abs — the figure path matches exactly, it never measures distance`)
+
+    // 2. Sorting may order by POSITION and nothing else. This is the rule that actually catches a
+    //    resolver: ranking candidates means sorting them by value.
+    for (const m of code.matchAll(/\.sort\(\s*\([^)]*\)\s*=>\s*([^)]*)\)/g)) {
+      assert.match(m[1].trim(), /^[ab]\.(figure\.)?(start|char_start|applied_seq)\s*-\s*[ab]\.(figure\.)?(start|char_start|applied_seq)$/,
+        `${f} sorts by "${m[1].trim()}" — the figure path may order by document offset only`)
+    }
+
+    // 3. Names, matched WITHOUT a trailing boundary so camelCase cannot hide them.
+    for (const banned of [/nearest/i, /closest/i, /best.?match/i, /most.?recent/i, /\bsimilarity\s*\(/, /levenshtein/i, /\brank(ed|ing|By)?\b/i]) {
+      assert.ok(!banned.test(code), `${f} names a ranking construct (${banned})`)
+    }
+  }
+})
+
+test('H:generalize-closed-range: a generalisation may never be a new number', () => {
+  // The whole risk of D3 in one assertion. `generalize` is the ONLY function that produces
+  // replacement text, so if a substitute figure is ever invented it must appear here. Its range is
+  // a closed vocabulary: an order-of-magnitude phrase, the word "multiple", or null (escalate).
+  // "62" -- or any bare quantity -- can never be a legal output.
+  const corpus = ['$18M portfolio', '$400k budget', '60+ reports', 'three units', '40% growth',
+                  '18M users', '400k users', '2.5B valuation', 'USD 18M portfolio', '1,200 staff',
+                  'sixty engineers', 'one hundred engineers', '$5,000 stipend', '18 million users']
+  let produced = 0
+  for (const t of corpus) {
+    for (const f of extractFigures(t)) {
+      const g = generalize(f)
+      if (g === null) continue
+      produced++
+      assert.ok(/^\d+-figure$/.test(g) || g === 'multiple',
+        `generalize invented "${g}" from "${t}" — the range is N-figure | multiple | null`)
+    }
+  }
+  assert.ok(produced >= 8, `the corpus must actually exercise generalize (produced ${produced})`)
+})
+
+test('H:profile-figure-provenance: source=profile_figure is unforgeable', () => {
+  // AC-10. Today nothing writes it -- `planCorrections` always records 'generalized', which is the
+  // accepted resolution. This guard is the tripwire on the version someone writes later: the
+  // moment `source: 'profile_figure'` appears, the same file must also carry the provenance that
+  // makes the claim checkable, or the assertion fails.
+  for (const f of ['correction.ts', 'appCorrections.ts']) {
+    const code = stripComments(src(f))
+    const writes = /source\s*[:=]\s*'profile_figure'/.test(code)
+    if (!writes) continue
+    for (const need of ['profile_source_key', 'profile_char_start', 'profile_char_end']) {
+      assert.ok(code.includes(need),
+        `${f} writes source='profile_figure' without ${need} — an unprovenanced substitute is a fabricated number`)
+    }
+  }
+  // And the shipped behaviour, so this case is not purely structural: every planned correction
+  // today is a generalisation, and none of them is a bare number.
+  const gen = 'Managed a $18M portfolio across three business units.'
+  const rows = planCorrections('ResumeSummary', gen, scanEcho(gen, 'Own a $18M portfolio across three business units.', 'Profile: ran platform engineering.').echoes)
+  assert.ok(rows.length > 0, 'the fixture must actually produce corrections')
+  for (const r of rows) {
+    assert.equal(r.source, 'generalized', 'generalization is the only path P8.1 ships')
+    assert.ok(!/^\d[\d,]*(\.\d+)?\+?$/.test(r.replacement), `replacement "${r.replacement}" is a bare number`)
+  }
+})
+
+// H:one-demand-parser — D23. There is ONE regex that reads a demanded quantity out of posting text,
+// it lives in ownerFacts.ts beside the fact catalogue, and dimensions.ts imports it.
+//
+// The alternative is what nearly happened: dimensions.ts already needed people and usd figures that
+// `demandedNumber` could not give it, and the shortest path was a second regex next to the grading
+// code. Two parsers is two answers, and they diverge on the first posting worded unusually — the
+// gate would settle a requirement the JD step showed as ungraded, over the same sentence.
+//
+// This is a SOURCE grep on purpose: the rule is structural (where a construct may live), which a
+// runtime test cannot express. It strips comments first, because the file documents the patterns it
+// must not contain and an earlier guard in this suite fired on its own explanatory comment.
+test('H:one-demand-parser: dimensions.ts derives no quantity of its own', () => {
+  const body = stripComments(src('dimensions.ts'))
+  assert.ok(/from '\.\/ownerFacts'/.test(body), 'dimensions.ts no longer imports the shared parser')
+  assert.ok(/parseQuantity/.test(body), 'dimensions.ts does not call the shared demand parser at all')
+
+  // Any regex literal containing a digit class is a numeric extractor. `asks` matchers are the
+  // legitimate exception - they decide WHICH lines belong to an axis, they do not read a figure -
+  // so they are excluded by name rather than by hoping the pattern misses them.
+  const withoutAsks = body.replace(/asks:\s*\/(?:\\.|\[[^\]]*\]|[^/\n\\])*\/[a-z]*/g, 'asks:<matcher>')
+  const numericLiterals = withoutAsks.match(/\/(?:\\.|\[[^\]]*\]|[^/\n\\])*\\d(?:\\.|\[[^\]]*\]|[^/\n\\])*\/[a-z]*/g) || []
+  assert.deepEqual(numericLiterals, [],
+    `dimensions.ts contains its own numeric extraction: ${numericLiterals.join(' ; ')}. ` +
+    `A second demand parser is a second answer. Extend parseQuantity in ownerFacts.ts instead.`)
+})
+
+// ---------------------------------------------------------------------------------------------
+// H:usd-scale-parity — D23. A usd fact and a usd demand must be compared on the SAME scale.
+//
+// This is not hypothetical and the evidence is two live writers of one column:
+//   * Settings > Facts (app/src/screens/Settings.jsx:1489) saves
+//     `Number(String(value).replace(/[^0-9.]/g, ''))`, so an owner typing "$18M" is stored as
+//     value: '$18M', value_num: 18.
+//   * `deriveFacts` (ownerFacts.ts) reads the same "$18M" off the resume and stores 18000000.
+//   * `upsertStated` (appFacts.ts) takes the client's valueNum verbatim, so both land in owner_fact.
+// Comparing value_num naively gives `18 >= 10000000` false and prints "Falls short" at an owner who
+// runs an $18M budget. That is an ACCUSATION manufactured by a unit bug.
+//
+// Behavioural, not spelling: it runs the real comparator over both stored shapes.
+test('H:usd-scale-parity: the two owner_fact writers reach the same verdict', async () => {
+  const { checkAgainstFacts } = await import('../dist/functions/tests/ownerFacts.js')
+  const demand = 'Own a P&L or budget of $10M+ across three business units'
+  const f = (value, value_num) => [{
+    key: 'scope.largest_budget', value, value_num, source: 'owner_stated', confirmed_at: '2026-01-01',
+  }]
+
+  const derived = checkAgainstFacts(demand, f('$18M', 18000000))
+  const typed = checkAgainstFacts(demand, f('$18M', 18))
+  assert.equal(derived.verdict, 'satisfied', 'the derived writer stopped comparing')
+  assert.notEqual(typed.verdict, 'not_satisfied',
+    'an owner running an $18M budget was told they fall short, because Settings stored 18')
+  assert.equal(typed.verdict, derived.verdict,
+    `the same $18M budget produced ${typed.verdict} typed and ${derived.verdict} derived`)
+
+  // The mirror, and the one that matters more: a genuinely small figure must NOT be rescaled into
+  // a pass. Turning a real shortfall green is strictly worse than the bug being fixed.
+  assert.equal(checkAgainstFacts(demand, f('$18K', 18000)).verdict, 'not_satisfied',
+    'an $18K budget was rescaled into a pass against a $10M demand')
+
+  // And a figure whose scale nothing states is refused rather than guessed in either direction.
+  assert.equal(checkAgainstFacts(demand, f('18', 18)).verdict, 'unknown',
+    'a bare "18" was graded as though its units were known')
+})
+
+// ---------------------------------------------------------------------------------------------
+// H:comparator-units-agree — D23. `dimensions.hasNumericComparator` and `ownerFacts.checkAgainstFacts`
+// must agree about which units have arithmetic, because they answer for the same fact on two
+// surfaces: the JD step's comparison row and the artifact GATE.
+//
+// When they disagreed, the product said both things at once — this is the state D23 fixed, where
+// `hasNumericComparator` returned false for usd (so the JD step printed "no comparator exists")
+// while nothing in the gate agreed or disagreed because the gate never compared it either. Widening
+// one without the other is the half-fix that ships and does nothing.
+test('H:comparator-units-agree: one answer to which units have arithmetic', async () => {
+  const { hasNumericComparator } = await import('../dist/functions/tests/dimensions.js')
+  const { checkAgainstFacts, FACT_CATALOGUE, isComparableUnit } =
+    await import('../dist/functions/tests/ownerFacts.js')
+
+  // A probe per unit that the unit's own `asks` matcher accepts AND that states a figure.
+  const probes = {
+    years: ['Requires 10+ years of engineering leadership experience', '14', 14],
+    people: ['Lead a distributed organization of 60 engineers', '62', 62],
+    usd: ['Own a P&L or budget of $10M+ across three business units', '$18M', 18000000],
+  }
+  let checked = 0
+  for (const def of FACT_CATALOGUE) {
+    if (!def.unit) continue
+    assert.equal(hasNumericComparator(def.key), isComparableUnit(def.unit),
+      `${def.key}: dimensions says ${hasNumericComparator(def.key)} but ownerFacts says ` +
+      `${isComparableUnit(def.unit)} about unit "${def.unit}"`)
+    const probe = probes[def.unit]
+    if (!probe || !def.asks.test(probe[0])) continue
+    // ...and the claim is true of the RUNTIME, not just of the two predicates agreeing with
+    // each other: a unit declared comparable must actually produce a comparison.
+    const v = checkAgainstFacts(probe[0], [{
+      key: def.key, value: probe[1], value_num: probe[2], source: 'owner_stated', confirmed_at: '2026-01-01',
+    }])
+    if (v && v.fact_key === def.key) {
+      assert.notEqual(v.verdict, 'unknown',
+        `${def.key} is declared comparable but "${probe[0]}" still returned unknown — the ` +
+        `comparator was widened and the arithmetic was not`)
+      checked++
+    }
+  }
+  // Absent evidence is not a pass: if no probe reached its def, the loop above proved nothing.
+  assert.ok(checked >= 2, `only ${checked} unit(s) were actually exercised — this guard has gone blind`)
+})
+
+// ---------------------------------------------------------------------------------------------
+// H:facts-widen-no-coverable-shift — D23. Extending the fact comparator must not move which
+// requirements the GATE judges as document coverage.
+//
+// `checks.ts:474-475` drops fact-resolved rows from `coverable`, and this is the mechanism by which
+// a change to `checkAgainstFacts` reaches the artifact gate. Read on the source: `ownedByFacts` is
+// built from ALL fact verdicts INCLUDING `unknown`, and `coverable` excludes `ownedByFacts` — so a
+// row moving from `unknown` to `satisfied`/`not_satisfied` leaves `coverable` identical. That is the
+// prediction. It was ALSO the prediction for D22, and D22's lane wrote that it had "not verified
+// live". Reading a predicate is not measuring it, so this measures it.
+//
+// The change that IS intended and must remain visible: the row's BUCKET moves. `facts_needed` loses
+// it and `facts_settled` / `fact_shortfall` gains it. A test asserting only "nothing changed" would
+// pass just as well if the comparator had never been widened.
+test('H:facts-widen-no-coverable-shift: the bucket moves, the denominator does not', async () => {
+  const { runChecks } = await import('../dist/functions/tests/checks.js')
+  const RESUME = { ResumeSummary: 'Engineering leader.', SkillsBullets1: 'Platform' }
+  const requirements = [
+    { seq: 0, verbatim: 'Lead a distributed organization of 60+ engineers', item_text: '', kind: 'must_have' },
+    { seq: 1, verbatim: 'Own a P&L or budget of $10M+ across three business units', item_text: '', kind: 'must_have' },
+    { seq: 2, verbatim: 'Deep experience with platform architecture', item_text: '', kind: 'must_have' },
+  ]
+  const f = (key, value, value_num, confirmed) =>
+    ({ key, value, value_num, source: 'owner_stated', confirmed_at: confirmed ? '2026-08-20T00:00:00Z' : null })
+
+  // The row shape is `check_key` / `observed` / `offenders` — asserted here because reading it off
+  // the wrong field name gives every lookup `undefined` and every comparison passes vacuously,
+  // which is how this test failed the first time it was run.
+  const find = (rs, key) => rs.find(r => r.check_key === key)
+  const denom = (rs) => {
+    const c = find(rs, 'must_have_coverage')
+    // The population the coverage check judged, however it publishes it.
+    return c ? `${c.state}|${c.observed || ''}|${(c.offenders || []).length}` : 'ABSENT'
+  }
+  assert.ok(find(runChecks({ type: 'resume', pkg: RESUME, requirements, facts: [] }), 'must_have_coverage'),
+    'must_have_coverage is not in the result under that key — the lookups below would all be undefined')
+
+  // UNCONFIRMED facts -> every scope row is `unknown` (an unconfirmed fact is a guess about the
+  // owner and must not settle a gate). This is the pre-D23 shape of the verdicts.
+  const unresolved = runChecks({ type: 'resume', pkg: RESUME, requirements,
+    facts: [f('scope.largest_team', '62 engineers', 62, false), f('scope.largest_budget', '$18M', 18000000, false)] })
+  // CONFIRMED -> D23's arithmetic runs and the same two rows resolve.
+  const resolved = runChecks({ type: 'resume', pkg: RESUME, requirements,
+    facts: [f('scope.largest_team', '62 engineers', 62, true), f('scope.largest_budget', '$18M', 18000000, true)] })
+
+  // Precondition, asserted rather than assumed: the two runs really do differ in verdict, or the
+  // equality below is measuring nothing.
+  assert.equal(find(unresolved, 'facts_settled').state, 'not_applicable',
+    'the unconfirmed run already settled something — this comparison is vacuous')
+  assert.equal(find(resolved, 'facts_settled').state, 'pass',
+    'the confirmed run settled nothing — D23 arithmetic did not run, so nothing is being compared')
+
+  // THE INVARIANT: the coverage population is byte-identical across that verdict change.
+  assert.equal(denom(resolved), denom(unresolved),
+    'widening the fact comparator moved which requirements the gate judges as document coverage')
+
+  // ...and the intended, visible half: the bucket moved.
+  const needed = (rs) => (find(rs, 'facts_needed')?.offenders || []).length
+  assert.ok(needed(unresolved) > needed(resolved),
+    `facts_needed did not shrink (${needed(unresolved)} -> ${needed(resolved)}) — the comparator ` +
+    `was widened and no requirement changed bucket, so this guard is watching nothing`)
+})
+
+// ---------------------------------------------------------------------------------------------
+// P7 hygiene — D11 items 4 and 8, D12, D13.
+//
+// The body of ONE top-level `export async function <name>(`. `functionBody` above matches the
+// synchronous form only, and every function these cases care about is async — a guard that silently
+// searched '' would have passed on nothing, which is the failure mode this file exists to refuse.
+const asyncFunctionBody = (body, name) => {
+  const start = body.indexOf(`export async function ${name}(`)
+  if (start < 0) return ''
+  const end = body.indexOf('\n}', start)
+  return end < 0 ? body.slice(start) : body.slice(start, end + 2)
+}
+
+// H:pipeline-error-status — `POST /api/pipeline/run` returned HTTP 200 with `pass:false` when an
+// exception had aborted the run. `api-test.yml` exits 1 only on status >= 400, so a fully failed
+// pipeline produced a GREEN Actions run: the one vehicle that verifies this API reported success for
+// a run that had failed, and nobody reading the Actions list could tell the two apart.
+//
+// The invariant, and it is about the CALLER not the number: a run that produced nothing must be
+// distinguishable from one that produced a packet, by a caller that reads only the HTTP status. The
+// completed-but-not-clean case is deliberately NOT covered here — it keeps a 2xx because documents
+// exist and the request did succeed, and it is the api-test.yml assertion (H:pass-false-is-red) that
+// makes that case red. Two exits, two mechanisms, on purpose.
+test('H:pipeline-error-status: a run that aborted does not report an HTTP success', async () => {
+  const prev = { conn: process.env.AZURE_STORAGE_CONNECTION_STRING, key: process.env.OPENAI_API_KEY }
+  try {
+    // A connection string this malformed makes the first TableClient throw inside the handler's
+    // try — the real abort path, no network, no Azure.
+    process.env.AZURE_STORAGE_CONNECTION_STRING = 'this-is-not-a-connection-string'
+    process.env.OPENAI_API_KEY = 'sk-test-not-a-real-key'
+    const { pipelineRun } = await import('../dist/functions/tests/pipeline.js')
+    const req = { method: 'POST', query: new Map(), params: {}, json: async () => ({ jobId: 'does-not-exist' }) }
+    const res = await pipelineRun(req, {})
+
+    assert.ok(res.status >= 400,
+      `the run aborted and returned HTTP ${res.status} — a caller reading the status cannot tell this from a delivered packet`)
+    assert.equal(res.jsonBody.pass, false)
+    assert.equal(res.jsonBody.outcome, 'error', 'the body must name the outcome, not leave it to be inferred')
+    // The body still carries the diagnosis: an error status must not cost the caller the reason.
+    assert.ok(String(res.jsonBody.detail || '').length > 0, 'the failure detail was dropped along with the 200')
+    assert.ok(Array.isArray(res.jsonBody.steps), 'steps must survive the error path')
+
+    // A missing model key is a configuration error on the server, and it too returned 200.
+    delete process.env.OPENAI_API_KEY
+    const noKey = await pipelineRun(req, {})
+    assert.ok(noKey.status >= 400, `a missing OPENAI_API_KEY returned HTTP ${noKey.status}`)
+    assert.equal(noKey.jsonBody.outcome, 'error')
+  } finally {
+    if (prev.conn === undefined) delete process.env.AZURE_STORAGE_CONNECTION_STRING
+    else process.env.AZURE_STORAGE_CONNECTION_STRING = prev.conn
+    if (prev.key === undefined) delete process.env.OPENAI_API_KEY
+    else process.env.OPENAI_API_KEY = prev.key
+  }
+})
+
+// H:pass-false-is-red — the caller half of the same defect, and the general one. 85 routes in this
+// repo return a `pass` boolean; `api-test.yml` exited 1 on status >= 400 and ignored every one of
+// them. Changing one route's status code would have closed one case out of eighty-five.
+//
+// This EXECUTES the real assertion out of the workflow file rather than grepping for it. A guard
+// that checked the YAML contained the string "pass" would be defeated by any rewrite that kept the
+// word and lost the behaviour — which is exactly how two guards were defeated today, by renaming a
+// constant while keeping the defect.
+test('H:pass-false-is-red: api-test.yml fails the job on a body that self-reports failure', () => {
+  const yml = readFileSync(new URL('../../.github/workflows/api-test.yml', import.meta.url).pathname, 'utf8')
+  const start = yml.indexOf('def body_failed(result):')
+  assert.notEqual(start, -1, 'api-test.yml no longer defines body_failed — the D12 caller fix is gone')
+  // From the START OF THE LINE, not from the match: slicing at the match drops the indent that the
+  // block-extent test depends on, and the loop then stops on its own first line.
+  const lineStart = yml.lastIndexOf('\n', start) + 1
+  const indent = start - lineStart
+  const lines = []
+  for (const line of yml.slice(lineStart).split('\n')) {
+    if (line.trim() && !line.startsWith(' '.repeat(indent))) break
+    lines.push(line.slice(indent))
+    if (lines.length > 1 && line.trim() === '') break
+  }
+  const fn = lines.join('\n')
+  assert.match(fn, /^def body_failed\(result\):\n\s+if/, `body_failed did not extract cleanly:\n${fn}`)
+
+  const cases = [
+    // The exact shape D12 names: the pipeline's completed-but-not-clean body.
+    [{ pass: false, outcome: 'completed_with_findings', detail: 'x', warnings: ['w'] }, 'pass'],
+    [{ pass: false, outcome: 'error', detail: 'boom' }, 'pass'],
+    [{ pass: true, detail: 'clean' }, null],
+    // `ok:false` is a REFUSAL in this codebase (appRemediation: "the loop is switched off for this
+    // owner"). A refusal is an outcome, not an error — firing on it is the cry-wolf failure.
+    [{ ok: false, detail: 'the remediation loop is switched off for this owner (Settings)' }, null],
+    // Not a verdict: a string, a count, an absent field, a non-object body.
+    [{ pass: 'false' }, null],
+    [{ pass: 0 }, null],
+    [{ analysis: {} }, null],
+    [[1, 2, 3], null],
+  ]
+  const script = fn + '\nimport json,sys\n'
+    + 'cases = json.loads(sys.stdin.read())\n'
+    + 'print(json.dumps([body_failed(c) for c in cases]))\n'
+  const out = execFileSync('python3', ['-c', script], { input: JSON.stringify(cases.map(c => c[0])), encoding: 'utf8' })
+  assert.deepEqual(JSON.parse(out), cases.map(c => c[1]),
+    'the workflow assertion no longer distinguishes a failed body from a passing or refusing one')
+})
+
+// H:orphan-drive-files — D13. `Promise.all(docJobs)` rejects on the FIRST rejection while every
+// other copy runs to completion in the background, so at the catch site there was nothing to
+// enumerate: the sibling files had not finished being created yet, and when they did their ids went
+// nowhere. There is no Drive DELETE anywhere in `api/src` (measured 2026-08-21: zero hits for a
+// DELETE against `drive/v3/files`), so every failed multi-document build leaked real Google files
+// onto the quota-bearing OAuth account, permanently and unenumerably.
+//
+// The invariant is the CLEANUP, not the spelling of `allSettled`: when any job fails, every file
+// that WAS created is deleted, none is reported as delivered, and anything the delete could not
+// remove is named so a human can.
+test('H:orphan-drive-files: a failed multi-document build leaves no file behind', async () => {
+  const { buildAllOrCleanUp } = await import('../dist/functions/tests/pipeline.js')
+
+  const removed = []
+  const remove = async (id) => { removed.push(id); return true }
+  // Job 0 fails FAST; jobs 1 and 2 succeed LATER — the ordering that made the ids unenumerable.
+  const slow = (v) => new Promise((res) => setTimeout(() => res(v), 15))
+  const out = await buildAllOrCleanUp(
+    [Promise.reject(new Error('Inject Portfolio failed: HTTP 500')), slow('FILE_B'), slow('FILE_C')],
+    remove,
+  )
+  assert.deepEqual(removed.sort(), ['FILE_B', 'FILE_C'],
+    'a sibling copy that completed after the first failure was not deleted — this is the leak')
+  assert.deepEqual(out.ids, [], 'a failed build must not report documents as delivered')
+  assert.deepEqual(out.orphaned, [])
+  assert.equal(out.errors.length, 1)
+
+  // A delete that FAILS is reported as an orphan, never silently counted as cleaned. Absent
+  // evidence is not_applicable, never pass.
+  const stubborn = await buildAllOrCleanUp(
+    [Promise.reject(new Error('boom')), slow('FILE_D')],
+    async () => false,
+  )
+  assert.deepEqual(stubborn.orphaned, ['FILE_D'], 'a delete that failed was counted as cleanup')
+  assert.deepEqual(stubborn.cleanedUp, [])
+
+  // Every job fails at the copy step: nothing was created, so nothing is cleaned up and the run
+  // must not CLAIM a cleanup. Reporting a cleanup that had nothing to clean is how a cleanup path
+  // goes green while broken.
+  const allFailed = await buildAllOrCleanUp(
+    [Promise.reject(new Error('copy HTTP 403')), Promise.reject(new Error('copy HTTP 403'))],
+    async () => { throw new Error('nothing was created — cleanup must not run') },
+  )
+  assert.deepEqual(allFailed.ids, [])
+  assert.deepEqual(allFailed.cleanedUp, [])
+  assert.deepEqual(allFailed.orphaned, [])
+  assert.equal(allFailed.errors.length, 2)
+
+  // The happy path is untouched: nothing is deleted and every id is returned.
+  const clean = await buildAllOrCleanUp([slow('A'), slow('B')], async () => {
+    throw new Error('cleanup must not run when every job succeeded')
+  })
+  assert.deepEqual(clean.ids, ['A', 'B'])
+  assert.deepEqual(clean.cleanedUp, [])
+})
+
+// H:orphan-after-copy — the half that is invisible from the caller. `copyAndInject` and
+// `renderArtifact` both copied a template and then did more work on the new file; a throw in that
+// later work left a real file whose id existed ONLY in the frame that had just thrown, so no catch
+// block anywhere could have cleaned it up. `copyThen` owns both halves for exactly that reason.
+test('H:orphan-after-copy: a failure after the copy deletes the file it created', async () => {
+  const { copyThen } = await import('../dist/functions/tests/packetTemplates.js')
+  const calls = []
+  const realFetch = globalThis.fetch
+  globalThis.fetch = async (url, init) => {
+    calls.push(`${init?.method || 'GET'} ${String(url)}`)
+    if (String(url).includes('/copy')) return { ok: true, status: 200, json: async () => ({ id: 'NEW_FILE_ID' }) }
+    return { ok: true, status: 204, json: async () => ({}) }
+  }
+  try {
+    await assert.rejects(
+      () => copyThen('tok', 'TPL', 'Portfolio', 'FOLDER', async () => { throw new Error('inject HTTP 500') }),
+      (err) => {
+        assert.match(err.message, /inject HTTP 500/, 'the original failure must survive the cleanup')
+        assert.match(err.message, /NEW_FILE_ID/, 'the message must name the file, or nobody can check it is gone')
+        return true
+      })
+    assert.ok(calls.includes('DELETE https://www.googleapis.com/drive/v3/files/NEW_FILE_ID'),
+      `the copy created before the failure was never deleted — calls were: ${calls.join(' | ')}`)
+    assert.ok(calls.some((c) => c.includes('/copy')), 'no copy was issued')
+  } finally { globalThis.fetch = realFetch }
+})
+
+// H:owner-config-is-read — P7 item 8. The Auth & Config screen has offered `google.resumeTemplateId`,
+// `google.portfolioTemplateId`, `google.coverLetterTemplateId`, `google.outputFolderId`,
+// `microsoft.senderEmail` and `microsoft.recipientEmail` since it was written; `POST /api/config`
+// stored every one of them; `CONFIG_KEYS` listed four keys and none of these six. The pipeline used
+// module constants, so an owner could set a template id and watch the run copy a different document.
+//
+// A setting that exists and is not read is worse than one that does not exist: it tells the owner
+// they are in control when they are not. The invariant is therefore about the READ — not that a
+// constant was renamed, which is a rejection rather than a fix.
+test('H:owner-config-is-read: every pipeline setting the console writes is actually read', async () => {
+  const { settingsFromConfig, CONFIG_KEYS, SEED_DRIVE_IDS, SEED_MAILBOXES } =
+    await import('../dist/functions/tests/pipelineConfig.js')
+
+  // Distinct, VALID owner values — a shared value could not tell a real read from a copy of one key.
+  const owner = {
+    [CONFIG_KEYS.resumeTemplateId]: '1ownerRESUMEaaaaaaaaaaaaaaaaaaaaaaaa',
+    [CONFIG_KEYS.portfolioTemplateId]: '1ownerPORTFOLIObbbbbbbbbbbbbbbbbbbb',
+    [CONFIG_KEYS.coverLetterTemplateId]: '1ownerCOVERcccccccccccccccccccccccc',
+    [CONFIG_KEYS.outputFolderId]: '1ownerFOLDERdddddddddddddddddddddddd',
+    [CONFIG_KEYS.senderEmail]: 'ops@another-tenant.example',
+    [CONFIG_KEYS.recipientEmail]: 'candidate@another-tenant.example',
+  }
+  const s = settingsFromConfig(owner)
+  for (const [field, key] of [
+    ['resumeTemplateId', CONFIG_KEYS.resumeTemplateId], ['portfolioTemplateId', CONFIG_KEYS.portfolioTemplateId],
+    ['coverLetterTemplateId', CONFIG_KEYS.coverLetterTemplateId], ['outputFolderId', CONFIG_KEYS.outputFolderId],
+    ['senderEmail', CONFIG_KEYS.senderEmail], ['recipientEmail', CONFIG_KEYS.recipientEmail],
+  ]) {
+    assert.equal(s[field].value, owner[key], `${key} is written by the console and still not read`)
+    assert.equal(s[field].source, 'config', `${field} did not report where its value came from`)
+  }
+
+  // Unset falls back to the SEED and says so — the code seeds a first value, it does not own it.
+  const seeded = settingsFromConfig({})
+  assert.equal(seeded.resumeTemplateId.value, SEED_DRIVE_IDS.resumeTemplateId)
+  assert.equal(seeded.resumeTemplateId.source, 'default')
+  assert.equal(seeded.senderEmail.value, SEED_MAILBOXES.sender)
+  assert.deepEqual(seeded.warnings, [], 'an unset setting is absent, not a misconfiguration')
+
+  // A junk value is REFUSED and REPORTED, never sent to Drive or Graph as a URL path segment.
+  const junk = settingsFromConfig({
+    [CONFIG_KEYS.resumeTemplateId]: 'Unknown',
+    [CONFIG_KEYS.senderEmail]: 'not an address',
+  })
+  assert.equal(junk.resumeTemplateId.value, SEED_DRIVE_IDS.resumeTemplateId)
+  assert.equal(junk.senderEmail.value, SEED_MAILBOXES.sender)
+  assert.equal(junk.warnings.length, 2, `a refused setting was not reported: ${JSON.stringify(junk.warnings)}`)
+  assert.ok(junk.warnings.every((w) => /google\.resumeTemplateId|microsoft\.senderEmail/.test(w)),
+    'a warning that does not name the setting cannot be acted on')
+})
+
+// H:no-second-id-copy — the same four Drive ids were declared in `pipeline.ts` AND in
+// `packetTemplates.ts`, byte-identical, which is how one copy goes stale without anyone noticing;
+// the Graph sender was a bare literal on the send path, which is what made the pipeline
+// single-tenant. Structural rather than behavioural on purpose: this guards the RETURN of a second
+// copy, which no runtime test can observe.
+//
+// `packetTemplates.ts` is exempt — it is the one home the seeds are allowed to have. The legacy
+// MT-XX and diag routes are also exempt and deliberately untouched: they are the dev-console test
+// harness, not the product, and are recorded in DEFERRED.md instead of half-fixed here.
+test('H:no-second-id-copy: the product paths carry no Drive id or mailbox literal', () => {
+  const DRIVE_IDS = [
+    '1bwOcxvkbihRTUjOzVjrWSPnDomwqy6gOz6229mdzbZw',
+    '1ULZZLBs9zwLEN6c8hcXvBCNPk0YyTGg0yIlFSYkGIec',
+    '1QN4Cnw4R9krUH4kEpl_lnhoPOkY5PG2oUKRMjxBfWV0',
+    '1MlVLMSQ0EQJoAtpKC1Mv7mDCAJDmdJTt',
+  ]
+  for (const file of ['pipeline.ts', 'appPackets.ts']) {
+    const code = stripComments(src(file))
+    for (const id of DRIVE_IDS) {
+      assert.ok(!code.includes(id), `${file} has its own copy of Drive id ${id} again`)
+    }
+    assert.ok(!/['"`]dev@enterpriseds\.io['"`]|users\/dev@enterpriseds\.io/.test(code),
+      `${file} hardcodes the Graph sender again — the pipeline is single-tenant`)
+    assert.ok(!/['"`]von\.ellis@enterpriseds\.io['"`]/.test(code),
+      `${file} hardcodes the recipient again`)
+  }
+  // The seeds still exist, in one place. A "fix" that deleted them is not a fix.
+  assert.ok(DRIVE_IDS.every((id) => src('packetTemplates.ts').includes(id)),
+    'the seeded Drive ids are gone — the owner now has no first value at all')
+})
+
+// H:duplicate-prompt-roles — P7 item 4, and the fact was established FROM THE PRIMARY SOURCE, which
+// is the only reason it is a guard rather than a note. Comparing the two live rows would only have
+// shown that they are the same; it could never have said which one is wrong. The source both rows
+// derive from is the zap export, checked into this repo at `docs/zap-289877647/prompts/`.
+//
+//   LIVE (GET /api/prompts, Actions run 32435525197, 2026-08-21):
+//     resume_user     29,068 chars  sha256 4b4af848...  \ identical
+//     portfolio_user  29,068 chars  sha256 4b4af848...  /
+//     ats_user         8,807 chars  sha256 970fce2e...    (control: differs)
+//
+//   PRIMARY SOURCE:
+//     node 289877661 "Update Resume/Portfolio Fields"       user_message 29,069 chars
+//     node 299599701 "Copy: Update Resume/Portfolio Fields" user_message  7,712 chars
+//
+//   Live `portfolio_user` matches node 289877661 — the RESUME node — whitespace-normalised, with a
+//   29,060-char common prefix; against node 299599701 it diverges after 329 chars. `portfolio_user`
+//   was seeded from the wrong node. It is the resume prompt (42 `###` markers, no mention of JSON)
+//   while Call 2 parses with `parseAgentJson`, so the portfolio and cover letter fall back to Call 1
+//   on every run at the cost of a second 16,000-token call.
+//
+// THE CRY-WOLF HALF, AND IT IS THE POINT OF THE `_user` RESTRICTION. `resume_system` and
+// `portfolio_system` are ALSO byte-identical live (329 chars, sha256 803330a2...) and that is
+// CORRECT — both zap nodes carry the same 331-char `system_message`. An earlier draft of this check
+// flagged them, which would have fired on correct configuration on every single run. Two calls may
+// share a system prompt; they may not share the instruction that says what to produce.
+test('H:duplicate-prompt-roles: two generation roles sharing one user prompt are named', async () => {
+  const { duplicatePromptPairs } = await import('../dist/functions/tests/pipeline.js')
+
+  // The live shape, reduced: the real defect, and the legitimate duplication beside it.
+  const live = {
+    resume_user: 'Objective:\nYou are an executive recruiter...### Section ###',
+    portfolio_user: 'Objective:\nYou are an executive recruiter...### Section ###',
+    resume_system: 'You are an executive recruiter such as Andrew LaCivita.',
+    portfolio_system: 'You are an executive recruiter such as Andrew LaCivita.',
+    ats_user: 'You are the ATS quality-control reviewer.',
+  }
+  assert.deepEqual(duplicatePromptPairs(live), [['portfolio_user', 'resume_user']],
+    'either the real defect was missed, or the shared system prompt was accused of being one')
+
+  // Near-identical is NOT identical. A similarity score would have called these a duplicate; an
+  // accusation may not be made on a score (H4).
+  assert.deepEqual(duplicatePromptPairs({
+    a_user: 'You are an executive recruiter such as Andrew LaCivita.',
+    b_user: 'You are an executive recruiter such as Andrew LaCivita!',
+  }), [])
+
+  // Two prompts that are simply UNSET are absent, not duplicated. Absent evidence is never a finding.
+  assert.deepEqual(duplicatePromptPairs({ a_user: '', b_user: '', c_user: '   ' }), [])
+  assert.deepEqual(duplicatePromptPairs({}), [])
+
+  // AND IT IS CALLED. A detector nothing invokes is the tested dead code D2 already records; the
+  // check is on the BODY of the generator, not the module, because an import line is not a call site.
+  const body = asyncFunctionBody(stripComments(src('pipeline.ts')), 'buildPackageForJD')
+  assert.ok(body.length > 500, 'buildPackageForJD not found — this guard has gone stale')
+  assert.ok(/duplicatePromptPairs\(prompts\)/.test(body),
+    'the duplicate-prompt detector is not called from the generator that loads the prompts')
+  // And the finding reaches the caller rather than a console.warn nobody reads (P7 item 6).
+  const call = body.indexOf('duplicatePromptPairs(prompts)')
+  assert.ok(/warnings\.push\(/.test(body.slice(call, call + 500)),
+    'the duplicate-prompt finding is not pushed onto warnings, so no caller can see it')
+})
+
+// H:run-outcome-distinguishable — the D12 decision as a pure function, because a status decision
+// reachable only through a live Function App cannot be guarded and the sandbox cannot reach one.
+// The invariant is DISTINGUISHABILITY, which is what the row actually complains about: a caller must
+// be able to tell "produced nothing" from "produced a packet" and from "produced a clean packet".
+test('H:run-outcome-distinguishable: every run outcome is separable by a caller', async () => {
+  const { runOutcome } = await import('../dist/functions/tests/pipeline.js')
+
+  const aborted = runOutcome({ caught: true, docCount: 0, emailsSent: 0, warningCount: 0 })
+  const dirty = runOutcome({ caught: false, docCount: 4, emailsSent: 2, warningCount: 3 })
+  const clean = runOutcome({ caught: false, docCount: 4, emailsSent: 2, warningCount: 0 })
+
+  // A run that produced nothing must not share a status with one that delivered a packet.
+  assert.ok(aborted.status < 200 || aborted.status > 299,
+    `an aborted run returned HTTP ${aborted.status} — this is the D12 defect`)
+  assert.notEqual(aborted.status, dirty.status)
+  assert.notEqual(aborted.status, clean.status)
+
+  // All three are separable on `outcome`, which is what a caller that does read the body uses.
+  assert.equal(new Set([aborted.outcome, dirty.outcome, clean.outcome]).size, 3)
+  assert.deepEqual([aborted.pass, dirty.pass, clean.pass], [false, false, true])
+
+  // A clean run is still a plain 200 — the fix must not turn success into an error.
+  assert.deepEqual(clean, { status: 200, pass: true, outcome: 'pass' })
+
+  // Every ingredient of "clean" is load-bearing: drop any one and `pass` goes false.
+  for (const bad of [
+    { caught: false, docCount: 2, emailsSent: 2, warningCount: 0 },
+    { caught: false, docCount: 4, emailsSent: 0, warningCount: 0 },
+    { caught: false, docCount: 4, emailsSent: 2, warningCount: 1 },
+  ]) {
+    assert.equal(runOutcome(bad).pass, false, `runOutcome called ${JSON.stringify(bad)} a pass`)
+  }
+})
+
+
+// ── D14 — `covered_kw` does not mean covered ─────────────────────────────────────────────────────
+//
+// THE DEFECT, live until this commit: the array `appPackets.jdAnalysis` writes into
+// `packet.covered_kw` rendered on the JD step as green chips under the word "covered". The call
+// that produces it is given Role, Company, Comp and the job description and NOTHING about the
+// candidate, so nothing in it can establish coverage of anything. A green count for an unmeasured
+// thing is the exact failure class this whole layer exists to prevent.
+//
+// The fix chosen is (b) RELABEL rather than (a) compare-against-the-profile, because three systems
+// already answer "does the candidate evidence this?" - `requirement_evidence` + the P8.3 resolver
+// (verbatim profile excerpts), `artifact_score.keyword_coverage` (measured against the published
+// ATS term library) and the P8.4 posting-vs-profile comparison - and `requirements.ts` already
+// declares `model_keyword` NEVER SCOREABLE. A fourth coverage number, derived from a model's
+// free-text guess at "ATS keywords for this role", would have to agree with all three.
+//
+// So the provenance is CONSTRUCTED, not declared: `jdAnalysisRequest` assembles the user message
+// from labelled fragments and returns the labels of the fragments that contributed. `sources`
+// cannot drift from `user` because one array produces both.
+test('H:jd-analysis-sees-no-profile: the keyword call is given no candidate input, and the predicate can say so', async () => {
+  const { jdAnalysisRequest, comparesToProfile, PROFILE_SOURCES } =
+    await import('../dist/functions/tests/appPackets.js')
+
+  const posting = 'RESPONSIBILITIES. '.repeat(20) + 'Own the engineering P&L of roughly $18M annually.'
+  const opp = {
+    role: 'Head of Engineering', company: 'SafetyIQ', comp_range: '$300-350k',
+    why_surfaced: 'WHYSENTINEL', company_signals: ['SIGNALSENTINEL'], pain_hypotheses: ['PAINSENTINEL'],
+  }
+
+  for (const [name, text] of [['grounded', posting], ['ungrounded', '']]) {
+    const req = jdAnalysisRequest(opp, text)
+    assert.equal(comparesToProfile(req), false,
+      `${name}: the JD-analysis call reports itself as profile-compared - either it now reads the candidate (make it option (a) and relabel the screen) or a source label is wrong`)
+    // Every label that contributed text is one of the two non-candidate sources. Absent evidence is
+    // not a pass: an empty source list would make `comparesToProfile` false for the wrong reason.
+    assert.ok(req.sources.length > 0, `${name}: no fragment sources - the predicate would be vacuously false`)
+    for (const src of req.sources) {
+      assert.ok(['opportunity', 'posting'].includes(src), `${name}: unexpected fragment source ${src}`)
+      assert.ok(!PROFILE_SOURCES.has(src), `${name}: ${src} is a profile source`)
+    }
+  }
+
+  // NON-VACUITY, both directions. A predicate hardwired to false would pass everything above.
+  assert.ok(PROFILE_SOURCES.size > 0, 'PROFILE_SOURCES is empty, so comparesToProfile can never be true')
+  const withProfile = { sources: ['opportunity', 'posting', ...PROFILE_SOURCES] }
+  assert.equal(comparesToProfile(withProfile), true,
+    'comparesToProfile is inert - adding a profile source did not flip it')
+
+  // GROUNDING still decides which of the two message shapes is built, and both are covered above.
+  assert.equal(jdAnalysisRequest(opp, posting).grounded, true)
+  assert.equal(jdAnalysisRequest(opp, 'too short').grounded, false)
+
+  // The fact has to travel WITH the array, or a caller reads `coveredKw` with nothing telling it
+  // what the array is. Structural, because `packetShape` is not exported: the payload field must be
+  // COMPUTED by the same predicate. A literal `false` is a second place for the answer to live, and
+  // the day the call changes it would keep saying false without anyone touching it.
+  const shape = stripComments(src('appPackets.ts'))
+  assert.match(shape, /coveredKwProfileCompared:\s*comparesToProfile\(/,
+    'packetShape declares coveredKwProfileCompared instead of computing it from comparesToProfile')
+  assert.ok(!/coveredKwProfileCompared:\s*(true|false)\b/.test(shape),
+    'coveredKwProfileCompared is a hardcoded literal on the packet payload')
+})
+
+// Extracting the prompt out of the handler is only safe if it produced the SAME two messages. This
+// pins them against the literals the handler carried before the extraction, so a refactor cannot
+// quietly reword a live production prompt while every provenance assertion above stays green.
+test('H:jd-analysis-prompt-unchanged: the extracted request is byte-identical to the message it replaced', async () => {
+  const { jdAnalysisRequest } = await import('../dist/functions/tests/appPackets.js')
+  const opp = {
+    role: 'Head of Engineering', company: 'SafetyIQ', comp_range: '$300-350k',
+    why_surfaced: 'a CTO left', company_signals: ['Series C', 'SOC 2'], pain_hypotheses: ['delivery cycle time'],
+  }
+  const postingText = 'x'.repeat(1200)
+
+  // Verbatim from appPackets.jdAnalysis as it stood at 2bd9546, before the extraction.
+  const wasGrounded = `Role: ${opp.role} at ${opp.company}\nComp: ${opp.comp_range || 'n/a'}\n\nJOB DESCRIPTION:\n${postingText.slice(0, 6000)}`
+  const wasUngrounded = `Role: ${opp.role} at ${opp.company}\nComp: ${opp.comp_range || 'n/a'}\nContext: ${opp.why_surfaced || ''}\nSignals: ${(opp.company_signals || []).join('; ')}\nPains: ${(opp.pain_hypotheses || []).join('; ')}`
+
+  assert.equal(jdAnalysisRequest(opp, postingText).user, wasGrounded, 'the grounded user message changed')
+  assert.equal(jdAnalysisRequest(opp, '').user, wasUngrounded, 'the ungrounded user message changed')
+  // The 6,000-character posting cap is load-bearing (max_tokens 900 on the response).
+  assert.ok(jdAnalysisRequest(opp, 'y'.repeat(9000)).user.length < 6400, 'the posting cap was dropped')
+})
+
+// ── D33 — 2,733 characters of prompt asking for output that maps to no merge field ──────────────
+//
+// THE DEFECT, measured on a live build: Call 1 returned `Missing ATS Skills` (940 chars),
+// `Missing ATS Swap Suggestions` (638), `Jobscan Extraction` (2,888) and `Word and Character
+// Requirements Check` as `### Title ###` sections that map to NO merge field. P7 item 1 made that
+// visible (`_unmapped`) instead of folding them into the field above, which was the right fix -
+// but nothing decided what to do about it, so the model kept being paid to write them.
+//
+// THE DECISION: drop them from the prompt, because every one of them duplicates a system that
+// already measures the same thing DETERMINISTICALLY against the real generated fields -
+// `checks.ts` owns the word and character contracts (expertiseWords, aboutMe1Words, aboutMe2Words,
+// execProfileWords, coreAccomplishmentsWords, coverWords, skillMaxChars, relevantMaxChars),
+// `missing_kw` + `artifact_score.keyword_coverage` own ATS gaps, and `swaps.ts`/`swap_decision`
+// own swaps. A model's HTML table grading its own compliance, printed beside a measurement, is the
+// less trustworthy of two numbers about one thing.
+//
+// It is NOT load-bearing on any field that ships: the ATS coverage-and-swap instruction is stated
+// in full in the sections that PRODUCE Skills1/Skills2 and the Relevant lists (base prompt lines
+// 92-134 and 149-156), long before these tail tables, and the owner had already neutered the tail
+// ones by hand - `return "Removed"` and `return "Moved" for both lists`.
+const PROMPTS = new URL('../../prompts/', import.meta.url).pathname
+const ZAP_RESUME_NODE = new URL('../../docs/zap-289877647/prompts/16-update-resume-portfolio-fields-prompt.md', import.meta.url).pathname
+
+/** The zap node 289877661 user_message — the primary source the live `resume_user` row was seeded from. */
+function zapResumeUserMessage() {
+  const md = readFileSync(ZAP_RESUME_NODE, 'utf8')
+  const i = md.indexOf('## user_message')
+  let j = md.indexOf('```', i) + 3
+  if (md[j] === '\n') j += 1
+  return md.slice(j, md.indexOf('\n```', j))
+}
+
+/** The four sections D33 named, exactly as the prompt requested them. */
+const DROPPED_SECTIONS = [
+  'Missing ATS Skills', 'Missing ATS Swap Suggestions',
+  'Word and Character Requirements Check', 'Jobscan Extraction',
+]
+
+/** The one clause outside the block that referred to it. See H:resume-prompt-surgical-excision. */
+const DANGLING_FORWARD_REF = ', this will be recalled later in the prompt'
+
+/**
+ * Every heading the prompt could be asking the model to emit, in document order.
+ *
+ * TWO grammars, and the asymmetry is deliberate. `bookended` is `### Title ###` — exactly what
+ * `resumeParser.splitSections` recognises in the REPLY, and what this prompt instructs ("Bookend
+ * each Header with ### in front and back"). Those are the only lines this file will ever ACCUSE.
+ * `loose` also takes `### Title - instruction` lines, and is used ONLY to work out which merge
+ * fields are already spoken for further up the file; a loose line that maps to nothing is ignored
+ * entirely rather than reported. So over-extraction can never produce a false accusation — the
+ * cry-wolf failure that got two guards in this repo weakened until they guarded nothing.
+ */
+function promptHeadings(text) {
+  const out = []
+  for (const line of text.split('\n')) {
+    if (!line.startsWith('### ')) continue
+    const book = line.match(/^### (.+?) ###/)
+    const title = book ? book[1].trim() : line.slice(4).split(' - ')[0].trim()
+    out.push({ title, bookended: !!book, keys: headingKeysFor(title) })
+  }
+  return out
+}
+
+test('H:resume-prompt-surgical-excision: the shipped prompt is the primary source minus one contiguous block', () => {
+  const base = zapResumeUserMessage()
+  // Pin the primary source BY DIGEST. Not by `.length`: Node counts UTF-16 code units and this
+  // prompt carries 8 astral characters, so the same 29,069-codepoint string measures 29,077 here —
+  // which is exactly how a pinned length becomes a number somebody "corrects" instead of a fact.
+  // sha256 e2b9ed1f6879578e is the value recorded for zap node 289877661 in the commit that
+  // established which of the two identical live prompt rows was wrong (pipeline.ts:114-116).
+  assert.equal(createHash('sha256').update(base, 'utf8').digest('hex').slice(0, 16), 'e2b9ed1f6879578e',
+    'the zap export changed - re-derive the excision from it, do not adjust this digest')
+
+  const file = readFileSync(join(PROMPTS, 'resume_user.txt'), 'utf8')
+  const lines = base.split('\n')
+  const start = lines.findIndex(l => l.startsWith('### Missing ATS Skills ###'))
+  const end = lines.findIndex(l => l.startsWith('---'))
+  assert.ok(start > 0 && end > start, 'the excision boundaries are not in the primary source')
+
+  const prefix = lines.slice(0, start).join('\n')
+  const suffix = lines.slice(end).join('\n')
+  const removed = lines.slice(start, end).join('\n')
+
+  // THE SECOND EDIT, and it exists only because an independent AC read caught it: the Resume
+  // Summary block tells the model to store each soft skill's JD source phrase because it "will be
+  // recalled later in the prompt", and the ONLY thing that recalled it was `Jobscan Extraction`
+  // (its column 4: "The source phrases or text from the JD for each of the skills, this was stored
+  // earlier in the prompt"). Removing the tail block without this leaves a live prompt instructing
+  // the model to hold work nothing ever asks for - a dangling forward reference.
+  assert.equal(base.split(DANGLING_FORWARD_REF).length - 1, 1,
+    'the dangling forward reference is not where it was — re-derive both edits')
+
+  // THE POINT OF THIS GUARD: 26,292 characters of prompt still drive every document the owner
+  // sends. Proving the file is EXACTLY the source minus these two enumerated edits proves NOTHING
+  // ELSE in it was touched — by this commit or any later one. A diff a human reads is not that
+  // proof, and this is the file that writes the resume the owner sends to employers.
+  assert.equal(file, (prefix + '\n' + suffix).replace(DANGLING_FORWARD_REF, ''),
+    'prompts/resume_user.txt is not the primary source minus exactly the two enumerated edits')
+  assert.equal(base, prefix + '\n' + removed + '\n' + suffix)
+  assert.ok(!file.includes(DANGLING_FORWARD_REF), 'the dangling forward reference is back')
+
+  // And the block that went is the one D33 named — nothing else rode along.
+  const removedHeads = removed.split('\n').filter(l => l.startsWith('### ')).map(l => l.slice(4).split(' ###')[0].split(' - ')[0].trim())
+  assert.deepEqual(removedHeads, DROPPED_SECTIONS,
+    'the removed block contains a section D33 did not name')
+  assert.ok(removed.length > 2000 && removed.length < 3600, `removed ${removed.length} UTF-16 units — expected ~2,800`)
+})
+
+test('H:dropped-ats-report-sections: the four are gone, and the reason they went still holds', async () => {
+  const file = readFileSync(join(PROMPTS, 'resume_user.txt'), 'utf8')
+  for (const title of DROPPED_SECTIONS) {
+    // Not requested. `### Title` at the start of a line is how this prompt asks for a section.
+    assert.ok(!new RegExp(`^### ${title}`, 'm').test(file),
+      `the prompt asks for "${title}" again — its output maps to no merge field and is discarded`)
+    // THE BEHAVIOURAL HALF, and the reason this is not a spelling test: they were dropped BECAUSE
+    // the real parser maps them to nothing. If a later lane takes D33's other option and gives one
+    // of them a merge field, this fails and forces the prompt to be revisited rather than leaving
+    // a field that nothing fills.
+    assert.deepEqual(headingKeysFor(title), [],
+      `"${title}" now maps to a merge field — D33 was closed by REMOVING it from the prompt, so that field can never be filled`)
+  }
+})
+
+// Sections whose output the parser discards but which stay in the prompt DELIBERATELY, each with
+// the reason. They are not report tables; the entries are the two the independent AC read found
+// that the D33 row itself does not name (3,353 chars of the primary source, which is MORE dead
+// prompt than the 2,777 this commit removes — said plainly rather than left for the next reader).
+const KEPT_UNMAPPED_SECTIONS = {
+  'Second Job Description Check':
+    'the re-extraction pass; the prompt preamble makes it load-bearing ("Extract and summarize the job description data first. Then use the same extracted data as inputs for generating the final structured outputs sections."). Its OUTPUT is discarded, its reasoning is not.',
+  'Job Description Summary':
+    'kept for the same reason, and it is also a LIVE PARSER DEFECT this lane may not fix: headingKeysFor("Job Description Summary") returns ["resumeSummary"] because the summary pattern is unanchored, so the section is claimed by an already-filled field and vanishes with no _unmapped entry and no warning — and if the model ever emits it BEFORE "Resume Summary", the employer job-description summary is printed as the candidate resume summary. Proven with the real parseResumePackage. resumeParser.ts belongs to another lane; see DEFERRED.md D35.',
+}
+
+test('H:prompt-no-dead-bookended-section: a section request must map to a merge field nothing already claims', () => {
+  const file = readFileSync(join(PROMPTS, 'resume_user.txt'), 'utf8')
+  const headings = promptHeadings(file)
+  const bookended = headings.filter(h => h.bookended)
+  assert.ok(bookended.length >= 3, `only ${bookended.length} bookended section requests — the sweep is blind`)
+  assert.ok(headings.filter(h => h.keys.length).length >= 4,
+    'no heading maps to a merge field — the sweep is matching the wrong thing')
+
+  // CLAUSE 1: maps to nothing at all — the `_unmapped` case the pipeline warns about.
+  // CLAUSE 2: maps ONLY to keys an EARLIER heading already claims. `parseResumePackage` takes the
+  // first unfilled candidate, so such a section is dropped SILENTLY — it never reaches `_unmapped`,
+  // which is why a guard with only clause 1 finds four dead sections where there are six.
+  const claimed = new Set()
+  const dead = []
+  for (const h of headings) {
+    const fresh = h.keys.filter(k => !claimed.has(k))
+    if (h.bookended && fresh.length === 0 && !(h.title in KEPT_UNMAPPED_SECTIONS)) {
+      dead.push(`${h.title} (${h.keys.length ? 'already claimed: ' + h.keys.join(', ') : 'maps to no field'})`)
+    }
+    for (const k of h.keys) claimed.add(k)
+  }
+  assert.deepEqual(dead, [],
+    `the prompt asks for section(s) whose output the parser will discard, undocumented: ${dead.join(' | ')}`)
+
+  // A STALE keep is a lie about the prompt. Same discipline as the contrast registry: an entry for
+  // a section the prompt no longer requests fails, so the list cannot rot into a rubber stamp.
+  for (const [title, why] of Object.entries(KEPT_UNMAPPED_SECTIONS)) {
+    assert.ok(headings.some(h => h.title === title),
+      `KEPT_UNMAPPED_SECTIONS lists "${title}", which the prompt no longer requests`)
+    assert.ok(why.length > 40, `"${title}" is kept without a real reason`)
+  }
+})
+
+// The preamble declares how many sections it wants. Before this commit the prompt carried 18
+// `### ` headings and declared 14 — so the model was told to produce four fewer than the file
+// defined, and inventing a heading to make up a shortfall lands straight in `_unmapped`. Removing
+// the four tail report sections brings the file to 14 and makes the declaration true. (One of the
+// 14 is the outline heading `### Sections to Generate:` rather than a request, so the equality is
+// not proof the four were an unreconciled later addition — it is consistent with it, and it is now
+// an invariant a future prompt edit has to keep.)
+test('H:prompt-section-count-declared: the preamble count matches the headings the file carries', () => {
+  const file = readFileSync(join(PROMPTS, 'resume_user.txt'), 'utf8')
+  const declared = file.match(/in (\d+) structured sections/)
+  assert.ok(declared, 'the preamble no longer declares a section count')
+  const headings = file.split('\n').filter(l => l.startsWith('### ')).length
+  assert.equal(headings, Number(declared[1]),
+    `the prompt declares ${declared[1]} sections and carries ${headings} — a model told to produce a section the prompt does not define invents a heading, and an invented heading maps to no merge field`)
+
+  // Non-vacuity: the primary source FAILED this, which is the whole reason it is worth asserting.
+  const base = zapResumeUserMessage()
+  assert.notEqual(base.split('\n').filter(l => l.startsWith('### ')).length, Number(declared[1]),
+    'the primary source already satisfied this, so the assertion measures nothing')
+})
+
+// D31: `portfolio_user` and `resume_user` were byte-identical live — one file loaded under two
+// keys — so Call 2 was sent resume instructions on every build and its ~16,000-token reply could
+// not be parsed as portfolio JSON. `duplicatePromptPairs` catches it at RUN time; this catches it
+// at REPO time, before a dispatch of prompts-load-file.yml can recreate it.
+test('H:prompt-files-are-distinct: no two prompt files share their content', () => {
+  const files = readdirSync(PROMPTS).filter(f => f.endsWith('.txt'))
+  assert.ok(files.length >= 2, `only ${files.length} prompt file(s) — nothing to compare`)
+  const seen = new Map()
+  for (const f of files) {
+    const d = createHash('sha256').update(readFileSync(join(PROMPTS, f), 'utf8'), 'utf8').digest('hex')
+    assert.ok(!seen.has(d), `${f} and ${seen.get(d)} are byte-identical — this is D31, from the repo side`)
+    seen.set(d, f)
+  }
+})
+
+// H:evidence-reverified-on-read — D19. `requirement_evidence.record_sha256` was written on resolve,
+// served on read, and NEVER recomputed. The digest exists for exactly one purpose — to make a stale
+// offset detectable after the owner edits their profile — so never recomputing it makes it a
+// decoration rather than a guard, in precisely the way `correction.before_sha256` is NOT (`revertOne`
+// recomputes it and refuses rather than guessing when the text has moved).
+//
+// WHY THIS WAS INVISIBLE. The excerpt still renders, and it is a TRUE substring of what the record
+// USED to say. Nothing 500s, no count goes to zero, and the JD step goes on presenting it as a
+// verbatim quote of the candidate's profile. It is the same class as H32 one step later in the
+// lifecycle: there the offsets were wrong when WRITTEN (measured on a lower-cased copy), here they
+// are correct when written and rot afterwards, and neither is catchable by a substring check on the
+// value alone — in both cases the excerpt is simply the wrong characters.
+//
+// THE INVARIANT, stated generally rather than as the incident: ANY excerpt a surface is allowed to
+// print is the named record's own bytes at the offsets stored, measured against the profile AS IT
+// STANDS. Not "the fixture edit is caught" — every edit, at every position.
+test('H:evidence-reverified-on-read: a served excerpt is the record\'s bytes at its offsets, always', async () => {
+  const { verifyEvidence } = await import('../dist/functions/tests/evidence.js')
+  const { shapeRequirementsForApi } = await import('../dist/functions/tests/appRequirements.js')
+
+  const BODY = 'VP Engineering, Resideo 2021-2025\nLed the platform modernization programme across four '
+    + 'product lines, retiring a mainframe billing system and cutting release cycle time to two days.'
+  const REQ = 'Led the platform modernization programme across four product lines'
+  const mcOf = (text) => ({ partitionKey: 'context', rowKey: '1', workHistory1: text })
+
+  const recs0 = profileRecords(mcOf(BODY), null)
+  const ev = resolveEvidence(REQ, recs0)
+  assert.ok(ev, 'fixture: the requirement must resolve before anything can go stale')
+
+  const row = {
+    seq: 0, item_text: REQ, verbatim: REQ,
+    evidence_quote: ev.quote, evidence_source_kind: ev.source_kind, evidence_source_label: ev.source_label,
+    evidence_source_key: ev.source_key, evidence_char_start: ev.char_start, evidence_char_end: ev.char_end,
+    evidence_extra: ev.extra, evidence_ratio: ev.ratio, evidence_method: ev.method,
+    evidence_record_sha256: ev.record_sha256, evidence_resolver_version: ev.resolver_version,
+    evidence_resolved_at: new Date(0),
+  }
+
+  // Every single-edit rewrite of the record: an insertion and a deletion at each position. The
+  // invariant has to hold for all of them, not for the one an author happened to think of.
+  let withheld = 0, served = 0
+  for (let i = 0; i <= BODY.length; i += 7) {
+    for (const edited of [
+      `${BODY.slice(0, i)}[EDIT]${BODY.slice(i)}`,
+      `${BODY.slice(0, i)}${BODY.slice(i + 11)}`,
+    ]) {
+      const recs = profileRecords(mcOf(edited), null)
+      const out = shapeRequirementsForApi([row], recs)
+      const shown = out.requirements[0].evidence
+      if (!shown) { withheld++; continue }
+      served++
+      const rec = recs.find(r => r.key === shown.sourceKey)
+      assert.ok(rec, 'an excerpt was served naming a record that is not in the profile')
+      assert.equal(rec.text.slice(shown.charStart, shown.charEnd), shown.quote,
+        `served a quote that is NOT the record's bytes at its offsets (edit at ${i})`)
+      assert.equal(out.evidenced, 1)
+    }
+  }
+  // Both outcomes must actually occur, or the loop proves nothing: an edit after the quote leaves it
+  // provable, an edit before it moves it. A run that only ever withholds would pass vacuously.
+  assert.ok(withheld > 0 && served > 0, `vacuous sweep: ${withheld} withheld, ${served} served`)
+
+  // And the state is reported, not merely acted on — a caller must be able to tell WHY.
+  const moved = verifyEvidence(
+    { quote: ev.quote, source_key: ev.source_key, char_start: ev.char_start, char_end: ev.char_end, record_sha256: ev.record_sha256 },
+    profileRecords(mcOf(`PROMOTED. ${BODY}`), null))
+  assert.equal(moved.state, 'stale')
+  assert.equal(moved.proof, false)
+})
+
+// H:stale-evidence-not-absent — the second half of D19, and the half that is easy to lose while
+// fixing the first. Withholding a rotted excerpt is not enough: "your profile does not support this
+// requirement" and "your profile changed, so we can no longer show what it said" are different
+// claims ABOUT THE CANDIDATE, and the second must never be printed as the first. Same family as the
+// standing rule that absent evidence is `not_applicable` and never a pass — this is that rule
+// applied to the sentence a human reads rather than to a check verdict.
+test('H:stale-evidence-not-absent: withheld evidence is never presented as no evidence', async () => {
+  const { EVIDENCE_NOTE, NO_EVIDENCE_NOTE, verifyEvidence } = await import('../dist/functions/tests/evidence.js')
+  const { shapeRequirementsForApi } = await import('../dist/functions/tests/appRequirements.js')
+
+  // One sentence per state, and only the absent-row state may use the absent-row sentence.
+  const notes = Object.entries(EVIDENCE_NOTE)
+  assert.equal(new Set(notes.map(([, n]) => n)).size, notes.length, 'two states share a sentence')
+  for (const [state, note] of notes) {
+    if (state !== 'none') {
+      assert.notEqual(note, NO_EVIDENCE_NOTE, `state '${state}' prints the no-evidence sentence`)
+    }
+  }
+
+  // And the payload separates them: a requirement with a rotted excerpt and one with no excerpt at
+  // all must not come back looking the same to a surface that only reads the served fields.
+  const BODY = 'Rebuilt the incident response practice and took mean time to restore from nine hours to under one hour.'
+  const REQ = 'Rebuilt the incident response practice'
+  const mcOf = (t) => ({ partitionKey: 'context', rowKey: '1', coreAccomplishments: t })
+  const ev = resolveEvidence(REQ, profileRecords(mcOf(BODY), null))
+  assert.ok(ev)
+
+  const rows = [
+    { seq: 0, item_text: REQ, evidence_quote: ev.quote, evidence_source_key: ev.source_key,
+      evidence_char_start: ev.char_start, evidence_char_end: ev.char_end,
+      evidence_record_sha256: ev.record_sha256, evidence_source_label: ev.source_label,
+      evidence_source_kind: ev.source_kind, evidence_ratio: ev.ratio, evidence_method: ev.method,
+      evidence_extra: ev.extra, evidence_resolver_version: ev.resolver_version, evidence_resolved_at: new Date(0) },
+    { seq: 1, item_text: 'Something the profile has never mentioned at all', evidence_quote: null },
+  ]
+  const out = shapeRequirementsForApi(rows, profileRecords(mcOf(`SHIFTED. ${BODY}`), null))
+  const [rotted, absent] = out.requirements
+
+  assert.equal(rotted.evidence, null, 'a rotted excerpt was served')
+  assert.equal(absent.evidence, null)
+  assert.notEqual(rotted.evidenceState, absent.evidenceState, 'the two states are indistinguishable')
+  assert.notEqual(rotted.evidenceNote, absent.evidenceNote, 'the two states print the same sentence')
+  assert.equal(absent.evidenceNote, NO_EVIDENCE_NOTE)
+  assert.equal(out.evidenceHealth.stale, 1)
+  assert.equal(out.evidenceHealth.none, 1)
+
+  // An unreadable profile is a THIRD claim, and is neither of the other two.
+  const blind = shapeRequirementsForApi(rows, null)
+  assert.equal(blind.requirements[0].evidenceState, 'unverified')
+  assert.equal(blind.requirements[1].evidenceState, 'none')
+  assert.equal(blind.evidenceHealth.profileReadable, false)
+  assert.equal(verifyEvidence(null, null).state, 'none', 'no row is `none` even when nothing can be read')
+})
+
+// H:evidence-verified-at-the-boundary — the inert-guard failure, pre-empted. Every assertion above
+// exercises a PURE function; if the requirements read path never calls it, D19 is unfixed and the
+// whole suite still passes. The wiring is not expressible as a runtime test here — `requirementsGet`
+// reaches for a live Postgres and the live profile documents, neither of which the sandbox has — so
+// this is a structural check, which is what CLAUDE.md reserves source greps for.
+//
+// It asserts the read path (a) re-reads the profile, (b) shapes through the verifier, and (c) does
+// not build its own excerpt projection alongside it. (c) is the one that matters most: a second
+// projection is how a fix survives in one place while the served payload keeps the old behaviour.
+test('H:evidence-verified-at-the-boundary: the requirements read path re-validates before serving', () => {
+  const body = stripComments(src('appRequirements.ts'))
+  const i = body.indexOf('export async function requirementsGet')
+  assert.ok(i > 0, 'requirementsGet is gone — this guard has gone stale')
+  const fn = body.slice(i, body.indexOf('\n}', body.indexOf('finally', i)))
+
+  assert.match(fn, /await sourceText\(\)/,
+    'the read path does not re-read the profile, so no stored excerpt can be re-validated')
+  assert.match(fn, /shapeRequirementsForApi\(/,
+    'the read path does not shape through the verifier')
+  assert.ok(!/evidence_quote/.test(fn),
+    'the read path projects evidence columns itself — a second projection beside the verified one')
+  assert.match(fn, /evidenceHealth/,
+    'the response does not publish evidence health, so a stale row is not distinguishable to a caller')
+
+  // The verifier itself must consult the record, not the digest alone: an implementation that only
+  // compared hashes would withhold provable excerpts on any unrelated edit (proved by reinstating
+  // it — one named assertion fails, "a digest mismatch alone is not an accusation").
+  const ev = stripComments(src('evidence.ts'))
+  const vi = ev.indexOf('export function verifyEvidence')
+  assert.ok(vi > 0)
+  assert.match(ev.slice(vi, vi + 1400), /rec\.text\.slice\(stored\.char_start, stored\.char_end\) === stored\.quote/,
+    'verifyEvidence does not re-slice the record — the offsets are the claim, the digest is only the alarm')
+})
+
+// H:staged-prompt-is-vetoed — `prompts/resume_user.txt` is a PROPOSED replacement for a live prompt,
+// not an approved one. The owner decided on 2026-08-21 that the live prompt stays as it is until the
+// current one is proven working, and a staged file sitting in the repo with no marker is exactly how
+// a later session loads it believing it is the intended state. The veto is a file, so it is visible
+// wherever the prompt is, and this case is what keeps the two together.
+test('H:staged-prompt-is-vetoed: a staged prompt replacement carries its DO-NOT-LOAD notice', () => {
+  const dir = new URL('../../prompts/', import.meta.url).pathname
+  if (!existsSync(join(dir, 'resume_user.txt'))) return   // nothing staged, nothing to veto
+  const notice = join(dir, 'DO-NOT-LOAD.md')
+  assert.ok(existsSync(notice), 'prompts/resume_user.txt is staged with no DO-NOT-LOAD.md beside it')
+  const body = readFileSync(notice, 'utf8')
+  assert.match(body, /resume_user/, 'the notice must name the file it vetoes')
+  assert.match(body, /4b4af84859072c45/, 'the notice must record the live sha the decision protects')
 })
