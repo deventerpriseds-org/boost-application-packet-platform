@@ -27,6 +27,9 @@ import {
 import { MIN_QUOTE_CHARS, MIN_QUOTE_WORDS } from '../dist/functions/tests/reviewer.js'
 import { DEFAULT_THRESHOLDS } from '../dist/functions/tests/checks.js'
 import { writeEvidence, shapeRequirementsForApi } from '../dist/functions/tests/appRequirements.js'
+import {
+  verifyProposal, worthEscalating, PROPOSAL_VERSION, PROPOSAL_SYSTEM,
+} from '../dist/functions/tests/evidenceProposal.js'
 
 const SRC = path.join(import.meta.dirname, '..', 'src', 'functions', 'tests')
 const src = f => fs.readFileSync(path.join(SRC, f), 'utf8')
@@ -1046,4 +1049,158 @@ test('H:refusal-says-what-was-sought: an unevidenced row reports the words it lo
     evidence_char_start: 0, evidence_char_end: 38,
   }], PROD)
   assert.equal(ok.requirements[0].evidenceSearch, null)
+})
+
+// =================================================================================================
+// K. THE ESCALATION TIER — a model proposes, deterministic rules accept or refuse
+// =================================================================================================
+
+test('H:tightest-bullet-run-wins: the excerpt is the run that carries the support, not the field', () => {
+  // The owner's real `expertise` field. `Experience in leading technology operations` resolved to
+  // ALL SEVEN bullets (286 chars) — four of which (budgets, KPIs, M&A) say nothing about the
+  // requirement. The match is CORRECT; the citation was imprecise. Sub-runs let the shorter-span
+  // tie-break pick the run that actually carries the tokens.
+  const EXP = 'Budget Development and P&L Management|KPI-driven performance management|Enterprise alignment of strategy and execution|Governance frameworks for compliance|Optimizing scaled agile operations|Strategic roadmaps for customer-centric innovation|M&A due diligence and technology integration'
+  const recs = profileRecords({ expertise: EXP }, null)
+  const ev = resolveEvidence('Experience in leading technology operations', recs)
+  assert.ok(ev, 'the requirement IS supported and must stay evidenced')
+  assert.ok(ev.quote.length < EXP.length, 'and must no longer quote the whole field')
+  assert.ok(ev.quote.length <= 140, `expected a tight run, got ${ev.quote.length} chars`)
+  assert.ok(!ev.quote.includes('Budget Development'), 'irrelevant leading bullets must be dropped')
+  assert.equal(recs[0].text.slice(ev.char_start, ev.char_end), ev.quote, 'offsets still index the original')
+})
+
+test('H:bullet-run-is-a-setting: the excerpt width is the owner\'s, and the knob reads backwards', () => {
+  // The owner chose the TIGHT citation "for now" and said they may want the wide one back. That
+  // makes the width a setting — `owner_search_prefs.chk_evidence_bullet_run`, seeded 3.
+  //
+  // TWO invariants, and the second one is a trap this case exists to pin down.
+  //
+  // (1) The knob moves the CITATION, never the MATCH. The whole line is a candidate at every value,
+  //     so no setting can un-evidence a supported requirement. That is what makes it safe to expose.
+  // (2) LOWER = BROADER. It caps how narrow a candidate may be, and `supportIn` breaks ties toward
+  //     the shorter span, so raising it can only tighten. Measured, not assumed: the first version of
+  //     this guard asserted that a HIGHER value widens the quote and failed — 3 and 12 return the
+  //     same 130 characters. The revert the owner asked for is `= 1`, not a big number.
+  const EXP = 'Budget Development and P&L Management|KPI-driven performance management|Enterprise alignment of strategy and execution|Governance frameworks for compliance|Optimizing scaled agile operations|Strategic roadmaps for customer-centric innovation|M&A due diligence and technology integration'
+  const recs = profileRecords({ expertise: EXP }, null)
+  const REQ = 'Experience in leading technology operations'
+
+  const at = (n) => resolveEvidence(REQ, recs, { bulletRunMax: n })
+  const wide = at(1)
+  const tight = at(3)
+  assert.ok(wide && tight, 'the requirement is evidenced at BOTH widths — the knob is presentation, not reach')
+  assert.equal(wide.ratio, tight.ratio, 'the MATCH must not move with the citation width')
+
+  // The measured pair, so a future change to the tie-break cannot silently flip the direction.
+  assert.equal(wide.quote.length, EXP.length, 'bulletRunMax=1 is the revert: the whole field')
+  assert.ok(tight.quote.length <= 140, `expected the tight run at 3, got ${tight.quote.length}`)
+  assert.ok(!tight.quote.includes('Budget Development'), 'irrelevant leading bullets must be dropped')
+
+  // Monotone, and never wider than the previous step. This is the property the owner is actually
+  // buying: one number, one direction, no surprises between the values they might try.
+  let prev = Infinity
+  for (const n of [1, 2, 3, 4, 7, 12]) {
+    const ev = at(n)
+    assert.ok(ev, `bulletRunMax=${n} must not un-evidence a supported requirement`)
+    assert.ok(ev.quote.length <= prev, `raising the setting widened the quote at ${n} — the direction flipped`)
+    prev = ev.quote.length
+    // The accusation-grade half is not negotiable by a setting, at any value.
+    assert.equal(recs[0].text.slice(ev.char_start, ev.char_end), ev.quote)
+  }
+
+  // A nonsense value takes the seeded default or clamps; none of them may break the resolver.
+  for (const bad of [0, -5, 1.7, NaN]) {
+    assert.ok(at(bad), `bulletRunMax=${bad} must not un-evidence a supported requirement`)
+  }
+})
+
+test('H:proposal-must-be-verbatim: a paraphrased model quote is refused, never repaired', () => {
+  const recs = profileRecords({
+    workHistory1: 'Reduced outages from nine hours to one across the payments platform.',
+  }, null)
+  const opts = { neverEvidence: NEVER_EVIDENCE, minQuoteChars: MIN_QUOTE_CHARS }
+  const REQ = 'Improve operational reliability'
+
+  // THE CASE THE TIER EXISTS FOR: no shared content word, so the deterministic matcher cannot reach
+  // it, and a model can.
+  assert.equal(resolveEvidence(REQ, recs), null, 'word-matching provably cannot find this')
+  const good = verifyProposal(REQ, recs, {
+    source_key: 'workHistory1', supported: true,
+    quote: 'Reduced outages from nine hours to one',
+    reasoning: 'Cutting outage duration is an improvement in operational reliability.',
+  }, opts)
+  assert.ok(good.accepted, 'an exact quote is accepted')
+  assert.equal(recs[0].text.slice(good.accepted.char_start, good.accepted.char_end), good.accepted.quote)
+
+  // EVERY way a fluent model goes wrong, each refused rather than repaired.
+  const bad = [
+    ['quote_not_in_record', 'Reduced outages from 9 hours to 1', 'digits rewritten'],
+    ['quote_not_in_record', 'reduced outages from nine hours to one', 'case changed'],
+    ['quote_not_in_record', 'Reduced outages from nine hours to one.', 'punctuation added'],
+    ['quote_not_in_record', 'Reduced outages substantially across payments', 'paraphrased'],
+  ]
+  for (const [expected, quote, why] of bad) {
+    const out = verifyProposal(REQ, recs, {
+      source_key: 'workHistory1', supported: true, quote, reasoning: 'x',
+    }, opts)
+    assert.equal(out.accepted, null, `must refuse: ${why}`)
+    assert.equal(out.refusal, expected, why)
+  }
+})
+
+test('H:proposal-floor-binds-every-tier: the model cannot reach what the rules refuse outright', () => {
+  const recs = profileRecords({
+    workHistory1: 'Graduated from Pennsylvania State University and worked across the eastern seaboard.',
+    itemsToOmit: 'Kubernetes cluster federation',
+  }, null)
+  const opts = { neverEvidence: NEVER_EVIDENCE, minQuoteChars: MIN_QUOTE_CHARS }
+
+  // Eligibility is refused at EVERY tier. A model is not allowed to settle where someone lives from
+  // prose merely because it argues more persuasively than a regex.
+  const elig = verifyProposal('Reside in the East Coast of the United States', recs, {
+    source_key: 'workHistory1', supported: true,
+    quote: 'worked across the eastern seaboard',
+    reasoning: 'Penn State and the eastern seaboard imply East Coast residence.',
+  }, opts)
+  assert.equal(elig.accepted, null)
+  assert.equal(elig.refusal, 'requirement_class')
+  assert.equal(worthEscalating('Reside in the East Coast of the United States', 2), false,
+    'and it is not even sent to the model')
+
+  // The owner's ban list is not a source at any tier either.
+  const banned = verifyProposal('Deep experience with Kubernetes cluster federation', [
+    ...recs, { key: 'itemsToOmit', kind: 'profile_field', label: 'Items to omit', text: 'Kubernetes cluster federation' },
+  ], {
+    source_key: 'itemsToOmit', supported: true,
+    quote: 'Kubernetes cluster federation', reasoning: 'It is listed.',
+  }, opts)
+  assert.equal(banned.refusal, 'banned_source')
+
+  // A record that does not exist, and an unexplained match.
+  assert.equal(verifyProposal('Lead platform work', recs, {
+    source_key: 'nope', supported: true, quote: 'Graduated from Pennsylvania', reasoning: 'x',
+  }, opts).refusal, 'unknown_source_key')
+  assert.equal(verifyProposal('Lead platform work', recs, {
+    source_key: 'workHistory1', supported: true,
+    quote: 'Graduated from Pennsylvania State University', reasoning: '   ',
+  }, opts).refusal, 'no_reasoning')
+
+  // And a model that declines is respected rather than second-guessed.
+  assert.equal(verifyProposal('Lead platform work', recs, {
+    source_key: 'workHistory1', supported: false, quote: '', reasoning: 'Nothing here supports it.',
+  }, opts).refusal, 'model_declined')
+})
+
+test('H:escalation-is-scoped: only rows the deterministic pass could not settle are sent', () => {
+  // The determinism contract survives because the model never sees the rows exact rules settled —
+  // those stay reproducible and attributable to RESOLVER_VERSION. Escalation is the trigger.
+  assert.equal(worthEscalating('Minimum of 8 years of experience', 2), false, 'numeric: no excerpt settles it')
+  assert.equal(worthEscalating('Leadership', 2), false, 'too thin to judge either way')
+  assert.equal(worthEscalating('Improve operational reliability', 2), true)
+  assert.ok(PROPOSAL_VERSION >= 1, 'a proposal row must be attributable to a ruleset')
+
+  // The prompt has to carry the one instruction that makes the output checkable.
+  assert.match(PROPOSAL_SYSTEM, /CHARACTER-FOR-CHARACTER/)
+  assert.match(PROPOSAL_SYSTEM, /Never infer where a person LIVES/)
 })

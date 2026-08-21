@@ -38,6 +38,7 @@ import { toBmp } from './jdText'
 import { MIN_QUOTE_CHARS, MIN_QUOTE_WORDS } from './reviewer'
 import {
   claimTokens, countTokensAcrossRecords, supportIn, requirementClass, gateProgress,
+  BULLET_RUN_MAX,
   type RefusalReason,
 } from './requirementSupport'
 
@@ -236,6 +237,17 @@ export const DISTINCTIVE_LEN = 6
  * quote for a little more recall, which is a judgement about presentation and belongs to the owner.
  */
 export const EVIDENCE_MAX_SENTENCES = 1
+/**
+ * How many BULLET items a FOCUSED citation may span. SEEDED at 3, owner-settable as
+ * `owner_search_prefs.chk_evidence_bullet_run`.
+ *
+ * LOWER = BROADER quotes; HIGHER = TIGHTER. See `requirementSupport.BULLET_RUN_MAX` for why the
+ * direction reads backwards and for the measured numbers. This is a presentation judgement — it
+ * cannot make a match DISAPPEAR, because the whole line is a candidate at every setting — which is
+ * exactly what makes it safe to hand to the owner. The owner chose the tight citation and said they
+ * may want the wide one back; that revert is `chk_evidence_bullet_run = 1`, not a deploy.
+ */
+export const EVIDENCE_BULLET_RUN = BULLET_RUN_MAX
 // GENERIC-vocabulary detection (M10) is NOT an owner setting — see
 // `requirementSupport.GENERIC_RECORDS` for why raising it strengthens one safety-floor rule while
 // weakening another, which is what makes it unsafe to expose as a single knob at all.
@@ -244,6 +256,7 @@ export interface ResolveOptions {
   threshold?: number
   minTokens?: number
   maxSentences?: number
+  bulletRunMax?: number
   /**
    * Token->record-count map for the WHOLE profile, computed once by `resolveAll`.
    *
@@ -286,6 +299,7 @@ export function resolveEvidence(
   const threshold = typeof opts.threshold === 'number' ? opts.threshold : EVIDENCE_THRESHOLD
   const minTokens = typeof opts.minTokens === 'number' ? opts.minTokens : RESOLVE_MIN_TOKENS
   const maxSentences = typeof opts.maxSentences === 'number' ? opts.maxSentences : EVIDENCE_MAX_SENTENCES
+  const bulletRunMax = typeof opts.bulletRunMax === 'number' ? opts.bulletRunMax : EVIDENCE_BULLET_RUN
 
   const text = String(requirementText || '')
   // The CLASS of the requirement is decided before its token count, because a class refusal is not
@@ -309,6 +323,7 @@ export function resolveEvidence(
       recordCounts,
       threshold,
       maxSentences,
+      bulletRunMax,
       minQuoteChars: MIN_QUOTE_CHARS,
       minQuoteWords: MIN_QUOTE_WORDS,
       distinctiveLen: DISTINCTIVE_LEN,
@@ -378,6 +393,7 @@ export function refusalReason(
       recordCounts,
       threshold: typeof opts.threshold === 'number' ? opts.threshold : EVIDENCE_THRESHOLD,
       maxSentences: typeof opts.maxSentences === 'number' ? opts.maxSentences : EVIDENCE_MAX_SENTENCES,
+      bulletRunMax: typeof opts.bulletRunMax === 'number' ? opts.bulletRunMax : EVIDENCE_BULLET_RUN,
       minQuoteChars: MIN_QUOTE_CHARS,
       minQuoteWords: MIN_QUOTE_WORDS,
       distinctiveLen: DISTINCTIVE_LEN,

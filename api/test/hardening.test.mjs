@@ -1864,7 +1864,8 @@ test('H42: every per-owner settings column production reads has a writer that ca
   // pre-existing gap this lane did not create, and a guard that is red on arrival gets switched
   // off. Pinning it fails on a NEW unwritable setting AND on the known ones being fixed.
   const KNOWN = [
-    'chk_cover_words_max', 'chk_cover_words_min', 'chk_evidence_max_sentences',
+    'chk_cover_words_max', 'chk_cover_words_min', 'chk_evidence_bullet_run',
+    'chk_evidence_max_sentences',
     'chk_evidence_min_tokens', 'chk_evidence_threshold',
     'chk_expertise_words', 'chk_relevant_allowance', 'chk_relevant_max_chars', 'chk_skill_max_chars',
     'chk_skills_total_max', 'chk_skills_total_min',
@@ -1873,6 +1874,12 @@ test('H42: every per-owner settings column production reads has a writer that ca
   // pre-existing gap `chk_evidence_threshold`/`chk_evidence_min_tokens` already sit in — parity
   // with its siblings, not a new regression. `chk_evidence_generic_recs` deliberately does NOT
   // exist: see `requirementSupport.GENERIC_RECORDS` for why that knob is unsafe to expose at all.
+  //
+  // `chk_evidence_bullet_run` (2026-08-21) is the FOURTH evidence knob to land in this list, and the
+  // repetition is the finding: four settings in one subsystem now share one missing writer, so the
+  // fix is one writer for the whole `chk_*` family rather than a fifth entry here. Recorded as
+  // `D:chk-settings-have-no-writer` — this pin is what will fail when that row is done, which is the
+  // point of pinning rather than asserting none.
   assert.deepEqual(unwritable, KNOWN,
     `the set of unwritable per-owner settings changed: ${JSON.stringify(unwritable)} — a new setting shipped with no way for the owner to change it, or the known ones were fixed and this case must be updated`)
 

@@ -8,7 +8,7 @@ import { randomUUID } from 'node:crypto'
 import { resolveOwner, requireWrite } from './appSession'
 import { getPgClient } from './pgClient'
 import { runChecks, gateFor, attentionCount, CheckResult } from './checks'
-import { loadThresholds } from './checkPrefs'
+import { loadThresholds, resolveOptionsFrom } from './checkPrefs'
 import { computeArtifactScore, ArtifactScore } from './artifactScore'
 import { loadFacts, sourceText } from './appFacts'
 import { shapeVerdict } from './appReviewer'
@@ -20,7 +20,7 @@ const HEADERS = { 'Content-Type': 'application/json', 'Access-Control-Allow-Orig
 
 // `ensureCheckPrefs` / `loadThresholds` moved to `checkPrefs.ts` (see the note there: it broke an
 // appChecks <-> appRequirements import cycle). Re-exported so every existing importer is unchanged.
-export { ensureCheckPrefs, loadThresholds, resolveOptionsFor } from './checkPrefs'
+export { ensureCheckPrefs, loadThresholds, resolveOptionsFor, resolveOptionsFrom } from './checkPrefs'
 
 /**
  * Run the engine for one artifact and store the results plus the aggregated gate.
@@ -66,11 +66,7 @@ export async function evaluateArtifact(client: any, artifactId: string, owner: s
     // The owner's thresholds reach the RESOLVER, not just the checks. `writeEvidence` used to be
     // called with no options, so `ResolveOptions` was overridable in principle and fixed in
     // production — which is the no-hardcoded-config rule broken with a settings hook attached.
-    await writeEvidence(client, art.opp_id, profileRead.records, {
-      threshold: thresholds.evidenceThreshold,
-      minTokens: thresholds.evidenceMinTokens,
-      maxSentences: thresholds.evidenceMaxSentences,
-    })
+    await writeEvidence(client, art.opp_id, profileRead.records, resolveOptionsFrom(thresholds))
   }
   const requirements = await loadRequirementsWithEvidence(client, art.opp_id)
   const evidence: EvidenceInput = {

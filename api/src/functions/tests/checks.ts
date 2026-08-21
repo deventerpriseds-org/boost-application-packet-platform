@@ -25,6 +25,7 @@ import { checkAgainstFacts, OwnerFact } from './ownerFacts'
 import { scanEcho, scanWording, WORDING_RUN_TOKENS } from './figureEcho'
 import {
   EvidenceInput, NO_EVIDENCE_NOTE, EVIDENCE_THRESHOLD, EVIDENCE_MAX_SENTENCES,
+  EVIDENCE_BULLET_RUN,
   RESOLVE_MIN_TOKENS as EVIDENCE_MIN_TOKENS,
 } from './evidence'
 
@@ -77,11 +78,15 @@ export interface CheckThresholds {
    * P8.3 / option (c) — the two knobs the purpose-made matcher adds.
    *
    * `evidenceMaxSentences`: how many CONTIGUOUS sentences one excerpt may span (clamped 1..3).
+   * `evidenceBulletRun`: how many BULLET items one excerpt may span (clamped 1..12). It changes how
+   * much surrounding text a quote carries, never whether the match is found — the whole line stays
+   * a candidate at every setting.
    *
    * Generic-vocabulary detection (M10) is DELIBERATELY not here: see
    * `requirementSupport.GENERIC_RECORDS` for why it cannot be a single safe knob.
    */
   evidenceMaxSentences: number
+  evidenceBulletRun: number
 }
 
 /** Seeded first values, taken from the live prompt. The owner can change every one of them. */
@@ -102,6 +107,7 @@ export const DEFAULT_THRESHOLDS: CheckThresholds = {
   evidenceThreshold: EVIDENCE_THRESHOLD,
   evidenceMinTokens: EVIDENCE_MIN_TOKENS,
   evidenceMaxSentences: EVIDENCE_MAX_SENTENCES,
+  evidenceBulletRun: EVIDENCE_BULLET_RUN,
 }
 
 // Phrases and punctuation that read as machine-written. Kept as data so they can move to the
