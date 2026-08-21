@@ -442,3 +442,46 @@ test('R3 scans every populated field, not just the summary', () => {
   assert.ok(r.offenders.includes('SkillsBullets1: $18M'), `list items were not scanned: ${r.offenders}`)
   assert.ok(r.offenders.includes('RelevantBullets1: 60+'), `list items were not scanned: ${r.offenders}`)
 })
+
+// ---------------------------------------------------------------------------------------------
+// D5 — a swap recorded but not yet rendered was text nobody checked.
+
+test('D5: R3 scans swap labels that have not been rendered into a field yet', () => {
+  // The backlog is explicit: "a list item may not read `Org Scaling 60+` or `P&L $18M`". Before
+  // this, `runChecks` scanned `pkg` only, so a swap sitting in `swap_decision.to_label` passed R3
+  // simply because the rendering had not caught up. The label is text the user will read.
+  const rs = runChecks({
+    type: 'resume', pkg: echoPkg('Led platform engineering for a regional utility.'),
+    postingText: POSTING, profileText: PROFILE,
+    swaps: [{ action: 'swapped', driver: 'posting', from_label: 'Team Leadership', to_label: 'P&L $18M' }],
+  })
+  const r = find(rs, 'posting_figure_echo')
+  assert.equal(r.state, 'warn', 'an unrendered swap label carrying the posting\'s figure must surface')
+  assert.deepEqual(r.offenders, ['swap: P&L $18M: $18M'])
+})
+
+test('D5: a swap label ALREADY rendered is reported once, not twice', () => {
+  // The cry-wolf half. Adding the labels to the scan naively prints every offender twice — once as
+  // the field and once as the label — under two different names for one string in one document.
+  // A check that names people may not inflate its own count.
+  const rs = runChecks({
+    type: 'resume', pkg: echoPkg('Owned P&L $18M for the region.'),
+    postingText: POSTING, profileText: PROFILE,
+    swaps: [{ action: 'swapped', driver: 'posting', from_label: 'x', to_label: 'P&L $18M' }],
+  })
+  const r = find(rs, 'posting_figure_echo')
+  assert.deepEqual(r.offenders, ['ResumeSummary: $18M'], 'the rendered field owns it; the label must not repeat it')
+})
+
+test('D5: swap labels do not manufacture an R3 verdict out of nothing', () => {
+  // A clean label must not turn a pass into a warn, and `not_applicable` must survive: absent
+  // posting text is still "could not look", never "looked and found nothing".
+  const clean = [{ action: 'swapped', driver: 'posting', from_label: 'x', to_label: 'Platform Engineering' }]
+  const passed = find(runChecks({ type: 'resume', pkg: echoPkg('Led platform engineering.'),
+                                  postingText: POSTING, profileText: PROFILE, swaps: clean }), 'posting_figure_echo')
+  assert.equal(passed.state, 'pass')
+  assert.deepEqual(passed.offenders, [])
+  const blind = find(runChecks({ type: 'resume', pkg: echoPkg('Led platform engineering.'),
+                                 postingText: '', profileText: PROFILE, swaps: clean }), 'posting_figure_echo')
+  assert.equal(blind.state, 'not_applicable', 'no posting text is not a clean scan')
+})
