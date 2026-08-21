@@ -33,7 +33,8 @@ export async function ensureCheckPrefs(client: any) {
       add column if not exists chk_cover_words_max      int not null default ${DEFAULT_THRESHOLDS.coverWords[1]},
       add column if not exists chk_evidence_threshold   numeric not null default ${DEFAULT_THRESHOLDS.evidenceThreshold},
       add column if not exists chk_evidence_min_tokens  int not null default ${DEFAULT_THRESHOLDS.evidenceMinTokens},
-      add column if not exists chk_evidence_max_sentences int not null default ${DEFAULT_THRESHOLDS.evidenceMaxSentences}`)
+      add column if not exists chk_evidence_max_sentences int not null default ${DEFAULT_THRESHOLDS.evidenceMaxSentences},
+      add column if not exists chk_evidence_bullet_run  int not null default ${DEFAULT_THRESHOLDS.evidenceBulletRun}`)
 }
 
 export async function loadThresholds(client: any, owner: string): Promise<Partial<CheckThresholds>> {
@@ -42,7 +43,7 @@ export async function loadThresholds(client: any, owner: string): Promise<Partia
     `select chk_skill_max_chars, chk_skills_total_min, chk_skills_total_max, chk_relevant_max_chars,
             chk_relevant_allowance, chk_expertise_words, chk_cover_words_min, chk_cover_words_max,
             chk_evidence_threshold, chk_evidence_min_tokens,
-            chk_evidence_max_sentences
+            chk_evidence_max_sentences, chk_evidence_bullet_run
        from owner_search_prefs where owner_email=$1`, [owner])).rows[0]
   if (!r) return {}
   return {
@@ -56,6 +57,7 @@ export async function loadThresholds(client: any, owner: string): Promise<Partia
     evidenceThreshold: r.chk_evidence_threshold === null ? undefined : Number(r.chk_evidence_threshold),
     evidenceMinTokens: r.chk_evidence_min_tokens ?? undefined,
     evidenceMaxSentences: r.chk_evidence_max_sentences ?? undefined,
+    evidenceBulletRun: r.chk_evidence_bullet_run ?? undefined,
   }
 }
 
@@ -68,10 +70,22 @@ export async function loadThresholds(client: any, owner: string): Promise<Partia
  * `resolveEvidence` rather than to zero — which would evidence everything.
  */
 export async function resolveOptionsFor(client: any, owner: string): Promise<ResolveOptions> {
-  const t = await loadThresholds(client, owner)
+  return resolveOptionsFrom(await loadThresholds(client, owner))
+}
+
+/**
+ * The same mapping, without the query — for a caller that already loaded the thresholds.
+ *
+ * `appChecks` loads them for the checks anyway and used to hand-build the options object beside
+ * this one, which is how `bulletRunMax` came to be settable everywhere EXCEPT the path the gate
+ * runs on. A setting that reaches two of its three callers is worse than one that reaches none: it
+ * looks configurable and behaves differently depending on which route ran. One mapper, one shape.
+ */
+export function resolveOptionsFrom(t: Partial<CheckThresholds>): ResolveOptions {
   return {
     threshold: t.evidenceThreshold,
     minTokens: t.evidenceMinTokens,
     maxSentences: t.evidenceMaxSentences,
+    bulletRunMax: t.evidenceBulletRun,
   }
 }

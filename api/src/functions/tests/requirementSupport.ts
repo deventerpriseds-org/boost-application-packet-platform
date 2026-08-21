@@ -364,7 +364,34 @@ export const SAFETY_FLOOR_RULES: RefusalReason[] = [
  * satisfy `length(quote) = char_end - char_start`, so a quote stitched from two non-contiguous spans
  * is rejected by the schema — and would be a synthesis presented as a verbatim quote.
  */
-export function segments(text: string, maxSegments = 1): Span[] {
+/**
+ * How many bullet items a FOCUSED citation may span. SEEDED at 3.
+ *
+ * Owner-settable as `owner_search_prefs.chk_evidence_bullet_run`, and READ THE DIRECTION BEFORE
+ * CHANGING IT, because it is the opposite of what the name suggests at a glance:
+ *
+ *   LOWER = BROADER quotes.  HIGHER = TIGHTER quotes.
+ *
+ * The whole line is ALWAYS a candidate — it has to be, since item-only candidates fall under the
+ * quote floor and shipping that regressed production from 1 evidenced row to 0. This value only
+ * decides how narrow a candidate is ALSO offered alongside it, and `supportIn` breaks ties toward
+ * the shorter span. So raising it can only make a citation tighter or leave it unchanged, and
+ * lowering it can only widen it.
+ *
+ * Measured on the owner's real `expertise` field for "Experience in leading technology operations"
+ * (ratio 0.667 at every setting — the MATCH never moves, only the citation):
+ *   1 or 2 -> 286 chars, the whole field, all seven bullets
+ *   3 or more -> 130 chars, the three bullets that carry the support
+ *
+ * So the owner's "I may want the wide one back later" is `= 1`, a column write rather than a deploy.
+ */
+export const BULLET_RUN_MAX = 3
+
+export function segments(text: string, maxSegments = 1, bulletRunMax = BULLET_RUN_MAX): Span[] {
+  // Clamped, not trusted: no value may un-evidence a supported requirement, because the whole-line
+  // span is emitted regardless of this number. 0/NaN mean "unset" and take the seeded default;
+  // anything else lands in 1..12.
+  const runMax = Math.max(1, Math.min(12, Math.floor(bulletRunMax) || BULLET_RUN_MAX))
   const t = String(text || '')
   if (!t) return []
 
@@ -418,15 +445,39 @@ export function segments(text: string, maxSegments = 1): Span[] {
   // a short bullet item gets the surrounding item run to clear the quote floor. It cannot resurrect
   // the blob problem either: an item and its enclosing run that both carry the requirement's tokens
   // tie on ratio, and `supportIn` breaks ties toward the SHORTER span.
-  for (let i = 0; i < base.length; i++) {
+  // Collected separately and concatenated after the walk. Pushing into `base` while looping over it
+  // would extend the loop over the spans it just created — harmless today only because the appended
+  // entries have no `endedAtBullet` slot, which is exactly the kind of "happens to work" this file
+  // is not built on.
+  const runs: Span[] = []
+  const baseCount = base.length
+  for (let i = 0; i < baseCount; i++) {
     let j = i
-    while (j < base.length - 1 && endedAtBullet[j]) j++
+    while (j < baseCount - 1 && endedAtBullet[j]) j++
     if (j > i) {
+      // EVERY contiguous SUB-RUN of the bullet list, not just the whole line.
+      //
+      // The whole line alone is correct but imprecise. Measured on the owner's `expertise` field:
+      // `Experience in leading technology operations` resolved to all SEVEN bullets (286 chars),
+      // four of which — budgets, KPIs, M&A — say nothing about the requirement. The support was
+      // carried by a run of three. Emitting sub-runs lets `supportIn`'s shorter-span tie-break pick
+      // the tightest run that still carries the tokens (130 chars here) instead of the whole field.
+      //
+      // Bounded at `runMax` members so a long skills list cannot produce a quadratic number of
+      // candidates; the whole-line span is always emitted regardless, so a wide run is still
+      // reachable when nothing narrower qualifies.
+      for (let a = i; a <= j; a++) {
+        for (let b = a; b <= Math.min(j, a + runMax - 1); b++) {
+          const run = t.slice(base[a].start, base[b].end).replace(/\s+$/, '')
+          if (run) runs.push({ start: base[a].start, end: base[a].start + run.length })
+        }
+      }
       const whole = t.slice(base[i].start, base[j].end).replace(/\s+$/, '')
-      if (whole) base.push({ start: base[i].start, end: base[i].start + whole.length })
+      if (whole) runs.push({ start: base[i].start, end: base[i].start + whole.length })
     }
     i = j
   }
+  base.push(...runs)
 
   const n = Math.max(1, Math.min(3, Math.floor(maxSegments) || 1))
   const out: Span[] = [...base]
@@ -454,6 +505,8 @@ export interface SupportInput {
   recordCounts?: Map<string, number>
   threshold: number
   maxSentences: number
+  /** How many bullet items one excerpt may span. Optional; falls through to `BULLET_RUN_MAX`. */
+  bulletRunMax?: number
   minQuoteChars: number
   minQuoteWords: number
   distinctiveLen: number
@@ -632,7 +685,8 @@ export function supportIn(input: SupportInput): SupportResult {
   // ranking below (ratio, then shorter excerpt) picks it naturally when it wins, and falls back to
   // a full-sentence candidate when no exact literal span exists.
   const lit = literalSpan(requirement, text)
-  const candidates = lit ? [lit, ...segments(text, input.maxSentences)] : segments(text, input.maxSentences)
+  const segs = segments(text, input.maxSentences, input.bulletRunMax)
+  const candidates = lit ? [lit, ...segs] : segs
   for (const span of candidates) {
     const excerpt = text.slice(span.start, span.end)
     if (excerpt.length < input.minQuoteChars) { seen.push('quote_too_short'); continue }
