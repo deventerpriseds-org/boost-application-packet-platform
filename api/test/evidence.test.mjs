@@ -12,6 +12,8 @@ import { readFileSync } from 'node:fs'
 import {
   profileRecords, resolveEvidence, resolveAll, toCheckInput,
   EVIDENCE_THRESHOLD, MIN_JUDGEABLE_TOKENS, RESOLVER_VERSION, NO_EVIDENCE_NOTE, MC_KIND,
+  verifyEvidence, tallyHealth, sha256,
+  EVIDENCE_NOTE, EVIDENCE_STALE_NOTE, EVIDENCE_SOURCE_MISSING_NOTE, EVIDENCE_UNVERIFIED_NOTE,
 } from '../dist/functions/tests/evidence.js'
 import { MIN_QUOTE_CHARS, MIN_QUOTE_WORDS } from '../dist/functions/tests/reviewer.js'
 import { runChecks, DEFAULT_THRESHOLDS } from '../dist/functions/tests/checks.js'
@@ -291,4 +293,243 @@ test('the evidence thresholds are seeded defaults with a real owner path, not co
   const req = 'Owned the digital water technology roadmap with Product across three business units'
   assert.equal(resolveEvidence(req, recs, { threshold: 0.99 }), null)
   assert.ok(resolveEvidence(req, recs, { threshold: 0.4 }))
+})
+
+// ------------------------------------------------------------------ D19: re-validation on read
+//
+// A stored excerpt is a claim about the profile AS IT WAS. `record_sha256` was written so a stale
+// offset would be detectable once the owner edited that record — and it was never recomputed, which
+// made it a decoration. These exercise what a stored row DOES on read, in each state it can be in.
+//
+// The requirement below resolves EXACTLY into `workHistory1`, so the stored offsets are the real
+// ones `locate` measured, not values written by hand into a fixture.
+const REQ = 'Led the platform modernization programme across four product lines'
+
+/** The joined row `loadRequirementsWithEvidence` returns, built from a REAL resolve. */
+function joinedRow(mc = MC, seq = 0) {
+  const ev = resolveEvidence(REQ, profileRecords(mc, TEMPLATE))
+  assert.ok(ev, 'fixture is broken: the requirement no longer resolves against the profile')
+  return {
+    seq, item_text: REQ, verbatim: REQ, jd_text_sha256: 'jd-sha',
+    char_start: 0, char_end: REQ.length, kind: 'must_have',
+    evidence_quote: ev.quote,
+    evidence_source_kind: ev.source_kind,
+    evidence_source_label: ev.source_label,
+    evidence_source_key: ev.source_key,
+    evidence_char_start: ev.char_start,
+    evidence_char_end: ev.char_end,
+    evidence_extra: ev.extra,
+    evidence_ratio: ev.ratio,
+    evidence_method: ev.method,
+    evidence_record_sha256: ev.record_sha256,
+    evidence_resolver_version: ev.resolver_version,
+    evidence_resolved_at: new Date('2026-08-20T00:00:00Z'),
+  }
+}
+
+const stored = (row) => ({
+  quote: row.evidence_quote, source_key: row.evidence_source_key,
+  char_start: row.evidence_char_start, char_end: row.evidence_char_end,
+  record_sha256: row.evidence_record_sha256,
+})
+
+// The four ways an owner can change their profile out from under a stored excerpt.
+const editedBefore = { ...MC, workHistory1: `PROMOTED TWICE. ${MC.workHistory1}` }
+const editedAfter = { ...MC, workHistory1: `${MC.workHistory1} Also chaired the architecture council.` }
+const rewritten = { ...MC, workHistory1: MC.workHistory1.replace(REQ, 'Ran a small internal pilot') }
+const removed = (() => { const m = { ...MC }; delete m.workHistory1; return m })()
+
+test('the fixture row carries every evidence column the real join projects', () => {
+  // Otherwise these tests verify a shape the database never produces. The alias list is read from
+  // the query itself, so a column added to the join makes this fail rather than go unchecked.
+  const src = readFileSync(new URL('../src/functions/tests/appRequirements.ts', import.meta.url), 'utf8')
+  const sql = src.slice(src.indexOf('export async function loadRequirementsWithEvidence'))
+  const aliases = [...sql.slice(0, sql.indexOf('order by r.seq')).matchAll(/as\s+(evidence_[a-z0-9_]+)/g)].map(m => m[1])
+  assert.ok(aliases.length >= 12, `only ${aliases.length} evidence aliases found — the scan has gone stale`)
+  const row = joinedRow()
+  for (const a of aliases) assert.ok(a in row, `the join projects ${a} and the fixture does not carry it`)
+})
+
+test('a stored excerpt whose record is unchanged is still proof', () => {
+  const v = verifyEvidence(stored(joinedRow()), profileRecords(MC, TEMPLATE))
+  assert.equal(v.state, 'verified')
+  assert.equal(v.proof, true)
+  assert.equal(v.recordChanged, false)
+  assert.equal(v.note, null)
+})
+
+test('an edit BEFORE the excerpt moves it, and a moved excerpt is not proof', () => {
+  // The D19 defect exactly: the offsets still land inside the record and still return a true
+  // substring OF SOMETHING — just not of the quote the row claims. `locate`'s H32 fix makes the
+  // offsets right when they are WRITTEN; nothing made them right when they are READ.
+  const row = joinedRow()
+  const after = profileRecords(editedBefore, TEMPLATE)
+  const rec = after.find(r => r.key === 'workHistory1')
+  assert.notEqual(rec.text.slice(row.evidence_char_start, row.evidence_char_end), row.evidence_quote,
+    'the premise of this test is gone: the edit did not move the excerpt')
+
+  const v = verifyEvidence(stored(row), after)
+  assert.equal(v.state, 'stale')
+  assert.equal(v.proof, false)
+  assert.equal(v.recordChanged, true)
+  assert.equal(v.quoteMoved, true, 'the text is still in the record — the OFFSETS are what rotted')
+  assert.equal(v.note, EVIDENCE_STALE_NOTE)
+})
+
+test('an edit AFTER the excerpt leaves it provable — a digest mismatch alone is not an accusation', () => {
+  // The over-strict fix this guards against: refusing every row whose record hash changed. The row
+  // asserts "this quote is the record's bytes at these offsets", and that is still TRUE here.
+  // Withholding it would be a false accusation, and would empty the JD step on any profile edit.
+  const row = joinedRow()
+  const after = profileRecords(editedAfter, TEMPLATE)
+  assert.notEqual(sha256(after.find(r => r.key === 'workHistory1').text), row.evidence_record_sha256)
+
+  const v = verifyEvidence(stored(row), after)
+  assert.equal(v.state, 'verified')
+  assert.equal(v.proof, true)
+  assert.equal(v.recordChanged, true, 'the ranking IS stale and must be reported as such')
+  assert.equal(v.quoteMoved, false)
+})
+
+test('a record that no longer says it, and a record that is gone, are different states', () => {
+  const row = joinedRow()
+
+  const gone = verifyEvidence(stored(row), profileRecords(rewritten, TEMPLATE))
+  assert.equal(gone.state, 'stale')
+  assert.equal(gone.quoteMoved, false, 'the profile no longer contains this text at all')
+
+  const missing = verifyEvidence(stored(row), profileRecords(removed, TEMPLATE))
+  assert.equal(missing.state, 'source_missing')
+  assert.equal(missing.proof, false)
+  assert.equal(missing.note, EVIDENCE_SOURCE_MISSING_NOTE)
+})
+
+test('offsets that were wrong when WRITTEN are not blamed on an edit the owner never made', () => {
+  // The H32 residue, and the reason this is a state of its own. `locate`'s exact branch used to index
+  // a lower-cased copy of the haystack, and `toLowerCase()` is not length-preserving, so the stored
+  // offsets could be wrong BY CONSTRUCTION — a true substring of the record, and the wrong
+  // characters. That was fixed at the write side (EXTRACTOR_VERSION 1 -> 2); rows written before it
+  // are still in the table, and re-validation on read is the first thing that can see them.
+  //
+  // The digest is what tells the two apart: it MATCHES, so the record is byte-identical and nothing
+  // the owner did caused this. Printing "your profile changed" at them would be a false statement.
+  const row = joinedRow()
+  const recs = profileRecords(MC, TEMPLATE)
+  const rec = recs.find(r => r.key === row.evidence_source_key)
+  const drifted = {
+    ...stored(row),
+    char_start: row.evidence_char_start + 5,
+    char_end: row.evidence_char_end + 5,
+    record_sha256: sha256(rec.text),          // the record is UNCHANGED — this is the whole point
+  }
+
+  const v = verifyEvidence(drifted, recs)
+  assert.equal(v.state, 'misresolved')
+  assert.equal(v.proof, false)
+  assert.equal(v.recordChanged, false, 'the record is byte-identical; claiming otherwise blames the owner')
+  assert.equal(v.quoteMoved, true, 'the text is in the record — the row simply points at the wrong place')
+  assert.notEqual(v.note, EVIDENCE_STALE_NOTE, 'a mis-recorded offset is not a profile edit')
+})
+
+test('an unreadable profile is `unverified` — never verified, and never an accusation either', () => {
+  // The same rule `profileReadable` already encodes one level up: absent evidence is not a pass,
+  // and it is not a finding against the candidate. `null` means unreadable; `[]` would mean a
+  // profile that genuinely holds nothing, which is why callers pass `records.length ? records : null`.
+  const v = verifyEvidence(stored(joinedRow()), null)
+  assert.equal(v.state, 'unverified')
+  assert.equal(v.proof, false)
+  assert.equal(v.note, EVIDENCE_UNVERIFIED_NOTE)
+  assert.notEqual(v.note, NO_EVIDENCE_NOTE)
+})
+
+test('every non-provable state prints a DIFFERENT sentence', () => {
+  // "Your profile does not support this", "your profile changed", "that record is gone" and "we
+  // could not read your profile" are four different claims about the candidate. One sentence for
+  // all four is the conflation this module exists to refuse.
+  const notes = Object.values(EVIDENCE_NOTE)
+  assert.equal(new Set(notes).size, notes.length, 'two states share a sentence')
+  assert.equal(EVIDENCE_NOTE.none, NO_EVIDENCE_NOTE, 'the absent-row sentence must not have changed')
+  for (const n of notes) assert.ok(n.length > 20)
+})
+
+test('health buckets account for every row exactly once', () => {
+  const rows = [joinedRow(), joinedRow(), { seq: 2, evidence_quote: null }]
+  const verdicts = rows.map(r => verifyEvidence(r.evidence_quote == null ? null : stored(r), profileRecords(MC, TEMPLATE)))
+  const h = tallyHealth(verdicts, true)
+  assert.equal(h.total, 3)
+  assert.equal(h.verified + h.stale + h.misresolved + h.sourceMissing + h.unverified + h.none, h.total)
+  assert.deepEqual([h.verified, h.none], [2, 1])
+  assert.equal(h.profileReadable, true)
+
+  // Every state has a bucket, and a state that gains one later must gain one HERE too — the `else`
+  // that used to end this tally would have counted a new state as "no evidence found", which is
+  // precisely the miscount this module exists to prevent.
+  const BUCKET = {
+    verified: 'verified', stale: 'stale', misresolved: 'misresolved',
+    source_missing: 'sourceMissing', unverified: 'unverified', none: 'none',
+  }
+  const states = Object.keys(EVIDENCE_NOTE).concat('verified')
+  assert.deepEqual(states.slice().sort(), Object.keys(BUCKET).sort(), 'a state exists with no bucket named for it')
+  for (const state of states) {
+    const t = tallyHealth([{ state, proof: state === 'verified', recordChanged: false, quoteMoved: false, note: null }], true)
+    assert.equal(t.verified + t.stale + t.misresolved + t.sourceMissing + t.unverified + t.none, 1,
+      `state '${state}' landed in no bucket, or in two`)
+    // Landing SOMEWHERE is not enough: an `else h.none++` fallback counts an unhandled state as
+    // "no evidence found in your profile", which is a false claim about the candidate and the exact
+    // miscount this module exists to prevent.
+    assert.equal(t[BUCKET[state]], 1, `state '${state}' was counted as '${Object.keys(BUCKET).find(k => t[BUCKET[k]] === 1)}'`)
+  }
+  assert.throws(() => tallyHealth([{ state: 'invented_later' }], true), /unknown evidence state/)
+})
+
+// ------------------------------------------------------------------ what the JD step is served
+
+test('a broken excerpt is WITHHELD from the payload, not served with a caveat', async () => {
+  const { shapeRequirementsForApi } = await import('../dist/functions/tests/appRequirements.js')
+  const joined = [joinedRow()]
+
+  const fresh = shapeRequirementsForApi(joined, profileRecords(MC, TEMPLATE))
+  assert.equal(fresh.evidenced, 1)
+  assert.equal(fresh.requirements[0].evidence.quote, REQ)
+  assert.equal(fresh.requirements[0].evidenceNote, null)
+
+  const rotted = shapeRequirementsForApi(joined, profileRecords(editedBefore, TEMPLATE))
+  assert.equal(rotted.requirements[0].evidence, null, 'a moved excerpt was still served as a quote')
+  assert.equal(rotted.requirements[0].evidenced, false)
+  assert.equal(rotted.evidenced, 0, 'a row that cannot be shown must not be counted as covered')
+  assert.equal(rotted.evidenceHealth.stale, 1)
+
+  // And no fragment of the withdrawn excerpt leaks through any other column.
+  const leaked = Object.entries(rotted.requirements[0])
+    .filter(([k, v]) => k.startsWith('evidence_') && !['evidence_state', 'evidence_note', 'evidence_record_changed', 'evidence_quote_moved'].includes(k) && v != null)
+  assert.deepEqual(leaked, [], 'an evidence column survived the redaction')
+})
+
+test('the redaction covers columns nobody listed by hand', async () => {
+  // The hand-written null-list is the shape that goes stale the day the join gains a column, and a
+  // leaked column is a fragment of a withdrawn excerpt. Redaction is by prefix, so this passes for
+  // a column that did not exist when it was written.
+  const { verifyRequirementRows } = await import('../dist/functions/tests/appRequirements.js')
+  const row = { ...joinedRow(), evidence_some_column_added_later: 'a fragment of the old excerpt' }
+  const out = verifyRequirementRows([row], profileRecords(editedBefore, TEMPLATE)).rows[0]
+  assert.equal(out.evidence_some_column_added_later, null)
+})
+
+test('"we cannot check" is distinguishable from "your profile does not support this"', async () => {
+  const { shapeRequirementsForApi } = await import('../dist/functions/tests/appRequirements.js')
+  // Two rows: one with a stored excerpt, one with none. Under an unreadable profile they must NOT
+  // collapse into the same state — that is the claim D19 says is being made silently today.
+  const joined = [joinedRow(), { seq: 1, item_text: 'something else entirely', evidence_quote: null }]
+  const out = shapeRequirementsForApi(joined, null)
+
+  assert.equal(out.requirements[0].evidenceState, 'unverified')
+  assert.equal(out.requirements[1].evidenceState, 'none')
+  assert.notEqual(out.requirements[0].evidenceNote, out.requirements[1].evidenceNote)
+  assert.equal(out.requirements[1].evidenceNote, NO_EVIDENCE_NOTE)
+  assert.equal(out.evidenced, 0)
+  assert.equal(out.evidenceHealth.profileReadable, false)
+  assert.equal(out.evidenceHealth.unverified, 1)
+  assert.equal(out.evidenceHealth.none, 1)
+  // The arithmetic every consumer of these two numbers depends on.
+  assert.equal(out.evidenced + out.unevidenced, out.requirements.length)
 })

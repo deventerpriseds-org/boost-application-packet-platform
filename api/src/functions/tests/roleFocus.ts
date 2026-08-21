@@ -4,6 +4,7 @@ const CONN = process.env.AZURE_STORAGE_CONNECTION_STRING!
 
 export type RoleFocusSource =
   | 'appconfig'            // an AppConfig/templates row for this role carried a roleFocus
+  | 'persona'              // the owner's own curated role, from persona.master_role
   | 'configured_default'   // the owner's fallback (AppConfig/auth `openai.defaultRoleFocus`)
   | 'inferred'             // the role text itself said "product"; code inferred the focus
   | 'seed'                 // nothing matched — the code seed was used, and that is a warning
@@ -37,6 +38,7 @@ export function decideRoleFocus(
   rowFocus?: string | null,
   configuredDefault?: string | null,
   lookupError?: string | null,
+  personaRole?: string | null,
 ): ResolvedRoleFocus {
   const row = String(rowFocus ?? '').trim()
   if (row) return { focus: row, source: 'appconfig' }
@@ -45,6 +47,25 @@ export function decideRoleFocus(
   const why = lookupError
     ? `AppConfig lookup failed for templates/${rowKey} (${lookupError})`
     : `no roleFocus configured for templates/${rowKey}`
+
+  // THE OWNER'S OWN ROLE, and it outranks every guess below.
+  //
+  // This resolver was looking in AppConfig/templates, missing, and falling to a hardcoded seed —
+  // while the roles the owner actually curates in Settings > Roles sat unread in
+  // `persona.master_role`. Measured on the live database: CTO -> "CTO", CDIGITAL -> "Chief Digital
+  // Officer", VP-ENGINEERING -> "Engineering", VP-PRODUCT -> "Product", VP-TECHNOLOGY ->
+  // "Technology". Those ARE role focuses; `roleDirective` renders "...for a senior {focus}
+  // executive" and each drops straight in.
+  //
+  // That made this a SECOND role brain beside the persona system — the exact shape CLAUDE.md's
+  // extend-don't-duplicate rule was written about. It is not a missing configuration the owner
+  // forgot to fill in; the configuration exists and nothing read it.
+  //
+  // Ranked ABOVE `inferred` deliberately: a curated persona is the owner stating their target
+  // role, while `inferred` is a regex on the job title. Evidence beats a guess. No warning is
+  // attached, because resolving from the owner's own data is not a fallback.
+  const persona = String(personaRole ?? '').trim()
+  if (persona) return { focus: persona, source: 'persona' }
 
   if (roleType && /product/i.test(roleType)) {
     return { focus: 'product management', source: 'inferred', warning: `${why}; inferred "product management" from the role name` }
@@ -67,7 +88,7 @@ export function decideRoleFocus(
  * it came from. Engineering and Product Management currently share template files, but each row
  * carries a roleFocus so the AI content is tailored per role.
  */
-export async function resolveRoleFocus(roleType: string, configuredDefault?: string): Promise<ResolvedRoleFocus> {
+export async function resolveRoleFocus(roleType: string, configuredDefault?: string, personaRole?: string | null): Promise<ResolvedRoleFocus> {
   let rowFocus: string | null = null
   let lookupError: string | null = null
   try {
@@ -80,7 +101,7 @@ export async function resolveRoleFocus(roleType: string, configuredDefault?: str
     const status = (e as any)?.statusCode
     lookupError = status === 404 ? null : String((e as any)?.message || e).slice(0, 160)
   }
-  return decideRoleFocus(roleType, rowFocus, configuredDefault, lookupError)
+  return decideRoleFocus(roleType, rowFocus, configuredDefault, lookupError, personaRole)
 }
 
 /** Back-compatible string form for callers that do not surface the provenance (mt14/mt18/mt19). */
