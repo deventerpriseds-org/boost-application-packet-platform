@@ -2263,3 +2263,43 @@ gate-affected postings exists. D22 changes gate-visible rows on real data and th
 owed.
 
 482 api tests pass (461 on `main`; +21 added). Branch pushed, NOT landed on `main`.
+
+## Ledger guard — `.claude/DEFERRED.md` is machine-checked (`claude/ledger-guard`)
+
+**Asked:** "what are ledger rows and why are they becoming stale what needs to be improved or more
+frequent" — then "go ahead" on the guard I proposed in reply.
+
+**Answer given, and the evidence for it:** more frequent editing is the fix that had already failed
+three times. The ledger needed to become *checkable*. Built:
+
+- `.claude/DEFERRED.md` normalized — a `Status` column (`OPEN`/`CLOSED`/`WONTDO` as a token, never
+  inferred from prose), 4 duplicate ids resolved, the `a9f23a3` duplicate `## Contrast`/D26 block
+  removed, D35 re-parented, and every open row carrying one executable `check:`.
+- `api/test/deferredLedger.test.mjs` — 15 cases, auto-globbed by `node --test test/*.test.mjs` with
+  no `package.json` change. 571 api tests pass (556 on `main`).
+
+**Corrections made to my own first pass, both from the independent AC subagent's read:**
+- The brief said five duplicate ids; **`D23` is not one** — `D23`/`D23b` are distinct rows and the
+  `b` suffix is already the convention (`H4b`, `H5b`). Re-keying it would have broken 25+ pointers.
+- The first migration re-keyed **the wrong side of `D21` and `D22`** — it ordered by commit date
+  when the ground truth is which row the external citations mean. Fixed, and
+  `D:ledger-citation-resolves` makes the class impossible.
+
+**Integration trace.** Core system: the `api/test` suite run by `api/package.json` `test` and
+`.github/workflows/test.yml` — extended, not duplicated (new file, no runner change, `D:` slugs that
+cannot collide with `H:`). Upstream producers of the ledger: every lane's commit. Downstream
+consumers: source comments, `.claude/actions.md`, `hardening.test.mjs` — all grepped, and the
+citation guard now proves they reconcile.
+
+**Open, and recorded as a row rather than a note:** `D:hslug-scan-one-file` — `H26` reads only its
+own file, so an `H:` slug in a second test file is invisible to it. Latent, not live.
+
+**NOT verified live** — a test-suite and documentation change; nothing deploys.
+
+**The verifier found what self-verification would not.** Eight claims CONFIRMED, and then eleven
+defects — the worst being that three of the first four `check:` directives I wrote could never go
+false, two proven by reinstating the exact regression while the suite stayed green. That is the rot
+vector the whole remedy exists to close, and it was open in the remedy itself. All fixed and each
+re-proved by reinstatement. Two of the defects were my own cry-wolf: a line-coordinate ban that fired
+on clock times in prose, and a fixture helper that never asserted its own edit applied.
+Deferred as rows rather than notes: `D:hslug-scan-one-file`, `D:id-hygiene-duplicated`.

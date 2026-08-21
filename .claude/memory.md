@@ -1641,3 +1641,83 @@ correct code is one people switch off.
 
 **NOT verified live**, and no independent AC subagent was spawned — no agent-spawning tool is
 exposed in that session type. Recorded as `not_applicable`, not as done.
+
+## The ledger is machine-checked now (`api/test/deferredLedger.test.mjs`)
+
+`.claude/DEFERRED.md` exists to catch "a claim about state that nothing re-checks". It had become
+that claim: status was prose only (`CLOSED.` / `DONE.` / `FIXED` / `DONE, proven live.` — nothing
+could tell open from closed), four ids named two defects each, and the `a9f23a3` merge duplicated
+`## Contrast` and D26 verbatim while orphaning D35 under a headerless table.
+
+Three causes of its staleness, all measured rather than guessed:
+1. **Updating it is a step separate from the fix.** The contrast commit was scoped `-- app/`, which
+   excluded `.claude/DEFERRED.md`. The rewind guard reported ZERO drift — this was scoping, not a
+   container reclaim.
+2. **Parallel lanes fix things without touching it.**
+3. **Rows carry claims nothing re-checks.** Three were false when written or fixed later.
+
+The remedy is the one that retired the H-counter: `OPEN`/`CLOSED`/`WONTDO` as a TOKEN, `D1`-`D37`
+frozen with slugs for everything new, and **every open row carries a `check:` the suite RUNS** —
+`grep` (defect still present), `absent` (thing still missing), or `manual <vehicle>` for what this
+sandbox cannot settle. A row whose defect no longer reproduces FAILS, in both directions: a closed
+row's `grep` means the fix must still be there, so a regression reopens it.
+
+**Re-key by CITATION, not by commit date.** The first migration ordered the D21/D22 collisions by
+which commit came first and picked the wrong side of both. Ground truth is what points at the id:
+`appDimensions.ts:14`, `schema.ts:854`, `dimensionsDb.test.mjs`, `hardening.test.mjs:277` all mean
+the P8.4 schema row by `D21`; `ownerFacts.ts:31,238`, `dimensions.ts:311`, `checks.test.mjs:250`,
+`hardening.test.mjs:1874,2282` all mean `years_leadership` by `D22`. `D:ledger-citation-resolves`
+now fails on any id cited from source that resolves to no row.
+
+**Two cry-wolf near-misses, both caught before landing.** A citation scan flagged `D97706` — the
+amber hex in `theme.css`; bounding the id to two digits and refusing a hex-ish left neighbour fixes
+it. A row-census regex counted the format doc's `| Directive |` header as a row. Both are the shape
+this repo has already deleted a linter for.
+
+**A check is never pinned to a line number.** `D20` cited `appFacts.ts:232`; the construct now lives
+at `:239` and the claim never changed. `D:ledger-check-names-a-construct` bans the coordinate.
+
+All 13 assertion functions are proven by reinstating their own defect through the SAME parser CI
+runs (`D:ledger-guard-not-vacuous`), and the proof prints on every run.
+
+**NOT verified live** — nothing here touches production; it is a test-suite and doc change. 571 api
+tests pass (556 on `main`; +15). 14 of 42 rows are reported `not_applicable`, never `pass`.
+
+### The independent verifier found the guard's own rot vector — three checks that could never go false
+
+It confirmed all eight claims (571 tests, 13/13 assertions firing on its OWN fixtures, both staleness
+directions from real source edits, the re-key correct against every citation, no row body dropped)
+and then found what self-verification would not have:
+
+**Three of the first four checks written could never go false**, two proven by execution — reinstate
+the exact regression the row names and the suite stays green:
+- `D2` grepped `generalize`, which survives the import, the `'generalized'` type literal and a
+  comment after the last CALLER is gone. Now `= generalize\(`. Reinstated: identifier still present
+  4 times, suite RED.
+- `D10` grepped `H26`, which survives in comments after the case itself is deleted. Now
+  `test\('H26:`. Reinstated: `H26` still present twice, suite RED. `H26` strips comments before
+  scanning for this exact reason; the check had done the opposite.
+- `D14`'s defect is what `covered_kw` MEANS — semantic, so no source grep can settle it. Now
+  `manual`.
+**A check whose pattern cannot go false is not a check.** An empty pattern is the degenerate case:
+`/(?:)/` matches every file, passes forever, and was being COUNTED as machine-checked — the vacuous
+gate class, inside the vacuity guard. Rejected now.
+
+**The census omitted 16 rows.** 12 machine + 14 manual = 26 of 42; the other 16 were closed by prose
+with no check, invisible in a green run. All three buckets print, and the accounting must be
+complete.
+
+**Two cry-wolf defects of my own.** The line-coordinate ban ran on `manual` reasons too, so a clock
+time (`02:03`) or a run id read as a line number — scoped to `grep`/`absent` now. And `swap()`
+asserted its ANCHOR existed but never that the replacement APPLIED, so a legal ledger edit made a
+no-op fixture accuse the guard of being inert — the repo's own "verify that an edit applied" rule,
+broken by the helper that enforces that class. Adding the assertion immediately caught a real no-op
+placeholder fixture I had left in.
+
+Also fixed: a `|` in a check pattern split the row and reported "6 columns, expected 5" (escape it
+`\|`); `check: owner` was an undocumented fourth kind that bypassed vehicle validation (one spelling,
+`manual owner`); the ledger itself was not in the citation-scan roots, the one place a re-key is
+most likely to strand a pointer; an invalid regex threw naming no row; and `D20`'s prose still cited
+the `appFacts.ts:232` coordinate that had already rotted to `:239`.
+
+572 api tests pass. **NOT verified live** — nothing here deploys.
