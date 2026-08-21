@@ -22,7 +22,7 @@ import { splitItems, itemTokens, omitEntries, onOmitList } from './swaps'
 import { mergeFieldsFor } from './insertions'
 import { normalizePostingText } from './jdText'
 import { checkAgainstFacts, OwnerFact } from './ownerFacts'
-import { scanEcho } from './figureEcho'
+import { scanEcho, scanWording, WORDING_RUN_TOKENS } from './figureEcho'
 import { EvidenceInput, NO_EVIDENCE_NOTE, EVIDENCE_THRESHOLD, MIN_JUDGEABLE_TOKENS as EVIDENCE_MIN_TOKENS } from './evidence'
 
 export type CheckState = 'pass' | 'warn' | 'fail' | 'not_applicable'
@@ -48,6 +48,8 @@ export interface CheckResult {
 }
 
 export interface CheckThresholds {
+  /** D4: how many consecutive identical words count as wording kept from the posting. */
+  wordingRunTokens: number
   skillMaxChars: number
   skillsTotalMin: number
   skillsTotalMax: number
@@ -72,6 +74,7 @@ export interface CheckThresholds {
 
 /** Seeded first values, taken from the live prompt. The owner can change every one of them. */
 export const DEFAULT_THRESHOLDS: CheckThresholds = {
+  wordingRunTokens: WORDING_RUN_TOKENS,
   skillMaxChars: 30,
   skillsTotalMin: 20,
   skillsTotalMax: 22,
@@ -99,6 +102,8 @@ export const AI_TELLS = [
 ]
 
 const words = (s: string) => String(s || '').trim().split(/\s+/).filter(Boolean).length
+const WORDING_EXPECT = 'no generated field repeats a run of the posting\'s wording'
+
 const ok = (key: string, observed: string, expected: string): CheckResult =>
   ({ check_key: key, engine: 'deterministic', state: 'pass', observed, expected, offenders: [] })
 const bad = (key: string, observed: string, expected: string, offenders: string[], state: CheckState = 'fail'): CheckResult =>
@@ -298,9 +303,22 @@ export function runChecks(input: CheckInput): CheckResult[] {
   //     BOTH documents can be legitimate, and the offender list is the point: it names the field
   //     and the exact string so a human decides in one look. A gate that reddens on a shared number
   //     is a gate people learn to click past.
-  const echoFields = present
-  if (echoFields.length) {
-    const scans = echoFields.map(f => ({ f, r: scanEcho(String(pkg[f]), input.postingText || '', input.profileText || '') }))
+  //  4. It scans the SWAP LABELS too, not just the rendered fields (D5). `runChecks` sees `pkg`,
+  //     so a swap RECORDED but not yet written into a bullet was text the user would read that
+  //     nothing had checked - "Org Scaling 60+" or "P&L $18M" sitting in `swap_decision.to_label`
+  //     passed R3 simply because the rendering had not caught up yet. Only labels NOT already in
+  //     the rendered text are added: a label that HAS been rendered is covered by the field scan,
+  //     and reporting it twice under two names is the cry-wolf tax on a check that names people.
+  const renderedAll = present.map(f => String(pkg[f])).join('\n')
+  const swapLabels = [...new Set((input.swaps || [])
+    .map(sw => String(sw.to_label ?? ''))
+    .filter(l => l.trim() !== '' && !renderedAll.includes(l)))]
+  const echoUnits = [
+    ...present.map(f => ({ f, text: String(pkg[f]) })),
+    ...swapLabels.map(l => ({ f: `swap: ${l}`, text: l })),
+  ]
+  if (echoUnits.length) {
+    const scans = echoUnits.map(({ f, text }) => ({ f, r: scanEcho(text, input.postingText || '', input.profileText || '') }))
     // The SCAN decides whether it could look, not this function. Re-deriving it here from the raw
     // strings tested a different thing: `jd_real` is HTML, so a markup-only posting (`<p></p>`) is a
     // non-empty raw string and an empty posting — and this check reported `pass` on a document it
@@ -322,8 +340,34 @@ export function runChecks(input: CheckInput): CheckResult[] {
       out.push(hits.length
         ? bad('posting_figure_echo', `${hits.length} figure(s) taken from the posting${keptNote}`,
               "no generated field states a figure that appears only in the posting", hits, 'warn')
-        : ok('posting_figure_echo', `no posting-only figures across ${echoFields.length} field(s)${keptNote}`,
+        : ok('posting_figure_echo', `no posting-only figures across ${present.length} field(s)${swapLabels.length ? ` and ${swapLabels.length} unrendered swap label(s)` : ''}${keptNote}`,
              "no generated field states a figure that appears only in the posting"))
+    }
+  }
+
+  // --- D4 / R3: WORDING kept from the posting — a user judgement call, listed separately -------
+  //
+  // Deliberately its own check, not more offenders on `posting_figure_echo`. The spec separates
+  // them because the REMEDY is different: a figure the profile cannot evidence is corrected
+  // automatically (R1/P8.1), and a phrase is never touched — only the writer can say whether it is
+  // the employer's sentence, the industry's standard term, or their own words. Folding the two
+  // together would put prose into the auto-correct path, which is the one thing R3 must not do.
+  //
+  // `warn`, and R1 permits it: "only what genuinely cannot be settled without the user appears as
+  // an open item" — a judgement call is exactly that. It cites the passage verbatim so the decision
+  // takes one look. See `scanWording` for why the run is long: this list is shown to a person about
+  // their own writing, so it errs toward silence.
+  if (echoUnits.length) {
+    const wScans = echoUnits.map(({ f, text }) => ({ f, r: scanWording(text, input.postingText || '', input.profileText || '', t.wordingRunTokens) }))
+    const wBlocked = wScans.find(x => x.r.notApplicable)
+    if (wBlocked) {
+      out.push(na('posting_wording_kept', wBlocked.r.reason || 'nothing to compare against', WORDING_EXPECT))
+    } else {
+      const wHits = wScans.flatMap(({ f, r }) => r.kept.map(k => `${f}: "${k.phrase}"`))
+      out.push(wHits.length
+        ? bad('posting_wording_kept', `${wHits.length} passage(s) read as the posting's wording — your call`,
+              WORDING_EXPECT, wHits, 'warn')
+        : ok('posting_wording_kept', `no passage of ${t.wordingRunTokens}+ words matches the posting`, WORDING_EXPECT))
     }
   }
 
