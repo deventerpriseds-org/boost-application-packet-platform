@@ -202,8 +202,29 @@ export function profileRecords(
  * settings hook attached.
  */
 export const EVIDENCE_THRESHOLD = 0.7
-/** Below this many content words a requirement carries too little signal to evidence either way. */
+/**
+ * Below this many content words a requirement carries too little signal to evidence either way.
+ *
+ * SHARED — `dimensions.ts` imports this to decide whether a requirement is gradeable at all, so it
+ * is NOT the resolver's private tuning knob. Left at 3 deliberately: changing it to 2 to fix a
+ * resolver-local problem silently reclassified dimension rows from `not_applicable` to `weak`
+ * (caught by AC20). The resolver's own floor is `RESOLVE_MIN_TOKENS` below.
+ */
 export const MIN_JUDGEABLE_TOKENS = 3
+
+/**
+ * The resolver's OWN judgeability floor, separate because it counts a different token population.
+ *
+ * This module's tokenizer drops requirement boilerplate that `checks.itemTokens` keeps
+ * (`experience`, `ability`, `strong`, `understanding`), so the SAME requirement yields fewer tokens
+ * here than the shared floor was calibrated against. Measured on real data:
+ * `Experience with enterprise architecture` reduced to `[enterprise, architecture]` and came back
+ * `unjudgeable` — a perfectly judgeable two-word requirement refused for arithmetic reasons.
+ *
+ * 2 still does the real job: `Leadership` and `Own it` reduce to a single token and stay
+ * unjudgeable, which is what the floor exists for.
+ */
+export const RESOLVE_MIN_TOKENS = 2
 /** A token this long carries real signal; a requirement of only short common words carries none. */
 export const DISTINCTIVE_LEN = 6
 /**
@@ -263,7 +284,7 @@ export function resolveEvidence(
   // Typeof, not `||`: a caller passing 0 means 0, and an owner who has not set the column passes
   // undefined, which is what the seeded default is for.
   const threshold = typeof opts.threshold === 'number' ? opts.threshold : EVIDENCE_THRESHOLD
-  const minTokens = typeof opts.minTokens === 'number' ? opts.minTokens : MIN_JUDGEABLE_TOKENS
+  const minTokens = typeof opts.minTokens === 'number' ? opts.minTokens : RESOLVE_MIN_TOKENS
   const maxSentences = typeof opts.maxSentences === 'number' ? opts.maxSentences : EVIDENCE_MAX_SENTENCES
 
   const text = String(requirementText || '')
@@ -338,7 +359,7 @@ export function refusalReason(
   records: ProfileRecord[],
   opts: ResolveOptions = {},
 ): RefusalReason | null {
-  const minTokens = typeof opts.minTokens === 'number' ? opts.minTokens : MIN_JUDGEABLE_TOKENS
+  const minTokens = typeof opts.minTokens === 'number' ? opts.minTokens : RESOLVE_MIN_TOKENS
   const text = String(requirementText || '')
   const klass = requirementClass(text)
   if (klass) return klass

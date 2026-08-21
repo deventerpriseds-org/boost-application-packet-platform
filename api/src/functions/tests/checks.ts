@@ -25,7 +25,7 @@ import { checkAgainstFacts, OwnerFact } from './ownerFacts'
 import { scanEcho, scanWording, WORDING_RUN_TOKENS } from './figureEcho'
 import {
   EvidenceInput, NO_EVIDENCE_NOTE, EVIDENCE_THRESHOLD, EVIDENCE_MAX_SENTENCES,
-  MIN_JUDGEABLE_TOKENS as EVIDENCE_MIN_TOKENS,
+  RESOLVE_MIN_TOKENS as EVIDENCE_MIN_TOKENS,
 } from './evidence'
 
 export type CheckState = 'pass' | 'warn' | 'fail' | 'not_applicable'

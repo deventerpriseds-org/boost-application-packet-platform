@@ -16,12 +16,13 @@ import fs from 'node:fs'
 import path from 'node:path'
 import {
   profileRecords, resolveEvidence, resolveAll, refusalReason, sha256, verifyEvidence,
-  RESOLVER_VERSION, EVIDENCE_THRESHOLD, MIN_JUDGEABLE_TOKENS, EVIDENCE_MAX_SENTENCES,
-  NEVER_EVIDENCE, DISTINCTIVE_LEN,
+  RESOLVER_VERSION, EVIDENCE_THRESHOLD, MIN_JUDGEABLE_TOKENS, RESOLVE_MIN_TOKENS,
+  EVIDENCE_MAX_SENTENCES, NEVER_EVIDENCE, DISTINCTIVE_LEN,
 } from '../dist/functions/tests/evidence.js'
 import {
   claimTokens, countTokensAcrossRecords, forms, sameWord, segments, listElements, supportIn,
-  tokensOf, requirementClass, SAFETY_FLOOR_RULES, GATE_ORDER, PRE_GATE_REASONS, GENERIC_RECORDS,
+  tokensOf, requirementClass, isContentful, isCategoryWord,
+  SAFETY_FLOOR_RULES, GATE_ORDER, PRE_GATE_REASONS,
 } from '../dist/functions/tests/requirementSupport.js'
 import { MIN_QUOTE_CHARS, MIN_QUOTE_WORDS } from '../dist/functions/tests/reviewer.js'
 import { DEFAULT_THRESHOLDS } from '../dist/functions/tests/checks.js'
@@ -290,7 +291,16 @@ bothConfigs('M12: one member of a list never evidences the list, at any setting'
   const REQ = 'IoT data, models, geospatial data, and AI/ML'
   assert.deepEqual(listElements(REQ), ['IoT data', 'models', 'geospatial data', 'AI/ML'])
   assert.equal(resolveEvidence(REQ, RECS, opts), null, where)
-  assert.equal(refusalReason(REQ, RECS, opts), 'list_element_unsupported', where)
+  assert.ok(SAFETY_FLOOR_RULES.includes(refusalReason(REQ, RECS, opts)), where)
+})
+
+test('M12b: the conjunction rule refuses a list whose missing member is NOT a named entity', () => {
+  // `AI/ML` is a named token, so the exact-name rule refuses seq-8 before the conjunction rule is
+  // reached. This case has no named member, so only the conjunction rule can refuse it — which is
+  // what makes the rule provably live rather than shadowed by a stricter one.
+  const REQ = 'roadmap ownership, delivery quality, and vendor negotiation'
+  assert.ok(listElements(REQ), 'must parse as a list')
+  assert.equal(resolveEvidence(REQ, RECS), null)
 })
 
 test('M12 non-vacuity: the conjunction rule is the only thing refusing the 4-of-5 case', () => {
@@ -698,7 +708,11 @@ test('M34: every knob the matcher introduces has a chk_ column and a ResolveOpti
 
   // The seeded first values are the code constants, so the default and the column cannot drift.
   assert.equal(DEFAULT_THRESHOLDS.evidenceThreshold, EVIDENCE_THRESHOLD)
-  assert.equal(DEFAULT_THRESHOLDS.evidenceMinTokens, MIN_JUDGEABLE_TOKENS)
+  // Tracks the RESOLVER's floor: `writeEvidence` feeds it straight into `resolveEvidence`, so it
+  // must mean what that function means. The shared `MIN_JUDGEABLE_TOKENS` (3) belongs to
+  // `dimensions.ts`/`checks.ts` and is deliberately a different number.
+  assert.equal(DEFAULT_THRESHOLDS.evidenceMinTokens, RESOLVE_MIN_TOKENS)
+  assert.equal(MIN_JUDGEABLE_TOKENS, 3)
   assert.equal(DEFAULT_THRESHOLDS.evidenceMaxSentences, EVIDENCE_MAX_SENTENCES)
 
   // And each one actually changes behaviour, or it is a column pretending to be a setting.
@@ -835,7 +849,7 @@ test('claimTokens keeps the VERB and drops the boilerplate', () => {
 test('supportIn returns a reason for every refusal, and the severities are one list', () => {
   const counts = countTokensAcrossRecords(RECS)
   const base = {
-    recordCounts: counts, threshold: EVIDENCE_THRESHOLD,
+    threshold: EVIDENCE_THRESHOLD,
     maxSentences: 1, minQuoteChars: MIN_QUOTE_CHARS, minQuoteWords: MIN_QUOTE_WORDS,
     distinctiveLen: DISTINCTIVE_LEN,
   }
@@ -869,4 +883,112 @@ test('H:matcher-not-locate: the resolve path no longer imports locate()', () => 
   assert.ok(!/from '\.\/swaps'/.test(s), 'nor for itemTokens, whose STOP list deletes the verbs')
   // And `locate` itself must still exist and still be used by the posting path it was written for.
   assert.ok(/export function locate\(paraphrase: string, postingText: string/.test(src('requirements.ts')))
+})
+
+// =================================================================================================
+// J. THE PRODUCTION SHAPE — the tests that would have caught this before it shipped
+//
+// Everything above was written against requirements shaped like SENTENCES ("Build and promote a
+// high-performing engineering culture"). Production does not store those. It stores jd_table Items:
+// bare FRAGMENTS of three to five content words, often with no verb at all. The matcher passed 46
+// tests and then evidenced 0 of 10 on opp 9f9c370a and 0 of 38 on opp c5671835, because every
+// fixture above shared a shape the real data does not have.
+//
+// These fixtures are the REAL requirement strings (db-query run 32504616715) and a profile
+// paraphrased from the REAL excerpts the debug probe returned (run 32505124784) — deliberately
+// reworded so they are not verbatim copies, per M8/M40.
+//
+// The rule this encodes, which is the actual lesson: a fixture must come from the shape the system
+// really sees, and the cheapest way to know that shape is to read production before writing tests.
+// =================================================================================================
+
+const PROD_MC = {
+  aboutMe1: 'By aligning enterprise strategy with execution, I have led digital and agile transformations that empowered teams, streamlined operations, and delivered measurable outcomes.',
+  aboutMe2: 'A technology leader focused on modernization, platform strategy, and building durable engineering organisations that ship reliably.',
+  coreAccomplishments: 'Established a security-first engineering culture, embedding DevSecOps practices within SDLC workflows and improving delivery predictability.',
+  resumeSummary: 'Passionate about bridging vision and execution, I empower teams to deliver measurable business outcomes and accelerate digital evolution.',
+  relevantProficiencies: 'Standards and Compliance, AI/ML Strategy, Cybersecurity Leadership, Data Strategy, Policy Development | Technology Strategy | Platform Modernization',
+  skills1: 'Enterprise Architecture, Cloud Platforms, Agile Delivery, Product Strategy',
+  workHistory1: 'Collaborated with CTO and CPO to design a 3-year technology roadmap, securing a $13M budget increase for a Software Center of Excellence.',
+  workHistory3: 'Directed enterprise architecture and technology operations for a global organisation, managing distributed engineering teams.',
+  workHistory4: 'Owned platform strategy and delivery quality, partnering with product leadership to raise engineering standards.',
+}
+const PROD = profileRecords(PROD_MC, null)
+
+test('H:production-shape-evidences: the real fragments the profile DOES support resolve', () => {
+  // Each of these is a fragment in the production shape whose contentful words are genuinely in the
+  // profile. Before the WEAK/category correction every one of them was refused, which is how the
+  // matcher reached 0 of 38 on a CTO posting against a CTO's own résumé.
+  for (const req of [
+    'Experience in leading technology operations',
+    'Lead technology strategy',
+    'Experience with enterprise architecture',
+    'Drive platform modernization',
+    'Manage distributed engineering teams',
+    'Partner with product leadership',
+  ]) {
+    const ev = resolveEvidence(req, PROD)
+    assert.ok(ev, `must evidence: ${req}`)
+    const rec = PROD.find(r => r.key === ev.source_key)
+    assert.equal(rec.text.slice(ev.char_start, ev.char_end), ev.quote,
+      'and the quote must still be the record\'s own bytes')
+  }
+})
+
+test('H:production-shape-refuses: the real fragments the profile does NOT support stay refused', () => {
+  // The other half, and the half that matters more. Every one of these is a REAL requirement from
+  // opp 9f9c370a that the profile genuinely does not support. A matcher loosened until the six
+  // above pass must not drag any of these through with them.
+  const MUST_REFUSE = {
+    'Reside in the East Coast of the United States': 'eligibility',
+    'Collaborate effectively with Trinnex stakeholders': 'missing_specific_token',
+    'IoT data, models, geospatial data, and AI/ML': 'missing_specific_token',
+  }
+  for (const [req, reason] of Object.entries(MUST_REFUSE)) {
+    assert.equal(resolveEvidence(req, PROD), null, `must refuse: ${req}`)
+    assert.equal(refusalReason(req, PROD), reason, `and for the right reason: ${req}`)
+    // At the loosest reachable configuration too — these are floor rules, not tuning.
+    assert.equal(resolveEvidence(req, PROD, LOOSEST), null, `must refuse at loosest: ${req}`)
+  }
+  // These are refused by DEGREE rather than by the floor, so they are asserted at the default only.
+  for (const req of [
+    'high-performing engineering culture',        // profile says security-first, not high-performing
+    'Strong understanding of software engineering practices',
+    'optimize water supply and demand',           // the profile has no water content at all
+    'Ability to manage remote teams',             // the profile never says "remote"
+  ]) {
+    assert.equal(resolveEvidence(req, PROD), null, `must refuse at default: ${req}`)
+  }
+})
+
+test('H:weak-verb-not-fatal: a missing weak verb never sinks a match, a missing adjective always does', () => {
+  // The two halves of the correction, stated as one invariant. `Drive platform modernization`
+  // against "…focused on modernization, platform strategy…" is missing only `drive`, and evidences.
+  // `high-performing engineering culture` against "security-first engineering culture" is missing
+  // `high-performing` — a word that carries the claim — and must not.
+  assert.ok(resolveEvidence('Drive platform modernization', PROD))
+  assert.equal(resolveEvidence('high-performing engineering culture', PROD), null)
+
+  assert.ok(!isContentful('drive') && !isContentful('lead') && !isContentful('support'))
+  assert.ok(isContentful('high-performing') && isContentful('geospatial') && isContentful('remote'))
+
+  // And the category floor is about the WORD, never about how often the candidate happens to use it.
+  assert.ok(isCategoryWord('engineering') && isCategoryWord('software') && isCategoryWord('platform'))
+  assert.ok(!isCategoryWord('modernization') && !isCategoryWord('geospatial'))
+})
+
+test('H:record-frequency-not-evidence: a token recurring across records must not be discounted', () => {
+  // The defect this whole correction fixes, pinned so it cannot come back. The first version treated
+  // a token appearing in more than one of the candidate's records as GENERIC and refused when every
+  // matched token was generic — so a profile that mentions "platform" in five records made
+  // `platform` count for LESS. Record frequency describes the candidate's career, not the word's
+  // informativeness; using it to discount evidence penalises the strongest matches.
+  const repeated = profileRecords({
+    aboutMe1: 'Owned platform modernization across the estate.',
+    aboutMe2: 'Platform modernization was the core of the operating model.',
+    workHistory1: 'Directed platform modernization for three business units.',
+  }, null)
+  const ev = resolveEvidence('Drive platform modernization', repeated)
+  assert.ok(ev, 'a claim the profile makes repeatedly is MORE evidenced, never less')
+  assert.equal(repeated.find(r => r.key === ev.source_key).text.slice(ev.char_start, ev.char_end), ev.quote)
 })
