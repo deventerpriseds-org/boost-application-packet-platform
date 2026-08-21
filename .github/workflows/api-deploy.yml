@@ -92,3 +92,51 @@ jobs:
             --settings \
               GOOGLE_SERVICE_ACCOUNT_JSON='${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}' \
               ZAPIER_DOCS_FOLDER_ID='1MlVLMSQ0EQJoAtpKC1Mv7mDCAJDmdJTt'
+
+      # A table registered in SCHEMA_SQL is not thereby IN production. `comparison_dimension` was
+      # registered in all three places — that is what ledger row D21 closed — and still did not exist
+      # in the live database: db-query.yml run 32451433317 failed with
+      #   ERROR:  relation "comparison_dimension" does not exist
+      # A manual POST /api/diag/pg-migrate (run 32451553273) created it, after which P8.4 immediately
+      # produced 8 rows on real data. Nothing ran the migration, so every schema change since the last
+      # manual run sat dormant behind a green deploy.
+      #
+      # `ok` IS THE VERDICT, NOT THE STATUS CODE. pgMigrate's catch returns HTTP 200 with
+      # {ok:false, error} (pgMigrate.ts:48) — the identical shape that let a fully failed pipeline run
+      # report success until D12 fixed the caller. Reading only the status here would rebuild that
+      # defect one workflow over.
+      - name: Apply the database schema, and fail loudly if it did not apply
+        run: |
+          set -uo pipefail
+          API=https://job-platform-api.azurewebsites.net
+
+          # A new deploy restarts the worker and the route 404s until it converges. Poll for
+          # readiness rather than guessing a sleep length.
+          for i in $(seq 1 30); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' "$API/api/health" || true)
+            [ "$code" = "200" ] && break
+            echo "worker not up yet (health=$code), attempt $i"
+            sleep 6
+          done
+
+          body=$(curl -sS -X POST "$API/api/diag/pg-migrate")
+          echo "$body" | head -c 4000
+          echo
+          MIGRATE_BODY="$body" python3 <<'PY'
+          import json, os, sys
+          try:
+              r = json.loads(os.environ['MIGRATE_BODY'])
+          except Exception as e:
+              print(f'FAILED: migrate response was not JSON ({e})')
+              sys.exit(1)
+          # `[]` and `null` are valid JSON. Without this the next line raises AttributeError and the
+          # step still fails — the safe direction — but it fails with a traceback instead of saying
+          # what was wrong, which is the difference between a diagnosis and a puzzle at 3am.
+          if not isinstance(r, dict):
+              print(f'FAILED: migrate response was not a JSON object, got {type(r).__name__}')
+              sys.exit(1)
+          if r.get('ok') is not True:
+              print(f"FAILED: schema did not apply - {r.get('error') or r.get('detail') or '(no detail)'}")
+              sys.exit(1)
+          print(f"schema applied: {r.get('detail')}")
+          PY
