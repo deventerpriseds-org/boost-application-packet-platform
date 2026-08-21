@@ -26,18 +26,29 @@
 //     (`data.js:583`) and its one weak fixture happens to be a true absence, so the fixture cannot
 //     expose it. `shortfall` distinguishes `nothing_found` from `falls_short`, and the two carry
 //     different sentences.
-//  3. A number asserted with no comparator. `checkAgainstFacts` compares NUMBERS for years only
-//     (`ownerFacts.ts:116` gates the arithmetic on `def.unit === 'years'`); `people` and `usd` fall
-//     through to `unknown`. Organization size and Budget owned are two of the eight named
-//     dimensions, so two of eight have no arithmetic available. This module REFUSES to grade from a
-//     number it cannot compare — `numeric_verdict: 'unavailable'` is recorded and said out loud —
-//     rather than eyeballing "$18M vs $10M+" and calling it strong.
+//  3. A number asserted with no comparator. This USED to describe Organization size and Budget
+//     owned: `checkAgainstFacts` did arithmetic for years only, so `people` and `usd` fell through
+//     to `unknown` and two of the eight named dimensions could never be graded from their figures.
+//     D23 fixed that in `ownerFacts` — the ONE demand parser, extended per unit — and this module
+//     now grades them. The REFUSAL remains, because the reason for it does: a number this system
+//     cannot put on the same scale as the posting's is recorded as
+//     `numeric_verdict: 'unavailable'` and said out loud, rather than eyeballed. That case is no
+//     longer hypothetical either — see the scale guard in the fact path below, where an owner's
+//     budget stored without its magnitude ("$18M" saved as 18 by Settings) is refused rather than
+//     graded, because grading it would accuse them of a shortfall they do not have.
 import { itemTokens } from './swaps'
-import { OwnerFact, demandedNumber, FACT_BY_KEY } from './ownerFacts'
+import { OwnerFact, parseQuantity, factQuantity, formatQuantity, isComparableUnit, Quantity, FACT_BY_KEY } from './ownerFacts'
 import { MIN_JUDGEABLE_TOKENS } from './evidence'
 
-/** Bumped when the seeded set, a matcher, or a grading rule changes, so old rows stay findable. */
-export const DIMENSION_VERSION = 1
+/**
+ * Bumped when the seeded set, a matcher, or a grading rule changes, so old rows stay findable.
+ *
+ * 2 (D23): `people` and `usd` are graded from their figures. Rows written at version 1 recorded
+ * `numeric_verdict: 'unavailable'` for Organization size and Budget owned because no comparator
+ * existed; the same inputs now produce a grade, so the two are not the same measurement and must
+ * not be read as one.
+ */
+export const DIMENSION_VERSION = 2
 
 export type Fit = 'strong' | 'moderate' | 'weak' | 'not_applicable'
 
@@ -285,17 +296,30 @@ const factUnit = (key: string) => FACT_BY_KEY.get(key)?.unit || 'that unit'
 /**
  * Can the fact matcher actually COMPARE this fact's unit to a number in the posting?
  *
- * Measured, not assumed: `checkAgainstFacts` computes `demanded` only when `def.unit === 'years'`
- * (`ownerFacts.ts:116`), so `people` and `usd` reach the fall-through at `:133` and return
- * `unknown` with "confirm this satisfies the requirement". Extending that matcher changes what the
- * GATE judges (a resolved fact leaves `coverable`, `checks.ts:474-475`), which is a different
- * lane's blast radius; this module therefore reports the gap rather than widening it. Recorded in
- * `.claude/DEFERRED.md`.
+ * D23 widened this from years-only to `years | people | usd`, and it does NOT decide the answer
+ * itself — `isComparableUnit` (ownerFacts.ts) does, beside the parser that implements it. Two
+ * places answering "which units have arithmetic" is how this module and the gate come to disagree
+ * about the same fact, so there is one answer and this function reads it.
+ *
+ * Blast radius, traced rather than assumed. Extending the comparator changes what
+ * `checkAgainstFacts` returns for scope requirements — `unknown` becomes `satisfied` or
+ * `not_satisfied` — and `checks.ts:474-475` drops fact-resolved rows from `coverable`. Measured on
+ * the source: `ownedByFacts` is built from ALL fact verdicts INCLUDING `unknown`, and `coverable`
+ * excludes `ownedByFacts`, so the same rows leave `coverable` either way and the coverage
+ * denominator is unchanged. What DOES change is which bucket the row reports in: `facts_needed`
+ * loses it, and `facts_settled` or `fact_shortfall` (state `warn`) gains it. That is the intended
+ * product change and it is the same shape D22's fix had.
  */
 export function hasNumericComparator(factKey: string | undefined): boolean {
   if (!factKey) return false
   const def = FACT_BY_KEY.get(factKey)
-  return !!def && def.unit === 'years'
+  return !!def && isComparableUnit(def.unit)
+}
+
+/** The unit an axis's fact is measured in, when that unit has arithmetic. */
+function comparableUnitOf(factKey: string): Quantity | null {
+  const u = FACT_BY_KEY.get(factKey)?.unit
+  return isComparableUnit(u) ? u : null
 }
 
 const NOT_APPLICABLE_STALE = 'the posting changed since these offsets were measured, so nothing here has been compared'
@@ -361,14 +385,36 @@ export function buildComparison(input: ComparisonInput): DimensionRow[] {
     const numericFactKey = (d.factKeys || []).find(k => hasNumericComparator(k) && confirmedFact(k, facts))
     if (numericFactKey) {
       const used = confirmedFact(numericFactKey, facts)!
-      if (used.value_num != null) {
+      // The AXIS'S unit drives BOTH sides. Reading the posting with the years pattern while the
+      // fact is measured in people is the shape D23 would have shipped if only
+      // `hasNumericComparator` were widened: `demandedNumber` returns null for any text without
+      // the word "years", every line would `continue`, and the row would silently fall through to
+      // the evidence path — the change landing and doing nothing.
+      const unit = comparableUnitOf(numericFactKey)
+      const owned = unit ? factQuantity(used, unit) : null
+      if (unit && owned) {
         const profile = { value: String(used.value), source_label: factLabel(numericFactKey), source: 'fact' as const }
         for (const r of judgeable) {
-          const demanded = demandedNumber(textOf(r))
+          const demanded = parseQuantity(textOf(r), unit)
           if (demanded === null) continue
           const posted = { seq: r.seq, text: textOf(r), quoted: !!r.verbatim }
-          const detail = `${used.value_num} ${factUnit(numericFactKey)} recorded, ${demanded} required`
-          if (used.value_num >= demanded) {
+
+          // THE SCALE GUARD. Settings > Facts stores "$18M" as value_num 18 (it strips the
+          // magnitude: `Number(String(v).replace(/[^0-9.]/g,''))`, Settings.jsx:1489) while
+          // `deriveFacts` stores the same figure as 18000000 — two writers, one fact, six orders
+          // of magnitude apart, both live in `owner_fact` today. Grading 18 against 10000000 would
+          // print "Falls short" at an owner who runs an $18M budget. This is an accusation, and
+          // the standing rule is that accusations are never made on a value this system is not
+          // sure it can compare. Refused, named, and NOT rescaled upward — rescaling would turn a
+          // real $18K shortfall into a pass, which is strictly worse than the bug being fixed.
+          if (unit === 'usd' && !owned.explicit && demanded.value >= 1000 && owned.value < 1000) {
+            return na(d,
+              `your profile records ${factLabel(numericFactKey).toLowerCase()} as "${used.value}", which does not say whether that is dollars, thousands or millions — so it was NOT compared to the ${formatQuantity(demanded.value, unit)} this posting asks for. Re-enter it with its magnitude (for example "$18M") in your master profile`,
+              { posting: posted, matched_seqs, numeric_verdict: 'unavailable', profile })
+          }
+
+          const detail = `${formatQuantity(owned.value, unit)} recorded, ${formatQuantity(demanded.value, unit)} required`
+          if (owned.value >= demanded.value) {
             return {
               key: d.key, label: d.label, fit: 'strong', basis: 'fact', numeric_verdict: 'satisfied',
               shortfall: null, posting: posted, profile, note: null, reason: null,
@@ -403,7 +449,11 @@ export function buildComparison(input: ComparisonInput): DimensionRow[] {
       // a number nobody can compare is not a finding about the candidate — it is a missing
       // comparator, and reporting it as a shortfall would be an accusation built on absent evidence.
       if (uncomparableFact) {
-        return na(d, `your profile records ${factLabel(uncomparableKey!).toLowerCase()} as "${uncomparableFact.value}", but this system cannot yet compare ${factUnit(uncomparableKey!)} to the figure in the posting, so no grade is claimed`,
+        // Reachable only for an axis whose fact is measured in a unit that has NO arithmetic —
+        // `percent`, or a fact with no unit at all. It is NOT reachable for Organization size or
+        // Budget owned any more, and saying otherwise would be the product printing a limitation
+        // it no longer has. `H:comparator-units-agree` fails if a factKey'd axis loses arithmetic.
+        return na(d, `your profile records ${factLabel(uncomparableKey!).toLowerCase()} as "${uncomparableFact.value}", but this system has no way to compare ${factUnit(uncomparableKey!)} to the figure in the posting, so no grade is claimed`,
           {
             posting, matched_seqs, numeric_verdict: 'unavailable',
             profile: { value: String(uncomparableFact.value), source_label: factLabel(uncomparableKey!), source: 'fact' },
@@ -427,7 +477,7 @@ export function buildComparison(input: ComparisonInput): DimensionRow[] {
     }
     const numeric_verdict: NumericVerdict = uncomparableFact ? 'unavailable' : null
     const uncomparableTail = uncomparableFact
-      ? `; your recorded ${factLabel(uncomparableKey!).toLowerCase()} ("${uncomparableFact.value}") was NOT compared to the posting's figure — no comparator exists for ${factUnit(uncomparableKey!)}`
+      ? `; your recorded ${factLabel(uncomparableKey!).toLowerCase()} ("${uncomparableFact.value}") was NOT compared to the posting's figure — this system has no arithmetic for ${factUnit(uncomparableKey!)}`
       : ''
 
     // Mandatory for moderate and weak, and it names the SPECIFIC shortfall in terms of both sides.

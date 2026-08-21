@@ -22,7 +22,7 @@ import {
   groupRequirements, modelKeywords, summarizeKindSource, keywordLibraryState,
   keywordColumns, keywordGridTemplate, POSTING_HOOKS,
   fitLabel, FIT_COLOR, comparisonState, compareColumns, compareGridTemplate,
-  COMPARE_COLUMNS, COMPARE_SCOPE_NOTE,
+  COMPARE_COLUMNS, COMPARE_SCOPE_NOTE, comparisonStaleNote,
 } from '../postingAnalysis.js'
 import { HIGHLIGHT_CLASS } from '../highlight.js'
 
@@ -127,6 +127,7 @@ export function ProfileCompareCard({ comparison, onOpenRequirements }) {
   const rows = st.rows || []
   const summary = comparison && comparison.summary ? comparison.summary : null
   const set = comparison && comparison.set ? comparison.set : null
+  const stale = comparisonStaleNote(comparison)
 
   return (
     <div className="px-box" data-qc={POSTING_HOOKS.compare} data-qc-state={st.state} style={{ padding: 16 }}>
@@ -144,6 +145,17 @@ export function ProfileCompareCard({ comparison, onOpenRequirements }) {
             ? `Your dimension set for ${set.family}.`
             : `Seeded dimension set for ${set.family} - you have not changed it yet.`}
           {set.warning ? ` ${set.warning}` : ''}
+        </div>
+      )}
+
+      {/* The stored rows are not always how the comparison would be built today: `set` above is read
+          live from the owner's prefs while these rows were written when it was last resolved, and
+          D23 changed the grading rules underneath every row already in the database. Saying so is
+          the difference between a stale number and a stale number a reader believes. */}
+      {stale && (
+        <div className="px-note" data-qc={POSTING_HOOKS.compareStale} data-qc-stale={stale.kind}
+          style={{ marginTop: 10 }}>
+          {stale.text}
         </div>
       )}
 

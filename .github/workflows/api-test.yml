@@ -82,6 +82,40 @@ jobs:
 
           print(f'\nHTTP {status} {method} {url}')
           print(json.dumps(result, indent=2))
+
+          # ---- D12 -------------------------------------------------------------------------
+          # A body that self-reports failure must not produce a GREEN Actions run.
+          #
+          # `POST /api/pipeline/run` returned HTTP 200 with `pass:false` on a fully failed run, and
+          # this workflow exited 1 only on status >= 400 - so the definitive verification vehicle
+          # reported success for a run that had failed. A vehicle that cannot tell the two apart is
+          # worse than no vehicle. This is the GENERIC half of the fix: 85 routes in this repo
+          # return a `pass` boolean and every one of them was being ignored here, so changing one
+          # route's status code would have closed one case out of eighty-five.
+          #
+          # `pass` ONLY, deliberately. `ok:false` is overloaded in this codebase - `appRemediation`
+          # returns it for "the remediation loop is switched off for this owner", which is a
+          # REFUSAL, and a refusal is an outcome rather than an error. Failing the job on `ok`
+          # would fire on correct behaviour, which is the cry-wolf failure hardening rule 2 forbids.
+          # `pass` has one meaning everywhere it appears: this check did not pass.
+          #
+          # Only an actual boolean counts. A route returning a `pass` STRING or a count named `pass`
+          # is not making this claim, and coercing it would be inventing a verdict.
+          def body_failed(result):
+            if not isinstance(result, dict):
+              return None
+            v = result.get('pass')
+            if isinstance(v, bool) and v is False:
+              return 'pass'
+            return None
+
+          failed_key = body_failed(result)
           if status >= 400:
+            exit(1)
+          if failed_key:
+            print(f'\nFAILED: HTTP {status} but the response body reports {failed_key}=false.')
+            print(f'detail: {result.get("detail") or result.get("error") or "(none)"}')
+            for w in (result.get('warnings') or [])[:20]:
+              print(f'  warning: {w}')
             exit(1)
           PYEOF

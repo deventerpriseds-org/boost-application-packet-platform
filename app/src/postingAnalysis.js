@@ -59,6 +59,7 @@ export const POSTING_HOOKS = {
   compareSetSource: 'compare-set-source',
   compareCols: 'compare-cols',          // carries data-qc-cols - the responsive rule, selectable
   compareSummary: 'compare-summary',
+  compareStale: 'compare-stale',        // carries data-qc-stale - why the stored rows are not current
 }
 
 // -- the comparison's grade vocabulary (P8.4) ---------------------------------------------------
@@ -365,5 +366,37 @@ export function postingBody({ jdSummary, why, jdTextLen } = {}) {
     badge: null,
     provenance: 'No posting text and no summary are stored for this opportunity.',
     body: null,
+  }
+}
+
+// -- is what is on screen still how the comparison would be built today? (D23/D24) --------------
+//
+// The payload's `set` is read LIVE from the owner's prefs; `dimensions` are the rows stored when the
+// comparison was last resolved. Those two can disagree, and when they do the card would otherwise
+// print "Your dimension set for engineering." above rows built from a different set entirely. The
+// API decides this (appDimensions.comparisonStaleness) so one answer serves every caller; this
+// function only turns it into the sentence, and returns null when there is nothing to say.
+//
+// Two causes, and they are NOT the same sentence, because the fix differs: the owner changed their
+// set (re-resolve to grade the axes they now want) versus the grading rules changed underneath the
+// stored rows (re-resolve to get grades the old rules could not produce). D23 created the second
+// one for every row already in the database.
+export function comparisonStaleNote(comparison) {
+  const st = comparison && comparison.stale
+  if (!st) return null
+  const parts = []
+  if (st.set_changed) {
+    const bits = []
+    if (st.missing && st.missing.length) bits.push(`${st.missing.length} dimension(s) you have since turned on were never graded here`)
+    if (st.extra && st.extra.length) bits.push(`${st.extra.length} below are no longer in your set`)
+    parts.push(`Your dimension set has changed since this posting was compared - ${bits.join(', ')}.`)
+  }
+  if (st.rules_changed) {
+    parts.push('These rows were graded by an older version of the comparison rules, which could not compare figures like org size and budget.')
+  }
+  parts.push('Re-resolve the evidence for this opportunity to rebuild it.')
+  return {
+    kind: st.set_changed && st.rules_changed ? 'both' : st.set_changed ? 'set' : 'rules',
+    text: parts.join(' '),
   }
 }

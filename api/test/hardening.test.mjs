@@ -13,6 +13,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync, readdirSync } from 'node:fs'
+import { execFileSync } from 'node:child_process'
 import { join } from 'node:path'
 
 import { normalizePostingText, decodeEntities, groundingText } from '../dist/functions/tests/jdText.js'
@@ -23,7 +24,8 @@ import { computeArtifactScore, judgedMustHaveIds, mustHaveSource, parseMustHaveS
 import { deriveFacts } from '../dist/functions/tests/ownerFacts.js'
 import { parseResumePackage } from '../dist/functions/tests/resumeParser.js'
 import { validateCitations, reviewerChecks, agreementFor } from '../dist/functions/tests/reviewer.js'
-import { extractFigures, scanEcho, claimKey, isMarked } from '../dist/functions/tests/figureEcho.js'
+import { extractFigures, scanEcho, claimKey, isMarked, generalize } from '../dist/functions/tests/figureEcho.js'
+import { planCorrections } from '../dist/functions/tests/correction.js'
 import { profileRecords, resolveEvidence } from '../dist/functions/tests/evidence.js'
 
 const SRC = new URL('../src/functions/tests/', import.meta.url).pathname
@@ -271,7 +273,14 @@ test('H11: every table this layer added is registered for migration', () => {
   const schema = src('schema.ts')
   for (const t of ['requirement', 'requirement_evidence', 'skill_candidate', 'swap_decision', 'insertion',
                    'check_result', 'artifact_gate', 'artifact_score',
-                   'term_library', 'term_library_entry', 'term_candidate']) {
+                   'term_library', 'term_library_entry', 'term_candidate',
+                   // D21. Shipped created by an ensure-path only (appDimensions.ts), so it worked at
+                   // runtime while pg-migrate never reported it and THIS array — the third place, and
+                   // the one that gets forgotten — did not name it. Proved by reinstating both halves
+                   // of the defect: dropping the name from EXPECTED_TABLES fails this case on
+                   // "not in EXPECTED_TABLES", and renaming the CREATE in SCHEMA_SQL fails it on
+                   // "not in SCHEMA_SQL".
+                   'comparison_dimension']) {
     assert.ok(schema.includes(`create table if not exists ${t} `) || schema.includes(`create table if not exists ${t}(`),
       `${t} is not in SCHEMA_SQL`)
     assert.ok(new RegExp(`'${t}'`).test(schema.slice(schema.indexOf('EXPECTED_TABLES'))),
@@ -2053,5 +2062,637 @@ test('H:correction-layer-pure: the correction judgement layer takes no database 
   const pure = stripComments(src('correction.ts'))
   for (const banned of ['pgClient', '@azure/functions', 'logUsage', 'fetch(']) {
     assert.ok(!pure.includes(banned), `correction.ts references ${banned} — it is no longer pure`)
+  }
+})
+
+// ---------------------------------------------------------------------------------------------
+// D3 — the substitute figure. THE ANSWER IS THAT THERE IS NO RESOLVER, AND THESE GUARD THAT.
+//
+// The backlog asks for an echoed figure to be replaced with the candidate's own ("60+" -> "62")
+// where one exists. `scanEcho` structurally cannot supply it: the profile side is indexed by the
+// EXACT figure (`profileByKey`), so it answers "does the profile also say 60?" and a hit there is
+// the KEEP branch (`shared_with_profile`) -- the opposite of a substitute. Answering "what is the
+// candidate's corresponding number?" is a different question, keyed on the UNIT, and no such index
+// exists for the profile.
+//
+// `docs/qc-evidence/P8.1-ACCEPTANCE.md` §4 records the accepted resolution: GENERALIZATION ONLY.
+// Substitution may be written only as the AC-10 resolver -- exactly one profile figure sharing the
+// stemmed, exact unit, with `profile_source_key` and offsets recorded, and the substring at those
+// offsets equal to the substituted figure. Zero or two-or-more matches fall through to generalize.
+//
+// Anything that RANKS is forbidden outright. A guessed number in a resume is worse than a false
+// accusation: the candidate has to defend it in an interview. These cases are dormant-but-armed --
+// they cost nothing today and fail the moment someone implements the tempting version.
+
+test('H:no-figure-ranking: nothing in the figure path may rank a candidate substitute', () => {
+  // "Fuzzy matching is for RANKING, never for ACCUSING" already governs this codebase. A figure
+  // SUBSTITUTION is stricter still: it does not merely accuse, it writes a number into the resume,
+  // which the candidate then has to defend in an interview. Nearest-magnitude, most-recent and
+  // best-fuzzy-unit are all forbidden.
+  //
+  // THIS GUARD WAS INERT WHEN FIRST WRITTEN, and was caught by reinstating the defect it names.
+  // It banned the word `nearest` as /\bnearest\b/, which does not match `nearestProfileFigure` --
+  // the trailing \b fails against a camelCase capital, exactly the way the percent regex's trailing
+  // \b never matched "40% growth". A word list is the wrong instrument. These rules match the
+  // CONSTRUCT instead, and are measured against the files as they stand: `Math.abs` appears zero
+  // times in all three, and every `.sort(` in them orders by a document OFFSET.
+  for (const f of ['figureEcho.ts', 'correction.ts', 'appCorrections.ts']) {
+    const code = stripComments(src(f))
+
+    // 1. Absolute difference has no honest use in an EXACT-match figure path. Its only purpose
+    //    here would be "how far is this profile figure from the posting's?", which is ranking.
+    assert.ok(!/Math\.abs\s*\(/.test(code), `${f} uses Math.abs — the figure path matches exactly, it never measures distance`)
+
+    // 2. Sorting may order by POSITION and nothing else. This is the rule that actually catches a
+    //    resolver: ranking candidates means sorting them by value.
+    for (const m of code.matchAll(/\.sort\(\s*\([^)]*\)\s*=>\s*([^)]*)\)/g)) {
+      assert.match(m[1].trim(), /^[ab]\.(figure\.)?(start|char_start|applied_seq)\s*-\s*[ab]\.(figure\.)?(start|char_start|applied_seq)$/,
+        `${f} sorts by "${m[1].trim()}" — the figure path may order by document offset only`)
+    }
+
+    // 3. Names, matched WITHOUT a trailing boundary so camelCase cannot hide them.
+    for (const banned of [/nearest/i, /closest/i, /best.?match/i, /most.?recent/i, /\bsimilarity\s*\(/, /levenshtein/i, /\brank(ed|ing|By)?\b/i]) {
+      assert.ok(!banned.test(code), `${f} names a ranking construct (${banned})`)
+    }
+  }
+})
+
+test('H:generalize-closed-range: a generalisation may never be a new number', () => {
+  // The whole risk of D3 in one assertion. `generalize` is the ONLY function that produces
+  // replacement text, so if a substitute figure is ever invented it must appear here. Its range is
+  // a closed vocabulary: an order-of-magnitude phrase, the word "multiple", or null (escalate).
+  // "62" -- or any bare quantity -- can never be a legal output.
+  const corpus = ['$18M portfolio', '$400k budget', '60+ reports', 'three units', '40% growth',
+                  '18M users', '400k users', '2.5B valuation', 'USD 18M portfolio', '1,200 staff',
+                  'sixty engineers', 'one hundred engineers', '$5,000 stipend', '18 million users']
+  let produced = 0
+  for (const t of corpus) {
+    for (const f of extractFigures(t)) {
+      const g = generalize(f)
+      if (g === null) continue
+      produced++
+      assert.ok(/^\d+-figure$/.test(g) || g === 'multiple',
+        `generalize invented "${g}" from "${t}" — the range is N-figure | multiple | null`)
+    }
+  }
+  assert.ok(produced >= 8, `the corpus must actually exercise generalize (produced ${produced})`)
+})
+
+test('H:profile-figure-provenance: source=profile_figure is unforgeable', () => {
+  // AC-10. Today nothing writes it -- `planCorrections` always records 'generalized', which is the
+  // accepted resolution. This guard is the tripwire on the version someone writes later: the
+  // moment `source: 'profile_figure'` appears, the same file must also carry the provenance that
+  // makes the claim checkable, or the assertion fails.
+  for (const f of ['correction.ts', 'appCorrections.ts']) {
+    const code = stripComments(src(f))
+    const writes = /source\s*[:=]\s*'profile_figure'/.test(code)
+    if (!writes) continue
+    for (const need of ['profile_source_key', 'profile_char_start', 'profile_char_end']) {
+      assert.ok(code.includes(need),
+        `${f} writes source='profile_figure' without ${need} — an unprovenanced substitute is a fabricated number`)
+    }
+  }
+  // And the shipped behaviour, so this case is not purely structural: every planned correction
+  // today is a generalisation, and none of them is a bare number.
+  const gen = 'Managed a $18M portfolio across three business units.'
+  const rows = planCorrections('ResumeSummary', gen, scanEcho(gen, 'Own a $18M portfolio across three business units.', 'Profile: ran platform engineering.').echoes)
+  assert.ok(rows.length > 0, 'the fixture must actually produce corrections')
+  for (const r of rows) {
+    assert.equal(r.source, 'generalized', 'generalization is the only path P8.1 ships')
+    assert.ok(!/^\d[\d,]*(\.\d+)?\+?$/.test(r.replacement), `replacement "${r.replacement}" is a bare number`)
+  }
+})
+
+// H:one-demand-parser — D23. There is ONE regex that reads a demanded quantity out of posting text,
+// it lives in ownerFacts.ts beside the fact catalogue, and dimensions.ts imports it.
+//
+// The alternative is what nearly happened: dimensions.ts already needed people and usd figures that
+// `demandedNumber` could not give it, and the shortest path was a second regex next to the grading
+// code. Two parsers is two answers, and they diverge on the first posting worded unusually — the
+// gate would settle a requirement the JD step showed as ungraded, over the same sentence.
+//
+// This is a SOURCE grep on purpose: the rule is structural (where a construct may live), which a
+// runtime test cannot express. It strips comments first, because the file documents the patterns it
+// must not contain and an earlier guard in this suite fired on its own explanatory comment.
+test('H:one-demand-parser: dimensions.ts derives no quantity of its own', () => {
+  const body = stripComments(src('dimensions.ts'))
+  assert.ok(/from '\.\/ownerFacts'/.test(body), 'dimensions.ts no longer imports the shared parser')
+  assert.ok(/parseQuantity/.test(body), 'dimensions.ts does not call the shared demand parser at all')
+
+  // Any regex literal containing a digit class is a numeric extractor. `asks` matchers are the
+  // legitimate exception - they decide WHICH lines belong to an axis, they do not read a figure -
+  // so they are excluded by name rather than by hoping the pattern misses them.
+  const withoutAsks = body.replace(/asks:\s*\/(?:\\.|\[[^\]]*\]|[^/\n\\])*\/[a-z]*/g, 'asks:<matcher>')
+  const numericLiterals = withoutAsks.match(/\/(?:\\.|\[[^\]]*\]|[^/\n\\])*\\d(?:\\.|\[[^\]]*\]|[^/\n\\])*\/[a-z]*/g) || []
+  assert.deepEqual(numericLiterals, [],
+    `dimensions.ts contains its own numeric extraction: ${numericLiterals.join(' ; ')}. ` +
+    `A second demand parser is a second answer. Extend parseQuantity in ownerFacts.ts instead.`)
+})
+
+// ---------------------------------------------------------------------------------------------
+// H:usd-scale-parity — D23. A usd fact and a usd demand must be compared on the SAME scale.
+//
+// This is not hypothetical and the evidence is two live writers of one column:
+//   * Settings > Facts (app/src/screens/Settings.jsx:1489) saves
+//     `Number(String(value).replace(/[^0-9.]/g, ''))`, so an owner typing "$18M" is stored as
+//     value: '$18M', value_num: 18.
+//   * `deriveFacts` (ownerFacts.ts) reads the same "$18M" off the resume and stores 18000000.
+//   * `upsertStated` (appFacts.ts) takes the client's valueNum verbatim, so both land in owner_fact.
+// Comparing value_num naively gives `18 >= 10000000` false and prints "Falls short" at an owner who
+// runs an $18M budget. That is an ACCUSATION manufactured by a unit bug.
+//
+// Behavioural, not spelling: it runs the real comparator over both stored shapes.
+test('H:usd-scale-parity: the two owner_fact writers reach the same verdict', async () => {
+  const { checkAgainstFacts } = await import('../dist/functions/tests/ownerFacts.js')
+  const demand = 'Own a P&L or budget of $10M+ across three business units'
+  const f = (value, value_num) => [{
+    key: 'scope.largest_budget', value, value_num, source: 'owner_stated', confirmed_at: '2026-01-01',
+  }]
+
+  const derived = checkAgainstFacts(demand, f('$18M', 18000000))
+  const typed = checkAgainstFacts(demand, f('$18M', 18))
+  assert.equal(derived.verdict, 'satisfied', 'the derived writer stopped comparing')
+  assert.notEqual(typed.verdict, 'not_satisfied',
+    'an owner running an $18M budget was told they fall short, because Settings stored 18')
+  assert.equal(typed.verdict, derived.verdict,
+    `the same $18M budget produced ${typed.verdict} typed and ${derived.verdict} derived`)
+
+  // The mirror, and the one that matters more: a genuinely small figure must NOT be rescaled into
+  // a pass. Turning a real shortfall green is strictly worse than the bug being fixed.
+  assert.equal(checkAgainstFacts(demand, f('$18K', 18000)).verdict, 'not_satisfied',
+    'an $18K budget was rescaled into a pass against a $10M demand')
+
+  // And a figure whose scale nothing states is refused rather than guessed in either direction.
+  assert.equal(checkAgainstFacts(demand, f('18', 18)).verdict, 'unknown',
+    'a bare "18" was graded as though its units were known')
+})
+
+// ---------------------------------------------------------------------------------------------
+// H:comparator-units-agree — D23. `dimensions.hasNumericComparator` and `ownerFacts.checkAgainstFacts`
+// must agree about which units have arithmetic, because they answer for the same fact on two
+// surfaces: the JD step's comparison row and the artifact GATE.
+//
+// When they disagreed, the product said both things at once — this is the state D23 fixed, where
+// `hasNumericComparator` returned false for usd (so the JD step printed "no comparator exists")
+// while nothing in the gate agreed or disagreed because the gate never compared it either. Widening
+// one without the other is the half-fix that ships and does nothing.
+test('H:comparator-units-agree: one answer to which units have arithmetic', async () => {
+  const { hasNumericComparator } = await import('../dist/functions/tests/dimensions.js')
+  const { checkAgainstFacts, FACT_CATALOGUE, isComparableUnit } =
+    await import('../dist/functions/tests/ownerFacts.js')
+
+  // A probe per unit that the unit's own `asks` matcher accepts AND that states a figure.
+  const probes = {
+    years: ['Requires 10+ years of engineering leadership experience', '14', 14],
+    people: ['Lead a distributed organization of 60 engineers', '62', 62],
+    usd: ['Own a P&L or budget of $10M+ across three business units', '$18M', 18000000],
+  }
+  let checked = 0
+  for (const def of FACT_CATALOGUE) {
+    if (!def.unit) continue
+    assert.equal(hasNumericComparator(def.key), isComparableUnit(def.unit),
+      `${def.key}: dimensions says ${hasNumericComparator(def.key)} but ownerFacts says ` +
+      `${isComparableUnit(def.unit)} about unit "${def.unit}"`)
+    const probe = probes[def.unit]
+    if (!probe || !def.asks.test(probe[0])) continue
+    // ...and the claim is true of the RUNTIME, not just of the two predicates agreeing with
+    // each other: a unit declared comparable must actually produce a comparison.
+    const v = checkAgainstFacts(probe[0], [{
+      key: def.key, value: probe[1], value_num: probe[2], source: 'owner_stated', confirmed_at: '2026-01-01',
+    }])
+    if (v && v.fact_key === def.key) {
+      assert.notEqual(v.verdict, 'unknown',
+        `${def.key} is declared comparable but "${probe[0]}" still returned unknown — the ` +
+        `comparator was widened and the arithmetic was not`)
+      checked++
+    }
+  }
+  // Absent evidence is not a pass: if no probe reached its def, the loop above proved nothing.
+  assert.ok(checked >= 2, `only ${checked} unit(s) were actually exercised — this guard has gone blind`)
+})
+
+// ---------------------------------------------------------------------------------------------
+// H:facts-widen-no-coverable-shift — D23. Extending the fact comparator must not move which
+// requirements the GATE judges as document coverage.
+//
+// `checks.ts:474-475` drops fact-resolved rows from `coverable`, and this is the mechanism by which
+// a change to `checkAgainstFacts` reaches the artifact gate. Read on the source: `ownedByFacts` is
+// built from ALL fact verdicts INCLUDING `unknown`, and `coverable` excludes `ownedByFacts` — so a
+// row moving from `unknown` to `satisfied`/`not_satisfied` leaves `coverable` identical. That is the
+// prediction. It was ALSO the prediction for D22, and D22's lane wrote that it had "not verified
+// live". Reading a predicate is not measuring it, so this measures it.
+//
+// The change that IS intended and must remain visible: the row's BUCKET moves. `facts_needed` loses
+// it and `facts_settled` / `fact_shortfall` gains it. A test asserting only "nothing changed" would
+// pass just as well if the comparator had never been widened.
+test('H:facts-widen-no-coverable-shift: the bucket moves, the denominator does not', async () => {
+  const { runChecks } = await import('../dist/functions/tests/checks.js')
+  const RESUME = { ResumeSummary: 'Engineering leader.', SkillsBullets1: 'Platform' }
+  const requirements = [
+    { seq: 0, verbatim: 'Lead a distributed organization of 60+ engineers', item_text: '', kind: 'must_have' },
+    { seq: 1, verbatim: 'Own a P&L or budget of $10M+ across three business units', item_text: '', kind: 'must_have' },
+    { seq: 2, verbatim: 'Deep experience with platform architecture', item_text: '', kind: 'must_have' },
+  ]
+  const f = (key, value, value_num, confirmed) =>
+    ({ key, value, value_num, source: 'owner_stated', confirmed_at: confirmed ? '2026-08-20T00:00:00Z' : null })
+
+  // The row shape is `check_key` / `observed` / `offenders` — asserted here because reading it off
+  // the wrong field name gives every lookup `undefined` and every comparison passes vacuously,
+  // which is how this test failed the first time it was run.
+  const find = (rs, key) => rs.find(r => r.check_key === key)
+  const denom = (rs) => {
+    const c = find(rs, 'must_have_coverage')
+    // The population the coverage check judged, however it publishes it.
+    return c ? `${c.state}|${c.observed || ''}|${(c.offenders || []).length}` : 'ABSENT'
+  }
+  assert.ok(find(runChecks({ type: 'resume', pkg: RESUME, requirements, facts: [] }), 'must_have_coverage'),
+    'must_have_coverage is not in the result under that key — the lookups below would all be undefined')
+
+  // UNCONFIRMED facts -> every scope row is `unknown` (an unconfirmed fact is a guess about the
+  // owner and must not settle a gate). This is the pre-D23 shape of the verdicts.
+  const unresolved = runChecks({ type: 'resume', pkg: RESUME, requirements,
+    facts: [f('scope.largest_team', '62 engineers', 62, false), f('scope.largest_budget', '$18M', 18000000, false)] })
+  // CONFIRMED -> D23's arithmetic runs and the same two rows resolve.
+  const resolved = runChecks({ type: 'resume', pkg: RESUME, requirements,
+    facts: [f('scope.largest_team', '62 engineers', 62, true), f('scope.largest_budget', '$18M', 18000000, true)] })
+
+  // Precondition, asserted rather than assumed: the two runs really do differ in verdict, or the
+  // equality below is measuring nothing.
+  assert.equal(find(unresolved, 'facts_settled').state, 'not_applicable',
+    'the unconfirmed run already settled something — this comparison is vacuous')
+  assert.equal(find(resolved, 'facts_settled').state, 'pass',
+    'the confirmed run settled nothing — D23 arithmetic did not run, so nothing is being compared')
+
+  // THE INVARIANT: the coverage population is byte-identical across that verdict change.
+  assert.equal(denom(resolved), denom(unresolved),
+    'widening the fact comparator moved which requirements the gate judges as document coverage')
+
+  // ...and the intended, visible half: the bucket moved.
+  const needed = (rs) => (find(rs, 'facts_needed')?.offenders || []).length
+  assert.ok(needed(unresolved) > needed(resolved),
+    `facts_needed did not shrink (${needed(unresolved)} -> ${needed(resolved)}) — the comparator ` +
+    `was widened and no requirement changed bucket, so this guard is watching nothing`)
+})
+
+// ---------------------------------------------------------------------------------------------
+// P7 hygiene — D11 items 4 and 8, D12, D13.
+//
+// The body of ONE top-level `export async function <name>(`. `functionBody` above matches the
+// synchronous form only, and every function these cases care about is async — a guard that silently
+// searched '' would have passed on nothing, which is the failure mode this file exists to refuse.
+const asyncFunctionBody = (body, name) => {
+  const start = body.indexOf(`export async function ${name}(`)
+  if (start < 0) return ''
+  const end = body.indexOf('\n}', start)
+  return end < 0 ? body.slice(start) : body.slice(start, end + 2)
+}
+
+// H:pipeline-error-status — `POST /api/pipeline/run` returned HTTP 200 with `pass:false` when an
+// exception had aborted the run. `api-test.yml` exits 1 only on status >= 400, so a fully failed
+// pipeline produced a GREEN Actions run: the one vehicle that verifies this API reported success for
+// a run that had failed, and nobody reading the Actions list could tell the two apart.
+//
+// The invariant, and it is about the CALLER not the number: a run that produced nothing must be
+// distinguishable from one that produced a packet, by a caller that reads only the HTTP status. The
+// completed-but-not-clean case is deliberately NOT covered here — it keeps a 2xx because documents
+// exist and the request did succeed, and it is the api-test.yml assertion (H:pass-false-is-red) that
+// makes that case red. Two exits, two mechanisms, on purpose.
+test('H:pipeline-error-status: a run that aborted does not report an HTTP success', async () => {
+  const prev = { conn: process.env.AZURE_STORAGE_CONNECTION_STRING, key: process.env.OPENAI_API_KEY }
+  try {
+    // A connection string this malformed makes the first TableClient throw inside the handler's
+    // try — the real abort path, no network, no Azure.
+    process.env.AZURE_STORAGE_CONNECTION_STRING = 'this-is-not-a-connection-string'
+    process.env.OPENAI_API_KEY = 'sk-test-not-a-real-key'
+    const { pipelineRun } = await import('../dist/functions/tests/pipeline.js')
+    const req = { method: 'POST', query: new Map(), params: {}, json: async () => ({ jobId: 'does-not-exist' }) }
+    const res = await pipelineRun(req, {})
+
+    assert.ok(res.status >= 400,
+      `the run aborted and returned HTTP ${res.status} — a caller reading the status cannot tell this from a delivered packet`)
+    assert.equal(res.jsonBody.pass, false)
+    assert.equal(res.jsonBody.outcome, 'error', 'the body must name the outcome, not leave it to be inferred')
+    // The body still carries the diagnosis: an error status must not cost the caller the reason.
+    assert.ok(String(res.jsonBody.detail || '').length > 0, 'the failure detail was dropped along with the 200')
+    assert.ok(Array.isArray(res.jsonBody.steps), 'steps must survive the error path')
+
+    // A missing model key is a configuration error on the server, and it too returned 200.
+    delete process.env.OPENAI_API_KEY
+    const noKey = await pipelineRun(req, {})
+    assert.ok(noKey.status >= 400, `a missing OPENAI_API_KEY returned HTTP ${noKey.status}`)
+    assert.equal(noKey.jsonBody.outcome, 'error')
+  } finally {
+    if (prev.conn === undefined) delete process.env.AZURE_STORAGE_CONNECTION_STRING
+    else process.env.AZURE_STORAGE_CONNECTION_STRING = prev.conn
+    if (prev.key === undefined) delete process.env.OPENAI_API_KEY
+    else process.env.OPENAI_API_KEY = prev.key
+  }
+})
+
+// H:pass-false-is-red — the caller half of the same defect, and the general one. 85 routes in this
+// repo return a `pass` boolean; `api-test.yml` exited 1 on status >= 400 and ignored every one of
+// them. Changing one route's status code would have closed one case out of eighty-five.
+//
+// This EXECUTES the real assertion out of the workflow file rather than grepping for it. A guard
+// that checked the YAML contained the string "pass" would be defeated by any rewrite that kept the
+// word and lost the behaviour — which is exactly how two guards were defeated today, by renaming a
+// constant while keeping the defect.
+test('H:pass-false-is-red: api-test.yml fails the job on a body that self-reports failure', () => {
+  const yml = readFileSync(new URL('../../.github/workflows/api-test.yml', import.meta.url).pathname, 'utf8')
+  const start = yml.indexOf('def body_failed(result):')
+  assert.notEqual(start, -1, 'api-test.yml no longer defines body_failed — the D12 caller fix is gone')
+  // From the START OF THE LINE, not from the match: slicing at the match drops the indent that the
+  // block-extent test depends on, and the loop then stops on its own first line.
+  const lineStart = yml.lastIndexOf('\n', start) + 1
+  const indent = start - lineStart
+  const lines = []
+  for (const line of yml.slice(lineStart).split('\n')) {
+    if (line.trim() && !line.startsWith(' '.repeat(indent))) break
+    lines.push(line.slice(indent))
+    if (lines.length > 1 && line.trim() === '') break
+  }
+  const fn = lines.join('\n')
+  assert.match(fn, /^def body_failed\(result\):\n\s+if/, `body_failed did not extract cleanly:\n${fn}`)
+
+  const cases = [
+    // The exact shape D12 names: the pipeline's completed-but-not-clean body.
+    [{ pass: false, outcome: 'completed_with_findings', detail: 'x', warnings: ['w'] }, 'pass'],
+    [{ pass: false, outcome: 'error', detail: 'boom' }, 'pass'],
+    [{ pass: true, detail: 'clean' }, null],
+    // `ok:false` is a REFUSAL in this codebase (appRemediation: "the loop is switched off for this
+    // owner"). A refusal is an outcome, not an error — firing on it is the cry-wolf failure.
+    [{ ok: false, detail: 'the remediation loop is switched off for this owner (Settings)' }, null],
+    // Not a verdict: a string, a count, an absent field, a non-object body.
+    [{ pass: 'false' }, null],
+    [{ pass: 0 }, null],
+    [{ analysis: {} }, null],
+    [[1, 2, 3], null],
+  ]
+  const script = fn + '\nimport json,sys\n'
+    + 'cases = json.loads(sys.stdin.read())\n'
+    + 'print(json.dumps([body_failed(c) for c in cases]))\n'
+  const out = execFileSync('python3', ['-c', script], { input: JSON.stringify(cases.map(c => c[0])), encoding: 'utf8' })
+  assert.deepEqual(JSON.parse(out), cases.map(c => c[1]),
+    'the workflow assertion no longer distinguishes a failed body from a passing or refusing one')
+})
+
+// H:orphan-drive-files — D13. `Promise.all(docJobs)` rejects on the FIRST rejection while every
+// other copy runs to completion in the background, so at the catch site there was nothing to
+// enumerate: the sibling files had not finished being created yet, and when they did their ids went
+// nowhere. There is no Drive DELETE anywhere in `api/src` (measured 2026-08-21: zero hits for a
+// DELETE against `drive/v3/files`), so every failed multi-document build leaked real Google files
+// onto the quota-bearing OAuth account, permanently and unenumerably.
+//
+// The invariant is the CLEANUP, not the spelling of `allSettled`: when any job fails, every file
+// that WAS created is deleted, none is reported as delivered, and anything the delete could not
+// remove is named so a human can.
+test('H:orphan-drive-files: a failed multi-document build leaves no file behind', async () => {
+  const { buildAllOrCleanUp } = await import('../dist/functions/tests/pipeline.js')
+
+  const removed = []
+  const remove = async (id) => { removed.push(id); return true }
+  // Job 0 fails FAST; jobs 1 and 2 succeed LATER — the ordering that made the ids unenumerable.
+  const slow = (v) => new Promise((res) => setTimeout(() => res(v), 15))
+  const out = await buildAllOrCleanUp(
+    [Promise.reject(new Error('Inject Portfolio failed: HTTP 500')), slow('FILE_B'), slow('FILE_C')],
+    remove,
+  )
+  assert.deepEqual(removed.sort(), ['FILE_B', 'FILE_C'],
+    'a sibling copy that completed after the first failure was not deleted — this is the leak')
+  assert.deepEqual(out.ids, [], 'a failed build must not report documents as delivered')
+  assert.deepEqual(out.orphaned, [])
+  assert.equal(out.errors.length, 1)
+
+  // A delete that FAILS is reported as an orphan, never silently counted as cleaned. Absent
+  // evidence is not_applicable, never pass.
+  const stubborn = await buildAllOrCleanUp(
+    [Promise.reject(new Error('boom')), slow('FILE_D')],
+    async () => false,
+  )
+  assert.deepEqual(stubborn.orphaned, ['FILE_D'], 'a delete that failed was counted as cleanup')
+  assert.deepEqual(stubborn.cleanedUp, [])
+
+  // Every job fails at the copy step: nothing was created, so nothing is cleaned up and the run
+  // must not CLAIM a cleanup. Reporting a cleanup that had nothing to clean is how a cleanup path
+  // goes green while broken.
+  const allFailed = await buildAllOrCleanUp(
+    [Promise.reject(new Error('copy HTTP 403')), Promise.reject(new Error('copy HTTP 403'))],
+    async () => { throw new Error('nothing was created — cleanup must not run') },
+  )
+  assert.deepEqual(allFailed.ids, [])
+  assert.deepEqual(allFailed.cleanedUp, [])
+  assert.deepEqual(allFailed.orphaned, [])
+  assert.equal(allFailed.errors.length, 2)
+
+  // The happy path is untouched: nothing is deleted and every id is returned.
+  const clean = await buildAllOrCleanUp([slow('A'), slow('B')], async () => {
+    throw new Error('cleanup must not run when every job succeeded')
+  })
+  assert.deepEqual(clean.ids, ['A', 'B'])
+  assert.deepEqual(clean.cleanedUp, [])
+})
+
+// H:orphan-after-copy — the half that is invisible from the caller. `copyAndInject` and
+// `renderArtifact` both copied a template and then did more work on the new file; a throw in that
+// later work left a real file whose id existed ONLY in the frame that had just thrown, so no catch
+// block anywhere could have cleaned it up. `copyThen` owns both halves for exactly that reason.
+test('H:orphan-after-copy: a failure after the copy deletes the file it created', async () => {
+  const { copyThen } = await import('../dist/functions/tests/packetTemplates.js')
+  const calls = []
+  const realFetch = globalThis.fetch
+  globalThis.fetch = async (url, init) => {
+    calls.push(`${init?.method || 'GET'} ${String(url)}`)
+    if (String(url).includes('/copy')) return { ok: true, status: 200, json: async () => ({ id: 'NEW_FILE_ID' }) }
+    return { ok: true, status: 204, json: async () => ({}) }
+  }
+  try {
+    await assert.rejects(
+      () => copyThen('tok', 'TPL', 'Portfolio', 'FOLDER', async () => { throw new Error('inject HTTP 500') }),
+      (err) => {
+        assert.match(err.message, /inject HTTP 500/, 'the original failure must survive the cleanup')
+        assert.match(err.message, /NEW_FILE_ID/, 'the message must name the file, or nobody can check it is gone')
+        return true
+      })
+    assert.ok(calls.includes('DELETE https://www.googleapis.com/drive/v3/files/NEW_FILE_ID'),
+      `the copy created before the failure was never deleted — calls were: ${calls.join(' | ')}`)
+    assert.ok(calls.some((c) => c.includes('/copy')), 'no copy was issued')
+  } finally { globalThis.fetch = realFetch }
+})
+
+// H:owner-config-is-read — P7 item 8. The Auth & Config screen has offered `google.resumeTemplateId`,
+// `google.portfolioTemplateId`, `google.coverLetterTemplateId`, `google.outputFolderId`,
+// `microsoft.senderEmail` and `microsoft.recipientEmail` since it was written; `POST /api/config`
+// stored every one of them; `CONFIG_KEYS` listed four keys and none of these six. The pipeline used
+// module constants, so an owner could set a template id and watch the run copy a different document.
+//
+// A setting that exists and is not read is worse than one that does not exist: it tells the owner
+// they are in control when they are not. The invariant is therefore about the READ — not that a
+// constant was renamed, which is a rejection rather than a fix.
+test('H:owner-config-is-read: every pipeline setting the console writes is actually read', async () => {
+  const { settingsFromConfig, CONFIG_KEYS, SEED_DRIVE_IDS, SEED_MAILBOXES } =
+    await import('../dist/functions/tests/pipelineConfig.js')
+
+  // Distinct, VALID owner values — a shared value could not tell a real read from a copy of one key.
+  const owner = {
+    [CONFIG_KEYS.resumeTemplateId]: '1ownerRESUMEaaaaaaaaaaaaaaaaaaaaaaaa',
+    [CONFIG_KEYS.portfolioTemplateId]: '1ownerPORTFOLIObbbbbbbbbbbbbbbbbbbb',
+    [CONFIG_KEYS.coverLetterTemplateId]: '1ownerCOVERcccccccccccccccccccccccc',
+    [CONFIG_KEYS.outputFolderId]: '1ownerFOLDERdddddddddddddddddddddddd',
+    [CONFIG_KEYS.senderEmail]: 'ops@another-tenant.example',
+    [CONFIG_KEYS.recipientEmail]: 'candidate@another-tenant.example',
+  }
+  const s = settingsFromConfig(owner)
+  for (const [field, key] of [
+    ['resumeTemplateId', CONFIG_KEYS.resumeTemplateId], ['portfolioTemplateId', CONFIG_KEYS.portfolioTemplateId],
+    ['coverLetterTemplateId', CONFIG_KEYS.coverLetterTemplateId], ['outputFolderId', CONFIG_KEYS.outputFolderId],
+    ['senderEmail', CONFIG_KEYS.senderEmail], ['recipientEmail', CONFIG_KEYS.recipientEmail],
+  ]) {
+    assert.equal(s[field].value, owner[key], `${key} is written by the console and still not read`)
+    assert.equal(s[field].source, 'config', `${field} did not report where its value came from`)
+  }
+
+  // Unset falls back to the SEED and says so — the code seeds a first value, it does not own it.
+  const seeded = settingsFromConfig({})
+  assert.equal(seeded.resumeTemplateId.value, SEED_DRIVE_IDS.resumeTemplateId)
+  assert.equal(seeded.resumeTemplateId.source, 'default')
+  assert.equal(seeded.senderEmail.value, SEED_MAILBOXES.sender)
+  assert.deepEqual(seeded.warnings, [], 'an unset setting is absent, not a misconfiguration')
+
+  // A junk value is REFUSED and REPORTED, never sent to Drive or Graph as a URL path segment.
+  const junk = settingsFromConfig({
+    [CONFIG_KEYS.resumeTemplateId]: 'Unknown',
+    [CONFIG_KEYS.senderEmail]: 'not an address',
+  })
+  assert.equal(junk.resumeTemplateId.value, SEED_DRIVE_IDS.resumeTemplateId)
+  assert.equal(junk.senderEmail.value, SEED_MAILBOXES.sender)
+  assert.equal(junk.warnings.length, 2, `a refused setting was not reported: ${JSON.stringify(junk.warnings)}`)
+  assert.ok(junk.warnings.every((w) => /google\.resumeTemplateId|microsoft\.senderEmail/.test(w)),
+    'a warning that does not name the setting cannot be acted on')
+})
+
+// H:no-second-id-copy — the same four Drive ids were declared in `pipeline.ts` AND in
+// `packetTemplates.ts`, byte-identical, which is how one copy goes stale without anyone noticing;
+// the Graph sender was a bare literal on the send path, which is what made the pipeline
+// single-tenant. Structural rather than behavioural on purpose: this guards the RETURN of a second
+// copy, which no runtime test can observe.
+//
+// `packetTemplates.ts` is exempt — it is the one home the seeds are allowed to have. The legacy
+// MT-XX and diag routes are also exempt and deliberately untouched: they are the dev-console test
+// harness, not the product, and are recorded in DEFERRED.md instead of half-fixed here.
+test('H:no-second-id-copy: the product paths carry no Drive id or mailbox literal', () => {
+  const DRIVE_IDS = [
+    '1bwOcxvkbihRTUjOzVjrWSPnDomwqy6gOz6229mdzbZw',
+    '1ULZZLBs9zwLEN6c8hcXvBCNPk0YyTGg0yIlFSYkGIec',
+    '1QN4Cnw4R9krUH4kEpl_lnhoPOkY5PG2oUKRMjxBfWV0',
+    '1MlVLMSQ0EQJoAtpKC1Mv7mDCAJDmdJTt',
+  ]
+  for (const file of ['pipeline.ts', 'appPackets.ts']) {
+    const code = stripComments(src(file))
+    for (const id of DRIVE_IDS) {
+      assert.ok(!code.includes(id), `${file} has its own copy of Drive id ${id} again`)
+    }
+    assert.ok(!/['"`]dev@enterpriseds\.io['"`]|users\/dev@enterpriseds\.io/.test(code),
+      `${file} hardcodes the Graph sender again — the pipeline is single-tenant`)
+    assert.ok(!/['"`]von\.ellis@enterpriseds\.io['"`]/.test(code),
+      `${file} hardcodes the recipient again`)
+  }
+  // The seeds still exist, in one place. A "fix" that deleted them is not a fix.
+  assert.ok(DRIVE_IDS.every((id) => src('packetTemplates.ts').includes(id)),
+    'the seeded Drive ids are gone — the owner now has no first value at all')
+})
+
+// H:duplicate-prompt-roles — P7 item 4, and the fact was established FROM THE PRIMARY SOURCE, which
+// is the only reason it is a guard rather than a note. Comparing the two live rows would only have
+// shown that they are the same; it could never have said which one is wrong. The source both rows
+// derive from is the zap export, checked into this repo at `docs/zap-289877647/prompts/`.
+//
+//   LIVE (GET /api/prompts, Actions run 32435525197, 2026-08-21):
+//     resume_user     29,068 chars  sha256 4b4af848...  \ identical
+//     portfolio_user  29,068 chars  sha256 4b4af848...  /
+//     ats_user         8,807 chars  sha256 970fce2e...    (control: differs)
+//
+//   PRIMARY SOURCE:
+//     node 289877661 "Update Resume/Portfolio Fields"       user_message 29,069 chars
+//     node 299599701 "Copy: Update Resume/Portfolio Fields" user_message  7,712 chars
+//
+//   Live `portfolio_user` matches node 289877661 — the RESUME node — whitespace-normalised, with a
+//   29,060-char common prefix; against node 299599701 it diverges after 329 chars. `portfolio_user`
+//   was seeded from the wrong node. It is the resume prompt (42 `###` markers, no mention of JSON)
+//   while Call 2 parses with `parseAgentJson`, so the portfolio and cover letter fall back to Call 1
+//   on every run at the cost of a second 16,000-token call.
+//
+// THE CRY-WOLF HALF, AND IT IS THE POINT OF THE `_user` RESTRICTION. `resume_system` and
+// `portfolio_system` are ALSO byte-identical live (329 chars, sha256 803330a2...) and that is
+// CORRECT — both zap nodes carry the same 331-char `system_message`. An earlier draft of this check
+// flagged them, which would have fired on correct configuration on every single run. Two calls may
+// share a system prompt; they may not share the instruction that says what to produce.
+test('H:duplicate-prompt-roles: two generation roles sharing one user prompt are named', async () => {
+  const { duplicatePromptPairs } = await import('../dist/functions/tests/pipeline.js')
+
+  // The live shape, reduced: the real defect, and the legitimate duplication beside it.
+  const live = {
+    resume_user: 'Objective:\nYou are an executive recruiter...### Section ###',
+    portfolio_user: 'Objective:\nYou are an executive recruiter...### Section ###',
+    resume_system: 'You are an executive recruiter such as Andrew LaCivita.',
+    portfolio_system: 'You are an executive recruiter such as Andrew LaCivita.',
+    ats_user: 'You are the ATS quality-control reviewer.',
+  }
+  assert.deepEqual(duplicatePromptPairs(live), [['portfolio_user', 'resume_user']],
+    'either the real defect was missed, or the shared system prompt was accused of being one')
+
+  // Near-identical is NOT identical. A similarity score would have called these a duplicate; an
+  // accusation may not be made on a score (H4).
+  assert.deepEqual(duplicatePromptPairs({
+    a_user: 'You are an executive recruiter such as Andrew LaCivita.',
+    b_user: 'You are an executive recruiter such as Andrew LaCivita!',
+  }), [])
+
+  // Two prompts that are simply UNSET are absent, not duplicated. Absent evidence is never a finding.
+  assert.deepEqual(duplicatePromptPairs({ a_user: '', b_user: '', c_user: '   ' }), [])
+  assert.deepEqual(duplicatePromptPairs({}), [])
+
+  // AND IT IS CALLED. A detector nothing invokes is the tested dead code D2 already records; the
+  // check is on the BODY of the generator, not the module, because an import line is not a call site.
+  const body = asyncFunctionBody(stripComments(src('pipeline.ts')), 'buildPackageForJD')
+  assert.ok(body.length > 500, 'buildPackageForJD not found — this guard has gone stale')
+  assert.ok(/duplicatePromptPairs\(prompts\)/.test(body),
+    'the duplicate-prompt detector is not called from the generator that loads the prompts')
+  // And the finding reaches the caller rather than a console.warn nobody reads (P7 item 6).
+  const call = body.indexOf('duplicatePromptPairs(prompts)')
+  assert.ok(/warnings\.push\(/.test(body.slice(call, call + 500)),
+    'the duplicate-prompt finding is not pushed onto warnings, so no caller can see it')
+})
+
+// H:run-outcome-distinguishable — the D12 decision as a pure function, because a status decision
+// reachable only through a live Function App cannot be guarded and the sandbox cannot reach one.
+// The invariant is DISTINGUISHABILITY, which is what the row actually complains about: a caller must
+// be able to tell "produced nothing" from "produced a packet" and from "produced a clean packet".
+test('H:run-outcome-distinguishable: every run outcome is separable by a caller', async () => {
+  const { runOutcome } = await import('../dist/functions/tests/pipeline.js')
+
+  const aborted = runOutcome({ caught: true, docCount: 0, emailsSent: 0, warningCount: 0 })
+  const dirty = runOutcome({ caught: false, docCount: 4, emailsSent: 2, warningCount: 3 })
+  const clean = runOutcome({ caught: false, docCount: 4, emailsSent: 2, warningCount: 0 })
+
+  // A run that produced nothing must not share a status with one that delivered a packet.
+  assert.ok(aborted.status < 200 || aborted.status > 299,
+    `an aborted run returned HTTP ${aborted.status} — this is the D12 defect`)
+  assert.notEqual(aborted.status, dirty.status)
+  assert.notEqual(aborted.status, clean.status)
+
+  // All three are separable on `outcome`, which is what a caller that does read the body uses.
+  assert.equal(new Set([aborted.outcome, dirty.outcome, clean.outcome]).size, 3)
+  assert.deepEqual([aborted.pass, dirty.pass, clean.pass], [false, false, true])
+
+  // A clean run is still a plain 200 — the fix must not turn success into an error.
+  assert.deepEqual(clean, { status: 200, pass: true, outcome: 'pass' })
+
+  // Every ingredient of "clean" is load-bearing: drop any one and `pass` goes false.
+  for (const bad of [
+    { caught: false, docCount: 2, emailsSent: 2, warningCount: 0 },
+    { caught: false, docCount: 4, emailsSent: 0, warningCount: 0 },
+    { caught: false, docCount: 4, emailsSent: 2, warningCount: 1 },
+  ]) {
+    assert.equal(runOutcome(bad).pass, false, `runOutcome called ${JSON.stringify(bad)} a pass`)
   }
 })

@@ -43,7 +43,15 @@ const PORT = 55470
 function bootPg() {
   if (!existsSync(`${PGBIN}/initdb`)) return false
   try {
-    if (existsSync(`${SOCK}/.s.PGSQL.${PORT}`)) return true
+    // A socket FILE outlives the postmaster — after a container restore this directory still
+    // held .s.PGSQL.55470 with nothing behind it, and returning true here reported a healthy
+    // cluster while every query failed ECONNREFUSED. Ask pg_ctl, not the filesystem.
+    if (existsSync(`${SOCK}/.s.PGSQL.${PORT}`)) {
+      try {
+        execSync(`su postgres -c "${PGBIN}/pg_ctl -D ${PGDATA} status"`, { stdio: 'ignore' })
+        return true
+      } catch { /* stale socket: rebuild below */ }
+    }
     execSync(`rm -rf ${SOCK} && mkdir -p ${PGDATA} && chown -R postgres ${SOCK}`, { stdio: 'ignore' })
     execSync(`su postgres -c "${PGBIN}/initdb -D ${PGDATA} -U postgres -A trust"`, { stdio: 'ignore' })
     // `-l` is required: without it pg_ctl inherits stdout and never returns.

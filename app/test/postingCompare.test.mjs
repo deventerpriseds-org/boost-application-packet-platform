@@ -8,7 +8,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import {
-  POSTING_HOOKS, FIT_LABEL, FIT_COLOR, fitLabel, comparisonState,
+  POSTING_HOOKS, FIT_LABEL, FIT_COLOR, fitLabel, comparisonState, comparisonStaleNote,
   COMPARE_WIDE_MIN, compareColumns, compareGridTemplate, COMPARE_COLUMNS, COMPARE_SCOPE_NOTE,
 } from '../src/postingAnalysis.js'
 
@@ -240,4 +240,59 @@ test('the comparison is mounted on the JD step, above the source card it was bui
     'the answer must precede the source it was derived from')
   assert.match(BUILDER_SRC, /comparison=\{req\.data\?\.comparison\}/,
     'the comparison must come from the SAME requirements payload, not a second fetch')
+})
+
+// ── D23/D24: the card must not present stored rows as if they were built from the live set ─────
+//
+// `comparison.set` is read LIVE from the owner's prefs; `comparison.dimensions` are rows written
+// when the comparison was last resolved. Without this the card prints "Your dimension set for
+// engineering." directly above rows built from a different set — a correct sentence beside a stale
+// number, which is the half a reader believes (D15's failure, in a new place).
+//
+// The API decides staleness (appDimensions.comparisonStaleness) so one answer serves every caller.
+// This function only turns it into the sentence, so these tests are about the SENTENCE.
+
+test('D24: nothing to say when the stored rows are current', () => {
+  assert.equal(comparisonStaleNote(null), null)
+  assert.equal(comparisonStaleNote({ dimensions: [], stale: null }), null)
+  assert.equal(comparisonStaleNote({ dimensions: [{ key: 'cycle_time' }] }), null,
+    'a payload with no `stale` field at all must not invent one')
+})
+
+test('D24: a changed SET and changed RULES are different sentences, because the reason differs', () => {
+  const setOnly = comparisonStaleNote({
+    stale: { set_changed: true, rules_changed: false, missing: ['cycle_time'], extra: ['budget_owned'], row_version: 2 },
+  })
+  assert.equal(setOnly.kind, 'set')
+  assert.match(setOnly.text, /dimension set has changed/)
+  assert.doesNotMatch(setOnly.text, /older version of the comparison rules/,
+    'a set change was reported as a rules change')
+
+  const rulesOnly = comparisonStaleNote({
+    stale: { set_changed: false, rules_changed: true, missing: [], extra: [], row_version: 1 },
+  })
+  assert.equal(rulesOnly.kind, 'rules')
+  assert.match(rulesOnly.text, /older version of the comparison rules/)
+  assert.doesNotMatch(rulesOnly.text, /dimension set has changed/)
+
+  const both = comparisonStaleNote({
+    stale: { set_changed: true, rules_changed: true, missing: ['cycle_time'], extra: [], row_version: 1 },
+  })
+  assert.equal(both.kind, 'both')
+  assert.match(both.text, /dimension set has changed/)
+  assert.match(both.text, /older version of the comparison rules/)
+
+  // Every one of them must say what to DO. A staleness notice with no remedy is a dead end (R5).
+  for (const n of [setOnly, rulesOnly, both]) assert.match(n.text, /Re-resolve/)
+})
+
+test('D24: the stale notice is actually MOUNTED, not merely exported', () => {
+  // A hook can exist in POSTING_HOOKS and be rendered nowhere. Proved by deleting the JSX block:
+  // without this assertion every test above still passes and the notice reaches no screen.
+  const jsx = readFileSync(new URL('../src/screens/PostingAnalysis.jsx', import.meta.url), 'utf8')
+  assert.match(jsx, /comparisonStaleNote\(/, 'the screen never computes the notice')
+  assert.match(jsx, /POSTING_HOOKS\.compareStale/, 'the notice has no stable hook on screen')
+  // ...and it is rendered from the computed value, not from a literal someone typed.
+  assert.match(jsx, /\{stale && \(/, 'the notice is not conditional on there being one')
+  assert.match(jsx, /\{stale\.text\}/, 'the notice renders something other than the computed text')
 })
