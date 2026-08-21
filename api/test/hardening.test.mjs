@@ -3180,3 +3180,48 @@ test('H:staged-prompt-is-vetoed: a staged prompt replacement carries its DO-NOT-
   assert.match(body, /resume_user/, 'the notice must name the file it vetoes')
   assert.match(body, /4b4af84859072c45/, 'the notice must record the live sha the decision protects')
 })
+
+// H:model-evidence-is-labelled — an evidence row a MODEL proposed must be distinguishable from one a
+// rule settled alone, and the database must be what enforces it.
+//
+// The escalation tier accepts a model's excerpt only after an exact substring check, so the stored
+// quote is every bit as verbatim as a deterministic one. That is exactly why the label matters: the
+// two rows are indistinguishable by inspection, and without a third `method` value the honest way to
+// store a model row is as 'exact' — which asserts a rule did work a model did. A reader a month
+// later, and any query that tries to audit model influence, would have no way to tell them apart.
+//
+// Evidence this is real rather than defensive: the CHECK was `in ('exact','anchored')` and an insert
+// of `'guessed'` was REFUSED against a populated database carrying main's schema (measured
+// 2026-08-21), which proves the constraint is load-bearing and not decoration. The same run proved
+// the migration applies over seeded rows (exit 0), leaves a pre-existing 'exact' row untouched with
+// `proposal_version` null, and is a no-op on re-run.
+//
+// The invariant, in three parts, because dropping any one of them re-opens the hole:
+//   1. 'proposed' is an accepted `method` value, or a model row cannot be stored honestly at all;
+//   2. `proposal_version` exists and is NOT defaulted — a default backfills model provenance onto
+//      every deterministic row already in the table;
+//   3. the constraint is DROPPED before it is added, because `add constraint` is not idempotent and
+//      this file's own migration runs on every deploy.
+test('H:model-evidence-is-labelled: a model-proposed evidence row has its own method and version', () => {
+  const schema = readFileSync(new URL('../src/functions/tests/schema.ts', import.meta.url), 'utf8')
+  const sql = schema.slice(schema.indexOf('SCHEMA_SQL = `') + 14, schema.indexOf('\n`;'))
+
+  // (1) The three provenances, and no more — a fourth added without a thought here should fail.
+  const checks = [...sql.matchAll(/method in \(([^)]*)\)/g)].map(m => m[1].replace(/\s|'/g, ''))
+  assert.ok(checks.length >= 1, 'the method CHECK has vanished from SCHEMA_SQL')
+  assert.ok(checks.some(c => c === 'exact,anchored,proposed'),
+    `no method CHECK admits a model-proposed row: found ${JSON.stringify(checks)}`)
+
+  // (2) Nullable, never defaulted. A default is the silent version of lying about provenance.
+  assert.match(sql, /add column if not exists proposal_version int;/,
+    'proposal_version is missing — a model row would carry no ruleset version')
+  assert.ok(!/proposal_version int[^;]*default/i.test(sql),
+    'proposal_version has a DEFAULT — it would assert model provenance for rows a rule settled alone')
+
+  // (3) Drop before add, in that order, in the text. `add constraint` is not idempotent and this
+  //     migration runs on every deploy, so the reverse order aborts or silently swallows the rest.
+  const drop = sql.indexOf('drop constraint if exists requirement_evidence_method_check')
+  const add = sql.indexOf('add constraint requirement_evidence_method_check')
+  assert.ok(drop > 0 && add > 0, 'the method constraint is not managed idempotently')
+  assert.ok(drop < add, 'the method constraint is ADDED before it is DROPPED — the migration will abort')
+})
