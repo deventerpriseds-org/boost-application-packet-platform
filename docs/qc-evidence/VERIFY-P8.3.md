@@ -649,3 +649,124 @@ the check *"Must-haves this document covers"*, which is no longer what it measur
 Measurements taken on a detached checkout of `30bb129`; the tree was restored after every revert and
 re-confirmed at 330/330 and 149/149. Nothing was fixed in this pass either — D-H is reported, not
 patched.
+
+---
+
+## ADDENDUM 3 — PR #13 merged; re-verified against `main` @ `3153f1a`
+
+`claude/qc-p8-3-evidence` was merged: `git merge-base --is-ancestor 30bb129 origin/main` → **yes**.
+`main` has since advanced ~30 commits across several lanes, one of which names a finding in this
+report. This report rode onto `main` inside the merge — but only as far as Addendum 1; **Addendum 2,
+including D-H, is not on `main`**, which is the gap this addendum closes.
+
+Everything below was measured on `main` merged into `claude/qc-p8-3-verify` (no conflicts).
+**Baseline: `api` build exit 0, `npm test` 582/582 · 0 fail · 0 skipped; `app` build exit 0,
+`npm test` 204/204 · 0 fail · 0 skipped.**
+
+### Everything previously confirmed fixed still holds on `main`
+
+Re-ran every probe unchanged against the merged tree:
+
+- **D-C** — `RAIL must_have card : total=1 closed=0`, source `0 of 1 closed … (3 more not judged
+  either way)`, requirements #0/#1/#2 `unmeasured/not measured`. Check `0/1`, score `0%`, rail `0/1`.
+- **D-A** — `locate: start=15 end=81`, `verbatim = "led the platform modernization programme across
+  four product lines"`, true index 15. No drift.
+- **The substring claim** — 637 probes, 591 resolved, **0 violations**.
+- **Reader and identity** — determinism, no astral, the code-point/code-unit equality the schema
+  CHECK depends on, and `evidenced(1) + no_evidence(1) + unresolvable(0) + fact_owned(3) +
+  eligibility(0) = 5 = total` all unchanged.
+
+### D-D is fixed — and the fix is larger than the finding
+
+`edbbdd5 fix(qc): D19 — stored evidence is re-validated on read, and a broken excerpt is withheld`.
+`requirementsGet` now re-reads the profile and puts every stored row through a new
+`verifyEvidence()`, which recomputes `sha256(rec.text)` against the stored `record_sha256` and
+re-slices the record at the stored offsets. The posture is **refuse, do not guess, and say which**: a
+rotted excerpt is *withheld*, not caveated, and it is explicitly **not** re-resolved on the read path
+(re-ranking is a write, and that route is readable with an unverified `?owner=`).
+
+Revert-proofed: forcing `verifyEvidence` to return `verified` unconditionally makes **8 tests fail**,
+including three named H-cases — `H:evidence-reverified-on-read`, `H:stale-evidence-not-absent`,
+`H:evidence-verified-at-the-boundary` — with `actual: 'verified', expected: 'stale'`. (The same
+revert also produces two `tsc` type errors, so it is guarded twice.) 108 pass / 8 fail; restored and
+re-confirmed green.
+
+This closes **AC-14** and **AC-22**, and it goes further than either asked: `EvidenceState` is a
+closed enumeration — `none | verified | stale | misresolved | source_missing | unverified` — and the
+`stale` / `misresolved` split is a distinction I did not think to ask for. A record that is
+byte-identical while its offsets no longer name the quote means *the row was recorded wrong*, not
+that the owner edited anything; blaming an edit they never made would be a false statement about
+them, and the digest is exactly what separates the two.
+
+**AC-38** also moves to pass: `tallyHealth()` counts each state as its own population, `evidenceHealth`
+is served on the requirements payload beside per-row verdicts that name the requirement, and
+`HEALTH_BUCKET` **throws** on an unbucketed state rather than letting a new state be silently
+miscounted.
+
+### AC-59's two remaining consumers are fixed
+
+- `app/src/assetGate.js:91` now reads **"Must-haves your profile can evidence"** (was "Must-haves
+  this document covers", which had stopped being what the check measures).
+- `appReviewer.ts:190` now reads `const engineJudged = judgedMustHaveIds(requirements, scoreRow)` —
+  no longer every must-have row while the check judges only `coverable`.
+
+With the rail already fixed, all three consumers agree. **AC-59 → pass.**
+
+### D-H survives, is now live on `main`, and has a guard that cannot see it
+
+The one finding that made it through the merge unaddressed.
+
+| Call site on `main` | Passes the owner's thresholds? |
+|---|---|
+| `appChecks.ts:109` — `evaluateArtifact` | **yes** |
+| `appRequirements.ts:441` — `requirementsBackfill` | **no** — `writeEvidence(client, opp.id, profile.records)` |
+| `appRequirements.ts:498` — **`POST /api/app/opportunity/{id}/evidence`** | **no** — same bare call |
+
+`grep -c loadThresholds api/src/functions/tests/appRequirements.ts` → **0**. `writeEvidence` still
+opens with `delete from requirement_evidence e using requirement r where … r.opp_id = $1`, so it
+replaces every row for the opportunity: **calling the evidence endpoint overwrites the
+threshold-respecting rows the checks path wrote with default-threshold ones.**
+
+New this pass, and the part worth flagging: a test now exists —
+`evidence.test.mjs:288`, `assert.match(appChecks, /writeEvidence\(…threshold: thresholds\.evidenceThreshold/)`
+— which asserts the property **at the one call site that was fixed** and is blind to the other two.
+That is the inverse of the cry-wolf failure the hardening rules guard against: not a guard that fires
+on correct code, but a guard that certifies a property it only partially checks. If the rule is "the
+owner's thresholds reach the resolver", the assertion has to be over the writers as a set — the same
+"name the core source and grep every consumer" discipline that D-C was about.
+
+### Not re-verified here — Section F has moved under a different spec
+
+`app/src/screens/PostingAnalysis.jsx` now renders a posting-vs-profile `CompareRow` whose profile
+cell is *"a `requirement_evidence` excerpt or a confirmed `owner_fact`, named either way"* — P8.4's
+**SPEC 4.2** comparison, not AC-42's SPEC 4.1 disclosure-expansion model. It plausibly satisfies the
+intent behind ACs 35 and 42–48, but it is a different design, it belongs to a different lane with its
+own criteria (`docs/qc-evidence/AC-P8.4.md`, now on `main`), and confirming what it actually renders
+needs `ui-verify.yml` against `main`. **I am not claiming those ACs as passed on the strength of
+reading a component.** They stay `fail` against P8.3's criteria as written, with that caveat.
+
+`AC-3` is **still fail**, though better factored: `pipeline.ts:93` now exports
+`profileFromMasterContext(mc)` — but it was extracted so the remediation loop could reuse it, and it
+still carries pipeline's own rule (`k !== 'itemsToOmit'`, joined with `' '`, `rowKey`/`etag`/
+`timestamp` admitted as prose) and never calls `profileRecords`. Two rules for "what is the profile"
+rather than three; the AC asks for one.
+
+`AC-23` is still fail on its letter, but only just: five of its six named reasons now exist as
+read-time states. The missing one is resolve-time — `resolveEvidence` still returns a bare `null` for
+a quote below the length or token floor, with no reason attached.
+
+### Corrected tally at `main` @ `3153f1a` — **48 pass · 11 fail · 4 not_applicable**
+
+Moved to pass since `30bb129`: **14**, **22**, **38** (D19), **59** (both remaining consumers).
+
+Still failing: **3, 20, 23, 33, 35, 41, 42, 43, 44, 47, 48** — of which 35 and 42–48 carry the
+Section F caveat above. `not_applicable` remains **16, 45, 46, 49**.
+
+**A correction to my own arithmetic.** Addendum 2 reported "45 pass · 14 fail · 4 not_applicable"
+while listing fifteen failing criteria — the count and the list disagreed, and the list was right.
+Recomputed from the per-criterion table: `8bf2b59` was 39/20/4, `30a236b` 40/19/4, `30bb129` 44/15/4,
+and `main` is 48/11/4. The verdict on every individual criterion is unchanged; only the totals were
+wrong.
+
+Measured on `claude/qc-p8-3-verify` with `origin/main` @ `3153f1a` merged in. Nothing was fixed in
+this pass either — D-H is reported, not patched.
