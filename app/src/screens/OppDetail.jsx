@@ -93,8 +93,8 @@ export default function OppDetail({ id, tab = 'overview' }) {
 
         {/* 3-way triage — the same decision as the Swipe deck, available on the detail page */}
         <div style={{ display: 'flex', gap: 8, marginTop: 14, flexWrap: 'wrap' }}>
-          <button className="px-btn" style={{ fontSize: 12, color: '#16794a', borderColor: '#16794a' }} onClick={() => move('saved')}>✓ Keep</button>
-          <button className="px-btn" style={{ fontSize: 12, color: '#a8730a', borderColor: '#a8730a' }} onClick={() => move('enriched')}>↓ Maybe</button>
+          <button className="px-btn" style={{ fontSize: 12, color: 'var(--triage-keep)', borderColor: 'var(--triage-keep)' }} onClick={() => move('saved')}>✓ Keep</button>
+          <button className="px-btn" style={{ fontSize: 12, color: 'var(--triage-maybe)', borderColor: 'var(--triage-maybe)' }} onClick={() => move('enriched')}>↓ Maybe</button>
           <button className="px-btn" style={{ fontSize: 12, color: 'var(--proto-red)', borderColor: 'var(--proto-red)' }} onClick={dismissOpp}>✕ Dismiss</button>
         </div>
       </div>

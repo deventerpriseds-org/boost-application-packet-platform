@@ -161,7 +161,7 @@ export const StageBadge = ({ stage }) => <span className="px-chip" style={{ text
 
 // Gold favorite star — rendered only for is_favorite opportunities (priority flag).
 export const FavStar = ({ on, title = 'Favorite role — promoted', size = 14 }) =>
-  on ? <span title={title} aria-label="favorite" style={{ color: '#c08a1e', fontSize: size, lineHeight: 1 }}>★</span> : null
+  on ? <span title={title} aria-label="favorite" style={{ color: 'var(--gold)', fontSize: size, lineHeight: 1 }}>★</span> : null
 
 export function MatchScore({ value, size = 34 }) {
   const r = (size - 6) / 2

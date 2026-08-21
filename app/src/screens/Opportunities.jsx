@@ -363,8 +363,8 @@ export default function Opportunities({ opps, filter }) {
                     : (
                       // Same 3-way triage as the Swipe deck: Keep → saved, Maybe → enriched, Dismiss → reject.
                       <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-                        <button className="px-btn" title="Keep — move to Saved" style={{ fontSize: 11, padding: '6px 10px', color: '#16794a', borderColor: '#16794a' }} disabled={busyId === o.id} onClick={(e) => { e.stopPropagation(); keepOpp(o.id, o.company) }}>✓ Keep</button>
-                        <button className="px-btn" title="Maybe — move to Enriched" style={{ fontSize: 11, padding: '6px 10px', color: '#a8730a', borderColor: '#a8730a' }} disabled={busyId === o.id} onClick={(e) => { e.stopPropagation(); maybeOpp(o.id, o.company) }}>↓ Maybe</button>
+                        <button className="px-btn" title="Keep — move to Saved" style={{ fontSize: 11, padding: '6px 10px', color: 'var(--triage-keep)', borderColor: 'var(--triage-keep)' }} disabled={busyId === o.id} onClick={(e) => { e.stopPropagation(); keepOpp(o.id, o.company) }}>✓ Keep</button>
+                        <button className="px-btn" title="Maybe — move to Enriched" style={{ fontSize: 11, padding: '6px 10px', color: 'var(--triage-maybe)', borderColor: 'var(--triage-maybe)' }} disabled={busyId === o.id} onClick={(e) => { e.stopPropagation(); maybeOpp(o.id, o.company) }}>↓ Maybe</button>
                         <button className="px-btn" title="Dismiss — reject" style={{ fontSize: 11, padding: '6px 10px', color: 'var(--proto-red)', borderColor: 'var(--proto-red)' }} disabled={busyId === o.id} onClick={(e) => { e.stopPropagation(); rejectOpp(o.id, o.company) }}>✕ Dismiss</button>
                       </div>
                     )}

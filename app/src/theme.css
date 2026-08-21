@@ -91,10 +91,21 @@
       --proto-radius-sm: 8px;
       /* Recency-temperature palette (light) — muted text/border + low-alpha tint so chips blend
          with the teal/slate UI. Cooling is nudged toward the brand teal. */
-      --temp-hot: #c15b3c;   --temp-hot-tint: rgba(193,91,60,.14);
-      --temp-warm: #a9812f;  --temp-warm-tint: rgba(169,129,47,.15);
-      --temp-cooling: #4f88a0; --temp-cooling-tint: rgba(79,136,160,.15);
-      --temp-cold: #7f8b99;  --temp-cold-tint: rgba(127,139,153,.14);
+      --temp-hot: #a44d33;   --temp-hot-tint: rgba(193,91,60,.14);
+      --temp-warm: #826324;  --temp-warm-tint: rgba(169,129,47,.15);
+      --temp-cooling: #3f6d80; --temp-cooling-tint: rgba(79,136,160,.15);
+      --temp-cold: #616a74;  --temp-cold-tint: rgba(127,139,153,.14);
+      /* FOUR LITERALS THAT WERE HARDCODED IN JSX, now tokens — which is the whole reason they
+         failed. A literal cannot adapt, so each was measured against the DARK ground it was never
+         designed for. Measured before this change:
+             #16794a keep-triage   3.29 dark      #a8730a maybe-triage 4.10 light / 4.35 dark
+             #c08a1e gold          2.89 light     #0a66c2 LinkedIn     2.29 dark / 4.41 light
+         The light values are the originals wherever they already passed, so nothing visibly moves
+         in the theme people use most; only the failing side is corrected. */
+      --triage-keep: #16794a;
+      --triage-maybe: #996909;
+      --gold: #946a17;
+      --linkedin: #0a64be;   --linkedin-tint: rgba(10,102,194,.14);
     }
     /* Dark mode — self-contained. The Compass bundle ships a "preview pin"
        that strips [data-theme="dark"] / .dark, so we drive dark ourselves via
@@ -119,10 +130,16 @@
       --surface-success-subtle: var(--green-950);
       --surface-error-subtle: var(--red-950);
       /* Recency-temperature palette (dark) — lightened for contrast on the dark ground. */
-      --temp-hot: #dd8064;   --temp-hot-tint: rgba(221,128,100,.16);
+      --temp-hot: #e08d74;   --temp-hot-tint: rgba(221,128,100,.16);
       --temp-warm: #c9a252;  --temp-warm-tint: rgba(201,161,80,.16);
-      --temp-cooling: #74a8c0; --temp-cooling-tint: rgba(116,168,192,.16);
+      --temp-cooling: #7bacc3; --temp-cooling-tint: rgba(116,168,192,.16);
       --temp-cold: #9aa6b4;  --temp-cold-tint: rgba(154,166,180,.15);
+      /* The same four, lightened for the dark ground. gold keeps its original value because that
+         value already passes here — the defect was light-side only. */
+      --triage-keep: #559d7b;
+      --triage-maybe: #b5882f;
+      --gold: #c08a1e;
+      --linkedin: #629dd8;   --linkedin-tint: rgba(10,102,194,.14);
       --surface-warning-subtle: var(--yellow-950);
       --surface-info-subtle: var(--blue-950);
       --text-info: var(--blue-400);
@@ -151,7 +168,10 @@
          light-mode-only fix written there silently follows into dark and reverses its own
          direction: darkening green to clear 3.00 on a pale tint took it to 2.97 on a near-black
          one. The tones sweep caught that on its first run, which is the entire reason it exists. */
-      --proto-green: var(--green-600);
+      /* green-600 measures 4.44:1 as TEXT on the dark panel ground — the tone sweep only ever
+         proved it on its own -soft tint, which is why the WIDER sweep caught this and the tones
+         sweep did not. green-500 is the next step up the same ramp: 6.42:1. */
+      --proto-green: var(--green-500);
       --proto-yellow: var(--yellow-500);
       /* Darker and more opaque than the light scrim: on a near-black page a 34% slate wash reads
          as nothing, so the overlay would appear to float with the page still fully lit behind it. */
