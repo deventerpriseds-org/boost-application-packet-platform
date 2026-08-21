@@ -841,3 +841,115 @@ No criterion moved this pass. Fails remain **3, 20, 23, 33, 35, 41, 42, 43, 44, 
 42–48 under the Section F caveat); `not_applicable` remains **16, 45, 46, 49**.
 
 Nothing was fixed in this pass either.
+
+---
+
+## ADDENDUM 5 — `main` @ `0beae72`: the resolver was rewritten, D-H is fixed, and a new defect found
+
+`main` advanced 4 more merges since `a37f7c2`, all inside a single arc: production measurement found
+the evidence spine evidenced **0 of 10** requirements on the Trinnex opportunity and **0 of 35** on a
+second posting with **0 refusals** — `requirements.locate()` was reused outside its design domain
+(comparing an employer's requirement against the candidate's own profile, which is not a paraphrase
+relationship). Per an owner decision recorded in `docs/qc-evidence/AC-matcher.md` (44 criteria), the
+resolve path was withdrawn from `locate()` entirely and replaced with a purpose-built matcher,
+`requirementSupport.ts` (`cc04ba1` onward). `RESOLVER_VERSION` bumped 1→2.
+
+Merged in (no conflicts), rebuilt, retested. **`api` 635/635 · `app` 204/204 · both builds clean.**
+
+### D-H is now genuinely fixed, and fixed at the design level
+
+`checkPrefs.ts` was extracted specifically so `loadThresholds`/`resolveOptionsFor` has **one
+importable location**, ending the `appChecks`↔`appRequirements` cycle that previously made
+"just import loadThresholds into appRequirements.ts" awkward. All three `writeEvidence` call sites
+now pass `evOpts`/thresholds:
+
+```
+appRequirements.ts:494  for (const opp of opps) ev.push(await writeEvidence(client, opp.id, profile.records, evOpts))
+appRequirements.ts:552  const out = await writeEvidence(client, opp.id, profile.records, evOpts)
+appChecks.ts:69         await writeEvidence(client, art.opp_id, profileRead.records, { … })
+```
+
+`grep -c loadThresholds api/src/functions/tests/appRequirements.ts` → **1** (was 0). This isn't
+patched around my finding — `resolveOptionsFor`'s own comment states the goal directly: "ONE place,
+so a third caller of `writeEvidence` cannot appear without them." **AC-20 also improves**: the new
+matcher's thresholds (`evidenceThreshold`, `evidenceMinTokens`, plus a new `evidenceMaxSentences`)
+are now real `CheckThresholds` columns with a `H42` guard (`hardening.test.mjs:1827`) asserting every
+per-owner settings column production reads has a writer that can set it.
+
+### The substring/offset guarantee holds under the new matcher
+
+Re-ran the full adversarial harness against `resolveEvidence`/`profileRecords` (unchanged export
+names, so the same probes run) with the new resolver underneath: **531 probes, 491 resolved, 0
+substring violations.** The new module's own header explicitly names the H32 class ("index into a
+lower-cased copy is not an index into the original... invisible to a substring assertion, because
+the wrong span is still a true substring") and its `literalSpan()` measures on the original string
+via case-insensitive regex `exec`, never `.toLowerCase().indexOf(...)`.
+
+### D-I (new) — the negation/attribution safety floor is bypassed by the literal-span shortcut
+
+The module states its own bar explicitly: *"attributing someone else's accomplishment to the
+candidate is the highest-severity output this system can produce,"* and ships `NEGATION_RE` /
+`ATTRIBUTION_RE` as one of seven rules in `SAFETY_FLOOR_RULES` — not owner-configurable, asserted by
+`M17/M37` (`matcher.test.mjs:427`). I tried to break it and did.
+
+`supportIn()` tries two kinds of candidate excerpt for a requirement: `literalSpan()` — an exact,
+case-insensitive substring match of the requirement's own words, deliberately **not** widened to the
+sentence — "tried ALONGSIDE the [sentence] segments... the ranking... picks it naturally when it
+wins." The safety-floor check runs against whichever excerpt wins:
+`if (NEGATION_RE.test(excerpt) || ATTRIBUTION_RE.test(excerpt))`.
+
+**The bug: when a negation or attribution marker sits immediately *before* the literal phrase, the
+literal span starts *after* the marker, and `NEGATION_RE`/`ATTRIBUTION_RE` never see it.** This is
+the ordinary English construction for negating a claim — "I did **not** X", "I **never** X", "we
+**failed to** X" — so the bypass is not an edge case, it is the common case.
+
+Reproduced six ways, every one resolving a claim the record explicitly negates or attributes to
+someone else:
+
+| Requirement | Record | Result |
+|---|---|---|
+| `Own the P&L for the water technology division` | "I did **not** own the P&L for the water technology division; I only reported metrics." | **RESOLVED**: `"own the P&L for the water technology division"` |
+| same | "I **never** own the P&L…; that sits with finance." | **RESOLVED** |
+| `Deliver the migration on schedule` | "We **failed to** deliver the migration on schedule due to vendor delays." | **RESOLVED** |
+| `Lead the platform rebuild` | "My manager insisted **rather than** lead the platform rebuild himself, he delegated it to me." | **RESOLVED** |
+| `Owned the P&L for the water technology division` | "Reported to the leader **who owned** the P&L for the water technology division throughout." | **RESOLVED** |
+| `Manage the vendor relationship` | "I manage the vendor relationship **on behalf of** the VP of Procurement." | **RESOLVED** |
+
+Every one of these is a true substring at its offsets — `writeEvidence`'s own guard, and the H28-class
+per-record check, both pass it, because they check substring correctness, not semantic correctness.
+It is exactly the failure the safety floor names as the system's worst possible output, produced by
+the system.
+
+**Why the existing tests didn't catch it.** `M16` (`matcher.test.mjs:400-415`), the test that exists
+specifically for this rule, uses `Declined to take on remote engineering teams` against `Ability to
+manage remote engineering teams` — different verb (`decline`/`take on` vs. `manage`), so no literal
+phrase match exists and the candidate is forced through the sentence-segment path, where
+`NEGATION_RE` correctly sees the whole sentence including "Declined". Its attribution counterpart
+uses `owned` against a requirement phrased `Own` — a tense mismatch that again forces the
+sentence-segment path. **Neither fixture exercises `literalSpan()`,** so a real, common bypass exists
+one config away from every test that was written to close this exact hole. Confirmed directly: my
+"control" case (`Declined to take on remote engineering teams` / `Ability to manage…`) still refuses
+correctly — only the literal-match path is broken.
+
+**Live exposure.** Same as D-H: `requirement_evidence` holds 0 rows in production and `POST /evidence`
+has no caller in `app/src`, so this is latent, not live, today. But it is *more urgent to close before
+a caller lands* than D-H was, because D-H silently used a wrong-but-plausible default; D-I fabricates
+a claim the candidate explicitly disclaimed — reviewer-facing, resume-facing, the exact scenario the
+module's changelog treats as the single worst outcome it can produce.
+
+A fix does not require abandoning `literalSpan`'s design goal (avoiding sentence-padding when the
+words are already literally present) — it requires the safety-floor check to run against a fixed
+lookback window (or the containing sentence) rather than against the winning excerpt alone, the same
+way `NEGATION_RE`/`ATTRIBUTION_RE` already work correctly on the sentence-segment path. Not fixed
+here; reported, with reproduction steps precise enough to turn directly into a test.
+
+### Tally — unchanged at 48/11/4; D-I is outside the original 63 criteria
+
+None of `AC-P8.3.md`'s 63 criteria named negation/attribution explicitly (that rule postdates this
+AC file), so D-I doesn't move a criterion verdict. It stands as the most severe defect found across
+every pass of this verification, ahead of D-C, and is reported here rather than in a new AC file
+because it was found doing exactly what this document exists to do: attack the accusation-grade claim
+the module makes about itself.
+
+Nothing was fixed in this pass. Probe scripts (`attack3.mjs`, `negdig.mjs`, `negdig2.mjs`) left in the
+scratchpad for reproduction.
