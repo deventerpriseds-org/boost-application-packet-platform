@@ -770,3 +770,74 @@ wrong.
 
 Measured on `claude/qc-p8-3-verify` with `origin/main` @ `3153f1a` merged in. Nothing was fixed in
 this pass either — D-H is reported, not patched.
+
+---
+
+## ADDENDUM 4 — `main` @ `a37f7c2`, and a correction to how D-H was stated
+
+`main` advanced 19 further commits. Merged in (no conflicts) and re-measured.
+**`api` 582/582 · `app` 204/204 · both builds clean · nothing skipped.**
+
+Every probe re-run unchanged and still green: the rail reports `total=1 closed=0` with #0/#1/#2
+`not measured`; `locate` returns `char_start 15` for a phrase at 15; 637 substring probes / 591
+resolved / **0 violations**; 4,000 `locate()` rounds / 0 mismatches; the AC-28 identity exact.
+
+**D-H is unchanged on `main`:** `grep -c loadThresholds api/src/functions/tests/appRequirements.ts`
+→ **0**; `writeEvidence` still called bare at `:441` (backfill) and `:498` (`POST /evidence`);
+`evidence.test.mjs:288` still asserts the property against `appChecks` alone.
+
+### The correction — I overstated D-H's reach
+
+Addendum 3, and the PR title carrying it, said D-H was "live on `main`". **The code is on `main`; the
+destructive path is not reachable through the product.** `8915afa` determined that the evidence
+resolver has no caller, and I verified that independently rather than accept it:
+
+```
+grep -rn "opportunity/${…}/evidence|evidenceResolve" app/src/   →  NO CALLER
+grep -rn "requirements/backfill|requirementsBackfill" app/src/  →  NO CALLER
+grep -rn "runArtifactChecks" app/src/                           →  api.js:180, AssetGateDrawer.jsx:420
+```
+
+So the **only** `writeEvidence` call site with a caller is `appChecks.ts:109` — the one that *does*
+pass the owner's thresholds. Today the setting is honoured on every reachable path, and the
+overwrite I described cannot happen through the UI.
+
+Ground-truthed against production rather than inferred (`db-query.yml` run **32489875839**, job
+96794765979, head `a37f7c2`):
+
+```
+ tbl_exists           →  requirement_evidence      (the table is deployed)
+ evidence_rows        →  0
+ reqs | extractor_v1  →  8277 | 8015
+```
+
+**Zero evidence rows in production.** Consistent with "nothing triggers the resolver", and it means
+no stored row can currently be overwritten by anything.
+
+### What that changes, and what it does not
+
+D-H stops being a live data-integrity bug and becomes a **latent one that arms itself the moment the
+planned caller lands** — and that caller is explicitly the next piece of work (`8915afa` calls it
+"the cheaper half" of getting `requirement_evidence` off zero). When `POST /evidence` gains a UI
+caller, it will write with seeded defaults and delete the rows the checks path wrote with the
+owner's values, and `evidence.test.mjs:288` will not notice, because it looks at the other call site.
+
+That is worth fixing *before* the caller, not after, and it is a cheap fix: import `loadThresholds`
+and widen the assertion from one call site to the set of writers. The finding stands; only my
+characterisation of its current blast radius was wrong, and the PR title is corrected with this
+addendum.
+
+### One thing this quantifies that was previously only noted
+
+Addendum 2 flagged that nothing re-extracts the rows written under `EXTRACTOR_VERSION = 1`, whose
+offsets predate the H32 fold fix. The production numbers put a size on it: **8,015 of 8,277
+requirement rows — 96.8% of the corpus — are still at version 1.** The marker makes them findable;
+nothing yet makes them correct. Whether that matters in practice depends on how many postings
+contain a case-expanding character, which I have not measured and am not going to guess at.
+
+### Tally at `main` @ `a37f7c2` — unchanged: **48 pass · 11 fail · 4 not_applicable**
+
+No criterion moved this pass. Fails remain **3, 20, 23, 33, 35, 41, 42, 43, 44, 47, 48** (35 and
+42–48 under the Section F caveat); `not_applicable` remains **16, 45, 46, 49**.
+
+Nothing was fixed in this pass either.
