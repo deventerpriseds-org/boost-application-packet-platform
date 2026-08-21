@@ -12,8 +12,9 @@
 // Each ID is referenced from `.claude/actions.md` so the story and the guard point at each other.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { readFileSync, readdirSync } from 'node:fs'
+import { readFileSync, readdirSync, existsSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
+import { createHash } from 'node:crypto'
 import { join } from 'node:path'
 
 import { normalizePostingText, decodeEntities, groundingText } from '../dist/functions/tests/jdText.js'
@@ -22,7 +23,7 @@ import { onOmitList, omitEntries, similarity, itemTokens } from '../dist/functio
 import { runChecks, gateFor, attentionCount, COVERAGE_THRESHOLD, MIN_JUDGEABLE_TOKENS } from '../dist/functions/tests/checks.js'
 import { computeArtifactScore, judgedMustHaveIds, mustHaveSource, parseMustHaveSource } from '../dist/functions/tests/artifactScore.js'
 import { deriveFacts } from '../dist/functions/tests/ownerFacts.js'
-import { parseResumePackage } from '../dist/functions/tests/resumeParser.js'
+import { parseResumePackage, headingKeysFor } from '../dist/functions/tests/resumeParser.js'
 import { validateCitations, reviewerChecks, agreementFor } from '../dist/functions/tests/reviewer.js'
 import { extractFigures, scanEcho, claimKey, isMarked, generalize } from '../dist/functions/tests/figureEcho.js'
 import { planCorrections } from '../dist/functions/tests/correction.js'
@@ -2697,6 +2698,293 @@ test('H:run-outcome-distinguishable: every run outcome is separable by a caller'
   }
 })
 
+
+// ── D14 — `covered_kw` does not mean covered ─────────────────────────────────────────────────────
+//
+// THE DEFECT, live until this commit: the array `appPackets.jdAnalysis` writes into
+// `packet.covered_kw` rendered on the JD step as green chips under the word "covered". The call
+// that produces it is given Role, Company, Comp and the job description and NOTHING about the
+// candidate, so nothing in it can establish coverage of anything. A green count for an unmeasured
+// thing is the exact failure class this whole layer exists to prevent.
+//
+// The fix chosen is (b) RELABEL rather than (a) compare-against-the-profile, because three systems
+// already answer "does the candidate evidence this?" - `requirement_evidence` + the P8.3 resolver
+// (verbatim profile excerpts), `artifact_score.keyword_coverage` (measured against the published
+// ATS term library) and the P8.4 posting-vs-profile comparison - and `requirements.ts` already
+// declares `model_keyword` NEVER SCOREABLE. A fourth coverage number, derived from a model's
+// free-text guess at "ATS keywords for this role", would have to agree with all three.
+//
+// So the provenance is CONSTRUCTED, not declared: `jdAnalysisRequest` assembles the user message
+// from labelled fragments and returns the labels of the fragments that contributed. `sources`
+// cannot drift from `user` because one array produces both.
+test('H:jd-analysis-sees-no-profile: the keyword call is given no candidate input, and the predicate can say so', async () => {
+  const { jdAnalysisRequest, comparesToProfile, PROFILE_SOURCES } =
+    await import('../dist/functions/tests/appPackets.js')
+
+  const posting = 'RESPONSIBILITIES. '.repeat(20) + 'Own the engineering P&L of roughly $18M annually.'
+  const opp = {
+    role: 'Head of Engineering', company: 'SafetyIQ', comp_range: '$300-350k',
+    why_surfaced: 'WHYSENTINEL', company_signals: ['SIGNALSENTINEL'], pain_hypotheses: ['PAINSENTINEL'],
+  }
+
+  for (const [name, text] of [['grounded', posting], ['ungrounded', '']]) {
+    const req = jdAnalysisRequest(opp, text)
+    assert.equal(comparesToProfile(req), false,
+      `${name}: the JD-analysis call reports itself as profile-compared - either it now reads the candidate (make it option (a) and relabel the screen) or a source label is wrong`)
+    // Every label that contributed text is one of the two non-candidate sources. Absent evidence is
+    // not a pass: an empty source list would make `comparesToProfile` false for the wrong reason.
+    assert.ok(req.sources.length > 0, `${name}: no fragment sources - the predicate would be vacuously false`)
+    for (const src of req.sources) {
+      assert.ok(['opportunity', 'posting'].includes(src), `${name}: unexpected fragment source ${src}`)
+      assert.ok(!PROFILE_SOURCES.has(src), `${name}: ${src} is a profile source`)
+    }
+  }
+
+  // NON-VACUITY, both directions. A predicate hardwired to false would pass everything above.
+  assert.ok(PROFILE_SOURCES.size > 0, 'PROFILE_SOURCES is empty, so comparesToProfile can never be true')
+  const withProfile = { sources: ['opportunity', 'posting', ...PROFILE_SOURCES] }
+  assert.equal(comparesToProfile(withProfile), true,
+    'comparesToProfile is inert - adding a profile source did not flip it')
+
+  // GROUNDING still decides which of the two message shapes is built, and both are covered above.
+  assert.equal(jdAnalysisRequest(opp, posting).grounded, true)
+  assert.equal(jdAnalysisRequest(opp, 'too short').grounded, false)
+
+  // The fact has to travel WITH the array, or a caller reads `coveredKw` with nothing telling it
+  // what the array is. Structural, because `packetShape` is not exported: the payload field must be
+  // COMPUTED by the same predicate. A literal `false` is a second place for the answer to live, and
+  // the day the call changes it would keep saying false without anyone touching it.
+  const shape = stripComments(src('appPackets.ts'))
+  assert.match(shape, /coveredKwProfileCompared:\s*comparesToProfile\(/,
+    'packetShape declares coveredKwProfileCompared instead of computing it from comparesToProfile')
+  assert.ok(!/coveredKwProfileCompared:\s*(true|false)\b/.test(shape),
+    'coveredKwProfileCompared is a hardcoded literal on the packet payload')
+})
+
+// Extracting the prompt out of the handler is only safe if it produced the SAME two messages. This
+// pins them against the literals the handler carried before the extraction, so a refactor cannot
+// quietly reword a live production prompt while every provenance assertion above stays green.
+test('H:jd-analysis-prompt-unchanged: the extracted request is byte-identical to the message it replaced', async () => {
+  const { jdAnalysisRequest } = await import('../dist/functions/tests/appPackets.js')
+  const opp = {
+    role: 'Head of Engineering', company: 'SafetyIQ', comp_range: '$300-350k',
+    why_surfaced: 'a CTO left', company_signals: ['Series C', 'SOC 2'], pain_hypotheses: ['delivery cycle time'],
+  }
+  const postingText = 'x'.repeat(1200)
+
+  // Verbatim from appPackets.jdAnalysis as it stood at 2bd9546, before the extraction.
+  const wasGrounded = `Role: ${opp.role} at ${opp.company}\nComp: ${opp.comp_range || 'n/a'}\n\nJOB DESCRIPTION:\n${postingText.slice(0, 6000)}`
+  const wasUngrounded = `Role: ${opp.role} at ${opp.company}\nComp: ${opp.comp_range || 'n/a'}\nContext: ${opp.why_surfaced || ''}\nSignals: ${(opp.company_signals || []).join('; ')}\nPains: ${(opp.pain_hypotheses || []).join('; ')}`
+
+  assert.equal(jdAnalysisRequest(opp, postingText).user, wasGrounded, 'the grounded user message changed')
+  assert.equal(jdAnalysisRequest(opp, '').user, wasUngrounded, 'the ungrounded user message changed')
+  // The 6,000-character posting cap is load-bearing (max_tokens 900 on the response).
+  assert.ok(jdAnalysisRequest(opp, 'y'.repeat(9000)).user.length < 6400, 'the posting cap was dropped')
+})
+
+// ── D33 — 2,733 characters of prompt asking for output that maps to no merge field ──────────────
+//
+// THE DEFECT, measured on a live build: Call 1 returned `Missing ATS Skills` (940 chars),
+// `Missing ATS Swap Suggestions` (638), `Jobscan Extraction` (2,888) and `Word and Character
+// Requirements Check` as `### Title ###` sections that map to NO merge field. P7 item 1 made that
+// visible (`_unmapped`) instead of folding them into the field above, which was the right fix -
+// but nothing decided what to do about it, so the model kept being paid to write them.
+//
+// THE DECISION: drop them from the prompt, because every one of them duplicates a system that
+// already measures the same thing DETERMINISTICALLY against the real generated fields -
+// `checks.ts` owns the word and character contracts (expertiseWords, aboutMe1Words, aboutMe2Words,
+// execProfileWords, coreAccomplishmentsWords, coverWords, skillMaxChars, relevantMaxChars),
+// `missing_kw` + `artifact_score.keyword_coverage` own ATS gaps, and `swaps.ts`/`swap_decision`
+// own swaps. A model's HTML table grading its own compliance, printed beside a measurement, is the
+// less trustworthy of two numbers about one thing.
+//
+// It is NOT load-bearing on any field that ships: the ATS coverage-and-swap instruction is stated
+// in full in the sections that PRODUCE Skills1/Skills2 and the Relevant lists (base prompt lines
+// 92-134 and 149-156), long before these tail tables, and the owner had already neutered the tail
+// ones by hand - `return "Removed"` and `return "Moved" for both lists`.
+const PROMPTS = new URL('../../prompts/', import.meta.url).pathname
+const ZAP_RESUME_NODE = new URL('../../docs/zap-289877647/prompts/16-update-resume-portfolio-fields-prompt.md', import.meta.url).pathname
+
+/** The zap node 289877661 user_message — the primary source the live `resume_user` row was seeded from. */
+function zapResumeUserMessage() {
+  const md = readFileSync(ZAP_RESUME_NODE, 'utf8')
+  const i = md.indexOf('## user_message')
+  let j = md.indexOf('```', i) + 3
+  if (md[j] === '\n') j += 1
+  return md.slice(j, md.indexOf('\n```', j))
+}
+
+/** The four sections D33 named, exactly as the prompt requested them. */
+const DROPPED_SECTIONS = [
+  'Missing ATS Skills', 'Missing ATS Swap Suggestions',
+  'Word and Character Requirements Check', 'Jobscan Extraction',
+]
+
+/** The one clause outside the block that referred to it. See H:resume-prompt-surgical-excision. */
+const DANGLING_FORWARD_REF = ', this will be recalled later in the prompt'
+
+/**
+ * Every heading the prompt could be asking the model to emit, in document order.
+ *
+ * TWO grammars, and the asymmetry is deliberate. `bookended` is `### Title ###` — exactly what
+ * `resumeParser.splitSections` recognises in the REPLY, and what this prompt instructs ("Bookend
+ * each Header with ### in front and back"). Those are the only lines this file will ever ACCUSE.
+ * `loose` also takes `### Title - instruction` lines, and is used ONLY to work out which merge
+ * fields are already spoken for further up the file; a loose line that maps to nothing is ignored
+ * entirely rather than reported. So over-extraction can never produce a false accusation — the
+ * cry-wolf failure that got two guards in this repo weakened until they guarded nothing.
+ */
+function promptHeadings(text) {
+  const out = []
+  for (const line of text.split('\n')) {
+    if (!line.startsWith('### ')) continue
+    const book = line.match(/^### (.+?) ###/)
+    const title = book ? book[1].trim() : line.slice(4).split(' - ')[0].trim()
+    out.push({ title, bookended: !!book, keys: headingKeysFor(title) })
+  }
+  return out
+}
+
+test('H:resume-prompt-surgical-excision: the shipped prompt is the primary source minus one contiguous block', () => {
+  const base = zapResumeUserMessage()
+  // Pin the primary source BY DIGEST. Not by `.length`: Node counts UTF-16 code units and this
+  // prompt carries 8 astral characters, so the same 29,069-codepoint string measures 29,077 here —
+  // which is exactly how a pinned length becomes a number somebody "corrects" instead of a fact.
+  // sha256 e2b9ed1f6879578e is the value recorded for zap node 289877661 in the commit that
+  // established which of the two identical live prompt rows was wrong (pipeline.ts:114-116).
+  assert.equal(createHash('sha256').update(base, 'utf8').digest('hex').slice(0, 16), 'e2b9ed1f6879578e',
+    'the zap export changed - re-derive the excision from it, do not adjust this digest')
+
+  const file = readFileSync(join(PROMPTS, 'resume_user.txt'), 'utf8')
+  const lines = base.split('\n')
+  const start = lines.findIndex(l => l.startsWith('### Missing ATS Skills ###'))
+  const end = lines.findIndex(l => l.startsWith('---'))
+  assert.ok(start > 0 && end > start, 'the excision boundaries are not in the primary source')
+
+  const prefix = lines.slice(0, start).join('\n')
+  const suffix = lines.slice(end).join('\n')
+  const removed = lines.slice(start, end).join('\n')
+
+  // THE SECOND EDIT, and it exists only because an independent AC read caught it: the Resume
+  // Summary block tells the model to store each soft skill's JD source phrase because it "will be
+  // recalled later in the prompt", and the ONLY thing that recalled it was `Jobscan Extraction`
+  // (its column 4: "The source phrases or text from the JD for each of the skills, this was stored
+  // earlier in the prompt"). Removing the tail block without this leaves a live prompt instructing
+  // the model to hold work nothing ever asks for - a dangling forward reference.
+  assert.equal(base.split(DANGLING_FORWARD_REF).length - 1, 1,
+    'the dangling forward reference is not where it was — re-derive both edits')
+
+  // THE POINT OF THIS GUARD: 26,292 characters of prompt still drive every document the owner
+  // sends. Proving the file is EXACTLY the source minus these two enumerated edits proves NOTHING
+  // ELSE in it was touched — by this commit or any later one. A diff a human reads is not that
+  // proof, and this is the file that writes the resume the owner sends to employers.
+  assert.equal(file, (prefix + '\n' + suffix).replace(DANGLING_FORWARD_REF, ''),
+    'prompts/resume_user.txt is not the primary source minus exactly the two enumerated edits')
+  assert.equal(base, prefix + '\n' + removed + '\n' + suffix)
+  assert.ok(!file.includes(DANGLING_FORWARD_REF), 'the dangling forward reference is back')
+
+  // And the block that went is the one D33 named — nothing else rode along.
+  const removedHeads = removed.split('\n').filter(l => l.startsWith('### ')).map(l => l.slice(4).split(' ###')[0].split(' - ')[0].trim())
+  assert.deepEqual(removedHeads, DROPPED_SECTIONS,
+    'the removed block contains a section D33 did not name')
+  assert.ok(removed.length > 2000 && removed.length < 3600, `removed ${removed.length} UTF-16 units — expected ~2,800`)
+})
+
+test('H:dropped-ats-report-sections: the four are gone, and the reason they went still holds', async () => {
+  const file = readFileSync(join(PROMPTS, 'resume_user.txt'), 'utf8')
+  for (const title of DROPPED_SECTIONS) {
+    // Not requested. `### Title` at the start of a line is how this prompt asks for a section.
+    assert.ok(!new RegExp(`^### ${title}`, 'm').test(file),
+      `the prompt asks for "${title}" again — its output maps to no merge field and is discarded`)
+    // THE BEHAVIOURAL HALF, and the reason this is not a spelling test: they were dropped BECAUSE
+    // the real parser maps them to nothing. If a later lane takes D33's other option and gives one
+    // of them a merge field, this fails and forces the prompt to be revisited rather than leaving
+    // a field that nothing fills.
+    assert.deepEqual(headingKeysFor(title), [],
+      `"${title}" now maps to a merge field — D33 was closed by REMOVING it from the prompt, so that field can never be filled`)
+  }
+})
+
+// Sections whose output the parser discards but which stay in the prompt DELIBERATELY, each with
+// the reason. They are not report tables; the entries are the two the independent AC read found
+// that the D33 row itself does not name (3,353 chars of the primary source, which is MORE dead
+// prompt than the 2,777 this commit removes — said plainly rather than left for the next reader).
+const KEPT_UNMAPPED_SECTIONS = {
+  'Second Job Description Check':
+    'the re-extraction pass; the prompt preamble makes it load-bearing ("Extract and summarize the job description data first. Then use the same extracted data as inputs for generating the final structured outputs sections."). Its OUTPUT is discarded, its reasoning is not.',
+  'Job Description Summary':
+    'kept for the same reason, and it is also a LIVE PARSER DEFECT this lane may not fix: headingKeysFor("Job Description Summary") returns ["resumeSummary"] because the summary pattern is unanchored, so the section is claimed by an already-filled field and vanishes with no _unmapped entry and no warning — and if the model ever emits it BEFORE "Resume Summary", the employer job-description summary is printed as the candidate resume summary. Proven with the real parseResumePackage. resumeParser.ts belongs to another lane; see DEFERRED.md D35.',
+}
+
+test('H:prompt-no-dead-bookended-section: a section request must map to a merge field nothing already claims', () => {
+  const file = readFileSync(join(PROMPTS, 'resume_user.txt'), 'utf8')
+  const headings = promptHeadings(file)
+  const bookended = headings.filter(h => h.bookended)
+  assert.ok(bookended.length >= 3, `only ${bookended.length} bookended section requests — the sweep is blind`)
+  assert.ok(headings.filter(h => h.keys.length).length >= 4,
+    'no heading maps to a merge field — the sweep is matching the wrong thing')
+
+  // CLAUSE 1: maps to nothing at all — the `_unmapped` case the pipeline warns about.
+  // CLAUSE 2: maps ONLY to keys an EARLIER heading already claims. `parseResumePackage` takes the
+  // first unfilled candidate, so such a section is dropped SILENTLY — it never reaches `_unmapped`,
+  // which is why a guard with only clause 1 finds four dead sections where there are six.
+  const claimed = new Set()
+  const dead = []
+  for (const h of headings) {
+    const fresh = h.keys.filter(k => !claimed.has(k))
+    if (h.bookended && fresh.length === 0 && !(h.title in KEPT_UNMAPPED_SECTIONS)) {
+      dead.push(`${h.title} (${h.keys.length ? 'already claimed: ' + h.keys.join(', ') : 'maps to no field'})`)
+    }
+    for (const k of h.keys) claimed.add(k)
+  }
+  assert.deepEqual(dead, [],
+    `the prompt asks for section(s) whose output the parser will discard, undocumented: ${dead.join(' | ')}`)
+
+  // A STALE keep is a lie about the prompt. Same discipline as the contrast registry: an entry for
+  // a section the prompt no longer requests fails, so the list cannot rot into a rubber stamp.
+  for (const [title, why] of Object.entries(KEPT_UNMAPPED_SECTIONS)) {
+    assert.ok(headings.some(h => h.title === title),
+      `KEPT_UNMAPPED_SECTIONS lists "${title}", which the prompt no longer requests`)
+    assert.ok(why.length > 40, `"${title}" is kept without a real reason`)
+  }
+})
+
+// The preamble declares how many sections it wants. Before this commit the prompt carried 18
+// `### ` headings and declared 14 — so the model was told to produce four fewer than the file
+// defined, and inventing a heading to make up a shortfall lands straight in `_unmapped`. Removing
+// the four tail report sections brings the file to 14 and makes the declaration true. (One of the
+// 14 is the outline heading `### Sections to Generate:` rather than a request, so the equality is
+// not proof the four were an unreconciled later addition — it is consistent with it, and it is now
+// an invariant a future prompt edit has to keep.)
+test('H:prompt-section-count-declared: the preamble count matches the headings the file carries', () => {
+  const file = readFileSync(join(PROMPTS, 'resume_user.txt'), 'utf8')
+  const declared = file.match(/in (\d+) structured sections/)
+  assert.ok(declared, 'the preamble no longer declares a section count')
+  const headings = file.split('\n').filter(l => l.startsWith('### ')).length
+  assert.equal(headings, Number(declared[1]),
+    `the prompt declares ${declared[1]} sections and carries ${headings} — a model told to produce a section the prompt does not define invents a heading, and an invented heading maps to no merge field`)
+
+  // Non-vacuity: the primary source FAILED this, which is the whole reason it is worth asserting.
+  const base = zapResumeUserMessage()
+  assert.notEqual(base.split('\n').filter(l => l.startsWith('### ')).length, Number(declared[1]),
+    'the primary source already satisfied this, so the assertion measures nothing')
+})
+
+// D31: `portfolio_user` and `resume_user` were byte-identical live — one file loaded under two
+// keys — so Call 2 was sent resume instructions on every build and its ~16,000-token reply could
+// not be parsed as portfolio JSON. `duplicatePromptPairs` catches it at RUN time; this catches it
+// at REPO time, before a dispatch of prompts-load-file.yml can recreate it.
+test('H:prompt-files-are-distinct: no two prompt files share their content', () => {
+  const files = readdirSync(PROMPTS).filter(f => f.endsWith('.txt'))
+  assert.ok(files.length >= 2, `only ${files.length} prompt file(s) — nothing to compare`)
+  const seen = new Map()
+  for (const f of files) {
+    const d = createHash('sha256').update(readFileSync(join(PROMPTS, f), 'utf8'), 'utf8').digest('hex')
+    assert.ok(!seen.has(d), `${f} and ${seen.get(d)} are byte-identical — this is D31, from the repo side`)
+    seen.set(d, f)
+  }
+})
+
 // H:evidence-reverified-on-read — D19. `requirement_evidence.record_sha256` was written on resolve,
 // served on read, and NEVER recomputed. The digest exists for exactly one purpose — to make a stale
 // offset detectable after the owner edits their profile — so never recomputing it makes it a
@@ -2853,4 +3141,19 @@ test('H:evidence-verified-at-the-boundary: the requirements read path re-validat
   assert.ok(vi > 0)
   assert.match(ev.slice(vi, vi + 1400), /rec\.text\.slice\(stored\.char_start, stored\.char_end\) === stored\.quote/,
     'verifyEvidence does not re-slice the record — the offsets are the claim, the digest is only the alarm')
+})
+
+// H:staged-prompt-is-vetoed — `prompts/resume_user.txt` is a PROPOSED replacement for a live prompt,
+// not an approved one. The owner decided on 2026-08-21 that the live prompt stays as it is until the
+// current one is proven working, and a staged file sitting in the repo with no marker is exactly how
+// a later session loads it believing it is the intended state. The veto is a file, so it is visible
+// wherever the prompt is, and this case is what keeps the two together.
+test('H:staged-prompt-is-vetoed: a staged prompt replacement carries its DO-NOT-LOAD notice', () => {
+  const dir = new URL('../../prompts/', import.meta.url).pathname
+  if (!existsSync(join(dir, 'resume_user.txt'))) return   // nothing staged, nothing to veto
+  const notice = join(dir, 'DO-NOT-LOAD.md')
+  assert.ok(existsSync(notice), 'prompts/resume_user.txt is staged with no DO-NOT-LOAD.md beside it')
+  const body = readFileSync(notice, 'utf8')
+  assert.match(body, /resume_user/, 'the notice must name the file it vetoes')
+  assert.match(body, /4b4af84859072c45/, 'the notice must record the live sha the decision protects')
 })

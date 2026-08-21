@@ -93,7 +93,21 @@ async function recomputePacket(client: any, packetId: string) {
 function packetShape(pkt: any, artifacts: any[], opp?: any) {
   return {
     id: pkt.id, oppId: pkt.opp_id, status: pkt.status, round: pkt.round,
-    jdAnalyzed: pkt.jd_analyzed, coveredKw: pkt.covered_kw || [], atsScore: pkt.ats_score,
+    jdAnalyzed: pkt.jd_analyzed,
+    // D14, and the name is the misnomer: `covered_kw` holds the terms the JD-ANALYSIS MODEL CALL
+    // pulled out of the posting. Nothing compared them to the candidate — see `jdAnalysisRequest`,
+    // whose fragment sources are `opportunity` and `posting` and nothing else. The column keeps its
+    // name deliberately: renaming it is `schema.ts` plus a migration plus every reader, which is
+    // another lane's file, and a half-rename that leaves the column called one thing and the
+    // payload another is worse than the misnomer. The MEANING is carried instead, by
+    // `coveredKwProfileCompared` below and by the group provenance in `app/src/postingAnalysis.js`.
+    coveredKw: pkt.covered_kw || [],
+    // DERIVED, never a literal `false`: the same predicate, over the same request builder that
+    // produced the stored array, so there is ONE answer to "was this compared to the candidate?"
+    // and no second place for it to drift. This is also the artefact an api-test.yml run reads to
+    // prove D14 without a browser.
+    coveredKwProfileCompared: comparesToProfile(jdAnalysisRequest(opp || {}, '')),
+    atsScore: pkt.ats_score,
     mustHaves: pkt.must_haves || [],
     // missingKw is DERIVED from opportunity.ats_gaps — the posting-grounded gap list produced by
     // atsScoreOne() against jd_real. It is deliberately NOT a packet column: a second gap list
@@ -676,6 +690,96 @@ export async function packetBuildAll(req: HttpRequest, context: InvocationContex
   } finally { try { await client?.end() } catch {} }
 }
 
+// ── D14: what the JD-analysis call is actually GIVEN ────────────────────────────────────────────
+//
+// `packet.covered_kw` is filled by the model call below, and the column name is a misnomer that has
+// already misled one screen into printing a green "N covered" count. The word "covered" is a claim
+// about the CANDIDATE, and this call has never been shown the candidate.
+//
+// D14 asked for one of two fixes: (a) compare the keywords against the profile so "covered" becomes
+// true, or (b) relabel so the list says what it is. This lane chose (b), and the reason is
+// "extend, don't duplicate": three systems already measure coverage against the candidate —
+// `requirement_evidence` + the P8.3 evidence resolver (verbatim profile excerpts), `artifact_score
+// .keyword_coverage` (measured against the published ATS term library), and the P8.4 posting-vs-
+// profile dimension comparison. A fourth number named "keyword coverage", derived from a model's
+// free-text guess at "ATS keywords for this role", would have to agree with all three and could
+// not, which is exactly the mismatched-number failure this layer exists to prevent. `requirements
+// .ts` already declares `model_keyword` NEVER SCOREABLE for the same reason.
+//
+// A comment saying so is prose, and prose does not run. So the provenance is CONSTRUCTED rather
+// than asserted: the user message is assembled from labelled fragments, and `sources` is the list
+// of labels of the fragments that actually contributed text. It cannot drift from `user`, because
+// the same array produces both. `comparesToProfile()` then answers D14's question from that list,
+// and `H:jd-analysis-sees-no-profile` exercises both directions of it.
+
+/** One labelled piece of the JD-analysis user message. `source` names where the text came from. */
+export interface JdAnalysisFragment { source: string; label: string; text: string }
+
+/**
+ * Fragment sources that are the CANDIDATE's stored profile.
+ *
+ * Empty of nothing by accident: `appFacts.sourceText()` is the only reader of the profile in this
+ * codebase, and `jdAnalysisFragments` does not call it. The set exists so that the day somebody
+ * wires the profile in, they have to name the fragment — and the moment they do, `comparesToProfile`
+ * flips and the surfaces that describe this list stop having to say "never compared".
+ */
+export const PROFILE_SOURCES = new Set(['master_context', 'resume_template', 'owner_fact', 'requirement_evidence'])
+
+/** True only when the request carries candidate-profile text. Derived from what was assembled. */
+export function comparesToProfile(req: { sources: string[] }): boolean {
+  return (req.sources || []).some(s => PROFILE_SOURCES.has(s))
+}
+
+export interface JdAnalysisRequest {
+  system: string
+  user: string
+  /** The stored posting was long enough to analyse — same rule as `appApply.atsScoreOne`. */
+  grounded: boolean
+  /** Labels of every fragment that contributed text to `user`, in order. */
+  sources: string[]
+}
+
+/**
+ * Build the JD-analysis model request. PURE — no pg, no network, no @azure/functions.
+ *
+ * Byte-for-byte the same two messages the handler sent before this was extracted; the extraction is
+ * what makes the claim testable at all. The GROUNDED and UNGROUNDED user messages are different
+ * shapes (the ungrounded one falls back to the enrichment fields because there is no posting), and
+ * both are assembled here so neither can quietly acquire a profile input without a source label.
+ */
+export function jdAnalysisRequest(opp: any, postingText: string): JdAnalysisRequest {
+  const grounded = (postingText || '').length >= 200
+  const frags: JdAnalysisFragment[] = grounded
+    ? [
+        { source: 'opportunity', label: 'Role', text: `${opp?.role} at ${opp?.company}` },
+        { source: 'opportunity', label: 'Comp', text: String(opp?.comp_range || 'n/a') },
+        { source: 'posting', label: 'JOB DESCRIPTION', text: String(postingText).slice(0, 6000) },
+      ]
+    : [
+        { source: 'opportunity', label: 'Role', text: `${opp?.role} at ${opp?.company}` },
+        { source: 'opportunity', label: 'Comp', text: String(opp?.comp_range || 'n/a') },
+        { source: 'opportunity', label: 'Context', text: String(opp?.why_surfaced || '') },
+        { source: 'opportunity', label: 'Signals', text: (opp?.company_signals || []).join('; ') },
+        { source: 'opportunity', label: 'Pains', text: (opp?.pain_hypotheses || []).join('; ') },
+      ]
+  const user = grounded
+    ? `${frags[0].label}: ${frags[0].text}\n${frags[1].label}: ${frags[1].text}\n\n${frags[2].label}:\n${frags[2].text}`
+    : frags.map(f => `${f.label}: ${f.text}`).join('\n')
+  return {
+    system: JD_ANALYSIS_SYSTEM,
+    user,
+    grounded,
+    sources: frags.map(f => f.source),
+  }
+}
+
+/**
+ * The system message. `keywords` is deliberately still described to the model as "ATS keywords for
+ * this role" — that IS what the call produces, and rewording the instruction would not make the
+ * output a comparison. What changed is that nothing downstream calls the result coverage.
+ */
+export const JD_ANALYSIS_SYSTEM = 'You are an ATS/JD analyst. Return ONLY JSON: {"keywords":[],"mustHaves":[],"atsScore":<0-100 int>,"gaps":[]}. keywords = ATS keywords for this role; mustHaves = hard requirements; gaps = likely gaps for a senior exec candidate.'
+
 // POST /api/app/opportunity/{id}/jd-analysis — JD/ATS analysis: keywords, must-haves,
 // ATS score, gaps. Stores on the packet (jd_analyzed, ats_score, covered_kw).
 export async function jdAnalysis(req: HttpRequest, context: InvocationContext): Promise<HttpResponseInit> {
@@ -703,18 +807,20 @@ export async function jdAnalysis(req: HttpRequest, context: InvocationContext): 
         g = groundingText(opp).length >= 200
         await client.query(`update packet set jd_grounded = $1 where id = $2`, [g, pkt.id])
       }
-      return { status: 200, headers: HEADERS, jsonBody: { ok: true, oppId, cached: true, grounded: g, analysis: { keywords: pkt.covered_kw || [], mustHaves: pkt.must_haves || [], atsScore: pkt.ats_score, gaps: [] } } }
+      // The stored array came from the same call, so the same provenance holds. Computing it from
+      // an empty source list rather than hardcoding `false` keeps ONE answer to the question.
+      return { status: 200, headers: HEADERS, jsonBody: { ok: true, oppId, cached: true, grounded: g, analysis: { keywords: pkt.covered_kw || [], keywordsProfileCompared: comparesToProfile({ sources: jdAnalysisRequest(opp, groundingText(opp)).sources }), mustHaves: pkt.must_haves || [], atsScore: pkt.ats_score, gaps: [] } } }
     }
 
     // GROUNDING: prefer the real posting. The previous prompt saw only role/company/comp/why_surfaced
     // and signals, so its "ATS keywords" described a job TITLE, not this posting. Same normalization
     // as appApply.atsScoreOne so the two agree on what the posting text is.
     const postingText = groundingText(opp)
-    const grounded = postingText.length >= 200
-    const system = 'You are an ATS/JD analyst. Return ONLY JSON: {"keywords":[],"mustHaves":[],"atsScore":<0-100 int>,"gaps":[]}. keywords = ATS keywords for this role; mustHaves = hard requirements; gaps = likely gaps for a senior exec candidate.'
-    const user = grounded
-      ? `Role: ${opp.role} at ${opp.company}\nComp: ${opp.comp_range || 'n/a'}\n\nJOB DESCRIPTION:\n${postingText.slice(0, 6000)}`
-      : `Role: ${opp.role} at ${opp.company}\nComp: ${opp.comp_range || 'n/a'}\nContext: ${opp.why_surfaced || ''}\nSignals: ${(opp.company_signals || []).join('; ')}\nPains: ${(opp.pain_hypotheses || []).join('; ')}`
+    // D14 — see `jdAnalysisRequest`. The two messages are unchanged; building them there is what
+    // lets `comparesToProfile` answer "is this list a coverage measurement?" from what was actually
+    // assembled rather than from a comment.
+    const { system, user, grounded, sources } = jdAnalysisRequest(opp, postingText)
+    const profileCompared = comparesToProfile({ sources })
     const res = await fetch('https://api.openai.com/v1/chat/completions', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` }, body: JSON.stringify({ model: 'gpt-4o-mini', response_format: { type: 'json_object' }, messages: [{ role: 'system', content: system }, { role: 'user', content: user }], max_tokens: 900 }) })
     if (!res.ok) throw new Error(`OpenAI HTTP ${res.status}`)
     const data = await res.json() as any
@@ -728,7 +834,10 @@ export async function jdAnalysis(req: HttpRequest, context: InvocationContext): 
     await client.query(
       `update packet set jd_analyzed = true, ats_score = $1, covered_kw = $2, must_haves = $3, jd_grounded = $4, jd_analyzed_at = now(), updated_at = now() where id = $5`,
       [ats, kws, mustHaves, grounded, pkt.id])
-    return { status: 200, headers: HEADERS, jsonBody: { ok: true, oppId, cached: false, grounded, sourceChars: postingText.length, analysis: { keywords: kws, mustHaves, atsScore: ats, gaps: a.gaps || [] } } }
+    // `keywordsProfileCompared` travels WITH the array, so a caller cannot read `keywords` without
+    // being told whether anything compared them to the candidate. It is computed from the request
+    // that was actually sent, never declared.
+    return { status: 200, headers: HEADERS, jsonBody: { ok: true, oppId, cached: false, grounded, sourceChars: postingText.length, analysis: { keywords: kws, keywordsProfileCompared: profileCompared, mustHaves, atsScore: ats, gaps: a.gaps || [] } } }
   } catch (err) {
     return { status: 500, headers: HEADERS, jsonBody: { error: String(err) } }
   } finally { try { await client?.end() } catch {} }

@@ -268,6 +268,85 @@ export function summarizeKindSource(rows) {
   }
 }
 
+// -- D14: the three keyword lists, and WHICH OF THEM WAS EVER COMPARED TO THE CANDIDATE ---------
+//
+// `packet.covered_kw` used to render as green "N covered" chips. Nothing in the call that fills it
+// (appPackets.jdAnalysis) is given the candidate: its user message carries Role, Company, Comp and
+// the job description, and no profile input of any kind - which the API side now proves rather than
+// asserts, by assembling that message from labelled fragments and exposing `comparesToProfile`.
+// So a confident green count was being shown for something nobody had measured.
+//
+// The fix is (b) RELABEL, not (a) compare. Three systems already measure coverage against the
+// candidate - requirement_evidence + the P8.3 resolver, artifact_score.keyword_coverage against the
+// published term library, and the P8.4 posting-vs-profile comparison - and `requirements.ts`
+// declares `model_keyword` never scoreable. A fourth coverage number derived from a model's guess
+// would have to agree with those three and could not.
+//
+// The relabel lived as a paragraph of JSX comment, which is prose, and prose does not run. It lives
+// here instead, DERIVED from one field per group: did the producer of this list see the profile?
+// The label, the tone and the disclaimer all follow from that boolean, so a rename cannot detach
+// them from it, and flipping the boolean is what changes the screen.
+//
+// The rule has NO carve-outs: every uncompared list gets the neutral tone and the disclaimer, even
+// the one whose section paragraph already says so. A carve-out - "this group is obvious, it does
+// not need the note" - is how the from-run group lost its disclaimer the first time.
+
+/**
+ * `profileCompared` is the load-bearing field, and each value is a claim about a specific producer:
+ *   parsed    requirements.model_keyword, written by the JD parse. Posting in, keywords out.
+ *   from_run  packet.covered_kw, written by appPackets.jdAnalysis. Posting in, keywords out.
+ *   thin      packet.missing_kw, written by appApply.atsScoreOne, which sends a CANDIDATE MASTER
+ *             BASELINE and asks what the posting wants that the baseline does not evidence.
+ * `qcGroup` is the rendered data-qc-group value; it stays hyphenated because ui-verify.yml selects
+ * on it and those selectors are already in use.
+ */
+export const KEYWORD_GROUPS = {
+  parsed: {
+    key: 'parsed', qcGroup: 'parsed', profileCompared: false, tone: null,
+    what: 'From the posting parse, one per extracted line',
+  },
+  from_run: {
+    key: 'from_run', qcGroup: 'from-run', profileCompared: false, tone: null,
+    what: 'Terms the analysis run pulled out of the posting',
+  },
+  thin: {
+    key: 'thin', qcGroup: 'thin', profileCompared: true, tone: 'red',
+    what: 'Compared against your profile and flagged as thin',
+  },
+}
+
+/** The disclaimer every uncompared list carries. One sentence, one place. */
+export const NOT_COMPARED_NOTE =
+  'Read from the posting only - nothing here compared these terms to your profile, so this is not a coverage list.'
+
+/**
+ * What a keyword group may say about itself, given how many terms it holds.
+ *
+ * Pass a group KEY for the real groups, or a descriptor object to exercise the derivation - the
+ * guard does exactly that, because a test that only reads the three shipped constants proves the
+ * constants, not the rule.
+ */
+export function keywordGroupMeaning(group, count) {
+  const g = typeof group === 'string' ? KEYWORD_GROUPS[group] : group
+  if (!g) return null
+  const n = Number.isFinite(Number(count)) ? Number(count) : 0
+  const compared = g.profileCompared === true
+  return {
+    key: g.key,
+    qcGroup: g.qcGroup,
+    profileCompared: compared,
+    // 'posting_only' is the whole of D14 in one field: a list nothing compared may not be counted
+    // as coverage, whatever its column in the database happens to be called.
+    claim: compared ? 'profile_compared' : 'posting_only',
+    // Every count on this surface says what kind of number it is on the same line as the number.
+    label: g.what + ' - ' + n + ' model-suggested',
+    // A TONE IS A VERDICT. Only a list something actually compared may carry one; an untoned chip
+    // means "this is a keyword", never "this keyword is good or bad".
+    tone: compared ? (g.tone || null) : null,
+    note: compared ? null : NOT_COMPARED_NOTE,
+  }
+}
+
 // ── the keyword term library (the latent lie: this used to be hardcoded) ────────────────────────
 // Derived from the checks engine's artifact_score row, never asserted. `keyword_coverage` is an int
 // or null; the row itself is null when no checks run has been read at all. Those are three states.
