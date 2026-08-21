@@ -163,7 +163,7 @@ function VoiceCall() {
           <input type="checkbox" checked={echoGuard} onChange={(e) => setEchoGuard(e.target.checked)} />
           Speakerphone mode — mute mic while coach speaks (prevents echo; disables interrupting)
         </label>
-        {echoCount > 0 && <div className="px-small">Filtered {echoCount} echo{echoCount === 1 ? '' : 's'} of the coach’s own voice.</div>}
+        {echoCount > 0 && <div className="px-small">Filtered {echoCount} echo{echoCount === 1 ? '' : 's'} of the coach's own voice.</div>}
         <div className="px-small">Your browser will ask for microphone access on the first call.</div>
       </div>
 
@@ -242,9 +242,9 @@ function CoachChat({ msgs, setMsgs, clearThread }) {
       <div ref={scrollRef} className="px-box" style={{ padding: 14, height: 440, overflow: 'auto', display: 'flex', flexDirection: 'column', gap: 10 }}>
         {msgs.length === 0 && (
           <div className="px-small" style={{ margin: 'auto', textAlign: 'center', maxWidth: 420, lineHeight: 1.6 }}>
-            Try: <i>“Show me my top opportunities and build a packet for the best fit.”</i><br />
-            <i>“Research the hiring manager at Acme and draft a cold email.”</i><br />
-            <i>“What have I spent on AI so far this week?”</i>
+            Try: <i>"Show me my top opportunities and build a packet for the best fit."</i><br />
+            <i>"Research the hiring manager at Acme and draft a cold email."</i><br />
+            <i>"What have I spent on AI so far this week?"</i>
           </div>
         )}
         {msgs.map((m, i) => (
@@ -252,7 +252,7 @@ function CoachChat({ msgs, setMsgs, clearThread }) {
             {m.tools && m.tools.length > 0 && (
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
                 {m.tools.map((t, j) => (
-                  <span key={j} className="px-small" style={{ background: 'var(--proto-panel-deep)', borderRadius: 8, padding: '2px 8px', fontSize: 11, fontFamily: 'ui-monospace, monospace' }} title={TOOL_LABEL[t.name] || t.name}>
+                  <span key={j} className="px-small" style={{ background: 'var(--proto-panel-deep)', color: 'var(--proto-ink-on-panel)', borderRadius: 8, padding: '2px 8px', fontSize: 11, fontFamily: 'ui-monospace, monospace' }} title={TOOL_LABEL[t.name] || t.name}>
                     🔧 {t.name}{TOOL_LABEL[t.name] ? <span style={{ opacity: 0.55, fontFamily: 'inherit' }}> · {TOOL_LABEL[t.name]}</span> : null}
                   </span>
                 ))}
@@ -311,7 +311,7 @@ function CoachActivity() {
     <div style={{ maxWidth: 760, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 14 }}>
       <div>
         <div style={{ fontSize: 20, fontWeight: 700 }}>Coach activity & memory</div>
-        <div className="px-small">The coach’s actions and everything it remembers live in <b>your own Azure Postgres</b> (pgvector) — vendor-portable, and it survives swapping AI models.</div>
+        <div className="px-small">The coach's actions and everything it remembers live in <b>your own Azure Postgres</b> (pgvector) — vendor-portable, and it survives swapping AI models.</div>
       </div>
 
       {status && (
@@ -353,12 +353,12 @@ function CoachActivity() {
             {acts.map((a) => (
               <div key={a.id} style={{ borderLeft: '2px solid var(--proto-rule-soft)', paddingLeft: 10 }}>
                 <div style={{ display: 'flex', gap: 8, alignItems: 'baseline' }}>
-                  <div className="px-small" style={{ flex: 1, fontStyle: 'italic' }}>“{(a.userMsg || '').slice(0, 90)}”</div>
+                  <div className="px-small" style={{ flex: 1, fontStyle: 'italic' }}>"{(a.userMsg || '').slice(0, 90)}"</div>
                   <span className="px-small" style={{ whiteSpace: 'nowrap' }}>{timeAgoShort(a.createdAt)}</span>
                 </div>
                 {a.tools && a.tools.length > 0 && (
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 4 }}>
-                    {a.tools.map((t, j) => <span key={j} className="px-small" style={{ background: 'var(--proto-panel-deep)', borderRadius: 8, padding: '1px 7px', fontSize: 11, fontFamily: 'ui-monospace, monospace' }} title={TOOL_LABEL[t.name] || ''}>🔧 {t.name}{TOOL_LABEL[t.name] ? <span style={{ opacity: 0.55 }}> · {TOOL_LABEL[t.name]}</span> : null}</span>)}
+                    {a.tools.map((t, j) => <span key={j} className="px-small" style={{ background: 'var(--proto-panel-deep)', color: 'var(--proto-ink-on-panel)', borderRadius: 8, padding: '1px 7px', fontSize: 11, fontFamily: 'ui-monospace, monospace' }} title={TOOL_LABEL[t.name] || ''}>🔧 {t.name}{TOOL_LABEL[t.name] ? <span style={{ opacity: 0.55 }}> · {TOOL_LABEL[t.name]}</span> : null}</span>)}
                   </div>
                 )}
               </div>
@@ -396,7 +396,7 @@ function CoachActivity() {
           </div>
         )}
       </div>
-      <div className="px-small">Manage the coach’s system prompt and configuration in <b>Settings ▸ Coach</b>.</div>
+      <div className="px-small">Manage the coach's system prompt and configuration in <b>Settings ▸ Coach</b>.</div>
     </div>
   )
 }

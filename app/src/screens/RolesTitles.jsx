@@ -13,7 +13,7 @@ const GROUP_RANK = { csuite: 0, vp: 1, director: 2 }
 const roleLabel = (group, role) =>
   group === 'csuite' ? role : group === 'director' ? `Director · ${role}` : group === 'vp' ? `VP · ${role}` : role
 const TIER_META = {
-  fav: { label: '★ Favorite', color: '#c08a1e', dot: '#c08a1e' },
+  fav: { label: '★ Favorite', color: 'var(--gold)', dot: 'var(--gold)' },
   watch: { label: 'Watching', color: 'var(--proto-ink2)', dot: 'var(--proto-ink3)' },
   off: { label: 'Off', color: 'var(--proto-ink3)', dot: 'var(--proto-ink4, #cbd2dc)' },
 }
@@ -160,7 +160,7 @@ export default function RolesTitles() {
               clickable straight to the filtered Opportunities view (extends the existing 'strategic' filter). */}
           <div data-priority-opps onClick={() => go('/opportunities?filter=strategic')} title="View these opportunities"
             style={{ textAlign: 'right', cursor: 'pointer', paddingLeft: 14, borderLeft: '1px solid var(--proto-rule-soft)' }}>
-            <div style={{ fontSize: 18, fontWeight: 800, color: '#c08a1e' }}>{data.favoritedOpps} ★</div>
+            <div style={{ fontSize: 18, fontWeight: 800, color: 'var(--gold)' }}>{data.favoritedOpps} ★</div>
             <div className="px-small" style={{ textTransform: 'uppercase', letterSpacing: 0.4, fontSize: 10, color: 'var(--text-brand)' }}>Priority opps →</div>
           </div>
           {dirty > 0 && (
@@ -185,7 +185,7 @@ export default function RolesTitles() {
                   style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '7px 8px', cursor: 'pointer', fontWeight: 700, fontSize: 13 }}>
                   <span style={{ width: 12, color: 'var(--proto-ink3)' }}>{open ? '▾' : '▸'}</span>
                   <span style={{ flex: 1 }}>{g.label || GROUP_LABEL[g.slug] || g.slug}</span>
-                  {gFav > 0 && <span style={{ color: '#c08a1e', fontSize: 11, fontWeight: 700 }}>★{gFav}</span>}
+                  {gFav > 0 && <span style={{ color: 'var(--gold)', fontSize: 11, fontWeight: 700 }}>★{gFav}</span>}
                 </div>
                 {open && g.roles.map((r) => {
                   const on = sel.group === g.slug && sel.role === r.slug
@@ -196,7 +196,7 @@ export default function RolesTitles() {
                         borderRadius: 6, fontSize: 12.5, background: on ? 'var(--surface-brand-default)' : 'transparent',
                         color: on ? '#fff' : 'var(--proto-ink2)' }}>
                       <span style={{ flex: 1 }}>{r.role}</span>
-                      {r.fav > 0 && <span style={{ color: on ? '#ffe' : '#c08a1e', fontSize: 10.5 }}>★{r.fav}</span>}
+                      {r.fav > 0 && <span style={{ color: on ? '#ffe' : 'var(--gold)', fontSize: 10.5 }}>★{r.fav}</span>}
                       <span style={{ fontSize: 10.5, opacity: 0.7 }}>{r.titles.length}</span>
                     </div>
                   )
@@ -240,13 +240,13 @@ export default function RolesTitles() {
                     style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 4px', borderBottom: '1px solid var(--proto-rule-soft)',
                       background: t.tier === 'fav' ? 'rgba(192,138,30,.06)' : undefined, opacity: t.tier === 'off' ? 0.5 : 1 }}>
                     <span data-star data-star-on={t.tier === 'fav' ? 'on' : 'off'} onClick={() => toggleStar(t)}
-                      style={{ cursor: canEdit ? 'pointer' : 'default', color: t.tier === 'fav' ? '#c08a1e' : 'var(--proto-ink4, #cbd2dc)', fontSize: 15, width: 16 }}>★</span>
+                      style={{ cursor: canEdit ? 'pointer' : 'default', color: t.tier === 'fav' ? 'var(--gold)' : 'var(--proto-ink4, #cbd2dc)', fontSize: 15, width: 16 }}>★</span>
                     <span style={{ flex: 1, fontSize: 12.5, fontWeight: t.tier === 'fav' ? 600 : 400,
                       textDecoration: t.tier === 'off' ? 'line-through' : 'none' }}>{t.title}</span>
                     {t.live > 0 && (
                       <span data-live title={`${t.live} open opportunit${t.live === 1 ? 'y' : 'ies'} matched — click to view`}
                         onClick={() => go('/opportunities?filter=strategic')}
-                        style={{ cursor: 'pointer', fontSize: 10.5, fontWeight: 700, color: '#c08a1e', background: 'rgba(192,138,30,.10)', borderRadius: 10, padding: '1px 7px' }}>{t.live} live</span>
+                        style={{ cursor: 'pointer', fontSize: 10.5, fontWeight: 700, color: 'var(--gold)', background: 'rgba(192,138,30,.10)', borderRadius: 10, padding: '1px 7px' }}>{t.live} live</span>
                     )}
                     <span data-tiercycle onClick={() => cycleTier(t)}
                       style={{ cursor: canEdit ? 'pointer' : 'default', fontSize: 11, fontWeight: 600, color: TIER_META[t.tier].color,
@@ -281,7 +281,7 @@ export default function RolesTitles() {
                 <div className="px-small" style={{ fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.4, fontSize: 10 }}>Favorites in this role</div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4 }}>
                   <div style={{ flex: 1, height: 7, borderRadius: 4, background: 'var(--proto-rule-soft)', overflow: 'hidden' }}>
-                    <div style={{ width: `${selRole.role.titles.length ? (selRole.role.fav / selRole.role.titles.length) * 100 : 0}%`, height: '100%', background: '#c08a1e' }} />
+                    <div style={{ width: `${selRole.role.titles.length ? (selRole.role.fav / selRole.role.titles.length) * 100 : 0}%`, height: '100%', background: 'var(--gold)' }} />
                   </div>
                   <span style={{ fontSize: 12, fontWeight: 700 }}>{selRole.role.fav}/{selRole.role.titles.length}</span>
                 </div>

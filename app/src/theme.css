@@ -12,7 +12,33 @@
       --proto-paper: var(--surface-background-primary);
       --proto-ink: var(--text-primary);
       --proto-ink2: var(--text-secondary);
-      --proto-ink3: var(--text-tertiary);
+      /* TERTIARY INK — D27. `--text-tertiary` is `--neutral-400`, and as TEXT that is below AA on
+         every ground the app paints: measured in Chromium before this change, `.px-small` (11px,
+         this token) came out at 2.43 on the app ground, 2.56 on paper, 2.43 on panel and 2.31 on
+         panel-deep. The 2.56 figure the P8.6 lane reported was real and was the BEST of the four.
+         Dark was no better in its own direction: 3.07 / 3.75 / 3.07 / 2.18.
+
+         Why the token moved rather than the class. The `panel` tone got its own
+         `--proto-ink-on-panel` because ink2 was readable everywhere EXCEPT one ground — a
+         context defect, so a context token fixed it. This is the opposite shape: ink3 fails on
+         EVERY ground in BOTH themes, so it is the token's value that is wrong and no per-class
+         token would fix the other consumers. `.px-small`, `.px-label` and 66 inline
+         `color: var(--proto-ink3)` sites in `src/` all render real informational text through it
+         ("No record yet", "Use Parse posting to fetch it", "N of M") — they are not decoration.
+
+         CONSEQUENCE, AND IT IS DELIBERATE: one step down the ramp is `--neutral-500`, which is
+         exactly `--proto-ink2`'s value, so tertiary and secondary ink are now the SAME colour and
+         the three-tier ink hierarchy is a two-tier one. The ramp has no step between 400 and 500,
+         so the alternative was to move ink2 down as well — 126 inline sites plus `.px-meta`,
+         `.px-pill`, `.px-chip`, `.px-tab`, `.px-logo` and the input placeholder, i.e. every piece
+         of secondary text in the app — which is far more churn than this defect warrants and is
+         the same trade the pill lane declined. The token is KEPT rather than deleted because 66
+         call sites use it to mean "de-emphasised"; the day the ramp gains a step between 400 and
+         500, one line here restores the third tier. Logged as D29.
+
+         The direction REVERSES in dark (see `.proto-dark` below) — this base block is inherited,
+         so a light-only fix written here silently follows into dark and undoes itself. */
+      --proto-ink3: var(--neutral-500);
       --proto-rule: var(--border-strong);
       --proto-rule-soft: var(--border-default);
       --proto-panel: var(--surface-background-secondary);
@@ -65,10 +91,21 @@
       --proto-radius-sm: 8px;
       /* Recency-temperature palette (light) — muted text/border + low-alpha tint so chips blend
          with the teal/slate UI. Cooling is nudged toward the brand teal. */
-      --temp-hot: #c15b3c;   --temp-hot-tint: rgba(193,91,60,.14);
-      --temp-warm: #a9812f;  --temp-warm-tint: rgba(169,129,47,.15);
-      --temp-cooling: #4f88a0; --temp-cooling-tint: rgba(79,136,160,.15);
-      --temp-cold: #7f8b99;  --temp-cold-tint: rgba(127,139,153,.14);
+      --temp-hot: #a44d33;   --temp-hot-tint: rgba(193,91,60,.14);
+      --temp-warm: #826324;  --temp-warm-tint: rgba(169,129,47,.15);
+      --temp-cooling: #3f6d80; --temp-cooling-tint: rgba(79,136,160,.15);
+      --temp-cold: #616a74;  --temp-cold-tint: rgba(127,139,153,.14);
+      /* FOUR LITERALS THAT WERE HARDCODED IN JSX, now tokens — which is the whole reason they
+         failed. A literal cannot adapt, so each was measured against the DARK ground it was never
+         designed for. Measured before this change:
+             #16794a keep-triage   3.29 dark      #a8730a maybe-triage 4.10 light / 4.35 dark
+             #c08a1e gold          2.89 light     #0a66c2 LinkedIn     2.29 dark / 4.41 light
+         The light values are the originals wherever they already passed, so nothing visibly moves
+         in the theme people use most; only the failing side is corrected. */
+      --triage-keep: #16794a;
+      --triage-maybe: #996909;
+      --gold: #946a17;
+      --linkedin: #0a64be;   --linkedin-tint: rgba(10,102,194,.14);
     }
     /* Dark mode — self-contained. The Compass bundle ships a "preview pin"
        that strips [data-theme="dark"] / .dark, so we drive dark ourselves via
@@ -93,10 +130,16 @@
       --surface-success-subtle: var(--green-950);
       --surface-error-subtle: var(--red-950);
       /* Recency-temperature palette (dark) — lightened for contrast on the dark ground. */
-      --temp-hot: #dd8064;   --temp-hot-tint: rgba(221,128,100,.16);
+      --temp-hot: #e08d74;   --temp-hot-tint: rgba(221,128,100,.16);
       --temp-warm: #c9a252;  --temp-warm-tint: rgba(201,161,80,.16);
-      --temp-cooling: #74a8c0; --temp-cooling-tint: rgba(116,168,192,.16);
+      --temp-cooling: #7bacc3; --temp-cooling-tint: rgba(116,168,192,.16);
       --temp-cold: #9aa6b4;  --temp-cold-tint: rgba(154,166,180,.15);
+      /* The same four, lightened for the dark ground. gold keeps its original value because that
+         value already passes here — the defect was light-side only. */
+      --triage-keep: #559d7b;
+      --triage-maybe: #b5882f;
+      --gold: #c08a1e;
+      --linkedin: #629dd8;   --linkedin-tint: rgba(10,102,194,.14);
       --surface-warning-subtle: var(--yellow-950);
       --surface-info-subtle: var(--blue-950);
       --text-info: var(--blue-400);
@@ -114,13 +157,21 @@
       --proto-accent: var(--brand-300);
       --proto-red: var(--red-400);
       --proto-ink-on-panel: var(--neutral-300);
+      /* Dark tertiary ink — the opposite direction to the light fix above, for the same reason the
+         status inks reverse: on a near-black ground the ink must get LIGHTER. Measured before this
+         change at 3.07 / 3.75 / 3.07 / 2.18 across the four grounds; `--neutral-400` takes those to
+         5.71 / 6.96 / 5.71 / 4.04. Same D29 consequence — this is `--proto-ink2`'s dark value. */
+      --proto-ink3: var(--neutral-400);
       /* green and yellow are restored to the values they had before the light-mode darkening —
          NOT a new choice, the Compass dark steps they already resolved to, which measured 4.52 and
          6.79 and passed. They must be repeated here because the block above is the BASE, so a
          light-mode-only fix written there silently follows into dark and reverses its own
          direction: darkening green to clear 3.00 on a pale tint took it to 2.97 on a near-black
          one. The tones sweep caught that on its first run, which is the entire reason it exists. */
-      --proto-green: var(--green-600);
+      /* green-600 measures 4.44:1 as TEXT on the dark panel ground — the tone sweep only ever
+         proved it on its own -soft tint, which is why the WIDER sweep caught this and the tones
+         sweep did not. green-500 is the next step up the same ramp: 6.42:1. */
+      --proto-green: var(--green-500);
       --proto-yellow: var(--yellow-500);
       /* Darker and more opaque than the light scrim: on a near-black page a 34% slate wash reads
          as nothing, so the overlay would appear to float with the page still fully lit behind it. */
