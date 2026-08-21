@@ -1693,3 +1693,14 @@ independent reader, and it changed the D33 work in three ways this lane had miss
 forward reference, a guard that would have found four dead sections where there are six, and the
 fact that more dead prompt is left behind than was removed. Do it this way; do not report the step
 as not_applicable while the tool exists.
+
+## A reinstatement harness can silently no-op, and then a guard looks proved when it is not
+
+Proving `H:prompt-no-dead-bookended-section`'s stale-keep-list assertion used a shell harness whose
+`str.replace()` targeted the keep list's ONE-LINE format. The list was later rewritten multi-line,
+the replace matched nothing, the harness reported the suite green — and green reads as "the defect
+was reinstated and the guard held", which is the opposite of what happened. Caught only because the
+same defect had failed on an earlier run and stopped failing after a merge.
+**Every reinstatement must assert the edit APPLIED before it trusts the run's result** — the same
+standing rule that already covers `.replace()` in production code applies to the harness that proves
+the guards. A guard proved by a no-op is not proved.
