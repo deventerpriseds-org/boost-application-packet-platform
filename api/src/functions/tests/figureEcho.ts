@@ -22,7 +22,7 @@ export interface Figure {
   key: string
   start: number
   end: number
-  kind: 'currency' | 'count' | 'percent' | 'range'  | 'spelled'
+  kind: 'currency' | 'count' | 'percent' | 'range'  | 'spelled' | 'magnitude'
   /**
    * The literal announces a QUANTITY by itself: a `+` suffix, or currency carrying a magnitude
    * ("$18M", "$18 million"). Set at extraction, never re-derived from `raw`.
@@ -163,9 +163,19 @@ export function extractFigures(text: string): Figure[] {
     out.push({ raw, key, start, end, kind, unit: unitAfter(s, end), marked })
   }
 
-  // $18M · $18 million · $18.5M · £18M
-  for (const m of s.matchAll(/([$£€])\s?(\d[\d,]*(?:\.\d+)?)\s*(k|m|b|bn|thousand|million|billion)?\b/gi)) {
-    const n = Number(m[2].replace(/,/g, '')) * (m[3] ? MULT[m[3].toLowerCase()] || 1 : 1)
+  // $18M · $18 million · $18.5M · £18M · USD 18M · EUR 400k
+  //
+  // ISO CODES, not just symbols. `[$£€]` alone missed every posting that prices in words - measured:
+  // "Own a USD 18M portfolio" produced ONE figure, `{raw:"18", key:"num:18"}`, because the symbol
+  // pattern declined it and the bare-count scanner then took the digits and threw the `M` away. That
+  // is not a near-miss, it is the WRONG NUMBER: eighteen standing in for eighteen million.
+  //
+  // The code must be UPPERCASE. None of these are English words, so the `\b`-delimited alternation is
+  // already safe against "Audrey" or "Inrush" - the case rule is the belt to that braces, and it costs
+  // nothing real, because no document that writes a currency code writes it in lower case.
+  for (const m of s.matchAll(/(?:([$£€])|\b(USD|EUR|GBP|CAD|AUD|CHF|JPY|SEK|NOK|DKK|SGD|NZD|HKD|ZAR|INR)\b[ \t]?)[ \t]?(\d[\d,]*(?:\.\d+)?)\s*(k|m|b|bn|thousand|million|billion)?\b/gi)) {
+    if (m[2] && m[2] !== m[2].toUpperCase()) continue      // "usd 18m" is prose, not a price
+    const n = Number(m[3].replace(/,/g, '')) * (m[4] ? MULT[m[4].toLowerCase()] || 1 : 1)
     // `\s*` before the optional magnitude word swallows the space even when no word follows, so
     // "$2019 spend" yielded the raw "$2019 " - trailing space and all - and that string is what a
     // correction would search for and what the drawer would print back at the user.
@@ -173,7 +183,41 @@ export function extractFigures(text: string): Figure[] {
     // postings are dense with comp bands and benefit amounts, resumes with budgets they really
     // owned, and exempting those from the noun rule accused "$5,000 training stipend" of echoing
     // "a $5,000 learning budget", and "$180,000 vendor budget" of echoing a salary range.
-    push(m[0].trimEnd(), `cur:${n}`, m.index!, 'currency', !!m[3])
+    push(m[0].trimEnd(), `cur:${n}`, m.index!, 'currency', !!m[4])
+  }
+  // 18M · 400k · 2.5B · 18 million — a magnitude with NO currency symbol.
+  //
+  // This exists because of two FALSE ACCUSATIONS measured on `main`, not because of a missing form.
+  // Without it the bare-count scanner took the digits and left the magnitude behind, and the magnitude
+  // token then became the "unit" the noun rule compares:
+  //
+  //   "Grew the community to 18 million users."   -> {raw:"18", key:"num:18", unit:"million"}
+  //   "You will own an 18 million dollar budget." -> {raw:"18", key:"num:18", unit:"million"}
+  //                                                  => ECHO. Same key, same "unit".
+  //
+  // A community of users was accused of being lifted from a budget line, because both documents
+  // happened to say "18 million" about entirely different things. The lowercase-letter form did the
+  // same ("400k users" vs "400k budget"), and the UPPERCASE form did the opposite — `unitAfter` drops
+  // a capitalised word as a proper noun, so "400K users" reported no unit at all and could never match
+  // anything. The verdict flipped on the case of a single letter, which is the typography-dependence
+  // the ordinal rule below was already written to kill.
+  //
+  // Keyed `cur:` — the SAME key space as currency, deliberately. That prefix means A MAGNITUDE, not
+  // money; the symbol only ever decided `marked`. Sharing it is what makes "Managed a 18M portfolio"
+  // collide with a posting's "$18M portfolio", which is laundering by deleting a dollar sign and is
+  // exactly the move the `60`/`60+` rule already refuses to let through.
+  //
+  // NEVER marked. A number without a symbol does not announce itself, so it must clear the noun rule
+  // like any other bare count — and that is precisely what keeps "18M users" away from "$18M budget".
+  // The single optional [ \t] (not `\s`) is deliberate: `\s` matches a newline, and joining a figure
+  // at the end of one bullet to the word "million" at the start of the next invents a quantity out of
+  // layout, the same way the newline rule in `unitAfter` prevents inventing a unit out of it.
+  for (const m of s.matchAll(/\b(\d[\d,]*(?:\.\d+)?)[ \t]?(k|m|b|bn|thousand|million|billion)\b/gi)) {
+    const at = m.index!
+    if (out.some(f => at >= f.start && at < f.end)) continue   // already inside a currency literal
+    const n = Number(m[1].replace(/,/g, '')) * (MULT[m[2].toLowerCase()] || 1)
+    if (!Number.isFinite(n)) continue
+    push(m[0], `cur:${n}`, at, 'magnitude')
   }
   // 40% · 40 percent
   //

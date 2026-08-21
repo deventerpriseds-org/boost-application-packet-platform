@@ -332,3 +332,76 @@ test('there is ONE implementation of what two documents must share', () => {
   assert.ok(/\.has\(claimKey\(figure\)\)/.test(src), 'scanEcho must decide through claimKey itself')
   assert.ok(!/postingClaims\.has\(unitKey\(figure\)\)/.test(src), 'the claim rule was inlined again')
 })
+
+// ---------------------------------------------------------------------------------------------
+// D6 — the extraction gaps, and the two live FALSE ACCUSATIONS found while measuring them.
+//
+// The DEFERRED row listed three gaps. One of them was already closed: `thirteen`..`nineteen` are
+// present in SPELLED on `main` and always were, so the row was stale. The other two were real, and
+// chasing them turned up something the row did not claim at all — the extractor was not merely
+// MISSING magnitudes, it was mis-reading them in a way that accused people.
+
+test('D6: a magnitude is part of the number, not the noun it counts', () => {
+  // THE DEFECT, MEASURED ON `main` BEFORE THE FIX (node, dist build of 8e4c46c):
+  //   "Grew the community to 18 million users."   -> [{raw:"18", key:"num:18", unit:"million"}]
+  //   "You will own an 18 million dollar budget." -> [{raw:"18", key:"num:18", unit:"million"}]
+  //   scanEcho(...).echoes -> ["18"]      i.e. ECHO. A community of users was accused of being
+  // lifted from a budget line, because the bare-count scanner took the digits, dropped the
+  // magnitude, and the word "million" then became the "unit" the noun rule compares. Any two
+  // documents saying "18 million" about anything at all collided.
+  const genA = 'Grew the community to 18 million users.'
+  const postA = 'You will own an 18 million dollar budget.'
+  assert.deepEqual(scanEcho(genA, postA, 'Profile: led platform engineering.').echoes, [],
+    'a users figure was accused of echoing a budget figure — the magnitude word was read as the noun')
+  assert.equal(extractFigures(genA)[0].unit, 'users', 'the noun is what follows the whole magnitude')
+  assert.equal(extractFigures(genA)[0].key, 'cur:18000000', 'the figure is eighteen million, not eighteen')
+
+  // The same defect in the letter form, and it was TYPOGRAPHY-DEPENDENT, which is the tell:
+  //   "400k users" -> {raw:"400", unit:"k"}   (lowercase: the letter became the unit -> collided)
+  //   "400K users" -> {raw:"400", unit:""}    (uppercase: dropped as a proper noun -> matched nothing)
+  // The verdict flipped on the case of one letter. Both now read four hundred thousand users.
+  assert.deepEqual(scanEcho('Scaled to 400k users.', 'Manage a 400k budget.', 'P.').echoes, [])
+  for (const t of ['Scaled to 400k users.', 'Scaled to 400K users.']) {
+    assert.equal(extractFigures(t)[0].key, 'cur:400000', t)
+    assert.equal(extractFigures(t)[0].unit, 'users', t)
+  }
+})
+
+test('D6: a currency written as an ISO code is currency', () => {
+  // Measured on `main`: "Own a USD 18M portfolio." produced ONE figure, {raw:"18", key:"num:18"} —
+  // the symbol-only pattern declined it and the bare-count scanner threw the M away. Not a
+  // near-miss: eighteen standing in for eighteen million.
+  for (const code of ['USD', 'EUR', 'GBP', 'CAD']) {
+    const [f] = extractFigures(`Own a ${code} 18M portfolio.`)
+    assert.equal(f.kind, 'currency', code)
+    assert.equal(f.key, 'cur:18000000', code)
+    assert.equal(f.raw, `${code} 18M`, 'the raw literal is what a correction would splice out')
+    assert.ok(f.marked, 'a magnitude with a currency marker announces itself')
+  }
+  // A posting priced in a code is now caught in the generated document, and vice versa.
+  assert.deepEqual(scanEcho('Managed a $18M portfolio.', 'Own a USD 18M portfolio.', 'P.').echoes.map(e => e.figure.raw), ['$18M'])
+  // Lower case is prose, not a price. Deliberate silence: no document that quotes a currency code
+  // writes it in lower case, and declining costs nothing real.
+  assert.notEqual(extractFigures('spent usd 18m on it')[0]?.kind, 'currency')
+})
+
+test('D6: deleting the dollar sign does not launder the posting\'s figure', () => {
+  // The `60`/`60+` rule already refuses this move for a plus; it did not for a currency symbol.
+  // Measured on `main`: scanEcho('Managed a 18M portfolio.', 'Own a $18M portfolio.', ...) -> [].
+  assert.deepEqual(scanEcho('Managed a 18M portfolio.', 'Own a $18M portfolio.', 'P.').echoes.map(e => e.figure.raw), ['18M'])
+  // ...but ONLY through the noun rule, because a number with no symbol does not announce itself.
+  // This is the line between the fix and a cry-wolf: a headcount is not a budget.
+  assert.deepEqual(scanEcho('Grew to 18M users.', 'Own a $18M budget.', 'P.').echoes, [],
+    'an unmarked magnitude must still clear the noun rule')
+  assert.equal(extractFigures('Managed a 18M portfolio.')[0].marked, false)
+})
+
+test('D6: the spelled teens were never missing — pin them so the stale row cannot be "fixed" twice', () => {
+  // DEFERRED D6 claimed thirteen/fourteen/sixteen/seventeen/eighteen/nineteen were absent from
+  // SPELLED. They are present on `main` and extract correctly; the row was stale. Pinned rather
+  // than deleted, so the next reader of that row gets a test instead of a second implementation.
+  const want = { thirteen: 13, fourteen: 14, fifteen: 15, sixteen: 16, seventeen: 17, eighteen: 18, nineteen: 19 }
+  for (const [word, n] of Object.entries(want)) {
+    assert.deepEqual(extractFigures(`We run ${word} sites.`).map(f => f.key), [`num:${n}`], word)
+  }
+})
