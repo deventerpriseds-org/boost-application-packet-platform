@@ -23,7 +23,8 @@ import { computeArtifactScore, judgedMustHaveIds, mustHaveSource, parseMustHaveS
 import { deriveFacts } from '../dist/functions/tests/ownerFacts.js'
 import { parseResumePackage } from '../dist/functions/tests/resumeParser.js'
 import { validateCitations, reviewerChecks, agreementFor } from '../dist/functions/tests/reviewer.js'
-import { extractFigures, scanEcho, claimKey, isMarked } from '../dist/functions/tests/figureEcho.js'
+import { extractFigures, scanEcho, claimKey, isMarked, generalize } from '../dist/functions/tests/figureEcho.js'
+import { planCorrections } from '../dist/functions/tests/correction.js'
 import { profileRecords, resolveEvidence } from '../dist/functions/tests/evidence.js'
 
 const SRC = new URL('../src/functions/tests/', import.meta.url).pathname
@@ -2053,5 +2054,103 @@ test('H:correction-layer-pure: the correction judgement layer takes no database 
   const pure = stripComments(src('correction.ts'))
   for (const banned of ['pgClient', '@azure/functions', 'logUsage', 'fetch(']) {
     assert.ok(!pure.includes(banned), `correction.ts references ${banned} — it is no longer pure`)
+  }
+})
+
+// ---------------------------------------------------------------------------------------------
+// D3 — the substitute figure. THE ANSWER IS THAT THERE IS NO RESOLVER, AND THESE GUARD THAT.
+//
+// The backlog asks for an echoed figure to be replaced with the candidate's own ("60+" -> "62")
+// where one exists. `scanEcho` structurally cannot supply it: the profile side is indexed by the
+// EXACT figure (`profileByKey`), so it answers "does the profile also say 60?" and a hit there is
+// the KEEP branch (`shared_with_profile`) -- the opposite of a substitute. Answering "what is the
+// candidate's corresponding number?" is a different question, keyed on the UNIT, and no such index
+// exists for the profile.
+//
+// `docs/qc-evidence/P8.1-ACCEPTANCE.md` §4 records the accepted resolution: GENERALIZATION ONLY.
+// Substitution may be written only as the AC-10 resolver -- exactly one profile figure sharing the
+// stemmed, exact unit, with `profile_source_key` and offsets recorded, and the substring at those
+// offsets equal to the substituted figure. Zero or two-or-more matches fall through to generalize.
+//
+// Anything that RANKS is forbidden outright. A guessed number in a resume is worse than a false
+// accusation: the candidate has to defend it in an interview. These cases are dormant-but-armed --
+// they cost nothing today and fail the moment someone implements the tempting version.
+
+test('H:no-figure-ranking: nothing in the figure path may rank a candidate substitute', () => {
+  // "Fuzzy matching is for RANKING, never for ACCUSING" already governs this codebase. A figure
+  // SUBSTITUTION is stricter still: it does not merely accuse, it writes a number into the resume,
+  // which the candidate then has to defend in an interview. Nearest-magnitude, most-recent and
+  // best-fuzzy-unit are all forbidden.
+  //
+  // THIS GUARD WAS INERT WHEN FIRST WRITTEN, and was caught by reinstating the defect it names.
+  // It banned the word `nearest` as /\bnearest\b/, which does not match `nearestProfileFigure` --
+  // the trailing \b fails against a camelCase capital, exactly the way the percent regex's trailing
+  // \b never matched "40% growth". A word list is the wrong instrument. These rules match the
+  // CONSTRUCT instead, and are measured against the files as they stand: `Math.abs` appears zero
+  // times in all three, and every `.sort(` in them orders by a document OFFSET.
+  for (const f of ['figureEcho.ts', 'correction.ts', 'appCorrections.ts']) {
+    const code = stripComments(src(f))
+
+    // 1. Absolute difference has no honest use in an EXACT-match figure path. Its only purpose
+    //    here would be "how far is this profile figure from the posting's?", which is ranking.
+    assert.ok(!/Math\.abs\s*\(/.test(code), `${f} uses Math.abs — the figure path matches exactly, it never measures distance`)
+
+    // 2. Sorting may order by POSITION and nothing else. This is the rule that actually catches a
+    //    resolver: ranking candidates means sorting them by value.
+    for (const m of code.matchAll(/\.sort\(\s*\([^)]*\)\s*=>\s*([^)]*)\)/g)) {
+      assert.match(m[1].trim(), /^[ab]\.(figure\.)?(start|char_start|applied_seq)\s*-\s*[ab]\.(figure\.)?(start|char_start|applied_seq)$/,
+        `${f} sorts by "${m[1].trim()}" — the figure path may order by document offset only`)
+    }
+
+    // 3. Names, matched WITHOUT a trailing boundary so camelCase cannot hide them.
+    for (const banned of [/nearest/i, /closest/i, /best.?match/i, /most.?recent/i, /\bsimilarity\s*\(/, /levenshtein/i, /\brank(ed|ing|By)?\b/i]) {
+      assert.ok(!banned.test(code), `${f} names a ranking construct (${banned})`)
+    }
+  }
+})
+
+test('H:generalize-closed-range: a generalisation may never be a new number', () => {
+  // The whole risk of D3 in one assertion. `generalize` is the ONLY function that produces
+  // replacement text, so if a substitute figure is ever invented it must appear here. Its range is
+  // a closed vocabulary: an order-of-magnitude phrase, the word "multiple", or null (escalate).
+  // "62" -- or any bare quantity -- can never be a legal output.
+  const corpus = ['$18M portfolio', '$400k budget', '60+ reports', 'three units', '40% growth',
+                  '18M users', '400k users', '2.5B valuation', 'USD 18M portfolio', '1,200 staff',
+                  'sixty engineers', 'one hundred engineers', '$5,000 stipend', '18 million users']
+  let produced = 0
+  for (const t of corpus) {
+    for (const f of extractFigures(t)) {
+      const g = generalize(f)
+      if (g === null) continue
+      produced++
+      assert.ok(/^\d+-figure$/.test(g) || g === 'multiple',
+        `generalize invented "${g}" from "${t}" — the range is N-figure | multiple | null`)
+    }
+  }
+  assert.ok(produced >= 8, `the corpus must actually exercise generalize (produced ${produced})`)
+})
+
+test('H:profile-figure-provenance: source=profile_figure is unforgeable', () => {
+  // AC-10. Today nothing writes it -- `planCorrections` always records 'generalized', which is the
+  // accepted resolution. This guard is the tripwire on the version someone writes later: the
+  // moment `source: 'profile_figure'` appears, the same file must also carry the provenance that
+  // makes the claim checkable, or the assertion fails.
+  for (const f of ['correction.ts', 'appCorrections.ts']) {
+    const code = stripComments(src(f))
+    const writes = /source\s*[:=]\s*'profile_figure'/.test(code)
+    if (!writes) continue
+    for (const need of ['profile_source_key', 'profile_char_start', 'profile_char_end']) {
+      assert.ok(code.includes(need),
+        `${f} writes source='profile_figure' without ${need} — an unprovenanced substitute is a fabricated number`)
+    }
+  }
+  // And the shipped behaviour, so this case is not purely structural: every planned correction
+  // today is a generalisation, and none of them is a bare number.
+  const gen = 'Managed a $18M portfolio across three business units.'
+  const rows = planCorrections('ResumeSummary', gen, scanEcho(gen, 'Own a $18M portfolio across three business units.', 'Profile: ran platform engineering.').echoes)
+  assert.ok(rows.length > 0, 'the fixture must actually produce corrections')
+  for (const r of rows) {
+    assert.equal(r.source, 'generalized', 'generalization is the only path P8.1 ships')
+    assert.ok(!/^\d[\d,]*(\.\d+)?\+?$/.test(r.replacement), `replacement "${r.replacement}" is a bare number`)
   }
 })
