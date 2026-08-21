@@ -2696,3 +2696,161 @@ test('H:run-outcome-distinguishable: every run outcome is separable by a caller'
     assert.equal(runOutcome(bad).pass, false, `runOutcome called ${JSON.stringify(bad)} a pass`)
   }
 })
+
+// H:evidence-reverified-on-read — D19. `requirement_evidence.record_sha256` was written on resolve,
+// served on read, and NEVER recomputed. The digest exists for exactly one purpose — to make a stale
+// offset detectable after the owner edits their profile — so never recomputing it makes it a
+// decoration rather than a guard, in precisely the way `correction.before_sha256` is NOT (`revertOne`
+// recomputes it and refuses rather than guessing when the text has moved).
+//
+// WHY THIS WAS INVISIBLE. The excerpt still renders, and it is a TRUE substring of what the record
+// USED to say. Nothing 500s, no count goes to zero, and the JD step goes on presenting it as a
+// verbatim quote of the candidate's profile. It is the same class as H32 one step later in the
+// lifecycle: there the offsets were wrong when WRITTEN (measured on a lower-cased copy), here they
+// are correct when written and rot afterwards, and neither is catchable by a substring check on the
+// value alone — in both cases the excerpt is simply the wrong characters.
+//
+// THE INVARIANT, stated generally rather than as the incident: ANY excerpt a surface is allowed to
+// print is the named record's own bytes at the offsets stored, measured against the profile AS IT
+// STANDS. Not "the fixture edit is caught" — every edit, at every position.
+test('H:evidence-reverified-on-read: a served excerpt is the record\'s bytes at its offsets, always', async () => {
+  const { verifyEvidence } = await import('../dist/functions/tests/evidence.js')
+  const { shapeRequirementsForApi } = await import('../dist/functions/tests/appRequirements.js')
+
+  const BODY = 'VP Engineering, Resideo 2021-2025\nLed the platform modernization programme across four '
+    + 'product lines, retiring a mainframe billing system and cutting release cycle time to two days.'
+  const REQ = 'Led the platform modernization programme across four product lines'
+  const mcOf = (text) => ({ partitionKey: 'context', rowKey: '1', workHistory1: text })
+
+  const recs0 = profileRecords(mcOf(BODY), null)
+  const ev = resolveEvidence(REQ, recs0)
+  assert.ok(ev, 'fixture: the requirement must resolve before anything can go stale')
+
+  const row = {
+    seq: 0, item_text: REQ, verbatim: REQ,
+    evidence_quote: ev.quote, evidence_source_kind: ev.source_kind, evidence_source_label: ev.source_label,
+    evidence_source_key: ev.source_key, evidence_char_start: ev.char_start, evidence_char_end: ev.char_end,
+    evidence_extra: ev.extra, evidence_ratio: ev.ratio, evidence_method: ev.method,
+    evidence_record_sha256: ev.record_sha256, evidence_resolver_version: ev.resolver_version,
+    evidence_resolved_at: new Date(0),
+  }
+
+  // Every single-edit rewrite of the record: an insertion and a deletion at each position. The
+  // invariant has to hold for all of them, not for the one an author happened to think of.
+  let withheld = 0, served = 0
+  for (let i = 0; i <= BODY.length; i += 7) {
+    for (const edited of [
+      `${BODY.slice(0, i)}[EDIT]${BODY.slice(i)}`,
+      `${BODY.slice(0, i)}${BODY.slice(i + 11)}`,
+    ]) {
+      const recs = profileRecords(mcOf(edited), null)
+      const out = shapeRequirementsForApi([row], recs)
+      const shown = out.requirements[0].evidence
+      if (!shown) { withheld++; continue }
+      served++
+      const rec = recs.find(r => r.key === shown.sourceKey)
+      assert.ok(rec, 'an excerpt was served naming a record that is not in the profile')
+      assert.equal(rec.text.slice(shown.charStart, shown.charEnd), shown.quote,
+        `served a quote that is NOT the record's bytes at its offsets (edit at ${i})`)
+      assert.equal(out.evidenced, 1)
+    }
+  }
+  // Both outcomes must actually occur, or the loop proves nothing: an edit after the quote leaves it
+  // provable, an edit before it moves it. A run that only ever withholds would pass vacuously.
+  assert.ok(withheld > 0 && served > 0, `vacuous sweep: ${withheld} withheld, ${served} served`)
+
+  // And the state is reported, not merely acted on — a caller must be able to tell WHY.
+  const moved = verifyEvidence(
+    { quote: ev.quote, source_key: ev.source_key, char_start: ev.char_start, char_end: ev.char_end, record_sha256: ev.record_sha256 },
+    profileRecords(mcOf(`PROMOTED. ${BODY}`), null))
+  assert.equal(moved.state, 'stale')
+  assert.equal(moved.proof, false)
+})
+
+// H:stale-evidence-not-absent — the second half of D19, and the half that is easy to lose while
+// fixing the first. Withholding a rotted excerpt is not enough: "your profile does not support this
+// requirement" and "your profile changed, so we can no longer show what it said" are different
+// claims ABOUT THE CANDIDATE, and the second must never be printed as the first. Same family as the
+// standing rule that absent evidence is `not_applicable` and never a pass — this is that rule
+// applied to the sentence a human reads rather than to a check verdict.
+test('H:stale-evidence-not-absent: withheld evidence is never presented as no evidence', async () => {
+  const { EVIDENCE_NOTE, NO_EVIDENCE_NOTE, verifyEvidence } = await import('../dist/functions/tests/evidence.js')
+  const { shapeRequirementsForApi } = await import('../dist/functions/tests/appRequirements.js')
+
+  // One sentence per state, and only the absent-row state may use the absent-row sentence.
+  const notes = Object.entries(EVIDENCE_NOTE)
+  assert.equal(new Set(notes.map(([, n]) => n)).size, notes.length, 'two states share a sentence')
+  for (const [state, note] of notes) {
+    if (state !== 'none') {
+      assert.notEqual(note, NO_EVIDENCE_NOTE, `state '${state}' prints the no-evidence sentence`)
+    }
+  }
+
+  // And the payload separates them: a requirement with a rotted excerpt and one with no excerpt at
+  // all must not come back looking the same to a surface that only reads the served fields.
+  const BODY = 'Rebuilt the incident response practice and took mean time to restore from nine hours to under one hour.'
+  const REQ = 'Rebuilt the incident response practice'
+  const mcOf = (t) => ({ partitionKey: 'context', rowKey: '1', coreAccomplishments: t })
+  const ev = resolveEvidence(REQ, profileRecords(mcOf(BODY), null))
+  assert.ok(ev)
+
+  const rows = [
+    { seq: 0, item_text: REQ, evidence_quote: ev.quote, evidence_source_key: ev.source_key,
+      evidence_char_start: ev.char_start, evidence_char_end: ev.char_end,
+      evidence_record_sha256: ev.record_sha256, evidence_source_label: ev.source_label,
+      evidence_source_kind: ev.source_kind, evidence_ratio: ev.ratio, evidence_method: ev.method,
+      evidence_extra: ev.extra, evidence_resolver_version: ev.resolver_version, evidence_resolved_at: new Date(0) },
+    { seq: 1, item_text: 'Something the profile has never mentioned at all', evidence_quote: null },
+  ]
+  const out = shapeRequirementsForApi(rows, profileRecords(mcOf(`SHIFTED. ${BODY}`), null))
+  const [rotted, absent] = out.requirements
+
+  assert.equal(rotted.evidence, null, 'a rotted excerpt was served')
+  assert.equal(absent.evidence, null)
+  assert.notEqual(rotted.evidenceState, absent.evidenceState, 'the two states are indistinguishable')
+  assert.notEqual(rotted.evidenceNote, absent.evidenceNote, 'the two states print the same sentence')
+  assert.equal(absent.evidenceNote, NO_EVIDENCE_NOTE)
+  assert.equal(out.evidenceHealth.stale, 1)
+  assert.equal(out.evidenceHealth.none, 1)
+
+  // An unreadable profile is a THIRD claim, and is neither of the other two.
+  const blind = shapeRequirementsForApi(rows, null)
+  assert.equal(blind.requirements[0].evidenceState, 'unverified')
+  assert.equal(blind.requirements[1].evidenceState, 'none')
+  assert.equal(blind.evidenceHealth.profileReadable, false)
+  assert.equal(verifyEvidence(null, null).state, 'none', 'no row is `none` even when nothing can be read')
+})
+
+// H:evidence-verified-at-the-boundary — the inert-guard failure, pre-empted. Every assertion above
+// exercises a PURE function; if the requirements read path never calls it, D19 is unfixed and the
+// whole suite still passes. The wiring is not expressible as a runtime test here — `requirementsGet`
+// reaches for a live Postgres and the live profile documents, neither of which the sandbox has — so
+// this is a structural check, which is what CLAUDE.md reserves source greps for.
+//
+// It asserts the read path (a) re-reads the profile, (b) shapes through the verifier, and (c) does
+// not build its own excerpt projection alongside it. (c) is the one that matters most: a second
+// projection is how a fix survives in one place while the served payload keeps the old behaviour.
+test('H:evidence-verified-at-the-boundary: the requirements read path re-validates before serving', () => {
+  const body = stripComments(src('appRequirements.ts'))
+  const i = body.indexOf('export async function requirementsGet')
+  assert.ok(i > 0, 'requirementsGet is gone — this guard has gone stale')
+  const fn = body.slice(i, body.indexOf('\n}', body.indexOf('finally', i)))
+
+  assert.match(fn, /await sourceText\(\)/,
+    'the read path does not re-read the profile, so no stored excerpt can be re-validated')
+  assert.match(fn, /shapeRequirementsForApi\(/,
+    'the read path does not shape through the verifier')
+  assert.ok(!/evidence_quote/.test(fn),
+    'the read path projects evidence columns itself — a second projection beside the verified one')
+  assert.match(fn, /evidenceHealth/,
+    'the response does not publish evidence health, so a stale row is not distinguishable to a caller')
+
+  // The verifier itself must consult the record, not the digest alone: an implementation that only
+  // compared hashes would withhold provable excerpts on any unrelated edit (proved by reinstating
+  // it — one named assertion fails, "a digest mismatch alone is not an accusation").
+  const ev = stripComments(src('evidence.ts'))
+  const vi = ev.indexOf('export function verifyEvidence')
+  assert.ok(vi > 0)
+  assert.match(ev.slice(vi, vi + 1400), /rec\.text\.slice\(stored\.char_start, stored\.char_end\) === stored\.quote/,
+    'verifyEvidence does not re-slice the record — the offsets are the claim, the digest is only the alarm')
+})
