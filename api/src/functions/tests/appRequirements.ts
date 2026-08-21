@@ -9,11 +9,10 @@ import { getPgClient } from './pgClient'
 import { buildRequirements } from './requirements'
 import {
   resolveAll, ProfileRecord, ResolveOptions, NO_EVIDENCE_NOTE, RESOLVER_VERSION,
-  verifyEvidence, tallyHealth, EvidenceHealth, EvidenceVerdict, EvidenceState, refusalReason,
+  verifyEvidence, tallyHealth, EvidenceHealth, EvidenceVerdict, EvidenceState,
 } from './evidence'
 import { sourceText, loadFacts } from './appFacts'
 import { resolveOptionsFor } from './checkPrefs'
-import { claimTokens, countTokensAcrossRecords, segments, tokensOf, sameWord } from './requirementSupport'
 import { writeComparison, comparisonPayload } from './appDimensions'
 
 const HEADERS = { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': '*', 'Access-Control-Allow-Methods': 'GET,POST,OPTIONS' }
@@ -521,50 +520,6 @@ export async function evidenceResolve(req: HttpRequest, context: InvocationConte
     // been replaced — the trap `requirementsBackfill` already documents for evidence itself.
     const cmp = await rebuildComparison(client, opp.id, owner, profile.records.length ? profile.records : null)
 
-    // TEMPORARY, root-causing D:evidence-resolves-nothing after the option-(c) matcher deploy still
-    // read evidenced:0 on real production data (opp 9f9c370a, runs 32503671944/32503929543, >3min
-    // post-deploy — worker convergence ruled out). `?debug=1` is opt-in, requires the same
-    // `requireWrite` session this route already needs, and touches no stored data — it only names
-    // WHY each unevidenced requirement was refused, using `refusalReason` (built for exactly this).
-    // REMOVE this block once the cause is found — it is not part of the shipped API.
-    let debug: any
-    if (String(req.query.get('debug') || '') === '1') {
-      const rows = (await client.query(
-        `select seq, verbatim, item_text from requirement where opp_id=$1 order by seq`, [opp.id])).rows
-      debug = {
-        recordKeys: profile.records.map(r => ({ key: r.key, kind: r.kind, chars: r.text.length })),
-        perRequirement: rows.map((r: any) => {
-          const text = r.verbatim || r.item_text || ''
-          // The BEST candidate excerpt across the whole profile, scored, even when refused. This is
-          // what separates a FALSE negative (the profile says it, we refused anyway) from a TRUE
-          // negative (the profile genuinely does not say it) — a distinction no refusal reason can
-          // make on its own, and one nobody can make without reading the profile.
-          const want = claimTokens(text)
-          const counts = countTokensAcrossRecords(profile.records)
-          let top: any = null
-          for (const rec of profile.records) {
-            for (const span of segments(rec.text, 1)) {
-              const excerpt = rec.text.slice(span.start, span.end)
-              const have = tokensOf(excerpt).map(x => x.t)
-              const matched = want.filter(t => have.includes(t) || have.some(h => sameWord(t, h)))
-              const support = want.length ? matched.length / want.length : 0
-              if (!top || support > top.support) {
-                top = { support: Math.round(support * 100) / 100, key: rec.key,
-                        excerpt: excerpt.slice(0, 140),
-                        missing: want.filter(t => !matched.includes(t)) }
-              }
-            }
-          }
-          return {
-            seq: r.seq, text, tokens: want,
-            genericTokens: want.filter(t => (counts.get(t) || 0) > 1),
-            reason: refusalReason(text, profile.records, evOpts),
-            best: top,
-          }
-        }),
-      }
-    }
-
     return {
       status: 200, headers: HEADERS,
       jsonBody: {
@@ -573,7 +528,6 @@ export async function evidenceResolve(req: HttpRequest, context: InvocationConte
         note: out.evidenced === out.total
           ? 'every requirement is evidenced by a verbatim excerpt of your profile'
           : `${out.total - out.evidenced} requirement(s): ${NO_EVIDENCE_NOTE}`,
-        ...(debug ? { debug } : {}),
       },
     }
   } catch (e: any) {

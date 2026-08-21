@@ -405,10 +405,10 @@ export interface SupportInput {
   /** The record's ORIGINAL text. Every offset returned indexes this string. */
   recordText: string
   /**
-   * How many records in the whole profile contain each token. Tokens present in more than
-   * `GENERIC_RECORDS` records are GENERIC — supplied by the industry, not by the achievement.
+   * Retained for callers that already build it; no longer consulted by the judgement. Record
+   * frequency measured the candidate's career rather than a word's informativeness — see WEAK.
    */
-  recordCounts: Map<string, number>
+  recordCounts?: Map<string, number>
   threshold: number
   maxSentences: number
   minQuoteChars: number
@@ -417,20 +417,70 @@ export interface SupportInput {
 }
 
 /**
- * A token in more than this many profile records is industry vocabulary, not achievement
- * vocabulary — SEEDED, and DELIBERATELY NOT an owner setting.
+ * Low-information words whose ABSENCE from an excerpt does not sink the match.
  *
- * M37: an owner may tune how much evidence is enough; an owner may not turn on false provenance.
- * This gates M10 (generic-overlap-only is not evidence), which lives in section C alongside M11's
- * exact-name rule and M12's conjunction rule — both of which M37 already names as non-configurable.
- * The reason is not merely policy: `genericRecords` moves M10 and M11 in OPPOSITE directions.
- * Raising it makes FEWER tokens generic, which strengthens M11 (more tokens must be named-carried)
- * but WEAKENS M10 (fewer tokens are ever classified generic, so "the whole overlap is generic" can
- * no longer fire). A single exposed knob cannot be "the loosest reachable setting" for both rules
- * at once, so it cannot be exposed at all — measured directly: `M17`'s permissive sweep broke M10
- * the moment this was a column, because the loosest setting for M11 is the setting that disables M10.
+ * THIS REPLACES A RULE THAT WAS BACKWARDS, and the correction is the whole fix.
+ * The previous version classed a token as "generic" when it appeared in MORE THAN ONE of the
+ * candidate's own profile records, then refused whenever every matched token was generic. Measured
+ * against the real production profile (15 records, opp 9f9c370a run 32505124784): `Drive platform
+ * modernization` was REFUSED while the profile literally contains "Platform Modernization", because
+ * `platform` and `modernization` each appear in several records. That reasoning is inverted — a word
+ * recurring across a person's own history means they do that thing constantly, which is STRONGER
+ * evidence, not weaker. Record frequency measures the candidate's career, not the word's
+ * informativeness, and using it to discount evidence penalised exactly the strongest matches.
+ *
+ * What actually matters is WHICH token is missing. A missing weak verb (`drive`, `lead`, `support`)
+ * costs nothing — every posting opens with one and no résumé sentence is about it. A missing
+ * CONTENTFUL word is fatal: `high-performing engineering culture` against a profile that says
+ * "security-first engineering culture" is missing `high-performing`, and evidencing it would claim
+ * the candidate built a high-performing culture when they documented a different one. That is the
+ * false provenance this module exists to prevent, and it is decided by the missing token's kind, not
+ * by a ratio.
+ *
+ * Kept to verbs and degree words that carry no claim on their own. Anything nameable, measurable, or
+ * domain-specific stays OUT, so its absence still refuses.
  */
-export const GENERIC_RECORDS = 1
+const WEAK = new Set((
+  // low-information action verbs a posting uses to introduce a duty
+  'drive drives driving drove driven lead leads leading led manage manages managing managed ' +
+  'support supports supporting supported ensure ensures ensuring ensured provide provides ' +
+  'providing provided deliver delivers delivering delivered own owns owning owned run runs ' +
+  'running ran oversee oversees overseeing oversaw help helps helping helped work works working ' +
+  'worked perform performs performing performed handle handles handling handled maintain ' +
+  'maintains maintaining maintained collaborate collaborates collaborating collaborated ' +
+  'partner partners partnering partnered contribute contributes contributing contributed ' +
+  // degree and framing words
+  'effectively efficiently successfully strongly closely directly broad deep strong solid ' +
+  'excellent significant substantial extensive relevant appropriate overall general various'
+).split(/\s+/))
+
+/** Does this token carry a claim of its own? Only these must be present for a match to stand. */
+export const isContentful = (t: string) => !WEAK.has(t)
+
+/**
+ * Domain CATEGORY words — the vocabulary every posting and every résumé in this industry shares.
+ *
+ * This is M10 ("generic-vocabulary overlap alone is not evidence") expressed the way it should have
+ * been the first time. The first attempt measured "generic" as *appears in more than one of the
+ * candidate's records*, which is a fact about their career, not about the word — and it refused
+ * `Drive platform modernization` against a profile containing "Platform Modernization". This list
+ * is a fact about the WORD: `engineering`, `software`, `technology` appear in essentially every
+ * technology posting and every technology résumé, so an overlap made only of them discriminates
+ * nothing.
+ *
+ * Deliberately SHORT and deliberately not owner-settable. It is the M10 safety floor, so it must
+ * hold at the loosest reachable configuration (M17) — a threshold of 0 must not be able to turn
+ * `Strong understanding of software engineering practices` into evidence just because the profile
+ * says "software" and "engineering" somewhere while never mentioning `practices`.
+ */
+const CATEGORY = new Set((
+  'engineering engineer software technology technical data platform platforms digital enterprise ' +
+  'business systems system solutions operations product products program programme project ' +
+  'projects service services team teams organisation organization company industry'
+).split(/\s+/))
+
+/** A word so common to this domain that its presence alone distinguishes nothing. */
+export const isCategoryWord = (t: string) => CATEGORY.has(t)
 
 export interface SupportResult {
   ok: boolean
@@ -466,7 +516,12 @@ export function listElements(text: string): string[] | null {
     .map(p => p.trim().replace(/^(?:and|or)\s+/i, '').trim())
     .filter(Boolean)
     .filter(p => claimTokens(p).length > 0)
-  return parts.length >= 3 ? parts : null
+  // A real conjunctive list has SUBSTANTIVE members. `scalable, secure, high-quality software` is
+  // three adjectives modifying one noun, not three requirements, and demanding each as its own
+  // evidenced claim refused a requirement nothing was wrong with (measured, run 32505124784).
+  // A member counts as substantive when it carries more than one content word or names something.
+  const substantive = parts.filter(pt => claimTokens(pt).length > 1 || namedEntityTokens(pt).size > 0)
+  return parts.length >= 3 && substantive.length >= 2 ? parts : null
 }
 
 /**
@@ -515,15 +570,14 @@ export function supportIn(input: SupportInput): SupportResult {
   const want = claimTokens(requirement)
   if (want.length < 1) return refuse('unjudgeable')
 
-  const generic = (t: string) => (input.recordCounts.get(t) || 0) > GENERIC_RECORDS
-  const specific = want.filter(t => !generic(t))
   const distinctive = want.filter(t => t.length >= input.distinctiveLen)
   const elements = listElements(requirement)
-  // M11's rule applies to NAMED tokens, never to every non-generic word. `specific` also contains
-  // ordinary vocabulary an achievement happens to use once (`design`, `roadmap`) — those trade off
-  // against `threshold` like everything else; only a name may not.
-  const named = namedEntityTokens(requirement)
-  const mustName = specific.filter(t => named.has(t))
+  // Every NAMED token must be carried exactly — Snowflake, Kubernetes, SOC 2, AI/ML, an employer's
+  // own name. No ratio, no fold beyond the enumerated ones, no similarity.
+  const mustName = want.filter(t => namedEntityTokens(requirement).has(t))
+  // Every CONTENTFUL token must be carried too. The weak verbs and degree words are the only ones
+  // whose absence is survivable — see WEAK's comment for the measured reason.
+  const mustCarry = want.filter(isContentful)
 
   let best: SupportResult | null = null
   // Why each candidate excerpt failed, so a refusal is a DIAGNOSIS rather than a shrug. Without
@@ -547,7 +601,25 @@ export function supportIn(input: SupportInput): SupportResult {
 
     const matched = want.filter(carries)
     if (matched.length === 0) { seen.push('no_candidate'); continue }
-    const support = matched.length / want.length
+    // Measured over CONTENTFUL tokens only, and this is where the two halves divide.
+    //
+    // NAMED tokens (above) are absolute: no threshold reaches them, because an excerpt that does not
+    // contain `Snowflake` cannot evidence a Snowflake requirement at any setting. Everything else is
+    // a matter of DEGREE and belongs to the owner's threshold.
+    //
+    // Weak verbs are excluded from the denominator, not merely tolerated in the numerator: leaving
+    // them in penalises the same absence twice. Measured — `Drive platform modernization` against a
+    // profile literally containing "Platform Modernization" scored 2/3 = 0.667 and was refused for
+    // missing `drive` alone. The threshold asks how much of the CLAIM is present, and a weak verb
+    // carries no claim.
+    //
+    // An earlier revision of this fix made contentful coverage a HARD gate as well. That was wrong
+    // in a way worth recording: every contentful token then had to be carried, so `support` was
+    // always exactly 1 by the time it was compared, and the owner's threshold became inert — a
+    // settings-shaped constant, the exact defect H42 exists to catch. Caught by the two threshold
+    // tests in `evidence.test.mjs`, which is why they assert MOVEMENT rather than a value.
+    const judged = mustCarry.length ? mustCarry : want
+    const support = judged.filter(carries).length / judged.length
     const exactHits = want.filter(t => haveSet.has(t)).length
     const ratio = exactHits / want.length
 
@@ -558,9 +630,19 @@ export function supportIn(input: SupportInput): SupportResult {
     // (`design` in a roadmap requirement) is NOT this rule — it just costs `support`, same as any
     // other unmatched token, and the threshold below decides whether that is still enough.
     if (mustName.some(t => !carries(t))) { seen.push('missing_specific_token'); continue }
+    // M10's floor, and it is NOT threshold-governed: when something contentful is missing and
+    // everything present is domain category vocabulary, the overlap discriminates nothing. Held at
+    // every reachable setting, because the loosest threshold is exactly where this would otherwise
+    // manufacture evidence.
+    {
+      const got = mustCarry.filter(carries)
+      const lost = mustCarry.filter(t => !carries(t))
+      if (lost.length && got.length && got.every(isCategoryWord)) {
+        seen.push('generic_overlap_only'); continue
+      }
+    }
     // M10 in its own words: an overlap made only of words that recur across unrelated records —
     // `engineering` for a technology executive — is supplied by the industry, not the achievement.
-    if (matched.length < want.length && matched.every(generic)) { seen.push('generic_overlap_only'); continue }
     // A conjunction is evidenced whole or not at all. Element granularity deliberately ignores the
     // generic waiver above: one member of a five-item list is never the list.
     if (elements && !elements.every(el => claimTokens(el).every(carries))) { seen.push('list_element_unsupported'); continue }
