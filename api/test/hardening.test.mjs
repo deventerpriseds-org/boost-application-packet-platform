@@ -2195,6 +2195,18 @@ test('H:orphan-drive-files: a failed multi-document build leaves no file behind'
   assert.deepEqual(stubborn.orphaned, ['FILE_D'], 'a delete that failed was counted as cleanup')
   assert.deepEqual(stubborn.cleanedUp, [])
 
+  // Every job fails at the copy step: nothing was created, so nothing is cleaned up and the run
+  // must not CLAIM a cleanup. Reporting a cleanup that had nothing to clean is how a cleanup path
+  // goes green while broken.
+  const allFailed = await buildAllOrCleanUp(
+    [Promise.reject(new Error('copy HTTP 403')), Promise.reject(new Error('copy HTTP 403'))],
+    async () => { throw new Error('nothing was created — cleanup must not run') },
+  )
+  assert.deepEqual(allFailed.ids, [])
+  assert.deepEqual(allFailed.cleanedUp, [])
+  assert.deepEqual(allFailed.orphaned, [])
+  assert.equal(allFailed.errors.length, 2)
+
   // The happy path is untouched: nothing is deleted and every id is returned.
   const clean = await buildAllOrCleanUp([slow('A'), slow('B')], async () => {
     throw new Error('cleanup must not run when every job succeeded')
@@ -2312,28 +2324,35 @@ test('H:no-second-id-copy: the product paths carry no Drive id or mailbox litera
     'the seeded Drive ids are gone — the owner now has no first value at all')
 })
 
-// H:duplicate-prompt-roles — P7 item 4, and the fact was established BEFORE the code, which is the
-// only reason it is in this file rather than a note. `GET /api/prompts` on the live Function App
-// (Actions run 32435525197, 2026-08-21), sha256 over the raw response bytes:
+// H:duplicate-prompt-roles — P7 item 4, and the fact was established FROM THE PRIMARY SOURCE, which
+// is the only reason it is a guard rather than a note. Comparing the two live rows would only have
+// shown that they are the same; it could never have said which one is wrong. The source both rows
+// derive from is the zap export, checked into this repo at `docs/zap-289877647/prompts/`.
 //
-//     resume_user     29,068 chars  335aef44caddc15ab318cf5d...  \ IDENTICAL
-//     portfolio_user  29,068 chars  335aef44caddc15ab318cf5d...  /
-//     resume_system      329 chars  803330a27620b65c9303c1e7...  \ IDENTICAL
-//     portfolio_system   329 chars  803330a27620b65c9303c1e7...  /
-//     ats_user         8,807 chars  88a350d0b5b05021f1ed7834...    (control: differs)
+//   LIVE (GET /api/prompts, Actions run 32435525197, 2026-08-21):
+//     resume_user     29,068 chars  sha256 4b4af848...  \ identical
+//     portfolio_user  29,068 chars  sha256 4b4af848...  /
+//     ats_user         8,807 chars  sha256 970fce2e...    (control: differs)
 //
-// The backlog claim rested on equal LENGTHS and had never been checked; it is true, and larger than
-// stated — two identical PAIRS, not one near-identical pair. `portfolio_user` is the resume prompt
-// (42 `###` markers, no mention of JSON) while Call 2 parses its reply with `parseAgentJson`, so the
-// portfolio and cover letter fall back to Call 1 on every run, at the cost of a second 16,000-token
-// call. Authoring a real portfolio prompt is owner content; naming the condition is not.
+//   PRIMARY SOURCE:
+//     node 289877661 "Update Resume/Portfolio Fields"       user_message 29,069 chars
+//     node 299599701 "Copy: Update Resume/Portfolio Fields" user_message  7,712 chars
 //
-// EXACT equality, never similarity: this names an offender, and H4's rule is that fuzzy matching is
-// for ranking, never for accusing.
-test('H:duplicate-prompt-roles: two prompt roles backed by identical text are named', async () => {
+//   Live `portfolio_user` matches node 289877661 — the RESUME node — whitespace-normalised, with a
+//   29,060-char common prefix; against node 299599701 it diverges after 329 chars. `portfolio_user`
+//   was seeded from the wrong node. It is the resume prompt (42 `###` markers, no mention of JSON)
+//   while Call 2 parses with `parseAgentJson`, so the portfolio and cover letter fall back to Call 1
+//   on every run at the cost of a second 16,000-token call.
+//
+// THE CRY-WOLF HALF, AND IT IS THE POINT OF THE `_user` RESTRICTION. `resume_system` and
+// `portfolio_system` are ALSO byte-identical live (329 chars, sha256 803330a2...) and that is
+// CORRECT — both zap nodes carry the same 331-char `system_message`. An earlier draft of this check
+// flagged them, which would have fired on correct configuration on every single run. Two calls may
+// share a system prompt; they may not share the instruction that says what to produce.
+test('H:duplicate-prompt-roles: two generation roles sharing one user prompt are named', async () => {
   const { duplicatePromptPairs } = await import('../dist/functions/tests/pipeline.js')
 
-  // The live shape, reduced. Two identical pairs and one row that only LOOKS close.
+  // The live shape, reduced: the real defect, and the legitimate duplication beside it.
   const live = {
     resume_user: 'Objective:\nYou are an executive recruiter...### Section ###',
     portfolio_user: 'Objective:\nYou are an executive recruiter...### Section ###',
@@ -2341,20 +2360,18 @@ test('H:duplicate-prompt-roles: two prompt roles backed by identical text are na
     portfolio_system: 'You are an executive recruiter such as Andrew LaCivita.',
     ats_user: 'You are the ATS quality-control reviewer.',
   }
-  assert.deepEqual(duplicatePromptPairs(live), [
-    ['portfolio_system', 'resume_system'],
-    ['portfolio_user', 'resume_user'],
-  ])
+  assert.deepEqual(duplicatePromptPairs(live), [['portfolio_user', 'resume_user']],
+    'either the real defect was missed, or the shared system prompt was accused of being one')
 
   // Near-identical is NOT identical. A similarity score would have called these a duplicate; an
-  // accusation may not be made on a score.
+  // accusation may not be made on a score (H4).
   assert.deepEqual(duplicatePromptPairs({
-    a: 'You are an executive recruiter such as Andrew LaCivita.',
-    b: 'You are an executive recruiter such as Andrew LaCivita!',
+    a_user: 'You are an executive recruiter such as Andrew LaCivita.',
+    b_user: 'You are an executive recruiter such as Andrew LaCivita!',
   }), [])
 
   // Two prompts that are simply UNSET are absent, not duplicated. Absent evidence is never a finding.
-  assert.deepEqual(duplicatePromptPairs({ a: '', b: '', c: '   ' }), [])
+  assert.deepEqual(duplicatePromptPairs({ a_user: '', b_user: '', c_user: '   ' }), [])
   assert.deepEqual(duplicatePromptPairs({}), [])
 
   // AND IT IS CALLED. A detector nothing invokes is the tested dead code D2 already records; the
@@ -2367,4 +2384,38 @@ test('H:duplicate-prompt-roles: two prompt roles backed by identical text are na
   const call = body.indexOf('duplicatePromptPairs(prompts)')
   assert.ok(/warnings\.push\(/.test(body.slice(call, call + 500)),
     'the duplicate-prompt finding is not pushed onto warnings, so no caller can see it')
+})
+
+// H:run-outcome-distinguishable — the D12 decision as a pure function, because a status decision
+// reachable only through a live Function App cannot be guarded and the sandbox cannot reach one.
+// The invariant is DISTINGUISHABILITY, which is what the row actually complains about: a caller must
+// be able to tell "produced nothing" from "produced a packet" and from "produced a clean packet".
+test('H:run-outcome-distinguishable: every run outcome is separable by a caller', async () => {
+  const { runOutcome } = await import('../dist/functions/tests/pipeline.js')
+
+  const aborted = runOutcome({ caught: true, docCount: 0, emailsSent: 0, warningCount: 0 })
+  const dirty = runOutcome({ caught: false, docCount: 4, emailsSent: 2, warningCount: 3 })
+  const clean = runOutcome({ caught: false, docCount: 4, emailsSent: 2, warningCount: 0 })
+
+  // A run that produced nothing must not share a status with one that delivered a packet.
+  assert.ok(aborted.status < 200 || aborted.status > 299,
+    `an aborted run returned HTTP ${aborted.status} — this is the D12 defect`)
+  assert.notEqual(aborted.status, dirty.status)
+  assert.notEqual(aborted.status, clean.status)
+
+  // All three are separable on `outcome`, which is what a caller that does read the body uses.
+  assert.equal(new Set([aborted.outcome, dirty.outcome, clean.outcome]).size, 3)
+  assert.deepEqual([aborted.pass, dirty.pass, clean.pass], [false, false, true])
+
+  // A clean run is still a plain 200 — the fix must not turn success into an error.
+  assert.deepEqual(clean, { status: 200, pass: true, outcome: 'pass' })
+
+  // Every ingredient of "clean" is load-bearing: drop any one and `pass` goes false.
+  for (const bad of [
+    { caught: false, docCount: 2, emailsSent: 2, warningCount: 0 },
+    { caught: false, docCount: 4, emailsSent: 0, warningCount: 0 },
+    { caught: false, docCount: 4, emailsSent: 2, warningCount: 1 },
+  ]) {
+    assert.equal(runOutcome(bad).pass, false, `runOutcome called ${JSON.stringify(bad)} a pass`)
+  }
 })

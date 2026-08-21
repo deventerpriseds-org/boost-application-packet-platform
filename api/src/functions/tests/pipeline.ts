@@ -100,35 +100,51 @@ export function profileFromMasterContext(mc: any): { profileText: string; omitLi
 }
 
 /**
- * P7 item 4 — two prompt roles backed by byte-identical text.
+ * P7 item 4 — two prompt roles whose USER prompt is byte-identical.
  *
- * THE FACT, ESTABLISHED BEFORE THE CODE (the backlog claim rested on equal LENGTHS and had never
- * been checked). `GET /api/prompts` on the live Function App, run 32435525197, 2026-08-21, sha256
- * over the raw response bytes:
+ * THE FACT, ESTABLISHED FROM THE PRIMARY SOURCE, not from a comparison of the two live rows. The
+ * backlog claim rested on equal LENGTHS and had never been checked; comparing the two live rows
+ * would only have shown they are the same, never which one is wrong. The source both rows derive
+ * from is the zap export, in this repo at `docs/zap-289877647/prompts/`.
  *
- *     resume_user       29,068 chars  335aef44caddc15ab318cf5d…  \
- *     portfolio_user    29,068 chars  335aef44caddc15ab318cf5d…  /  IDENTICAL
- *     resume_system        329 chars  803330a27620b65c9303c1e7…  \
- *     portfolio_system     329 chars  803330a27620b65c9303c1e7…  /  IDENTICAL
- *     ats_user           8,807 chars  88a350d0b5b05021f1ed7834…     (control: differs)
+ *   LIVE (GET /api/prompts, Actions run 32435525197, 2026-08-21):
+ *     resume_user       29,068 chars   sha256 4b4af848…   \ identical to each other
+ *     portfolio_user    29,068 chars   sha256 4b4af848…   /
+ *     ats_user           8,807 chars   sha256 970fce2e…     (control: differs)
  *
- * So the claim is TRUE and it is BIGGER than the backlog said: not "two near-identical prompts" but
- * two byte-identical PAIRS, the user prompt and the system prompt both. `portfolio_user` is the
- * resume prompt — 42 `###` section markers, no mention of JSON — while Call 2 parses its reply with
- * `parseAgentJson`. Call 2 therefore cannot return a JSON object, and the portfolio and cover letter
- * are built from Call 1's fallback on every single run, at the cost of a second 16,000-token call.
+ *   PRIMARY SOURCE (the zap nodes the migration seeded them from):
+ *     node 289877661  "Update Resume/Portfolio Fields"        user_message  29,069 chars
+ *     node 299599701  "Copy: Update Resume/Portfolio Fields"  user_message   7,712 chars
  *
- * WHAT THIS FUNCTION DOES AND DOES NOT DO. Authoring a real portfolio prompt is the owner's content
- * and inventing 29k characters of it would be a worse defect than the one being fixed, so this does
- * not attempt it. What it does is make the condition impossible to hold silently: identical text
- * under two different partition keys means one of the two roles is not being performed, and the run
- * now says so by name. Deterministic, exact, zero tokens.
+ *   Live `portfolio_user` matches node 289877661 — the RESUME node — whitespace-normalised, with a
+ *   29,060-character common prefix. Against node 299599701, the node it should have been seeded
+ *   from, it diverges after 329 characters.
  *
- * Exact equality, never similarity — an accusation-grade check (H4). Blank rows are skipped: two
- * unset prompts both defaulting to '' are absent, not duplicated.
+ * So `portfolio_user` was seeded with the wrong zap node. It is the resume prompt: 42 `###` section
+ * markers, no mention of JSON, while Call 2 parses its reply with `parseAgentJson`. Call 2 therefore
+ * cannot return a JSON object, and the portfolio and cover letter fall back to Call 1 on every run,
+ * at the cost of a second 16,000-token call. The correct text is not something to invent — it is
+ * checked into this repo at
+ * `docs/zap-289877647/prompts/17-copy-update-resume-portfolio-fields-prompt.md`. Installing it
+ * rewrites live document generation for the real owner, so it is an owner decision and a
+ * `DEFERRED.md` row, not something this lane does on its way past.
+ *
+ * WHY `_user` ONLY, AND IT IS THE WHOLE REASON THIS FUNCTION IS NARROW. The live `resume_system` and
+ * `portfolio_system` rows are ALSO byte-identical (329 chars, sha256 803330a2…) — and that is
+ * CORRECT. Both zap nodes carry the same 331-character `system_message`; the duplication is faithful
+ * to the source, not a seeding mistake. An earlier draft of this check flagged it, which would have
+ * been a guard firing on correct configuration on every single run — the cry-wolf failure that makes
+ * people stop reading warnings. Two calls may legitimately share a system prompt. They may not
+ * legitimately share the instruction that says what to produce.
+ *
+ * Exact equality, never similarity: this names an offender, and H4's rule is that fuzzy matching is
+ * for ranking and never for accusing. Blank rows are skipped — two unset prompts both defaulting to
+ * '' are absent, not duplicated.
  */
 export function duplicatePromptPairs(prompts: Record<string, string>): Array<[string, string]> {
-  const keys = Object.keys(prompts).filter((k) => (prompts[k] || '').trim().length > 0).sort()
+  const keys = Object.keys(prompts)
+    .filter((k) => k.endsWith('_user') && (prompts[k] || '').trim().length > 0)
+    .sort()
   const pairs: Array<[string, string]> = []
   for (let i = 0; i < keys.length; i++) {
     for (let j = i + 1; j < keys.length; j++) {
@@ -136,6 +152,40 @@ export function duplicatePromptPairs(prompts: Record<string, string>): Array<[st
     }
   }
   return pairs
+}
+
+/**
+ * D12 — the status a run's outcome gets, as a pure function.
+ *
+ * Split out because a status decision reachable only through a live Function App cannot be guarded,
+ * and the sandbox cannot reach one. Same split as `checks.ts` vs `appChecks.ts`.
+ *
+ * THE DECISION, and it is deliberately not uniform:
+ *
+ *  - `caught` — an exception aborted the run. Nothing completed, there are no urls, and the job row
+ *    may still say `processing`. This returned 200, so a fully failed pipeline produced a GREEN
+ *    Actions run. It is an error and it takes an error status. 502 rather than 500 because every
+ *    realistic failure on this path is an upstream call: OpenAI, Drive, Docs/Slides, Graph, Tables.
+ *
+ *  - completed but not clean — the documents exist and were mailed; a config gap, an inert QC call
+ *    or a duplicated prompt made the RESULT imperfect. This keeps a 2xx, and the reason is not
+ *    squeamishness about the number: `POST /api/pipeline/run` is NOT idempotent — it copies Google
+ *    files. A non-2xx invites a retrying client to re-run it, and P7-ACCEPTANCE's own warning is
+ *    that any retry design must be traced against X5 (render once) first or a retry MULTIPLIES the
+ *    D13 orphans. Marking a delivered packet as a transport failure would manufacture exactly that.
+ *    The caller is fixed instead, in `api-test.yml`, which is also the general fix: 85 routes here
+ *    return a `pass` boolean and the workflow ignored every one of them.
+ *
+ * An independent AC agent, reading this cold, asked instead that EVERY `pass:false` path be non-2xx.
+ * That disagreement is real and is recorded in `.claude/DEFERRED.md` rather than silently resolved.
+ */
+export function runOutcome(o: { caught: boolean; docCount: number; emailsSent: number; warningCount: number }):
+  { status: number; pass: boolean; outcome: 'pass' | 'completed_with_findings' | 'error' } {
+  if (o.caught) return { status: 502, pass: false, outcome: 'error' }
+  const clean = o.docCount >= 3 && o.emailsSent >= 1 && o.warningCount === 0
+  return clean
+    ? { status: 200, pass: true, outcome: 'pass' }
+    : { status: 200, pass: false, outcome: 'completed_with_findings' }
 }
 
 /** Load the MasterContext profile on its own. The loop needs it; a full generation does not. */
@@ -520,12 +570,12 @@ export async function pipelineRun(req: HttpRequest, context: InvocationContext):
     // The CATCH exit below is the other half, and there 200 was simply wrong.
     //
     // `outcome` exists so a caller does not have to infer the difference from the shape of the body.
-    const clean = ids.length >= 3 && emailsSent >= 1 && warnings.length === 0
+    const verdict = runOutcome({ caught: false, docCount: ids.length, emailsSent, warningCount: warnings.length })
     return {
-      status: 200, headers: HEADERS,
+      status: verdict.status, headers: HEADERS,
       jsonBody: {
-        pass: clean,
-        outcome: clean ? 'pass' : 'completed_with_findings',
+        pass: verdict.pass,
+        outcome: verdict.outcome,
         detail: `Pipeline complete for ${jobTitle} @ ${company} (${roleType}): ${ids.length} docs, ${emailsSent}/2 emails.`
           + (warnings.length ? ` ${warnings.length} warning(s).` : ''),
         jobId, roleType, roleFocus, roleFocusSource: built.roleFocusSource, qcApplied: built.qcApplied,
@@ -543,7 +593,8 @@ export async function pipelineRun(req: HttpRequest, context: InvocationContext):
     // Docs/Slides, Graph, Table Storage. The body is unchanged so nothing that reads `detail`/`steps`
     // loses anything; `web/src/App.jsx` parses the body regardless of status and reads `data.pass`,
     // so the console is unaffected (checked at App.jsx:438).
-    return { status: 502, headers: HEADERS, jsonBody: { pass: false, outcome: 'error', detail: String(err), steps } }
+    const verdict = runOutcome({ caught: true, docCount: 0, emailsSent: 0, warningCount: 0 })
+    return { status: verdict.status, headers: HEADERS, jsonBody: { pass: verdict.pass, outcome: verdict.outcome, detail: String(err), steps } }
   }
 }
 
