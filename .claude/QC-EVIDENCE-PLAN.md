@@ -10,40 +10,60 @@ where the train currently is. Read it first on any resume; it is written to surv
 ## ▶ RESUME MARKER — where the train is
 
 ```
-UPDATED       : 2026-08-20 16:10Z
-CURRENT PHASE : P8 (review decisions) — running in parallel with P3 and P8.3
-STATUS        : P3 (remediation loop) COMPLETE on its branch — PR #14, merged with main,
-                H-cases renumbered H34-H39. NOT landed, NOT deployed, NOT confirmed live.
-LAST LANDED   : 44d1cfc (H26 one-ID-one-case + contiguity)
-NEXT ACTION   : land PR #14; then deploy and run the loop against the
-                Trinnex opportunity 9f9c370a-4ac9-441e-b58e-02e3ffcf669e
-DONE + LIVE   : P0 · P1 · P2 · P4 · P5 · P6 · X1 X2 X3 X4 · D1 D2 D3 D6 D7 D8 D11
-DONE, NOT LIVE: P3 (X5 render-once, D8 per-pass metering, scoped regeneration)
+UPDATED       : 2026-08-21 11:45Z
+CURRENT PHASE : none — EVERY phase lane P0-P8 and every X prerequisite is on `main`.
+                `git branch -r --merged origin/main` lists 64 `claude/qc-*` lanes.
+STATUS        : building is finished; PROVING is not. The open work is no longer
+                "write the phase", it is "make it actually run in production".
+LAST LANDED   : 8a55704 (the live-verification wave)
+NEXT ACTION   : the OPEN rows in `.claude/DEFERRED.md`, which is machine-checked —
+                a stale row now fails `api/test/deferredLedger.test.mjs`.
+DONE + LIVE   : P0 P1 P2 P4 P5 P6 P7 · X1 X2 X3 X4 X5
+DEPLOYED, NEVER RUN : P3. Measured 2026-08-21 (pg-migrate run 32451553273):
+                remediation_loop 0, escalation 0, correction 0, term_library_entry 0,
+                against requirement 8200 and check_result 60. "Deployed" and "has
+                ever run" are different claims and only the first is true.
+
+READ THIS BEFORE TRUSTING ANY ROW ABOVE
+  Three things were believed done and were not, all found by running the vehicles
+  rather than reasoning about them:
+    - `comparison_dimension` was registered in SCHEMA_SQL and DID NOT EXIST in the
+      production database. Nothing in the deploy ran the migration (PR #28 fixes it).
+    - the evidence spine evidences NOTHING on real data: 0 of 10 requirements
+      against 15 readable profile records, refused 0.
+    - all ten AppConfig settings are unreachable from the PRODUCT; only the legacy
+      `web/` console writes them.
+  "Landed" is not "deployed" is not "has run" is not "produces correct output".
+  This block records which of the four each item has reached, and no more.
 ```
 *Update this block on every landing. It is the single place to look after a restart.*
 
-Phase status: P0 `done` · P1 `done` · P2 `done` · P3 `RESTARTED` · P4 `done` · P5 `done` ·
-P6 `done` · P7 `partial (item 1 landed; 4, 6, 8 held behind P3)` · P8 `in progress`.
-P3 `built, PR #14, merged with main, NOT landed`.
+Phase status: P0 `done` · P1 `done` · P2 `done` · P3 `landed, never executed in production` ·
+P4 `done` · P5 `done` · P6 `done` · P7 `done (item 1 residual fixed by PR #25)` · P8 `done`.
+
+There is no P9. The phase list ends at P8, and the remaining work is tracked as ledger rows,
+not as phases.
 
 ### Lanes in flight — who owns which files
 
 A lane may not touch a file another lane owns. `api/test/hardening.test.mjs` is shared and
 APPEND-ONLY. H-case IDs are pre-allocated so two lanes cannot collide on one number.
 
-**ONE ID PER LANE DID NOT HOLD, and the failure mode is worth naming.** Each lane finds SEVERAL
-defects, so P3 needed six ids and P8.3 four. Append-only is exactly what hid it: every lane appends
-at the end of the file, so the branches MERGE CLEANLY, each is green in isolation, and the duplicate
-ids land unnoticed while `actions.md` points at numbers that name two things. `H26` on `main` now
-asserts one-id-one-case AND contiguity from H1, so the next collision fails a build instead of
-being discovered by a reader. Allocate a RANGE per lane, not a number.
+**THE H-COUNTER IS RETIRED — the advice this section used to give is SUPERSEDED.** It said
+"allocate a RANGE per lane, not a number". That failed too: lanes overrun their range and new lanes
+appear, and claim-at-merge cost a hand renumber on every merge, one of which left the file
+unparseable. A counter requires coordination between branches that cannot see each other.
 
-| Lane | Branch | Owns | H-ids |
-|---|---|---|---|
-| P8.2 R3 figure echo | `claude/qc-p8-2-figures` (PR #10) | `figureEcho.ts`, `checks.ts`, `appChecks.ts`, `appFacts.ts` | H24, H25 |
-| P8.7 UI remainder | subagent worktree | `app/` (theme.css, PostingAnalysis, Today, packetBuilder) | — |
-| P3 remediation loop | `claude/qc-p3-remediation` (PR #14) | `pipeline.ts`, `appPackets.ts`, `appSwaps.ts`, `appInsertions.ts`, `remediation.ts`, `appRemediation.ts` | **H34-H39** |
-| P8.3 evidence excerpts | `claude/qc-p8-3-evidence` | `requirements.ts`, evidence schema | H27 |
+`H1`-`H44` are frozen. **Every new case takes a two-word slug** — `test('H:schema-parity: ...')` —
+and `H26` fails the suite on any new numeric id. Two lanes minting the same slug means they guard
+the same thing, which is information rather than an accident. `.claude/DEFERRED.md` adopted the same
+rule for `D`-ids after four of them came to mean two things each.
+
+**No lanes are in flight.** Every phase lane has landed; the table that used to sit here listed four
+branches that have all been on `main` for hours. What replaces it is `.claude/DEFERRED.md`, which is
+machine-checked: each open row names its own trigger and a `check:` the suite executes, so a row
+that has quietly become true fails a build instead of misleading a reader. Do not re-create a
+lanes-in-flight table here — it is the exact artifact that went stale and lost the P3 lane.
 
 **The P3 lane was lost once.** A subagent ran it, died without pushing, and left no branch — the
 work was gone with no trace but a stale entry in this file. Restarted 2026-08-20 as a fresh lane,
@@ -52,13 +72,17 @@ nothing, whatever a summary says about it.
 
 ### Blocked, and on what
 
+**Every blocker in this table has cleared** — P8.1, P8.7, P3 and P8.4 are all on `main`. What blocks
+work now is not a landing order; it is that several subsystems have never produced output in
+production. Those are ledger rows, each naming the vehicle that would settle it:
+
 | Item | Blocked on |
 |---|---|
-| P8.2 rewrite/generalize half | P8.1 correction table (to log and revert a replacement) |
-| P8.6 correction affordances | P8.1 |
-| P7 items 4, 6, 8 | P3 (they touch `pipeline.ts` / `appPackets.ts`) |
-| P8.4 comparison dimensions | P8.7 landing (both are in `app/`) |
-| P0.3 residual + its H-case | P8.7 landing (`app/src/theme.css`) |
+| `D:evidence-resolves-nothing` | nothing — it is a live defect awaiting diagnosis, not a dependency |
+| `D:remediation-never-ran` | a build on an opportunity that actually triggers remediation |
+| `D24` + `D:appconfig-unreachable-in-product` | the `app/` lane; both are the same defect and should share one home |
+| `D29` (R3 dormant) | a posting that contains figures — a live action on real data, not to be taken without a go-ahead |
+| `D13`, `D30`, `D35` | a real Drive call / more builds / the live gateway |
 
 ---
 
