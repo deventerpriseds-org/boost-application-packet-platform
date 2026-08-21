@@ -6,7 +6,8 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
-import { extractFigures, scanEcho, generalize, claimKey, isMarked, stem, ECHO_VERSION } from '../dist/functions/tests/figureEcho.js'
+import { extractFigures, scanEcho, generalize, claimKey, isMarked, stem, ECHO_VERSION,
+         scanWording, WORDING_RUN_TOKENS } from '../dist/functions/tests/figureEcho.js'
 
 const keys = (t) => extractFigures(t).map(f => f.key)
 const raws = (t) => extractFigures(t).map(f => f.raw)
@@ -404,4 +405,94 @@ test('D6: the spelled teens were never missing — pin them so the stale row can
   for (const [word, n] of Object.entries(want)) {
     assert.deepEqual(extractFigures(`We run ${word} sites.`).map(f => f.key), [`num:${n}`], word)
   }
+})
+
+// ---------------------------------------------------------------------------------------------
+// D4 — wording kept from the posting. A LIST, never a rewrite.
+
+test('D4: a long verbatim run from the posting is listed', () => {
+  const posting = 'You will manage a portfolio of enterprise customers across three business units and report to the COO.'
+  const gen = 'Managed a portfolio of enterprise customers across three business units for a regional utility.'
+  const r = scanWording(gen, posting, 'Profile: led platform engineering teams.')
+  assert.equal(r.notApplicable, false)
+  assert.equal(r.kept.length, 1, JSON.stringify(r.kept))
+  assert.equal(r.kept[0].phrase, 'a portfolio of enterprise customers across three business units')
+  // The offsets must address the phrase in the GENERATED text, so a UI can outline it.
+  assert.equal(gen.slice(r.kept[0].start, r.kept[0].end), r.kept[0].phrase)
+})
+
+test('D4: ordinary professional prose is not an accusation', () => {
+  // THE PRIMARY RISK. Two people writing about the same job independently share vocabulary, whole
+  // phrases, and often a full clause. A list shown to a person about their own writing must not
+  // fire on any of this.
+  const posting = 'We are seeking a senior engineering leader to drive operational excellence in a fast paced environment. '
+    + 'The successful candidate will have strong communication skills and a track record of delivery.'
+  const profile = 'Led platform engineering. Strong communication skills.'
+  for (const gen of [
+    'Drove operational excellence in a fast paced environment.',          // 6 tokens — under the run
+    'Senior engineering leader with strong communication skills.',        // shared, but short
+    'I have a track record of delivery and strong communication skills.', // two short shared runs
+    'Built and led platform engineering teams across three regions.',
+  ]) {
+    assert.deepEqual(scanWording(gen, posting, profile).kept, [], gen)
+  }
+})
+
+test('D4: the candidate\'s own wording is theirs, even when the ad says it too', () => {
+  // Same three-way split as scanEcho: R2 beats a literal reading of R3. Stripping a person's own
+  // sentence because the employer wrote something similar is the harm, not the fix.
+  const phrase = 'a portfolio of enterprise customers across three business units'
+  const posting = `You will manage ${phrase} and report to the COO.`
+  const gen = `Managed ${phrase} for a regional utility.`
+  assert.equal(scanWording(gen, posting, 'Nothing relevant here.').kept.length, 1, 'control: it fires without the profile')
+  assert.deepEqual(scanWording(gen, posting, `Career summary: managed ${phrase} since 2016.`).kept, [],
+    'the profile states the same words — they are the candidate\'s')
+})
+
+test('D4: absent evidence is not_applicable, never "no wording was kept"', () => {
+  const gen = 'Managed a portfolio of enterprise customers across three business units.'
+  for (const [posting, profile, why] of [['', 'Profile.', 'no posting'], ['<p></p>', 'Profile.', 'markup-only posting'],
+                                          ['Real posting text here.', '', 'no profile']]) {
+    const r = scanWording(gen, posting, profile)
+    assert.equal(r.notApplicable, true, why)
+    assert.deepEqual(r.kept, [], why)
+    assert.ok(r.reason && r.reason.length > 10, why)
+  }
+})
+
+test('D4: matching is exact — nothing here stems, scores or ranks', () => {
+  const phrase = 'a portfolio of enterprise customers across three business units'
+  const posting = `You will manage ${phrase} and report to the COO.`
+  const profile = 'Profile: led platform engineering.'
+  // One word different in the middle breaks the run. A fuzzy matcher would still fire; that is
+  // precisely what "fuzzy matching is for RANKING, never for ACCUSING" forbids.
+  assert.deepEqual(scanWording('Managed a portfolio of enterprise clients across three business units.', posting, profile).kept, [])
+  // A plural difference also breaks it. `stem` is deliberately not used on prose.
+  assert.deepEqual(scanWording('Managed a portfolio of enterprise customer across three business unit.', posting, profile).kept, [])
+})
+
+test('D4: a run of pure connective tissue is not a passage', () => {
+  // The content-word floor at its real boundary. A job ad and a resume can easily share eight
+  // consecutive words of grammar — "and you will have to be able to" — and that is a fact about
+  // English, not evidence of copying. Reporting it would train the reader to dismiss the list.
+  const posting = 'The role is demanding and you will have to be able to travel each quarter.'
+  const gen = 'The work was demanding and you will have to be able to deliver under pressure.'
+  const r = scanWording(gen, posting, 'Profile: led engineering.')
+  assert.deepEqual(r.kept, [], `connective tissue was reported: ${JSON.stringify(r.kept)}`)
+  // ...and the floor is what does it: the same run carrying real content IS reported.
+  const posting2 = 'You will have to be able to run a distributed platform organisation.'
+  const gen2 = 'I have had to be able to run a distributed platform organisation.'
+  assert.equal(scanWording(gen2, posting2, 'Profile: led teams.', 6).kept.length, 1,
+    'a run with three content words is a passage')
+})
+
+test('D4: the run length is a seeded default, not a constant', () => {
+  // CLAUDE.md: no behaviour-affecting value may be code-only. Threaded from
+  // CheckThresholds.wordingRunTokens, so an owner can tune it without a code change.
+  const posting = 'We need someone to drive operational excellence across the enterprise every day.'
+  const gen = 'Drove operational excellence across the enterprise every day.'
+  const profile = 'Profile: led platform engineering.'
+  assert.deepEqual(scanWording(gen, posting, profile).kept, [], 'silent at the default run length')
+  assert.equal(scanWording(gen, posting, profile, 5).kept.length, 1, 'a lower threshold surfaces it')
+  assert.equal(typeof WORDING_RUN_TOKENS, 'number')
 })

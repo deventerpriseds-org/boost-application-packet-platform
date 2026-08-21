@@ -417,3 +417,116 @@ export function generalize(figure: Figure): string | null {
   if (figure.kind === 'percent') return null                    // no honest generalisation of a rate
   return 'multiple'
 }
+
+// -----------------------------------------------------------------------------------------------
+// D4 / R3 — WORDING lifted from the posting.
+//
+// The spec is explicit that this is NOT the figure case: "Non-numeric echoes stay a user judgement
+// call and are listed separately as 'wording kept from the posting'." So this function only ever
+// LISTS. Nothing here rewrites prose, and nothing downstream may: a phrase can be the employer's
+// house style, the industry's standard term, or the candidate's own sentence that happens to read
+// like the ad. Only the user can tell which, and a machine that rewrites prose on a guess produces
+// a resume the candidate did not write and cannot defend.
+//
+// THE ENTIRE DESIGN RISK IS CRYING WOLF, so every rule below buys silence:
+//
+//  - EXACT tokens, contiguous, in order. No stemming, no similarity, no fuzzy unit. `stem` is
+//    deliberately NOT used here: folding plurals is right for a figure's noun, and wrong for a
+//    phrase, where it would merge distinct sentences.
+//  - A LONG run. Eight consecutive identical words essentially does not occur in independently
+//    written prose; five does, constantly ("in a fast paced environment"). This is the same trade
+//    the year rule makes above — accept a real false negative to avoid an accusation — and it is
+//    the right way round, because this list is shown to a person about their own writing.
+//  - The run must appear CONTIGUOUSLY in the posting, verified against the posting's own token
+//    stream, not assembled out of overlapping n-grams that never sat together in the ad.
+//  - Wording the PROFILE also contains is the candidate's, and is dropped. Same three-way split as
+//    `scanEcho`, for the same reason: R2 beats a literal reading of R3, and stripping a person's
+//    own sentence because the employer wrote something similar is the harm, not the fix.
+//  - No posting text, or no profile text, is `notApplicable`. Absent evidence is never a pass.
+//
+// The run length is a SEEDED DEFAULT, not a constant: `runTokens` is threaded from
+// `CheckThresholds.wordingRunTokens` so an owner can tune it without a code change.
+
+/** A passage the generated text and the posting share word for word. */
+export interface WordingEcho {
+  /** The run exactly as it appears in the GENERATED text, original casing and punctuation. */
+  phrase: string
+  start: number
+  end: number
+  tokens: number
+}
+
+export interface WordingScan {
+  kept: WordingEcho[]
+  /** True when there was nothing to compare against. Never treat this as "no wording was kept". */
+  notApplicable: boolean
+  reason?: string
+}
+
+export const WORDING_RUN_TOKENS = 8
+/** A run must carry this many non-stopword tokens, so eight function words are not an accusation. */
+const WORDING_MIN_CONTENT = 3
+
+// Only for deciding whether a run says anything. Not a general stop list, and never used to MATCH:
+// matching is exact on every token, function words included.
+const PHRASE_STOP = new Set([...UNIT_STOP,
+  'with', 'by', 'at', 'as', 'from', 'that', 'this', 'these', 'those', 'will', 'be', 'is', 'are',
+  'was', 'were', 'you', 'your', 'we', 'they', 'it', 'have', 'has', 'had', 'across', 'into', 'over',
+  'all', 'any', 'each', 'more', 'most', 'other', 'such', 'than', 'then', 'so', 'but', 'not', 'no',
+])
+
+const WORD_RE = /[A-Za-z0-9][A-Za-z0-9'-]*/g
+
+interface Tok { w: string; start: number; end: number }
+
+function tokens(s: string): Tok[] {
+  const out: Tok[] = []
+  for (const m of s.matchAll(WORD_RE)) out.push({ w: m[0].toLowerCase(), start: m.index!, end: m.index! + m[0].length })
+  return out
+}
+
+/**
+ * The token stream as one padded, space-joined string.
+ *
+ * Padding both sides — and searching for a padded needle — is what stops a run matching the MIDDLE
+ * of a token: without it, " ab c " would be found inside " xab c ", reporting a phrase the document
+ * does not contain.
+ */
+const joined = (t: Tok[]): string => ` ${t.map(x => x.w).join(' ')} `
+const contains = (hay: string, run: string[]): boolean => hay.includes(` ${run.join(' ')} `)
+
+export function scanWording(generated: string, postingText: string, profileText: string, runTokens: number = WORDING_RUN_TOKENS): WordingScan {
+  // The SAME normalizer `scanEcho` uses. `jd_real` is HTML; a second regex here would be a second
+  // definition of what the employer actually wrote.
+  const posting = normalizePostingText(postingText)
+  if (!posting.trim()) {
+    return { kept: [], notApplicable: true, reason: 'no employer posting text to compare against' }
+  }
+  const profileNorm = normalizePostingText(profileText)
+  if (!profileNorm.trim()) {
+    return { kept: [], notApplicable: true, reason: "no profile text — wording the candidate already uses cannot be told from wording taken from the ad" }
+  }
+  const n = Math.max(2, Math.floor(Number(runTokens) || WORDING_RUN_TOKENS))
+  const gen = tokens(generated)
+  const post = joined(tokens(posting))
+  const prof = joined(tokens(profileNorm))
+
+  const kept: WordingEcho[] = []
+  let i = 0
+  while (i < gen.length) {
+    // The longest run starting here that the posting states contiguously.
+    let len = 0
+    while (i + len < gen.length && contains(post, gen.slice(i, i + len + 1).map(x => x.w))) len++
+    if (len < n) { i++; continue }
+    const run = gen.slice(i, i + len)
+    const words = run.map(x => x.w)
+    // The candidate's own wording, not the ad's.
+    if (contains(prof, words)) { i += len; continue }
+    if (words.filter(w => !PHRASE_STOP.has(w)).length >= WORDING_MIN_CONTENT) {
+      const start = run[0].start, end = run[run.length - 1].end
+      kept.push({ phrase: generated.slice(start, end), start, end, tokens: run.length })
+    }
+    i += len
+  }
+  return { kept, notApplicable: false }
+}

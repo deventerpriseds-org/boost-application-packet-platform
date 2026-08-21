@@ -485,3 +485,53 @@ test('D5: swap labels do not manufacture an R3 verdict out of nothing', () => {
                                  postingText: '', profileText: PROFILE, swaps: clean }), 'posting_figure_echo')
   assert.equal(blind.state, 'not_applicable', 'no posting text is not a clean scan')
 })
+
+// ---------------------------------------------------------------------------------------------
+// D4 — wording kept from the posting, surfaced as its own check.
+
+test('D4: wording kept from the posting is its own check, not more figure offenders', () => {
+  // The spec separates them because the REMEDY differs: a figure gets auto-corrected (R1/P8.1), a
+  // phrase never does. Folding them together would put prose into the auto-correct path.
+  const posting = 'You will manage a portfolio of enterprise customers across three business units and report to the COO.'
+  const rs = runChecks({ type: 'resume',
+    pkg: echoPkg('Managed a portfolio of enterprise customers across three business units for a utility.'),
+    postingText: posting, profileText: 'Operated 60 sites for a regional utility.' })
+  const w = find(rs, 'posting_wording_kept')
+  assert.equal(w.state, 'warn')
+  assert.equal(w.offenders.length, 1)
+  assert.match(w.offenders[0], /^ResumeSummary: "a portfolio of enterprise customers across three business units"$/)
+  // The figure check is a SEPARATE row and does not absorb the phrase.
+  const f = find(rs, 'posting_figure_echo')
+  assert.ok(!f.offenders.some(o => /portfolio of enterprise/.test(o)), 'wording must not leak into the figure check')
+})
+
+test('D4: no posting text is not_applicable, never "no wording was kept"', () => {
+  const rs = runChecks({ type: 'resume', pkg: echoPkg('Managed a portfolio of enterprise customers across three business units.'),
+                         postingText: '<p></p>', profileText: PROFILE })
+  assert.equal(find(rs, 'posting_wording_kept').state, 'not_applicable')
+})
+
+test('D4: the new check stays silent across every existing fixture in this file', () => {
+  // The cry-wolf budget, measured rather than asserted. A new WARN-state check raises
+  // attentionCount and can move a gate, so it must not fire on prose nobody copied.
+  const fixtures = [
+    ['Led platform engineering for a regional utility.', POSTING, PROFILE],
+    ['Ran 60 sites across the Midwest.', POSTING, PROFILE],
+    ['Managed a $18M portfolio across three business units.', POSTING, PROFILE],
+    ['Cut incident volume 37% and shipped 14 releases.', POSTING, PROFILE],
+    ['Built and led platform engineering teams across three regions.', POSTING, PROFILE],
+  ]
+  for (const [summary, posting, profile] of fixtures) {
+    const w = find(runChecks({ type: 'resume', pkg: echoPkg(summary), postingText: posting, profileText: profile }), 'posting_wording_kept')
+    assert.equal(w.state, 'pass', `${summary} -> ${JSON.stringify(w.offenders)}`)
+  }
+})
+
+test('D4: the run length comes from thresholds, not from a constant', () => {
+  const posting = 'We need someone to drive operational excellence across the enterprise every day.'
+  const pkg = echoPkg('Drove operational excellence across the enterprise every day.')
+  const base = { type: 'resume', pkg, postingText: posting, profileText: PROFILE }
+  assert.equal(find(runChecks(base), 'posting_wording_kept').state, 'pass', 'silent at the seeded default')
+  assert.equal(find(runChecks({ ...base, thresholds: { wordingRunTokens: 5 } }), 'posting_wording_kept').state, 'warn',
+    'an owner lowering the threshold surfaces it — the value is not code-only')
+})
