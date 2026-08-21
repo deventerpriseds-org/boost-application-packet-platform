@@ -267,7 +267,7 @@ export async function regenerateFields(opts: {
 // Returns `calls` alongside the package because P1.3 cannot reconstruct what changed from the merged
 // output alone: assemblePackage's per-slot preference for Call 3 over Call 1 IS the swap decision,
 // and both sides are needed to see it. These were previously discarded at the end of this function.
-export async function buildPackageForJD(opts: { key: string; jd: string; roleType: string; company: string; jobTitle: string }): Promise<{ pkg: Record<string, string | null>; steps: string[]; roleFocus: any; roleFocusSource: string; calls: { c1: any; c2: any; c3: any }; usage: Array<{ pass: string; usage: any }>; promptVersions: Record<string, number>; profileText: string; omitList: string; warnings: string[]; qcApplied: boolean; settings: PipelineSettings }> {
+export async function buildPackageForJD(opts: { key: string; jd: string; roleType: string; company: string; jobTitle: string; personaRole?: string | null }): Promise<{ pkg: Record<string, string | null>; steps: string[]; roleFocus: any; roleFocusSource: string; calls: { c1: any; c2: any; c3: any }; usage: Array<{ pass: string; usage: any }>; promptVersions: Record<string, number>; profileText: string; omitList: string; warnings: string[]; qcApplied: boolean; settings: PipelineSettings }> {
   const { key, jd, roleType, company, jobTitle } = opts
   const steps: string[] = []
   const warnings: string[] = []
@@ -276,7 +276,7 @@ export async function buildPackageForJD(opts: { key: string; jd: string; roleTyp
   const settings = await loadPipelineSettings()
   warnings.push(...settings.warnings)
 
-  const role = await resolveRoleFocus(roleType, settings.defaultRoleFocus)
+  const role = await resolveRoleFocus(roleType, settings.defaultRoleFocus, opts.personaRole)
   const roleFocus = role.focus
   if (role.warning) warnings.push(`role focus: ${role.warning}`)
   steps.push(`Role focus "${roleFocus}" (source: ${role.source})`)
