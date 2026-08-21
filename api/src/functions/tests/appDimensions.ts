@@ -32,7 +32,7 @@ import { getPgClient } from './pgClient'
 import { resolveTitle } from './roleTaxonomy'
 import {
   DimensionRow, DIMENSION_CATALOGUE, DIMENSION_BY_KEY, DIMENSION_SETS, DEFAULT_SET_KEY,
-  dimensionsFor, buildComparison, summarize, ResolvedDimensionSet,
+  dimensionsFor, buildComparison, summarize, ResolvedDimensionSet, DIMENSION_VERSION,
 } from './dimensions'
 
 const HEADERS = { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': '*', 'Access-Control-Allow-Methods': 'GET,POST,OPTIONS' }
@@ -226,7 +226,27 @@ export async function loadComparison(client: any, oppId: string): Promise<Dimens
   }))
 }
 
-/** Everything the JD step needs about the comparison, from ONE read. */
+/**
+ * Everything the JD step needs about the comparison, from ONE read.
+ *
+ * `set` IS COMPUTED LIVE AND `dimensions` IS NOT, and that gap is a lie waiting to be printed.
+ * `set` comes from the owner's prefs as they are right now; the rows come from
+ * `comparison_dimension`, written whenever the comparison was last resolved. Change the dimension
+ * set and the card would say "Your dimension set for engineering." directly above rows built from
+ * the seeded one — the caller cannot tell, because both halves arrive in the same object looking
+ * equally current.
+ *
+ * The same gap opened a second way the moment `DIMENSION_VERSION` went to 2 (D23): every row
+ * already in the database was graded by rules that could not compare people or usd, and recorded
+ * `numeric_verdict: 'unavailable'` for Organization size and Budget owned. Re-resolving those
+ * opportunities produces real grades. A row from before that is not wrong — it is a different
+ * measurement — and presenting it as the current one is the "stale label next to a correct number"
+ * failure this codebase has already paid for (D15).
+ *
+ * So the payload REPORTS the mismatch instead of hiding it. It does not silently re-resolve:
+ * re-grading on a GET would make a read request write, and would do it without the requirements
+ * and evidence this function does not load.
+ */
 export async function comparisonPayload(client: any, oppId: string, owner: string, role: string | null) {
   const rows = await loadComparison(client, oppId)
   const stored = await loadDimensionPrefs(client, owner)
@@ -236,6 +256,32 @@ export async function comparisonPayload(client: any, oppId: string, owner: strin
     summary: summarize(rows),
     set: { family: set.family, source: set.source, warning: set.warning || null, keys: set.keys },
     resolved: rows.length > 0,
+    stale: comparisonStaleness(rows, set.keys),
+  }
+}
+
+/**
+ * Why the stored comparison no longer matches how it would be built today — or null.
+ *
+ * Null when there is nothing to compare against: an unresolved opportunity has no rows, and
+ * reporting THAT as stale would put a warning on every opportunity nobody has resolved yet.
+ * Absent evidence is not a finding.
+ */
+export function comparisonStaleness(rows: DimensionRow[], setKeys: string[]):
+  { set_changed: boolean; rules_changed: boolean; missing: string[]; extra: string[]; row_version: number | null } | null {
+  if (!Array.isArray(rows) || !rows.length) return null
+  const have = new Set(rows.map(r => r.key))
+  const want = new Set(setKeys || [])
+  const missing = [...want].filter(k => !have.has(k))   // configured now, never graded
+  const extra = [...have].filter(k => !want.has(k))     // graded then, not configured now
+  const versions = rows.map(r => Number(r.dimension_version)).filter(Number.isFinite)
+  const rowVersion = versions.length ? Math.min(...versions) : null
+  const rulesChanged = rowVersion != null && rowVersion < DIMENSION_VERSION
+  if (!missing.length && !extra.length && !rulesChanged) return null
+  return {
+    set_changed: missing.length > 0 || extra.length > 0,
+    rules_changed: rulesChanged,
+    missing, extra, row_version: rowVersion,
   }
 }
 

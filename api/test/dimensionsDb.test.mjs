@@ -355,3 +355,66 @@ t('H:dimension-ddl-parity: the migration and the ensure-path build the SAME tabl
       `would not enforce what production enforces — the same divergence pointing the other way.`)
   }
 })
+
+// ---------------------------------------------------------------------------------------------
+// H:comparison-staleness-declared — D23/D24. `comparisonPayload` returns `set` read LIVE from the
+// owner's prefs and `dimensions` read from rows written when the comparison was last resolved. Both
+// arrive in one object looking equally current, so a caller cannot tell them apart — and the JD card
+// prints "Your dimension set for engineering." straight above the rows.
+//
+// Two ways they diverge, both real:
+//   * the owner changes their set (which is exactly what D24's Settings control will let them do,
+//     so this must be honest BEFORE that control exists, not after);
+//   * the grading rules change under rows already stored — D23 did this to every row in the
+//     database the moment DIMENSION_VERSION went to 2, because rows graded at 1 recorded
+//     numeric_verdict 'unavailable' for org size and budget where the engine now produces a grade.
+//
+// Against a POPULATED database, because the rows are the whole point.
+t('H:comparison-staleness-declared: a stored comparison says when it is no longer current', async () => {
+  const { c, opp, owner } = await populatedDb('p84_stale')
+  try {
+    const { writeComparison, comparisonPayload, setDimensionPrefs } =
+      await import('../dist/functions/tests/appDimensions.js')
+    const { loadRequirementsWithEvidence } = await import('../dist/functions/tests/appRequirements.js')
+    const { DIMENSION_VERSION } = await import('../dist/functions/tests/dimensions.js')
+    const rows = await loadRequirementsWithEvidence(c, opp)
+    const facts = (await c.query(`select key, value, value_num, source, confirmed_at from owner_fact where owner_email=$1`, [owner])).rows
+
+    await writeComparison(c, { id: opp, role: 'VP of Engineering', owner_email: owner }, rows, true, facts, false)
+
+    // Freshly resolved under the current rules and the current set: nothing to report. A warning
+    // on every opportunity is a warning nobody reads.
+    const fresh = await comparisonPayload(c, opp, owner, 'VP of Engineering')
+    assert.ok(fresh.dimensions.length > 0, 'nothing was resolved, so this proves nothing')
+    assert.equal(fresh.stale, null, 'a just-resolved comparison was reported as stale')
+
+    // (a) RULES changed under the stored rows. Age them by one version, which is exactly what D23
+    // did to every row that existed before it.
+    await c.query(`update comparison_dimension set dimension_version = $1 where opp_id = $2`,
+      [DIMENSION_VERSION - 1, opp])
+    const aged = await comparisonPayload(c, opp, owner, 'VP of Engineering')
+    assert.ok(aged.stale, 'rows graded by superseded rules were presented as current')
+    assert.equal(aged.stale.rules_changed, true)
+    assert.equal(aged.stale.set_changed, false, 'the set did not change; only the rules did')
+    assert.equal(aged.stale.row_version, DIMENSION_VERSION - 1)
+
+    await c.query(`update comparison_dimension set dimension_version = $1 where opp_id = $2`, [DIMENSION_VERSION, opp])
+    assert.equal((await comparisonPayload(c, opp, owner, 'VP of Engineering')).stale, null)
+
+    // (b) The OWNER changed their set — the D24 case. The rows on disk still reflect the old one.
+    await setDimensionPrefs(c, owner, 'engineering', ['cycle_time'])
+    const reset = await comparisonPayload(c, opp, owner, 'VP of Engineering')
+    assert.ok(reset.stale, 'the card would have claimed these rows were built from the new set')
+    assert.equal(reset.stale.set_changed, true)
+    assert.ok(reset.stale.extra.length > 0,
+      'dimensions graded under the old set but no longer configured were not named')
+    assert.equal(reset.set.source, 'owner', 'the live set did not pick up the owner choice at all')
+
+    // An UNRESOLVED opportunity has no rows and must not be reported as stale — absent evidence is
+    // not a finding, and every unresolved opportunity carrying a warning is how a warning dies.
+    await c.query(`delete from comparison_dimension where opp_id=$1`, [opp])
+    const empty = await comparisonPayload(c, opp, owner, 'VP of Engineering')
+    assert.equal(empty.resolved, false)
+    assert.equal(empty.stale, null, 'an opportunity nobody has compared was flagged as stale')
+  } finally { await c.end() }
+})
