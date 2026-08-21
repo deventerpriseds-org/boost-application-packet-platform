@@ -9,7 +9,7 @@ import { getPgClient } from './pgClient'
 import { buildRequirements } from './requirements'
 import {
   resolveAll, ProfileRecord, ResolveOptions, NO_EVIDENCE_NOTE, RESOLVER_VERSION,
-  verifyEvidence, tallyHealth, EvidenceHealth, EvidenceVerdict, EvidenceState,
+  verifyEvidence, tallyHealth, EvidenceHealth, EvidenceVerdict, EvidenceState, refusalReason,
 } from './evidence'
 import { sourceText, loadFacts } from './appFacts'
 import { resolveOptionsFor } from './checkPrefs'
@@ -513,11 +513,35 @@ export async function evidenceResolve(req: HttpRequest, context: InvocationConte
                     sources: profile.sources, wrote: 0 },
       }
     }
-    const out = await writeEvidence(client, opp.id, profile.records, await resolveOptionsFor(client, owner))
+    const evOpts = await resolveOptionsFor(client, owner)
+    const out = await writeEvidence(client, opp.id, profile.records, evOpts)
     // P8.4 / AC54 — the comparison is keyed to these requirement rows and their evidence, so it is
     // rebuilt in the SAME call. Leaving it behind would serve grades over evidence that has just
     // been replaced — the trap `requirementsBackfill` already documents for evidence itself.
     const cmp = await rebuildComparison(client, opp.id, owner, profile.records.length ? profile.records : null)
+
+    // TEMPORARY, root-causing D:evidence-resolves-nothing after the option-(c) matcher deploy still
+    // read evidenced:0 on real production data (opp 9f9c370a, runs 32503671944/32503929543, >3min
+    // post-deploy — worker convergence ruled out). `?debug=1` is opt-in, requires the same
+    // `requireWrite` session this route already needs, and touches no stored data — it only names
+    // WHY each unevidenced requirement was refused, using `refusalReason` (built for exactly this).
+    // REMOVE this block once the cause is found — it is not part of the shipped API.
+    let debug: any
+    if (String(req.query.get('debug') || '') === '1') {
+      const rows = (await client.query(
+        `select seq, verbatim, item_text from requirement where opp_id=$1 order by seq`, [opp.id])).rows
+      debug = {
+        recordKeys: profile.records.map(r => ({ key: r.key, kind: r.kind, chars: r.text.length })),
+        perRequirement: rows.map((r: any) => {
+          const text = r.verbatim || r.item_text || ''
+          return {
+            seq: r.seq, text,
+            reason: refusalReason(text, profile.records, evOpts),
+          }
+        }),
+      }
+    }
+
     return {
       status: 200, headers: HEADERS,
       jsonBody: {
@@ -526,6 +550,7 @@ export async function evidenceResolve(req: HttpRequest, context: InvocationConte
         note: out.evidenced === out.total
           ? 'every requirement is evidenced by a verbatim excerpt of your profile'
           : `${out.total - out.evidenced} requirement(s): ${NO_EVIDENCE_NOTE}`,
+        ...(debug ? { debug } : {}),
       },
     }
   } catch (e: any) {
