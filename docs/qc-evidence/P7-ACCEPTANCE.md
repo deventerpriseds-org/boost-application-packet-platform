@@ -50,6 +50,41 @@ hardcoded in eleven files, twice over. The Graph sender is a bare literal.
 The fix EXTENDS `CONFIG_KEYS` with the RowKeys the console already writes. A renamed constant, an env
 var, or a new `TEMPLATE_IDS` module is a rejection, not a fix.
 
+## Owner decisions on the live prompts (2026-08-21)
+
+**`resume_user` stays exactly as it is until the current prompt is proven working.** Live:
+`v001`, **29,068 chars, sha `4b4af84859072c45`**. The `claude/qc-d14-d33` lane staged a trimmed
+replacement (26,640 chars) that drops four sections — `Missing ATS Skills`,
+`Missing ATS Swap Suggestions`, `Jobscan Extraction`, `Word and Character Requirements Check` — on
+the reasoning that the QC engine now computes them. **That is not to be loaded.** The lane's own
+agent flagged the risk it was taking: *"A different owner would keep `Jobscan Extraction` — its
+per-skill JD-phrase→resume-phrase table is evidence provenance."* Evidence provenance is what
+P8.1/P8.3/P8.4 built subsystems to obtain, so removing its only upstream source is a product
+decision, not a cleanup. Revisit only after the current prompt is proven working in production; until
+then the discarded-section warnings are the correct behaviour and `D33` stays open.
+
+**Item 4 is settled, and the answer was the opposite of the length-based guess.** The duplicate was
+real but `portfolio_user` was the wrong row, not `resume_user`: it held a byte-identical copy of the
+resume prompt (both 29,068, sha `4b4af848`). The primary source settled which was wrong — Zap
+289877647 node 289877661 is the resume prompt at 29,069 chars, node 299599701 the portfolio prompt at
+7,712. `portfolio_user` is now `v002`, **7,712 chars, sha `b1adf7ee79f17c29`**, and Call 2's input
+fell by ~16,000 to 5,118 tokens with all four fields populated (`@AboutMe1_50words` 382,
+`@ExecutiveProfile_55words` 405, `@CoreAccomplishments` 772, `@CoverLetterBody` 1,453).
+
+**No prompt has ever been trimmed.** Measured against the live store, not the repo —
+`GET /api/prompts`, run `32448350079`, nine keys. Only two differ from their seed, and both grew or
+were corrected rather than shortened:
+
+| Key | Live | Change |
+|---|---|---|
+| `ats_system` | v002, 4,210 | **28-char stub → 4,210.** Authored by `62e4ede`; the stub was measured in run `32290705438`. A 150× increase. |
+| `portfolio_user` | v002, 7,714 | wrong prompt replaced with the right one (see Item 4) |
+| `ats_user`, `portfolio_system`, `resume_system`, `resume_user`, `review_email`, `reviewer_system`, `reviewer_user` | v001 | untouched since seeding |
+
+In the repo, all three commits that have ever touched `prompts/` are pure additions across every
+branch — zero deletions. The apparent `reviewer_system.txt | 28 ----` diffs on older branches are
+those branches predating `1cb5986`, which created the file.
+
 ## Also found, outside the eight
 
 `Promise.all(docJobs)` means one Drive failure discards the successful copies too — and with no Drive
