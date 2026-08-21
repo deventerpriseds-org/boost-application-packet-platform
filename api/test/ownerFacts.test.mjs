@@ -5,6 +5,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
   FACT_CATALOGUE, FACT_BY_KEY, demandedNumber, checkAgainstFacts, proposeMissingFacts, selectFactDef,
+  parseQuantity, factQuantity, formatQuantity, isComparableUnit,
 } from '../dist/functions/tests/ownerFacts.js'
 
 const fact = (key, value, value_num = null, confirmed = true, source = 'owner_stated') =>
@@ -274,4 +275,74 @@ test('total years cannot stand in for leadership years, in either direction', ()
   assert.equal(missing.fact_key, 'experience.years_leadership')
   assert.equal(missing.verdict, 'unknown')
   assert.match(missing.detail, /no value recorded/)
+})
+
+// ── D23: what the comparator does NOT reach, pinned so nobody reports it as reached ────────────
+//
+// A line that asks for BOTH years and an org size matches `experience.years_total` AND
+// `scope.largest_team`. Neither refines the other — they are unrelated questions, not a
+// subset relation — so `selectFactDef`'s survivor set holds both and catalogue ORDER breaks the
+// tie, which puts years first.
+//
+// CONSEQUENCE, stated rather than discovered: on a mixed line the org-size fact is still never
+// selected by `checkAgainstFacts`, so D23's arithmetic reaches the JD step's comparison (which
+// selects by `DimensionDef.factKeys`, not by the catalogue scan) but NOT the gate. This is a
+// deliberate limit, not an oversight, and the two available "fixes" are both worse:
+//   * reordering FACT_CATALOGUE silently changes which requirements EVERY gate treats as settled,
+//     across all 7,559 live requirement rows;
+//   * declaring a `refines` link between them would be false — H41 measures undeclared strict-subset
+//     relations by construction and a fabricated declaration is a lie told to that guard.
+// Fixing it properly needs multi-fact resolution per requirement, which is its own change.
+test('D23 limit: a mixed years+org-size line still resolves to years, and that is pinned', () => {
+  const mixed = 'Lead a team of 60 engineers and bring 10+ years of experience'
+  const def = selectFactDef(mixed)
+  assert.equal(def.key, 'experience.years_total',
+    'catalogue order stopped deciding the mixed-line tie — if this was changed deliberately, the ' +
+    'gate now settles a different population and that needs its own blast-radius trace')
+
+  // Both defs really do match, or the pin above is about nothing.
+  assert.ok(FACT_BY_KEY.get('experience.years_total').asks.test(mixed))
+  assert.ok(FACT_BY_KEY.get('scope.largest_team').asks.test(mixed))
+
+  // And the arithmetic that IS reached is the years one, on the years figure.
+  const v = checkAgainstFacts(mixed, [
+    { key: 'experience.years_total', value: '24 years', value_num: 24, source: 'owner_stated', confirmed_at: '2026-08-20T00:00:00Z' },
+    { key: 'scope.largest_team', value: '62 engineers', value_num: 62, source: 'owner_stated', confirmed_at: '2026-08-20T00:00:00Z' },
+  ])
+  assert.equal(v.fact_key, 'experience.years_total')
+  assert.equal(v.verdict, 'satisfied')
+  assert.match(v.detail, /24 years recorded, 10 required/)
+})
+
+// ── D23: the parser, at its own level ─────────────────────────────────────────────────────────
+
+test('D23: parseQuantity reports whether a usd figure carries its own magnitude', () => {
+  assert.deepEqual(parseQuantity('$18M', 'usd'), { value: 18000000, explicit: true })
+  assert.deepEqual(parseQuantity('$18', 'usd'), { value: 18, explicit: false })
+  assert.deepEqual(parseQuantity('team of 250', 'people'), { value: 250, explicit: true })
+  assert.equal(parseQuantity('no figure at all', 'usd'), null)
+  // `percent` has no arithmetic and must not acquire one by accident.
+  assert.equal(parseQuantity('travel up to 25%', 'percent'), null)
+  assert.equal(isComparableUnit('percent'), false)
+  assert.equal(isComparableUnit('usd'), true)
+})
+
+test('D23: factQuantity prefers the fact TEXT for money and value_num for counts', () => {
+  // The Settings writer strips the magnitude into value_num; the text still has it.
+  assert.deepEqual(factQuantity({ value: '$18M', value_num: 18 }, 'usd'), { value: 18000000, explicit: true })
+  // The derive writer agrees, from the other direction.
+  assert.deepEqual(factQuantity({ value: '$18M', value_num: 18000000 }, 'usd'), { value: 18000000, explicit: true })
+  // People are bare counts on both paths and are NOT rescaled.
+  assert.deepEqual(factQuantity({ value: '62 engineers', value_num: 62 }, 'people'), { value: 62, explicit: true })
+  // Nothing recorded is null, never zero — zero is a figure and would grade.
+  assert.equal(factQuantity({ value: null, value_num: null }, 'usd'), null)
+})
+
+test('D23: formatQuantity prints what the owner reads, not the raw enum', () => {
+  assert.equal(formatQuantity(18000000, 'usd'), '$18M')
+  assert.equal(formatQuantity(1500000000, 'usd'), '$1.5B')
+  assert.equal(formatQuantity(750000, 'usd'), '$750K')
+  assert.equal(formatQuantity(250, 'people'), '250 people')
+  assert.equal(formatQuantity(1, 'people'), '1 person')
+  assert.equal(formatQuantity(14, 'years'), '14 years')
 })
