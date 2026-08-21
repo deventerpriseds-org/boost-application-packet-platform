@@ -13,6 +13,7 @@ import {
 } from './evidence'
 import { sourceText, loadFacts } from './appFacts'
 import { resolveOptionsFor } from './checkPrefs'
+import { claimTokens, countTokensAcrossRecords, segments, tokensOf, sameWord } from './requirementSupport'
 import { writeComparison, comparisonPayload } from './appDimensions'
 
 const HEADERS = { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': '*', 'Access-Control-Allow-Methods': 'GET,POST,OPTIONS' }
@@ -534,9 +535,31 @@ export async function evidenceResolve(req: HttpRequest, context: InvocationConte
         recordKeys: profile.records.map(r => ({ key: r.key, kind: r.kind, chars: r.text.length })),
         perRequirement: rows.map((r: any) => {
           const text = r.verbatim || r.item_text || ''
+          // The BEST candidate excerpt across the whole profile, scored, even when refused. This is
+          // what separates a FALSE negative (the profile says it, we refused anyway) from a TRUE
+          // negative (the profile genuinely does not say it) — a distinction no refusal reason can
+          // make on its own, and one nobody can make without reading the profile.
+          const want = claimTokens(text)
+          const counts = countTokensAcrossRecords(profile.records)
+          let top: any = null
+          for (const rec of profile.records) {
+            for (const span of segments(rec.text, 1)) {
+              const excerpt = rec.text.slice(span.start, span.end)
+              const have = tokensOf(excerpt).map(x => x.t)
+              const matched = want.filter(t => have.includes(t) || have.some(h => sameWord(t, h)))
+              const support = want.length ? matched.length / want.length : 0
+              if (!top || support > top.support) {
+                top = { support: Math.round(support * 100) / 100, key: rec.key,
+                        excerpt: excerpt.slice(0, 140),
+                        missing: want.filter(t => !matched.includes(t)) }
+              }
+            }
+          }
           return {
-            seq: r.seq, text,
+            seq: r.seq, text, tokens: want,
+            genericTokens: want.filter(t => (counts.get(t) || 0) > 1),
             reason: refusalReason(text, profile.records, evOpts),
+            best: top,
           }
         }),
       }
