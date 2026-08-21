@@ -23,7 +23,10 @@ import { mergeFieldsFor } from './insertions'
 import { normalizePostingText } from './jdText'
 import { checkAgainstFacts, OwnerFact } from './ownerFacts'
 import { scanEcho, scanWording, WORDING_RUN_TOKENS } from './figureEcho'
-import { EvidenceInput, NO_EVIDENCE_NOTE, EVIDENCE_THRESHOLD, MIN_JUDGEABLE_TOKENS as EVIDENCE_MIN_TOKENS } from './evidence'
+import {
+  EvidenceInput, NO_EVIDENCE_NOTE, EVIDENCE_THRESHOLD, EVIDENCE_MAX_SENTENCES,
+  RESOLVE_MIN_TOKENS as EVIDENCE_MIN_TOKENS,
+} from './evidence'
 
 export type CheckState = 'pass' | 'warn' | 'fail' | 'not_applicable'
 export type CheckEngine = 'deterministic' | 'reviewer'
@@ -70,6 +73,15 @@ export interface CheckThresholds {
    */
   evidenceThreshold: number
   evidenceMinTokens: number
+  /**
+   * P8.3 / option (c) — the two knobs the purpose-made matcher adds.
+   *
+   * `evidenceMaxSentences`: how many CONTIGUOUS sentences one excerpt may span (clamped 1..3).
+   *
+   * Generic-vocabulary detection (M10) is DELIBERATELY not here: see
+   * `requirementSupport.GENERIC_RECORDS` for why it cannot be a single safe knob.
+   */
+  evidenceMaxSentences: number
 }
 
 /** Seeded first values, taken from the live prompt. The owner can change every one of them. */
@@ -89,6 +101,7 @@ export const DEFAULT_THRESHOLDS: CheckThresholds = {
   coverWords: [250, 400],
   evidenceThreshold: EVIDENCE_THRESHOLD,
   evidenceMinTokens: EVIDENCE_MIN_TOKENS,
+  evidenceMaxSentences: EVIDENCE_MAX_SENTENCES,
 }
 
 // Phrases and punctuation that read as machine-written. Kept as data so they can move to the

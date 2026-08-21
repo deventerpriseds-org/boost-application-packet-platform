@@ -11,7 +11,7 @@ import { readFileSync } from 'node:fs'
 
 import {
   profileRecords, resolveEvidence, resolveAll, toCheckInput,
-  EVIDENCE_THRESHOLD, MIN_JUDGEABLE_TOKENS, RESOLVER_VERSION, NO_EVIDENCE_NOTE, MC_KIND,
+  EVIDENCE_THRESHOLD, MIN_JUDGEABLE_TOKENS, RESOLVE_MIN_TOKENS, RESOLVER_VERSION, NO_EVIDENCE_NOTE, MC_KIND,
   verifyEvidence, tallyHealth, sha256,
   EVIDENCE_NOTE, EVIDENCE_STALE_NOTE, EVIDENCE_SOURCE_MISSING_NOTE, EVIDENCE_UNVERIFIED_NOTE,
 } from '../dist/functions/tests/evidence.js'
@@ -133,7 +133,10 @@ test('a requirement too thin to judge is NOT evidenced, whatever it happens to o
   const recs = profileRecords(MC, TEMPLATE)
   assert.equal(resolveEvidence('Leadership', recs), null)
   assert.equal(resolveEvidence('Own it', recs), null)
+  // The SHARED floor stays 3 (dimensions.ts grades against it); the resolver's own floor is 2,
+  // because this module's tokenizer strips requirement boilerplate the shared one keeps.
   assert.ok(MIN_JUDGEABLE_TOKENS >= 3)
+  assert.equal(RESOLVE_MIN_TOKENS, 2)
 })
 
 test('an excerpt short enough to happen by accident is not evidence', () => {
@@ -153,7 +156,14 @@ test('resolution is deterministic — the same inputs give byte-identical rows',
 
 test('the supporting note says what the excerpt does NOT cover, and never smuggles a second quote', () => {
   const recs = profileRecords(MC, TEMPLATE)
-  const ev = resolveEvidence('Owned the digital water technology roadmap with Product and Design', recs)
+  // NOT 'with Product and Design' — 'Design' capitalized mid-sentence now reads as a named entity
+  // (M11's exact-name rule, added 2026-08-21 with the purpose-made matcher) and a genuinely absent
+  // name is correctly refused rather than partially credited. That is a stricter, more correct
+  // resolver, not a broken one; this test is about the shape of `extra`, so it uses ordinary
+  // lowercase vocabulary that is missing instead.
+  // Every CONTENTFUL token of this requirement is in the profile; only the weak verb `drive` is
+  // absent, which is exactly the case `extra` exists to narrate.
+  const ev = resolveEvidence('Drive the digital water technology roadmap', recs)
   assert.ok(ev)
   if (ev.extra !== null) {
     assert.match(ev.extra, /^the excerpt does not mention: /)
@@ -163,7 +173,9 @@ test('the supporting note says what the excerpt does NOT cover, and never smuggl
 
 test('the threshold is a seeded default a caller can move, not a constant', () => {
   const recs = profileRecords(MC, TEMPLATE)
-  const req = 'Owned the digital water technology roadmap with Product across three business units'
+  // `platform` and `modernization` are both in workHistory1; `mainframe` is too, but `cadence`
+  // is not — so contentful coverage is partial and the THRESHOLD is what decides.
+  const req = 'Owned the platform modernization mainframe cadence'
   const strict = resolveEvidence(req, recs, { threshold: 0.99 })
   const loose = resolveEvidence(req, recs, { threshold: 0.4 })
   assert.equal(strict, null, 'at 0.99 nothing partial qualifies')
@@ -279,18 +291,23 @@ test('the evidence thresholds are seeded defaults with a real owner path, not co
   // `ResolveOptions` being overridable in principle while every shipped caller passed the literal
   // is that rule broken with a settings hook attached — found by the independent verifier (D-F).
   assert.equal(DEFAULT_THRESHOLDS.evidenceThreshold, EVIDENCE_THRESHOLD)
-  assert.equal(DEFAULT_THRESHOLDS.evidenceMinTokens, MIN_JUDGEABLE_TOKENS)
+  // The owner-settable default tracks the RESOLVER's floor, not the shared one — `writeEvidence`
+  // passes it into `resolveEvidence`, so it must mean what that function means by it.
+  assert.equal(DEFAULT_THRESHOLDS.evidenceMinTokens, RESOLVE_MIN_TOKENS)
 
   // The production caller passes them through, and the store column exists to hold them.
+  // `ensureCheckPrefs`/`loadThresholds` moved to `checkPrefs.ts` (see its own header: it broke an
+  // appChecks <-> appRequirements import cycle) — `appChecks.ts` now only re-exports them.
+  const checkPrefs = readFileSync(new URL('../src/functions/tests/checkPrefs.ts', import.meta.url), 'utf8')
   const appChecks = readFileSync(new URL('../src/functions/tests/appChecks.ts', import.meta.url), 'utf8')
-  assert.match(appChecks, /chk_evidence_threshold/, 'no per-owner column, no owner path')
-  assert.match(appChecks, /chk_evidence_min_tokens/)
+  assert.match(checkPrefs, /chk_evidence_threshold/, 'no per-owner column, no owner path')
+  assert.match(checkPrefs, /chk_evidence_min_tokens/)
   assert.match(appChecks, /writeEvidence\([\s\S]{0,200}threshold: thresholds\.evidenceThreshold/,
     'the resolver must receive the owner value, not just the checks')
 
   // And an owner value actually changes the answer.
   const recs = profileRecords(MC, TEMPLATE)
-  const req = 'Owned the digital water technology roadmap with Product across three business units'
+  const req = 'Owned the platform modernization mainframe cadence'
   assert.equal(resolveEvidence(req, recs, { threshold: 0.99 }), null)
   assert.ok(resolveEvidence(req, recs, { threshold: 0.4 }))
 })

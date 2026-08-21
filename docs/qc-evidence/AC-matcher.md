@@ -16,7 +16,7 @@
 >
 > Nothing here has been implemented. No source file was changed.
 
-status: complete
+status: implemented, mechanism verified locally (46/46 in `api/test/matcher.test.mjs`; 628/628 full regression), NOT yet confirmed live — M42/M43 have not been run against production
 
 Scope: `POST /api/app/opportunity/{id}/evidence` returns `evidenced: 0` on real data
 (runs 32451913037, 32480993987 — 45 requirements, 15 readable profile records, 0 evidenced,
