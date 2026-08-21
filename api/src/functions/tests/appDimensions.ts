@@ -11,12 +11,21 @@
 // that always eventually appears. Same reasoning, same shape, as `owner_fact`'s
 // "a confirmed fact must have a value" check.
 //
-// SCHEMA REGISTRATION IS OWED, AND SAID OUT LOUD. D1/H11's rule is that a new table belongs in
-// `schema.ts`'s SCHEMA_SQL and EXPECTED_TABLES so `pgMigrate` reports a migration gap instead of
-// 500ing at runtime. `schema.ts` is owned by another lane mid-fix and this lane was told not to
-// edit it, so the table is created by the ensure-path below ONLY. Consequence, stated rather than
-// discovered later: `diag/pg-migrate` will not list `comparison_dimension` in its completeness
-// report, and H11 does not guard it. Recorded in `.claude/DEFERRED.md`.
+// SCHEMA REGISTRATION — D21, now DONE. `comparison_dimension` is declared in `schema.ts`'s
+// SCHEMA_SQL, named in `EXPECTED_TABLES` so `pgMigrate` reports a migration gap instead of a 500,
+// and listed in H11's hand-maintained array (the third place, and the one that gets forgotten).
+//
+// The ensure-path below STAYS, because a request may still meet a database the migration has not
+// reached — but it is now a SECOND copy of DDL that also lives in `schema.ts`, and two copies of a
+// CREATE TABLE is precisely the shape that goes wrong in silence. It cannot be caught by reading:
+// every database that ran this ensure-path already HAS the table, so `create table if not exists`
+// in SCHEMA_SQL is skipped there, and a CHECK present in one copy and not the other would be
+// enforced on fresh installs and absent on production forever.
+//
+// So it is caught by EXECUTION instead. `H:dimension-ddl-parity` (api/test/dimensionsDb.test.mjs)
+// builds the table both ways against a real cluster and diffs every column, constraint and index
+// the database reports. Proved by reinstating the defect: changing one CHECK in the SCHEMA_SQL copy
+// fails that test by name.
 import { app, HttpRequest, HttpResponseInit, InvocationContext } from '@azure/functions'
 import { resolveOwner, requireWrite } from './appSession'
 import { getPgClient } from './pgClient'

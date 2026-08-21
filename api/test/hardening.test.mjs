@@ -271,7 +271,14 @@ test('H11: every table this layer added is registered for migration', () => {
   const schema = src('schema.ts')
   for (const t of ['requirement', 'requirement_evidence', 'skill_candidate', 'swap_decision', 'insertion',
                    'check_result', 'artifact_gate', 'artifact_score',
-                   'term_library', 'term_library_entry', 'term_candidate']) {
+                   'term_library', 'term_library_entry', 'term_candidate',
+                   // D21. Shipped created by an ensure-path only (appDimensions.ts), so it worked at
+                   // runtime while pg-migrate never reported it and THIS array — the third place, and
+                   // the one that gets forgotten — did not name it. Proved by reinstating both halves
+                   // of the defect: dropping the name from EXPECTED_TABLES fails this case on
+                   // "not in EXPECTED_TABLES", and renaming the CREATE in SCHEMA_SQL fails it on
+                   // "not in SCHEMA_SQL".
+                   'comparison_dimension']) {
     assert.ok(schema.includes(`create table if not exists ${t} `) || schema.includes(`create table if not exists ${t}(`),
       `${t} is not in SCHEMA_SQL`)
     assert.ok(new RegExp(`'${t}'`).test(schema.slice(schema.indexOf('EXPECTED_TABLES'))),

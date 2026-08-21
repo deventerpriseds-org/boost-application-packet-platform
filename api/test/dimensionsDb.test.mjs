@@ -37,7 +37,18 @@ const PGDATA = `${SOCK}/data`
 function bootPg() {
   if (!existsSync(`${PGBIN}/initdb`)) return false
   try {
-    if (existsSync(`${SOCK}/.s.PGSQL.55432`)) return true      // already up — reuse it
+    // A SOCKET FILE IS NOT A RUNNING SERVER. This line used to return true on the strength of
+    // the file alone, and the file OUTLIVES the process: after a container restore /var/tmp still
+    // held /var/tmp/p84pg/.s.PGSQL.55432 with no postmaster behind it, so every test in this file
+    // failed with ECONNREFUSED while bootPg reported a healthy cluster. That is the same
+    // conflation the comment above says was fixed, one level down — "the binaries exist" became
+    // "the socket exists", and neither is "a server is listening". Ask the postmaster.
+    if (existsSync(`${SOCK}/.s.PGSQL.55432`)) {
+      try {
+        execSync(`su postgres -c "${PGBIN}/pg_ctl -D ${PGDATA} status"`, { stdio: 'ignore' })
+        return true                                            // genuinely up — reuse it
+      } catch { /* stale socket: fall through and rebuild the cluster */ }
+    }
     execSync(`rm -rf ${SOCK} && mkdir -p ${PGDATA} && chown -R postgres ${SOCK}`, { stdio: 'ignore' })
     execSync(`su postgres -c "${PGBIN}/initdb -D ${PGDATA} -U postgres -A trust"`, { stdio: 'ignore' })
     execSync(`su postgres -c "${PGBIN}/pg_ctl -D ${PGDATA} -o '-p 55432 -k ${SOCK} -c listen_addresses=' -l ${SOCK}/pg.log -w start"`, { stdio: 'ignore' })
@@ -48,18 +59,23 @@ const HAVE_PG = bootPg()
 
 const CONN = { host: SOCK, port: 55432, user: 'postgres', database: 'postgres' }
 
+/**
+ * pgvector is not installable in this container; the substitution is confined to the columns that
+ * need it and is irrelevant to every table this lane touches. ONE copy, used for both the ref
+ * lookup and the built module, so the two schemas are always made runnable the same way.
+ */
+const usableSql = (sql) => sql
+  .replace(/create extension if not exists vector;/, '')
+  .replace(/vector\(1536\)/g, 'text')
+  .replace(/create index if not exists opp_embedding_hnsw[^;]*;/, '')
+
 /** SCHEMA_SQL as it exists at a git ref — the PREVIOUS schema, never the working tree's. */
 function schemaSqlAt(ref) {
   const src = execSync(`git show ${ref}:api/src/functions/tests/schema.ts`, { encoding: 'utf8' })
   const marker = 'export const SCHEMA_SQL = `'
   const i = src.indexOf(marker)
   const j = src.indexOf('`', i + marker.length)
-  return src.slice(i + marker.length, j)
-    // pgvector is not installable in this container; the substitution is confined to the columns
-    // that need it and is irrelevant to every table this lane touches.
-    .replace(/create extension if not exists vector;/, '')
-    .replace(/vector\(1536\)/g, 'text')
-    .replace(/create index if not exists opp_embedding_hnsw[^;]*;/, '')
+  return usableSql(src.slice(i + marker.length, j))
 }
 
 async function populatedDb(name) {
@@ -126,6 +142,12 @@ t('the store is created on a POPULATED database that already has the previous sc
     assert.equal(before.rows[0].rq, 6)
     assert.equal(before.rows[0].ev, 1)
     assert.equal(before.rows[0].f, 1)
+    // The ensure-path's job is to create the table on a database that does NOT have it. Once D21
+    // landed, origin/main's SCHEMA_SQL DECLARES comparison_dimension, so populatedDb now hands us a
+    // database that already has it and the precondition below would be false — the test would have
+    // gone vacuous in exactly the silent way this file exists to prevent. Dropping it restores the
+    // condition the test is about, rather than deleting the assertion that noticed.
+    await c.query(`drop table if exists comparison_dimension`)
     const pre = await c.query(`select to_regclass('public.comparison_dimension') t`)
     assert.equal(pre.rows[0].t, null, 'the table must not already exist, or this proves nothing')
 
@@ -258,4 +280,78 @@ t('AC46/AC47: the comparison and the requirements endpoint count evidence from t
       'the comparison credited coverage no evidence row supports')
     assert.equal(endpointEvidenced, evidencedSeqs.size)
   } finally { await c.end() }
+})
+
+// ---------------------------------------------------------------------------------------------
+// H:dimension-ddl-parity — D21. `comparison_dimension` is now declared in SCHEMA_SQL *and* still
+// created by `ensureDimensionTable`, because a request can still meet a database the migration has
+// not reached. Two copies of one CREATE TABLE is the shape that diverges in silence, and no amount
+// of reading catches it: every database that ran the ensure-path already HAS the table, so
+// SCHEMA_SQL's `create table if not exists` is SKIPPED there. A CHECK added to one copy would be
+// enforced on fresh installs and absent on production, forever, with the migration exiting 0.
+//
+// This asks the only question that settles it, and lets the database answer: build the table BOTH
+// ways and diff every column, constraint and index PostgreSQL reports.
+//
+// Proved by reinstating the defect rather than by assertion: with
+// `check (posting_text is null or posting_quoted is not null)` deleted from the SCHEMA_SQL copy
+// only, this test fails by name on `cons`, and `npm test` goes red. Restored, it passes.
+t('H:dimension-ddl-parity: the migration and the ensure-path build the SAME table', async () => {
+  // HEAD's SCHEMA_SQL from the BUILT module — what production actually migrates with.
+  const head = usableSql(
+    execSync('node -e "process.stdout.write(require(\'./dist/functions/tests/schema.js\').SCHEMA_SQL)"',
+      { encoding: 'utf8', cwd: new URL('..', import.meta.url).pathname }))
+  assert.ok(/create table if not exists comparison_dimension/.test(head),
+    'SCHEMA_SQL does not declare comparison_dimension — D21 has been reverted')
+
+  const admin = new Client(CONN); await admin.connect()
+  for (const db of ['p84_ddl_migrated', 'p84_ddl_ensured']) {
+    await admin.query(`drop database if exists ${db}`)
+    await admin.query(`create database ${db}`)
+  }
+  await admin.end()
+
+  // A: the migration path — SCHEMA_SQL alone.
+  const a = new Client({ ...CONN, database: 'p84_ddl_migrated' }); await a.connect()
+  await a.query(head)
+
+  // B: the ensure path — the PREVIOUS schema (which has opportunity but not this table), then the
+  // runtime function, exactly as a request that arrives before the migration would run it.
+  const b = new Client({ ...CONN, database: 'p84_ddl_ensured' }); await b.connect()
+  await b.query(schemaSqlAt('origin/main'))
+  await b.query(`drop table if exists comparison_dimension`)
+  const { ensureDimensionTable } = await import('../dist/functions/tests/appDimensions.js')
+  await ensureDimensionTable(b)
+
+  const shape = async (c) => ({
+    cols: (await c.query(`
+      select column_name||' '||data_type||' null='||is_nullable||' default='||coalesce(column_default,'NONE') d
+        from information_schema.columns
+       where table_schema='public' and table_name='comparison_dimension' order by 1`)).rows.map(r => r.d),
+    cons: (await c.query(`
+      select co.conname||' :: '||pg_get_constraintdef(co.oid) d
+        from pg_constraint co join pg_class cl on cl.oid = co.conrelid
+       where cl.relname='comparison_dimension' order by 1`)).rows.map(r => r.d),
+    idx: (await c.query(
+      `select indexdef d from pg_indexes where schemaname='public' and tablename='comparison_dimension' order by 1`)).rows.map(r => r.d),
+  })
+
+  const A = await shape(a)
+  const B = await shape(b)
+  await a.end(); await b.end()
+
+  // Absent evidence is not a pass: if neither path built anything, the diff below is vacuous.
+  assert.ok(A.cols.length > 15, `the migrated table has ${A.cols.length} columns — SCHEMA_SQL did not build it`)
+  assert.ok(B.cols.length > 15, `the ensured table has ${B.cols.length} columns — the ensure-path did not build it`)
+  assert.ok(A.cons.length >= 8, `only ${A.cons.length} constraints — the CHECKs are not being read`)
+
+  for (const kind of ['cols', 'cons', 'idx']) {
+    assert.deepEqual(A[kind].filter(x => !B[kind].includes(x)), [],
+      `${kind}: declared in SCHEMA_SQL and ABSENT from the ensure-path. Every database created by ` +
+      `the ensure-path already has this table, so SCHEMA_SQL's create-if-not-exists is skipped ` +
+      `there and this difference never reaches production.`)
+    assert.deepEqual(B[kind].filter(x => !A[kind].includes(x)), [],
+      `${kind}: built by the ensure-path and MISSING from SCHEMA_SQL. A freshly migrated database ` +
+      `would not enforce what production enforces — the same divergence pointing the other way.`)
+  }
 })

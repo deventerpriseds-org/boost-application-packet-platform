@@ -849,6 +849,62 @@ create table if not exists escalation (
 create index if not exists escalation_packet_idx on escalation(packet_id, state);
 create index if not exists escalation_artifact_idx on escalation(artifact_id, state);
 
+-- P8.4 -- the posting-vs-profile comparison, one row per dimension per opportunity.
+--
+-- REGISTERED HERE, not only in an ensure-path (D21 / D1 / H11). The table shipped created solely by
+-- ensureDimensionTable (appDimensions.ts), so it worked at runtime while diag/pg-migrate never
+-- listed it and H11 could not guard it -- a store that exists in production but not in the
+-- migration's completeness report is a gap nothing signals.
+--
+-- THIS DDL AND ensureDimensionTable's MUST STAY IDENTICAL, and a comment saying so is not what
+-- keeps them identical. Every database that ran the ensure-path ALREADY HAS this table, so the
+-- create-table-if-not-exists below is SKIPPED there -- exactly the trap that shipped three times in
+-- one session. A CHECK that differed between the two paths would therefore be enforced on fresh
+-- installs and absent on production, silently and forever. What actually holds them together is
+-- H:dimension-ddl-parity in api/test/dimensionsDb.test.mjs, which builds the table BOTH ways
+-- against a real cluster and diffs every column, constraint and index the database reports.
+--
+-- Deliberately NOT interpolated from a shared constant, though that would make drift impossible:
+-- SCHEMA_SQL is extracted as RAW SOURCE TEXT by three consumers (api/test/schemaParity.test.mjs,
+-- api/test/dimensionsDb.test.mjs, and the local-schema procedure in CLAUDE.md), and a JS
+-- interpolation left unexpanded in that text is invalid SQL. Note also that a backtick anywhere in
+-- this file's SQL would END the template literal -- writing this comment with backticks in it broke
+-- the build once, in this very block. The executed test is the guard; the literal is the contract.
+create table if not exists comparison_dimension (
+  id              uuid primary key default uuid_generate_v4(),
+  opp_id          uuid not null references opportunity(id) on delete cascade,
+  dimension_key   text not null,
+  label           text not null,
+  fit             text not null check (fit in ('strong','moderate','weak','not_applicable')),
+  basis           text not null check (basis in ('fact','evidence','none')),
+  numeric_verdict text check (numeric_verdict in ('satisfied','not_satisfied','unavailable')),
+  shortfall       text check (shortfall in ('nothing_found','falls_short')),
+  posting_seq     int,
+  posting_text    text,
+  posting_quoted  boolean,
+  profile_value   text,
+  profile_source_label text,
+  profile_source  text check (profile_source in ('evidence','fact')),
+  note            text,
+  reason          text,
+  covered         int,
+  total           int,
+  matched_seqs    int[] not null default '{}',
+  set_source      text not null check (set_source in ('owner','seed_family','seed_default')),
+  role_family     text not null,
+  dimension_version int not null,
+  resolved_at     timestamptz not null default now(),
+  unique (opp_id, dimension_key),
+  -- The acceptance sentence, as a constraint: every moderate/weak grade carries the reason.
+  check (fit not in ('moderate','weak') or (note is not null and btrim(note) <> '')),
+  -- Its mirror: a row that measured nothing must say which state it was in.
+  check (fit <> 'not_applicable' or (reason is not null and btrim(reason) <> '')),
+  -- A graded row has a denominator; an ungraded one must not invent one.
+  check (fit = 'not_applicable' or (covered is not null and total is not null and total > 0)),
+  check (fit <> 'not_applicable' or (covered is null and total is null))
+);
+create index if not exists comparison_dimension_opp_idx on comparison_dimension(opp_id);
+
 -- Idempotent multi-tenant column adds (safe on tables that predate them)
 -- artifact_score gained judged_requirement_ids AFTER the table shipped, so the inline column in the
 -- create above reaches a FRESH database only. On every database that already has artifact_score --
@@ -1042,5 +1098,5 @@ export const EXPECTED_TABLES = [
   'interview', 'offer', 'library_entity', 'asset_event', 'usage_metering',
   'term_library', 'term_library_entry', 'term_candidate', 'requirement',
   'skill_candidate', 'swap_decision', 'insertion', 'check_result', 'artifact_gate', 'artifact_score', 'owner_fact', 'review_verdict',
-  'remediation_loop', 'escalation', 'requirement_evidence'
+  'remediation_loop', 'escalation', 'requirement_evidence', 'comparison_dimension'
 ]
