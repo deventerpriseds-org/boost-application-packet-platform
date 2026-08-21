@@ -10,9 +10,11 @@ import { buildRequirements } from './requirements'
 import {
   resolveAll, ProfileRecord, ResolveOptions, NO_EVIDENCE_NOTE, RESOLVER_VERSION,
   verifyEvidence, tallyHealth, EvidenceHealth, EvidenceVerdict, EvidenceState,
+  refusalReason, NEVER_EVIDENCE,
 } from './evidence'
 import { sourceText, loadFacts } from './appFacts'
 import { resolveOptionsFor } from './checkPrefs'
+import { claimTokens, segments, tokensOf, sameWord } from './requirementSupport'
 import { writeComparison, comparisonPayload } from './appDimensions'
 
 const HEADERS = { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': '*', 'Access-Control-Allow-Methods': 'GET,POST,OPTIONS' }
@@ -331,6 +333,37 @@ export async function rebuildComparison(client: any, oppId: string, owner: strin
 export function shapeRequirementsForApi(joined: any[], records: ProfileRecord[] | null): {
   requirements: any[]; evidenced: number; unevidenced: number; evidenceHealth: EvidenceHealth
 } {
+  // WHAT WE LOOKED FOR, for every requirement the profile does not support.
+  //
+  // "no evidence found in your profile" is true and useless: it does not say what was sought, so the
+  // owner cannot act on it. The resolver already computes the answer — which rule refused it, which
+  // words were missing, and the closest excerpt it found — and until now threw all of it away.
+  // Surfacing it turns a dead end into a decision: add the missing thing to the profile, or accept
+  // that this posting asks for something the profile does not claim.
+  //
+  // Read-only and derived: nothing here is stored, and it cannot make an unevidenced requirement
+  // look evidenced — `evidenced` is still `evidence_quote != null` and nothing below touches it.
+  const lookedFor = (text: string) => {
+    if (!records || !records.length) return null
+    const reason = refusalReason(text, records)
+    if (!reason) return null
+    const want = claimTokens(text)
+    let best: { excerpt: string; sourceKey: string; missing: string[] } | null = null
+    for (const rec of records) {
+      if (NEVER_EVIDENCE.has(rec.key)) continue
+      for (const span of segments(rec.text, 1)) {
+        const excerpt = rec.text.slice(span.start, span.end)
+        const have = tokensOf(excerpt).map(x => x.t)
+        const hit = want.filter(t => have.includes(t) || have.some(h => sameWord(t, h)))
+        if (!best || hit.length > want.length - best.missing.length) {
+          best = { excerpt: excerpt.slice(0, 160), sourceKey: rec.key, missing: want.filter(t => !hit.includes(t)) }
+        }
+      }
+    }
+    return { reason, soughtWords: want, missingWords: best ? best.missing : want,
+             closestExcerpt: best ? best.excerpt : null, closestSourceKey: best ? best.sourceKey : null }
+  }
+
   const { rows, health } = verifyRequirementRows(joined, records)
   const requirements = rows.map((r: any) => ({
     ...r,
@@ -358,6 +391,8 @@ export function shapeRequirementsForApi(joined: any[], records: ProfileRecord[] 
     // possible sentences rather than the only one, because it is one of five different claims.
     evidenceState: r.evidence_state,
     evidenceNote: r.evidence_note,
+    // Only for rows with no provable excerpt — an evidenced row already shows its quote.
+    evidenceSearch: r.evidence_quote != null ? null : lookedFor(r.verbatim || r.item_text || ''),
   }))
   const evidenced = requirements.filter(r => r.evidenced).length
   return { requirements, evidenced, unevidenced: requirements.length - evidenced, evidenceHealth: health }

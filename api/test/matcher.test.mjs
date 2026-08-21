@@ -26,7 +26,7 @@ import {
 } from '../dist/functions/tests/requirementSupport.js'
 import { MIN_QUOTE_CHARS, MIN_QUOTE_WORDS } from '../dist/functions/tests/reviewer.js'
 import { DEFAULT_THRESHOLDS } from '../dist/functions/tests/checks.js'
-import { writeEvidence } from '../dist/functions/tests/appRequirements.js'
+import { writeEvidence, shapeRequirementsForApi } from '../dist/functions/tests/appRequirements.js'
 
 const SRC = path.join(import.meta.dirname, '..', 'src', 'functions', 'tests')
 const src = f => fs.readFileSync(path.join(SRC, f), 'utf8')
@@ -991,4 +991,54 @@ test('H:record-frequency-not-evidence: a token recurring across records must not
   const ev = resolveEvidence('Drive platform modernization', repeated)
   assert.ok(ev, 'a claim the profile makes repeatedly is MORE evidenced, never less')
   assert.equal(repeated.find(r => r.key === ev.source_key).text.slice(ev.char_start, ev.char_end), ev.quote)
+})
+
+test('H:bullet-blob-not-one-quote: a pipe-separated field splits into items, not one blob', () => {
+  // The first evidence row production ever stored quoted a 400-character pipe-delimited skills blob
+  // as proof of `Experience in leading technology operations` (db-query 2026-08-21, resolver_version
+  // 2, offsets and length all structurally valid). The live profile separates items inside one field
+  // with `|`, and `segments()` split only on newlines and sentence punctuation, so the whole field
+  // was ONE candidate. A long excerpt also clears a coverage threshold merely by containing more
+  // words, so the blob outranked the focused item that actually said the thing.
+  const BLOB = 'Budget Development and P&L Management|KPI-driven performance management|Enterprise alignment of strategy and execution|Global technology operations leadership'
+  const spans = segments(BLOB, 1).map(s => BLOB.slice(s.start, s.end))
+  assert.ok(spans.includes('Global technology operations leadership'), `got ${JSON.stringify(spans)}`)
+  assert.ok(spans.every(x => !x.includes('|')), 'no candidate may span a bullet separator')
+
+  const recs = profileRecords({ expertise: BLOB }, null)
+  const ev = resolveEvidence('Experience in leading technology operations', recs)
+  assert.ok(ev)
+  assert.equal(ev.quote, 'Global technology operations leadership')
+  assert.ok(ev.quote.length < 60, 'the excerpt must be the ITEM, never the whole field')
+  assert.equal(recs[0].text.slice(ev.char_start, ev.char_end), ev.quote, 'offsets still index the original')
+})
+
+test('H:refusal-says-what-was-sought: an unevidenced row reports the words it looked for', () => {
+  // "no evidence found in your profile" is true and unactionable. The resolver already knows which
+  // rule refused, which words were missing and the closest excerpt it saw; throwing that away left
+  // the owner with a dead end instead of a decision.
+  const joined = [{
+    seq: 0, verbatim: 'Ability to manage remote teams', item_text: '',
+    evidence_quote: null, evidence_source_key: null, evidence_char_start: null, evidence_char_end: null,
+  }]
+  const out = shapeRequirementsForApi(joined, PROD)
+  const row = out.requirements[0]
+
+  assert.equal(row.evidenced, false, 'surfacing the search must never make a row look evidenced')
+  assert.ok(row.evidenceSearch, 'an unevidenced row must say what was sought')
+  assert.ok(row.evidenceSearch.soughtWords.includes('remote'))
+  assert.ok(row.evidenceSearch.missingWords.includes('remote'),
+    'and must name the word the profile never uses')
+  assert.ok(row.evidenceSearch.reason, 'and which rule refused it')
+  assert.ok(typeof row.evidenceSearch.closestExcerpt === 'string' && row.evidenceSearch.closestExcerpt.length > 0,
+    'and the nearest thing the profile does say')
+  assert.ok(row.evidenceSearch.closestExcerpt.length <= 160, 'bounded — a hint, not a record dump')
+
+  // An EVIDENCED row shows its quote instead; it does not carry a search.
+  const ok = shapeRequirementsForApi([{
+    seq: 1, verbatim: 'Manage distributed engineering teams', item_text: '',
+    evidence_quote: 'managing distributed engineering teams', evidence_source_key: 'workHistory3',
+    evidence_char_start: 0, evidence_char_end: 38,
+  }], PROD)
+  assert.equal(ok.requirements[0].evidenceSearch, null)
 })
