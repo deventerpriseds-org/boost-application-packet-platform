@@ -12,7 +12,33 @@
       --proto-paper: var(--surface-background-primary);
       --proto-ink: var(--text-primary);
       --proto-ink2: var(--text-secondary);
-      --proto-ink3: var(--text-tertiary);
+      /* TERTIARY INK — D27. `--text-tertiary` is `--neutral-400`, and as TEXT that is below AA on
+         every ground the app paints: measured in Chromium before this change, `.px-small` (11px,
+         this token) came out at 2.43 on the app ground, 2.56 on paper, 2.43 on panel and 2.31 on
+         panel-deep. The 2.56 figure the P8.6 lane reported was real and was the BEST of the four.
+         Dark was no better in its own direction: 3.07 / 3.75 / 3.07 / 2.18.
+
+         Why the token moved rather than the class. The `panel` tone got its own
+         `--proto-ink-on-panel` because ink2 was readable everywhere EXCEPT one ground — a
+         context defect, so a context token fixed it. This is the opposite shape: ink3 fails on
+         EVERY ground in BOTH themes, so it is the token's value that is wrong and no per-class
+         token would fix the other consumers. `.px-small`, `.px-label` and 66 inline
+         `color: var(--proto-ink3)` sites in `src/` all render real informational text through it
+         ("No record yet", "Use Parse posting to fetch it", "N of M") — they are not decoration.
+
+         CONSEQUENCE, AND IT IS DELIBERATE: one step down the ramp is `--neutral-500`, which is
+         exactly `--proto-ink2`'s value, so tertiary and secondary ink are now the SAME colour and
+         the three-tier ink hierarchy is a two-tier one. The ramp has no step between 400 and 500,
+         so the alternative was to move ink2 down as well — 126 inline sites plus `.px-meta`,
+         `.px-pill`, `.px-chip`, `.px-tab`, `.px-logo` and the input placeholder, i.e. every piece
+         of secondary text in the app — which is far more churn than this defect warrants and is
+         the same trade the pill lane declined. The token is KEPT rather than deleted because 66
+         call sites use it to mean "de-emphasised"; the day the ramp gains a step between 400 and
+         500, one line here restores the third tier. Logged as D29.
+
+         The direction REVERSES in dark (see `.proto-dark` below) — this base block is inherited,
+         so a light-only fix written here silently follows into dark and undoes itself. */
+      --proto-ink3: var(--neutral-500);
       --proto-rule: var(--border-strong);
       --proto-rule-soft: var(--border-default);
       --proto-panel: var(--surface-background-secondary);
@@ -114,6 +140,11 @@
       --proto-accent: var(--brand-300);
       --proto-red: var(--red-400);
       --proto-ink-on-panel: var(--neutral-300);
+      /* Dark tertiary ink — the opposite direction to the light fix above, for the same reason the
+         status inks reverse: on a near-black ground the ink must get LIGHTER. Measured before this
+         change at 3.07 / 3.75 / 3.07 / 2.18 across the four grounds; `--neutral-400` takes those to
+         5.71 / 6.96 / 5.71 / 4.04. Same D29 consequence — this is `--proto-ink2`'s dark value. */
+      --proto-ink3: var(--neutral-400);
       /* green and yellow are restored to the values they had before the light-mode darkening —
          NOT a new choice, the Compass dark steps they already resolved to, which measured 4.52 and
          6.79 and passed. They must be repeated here because the block above is the BASE, so a

@@ -89,6 +89,9 @@ const TEMP_TOKENS = {
   cooling: { solid: 'var(--temp-cooling)', tint: 'var(--temp-cooling-tint)' },
   cold: { solid: 'var(--temp-cold)', tint: 'var(--temp-cold-tint)' },
 }
+// Exported for the SAME reason as TONE_TABLE: the contrast sweep measures THESE keys, not a copy
+// of them, so a fifth temperature is swept the day it is added and cannot ship below threshold.
+export const TEMP_KEYS = Object.keys(TEMP_TOKENS)
 /** A temperature's two tokens. An unknown key falls back to visible ink, never to nothing. */
 export const tempColor = (key) => (TEMP_TOKENS[key] || { solid: 'var(--proto-ink3)', tint: 'transparent' })
 /** The chip style, tinted when the filter is on and outlined in both states. */
