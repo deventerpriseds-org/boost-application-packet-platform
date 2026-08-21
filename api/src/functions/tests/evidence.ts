@@ -11,12 +11,20 @@
 // would have become a second answer to the same question):
 //   1. `appFacts.sourceText()` stays the ONLY reader of the candidate's stored profile. This module
 //      never opens a Google Doc or an Azure table; it is handed the records that reader produced.
-//   2. `requirements.locate()` — the same anchoring that resolves a model paraphrase back to the
-//      employer's own words in the posting now resolves it back to the candidate's own words in the
-//      profile. Same guarantee, both directions: the returned quote is EXACTLY
-//      `record.text.slice(char_start, char_end)`, never a synthesis.
-//   3. `swaps.itemTokens()` — the tokenizer `checks.covers()` used. Keeping it means the coverage
-//      threshold means the same thing after the numerator moves as it did before.
+//   2. `requirementSupport.supportIn()` — the purpose-made matcher. See the WITHDRAWN REUSE note
+//      below for what used to be here and why it was wrong.
+//   3. `reviewer.MIN_QUOTE_CHARS/WORDS` — the citation validator's floors for "is this quote
+//      substantial". A second pair of numbers would be a second answer to one question.
+//
+// A REUSE WITHDRAWN, 2026-08-21, and this is the correction that made the module work at all.
+// Reuse #2 used to be `requirements.locate()`, described here as "the same anchoring ... Same
+// guarantee, both directions." Only the SUBSTRING guarantee transfers. `locate`'s design premise —
+// stated in its own module header — is that the needle is a PARAPHRASE OF THE HAYSTACK, so a source
+// span always exists. An employer's requirement is not derived from the candidate's profile, and
+// shared vocabulary between them is coincidental. Measured on production: 0 of 10 requirements
+// evidenced on opp 9f9c370a (run 32451913037) and 0 of 35 on opp 2cb56fb3 (run 32480993987), with
+// 0 refusals against 15 readable profile records. Tense alone moved a requirement from ratio 1.00
+// to 0.60 and off the bottom of the gate. Reuse was correct as a VALUE and wrong as a FACT.
 //
 // FUZZY MATCHING IS FOR RANKING, NEVER FOR ACCUSING (house rule). Ranking is what picks WHICH
 // profile record best evidences a requirement. The accusation — "this requirement is covered" — is
@@ -26,13 +34,22 @@
 //
 // Nothing here calls a model. Same records + same requirement text = same row, every time.
 import { createHash } from 'node:crypto'
-import { locate } from './requirements'
-import { itemTokens } from './swaps'
 import { toBmp } from './jdText'
 import { MIN_QUOTE_CHARS, MIN_QUOTE_WORDS } from './reviewer'
+import {
+  claimTokens, countTokensAcrossRecords, supportIn, requirementClass, gateProgress,
+  type RefusalReason,
+} from './requirementSupport'
 
-/** Bump when the resolution rules change, so rows resolved under old rules are identifiable. */
-export const RESOLVER_VERSION = 1
+/**
+ * Bump when the resolution rules change, so rows resolved under old rules are identifiable.
+ *
+ * 1 -> 2 on 2026-08-21: `locate()`-as-matcher replaced by `requirementSupport`. Version 1 rows are
+ * resolved under a ruleset whose premise was false. Production holds ZERO of them — re-measured
+ * before the bump, not assumed — so nothing needs migrating; a row carrying `resolver_version = 1`
+ * anywhere else is a row to re-resolve, not to trust.
+ */
+export const RESOLVER_VERSION = 2
 
 export type SourceKind = 'work_history' | 'accomplishment' | 'profile_field' | 'certification'
 export const SOURCE_KINDS: SourceKind[] = ['work_history', 'accomplishment', 'profile_field', 'certification']
@@ -189,28 +206,52 @@ export const EVIDENCE_THRESHOLD = 0.7
 export const MIN_JUDGEABLE_TOKENS = 3
 /** A token this long carries real signal; a requirement of only short common words carries none. */
 export const DISTINCTIVE_LEN = 6
+/**
+ * How many CONTIGUOUS sentences one excerpt may span. SEEDED at 1.
+ *
+ * Owner-settable (`owner_search_prefs.chk_evidence_max_sentences`) and clamped to 1..3 inside
+ * `segments()`. Raising it can only help when the record genuinely contains the requirement's
+ * specific tokens — the safety floor is measured on the excerpt either way — so it trades a longer
+ * quote for a little more recall, which is a judgement about presentation and belongs to the owner.
+ */
+export const EVIDENCE_MAX_SENTENCES = 1
+// GENERIC-vocabulary detection (M10) is NOT an owner setting — see
+// `requirementSupport.GENERIC_RECORDS` for why raising it strengthens one safety-floor rule while
+// weakening another, which is what makes it unsafe to expose as a single knob at all.
 
 export interface ResolveOptions {
   threshold?: number
   minTokens?: number
+  maxSentences?: number
+  /**
+   * Token->record-count map for the WHOLE profile, computed once by `resolveAll`.
+   *
+   * Passed in rather than recomputed per requirement: it is a property of the profile, not of the
+   * requirement, and recomputing it per call made the spine O(requirements x records).
+   */
+  recordCounts?: Map<string, number>
 }
-
-/** Content words of the requirement, deduplicated — the denominator of `ratio`. */
-const wantTokens = (text: string) => Array.from(new Set(itemTokens(text)))
 
 /**
  * Find the best verbatim excerpt in the profile that evidences this requirement, or null.
  *
- * The rules are the three `checks.covers()` learned the hard way on live Trinnex data, kept
- * deliberately, because they are the reason that check stopped calling a garbage requirement
- * covered:
+ * The judgement itself lives in `requirementSupport.supportIn`, one record at a time. This function
+ * owns only what is about the PROFILE rather than about a record: which records are eligible, which
+ * candidate wins, and the shape of the stored row.
+ *
+ * Kept from the previous resolver because each was learned on live Trinnex data:
  *   - a requirement with fewer than `minTokens` content words cannot be judged, and an unjudgeable
  *     requirement is NOT evidenced (it surfaces to a human instead of passing quietly);
- *   - the quote must account for at least `threshold` of the requirement's content words;
- *   - at least one DISTINCTIVE token must appear when the requirement has any. Common short words
- *     carry almost no evidence, and a requirement made only of them is exactly the fragment case.
+ *   - the excerpt must clear `reviewer`'s quote floors;
+ *   - at least one DISTINCTIVE token must appear when the requirement has any.
  *
- * Records are ranked by ratio and ties are broken by record order, so the result is deterministic.
+ * TIE-BREAK, and it is not arbitrary. Ranking is `ratio` descending, then `source_key` ascending,
+ * then `char_start` ascending — deliberately the same order as
+ * `loadRequirementsWithEvidence`'s `order by x.ratio desc nulls last, x.source_key, x.char_start`,
+ * so the resolver and the join can never disagree about which excerpt is "the" one. The previous
+ * version broke ties by ARRAY order, which is not the same: `profileRecords` puts the resume
+ * template first while its key (`resume_template:...`) sorts last.
+ *
  * The winner is then re-checked as an EXACT substring of its own record; a candidate that fails
  * that is dropped, never emitted with a caveat. No non-substring quote can leave this function.
  */
@@ -219,57 +260,116 @@ export function resolveEvidence(
   records: ProfileRecord[],
   opts: ResolveOptions = {},
 ): EvidenceRow | null {
-  // `??` not `||`: a caller passing 0 means 0, and an owner who has not set the column passes
+  // Typeof, not `||`: a caller passing 0 means 0, and an owner who has not set the column passes
   // undefined, which is what the seeded default is for.
   const threshold = typeof opts.threshold === 'number' ? opts.threshold : EVIDENCE_THRESHOLD
   const minTokens = typeof opts.minTokens === 'number' ? opts.minTokens : MIN_JUDGEABLE_TOKENS
+  const maxSentences = typeof opts.maxSentences === 'number' ? opts.maxSentences : EVIDENCE_MAX_SENTENCES
 
   const text = String(requirementText || '')
-  const want = wantTokens(text)
-  if (want.length < minTokens) return null
-  const distinctive = want.filter(t => t.length >= DISTINCTIVE_LEN)
+  // The CLASS of the requirement is decided before its token count, because a class refusal is not
+  // a "we could not judge it" — it is "no excerpt can honestly settle this". Ordering it after the
+  // token gate is how "Minimum of 8 years" came back as `unjudgeable`: true, and the wrong reason.
+  if (requirementClass(text)) return null
+  if (claimTokens(text).length < minTokens) return null
+
+  const eligible = (records || []).filter(
+    r => r && typeof r.text === 'string' && r.text && !NEVER_EVIDENCE.has(r.key))
+  // The counts are a property of the profile, so they are measured over the ELIGIBLE records — the
+  // same population the excerpts come from. Counting a banned record would let it decide what is
+  // generic even though nothing may be quoted from it.
+  const recordCounts = opts.recordCounts || countTokensAcrossRecords(eligible)
 
   let best: EvidenceRow | null = null
-  for (const rec of records || []) {
-    if (!rec || typeof rec.text !== 'string' || !rec.text) continue
-    if (NEVER_EVIDENCE.has(rec.key)) continue
+  for (const rec of eligible) {
+    const res = supportIn({
+      requirement: text,
+      recordText: rec.text,
+      recordCounts,
+      threshold,
+      maxSentences,
+      minQuoteChars: MIN_QUOTE_CHARS,
+      minQuoteWords: MIN_QUOTE_WORDS,
+      distinctiveLen: DISTINCTIVE_LEN,
+    })
+    if (!res.ok || !res.span) continue
 
-    const loc = locate(text, rec.text)
-    if (loc.verbatim === null || loc.char_start === null || loc.char_end === null) continue
+    const quote = rec.text.slice(res.span.start, res.span.end)
+    // The accusation-grade half: the quote must BE the record's own bytes at those offsets. Under
+    // this resolver the quote is produced BY that slice, so the assertion is a tautology HERE — the
+    // one in `writeEvidence` is not, because it re-slices the records it was handed. See M25.
+    if (!quote) continue
 
-    // The accusation-grade half: the quote must BE the record's own bytes at those offsets.
-    if (rec.text.slice(loc.char_start, loc.char_end) !== loc.verbatim) continue
+    if (best) {
+      const r = Math.round(res.ratio * 1000) / 1000
+      if (r < best.ratio) continue
+      if (r === best.ratio) {
+        if (rec.key > best.source_key) continue
+        if (rec.key === best.source_key && res.span.start >= best.char_start) continue
+      }
+    }
 
-    // An excerpt short enough to occur by accident is not evidence. The SAME floor the citation
-    // validator already publishes (`reviewer.MIN_QUOTE_CHARS/WORDS`) — a second pair of numbers for
-    // the same judgement is a second answer to "is this quote substantial".
-    if (loc.verbatim.length < MIN_QUOTE_CHARS) continue
-    if (loc.verbatim.trim().split(/\s+/).filter(Boolean).length < MIN_QUOTE_WORDS) continue
-
-    const inQuote = new Set(itemTokens(loc.verbatim))
-    const hit = want.filter(t => inQuote.has(t))
-    const ratio = hit.length / want.length
-    if (ratio < threshold) continue
-    if (distinctive.length && !distinctive.some(t => inQuote.has(t))) continue
-
-    if (best && ratio <= best.ratio) continue
-
-    const missing = want.filter(t => !inQuote.has(t))
     best = {
-      quote: loc.verbatim,
+      quote,
       source_kind: rec.kind,
       source_label: rec.label,
       source_key: rec.key,
-      char_start: loc.char_start,
-      char_end: loc.char_end,
-      extra: missing.length ? `the excerpt does not mention: ${missing.join(', ')}` : null,
-      ratio: Math.round(ratio * 1000) / 1000,
-      method: loc.match_method === 'exact' ? 'exact' : 'anchored',
+      char_start: res.span.start,
+      char_end: res.span.end,
+      extra: res.missing.length ? `the excerpt does not mention: ${res.missing.join(', ')}` : null,
+      ratio: Math.round(res.ratio * 1000) / 1000,
+      method: res.literal ? 'exact' : 'anchored',
       record_sha256: sha256(rec.text),
       resolver_version: RESOLVER_VERSION,
     }
   }
   return best
+}
+
+/**
+ * Why a requirement is not evidenced, measured over the whole profile. Diagnosis, not storage.
+ *
+ * `resolveEvidence` returns null for eight distinct reasons and a null cannot say which. Nothing
+ * downstream stores this — it exists so a refusal can be inspected, and so the false-positive tests
+ * can assert WHICH rule refused rather than only that something did.
+ */
+export function refusalReason(
+  requirementText: string,
+  records: ProfileRecord[],
+  opts: ResolveOptions = {},
+): RefusalReason | null {
+  const minTokens = typeof opts.minTokens === 'number' ? opts.minTokens : MIN_JUDGEABLE_TOKENS
+  const text = String(requirementText || '')
+  const klass = requirementClass(text)
+  if (klass) return klass
+  if (claimTokens(text).length < minTokens) return 'unjudgeable'
+
+  const eligible = (records || []).filter(
+    r => r && typeof r.text === 'string' && r.text && !NEVER_EVIDENCE.has(r.key))
+  if (!eligible.length) return 'banned_source'
+  const recordCounts = opts.recordCounts || countTokensAcrossRecords(eligible)
+
+  const reasons: RefusalReason[] = []
+  for (const rec of eligible) {
+    const res = supportIn({
+      requirement: text,
+      recordText: rec.text,
+      recordCounts,
+      threshold: typeof opts.threshold === 'number' ? opts.threshold : EVIDENCE_THRESHOLD,
+      maxSentences: typeof opts.maxSentences === 'number' ? opts.maxSentences : EVIDENCE_MAX_SENTENCES,
+      minQuoteChars: MIN_QUOTE_CHARS,
+      minQuoteWords: MIN_QUOTE_WORDS,
+      distinctiveLen: DISTINCTIVE_LEN,
+    })
+    if (res.ok) return null
+    if (res.reason) reasons.push(res.reason)
+  }
+  // How FAR the matcher got, across every record — the same rule `supportIn` applies across
+  // segments, from the same exported gate order.
+  if (!reasons.length) return 'no_candidate'
+  let furthest = reasons[0]
+  for (const r of reasons) if (gateProgress(r) > gateProgress(furthest)) furthest = r
+  return furthest
 }
 
 export interface ResolvedEvidence {
@@ -292,9 +392,14 @@ export function resolveAll(
   records: ProfileRecord[],
   opts: ResolveOptions = {},
 ): ResolvedEvidence[] {
+  // Measured ONCE for the whole spine. It is a property of the profile, and computing it per
+  // requirement made the spine O(requirements x records) over the same unchanging text.
+  const eligible = (records || []).filter(
+    r => r && typeof r.text === 'string' && r.text && !NEVER_EVIDENCE.has(r.key))
+  const withCounts: ResolveOptions = { ...opts, recordCounts: opts.recordCounts || countTokensAcrossRecords(eligible) }
   return (requirements || []).map(r => {
     const requirement_text = r.verbatim || r.item_text || ''
-    return { seq: r.seq, requirement_text, evidence: resolveEvidence(requirement_text, records, opts) }
+    return { seq: r.seq, requirement_text, evidence: resolveEvidence(requirement_text, records, withCounts) }
   })
 }
 

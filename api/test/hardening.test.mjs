@@ -143,6 +143,13 @@ test('H4b: no accusation-grade check reaches for similarity()', () => {
   // requirement is evidenced. Found absent by the independent verifier of P8.3.
   assert.ok(!/\bsimilarity\(/.test(stripComments(src('evidence.ts'))),
     'evidence decides coverage, which decides the gate; it must not be decided by a ranking heuristic')
+
+  // 2026-08-21: the JUDGEMENT moved again, out of `evidence.ts` and into `requirementSupport.ts`
+  // (the purpose-made matcher that replaced the `locate()` misuse). A guard that keeps watching the
+  // file the code LEFT has silently stopped watching anything — the single-file-grep failure this
+  // repo has now made twice. The rule follows the accusation.
+  assert.ok(!/\bsimilarity\(/.test(stripComments(src('requirementSupport.ts'))),
+    'the matcher decides whether a requirement is evidenced; it must not use a ranking heuristic')
 })
 
 // ---------------------------------------------------------------------------------------------
@@ -1820,7 +1827,11 @@ test('H41b: the leadership fact settles a leadership requirement, and total year
 test('H42: every per-owner settings column production reads has a writer that can set it', () => {
   const apiDir = new URL('../src/functions/tests/', import.meta.url)
   const read = (f) => readFileSync(new URL(f, apiDir), 'utf8')
-  const sources = ['appChecks.ts', 'appSearchPrefs.ts', 'appDimensions.ts', 'jdSweep.ts', 'appFacts.ts']
+  // `checkPrefs.ts` added 2026-08-21: `ensureCheckPrefs`/`loadThresholds` moved out of
+  // `appChecks.ts` to break an appChecks <-> appRequirements import cycle (checkPrefs.ts's own
+  // header). Without it here the scan would find ZERO `chk_*` columns and pass VACUOUSLY — the
+  // `declared.size >= 5` floor below exists specifically to catch that class of silent blindness.
+  const sources = ['appChecks.ts', 'checkPrefs.ts', 'appSearchPrefs.ts', 'appDimensions.ts', 'jdSweep.ts', 'appFacts.ts']
     .map(f => { try { return [f, read(f)] } catch { return null } })
     .filter(Boolean)
 
@@ -1853,10 +1864,15 @@ test('H42: every per-owner settings column production reads has a writer that ca
   // pre-existing gap this lane did not create, and a guard that is red on arrival gets switched
   // off. Pinning it fails on a NEW unwritable setting AND on the known ones being fixed.
   const KNOWN = [
-    'chk_cover_words_max', 'chk_cover_words_min', 'chk_evidence_min_tokens', 'chk_evidence_threshold',
+    'chk_cover_words_max', 'chk_cover_words_min', 'chk_evidence_max_sentences',
+    'chk_evidence_min_tokens', 'chk_evidence_threshold',
     'chk_expertise_words', 'chk_relevant_allowance', 'chk_relevant_max_chars', 'chk_skill_max_chars',
     'chk_skills_total_max', 'chk_skills_total_min',
   ]
+  // `chk_evidence_max_sentences` (the matcher's window-size knob, added 2026-08-21) joins the SAME
+  // pre-existing gap `chk_evidence_threshold`/`chk_evidence_min_tokens` already sit in — parity
+  // with its siblings, not a new regression. `chk_evidence_generic_recs` deliberately does NOT
+  // exist: see `requirementSupport.GENERIC_RECORDS` for why that knob is unsafe to expose at all.
   assert.deepEqual(unwritable, KNOWN,
     `the set of unwritable per-owner settings changed: ${JSON.stringify(unwritable)} — a new setting shipped with no way for the owner to change it, or the known ones were fixed and this case must be updated`)
 
