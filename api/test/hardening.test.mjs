@@ -12,7 +12,7 @@
 // Each ID is referenced from `.claude/actions.md` so the story and the guard point at each other.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { readFileSync, readdirSync } from 'node:fs'
+import { readFileSync, readdirSync, existsSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { join } from 'node:path'
@@ -3141,4 +3141,19 @@ test('H:evidence-verified-at-the-boundary: the requirements read path re-validat
   assert.ok(vi > 0)
   assert.match(ev.slice(vi, vi + 1400), /rec\.text\.slice\(stored\.char_start, stored\.char_end\) === stored\.quote/,
     'verifyEvidence does not re-slice the record — the offsets are the claim, the digest is only the alarm')
+})
+
+// H:staged-prompt-is-vetoed — `prompts/resume_user.txt` is a PROPOSED replacement for a live prompt,
+// not an approved one. The owner decided on 2026-08-21 that the live prompt stays as it is until the
+// current one is proven working, and a staged file sitting in the repo with no marker is exactly how
+// a later session loads it believing it is the intended state. The veto is a file, so it is visible
+// wherever the prompt is, and this case is what keeps the two together.
+test('H:staged-prompt-is-vetoed: a staged prompt replacement carries its DO-NOT-LOAD notice', () => {
+  const dir = new URL('../../prompts/', import.meta.url).pathname
+  if (!existsSync(join(dir, 'resume_user.txt'))) return   // nothing staged, nothing to veto
+  const notice = join(dir, 'DO-NOT-LOAD.md')
+  assert.ok(existsSync(notice), 'prompts/resume_user.txt is staged with no DO-NOT-LOAD.md beside it')
+  const body = readFileSync(notice, 'utf8')
+  assert.match(body, /resume_user/, 'the notice must name the file it vetoes')
+  assert.match(body, /4b4af84859072c45/, 'the notice must record the live sha the decision protects')
 })
