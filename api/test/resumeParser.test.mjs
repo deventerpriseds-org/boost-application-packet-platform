@@ -151,3 +151,48 @@ test('a lone ### inside a sentence is still prose, not a heading', () => {
   assert.equal(p.skills1, 'Cloud Strategy | DevSecOps', 'a stray delimiter must not re-align later sections')
   assert.deepEqual(p._unmapped, [], 'a mid-sentence ### is not an unknown section')
 })
+
+test('a section whose body reaches NO field is always visible, whatever the reason', () => {
+  // D35. `keys.find(k => !fields[k])` returns undefined when every candidate is already filled, and
+  // the section was then dropped with no `unmapped.push` — the visibility branch above it only
+  // covered sections matching no key AT ALL. So content vanished while `_unmapped` stayed empty and
+  // P7 item 1's fix reported nothing wrong.
+  //
+  // The invariant is not "fix that one heading". It is that a section body reaching no field is
+  // REPORTED, for any reason — losing content silently and misfiling it silently are the same
+  // defect, which is what this loop's own comment already said.
+  const p = parseResumePackage([
+    '### Resume Summary ###', 'Executive who modernizes regulated platforms.',
+    '### Resume Summary ###', 'A second block claiming the same field.',
+  ].join('\n'), {}, 'Director', 'Trinnex')
+
+  assert.equal(p.resumeSummary, 'Executive who modernizes regulated platforms.', 'first occurrence still wins')
+  assert.deepEqual(p._unmapped.map(u => u.title), ['Resume Summary'],
+    'the second block reached no field and must be visible, not dropped')
+  assert.equal(p._unmapped[0].body, 'A second block claiming the same field.')
+})
+
+test('the EMPLOYER’s summary never becomes the candidate’s', () => {
+  // Measured on the real parser before the fix: `headingKeysFor('Job Description Summary')` returned
+  // ['resumeSummary'] because the pattern was unanchored. Emitted before the real section, the
+  // employer's own text became the candidate's resume summary and `_unmapped` was [] in BOTH
+  // orders — the defect R3 exists to prevent, one layer below where R3 looks, invisible to every
+  // check downstream.
+  assert.deepEqual(headingKeysFor('Job Description Summary'), [])
+  assert.deepEqual(headingKeysFor('Posting Summary'), [])
+  assert.deepEqual(headingKeysFor('Role Summary'), [])
+  // ...without breaking the candidate's own headings, which is the cry-wolf half.
+  assert.deepEqual(headingKeysFor('Resume Summary'), ['resumeSummary'])
+  assert.deepEqual(headingKeysFor('Summary'), ['resumeSummary'])
+  assert.deepEqual(headingKeysFor('Professional Summary'), ['resumeSummary'])
+
+  for (const order of [
+    ['### Job Description Summary ###', 'EMPLOYER TEXT', '### Resume Summary ###', 'CANDIDATE TEXT'],
+    ['### Resume Summary ###', 'CANDIDATE TEXT', '### Job Description Summary ###', 'EMPLOYER TEXT'],
+  ]) {
+    const p = parseResumePackage(order.join('\n'), {}, 'Director', 'Trinnex')
+    assert.equal(p.resumeSummary, 'CANDIDATE TEXT', `employer text reached the summary in order: ${order[0]}`)
+    assert.ok(p._unmapped.some(u => u.title === 'Job Description Summary'),
+      'the employer section must be surfaced, not silently dropped')
+  }
+})
