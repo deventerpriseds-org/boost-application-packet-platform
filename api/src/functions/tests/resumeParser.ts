@@ -41,7 +41,11 @@ const TITLE_MAP: Array<[RegExp, string]> = [
   [/^date$/, 'date'],
   [/target\s*(?:job\s*)?(?:title|role)/, 'targetRole'],
   [/target\s*company/, 'targetCompany'],
-  [new RegExp(`${QUAL}(?:resume\\s*)?summary`), 'resumeSummary'],
+  // Anchored against the employer's own sections. The pattern is deliberately loose elsewhere to
+  // tolerate heading variants, but `job description summary` / `posting summary` / `role summary`
+  // are the EMPLOYER's text, and matching them here is how the JD summary became the candidate's
+  // resume summary on a real document.
+  [new RegExp(`^(?!.*\\b(?:job\\s*description|posting|jd|role|position)\\b)${QUAL}(?:resume\\s*)?summary`), 'resumeSummary'],
   [new RegExp(`^${QUAL}skills${N(1)}|^${QUAL}skills1$`), 'skills1'],
   [new RegExp(`^${QUAL}skills${N(2)}|^${QUAL}skills2$`), 'skills2'],
   // Plain "Skills"/"Core Skills" (no digit) → treat as the first skills block.
@@ -149,7 +153,21 @@ export function parseResumePackage(content: string, mc: MC, jobTitle: string, co
     }
     // First unfilled candidate wins, mirroring the original loop's fall-through.
     const key = keys.find((k) => !fields[k])
-    if (key) fields[key] = sec.body
+    if (key) { fields[key] = sec.body; continue }
+    // EVERY candidate field was already filled, so this section's body reaches NO field — and the
+    // branch above only made a section visible when it matched no key at all. That gap let content
+    // vanish with `_unmapped` empty, so P7 item 1's visibility fix reported nothing wrong.
+    //
+    // Measured on the real parser: a document emitting `### Job Description Summary ###` before
+    // `### Resume Summary ###` put THE EMPLOYER'S OWN TEXT in the candidate's resume summary and
+    // dropped the candidate's, with `_unmapped: []` in BOTH orders. That is the defect R3 exists to
+    // prevent — the posting's words presented as the candidate's — one layer below where R3 looks,
+    // and no check downstream could see it.
+    //
+    // The invariant is not "fix that heading": it is that a section whose body reaches no field is
+    // reported, for ANY reason. Losing content silently and misfiling it silently are the same
+    // defect, which is what the comment above this loop already said and what this branch missed.
+    unmapped.push(sec)
   }
 
   const val = (k: string) => (mc && mc[k] != null ? String(mc[k]) : '')
