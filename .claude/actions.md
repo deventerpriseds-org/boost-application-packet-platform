@@ -2263,3 +2263,84 @@ gate-affected postings exists. D22 changes gate-visible rows on real data and th
 owed.
 
 482 api tests pass (461 on `main`; +21 added). Branch pushed, NOT landed on `main`.
+
+
+---
+
+## ACT-D14 / ACT-D33 — `covered_kw` does not mean covered, and 2,777 characters of dead prompt
+`claude/qc-d14-d33`, 2026-08-21. Files touched: `appPackets.ts`, `postingAnalysis.js`,
+`PostingAnalysis.jsx`, `prompts/resume_user.txt` (new), the two test files, `DEFERRED.md`.
+
+**D14 — decided (b) RELABEL, and the row's own description of the defect was STALE.** The chips had
+already stopped being green and the copy already said "not a coverage list". What did not exist was
+anything that FAILED when that prose was deleted — `grep covered app/test/postingAnalysis.test.mjs`
+returned nothing. So the deliverable is the enforcement, not the wording, and the commit does not
+claim a green-chips before-state that did not exist.
+
+Option (a), compare against the profile, was rejected on the "extend, don't duplicate" rule: three
+systems already answer "does the candidate evidence this?" — `requirement_evidence` + the P8.3
+resolver, `artifact_score.keyword_coverage` against the published term library, and the P8.4
+dimension comparison — and `requirements.ts` declares `model_keyword` never scoreable. A fourth
+coverage number, derived from a model's free-text guess at "ATS keywords for this role", would have
+to agree with all three and could not. Option (c), delete the column outright, is the cheapest
+correct move and needs `schema.ts`, another lane's file; recorded rather than taken.
+
+The provenance is CONSTRUCTED, not declared. `jdAnalysisRequest` assembles the user message from
+labelled fragments and returns their `sources`, so `sources` cannot drift from `user` — one array
+produces both. `comparesToProfile` answers D14's question from that list.
+`keywordGroupMeaning` (postingAnalysis.js) derives the label, the tone and the disclaimer from one
+field per group. The rule has NO carve-out: every uncompared list gets the neutral tone and the
+disclaimer, because a carve-out is how the from-run group lost its disclaimer the first time.
+
+**D33 — decided DROP, provisionally and reversibly.** `prompts/resume_user.txt` is the primary
+source (zap node 289877661 `user_message`, sha256 `e2b9ed1f6879578e`) minus two enumerated edits.
+Every one of the four duplicates a system that already measures the same thing deterministically
+against the real generated fields — `checks.ts` owns the word/character contracts, `missing_kw` +
+`keyword_coverage` own ATS gaps, `swaps.ts` owns swaps. A model's HTML table grading its own
+compliance, printed beside a measurement, is the less trustworthy of two numbers about one thing.
+
+**AN INDEPENDENT AC READ CHANGED THE WORK, WHICH IS THE POINT OF DOING IT.** No in-process
+agent-spawning tool exists in this session type, so the AC step ran as a separate CCR session
+(`claude/qc-d14-d33-ac`, 28 ACs). It found three things this lane had not:
+1. **A dangling forward reference.** The Resume Summary block told the model to store each soft
+   skill's JD source phrase because it "will be recalled later in the prompt" — and only
+   `Jobscan Extraction` recalled it. Removing the block without that clause would have left the live
+   prompt instructing the model to hold work nothing asks for. It is the second enumerated edit.
+2. **The guard was going to be half a guard.** A sweep that only flags headings mapping to NOTHING
+   finds four dead sections where there are six. Clause 2 — a heading whose keys are ALL claimed by
+   an earlier heading — is now implemented, and it fires on the real `Job Description Summary`.
+3. **The four are not the whole dead set, and what stays is bigger than what went** (3,353 chars vs
+   2,777). Said plainly in DEFERRED D33/D35 rather than left for the next reader.
+
+**19 defect reinstatements, each caught by a NAMED assertion, each restored green.**
+App (5): green tone on from-run; unconditional tone; disclaimer dropped; label ignoring its count;
+the heading hand-typed back into the JSX.
+API (8): a profile fragment wired into the JD-analysis call; `comparesToProfile` hardwired false;
+the live JD-analysis prompt silently reworded; `Missing ATS Skills` back in the prompt; a brand-new
+dead section; an UNRELATED line of the still-shipping 26KB edited; `Missing ATS Skills` given a merge
+field (D33's other option, half-done); a stale keep-list entry.
+API round 2 (6): the dangling forward reference restored; `Job Description Summary` removed from the
+keep list (clause 2, the real case); a NEW already-claimed section (clause 2, a synthetic case); the
+preamble count made to disagree with the headings; one prompt file copied under a second key (D31
+from the repo side); the payload provenance flag hardcoded instead of computed.
+
+**Two guards were WRONG when first written and were caught by the suite, not by reading.**
+`H26` failed because I minted the same slug twice. And `H:resume-prompt-surgical-excision` pinned
+the primary source by `.length` — Node counts UTF-16 code units and this prompt carries 8 astral
+characters, so the same 29,069-codepoint string measures 29,077 there. A pinned length is a number
+somebody "corrects"; it is pinned by sha256 now.
+
+**NOT VERIFIED LIVE, and the gap is specific.** The sandbox cannot reach the Function App, the
+Prompts table or the SPA, and `api-test.yml` / `db-query.yml` / `ui-verify.yml` are `main`-only.
+Owed, in the AC doc's own terms: `GET /api/prompts` to diff the authored file against the LIVE
+`resume_user` row before loading it (the live row is 29,068 chars / `4b4af848`, one character and a
+different digest from the primary source — they share a 29,060-char prefix, so the delta is at the
+tail, but that is a record, not a measurement); the `prompts-load-file.yml` dispatch and the version
+read-back; a build-all showing the "maps to no merge field" warnings gone; `usage_metering`
+before/after for the token claim; before/after `checks.ts` results to show the resume did not
+degrade; and a `ui-verify.yml` run on
+`[data-qc="keyword-group"][data-qc-group="from-run"][data-qc-claim="posting_only"]`.
+NOTHING WAS LOADED and nothing was landed on `main`.
+
+544 api tests pass (537 on `main`; +7). 204 app tests pass (200 on `main`; +4). Contrast sweep
+1,062/1,062, 0 failures. Branch pushed, NOT landed.

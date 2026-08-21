@@ -1641,3 +1641,55 @@ correct code is one people switch off.
 
 **NOT verified live**, and no independent AC subagent was spawned — no agent-spawning tool is
 exposed in that session type. Recorded as `not_applicable`, not as done.
+
+
+## `covered_kw` is not coverage, and the JD-analysis call is candidate-blind (D14, 2026-08-21)
+
+`appPackets.jdAnalysis` builds its user message from Role, Company, Comp and the posting. **No
+candidate input of any kind.** So `packet.covered_kw`, `packet.ats_score` and anything else that
+call writes are statements about the POSTING, never about the candidate. The column name is a
+misnomer and is kept deliberately — renaming it is `schema.ts` plus a migration plus every reader,
+and a half-rename is worse than the misnomer.
+
+The provenance is now CONSTRUCTED rather than declared: `jdAnalysisRequest` assembles the message
+from labelled fragments and returns their `sources`; `comparesToProfile(req)` answers "was the
+candidate involved?" from what was actually assembled, so it cannot drift from the message.
+`packetShape.coveredKwProfileCompared` computes it (never a literal) so an `api-test.yml` run proves
+D14 with no browser. On the screen, `keywordGroupMeaning` (postingAnalysis.js) derives label, tone
+and disclaimer from `profileCompared`; `data-qc-claim` puts the same fact in the DOM for
+`ui-verify.yml`. The three groups: `parsed` and `from_run` are posting-only, `thin` is the only one
+compared (appApply.atsScoreOne sends a CANDIDATE MASTER BASELINE).
+
+**Still candidate-blind and still unguarded: the 30px match-estimate number** — same call, same
+column, hedging prose and no test. DEFERRED D36.
+
+## The Call-1 prompt, and a section that vanishes without a warning (D33 / D35, 2026-08-21)
+
+`prompts/resume_user.txt` is the Call-1 prompt minus the four dead report sections and one dangling
+clause. **It is NOT loaded** — one `prompts-load-file.yml` dispatch does that, and it is reversible.
+The primary source is the zap export at `docs/zap-289877647/prompts/16-…md` (`user_message`, sha256
+`e2b9ed1f6879578e`); the LIVE row is a different digest, so the export is a record of what the row
+was seeded from, not proof of what it holds today — read `GET /api/prompts` before loading.
+
+**`_unmapped` does not see the whole dead set, and this is the important part.** It reports a
+`### Title ###` that maps to NO merge field. A title that maps to an ALREADY-FILLED field is dropped
+silently: `headingKeysFor('Job Description Summary')` returns `["resumeSummary"]` (the `summary`
+pattern is unanchored), `keys.find(k => !fields[k])` returns undefined, and the section evaporates —
+`_unmapped` is `[]`. Order decides the damage: emitted BEFORE `### Resume Summary ###`, the
+employer's job-description summary becomes the candidate's resume summary. Proven with the real
+`parseResumePackage`, both orders. Fix is `resumeParser.ts`; see DEFERRED D35.
+
+## Pin a text by DIGEST, never by length — Node and Python disagree
+
+`H:resume-prompt-surgical-excision` first pinned the zap `user_message` at 29,069 chars and failed
+at 29,077: `String.prototype.length` counts UTF-16 code units and that prompt carries 8 astral
+characters. A pinned length is a number the next person "corrects"; a sha256 is a fact.
+
+## An independent AC read is worth a whole container
+
+No in-process agent-spawning tool exists in CCR sessions of this type. Spawning a sibling session
+(`mcp__Claude_Code_Remote__create_session`) that writes its ACs to a branch and pushes IS a usable
+independent reader, and it changed the D33 work in three ways this lane had missed — a dangling
+forward reference, a guard that would have found four dead sections where there are six, and the
+fact that more dead prompt is left behind than was removed. Do it this way; do not report the step
+as not_applicable while the tool exists.

@@ -23,6 +23,7 @@ import {
   keywordColumns, keywordGridTemplate, POSTING_HOOKS,
   fitLabel, FIT_COLOR, comparisonState, compareColumns, compareGridTemplate,
   COMPARE_COLUMNS, COMPARE_SCOPE_NOTE, comparisonStaleNote,
+  keywordGroupMeaning,
 } from '../postingAnalysis.js'
 import { HIGHLIGHT_CLASS } from '../highlight.js'
 
@@ -314,6 +315,32 @@ function KeywordChips({ items, tone }) {
   )
 }
 
+// D14. Every keyword list on this screen renders through here, and every word it says about itself
+// comes from `keywordGroupMeaning` - which derives label, tone and disclaimer from ONE fact: was the
+// list ever compared to the candidate's profile? `packet.covered_kw` used to render green under the
+// word "covered"; the call that fills it (appPackets.jdAnalysis) carries Role, Company, Comp and the
+// job description and no candidate input at all, so nothing in it could establish coverage. The
+// thin list IS candidate-compared (appApply.atsScoreOne sends a CANDIDATE MASTER BASELINE), and
+// rendering the two as a green/red pair lent the unmeasured half the credibility of the measured one.
+//
+// The rule used to be a paragraph of comment here. It is a tested function now, because prose does
+// not run: `H:keyword-claim-follows-provenance` flips the provenance and asserts the screen changes.
+// `data-qc-claim` puts the same fact in the DOM, so ui-verify.yml can prove it on the live app.
+function KeywordGroup({ groupKey, items }) {
+  const m = keywordGroupMeaning(groupKey, items.length)
+  if (!m) return null
+  return (
+    <div style={{ marginTop: 10 }} data-qc={POSTING_HOOKS.keywordGroup}
+      data-qc-group={m.qcGroup} data-qc-claim={m.claim}>
+      <div className="px-small" style={{ fontWeight: 600 }}>{m.label}</div>
+      <KeywordChips items={items} tone={m.tone} />
+      {m.note && (
+        <div className="px-small" style={{ marginTop: 4, color: 'var(--proto-ink3)' }}>{m.note}</div>
+      )}
+    </div>
+  )
+}
+
 // Every count in here is a count of MODEL output. Each one says so on the same line as the number,
 // because a bare "(4)" next to anything keyword-shaped reads as a measurement.
 function ModelKeywords({ parsedKeywords, coveredKw, missingKw, gapsScoredAt }) {
@@ -335,50 +362,18 @@ function ModelKeywords({ parsedKeywords, coveredKw, missingKw, gapsScoredAt }) {
       <div data-qc={POSTING_HOOKS.keywordColumns} data-qc-cols={cols} style={{
         display: 'grid', gridTemplateColumns: keywordGridTemplate(vw), gap: 14, alignItems: 'start',
       }}>
-      {parsedKeywords.length > 0 && (
-        <div style={{ marginTop: 10 }} data-qc={POSTING_HOOKS.keywordGroup} data-qc-group="parsed">
-          <div className="px-small" style={{ fontWeight: 600 }}>
-            From the posting parse, one per extracted line - {parsedKeywords.length} model-suggested
-          </div>
-          <KeywordChips items={parsedKeywords} />
-        </div>
-      )}
-      {coveredKw.length > 0 && (
-        <div style={{ marginTop: 10 }} data-qc={POSTING_HOOKS.keywordGroup} data-qc-group="from-run">
-          <div className="px-small" style={{ fontWeight: 600 }}>
-            Terms the analysis run pulled out of the posting - {coveredKw.length} model-suggested
-          </div>
-          {/*
-            NOT green, and NOT described as covered. This list is `packet.covered_kw`, and the column
-            name is a misnomer: the prompt that fills it (appPackets.jdAnalysis) asks for
-            "ATS keywords for this role" and its user message carries Role/Company/Comp plus the job
-            description - NO candidate input of any kind. Nothing in that call compares the posting
-            to the profile, so nothing in it can establish coverage.
-
-            The thin list below IS candidate-compared (appApply.atsScoreOne sends a CANDIDATE MASTER
-            BASELINE and asks what is missing). Rendering the two as a green/red pair made them look
-            like two halves of one measurement when only one half was ever measured - which lends the
-            unmeasured half the credibility of the measured one. They are now visibly different
-            kinds of thing.
-          */}
-          <KeywordChips items={coveredKw} />
-          <div className="px-small" style={{ marginTop: 4, color: 'var(--proto-ink3)' }}>
-            Read from the posting only - this run never compared them to your profile, so it is not a
-            coverage list.
-          </div>
-        </div>
-      )}
+      {parsedKeywords.length > 0 && <KeywordGroup groupKey="parsed" items={parsedKeywords} />}
+      {coveredKw.length > 0 && <KeywordGroup groupKey="from_run" items={coveredKw} />}
       {missingKw.length > 0 ? (
-        <div style={{ marginTop: 10 }} data-qc={POSTING_HOOKS.keywordGroup} data-qc-group="thin">
-          <div className="px-small" style={{ fontWeight: 600 }}>
-            Compared against your profile and flagged as thin - {missingKw.length} model-suggested
-          </div>
-          <KeywordChips items={missingKw} tone="red" />
-        </div>
+        <KeywordGroup groupKey="thin" items={missingKw} />
       ) : (
         // "Scored and found nothing" and "never scored" are different states. Printing an empty
-        // list for both is how absent evidence gets read as a pass.
-        <div className="px-small" style={{ marginTop: 10, color: 'var(--proto-ink3)' }} data-qc={POSTING_HOOKS.keywordGroup} data-qc-group="thin">
+        // list for both is how absent evidence gets read as a pass. The claim attribute is the
+        // SAME one a populated thin list carries, so a live check cannot tell them apart by
+        // accident - the difference is the sentence, not the provenance.
+        <div className="px-small" style={{ marginTop: 10, color: 'var(--proto-ink3)' }}
+          data-qc={POSTING_HOOKS.keywordGroup} data-qc-group="thin"
+          data-qc-claim={keywordGroupMeaning('thin', 0).claim}>
           {gapsScoredAt
             ? 'The gap scorer has run against this posting and flagged nothing as thin.'
             : 'This posting has not been gap-scored yet, so the thin list is unknown, not empty.'}
