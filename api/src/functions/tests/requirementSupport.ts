@@ -375,8 +375,18 @@ export function segments(text: string, maxSegments = 1): Span[] {
   while (pos < t.length && guard++ < 100000) {
     if (/\s/.test(t[pos])) { pos++; continue }
     const sb = sentenceBounds(t, pos)
-    let lineEnd = t.indexOf('\n', pos)
-    if (lineEnd === -1) lineEnd = t.length
+    // A BULLET boundary, not merely a line boundary. The live profile separates items inside a
+    // single field with `|` and `\u2022` rather than newlines — `expertise` is one 400-character run of
+    // "Budget Development and P&L Management|KPI-driven performance management|...". Splitting on
+    // newlines alone made that whole blob ONE segment, and the first evidence row production ever
+    // stored quoted the entire blob as proof of "Experience in leading technology operations"
+    // (db-query 2026-08-21). A long excerpt also clears a coverage threshold simply by containing
+    // more words, so an unsplit blob outranks the focused sentence that actually says the thing.
+    let lineEnd = t.length
+    for (const sep of ['\n', '|', '\u2022', '\u00b7']) {
+      const at = t.indexOf(sep, pos)
+      if (at !== -1 && at < lineEnd) lineEnd = at
+    }
     const start = Math.max(pos, sb.start)
     const end = Math.min(sb.end, lineEnd)
     if (end <= start) { pos = Math.max(pos + 1, Math.min(sb.end, lineEnd + 1)); continue }
