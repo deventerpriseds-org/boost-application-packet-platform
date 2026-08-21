@@ -901,7 +901,9 @@ create table if not exists comparison_dimension (
   check (fit <> 'not_applicable' or (reason is not null and btrim(reason) <> '')),
   -- A graded row has a denominator; an ungraded one must not invent one.
   check (fit = 'not_applicable' or (covered is not null and total is not null and total > 0)),
-  check (fit <> 'not_applicable' or (covered is null and total is null))
+  check (fit <> 'not_applicable' or (covered is null and total is null)),
+  -- The posting cell must say whether it is the employer's words or the model's paraphrase.
+  check (posting_text is null or posting_quoted is not null)
 );
 create index if not exists comparison_dimension_opp_idx on comparison_dimension(opp_id);
 

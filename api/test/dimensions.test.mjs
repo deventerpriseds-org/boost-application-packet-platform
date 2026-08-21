@@ -11,6 +11,7 @@ import {
   dimensionsFor, gradeFit, fitLabel, buildComparison, summarize, hasNumericComparator,
   STRONG_AT, MODERATE_AT,
 } from '../dist/functions/tests/dimensions.js'
+import { demandedNumber } from '../dist/functions/tests/ownerFacts.js'
 import { MIN_JUDGEABLE_TOKENS } from '../dist/functions/tests/evidence.js'
 
 const defs = DIMENSION_CATALOGUE
@@ -269,37 +270,176 @@ test('AC17: a shortfall on a comparable number is weak and the note carries the 
 
 // ── AC18: no grade from a number nobody compared ───────────────────────────────────────────────
 
-test('AC18: org size and budget have no numeric comparator today, and the row says so', () => {
+// THESE THREE TESTS WERE REWRITTEN BY D23, DELIBERATELY, and the old text is quoted here because a
+// test edited to match new behaviour is how a regression ships silently. They asserted the ABSENCE
+// of a comparator for people and usd — the first one said so out loud ("if a comparator was added,
+// this test must be updated deliberately — not silently"). The comparator now exists, so the old
+// expectations assert the defect rather than the invariant:
+//
+//   was: hasNumericComparator('scope.largest_team')   === false
+//   was: a $2M budget against a $10M+ demand          -> not_applicable, /cannot yet compare/
+//   was: 62 engineers against "60+ engineers"         -> basis 'evidence', numeric_verdict 'unavailable'
+//
+// The INVARIANT they were protecting — never grade from a number nobody compared — is not dropped.
+// It moves to the case where it is still true: a figure whose SCALE is unknown (below).
+
+test('AC18/D23: the comparator is exactly the units that have arithmetic, and no others', () => {
   assert.equal(hasNumericComparator('experience.years_leadership'), true)
-  assert.equal(hasNumericComparator('scope.largest_team'), false,
-    'if a comparator was added, this test must be updated deliberately — not silently')
-  assert.equal(hasNumericComparator('scope.largest_budget'), false)
+  assert.equal(hasNumericComparator('scope.largest_team'), true, 'people lost its comparator')
+  assert.equal(hasNumericComparator('scope.largest_budget'), true, 'usd lost its comparator')
+  // The refusal still has teeth: a unit with no arithmetic, and a fact with no unit at all.
+  assert.equal(hasNumericComparator('preference.travel_max'), false, 'percent has no comparator')
+  assert.equal(hasNumericComparator('education.highest_degree'), false)
+  assert.equal(hasNumericComparator(undefined), false)
 })
 
-test('AC18: a budget dimension with only an uncomparable number is not_applicable, never graded', () => {
+test('AC18/D23: a budget short of the demand is graded from the figures, in money', () => {
   const [row] = buildComparison({
     requirements: [req(0, 'Own a P&L or budget of $10M+ across three business units')],
     profileReadable: true, defs: only('budget_owned'),
     facts: [fact('scope.largest_budget', '$2M engineering budget', 2000000)],
   })
-  assert.equal(row.fit, 'not_applicable', 'a number was graded with no comparator')
-  assert.equal(row.numeric_verdict, 'unavailable')
-  assert.match(row.reason, /cannot yet compare/)
-  // Two-sided even when ungraded: the owner still sees their own recorded figure.
+  assert.equal(row.fit, 'weak')
+  assert.equal(row.basis, 'fact')
+  assert.equal(row.numeric_verdict, 'not_satisfied')
+  assert.equal(row.shortfall, 'falls_short')
+  // The database CHECK rejects a moderate/weak row with no note, so a null here is a 500 in
+  // production rather than a cosmetic miss.
+  assert.ok(row.note && row.note.trim(), 'a weak grade with no note cannot be inserted')
+  assert.match(row.note, /\$2M recorded, \$10M required/,
+    'the note printed raw units instead of money — this is the string the owner reads')
   assert.ok(row.profile && row.profile.source === 'fact')
   assert.ok(row.posting)
 })
 
-test('AC18: when evidence DOES support the line, the uncompared number is stated, not folded in', () => {
+test('AC18/D23: an org size that MEETS the demand is strong, on arithmetic, not on overlap', () => {
   const [row] = buildComparison({
     requirements: [withEvidence(req(0, 'Lead a distributed organization of 60+ engineers'))],
     profileReadable: true, defs: only('organization_size'),
     facts: [fact('scope.largest_team', '62 engineers', 62)],
   })
-  assert.equal(row.basis, 'evidence')
+  assert.equal(row.fit, 'strong')
+  assert.equal(row.basis, 'fact', 'the fact path silently no-opped back to evidence')
+  assert.equal(row.numeric_verdict, 'satisfied')
+  assert.equal(row.covered, 1)
+  assert.equal(row.total, 1)
+  assert.ok(row.profile && row.profile.source === 'fact')
+})
+
+// ── D23: the parser. One per unit, anchored, and none of them in dimensions.ts ─────────────────
+
+test('D23: people are parsed at full width — a two-digit cap reads 1,200 as 1', () => {
+  const cases = [
+    ['Lead a team of 250 engineers', 250],
+    ['team of 60', 60],
+    ['60+ engineers', 60],
+    ['org of 1,200', 1200],
+    ['12 direct reports', 12],
+    ['an organization of 450 people', 450],
+  ]
+  for (const [text, want] of cases) {
+    assert.equal(demandedNumber(text, 'people'), want, `people: ${text}`)
+  }
+  // Anchored: a year count is not a headcount.
+  assert.equal(demandedNumber('Requires 10+ years of experience', 'people'), null)
+})
+
+test('D23: money is parsed in DOLLARS — "$18M" is not eighteen', () => {
+  const cases = [
+    ['$18M', 18000000],
+    ['$1.5B', 1500000000],
+    ['budget of $750K', 750000],
+    ['P&L of $10 million', 10000000],
+    ['a $2.4 billion portfolio', 2400000000],
+    ['Own a $10M P&L', 10000000],
+  ]
+  for (const [text, want] of cases) {
+    assert.equal(demandedNumber(text, 'usd'), want, `usd: ${text}`)
+  }
+  assert.equal(demandedNumber('own the P&L for the division', 'usd'), null,
+    'a figure was invented for text that states none')
+})
+
+test('D23: the years path is byte-for-byte what it was — 511 live rows depend on it', () => {
+  assert.equal(demandedNumber('Minimum of 10 years of product management experience'), 10)
+  assert.equal(demandedNumber('15+ years of progressive leadership'), 15)
+  assert.equal(demandedNumber('Deep experience with roadmaps'), null)
+})
+
+// ── D23: the scale guard — the live defect the comparator would otherwise weaponise ────────────
+
+test('D23: the Settings scale bug does not become an accusation', () => {
+  // MEASURED, not supposed. Settings > Facts (Settings.jsx:1489) does
+  // Number(String(v).replace(/[^0-9.]/g,'')), so typing "$18M" stores value: '$18M', value_num: 18.
+  // Trusting value_num compares 18 against 10,000,000 and prints "Falls short" at an owner who
+  // runs an $18M budget. The magnitude is re-read from the fact's own TEXT, so it is graded
+  // correctly instead — this is a pass, and the point is that it is not a shortfall.
+  const [row] = buildComparison({
+    requirements: [req(0, 'Own a $10M P&L across three business units')],
+    profileReadable: true, defs: only('budget_owned'),
+    facts: [fact('scope.largest_budget', '$18M', 18)],
+  })
+  assert.notEqual(row.fit, 'weak', 'an owner running an $18M budget was accused of falling short')
+  assert.equal(row.fit, 'strong')
+  assert.equal(row.numeric_verdict, 'satisfied')
+})
+
+test('D23: a budget with NO magnitude anywhere is refused, not guessed in either direction', () => {
+  // The residual case the rule above cannot rescue: neither `value` nor `value_num` says whether
+  // "18" is dollars, thousands or millions. Grading it would either accuse an owner of a shortfall
+  // they do not have or invent a pass. Absent evidence is not a grade.
+  const [row] = buildComparison({
+    requirements: [req(0, 'Own a $10M P&L across three business units')],
+    profileReadable: true, defs: only('budget_owned'),
+    facts: [fact('scope.largest_budget', '18', 18)],
+  })
+  assert.equal(row.fit, 'not_applicable')
   assert.equal(row.numeric_verdict, 'unavailable')
-  assert.ok(row.note && /NOT compared/.test(row.note),
-    'the row implied a numeric comparison it never made')
+  assert.ok(row.reason && /magnitude|dollars, thousands or millions/.test(row.reason),
+    'the row refused to grade but did not say why')
+  // Still two-sided: the owner sees their own figure and the posting's.
+  assert.ok(row.profile && row.profile.source === 'fact')
+  assert.ok(row.posting)
+})
+
+test('D23: the scale fix does NOT rescale a genuinely small figure into a pass', () => {
+  // The mirror of the case above, and the one that matters more: turning a real shortfall into a
+  // pass is strictly worse than the bug being fixed.
+  const [row] = buildComparison({
+    requirements: [req(0, 'Own a $10M P&L across three business units')],
+    profileReadable: true, defs: only('budget_owned'),
+    facts: [fact('scope.largest_budget', '$18K', 18000)],
+  })
+  assert.equal(row.fit, 'weak')
+  assert.equal(row.numeric_verdict, 'not_satisfied')
+  assert.match(row.note, /\$18K recorded, \$10M required/)
+})
+
+test('D23: a Settings-recorded "$18M" and a derived "$18M" reach the SAME verdict', () => {
+  // Two writers, one fact, six orders of magnitude apart in owner_fact today. Both must be right.
+  const demand = [req(0, 'Own a $10M P&L across three business units')]
+  const derived = buildComparison({ requirements: demand, profileReadable: true, defs: only('budget_owned'),
+    facts: [fact('scope.largest_budget', '$18M', 18000000)] })[0]
+  assert.equal(derived.fit, 'strong')
+  assert.equal(derived.numeric_verdict, 'satisfied')
+
+  const typed = buildComparison({ requirements: demand, profileReadable: true, defs: only('budget_owned'),
+    facts: [fact('scope.largest_budget', '$18M', 18)] })[0]
+  // The typed one carries its magnitude in `value`, so it is read from there rather than trusted
+  // from value_num — the same $18M, the same answer, from writers six orders of magnitude apart.
+  assert.equal(typed.numeric_verdict, 'satisfied')
+  assert.equal(typed.fit, derived.fit, 'the same budget was a pass one way and a shortfall the other')
+})
+
+test('D23: people are NOT rescaled — the correction is unit-scoped', () => {
+  const [row] = buildComparison({
+    requirements: [req(0, 'Lead a team of 250 engineers')],
+    profileReadable: true, defs: only('organization_size'),
+    facts: [fact('scope.largest_team', '300 engineers', 300)],
+  })
+  assert.equal(row.fit, 'strong')
+  assert.equal(row.numeric_verdict, 'satisfied')
+  assert.match(row.note ?? '', /^$/)   // strong on arithmetic carries no note
 })
 
 // ── AC8/AC9/AC10: what the two sides may contain ───────────────────────────────────────────────
