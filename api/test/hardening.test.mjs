@@ -272,7 +272,14 @@ test('H11: every table this layer added is registered for migration', () => {
   const schema = src('schema.ts')
   for (const t of ['requirement', 'requirement_evidence', 'skill_candidate', 'swap_decision', 'insertion',
                    'check_result', 'artifact_gate', 'artifact_score',
-                   'term_library', 'term_library_entry', 'term_candidate']) {
+                   'term_library', 'term_library_entry', 'term_candidate',
+                   // D21. Shipped created by an ensure-path only (appDimensions.ts), so it worked at
+                   // runtime while pg-migrate never reported it and THIS array — the third place, and
+                   // the one that gets forgotten — did not name it. Proved by reinstating both halves
+                   // of the defect: dropping the name from EXPECTED_TABLES fails this case on
+                   // "not in EXPECTED_TABLES", and renaming the CREATE in SCHEMA_SQL fails it on
+                   // "not in SCHEMA_SQL".
+                   'comparison_dimension']) {
     assert.ok(schema.includes(`create table if not exists ${t} `) || schema.includes(`create table if not exists ${t}(`),
       `${t} is not in SCHEMA_SQL`)
     assert.ok(new RegExp(`'${t}'`).test(schema.slice(schema.indexOf('EXPECTED_TABLES'))),
@@ -2055,6 +2062,178 @@ test('H:correction-layer-pure: the correction judgement layer takes no database 
   for (const banned of ['pgClient', '@azure/functions', 'logUsage', 'fetch(']) {
     assert.ok(!pure.includes(banned), `correction.ts references ${banned} — it is no longer pure`)
   }
+})
+
+// ---------------------------------------------------------------------------------------------
+// H:one-demand-parser — D23. There is ONE regex that reads a demanded quantity out of posting text,
+// it lives in ownerFacts.ts beside the fact catalogue, and dimensions.ts imports it.
+//
+// The alternative is what nearly happened: dimensions.ts already needed people and usd figures that
+// `demandedNumber` could not give it, and the shortest path was a second regex next to the grading
+// code. Two parsers is two answers, and they diverge on the first posting worded unusually — the
+// gate would settle a requirement the JD step showed as ungraded, over the same sentence.
+//
+// This is a SOURCE grep on purpose: the rule is structural (where a construct may live), which a
+// runtime test cannot express. It strips comments first, because the file documents the patterns it
+// must not contain and an earlier guard in this suite fired on its own explanatory comment.
+test('H:one-demand-parser: dimensions.ts derives no quantity of its own', () => {
+  const body = stripComments(src('dimensions.ts'))
+  assert.ok(/from '\.\/ownerFacts'/.test(body), 'dimensions.ts no longer imports the shared parser')
+  assert.ok(/parseQuantity/.test(body), 'dimensions.ts does not call the shared demand parser at all')
+
+  // Any regex literal containing a digit class is a numeric extractor. `asks` matchers are the
+  // legitimate exception - they decide WHICH lines belong to an axis, they do not read a figure -
+  // so they are excluded by name rather than by hoping the pattern misses them.
+  const withoutAsks = body.replace(/asks:\s*\/(?:\\.|\[[^\]]*\]|[^/\n\\])*\/[a-z]*/g, 'asks:<matcher>')
+  const numericLiterals = withoutAsks.match(/\/(?:\\.|\[[^\]]*\]|[^/\n\\])*\\d(?:\\.|\[[^\]]*\]|[^/\n\\])*\/[a-z]*/g) || []
+  assert.deepEqual(numericLiterals, [],
+    `dimensions.ts contains its own numeric extraction: ${numericLiterals.join(' ; ')}. ` +
+    `A second demand parser is a second answer. Extend parseQuantity in ownerFacts.ts instead.`)
+})
+
+// ---------------------------------------------------------------------------------------------
+// H:usd-scale-parity — D23. A usd fact and a usd demand must be compared on the SAME scale.
+//
+// This is not hypothetical and the evidence is two live writers of one column:
+//   * Settings > Facts (app/src/screens/Settings.jsx:1489) saves
+//     `Number(String(value).replace(/[^0-9.]/g, ''))`, so an owner typing "$18M" is stored as
+//     value: '$18M', value_num: 18.
+//   * `deriveFacts` (ownerFacts.ts) reads the same "$18M" off the resume and stores 18000000.
+//   * `upsertStated` (appFacts.ts) takes the client's valueNum verbatim, so both land in owner_fact.
+// Comparing value_num naively gives `18 >= 10000000` false and prints "Falls short" at an owner who
+// runs an $18M budget. That is an ACCUSATION manufactured by a unit bug.
+//
+// Behavioural, not spelling: it runs the real comparator over both stored shapes.
+test('H:usd-scale-parity: the two owner_fact writers reach the same verdict', async () => {
+  const { checkAgainstFacts } = await import('../dist/functions/tests/ownerFacts.js')
+  const demand = 'Own a P&L or budget of $10M+ across three business units'
+  const f = (value, value_num) => [{
+    key: 'scope.largest_budget', value, value_num, source: 'owner_stated', confirmed_at: '2026-01-01',
+  }]
+
+  const derived = checkAgainstFacts(demand, f('$18M', 18000000))
+  const typed = checkAgainstFacts(demand, f('$18M', 18))
+  assert.equal(derived.verdict, 'satisfied', 'the derived writer stopped comparing')
+  assert.notEqual(typed.verdict, 'not_satisfied',
+    'an owner running an $18M budget was told they fall short, because Settings stored 18')
+  assert.equal(typed.verdict, derived.verdict,
+    `the same $18M budget produced ${typed.verdict} typed and ${derived.verdict} derived`)
+
+  // The mirror, and the one that matters more: a genuinely small figure must NOT be rescaled into
+  // a pass. Turning a real shortfall green is strictly worse than the bug being fixed.
+  assert.equal(checkAgainstFacts(demand, f('$18K', 18000)).verdict, 'not_satisfied',
+    'an $18K budget was rescaled into a pass against a $10M demand')
+
+  // And a figure whose scale nothing states is refused rather than guessed in either direction.
+  assert.equal(checkAgainstFacts(demand, f('18', 18)).verdict, 'unknown',
+    'a bare "18" was graded as though its units were known')
+})
+
+// ---------------------------------------------------------------------------------------------
+// H:comparator-units-agree — D23. `dimensions.hasNumericComparator` and `ownerFacts.checkAgainstFacts`
+// must agree about which units have arithmetic, because they answer for the same fact on two
+// surfaces: the JD step's comparison row and the artifact GATE.
+//
+// When they disagreed, the product said both things at once — this is the state D23 fixed, where
+// `hasNumericComparator` returned false for usd (so the JD step printed "no comparator exists")
+// while nothing in the gate agreed or disagreed because the gate never compared it either. Widening
+// one without the other is the half-fix that ships and does nothing.
+test('H:comparator-units-agree: one answer to which units have arithmetic', async () => {
+  const { hasNumericComparator } = await import('../dist/functions/tests/dimensions.js')
+  const { checkAgainstFacts, FACT_CATALOGUE, isComparableUnit } =
+    await import('../dist/functions/tests/ownerFacts.js')
+
+  // A probe per unit that the unit's own `asks` matcher accepts AND that states a figure.
+  const probes = {
+    years: ['Requires 10+ years of engineering leadership experience', '14', 14],
+    people: ['Lead a distributed organization of 60 engineers', '62', 62],
+    usd: ['Own a P&L or budget of $10M+ across three business units', '$18M', 18000000],
+  }
+  let checked = 0
+  for (const def of FACT_CATALOGUE) {
+    if (!def.unit) continue
+    assert.equal(hasNumericComparator(def.key), isComparableUnit(def.unit),
+      `${def.key}: dimensions says ${hasNumericComparator(def.key)} but ownerFacts says ` +
+      `${isComparableUnit(def.unit)} about unit "${def.unit}"`)
+    const probe = probes[def.unit]
+    if (!probe || !def.asks.test(probe[0])) continue
+    // ...and the claim is true of the RUNTIME, not just of the two predicates agreeing with
+    // each other: a unit declared comparable must actually produce a comparison.
+    const v = checkAgainstFacts(probe[0], [{
+      key: def.key, value: probe[1], value_num: probe[2], source: 'owner_stated', confirmed_at: '2026-01-01',
+    }])
+    if (v && v.fact_key === def.key) {
+      assert.notEqual(v.verdict, 'unknown',
+        `${def.key} is declared comparable but "${probe[0]}" still returned unknown — the ` +
+        `comparator was widened and the arithmetic was not`)
+      checked++
+    }
+  }
+  // Absent evidence is not a pass: if no probe reached its def, the loop above proved nothing.
+  assert.ok(checked >= 2, `only ${checked} unit(s) were actually exercised — this guard has gone blind`)
+})
+
+// ---------------------------------------------------------------------------------------------
+// H:facts-widen-no-coverable-shift — D23. Extending the fact comparator must not move which
+// requirements the GATE judges as document coverage.
+//
+// `checks.ts:474-475` drops fact-resolved rows from `coverable`, and this is the mechanism by which
+// a change to `checkAgainstFacts` reaches the artifact gate. Read on the source: `ownedByFacts` is
+// built from ALL fact verdicts INCLUDING `unknown`, and `coverable` excludes `ownedByFacts` — so a
+// row moving from `unknown` to `satisfied`/`not_satisfied` leaves `coverable` identical. That is the
+// prediction. It was ALSO the prediction for D22, and D22's lane wrote that it had "not verified
+// live". Reading a predicate is not measuring it, so this measures it.
+//
+// The change that IS intended and must remain visible: the row's BUCKET moves. `facts_needed` loses
+// it and `facts_settled` / `fact_shortfall` gains it. A test asserting only "nothing changed" would
+// pass just as well if the comparator had never been widened.
+test('H:facts-widen-no-coverable-shift: the bucket moves, the denominator does not', async () => {
+  const { runChecks } = await import('../dist/functions/tests/checks.js')
+  const RESUME = { ResumeSummary: 'Engineering leader.', SkillsBullets1: 'Platform' }
+  const requirements = [
+    { seq: 0, verbatim: 'Lead a distributed organization of 60+ engineers', item_text: '', kind: 'must_have' },
+    { seq: 1, verbatim: 'Own a P&L or budget of $10M+ across three business units', item_text: '', kind: 'must_have' },
+    { seq: 2, verbatim: 'Deep experience with platform architecture', item_text: '', kind: 'must_have' },
+  ]
+  const f = (key, value, value_num, confirmed) =>
+    ({ key, value, value_num, source: 'owner_stated', confirmed_at: confirmed ? '2026-08-20T00:00:00Z' : null })
+
+  // The row shape is `check_key` / `observed` / `offenders` — asserted here because reading it off
+  // the wrong field name gives every lookup `undefined` and every comparison passes vacuously,
+  // which is how this test failed the first time it was run.
+  const find = (rs, key) => rs.find(r => r.check_key === key)
+  const denom = (rs) => {
+    const c = find(rs, 'must_have_coverage')
+    // The population the coverage check judged, however it publishes it.
+    return c ? `${c.state}|${c.observed || ''}|${(c.offenders || []).length}` : 'ABSENT'
+  }
+  assert.ok(find(runChecks({ type: 'resume', pkg: RESUME, requirements, facts: [] }), 'must_have_coverage'),
+    'must_have_coverage is not in the result under that key — the lookups below would all be undefined')
+
+  // UNCONFIRMED facts -> every scope row is `unknown` (an unconfirmed fact is a guess about the
+  // owner and must not settle a gate). This is the pre-D23 shape of the verdicts.
+  const unresolved = runChecks({ type: 'resume', pkg: RESUME, requirements,
+    facts: [f('scope.largest_team', '62 engineers', 62, false), f('scope.largest_budget', '$18M', 18000000, false)] })
+  // CONFIRMED -> D23's arithmetic runs and the same two rows resolve.
+  const resolved = runChecks({ type: 'resume', pkg: RESUME, requirements,
+    facts: [f('scope.largest_team', '62 engineers', 62, true), f('scope.largest_budget', '$18M', 18000000, true)] })
+
+  // Precondition, asserted rather than assumed: the two runs really do differ in verdict, or the
+  // equality below is measuring nothing.
+  assert.equal(find(unresolved, 'facts_settled').state, 'not_applicable',
+    'the unconfirmed run already settled something — this comparison is vacuous')
+  assert.equal(find(resolved, 'facts_settled').state, 'pass',
+    'the confirmed run settled nothing — D23 arithmetic did not run, so nothing is being compared')
+
+  // THE INVARIANT: the coverage population is byte-identical across that verdict change.
+  assert.equal(denom(resolved), denom(unresolved),
+    'widening the fact comparator moved which requirements the gate judges as document coverage')
+
+  // ...and the intended, visible half: the bucket moved.
+  const needed = (rs) => (find(rs, 'facts_needed')?.offenders || []).length
+  assert.ok(needed(unresolved) > needed(resolved),
+    `facts_needed did not shrink (${needed(unresolved)} -> ${needed(resolved)}) — the comparator ` +
+    `was widened and no requirement changed bucket, so this guard is watching nothing`)
 })
 
 // ---------------------------------------------------------------------------------------------
