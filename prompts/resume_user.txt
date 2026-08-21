@@ -1,0 +1,314 @@
+Objective:
+You are an executive recruiter such as Andrew LaCivita, Linda Raynier, Madelinne Mann, or Marie Forleo. Your goal is to create a tailored resume that will be appropriate for a top-level executive while ensuring it stands out to executive recruiters and is optimized for ATS.
+
+Please provide the following responses in 14 structured sections with no fluff.  Avoid redundancy and using hyphens or words known to be an indicator of AI chatbot assistance.  Stick to common words, pairings, and phrases without suggesting any uncommon terms.   
+
+Each section should be clearly labeled using ### at the beginning and end of the section title, minimizing space between the title and content. All outputs should be in plain text with no markup.  
+
+Do not include any skills related to the list below:
+{{289877659__Items to Omit}}
+
+Inputs to use:  
+1. Job Description (Parsed Page): {{289877647__answers__Target Job Description}}
+2. Current Resume Summary: {{289877648__value}}
+3. Existing Skills List:{{289877650__value}}
+4. Existing Expertise List: {{289877651__value}}5. Current Work Experience: {{289877649__value}}
+6.  Current About Me (First Paragraph): {{289877654__value}}
+7. Current About Me (Second Paragraph):{{289877655__value}}
+8. Existing Executive Profile: {{289877656__value}}
+9. Current Core Accomplishments (5 bullets, 180 words): {{289877657__value}}
+10. Input Relavant List: {{289877652__value}}
+
+Extract and summarize the job description data first.  Then use the same extracted data as inputs for generating the final structured outputs sections.
+
+### Sections to Generate:  
+Special Note: Bookend each Header with ### in front and back with plain text just flat structure.  
+Do not use Numbered bullets, but rather hyphen formatted bullets 
+
+Date, Job Title & Company  
+### Date ### - Return todays date ({{zap_meta_human_now}}) in Full month name, day, year format without the time. 
+### Target Job Title - Extract and return the job title from the job description.  
+### Target Company - Extract and return the hiring company’s name from the job description.  
+
+Resume Summary & Skills Updates  [Originally 65-68]
+### Resume Summary (55-60 words) -  Using the style and best practices for executive resume summaries from resume.supply on the web, generate an executive resume summary section for the ideal candidate for the job description, to emphasize my most relevant qualifications, maintaining 55-60 words. Use my (current resume summary) from the input section as a model. This passage should declare who I am and what I bring to the job as an impactful executive, not specific examples of what I have done.  For context, I am a visionary leader with decades of experience leading initiatives  and customer-centric product design to achieve measurable business impact aligned with business goals.  I have led several digital transformations as well as agile transformations.  Ensure ATS optimization and alignment with the key requirements and skills from the job description. Tone should convey executive presence, business impact, and strategic leadership aligned to ATS optimization and the job description. Use a voice that blends leadership, strategic execution, transformation, and behavioral depth.
+
+(Do not output the soft skills extracted only use them for building the summary)
+🔹 Soft Skill Integration (Jobscan-Aligned)
+Step 1 – Extract Soft Skills
+Before generating the summary, extract all soft skills as defined by Jobscan, explicitly stated or functionally described in the job description using Jobscan-style logic. Store the source phrases or text from the JD for each of the skills. 
+
+Definition of a Soft Skill:
+A soft skill is an interpersonal, behavioral, emotional, or mindset-related trait. These often describe how a person collaborates, adapts, decides, communicates, or influences — rather than what they do.
+
+Extraction Instructions:
+✅ Include all phrases that describe:
+Interpersonal interaction (e.g., “builds relationships across teams” → collaboration)
+
+Disqualifiers:
+❌ Do not extract job titles, degrees, or time-based experience
+❌ Do not include technical tools or task-based actions (e.g., “develops roadmaps”)
+
+Important:
+Include inferred interpersonal or mindset-based trait for the ideal candidate based on the JD. be ready to show what text went into your choices when prompted.  
+
+🔸 Optional Seed Set (for Pattern Recognition Only — Do Not Output Blindly)
+You may use this list to recognize phrasing patterns. Do not insert these unless they are clearly implied or present in the JD.
+
+Soft skill seed set:
+Collaboration, Leadership, Accountability, Adaptability, Customer Orientation, Strategic Thinking, Critical Thinking, Communication, Resilience, Stakeholder Engagement, Team Influence, Empathy, Ownership, Integrity, Cultural Awareness, Emotional Intelligence, Flexibility, Innovation Mindset, Transparency
+
+Step 2 – Summary Construction (55–60Words)
+Using the extracted soft skills:
+✅ Integrate every soft skill naturally into the summary
+✅ Rephrase or compress other content if space is limited
+✅ Avoid “I” statements or first-person language
+✅ Ensure the tone reflects an executive candidate aligned with the ideal profile
+
+The summary must:
+✅ Use all extracted soft skills
+✅ Be between 55 and 60 words as a hard requirement
+- Avoids using first person terms like "I" to begin sentences
+✅ Dynamic and engaging 
+ - maintains the style and best practices for executive resume summaries from resume.supply on the web. 
+✅ Balances leadership & execution 
+✅ Industry relevance 
+✅ Impact-driven
+More outcome-focused 
+✅ Stronger leadership positioning → "Aligning technology investments with business objectives" adds a C-level strategic perspective.
+✅ Maintain logical sentence flow and business relevance
+✅ Use executive language — e.g., “Aligning transformation efforts with customer-centric outcomes to drive growth...”
+✅ Dynamic and engaging 
+ - maintains the style and best practices for executive resume summaries from resume.supply on the web. 
+✅ Balances leadership & execution 
+✅ Industry relevance 
+✅ Impact-driven
+More outcome-focused 
+✅ Stronger leadership positioning → "Aligning technology investments with business objectives" adds a C-level strategic perspective.
+✅ More ATS-optimized keywords → "Enterprise transformation," "operational efficiency," and "revenue growth" enhance executive recruiter visibility.
+
+
+
+ Skills Lists
+Generate two skill lists: ### Skills1 ### and ### Skills2 ### (20-22 skills total, evenly split), ensuring:
+🔹 Two-Step Validation Process:
+Step 1: Generate Initial Draft
+1️⃣ Extract all required skills from the job description.
+2️⃣ Apply executive-level phrasing with a strict limit of 30 characters per skill, including spaces.
+3️⃣ Prioritize, leadership related competencies towards the top of the list before splitting across Skills1 and Skills2.
+
+Step 2: Review & Update for Missing Items
+4️⃣ Cross-check against the job description to map requirements to ATS optimized keywords and confirm 100% coverage of these verbatim ATS keywords. Override any requirements to ensure ATS keywords are included in the list. 
+5️⃣ Identify missing or overlooked executive-level competencies by comparing the generated skills against the job description requirements.
+✅ Replace lower-priority skills with missing required skills to ensure 100% job description alignment.
+ - Replace skills included but not explicitly required by the JD with missing required skills to ensure 100% job description alignment.
+
+Step 3— Inferred Skills
+Replace the skills with the lowest match confidence—those furthest from verbatim, near-verbatim, or reasonably inferred from the job description—with common ATS hard skills that are clearly implied by the job description, possibly embedded in longer sentences.
+Each item must be ≤30 characters, including spaces. Use abbreviations or restructure wording if needed.
+Must align with the Jobscan definition of hard skills and reflect senior-level scope (strategy, governance, transformation, etc.).
+
+Step 4— Near-Verbatim Skills
+If near-verbatim hard skills are present in the job description, extract them—even if embedded within longer statements. Reformat each into a standalone, executive-style skill label (≤30 characters, including spaces). Replace the least relevant or loosely aligned skills from previous outputs with these refined phrases.
+
+Step 5 — Verbatim Skills (No Alterations)
+Extract only hard skills per the Jobscan definition, written exactly as they appear in the job description.
+Do not modify, rephrase, shorten, pluralize, or change tense.
+Use the Jobscan definition of a hard skill:
+A hard skill is a teachable, measurable ability such as a software tool, business method, framework, platform, or process.
+Exclude:
+• Educational requirements (e.g., “Bachelor’s degree,” “MBA”)
+• Time-based experience (e.g., “12 years,” “10+ years”)
+• Soft skills (e.g., leadership, collaboration, communication)
+• Values or personal traits
+Replace the skills with the lowest match confidence from the previous steps with these items. All verbatim skills must be included as a hard requirement.  Double check to confirm all verbatim skills included 
+
+🔹 Hard Requirements:
+✅ Strict character limit: Each skill must be ≤30 characters, including spaces – Any skill that isn't a ATS keyword and is exceeding this limit must be reworded concisely, abbreviated where appropriate, or replaced with an equally relevant ATS keyword.
+✅ Ensure 100% job relevance – Directly extract required skills from the job description while ensuring direct or indirect alignment with items defensible within my work history.
+✅ Only senior executive competencies – Prioritize leadership, strategy, governance, risk management, and business transformation. Exclude mid-level technical skills (e.g., "CI/CD," "Secure Coding," "Microservices").  This can be ignored if in favor of 100% ATS keywords from job requirements. 
+✅ Ensure ATS Optimization – Integrate all critical keywords for the role in the job description while ensuring executive-level phrasing that recruiters search for.
+✅ Avoid redundancy – No duplicate skills across Skills1, Skills2, or other resume sections (e.g., Expertise, relevant skills, Proficiencies).
+- Avoid overusing AI as it is not a core competency
+(ignore this line as it is a note) ✅ Cover all transformation and impact areas – Include technology roadmapping, process improvement, innovation, agile transformation, and compliance frameworks.
+✅ Balanced distribution – Skills must be evenly split across Skills1 and Skills2, with 10-11 skills in each.
+
+Expertise 
+### Expertise - Using both the job description and my work history as inputs, generate 6 five-word expertise phrases that accurately represent my executive-level capabilities while being fully ATS-optimized for recruiter search relevance.
+Strict Requirements for Output:
+-  Each phrase must be exactly 5 words to ensure concise, high-impact descriptions.
+-  Balance strategic leadership & execution to demonstrate visionary thinking + hands-on results.
+-  No generic phrases (e.g., “Leadership” or “Technology”) – instead, focus on high-value, role-specific competencies.
+-  No duplication from Skills1 or Skills2 bins to ensure variety across resume sections.
+-  Include a mix of technology, business, and governance areas relevant to enterprise-wide impact.
+-  Must include ATS-optimized keywords that align with the job description and recruiter search terms.
+
+
+
+Relevant Proficiencies 
+Step 1: Select 9 proficiencies to align with the ATS optimized keywords that are most relevant to the job description. Only use options that are not already covered by the Skills1 or Skills2 lists.  Balance the selections to cover any unused ATS optimized hard skills this role and order them by the highest match score to the job description. Split the results into 3 lists ensuring that as a hard requirement, limit each list to have no more than 1 bullet with more than 20 characters. Replace terms with the next most related or relevant item from the Input Relevance list if needed to meet this requirement.
+Format the Output as Three Separate Lists (Ensuring no more than one item per list is greater than 20 characters including spaces, as a hard requirement):
+### Relevant Skills bullet list 1
+### Relevant Skills bullet list 2
+### Relevant Skills bullet list 3 
+
+Step 2:
+Review the current relevant skills lists and if there are any unused ATS optimization keywords suggested earlier, replace the least relevant items with any remaining ATS optimization keywords.  Maintain the Split results in 3 lists ensuring that as a hard requirement, each list (Relevant Skills 1,  Relevant Skills 2, and  Relevant Skills 3) must not have more than 1 bullet with more than 20 characters, including spaces as a hard requirement. It is important not to include items already covered in Skills1 and Skills2 lists.  
+Maintain the Output as Three Separate Lists (Hard requirement - Each list should be no more than 3 items and no more than one item greater than 24 characters, including spaces in any list.):
+
+
+### Cover Letter - Using the Refined Cover Letter Prompt for Executive Roles, generate a concise, results-driven, and engaging cover letter for the role at the company found in the job description,  based on my work history, the job description, and industry trends while ensuring ATS optimization, recruiter alignment, and measurable leadership impact. The cover letter must strictly follow the prompt structure below, maintain 250-400 words, and align with executive hiring best practices. Address it to "Dear Leadership Team" and end with "Sincerely, Von Ellis."
+
+Prompt Structure:
+Objective:
+Craft a high-impact, ATS-optimized, and engaging cover letter tailored to the job description, company, and industry trends while ensuring it stands out to hiring managers and executive recruiters by demonstrating strategic leadership, measurable business impact, and cultural fit.
+
+🔹 Final Cover Letter Prompt:
+Using my work history, job description, and company background as inputs, generate a concise, results-driven, and engaging cover letter for a VP of Software, CTO, CDO, CIO, or Deputy Executive role that aligns with executive hiring best practices from top career experts (Andrew LaCivita, Madeline Mann, Linda Raynier, Harvard Business Review, The Muse).
+
+The cover letter must be addressed to "Dear Leadership Team" and end with "Sincerely, Von Ellis."
+
+🔹 Strict Requirements for Output:
+✅ Length: 250-400 words (strict) – No more than one page
+✅ 4 Key Sections: Opening Hook, Why You’re the Right Fit, Cultural Fit, and Strong Closing
+✅ No generic openings – Hook the reader immediately with a compelling value-driven statement
+✅ Focus on results, not responsibilities – Highlight 2-3 of my strongest, most RELEVANT leadership achievements with measurable impact (metrics, cost savings, revenue growth, efficiency improvements, etc.)
+✅ Demonstrate cultural alignment – Show how my leadership aligns with the company’s mission, industry, and goals
+✅ Include a strong closing with a call to action – Encourage a discussion/interview without sounding desperate
+✅ No first-person overuse (avoid "I" at the start of every sentence)
+✅ ATS Optimization – Ensure it is fully keyword-optimized for executive-level hiring and recruiter searches
+✅ Maintain a confident, polished tone – No passive or overly humble language
+✅ Replace, adjust, or refine sentences if missing key leadership or technology themes
+
+🔹 Cover Letter Structure & Best Practices:
+1️⃣ Strong Opening Hook (First 1-2 Sentences)
+✅ Immediately capture interest – Avoid “I am writing to apply for…”
+✅ Connect with the company’s mission, products, or industry impact
+✅ Mention a referral (if applicable)
+✅ Showcase a defining leadership quality or achievement in the first line
+
+2️⃣ Why You’re the Right Fit (2-3 Short Paragraphs)
+✅ Highlight 2-3 executive-level achievements directly tied to the company’s goals and pain points
+✅ Use metrics and business outcomes – Show how you’ve delivered results (e.g., revenue growth, cost savings, efficiency gains, customer acquisition, etc.)
+✅ Align with role-specific expectations (governance, security, compliance, M&A, innovation, product development, etc.)
+✅ Ensure clarity and flow – Avoid long, run-on sentences
+
+3️⃣ Cultural Fit & Personal Connection (1 Paragraph)
+✅ Show you understand the company’s mission, leadership style, and values
+✅ Position yourself as a long-term, strategic leader who fits into their culture
+✅ If applicable, align with company values such as innovation, customer-first strategies, or market expansion
+
+4️⃣ Strong Closing & Call to Action (Final 2 Sentences)
+✅ Express confidence and enthusiasm for next steps
+✅ Suggest a conversation/interview without sounding desperate
+✅ No passive phrases like “I hope to hear from you”
+
+🔹 Final Output Verification:
+✅ 250-400 words max – No longer than one page
+✅ Includes strong, metric-driven achievements (not just responsibilities)
+✅ Uses executive-level ATS keywords for optimal search visibility
+✅ Aligns with the job description’s leadership and technology themes
+✅ Has a confident, engaging, and persuasive tone
+✅ Ensures variety in sentence structure for clarity and impact
+
+
+Ensure Executive Presence in These Sections:  
+Utilize the tips and best practices of the leading experts for executive portfolios on the web, youtube, and books.  
+
+Develop a two-paragraph section for my portfolio (### About Me 1, ### About Me 2) that establishes what I believe as a professional, how I operate, the impact, and how I will utilize my passion for sustained success. The two paragraphs should flow together as one continuous stream of thought.  It should have a natural tone as well as come off as personal, inspirational, motivational, and admirable while signaling high-level leadership impact. Maintain warmth and authenticity.  The first sentence should be "I have always maintained a philosophy that innovation flourishes when vision, strategy, and execution move in lockstep, driving continuous progress.".  The narrative should draw admiration from a potential hiring manager while aligning to the role in the job description, VP of Software, CTO, CDO, CIO, and Deputy Chief Executive roles.   Don't make up compound words that aren't regularly found as common language or used by authors like "Agile-driven". 
+
+The first passage (45-48 words as a hard requirement) should be primarily past tense establishing who I am and what I have always believed, and how I have operated to drive innovation and transformation.  It should depict what I am passionate about and how that impacts business success:
+
+Sample first passage:  
+I've always embraced continuous learning and skill refinement to deliver transformative solutions. I've leveraged technology to drive operational efficiency, business growth, and customer impact. By bridging strategic vision with agile execution, I build high-performing teams and foster innovation, consistently delivering measurable value across global organizations.
+
+The second passage (75-80 words) should avoid being redundant with the first and begin with "My career". It should focus on my career so far, what type of leader I have been.  It should mention the approach I've taken, to achieve measurable results, and what I thrive at doing 
+
+Sample second passage:
+  My career reflects a dedication to leading transformative initiatives through technical leadership and strategic vision. From modernizing systems to pioneering Agile transformations, I have driven measurable results, including enhanced team performance, operational efficiency, and strategic alignment. I thrive at the nexus of technology, business strategy, and leadership, empowering teams to deliver scalable, impactful solutions.
+
+Context:
+I am a visionary leader who achieves success by aligning strategy and execution across global teams.  I have spearheaded several digital and agile transformations and believe in customer-centric product design.  You can also look to my work history for context.  
+
+### 10 - Analyze and refine the executive profile introduction to align with VP of Software, CTO, CDO, CIO, and Deputy Chief Executive roles.  
+- Tone: Confident yet humble, avoiding self-promotion (using words like excellence) while emphasizing measurable, high-impact leadership.  
+- Hard Requirement: 50-55 words.  
+- Ensure alignment with the role highlighted in the job description and enterprise software leadership, large-scale digital transformation, and strategic decision-making.  
+- Balance visionary leadership with execution-driven impact.  
+- Emphasize business outcomes such as revenue growth, operational efficiency, cost savings, market expansion, and technology innovation.  
+- Showcase global team leadership and enterprise decision-making.  
+- Naturally integrate AI, cloud, and cybersecurity as supporting elements rather than primary themes.  
+- Use action-oriented phrasing and ensure full ATS optimization.  
+- The sentences should be about me so begin with terms like  I am, I have, I do, etc.
+- The first sentence should begin with "As a"
+
+### 11 - Core Accomplishments (98-100 words, five bullets). Using my work history as a foundation,  select the five most relevant items to the Job description as core accomplishments bullet points that align with VP of Software, CTO, CDO, CIO, or Deputy Chief Executive roles. 
+
+Each bullet must be restructured to strictly follow this formula:
+[Strong Action Verb] + [Business Initiative] + [Technology/Process Focus] + [Quantifiable Impact]
+
+Strict Requirements for Output:
+- Stay as close to verbatim to the original work history items as possible 
+- Exactly five bullets
+- Total word count: 98-125 words (hard requirement)
+- No more than two lines per bullet
+- Maintain executive-level leadership presence
+- Align with business priorities and ATS relevance across industries
+- Balance vision and execution to reinforce strategic and hands-on leadership
+- Use powerful, results-oriented language that is applicable across leadership roles
+- AI, Cloud, and Cybersecurity must be naturally integrated as supporting elements, not primary themes
+- Tie each achievement to measurable business outcomes such as efficiency, scalability, cost reduction, or revenue growth
+- Be defensible according to my true work history
+- Ensure each bullet directly aligns with my actual projects and leadership contributions to be fully authentic and defensible in interviews
+- Include key themes such as:
+-- Platform interoperability
+-- Cloud migration
+-- AI-powered analytics
+-- Security governance
+-- M&A integration
+- Ensure broad industry appeal by using language that resonates across multiple sectors while keeping a strong business alignment
+- Maximize executive positioning by maintaining a structured, high-impact format
+
+ATS Optimization & Final Adjustments  
+### Job Description Summary ### - Extract Key Job Description Data (Ensure 100% Coverage)  
+First, Return a comprehensive summary in a paragraph including the key points, required responsibilities, experience, requirements and skills extracted from the job description. 
+
+ Second, Include a bullet list summary of 100% grouped by required responsibilities, experience, requirements and skills mentioned. The bullet list must use proper HTML table tags <ul> (unordered list) tag along with <li> (list item) tags for each item in the list.
+
+Third, add a HTML table formatting below that. (Generate a table formatted with html tags) DO NOT summarize—Extract a complete, fully detailed breakdown of the role.  
+
+Step 1: Initial Extraction
+✅ Extract all required responsibilities, experience, requirements and skills from the job description, ensuring no omissions.
+Job analysis → Consolidated list of everything required for the role grouped by categories of responsibilities, experience, requirements and skills 
+
+✅ Structure into:
+-Column 1: The group category for the skill, of either responsibilities, experience, requirements or skills 
+-Column 2: 100% of the required responsibilities, experience, requirements and skills
+
+Step 2: Validation Against Job Description
+✅ Cross-check extracted responsibilities & skills against the full job description to ensure nothing is missing.
+✅ If any required skill or responsibility is missing, correct it by adding it back verbatim from the job description.
+
+Step 3: Final Adjustments for ATS Optimization
+-Column 3: Generate ATS-optimized skills, each with a limited length of 25 characters or less. 
+✅ Ensure 100% of  responsibilities, experience, requirements and skills are covered with an ATS optimized skill per job description requirements.
+
+Step 4: Remove any rows with items focused on years of experience or college degrees from the table, but keep them in the paragraph summary and bullet list.  
+
+
+
+### Second Job Description Check ### - Extract Key Job Description Data (Ensure 100% Coverage)  
+First, Return a comprehensive summary in a paragraph including the key points, required responsibilities, experience, requirements and skills extracted from the job description. 
+
+ Second, Include a bullet list summary of 100% all required responsibilities, experience, requirements and skills mentioned.  The bullet list must use proper HTML table tags <ul> (unordered list) tag along with <li> (list item) tags for each item in the list.
+
+Generate an HTML table with proper <table>, <tr>, <th>, and <td> tags.  Do not format it as markdown or plain text. I need this output for embedding in an HTML document. Include column headers and make sure it's valid HTML
+
+- initial step, include a table with the requirement category (responsibilities, experience, requirements and skills) in column 1 and the required responsibilities, experience, requirements and skills in column 2 (omit years of experience items).   
+- Next step, generate an ATS optimized keywords to match each row in column 3 (hard requirement is they must be less than 30 characters in length) 
+- Next step, update column 4 with the current list location if that skill is covered by the current skills lists (skills Lists: Skills1 or Skills2, Relevant Skills 1, 2, or 3) or "Missing" if that ATS keyword is not found in these lists. 
+
+
+
+
+---        

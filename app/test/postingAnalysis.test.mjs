@@ -13,6 +13,7 @@ import {
   kindSourceNote, noQuoteReason, isQuoted, modelKeywords, groupRequirements,
   summarizeKindSource, isEvidencedKindSource, keywordLibraryState, postingBody,
   KEYWORD_2UP_MIN, keywordColumns, keywordGridTemplate, POSTING_HOOKS,
+  KEYWORD_GROUPS, NOT_COMPARED_NOTE, keywordGroupMeaning,
 } from '../src/postingAnalysis.js'
 
 // The fixture from the AC7 reproduction: one line the posting MARKED required, two the parser
@@ -431,4 +432,87 @@ test('the keyword library state is derived from the checks score, never hardcode
   assert.match(code, /const s = keywordLibraryState\(score\)/)
   assert.ok(!/has no published version yet/.test(code),
     'the "no published version" claim is hardcoded in the component again instead of derived')
+})
+
+
+// ── D14 ─────────────────────────────────────────────────────────────────────────────────────────
+//
+// THE DEFECT, and it was live: `packet.covered_kw` rendered as green chips under the word
+// "covered". The call that fills it is `appPackets.jdAnalysis`, whose user message is Role,
+// Company, Comp and the job description - measured by reading the request builder, and now pinned
+// on the API side by `H:jd-analysis-sees-no-profile`. No candidate input reaches it, so nothing in
+// that call could establish coverage of anything. A confident green count for an unmeasured thing.
+//
+// The fix chosen was (b) RELABEL, not (a) compare: `requirement_evidence` (P8.3), the term-library
+// `keyword_coverage` and the P8.4 dimension comparison already measure the candidate, and a fourth
+// coverage number derived from a model's free-text guess would have to agree with all three.
+//
+// These guards test the DERIVATION, not the wording. A verifier who renames `NOT_COMPARED_NOTE` or
+// rewrites its sentence still passes; a verifier who marks an uncompared list as compared, or hands
+// an uncompared list a tone, fails by name. That distinction is the whole point - two guards were
+// defeated in this repo this week by renaming a constant while keeping the defect.
+
+test('H:keyword-claim-follows-provenance: only a profile-compared list may claim comparison or carry a tone', () => {
+  // Both directions on the SAME descriptor, so the result cannot be a constant.
+  const base = { key: 'probe', qcGroup: 'probe', tone: 'red', what: 'Some list' }
+
+  const uncompared = keywordGroupMeaning({ ...base, profileCompared: false }, 7)
+  assert.equal(uncompared.claim, 'posting_only',
+    'a list nothing compared to the profile claimed a comparison')
+  assert.equal(uncompared.tone, null,
+    'an uncompared list carried a tone - a tone is a verdict, and nothing rendered one')
+  assert.equal(uncompared.note, NOT_COMPARED_NOTE,
+    'an uncompared list shipped without the disclaimer that says so')
+
+  const compared = keywordGroupMeaning({ ...base, profileCompared: true }, 7)
+  assert.equal(compared.claim, 'profile_compared')
+  assert.equal(compared.tone, 'red', 'the derivation is inert - flipping the fact changed nothing')
+  assert.equal(compared.note, null, 'a compared list carried the never-compared disclaimer')
+
+  // Non-vacuity: the two outputs must actually differ, or the assertions above prove nothing.
+  assert.notDeepEqual(uncompared, compared)
+})
+
+test('H:keyword-claim-follows-provenance: the three shipped groups declare the right producer', () => {
+  // `from_run` IS `packet.covered_kw`. If a future lane wires the profile into jdAnalysis and flips
+  // this to true, that is option (a) and it must be a deliberate edit here, not a drift.
+  assert.equal(KEYWORD_GROUPS.from_run.profileCompared, false,
+    'covered_kw was marked profile-compared - jdAnalysis sends no candidate input (see H:jd-analysis-sees-no-profile)')
+  assert.equal(KEYWORD_GROUPS.parsed.profileCompared, false,
+    'requirements.model_keyword was marked profile-compared - the JD parse never sees the profile')
+  assert.equal(KEYWORD_GROUPS.thin.profileCompared, true,
+    'the thin list was marked uncompared - appApply.atsScoreOne sends a candidate master baseline')
+
+  // Every group renders through keywordGroupMeaning, so the rule reaches all of them with no
+  // carve-out. A carve-out is how the from-run group lost its disclaimer in the first place.
+  for (const [k, g] of Object.entries(KEYWORD_GROUPS)) {
+    const m = keywordGroupMeaning(k, 3)
+    assert.equal(m.profileCompared, g.profileCompared, `${k}: meaning disagrees with its descriptor`)
+    assert.equal(m.tone === null, !g.profileCompared, `${k}: tone does not follow provenance`)
+    assert.equal(m.note === null, g.profileCompared, `${k}: disclaimer does not follow provenance`)
+    assert.match(m.label, /\b3\b/, `${k}: the count is missing from the label`)
+  }
+})
+
+test('H:keyword-claim-follows-provenance: the count in the label is the count it was given', () => {
+  // A hardcoded label would sail past the tests above. Vary the number and the string must move.
+  const labels = [0, 1, 42].map(n => keywordGroupMeaning('from_run', n).label)
+  assert.equal(new Set(labels).size, 3, 'the label ignores its count')
+  assert.match(keywordGroupMeaning('from_run', 0).label, /\b0\b/)
+  // A junk count is 0, never NaN on screen.
+  assert.match(keywordGroupMeaning('from_run', undefined).label, /\b0\b/)
+})
+
+test('H:keyword-claim-follows-provenance: the rendered screen reads its label from the module', () => {
+  // The rule lived as a JSX comment before D14, and prose does not run. The one structural claim a
+  // unit test can make about the .jsx is that it no longer hand-types these strings: every keyword
+  // group must go through KeywordGroup/keywordGroupMeaning. Source grep, per the H-case rules -
+  // there is no DOM here to exercise.
+  const jsx = readFileSync(new URL('../src/screens/PostingAnalysis.jsx', import.meta.url), 'utf8')
+  assert.ok(jsx.includes('keywordGroupMeaning('),
+    'PostingAnalysis.jsx no longer calls keywordGroupMeaning - the labels went back to being hand-typed')
+  // The old hand-typed headings are gone. Named individually so a failure says which came back.
+  for (const gone of ['Terms the analysis run pulled out of the posting -', 'Compared against your profile and flagged as thin -']) {
+    assert.ok(!jsx.includes(gone), `a keyword heading is hand-typed in the .jsx again: ${gone}`)
+  }
 })
