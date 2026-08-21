@@ -370,6 +370,9 @@ export function segments(text: string, maxSegments = 1): Span[] {
 
   // Base segments: walk the string, intersecting the sentence bound with the line bound.
   const base: Span[] = []
+  // Whether each base segment was terminated by a BULLET separator rather than by sentence
+  // punctuation. The fallback below joins only bullet runs, and this is what tells them apart.
+  const endedAtBullet: boolean[] = []
   let pos = 0
   let guard = 0
   while (pos < t.length && guard++ < 100000) {
@@ -383,35 +386,44 @@ export function segments(text: string, maxSegments = 1): Span[] {
     // (db-query 2026-08-21). A long excerpt also clears a coverage threshold simply by containing
     // more words, so an unsplit blob outranks the focused sentence that actually says the thing.
     let lineEnd = t.length
+    let bulletCut = false
     for (const sep of ['\n', '|', '\u2022', '\u00b7']) {
       const at = t.indexOf(sep, pos)
-      if (at !== -1 && at < lineEnd) lineEnd = at
+      if (at !== -1 && at < lineEnd) { lineEnd = at; bulletCut = sep !== '\n' }
     }
     const start = Math.max(pos, sb.start)
     const end = Math.min(sb.end, lineEnd)
     if (end <= start) { pos = Math.max(pos + 1, Math.min(sb.end, lineEnd + 1)); continue }
     const trimmed = t.slice(start, end).replace(/\s+$/, '')
-    if (trimmed) base.push({ start, end: start + trimmed.length })
+    // Bullet-terminated only when the BULLET is what cut it — a sentence that happens to end before
+    // a later pipe was cut by its own full stop, and joining those back together is what rebuilt a
+    // whole paragraph (see the fallback's comment).
+    if (trimmed) { base.push({ start, end: start + trimmed.length }); endedAtBullet.push(bulletCut && end === lineEnd) }
     pos = end > pos ? end : pos + 1
   }
 
-  // BOTH granularities, deliberately. Splitting a `|`-separated field into items is right — the
-  // first row production stored quoted a 400-character skills blob whole — but item-only was a
-  // REGRESSION: the live `expertise` items are shorter than `reviewer.MIN_QUOTE_WORDS`, so every
-  // candidate failed the quote floor and the one working match went back to zero (measured, run
-  // 32508310532, evidenced 1 -> 0).
+  // BOTH granularities for a BULLET LIST, and only for a bullet list.
   //
-  // Emitting the enclosing LINE as well as its items costs nothing and cannot resurrect the blob
-  // problem: a line and an item that both carry the requirement's tokens tie on ratio, and the
-  // tie-break in `supportIn` prefers the SHORTER span, so the focused item still wins. The line is
-  // reached only when no item on it clears the floors — which is exactly the case that regressed.
+  // Splitting a `|`-separated field into items is right — the first row production stored quoted a
+  // 400-character skills blob whole. But item-only was a REGRESSION: the live `expertise` items are
+  // shorter than `reviewer.MIN_QUOTE_WORDS`, so every candidate failed the quote floor and the one
+  // working match went back to zero (run 32508310532, evidenced 1 -> 0).
+  //
+  // The first repair joined any consecutive segments not separated by a NEWLINE, which was worse:
+  // consecutive SENTENCES are not separated by a newline either, so it rebuilt whole paragraphs and
+  // stored a 670-character four-sentence block from `aboutMe1` as the excerpt (run 32508756588).
+  // A fallback that reassembles prose is the blob defect with extra steps.
+  //
+  // So the run is joined ONLY across bullet separators. A sentence is never glued to its neighbour;
+  // a short bullet item gets the surrounding item run to clear the quote floor. It cannot resurrect
+  // the blob problem either: an item and its enclosing run that both carry the requirement's tokens
+  // tie on ratio, and `supportIn` breaks ties toward the SHORTER span.
   for (let i = 0; i < base.length; i++) {
-    const lineStart = base[i].start
     let j = i
-    while (j + 1 < base.length && !t.slice(base[j].end, base[j + 1].start).includes('\n')) j++
+    while (j < base.length - 1 && endedAtBullet[j]) j++
     if (j > i) {
-      const whole = t.slice(lineStart, base[j].end).replace(/\s+$/, '')
-      if (whole) base.push({ start: lineStart, end: lineStart + whole.length })
+      const whole = t.slice(base[i].start, base[j].end).replace(/\s+$/, '')
+      if (whole) base.push({ start: base[i].start, end: base[i].start + whole.length })
     }
     i = j
   }
