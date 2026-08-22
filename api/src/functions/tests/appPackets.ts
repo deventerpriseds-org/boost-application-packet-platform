@@ -770,12 +770,31 @@ export async function runPacketBuild(
     if (!opp) return { status: 404, body: { error: 'opportunity not found' } }
     const { pkt, artifacts } = await loadPacket(client, oppId)
     const results: any[] = []
+    // ONE generation per build, not one per artifact.
+    //
+    // X2 fixed `regen` being hardcoded `false` — a rebuild could never escape the cache. The fix
+    // passed the flag straight into the loop, which overshot: `regen` stayed true for all four
+    // artifacts, so a rebuild ran the THREE-CALL PIPELINE FOUR SEPARATE TIMES and each document
+    // rendered from its own independent generation. The packet is one document set built from one
+    // package, and `ensurePackage` stores exactly one `pkg_json` — the LAST writer won, so every
+    // check, the artifact gate, the score and the reviewer graded the four documents against a
+    // package that only one of them was rendered from. Measured on job `945e28ed`: 42 warnings,
+    // which is one generation's ~10-11 repeated four times.
+    //
+    // `ensurePackage` writes `pkg_json` before returning, so clearing the flag after the first
+    // success makes artifacts 2..4 read back the package artifact 1 just generated — the same one
+    // that gets graded. Cost falls ~4x on a rebuild for the same reason.
+    //
+    // CLEARED ONLY ON SUCCESS, AND INSIDE THE TRY. If artifact 1 throws, the remaining three must
+    // still regenerate: clearing first would have them serve the STALE pre-rebuild cache, so the
+    // owner's explicit Rebuild would silently change nothing — the exact defect X2 fixed, returning
+    // through the failure path.
+    let regen = body?.regen === true
     for (const a of artifacts) {
       if (!metaFor(a.type)) continue // skip video (HeyGen) + non-templated
       try {
-        // X2: this was hardcoded `false`, so a rebuild-all could never escape the cache and every
-        // remediation loop (P3.1) would have reported looping while changing nothing.
-        const built = await buildTemplatedArtifact(client, { ...a, packet_id: pkt.id, opp_id: oppId }, opp, body?.regen === true)
+        const built = await buildTemplatedArtifact(client, { ...a, packet_id: pkt.id, opp_id: oppId }, opp, regen)
+        regen = false
         results.push({ type: a.type, url: built!.url, cleanedTokens: built!.cleaned,
                        warnings: built!.warnings || [], qcApplied: built!.qcApplied,
                        lineage: (built as any).lineage, analysis: (built as any).analysis })

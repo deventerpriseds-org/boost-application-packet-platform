@@ -1863,3 +1863,46 @@ exactly the vacuous-coverage failure the ledger test exists to catch. Corrected 
 **14 → 16**. Both clauses were mutation-proven: storing `content` instead of `'len'` fails the first
 ("the defect is gone, close the row"), and adding a real `update artifact set template_id = $1` fails
 the second ("the thing was built, close the row").
+
+## A rebuild ran the three-call pipeline FOUR times, once per artifact (2026-08-22)
+
+`runPacketBuild`'s loop passed `body?.regen === true` into `buildTemplatedArtifact` on **every**
+iteration. `X2` had fixed `regen` being hardcoded `false` (a rebuild could not escape the cache) and
+overshot: the flag stayed true for all four artifacts, so a rebuild ran three OpenAI calls four
+separate times and **each document rendered from its own independent generation**.
+
+The packet is one document set built from one package, and `ensurePackage` stores exactly one
+`pkg_json` — **the last writer won**, so every check, the artifact gate, the score and the reviewer
+graded four documents against a package only one of them was rendered from. Measured on job
+`945e28ed`: **42 warnings**, which is one generation's ~10-11 repeated four times.
+
+**Fix:** hoist to `let regen`, clear after the first SUCCESSFUL build, **inside the try**. The
+ordering is the whole correctness argument — `ensurePackage` writes `pkg_json` before returning, so
+artifacts 2..4 read back exactly what artifact 1 generated and what gets graded. Clearing *before*
+the call, or outside the try, reintroduces `A2` through the failure path: if artifact 1 throws, the
+remaining three would serve the STALE pre-rebuild cache and an explicit Rebuild would silently
+change nothing.
+
+**Blast radius traced, and it is bounded.** `summariseBuild` reads only `error` and `warnings`;
+`buildJobOutcome` reads only status/`failed`/`built`/`error`. Neither reads `qcApplied`, so the
+cached path's `qcApplied: null` changes no gate. `lineage`/`analysis` are diagnostic — the source
+comment says so outright, "the build persists them, nothing scores off them" — and one generation
+correctly yields one lineage. Warnings falling 42 → ~10-11 is the de-duplication, not a loss.
+
+### Hardening — I shipped an inert regex, and only the mutation caught it
+
+The guard's first assertion was `!/body\s*[?.]*\.\s*regen/`. The character class **greedily ate both
+characters of `?.`**, leaving nothing for the following `\.`, so it could never match `body?.regen`
+— the exact defect it was written for. Reinstating the defect left the guard GREEN. Fixed to
+`\??\.`. This is the third time this session that a guard passed on the thing it was written to
+catch, and the only reason it was found is that the mutation was actually run.
+
+### Hardening — a mutation that does not APPLY is not a mutation
+
+Worse: the first two runs of that mutation used `perl -0pi -e 's/\Qopp, regen)\E/.../'` and it
+**silently did not substitute**, so the "green" result was vacuous — it proved nothing about the
+guard either way, and I nearly read it as "the guard has a hole" when the real state was "the test
+was never run against a mutated file." `.replace()` and `sed`/`perl` in-place edits are silent
+no-ops on a miss, which `CLAUDE.md` already says under *"Verify that an edit applied"* — it applies
+to MUTATIONS too, not just fixes. Every mutation now greps the mutated line and aborts if the edit
+is not visibly present before the suite runs.

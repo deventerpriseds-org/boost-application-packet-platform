@@ -3434,3 +3434,57 @@ test('H:one-http-registration-per-route: a duplicate route silently 404s the sec
   assert.deepEqual(dupes, [],
     'these routes are registered more than once; every registration after the first is a silent 404')
 })
+
+// H:one-generation-per-build — a REBUILD ran the three-call pipeline once PER ARTIFACT.
+//
+//   actions.md A2   `regen` honoured server-side, hardcoded false — a rebuild could not escape the cache
+//   actions.md X2   made `regen` reachable — and passed it straight into the four-artifact loop
+//
+// X2's fix overshot. `regen` stayed true for every iteration, so a rebuild ran THREE OpenAI calls
+// FOUR SEPARATE TIMES and each document rendered from its own independent generation. The packet is
+// one document set built from one package and `ensurePackage` stores exactly one `pkg_json` — the
+// LAST writer won, so every check, the artifact gate, the score and the reviewer graded four
+// documents against a package only one of them was rendered from.
+//
+// Measured, job `945e28ed` (2026-08-22): 42 warnings on a four-artifact build — one generation's
+// ~10-11 repeated four times — and four `packet:*:generate:*` usage rows per pass instead of one.
+//
+// The invariant is the CLASS, not the line: inside the multi-artifact loop the regen flag may not be
+// re-read from the request, and must be cleared once an artifact has successfully built. Clearing it
+// BEFORE the call, or outside the try, reintroduces A2 through the failure path — if artifact 1
+// throws, the remaining three would serve the stale pre-rebuild cache and an explicit Rebuild would
+// silently change nothing. Source rule: exercising it needs live Postgres, Drive and OpenAI.
+test('H:one-generation-per-build: the artifact loop generates once, not once per artifact', () => {
+  const SRC = stripComments(readFileSync(new URL('../src/functions/tests/appPackets.ts', import.meta.url), 'utf8'))
+  const start = SRC.indexOf('for (const a of artifacts)')
+  assert.notEqual(start, -1, 'the multi-artifact build loop is gone or renamed; this guard must be retargeted')
+
+  // Brace-match the loop body so the assertions below cannot drift onto neighbouring code.
+  const open = SRC.indexOf('{', start)
+  let depth = 0, end = -1
+  for (let i = open; i < SRC.length; i++) {
+    if (SRC[i] === '{') depth++
+    else if (SRC[i] === '}' && --depth === 0) { end = i; break }
+  }
+  assert.notEqual(end, -1, 'could not brace-match the artifact loop body')
+  const body = SRC.slice(open, end + 1)
+
+  // `\??\.` not `[?.]*\.` — the character class greedily ate BOTH chars of `?.` and left nothing
+  // for the dot, so the first written form of this assertion passed with the defect reinstated.
+  // Caught by mutation A, which is the only reason it is not shipping inert.
+  assert.ok(!/body\s*\??\.\s*regen/.test(body),
+    'the artifact loop reads `regen` from the request on every iteration, so a rebuild runs the ' +
+    'three-call pipeline once PER ARTIFACT and each document renders from a different package. ' +
+    'Hoist it to a `let` outside the loop.')
+
+  assert.ok(/\bregen\s*=\s*false\b/.test(body),
+    'the artifact loop never clears the regen flag, so every artifact regenerates. Clear it after ' +
+    'a SUCCESSFUL build, inside the try.')
+
+  // Ordering: the clear must come AFTER the build call, or artifact 1 serves the stale cache too.
+  const call = body.indexOf('buildTemplatedArtifact')
+  const clear = body.search(/\bregen\s*=\s*false\b/)
+  assert.ok(call !== -1 && clear > call,
+    'the regen flag is cleared before `buildTemplatedArtifact` runs, so the FIRST artifact reads the ' +
+    'stale pre-rebuild cache — an explicit Rebuild would change nothing (this is A2 returning).')
+})
