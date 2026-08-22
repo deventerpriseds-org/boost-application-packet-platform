@@ -3488,3 +3488,46 @@ test('H:one-generation-per-build: the artifact loop generates once, not once per
     'the regen flag is cleared before `buildTemplatedArtifact` runs, so the FIRST artifact reads the ' +
     'stale pre-rebuild cache — an explicit Rebuild would change nothing (this is A2 returning).')
 })
+
+// H:sent-is-terminal-and-written — `packet.status` allowed 'sent' since the schema was written and
+// NOTHING ever set it. Measured 2026-08-22: 39 packets, 0 sent; 195 artifacts, 0 approved.
+//
+// The send itself was never missing — `outreachSend` really goes out through Microsoft Graph, and
+// `appOutreach.ts` even gates it on packet blocking findings. Only the WRITE-BACK was absent, so
+// `Packets.jsx:13`'s "Sent" group could never populate and a shipped packet read "Ready to ship"
+// forever. (The ledger row first claimed the whole ship half was missing, from a grep of ONE file.
+// It was corrected; this guard pins the real defect.)
+//
+// Three properties, because each was independently capable of making the fix inert:
+//  1. `recomputePacket` derives status from artifact rows and can only ever produce
+//     ready/review/building. Without an early return it would RESET a sent packet on the next
+//     status change, regenerate or rebuild — the group would empty itself again.
+//  2. BOTH outreach write points must mark it. LinkedIn and call channels have no send API and
+//     reach 'sent' only through `outreachState`, so wiring only the Graph path would make a sent
+//     packet mean "sent by email".
+//  3. The build response must DERIVE `sent`, not assert a literal `false` about a packet it never
+//     asked — which is what it did for the whole life of the route.
+test('H:sent-is-terminal-and-written: a sent packet stays sent, and both send paths mark it', () => {
+  const PK = stripComments(readFileSync(new URL('../src/functions/tests/appPackets.ts', import.meta.url), 'utf8'))
+  const OUT = stripComments(readFileSync(new URL('../src/functions/tests/appOutreach.ts', import.meta.url), 'utf8'))
+
+  const rc = PK.indexOf('async function recomputePacket')
+  assert.notEqual(rc, -1, 'recomputePacket is gone or renamed; retarget this guard')
+  const derive = PK.indexOf("const status = (allApproved", rc)
+  assert.notEqual(derive, -1, 'the status derivation moved; retarget this guard')
+  const preamble = PK.slice(rc, derive)
+  assert.ok(/status\s*===\s*'sent'/.test(preamble) && /return\s+'sent'/.test(preamble),
+    "recomputePacket does not treat 'sent' as terminal BEFORE deriving from artifacts, so the next " +
+    'artifact status change or rebuild silently resets a sent packet to ready.')
+
+  assert.ok(/export async function markPacketSent/.test(PK),
+    'markPacketSent is gone — packet.status has no writer again')
+
+  // Both outreach write points, not one.
+  assert.equal((OUT.match(/markPacketSent\(/g) || []).length, 2,
+    'expected markPacketSent at BOTH outreach write points (outreachSend via Graph, and ' +
+    'outreachState for the copy-paste LinkedIn/call channels). Wiring one leaves the other silent.')
+
+  assert.ok(!/\bsent:\s*false\b/.test(PK),
+    'the build response hardcodes `sent: false` again — it must derive from the recomputed status')
+})

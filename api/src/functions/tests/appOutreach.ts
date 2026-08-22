@@ -3,6 +3,8 @@ import { resolveOwner, requireWrite } from './appSession'
 import { getPgClient } from './pgClient'
 import { getMicrosoftToken } from './googleAuth'
 import { logUsage } from './usageMeter'
+// One direction only: appPackets does NOT import this module, so this cannot cycle.
+import { markPacketSent } from './appPackets'
 
 // Email channels can actually be sent via Graph; LinkedIn/call channels have no
 // send API and are copy-paste by design.
@@ -145,7 +147,11 @@ export async function outreachState(req: HttpRequest, context: InvocationContext
       [state, messageId]
     )).rows[0]
     if (!r) return { status: 404, headers: HEADERS, jsonBody: { error: 'message not found' } }
-    return { status: 200, headers: HEADERS, jsonBody: { ok: true, message: msgShape(r) } }
+    // Same write-back as the Graph path. LinkedIn and call channels have no send API and reach
+    // 'sent' only through here, so marking on the Graph path alone would make a sent packet mean
+    // "sent by email" — the half-truth `packet.status` exists to remove.
+    const packetSent = state === 'sent' ? await markPacketSent(client, r.opp_id) : false
+    return { status: 200, headers: HEADERS, jsonBody: { ok: true, packetSent, message: msgShape(r) } }
   } catch (err) {
     return { status: 500, headers: HEADERS, jsonBody: { error: String(err) } }
   } finally { try { await client?.end() } catch {} }
@@ -298,7 +304,10 @@ export async function outreachSend(req: HttpRequest, context: InvocationContext)
       `update outreach_message set state = 'sent', sent_at = now(), to_email = $1, subject = $2 where id = $3 returning *`,
       [to, subject, messageId]
     )).rows[0]
-    return { status: 200, headers: HEADERS, jsonBody: { ok: true, delivered: true, from: sender, to, subject, message: msgShape(updated) } }
+    // The packet learns that it shipped. Until this line `packet.status` could never reach 'sent',
+    // so the "Sent" group was permanently empty and a shipped packet still read "Ready to ship".
+    const packetSent = await markPacketSent(client, updated.opp_id)
+    return { status: 200, headers: HEADERS, jsonBody: { ok: true, delivered: true, from: sender, to, subject, packetSent, message: msgShape(updated) } }
   } catch (err) {
     return { status: 500, headers: HEADERS, jsonBody: { error: String(err) } }
   } finally { try { await client?.end() } catch {} }

@@ -81,7 +81,38 @@ async function loadPacket(client: any, oppId: string) {
 }
 
 // Recompute packet.status from its artifacts' states.
+/**
+ * Mark the packet behind an opportunity as SENT. The one writer of `packet.status = 'sent'`.
+ *
+ * `packet.status` has allowed `'sent'` since the schema was written and NOTHING has ever set it, so
+ * `Packets.jsx`'s "Sent" group could not populate and a shipped packet read "Ready to ship" forever.
+ * Measured 2026-08-22: 39 packets, 0 sent. The send itself was never missing — `outreachSend` really
+ * goes out through Microsoft Graph — only the write-back was.
+ *
+ * Called from BOTH outreach write points: the real Graph send and the manual state set that the
+ * copy-paste channels (LinkedIn, call) use. Marking on only one would make "sent" mean "sent by
+ * email", which is the kind of half-truth this column exists to remove.
+ *
+ * NON-FATAL by construction: the message has already gone out when this runs, and failing the send
+ * response because a bookkeeping update failed would tell the owner their email did not send when it
+ * did. Returns whether it marked, so the caller can report it without depending on it.
+ */
+export async function markPacketSent(client: any, oppId: string): Promise<boolean> {
+  try {
+    const r = await client.query(
+      `update packet set status = 'sent', updated_at = now() where opp_id = $1 and status <> 'sent'`, [oppId])
+    return (r.rowCount || 0) > 0
+  } catch { return false }
+}
+
 async function recomputePacket(client: any, packetId: string) {
+  // `sent` is TERMINAL and must survive this function. Everything below derives status from artifact
+  // rows, and the derivation can only ever produce ready/review/building — so a packet marked sent
+  // would be silently reset to `ready` by the next status change, regenerate or rebuild, and the
+  // "Sent" group would empty itself again. Re-opening a sent packet is a deliberate act, not a
+  // side effect of touching an artifact.
+  const cur = (await client.query(`select status from packet where id = $1`, [packetId])).rows[0]
+  if (cur?.status === 'sent') return 'sent'
   const arts = (await client.query(`select status from artifact where packet_id = $1`, [packetId])).rows
   const allApproved = arts.length > 0 && arts.every((a: any) => a.status === 'approved')
   const anyStarted = arts.some((a: any) => a.status !== 'todo')
@@ -874,7 +905,11 @@ export async function runPacketBuild(
         proposed: evidence?.proposed ?? 0, escalated: evidence?.escalated ?? 0,
         refused: evidence?.refused ?? null,
       },
-      packetStatus, cadenceSeeded, outreachDrafted, sent: false, note: summary.note } }
+      // DERIVED, not hardcoded. This was the literal `false` for the whole life of the route, so the
+      // build response asserted "not sent" about a packet it had never asked — and `Packets.jsx`
+      // read it. It now reports what `recomputePacket` actually returned, which is the only value
+      // that can be `'sent'` (that status is terminal and survives a rebuild).
+      packetStatus, cadenceSeeded, outreachDrafted, sent: packetStatus === 'sent', note: summary.note } }
   }
 }
 
