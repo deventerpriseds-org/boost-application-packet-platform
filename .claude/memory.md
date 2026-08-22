@@ -1811,3 +1811,18 @@ prompt directed at "a senior **engineering** executive", from a hardcoded seed. 
 **the resume TEMPLATE chosen for the build drives the focus** — today only one template exists, so it
 must resolve to engineering EXPLICITLY from the template's own configuration rather than by falling
 through five layers to a code constant.
+
+
+## NEVER spawn a cloud session for work an in-process agent does (2026-08-22, owner directive)
+
+`mcp__Claude_Code_Remote__create_session` creates a **separate billable container** with its own
+lifecycle, its own permission prompts that nobody is watching, and its own recurring triggers. The
+`Agent` tool creates an in-process subagent that costs the parent's context and dies with it.
+
+I used the first for AC writers and verifiers. Seven sessions, **~$325**, one blocked on an unanswered
+permission prompt for a day, all of them persisting after their work was done and resurfacing in the
+owner's list on their own schedules. He cleaned them up by hand and said: never again.
+
+- **AC writing, verification, research, review → `Agent`, always.**
+- A cloud session is only for work the OWNER asked to run as a separate session.
+- If one is ever spawned, archive it in the same turn its work lands.
