@@ -2118,3 +2118,35 @@ own concurrency comments describe "four artifacts of one packet" entering it at 
 built for all four; nothing called it. So the fix RUNS the checks the design intended instead of
 weakening the gate — strictly better, and I nearly shipped the weaker one because I inferred the
 premise instead of reading the function.
+
+### CONFIRMED LIVE: the deadlock is gone, and the gate now fails on REAL findings (2026-08-22)
+
+Rebuild of the Trinnex packet on deploy `ae72a56` (api-deploy run 32602915043), then read from the
+database:
+
+```
+      type      | status | gate | attention | checks
+ compact_resume | review | fail |         8 |     18     (was 0 checks)
+ cover          | review | fail |         5 |     15     (was 0 checks)
+ portfolio      | review | fail |         5 |     15     (was 0 checks)
+ resume         | review | fail |         8 |     78
+ video          | todo   |      |           |      0     (correctly excluded)
+```
+
+**Checks now run for every buildable type — 0 → 15/15/18.** `approvalBlock`'s "no checks have been
+run" deadlock is gone.
+
+**The gate now says `fail`, and that is the gate WORKING, not a new bug.** The findings are real and
+several are the owner's OWN prompt rules being enforced: `skill_char_limit` (6 of 20 skills over 30
+chars — the prompt says ≤30), `relevant_char_limit` (3 items over 20 chars — the prompt allows at
+most one), `cross_list_redundancy` (3 items in more than one list), `word_counts` (5 fields outside
+their band), `changes_cited` (6 of 9 changes cite nothing), and the substantive one,
+**`must_have_coverage` 1/5**.
+
+**The distinction that matters, and it is the whole point of the two-day fix:** before, NO amount of
+owner effort could ship a packet — the transition did not exist. Now the packet is blocked by
+nameable, fixable findings, which is what a quality gate is supposed to do. `fail` cannot be
+overridden by design, so the route forward is the remediation loop (P3), not a gate weakening.
+
+Do NOT read the 26 findings as "still broken." Read them as the first honest quality signal this
+product has ever produced about a packet.

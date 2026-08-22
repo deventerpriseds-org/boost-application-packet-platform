@@ -2638,3 +2638,11 @@ I read `0 approved / 0 sent` as unused three times while building on top of a ga
 **Correction on the record:** I recommended weakening the approval gate, on the unverified premise
 that no check suite existed for cover/portfolio. Reading `evaluateArtifact` showed it type-agnostic.
 The premise was inferred, not checked — the same failure mode as the two-day miss itself.
+
+**LIVE RESULT (ship path, deploy `ae72a56`):** rebuild → checks now written for every buildable type
+(cover 0→15, portfolio 0→15, compact_resume 0→18, resume 78; video correctly 0). The
+"no checks have been run" deadlock is CLEARED. All four gates read `fail` on real findings —
+`skill_char_limit`, `relevant_char_limit`, `cross_list_redundancy`, `word_counts`,
+`changes_cited`, and `must_have_coverage` 1/5 — most of which are the owner's own prompt rules
+being enforced for the first time. A `fail` cannot be overridden by design, so the next step is the
+remediation loop, NOT a gate change. Before: no effort could ship. Now: nameable, fixable findings.
