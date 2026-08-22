@@ -1029,3 +1029,73 @@ fabricating a claim disguised as `exact` fact. Both matter; they are different m
 ### Tally unchanged: 48 pass · 11 fail · 4 not_applicable
 
 D-I is still outside the 63 original criteria and doesn't move a grade. Nothing fixed in this pass.
+
+---
+
+## ADDENDUM 7 — `main` @ `19dc491`: a correction to Addendum 6, and D-I still stands
+
+`main` advanced 22 more commits. Merged in, rebuilt: **`api` 705/705 · `app` 208/208**, both clean
+(one interim run of `npm test` reported "18 skipped" with 687/705 passing; a clean re-run of the
+exact same command reported 705/705/0-skipped, so I'm treating the first as run-to-run noise in this
+sandbox rather than a real regression — flagged rather than silently dropped).
+
+### Correcting Addendum 6: the "real build" I cited had never actually run
+
+Addendum 6 said the six evidence rows I observed came from "the first real build" via the "Build
+entire packet" button. **That specific causal claim was wrong, and I should have verified it rather
+than inferred it.** `51c65e2` ("Call the evidence pass in-process — the route call was never
+authenticated"), landed 33 minutes *after* my observation, records that the `selfPost` call
+`packetBuildAll` used sent no `Authorization` header, `evidenceResolve` requires one
+(`requireWrite`), and so **every build since the caller was wired had silently logged "evidence
+resolve did not run: sign in required" and never once written a row.** The six rows I read were
+real, but they came from the authenticated `api-test.yml` dispatches used to diagnose the matcher
+(the same class of dispatch that produced every evidence row before this, going back to the original
+D:evidence-resolves-nothing investigation) — not from the button. I saw a plausible story (a caller
+was wired; the row count moved) and did not check the one thing that would have settled it: whether
+that specific request actually succeeded. That is exactly the "compare two derived facts instead of
+reading the primary source" failure this codebase's own house rules name, and the other lane caught
+their own version of it in the same session — worth crediting rather than papering over.
+
+### The button is now genuinely fixed, and I checked this one more carefully
+
+`packetBuildAll` (`app.http` route `app/opportunity/{id}/packet/build-all` — the handler the UI's
+"Build entire packet" button actually calls) now invokes `resolveEvidenceForOpp` **in-process**, no
+HTTP hop: it re-checks the opportunity belongs to the signed-in owner (a real gap the same commit
+found and closed — `requireWrite` proves someone is signed in, not that they own *this*
+opportunity), reads the profile, resolves the owner's thresholds via `resolveOptionsFor`, and calls
+`writeEvidence` directly. A follow-up commit (`a7a5cdc`) reports a live async build job completing
+with **"evidence resolved."** I did not just read that claim — production `requirement_evidence` is
+now at **14 rows**, up from the 6 I saw before this fix, which is independent corroboration that
+something is writing rows again post-fix.
+
+### D-I: re-checked against the now-genuinely-live path, still unfixed
+
+`requirementSupport.ts`'s safety-floor check is unchanged:
+`NEGATION_RE.test(excerpt) || ATTRIBUTION_RE.test(excerpt)` still runs only against the winning
+excerpt. Re-ran the six-case repro (`negdig2.mjs`) against the merged code: **all six still
+resolve**, including all the negation/attribution markers from Addendum 5/6, and the control case
+(verb-tense-mismatched, forced onto the sentence path) still correctly refuses.
+
+Queried production fresh, now that a genuine authenticated build has run:
+
+```
+ total | exact_rows | anchored_rows | proposed_rows
+    14 |          0 |             1 |            13
+```
+
+**Still zero `exact`-method rows.** The bypass mechanism remains structurally present and now
+confirmed genuinely reachable through real, working product usage — but has still not produced an
+observed bad row in the two live samples measured so far. I'm holding to the same distinction as
+Addendum 6: reachable and unfixed, not confirmed exploited.
+
+### D-H re-confirmed under the rewritten call
+
+The in-process `resolveEvidenceForOpp` also calls `resolveOptionsFor(client, owner)` before
+`writeEvidence` — so D-H's fix held through this rewrite too, on what is now a fourth/fifth distinct
+call site across the module's history (`appChecks.ts`, `appRequirements.ts` ×2, `appPackets.ts`).
+
+### Tally unchanged: 48 pass · 11 fail · 4 not_applicable
+
+Nothing fixed in this pass; nothing in this addendum moves an AC-P8.3 criterion. It exists to correct
+the record on Addendum 6's unverified causal claim and to confirm D-I survived a second, more solid
+verification of the path that would expose it.
