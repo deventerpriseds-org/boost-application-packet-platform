@@ -2526,3 +2526,31 @@ falling. All four still produced real Drive URLs and `packetStatus: review`, so 
 
 The 42 was one generation's 10 repeated four times, as claimed — and the four documents now render
 from the same `pkg_json` that every check, the gate, the score and the reviewer grade against.
+
+## Send write-back + review notes (2026-08-22) — commits `5ee24a9`, `aa4a42f`
+
+**Owner request:** "yes build 1 and 2", after I corrected my own overstated claim that the ship half
+of the product did not exist.
+
+**Neither item needed a schema change.** `packet.status` already allowed `'sent'`, `packet.feedback`
+was already a declared jsonb column, `packet.round` too — all three written by nothing. Adding a
+`packet_review` table would have stood a parallel system beside three unused columns.
+
+1. **Packet learns it shipped** — `markPacketSent`, wired at BOTH outreach write points; `'sent'`
+   made terminal in `recomputePacket` (without which the next artifact change resets it); build
+   response derives `sent` instead of its lifelong literal `false`.
+2. **"Request changes" carries a reason** — note appended to `packet.feedback`, unresolved notes for
+   that artifact type steer the next generation, prepended as a directive exactly as `roleDirective`
+   already is. **Prompts table untouched**; notes resolve only after the package is stored.
+
+**Deliberately NOT built, and it is a correction to my own recommendation:** auto-advancing
+`opportunity.stage` to `applied` on send. The outreach channels include `linkedinConnect`,
+`coldCall` and `followUp` — a connect request is not an application, so auto-advancing would mark
+the pipeline applied on a LinkedIn touch. Flagged to the owner as the one open decision.
+
+**Guards:** `H:sent-is-terminal-and-written` (3 mutations), `H:changes-carries-a-reason` (4).
+One of the latter's assertions was INERT when first written — a bare `/revisionNotes/` word-match
+that stayed green when the call site lost the argument. Now scoped to the sliced call.
+
+**Verification:** api `tsc` clean, app `vite build` clean, per-file sweep of all 35 test files with
+0 failures. Landed `aa4a42f`; live verification pending the deploy.

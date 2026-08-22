@@ -1937,3 +1937,47 @@ that would have caught it: an absence claim must sweep every module that could o
 The real gap is much smaller and is now what the row says: a send never writes back to the packet
 (`appPackets.ts:877` hardcodes `sent: false`) or to `opportunity.stage`, and "Request changes"
 carries no note. An enhancement on a working path, not a missing half.
+
+## Send write-back + review notes (2026-08-22) — the columns already existed
+
+Owner approved building two things after I corrected the `D:packet-cannot-be-sent` overstatement.
+**No schema change was needed for either**: `packet.status` has allowed `'sent'` since the schema
+was written, `packet.feedback jsonb` was declared, and `packet.round` too — all three read by
+nothing and written by nothing. This is the extend-don't-duplicate rule paying off; the instinct to
+add a `packet_review` table would have stood a parallel system beside three unused columns.
+
+**1. The packet learns it shipped.** `markPacketSent` is the one writer of `status='sent'`, wired at
+BOTH outreach write points — the Graph send AND `outreachState`, because LinkedIn and call channels
+have no send API and reach 'sent' only through the latter; wiring one would make "sent" mean "sent
+by email". Non-fatal by construction: the mail has already gone when it runs.
+
+**The trap that would have made it inert:** `recomputePacket` derives status from artifact rows and
+can only ever produce ready/review/building, so it would have RESET a sent packet on the next status
+change or rebuild. `'sent'` is now terminal, checked before the derivation.
+
+**2. "Request changes" carries a reason.** The note is appended to `packet.feedback`, and
+`ensurePackage` loads UNRESOLVED notes for that artifact type and passes them to
+`buildPackageForJD`, which prepends them as a directive in front of the resolved user message —
+**exactly the mechanism `roleDirective` already uses**. The owner's standing constraint holds:
+`prompts['resume_user']` is still read and used verbatim, the Prompts table is untouched. A revision
+request is a turn of human instruction ahead of the prompt, not an edit to it.
+
+Notes resolve only AFTER the package is stored. Resolving on entry lets a failed generation silently
+eat the request while the owner watches the artifact rebuild — the worse of the two failure modes.
+
+### Hardening — a bare word-match assertion is inert when the word appears elsewhere
+
+`H:changes-carries-a-reason` first asserted `/revisionNotes/.test(PK)`. That word also appears in
+the declaration and the resolve block, so deleting it from the `buildPackageForJD` ARGUMENTS — the
+mutation that makes the whole feature blind — left the guard GREEN. Now asserted inside the sliced
+call site. **Second inert guard this session caught only by mutation** (the first was `[?.]*\.`
+eating both characters of `?.`). Both were regexes that looked obviously right when read. The
+lesson generalises: an existence assertion must be scoped to the construct that matters, because a
+symbol used in three places cannot prove anything about one of them.
+
+### Measurement note — the aggregate test count is not trustworthy
+
+`node --test --test-force-exit "test/*.test.mjs"` reported 708, then 697, then 684 across three
+runs of a growing suite, with 0 failures every time; force-exit truncates the aggregate reporter.
+Stop quoting that number. The reliable measure is the per-file sweep — all 35 files, 0 failures —
+and that is what is cited from here on.
