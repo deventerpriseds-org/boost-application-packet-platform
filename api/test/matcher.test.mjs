@@ -1301,7 +1301,12 @@ test('H:escalation-reaches-what-words-cannot: the happy path, with offsets that 
   assert.equal(proposalVersion, PROPOSAL_VERSION)
   assert.equal(ratio, null, 'a proposed row has no similarity score and must not invent one')
   assert.equal(sourceKey, 'workHistory1')
-  assert.equal(extra, GOOD.reasoning, 'the reasoning is stored, so the owner can judge it')
+  // The VERIFIED note, not the raw sentence. `verifyReasoning` publishes what the excerpt does not
+  // mention beside the model's claim — on this path the requirement's words are absent by
+  // construction, which is why the row escalated at all, so the note says so in one line.
+  assert.ok(extra.includes(GOOD.reasoning), 'the model\'s sentence must survive when nothing is withdrawn')
+  assert.match(extra, /none of the requirement's own words appear/,
+    'and the owner must be told a model judged it, not a rule')
   // THE ACCUSATION-GRADE HALF: the offsets index the record's real bytes.
   assert.equal(ESC_REC.text.slice(start, end), quote)
   assert.ok(ESC_REC.text.includes(quote))

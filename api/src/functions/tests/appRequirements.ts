@@ -240,6 +240,10 @@ export async function writeEvidence(
       if (outcome.kind === 'transport_failed') { note('transport_failed'); continue }
       if (outcome.kind === 'unparseable') { note('unparseable'); continue }
       if (outcome.kind === 'refused') { note(outcome.reason); continue }
+      // The row still stands — the QUOTE was verified independently of the explanation — but a
+      // withdrawn explanation is counted, because a model overclaiming is a fact about the run the
+      // owner should be able to see without reading every note.
+      if (outcome.reasoningWithdrawn) note('reasoning_withdrawn')
 
       const e = outcome.row
       // THE SAME accusation-grade assertion the deterministic path makes, applied again here rather

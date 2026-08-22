@@ -27,7 +27,9 @@
 // ordinary tests with hand-written model answers, including adversarial ones. `appRequirements`
 // supplies the real transport.
 import type { ProfileRecord } from './evidence'
-import { requirementClass, claimTokens } from './requirementSupport'
+import {
+  requirementClass, claimTokens, namedEntityTokens, tokensOf, sameWord, isContentful,
+} from './requirementSupport'
 
 /** Bump when the proposal rules change, so a row can be attributed to a ruleset. */
 export const PROPOSAL_VERSION = 1
@@ -188,7 +190,7 @@ import { contentJson, type FetchJson } from './openaiJson'
  * evidence, broken one layer below where anyone would look.
  */
 export type EscalationOutcome =
-  | { kind: 'accepted'; row: EvidenceRow; reasoning: string }
+  | { kind: 'accepted'; row: EvidenceRow; reasoning: string; reasoningWithdrawn: boolean; overclaimed: string[] }
   | { kind: 'refused'; reason: ProposalRefusal }
   | { kind: 'skipped' }
   | { kind: 'transport_failed'; error: string }
@@ -240,9 +242,16 @@ export async function escalateOne(
 
   const a = outcome.accepted
   const rec = records.find(r => r.key === a.source_key)!
+  // The explanation faces its own check, and the RESULT of that check is what gets stored — never
+  // the model's raw sentence. See `verifyReasoning`: an exact rule withdraws a named-entity
+  // overclaim, and everything else is published beside a deterministic statement of what the excerpt
+  // does not mention.
+  const verdict = verifyReasoning(requirement, rec.text.slice(a.char_start, a.char_end), a.reasoning)
   return {
     kind: 'accepted',
-    reasoning: a.reasoning,
+    reasoning: verdict.note,
+    reasoningWithdrawn: verdict.withdrawn,
+    overclaimed: verdict.overclaimed,
     row: {
       // The record's own bytes at the verified offsets — never the model's string. On this path the
       // two are equal by construction (verifyProposal found the quote with indexOf), which is
@@ -255,7 +264,9 @@ export async function escalateOne(
       char_end: a.char_end,
       // The model's one sentence, in SPEC 4.1's supporting-note column. Prose about the quote,
       // never a second quote — which is the only thing `extra` is allowed to hold.
-      extra: a.reasoning,
+      // The VERIFIED note, not the model's sentence. Never empty — `verifyProposal` already refuses
+      // an unexplained match, so a row whose note we blanked would contradict this module one function up.
+      extra: verdict.note,
       // NOT a similarity score. There is no ratio to report for a proposed row, and inventing one
       // would be a fabricated composite: the number a reviewer trusts most and the one most likely
       // to be wrong. `method` and `proposal_version` carry the provenance instead.
@@ -266,4 +277,99 @@ export async function escalateOne(
       proposal_version: PROPOSAL_VERSION,
     },
   }
+}
+
+// --- verifying the model's EXPLANATION ---------------------------------------------------------
+//
+// The quote is settled by `indexOf`. The sentence explaining WHY it matches was checked only for
+// being non-empty, and it is the text shown to the owner as the reason to trust the row. Measured on
+// the first live run, two of five explanations asserted what their own quote does not show: one said
+// an excerpt demonstrated "security" from a passage mentioning none, and one called "real-time data
+// collection" IoT.
+//
+// THE OBVIOUS FIX DOES NOT WORK, AND THAT IS WHY THIS IS SHAPED THE WAY IT IS. "Drop the sentence
+// when it names a requirement term the quote lacks" was built and run against the real cases first:
+//
+//   1. It MISSED the security case. `sameWord('secure','security')` is FALSE — `forms()` has no
+//      -e -> -ity rule — so the word at issue never matched. It dropped that row anyway, on
+//      `software`, which means a test asserting "case 1 is dropped" would pass while the guard was
+//      blind to the defect that commissioned it. A vacuous gate that looks like a working one.
+//   2. It fired THREE times on sound reasoning: for "Build and promote a high-performing engineering
+//      culture" evidenced by "I have fostered high-performing teams", the explanation "which directly
+//      evidences building an engineering culture" flagged `build`, `engineering`, `culture`.
+//      Restating the requirement is what an explanation DOES.
+//   3. It would drop an HONEST explanation hardest of all — "the excerpt shows scale but does not
+//      address security" names `security` while the quote lacks it, and is exactly right.
+//
+// (2) and (1) are structurally identical to a token matcher: in both the reasoning names a
+// requirement term the quote lacks. Only a semantic reading separates "fostered high-performing
+// teams ~ engineering culture" from "real-time decision support !~ security", and a model policing a
+// model's prose relocates the problem rather than solving it.
+//
+// SO THE TWO JOBS ARE SPLIT BY WHAT CAN BE SETTLED EXACTLY:
+//
+//   ACCUSE only on NAMED tokens — `IoT`, `AI/ML`, `SOC 2`, `Java`. An acronym or product name is
+//   present or it is not; there is no near-miss and no morphology to get wrong, which is the same
+//   reason `supportIn` already treats named entities as absolute. A model claiming the excerpt shows
+//   IoT when the string `iot` appears nowhere in it is wrong by an exact rule, and its sentence is
+//   withdrawn.
+//
+//   LABEL everything else, with the deterministic fact `resolveEvidence` already publishes:
+//   "the excerpt does not mention: secure". The owner reads the model's claim beside a computed note
+//   contradicting it. That catches the security case — which no exact rule can settle — without
+//   accusing anyone, and it cannot cry wolf, because it states rather than judges.
+//
+// `extra` is NEVER left null. `verifyProposal` refuses an unexplained match outright
+// (`no_reasoning`: "an unexplained match is not reviewable"), so storing a row with nothing in its
+// note would contradict this module's own rule one function up. A withdrawn sentence is REPLACED by
+// the fact that withdrew it.
+
+export interface ReasoningVerdict {
+  /** Named requirement tokens the explanation claimed and the quote does not contain. */
+  overclaimed: string[]
+  /** Requirement content words absent from the excerpt. A FACT, published either way. */
+  missing: string[]
+  /** True when the model's sentence was withdrawn by an exact rule. */
+  withdrawn: boolean
+  /** What to store in `requirement_evidence.extra`. Never empty. */
+  note: string
+}
+
+const carries = (toks: string[], t: string) => toks.includes(t) || toks.some(h => sameWord(t, h))
+
+export function verifyReasoning(requirement: string, quote: string, reasoning: string): ReasoningVerdict {
+  const reqText = String(requirement || '')
+  const q = tokensOf(String(quote || '')).map(x => x.t)
+  const r = tokensOf(String(reasoning || '')).map(x => x.t)
+
+  // The accusation, and it is deliberately narrow. Named tokens only.
+  const named = [...namedEntityTokens(reqText)]
+  const overclaimed = named.filter(t => carries(r, t) && !carries(q, t))
+
+  // The fact, over the same contentful population `supportIn` measures support on.
+  const missing = claimTokens(reqText).filter(isContentful).filter(t => !carries(q, t))
+
+  // HOW THE FACT IS PHRASED MATTERS, because on this path it is almost always a long list. A row
+  // reaches the model precisely BECAUSE the requirement's words are absent from the profile — that is
+  // what the deterministic matcher could not get past — so listing every missing term on every row
+  // would be near-maximal, would read as an accusation against evidence the design considers sound,
+  // and would train the owner to ignore it.
+  //
+  // So: when NOTHING of the requirement appears, say that once, plainly, and name the model as the
+  // thing that judged it. When only SOME terms are absent, they are the informative case and are
+  // listed — capped, because a list nobody finishes is a list nobody reads.
+  const total = claimTokens(reqText).filter(isContentful).length
+  const missNote = !missing.length ? ''
+    : missing.length >= total
+      ? 'none of the requirement\'s own words appear in this excerpt — a model judged it relevant'
+      : `the excerpt does not mention: ${missing.slice(0, 6).join(', ')}${missing.length > 6 ? `, and ${missing.length - 6} more` : ''}`
+  const clean = String(reasoning || '').trim()
+
+  if (overclaimed.length) {
+    const why = `a model's explanation was withdrawn: it credited the excerpt with ${overclaimed.join(', ')}, which it does not contain`
+    return { overclaimed, missing, withdrawn: true, note: missNote ? `${why} — ${missNote}` : why }
+  }
+  // Not withdrawn: the model's sentence stands, with the fact beside it rather than instead of it.
+  const note = [clean, missNote].filter(Boolean).join(' — ')
+  return { overclaimed: [], missing, withdrawn: false, note }
 }
