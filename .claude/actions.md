@@ -2508,8 +2508,21 @@ Live rebuild filed on Trinnex `9f9c370a`: `POST packet/build-async {"regen":true
 job `3ae8d684-eaff-44a7-a624-80e5a5fa2245`, created 21:26:55.409, **claimed 21:26:57.788 — 2.4s,
 by the queue message**. `state: running` at the last poll (21:27:54).
 
-**NOT YET CONFIRMED: the fix's actual effect.** The claim that generation now runs ONCE is proven
-only by the source guard and the reasoning above — the live number that would settle it is the
-warning count, which should fall from **42 to roughly 10-11** on a four-artifact build. Until that
-job reaches `state: done` and the count is read, this is *implemented and deployed, mechanism
-verified locally, effect not yet observed in production*.
+**CONFIRMED IN PRODUCTION 2026-08-22, job `3ae8d684` `done: true`** (api-test run 32599780319).
+The prediction was warnings **42 → roughly 10-11**; measured **10**, and the shape is the proof,
+not just the count:
+
+| artifact | warnings | qcApplied | doc |
+|---|---|---|---|
+| `resume` | **10** | `true` | Google Doc |
+| `compact_resume` | **0** | `null` | Google Doc |
+| `cover` | **0** | `null` | Google Slides |
+| `portfolio` | **0** | `null` | Google Slides |
+
+`qcApplied: null` is `ensurePackage`'s cached-path signature — it means "not measured on this call".
+Three of the four artifacts returning it is DIRECT evidence that generation ran **once** and the
+other three read back the package artifact 1 wrote, rather than an inference from the warning count
+falling. All four still produced real Drive URLs and `packetStatus: review`, so nothing regressed.
+
+The 42 was one generation's 10 repeated four times, as claimed — and the four documents now render
+from the same `pkg_json` that every check, the gate, the score and the reviewer grade against.

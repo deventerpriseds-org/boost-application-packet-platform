@@ -1906,3 +1906,15 @@ was never run against a mutated file." `.replace()` and `sed`/`perl` in-place ed
 no-ops on a miss, which `CLAUDE.md` already says under *"Verify that an edit applied"* — it applies
 to MUTATIONS too, not just fixes. Every mutation now greps the mutated line and aborts if the edit
 is not visibly present before the suite runs.
+
+### CONFIRMED IN PRODUCTION — one generation per build (job `3ae8d684`, 2026-08-22)
+
+Warnings **42 → 10** on a four-artifact rebuild, exactly the predicted 10-11. The decisive evidence
+is not the count but the SHAPE: `resume` returned 10 warnings with `qcApplied: true`, and
+`compact_resume` / `cover` / `portfolio` each returned `warnings: []` with **`qcApplied: null`** —
+`ensurePackage`'s cached-path signature, meaning "not measured on this call". Three of four
+artifacts carrying it proves generation ran ONCE and the rest read back what artifact 1 wrote.
+All four produced real Drive URLs; `packetStatus: review`; nothing regressed.
+
+Note for any row citing "42 warnings" as a measure of discarded content (`D33`): that number was
+**one generation's 10, duplicated four times**. The real per-build figure is 10.
