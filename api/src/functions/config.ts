@@ -49,12 +49,7 @@ export async function getConfig(
   }
 }
 
-app.http('getConfig', {
-  methods: ['GET', 'OPTIONS'],
-  authLevel: 'anonymous',
-  route: 'config',
-  handler: getConfig
-})
+
 
 // POST /api/config - save config values { values: { "google.outputFolderId": "...", ... } }
 export async function saveConfig(
@@ -100,12 +95,7 @@ export async function saveConfig(
   }
 }
 
-app.http('saveConfig', {
-  methods: ['POST', 'OPTIONS'],
-  authLevel: 'anonymous',
-  route: 'config',
-  handler: saveConfig
-})
+
 
 
 // ── The RESUME TEMPLATE's role focus ────────────────────────────────────────────────────────────
@@ -181,5 +171,25 @@ export async function saveTemplateConfig(req: HttpRequest, context: InvocationCo
   }
 }
 
-app.http('getTemplateConfig', { methods: ['GET', 'OPTIONS'], authLevel: 'anonymous', route: 'config/templates', handler: getTemplateConfig })
-app.http('saveTemplateConfig', { methods: ['POST', 'OPTIONS'], authLevel: 'anonymous', route: 'config/templates', handler: saveTemplateConfig })
+// ONE REGISTRATION PER ROUTE, dispatching on the method — and this is not a style preference.
+//
+// `config` was registered TWICE, `getConfig` for GET and `saveConfig` for POST. Only the first
+// registration wins: `POST /api/config` returned **404 in production** (api-test run 32558143290),
+// which means `saveConfig` had never once been reachable and the Settings ▸ Pipeline Save button
+// could not have worked on any day of its life. `config/templates` was written the same way and
+// inherited the same defect the hour it shipped. `app/coach/config` had it too.
+//
+// This is the shape `promptsApi` already uses — one function, `req.method` inside — and the reason
+// it works there. `H:one-http-registration-per-route` now fails the suite on a duplicate route.
+export async function configApi(req: HttpRequest, context: InvocationContext): Promise<HttpResponseInit> {
+  if (req.method === 'OPTIONS') return { status: 204, headers }
+  return req.method === 'POST' ? saveConfig(req, context) : getConfig(req, context)
+}
+
+export async function templateConfigApi(req: HttpRequest, context: InvocationContext): Promise<HttpResponseInit> {
+  if (req.method === 'OPTIONS') return { status: 204, headers }
+  return req.method === 'POST' ? saveTemplateConfig(req, context) : getTemplateConfig(req, context)
+}
+
+app.http('configApi', { methods: ['GET', 'POST', 'OPTIONS'], authLevel: 'anonymous', route: 'config', handler: configApi })
+app.http('templateConfigApi', { methods: ['GET', 'POST', 'OPTIONS'], authLevel: 'anonymous', route: 'config/templates', handler: templateConfigApi })

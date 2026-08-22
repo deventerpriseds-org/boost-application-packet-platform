@@ -3395,3 +3395,42 @@ test('H:in-process-copy-keeps-the-ownership-check: build-path evidence proves th
   assert.ok(check > 0 && write > 0 && check < write,
     'evidence is written before ownership is established')
 })
+
+
+// H:one-http-registration-per-route — two `app.http` calls on the same route means only the FIRST
+// one exists, and the second is a 404 that nothing reports.
+//
+// MEASURED IN PRODUCTION, not reasoned about. `config` was registered twice — `getConfig` for GET,
+// `saveConfig` for POST — and `POST /api/config` returned **404** (api-test run 32558143290) while
+// `GET /api/config` returned 200 (run 32558078459). So `saveConfig` had never been reachable on any
+// day of its life, and the Settings ▸ Pipeline Save button could not have worked. `app/coach/config`
+// carried the identical pair, so the coach settings could not be saved either, and `config/templates`
+// was written the same way and inherited the defect within the hour.
+//
+// Nothing catches this at build, deploy or runtime: the code compiles, the deploy succeeds, the host
+// registers both names without complaint, and the second one silently never receives a request. The
+// only symptom is a 404 on a route the source plainly defines — which reads like a converge delay,
+// which is exactly how it survived.
+//
+// The fix is one function per route dispatching on `req.method`, as `promptsApi` already does.
+test('H:one-http-registration-per-route: a duplicate route silently 404s the second one', () => {
+  const dir = new URL('../src/functions/', import.meta.url).pathname
+  const read = (d) => readdirSync(d, { withFileTypes: true }).flatMap((e) =>
+    e.isDirectory() ? read(join(d, e.name)) : e.name.endsWith('.ts') ? [join(d, e.name)] : [])
+
+  const byRoute = new Map()
+  for (const file of read(dir)) {
+    const code = stripComments(readFileSync(file, 'utf8'))
+    for (const m of code.matchAll(/app\.http\(\s*'([^']+)'\s*,\s*\{([^}]*)\}/g)) {
+      const route = m[2].match(/route:\s*'([^']+)'/)
+      if (!route) continue
+      const list = byRoute.get(route[1]) || []
+      list.push(`${file.split('/').pop()}:${m[1]}`)
+      byRoute.set(route[1], list)
+    }
+  }
+  const dupes = [...byRoute.entries()].filter(([, fns]) => fns.length > 1)
+    .map(([route, fns]) => `${route} <- ${fns.join(', ')}`)
+  assert.deepEqual(dupes, [],
+    'these routes are registered more than once; every registration after the first is a silent 404')
+})

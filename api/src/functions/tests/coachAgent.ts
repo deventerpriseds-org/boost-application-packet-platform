@@ -390,8 +390,14 @@ app.http('coachMemoryDelete', { methods: ['POST', 'OPTIONS'], authLevel: 'anonym
 app.http('coachActivity', { methods: ['GET', 'OPTIONS'], authLevel: 'anonymous', route: 'app/coach/activity', handler: coachActivity })
 app.http('coachThreadGet', { methods: ['GET', 'OPTIONS'], authLevel: 'anonymous', route: 'app/coach/thread', handler: coachThreadGet })
 app.http('coachThreadClear', { methods: ['POST', 'OPTIONS'], authLevel: 'anonymous', route: 'app/coach/thread/clear', handler: coachThreadClear })
-app.http('coachConfigGet', { methods: ['GET', 'OPTIONS'], authLevel: 'anonymous', route: 'app/coach/config', handler: coachConfigGet })
-app.http('coachConfigSet', { methods: ['POST', 'OPTIONS'], authLevel: 'anonymous', route: 'app/coach/config', handler: coachConfigSet })
+// ONE registration, dispatching on the method. Registered twice, only the first won, so
+// `POST /api/app/coach/config` was a 404 and the coach settings could never be saved — the same
+// defect measured on `/api/config` (api-test run 32558143290). See `H:one-http-registration-per-route`.
+export async function coachConfigApi(req: HttpRequest): Promise<HttpResponseInit> {
+  if (req.method === 'OPTIONS') return { status: 204, headers: HEADERS }
+  return req.method === 'POST' ? coachConfigSet(req) : coachConfigGet(req)
+}
+app.http('coachConfigApi', { methods: ['GET', 'POST', 'OPTIONS'], authLevel: 'anonymous', route: 'app/coach/config', handler: coachConfigApi })
 app.http('coachMemoryBootstrap', { methods: ['POST', 'OPTIONS'], authLevel: 'anonymous', route: 'app/coach/memory/bootstrap', handler: coachMemoryBootstrap })
 app.http('coachMemoryList', { methods: ['GET', 'OPTIONS'], authLevel: 'anonymous', route: 'app/coach/memory/list', handler: coachMemoryList })
 app.http('coachProvision', { methods: ['POST', 'OPTIONS'], authLevel: 'anonymous', route: 'app/coach/provision', handler: coachProvision })
