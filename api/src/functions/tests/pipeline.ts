@@ -289,7 +289,11 @@ export async function buildPackageForJD(opts: { key: string; jd: string; roleTyp
   const settings = await loadPipelineSettings()
   warnings.push(...settings.warnings)
 
-  const role = await resolveRoleFocus(roleType, settings.defaultRoleFocus, opts.personaRole)
+  // THE RESUME BEING BUILT decides the focus — the owner's ruling. `settings.resumeTemplateId` is the
+  // same resolved value the build copies from (owner override, else the seeded id), so the focus can
+  // never describe a different document from the one that gets written.
+  const role = await resolveRoleFocus(
+    roleType, settings.defaultRoleFocus, opts.personaRole, settings.resumeTemplateId?.value)
   const roleFocus = role.focus
   if (role.warning) warnings.push(`role focus: ${role.warning}`)
   steps.push(`Role focus "${roleFocus}" (source: ${role.source})`)

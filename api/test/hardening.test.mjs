@@ -3288,11 +3288,20 @@ test('H:model-evidence-is-labelled: a model-proposed evidence row has its own me
 test('H:config-route-is-not-open: /api/config needs a session to write and serves only declared keys', () => {
   const src = stripComments(readFileSync(new URL('../src/functions/config.ts', import.meta.url), 'utf8'))
 
-  // The write needs a verified session, like every other mutation in this API.
+  // The write needs a VERIFIED session — and this case originally pinned `requireWrite`, which is
+  // not one. `requireWrite` allows a write when `verified || owner === DEMO_EMAIL`, and
+  // `resolveOwner` defaults the owner to DEMO_EMAIL when no `?owner=` is supplied, so an
+  // unauthenticated POST resolved to demo and was waved through — to the table holding the
+  // pipeline's template ids, output folder and sender address. AppConfig is global state with no
+  // demo partition to absorb such a write. `promptsApi` had already written this exact reasoning for
+  // the Prompts table; this guard had encoded the weaker check as the requirement, so it PASSED on
+  // the hole it was written to prevent.
   const save = src.slice(src.indexOf('export async function saveConfig'), src.indexOf('app.http(\'saveConfig\''))
   assert.ok(save.length > 100, 'saveConfig moved — this scan has gone stale')
-  assert.match(save, /const guard = requireWrite\(req\); if \(guard\) return guard/,
-    'saveConfig writes the auth partition with no session check')
+  assert.match(save, /const \{ verified \} = resolveOwner\(req\)[\s\S]{0,220}?if \(!verified\)/,
+    'saveConfig does not require a verified session')
+  assert.ok(!/requireWrite\(req\)/.test(save),
+    'saveConfig uses requireWrite, which an unauthenticated request passes on a global table')
 
   // BOTH methods are bounded by the same declared whitelist, and it is IMPORTED rather than retyped.
   assert.match(src, /import \{ CONFIG_KEYS \}/, 'the whitelist is not the pipeline\'s own key list')

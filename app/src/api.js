@@ -284,6 +284,11 @@ export const api = {
   // that was serving the whole `auth` partition unauthenticated until it was bounded to these keys.
   pipelineConfigGet: () => get('/config'),
   pipelineConfigSet: (values) => post('/config', { values }),
+  // The resume template's role focus — the owner's ruling that the resume chosen drives the persona.
+  // `resolveRoleFocus` reads `templates/resume-<driveId>` before every other source; these are the
+  // read and write for that row, so the value is a setting rather than a code constant.
+  templateFocusGet: () => get('/config/templates'),
+  templateFocusSet: (templateId, roleFocus) => post('/config/templates', { templateId, roleFocus }),
   dimensionPrefsGet: () => get(`/app/dimension-prefs?owner=${encodeURIComponent(_owner)}`),
   dimensionPrefsSet: ({ family, keys }) => post(`/app/dimension-prefs?owner=${encodeURIComponent(_owner)}`, { family, keys }),
   // LinkedIn role-sweep config + cursor + the exact built queries (preview before enabling).

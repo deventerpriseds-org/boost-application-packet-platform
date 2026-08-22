@@ -1794,6 +1794,74 @@ const PIPELINE_LABELS = {
   'microsoft.recipientEmail': ['Recipient address', 'Where copies are delivered.'],
 }
 
+// The role focus attached to each resume template.
+//
+// The owner's ruling: the resume chosen drives the persona. Before this, the focus was looked up by
+// the POSTING'S JOB TITLE — a free-text key no configured row could ever match — so every build fell
+// through to a code constant, and a Director of Digital posting was written for "a senior
+// engineering executive". A template is a closed set the owner controls, which is what makes it a
+// key that can actually be configured.
+function TemplateFocusSettings() {
+  const [rows, setRows] = useState(null)
+  const [vals, setVals] = useState({})
+  const [note, setNote] = useState(null)
+  const [saving, setSaving] = useState(null)
+
+  const load = () => api.templateFocusGet().then((r) => {
+    if (!r || r.success === false) { setNote({ ok: false, msg: r?.error || 'could not load template settings' }); setRows([]); return }
+    setRows(r.templates || [])
+    setVals(Object.fromEntries((r.templates || []).map((t) => [t.templateId, t.roleFocus || ''])))
+  }).catch((e) => { setNote({ ok: false, msg: String(e.message || e) }); setRows([]) })
+
+  useEffect(() => { load() }, [])
+
+  if (!rows) return <Card style={{ color: 'var(--proto-ink2)' }}>Loading template settings…</Card>
+
+  const save = async (templateId) => {
+    if (!sessionValid()) { setNote({ ok: false, msg: 'Sign-in expired — sign out and back in, then Save.' }); return }
+    setSaving(templateId); setNote(null)
+    try {
+      const r = await api.templateFocusSet(templateId, vals[templateId] || '')
+      if (!r || r.success === false) throw new Error(r?.error || 'save failed')
+      setNote({ ok: true, msg: r.cleared ? 'Cleared — the seeded focus applies again.' : `Saved "${r.roleFocus}".` })
+      load()
+    } catch (e) { setNote({ ok: false, msg: String(e.message || e) }) } finally { setSaving(null) }
+  }
+
+  return (
+    <Card>
+      <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 4 }}>Resume template focus</div>
+      <div className="px-small" style={{ color: 'var(--proto-ink2)', marginBottom: 14 }}>
+        Every generation prompt is prefixed with "tailor this for a senior <em>focus</em> executive".
+        The resume template being built decides that word. Clear a value to fall back to the seeded one.
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+        {rows.length === 0 && <div className="px-small" style={{ color: 'var(--proto-ink2)' }}>No resume templates configured.</div>}
+        {rows.map((t) => (
+          <div key={t.templateId} style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16 }}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 13, fontWeight: 600 }}>Resume template</div>
+              <div className="px-small" style={{ color: 'var(--proto-ink2)', marginTop: 2, wordBreak: 'break-all' }}>
+                {t.templateId} — {t.source === 'config' ? 'set here' : 'using the seeded focus'}
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
+              <input className="px-input" type="text" value={vals[t.templateId] ?? ''} placeholder="e.g. digital"
+                onChange={(e) => setVals({ ...vals, [t.templateId]: e.target.value })}
+                style={{ width: 200 }} />
+              <button className="px-btn" disabled={saving === t.templateId || (vals[t.templateId] ?? '') === (t.roleFocus || '')}
+                onClick={() => save(t.templateId)}>
+                {saving === t.templateId ? 'Saving…' : 'Save'}
+              </button>
+            </div>
+          </div>
+        ))}
+      </div>
+      {note ? <div className="px-small" style={{ marginTop: 12, color: note.ok ? 'var(--text-ok)' : 'var(--text-bad)' }}>{note.msg}</div> : null}
+    </Card>
+  )
+}
+
 function PipelineSettings() {
   const [vals, setVals] = useState(null)
   const [saved, setSaved] = useState({})
@@ -1884,7 +1952,7 @@ export default function Settings({ tab = 'account' }) {
       {active === 'templates' && <TemplatesSettings />}
       {active === 'coach' && <CoachSettings />}
       {active === 'workspace' && <WorkspaceSettings />}
-      {active === 'quality' && <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}><ChecksSettings /><DimensionSettings /><PipelineSettings /></div>}
+      {active === 'quality' && <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}><ChecksSettings /><DimensionSettings /><TemplateFocusSettings /><PipelineSettings /></div>}
       {active === 'usage' && <UsageSettings />}
       {active === 'system' && <SystemSettings />}
     </div>
