@@ -2597,3 +2597,15 @@ generator extension (common vs unique questions, and attaching the built artifac
 names what already exists to EXTEND rather than duplicate — `ownerFacts` and `requirement_evidence`
 are the answer substrate, `appJdParse` already parses postings, artifacts already carry Drive URLs.
 Not scoped: it is a separate delivery surface and the owner said "eventually".
+
+**CONFIRMED LIVE (button):** `POST /api/app/opportunity/9f9c370a/stage {"stage":"applied"}` returned
+`stage: applied, packetSent: true` (api-test **32601313786**), and the DB read back `applied | sent`
+(db-query **32601337296**) — one press, both facts. Test state restored to the captured baseline
+`enriched | review` with 0 `applied` stage-history rows (db-query **32601386185**).
+
+**Trap recorded in memory.md:** `db-query.yml` runs the whole `sql` input in ONE transaction. A
+failing statement rolls back earlier `UPDATE`s that already printed `UPDATE 1`, so the run's own
+output is not proof a mutation persisted — re-read state in a separate invocation. My first restore
+attempt silently left production `applied | sent` while the log read as success.
+
+**Deploys:** api **32601204463**, frontend **32601204611**, both success on `b772361`.

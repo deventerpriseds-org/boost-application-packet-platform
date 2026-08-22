@@ -1981,3 +1981,47 @@ symbol used in three places cannot prove anything about one of them.
 runs of a growing suite, with 0 failures every time; force-exit truncates the aggregate reporter.
 Stop quoting that number. The reliable measure is the per-file sweep — all 35 files, 0 failures —
 and that is what is cited from here on.
+
+## "Mark as applied" is a DECLARATION, and the button ships (2026-08-22)
+
+Owner: *"for now, a button I press along the workflow letting you know I've done so."* Built with
+**no new route** — `POST /app/opportunity/{id}/stage` and the `moveStage` client helper already
+existed and already recorded stage history. The only server change: that route calls
+`markPacketSent` when the stage becomes `applied`, so one press writes BOTH facts and they cannot
+disagree.
+
+**Why it hangs off the stage change and never off `outreachSend`** — `outreach_message.channel`
+includes `linkedinConnect`, `coldCall` and `followUp`. Advancing on send would mark the pipeline
+applied on a *connect request*. `applied` is the number the funnel is judged by, so inflating it
+from a LinkedIn touch corrupts the exact metric this work set out to make truthful. I had
+RECOMMENDED the automatic version earlier in the session and reversed it on reading the channel
+list — the recommendation was wrong, the channel list is the ground truth.
+
+`H:applied-is-declared-not-inferred` pins it: `appOutreach` may mark a packet sent, may never write
+a stage, and may not even reference `'applied'`. Three mutations proven, including the real defect.
+
+**CONFIRMED LIVE:** `POST .../stage {"stage":"applied"}` → `stage: applied, packetSent: true`
+(api-test 32601313786), and the database read back `applied | sent` (db-query 32601337296). Restored
+to the captured baseline `enriched | review`, 0 stage-history rows (db-query 32601386185).
+
+### Hardening — `db-query.yml` runs the whole `sql` input as ONE transaction, so "UPDATE 1" is NOT proof
+
+The restore looked like it worked and had not. The SQL was `select; update; update; delete; select`,
+the DELETE failed on `created_at` (the column is `changed_at`), and the log showed:
+
+```
+ERROR:  column "created_at" does not exist
+ BEFORE-RESTORE | applied | sent
+UPDATE 1
+UPDATE 1
+```
+
+Two `UPDATE 1`s, both **rolled back** by the failing statement after them. Reading that log as
+"the updates applied, only the cleanup failed" is the natural reading and it is wrong — production
+was left `applied | sent` while I believed it restored. Only a fresh SELECT in a SEPARATE run caught
+it.
+
+So: **a mutation through `db-query.yml` is not confirmed by its own run's output. Re-read the state
+in a new invocation.** This is the same class as the mutation that silently did not apply earlier
+today, and the same rule covers both — *verify the change is present, from a source that is not the
+thing that claims to have made it.*
