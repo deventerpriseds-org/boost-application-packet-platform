@@ -1,23 +1,21 @@
 
-## 2026-08-22 — Called correct model matches "stretches", twice in one session
+
+## 2026-08-22 — Collapsed "the match is good" and "the reasoning is fabricated" into one verdict
 
 | | |
 |---|---|
-| **Claim** | Two of five escalation proposals were "stretches": for *"scalable, **secure**, high-quality software"* the quote "says nothing about security"; for *"AI/ML and **IoT**"*, "real-time data collection is not IoT". |
-| **Ground truth** | Both are good matches. The owner: *"How is the quote saying nothing about security when it is requiring the ability to build scalable secure and high quality software?... I'd have to say the second example with AI/ML is close enough as well."* |
-| **The single source that would have settled it** | Asking what a human reviewer would conclude from the requirement AS A WHOLE — not auditing each adjective for a matching token. A compound requirement is satisfied by evidence of the capability, not by term-by-term coverage. |
-| **Root-cause pattern** | Applying token-level strictness to a RELEVANCE judgement. The deterministic matcher must be term-exact because it ACCUSES; a relevance read must not be, because it RANKS. I imported the wrong standard across that line. |
-| **Why it is in this log rather than a note** | **SECOND OCCURRENCE THE SAME DAY.** Earlier: I called a correct match a false positive and was corrected — *"an llm also would have said it was true positive due to evidence like these meeting the requirement."* A repeat means prose did not hold. |
-| **Cost** | Not just a wrong tally. Those two examples were the empirical evidence cited for keeping proposed rows out of the coverage gate, and they were written into `.claude/DEFERRED.md` as a live finding. The design decision may still be right on structural grounds — the evidence offered for it was not. |
+| **What I did** | Called two escalation proposals "stretches" because the model's REASONING asserted things absent from the quote ("security", "IoT"). |
+| **What was actually true** | Two separate facts, and I reported them as one. **The MATCH is good** — the quote evidences the requirement. **The REASONING contains a fabricated claim** — it says the excerpt shows security when nothing in it is about security. |
+| **The two errors, in order** | (1) I judged the MATCH bad on the basis of the REASONING. The owner corrected that. (2) I then retracted the whole finding, throwing away the valid observation about the reasoning — the owner corrected that too: *"you were correct and i agree with you mentioning secure / security is just false and fabricated."* |
+| **Root-cause pattern** | Not strictness, and this is why the first version of this entry was wrong. The failure is COLLAPSING TWO JUDGEMENTS INTO ONE VERDICT, then swinging the whole verdict when either half is challenged. Over-correcting is the same error as over-claiming: both replace a decomposition with a single label. |
+| **Cost** | A real defect — a model fabricating justification text that is STORED and SHOWN to the owner as evidence — was briefly written out of the ledger as "no finding". Recorded as `D:proposal-reasoning-unverified`. |
 
-**GUARD — apply before writing "stretch", "false positive", "overclaims" or "weak match" about any
-model output:**
-1. **State what a human reviewer would conclude from the requirement as a whole, FIRST.** If that
-   answer is "yes, this person clearly does this", the match is good — stop. A missing adjective is
-   not a defect.
-2. **Never audit a compound requirement adjective-by-adjective.** "scalable, secure, high-quality"
-   is one capability claim, not three token searches.
-3. **The model's REASONING being padded is not the MATCH being wrong.** Judge the quote against the
-   requirement; judge the reasoning separately and say which one is at fault.
-4. Only after 1–3 still say "no" may the word "stretch" be used — and then name the specific thing a
-   reviewer would reject, not the term that failed to appear.
+**GUARD — before writing any verdict on a model output, answer BOTH questions separately and say
+both answers:**
+1. **Is the QUOTE evidence for the requirement?** Judge the excerpt against the requirement as a
+   whole. A compound requirement ("scalable, secure, high-quality") is one capability claim, not
+   three token searches — a missing adjective is not by itself a defect.
+2. **Does the REASONING assert anything the quote does not support?** That is a fabrication and is
+   worth reporting on its own, whatever the answer to (1) was.
+3. **Never let one answer move the other**, and never retract a sound observation because a
+   different one was wrong. If challenged on either, re-answer THAT question — not both.

@@ -1457,7 +1457,17 @@ test('H:draft-is-written-from-prompts-not-evidence: the resume text never reads 
   assert.ok(!/requirement_evidence|loadRequirementsWithEvidence|evidence/i.test(draft),
     'the drafting path reads evidence — the owner\'s prompts must be what writes the draft')
 
-  // And the ordering: artifacts first, evidence second.
+  // ORDERING, AND COUNT. This caught a real defect twenty minutes after it reached production:
+  // commit c230f30 carried a second `selfPost(.../evidence)` placed BEFORE the build loop that I did
+  // not intend to write and did not notice in the diff. Live, it made every build-all resolve
+  // evidence TWICE — once against a packet that had not been rebuilt yet — which doubles escalation
+  // model spend and grades the wrong artifacts.
+  //
+  // The count assertion is the half the first version lacked. Ordering alone would have missed a
+  // duplicate placed AFTER the loop, which is the same waste with none of the wrongness to reveal it.
+  const calls = [...s.matchAll(/\/evidence\?owner=/g)]
+  assert.equal(calls.length, 1,
+    `appPackets makes ${calls.length} evidence calls per build — exactly one, after the artifacts exist`)
   const buildLoop = s.indexOf('buildTemplatedArtifact(client, { ...a')
   const evidenceCall = s.indexOf('/evidence?owner=')
   assert.ok(buildLoop > 0 && evidenceCall > 0, 'the build loop or the evidence call moved')

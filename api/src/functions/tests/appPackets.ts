@@ -663,7 +663,6 @@ export async function packetBuildAll(req: HttpRequest, context: InvocationContex
     if (!opp) return { status: 404, headers: HEADERS, jsonBody: { error: 'opportunity not found' } }
     const { pkt, artifacts } = await loadPacket(client, oppId)
     const results: any[] = []
-    const evidencePre = await selfPost(`app/opportunity/${oppId}/evidence?owner=${encodeURIComponent(owner)}`, {})
     for (const a of artifacts) {
       if (!metaFor(a.type)) continue // skip video (HeyGen) + non-templated
       try {

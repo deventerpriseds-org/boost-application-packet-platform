@@ -1,4 +1,36 @@
 # Independent verification — escalation wiring
+
+## !!! URGENT — READ FIRST: MY TEST-HARNESS EDIT WAS COMMITTED BY THE PARENT SESSION !!!
+
+While I was mutation-testing the guards (claim 8), the parent session committed the working tree
+mid-mutation. Commit **`c230f30`** ("Settings: Quality section — the chk_* controls and the comparison
+dimensions", 2026-08-22 01:04:00) contains **my deliberately-injected defect**:
+
+```
+api/src/functions/tests/appPackets.ts:666
+    const evidencePre = await selfPost(`app/opportunity/${oppId}/evidence?owner=${encodeURIComponent(owner)}`, {})
+```
+`git log -S evidencePre -- api/src/functions/tests/appPackets.ts` -> `c230f30`.
+
+This line is **not the implementer's code and must be deleted**. It is a second, duplicate call to the
+evidence-resolve route placed BEFORE the artifact build loop — i.e. it violates the owner's hard
+constraint (claim 6) and it doubles the model spend of every build. `git show 86c6e54:...` contains
+zero occurrences; it appeared only in `c230f30`.
+
+Consequence, measured at HEAD `c230f30`:
+```
+$ node --test test/*.test.mjs
+# tests 662  # pass 660  # fail 2
+not ok 422 - H:draft-is-written-from-prompts-not-evidence
+  error: 'evidence is resolved BEFORE the artifacts are built — it must run after, on what was written'
+not ok 116 - D:ledger-stale-row-fails
+```
+The guard did its job — it is the reason this was caught. **`git revert`/hand-remove that one line.**
+
+I did not commit anything and I have left the working tree as I found it; the line is in a commit,
+not in my scratch state, so I cannot undo it without rewriting the parent's history.
+
+---
 Branch `claude/qc-escalation-wiring` @ 86c6e54. Verifier has no shared context with the implementing agent.
 Started: (in progress — appended incrementally)
 
@@ -224,3 +256,60 @@ only `p1` is lost. `appRequirements.ts:236-252` wraps each proposed insert in it
 one per proposed insert, as claimed.
 *Nit:* the comment says "ONE ROW, ONE SAVEPOINT" but the code uses `begin`/`commit`/`rollback`, i.e. a
 **separate transaction**, not a `SAVEPOINT`. The behaviour is what was claimed; the word is wrong.
+
+---
+## C6 — "the resume draft is written from prompts, never from evidence" — **CONFIRMED**
+The drafting chain reads, in order:
+`ensurePackage` (`appPackets.ts:338`) -> `packet.pkg_json` cache, `generationJd(opp)`,
+`buildPackageForJD` (`pipeline.ts:367`) -> `assemblePackage(c1,c2,c3)` (`mt17.ts:74`), then
+`applyCorrectionPass` with `postingText` + `profileText` from `sourceText()`, then `writeSwaps`.
+`assemblePackage` takes **only the three model calls** and `firstNonEmpty`s their slots. There is no
+DB read of `requirement_evidence` anywhere in it.
+
+`grep -rn requirement_evidence api/src/functions/tests/*.ts` (excluding schema.ts) hits exactly two
+files: `appRequirements.ts` (the writer/reader) and `appPackets.ts` — and in `appPackets.ts` every hit
+is a **comment** or the unrelated `PROFILE_SOURCES` set at :754. Zero query sites in the draft path.
+
+Ordering: `packetBuildAll` builds every artifact in the `for (const a of artifacts)` loop
+(`appPackets.ts:665-675`) and only then calls the evidence route (`:692`). CONFIRMED.
+
+**Caveat, and it is now urgent:** at HEAD `c230f30` this is **BROKEN by the contaminating line above** —
+a duplicate `selfPost(.../evidence...)` now runs BEFORE the loop. Removing `evidencePre` restores it.
+
+---
+## C8 — "the guards are not inert" — **CONFIRMED for 9 of 10; ONE REAL GAP FOUND**
+Each defect was reinstated in the TypeScript source, `npm run build`, full `node --test test/*.test.mjs`,
+then restored. Results:
+
+| # | Defect reinstated | file | Result |
+|---|---|---|---|
+| M1 | `ruleEvidenceOf` -> `evidenceOf` in the coverage numerator | checks.ts:651 | **FIRED** (2 fail) |
+| M2 | `opts.escalate === true` -> `!== false` | appRequirements.ts:213 | **FIRED** (1 fail) |
+| M3 | `note('transport_failed')` -> `note('model_declined')` | appRequirements.ts | **FIRED** (1 fail) |
+| M4 | remove the per-insert `begin`/`commit` | appRequirements.ts:236-252 | **FIRED** (2 fail) |
+| M5 | `rec.text.indexOf(quote)` -> case-insensitive | evidenceProposal.ts:145 | **FIRED** (2 fail) |
+| M6 | `escalate: !== false` -> `=== true` (revert on-by-default) | checkPrefs.ts:113 | **FIRED** (4 fail) |
+| M7 | render the banned record into the prompt | evidenceProposal.ts:107 | **FIRED** (5 fail) |
+| M8 | **delete the pre-insert offset re-check in the escalation block** | appRequirements.ts:230 | ***INERT — 0 fail*** |
+| M9 | `ratio: null` -> `ratio: 1` on a proposed row (fabricated composite) | evidenceProposal.ts:262 | **FIRED** (1 fail) |
+| M10 | move the evidence call BEFORE the build loop | appPackets.ts | **FIRED** (2 fail) |
+
+### M8 — the one worthless guard, and it is the one the code brags loudest about
+`appRequirements.ts:226-230` reads:
+```ts
+// THE SAME accusation-grade assertion the deterministic path makes, applied again here rather
+// than trusted from `verifyProposal`. Two independent checks of the same invariant is not
+// redundancy when one of them is the last thing standing between a model's string and a
+// stored claim.
+const rec = byKey.get(e.source_key)
+if (!rec || rec.text.slice(e.char_start, e.char_end) !== e.quote) { refused++; note('offset_mismatch'); continue }
+```
+I replaced it with `if (!rec) { ... }` — deleting the byte comparison entirely. **The full suite still
+passed, 662/662.** `M24`/`M25` guard the *deterministic* pre-store assertion; nothing guards this one.
+So the "last thing standing between a model's string and a stored claim" can be deleted without any
+test noticing. Add an H-case that drives a proposal whose offsets do not re-slice (e.g. a stubbed
+`verifyProposal`, or a record mutated between verify and insert) and asserts `offset_mismatch`.
+
+**Caveat on M4-M10:** the parent session was committing concurrently, so the baseline test count moved
+(657 -> 658 -> 662) across the run. Each row's fired/inert verdict is a within-run comparison against
+its own restore, so the verdicts stand, but the absolute counts are not comparable across rows.
