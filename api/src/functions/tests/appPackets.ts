@@ -654,6 +654,15 @@ const SELF_BASE = process.env.COACH_SELF_BASE || 'https://job-platform-api.azure
  */
 async function resolveEvidenceForOpp(client: any, oppId: string, owner: string): Promise<any> {
   try {
+    // THE OBJECT-LEVEL CHECK, and its absence was a real regression an independent review caught.
+    // The comment above this function claimed parity with `evidenceResolve` "after its auth guard".
+    // That was false in the way that matters: the route ALSO does
+    // `where id=$1 and owner_email=$2` and 404s, and this copy did not. `requireWrite` on the
+    // caller proves SOMEONE is signed in; it does not prove they own THIS opportunity. Those are
+    // different gates and I conflated them — authentication is not authorization.
+    const owned = (await client.query(
+      `select 1 from opportunity where id=$1 and owner_email=$2`, [oppId, owner])).rows[0]
+    if (!owned) return { error: 'this opportunity does not belong to the signed-in owner' }
     await ensureRequirementCols(client)
     await ensureEvidenceTable(client)
     const profile = await sourceText()

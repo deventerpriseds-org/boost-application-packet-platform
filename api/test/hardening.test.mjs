@@ -3339,3 +3339,39 @@ test('H:build-outcome-outlives-the-response: build-all writes its warnings befor
   assert.match(schema, /alter table packet\s+add column if not exists last_build jsonb;/,
     'last_build is written but never declared')
 })
+
+// H:in-process-copy-keeps-the-ownership-check — moving a route's work in-process must carry its
+// OBJECT-level check, not just clear its authentication guard.
+//
+// `packetBuildAll` called `POST /evidence` through `selfPost`, which sends no Authorization header,
+// so the route's `requireWrite` refused it and the evidence pass never ran on the build path (run
+// 32547019724, "sign in required to modify this workspace"). The fix was to call the work
+// in-process — correct — with a comment claiming parity "after its auth guard".
+//
+// The parity was not exact, and an independent review caught it. `evidenceResolve` also does
+// `select ... from opportunity where id=$1 and owner_email=$2` and 404s when the opportunity is not
+// the caller's; the in-process copy had no equivalent. `packetBuildAll` loads the opportunity with
+// `${OPP_FIELDS} where id = $1` — no owner predicate — so nothing on that path proved ownership.
+// `requireWrite` proves SOMEONE is signed in. It does not prove they own this row. Authentication
+// is not authorization, and the comment conflated them.
+//
+// The invariant is general because the mistake is: any in-process copy of a guarded route must
+// carry the route's object-level check too.
+test('H:in-process-copy-keeps-the-ownership-check: build-path evidence proves the owner owns the opp', () => {
+  const body = stripComments(src('appPackets.ts'))
+  const fn = body.slice(body.indexOf('async function resolveEvidenceForOpp'))
+  const end = fn.indexOf('\nasync function selfPost')
+  const helper = end > 0 ? fn.slice(0, end) : fn
+  assert.ok(helper.length > 200, 'resolveEvidenceForOpp moved — this scan has gone stale')
+
+  assert.match(helper, /from opportunity where id=\$1 and owner_email=\$2/,
+    'the in-process evidence pass does not check the opportunity belongs to the owner')
+  // And it must REFUSE, not merely query. A check whose result is discarded is decoration.
+  assert.match(helper, /if \(!owned\) return/,
+    'the ownership result is not acted on')
+  // The refusal has to come BEFORE anything is written.
+  const check = helper.indexOf('owner_email=$2')
+  const write = helper.indexOf('writeEvidence(')
+  assert.ok(check > 0 && write > 0 && check < write,
+    'evidence is written before ownership is established')
+})
