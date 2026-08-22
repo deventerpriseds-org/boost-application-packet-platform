@@ -953,3 +953,79 @@ the module makes about itself.
 
 Nothing was fixed in this pass. Probe scripts (`attack3.mjs`, `negdig.mjs`, `negdig2.mjs`) left in the
 scratchpad for reproduction.
+
+---
+
+## ADDENDUM 6 — `main` @ `9b0bff6`: the caller landed — D-I is now live-reachable
+
+`main` advanced 22 more commits, the significant one being exactly the transition Addendum 4 and 5
+flagged: *"the evidence resolver has no caller"* is fixed. `packetBuildAll` now self-posts to
+`POST /api/app/opportunity/{id}/evidence` after the artifacts exist, and that endpoint is reached
+from the **"Build entire packet"** button in `PacketBuilder.jsx` — a real, owner-facing control, not
+a workflow dispatch. Merged in (no conflicts), rebuilt: **`api` 671/671 · `app` 208/208**, both clean.
+
+### D-H remains fixed; D-I remains unfixed
+
+Re-checked both directly against the merged tree. `writeEvidence`'s three call sites still all pass
+`resolveOptionsFor`/thresholds (`checkPrefs.ts`'s design goal — "a third caller... cannot appear
+without them" — held even though a fourth caller, the escalation tier, was added this pass). D-I's
+mechanism is untouched: `NEGATION_RE.test(excerpt) || ATTRIBUTION_RE.test(excerpt)` still runs only
+against the winning candidate excerpt, and `literalSpan()` still wins ties by being shorter/exact. Re
+ran the six-case repro (`negdig2.mjs`) against the merged code: **all six still resolve**, including
+the control case (verb/tense-mismatched, forced onto the sentence path) still correctly refusing —
+confirming the bypass is specific to the literal-match path, not a general regression.
+
+### What this changes about D-I's severity
+
+D-I was reported latent because nothing called the resolver. **That is no longer true.** The path
+that reproduces the bypass — `resolveEvidence` via `writeEvidence` via `POST /evidence` — is the
+same path `packetBuildAll` now calls on every "Build entire packet" click, and that button has
+already been exercised for real: production `requirement_evidence` went from 0 rows to 6.
+
+Read those six rows directly (`db-query.yml`, run **32545898372**, head `9b0bff6`):
+
+```
+ total_rows | literal_rows(method='literal') | offset_gt0
+          6 |                              0 |          6
+
+ source_key   | method    | quote (first 80 chars)
+ aboutMe1     | proposed  | Passionate about customer-centric product design, I have fostered...
+ workHistory4 | proposed  | Developed a SaaS platform integrating real-time data collection...
+ workHistory1 | proposed  | Collaborated with CTO and CPO to design a 3-year technology roadmap...
+ workHistory1 | proposed  | Led an enterprise-wide Agile transformation, reducing time-to-market...
+ workHistory3 | proposed  | Redesigned a predictive analytics suite, converting a consultative...
+ expertise    | anchored  | Optimizing scaled agile operations|Strategic roadmaps...
+```
+
+(My query's `method='literal'` filter was against the wrong label — `evidence.ts:382` tags a
+literal-match winner `'exact'`, not `'literal'`; the second, unfiltered `SELECT` is what settles it.)
+
+**None of the six is tagged `exact`** — the specific D-I mechanism (a `literalSpan()` win) has not
+produced an observed row in this one live sample, so I am not claiming a fabricated row exists in
+production today. Five of six are `proposed` (model-escalated, and per `H:proposed-evidence-cannot-
+pass-the-gate` these can never move `must_have_coverage` regardless of correctness) and the sixth is
+`anchored` (sentence-path, which D-I's repro shows correctly catches negation). **The bypass remains
+structurally live and unexercised-so-far, not live-and-observed** — a real distinction, stated
+precisely rather than rounded up to "already happened."
+
+**A secondary, lower-severity note on the `proposed` path:** `evidenceProposal.ts` has no
+negation/attribution check either, so a model-escalated row could show the owner a claim the source
+sentence negates, with plausible-sounding model reasoning attached. This is materially less severe
+than the `exact`-path case — the gate rule keeps it from ever passing coverage — but it is the same
+class of gap, worth closing at the same time, and outside the scope of what I probed this pass since
+it isn't reachable via `resolveEvidence`/`supportIn` (it goes through a separate model call I did not
+attack).
+
+### Unrelated to D-I, worth noting: the reasoning-verification fix at HEAD
+
+The commit at `main`'s current tip (`9b0bff6`, "Check the model's explanation: accuse where a string
+settles it, label everywhere else") adds verification of the model's stated *reasoning* for a
+`proposed` row, not just its quote — catching two of five live explanations that asserted something
+their own quote didn't show (an IoT claim on a quote that never says IoT; a "secure" claim on a quote
+about "software" but not security). This closes a real gap and is orthogonal to D-I: it strengthens
+honesty about *why* a proposed row was offered, while D-I is about the *deterministic* path silently
+fabricating a claim disguised as `exact` fact. Both matter; they are different mechanisms.
+
+### Tally unchanged: 48 pass · 11 fail · 4 not_applicable
+
+D-I is still outside the 63 original criteria and doesn't move a grade. Nothing fixed in this pass.
