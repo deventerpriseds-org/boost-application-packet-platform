@@ -16,6 +16,7 @@ import { readFileSync, readdirSync, existsSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { join } from 'node:path'
+import { checkPrefColumns } from '../dist/functions/tests/checkPrefs.js'
 
 import { normalizePostingText, decodeEntities, groundingText } from '../dist/functions/tests/jdText.js'
 import { buildRequirements, locate, mapKind, sentenceBounds } from '../dist/functions/tests/requirements.js'
@@ -1859,18 +1860,41 @@ test('H42: every per-owner settings column production reads has a writer that ca
     }
   }
 
+  // THE DYNAMIC WRITER, and this scan could not see it — which made this case a FALSE NEGATIVE the
+  // moment the writer landed. `writeCheckPrefs` (checkPrefs.ts) builds its SET clause as
+  // `${column}=$${vals.length}` from `checkPrefColumns()`, so there is no literal column name in any
+  // SQL string for the loop above to find. The case's own comment records the first version missing
+  // dynamically-built clauses and being fixed by reading SQL text; a whitelist-driven writer defeats
+  // that fix again, in the direction that ACCUSES INNOCENT SETTINGS — it would have kept reporting
+  // fourteen columns as unwritable while a route was writing them.
+  //
+  // Handled by REACHABILITY rather than by another pattern: if `writeCheckPrefs` derives its
+  // whitelist from the same statement that declares the columns, then every `chk_*` column it
+  // declares is writable BY CONSTRUCTION. That is asserted below, not assumed, by running the real
+  // `checkPrefColumns()` against the real ensure SQL.
+  const derived = checkPrefColumns().map(c => c.column)
+  const cp = stripComments(read('checkPrefs.ts'))
+  assert.match(cp, /for \(const \{ column, type \} of checkPrefColumns\(\)\)/,
+    'writeCheckPrefs no longer iterates the derived whitelist — the chk_* columns may be unwritable again')
+  assert.match(cp, /sets\.push\(`\$\{column\}=/,
+    'writeCheckPrefs no longer builds its SET clause from the whitelist entry')
+  for (const c of derived) written.add(c)
+  // Not vacuous: the derivation must actually find the columns. A regex that stopped matching would
+  // otherwise silently mark nothing writable and this case would go green on an empty set.
+  assert.ok(derived.length >= 12,
+    `checkPrefColumns() derived only ${derived.length} columns — the derivation has gone stale`)
+  assert.ok(derived.includes('chk_evidence_escalate'), 'the escalation toggle is not in the derived whitelist')
+
   const unwritable = [...declared].filter(c => !written.has(c)).sort()
   // The KNOWN set, pinned. Same reasoning as H41: asserting "none" would be red on arrival for a
   // pre-existing gap this lane did not create, and a guard that is red on arrival gets switched
   // off. Pinning it fails on a NEW unwritable setting AND on the known ones being fixed.
-  const KNOWN = [
-    'chk_cover_words_max', 'chk_cover_words_min', 'chk_evidence_bullet_run',
-    'chk_evidence_escalate', 'chk_evidence_escalate_max',
-    'chk_evidence_max_sentences',
-    'chk_evidence_min_tokens', 'chk_evidence_threshold',
-    'chk_expertise_words', 'chk_relevant_allowance', 'chk_relevant_max_chars', 'chk_skill_max_chars',
-    'chk_skills_total_max', 'chk_skills_total_min',
-  ]
+  // EMPTY, AND THAT IS THE POINT. This list held fourteen entries — every `chk_*` setting production
+  // read — and each new knob joined it as "parity with its siblings". The repetition was the finding:
+  // the answer was one writer for the whole family, not a fifteenth exception.
+  // `D:chk-settings-have-no-writer`, closed 2026-08-22. If a setting ever becomes unwritable again,
+  // this fails with its name.
+  const KNOWN = []
   // `chk_evidence_max_sentences` (the matcher's window-size knob, added 2026-08-21) joins the SAME
   // pre-existing gap `chk_evidence_threshold`/`chk_evidence_min_tokens` already sit in — parity
   // with its siblings, not a new regression. `chk_evidence_generic_recs` deliberately does NOT

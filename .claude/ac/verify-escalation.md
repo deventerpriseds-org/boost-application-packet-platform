@@ -97,3 +97,130 @@ away at that boundary, so `comparison_dimension` is written with `fit='strong'`,
 - `dimensions.ts` / `comparison_dimension`: **LEAKS** — weak -> strong, executed.
 - `evidence_placed`: uses the unfiltered helper; my probes moved it not_applicable -> warn but I did
   not construct a not_applicable -> pass case. Reported as a leak of the same class, severity lower.
+
+---
+## C7 — "the schema change is real and safe" — **CONFIRMED (EXECUTED on a populated DB)**
+
+Baseline used: **`ebc52b4`**, not `origin/main`. `origin/main` is now `444e436` = *"Merge pull request
+#45 from claude/qc-escalation-wiring"* — **this branch is ALREADY MERGED TO MAIN**, so `origin/main`'s
+SCHEMA_SQL is byte-identical to the branch's (diff = 1 trailing newline). Using `origin/main` as the
+"previous schema", as CLAUDE.md's recipe literally says, would have produced a **vacuous pass**:
+applying a schema on top of itself. `ebc52b4` is the real pre-change schema (merge-base / first parent
+of the merge commit).
+
+```
+$ psql -v ON_ERROR_STOP=1 -q -d upg -f /tmp/schema_prev_nv.sql   # ebc52b4  -> exit 0
+$ psql ... seed opportunity + 2 requirement rows + 1 'exact' requirement_evidence row
+$ psql -v ON_ERROR_STOP=1 -q -d upg -f /tmp/schema_nv.sql        # branch   -> exit 0
+$ psql -v ON_ERROR_STOP=1 -q -d upg -f /tmp/schema_nv.sql        # re-run   -> exit 0 (idempotent)
+```
+Pre-existing deterministic row, after the migration:
+```
+ method_ok | ratio_ok | sha_ok | rv_ok | pv_null | quote_ok
+ t         | t        | t      | t     | t       | t
+```
+Constraint after:
+`requirement_evidence_method_check CHECK (method = ANY (ARRAY['exact','anchored','proposed']))`
+Column after: `proposal_version | integer | is_nullable=YES | default=<none>` — nullable, NOT defaulted, as claimed.
+
+Behavioural assertions, executed:
+- proposed row with `ratio NULL` inserts: `INSERT 0 1`, returns `proposed | (null) | 1`
+- bogus method REFUSED: `ERROR: ... violates check constraint "requirement_evidence_method_check"` on `'guessed'`
+- `length(quote) = char_end - char_start` still enforced on a proposed row: `ERROR ... requirement_evidence_check1`
+
+Minor (not a defect): the `exception when undefined_table` guard wraps only the ADD CONSTRAINT
+(`schema.sql:1101-1104`). The DROP at :1100 and the ADD COLUMN at :1108 are unguarded — harmless,
+because `create table if not exists requirement_evidence` is at :394 of the same file, so the table is
+always present by then. The guard is therefore dead code, and inconsistently applied.
+
+Not in SCHEMA_SQL: `chk_evidence_escalate` / `chk_evidence_escalate_max` live only in
+`ensureCheckPrefs` (runtime DDL), and `owner_search_prefs` is not in SCHEMA_SQL at all. Consistent
+with the existing chk_ columns, so not a regression — but it means the pg-migrate step does not
+create them; the first API call does.
+
+---
+## C1 — "ZERO model calls when the owner switched it off" — **CONFIRMED**
+`test/zz-verifier-adversarial.test.mjs` V-C1a/b/c, with a counting spy transport:
+```
+ok 1 - V-C1a  (calls === 0, escalated 0, proposed 0, inserts 0)
+ok 2 - V-C1b
+ok 13 - V-C1c (escalateOne makes no call for a requirementClass row)
+```
+Three independent gates, all required (`appRequirements.ts:213`): `opts.escalate === true` **AND**
+`fetchJson` truthy. And `resolveOptionsFrom` (`checkPrefs.ts:113`) maps a `false` column to
+`escalate:false` — `!== false` upgrades only *absent*, never *false*.
+
+Measured truth table for `resolveOptionsFrom`:
+| DB state | `loadThresholds` yields | `escalate` |
+|---|---|---|
+| no `owner_search_prefs` row | `{}` | **true** (seed) |
+| `chk_evidence_escalate = true` | `evidenceEscalate:true` | true |
+| `chk_evidence_escalate = false` | `evidenceEscalate:false` | **false** |
+| `chk_evidence_escalate = NULL` | `evidenceEscalate:false` (`=== true` in loadThresholds) | false |
+
+**Caveat on how the claim is worded.** "Escalation makes zero model calls when the owner has switched
+it OFF" is true. But the default is now **ON**, and the code still says otherwise in three places
+(see WHAT I FOUND). `evidence.ts:275` still reads *"Escalation is OPT-IN. Absent means off — never
+'unset, so use the default'."* — that comment is now false.
+
+---
+## C3 — "a proposed quote is byte-exact in the record it names" — **CONFIRMED**
+`verifyProposal` (`evidenceProposal.ts:145`) is `rec.text.indexOf(quote)` on the ORIGINAL bytes: no
+lowercasing, no normalize(), no trim, no fuzzy fallback. Every constructed near-miss was refused:
+```
+  leading space      substring=false -> refused:quote_not_in_record
+  NBSP for space     substring=false -> refused:quote_not_in_record
+  curly apostrophe   substring=false -> refused:quote_not_in_record
+  ellipsis append    substring=false -> refused:quote_not_in_record
+  digit paraphrase   substring=false -> refused:quote_not_in_record
+  case tidy          substring=false -> refused:quote_not_in_record
+  two records join   substring=false -> refused:quote_not_in_record
+  zero-width space   substring=false -> refused:quote_not_in_record
+  NFD-vs-NFC accent  substring=false -> refused:quote_not_in_record
+  cross-record quote (A's text attributed to B) -> refused:quote_not_in_record
+```
+- **Unicode normalization**: no `.normalize()` anywhere on this path (`grep -c normalize` on
+  evidenceProposal.ts / openaiJson.ts = 0). NFD-vs-NFC is refused, which is the conservative direction.
+- **Trailing whitespace**: a trailing space is only accepted when it is *genuinely in the record*, and
+  then the offsets still re-slice to it and `char_end-char_start === quote.length` holds (V2-e). My
+  first probe flagged this as a leak; **that was my error, not the code's** — I asserted refusal for a
+  string that really is a substring.
+- **`contentJson` brace salvage**: a salvaged object still goes through `verifyProposal`; a salvaged
+  paraphrase is refused `quote_not_in_record` (V-C3d). Nested braces yield `null` rather than a
+  half-parsed object (V-C3e).
+- **The re-slice in `writeEvidence`**: `appRequirements.ts:230` re-checks
+  `rec.text.slice(e.char_start, e.char_end) !== e.quote` and increments `refused` + `offset_mismatch`.
+  Executed (V-C3c): stored quote === record bytes at the stored offsets.
+
+---
+## C4 — "a transport failure never reads as 'the profile supports nothing'" — **CONFIRMED**
+```
+  thrown       -> evidenced=0 proposed=0 refusals={"transport_failed":1}
+  httpError    -> evidenced=0 proposed=0 refusals={"transport_failed":1}
+  nonJsonBody  -> evidenced=0 proposed=0 refusals={"unparseable":1}
+  emptyBody    -> evidenced=0 proposed=0 refusals={"unparseable":1}
+  missingKey   -> {"transport_failed":1}        (via the REAL openAiJson factory, OPENAI_API_KEY deleted)
+  --- contrast ---
+  model_declined -> {"model_declined":1}
+```
+All four leave the row unevidenced, write nothing, and none is reported as `model_declined`.
+`openaiJson.ts:44` throws on a missing key; `:56` throws on non-2xx — both become `transport_failed`,
+never a value that reads like an answer.
+*Caveat:* `unparseable` and `transport_failed` are distinct from `model_declined` but **not from each
+other in the owner-facing note** — `evidenceResolve`'s `note` (`appRequirements.ts:707`) reports only
+`out.proposed`; `escalation_refusals` is returned in the JSON body but no UI copy names an outage.
+
+---
+## C5 — "a rejected proposed insert costs one row, not the run" — **CONFIRMED**
+Fake client rejecting only the insert whose `requirement_id === 'p1'`:
+```
+  inserts: d1/exact, p2/proposed
+  out: {"evidenced":1,"proposed":1,"refused":1,"r":{"insert_rejected":1}}
+  begin=3 commit=2 rollback=1
+```
+The deterministic row `d1` survives; the *later* proposed row `p2` is still attempted and succeeds;
+only `p1` is lost. `appRequirements.ts:236-252` wraps each proposed insert in its own
+`begin`/`commit`, with `rollback` in the catch. Three `begin`s = the deterministic transaction plus
+one per proposed insert, as claimed.
+*Nit:* the comment says "ONE ROW, ONE SAVEPOINT" but the code uses `begin`/`commit`/`rollback`, i.e. a
+**separate transaction**, not a `SAVEPOINT`. The behaviour is what was claimed; the word is wrong.

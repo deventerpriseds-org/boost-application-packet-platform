@@ -2,6 +2,10 @@ import { app, HttpRequest, HttpResponseInit, InvocationContext } from '@azure/fu
 import { resolveOwner, requireWrite } from './appSession'
 import { getPgClient } from './pgClient'
 import { TempThresholds, DEFAULT_TEMP_THRESHOLDS, normalizeTempThresholds } from './signals'
+// The `chk_*` half of the SAME table. Its columns, defaults and whitelist live in `checkPrefs`, which
+// is the one reader/writer of them; this route only dispatches to it, so there is no second
+// declaration of what a check setting is.
+import { loadThresholds, writeCheckPrefs, checkPrefColumns } from './checkPrefs'
 
 const HEADERS = {
   'Content-Type': 'application/json',
@@ -47,7 +51,12 @@ export async function searchPrefs(req: HttpRequest, _ctx: InvocationContext): Pr
     client = await getPgClient()
     if (req.method === 'GET') {
       const prefs = await getSearchPrefs(client, owner)
-      return { status: 200, headers: HEADERS, jsonBody: { ok: true, ...prefs } }
+      // D:chk-settings-have-no-writer — the check thresholds ride the SAME route as the rest of
+      // `owner_search_prefs` rather than getting a parallel one. `columns` is published alongside the
+      // values so the UI can render a control per setting from the API's own list, which is what
+      // stops a knob added later from being invisible until someone hand-writes a field for it.
+      const checks = await loadThresholds(client, owner)
+      return { status: 200, headers: HEADERS, jsonBody: { ok: true, ...prefs, checks, checkColumns: checkPrefColumns() } }
     }
     // POST — mutate. Partial update: only the keys present in the body change, so saving the
     // temperature bands never clobbers the metro/remote prefs (and vice-versa).
@@ -65,8 +74,12 @@ export async function searchPrefs(req: HttpRequest, _ctx: InvocationContext): Pr
       vals.push(t.coolMaxDays); sets.push(`temp_cool_days=$${vals.length}`)
     }
     if (sets.length) await client.query(`update owner_search_prefs set ${sets.join(', ')}, updated_at=now() where owner_email=$1`, vals)
+    // Partial in the same sense as everything above it: only the `chk_*` keys present in
+    // `body.checks` move, so saving a threshold never clobbers the metro or temperature prefs.
+    const wroteChecks = await writeCheckPrefs(client, owner, b?.checks)
     const prefs = await getSearchPrefs(client, owner)
-    return { status: 200, headers: HEADERS, jsonBody: { ok: true, ...prefs } }
+    const checks = await loadThresholds(client, owner)
+    return { status: 200, headers: HEADERS, jsonBody: { ok: true, ...prefs, checks, checkColumns: checkPrefColumns(), wroteChecks } }
   } catch (e) {
     return { status: 200, headers: HEADERS, jsonBody: { ok: false, error: String(e) } }
   } finally { try { await client?.end() } catch {} }

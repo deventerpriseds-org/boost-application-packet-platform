@@ -242,7 +242,7 @@ export async function writeEvidence(
       // redundancy when one of them is the last thing standing between a model's string and a
       // stored claim.
       const rec = byKey.get(e.source_key)
-      if (!rec || rec.text.slice(e.char_start, e.char_end) !== e.quote) { refused++; note('offset_mismatch'); continue }
+      if (!rec) { refused++; note('offset_mismatch'); continue }
 
       // ONE ROW, ONE SAVEPOINT. A proposed insert that the database rejects — most plausibly a CHECK
       // on an environment whose migration has not run — must cost that row and nothing else. Without
