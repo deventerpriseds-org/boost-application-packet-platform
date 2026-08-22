@@ -206,6 +206,10 @@ function shapeRequirement(r: any) {
     evidence: r.evidence_quote == null ? null : {
       quote: r.evidence_quote, source_label: r.evidence_source_label,
       source_kind: r.evidence_source_kind, ratio: r.evidence_ratio == null ? null : Number(r.evidence_ratio),
+      // CARRIED, not dropped. This mapping silently discarded `evidence_method`, which is how the
+      // grader below came to treat a model's proposal as a rule's finding — the column was in the
+      // join and in the database and stopped existing here.
+      method: r.evidence_method ?? null,
     },
   }
 }

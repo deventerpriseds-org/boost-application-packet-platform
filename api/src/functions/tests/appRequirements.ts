@@ -201,6 +201,11 @@ export async function writeEvidence(
   // is leave rows unevidenced, which is exactly what they were a moment earlier.
   let escalated = 0
   let proposed = 0
+  // SEPARATE FROM `refused`, and the separation is a bug fix rather than tidiness. `evidenced` below
+  // is computed as `deterministic rows - refused`, so an escalation-path refusal was subtracting
+  // from the DETERMINISTIC count — a population it has nothing to do with. Measured by an
+  // independent verifier: two rows stored, the route reported `evidenced: 1`.
+  let escRefused = 0
   const escalation_refusals: Record<string, number> = {}
   const note = (k: string) => { escalation_refusals[k] = (escalation_refusals[k] || 0) + 1 }
 
@@ -242,7 +247,7 @@ export async function writeEvidence(
       // redundancy when one of them is the last thing standing between a model's string and a
       // stored claim.
       const rec = byKey.get(e.source_key)
-      if (!rec || rec.text.slice(e.char_start, e.char_end) !== e.quote) { refused++; note('offset_mismatch'); continue }
+      if (!rec || rec.text.slice(e.char_start, e.char_end) !== e.quote) { escRefused++; note('offset_mismatch'); continue }
 
       // ONE ROW, ONE SAVEPOINT. A proposed insert that the database rejects — most plausibly a CHECK
       // on an environment whose migration has not run — must cost that row and nothing else. Without
@@ -262,11 +267,14 @@ export async function writeEvidence(
         proposed++
       } catch (err) {
         try { await client.query('rollback') } catch {}
-        refused++; note('insert_rejected')
+        escRefused++; note('insert_rejected')
       }
     }
   }
 
+  // `refused` only — the deterministic guard's count against the deterministic population. Escalation
+  // refusals are counted in `escRefused` and reported through `escalation_refusals`; they never
+  // reduce a number they are not part of.
   const evidenced = resolved.filter(r => r.evidence).length - refused
   return {
     opp_id: oppId, total: rows.length,
@@ -274,7 +282,7 @@ export async function writeEvidence(
     // are NOT coverage: `checks.ts` refuses to let one turn `must_have_coverage` green on its own,
     // and `proposed` below is what lets any caller separate the two populations.
     evidenced: evidenced + proposed, unevidenced: rows.length - evidenced - proposed,
-    refused, profile_records: records.length,
+    refused: refused + escRefused, profile_records: records.length,
     escalated, proposed, escalation_refusals,
   }
 }

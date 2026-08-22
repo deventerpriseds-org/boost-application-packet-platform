@@ -1474,3 +1474,98 @@ test('H:draft-is-written-from-prompts-not-evidence: the resume text never reads 
   assert.ok(buildLoop < evidenceCall,
     'evidence is resolved BEFORE the artifacts are built — it must run after, on what was written')
 })
+
+test('H:proposed-row-cannot-grade-a-dimension: the FOURTH grader, in another file', () => {
+  // FOUND BY AN INDEPENDENT VERIFIER, and it is the sharpest kind of miss: the rule was right, the
+  // guard was written over "the set of evidence-reading checks", and the set was the set in ONE file.
+  // `dimensions.ts` grades the comparison card — a fourth reader of the same rows, in another module,
+  // whose `evidence` type did not even HAVE a `method` field, so it structurally could not tell a
+  // rule's finding from a model's proposal. Measured: `platform_modernization` weak -> STRONG with
+  // the model's quote in the `profile` slot, written to `comparison_dimension` on the deployed path.
+  //
+  // The comparison card is where the owner reads how they measure up. A proposal grading a dimension
+  // strong is the exact claim `checks.ts` refuses to make, made somewhere the gate cannot see it.
+  const src = fs.readFileSync(path.join(SRC, 'dimensions.ts'), 'utf8')
+  const s = stripComments(src)
+  assert.match(s, /method\?: string \| null/, 'the evidence type cannot express provenance')
+  assert.match(s, /r\.evidence\.method !== 'proposed'/,
+    'dimensions.ts grades on any excerpt — a model proposal would grade a dimension')
+  // And the mapping must CARRY it, or the check above always sees undefined and passes vacuously.
+  const shaped = stripComments(fs.readFileSync(path.join(SRC, 'appDimensions.ts'), 'utf8'))
+  assert.match(shaped, /method: r\.evidence_method/,
+    'shapeRequirement drops evidence_method — the grader would be blind again')
+})
+
+test('H:escalation-refusals-do-not-shrink-the-deterministic-count', async () => {
+  // FOUND BY AN INDEPENDENT VERIFIER. `evidenced` is `deterministic rows - refused`, and the
+  // escalation path was incrementing that same `refused`, so a model refusal subtracted from a
+  // population it has nothing to do with. Measured: two rows stored, the route reported one.
+  const rec = {
+    key: 'workHistory1', kind: 'work_history', label: 'Work history',
+    text: 'Reduced outages from nine hours to one across the payments platform.',
+  }
+  const det = 'Reduced outages from nine hours to one'
+  assert.ok(resolveEvidence(det, [rec]), 'fixture: the deterministic row must resolve')
+  const rows = [
+    { id: 'd1', seq: 0, verbatim: det, item_text: det },              // settled by a rule
+    { id: 'p2', seq: 1, verbatim: 'Improve operational reliability', item_text: '' }, // escalated
+    { id: 'p3', seq: 2, verbatim: 'Improve operational uptime', item_text: '' },      // escalated, rejected
+  ]
+  const inserts = []
+  const client = {
+    async query(sql, params) {
+      if (/from requirement where opp_id/.test(sql)) return { rows }
+      if (/^\s*insert into requirement_evidence/.test(sql)) {
+        if (params[0] === 'p3') throw new Error('violates check constraint')
+        inserts.push(params); return { rows: [] }
+      }
+      return { rows: [] }
+    },
+  }
+  const model = async () => ({ choices: [{ message: { content: JSON.stringify({
+    supported: true, source_key: 'workHistory1', quote: det, reasoning: 'cutting outages improves reliability',
+  }) } }] })
+  const out = await writeEvidence(client, 'opp-1', [rec], { escalate: true }, undefined, model)
+
+  assert.equal(inserts.length, 2, 'two rows must actually be stored')
+  assert.equal(out.proposed, 1)
+  assert.equal(out.escalation_refusals.insert_rejected, 1)
+  // THE ASSERTION THAT WAS FAILING IN PRODUCTION SHAPE: the count matches what was stored.
+  assert.equal(out.evidenced, 2, `reported ${out.evidenced} evidenced with 2 rows stored`)
+  assert.equal(out.unevidenced, rows.length - 2)
+  assert.equal(out.refused, 1, 'the refusal is still reported, just not subtracted from the wrong population')
+})
+
+test('H:pre-store-offset-check-is-a-tautology-and-says-so', () => {
+  // AN INDEPENDENT VERIFIER DELETED THE ESCALATION PATH'S PRE-STORE OFFSET CHECK AND THE WHOLE SUITE
+  // PASSED, 662/662 — and reported it as a worthless guard. The finding is right that nothing
+  // exercises it. The reason is worth more than a test that pretends otherwise:
+  //
+  // `writeEvidence` builds `byKey` from the SAME `records` it passes to `escalateOne`, and
+  // `verifyProposal` measures its offsets with `indexOf` on that record's text. So the re-slice
+  // compares a string to itself, and NO input reachable through the public API can make it fail. I
+  // tried: handing `writeEvidence` a shifted record shifts the offsets with it, because the same
+  // array feeds both. The deterministic path is identical, which is why `M24`'s comment was
+  // corrected earlier to stop claiming the check "structurally cannot" reject — it can, but only for
+  // a caller that passes a MISMATCHED pair, and `M25` reaches that case through the `resolver` seam
+  // because a seam exists there. Escalation has no equivalent seam, so the case is unreachable.
+  //
+  // Writing a test that appears to exercise it would be worse than having none — that is precisely
+  // the "absent evidence read as pass" this file exists to prevent. So this asserts what is TRUE:
+  // the check is present on both paths, and a refactor that separates the two record sets (which is
+  // what would make it live) cannot silently drop it on the way.
+  const s = stripComments(src('appRequirements.ts'))
+  const slices = [...s.matchAll(/rec\.text\.slice\(e\.char_start, e\.char_end\) !== e\.quote/g)]
+  assert.equal(slices.length, 2,
+    `expected the pre-store offset check on BOTH the deterministic and escalation paths, found ${slices.length}`)
+  // Each one must REFUSE rather than repair — the branch is what matters, not the comparison.
+  for (const m of slices) {
+    const after = s.slice(m.index, m.index + 160)
+    assert.match(after, /\{\s*(refused|escRefused)\+\+/,
+      'the offset check does not refuse — a mismatched quote would be stored')
+  }
+  // And the comment must not claim to be a live guard. A false comment about a guard is worse than
+  // no comment; that lesson is already recorded against `M24` and this is the same class.
+  assert.ok(!/structurally cannot/.test(s),
+    'a comment claims the check structurally cannot reject — it can, for a mismatched pair')
+})

@@ -238,7 +238,16 @@ export interface ComparisonRequirement {
   item_text: string
   kind: string
   match_method?: string | null
-  evidence?: { quote: string; source_label: string; source_kind: string; ratio?: number | null } | null
+  /**
+   * `method` IS PART OF THE EVIDENCE, and leaving it out was not a simplification.
+   *
+   * Without it this module structurally could not tell a rule's finding from a model's proposal, so
+   * `evidenced` below counted both and a proposed row graded a dimension `strong` — measured by an
+   * independent verifier: `platform_modernization` weak -> strong with a model's quote in the
+   * `profile` slot under `basis:'evidence'`, written to `comparison_dimension` on the deployed path.
+   * A type that cannot express the distinction cannot be asked to respect it.
+   */
+  evidence?: { quote: string; source_label: string; source_kind: string; ratio?: number | null; method?: string | null } | null
 }
 
 export interface ComparisonInput {
@@ -434,10 +443,18 @@ export function buildComparison(input: ComparisonInput): DimensionRow[] {
     }
 
     // ── the evidence path ───────────────────────────────────────────────────────────────────────
-    // A line is evidenced when it HAS an excerpt, and there is no other way to be — the same rule,
-    // from the same rows, as `requirementsGet`'s `evidenced` count (`appRequirements.ts:234-236`).
-    const evidenced = judgeable.filter(r => r.evidence && r.evidence.quote)
-    const unevidenced = judgeable.filter(r => !(r.evidence && r.evidence.quote))
+    // A line is evidenced when it HAS an excerpt AND a RULE chose that excerpt.
+    //
+    // The second half is the correction. `checks.ts` refuses to let a model-proposed row move
+    // `must_have_coverage`, on the grounds that a byte-exact quote is not a relevance finding — but
+    // this module is a FOURTH grader, in another file, outside the set that guard covers, and it was
+    // counting proposals as evidence. The comparison card is where the owner reads how they measure
+    // up, so a proposal grading a dimension `strong` is the same claim the gate refuses to make,
+    // made somewhere the gate cannot see. Same rule, same reason, one line lower down the stack.
+    const ruleEvidenced = (r: ComparisonRequirement) =>
+      !!(r.evidence && r.evidence.quote && r.evidence.method !== 'proposed')
+    const evidenced = judgeable.filter(ruleEvidenced)
+    const unevidenced = judgeable.filter(r => !ruleEvidenced(r))
 
     // A fact the owner confirmed still SHOWS on the profile side even when it cannot be compared —
     // that is the two-sidedness the acceptance sentence asks for. What it must not do is grade.
