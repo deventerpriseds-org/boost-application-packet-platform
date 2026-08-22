@@ -3259,3 +3259,39 @@ test('H:model-evidence-is-labelled: a model-proposed evidence row has its own me
   assert.ok(drop > 0 && add > 0, 'the method constraint is not managed idempotently')
   assert.ok(drop < add, 'the method constraint is ADDED before it is DROPPED — the migration will abort')
 })
+
+// H:config-route-is-not-open — `/api/config` shipped as an unauthenticated read AND write of the
+// whole AppConfig partition named `auth`.
+//
+// Measured at a02a85c, before it was wired to anything: `authLevel: 'anonymous'` on both methods,
+// no `requireWrite`, no owner scoping, and the GET returned every row of `PartitionKey eq 'auth'` —
+// so any caller who could reach the function could enumerate that partition and upsert arbitrary
+// rows into it. `grep -rn "api/config" app/ web/ scripts/` returned NOTHING, which is why it went
+// unnoticed for so long and also why tightening it broke nobody.
+//
+// The invariant has two halves and the projection is the one that keeps mattering: the mutation
+// needs a verified session, AND both methods are bounded by the `CONFIG_KEYS` whitelist, so a
+// credential that ever lands beside the pipeline settings in that partition is not served by this
+// route. Deny-by-default — a key nobody declared is not returned, rather than a denylist of keys
+// nobody may read.
+test('H:config-route-is-not-open: /api/config needs a session to write and serves only declared keys', () => {
+  const src = stripComments(readFileSync(new URL('../src/functions/config.ts', import.meta.url), 'utf8'))
+
+  // The write needs a verified session, like every other mutation in this API.
+  const save = src.slice(src.indexOf('export async function saveConfig'), src.indexOf('app.http(\'saveConfig\''))
+  assert.ok(save.length > 100, 'saveConfig moved — this scan has gone stale')
+  assert.match(save, /const guard = requireWrite\(req\); if \(guard\) return guard/,
+    'saveConfig writes the auth partition with no session check')
+
+  // BOTH methods are bounded by the same declared whitelist, and it is IMPORTED rather than retyped.
+  assert.match(src, /import \{ CONFIG_KEYS \}/, 'the whitelist is not the pipeline\'s own key list')
+  const get = src.slice(src.indexOf('export async function getConfig'), src.indexOf('app.http(\'getConfig\''))
+  for (const [name, body] of [['getConfig', get], ['saveConfig', save]]) {
+    assert.match(body, /new Set<string>\(Object\.values\(CONFIG_KEYS\)\)/,
+      `${name} is not bounded by the declared key list`)
+    assert.match(body, /allowed\.has\(/, `${name} does not consult the whitelist`)
+  }
+  // And the read must not hand back the whole partition.
+  assert.ok(!/values\[entity\.rowKey as string\] = entity\.value as string/.test(get),
+    'getConfig still returns every row of the auth partition')
+})

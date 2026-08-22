@@ -1770,6 +1770,98 @@ function DimensionSettings() {
   )
 }
 
+
+// ── Pipeline settings (D:appconfig-unreachable-in-product) ──────────────────────────────────────
+//
+// Ten values the pipeline reads from AppConfig — temperatures, template ids, the output folder, the
+// sender and recipient. Every one was code-seeded with no UI path, so the seed was doing a setting's
+// job: a live run reports `no roleFocus configured for templates/...; used the code seed
+// "engineering"` and there was nowhere to change it.
+//
+// The KEYS come from the API (`/config` returns only what `CONFIG_KEYS` declares), so this renders
+// what the pipeline actually reads rather than a hand-written list that drifts from it.
+
+const PIPELINE_LABELS = {
+  'openai.generateTemperature': ['Generation temperature', 'How much the model varies when writing your packet. Lower is more literal.'],
+  'openai.qcTemperature': ['QC temperature', 'Used for the quality passes. Lower is stricter.'],
+  'openai.defaultRoleFocus': ['Default role focus', 'Used when a template has no focus of its own. A run warns when it falls back to this.'],
+  'google.resumeTemplateId': ['Resume template', 'Google Docs id.'],
+  'google.compactResumeTemplateId': ['Compact resume template', 'Google Docs id.'],
+  'google.portfolioTemplateId': ['Portfolio template', 'Google Docs id.'],
+  'google.coverLetterTemplateId': ['Cover letter template', 'Google Docs id.'],
+  'google.outputFolderId': ['Output folder', 'Google Drive folder your generated documents land in.'],
+  'microsoft.senderEmail': ['Sender address', 'The mailbox outreach is sent from.'],
+  'microsoft.recipientEmail': ['Recipient address', 'Where copies are delivered.'],
+}
+
+function PipelineSettings() {
+  const [vals, setVals] = useState(null)
+  const [saved, setSaved] = useState({})
+  const [note, setNote] = useState(null)
+  const [saving, setSaving] = useState(false)
+
+  useEffect(() => {
+    api.pipelineConfigGet().then((r) => {
+      if (!r || r.success === false) { setNote({ ok: false, msg: r?.error || 'could not load pipeline settings' }); setVals({}); return }
+      const v = r.values || {}
+      setVals(v); setSaved(v)
+    }).catch((e) => { setNote({ ok: false, msg: String(e.message || e) }); setVals({}) })
+  }, [])
+
+  if (!vals) return <Card style={{ color: 'var(--proto-ink2)' }}>Loading pipeline settings…</Card>
+
+  // The union of what the API returned and what we have copy for. A key the API returns that has no
+  // label still renders under its own name — better an unlabelled control than an invisible setting.
+  const keys = Array.from(new Set([...Object.keys(PIPELINE_LABELS), ...Object.keys(vals)]))
+  const dirty = keys.some((k) => (vals[k] || '') !== (saved[k] || ''))
+
+  const save = async () => {
+    if (!sessionValid()) { setNote({ ok: false, msg: 'Sign-in expired — sign out and back in, then Save.' }); return }
+    setSaving(true); setNote(null)
+    try {
+      const patch = {}
+      for (const k of keys) if ((vals[k] || '') !== (saved[k] || '')) patch[k] = vals[k] || ''
+      const r = await api.pipelineConfigSet(patch)
+      if (!r || r.success === false) throw new Error(r?.error || 'save failed')
+      setSaved({ ...saved, ...patch })
+      const ignored = (r.ignored || []).length
+      setNote({ ok: true, msg: `Saved ${r.saved ?? Object.keys(patch).length} setting(s).${ignored ? ` ${ignored} unknown key(s) ignored.` : ''}` })
+    } catch (e) { setNote({ ok: false, msg: String(e.message || e) }) } finally { setSaving(false) }
+  }
+
+  return (
+    <Card>
+      <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 4 }}>Pipeline</div>
+      <div className="px-small" style={{ color: 'var(--proto-ink2)', marginBottom: 14 }}>
+        What the generator uses when it builds a packet. Blank means the code seed is used, and a run
+        will tell you when it fell back to one.
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+        {keys.map((k) => {
+          const [label, help] = PIPELINE_LABELS[k] || [k, '']
+          return (
+            <div key={k} style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16 }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 13, fontWeight: 600 }}>{label}</div>
+                {help ? <div className="px-small" style={{ color: 'var(--proto-ink2)', marginTop: 2 }}>{help}</div> : null}
+              </div>
+              <input className="px-input" type="text" value={vals[k] || ''} placeholder="code seed"
+                onChange={(e) => setVals({ ...vals, [k]: e.target.value })}
+                style={{ width: 260, flexShrink: 0 }} />
+            </div>
+          )
+        })}
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 16 }}>
+        <button className="px-btn px-btn-accent" disabled={!dirty || saving} onClick={save}>
+          {saving ? 'Saving…' : 'Save'}
+        </button>
+        {note ? <span className="px-small" style={{ color: note.ok ? 'var(--text-ok)' : 'var(--text-bad)' }}>{note.msg}</span> : null}
+      </div>
+    </Card>
+  )
+}
+
 const SECTIONS = [{ key: 'account', label: 'Account' }, { key: 'intake', label: 'Intake' }, { key: 'roles', label: 'Roles' }, { key: 'facts', label: 'Facts' }, { key: 'locations', label: 'Locations' }, { key: 'templates', label: 'Templates' }, { key: 'coach', label: 'Coach' }, { key: 'workspace', label: 'Workspace' }, { key: 'quality', label: 'Quality' }, { key: 'usage', label: 'Usage' }, { key: 'system', label: 'System' }]
 
 export default function Settings({ tab = 'account' }) {
@@ -1792,7 +1884,7 @@ export default function Settings({ tab = 'account' }) {
       {active === 'templates' && <TemplatesSettings />}
       {active === 'coach' && <CoachSettings />}
       {active === 'workspace' && <WorkspaceSettings />}
-      {active === 'quality' && <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}><ChecksSettings /><DimensionSettings /></div>}
+      {active === 'quality' && <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}><ChecksSettings /><DimensionSettings /><PipelineSettings /></div>}
       {active === 'usage' && <UsageSettings />}
       {active === 'system' && <SystemSettings />}
     </div>

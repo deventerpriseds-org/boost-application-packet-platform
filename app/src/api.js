@@ -273,6 +273,11 @@ export const api = {
   artifactRemediate: (artifactId, body) => post(`/app/artifact/${artifactId}/remediate?owner=${encodeURIComponent(_owner)}`, body || {}),
   escalationResolve: (id, body) => post(`/app/escalation/${id}?owner=${encodeURIComponent(_owner)}`, body || {}),
   remediationPrefsGet: () => get(`/app/remediation-prefs?owner=${encodeURIComponent(_owner)}`),
+  // D:appconfig-unreachable-in-product — the ten pipeline settings (openai.*, google.*, microsoft.*).
+  // The route existed and had NO caller anywhere, including the legacy console; it is also the route
+  // that was serving the whole `auth` partition unauthenticated until it was bounded to these keys.
+  pipelineConfigGet: () => get('/config'),
+  pipelineConfigSet: (values) => post('/config', { values }),
   dimensionPrefsGet: () => get(`/app/dimension-prefs?owner=${encodeURIComponent(_owner)}`),
   dimensionPrefsSet: ({ family, keys }) => post(`/app/dimension-prefs?owner=${encodeURIComponent(_owner)}`, { family, keys }),
   // LinkedIn role-sweep config + cursor + the exact built queries (preview before enabling).
