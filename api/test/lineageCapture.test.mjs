@@ -38,6 +38,23 @@ test('H:lineage-names-the-pass-that-actually-shipped', () => {
   assert.equal(rows.length, 5)
 })
 
+test('H:lineage-compares-content-not-formatting', () => {
+  // MEASURED, and the first version got it wrong. The shipped SkillsBullets1 was Call 2's list item
+  // for item — "Engineering Leadership / Digital Transformation / Software Quality Assurance / ..." —
+  // and the raw string comparison still returned `none` for all five slots, because a correction pass
+  // runs after assembly and strips the "- " bullet prefix. A lineage that says "none" on every row of
+  // a healthy build is worse than none at all: it is a panel that always says the same wrong thing.
+  const asBullets = '- Engineering Leadership\n- Digital Transformation\n- Cloud Strategy'
+  const asPlain = 'Engineering Leadership\nDigital Transformation\nCloud Strategy'
+  const rows = skillLineage({ skills1: 'other' }, { skills1: asBullets }, {}, { SkillsBullets1: asPlain })
+  assert.equal(rows[0].winner, 'call2', 'a bullet prefix was read as a different list')
+
+  // It must still be a CONTENT comparison, not a fuzzy one: a different list is a different list.
+  const different = skillLineage({ skills1: 'other' }, { skills1: asBullets }, {},
+    { SkillsBullets1: asPlain + '\nAgile Methodologies' })
+  assert.equal(different[0].winner, 'none', 'an extra item was treated as the same list')
+})
+
 test('H:analysis-records-the-full-length-even-when-truncated', () => {
   // A record that shrinks the number along with the text is how "7,446 characters discarded" becomes
   // un-measurable a week later. `chars` is the FULL length; `truncated` says the body was cut.

@@ -111,6 +111,20 @@ const LINEAGE_SLOTS: Array<[string, string, string, string]> = [
   ['RelevantBullets3', 'relevant3', 'relevant3', 'finalRelevant3'],
 ]
 
+/**
+ * Compare on CONTENT, not on formatting — the first version compared raw strings and was wrong.
+ *
+ * Measured: the shipped `SkillsBullets1` was Call 2's list exactly, item for item, and the raw
+ * comparison still returned `none` for all five slots. The reason is that a correction pass runs
+ * after assembly and strips the `- ` bullet prefix, so every value differs from its source by two
+ * characters per line. A lineage that reports "none" on every row of a healthy build is worse than
+ * no lineage: it is a panel that always says the same wrong thing, and it would have been believed.
+ */
+function sameList(a: string, b: string): boolean {
+  const norm = (s: string) => s.split('\n').map((l) => l.replace(/^\s*[-•*]\s*/, '').trim()).filter(Boolean).join('\n')
+  return !!a && !!b && norm(a) === norm(b)
+}
+
 export function skillLineage(c1: any, c2: any, c3: any, pkg: Record<string, any>): SlotLineage[] {
   const txt = (v: any) => (typeof v === 'string' ? v.trim() : '')
   return LINEAGE_SLOTS.map(([slot, k1, k2, k3]) => {
@@ -119,7 +133,11 @@ export function skillLineage(c1: any, c2: any, c3: any, pkg: Record<string, any>
     // Compared against the value that SHIPPED, in the precedence order the assembler applies, so the
     // answer is what actually happened rather than what the ranking says should have happened.
     const winner: SlotLineage['winner'] =
-      !final ? 'none' : final === call3 ? 'call3' : final === call2 ? 'call2' : final === call1 ? 'call1' : 'none'
+      !final ? 'none'
+        : sameList(final, call3) ? 'call3'
+        : sameList(final, call2) ? 'call2'
+        : sameList(final, call1) ? 'call1'
+        : 'none'
     return { slot, call1, call2, call3, final, winner }
   })
 }
