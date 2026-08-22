@@ -2309,3 +2309,39 @@ Nine minutes "running" with **zero** `packet:resume:generate:*` calls metered an
 rows at all — the call hung or errored without ever reaching `logUsage`. So swapping that model would
 have broken generation outright, not improved it. Config reverted to `gpt-4o-mini`. The wedged job is
 the sweep's problem, which is exactly what `D35` built it for.
+
+## List B identified — it is `D33`'s discarded sections, seen from the other end (2026-08-22)
+
+The owner settled the semantics: *"list b ... is the result of what was kept from the original
+template items and any items that were swapped out. it's a post swap check."* The zap export
+(`docs/zap-289877647/zap-289877647.full.json`) settles the mechanism:
+
+- `290709249` — Formatter `string.split` on `###` over `{{290709248__response__content}}`
+- `290709248` — **"Skills HTML Bullet List Formatting"**, `gpt-4o-mini`, prompt reads
+  *"### Original Skills 1 ### - Re-format this bullet list … {{289877662__output__Item 11}}"*
+- `289877662` — Formatter split over **`{{289877661__response__content}}{{299599701__response__content}}`**,
+  i.e. **Call 1 and Call 2 concatenated**
+- `289877667` — "Create Loop to Trim whitespace" over that same split → **List A**
+
+**So List A and List B come from the SAME generation, at different section indexes.** List B is not
+a second model brain, an external system or a template read — it is the pre-swap copy of the lists,
+HTML-formatted.
+
+**AND THAT IS `D33`.** `D33` already records that `Skills1`, `Skills2` and `Relevant Skills 1/2/3`
+arrive as SECOND occurrences and are discarded by `resumeParser.ts:155` (first-unfilled-wins),
+because the owner's prompt asks the model to restate the lists inside the swap table *"before any
+swaps"*. The placed field is the post-swap final; the discarded copy is the pre-swap original.
+**Those discarded second occurrences ARE List B.**
+
+So two rows opened from opposite symptoms — content vanishing (`D33`) and an input missing
+(`D:call3-compares-against-an-empty-list`) — are one defect. We generate List B on every build,
+throw it away, then ask Call 3 to compare against nothing.
+
+**The fix is ROUTING data we already produce, not reconstructing a node.** Materially smaller than
+it looked an hour ago.
+
+### Method note
+This was settled by reading the PRIMARY SOURCE — the zap export in this repo — after the owner's
+correction that the prompts and models were fine. Four node lookups, no guessing, no model A/B. The
+export has been sitting in `docs/zap-289877647/` the whole time; I had reached for a model
+comparison before reading the thing that documents the pipeline being replicated.
