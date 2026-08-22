@@ -267,6 +267,12 @@ export const api = {
   searchPrefsSet: ({ targetGeoIds, remoteOnly, tempThresholds, checks }) => post(`/app/search-prefs?owner=${encodeURIComponent(_owner)}`, { targetGeoIds, remoteOnly, tempThresholds, checks }),
   // D24 — the comparison dimension set per role family. The API half has been live and uncalled;
   // the run warning literally names "Settings ▸ Comparison dimensions" as the place to change it.
+  // D:remediation-never-ran — P3 has been deployed and has executed ZERO times in production, because
+  // nothing in app/ ever called it. Four routes, no caller. Same shape as D:build-runs-no-qc.
+  artifactRemediationGet: (artifactId) => get(`/app/artifact/${artifactId}/remediation?owner=${encodeURIComponent(_owner)}`),
+  artifactRemediate: (artifactId, body) => post(`/app/artifact/${artifactId}/remediate?owner=${encodeURIComponent(_owner)}`, body || {}),
+  escalationResolve: (id, body) => post(`/app/escalation/${id}?owner=${encodeURIComponent(_owner)}`, body || {}),
+  remediationPrefsGet: () => get(`/app/remediation-prefs?owner=${encodeURIComponent(_owner)}`),
   dimensionPrefsGet: () => get(`/app/dimension-prefs?owner=${encodeURIComponent(_owner)}`),
   dimensionPrefsSet: ({ family, keys }) => post(`/app/dimension-prefs?owner=${encodeURIComponent(_owner)}`, { family, keys }),
   // LinkedIn role-sweep config + cursor + the exact built queries (preview before enabling).

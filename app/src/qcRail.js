@@ -686,18 +686,47 @@ export function packetGate(entries) {
 /**
  * What the Remediation loops tab may honestly show.
  *
- * P3 IS NOT BUILT. There is no `remediation_loop` table and no `escalation` table anywhere in
- * api/src - the loop controller that would write `n / ran_at / closed[] / remaining[] / halted` does
- * not exist. So this tab is wired to the ONE real record of passes that does exist: `insertion.loop`,
- * which writeInsertions() increments each time an artifact is regenerated.
+ * THE PREMISE THIS WAS BUILT ON STOPPED BEING TRUE, and the comment outlived it. It said "P3 IS NOT
+ * BUILT. There is no remediation_loop table and no escalation table anywhere in api/src" — both
+ * tables shipped, they are in SCHEMA_SQL and EXPECTED_TABLES, and four routes serve them
+ * (`/remediate`, `/remediation`, `/escalation/{id}`, `/remediation-prefs`). What was actually missing
+ * was a CALLER: `app/src/api.js` referenced none of them, so P3 was deployed and had executed ZERO
+ * times in production (`D:remediation-never-ran`). The tab then told the owner the controller did not
+ * exist, which is how a stale comment becomes a false statement in the product.
  *
- * That is a REAL (usually empty) query, not a fixture. Every asset in the live database sits at loop
- * 0 - one generation, no remediation - and this returns exactly that, with the reason it is not more.
- * Rendering an invented loop log here would be dead UI dressed as evidence.
+ * So this model now takes the REAL loop ledger when the caller has fetched it, and falls back to
+ * `insertion.loop` — the pass record every asset has — when it has not. The distinction is reported
+ * rather than blurred: `source` says which one the numbers came from, because "no passes have run"
+ * and "we did not ask" are different facts and only one of them is about the packet.
  */
 export function loopsModel(entries) {
   const list = arr(entries)
   const assets = list.map((e) => {
+    // The real ledger, when the caller fetched it. `passes` are `remediation_loop` rows; each has an
+    // `n`, a halt reason and the requirements it closed or left open.
+    const ledger = e && e.remediation && Array.isArray(e.remediation.passes) ? e.remediation.passes : null
+    if (ledger) {
+      const esc = arr(e.remediation.escalations)
+      return {
+        artifact_id: e && e.artifact && e.artifact.id,
+        label: e && e.label,
+        loading: !!(e && e.remediationLoading),
+        error: (e && e.remediationError) || null,
+        source: 'ledger',
+        passes: ledger.length,
+        loops: ledger.map((r) => Number(r.n)).filter((n) => Number.isFinite(n)).sort((a, b) => a - b),
+        // A pass that ran is remediation, whatever it closed — `n` counts from 1, so every ledger row
+        // IS a second look. That is the difference from the fallback, where loop 0 is the first
+        // generation and only loops above it mean anything was revisited.
+        remediation: ledger.length,
+        rewritten: ledger.reduce((a, r) => a + arr(r.closed).length, 0),
+        outcome: e.remediation.outcome || null,
+        halted: ledger.some((r) => r.halted),
+        haltReason: (ledger.find((r) => r.halted) || {}).halt_reason || null,
+        open: esc.filter((x) => x && x.state !== 'resolved').length,
+        escalations: esc,
+      }
+    }
     const rows = arr(e && e.insertions && e.insertions.insertions)
     const loops = Array.from(new Set(rows.map((r) => Number(r.loop)).filter((n) => Number.isFinite(n)))).sort((a, b) => a - b)
     const rewritten = rows.filter((r) => Number(r.loop) > 0 && r.before_text != null && r.after_text != null && r.before_text !== r.after_text)
@@ -706,23 +735,36 @@ export function loopsModel(entries) {
       label: e && e.label,
       loading: !!(e && e.insertionsLoading),
       error: (e && e.insertionsError) || null,
+      source: 'insertions',
       passes: loops.length,
       loops,
       remediation: loops.filter((n) => n > 0).length,
       rewritten: rewritten.length,
+      outcome: null, halted: false, haltReason: null, open: 0, escalations: [],
     }
   })
   const remediation = assets.reduce((a, x) => a + x.remediation, 0)
+  // Which source the NUMBERS came from. Mixed is reported as the weaker one: if any asset fell back,
+  // the total is not a ledger total, and calling it one would be the more confident of two readings.
+  const fromLedger = assets.length > 0 && assets.every((a) => a.source === 'ledger')
+  const openEscalations = assets.reduce((a, x) => a + (x.open || 0), 0)
   return {
     assets,
     remediation,
+    openEscalations,
     anyLoaded: assets.some((a) => !a.loading && !a.error),
-    note: 'The remediation loop controller (backlog P3.1) is not built: there is no remediation_loop '
-      + 'table and no escalation table in the API, so there is no loop log to read. What is shown is '
-      + 'the real pass record every asset does have - insertion.loop, incremented once per '
-      + 'regeneration. A loop count of one means the asset was generated once and never revisited.',
+    source: fromLedger ? 'ledger' : 'insertions',
+    note: fromLedger
+      ? 'Each pass below is a real remediation run: what it closed, what it left open, and why it '
+        + 'stopped. Anything the loop could not close is escalated to you rather than retried forever.'
+      : 'The remediation ledger has not been loaded for these assets, so this falls back to the pass '
+        + 'record every asset has - insertion.loop, incremented once per regeneration. A loop count of '
+        + 'one means the asset was generated once and never revisited. This is not the same as saying '
+        + 'no remediation has run.',
     empty: remediation === 0,
-    emptyText: 'No asset in this packet has been through a second pass, so nothing has been remediated yet.',
+    emptyText: fromLedger
+      ? 'No remediation pass has run on this packet yet.'
+      : 'No asset in this packet has been through a second pass, so nothing has been remediated yet.',
   }
 }
 
