@@ -88,10 +88,19 @@ export interface CheckThresholds {
   evidenceMaxSentences: number
   evidenceBulletRun: number
   /**
-   * THE ESCALATION TIER'S OWN SETTINGS, and the toggle is different in kind from every threshold
-   * above it: those tune a rule, this one SPENDS MONEY and admits model judgement into the evidence
-   * spine. So its unconfigured state is the SAFE one rather than the seeded one — see
-   * `resolveOptionsFrom`, where it is the single field that does not fall through to a default.
+   * THE ESCALATION TIER'S OWN SETTINGS. SEEDED ON, at the owner's instruction (2026-08-21: "I don't
+   * know why the escalation needs to be turned on or off vs always on ... make sure the toggle is
+   * automatically on by default").
+   *
+   * It is still a COLUMN rather than a constant, and still read with `=== true` rather than `??`,
+   * and both of those matter more now that it is on. A knob that spends money per requirement must
+   * remain something the owner can switch off without a deploy, and reading it strictly means an
+   * owner row that says `false` beats any future change to this seed — the setting wins over the
+   * code, which is the whole point of the no-hardcoded-config rule.
+   *
+   * What makes ON safe here is that a proposed row cannot reach the gate: `checks.ts` counts it as
+   * something to SHOW and never as coverage, so the tier can only ever add information beside a
+   * requirement that had none. It changes what the owner is told, never what they are scored.
    *
    * `evidenceEscalateMax` caps calls per run. A posting with 38 unevidenced requirements would
    * otherwise make 38 calls the first time the owner opened it.
@@ -119,7 +128,7 @@ export const DEFAULT_THRESHOLDS: CheckThresholds = {
   evidenceMinTokens: EVIDENCE_MIN_TOKENS,
   evidenceMaxSentences: EVIDENCE_MAX_SENTENCES,
   evidenceBulletRun: EVIDENCE_BULLET_RUN,
-  evidenceEscalate: false,
+  evidenceEscalate: true,
   evidenceEscalateMax: 12,
 }
 

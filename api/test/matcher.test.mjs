@@ -26,6 +26,7 @@ import {
 } from '../dist/functions/tests/requirementSupport.js'
 import { MIN_QUOTE_CHARS, MIN_QUOTE_WORDS } from '../dist/functions/tests/reviewer.js'
 import { DEFAULT_THRESHOLDS } from '../dist/functions/tests/checks.js'
+import { resolveOptionsFrom } from '../dist/functions/tests/checkPrefs.js'
 import { writeEvidence, shapeRequirementsForApi } from '../dist/functions/tests/appRequirements.js'
 import {
   verifyProposal, worthEscalating, PROPOSAL_VERSION, PROPOSAL_SYSTEM,
@@ -1419,4 +1420,47 @@ test('H:banned-record-never-reaches-the-prompt', async () => {
   }, { neverEvidence: NEVER_EVIDENCE, minQuoteChars: MIN_QUOTE_CHARS })
   assert.equal(outcome.refusal, 'banned_source')
   assert.equal(outcome.accepted, null)
+})
+
+test('H:escalation-on-by-default: the seed is ON, and an owner saying false still wins', () => {
+  // OWNER DECISION 2026-08-21: "I don't know why the escalation needs to be turned on or off vs
+  // always on ... make sure the toggle is automatically on by default." This reverses the
+  // safe-by-default posture the toggle shipped with hours earlier, so it is pinned rather than left
+  // to a literal someone re-reads later and "corrects".
+  //
+  // What makes ON safe is not the toggle — it is that a proposed row can never reach the gate
+  // (`H:proposed-evidence-cannot-pass-the-gate`). The tier only ever adds information beside a
+  // requirement that had none.
+  assert.equal(DEFAULT_THRESHOLDS.evidenceEscalate, true, 'the seed must be ON')
+
+  // THE THREE STATES, and the middle one is the reason this is `!== false` rather than `=== true`.
+  // `ensureCheckPrefs` adds the column but does not INSERT a row, so `loadThresholds` returns `{}`
+  // for an owner nobody has written yet. A strict read would leave exactly that owner OFF while the
+  // column default said ON — a seed that reads as enabled and behaves as disabled.
+  assert.equal(resolveOptionsFrom({}).escalate, true, 'no row yet must take the seed, not fall off')
+  assert.equal(resolveOptionsFrom({ evidenceEscalate: true }).escalate, true)
+  assert.equal(resolveOptionsFrom({ evidenceEscalate: false }).escalate, false,
+    'an owner who switched it off must beat the code seed — the setting wins, always')
+})
+
+test('H:draft-is-written-from-prompts-not-evidence: the resume text never reads an evidence row', () => {
+  // OWNER CONSTRAINT 2026-08-21: "I'm fine with your design decision for now as long as its just
+  // related to grading / scoring... i still want my original prompts to be driving what the resume
+  // draft is."
+  //
+  // The tier must stay on the QC side of the line. Asserted structurally because the alternative is
+  // a promise in prose: `ensurePackage`/`assemblePackage` — the drafting path — must not read
+  // evidence, and the ONE evidence call in `appPackets` must come AFTER the artifacts are built.
+  const s = stripComments(src('appPackets.ts'))
+  const draft = s.slice(s.indexOf('export async function ensurePackage'), s.indexOf('async function buildTemplatedArtifact'))
+  assert.ok(draft.length > 200, 'ensurePackage moved — this scan has gone stale')
+  assert.ok(!/requirement_evidence|loadRequirementsWithEvidence|evidence/i.test(draft),
+    'the drafting path reads evidence — the owner\'s prompts must be what writes the draft')
+
+  // And the ordering: artifacts first, evidence second.
+  const buildLoop = s.indexOf('buildTemplatedArtifact(client, { ...a')
+  const evidenceCall = s.indexOf('/evidence?owner=')
+  assert.ok(buildLoop > 0 && evidenceCall > 0, 'the build loop or the evidence call moved')
+  assert.ok(buildLoop < evidenceCall,
+    'evidence is resolved BEFORE the artifacts are built — it must run after, on what was written')
 })

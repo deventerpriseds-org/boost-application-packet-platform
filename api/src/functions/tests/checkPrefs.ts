@@ -92,14 +92,25 @@ export function resolveOptionsFrom(t: Partial<CheckThresholds>): ResolveOptions 
     minTokens: t.evidenceMinTokens,
     maxSentences: t.evidenceMaxSentences,
     bulletRunMax: t.evidenceBulletRun,
-    // THE ONE FIELD THAT DOES NOT FALL THROUGH TO A SEEDED DEFAULT, and the asymmetry is deliberate.
-    // Every option above it is a threshold: an owner who has never been written to
-    // `owner_search_prefs` gets `undefined` and `resolveEvidence` supplies the seeded value, which
-    // is right, because a missing threshold must not mean zero. This one is a spend-and-trust
-    // toggle, so the unconfigured state must be OFF rather than whatever the code currently seeds —
-    // `=== true`, not `??`. A future seed of `true` would otherwise silently enrol every owner who
-    // has never opened the setting.
-    escalate: t.evidenceEscalate === true,
+    // ON UNLESS THE OWNER SAID OTHERWISE — `!== false`, and the distinction is not pedantry.
+    //
+    // `ensureCheckPrefs` only ADDS the column; it does not INSERT a row. So `loadThresholds` returns
+    // `{}` for an owner who has never been written to `owner_search_prefs`, and a strict `=== true`
+    // would have left exactly that owner OFF while the column's default said ON — a seed that reads
+    // as enabled and behaves as disabled, which is the worst of both.
+    //
+    // `!== false` distinguishes the three real states: no row yet (take the seed, ON), a row saying
+    // true (ON), a row saying false (OFF, and it beats the seed — the setting wins over the code,
+    // which is the no-hardcoded-config rule pointing the way that matters).
+    //
+    // This REVERSES the safe-by-default posture this line shipped with a few commits ago, at the
+    // owner's explicit instruction: "I don't know why the escalation needs to be turned on or off vs
+    // always on ... make sure the toggle is automatically on by default." What makes that safe is
+    // not the toggle but `checks.ts`: a proposed row is shown beside a requirement and can never
+    // count toward coverage, so the tier only ever ADDS information where there was none. It changes
+    // what the owner is told, never what they are scored — and never what the resume draft says,
+    // which is written from their prompts before this pass runs at all.
+    escalate: t.evidenceEscalate !== false,
     escalateMax: t.evidenceEscalateMax,
   }
 }
