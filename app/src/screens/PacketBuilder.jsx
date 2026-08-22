@@ -216,6 +216,10 @@ export default function PacketBuilder({ id, step }) {
   const [jdBusy, setJdBusy] = useState(false)
   const [parseBusy, setParseBusy] = useState(false)
   const [allBusy, setAllBusy] = useState(false)
+  // The queued build (D35): { jobId, state }. Null when nothing is in flight. Its own timer ref,
+  // because `pollers` is keyed by artifact id and a packet build is not one artifact.
+  const [buildJob, setBuildJob] = useState(null)
+  const buildPoller = useRef(null)
   // The wizard step lives in the ROUTE (#/packet/:id/:step), matching every other multi-view screen
   // (OppDetail, Interview, Library, Settings). It was component state, which meant no deep-link, no
   // back-button, and nothing behind a step was reachable by the UI verifier.
@@ -295,6 +299,7 @@ export default function PacketBuilder({ id, step }) {
   useEffect(() => { load() }, [load])
   useEffect(() => { loadReq() }, [loadReq])
   useEffect(() => () => Object.values(pollers.current).forEach(clearTimeout), [])
+  useEffect(() => () => clearTimeout(buildPoller.current), [])
 
   const patchArtifact = (artifactId, fields) => setPState((s) => ({
     ...s,
@@ -389,16 +394,47 @@ export default function PacketBuilder({ id, step }) {
   // X2's remaining half. `api.buildFullPacket` has always forwarded its options and the API has
   // always read `regen` — the UI simply never set it, so a control labelled "Rebuild" replayed the
   // cached package. Same shape as the Re-run button: a server capability with no consumer.
+  // D35. This used to await the whole build. It takes about three minutes and the gateway in front
+  // of the Function gives up at roughly 230 seconds, so the browser was shown a failure on builds
+  // that had already written every document — and the owner, reasonably, pressed the button again
+  // and paid for it twice. The request now queues the build and polls it, which is the same shape
+  // the video render already uses on this screen.
   const buildAll = async (opts = {}) => {
     setAllBusy(true)
     try {
-      const r = await api.buildFullPacket(id, opts.regen ? { regen: true } : {})
+      const r = await api.queueFullPacket(id, opts.regen ? { regen: true } : {})
       if (r.error) throw new Error(r.error)
-      toast(`Built ${(r.artifacts || []).filter((x) => x.url).length} documents — nothing sent`)
-      load()
-    } catch (e) { toast(`Build failed: ${e.message || e}`) }
-    finally { setAllBusy(false) }
+      // `note` is the server's honest description of what happened, and the three cases are not the
+      // same: queued, upgraded-to-a-rebuild, or "something else is already running and this is not
+      // the build you asked for". Showing "Building…" for all three is how a rebuild button ends up
+      // reporting success for a cached build.
+      toast(r.note || 'Build queued.')
+      setBuildJob({ jobId: r.jobId, state: r.state || 'pending' })
+      pollBuild(r.jobId)
+    } catch (e) { toast(`Build failed: ${e.message || e}`); setAllBusy(false); setBuildJob(null) }
   }
+
+  const pollBuild = useCallback((jobId) => {
+    clearTimeout(buildPoller.current)
+    const tick = async () => {
+      try {
+        const s = await api.buildJob(jobId)
+        if (s.error) { toast(`Build status unavailable: ${s.error}`); setAllBusy(false); setBuildJob(null); return }
+        setBuildJob({ jobId, state: s.state })
+        if (!s.done) { buildPoller.current = setTimeout(tick, 10000); return }
+        setAllBusy(false)
+        const built = (s.result?.artifacts || []).filter((x) => x.url).length
+        // A FAILED job still carries its payload, so a partial build reports what it did write
+        // rather than only that it failed — three documents that exist are not nothing.
+        if (s.state === 'done') toast(`Built ${built} documents — nothing sent`)
+        else toast(built ? `Build failed after ${built} documents: ${s.error || 'unknown error'}`
+                         : `Build failed: ${s.error || 'unknown error'}`)
+        setBuildJob(null)
+        load()
+      } catch { buildPoller.current = setTimeout(tick, 10000) }
+    }
+    buildPoller.current = setTimeout(tick, 4000)
+  }, [id])
 
   const pollVideo = useCallback((artifactId) => {
     clearTimeout(pollers.current[artifactId])
@@ -549,9 +585,21 @@ export default function PacketBuilder({ id, step }) {
                option added there would have been silently ungettable. Both call sites are now
                explicit that they send nothing. */
             extra={(
-              <button className="px-btn" style={{ fontSize: 12 }} disabled={allBusy} onClick={() => buildAll()}>
-                {allBusy ? 'Building…' : 'Build entire packet'}
-              </button>
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                <button className="px-btn" style={{ fontSize: 12 }} disabled={allBusy} onClick={() => buildAll()}>
+                  {allBusy ? 'Building…' : 'Build entire packet'}
+                </button>
+                {/* The build now runs on the server after the request returns, so the screen says
+                    which of the two states it is in. "Queued" is real — a job waits for the next
+                    worker tick — and a spinner that claimed it was already building would be a
+                    small lie the owner would notice the moment it sat there for a minute. */}
+                {buildJob && (
+                  <span style={{ fontSize: 11, color: 'var(--proto-ink2)' }}>
+                    {buildJob.state === 'running' ? 'building on the server — this takes a few minutes'
+                                                  : 'queued — starts within a minute'}
+                  </span>
+                )}
+              </span>
             )} />
 
           <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
