@@ -58,6 +58,8 @@ export interface NormaliseResult {
  */
 export type RewriteFn = (args: {
   item: string; maxChars: number; siblings: string[]; field: string
+  /** Set on the RETRY only: what was wrong with the previous proposal, measured. */
+  priorAttempt?: string
 }) => Promise<string | null>
 
 /** How the checks compare two items for redundancy. Mirrors `runChecks` exactly. */
@@ -162,12 +164,30 @@ export async function enforceCharLimits(
     let changedThisField = false
     for (const { item, i } of mustFix) {
       const siblings = next.filter((_, j) => j !== i)
-      let proposal: string | null = null
-      try {
-        proposal = await rewrite({ item, maxChars: max, siblings, field })
-      } catch { proposal = null }
+      // ONE RETRY, WITH THE REASON. Measured in production 2026-08-22: the first pass rejected
+      // "Software Engineering Leadership" (31) as un-shortenable to 30 — a trivial edit
+      // ("Engineering Leadership" is 22). The model had simply returned something that did not fit
+      // and was discarded SILENTLY, so it never learned it had failed within the one exchange it
+      // gets. Telling it the measured length of its own proposal costs one cheap call and is the
+      // difference between a rule that is enforced and a rule that is merely attempted.
+      //
+      // Strictly one retry. A loop here would spend unbounded calls on an item the model cannot fix,
+      // and the whole point of `unresolved` is that giving up VISIBLY is an acceptable outcome.
+      let clean = ''
+      let lastFail = ''
+      for (let attempt = 0; attempt < 2; attempt++) {
+        let proposal: string | null = null
+        try {
+          proposal = await rewrite({ item, maxChars: max, siblings, field, priorAttempt: lastFail || undefined })
+        } catch { proposal = null }
+        const c = (proposal || '').replace(/\s+/g, ' ').trim()
+        if (c.length > 0 && c.length <= max && !siblings.some(s => norm(s) === norm(c))) { clean = c; break }
+        lastFail = c.length > max
+          ? `your previous answer "${c}" was ${c.length} characters, still over the ${max} limit`
+          : c.length === 0 ? 'your previous answer was empty'
+          : `your previous answer "${c}" duplicates another item in the list`
+      }
 
-      const clean = (proposal || '').replace(/\s+/g, ' ').trim()
       const fits = clean.length > 0 && clean.length <= max
       const collides = fits && siblings.some(s => norm(s) === norm(clean))
       if (!fits || collides) {

@@ -180,3 +180,32 @@ test('normalisePackage never throws', async () => {
   const r = await normalisePackage(null, T, never)
   assert.ok(Array.isArray(r.changes), 'a broken input must return a result, not throw')
 })
+
+// THE RETRY, added after production measured the gap: the first live run rejected
+// "Software Engineering Leadership" (31) as un-shortenable to 30, which is a trivial edit. The model
+// had returned something too long and was discarded silently, never learning it had failed.
+test('a failed proposal is retried ONCE, with the measured reason', async () => {
+  const pkg = { SkillsBullets1: LIVE_SKILLS1 }
+  const seen = []
+  // Too long first, correct second — exactly the production failure and its cheap fix.
+  const flaky = async ({ item, maxChars, priorAttempt }) => {
+    seen.push(priorAttempt || null)
+    return priorAttempt ? item.slice(0, maxChars) : item + ' XXXXXXXX'
+  }
+  const { changes } = await enforceCharLimits(pkg, T, flaky)
+  assert.ok(changes.length > 0, 'the retry must rescue an item the first attempt got wrong')
+  assert.equal(seen[0], null, 'the first attempt carries no prior-failure note')
+  assert.ok(/still over the \d+ limit/.test(seen[1]),
+    'the retry must state the MEASURED length of the previous answer, not just "try again"')
+})
+
+test('the retry is strictly bounded to one extra attempt', async () => {
+  const pkg = { SkillsBullets1: LIVE_SKILLS1 }
+  let calls = 0
+  const alwaysBad = async ({ item }) => { calls++; return item + ' still too long' }
+  const { changes, unresolved } = await enforceCharLimits(pkg, T, alwaysBad)
+  assert.deepEqual(changes, [], 'nothing should be accepted when every attempt fails')
+  assert.ok(unresolved.length > 0, 'giving up must be visible')
+  // Four over-limit items in the live list x at most 2 attempts each.
+  assert.ok(calls <= 8, `unbounded retry: ${calls} calls — a loop here burns spend on an unfixable item`)
+})

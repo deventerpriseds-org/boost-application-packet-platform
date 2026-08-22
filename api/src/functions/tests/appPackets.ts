@@ -516,14 +516,15 @@ export async function ensurePackage(client: any, art: any, opp: any, regen: bool
   // model reads as a seam in a list it did not write.
   const thresholds = { ...DEFAULT_THRESHOLDS, ...(await loadThresholds(client, opp.owner_email).catch(() => ({}))) }
   const rewriteOne = openAiJson({ feature: 'normalise:reword', model: 'gpt-4o-mini', temperature: 0, maxTokens: 120 })
-  const normalised = await normalisePackage(pkg, thresholds, async ({ item, maxChars, siblings, field }) => {
+  const normalised = await normalisePackage(pkg, thresholds, async ({ item, maxChars, siblings, field, priorAttempt }) => {
     const out = await rewriteOne(
       'You shorten one resume list item so it fits a hard character limit. Keep the meaning and the '
       + 'voice of the surrounding items. Never abbreviate into something unreadable. '
       + 'Reply as JSON: {"item": "<the shortened item>"}.',
       `Field: ${field}\nHard limit: ${maxChars} characters including spaces.\n`
       + `Item to shorten (${item.length} chars): ${item}\n`
-      + `Other items in this list, for voice and to avoid duplicating one:\n${siblings.map(x => `- ${x}`).join('\n')}`,
+      + `Other items in this list, for voice and to avoid duplicating one:\n${siblings.map(x => `- ${x}`).join('\n')}`
+      + (priorAttempt ? `\n\nRETRY — ${priorAttempt}. Count the characters this time and return something shorter.` : ''),
     )
     return typeof out?.item === 'string' ? out.item : null
   })

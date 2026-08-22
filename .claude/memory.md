@@ -2224,3 +2224,46 @@ collision check.
 - **"Would fixes go back to the same AI for consistency?"** Yes, and the design honours it: `RewriteFn`
   is INJECTED so the caller passes its own generation transport, and the reworded item is given its
   siblings as context so it does not read as a seam in a list it did not write.
+
+## Normaliser CONFIRMED LIVE, and the retry it earned (2026-08-22)
+
+Deploy `466b40f` (api-deploy 32604780457), then a real `regen` build on opp `9f9c370a`. The build's
+own warnings are the evidence:
+
+```
+✓ normalised RelevantBullets1: removed "Technology Strategy"   — already listed in SkillsBullets2
+✓ normalised RelevantBullets1: removed "Governance Compliance" — already listed in SkillsBullets2
+✗ normalise could not fix — SkillsBullets1: "Software Engineering Leadership" (31) within 30
+✗ normalise could not fix — RelevantBullets3: "Strategic Partnerships" (22) within 20
+```
+
+**`cross_list_redundancy` is GONE from all four artifacts.** Attention on resume/compact_resume
+8 → 6. The two rejections are the safety property holding in production: proposals that did not fit
+were refused, originals kept, both reported.
+
+### THE GAP THE MEASUREMENT EXPOSED — and why "model proposes, code decides" was only half built
+
+Shortening "Software Engineering Leadership" (31) to 30 is trivial — "Engineering Leadership" is 22.
+The model returned something too long and the proposal was **discarded silently**, so within the one
+exchange it gets it never learned it had failed. Code was deciding, but it was not TELLING.
+
+Fixed with exactly ONE retry that states the MEASURED length of the model's own previous answer
+(`your previous answer "X" was 34 characters, still over the 30 limit`). Strictly one — a loop would
+spend unbounded calls on an item the model cannot fix, and `unresolved` exists so that giving up
+VISIBLY is an acceptable outcome.
+
+### Hardening — the module tests were green while the wiring was broken, TWICE
+
+The caller patch silently failed to apply twice. First time a python script threw on its second
+assert AFTER doing the first `replace` in memory, so NOTHING was written and both edits were lost —
+the classic partial-script failure. Second time `priorAttempt` was destructured in the callback but
+never interpolated into the user message, so the retry would have re-sent a **byte-identical prompt**
+and burned a call telling the model nothing.
+
+`api/test/normalise.test.mjs` stayed GREEN through both, because it exercises the MODULE and the
+defect was in the CALLER. That is the same shape as `evaluateArtifact` having no caller in the build
+path. So the guard is `H:retry-carries-the-reason`, which asserts `${priorAttempt}` is actually
+interpolated into the prompt — a module test cannot see that, and only a caller-level assertion can.
+
+**Rule earned: when a module takes an injected function, the module's own tests can never prove the
+caller passes the right thing. That needs its own guard.**

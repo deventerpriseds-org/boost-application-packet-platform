@@ -3740,3 +3740,26 @@ test('H:normaliser-runs-on-the-stored-package: wired in, after corrections, befo
     'the rewrite transport does not pin gpt-4o-mini, so a reworded item comes from a different model ' +
     'than wrote the list around it and reads as a seam')
 })
+
+// H:retry-carries-the-reason — a retry that repeats the same prompt is a wasted call.
+//
+// Measured in production 2026-08-22 (build job on opp 9f9c370a): the normaliser reported
+// `"Software Engineering Leadership" (31 chars) could not be reworded within 30` — a trivial edit.
+// The model returned something too long and the proposal was discarded SILENTLY, so within the one
+// exchange it gets it never learned it had failed. The fix is one retry that states the MEASURED
+// length of the model's own previous answer.
+//
+// This guard exists because the wiring for it silently failed to apply twice while the module-level
+// tests stayed green: `priorAttempt` was destructured in the callback but never interpolated into
+// the user message, so the retry would have re-sent a byte-identical prompt and the tests — which
+// exercise the module, not the caller — could not see it.
+test('H:retry-carries-the-reason: the caller interpolates priorAttempt into the prompt', () => {
+  const PK = stripComments(readFileSync(new URL('../src/functions/tests/appPackets.ts', import.meta.url), 'utf8'))
+  const at = PK.indexOf('normalisePackage(')
+  assert.notEqual(at, -1, 'normalisePackage call moved; retarget this guard')
+  const cb = PK.slice(at, PK.indexOf('\n  })', at))
+  assert.ok(/priorAttempt/.test(cb), 'the rewrite callback does not accept priorAttempt')
+  assert.ok(/\$\{priorAttempt\}/.test(cb),
+    'priorAttempt is accepted but never interpolated into the prompt, so the retry re-sends an ' +
+    'identical message and burns a call telling the model nothing')
+})
