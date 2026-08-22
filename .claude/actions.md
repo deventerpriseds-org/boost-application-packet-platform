@@ -2450,3 +2450,30 @@ Upstream: the Prompts table (untouched — the owner's constraint). Downstream g
 `assemblePackage` (all 5 skill slots), Call 3's input, `pkg_json`, `swap_decision`, `varsForType`,
 the artifact documents. Role focus: `decideRoleFocus` is the one decision point and the ladder below
 the template is asserted unchanged.
+
+## Full-system maps + the three gaps they surfaced (2026-08-22)
+
+**Request (owner):** *"yes but it's seems you need a full grep of the original prompts and current
+system and desired packets spec. most of your water tubes seems like short sightedness"*
+
+**Delivered:** three maps under `.claude/map/`, every claim carrying a `file:line` —
+`prompts.md` (587), `build-path.md` (698), `spec-vs-shipped.md` (483, now COMPLETE §1-6).
+
+**Durable output:** three OPEN ledger rows in `.claude/DEFERRED.md` for gaps no existing row covered
+— `D:packet-cannot-be-sent` (39 packets, 0 sent, 0 approved, 2 of 1,924 `applied`),
+`D:every-build-is-destructive` (`version_history` stores `{"len": N}`),
+`D:no-template-picker` (`artifact.template_id` dead, 0 of 195 populated).
+
+**Guard interaction worth keeping:** `D:ledger-stale-row-fails` REJECTED all three on first write —
+the `check:` clauses carried prose where the file path belongs, so the parser read `version_history`
+and `update` as filenames. Fixed to the real grammar; machine-checked rows 14 → 16; both new clauses
+mutation-proven to bite in the correct direction. Evidence: `node --test test/deferredLedger.test.mjs`
+→ 16/16, and each mutation reproduced its own row's failure message.
+
+**Tier 3 (prose)** per CLAUDE.md's blast-radius table — `.claude/**` only, no executable behaviour
+changed, no deploy path touched. No AC subagent, no verifier; the mutation-proof was still run.
+
+**Still open from this thread:** the single-generation fix (owner said yes, conditioned on the map
+landing first — now landed); Call 3 parsed as sections, gated behind supplying the 12 blank
+`atsExtra` tokens; three-pass swap attribution (ACs complete at `.claude/ac/three-pass-swaps.md`);
+and the owner decision `D:packet-cannot-be-sent` asks for.

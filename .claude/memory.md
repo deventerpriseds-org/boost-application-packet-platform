@@ -1826,3 +1826,40 @@ owner's list on their own schedules. He cleaned them up by hand and said: never 
 - **AC writing, verification, research, review → `Agent`, always.**
 - A cloud session is only for work the OWNER asked to run as a separate session.
 - If one is ever spawned, archive it in the same turn its work lands.
+
+## The three systemic maps, and the three ledger rows they earned (2026-08-22)
+
+The owner's diagnosis — *"most of your water tubes seems like short sightedness"* — was answered with
+three full-system reads under `.claude/map/`: `prompts.md` (587 lines, all three Prompts rows against
+what the code expects of them), `build-path.md` (698, the request-to-document path), and
+`spec-vs-shipped.md` (483, `docs/design_handoff/proto-compass/packet.jsx` against what is built).
+Every claim in them carries a `file:line`.
+
+**What the maps found that NO ledger row covered** — three rows, all OPEN, all machine-checked:
+
+- **`D:packet-cannot-be-sent`** — the ship half of the product does not exist. "Request changes"
+  flips one artifact's status with no note and no round; "Send packet →" navigates and writes
+  nothing; `feedback` appears 0 times in `appPackets.ts`; nothing in the packet flow ever sets
+  `applied`. Live: **39 packets, 0 sent, 0 with feedback; 195 artifacts, 0 approved; 2 of 1,924
+  opportunities `applied`.** Thirty-nine packets built, not one approved or sent.
+- **`D:every-build-is-destructive`** — `artifact.version_history` is appended on every build with
+  **`{"len": N}` only** — a character count, not the text — and nothing reads it. A column exists
+  that makes a reader conclude prior text is recoverable. It is not.
+- **`D:no-template-picker`** — `artifact.template_id` is SELECTed and projected to the client, and
+  **no writer exists anywhere**. 195 artifacts, 0 populated. Not cosmetic: `D32` ruled the resume
+  TEMPLATE decides the role focus every prompt is prefixed with, so which template an artifact uses
+  is a content-correctness question, and this column is already its right home.
+
+### Hardening — a ledger `check:` clause has a grammar, and omitting the path silently mis-parses
+
+All three rows were written with `check: grep version_history — ...` / `check: absent update artifact
+set template_id — ...`, i.e. **prose where the file path belongs**. The grammar is
+`check: <grep|absent> <path> <pattern>`, so the parser took `version_history` and `update` as
+filenames and `D:ledger-stale-row-fails` failed with *"check names X, not a file in this repo"*.
+That is the guard working: a row claiming to be machine-checked while naming nothing checkable is
+exactly the vacuous-coverage failure the ledger test exists to catch. Corrected to
+`grep api/src/functions/tests/appPackets.ts version_history = coalesce.*'len'` and
+`absent api/src/functions/tests/appPackets.ts set[^\n]*template_id\s*=`; machine-checked rows went
+**14 → 16**. Both clauses were mutation-proven: storing `content` instead of `'len'` fails the first
+("the defect is gone, close the row"), and adding a real `update artifact set template_id = $1` fails
+the second ("the thing was built, close the row").

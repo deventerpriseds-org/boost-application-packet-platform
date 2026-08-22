@@ -1,6 +1,7 @@
 # Packet: spec vs shipped
 
-Status: IN PROGRESS (written incrementally — whatever is here is the deliverable).
+Status: COMPLETE (sections 1-6). Source-only analysis; nothing checked against the live DB
+— see §6 for the two claims a `db-query.yml` dispatch would settle.
 Author: map agent, 2026-08-22.
 Rule for this file: every claim carries a `file:line`. Claims from `.claude/memory.md`
 are treated as CLAIMS TO CHECK, not as givens; where memory is wrong it is corrected
