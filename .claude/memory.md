@@ -1761,3 +1761,53 @@ that evidence; no fence, so a reclaimed zombie could overwrite a live run; a reb
 cached build silently downgraded to it; a return type that lied; and a job that could be filed
 against another owner's opportunity. Each is now a test, and all five mutations bite. The tests I
 wrote first were not wrong — they were tests of the design I already had in my head.
+
+
+## THE THREE-CALL GENERATION PIPELINE — what each call actually is (2026-08-22)
+
+Read this before touching `pipeline.ts buildPackageForJD`, `mt17.assemblePackage`, or anything that
+reasons about "Call 2". The code's own names were wrong about this for the product's whole life.
+
+| call | prompt row | zap node | what it REALLY is | output shape |
+|---|---|---|---|---|
+| 1 | `resume_user` | 289877661 "Update Resume/Portfolio Fields" | the draft: summary, skills, relevant, work history, cover letter, About Me, executive profile, plus SIX analysis sections | `### Title ###` text |
+| 2 | `portfolio_user` | 299599701 **"Copy: Update Resume/Portfolio Fields"** | a SECOND SKILLS-REFINEMENT PASS over Call 1 — not a portfolio prompt, despite the row name | `### Title ###` text |
+| 3 | `ats_user` | 289877668 "Post Analysis QA" | ATS QC + skills merge | **JSON** |
+
+- **Call 2 emits ONLY** `Skills1`, `Skills2`, `Relevant Skills 1/2/3`, `Word and Character
+  Requirements Check`. It never emits a cover letter, About Me, executive profile, resume summary or
+  cold email — which are exactly the fields `assemblePackage` used to read off `call2`. That
+  expectation was fiction; no model output could satisfy it. Those come from Call 1 and the baseline
+  `set_value` nodes (MasterContext).
+- **Call 2 was parsed with `parseAgentJson` and therefore always failed** — 2,957/3,178/4,736/5,404
+  characters discarded in one build. Read as a flaky model, then as a duplicate-prompt bug. It was
+  neither: the prompt never asks for JSON. **The prompt is the only source that settles a "what does
+  this call return" question.** `GET /api/prompts?key=<row>&tail=N` now exists for exactly that.
+- Call 3's prompt DOES ask for JSON and parses fine in production — which is the disconfirming
+  control that proves the JSON parser was never the problem.
+
+### Hardening — a fix that leaves the symptom identical is indistinguishable from no fix
+`portfolio_user` was corrected (wrong zap node → right one) a day before this. The warning text did
+not change, because the NEW prompt also failed to parse — for a completely different reason. The
+second cause hid behind the first for a full day. When a fix lands and the symptom is unchanged, that
+is not "the fix did not take": re-derive the cause from scratch.
+
+### Hardening — `{...c1, ...c2}` was safe only because c2 was always `{}`
+Fixing the parse turned a dormant spread into a live silent-degradation path: `parseResumePackage`
+returns EVERY key defaulted `|| ''`, so the spread blanked six of Call 1's fields in the input handed
+to the QC pass — whose verdict OUTRANKS Call 1 in the document, while the build still reports
+`built: 4, failed: 0`. Caught by an independent AC read of a change that had already shipped, not by
+any test. **The general rule: when a value goes from always-empty to populated, every merge it feeds
+changes meaning.** Grep the consumers of a variable whose emptiness was load-bearing. `mergeCallTwo`
+is now an allowlist and refuses anything Call 2's prompt did not ask for.
+
+### Role focus: the AppConfig row key is a free-text job title, so that source can never hit
+`resolveRoleFocus` looks up `templates/<roleRowKey(roleType)>` where `roleType` is the posting's job
+title — e.g. `director-of-digital-technology-operations-&-innovation`. No such row will ever exist,
+so the first source is dead on arrival and every build falls through. The persona branch below it is
+also dead: **`opportunity.persona_key` is NULL on 1,676 of 1,903 rows** and the owner confirms the
+persona design was abandoned. Net effect: an executive Director of Digital posting was written by a
+prompt directed at "a senior **engineering** executive", from a hardcoded seed. The owner's ruling:
+**the resume TEMPLATE chosen for the build drives the focus** — today only one template exists, so it
+must resolve to engineering EXPLICITLY from the template's own configuration rather than by falling
+through five layers to a code constant.
