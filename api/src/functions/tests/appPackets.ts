@@ -11,7 +11,7 @@ import { writeSwaps } from './appSwaps'
 import { writeInsertions } from './appInsertions'
 import { applyCorrectionPass } from './appCorrections'
 import { sourceText } from './appFacts'
-import { summariseBuild } from './packetBuild'
+import { summariseBuild, skillLineage, collectAnalysis } from './packetBuild'
 import { approvalBlock } from './appChecks'
 // The evidence pass, called in-process rather than over HTTP — see resolveEvidenceForOpp. No cycle:
 // appPackets is not reachable from appRequirements (checked across all 24 modules it can reach).
@@ -365,6 +365,9 @@ export function generationJd(opp: any): { jd: string; grounded: boolean } {
  */
 export async function ensurePackage(client: any, art: any, opp: any, regen: boolean): Promise<{
   pkg: Record<string, string | null>; generated: boolean; grounded: boolean
+  // What each pass produced, and the analysis sections none of them could place. Diagnostic only —
+  // see `skillLineage`. Absent on a cached package, because nothing was generated to attribute.
+  lineage?: any[]; analysis?: any[]
   // P7 item 6 - THE FAILURE PATH. `buildPackageForJD` returns `warnings` and `qcApplied` and this
   // file read NEITHER, so a build that hit a config gap, lost a section to an unmapped title, or
   // had its ATS-QC call come back empty returned `ok:true` with no hint anything was wrong. The
@@ -426,7 +429,13 @@ export async function ensurePackage(client: any, art: any, opp: any, regen: bool
       profileText: built.profileText, omitList: built.omitList, loop: 0,
     })
   } catch (e) { console.warn('[packets] swap provenance not recorded:', String(e)) }
-  return { pkg, generated: true, grounded, warnings: built.warnings, qcApplied: built.qcApplied }
+  return {
+    pkg, generated: true, grounded, warnings: built.warnings, qcApplied: built.qcApplied,
+    // The three calls are discarded when this scope ends, and the merged package alone cannot say
+    // which pass wrote a given skill. Captured HERE, where all three are still in hand.
+    lineage: skillLineage(built.calls.c1, built.calls.c2, built.calls.c3, pkg),
+    analysis: collectAnalysis(built.calls.c1, built.calls.c2),
+  }
 }
 
 /**
@@ -491,10 +500,12 @@ export async function renderArtifact(client: any, art: any, opp: any, pkg: Recor
 // while the loop can take the two halves separately.
 async function buildTemplatedArtifact(client: any, art: any, opp: any, regen: boolean) {
   if (!metaFor(art.type)) return null
-  const { pkg, warnings, qcApplied } = await ensurePackage(client, art, opp, regen)
+  const { pkg, warnings, qcApplied, lineage, analysis } = await ensurePackage(client, art, opp, regen)
   const rendered = await renderArtifact(client, art, opp, pkg)
   // P7 item 6 - carried to the caller so a partial build cannot report clean success.
-  return rendered && { ...rendered, warnings, qcApplied }
+  // `lineage`/`analysis` ride along for the same reason and no further: the build persists them,
+  // nothing scores off them.
+  return rendered && { ...rendered, warnings, qcApplied, lineage, analysis }
 }
 
 // POST /api/app/artifact/{artifactId}/document — turn the generated text into a
@@ -766,7 +777,8 @@ export async function runPacketBuild(
         // remediation loop (P3.1) would have reported looping while changing nothing.
         const built = await buildTemplatedArtifact(client, { ...a, packet_id: pkt.id, opp_id: oppId }, opp, body?.regen === true)
         results.push({ type: a.type, url: built!.url, cleanedTokens: built!.cleaned,
-                       warnings: built!.warnings || [], qcApplied: built!.qcApplied })
+                       warnings: built!.warnings || [], qcApplied: built!.qcApplied,
+                       lineage: (built as any).lineage, analysis: (built as any).analysis })
       } catch (e) { results.push({ type: a.type, error: String(e) }) }
     }
     // D:build-runs-no-qc — THE EVIDENCE RESOLVER NOW HAS A CALLER IN THE PRODUCT.
@@ -813,6 +825,12 @@ export async function runPacketBuild(
             type: r.type, error: r.error || null,
             warnings: r.warnings || [], qcApplied: r.qcApplied ?? null,
           })),
+          // WHICH PASS WROTE WHICH SKILL, and the analysis sections none of them could place.
+          // Taken from the first artifact that actually generated — all four share one generation,
+          // so the lineage is a property of the BUILD, not of a document. A cached artifact carries
+          // none, which is why this looks for the first that has it rather than reading results[0].
+          lineage: (results.find((r: any) => r.lineage?.length) || {}).lineage || null,
+          analysis: (results.find((r: any) => r.analysis?.length) || {}).analysis || null,
         })])
     } catch (e) { log(`last_build persist failed ${String(e)}`) }
     const packetStatus = await recomputePacket(client, pkt.id)

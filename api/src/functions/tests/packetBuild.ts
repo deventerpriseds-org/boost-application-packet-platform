@@ -71,3 +71,83 @@ export function summariseBuild(results: BuiltArtifact[]): BuildSummary {
       : 'Packet built. Nothing was sent.'
   return { ok: !failed.length && !warned.length, built: rows.length - failed.length, failed: failed.length, warnings, note }
 }
+
+
+/**
+ * What each generation pass produced for the five skill slots, and which one the document kept.
+ *
+ * WHY THIS EXISTS AT ALL. The three calls are held in one function's local scope and then discarded,
+ * so the only thing that survived a build was the MERGED result. That makes the single most
+ * consequential question about the pipeline unanswerable after the fact: when the resume says a
+ * skill, which pass wrote it? It was asked directly — "is the refinement actually reaching the
+ * document, or is the QC pass overwriting it?" — and could not be answered from any stored row.
+ *
+ * WHERE IT IS STORED, AND WHERE IT MUST NOT BE. This goes into `packet.last_build`, which is
+ * diagnostic only: nothing scores off it, no gate reads it, and no coverage count derives from it.
+ * It must never be written into `requirement_evidence`, `check_result`, `artifact_score` or
+ * `swap_decision` — those are accusation-grade, and model prose reaching them turns a diagnosis into
+ * a claim about the candidate. Attributing skills inside the swap system would be a genuine
+ * improvement to `skill_candidate.origin`, and it is deliberately NOT done here: that path decides
+ * things, this one only records them.
+ *
+ * `winner` is derived from the values, never asserted alongside them, so it cannot disagree with the
+ * lists it describes.
+ */
+export interface SlotLineage {
+  slot: string
+  call1: string
+  call2: string
+  call3: string
+  final: string
+  winner: 'call1' | 'call2' | 'call3' | 'none'
+}
+
+const LINEAGE_SLOTS: Array<[string, string, string, string]> = [
+  // [slot, call1 key, call2 key, call3 key] — the pkg key is the slot name.
+  ['SkillsBullets1', 'skills1', 'skills1', 'finalSkills1'],
+  ['SkillsBullets2', 'skills2', 'skills2', 'finalSkills2'],
+  ['RelevantBullets1', 'relevant1', 'relevant1', 'finalRelevant1'],
+  ['RelevantBullets2', 'relevant2', 'relevant2', 'finalRelevant2'],
+  ['RelevantBullets3', 'relevant3', 'relevant3', 'finalRelevant3'],
+]
+
+export function skillLineage(c1: any, c2: any, c3: any, pkg: Record<string, any>): SlotLineage[] {
+  const txt = (v: any) => (typeof v === 'string' ? v.trim() : '')
+  return LINEAGE_SLOTS.map(([slot, k1, k2, k3]) => {
+    const call1 = txt(c1?.[k1]), call2 = txt(c2?.[k2]), call3 = txt(c3?.[k3])
+    const final = txt(pkg?.[slot])
+    // Compared against the value that SHIPPED, in the precedence order the assembler applies, so the
+    // answer is what actually happened rather than what the ranking says should have happened.
+    const winner: SlotLineage['winner'] =
+      !final ? 'none' : final === call3 ? 'call3' : final === call2 ? 'call2' : final === call1 ? 'call1' : 'none'
+    return { slot, call1, call2, call3, final, winner }
+  })
+}
+
+/** One section a call produced that maps to no merge field — the analysis half of the owner's prompts. */
+export interface AnalysisSection { call: number; title: string; body: string; chars: number; truncated?: boolean }
+
+/** Per-section and total caps. One section measured 2,694 characters and builds are frequent; an
+ *  uncapped diagnostic column is a table that grows without anyone deciding it should. */
+export const ANALYSIS_SECTION_MAX = 4000
+export const ANALYSIS_TOTAL_MAX = 24000
+
+export function collectAnalysis(c1: any, c2: any): AnalysisSection[] {
+  const out: AnalysisSection[] = []
+  let total = 0
+  for (const [call, c] of [[1, c1], [2, c2]] as Array<[number, any]>) {
+    for (const u of (c?._unmapped || [])) {
+      const body = String(u?.body ?? '')
+      const title = String(u?.title ?? '').slice(0, 200)
+      if (!body.trim()) continue
+      if (total >= ANALYSIS_TOTAL_MAX) return out
+      const room = Math.min(ANALYSIS_SECTION_MAX, ANALYSIS_TOTAL_MAX - total)
+      const kept = body.length > room ? body.slice(0, room) : body
+      total += kept.length
+      // `chars` is the FULL length, never the kept length. A record that shrinks the number along
+      // with the text is how "7,446 characters discarded" becomes un-measurable a week later.
+      out.push({ call, title, body: kept, chars: body.length, ...(kept.length < body.length ? { truncated: true } : {}) })
+    }
+  }
+  return out
+}
