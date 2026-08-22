@@ -2609,3 +2609,32 @@ output is not proof a mutation persisted — re-read state in a separate invocat
 attempt silently left production `applied | sent` while the log read as success.
 
 **Deploys:** api **32601204463**, frontend **32601204611**, both success on `b772361`.
+
+## The two-day blocker: `ready` was unreachable, and the lesson is now a test (2026-08-22)
+
+**Owner:** *"this things still isn't usable after two days"* → *"Mark to prevent causing me 2 days
+again. there must be something learned."*
+
+**Blocker 1 — video held every packet out of `ready`** (`cf2bbad`). Build loop skips video
+(`!metaFor`), `recomputePacket` required ALL artifacts approved. Fixed by filtering on the same
+`metaFor` predicate the builder uses.
+
+**Blocker 2 — the build never ran checks, so approval was deadlocked.** `approvalBlock` refuses
+without an `artifact_gate` row; `evaluateArtifact`'s only callers were a manual route and the
+remediation loop. Live: cover 0 check rows, portfolio 0, compact_resume 0 of 39 each; approving the
+Trinnex cover returned HTTP 409. **Fixed by RUNNING the checks, not weakening the gate** — the
+engine is type-agnostic and was designed for all four artifacts.
+
+**THE MARKER (what the owner asked for):** `api/test/shipPathDb.test.mjs` — the ship path executed
+against a real PostgreSQL. Seeds the real five artifacts, approves what a build produces, calls the
+real `recomputePacket`, asserts `ready`. Mutation-proven. Plus
+`H:build-runs-checks-so-approval-is-possible`, which FAILED on shipped code — that is how blocker 2
+was proven rather than argued.
+
+**The rule:** *a funnel stage reading exactly zero across its whole history is a structural claim,
+not a usage signal — prove the transition into it can happen before building anything downstream.*
+I read `0 approved / 0 sent` as unused three times while building on top of a gate nothing could pass.
+
+**Correction on the record:** I recommended weakening the approval gate, on the unverified premise
+that no check suite existed for cover/portfolio. Reading `evaluateArtifact` showed it type-agnostic.
+The premise was inferred, not checked — the same failure mode as the two-day miss itself.

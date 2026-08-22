@@ -3659,3 +3659,39 @@ test('H:readiness-ignores-unbuildable: only buildable artifacts can hold a packe
     'allApproved is computed over the UNFILTERED artifact list, so the unbuildable video artifact ' +
     'still blocks `ready` — the defect is back exactly as it shipped')
 })
+
+// H:build-runs-checks-so-approval-is-possible — THE SECOND HALF OF THE UNSHIPPABLE BUG.
+//
+// `approvalBlock` refuses approval when an artifact has no `artifact_gate` row: *"no checks have
+// been run for this artifact"*. That is correct and deliberate — this repo's own rule is that
+// absent evidence is `not_applicable`, never `pass`. It becomes a DEADLOCK the moment nothing
+// writes the row, and nothing did: `evaluateArtifact`'s only callers were the manual per-artifact
+// route `POST /api/app/artifact/{id}/checks` and the remediation loop. A BUILD never ran checks.
+//
+// MEASURED LIVE 2026-08-22, `check_result` joined to `artifact`: `resume` 60 rows over 1 of 39
+// artifacts; `compact_resume` 0; `cover` 0; `portfolio` 0. Reproduced end to end — approving the
+// Trinnex cover with the other three already approved returned HTTP 409 (api-test 32601711488). So
+// `allApproved` could never be true and `ready` was unreachable even after the video fix.
+//
+// The engine was never the problem: `evaluateArtifact` selects `a.type` and works from `pkg_json`,
+// the posting and the profile, and appChecks' own concurrency comments describe "four artifacts of
+// one packet" entering it at once. It is type-agnostic and was designed for all four. Nothing
+// called it.
+//
+// The invariant: a build must leave every artifact it produced in a state where the owner CAN
+// approve it. Anything less ships a product whose gate cannot be passed.
+test('H:build-runs-checks-so-approval-is-possible: the build path runs checks on what it builds', () => {
+  const PK = stripComments(readFileSync(new URL('../src/functions/tests/appPackets.ts', import.meta.url), 'utf8'))
+  const start = PK.indexOf('export async function runPacketBuild')
+  assert.notEqual(start, -1, 'runPacketBuild is gone or renamed; retarget this guard')
+  const body = PK.slice(start)
+
+  assert.ok(/evaluateArtifact\s*\(/.test(body),
+    'runPacketBuild never runs checks, so no artifact it builds gets an `artifact_gate` row, so ' +
+    '`approvalBlock` refuses every approval with "no checks have been run for this artifact". ' +
+    'allApproved can never be true, `ready` is unreachable, and NOTHING CAN EVER SHIP.')
+
+  assert.ok(/import\s*{[^}]*evaluateArtifact[^}]*}\s*from\s*'\.\/appChecks'/.test(PK),
+    'evaluateArtifact must be imported from appChecks — the engine that already owns the gate, not ' +
+    'a second checking path')
+})

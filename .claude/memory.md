@@ -2076,3 +2076,45 @@ artifacts can never be approved, and `ready` remains unreachable. Recorded as
 have been wrong, and I nearly did. What caught it was trying to EXECUTE the path end to end rather
 than reasoning that the fix was sufficient. A structural fix is not confirmed by the code change; it
 is confirmed by the state transition actually happening.
+
+## THE MARKER: a funnel stage reading zero is a STRUCTURAL claim, and it is now a TEST (2026-08-22)
+
+Owner: *"Mark to prevent causing me 2 days again. there must be something learned."*
+
+Prose would not have prevented this — the ledger already RECORDED `0 sent / 0 approved` and drew the
+wrong conclusion from it. So the lesson is a file that runs:
+**`api/test/shipPathDb.test.mjs`** — the ship path executed against a real PostgreSQL.
+
+It seeds the real five artifacts (video included — a fixture that omitted it could not reproduce the
+bug), approves what a build produces, calls the REAL `recomputePacket`, and asserts the packet
+reaches `ready`. Mutation-proven: restoring `arts = all` makes it fail. Paired with
+`H:build-runs-checks-so-approval-is-possible`, which asserts the build actually runs the checks that
+`approvalBlock` demands — it FAILED on shipped code before the fix, which is how the second blocker
+was proven rather than argued.
+
+**Why a source-grep guard was not enough for the first one:** the defect was a `.every()` over the
+wrong list. Reading the function does not reveal that `ready` is unreachable; only running the
+transition does. Where a runtime test could not reach (the build calls checks at all), a static
+guard covers it. Both, not either.
+
+### THE RULE
+
+**A funnel stage that reads exactly zero across its entire history is a structural claim, not a
+usage signal. Prove the transition into it can happen before doing any work downstream of it.**
+
+I measured `0 approved / 0 sent` three times this session and read it as "the owner hasn't used the
+review flow yet." `D:packet-cannot-be-sent` even recorded the zeroes and still concluded a FEATURE
+was missing (rounds, send) rather than asking whether the existing path could execute. Meanwhile I
+built lineage, swaps, evidence and guards — all real, all downstream of a gate nothing could pass.
+The cheap test — *can this predicate ever be true?* — takes one minute and would have found both on
+day one.
+
+### The correction inside the correction
+
+I recommended weakening the approval gate ("treat a type with no check suite as not_applicable") on
+the premise that no suite existed for cover/portfolio. **That premise was wrong.** `evaluateArtifact`
+selects `a.type` and works from `pkg_json` + posting + profile — it is type-agnostic, and appChecks'
+own concurrency comments describe "four artifacts of one packet" entering it at once. The engine was
+built for all four; nothing called it. So the fix RUNS the checks the design intended instead of
+weakening the gate — strictly better, and I nearly shipped the weaker one because I inferred the
+premise instead of reading the function.

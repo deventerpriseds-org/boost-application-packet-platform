@@ -12,7 +12,7 @@ import { writeInsertions } from './appInsertions'
 import { applyCorrectionPass } from './appCorrections'
 import { sourceText } from './appFacts'
 import { summariseBuild, skillLineage, collectAnalysis } from './packetBuild'
-import { approvalBlock } from './appChecks'
+import { approvalBlock, evaluateArtifact } from './appChecks'
 // The evidence pass, called in-process rather than over HTTP — see resolveEvidenceForOpp. No cycle:
 // appPackets is not reachable from appRequirements (checked across all 24 modules it can reach).
 import { writeEvidence, rebuildComparison, ensureRequirementCols, ensureEvidenceTable } from './appRequirements'
@@ -105,7 +105,7 @@ export async function markPacketSent(client: any, oppId: string): Promise<boolea
   } catch { return false }
 }
 
-async function recomputePacket(client: any, packetId: string) {
+export async function recomputePacket(client: any, packetId: string) {
   // `sent` is TERMINAL and must survive this function. Everything below derives status from artifact
   // rows, and the derivation can only ever produce ready/review/building — so a packet marked sent
   // would be silently reset to `ready` by the next status change, regenerate or rebuild, and the
@@ -922,6 +922,39 @@ export async function runPacketBuild(
     // budget that D35 is already losing. `requireWrite` guards the ROUTE because a route is
     // reachable by anyone; this caller is already past that gate.
     const evidence = await resolveEvidenceForOpp(client, oppId, owner)
+
+    // RUN THE CHECKS ON WHAT WE JUST BUILT — without this, nothing the build produces can ever be
+    // approved, and the product cannot ship.
+    //
+    // `approvalBlock` refuses approval when an artifact has no `artifact_gate` row ("no checks have
+    // been run for this artifact"), which is right: absent evidence is never a pass. But the ONLY
+    // callers of `evaluateArtifact` were the manual per-artifact route and the remediation loop, so
+    // a built artifact never got a row. Measured live 2026-08-22: `cover` 0 check rows, `portfolio`
+    // 0, `compact_resume` 0, of 39 artifacts each — and approving a cover with the other three
+    // approved returned HTTP 409. `allApproved` could not become true, `ready` was unreachable, and
+    // `Send packet →` renders only when ready. 39 packets, 0 ever sent.
+    //
+    // AFTER the evidence pass, because coverage is decided by the evidence rows it persists and the
+    // gate must read the same rows rather than a second resolution of the same question.
+    //
+    // Per artifact and NON-FATAL, each in its own try: a build that produced four documents must not
+    // be reported as failed because one gate could not be computed. A missing gate row is the
+    // already-handled "not checked yet" state, not a corrupt one — the owner sees the artifact and
+    // can run checks from the artifact's own control.
+    //
+    // Sequential, not `Promise.all`: `evaluateArtifact` runs its own begin/commit on this same
+    // client (see appRemediation's note), so overlapping calls would nest transactions on one
+    // connection. appChecks' own comments anticipate four artifacts entering concurrently on
+    // SEPARATE connections; this caller has one.
+    const checked: string[] = []
+    const checkWarnings: string[] = []
+    for (const r of results) {
+      if (r.error) continue
+      const art = artifacts.find((a: any) => a.type === r.type)
+      if (!art) continue
+      try { await evaluateArtifact(client, art.id, owner); checked.push(r.type) }
+      catch (e) { checkWarnings.push(`${r.type}: checks did not run, so this artifact cannot be approved yet (${String(e).slice(0, 200)})`) }
+    }
     // PERSIST THE OUTCOME BEFORE RETURNING IT. The response below is routinely lost — `build-all`
     // runs ~3 minutes and the gateway cuts at 4 (D35, measured twice) — and `warnings` is the only
     // place the discarded-section list and the Call-2 parse failures have ever existed. Two open
@@ -956,8 +989,8 @@ export async function runPacketBuild(
       ok: summary.ok, oppId, company: opp.company, artifacts: results,
       built: summary.built, failed: summary.failed,
       warnings: evidence?.error
-        ? [...summary.warnings, `evidence resolve did not run: ${String(evidence.error).slice(0, 200)}`]
-        : summary.warnings,
+        ? [...summary.warnings, ...checkWarnings, `evidence resolve did not run: ${String(evidence.error).slice(0, 200)}`]
+        : [...summary.warnings, ...checkWarnings],
       // The measured result, not a boolean. `evidenced`/`proposed`/`escalated` are what make a
       // coverage change attributable later — a reviewer can tell a better profile from a chattier
       // model only if the run recorded which one moved.
