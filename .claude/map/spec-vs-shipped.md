@@ -208,6 +208,276 @@ another place where the source of truth demonstrates the UI but not the persiste
 
 ---
 
+### 1.11 Corroboration from `Executive Engine Spec.html` (§5, §7.5, §8)
+
+The prose spec agrees with the prototype and adds two things the `.jsx` does not state:
+
+- **§5 "The application packet"** — "Each artifact has its own status (todo → drafting →
+  review → changes → approved) **and a selected template**. The packet has a round
+  counter, a JD-analyzed flag, a covered-keyword set, and a feedback thread. **It cannot
+  ship until all four artifacts are approved.**"
+- **§5 "Master profiles & templates"** — "Every asset type (resume, cover, portfolio,
+  video, and each outreach channel, and application answers) has a **set of templates with
+  an explicit default pre-selected for speed**." So the picker is a product-wide pattern,
+  not a packet quirk.
+- **§8 data model**, two rows:
+  - `packet` → `oppId, status, round, jdAnalyzed, coveredKw[], templates{resume,cover,portfolio,video}, artifacts{…status}, feedback[]`
+  - `artifact` → `type, status (todo→drafting→review→changes→approved), **template**, **version history**`
+  So *version history is a first-class field of the artifact entity in the spec's own data
+  model* — not merely a UI panel.
+- **§4 (users)** — "A secondary user is a **partner/reviewer** (the plan includes one
+  partner seat) who can review packets and leave feedback during approval rounds." The
+  feedback thread is therefore multi-actor by design; `FeedbackThread`'s "AI reviewer"
+  seed entries (`packet.jsx:502-505`) are the third actor.
+- **§7.5** — restates the builder, ending "Review step gates sending on all-approved;
+  'Request changes' spins a new round; **sending moves the opportunity to `applied`**."
+
+---
+
 ## 2. What is SHIPPED
 
-(pending — next section)
+Primary files: `app/src/screens/PacketBuilder.jsx` (826 lines),
+`app/src/screens/Packets.jsx`, `api/src/functions/tests/appPackets.ts` (1149 lines),
+`api/src/functions/tests/schema.ts`, `api/src/functions/tests/packetTemplates.ts`.
+
+### 2.1 The shipped data model (`schema.ts:82-110`)
+
+```sql
+create table if not exists packet (
+  status   text not null default 'building' check (status in ('building','review','ready','sent')),  -- :85
+  round    int not null default 1,                                                                   -- :86
+  jd_analyzed boolean, covered_kw text[], ats_score int,
+  feedback jsonb default '[]',                                                                       -- :90
+  ...);
+create table if not exists artifact (
+  type   text check (type in ('resume','compact_resume','cover','portfolio','video')),               -- :101
+  status text default 'todo' check (status in ('todo','drafting','review','changes','approved')),    -- :102-ish
+  template_id text,                                                                                  -- :102
+  doc_url text,
+  version_history jsonb default '[]',                                                                -- :104
+  ...);
+```
+Plus columns added by idempotent ALTERs at runtime: `artifact.content`, `artifact.drive_url`
+(`appPackets.ts:55-56`), `packet.pkg_json` (`appPackets.ts:289`).
+
+Note the packet status enum SHIPPED is `building | review | ready | sent` — the spec's
+`approved` is renamed `ready`, and `none`/`changes` do not exist as packet statuses.
+`recomputePacket` (`appPackets.ts:84-97`) derives it: `ready` iff every artifact is
+`approved` AND no `artifact_gate.gate='fail'`; else `review` if any artifact left `todo`;
+else `building`. **`sent` is in the CHECK constraint and is written by nothing** (grep for
+`'sent'` across `api/src` returns only `outreach_message.state`, `schema.ts:85`, and
+`schema.ts:119`).
+
+### 2.2 Step rail — 7 steps, not 6
+
+`PacketBuilder.jsx:31-44` (`STEPS`):
+
+| # | key | label | vs spec |
+|---|---|---|---|
+| 1 | `jd` | **Posting analysis** | spec's "JD analysis", deliberately renamed (`:32-33` comment) |
+| 2 | `resume` | Resume | + also renders `compact_resume` (`:504`) — a 5th artifact the spec has no step for |
+| 3 | `cover` | Cover letter | matches |
+| 4 | `portfolio` | Portfolio | matches |
+| 5 | `video` | Intro video | matches |
+| 6 | `qc` | **QC & evidence** | **NEW — not in the spec at all** |
+| 7 | `send` | Review & send | spec's "review" |
+
+Step 6 (QC) is the largest thing this product has built beyond the spec: `QcRail.jsx`,
+`qcRail.js`, `checks.ts`, `evidence.ts`, `dimensions.ts`, `remediation.ts`,
+`appChecks.ts` — the whole gate/evidence subsystem. It is an EXTENSION, correctly so; the
+divergence table below treats it as such and does not score it as a gap.
+
+Step completion (`PacketBuilder.jsx:68-77`): `jd` = `p.jdAnalyzed`; `qc` = `qc.done`;
+`send` = `p.status === 'ready'`; artifact steps = all their types `approved`.
+
+### 2.3 The bucket verdict per spec element
+
+**BUILT**
+
+| Spec element | Shipped at |
+|---|---|
+| Step rail, deep-linked | `PacketBuilder.jsx:31-44`, `:228-233` (step lives in the route `#/packet/:id/:step`), desktop rail `:792-814`, mobile scroller `:720-738` |
+| Packet auto-created on first open | `appPackets.ts:67-76` — `loadPacket` inserts the packet then one `artifact` row per missing type |
+| JD step pre-populated from the triggering email | `PacketBuilder.jsx:511-532` (Source/Role/Comp/Location/HM), fed by `api.getOpportunity` |
+| Live "ATS %" in the header | `PacketBuilder.jsx:501` (`p.atsScore`), rendered by `MatchEstimateButton` `:782` / `:716`. **Renamed** "Match estimate" on purpose (`:780-781`: "nothing here came from an applicant tracking system, and the number is a model estimate, not keyword coverage") |
+| Keyword-coverage surface | moved out of the resume step into `KeywordTallyOverlay` (`:693-700`), opened from the header; `PostingAnalysisCard` on the JD step `:578-582` |
+| Artifact editable draft | `AssetBlocks` per merge field, `PacketBuilder.jsx:121-124` |
+| Artifact status machine (all 5 states) | enum `appPackets.ts:51`; UI writes `approved`/`changes`/`review` at `:189`, `:194`, `:199`; server writes `review` on generate (`appPackets.ts:217`); `drafting` is the only unwritten state |
+| Approve-all gates readiness | `appPackets.ts:86-94` — server-side, **stronger than spec** (also requires no failing gate) |
+| Server-side approval gate | `appPackets.ts:240-244` — a direct API call cannot approve a blocked artifact |
+| Packet list screen | `app/src/screens/Packets.jsx`, `api` `packetsList` `appPackets.ts:151-176` |
+| Real document generation (spec §9) | `packetTemplates.ts` copy→`replaceAllText`→export; `appPackets.ts` `renderArtifact`; queued build `buildQueue.ts` |
+
+**SCAFFOLDED** (column/prop/route exists; nothing writes it, or nothing reads it)
+
+| Thing | Evidence |
+|---|---|
+| `packet.feedback jsonb` | declared `schema.ts:90`. **Zero writes and zero reads.** `grep -n feedback api/src/functions/tests/appPackets.ts` → no hits at all: it is not in `packetShape` (`:99-127`) and not in any `update packet` statement anywhere in `api/src`. |
+| `artifact.template_id` | declared `schema.ts:102`; SELECTed `appPackets.ts:77`; projected to the client as `templateId` `appPackets.ts:125`. **Never written** — the only `insert into artifact` is `appPackets.ts:75`, `(packet_id, type)`, and no `update artifact set template_id` exists. **Never read by the client** — `grep -rni "templateid" app/src` matches only `api.js:290-291` (`templateFocusGet/Set`, a *pipeline-config* Drive-id, unrelated to `artifact.template_id`). So the column is NULL for every row in production and the API field it feeds is consumed by nothing. |
+| `artifact.version_history jsonb` | declared `schema.ts:104`. Written **once**, `appPackets.ts:216-221`: `version_history = coalesce(version_history,'[]') \|\| jsonb_build_object('len', $2::int)` — it appends **only the character count** of each draft. **Never read** by anything (`grep -rn version_history` → schema + that one write). It cannot restore anything: prior `content` is destroyed by the same statement (`set content = $1`). |
+| `packet.status = 'sent'` | in the CHECK (`schema.ts:85`) and given its own group with a green pill in the packet list (`Packets.jsx:13`). Nothing writes it, so that group is permanently empty. |
+| `packet.round` **repurposed, not dead** | `schema.ts:86`; read `appPackets.ts:68` (ORDER BY) and `:101` (`round:` in `packetShape`). **[memory correction]** memory says nothing writes it — that was true and is not any more: `appRemediation.ts:488` runs `update packet set round = round + 1`. But `appRemediation.ts:484-488` says explicitly it "counts REMEDIATION RUNS - one per run", i.e. **it no longer means "review round"**. And no `app/src` file renders `p.round` (grep: zero hits). |
+
+**ABSENT**
+
+| Spec element | Confirmation |
+|---|---|
+| **Per-artifact template picker** | No `TemplateBar`, no `TEMPLATE_SETS`, no template control anywhere in `app/src/screens/PacketBuilder.jsx` (826 lines, zero occurrences of a template selector) or any other packet screen. |
+| **Template choice changing generated content** | `ARTIFACT_BRIEF` (`appPackets.ts:178-184`) is a fixed per-TYPE brief; `artifactGenerate` (`:187-227`) builds one system+user prompt with no template parameter. |
+| **Version history UI / restore** | No panel, no restore control, nothing renders `version_history`. |
+| **Reviewer feedback thread** | No thread UI, no note field, no `from`/`kind`. The only "Request changes" (`PacketBuilder.jsx:194`, `OppDetail.jsx:608`) flips one artifact's status and captures **no note**. |
+| **Review ROUNDS as a concept** | Nothing increments a review round; `requestChanges`-equivalent does not touch `packet.round`; no round is displayed anywhere in the app. |
+| **The partner/reviewer seat** (spec §4) | No second-actor identity on any packet write; `requireWrite` resolves one owner. |
+| **Send → `packet.status='sent'`** | Nothing writes it (§2.1). |
+| **Send → opportunity stage `applied`** | The only `update opportunity set stage` in `api/src` is `appOpportunities.ts:160` (the generic PATCH). The send button — `PacketBuilder.jsx:784`, `:679` — is `onClick={() => go('/compose/'+id)}`: it **navigates to the outreach composer** and writes nothing. |
+| **Packet-level `changes` status** | Not in the shipped enum (`schema.ts:85`). |
+| **Portfolio "assemble from a sample library"** | The spec's checkbox grid of work samples (`packet.jsx:362-394`) has no shipped equivalent; portfolio is a generated Slides deck. |
+
+---
+
+## 3. Divergence table
+
+`DEFERRED` column names the open ledger row that covers the gap, or **UNRECORDED**.
+
+| # | Spec element | Shipped state | Evidence (file:line) | Covered by a `.claude/DEFERRED.md` row? |
+|---|---|---|---|---|
+| 1 | Per-artifact template picker with an explicit default | **ABSENT** — one hardcoded template id per artifact TYPE | `packetTemplates.ts:22-39` `TEMPLATE_META`; owner override only at the pipeline level, `packetTemplates.ts:46-72` `metaFor`/`OVERRIDE_KEY`; no UI in `PacketBuilder.jsx` | **UNRECORDED** |
+| 2 | `artifact.template_id` carries the per-artifact choice | **SCAFFOLDED** — column + API projection, never written, never read | `schema.ts:102`; read `appPackets.ts:77`; projected `appPackets.ts:125`; only insert `appPackets.ts:75` sets `(packet_id, type)` | **UNRECORDED** |
+| 3 | Version history per artifact, with restore | **SCAFFOLDED to the point of being misleading** — stores only draft LENGTH; every build overwrites `content` | write `appPackets.ts:216-221`; column `schema.ts:104`; no reader | **UNRECORDED** |
+| 4 | Reviewer feedback thread (`packet.feedback[]`) | **SCAFFOLDED** — column exists, zero writes, zero reads | `schema.ts:90`; absent from `packetShape` `appPackets.ts:99-127` | **UNRECORDED** |
+| 5 | Review ROUNDS — "request changes" bumps the round | **REPURPOSED** — `round` now counts remediation runs, and no UI shows it | `appRemediation.ts:484-488`; `appPackets.ts:61-66`; `PacketBuilder.jsx:194` captures no note | **PARTIAL — `D:remediation-never-ran`** covers whether remediation ever RUNS (`remediation_loop` = 0 rows in prod), which is what now increments `round`. It does **not** cover the loss of the review-round concept. |
+| 6 | Send moves the opportunity to `applied` | **ABSENT** — the button navigates to the composer | `PacketBuilder.jsx:784` and `:679` (`go('/compose/'+id)`); only stage writer is `appOpportunities.ts:160` | **UNRECORDED** |
+| 7 | Packet reaches `sent` | **ABSENT** — enum value + a list group with no writer | `schema.ts:85`; `Packets.jsx:13` | **UNRECORDED** |
+| 8 | Packet status `approved` | **RENAMED** to `ready` (defensible; also strengthened by the gate) | `schema.ts:85`; `appPackets.ts:94` | n/a — deliberate |
+| 9 | ATS % is keyword coverage (`30 + 65·covered/total`) | **CHANGED** — a model-produced estimate, relabelled "Match estimate" | spec `packet.jsx:113`; shipped `PacketBuilder.jsx:501`, `:780-782`; `covered_kw` meaning documented `appPackets.ts:103-115` | **`D14`** (open) — "covered_kw does not mean covered" |
+| 10 | Keyword-coverage meter inside the resume step | **MOVED** to a header-opened overlay | `PacketBuilder.jsx:693-700`; comment `:234-235`, `:688-692` | n/a — deliberate (D4) |
+| 11 | 4 gated artifacts | **5** (`compact_resume` added) | `schema.ts:101`; `PacketBuilder.jsx:47`, `:504` | n/a — deliberate extension |
+| 12 | 6-step rail | **7** (`qc` inserted before send) | `PacketBuilder.jsx:39-43` | n/a — deliberate extension |
+| 13 | Artifact `drafting` state | in the enum, never written | `appPackets.ts:51`; generate writes `'review'` `appPackets.ts:217` | **UNRECORDED** (cosmetic) |
+| 14 | Partner/reviewer seat leaves feedback during rounds | **ABSENT** — single-owner writes only | spec §4; `requireWrite`/`resolveOwner` in `appSession.ts` | **UNRECORDED** |
+| 15 | Portfolio assembled from a selectable work-sample library | **ABSENT** — generated deck instead | spec `packet.jsx:355-401`; shipped `packetTemplates.ts:31-34` | **UNRECORDED** |
+
+---
+
+## 4. The UNRECORDED gaps, ranked by cost to the owner
+
+`.claude/DEFERRED.md` holds ~23 open rows and **every one of them is about the QC /
+evidence / checks / remediation / build-queue / contrast lanes** — `D3`, `D11`, `D13`,
+`D14`, `D20`, `D23b`, `D29`, `D31`, `D33`, `D34`, `D36`, `D:remediation-atomicity`,
+`D:escalation-term-target`, `D:pass-ceiling-contradiction`, `D:remediation-never-ran`,
+`D:facts-before-evidence-precedence`, `D:locate-truncates-requirements`,
+`D:compound-requirements-unevidenceable`, `D:api-duplicate-keys`, `D:hslug-scan-one-file`,
+`D:id-hygiene-duplicated`, `D:openai-transport-duplicated`, `D:swap-screen-reads-a-dead-pass`,
+`D:reasoning-semantic-judge`.
+
+**Not one row concerns the review loop, the template picker, versioning, feedback, or
+sending.** That is exactly the predicted shape: the ledger grew by tripping over defects
+inside the subsystem the last several phases were building, so the parts of the spec
+nobody has walked into are invisible to it.
+
+Ranked by what the absence costs the owner:
+
+**1 — The review loop does not exist, and the packet cannot be SENT. (rows 4, 5, 6, 7, 14)**
+This is the top of the list because it breaks the product's end-to-end claim. The spec's
+loop is: request changes (with a note) → round++ → thread → approve all → send → opportunity
+becomes `applied`. Shipped: an artifact flips to `changes` with **no note**
+(`PacketBuilder.jsx:194`), so the reason for the rejection is not recorded anywhere; there
+is no round; the packet can reach `ready` and then the "Send packet →" button just navigates
+to the composer (`PacketBuilder.jsx:784`). Consequences the owner actually feels:
+- the opportunity **never advances to `applied` from the packet**, so pipeline counts,
+  funnel health and "days in stage" under-report every application actually sent;
+- `Packets.jsx`'s "Sent" group is permanently empty — a screen region that can never populate;
+- the partner/reviewer seat the plan sells (spec §4) has no mechanism at all;
+- re-work is unattributable: nothing records what a reviewer asked for or which pass answered it.
+
+**2 — Every build is DESTRUCTIVE; there is no way back to a previous draft. (row 3)**
+`appPackets.ts:216-221` overwrites `artifact.content` and appends only `{"len": N}`.
+`packet.pkg_json` is likewise overwritten in place (`appPackets.ts:419`, `:1071`;
+`appRemediation.ts:266`). The owner presses "Rebuild from current draft" or "Build entire
+packet" and the previous wording is gone — with a `version_history` column sitting there
+that looks like it protects them. The one genuine partial exception is `insertion`, which is
+keyed `unique (artifact_id, merge_field, loop)` (`schema.ts:506`) and retains `before_text` /
+`after_text` per remediation loop — so **merge-field-level history exists for remediation
+passes only**, and nothing for ordinary regenerates. This is the highest-risk *silent* gap:
+the scaffolding actively implies a safety net that is not there.
+
+**3 — The template picker is absent and `artifact.template_id` is inert. (rows 1, 2)**
+Directly contradicts this repo's own standing rule ("No hardcoded config — everything
+user-setting driven", `CLAUDE.md`). Today the resume, compact resume, cover and portfolio
+each get exactly one Drive template (`packetTemplates.ts:13-39`), overridable only globally
+per owner through pipeline config (`metaFor`, `:67-72`). The owner cannot say "use the
+turnaround resume for this opportunity and the growth resume for that one" — which is the
+single most load-bearing per-opportunity choice in the spec, because in the prototype the
+template *selects the narrative* (`packet.jsx:280-296`). `D32` records the owner's ruling
+that *"the resume chosen drives the persona"* — so the per-packet template choice also
+decides the role focus of the generated text, which makes this a content-correctness gap,
+not just a convenience one. And `artifact.template_id` already exists as the right place
+to put it, so the fix is a wiring job, not a schema design.
+
+**4 — `drafting` and the packet-level `changes` state are dead enum values. (row 13)**
+Low cost on its own; listed because a status enum that contains states nothing can reach is
+how a future gate accidentally treats "not yet reached" as "passed".
+
+**5 — Portfolio work-sample selection. (row 15)**
+The spec's portfolio step is a curated checkbox grid over a real asset library; shipped is
+a generated one-pager. Genuinely a product decision, not obviously a defect — flagged so
+someone makes it deliberately rather than discovering it in a demo.
+
+---
+
+## 5. The two direct questions
+
+### Q1 — the template picker: built, scaffolded, or absent? Is `artifact.template_id` read?
+
+**ABSENT as a picker; the column is SCAFFOLDED and read by nothing that matters.**
+
+Observation:
+- `TEMPLATE_META` (`packetTemplates.ts:22-39`) maps artifact TYPE → one Drive file id.
+  `resume` and `compact_resume` deliberately share `RESUME_TEMPLATE_ID`.
+- Per-OWNER (not per-packet, not per-artifact) overrides exist:
+  `metaFor(type, ids)` at `packetTemplates.ts:67-72`, keyed by
+  `OVERRIDE_KEY` (`:53-58`) → `google.resumeTemplateId` / `portfolioTemplateId` /
+  `coverLetterTemplateId` in pipeline config.
+- There is no per-artifact choice, no set of alternatives to choose from, and no UI
+  control: `PacketBuilder.jsx` contains no template selector of any kind.
+- `artifact.template_id`: SELECTed at `appPackets.ts:77`, projected as `templateId` at
+  `appPackets.ts:125`, and that is the end of it. The only `insert into artifact`
+  (`appPackets.ts:75`) does not set it; there is no `update artifact set template_id`
+  anywhere in `api/src`; and no file under `app/src` reads `templateId` off an artifact.
+
+Interpretation: the column is NULL on every row in production and the API field is dead
+weight. Verdict — **absent (picker), scaffolded (column), unread (client)**.
+Confidence: high for the source facts (they are exhaustive greps over both trees); the
+"NULL in production" half is an inference from "no writer exists", not a DB observation —
+`db-query.yml` with `select count(*) from artifact where template_id is not null` would
+settle it in one dispatch.
+
+### Q2 — does anything version an artifact's content?
+
+**No. Every build is destructive.** Taking the three candidates named:
+
+| Candidate | Retains a prior version? | Evidence |
+|---|---|---|
+| `artifact.content` | **No.** Three separate statements replace it in place, none of them copying the old value anywhere | `appPackets.ts:217` (generate), `:1064` (edit save), `:1131` (revise) |
+| `artifact.version_history` | **No content** — appends `{"len": <int>}` only, and nothing ever reads it | `appPackets.ts:218`; `schema.ts:104` |
+| `packet.pkg_json` | **No.** Overwritten wholesale on every build and every remediation pass | `appPackets.ts:419`, `appPackets.ts:1069-1071`, `appRemediation.ts:266` |
+| `insertion` (the one partial exception) | **Yes, narrowly** — `unique (artifact_id, merge_field, loop)` keeps one row per merge field PER LOOP, each with `before_text` and `after_text` | `schema.ts:491-510` |
+
+So the only history the system keeps is a per-merge-field before/after trail across
+*remediation loops* — and `D:remediation-never-ran` records that `remediation_loop` has
+**0 rows in production**, so in practice today there is no retained history of any kind.
+An ordinary "Regenerate" or "Rebuild from current draft" is irreversible.
+
+---
+
+## 6. What I did NOT verify
+
+- Nothing here was checked against the live database or the deployed Function. Every claim
+  is from source on the local checkout. Two claims that a `db-query.yml` dispatch would
+  settle and I did not run: `artifact.template_id is not null` count (Q1), and
+  `packet.feedback <> '[]'` count.
+- I did not read the whole of `appPackets.ts` (1149 lines) or `QcRail.jsx`; the greps for
+  `template_id`, `feedback`, `version_history`, `'sent'` and `set stage` were repo-wide
+  over `api/src` and `app/src`, which is what the absence claims rest on.
+- Compass token / visual conformance was out of scope for this question.
+
