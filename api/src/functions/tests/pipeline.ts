@@ -3,7 +3,7 @@ import { TableClient } from '@azure/data-tables'
 import { getGoogleToken, getGoogleOAuthToken, HAS_GOOGLE_OAUTH, IMPERSONATE_SUBJECT, getMicrosoftToken } from './googleAuth'
 import { resolveZapVars } from './zapVars'
 import { resolveRoleFocus, roleDirective } from './roleFocus'
-import { assemblePackage } from './mt17'
+import { assemblePackage, mergeCallTwo, call2Draft } from './mt17'
 import { parseResumePackage } from './resumeParser'
 import { parseAgentJson, isEmptyResult } from './agentJson'
 import { loadPipelineSettings, requireDriveId, isDriveId, isEmailish, CONFIG_KEYS, PipelineSettings } from './pipelineConfig'
@@ -395,7 +395,15 @@ export async function buildPackageForJD(opts: { key: string; jd: string; roleTyp
     '289877662__output__Item 5': jobTitle || '',
   }
   const base3 = resolveZapVars(prompts['ats_user'] || 'ATS QC.', mc, jd, undefined, atsExtra)
-  const r3 = await openai(prompts['ats_system'] || 'You are a helpful assistant.', `${base3}\n\nINPUTS:\n${JSON.stringify({ ...c1, ...c2 })}`, 15500, tQc) as any
+  // ALLOWLIST MERGE, NOT A SPREAD — see `mergeCallTwo`. `{...c1, ...c2}` was safe only while the
+  // Call-2 parse always failed and `c2` was `{}`; with a real parse it blanks six of Call 1's fields
+  // with the `|| ''` defaults `parseResumePackage` returns, and hands the emptied package to the QC
+  // pass whose verdict outranks Call 1 in the document.
+  const { merged: call3Input, improvised } = mergeCallTwo(c1, c2)
+  for (const k of improvised) {
+    warnings.push(`Call 2 returned a "${k}" its prompt never asked for — refused, so the draft keeps Call 1's`)
+  }
+  const r3 = await openai(prompts['ats_system'] || 'You are a helpful assistant.', `${base3}\n\nINPUTS:\n${JSON.stringify(call3Input)}`, 15500, tQc) as any
   const p3 = parseAgentJson(r3.choices?.[0]?.message?.content)
   const c3: any = p3.value || {}
   // An inert Call 3 is the difference between "QC ran and agreed" and "QC never landed". It used to
@@ -405,7 +413,7 @@ export async function buildPackageForJD(opts: { key: string; jd: string; roleTyp
   else if (!qcApplied) warnings.push('Call 3 (ATS QC) returned an empty object — no skill merge or summary update was applied')
   steps.push(`Agent Call 3 (ATS QC + skills merge) — JSON via ${p3.via}, applied: ${qcApplied}`)
 
-  const pkg = assemblePackage(c1, c2, c3) as Record<string, string | null>
+  const pkg = assemblePackage(c1, call2Draft(c2), c3) as Record<string, string | null>
   // The standing profile, so an item that predates this application can be marked profile_original
   // rather than credited to a pass that merely repeated it. `itemsToOmit` is EXCLUDED: it is the
   // owner's do-not-use list, injected into the resume prompt as {{289877659__Items to Omit}}.

@@ -71,6 +71,63 @@ function splitSkills(block: any): [string | null, string | null] {
   return [lines.slice(0, mid).join('\n'), lines.slice(mid).join('\n')]
 }
 
+/**
+ * The ONLY fields Call 2's prompt asks for.
+ *
+ * Zap node 299599701 emits `### Skills1 ###`, `### Skills2 ###`, `### Relevant Skills 1/2/3 ###`, a
+ * swap table and a word-count check. Nothing else. A cover letter, an About Me, an executive profile
+ * or a resume summary appearing in that reply is the model improvising — and the owner's standing
+ * constraint is that THEIR prompts drive the draft, so a field their prompt never requested is by
+ * definition not their prompt driving it. Improvised fields are reported and refused, not merged.
+ */
+export const CALL2_FIELDS = ['skills1', 'skills2', 'relevant1', 'relevant2', 'relevant3'] as const
+
+/**
+ * Merge Call 2 onto Call 1 for the ATS QC pass, losing nothing.
+ *
+ * THE DEFECT THIS EXISTS TO PREVENT, which shipped and was caught by an independent AC read before
+ * it could be measured: Call 3's input was assembled as `{...c1, ...c2}`. That was harmless only
+ * while `c2` was always `{}` — the JSON parse that never succeeded. The moment Call 2 was parsed
+ * properly, `c2` became a full `parseResumePackage` shape, and that shape returns EVERY key
+ * defaulted with `|| ''`. So the spread overwrote Call 1's real `resumeSummary`, `expertise`,
+ * `coverLetter`, `aboutMe1/2`, `executiveProfile` and `coreAccomplishments` with empty strings, and
+ * handed the blanked package to the QC pass.
+ *
+ * That is the silent-degradation path, and nothing downstream would have caught it: Call 3's
+ * `updatedResumeSummary` and `finalSkills*` OUTRANK Call 1 in `assemblePackage`, so a QC pass that
+ * graded a blanked package writes its verdict straight into the document — while the build still
+ * reports `built: 4, failed: 0`.
+ *
+ * So the merge is an allowlist of non-empty values, never a spread. `improvised` names any other
+ * non-empty field Call 2 returned that differs from Call 1's, so the caller can warn about it.
+ */
+export function mergeCallTwo(c1: any, c2: any): { merged: Record<string, any>; improvised: string[] } {
+  const merged: Record<string, any> = { ...(c1 || {}) }
+  for (const k of CALL2_FIELDS) {
+    const v = c2 && c2[k]
+    if (typeof v === 'string' && v.trim()) merged[k] = v
+  }
+  const allowed = new Set<string>(CALL2_FIELDS as readonly string[])
+  const improvised = Object.keys(c2 || {})
+    .filter((k) => !k.startsWith('_') && !allowed.has(k))
+    .filter((k) => typeof c2[k] === 'string' && c2[k].trim())
+    // A manufactured `date`/`targetRole`/`targetCompany`, or a MasterContext work-history block, is
+    // identical to what Call 1 produced from the same inputs. Reporting those as improvisation would
+    // fire on every single run — the cry-wolf failure — so only a DIFFERENT value counts.
+    .filter((k) => c2[k] !== (c1 || {})[k])
+  return { merged, improvised }
+}
+
+/** Call 2's contribution to the DRAFT: the allowlisted fields only, so an improvised section cannot win. */
+export function call2Draft(c2: any): Record<string, string> {
+  const out: Record<string, string> = {}
+  for (const k of CALL2_FIELDS) {
+    const v = c2 && c2[k]
+    if (typeof v === 'string' && v.trim()) out[k] = v
+  }
+  return out
+}
+
 export function assemblePackage(call1: any, call2: any, call3: any): Record<string, string | null> {
   // Skills: prefer the QC'd Call-3 arrays, then Call-1 per-slot fields, then a
   // split of any single combined skills block (call1.skills / call3.finalSkills).

@@ -97,3 +97,58 @@ test('H:call-2-sections-parse-into-the-fields-the-package-reads', () => {
   assert.equal(pkg.SkillsBullets1, 'Portfolio Governance', 'the parsed refinement did not reach the package')
   assert.equal(pkg.RelevantBullets1, 'Agile Transformation')
 })
+
+test('H:call-3-input-never-loses-call-1: the merge is an allowlist, not a spread', async () => {
+  // THE DEFECT, caught by an independent AC read after it had shipped and before it could be
+  // measured. Call 3's input was `{...c1, ...c2}`, harmless only while the Call-2 JSON parse always
+  // failed and c2 was `{}`. Parsed properly, c2 is a full `parseResumePackage` shape, and that shape
+  // returns EVERY key defaulted with `|| ''` — so the spread blanked Call 1's resumeSummary,
+  // expertise, coverLetter, aboutMe1/2, executiveProfile and coreAccomplishments and handed the
+  // emptied package to the QC pass. Nothing downstream would have caught it: Call 3's
+  // updatedResumeSummary and finalSkills* OUTRANK Call 1 in the document, and the build still
+  // reports built:4 failed:0.
+  const { mergeCallTwo } = await import('../dist/functions/tests/mt17.js')
+  const c1 = {
+    resumeSummary: 'real summary', expertise: 'real expertise', coverLetter: 'real cover',
+    aboutMe1: 'real a1', aboutMe2: 'real a2', executiveProfile: 'real profile',
+    coreAccomplishments: 'real accomplishments', skills1: 'draft s1', relevant1: 'draft r1',
+    workHistory1: 'real wh1',
+  }
+  // Exactly what parseResumePackage returns for a reply that only carried skills sections.
+  const c2 = {
+    skills1: 'refined s1', skills2: '', relevant1: 'refined r1', relevant2: '', relevant3: '',
+    resumeSummary: '', expertise: '', coverLetter: '', aboutMe1: '', aboutMe2: '',
+    executiveProfile: '', coreAccomplishments: '', workHistory1: 'real wh1', _unmapped: [],
+  }
+  const { merged, improvised } = mergeCallTwo(c1, c2)
+
+  // Assert on the FULL key set, not a sample: a test that only checks skills1 passes and is inert.
+  for (const k of Object.keys(c1)) {
+    assert.ok(String(merged[k] || '').trim(),
+      `Call 3 would have been handed an empty "${k}" — Call 1's content was lost`)
+  }
+  assert.equal(merged.resumeSummary, 'real summary')
+  assert.equal(merged.coverLetter, 'real cover')
+  assert.equal(merged.skills1, 'refined s1', 'the refinement did not reach Call 3')
+  assert.equal(merged.relevant1, 'refined r1')
+  assert.deepEqual(improvised, [], 'a value identical to Call 1 was reported as improvisation')
+})
+
+test('H:call-2-may-not-improvise-a-draft-field: refused and named, not merged', async () => {
+  // Node 299599701 asks for skills only. A cover letter or an executive profile in that reply is the
+  // model improvising, and the owner's constraint is that THEIR prompts drive the draft — a field
+  // their prompt never requested is by definition not their prompt driving it. This is deliberately
+  // the opposite of "the later call wins".
+  const { mergeCallTwo, call2Draft, assemblePackage } = await import('../dist/functions/tests/mt17.js')
+  const c1 = { coverLetter: 'the real cover letter', executiveProfile: 'the real profile', skills1: 'draft s1' }
+  const c2 = { coverLetter: 'IMPROVISED cover', executiveProfile: 'IMPROVISED profile', skills1: 'refined s1' }
+
+  const { merged, improvised } = mergeCallTwo(c1, c2)
+  assert.equal(merged.coverLetter, 'the real cover letter', 'an improvised cover letter reached the QC pass')
+  assert.deepEqual(improvised.sort(), ['coverLetter', 'executiveProfile'], 'the improvisation was not reported')
+
+  const pkg = assemblePackage(c1, call2Draft(c2), {})
+  assert.equal(pkg['@CoverLetterBody'], 'the real cover letter', 'an improvised cover letter reached the DOCUMENT')
+  assert.equal(pkg['@ExecutiveProfile_55words'], 'the real profile')
+  assert.equal(pkg.SkillsBullets1, 'refined s1', 'the allowlist also blocked the field Call 2 is FOR')
+})
