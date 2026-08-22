@@ -2267,3 +2267,45 @@ interpolated into the prompt — a module test cannot see that, and only a calle
 
 **Rule earned: when a module takes an injected function, the module's own tests can never prove the
 caller passes the right thing. That needs its own guard.**
+
+## The owner's correction that reframed everything: same prompt, same model, different PIPELINE (2026-08-22)
+
+*"the same prompt and models worked together fine. there is a nuanced difference in the pipelines."*
+That is ground truth by the standing rule, and it was right. I had drifted toward a model-quality
+hypothesis and started an A/B against GPT-5.6 Luna. Wrong hypothesis, and the owner stopped it.
+
+**What the ground truth actually says.** `GET /api/prompts?key=ats_user` (api-test 32605847835)
+returns v001, 8,807 chars, *"Seeded from Zap 289877647"*. Its objective:
+
+> "Identify and eliminate redundancy across Skills Lists A (1,2), **Skills Lists B (1,2)**, and the
+> Relevant Skills Lists" / "Compare each skill in **Lists A to Lists B**"
+
+The prompt interpolates **21 tokens. `atsExtra` (pipeline.ts:401) supplies 9 — every one of them
+List A.** Blank: `290709249__output__Item 13`/`15` (**List B skills**),
+`289877662__output__Item 41/43/45` (**Relevant B**), `Item 33` (JD responsibilities), `Item 53`
+(extracted JD skills), the memory-key pair, and the two cold-email contact answers.
+
+**The ATS pass compares List A against an empty List B.** In the zap, node `290709249` produced it.
+This pipeline has no equivalent. Recorded as `D:call3-compares-against-an-empty-list`.
+
+**Second mismatch, same prompt:** it states skills ≤ **24** chars and relevant ≤ **20**, while
+`DEFAULT_THRESHOLDS.skillMaxChars` is **30**. Our gate is LOOSER than the owner's own prompt — and 30
+is the number I built the normaliser against.
+
+### The methodological lesson, and it is the expensive one
+
+A model handed an empty List B still returns a confident merged list. The call succeeds, the
+documents build, and every symptom looks like model quality. **Nothing anywhere surfaced that twelve
+of twenty-one tokens resolved to `''`.** So I reached for the most visible variable (the model)
+instead of auditing whether the prompt's own inputs were satisfied.
+
+**Rule: when output quality is disappointing, audit the INPUTS the prompt declares before ever
+questioning the model.** An unresolved template token is silent by construction — `resolveZapVars`
+blanks what it cannot map — and a blank is indistinguishable from a bad answer once the reply comes
+back. The prompt names its inputs; count them.
+
+### The Luna A/B could not even run, which is its own finding
+Nine minutes "running" with **zero** `packet:resume:generate:*` calls metered and no `gpt-5.6-luna`
+rows at all — the call hung or errored without ever reaching `logUsage`. So swapping that model would
+have broken generation outright, not improved it. Config reverted to `gpt-4o-mini`. The wedged job is
+the sweep's problem, which is exactly what `D35` built it for.
