@@ -18,17 +18,24 @@
 // The synchronous route stays exactly as it was. `appBulk` and the coach tool call it and expect the
 // full summary back, and this file is not a reason to break them.
 //
-// THE COST, STATED PLAINLY: a queued build waits up to 60 seconds for the next tick before it
-// starts. That is the worst everyday property of this design, and it is the price of using the
-// mechanism the repo already has (six `app.timer` triggers) instead of introducing a queue service.
-// If that wait becomes the complaint, the upgrade path is Azure Storage Queues — the storage account
-// and connection string already exist — whose visibility timeout, dequeue count and poison queue
-// replace the lease, the attempt cap and `abandonExhausted` respectively.
+// THE WAKE SIGNAL IS THE STORAGE QUEUE, not a clock. The first version ticked every minute, so a
+// queued build waited up to sixty seconds for something we already knew the exact moment of. The
+// POST now drops a message on `packet-build-jobs` and the host delivers it in about a second.
+//
+// The queue carries a wake-up, not the work. Every correctness rule stays in `packet_build_job`,
+// where it is tested against a real PostgreSQL: the claim, the lease, the fence, the attempt cap,
+// the owner scoping. A message that is lost, duplicated or redelivered is therefore harmless — the
+// database decides who runs what, and a second delivery finds the job already claimed.
+//
+// The timer survives, demoted to a five-minute sweep, and only for the case a push signal cannot
+// cover: a worker that dies mid-build leaves a row in `running` and sends no new message, so
+// nothing else would ever wake it.
 import { app, HttpRequest, HttpResponseInit, InvocationContext, Timer } from '@azure/functions'
 import { resolveOwner, requireWrite, serverError } from './appSession'
 import { getPgClient } from './pgClient'
 import { runPacketBuild } from './appPackets'
 import { enqueueBuild, claimNextBuild, finishBuild, abandonExhausted, getBuildJob } from './buildQueue'
+import { BUILD_QUEUE_NAME, decodeBuildSignal, sendBuildSignal } from './buildSignal'
 
 const HEADERS = {
   'Content-Type': 'application/json',
@@ -55,6 +62,10 @@ export async function packetBuildAsync(req: HttpRequest, context: InvocationCont
     // job here is either a foreign/unknown id or a lost race — both 404 to the caller, and neither
     // leaks which.
     if (!r.job) return { status: 404, headers: HEADERS, jsonBody: { error: r.error || 'opportunity not found' } }
+    // Wake a worker now. Only for a job that is still waiting — signalling one that is already
+    // running would deliver a message whose only outcome is a worker finding nothing to claim.
+    // A failed send is logged and ignored: the row is committed, so the sweep still gets to it.
+    if (r.job.state === 'pending') await sendBuildSignal({ jobId: r.job.id, oppId }, (m: string) => context.log(m))
     return { status: 202, headers: HEADERS, jsonBody: {
       jobId: r.job.id, oppId, state: r.job.state, regen: r.job.regen,
       created: r.created, promoted: !!r.promoted, regenPending: !!r.regenPending,
@@ -97,55 +108,97 @@ export async function packetBuildJobRead(req: HttpRequest, context: InvocationCo
 }
 
 /**
- * The worker: sweep, claim one, build it, record how it ended.
+ * Claim one job and run it. Returns what happened, so a caller can log it honestly.
  *
- * ONE JOB PER TICK, deliberately. A build costs three minutes and a real model bill; a tick that
- * drained the queue would run them back to back inside a single Function invocation and hit the host
- * timeout mid-build, which is the failure this whole file exists to stop having.
- *
- * `abandonExhausted` runs FIRST. It is what marks a job that has burned its attempts as `failed`, so
- * the owner sees an outcome instead of a row that says `running` forever — and so the partial unique
- * index stops blocking them from queueing a fresh build. `claimNextBuild` no longer depends on this
- * ordering for correctness (it skips exhausted rows in the scan), but the sweep still has to happen
- * somewhere, and this is the only thing that runs on a clock.
+ * ONE JOB PER INVOCATION, deliberately. A build costs three minutes and a real model bill; draining
+ * the queue inside a single invocation would run them back to back and hit the host timeout
+ * mid-build, which is the failure this whole file exists to stop having. The queue has a message per
+ * job, so the next one wakes its own worker.
  *
  * A build that RAN and returned a failure is not retried. Only a worker that died without recording
- * anything is — its row stays `running` and goes stale, and the reclaim picks it up. Retrying a
- * build that genuinely failed would spend the model budget again to fail the same way.
+ * anything is — its row stays `running`, goes stale, and the sweep reclaims it. Retrying a build
+ * that genuinely failed would spend the model budget again to fail the same way.
  */
-export async function buildQueueTick(_timer: Timer, context: InvocationContext): Promise<void> {
+async function processOneBuild(client: any, context: InvocationContext): Promise<'idle' | 'done' | 'failed' | 'fenced'> {
+  const job = await claimNextBuild(client)
+  if (!job) return 'idle'
+  context.log(`buildWorker: claimed ${job.id} (opp ${job.opp_id}, attempt ${job.attempts}, regen ${job.regen})`)
+
+  let ok = false, payload: any = null, error: unknown = null
+  try {
+    const out = await runPacketBuild(client, job.opp_id, job.owner_email, { regen: job.regen },
+      (m: string) => context.log(`buildWorker[${job.id}] ${m}`))
+    payload = out.body
+    ok = out.status === 200 && out.body?.ok === true && !out.body?.error
+    if (!ok) error = out.body?.error || out.body?.note || 'the build did not complete cleanly'
+  } catch (e) {
+    error = e
+    context.log(`buildWorker: ${job.id} threw ${String(e)}`)
+  }
+
+  // The fence. If this returns false the job was reclaimed while we were building and another worker
+  // owns it now — say so and stop. Retrying here is how a zombie overwrites a live run.
+  const wrote = await finishBuild(client, job.id, job.attempts, ok, payload, error)
+  if (!wrote) {
+    context.log(`buildWorker: fenced out of ${job.id} — it was reclaimed mid-build; result discarded`)
+    return 'fenced'
+  }
+  context.log(`buildWorker: ${job.id} -> ${ok ? 'done' : 'failed'}`)
+  return ok ? 'done' : 'failed'
+}
+
+/**
+ * The primary worker: woken by the queue message the POST just sent.
+ *
+ * It claims the NEXT eligible job rather than the one the message names, and that is deliberate. The
+ * message is a wake-up, not an assignment: if its job was already taken, there may still be another
+ * one waiting, and picking it up here is free. It also means a lost message costs nothing more than
+ * a later start, since any later signal — or the sweep — will find the orphan.
+ *
+ * Nothing thrown escapes. An exception here would make the host redeliver the message five times and
+ * then poison it, and the job row already records the outcome; a retry loop on top of that would
+ * spend the model budget again for no new information.
+ */
+export async function buildQueueWorker(message: unknown, context: InvocationContext): Promise<void> {
+  const sig = decodeBuildSignal(message)
+  context.log(`buildQueueWorker: signal ${sig ? sig.jobId : 'unreadable'}`)
+  let client
+  try {
+    client = await getPgClient()
+    const outcome = await processOneBuild(client, context)
+    if (outcome === 'idle') context.log('buildQueueWorker: nothing to claim — already taken or finished')
+  } catch (e) {
+    context.log(`buildQueueWorker failed: ${String(e)}`)
+  } finally { try { await client?.end() } catch {} }
+}
+
+/**
+ * The sweep — the fallback, scoped to exactly what the queue cannot signal.
+ *
+ * Two jobs, neither of which any message will ever announce:
+ *   `abandonExhausted` marks a job that burned its attempts as `failed`, so the owner sees an
+ *      outcome instead of a row that says `running` for ever, and the partial unique index stops
+ *      blocking them from queueing a fresh build.
+ *   `processOneBuild` reclaims a job whose worker died mid-build — its lease has expired, and the
+ *      message that started it was consumed long ago.
+ *
+ * Five minutes, not one. It is not the path a healthy build takes any more, and a sweep that runs
+ * more often than the failure it recovers from is just a poll wearing a different name.
+ */
+export async function buildQueueSweep(_timer: Timer, context: InvocationContext): Promise<void> {
   let client
   try {
     client = await getPgClient()
     const swept = await abandonExhausted(client)
-    if (swept) context.log(`buildQueueTick: abandoned ${swept} exhausted job(s)`)
-
-    const job = await claimNextBuild(client)
-    if (!job) return
-    context.log(`buildQueueTick: claimed ${job.id} (opp ${job.opp_id}, attempt ${job.attempts}, regen ${job.regen})`)
-
-    let ok = false, payload: any = null, error: unknown = null
-    try {
-      const out = await runPacketBuild(client, job.opp_id, job.owner_email, { regen: job.regen },
-        (m: string) => context.log(`buildQueueTick[${job.id}] ${m}`))
-      payload = out.body
-      ok = out.status === 200 && out.body?.ok === true && !out.body?.error
-      if (!ok) error = out.body?.error || out.body?.note || 'the build did not complete cleanly'
-    } catch (e) {
-      error = e
-      context.log(`buildQueueTick: ${job.id} threw ${String(e)}`)
-    }
-
-    // The fence. If this returns false the job was reclaimed while we were building and another
-    // worker owns it now — say so and stop. Retrying here is how a zombie overwrites a live run.
-    const wrote = await finishBuild(client, job.id, job.attempts, ok, payload, error)
-    if (!wrote) context.log(`buildQueueTick: fenced out of ${job.id} — it was reclaimed mid-build; result discarded`)
-    else context.log(`buildQueueTick: ${job.id} -> ${ok ? 'done' : 'failed'}`)
+    if (swept) context.log(`buildQueueSweep: abandoned ${swept} exhausted job(s)`)
+    const outcome = await processOneBuild(client, context)
+    if (outcome !== 'idle') context.log(`buildQueueSweep: recovered a job the queue could not signal -> ${outcome}`)
   } catch (e) {
-    context.log(`buildQueueTick failed: ${String(e)}`)
+    context.log(`buildQueueSweep failed: ${String(e)}`)
   } finally { try { await client?.end() } catch {} }
 }
 
 app.http('packetBuildAsync', { methods: ['POST', 'OPTIONS'], authLevel: 'anonymous', route: 'app/opportunity/{id}/packet/build-async', handler: packetBuildAsync })
 app.http('packetBuildJobRead', { methods: ['GET', 'OPTIONS'], authLevel: 'anonymous', route: 'app/packet/build-job/{jobId}', handler: packetBuildJobRead })
-app.timer('buildQueueTick', { schedule: '0 */1 * * * *', handler: buildQueueTick })
+app.storageQueue('buildQueueWorker', { queueName: BUILD_QUEUE_NAME, connection: 'AZURE_STORAGE_CONNECTION_STRING', handler: buildQueueWorker })
+app.timer('buildQueueSweep', { schedule: '0 */5 * * * *', handler: buildQueueSweep })
