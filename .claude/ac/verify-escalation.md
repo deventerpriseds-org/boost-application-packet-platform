@@ -313,3 +313,126 @@ test noticing. Add an H-case that drives a proposal whose offsets do not re-slic
 **Caveat on M4-M10:** the parent session was committing concurrently, so the baseline test count moved
 (657 -> 658 -> 662) across the run. Each row's fired/inert verdict is a within-run comparison against
 its own restore, so the verdicts stand, but the absolute counts are not comparable across rows.
+
+---
+# WHAT I FOUND THAT NOBODY ASKED ABOUT
+
+### 1. `dimensions.ts` still grades a model proposal `strong`. **STILL OPEN at HEAD `c230f30`.**
+Re-run after the parent's fix commit: `responsibilities_addressed` and `evidence_placed` are now on
+`ruleEvidenceOf` and no longer leak. `dimensions.ts` was not touched and still does:
+```
+  WITH a proposed-shaped evidence row : [["platform_modernization","strong","evidence","Reduced outages from nine hours to one"]]
+  WITHOUT any evidence row            : [["platform_modernization","weak","evidence",null]]
+```
+Commit `bee71aa`'s message says *"The guard is now written over the SET of evidence-reading checks
+rather than over one name, so a fourth check added later that counts a proposed row as settled fails."*
+That set is `checks.ts` only. The **fourth evidence-reading grader already exists**, in a different
+file, and is not in the set. `appDimensions.shapeRequirement` (`:203-211`) drops `evidence_method`, so
+`dimensions.ts` cannot be fixed without also widening that mapping.
+
+### 2. `writeEvidence` MISCOUNTS `evidenced` when an escalation insert is refused.
+`appRequirements.ts:257` `const evidenced = resolved.filter(r => r.evidence).length - refused` —
+but `refused` is *also* incremented by the escalation block (`offset_mismatch` at :230,
+`insert_rejected` at :251). An escalation-path refusal is therefore subtracted from the
+**deterministic** evidenced count. Executed:
+```
+  rows actually STORED   : d1:exact, p2:proposed
+  writeEvidence reported : {"total":3,"evidenced":1,"unevidenced":2,"refused":1,"proposed":1}
+```
+Two evidence rows are in the database; the route tells the owner one. `unevidenced` is
+correspondingly inflated. This propagates to `evidenceResolve`'s owner-facing `note` and to
+`packetBuildAll`'s `evidence.evidenced`. Control run with no insert failure reports correctly, so the
+defect is exactly the shared counter. Fix: give the escalation block its own counter and stop folding
+it into the deterministic `refused`.
+
+### 3. Three comments now state the opposite of what the code does.
+Commit `86c6e54` flipped the default to ON and did not sweep the prose that says it is OFF:
+- `evidence.ts:275` — *"Escalation is OPT-IN. Absent means off — never 'unset, so use the default'."*
+  `resolveOptionsFrom` does exactly the thing this sentence forbids.
+- `appRequirements.ts:82` — *"Escalation is off by default"*, used as part of the safety argument for
+  deploying code before the migration.
+- `appRequirements.ts:207` — *"The owner's toggle is opt-in and its unconfigured state is OFF
+  (`resolveOptionsFrom`)"* — names the function that contradicts it.
+And the guard `H:escalation-is-off-by-default` (`matcher.test.mjs:1267`) keeps a name that asserts a
+policy the product no longer has; it actually tests `writeEvidence`'s local `=== true` gate, which is
+a different (still true) claim. Rename it, e.g. `H:escalation-needs-both-toggle-and-transport`.
+
+### 4. `bee71aa`'s commit message describes a code change the commit does not contain.
+`git show --name-only bee71aa` -> **`.claude/DEFERRED.md` only, 1 insertion, 1 deletion.** The message
+claims *"Both now use it"*, *"Both fixes proven by reversion: each sibling reverted independently
+fails the suite"*, and *"api build clean, 657/657 tests pass"*. The actual `checks.ts` fix landed in
+`6f5a469`, whose subject is *"Accuracy log: I called correct model matches stretches"*. Two commits'
+messages and contents are effectively swapped. Anyone auditing this later by `git log` will look in
+the wrong commit. (The claimed 657/657 is also not reproducible: HEAD is 660/662 with the two
+failures listed at the top of this file.)
+
+### 5. Cost exposure of the default flip.
+`openaiJson.ts:38` `const model = opts.model || process.env.OPENAI_MODEL || 'gpt-4o'` — the escalation
+tier defaults to **gpt-4o** ($2.50/$10 per 1M, `usageMeter.ts` PRICES), not the mini tier the rest of
+the packet pipeline uses (`packet:*:generate` logs `gpt-4o-mini`). Each call ships the **entire**
+profile record set in `buildProposalUser`, once per unevidenced requirement, up to 12 per run — and
+now for every owner with no `owner_search_prefs` row, without them ever opting in. `packetBuildAll`
+calls the evidence route on every build. Metering IS wired (`logUsage('evidence:escalate', ...)`) and
+gpt-4o is priced, so this is visible after the fact; it is not capped by budget, only by count.
+
+### 6. `PROPOSAL_VERSION` is written twice, from two places, and they can drift.
+`escalateOne` stamps `row.proposal_version = PROPOSAL_VERSION` (`evidenceProposal.ts:266`) and
+`writeEvidence` then ignores it, binding the module-level `PROPOSAL_VERSION` constant into `$13`
+directly (`appRequirements.ts:246`). Harmless today (same constant, same module) but the row's own
+field is dead, and a future per-ruleset version on the row would be silently discarded.
+
+### 7. "ONE ROW, ONE SAVEPOINT" is not a savepoint.
+`appRequirements.ts:236-252` uses `begin`/`commit`/`rollback` — a separate transaction per insert, not
+`SAVEPOINT`/`ROLLBACK TO`. The behaviour matches the claim; the terminology does not, and the comment
+explains the Postgres poisoned-transaction rule that savepoints solve while not using one.
+
+### 8. The CLAUDE.md schema recipe produced a vacuous test, and would have again.
+It says to diff against `origin/main` — but this branch is already merged there, so
+`git show origin/main:api/.../schema.ts` returns the branch's own file (diff: 1 newline). Following the
+recipe literally applies a schema on top of itself and passes for free. I used `ebc52b4` instead. The
+recipe needs "the merge-base / the last commit before your change", not "origin/main".
+
+### 9. The `exception when undefined_table` guard in SCHEMA_SQL is inconsistent and dead.
+`schema.ts:1100` (DROP CONSTRAINT) and `:1108` (ADD COLUMN) are unguarded while `:1101-1104` (ADD
+CONSTRAINT) is wrapped. All three are unreachable-as-failures because `create table if not exists
+requirement_evidence` is at `:394` of the same string. Confirmed by execution: the bare DROP against a
+database without the table errors `relation "requirement_evidence" does not exist`. Harmless as
+ordered; misleading as written.
+
+### 10. Escalation outcome detail never reaches the owner's screen.
+`escalation_refusals` distinguishes `transport_failed` / `unparseable` / `model_declined` /
+`insert_rejected` / `over_cap` and is returned in the JSON body, but `evidenceResolve`'s human-readable
+`note` (`appRequirements.ts:707`) mentions only `out.proposed`. An owner whose OpenAI key is missing
+sees the same sentence as an owner whose profile genuinely supports nothing. That is the exact
+distinction claim 4 exists to protect, preserved in the data and dropped at the last surface.
+
+---
+# VERDICT SUMMARY
+
+| # | Claim | Verdict |
+|---|---|---|
+| 1 | Zero model calls when the owner switched escalation off | **CONFIRMED** (spy transport, 3 gate combinations) |
+| 2 | A model-proposed row cannot turn `must_have_coverage` green | **CONFIRMED for that check.** REFUTED as a system property at the commit I was given: `responsibilities_addressed` leaked warn->pass (since fixed in `6f5a469`); **`dimensions.ts` still leaks weak->strong at HEAD** |
+| 3 | A proposed quote is byte-exact in the record it names | **CONFIRMED** (10 adversarial near-misses, all refused; offsets re-slice) |
+| 4 | A transport failure never reads as "the profile supports nothing" | **CONFIRMED** for all 4 modes + missing key; distinct from `model_declined` in the data, not in the owner-facing note |
+| 5 | A rejected proposed insert costs one row, not the run | **CONFIRMED** (deterministic row and the later proposed row both survive) |
+| 6 | The resume draft is written from prompts, never from evidence | **CONFIRMED in `86c6e54`. BROKEN at HEAD `c230f30`** by the contaminating `evidencePre` line |
+| 7 | The schema change is real and safe | **CONFIRMED** — executed against a populated DB carrying `ebc52b4`'s schema; pre-existing `exact` row untouched, bogus method refused |
+| 8 | The guards are not inert | **CONFIRMED for 9/10.** One guard is missing entirely: the escalation pre-insert offset re-check can be deleted with zero test failures |
+
+### Required before this can be called done
+1. **Delete `api/src/functions/tests/appPackets.ts:666` (`evidencePre`)** — my harness artefact, committed in `c230f30`. It breaks the owner's hard constraint and doubles build spend.
+2. Fix `dimensions.ts` / `appDimensions.shapeRequirement` so a proposed row cannot grade a dimension.
+3. Fix the `evidenced` miscount (escalation refusals decrementing the deterministic count).
+4. Add an H-case for the escalation pre-insert offset assertion (currently unguarded).
+5. Sweep the three comments and one test name that still say escalation is off by default.
+6. Correct the record for `bee71aa` / `6f5a469` — the message and the code are in different commits.
+
+### What I could NOT verify from this sandbox
+- Nothing about the **live** system: no Azure, no production Postgres, no SPA. I did not run
+  `db-query.yml` or `api-test.yml`; every verdict above is from local execution against a local
+  Postgres 16.13 and the built `dist/`.
+- Whether real OpenAI responses behave like my hand-written model answers. The transport is injected,
+  so I exercised the rules, never the model.
+- The Settings UI control for `chk_evidence_escalate` (`app/src/screens/Settings.jsx:1583`) — it exists
+  in source; I did not render it.
