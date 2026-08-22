@@ -1721,3 +1721,43 @@ most likely to strand a pointer; an invalid regex threw naming no row; and `D20`
 the `appFacts.ts:232` coordinate that had already rotted to `:239`.
 
 572 api tests pass. **NOT verified live** — nothing here deploys.
+
+
+## D35 — the build is asynchronous now, and the queue is woken by Azure Storage (2026-08-22)
+
+**Feature status: BUILT AND DEPLOYED, NOT YET CONFIRMED LIVE.** `main` at `e47c8fd`.
+
+Read this before touching `packetBuildAll` or the packet screen.
+
+- **`runPacketBuild` is the one build path.** It was extracted out of `packetBuildAll`, not copied,
+  and has two callers: the synchronous route (kept, because `appBulk` and `coachTools` call it) and
+  the queue worker. Anything that changes the build changes both by construction.
+- **`packet_build_job` is the record of truth, not the queue.** Claim (`for update skip locked`),
+  ten-minute lease, attempt cap, the `finishBuild` fence, owner scoping and the partial unique index
+  `pbj_one_live_per_opp` are all database facts with tests against a real PostgreSQL. The Azure queue
+  carries a wake-up only, so a lost, duplicated or redelivered message is harmless.
+- **The wake signal is `packet-build-jobs`, base64-encoded.** The queue extension defaults to base64
+  and `@azure/storage-queue` sends plain text: raw JSON is accepted, sits in the queue and is
+  dead-lettered without triggering anything. `buildSignal.ts` encodes base64 and decodes either form.
+- **`buildQueueSweep` is a five-minute FALLBACK, not the path.** It exists for the one case no
+  message can announce — a worker that died mid-build — and for `abandonExhausted`. If you find
+  yourself shortening it, the thing you actually want is another signal.
+
+### Hardening — authentication is not authorization, and I made the same mistake twice in one day
+`requireWrite` returns null for any request that resolves to the demo workspace, and a request with
+NO credentials resolves there. So every route that then loaded its object by id alone was open:
+`build-all`, `artifactGenerate`, `artifactDocument`, `artifactSlides`. An opportunity or artifact
+UUID was the whole of the access control — four Google documents in the owner's Drive overwritten
+and the model budget spent, by an anonymous caller. Now: one owner-scoped `loadOwnedArtifact`, an
+owner predicate on the build's opportunity load, and `enqueueBuild` refusing to file a job it does
+not own. **The generalisation worth keeping: `requireWrite` answers "may this request write
+something", never "may it write THIS".** Object-level authorization belongs in the load.
+
+### Hardening — a cold AC read found six defects in code I had already tested
+The queue had 6 passing DB tests before an independent AC pass read it. It found: the attempt cap
+outside the claim subquery (one poisoned job would have silently stopped every build for every
+owner); `finishBuild` discarding the payload on failure — in the queue built to stop losing exactly
+that evidence; no fence, so a reclaimed zombie could overwrite a live run; a rebuild behind a live
+cached build silently downgraded to it; a return type that lied; and a job that could be filed
+against another owner's opportunity. Each is now a test, and all five mutations bite. The tests I
+wrote first were not wrong — they were tests of the design I already had in my head.
