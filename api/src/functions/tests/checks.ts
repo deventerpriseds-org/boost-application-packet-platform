@@ -682,7 +682,12 @@ export function runChecks(input: CheckInput): CheckResult[] {
                   : `${label(r)} — ${NO_EVIDENCE_NOTE}`)), judged: judgedIds }
           : { ...ok('must_have_coverage', `${coverable.length}/${coverable.length} must-haves evidenced${tail}`, COVERAGE_EXPECT), judged: judgedIds })
 
-      const unaddressed = resp.filter(r => !evidenceOf(r))
+      // `ruleEvidenceOf`, for the same reason `must_have_coverage` uses it. An INDEPENDENT VERIFIER
+      // caught that this line and `evidence_placed` below were left on the unfiltered `evidenceOf`,
+      // 34 and 46 lines under the helper written to prevent exactly this — the "fix all consumers,
+      // not just the one you found" rule broken inside one else-branch. A responsibility whose only
+      // support is a model's proposal is not addressed; it is a suggestion awaiting confirmation.
+      const unaddressed = resp.filter(r => !ruleEvidenceOf(r))
       out.push(!resp.length
         ? na('responsibilities_addressed', 'the posting produced no responsibilities', RESP_EXPECT)
         : unaddressed.length
@@ -694,7 +699,12 @@ export function runChecks(input: CheckInput): CheckResult[] {
       // coverage (R4: two counts describing different populations are never merged). The profile can
       // support this requirement and this asset still failed to say it — which is a defect the
       // remediation loop can close, unlike a gap in the profile, which it cannot.
-      const evidenced = [...coverable, ...resp].filter(r => evidenceOf(r))
+      // ALSO `ruleEvidenceOf`, and this one is worth its own sentence because the question is
+      // different. `evidence_placed` asks: of the things the profile evidences, which reached this
+      // asset? Feeding proposed rows in would make the check ACCUSE the document of omitting an
+      // excerpt that only a model ever claimed was relevant — an accusation built on model
+      // judgement, which is precisely what the house rule reserves for exact rules.
+      const evidenced = [...coverable, ...resp].filter(r => ruleEvidenceOf(r))
       // `covers()` cannot judge a requirement with fewer than MIN_JUDGEABLE_TOKENS content words —
       // it returns false for them, which is the right answer for COVERAGE (an unjudgeable
       // requirement must surface, not pass quietly) and the WRONG one here. Measured on the live

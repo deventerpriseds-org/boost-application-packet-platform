@@ -584,3 +584,39 @@ test('H:proposed-evidence-cannot-pass-the-gate: a model may propose, only a rule
   assert.equal(find(withRule, 'must_have_coverage').state, 'pass',
     'the same excerpt from a RULE is coverage — only the provenance may change the verdict')
 })
+
+test('H:proposed-evidence-cannot-pass-ANY-evidence-check: all three, not just the one I remembered', () => {
+  // FOUND BY AN INDEPENDENT VERIFIER, and the miss is the reason this case is separate from the one
+  // above rather than folded into it. `must_have_coverage` was filtered; `responsibilities_addressed`
+  // and `evidence_placed` were left on the unfiltered `evidenceOf`, 34 and 46 lines below the helper
+  // written to prevent exactly that — this repo's own "fix all consumers, not just the one you
+  // found" rule, broken inside a single else-branch.
+  //
+  // So the guard is written over the SET of evidence-reading checks rather than over one name. A
+  // fourth check added later that counts a proposed row as settled fails here.
+  const reqs = [
+    { seq: 0, verbatim: 'Improve operational reliability across the platform', item_text: '', kind: 'must_have' },
+    { seq: 1, verbatim: 'Own the reliability of the payments platform end to end', item_text: '', kind: 'responsibility' },
+  ]
+  const bySeq = { 0: proposedRow(), 1: proposedRow() }
+  const rs = runChecks({ type: 'resume', pkg: RESUME_FULL, requirements: reqs, evidence: { profileReadable: true, bySeq } })
+
+  for (const key of ['must_have_coverage', 'responsibilities_addressed', 'evidence_placed']) {
+    const c = find(rs, key)
+    assert.ok(c, `${key} is missing — the scan has gone stale`)
+    assert.notEqual(c.state, 'pass',
+      `${key} passed on model-proposed evidence alone — a model may propose, only a rule may accuse`)
+  }
+
+  // `evidence_placed` specifically must not ACCUSE either. Its question is "of what the profile
+  // evidences, what reached this asset" — counting a proposed row would make it charge the document
+  // with omitting something only a model ever claimed was relevant.
+  assert.equal(find(rs, 'evidence_placed').state, 'not_applicable',
+    'evidence_placed must have nothing to judge when the only evidence is proposed')
+
+  // Same rows from a RULE: all three become judgeable again, so the difference is provenance alone.
+  const ruleRows = { 0: { ...proposedRow(), method: 'anchored', ratio: 1 }, 1: { ...proposedRow(), method: 'anchored', ratio: 1 } }
+  const rr = runChecks({ type: 'resume', pkg: RESUME_FULL, requirements: reqs, evidence: { profileReadable: true, bySeq: ruleRows } })
+  assert.equal(find(rr, 'must_have_coverage').state, 'pass')
+  assert.notEqual(find(rr, 'evidence_placed').state, 'not_applicable')
+})
