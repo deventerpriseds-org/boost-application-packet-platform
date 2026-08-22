@@ -1918,3 +1918,22 @@ All four produced real Drive URLs; `packetStatus: review`; nothing regressed.
 
 Note for any row citing "42 warnings" as a measure of discarded content (`D33`): that number was
 **one generation's 10, duplicated four times**. The real per-build figure is 10.
+
+### ACCURACY MISS — I claimed the send half "does not exist" from a ONE-FILE grep (2026-08-22)
+
+`D:packet-cannot-be-sent` was written asserting *"THE SHIP HALF OF THE PRODUCT DOES NOT EXIST"* on
+the evidence that `feedback` appears 0 times in `appPackets.ts` and `'applied'` is never set there.
+Both facts are true. The conclusion was false: **sending is built and works**, in `appOutreach.ts` —
+`outreachSend` goes out through Microsoft Graph, `Composer.jsx` is a real screen behind the button,
+and `appOutreach.ts:249-261` **already gates the send on packet QC findings**, refusing when assets
+have blocking ones. The QC layer already protects the outbound path, the opposite of the claim.
+
+This is the exact failure my global rules already name — *"Never claim a capability is ABSENT from a
+single-file / single-name grep"* — and having the rule written down did not stop me doing it, which
+is the same evidence for "guards, not prose" that the ledger test itself was built on. The guard
+that would have caught it: an absence claim must sweep every module that could own the capability
+(here, the sibling `app*` route files), not the one file the symptom surfaced in.
+
+The real gap is much smaller and is now what the row says: a send never writes back to the packet
+(`appPackets.ts:877` hardcodes `sent: false`) or to `opportunity.stage`, and "Request changes"
+carries no note. An enhancement on a working path, not a missing half.
