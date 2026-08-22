@@ -2057,3 +2057,22 @@ of asking whether the EXISTING path could execute at all.
 transition INTO it as broken until proven reachable.** Zero is not a usage signal. A count of zero
 over 39 attempts and 1,937 rows is a structural claim, and the cheap test — can this predicate ever
 be true? — takes one minute and would have found this on day one.
+
+## The ship path had TWO structural blocks in series, not one (2026-08-22)
+
+After fixing the video/readiness block I tried to prove a packet could now reach `ready`, by
+approving all four buildable artifacts on the Trinnex packet. It could not. **`POST .../status
+{"status":"approved"}` on the cover returned HTTP 409 `no checks have been run for this artifact`**
+(api-test 32601711488).
+
+`check_result` joined to `artifact`, live: `resume` 60 rows over **1** of 39 artifacts;
+`compact_resume` **0**; `cover` **0**; `portfolio` **0**; `video` **0**. **Checks only ever run for
+the resume.** `approvalBlock` refuses approval without checks — which is this repo's own *absent
+evidence is `not_applicable`, never `pass`* rule applied to approval — so three of the four required
+artifacts can never be approved, and `ready` remains unreachable. Recorded as
+`D:approval-needs-checks-that-never-run`; the fix is tier 1 and needs the owner's call.
+
+**The habit worth keeping from this:** fixing blocker 1 and reporting it as "you can ship now" would
+have been wrong, and I nearly did. What caught it was trying to EXECUTE the path end to end rather
+than reasoning that the fix was sufficient. A structural fix is not confirmed by the code change; it
+is confirmed by the state transition actually happening.
