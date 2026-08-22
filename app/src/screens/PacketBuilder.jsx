@@ -217,6 +217,7 @@ export default function PacketBuilder({ id, step }) {
   const mobile = useIsMobile()
   const [pState, setPState] = useState({ loading: true, error: null, packet: null })
   const [opp, setOpp] = useState(null)
+  const [applying, setApplying] = useState(false)
   const [busy, setBusy] = useState(null)
   const [video, setVideo] = useState({})
   const [doc, setDoc] = useState({})
@@ -497,6 +498,28 @@ export default function PacketBuilder({ id, step }) {
         : res.feedbackAdded ? `${TYPE_LABEL[a.type]} sent back — your note will steer the next rebuild`
         : `${TYPE_LABEL[a.type]} → ${status}`)
     } catch (err) { patchArtifact(a.id, { status: prev }); toast(`Update failed: ${err.message || err}`) }
+  }
+
+  // THE OWNER TELLS US THEY APPLIED. Deliberate, never inferred.
+  //
+  // Nothing in the packet flow could reach the `applied` stage, which is why only 2 of 1,924
+  // opportunities carried it. The obvious automation - advance on outreach send - is WRONG: those
+  // channels include linkedinConnect, coldCall and followUp, and a connect request is not an
+  // application. A human pressing this button is the only signal that actually means it.
+  //
+  // Reuses the existing stage route; the server marks the packet sent when the stage is `applied`,
+  // so one press writes both facts and they cannot disagree.
+  const markApplied = async () => {
+    if (!window.confirm('Mark this opportunity as applied?\n\nThis records that you submitted the application, and moves the packet to Sent.')) return
+    setApplying(true)
+    try {
+      const res = await api.moveStage(id, 'applied')
+      if (res.error) throw new Error(res.error)
+      setOpp((o) => (o ? { ...o, stage: res.stage } : o))
+      if (res.packetSent) setPState((s) => (s.packet ? { ...s, packet: { ...s.packet, status: 'sent' } } : s))
+      toast(res.packetSent ? 'Marked applied - packet moved to Sent' : 'Marked applied')
+    } catch (err) { toast(`Could not mark applied: ${err.message || err}`) }
+    finally { setApplying(false) }
   }
 
   if (pState.loading) return <Loading />
@@ -791,6 +814,13 @@ export default function PacketBuilder({ id, step }) {
           <MatchEstimateButton atsScore={atsScore} onClick={() => setAtsOpen(true)} />
           {ready ? <Pill tone="green">Ready to ship ✓</Pill> : allBusy ? <Pill tone="yellow">building</Pill> : null}
           {ready && <button className="px-btn px-btn-accent" onClick={() => go(`/compose/${id}`)}>Send packet →</button>}
+          {opp?.stage === 'applied'
+            ? <Pill tone="green">Applied ✓</Pill>
+            : (ready || p.status === 'sent') && (
+              <button className="px-btn" disabled={applying} onClick={markApplied}>
+                {applying ? 'Marking…' : 'Mark as applied'}
+              </button>
+            )}
         </div>
       </div>
 

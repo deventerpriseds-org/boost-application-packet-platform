@@ -4,6 +4,8 @@ import { getPgClient } from './pgClient'
 import { resolveMetro, parseWorkMode } from './geoMaster'
 import { getSearchPrefs } from './appSearchPrefs'
 import { deriveTemperature, deriveActionPriority, DEFAULT_TEMP_THRESHOLDS, TempThresholds } from './signals'
+// One direction only: appPackets does NOT import this module, so this cannot cycle.
+import { markPacketSent } from './appPackets'
 
 const HEADERS = {
   'Content-Type': 'application/json',
@@ -172,7 +174,20 @@ export async function opportunityMoveStage(req: HttpRequest, context: Invocation
     } catch (histErr) {
       context.log(`opportunityMoveStage: failed to record stage history for ${id}: ${histErr}`)
     }
-    return { status: 200, headers: HEADERS, jsonBody: { ok: true, id: r.rows[0].id, stage: r.rows[0].stage } }
+    // APPLYING IS ONE INTENT, SO IT WRITES BOTH FACTS.
+    //
+    // The owner told us they applied; a packet they applied WITH has shipped, and leaving it at
+    // "Ready to ship" would contradict the stage sitting next to it. This is deliberately NOT
+    // wired to the outreach send: those channels include `linkedinConnect`, `coldCall` and
+    // `followUp`, and a connect request is not an application — auto-advancing there would have
+    // marked the pipeline applied on a LinkedIn touch. A human pressing "Mark as applied" is the
+    // only signal that actually means it, which is why this hangs off the stage change and not
+    // off `outreachSend`.
+    //
+    // Non-fatal and only forward: `markPacketSent` no-ops when there is no packet (an opportunity
+    // can be applied to without one) and when it is already sent.
+    const packetSent = stage === 'applied' ? await markPacketSent(client, id) : false
+    return { status: 200, headers: HEADERS, jsonBody: { ok: true, id: r.rows[0].id, stage: r.rows[0].stage, packetSent } }
   } catch (err) {
     return { status: 500, headers: HEADERS, jsonBody: { error: String(err) } }
   } finally { try { await client?.end() } catch {} }

@@ -2571,3 +2571,29 @@ actually sending an email through Graph to a real recipient. That is an outward-
 action and was not part of the request, so it was not done. What IS proven: `tsc`, the guard with
 three mutations, and the fact that `markPacketSent` is reached from both write points. What would
 confirm it: the owner sending one real packet and seeing it move to the "Sent" group.
+
+## "Mark as applied" button + the extension deferred (2026-08-22)
+
+**Owner request:** *"for now, a button I press along the workflow letting you know I've done so as
+well as marking that eventually we have to update the appl scraper answer generator extension..."*
+
+**Built — no new route.** The stage route (`POST /app/opportunity/{id}/stage`) and the `moveStage`
+client helper already existed and already recorded stage history. The button reuses both; the only
+server change is that the stage route calls `markPacketSent` when the stage becomes `applied`, so
+one press writes BOTH facts and they cannot disagree. `PacketBuilder` gets a confirmed
+"Mark as applied" action beside "Send packet →", and an `Applied ✓` pill once set.
+
+**Why it hangs off the stage change and not the send** — this is the whole point of the design and
+is now a guard: `outreach_message.channel` includes `linkedinConnect`, `coldCall` and `followUp`, so
+advancing on send would mark the pipeline applied on a connect request. `applied` is the number the
+funnel is judged by; inflating it from a LinkedIn touch corrupts the exact metric this work set out
+to make truthful. A human pressing the button is the only signal that means it.
+
+**Guard:** `H:applied-is-declared-not-inferred`, three mutations proven — including the real one,
+making the send path write `stage = 'applied'`, which the guard rejects.
+
+**Deferred, recorded as `D:no-application-answer-assist`:** the application-form scraper + answer
+generator extension (common vs unique questions, and attaching the built artifacts). Ledger row
+names what already exists to EXTEND rather than duplicate — `ownerFacts` and `requirement_evidence`
+are the answer substrate, `appJdParse` already parses postings, artifacts already carry Drive URLs.
+Not scoped: it is a separate delivery surface and the owner said "eventually".

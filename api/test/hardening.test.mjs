@@ -3589,3 +3589,39 @@ test('H:changes-carries-a-reason: the note is stored, sent, applied, and retired
     'notes are marked resolved before the package is stored, so a failed generation silently eats ' +
     'the reviewer request and the owner cannot tell it was never applied')
 })
+
+// H:applied-is-declared-not-inferred — `applied` must come from a human, never from a send.
+//
+// Nothing in the packet flow could ever reach the `applied` stage: measured 2026-08-22, only 2 of
+// 1,924 opportunities carried it. The obvious automation is to advance on outreach send, and it is
+// WRONG — `outreach_message.channel` includes `linkedinConnect`, `coldCall` and `followUp`, so a
+// connect request or a follow-up nudge would mark the pipeline applied. That would not be a cosmetic
+// bug: `applied` is the number the funnel is judged by, and inflating it from a LinkedIn touch
+// corrupts exactly the metric this work set out to make truthful.
+//
+// So the invariant is about WHERE the write hangs, not that it exists: the stage change is the
+// trigger (a human pressed "Mark as applied"), and `appOutreach.ts` must never set a stage.
+test('H:applied-is-declared-not-inferred: only a human stage change can mark applied', () => {
+  const OPP = stripComments(readFileSync(new URL('../src/functions/tests/appOpportunities.ts', import.meta.url), 'utf8'))
+  const OUT = stripComments(readFileSync(new URL('../src/functions/tests/appOutreach.ts', import.meta.url), 'utf8'))
+  const UI  = stripComments(readFileSync(new URL('../../app/src/screens/PacketBuilder.jsx', import.meta.url), 'utf8'))
+
+  // The send path may mark a PACKET sent; it may never move an opportunity's stage.
+  assert.ok(!/update\s+opportunity\s+set[^;]*\bstage\s*=/.test(OUT),
+    'appOutreach writes opportunity.stage — a linkedinConnect or followUp would mark the pipeline ' +
+    'applied. Stage is declared by a human, never inferred from a send.')
+  assert.ok(!/'applied'/.test(OUT),
+    "appOutreach references the 'applied' stage; the send path must not know about it")
+
+  // The stage route is where the packet write-back hangs, and only for 'applied'.
+  assert.ok(/stage === 'applied'\s*\?\s*await markPacketSent/.test(OPP),
+    'the stage route no longer marks the packet sent on `applied`, so a declared application leaves ' +
+    'the packet reading "Ready to ship" beside an Applied stage')
+
+  // And a human has to be able to declare it.
+  assert.ok(/markApplied/.test(UI) && /moveStage\(id,\s*'applied'\)/.test(UI),
+    'PacketBuilder has no "Mark as applied" action, so the stage is unreachable from the product again')
+  assert.ok(/window\.confirm\(/.test(UI),
+    'Mark as applied fires without confirmation — a stage transition the funnel is judged by should ' +
+    'not be one stray click away')
+})
