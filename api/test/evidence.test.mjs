@@ -302,8 +302,18 @@ test('the evidence thresholds are seeded defaults with a real owner path, not co
   const appChecks = readFileSync(new URL('../src/functions/tests/appChecks.ts', import.meta.url), 'utf8')
   assert.match(checkPrefs, /chk_evidence_threshold/, 'no per-owner column, no owner path')
   assert.match(checkPrefs, /chk_evidence_min_tokens/)
-  assert.match(appChecks, /writeEvidence\([\s\S]{0,200}threshold: thresholds\.evidenceThreshold/,
+  // The call must pass OWNER-DERIVED options. Asserted against the ONE mapper rather than against a
+  // literal object, because the literal was duplicated here and in `appRequirements` and drifted the
+  // moment a fourth knob was added: `bulletRunMax` reached two of the three callers and not the one
+  // the gate runs on. `resolveOptionsFrom` is now the only shape, and the next knob cannot be added
+  // to some call sites and not others.
+  assert.match(appChecks, /writeEvidence\([^)]*resolveOptionsFrom\(thresholds\)/,
     'the resolver must receive the owner value, not just the checks')
+  // And the mapper actually carries every evidence knob the resolver reads. A mapper that silently
+  // drops one is the same defect with an indirection in front of it.
+  for (const k of ['evidenceThreshold', 'evidenceMinTokens', 'evidenceMaxSentences', 'evidenceBulletRun']) {
+    assert.match(checkPrefs, new RegExp(`t\\.${k}\\b`), `resolveOptionsFrom drops ${k}`)
+  }
 
   // And an owner value actually changes the answer.
   const recs = profileRecords(MC, TEMPLATE)
@@ -340,6 +350,10 @@ function joinedRow(mc = MC, seq = 0) {
     evidence_method: ev.method,
     evidence_record_sha256: ev.record_sha256,
     evidence_resolver_version: ev.resolver_version,
+    // NULL, because this fixture is a DETERMINISTIC row and null is what "no model was involved"
+    // means. Carrying the column with a value would make every test in this file assert the shape
+    // of a proposed row while claiming to describe a resolved one.
+    evidence_proposal_version: null,
     evidence_resolved_at: new Date('2026-08-20T00:00:00Z'),
   }
 }

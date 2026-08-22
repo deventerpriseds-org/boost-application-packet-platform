@@ -38,12 +38,17 @@ import {
  * Every call goes through api.js, which appends ?owner= - resolveOwner() falls back to the DEMO
  * owner without it and silently 404s the real owner's rows.
  */
-export function useQcEntries(artifacts, { withInsertions = false } = {}) {
+export function useQcEntries(artifacts, { withInsertions = false, withRemediation = false } = {}) {
   const list = useMemo(() => arr(artifacts), [artifacts])
   const ids = list.map((a) => a && a.id).filter(Boolean).join(',')
   const [checks, setChecks] = useState({})
   const [ins, setIns] = useState({})
   const insWanted = useRef(new Set())
+  // D:remediation-never-ran — the loop ledger. Fetched on the same terms as insertions and kept in
+  // its own map, so a tab that does not ask for it pays nothing and `loopsModel` can tell "no pass
+  // has run" from "we did not ask".
+  const [rem, setRem] = useState({})
+  const remWanted = useRef(new Set())
 
   useEffect(() => {
     let dead = false
@@ -76,9 +81,25 @@ export function useQcEntries(artifacts, { withInsertions = false } = {}) {
     return () => { dead = true }
   }, [ids, withInsertions])
 
+  useEffect(() => {
+    if (!withRemediation) return undefined
+    let dead = false
+    const wanted = ids ? ids.split(',') : []
+    for (const id of wanted) {
+      if (remWanted.current.has(id)) continue
+      remWanted.current.add(id)
+      setRem((m) => ({ ...m, [id]: { loading: true, error: null, data: null } }))
+      api.artifactRemediationGet(id)
+        .then((r) => { if (!dead) setRem((m) => ({ ...m, [id]: { loading: false, error: null, data: r } })) })
+        .catch((e) => { if (!dead) setRem((m) => ({ ...m, [id]: { loading: false, error: errText(e), data: null } })) })
+    }
+    return () => { dead = true }
+  }, [ids, withRemediation])
+
   const entries = useMemo(() => list.filter((a) => a && a.id).map((a) => {
     const c = checks[a.id] || { loading: true, error: null, data: null }
     const i = ins[a.id] || { loading: false, error: null, data: null }
+    const rm = rem[a.id] || { loading: false, error: null, data: null }
     return {
       artifact: a,
       label: assetLabel(a.type),
@@ -88,8 +109,11 @@ export function useQcEntries(artifacts, { withInsertions = false } = {}) {
       insertions: i.data,
       insertionsLoading: i.loading,
       insertionsError: i.error,
+      remediation: rm.data,
+      remediationLoading: rm.loading,
+      remediationError: rm.error,
     }
-  }), [list, checks, ins])
+  }), [list, checks, ins, rem])
 
   const setResult = useCallback((artifactId, fresh) => {
     setChecks((m) => ({ ...m, [artifactId]: { loading: false, error: null, data: fresh } }))
@@ -305,9 +329,15 @@ function CompareTab({ swaps, loading, error, pick }) {
 /**
  * Remediation loops.
  *
- * P3 IS NOT BUILT - there is no remediation_loop table and no escalation table in the API. This tab
- * is wired to the one real pass record that exists (insertion.loop) and says plainly that the loop
- * controller does not. Building it against a fixture would be dead UI dressed as evidence.
+ * READS THE REAL LEDGER. The comment here used to say "P3 IS NOT BUILT - there is no
+ * remediation_loop table and no escalation table in the API", which was true when written and
+ * stopped being true when both tables shipped. What was actually missing was a CALLER — four routes
+ * were deployed and `app/src/api.js` referenced none of them, so P3 had run ZERO times in production
+ * while this tab told the owner the controller did not exist (`D:remediation-never-ran`).
+ *
+ * `loopsModel` still falls back to `insertion.loop` when the ledger has not been fetched, and SAYS
+ * SO — "no pass has run" and "we did not ask" are different facts and only one of them is about the
+ * packet.
  */
 function LoopsTab({ entries, filtered }) {
   const m = loopsModel(entries)
@@ -321,6 +351,11 @@ function LoopsTab({ entries, filtered }) {
         </div>
       )}
       {m.empty && <Quiet>{m.emptyText}</Quiet>}
+      {m.openEscalations > 0 && (
+        <div className="px-small" style={{ marginTop: 6, color: 'var(--text-warn)' }}>
+          {m.openEscalations} requirement(s) the loop could not close are waiting on you.
+        </div>
+      )}
       <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 8 }}>
         {m.assets.map((a) => (
           <div key={a.artifact_id} className="px-box-soft" style={{ padding: 10 }}>

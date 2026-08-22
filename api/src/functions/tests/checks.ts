@@ -25,6 +25,7 @@ import { checkAgainstFacts, OwnerFact } from './ownerFacts'
 import { scanEcho, scanWording, WORDING_RUN_TOKENS } from './figureEcho'
 import {
   EvidenceInput, NO_EVIDENCE_NOTE, EVIDENCE_THRESHOLD, EVIDENCE_MAX_SENTENCES,
+  EVIDENCE_BULLET_RUN,
   RESOLVE_MIN_TOKENS as EVIDENCE_MIN_TOKENS,
 } from './evidence'
 
@@ -77,11 +78,35 @@ export interface CheckThresholds {
    * P8.3 / option (c) — the two knobs the purpose-made matcher adds.
    *
    * `evidenceMaxSentences`: how many CONTIGUOUS sentences one excerpt may span (clamped 1..3).
+   * `evidenceBulletRun`: how many BULLET items one excerpt may span (clamped 1..12). It changes how
+   * much surrounding text a quote carries, never whether the match is found — the whole line stays
+   * a candidate at every setting.
    *
    * Generic-vocabulary detection (M10) is DELIBERATELY not here: see
    * `requirementSupport.GENERIC_RECORDS` for why it cannot be a single safe knob.
    */
   evidenceMaxSentences: number
+  evidenceBulletRun: number
+  /**
+   * THE ESCALATION TIER'S OWN SETTINGS. SEEDED ON, at the owner's instruction (2026-08-21: "I don't
+   * know why the escalation needs to be turned on or off vs always on ... make sure the toggle is
+   * automatically on by default").
+   *
+   * It is still a COLUMN rather than a constant, and still read with `=== true` rather than `??`,
+   * and both of those matter more now that it is on. A knob that spends money per requirement must
+   * remain something the owner can switch off without a deploy, and reading it strictly means an
+   * owner row that says `false` beats any future change to this seed — the setting wins over the
+   * code, which is the whole point of the no-hardcoded-config rule.
+   *
+   * What makes ON safe here is that a proposed row cannot reach the gate: `checks.ts` counts it as
+   * something to SHOW and never as coverage, so the tier can only ever add information beside a
+   * requirement that had none. It changes what the owner is told, never what they are scored.
+   *
+   * `evidenceEscalateMax` caps calls per run. A posting with 38 unevidenced requirements would
+   * otherwise make 38 calls the first time the owner opened it.
+   */
+  evidenceEscalate: boolean
+  evidenceEscalateMax: number
 }
 
 /** Seeded first values, taken from the live prompt. The owner can change every one of them. */
@@ -102,6 +127,9 @@ export const DEFAULT_THRESHOLDS: CheckThresholds = {
   evidenceThreshold: EVIDENCE_THRESHOLD,
   evidenceMinTokens: EVIDENCE_MIN_TOKENS,
   evidenceMaxSentences: EVIDENCE_MAX_SENTENCES,
+  evidenceBulletRun: EVIDENCE_BULLET_RUN,
+  evidenceEscalate: true,
+  evidenceEscalateMax: 12,
 }
 
 // Phrases and punctuation that read as machine-written. Kept as data so they can move to the
@@ -579,6 +607,29 @@ export function runChecks(input: CheckInput): CheckResult[] {
      */
     const ev = input.evidence
     const evidenceOf = (r: { seq: number }) => (ev && ev.bySeq ? ev.bySeq[r.seq] || null : null)
+    /**
+     * A MODEL chose this excerpt. THE GATE MUST NOT TREAT IT AS A RULE'S FINDING.
+     *
+     * This is the one place the escalation tier could have loosened the whole engine silently, and
+     * the reasoning is worth stating because the row LOOKS identical: `verifyProposal` accepts a
+     * proposal only if the quote is byte-exact in the record it names, so a proposed excerpt is
+     * every bit as verbatim as a deterministic one, correctly attributed, with real offsets.
+     *
+     * But byte-exactness is not RELEVANCE. The deterministic path clears a lexical floor as well —
+     * token overlap at `EVIDENCE_THRESHOLD`, a distinctive token, the conjunction and negation
+     * rules — and a proposed row clears none of them, by design: it exists precisely for the cases
+     * where no word is shared. Its only judge of relevance is the model, and `reasoning` is stored,
+     * never verified. Counting it in the numerator would move this check's standard from "verbatim
+     * AND lexically supported" to "verbatim", and nothing on any surface would say so.
+     *
+     * So: a proposed row is evidence to SHOW, never evidence to PASS ON. It moves a requirement out
+     * of "nothing found" and into "a model found this — confirm it", which is a strictly better
+     * place for the owner than a blank, and it cannot turn the gate green by itself. That is the
+     * house rule at the only altitude where it decides anything: a model may PROPOSE, only an exact
+     * rule may ACCUSE, and `must_have_coverage` is the accusation.
+     */
+    const isProposed = (r: { seq: number }) => evidenceOf(r)?.method === 'proposed'
+    const ruleEvidenceOf = (r: { seq: number }) => (isProposed(r) ? null : evidenceOf(r))
     const label = (r: { seq: number; verbatim: string | null; item_text: string }) =>
       `#${r.seq} ${(r.verbatim || r.item_text).slice(0, 80)}`
 
@@ -593,7 +644,11 @@ export function runChecks(input: CheckInput): CheckResult[] {
       out.push(na('responsibilities_addressed', why, RESP_EXPECT))
       out.push(na('evidence_placed', why, PLACED_EXPECT))
     } else {
-      const unevidenced = coverable.filter(r => !evidenceOf(r))
+      // `ruleEvidenceOf`, not `evidenceOf`: a proposed row leaves the requirement in the
+      // unevidenced list, where it surfaces to the owner with its excerpt attached rather than
+      // being counted as settled. Erring toward surfacing is what every other tightening in this
+      // check does.
+      const unevidenced = coverable.filter(r => !ruleEvidenceOf(r))
       // ONE denominator on every branch, and it says in words which population it is.
       //
       // The fail branch used to divide by `mustHaves.length` while its numerator came from
@@ -606,6 +661,11 @@ export function runChecks(input: CheckInput): CheckResult[] {
       // it inflated the one number a reviewer trusts most. Both branches now divide by `coverable`,
       // and the excluded rows are counted by name so they are visible rather than absorbed.
       const excluded: string[] = []
+      // Named in the observed string rather than absorbed into it. A count that changed because a
+      // model was consulted must say so on the surface a reviewer reads, or "coverage rose" is not
+      // falsifiable — the reviewer cannot tell a better profile from a chattier model.
+      const proposed = coverable.filter(isProposed)
+      if (proposed.length) excluded.push(`${proposed.length} model-proposed, awaiting your confirmation`)
       if (eligibility.length) excluded.push(`${eligibility.length} not reachable by any generated field`)
       const factOwned = mustHaves.length - coverable.length - eligibility.length
       if (factOwned > 0) excluded.push(`${factOwned} answered from your profile facts`)
@@ -617,10 +677,17 @@ export function runChecks(input: CheckInput): CheckResult[] {
         ? na('must_have_coverage', 'the posting produced no must-have requirements to judge', COVERAGE_EXPECT)
         : unevidenced.length
           ? { ...bad('must_have_coverage', `${coverable.length - unevidenced.length}/${coverable.length} must-haves evidenced${tail}`,
-                COVERAGE_EXPECT, unevidenced.map(r => `${label(r)} — ${NO_EVIDENCE_NOTE}`)), judged: judgedIds }
+                COVERAGE_EXPECT, unevidenced.map(r => isProposed(r)
+                  ? `${label(r)} — a model proposes "${(evidenceOf(r)!.quote || '').slice(0, 90)}" from ${evidenceOf(r)!.source_label}; confirm it`
+                  : `${label(r)} — ${NO_EVIDENCE_NOTE}`)), judged: judgedIds }
           : { ...ok('must_have_coverage', `${coverable.length}/${coverable.length} must-haves evidenced${tail}`, COVERAGE_EXPECT), judged: judgedIds })
 
-      const unaddressed = resp.filter(r => !evidenceOf(r))
+      // `ruleEvidenceOf`, for the same reason `must_have_coverage` uses it. An INDEPENDENT VERIFIER
+      // caught that this line and `evidence_placed` below were left on the unfiltered `evidenceOf`,
+      // 34 and 46 lines under the helper written to prevent exactly this — the "fix all consumers,
+      // not just the one you found" rule broken inside one else-branch. A responsibility whose only
+      // support is a model's proposal is not addressed; it is a suggestion awaiting confirmation.
+      const unaddressed = resp.filter(r => !ruleEvidenceOf(r))
       out.push(!resp.length
         ? na('responsibilities_addressed', 'the posting produced no responsibilities', RESP_EXPECT)
         : unaddressed.length
@@ -632,7 +699,12 @@ export function runChecks(input: CheckInput): CheckResult[] {
       // coverage (R4: two counts describing different populations are never merged). The profile can
       // support this requirement and this asset still failed to say it — which is a defect the
       // remediation loop can close, unlike a gap in the profile, which it cannot.
-      const evidenced = [...coverable, ...resp].filter(r => evidenceOf(r))
+      // ALSO `ruleEvidenceOf`, and this one is worth its own sentence because the question is
+      // different. `evidence_placed` asks: of the things the profile evidences, which reached this
+      // asset? Feeding proposed rows in would make the check ACCUSE the document of omitting an
+      // excerpt that only a model ever claimed was relevant — an accusation built on model
+      // judgement, which is precisely what the house rule reserves for exact rules.
+      const evidenced = [...coverable, ...resp].filter(r => ruleEvidenceOf(r))
       // `covers()` cannot judge a requirement with fewer than MIN_JUDGEABLE_TOKENS content words —
       // it returns false for them, which is the right answer for COVERAGE (an unjudgeable
       // requirement must surface, not pass quietly) and the WRONG one here. Measured on the live

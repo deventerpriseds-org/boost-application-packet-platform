@@ -673,6 +673,23 @@ export async function packetBuildAll(req: HttpRequest, context: InvocationContex
                        warnings: built!.warnings || [], qcApplied: built!.qcApplied })
       } catch (e) { results.push({ type: a.type, error: String(e) }) }
     }
+    // D:build-runs-no-qc — THE EVIDENCE RESOLVER NOW HAS A CALLER IN THE PRODUCT.
+    //
+    // Until this line it had none. `POST /api/app/opportunity/{id}/evidence` was deployed, returned
+    // 200, and populated an `evidenceHealth` block whenever it was called — and the only calls it
+    // had ever received were workflow dispatches made while diagnosing why `requirement_evidence`
+    // was empty. A full build moved `check_result` 60->60 and `requirement_evidence` 0->0 (run
+    // 32487630490). Nothing distinguished "no data yet" from "no caller", which is why it survived.
+    //
+    // AFTER the artifacts exist, so the excerpts are resolved against the profile the documents were
+    // actually built from, and this is where the owner's escalation setting takes effect: the route
+    // supplies the model transport when they have switched it on, so a saved opportunity that is
+    // built picks up proposed evidence for the requirements no rule could reach.
+    //
+    // FAILURE IS NON-FATAL AND VISIBLE. `selfPost` swallows transport errors into `{error}`, and a
+    // build must not fail because QC could not run — but it must not report clean either, so the
+    // outcome joins `warnings` where `summariseBuild` already surfaces partial success.
+    const evidence = await selfPost(`app/opportunity/${oppId}/evidence?owner=${encodeURIComponent(owner)}`, {})
     const packetStatus = await recomputePacket(client, pkt.id)
     let cadenceSeeded = false, outreachDrafted = false
     if (body?.seedCadence === true) { const r = await selfPost(`app/opportunity/${oppId}/cadence?owner=${encodeURIComponent(owner)}`, {}); cadenceSeeded = !r?.error }
@@ -683,7 +700,18 @@ export async function packetBuildAll(req: HttpRequest, context: InvocationContex
     const summary = summariseBuild(results)
     return { status: 200, headers: HEADERS, jsonBody: {
       ok: summary.ok, oppId, company: opp.company, artifacts: results,
-      built: summary.built, failed: summary.failed, warnings: summary.warnings,
+      built: summary.built, failed: summary.failed,
+      warnings: evidence?.error
+        ? [...summary.warnings, `evidence resolve did not run: ${String(evidence.error).slice(0, 200)}`]
+        : summary.warnings,
+      // The measured result, not a boolean. `evidenced`/`proposed`/`escalated` are what make a
+      // coverage change attributable later — a reviewer can tell a better profile from a chattier
+      // model only if the run recorded which one moved.
+      evidence: evidence?.error ? { error: String(evidence.error).slice(0, 200) } : {
+        total: evidence?.total ?? null, evidenced: evidence?.evidenced ?? null,
+        proposed: evidence?.proposed ?? 0, escalated: evidence?.escalated ?? 0,
+        refused: evidence?.refused ?? null,
+      },
       packetStatus, cadenceSeeded, outreachDrafted, sent: false, note: summary.note } }
   } catch (err) {
     return { status: 500, headers: HEADERS, jsonBody: { error: String(err) } }

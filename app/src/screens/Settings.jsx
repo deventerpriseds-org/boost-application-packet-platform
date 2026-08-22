@@ -1567,7 +1567,302 @@ function FactsSettings() {
   )
 }
 
-const SECTIONS = [{ key: 'account', label: 'Account' }, { key: 'intake', label: 'Intake' }, { key: 'roles', label: 'Roles' }, { key: 'facts', label: 'Facts' }, { key: 'locations', label: 'Locations' }, { key: 'templates', label: 'Templates' }, { key: 'coach', label: 'Coach' }, { key: 'workspace', label: 'Workspace' }, { key: 'usage', label: 'Usage' }, { key: 'system', label: 'System' }]
+
+// ── Quality checks ──────────────────────────────────────────────────────────────────────────────
+//
+// D:chk-settings-have-no-writer. Fourteen per-owner settings were read by production and writable by
+// nothing, so each was a constant with a settings-shaped costume. This is the screen half.
+//
+// THE FIELD LIST COMES FROM THE API, not from this file. `search-prefs` publishes `checkColumns`,
+// derived from the statement that declares the columns, so a knob added later renders here the day
+// it is added rather than the day someone remembers to hand-write a field for it. That is the whole
+// reason the previous gap grew one setting at a time.
+
+/** Copy for the settings worth explaining. Anything without an entry falls back to its column name. */
+const CHK_LABELS = {
+  chk_evidence_escalate: ['Ask a model when the matcher cannot find evidence',
+    'When a requirement shares no words with your profile, a model looks for a passage that supports it anyway. It may only quote your profile exactly, and what it finds is shown for your confirmation rather than counted toward your score.'],
+  chk_evidence_escalate_max: ['Most model lookups per run',
+    'Caps the cost of one build. Requirements beyond the cap are left unevidenced and reported.'],
+  chk_evidence_bullet_run: ['Citation width',
+    'How many bullet items one quote may span. LOWER IS BROADER: 1 quotes the whole field, 3 quotes just the items that carry the match.'],
+  chk_evidence_threshold: ['Evidence match threshold',
+    'How much of a requirement an excerpt must account for before it counts as evidence. Higher is stricter.'],
+  chk_evidence_min_tokens: ['Minimum words to judge a requirement', 'A requirement shorter than this is surfaced rather than judged.'],
+  chk_evidence_max_sentences: ['Maximum sentences per quote', 'How many consecutive sentences one excerpt may span.'],
+  chk_skill_max_chars: ['Longest skill label', 'Skills longer than this are flagged.'],
+  chk_skills_total_min: ['Fewest skills', ''],
+  chk_skills_total_max: ['Most skills', ''],
+  chk_relevant_max_chars: ['Longest relevant-experience bullet', ''],
+  chk_relevant_allowance: ['Relevant bullets allowed over the limit', ''],
+  chk_expertise_words: ['Words per expertise item', ''],
+  chk_cover_words_min: ['Cover letter, fewest words', ''],
+  chk_cover_words_max: ['Cover letter, most words', ''],
+}
+
+function ChecksSettings() {
+  const [cols, setCols] = useState(null)
+  const [vals, setVals] = useState({})
+  const [saved, setSaved] = useState({})
+  const [note, setNote] = useState(null)
+  const [saving, setSaving] = useState(false)
+
+  useEffect(() => {
+    api.searchPrefsGet().then((p) => {
+      if (!p || p.ok === false) { setNote({ ok: false, msg: p?.error || 'could not load settings' }); setCols([]); return }
+      const c = Array.isArray(p.checkColumns) ? p.checkColumns : []
+      // The API returns camelCase values keyed by CheckThresholds; map them back onto their columns.
+      const byCol = {}
+      for (const { column } of c) {
+        const camel = column.replace(/^chk_/, '').replace(/_([a-z])/g, (_, ch) => ch.toUpperCase())
+        const k = camel === 'skillMaxChars' ? 'skillMaxChars' : camel
+        const v = p.checks ? p.checks[k] : undefined
+        if (v !== undefined && v !== null) byCol[column] = v
+      }
+      setCols(c); setVals(byCol); setSaved(byCol)
+    }).catch((e) => { setNote({ ok: false, msg: String(e.message || e) }); setCols([]) })
+  }, [])
+
+  if (!cols) return <Card style={{ color: 'var(--proto-ink2)' }}>Loading quality checks…</Card>
+  if (!cols.length) return <Card style={{ color: 'var(--proto-ink2)' }}>No check settings are published by the API.{note ? ` (${note.msg})` : ''}</Card>
+
+  const dirty = cols.some(({ column }) => String(vals[column]) !== String(saved[column]))
+  const save = async () => {
+    if (!sessionValid()) { setNote({ ok: false, msg: 'Sign-in expired — sign out and back in, then Save.' }); return }
+    setSaving(true); setNote(null)
+    try {
+      // Only what CHANGED is sent. The route applies partial updates, so an unsent key keeps its
+      // value — which also means a failed render of one control cannot blank the others.
+      const patch = {}
+      for (const { column } of cols) if (String(vals[column]) !== String(saved[column])) patch[column] = vals[column]
+      const r = await api.searchPrefsSet({ checks: patch })
+      if (!r || r.ok === false) throw new Error(r?.error || 'save failed')
+      setSaved({ ...saved, ...patch })
+      setNote({ ok: true, msg: `Saved ${(r.wroteChecks || []).length} setting(s).` })
+    } catch (e) { setNote({ ok: false, msg: String(e.message || e) }) } finally { setSaving(false) }
+  }
+
+  return (
+    <Card>
+      <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 4 }}>Quality checks</div>
+      <div className="px-small" style={{ color: 'var(--proto-ink2)', marginBottom: 14 }}>
+        These decide when a requirement counts as evidenced by your profile, and how your packet is graded.
+        Every one is yours to change; the values shipped are starting points.
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+        {cols.map(({ column, type }) => {
+          const [label, help] = CHK_LABELS[column] || [column, '']
+          const v = vals[column]
+          return (
+            <div key={column} style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16 }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 13, fontWeight: 600 }}>{label}</div>
+                {help ? <div className="px-small" style={{ color: 'var(--proto-ink2)', marginTop: 2 }}>{help}</div> : null}
+              </div>
+              {type === 'boolean' ? (
+                <input type="checkbox" checked={v === true}
+                  onChange={(e) => setVals({ ...vals, [column]: e.target.checked })}
+                  style={{ width: 18, height: 18, marginTop: 2, flexShrink: 0 }} />
+              ) : (
+                <input className="px-input" type="number" value={v === undefined ? '' : v}
+                  step={type === 'numeric' ? 0.05 : 1}
+                  onChange={(e) => {
+                    const n = Number(e.target.value)
+                    setVals({ ...vals, [column]: Number.isFinite(n) ? (type === 'numeric' ? n : Math.round(n)) : '' })
+                  }}
+                  style={{ width: 84, textAlign: 'right', flexShrink: 0 }} />
+              )}
+            </div>
+          )
+        })}
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 16 }}>
+        <button className="px-btn px-btn-accent" disabled={!dirty || saving} onClick={save}>
+          {saving ? 'Saving…' : 'Save'}
+        </button>
+        {note ? <span className="px-small" style={{ color: note.ok ? 'var(--text-ok)' : 'var(--text-bad)' }}>{note.msg}</span> : null}
+      </div>
+    </Card>
+  )
+}
+
+// ── Comparison dimensions (D24) ─────────────────────────────────────────────────────────────────
+//
+// The API half has been live and UNCALLED. A run warning names this screen by name — "no dimension
+// set configured for role family technology; used the seeded default set — change it in
+// Settings ▸ Comparison dimensions" — so the product has been telling the owner to visit a page
+// that did not exist.
+
+function DimensionSettings() {
+  const [data, setData] = useState(null)
+  const [family, setFamily] = useState('technology')
+  const [keys, setKeys] = useState([])
+  const [note, setNote] = useState(null)
+  const [saving, setSaving] = useState(false)
+
+  const load = useCallback(() => {
+    api.dimensionPrefsGet().then((d) => {
+      if (!d || d.ok === false) { setNote({ ok: false, msg: d?.error || 'could not load dimensions' }); setData({ catalogue: [] }); return }
+      setData(d)
+    }).catch((e) => { setNote({ ok: false, msg: String(e.message || e) }); setData({ catalogue: [] }) })
+  }, [])
+  useEffect(() => { load() }, [load])
+
+  useEffect(() => {
+    if (!data) return
+    const stored = (data.stored && data.stored[family]) || null
+    const seed = (data.seed && (data.seed[family] || data.seed[data.defaultKey])) || []
+    setKeys(stored || seed)
+  }, [data, family])
+
+  if (!data) return <Card style={{ color: 'var(--proto-ink2)' }}>Loading comparison dimensions…</Card>
+  const catalogue = data.catalogue || []
+  if (!catalogue.length) return <Card style={{ color: 'var(--proto-ink2)' }}>No dimensions are published by the API.{note ? ` (${note.msg})` : ''}</Card>
+
+  const families = Array.from(new Set([...Object.keys(data.seed || {}), ...Object.keys(data.stored || {}), 'technology'])).sort()
+  const isStored = !!(data.stored && data.stored[family])
+  const toggle = (k) => setKeys(keys.includes(k) ? keys.filter((x) => x !== k) : [...keys, k])
+
+  const save = async () => {
+    if (!sessionValid()) { setNote({ ok: false, msg: 'Sign-in expired — sign out and back in, then Save.' }); return }
+    setSaving(true); setNote(null)
+    try {
+      const r = await api.dimensionPrefsSet({ family, keys })
+      if (!r || r.ok === false) throw new Error(r?.error || 'save failed')
+      setNote({ ok: true, msg: `Saved ${keys.length} dimension(s) for ${family}.` })
+      load()
+    } catch (e) { setNote({ ok: false, msg: String(e.message || e) }) } finally { setSaving(false) }
+  }
+
+  return (
+    <Card>
+      <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 4 }}>Comparison dimensions</div>
+      <div className="px-small" style={{ color: 'var(--proto-ink2)', marginBottom: 12 }}>
+        Which dimensions your packet is compared on, per role family.
+        {isStored ? ' This family uses your saved set.' : ' This family has no saved set yet, so the seeded default is shown — saving makes it yours.'}
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+        <span className="px-small" style={{ color: 'var(--proto-ink2)' }}>Role family</span>
+        <select className="px-input" value={family} onChange={(e) => setFamily(e.target.value)} style={{ width: 200 }}>
+          {families.map((f) => <option key={f} value={f}>{f}</option>)}
+        </select>
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+        {catalogue.map((d) => (
+          <label key={d.key} style={{ display: 'flex', alignItems: 'flex-start', gap: 10, cursor: 'pointer' }}>
+            <input type="checkbox" checked={keys.includes(d.key)} onChange={() => toggle(d.key)}
+              style={{ width: 16, height: 16, marginTop: 2, flexShrink: 0 }} />
+            <div style={{ minWidth: 0 }}>
+              <div style={{ fontSize: 13, fontWeight: 600 }}>{d.label}</div>
+              {d.help ? <div className="px-small" style={{ color: 'var(--proto-ink2)' }}>{d.help}</div> : null}
+            </div>
+          </label>
+        ))}
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 16 }}>
+        <button className="px-btn px-btn-accent" disabled={saving || !keys.length} onClick={save}>
+          {saving ? 'Saving…' : 'Save'}
+        </button>
+        {!keys.length ? <span className="px-small" style={{ color: 'var(--proto-ink2)' }}>Pick at least one dimension.</span> : null}
+        {note ? <span className="px-small" style={{ color: note.ok ? 'var(--text-ok)' : 'var(--text-bad)' }}>{note.msg}</span> : null}
+      </div>
+    </Card>
+  )
+}
+
+
+// ── Pipeline settings (D:appconfig-unreachable-in-product) ──────────────────────────────────────
+//
+// Ten values the pipeline reads from AppConfig — temperatures, template ids, the output folder, the
+// sender and recipient. Every one was code-seeded with no UI path, so the seed was doing a setting's
+// job: a live run reports `no roleFocus configured for templates/...; used the code seed
+// "engineering"` and there was nowhere to change it.
+//
+// The KEYS come from the API (`/config` returns only what `CONFIG_KEYS` declares), so this renders
+// what the pipeline actually reads rather than a hand-written list that drifts from it.
+
+const PIPELINE_LABELS = {
+  'openai.generateTemperature': ['Generation temperature', 'How much the model varies when writing your packet. Lower is more literal.'],
+  'openai.qcTemperature': ['QC temperature', 'Used for the quality passes. Lower is stricter.'],
+  'openai.defaultRoleFocus': ['Default role focus', 'Used when a template has no focus of its own. A run warns when it falls back to this.'],
+  'google.resumeTemplateId': ['Resume template', 'Google Docs id.'],
+  'google.compactResumeTemplateId': ['Compact resume template', 'Google Docs id.'],
+  'google.portfolioTemplateId': ['Portfolio template', 'Google Docs id.'],
+  'google.coverLetterTemplateId': ['Cover letter template', 'Google Docs id.'],
+  'google.outputFolderId': ['Output folder', 'Google Drive folder your generated documents land in.'],
+  'microsoft.senderEmail': ['Sender address', 'The mailbox outreach is sent from.'],
+  'microsoft.recipientEmail': ['Recipient address', 'Where copies are delivered.'],
+}
+
+function PipelineSettings() {
+  const [vals, setVals] = useState(null)
+  const [saved, setSaved] = useState({})
+  const [note, setNote] = useState(null)
+  const [saving, setSaving] = useState(false)
+
+  useEffect(() => {
+    api.pipelineConfigGet().then((r) => {
+      if (!r || r.success === false) { setNote({ ok: false, msg: r?.error || 'could not load pipeline settings' }); setVals({}); return }
+      const v = r.values || {}
+      setVals(v); setSaved(v)
+    }).catch((e) => { setNote({ ok: false, msg: String(e.message || e) }); setVals({}) })
+  }, [])
+
+  if (!vals) return <Card style={{ color: 'var(--proto-ink2)' }}>Loading pipeline settings…</Card>
+
+  // The union of what the API returned and what we have copy for. A key the API returns that has no
+  // label still renders under its own name — better an unlabelled control than an invisible setting.
+  const keys = Array.from(new Set([...Object.keys(PIPELINE_LABELS), ...Object.keys(vals)]))
+  const dirty = keys.some((k) => (vals[k] || '') !== (saved[k] || ''))
+
+  const save = async () => {
+    if (!sessionValid()) { setNote({ ok: false, msg: 'Sign-in expired — sign out and back in, then Save.' }); return }
+    setSaving(true); setNote(null)
+    try {
+      const patch = {}
+      for (const k of keys) if ((vals[k] || '') !== (saved[k] || '')) patch[k] = vals[k] || ''
+      const r = await api.pipelineConfigSet(patch)
+      if (!r || r.success === false) throw new Error(r?.error || 'save failed')
+      setSaved({ ...saved, ...patch })
+      const ignored = (r.ignored || []).length
+      setNote({ ok: true, msg: `Saved ${r.saved ?? Object.keys(patch).length} setting(s).${ignored ? ` ${ignored} unknown key(s) ignored.` : ''}` })
+    } catch (e) { setNote({ ok: false, msg: String(e.message || e) }) } finally { setSaving(false) }
+  }
+
+  return (
+    <Card>
+      <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 4 }}>Pipeline</div>
+      <div className="px-small" style={{ color: 'var(--proto-ink2)', marginBottom: 14 }}>
+        What the generator uses when it builds a packet. Blank means the code seed is used, and a run
+        will tell you when it fell back to one.
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+        {keys.map((k) => {
+          const [label, help] = PIPELINE_LABELS[k] || [k, '']
+          return (
+            <div key={k} style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16 }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 13, fontWeight: 600 }}>{label}</div>
+                {help ? <div className="px-small" style={{ color: 'var(--proto-ink2)', marginTop: 2 }}>{help}</div> : null}
+              </div>
+              <input className="px-input" type="text" value={vals[k] || ''} placeholder="code seed"
+                onChange={(e) => setVals({ ...vals, [k]: e.target.value })}
+                style={{ width: 260, flexShrink: 0 }} />
+            </div>
+          )
+        })}
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 16 }}>
+        <button className="px-btn px-btn-accent" disabled={!dirty || saving} onClick={save}>
+          {saving ? 'Saving…' : 'Save'}
+        </button>
+        {note ? <span className="px-small" style={{ color: note.ok ? 'var(--text-ok)' : 'var(--text-bad)' }}>{note.msg}</span> : null}
+      </div>
+    </Card>
+  )
+}
+
+const SECTIONS = [{ key: 'account', label: 'Account' }, { key: 'intake', label: 'Intake' }, { key: 'roles', label: 'Roles' }, { key: 'facts', label: 'Facts' }, { key: 'locations', label: 'Locations' }, { key: 'templates', label: 'Templates' }, { key: 'coach', label: 'Coach' }, { key: 'workspace', label: 'Workspace' }, { key: 'quality', label: 'Quality' }, { key: 'usage', label: 'Usage' }, { key: 'system', label: 'System' }]
 
 export default function Settings({ tab = 'account' }) {
   const active = SECTIONS.find((s) => s.key === tab) ? tab : 'account'
@@ -1589,6 +1884,7 @@ export default function Settings({ tab = 'account' }) {
       {active === 'templates' && <TemplatesSettings />}
       {active === 'coach' && <CoachSettings />}
       {active === 'workspace' && <WorkspaceSettings />}
+      {active === 'quality' && <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}><ChecksSettings /><DimensionSettings /><PipelineSettings /></div>}
       {active === 'usage' && <UsageSettings />}
       {active === 'system' && <SystemSettings />}
     </div>

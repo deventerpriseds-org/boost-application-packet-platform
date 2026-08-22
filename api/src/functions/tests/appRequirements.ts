@@ -16,6 +16,11 @@ import { sourceText, loadFacts } from './appFacts'
 import { resolveOptionsFor } from './checkPrefs'
 import { claimTokens, segments, tokensOf, sameWord } from './requirementSupport'
 import { writeComparison, comparisonPayload } from './appDimensions'
+import { escalateOne, PROPOSAL_VERSION, type EscalationOutcome } from './evidenceProposal'
+import { openAiJson, type FetchJson } from './openaiJson'
+// IMPORTED, never redeclared — M3: the citation floors have one home (`reviewer.ts`), and the
+// escalation tier must clear the SAME floor the deterministic path does, not a copy of it.
+import { MIN_QUOTE_CHARS } from './reviewer'
 
 const HEADERS = { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': '*', 'Access-Control-Allow-Methods': 'GET,POST,OPTIONS' }
 
@@ -44,15 +49,40 @@ export async function ensureEvidenceTable(client: any) {
       char_end       int not null,
       extra          text,
       ratio          numeric,
-      method         text not null check (method in ('exact','anchored')),
+      method         text not null check (method in ('exact','anchored','proposed')),
       record_sha256  text not null,
       resolver_version int not null,
+      proposal_version int,
       resolved_at    timestamptz not null default now(),
       check (char_start >= 0 and char_end > char_start),
       check (length(quote) = char_end - char_start),
       unique (requirement_id, source_key, char_start, char_end)
     )`)
   await client.query(`create index if not exists req_evidence_req_idx on requirement_evidence(requirement_id)`)
+  // THE TWO ALTERs THIS TABLE NEEDS ARE SPLIT BY COST, and the split is the whole point.
+  //
+  // I first put BOTH here and it was wrong: `alter table ... drop constraint` takes an ACCESS
+  // EXCLUSIVE lock, and this function's own comment (above) explains it was deliberately kept to
+  // `create table if not exists` — which takes no lock on an existing table — precisely because four
+  // artifacts of one packet enter `evaluateArtifact` at the same moment. A DDL lock on the hot path
+  // would have surfaced as intermittent 500s under concurrency, not as a migration bug, which is the
+  // worst way for it to appear. So the CHECK widening lives ONLY in `SCHEMA_SQL`, where the deploy
+  // applies it once and fails loudly if it did not.
+  //
+  // The COLUMN is the opposite case and has to be here, which the test suite proved rather than my
+  // reading it: `dimensionsDb.test.mjs` builds a database from `origin/main`'s SCHEMA_SQL — the
+  // database a migration actually meets — and `loadRequirementsWithEvidence` failed on it with
+  // `column e.proposal_version does not exist`. That is not a test artefact. `api-deploy.yml`
+  // deploys the code at its "Deploy to Azure Functions" step and only calls `pg-migrate` afterwards,
+  // so between those two steps the running code selects a column the database has not got, and every
+  // requirements read 500s. Adding a nullable column with no default is a catalogue-only change in
+  // Postgres 11+ — no table rewrite — and `if not exists` makes the steady-state call a no-op, so
+  // this is cheap in the way the constraint swap is not.
+  //
+  // WRITES can wait for the migration; READS cannot. Escalation is off by default, and its inserts
+  // are individually savepointed, so a database that has the column but not yet the widened CHECK
+  // refuses the one proposed row instead of losing the opportunity's evidence.
+  await client.query(`alter table requirement_evidence add column if not exists proposal_version int`)
 }
 
 export async function ensureRequirementCols(client: any) {
@@ -83,8 +113,16 @@ export async function ensureRequirementCols(client: any) {
  * second population into it would make both unreadable. Whether a requirement is evidenced is
  * answered by whether a row exists here, and by nothing else.
  *
- * Deterministic and model-free, so it is safe to re-run; each run REPLACES the previous row's
- * evidence rather than accumulating.
+ * DETERMINISTIC AND MODEL-FREE BY DEFAULT, and that sentence used to be unconditional. It is not
+ * any more, and saying so is the point: when the owner turns escalation ON, rows the deterministic
+ * pass could not settle are offered to a model, and two runs over identical inputs CAN differ
+ * (`temperature: 0` is not a determinism guarantee). Those rows are stamped `method='proposed'` and
+ * carry a `proposal_version`, so which rows are reproducible is a property of the data rather than
+ * of anyone's memory — and `checks.ts` refuses to let a proposed row turn the gate green on its own.
+ * With escalation OFF, which is the default and the unconfigured state, this function is exactly as
+ * deterministic as it was.
+ *
+ * Each run REPLACES the previous row's evidence rather than accumulating.
  */
 export async function writeEvidence(
   client: any, oppId: string, records: ProfileRecord[], opts: ResolveOptions = {},
@@ -95,9 +133,17 @@ export async function writeEvidence(
   // rather than `pass` — the exact conflation this file's own comments forbid one level up.
   // Production passes nothing and gets `resolveAll`.
   resolver: typeof resolveAll = resolveAll,
+  // The escalation transport, injected for the same reason the resolver is. Absent means the tier
+  // cannot run AT ALL, whatever the owner's setting says — so a test, a backfill, or any caller that
+  // has not deliberately opted in makes zero model calls by construction rather than by flag.
+  fetchJson?: FetchJson,
 ): Promise<{
   opp_id: string; total: number; evidenced: number; unevidenced: number
   refused: number; profile_records: number
+  // The escalation tier's own counts, ALWAYS present and zero when it did not run. Without them a
+  // coverage rise is unattributable after the fact — a reviewer cannot tell a better profile from a
+  // chattier model, and coverage is the number the gate and the score both read.
+  escalated: number; proposed: number; escalation_refusals: Record<string, number>
 }> {
   const rows = (await client.query(
     `select id, seq, verbatim, item_text from requirement where opp_id=$1 order by seq`, [oppId])).rows
@@ -144,10 +190,104 @@ export async function writeEvidence(
     await client.query('commit')
   } catch (e) { await client.query('rollback'); throw e }
 
+  // --- the escalation pass ----------------------------------------------------------------------
+  //
+  // AFTER the deterministic transaction has COMMITTED, and that ordering is the whole safety
+  // argument rather than a detail. The transaction above opens by DELETING every evidence row for
+  // this opportunity, so anything that throws inside it takes the entire rewrite with it. Running
+  // model calls in there would mean one rejected proposal — a constraint an environment has not
+  // migrated yet, a network blip — costing every deterministic row of the run and 500ing the route.
+  // Out here the deterministic result is already durable and the worst an escalation failure can do
+  // is leave rows unevidenced, which is exactly what they were a moment earlier.
+  let escalated = 0
+  let proposed = 0
+  // SEPARATE FROM `refused`, and the separation is a bug fix rather than tidiness. `evidenced` below
+  // is computed as `deterministic rows - refused`, so an escalation-path refusal was subtracting
+  // from the DETERMINISTIC count — a population it has nothing to do with. Measured by an
+  // independent verifier: two rows stored, the route reported `evidenced: 1`.
+  let escRefused = 0
+  const escalation_refusals: Record<string, number> = {}
+  const note = (k: string) => { escalation_refusals[k] = (escalation_refusals[k] || 0) + 1 }
+
+  // THREE conditions, all required. The owner's toggle is opt-in and its unconfigured state is OFF
+  // (`resolveOptionsFrom`), and the transport must have been passed in — so no caller reaches the
+  // model by forgetting a flag.
+  if (opts.escalate === true && fetchJson) {
+    const cap = typeof opts.escalateMax === 'number' ? opts.escalateMax : 12
+    const minQuoteChars = MIN_QUOTE_CHARS
+    // Only rows the deterministic pass could not settle, and only up to the cap. `slice` before the
+    // loop rather than a break inside it, so what was skipped is knowable rather than implicit.
+    const open = rows.filter((r: any) => !bySeq.get(r.seq))
+    const attempt = open.slice(0, Math.max(0, cap))
+    if (open.length > attempt.length) note('over_cap')
+
+    for (const r of attempt) {
+      const requirement = r.verbatim || r.item_text || ''
+      let outcome: EscalationOutcome
+      try {
+        outcome = await escalateOne(requirement, records, {
+          fetchJson, neverEvidence: NEVER_EVIDENCE, minQuoteChars,
+          minTokens: typeof opts.minTokens === 'number' ? opts.minTokens : 2,
+          resolverVersion: RESOLVER_VERSION,
+        })
+      } catch (e: any) {
+        // Never fatal. An escalation that throws leaves the row exactly as the deterministic pass
+        // left it, and says so in the counts.
+        note('transport_failed'); continue
+      }
+      if (outcome.kind === 'skipped') { note('not_worth_escalating'); continue }
+      escalated++
+      if (outcome.kind === 'transport_failed') { note('transport_failed'); continue }
+      if (outcome.kind === 'unparseable') { note('unparseable'); continue }
+      if (outcome.kind === 'refused') { note(outcome.reason); continue }
+      // The row still stands — the QUOTE was verified independently of the explanation — but a
+      // withdrawn explanation is counted, because a model overclaiming is a fact about the run the
+      // owner should be able to see without reading every note.
+      if (outcome.reasoningWithdrawn) note('reasoning_withdrawn')
+
+      const e = outcome.row
+      // THE SAME accusation-grade assertion the deterministic path makes, applied again here rather
+      // than trusted from `verifyProposal`. Two independent checks of the same invariant is not
+      // redundancy when one of them is the last thing standing between a model's string and a
+      // stored claim.
+      const rec = byKey.get(e.source_key)
+      if (!rec || rec.text.slice(e.char_start, e.char_end) !== e.quote) { escRefused++; note('offset_mismatch'); continue }
+
+      // ONE ROW, ONE SAVEPOINT. A proposed insert that the database rejects — most plausibly a CHECK
+      // on an environment whose migration has not run — must cost that row and nothing else. Without
+      // the savepoint the failed statement poisons the surrounding transaction in Postgres and every
+      // subsequent insert fails too, turning one bad row into a whole failed pass.
+      try {
+        await client.query('begin')
+        await client.query(
+          `insert into requirement_evidence
+             (requirement_id, quote, source_kind, source_label, source_key, char_start, char_end,
+              extra, ratio, method, record_sha256, resolver_version, proposal_version)
+           values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+           on conflict (requirement_id, source_key, char_start, char_end) do nothing`,
+          [r.id, e.quote, e.source_kind, e.source_label, e.source_key, e.char_start, e.char_end,
+           e.extra, e.ratio, e.method, e.record_sha256, e.resolver_version, PROPOSAL_VERSION])
+        await client.query('commit')
+        proposed++
+      } catch (err) {
+        try { await client.query('rollback') } catch {}
+        escRefused++; note('insert_rejected')
+      }
+    }
+  }
+
+  // `refused` only — the deterministic guard's count against the deterministic population. Escalation
+  // refusals are counted in `escRefused` and reported through `escalation_refusals`; they never
+  // reduce a number they are not part of.
   const evidenced = resolved.filter(r => r.evidence).length - refused
   return {
-    opp_id: oppId, total: rows.length, evidenced, unevidenced: rows.length - evidenced,
-    refused, profile_records: records.length,
+    opp_id: oppId, total: rows.length,
+    // Proposed rows ARE evidence — they are shown beside the requirement — so they count here. They
+    // are NOT coverage: `checks.ts` refuses to let one turn `must_have_coverage` green on its own,
+    // and `proposed` below is what lets any caller separate the two populations.
+    evidenced: evidenced + proposed, unevidenced: rows.length - evidenced - proposed,
+    refused: refused + escRefused, profile_records: records.length,
+    escalated, proposed, escalation_refusals,
   }
 }
 
@@ -224,6 +364,11 @@ export async function loadRequirementsWithEvidence(client: any, oppId: string): 
             e.method       as evidence_method,
             e.record_sha256 as evidence_record_sha256,
             e.resolver_version as evidence_resolver_version,
+            -- PREFIXED evidence_ DELIBERATELY, and not merely for tidiness: verifyRequirementRows
+            -- redacts a stale row by nulling every key whose name starts with that prefix. A
+            -- provenance column named anything else would survive the redaction and keep asserting
+            -- that a model judged this, beside a quote that has already been withdrawn.
+            e.proposal_version as evidence_proposal_version,
             e.resolved_at  as evidence_resolved_at
        from requirement r
        left join lateral (
@@ -491,6 +636,12 @@ export async function requirementsBackfill(req: HttpRequest, context: Invocation
       // `appChecks.evaluateArtifact` alone, so the backfill and the resolve route silently used the
       // seeded literals instead — the owner's settings applied on one of three call sites. Found by
       // grepping every `writeEvidence(` rather than by reading the one file the guard watched.
+      // NO TRANSPORT, deliberately, and this is a decision rather than an omission. This route
+      // loops up to 50 opportunities in one dispatch; at the 38 unevidenced requirements the CTO
+      // posting carries, inheriting escalation would make thousands of model calls from a single
+      // unattended sweep. The backfill exists to re-resolve the deterministic spine cheaply, and
+      // that is all it does. `escalated: 0` in its result says so rather than leaving it to be
+      // inferred.
       for (const opp of opps) ev.push(await writeEvidence(client, opp.id, profile.records, evOpts))
     }
     // P8.4 / AC54 — re-extraction REPLACED the requirement rows, which the comparison is graded
@@ -549,7 +700,12 @@ export async function evidenceResolve(req: HttpRequest, context: InvocationConte
       }
     }
     const evOpts = await resolveOptionsFor(client, owner)
-    const out = await writeEvidence(client, opp.id, profile.records, evOpts)
+    // The transport is supplied HERE, on the owner-facing route, and deliberately not in the
+    // backfill below. `writeEvidence` cannot escalate without it, so the expensive path is opt-in at
+    // the CALLER as well as in the owner's setting — two independent conditions, and the sweep does
+    // not inherit the interactive route's permission to spend.
+    const out = await writeEvidence(client, opp.id, profile.records, evOpts, undefined,
+      evOpts.escalate === true ? openAiJson({ feature: 'evidence:escalate' }) : undefined)
     // P8.4 / AC54 — the comparison is keyed to these requirement rows and their evidence, so it is
     // rebuilt in the SAME call. Leaving it behind would serve grades over evidence that has just
     // been replaced — the trap `requirementsBackfill` already documents for evidence itself.
@@ -560,9 +716,16 @@ export async function evidenceResolve(req: HttpRequest, context: InvocationConte
       jsonBody: {
         ok: true, ...out, sources: profile.sources, comparison: cmp,
         unevidenced: out.total - out.evidenced,
-        note: out.evidenced === out.total
+        // The sentence stays literally TRUE with proposed rows in the numerator — `verifyProposal`
+        // accepts nothing that is not byte-exact in the record it names — and it would still be
+        // misleading, because "evidenced by a verbatim excerpt" reads as "a rule found this". Which
+        // rows a model chose is the owner's business, so the count says so.
+        note: (out.evidenced === out.total
           ? 'every requirement is evidenced by a verbatim excerpt of your profile'
-          : `${out.total - out.evidenced} requirement(s): ${NO_EVIDENCE_NOTE}`,
+          : `${out.total - out.evidenced} requirement(s): ${NO_EVIDENCE_NOTE}`)
+          + (out.proposed
+              ? ` — ${out.proposed} of them proposed by a model and awaiting your confirmation; they are shown but do not count toward the coverage gate`
+              : ''),
       },
     }
   } catch (e: any) {

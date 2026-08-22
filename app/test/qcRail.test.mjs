@@ -497,7 +497,14 @@ test('the packet gate is the worst state any asset is in, and unchecked outranks
 
 // ── remediation loops ────────────────────────────────────────────────────────────────────────────
 
-test('the remediation tab reports real pass data and says P3 is not built', () => {
+test('the remediation tab falls back to insertion.loop, and NEVER claims P3 does not exist', () => {
+  // THE ASSERTION THIS REPLACES WAS `assert.match(m.note, /not built/)`, and it is why the stale
+  // claim survived: the note said "there is no remediation_loop table and no escalation table in the
+  // API", both tables had shipped, and a test was holding that sentence in place. A test that pins a
+  // PREMISE rather than a behaviour keeps the premise alive after it stops being true.
+  //
+  // The behaviour worth pinning is the fallback being LABELLED. "No pass has run" and "we did not
+  // load the ledger" are different facts and only one is about the packet.
   const m = loopsModel([
     { artifact: { id: 'a1' }, label: 'Resume', insertions: { insertions: [{ loop: 0, merge_field: 'ResumeSummary' }] } },
     { artifact: { id: 'a2' }, label: 'Cover letter', insertions: { insertions: [] } },
@@ -506,8 +513,11 @@ test('the remediation tab reports real pass data and says P3 is not built', () =
   assert.equal(m.assets[0].passes, 1)
   assert.equal(m.assets[0].remediation, 0, 'loop 0 is the first generation, not a remediation pass')
   assert.equal(m.empty, true)
-  assert.match(m.note, /not built/)
-  assert.match(m.emptyText, /nothing has been remediated/)
+  assert.equal(m.source, 'insertions', 'the fallback must say it is the fallback')
+  assert.match(m.note, /insertion\.loop/, 'and name the record it is actually reading')
+  assert.match(m.note, /not the same as saying\s+no remediation has run/, 'it must not be read as a measurement of remediation')
+  assert.ok(!/not built|does not exist|no remediation_loop table/i.test(m.note),
+    'the tables shipped — the note must never tell the owner the controller does not exist')
 
   const withLoop = loopsModel([{ artifact: { id: 'a1' }, insertions: { insertions: [
     { loop: 0, before_text: null, after_text: 'x' }, { loop: 1, before_text: 'x', after_text: 'y' },
@@ -515,6 +525,99 @@ test('the remediation tab reports real pass data and says P3 is not built', () =
   assert.equal(withLoop.assets[0].remediation, 1)
   assert.equal(withLoop.assets[0].rewritten, 1)
   assert.equal(withLoop.empty, false)
+})
+
+test('the remediation tab reads the REAL ledger when it has been fetched', () => {
+  // D:remediation-never-ran. Four routes were deployed and app/src/api.js called none of them, so P3
+  // had executed zero times in production and the tab reported on `insertion.loop` instead. This is
+  // the shape the real ledger arrives in.
+  const m = loopsModel([{
+    artifact: { id: 'a1' }, label: 'Resume',
+    remediation: {
+      outcome: { converged: false, note: 'halted at pass 2' },
+      passes: [
+        { n: 1, halted: false, closed: ['#3', '#7'], remaining: ['#5'], close_state: 'partial' },
+        { n: 2, halted: true, halt_reason: 'no_progress', closed: [], remaining: ['#5'], close_state: 'open' },
+      ],
+      escalations: [
+        { id: 'e1', state: 'open', requirement_seq: 5 },
+        { id: 'e2', state: 'resolved', requirement_seq: 3 },
+      ],
+    },
+  }])
+  const a = m.assets[0]
+  assert.equal(a.source, 'ledger')
+  assert.equal(m.source, 'ledger')
+  // Every ledger row IS a second look — `n` counts from 1 — which is the difference from the
+  // fallback, where loop 0 is the first generation and does not count.
+  assert.equal(a.remediation, 2, 'both passes are remediation; there is no loop 0 in this ledger')
+  assert.equal(a.rewritten, 2, 'two requirements were closed across the passes')
+  assert.equal(a.halted, true)
+  assert.equal(a.haltReason, 'no_progress')
+  assert.equal(a.open, 1, 'only the unresolved escalation is open')
+  assert.equal(m.openEscalations, 1)
+  assert.equal(m.empty, false)
+  assert.match(m.note, /escalated to you/, 'the ledger note must explain what happens to what it cannot close')
+  assert.ok(!/insertion\.loop/.test(m.note), 'the ledger note must not describe the fallback')
+})
+
+test('a MIXED packet reports the weaker source, never the more confident one', () => {
+  // One asset with a ledger and one without is not a ledger total. Reporting it as one would be the
+  // more confident of two readings, which is the failure this repo names as absent evidence read as
+  // a measurement.
+  const m = loopsModel([
+    { artifact: { id: 'a1' }, remediation: { passes: [{ n: 1, closed: [], remaining: [] }], escalations: [] } },
+    { artifact: { id: 'a2' }, insertions: { insertions: [{ loop: 0 }] } },
+  ])
+  assert.equal(m.source, 'insertions', 'any fallback makes the total a fallback total')
+  assert.match(m.note, /insertion\.loop/)
+})
+
+test('H:remediation-has-a-caller: the deployed routes are reachable from the product', () => {
+  // D:remediation-never-ran, and the invariant is CALLER-SIDE because that is where the gap was.
+  // Four routes shipped and ran zero times in production for one reason: `app/src/api.js` referenced
+  // none of them. Nothing was broken — nothing was connected — and an unconnected subsystem reads
+  // exactly like one with no data yet. This is the third time that shape has appeared in this repo
+  // (D:build-runs-no-qc, D24, this), so it is asserted rather than remembered.
+  const apiSrc = stripComments(readSrc('api.js'))
+  for (const [fn, route] of [
+    ['artifactRemediationGet', '/remediation'],
+    ['artifactRemediate', '/remediate'],
+    ['escalationResolve', '/app/escalation/'],
+  ]) {
+    // A PROPERTY DEFINITION, not a substring. `includes(fn)` passed when the mutation test renamed
+    // the export to `_removed_artifactRemediationGet` — the old name was still IN the file, as part
+    // of the new one, so the guard reported a caller that no longer existed. Found by reverting it;
+    // it would never have been found by reading.
+    assert.match(apiSrc, new RegExp(`(^|[^A-Za-z0-9_])${fn}\\s*:`, 'm'),
+      `api.js defines no ${fn} — the route is deployed and unreachable`)
+    assert.ok(apiSrc.includes(route), `api.js never names ${route}`)
+  }
+  // And a screen must actually CALL it: an api.js entry nothing invokes is the same gap one level up.
+  const rail = stripComments(readSrc('screens/QcRail.jsx'))
+  assert.match(rail, /api\.artifactRemediationGet\(/, 'the ledger is never fetched by any screen')
+  assert.match(rail, /withRemediation/, 'the fetch is not gated to the tab that needs it')
+  const builder = stripComments(readSrc('screens/PacketBuilder.jsx'))
+  assert.match(builder, /withRemediation:/, 'nothing ever turns the remediation fetch on')
+})
+
+test('H:no-stale-not-built-claim: no screen tells the owner a shipped subsystem does not exist', () => {
+  // The claim that outlived its premise. `qcRail.js` asserted "there is no remediation_loop table and
+  // no escalation table in the API" long after both shipped — and a TEST was pinning that sentence in
+  // place, which is how it survived review. A comment can go stale quietly; a comment a test defends
+  // goes stale loudly and stays.
+  // COMMENTS ARE STRIPPED FIRST, and that precision is not optional. The first version of this case
+  // fired on the comment that RECORDS the stale claim in order to explain why it was wrong — the
+  // same false positive this repo already deleted a linter over (`termMatch.ts:21`, the smart-quote
+  // normalizer flagged for containing the characters it strips). A guard that fires on the history
+  // of a defect is one people switch off. What must not survive is the claim in text the OWNER READS.
+  for (const f of ['qcRail.js', 'screens/QcRail.jsx']) {
+    const src = stripComments(readSrc(f))
+    assert.ok(!/P3 IS NOT BUILT/i.test(src), `${f} still claims P3 is not built`)
+    assert.ok(!/there is no .{0,4}remediation_loop/i.test(src), `${f} still claims the table is absent`)
+    assert.ok(!/loop controller .{0,20}(is not built|does not exist)/i.test(src),
+      `${f} still tells the owner the controller does not exist`)
+  }
 })
 
 test('no fixture data backs the remediation tab', () => {

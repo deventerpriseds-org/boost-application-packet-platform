@@ -535,3 +535,88 @@ test('D4: the run length comes from thresholds, not from a constant', () => {
   assert.equal(find(runChecks({ ...base, thresholds: { wordingRunTokens: 5 } }), 'posting_wording_kept').state, 'warn',
     'an owner lowering the threshold surfaces it — the value is not code-only')
 })
+
+// --- the escalation tier at the GATE ----------------------------------------------------------
+
+/** A model-proposed evidence row: byte-exact, correctly attributed, and unscored by any rule. */
+const proposedRow = () =>
+  ({ quote: 'reduced outages from nine hours to one', source_kind: 'work_history',
+     source_label: 'Work history 1 · stored profile', source_key: 'workHistory1',
+     char_start: 0, char_end: 37, extra: 'Cutting outage duration improves reliability.',
+     ratio: null, method: 'proposed', record_sha256: '', resolver_version: 2, proposal_version: 1 })
+
+test('H:proposed-evidence-cannot-pass-the-gate: a model may propose, only a rule may accuse', () => {
+  // THE PLACE THE ESCALATION TIER COULD HAVE LOOSENED THE WHOLE ENGINE SILENTLY.
+  //
+  // A proposed row is byte-exact in the record it names — `verifyProposal` accepts nothing else — so
+  // it is indistinguishable from a deterministic row by inspection. But byte-exactness is not
+  // RELEVANCE: the deterministic path also clears a lexical floor (token overlap at
+  // EVIDENCE_THRESHOLD, a distinctive token, the conjunction and negation rules) and a proposed row
+  // clears none of them by design, because it exists for the cases where no word is shared. Its only
+  // relevance judge is the model, and its `reasoning` is stored, never verified.
+  //
+  // If this check counted it, `must_have_coverage` — whose own comment calls it accusation-grade —
+  // would quietly move from "verbatim AND lexically supported" to "verbatim", and no surface would
+  // say so. So a proposed row is evidence to SHOW, never evidence to PASS ON.
+  const reqs = [{ seq: 0, verbatim: 'Improve operational reliability across the platform', item_text: '', kind: 'must_have' }]
+
+  const withProposed = runChecks({
+    type: 'resume', pkg: RESUME_FULL, requirements: reqs,
+    evidence: { profileReadable: true, bySeq: { 0: proposedRow() } },
+  })
+  const c = find(withProposed, 'must_have_coverage')
+  assert.notEqual(c.state, 'pass', 'a model-proposed excerpt must NOT turn the gate green on its own')
+  assert.equal(c.state, 'fail')
+  assert.match(c.observed, /model-proposed, awaiting your confirmation/,
+    'the count must say a model was involved, or a coverage rise is unattributable')
+
+  // The excerpt is SHOWN, not hidden. Leaving the owner a blank when a model found something real
+  // would be the opposite failure — this is strictly better information than "nothing found".
+  assert.match(c.offenders[0], /a model proposes "reduced outages from nine hours to one"/)
+  assert.match(c.offenders[0], /confirm it/)
+
+  // And the identical row with a DETERMINISTIC method does pass — so the difference is provenance
+  // and nothing else. Without this half the case would also pass if coverage were broken outright.
+  const withRule = runChecks({
+    type: 'resume', pkg: RESUME_FULL, requirements: reqs,
+    evidence: { profileReadable: true, bySeq: { 0: { ...proposedRow(), method: 'anchored', ratio: 1 } } },
+  })
+  assert.equal(find(withRule, 'must_have_coverage').state, 'pass',
+    'the same excerpt from a RULE is coverage — only the provenance may change the verdict')
+})
+
+test('H:proposed-evidence-cannot-pass-ANY-evidence-check: all three, not just the one I remembered', () => {
+  // FOUND BY AN INDEPENDENT VERIFIER, and the miss is the reason this case is separate from the one
+  // above rather than folded into it. `must_have_coverage` was filtered; `responsibilities_addressed`
+  // and `evidence_placed` were left on the unfiltered `evidenceOf`, 34 and 46 lines below the helper
+  // written to prevent exactly that — this repo's own "fix all consumers, not just the one you
+  // found" rule, broken inside a single else-branch.
+  //
+  // So the guard is written over the SET of evidence-reading checks rather than over one name. A
+  // fourth check added later that counts a proposed row as settled fails here.
+  const reqs = [
+    { seq: 0, verbatim: 'Improve operational reliability across the platform', item_text: '', kind: 'must_have' },
+    { seq: 1, verbatim: 'Own the reliability of the payments platform end to end', item_text: '', kind: 'responsibility' },
+  ]
+  const bySeq = { 0: proposedRow(), 1: proposedRow() }
+  const rs = runChecks({ type: 'resume', pkg: RESUME_FULL, requirements: reqs, evidence: { profileReadable: true, bySeq } })
+
+  for (const key of ['must_have_coverage', 'responsibilities_addressed', 'evidence_placed']) {
+    const c = find(rs, key)
+    assert.ok(c, `${key} is missing — the scan has gone stale`)
+    assert.notEqual(c.state, 'pass',
+      `${key} passed on model-proposed evidence alone — a model may propose, only a rule may accuse`)
+  }
+
+  // `evidence_placed` specifically must not ACCUSE either. Its question is "of what the profile
+  // evidences, what reached this asset" — counting a proposed row would make it charge the document
+  // with omitting something only a model ever claimed was relevant.
+  assert.equal(find(rs, 'evidence_placed').state, 'not_applicable',
+    'evidence_placed must have nothing to judge when the only evidence is proposed')
+
+  // Same rows from a RULE: all three become judgeable again, so the difference is provenance alone.
+  const ruleRows = { 0: { ...proposedRow(), method: 'anchored', ratio: 1 }, 1: { ...proposedRow(), method: 'anchored', ratio: 1 } }
+  const rr = runChecks({ type: 'resume', pkg: RESUME_FULL, requirements: reqs, evidence: { profileReadable: true, bySeq: ruleRows } })
+  assert.equal(find(rr, 'must_have_coverage').state, 'pass')
+  assert.notEqual(find(rr, 'evidence_placed').state, 'not_applicable')
+})

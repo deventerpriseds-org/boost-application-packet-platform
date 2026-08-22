@@ -26,7 +26,11 @@ import {
 } from '../dist/functions/tests/requirementSupport.js'
 import { MIN_QUOTE_CHARS, MIN_QUOTE_WORDS } from '../dist/functions/tests/reviewer.js'
 import { DEFAULT_THRESHOLDS } from '../dist/functions/tests/checks.js'
+import { resolveOptionsFrom } from '../dist/functions/tests/checkPrefs.js'
 import { writeEvidence, shapeRequirementsForApi } from '../dist/functions/tests/appRequirements.js'
+import {
+  verifyProposal, worthEscalating, PROPOSAL_VERSION, PROPOSAL_SYSTEM,
+} from '../dist/functions/tests/evidenceProposal.js'
 
 const SRC = path.join(import.meta.dirname, '..', 'src', 'functions', 'tests')
 const src = f => fs.readFileSync(path.join(SRC, f), 'utf8')
@@ -648,29 +652,49 @@ test('M29: RESOLVER_VERSION is bumped and stored rows carry it', () => {
   assert.equal(ev.resolver_version, RESOLVER_VERSION)
 })
 
-test('M30/H40: the method values are still exactly what the stored CHECK permits', () => {
-  // The matcher emits nothing outside `exact` / `anchored`, so no CHECK is widened and no migration
-  // is needed. DELIBERATE: `ensureEvidenceTable` is on the hot path precisely because
-  // `create table if not exists` takes no lock, and a `drop constraint`/`add constraint` pair there
-  // would take an ACCESS EXCLUSIVE lock that four artifacts of one packet can hit at once. Adding a
-  // third method value would have to go in `ensureRequirementCols` (the cold path) instead, and be
-  // executed against a POPULATED database per CLAUDE.md's schema rule.
+test('M30/H40: the DETERMINISTIC resolver emits only its own two methods, and the CHECK matches', () => {
+  // WIDENED 2026-08-21, and the original version of this case was RIGHT about the danger in a way
+  // worth preserving. It said: adding a third method value would have to go on the cold path,
+  // because `ensureEvidenceTable` is on the hot path precisely so that `create table if not exists`
+  // takes no lock, and a `drop constraint`/`add constraint` pair there takes an ACCESS EXCLUSIVE
+  // lock that four artifacts of one packet can hit at once. When the escalation tier added
+  // `proposed`, that pair was put on the hot path anyway — this comment did not stop it, an
+  // adversarial review did. So the prose became an assertion; see the last block.
+  //
+  // The invariant that did NOT change, and is the important half: the deterministic resolver still
+  // emits only `exact` and `anchored`. `proposed` comes from `evidenceProposal`, never from here. If
+  // `resolveEvidence` ever emitted it, a model-provenance stamp would appear on a row no model
+  // touched — the provenance lie in the opposite direction from the one the column exists to stop.
   const emitted = new Set()
   for (const req of ['Built and promoted a high-performing engineering culture',
     'Build and promote a high-performing engineering culture', 'Ability to manage remote teams']) {
     const ev = resolveEvidence(req, RECS)
     if (ev) emitted.add(ev.method)
   }
-  const declared = new Set(['exact', 'anchored'])
-  for (const m of emitted) assert.ok(declared.has(m), `${m} is not in the CHECK`)
+  for (const m of emitted) assert.ok(m === 'exact' || m === 'anchored',
+    `the deterministic resolver emitted ${m} — only evidenceProposal may produce a third value`)
+  const ev = stripComments(src('evidence.ts'))
+  assert.ok(!/method: '(?!exact|anchored)/.test(ev), 'evidence.ts may not emit a third method value')
 
+  // Both declarations carry the SAME union, or an insert that one permits the other rejects.
   for (const [file, re] of [
-    ['appRequirements.ts', /method\s+text not null check \(method in \('exact','anchored'\)\)/],
-    ['schema.ts', /method\s+text not null check \(method in \('exact','anchored'\)\)/],
-  ]) assert.ok(re.test(src(file)), `${file} must still declare the same union`)
+    ['appRequirements.ts', /method\s+text not null check \(method in \('exact','anchored','proposed'\)\)/],
+    ['schema.ts', /method in \('exact','anchored','proposed'\)/],
+  ]) assert.ok(re.test(src(file)), `${file} must declare the three-value union`)
 
-  const s = stripComments(src('evidence.ts'))
-  assert.ok(!/method: '(?!exact|anchored)/.test(s), 'no third method value may be emitted')
+  // THE LESSON, AS AN ASSERTION RATHER THAN A PARAGRAPH. `ensureEvidenceTable` runs on every
+  // request and four artifacts of one packet enter it concurrently. `create table if not exists`
+  // and `add column if not exists` are catalogue-only; `drop constraint` / `add constraint` take an
+  // ACCESS EXCLUSIVE lock and would present as intermittent 500s under concurrency rather than as a
+  // migration bug. The constraint swap belongs in SCHEMA_SQL, which the deploy applies once.
+  const ensure = stripComments(src('appRequirements.ts'))
+  const fn = ensure.slice(ensure.indexOf('export async function ensureEvidenceTable'),
+                          ensure.indexOf('export async function ensureRequirementCols'))
+  assert.ok(fn.length > 100, 'the ensure function moved — this scan has gone stale')
+  assert.ok(!/drop\s+constraint/i.test(fn),
+    'ensureEvidenceTable takes an ACCESS EXCLUSIVE lock on the hot path — move the constraint swap to SCHEMA_SQL')
+  assert.ok(!/add\s+constraint/i.test(fn),
+    'ensureEvidenceTable adds a constraint on the hot path — that is the same lock')
 })
 
 test('M33/H4b: similarity() must not appear in the resolve path — INCLUDING the new module', () => {
@@ -1046,4 +1070,507 @@ test('H:refusal-says-what-was-sought: an unevidenced row reports the words it lo
     evidence_char_start: 0, evidence_char_end: 38,
   }], PROD)
   assert.equal(ok.requirements[0].evidenceSearch, null)
+})
+
+// =================================================================================================
+// K. THE ESCALATION TIER — a model proposes, deterministic rules accept or refuse
+// =================================================================================================
+
+test('H:tightest-bullet-run-wins: the excerpt is the run that carries the support, not the field', () => {
+  // The owner's real `expertise` field. `Experience in leading technology operations` resolved to
+  // ALL SEVEN bullets (286 chars) — four of which (budgets, KPIs, M&A) say nothing about the
+  // requirement. The match is CORRECT; the citation was imprecise. Sub-runs let the shorter-span
+  // tie-break pick the run that actually carries the tokens.
+  const EXP = 'Budget Development and P&L Management|KPI-driven performance management|Enterprise alignment of strategy and execution|Governance frameworks for compliance|Optimizing scaled agile operations|Strategic roadmaps for customer-centric innovation|M&A due diligence and technology integration'
+  const recs = profileRecords({ expertise: EXP }, null)
+  const ev = resolveEvidence('Experience in leading technology operations', recs)
+  assert.ok(ev, 'the requirement IS supported and must stay evidenced')
+  assert.ok(ev.quote.length < EXP.length, 'and must no longer quote the whole field')
+  assert.ok(ev.quote.length <= 140, `expected a tight run, got ${ev.quote.length} chars`)
+  assert.ok(!ev.quote.includes('Budget Development'), 'irrelevant leading bullets must be dropped')
+  assert.equal(recs[0].text.slice(ev.char_start, ev.char_end), ev.quote, 'offsets still index the original')
+})
+
+test('H:bullet-run-is-a-setting: the excerpt width is the owner\'s, and the knob reads backwards', () => {
+  // The owner chose the TIGHT citation "for now" and said they may want the wide one back. That
+  // makes the width a setting — `owner_search_prefs.chk_evidence_bullet_run`, seeded 3.
+  //
+  // TWO invariants, and the second one is a trap this case exists to pin down.
+  //
+  // (1) The knob moves the CITATION, never the MATCH. The whole line is a candidate at every value,
+  //     so no setting can un-evidence a supported requirement. That is what makes it safe to expose.
+  // (2) LOWER = BROADER. It caps how narrow a candidate may be, and `supportIn` breaks ties toward
+  //     the shorter span, so raising it can only tighten. Measured, not assumed: the first version of
+  //     this guard asserted that a HIGHER value widens the quote and failed — 3 and 12 return the
+  //     same 130 characters. The revert the owner asked for is `= 1`, not a big number.
+  const EXP = 'Budget Development and P&L Management|KPI-driven performance management|Enterprise alignment of strategy and execution|Governance frameworks for compliance|Optimizing scaled agile operations|Strategic roadmaps for customer-centric innovation|M&A due diligence and technology integration'
+  const recs = profileRecords({ expertise: EXP }, null)
+  const REQ = 'Experience in leading technology operations'
+
+  const at = (n) => resolveEvidence(REQ, recs, { bulletRunMax: n })
+  const wide = at(1)
+  const tight = at(3)
+  assert.ok(wide && tight, 'the requirement is evidenced at BOTH widths — the knob is presentation, not reach')
+  assert.equal(wide.ratio, tight.ratio, 'the MATCH must not move with the citation width')
+
+  // The measured pair, so a future change to the tie-break cannot silently flip the direction.
+  assert.equal(wide.quote.length, EXP.length, 'bulletRunMax=1 is the revert: the whole field')
+  assert.ok(tight.quote.length <= 140, `expected the tight run at 3, got ${tight.quote.length}`)
+  assert.ok(!tight.quote.includes('Budget Development'), 'irrelevant leading bullets must be dropped')
+
+  // Monotone, and never wider than the previous step. This is the property the owner is actually
+  // buying: one number, one direction, no surprises between the values they might try.
+  let prev = Infinity
+  for (const n of [1, 2, 3, 4, 7, 12]) {
+    const ev = at(n)
+    assert.ok(ev, `bulletRunMax=${n} must not un-evidence a supported requirement`)
+    assert.ok(ev.quote.length <= prev, `raising the setting widened the quote at ${n} — the direction flipped`)
+    prev = ev.quote.length
+    // The accusation-grade half is not negotiable by a setting, at any value.
+    assert.equal(recs[0].text.slice(ev.char_start, ev.char_end), ev.quote)
+  }
+
+  // A nonsense value takes the seeded default or clamps; none of them may break the resolver.
+  for (const bad of [0, -5, 1.7, NaN]) {
+    assert.ok(at(bad), `bulletRunMax=${bad} must not un-evidence a supported requirement`)
+  }
+})
+
+test('H:proposal-must-be-verbatim: a paraphrased model quote is refused, never repaired', () => {
+  const recs = profileRecords({
+    workHistory1: 'Reduced outages from nine hours to one across the payments platform.',
+  }, null)
+  const opts = { neverEvidence: NEVER_EVIDENCE, minQuoteChars: MIN_QUOTE_CHARS }
+  const REQ = 'Improve operational reliability'
+
+  // THE CASE THE TIER EXISTS FOR: no shared content word, so the deterministic matcher cannot reach
+  // it, and a model can.
+  assert.equal(resolveEvidence(REQ, recs), null, 'word-matching provably cannot find this')
+  const good = verifyProposal(REQ, recs, {
+    source_key: 'workHistory1', supported: true,
+    quote: 'Reduced outages from nine hours to one',
+    reasoning: 'Cutting outage duration is an improvement in operational reliability.',
+  }, opts)
+  assert.ok(good.accepted, 'an exact quote is accepted')
+  assert.equal(recs[0].text.slice(good.accepted.char_start, good.accepted.char_end), good.accepted.quote)
+
+  // EVERY way a fluent model goes wrong, each refused rather than repaired.
+  const bad = [
+    ['quote_not_in_record', 'Reduced outages from 9 hours to 1', 'digits rewritten'],
+    ['quote_not_in_record', 'reduced outages from nine hours to one', 'case changed'],
+    ['quote_not_in_record', 'Reduced outages from nine hours to one.', 'punctuation added'],
+    ['quote_not_in_record', 'Reduced outages substantially across payments', 'paraphrased'],
+  ]
+  for (const [expected, quote, why] of bad) {
+    const out = verifyProposal(REQ, recs, {
+      source_key: 'workHistory1', supported: true, quote, reasoning: 'x',
+    }, opts)
+    assert.equal(out.accepted, null, `must refuse: ${why}`)
+    assert.equal(out.refusal, expected, why)
+  }
+})
+
+test('H:proposal-floor-binds-every-tier: the model cannot reach what the rules refuse outright', () => {
+  const recs = profileRecords({
+    workHistory1: 'Graduated from Pennsylvania State University and worked across the eastern seaboard.',
+    itemsToOmit: 'Kubernetes cluster federation',
+  }, null)
+  const opts = { neverEvidence: NEVER_EVIDENCE, minQuoteChars: MIN_QUOTE_CHARS }
+
+  // Eligibility is refused at EVERY tier. A model is not allowed to settle where someone lives from
+  // prose merely because it argues more persuasively than a regex.
+  const elig = verifyProposal('Reside in the East Coast of the United States', recs, {
+    source_key: 'workHistory1', supported: true,
+    quote: 'worked across the eastern seaboard',
+    reasoning: 'Penn State and the eastern seaboard imply East Coast residence.',
+  }, opts)
+  assert.equal(elig.accepted, null)
+  assert.equal(elig.refusal, 'requirement_class')
+  assert.equal(worthEscalating('Reside in the East Coast of the United States', 2), false,
+    'and it is not even sent to the model')
+
+  // The owner's ban list is not a source at any tier either.
+  const banned = verifyProposal('Deep experience with Kubernetes cluster federation', [
+    ...recs, { key: 'itemsToOmit', kind: 'profile_field', label: 'Items to omit', text: 'Kubernetes cluster federation' },
+  ], {
+    source_key: 'itemsToOmit', supported: true,
+    quote: 'Kubernetes cluster federation', reasoning: 'It is listed.',
+  }, opts)
+  assert.equal(banned.refusal, 'banned_source')
+
+  // A record that does not exist, and an unexplained match.
+  assert.equal(verifyProposal('Lead platform work', recs, {
+    source_key: 'nope', supported: true, quote: 'Graduated from Pennsylvania', reasoning: 'x',
+  }, opts).refusal, 'unknown_source_key')
+  assert.equal(verifyProposal('Lead platform work', recs, {
+    source_key: 'workHistory1', supported: true,
+    quote: 'Graduated from Pennsylvania State University', reasoning: '   ',
+  }, opts).refusal, 'no_reasoning')
+
+  // And a model that declines is respected rather than second-guessed.
+  assert.equal(verifyProposal('Lead platform work', recs, {
+    source_key: 'workHistory1', supported: false, quote: '', reasoning: 'Nothing here supports it.',
+  }, opts).refusal, 'model_declined')
+})
+
+test('H:escalation-is-scoped: only rows the deterministic pass could not settle are sent', () => {
+  // The determinism contract survives because the model never sees the rows exact rules settled —
+  // those stay reproducible and attributable to RESOLVER_VERSION. Escalation is the trigger.
+  assert.equal(worthEscalating('Minimum of 8 years of experience', 2), false, 'numeric: no excerpt settles it')
+  assert.equal(worthEscalating('Leadership', 2), false, 'too thin to judge either way')
+  assert.equal(worthEscalating('Improve operational reliability', 2), true)
+  assert.ok(PROPOSAL_VERSION >= 1, 'a proposal row must be attributable to a ruleset')
+
+  // The prompt has to carry the one instruction that makes the output checkable.
+  assert.match(PROPOSAL_SYSTEM, /CHARACTER-FOR-CHARACTER/)
+  assert.match(PROPOSAL_SYSTEM, /Never infer where a person LIVES/)
+})
+
+// --- L. the escalation tier, wired -----------------------------------------------------------
+//
+// Everything in section K judges a model answer in isolation. These drive the whole pass through
+// `writeEvidence` with an injected transport, so what is tested is the WIRING: when a call is made,
+// when it is not, what reaches the database, and what a failure does to the row.
+
+/** A fake pg client that records inserts and lets a test make one of them fail. */
+function fakeClient(rows, failOn = null) {
+  const inserts = []
+  const stmts = []
+  return {
+    inserts, stmts,
+    async query(sql, params) {
+      stmts.push(String(sql).trim().split('\n')[0].trim())
+      if (/from requirement where opp_id/.test(sql)) return { rows }
+      if (/^\s*insert into requirement_evidence/.test(sql)) {
+        if (failOn && failOn(params)) throw new Error('violates check constraint')
+        inserts.push(params); return { rows: [] }
+      }
+      return { rows: [] }
+    },
+  }
+}
+
+const ESC_REC = {
+  key: 'workHistory1', kind: 'work_history', label: 'Work history · CTO',
+  text: 'Reduced outages from nine hours to one across the payments platform.',
+}
+// Shares NO content word with the record — the case the deterministic matcher provably cannot reach.
+const ESC_REQ = 'Improve operational reliability'
+const escRows = [{ id: 'r1', seq: 0, verbatim: ESC_REQ, item_text: ESC_REQ }]
+const modelSays = (obj) => async () => ({ choices: [{ message: { content: JSON.stringify(obj) } }] })
+const GOOD = {
+  supported: true, source_key: 'workHistory1',
+  quote: 'Reduced outages from nine hours to one',
+  reasoning: 'Cutting outage duration is an improvement in operational reliability.',
+}
+
+test('H:escalation-is-off-by-default: no toggle, no transport, ZERO model calls', async () => {
+  // The observable form of "defaults OFF". Not "the flag is false" — the transport is never invoked,
+  // which is the only version of this claim that a caller cannot accidentally undo.
+  let calls = 0
+  const spy = async (...a) => { calls++; return modelSays(GOOD)(...a) }
+
+  for (const [label, opts, transport] of [
+    ['no options at all', {}, spy],
+    ['escalate explicitly false', { escalate: false }, spy],
+    ['escalate TRUE but no transport supplied', { escalate: true }, undefined],
+  ]) {
+    const c = fakeClient(escRows)
+    const out = await writeEvidence(c, 'opp-1', [ESC_REC], opts, undefined, transport)
+    assert.equal(calls, 0, `${label}: the model was called`)
+    assert.equal(out.escalated, 0, `${label}: escalated must be 0`)
+    assert.equal(out.proposed, 0, `${label}: proposed must be 0`)
+    assert.equal(c.inserts.length, 0, `${label}: nothing may be written`)
+  }
+})
+
+test('H:escalation-reaches-what-words-cannot: the happy path, with offsets that index the record', async () => {
+  // The whole justification for the tier, as a test: the deterministic pass provably cannot settle
+  // this row, and the model can.
+  assert.equal(resolveEvidence(ESC_REQ, [ESC_REC]), null, 'word-matching must NOT reach this')
+
+  const c = fakeClient(escRows)
+  const out = await writeEvidence(c, 'opp-1', [ESC_REC], { escalate: true }, undefined, modelSays(GOOD))
+  assert.equal(out.escalated, 1)
+  assert.equal(out.proposed, 1)
+  assert.equal(out.evidenced, 1, 'a proposed row IS evidence, and is counted as such')
+  assert.equal(c.inserts.length, 1)
+
+  const [, quote, , , sourceKey, start, end, extra, ratio, method, , , proposalVersion] = c.inserts[0]
+  assert.equal(method, 'proposed', 'provenance must be stamped, not inferred')
+  assert.equal(proposalVersion, PROPOSAL_VERSION)
+  assert.equal(ratio, null, 'a proposed row has no similarity score and must not invent one')
+  assert.equal(sourceKey, 'workHistory1')
+  // The VERIFIED note, not the raw sentence. `verifyReasoning` publishes what the excerpt does not
+  // mention beside the model's claim — on this path the requirement's words are absent by
+  // construction, which is why the row escalated at all, so the note says so in one line.
+  assert.ok(extra.includes(GOOD.reasoning), 'the model\'s sentence must survive when nothing is withdrawn')
+  assert.match(extra, /none of the requirement's own words appear/,
+    'and the owner must be told a model judged it, not a rule')
+  // THE ACCUSATION-GRADE HALF: the offsets index the record's real bytes.
+  assert.equal(ESC_REC.text.slice(start, end), quote)
+  assert.ok(ESC_REC.text.includes(quote))
+})
+
+test('H:escalation-never-touches-a-settled-row: only rows the rules could not reach', async () => {
+  // Two requirements: one the deterministic pass settles, one it cannot. Exactly one call.
+  const settled = 'Reduced outages from nine hours to one'
+  assert.ok(resolveEvidence(settled, [ESC_REC]), 'fixture: this one must resolve deterministically')
+  const asked = []
+  const transport = async (sys, user) => { asked.push(user); return modelSays(GOOD)() }
+  const rows = [
+    { id: 'r1', seq: 0, verbatim: settled, item_text: settled },
+    { id: 'r2', seq: 1, verbatim: ESC_REQ, item_text: ESC_REQ },
+  ]
+  const c = fakeClient(rows)
+  const out = await writeEvidence(c, 'opp-1', [ESC_REC], { escalate: true }, undefined, transport)
+  assert.equal(asked.length, 1, 'the settled row must never be sent to the model')
+  assert.ok(asked[0].includes(ESC_REQ) && !asked[0].includes(`REQUIREMENT:\n${settled}`))
+  assert.equal(out.escalated, 1)
+  assert.equal(out.evidenced, 2, 'one deterministic + one proposed')
+})
+
+test('H:escalation-cap-binds-and-says-so', async () => {
+  // A posting with 38 unevidenced requirements must not make 38 calls the first time it is opened,
+  // and what was skipped must be reported rather than silently dropped.
+  let calls = 0
+  const transport = async (...a) => { calls++; return modelSays({ supported: false })(...a) }
+  const many = Array.from({ length: 9 }, (_, i) => ({
+    id: `r${i}`, seq: i, verbatim: ESC_REQ, item_text: ESC_REQ,
+  }))
+  const c = fakeClient(many)
+  const out = await writeEvidence(c, 'opp-1', [ESC_REC], { escalate: true, escalateMax: 3 }, undefined, transport)
+  assert.equal(calls, 3, 'the cap must bind')
+  assert.equal(out.escalated, 3)
+  assert.equal(out.escalation_refusals.over_cap, 1, 'silent truncation reads as "we covered everything"')
+})
+
+test('H:transport-failure-is-not-a-finding: an outage never reads as "your profile supports nothing"', async () => {
+  // The house rule at the transport layer. Every one of these leaves the row UNEVIDENCED and says
+  // WHY — none of them may be reported as the model having declined.
+  for (const [label, transport, expected] of [
+    ['a thrown transport', async () => { throw new Error('OpenAI HTTP 503') }, 'transport_failed'],
+    ['an unparseable body', async () => ({ choices: [{ message: { content: 'I cannot answer that.' } }] }), 'unparseable'],
+    ['an empty envelope', async () => ({}), 'unparseable'],
+  ]) {
+    const c = fakeClient(escRows)
+    const out = await writeEvidence(c, 'opp-1', [ESC_REC], { escalate: true }, undefined, transport)
+    assert.equal(c.inserts.length, 0, `${label}: nothing may be written`)
+    assert.equal(out.proposed, 0, `${label}`)
+    assert.equal(out.evidenced, 0, `${label}`)
+    assert.equal(out.escalation_refusals[expected], 1, `${label}: must be reported as ${expected}`)
+    assert.ok(!out.escalation_refusals.model_declined,
+      `${label}: an outage must NEVER be recorded as the model declining`)
+  }
+})
+
+test('H:proposal-insert-failure-costs-one-row: a rejected insert does not lose the run', async () => {
+  // The savepoint. Most plausible cause is a CHECK on an environment whose migration has not run:
+  // in Postgres a failed statement poisons the surrounding transaction, so without the savepoint one
+  // bad row takes every later insert with it.
+  const rows = [
+    { id: 'r1', seq: 0, verbatim: ESC_REQ, item_text: ESC_REQ },
+    { id: 'r2', seq: 1, verbatim: ESC_REQ, item_text: ESC_REQ },
+  ]
+  const c = fakeClient(rows, params => params[0] === 'r1')   // the FIRST proposed insert fails
+  const out = await writeEvidence(c, 'opp-1', [ESC_REC], { escalate: true }, undefined, modelSays(GOOD))
+  assert.equal(out.escalation_refusals.insert_rejected, 1, 'the rejection must be counted')
+  assert.equal(out.proposed, 1, 'and the SECOND row must still have been written')
+  assert.equal(c.inserts.length, 1)
+  assert.equal(c.inserts[0][0], 'r2')
+  // Each proposed insert is its own transaction, so a failure rolls back that row alone.
+  assert.ok(c.stmts.filter(s => s === 'begin').length >= 2, 'proposed inserts must not share one transaction')
+})
+
+test('H:escalation-runs-after-the-deterministic-commit', async () => {
+  // Ordering, asserted rather than described. The deterministic transaction opens by DELETING every
+  // evidence row for the opportunity; a model call inside it would mean one bad proposal costing the
+  // whole rewrite. The commit must land before the first model call.
+  const seen = []
+  const c = {
+    inserts: [], stmts: [],
+    async query(sql) {
+      const head = String(sql).trim().split('\n')[0].trim()
+      seen.push(head)
+      if (/from requirement where opp_id/.test(sql)) return { rows: escRows }
+      return { rows: [] }
+    },
+  }
+  const transport = async (...a) => { seen.push('MODEL CALL'); return modelSays(GOOD)(...a) }
+  await writeEvidence(c, 'opp-1', [ESC_REC], { escalate: true }, undefined, transport)
+  const firstCall = seen.indexOf('MODEL CALL')
+  const firstCommit = seen.indexOf('commit')
+  assert.ok(firstCommit !== -1 && firstCall !== -1)
+  assert.ok(firstCommit < firstCall,
+    'the model was called inside the transaction that deletes the deterministic rows')
+})
+
+test('H:banned-record-never-reaches-the-prompt', async () => {
+  // Two independent guards, in the right order. The owner's do-not-use list must not be RENDERED to
+  // a model at all — refusing the answer afterwards spends a call to reach a certain refusal and
+  // shows the model text the owner excluded.
+  const banned = { key: 'itemsToOmit', kind: 'profile_field', label: 'Items to omit', text: 'Never mention the 2019 layoffs.' }
+  let prompt = ''
+  const transport = async (sys, user) => { prompt = user; return modelSays({ supported: false })() }
+  const c = fakeClient(escRows)
+  await writeEvidence(c, 'opp-1', [ESC_REC, banned], { escalate: true }, undefined, transport)
+  assert.ok(prompt.includes('workHistory1'), 'the eligible record must be shown')
+  assert.ok(!prompt.includes('itemsToOmit'), 'the banned record must not be in the prompt at all')
+  assert.ok(!prompt.includes('2019 layoffs'), 'nor its text')
+
+  // And the second guard still stands on its own, for a model that names it anyway.
+  const outcome = verifyProposal(ESC_REQ, [ESC_REC, banned], {
+    supported: true, source_key: 'itemsToOmit', quote: 'Never mention the 2019 layoffs.',
+    reasoning: 'it is in the profile',
+  }, { neverEvidence: NEVER_EVIDENCE, minQuoteChars: MIN_QUOTE_CHARS })
+  assert.equal(outcome.refusal, 'banned_source')
+  assert.equal(outcome.accepted, null)
+})
+
+test('H:escalation-on-by-default: the seed is ON, and an owner saying false still wins', () => {
+  // OWNER DECISION 2026-08-21: "I don't know why the escalation needs to be turned on or off vs
+  // always on ... make sure the toggle is automatically on by default." This reverses the
+  // safe-by-default posture the toggle shipped with hours earlier, so it is pinned rather than left
+  // to a literal someone re-reads later and "corrects".
+  //
+  // What makes ON safe is not the toggle — it is that a proposed row can never reach the gate
+  // (`H:proposed-evidence-cannot-pass-the-gate`). The tier only ever adds information beside a
+  // requirement that had none.
+  assert.equal(DEFAULT_THRESHOLDS.evidenceEscalate, true, 'the seed must be ON')
+
+  // THE THREE STATES, and the middle one is the reason this is `!== false` rather than `=== true`.
+  // `ensureCheckPrefs` adds the column but does not INSERT a row, so `loadThresholds` returns `{}`
+  // for an owner nobody has written yet. A strict read would leave exactly that owner OFF while the
+  // column default said ON — a seed that reads as enabled and behaves as disabled.
+  assert.equal(resolveOptionsFrom({}).escalate, true, 'no row yet must take the seed, not fall off')
+  assert.equal(resolveOptionsFrom({ evidenceEscalate: true }).escalate, true)
+  assert.equal(resolveOptionsFrom({ evidenceEscalate: false }).escalate, false,
+    'an owner who switched it off must beat the code seed — the setting wins, always')
+})
+
+test('H:draft-is-written-from-prompts-not-evidence: the resume text never reads an evidence row', () => {
+  // OWNER CONSTRAINT 2026-08-21: "I'm fine with your design decision for now as long as its just
+  // related to grading / scoring... i still want my original prompts to be driving what the resume
+  // draft is."
+  //
+  // The tier must stay on the QC side of the line. Asserted structurally because the alternative is
+  // a promise in prose: `ensurePackage`/`assemblePackage` — the drafting path — must not read
+  // evidence, and the ONE evidence call in `appPackets` must come AFTER the artifacts are built.
+  const s = stripComments(src('appPackets.ts'))
+  const draft = s.slice(s.indexOf('export async function ensurePackage'), s.indexOf('async function buildTemplatedArtifact'))
+  assert.ok(draft.length > 200, 'ensurePackage moved — this scan has gone stale')
+  assert.ok(!/requirement_evidence|loadRequirementsWithEvidence|evidence/i.test(draft),
+    'the drafting path reads evidence — the owner\'s prompts must be what writes the draft')
+
+  // ORDERING, AND COUNT. This caught a real defect twenty minutes after it reached production:
+  // commit c230f30 carried a second `selfPost(.../evidence)` placed BEFORE the build loop that I did
+  // not intend to write and did not notice in the diff. Live, it made every build-all resolve
+  // evidence TWICE — once against a packet that had not been rebuilt yet — which doubles escalation
+  // model spend and grades the wrong artifacts.
+  //
+  // The count assertion is the half the first version lacked. Ordering alone would have missed a
+  // duplicate placed AFTER the loop, which is the same waste with none of the wrongness to reveal it.
+  const calls = [...s.matchAll(/\/evidence\?owner=/g)]
+  assert.equal(calls.length, 1,
+    `appPackets makes ${calls.length} evidence calls per build — exactly one, after the artifacts exist`)
+  const buildLoop = s.indexOf('buildTemplatedArtifact(client, { ...a')
+  const evidenceCall = s.indexOf('/evidence?owner=')
+  assert.ok(buildLoop > 0 && evidenceCall > 0, 'the build loop or the evidence call moved')
+  assert.ok(buildLoop < evidenceCall,
+    'evidence is resolved BEFORE the artifacts are built — it must run after, on what was written')
+})
+
+test('H:proposed-row-cannot-grade-a-dimension: the FOURTH grader, in another file', () => {
+  // FOUND BY AN INDEPENDENT VERIFIER, and it is the sharpest kind of miss: the rule was right, the
+  // guard was written over "the set of evidence-reading checks", and the set was the set in ONE file.
+  // `dimensions.ts` grades the comparison card — a fourth reader of the same rows, in another module,
+  // whose `evidence` type did not even HAVE a `method` field, so it structurally could not tell a
+  // rule's finding from a model's proposal. Measured: `platform_modernization` weak -> STRONG with
+  // the model's quote in the `profile` slot, written to `comparison_dimension` on the deployed path.
+  //
+  // The comparison card is where the owner reads how they measure up. A proposal grading a dimension
+  // strong is the exact claim `checks.ts` refuses to make, made somewhere the gate cannot see it.
+  const src = fs.readFileSync(path.join(SRC, 'dimensions.ts'), 'utf8')
+  const s = stripComments(src)
+  assert.match(s, /method\?: string \| null/, 'the evidence type cannot express provenance')
+  assert.match(s, /r\.evidence\.method !== 'proposed'/,
+    'dimensions.ts grades on any excerpt — a model proposal would grade a dimension')
+  // And the mapping must CARRY it, or the check above always sees undefined and passes vacuously.
+  const shaped = stripComments(fs.readFileSync(path.join(SRC, 'appDimensions.ts'), 'utf8'))
+  assert.match(shaped, /method: r\.evidence_method/,
+    'shapeRequirement drops evidence_method — the grader would be blind again')
+})
+
+test('H:escalation-refusals-do-not-shrink-the-deterministic-count', async () => {
+  // FOUND BY AN INDEPENDENT VERIFIER. `evidenced` is `deterministic rows - refused`, and the
+  // escalation path was incrementing that same `refused`, so a model refusal subtracted from a
+  // population it has nothing to do with. Measured: two rows stored, the route reported one.
+  const rec = {
+    key: 'workHistory1', kind: 'work_history', label: 'Work history',
+    text: 'Reduced outages from nine hours to one across the payments platform.',
+  }
+  const det = 'Reduced outages from nine hours to one'
+  assert.ok(resolveEvidence(det, [rec]), 'fixture: the deterministic row must resolve')
+  const rows = [
+    { id: 'd1', seq: 0, verbatim: det, item_text: det },              // settled by a rule
+    { id: 'p2', seq: 1, verbatim: 'Improve operational reliability', item_text: '' }, // escalated
+    { id: 'p3', seq: 2, verbatim: 'Improve operational uptime', item_text: '' },      // escalated, rejected
+  ]
+  const inserts = []
+  const client = {
+    async query(sql, params) {
+      if (/from requirement where opp_id/.test(sql)) return { rows }
+      if (/^\s*insert into requirement_evidence/.test(sql)) {
+        if (params[0] === 'p3') throw new Error('violates check constraint')
+        inserts.push(params); return { rows: [] }
+      }
+      return { rows: [] }
+    },
+  }
+  const model = async () => ({ choices: [{ message: { content: JSON.stringify({
+    supported: true, source_key: 'workHistory1', quote: det, reasoning: 'cutting outages improves reliability',
+  }) } }] })
+  const out = await writeEvidence(client, 'opp-1', [rec], { escalate: true }, undefined, model)
+
+  assert.equal(inserts.length, 2, 'two rows must actually be stored')
+  assert.equal(out.proposed, 1)
+  assert.equal(out.escalation_refusals.insert_rejected, 1)
+  // THE ASSERTION THAT WAS FAILING IN PRODUCTION SHAPE: the count matches what was stored.
+  assert.equal(out.evidenced, 2, `reported ${out.evidenced} evidenced with 2 rows stored`)
+  assert.equal(out.unevidenced, rows.length - 2)
+  assert.equal(out.refused, 1, 'the refusal is still reported, just not subtracted from the wrong population')
+})
+
+test('H:pre-store-offset-check-is-a-tautology-and-says-so', () => {
+  // AN INDEPENDENT VERIFIER DELETED THE ESCALATION PATH'S PRE-STORE OFFSET CHECK AND THE WHOLE SUITE
+  // PASSED, 662/662 — and reported it as a worthless guard. The finding is right that nothing
+  // exercises it. The reason is worth more than a test that pretends otherwise:
+  //
+  // `writeEvidence` builds `byKey` from the SAME `records` it passes to `escalateOne`, and
+  // `verifyProposal` measures its offsets with `indexOf` on that record's text. So the re-slice
+  // compares a string to itself, and NO input reachable through the public API can make it fail. I
+  // tried: handing `writeEvidence` a shifted record shifts the offsets with it, because the same
+  // array feeds both. The deterministic path is identical, which is why `M24`'s comment was
+  // corrected earlier to stop claiming the check "structurally cannot" reject — it can, but only for
+  // a caller that passes a MISMATCHED pair, and `M25` reaches that case through the `resolver` seam
+  // because a seam exists there. Escalation has no equivalent seam, so the case is unreachable.
+  //
+  // Writing a test that appears to exercise it would be worse than having none — that is precisely
+  // the "absent evidence read as pass" this file exists to prevent. So this asserts what is TRUE:
+  // the check is present on both paths, and a refactor that separates the two record sets (which is
+  // what would make it live) cannot silently drop it on the way.
+  const s = stripComments(src('appRequirements.ts'))
+  const slices = [...s.matchAll(/rec\.text\.slice\(e\.char_start, e\.char_end\) !== e\.quote/g)]
+  assert.equal(slices.length, 2,
+    `expected the pre-store offset check on BOTH the deterministic and escalation paths, found ${slices.length}`)
+  // Each one must REFUSE rather than repair — the branch is what matters, not the comparison.
+  for (const m of slices) {
+    const after = s.slice(m.index, m.index + 160)
+    assert.match(after, /\{\s*(refused|escRefused)\+\+/,
+      'the offset check does not refuse — a mismatched quote would be stored')
+  }
+  // And the comment must not claim to be a live guard. A false comment about a guard is worse than
+  // no comment; that lesson is already recorded against `M24` and this is the same class.
+  assert.ok(!/structurally cannot/.test(s),
+    'a comment claims the check structurally cannot reject — it can, for a mismatched pair')
 })

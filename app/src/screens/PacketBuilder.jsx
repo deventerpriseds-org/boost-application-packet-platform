@@ -258,7 +258,13 @@ export default function PacketBuilder({ id, step }) {
   // that was a second copy of the same payload, and the tally now reads the resume's entry out of
   // this one map. `null` still means no run has been read yet - a state of its own, not zero.
   const artifactList = pState.packet ? pState.packet.artifacts : null
-  const { entries: qcEntries, setResult: setQcResult } = useQcEntries(artifactList, { withInsertions: activeStep === 'qc' })
+  const { entries: qcEntries, setResult: setQcResult } = useQcEntries(artifactList, {
+    withInsertions: activeStep === 'qc',
+    // D:remediation-never-ran — fetched on the same terms as insertions, so the Remediation loops
+    // tab reads the real ledger instead of falling back to insertion.loop and reporting that as
+    // "nothing has been remediated".
+    withRemediation: activeStep === 'qc',
+  })
   const qc = qcStepState(qcEntries)
   const resumeEntry = qcEntries.find((e) => e.artifact.type === 'resume') || null
   const keywordScore = (resumeEntry && resumeEntry.result && resumeEntry.result.score) || null

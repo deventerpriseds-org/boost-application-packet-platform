@@ -545,3 +545,35 @@ This exists because a location filter was added to Swipe + Opportunities but NOT
 counts, so the same underlying data showed different numbers on different screens. Real fix: filter
 in the shared `useOpportunities` source so all consumers reflect it. Stale/mismatched numbers almost
 always mean a value was hardcoded or applied off the core funnel — hunt that, don't patch one screen.
+
+## Match the process to the risk (strict rule, added 2026-08-22 at the owner's instruction)
+
+Every change was getting the same ceremony: an AC subagent, an implementation, an independent
+verifier, a mutation-proof of every guard, and a live workflow round-trip. Five steps and ~20
+minutes of agent time for a doc edit costs the same as for a change to the approval gate, and the
+owner named the cost directly — *"we have too many steps for a simple update. it's a waste of tokens
+and I need us to get more efficient while not dropping effectiveness of guards all together."*
+
+So the process is TIERED BY BLAST RADIUS, not applied uniformly.
+
+| Tier | What it covers | Process |
+|---|---|---|
+| **1 — accusation grade** | Anything that decides `must_have_coverage`, the artifact gate, a score, a coverage count, or that names an offender. Anything that admits model output into a stored claim. | Full: independent AC subagent BEFORE coding, independent `verifier` after, mutation-proof every new guard, live verification. |
+| **2 — ordinary logic** | Application code with no path to a gate or a score: routes, UI wiring, settings, refactors, extraction, transports. | Implement, test, and mutation-prove **the new guard only**. No AC subagent, no verifier. |
+| **3 — prose** | `CLAUDE.md`, `.claude/*.md`, comments, copy, commit messages, pure JSON values. | Just make the change. |
+
+**Verifier runs are BATCHED per phase**, not per change — except tier 1, which gets one immediately.
+The reason for that exception is measured rather than assumed: every real defect found by review in
+the P8.3 build was on a gate path, and the two most expensive (`dimensions.ts` grading on a model
+proposal, and two sibling checks left unfiltered) would each have sat in `main` under several more
+commits if the verifier had waited for a phase boundary.
+
+**THE ONE STEP THAT IS NEVER SKIPPED, AT ANY TIER: mutation-prove a NEW guard.** Write the guard,
+revert the behaviour it guards, confirm the suite FAILS, restore. It costs one command. Three guards
+in a single session passed with their defect reinstated and would have shipped as protection that
+protected nothing — an inert guard is worse than no guard, because it is believed. Note also that a
+mutation can be *behaviourally equivalent* and correctly fail to fail: when that happens, say so and
+do not claim the assertion is proven.
+
+Tier 1 is a property of the CODE PATH, not of the change's size. A one-line edit to `checks.ts` is
+tier 1; a 200-line settings screen is tier 2.

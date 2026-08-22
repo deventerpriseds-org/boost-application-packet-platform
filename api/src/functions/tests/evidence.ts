@@ -38,6 +38,7 @@ import { toBmp } from './jdText'
 import { MIN_QUOTE_CHARS, MIN_QUOTE_WORDS } from './reviewer'
 import {
   claimTokens, countTokensAcrossRecords, supportIn, requirementClass, gateProgress,
+  BULLET_RUN_MAX,
   type RefusalReason,
 } from './requirementSupport'
 
@@ -79,9 +80,24 @@ export interface EvidenceRow {
   char_end: number
   /** A deterministic supporting note (SPEC 4.1's "optional supporting note"), or null. */
   extra: string | null
-  /** How much of the requirement the quote accounts for. RANKING ONLY — never the accusation. */
-  ratio: number
-  method: 'exact' | 'anchored'
+  /**
+   * How much of the requirement the quote accounts for. RANKING ONLY — never the accusation.
+   *
+   * NULL for a `proposed` row, and that is not a gap to fill later. There is no similarity score to
+   * report when a model chose the excerpt, and inventing one would be a fabricated composite — the
+   * number a reviewer trusts most and the one most likely to be wrong. `loadRequirementsWithEvidence`
+   * already orders `ratio desc NULLS LAST`, so an unscored row sorts behind every scored one rather
+   * than ahead of them.
+   */
+  ratio: number | null
+  /**
+   * How the excerpt was found. `proposed` means a MODEL named it and an exact substring check
+   * accepted it — the quote is every bit as verbatim, but a rule did not choose it, and a reader
+   * must be able to tell. The database CHECK enforces the same three values.
+   */
+  method: 'exact' | 'anchored' | 'proposed'
+  /** The proposal ruleset that judged a `proposed` row. NULL means no model was involved. */
+  proposal_version?: number | null
   /** Digest of the record body the offsets index. Offsets rot silently without it. */
   record_sha256: string
   resolver_version: number
@@ -236,6 +252,17 @@ export const DISTINCTIVE_LEN = 6
  * quote for a little more recall, which is a judgement about presentation and belongs to the owner.
  */
 export const EVIDENCE_MAX_SENTENCES = 1
+/**
+ * How many BULLET items a FOCUSED citation may span. SEEDED at 3, owner-settable as
+ * `owner_search_prefs.chk_evidence_bullet_run`.
+ *
+ * LOWER = BROADER quotes; HIGHER = TIGHTER. See `requirementSupport.BULLET_RUN_MAX` for why the
+ * direction reads backwards and for the measured numbers. This is a presentation judgement — it
+ * cannot make a match DISAPPEAR, because the whole line is a candidate at every setting — which is
+ * exactly what makes it safe to hand to the owner. The owner chose the tight citation and said they
+ * may want the wide one back; that revert is `chk_evidence_bullet_run = 1`, not a deploy.
+ */
+export const EVIDENCE_BULLET_RUN = BULLET_RUN_MAX
 // GENERIC-vocabulary detection (M10) is NOT an owner setting — see
 // `requirementSupport.GENERIC_RECORDS` for why raising it strengthens one safety-floor rule while
 // weakening another, which is what makes it unsafe to expose as a single knob at all.
@@ -244,6 +271,11 @@ export interface ResolveOptions {
   threshold?: number
   minTokens?: number
   maxSentences?: number
+  bulletRunMax?: number
+  /** Escalation is OPT-IN. Absent means off — never "unset, so use the default". */
+  escalate?: boolean
+  /** Maximum model calls one run may make. */
+  escalateMax?: number
   /**
    * Token->record-count map for the WHOLE profile, computed once by `resolveAll`.
    *
@@ -286,6 +318,7 @@ export function resolveEvidence(
   const threshold = typeof opts.threshold === 'number' ? opts.threshold : EVIDENCE_THRESHOLD
   const minTokens = typeof opts.minTokens === 'number' ? opts.minTokens : RESOLVE_MIN_TOKENS
   const maxSentences = typeof opts.maxSentences === 'number' ? opts.maxSentences : EVIDENCE_MAX_SENTENCES
+  const bulletRunMax = typeof opts.bulletRunMax === 'number' ? opts.bulletRunMax : EVIDENCE_BULLET_RUN
 
   const text = String(requirementText || '')
   // The CLASS of the requirement is decided before its token count, because a class refusal is not
@@ -309,6 +342,7 @@ export function resolveEvidence(
       recordCounts,
       threshold,
       maxSentences,
+      bulletRunMax,
       minQuoteChars: MIN_QUOTE_CHARS,
       minQuoteWords: MIN_QUOTE_WORDS,
       distinctiveLen: DISTINCTIVE_LEN,
@@ -323,8 +357,14 @@ export function resolveEvidence(
 
     if (best) {
       const r = Math.round(res.ratio * 1000) / 1000
-      if (r < best.ratio) continue
-      if (r === best.ratio) {
+      // `best.ratio` is non-null on THIS path by construction — every candidate below is built with
+      // a measured ratio, and a `proposed` row (the only null one) is never a candidate here because
+      // this function makes no model call. Narrowed rather than asserted with `!`, so that if a
+      // future unscored candidate ever reaches this loop it sorts behind the scored ones instead of
+      // throwing at runtime.
+      const bestRatio = best.ratio ?? -1
+      if (r < bestRatio) continue
+      if (r === bestRatio) {
         if (rec.key > best.source_key) continue
         if (rec.key === best.source_key && res.span.start >= best.char_start) continue
       }
@@ -378,6 +418,7 @@ export function refusalReason(
       recordCounts,
       threshold: typeof opts.threshold === 'number' ? opts.threshold : EVIDENCE_THRESHOLD,
       maxSentences: typeof opts.maxSentences === 'number' ? opts.maxSentences : EVIDENCE_MAX_SENTENCES,
+      bulletRunMax: typeof opts.bulletRunMax === 'number' ? opts.bulletRunMax : EVIDENCE_BULLET_RUN,
       minQuoteChars: MIN_QUOTE_CHARS,
       minQuoteWords: MIN_QUOTE_WORDS,
       distinctiveLen: DISTINCTIVE_LEN,
