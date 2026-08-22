@@ -2179,3 +2179,48 @@ they need a tight single-purpose call with a deterministic accept/reject on leng
 
 Recorded as `D:mechanical-rules-have-no-enforcer`. The fix EXTENDS `applyCorrectionPass` rather than
 adding a third corrector beside two that already disagree about their scope.
+
+## The normaliser, and the assumption that would have corrupted every document (2026-08-22)
+
+Owner: *"yes build the normaliser"* + *"investigate deeper to be sure if your assumptions this time"*.
+The second instruction paid for itself immediately.
+
+**THE WRONG ASSUMPTION.** The first version wrote lists back with `items.join('\n')`, treating that
+as the inverse of `splitItems`. It is not. `splitItems` (swaps.ts:45) splits on `\n` **and `|`, `•`,
+`·`**, and STRIPS a leading `-`/`*`/`•`/`·` from every item. So a field stored as
+`"- Data Governance\n- Cloud"` would have been written back as `"Data Governance\nCloud"` — silently
+deleting the bullets from a document the owner sends to an employer, to fix a warning that only
+existed on a dashboard. Strictly worse than the finding.
+
+**How it was caught:** by reading `splitItems` instead of assuming, then reading the LIVE package.
+Live data (db-query 32603750148) is plain newline-separated with no prefixes, so the round trip
+happens to be lossless *there* — which is exactly the trap. "True for the rows I looked at" is not an
+invariant, and the parser's own tolerance is evidence other shapes are expected.
+
+**The fix is a refusal, not a cleverer join:** `roundTripSafe()` rewrites a field ONLY when re-joining
+its parsed items reproduces the stored text EXACTLY. Bullets, pipes, odd whitespace → left untouched
+and REPORTED. A visible finding beats a quietly reformatted document.
+
+**Design: THE MODEL PROPOSES, CODE DECIDES.** Dedupe is pure code. Char limits ask the model to
+reword (never truncate — a chopped skill is visibly broken) and accept the proposal ONLY if it fits,
+is non-empty, and does not collide with an existing item. Every rejection keeps the original, so the
+pass cannot make a package worse than it found it.
+
+Guards: `api/test/normalise.test.mjs`, 12 cases, fixtures are the REAL production strings. Three
+mutations proven: accepting a non-fitting proposal, dropping the fidelity guard, dropping the
+collision check.
+
+### Two smaller corrections found the same way
+- `if (changes.some(c => c.field === field))` re-scanned an ACCUMULATING array, so once any field
+  changed, later untouched fields would be rewritten. Now a local `changedThisField` flag.
+- A test of mine was wrong, not the code: `'Agile Methodologies'` collides inside `SkillsBullets1`
+  but is a legitimate fitting value for `RelevantBullets1`, so accepting it there was CORRECT. Had I
+  "fixed" the code to satisfy that test I would have broken working behaviour.
+
+### Answering the owner's two questions honestly
+- **"Would the AI learn from its mistakes?"** No. `gpt-4o-mini` has no memory between calls; nothing
+  corrected today improves tomorrow's first draft. The real version is few-shot exemplars (store
+  accepted outputs, feed them back) or fine-tuning — a separate capability, recorded, not built.
+- **"Would fixes go back to the same AI for consistency?"** Yes, and the design honours it: `RewriteFn`
+  is INJECTED so the caller passes its own generation transport, and the reworded item is given its
+  siblings as context so it does not read as a seam in a list it did not write.

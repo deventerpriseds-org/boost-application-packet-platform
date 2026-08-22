@@ -230,8 +230,11 @@ export function coversText(text: string, r: { verbatim: string | null; item_text
   return coversIn(normalizePostingText(String(text || '')).toLowerCase(), r)
 }
 
-const SKILL_FIELDS = ['SkillsBullets1', 'SkillsBullets2']
-const RELEVANT_FIELDS = ['RelevantBullets1', 'RelevantBullets2', 'RelevantBullets3']
+// Exported so the NORMALISER enforces the same lists these checks measure. Two copies of "which
+// fields are skill lists" is two answers to the same question, and the normaliser exists precisely
+// to satisfy these checks — it cannot be allowed to disagree with them about scope.
+export const SKILL_FIELDS = ['SkillsBullets1', 'SkillsBullets2']
+export const RELEVANT_FIELDS = ['RelevantBullets1', 'RelevantBullets2', 'RelevantBullets3']
 
 /**
  * Run every deterministic check for one artifact.
