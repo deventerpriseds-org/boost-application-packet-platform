@@ -2150,3 +2150,32 @@ overridden by design, so the route forward is the remediation loop (P3), not a g
 
 Do NOT read the 26 findings as "still broken." Read them as the first honest quality signal this
 product has ever produced about a packet.
+
+## Why a ready packet needs so many tweaks: FOUR of six rubric families have no enforcer (2026-08-22)
+
+Owner: *"why are these allowed to happen? don't the prompts need to be hardened or better
+systemized?"* Their instinct was right, and the ground truth is worse than prompt quality.
+
+**The pipeline has exactly two automated correctors, and neither touches what blocks the gate:**
+- `applyCorrectionPass` (`appCorrections.ts:92`) — `scanEcho`/`planCorrections`, fixes ONLY
+  posting-echoed figures and claims the candidate does not own.
+- The remediation loop (`appRemediation.ts:185+`) — built entirely around COVERAGE:
+  `coverageView`, `cov.openSeqs`, `scopeForRequirements(...)`, `CLOSE_CHECK_KEY`. It iterates
+  uncovered REQUIREMENTS and knows nothing else.
+
+So `skill_char_limit`, `relevant_char_limit`, `cross_list_redundancy` and `word_counts` are stated
+in the prompt, measured by the checks, and **enforced by nothing**. If the model does not comply,
+no mechanism makes it comply.
+
+**Proven live:** remediation on the Trinnex cover (api-test 32603441906) returned `closed: 0`,
+`editedFields: []`, `haltReason: no_coverage_evidence` — halted having changed nothing, with 26
+findings blocking the gate. A clean halt that reads like success.
+
+**The design lesson:** asking ONE prompt to satisfy a twenty-rule rubric in one shot, then measuring
+compliance, is not a system — it is a hope with a dashboard. Deterministic rules belong in code.
+`cross_list_redundancy` is a pure dedupe. The char limits need rewording rather than truncation, so
+they need a tight single-purpose call with a deterministic accept/reject on length — never a general
+"try again", which is what produced the current state.
+
+Recorded as `D:mechanical-rules-have-no-enforcer`. The fix EXTENDS `applyCorrectionPass` rather than
+adding a third corrector beside two that already disagree about their scope.

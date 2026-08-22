@@ -2646,3 +2646,24 @@ The premise was inferred, not checked — the same failure mode as the two-day m
 `changes_cited`, and `must_have_coverage` 1/5 — most of which are the owner's own prompt rules
 being enforced for the first time. A `fail` cannot be overridden by design, so the next step is the
 remediation loop, NOT a gate change. Before: no effort could ship. Now: nameable, fixable findings.
+
+## Remediation run + why the rubric is not self-enforcing (2026-08-22)
+
+**Owner asked:** run remediation and show a packet reaching ready; and *"why are these allowed to
+happen? don't the prompts need to be hardened or better systemized?"*
+
+**Remediation RAN and FIXED NOTHING.** api-test run **32603441906** on the Trinnex cover:
+`closed: 0`, `editedFields: []`, `phantomCloses: 0`, `haltReason: no_coverage_evidence`, 7.5s,
+$0 spend. It halted cleanly with 26 findings still blocking the gate.
+
+**Root cause, ground-truthed rather than guessed.** Two automated correctors exist and neither
+covers the blocking findings: `applyCorrectionPass` fixes only posting-ECHOES; the remediation loop
+is built around COVERAGE (`coverageView`, `cov.openSeqs`, `scopeForRequirements`, `CLOSE_CHECK_KEY`).
+`skill_char_limit`, `relevant_char_limit`, `cross_list_redundancy` and `word_counts` — four of the
+six blocking families — are stated in the prompt, measured by the checks, and **enforced by nothing.**
+
+Recorded as `D:mechanical-rules-have-no-enforcer`. The owner's instinct was correct; the fix is NOT
+prompt hardening but a deterministic normaliser EXTENDING `applyCorrectionPass`.
+
+**Could NOT show a packet reaching `ready`** — that is blocked on this gap, not on the two structural
+fixes landed earlier today (which are confirmed working: checks now run for every buildable type).
