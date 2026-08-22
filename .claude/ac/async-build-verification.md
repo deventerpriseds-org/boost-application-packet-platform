@@ -111,3 +111,131 @@ That is **false as of 6050fff** — the same commit that wrote the comment also 
 Stale prose describing a closed hole as open. No runtime impact; worth a one-line fix.
 
 ---
+## Claim 4(b) part 2 — LIVE proof the hole is closed. **CONFIRMED on production.**
+
+api-test run **32550743870** (job 96976946976), `omit_auth: true`, and deliberately **no `?owner=`** —
+which is the *exact* attack shape, because with no owner param `resolveOwner` returns
+`demo@executive-engine.local` and `requireWrite` therefore ALLOWS the request. Raw log:
+```
+API_PATH: /api/app/opportunity/9f9c370a-4ac9-441e-b58e-02e3ffcf669e/packet/build-async
+API_BODY: {"regen":true}          API_OMIT_AUTH: true
+omit_auth=true -> sending NO Authorization header (testing the reject path)
+04:05:03.4457  HTTP 404 POST .../packet/build-async
+{ "error": "opportunity not found" }
+```
+This is the strong form of the test. The request got **past** `requireWrite` exactly as it did before
+the fix, and was stopped by `enqueueBuild`'s new `and owner_email=$2` predicate instead. The
+Actions run is red (`exit 1` on status >= 400) — expected for a reject-path test, not a failure.
+
+Note the 404-not-401 is deliberate and correct: `packetBuildAsync` (appBuildJobs.ts:64) collapses
+"foreign id" and "unknown id" into one 404 so the response does not leak which opportunity UUIDs exist.
+
+### The three artifact routes now go through `loadOwnedArtifact`. **CONFIRMED.**
+`grep -rn loadOwnedArtifact api/src/functions/tests/` → definition at appPackets.ts:311, and exactly
+three call sites: **197 (`artifactGenerate`), 513 (`artifactDocument`), 593 (`artifactSlides`)**.
+Each is preceded by `requireWrite` and followed by `if (!art) return 404`. The loader itself:
+```sql
+select a.*, p.opp_id from artifact a
+  join packet p on p.id = a.packet_id
+  join opportunity o on o.id = p.opp_id
+ where a.id = $1 and o.owner_email = $2
+```
+The subsequent `${OPP_FIELDS} where id = $1` in each route uses `art.opp_id`, which is only reachable
+through that owner-scoped join, so it is not a second hole.
+
+---
+## Claim 5 — the tests are real, and SIX mutation proofs. **CONFIRMED.**
+
+Local PostgreSQL 16.13 booted (`/usr/lib/postgresql/16`). Baseline, `node --test --test-force-exit`:
+```
+buildQueueDb.test.mjs + buildSignal.test.mjs
+# tests 16   # pass 16   # fail 0   # skipped 0
+```
+**`skipped 0` is the load-bearing number.** Both files guard with `{ skip: !HAVE_PG && 'no PostgreSQL' }`,
+so a container without a cluster would report 16 green skips. It did not — every DB test executed.
+
+Mutation proofs. Each: reinstate the defect in the `.ts`, rebuild, run, restore, verify `git diff` clean.
+
+| # | Defect reinstated | Result |
+|---|---|---|
+| 1 | `enqueueBuild`: drop `and owner_email=$2` from the opportunity load | **FAIL** `not ok 10 H:enqueue-is-owner-scoped` — *"a cross-owner build was queued"*. 10 pass / 1 fail |
+| 2 | `getBuildJob`: drop `and owner_email=$2` | **FAIL** `not ok 5 H:job-read-is-owner-scoped`. 15 pass / 1 fail |
+| 3b | `finishBuild`: remove the fence (`and attempts=$5 and state='running'`) + its param | **FAIL** `not ok 7 H:zombie-worker-cannot-clobber-a-reclaimed-build`. 15 pass / 1 fail |
+| 4 | `finishBuild`: `result = null` whenever `ok` is false | **FAIL** `not ok 8 H:failed-build-keeps-its-evidence`. 15 pass / 1 fail |
+| 5 | `claimNextBuild`: move `attempts < $2` OUT of the subquery into the outer WHERE | **FAIL** `not ok 6 H:poisoned-job-does-not-block-the-queue`. 15 pass / 1 fail |
+| 6 | `encodeBuildSignal`: return raw `JSON.stringify(sig)` instead of base64 | **FAIL** `not ok 12 H:build-signal-is-base64`. 15 pass / 1 fail |
+
+Five of the six failed **exactly one** test — the guards are precise, not blanket.
+
+**Honest note on a discarded first attempt.** My initial mutation 3 removed the fence predicates but
+left `attempt` in the parameter array, so Postgres rejected the statement for parameter-count and
+**four** tests failed. That proved nothing about the fence — it proved the query was malformed. I
+redid it as 3b (removing the param too), which is a genuine unfenced `finishBuild`, and only the
+fence test failed. Reporting the discarded attempt because a mutation that fails for the wrong
+reason is not a mutation proof.
+
+Tree restored: `git status --short` shows only `.claude/ac/async-build-verification.md`; re-run after
+restore is 16/16 pass, 0 skipped.
+
+---
+## Claim 3 — "reaches `state: done` with artifacts and an evidence block". **FALSE AS STATED.**
+
+Ground truth, db-query job 96977884856 at 2026-08-22T04:13:18Z, on job 945e28ed:
+```
+ t                             | state  | attempts | secs | err                                                                     | arts | evidence                                                                   | touched
+ 2026-08-22 04:13:18.283722+00 | failed |        2 |  196 | Packet built with 42 warning(s) across 4 artifact(s). Nothing was sent. |    4 | {"total":10,"refused":0,"proposed":5,"escalated":8,"evidenced":6}          |       4
+```
+- **`state` is `failed`, not `done`.** The claim is wrong on its central word.
+- It *does* carry 4 artifacts and a real evidence block — so the "payload is kept on failure" design
+  is vindicated in production. But that is a different claim from the one made.
+- `attempts = 2`: the job was claimed twice.
+
+### What actually happened, reconstructed from the row (Observation vs Interpretation)
+**Observed:** claimed 03:58:00 (attempt 1); at 04:13:18 attempts=2 and `finished-claimed = 196 s`,
+which places attempt 2's claim at ~04:10:02.
+**Interpretation (high confidence, not proven — the Function App's Application Insights is not
+reachable from this sandbox):** attempt 1 ran from 03:58:00 and never finished. `STALE_CLAIM_MINUTES`
+is 10, and the 5-minute sweep (`0 */5 * * * *`) fires at :00/:05/:10 — 04:10:00 is the first sweep at
+which the 03:58:00 claim was older than 10 minutes, which matches ~04:10:02 exactly. `host.json` sets
+`functionTimeout: 00:10:00`, so attempt 1 was almost certainly killed by the host timeout at ~04:08.
+**The sweep did exactly the job it was demoted to do** — it recovered a worker that died mid-build.
+That part of the design is confirmed by production behaviour.
+
+### DEFECT (regression introduced by these commits): a build that WROTE ALL FOUR DOCUMENTS is reported to the owner as a FAILURE
+
+This is not a nitpick — it is the exact failure D35 was created to eliminate, relocated from the
+gateway into the `ok` computation.
+
+Chain, read from source:
+1. `packetBuild.ts:72` — `summariseBuild` returns `ok: !failed.length && !warned.length`.
+   **Any warning on any artifact makes `ok` false, even with zero failures.**
+2. `appBuildJobs.ts:132` — `ok = out.status===200 && out.body?.ok===true && !out.body?.error`;
+   `if (!ok) error = out.body?.error || out.body?.note || ...`
+3. `finishBuild(..., ok=false, ...)` → **`state = 'failed'`**, `error` = the *success-shaped* note.
+4. `PacketBuilder.jsx` `pollBuild`:
+   `if (s.state === 'done') toast('Built N documents — nothing sent')`
+   `else toast('Build failed after N documents: ' + s.error)`
+
+So the owner is shown, verbatim:
+> **"Build failed after 4 documents: Packet built with 42 warning(s) across 4 artifact(s). Nothing was sent."**
+
+A self-contradictory message on a build that succeeded — and the stated motivation for D35 is that
+"the owner is shown a failure on a build that succeeded, so they press the button again and pay for
+it again."
+
+**This is a REGRESSION, not a pre-existing condition.** `summariseBuild`'s `ok` semantics are older,
+but before 96e2f06 the UI did:
+```js
+const r = await api.buildFullPacket(...)
+if (r.error) throw new Error(r.error)          // body has no `error` key on a warning-only build
+toast(`Built ${...} documents — nothing sent`)  // <-- old UI reported SUCCESS
+```
+`ok:false` was never read by the old UI. 96e2f06 routes the same condition through job state, where
+`ok:false` becomes `state:'failed'` and a "Build failed" toast. **The old path said success; the new
+path says failure, on identical build output.**
+
+Fix direction (not applied — I do not modify source): the queue's notion of failure should be
+`summary.failed > 0` (an artifact that did not build), not `!summary.ok` (which folds in warnings).
+Warnings already have a home in `result.warnings`.
+
+---
