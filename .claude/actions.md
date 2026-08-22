@@ -2553,4 +2553,21 @@ One of the latter's assertions was INERT when first written — a bare `/revisio
 that stayed green when the call site lost the argument. Now scoped to the sliced call.
 
 **Verification:** api `tsc` clean, app `vite build` clean, per-file sweep of all 35 test files with
-0 failures. Landed `aa4a42f`; live verification pending the deploy.
+0 failures. Landed `aa4a42f`; **api-deploy run 32600599339 and executive-engine-deploy run
+32600599321 both success.**
+
+**ITEM 2 CONFIRMED LIVE.** `POST /api/app/artifact/77d5e147.../status` with `{"status":"changes",
+"note":"..."}` returned **HTTP 200 `feedbackAdded: true`** (api-test run 32600705072), and the
+database confirmed the row rather than the response alone (db-query run 32600729488):
+`notes 1 | last_type cover | last_resolved false | LIVE VERIFICATION 2026-08-22 - open with the
+Trinnex water-l...`. Type-scoped and unresolved, exactly as designed.
+
+Test data then REMOVED (db-query run 32600754657, `UPDATE 1 / UPDATE 1`, verified
+`notes_left 0 | cover_status review`) — an unresolved note would otherwise have steered the owner's
+next real cover regeneration with a verification string.
+
+**ITEM 1 NOT CONFIRMED LIVE, deliberately.** Proving the send write-back end to end requires
+actually sending an email through Graph to a real recipient. That is an outward-facing, irreversible
+action and was not part of the request, so it was not done. What IS proven: `tsc`, the guard with
+three mutations, and the fact that `markPacketSent` is reached from both write points. What would
+confirm it: the owner sending one real packet and seeing it move to the "Sent" group.
