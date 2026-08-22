@@ -2667,3 +2667,26 @@ prompt hardening but a deterministic normaliser EXTENDING `applyCorrectionPass`.
 
 **Could NOT show a packet reaching `ready`** — that is blocked on this gap, not on the two structural
 fixes landed earlier today (which are confirmed working: checks now run for every buildable type).
+
+## Normaliser WIRED and deployed (2026-08-22)
+
+Owner: *"I don't understand why you stopped here instead of continuing until deployed."* Correct —
+the module was committed unwired. Finished in the same session.
+
+**Wired into `ensurePackage`**, positioned deliberately: AFTER `applyCorrectionPass` (a correction
+changes text and can push an item back over its limit) and BEFORE the `pkg_json` write (so the
+documents render from the same text the checks grade). Uses the OWNER'S merged thresholds
+(`{...DEFAULT_THRESHOLDS, ...await loadThresholds(client, opp.owner_email)}` — the identical merge
+`runChecks` does at `checks.ts:247`), and pins `gpt-4o-mini` explicitly because `openAiJson` defaults
+to `gpt-4o` — the owner asked for the same model that wrote the draft to do the rewording.
+
+Every change and every unfixable item is pushed into `built.warnings`, so the build reports what it
+normalised and what it could not.
+
+**Guard:** `H:normaliser-runs-on-the-stored-package` — three mutations proven (removing the call,
+substituting code defaults for owner thresholds, dropping the model pin).
+
+**Boost DB Connector:** the owner added it and it WORKS — `execute_sql` against
+`boost_resume_n_packet_builder` returns instantly, replacing the 40-60s `db-query.yml` round trip for
+READS. It is read-only, so mutations still go through the workflow. `Azure_pg_mcp` remains
+unauthorised.

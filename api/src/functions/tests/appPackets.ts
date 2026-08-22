@@ -13,6 +13,9 @@ import { applyCorrectionPass } from './appCorrections'
 import { sourceText } from './appFacts'
 import { summariseBuild, skillLineage, collectAnalysis } from './packetBuild'
 import { approvalBlock, evaluateArtifact } from './appChecks'
+import { loadThresholds } from './checkPrefs'
+import { DEFAULT_THRESHOLDS } from './checks'
+import { normalisePackage } from './normalise'
 // The evidence pass, called in-process rather than over HTTP — see resolveEvidenceForOpp. No cycle:
 // appPackets is not reachable from appRequirements (checked across all 24 modules it can reach).
 import { writeEvidence, rebuildComparison, ensureRequirementCols, ensureEvidenceTable } from './appRequirements'
@@ -496,6 +499,40 @@ export async function ensurePackage(client: any, art: any, opp: any, regen: bool
     // generation is not a remediation pass. Passes 1..n are scoped and are written by the loop.
     loop: 0,
   })
+
+  // DETERMINISTIC NORMALISATION — the mechanical rubric rules, enforced rather than hoped for.
+  //
+  // AFTER the correction pass, because a correction changes text and can push an item back over its
+  // character limit; normalising first would measure a string that is about to change. BEFORE
+  // `pkg_json` is stored, so the documents render from the normalised text and the checks grade the
+  // same text the owner reads — the alternative is a package that passes in memory and fails on disk.
+  //
+  // THE OWNER'S THRESHOLDS, merged exactly as `runChecks` merges them (`checks.ts:247`). A normaliser
+  // working from code defaults would satisfy a rule the gate is not using, which is the one way this
+  // pass could run, report success, and leave the gate red.
+  //
+  // THE SAME MODEL THAT WROTE THE DRAFT does the rewording — `gpt-4o-mini`, passed explicitly because
+  // `openAiJson` defaults to `gpt-4o`. The owner asked for this directly: a rewrite from a different
+  // model reads as a seam in a list it did not write.
+  const thresholds = { ...DEFAULT_THRESHOLDS, ...(await loadThresholds(client, opp.owner_email).catch(() => ({}))) }
+  const rewriteOne = openAiJson({ feature: 'normalise:reword', model: 'gpt-4o-mini', temperature: 0, maxTokens: 120 })
+  const normalised = await normalisePackage(pkg, thresholds, async ({ item, maxChars, siblings, field }) => {
+    const out = await rewriteOne(
+      'You shorten one resume list item so it fits a hard character limit. Keep the meaning and the '
+      + 'voice of the surrounding items. Never abbreviate into something unreadable. '
+      + 'Reply as JSON: {"item": "<the shortened item>"}.',
+      `Field: ${field}\nHard limit: ${maxChars} characters including spaces.\n`
+      + `Item to shorten (${item.length} chars): ${item}\n`
+      + `Other items in this list, for voice and to avoid duplicating one:\n${siblings.map(x => `- ${x}`).join('\n')}`,
+    )
+    return typeof out?.item === 'string' ? out.item : null
+  })
+  for (const c of normalised.changes) {
+    built.warnings.push(c.after === null
+      ? `normalised ${c.field}: removed "${c.before}" — ${c.note}`
+      : `normalised ${c.field}: "${c.before}" → "${c.after}" (${c.note})`)
+  }
+  for (const u of normalised.unresolved) built.warnings.push(`normalise could not fix — ${u}`)
 
   await client.query(`update packet set pkg_json = $1, jd_grounded = $2, updated_at = now() where id = $3`,
     [JSON.stringify(pkg), grounded, art.packet_id])

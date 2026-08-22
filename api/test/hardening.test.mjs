@@ -3695,3 +3695,48 @@ test('H:build-runs-checks-so-approval-is-possible: the build path runs checks on
     'evaluateArtifact must be imported from appChecks — the engine that already owns the gate, not ' +
     'a second checking path')
 })
+
+// H:normaliser-runs-on-the-stored-package — the enforcement layer must actually be in the build.
+//
+// A normaliser that exists and is never called is the same defect as `evaluateArtifact` having no
+// caller in the build path (see H:build-runs-checks-so-approval-is-possible, found the same day).
+// Both were modules that worked perfectly in isolation while the product went unshipped.
+//
+// Three ordering properties, each of which silently breaks the pass if wrong:
+//  1. it runs BEFORE `pkg_json` is written — otherwise the documents render from un-normalised text
+//     and the checks grade a different string than the owner reads;
+//  2. it runs AFTER `applyCorrectionPass` — a correction changes text and can push an item back over
+//     its limit, so normalising first measures a string that is about to change;
+//  3. it uses the OWNER'S merged thresholds, not the code defaults. A normaliser satisfying a rule
+//     the gate is not using would run, report success, and leave the gate red.
+test('H:normaliser-runs-on-the-stored-package: wired in, after corrections, before the write', () => {
+  const PK = stripComments(readFileSync(new URL('../src/functions/tests/appPackets.ts', import.meta.url), 'utf8'))
+
+  const correction = PK.indexOf('applyCorrectionPass(')
+  const normalise  = PK.indexOf('normalisePackage(')
+  const write      = PK.indexOf('update packet set pkg_json')
+  assert.notEqual(normalise, -1,
+    'normalisePackage is never called — the mechanical rubric rules are unenforced again, exactly ' +
+    'as they were when remediation returned closed:0 with 26 findings blocking the gate')
+  assert.notEqual(correction, -1, 'applyCorrectionPass moved; retarget this guard')
+  assert.notEqual(write, -1, 'the pkg_json write moved; retarget this guard')
+
+  assert.ok(normalise > correction,
+    'normalisePackage runs BEFORE applyCorrectionPass — a correction changes text and can push an ' +
+    'item back over its character limit, so the normalisation would measure a stale string')
+  assert.ok(normalise < write,
+    'normalisePackage runs AFTER pkg_json is written — the documents would render from un-normalised ' +
+    'text while the checks grade the normalised text, which is the in-memory/on-disk split this ' +
+    'whole layer exists to prevent')
+
+  // The owner's thresholds, merged the way runChecks merges them.
+  assert.ok(/\{\s*\.\.\.DEFAULT_THRESHOLDS,\s*\.\.\.\(await loadThresholds\(/.test(PK),
+    'the normaliser is not using the owner\'s merged thresholds — it would enforce a rule the gate ' +
+    'is not using, run clean, and leave the gate red')
+
+  // The SAME model that wrote the draft, passed explicitly (openAiJson defaults to gpt-4o).
+  const call = PK.slice(normalise - 400, normalise + 200)
+  assert.ok(/model:\s*'gpt-4o-mini'/.test(call),
+    'the rewrite transport does not pin gpt-4o-mini, so a reworded item comes from a different model ' +
+    'than wrote the list around it and reads as a seam')
+})
