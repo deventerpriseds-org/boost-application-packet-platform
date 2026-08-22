@@ -1172,6 +1172,17 @@ test('H33: every server-side body toggle has a caller that can send it', () => {
       const caller = f1 || f2
       if (caller && routeOf.has(caller) && !routeOf.has(callee)) routeOf.set(callee, routeOf.get(caller))
     }
+    // The other way a handler delegates: it keeps the request, and hands the parsed BODY to a
+    // same-file function. `packetBuildAll` does exactly this since the build was extracted so the
+    // D35 timer could run the same code — `await runPacketBuild(client, oppId, owner, body, log)`.
+    // The `(req` form above only recognises a callee that takes the request itself, so the moment
+    // the toggles moved one function across, this guard called `draftOutreach` unsendable while the
+    // coach tool was still sending it to the same route. The toggles travel with the body; the
+    // route has to travel with them, or the guard measures where code happens to live.
+    for (const [, f1, f2, callee] of code.matchAll(/(?:function\s+(\w+)|const\s+(\w+)\s*=\s*async)[\s\S]{0,1500}?\bawait\s+(\w+)\([^\n]{0,200}?\bbody\b/g)) {
+      const caller = f1 || f2
+      if (caller && routeOf.has(caller) && !routeOf.has(callee)) routeOf.set(callee, routeOf.get(caller))
+    }
     for (const m of code.matchAll(toggleRe(code))) {
       // A DESTRUCTURED name is only a toggle if it is later used as one. `const { roleType,
       // jobTitle } = body` is ordinary input, and counting it turns this into "every body field
