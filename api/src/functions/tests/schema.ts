@@ -1088,6 +1088,15 @@ exception when duplicate_table or duplicate_object then null; end $$;
 alter table packet         add column if not exists must_haves text[];
 alter table packet         add column if not exists jd_grounded boolean;
 alter table packet         add column if not exists jd_analyzed_at timestamptz;
+-- The last build's OUTCOME, so a diagnosis does not live only in an HTTP response.
+--
+-- build-all takes about three minutes of real work and the gateway gives up at four, so the
+-- response carrying "warnings" and the discarded-section list is routinely lost (D35: measured
+-- twice, most recently run 32546312184, where every artifact finished at 02:31:50 and the 504 fired
+-- at 02:31:51). Two open findings — D31's unparseable Call 2 and D33's 7,446 discarded characters —
+-- are stuck precisely because the evidence for them was only ever in that response. Persisting it
+-- turns "we cannot see what happened" into a row anyone can query afterwards.
+alter table packet         add column if not exists last_build jsonb;
 alter table library_entity add column if not exists owner_email text not null default 'demo@executive-engine.local';
 alter table library_entity add column if not exists is_demo boolean not null default false;
 create index if not exists opp_owner_idx2 on opportunity(owner_email);

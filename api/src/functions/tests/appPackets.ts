@@ -690,6 +690,22 @@ export async function packetBuildAll(req: HttpRequest, context: InvocationContex
     // build must not fail because QC could not run — but it must not report clean either, so the
     // outcome joins `warnings` where `summariseBuild` already surfaces partial success.
     const evidence = await selfPost(`app/opportunity/${oppId}/evidence?owner=${encodeURIComponent(owner)}`, {})
+    // PERSIST THE OUTCOME BEFORE RETURNING IT. The response below is routinely lost — `build-all`
+    // runs ~3 minutes and the gateway cuts at 4 (D35, measured twice) — and `warnings` is the only
+    // place the discarded-section list and the Call-2 parse failures have ever existed. Two open
+    // findings are un-diagnosable for exactly that reason. Written before the return, so a build
+    // whose response never arrives still leaves its diagnosis behind.
+    try {
+      await client.query(
+        `update packet set last_build = $2 where id = $1`,
+        [pkt.id, JSON.stringify({
+          at: new Date().toISOString(), regen: body?.regen === true,
+          artifacts: results.map((r: any) => ({
+            type: r.type, error: r.error || null,
+            warnings: r.warnings || [], qcApplied: r.qcApplied ?? null,
+          })),
+        })])
+    } catch (e) { context.log('last_build persist failed', String(e)) }
     const packetStatus = await recomputePacket(client, pkt.id)
     let cadenceSeeded = false, outreachDrafted = false
     if (body?.seedCadence === true) { const r = await selfPost(`app/opportunity/${oppId}/cadence?owner=${encodeURIComponent(owner)}`, {}); cadenceSeeded = !r?.error }

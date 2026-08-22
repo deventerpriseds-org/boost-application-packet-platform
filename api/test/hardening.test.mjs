@@ -3295,3 +3295,47 @@ test('H:config-route-is-not-open: /api/config needs a session to write and serve
   assert.ok(!/values\[entity\.rowKey as string\] = entity\.value as string/.test(get),
     'getConfig still returns every row of the auth partition')
 })
+
+// H:build-outcome-outlives-the-response — a diagnosis that exists only in an HTTP response is a
+// diagnosis you lose exactly when the build is interesting.
+//
+// `build-all` does ~3 minutes of real work and the gateway gives up at 4. Measured TWICE, most
+// recently run 32546312184: every artifact finished (02:29:02, 02:30:10, 02:30:53, 02:31:50, all
+// four with doc_urls) and the 504 fired at 02:31:51 — one second after the last one landed. The work
+// completes; the response does not.
+//
+// That is not merely annoying, and it is why this case exists rather than a note on D35. Two open
+// findings are un-diagnosable BECAUSE of it: D33's 7,446 discarded characters and D31's unparseable
+// Call 2 were both observed once, in a response, and neither has been reproducible since — the
+// evidence for them was never written anywhere. `packet` carried no column for it (checked at
+// a6058a8: id, opp_id, status, round, jd_analyzed, covered_kw, ats_score, feedback, created_at,
+// updated_at, must_haves, jd_grounded, jd_analyzed_at).
+//
+// The invariant: the build persists its own outcome BEFORE it tries to return it. Ordering is the
+// whole point — persisting after the return would keep exactly the failure mode this fixes.
+test('H:build-outcome-outlives-the-response: build-all writes its warnings before returning them', () => {
+  const body = stripComments(src('appPackets.ts'))
+  const fn = body.slice(body.indexOf('export async function packetBuildAll'))
+  assert.ok(fn.length > 400, 'packetBuildAll moved — this scan has gone stale')
+
+  const persist = fn.indexOf('update packet set last_build')
+  assert.ok(persist > 0, 'the build outcome is never persisted — a lost response loses the diagnosis')
+
+  // BEFORE the SUCCESS response is constructed, not merely before the first `jsonBody:` in the
+  // function — the early guard returns (no Google token, opportunity not found) come first and are
+  // not what this is about. Anchored on the success body, which is the one the gateway drops.
+  const ret = fn.indexOf('ok: summary.ok')
+  assert.ok(ret > 0, 'the success response moved — this scan has gone stale')
+  assert.ok(persist < ret,
+    'the outcome is persisted after the response is built — the timeout would still lose it')
+
+  // It must carry the per-artifact WARNINGS, which are the diagnosis. A row recording only
+  // success/failure would satisfy the ordering above and still tell nobody what happened.
+  const block = fn.slice(persist - 700, persist + 700)
+  assert.match(block, /warnings: r\.warnings/, 'the persisted outcome drops the per-artifact warnings')
+
+  // And the column has to exist in SCHEMA_SQL, or the write fails silently on a migrated database.
+  const schema = src('schema.ts')
+  assert.match(schema, /alter table packet\s+add column if not exists last_build jsonb;/,
+    'last_build is written but never declared')
+})
