@@ -34,7 +34,9 @@ export async function ensureCheckPrefs(client: any) {
       add column if not exists chk_evidence_threshold   numeric not null default ${DEFAULT_THRESHOLDS.evidenceThreshold},
       add column if not exists chk_evidence_min_tokens  int not null default ${DEFAULT_THRESHOLDS.evidenceMinTokens},
       add column if not exists chk_evidence_max_sentences int not null default ${DEFAULT_THRESHOLDS.evidenceMaxSentences},
-      add column if not exists chk_evidence_bullet_run  int not null default ${DEFAULT_THRESHOLDS.evidenceBulletRun}`)
+      add column if not exists chk_evidence_bullet_run  int not null default ${DEFAULT_THRESHOLDS.evidenceBulletRun},
+      add column if not exists chk_evidence_escalate  boolean not null default ${DEFAULT_THRESHOLDS.evidenceEscalate},
+      add column if not exists chk_evidence_escalate_max int not null default ${DEFAULT_THRESHOLDS.evidenceEscalateMax}`)
 }
 
 export async function loadThresholds(client: any, owner: string): Promise<Partial<CheckThresholds>> {
@@ -43,7 +45,8 @@ export async function loadThresholds(client: any, owner: string): Promise<Partia
     `select chk_skill_max_chars, chk_skills_total_min, chk_skills_total_max, chk_relevant_max_chars,
             chk_relevant_allowance, chk_expertise_words, chk_cover_words_min, chk_cover_words_max,
             chk_evidence_threshold, chk_evidence_min_tokens,
-            chk_evidence_max_sentences, chk_evidence_bullet_run
+            chk_evidence_max_sentences, chk_evidence_bullet_run,
+            chk_evidence_escalate, chk_evidence_escalate_max
        from owner_search_prefs where owner_email=$1`, [owner])).rows[0]
   if (!r) return {}
   return {
@@ -58,6 +61,8 @@ export async function loadThresholds(client: any, owner: string): Promise<Partia
     evidenceMinTokens: r.chk_evidence_min_tokens ?? undefined,
     evidenceMaxSentences: r.chk_evidence_max_sentences ?? undefined,
     evidenceBulletRun: r.chk_evidence_bullet_run ?? undefined,
+    evidenceEscalate: r.chk_evidence_escalate === true,
+    evidenceEscalateMax: r.chk_evidence_escalate_max ?? undefined,
   }
 }
 
@@ -87,5 +92,25 @@ export function resolveOptionsFrom(t: Partial<CheckThresholds>): ResolveOptions 
     minTokens: t.evidenceMinTokens,
     maxSentences: t.evidenceMaxSentences,
     bulletRunMax: t.evidenceBulletRun,
+    // ON UNLESS THE OWNER SAID OTHERWISE — `!== false`, and the distinction is not pedantry.
+    //
+    // `ensureCheckPrefs` only ADDS the column; it does not INSERT a row. So `loadThresholds` returns
+    // `{}` for an owner who has never been written to `owner_search_prefs`, and a strict `=== true`
+    // would have left exactly that owner OFF while the column's default said ON — a seed that reads
+    // as enabled and behaves as disabled, which is the worst of both.
+    //
+    // `!== false` distinguishes the three real states: no row yet (take the seed, ON), a row saying
+    // true (ON), a row saying false (OFF, and it beats the seed — the setting wins over the code,
+    // which is the no-hardcoded-config rule pointing the way that matters).
+    //
+    // This REVERSES the safe-by-default posture this line shipped with a few commits ago, at the
+    // owner's explicit instruction: "I don't know why the escalation needs to be turned on or off vs
+    // always on ... make sure the toggle is automatically on by default." What makes that safe is
+    // not the toggle but `checks.ts`: a proposed row is shown beside a requirement and can never
+    // count toward coverage, so the tier only ever ADDS information where there was none. It changes
+    // what the owner is told, never what they are scored — and never what the resume draft says,
+    // which is written from their prompts before this pass runs at all.
+    escalate: t.evidenceEscalate !== false,
+    escalateMax: t.evidenceEscalateMax,
   }
 }

@@ -94,6 +94,15 @@ async function populatedDb(name) {
     add column if not exists jd_summary text, add column if not exists jd_table jsonb,
     add column if not exists jd_text text, add column if not exists jd_text_sha256 text,
     add column if not exists jd_text_truncated boolean`)
+  // `requirement_evidence.proposal_version` is an ensure-path column for the same reason the
+  // opportunity ones are: `ensureEvidenceTable` adds it, SCHEMA_SQL's ALTER widens the CHECK, and
+  // `loadRequirementsWithEvidence` selects it. Reproducing it here is keeping the fixture faithful
+  // to what the ensure path now builds — NOT relaxing the test. It earned its place: this fixture
+  // failed with `column e.proposal_version does not exist` and that is what proved the column had to
+  // be on the ensure path rather than in SCHEMA_SQL alone, because `api-deploy.yml` deploys the code
+  // BEFORE it runs `pg-migrate`, so a read-path column that only SCHEMA_SQL adds is missing for the
+  // length of that window.
+  await c.query(`alter table requirement_evidence add column if not exists proposal_version int`)
 
   const owner = 'von.ellis@enterpriseds.io'
   const opp = (await c.query(

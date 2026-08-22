@@ -350,6 +350,10 @@ function joinedRow(mc = MC, seq = 0) {
     evidence_method: ev.method,
     evidence_record_sha256: ev.record_sha256,
     evidence_resolver_version: ev.resolver_version,
+    // NULL, because this fixture is a DETERMINISTIC row and null is what "no model was involved"
+    // means. Carrying the column with a value would make every test in this file assert the shape
+    // of a proposed row while claiming to describe a resolved one.
+    evidence_proposal_version: null,
     evidence_resolved_at: new Date('2026-08-20T00:00:00Z'),
   }
 }

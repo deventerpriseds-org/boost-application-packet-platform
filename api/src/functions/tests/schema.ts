@@ -1091,6 +1091,33 @@ alter table packet         add column if not exists jd_analyzed_at timestamptz;
 alter table library_entity add column if not exists owner_email text not null default 'demo@executive-engine.local';
 alter table library_entity add column if not exists is_demo boolean not null default false;
 create index if not exists opp_owner_idx2 on opportunity(owner_email);
+
+-- P8.3 escalation tier — a third provenance for an evidence row.
+--
+-- method was constrained to ('exact','anchored'), both produced by the deterministic resolver. The
+-- escalation tier adds rows a MODEL proposed and an exact substring check then accepted, and those
+-- must be distinguishable from the rows a rule settled on its own — otherwise a reader a month
+-- later cannot tell which claims carry model judgement, and neither can a query.
+--
+-- The constraint is what makes this safe rather than decorative: writing a model row as 'exact'
+-- would be the loosening this whole subsystem exists to prevent, and the CHECK refuses any value
+-- that is not one of the three. Verified by execution against a POPULATED database carrying main's
+-- schema (2026-08-21): 'proposed' + proposal_version inserted, a deterministic 'exact' row inserted
+-- unchanged with proposal_version null, and a bogus 'guessed' REFUSED by this constraint.
+--
+-- DROP-THEN-ADD, in that order, per this file's own rule: "add constraint" is not idempotent, and
+-- an already-present old constraint would otherwise abort the migration or be silently swallowed.
+alter table requirement_evidence drop constraint if exists requirement_evidence_method_check;
+do $$ begin
+  alter table requirement_evidence add constraint requirement_evidence_method_check
+    check (method in ('exact','anchored','proposed'));
+exception when undefined_table then null; end $$;
+-- NULL means no model was involved, which is what every existing row means and why the column is
+-- nullable rather than defaulted. A default would backfill 1 onto 'exact' rows and assert model
+-- provenance for work a rule did alone.
+alter table requirement_evidence add column if not exists proposal_version int;
+-- The model's one-sentence justification. The extra column is SPEC 4.1's supporting note and is the right
+-- home for it — it is prose about the quote, never a second quote — so no column is added for it.
 `;
 
 // Tables we expect to exist after migration (used by the runner to report).

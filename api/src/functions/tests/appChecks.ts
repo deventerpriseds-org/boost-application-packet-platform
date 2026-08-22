@@ -66,6 +66,12 @@ export async function evaluateArtifact(client: any, artifactId: string, owner: s
     // The owner's thresholds reach the RESOLVER, not just the checks. `writeEvidence` used to be
     // called with no options, so `ResolveOptions` was overridable in principle and fixed in
     // production — which is the no-hardcoded-config rule broken with a settings hook attached.
+    // NO TRANSPORT on the gate path either, and for a sharper reason than cost. Four artifacts of
+    // one packet enter `evaluateArtifact` concurrently, each calling `writeEvidence`; with a
+    // transport here that is four independent sets of model calls for the same opportunity, and
+    // because two runs can return DIFFERENT proposals, the last committer wins with a row set the
+    // other three were never judged against. The gate would then be reading rows that no longer
+    // exist. Escalation happens ONCE, on the evidence route the build calls, before the checks run.
     await writeEvidence(client, art.opp_id, profileRead.records, resolveOptionsFrom(thresholds))
   }
   const requirements = await loadRequirementsWithEvidence(client, art.opp_id)
@@ -83,10 +89,14 @@ export async function evaluateArtifact(client: any, artifactId: string, owner: s
       // because nothing downstream reads them, and one edit away from a digest field holding a
       // value no digest produced.
       extra: r.evidence_extra,
-      ratio: r.evidence_ratio === null ? 0 : Number(r.evidence_ratio),
+      // NULL stays NULL. It used to be coerced to 0, which was harmless while every row had a
+      // ratio and is not any more: a proposed row has none, and 0 is a MEASUREMENT — it would read
+      // as "the matcher scored this and got zero" rather than "no rule scored this at all".
+      ratio: r.evidence_ratio === null || r.evidence_ratio === undefined ? null : Number(r.evidence_ratio),
       method: r.evidence_method,
       record_sha256: r.evidence_record_sha256,
       resolver_version: r.evidence_resolver_version,
+      proposal_version: r.evidence_proposal_version ?? null,
     } as EvidenceRow)])),
   }
 
