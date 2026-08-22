@@ -113,9 +113,24 @@ async function recomputePacket(client: any, packetId: string) {
   // side effect of touching an artifact.
   const cur = (await client.query(`select status from packet where id = $1`, [packetId])).rows[0]
   if (cur?.status === 'sent') return 'sent'
-  const arts = (await client.query(`select status from artifact where packet_id = $1`, [packetId])).rows
+  const all = (await client.query(`select type, status from artifact where packet_id = $1`, [packetId])).rows
+  // READINESS COUNTS ONLY WHAT THE BUILDER ACTUALLY PRODUCES, and this was the bug that made the
+  // whole ship path unreachable.
+  //
+  // Every packet carries a `video` artifact, and the build loop SKIPS it — `if (!metaFor(a.type))
+  // continue`, because video is a HeyGen action, not a templated document. So video sits at `todo`
+  // forever unless the owner separately generates AND approves it. `allApproved` used to include
+  // it, so it could never be true, so a packet could never reach `ready`, so `Send packet →` (which
+  // renders only when ready) never appeared. MEASURED 2026-08-22: 39 packets, ALL 39 carrying a
+  // video artifact, 38 of them `todo` — and **0 packets `ready`, 0 `sent`, across the product's
+  // whole life**. Not a workflow the owner had not finished: a state machine that could not finish.
+  //
+  // `metaFor` is the SAME predicate the build loop uses to decide what to build, so "what must be
+  // approved" and "what gets built" cannot drift apart. An optional artifact the owner does choose
+  // to generate and approve still counts as approved; it just cannot block on never having existed.
+  const arts = all.filter((a: any) => metaFor(a.type))
   const allApproved = arts.length > 0 && arts.every((a: any) => a.status === 'approved')
-  const anyStarted = arts.some((a: any) => a.status !== 'todo')
+  const anyStarted = all.some((a: any) => a.status !== 'todo')
   // P2.2 — `ready` additionally requires no asset sitting at a `fail` gate. Approval is already
   // gated, but a re-run AFTER approval can turn a gate red (a new run also clears any override), and
   // without this a packet would stay `ready` while carrying a blocking finding.

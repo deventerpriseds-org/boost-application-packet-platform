@@ -3625,3 +3625,37 @@ test('H:applied-is-declared-not-inferred: only a human stage change can mark app
     'Mark as applied fires without confirmation — a stage transition the funnel is judged by should ' +
     'not be one stray click away')
 })
+
+// H:readiness-ignores-unbuildable — a packet could NEVER reach `ready`, so nothing could ever ship.
+//
+// THE MEASUREMENT THAT FOUND IT (2026-08-22, live): 1,937 opportunities, 39 packets, and
+// **0 `ready`, 0 `sent`, 0 artifacts `approved`** across the product's entire life. That reads like
+// a workflow the owner never finished. It was not. Every one of the 39 packets carries a `video`
+// artifact (38 of them at `todo`), the build loop SKIPS video — `if (!metaFor(a.type)) continue`,
+// because it is a HeyGen action and not a templated document — and `recomputePacket` required
+// `arts.every(status === 'approved')` over ALL artifacts including that one. So `allApproved` could
+// never be true, `ready` was unreachable, and `Send packet →` renders only when ready. A state
+// machine that could not finish, presented as a workflow.
+//
+// The invariant: readiness is computed over the artifacts the BUILDER produces, using the same
+// predicate the builder uses, so "what must be approved" and "what gets built" cannot drift.
+test('H:readiness-ignores-unbuildable: only buildable artifacts can hold a packet back', () => {
+  const PK = stripComments(readFileSync(new URL('../src/functions/tests/appPackets.ts', import.meta.url), 'utf8'))
+  const rc = PK.indexOf('async function recomputePacket')
+  assert.notEqual(rc, -1, 'recomputePacket is gone or renamed; retarget this guard')
+  const body = PK.slice(rc, PK.indexOf('\n}', rc))
+
+  assert.ok(/metaFor\(/.test(body),
+    'recomputePacket no longer filters by metaFor, so an artifact the builder never builds (video) ' +
+    'can hold the packet out of `ready` forever and nothing can ever be sent')
+
+  // The approval set must be the FILTERED list, not the raw query result.
+  const m = body.match(/const\s+allApproved\s*=\s*(\w+)\.length\s*>\s*0\s*&&\s*(\w+)\.every/)
+  assert.ok(m, 'allApproved is no longer computed as `<list>.length > 0 && <list>.every(...)`; retarget')
+  assert.equal(m[1], m[2], 'allApproved mixes two different lists')
+  const filtered = body.match(/const\s+(\w+)\s*=\s*\w+\.filter\(\(a: any\) => metaFor\(a\.type\)\)/)
+  assert.ok(filtered, 'no metaFor-filtered artifact list exists in recomputePacket')
+  assert.equal(m[1], filtered[1],
+    'allApproved is computed over the UNFILTERED artifact list, so the unbuildable video artifact ' +
+    'still blocks `ready` — the defect is back exactly as it shipped')
+})

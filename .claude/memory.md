@@ -2025,3 +2025,35 @@ So: **a mutation through `db-query.yml` is not confirmed by its own run's output
 in a new invocation.** This is the same class as the mutation that silently did not apply earlier
 today, and the same rule covers both — *verify the change is present, from a source that is not the
 thing that claims to have made it.*
+
+## THE PRODUCT WAS UNSHIPPABLE BY CONSTRUCTION — `ready` was unreachable (2026-08-22)
+
+Owner: *"this things still isn't usable after two days."* They were right, and the cause was not
+workflow friction. **Measured live:** 1,937 opportunities, 39 packets, **0 `ready`, 0 `sent`, 0
+artifacts `approved`** — across the product's entire life.
+
+**Root cause.** Every one of the 39 packets carries a `video` artifact (38 at `todo`). The build
+loop SKIPS video — `if (!metaFor(a.type)) continue`, because video is a HeyGen action and not a
+templated document — so it never advances on its own. `recomputePacket` computed
+`allApproved = arts.every(status === 'approved')` over **all** artifacts, video included. So
+`allApproved` could never be true → `ready` unreachable → and `PacketBuilder` renders
+`Send packet →` **only when ready**. A state machine that could not finish, presented as a workflow.
+
+**Fix:** readiness is computed over `all.filter(a => metaFor(a.type))` — the SAME predicate the
+build loop uses, so "what must be approved" and "what gets built" cannot drift. `anyStarted` still
+reads the full list (a video generation is real progress). `H:readiness-ignores-unbuildable`, two
+mutations proven, including recomputing over the unfiltered list.
+
+### The lesson, and it is about where I was looking
+
+I spent this session on the QC/evidence layer — lineage, swaps, evidence resolution, guards — all of
+which is real and all of which sat **downstream of a gate nothing could pass**. Three separate times
+I measured `0 approved / 0 sent` and read it as *"the owner has not used the review flow yet"*
+rather than as *"prove the state is reachable."* `D:packet-cannot-be-sent` even recorded those
+zeroes and still concluded the wrong thing — I looked for a MISSING FEATURE (rounds, send) instead
+of asking whether the EXISTING path could execute at all.
+
+**The rule this earns: when a funnel stage reads exactly zero across its whole history, treat the
+transition INTO it as broken until proven reachable.** Zero is not a usage signal. A count of zero
+over 39 attempts and 1,937 rows is a structural claim, and the cheap test — can this predicate ever
+be true? — takes one minute and would have found this on day one.
