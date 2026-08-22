@@ -228,10 +228,12 @@ export async function abandonExhausted(client: any, staleMinutes = STALE_CLAIM_M
 /**
  * One job, scoped to its owner.
  *
- * The owner predicate is not optional and is not decoration. `build-all` loads its opportunity with
- * no owner predicate at all, and an in-process evidence call shipped today without an ownership
- * check because "the caller is past the auth gate" — true of authentication, false of authorization.
- * A job id is a bearer token for whatever the job contains, so the read is scoped at the query.
+ * The owner predicate is not optional and is not decoration. `build-all` USED to load its
+ * opportunity with no owner predicate at all — the same commit that wrote this comment closed that,
+ * so read the present tense here as history, not as a live hole. An in-process evidence call had
+ * shipped hours earlier without an ownership check because "the caller is past the auth gate" —
+ * true of authentication, false of authorization. A job id is a bearer token for whatever the job
+ * contains, so the read is scoped at the query.
  */
 export async function getBuildJob(client: any, jobId: string, owner: string): Promise<BuildJob | null> {
   const r = await client.query(
