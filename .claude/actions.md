@@ -2477,3 +2477,39 @@ changed, no deploy path touched. No AC subagent, no verifier; the mutation-proof
 landing first — now landed); Call 3 parsed as sections, gated behind supplying the 12 blank
 `atsExtra` tokens; three-pass swap attribution (ACs complete at `.claude/ac/three-pass-swaps.md`);
 and the owner decision `D:packet-cannot-be-sent` asks for.
+
+## Single generation per build (2026-08-22) — `claude/ledger-spec-gaps`, commit `67e4caa`
+
+**Owner approval:** "yes", conditioned on the systemic map landing first. It landed (`33e6fd6`).
+
+**Defect:** `runPacketBuild`'s loop passed `body?.regen === true` on every iteration, so a rebuild
+ran the three-call pipeline four times and each document rendered from its own generation, while
+`pkg_json` kept only the last — the package every check, the gate, the score and the reviewer grade
+against. Evidence: job `945e28ed`, 42 warnings = one generation's ~10-11 repeated four times.
+
+**Fix:** `let regen`, cleared after the first SUCCESSFUL build, inside the try. Ordering is the
+correctness argument, not a style choice — clearing early reintroduces `A2` via the failure path.
+
+**Guard:** `H:one-generation-per-build` brace-matches the loop body and asserts three properties
+(no request read inside the loop, a clear exists, the clear follows the call). All three
+mutation-proven to fail with their defect reinstated.
+
+**Two hardening lessons, both recorded in memory.md:**
+1. The guard's first regex `[?.]*\.` greedily ate both characters of `?.` and **passed with the
+   defect reinstated** — an inert guard, caught only because the mutation was run.
+2. The mutation itself **silently failed to apply** twice (`perl -0pi`), so the green result proved
+   nothing. Mutations now grep the mutated line and abort if the edit is not visibly present.
+
+**Verification:** api build clean, 708 tests / 0 failures. Landed on `main` (`67e4caa`) and
+**deployed — api-deploy run 32599485997, conclusion success**, waited on by
+`wait-run.sh sha:api-deploy.yml:67e4caa` (never `latest:`, per H15).
+
+Live rebuild filed on Trinnex `9f9c370a`: `POST packet/build-async {"regen":true}` → **HTTP 202**,
+job `3ae8d684-eaff-44a7-a624-80e5a5fa2245`, created 21:26:55.409, **claimed 21:26:57.788 — 2.4s,
+by the queue message**. `state: running` at the last poll (21:27:54).
+
+**NOT YET CONFIRMED: the fix's actual effect.** The claim that generation now runs ONCE is proven
+only by the source guard and the reasoning above — the live number that would settle it is the
+warning count, which should fall from **42 to roughly 10-11** on a four-artifact build. Until that
+job reaches `state: done` and the count is read, this is *implemented and deployed, mechanism
+verified locally, effect not yet observed in production*.
