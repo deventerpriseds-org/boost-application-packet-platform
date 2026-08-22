@@ -187,13 +187,14 @@ const ARTIFACT_BRIEF: Record<string, string> = {
 export async function artifactGenerate(req: HttpRequest, context: InvocationContext): Promise<HttpResponseInit> {
   if (req.method === 'OPTIONS') return { status: 204, headers: HEADERS }
   const artifactId = req.params.artifactId
+  const owner = resolveOwner(req).owner
   const key = process.env.OPENAI_API_KEY
   let client
   try {
     const guard = requireWrite(req); if (guard) return guard
     client = await getPgClient()
     await ensureContentColumn(client)
-    const art = (await client.query(`select a.*, p.opp_id from artifact a join packet p on p.id = a.packet_id where a.id = $1`, [artifactId])).rows[0]
+    const art = await loadOwnedArtifact(client, artifactId, owner)
     if (!art) return { status: 404, headers: HEADERS, jsonBody: { error: 'artifact not found' } }
     const opp = (await client.query(`${OPP_FIELDS} where id = $1`, [art.opp_id])).rows[0]
     if (!key) return { status: 200, headers: HEADERS, jsonBody: { error: 'OPENAI_API_KEY not set' } }
@@ -293,6 +294,27 @@ async function ensurePkgColumn(client: any) {
 // synthesised pseudo-JD instead of the posting (X1). A single constant is what stops that recurring.
 export const OPP_FIELDS = `select id, company, role, comp_range, why_surfaced, company_signals,
   pain_hypotheses, persona_key, jd_real, raw_jd from opportunity`
+
+/**
+ * One artifact — and only if the resolved owner owns the opportunity it hangs off.
+ *
+ * Three routes that SPEND on an artifact (`generate` burns model tokens, `document` and `slides`
+ * write real Google files into the owner's Drive) each loaded it by id alone, then acted. Every one
+ * of them is `authLevel: 'anonymous'` behind `requireWrite`, which passes any request resolving to
+ * the demo workspace — a request with no credentials at all does. So an artifact UUID was the only
+ * thing standing between an anonymous caller and another owner's documents.
+ *
+ * The authorization is done in the load, at the one place all three funnel through, so a fourth
+ * route added later inherits it instead of re-deciding it. It is the same join `appRemediation`
+ * already uses; this extends that, rather than inventing a second way to ask the same question.
+ */
+export async function loadOwnedArtifact(client: any, artifactId: string, owner: string): Promise<any> {
+  return (await client.query(
+    `select a.*, p.opp_id from artifact a
+       join packet p on p.id = a.packet_id
+       join opportunity o on o.id = p.opp_id
+      where a.id = $1 and o.owner_email = $2`, [artifactId, owner])).rows[0]
+}
 
 /**
  * The text the generator is grounded in.
@@ -481,13 +503,14 @@ async function buildTemplatedArtifact(client: any, art: any, opp: any, regen: bo
 export async function artifactDocument(req: HttpRequest, context: InvocationContext): Promise<HttpResponseInit> {
   if (req.method === 'OPTIONS') return { status: 204, headers: HEADERS }
   const artifactId = req.params.artifactId
+  const owner = resolveOwner(req).owner
   let client
   try {
     const guard = requireWrite(req); if (guard) return guard
     if (!HAS_GOOGLE_OAUTH) return { status: 200, headers: HEADERS, jsonBody: { error: 'GOOGLE_REFRESH_TOKEN not set — run the Google consent flow first (owns Drive quota).' } }
     client = await getPgClient()
     await ensureContentColumn(client)
-    const art = (await client.query(`select a.*, p.opp_id from artifact a join packet p on p.id = a.packet_id where a.id = $1`, [artifactId])).rows[0]
+    const art = await loadOwnedArtifact(client, artifactId, owner)
     if (!art) return { status: 404, headers: HEADERS, jsonBody: { error: 'artifact not found' } }
     if (art.type === 'video') return { status: 400, headers: HEADERS, jsonBody: { error: 'video artifacts are rendered via the HeyGen video action, not a document' } }
     const opp = (await client.query(`${OPP_FIELDS} where id = $1`, [art.opp_id])).rows[0]
@@ -560,13 +583,14 @@ function toSlideSections(content: string, max = 4): { title: string; body: strin
 export async function artifactSlides(req: HttpRequest, context: InvocationContext): Promise<HttpResponseInit> {
   if (req.method === 'OPTIONS') return { status: 204, headers: HEADERS }
   const artifactId = req.params.artifactId
+  const owner = resolveOwner(req).owner
   let client
   try {
     const guard = requireWrite(req); if (guard) return guard
     if (!HAS_GOOGLE_OAUTH) return { status: 200, headers: HEADERS, jsonBody: { error: 'GOOGLE_REFRESH_TOKEN not set — run the Google consent flow first.' } }
     client = await getPgClient()
     await ensureContentColumn(client)
-    const art = (await client.query(`select a.*, p.opp_id from artifact a join packet p on p.id = a.packet_id where a.id = $1`, [artifactId])).rows[0]
+    const art = await loadOwnedArtifact(client, artifactId, owner)
     if (!art) return { status: 404, headers: HEADERS, jsonBody: { error: 'artifact not found' } }
     const opp = (await client.query(`${OPP_FIELDS} where id = $1`, [art.opp_id])).rows[0]
     if (!opp) return { status: 404, headers: HEADERS, jsonBody: { error: 'opportunity not found' } }
@@ -700,10 +724,39 @@ export async function packetBuildAll(req: HttpRequest, context: InvocationContex
   let client
   try {
     const guard = requireWrite(req); if (guard) return guard
-    if (!HAS_GOOGLE_OAUTH) return { status: 200, headers: HEADERS, jsonBody: { error: 'GOOGLE_REFRESH_TOKEN not set' } }
-    client = await getPgClient(); await ensureContentColumn(client)
-    const opp = (await client.query(`${OPP_FIELDS} where id = $1`, [oppId])).rows[0]
-    if (!opp) return { status: 404, headers: HEADERS, jsonBody: { error: 'opportunity not found' } }
+    client = await getPgClient()
+    const out = await runPacketBuild(client, oppId, owner, body, (m: string) => context.log(m))
+    return { status: out.status, headers: HEADERS, jsonBody: out.body }
+  } catch (err) {
+    return { status: 500, headers: HEADERS, jsonBody: { error: String(err) } }
+  } finally { try { await client?.end() } catch {} }
+}
+
+/**
+ * The build itself, with no HTTP in it.
+ *
+ * Extracted so the background worker (`buildQueueTick`) runs THE SAME CODE the route runs, rather
+ * than a second copy that drifts. The route keeps the parts only a request has — the auth guard, the
+ * connection lifecycle, the status code — and everything below is what actually builds a packet.
+ *
+ * `log` rather than `context.log`: a timer's context and a request's context are different objects,
+ * and the build has no business knowing which one it is running under.
+ */
+export async function runPacketBuild(
+  client: any, oppId: string, owner: string, body: any, log: (m: string) => void,
+): Promise<{ status: number; body: any }> {
+  {
+    if (!HAS_GOOGLE_OAUTH) return { status: 200, body: { error: 'GOOGLE_REFRESH_TOKEN not set' } }
+    await ensureContentColumn(client)
+    // OWNER-SCOPED, and this was a real hole rather than a tidy-up. `requireWrite` passes any
+    // request that resolves to the demo workspace — including one with no credentials at all — and
+    // the load below used to be `where id = $1`. So an unauthenticated caller holding an opportunity
+    // UUID could drive a full build of somebody else's packet: four Google documents overwritten in
+    // their Drive and the model budget spent, all on an id they merely knew. Authentication was
+    // being read as authorization. The predicate is the fix; there is no request shape that should
+    // build a packet belonging to another owner.
+    const opp = (await client.query(`${OPP_FIELDS} where id = $1 and owner_email = $2`, [oppId, owner])).rows[0]
+    if (!opp) return { status: 404, body: { error: 'opportunity not found' } }
     const { pkt, artifacts } = await loadPacket(client, oppId)
     const results: any[] = []
     for (const a of artifacts) {
@@ -761,7 +814,7 @@ export async function packetBuildAll(req: HttpRequest, context: InvocationContex
             warnings: r.warnings || [], qcApplied: r.qcApplied ?? null,
           })),
         })])
-    } catch (e) { context.log('last_build persist failed', String(e)) }
+    } catch (e) { log(`last_build persist failed ${String(e)}`) }
     const packetStatus = await recomputePacket(client, pkt.id)
     let cadenceSeeded = false, outreachDrafted = false
     if (body?.seedCadence === true) { const r = await selfPost(`app/opportunity/${oppId}/cadence?owner=${encodeURIComponent(owner)}`, {}); cadenceSeeded = !r?.error }
@@ -770,7 +823,7 @@ export async function packetBuildAll(req: HttpRequest, context: InvocationContex
     // real inputs. It used to be inline here, where nothing without Drive, Postgres and OpenAI could
     // reach it, and the guards written for it tested the source text instead and were inert.
     const summary = summariseBuild(results)
-    return { status: 200, headers: HEADERS, jsonBody: {
+    return { status: 200, body: {
       ok: summary.ok, oppId, company: opp.company, artifacts: results,
       built: summary.built, failed: summary.failed,
       warnings: evidence?.error
@@ -785,9 +838,7 @@ export async function packetBuildAll(req: HttpRequest, context: InvocationContex
         refused: evidence?.refused ?? null,
       },
       packetStatus, cadenceSeeded, outreachDrafted, sent: false, note: summary.note } }
-  } catch (err) {
-    return { status: 500, headers: HEADERS, jsonBody: { error: String(err) } }
-  } finally { try { await client?.end() } catch {} }
+  }
 }
 
 // ── D14: what the JD-analysis call is actually GIVEN ────────────────────────────────────────────
