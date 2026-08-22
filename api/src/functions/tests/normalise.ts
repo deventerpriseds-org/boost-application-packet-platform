@@ -193,7 +193,13 @@ export async function enforceCharLimits(
       if (!fits || collides) {
         // CODE DECIDES. The original stands, the finding stays reported, and nothing is silently
         // damaged. This branch is the whole reason the pass is safe to run on every build.
-        unresolved.push(`${field}: "${item}" (${item.length} chars) could not be reworded within ${max}`)
+        // THE PROPOSAL IS NAMED. Without it, "could not be reworded" is unfalsifiable: it cannot
+        // distinguish a model returning the string unchanged from a transport failure from a
+        // collision. Measured 2026-08-22: 18 reword calls billed and every proposal rejected, and
+        // this message could not say why for any of them.
+        unresolved.push(`${field}: "${item}" (${item.length} chars) could not be reworded within ${max}`
+          + (clean ? ` — best proposal was "${clean}" (${clean.length} chars)` : ' — the model returned nothing usable')
+          + (lastFail ? `; ${lastFail}` : ''))
         continue
       }
       changes.push({

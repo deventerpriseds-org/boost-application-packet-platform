@@ -326,7 +326,7 @@ export async function buildPackageForJD(opts: { key: string; jd: string; roleTyp
   // creative. Both values are configurable (AppConfig/auth), seeded from `SEED_TEMPERATURES`.
   const openai = (system: string, user: string, maxTokens: number, temperature: number) => fetch('https://api.openai.com/v1/chat/completions', {
     method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
-    body: JSON.stringify({ model: 'gpt-4o-mini', messages: [{ role: 'system', content: system }, { role: 'user', content: user }], max_tokens: maxTokens, temperature })
+    body: JSON.stringify({ model: settings.generateModel, messages: [{ role: 'system', content: system }, { role: 'user', content: user }], max_tokens: maxTokens, temperature })
   }).then(r => r.ok ? r.json() : r.text().then(t => { throw new Error(`OpenAI HTTP ${r.status}: ${t}`) }))
 
   const tGen = settings.generateTemperature.value

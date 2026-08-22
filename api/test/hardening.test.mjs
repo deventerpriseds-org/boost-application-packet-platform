@@ -3763,3 +3763,25 @@ test('H:retry-carries-the-reason: the caller interpolates priorAttempt into the 
     'priorAttempt is accepted but never interpolated into the prompt, so the retry re-sends an ' +
     'identical message and burns a call telling the model nothing')
 })
+
+// H:generation-model-is-a-setting — the model that writes the documents was a literal.
+//
+// `pipeline.ts` hardcoded `model: 'gpt-4o-mini'` in the three-call generator. That is a
+// behaviour-affecting value with no UI path, which CLAUDE.md's no-hardcoded-config rule forbids
+// outright, and the practical cost showed up the moment the owner asked to compare models: a
+// comparison that should have been a settings change required editing and redeploying code.
+// Code SEEDS the value (`SEED_GENERATE_MODEL`); the owner overrides it via `openai.generateModel`.
+test('H:generation-model-is-a-setting: the generator reads the model from config, never a literal', () => {
+  const PIPE = stripComments(readFileSync(new URL('../src/functions/tests/pipeline.ts', import.meta.url), 'utf8'))
+  const CFG  = stripComments(readFileSync(new URL('../src/functions/tests/pipelineConfig.ts', import.meta.url), 'utf8'))
+
+  assert.ok(!/model:\s*'gpt-[^']*'/.test(PIPE),
+    'pipeline.ts pins a model literal again — the owner cannot change which model writes their ' +
+    'documents without a code deploy')
+  assert.ok(/model:\s*settings\.generateModel/.test(PIPE),
+    'the generator no longer reads settings.generateModel')
+  assert.ok(/generateModel:\s*'openai\.generateModel'/.test(CFG),
+    'the AppConfig key for the generation model is gone, so nothing can override the seed')
+  assert.ok(/SEED_GENERATE_MODEL/.test(CFG),
+    'the seed constant is gone — code must still supply a first value the owner can change')
+})

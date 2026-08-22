@@ -33,8 +33,12 @@ const CONN = process.env.AZURE_STORAGE_CONNECTION_STRING!
  * they are in control when they are not. The fix is this list, not a rename and not an env var —
  * the RowKeys were already being written and the reader was the missing half.
  */
+/** The seeded generation model. The owner overrides it via `openai.generateModel` in AppConfig. */
+export const SEED_GENERATE_MODEL = 'gpt-4o-mini'
+
 export const CONFIG_KEYS = {
   generateTemperature: 'openai.generateTemperature',
+  generateModel: 'openai.generateModel',
   qcTemperature: 'openai.qcTemperature',
   compactResumeTemplateId: 'google.compactResumeTemplateId',
   defaultRoleFocus: 'openai.defaultRoleFocus',
@@ -169,6 +173,13 @@ export function requireDriveId(id: unknown, what: string, configKey?: string): s
 export interface PipelineSettings {
   generateTemperature: ResolvedNumber
   qcTemperature: ResolvedNumber
+  /**
+   * The model the three generation calls use. Was the literal `'gpt-4o-mini'` at `pipeline.ts:329`
+   * — a hardcoded behaviour-affecting value with no UI path, which the no-hardcoded-config rule
+   * forbids, and the reason a model comparison needed a code change instead of a settings change.
+   * Code SEEDS `gpt-4o-mini`; the owner changes it from there.
+   */
+  generateModel: string
   /** Owner-configured fallback template for a role with no AppConfig/templates row. '' when unset. */
   compactResumeTemplateId: string
   /** Owner-configured role focus for a role type the templates partition does not know. '' when unset. */
@@ -229,6 +240,7 @@ export function settingsFromConfig(cfg: Record<string, string>): PipelineSetting
   return {
     generateTemperature: gen,
     qcTemperature: qc,
+    generateModel: (cfg[CONFIG_KEYS.generateModel] || '').trim() || SEED_GENERATE_MODEL,
     compactResumeTemplateId: isDriveId(compact) ? compact : '',
     defaultRoleFocus: (cfg[CONFIG_KEYS.defaultRoleFocus] || '').trim(),
     resumeTemplateId: driveId('resumeTemplateId'),
