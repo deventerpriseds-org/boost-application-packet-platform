@@ -1172,6 +1172,17 @@ test('H33: every server-side body toggle has a caller that can send it', () => {
       const caller = f1 || f2
       if (caller && routeOf.has(caller) && !routeOf.has(callee)) routeOf.set(callee, routeOf.get(caller))
     }
+    // The other way a handler delegates: it keeps the request, and hands the parsed BODY to a
+    // same-file function. `packetBuildAll` does exactly this since the build was extracted so the
+    // D35 timer could run the same code — `await runPacketBuild(client, oppId, owner, body, log)`.
+    // The `(req` form above only recognises a callee that takes the request itself, so the moment
+    // the toggles moved one function across, this guard called `draftOutreach` unsendable while the
+    // coach tool was still sending it to the same route. The toggles travel with the body; the
+    // route has to travel with them, or the guard measures where code happens to live.
+    for (const [, f1, f2, callee] of code.matchAll(/(?:function\s+(\w+)|const\s+(\w+)\s*=\s*async)[\s\S]{0,1500}?\bawait\s+(\w+)\([^\n]{0,200}?\bbody\b/g)) {
+      const caller = f1 || f2
+      if (caller && routeOf.has(caller) && !routeOf.has(callee)) routeOf.set(callee, routeOf.get(caller))
+    }
     for (const m of code.matchAll(toggleRe(code))) {
       // A DESTRUCTURED name is only a toggle if it is later used as one. `const { roleType,
       // jobTitle } = body` is ordinary input, and counting it turns this into "every body field
@@ -3277,11 +3288,20 @@ test('H:model-evidence-is-labelled: a model-proposed evidence row has its own me
 test('H:config-route-is-not-open: /api/config needs a session to write and serves only declared keys', () => {
   const src = stripComments(readFileSync(new URL('../src/functions/config.ts', import.meta.url), 'utf8'))
 
-  // The write needs a verified session, like every other mutation in this API.
+  // The write needs a VERIFIED session — and this case originally pinned `requireWrite`, which is
+  // not one. `requireWrite` allows a write when `verified || owner === DEMO_EMAIL`, and
+  // `resolveOwner` defaults the owner to DEMO_EMAIL when no `?owner=` is supplied, so an
+  // unauthenticated POST resolved to demo and was waved through — to the table holding the
+  // pipeline's template ids, output folder and sender address. AppConfig is global state with no
+  // demo partition to absorb such a write. `promptsApi` had already written this exact reasoning for
+  // the Prompts table; this guard had encoded the weaker check as the requirement, so it PASSED on
+  // the hole it was written to prevent.
   const save = src.slice(src.indexOf('export async function saveConfig'), src.indexOf('app.http(\'saveConfig\''))
   assert.ok(save.length > 100, 'saveConfig moved — this scan has gone stale')
-  assert.match(save, /const guard = requireWrite\(req\); if \(guard\) return guard/,
-    'saveConfig writes the auth partition with no session check')
+  assert.match(save, /const \{ verified \} = resolveOwner\(req\)[\s\S]{0,220}?if \(!verified\)/,
+    'saveConfig does not require a verified session')
+  assert.ok(!/requireWrite\(req\)/.test(save),
+    'saveConfig uses requireWrite, which an unauthenticated request passes on a global table')
 
   // BOTH methods are bounded by the same declared whitelist, and it is IMPORTED rather than retyped.
   assert.match(src, /import \{ CONFIG_KEYS \}/, 'the whitelist is not the pipeline\'s own key list')
@@ -3294,4 +3314,123 @@ test('H:config-route-is-not-open: /api/config needs a session to write and serve
   // And the read must not hand back the whole partition.
   assert.ok(!/values\[entity\.rowKey as string\] = entity\.value as string/.test(get),
     'getConfig still returns every row of the auth partition')
+})
+
+// H:build-outcome-outlives-the-response — a diagnosis that exists only in an HTTP response is a
+// diagnosis you lose exactly when the build is interesting.
+//
+// `build-all` does ~3 minutes of real work and the gateway gives up at 4. Measured TWICE, most
+// recently run 32546312184: every artifact finished (02:29:02, 02:30:10, 02:30:53, 02:31:50, all
+// four with doc_urls) and the 504 fired at 02:31:51 — one second after the last one landed. The work
+// completes; the response does not.
+//
+// That is not merely annoying, and it is why this case exists rather than a note on D35. Two open
+// findings are un-diagnosable BECAUSE of it: D33's 7,446 discarded characters and D31's unparseable
+// Call 2 were both observed once, in a response, and neither has been reproducible since — the
+// evidence for them was never written anywhere. `packet` carried no column for it (checked at
+// a6058a8: id, opp_id, status, round, jd_analyzed, covered_kw, ats_score, feedback, created_at,
+// updated_at, must_haves, jd_grounded, jd_analyzed_at).
+//
+// The invariant: the build persists its own outcome BEFORE it tries to return it. Ordering is the
+// whole point — persisting after the return would keep exactly the failure mode this fixes.
+test('H:build-outcome-outlives-the-response: build-all writes its warnings before returning them', () => {
+  const body = stripComments(src('appPackets.ts'))
+  const fn = body.slice(body.indexOf('export async function packetBuildAll'))
+  assert.ok(fn.length > 400, 'packetBuildAll moved — this scan has gone stale')
+
+  const persist = fn.indexOf('update packet set last_build')
+  assert.ok(persist > 0, 'the build outcome is never persisted — a lost response loses the diagnosis')
+
+  // BEFORE the SUCCESS response is constructed, not merely before the first `jsonBody:` in the
+  // function — the early guard returns (no Google token, opportunity not found) come first and are
+  // not what this is about. Anchored on the success body, which is the one the gateway drops.
+  const ret = fn.indexOf('ok: summary.ok')
+  assert.ok(ret > 0, 'the success response moved — this scan has gone stale')
+  assert.ok(persist < ret,
+    'the outcome is persisted after the response is built — the timeout would still lose it')
+
+  // It must carry the per-artifact WARNINGS, which are the diagnosis. A row recording only
+  // success/failure would satisfy the ordering above and still tell nobody what happened.
+  const block = fn.slice(persist - 700, persist + 700)
+  assert.match(block, /warnings: r\.warnings/, 'the persisted outcome drops the per-artifact warnings')
+
+  // And the column has to exist in SCHEMA_SQL, or the write fails silently on a migrated database.
+  const schema = src('schema.ts')
+  assert.match(schema, /alter table packet\s+add column if not exists last_build jsonb;/,
+    'last_build is written but never declared')
+})
+
+// H:in-process-copy-keeps-the-ownership-check — moving a route's work in-process must carry its
+// OBJECT-level check, not just clear its authentication guard.
+//
+// `packetBuildAll` called `POST /evidence` through `selfPost`, which sends no Authorization header,
+// so the route's `requireWrite` refused it and the evidence pass never ran on the build path (run
+// 32547019724, "sign in required to modify this workspace"). The fix was to call the work
+// in-process — correct — with a comment claiming parity "after its auth guard".
+//
+// The parity was not exact, and an independent review caught it. `evidenceResolve` also does
+// `select ... from opportunity where id=$1 and owner_email=$2` and 404s when the opportunity is not
+// the caller's; the in-process copy had no equivalent. `packetBuildAll` loads the opportunity with
+// `${OPP_FIELDS} where id = $1` — no owner predicate — so nothing on that path proved ownership.
+// `requireWrite` proves SOMEONE is signed in. It does not prove they own this row. Authentication
+// is not authorization, and the comment conflated them.
+//
+// The invariant is general because the mistake is: any in-process copy of a guarded route must
+// carry the route's object-level check too.
+test('H:in-process-copy-keeps-the-ownership-check: build-path evidence proves the owner owns the opp', () => {
+  const body = stripComments(src('appPackets.ts'))
+  const fn = body.slice(body.indexOf('async function resolveEvidenceForOpp'))
+  const end = fn.indexOf('\nasync function selfPost')
+  const helper = end > 0 ? fn.slice(0, end) : fn
+  assert.ok(helper.length > 200, 'resolveEvidenceForOpp moved — this scan has gone stale')
+
+  assert.match(helper, /from opportunity where id=\$1 and owner_email=\$2/,
+    'the in-process evidence pass does not check the opportunity belongs to the owner')
+  // And it must REFUSE, not merely query. A check whose result is discarded is decoration.
+  assert.match(helper, /if \(!owned\) return/,
+    'the ownership result is not acted on')
+  // The refusal has to come BEFORE anything is written.
+  const check = helper.indexOf('owner_email=$2')
+  const write = helper.indexOf('writeEvidence(')
+  assert.ok(check > 0 && write > 0 && check < write,
+    'evidence is written before ownership is established')
+})
+
+
+// H:one-http-registration-per-route — two `app.http` calls on the same route means only the FIRST
+// one exists, and the second is a 404 that nothing reports.
+//
+// MEASURED IN PRODUCTION, not reasoned about. `config` was registered twice — `getConfig` for GET,
+// `saveConfig` for POST — and `POST /api/config` returned **404** (api-test run 32558143290) while
+// `GET /api/config` returned 200 (run 32558078459). So `saveConfig` had never been reachable on any
+// day of its life, and the Settings ▸ Pipeline Save button could not have worked. `app/coach/config`
+// carried the identical pair, so the coach settings could not be saved either, and `config/templates`
+// was written the same way and inherited the defect within the hour.
+//
+// Nothing catches this at build, deploy or runtime: the code compiles, the deploy succeeds, the host
+// registers both names without complaint, and the second one silently never receives a request. The
+// only symptom is a 404 on a route the source plainly defines — which reads like a converge delay,
+// which is exactly how it survived.
+//
+// The fix is one function per route dispatching on `req.method`, as `promptsApi` already does.
+test('H:one-http-registration-per-route: a duplicate route silently 404s the second one', () => {
+  const dir = new URL('../src/functions/', import.meta.url).pathname
+  const read = (d) => readdirSync(d, { withFileTypes: true }).flatMap((e) =>
+    e.isDirectory() ? read(join(d, e.name)) : e.name.endsWith('.ts') ? [join(d, e.name)] : [])
+
+  const byRoute = new Map()
+  for (const file of read(dir)) {
+    const code = stripComments(readFileSync(file, 'utf8'))
+    for (const m of code.matchAll(/app\.http\(\s*'([^']+)'\s*,\s*\{([^}]*)\}/g)) {
+      const route = m[2].match(/route:\s*'([^']+)'/)
+      if (!route) continue
+      const list = byRoute.get(route[1]) || []
+      list.push(`${file.split('/').pop()}:${m[1]}`)
+      byRoute.set(route[1], list)
+    }
+  }
+  const dupes = [...byRoute.entries()].filter(([, fns]) => fns.length > 1)
+    .map(([route, fns]) => `${route} <- ${fns.join(', ')}`)
+  assert.deepEqual(dupes, [],
+    'these routes are registered more than once; every registration after the first is a silent 404')
 })

@@ -145,6 +145,12 @@ export const api = {
   matchScore: (oppId) => post(`/app/opportunity/${oppId}/match-score`, {}),
   applyPrepare: (oppId, opts = {}) => post(`/app/opportunity/${oppId}/apply/prepare`, opts),
   buildFullPacket: (oppId, opts = {}) => post(`/app/opportunity/${oppId}/packet/build-all`, opts),
+  // D35. The synchronous build above takes ~3 minutes and the gateway gives up at ~230s, so the
+  // browser saw a 504 on builds that had already written every document. These two queue the same
+  // build and poll it: the POST returns a jobId in milliseconds, and the job carries the result —
+  // including on failure, which is where a partial build's warnings live.
+  queueFullPacket: (oppId, opts = {}) => post(`/app/opportunity/${oppId}/packet/build-async`, opts),
+  buildJob: (jobId) => get(`/app/packet/build-job/${jobId}?owner=${encodeURIComponent(_owner)}`),
   bulkRun: (opts = {}) => post(`/app/bulk/packets`, opts),
   bulkStatus: (jobId) => get(`/app/bulk/${jobId}`),
   appHealth: () => get(`/app/health`),
@@ -278,6 +284,11 @@ export const api = {
   // that was serving the whole `auth` partition unauthenticated until it was bounded to these keys.
   pipelineConfigGet: () => get('/config'),
   pipelineConfigSet: (values) => post('/config', { values }),
+  // The resume template's role focus — the owner's ruling that the resume chosen drives the persona.
+  // `resolveRoleFocus` reads `templates/resume-<driveId>` before every other source; these are the
+  // read and write for that row, so the value is a setting rather than a code constant.
+  templateFocusGet: () => get('/config/templates'),
+  templateFocusSet: (templateId, roleFocus) => post('/config/templates', { templateId, roleFocus }),
   dimensionPrefsGet: () => get(`/app/dimension-prefs?owner=${encodeURIComponent(_owner)}`),
   dimensionPrefsSet: ({ family, keys }) => post(`/app/dimension-prefs?owner=${encodeURIComponent(_owner)}`, { family, keys }),
   // LinkedIn role-sweep config + cursor + the exact built queries (preview before enabling).

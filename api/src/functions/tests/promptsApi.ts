@@ -18,9 +18,20 @@ export async function promptsApi(req: HttpRequest, context: InvocationContext): 
 
   try {
     if (req.method === 'GET') {
+      // `?key=` narrows the read to one prompt, and `?tail=N` to its last N characters.
+      //
+      // Not a convenience. These prompts are the largest single thing in the system — `resume_user`
+      // alone is ~7,700 characters — and diagnosing "did Call 2 ask for JSON?" meant pulling every
+      // active prompt to read one instruction at the end of one of them. A reader that must take
+      // 40KB to answer a question about 200 bytes is a reader nobody uses, so the question goes
+      // unanswered and the answer gets guessed instead. The filter is applied AFTER the same
+      // active/highest-version selection, so a narrowed read and a full read never disagree.
+      const wantKey = req.query.get('key') || ''
+      const tail = Math.max(0, Number(req.query.get('tail') || 0))
       const prompts: Record<string, any> = {}
       for await (const e of client.listEntities()) {
         const pk = (e as any).partitionKey
+        if (wantKey && pk !== wantKey) continue
         // Prefer active rows; keep the highest version seen
         const existing = prompts[pk]
         const version = (e as any).version ?? 0
@@ -37,7 +48,13 @@ export async function promptsApi(req: HttpRequest, context: InvocationContext): 
           }
         }
       }
-      return { status: 200, headers: HEADERS, jsonBody: { prompts: Object.values(prompts) } }
+      // `length` is always the FULL length, never the length of the tail that was returned, and
+      // `truncated` says so out loud. A reader that trims content while reporting a shorter length
+      // is how a prompt gets called "the 200-character one" and a stale diagnosis outlives its cause.
+      const rows = Object.values(prompts).map((p: any) => tail && p.content.length > tail
+        ? { ...p, content: p.content.slice(-tail), truncated: true, returnedChars: tail }
+        : p)
+      return { status: 200, headers: HEADERS, jsonBody: { prompts: rows } }
     }
 
     if (req.method === 'POST') {

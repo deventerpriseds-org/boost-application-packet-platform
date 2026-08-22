@@ -2303,3 +2303,150 @@ vector the whole remedy exists to close, and it was open in the remedy itself. A
 re-proved by reinstatement. Two of the defects were my own cry-wolf: a line-coordinate ban that fired
 on clock times in prose, and a fixture helper that never asserted its own edit applied.
 Deferred as rows rather than notes: `D:hslug-scan-one-file`, `D:id-hygiene-duplicated`.
+
+---
+
+## ACT: D35 — build-all is asynchronous, and the cross-owner build hole it ran through is closed (2026-08-22)
+
+**Asked:** "go with 1" — make `build-all` asynchronous rather than tolerating the 504. Then, on the
+one decision I surfaced: **"use my azure storage."**
+
+**Shipped** on `main`: `6050fff` (queue + auth), `96e2f06` (UI), `ca83b00` (H33), `e47c8fd` (storage
+queue). Deploys: `executive-engine-deploy` run **32550011764** success, `api-deploy` run
+**32550011806** success; the storage-queue deploy is the run for `e47c8fd`.
+
+**What was wrong.** `build-all` does ~3 minutes of work and the gateway cuts at ~230s — run
+**32546312184** returned 504 at 02:31:51 with all four artifacts already written (02:29:02 / 02:30:10
+/ 02:30:53 / 02:31:50, every one with a doc_url), and run 32548283352 returned 502 with `/api/health`
+fine throughout. The work completed; only the answer died. So the owner was shown a failure on a
+build that succeeded and paid to run it again, and the response was the only home for the warnings
+two open findings depend on.
+
+**The shape.** `POST packet/build-async` files a `packet_build_job` row and returns 202. The row is
+the record of truth — claim, lease, fence, attempt cap, owner scoping, one-live-job-per-opportunity —
+all tested against a real PostgreSQL. The worker runs `runPacketBuild`, EXTRACTED from
+`packetBuildAll` rather than copied, so the two cannot drift. The synchronous route is untouched
+because `appBulk` and the coach tool call it.
+
+**The wake signal is the storage queue, at the owner's instruction.** First version woke on a
+one-minute timer — a fixed-interval poll standing in for an event whose exact moment we already know.
+Now the POST sends a base64 message on `packet-build-jobs`. The timer survives demoted to a
+five-minute SWEEP, scoped to the only case no message can announce: a worker that dies mid-build.
+The encoding is not a detail — the queue extension defaults to base64 and `@azure/storage-queue`
+sends plain text, so raw JSON is accepted, sits in the queue and is dead-lettered without triggering
+anything. A build that never starts, and no error anywhere.
+
+**The AC agent earned its cost, and the most expensive finding was not the one I asked about.**
+`requireWrite` passes any request resolving to the demo workspace — *including one with no
+credentials at all* — and `build-all` then loaded its opportunity `where id = $1`. An opportunity
+UUID was the only thing between an anonymous caller and a full build against another owner's packet:
+four Google documents overwritten in their Drive, the model budget spent. `artifactGenerate`,
+`artifactDocument` and `artifactSlides` had the identical shape. All four now go through one
+owner-scoped loader (`loadOwnedArtifact`), and `enqueueBuild` refuses to file a job it does not own.
+I had read authentication as authorization — the same conflation as the in-process evidence call
+fixed hours earlier, which is why this is a row and not a note.
+
+**Six defects in my own queue code, found by that same cold read, each now a test:** the attempt cap
+sat OUTSIDE the claim's subquery, so one poisoned job returned "queue empty" and would have stopped
+every build for every owner with no error anywhere; `finishBuild` discarded the payload on failure —
+throwing away the partial-build evidence this queue exists to preserve; it was unfenced, so a
+reclaimed zombie could overwrite a live run; a rebuild requested behind a live cached build was
+silently downgraded to it (a control that appears to work and does nothing); `enqueueBuild` could
+return an absent job while its type promised one; and a job could be filed against another owner's
+opportunity.
+
+**Integration trace.** Core system: `runPacketBuild` — the one build path, now with two callers
+(route, worker) instead of one. Upstream producers grepped: `api.js buildFullPacket` /
+`queueFullPacket`, `appBulk` self-fetch, `coachTools.build_full_packet`. Downstream consumers:
+`packet.last_build`, `recomputePacket`, `summariseBuild`, the PacketBuilder screen. Extend, not
+duplicate: the sync route keeps its callers, the queue is a wake signal over the existing job table,
+and `loadOwnedArtifact` is the join `appRemediation` already used.
+
+**Evidence.** `api/test/buildQueueDb.test.mjs` 11/11 against real PostgreSQL; five mutations proven
+to bite (claim scope, fence, payload-on-failure, regen promotion, owner scoping).
+`api/test/buildSignal.test.mjs` 5/5, five mutations proven to bite. Full suite 689 tests, 689 pass.
+H33 was widened, non-vacuously: it FAILED on this tree before the widening and passed after, with no
+source change between.
+
+**NOT CONFIRMED LIVE.** No build has yet run through the queue in production. D35 stays OPEN until a
+real `build-async` on Trinnex reaches `state: done` with its artifacts.
+
+**Flagged, undecided:** `STALE_CLAIM_MINUTES` (10) and `MAX_ATTEMPTS` (3) are code-only operational
+knobs with no Settings path — against the strict no-hardcoded-config rule, held pending explicit
+approval to leave them code-only. Nothing prunes `packet_build_job`; unbounded growth accepted for now.
+
+---
+
+## ACT: the three prompt-path fixes — Call 2, role focus, ATS analysis (2026-08-22)
+
+**Asked:** after reading the 42 warnings the async queue finally made readable, three fixes in order —
+(1) parse Call 2 with the section parser, (2) capture the discarded ATS analysis, (3) role focus.
+Then, on the persona question: *"let the resume chosen drive the persona, right now it's only
+engineering available"*, *"try to continue the AC from where it was instead of starting over"*, and
+*"finish everything you've noted"*.
+
+### 1. Call 2 — DONE, CONFIRMED LIVE (`4fb00e1`, `2cf29ca`; build job `1c0ad2f3`, `done`, 198s)
+
+Settled from the PRIMARY SOURCE, which is the only thing that could settle it: `portfolio_user` v002
+is Zap node **299599701, "Copy: Update Resume/Portfolio Fields"** — a copy of Call 1's node — and it
+emits `Skills1`, `Skills2`, `Relevant Skills 1/2/3`, `Word and Character Requirements Check`. Plain
+`### Title ###` text; it never asks for JSON. `parseAgentJson` could not have succeeded, ever. Read
+twice as something else: a flaky model, then a duplicate-prompt bug.
+
+It also never emits a cover letter, About Me, executive profile or cold email — the fields
+`assemblePackage` READ off `call2`. That expectation was fiction; those come from Call 1 and the
+baseline `set_value` nodes. Measured: warnings `Call 2 returned no JSON object` **4 → 0**, ten Call-2
+sections parsed, and the document changed — `SkillsBullets1` 232→**385**, `SkillsBullets2` 153→**239**,
+`RelevantBullets1/2/3` 89/94/89→**65/60/63**, both directions matching the prompt's own hard
+requirements. The owner's two-pass refinement ran for the first time. **No prompt was edited.**
+
+**The AC agent caught a defect in this fix AFTER it shipped**, which is the whole argument for the
+cold read: `{...c1, ...c2}` fed Call 3 a package with six of Call 1's fields BLANKED, because
+`parseResumePackage` returns every key defaulted `|| ''`. Call 3's verdict outranks Call 1 in the
+document, so that writes degraded content while the build reports `built: 4, failed: 0`. Fixed with
+`mergeCallTwo`/`call2Draft` — an allowlist of the five fields node 299599701 actually asks for, and
+anything else Call 2 improvises is named and refused. One build ran with the defect; no field was
+blanked in the document (they come from Call 1 and `''` is falsy), but `ResumeSummary` 381→468 was
+generated by a QC pass that could not see the original. Not proven degraded, not trustworthy either.
+
+### 3. Role focus — DONE (`b9b5567`), deployed; taken out of order because the owner ruled on it
+
+The old first source looked up `templates/<roleRowKey(roleType)>` where `roleType` is the posting's
+FREE-TEXT JOB TITLE — `templates/director-of-digital-technology-operations-&-innovation`. No such row
+exists for any posting, so it was dead on arrival. The `persona` source below it is dead too:
+**`opportunity.persona_key` is NULL on 1,676 of 1,903 rows** and the owner confirmed the design was
+abandoned. Every build fell to a code constant, and a Director of Digital posting was written for
+"a senior ENGINEERING executive".
+
+Now: `templates/resume-<driveId>` is read first, keyed by the Drive id the build actually copies.
+Only one template exists, so **no document changes** — `source` moves from `seed` to `template`,
+which is the whole point. Plus the WRITER (`GET`/`POST /api/config/templates`, Settings ▸ Quality),
+without which this change would itself have broken the no-hardcoded-config rule. Blank clears rather
+than storing `''`, which would win over the seed and blank the directive every prompt is prefixed with.
+
+### SECURITY found on the way, and the guard that blessed it
+
+`POST /api/config` used `requireWrite`, which allows any request resolving to the demo workspace —
+including one with **no credentials**. `AppConfig` is global state with no demo partition, so an
+unauthenticated POST could rewrite the pipeline's template ids, output folder and sender address.
+`promptsApi` had already written this exact reasoning for the Prompts table.
+
+**`H:config-route-is-not-open` had pinned `requireWrite` AS the requirement** — so the guard PASSED
+on the hole it existed to prevent. That is the sharpest instance yet of an inert guard: not one that
+fails to fire, but one that certifies the weakness. Corrected, and the correction mutation-proven.
+
+### 2. ATS analysis capture — NOT STARTED
+
+Its AC pass is running (continued from the killed agent's file rather than restarted, per the owner).
+It stores MODEL OUTPUT, so it is tier 1 by CLAUDE.md's blast-radius table: the cold read comes before
+any code. Note it now has TWO producers — Call 1's unmapped sections and Call 2's.
+
+**Still flagged, undecided:** `STALE_CLAIM_MINUTES`/`MAX_ATTEMPTS` code-only; `packet_build_job`
+retention unbounded.
+
+**Integration trace.** Core system: `buildPackageForJD`'s three-call sequence, extended not
+duplicated — Call 2 now uses the SAME parser Call 1 uses, and `mergeCallTwo` is the one merge point.
+Upstream: the Prompts table (untouched — the owner's constraint). Downstream grepped:
+`assemblePackage` (all 5 skill slots), Call 3's input, `pkg_json`, `swap_decision`, `varsForType`,
+the artifact documents. Role focus: `decideRoleFocus` is the one decision point and the ladder below
+the template is asserted unchanged.

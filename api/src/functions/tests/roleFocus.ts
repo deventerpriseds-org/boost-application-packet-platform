@@ -3,6 +3,7 @@ import { TableClient } from '@azure/data-tables'
 const CONN = process.env.AZURE_STORAGE_CONNECTION_STRING!
 
 export type RoleFocusSource =
+  | 'template'             // the RESUME TEMPLATE being built carried a roleFocus — the owner's ruling
   | 'appconfig'            // an AppConfig/templates row for this role carried a roleFocus
   | 'persona'              // the owner's own curated role, from persona.master_role
   | 'configured_default'   // the owner's fallback (AppConfig/auth `openai.defaultRoleFocus`)
@@ -18,6 +19,41 @@ export interface ResolvedRoleFocus {
 
 /** Code seed. Only the FIRST value: the owner changes it at Auth & Config → `openai.defaultRoleFocus`. */
 export const SEED_ROLE_FOCUS = 'engineering'
+
+/**
+ * The resume TEMPLATE decides the focus. This is the owner's ruling, in their words: *"let the
+ * resume chosen drive the persona, right now it's only engineering available"*.
+ *
+ * Why this had to change. The first source below used to be `templates/<roleRowKey(roleType)>`, and
+ * `roleType` is the POSTING'S FREE-TEXT JOB TITLE — so the row it looked for was
+ * `templates/director-of-digital-technology-operations-&-innovation`. No such row will ever exist,
+ * for any real posting, so the first source was dead on arrival and every build fell through it. The
+ * `persona` source below it is dead too: `opportunity.persona_key` is NULL on 1,676 of this owner's
+ * 1,903 opportunities and the persona design was abandoned. The measured result was an executive
+ * Director of Digital posting written by a prompt aimed at "a senior ENGINEERING executive", from a
+ * code constant.
+ *
+ * A template, unlike a job title, is a closed set the owner controls: there is one resume template
+ * today, and the day a second is added it brings its own focus with it and no code changes. The row
+ * key is the template's Drive ID rather than a name, because that is already the identity the
+ * per-owner override uses (`CONFIG_KEYS.resumeTemplateId`) and it cannot drift from the document
+ * actually being copied.
+ */
+export function templateRowKey(resumeTemplateId: string): string {
+  return `resume-${String(resumeTemplateId || '').trim()}`
+}
+
+/**
+ * The first value for the one template that exists today.
+ *
+ * Seeded in code and overridable per template row, which is what the no-hardcoded-config rule
+ * requires: the code may seed the FIRST value, the owner changes it. It is deliberately the same
+ * word the old fallback produced, so this change alters WHERE the answer comes from — an explicit
+ * statement about the resume being built — without silently changing what today's documents say.
+ */
+export const SEED_TEMPLATE_ROLE_FOCUS: Record<string, string> = {
+  '1bwOcxvkbihRTUjOzVjrWSPnDomwqy6gOz6229mdzbZw': 'engineering',
+}
 
 /** AppConfig/templates RowKey for a role type. Exported so callers report the exact row they missed. */
 export function roleRowKey(roleType: string): string {
@@ -39,7 +75,14 @@ export function decideRoleFocus(
   configuredDefault?: string | null,
   lookupError?: string | null,
   personaRole?: string | null,
+  templateFocus?: string | null,
 ): ResolvedRoleFocus {
+  // THE TEMPLATE FIRST. It is the most concrete statement available of what is being built — the
+  // owner picked this resume — and unlike the job-title row below it, it is a key that can actually
+  // be configured, because templates are a closed set and job titles are not.
+  const tpl = String(templateFocus ?? '').trim()
+  if (tpl) return { focus: tpl, source: 'template' }
+
   const row = String(rowFocus ?? '').trim()
   if (row) return { focus: row, source: 'appconfig' }
 
@@ -88,9 +131,23 @@ export function decideRoleFocus(
  * it came from. Engineering and Product Management currently share template files, but each row
  * carries a roleFocus so the AI content is tailored per role.
  */
-export async function resolveRoleFocus(roleType: string, configuredDefault?: string, personaRole?: string | null): Promise<ResolvedRoleFocus> {
+export async function resolveRoleFocus(
+  roleType: string, configuredDefault?: string, personaRole?: string | null, resumeTemplateId?: string | null,
+): Promise<ResolvedRoleFocus> {
   let rowFocus: string | null = null
+  let templateFocus: string | null = null
   let lookupError: string | null = null
+  // The template's own row, then the code seed for it. A stored row always wins so the owner can
+  // change it; the seed only answers for a template nobody has configured yet.
+  const tplId = String(resumeTemplateId ?? '').trim()
+  if (tplId) {
+    try {
+      const client = TableClient.fromConnectionString(CONN, 'AppConfig')
+      const entity = await client.getEntity('templates', templateRowKey(tplId)) as any
+      templateFocus = entity?.roleFocus ? String(entity.roleFocus) : null
+    } catch { /* 404 = not configured yet; the seed below answers */ }
+    if (!templateFocus) templateFocus = SEED_TEMPLATE_ROLE_FOCUS[tplId] || null
+  }
   try {
     const client = TableClient.fromConnectionString(CONN, 'AppConfig')
     const entity = await client.getEntity('templates', roleRowKey(roleType)) as any
@@ -101,7 +158,7 @@ export async function resolveRoleFocus(roleType: string, configuredDefault?: str
     const status = (e as any)?.statusCode
     lookupError = status === 404 ? null : String((e as any)?.message || e).slice(0, 160)
   }
-  return decideRoleFocus(roleType, rowFocus, configuredDefault, lookupError, personaRole)
+  return decideRoleFocus(roleType, rowFocus, configuredDefault, lookupError, personaRole, templateFocus)
 }
 
 /** Back-compatible string form for callers that do not surface the provenance (mt14/mt18/mt19). */

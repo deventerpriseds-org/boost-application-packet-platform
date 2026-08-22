@@ -1088,9 +1088,51 @@ exception when duplicate_table or duplicate_object then null; end $$;
 alter table packet         add column if not exists must_haves text[];
 alter table packet         add column if not exists jd_grounded boolean;
 alter table packet         add column if not exists jd_analyzed_at timestamptz;
+-- The last build's OUTCOME, so a diagnosis does not live only in an HTTP response.
+--
+-- build-all takes about three minutes of real work and the gateway gives up at four, so the
+-- response carrying "warnings" and the discarded-section list is routinely lost (D35: measured
+-- twice, most recently run 32546312184, where every artifact finished at 02:31:50 and the 504 fired
+-- at 02:31:51). Two open findings — D31's unparseable Call 2 and D33's 7,446 discarded characters —
+-- are stuck precisely because the evidence for them was only ever in that response. Persisting it
+-- turns "we cannot see what happened" into a row anyone can query afterwards.
+alter table packet         add column if not exists last_build jsonb;
 alter table library_entity add column if not exists owner_email text not null default 'demo@executive-engine.local';
 alter table library_entity add column if not exists is_demo boolean not null default false;
 create index if not exists opp_owner_idx2 on opportunity(owner_email);
+
+-- D35 — the build queue, because a three-minute request cannot survive a four-minute gateway.
+--
+-- packet/build-all does ~3 minutes of real work (four artifacts, several model calls each, plus
+-- Google Docs writes) and the gateway gives up at 4. Measured: run 32546312184 returned 504 one
+-- second AFTER the last artifact landed, and run 32548283352 returned 502, while /api/health was
+-- fine throughout. The work completes; only the answer is lost. That also blocks D31 and D33, whose
+-- evidence only ever existed in that response.
+--
+-- One row per requested build. The POST creates it and returns immediately; a timer claims and runs
+-- it. state is the whole contract: a caller must be able to tell not started from running from
+-- failed, and a job that dies mid-build must be reclaimable rather than wedged in running
+-- forever, which is what claimed_at and attempts are for.
+create table if not exists packet_build_job (
+  id           uuid primary key default uuid_generate_v4(),
+  opp_id       uuid not null references opportunity(id) on delete cascade,
+  owner_email  text not null,
+  regen        boolean not null default false,
+  state        text not null default 'pending' check (state in ('pending','running','done','failed')),
+  attempts     int not null default 0,
+  claimed_at   timestamptz,
+  finished_at  timestamptz,
+  result       jsonb,
+  error        text,
+  created_at   timestamptz not null default now()
+);
+-- The claim order. state first because every claim filters on it.
+create index if not exists pbj_claim_idx on packet_build_job(state, created_at);
+-- One build in flight per opportunity. Without this an impatient double-click queues two builds of
+-- the same packet, and they would race each other writing the same artifacts and spend the model
+-- budget twice. Partial, so finished jobs do not block the next request.
+create unique index if not exists pbj_one_live_per_opp
+  on packet_build_job(opp_id) where state in ('pending','running');
 
 -- P8.3 escalation tier — a third provenance for an evidence row.
 --
@@ -1127,5 +1169,6 @@ export const EXPECTED_TABLES = [
   'interview', 'offer', 'library_entity', 'asset_event', 'usage_metering',
   'term_library', 'term_library_entry', 'term_candidate', 'requirement',
   'skill_candidate', 'swap_decision', 'insertion', 'check_result', 'artifact_gate', 'artifact_score', 'owner_fact', 'review_verdict',
-  'remediation_loop', 'escalation', 'requirement_evidence', 'comparison_dimension'
+  'remediation_loop', 'escalation', 'requirement_evidence', 'comparison_dimension',
+  'packet_build_job'
 ]

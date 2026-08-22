@@ -3,7 +3,7 @@ import { TableClient } from '@azure/data-tables'
 import { getGoogleToken, getGoogleOAuthToken, HAS_GOOGLE_OAUTH, IMPERSONATE_SUBJECT, getMicrosoftToken } from './googleAuth'
 import { resolveZapVars } from './zapVars'
 import { resolveRoleFocus, roleDirective } from './roleFocus'
-import { assemblePackage } from './mt17'
+import { assemblePackage, mergeCallTwo, call2Draft } from './mt17'
 import { parseResumePackage } from './resumeParser'
 import { parseAgentJson, isEmptyResult } from './agentJson'
 import { loadPipelineSettings, requireDriveId, isDriveId, isEmailish, CONFIG_KEYS, PipelineSettings } from './pipelineConfig'
@@ -128,6 +128,19 @@ export function profileFromMasterContext(mc: any): { profileText: string; omitLi
  * `docs/zap-289877647/prompts/17-copy-update-resume-portfolio-fields-prompt.md`. Installing it
  * rewrites live document generation for the real owner, so it is an owner decision and a
  * `DEFERRED.md` row, not something this lane does on its way past.
+ *
+ * RESOLVED SINCE — read this before trusting the measurements above, which are now HISTORY.
+ * The owner installed the correct text: live `portfolio_user` is v002, **7,714 chars**, notes
+ * "Zap 289877647 node 299599701 user_message verbatim", confirmed by
+ * `GET /api/prompts?key=portfolio_user` on 2026-08-22 (api-test run 32553002646). This guard did NOT
+ * fire on the 2026-08-22 build, correctly — the two prompts differ now.
+ *
+ * The JSON half outlived the fix by a day, because installing the right prompt did not change how
+ * its reply was parsed. Node 299599701 emits `### Skills1 ###`, `### Skills2 ###`, `### Relevant
+ * Skills 1/2/3 ###` — plain sections, never JSON — so `parseAgentJson` kept failing for a NEW reason
+ * and the warning kept reading like the old one. Call 2 is now parsed with `parseResumePackage`;
+ * see the comment at the call site. The lesson worth keeping: a fix that leaves the symptom identical
+ * is indistinguishable from no fix, and the second cause hid behind the first for a full day.
  *
  * WHY `_user` ONLY, AND IT IS THE WHOLE REASON THIS FUNCTION IS NARROW. The live `resume_system` and
  * `portfolio_system` rows are ALSO byte-identical (329 chars, sha256 803330a2…) — and that is
@@ -276,7 +289,11 @@ export async function buildPackageForJD(opts: { key: string; jd: string; roleTyp
   const settings = await loadPipelineSettings()
   warnings.push(...settings.warnings)
 
-  const role = await resolveRoleFocus(roleType, settings.defaultRoleFocus, opts.personaRole)
+  // THE RESUME BEING BUILT decides the focus — the owner's ruling. `settings.resumeTemplateId` is the
+  // same resolved value the build copies from (owner override, else the seeded id), so the focus can
+  // never describe a different document from the one that gets written.
+  const role = await resolveRoleFocus(
+    roleType, settings.defaultRoleFocus, opts.personaRole, settings.resumeTemplateId?.value)
   const roleFocus = role.focus
   if (role.warning) warnings.push(`role focus: ${role.warning}`)
   steps.push(`Role focus "${roleFocus}" (source: ${role.source})`)
@@ -335,26 +352,62 @@ export async function buildPackageForJD(opts: { key: string; jd: string; roleTyp
   // itself, so the ATS-QC pass was asked to compare two lists against a posting it never saw.
   // `extra` supplies the tokens that only exist mid-run (Call-1's own output, the target company
   // and role); everything still unmapped is blanked rather than shown to the model.
+  // CALL 2 IS A SECOND SKILLS-REFINEMENT PASS, and this code spent its life believing otherwise.
+  //
+  // It was parsed with `parseAgentJson`, warned "Call 2 (portfolio) returned no JSON object", and
+  // fell back to Call 1 — on every build, for both postings, four times in the 2026-08-22 run
+  // (2,957 / 3,178 / 4,736 / 5,404 characters discarded). That was read as a flaky model, then as a
+  // duplicate-prompt bug. It is neither. The prompt itself settles it, and it is the one source that
+  // could: `portfolio_user` v002 is Zap node **299599701, "Copy: Update Resume/Portfolio Fields"** —
+  // a COPY of Call 1's node — and it emits `### Skills1 ###`, `### Skills2 ###`, `### Relevant
+  // Skills 1/2/3 ###` and `### Word and Character Requirements Check ###`. Plain text sections, the
+  // same shape Call 1 returns. It never asks for JSON, so the JSON parse could never have succeeded.
+  //
+  // It also never emits a cover letter, an About Me, an executive profile or a cold email — the
+  // fields `assemblePackage` asks Call 2 for. In the zap those come from the baseline `set_value`
+  // nodes (7-11, i.e. MasterContext) and from Call 1. That expectation was fiction, and no model
+  // output could have satisfied it.
+  //
+  // What the pass actually does is in its own words: "Replace the least relevant or loosely aligned
+  // skills from previous outputs with these refined phrases", under a ≤30-character limit and the
+  // Jobscan hard-skill definition. So it is parsed with the SAME parser Call 1 uses, and its refined
+  // lists are preferred over Call 1's — which is the two-pass refinement the owner's prompts describe
+  // and the product has never once performed.
   const base2 = resolveZapVars(prompts['portfolio_user'] || 'Portfolio JSON.', mc, jd)
   const r2 = await openai(prompts['portfolio_system'] || 'You are a helpful assistant.', roleDirective(roleFocus) + `${base2}\n\nCALL1:\n${JSON.stringify(c1)}`, 16000, tGen) as any
-  const p2 = parseAgentJson(r2.choices?.[0]?.message?.content)
-  const c2: any = p2.value || {}
-  if (!p2.value) warnings.push(`Call 2 (portfolio) returned no JSON object (${p2.detail}) — portfolio/cover fields fall back to Call 1`)
-  steps.push(`Agent Call 2 (portfolio + cold email) — JSON via ${p2.via}`)
+  const c2: any = parseResumePackage(r2.choices?.[0]?.message?.content || '', mc, jobTitle, company)
+  if (!c2._parsedFieldCount) warnings.push('Call 2 (skills refinement) produced no recognisable ### sections — the skills are Call 1 unrefined')
+  steps.push(`Agent Call 2 (skills refinement) — parsed ${c2._parsedFieldCount} fields by title`)
+  for (const u of (c2._unmapped || [])) {
+    warnings.push(`Call 2 returned a section named "${u.title}" that maps to no merge field — its ${u.body.length} characters were NOT placed in any document`)
+  }
 
   const atsExtra: Record<string, string> = {
+    // THE REFINED LISTS, NOT THE FIRST DRAFT. Call 3 is the ATS QC pass and it judges what it is
+    // given; handed Call 1's skills it re-does work Call 2 already did, against text that is no
+    // longer what the document will carry. The zap runs node 17 (this refinement) BEFORE the QA
+    // node, so this is the faithful order as well as the useful one. Call 1 remains the fallback for
+    // anything Call 2 did not return.
     '289877667__ResumeSummary': c1.resumeSummary || '',
-    '289877667__skills list 1': c1.skills1 || '',
-    '289877667__skills list 2': c1.skills2 || '',
+    '289877667__skills list 1': c2.skills1 || c1.skills1 || '',
+    '289877667__skills list 2': c2.skills2 || c1.skills2 || '',
     '289877667__Expertise': c1.expertise || '',
-    '289877667__Relevant 1': c1.relevant1 || '',
-    '289877667__Relevant 2': c1.relevant2 || '',
-    '289877667__Relevant 3': c1.relevant3 || '',
+    '289877667__Relevant 1': c2.relevant1 || c1.relevant1 || '',
+    '289877667__Relevant 2': c2.relevant2 || c1.relevant2 || '',
+    '289877667__Relevant 3': c2.relevant3 || c1.relevant3 || '',
     '289877662__output__Item 7': company || '',
     '289877662__output__Item 5': jobTitle || '',
   }
   const base3 = resolveZapVars(prompts['ats_user'] || 'ATS QC.', mc, jd, undefined, atsExtra)
-  const r3 = await openai(prompts['ats_system'] || 'You are a helpful assistant.', `${base3}\n\nINPUTS:\n${JSON.stringify({ ...c1, ...c2 })}`, 15500, tQc) as any
+  // ALLOWLIST MERGE, NOT A SPREAD — see `mergeCallTwo`. `{...c1, ...c2}` was safe only while the
+  // Call-2 parse always failed and `c2` was `{}`; with a real parse it blanks six of Call 1's fields
+  // with the `|| ''` defaults `parseResumePackage` returns, and hands the emptied package to the QC
+  // pass whose verdict outranks Call 1 in the document.
+  const { merged: call3Input, improvised } = mergeCallTwo(c1, c2)
+  for (const k of improvised) {
+    warnings.push(`Call 2 returned a "${k}" its prompt never asked for — refused, so the draft keeps Call 1's`)
+  }
+  const r3 = await openai(prompts['ats_system'] || 'You are a helpful assistant.', `${base3}\n\nINPUTS:\n${JSON.stringify(call3Input)}`, 15500, tQc) as any
   const p3 = parseAgentJson(r3.choices?.[0]?.message?.content)
   const c3: any = p3.value || {}
   // An inert Call 3 is the difference between "QC ran and agreed" and "QC never landed". It used to
@@ -364,7 +417,7 @@ export async function buildPackageForJD(opts: { key: string; jd: string; roleTyp
   else if (!qcApplied) warnings.push('Call 3 (ATS QC) returned an empty object — no skill merge or summary update was applied')
   steps.push(`Agent Call 3 (ATS QC + skills merge) — JSON via ${p3.via}, applied: ${qcApplied}`)
 
-  const pkg = assemblePackage(c1, c2, c3) as Record<string, string | null>
+  const pkg = assemblePackage(c1, call2Draft(c2), c3) as Record<string, string | null>
   // The standing profile, so an item that predates this application can be marked profile_original
   // rather than credited to a pass that merely repeated it. `itemsToOmit` is EXCLUDED: it is the
   // owner's do-not-use list, injected into the resume prompt as {{289877659__Items to Omit}}.

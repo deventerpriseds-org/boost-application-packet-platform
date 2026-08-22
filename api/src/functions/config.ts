@@ -1,9 +1,10 @@
 import { app, HttpRequest, HttpResponseInit, InvocationContext } from '@azure/functions'
 import { TableClient, odata } from '@azure/data-tables'
-import { requireWrite } from './tests/appSession'
+import { requireWrite, resolveOwner } from './tests/appSession'
 // The ten keys the pipeline declares. IMPORTED, never re-listed — a whitelist typed twice is a
 // whitelist that drifts, and this one decides what may be read and written.
 import { CONFIG_KEYS } from './tests/pipelineConfig'
+import { SEED_TEMPLATE_ROLE_FOCUS, templateRowKey } from './tests/roleFocus'
 
 const CONN = process.env.AZURE_STORAGE_CONNECTION_STRING!
 const TABLE = 'AppConfig'
@@ -48,12 +49,7 @@ export async function getConfig(
   }
 }
 
-app.http('getConfig', {
-  methods: ['GET', 'OPTIONS'],
-  authLevel: 'anonymous',
-  route: 'config',
-  handler: getConfig
-})
+
 
 // POST /api/config - save config values { values: { "google.outputFolderId": "...", ... } }
 export async function saveConfig(
@@ -62,9 +58,21 @@ export async function saveConfig(
 ): Promise<HttpResponseInit> {
   if (req.method === 'OPTIONS') return { status: 204, headers }
 
-  // A VERIFIED SESSION, like every other mutation in this API. Without it, anyone who could reach
-  // the function could rewrite the pipeline's template ids, output folder and sender address.
-  const guard = requireWrite(req); if (guard) return guard
+  // A VERIFIED SESSION — and `requireWrite` is NOT that, which is the defect this replaces.
+  //
+  // `requireWrite` allows a write when `verified || owner === DEMO_EMAIL`, and `resolveOwner`
+  // DEFAULTS the owner to DEMO_EMAIL when no `?owner=` is supplied. So an unauthenticated POST
+  // resolved to demo and was waved straight through — to a table that holds the pipeline's template
+  // ids, output folder and sender address. That guard is correct for OWNER-SCOPED tables, which have
+  // a demo partition to absorb such a write; `AppConfig` is global shared state with no such
+  // partition, so a "demo" write here rewrites the real owner's live pipeline.
+  //
+  // This is the identical reasoning already written into `promptsApi` for the Prompts table, which
+  // is the other global table in this API. Same hazard, same guard.
+  const { verified } = resolveOwner(req)
+  if (!verified) {
+    return { status: 403, headers, jsonBody: { success: false, error: 'a verified session is required to change pipeline configuration' } }
+  }
   try {
     const { values } = await req.json() as { values: Record<string, string> }
     const client = TableClient.fromConnectionString(CONN, TABLE)
@@ -87,9 +95,101 @@ export async function saveConfig(
   }
 }
 
-app.http('saveConfig', {
-  methods: ['POST', 'OPTIONS'],
-  authLevel: 'anonymous',
-  route: 'config',
-  handler: saveConfig
-})
+
+
+
+// ── The RESUME TEMPLATE's role focus ────────────────────────────────────────────────────────────
+//
+// The owner's ruling: *"let the resume chosen drive the persona, right now it's only engineering
+// available"*. `resolveRoleFocus` reads `templates/resume-<driveId>` before anything else, and this
+// is the writer that makes that row settable — without which the focus is a code constant and the
+// no-hardcoded-config rule is violated by the very change that was meant to satisfy it.
+//
+// Same table, same guard, same deny-by-default shape as the pipeline settings above. It is a second
+// PARTITION rather than a second store: `templates` already existed and `resolveRoleFocus` already
+// read from it — what was missing was any way to write it.
+
+/** Only `roleFocus`, and only on a `resume-` row. A writer that accepts arbitrary fields on
+ *  arbitrary rows is a way to put anything into AppConfig, which is what the projection above
+ *  exists to prevent on the read side. */
+function isTemplateRow(rowKey: string): boolean {
+  return /^resume-[A-Za-z0-9_-]{10,}$/.test(rowKey)
+}
+
+// GET /api/config/templates — every configured template focus, plus the seeds for those with none.
+export async function getTemplateConfig(req: HttpRequest, context: InvocationContext): Promise<HttpResponseInit> {
+  if (req.method === 'OPTIONS') return { status: 204, headers }
+  try {
+    const client = TableClient.fromConnectionString(CONN, TABLE)
+    const configured: Record<string, string> = {}
+    for await (const entity of client.listEntities({ queryOptions: { filter: odata`PartitionKey eq 'templates'` } })) {
+      const k = entity.rowKey as string
+      if (isTemplateRow(k) && (entity as any).roleFocus) configured[k] = String((entity as any).roleFocus)
+    }
+    // The seeded templates are listed too, so the screen can show a template nobody has configured
+    // yet rather than an empty list that looks like nothing exists.
+    const templates = Object.entries(SEED_TEMPLATE_ROLE_FOCUS).map(([templateId, seed]) => {
+      const row = templateRowKey(templateId)
+      return { templateId, rowKey: row, roleFocus: configured[row] || seed, source: configured[row] ? 'config' : 'seed' }
+    })
+    for (const [row, roleFocus] of Object.entries(configured)) {
+      if (!templates.some((t) => t.rowKey === row)) {
+        templates.push({ templateId: row.replace(/^resume-/, ''), rowKey: row, roleFocus, source: 'config' })
+      }
+    }
+    return { status: 200, headers, jsonBody: { success: true, templates } }
+  } catch (err) {
+    return { status: 500, headers, jsonBody: { success: false, error: String(err) } }
+  }
+}
+
+// POST /api/config/templates { templateId, roleFocus }
+export async function saveTemplateConfig(req: HttpRequest, context: InvocationContext): Promise<HttpResponseInit> {
+  if (req.method === 'OPTIONS') return { status: 204, headers }
+  const { verified } = resolveOwner(req)
+  if (!verified) {
+    return { status: 403, headers, jsonBody: { success: false, error: 'a verified session is required to change a template role focus' } }
+  }
+  try {
+    const body = await req.json() as { templateId?: string; roleFocus?: string }
+    const templateId = String(body?.templateId || '').trim()
+    const roleFocus = String(body?.roleFocus || '').trim()
+    const rowKey = templateRowKey(templateId)
+    if (!templateId || !isTemplateRow(rowKey)) {
+      return { status: 400, headers, jsonBody: { success: false, error: 'templateId must be a Drive id' } }
+    }
+    // A blank focus is a DELETE, not a stored empty string: an empty row would win over the seed in
+    // `resolveRoleFocus` and silently blank the directive that every prompt is prefixed with.
+    if (!roleFocus) {
+      try { await TableClient.fromConnectionString(CONN, TABLE).deleteEntity('templates', rowKey) } catch { /* already absent */ }
+      return { status: 200, headers, jsonBody: { success: true, templateId, roleFocus: null, cleared: true } }
+    }
+    await TableClient.fromConnectionString(CONN, TABLE).upsertEntity({ partitionKey: 'templates', rowKey, roleFocus }, 'Merge')
+    return { status: 200, headers, jsonBody: { success: true, templateId, roleFocus } }
+  } catch (err) {
+    return { status: 500, headers, jsonBody: { success: false, error: String(err) } }
+  }
+}
+
+// ONE REGISTRATION PER ROUTE, dispatching on the method — and this is not a style preference.
+//
+// `config` was registered TWICE, `getConfig` for GET and `saveConfig` for POST. Only the first
+// registration wins: `POST /api/config` returned **404 in production** (api-test run 32558143290),
+// which means `saveConfig` had never once been reachable and the Settings ▸ Pipeline Save button
+// could not have worked on any day of its life. `config/templates` was written the same way and
+// inherited the same defect the hour it shipped. `app/coach/config` had it too.
+//
+// This is the shape `promptsApi` already uses — one function, `req.method` inside — and the reason
+// it works there. `H:one-http-registration-per-route` now fails the suite on a duplicate route.
+export async function configApi(req: HttpRequest, context: InvocationContext): Promise<HttpResponseInit> {
+  if (req.method === 'OPTIONS') return { status: 204, headers }
+  return req.method === 'POST' ? saveConfig(req, context) : getConfig(req, context)
+}
+
+export async function templateConfigApi(req: HttpRequest, context: InvocationContext): Promise<HttpResponseInit> {
+  if (req.method === 'OPTIONS') return { status: 204, headers }
+  return req.method === 'POST' ? saveTemplateConfig(req, context) : getTemplateConfig(req, context)
+}
+
+app.http('configApi', { methods: ['GET', 'POST', 'OPTIONS'], authLevel: 'anonymous', route: 'config', handler: configApi })
+app.http('templateConfigApi', { methods: ['GET', 'POST', 'OPTIONS'], authLevel: 'anonymous', route: 'config/templates', handler: templateConfigApi })

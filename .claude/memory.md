@@ -1721,3 +1721,93 @@ most likely to strand a pointer; an invalid regex threw naming no row; and `D20`
 the `appFacts.ts:232` coordinate that had already rotted to `:239`.
 
 572 api tests pass. **NOT verified live** — nothing here deploys.
+
+
+## D35 — the build is asynchronous now, and the queue is woken by Azure Storage (2026-08-22)
+
+**Feature status: BUILT AND DEPLOYED, NOT YET CONFIRMED LIVE.** `main` at `e47c8fd`.
+
+Read this before touching `packetBuildAll` or the packet screen.
+
+- **`runPacketBuild` is the one build path.** It was extracted out of `packetBuildAll`, not copied,
+  and has two callers: the synchronous route (kept, because `appBulk` and `coachTools` call it) and
+  the queue worker. Anything that changes the build changes both by construction.
+- **`packet_build_job` is the record of truth, not the queue.** Claim (`for update skip locked`),
+  ten-minute lease, attempt cap, the `finishBuild` fence, owner scoping and the partial unique index
+  `pbj_one_live_per_opp` are all database facts with tests against a real PostgreSQL. The Azure queue
+  carries a wake-up only, so a lost, duplicated or redelivered message is harmless.
+- **The wake signal is `packet-build-jobs`, base64-encoded.** The queue extension defaults to base64
+  and `@azure/storage-queue` sends plain text: raw JSON is accepted, sits in the queue and is
+  dead-lettered without triggering anything. `buildSignal.ts` encodes base64 and decodes either form.
+- **`buildQueueSweep` is a five-minute FALLBACK, not the path.** It exists for the one case no
+  message can announce — a worker that died mid-build — and for `abandonExhausted`. If you find
+  yourself shortening it, the thing you actually want is another signal.
+
+### Hardening — authentication is not authorization, and I made the same mistake twice in one day
+`requireWrite` returns null for any request that resolves to the demo workspace, and a request with
+NO credentials resolves there. So every route that then loaded its object by id alone was open:
+`build-all`, `artifactGenerate`, `artifactDocument`, `artifactSlides`. An opportunity or artifact
+UUID was the whole of the access control — four Google documents in the owner's Drive overwritten
+and the model budget spent, by an anonymous caller. Now: one owner-scoped `loadOwnedArtifact`, an
+owner predicate on the build's opportunity load, and `enqueueBuild` refusing to file a job it does
+not own. **The generalisation worth keeping: `requireWrite` answers "may this request write
+something", never "may it write THIS".** Object-level authorization belongs in the load.
+
+### Hardening — a cold AC read found six defects in code I had already tested
+The queue had 6 passing DB tests before an independent AC pass read it. It found: the attempt cap
+outside the claim subquery (one poisoned job would have silently stopped every build for every
+owner); `finishBuild` discarding the payload on failure — in the queue built to stop losing exactly
+that evidence; no fence, so a reclaimed zombie could overwrite a live run; a rebuild behind a live
+cached build silently downgraded to it; a return type that lied; and a job that could be filed
+against another owner's opportunity. Each is now a test, and all five mutations bite. The tests I
+wrote first were not wrong — they were tests of the design I already had in my head.
+
+
+## THE THREE-CALL GENERATION PIPELINE — what each call actually is (2026-08-22)
+
+Read this before touching `pipeline.ts buildPackageForJD`, `mt17.assemblePackage`, or anything that
+reasons about "Call 2". The code's own names were wrong about this for the product's whole life.
+
+| call | prompt row | zap node | what it REALLY is | output shape |
+|---|---|---|---|---|
+| 1 | `resume_user` | 289877661 "Update Resume/Portfolio Fields" | the draft: summary, skills, relevant, work history, cover letter, About Me, executive profile, plus SIX analysis sections | `### Title ###` text |
+| 2 | `portfolio_user` | 299599701 **"Copy: Update Resume/Portfolio Fields"** | a SECOND SKILLS-REFINEMENT PASS over Call 1 — not a portfolio prompt, despite the row name | `### Title ###` text |
+| 3 | `ats_user` | 289877668 "Post Analysis QA" | ATS QC + skills merge | **JSON** |
+
+- **Call 2 emits ONLY** `Skills1`, `Skills2`, `Relevant Skills 1/2/3`, `Word and Character
+  Requirements Check`. It never emits a cover letter, About Me, executive profile, resume summary or
+  cold email — which are exactly the fields `assemblePackage` used to read off `call2`. That
+  expectation was fiction; no model output could satisfy it. Those come from Call 1 and the baseline
+  `set_value` nodes (MasterContext).
+- **Call 2 was parsed with `parseAgentJson` and therefore always failed** — 2,957/3,178/4,736/5,404
+  characters discarded in one build. Read as a flaky model, then as a duplicate-prompt bug. It was
+  neither: the prompt never asks for JSON. **The prompt is the only source that settles a "what does
+  this call return" question.** `GET /api/prompts?key=<row>&tail=N` now exists for exactly that.
+- Call 3's prompt DOES ask for JSON and parses fine in production — which is the disconfirming
+  control that proves the JSON parser was never the problem.
+
+### Hardening — a fix that leaves the symptom identical is indistinguishable from no fix
+`portfolio_user` was corrected (wrong zap node → right one) a day before this. The warning text did
+not change, because the NEW prompt also failed to parse — for a completely different reason. The
+second cause hid behind the first for a full day. When a fix lands and the symptom is unchanged, that
+is not "the fix did not take": re-derive the cause from scratch.
+
+### Hardening — `{...c1, ...c2}` was safe only because c2 was always `{}`
+Fixing the parse turned a dormant spread into a live silent-degradation path: `parseResumePackage`
+returns EVERY key defaulted `|| ''`, so the spread blanked six of Call 1's fields in the input handed
+to the QC pass — whose verdict OUTRANKS Call 1 in the document, while the build still reports
+`built: 4, failed: 0`. Caught by an independent AC read of a change that had already shipped, not by
+any test. **The general rule: when a value goes from always-empty to populated, every merge it feeds
+changes meaning.** Grep the consumers of a variable whose emptiness was load-bearing. `mergeCallTwo`
+is now an allowlist and refuses anything Call 2's prompt did not ask for.
+
+### Role focus: the AppConfig row key is a free-text job title, so that source can never hit
+`resolveRoleFocus` looks up `templates/<roleRowKey(roleType)>` where `roleType` is the posting's job
+title — e.g. `director-of-digital-technology-operations-&-innovation`. No such row will ever exist,
+so the first source is dead on arrival and every build falls through. The persona branch below it is
+also dead: **`opportunity.persona_key` is NULL on 1,676 of 1,903 rows** and the owner confirms the
+persona design was abandoned. Net effect: an executive Director of Digital posting was written by a
+prompt directed at "a senior **engineering** executive", from a hardcoded seed. The owner's ruling:
+**the resume TEMPLATE chosen for the build drives the focus** — today only one template exists, so it
+must resolve to engineering EXPLICITLY from the template's own configuration rather than by falling
+through five layers to a code constant.

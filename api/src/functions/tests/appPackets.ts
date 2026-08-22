@@ -13,6 +13,12 @@ import { applyCorrectionPass } from './appCorrections'
 import { sourceText } from './appFacts'
 import { summariseBuild } from './packetBuild'
 import { approvalBlock } from './appChecks'
+// The evidence pass, called in-process rather than over HTTP — see resolveEvidenceForOpp. No cycle:
+// appPackets is not reachable from appRequirements (checked across all 24 modules it can reach).
+import { writeEvidence, rebuildComparison, ensureRequirementCols, ensureEvidenceTable } from './appRequirements'
+import { resolveOptionsFor } from './checkPrefs'
+import { openAiJson } from './openaiJson'
+
 
 const HEADERS = {
   'Content-Type': 'application/json',
@@ -181,13 +187,14 @@ const ARTIFACT_BRIEF: Record<string, string> = {
 export async function artifactGenerate(req: HttpRequest, context: InvocationContext): Promise<HttpResponseInit> {
   if (req.method === 'OPTIONS') return { status: 204, headers: HEADERS }
   const artifactId = req.params.artifactId
+  const owner = resolveOwner(req).owner
   const key = process.env.OPENAI_API_KEY
   let client
   try {
     const guard = requireWrite(req); if (guard) return guard
     client = await getPgClient()
     await ensureContentColumn(client)
-    const art = (await client.query(`select a.*, p.opp_id from artifact a join packet p on p.id = a.packet_id where a.id = $1`, [artifactId])).rows[0]
+    const art = await loadOwnedArtifact(client, artifactId, owner)
     if (!art) return { status: 404, headers: HEADERS, jsonBody: { error: 'artifact not found' } }
     const opp = (await client.query(`${OPP_FIELDS} where id = $1`, [art.opp_id])).rows[0]
     if (!key) return { status: 200, headers: HEADERS, jsonBody: { error: 'OPENAI_API_KEY not set' } }
@@ -287,6 +294,27 @@ async function ensurePkgColumn(client: any) {
 // synthesised pseudo-JD instead of the posting (X1). A single constant is what stops that recurring.
 export const OPP_FIELDS = `select id, company, role, comp_range, why_surfaced, company_signals,
   pain_hypotheses, persona_key, jd_real, raw_jd from opportunity`
+
+/**
+ * One artifact — and only if the resolved owner owns the opportunity it hangs off.
+ *
+ * Three routes that SPEND on an artifact (`generate` burns model tokens, `document` and `slides`
+ * write real Google files into the owner's Drive) each loaded it by id alone, then acted. Every one
+ * of them is `authLevel: 'anonymous'` behind `requireWrite`, which passes any request resolving to
+ * the demo workspace — a request with no credentials at all does. So an artifact UUID was the only
+ * thing standing between an anonymous caller and another owner's documents.
+ *
+ * The authorization is done in the load, at the one place all three funnel through, so a fourth
+ * route added later inherits it instead of re-deciding it. It is the same join `appRemediation`
+ * already uses; this extends that, rather than inventing a second way to ask the same question.
+ */
+export async function loadOwnedArtifact(client: any, artifactId: string, owner: string): Promise<any> {
+  return (await client.query(
+    `select a.*, p.opp_id from artifact a
+       join packet p on p.id = a.packet_id
+       join opportunity o on o.id = p.opp_id
+      where a.id = $1 and o.owner_email = $2`, [artifactId, owner])).rows[0]
+}
 
 /**
  * The text the generator is grounded in.
@@ -475,13 +503,14 @@ async function buildTemplatedArtifact(client: any, art: any, opp: any, regen: bo
 export async function artifactDocument(req: HttpRequest, context: InvocationContext): Promise<HttpResponseInit> {
   if (req.method === 'OPTIONS') return { status: 204, headers: HEADERS }
   const artifactId = req.params.artifactId
+  const owner = resolveOwner(req).owner
   let client
   try {
     const guard = requireWrite(req); if (guard) return guard
     if (!HAS_GOOGLE_OAUTH) return { status: 200, headers: HEADERS, jsonBody: { error: 'GOOGLE_REFRESH_TOKEN not set — run the Google consent flow first (owns Drive quota).' } }
     client = await getPgClient()
     await ensureContentColumn(client)
-    const art = (await client.query(`select a.*, p.opp_id from artifact a join packet p on p.id = a.packet_id where a.id = $1`, [artifactId])).rows[0]
+    const art = await loadOwnedArtifact(client, artifactId, owner)
     if (!art) return { status: 404, headers: HEADERS, jsonBody: { error: 'artifact not found' } }
     if (art.type === 'video') return { status: 400, headers: HEADERS, jsonBody: { error: 'video artifacts are rendered via the HeyGen video action, not a document' } }
     const opp = (await client.query(`${OPP_FIELDS} where id = $1`, [art.opp_id])).rows[0]
@@ -554,13 +583,14 @@ function toSlideSections(content: string, max = 4): { title: string; body: strin
 export async function artifactSlides(req: HttpRequest, context: InvocationContext): Promise<HttpResponseInit> {
   if (req.method === 'OPTIONS') return { status: 204, headers: HEADERS }
   const artifactId = req.params.artifactId
+  const owner = resolveOwner(req).owner
   let client
   try {
     const guard = requireWrite(req); if (guard) return guard
     if (!HAS_GOOGLE_OAUTH) return { status: 200, headers: HEADERS, jsonBody: { error: 'GOOGLE_REFRESH_TOKEN not set — run the Google consent flow first.' } }
     client = await getPgClient()
     await ensureContentColumn(client)
-    const art = (await client.query(`select a.*, p.opp_id from artifact a join packet p on p.id = a.packet_id where a.id = $1`, [artifactId])).rows[0]
+    const art = await loadOwnedArtifact(client, artifactId, owner)
     if (!art) return { status: 404, headers: HEADERS, jsonBody: { error: 'artifact not found' } }
     const opp = (await client.query(`${OPP_FIELDS} where id = $1`, [art.opp_id])).rows[0]
     if (!opp) return { status: 404, headers: HEADERS, jsonBody: { error: 'opportunity not found' } }
@@ -638,6 +668,43 @@ export async function artifactSlides(req: HttpRequest, context: InvocationContex
 }
 
 const SELF_BASE = process.env.COACH_SELF_BASE || 'https://job-platform-api.azurewebsites.net/api'
+/**
+ * Resolve and store evidence for one opportunity, in-process.
+ *
+ * Mirrors what `evidenceResolve` does after its auth guard — same profile read, same options, same
+ * comparison rebuild — so the build path and the route cannot drift into two different answers.
+ * Errors are RETURNED rather than thrown: a build must not fail because QC could not run, but it
+ * must not report clean either, so the caller folds this into `warnings`.
+ */
+async function resolveEvidenceForOpp(client: any, oppId: string, owner: string): Promise<any> {
+  try {
+    // THE OBJECT-LEVEL CHECK, and its absence was a real regression an independent review caught.
+    // The comment above this function claimed parity with `evidenceResolve` "after its auth guard".
+    // That was false in the way that matters: the route ALSO does
+    // `where id=$1 and owner_email=$2` and 404s, and this copy did not. `requireWrite` on the
+    // caller proves SOMEONE is signed in; it does not prove they own THIS opportunity. Those are
+    // different gates and I conflated them — authentication is not authorization.
+    const owned = (await client.query(
+      `select 1 from opportunity where id=$1 and owner_email=$2`, [oppId, owner])).rows[0]
+    if (!owned) return { error: 'this opportunity does not belong to the signed-in owner' }
+    await ensureRequirementCols(client)
+    await ensureEvidenceTable(client)
+    const profile = await sourceText()
+    if (!profile.records.length) {
+      // An unreadable profile is NOT proof the profile supports nothing, so nothing is written —
+      // the same refusal the route makes, for the same reason.
+      return { error: 'no profile record could be read, so no coverage claim can be evidenced' }
+    }
+    const opts = await resolveOptionsFor(client, owner)
+    const out = await writeEvidence(client, oppId, profile.records, opts, undefined,
+      opts.escalate === true ? openAiJson({ feature: 'evidence:escalate' }) : undefined)
+    await rebuildComparison(client, oppId, owner, profile.records)
+    return out
+  } catch (e: any) {
+    return { error: String(e?.message || e).slice(0, 200) }
+  }
+}
+
 async function selfPost(path: string, body: any): Promise<any> {
   try {
     const r = await fetch(`${SELF_BASE}/${path}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) })
@@ -657,10 +724,39 @@ export async function packetBuildAll(req: HttpRequest, context: InvocationContex
   let client
   try {
     const guard = requireWrite(req); if (guard) return guard
-    if (!HAS_GOOGLE_OAUTH) return { status: 200, headers: HEADERS, jsonBody: { error: 'GOOGLE_REFRESH_TOKEN not set' } }
-    client = await getPgClient(); await ensureContentColumn(client)
-    const opp = (await client.query(`${OPP_FIELDS} where id = $1`, [oppId])).rows[0]
-    if (!opp) return { status: 404, headers: HEADERS, jsonBody: { error: 'opportunity not found' } }
+    client = await getPgClient()
+    const out = await runPacketBuild(client, oppId, owner, body, (m: string) => context.log(m))
+    return { status: out.status, headers: HEADERS, jsonBody: out.body }
+  } catch (err) {
+    return { status: 500, headers: HEADERS, jsonBody: { error: String(err) } }
+  } finally { try { await client?.end() } catch {} }
+}
+
+/**
+ * The build itself, with no HTTP in it.
+ *
+ * Extracted so the background worker (`buildQueueTick`) runs THE SAME CODE the route runs, rather
+ * than a second copy that drifts. The route keeps the parts only a request has — the auth guard, the
+ * connection lifecycle, the status code — and everything below is what actually builds a packet.
+ *
+ * `log` rather than `context.log`: a timer's context and a request's context are different objects,
+ * and the build has no business knowing which one it is running under.
+ */
+export async function runPacketBuild(
+  client: any, oppId: string, owner: string, body: any, log: (m: string) => void,
+): Promise<{ status: number; body: any }> {
+  {
+    if (!HAS_GOOGLE_OAUTH) return { status: 200, body: { error: 'GOOGLE_REFRESH_TOKEN not set' } }
+    await ensureContentColumn(client)
+    // OWNER-SCOPED, and this was a real hole rather than a tidy-up. `requireWrite` passes any
+    // request that resolves to the demo workspace — including one with no credentials at all — and
+    // the load below used to be `where id = $1`. So an unauthenticated caller holding an opportunity
+    // UUID could drive a full build of somebody else's packet: four Google documents overwritten in
+    // their Drive and the model budget spent, all on an id they merely knew. Authentication was
+    // being read as authorization. The predicate is the fix; there is no request shape that should
+    // build a packet belonging to another owner.
+    const opp = (await client.query(`${OPP_FIELDS} where id = $1 and owner_email = $2`, [oppId, owner])).rows[0]
+    if (!opp) return { status: 404, body: { error: 'opportunity not found' } }
     const { pkt, artifacts } = await loadPacket(client, oppId)
     const results: any[] = []
     for (const a of artifacts) {
@@ -689,7 +785,36 @@ export async function packetBuildAll(req: HttpRequest, context: InvocationContex
     // FAILURE IS NON-FATAL AND VISIBLE. `selfPost` swallows transport errors into `{error}`, and a
     // build must not fail because QC could not run — but it must not report clean either, so the
     // outcome joins `warnings` where `summariseBuild` already surfaces partial success.
-    const evidence = await selfPost(`app/opportunity/${oppId}/evidence?owner=${encodeURIComponent(owner)}`, {})
+    // IN-PROCESS, NOT OVER HTTP, and the first version of this line was a real defect rather than a
+    // style choice. It called the route through `selfPost`, which sends no Authorization header,
+    // while `evidenceResolve` requires a verified session — so every build logged "evidence resolve
+    // did not run: sign in required to modify this workspace" (run 32547019724) and the evidence
+    // pass never once ran on the build path. I closed `D:build-runs-no-qc` on an api-test dispatch
+    // that hit the route DIRECTLY with a minted token, which is a different path from the one the
+    // row was about; the row is reopened.
+    //
+    // Forwarding a token would work and is the wrong fix. This function already holds an
+    // authenticated `client` and the resolved `owner`, so the honest call is the function itself:
+    // no HTTP hop, no credential to mint or leak, and nothing added to the four-minute gateway
+    // budget that D35 is already losing. `requireWrite` guards the ROUTE because a route is
+    // reachable by anyone; this caller is already past that gate.
+    const evidence = await resolveEvidenceForOpp(client, oppId, owner)
+    // PERSIST THE OUTCOME BEFORE RETURNING IT. The response below is routinely lost — `build-all`
+    // runs ~3 minutes and the gateway cuts at 4 (D35, measured twice) — and `warnings` is the only
+    // place the discarded-section list and the Call-2 parse failures have ever existed. Two open
+    // findings are un-diagnosable for exactly that reason. Written before the return, so a build
+    // whose response never arrives still leaves its diagnosis behind.
+    try {
+      await client.query(
+        `update packet set last_build = $2 where id = $1`,
+        [pkt.id, JSON.stringify({
+          at: new Date().toISOString(), regen: body?.regen === true,
+          artifacts: results.map((r: any) => ({
+            type: r.type, error: r.error || null,
+            warnings: r.warnings || [], qcApplied: r.qcApplied ?? null,
+          })),
+        })])
+    } catch (e) { log(`last_build persist failed ${String(e)}`) }
     const packetStatus = await recomputePacket(client, pkt.id)
     let cadenceSeeded = false, outreachDrafted = false
     if (body?.seedCadence === true) { const r = await selfPost(`app/opportunity/${oppId}/cadence?owner=${encodeURIComponent(owner)}`, {}); cadenceSeeded = !r?.error }
@@ -698,7 +823,7 @@ export async function packetBuildAll(req: HttpRequest, context: InvocationContex
     // real inputs. It used to be inline here, where nothing without Drive, Postgres and OpenAI could
     // reach it, and the guards written for it tested the source text instead and were inert.
     const summary = summariseBuild(results)
-    return { status: 200, headers: HEADERS, jsonBody: {
+    return { status: 200, body: {
       ok: summary.ok, oppId, company: opp.company, artifacts: results,
       built: summary.built, failed: summary.failed,
       warnings: evidence?.error
@@ -713,9 +838,7 @@ export async function packetBuildAll(req: HttpRequest, context: InvocationContex
         refused: evidence?.refused ?? null,
       },
       packetStatus, cadenceSeeded, outreachDrafted, sent: false, note: summary.note } }
-  } catch (err) {
-    return { status: 500, headers: HEADERS, jsonBody: { error: String(err) } }
-  } finally { try { await client?.end() } catch {} }
+  }
 }
 
 // ── D14: what the JD-analysis call is actually GIVEN ────────────────────────────────────────────
