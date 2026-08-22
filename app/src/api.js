@@ -172,7 +172,9 @@ export const api = {
   packetSwaps: (packetId) => get(`/app/packet/${packetId}/swaps?owner=${encodeURIComponent(_owner)}`),
   oppRequirements: (oppId) => get(`/app/opportunity/${oppId}/requirements?owner=${encodeURIComponent(_owner)}`),
   generateArtifact: (artifactId) => post(`/app/artifact/${artifactId}/generate`, {}),
-  setArtifactStatus: (artifactId, status) => post(`/app/artifact/${artifactId}/status`, { status }),
+  // `note` rides along on a 'changes' status: the server appends it to packet.feedback and the
+  // next regenerate of that artifact type is steered by it. Omitted for approve/reopen.
+  setArtifactStatus: (artifactId, status, note) => post(`/app/artifact/${artifactId}/status`, note ? { status, note } : { status }),
   // ── QC gate (P2.2/P2.3) ────────────────────────────────────────────────────────────────────
   // Every GET here is owner-scoped server-side via resolveOwner(), which falls back to the DEMO
   // owner when no ?owner= is present — so omitting it silently 404s the real owner's artifacts.

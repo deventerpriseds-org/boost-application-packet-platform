@@ -191,7 +191,14 @@ export function ArtifactCard({ a, busy, setBusy, onGenerate, onSetStatus, onMake
               {busy === a.id ? 'Regenerating…' : 'Regenerate'}
             </button>
             {a.status !== 'changes' && (
-              <button className="px-btn" onClick={() => onSetStatus(a, 'changes')}>Request changes</button>
+              <button className="px-btn" onClick={() => {
+                // The reason is the whole point: a status alone told the next Regenerate nothing,
+                // so it re-ran with identical inputs. Cancel leaves the artifact untouched; an
+                // empty note still sends it back, just without steering.
+                const note = window.prompt(`What should change about the ${TYPE_LABEL[a.type]}?`, '')
+                if (note === null) return
+                onSetStatus(a, 'changes', note.trim())
+              }}>Request changes</button>
             )}
           </>
         )}
@@ -479,14 +486,16 @@ export default function PacketBuilder({ id, step }) {
     } catch (err) { setVideo((v) => ({ ...v, [a.id]: { ...v[a.id], archiving: false } })); toast(`Archive failed: ${err.message || err}`) }
   }
 
-  const setStatus = async (a, status) => {
+  const setStatus = async (a, status, note) => {
     const prev = a.status
     patchArtifact(a.id, { status })
     try {
-      const res = await api.setArtifactStatus(a.id, status)
+      const res = await api.setArtifactStatus(a.id, status, note)
       if (res.error) throw new Error(res.error)
       setPState((s) => ({ ...s, packet: { ...s.packet, status: res.packetStatus } }))
-      toast(status === 'approved' ? `Approved ${TYPE_LABEL[a.type]}` : `${TYPE_LABEL[a.type]} → ${status}`)
+      toast(status === 'approved' ? `Approved ${TYPE_LABEL[a.type]}`
+        : res.feedbackAdded ? `${TYPE_LABEL[a.type]} sent back — your note will steer the next rebuild`
+        : `${TYPE_LABEL[a.type]} → ${status}`)
     } catch (err) { patchArtifact(a.id, { status: prev }); toast(`Update failed: ${err.message || err}`) }
   }
 

@@ -131,6 +131,9 @@ function packetShape(pkt: any, artifacts: any[], opp?: any) {
   return {
     id: pkt.id, oppId: pkt.opp_id, status: pkt.status, round: pkt.round,
     jdAnalyzed: pkt.jd_analyzed,
+    // The review thread. Projected so the screen can show WHY an artifact was sent back, which is
+    // the half "Request changes" never had — it stored a status and no reason.
+    feedback: pkt.feedback || [],
     // D14, and the name is the misnomer: `covered_kw` holds the terms the JD-ANALYSIS MODEL CALL
     // pulled out of the posting. Nothing compared them to the candidate — see `jdAnalysisRequest`,
     // whose fragment sources are `opportunity` and `posting` and nothing else. The column keeps its
@@ -278,10 +281,35 @@ export async function artifactStatus(req: HttpRequest, context: InvocationContex
         return { status: 409, headers: HEADERS, jsonBody: { error: block.reason, gate: block.gate, artifactId } }
       }
     }
-    const art = (await client.query(`update artifact set status = $1, updated_at = now() where id = $2 returning packet_id`, [status, artifactId])).rows[0]
+    const art = (await client.query(`update artifact set status = $1, updated_at = now() where id = $2 returning packet_id, type`, [status, artifactId])).rows[0]
     if (!art) return { status: 404, headers: HEADERS, jsonBody: { error: 'artifact not found' } }
+
+    // THE NOTE IS THE POINT OF "Request changes". Before this, the button stored a STATUS and
+    // nothing else: the artifact moved to `changes`, the owner pressed Regenerate, and the model
+    // re-rolled with byte-identical inputs because nothing recorded WHAT to change. `packet.feedback`
+    // has existed as a jsonb column since the schema was written, read by nothing and written by
+    // nothing — so this extends the column the design already had rather than adding a table.
+    //
+    // Appended, never replaced: the thread is the history of the review, and `resolved` is what a
+    // later regenerate flips so a note steers exactly one rebuild instead of every future one.
+    let feedbackAdded = false
+    const note = typeof body?.note === 'string' ? body.note.trim() : ''
+    if (status === 'changes' && note) {
+      const entry = {
+        artifactId, type: art.type, note: note.slice(0, 4000),
+        at: new Date().toISOString(), resolved: false,
+      }
+      // Non-fatal: the status change is the durable part and already succeeded. Losing the note to
+      // a jsonb error must not report the whole action as failed.
+      try {
+        await client.query(
+          `update packet set feedback = coalesce(feedback, '[]'::jsonb) || $1::jsonb, updated_at = now() where id = $2`,
+          [JSON.stringify([entry]), art.packet_id])
+        feedbackAdded = true
+      } catch { feedbackAdded = false }
+    }
     const packetStatus = await recomputePacket(client, art.packet_id)
-    return { status: 200, headers: HEADERS, jsonBody: { ok: true, artifactId, artifactStatus: status, packetStatus } }
+    return { status: 200, headers: HEADERS, jsonBody: { ok: true, artifactId, artifactStatus: status, packetStatus, feedbackAdded } }
   } catch (err) {
     return { status: 500, headers: HEADERS, jsonBody: { error: String(err) } }
   } finally { try { await client?.end() } catch {} }
@@ -411,7 +439,7 @@ export async function ensurePackage(client: any, art: any, opp: any, regen: bool
 
   await ensurePkgColumn(client)
   await ensureAnalysisCols(client)
-  const pkt = (await client.query(`select pkg_json, jd_grounded from packet where id = $1`, [art.packet_id])).rows[0]
+  const pkt = (await client.query(`select pkg_json, jd_grounded, feedback from packet where id = $1`, [art.packet_id])).rows[0]
   const { jd, grounded } = generationJd(opp)
 
   // A package cached BEFORE X1 was generated from the synthesised pseudo-JD. Reusing it would make
@@ -425,7 +453,14 @@ export async function ensurePackage(client: any, art: any, opp: any, regen: bool
   if (cached) return { pkg: cached, generated: false, grounded: pkt?.jd_grounded === true, warnings: [], qcApplied: null }
 
   const roleType = opp.persona_key || opp.role || 'Executive'
-  const built = await buildPackageForJD({ key, jd, roleType, company: opp.company, jobTitle: opp.role })
+  // The reviewer's OPEN notes steer this generation. Unresolved only: a note describes one draft,
+  // and replaying every note the packet ever collected would make old requests fight new ones.
+  // Scoped to this artifact's type as well, so a cover-letter complaint does not rewrite the resume.
+  const openNotes: any[] = Array.isArray(pkt?.feedback) ? pkt.feedback : []
+  const revisionNotes = openNotes
+    .filter((f: any) => f && f.resolved === false && (!f.type || f.type === art.type))
+    .map((f: any) => String(f.note || '')).filter(Boolean)
+  const built = await buildPackageForJD({ key, jd, roleType, company: opp.company, jobTitle: opp.role, revisionNotes })
   const pkg = built.pkg
   // D8 - this used to pass `{}`, which logUsage discards, so every production packet build
   // recorded nothing. Each of the three generation passes is metered on its own so the cost of
@@ -449,6 +484,17 @@ export async function ensurePackage(client: any, art: any, opp: any, regen: bool
 
   await client.query(`update packet set pkg_json = $1, jd_grounded = $2, updated_at = now() where id = $3`,
     [JSON.stringify(pkg), grounded, art.packet_id])
+  // A note steers exactly ONE rebuild. Marked resolved only AFTER the generation it fed actually
+  // produced a stored package — resolving on entry would silently discard the request if the call
+  // then failed, which is the worse of the two failure modes: the owner sees the artifact rebuild
+  // and has no way to tell their note was never applied.
+  if (revisionNotes.length) {
+    try {
+      const merged = openNotes.map((f: any) =>
+        (f && f.resolved === false && (!f.type || f.type === art.type)) ? { ...f, resolved: true, resolvedAt: new Date().toISOString() } : f)
+      await client.query(`update packet set feedback = $1::jsonb where id = $2`, [JSON.stringify(merged), art.packet_id])
+    } catch { /* non-fatal: the package is built and stored; a stuck note repeats at worst */ }
+  }
   // P1.3 — record what the two passes changed, while both payloads are still in hand. They are
   // discarded once this scope ends, and the merged package alone cannot show what it replaced.
   // Never fatal: this is provenance about a package that is already built and stored.

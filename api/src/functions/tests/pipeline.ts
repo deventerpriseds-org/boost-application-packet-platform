@@ -280,7 +280,7 @@ export async function regenerateFields(opts: {
 // Returns `calls` alongside the package because P1.3 cannot reconstruct what changed from the merged
 // output alone: assemblePackage's per-slot preference for Call 3 over Call 1 IS the swap decision,
 // and both sides are needed to see it. These were previously discarded at the end of this function.
-export async function buildPackageForJD(opts: { key: string; jd: string; roleType: string; company: string; jobTitle: string; personaRole?: string | null }): Promise<{ pkg: Record<string, string | null>; steps: string[]; roleFocus: any; roleFocusSource: string; calls: { c1: any; c2: any; c3: any }; usage: Array<{ pass: string; usage: any }>; promptVersions: Record<string, number>; profileText: string; omitList: string; warnings: string[]; qcApplied: boolean; settings: PipelineSettings }> {
+export async function buildPackageForJD(opts: { key: string; jd: string; roleType: string; company: string; jobTitle: string; personaRole?: string | null; revisionNotes?: string[] }): Promise<{ pkg: Record<string, string | null>; steps: string[]; roleFocus: any; roleFocusSource: string; calls: { c1: any; c2: any; c3: any }; usage: Array<{ pass: string; usage: any }>; promptVersions: Record<string, number>; profileText: string; omitList: string; warnings: string[]; qcApplied: boolean; settings: PipelineSettings }> {
   const { key, jd, roleType, company, jobTitle } = opts
   const steps: string[] = []
   const warnings: string[] = []
@@ -334,7 +334,23 @@ export async function buildPackageForJD(opts: { key: string; jd: string; roleTyp
   steps.push(`Temperatures — generation ${tGen} (${settings.generateTemperature.source}), QC ${tQc} (${settings.qcTemperature.source})`)
 
   const base1 = resolveZapVars(prompts['resume_user'] || 'Write resume package with ### sections.', mc, jd)
-  const r1 = await openai(prompts['resume_system'] || 'You are an executive resume writer.', roleDirective(roleFocus) + base1, 16000, tGen) as any
+  // THE OWNER'S REVISION NOTES, PREPENDED — never merged into the prompt.
+  //
+  // "Request changes" used to store a status and nothing else, so Regenerate re-ran with
+  // byte-identical inputs and the model could not know what the owner disliked. The note is now
+  // carried in as INPUT, the same way the job description is, and by the same mechanism
+  // `roleDirective` already uses: a directive string in front of the resolved user message.
+  //
+  // THE PROMPTS TABLE IS NOT TOUCHED. That is the owner's standing constraint — their prompts drive
+  // the draft — and it holds here: `prompts['resume_user']` is read and used verbatim. This adds a
+  // turn of human instruction ahead of it, which is what a revision request is.
+  const notes = (opts.revisionNotes || []).map(n => String(n || '').trim()).filter(Boolean)
+  const revisionDirective = notes.length
+    ? `The reviewer asked for these changes to the previous draft. Apply them, and keep everything `
+      + `else that was already working:\n${notes.map(n => `- ${n}`).join('\n')}\n\n`
+    : ''
+  if (notes.length) steps.push(`Applying ${notes.length} reviewer note(s) to this generation`)
+  const r1 = await openai(prompts['resume_system'] || 'You are an executive resume writer.', revisionDirective + roleDirective(roleFocus) + base1, 16000, tGen) as any
   const c1: any = parseResumePackage(r1.choices?.[0]?.message?.content || '', mc, jobTitle, company)
   steps.push(`Agent Call 1 (resume) — parsed ${c1._parsedFieldCount} fields by title`)
   if (!c1._parsedFieldCount) warnings.push('Call 1 produced no recognisable ### sections — the package is MasterContext only')

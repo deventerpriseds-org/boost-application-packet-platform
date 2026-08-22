@@ -3531,3 +3531,61 @@ test('H:sent-is-terminal-and-written: a sent packet stays sent, and both send pa
   assert.ok(!/\bsent:\s*false\b/.test(PK),
     'the build response hardcodes `sent: false` again — it must derive from the recomputed status')
 })
+
+// H:changes-carries-a-reason — "Request changes" stored a STATUS AND NOTHING ELSE.
+//
+// The artifact moved to `changes`, the owner pressed Regenerate, and the pipeline re-ran with
+// BYTE-IDENTICAL inputs, because nothing recorded what the owner disliked. Measured 2026-08-22:
+// 39 packets, 0 with feedback — and `packet.feedback` has been a declared jsonb column since the
+// schema was written, read by nothing and written by nothing.
+//
+// Four properties, each independently able to make the feature a notepad instead of a fix:
+//  1. the note is CAPTURED on the way to `changes` (server side, not just prompted for in the UI);
+//  2. the client actually SENDS it — a prompt whose value is dropped is the worst version of this;
+//  3. generation CONSUMES it, prepended as input, and the Prompts table is NOT edited — the owner's
+//     standing constraint is that their prompts drive the draft;
+//  4. notes are resolved AFTER the package is stored, not on entry. Resolving first means a failed
+//     generation silently eats the request and the owner cannot tell it was never applied.
+test('H:changes-carries-a-reason: the note is stored, sent, applied, and retired only on success', () => {
+  const PK  = stripComments(readFileSync(new URL('../src/functions/tests/appPackets.ts', import.meta.url), 'utf8'))
+  const PIPE = stripComments(readFileSync(new URL('../src/functions/tests/pipeline.ts', import.meta.url), 'utf8'))
+  const API = stripComments(readFileSync(new URL('../../app/src/api.js', import.meta.url), 'utf8'))
+  const UI  = stripComments(readFileSync(new URL('../../app/src/screens/PacketBuilder.jsx', import.meta.url), 'utf8'))
+
+  assert.ok(/feedback\s*=\s*coalesce\(feedback/.test(PK),
+    'nothing appends to packet.feedback — "Request changes" is storing a status and no reason again')
+
+  assert.ok(/setArtifactStatus:\s*\(artifactId,\s*status,\s*note\)/.test(API),
+    'api.js setArtifactStatus dropped its `note` parameter, so the reason never leaves the browser')
+  assert.ok(/onSetStatus\(a,\s*'changes',\s*note/.test(UI),
+    'the Request-changes button no longer passes a note, so nothing is captured')
+
+  // Asserted AT THE CALL SITE, not as a bare word. The first written form of this checked only
+  // that `revisionNotes` appeared somewhere in the file — and it appears in the declaration and in
+  // the resolve block, so deleting it from the buildPackageForJD ARGUMENTS left the guard green
+  // while the rebuild went blind again. Caught by mutation M2.
+  const callAt = PK.indexOf('buildPackageForJD({')
+  assert.notEqual(callAt, -1, 'buildPackageForJD call moved; retarget this guard')
+  const callArgs = PK.slice(callAt, PK.indexOf('})', callAt) + 2)
+  assert.ok(/revisionNotes/.test(callArgs),
+    'buildPackageForJD is called WITHOUT revisionNotes — the reviewer note is captured and stored ' +
+    'but never reaches the model, so the rebuild is blind again')
+  assert.ok(/revisionNotes/.test(PIPE),
+    'pipeline.ts no longer accepts revisionNotes — the rebuild is blind again')
+  assert.ok(/revisionDirective\s*\+\s*roleDirective/.test(PIPE),
+    'the revision directive is not PREPENDED to the resolved user message the way roleDirective is')
+
+  // The owner's constraint: their prompts drive the draft. The directive is prepended INPUT; the
+  // stored prompt must still be read and used verbatim.
+  assert.ok(/prompts\['resume_user'\]/.test(PIPE),
+    "the resume_user prompt is no longer read verbatim — the Prompts table must not be edited or bypassed")
+
+  // Ordering: resolve must come after the package is stored, never before generation.
+  const gen = PK.indexOf('buildPackageForJD({')
+  const store = PK.indexOf('update packet set pkg_json')
+  const resolve = PK.search(/resolved:\s*true/)
+  assert.ok(gen !== -1 && store !== -1 && resolve !== -1, 'retarget: one of the three anchors moved')
+  assert.ok(resolve > store && store > gen,
+    'notes are marked resolved before the package is stored, so a failed generation silently eats ' +
+    'the reviewer request and the owner cannot tell it was never applied')
+})
