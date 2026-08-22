@@ -13,6 +13,12 @@ import { applyCorrectionPass } from './appCorrections'
 import { sourceText } from './appFacts'
 import { summariseBuild } from './packetBuild'
 import { approvalBlock } from './appChecks'
+// The evidence pass, called in-process rather than over HTTP — see resolveEvidenceForOpp. No cycle:
+// appPackets is not reachable from appRequirements (checked across all 24 modules it can reach).
+import { writeEvidence, rebuildComparison, ensureRequirementCols, ensureEvidenceTable } from './appRequirements'
+import { resolveOptionsFor } from './checkPrefs'
+import { openAiJson } from './openaiJson'
+
 
 const HEADERS = {
   'Content-Type': 'application/json',
@@ -638,6 +644,34 @@ export async function artifactSlides(req: HttpRequest, context: InvocationContex
 }
 
 const SELF_BASE = process.env.COACH_SELF_BASE || 'https://job-platform-api.azurewebsites.net/api'
+/**
+ * Resolve and store evidence for one opportunity, in-process.
+ *
+ * Mirrors what `evidenceResolve` does after its auth guard — same profile read, same options, same
+ * comparison rebuild — so the build path and the route cannot drift into two different answers.
+ * Errors are RETURNED rather than thrown: a build must not fail because QC could not run, but it
+ * must not report clean either, so the caller folds this into `warnings`.
+ */
+async function resolveEvidenceForOpp(client: any, oppId: string, owner: string): Promise<any> {
+  try {
+    await ensureRequirementCols(client)
+    await ensureEvidenceTable(client)
+    const profile = await sourceText()
+    if (!profile.records.length) {
+      // An unreadable profile is NOT proof the profile supports nothing, so nothing is written —
+      // the same refusal the route makes, for the same reason.
+      return { error: 'no profile record could be read, so no coverage claim can be evidenced' }
+    }
+    const opts = await resolveOptionsFor(client, owner)
+    const out = await writeEvidence(client, oppId, profile.records, opts, undefined,
+      opts.escalate === true ? openAiJson({ feature: 'evidence:escalate' }) : undefined)
+    await rebuildComparison(client, oppId, owner, profile.records)
+    return out
+  } catch (e: any) {
+    return { error: String(e?.message || e).slice(0, 200) }
+  }
+}
+
 async function selfPost(path: string, body: any): Promise<any> {
   try {
     const r = await fetch(`${SELF_BASE}/${path}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) })
@@ -689,7 +723,20 @@ export async function packetBuildAll(req: HttpRequest, context: InvocationContex
     // FAILURE IS NON-FATAL AND VISIBLE. `selfPost` swallows transport errors into `{error}`, and a
     // build must not fail because QC could not run — but it must not report clean either, so the
     // outcome joins `warnings` where `summariseBuild` already surfaces partial success.
-    const evidence = await selfPost(`app/opportunity/${oppId}/evidence?owner=${encodeURIComponent(owner)}`, {})
+    // IN-PROCESS, NOT OVER HTTP, and the first version of this line was a real defect rather than a
+    // style choice. It called the route through `selfPost`, which sends no Authorization header,
+    // while `evidenceResolve` requires a verified session — so every build logged "evidence resolve
+    // did not run: sign in required to modify this workspace" (run 32547019724) and the evidence
+    // pass never once ran on the build path. I closed `D:build-runs-no-qc` on an api-test dispatch
+    // that hit the route DIRECTLY with a minted token, which is a different path from the one the
+    // row was about; the row is reopened.
+    //
+    // Forwarding a token would work and is the wrong fix. This function already holds an
+    // authenticated `client` and the resolved `owner`, so the honest call is the function itself:
+    // no HTTP hop, no credential to mint or leak, and nothing added to the four-minute gateway
+    // budget that D35 is already losing. `requireWrite` guards the ROUTE because a route is
+    // reachable by anyone; this caller is already past that gate.
+    const evidence = await resolveEvidenceForOpp(client, oppId, owner)
     // PERSIST THE OUTCOME BEFORE RETURNING IT. The response below is routinely lost — `build-all`
     // runs ~3 minutes and the gateway cuts at 4 (D35, measured twice) — and `warnings` is the only
     // place the discarded-section list and the Call-2 parse failures have ever existed. Two open

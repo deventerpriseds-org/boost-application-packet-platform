@@ -1470,11 +1470,18 @@ test('H:draft-is-written-from-prompts-not-evidence: the resume text never reads 
   //
   // The count assertion is the half the first version lacked. Ordering alone would have missed a
   // duplicate placed AFTER the loop, which is the same waste with none of the wrongness to reveal it.
-  const calls = [...s.matchAll(/\/evidence\?owner=/g)]
+  // Anchored on the in-process CALL, not the HTTP string it used to be. The route version was a
+  // defect: `selfPost` sends no Authorization header and `evidenceResolve` requires a verified
+  // session, so the build path logged "sign in required to modify this workspace" and the evidence
+  // pass never ran (run 32547019724). The count and ordering invariants are unchanged.
+  const calls = [...s.matchAll(/await resolveEvidenceForOpp\(/g)]
   assert.equal(calls.length, 1,
     `appPackets makes ${calls.length} evidence calls per build — exactly one, after the artifacts exist`)
+  // And it must NOT have gone back to the unauthenticated route call.
+  assert.ok(!/selfPost\([^)]*\/evidence/.test(s),
+    'the evidence pass is back on selfPost, which sends no session and is refused by requireWrite')
   const buildLoop = s.indexOf('buildTemplatedArtifact(client, { ...a')
-  const evidenceCall = s.indexOf('/evidence?owner=')
+  const evidenceCall = s.indexOf('await resolveEvidenceForOpp(')
   assert.ok(buildLoop > 0 && evidenceCall > 0, 'the build loop or the evidence call moved')
   assert.ok(buildLoop < evidenceCall,
     'evidence is resolved BEFORE the artifacts are built — it must run after, on what was written')
