@@ -424,9 +424,13 @@ export default function PacketBuilder({ id, step }) {
         if (!s.done) { buildPoller.current = setTimeout(tick, 10000); return }
         setAllBusy(false)
         const built = (s.result?.artifacts || []).filter((x) => x.url).length
+        const warned = (s.result?.warnings || []).length
         // A FAILED job still carries its payload, so a partial build reports what it did write
-        // rather than only that it failed — three documents that exist are not nothing.
-        if (s.state === 'done') toast(`Built ${built} documents — nothing sent`)
+        // rather than only that it failed — three documents that exist are not nothing. And a build
+        // with warnings is not a failure: 42 warnings across four finished documents is an ordinary
+        // good outcome, so the count is surfaced beside the success rather than instead of it.
+        if (s.state === 'done') toast(warned ? `Built ${built} documents — ${warned} warnings, nothing sent`
+                                             : `Built ${built} documents — nothing sent`)
         else toast(built ? `Build failed after ${built} documents: ${s.error || 'unknown error'}`
                          : `Build failed: ${s.error || 'unknown error'}`)
         setBuildJob(null)

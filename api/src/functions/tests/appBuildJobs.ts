@@ -34,6 +34,7 @@ import { app, HttpRequest, HttpResponseInit, InvocationContext, Timer } from '@a
 import { resolveOwner, requireWrite, serverError } from './appSession'
 import { getPgClient } from './pgClient'
 import { runPacketBuild } from './appPackets'
+import { buildJobOutcome } from './packetBuild'
 import { enqueueBuild, claimNextBuild, finishBuild, abandonExhausted, getBuildJob } from './buildQueue'
 import { BUILD_QUEUE_NAME, decodeBuildSignal, sendBuildSignal } from './buildSignal'
 
@@ -129,8 +130,12 @@ async function processOneBuild(client: any, context: InvocationContext): Promise
     const out = await runPacketBuild(client, job.opp_id, job.owner_email, { regen: job.regen },
       (m: string) => context.log(`buildWorker[${job.id}] ${m}`))
     payload = out.body
-    ok = out.status === 200 && out.body?.ok === true && !out.body?.error
-    if (!ok) error = out.body?.error || out.body?.note || 'the build did not complete cleanly'
+    // NOT `body.ok`. That flag means the build was CLEAN — no warnings at all — which almost no real
+    // packet is; the first build through this queue wrote all four documents and carried 42 warnings.
+    // Reading it as success recorded a good build as `failed`.
+    const outcome = buildJobOutcome(out.status, out.body)
+    ok = outcome.ok
+    if (!ok) error = outcome.error
   } catch (e) {
     error = e
     context.log(`buildWorker: ${job.id} threw ${String(e)}`)

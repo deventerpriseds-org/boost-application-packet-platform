@@ -69,3 +69,26 @@ test('H:signal-failure-does-not-fail-the-build: the job row is already committed
   assert.match(code, /if \(!conn\) \{ log\('build signal not sent/, 'a missing connection string throws')
   assert.equal(BUILD_QUEUE_NAME, 'packet-build-jobs')
 })
+
+test('H:warnings-are-not-a-failed-build: the queue must not relabel a good build', async () => {
+  // MEASURED, not hypothetical. The first build to run through the queue in production
+  // (job 945e28ed-8b2d-4b60-ab20-1ebd58d369a4, 2026-08-22 04:13) wrote all four documents in 196
+  // seconds and carried 42 warnings — an ordinary good outcome — and was recorded as `failed`,
+  // because the worker read `summariseBuild().ok`. That flag means CLEAN (no failures AND no
+  // warnings), which almost no real packet is. The owner would have been told their build failed
+  // while looking at four finished documents: precisely the lie this queue exists to stop telling,
+  // reintroduced one layer above it.
+  const { buildJobOutcome } = await import('../dist/functions/tests/packetBuild.js')
+  const real = { ok: false, built: 4, failed: 0, warnings: new Array(42).fill('w'), note: 'Packet built with 42 warning(s) across 4 artifact(s). Nothing was sent.' }
+  assert.equal(buildJobOutcome(200, real).ok, true, 'a build with warnings was recorded as failed')
+  assert.equal(buildJobOutcome(200, real).error, null)
+
+  // What a failure actually is: an artifact that did not build, nothing built at all, an error, or
+  // a non-200. Each names what happened, because "it failed" is not something anyone can act on.
+  assert.equal(buildJobOutcome(200, { built: 3, failed: 1, note: '1 of 4 artifact(s) FAILED' }).ok, false)
+  assert.match(buildJobOutcome(200, { built: 3, failed: 1, note: '1 of 4 artifact(s) FAILED' }).error, /FAILED/)
+  assert.equal(buildJobOutcome(200, { built: 0, failed: 0 }).ok, false)
+  assert.equal(buildJobOutcome(200, { error: 'GOOGLE_REFRESH_TOKEN not set' }).ok, false)
+  assert.equal(buildJobOutcome(500, null).ok, false)
+  assert.match(buildJobOutcome(500, null).error, /HTTP 500/)
+})
