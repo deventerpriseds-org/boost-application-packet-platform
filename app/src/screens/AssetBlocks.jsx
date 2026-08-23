@@ -37,8 +37,8 @@ import {
   meterModel, reqsForRow, scopeSwaps, shapeOf, sharedSourceNote, statPct, wordCount,
 } from '../assetBlocks.js'
 import { HIGHLIGHT_CLASS } from '../highlight.js'
-import { fieldLabel } from '../assetGate.js'
-import { railChangeLog } from '../qcRail.js'
+import { checkLabel, fieldLabel } from '../assetGate.js'
+import { offendersByField, offendersForField, railChangeLog } from '../qcRail.js'
 import { CorrectionRow } from './QcRail.jsx'
 
 export { BLOCK_HOOKS }
@@ -91,20 +91,36 @@ export function useAssetProvenance(oppId, packetId) {
  * Fetched here rather than threaded down from PacketBuilder because the blocks panel is collapsible
  * and per-artifact - the resume and the compact resume are two artifacts with byte-identical merge
  * fields, and each needs its OWN change log or one would show the other's corrections.
+ *
+ * It also carries the FIELD-MARGIN findings out of the same payload rather than fetching it twice.
+ * `posting_wording_kept` belongs beside the sentence for the same reason a correction does - the
+ * prototype puts both in the margin - and it arrives on the response this hook already has. The
+ * grouping is done here, through `offendersByField`, so no component ever holds the raw result and
+ * grows its own idea of which field a finding names.
  */
 export function useArtifactCorrections(artifactId) {
-  const [rows, setRows] = useState(null)
+  const [state, setState] = useState(null)
   const [reload, setReload] = useState(0)
   useEffect(() => {
     let live = true
-    if (!artifactId) { setRows(null); return undefined }
-    setRows(null)
+    if (!artifactId) { setState(null); return undefined }
+    setState(null)
     api.artifactChecksResult(artifactId)
-      .then((result) => { if (live) setRows(railChangeLog(result).rows) })
-      .catch(() => { if (live) setRows(null) })
+      .then((result) => {
+        if (!live) return
+        setState({ log: railChangeLog(result), wording: offendersByField(result, 'posting_wording_kept') })
+      })
+      .catch(() => { if (live) setState(null) })
     return () => { live = false }
   }, [artifactId, reload])
-  return { rows, refresh: () => setReload((n) => n + 1) }
+  return {
+    rows: state ? state.log.rows : null,
+    // The SERVER'S measured number, not `rows.length`: `count` excludes rows the reader undid, and
+    // is null for every payload that was never measured. meterModel refuses to print the null.
+    correctedCount: state ? state.log.count : null,
+    wording: state ? state.wording : null,
+    refresh: () => setReload((n) => n + 1),
+  }
 }
 
 // Width of the card itself, not of the window: whether the margin sits beside the text or under it
@@ -206,10 +222,10 @@ function Stat({ label, n, d, sub }) {
  *   with the prototype's prettier one would be inventing a number, which is the one thing this
  *   screen exists to prevent.
  */
-function DistributionMeter({ rows, filled, unfilled, requirements, scopedSwaps, terms, label }) {
-  const { stats, notes } = meterModel({ rows, filled, unfilled, requirements, scopedSwaps, terms })
+function DistributionMeter({ rows, filled, unfilled, requirements, scopedSwaps, terms, label, corrected }) {
+  const { stats, notes, corrected: correctedCount } = meterModel({ rows, filled, unfilled, requirements, scopedSwaps, terms, corrected })
   const [open, setOpen] = useState(ASSET_ANSWERS_DEFAULT_OPEN)
-  if (!stats.length && !notes.length) return null
+  if (!stats.length && !notes.length && correctedCount == null) return null
   const toggle = () => setOpen((v) => !v)
 
   return (
@@ -225,6 +241,16 @@ function DistributionMeter({ rows, filled, unfilled, requirements, scopedSwaps, 
             {s.n}{s.d == null ? '' : ` of ${s.d}`} {s.label.toLowerCase()}
           </span>
         ))}
+        {/* "N corrected", green, on the collapsed row - the prototype's own summary token
+            (qc/assets.jsx:218). It stays visible when the meter is OPEN too, because unlike the
+            stats it has no expanded form to defer to: the corrections themselves are rendered in
+            the field margins below, not inside this box. */}
+        {correctedCount != null && (
+          <span className="px-small" data-qc={BLOCK_HOOKS.meterCorrected}
+            style={{ textTransform: 'none', fontWeight: 700, color: 'var(--proto-green)' }}>
+            {correctedCount} corrected
+          </span>
+        )}
         <span style={{ flex: 1 }} />
         <span className="px-link" style={{ fontSize: 11.5 }}>{open ? 'Hide' : 'Show'}</span>
       </div>
@@ -316,12 +342,21 @@ function BlockBody({ row, shape, swapsForList, artifactId, listOwners }) {
 }
 
 function AssetBlock({ row, reqs, swapsForList, wide, artifactId, listOwners, thresholds,
-  corrections = [], correctionBusy, setCorrectionBusy, onCorrectionsChanged }) {
+  corrections = [], wording = [], wordingExpected = '',
+  correctionBusy, setCorrectionBusy, onCorrectionsChanged }) {
   const [showBefore, setShowBefore] = useState(false)
   const [askOpen, setAskOpen] = useState(false)
   const [ask, setAsk] = useState('')
   const [askBusy, setAskBusy] = useState(false)
   const [askError, setAskError] = useState(null)
+  // The prototype's "Ask assistant" beside a kept phrase seeds the assistant with a reword request
+  // (qc/assets.jsx:139). Here it opens the field's OWN ask box with that sentence already typed -
+  // the same box, the same `api.aiEditArtifact(..., { section })` route. Not a second edit path,
+  // and nothing is sent until the reader presses Send, so the wording stays theirs to edit.
+  const seedAskReword = (phrase) => {
+    setAsk(`Reword "${phrase}" so it does not repeat the posting's wording.`)
+    setAskOpen(true)
+  }
   const shape = shapeOf(row)
   const isStatic = shape === 'static'
   const expect = expectationFor(row.merge_field)
@@ -490,6 +525,51 @@ function AssetBlock({ row, reqs, swapsForList, wide, artifactId, listOwners, thr
         </div>
       )}
 
+      {/* WORDING KEPT FROM THE POSTING - a judgement, in the margin, beside the sentence carrying
+          it. The prototype puts it here rather than on the QC tab for the reason the check's own
+          comment gives: a figure the profile cannot evidence is corrected FOR you, but only the
+          writer can say whether a phrase is the employer's sentence, the industry's standard term,
+          or their own words. So this list never blocks anything and offers no auto-fix - it names
+          the phrase, marks it `kept`, and hands over the one control that can change it.
+
+          The status word is a literal `kept` and NOT one of the gate words: `posting_wording_kept`
+          is a `warn`, and rendering "Needs a decision" here would put a phrase the writer may well
+          want to keep into the same vocabulary as a blocking finding.
+
+          The prototype also has a `Reword it` toggle. It is NOT built: in the prototype it flips
+          local state and nothing else, and there is no store behind a "I chose to reword this"
+          decision here. Shipping it would be a control that forgets - the "no dead UI" rule. */}
+      {wording.length > 0 && (
+        <div style={{ marginTop: 9 }} data-qc={BLOCK_HOOKS.fieldWordingKept} data-qc-n={wording.length}>
+          <div className="px-label" style={{ marginBottom: 4 }}>{checkLabel('posting_wording_kept')}</div>
+          {wording.map((phrase, i) => (
+            <div key={`${phrase}-${i}`} style={{ padding: '6px 0', borderTop: '1px solid var(--proto-rule-soft)' }}>
+              <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
+                <span style={{ fontSize: 11.5, fontWeight: 600, flex: 1, minWidth: 0 }}>{phrase}</span>
+                <span className="px-small" style={{ fontWeight: 700, color: 'var(--proto-ink2)' }}>kept</span>
+              </div>
+              {artifactId && !isStatic && (
+                <span className="px-link" role="button" tabIndex={0}
+                  data-qc={BLOCK_HOOKS.wordingAsk} style={{ fontSize: 11, marginTop: 3, display: 'inline-block' }}
+                  onClick={() => seedAskReword(phrase)}
+                  onKeyDown={(e) => {
+                    if (e.key !== 'Enter' && e.key !== ' ') return
+                    e.preventDefault()
+                    seedAskReword(phrase)
+                  }}>Ask for a reword</span>
+              )}
+            </div>
+          ))}
+          {/* The rule that put these here, in the checker's own words - so "why is this listed?"
+              is answered where it is asked. `expected` is carried from the row, never retyped. */}
+          {wordingExpected && (
+            <div className="px-small" style={{ textTransform: 'none', marginTop: 4, fontStyle: 'italic' }}>
+              {wordingExpected}
+            </div>
+          )}
+        </div>
+      )}
+
       {reqs.length > 0 && (
         <div style={{ marginTop: 9 }}>
           <div className="px-label" style={{ marginBottom: 4 }}>
@@ -557,7 +637,7 @@ export default function AssetBlocks({ artifact, provenance, fallback, defaultOpe
 
   // The change log, scoped per field into the margins below. One `busy` for the whole panel, not one
   // per row: two undos in flight against the same artifact would race the re-read that follows them.
-  const { rows: correctionRows, refresh: refreshCorrections } = useArtifactCorrections(artifact.id)
+  const { rows: correctionRows, correctedCount, wording, refresh: refreshCorrections } = useArtifactCorrections(artifact.id)
   // The OWNER'S check thresholds, so every field can state the contract the gate actually holds it
   // to. `searchPrefsGet().checks` is the same row Settings writes - one source, so changing 24 to 30
   // there changes what this screen promises.
@@ -651,6 +731,7 @@ export default function AssetBlocks({ artifact, provenance, fallback, defaultOpe
             requirements={provenance && provenance.requirements}
             scopedSwaps={scopedSwaps}
             terms={null}
+            corrected={correctedCount}
             label={ANSWERS_LABEL[artifact.type] || 'asset'}
           />
           {rows.map((r) => (
@@ -664,6 +745,8 @@ export default function AssetBlocks({ artifact, provenance, fallback, defaultOpe
               listOwners={listOwners}
               thresholds={thresholds}
               corrections={correctionsForField(correctionRows, r.merge_field)}
+              wording={offendersForField(wording, r.merge_field)}
+              wordingExpected={(wording && wording.expected) || ''}
               correctionBusy={correctionBusy}
               setCorrectionBusy={setCorrectionBusy}
               onCorrectionsChanged={refreshCorrections}

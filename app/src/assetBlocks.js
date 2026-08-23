@@ -46,6 +46,9 @@ export const BLOCK_HOOKS = {
   fieldSlot: 'blocks-field-slot',         // the raw merge field, kept beside the human name
   fieldTarget: 'blocks-field-target',     // the rule the field is held to, from the owner's thresholds
   fieldChangeLog: 'blocks-corrected-for-you', // the field's own "Corrected for you" list (P8.6 inline).
+  fieldWordingKept: 'blocks-wording-kept',    // "Wording kept from the posting", in the field's margin
+  wordingAsk: 'blocks-wording-ask',           // seeds the field's own ask box with a reword request
+  meterCorrected: 'blocks-answers-corrected', // "N corrected" kept on the COLLAPSED row
   // NOT named `corrections`: corrections.test.mjs forbids /\.corrections\b/ in any .jsx so no
   // component can read `result.corrections` instead of the selector, and BLOCK_HOOKS.corrections
   // would trip it on a name collision alone. The guard is right; the key gets the different name.
@@ -360,7 +363,8 @@ export const UNKNOWN_REQS_NOTE =
   'This posting has no requirement rows yet, so how much of it this asset answers is unknown - not zero.'
 
 export function meterModel(input) {
-  const { rows = [], filled = 0, unfilled = 0, requirements = null, scopedSwaps = [], terms = null } = input || {}
+  const { rows = [], filled = 0, unfilled = 0, requirements = null, scopedSwaps = [], terms = null,
+    corrected = null } = input || {}
   const placedReqIds = new Set(rows.map((r) => r.requirement_id).filter(Boolean))
   const totalReqs = requirements && Number.isFinite(Number(requirements.total)) ? Number(requirements.total) : null
   const changed = scopedSwaps.filter((s) => s.action === 'swapped' || s.action === 'added')
@@ -391,7 +395,19 @@ export function meterModel(input) {
     notes.push(UNKNOWN_TERMS_NOTE)
   }
 
-  return { stats, notes }
+  // "N corrected" on the collapsed row (prototype `qc/assets.jsx:218`). NOT a stat: it has no
+  // denominator, so it never gets a bar - it is a count of figures already rewritten for you.
+  //
+  // NULL AND 0 ARE DIFFERENT AND THIS IS THE WHOLE REASON IT IS COMPUTED HERE. `correctionsState`
+  // returns `count: null` for every payload it could not measure - unchecked, absent, malformed -
+  // and rendering that as "0 corrected" is the reviewer's "0 disagreements" bug: a measurement
+  // reported that was never taken. Only a finite number reaches the caller; anything else is null
+  // and the row shows nothing. 0 is a real, measured answer and is also not shown, because the
+  // prototype does not show it and "nothing was corrected" is not news beside the counts.
+  const n = Number(corrected)
+  const correctedCount = corrected != null && Number.isFinite(n) && n > 0 ? n : null
+
+  return { stats, notes, corrected: correctedCount }
 }
 
 /** Percent for a stat's bar. Never divides by zero — a stat with d <= 0 never reaches the meter. */

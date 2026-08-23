@@ -2927,3 +2927,58 @@ Deployed: `89bf2dc` severity labels · `9f4baf1` change-log wording + video tria
 | 7 | Re-capture against a populated packet | `compare-ui.mjs` | Register overstates; measure before trusting the next number. |
 
 **Batched verifier not yet run** — owed at this phase boundary per the tiering rule.
+
+---
+
+#### 2026-08-23 (cont.) — resume triage rows 3 and 4 built (tier 2)
+
+Owner redirect that resumed this lane, verbatim: *"it's not n8n your wrong. we'll deal with this
+once we have the UI matching the he prototype"* — the digest-source hunt and the `jd_text` →
+`jd_summary` / `jd_real` → `jd_raw` renames are DEFERRED by the owner, not dropped.
+
+**Built** (`app/src/qcRail.js`, `assetGate.js`, `assetBlocks.js`, `screens/AssetBlocks.jsx`):
+
+- **`Wording kept from the posting` in the field margin** (resume triage #3). `checks.ts:425-434`
+  already emitted `posting_wording_kept` as a `warn` with field-prefixed offenders; nothing rendered
+  them. New `offendersByField(result, checkKey)` groups any check's offenders by merge field through
+  the EXISTING `sectionIdForOffender`, so the margin and the QC tab cannot disagree about which
+  field a finding belongs to. `CHECK_LABEL` gained the prototype's own heading — it degraded to
+  "posting wording kept", which reads as an accusation for a judgement call the writer owns.
+- **Per-phrase `kept` + `Ask for a reword`.** The reword control seeds the field's OWN ask box with
+  the request; it does not add a second edit path (guard asserts exactly one `api.aiEditArtifact`
+  call in the screen). The prototype's `Reword it` toggle is deliberately NOT built — in the
+  prototype it flips local state and nothing else, and there is no store behind a "I chose to
+  reword this" decision, so shipping it would be a control that forgets ("no dead UI").
+- **`N corrected` on the meter row** (resume triage #4), from `correctionsState().count` — the
+  server's measured number, which excludes rows the reader undid. `rows.length` would keep counting
+  an undone correction.
+
+**Guards, all six mutation-proved** (`test/qcRail.test.mjs`, `test/assetBlocks.test.mjs`):
+`H:wording-phrase-survives-whole`, `H:wording-absent-row-is-not-an-empty-one`,
+`H:wording-kept-is-rendered-in-the-margin`, `H:wording-ask-reuses-the-field-edit-path`,
+`H:corrected-count-never-invents-zero`, `H:corrected-count-comes-from-the-server`.
+
+**Two mutations initially did NOT fail, and both were real findings about the guards:**
+1. Replacing the by-name prefix strip with `slice(indexOf(':') + 1)` is **behaviourally equivalent**
+   on every offender `checks.ts` emits — a merge-field name contains no colon, so the prefix colon
+   IS the first colon. The test now says so explicitly rather than claiming a proof it does not
+   have, and a second case (`company_in_body`'s un-prefixed `absent from @CoverLetterBody: …`) was
+   added, which does discriminate and does fail the mutation.
+2. Asserting the `data-qc` hook exists proved the markup EXISTS, not that it is REACHABLE — it
+   passed with the block rewritten to `{false && wording.length > 0 && (`. The render condition is
+   now pinned to the prop, the same shape the packet-gate guard already uses.
+
+**Also loosened one pre-existing guard, deliberately.** `H:corrections-render-beside-the-field`
+pinned `import { railChangeLog }` as the SOLE import from `qcRail.js`, so importing another selector
+from the same module — exactly what the rule wants — failed it. It now matches the name inside the
+brace. The invariant (where `railChangeLog` comes from) is unchanged.
+
+`./scripts/check.sh app` green: 92 assertions across both files, build clean, no smart-quote hits.
+
+**Still open on the resume step:** `ReqChip` legend (#4 above), the asset-level `Ask for a change`
+(triage #5), and the **owner call on `M/D/N` vs `M/N/R` vs `MH/NTH/RESP`** (#5 above) — `R` is
+live, the prototype says `D`, and nothing should rename it without the owner. Batched verifier
+still owed at the phase boundary.
+
+**NOT verified live.** These are rendered-locally changes only; nothing has been merged to `main`
+or deployed, and no live capture has been taken.

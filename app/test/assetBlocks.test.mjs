@@ -427,7 +427,12 @@ test('collapsing the header hides the asset BODY, not just its label', () => {
 test('H:corrections-render-beside-the-field: the field margin renders the shared row from the selector', () => {
   const src = readFileSync(new URL('../src/screens/AssetBlocks.jsx', import.meta.url).pathname, 'utf8')
 
-  assert.match(src, /import\s*\{\s*railChangeLog\s*\}\s*from\s*['"]\.\.\/qcRail\.js['"]/,
+  // The invariant is WHERE `railChangeLog` comes from, not that it is the only thing imported from
+  // there. The original regex pinned the whole brace, so adding `offendersByField` alongside it -
+  // another selector from the same module, which is exactly what this rule wants - failed the test.
+  // A guard that fires on the behaviour it is asking for is the cry-wolf failure hardening rule 2
+  // forbids, so it now matches the NAME inside the import rather than the brace's exact contents.
+  assert.match(src, /import\s*\{[^}]*\brailChangeLog\b[^}]*\}\s*from\s*['"]\.\.\/qcRail\.js['"]/,
     'the inline log must come from the rail selector, not from a second derivation')
   assert.match(src, /import\s*\{\s*CorrectionRow\s*\}\s*from\s*['"]\.\/QcRail\.jsx['"]/,
     'the inline row must BE the QC row - two renderings of one correction is the bug')
@@ -774,4 +779,36 @@ test('H:click-targets-are-controls: an onClick span carries a role and a keyboar
   // A guard that inspected nothing would pass silently - that is the vacuous-green failure this
   // repo already shipped once. Assert it actually found the elements it exists to police.
   assert.ok(checked >= 5, 'expected at least 5 clickable spans across the three screens, saw ' + checked)
+})
+
+test('H:corrected-count-never-invents-zero: an unmeasured change log prints no number', () => {
+  // `correctionsState` returns `count: null` for every payload it could not measure - unchecked,
+  // absent, malformed. Rendering that as "0 corrected" is the reviewer's "0 disagreements" bug:
+  // a measurement reported that was never taken, and the reader cannot tell it from a real zero.
+  const base = { rows: [], filled: 1, unfilled: 0, requirements: { total: 2 }, scopedSwaps: [] }
+
+  assert.equal(meterModel({ ...base, corrected: null }).corrected, null, 'null is not a count')
+  assert.equal(meterModel({ ...base }).corrected, null, 'a caller that passes nothing measured nothing')
+  assert.equal(meterModel({ ...base, corrected: undefined }).corrected, null)
+  // Not a number is not a number, however it arrives.
+  assert.equal(meterModel({ ...base, corrected: NaN }).corrected, null)
+  assert.equal(meterModel({ ...base, corrected: 'four' }).corrected, null)
+
+  // A measured zero is real, and still shows nothing: the prototype does not print it, and
+  // "nothing was corrected" is not news beside the counts. It must not print "0" either.
+  assert.equal(meterModel({ ...base, corrected: 0 }).corrected, null)
+
+  // A measured count passes through untouched.
+  assert.equal(meterModel({ ...base, corrected: 4 }).corrected, 4)
+})
+
+test('H:corrected-count-comes-from-the-server: not a re-count of the rows in the browser', () => {
+  const code = stripComments(BLOCKS_SRC)
+  // `count` excludes rows the reader undid; `rows.length` does not. A screen that counted the rows
+  // itself would keep showing an undone correction in its total.
+  assert.match(code, /correctedCount: state \? state\.log\.count : null/,
+    'the corrected count must be the server-measured `count`, not a length')
+  assert.ok(!/corrected=\{correctionRows\.length\}/.test(code), 'the count was re-derived in the view')
+  assert.match(code, /corrected=\{correctedCount\}/, 'the meter never receives the count')
+  assert.match(code, /data-qc=\{BLOCK_HOOKS\.meterCorrected\}/, 'the count is computed but never rendered')
 })

@@ -2821,3 +2821,47 @@ wording (`Change it` / `Review →` / `Corrected for you`).
 so you should check that before saying we can't connect"*. `ListConnectors` at session start,
 and again before ever saying the data is unreachable — a lapsed token is a 10-second re-auth
 the owner can do, not a platform limit and not a reason to build a runner detour.
+
+## UI/prototype alignment — resume step, "Wording kept" + "N corrected" (2026-08-23)
+
+**Status: built and rendered locally on `claude/session-handoff-setup-ctozd3`. NOT merged, NOT
+deployed, NOT confirmed live.** Owner redirect that set this lane: *"it's not n8n your wrong. we'll
+deal with this once we have the UI matching the he prototype"* — the digest-source hunt and the
+`jd_text`/`jd_real` renames are DEFERRED by the owner, not dropped.
+
+**The pattern worth reusing.** `posting_wording_kept` had been emitted by `checks.ts:425-434` for a
+whole phase and rendered nowhere. Before building anything new, check whether the check ALREADY
+emits what the prototype shows — three of the six resume triage rows turned out to be display gaps,
+not data gaps. `docs/qc-evidence/triage/*.md` splits them exactly that way.
+
+**`offendersByField(result, checkKey)` (`qcRail.js`) is the general form.** It groups ONE check's
+offenders by the merge field each names, reusing `sectionIdForOffender` — the same parse the QC tab
+and the deep links use. The next check the design wants in a field margin needs no new grouping
+function. It returns `null` for a MISSING row and `{byField:{}}` for a row with no offenders; those
+mean "never checked" and "checked, clean" and must never collapse into one.
+
+**Prototype ground truth is `docs/qc-evidence/qc/assets.jsx`, and it is worth reading before
+guessing.** `:124` is the margin heading, `:218` is the `N corrected` token on the meter row. Two
+things in it are deliberately NOT built: the `Reword it` toggle (flips local state only; no store
+behind it here, so it would be a control that forgets) and its fabricated stat names.
+
+**Mutation-proving caught two inert guards in one session — the rule earns its keep.**
+1. A mutation can be BEHAVIOURALLY EQUIVALENT. Splitting a `Field: "phrase"` offender at the first
+   colon equals splitting by field name, because a merge-field name has no colon. Say so and add a
+   case that discriminates; do not claim the assertion is proven.
+2. A `data-qc` hook assertion proves markup EXISTS, not that it RENDERS — it passes on
+   `{false && cond && (`. Pin the render CONDITION, the way the packet-gate guard already does.
+
+**A guard can be too tight in the direction of the rule it enforces.**
+`H:corrections-render-beside-the-field` pinned `import { railChangeLog }` as the sole import from
+`qcRail.js`, so importing a SECOND selector from that same module — the behaviour the rule wants —
+failed the suite. Loosened to match the name inside the brace. When a guard fires on the thing it is
+asking for, the guard is what changes.
+
+**A `cat >>` append to this file reported success and did not land** (2026-08-23, same session).
+`echo ok && tail -3` printed the new text; `git diff --stat` a minute later showed the file
+unchanged and a `grep` for the heading returned 0. `.claude/actions.md`, edited through the Edit
+tool in the same stretch, survived. Cause not established — a container restore is the likeliest
+candidate and is exactly what CLAUDE.md warns about. **The lesson is the repo's own "verify that an
+edit applied" rule, applied to appends too: after writing to a large file, `grep` for the new
+heading before moving on.** Prefer an anchored Edit over `cat >>` for these two files.

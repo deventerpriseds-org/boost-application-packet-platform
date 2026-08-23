@@ -134,6 +134,10 @@ export const CHECK_LABEL = {
   changes_cited: 'Every change cites the posting',
   omission_list: 'Nothing you asked to omit appears',
   template_reach: 'Requirements no block can carry',
+  // The prototype's own heading for this finding, read off `docs/qc-evidence/qc/assets.jsx:124`.
+  // Without an entry it degraded to "posting wording kept", which reads as an accusation; the
+  // design's wording says what it is - wording the ad used that your draft kept, for you to judge.
+  posting_wording_kept: 'Wording kept from the posting',
   facts_settled: 'Facts you confirmed are used',
   facts_needed: 'Facts still needed',
   fact_shortfall: 'A confirmed fact falls short',

@@ -454,6 +454,48 @@ export function countLink(artifactId, row) {
 }
 
 /**
+ * ONE check's offenders, grouped by the merge field each one names, with the field prefix removed.
+ *
+ * Written for `posting_wording_kept` - the prototype puts that finding in the FIELD'S MARGIN
+ * (`docs/qc-evidence/qc/assets.jsx:124`, "Wording kept from the posting"), beside the sentence the
+ * phrase is in, because it is a judgement the writer makes about their own words. But it is
+ * deliberately keyed on `checkKey` rather than hardcoding that one check: every offender in
+ * checks.ts that attributes a defect to a field uses the same `Field: rest` shape, so the next
+ * check the design wants in a margin needs no second grouping function.
+ *
+ * SPLIT ON THE FIELD NAME, never on the first colon. `posting_wording_kept` offenders are
+ * `` `${field}: "${phrase}"` `` and a kept phrase can itself contain a colon - splitting on
+ * indexOf(':') would silently truncate the phrase the reader is being asked to judge. Resolution
+ * goes through `sectionIdForOffender` for the same reason `offenderLinks` does: one parse, so the
+ * margin and the QC tab can never disagree about which field a finding belongs to.
+ *
+ * Returns null when the payload has no such row - which is NOT the same as a row with no offenders
+ * (a pass), and the caller must be able to tell them apart.
+ */
+export function offendersByField(result, checkKey) {
+  const row = allRows(result).find((r) => r && r.check_key === checkKey)
+  if (!row) return null
+  const byField = {}
+  for (const o of arr(row.offenders)) {
+    const s = String(o)
+    const field = sectionIdForOffender(checkKey, s)
+    if (!field) continue
+    let text = s.startsWith(field + ':') ? s.slice(field.length + 1).trim() : s.trim()
+    // checks.ts quotes the phrase; the margin renders it as the field's own words, so the quotes
+    // would read as part of it. Stripped only when they wrap the WHOLE value.
+    if (text.length > 1 && text.startsWith('"') && text.endsWith('"')) text = text.slice(1, -1)
+    ;(byField[field] || (byField[field] = [])).push(text)
+  }
+  return { row, byField, state: row.state, expected: row.expected || '' }
+}
+
+/** The offenders of one grouped check that belong to one field. [] when there are none. */
+export function offendersForField(grouped, mergeField) {
+  if (!grouped || !mergeField) return []
+  return grouped.byField[mergeField] || []
+}
+
+/**
  * The findings on one asset that name a given requirement.
  *
  * The offender prefix is read through offenderSeq() - the SAME parse the coverage cards use. A

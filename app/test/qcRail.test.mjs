@@ -16,6 +16,7 @@ import {
   railVerdict, sectionIdForOffender, inertReason, offenderLinks, countLink, MERGE_FIELDS,
   coverageCards, requirementState, openSeqs, offenderSeq, qcStepState, qcStepDone, packetGate,
   loopsModel, rowsForRequirement, swapsForRequirement, pctWidth, packetReadiness,
+  offendersByField, offendersForField,
 } from '../src/qcRail.js'
 
 const SRC = new URL('../src/', import.meta.url)
@@ -792,4 +793,114 @@ test('H:stored-ready-vs-computed-gate: a claim the checks contradict is REPORTED
 
   const pb = readSrc('screens/PacketBuilder.jsx').replace(/\/\*[\s\S]*?\*\//g, '')
   assert.match(pb, /readiness\.contradiction && \(/, 'the contradiction is computed but never rendered')
+})
+
+// ── the field margin: "Wording kept from the posting" ────────────────────────────────────────────
+//
+// checks.ts:425-434 emits `posting_wording_kept` with offenders shaped `Field: "phrase"`. The
+// prototype (docs/qc-evidence/qc/assets.jsx:124) renders them in the FIELD'S margin, not on the QC
+// tab, because keeping a phrase is a judgement the writer makes beside their own sentence.
+
+const WORDING_RESULT = (offenders) => ({
+  gate: 'warn',
+  attention: 1,
+  results: [{
+    check_key: 'posting_wording_kept',
+    state: 'warn',
+    engine: 'deterministic',
+    expected: "no generated field repeats a run of the posting's wording",
+    offenders,
+  }],
+})
+
+test('H:wording-phrase-survives-whole: the phrase reaches the margin exactly as the check found it', () => {
+  // WHAT THIS DOES AND DOES NOT PROVE, stated because the mutation proof said so. Replacing the
+  // by-name strip with `slice(indexOf(':') + 1)` is BEHAVIOURALLY EQUIVALENT on every offender
+  // checks.ts actually emits: the prefix colon IS the first colon, because a merge-field name
+  // contains none. This test does not fail on that mutation and is not claimed to. It pins the
+  // OUTPUT instead - the phrase arrives whole, colons and all, with the quoting removed - which is
+  // the property the margin depends on. The implementation keeps the by-name form anyway because
+  // it is the one that stays correct if an offender is ever attributed without the prefix
+  // (`company_in_body` writes `absent from @CoverLetterBody`), where the colon form would cut into
+  // a string that has no prefix to cut.
+  const g = offendersByField(WORDING_RESULT([
+    'ResumeSummary: "Note: we ship weekly"',
+    'SkillsBullets1: "safety-critical systems"',
+  ]), 'posting_wording_kept')
+
+  assert.deepEqual(g.byField.ResumeSummary, ['Note: we ship weekly'],
+    'the phrase did not survive the prefix strip intact')
+  // The by-name strip is the code that runs, and an offender with NO prefix must be left whole
+  // rather than cut at whatever colon it happens to contain. This half DOES discriminate.
+  const noPrefix = offendersByField({
+    gate: 'warn', attention: 1,
+    results: [{ check_key: 'company_in_body', state: 'warn', engine: 'deterministic', expected: '',
+      offenders: ['absent from @CoverLetterBody: checked the whole body'] }],
+  }, 'company_in_body')
+  assert.deepEqual(noPrefix.byField['@CoverLetterBody'], ['absent from @CoverLetterBody: checked the whole body'],
+    'an offender that does not start with `Field:` must not be cut at a colon inside it')
+  assert.deepEqual(g.byField.SkillsBullets1, ['safety-critical systems'])
+  // The wrapping quotes checks.ts adds are not part of the phrase.
+  assert.ok(!g.byField.ResumeSummary[0].includes('"'))
+  // The rule that listed them travels with them, so the margin never retypes it.
+  assert.match(g.expected, /repeats a run of the posting/)
+})
+
+test('H:wording-absent-row-is-not-an-empty-one: null and [] mean different things', () => {
+  // A payload with no `posting_wording_kept` row (the check never ran) must not look like a row
+  // with no offenders (it ran and found nothing). The first is unknown; the second is a pass.
+  assert.equal(offendersByField({ gate: 'pass', attention: 0, results: [] }, 'posting_wording_kept'), null)
+
+  const clean = offendersByField(WORDING_RESULT([]), 'posting_wording_kept')
+  assert.notEqual(clean, null)
+  assert.deepEqual(clean.byField, {})
+
+  // An offender that names no merge field is DROPPED from every field rather than attached to one -
+  // the same refusal `offenderLinks` makes. A reader sent to a field the phrase is not in would be
+  // asked to judge a sentence that does not contain it.
+  const vague = offendersByField(WORDING_RESULT(['"quarterly business review"']), 'posting_wording_kept')
+  assert.deepEqual(vague.byField, {})
+
+  assert.deepEqual(offendersForField(null, 'ResumeSummary'), [])
+  assert.deepEqual(offendersForField(clean, 'ResumeSummary'), [])
+})
+
+test('H:wording-kept-is-rendered-in-the-margin: the selector is wired, not merely exported', () => {
+  const src = stripComments(readSrc('screens/AssetBlocks.jsx'))
+  assert.match(src, /offendersForField\(wording, r\.merge_field\)/,
+    'the field margin never receives the kept phrases')
+  assert.match(src, /data-qc=\{BLOCK_HOOKS\.fieldWordingKept\}/,
+    'the margin block is not rendered')
+  // REACHABILITY, not just presence. The hook assertion above passes on `{false && wording.length
+  // > 0 && (` - markup that exists and can never render, which is the "computed but never shown"
+  // failure this file already guards for the packet gate. The condition is pinned to the prop.
+  assert.match(src, /\{wording\.length > 0 && \(/,
+    'the kept list is gated on something other than the phrases it was given')
+  assert.match(src, /checkLabel\('posting_wording_kept'\)/,
+    'the heading must come from CHECK_LABEL, not a second literal in the .jsx')
+
+  // `kept` is a plain status word and must NOT be one of the gate words: this check is a warn that
+  // can never block, and borrowing "Needs a decision" would rank a phrase the writer may want to
+  // keep alongside a blocker.
+  assert.match(src, />kept</, 'the per-phrase status word is missing')
+  const marginBlock = src.slice(src.indexOf('BLOCK_HOOKS.fieldWordingKept'), src.indexOf('Posting line answered'))
+  for (const gateWord of ['Blocked', 'Needs a decision', 'Fix before approval']) {
+    assert.ok(!marginBlock.includes(gateWord), `the kept list must not use the gate word "${gateWord}"`)
+  }
+})
+
+test('H:wording-ask-reuses-the-field-edit-path: no second route for a reword', () => {
+  const src = stripComments(readSrc('screens/AssetBlocks.jsx'))
+  // The reword control opens the field's OWN ask box. There is exactly one call to the edit route
+  // in this screen; a second would be a parallel edit path, which the ask box already covers.
+  assert.equal((src.match(/api\.aiEditArtifact\(/g) || []).length, 1,
+    'a second edit path was added instead of reusing the field ask box')
+  assert.match(src, /seedAskReword/, 'the reword control is not wired to the ask box')
+  // Keyboard-reachable, like every other span-as-control on this screen.
+  const at = src.indexOf('BLOCK_HOOKS.wordingAsk')
+  assert.ok(at > 0, 'the reword control has no test hook')
+  const askLink = src.slice(at - 200, at + 400)
+  assert.match(askLink, /role="button"/)
+  assert.match(askLink, /tabIndex=\{0\}/)
+  assert.match(askLink, /onKeyDown=/)
 })
