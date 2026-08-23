@@ -422,3 +422,30 @@ test('H:change-log-headline-matches-prototype: the change log is headed in the p
   assert.equal(CHANGE_LOG_HEADLINE, m[1].trim(),
     'the app heads its change log differently from the prototype')
 })
+
+test('H:correction-controls-use-prototype-words: the change-log row speaks the design language', () => {
+  // The app had all three affordances already WIRED and named differently:
+  //   'Suggest something different' (prototype: 'Change it')
+  //   'Open <fieldName>'            (prototype: 'Review →')
+  //   'Corrected'                   (prototype: 'Corrected for you')
+  // Tests bind to the data-qc hooks, not these strings, so the rename is safe - and this guard is
+  // what stops it silently drifting back. Expected strings are READ from the prototype.
+  const src = readFileSync(new URL('../src/screens/QcRail.jsx', import.meta.url), 'utf8')
+  const stripped = src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')
+
+  for (const m of PROTO_EVIDENCE.matchAll(/>(Change it|Review →)</g)) {
+    assert.ok(stripped.includes('>' + m[1] + '<'),
+      'the prototype ships a "' + m[1] + '" control and the change-log row does not use those words')
+  }
+  assert.equal(SEV_LABEL.fixed, 'Corrected for you')
+  assert.match(stripped, /row\.undone \? 'Undone' : SEV_LABEL\.fixed/,
+    'the corrected state must read its word from SEV_LABEL, not restate it')
+
+  // The rename must not have cost the reader the destination: the field tag still renders.
+  assert.match(stripped, /\{row\.merge_field\}<\/span>/,
+    '"Review →" is only honest while the field name is still on the row')
+
+  for (const gone of ['Suggest something different', 'Open {row.fieldName']) {
+    assert.ok(!stripped.includes(gone), 'stale pre-prototype wording is back: ' + gone)
+  }
+})

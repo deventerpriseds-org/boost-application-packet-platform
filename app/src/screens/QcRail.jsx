@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api } from '../api.js'
 import { Pill, toneColor } from '../shell.jsx'
 import AssetGateDrawer from './AssetGateDrawer.jsx'
-import { assetLabel, checkLabel, fieldLabel, severityMeta, fmtWhen } from '../assetGate.js'
+import { assetLabel, checkLabel, fieldLabel, severityMeta, SEV_LABEL, fmtWhen } from '../assetGate.js'
 import {
   QC_HOOKS, RAIL_TABS, railGate, railGateMeta, railAttention, railCounts, railTotals, railBody,
   railHeadline, verdictLine, railVerdict, engineRows, countLink, coverageCards,
@@ -519,13 +519,16 @@ export function CorrectionRow({ row, artifactId, onOpen, onUndid, busy, setBusy,
             themes, and the colour is a RULE rather than the text - so the two states are told apart
             by their word first and their colour second, which is also the only way a reader who
             cannot see the difference gets the information at all. */}
-        <b style={{ fontSize: 12, letterSpacing: '.3px' }}>{row.undone ? 'Undone' : 'Corrected'}</b>
+        <b style={{ fontSize: 12, letterSpacing: '.3px' }}>{row.undone ? 'Undone' : SEV_LABEL.fixed}</b>
         <span data-qc-part="sentence" style={{ fontSize: 13, flex: 1, minWidth: 180, color: 'var(--proto-ink)' }}>{row.sentence}</span>
         {/* Rendered INSIDE the field it corrects (AssetBlocks' margin), the field name and the
             "Open <field>" button are both restatements of where the reader already is. The row is
             otherwise identical - same wording, same affordances, same module-owned model - because
             two renderings of one correction is exactly the divergence this component exists to
             prevent. */}
+        {/* The field name stays on the row as its own mono tag, which is why the button beside it
+            can be the prototype's bare 'Review →' without the reader losing WHERE it goes. Dropping
+            this tag and the button's words together is what would leave an unlabelled arrow. */}
         {!inField && (
           <span className="px-small" style={{ fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace' }}>{row.merge_field}</span>
         )}
@@ -533,7 +536,7 @@ export function CorrectionRow({ row, artifactId, onOpen, onUndid, busy, setBusy,
           <button type="button" className="px-btn" data-qc={QC_HOOKS.correctionOpen}
             data-qc-artifact={artifactId} data-qc-section={row.merge_field}
             onClick={() => onOpen(artifactId, row.merge_field)}
-            style={{ fontSize: 12, padding: '1px 8px' }}>Open {row.fieldName || row.merge_field}</button>
+            style={{ fontSize: 12, padding: '1px 8px' }}>Review →</button>
         )}
       </div>
       {/* The reason is the SUBSTANCE of a change log - R1's whole claim is that the user can see why
@@ -559,7 +562,7 @@ export function CorrectionRow({ row, artifactId, onOpen, onUndid, busy, setBusy,
           : <span className="px-small" data-qc={QC_HOOKS.correctionUndo} data-qc-available="0">{undo.reason}</span>}
         <button type="button" className="px-btn" data-qc={QC_HOOKS.correctionSuggest}
           data-qc-section={row.merge_field} onClick={() => setAskOpen((v) => !v)} disabled={!!busy}
-          style={{ fontSize: 12 }}>Suggest something different</button>
+          style={{ fontSize: 12 }}>Change it</button>
       </div>
       {askOpen && (
         <div style={{ marginTop: 6 }}>
