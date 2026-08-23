@@ -16,7 +16,7 @@ import {
   UNKNOWN_REQS_NOTE, UNKNOWN_TERMS_NOTE,
   countMismatchNote, deriveItems, draftSizeText, expectationFor, itemCountOf, joinLabels,
   latestRows, listBodyModel, listsOf, meterModel, normLabel, registerListOwners, reqsForRow,
-  scopeSwaps, shapeOf, sharedSourceNote, splitItems, statPct, wordCount,
+  scopeSwaps, shapeOf, sharedSourceNote, splitItems, statPct, wordCount, observedFor,
 } from '../src/assetBlocks.js'
 
 const src = (rel) => readFileSync(fileURLToPath(new URL(rel, import.meta.url)), 'utf8')
@@ -684,4 +684,50 @@ test('H:the-threshold-beats-the-field-name: ranges come from thresholds, not fro
   // And the name-derived expectation must not render beside a threshold target.
   assert.match(stripComments(BLOCKS_SRC), /\{expect && !target && \(/,
     'two different targets beside one measurement is worse than either alone')
+})
+
+test('H:observed-matches-rule-unit: the measurement is stated in the unit its rule tests', () => {
+  // The card printed "{count} lines - {words} words" for EVERY field regardless of its rule, so a
+  // skills list read "10 lines - 20 words - <= 24 chars each" - a word count beside a character
+  // limit. The two halves did not answer each other, so the line could not tell the reader whether
+  // the field passed. Seen on the live production screenshot 2026-08-23, not inferred.
+  const T = { skillMaxChars: 24, relevantMaxChars: 20, relevantOverLimitAllowance: 1,
+              expertiseWords: 5, coverWords: [250, 400] }
+  const row = (txt) => ({ after_text: txt, generated: true })
+
+  // Each pair must share a unit. Asserted as a PAIR because either string alone is unfalsifiable.
+  const pairs = [
+    ['SkillsBullets1', row('Enterprise Architecture\nSoftware Development'), /chars/],
+    ['RelevantBullets1', row('short\nthis one is definitely over twenty chars'), /chars/],
+    ['ExpertiseBullets', row('one two three four five\nsix seven eight nine ten'), /words/],
+    ['@CoverLetterBody', row('a b c d e'), /words/],
+  ]
+  for (const [field, r, unit] of pairs) {
+    const o = observedFor(field, r, T)
+    const t = targetFor(field, T)
+    assert.ok(o, 'no measurement for ' + field)
+    assert.match(o, unit, field + ' measured in the wrong unit: ' + o)
+    assert.match(t, unit, field + ' target in the wrong unit: ' + t)
+  }
+
+  // Real values, so a branch that returns a plausible-shaped wrong number is caught.
+  assert.equal(observedFor('SkillsBullets1', row('Enterprise Architecture\nSoftware Development'), T), 'longest 23 chars')
+  assert.equal(observedFor('RelevantBullets1', row('short\nthis one is definitely over twenty chars'), T), '1 over 20 chars')
+
+  // A NON-uniform expertise list must not claim uniformity - "6 x 5 words" asserts every phrase is
+  // 5 words, which is the exact thing the rule tests, so a false one would be worse than silence.
+  assert.equal(observedFor('ExpertiseBullets', row('one two three four five\nsix seven eight nine ten'), T), '2 × 5 words')
+  assert.equal(observedFor('ExpertiseBullets', row('one two three four five\nsix seven'), T), '2 phrases, 2–5 words')
+
+  // Null wherever targetFor is null - an unruled field keeps the old lines/words line.
+  for (const field of ['ResumeSummary', '@Company', 'NotAField']) {
+    assert.equal(observedFor(field, row('a b c'), T), null, field + ' invented a rule it has none for')
+    assert.equal(targetFor(field, T), null, field + ' - the pair must agree about having no rule')
+  }
+  assert.equal(observedFor('SkillsBullets1', row(''), T), null, 'no items means nothing to measure')
+  assert.equal(observedFor('SkillsBullets1', row('x'), {}), null, 'no threshold means no stated rule')
+
+  // ONE map behind both, or the pair drifts about which fields even have a band.
+  const src = readFileSync(new URL('../src/assetBlocks.js', import.meta.url), 'utf8')
+  assert.equal((src.match(/const RANGE = \{/g) || []).length, 1, 'RANGE is defined more than once')
 })

@@ -474,6 +474,17 @@ export function correctionsForField(rows, mergeField) {
  * Two sources for one number, and picking either without deciding which is authoritative would
  * invent certainty. Recorded for the owner instead; see .claude/actions.md.
  */
+// merge field -> the threshold key holding its [lo, hi] word band. Module scope because BOTH
+// targetFor() and observedFor() key off it; two copies of this map is exactly how the target and
+// the measurement beside it would come to disagree about which fields have a band at all.
+const RANGE = {
+  '@CoverLetterBody': 'coverWords',
+  '@AboutMe1_50words': 'aboutMe1Words',
+  '@AboutMe2_60words': 'aboutMe2Words',
+  '@ExecutiveProfile_55words': 'execProfileWords',
+  '@CoreAccomplishments_5blts_180words': 'coreAccomplishmentsWords',
+}
+
 export function targetFor(mergeField, thresholds) {
   const t = thresholds
   if (!t || !mergeField) return null
@@ -499,19 +510,60 @@ export function targetFor(mergeField, thresholds) {
   // `@CoreAccomplishments_5blts_180words`. The name's number is stale; the threshold is what the
   // gate tests and what the design displays. Reading the rendered prototype settled a question that
   // reading the code could not.
-  const RANGE = {
-    '@CoverLetterBody': 'coverWords',
-    '@AboutMe1_50words': 'aboutMe1Words',
-    '@AboutMe2_60words': 'aboutMe2Words',
-    '@ExecutiveProfile_55words': 'execProfileWords',
-    '@CoreAccomplishments_5blts_180words': 'coreAccomplishmentsWords',
-  }
   const key = RANGE[mergeField]
   if (key) {
     const r = t[key]
     if (!Array.isArray(r) || r.length !== 2) return null
     const lo = n(r[0]); const hi = n(r[1])
     return lo === null || hi === null ? null : `${lo}\u2013${hi} words`
+  }
+  return null
+}
+
+/**
+ * The MEASUREMENT, in the unit of the rule that governs it.
+ *
+ * The card used to print `{count} lines - {words} words` for every field, whatever the rule
+ * measured, so a skills list read "10 lines - 20 words - <= 24 chars each": a word count beside a
+ * character limit. The two halves did not answer each other, and a measurement that cannot be
+ * compared to its target tells the reader nothing about whether the field passes. Confirmed on the
+ * live screen 2026-08-23, not inferred - the same line is visible in the production screenshot.
+ *
+ * The prototype states both halves in one unit ("longest 22 chars - <= 24 chars each",
+ * "0 over 20 chars - max 1 item over 20 chars", "6 x 5 words - 6 phrases, exactly 5 words").
+ *
+ * BRANCHES MIRROR targetFor() EXACTLY, in the same order, keyed off the same field patterns. That
+ * is deliberate: these two strings are read side by side, so if one gains a branch and the other
+ * does not, the pair silently goes back to disagreeing. Returns null wherever targetFor() would -
+ * a measurement with no stated rule is the old behaviour and stays as it was.
+ */
+export function observedFor(mergeField, row, thresholds) {
+  const t = thresholds
+  if (!t || !mergeField || !row) return null
+  const n = (v) => (Number.isFinite(Number(v)) ? Number(v) : null)
+  const { items } = deriveItems(row)
+
+  if (/^SkillsBullets\d$/.test(mergeField)) {
+    if (n(t.skillMaxChars) === null || !items.length) return null
+    return `longest ${Math.max(...items.map((s) => String(s).trim().length))} chars`
+  }
+  if (/^RelevantBullets\d$/.test(mergeField)) {
+    const max = n(t.relevantMaxChars)
+    if (max === null || !items.length) return null
+    return `${items.filter((s) => String(s).trim().length > max).length} over ${max} chars`
+  }
+  if (mergeField === 'ExpertiseBullets') {
+    if (n(t.expertiseWords) === null || !items.length) return null
+    const each = items.map((s) => wordCount(s))
+    // `6 x 5 words` asserts every phrase is the same length. When they are NOT, saying so would be
+    // a false uniformity claim about the exact thing the rule tests, so the spread is stated instead.
+    const lo = Math.min(...each); const hi = Math.max(...each)
+    return lo === hi ? `${items.length} \u00d7 ${lo} words` : `${items.length} phrases, ${lo}\u2013${hi} words`
+  }
+  if (RANGE[mergeField]) {
+    const r = t[RANGE[mergeField]]
+    if (!Array.isArray(r) || r.length !== 2) return null
+    return `${wordCount(row.after_text)} words`
   }
   return null
 }

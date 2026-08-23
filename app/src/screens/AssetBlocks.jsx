@@ -30,7 +30,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { api } from '../api.js'
 import {
-  BLOCK_HOOKS, KIND_ABBR, KIND_WORD, METHOD_LABEL,
+  BLOCK_HOOKS, observedFor, KIND_ABBR, KIND_WORD, METHOD_LABEL,
   countMismatchNote, deriveItems, draftSizeText, expectationFor, latestRows, listBodyModel, listsOf,
   targetFor,
   ASSET_ANSWERS_DEFAULT_OPEN, correctionsForField,
@@ -326,6 +326,9 @@ function AssetBlock({ row, reqs, swapsForList, wide, artifactId, listOwners, thr
   const isStatic = shape === 'static'
   const expect = expectationFor(row.merge_field)
   const target = targetFor(row.merge_field, thresholds)
+  // Same inputs as `target`, deliberately: the two render side by side and must be about the
+  // same rule, so they are computed from one field and one threshold set on one line apart.
+  const observed = observedFor(row.merge_field, row, thresholds)
   // The ROW's count, not a re-split of its text. When the two disagree the card says so rather
   // than printing the browser's number over the one the checks were run against.
   const measured = deriveItems(row)
@@ -350,9 +353,14 @@ function AssetBlock({ row, reqs, swapsForList, wide, artifactId, listOwners, thr
     <div style={{ minWidth: 0 }}>
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 7, flexWrap: 'wrap' }}>
         <span style={{ fontSize: 13, fontWeight: 600 }}>{fieldLabel(row.merge_field)}</span>
+        {/* The measurement, in the RULE'S unit whenever there is a rule - observedFor() mirrors
+            targetFor() branch for branch. Without one this falls back to lines/words, which is all
+            an unruled field has. The old line printed lines/words for EVERY field, so a skills list
+            read "10 lines - 20 words - <= 24 chars each": a word count beside a character limit,
+            two halves that do not answer each other. Seen on the live screen, not inferred. */}
         {!isStatic && (
           <span className="px-small">
-            {count > 1 ? `${count} lines - ` : ''}{words} words
+            {observed || `${count > 1 ? `${count} lines - ` : ''}${words} words`}
           </span>
         )}
         {/* The CONTRACT beside the measurement, in the words of the rule that enforces it - the
