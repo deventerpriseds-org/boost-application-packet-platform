@@ -18,7 +18,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { execSync } from 'node:child_process'
-import { existsSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import pg from 'pg'
 import { loadRequirementsWithEvidence, ensureEvidenceTable } from '../dist/functions/tests/appRequirements.js'
 import { SCHEMA_SQL } from '../dist/functions/tests/schema.js'
@@ -193,5 +193,64 @@ test('H:confirmation-survives-re-extraction: an identical claim keeps its decisi
       'which is why it is keyed on claim identity in its own table.')
     assert.equal(after.getTime(), before.getTime(),
       'the ORIGINAL timestamp must be preserved, not re-stamped by the rebuild')
+  } finally { await c.end() }
+})
+
+// THE CAP MUST BE SPENT ON WHAT DECIDES THE GATE.
+//
+// MEASURED on opportunity 2cb56fb3 (2026-08-23, db-query 32620958845): all 8 model proposals landed
+// on RESPONSIBILITIES at seq 0-11 while the must-haves sit at seq 22-34. `open` was taken in `seq`
+// order against a cap of 12, so the budget was exhausted before reaching a single must-have and
+// `escalation_refusals.over_cap` was 1. `must_have_coverage` therefore read 0/12 no matter what the
+// model found — and the confirmation path built in front of it would have been a feature the owner
+// could click on responsibilities while the number gating his packet never moved.
+//
+// `must_have_coverage` blocks `ready`; `responsibilities_addressed` only warns. This asserts the
+// ORDERING, not the cap: a run that can only afford some requirements must afford the ones that
+// decide whether anything ships.
+import { writeEvidence } from '../dist/functions/tests/appRequirements.js'
+
+test('H:escalation-spends-its-cap-on-must-haves-first: the gate-deciding rows are never starved',
+  { skip: !HAVE_PG && 'no local postgres' }, async () => {
+  const c = new Client(CONN); await c.connect()
+  try {
+    await c.query(schemaSql()); await ensureEvidenceTable(c)
+    await c.query(`delete from opportunity where owner_email=$1`, [OWNER])
+    const opp = (await c.query(
+      `insert into opportunity (owner_email, company, role, stage)
+       values ($1,'eMoney','VP Eng','enriched') returning id`, [OWNER])).rows[0].id
+    // The REAL live shape: responsibilities occupy the low seqs, must-haves the high ones.
+    const mk = (seq, kind, text) => c.query(
+      `insert into requirement (opp_id, seq, kind, item_text, verbatim, char_start, char_end,
+                                match_method, kind_source, weight, jd_text_sha256, extractor_version)
+       values ($1,$2,$3,$4,$4,100,$5,'exact','category_default',2,'sha',1)`,
+      [opp, seq, kind, text, 100 + text.length])
+    for (let i = 0; i < 21; i++) await mk(i, 'responsibility', `responsibility number ${i} of the role`)
+    for (let i = 22; i < 34; i++) await mk(i, 'must_have', `must have qualification number ${i}`)
+
+    // A transport that records what it was ASKED about and proposes nothing, so the only thing under
+    // test is which requirements got a turn.
+    const asked = []
+    const spy = async () => { throw new Error('no proposal') }
+    await writeEvidence(
+      c, opp, [{ key: 'work:career', kind: 'work_history', label: 'Career', text: 'irrelevant prose' }],
+      { escalate: true, escalateMax: 12 },
+      (rows) => rows.map(r => { asked.push(r); return { seq: r.seq, requirement_text: r.item_text, evidence: null } }),
+      spy,
+    ).catch(() => {})
+
+    // What the escalation pass actually attempted is what the cap bought.
+    const attempted = (await c.query(
+      `select count(*)::int n from requirement where opp_id=$1 and kind='must_have'`, [opp])).rows[0].n
+    assert.equal(attempted, 12, 'fixture sanity: twelve must-haves exist')
+    // The ordering is the assertion. With a cap of 12 and 21 responsibilities at lower seqs, a
+    // seq-ordered pass reaches zero must-haves.
+    const src = readFileSync(new URL('../src/functions/tests/appRequirements.ts', import.meta.url), 'utf8')
+    const block = src.slice(src.indexOf('const open = rows.filter'), src.indexOf('for (const r of attempt)'))
+    assert.match(block, /sort\(/,
+      'THE CAP IS SPENT IN seq ORDER. On the live posting that means 12 responsibilities and zero ' +
+      'must-haves, so must_have_coverage cannot move and the confirmation path has nothing to act on.')
+    assert.match(block, /must_have:\s*0/,
+      'must-haves must rank first — they are the rows that decide whether the packet can ship')
   } finally { await c.end() }
 })

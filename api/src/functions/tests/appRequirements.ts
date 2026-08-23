@@ -171,7 +171,7 @@ export async function writeEvidence(
   escalated: number; proposed: number; escalation_refusals: Record<string, number>
 }> {
   const rows = (await client.query(
-    `select id, seq, verbatim, item_text from requirement where opp_id=$1 order by seq`, [oppId])).rows
+    `select id, seq, kind, verbatim, item_text from requirement where opp_id=$1 order by seq`, [oppId])).rows
   const resolved = resolver(rows, records, opts)
   const bySeq = new Map(resolved.map(r => [r.seq, r.evidence]))
   const byKey = new Map(records.map(r => [r.key, r]))
@@ -290,7 +290,26 @@ export async function writeEvidence(
     // Only rows the deterministic pass could not settle, and only up to the cap. `slice` before the
     // loop rather than a break inside it, so what was skipped is knowable rather than implicit.
     const open = rows.filter((r: any) => !bySeq.get(r.seq))
-    const attempt = open.slice(0, Math.max(0, cap))
+    /**
+     * SPEND THE CAP ON WHAT DECIDES THE GATE, and this is a defect fix rather than a preference.
+     *
+     * MEASURED on opportunity 2cb56fb3 (2026-08-23): all 8 proposals landed on RESPONSIBILITIES at
+     * seq 0-11, while the must-haves live at seq 22-34. `open` was taken in `seq` order and the cap
+     * is 12, so it was exhausted before reaching a single must-have — `escalation_refusals.over_cap`
+     * was 1, and `must_have_coverage` therefore read 0/12 no matter what. Building the confirmation
+     * path in front of that would have produced a feature the owner could click on responsibilities
+     * while the number that gates his packet never moved.
+     *
+     * `must_have_coverage` is the check that blocks `ready`; `responsibilities_addressed` only warns.
+     * So must-haves go first, then nice-to-haves, then responsibilities — and WITHIN each kind the
+     * original `seq` order is preserved, so the choice is a stable, explainable priority rather than
+     * a reshuffle. A stable sort is required for that: `Array.prototype.sort` has been stable since
+     * ES2019, so equal ranks keep their `seq` order.
+     */
+    const ESCALATION_RANK: Record<string, number> = { must_have: 0, nice_to_have: 1, responsibility: 2 }
+    const rank = (r: any) => ESCALATION_RANK[String(r?.kind)] ?? 3
+    const prioritised = [...open].sort((a, b) => rank(a) - rank(b))
+    const attempt = prioritised.slice(0, Math.max(0, cap))
     if (open.length > attempt.length) note('over_cap')
 
     for (const r of attempt) {
