@@ -70,9 +70,37 @@ mismatch silently blanks the setting).
 
 ## Live Database Access
 
-**You cannot reach the live Postgres DB or the Function App API directly from a
-Claude Code sandbox** — the egress proxy blocks `azurewebsites.net` and DB
-credentials are not available as env vars here. Use GitHub Actions instead.
+### READ THIS FIRST: there IS direct live-DB access, via a BROKERED MCP connector
+
+**`Boost_DB_Connector` is this app's live Postgres, reachable in ~1s per query with no
+runner.** `Azure_pg_mcp` is the same thing for the org's other DB (`RAG_AI_Agents`).
+Check with `ListConnectors` at session start and use them.
+
+**Why the paragraph below is only half true, and how it misled a whole session.** A
+*locally-spawned* client — `psql`, `az`, a stdio MCP — connects **from inside** the
+session and dies on the egress proxy. **A brokered/remote MCP runs OUTSIDE the session,
+on Anthropic's servers, so the proxy never sees it.** Same database, different transport,
+opposite outcome. The general rule (from the org `query-azure-pg-mcp` skill, proven
+2026-08-07): *a brokered/remote MCP bypasses session egress; a locally-run one does not.*
+
+**Two things to check before concluding you cannot reach the data — neither is a platform
+limit, both are one toggle:**
+- `enabledInChat: false` → the connector is authenticated but **off for this chat**. Ask
+  the owner to enable it in the chat's connector settings; its tools will not load otherwise.
+- A system reminder saying the server *"requires authentication"* → the OAuth session
+  lapsed. A CCR session cannot run the OAuth flow. **TELL THE OWNER** so they can re-auth.
+  Do not silently fall back to GitHub Actions and never mention it.
+
+*(2026-08-23: a session read the paragraph below, concluded the live data was unreachable,
+and built `fixture-refresh.yml` plus a chain of `db-query.yml` round-trips to haul data out
+through job logs — while `Azure_pg_mcp` sat `enabledInChat: true` and two system reminders
+named both connectors. The owner: "of course you can reach my data the agents have been
+doing so for days". GitHub Actions is the FALLBACK for when a connector is off or lapsed,
+not the default.)*
+
+**Without a connector**, you cannot reach the live Postgres DB or the Function App API
+directly from a Claude Code sandbox — the egress proxy blocks `azurewebsites.net` and DB
+credentials are not available as env vars here. Then, and only then, use GitHub Actions.
 
 > **But the sandbox DOES have a local PostgreSQL.** This distinction cost a
 > near-miss and is the reason for the section below. "Cannot reach the LIVE

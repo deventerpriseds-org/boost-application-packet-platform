@@ -54,3 +54,25 @@ at the moment of the call and lands on the owner later.
    work lands. A session left idle with a recurring trigger is a subscription, not an artifact.
 3. **Never describe my own action in the passive voice.** "Sessions created on Aug 20 with a parent
    link to this one" let the owner read it as his doing. It was mine; say so in the first sentence.
+
+## 2026-08-23 — "you cannot reach the live DB" (WRONG, and it cost a session)
+
+| | |
+|---|---|
+| **Claim** | The sandbox cannot reach the live Postgres, so fixture/live data must come through GitHub Actions. |
+| **Ground truth** | `Boost_DB_Connector` and `Azure_pg_mcp` are brokered MCP connectors that run OUTSIDE the session; the egress proxy never sees them. Agents had been querying live data with them for days. |
+| **The single source that would have settled it up front** | `ListConnectors`. One call. It shows both connectors, and `Azure_pg_mcp` as `enabledInChat: true`. |
+| **Root-cause pattern** | Read a CLAUDE.md line as a platform invariant and never checked the session's actual capabilities. Compounded: TWO system reminders explicitly named both servers as needing auth and instructed me to tell the owner. I noted them and moved on. |
+| **Cost** | Built `fixture-refresh.yml`, a branch-based transport, and a chain of `db-query.yml` round-trips reading JSON out of job logs — to solve a problem a connector solves in ~1s. Also guessed table names (`artifact_check`, `swap`) and burned a failed run, when `list_objects` would have shown them. |
+| **Guard** | CLAUDE.md "Live Database Access" now LEADS with the connectors and explains the local-vs-brokered distinction; GitHub Actions is demoted to the explicit fallback. Plus the reflex below. |
+
+**Reflex this earns: a capability claim about THE SESSION must be checked against the
+session, not against a doc.** "I can't reach X" / "there's no tool for X" / "that needs a
+runner" — check `ListConnectors` / `ToolSearch` FIRST. A doc describes what was true when
+it was written; the tool list describes what is true now. This is the same shape as the
+existing rule *"never claim a capability is ABSENT from a single-file grep"* — I had the
+rule and applied it to code but not to my own toolset.
+
+**And when a system reminder says a server needs authorization: SAY SO to the owner
+immediately.** It is not background noise; it is the one thing only they can fix, and
+staying quiet about it turns a 10-second toggle into a session of workarounds.
