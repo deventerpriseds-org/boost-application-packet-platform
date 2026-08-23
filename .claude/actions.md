@@ -2757,3 +2757,21 @@ CONFIRMED proposal only), PLUS the escalation-priority fix without which it was 
 **Open:** turn `chk_gate_advisory` OFF once the owner is shipping on merit. The confirm route needs
 a VERIFIED session, so confirmations must come from the UI — a service-principal workflow token
 cannot make them (by design; the audit row records who decided).
+
+## ACT — design package re-anchored to the as-built lineage doc (2026-08-23)
+
+Owner: "read both pages which gives you the layout and lineage once extracted and organized this all
+needs to be stored in the repo so that development is consistently anchored to it", then
+"the repo versions need to be updated as changes were made".
+
+**Done:** replaced `docs/qc-evidence/Evidence Model & QC Lineage.html` (first draft -> as-built, 121
+lines) and `Packet QC Prototype.html` (2-line light-theme meta). Verified byte-for-byte that nothing
+else in the package changed. Rewrote `IMPORT-NOTE.md` with the settled decisions, an explicit
+precedence rule (lineage doc > prototype > screenshots), and the divergence table.
+
+**Open, and now spec-grounded rather than inferred:**
+- `swap_decision.override_value` / `override_state` are unbuilt -> defect-register **C1 + C3**,
+  `BACKLOG.md` **P8.6**. This is the owner's "I have no mechanism to put back the item it displaced".
+- `app/src/screens/PacketBuilder.jsx:42` implements the **QC rail step the settled spec drops**.
+  Needs an owner decision: reconcile to the spec (evidence inline + one ATS Match modal), or keep
+  the step and record the deviation. NOT actioned unilaterally — it is a whole-screen change.

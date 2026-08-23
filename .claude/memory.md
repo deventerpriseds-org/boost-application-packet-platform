@@ -2682,3 +2682,34 @@ The evidence route returned `proposed: 8` and `verified: 8` while the gate it fe
 ### Still owed
 `chk_gate_advisory` is still ON. It was the bridge; coverage can now move on merit, so it should be
 turned OFF once the owner has confirmed enough proposals to ship without it.
+
+## Design package: the lineage doc was a FIRST DRAFT until 2026-08-23
+
+The owner re-supplied two HTML pages. Ground-truthed byte-for-byte: **only those two changed.** All
+47 PNGs, all six `qc/*.jsx`, `qc/data.js`, the four token/theme CSS files, `SPEC.md`, `BACKLOG.md`
+and `README.md` are identical to the 2026-08-19 import. `Packet QC Prototype.html` changed by 2
+lines (a light-theme meta). `Evidence Model & QC Lineage.html` changed by 121 lines — **first draft
+-> as-built**, and that one is substantive.
+
+**What the settled revision decides** (full detail in `docs/qc-evidence/IMPORT-NOTE.md`):
+- **The QC rail step is DROPPED** (§5a, §7). Evidence lives in the asset beside the line it
+  explains; the packet roll-up is the single **ATS Match** modal. The per-asset drawer goes too.
+- Ninth record **`correction`**, plus a new pipeline **step 2 auto-correct** before the rules engine.
+- **`swap_decision.override_value` + `override_state`** (suggested | reverted | custom) — the
+  swap-back control and an editable *ships* value.
+- Settled: a `warn` does NOT block approval (needs a recorded override); weights 50/30/20; bands 85/70.
+- Ordering: **"Done for you" before "Needs a decision"**; the flat Q1-Q16 list is a detail view.
+
+**PRECEDENCE RULE — this is the anchoring fix.** The prototype (`qc/packet.jsx:315`) and the
+screenshots (`INDEX.md` 28-36, 39-43) still depict the REJECTED design. They predate the decision.
+**Where the lineage doc disagrees with the prototype or the screenshots, the lineage doc wins.**
+
+**Two divergences, verified against this repo:**
+1. `app/src/screens/PacketBuilder.jsx:42` builds the QC rail step the spec drops. Not reconciled.
+2. `override_value` / `override_state` do **not exist** in `api/src` or `app/src`. This is the spec
+   basis for the owner's "put back the item it displaced" and for defect-register C1 + C3.
+   (`correction` DOES exist — `api/src/functions/tests/schema.ts:370` — and matches.)
+
+**Correction to my own earlier claim this session:** I said the repo had been working from a
+"partial spec". Wrong in the general case — the package was complete and in-repo since 2026-08-19.
+Exactly one document in it was stale, and it was the one that carries the architecture decisions.

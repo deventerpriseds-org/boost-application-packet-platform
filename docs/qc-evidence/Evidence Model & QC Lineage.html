@@ -3,6 +3,8 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light only">
+<style>:root{color-scheme:only light}html,body{background:#fff}</style>
 <title>Evidence model &amp; QC lineage</title>
 <link rel="stylesheet" href="_ds/compass-design-system-03277a8e-7275-4ccc-af18-f3a1dd3ffc61/tokens/fonts.css">
 <link rel="stylesheet" href="_ds/compass-design-system-03277a8e-7275-4ccc-af18-f3a1dd3ffc61/tokens/fig-tokens.css">
@@ -72,7 +74,7 @@ a{color:var(--text-brand)}a:hover{color:var(--brand-900)}
 <div class="wrap">
 
 <h1>Evidence model &amp; QC lineage</h1>
-<p class="lead">Step one of two. This document fixes <b>what evidence the pipeline must produce and persist</b> so the QC story can be shown rather than asserted. Once you sign off on §2 (the evidence model) and §4 (the score), I build the clickable prototype against the current repo screens — packet-builder rail step plus per-asset badges and drawer, as chosen.</p>
+<p class="lead">The evidence contract behind the packet builder, <b>as built</b>. §1–§2 fix what the pipeline must produce and persist; §3–§5 record how the prototype surfaces it after review. Sections marked <span class="tag t-vis">as built</span> match <code>Packet QC Prototype.html</code>; §7 lists the decisions that were open in the first draft and how they were settled.</p>
 
 <div class="note"><b>Grounding.</b> As-is behavior from <code>Zap 289877647 Workflow Baseline.html</code> (16 checks, Q1–Q16). Current UI from <code>app/src/screens/PacketBuilder.jsx</code> — a 6-step rail (<code>jd → resume → cover → portfolio → video → send</code>), one <code>atsScore</code> number, and <code>coveredKw</code>/<code>missingKw</code> chips in the right panel. That single number and two chip lists are the entire QC surface today. §1b reconciles the target model against what the repo already stores.</div>
 
@@ -133,10 +135,10 @@ a{color:var(--text-brand)}a:hover{color:var(--brand-900)}
 <p><b>Also reusable as-is:</b> the approval gate has a hook point already — <code>artifact.status</code> ('todo→drafting→review→changes→approved'), <code>stepDone()</code> in <code>PacketBuilder.jsx</code>, and <code>packet.status='ready'</code> when all artifacts are approved. The QC gate reads those, it does not replace them.</p>
 <div class="note"><b>Bug found while grepping.</b> <code>PacketBuilder.jsx</code> renders <code>p.missingKw</code> as the red "! missing" chips, but <code>packet</code> has only <code>covered_kw</code> — there is no <code>missing_kw</code> column and <code>appPackets.ts</code> does not return one. The gap chips are therefore always empty, and <code>jd-analysis</code> returns <code>keywords/mustHaves/gaps</code> to the caller without persisting them. So the one QC surface that exists today is half wired.</div>
 <h3>So how much of §2 do we still need?</h3>
-<p>Three of the eight records are substantially present but unstructured, five are net new. Weighted by effort the split is roughly: <b>structuring work</b> (parse <code>jd_table</code>/<code>jd_requirements</code> into <code>requirement</code> + <code>ats_term</code> rows, decompose the score) — no new extraction, no new prompts; <b>capture work</b> (persist candidates, swaps, insertions, check results) — the pipeline already computes all of this and discards it; <b>genuinely new</b> — the deterministic rules engine and the one blind-reviewer call. Nothing here requires re-architecting generation.</p>
+<p>Three of the nine records are substantially present but unstructured, six are net new. Weighted by effort the split is roughly: <b>structuring work</b> (parse <code>jd_table</code>/<code>jd_requirements</code> into <code>requirement</code> + <code>ats_term</code> rows, decompose the score) — no new extraction, no new prompts; <b>capture work</b> (persist candidates, swaps, insertions, check results) — the pipeline already computes all of this and discards it; <b>genuinely new</b> — the deterministic rules engine and the one blind-reviewer call. Nothing here requires re-architecting generation.</p>
 
 <h2>2. Target evidence model</h2>
-<p>Eight records. Everything the UI needs is derivable from these; nothing in the UI is allowed to be a claim without a row behind it. Ids are stable so a badge, a drawer row, and a posting highlight all address the same object.</p>
+<p>Nine records. Everything the UI needs is derivable from these; nothing in the UI is allowed to be a claim without a row behind it. Ids are stable so a badge, a modal row, and a posting highlight all address the same object.</p>
 
 <div class="ents">
 
@@ -178,7 +180,20 @@ a{color:var(--text-brand)}a:hover{color:var(--brand-900)}
 <div class="f"><b>verbatim_quote</b> — the posting text shown in the row</div>
 <div class="f"><b>confidence</b> — 0–1, from the reviewer</div>
 <div class="f"><b>rationale</b> — one sentence, must reference the quote</div>
-<div class="rel">This is the row your swap table renders. <b>No <code>requirement_id</code> ⇒ the swap fails Q5 and is flagged, not shown as justified.</b></div>
+<div class="f"><b>override_value</b> — the user's own wording, if they typed one <span class="tag t-vis">as built</span></div>
+<div class="f"><b>override_state</b> — suggested | reverted | custom <span class="tag t-vis">as built</span></div>
+<div class="rel">This is the row your swap table renders. <b>No <code>requirement_id</code> ⇒ the swap fails Q5 and is flagged, not shown as justified.</b> The user can revert to the original wording or type a third value; both are recorded here, not silently applied.</div>
+</div></div>
+
+<div class="ent"><div class="eh"><span class="nm">correction</span><span class="tag t-vis">as built</span></div><div class="eb">
+<div class="f"><b>id</b> · <b>artifact_id</b></div>
+<div class="f"><b>kind</b> — posting_figure | omit_list | markup_residue</div>
+<div class="f"><b>found</b> — the literal string from the draft, e.g. <code>$18M</code></div>
+<div class="f"><b>replaced_with</b> — e.g. <code>8-figure</code>, or the profile value</div>
+<div class="f"><b>source</b> — posting_verbatim | profile_field | rule</div>
+<div class="f"><b>applied</b> — true when auto-corrected before display</div>
+<div class="f"><b>undone_at</b> — set if the user reverts it</div>
+<div class="rel">Exact posting figures are a hard fail, so they are fixed before the draft is ever shown (<code>$18M</code> → <code>8-figure</code>, <code>60+</code> → <code>62</code> from the profile). This record is the undo trail in the margin and the "Done for you" list in QC.</div>
 </div></div>
 
 <div class="ent"><div class="eh"><span class="nm">insertion</span><span class="tag t-new">new</span></div><div class="eb">
@@ -197,7 +212,7 @@ a{color:var(--text-brand)}a:hover{color:var(--brand-900)}
 <div class="f"><b>state</b> — pass | warn | fail | not_applicable</div>
 <div class="f"><b>observed</b> / <b>expected</b> — e.g. <code>26</code> vs <code>≤24</code></div>
 <div class="f"><b>offenders[]</b> — the specific items that failed</div>
-<div class="rel">One row per check per asset. The badge is an aggregate of these; the drawer is a list of them.</div>
+<div class="rel">One row per check per asset. The badge is an aggregate of these; the ATS Match modal lists them.</div>
 </div></div>
 
 <div class="ent"><div class="eh"><span class="nm">review_verdict</span><span class="tag t-ai">reviewer</span></div><div class="eb">
@@ -225,18 +240,19 @@ a{color:var(--text-brand)}a:hover{color:var(--brand-900)}
 </div>
 
 <h2>3. Gate sequence — what happens when an asset is generated</h2>
-<p>Today: generate → status <code>review</code> → a human approves. Target: generate → deterministic rules → blind reviewer → aggregate → gate. The gate state is what the badge shows and what the rail step enforces.</p>
+<p>Today: generate → status <code>review</code> → a human approves. As built: generate → auto-correct → deterministic rules → blind reviewer → aggregate → gate. The gate state is what the badge shows and what the modal reports.</p>
 
 <div class="pipe">
 <div class="pnode"><div class="pn">step 1</div><h4>Generate draft</h4><p>Unchanged. Produces artifact content plus <code>skill_candidate</code> and <code>insertion</code> rows instead of only text.</p></div>
-<div class="pnode acc"><div class="pn">step 2 · deterministic</div><h4>Rules engine</h4><p>No model. Char limits (Q2, Q3), list counts (Q6), omit-list membership (Q1), AI-tell vocabulary and em-dash scan (Q7), word-count contracts (Q13), markup residue (Q8, Q9), empty template fields (Q14), whitespace (Q11). Emits <code>check_result</code> rows with offenders.</p></div>
-<div class="pnode ai"><div class="pn">step 3 · independent</div><h4>Blind reviewer</h4><p>Separate prompt, separate call, does <b>not</b> receive the generator's rationale. Gets: posting text, requirement rows, the finished asset. Returns a grade, per-swap agreement, and citations that must resolve to a <code>requirement_id</code>.</p></div>
-<div class="pnode acc"><div class="pn">step 4</div><h4>Aggregate</h4><p>Any <code>fail</code> ⇒ gate <b>fail</b>. No fails but any <code>warn</code> or reviewer disagreement ⇒ gate <b>warn</b>. Otherwise <b>pass</b>. Uncited swaps are always a fail, not a warn.</p></div>
-<div class="pnode"><div class="pn">step 5</div><h4>Score</h4><p>Compute <code>match_score</code> against the requirement set. Stored per generation so regenerations are comparable.</p></div>
-<div class="pnode"><div class="pn">step 6</div><h4>Gate the approval</h4><p>Approve stays disabled on a <b>fail</b>; a <b>warn</b> requires an explicit "approve with exceptions" that records who and why.</p></div>
+<div class="pnode acc"><div class="pn">step 2 · deterministic <span class="tag t-vis">as built</span></div><h4>Auto-correct</h4><p>Hard fails with exactly one right answer are fixed before display, not reported: exact posting figures scrubbed to a band or the profile's real number, omit-list items removed, markup residue stripped. Emits <code>correction</code> rows so every fix is reversible.</p></div>
+<div class="pnode acc"><div class="pn">step 3 · deterministic</div><h4>Rules engine</h4><p>No model. Char limits (Q2, Q3), list counts (Q6), omit-list membership (Q1), AI-tell vocabulary and em-dash scan (Q7), word-count contracts (Q13), markup residue (Q8, Q9), empty template fields (Q14), whitespace (Q11). Emits <code>check_result</code> rows with offenders.</p></div>
+<div class="pnode ai"><div class="pn">step 4 · independent</div><h4>Blind reviewer</h4><p>Separate prompt, separate call, does <b>not</b> receive the generator's rationale. Gets: posting text, requirement rows, the finished asset. Returns a grade, per-swap agreement, and citations that must resolve to a <code>requirement_id</code>.</p></div>
+<div class="pnode acc"><div class="pn">step 5</div><h4>Aggregate</h4><p>Any <code>fail</code> ⇒ gate <b>fail</b>. No fails but any <code>warn</code> or reviewer disagreement ⇒ gate <b>warn</b>. Otherwise <b>pass</b>. Uncited swaps are always a fail, not a warn. Auto-corrected items report as resolved, under "Done for you".</p></div>
+<div class="pnode"><div class="pn">step 6</div><h4>Score</h4><p>Compute <code>match_score</code> against the requirement set. Stored per generation so regenerations are comparable.</p></div>
+<div class="pnode"><div class="pn">step 7</div><h4>Gate the approval</h4><p>Approve stays disabled on a <b>fail</b>; a <b>warn</b> requires an explicit "approve with exceptions" that records who and why.</p></div>
 </div>
 
-<div class="ask"><b>Decision for you.</b> Should a <b>warn</b> block approval too, or only a <b>fail</b>? I've assumed fail blocks, warn requires an explicit override that gets recorded.</div>
+<div class="note"><b>Settled.</b> A <b>fail</b> blocks approval. A <b>warn</b> does not — it requires an explicit override that records who approved and why.</div>
 
 <h2>4. Match score</h2>
 <p>Three dimensions, as chosen. Weighted so a missing must-have cannot be papered over with keyword stuffing.</p>
@@ -247,46 +263,49 @@ a{color:var(--text-brand)}a:hover{color:var(--brand-900)}
 <tr><td>Seniority &amp; scope alignment</td><td>20%</td><td>Reviewer-graded against posting signals (title band, team size, budget/P&amp;L language, reporting line) versus what the asset evidences.</td><td>Four signal rows with the posting quote and the asset quote side by side</td></tr>
 </table>
 <p><code>composite = 0.5·must_have + 0.3·keyword + 0.2·seniority</code>, banded <b>≥85 strong</b> · <b>70–84 acceptable</b> · <b>&lt;70 needs work</b>. Both the composite and the three parts are stored — the number in the header is clickable down to the requirement that moved it.</p>
-<div class="ask"><b>Decision for you.</b> Weights 50/30/20 and the banding thresholds. Also: score the ATS-compact resume separately from the full resume (they carry different skill blocks), which I've assumed yes.</div>
+<div class="note"><b>Settled.</b> Weights 50 / 30 / 20, bands 85 / 70. The ATS-compact resume scores separately from the full resume. In the prototype the composite is the <b>ATS Match</b> figure in the packet header, and clicking it opens the modal in §5b.</div>
 
-<h2>5. Where it surfaces</h2>
+<h2>5. Where it surfaces <span class="tag t-vis">as built</span></h2>
+<p>The first draft of this document proposed a dedicated QC rail step with five evidence tabs, plus a right drawer per asset. Review rejected both: a separate QC destination puts the evidence where the editing isn't. What was built instead keeps evidence <b>in the asset, beside the line it explains</b>, and reserves one modal for the packet-level roll-up.</p>
 
-<h3>5a. Packet rail — new step 7, "QC &amp; evidence"</h3>
-<p>Existing rail is <code>jd · resume · cover · portfolio · video · send</code>. The new step sits between <b>video</b> and <b>review &amp; send</b>, and <code>send</code> reads its gate.</p>
+<h3>5a. No QC rail step — evidence lives in the three asset tabs</h3>
+<p>The rail is unchanged: <code>jd · resume · cover · portfolio · video · send</code>. Evidence is carried by the tabs that already existed.</p>
 <div class="wf">
-<div class="wfrow" style="grid-template-columns:minmax(150px,220px) minmax(0,1fr) minmax(0,280px)">
-<div class="box"><b>Left rail (existing)</b>1 JD analysis<br>2 Resume<br>3 Cover letter<br>4 Portfolio<br>5 Intro video<br><span class="mono" style="color:var(--text-brand)">6 QC &amp; evidence ← new</span><br>7 Review &amp; send</div>
-<div class="box solid"><b>Center — evidence tabs</b>
-<div class="f-right" style="margin:6px 0"><span class="tag t-new">Requirement coverage</span><span class="tag t-new">Skills &amp; swaps</span><span class="tag t-new">Insert map</span><span class="tag t-new">Checks</span><span class="tag t-ai">Reviewer</span></div>
-Coverage tab: the posting rendered as text, each requirement line highlighted green (covered) / amber (partial) / red (uncovered). Clicking a line filters the other tabs to it.</div>
-<div class="box"><b>Right (existing panel, extended)</b>Composite score, large<br>3 sub-score bars<br>Gate state chip<br>Per-asset badges<br>"Re-run QC" button</div>
+<div class="wfrow" style="grid-template-columns:repeat(auto-fit,minmax(220px,1fr))">
+<div class="box solid"><b>JD analysis</b>Three tabs — responsibilities, requirements, ATS keywords (three columns above 1040px, one below). Each line is the posting <b>verbatim</b>, paired with the profile line that evidences it and a link to the exact excerpt with its source. Below: a four-card fit summary and a two-column comparison — what the posting asks, what the profile evidences.</div>
+<div class="box solid"><b>Resume</b>Per block, a "1 item to fix · 3 to review" label that jumps to the field. Per-field actions sit in the right margin, same position in every section: show original, ask for a change, and the undo trail for anything auto-corrected. Keyword chips swap, revert, or drop with a confidence control.</div>
+<div class="box solid"><b>Cover letter</b>"What this cover letter answers" — plain language, with counts and attention badges, collapsed by default. Posting echoes highlight in the letter body on hover.</div>
+</div>
+<div class="wfrow" style="grid-template-columns:minmax(0,1fr);margin-top:10px">
+<div class="box"><b>Assistant</b>Docked as a right column at 1440px and up; floats below that. Reads the same records — no private state.</div>
 </div>
 </div>
+<div class="note"><b>Why no rail step.</b> A QC destination would re-show the same rows a second time, away from the editing context. The gate still exists (§3) and <code>send</code> still reads it — it just has no screen of its own.</div>
 
-<h3>5b. Asset badge → drawer</h3>
-<p>Every artifact card in the existing rail gains a badge next to its status pill: <span class="tag t-vis">QC 92 · pass</span> <span class="tag t-weak">QC 74 · 2 warnings</span> <span class="tag t-silent">QC · 1 failure</span>. Clicking opens a right drawer over the current screen.</p>
+<h3>5b. Packet-level roll-up — the ATS Match modal</h3>
+<p>The header carries the composite as <b>ATS Match</b>. Clicking it opens one modal holding what the drawer used to: keyword / ATS analysis and the QC summary. Per-asset badges stay on the artifact cards and scroll to the field rather than opening a second surface.</p>
 <div class="wf">
-<div class="wfrow" style="grid-template-columns:minmax(0,1fr) minmax(0,420px)">
-<div class="box"><b>Screen behind</b>Packet builder, unchanged. Card list keeps its Generate / Approve / Regenerate actions; Approve is disabled while the gate is <span class="tag t-silent">fail</span>.</div>
-<div class="box solid"><b>Drawer — five stacked sections</b>
-<div style="margin-top:6px"><b style="color:var(--text-primary);text-transform:none;letter-spacing:0">1 · Score</b> composite + 3 bars, each expandable to its requirement rows.</div>
-<div><b style="color:var(--text-primary);text-transform:none;letter-spacing:0">2 · Checks</b> Q/R list, one row each: key, state, observed vs expected, offenders.</div>
-<div><b style="color:var(--text-primary);text-transform:none;letter-spacing:0">3 · Swaps</b> the table in §5c.</div>
-<div><b style="color:var(--text-primary);text-transform:none;letter-spacing:0">4 · Insert map</b> per target passage: before / after, and which term or requirement drove it.</div>
-<div><b style="color:var(--text-primary);text-transform:none;letter-spacing:0">5 · Independent review</b> grade, agreement count, citations, critique, and a "blind" indicator.</div>
+<div class="wfrow" style="grid-template-columns:minmax(0,1fr) minmax(0,1fr)">
+<div class="box solid"><b>Done for you</b>Corrections already applied — found → replaced, the source, and an undo. Reads <code>correction</code>.
+<div class="mono" style="margin-top:6px">$18M → 8-figure · posting verbatim<br>60+ → 62 · profile field</div></div>
+<div class="box solid"><b>Needs a decision</b>Only genuinely unsettled items: uncited swaps, reviewer disagreements, uncovered must-haves. Reads <code>check_result</code> + <code>review_verdict</code>.</div>
+</div>
+<div class="wfrow" style="grid-template-columns:minmax(0,1fr);margin-top:10px">
+<div class="box"><b>Also in the modal</b>Composite + three sub-score bars, each expandable to its requirement rows · term chips linking to the posting line and the insert location · reviewer grade, agreement count, citations, blind indicator.</div>
 </div>
 </div>
-</div>
+<div class="note"><b>Ordering rule.</b> QC leads with what was handled, not what is broken. "Done for you" first, "Needs a decision" second — the flat Q1–Q16 list from the first draft is a detail view inside the second group, not the top level.</div>
 
-<h3>5c. The swap table — the row you asked for</h3>
+<h3>5c. The swap row — as built</h3>
+<p>Rendered per field, in place, not as one table in a drawer. Left column is the wording being set aside; right column is what ships. <b>⇄ between them exchanges the two sides</b> (inert on a row kept as written), and <b>the right value is text-editable</b> — click it and type a third option. Both land in <code>swap_decision.override_value</code> / <code>override_state</code>; nothing is applied silently.</p>
 <table>
-<tr><th>Original</th><th></th><th>Final</th><th>Posting line (verbatim)</th><th>Conf.</th><th>Reviewer</th></tr>
-<tr><td>Agile Transformation</td><td>→</td><td>Platform Modernization</td><td>"lead modernization of our core platform across three business units"</td><td>0.91</td><td><span class="tag t-vis">agrees</span></td></tr>
-<tr><td>Change Management</td><td>→</td><td>Change Management</td><td>kept — matched by "drive organizational change"</td><td>0.78</td><td><span class="tag t-vis">agrees</span></td></tr>
-<tr><td>M&amp;A Due Diligence</td><td>→</td><td><i>dropped</i></td><td>no matching line</td><td>—</td><td><span class="tag t-weak">flag: on omit list</span></td></tr>
-<tr><td><i>added</i></td><td>→</td><td>FedRAMP Compliance</td><td><i>no citation returned</i></td><td>0.44</td><td><span class="tag t-silent">fail Q5 — unjustified</span></td></tr>
+<tr><th>Set aside</th><th></th><th>Ships</th><th>Posting line (verbatim)</th><th>Conf.</th><th>Reviewer</th></tr>
+<tr><td>Agile Transformation</td><td>⇄</td><td><b>Platform Modernization</b></td><td>"lead modernization of our core platform across three business units"</td><td>0.91</td><td><span class="tag t-vis">agrees</span></td></tr>
+<tr><td>Change Management</td><td></td><td><i>unchanged</i></td><td>kept — matched by "drive organizational change"</td><td>0.78</td><td><span class="tag t-vis">agrees</span></td></tr>
+<tr><td>M&amp;A Due Diligence</td><td>⇄</td><td><i>dropped</i></td><td>no matching line</td><td>—</td><td><span class="tag t-weak">flag: on omit list</span></td></tr>
+<tr><td><i>added</i></td><td>⇄</td><td>FedRAMP Compliance</td><td><i>no citation returned</i></td><td>0.44</td><td><span class="tag t-silent">fail Q5 — unjustified</span></td></tr>
 </table>
-<p>Sort defaults to unjustified first, then lowest confidence. That ordering is the answer to "are the swaps truly posting-driven" — anything without a verbatim line floats to the top instead of hiding in a list of 22.</p>
+<p>Order is unjustified first, then lowest confidence — anything without a verbatim line floats to the top instead of hiding in a list of 22. A row the user swaps back or types over keeps its position and records <code>override_state</code>, so a reverted suggestion stays auditable rather than disappearing.</p>
 
 <h3>5d. Intake — collecting the inputs up front</h3>
 <p>You left the intake scope open, so this is my call: the 13 hardcoded baseline values become a <b>reusable profile</b> edited in Settings, and the packet's JD step gains a short per-run block for what genuinely varies. Nothing per-run gets re-typed if the profile already has it.</p>
@@ -296,7 +315,7 @@ Coverage tab: the posting rendered as text, each requirement line highlighted gr
 <tr><td>Per run (JD step, existing screen)</td><td>Posting URL / paste / file · role type → template routing · recipient name &amp; email · optional per-run overrides of any profile field</td><td>The only things that actually change per application</td></tr>
 <tr><td>Derived, never typed</td><td>Target title · company · today's date · requirement and ATS-term sets</td><td>Extracted from the posting; typing them invites drift</td></tr>
 </table>
-<div class="ask"><b>Decision for you.</b> Per-run overrides: show them inline on the JD step (my assumption), or keep the run strictly profile-driven and force edits back into the profile?</div>
+<div class="note"><b>Settled.</b> Per-run overrides show inline on the JD step; the profile stays the default source and is edited in Settings.</div>
 
 <h2>6. What has to be persisted for any of this to render</h2>
 <table>
@@ -309,17 +328,21 @@ Coverage tab: the posting rendered as text, each requirement line highlighted gr
 <tr><td><code>insertion</code></td><td>Generation / template fill</td><td>Insert map, passage diffs</td><td>No — <code>artifact.version_history</code> is an empty home</td></tr>
 <tr><td><code>check_result</code></td><td>Rules engine + reviewer</td><td>Badges, Checks section</td><td>No</td></tr>
 <tr><td><code>review_verdict</code></td><td>Blind reviewer</td><td>Reviewer section, agreement counts</td><td>No — but prompt versioning + cost metering exist</td></tr>
-<tr><td><code>match_score</code></td><td>Score engine</td><td>Header, sub-score bars</td><td><code>ats_score</code> only — one model-estimated integer, not decomposable</td></tr>
+<tr><td><code>match_score</code></td><td>Score engine</td><td>Header ATS Match, sub-score bars</td><td><code>ats_score</code> only — one model-estimated integer, not decomposable</td></tr>
+<tr><td><code>correction</code></td><td>Auto-correct (step 2)</td><td>Margin undo trail, "Done for you"</td><td>No</td></tr>
 </table>
 
-<h2>7. Confirm these five and I'll build the prototype</h2>
-<ol>
-<li>The eight records in §2, and specifically that an uncited swap is a <b>failure</b> rather than a warning.</li>
-<li>Score weights 50 / 30 / 20 and bands 85 / 70.</li>
-<li>Whether a <b>warn</b> gate blocks approval or only requires a recorded override.</li>
-<li>The new rail step sits at position 6, before Review &amp; send, and <code>send</code> reads its gate.</li>
-<li>Intake split: 13 baseline values move to a reusable profile; per-run block holds posting, routing, recipient, overrides.</li>
-</ol>
+<h2>7. Decisions settled during the prototype</h2>
+<p>The five open questions from the first draft, and what the built prototype answers.</p>
+<table>
+<tr><th>Open question</th><th>Settled as</th></tr>
+<tr><td>The record set, and whether an uncited swap fails or warns</td><td>Confirmed — uncited swap is a <b>failure</b>. One record added: <code>correction</code>, for auto-corrected hard fails.</td></tr>
+<tr><td>Score weights and bands</td><td>50 / 30 / 20, bands 85 / 70. ATS-compact resume scores separately.</td></tr>
+<tr><td>Does a <b>warn</b> block approval</td><td>No. Fail blocks; warn needs a recorded override.</td></tr>
+<tr><td>New rail step at position 6</td><td><b>Dropped.</b> No QC step. Evidence is inline per field; the packet roll-up is the ATS Match modal. <code>send</code> still reads the gate.</td></tr>
+<tr><td>Intake split</td><td>Confirmed — 13 baseline values to a reusable profile, per-run block for posting / routing / recipient, overrides inline on the JD step.</td></tr>
+</table>
+<div class="note"><b>Added after review, not in the first draft.</b> Exact posting figures are hard fails and auto-corrected before display, with an undo trail. QC leads with "Done for you" before "Needs a decision". The swap row gained ⇄ swap-back and a text-editable ships value, recorded as <code>override_state</code>.</div>
 
 </div>
 </body>
