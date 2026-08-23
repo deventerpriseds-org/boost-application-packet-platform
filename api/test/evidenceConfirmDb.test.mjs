@@ -228,29 +228,43 @@ test('H:escalation-spends-its-cap-on-must-haves-first: the gate-deciding rows ar
     for (let i = 0; i < 21; i++) await mk(i, 'responsibility', `responsibility number ${i} of the role`)
     for (let i = 22; i < 34; i++) await mk(i, 'must_have', `must have qualification number ${i}`)
 
-    // A transport that records what it was ASKED about and proposes nothing, so the only thing under
-    // test is which requirements got a turn.
-    const asked = []
-    const spy = async () => { throw new Error('no proposal') }
+    // THE TRANSPORT IS THE ONLY HONEST WITNESS. `escalateOne` calls
+    // `opts.fetchJson(PROPOSAL_SYSTEM, buildProposalUser(requirement, ...))`, so the user prompt
+    // carries the requirement text of every row the cap actually bought. Capturing that is what
+    // makes this a behavioural test.
+    //
+    // THE FIRST VERSION OF THIS TEST WAS VACUOUS AND ITS COMMIT MESSAGE CLAIMED OTHERWISE.
+    // It asserted `attempted === 12` (a count of must-have ROWS IN THE DATABASE, true no matter what
+    // escalation did) plus two source greps for `sort(` and `must_have: 0` over the surrounding
+    // block. An independent verifier killed it: changing `prioritised.slice(...)` back to
+    // `open.slice(...)` -- verbatim the defect the guard was said to catch -- left the suite fully
+    // green, because the now-dead `sort(` line was still present for the grep to find. Inverting the
+    // comparator so must-haves rank LAST also passed. Only physically deleting the block failed it.
+    // A guard that survives the regression it names is worse than no guard, because it is believed.
+    const attemptedTexts = []
+    const spy = async (_system, user) => { attemptedTexts.push(String(user)); throw new Error('no proposal') }
     await writeEvidence(
       c, opp, [{ key: 'work:career', kind: 'work_history', label: 'Career', text: 'irrelevant prose' }],
       { escalate: true, escalateMax: 12 },
-      (rows) => rows.map(r => { asked.push(r); return { seq: r.seq, requirement_text: r.item_text, evidence: null } }),
+      (rows) => rows.map(r => ({ seq: r.seq, requirement_text: r.item_text, evidence: null })),
       spy,
     ).catch(() => {})
 
-    // What the escalation pass actually attempted is what the cap bought.
-    const attempted = (await c.query(
-      `select count(*)::int n from requirement where opp_id=$1 and kind='must_have'`, [opp])).rows[0].n
-    assert.equal(attempted, 12, 'fixture sanity: twelve must-haves exist')
-    // The ordering is the assertion. With a cap of 12 and 21 responsibilities at lower seqs, a
-    // seq-ordered pass reaches zero must-haves.
-    const src = readFileSync(new URL('../src/functions/tests/appRequirements.ts', import.meta.url), 'utf8')
-    const block = src.slice(src.indexOf('const open = rows.filter'), src.indexOf('for (const r of attempt)'))
-    assert.match(block, /sort\(/,
-      'THE CAP IS SPENT IN seq ORDER. On the live posting that means 12 responsibilities and zero ' +
-      'must-haves, so must_have_coverage cannot move and the confirmation path has nothing to act on.')
-    assert.match(block, /must_have:\s*0/,
-      'must-haves must rank first — they are the rows that decide whether the packet can ship')
+    assert.ok(attemptedTexts.length > 0,
+      'the escalation pass made no attempts at all — this test would be vacuous')
+
+    // WHICH requirements the cap was spent on. With 21 responsibilities at seq 0-20 and 12
+    // must-haves at seq 22-33, a seq-ordered pass spends all 12 attempts on responsibilities and
+    // reaches ZERO must-haves — which is exactly what production did (all 8 proposals on
+    // responsibilities, must_have_coverage stuck at 0/12 no matter what the model found).
+    const mustHaveAttempts = attemptedTexts.filter(t => t.includes('must have qualification')).length
+    const responsibilityAttempts = attemptedTexts.filter(t => t.includes('responsibility number')).length
+
+    assert.equal(responsibilityAttempts, 0,
+      `THE CAP WAS SPENT ON RESPONSIBILITIES (${responsibilityAttempts} of ${attemptedTexts.length} ` +
+      'attempts). must_have_coverage blocks `ready`; responsibilities_addressed only warns. Spending ' +
+      'the budget on the warning means the gating number can never move.')
+    assert.equal(mustHaveAttempts, attemptedTexts.length,
+      'every attempt the cap bought must be a must-have while any must-have is still unevidenced')
   } finally { await c.end() }
 })

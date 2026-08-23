@@ -635,3 +635,43 @@ test('H:proposed-evidence-cannot-pass-ANY-evidence-check: all three, not just th
   assert.equal(find(rr, 'must_have_coverage').state, 'pass')
   assert.notEqual(find(rr, 'evidence_placed').state, 'not_applicable')
 })
+
+// A CONFIRMED PROPOSAL IS NOT "AWAITING YOUR CONFIRMATION".
+//
+// Found by an independent verifier against live production (2026-08-23). The shipped string read
+// "2/12 must-haves evidenced (5 model-proposed, awaiting your confirmation, 1 answered from your
+// profile facts, not counted either way)" — while only THREE proposals were actually pending. The
+// other two were confirmed and were the numerator, so the sentence declared five rows uncounted
+// while its own count of two consisted entirely of two of those five.
+//
+// The numerator was correct throughout (it reads `ruleEvidenceOf`). This guards the SURFACE: the
+// exclusions are spelled out rather than absorbed precisely so a reviewer can audit the number, and
+// a parenthetical that contradicts the count destroys that.
+test('H:a-confirmed-proposal-is-not-reported-as-awaiting: the tail cannot contradict the numerator', () => {
+  const req = (seq, text) => ({
+    id: `r${seq}`, seq, kind: 'must_have', item_text: text, verbatim: text,
+    char_start: 0, char_end: text.length, match_method: 'exact', kind_source: 'category_default',
+  })
+  const ev = (confirmed) => ({
+    quote: 'an excerpt from the profile', source_kind: 'work_history', source_label: 'Career',
+    source_key: 'work:career', char_start: 0, char_end: 27, extra: null, ratio: null,
+    method: 'proposed', record_sha256: 'sha', resolver_version: 1, proposal_version: 1,
+    confirmed_at: confirmed ? '2026-08-23T05:48:26.832Z' : null,
+    confirmed_by: confirmed ? 'von.ellis@enterpriseds.io' : null,
+  })
+  const requirements = [req(1, 'first distinct requirement text here'), req(2, 'second distinct requirement text here'),
+                        req(3, 'third distinct requirement text here')]
+  const results = runChecks({
+    type: 'resume', pkg: {}, company: 'Acme', requirements, swaps: [],
+    postingText: '', profileText: '', facts: [],
+    // One confirmed, two still pending.
+    evidence: { profileReadable: true, bySeq: { 1: ev(true), 2: ev(false), 3: ev(false) } },
+  })
+  const cov = results.find(r => r.check_key === 'must_have_coverage')
+  assert.ok(cov, 'must_have_coverage must be produced')
+  const m = /(\d+) model-proposed, awaiting your confirmation/.exec(cov.observed)
+  assert.ok(m, `expected an awaiting-confirmation clause, got: ${cov.observed}`)
+  assert.equal(Number(m[1]), 2,
+    `THE TAIL CONTRADICTS THE NUMERATOR. It reports ${m[1]} proposals "awaiting your confirmation ` +
+    `... not counted either way", but one of them is confirmed and IS counted. Observed: ${cov.observed}`)
+})

@@ -710,7 +710,19 @@ export function runChecks(input: CheckInput): CheckResult[] {
       // Named in the observed string rather than absorbed into it. A count that changed because a
       // model was consulted must say so on the surface a reviewer reads, or "coverage rose" is not
       // falsifiable — the reviewer cannot tell a better profile from a chattier model.
-      const proposed = coverable.filter(isProposed)
+      // `!isConfirmed` MATTERS HERE, and its absence shipped a self-contradicting sentence.
+      //
+      // Found by an independent verifier against live production (2026-08-23): the string read
+      // "2/12 must-haves evidenced (5 model-proposed, awaiting your confirmation, ... not counted
+      // either way)" while only THREE were awaiting a decision — the other two were confirmed and
+      // WERE the numerator. So one sentence claimed five rows were uncounted while its own count of
+      // two was made entirely of two of those five.
+      //
+      // The numerator was never wrong (it reads `ruleEvidenceOf`, which excludes an unconfirmed
+      // proposal), but this is an accusation-grade surface: a reviewer who cannot trust the
+      // parenthetical cannot audit the number in front of it, which is the whole reason the
+      // exclusions are named rather than absorbed.
+      const proposed = coverable.filter(r => isProposed(r) && !isConfirmed(r))
       if (proposed.length) excluded.push(`${proposed.length} model-proposed, awaiting your confirmation`)
       if (eligibility.length) excluded.push(`${eligibility.length} not reachable by any generated field`)
       const factOwned = mustHaves.length - coverable.length - eligibility.length
