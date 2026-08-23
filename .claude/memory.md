@@ -2794,3 +2794,30 @@ instead — recoverable only because they finished. Had they been interrupted, t
 **All guards mutation-proved, each with the mutation verified to have APPLIED to source first.**
 The cry-wolf direction was proved too (`contradicts -> true` must also fail), not just the
 never-fires direction. 223/223 green.
+
+### 2026-08-23 — CONFIRMED LIVE by the owner in their own browser
+
+The owner opened the production SPA and reported "I see it now" on the eMoney packet at
+`#/packet/2cb56fb3.../resume`. That is the bar this repo's rule sets, and it is now met for:
+`severityMeta()` engine-aware finding words, `packetReadiness()` (the `Blocked` chip), the
+`METHOD_LABEL` reconciliation (`filled straight from the package`), and the change-log
+wording (`Change it` / `Review →` / `Corrected for you`).
+
+**Two wording lessons from getting there, both mine:**
+1. **"Live" needs qualifying.** `ui-verify.mjs` DOES hit the production URL (`:49` →
+   `purple-ground-0f377120f...`), but it SEEDS `localStorage.ee_auth_user` with
+   von.ellis@enterpriseds.io — it impersonates rather than signs in. So a green ui-verify
+   proves the deployed bundle reached PRODUCTION; it does not prove the owner sees it.
+   Say "verified on the production URL under a seeded identity, not yet confirmed in your
+   browser" until they confirm. The owner caught this: *"do you mean live in the local
+   render not the production web app?"*
+2. **Owner-scoped data is the likeliest reason prod "looks empty".** Measured:
+   von.ellis@enterpriseds.io 1953 opportunities, demo@executive-engine.local 7,
+   capscope1783707178@ee.local 1. `_owner` falls back to demo when auth does not resolve,
+   so a session on the wrong identity renders every screen correctly and shows almost no
+   data. Check `localStorage.getItem('ee_auth_user')` FIRST when prod looks wrong.
+
+**Connector note: `Boost_DB_Connector` OAuth expires often.** The owner: *"it expires often
+so you should check that before saying we can't connect"*. `ListConnectors` at session start,
+and again before ever saying the data is unreachable — a lapsed token is a 10-second re-auth
+the owner can do, not a platform limit and not a reason to build a runner detour.
