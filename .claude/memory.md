@@ -2443,3 +2443,41 @@ empty", and empty pointed straight at parsing. That took one line and one build.
 why.** A rejection message that omits what was rejected is unfalsifiable, and three plausible
 explanations (weak model, bad prompt, wrong threshold) all fit an outcome that had none of those
 causes.
+
+## MEASURED: the normaliser now clears three of six blocking families (2026-08-23)
+
+Build after the envelope fix (`c692924`), opportunity `9f9c370a`:
+
+**`reword_fails: 0`** — down from 11. Nine real rewrites, and the quality is sound:
+
+```
+"Strategic Technology Planning" (29) -> "Tech Strategy Planning"   (22)
+"Software Development Life Cycle" (31) -> "Software Dev Life Cycle" (23)
+"Cross-Functional Leadership"   (27) -> "Cross-Functional Lead"    (21)
+"Data-Driven Decision Making"   (27) -> "Data-Driven Decisions"    (21)
+"Customer-Centric Solutions"    (26) -> "Client-Focused Solutions" (24)
+"Digital Platform Maturity"     (25) -> "Digital Maturity"         (16)
+```
+
+**Gate, resume and compact_resume:**
+- before: `changes_cited, must_have_coverage, relevant_char_limit, skill_char_limit`, attention **9**
+- after:  `changes_cited, must_have_coverage`, attention **5**
+
+So `cross_list_redundancy`, `skill_char_limit` and `relevant_char_limit` are all enforced now — the
+three deterministic families the normaliser was built for, at the owner's 24/20 limits. `word_counts`
+still fails on cover/portfolio and was deliberately excluded.
+
+**`changes_cited` did NOT clear**, on any artifact, despite List B now being routed. So supplying the
+comparison set was necessary and not sufficient — that check needs its own investigation rather than
+an assumption that List B would fix it. Do not record it as addressed.
+
+### What the whole arc cost, and what actually resolved it
+
+The char-limit rule took: a normaliser, a retry mechanism, a model A/B that could not even execute,
+and two rounds of theorising — before the cause turned out to be `out?.item` read off the raw OpenAI
+envelope. Every rewrite had been discarded by one property access while the model answered correctly.
+
+**One diagnostic line ended it.** Making the rejection message print the value it rejected turned
+"could not be reworded" into "returned nothing usable; previous answer was empty", and empty is the
+signature of a parse failure, not a weak model. That is the cheapest thing in this entire sequence
+and it should have been first.
