@@ -31,9 +31,12 @@ import { api } from '../api.js'
 import {
   BLOCK_HOOKS, KIND_ABBR, KIND_WORD, METHOD_LABEL,
   countMismatchNote, deriveItems, draftSizeText, expectationFor, latestRows, listBodyModel, listsOf,
+  correctionsForField,
   meterModel, reqsForRow, scopeSwaps, shapeOf, sharedSourceNote, statPct, wordCount,
 } from '../assetBlocks.js'
 import { HIGHLIGHT_CLASS } from '../highlight.js'
+import { railChangeLog } from '../qcRail.js'
+import { CorrectionRow } from './QcRail.jsx'
 
 export { BLOCK_HOOKS }
 
@@ -64,6 +67,37 @@ export function useAssetProvenance(oppId, packetId) {
     return () => { live = false }
   }, [oppId, packetId])
   return state
+}
+
+/**
+ * The change log for ONE artifact, so a correction can be read BESIDE the sentence it changed.
+ *
+ * The design puts corrections in two places on purpose (rendered and confirmed from the prototype
+ * 2026-08-23): inline in the field's margin while you are reading the draft, and rolled up in the
+ * QC step's "Done for you" while you are auditing the packet. Same rows, two surfaces - which is
+ * exactly why this must NOT grow its own notion of what a correction is.
+ *
+ * So it goes through `railChangeLog` like every other surface. `result.corrections` is never read
+ * here; the moment a second `.jsx` touches that property there are two definitions of how many
+ * corrections there are, which is the bug the QC counts strip already shipped twice.
+ *
+ * Fetched here rather than threaded down from PacketBuilder because the blocks panel is collapsible
+ * and per-artifact - the resume and the compact resume are two artifacts with byte-identical merge
+ * fields, and each needs its OWN change log or one would show the other's corrections.
+ */
+export function useArtifactCorrections(artifactId) {
+  const [rows, setRows] = useState(null)
+  const [reload, setReload] = useState(0)
+  useEffect(() => {
+    let live = true
+    if (!artifactId) { setRows(null); return undefined }
+    setRows(null)
+    api.artifactChecksResult(artifactId)
+      .then((result) => { if (live) setRows(railChangeLog(result).rows) })
+      .catch(() => { if (live) setRows(null) })
+    return () => { live = false }
+  }, [artifactId, reload])
+  return { rows, refresh: () => setReload((n) => n + 1) }
 }
 
 // Width of the card itself, not of the window: whether the margin sits beside the text or under it
@@ -238,7 +272,8 @@ function BlockBody({ row, shape, swapsForList, artifactId, listOwners }) {
   )
 }
 
-function AssetBlock({ row, reqs, swapsForList, wide, artifactId, listOwners }) {
+function AssetBlock({ row, reqs, swapsForList, wide, artifactId, listOwners,
+  corrections = [], correctionBusy, setCorrectionBusy, onCorrectionsChanged }) {
   const [showBefore, setShowBefore] = useState(false)
   const shape = shapeOf(row)
   const isStatic = shape === 'static'
@@ -322,6 +357,21 @@ function AssetBlock({ row, reqs, swapsForList, wide, artifactId, listOwners }) {
         <span className="px-small">loop {row.loop}</span>
       </div>
 
+      {/* "Corrected for you" - the design's own words, and the design's own position: the reason a
+          figure was rewritten sits beside the sentence carrying it, not one tab away. Rendered with
+          the SAME component the QC step uses, in `inField` mode so it does not restate the field
+          name the reader is already inside. */}
+      {corrections.length > 0 && (
+        <div style={{ marginTop: 9 }} data-qc={BLOCK_HOOKS.fieldChangeLog} data-qc-n={corrections.length}>
+          <div className="px-label" style={{ marginBottom: 4 }}>Corrected for you</div>
+          {corrections.map((c) => (
+            <CorrectionRow key={c.key} row={c} artifactId={artifactId} inField
+              busy={correctionBusy} setBusy={setCorrectionBusy}
+              onOpen={() => {}} onUndid={onCorrectionsChanged} />
+          ))}
+        </div>
+      )}
+
       {reqs.length > 0 && (
         <div style={{ marginTop: 9 }}>
           <div className="px-label" style={{ marginBottom: 4 }}>
@@ -386,6 +436,11 @@ export default function AssetBlocks({ artifact, provenance, fallback, defaultOpe
   const [open, setOpen] = useState(defaultOpen)
   const [state, setState] = useState({ loading: true, error: null, data: null })
   const [ref, wide] = useWideRef(700)
+
+  // The change log, scoped per field into the margins below. One `busy` for the whole panel, not one
+  // per row: two undos in flight against the same artifact would race the re-read that follows them.
+  const { rows: correctionRows, refresh: refreshCorrections } = useArtifactCorrections(artifact.id)
+  const [correctionBusy, setCorrectionBusy] = useState(null)
 
   useEffect(() => {
     let live = true
@@ -475,6 +530,10 @@ export default function AssetBlocks({ artifact, provenance, fallback, defaultOpe
               wide={wide}
               artifactId={artifact.id}
               listOwners={listOwners}
+              corrections={correctionsForField(correctionRows, r.merge_field)}
+              correctionBusy={correctionBusy}
+              setCorrectionBusy={setCorrectionBusy}
+              onCorrectionsChanged={refreshCorrections}
             />
           ))}
         </>

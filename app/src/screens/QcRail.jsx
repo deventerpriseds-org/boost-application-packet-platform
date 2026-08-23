@@ -472,7 +472,7 @@ function ReviewTab({ entries, onOpen, filtered }) {
  *                                 field-scoped edit path the resume editor already uses. Not a second
  *                                 way to ask for a change.
  */
-function CorrectionRow({ row, artifactId, onOpen, onUndid, busy, setBusy }) {
+export function CorrectionRow({ row, artifactId, onOpen, onUndid, busy, setBusy, inField = false }) {
   const [refusal, setRefusal] = useState(null)
   const [askOpen, setAskOpen] = useState(false)
   const [ask, setAsk] = useState('')
@@ -520,8 +520,15 @@ function CorrectionRow({ row, artifactId, onOpen, onUndid, busy, setBusy }) {
             cannot see the difference gets the information at all. */}
         <b style={{ fontSize: 12, letterSpacing: '.3px' }}>{row.undone ? 'Undone' : 'Corrected'}</b>
         <span data-qc-part="sentence" style={{ fontSize: 13, flex: 1, minWidth: 180, color: 'var(--proto-ink)' }}>{row.sentence}</span>
-        <span className="px-small" style={{ fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace' }}>{row.merge_field}</span>
-        {artifactId && row.merge_field && (
+        {/* Rendered INSIDE the field it corrects (AssetBlocks' margin), the field name and the
+            "Open <field>" button are both restatements of where the reader already is. The row is
+            otherwise identical - same wording, same affordances, same module-owned model - because
+            two renderings of one correction is exactly the divergence this component exists to
+            prevent. */}
+        {!inField && (
+          <span className="px-small" style={{ fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace' }}>{row.merge_field}</span>
+        )}
+        {!inField && artifactId && row.merge_field && (
           <button type="button" className="px-btn" data-qc={QC_HOOKS.correctionOpen}
             data-qc-artifact={artifactId} data-qc-section={row.merge_field}
             onClick={() => onOpen(artifactId, row.merge_field)}

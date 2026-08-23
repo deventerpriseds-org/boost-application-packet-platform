@@ -349,7 +349,7 @@ test('draftSizeText omits bullets when the field name never asked for them', () 
 })
 
 // ── P8.7: the blocks card is selectable by CSS, and the two disclosures stay opposite ───────────
-import { BLOCK_HOOKS } from '../src/assetBlocks.js'
+import { BLOCK_HOOKS, correctionsForField } from '../src/assetBlocks.js'
 import { ASSET_HEADER_DEFAULT_OPEN, PACKET_HOOKS } from '../src/packetBuilder.js'
 
 const BLOCKS_SRC = src('../src/screens/AssetBlocks.jsx')
@@ -401,4 +401,47 @@ test('collapsing the header hides the asset BODY, not just its label', () => {
   const packet = stripComments(PACKET_SRC)
   assert.match(packet, /\{open && \([\s\S]{0,200}data-qc=\{PACKET_HOOKS\.assetBody\}/,
     'the body must be rendered conditionally on the header state')
+})
+
+// ── inline change log (P8.6, the design's two surfaces) ──────────────────────────────────────────
+
+/**
+ * H:corrections-render-beside-the-field
+ *
+ * The design puts a correction in TWO places and the app only had one of them. Confirmed by
+ * rendering the prototype 2026-08-23: step 2 Resume shows 8 inline "Corrected for you" cards in the
+ * field margin, while step 6 QC shows the same rows rolled up as "Done for you". The app rendered
+ * them ONLY in the QC step, so the owner had to leave the draft to find out why a figure changed -
+ * the exact complaint that produced this work.
+ *
+ * Asserts the invariant, not the incident: the field margin reaches the change log THROUGH the
+ * shared selector and renders the SHARED row component. A second, private correction row in
+ * AssetBlocks would satisfy "something renders inline" while re-introducing the two-definitions bug
+ * that `corrections.test.mjs` exists to prevent.
+ */
+test('H:corrections-render-beside-the-field: the field margin renders the shared row from the selector', () => {
+  const src = readFileSync(new URL('../src/screens/AssetBlocks.jsx', import.meta.url).pathname, 'utf8')
+
+  assert.match(src, /import\s*\{\s*railChangeLog\s*\}\s*from\s*['"]\.\.\/qcRail\.js['"]/,
+    'the inline log must come from the rail selector, not from a second derivation')
+  assert.match(src, /import\s*\{\s*CorrectionRow\s*\}\s*from\s*['"]\.\/QcRail\.jsx['"]/,
+    'the inline row must BE the QC row - two renderings of one correction is the bug')
+  assert.match(src, /<CorrectionRow\b[^>]*\binField\b/,
+    'rendered inside the field it corrects, so it does not restate the field name')
+  assert.match(src, /Corrected for you/,
+    "the design's own words for the inline group")
+  assert.ok(!/\.slice\(0,\s*\d+\)/.test(src.slice(src.indexOf('Corrected for you') - 400, src.indexOf('Corrected for you') + 400)),
+    'no cap on how many corrections a field may show')
+})
+
+test('H:corrections-render-beside-the-field: field scoping is an id match, never a substring', () => {
+  const rows = [
+    { key: 'a', merge_field: 'Summary' },
+    { key: 'b', merge_field: 'SummaryExtra' },
+    { key: 'c', merge_field: 'Relevant1' },
+  ]
+  assert.deepEqual(correctionsForField(rows, 'Summary').map((r) => r.key), ['a'],
+    'SummaryExtra must NOT leak into Summary - a merge field name is an identifier')
+  assert.deepEqual(correctionsForField(rows, '').map((r) => r.key), [])
+  assert.deepEqual(correctionsForField(null, 'Summary'), [])
 })

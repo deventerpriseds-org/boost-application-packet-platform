@@ -38,6 +38,10 @@ export const BLOCK_HOOKS = {
   quote: 'blocks-posting-quote',   // the posting's own words echoed onto this asset
   compareToggle: 'blocks-compare-toggle',
   before: 'blocks-before',
+  fieldChangeLog: 'blocks-corrected-for-you', // the field's own "Corrected for you" list (P8.6 inline).
+  // NOT named `corrections`: corrections.test.mjs forbids /\.corrections\b/ in any .jsx so no
+  // component can read `result.corrections` instead of the selector, and BLOCK_HOOKS.corrections
+  // would trip it on a name collision alone. The guard is right; the key gets the different name.
   fallback: 'blocks-fallback',     // the stored content dump, when there are no rows at all
   empty: 'blocks-empty',
 }
@@ -353,4 +357,19 @@ export function registerListOwners(prev, artifactId, label, lists) {
     changed = true
   }
   return changed ? next : (prev || {})
+}
+
+/**
+ * The corrections that touched ONE merge field.
+ *
+ * An EXACT match on the field name, never a substring: `Summary` and `SummaryExtra` are two fields,
+ * and a prefix match would print one field's corrections under the other's text - an attribution
+ * error in the one place the screen exists to make attribution checkable.
+ *
+ * Lives here rather than in the .jsx for the reason this module's header gives: `node --test` cannot
+ * import a .jsx, so a derivation written there is a derivation no test can exercise.
+ */
+export function correctionsForField(rows, mergeField) {
+  if (!Array.isArray(rows) || !mergeField) return []
+  return rows.filter((r) => r && r.merge_field === mergeField)
 }
