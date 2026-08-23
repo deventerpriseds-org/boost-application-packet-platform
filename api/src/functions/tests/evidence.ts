@@ -98,6 +98,16 @@ export interface EvidenceRow {
   method: 'exact' | 'anchored' | 'proposed'
   /** The proposal ruleset that judged a `proposed` row. NULL means no model was involved. */
   proposal_version?: number | null
+  /**
+   * When the OWNER confirmed this model-proposed excerpt, and who.
+   *
+   * Null on every deterministic row (a rule needs no human) and on a proposal nobody has decided on
+   * yet. Set only by matching a stored `evidence_confirmation` on the full claim identity, so a
+   * profile edit that changes `record_sha256` makes the join stop matching and the confirmation
+   * lapse on its own.
+   */
+  confirmed_at?: string | null
+  confirmed_by?: string | null
   /** Digest of the record body the offsets index. Offsets rot silently without it. */
   record_sha256: string
   resolver_version: number

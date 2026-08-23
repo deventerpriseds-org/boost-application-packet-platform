@@ -652,7 +652,30 @@ export function runChecks(input: CheckInput): CheckResult[] {
      * rule may ACCUSE, and `must_have_coverage` is the accusation.
      */
     const isProposed = (r: { seq: number }) => evidenceOf(r)?.method === 'proposed'
-    const ruleEvidenceOf = (r: { seq: number }) => (isProposed(r) ? null : evidenceOf(r))
+    /**
+     * A proposal the OWNER has confirmed. This is the one thing that may promote a model row into
+     * the numerator, and it does not weaken the rule above — it satisfies it with a different
+     * accuser.
+     *
+     * The house rule is "a model may PROPOSE, only an exact rule may ACCUSE". The gap it left was
+     * that nothing else could accuse either: the deterministic resolver evidences 0 of 35
+     * requirements on a real posting, because lexical matching cannot bridge the employer's
+     * noun-phrase vocabulary to the candidate's prose. So coverage was pinned at 0 with no path off
+     * it, and the app told the owner the proposals were "awaiting your confirmation" while offering
+     * nothing to confirm them with.
+     *
+     * A HUMAN IS AN ACCUSER. When the owner reads the excerpt beside the requirement and says yes,
+     * that is a person taking responsibility for the claim — a stronger warrant than token overlap,
+     * not a weaker one. What must never happen is the MODEL's say-so counting, and it still cannot:
+     * `confirmed_at` is set only by matching a stored `evidence_confirmation` on the full claim
+     * identity, written only through a route that requires a verified session.
+     *
+     * `confirmed_at` alone is sufficient here and is NOT checked against `method`: a deterministic
+     * row never carries one, so there is nothing to disambiguate.
+     */
+    const isConfirmed = (r: { seq: number }) => !!evidenceOf(r)?.confirmed_at
+    const ruleEvidenceOf = (r: { seq: number }) =>
+      (isProposed(r) && !isConfirmed(r) ? null : evidenceOf(r))
     const label = (r: { seq: number; verbatim: string | null; item_text: string }) =>
       `#${r.seq} ${(r.verbatim || r.item_text).slice(0, 80)}`
 

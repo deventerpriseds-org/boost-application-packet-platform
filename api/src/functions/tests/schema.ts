@@ -424,6 +424,58 @@ create table if not exists requirement_evidence (
 );
 create index if not exists req_evidence_req_idx on requirement_evidence(requirement_id);
 
+-- THE OWNER'S CONFIRMATION OF A MODEL-PROPOSED EXCERPT.
+--
+-- Why coverage was pinned at zero: the deterministic resolver evidences 0 of 35 requirements on a
+-- real posting (measured 2026-08-23), because lexical matching cannot bridge the employer's
+-- noun-phrase vocabulary to the candidate's verb/gerund prose. The escalation tier already bridges
+-- it -- 8 of 12 must-haves got a valid model proposal -- but ruleEvidenceOf excludes a proposed
+-- row by design ("a model may PROPOSE, only an exact rule may ACCUSE"). The app told the owner those
+-- were "awaiting your confirmation" in three places and there was nothing to confirm them WITH.
+-- This is that missing step, and it keeps the house rule intact by making the HUMAN the accuser.
+--
+-- KEYED ON THE CLAIM, NOT ON THE EVIDENCE ROW, and that is the whole design.
+--
+-- A confirmation cannot be a column on requirement_evidence. writeRequirements runs
+-- delete from requirement where opp_id=$1 on every re-extraction and this table's parent FK is
+-- ON DELETE CASCADE, so every confirmation the owner ever gave would be destroyed the next time a
+-- posting was re-parsed. requirement.seq is no better: it is a reused positional index, so a
+-- confirmation keyed on it would silently transfer to whatever requirement later occupies that slot.
+-- The only stable identity is the CLAIM ITSELF -- this requirement text, this excerpt, from this
+-- record, at these offsets, with that record's digest.
+--
+-- EVERY COLUMN OF THE KEY IS LOAD-BEARING, because a confirmation means: "THIS exact sentence, from
+-- THIS exact record of mine, answers THIS exact requirement." Change any noun and the owner never
+-- made that claim. record_sha256 is what makes a profile edit invalidate it rather than silently
+-- inherit it -- a surviving confirmation over a changed record would assert something no human said
+-- and no rule can support, which is strictly worse than the honest 0/12 it replaces. Fail closed.
+create table if not exists evidence_confirmation (
+  id               uuid primary key default uuid_generate_v4(),
+  opp_id           uuid not null references opportunity(id) on delete cascade,
+  -- The requirement as EXTRACTED TEXT, never its id or seq -- both are destroyed or reused by
+  -- re-extraction. This is what survives delete from requirement.
+  requirement_text text not null,
+  source_key       text not null,
+  char_start       int not null,
+  char_end         int not null,
+  quote            text not null,
+  record_sha256    text not null,
+  confirmed_at     timestamptz not null default now(),
+  -- Resolved SERVER-side from the verified session, never client-supplied -- the same discipline
+  -- artifact_gate's override_by carries, and for the same reason: a client-named actor makes the
+  -- audit row worthless.
+  confirmed_by     text not null,
+  -- A withdrawal is recorded rather than deleted, so "the owner confirmed this and then the profile
+  -- changed" stays reconstructable months later instead of looking like it never happened.
+  withdrawn_at     timestamptz,
+  withdrawn_reason text,
+  check (char_start >= 0 and char_end > char_start),
+  check (length(quote) = char_end - char_start),
+  check ((withdrawn_at is null) = (withdrawn_reason is null)),
+  unique (opp_id, requirement_text, source_key, char_start, char_end, record_sha256)
+);
+create index if not exists evidence_confirmation_opp_idx on evidence_confirmation(opp_id);
+
 -- P1.3 — what the pipeline CHANGED, and whether the posting explains it.
 -- One candidate row per item in every list, INCLUDING unchanged ones: the packet screen shows all
 -- originals against all finals, so "we looked at this and kept it" is a different statement from
@@ -1170,5 +1222,5 @@ export const EXPECTED_TABLES = [
   'term_library', 'term_library_entry', 'term_candidate', 'requirement',
   'skill_candidate', 'swap_decision', 'insertion', 'check_result', 'artifact_gate', 'artifact_score', 'owner_fact', 'review_verdict',
   'remediation_loop', 'escalation', 'requirement_evidence', 'comparison_dimension',
-  'packet_build_job'
+  'packet_build_job', 'evidence_confirmation'
 ]

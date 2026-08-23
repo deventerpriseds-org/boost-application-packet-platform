@@ -354,6 +354,10 @@ function joinedRow(mc = MC, seq = 0) {
     // means. Carrying the column with a value would make every test in this file assert the shape
     // of a proposed row while claiming to describe a resolved one.
     evidence_proposal_version: null,
+    // The owner's confirmation, projected by the same join. Null here because this fixture is a
+    // deterministic row -- a rule needs no human warrant.
+    evidence_confirmed_at: null,
+    evidence_confirmed_by: null,
     evidence_resolved_at: new Date('2026-08-20T00:00:00Z'),
   }
 }

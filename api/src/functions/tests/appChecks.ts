@@ -97,6 +97,10 @@ export async function evaluateArtifact(client: any, artifactId: string, owner: s
       record_sha256: r.evidence_record_sha256,
       resolver_version: r.evidence_resolver_version,
       proposal_version: r.evidence_proposal_version ?? null,
+      // Carried through so `ruleEvidenceOf` can tell a proposal the owner ACCEPTED from one still
+      // waiting. Without this the gate cannot distinguish them and coverage stays pinned at 0.
+      confirmed_at: r.evidence_confirmed_at ?? null,
+      confirmed_by: r.evidence_confirmed_by ?? null,
     } as EvidenceRow)])),
   }
 

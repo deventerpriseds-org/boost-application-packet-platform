@@ -83,6 +83,31 @@ export async function ensureEvidenceTable(client: any) {
   // are individually savepointed, so a database that has the column but not yet the widened CHECK
   // refuses the one proposed row instead of losing the opportunity's evidence.
   await client.query(`alter table requirement_evidence add column if not exists proposal_version int`)
+  // The owner's confirmations. Declared in SCHEMA_SQL and registered in EXPECTED_TABLES; repeated
+  // here for the same reason the evidence table is — between `api-deploy.yml`'s deploy step and its
+  // `pg-migrate` step the running code would otherwise select from a table that does not exist yet,
+  // and every requirements read would 500. `create table if not exists` takes no lock on an existing
+  // table, so this is safe on the hot path four artifacts enter concurrently.
+  await client.query(`
+    create table if not exists evidence_confirmation (
+      id               uuid primary key default uuid_generate_v4(),
+      opp_id           uuid not null references opportunity(id) on delete cascade,
+      requirement_text text not null,
+      source_key       text not null,
+      char_start       int not null,
+      char_end         int not null,
+      quote            text not null,
+      record_sha256    text not null,
+      confirmed_at     timestamptz not null default now(),
+      confirmed_by     text not null,
+      withdrawn_at     timestamptz,
+      withdrawn_reason text,
+      check (char_start >= 0 and char_end > char_start),
+      check (length(quote) = char_end - char_start),
+      check ((withdrawn_at is null) = (withdrawn_reason is null)),
+      unique (opp_id, requirement_text, source_key, char_start, char_end, record_sha256)
+    )`)
+  await client.query(`create index if not exists evidence_confirmation_opp_idx on evidence_confirmation(opp_id)`)
 }
 
 export async function ensureRequirementCols(client: any) {
@@ -398,6 +423,14 @@ export async function clearRequirements(client: any, oppId: string) {
  * when a requirement has more than one, deterministically (source_key then char_start break ties).
  */
 export async function loadRequirementsWithEvidence(client: any, oppId: string): Promise<any[]> {
+  // THE DEPLOY WINDOW, and this is not hypothetical — `dimensionsDb.test.mjs` caught it by building
+  // its database from `origin/main`'s SCHEMA_SQL, which is the database a migration actually meets.
+  // `api-deploy.yml` deploys the code at its "Deploy to Azure Functions" step and only runs
+  // `pg-migrate` AFTERWARDS, so between those two steps this query would join a table the database
+  // does not have yet and EVERY requirements read would 500 — the identical trap the
+  // `proposal_version` column comment above describes. `create table if not exists` takes no lock on
+  // an existing table, so the steady-state cost here is one cheap no-op statement.
+  await ensureEvidenceTable(client)
   return (await client.query(
     `select r.*,
             e.quote        as evidence_quote,
@@ -416,12 +449,33 @@ export async function loadRequirementsWithEvidence(client: any, oppId: string): 
             -- provenance column named anything else would survive the redaction and keep asserting
             -- that a model judged this, beside a quote that has already been withdrawn.
             e.proposal_version as evidence_proposal_version,
-            e.resolved_at  as evidence_resolved_at
+            e.resolved_at  as evidence_resolved_at,
+            -- THE OWNER'S CONFIRMATION, matched on CLAIM IDENTITY rather than on the evidence row's
+            -- id. Every column of this join condition is part of what the owner actually asserted:
+            -- this requirement text, this excerpt, from this record, at these offsets, against that
+            -- record's digest. If the profile is edited, record_sha256 changes and the join stops
+            -- matching, so the confirmation lapses automatically rather than surviving to assert a
+            -- claim no human made. That is AC-11's "fail closed", enforced by the join itself rather
+            -- than by remembering to invalidate.
+            --
+            -- ALSO PREFIXED evidence_ DELIBERATELY: verifyRequirementRows redacts a stale row by
+            -- nulling every key starting with that prefix. A column named confirmed_at would
+            -- survive redaction and keep asserting a human vouched for a quote already withdrawn.
+            c.confirmed_at as evidence_confirmed_at,
+            c.confirmed_by as evidence_confirmed_by
        from requirement r
        left join lateral (
          select * from requirement_evidence x where x.requirement_id = r.id
           order by x.ratio desc nulls last, x.source_key, x.char_start limit 1
        ) e on true
+       left join evidence_confirmation c
+              on c.opp_id          = r.opp_id
+             and c.requirement_text = coalesce(r.verbatim, r.item_text)
+             and c.source_key      = e.source_key
+             and c.char_start      = e.char_start
+             and c.char_end        = e.char_end
+             and c.record_sha256   = e.record_sha256
+             and c.withdrawn_at is null
       where r.opp_id=$1 order by r.seq`, [oppId])).rows
 }
 
@@ -781,6 +835,98 @@ export async function evidenceResolve(req: HttpRequest, context: InvocationConte
   } finally { try { await client?.end() } catch {} }
 }
 
+/**
+ * POST /api/app/requirement/{seq}/evidence-confirm  { oppId, decision: 'confirm'|'reject', note? }
+ *
+ * The owner accepts (or refuses) a model-proposed excerpt. This is the step the product promised in
+ * three places and never had, and it is the ONLY thing that can move a `proposed` row into
+ * `must_have_coverage`'s numerator.
+ *
+ * ACCUSATION-GRADE, so it follows `artifactGateOverride` exactly rather than approximately:
+ * `requireWrite` proves someone is signed in, and then `verified` is re-checked — because
+ * `requireWrite` alone permits an unverified write to the demo workspace, and a confirmation whose
+ * actor is "whoever sent the request" is an audit row worth nothing.
+ *
+ * The target row is loaded with the ownership filter IN THE SAME STATEMENT (join `opportunity`,
+ * `owner_email = $owner`), never fetched and then compared in JS, and a miss returns 404 rather than
+ * 403 — a non-owner must not learn the row exists.
+ *
+ * `confirmed_by` is ALWAYS the session's owner. A `confirmed_by` in the request body is ignored.
+ */
+export async function evidenceConfirm(req: HttpRequest, context: InvocationContext): Promise<HttpResponseInit> {
+  if (req.method === 'OPTIONS') return { status: 204, headers: HEADERS }
+  const guard = requireWrite(req); if (guard) return guard
+  const { owner, verified } = resolveOwner(req)
+  if (!verified) {
+    return { status: 403, headers: HEADERS, jsonBody: { error: 'a confirmation needs a verified session — the audit row records who did it' } }
+  }
+  const body: any = await req.json().catch(() => ({}))
+  const oppId = String(body?.oppId || '').trim()
+  const decision = String(body?.decision || 'confirm').trim()
+  if (!oppId) return { status: 400, headers: HEADERS, jsonBody: { error: 'oppId is required' } }
+  if (decision !== 'confirm' && decision !== 'reject') {
+    return { status: 400, headers: HEADERS, jsonBody: { error: "decision must be 'confirm' or 'reject'" } }
+  }
+  const seq = Number(req.params.seq)
+  if (!Number.isFinite(seq)) return { status: 400, headers: HEADERS, jsonBody: { error: 'seq must be a number' } }
+
+  let client
+  try {
+    client = await getPgClient()
+    await ensureEvidenceTable(client)
+    // ONE statement: the requirement, its evidence, and the ownership check together. A row that
+    // does not belong to this owner is indistinguishable from one that does not exist.
+    const row = (await client.query(
+      `select r.opp_id, coalesce(r.verbatim, r.item_text) as requirement_text,
+              e.source_key, e.char_start, e.char_end, e.quote, e.record_sha256, e.method
+         from requirement r
+         join opportunity o on o.id = r.opp_id
+         left join lateral (
+           select * from requirement_evidence x where x.requirement_id = r.id
+            order by x.ratio desc nulls last, x.source_key, x.char_start limit 1
+         ) e on true
+        where r.opp_id = $1 and r.seq = $2 and o.owner_email = $3`, [oppId, seq, owner])).rows[0]
+    if (!row) return { status: 404, headers: HEADERS, jsonBody: { error: 'not found' } }
+    if (!row.source_key) {
+      return { status: 409, headers: HEADERS, jsonBody: { error: 'this requirement has no evidence to decide on' } }
+    }
+    // Only a MODEL proposal is a decision for the owner. A deterministic row is already a rule's
+    // finding and needs no human; "confirming" one would imply the human added something.
+    if (row.method !== 'proposed') {
+      return { status: 409, headers: HEADERS, jsonBody: { error: `this excerpt was resolved by a rule (${row.method}), so there is nothing to confirm`, method: row.method } }
+    }
+
+    if (decision === 'reject') {
+      // A rejection WITHDRAWS any existing confirmation for this exact claim and records why. It is
+      // not a delete: "the owner confirmed this and later took it back" must stay reconstructable.
+      await client.query(
+        `update evidence_confirmation set withdrawn_at = now(), withdrawn_reason = $1
+          where opp_id=$2 and requirement_text=$3 and source_key=$4 and char_start=$5
+            and char_end=$6 and record_sha256=$7 and withdrawn_at is null`,
+        ['rejected by the owner', row.opp_id, row.requirement_text, row.source_key,
+         row.char_start, row.char_end, row.record_sha256])
+      return { status: 200, headers: HEADERS, jsonBody: { ok: true, decision: 'reject', seq } }
+    }
+
+    // IDEMPOTENT. Confirming twice is one confirmation with its ORIGINAL timestamp and actor — the
+    // unique key is the claim identity, and `do nothing` keeps the first decision rather than
+    // re-stamping it to whoever clicked last.
+    await client.query(
+      `insert into evidence_confirmation
+         (opp_id, requirement_text, source_key, char_start, char_end, quote, record_sha256, confirmed_by)
+       values ($1,$2,$3,$4,$5,$6,$7,$8)
+       on conflict (opp_id, requirement_text, source_key, char_start, char_end, record_sha256)
+       do update set withdrawn_at = null, withdrawn_reason = null`,
+      [row.opp_id, row.requirement_text, row.source_key, row.char_start, row.char_end,
+       row.quote, row.record_sha256, owner])
+    return { status: 200, headers: HEADERS, jsonBody: { ok: true, decision: 'confirm', seq, confirmedBy: owner } }
+  } catch (e: any) {
+    context.error('evidenceConfirm', e)
+    return { status: 500, headers: HEADERS, jsonBody: { error: String(e?.message || e) } }
+  } finally { try { await client?.end() } catch {} }
+}
+
+app.http('evidenceConfirm', { methods: ['POST', 'OPTIONS'], authLevel: 'anonymous', route: 'app/requirement/{seq}/evidence-confirm', handler: evidenceConfirm })
 app.http('evidenceResolve', { methods: ['POST', 'OPTIONS'], authLevel: 'anonymous', route: 'app/opportunity/{id}/evidence', handler: evidenceResolve })
 app.http('requirementsGet', { methods: ['GET', 'OPTIONS'], authLevel: 'anonymous', route: 'app/opportunity/{id}/requirements', handler: requirementsGet })
 app.http('requirementsBackfill', { methods: ['POST', 'OPTIONS'], authLevel: 'anonymous', route: 'app/qc/requirements/backfill', handler: requirementsBackfill })
