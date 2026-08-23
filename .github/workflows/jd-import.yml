@@ -65,7 +65,15 @@ jobs:
         run: |
           set -euo pipefail
           test -f "$FILE" || { echo "::error::no such file: $FILE"; exit 1; }
-          NEW_CHARS=$(wc -c < "$FILE" | tr -d ' ')
+          # NOT `wc -c < file`: that counts the trailing newline, but psql's \set backtick
+          # substitution strips trailing newlines exactly as $(cat) does - so the stored length is
+          # one SHORT of the byte count and the post-write check below fails on a correct import.
+          # Measured: file 8619 bytes, UPDATE 1, stored 8618, guard reported "the write did not
+          # land as expected" about a write that landed perfectly. A guard that fails on success
+          # is worse than none, because the next person learns to ignore it.
+          # (Byte count == char count here only while postings stay ASCII; Postgres length() counts
+          # CHARACTERS, so a multi-byte posting would diverge and this check would need iconv.)
+          NEW_CHARS=$(printf '%s' "$(cat "$FILE")" | wc -c | tr -d ' ')
           echo "new posting: $FILE  ($NEW_CHARS chars)"
 
           # Refuse to replace a longer stored posting with a shorter one unless it is clearly a
