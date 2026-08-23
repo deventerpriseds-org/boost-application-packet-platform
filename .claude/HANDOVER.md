@@ -115,7 +115,13 @@ Secondary observations, lower priority:
 - **`claude mcp list` → "No MCP servers configured."** GitHub/Supabase/`Azure_pg_mcp` are injected
   server-side by the claude.ai connector layer; there is nothing local to copy or edit.
   `Azure_pg_mcp` points at **`RAG_AI_Agents` — the WRONG database** (no `requirement_evidence`).
-  **`Boost DB Connector`** is `connected: true` but was `enabledInChat: false` in the prior session.
+  **`Boost_DB_Connector`**: DO NOT TRUST THE PRIOR SESSION ON THIS. That session's connector view was
+  proven STALE — after the owner deleted and recreated the connector, `ListConnectors` there still
+  returned the OLD `directoryUuid` (42f9b20a-5c8e-4d6b-b1e9-f099ae5c2330) and `enabledInChat: false`,
+  i.e. a record of a connector that no longer existed. Conclusions drawn there (including a
+  "connector names with spaces get dropped" hypothesis reported as DISPROVEN) were based on that
+  ghost row and are UNTESTED, not settled. Check your OWN tool list for `mcp__Boost*` and report what
+  you actually see.
   **If its tools (`mcp__Boost*`) are present in YOUR session, USE THEM — they are ~instant.**
   Verify with a `select current_database()`; you want `boost_resume_n_packet_builder`.
 - **Otherwise use GitHub Actions** (~40-60s per round trip — **BATCH many questions into ONE query**):
