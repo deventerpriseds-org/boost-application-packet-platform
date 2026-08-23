@@ -112,7 +112,7 @@ export interface CheckThresholds {
 /** Seeded first values, taken from the live prompt. The owner can change every one of them. */
 export const DEFAULT_THRESHOLDS: CheckThresholds = {
   wordingRunTokens: WORDING_RUN_TOKENS,
-  skillMaxChars: 30,
+  skillMaxChars: 24,
   skillsTotalMin: 20,
   skillsTotalMax: 22,
   skillsSplitTolerance: 1,

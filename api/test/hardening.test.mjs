@@ -3785,3 +3785,52 @@ test('H:generation-model-is-a-setting: the generator reads the model from config
   assert.ok(/SEED_GENERATE_MODEL/.test(CFG),
     'the seed constant is gone — code must still supply a first value the owner can change')
 })
+
+// H:every-threshold-is-configurable — EVERY rule number must be tweakable, not most of them.
+//
+// Owner instruction, 2026-08-22: *"all such rule numbers need to be available for tweaking in the
+// settings/config"*. Audited on the spot: `DEFAULT_THRESHOLDS` declared 19 rules and `checkPrefs`
+// backed only 13 of them. Six were enforced by `runChecks` with NO column anywhere —
+// `aboutMe1Words`, `aboutMe2Words`, `coreAccomplishmentsWords`, `execProfileWords`,
+// `skillsSplitTolerance`, `wordingRunTokens`. They were code-only constants deciding gate findings
+// on the owner's documents, and no UI could reach them.
+//
+// That is the no-hardcoded-config rule violated by OMISSION rather than by a literal, which is why
+// it survived a settings screen built specifically to close this class (`D:chk-settings-have-no-writer`).
+// A hand-checked list goes stale silently; this derives both sides from source so a threshold added
+// tomorrow fails the suite until it is reachable from settings.
+test('H:every-threshold-is-configurable: every DEFAULT_THRESHOLDS rule is loadable from owner config', () => {
+  const CHECKS = readFileSync(new URL('../src/functions/tests/checks.ts', import.meta.url), 'utf8')
+  const PREFS  = readFileSync(new URL('../src/functions/tests/checkPrefs.ts', import.meta.url), 'utf8')
+
+  // Keys DECLARED as rules.
+  const block = CHECKS.slice(CHECKS.indexOf('export const DEFAULT_THRESHOLDS'))
+  const declared = [...block.slice(0, block.indexOf('\n}')).matchAll(/^  ([a-zA-Z0-9]+):/gm)].map(m => m[1])
+  assert.ok(declared.length >= 19, `expected the full threshold set, parsed ${declared.length}`)
+
+  // Keys loadThresholds actually RETURNS — i.e. the ones an owner value can reach.
+  const lt = PREFS.slice(PREFS.indexOf('export async function loadThresholds'))
+  const loadable = new Set([...lt.slice(0, lt.indexOf('\n}')).matchAll(/^    ([a-zA-Z0-9]+):/gm)].map(m => m[1]))
+
+  const orphans = declared.filter(k => !loadable.has(k))
+  assert.deepEqual(orphans, [],
+    `these threshold rules have no owner-configurable path, so they are code-only constants the ` +
+    `owner cannot change: ${orphans.join(', ')}. Add a chk_ column and map it in loadThresholds.`)
+})
+
+// H:char-limits-match-the-owners-prompt — the gate must not be looser than the prompt it grades.
+//
+// `ats_user` (live, 8,807 chars) states "Skills A and B items must be 24 characters or fewer" and
+// "All Relevant Skills must be 20 characters or fewer". The gate used 30 for skills — LOOSER than
+// the owner's own instruction, so a document could satisfy the gate while violating the spec the
+// model was given. Owner set it to 24/20 on 2026-08-22 ("stick to 24/20 to start and we will assess
+// pushing to 30"), so the seeds match the prompt and any change is an owner settings change.
+test('H:char-limits-match-the-owners-prompt: seeded skill/relevant limits are 24 and 20', () => {
+  const CHECKS = readFileSync(new URL('../src/functions/tests/checks.ts', import.meta.url), 'utf8')
+  const block = CHECKS.slice(CHECKS.indexOf('export const DEFAULT_THRESHOLDS'))
+  const grab = (k) => Number((block.match(new RegExp(`\\n  ${k}:\\s*(\\d+)`)) || [])[1])
+  assert.equal(grab('skillMaxChars'), 24,
+    'the seeded skill limit no longer matches ats_user\'s stated 24 characters')
+  assert.equal(grab('relevantMaxChars'), 20,
+    'the seeded relevant limit no longer matches ats_user\'s stated 20 characters')
+})

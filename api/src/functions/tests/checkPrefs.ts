@@ -55,7 +55,24 @@ const ENSURE_CHECK_COLUMNS_SQL = `
       add column if not exists chk_evidence_max_sentences int not null default ${DEFAULT_THRESHOLDS.evidenceMaxSentences},
       add column if not exists chk_evidence_bullet_run  int not null default ${DEFAULT_THRESHOLDS.evidenceBulletRun},
       add column if not exists chk_evidence_escalate  boolean not null default ${DEFAULT_THRESHOLDS.evidenceEscalate},
-      add column if not exists chk_evidence_escalate_max int not null default ${DEFAULT_THRESHOLDS.evidenceEscalateMax}`
+      add column if not exists chk_evidence_escalate_max int not null default ${DEFAULT_THRESHOLDS.evidenceEscalateMax},
+      -- EVERY rule number is tweakable, at the owner's instruction (2026-08-22): "all such rule
+      -- numbers need to be available for tweaking in the settings/config". These six were the
+      -- thresholds runChecks enforced with NO config column, so they were code-only constants the
+      -- owner could not change — the no-hardcoded-config rule, violated quietly by omission rather
+      -- than by a literal. H:every-threshold-is-configurable now fails if a new one is added
+      -- without a column, so the gap cannot regrow one threshold at a time the way it grew.
+      -- (No backticks in this comment: it lives inside a template literal, where a backtick ends it.)
+      add column if not exists chk_skills_split_tolerance int not null default ${DEFAULT_THRESHOLDS.skillsSplitTolerance},
+      add column if not exists chk_wording_run_tokens   int not null default ${DEFAULT_THRESHOLDS.wordingRunTokens},
+      add column if not exists chk_about_me1_words_min  int not null default ${DEFAULT_THRESHOLDS.aboutMe1Words[0]},
+      add column if not exists chk_about_me1_words_max  int not null default ${DEFAULT_THRESHOLDS.aboutMe1Words[1]},
+      add column if not exists chk_about_me2_words_min  int not null default ${DEFAULT_THRESHOLDS.aboutMe2Words[0]},
+      add column if not exists chk_about_me2_words_max  int not null default ${DEFAULT_THRESHOLDS.aboutMe2Words[1]},
+      add column if not exists chk_exec_profile_words_min int not null default ${DEFAULT_THRESHOLDS.execProfileWords[0]},
+      add column if not exists chk_exec_profile_words_max int not null default ${DEFAULT_THRESHOLDS.execProfileWords[1]},
+      add column if not exists chk_core_accomp_words_min int not null default ${DEFAULT_THRESHOLDS.coreAccomplishmentsWords[0]},
+      add column if not exists chk_core_accomp_words_max int not null default ${DEFAULT_THRESHOLDS.coreAccomplishmentsWords[1]}`
 
 export async function ensureCheckPrefs(client: any) {
   await client.query(`create table if not exists owner_search_prefs (owner_email text primary key)`)
@@ -100,7 +117,12 @@ export async function loadThresholds(client: any, owner: string): Promise<Partia
             chk_relevant_allowance, chk_expertise_words, chk_cover_words_min, chk_cover_words_max,
             chk_evidence_threshold, chk_evidence_min_tokens,
             chk_evidence_max_sentences, chk_evidence_bullet_run,
-            chk_evidence_escalate, chk_evidence_escalate_max
+            chk_evidence_escalate, chk_evidence_escalate_max,
+            chk_skills_split_tolerance, chk_wording_run_tokens,
+            chk_about_me1_words_min, chk_about_me1_words_max,
+            chk_about_me2_words_min, chk_about_me2_words_max,
+            chk_exec_profile_words_min, chk_exec_profile_words_max,
+            chk_core_accomp_words_min, chk_core_accomp_words_max
        from owner_search_prefs where owner_email=$1`, [owner])).rows[0]
   if (!r) return {}
   return {
@@ -117,6 +139,12 @@ export async function loadThresholds(client: any, owner: string): Promise<Partia
     evidenceBulletRun: r.chk_evidence_bullet_run ?? undefined,
     evidenceEscalate: r.chk_evidence_escalate === true,
     evidenceEscalateMax: r.chk_evidence_escalate_max ?? undefined,
+    skillsSplitTolerance: r.chk_skills_split_tolerance ?? undefined,
+    wordingRunTokens: r.chk_wording_run_tokens ?? undefined,
+    aboutMe1Words: [r.chk_about_me1_words_min, r.chk_about_me1_words_max],
+    aboutMe2Words: [r.chk_about_me2_words_min, r.chk_about_me2_words_max],
+    execProfileWords: [r.chk_exec_profile_words_min, r.chk_exec_profile_words_max],
+    coreAccomplishmentsWords: [r.chk_core_accomp_words_min, r.chk_core_accomp_words_max],
   }
 }
 
