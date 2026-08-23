@@ -174,3 +174,60 @@ label). Those are marked ALREADY SATISFIED and are excluded from the close-first
 - **Prototype source:** `docs/qc-evidence/qc/data.js:594` — `PROFILE_COMPARE[7].l`, the fixture's one `weak` row.
 - **App target:** n/a
 - **Note:** As above.
+
+## Controls only in the prototype
+
+### `Re-parse JD`
+- **Class:** STRUCTURAL (ALREADY SATISFIED — deliberate rename)
+- **Prototype source:** `docs/qc-evidence/qc/packet.jsx:379` — a dead button in the "Job description parsed" card (no handler in the prototype).
+- **App target:** `app/src/screens/PacketBuilder.jsx:582-584` — existing button wired to `parseJd`, labelled `↻ Re-parse posting` / `Parse posting` off `opp.jdSummary`; a second entry point exists at `PostingAnalysis.jsx:471` for the empty-extraction case.
+- **Note:** Present and wired, with the busy state the prototype lacks. "posting" for "JD" follows the same P5.4 naming decision as the step label. No work.
+
+### `Run again`
+- **Class:** STRUCTURAL (ALREADY SATISFIED — deliberate rename)
+- **Prototype source:** `docs/qc-evidence/qc/packet.jsx:405` — `{jdBusy ? 'Running…' : jdRun ? 'Run again' : 'Run comparison'}`.
+- **App target:** `app/src/screens/PostingAnalysis.jsx:528-530` — existing `AnalysisRunCard` button, `{busy ? 'Analyzing…' : (hasRun ? 'Re-run analysis' : 'Run analysis')}`, driven by `p.jdAnalyzed` from `PacketBuilder.jsx:616`.
+- **Note:** Same three-state control. The app additionally keeps a persistent result strip (`POSTING_HOOKS.analysisResult`) where the prototype only shows a transient line. No work.
+
+### `See how the assets answer these →`
+- **Class:** STRUCTURAL
+- **Prototype source:** `docs/qc-evidence/qc/packet.jsx:411` — the footer button of `ProfileCompare`, `onClick={onOpenQC}` → `setActiveStep('qc')`; the same link appears on `ParsedBlocks` as "See where each one is answered →" (`packet.jsx:159`).
+- **App target:** `app/src/screens/PostingAnalysis.jsx:196-207` — the control row of `ProfileCompareCard`. Extend the EXISTING `onOpenRequirements` prop pattern with a sibling callback passed from `app/src/screens/PacketBuilder.jsx:603-607`, wired to the `setActiveStep('qc')` that already exists on this screen (used at L687 and by the step rail at L836). No new navigation system is needed: `QcRail` already defaults to `tab = 'coverage'` (`QcRail.jsx:641`) and already receives the same `req.data.requirements` spine the JD step reads (`PacketBuilder.jsx:684`), so the destination the prototype's link promises is already built.
+- **Note:** This is the one genuinely missing control on the step. The app's only button here scrolls to the extraction card ("See the lines this was built from"), which answers "what was this built from" but never "where do my assets answer it" — so the JD step currently dead-ends at the posting, and the requirement→asset coverage the user is being told about lives one step away with no link to it.
+
+## Summary
+
+**Counts**
+- DEMO-DATA: 14
+- STRUCTURAL: 16 total, of which **14 are ALREADY SATISFIED** by an existing app surface (mostly renames the app made deliberately, or labels suppressed in the capture by an unresolved comparison) and **2 are genuinely open**.
+- BLOCKED-ON-DATA: 0
+
+The absence of BLOCKED-ON-DATA rows on this step is itself a finding: unlike the prototype's
+`TERM_LIB` / `OPEN_ITEMS` fixtures elsewhere, every jd-step surface the register flags has a live
+app data source — `GET /opportunity/{id}/requirements` (`api/src/functions/tests/appRequirements.ts`)
+carries both the extracted lines and `comparison` (`appDimensions.ts` `comparisonPayload`). Ten of
+the register's rows (`Dimension`, `The posting asks for`, `Your profile evidences`, `Strong match`,
+`Moderate match`, and the eight `PROFILE_COMPARE` dimension labels) are absent from the capture for
+ONE reason: the captured opportunity's comparison was unresolved, so `comparisonState()` returned
+`unresolved` and the table never rendered. Re-capturing against an opportunity whose evidence resolve
+has run would remove most of this section from the register without a line of UI code.
+
+**Open STRUCTURAL rows, highest value first**
+
+1. **`See how the assets answer these →`** — the only missing control. Cheap (one button + one
+   callback through props that already exist), and it closes the step's dead end: the JD step tells
+   the user what the posting asks and what their profile evidences, then offers no route to the QC
+   coverage view that says which asset answers each line. Extend `ProfileCompareCard`'s existing
+   control row and the `setActiveStep('qc')` already on `PacketBuilder`.
+2. **`fail`** (the packet gate word) — the packet gate is currently readable only as the QC step
+   circle's colour. A gate that has no text is unreadable to a colourblind or screen-reader user and
+   invisible in a screenshot. Extend `packetGate()` + `railGateMeta()` (both already imported into
+   `PacketBuilder.jsx`) into the header `Pill` that already renders "Ready to ship ✓". Ranked second
+   only because it is a header concern shared with the `qc` and `send` steps rather than a jd-step
+   surface, so it should be closed once, there, not three times.
+
+Everything else on this step is either the prototype's SafetyIQ fixture content (`PACKET`,
+`REQUIREMENTS`, `PROFILE_COMPARE`, `ATS_TERMS`) or a rename the app made on purpose and documented
+in-file — `JD analysis`→`Posting analysis`, `ATS keywords`→`Keywords`, `No evidence`→`Nothing found`
+/`Falls short`, `fail`→`Blocked`. Those renames should NOT be reverted to match the prototype: each
+one is recorded against a specific claim the prototype's wording would overstate.

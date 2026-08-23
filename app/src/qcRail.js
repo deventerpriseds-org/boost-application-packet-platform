@@ -689,6 +689,44 @@ export function packetGate(entries) {
   return 'pass'
 }
 
+/**
+ * What the packet header may say about readiness - the WORD, and any contradiction behind it.
+ *
+ * Two independent facts meet in that header and nothing has ever compared them:
+ *
+ *   p.status        a STORED string ('ready' / 'sent' / ...), which is what renders "Ready to ship ✓"
+ *   packetGate(...)  COMPUTED from the QC results now on screen
+ *
+ * They are not derived from each other, so they can disagree - a packet can carry status 'ready'
+ * while its assets' checks say `fail`. Until now the computed gate reached the screen ONLY as
+ * `railGateMeta(...).tone` on the QC step circle (PacketBuilder.jsx:843): a colour, on one step, with
+ * no words. So the disagreement was not merely unreported, it was unreadable - invisible to a reader
+ * who cannot distinguish the hues, and absent entirely from the six steps that are not QC.
+ *
+ * This REPORTS; it decides nothing. The gate still comes from the server and approval is still
+ * refused server-side. It is the same stance reconcile() takes on the drawer: when two numbers that
+ * should agree do not, say so rather than quietly rendering the friendlier one.
+ */
+const CLAIMS_READY = { ready: 'is marked ready to ship', sent: 'has already been sent' }
+
+export function packetReadiness(status, entries) {
+  const gate = packetGate(entries)
+  const meta = railGateMeta({ gate })
+  const claim = CLAIMS_READY[String(status || '')]
+  // 'warn' is NOT a contradiction: a warn packet reaches ready legitimately, by an approval with a
+  // recorded reason. Only an outright fail, or checks that never ran, contradict the claim.
+  const contradicts = claim && (gate === 'fail' || gate === 'unchecked')
+  return {
+    gate,
+    word: meta.word,
+    tone: meta.tone,
+    contradiction: contradicts
+      ? 'This packet ' + claim + ', but its checks now read "' + meta.word.toLowerCase() +
+        '" - ' + meta.blurb + '. The stored status and the current checks disagree; the checks are the newer fact.'
+      : null,
+  }
+}
+
 // ── remediation loops ───────────────────────────────────────────────────────────────────────────
 
 /**

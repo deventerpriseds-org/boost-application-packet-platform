@@ -15,7 +15,7 @@ import {
   severityWeight, bySeverity, notApplicableRows, allRows, railBody, railHeadline, verdictLine,
   railVerdict, sectionIdForOffender, inertReason, offenderLinks, countLink, MERGE_FIELDS,
   coverageCards, requirementState, openSeqs, offenderSeq, qcStepState, qcStepDone, packetGate,
-  loopsModel, rowsForRequirement, swapsForRequirement, pctWidth,
+  loopsModel, rowsForRequirement, swapsForRequirement, pctWidth, packetReadiness,
 } from '../src/qcRail.js'
 
 const SRC = new URL('../src/', import.meta.url)
@@ -744,4 +744,52 @@ test('a fact-owned requirement is not counted closed by the rail either', () => 
   assert.equal(card.closed, 1)
   assert.equal(requirementState(card, { seq: 0 }).state, 'unmeasured',
     'a shortfall is a fit problem the coverage check never judged — it is not closed')
+})
+
+// ── the packet header states the gate in WORDS, and reports a contradiction ──────────────────────
+//
+// Until this landed, the computed packet gate reached the screen ONLY as
+// `railGateMeta({gate: packetGate(qcEntries)}).tone` on the QC step circle
+// (PacketBuilder.jsx). A colour, on one step of seven. Two facts meet in that header and nothing
+// compared them: `p.status` is STORED, `packetGate()` is COMPUTED from the checks on screen.
+
+test('H:packet-gate-has-words: the packet gate is never colour-only', () => {
+  const r = packetReadiness('drafting', [{ result: { gate: 'fail', attention: 2 } }])
+  assert.equal(r.gate, 'fail')
+  assert.equal(r.word, 'Blocked', 'the WORD is what a reader who cannot see the tone relies on')
+  assert.ok(r.word && r.word.trim().length > 0)
+  assert.ok(r.tone, 'the tone is still carried - words IN ADDITION to colour, not instead of it')
+  // SPEC 7: the engine's own vocabulary is banned as a user-facing label.
+  for (const raw of ['fail', 'warn', 'pass', 'unchecked']) {
+    assert.notEqual(r.word.toLowerCase(), raw, 'the raw engine token must never be the label')
+  }
+  // An unchecked packet says so; absence of a verdict is not permission.
+  assert.equal(packetReadiness('drafting', []).word, 'Not checked')
+
+  // And the screen must actually RENDER it, not merely be able to.
+  const pb = readSrc('screens/PacketBuilder.jsx').replace(/\/\*[\s\S]*?\*\//g, '')
+  assert.match(pb, /data-qc="packet-gate"[\s\S]{0,80}\{readiness\.word\}/,
+    'the header does not render the gate word')
+})
+
+test('H:stored-ready-vs-computed-gate: a claim the checks contradict is REPORTED', () => {
+  // 'ready' is a stored string; the gate is computed. Neither derives from the other.
+  const lying = packetReadiness('ready', [{ result: { gate: 'fail', attention: 1 } }])
+  assert.ok(lying.contradiction, 'status ready beside a failing gate must never render silently')
+  assert.match(lying.contradiction, /marked ready to ship/)
+  assert.match(lying.contradiction, /blocked/i)
+
+  const sentButBroken = packetReadiness('sent', [{ result: { gate: null } }])
+  assert.ok(sentButBroken.contradiction, 'a sent packet whose checks never ran is also a contradiction')
+
+  // NOT contradictions - these are the states that legitimately coexist, and a guard that fired on
+  // them would be the cry-wolf failure hardening rule 2 forbids.
+  assert.equal(packetReadiness('ready', [{ result: { gate: 'warn', attention: 1 } }]).contradiction, null,
+    'a warn packet reaches ready legitimately, by an approval with a recorded reason')
+  assert.equal(packetReadiness('ready', [{ result: { gate: 'pass', attention: 0 } }]).contradiction, null)
+  assert.equal(packetReadiness('drafting', [{ result: { gate: 'fail', attention: 3 } }]).contradiction, null,
+    'a failing gate on a packet that claims nothing is just a failing gate')
+
+  const pb = readSrc('screens/PacketBuilder.jsx').replace(/\/\*[\s\S]*?\*\//g, '')
+  assert.match(pb, /readiness\.contradiction && \(/, 'the contradiction is computed but never rendered')
 })

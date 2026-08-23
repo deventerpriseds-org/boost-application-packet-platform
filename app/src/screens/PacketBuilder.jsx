@@ -12,7 +12,7 @@ import {
 import { postingBody } from '../postingAnalysis.js'
 import { PACKET_HOOKS, ASSET_BODY_DEFAULT_OPEN } from '../packetBuilder.js'
 import QcRail, { useQcEntries } from './QcRail.jsx'
-import { qcStepState, packetGate, railGateMeta } from '../qcRail.js'
+import { qcStepState, packetGate, railGateMeta, packetReadiness } from '../qcRail.js'
 
 const TYPE_LABEL = {
   resume: 'Resume', compact_resume: 'Compact resume', cover: 'Cover letter',
@@ -528,6 +528,10 @@ export default function PacketBuilder({ id, step }) {
   const p = pState.packet
   const artifacts = p.artifacts || []
   const ready = p.status === 'ready'
+  // The stored status and the COMPUTED gate, compared in one place. useQcEntries is fetched
+  // screen-wide (only withInsertions/withRemediation are gated on the QC step), so this is live on
+  // every step, not just QC.
+  const readiness = packetReadiness(p.status, qcEntries)
   const coveredKw = p.coveredKw || []
   const missingKw = p.missingKw || []
   const atsScore = typeof p.atsScore === 'number' ? p.atsScore : null
@@ -812,6 +816,10 @@ export default function PacketBuilder({ id, step }) {
           {/* Not "ATS Match": nothing here came from an applicant tracking system, and the number is
               a model estimate, not keyword coverage. It is also the door to the keyword tally. */}
           <MatchEstimateButton atsScore={atsScore} onClick={() => setAtsOpen(true)} />
+          {/* The COMPUTED gate, in words, on every step. It used to reach the screen only as
+              railGateMeta().tone on the QC step circle (see StepCircle below) - a colour, on one
+              step of seven, which a reader who cannot tell the hues apart could not read at all. */}
+          <Pill tone={readiness.tone} data-qc="packet-gate">{readiness.word}</Pill>
           {ready ? <Pill tone="green">Ready to ship ✓</Pill> : allBusy ? <Pill tone="yellow">building</Pill> : null}
           {ready && <button className="px-btn px-btn-accent" onClick={() => go(`/compose/${id}`)}>Send packet →</button>}
           {opp?.stage === 'applied'
@@ -822,6 +830,15 @@ export default function PacketBuilder({ id, step }) {
               </button>
             )}
         </div>
+        {/* p.status is STORED and packetGate() is COMPUTED from the checks on screen; neither is
+            derived from the other, so they can disagree. Saying so is the same stance reconcile()
+            takes in the drawer - never quietly render the friendlier of two numbers that should
+            agree. This reports; the server still owns the verdict and still refuses approval. */}
+        {readiness.contradiction && (
+          <div className="px-note" data-qc="packet-gate-contradiction" style={{ marginTop: 8 }}>
+            <b>These two do not agree.</b> {readiness.contradiction}
+          </div>
+        )}
       </div>
 
       {/* Two columns since D4: nav rail + content. The old 280px right keyword column is gone, which is
