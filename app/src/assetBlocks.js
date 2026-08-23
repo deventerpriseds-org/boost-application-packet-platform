@@ -482,5 +482,25 @@ export function targetFor(mergeField, thresholds) {
     const w = n(t.expertiseWords)
     return w === null ? null : `exactly ${w} words each`
   }
+  // Cover letter and portfolio. THE THRESHOLD WINS OVER THE FIELD NAME, and the design says so:
+  // the prototype heads these "48 words · 45-48 words" and "254 words · 250-400 words", which are
+  // `aboutMe1Words` and `coverWords` - NOT the 50 and the 180 baked into `@AboutMe1_50words` and
+  // `@CoreAccomplishments_5blts_180words`. The name's number is stale; the threshold is what the
+  // gate tests and what the design displays. Reading the rendered prototype settled a question that
+  // reading the code could not.
+  const RANGE = {
+    '@CoverLetterBody': 'coverWords',
+    '@AboutMe1_50words': 'aboutMe1Words',
+    '@AboutMe2_60words': 'aboutMe2Words',
+    '@ExecutiveProfile_55words': 'execProfileWords',
+    '@CoreAccomplishments_5blts_180words': 'coreAccomplishmentsWords',
+  }
+  const key = RANGE[mergeField]
+  if (key) {
+    const r = t[key]
+    if (!Array.isArray(r) || r.length !== 2) return null
+    const lo = n(r[0]); const hi = n(r[1])
+    return lo === null || hi === null ? null : `${lo}\u2013${hi} words`
+  }
   return null
 }

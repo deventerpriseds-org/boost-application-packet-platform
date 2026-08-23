@@ -118,6 +118,15 @@ export const FIELD_LABEL = {
   RelevantBullets1: 'Relevant 1',
   RelevantBullets2: 'Relevant 2',
   RelevantBullets3: 'Relevant 3',
+  // Cover letter and portfolio. The '@' names are template slots; these are what the document
+  // calls them (rendered prototype: "Letter body", "About me 1", "About me 2").
+  '@Company': 'Company',
+  '@CoverLetterDate': 'Date',
+  '@CoverLetterBody': 'Letter body',
+  '@AboutMe1_50words': 'About me 1',
+  '@AboutMe2_60words': 'About me 2',
+  '@ExecutiveProfile_55words': 'Executive profile',
+  '@CoreAccomplishments_5blts_180words': 'Core accomplishments',
 }
 export const fieldLabel = (f) => FIELD_LABEL[f] || String(f || '')
 

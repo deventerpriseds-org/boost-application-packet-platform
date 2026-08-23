@@ -24,7 +24,8 @@
 // omitting the stat — an omitted stat and a measured zero read the same to a reader.
 //
 // A merge field the pipeline could not fill still gets a card, dashed and marked
-// "static template - not generated". `generated: false` is the API's own word for it. A block that
+// "Template - same in every packet" (the design's wording; `generated: false` is the API's own
+// word for the same state). A block that
 // was not changed has to SAY so; looking generated is the failure this screen exists to prevent.
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { api } from '../api.js'
@@ -364,7 +365,7 @@ function AssetBlock({ row, reqs, swapsForList, wide, artifactId, listOwners, thr
         <span style={{ flex: 1 }} />
         <span className="px-small" data-qc={BLOCK_HOOKS.fieldSlot}
           style={{ textTransform: 'none', fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace' }}>{row.merge_field}</span>
-        {expect && (
+        {expect && !target && (
           <span className="px-small" style={{ textTransform: 'none' }}>
             field name asks for {expect.bullets ? `${expect.bullets} bullets` : ''}{expect.bullets && expect.words ? ' - ' : ''}{expect.words ? `${expect.words} words` : ''}
             {isStatic ? '' : ` - this draft has ${draftSizeText(row, expect)}`}
@@ -449,7 +450,7 @@ function AssetBlock({ row, reqs, swapsForList, wide, artifactId, listOwners, thr
     }}>
       <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
         {isStatic
-          ? <span className="px-small" style={{ fontWeight: 700, color: 'var(--proto-ink2)' }}>static template · not generated</span>
+          ? <span className="px-small" style={{ fontWeight: 700, color: 'var(--proto-ink2)' }}>Template · same in every packet</span>
           : <span className="px-small" style={{ fontWeight: 700, color: 'var(--text-brand)' }}>{METHOD_LABEL[row.method] || row.method}</span>}
         <span className="px-small">loop {row.loop}</span>
       </div>

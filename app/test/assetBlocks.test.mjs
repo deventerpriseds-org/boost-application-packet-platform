@@ -648,3 +648,40 @@ test('H:a-field-is-named-the-way-the-document-names-it: human name heads it, slo
   assert.ok(!/fontWeight: 600 \}\}>\{row\.merge_field\}/.test(s),
     'the identifier must not be the heading')
 })
+
+/**
+ * H:the-threshold-beats-the-field-name
+ *
+ * Some merge fields bake a size into their NAME - `@AboutMe1_50words`,
+ * `@CoreAccomplishments_5blts_180words`. The checks engine holds a different number for the same
+ * field: `aboutMe1Words [45, 48]`, `coreAccomplishmentsWords [98, 125]`. Two owners of one number,
+ * disagreeing silently, and a 50-word draft of `@AboutMe1_50words` satisfies its own name while
+ * FAILING the gate.
+ *
+ * The design settles it, and rendering the prototype is what surfaced the answer: it heads those
+ * fields "48 words · 45-48 words" and "254 words · 250-400 words" - the THRESHOLDS. The number in
+ * the name is stale. So the threshold is displayed and the name-derived expectation is suppressed
+ * wherever a threshold exists, because two different targets beside one measurement is worse than
+ * either alone.
+ */
+test('H:the-threshold-beats-the-field-name: ranges come from thresholds, not from the name', () => {
+  const t = { coverWords: [250, 400], aboutMe1Words: [45, 48], aboutMe2Words: [75, 80],
+              execProfileWords: [50, 55], coreAccomplishmentsWords: [98, 125] }
+
+  assert.equal(targetFor('@AboutMe1_50words', t), '45–48 words',
+    'the NAME says 50; the gate says 45-48; the gate is what is shown')
+  assert.equal(targetFor('@CoreAccomplishments_5blts_180words', t), '98–125 words',
+    'the name says 180 - nowhere near what is enforced')
+  assert.equal(targetFor('@CoverLetterBody', t), '250–400 words')
+  assert.equal(targetFor('@ExecutiveProfile_55words', t), '50–55 words')
+
+  // Never a half-range, and never a number pulled out of the name as a fallback.
+  assert.equal(targetFor('@AboutMe1_50words', { aboutMe1Words: [45] }), null)
+  assert.equal(targetFor('@AboutMe1_50words', {}), null)
+  assert.ok(!/50 words/.test(String(targetFor('@AboutMe1_50words', t))),
+    'the stale name number must never appear')
+
+  // And the name-derived expectation must not render beside a threshold target.
+  assert.match(stripComments(BLOCKS_SRC), /\{expect && !target && \(/,
+    'two different targets beside one measurement is worse than either alone')
+})
