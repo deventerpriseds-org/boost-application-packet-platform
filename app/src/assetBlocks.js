@@ -38,6 +38,8 @@ export const BLOCK_HOOKS = {
   quote: 'blocks-posting-quote',   // the posting's own words echoed onto this asset
   compareToggle: 'blocks-compare-toggle',
   before: 'blocks-before',
+  meterToggle: 'blocks-answers-toggle',   // the disclosure on "What this X answers"
+  meterSummary: 'blocks-answers-summary', // the counts kept on the COLLAPSED row
   fieldChangeLog: 'blocks-corrected-for-you', // the field's own "Corrected for you" list (P8.6 inline).
   // NOT named `corrections`: corrections.test.mjs forbids /\.corrections\b/ in any .jsx so no
   // component can read `result.corrections` instead of the selector, and BLOCK_HOOKS.corrections
@@ -416,6 +418,18 @@ export function registerListOwners(prev, artifactId, label, lists) {
  * Lives here rather than in the .jsx for the reason this module's header gives: `node --test` cannot
  * import a .jsx, so a derivation written there is a derivation no test can exercise.
  */
+/**
+ * "What this X answers" starts COLLAPSED - this is the panel P8.7 always meant.
+ *
+ * P8.7 says "asset headers are collapsed by default". In the design an ASSET HEADER is this
+ * counters panel INSIDE the card (`qc/assets.jsx` AssetHeader, `React.useState(false)`;
+ * screens/INDEX.md 09 "Artifact card header ... collapsed asset header", 10 expanded). The app had
+ * previously applied that instruction to the whole card, which hid the draft - see
+ * ASSET_BODY_DEFAULT_OPEN. The card body opens; THIS closes. Both halves of P8.7, finally on the
+ * objects it was written about.
+ */
+export const ASSET_ANSWERS_DEFAULT_OPEN = false
+
 export function correctionsForField(rows, mergeField) {
   if (!Array.isArray(rows) || !mergeField) return []
   return rows.filter((r) => r && r.merge_field === mergeField)

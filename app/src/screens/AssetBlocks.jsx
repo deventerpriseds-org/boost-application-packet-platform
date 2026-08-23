@@ -31,7 +31,7 @@ import { api } from '../api.js'
 import {
   BLOCK_HOOKS, KIND_ABBR, KIND_WORD, METHOD_LABEL,
   countMismatchNote, deriveItems, draftSizeText, expectationFor, latestRows, listBodyModel, listsOf,
-  correctionsForField,
+  ASSET_ANSWERS_DEFAULT_OPEN, correctionsForField,
   meterModel, reqsForRow, scopeSwaps, shapeOf, sharedSourceNote, statPct, wordCount,
 } from '../assetBlocks.js'
 import { HIGHLIGHT_CLASS } from '../highlight.js'
@@ -39,6 +39,10 @@ import { railChangeLog } from '../qcRail.js'
 import { CorrectionRow } from './QcRail.jsx'
 
 export { BLOCK_HOOKS }
+
+// The reader-side noun for the panel title. SPEC 7: name things by what the reader recognises.
+const ANSWERS_LABEL = { resume: 'resume', compact_resume: 'ATS resume', cover: 'cover letter',
+  portfolio: 'portfolio', video: 'intro video' }
 
 // ── shared provenance loader ────────────────────────────────────────────────────────────────────
 
@@ -178,19 +182,55 @@ function Stat({ label, n, d, sub }) {
  * stat whose source is missing is not shown as 0 of 0 — it is stated as unknown in the notes
  * underneath, so "nothing was placed" and "nothing was measured" cannot be confused.
  */
-function DistributionMeter({ rows, filled, unfilled, requirements, scopedSwaps, terms }) {
+/**
+ * "What this resume answers" - the asset header, COLLAPSED by default.
+ *
+ * This is the panel P8.7 was always talking about ("asset headers are collapsed by default"). It was
+ * previously applied to the whole artifact card, which hid the draft; see `ASSET_BODY_DEFAULT_OPEN`.
+ * The card body now opens, and THIS is what closes - which is what the prototype does:
+ * `screens/INDEX.md` 09 "Artifact card header … collapsed asset header", 10 the same expanded.
+ *
+ * Two things carry over from the prototype and one deliberately does not.
+ *
+ *   CARRIED: the reader-side name. "What this resume answers" is a question the reader has;
+ *   "What is in this asset" is a description of a data structure. SPEC §7 copy rules.
+ *   CARRIED: collapsed, with the numbers still readable on the closed row. A disclosure that hides
+ *   its own summary makes you open it to find out whether opening it was worth it.
+ *   NOT CARRIED: the prototype's stat NAMES. It shows "5/5 must-haves · 11/13 keywords" against
+ *   fabricated demo data. Ours come from `meterModel`, which reports what is actually measured and
+ *   says so when a denominator does not exist yet - "no published, scoreable library terms exist,
+ *   so how many this asset places is unknown - not measured, not zero". Replacing a measured stat
+ *   with the prototype's prettier one would be inventing a number, which is the one thing this
+ *   screen exists to prevent.
+ */
+function DistributionMeter({ rows, filled, unfilled, requirements, scopedSwaps, terms, label }) {
   const { stats, notes } = meterModel({ rows, filled, unfilled, requirements, scopedSwaps, terms })
+  const [open, setOpen] = useState(ASSET_ANSWERS_DEFAULT_OPEN)
   if (!stats.length && !notes.length) return null
+  const toggle = () => setOpen((v) => !v)
 
   return (
-    <div className="px-box" data-qc={BLOCK_HOOKS.meter} style={{ padding: 14, display: 'flex', flexDirection: 'column', gap: 10 }}>
-      <div style={{ fontSize: 13, fontWeight: 700 }}>What is in this asset</div>
-      {stats.length > 0 && (
+    <div className="px-box" data-qc={BLOCK_HOOKS.meter} data-qc-open={open ? '1' : '0'}
+      style={{ padding: 14, display: 'flex', flexDirection: 'column', gap: open ? 10 : 0 }}>
+      <div role="button" tabIndex={0} data-qc={BLOCK_HOOKS.meterToggle} aria-expanded={open}
+        onClick={toggle} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle() } }}
+        style={{ display: 'flex', alignItems: 'baseline', gap: 10, flexWrap: 'wrap', cursor: 'pointer' }}>
+        <div style={{ fontSize: 13, fontWeight: 700 }}>What this {label || 'asset'} answers</div>
+        {/* The summary stays on the collapsed row: the counts are the reason to open it. */}
+        {!open && stats.map((s) => (
+          <span key={s.key} className="px-small" data-qc={BLOCK_HOOKS.meterSummary} style={{ textTransform: 'none' }}>
+            {s.n}{s.d == null ? '' : ` of ${s.d}`} {s.label.toLowerCase()}
+          </span>
+        ))}
+        <span style={{ flex: 1 }} />
+        <span className="px-link" style={{ fontSize: 11.5 }}>{open ? 'Hide' : 'Show'}</span>
+      </div>
+      {open && stats.length > 0 && (
         <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap' }}>
           {stats.map((s) => <Stat key={s.key} label={s.label} n={s.n} d={s.d} sub={s.sub} />)}
         </div>
       )}
-      {notes.map((n, i) => (
+      {open && notes.map((n, i) => (
         <div key={i} className="px-small" data-qc={BLOCK_HOOKS.note} style={{ textTransform: 'none' }}>{n}</div>
       ))}
     </div>
@@ -520,6 +560,7 @@ export default function AssetBlocks({ artifact, provenance, fallback, defaultOpe
             requirements={provenance && provenance.requirements}
             scopedSwaps={scopedSwaps}
             terms={null}
+            label={ANSWERS_LABEL[artifact.type] || 'asset'}
           />
           {rows.map((r) => (
             <AssetBlock

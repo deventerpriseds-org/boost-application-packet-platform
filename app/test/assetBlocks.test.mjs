@@ -349,7 +349,7 @@ test('draftSizeText omits bullets when the field name never asked for them', () 
 })
 
 // ── P8.7: the blocks card is selectable by CSS, and the two disclosures stay opposite ───────────
-import { BLOCK_HOOKS, correctionsForField, orderFields } from '../src/assetBlocks.js'
+import { ASSET_ANSWERS_DEFAULT_OPEN, BLOCK_HOOKS, correctionsForField, orderFields } from '../src/assetBlocks.js'
 import { ASSET_BODY_DEFAULT_OPEN, PACKET_HOOKS } from '../src/packetBuilder.js'
 
 const BLOCKS_SRC = src('../src/screens/AssetBlocks.jsx')
@@ -520,4 +520,39 @@ test('H:sidenav-starts-collapsed: default closed, still navigable, and the state
   assert.ok(iconLine, 'the nav icon must still be rendered')
   assert.ok(!/\{open &&\s*$/.test(s.slice(0, s.indexOf(iconLine)).trimEnd()),
     'the icon must NOT be behind `open &&` - a rail you cannot navigate from is hidden, not collapsed')
+})
+
+/**
+ * H:the-answers-panel-is-what-p8.7-collapses
+ *
+ * P8.7 says "asset headers are collapsed by default". In the design an ASSET HEADER is the
+ * "What this resume answers" counters panel INSIDE the card - `qc/assets.jsx` AssetHeader carries
+ * its own `React.useState(false)`, and screens/INDEX.md 09 captions the card "Artifact card header
+ * ... collapsed asset header" with 10 showing it expanded.
+ *
+ * The app had applied that instruction to the whole artifact card, which hid the DRAFT (see
+ * ASSET_BODY_DEFAULT_OPEN, measured: the live resume step rendered 850 chars and no blocks panel).
+ * Both halves now sit on the objects P8.7 was written about: the card body OPENS, this panel CLOSES.
+ * Asserting them together is the point - a fix that flips the wrong one fails here either way.
+ *
+ * Owner, 2026-08-23: "things that are supposed to be collapsed are collapsed and you missed that
+ * (ie the what this resume answers section that still looks different)".
+ */
+test('H:the-answers-panel-is-what-p8.7-collapses: closed by default, summary still readable', () => {
+  assert.equal(ASSET_ANSWERS_DEFAULT_OPEN, false, 'P8.7 applies to THIS panel')
+  assert.equal(ASSET_BODY_DEFAULT_OPEN, true, 'and never to the card body - that hid the draft')
+
+  const s = stripComments(BLOCKS_SRC)
+  assert.match(s, /useState\(ASSET_ANSWERS_DEFAULT_OPEN\)/,
+    'seeded from the named default, not a bare literal')
+  assert.match(s, /What this \{label \|\| 'asset'\} answers/,
+    "named from the reader's side - 'What is in this asset' describes a data structure")
+  assert.match(s, /data-qc=\{BLOCK_HOOKS\.meter\}[\s\S]{0,160}data-qc-open=/,
+    'publishes its state, or "collapsed by default" is unprovable on the live site')
+  assert.match(s, /data-qc=\{BLOCK_HOOKS\.meterToggle\}/, 'collapsible needs a control')
+
+  // The counts stay on the CLOSED row. A disclosure that hides its own summary makes you open it
+  // to discover whether opening it was worth it.
+  assert.match(s, /!open && stats\.map/, 'the summary renders while collapsed')
+  assert.match(s, /data-qc=\{BLOCK_HOOKS\.meterSummary\}/, 'and is addressable for verification')
 })
