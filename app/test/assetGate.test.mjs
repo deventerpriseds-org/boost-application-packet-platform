@@ -8,7 +8,7 @@ import { readFileSync } from 'node:fs'
 import {
   footerFor, reconcile, reviewerAttention, attentionSplit, engineRows, scoreParts,
   gateMeta, stateMeta, checkLabel, fieldLabel, assetLabel, STATE_META,
-  SEV_LABEL, severityFor, severityMeta, CHANGE_LOG_HEADLINE, METHOD_LABEL,
+  SEV_LABEL, severityFor, severityMeta, CHANGE_LOG_HEADLINE, METHOD_LABEL, correctionSentence,
 } from '../src/assetGate.js'
 
 // The two payloads a verifier reproduced the AC3 defects with. They are shared by the tests below
@@ -438,8 +438,6 @@ test('H:correction-controls-use-prototype-words: the change-log row speaks the d
       'the prototype ships a "' + m[1] + '" control and the change-log row does not use those words')
   }
   assert.equal(SEV_LABEL.fixed, 'Corrected for you')
-  assert.match(stripped, /row\.undone \? 'Undone' : SEV_LABEL\.fixed/,
-    'the corrected state must read its word from SEV_LABEL, not restate it')
 
   // The rename must not have cost the reader the destination: the field tag still renders.
   assert.match(stripped, /\{row\.merge_field\}<\/span>/,
@@ -475,4 +473,32 @@ test('H:one-method-label: `method` has exactly ONE plain-language table, and it 
   }
   assert.notEqual(METHOD_LABEL.template_fill, METHOD_LABEL.model_rewrite,
     'the changed and unchanged cases must not read the same')
+})
+
+test('H:no-state-word-stutter: the correction row states its state ONCE', () => {
+  // Shipped for one deploy as: section header "CORRECTED FOR YOU", then the row reading
+  // "Corrected for you Corrected: \"15\" rewritten as \"multiple\" in Resume summary."
+  // Three times in two lines. correctionSentence() ALWAYS opens with the state word (R1 guards
+  // that prefix), so any separate label beside it is a restatement in BOTH states.
+  //
+  // Asserted on the RENDERED PAIR, not on one constant: the defect was two correct things placed
+  // next to each other, so a guard reading either one alone cannot see it.
+  const src = readFileSync(new URL('../src/screens/QcRail.jsx', import.meta.url), 'utf8')
+  const stripped = src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')
+
+  const row = stripped.slice(stripped.indexOf('export function CorrectionRow'))
+  const header = row.slice(0, row.indexOf('data-qc-part="why"'))
+  assert.ok(header.includes('data-qc-part="sentence"'), 'anchor moved - this guard is reading the wrong region')
+  assert.ok(!/<b[^>]*>\{row\.undone \?/.test(header),
+    'a state label is being rendered beside the sentence, which already opens with that word')
+  for (const dup of ["'Undone'", 'SEV_LABEL.fixed']) {
+    assert.ok(!header.includes(dup),
+      'the row header restates the state word ' + dup + '; correctionSentence already carries it')
+  }
+
+  // The prefix itself must SURVIVE - it is the accessible signal now, and eight of nine pill tones
+  // measure below 4.5:1, so it cannot be replaced by colour. This is R1's invariant, restated here
+  // because THIS guard is what would otherwise tempt someone to delete the prefix too.
+  assert.match(correctionSentence({ phrase: 'a', replacement: 'b', fieldName: 'F', undone: false }), /^Corrected: /)
+  assert.match(correctionSentence({ phrase: 'a', replacement: 'b', fieldName: 'F', undone: true }), /^Undone: /)
 })

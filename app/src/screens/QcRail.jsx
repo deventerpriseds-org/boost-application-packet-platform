@@ -511,15 +511,20 @@ export function CorrectionRow({ row, artifactId, onOpen, onUndid, busy, setBusy,
       data-qc-state={row.undone ? 'undone' : 'corrected'} data-qc-seq={row.seqKnown ? row.seq : ''}
       style={{ padding: 10, marginBottom: 8, borderLeft: '3px solid ' + toneColor(row.undone ? 'panel' : 'accent') }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-        {/* NOT a <Pill>. Measured in test/browser/run-qc-rail.mjs: of the nine px-pill tones, eight
-            fall below 4.5:1 in at least one theme - `accent` is 2.90:1 in dark and `panel` is
-            4.04:1 dark / 4.28:1 light, which are the two this row would have used. That is a live
-            defect in the shared tones and it is reported as one; what it is NOT is a reason to add
-            a ninth unreadable pill. The state is the row's own ink, which measures well in both
-            themes, and the colour is a RULE rather than the text - so the two states are told apart
-            by their word first and their colour second, which is also the only way a reader who
-            cannot see the difference gets the information at all. */}
-        <b style={{ fontSize: 12, letterSpacing: '.3px' }}>{row.undone ? 'Undone' : SEV_LABEL.fixed}</b>
+        {/* THE STATE WORD IS THE SENTENCE'S OWN PREFIX, and it is not repeated beside it.
+            correctionSentence() always opens with `Corrected: ` or `Undone: ` - R1 guards exactly
+            that - so a separate bold label restated it in BOTH states. It shipped for one deploy
+            reading "Corrected for you Corrected: "15" rewritten as..." under a section header that
+            already said CORRECTED FOR YOU: the same word three times in two lines. Caught by
+            looking at the live screenshot, not by a test.
+
+            What the deleted label was FOR still holds and is still satisfied. Measured in
+            test/browser/run-qc-rail.mjs: of the nine px-pill tones, eight fall below 4.5:1 in at
+            least one theme - `accent` is 2.90:1 dark, `panel` 4.04:1 dark / 4.28:1 light, the two
+            this row would have used. So the state must be carried by a WORD in primary ink rather
+            than by a pill, and the colour must stay a secondary rule. The sentence's own prefix is
+            that word, in that ink. Dropping the duplicate costs the reader nothing; what would cost
+            them is dropping the prefix, which is why R1 guards it and this does not touch it. */}
         <span data-qc-part="sentence" style={{ fontSize: 13, flex: 1, minWidth: 180, color: 'var(--proto-ink)' }}>{row.sentence}</span>
         {/* Rendered INSIDE the field it corrects (AssetBlocks' margin), the field name and the
             "Open <field>" button are both restatements of where the reader already is. The row is
