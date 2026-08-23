@@ -92,6 +92,47 @@ Secondary observations, lower priority:
 
 ---
 
+## 3b. SHIPPED TONIGHT — advisory gate mode (and it is a BRIDGE, not a fix)
+
+`chk_gate_advisory` is LIVE and **ON for von.ellis@enterpriseds.io** (commit `c226247`, deploy run
+32619566221; verified live: `advisory:true`, `gate:"fail"`, `attention:4`). A `fail` is now
+overridable through the existing audited path — verified session, >=8-char reason, recorded. It does
+NOT rewrite the gate value and does NOT change any check row.
+
+**The owner correctly called this the lesser option.** It does not repair coverage; it lets him ship
+past a grader that reads 0/12. Two live costs: `approvalBlock` is PER ARTIFACT, so it is four
+override prompts per packet; and habituation — if every packet ships by accepting four blocking
+findings, the QC rail becomes noise he has trained himself to click past, which is worse than no
+gate. **Turn `chk_gate_advisory` back OFF the day the confirmation path lands.** Nothing else
+reminds him.
+
+Five sites carry advisory (two server gates, `recomputePacket`, and two client mirrors). The
+`recomputePacket` one was found by the AC pass and would have failed SILENTLY — it counts
+`gate='fail'` and needs zero for `ready`, so without it every artifact goes `approved`, every call
+returns 200, and nothing ships.
+
+## 3c. YOUR TASK: Option A — the confirmation path
+
+**The ACs are ALREADY WRITTEN: `.claude/ac/confirm-proposed-evidence.md`** (39 ACs, 8 risks,
+11-guard spec). Read them; do not re-derive them. Two design traps they caught, both verified
+independently against source:
+1. **A confirmation cannot be keyed on `requirement_id`.** `writeRequirements` runs
+   `delete from requirement where opp_id=$1` on every re-extraction (`appRequirements.ts:359,388`)
+   and `requirement_evidence.requirement_id` is `ON DELETE CASCADE` (`schema.ts:406`) — re-parsing a
+   posting would silently destroy every confirmation the owner gave. Key on CLAIM IDENTITY:
+   requirement text + `source_key` + offsets + quote bytes + `record_sha256`.
+2. **The gate path never re-verifies evidence.** `verifyRequirementRows` is called only at
+   `appRequirements.ts:499,559`; `appChecks.ts:77` builds the gate's evidence off the raw join.
+   Harmless while proposals cannot count — fatal the moment one does, because a confirmation
+   pointing at a profile record the owner has since edited enters the numerator unchecked.
+3. Any confirmation column reaching the joined row MUST be named `evidence_confirmed_*` or the D19
+   prefix redaction will leave it asserting "a human vouched for this" beside a withdrawn quote.
+
+Migration already dry-run on a POPULATED local DB: two nullable columns + an all-or-none
+`(confirmed_at is null) = (confirmed_by is null)` constraint apply cleanly, the existing `proposed`
+row survives UNCONFIRMED, a half-confirmation is rejected by a real constraint error, and
+`add column ... not null default false` DOES backfill existing rows.
+
 ## 4. Corrections to earlier claims — do not re-inherit these errors
 
 - **"31% of 1,941 opportunities lack `jd_real`" was WRONG.** That counted dismissed + demo + other
