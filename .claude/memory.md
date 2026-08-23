@@ -2585,3 +2585,56 @@ Three of my hypotheses died to evidence in a row — `covers()` threshold (cover
 rows, not term placement), differing options functions (`resolveOptionsFor` IS
 `resolveOptionsFrom(loadThresholds(...))`), and "thin exemplar" (the real posting scored worse).
 Checking each instead of shipping the first one is what found the actual bug.
+
+## 2026-08-23 — Advisory gate mode (owner authorised: "continue to ship tonight")
+
+**Why:** the deterministic evidence resolver returns 0 of 35, so `must_have_coverage` is pinned at
+0/12 and a `fail` gate is absolutely non-overridable — meaning NO packet could reach `ready` and
+nothing could ship at all. The owner shipped fine before this gate existed.
+
+**What it is:** `chk_gate_advisory` (owner setting, DEFAULT FALSE). When ON, a `fail` becomes
+overridable through the EXISTING audited path — verified session, >=8-char reason, `override_by` /
+`override_at` / `override_reason` recorded. It is NOT a bypass and NOT a silent pass. Crucially it
+does **not** rewrite the gate value: an advisory run still records `gate='fail'` with the same
+findings and the same `attention_count`, so score history stays comparable and a reviewer still sees
+exactly what was wrong.
+
+**FIVE sites, not two — and the AC pass found three of them before they shipped:**
+1. `appChecks.approvalBlock` — fail overridable when advisory
+2. `appChecks.artifactGateOverride` — the 409 lifted when advisory (else the owner could approve but
+   not record the override that approval now requires — a deadlock)
+3. **`appPackets.recomputePacket`** — THE ONE THAT DECIDES WHETHER ANYTHING SHIPS. It counts
+   `gate='fail'` and needs zero for `ready`. Since advisory deliberately leaves the value at `fail`,
+   updating only 1+2 meant every artifact goes `approved`, every call returns 200, and the packet
+   still computes `review` — `Send packet` never renders. **Identical shape to the video-artifact
+   defect that made `ready` unreachable for 39 packets.** Would have failed silently.
+4. `app/src/assetGate.footerFor` — the Approve button is dead client-side on a fail, so the reason
+   prompt never opens and the server change is unreachable through the product
+5. `app/src/qcRail.qcStepState` — the QC step stays open against a packet the server moved to `ready`
+
+`packetGate` (the step-circle colour) is deliberately UNCHANGED: a packet that shipped under an
+override should still show its findings colour. Hiding it would destroy the discoverability the
+override exists to provide.
+
+**Guards, all mutation-proven:** `H:advisory-off-still-blocks-a-fail`,
+`H:advisory-fail-still-needs-a-recorded-override`, `H:advisory-never-touches-a-warn-or-a-pass`,
+`H:ready-counts-an-overridden-fail-only-in-advisory-mode`.
+
+### A NEW DEFECT CLASS FOUND WHILE BUILDING IT — `H:every-chk-column-is-selected`
+`chk_gate_advisory` was declared, defaulted, writable and MAPPED in `loadThresholds`'s return — and
+still read `false` forever, because `loadThresholds` uses an EXPLICIT column list and the new column
+was not in it. `r.chk_gate_advisory` was `undefined`, and `undefined === true` is false. Every layer
+looked right in isolation; the owner's toggle did nothing. `H:every-threshold-is-configurable` did
+NOT catch it — that proves a threshold HAS a column, not that the column is ever READ. The new guard
+asserts the projection, which is the step in between. Mutation-proven.
+
+### Ledger grammar, twice
+Two of my own rows broke `deferredLedger.test.mjs`: a status column reading `OPEN — **THE REAL
+COVERAGE BLOCKER**` instead of the bare token `OPEN`, and a `grep` check on an OPEN row for something
+not built yet. For an unbuilt thing the directive is `absent` — it stays quiet until someone builds
+it, then says "close the row". `grep` on an OPEN row means "prove the defect is still here".
+
+### Verified, not assumed
+`add column ... not null default false` DOES backfill existing rows (measured: existing row reads
+`f`, not NULL). So the owner's existing row starts OFF. `syncCheckPrefDefaults` is for CHANGED seeds
+on EXISTING columns, not this.

@@ -135,6 +135,17 @@ export function footerFor(result) {
     return { kind: 'unchecked', label: 'Approve', disabled: true, headline: 'Not checked',
       reason: 'no checks have been run for this artifact - run them before approving' }
   }
+  // ADVISORY MODE. `result.advisory` is the SERVER's boolean, published beside the gate for exactly
+  // the reason stated above — this function must not form its own opinion by reading settings. A
+  // fail is still a fail and still says so; what changes is that the owner may accept it on the
+  // record instead of being stuck. The wording keeps mirroring approvalBlock()'s 409 body.
+  if (gate === 'fail' && result.advisory) {
+    return result.override
+      ? { kind: 'fail_overridden', label: 'Approve with exceptions', disabled: false, headline: 'Blocking findings accepted',
+          reason: result.override.by + ' accepted ' + n + ' blocking finding(s): ' + result.override.reason }
+      : { kind: 'fail_advisory', label: 'Approve with exceptions', disabled: false, needsReason: true, headline: 'Blocking findings',
+          reason: n + ' blocking finding(s); advisory mode is on, so this needs an explicit override with a reason' }
+  }
   if (gate === 'fail') {
     return { kind: 'fail', label: 'Approve', disabled: true, headline: 'Blocked',
       reason: n + ' blocking finding(s); a fail cannot be overridden' }

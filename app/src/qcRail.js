@@ -659,9 +659,17 @@ export function qcStepState(entries) {
   if (unchecked.length) {
     return { done: false, reason: unchecked.length + ' asset(s) have never been checked - that is not a pass' }
   }
-  const failing = list.filter((e) => railGate(e.result) === 'fail')
+  // A fail still blocks the step UNLESS the server said advisory mode is on AND the owner has
+  // recorded an override for it. An advisory fail with no override falls through to `undecided`
+  // below, so the step reads "needs an explicit decision" rather than silently completing — the
+  // step must never tick because a rule was relaxed, only because a human answered it.
+  const failing = list.filter((e) => railGate(e.result) === 'fail'
+    && !(e.result && e.result.advisory && e.result.override))
   if (failing.length) return { done: false, reason: failing.length + ' asset(s) have blocking findings' }
-  const undecided = list.filter((e) => railGate(e.result) === 'warn' && !(e.result && e.result.override))
+  const undecided = list.filter((e) => {
+    const g = railGate(e.result)
+    return (g === 'warn' || g === 'fail') && !(e.result && e.result.override)
+  })
   if (undecided.length) {
     return { done: false, reason: undecided.length + ' asset(s) need an explicit decision with a reason' }
   }

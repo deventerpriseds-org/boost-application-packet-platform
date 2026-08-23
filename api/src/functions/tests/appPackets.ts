@@ -137,9 +137,32 @@ export async function recomputePacket(client: any, packetId: string) {
   // P2.2 — `ready` additionally requires no asset sitting at a `fail` gate. Approval is already
   // gated, but a re-run AFTER approval can turn a gate red (a new run also clears any override), and
   // without this a packet would stay `ready` while carrying a blocking finding.
+  // ADVISORY MODE REACHES HERE TOO, and this site is the one that decides whether anything ships.
+  //
+  // Found by the acceptance-criteria pass before it shipped, and it would have failed SILENTLY:
+  // advisory mode deliberately leaves the gate value at 'fail', so with only `approvalBlock` and
+  // `artifactGateOverride` updated, every artifact would go `approved`, every call would return 200,
+  // and this count would still be non-zero — the packet stays `review`, `Send packet` never renders,
+  // and nothing ships. That is the identical shape to the video-artifact defect that made `ready`
+  // unreachable for 39 packets: each piece correct alone, the transition impossible.
+  //
+  // The rule matches `approvalBlock` exactly: a fail stops `ready` UNLESS advisory mode is on AND a
+  // human recorded an override for it. An un-overridden fail still blocks in either mode, and a
+  // re-run clears overrides, so a gate that turns red after approval still pulls the packet back.
+  //
+  // The owner is read from the packet's own opportunity rather than threaded through all five
+  // callers; it still resolves through the one `loadThresholds`, so there is a single answer to
+  // "did the owner enable this".
+  const ownerEmail = (await client.query(
+    `select o.owner_email from packet p join opportunity o on o.id = p.opp_id where p.id = $1`, [packetId],
+  )).rows[0]?.owner_email
+  const advisory = ownerEmail
+    ? (await loadThresholds(client, ownerEmail).catch(() => ({} as any)))?.gateAdvisory === true
+    : false
   const failing = Number((await client.query(
     `select count(*)::int as n from artifact_gate g join artifact a on a.id = g.artifact_id
-      where a.packet_id = $1 and g.gate = 'fail'`, [packetId])).rows[0]?.n || 0)
+      where a.packet_id = $1 and g.gate = 'fail'
+        and (not $2::boolean or g.override_by is null)`, [packetId, advisory])).rows[0]?.n || 0)
   const status = (allApproved && failing === 0) ? 'ready' : anyStarted ? 'review' : 'building'
   await client.query(`update packet set status = $1, updated_at = now() where id = $2`, [status, packetId])
   return status
@@ -294,7 +317,10 @@ export async function artifactStatus(req: HttpRequest, context: InvocationContex
     // gated: moving to todo/review/rejected is how a user responds to findings, and blocking that
     // would trap the artifact in the state the findings are about.
     if (status === 'approved') {
-      const block = await approvalBlock(client, artifactId)
+      // The owner's advisory setting, read once here and handed down. `approvalBlock` deliberately
+      // does not read it itself — see the comment on its parameter.
+      const advisory = (await loadThresholds(client, resolveOwner(req).owner).catch(() => ({} as any)))?.gateAdvisory === true
+      const block = await approvalBlock(client, artifactId, advisory)
       if (block.blocked) {
         return { status: 409, headers: HEADERS, jsonBody: { error: block.reason, gate: block.gate, artifactId } }
       }

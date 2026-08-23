@@ -3935,3 +3935,30 @@ test('H:openai-envelope-is-parsed: a direct consumer of openAiJson goes through 
   assert.ok(/import \{[^}]*contentJson[^}]*\} from '\.\/openaiJson'/.test(PK),
     'contentJson is no longer imported')
 })
+
+// A SETTING THAT IS DECLARED, WRITABLE, MAPPED — AND NEVER SELECTED.
+//
+// Measured 2026-08-23 while building advisory gate mode. `chk_gate_advisory` was added to
+// ENSURE_CHECK_COLUMNS_SQL, given a default, written by the settings route, and mapped in
+// `loadThresholds`'s return object. It still read `false` forever, because `loadThresholds` uses an
+// EXPLICIT column list and the new column was not in it: `r.chk_gate_advisory` was `undefined`, and
+// `undefined === true` is false. Every layer looked correct in isolation and the owner's toggle did
+// nothing — the same silent shape as the seed that never reached production.
+//
+// `H:every-threshold-is-configurable` does not catch this: it proves a threshold HAS a column, not
+// that the column is ever read. This asserts the projection, which is the step in between.
+test('H:every-chk-column-is-selected: a column the loader never selects is a setting that does nothing', () => {
+  const prefs = src('checkPrefs.ts')
+  const declared = [...prefs.matchAll(/add column if not exists\s+(chk_[a-z0-9_]+)/g)].map(m => m[1])
+  assert.ok(declared.length > 20, `expected the full chk_ set, found ${declared.length} — the scan is broken`)
+
+  // The SELECT inside loadThresholds, isolated so an unrelated mention elsewhere cannot satisfy this.
+  const i = prefs.indexOf('export async function loadThresholds')
+  assert.ok(i > 0, 'loadThresholds not found — this guard has lost its target')
+  const projection = prefs.slice(i, prefs.indexOf('from owner_search_prefs', i))
+
+  const missing = declared.filter(c => !new RegExp(`\\b${c}\\b`).test(projection))
+  assert.deepEqual(missing, [],
+    `these chk_ columns are declared and defaulted but never SELECTED by loadThresholds, so the ` +
+    `owner can set them and nothing reads the value: ${missing.join(', ')}`)
+})

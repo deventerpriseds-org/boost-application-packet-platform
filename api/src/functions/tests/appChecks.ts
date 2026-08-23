@@ -185,11 +185,31 @@ export async function evaluateArtifact(client: any, artifactId: string, owner: s
  * An artifact with NO gate row has never been checked. That is not permission — it is the absence of
  * a verdict, and it is exactly the state a caller would exploit by approving before running checks.
  */
-export async function approvalBlock(client: any, artifactId: string): Promise<{ blocked: boolean; reason: string; gate: string | null }> {
+export async function approvalBlock(
+  client: any, artifactId: string,
+  // ADVISORY MODE, passed in rather than read here. The caller already loads the owner's thresholds,
+  // and a second read inside this function would be a second answer to "what did the owner choose" —
+  // the divergence this codebase keeps paying for. Defaulting to `false` means every caller that has
+  // not been updated keeps the strict behaviour, which is the safe direction for an omission.
+  advisory = false,
+): Promise<{ blocked: boolean; reason: string; gate: string | null }> {
   const g = (await client.query(
     `select gate, override_by, attention_count from artifact_gate where artifact_id=$1`, [artifactId])).rows[0]
   if (!g) return { blocked: true, reason: 'no checks have been run for this artifact', gate: null }
-  if (g.gate === 'fail') return { blocked: true, reason: `${g.attention_count} blocking finding(s); a fail cannot be overridden`, gate: 'fail' }
+  // A fail is absolutely blocking UNLESS the owner has put the gate in advisory mode, in which case
+  // it becomes overridable on exactly the same terms as a warn: a verified session and a written
+  // reason, recorded. Note what does NOT change — `gate` is still 'fail' and `attention_count` is
+  // still the same number, so nothing about the finding is softened, only the consequence.
+  if (g.gate === 'fail' && !advisory) {
+    return { blocked: true, reason: `${g.attention_count} blocking finding(s); a fail cannot be overridden`, gate: 'fail' }
+  }
+  if (g.gate === 'fail' && !g.override_by) {
+    return {
+      blocked: true,
+      reason: `${g.attention_count} blocking finding(s); advisory mode is on, so this needs an explicit override with a reason`,
+      gate: 'fail',
+    }
+  }
   if (g.gate === 'warn' && !g.override_by) return { blocked: true, reason: `${g.attention_count} finding(s) need an explicit override with a reason`, gate: 'warn' }
   return { blocked: false, reason: '', gate: g.gate }
 }
@@ -245,6 +265,13 @@ export async function artifactChecksGet(req: HttpRequest, context: InvocationCon
         artifactId: art.id,
         gate: g?.gate ?? null,
         attention: g?.attention_count ?? 0,
+        // THE ONE NEW FIELD THE CLIENT NEEDS, and it is published rather than inferred on purpose.
+        // `assetGate.footerFor` states that it derives the footer "from the SERVER's gate and nothing
+        // else… never inspects the check rows to form its own opinion". Advisory mode is a second
+        // input to that same decision, so it has to arrive the same way — as a server-computed
+        // boolean. A client that read the owner's settings itself would be a second implementation
+        // of the rule, free to disagree with `approvalBlock` about whether a button should be live.
+        advisory: (await loadThresholds(client, owner).catch(() => ({} as any)))?.gateAdvisory === true,
         computedAt: g?.computed_at ?? null,
         override: g?.override_by ? { by: g.override_by, at: g.override_at, reason: g.override_reason } : null,
         score, history,
@@ -286,12 +313,21 @@ export async function artifactGateOverride(req: HttpRequest, context: Invocation
     client = await getPgClient()
     const g = (await client.query(`select gate from artifact_gate where artifact_id=$1`, [req.params.artifactId])).rows[0]
     if (!g) return { status: 404, headers: HEADERS, jsonBody: { error: 'no checks have been run for this artifact' } }
-    if (g.gate === 'fail') return { status: 409, headers: HEADERS, jsonBody: { error: 'a fail cannot be overridden — fix the findings or re-run the checks', gate: 'fail' } }
+    // THE SECOND OF THE TWO SITES THAT HARD-BLOCK A FAIL, and it has to learn the setting too.
+    // Updating only `approvalBlock` would leave the owner able to approve but unable to record the
+    // override that approval now requires — a deadlock where each half enforces a different rule.
+    const advisory = (await loadThresholds(client, owner).catch(() => ({} as any)))?.gateAdvisory === true
+    if (g.gate === 'fail' && !advisory) {
+      return { status: 409, headers: HEADERS, jsonBody: { error: 'a fail cannot be overridden — fix the findings or re-run the checks', gate: 'fail' } }
+    }
     if (g.gate === 'pass') return { status: 200, headers: HEADERS, jsonBody: { ok: true, gate: 'pass', note: 'nothing to override' } }
     await client.query(
       `update artifact_gate set override_by=$1, override_at=now(), override_reason=$2 where artifact_id=$3`,
       [owner, reason, req.params.artifactId])
-    return { status: 200, headers: HEADERS, jsonBody: { ok: true, gate: 'warn', overriddenBy: owner, reason } }
+    // `g.gate`, not the literal 'warn' this used to return. Now that a fail can reach this line, a
+    // hardcoded 'warn' would tell the caller its blocking findings had been downgraded — the exact
+    // misreport this change is otherwise careful to avoid.
+    return { status: 200, headers: HEADERS, jsonBody: { ok: true, gate: g.gate, overriddenBy: owner, reason } }
   } catch (e: any) {
     context.error('artifactGateOverride', e)
     return { status: 500, headers: HEADERS, jsonBody: { error: String(e?.message || e) } }

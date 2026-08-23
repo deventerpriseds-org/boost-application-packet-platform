@@ -107,6 +107,24 @@ export interface CheckThresholds {
    */
   evidenceEscalate: boolean
   evidenceEscalateMax: number
+  /**
+   * ADVISORY GATE MODE — does a `fail` BLOCK approval, or may the owner override it with a reason?
+   *
+   * OFF by default, and the default is the whole safety argument: with this false, `approvalBlock`
+   * and `artifactGateOverride` behave byte-identically to before this setting existed.
+   *
+   * It changes ONLY the blocking decision. It does NOT change the gate value, the check rows, or
+   * `attention_count` — an advisory run still records `gate='fail'` with the same findings, so the
+   * score history stays comparable across the change and a reviewer can still see exactly what was
+   * wrong. Rewriting the gate to 'warn' instead would have been the easy version and would have
+   * corrupted both the audit row and every historical comparison.
+   *
+   * Turned on 2026-08-23 at the owner's explicit instruction ("continue to ship tonight"): the
+   * deterministic evidence resolver returns 0 of 35 requirements, so `must_have_coverage` is pinned
+   * at 0/12 and NO packet can reach `ready` at all. An override is a recorded human judgement with
+   * a reason attached; a permanently unshippable product is not a safety property.
+   */
+  gateAdvisory: boolean
 }
 
 /** Seeded first values, taken from the live prompt. The owner can change every one of them. */
@@ -130,6 +148,8 @@ export const DEFAULT_THRESHOLDS: CheckThresholds = {
   evidenceBulletRun: EVIDENCE_BULLET_RUN,
   evidenceEscalate: true,
   evidenceEscalateMax: 12,
+  // FALSE. An owner who has never touched the setting keeps today's behaviour exactly.
+  gateAdvisory: false,
 }
 
 // Phrases and punctuation that read as machine-written. Kept as data so they can move to the

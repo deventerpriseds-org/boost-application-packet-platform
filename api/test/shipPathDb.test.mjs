@@ -253,3 +253,148 @@ test('H:rule-evidence-evicts-a-stale-proposal: deterministic evidence must win t
       'so a requirement the profile really evidences would still not count toward the gate.')
   } finally { await c.end() }
 })
+
+// ---------------------------------------------------------------------------------------------
+// ADVISORY GATE MODE — the owner may accept blocking findings ON THE RECORD, or not at all.
+//
+// Added 2026-08-23 at the owner's explicit instruction ("continue to ship tonight"). The
+// deterministic evidence resolver returns 0 of 35 requirements, so `must_have_coverage` is pinned
+// at 0/12 on every packet and a `fail` gate is absolutely non-overridable — meaning NO packet can
+// reach `ready` and nothing can ship at all. He shipped fine before this gate existed.
+//
+// THE INVARIANT, and the reason there are three tests rather than one: advisory mode changes the
+// CONSEQUENCE of a fail, never the FINDING. Off, it must be byte-identical to the old behaviour.
+// On, a fail becomes overridable on exactly a warn's terms — verified session, written reason,
+// recorded — and is still blocking until that override exists. A silent pass would be the whole
+// safety property thrown away for convenience.
+
+async function gateFixture(c, gate, attention) {
+  await c.query(`delete from opportunity where owner_email = 'advisory@test.local'`)
+  const opp = (await c.query(
+    `insert into opportunity (owner_email, company, role, stage)
+     values ('advisory@test.local','Acme','VP Eng','enriched') returning id`)).rows[0].id
+  const pkt = (await c.query(`insert into packet (opp_id) values ($1) returning id`, [opp])).rows[0].id
+  const art = (await c.query(`insert into artifact (packet_id, type) values ($1,'resume') returning id`, [pkt])).rows[0].id
+  await c.query(
+    `insert into artifact_gate (artifact_id, run_id, gate, attention_count)
+     values ($1, gen_random_uuid(), $2, $3)`, [art, gate, attention])
+  return art
+}
+
+test('H:advisory-off-still-blocks-a-fail: the default must be byte-identical to the old behaviour',
+  { skip: !HAVE_PG && 'no local postgres' }, async () => {
+  const c = new Client(CONN); await c.connect()
+  try {
+    await c.query(schemaSql())
+    const art = await gateFixture(c, 'fail', 4)
+
+    // Called exactly as every un-updated caller calls it: no third argument.
+    const dflt = await approvalBlock(c, art)
+    assert.equal(dflt.blocked, true, 'THE DEFAULT LEAKED. A fail must block when nobody enabled advisory mode.')
+    assert.match(dflt.reason, /cannot be overridden/,
+      'the refusal must still be the absolute one, not the advisory wording')
+
+    // And explicitly false, which is what `loadThresholds` returns for an owner who never set it.
+    const off = await approvalBlock(c, art, false)
+    assert.deepEqual(off, dflt, 'advisory:false must be indistinguishable from the argument being absent')
+  } finally { await c.end() }
+})
+
+test('H:advisory-fail-still-needs-a-recorded-override: advisory is not a silent pass',
+  { skip: !HAVE_PG && 'no local postgres' }, async () => {
+  const c = new Client(CONN); await c.connect()
+  try {
+    await c.query(schemaSql())
+    const art = await gateFixture(c, 'fail', 4)
+
+    const noOverride = await approvalBlock(c, art, true)
+    assert.equal(noOverride.blocked, true,
+      'ADVISORY MODE BECAME A BYPASS. A fail with no recorded override must still block — the ' +
+      'owner accepts findings explicitly, with a reason, or not at all.')
+    assert.equal(noOverride.gate, 'fail', 'the gate VALUE must not be softened to warn')
+
+    // Now the override exists, exactly as `artifactGateOverride` records it.
+    await c.query(
+      `update artifact_gate set override_by='von.ellis@enterpriseds.io', override_at=now(),
+              override_reason='accepted: coverage is pinned at 0 by a known resolver defect'
+        where artifact_id=$1`, [art])
+    const after = await approvalBlock(c, art, true)
+    assert.equal(after.blocked, false, 'a recorded override must unblock approval in advisory mode')
+    assert.equal(after.gate, 'fail',
+      'the gate must STILL read fail — advisory changes the consequence, never the finding, so the ' +
+      'score history and the audit row stay comparable across the change')
+  } finally { await c.end() }
+})
+
+test('H:advisory-never-touches-a-warn-or-a-pass: the other two gates are unchanged',
+  { skip: !HAVE_PG && 'no local postgres' }, async () => {
+  const c = new Client(CONN); await c.connect()
+  try {
+    await c.query(schemaSql())
+    // A warn still needs its override, advisory or not.
+    const warn = await gateFixture(c, 'warn', 2)
+    assert.equal((await approvalBlock(c, warn, false)).blocked, true)
+    assert.equal((await approvalBlock(c, warn, true)).blocked, true,
+      'advisory mode must not waive a warn -- it only makes a FAIL behave like one')
+    // A pass is clear either way.
+    const pass = await gateFixture(c, 'pass', 0)
+    assert.equal((await approvalBlock(c, pass, false)).blocked, false)
+    assert.equal((await approvalBlock(c, pass, true)).blocked, false)
+  } finally { await c.end() }
+})
+
+// THE SITE THAT DECIDES WHETHER ANYTHING SHIPS, and the one an obvious implementation misses.
+//
+// `recomputePacket` counts artifacts sitting at gate='fail' and requires that count to be zero for
+// `ready`. Advisory mode deliberately does NOT rewrite the gate value, so updating only
+// `approvalBlock` and `artifactGateOverride` leaves this count non-zero forever: every artifact goes
+// `approved`, every API call returns 200, and the packet still computes `review` -- `Send packet`
+// never renders and nothing ships. Found by the acceptance-criteria pass BEFORE it shipped. It is
+// the identical shape to H:ship-path-is-reachable above: each piece correct alone, transition
+// impossible. That is why this asserts the TRANSITION rather than the function.
+test('H:ready-counts-an-overridden-fail-only-in-advisory-mode: the packet must actually reach ready',
+  { skip: !HAVE_PG && 'no local postgres' }, async () => {
+  const c = new Client(CONN); await c.connect()
+  try {
+    await c.query(schemaSql())
+    const owner = 'advisory-ready@test.local'
+    await c.query(`delete from opportunity where owner_email=$1`, [owner])
+    const opp = (await c.query(
+      `insert into opportunity (owner_email, company, role, stage)
+       values ($1,'Acme','VP Eng','enriched') returning id`, [owner])).rows[0].id
+    const pkt = (await c.query(`insert into packet (opp_id) values ($1) returning id`, [opp])).rows[0].id
+    const arts = {}
+    for (const t of TYPES) {
+      arts[t] = (await c.query(`insert into artifact (packet_id, type) values ($1,$2) returning id`, [pkt, t])).rows[0].id
+    }
+    // Every buildable artifact approved, and each carries a FAILING gate with a recorded override —
+    // the real end state of a packet the owner consciously accepted under advisory mode.
+    for (const t of BUILDABLE) {
+      await c.query(`update artifact set status='approved' where id=$1`, [arts[t]])
+      await c.query(
+        `insert into artifact_gate (artifact_id, run_id, gate, attention_count, override_by, override_at, override_reason)
+         values ($1, gen_random_uuid(), 'fail', 3, $2, now(), 'accepted: coverage pinned at 0 by a known resolver defect')`,
+        [arts[t], owner])
+    }
+
+    // ADVISORY OFF (the default): an overridden fail must STILL hold the packet back.
+    await c.query(`insert into owner_search_prefs (owner_email) values ($1)
+                   on conflict (owner_email) do nothing`, [owner])
+    await c.query(`update owner_search_prefs set chk_gate_advisory=false where owner_email=$1`, [owner])
+    assert.notEqual(await recomputePacket(c, pkt), 'ready',
+      'with advisory OFF a fail must keep the packet out of ready, override or not')
+
+    // ADVISORY ON: the same rows now reach ready.
+    await c.query(`update owner_search_prefs set chk_gate_advisory=true where owner_email=$1`, [owner])
+    assert.equal(await recomputePacket(c, pkt), 'ready',
+      'NOTHING SHIPS. Every artifact is approved and every blocking finding was explicitly accepted ' +
+      'with a recorded reason, yet the packet cannot reach `ready` -- so `Send packet` never renders. ' +
+      'recomputePacket counts gate=fail and advisory deliberately does not rewrite the gate value.')
+
+    // And an un-overridden fail still blocks even with advisory on — advisory is not a bypass.
+    await c.query(`update artifact_gate set override_by=null, override_at=null, override_reason=null
+                    where artifact_id=$1`, [arts.resume])
+    assert.notEqual(await recomputePacket(c, pkt), 'ready',
+      'an un-overridden fail must block ready even in advisory mode')
+  } finally { await c.end() }
+})

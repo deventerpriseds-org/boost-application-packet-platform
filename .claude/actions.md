@@ -2723,3 +2723,21 @@ covered with an EMPTY backfill queue; and every `check_result` in the DB belonge
 
 **STILL OPEN:** the deterministic resolver evidences **0 of 35** requirements against a healthy
 profile. That is why all 12 escalated. Coverage cannot rise until it is diagnosed.
+
+## ACT — advisory gate mode shipped (2026-08-23)
+
+**Owner authorised explicitly:** "continue to ship tonight and we will work on the faster connection
+in parallel." Option B of the A/B/A+B choice. Option A (the proposal-confirmation path that
+permanently unpins coverage) has ACs written and is NOT yet built.
+
+**Delivered:** `chk_gate_advisory`, default FALSE. A `fail` becomes overridable through the existing
+audited path — never a silent pass, never a rewritten gate value. Five sites updated (two server
+gates, the packet `ready` computation, and two client mirrors); `recomputePacket` was the one that
+would have made the whole change inert while every call returned 200.
+
+**Guards:** 4 advisory H-cases + `H:every-chk-column-is-selected`, all mutation-proven.
+
+**STILL OPEN and the real fix:** `D:proposals-can-never-be-confirmed`. Advisory mode lets the owner
+ship past a gate that is pinned at 0; it does not make coverage correct. Turning it back OFF is the
+signal that the resolver work landed — nothing currently records that intent, which is a known risk
+(the realistic failure is not a bug but that it is never turned off again).
