@@ -9,30 +9,64 @@ node scripts/compare-ui.mjs --all --vendor <react/react-dom/babel dir> \
 ```
 
 **Why this file exists.** Twice in one day an "alignment" was declared from eyeballing one
-component, and every divergence was found only when the owner pointed at it. Owner: *"your tight UI
-alignment to the prototype wasn't successful"*, then *"it has to be for the entire spec for the
-packets module not only tight UI alignment for the resume tab"*. This is the whole module, measured.
+component, and every divergence was found only when the owner pointed at it. This is the whole
+module, measured, and re-measurable on any commit.
 
 **What the numbers mean.** `app%` is the app's rendered text length as a fraction of the
-prototype's - a blunt proxy for how much of the designed content actually reaches the screen, not a
-quality score. `panels` and `controls` count named things present in the prototype and absent from
-the app. Matching is on TEXT and FONT WEIGHT, never class names: the two sides share no stylesheet.
+prototype's - a blunt proxy for how much designed content reaches the screen, not a quality score.
+`panels` and `controls` count named things present in the prototype and absent from the app.
+Matching is on TEXT and FONT WEIGHT, never class names: the two sides share no stylesheet.
+
+The prototype's own review chrome is **excluded** - the mode pill (`Current app` / `With QC layer`
+/ `Highlight additions`) and the `UI SPEC` badge. Its README says those are review aids and "do not
+build them"; counting them inflated an earlier version of this file with work nobody should do.
 
 ## Summary (2026-08-23)
 
 | Step | Prototype | App | app% | Panels missing | Controls missing |
 |---|---:|---:|---:|---:|---:|
-| `jd` | 3506 | 1898 | 54% | 30 | 5 |
-| `resume` | 14141 | 6588 | 47% | 71 | 6 |
-| `cover` | 4897 | 2538 | 52% | 26 | 5 |
-| `portfolio` | 7364 | 5151 | 70% | 30 | 6 |
-| `video` | 932 | 714 | 77% | 5 | 2 |
-| `qc` | — | — | — | — | **run failed:** app: page.goto: Target page, context or browser has been clo |
-| `send` | 1066 | 749 | 70% | 9 | 3 |
-| **total** | | | | **171** | **27** |
+| `jd` | 3506 | 1898 | 54% | 27 | 3 |
+| `resume` | 14141 | 7241 | 51% | 61 | 4 |
+| `cover` | 4897 | 2632 | 54% | 23 | 3 |
+| `portfolio` | 7364 | 5411 | 73% | 27 | 4 |
+| `video` | 932 | 714 | 77% | 2 | 0 |
+| `qc` | 6726 | 2817 | 42% | 23 | 6 |
+| `send` | 1066 | 749 | 70% | 6 | 1 |
+| **total** | | | | **169** | **21** |
 
-**171 panels and 27 controls** the design specifies and the app does not render, across the
-6 steps that compared cleanly. No step is above 77%; the resume step is the worst at 47%.
+### Movement
+
+First measure (2026-08-23, 6 steps, chrome counted): **171 panels / 27 controls**.
+After chrome filtering and the first alignment pass, the same 6 steps measure **146 / 15**.
+The `qc` step compared for the first time in this run and adds 23 / 6.
+
+| Step | app% before | app% now |
+|---|---:|---:|
+| `resume` | 47% | 51% |
+| `cover` | 52% | 54% |
+| `portfolio` | 70% | 73% |
+
+## Closed so far
+
+- Field order - the summary leads; the API returns merge fields alphabetically (`appInsertions.ts:81`)
+- Left nav collapsible, collapsed by default
+- "What this X answers" collapsed, counts kept on the closed row
+- Per-field targets from the owner's thresholds (`≤ 24 chars each`, `max 1 item over 20 chars`)
+- `Show original` wording; per-field `Ask for a change`
+- Human field names via one `FIELD_LABEL` table - moves the block heading, the QC correction
+  sentence, the gate drawer and the deep-link tooltip together
+- Cover and portfolio labels + ranges, sourced from thresholds
+- Static-block marker: `Template · same in every packet`
+
+## Known blocked or deliberately deviating
+
+- **`Keywords placed` chips - BLOCKED ON DATA.** There is no per-asset term-placement source;
+  `keyword_coverage` is deliberately null and the meter says so in words. Rendering the chips
+  would mean inventing which keywords landed where. Needs the term library published first.
+- **`Changes made` - DELIBERATE DEVIATION.** The prototype renders the same corrections a second
+  time lower down under this heading. One correction on screen twice is what the corrections
+  guard exists to prevent, so the app keeps a single "Corrected for you" section carrying both
+  the summary and the controls.
 
 ## Per step
 
@@ -69,17 +103,12 @@ Prototype 3506 chars · app 1898 chars
 - Cycle time, regulated
 - Domain background
 - Public sector
-- UI spec
-- Current app
-- With QC layer
 
-**Controls only in the prototype:** `von@enterpriseds.io` · `Re-parse JD` · `Run again` · `See how the assets answer these →` · `Assistant · 1`
-
-**Controls only in the app** (not automatically wrong - some are deliberate): `von.ellis@enterpriseds.io` · `»` · `your master profile (Settings > Facts)` · `Parse posting` · `Run analysis`
+**Controls only in the prototype:** `Re-parse JD` · `Run again` · `See how the assets answer these →`
 
 ### `resume` — Resume
 
-Prototype 14141 chars · app 6588 chars
+Prototype 14141 chars · app 7241 chars
 
 **Only in the prototype:**
 
@@ -87,7 +116,6 @@ Prototype 14141 chars · app 6588 chars
 - fail
 - 4 corrected
 - 3 to review
-- Resume summary
 - 56 words · 55–60 words
 - Keywords placed
 - Platform Modernization
@@ -96,13 +124,11 @@ Prototype 14141 chars · app 6588 chars
 - Changes made
 - sixty-two engineers
 - eight figures
-- Skills 1
 - longest 22 chars · ≤ 24 chars each
 - Roadmap Alignment
 - SOC 2 / ISO 27001
 - Multi-region AWS
 - SOC 2 Type II
-- Skills 2
 - longest 23 chars · ≤ 24 chars each
 - P&L Ownership
 - Distributed Teams
@@ -112,7 +138,6 @@ Prototype 14141 chars · app 6588 chars
 - Wording kept from the posting
 - safety-critical
 - kept
-- Expertise
 - 6 × 5 words · 6 phrases, exactly 5 words
 - Budget development and P&L ownership
 - KPI driven engineering performance management
@@ -120,18 +145,20 @@ Prototype 14141 chars · app 6588 chars
 - Governance frameworks for audit compliance
 - Optimizing scaled software delivery operations
 - Strategic roadmaps with product partnership
-- Relevant 1
 - 0 over 20 chars · max 1 item over 20 chars
 - DevSecOps
-- …and 31 more
+- Board Reporting
+- 1 over 20 chars · max 1 item over 20 chars
+- Cloud Migration
+- Org Scaling 62
+- Safety-critical
+- …and 21 more
 
-**Controls only in the prototype:** `von@enterpriseds.io` · `Open Google Doc ↗` · `Copy tracked link` · `Answer` · `Ask for a change` · `Assistant · 1`
-
-**Controls only in the app** (not automatically wrong - some are deliberate): `von.ellis@enterpriseds.io` · `»` · `your master profile (Settings > Facts)` · `Hide` · `📄 Create Google Doc` · `Request changes` · `Undo` · `Suggest something different`
+**Controls only in the prototype:** `Open Google Doc ↗` · `Copy tracked link` · `Answer` · `Ask for a change`
 
 ### `cover` — Cover letter
 
-Prototype 4897 chars · app 2538 chars
+Prototype 4897 chars · app 2632 chars
 
 **Only in the prototype:**
 
@@ -158,17 +185,12 @@ Prototype 4897 chars · app 2538 chars
 - M1–M5
 - D1–D4
 - N1–N3
-- UI spec
-- Current app
-- With QC layer
 
-**Controls only in the prototype:** `von@enterpriseds.io` · `Open Slides ↗` · `Copy tracked link` · `Reopen` · `Assistant · 1`
-
-**Controls only in the app** (not automatically wrong - some are deliberate): `von.ellis@enterpriseds.io` · `»` · `your master profile (Settings > Facts)` · `Hide` · `Undo` · `Suggest something different` · `▦ Create Slides deck` · `Approve` · `Regenerate` · `Request changes`
+**Controls only in the prototype:** `Open Slides ↗` · `Copy tracked link` · `Reopen`
 
 ### `portfolio` — Portfolio
 
-Prototype 7364 chars · app 5151 chars
+Prototype 7364 chars · app 5411 chars
 
 **Only in the prototype:**
 
@@ -199,13 +221,8 @@ Prototype 7364 chars · app 5151 chars
 - M1–M5
 - D1–D4
 - N1–N3
-- UI spec
-- Current app
-- With QC layer
 
-**Controls only in the prototype:** `von@enterpriseds.io` · `Open Slides ↗` · `Copy tracked link` · `Send to assistant` · `Ask for a change` · `Assistant · 1`
-
-**Controls only in the app** (not automatically wrong - some are deliberate): `von.ellis@enterpriseds.io` · `»` · `your master profile (Settings > Facts)` · `Hide` · `▦ Create Slides deck` · `Request changes`
+**Controls only in the prototype:** `Open Slides ↗` · `Copy tracked link` · `Send to assistant` · `Ask for a change`
 
 ### `video` — Intro video
 
@@ -215,22 +232,38 @@ Prototype 932 chars · app 714 chars
 
 - SafetyIQ · Head of Engineering
 - fail
-- UI spec
-- Current app
-- With QC layer
 
-**Controls only in the prototype:** `von@enterpriseds.io` · `Assistant · 1`
+### `qc` — QC & evidence
 
-**Controls only in the app** (not automatically wrong - some are deliberate): `von.ellis@enterpriseds.io` · `»` · `your master profile (Settings > Facts)` · `Hide` · `🎥 Generate clone video`
+Prototype 6726 chars · app 2817 chars
 
-### `qc` — qc
+**Only in the prototype:**
 
-**Comparison failed:** `app: page.goto: Target page, context or browser has been closed
-Call log:
-[2m  - navigating to "http://localhost:8962/", waiting until "domcontentloaded"[22m
-`
+- SafetyIQ · Head of Engineering
+- fail
+- warn
+- Done for you
+- Corrected for you
+- “60+” rewritten as “62” in Relevant 2
+- “$18M” rewritten as “8-figure” in Relevant 3
+- “60+” rewritten as “62” in Relevant 1–3
+- “$18M” rewritten as “8-figure” in Relevant 1–3
+- “$18M” rewritten as “8-figure” in Letter body
+- Fix before approval
+- Every library keyword lands in a field
+- Needs your answer
+- FedRAMP has no evidence in your profile
+- Two must-haves live only in generated fields
+- Review
+- No requirement rests only on static text
+- No empty merge field left visible
+- Keywords claimed by a field appear in its text
+- Your call
+- DevSecOps earns no score credit
+- Regulated Environments earns no score credit
+- Keywords
 
-Not a finding about the app - the harness could not read this step. Re-run it alone.
+**Controls only in the prototype:** `Change it` · `Review →` · `Open field →` · `Answer` · `Open asset →` · `Leave open`
 
 ### `send` — Review & send
 
@@ -244,24 +277,17 @@ Prototype 1066 chars · app 749 chars
 - 1 item to fix across 1 asset
 - ATS resume
 - Every library keyword lands in a field
-- UI spec
-- Current app
-- With QC layer
 
-**Controls only in the prototype:** `von@enterpriseds.io` · `Open field →` · `Assistant · 1`
-
-**Controls only in the app** (not automatically wrong - some are deliberate): `von.ellis@enterpriseds.io` · `»` · `your master profile (Settings > Facts)`
+**Controls only in the prototype:** `Open field →`
 
 ## Reading a row honestly
 
-A line "only in the prototype" is **not automatically a defect**. Three things it can be:
+A line "only in the prototype" is **not automatically a defect**:
 
-1. **A real gap** - the app should render it and does not. Most rows.
-2. **A rename** - the same thing under a different word. Step 1 is "JD analysis" in the prototype
-   and "Posting analysis" here, deliberately: the app reserves "ATS" for the keyword library.
-3. **Demo data** - the prototype ships one fabricated worked example (SafetyIQ · Head of
-   Engineering). Its *values* are fiction; its *structure* is the spec. Never copy a number from
-   it - `5/5 must-haves · 11/13 keywords` is invented, and reproducing it would be the one thing
-   this screen exists to prevent.
-
-Judge each row against those three before turning it into work.
+1. **A real gap** - most rows.
+2. **A rename** - step 1 is "JD analysis" there and "Posting analysis" here, deliberately: the
+   app reserves "ATS" for the keyword library.
+3. **Demo data** - the prototype ships one fabricated example (SafetyIQ · Head of Engineering).
+   Its *values* are fiction; its *structure* is the spec. Never copy a number from it -
+   `5/5 must-haves · 11/13 keywords` is invented, and reproducing it is the one thing these
+   screens exist to prevent.
