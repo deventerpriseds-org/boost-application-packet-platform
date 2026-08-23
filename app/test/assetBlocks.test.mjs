@@ -350,7 +350,7 @@ test('draftSizeText omits bullets when the field name never asked for them', () 
 
 // ── P8.7: the blocks card is selectable by CSS, and the two disclosures stay opposite ───────────
 import { BLOCK_HOOKS, correctionsForField } from '../src/assetBlocks.js'
-import { ASSET_HEADER_DEFAULT_OPEN, PACKET_HOOKS } from '../src/packetBuilder.js'
+import { ASSET_BODY_DEFAULT_OPEN, PACKET_HOOKS } from '../src/packetBuilder.js'
 
 const BLOCKS_SRC = src('../src/screens/AssetBlocks.jsx')
 const PACKET_SRC = src('../src/screens/PacketBuilder.jsx')
@@ -369,30 +369,34 @@ test('every BLOCK_HOOKS selector is rendered, and the card hand-types none of th
   assert.equal(new Set(values).size, values.length)
 })
 
-test('the asset HEADER defaults collapsed and the field BLOCK defaults open — both, in one place', () => {
-  // The plan states them together and warns they are trivially misread as a conflict: "Blocks
-  // default OPEN; asset headers default COLLAPSED (different objects - not a conflict)". Asserting
-  // them in ONE test is the point: a change that collapses the blocks, or that opens the headers,
-  // fails here whichever way it goes. Asserting only one of the two is how a fix flips the wrong
-  // object and still shows green.
-  assert.equal(ASSET_HEADER_DEFAULT_OPEN, false, 'P8.7: asset headers are collapsed by default')
+test('H:the-draft-is-visible-on-load: the artifact BODY and the field BLOCK both default open', () => {
+  // REPLACES 'the asset HEADER defaults collapsed and the field BLOCK defaults open'. That test
+  // asserted ASSET_HEADER_DEFAULT_OPEN === false, citing P8.7 "asset headers are collapsed by
+  // default". P8.7 is right and was applied to the WRONG OBJECT - the old comment in
+  // packetBuilder.js even named that as the mistake it was guarding, but it pinned the value, not
+  // the meaning, so the guard passed green on the defect.
+  //
+  // Ground truth, from RENDERING the prototype rather than reading the plan (scripts/render-spec.mjs):
+  // `qc/assets.jsx` AssetHeader() is the "What this resume answers" counters panel, with its own
+  // useState(false), sitting INSIDE the card above the fields. screens/INDEX.md 09 captions it
+  // "Artifact card header, gate badge, doc buttons, collapsed asset header" - card open, panel shut.
+  //
+  // Measured cost on production 2026-08-23: #/packet/2cb56fb3.../resume rendered bodyLen 850 with
+  // NO blocks panel in the DOM, against 6379 for the same packet's QC step. The draft was invisible.
+  assert.equal(ASSET_BODY_DEFAULT_OPEN, true,
+    'the draft is the point of the screen - it must not be behind an undocumented click')
 
   const packet = stripComments(PACKET_SRC)
-  assert.match(packet, /useState\(ASSET_HEADER_DEFAULT_OPEN\)/,
-    'the header must seed its state from the named default, not from a bare literal')
+  assert.match(packet, /useState\(ASSET_BODY_DEFAULT_OPEN\)/,
+    'the card body must seed its state from the named default, not from a bare literal')
   assert.match(packet, /data-qc=\{PACKET_HOOKS\.assetHeader\}[\s\S]{0,200}data-qc-open=/,
-    'the header must publish its open state, or "collapsed by default" is unprovable on the live site')
-  assert.ok(!/useState\(true\)[\s\S]{0,120}assetHeader/.test(packet))
+    'the disclosure must publish its open state, or the default is unprovable on the live site')
 
   const blocks = stripComments(BLOCKS_SRC)
   assert.match(blocks, /defaultOpen = true/, 'the field block must still default OPEN')
   assert.match(blocks, /useState\(defaultOpen\)/)
   assert.match(blocks, /data-qc=\{BLOCK_HOOKS\.root\}[\s\S]{0,160}data-qc-open=/,
     'the block must publish its open state too, so the pair can be read off the DOM at once')
-
-  // And the two are separate hooks, so a verifier can select them independently.
-  assert.notEqual(PACKET_HOOKS.assetHeader, BLOCK_HOOKS.root)
-  assert.equal(PACKET_HOOKS.assetHeader, 'asset-header')
 })
 
 test('collapsing the header hides the asset BODY, not just its label', () => {

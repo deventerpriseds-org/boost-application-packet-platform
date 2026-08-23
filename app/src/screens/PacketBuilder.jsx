@@ -10,7 +10,7 @@ import {
   ProfileCompareCard,
 } from './PostingAnalysis.jsx'
 import { postingBody } from '../postingAnalysis.js'
-import { PACKET_HOOKS, ASSET_HEADER_DEFAULT_OPEN } from '../packetBuilder.js'
+import { PACKET_HOOKS, ASSET_BODY_DEFAULT_OPEN } from '../packetBuilder.js'
 import QcRail, { useQcEntries } from './QcRail.jsx'
 import { qcStepState, packetGate, railGateMeta } from '../qcRail.js'
 
@@ -92,7 +92,7 @@ export function ArtifactCard({ a, busy, setBusy, onGenerate, onSetStatus, onMake
   // around two different objects: this one wraps the whole ARTIFACT, that one wraps the merge
   // FIELDS inside it. Opening this header therefore reveals the fields already open - one click,
   // not two - which is exactly the arrangement the plan describes and warns is easy to misread.
-  const [open, setOpen] = useState(ASSET_HEADER_DEFAULT_OPEN)
+  const [open, setOpen] = useState(ASSET_BODY_DEFAULT_OPEN)
   const toggle = () => setOpen((o) => !o)
 
   return (
