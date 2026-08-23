@@ -2404,3 +2404,42 @@ Live state repaired by hand at the owner's instruction: `chk_skill_max_chars` 30
 **General rule: DDL written as `if not exists` is create-only. Any change to an existing column —
 default, type, constraint — needs its own explicit statement, and the only proof it landed is
 reading the live catalog.**
+
+## The rewrites were never failing — I was reading the wrong object (2026-08-23)
+
+Every char-limit rewrite had been rejected since the normaliser shipped. The diagnostic added the
+previous round (name the rejected proposal) settled it in one build:
+
+```
+"Software Engineering Strategy" (29) could not be reworded within 24
+  — the model returned nothing usable; your previous answer was empty
+```
+
+Eleven items, all "empty" — never "too long", never "collides". Empty is the signature of a PARSE
+failure, not of a weak model.
+
+**`openAiJson()` returns the RAW OpenAI envelope** — `{id, choices, usage}` — and `contentJson()` is
+a separate, deliberate step, documented in that module as separating "the HTTP call succeeded" from
+"the model returned parseable JSON". My rewrite did `out?.item` on the envelope. That property never
+exists, so every rewrite became `null`. **The model had answered correctly every single time.**
+154 output tokens billed across 18 calls, all discarded by one property access.
+
+Audited every `openAiJson` caller: the two `evidence:escalate` ones hand the transport DOWN to
+`evidenceProposal.ts`, which parses correctly. Only mine consumed the envelope directly. Isolated,
+introduced today, fixed with `contentJson(out)`. `H:openai-envelope-is-parsed` pins the class and is
+mutation-proven.
+
+### What this says about the last few hours
+
+I spent a model A/B, a retry mechanism and two rounds of speculation on a symptom whose cause was a
+property access. The retry was not wasted — it is correct behaviour — but it was built to fix a
+problem that did not exist, and it "failed" for the same reason the original did.
+
+**What broke the loop was the diagnostic**: making the failure message name the model's ACTUAL
+proposal turned an opaque "could not be reworded" into "returned nothing usable; previous answer was
+empty", and empty pointed straight at parsing. That took one line and one build.
+
+**Rule: when a step reports failure, make it report the VALUE it rejected before theorising about
+why.** A rejection message that omits what was rejected is unfalsifiable, and three plausible
+explanations (weak model, bad prompt, wrong threshold) all fit an outcome that had none of those
+causes.

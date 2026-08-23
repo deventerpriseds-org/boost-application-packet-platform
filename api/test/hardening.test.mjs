@@ -3903,3 +3903,35 @@ test('H:list-b-reaches-the-prompt: recovered from both calls, spread into atsExt
       'anything headingKeysFor returns, and List B silently stays empty')
   }
 })
+
+// H:openai-envelope-is-parsed — reading a field off the RAW OpenAI response is always undefined.
+//
+// `openAiJson()` returns the transport's raw envelope — `{id, choices, usage}` — and `contentJson()`
+// is a SEPARATE, deliberate step so a caller can distinguish "the HTTP call succeeded" from "the
+// model returned parseable JSON". The module's own doc comment says exactly that.
+//
+// MEASURED 2026-08-23. The normaliser's rewrite did `out?.item` on the envelope. That property does
+// not exist, so every rewrite became `null` and the pass reported "the model returned nothing
+// usable" for all ELEVEN over-limit items — while the model had answered correctly every time.
+// 154 output tokens billed across 18 calls, every one discarded by one line. It read as a model
+// quality problem and was a property access on the wrong object.
+//
+// The class, not the incident: any caller that consumes an `openAiJson` transport's return value
+// directly must pass it through `contentJson` first. (Callers that hand the transport DOWN to
+// another module — the `evidence:escalate` pair — are exempt: the module they pass it to parses it.)
+test('H:openai-envelope-is-parsed: a direct consumer of openAiJson goes through contentJson', () => {
+  const PK = stripComments(readFileSync(new URL('../src/functions/tests/appPackets.ts', import.meta.url), 'utf8'))
+
+  // The normaliser's rewrite is the one direct consumer in this file.
+  const at = PK.indexOf("openAiJson({ feature: 'normalise:reword'")
+  assert.notEqual(at, -1, 'the reword transport moved; retarget this guard')
+  const region = PK.slice(at, PK.indexOf('\n  })', at) + 400)
+
+  assert.ok(/contentJson\(/.test(region),
+    'the rewrite consumes the OpenAI envelope without contentJson — every parse silently yields ' +
+    'undefined and every rewrite is discarded as "nothing usable"')
+  assert.ok(!/\bout\?\.\s*item\b/.test(region),
+    'a field is being read straight off the raw envelope again; that property never exists')
+  assert.ok(/import \{[^}]*contentJson[^}]*\} from '\.\/openaiJson'/.test(PK),
+    'contentJson is no longer imported')
+})

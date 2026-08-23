@@ -20,7 +20,7 @@ import { normalisePackage } from './normalise'
 // appPackets is not reachable from appRequirements (checked across all 24 modules it can reach).
 import { writeEvidence, rebuildComparison, ensureRequirementCols, ensureEvidenceTable } from './appRequirements'
 import { resolveOptionsFor } from './checkPrefs'
-import { openAiJson } from './openaiJson'
+import { openAiJson, contentJson } from './openaiJson'
 
 
 const HEADERS = {
@@ -526,7 +526,15 @@ export async function ensurePackage(client: any, art: any, opp: any, regen: bool
       + `Other items in this list, for voice and to avoid duplicating one:\n${siblings.map(x => `- ${x}`).join('\n')}`
       + (priorAttempt ? `\n\nRETRY — ${priorAttempt}. Count the characters this time and return something shorter.` : ''),
     )
-    return typeof out?.item === 'string' ? out.item : null
+    // `openAiJson` returns the RAW OpenAI envelope — `{id, choices, usage}` — and parsing is a
+    // SEPARATE step by design, so a caller can tell "the HTTP call succeeded" from "the model
+    // returned parseable JSON". Reading `out.item` off the envelope reads a property that does not
+    // exist, so EVERY rewrite silently became `null` and the normaliser reported "the model returned
+    // nothing usable" for all eleven items on the 2026-08-23 build — while the model had answered
+    // correctly every time. 154 output tokens were billed across 18 calls and every one was thrown
+    // away by this line.
+    const parsed = contentJson(out)
+    return typeof parsed?.item === 'string' ? parsed.item : null
   })
   for (const c of normalised.changes) {
     built.warnings.push(c.after === null
