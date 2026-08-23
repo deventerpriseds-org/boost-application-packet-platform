@@ -349,11 +349,12 @@ test('draftSizeText omits bullets when the field name never asked for them', () 
 })
 
 // ── P8.7: the blocks card is selectable by CSS, and the two disclosures stay opposite ───────────
-import { BLOCK_HOOKS, correctionsForField } from '../src/assetBlocks.js'
+import { BLOCK_HOOKS, correctionsForField, orderFields } from '../src/assetBlocks.js'
 import { ASSET_BODY_DEFAULT_OPEN, PACKET_HOOKS } from '../src/packetBuilder.js'
 
 const BLOCKS_SRC = src('../src/screens/AssetBlocks.jsx')
 const PACKET_SRC = src('../src/screens/PacketBuilder.jsx')
+const SHELL_SRC = src('../src/shell.jsx')
 
 test('every BLOCK_HOOKS selector is rendered, and the card hand-types none of them', () => {
   for (const [name, value] of Object.entries(BLOCK_HOOKS)) {
@@ -448,4 +449,75 @@ test('H:corrections-render-beside-the-field: field scoping is an id match, never
     'SummaryExtra must NOT leak into Summary - a merge field name is an identifier')
   assert.deepEqual(correctionsForField(rows, '').map((r) => r.key), [])
   assert.deepEqual(correctionsForField(null, 'Summary'), [])
+})
+
+// ── visual alignment to the prototype ────────────────────────────────────────────────────────────
+
+/**
+ * H:the-draft-reads-in-document-order
+ *
+ * `appInsertions.ts:81` returns `order by i.loop, i.merge_field` - ALPHABETICALLY. On the resume
+ * that opens the screen on `ExpertiseBullets` and buries `ResumeSummary` fourth. The prototype
+ * opens on the summary. Owner, 2026-08-23: "why is it rendering out of order vs the prototype with
+ * experience at the top instead of resume summary?"
+ *
+ * Measured by rendering both sides that day:
+ *   prototype  Resume summary -> Skills 1 -> Skills 2 -> Relevant 1-3 -> Work experience
+ *   app        ExpertiseBullets -> RelevantBullets1 -> 2 -> 3 -> ResumeSummary -> Skills 1 -> 2
+ *
+ * Asserts the invariant, not the incident: the summary leads, skills precede relevant, and the
+ * order is NOT the alphabetical one the API hands over. An unlisted field keeps its position and
+ * lands last, so a new template field appears at the end rather than jumping to the top.
+ */
+test('H:the-draft-reads-in-document-order: the summary leads and the order is not alphabetical', () => {
+  const shuffled = [
+    { merge_field: 'ExpertiseBullets' }, { merge_field: 'RelevantBullets1' },
+    { merge_field: 'RelevantBullets2' }, { merge_field: 'RelevantBullets3' },
+    { merge_field: 'ResumeSummary' }, { merge_field: 'SkillsBullets1' },
+    { merge_field: 'SkillsBullets2' },
+  ]
+  const got = orderFields(shuffled).map((r) => r.merge_field)
+  assert.deepEqual(got, [
+    'ResumeSummary', 'SkillsBullets1', 'SkillsBullets2',
+    'RelevantBullets1', 'RelevantBullets2', 'RelevantBullets3', 'ExpertiseBullets',
+  ], 'the resume must read in the prototype order')
+
+  const alphabetical = [...shuffled].map((r) => r.merge_field).sort()
+  assert.notDeepEqual(got, alphabetical, 'alphabetical is what the API returns and what looked wrong')
+
+  // Unknown fields: stable, and after the known ones - never dropped, never promoted.
+  const withNew = orderFields([{ merge_field: 'ZNewField' }, { merge_field: 'ResumeSummary' }, { merge_field: 'ANewField' }])
+  assert.deepEqual(withNew.map((r) => r.merge_field), ['ResumeSummary', 'ZNewField', 'ANewField'],
+    'unlisted fields keep their relative order and sort last')
+
+  // The ordering must be applied where the screen reads its rows, not only in the helper.
+  assert.match(stripComments(src('../src/assetBlocks.js')), /return orderFields\(all\.filter\(/,
+    'latestRows must return ordered rows, or the sort exists but nothing uses it')
+})
+
+/**
+ * H:sidenav-starts-collapsed
+ *
+ * Owner request 2026-08-23: "the left most nav menu needs to be collapsible and collapsed by
+ * default." 196px of permanently-parked chrome is 196px the draft, its provenance margin and the
+ * posting quotes do not get - and the prototype's three-column JD layout only opens above 1040px.
+ *
+ * Collapsed must keep the ICONS. A rail you cannot navigate from is not collapsed, it is hidden.
+ */
+test('H:sidenav-starts-collapsed: default closed, still navigable, and the state persists', () => {
+  const s = stripComments(SHELL_SRC)
+  assert.match(s, /export const SIDENAV_DEFAULT_OPEN = false/,
+    'the nav starts collapsed, and the default is named so a test can hold it')
+  assert.match(s, /data-qc="sidenav"[\s\S]{0,120}data-qc-open=/,
+    'the nav must publish its open state, or "collapsed by default" is unprovable on the live site')
+  assert.match(s, /data-qc="sidenav-toggle"/, 'collapsible means there is a control to do it with')
+  assert.match(s, /localStorage\.setItem\(SIDENAV_KEY/, 'the choice is remembered')
+  // Icons survive the collapse: the label is conditional, the icon is NOT. Asserting only that the
+  // label is conditional cannot catch an icon that also gets hidden - measured, that mutation left
+  // the suite green - so the icon's own unconditionality is what is asserted.
+  assert.match(s, /\{open && n\.label\}/, 'the LABEL hides when collapsed')
+  const iconLine = (s.match(/<span style=\{\{ width: 16[^\n]*\{n\.icon\}<\/span>/) || [''])[0]
+  assert.ok(iconLine, 'the nav icon must still be rendered')
+  assert.ok(!/\{open &&\s*$/.test(s.slice(0, s.indexOf(iconLine)).trimEnd()),
+    'the icon must NOT be behind `open &&` - a rail you cannot navigate from is hidden, not collapsed')
 })

@@ -168,7 +168,54 @@ export function latestRows(data) {
   const all = (data && data.insertions) || []
   if (!all.length) return []
   const latest = Number(data.loop)
-  return all.filter((r) => Number(r.loop) === latest)
+  return orderFields(all.filter((r) => Number(r.loop) === latest))
+}
+
+/**
+ * The order the DOCUMENT reads in, which is not the order the API returns.
+ *
+ * `appInsertions.ts:81` sorts `order by i.loop, i.merge_field` - ALPHABETICALLY. On the resume that
+ * puts `ExpertiseBullets` first and `ResumeSummary` fourth, so the screen opens on a skills list
+ * where the prototype opens on the summary. Rendering both sides 2026-08-23:
+ *
+ *   prototype  Resume summary -> Skills 1 -> Skills 2 -> Relevant 1-3 -> Work experience
+ *   app        ExpertiseBullets -> RelevantBullets1 -> 2 -> 3 -> ResumeSummary -> Skills1 -> 2
+ *
+ * Owner: "why is it rendering out of order vs the prototype with experience at the top instead of
+ * resume summary?"
+ *
+ * Sorted HERE rather than in the query because this is presentation: the same rows feed the resume
+ * and the compact resume, which share merge-field names, and a document's reading order is a
+ * property of the document, not of the table. Changing the SQL would also silently reorder every
+ * other consumer of that endpoint.
+ *
+ * STABLE for anything unlisted - an unknown merge field keeps its relative position and lands after
+ * the known ones, so a new template field appears at the end rather than vanishing or jumping to
+ * the top. Never alphabetical again.
+ */
+const FIELD_ORDER = [
+  // Resume / ATS-compact resume, in the prototype's reading order.
+  'ResumeSummary', 'SkillsBullets1', 'SkillsBullets2',
+  'RelevantBullets1', 'RelevantBullets2', 'RelevantBullets3',
+  'ExpertiseBullets',
+  // Cover letter: the letterhead fields precede the body that references them.
+  '@Company', '@CoverLetterDate', '@CoverLetterBody',
+  // Portfolio, narrative before evidence.
+  '@ExecutiveProfile_55words', '@AboutMe1_50words', '@AboutMe2_60words',
+  '@CoreAccomplishments_5blts_180words',
+]
+const FIELD_RANK = new Map(FIELD_ORDER.map((f, i) => [f, i]))
+
+/** Document reading order. Exported so a test can hold the order to the prototype's. */
+export function orderFields(rows) {
+  const rank = (r) => {
+    const k = r && r.merge_field
+    return FIELD_RANK.has(k) ? FIELD_RANK.get(k) : FIELD_ORDER.length
+  }
+  return rows
+    .map((r, i) => ({ r, i }))
+    .sort((a, b) => (rank(a.r) - rank(b.r)) || (a.i - b.i))
+    .map((x) => x.r)
 }
 
 /** The skill_candidate lists this asset actually renders. */

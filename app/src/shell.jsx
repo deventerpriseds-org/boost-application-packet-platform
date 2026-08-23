@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useApp, useRoute, go, useIsMobile } from './state.jsx'
 import { overlayVariant, FOCUSABLE_SELECTOR, wrapFocusIndex, routeKeyOf, hasNavigated } from './overlay.js'
@@ -365,18 +365,58 @@ function TopBar({ title }) {
   )
 }
 
+// The nav starts COLLAPSED and the choice is remembered. Owner request 2026-08-23: "the left most
+// nav menu needs to be collapsible and collapsed by default".
+//
+// The reason it matters is the packet builder, not the nav: the draft, its provenance margin and the
+// posting quotes all compete for the same row. 196px of permanently-parked chrome is 196px the
+// evidence does not get, and the prototype's three-column JD layout only opens up above 1040px.
+//
+// Collapsed keeps the ICONS, never a bare edge - a rail you cannot navigate from is not a collapsed
+// nav, it is a hidden one, and the labels come back as `title` tooltips so the target stays nameable.
+export const SIDENAV_DEFAULT_OPEN = false
+const SIDENAV_KEY = 'ee_sidenav_open'
+
 function SideNav() {
   const { parts } = useRoute()
   const activePath = '/' + parts.slice(0, 2).filter(Boolean).join('/')
+  // localStorage can throw outright (private mode, blocked site data) - a nav that crashes the shell
+  // because it could not read a preference is worse than a nav that forgets one.
+  const [open, setOpen] = useState(() => {
+    try {
+      const v = localStorage.getItem(SIDENAV_KEY)
+      return v === null ? SIDENAV_DEFAULT_OPEN : v === '1'
+    } catch { return SIDENAV_DEFAULT_OPEN }
+  })
+  const toggle = () => {
+    setOpen((v) => {
+      try { localStorage.setItem(SIDENAV_KEY, v ? '0' : '1') } catch { /* preference is optional */ }
+      return !v
+    })
+  }
   return (
-    <div style={{ width: 196, borderRight: '1px solid var(--proto-rule-soft)', background: 'var(--proto-paper)', padding: 12, flexShrink: 0, overflowY: 'auto' }}>
+    <div data-qc="sidenav" data-qc-open={open ? '1' : '0'}
+      style={{ width: open ? 196 : 52, borderRight: '1px solid var(--proto-rule-soft)', background: 'var(--proto-paper)',
+        padding: open ? 12 : '12px 6px', flexShrink: 0, overflowY: 'auto', overflowX: 'hidden',
+        transition: 'width 140ms ease' }}>
+      <div role="button" tabIndex={0} data-qc="sidenav-toggle" onClick={toggle}
+        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle() } }}
+        aria-expanded={open} title={open ? 'Collapse menu' : 'Expand menu'}
+        style={{ display: 'flex', alignItems: 'center', justifyContent: open ? 'flex-end' : 'center',
+          padding: '6px 8px', marginBottom: 6, borderRadius: 8, cursor: 'pointer',
+          fontSize: 14, color: 'var(--proto-ink3)' }}>
+        {open ? '«' : '»'}
+      </div>
       {NAV.map((n) => {
         const on = activePath === n.path || activePath.startsWith(n.path + '/') && n.path !== '/today'
         return (
-          <div key={n.label} onClick={() => go(n.path)}
-            style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 12px', borderRadius: 8, cursor: 'pointer', marginBottom: 2, fontSize: 13, fontWeight: on ? 600 : 500,
+          <div key={n.label} onClick={() => go(n.path)} title={n.label}
+            style={{ display: 'flex', alignItems: 'center', gap: open ? 10 : 0, justifyContent: open ? 'flex-start' : 'center',
+              padding: open ? '9px 12px' : '9px 0', borderRadius: 8, cursor: 'pointer', marginBottom: 2,
+              fontSize: 13, fontWeight: on ? 600 : 500, whiteSpace: 'nowrap',
               background: on ? 'var(--proto-accent-soft)' : 'transparent', color: on ? 'var(--text-brand)' : 'var(--proto-ink2)' }}>
-            <span style={{ width: 16, textAlign: 'center' }}>{n.icon}</span>{n.label}
+            <span style={{ width: 16, textAlign: 'center' }}>{n.icon}</span>
+            {open && n.label}
           </div>
         )
       })}
