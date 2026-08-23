@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api } from '../api.js'
 import { Pill, toneColor } from '../shell.jsx'
 import AssetGateDrawer from './AssetGateDrawer.jsx'
-import { assetLabel, checkLabel, fieldLabel, stateMeta, fmtWhen } from '../assetGate.js'
+import { assetLabel, checkLabel, fieldLabel, severityMeta, fmtWhen } from '../assetGate.js'
 import {
   QC_HOOKS, RAIL_TABS, railGate, railGateMeta, railAttention, railCounts, railTotals, railBody,
   railHeadline, verdictLine, railVerdict, engineRows, countLink, coverageCards,
@@ -176,10 +176,11 @@ function CountLink({ artifactId, row, onOpen }) {
   )
 }
 
-// One finding. The state pill is the only colour signal, and not_applicable carries its own grey and
-// its own words so it can never be read as a pass.
+// One finding. The severity pill is the only colour signal, and not_applicable carries its own grey
+// and its own words so it can never be read as a pass. severityMeta is engine-aware where stateMeta
+// was not: a reviewer `fail` reads 'Your call', because D6 says it cannot block this artifact.
 function CheckRow({ artifactId, row, onOpen }) {
-  const m = stateMeta(row.state)
+  const m = severityMeta(row)
   const link = countLink(artifactId, row)
   return (
     <div className="px-box-soft" data-qc={QC_HOOKS.check} data-qc-state={row.state} data-qc-engine={row.engine || 'deterministic'}

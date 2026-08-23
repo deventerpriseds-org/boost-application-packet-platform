@@ -8,6 +8,7 @@ import { readFileSync } from 'node:fs'
 import {
   footerFor, reconcile, reviewerAttention, attentionSplit, engineRows, scoreParts,
   gateMeta, stateMeta, checkLabel, fieldLabel, assetLabel, STATE_META,
+  SEV_LABEL, severityFor, severityMeta, CHANGE_LOG_HEADLINE,
 } from '../src/assetGate.js'
 
 // The two payloads a verifier reproduced the AC3 defects with. They are shared by the tests below
@@ -352,4 +353,72 @@ test('the two counts stay two hooks — a blended one is not addable back by acc
   assert.match(stripped, /GATE_HOOKS\.toReview[\s\S]{0,200}split\.review/)
   assert.ok(!/data-qc-n=\{split\.counted\}/.test(stripped),
     'the badge is publishing the blended server total as a count of things to fix')
+})
+
+// ── Severity labels: the prototype's words, read from the prototype ───────────────────────────────
+//
+// These three read their expected strings OUT of docs/qc-evidence/ at run time rather than
+// restating them. A guard that hardcodes the string it is guarding cannot notice the design moving;
+// this one fails the moment the app's copy and the prototype's copy stop agreeing, in either
+// direction. Evidence they were needed: the UI gap register listed 'Done for you', 'Fix before
+// approval', 'Review' and 'Your call' as present in the prototype and absent from the app.
+
+const PROTO_DATA = readFileSync(new URL('../../docs/qc-evidence/qc/data.js', import.meta.url), 'utf8')
+const PROTO_EVIDENCE = readFileSync(new URL('../../docs/qc-evidence/qc/evidence.jsx', import.meta.url), 'utf8')
+
+/** The prototype's own SEV_LABEL literal, parsed rather than retyped. */
+function protoSevLabel() {
+  const m = PROTO_DATA.match(/const SEV_LABEL = \{([^}]*)\}/)
+  assert.ok(m, 'the prototype no longer declares SEV_LABEL - this guard is reading the wrong file')
+  const out = {}
+  for (const pair of m[1].split(',')) {
+    const kv = pair.match(/\s*(\w+)\s*:\s*'([^']*)'/)
+    if (kv) out[kv[1]] = kv[2]
+  }
+  assert.ok(Object.keys(out).length >= 4, 'parsed too few SEV_LABEL entries: ' + JSON.stringify(out))
+  return out
+}
+
+test('H:sev-label-matches-prototype: every severity word we ship is the prototype word', () => {
+  const proto = protoSevLabel()
+  // Our keys are the prototype's keys minus `open`, which has no app-side source (OPEN_ITEMS).
+  assert.equal(SEV_LABEL.fix, proto.fail, 'deterministic fail must read the prototype "fail" label')
+  assert.equal(SEV_LABEL.review, proto.warn)
+  assert.equal(SEV_LABEL.soft, proto.soft)
+  assert.equal(SEV_LABEL.fixed, proto.fixed)
+  assert.ok(!('open' in SEV_LABEL),
+    'shipping an "open" severity means a bucket was minted with no data source behind it')
+})
+
+test('H:reviewer-fail-is-not-must-fix: a row that cannot block never uses blocking words', () => {
+  // D6 (qcRail.js railCounts): only a deterministic row can fail an artifact. STATE_META mapped
+  // every fail to 'Must fix' in red, so the drawer told the reader a reviewer finding blocked them.
+  const reviewerFail = { state: 'fail', engine: 'reviewer', check_key: 'x' }
+  const rulesFail = { state: 'fail', engine: 'deterministic', check_key: 'x' }
+
+  assert.equal(severityFor(reviewerFail), 'soft')
+  assert.equal(severityFor(rulesFail), 'fix')
+
+  const words = severityMeta(reviewerFail).label.toLowerCase()
+  for (const banned of ['must fix', 'must ', 'before approval', 'blocked', 'required']) {
+    assert.ok(!words.includes(banned),
+      'a reviewer fail may never block, so it may not say "' + banned + '": ' + JSON.stringify(words))
+  }
+  assert.notEqual(severityMeta(reviewerFail).tone, severityMeta(rulesFail).tone,
+    'the two must not share a colour either - colour is the faster signal than the word')
+
+  // A row with nothing to answer for keeps its existing state words, unchanged.
+  assert.equal(severityFor({ state: 'pass' }), null)
+  assert.equal(severityMeta({ state: 'pass' }).label, STATE_META.pass.label)
+  assert.equal(severityMeta({ state: 'not_applicable' }).label, STATE_META.not_applicable.label)
+  // warn is engine-blind: a warning is a warning whoever raised it.
+  assert.equal(severityFor({ state: 'warn', engine: 'reviewer' }), 'review')
+  assert.equal(severityFor({ state: 'warn', engine: 'deterministic' }), 'review')
+})
+
+test('H:change-log-headline-matches-prototype: the change log is headed in the prototype words', () => {
+  const m = PROTO_EVIDENCE.match(/>([^<>{}]*\bfor you\b[^<>{}]*)</)
+  assert.ok(m, 'the prototype no longer renders a "... for you" heading in qc/evidence.jsx')
+  assert.equal(CHANGE_LOG_HEADLINE, m[1].trim(),
+    'the app heads its change log differently from the prototype')
 })

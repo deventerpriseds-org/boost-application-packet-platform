@@ -3,6 +3,7 @@ import { api } from '../api.js'
 import { Overlay, Pill } from '../shell.jsx'
 import {
   ASSET_LABEL, assetLabel, STATUS_TONE, GATE_META, gateMeta, STATE_META, stateMeta,
+  SEV_LABEL, severityFor, severityMeta,
   CHECK_LABEL, checkLabel, FIELD_LABEL, fieldLabel, METHOD_LABEL,
   footerFor, reconcile, attentionSplit, engineRows, scoreParts, fmtWhen, arr, errText,
   GATE_HOOKS,
@@ -29,6 +30,7 @@ import { HIGHLIGHT_CLASS } from '../highlight.js'
 // import to reach for.
 export {
   ASSET_LABEL, assetLabel, STATUS_TONE, GATE_META, gateMeta, STATE_META, stateMeta,
+  SEV_LABEL, severityFor, severityMeta,
   CHECK_LABEL, checkLabel, FIELD_LABEL, fieldLabel, footerFor, reconcile, attentionSplit, engineRows,
   GATE_HOOKS,
 }
@@ -93,10 +95,11 @@ const Offenders = ({ items }) => {
   )
 }
 
-// One check row. The state pill is the only colour signal, and not_applicable carries its own grey
-// and its own words so it can never be read as a pass.
+// One check row. The severity pill is the only colour signal, and not_applicable carries its own
+// grey and its own words so it can never be read as a pass. Engine-aware for the same reason
+// QcRail's row is: a reviewer `fail` cannot block this artifact, so it must not read 'Must fix'.
 function CheckRow({ row }) {
-  const m = stateMeta(row.state)
+  const m = severityMeta(row)
   return (
     <div className="px-box-soft" data-qc={GATE_HOOKS.check} data-qc-state={row.state || 'unknown'}
       data-qc-engine={row.engine || 'unrecorded'} style={{ padding: 10, marginBottom: 8 }}>

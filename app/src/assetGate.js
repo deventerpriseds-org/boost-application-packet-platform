@@ -68,6 +68,47 @@ export const STATE_META = {
 }
 export const stateMeta = (s) => STATE_META[s] || { tone: 'panel', label: String(s || 'unknown') }
 
+/**
+ * SEVERITY - what a finding means for the READER, which is not the same as its raw state.
+ *
+ * The words are the prototype's (`docs/qc-evidence/qc/data.js` SEV_LABEL) and the guard reads them
+ * out of that file, so they cannot drift from the design without the suite saying so.
+ *
+ * This EXTENDS STATE_META rather than replacing it: pass / not_applicable have no severity and fall
+ * through to their existing words. What severity adds is the ENGINE, and it adds it because the
+ * state alone misstates the case. Decision D6 (qcRail.js railCounts) says only a deterministic row
+ * can fail an artifact - a reviewer `fail` may never block on its own, and reconcile() reports it as
+ * a contradiction when the gate acts as though it did. Yet STATE_META maps every `fail` to
+ * 'Must fix' in red, so the drawer has been telling the reader they are blocked by exactly the row
+ * that cannot block them. 'Your call' is what D6 already decided; this is naming it, not deciding it.
+ *
+ * `open` ('Needs your answer') is deliberately ABSENT. In the prototype it comes from OPEN_ITEMS - a
+ * separate list of questions each carrying its own `ask` - and the app has no such source. Minting it
+ * from a state we do have would be inventing a bucket, which is the one thing a label may not do.
+ */
+export const SEV_LABEL = {
+  fix: 'Fix before approval',
+  review: 'Review',
+  soft: 'Your call',
+  fixed: 'Corrected for you',
+}
+export const SEV_TONE = { fix: 'red', review: 'yellow', soft: 'panel', fixed: 'green' }
+
+/** fail|warn + engine -> severity key, or null for a row that needs no attention. */
+export function severityFor(row) {
+  if (!row) return null
+  if (row.state === 'warn') return 'review'
+  if (row.state !== 'fail') return null
+  return row.engine === 'reviewer' ? 'soft' : 'fix'
+}
+
+/** The words and tone for ONE finding row. Falls back to STATE_META where there is no severity. */
+export function severityMeta(row) {
+  const sev = severityFor(row)
+  if (!sev) return stateMeta(row && row.state)
+  return { tone: SEV_TONE[sev], label: SEV_LABEL[sev], sev }
+}
+
 // check_key -> plain language. An unmapped key degrades to the key with its underscores opened out,
 // so a check added server-side shows up honestly instead of vanishing from the list.
 export const CHECK_LABEL = {
@@ -327,7 +368,7 @@ export const CORRECTION_SOURCE = {
 export const correctionSourceText = (s) => CORRECTION_SOURCE[s] || String(s || 'no source was recorded')
 
 /** Finished framing (R1). These are the words the change log is allowed to use about itself. */
-export const CHANGE_LOG_HEADLINE = 'Changes made for you'
+export const CHANGE_LOG_HEADLINE = 'Done for you'
 
 /**
  * The four states a change log can be in, decided from the RAW payload key.
