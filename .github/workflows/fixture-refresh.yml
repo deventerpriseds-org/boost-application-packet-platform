@@ -1,0 +1,108 @@
+name: Fixture Refresh
+
+# Pull a full UI-comparison fixture set out of the production DB and COMMIT it to an orphan
+# branch, so a CCR session can `git fetch` it.
+#
+# WHY A BRANCH AND NOT THE JOB LOG. The sandbox cannot download GH artifacts (403) and cannot
+# reach the DB or the API directly. `git` is the only readable transport out of a runner, and
+# this is the same trick `ui-verify.yml` uses to get screenshots back (the `ui-shots` branch).
+# Reading a large JSON blob out of `get_job_logs` instead means hand-transcribing it, which
+# risks a transcription error in the very data a measurement is judged against.
+#
+# WHY IT EXISTS AT ALL. The route-keyed fixture file used to live only in a session scratchpad.
+# A container restore took it, and the next UI-gap measurement reported 193/26 against a
+# recorded 146/15 - a 47-row "regression" that was entirely the harness, with nothing logging
+# an error. See docs/qc-evidence/UI-GAP-REGISTER.md and scripts/build-fixtures.mjs.
+#
+# READ IT BACK FROM A SESSION:
+#   git fetch origin '+refs/heads/ui-fixtures:refs/remotes/origin/ui-fixtures'
+#   git show origin/ui-fixtures:raw-dump.json > /tmp/raw.json
+#   node scripts/build-fixtures.mjs --raw /tmp/raw.json --opp <oppId> --out /tmp/fx.json
+
+on:
+  workflow_dispatch:
+    inputs:
+      opp:
+        description: 'Opportunity id'
+        required: true
+        default: '2cb56fb3-fc33-4b1a-85b9-06c7aea2fbb3'
+      packet:
+        description: 'Packet id'
+        required: true
+        default: '4860ae3b-fa3a-46d0-9cfc-e656ae6835a5'
+
+permissions:
+  contents: write
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Dump the fixture data
+        env:
+          PGHOST: eds-postgresql.postgres.database.azure.com
+          PGPORT: 5432
+          PGDATABASE: boost_resume_n_packet_builder
+          PGUSER: Admin_eds
+          PGPASSWORD: ${{ secrets.Azure_admin_pw }}
+          PGSSLMODE: require
+          OPP: ${{ github.event.inputs.opp }}
+          PKT: ${{ github.event.inputs.packet }}
+        run: |
+          set -euo pipefail
+          # -t -A -X: tuples only, unaligned, no .psqlrc - so stdout is the bare JSON and
+          # nothing else. Without -A psql wraps long lines and the JSON comes back unparseable.
+          psql -t -A -X -v ON_ERROR_STOP=1 -o raw-dump.json <<SQL
+          select json_build_object(
+            'packet',        (select row_to_json(p) from packet p where p.id = '$PKT'),
+            'opp',           (select row_to_json(o) from opportunity o where o.id = '$OPP'),
+            'artifacts',     (select coalesce(json_agg(row_to_json(a)), '[]'::json)
+                              from artifact a where a.packet_id = '$PKT'),
+            'insertions',    (select coalesce(json_agg(row_to_json(i)), '[]'::json)
+                              from insertion i
+                              where i.artifact_id in (select id from artifact where packet_id = '$PKT')),
+            'corrections',   (select coalesce(json_agg(row_to_json(c)), '[]'::json)
+                              from correction c
+                              where c.artifact_id in (select id from artifact where packet_id = '$PKT')),
+            'requirements',  (select coalesce(json_agg(row_to_json(r) order by r.seq), '[]'::json)
+                              from requirement r where r.opp_id = '$OPP'),
+            'gates',         (select coalesce(json_agg(row_to_json(g)), '[]'::json)
+                              from artifact_gate g
+                              where g.artifact_id in (select id from artifact where packet_id = '$PKT')),
+            'checks',        (select coalesce(json_agg(row_to_json(cr)), '[]'::json)
+                              from check_result cr
+                              where cr.artifact_id in (select id from artifact where packet_id = '$PKT')),
+            'swaps',         (select coalesce(json_agg(row_to_json(s) order by s.seq), '[]'::json)
+                              from swap_decision s where s.packet_id = '$PKT')
+          )::text
+          SQL
+
+      - name: Report what came back
+        run: |
+          set -euo pipefail
+          # A 200 with a zero count is a result to INVESTIGATE, not a pass - so print the
+          # per-table counts and fail loudly on an empty dump rather than committing one.
+          node -e "
+            const d = JSON.parse(require('fs').readFileSync('raw-dump.json','utf8'));
+            for (const k of ['artifacts','insertions','corrections','requirements','gates','checks','swaps'])
+              console.log((d[k]||[]).length.toString().padStart(5), k);
+            if (!d.packet) { console.error('no packet row - wrong id?'); process.exit(1) }
+            const empty = ['artifacts','insertions','requirements'].filter(k => !(d[k]||[]).length);
+            if (empty.length) { console.error('EMPTY: ' + empty.join(', ') + ' - refusing to commit a dump that would silently thin the fixtures'); process.exit(1) }
+          "
+
+      - name: Commit to the ui-fixtures branch
+        run: |
+          set -euo pipefail
+          git config user.name  'github-actions[bot]'
+          git config user.email 'github-actions[bot]@users.noreply.github.com'
+          # Orphan branch: this data has nothing to do with the source history and must never
+          # accumulate one - each refresh replaces the last.
+          git checkout --orphan ui-fixtures
+          git rm -rf --cached . >/dev/null 2>&1 || true
+          find . -maxdepth 1 ! -name . ! -name .git ! -name raw-dump.json -exec rm -rf {} +
+          git add raw-dump.json
+          git commit -m "fixture refresh ${{ github.event.inputs.opp }} @ ${{ github.sha }}"
+          git push -f origin ui-fixtures
