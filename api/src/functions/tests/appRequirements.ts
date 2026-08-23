@@ -152,13 +152,40 @@ export async function writeEvidence(
   const byKey = new Map(records.map(r => [r.key, r]))
   let refused = 0
 
+  // THE ONE CONDITION THAT DECIDES WHETHER THIS CALL CAN PRODUCE `proposed` ROWS. It is read twice —
+  // here, to scope the delete, and below, to guard the escalation pass — and those two readings MUST
+  // be the same expression, which is why it is a const rather than the condition written out twice.
+  // A delete that outruns what the same call can rebuild is exactly the defect below.
+  const canEscalate = opts.escalate === true && !!fetchJson
+
   await client.query('begin')
   try {
     // REPLACE, never append: re-resolving a posting must not double its evidence. Scoped to this
     // opportunity's requirements so a re-run cannot touch another posting's rows.
+    //
+    // BUT NEVER DELETE WHAT THIS CALL CANNOT REBUILD — measured 2026-08-23, and it made the entire
+    // evidence spine empty in production (1 row across 613 opportunities that have requirements).
+    //
+    // `runPacketBuild` resolves evidence WITH a transport (`resolveEvidenceForOpp`), which escalated
+    // 12 requirements on opportunity 2cb56fb3 and stored 8 `proposed` rows. It then ran
+    // `evaluateArtifact` once per artifact, and THAT calls this function with four arguments — no
+    // transport — so `canEscalate` is false and the escalation pass is skipped by design (see the
+    // comment at the call site: four concurrent artifacts must not each start their own model run).
+    // The unconditional delete then removed all 8 proposed rows and the deterministic pass could not
+    // recreate them, because only the escalation pass ever can. Measured before/after on the same
+    // opportunity minutes apart: 8 rows after the evidence route, 0 rows after a full build — and
+    // `must_have_coverage` consequently read `0/12` on all four artifacts.
+    //
+    // So the delete is scoped to the rows this call is actually able to re-derive. A transport-less
+    // call replaces the deterministic rows it owns and leaves model proposals alone; a call that CAN
+    // escalate still replaces everything, because it will re-propose.
     await client.query(
-      `delete from requirement_evidence e using requirement r
-        where e.requirement_id = r.id and r.opp_id = $1`, [oppId])
+      canEscalate
+        ? `delete from requirement_evidence e using requirement r
+            where e.requirement_id = r.id and r.opp_id = $1`
+        : `delete from requirement_evidence e using requirement r
+            where e.requirement_id = r.id and r.opp_id = $1 and e.method <> 'proposed'`,
+      [oppId])
     for (const r of rows) {
       const e = bySeq.get(r.seq) || null
       if (!e) continue
@@ -178,6 +205,22 @@ export async function writeEvidence(
       // asserts `refused` increments and nothing is inserted. `refused` is now a real measurement.
       const rec = byKey.get(e.source_key)
       if (!rec || rec.text.slice(e.char_start, e.char_end) !== e.quote) { refused++; continue }
+      // DETERMINISTIC EVIDENCE EVICTS A STALE PROPOSAL FOR THE SAME REQUIREMENT, and this runs only
+      // on the transport-less path because that is the only path where a proposal survived the
+      // delete above. Two reasons, and the second is the one that bites:
+      //  - `loadRequirementsWithEvidence` picks ONE row per requirement, `order by ratio desc nulls
+      //    last`, and a proposed row has a NULL ratio — so a rule row already outranks it. Leaving
+      //    the proposal would be merely untidy.
+      //  - but `insert ... on conflict (requirement_id, source_key, char_start, char_end) do nothing`
+      //    is keyed on the SPAN, not the method. A proposal is verified byte-exact against the record
+      //    it names, so it can legitimately hold the very span the rule just resolved — and then the
+      //    deterministic insert is silently dropped and the row stays `proposed`. That row does not
+      //    count toward `must_have_coverage` (`ruleEvidenceOf` excludes it), so a requirement the
+      //    profile genuinely evidences would read as uncovered. Deleting first makes the rule win.
+      if (!canEscalate) {
+        await client.query(
+          `delete from requirement_evidence where requirement_id = $1 and method = 'proposed'`, [r.id])
+      }
       await client.query(
         `insert into requirement_evidence
            (requirement_id, quote, source_kind, source_label, source_key, char_start, char_end,
@@ -212,7 +255,11 @@ export async function writeEvidence(
   // THREE conditions, all required. The owner's toggle is opt-in and its unconfigured state is OFF
   // (`resolveOptionsFrom`), and the transport must have been passed in — so no caller reaches the
   // model by forgetting a flag.
-  if (opts.escalate === true && fetchJson) {
+  // `canEscalate` alone: TypeScript's aliased-condition narrowing carries `!!fetchJson` from the
+  // const's definition, so `fetchJson` is already non-optional inside this block — writing
+  // `&& fetchJson` here is not just redundant, tsc rejects it (TS2774). That the compiler can prove
+  // it is the point: the delete scope above and this guard cannot drift apart silently.
+  if (canEscalate) {
     const cap = typeof opts.escalateMax === 'number' ? opts.escalateMax : 12
     const minQuoteChars = MIN_QUOTE_CHARS
     // Only rows the deterministic pass could not settle, and only up to the cap. `slice` before the

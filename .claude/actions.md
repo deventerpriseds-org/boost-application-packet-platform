@@ -2690,3 +2690,36 @@ substituting code defaults for owner thresholds, dropping the model pin).
 `boost_resume_n_packet_builder` returns instantly, replacing the 40-60s `db-query.yml` round trip for
 READS. It is read-only, so mutations still go through the workflow. `Azure_pg_mcp` remains
 unauthorised.
+
+## ACT — evidence spine emptied itself on every build (2026-08-23)
+
+**Request context:** owner said *"I don't care just start picking when it's job destructive and more
+risk to keep moving"* — so this was picked and carried to a deployed fix without asking.
+
+**Found:** `requirement_evidence` held **1 row across 613 opportunities with requirements**.
+`must_have_coverage` read `0/12` and `responsibilities_addressed` `0/21` on all four artifacts of a
+packet built from a real 9,749-char posting (eMoney `2cb56fb3`).
+
+**Cause:** `writeEvidence` (appRequirements.ts) opened by deleting EVERY evidence row for the
+opportunity. `runPacketBuild` escalates first (transport present → 8 `proposed` rows stored), then
+runs `evaluateArtifact` per artifact, which calls `writeEvidence` with no transport — so the
+escalation pass is skipped by design and the delete removed rows that call could never rebuild.
+
+**Evidence:** before/after on the same opportunity, minutes apart — 8 rows after `POST /evidence`,
+0 rows after `POST /packet/build-all` (db-query runs 32614576680 / 32614402373; build job
+97132108910 reporting `escalated:12, proposed:8`).
+
+**Fix:** delete scoped by `canEscalate` (a pass may only delete what it can rebuild) + deterministic
+evidence evicts a stale proposal for the same requirement, because `on conflict (...span...) do
+nothing` is keyed on the span not the method and would otherwise swallow the rule row.
+
+**Guards:** `H:evidence-survives-the-build`, `H:rule-evidence-evicts-a-stale-proposal` in
+`api/test/shipPathDb.test.mjs`. Both mutation-proven (each fails with its defect reinstated).
+
+**Corrected two of my own claims in the same pass:** the "31% of 1,941 opportunities lack `jd_real`"
+figure was over ALL rows incl. dismissed/demo/other owners — the owner's active pipeline is 92.5%
+covered with an EMPTY backfill queue; and every `check_result` in the DB belonged to Trinnex, a
+1,054-char extension snippet, so "26 blocking findings" was n=1 on the worst input in the system.
+
+**STILL OPEN:** the deterministic resolver evidences **0 of 35** requirements against a healthy
+profile. That is why all 12 escalated. Coverage cannot rise until it is diagnosed.

@@ -133,3 +133,123 @@ test('H:every-required-artifact-can-be-approved: approval is not deadlocked for 
     }
   } finally { await c.end() }
 })
+
+// ---------------------------------------------------------------------------------------------
+// CAN THE EVIDENCE SPINE SURVIVE ITS OWN BUILD? — the same shape of defect as the two above, found
+// the same way: a funnel stage reading exactly zero across its whole history.
+//
+// MEASURED 2026-08-23 on production. `requirement_evidence` held **1 row across 613 opportunities
+// that have requirements**, and `must_have_coverage` read `0/12` on all four artifacts of a packet
+// built from a real 9,749-char posting (opportunity 2cb56fb3). Before/after on that opportunity,
+// minutes apart, same profile:
+//     after POST /evidence  -> 8 rows, all method='proposed'
+//     after POST /build-all -> 0 rows
+//
+// `runPacketBuild` resolves evidence WITH an escalation transport, then calls `evaluateArtifact`
+// once per artifact; that path calls `writeEvidence` with FOUR arguments — no transport — because
+// four concurrent artifacts must not each start their own model run. `writeEvidence` opened by
+// DELETING every evidence row for the opportunity, and only the escalation pass can create a
+// `proposed` row. So each build paid for 12 model calls and then deleted the result.
+//
+// THE INVARIANT, stated so it outlives this incident: a pass may only delete the rows it is
+// STRUCTURALLY ABLE TO REBUILD. Asserted by executing the write, because the bug was the scope of a
+// SQL `delete` and no assertion about source text would have caught it.
+import { writeEvidence } from '../dist/functions/tests/appRequirements.js'
+
+const REC = {
+  key: 'work:acme', kind: 'work_history', label: 'Acme',
+  text: 'Directed platform engineering and SRE transformation across twelve teams.',
+}
+// A model proposal for seq 1, exactly as the escalation pass stores one: real offsets into the
+// record it names, and ratio NULL because no rule scored it.
+// DERIVED, never hand-counted. The first version of this line hardcoded 32/50 and was off by two;
+// the fixture's own assertion below caught it, which is the reason that assertion exists.
+const PQUOTE = 'SRE transformation'
+const PROPOSAL = {
+  quote: PQUOTE,
+  start: REC.text.indexOf(PQUOTE),
+  end: REC.text.indexOf(PQUOTE) + PQUOTE.length,
+}
+
+async function seedEvidenceFixture(c) {
+  await c.query(`delete from opportunity where owner_email = 'evsurvive@test.local'`)
+  const opp = (await c.query(
+    `insert into opportunity (owner_email, company, role, stage)
+     values ('evsurvive@test.local','Acme','VP Eng','enriched') returning id`)).rows[0].id
+  const ids = {}
+  for (const seq of [1, 2]) {
+    ids[seq] = (await c.query(
+      `insert into requirement
+         (opp_id, seq, kind, item_text, match_method, kind_source, weight, jd_text_sha256, extractor_version)
+       values ($1,$2,'must_have',$3,'unlocatable','category_default',2,'sha',1) returning id`,
+      [opp, seq, `requirement number ${seq}`])).rows[0].id
+  }
+  assert.equal(REC.text.slice(PROPOSAL.start, PROPOSAL.end), PROPOSAL.quote,
+    'fixture offsets must really index the record, or the row would not be a legal proposal')
+  await c.query(
+    `insert into requirement_evidence
+       (requirement_id, quote, source_kind, source_label, source_key, char_start, char_end,
+        extra, ratio, method, record_sha256, resolver_version, proposal_version)
+     values ($1,$2,'work_history','Acme','work:acme',$3,$4,null,null,'proposed','sha',1,1)`,
+    [ids[1], PROPOSAL.quote, PROPOSAL.start, PROPOSAL.end])
+  return { opp, ids }
+}
+
+const countByMethod = async (c, opp) => Object.fromEntries((await c.query(
+  `select e.method, count(*)::int as n from requirement_evidence e
+     join requirement r on r.id = e.requirement_id where r.opp_id = $1 group by e.method`,
+  [opp])).rows.map(r => [r.method, r.n]))
+
+test('H:evidence-survives-the-build: a transport-less pass must not delete model proposals it cannot rebuild',
+  { skip: !HAVE_PG && 'no local postgres' }, async () => {
+  const c = new Client(CONN); await c.connect()
+  try {
+    await c.query(schemaSql())
+    const { opp } = await seedEvidenceFixture(c)
+    assert.deepEqual(await countByMethod(c, opp), { proposed: 1 }, 'fixture must start with the proposal')
+
+    // EXACTLY what `evaluateArtifact` does: four arguments, so no transport and no escalation. The
+    // resolver finds nothing, which is the real production case (deterministic evidence was 0/35).
+    const out = await writeEvidence(c, opp, [REC], {}, (rows) => rows.map(r => ({
+      seq: r.seq, requirement_text: r.item_text, evidence: null,
+    })))
+
+    assert.deepEqual(await countByMethod(c, opp), { proposed: 1 },
+      'THE BUILD DELETED ITS OWN ESCALATION OUTPUT. A pass with no transport cannot create a ' +
+      '`proposed` row, so it must not delete one: this is what emptied the evidence spine in ' +
+      'production (1 row across 613 opportunities) and made `must_have_coverage` read 0/12.')
+    assert.equal(out.proposed, 0, 'a transport-less pass reports no proposals of its own')
+  } finally { await c.end() }
+})
+
+test('H:rule-evidence-evicts-a-stale-proposal: deterministic evidence must win the requirement, not be swallowed',
+  { skip: !HAVE_PG && 'no local postgres' }, async () => {
+  const c = new Client(CONN); await c.connect()
+  try {
+    await c.query(schemaSql())
+    const { opp } = await seedEvidenceFixture(c)
+
+    // The resolver now settles seq 1 deterministically ON THE SAME SPAN the proposal occupies. That
+    // collision is legal — a proposal is verified byte-exact against the record it names, so it can
+    // hold the very span a rule later resolves — and the insert is `on conflict (requirement_id,
+    // source_key, char_start, char_end) do nothing`, keyed on the SPAN and not the method. Without
+    // the eviction the deterministic insert is silently dropped, the row stays `proposed`, and
+    // `ruleEvidenceOf` excludes it — so a requirement the profile genuinely evidences reads as
+    // uncovered and the gate accuses the owner of a gap that is not there.
+    await writeEvidence(c, opp, [REC], {}, (rows) => rows.map(r => ({
+      seq: r.seq, requirement_text: r.item_text,
+      evidence: r.seq !== 1 ? null : {
+        quote: PROPOSAL.quote, source_kind: 'work_history', source_label: 'Acme',
+        source_key: 'work:acme', char_start: PROPOSAL.start, char_end: PROPOSAL.end,
+        extra: null, ratio: 0.9, method: 'exact', record_sha256: 'sha', resolver_version: 1,
+      },
+    })))
+
+    const by = await countByMethod(c, opp)
+    assert.equal(by.proposed, undefined,
+      'the stale proposal outlived the rule evidence that replaced it')
+    assert.equal(by.exact, 1,
+      'THE RULE EVIDENCE WAS SWALLOWED by `on conflict do nothing` against the surviving proposal, ' +
+      'so a requirement the profile really evidences would still not count toward the gate.')
+  } finally { await c.end() }
+})

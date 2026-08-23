@@ -2521,3 +2521,67 @@ it, and an unread provenance column is indistinguishable from not having one.**
 ### And the fix is upstream, not in the checks
 Tuning `must_have_coverage` against a guessed set would make the number prettier and the packet no
 better. The question to answer first is why `jd_real` is NULL for 31% of opportunities.
+
+## 2026-08-23 — THE EVIDENCE SPINE WAS EMPTY IN PRODUCTION (and two of my own figures were wrong)
+
+### First: the correction. My "31% of opportunities lack `jd_real`" was WRONG.
+That figure counted ALL rows — dismissed, demo, every owner. Scoped to the owner's ACTIVE pipeline
+(`not dismissed and not is_demo`, run 32614116061): **1,114 total, 1,030 (92.5%) have `jd_real`.**
+Only 84 do not, and **83 of those have no `job_id` at all** (Indeed 34, LinkedIn 27, Email 21,
+Extension 1) — nothing the LinkedIn guest endpoint can fetch. The backfill queue is **EMPTY (0
+pending)**; the fetch log shows **1,526 `ok_jd`**. **The backfill is not broken and `jd_real` is not
+the bottleneck.** I had written "the question to answer first is why `jd_real` is NULL for 31%" —
+that question was built on a bad denominator and would have sent a day into a non-problem.
+
+### Second: Trinnex was the worst possible exemplar and I generalised from it.
+Trinnex `9f9c370a`: `jd_real` NULL, `job_id` NULL, source **Extension**, `raw_jd` 1,054 chars — a
+browser-extension snippet, ~1/9 of a real posting. eMoney `2cb56fb3` has `jd_real` **9,749 chars**.
+**Every `check_result` row in the database belonged to Trinnex** — there was no packet anywhere
+checked against a real posting. "26 blocking findings" was n=1 on the thinnest input in the system.
+
+### Third: the real defect, and it is the one that matters.
+Built eMoney (real posting, 12 must-haves): **`must_have_coverage` 0/12 and
+`responsibilities_addressed` 0/21 on all four artifacts** — WORSE than Trinnex, which falsified
+"thin exemplar" as the explanation. Exactly-zero twice, with evidence reported present, is an empty
+join, not a weak matcher. Ground truth: **`requirement_evidence` held 1 row across 613 opportunities
+that have requirements.**
+
+Mechanism, measured before/after on eMoney minutes apart, same profile:
+| after | rows |
+|---|---|
+| `POST /evidence` (has escalation transport) | **8**, all `method='proposed'` |
+| `POST /packet/build-all` | **0** |
+
+`runPacketBuild` calls `resolveEvidenceForOpp` (transport → escalates 12, stores 8 proposals), then
+calls `evaluateArtifact` per artifact, which calls `writeEvidence` with FOUR arguments — no
+transport, deliberately (four concurrent artifacts must not each start a model run). But
+`writeEvidence` OPENED by deleting **every** evidence row for the opportunity, and only the
+escalation pass can create a `proposed` row. **Every build paid for 12 model calls and deleted the
+result seconds later.**
+
+**FIXED** (`claude/evidence-survives-the-build`): the delete is now scoped by `canEscalate` — a pass
+may only delete rows it is STRUCTURALLY ABLE TO REBUILD. Plus an eviction so deterministic evidence
+beats a stale proposal: `on conflict (requirement_id, source_key, char_start, char_end) do nothing`
+is keyed on the SPAN not the method, and a proposal is byte-exact so it can legitimately hold the
+span a rule later resolves — the rule insert would have been silently swallowed and the row left
+`proposed`, which `ruleEvidenceOf` excludes from the gate. Guards `H:evidence-survives-the-build`
+and `H:rule-evidence-evicts-a-stale-proposal` in `shipPathDb.test.mjs`, both mutation-proven.
+
+### STILL OPEN — the deterministic matcher evidences 0 of 35
+Profile is healthy (resume template + MasterContext 14 blocks, `profileReadable: true`). All 12
+must-haves escalated because the deterministic resolver found **nothing** for any of 35
+requirements. The wipe explains why nothing accumulates; **this** explains why there is nothing to
+restore. Coverage cannot rise until this does. NOT yet diagnosed.
+
+### The pattern, now FIVE times in one session
+List B empty · `atsExtra` 12 blank tokens · `evaluateArtifact` never called · must-haves classified
+with no posting · and now the evidence spine deleting itself. **Every one is a MISSING INPUT that
+leaves every downstream layer reporting confidently.** The build even reported `evidenced: 8` while
+the table held zero — because `writeEvidence` returns `evidenced + proposed` under the name
+`evidenced`.
+
+### Method note worth keeping
+Three of my hypotheses died to evidence in a row — `covers()` threshold (coverage reads evidence
+rows, not term placement), differing options functions (`resolveOptionsFor` IS
+`resolveOptionsFrom(loadThresholds(...))`), and "thin exemplar" (the real posting scored worse).
+Checking each instead of shipping the first one is what found the actual bug.
