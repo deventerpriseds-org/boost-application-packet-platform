@@ -2481,3 +2481,43 @@ envelope. Every rewrite had been discarded by one property access while the mode
 "could not be reworded" into "returned nothing usable; previous answer was empty", and empty is the
 signature of a parse failure, not a weak model. That is the cheapest thing in this entire sequence
 and it should have been first.
+
+## The owner was right: the must-have SET is the defect, not the coverage number (2026-08-23)
+
+Owner: *"I disagree the distribution of must haves seems more important."* Correct, and investigating
+the distribution found a root cause that the coverage number only hinted at.
+
+**Mechanism** (`requirements.ts:153`, `mapKind`): a row becomes `posting_required_marker` only when
+`REQUIRED_RE` matches its OWN text, and `category` when it matches the surrounding WINDOW. But
+`item_text` is a **model paraphrase**, and paraphrasing strips exactly the "must have / required /
+N+ years" language the regex looks for — so the own-text test rarely fires. The window test needs
+`char_start`, which exists only when the row was LOCATED in the posting. **An `unlocatable` row has
+no window, so `mapKind` falls through to `must_have` / `category_default` every time.**
+
+**Trinnex `9f9c370a`:** `jd_real` **NULL**, `raw_jd` **1,054 chars**, 4 of 5 must-haves
+`unlocatable` with no verbatim and no offsets, all 5 `category_default`. So "1/4 must-haves
+evidenced" was grading the packet against five requirements the posting never asserted.
+
+**Systemic (1,941 opportunities / 9,196 requirements):** 69% have `jd_real` — **31% do not**; 25%
+have `raw_jd` under 1,500 chars; `unlocatable` 15%; `category_default` **22%** vs
+`posting_required_marker` **11%**.
+
+**So the machinery is sounder than the Trinnex packet suggested** — Trinnex is in the worst quartile,
+not the norm. But a fifth of all requirements are classified by category default rather than by
+anything the employer wrote, and nothing surfaces that. Recorded as
+`D:must-haves-are-guessed-when-the-posting-is-thin`.
+
+### The pattern, now four times in one session
+
+List B empty, `atsExtra` twelve tokens blank, `evaluateArtifact` never called, and now must-haves
+classified without a posting. **Every one is a MISSING INPUT that leaves every downstream layer
+reporting confidently.** The requirements table is populated, the checks run, the gate fails with a
+specific number — and nothing anywhere says the input was never there.
+
+`kind_source` is the honourable exception: it records "the posting asserted neither" faithfully, in
+the row, on every insert. No screen reads it. **Recording provenance is not the same as surfacing
+it, and an unread provenance column is indistinguishable from not having one.**
+
+### And the fix is upstream, not in the checks
+Tuning `must_have_coverage` against a guessed set would make the number prettier and the packet no
+better. The question to answer first is why `jd_real` is NULL for 31% of opportunities.
