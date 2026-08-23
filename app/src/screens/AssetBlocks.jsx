@@ -404,8 +404,10 @@ function AssetBlock({ row, reqs, swapsForList, wide, artifactId, listOwners, thr
           "Show original", and it pairs with "Hide original" which was already correct. */}
       <div style={{ marginTop: 8, display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
         {row.before_text && (
-          <span className="px-link" data-qc={BLOCK_HOOKS.compareToggle} data-qc-open={showBefore ? '1' : '0'}
-            style={{ fontSize: 11.5 }} onClick={() => setShowBefore((v) => !v)}>
+          <span className="px-link" role="button" tabIndex={0} aria-expanded={showBefore}
+            data-qc={BLOCK_HOOKS.compareToggle} data-qc-open={showBefore ? '1' : '0'}
+            style={{ fontSize: 11.5 }} onClick={() => setShowBefore((v) => !v)}
+            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setShowBefore((v) => !v) } }}>
             {showBefore ? 'Hide original' : 'Show original'}
           </span>
         )}
@@ -414,8 +416,18 @@ function AssetBlock({ row, reqs, swapsForList, wide, artifactId, listOwners, thr
             reason it belongs here too is the whole argument of this screen: the request is made
             where the sentence is being read, not on a tab that lists sentences. */}
         {!isStatic && artifactId && (
-          <span className="px-link" data-qc={BLOCK_HOOKS.askChange} data-qc-field={row.merge_field}
-            style={{ fontSize: 11.5 }} onClick={() => setAskOpen((v) => !v)}>
+          {/* role + tabIndex + key handler for the same reason as PacketBuilder's copy control: a
+              bare span has no keyboard path and is announced as text, and compare-ui.mjs (which
+              collects `button, [role="button"], a`) could not see it either - so a control that
+              has existed since P8.6 was being reported as missing from the app. */}
+          <span className="px-link" role="button" tabIndex={0} aria-expanded={askOpen}
+            data-qc={BLOCK_HOOKS.askChange} data-qc-field={row.merge_field}
+            style={{ fontSize: 11.5 }} onClick={() => setAskOpen((v) => !v)}
+            onKeyDown={(e) => {
+              if (e.key !== 'Enter' && e.key !== ' ') return
+              e.preventDefault()
+              setAskOpen((v) => !v)
+            }}>
             {askOpen ? 'Cancel' : 'Ask for a change'}
           </span>
         )}
@@ -622,8 +634,10 @@ export default function AssetBlocks({ artifact, provenance, fallback, defaultOpe
         <div style={{ fontSize: 13, fontWeight: 700, flex: 1 }}>
           {rows.length} merge {rows.length === 1 ? 'field' : 'fields'}
         </div>
-        <span className="px-link" data-qc={BLOCK_HOOKS.toggle} data-qc-open={open ? '1' : '0'}
-          style={{ fontSize: 11.5 }} onClick={() => setOpen((v) => !v)}>
+        <span className="px-link" role="button" tabIndex={0} aria-expanded={open}
+          data-qc={BLOCK_HOOKS.toggle} data-qc-open={open ? '1' : '0'}
+          style={{ fontSize: 11.5 }} onClick={() => setOpen((v) => !v)}
+          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setOpen((v) => !v) } }}>
           {open ? 'Hide blocks' : 'Show blocks'}
         </span>
       </div>

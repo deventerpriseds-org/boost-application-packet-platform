@@ -731,3 +731,47 @@ test('H:observed-matches-rule-unit: the measurement is stated in the unit its ru
   const src = readFileSync(new URL('../src/assetBlocks.js', import.meta.url), 'utf8')
   assert.equal((src.match(/const RANGE = \{/g) || []).length, 1, 'RANGE is defined more than once')
 })
+
+test('H:click-targets-are-controls: an onClick span carries a role and a keyboard path', () => {
+  // Five click targets shipped as bare <span onClick>: "Copy tracked link", "Build entire packet",
+  // per-field "Ask for a change", "Show/Hide original", "Show/Hide blocks". No role, no tabIndex,
+  // no key handler - unreachable by keyboard and announced as text. It also made them invisible to
+  // compare-ui.mjs, which collects `button, [role="button"], a`, so controls that had existed since
+  // P8.6 were being reported as prototype-only.
+  //
+  // THE TAG IS PARSED, NOT REGEXED. A JSX opening tag contains `=>` inside its handlers, so any
+  // /<span[^>]*>/ stops at the arrow and reports a correctly-fixed element as broken - this guard
+  // did exactly that on its first run, on all three elements it had just fixed. Walking to the
+  // first `>` at brace depth 0 is the only way to see the whole tag.
+  const openTags = (src, tag) => {
+    const out = []
+    for (let i = src.indexOf('<' + tag); i > -1; i = src.indexOf('<' + tag, i + 1)) {
+      let depth = 0
+      for (let j = i; j < src.length; j++) {
+        const c = src[j]
+        if (c === '{') depth++
+        else if (c === '}') depth--
+        else if (c === '>' && depth === 0) { out.push(src.slice(i, j + 1)); break }
+      }
+    }
+    return out
+  }
+
+  const files = ['../src/screens/AssetBlocks.jsx', '../src/screens/PacketBuilder.jsx', '../src/screens/QcRail.jsx']
+  let checked = 0
+  for (const rel of files) {
+    const src = readFileSync(new URL(rel, import.meta.url), 'utf8')
+      .replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')
+    for (const tag of openTags(src, 'span')) {
+      if (!/\bonClick=/.test(tag)) continue
+      checked++
+      const where = rel + ':\n' + tag.slice(0, 240)
+      assert.match(tag, /role="button"/, 'clickable span with no role - no keyboard path, reads as text:\n' + where)
+      assert.match(tag, /tabIndex=\{[^}]*0[^}]*\}|tabIndex=\{?0\}?/, 'clickable span that cannot be focused:\n' + where)
+      assert.match(tag, /onKeyDown=/, 'clickable span with no Enter/Space handler:\n' + where)
+    }
+  }
+  // A guard that inspected nothing would pass silently - that is the vacuous-green failure this
+  // repo already shipped once. Assert it actually found the elements it exists to police.
+  assert.ok(checked >= 5, 'expected at least 5 clickable spans across the three screens, saw ' + checked)
+})

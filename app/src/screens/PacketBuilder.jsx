@@ -153,8 +153,18 @@ export function ArtifactCard({ a, busy, setBusy, onGenerate, onSetStatus, onMake
             <a href={a.docUrl} target="_blank" rel="noreferrer" className="px-link" style={{ fontSize: 12 }}>
               {a.docUrl.includes('/presentation/') ? '✓ Open Slides ↗' : '✓ Open Google Doc ↗'}
             </a>
-            <span className="px-link" style={{ fontSize: 12, cursor: 'pointer' }}
-              onClick={() => { try { navigator.clipboard?.writeText(api.trackedLink(a.id)) } catch {} }}>
+            {/* role + tabIndex + a key handler, not a bare span: a click target with no role has no
+                keyboard path and is announced as text. Same treatment GateBadge and the meter toggle
+                already use. It ALSO stops the UI-gap comparator reporting this control as missing -
+                compare-ui.mjs collects `button, [role="button"], a`, so an unlabelled span was
+                invisible to it and showed up as a prototype-only control that already existed. */}
+            <span className="px-link" role="button" tabIndex={0} style={{ fontSize: 12, cursor: 'pointer' }}
+              onClick={() => { try { navigator.clipboard?.writeText(api.trackedLink(a.id)) } catch {} }}
+              onKeyDown={(e) => {
+                if (e.key !== 'Enter' && e.key !== ' ') return
+                e.preventDefault()
+                try { navigator.clipboard?.writeText(api.trackedLink(a.id)) } catch {}
+              }}>
               ⎘ Copy tracked link
             </span>
             {/* Fixing `api.js` alone would have changed nothing a user can reach. This branch USED to
@@ -163,8 +173,13 @@ export function ArtifactCard({ a, busy, setBusy, onGenerate, onSetStatus, onMake
                 — the dead-UI defect moved one layer up, where the api.js diff makes it look solved. */}
             <span data-qc={PACKET_HOOKS.assetRebuild} className="px-link"
               style={{ fontSize: 12, cursor: d.busy ? 'default' : 'pointer', opacity: d.busy ? 0.6 : 1 }}
-              role="button" aria-disabled={d.busy ? 'true' : 'false'}
-              onClick={() => { if (!d.busy) ((a.type === 'portfolio' || a.type === 'cover') ? onMakeSlides : onMakeDoc)(a, { regen: true }) }}>
+              role="button" aria-disabled={d.busy ? 'true' : 'false'} tabIndex={d.busy ? -1 : 0}
+              onClick={() => { if (!d.busy) ((a.type === 'portfolio' || a.type === 'cover') ? onMakeSlides : onMakeDoc)(a, { regen: true }) }}
+              onKeyDown={(e) => {
+                if (d.busy || (e.key !== 'Enter' && e.key !== ' ')) return
+                e.preventDefault()
+                ;((a.type === 'portfolio' || a.type === 'cover') ? onMakeSlides : onMakeDoc)(a, { regen: true })
+              }}>
               {d.busy && d.regen ? '↻ Rebuilding…' : '↻ Rebuild from current draft'}
             </span>
           </div>
@@ -657,7 +672,8 @@ export default function PacketBuilder({ id, step }) {
             {stepArtifacts.length === 0 && (
               <div className="px-box" style={{ padding: 20, textAlign: 'center', color: 'var(--proto-ink2)', fontSize: 13 }}>
                 No artifact yet for this step.{' '}
-                <span className="px-link" onClick={() => buildAll()}>Build entire packet</span> to generate all at once.
+                <span className="px-link" role="button" tabIndex={0} onClick={() => buildAll()}
+                  onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); buildAll() } }}>Build entire packet</span> to generate all at once.
               </div>
             )}
             {stepArtifacts.map((a) => (
