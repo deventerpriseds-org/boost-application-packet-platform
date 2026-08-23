@@ -264,7 +264,9 @@ test('unknown keys degrade to something readable rather than disappearing', () =
   assert.ok(!/this document covers/.test(checkLabel('must_have_coverage')),
     'the label promises document repetition again — that is the pre-C6 numerator')
   assert.equal(checkLabel('a_check_added_later'), 'a check added later')
-  assert.equal(fieldLabel('SkillsBullets1'), 'Skills, column 1')
+  // Design wording (rendered prototype 2026-08-23): the fields are headed "Skills 1", not
+  // "Skills, column 1", which described the column to a developer rather than naming it.
+  assert.equal(fieldLabel('SkillsBullets1'), 'Skills 1')
   assert.equal(fieldLabel('SomeNewMergeField'), 'SomeNewMergeField')
   assert.equal(assetLabel('compact_resume'), 'Compact resume')
   assert.equal(assetLabel('some_new_type'), 'some new type')

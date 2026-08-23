@@ -89,13 +89,19 @@ const EXTRACT = () => {
 
   // A "panel" is a titled block: a short, bold-ish line that opens a region. Matching on weight and
   // length rather than on a class keeps this working across two unrelated stylesheets.
+  // The prototype's own REVIEW CHROME is not a gap. Its README is explicit: the mode pill ("Current
+  // app" / "With QC layer" / "Highlight additions") and the "UI SPEC" badge are review aids and
+  // "do not build them". Counting them inflated the register with work nobody should do.
+  const CHROME = /^(UI SPEC|Current app|With QC layer|Highlight additions|Assistant( · \d+)?)$/i
   const panels = all
     .filter((el) => el.children.length === 0 && txt(el).length > 3 && txt(el).length < 60)
     .filter((el) => Number(getComputedStyle(el).fontWeight) >= 600)
     .map((el) => txt(el))
+    .filter((t) => !CHROME.test(t))
 
   const controls = [...document.querySelectorAll('button, [role="button"], a')]
     .filter(vis).map((el) => txt(el)).filter((t) => t && t.length < 40)
+    .filter((t) => !CHROME.test(t) && !/@/.test(t))  // and not the signed-in email, which differs by fixture
 
   // Anything that publishes an open/closed state - the app's data-qc-open, or a prototype element
   // whose own text carries the affordance.

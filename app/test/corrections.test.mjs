@@ -204,7 +204,9 @@ test('a row carries every field the server sent, and reword none of them', () =>
   assert.equal(r.replacement, '8-figure')
   assert.equal(r.reason, 'the posting states $18M; your profile does not evidence it')
   assert.equal(r.merge_field, 'ResumeSummary', 'the RAW merge-field name survives')
-  assert.equal(r.fieldName, 'Summary', 'and its plain-language label is resolved through fieldLabel')
+  // The label the DESIGN uses. The prototype writes this correction as '... in Resume summary';
+  // the value moved with FIELD_LABEL, the routing through fieldLabel is what is asserted.
+  assert.equal(r.fieldName, 'Resume summary', 'and its plain-language label is resolved through fieldLabel')
   assert.equal(r.id, 'corr-1')
 })
 
@@ -224,8 +226,8 @@ test('the change log speaks in finished framing (R1)', () => {
   // Asserted on the STRINGS the module returns, not on what a constant is named - a guard that reads
   // an identifier is defeated by a rename. Reinstated defect: correctionSentence returning
   // 'Needs fixing: ...'. Observed: failed on the /^Corrected/ assert.
-  const applied = correctionSentence({ phrase: '$18M', replacement: '8-figure', fieldName: 'Summary', undone: false })
-  const undone = correctionSentence({ phrase: '$18M', replacement: '8-figure', fieldName: 'Summary', undone: true })
+  const applied = correctionSentence({ phrase: '$18M', replacement: '8-figure', fieldName: 'Resume summary', undone: false })
+  const undone = correctionSentence({ phrase: '$18M', replacement: '8-figure', fieldName: 'Resume summary', undone: true })
   assert.match(applied, /^Corrected: /)
   assert.match(undone, /^Undone: /)
 
@@ -309,7 +311,7 @@ test('a refusal is a state with the server own words, never a swallowed error', 
 
 test('"suggest something different" is scoped to ONE merge field and says what it costs', () => {
   const scope = suggestScope(correctionRow(row(), 0))
-  assert.match(scope.label, /ASK FOR A CHANGE · SUMMARY/)
+  assert.match(scope.label, /ASK FOR A CHANGE · RESUME SUMMARY/)
   assert.match(scope.scope, /this field only/i)
   assert.ok(scope.caveat.length > 40, 'rewriting the field makes every undo on it refuse - say so BEFORE they send')
   assert.match(scope.caveat, /no longer be undone/i)

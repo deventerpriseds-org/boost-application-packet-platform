@@ -43,6 +43,7 @@ export const BLOCK_HOOKS = {
   askChange: 'blocks-ask-change',         // per-field "Ask for a change" (prototype: under the text)
   askBox: 'blocks-ask-box',
   askSend: 'blocks-ask-send',
+  fieldSlot: 'blocks-field-slot',         // the raw merge field, kept beside the human name
   fieldTarget: 'blocks-field-target',     // the rule the field is held to, from the owner's thresholds
   fieldChangeLog: 'blocks-corrected-for-you', // the field's own "Corrected for you" list (P8.6 inline).
   // NOT named `corrections`: corrections.test.mjs forbids /\.corrections\b/ in any .jsx so no

@@ -36,6 +36,7 @@ import {
   meterModel, reqsForRow, scopeSwaps, shapeOf, sharedSourceNote, statPct, wordCount,
 } from '../assetBlocks.js'
 import { HIGHLIGHT_CLASS } from '../highlight.js'
+import { fieldLabel } from '../assetGate.js'
 import { railChangeLog } from '../qcRail.js'
 import { CorrectionRow } from './QcRail.jsx'
 
@@ -347,7 +348,7 @@ function AssetBlock({ row, reqs, swapsForList, wide, artifactId, listOwners, thr
   const content = (
     <div style={{ minWidth: 0 }}>
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 7, flexWrap: 'wrap' }}>
-        <span style={{ fontSize: 13, fontWeight: 600 }}>{row.merge_field}</span>
+        <span style={{ fontSize: 13, fontWeight: 600 }}>{fieldLabel(row.merge_field)}</span>
         {!isStatic && (
           <span className="px-small">
             {count > 1 ? `${count} lines - ` : ''}{words} words
@@ -360,6 +361,9 @@ function AssetBlock({ row, reqs, swapsForList, wide, artifactId, listOwners, thr
         {!isStatic && target && (
           <span className="px-small" data-qc={BLOCK_HOOKS.fieldTarget} style={{ textTransform: 'none' }}>{target}</span>
         )}
+        <span style={{ flex: 1 }} />
+        <span className="px-small" data-qc={BLOCK_HOOKS.fieldSlot}
+          style={{ textTransform: 'none', fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace' }}>{row.merge_field}</span>
         {expect && (
           <span className="px-small" style={{ textTransform: 'none' }}>
             field name asks for {expect.bullets ? `${expect.bullets} bullets` : ''}{expect.bullets && expect.words ? ' - ' : ''}{expect.words ? `${expect.words} words` : ''}

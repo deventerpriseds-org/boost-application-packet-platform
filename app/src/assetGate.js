@@ -99,15 +99,25 @@ export const CHECK_LABEL = {
 }
 export const checkLabel = (k) => CHECK_LABEL[k] || String(k || '').replace(/_/g, ' ')
 
-// Merge field -> plain language, for the Blocks tab. Same degrade-to-the-key rule.
+// Merge field -> plain language. Same degrade-to-the-key rule.
+//
+// THE DESIGN'S WORDING, not a description of the column. Read off the rendered prototype
+// 2026-08-23: it heads the fields "Resume summary", "Skills 1", "Relevant 1", "Expertise", and
+// writes corrections as '"sixty engineers" rewritten as "sixty-two engineers" in Resume summary'.
+// The previous values ("Summary", "Skills, column 1", "Relevant experience, role 1") explained the
+// column to a developer; these name it the way the document does.
+//
+// ONE table, so the field heading, the QC correction sentence, the gate drawer and the deep-link
+// tooltip all say the same words. Changing it here changed all four - which is the point, and the
+// reason two tests that pinned the old strings were updated with it rather than around it.
 export const FIELD_LABEL = {
-  ResumeSummary: 'Summary',
-  SkillsBullets1: 'Skills, column 1',
-  SkillsBullets2: 'Skills, column 2',
-  ExpertiseBullets: 'Areas of expertise',
-  RelevantBullets1: 'Relevant experience, role 1',
-  RelevantBullets2: 'Relevant experience, role 2',
-  RelevantBullets3: 'Relevant experience, role 3',
+  ResumeSummary: 'Resume summary',
+  SkillsBullets1: 'Skills 1',
+  SkillsBullets2: 'Skills 2',
+  ExpertiseBullets: 'Expertise',
+  RelevantBullets1: 'Relevant 1',
+  RelevantBullets2: 'Relevant 2',
+  RelevantBullets3: 'Relevant 3',
 }
 export const fieldLabel = (f) => FIELD_LABEL[f] || String(f || '')
 

@@ -624,3 +624,27 @@ test('H:the-field-carries-its-own-controls: Show original and a field-scoped Ask
   // A static template block is not generated text and cannot be rewritten - no dead control.
   assert.match(s, /\{!isStatic && artifactId && \(/, 'no ask on a static template block')
 })
+
+/**
+ * H:a-field-is-named-the-way-the-document-names-it
+ *
+ * The design heads each block with the field's human name and keeps the raw merge field beside it
+ * as a small mono tag (screens/INDEX.md 11: "Resume summary … ResumeSummary"). The app printed only
+ * the identifier - `SkillsBullets1` - which names a template slot, not a part of a resume.
+ *
+ * BOTH are rendered on purpose. The name is what the reader recognises; the slot is what ties the
+ * block to the template it fills and to every check that reports against `merge_field`. Dropping
+ * the slot would make a finding that names SkillsBullets1 unlocatable on screen.
+ *
+ * ONE table (`FIELD_LABEL`), so the block heading, the QC correction sentence, the gate drawer and
+ * the deep-link tooltip cannot drift into four vocabularies for one field.
+ */
+test('H:a-field-is-named-the-way-the-document-names-it: human name heads it, slot stays beside it', () => {
+  const s = stripComments(BLOCKS_SRC)
+  assert.match(s, /fontWeight: 600 \}\}>\{fieldLabel\(row\.merge_field\)\}/,
+    'the heading is the human name, resolved through the shared table')
+  assert.match(s, /data-qc=\{BLOCK_HOOKS\.fieldSlot\}[\s\S]{0,200}\{row\.merge_field\}/,
+    'and the raw slot is still rendered, or a finding naming it cannot be found on screen')
+  assert.ok(!/fontWeight: 600 \}\}>\{row\.merge_field\}/.test(s),
+    'the identifier must not be the heading')
+})
