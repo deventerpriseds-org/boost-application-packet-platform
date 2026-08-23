@@ -36,8 +36,41 @@ if (!RAW || !OPP) { console.error('need --raw <dump.json> --opp <oppId>'); proce
 const raw = JSON.parse(await readFile(resolve(RAW), 'utf8'))
 const { packet: pk, opp, artifacts = [], insertions = [], corrections = [] } = raw
 const requirements = raw.requirements || []
-const checkResults = raw.checkResults || {}
 const swaps = raw.swaps || []
+
+/**
+ * The checks-result payload, assembled per artifact from the FLAT `checks` + `gates` tables the
+ * dump carries — the shape fixture-refresh.yml produces.
+ *
+ * `engines` is grouped HERE rather than left to the client, because that is what the real endpoint
+ * does (P4.2 made engines.deterministic/reviewer a top-level part of the payload precisely so a
+ * client stops re-partitioning a set the server already split). A fixture that omits it silently
+ * exercises assetGate.js's PRE-P4 fallback branch instead of the path production actually takes.
+ *
+ * `gate` comes from the artifact_gate row and is `null` when there is none — never invented. An
+ * artifact with no gate row has not been checked, and that is the absence of a verdict rather than
+ * permission; a fixture that defaulted it to 'pass' would make every screen render the one state
+ * the product exists to refuse.
+ */
+function checkResultFor(artifactId) {
+  const rows = (raw.checks || []).filter((c) => c.artifact_id === artifactId)
+  const gate = (raw.gates || []).find((g) => g.artifact_id === artifactId) || null
+  return {
+    gate: gate ? gate.gate : null,
+    attention: gate ? gate.attention_count : 0,
+    results: rows,
+    engines: {
+      deterministic: { results: rows.filter((r) => r.engine !== 'reviewer') },
+      reviewer: { results: rows.filter((r) => r.engine === 'reviewer') },
+    },
+    override: gate && gate.override_by
+      ? { by: gate.override_by, at: gate.override_at, reason: gate.override_reason }
+      : null,
+    corrections: (raw.corrections || []).filter((c) => c.artifact_id === artifactId),
+  }
+}
+const checkResults = raw.checkResults ||
+  Object.fromEntries((raw.artifacts || []).map((a) => [a.id, checkResultFor(a.id)]))
 
 const f = {}
 // FLAT - see trap 2.
@@ -72,7 +105,7 @@ console.log(`  ${opp.company} · ${opp.role} | ${artifacts.length} artifacts, ${
 // letting the next comparison quietly measure the fixture instead of the app.
 const thin = []
 if (!requirements.length) thin.push('requirements (drives "Posting lines answered", coverage cards)')
-if (!Object.keys(checkResults).length) thin.push('checkResults (drives the whole Checks tab and every gate word)')
+if (!(raw.checks || []).length && !raw.checkResults) thin.push('checkResults (drives the whole Checks tab and every gate word)')
 if (!swaps.length) thin.push('swaps (drives the Swaps tab)')
 if (thin.length) {
   console.log('\n!!! THIN FIXTURE SET - the next gap number will be INFLATED and NOT comparable:')

@@ -59,30 +59,43 @@ tab. **A thin fixture set inflates the gap and reads as product regression.**
 > **Before quoting a number: confirm the run had a full fixture set, and sanity-check the app-side
 > `bodyLen`. Five steps at ~610 chars means the harness, not the app.**
 
-## Summary (2026-08-23)
+## Summary (2026-08-23, re-based)
+
+**First measurement on a full, committed, reproducible fixture set** (`docs/qc-evidence/fixtures.json`,
+built by `scripts/build-fixtures.mjs` from a dump `fixture-refresh.yml` pulls out of prod). No THIN
+warning: 5 artifacts, 24 insertions, 35 requirements, 168 check rows, 29 swaps, 4 gates.
 
 | Step | Prototype | App | app% | Panels missing | Controls missing |
 |---|---:|---:|---:|---:|---:|
-| `jd` | 3506 | 1898 | 54% | 27 | 3 |
-| `resume` | 14141 | 7241 | 51% | 61 | 4 |
-| `cover` | 4897 | 2632 | 54% | 23 | 3 |
-| `portfolio` | 7364 | 5411 | 73% | 27 | 4 |
-| `video` | 932 | 714 | 77% | 2 | 0 |
-| `qc` | 6726 | 2817 | 42% | 23 | 6 |
-| `send` | 1066 | 749 | 70% | 6 | 1 |
-| **total** | | | | **169** | **21** |
+| `jd` | 3506 | 9313 | 266% | 27 | 3 |
+| `resume` | 14141 | 10793 | 76% | 62 | 4 |
+| `cover` | 4897 | 3188 | 65% | 22 | 3 |
+| `portfolio` | 7364 | 6076 | 83% | 24 | 4 |
+| `video` | 932 | 712 | 76% | 2 | 0 |
+| `qc` | 6726 | 5736 | 85% | 22 | 4 |
+| `send` | 1066 | 747 | 70% | 6 | 1 |
+| **total** | | | | **165** | **19** |
 
-### Movement
+`jd` renders MORE than the prototype (266%) because the real posting has 35 requirements against the
+prototype's fabricated handful. app% is a proxy for how much designed content reaches the screen, not
+a score - over 100% is not an error.
 
-First measure (2026-08-23, 6 steps, chrome counted): **171 panels / 27 controls**.
-After chrome filtering and the first alignment pass, the same 6 steps measure **146 / 15**.
-The `qc` step compared for the first time in this run and adds 23 / 6.
+### Movement, and why the earlier numbers are NOT a clean comparison
 
-| Step | app% before | app% now |
-|---|---:|---:|
-| `resume` | 47% | 51% |
-| `cover` | 52% | 54% |
-| `portfolio` | 70% | 73% |
+| measurement | total | fixture set |
+|---|---|---|
+| first measure (6 steps, chrome counted) | 171 / 27 | lost |
+| after chrome filtering + first alignment pass | 169 / 21 (7 steps; 146/15 excluding `qc`) | lost |
+| **re-based, full fixtures** | **165 / 19** | **committed, reproducible** |
+
+The earlier fixture sets no longer exist and cannot be reproduced, and this one is materially richer
+(24 insertions where the surviving scratchpad dump had 7), so the app renders far more on every step -
+`jd` 1898 -> 9313 chars, `qc` 2817 -> 5736. **The drop from 169/21 to 165/19 is therefore not
+attributable to the alignment work alone, and is not claimed as such.**
+
+What IS true and worth having: this is the first number that can be reproduced on any commit by
+anyone, because both the builder and the fixture file are in the repo. Treat **165 / 19 as the
+baseline** and measure progress against it, not against anything above it in this table.
 
 ## Closed so far
 
