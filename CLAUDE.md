@@ -459,6 +459,29 @@ never by a direct commit or push of new work.
    deploy workflow (H15). Use `sha:` and it waits for the run to exist before waiting for it to
    finish.
 
+### NEVER BLOCK ON A DEPLOY OR A WORKFLOW - background it (strict rule, owner-instructed)
+
+`wait-run.sh` polls. That is fine; **blocking the turn on it is not.** Run it with
+`run_in_background: true` and the harness wakes this session when it exits, so the 2-9 minutes cost
+nothing and other work continues meanwhile.
+
+```
+Bash(command: "./scripts/wait-run.sh sha:executive-engine-deploy.yml:$SHA", run_in_background: true)
+```
+
+The owner has asked for this more than once - "never use waits always subscriptions or polls", then
+"why are you still using waits for deploy instead of subscription/workflow/storage queue whichever
+is fastest? I've asked for this to be normal behavior" - and it kept being done synchronously
+anyway. What is actually available, so nobody re-litigates it:
+
+| Signal | Push available? | Use |
+|---|---|---|
+| PR CI + reviews | **YES** - `subscribe_pr_activity` wakes the session on failures/comments | Subscribe, never poll |
+| `workflow_dispatch` runs you trigger (db-query, api-test, ui-verify, deploys) | No push signal is exposed to a CCR session | `wait-run.sh` **in the background** |
+
+So there is no faster transport for a dispatch run from here - but there is also no reason to sit
+still while it runs. Background it, keep working, act on the wake.
+
 - Resolve conflicts by understanding both sides. For the legacy `web/` console
   (not the product), preferring one side wholesale is acceptable; for `app/`,
   `api/`, workflows, and docs, merge the actual intent.
