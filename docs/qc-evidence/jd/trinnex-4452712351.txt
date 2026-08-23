@@ -1,0 +1,61 @@
+To support collaboration and business needs, candidates must currently reside on the East Coast of the United States. Preferred locations include the Boston, MA and Raleigh, NC metropolitan areas, as well as other Northeastern states.
+Trinnex is seeking a Director of Digital Technology Operations & Innovation to lead the strategy, execution, quality, and technical health of our software engineering organization, for both today's and tomorrow's products and projects. This role is responsible for delivering scalable, secure, and high-quality software solutions while building a high-performing engineering culture grounded in ownership, collaboration, continuous improvement, and strong partnership with Trinnex stakeholders.
+In addition to overseeing engineering delivery, architecture, and operational excellence, this leader will define and execute the technology strategy for the software engineering organization, ensuring product roadmap commitments and project initiatives are delivered efficiently, securely, and with measurable impact. The Director will guide technical strategy, platform scalability, cybersecurity and regulatory alignment, team development, workforce upskilling, and the adoption of modern engineering practices and cloud-native technologies that improve delivery and business outcomes.
+This leader will serve as the organization's thought leader for technical innovation, mentoring teams and acting as a trusted advisor as they evaluate and responsibly adopt emerging technologies and AI-powered tools. The role will champion AI-enabled development, intelligent automation, and augmented engineering practices while maintaining strong engineering standards, translating technology trends into practical opportunities that improve delivery, strengthen our product portfolio, and create meaningful competitive differentiation. This responsibility also includes exploring AI-driven cybersecurity, software quality, and geospatial technologies that enhance security, improve reliability, accelerate insights, and expand the value of Trinnex solutions.
+At Trinnex, you'll help shape the future of digital solutions across water, infrastructure, environmental, and utility markets. You'll lead engineering teams building innovative AI-enabled SaaS products and data-driven technologies that solve complex real-world challenges for clients and communities while advancing the next generation of intelligent, resilient, and scalable digital solutions.
+Engineering Strategy & Delivery
+Lead engineering execution across software products and client-facing projects, ensuring solutions are delivered on time, within budget, and meet quality, security, scalability, and reliability objectives.
+Define and execute technology, platform, and architecture strategies that improve product performance, operational efficiency, technical health, and long-term sustainability.
+Manage engineering priorities, capacity, resource allocation, technical risk, and delivery tradeoffs across a diverse portfolio of initiatives.
+Partner with Product and business leaders to align engineering investments with strategic priorities, customer needs, and business objectives.
+Operational Excellence & Engineering Effectiveness
+Establish engineering standards, governance, metrics, and operating practices that improve software quality, reliability, delivery performance, and operational resilience.
+Drive continuous improvement through DevSecOps practices, automation, testing strategies, incident management, secure development, and disciplined technical debt management.
+Monitor and optimize engineering performance through meaningful measures of productivity, quality, stability, customer outcomes, and business value.
+Ensure compliance with cybersecurity, data protection, AI governance, regulatory requirements, and company policies.
+Technology Innovation Leadership
+Serve as Trinnex's leader for engineering innovation, identifying opportunities to apply emerging technologies that improve delivery, accelerate growth, and strengthen competitive advantage.
+Guide the responsible adoption of AI-powered development tools, intelligent agents, automation capabilities, and evolving engineering practices while maintaining strong governance and engineering discipline.
+Evaluate advancements in cybersecurity, software quality, geospatial technologies, data platforms, and AI-enabled solutions to enhance products, operations, and customer value.
+Foster a culture of experimentation, learning, and continuous modernization across the engineering organization.
+Leadership & Talent Development
+Build, lead, and develop high-performing engineering managers and technical teams through hiring, coaching, mentoring, succession planning, and career development.
+Create an environment that promotes ownership, accountability, innovation, collaboration, learning, and continuous improvement.
+Establish clear performance expectations, growth opportunities, and development plans that strengthen both technical and leadership capabilities.
+Support communities of practice, technical mentorship, and knowledge-sharing initiatives that elevate engineering excellence across the organization.
+Cross-Functional Partnership
+Build strong partnerships across Product, Services, GIS, Sales, Delivery, and business functions to improve planning, execution, and customer outcomes.
+Communicate engineering priorities, roadmaps, risks, tradeoffs, and performance clearly to executive, technical, and business stakeholders.
+Ensure engineering resources are focused on the highest-value opportunities while balancing customer commitments, strategic initiatives, and operational priorities.
+Skills & Abilities
+Engineering & Technology Leadership
+Proven experience leading software engineering organizations responsible for both product development and project-based delivery.
+Strong understanding of cloud platforms, software architecture, platform engineering, cybersecurity, DevSecOps, system reliability, and modern software delivery practices.
+Experience establishing engineering standards, governance frameworks, automation strategies, and operational excellence programs.
+Artificial Intelligence & Innovation
+Working knowledge of applied AI, intelligent agents, machine learning operations (MLOps), model governance, and responsible AI practices.
+Ability to evaluate emerging technologies and translate innovation into practical business value and measurable outcomes.
+Experience supporting AI-enabled development practices, automation initiatives, and data-driven decision making.
+Strategic & Commercial Acumen
+Ability to align engineering strategy with business goals, customer outcomes, revenue objectives, and organizational priorities.
+Strong decision-making skills with the ability to balance speed, quality, risk, resource constraints, and long-term technical health.
+Experience managing complex portfolios, competing priorities, budgets, and organizational change.
+Leadership & Communication
+Demonstrated success building high-performing teams and developing engineering leaders.
+Strong collaboration, stakeholder management, and communication skills across technical and non-technical audiences.
+Ability to influence decisions through technical expertise, sound judgment, and collaborative leadership.
+Minimum Qualifications
+Bachelor's degree.
+15 years of related experience with at least 3 of those years in a leadership or management capacity.
+Preferred Qualifications
+Experience within infrastructure, utilities, environmental services, public-sector, AEC, or other regulated industries is strongly preferred.
+Bachelor's degree in Computer Science, Software Engineering, Data Science, Engineering, or related technical field.
+Experience supporting both product development and project-based delivery models, including fixed-price engagements and customer-facing solutions.
+Experience with GIS, SCADA, sensor data, data integration, data engineering, analytics, or decision-support platforms.
+Familiarity with AI-enabled software development, intelligent agents, MLOps, model governance, retraining pipelines, and Human-in-the-Loop frameworks.
+Experience with platform engineering, DevSecOps, engineering governance, and technical communities of practice.
+Experience improving engineering productivity through process optimization, automation, and cross-functional collaboration.
+Experience supporting technical branding, thought leadership, and engineering excellence initiatives.
+Experience in AEC, infrastructure, environmental, utility, public-sector, or other regulated industries.
+Amount of Travel Required
+10% or less

@@ -1,0 +1,108 @@
+name: JD Import
+
+# Write a job posting's REAL text into opportunity.jd_text from a file committed in this repo.
+#
+# WHY A COMMITTED FILE AND NOT A WORKFLOW INPUT. Two reasons, both learned today:
+#  1. A posting is ~9KB of prose with quotes, ampersands and apostrophes. Passing that through a
+#     workflow_dispatch input and into psql is an escaping minefield; a file read by \set is not.
+#  2. AUDITABILITY. The owner's reasonable objection to the last import was "you said you couldn't
+#     scrape the page but had the exact text - almost like a fabrication". Committing the bytes
+#     means the exact content written to production is reviewable in git BEFORE it is written, and
+#     diffable afterwards. Nothing routes through an agent's retyping unseen.
+#
+# WHY THIS EXISTS AT ALL. Measured on the Trinnex opportunity 2026-08-23: opportunity.jd_text held
+# 1,054 chars against a 8,619-char posting - 12.2%. What was stored was a DIGEST ("Company: ...
+# Role: ... Employment: Full-time"), not the ad. Requirements are extracted downstream and their
+# quotes are located against jd_text, so a digest makes anchoring impossible and lets invented
+# requirements sit beside true ones with no way to tell them apart. 5 of that opportunity's 10
+# requirements were unlocatable, and BOTH real Minimum Qualifications were absent entirely.
+#
+# USAGE
+#   workflow_dispatch with opp=<uuid> file=docs/qc-evidence/jd/<name>.txt job_url=<source url>
+#
+# THE OLD VALUE IS PRINTED BEFORE THE WRITE. This is a destructive update to production data; the
+# log is the undo trail. Read it before assuming the previous text is gone.
+
+on:
+  workflow_dispatch:
+    inputs:
+      opp:
+        description: "Opportunity UUID"
+        required: true
+        type: string
+      file:
+        description: "Repo path of the posting text"
+        required: true
+        type: string
+      job_url:
+        description: "Source URL to record on the opportunity"
+        required: false
+        type: string
+      confirm:
+        description: "Type WRITE to actually update; anything else is a dry run"
+        required: true
+        default: "dry-run"
+        type: string
+
+jobs:
+  import:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Import
+        env:
+          PGHOST: eds-postgresql.postgres.database.azure.com
+          PGPORT: 5432
+          PGDATABASE: boost_resume_n_packet_builder
+          PGUSER: Admin_eds
+          PGPASSWORD: ${{ secrets.Azure_admin_pw }}
+          PGSSLMODE: require
+          OPP: ${{ inputs.opp }}
+          FILE: ${{ inputs.file }}
+          JOB_URL: ${{ inputs.job_url }}
+          CONFIRM: ${{ inputs.confirm }}
+        run: |
+          set -euo pipefail
+          test -f "$FILE" || { echo "::error::no such file: $FILE"; exit 1; }
+          NEW_CHARS=$(wc -c < "$FILE" | tr -d ' ')
+          echo "new posting: $FILE  ($NEW_CHARS chars)"
+
+          # Refuse to replace a longer stored posting with a shorter one unless it is clearly a
+          # digest. Shrinking jd_text is how the CURRENT problem was created, and an import that
+          # silently makes things worse is worth more than a rerun.
+          OLD_CHARS=$(psql -t -A -X -c "select coalesce(length(jd_text),0) from opportunity where id='$OPP'")
+          echo "current jd_text: $OLD_CHARS chars"
+          if [ "$OLD_CHARS" = "" ]; then echo "::error::no opportunity $OPP"; exit 1; fi
+          if [ "$NEW_CHARS" -le "$OLD_CHARS" ]; then
+            echo "::error::refusing to import: new text ($NEW_CHARS) is not longer than stored ($OLD_CHARS). If this is deliberate, do it by hand."
+            exit 1
+          fi
+
+          echo "----- CURRENT jd_text (the undo trail - copy this before proceeding) -----"
+          psql -t -A -X -c "select coalesce(jd_text,'(null)') from opportunity where id='$OPP'"
+          echo "----- END CURRENT jd_text -----"
+
+          if [ "$CONFIRM" != "WRITE" ]; then
+            echo "DRY RUN - nothing written. Re-dispatch with confirm=WRITE to apply."
+            exit 0
+          fi
+
+          # \set reads the file as a literal, so quotes/ampersands in the posting need no escaping.
+          psql -v ON_ERROR_STOP=1 -X <<SQL
+          \set jd \`cat "$FILE"\`
+          update opportunity
+             set jd_text = :'jd',
+                 job_url = nullif('$JOB_URL',''),
+                 updated_at = now()
+           where id = '$OPP';
+          SQL
+
+          AFTER=$(psql -t -A -X -c "select length(jd_text) from opportunity where id='$OPP'")
+          echo "stored jd_text: $AFTER chars"
+          # A write that reports success without changing the row is the failure mode that matters.
+          if [ "$AFTER" != "$NEW_CHARS" ]; then
+            echo "::error::stored length ($AFTER) does not match the file ($NEW_CHARS) - the write did not land as expected."
+            exit 1
+          fi
+          echo "OK - jd_text replaced. Requirements are NOT re-extracted by this workflow; do that next."
