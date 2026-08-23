@@ -2345,3 +2345,39 @@ This was settled by reading the PRIMARY SOURCE — the zap export in this repo �
 correction that the prompts and models were fine. Four node lookups, no guessing, no model A/B. The
 export has been sitting in `docs/zap-289877647/` the whole time; I had reached for a model
 comparison before reading the thing that documents the pipeline being replicated.
+
+## TWO live prompts state DIFFERENT char limits — and I landed red tests claiming otherwise (2026-08-23)
+
+**The fact, from the primary source** (`docs/zap-289877647/prompts/`):
+- `16-update-resume-portfolio-fields` — **Call 1, the GENERATOR** — *"strict limit of 30 characters
+  per skill"*, stated four separate times; relevant lists *"no more than 1 bullet with more than 20
+  characters"* (which is exactly why `relevantOverLimitAllowance` is 1 rather than a flat cap).
+- `25-post-analysis-qa` (`ats_user`) — **Call 3, the QC pass** — skills **24**, relevant **20**.
+
+So when I read `ats_user` and announced the gate was *"looser than the owner's own prompt"*, I had
+read ONE of two prompts and generalised. `checks.test.mjs` already carried the other half —
+*"the backlog says 24; the live prompt says 30"*, citing api-test run 32311693658 — and it was
+right about the GENERATOR.
+
+Owner decision stands: seeds are now **24/20** (*"stick to 24/20 to start and we will assess pushing
+to 30"*). **Consequence to state plainly: the generator is still instructed to produce up to 30, so
+items it was explicitly allowed to write will now be graded as findings.** The prompts cannot be
+edited (owner's standing constraint), so that mismatch is structural until the gate moves to 30 or
+the normaliser absorbs it.
+
+### THE PROCESS FAILURE, which is worse than the factual one
+
+**I committed and pushed to `main` with three failing tests.** The chain was
+`for f in test/*; do ... done && git commit ...` — the loop's exit status is the exit status of the
+LAST iteration, so it was 0 and `&&` sailed through. The failures printed on screen and I did not
+read them before the commit landed. `main` was red for roughly four minutes.
+
+The three failures were all *correct* — two were the pre-existing 30-char assertions doing their job,
+and one was my own `normalise` test whose `calls <= 8` bound silently encoded the old 30-char seed
+(at 24 there are six over-limit items, so twelve calls). A hardcoded count derived from a threshold
+is a test that fails for reasons unrelated to what it asserts; it now derives the bound from
+`T.skillMaxChars` and asserts the fixture is non-vacuous.
+
+**Rule: a verification loop must EXIT NON-ZERO, or it is decoration in an `&&` chain.** The sweep now
+accumulates failures and `exit 1`s. Printing a failure that nothing gates on is the same class as an
+inert guard — the information exists and changes nothing.

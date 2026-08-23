@@ -206,6 +206,12 @@ test('the retry is strictly bounded to one extra attempt', async () => {
   const { changes, unresolved } = await enforceCharLimits(pkg, T, alwaysBad)
   assert.deepEqual(changes, [], 'nothing should be accepted when every attempt fails')
   assert.ok(unresolved.length > 0, 'giving up must be visible')
-  // Four over-limit items in the live list x at most 2 attempts each.
-  assert.ok(calls <= 8, `unbounded retry: ${calls} calls — a loop here burns spend on an unfixable item`)
+  // DERIVED from the fixture and the live threshold, never a magic number: the first version of
+  // this assertion hardcoded 8 (four over-limit items x two attempts), which silently encoded the
+  // then-current 30-char seed. When the seed moved to 24 the count became 12 and the test failed
+  // for a reason that had nothing to do with retry bounding.
+  const overLimit = LIVE_SKILLS1.split('\n').filter(i => i.length > T.skillMaxChars).length
+  assert.ok(overLimit > 0, 'fixture no longer has any over-limit item; this test would be vacuous')
+  assert.ok(calls <= overLimit * 2,
+    `unbounded retry: ${calls} calls for ${overLimit} over-limit items (max ${overLimit * 2})`)
 })

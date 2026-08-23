@@ -1,6 +1,18 @@
-// P2.1 — the deterministic checks engine. Thresholds are the ones the LIVE prompt states
-// (api-test run 32311693658), not the backlog's, because the prompt is the system that produced
-// every artifact in the database.
+// P2.1 — the deterministic checks engine.
+//
+// THRESHOLDS: THERE ARE TWO LIVE PROMPTS AND THEY STATE DIFFERENT LIMITS. Established from the
+// primary source (`docs/zap-289877647/prompts/`), 2026-08-22:
+//   16-update-resume-portfolio-fields (Call 1, the GENERATOR)  — "strict limit of 30 characters
+//     per skill", repeated four times; relevant lists "no more than 1 bullet with more than 20
+//     characters" (which is why `relevantOverLimitAllowance` is 1, not a flat cap).
+//   25-post-analysis-qa (Call 3, `ats_user`, the QC pass)       — skills 24, relevant 20.
+// This header previously said "the LIVE prompt states 30" citing run 32311693658. That was true of
+// the GENERATOR and was read as though only one prompt existed.
+//
+// The seeds are now 24/20 BY OWNER DECISION (2026-08-22: "stick to 24/20 to start and we will
+// assess pushing to 30"), which is the QC pass's number. CONSEQUENCE, deliberately accepted: the
+// generator is still instructed to produce up to 30, so items it was allowed to write will be
+// graded as findings. That is the owner's call, and the seeds are owner-overridable anyway.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { runChecks, gateFor, attentionCount, DEFAULT_THRESHOLDS, AI_TELLS } from '../dist/functions/tests/checks.js'
@@ -17,16 +29,19 @@ const RESUME_FULL = {
 }
 
 test('the thresholds are the prompt values, not the backlog values', () => {
-  assert.equal(DEFAULT_THRESHOLDS.skillMaxChars, 30, 'the backlog says 24; the live prompt says 30')
+  assert.equal(DEFAULT_THRESHOLDS.skillMaxChars, 24,
+    'owner decision 2026-08-22: 24 is the QC prompt\'s number; the generator prompt says 30')
   assert.deepEqual([DEFAULT_THRESHOLDS.skillsTotalMin, DEFAULT_THRESHOLDS.skillsTotalMax], [20, 22])
   assert.equal(DEFAULT_THRESHOLDS.relevantOverLimitAllowance, 1, 'the prompt states an allowance, not a flat cap')
   assert.deepEqual(DEFAULT_THRESHOLDS.coverWords, [250, 400])
 })
 
 test('thresholds are overridable — nothing here is a permanent constant', () => {
-  const pkg = { ...RESUME_FULL, SkillsBullets1: 'A twenty six character skill' }
+  // 22 chars — inside the seeded 24, outside a stricter 20. The old fixture was 28 chars, which
+  // passed only while the seed was 30.
+  const pkg = { ...RESUME_FULL, SkillsBullets1: 'Twenty two char skill!' }
   assert.equal(find(runChecks({ type: 'resume', pkg }), 'skill_char_limit').state, 'pass')
-  const strict = runChecks({ type: 'resume', pkg, thresholds: { skillMaxChars: 24 } })
+  const strict = runChecks({ type: 'resume', pkg, thresholds: { skillMaxChars: 20 } })
   assert.equal(find(strict, 'skill_char_limit').state, 'fail')
 })
 
