@@ -3834,3 +3834,34 @@ test('H:char-limits-match-the-owners-prompt: seeded skill/relevant limits are 24
   assert.equal(grab('relevantMaxChars'), 20,
     'the seeded relevant limit no longer matches ats_user\'s stated 20 characters')
 })
+
+// H:seed-changes-reach-the-database — a changed seed that never propagates is a silent no-op.
+//
+// MEASURED IN PRODUCTION, 2026-08-23. `skillMaxChars` was changed 30 -> 24, the tests passed, the
+// deploy went green — and the live database still reported `column_default = 30` with the owner's
+// row still holding 30. `add column if not exists` SKIPS an existing column entirely, DEFAULT
+// included, so the ensure statement had no effect on the one database that mattered. Code said 24,
+// production graded at 30, and reporting the change as live would have been false.
+//
+// Two properties, and the second matters more than the first:
+//  1. `ensureCheckPrefs` must sync column defaults, so a seed edit actually reaches new owners;
+//  2. the sync must NEVER write existing ROWS. A stored value is the owner's setting, and a
+//     "helpful" UPDATE would silently revert every knob they had deliberately changed — turning a
+//     propagation fix into data loss. Verified against real PostgreSQL: after the sync the legacy
+//     row still held 30 while a brand-new owner inherited 24.
+test('H:seed-changes-reach-the-database: defaults sync, owner rows are never overwritten', () => {
+  const PREFS = stripComments(readFileSync(new URL('../src/functions/tests/checkPrefs.ts', import.meta.url), 'utf8'))
+
+  const ensure = PREFS.slice(PREFS.indexOf('export async function ensureCheckPrefs'))
+  assert.ok(/syncCheckPrefDefaults\(client\)/.test(ensure.slice(0, ensure.indexOf('\n}'))),
+    'ensureCheckPrefs no longer syncs column defaults, so editing DEFAULT_THRESHOLDS is a silent ' +
+    'no-op on any database that already has the columns')
+
+  const sync = PREFS.slice(PREFS.indexOf('async function syncCheckPrefDefaults'))
+  const body = sync.slice(0, sync.indexOf('\n}'))
+  assert.ok(/alter column \$\{column\} set default/.test(body),
+    'the sync no longer sets column defaults')
+  assert.ok(!/\bupdate\s+owner_search_prefs\b/i.test(body),
+    'the default sync writes existing ROWS — that silently reverts every setting the owner ' +
+    'deliberately changed. Seeds decide what a NEW owner starts from, never what an existing one has.')
+})

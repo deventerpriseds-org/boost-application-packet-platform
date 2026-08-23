@@ -2381,3 +2381,26 @@ is a test that fails for reasons unrelated to what it asserts; it now derives th
 **Rule: a verification loop must EXIT NON-ZERO, or it is decoration in an `&&` chain.** The sweep now
 accumulates failures and `exit 1`s. Printing a failure that nothing gates on is the same class as an
 inert guard — the information exists and changes nothing.
+
+### THE TRAP: a changed seed does NOT reach a database that already has the column (2026-08-23)
+
+`skillMaxChars` 30 -> 24, tests green, deploy green — and production still reported
+`column_default = 30` with the owner's row still holding 30. **`add column if not exists` skips an
+existing column ENTIRELY, DEFAULT included.** So the ensure statement had no effect on the only
+database that mattered, and "the gate is now 24" would have been a false report. Caught by querying
+live state instead of trusting the deploy.
+
+Fixed structurally: `ensureCheckPrefs` now calls `syncCheckPrefDefaults`, which issues
+`alter column ... set default` for every whitelisted `chk_` column from the seed parsed out of the
+same declaring statement. **It never writes existing ROWS** — a stored value is the owner's setting,
+and a "helpful" UPDATE would silently revert every knob they had changed, converting a propagation
+fix into data loss. Proven against real PostgreSQL on a legacy column: default 30 -> 24, legacy row
+stayed 30, a brand-new owner inherited 24. `H:seed-changes-reach-the-database` pins both halves;
+two mutations proven (removing the sync, and making it overwrite rows).
+
+Live state repaired by hand at the owner's instruction: `chk_skill_max_chars` 30 -> 24 for
+`von.ellis@enterpriseds.io`, column defaults now 24/20.
+
+**General rule: DDL written as `if not exists` is create-only. Any change to an existing column —
+default, type, constraint — needs its own explicit statement, and the only proof it landed is
+reading the live catalog.**

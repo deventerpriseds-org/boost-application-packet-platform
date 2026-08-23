@@ -74,9 +74,47 @@ const ENSURE_CHECK_COLUMNS_SQL = `
       add column if not exists chk_core_accomp_words_min int not null default ${DEFAULT_THRESHOLDS.coreAccomplishmentsWords[0]},
       add column if not exists chk_core_accomp_words_max int not null default ${DEFAULT_THRESHOLDS.coreAccomplishmentsWords[1]}`
 
+/**
+ * SYNC THE COLUMN DEFAULTS TO THE CODE SEEDS.
+ *
+ * `add column if not exists` SKIPS an existing column ENTIRELY — including its DEFAULT. So editing
+ * `DEFAULT_THRESHOLDS` changed nothing in a database that already had the column: the default
+ * stayed at whatever the first deploy created, and every new owner kept inheriting the old value.
+ *
+ * MEASURED 2026-08-23, and it is why this exists: after changing `skillMaxChars` 30 -> 24 and
+ * deploying successfully, production still read `column_default = 30` and the owner's row still held
+ * 30. The code said 24, the tests said 24, the deploy was green, and the live gate was still 24-blind.
+ * Reporting that change as live would have been false.
+ *
+ * EXISTING ROWS ARE NEVER TOUCHED. A stored value is the owner's, and code does not get to overwrite
+ * an owner's setting — the seed only decides what a NEW owner starts from. That is also why this
+ * cannot repair an owner whose row predates a seed change; that is a deliberate data decision, not
+ * something to do silently on every boot.
+ */
+async function syncCheckPrefDefaults(client: any) {
+  for (const { column } of checkPrefColumns()) {
+    const seed = SEEDED_DEFAULT[column]
+    if (seed === undefined) continue
+    // Column names cannot be parameterised, but `column` comes from the whitelist DERIVED from the
+    // ensure SQL — never from a caller — and `seed` is a number/boolean from code, never input.
+    try { await client.query(`alter table owner_search_prefs alter column ${column} set default ${seed}`) } catch { /* non-fatal */ }
+  }
+}
+
+/** The seed each chk_ column is declared with, parsed from the one statement that declares them. */
+const SEEDED_DEFAULT: Record<string, string> = (() => {
+  const out: Record<string, string> = {}
+  for (const m of ENSURE_CHECK_COLUMNS_SQL.matchAll(/add column if not exists\s+(chk_[a-z0-9_]+)\s+(?:int|numeric|boolean)\s+not null default\s+([^,\n]+)/g)) {
+    out[m[1]] = m[2].trim()
+  }
+  return out
+})()
+
 export async function ensureCheckPrefs(client: any) {
   await client.query(`create table if not exists owner_search_prefs (owner_email text primary key)`)
   await client.query(ENSURE_CHECK_COLUMNS_SQL)
+  // The ALTER above skips existing columns, so a changed seed would never reach the database.
+  await syncCheckPrefDefaults(client)
 }
 
 /**
