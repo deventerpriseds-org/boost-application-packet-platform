@@ -2700,15 +2700,26 @@ lines (a light-theme meta). `Evidence Model & QC Lineage.html` changed by 121 li
 - Settled: a `warn` does NOT block approval (needs a recorded override); weights 50/30/20; bands 85/70.
 - Ordering: **"Done for you" before "Needs a decision"**; the flat Q1-Q16 list is a detail view.
 
-**PRECEDENCE RULE — this is the anchoring fix.** The prototype (`qc/packet.jsx:315`) and the
-screenshots (`INDEX.md` 28-36, 39-43) still depict the REJECTED design. They predate the decision.
-**Where the lineage doc disagrees with the prototype or the screenshots, the lineage doc wins.**
+**PRECEDENCE RULE — corrected 2026-08-23 after the owner caught it.** I first wrote that the
+lineage doc outranks the prototype. **That is BACKWARDS and it produced a wrong claim to the owner.**
 
-**Two divergences, verified against this repo:**
-1. `app/src/screens/PacketBuilder.jsx:42` builds the QC rail step the spec drops. Not reconciled.
-2. `override_value` / `override_state` do **not exist** in `api/src` or `app/src`. This is the spec
-   basis for the owner's "put back the item it displaced" and for defect-register C1 + C3.
-   (`correction` DOES exist — `api/src/functions/tests/schema.ts:370` — and matches.)
+§5a/§7 of the lineage doc say the QC rail step was "Dropped". **They are wrong about their own
+prototype.** Verified by EXECUTION: the prototype rendered headless shows the rail
+`JD analysis · 2 Resume · Cover letter · 4 Portfolio · 5 Intro video · 6 QC & evidence · 7 Review
+& send`, with "Done for you" (15) and "Needs a decision" (9) INSIDE the step plus tabs
+Coverage/Swaps/Passes/Checks/Review. The 47 screenshots agree. The owner, viewing the published
+prototype, agrees. One paragraph of prose disagrees with three observable sources.
+
+> **The PROTOTYPE is behavioural ground truth for anything on a screen** (the package README says
+> so). The doc's §2/§3/§4 (records, gate sequence, score) stay authoritative — they describe data.
+> **The QC rail step STAYS.** `PacketBuilder.jsx:42` is correct.
+
+**The guard that would have caught this in one command: RENDER IT.** The prototype is runnable
+inside the sandbox with no network — React/ReactDOM/Babel are embedded in the published artifact
+bundle, and `qc/*.jsx` must be served over HTTP (Babel cannot XHR them over `file://`). Drive it
+with `playwright-core` + `/opt/pw-browsers/chromium-1194/chrome-linux/chrome`. Recipe in
+`docs/qc-evidence/IMPORT-NOTE.md`. **Never again assert what a screen shows from prose alone when
+the screen is executable.**
 
 **Correction to my own earlier claim this session:** I said the repo had been working from a
 "partial spec". Wrong in the general case — the package was complete and in-repo since 2026-08-19.

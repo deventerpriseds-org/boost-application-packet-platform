@@ -2775,3 +2775,14 @@ precedence rule (lineage doc > prototype > screenshots), and the divergence tabl
 - `app/src/screens/PacketBuilder.jsx:42` implements the **QC rail step the settled spec drops**.
   Needs an owner decision: reconcile to the spec (evidence inline + one ATS Match modal), or keep
   the step and record the deviation. NOT actioned unilaterally — it is a whole-screen change.
+
+### CORRECTION (same day) — the precedence rule was backwards
+
+I told the owner the QC rail step was dropped, sourcing §5a/§7 of the lineage doc. **Wrong.** The
+owner rendered the published prototype and the QC chip is plainly there. I then reproduced it
+locally by EXECUTING the prototype headless: rail = `JD analysis · 2 Resume · Cover letter ·
+4 Portfolio · 5 Intro video · 6 QC & evidence · 7 Review & send`.
+
+The prototype is behavioural ground truth; the doc's §5/§7 prose is not. `PacketBuilder.jsx:42`
+stays. `IMPORT-NOTE.md` and `memory.md` now carry the corrected rule plus the render recipe, so the
+next session can settle any "what does the screen show" question by running it instead of reading.
