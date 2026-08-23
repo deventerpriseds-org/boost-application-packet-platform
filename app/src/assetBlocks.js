@@ -40,6 +40,9 @@ export const BLOCK_HOOKS = {
   before: 'blocks-before',
   meterToggle: 'blocks-answers-toggle',   // the disclosure on "What this X answers"
   meterSummary: 'blocks-answers-summary', // the counts kept on the COLLAPSED row
+  askChange: 'blocks-ask-change',         // per-field "Ask for a change" (prototype: under the text)
+  askBox: 'blocks-ask-box',
+  askSend: 'blocks-ask-send',
   fieldTarget: 'blocks-field-target',     // the rule the field is held to, from the owner's thresholds
   fieldChangeLog: 'blocks-corrected-for-you', // the field's own "Corrected for you" list (P8.6 inline).
   // NOT named `corrections`: corrections.test.mjs forbids /\.corrections\b/ in any .jsx so no

@@ -592,3 +592,35 @@ test('H:a-field-states-the-rule-it-is-held-to: the target comes from the thresho
   assert.match(blocks, /targetFor\(row\.merge_field, thresholds\)/, 'the field reads the shared derivation')
   assert.ok(!/\b(?:24|20)\s*chars\b/.test(blocks), 'no threshold literal may appear in the rendering')
 })
+
+/**
+ * H:the-field-carries-its-own-controls
+ *
+ * screens/INDEX.md 11 shows the resume summary with "Show original   Ask for a change" directly
+ * under the text, in the same position on every field. The app had "Compare with original" (its own
+ * phrasing for the same act) and offered "Ask for a change" only from the QC step - so requesting a
+ * change meant leaving the sentence you wanted changed, which is the argument this whole screen
+ * exists to make.
+ *
+ * NOT A SECOND EDIT PATH. It posts to `aiEditArtifact` with `section`, the same field-scoped route
+ * QcRail's correction row uses. Two ways to ask for one change is how the two disagree about what
+ * was asked.
+ */
+test('H:the-field-carries-its-own-controls: Show original and a field-scoped Ask for a change', () => {
+  const s = stripComments(BLOCKS_SRC)
+
+  assert.match(s, /'Hide original' : 'Show original'/, "the design's wording, paired with its inverse")
+  assert.ok(!/Compare with original/.test(s), 'the old phrasing must be gone, not merely joined')
+
+  assert.match(s, /data-qc=\{BLOCK_HOOKS\.askChange\}[\s\S]{0,120}data-qc-field=/,
+    'the ask is addressable AND names the field it is scoped to')
+  assert.match(s, /aiEditArtifact\(artifactId, \{ instruction: ask\.trim\(\), section: row\.merge_field \}\)/,
+    'the SAME field-scoped route the QC correction row uses - never a second edit path')
+
+  // The cost has to be stated BEFORE sending: rewriting a field makes every undo on it refuse.
+  assert.match(s, /can no longer be undone/,
+    'say what the rewrite costs before it is sent, not after')
+
+  // A static template block is not generated text and cannot be rewritten - no dead control.
+  assert.match(s, /\{!isStatic && artifactId && \(/, 'no ask on a static template block')
+})

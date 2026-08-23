@@ -316,6 +316,10 @@ function BlockBody({ row, shape, swapsForList, artifactId, listOwners }) {
 function AssetBlock({ row, reqs, swapsForList, wide, artifactId, listOwners, thresholds,
   corrections = [], correctionBusy, setCorrectionBusy, onCorrectionsChanged }) {
   const [showBefore, setShowBefore] = useState(false)
+  const [askOpen, setAskOpen] = useState(false)
+  const [ask, setAsk] = useState('')
+  const [askBusy, setAskBusy] = useState(false)
+  const [askError, setAskError] = useState(null)
   const shape = shapeOf(row)
   const isStatic = shape === 'static'
   const expect = expectationFor(row.merge_field)
@@ -381,12 +385,52 @@ function AssetBlock({ row, reqs, swapsForList, wide, artifactId, listOwners, thr
         </div>
       )}
 
-      {row.before_text && (
-        <div style={{ marginTop: 8 }}>
+      {/* The field's own controls, in the prototype's words and the prototype's place: under the
+          text, same position on every field (screens/INDEX.md 11, "Show original  Ask for a change").
+          "Compare with original" was the app's phrasing for the same act; the design says
+          "Show original", and it pairs with "Hide original" which was already correct. */}
+      <div style={{ marginTop: 8, display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
+        {row.before_text && (
           <span className="px-link" data-qc={BLOCK_HOOKS.compareToggle} data-qc-open={showBefore ? '1' : '0'}
             style={{ fontSize: 11.5 }} onClick={() => setShowBefore((v) => !v)}>
-            {showBefore ? 'Hide original' : 'Compare with original'}
+            {showBefore ? 'Hide original' : 'Show original'}
           </span>
+        )}
+        {/* ASK FOR A CHANGE, scoped to THIS field. Not a second edit path - it posts to the same
+            `ai-edit` route with `section`, which is what QcRail's correction row already uses. The
+            reason it belongs here too is the whole argument of this screen: the request is made
+            where the sentence is being read, not on a tab that lists sentences. */}
+        {!isStatic && artifactId && (
+          <span className="px-link" data-qc={BLOCK_HOOKS.askChange} data-qc-field={row.merge_field}
+            style={{ fontSize: 11.5 }} onClick={() => setAskOpen((v) => !v)}>
+            {askOpen ? 'Cancel' : 'Ask for a change'}
+          </span>
+        )}
+      </div>
+
+      {askOpen && (
+        <div data-qc={BLOCK_HOOKS.askBox} style={{ marginTop: 8 }}>
+          <div className="px-small" style={{ textTransform: 'none' }}>
+            This rewrites <b>{row.merge_field}</b> only. Anything auto-corrected in it can no longer be undone.
+          </div>
+          <textarea className="px-input" rows={2} value={ask} placeholder="What should change about this field?"
+            onChange={(e) => setAsk(e.target.value)} style={{ width: '100%', marginTop: 4, resize: 'vertical' }} />
+          {askError && <div className="px-note" style={{ marginTop: 6 }}>{askError}</div>}
+          <div style={{ display: 'flex', gap: 6, marginTop: 4 }}>
+            <button type="button" className="px-btn" disabled={askBusy}
+              onClick={() => { setAskOpen(false); setAsk(''); setAskError(null) }}>Cancel</button>
+            <button type="button" className="px-btn px-btn-accent" data-qc={BLOCK_HOOKS.askSend}
+              disabled={askBusy || !ask.trim()}
+              onClick={async () => {
+                setAskBusy(true); setAskError(null)
+                try {
+                  await api.aiEditArtifact(artifactId, { instruction: ask.trim(), section: row.merge_field })
+                  setAsk(''); setAskOpen(false)
+                  if (onCorrectionsChanged) await onCorrectionsChanged()
+                } catch (e) { setAskError(String((e && e.message) || e)) }
+                finally { setAskBusy(false) }
+              }}>{askBusy ? 'Sending...' : 'Send'}</button>
+          </div>
         </div>
       )}
     </div>
