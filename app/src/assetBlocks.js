@@ -40,6 +40,7 @@ export const BLOCK_HOOKS = {
   before: 'blocks-before',
   meterToggle: 'blocks-answers-toggle',   // the disclosure on "What this X answers"
   meterSummary: 'blocks-answers-summary', // the counts kept on the COLLAPSED row
+  fieldTarget: 'blocks-field-target',     // the rule the field is held to, from the owner's thresholds
   fieldChangeLog: 'blocks-corrected-for-you', // the field's own "Corrected for you" list (P8.6 inline).
   // NOT named `corrections`: corrections.test.mjs forbids /\.corrections\b/ in any .jsx so no
   // component can read `result.corrections` instead of the selector, and BLOCK_HOOKS.corrections
@@ -433,4 +434,49 @@ export const ASSET_ANSWERS_DEFAULT_OPEN = false
 export function correctionsForField(rows, mergeField) {
   if (!Array.isArray(rows) || !mergeField) return []
   return rows.filter((r) => r && r.merge_field === mergeField)
+}
+
+/**
+ * The CONTRACT a field is held to, in the words of the rule that enforces it.
+ *
+ * The prototype states every field's target beside its measurement - "longest 22 chars · <= 24 chars
+ * each", "0 over 20 chars · max 1 item over 20 chars", "6 x 5 words · exactly 5 words". The app
+ * showed the measurement alone, which is the difference between "20 words" and "20 words, and the
+ * limit is 24". Owner: "fix the UI to match the prototype visually".
+ *
+ * THE NUMBERS COME FROM THE OWNER'S THRESHOLDS, never from a literal here. They are settings -
+ * `chk_skill_max_chars`, `chk_relevant_max_chars`, `chk_expertise_words` - reachable in Settings and
+ * already carried to the client by `searchPrefsGet().checks`. The owner set 24/20 and said "all such
+ * rule numbers need to be available for tweaking in the settings/config"; a literal here would print
+ * "<= 24 chars" while the gate enforced 30, which is worse than printing nothing.
+ *
+ * NO THRESHOLDS, NO TARGET. Returns null rather than falling back to a default - a contract stated
+ * from a guess is a promise the gate has not agreed to.
+ *
+ * DELIBERATELY ABSENT: the portfolio and cover fields. Their merge-field NAMES carry one number and
+ * the thresholds carry another - `@AboutMe1_50words` against `aboutMe1Words: [45, 48]`,
+ * `@AboutMe2_60words` against `[75, 80]`, `@CoreAccomplishments_5blts_180words` against `[98, 125]`.
+ * Two sources for one number, and picking either without deciding which is authoritative would
+ * invent certainty. Recorded for the owner instead; see .claude/actions.md.
+ */
+export function targetFor(mergeField, thresholds) {
+  const t = thresholds
+  if (!t || !mergeField) return null
+  const n = (v) => (Number.isFinite(Number(v)) ? Number(v) : null)
+  if (/^SkillsBullets\d$/.test(mergeField)) {
+    const max = n(t.skillMaxChars)
+    return max === null ? null : `\u2264 ${max} chars each`
+  }
+  if (/^RelevantBullets\d$/.test(mergeField)) {
+    const max = n(t.relevantMaxChars)
+    const allow = n(t.relevantOverLimitAllowance)
+    if (max === null) return null
+    return allow === null ? `\u2264 ${max} chars each`
+      : `max ${allow} item${allow === 1 ? '' : 's'} over ${max} chars`
+  }
+  if (mergeField === 'ExpertiseBullets') {
+    const w = n(t.expertiseWords)
+    return w === null ? null : `exactly ${w} words each`
+  }
+  return null
 }

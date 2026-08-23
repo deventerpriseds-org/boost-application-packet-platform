@@ -349,7 +349,7 @@ test('draftSizeText omits bullets when the field name never asked for them', () 
 })
 
 // ── P8.7: the blocks card is selectable by CSS, and the two disclosures stay opposite ───────────
-import { ASSET_ANSWERS_DEFAULT_OPEN, BLOCK_HOOKS, correctionsForField, orderFields } from '../src/assetBlocks.js'
+import { ASSET_ANSWERS_DEFAULT_OPEN, BLOCK_HOOKS, correctionsForField, orderFields, targetFor } from '../src/assetBlocks.js'
 import { ASSET_BODY_DEFAULT_OPEN, PACKET_HOOKS } from '../src/packetBuilder.js'
 
 const BLOCKS_SRC = src('../src/screens/AssetBlocks.jsx')
@@ -555,4 +555,40 @@ test('H:the-answers-panel-is-what-p8.7-collapses: closed by default, summary sti
   // to discover whether opening it was worth it.
   assert.match(s, /!open && stats\.map/, 'the summary renders while collapsed')
   assert.match(s, /data-qc=\{BLOCK_HOOKS\.meterSummary\}/, 'and is addressable for verification')
+})
+
+/**
+ * H:a-field-states-the-rule-it-is-held-to
+ *
+ * The prototype prints every field's target beside its measurement - "longest 22 chars <= 24 chars
+ * each", "0 over 20 chars, max 1 item over 20 chars", "6 x 5 words, exactly 5 words". The app
+ * printed the measurement alone, which cannot tell a reader whether 20 words is fine.
+ *
+ * THE NUMBER MUST BE THE OWNER'S, NOT A LITERAL. These are settings (chk_skill_max_chars,
+ * chk_relevant_max_chars, chk_expertise_words), reachable in Settings, and the owner was explicit:
+ * "all such rule numbers need to be available for tweaking in the settings/config". A literal in the
+ * UI would promise "<= 24 chars" while the gate enforced 30 - a screen lying about the rule it is
+ * reporting, which is worse than a screen that says nothing.
+ */
+test('H:a-field-states-the-rule-it-is-held-to: the target comes from the thresholds, never a literal', () => {
+  const t = { skillMaxChars: 24, relevantMaxChars: 20, relevantOverLimitAllowance: 1, expertiseWords: 5 }
+  assert.equal(targetFor('SkillsBullets1', t), '≤ 24 chars each')
+  assert.equal(targetFor('RelevantBullets2', t), 'max 1 item over 20 chars')
+  assert.equal(targetFor('ExpertiseBullets', t), 'exactly 5 words each')
+
+  // THE POINT: change the setting, change the promise. If this still says 24 the UI is hardcoded.
+  const raised = targetFor('SkillsBullets1', { ...t, skillMaxChars: 30 })
+  assert.equal(raised, '≤ 30 chars each', 'the screen must follow the setting the owner chose')
+  assert.ok(!raised.includes('24'), 'a literal 24 would survive the owner raising the limit')
+
+  // No thresholds, no target - never a default. A contract stated from a guess is a promise the
+  // gate has not agreed to.
+  assert.equal(targetFor('SkillsBullets1', null), null)
+  assert.equal(targetFor('SkillsBullets1', {}), null)
+  assert.equal(targetFor('ResumeSummary', t), null, 'no source for a summary word target - say nothing')
+
+  // The screen must go through it rather than composing its own sentence.
+  const blocks = stripComments(BLOCKS_SRC)
+  assert.match(blocks, /targetFor\(row\.merge_field, thresholds\)/, 'the field reads the shared derivation')
+  assert.ok(!/\b(?:24|20)\s*chars\b/.test(blocks), 'no threshold literal may appear in the rendering')
 })

@@ -31,6 +31,7 @@ import { api } from '../api.js'
 import {
   BLOCK_HOOKS, KIND_ABBR, KIND_WORD, METHOD_LABEL,
   countMismatchNote, deriveItems, draftSizeText, expectationFor, latestRows, listBodyModel, listsOf,
+  targetFor,
   ASSET_ANSWERS_DEFAULT_OPEN, correctionsForField,
   meterModel, reqsForRow, scopeSwaps, shapeOf, sharedSourceNote, statPct, wordCount,
 } from '../assetBlocks.js'
@@ -312,12 +313,13 @@ function BlockBody({ row, shape, swapsForList, artifactId, listOwners }) {
   )
 }
 
-function AssetBlock({ row, reqs, swapsForList, wide, artifactId, listOwners,
+function AssetBlock({ row, reqs, swapsForList, wide, artifactId, listOwners, thresholds,
   corrections = [], correctionBusy, setCorrectionBusy, onCorrectionsChanged }) {
   const [showBefore, setShowBefore] = useState(false)
   const shape = shapeOf(row)
   const isStatic = shape === 'static'
   const expect = expectationFor(row.merge_field)
+  const target = targetFor(row.merge_field, thresholds)
   // The ROW's count, not a re-split of its text. When the two disagree the card says so rather
   // than printing the browser's number over the one the checks were run against.
   const measured = deriveItems(row)
@@ -346,6 +348,13 @@ function AssetBlock({ row, reqs, swapsForList, wide, artifactId, listOwners,
           <span className="px-small">
             {count > 1 ? `${count} lines - ` : ''}{words} words
           </span>
+        )}
+        {/* The CONTRACT beside the measurement, in the words of the rule that enforces it - the
+            prototype states both ("longest 22 chars - <= 24 chars each"), and a measurement with no
+            target cannot tell the reader whether it is fine. The number is the OWNER'S threshold,
+            carried from settings; `targetFor` returns null rather than guessing one. */}
+        {!isStatic && target && (
+          <span className="px-small" data-qc={BLOCK_HOOKS.fieldTarget} style={{ textTransform: 'none' }}>{target}</span>
         )}
         {expect && (
           <span className="px-small" style={{ textTransform: 'none' }}>
@@ -480,6 +489,17 @@ export default function AssetBlocks({ artifact, provenance, fallback, defaultOpe
   // The change log, scoped per field into the margins below. One `busy` for the whole panel, not one
   // per row: two undos in flight against the same artifact would race the re-read that follows them.
   const { rows: correctionRows, refresh: refreshCorrections } = useArtifactCorrections(artifact.id)
+  // The OWNER'S check thresholds, so every field can state the contract the gate actually holds it
+  // to. `searchPrefsGet().checks` is the same row Settings writes - one source, so changing 24 to 30
+  // there changes what this screen promises.
+  const [thresholds, setThresholds] = useState(null)
+  useEffect(() => {
+    let live = true
+    api.searchPrefsGet()
+      .then((d) => { if (live) setThresholds((d && d.checks) || null) })
+      .catch(() => { if (live) setThresholds(null) })
+    return () => { live = false }
+  }, [])
   const [correctionBusy, setCorrectionBusy] = useState(null)
 
   useEffect(() => {
@@ -571,6 +591,7 @@ export default function AssetBlocks({ artifact, provenance, fallback, defaultOpe
               wide={wide}
               artifactId={artifact.id}
               listOwners={listOwners}
+              thresholds={thresholds}
               corrections={correctionsForField(correctionRows, r.merge_field)}
               correctionBusy={correctionBusy}
               setCorrectionBusy={setCorrectionBusy}

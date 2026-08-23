@@ -180,13 +180,20 @@ await writeFile(join(WORK, 'index.html'), html)
 
 const s1 = await serve(WORK, 8961, false)
 const s2 = await serve(DIST, 8962, true)
-const browser = await chromium.launch({ executablePath: EXE })
-
 const wanted = has('all') ? STEPS : STEPS.filter((s) => s.key === arg('step', 'resume'))
 const report = []
 for (const step of wanted) {
-  const proto = await protoSide(browser, step)
-  const app = await appSide(browser, step, fixtures)
+  // One step that throws must NOT cost the other six. A seven-step report is the whole point, and
+  // an exception here previously took the entire run down and wrote no file at all.
+  // ONE BROWSER PER STEP. A shared instance died partway through a seven-step run and every step
+  // after it reported "Target page, context or browser has been closed" - six empty rows from one
+  // crash. Launch costs ~300ms; a lost report costs the whole run.
+  const browser = await chromium.launch({ executablePath: EXE })
+  let proto, app
+  try { proto = await protoSide(browser, step) }
+  catch (e) { await browser.close().catch(() => {}); report.push({ step: step.key, error: 'prototype: ' + String(e.message || e).slice(0, 160) }); continue }
+  try { app = await appSide(browser, step, fixtures) }
+  catch (e) { await browser.close().catch(() => {}); report.push({ step: step.key, error: 'app: ' + String(e.message || e).slice(0, 160) }); continue }
   const only = (a, b) => a.filter((x) => !b.some((y) => y.toLowerCase() === x.toLowerCase()))
   report.push({
     step: step.key,
@@ -200,9 +207,10 @@ for (const step of wanted) {
     bodyLen: { prototype: proto.bodyLen, app: app.bodyLen },
     unmatchedFixtures: app.unmatchedFixtures,
   })
+  await browser.close().catch(() => {})
 }
 
-await browser.close(); s1.close(); s2.close()
+s1.close(); s2.close()
 const text = JSON.stringify(report, null, 1)
 if (JSON_OUT) await writeFile(JSON_OUT, text)
 console.log(text)
