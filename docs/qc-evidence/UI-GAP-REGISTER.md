@@ -21,6 +21,44 @@ The prototype's own review chrome is **excluded** - the mode pill (`Current app`
 / `Highlight additions`) and the `UI SPEC` badge. Its README says those are review aids and "do not
 build them"; counting them inflated an earlier version of this file with work nobody should do.
 
+---
+
+## READ THIS BEFORE TREATING THE COUNT AS A BACKLOG (2026-08-23)
+
+**A row here is a text difference, not a unit of work.** Six per-step triage passes
+(`docs/qc-evidence/triage/*.md`) classified every row, and the count substantially overstates the
+real gap. Four distinct reasons, each measured:
+
+1. **Already built, nothing to render.** `portfolio`: **16 of 20** blocked rows are implemented in
+   the app and were empty only because the captured artifact carried no `insertion` rows. `jd`: ~10
+   rows disappear if the capture uses an opportunity whose evidence resolve has run (`comparisonState()`
+   returned `unresolved`, so the table head never rendered).
+2. **Demo data.** `resume`: **27 of 45** entries are SafetyIQ / Head-of-Engineering sample strings.
+   The app renders the same structure with the real opportunity's values; matching is on TEXT.
+3. **Matcher artifacts.** `compare-ui.mjs:102` collects only `button, [role="button"], a`. Three of
+   four "missing controls" on `resume` exist as `span.px-link`, some with a `✓`/`⎘` glyph. Making
+   those two spans real `role="button"` controls fixes a genuine accessibility defect AND deletes
+   the phantom rows.
+4. **Rows that measure a BANNED string can never close.** SPEC 7 bans the engine's own vocabulary as
+   a user-facing label, so the prototype's `fail` / `warn` / `approved` have no app equivalent by
+   design - the app says `Blocked` / `Needs a decision` / `Clear` / `Not checked`. **These rows are
+   retired by judgement, never by string equality.** Do not "fix" them.
+
+### THE INSTRUMENT CAN DEGRADE SILENTLY - check before trusting a number
+
+The route-keyed fixture file used to live only in the session scratchpad. A container restore took
+it and the next run reported **193/26** against a recorded 146/15 - a 47-row "regression" that was
+entirely the harness. Nothing errored; the app rendered "No packets yet." with a 612-char body,
+which is indistinguishable from real empty data.
+
+`scripts/build-fixtures.mjs` now builds the fixture file, lives in the repo, and **prints
+`!!! THIN FIXTURE SET` naming each missing table** when it cannot supply `requirements`,
+`checkResults` or `swaps` - the three that drive coverage cards, the whole Checks tab and the Swaps
+tab. **A thin fixture set inflates the gap and reads as product regression.**
+
+> **Before quoting a number: confirm the run had a full fixture set, and sanity-check the app-side
+> `bodyLen`. Five steps at ~610 chars means the harness, not the app.**
+
 ## Summary (2026-08-23)
 
 | Step | Prototype | App | app% | Panels missing | Controls missing |
