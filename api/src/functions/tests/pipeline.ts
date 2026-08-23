@@ -4,7 +4,7 @@ import { getGoogleToken, getGoogleOAuthToken, HAS_GOOGLE_OAUTH, IMPERSONATE_SUBJ
 import { resolveZapVars } from './zapVars'
 import { resolveRoleFocus, roleDirective } from './roleFocus'
 import { assemblePackage, mergeCallTwo, call2Draft } from './mt17'
-import { parseResumePackage } from './resumeParser'
+import { headingKeysFor, parseResumePackage } from './resumeParser'
 import { parseAgentJson, isEmptyResult } from './agentJson'
 import { loadPipelineSettings, requireDriveId, isDriveId, isEmailish, CONFIG_KEYS, PipelineSettings } from './pipelineConfig'
 import { copyThen, deleteDriveFile } from './packetTemplates'
@@ -280,6 +280,55 @@ export async function regenerateFields(opts: {
 // Returns `calls` alongside the package because P1.3 cannot reconstruct what changed from the merged
 // output alone: assemblePackage's per-slot preference for Call 3 over Call 1 IS the swap decision,
 // and both sides are needed to see it. These were previously discarded at the end of this function.
+/**
+ * Which zap token each List-B slot fed, from the `ats_user` prompt itself.
+ *   290709249__output__Item 13/15  — "List B / Skills 1" and "Skills 2"
+ *   289877662__output__Item 41/43/45 — "Relevant skills b (lists 1, 2 and 3)"
+ * Keyed by the PACKAGE FIELD so `headingKeysFor` can drive the lookup.
+ */
+const LIST_B_TOKEN: Record<string, string> = {
+  // KEYED BY THE PARSER'S OWN KEYS, not the merge-field names. `headingKeysFor` returns
+  // `skills1` / `relevant1`, NOT `SkillsBullets1` / `RelevantBullets1`. The first version of this
+  // map used the merge-field names, so every lookup missed, `listB` was always `{}`, and List B
+  // would have shipped STILL EMPTY while every log line and code path said it was wired. Caught by
+  // `listB.test.mjs` asserting a recovered value rather than asserting the code ran.
+  skills1: '290709249__output__Item 13',
+  skills2: '290709249__output__Item 15',
+  relevant1: '289877662__output__Item 41',
+  relevant2: '289877662__output__Item 43',
+  relevant3: '289877662__output__Item 45',
+}
+
+/**
+ * Recover List B — the PRE-SWAP copies of each list — from the sections the parser discarded.
+ *
+ * Exported and pure so it can be proven. Buried inside `buildPackageForJD` it could only be
+ * exercised by a live three-call generation, which is how the empty-List-B defect survived: every
+ * piece worked, and nothing tested the composition.
+ *
+ * `headingKeysFor` is the SAME mapper `resumeParser` uses to decide which field a heading fills, so
+ * "which slot is this discarded copy the original of" has exactly one answer in both places. No
+ * heading strings are hardcoded here.
+ *
+ * FIRST COPY WINS, mirroring the parser's own first-unfilled-wins rule: the earliest restatement is
+ * the pre-swap original, and a later one is a further revision.
+ */
+export function listBFromCalls(...calls: any[]): Record<string, string> {
+  const out: Record<string, string> = {}
+  for (const call of calls) {
+    for (const sec of ((call as any)?._unmapped || []) as Array<{ title: string; body: string }>) {
+      if (!sec?.body) continue
+      for (const key of headingKeysFor(sec.title)) {
+        if (LIST_B_TOKEN[key] && !out[key]) out[key] = sec.body
+      }
+    }
+  }
+  return out
+}
+
+/** The zap token each List-B slot fed. Exported so a test can assert the wiring, not just the shape. */
+export const LIST_B_TOKENS = () => ({ ...LIST_B_TOKEN })
+
 export async function buildPackageForJD(opts: { key: string; jd: string; roleType: string; company: string; jobTitle: string; personaRole?: string | null; revisionNotes?: string[] }): Promise<{ pkg: Record<string, string | null>; steps: string[]; roleFocus: any; roleFocusSource: string; calls: { c1: any; c2: any; c3: any }; usage: Array<{ pass: string; usage: any }>; promptVersions: Record<string, number>; profileText: string; omitList: string; warnings: string[]; qcApplied: boolean; settings: PipelineSettings }> {
   const { key, jd, roleType, company, jobTitle } = opts
   const steps: string[] = []
@@ -398,7 +447,46 @@ export async function buildPackageForJD(opts: { key: string; jd: string; roleTyp
     warnings.push(`Call 2 returned a section named "${u.title}" that maps to no merge field — its ${u.body.length} characters were NOT placed in any document`)
   }
 
+  // LIST B — THE PRE-SWAP COPIES THE PARSER ALREADY DISCARDED.
+  //
+  // `ats_user`'s whole objective is "Compare each skill in Lists A to Lists B" and "eliminate
+  // redundancy across Skills Lists A (1,2), Skills Lists B (1,2), and the Relevant Skills Lists".
+  // Until now this pipeline supplied only List A, so the QC pass compared against nothing and its
+  // merged list, swap reasoning and `changes_cited` all degenerated. Measured: 21 tokens
+  // interpolated, 9 supplied.
+  //
+  // WHERE LIST B COMES FROM, established from the zap export rather than guessed:
+  //   290709249  splits {{290709248__response__content}} on ###
+  //   290709248  "Skills HTML Bullet List Formatting" — reformats {{289877662__output__Item 11}},
+  //              labelled "### Original Skills 1 ###"
+  //   289877662  splits {{289877661__response}}{{299599701__response}} — Call 1 and Call 2
+  // So List A and List B come from the SAME generation at different section indexes. The owner
+  // confirmed the semantics: List B is what was kept from the original items plus anything swapped
+  // out — a POST-SWAP CHECK against the pre-swap originals.
+  //
+  // We already produce them. The owner's prompt asks the model to restate each list inside the swap
+  // table "before any swaps", so each arrives TWICE; `resumeParser` is first-unfilled-wins, so the
+  // placed field is the post-swap final and the SECOND copy lands in `_unmapped` and was dropped.
+  // That is `D33` and `D:call3-compares-against-an-empty-list` seen from opposite ends.
+  //
+  // `headingKeysFor` is the SAME mapper the parser uses to decide which field a heading fills, so
+  // "which slot is this discarded copy the original of" has one answer here and in the parser. No
+  // title strings are hardcoded.
+  const listB = listBFromCalls(c1, c2)
+  for (const field of Object.keys(LIST_B_TOKEN)) {
+    if (listB[field]) steps.push(`List B ${field} recovered from a discarded section (${listB[field].length} chars)`)
+  }
+  const listBMissing = Object.keys(LIST_B_TOKEN).filter(f => !listB[f])
+  if (listBMissing.length === Object.keys(LIST_B_TOKEN).length) {
+    warnings.push('Call 3 has no List B to compare against — the ATS pass will merge against an empty list')
+  } else if (listBMissing.length) {
+    warnings.push(`Call 3 List B is partial; no pre-swap copy found for: ${listBMissing.join(', ')}`)
+  }
+
   const atsExtra: Record<string, string> = {
+    // List B, keyed by the zap token each slot fed. Blank when no pre-swap copy was found, which is
+    // the honest value — the same blank the prompt saw before, but now only when it is really absent.
+    ...Object.fromEntries(Object.entries(LIST_B_TOKEN).map(([f, tok]) => [tok, listB[f] || ''])),
     // THE REFINED LISTS, NOT THE FIRST DRAFT. Call 3 is the ATS QC pass and it judges what it is
     // given; handed Call 1's skills it re-does work Call 2 already did, against text that is no
     // longer what the document will carry. The zap runs node 17 (this refinement) BEFORE the QA

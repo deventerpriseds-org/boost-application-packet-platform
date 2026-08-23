@@ -3865,3 +3865,41 @@ test('H:seed-changes-reach-the-database: defaults sync, owner rows are never ove
     'the default sync writes existing ROWS — that silently reverts every setting the owner ' +
     'deliberately changed. Seeds decide what a NEW owner starts from, never what an existing one has.')
 })
+
+// H:list-b-reaches-the-prompt — the recovery is worthless unless the CALLER wires it through.
+//
+// `ats_user` compares "Lists A to Lists B" and this pipeline supplied only List A: 21 tokens
+// interpolated, 9 supplied, so the QC pass merged against nothing. List B needs no new node — the
+// prompt asks the model to restate each list "before any swaps", so each arrives twice and the
+// second copy lands in `_unmapped`, which the build discarded (`D33`).
+//
+// `listB.test.mjs` proves the RECOVERY. It cannot prove the WIRING, and both halves have already
+// failed silently once each in this module:
+//   - `LIST_B_TOKEN` was first keyed by merge-field names (`SkillsBullets1`) while `headingKeysFor`
+//     returns parser keys (`skills1`), so every lookup missed and List B stayed empty while every
+//     code path claimed success. Caught by the module test.
+//   - dropping `c2` from the call loses Call 2's sections, and the module test stays GREEN because
+//     the defect is in the caller. Caught by nothing until this guard.
+test('H:list-b-reaches-the-prompt: recovered from both calls, spread into atsExtra', () => {
+  const PIPE = stripComments(readFileSync(new URL('../src/functions/tests/pipeline.ts', import.meta.url), 'utf8'))
+
+  assert.ok(/listBFromCalls\(c1,\s*c2\)/.test(PIPE),
+    'List B is not recovered from BOTH calls — the zap split Call 1 and Call 2 concatenated, so ' +
+    'dropping either silently loses half the pre-swap originals')
+
+  const at = PIPE.indexOf('const atsExtra')
+  assert.notEqual(at, -1, 'atsExtra moved; retarget this guard')
+  const block = PIPE.slice(at, PIPE.indexOf('const base3', at))
+  assert.ok(/\.\.\.Object\.fromEntries\([^)]*LIST_B_TOKEN/.test(block),
+    'the recovered List B is no longer spread into atsExtra, so it never reaches the prompt and ' +
+    'Call 3 is back to comparing against an empty list')
+
+  // Keyed by the PARSER's keys, because that is what headingKeysFor returns.
+  const map = PIPE.slice(PIPE.indexOf('const LIST_B_TOKEN'))
+  const decl = map.slice(0, map.indexOf('\n}'))
+  for (const k of ['skills1', 'skills2', 'relevant1', 'relevant2', 'relevant3']) {
+    assert.ok(new RegExp(`\\n  ${k}:`).test(decl),
+      `LIST_B_TOKEN lost the parser key "${k}" — a map keyed by merge-field names never matches ` +
+      'anything headingKeysFor returns, and List B silently stays empty')
+  }
+})
