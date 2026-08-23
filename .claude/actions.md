@@ -2834,3 +2834,44 @@ blocks IMMEDIATELY (rendered 2026-08-23: Resume summary, Skills 1 … all visibl
 app renders 850 characters and no blocks panel. Whatever gates that panel is the next thing to find
 — the inline corrections cannot be seen until it is, and this is likely the same reason the owner
 experiences the app as not matching the design.
+
+### ACT — blocks panel FIXED LIVE; corrections wired but NOT yet visible live (2026-08-23)
+
+**Question asked:** "find why the blocks panel isn't rendering." Two separate defects, both found.
+
+**1. FIXED AND CONFIRMED LIVE (`8923668`).** Every artifact card was collapsed by default, so the
+whole body it gates - every merge field, margin, keyword chip - was never in the DOM.
+`ASSET_HEADER_DEFAULT_OPEN = false` applied P8.7 ("asset headers are collapsed by default") to the
+WRONG OBJECT: in the design, `AssetHeader` is the "What this resume answers" counters panel INSIDE
+the card, not the card's own disclosure. Renamed to `ASSET_BODY_DEFAULT_OPEN = true`.
+**Confirmed by looking at the live page** (`ui-shots` branch): 7 merge fields, "What is in this
+asset" with real counters (4/35 posting lines, 6/10 changes, 7/7 fields), swap rows, R-chips,
+highlighted "Posting says:" quotes. The draft is visible in production again.
+
+**2. WIRED, DEPLOYED, NOT CONFIRMED LIVE (`3dd03a0`).** `checks-result` never carried a
+`corrections` key, though `api.js` documents that "the change log rides on artifactChecksResult" and
+`correctionsState` reads exactly that key. So corrections were invisible in BOTH surfaces - the QC
+step's "Done for you" and the field margin - while the rows sat in the table. The dedicated
+`GET /artifact/{id}/corrections` route exists and `api.js` has no client for it.
+
+Fix adds the key from `listCorrections` (the same function the dedicated route uses).
+**Proven locally by controlled experiment** (`scripts/render-app.mjs`): fixtures identical except
+that key -> `[data-qc="blocks-corrected-for-you"]` counts **0 without, 1 with**, and the field
+renders CORRECTED FOR YOU with Undo / Suggest something different.
+
+**Still failing live after 3 checks** post-deploy (api-deploy SUCCESS for the SHA). Prime suspect is
+Azure Functions stale-worker convergence - the `azure-functions-deploy-verify` skill exists for
+exactly this and prescribes a restart-to-converge. NOT yet ruled out; do not call this done.
+
+**Next session, in order:** (a) confirm the deployed payload actually contains `corrections` (read
+the HEAD of the checks-result body, not the tail - the key sits before `score`); (b) if absent,
+restart the Function App to converge and re-check; (c) if present but the UI still shows nothing,
+the defect is downstream of the payload and `render-app.mjs` with a REAL captured payload will
+localise it in one run.
+
+**Tooling that made this findable, and is now the standard loop:**
+- `scripts/render-app.mjs` - renders this repo's `app/dist` locally against fixtures in ~2s.
+- `scripts/render-spec.mjs` - renders the design prototype locally.
+- `ui-verify.yml` now pushes its PNG to the orphan `ui-shots` branch, because the sandbox cannot
+  download a workflow artifact (proxy 403s both routes) but CAN `git fetch`. Read a live screenshot
+  with `git show origin/ui-shots:latest.png > /tmp/x.png`.
