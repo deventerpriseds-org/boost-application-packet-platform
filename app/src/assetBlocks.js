@@ -157,13 +157,24 @@ export function draftSizeText(row, expect) {
 export const KIND_ABBR = { must_have: 'M', nice_to_have: 'N', responsibility: 'R' }
 export const KIND_WORD = { must_have: 'must-have', nice_to_have: 'nice-to-have', responsibility: 'responsibility' }
 
-// How the row's own `method` reads in plain language. `manual` is never inferred by the pipeline —
-// it exists so a human edit can be told apart from a model rewrite, and it is shown as what it is.
-export const METHOD_LABEL = {
-  template_fill: 'written for this posting',
-  model_rewrite: 'rewritten by a later pass',
-  manual: 'edited by hand',
-}
+/**
+ * How the row's own `method` reads in plain language — RE-EXPORTED, not redefined.
+ *
+ * There were TWO of these and they disagreed about `template_fill`. This file said
+ * 'written for this posting'; assetGate.js said 'filled straight from the package'. Two consumers,
+ * one each: AssetBlocks.jsx read this copy, AssetGateDrawer.jsx read that one — so the SAME
+ * insertion row described itself two contradictory ways on two screens the reader can open side by
+ * side.
+ *
+ * The ground truth is the code that WRITES the value, not either label. insertions.ts:66 defines
+ * `template_fill` as "first time this slot was filled; the package value went straight in", and
+ * :87 derives it as `changed ? 'model_rewrite' : 'template_fill'` — i.e. template_fill means the
+ * text was NOT changed for this posting. So this file's wording was the false one, and it was false
+ * in the direction that flatters: it told the reader a line had been tailored to the job when it
+ * was an untouched template fill. That is the same class of claim as laundering a model change as
+ * human judgement, which the `manual` note in assetGate.js already refuses to do.
+ */
+export { METHOD_LABEL } from './assetGate.js'
 
 // ── the insertions × swaps × requirements join ──────────────────────────────────────────────────
 

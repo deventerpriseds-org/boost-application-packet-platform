@@ -8,7 +8,7 @@ import { readFileSync } from 'node:fs'
 import {
   footerFor, reconcile, reviewerAttention, attentionSplit, engineRows, scoreParts,
   gateMeta, stateMeta, checkLabel, fieldLabel, assetLabel, STATE_META,
-  SEV_LABEL, severityFor, severityMeta, CHANGE_LOG_HEADLINE,
+  SEV_LABEL, severityFor, severityMeta, CHANGE_LOG_HEADLINE, METHOD_LABEL,
 } from '../src/assetGate.js'
 
 // The two payloads a verifier reproduced the AC3 defects with. They are shared by the tests below
@@ -448,4 +448,31 @@ test('H:correction-controls-use-prototype-words: the change-log row speaks the d
   for (const gone of ['Suggest something different', 'Open {row.fieldName']) {
     assert.ok(!stripped.includes(gone), 'stale pre-prototype wording is back: ' + gone)
   }
+})
+
+test('H:one-method-label: `method` has exactly ONE plain-language table, and it is the true one', () => {
+  // There were two, disagreeing on template_fill. AssetBlocks.jsx read one, AssetGateDrawer.jsx the
+  // other, so one insertion row described itself two contradictory ways on two screens.
+  const blocks = readFileSync(new URL('../src/assetBlocks.js', import.meta.url), 'utf8')
+  const gate = readFileSync(new URL('../src/assetGate.js', import.meta.url), 'utf8')
+
+  assert.equal((gate.match(/^export const METHOD_LABEL = \{/gm) || []).length, 1,
+    'assetGate.js is the single definition')
+  assert.ok(!/^export const METHOD_LABEL = \{/m.test(blocks),
+    'assetBlocks.js has redefined METHOD_LABEL - that is the duplicate that disagreed')
+  assert.match(blocks, /export \{ METHOD_LABEL \} from '\.\/assetGate\.js'/,
+    'assetBlocks.js must RE-EXPORT the one table, so both screens cannot drift again')
+
+  // And the surviving wording must be the one insertions.ts actually means. `template_fill` is
+  // derived as `changed ? 'model_rewrite' : 'template_fill'` - it means NOT changed for this
+  // posting - so a label claiming it was written for the posting is false in the flattering
+  // direction. Assert on MEANING, not on the exact sentence, so a reword cannot silently re-break it.
+  const label = METHOD_LABEL.template_fill.toLowerCase()
+  for (const banned of ['written for this posting', 'tailored', 'for this posting', 'for this job']) {
+    assert.ok(!label.includes(banned),
+      'template_fill means the package value went in UNCHANGED; it may not claim ' +
+      JSON.stringify(banned) + ' - got ' + JSON.stringify(METHOD_LABEL.template_fill))
+  }
+  assert.notEqual(METHOD_LABEL.template_fill, METHOD_LABEL.model_rewrite,
+    'the changed and unchanged cases must not read the same')
 })
