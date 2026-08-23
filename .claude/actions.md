@@ -2875,3 +2875,36 @@ localise it in one run.
 - `ui-verify.yml` now pushes its PNG to the orphan `ui-shots` branch, because the sandbox cannot
   download a workflow artifact (proxy 403s both routes) but CAN `git fetch`. Read a live screenshot
   with `git show origin/ui-shots:latest.png > /tmp/x.png`.
+
+### ACT — the whole-module UI gap, measured (2026-08-23)
+
+Owner: *"it has to be for the entire spec for the packets module not only tight UI alignment for the
+resume tab"*, after *"your tight UI alignment to the prototype wasn't successful"*. Both fair.
+
+**Shipped and confirmed live:** field order (ResumeSummary leads; the API sorts merge fields
+ALPHABETICALLY at `appInsertions.ts:81`, which is why Expertise floated to the top) · left nav
+collapsible and collapsed by default · "What this X answers" collapsed with the counts kept on the
+closed row · per-field targets read from the OWNER'S thresholds.
+
+**Measured, not estimated** — `docs/qc-evidence/UI-GAP-REGISTER.md`, from `scripts/compare-ui.mjs`:
+**171 panels and 27 controls** the design specifies and the app does not render, across 6 of 7 steps.
+No step above 77%. Resume is worst at 47%. The `qc` step failed to compare — harness, not app.
+
+**OPEN DECISION FOR THE OWNER — two sources for one number.** Portfolio and cover merge-field NAMES
+disagree with the thresholds that actually gate them:
+
+| Field name says | Threshold enforces |
+|---|---|
+| `@AboutMe1_50words` | `aboutMe1Words [45, 48]` |
+| `@AboutMe2_60words` | `aboutMe2Words [75, 80]` |
+| `@CoreAccomplishments_5blts_180words` | `coreAccomplishmentsWords [98, 125]` |
+
+`expectationFor` reads the name; the checks enforce the threshold. Those fields state NO target until
+it is settled — printing either invents certainty. Blocks targets on portfolio and cover.
+
+**Process notes worth keeping.** Two mutations reported FALSE PASSES this session before being
+corrected: an icon assertion that only checked the label, and a target mutation whose sed never
+matched (the source carries a `≤` escape, not a literal). Both were re-run with proof the
+mutation applied. A mutation that does not mutate proves nothing.
+`pkill -f <pattern>` killed this session's own shell twice — the pattern matches the invoking
+command line. Read `/proc/<pid>/exe` instead.

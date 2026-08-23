@@ -1,4 +1,9 @@
 node_modules/
+# No trailing slash as well: the pattern above matches a DIRECTORY only, and the render harnesses
+# (scripts/render-app.mjs, render-spec.mjs, compare-ui.mjs) need playwright-core resolvable from the
+# repo root, which is easiest as a SYMLINK to a scratch install. A symlink is not a directory, so
+# `node_modules/` did not match it and the Stop hook flagged it as untracked work.
+node_modules
 dist/
 .env
 .env.local
