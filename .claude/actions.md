@@ -2741,3 +2741,19 @@ would have made the whole change inert while every call returned 200.
 ship past a gate that is pinned at 0; it does not make coverage correct. Turning it back OFF is the
 signal that the resolver work landed — nothing currently records that intent, which is a known risk
 (the realistic failure is not a bug but that it is never turned off again).
+
+## ACT — Option A shipped and verified live (2026-08-23)
+
+Owner: "continue from here deploying the version i wanted not some advisory mode".
+
+**Delivered:** the proposal-confirmation path (`evidence_confirmation`, keyed on claim identity;
+confirm/reject route with server-resolved actor and same-statement ownership filter; gate counts a
+CONFIRMED proposal only), PLUS the escalation-priority fix without which it was inert.
+
+**Verified live on 2cb56fb3:** proposals on must_have 0 -> 5; `must_have_coverage`
+`0/12 must-haves evidenced` -> `2/12`, with the remaining 5 correctly reported as
+"awaiting your confirmation" and NOT counted.
+
+**Open:** turn `chk_gate_advisory` OFF once the owner is shipping on merit. The confirm route needs
+a VERIFIED session, so confirmations must come from the UI — a service-principal workflow token
+cannot make them (by design; the audit row records who decided).

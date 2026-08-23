@@ -2638,3 +2638,47 @@ it, then says "close the row". `grep` on an OPEN row means "prove the defect is 
 `add column ... not null default false` DOES backfill existing rows (measured: existing row reads
 `f`, not NULL). So the owner's existing row starts OFF. `syncCheckPrefDefaults` is for CHANGED seeds
 on EXISTING columns, not this.
+
+## 2026-08-23 — OPTION A SHIPPED: coverage is no longer pinned at zero (verified live)
+
+**`must_have_coverage` went `0/12` -> `2/12` on production** (opportunity 2cb56fb3) after confirming
+two model proposals. That number had never moved before.
+
+**Two defects, and the second is why the first would have been inert.**
+
+1. **No confirmation mechanism existed.** Built `evidence_confirmation`, keyed on CLAIM IDENTITY —
+   requirement text + source_key + offsets + quote bytes + record_sha256 — in its OWN table. It
+   cannot be a column on `requirement_evidence`: `writeRequirements` runs `delete from requirement
+   where opp_id=$1` on every re-extraction and the FK is ON DELETE CASCADE, so every confirmation
+   would die on the next JD re-parse. `seq` is worse — a reused positional index would transfer a
+   decision to a different requirement. The join enforces invalidation by construction: edit the
+   profile, `record_sha256` changes, the join stops matching, the confirmation lapses. Fail closed.
+2. **THE ESCALATION CAP WAS SPENT ON THE WRONG ROWS.** Measured: all 8 proposals landed on
+   RESPONSIBILITIES at seq 0-11 while must-haves sit at seq 22-34. `open` was taken in `seq` order
+   against a cap of 12, exhausted before reaching a single must-have (`over_cap: 1`). So
+   `must_have_coverage` could never move regardless of the confirmation path — a feature the owner
+   could click on responsibilities while the gating number stayed at zero. Must-haves now rank first
+   (then nice-to-have, then responsibility; `seq` order preserved within each kind). Live: proposals
+   on must_have went **0 -> 5**.
+
+**A third defect this change would have caused, caught by a test:** the new join hits
+`evidence_confirmation`, and `dimensionsDb.test.mjs` builds its DB from `origin/main`'s SCHEMA_SQL —
+the database a migration actually meets. `api-deploy.yml` deploys code BEFORE `pg-migrate`, so every
+requirements read would have 500'd in that window. `loadRequirementsWithEvidence` now calls
+`ensureEvidenceTable` first, exactly as the `proposal_version` comment already prescribed.
+
+**Guards, all mutation-proven:** `H:unconfirmed-proposal-is-not-confirmed`,
+`H:confirmed-proposal-is-carried-to-the-gate`, `H:a-changed-profile-record-voids-the-confirmation`,
+`H:a-changed-requirement-voids-the-confirmation`, `H:confirmation-survives-re-extraction`,
+`H:escalation-spends-its-cap-on-must-haves-first`. "Every proposal counts" was mutation-tested too
+and is already caught by the existing checks/evidence suites — that protection predates this change.
+
+### The pattern, now SIX times in one session
+List B empty · `atsExtra` 12 blank tokens · `evaluateArtifact` never called · must-haves classified
+with no posting · the evidence spine deleting itself · and now the escalation cap starving the only
+rows that matter. **Every one a MISSING INPUT with every downstream layer reporting confidently.**
+The evidence route returned `proposed: 8` and `verified: 8` while the gate it feeds had nothing.
+
+### Still owed
+`chk_gate_advisory` is still ON. It was the bridge; coverage can now move on merit, so it should be
+turned OFF once the owner has confirmed enough proposals to ship without it.
