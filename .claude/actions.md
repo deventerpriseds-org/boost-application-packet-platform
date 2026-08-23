@@ -2811,3 +2811,26 @@ design as-is. **Do not remove the QC step, and do not move corrections out of th
 no network. Two silent traps handled — Babel cannot XHR `.jsx` over `file://` (empty `#root`), and
 `theme.css` imports tokens from a `_ds/<id>/tokens/` path the package does not ship, which renders
 the page structurally right but **entirely colourless**. The token check is mutation-proven.
+
+### ACT — inline corrections SHIPPED, NOT YET CONFIRMED LIVE (2026-08-23, `2b6331b`)
+
+Owner: *"actually you have not updated the boost app to have the UI design, layout, buttons of the
+prototype"* — correct, and this is the first commit that changes application code rather than docs.
+
+**Built:** the field margin in `AssetBlocks.jsx` now renders "Corrected for you" beside the sentence
+a correction changed, using the SHARED `CorrectionRow` (exported from `QcRail.jsx`, new `inField`
+prop) and reaching the log through `railChangeLog` — one definition, two surfaces. Two guards,
+both mutation-proven (private-row swap fails; `startsWith` scoping fails). App suite 210/210,
+vite build clean, deploy run 32644674100 SUCCESS for the exact SHA.
+
+**NOT CONFIRMED LIVE — do not mark this done.** `ui-verify` on
+`#/packet/2cb56fb3…/resume` returns `bodyLen: 850`, `count: 0` for
+`[data-qc="blocks-corrected-for-you"]`, and `clicked: "not found"` for
+`[data-qc="blocks-toggle"]`. The DB says that resume artifact HAS 1 correction and 7 insertions, so
+the data exists — the blocks panel simply is not on the rendered page.
+
+**Open question this raises, and it is a real one:** the prototype's resume step shows the field
+blocks IMMEDIATELY (rendered 2026-08-23: Resume summary, Skills 1 … all visible on load). The live
+app renders 850 characters and no blocks panel. Whatever gates that panel is the next thing to find
+— the inline corrections cannot be seen until it is, and this is likely the same reason the owner
+experiences the app as not matching the design.
