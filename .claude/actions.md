@@ -2786,3 +2786,28 @@ locally by EXECUTING the prototype headless: rail = `JD analysis · 2 Resume · 
 The prototype is behavioural ground truth; the doc's §5/§7 prose is not. `PacketBuilder.jsx:42`
 stays. `IMPORT-NOTE.md` and `memory.md` now carry the corrected rule plus the render recipe, so the
 next session can settle any "what does the screen show" question by running it instead of reading.
+
+### The QC step is NOT a choice — the design already does both (2026-08-23)
+
+Owner: *"I prefer inline for the example you gave for what was fixed instead of having to be
+launched to a different tab, but I believe other uses still use the qc tab so it shouldn't get
+dropped altogether"* — then: *"why do you need a hybrid? what is different in what I described and
+what the current spec shows?"*
+
+**Nothing is different. There is no hybrid.** I manufactured a false choice on top of the earlier
+wrong reading. Rendered proof (`scripts/render-spec.mjs`):
+
+- **Step 2 Resume** renders **8 inline "Corrected for you" cards** in the field margin, plus
+  `Show original`, `Ask for a change`, and a CHANGES MADE trail with `Undo` /
+  `Suggest something different` per row.
+- **Step 6 QC** renders the same corrections rolled up as **"Done for you — 15 corrections already
+  applied"** with `Change it` / `Review →`, then **"Needs a decision"** (9 left) and the tabs
+  Coverage · Swaps · Passes · Checks · Review.
+
+Same `correction` rows, two surfaces: inline where you read, rolled up where you audit. Build the
+design as-is. **Do not remove the QC step, and do not move corrections out of the field.**
+
+**New capability, committed:** `scripts/render-spec.mjs` renders any prototype step headless with
+no network. Two silent traps handled — Babel cannot XHR `.jsx` over `file://` (empty `#root`), and
+`theme.css` imports tokens from a `_ds/<id>/tokens/` path the package does not ship, which renders
+the page structurally right but **entirely colourless**. The token check is mutation-proven.

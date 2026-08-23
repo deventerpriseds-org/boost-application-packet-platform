@@ -95,16 +95,34 @@ the published prototype directly.
 The owner corrected it from the rendered prototype. The guard is the render command above — run it
 before making any claim about what a screen shows.)*
 
-### How to render the prototype locally (no network, no live app)
+### How to render the prototype locally — `scripts/render-spec.mjs`
 
 ```bash
-# React/ReactDOM/Babel are embedded in the published artifact bundle; extract once, then:
-python3 -m http.server 8899 --directory <proto-dir>   # Babel cannot XHR .jsx over file://
-# then drive http://localhost:8899/index.html with playwright-core +
-# /opt/pw-browsers/chromium-1194/chrome-linux/chrome
+npm i --no-save playwright-core
+node scripts/render-spec.mjs --vendor <dir-with-react/react-dom/babel> --step resume --out /tmp/a.png
+node scripts/render-spec.mjs --vendor <dir> --list      # print the rendered rail and exit
 ```
+
 This is the only way to compare a screen against the design from inside the sandbox — the live app
-is behind blocked egress, and `ui-verify.yml` reaches the live app but not the prototype.
+is behind blocked egress, and `ui-verify.yml` reaches the live app but not the prototype. **Settle
+any "what does this screen show" question by running it, never by reading the spec.**
+
+Two traps the script handles, both of which mislead rather than error:
+
+1. **Babel cannot XHR the `.jsx` files over `file://`.** Opening the HTML directly gives an empty
+   `#root` and a body length of 0 — it reads as "the prototype is broken" rather than "wrong
+   transport". It must be served over HTTP.
+2. **`theme.css` `@import`s its tokens from `_ds/<design-system-id>/tokens/`, but the package ships
+   them at `app/src/tokens/`.** If they are not copied to the path the `@import` names, all three
+   404 and the page renders **structurally correct and completely colourless** — every colour a
+   fallback. `fig-tokens.css` is the colour file. This produced a screenshot the owner immediately
+   flagged as "not showing the colors applied".
+   **Guard:** the script asserts `--surface-background-secondary` actually resolved before it will
+   screenshot, and exits 2 naming the 404s if not. Mutation-proven 2026-08-23 by removing the token
+   copy — the guard fired and listed all three missing files.
+
+React/ReactDOM/Babel come from unpkg, which sandbox egress blocks; extract them once from the
+published artifact bundle and pass the directory as `--vendor`.
 
 ### Divergences between the design and what is built (verified 2026-08-23)
 
