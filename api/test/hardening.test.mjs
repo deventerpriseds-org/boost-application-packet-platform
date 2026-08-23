@@ -3962,3 +3962,40 @@ test('H:every-chk-column-is-selected: a column the loader never selects is a set
     `these chk_ columns are declared and defaulted but never SELECTED by loadThresholds, so the ` +
     `owner can set them and nothing reads the value: ${missing.join(', ')}`)
 })
+
+/**
+ * H:the-change-log-is-on-the-payload-that-renders-it
+ *
+ * `app/src/api.js` documented for two phases that "the change log rides on artifactChecksResult",
+ * and `assetGate.correctionsState()` is written to read `result.corrections`. The payload never
+ * carried the key. The selector therefore saw `undefined` and returned its "absent" shape forever,
+ * so corrections were invisible in BOTH surfaces that render them - the QC step's "Done for you"
+ * and the per-field margin - while the rows sat in the `correction` table untouched.
+ *
+ * Measured 2026-08-23: the resume artifact of packet 4860ae3b has one correction ("15" ->
+ * "multiple" in ResumeSummary). Rendering `app/dist` against fixtures identical except for this
+ * key, `[data-qc="blocks-corrected-for-you"]` counted 0 without it and 1 with it.
+ *
+ * Asserts the invariant, not the incident: the payload the client reads carries the log, and it
+ * comes from the SAME function the dedicated route uses. Two queries for one change log is how the
+ * count on one surface drifts from the count on another.
+ */
+test('H:the-change-log-is-on-the-payload-that-renders-it: checks-result publishes corrections from listCorrections', () => {
+  const s = stripComments(src('appChecks.ts'))
+
+  assert.match(s, /\bcorrections:\s*await\s+listCorrections\(/,
+    'checks-result must publish the change log, and must not re-derive it from a second query')
+  assert.match(s, /import\s*\{[^}]*\blistCorrections\b[^}]*\}\s*from\s*'\.\/appCorrections'/,
+    'sourced from the same module the dedicated /corrections route uses')
+
+  // The key must be UNCONDITIONAL. `correctionsState` distinguishes "nothing needed correcting"
+  // (empty array) from "nobody asked" (absent key) and says different things about them; a payload
+  // that omits the key when there are no rows collapses those two states into the wrong one.
+  assert.ok(!/corrections:\s*[^,\n]*\?\s*await\s+listCorrections/.test(s),
+    'the key is always present - an empty array is a different statement from an absent key')
+
+  // The client must not have grown a second reader for it either.
+  const apiJs = stripComments(readFileSync(join(SRC, '../../../../app/src/api.js'), 'utf8'))
+  assert.ok(!/\.corrections\b/.test(apiJs),
+    'api.js transports the payload; it must not reach into the change log itself')
+})

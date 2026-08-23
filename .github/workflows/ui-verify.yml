@@ -56,6 +56,10 @@ on:
         required: false
         default: 'https://purple-ground-0f377120f.7.azurestaticapps.net'
 
+# `contents: write` is required by the ui-shots push below; the default token is read-only.
+permissions:
+  contents: write
+
 jobs:
   verify:
     runs-on: ubuntu-latest
@@ -92,3 +96,40 @@ jobs:
           name: ui-verify-screenshot
           path: ui-verify.png
           if-no-files-found: warn
+
+      # Push the PNG to an orphan `ui-shots` branch so a Claude Code session can actually LOOK at it.
+      #
+      # WHY THIS EXISTS: the sandbox cannot download a workflow artifact. Both routes are blocked by
+      # the egress proxy with a 403 CONNECT - github.com/.../artifacts/<id> (redirects to blob
+      # storage) and api.github.com/.../artifacts/<id>/zip (even with a valid Bearer token). git,
+      # however, IS allowed. So the screenshot travels by the one transport that works.
+      #
+      # Without this, a session verifying the live UI can only read TEXT assertions out of the job
+      # log - body length, a substring match, an element count - and then infer what the page looks
+      # like. That inference is exactly how this session spent several rounds reasoning about
+      # screenshot file SIZES instead of comparing two rendered pages. The owner's words: "wait
+      # using a kb test is crazy.... why aren't you actually rendering both the live app and the
+      # prototype to compare?"
+      #
+      # Orphan branch, single commit, force-pushed: this is a scratch surface for the newest shot,
+      # never history. It must never be merged anywhere.
+      - name: Publish screenshot to the ui-shots branch
+        if: always()
+        env:
+          ROUTE: ${{ inputs.route }}
+        run: |
+          test -f ui-verify.png || exit 0
+          SAFE=$(printf '%s' "$ROUTE" | tr -c 'A-Za-z0-9._-' '-' | sed 's/^-*//; s/-*$//')
+          mkdir -p /tmp/shots && cp ui-verify.png "/tmp/shots/${SAFE:-shot}.png"
+          cp ui-verify.png /tmp/shots/latest.png
+          cd /tmp/shots
+          git init -q .
+          git config user.email "actions@github.com"
+          git config user.name "ui-verify"
+          git checkout -q --orphan ui-shots
+          git add -A
+          git commit -q -m "ui-verify ${ROUTE} @ ${GITHUB_SHA}"
+          git push -q --force \
+            "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${GITHUB_REPOSITORY}.git" \
+            ui-shots
+          echo "screenshot pushed to branch ui-shots as ${SAFE:-shot}.png and latest.png"

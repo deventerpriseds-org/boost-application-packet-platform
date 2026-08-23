@@ -14,6 +14,7 @@ import { loadFacts, sourceText } from './appFacts'
 import { shapeVerdict } from './appReviewer'
 import { resolvePostingSource } from './jdText'
 import { ensureEvidenceTable, writeEvidence, loadRequirementsWithEvidence } from './appRequirements'
+import { listCorrections } from './appCorrections'
 import { EvidenceInput, EvidenceRow } from './evidence'
 
 const HEADERS = { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': '*', 'Access-Control-Allow-Methods': 'GET,POST,OPTIONS' }
@@ -278,6 +279,25 @@ export async function artifactChecksGet(req: HttpRequest, context: InvocationCon
         advisory: (await loadThresholds(client, owner).catch(() => ({} as any)))?.gateAdvisory === true,
         computedAt: g?.computed_at ?? null,
         override: g?.override_by ? { by: g.override_by, at: g.override_at, reason: g.override_reason } : null,
+        // THE CHANGE LOG. `app/src/api.js` has documented for two phases that "the change log rides
+        // on artifactChecksResult", and `assetGate.correctionsState()` is built to read exactly this
+        // key - but this payload never carried it, so the selector saw `undefined` and returned its
+        // "absent" shape forever. The consequence was total: corrections were invisible in BOTH
+        // surfaces that render them - the QC step's "Done for you" AND the per-field margin - while
+        // the rows sat in the table the whole time.
+        //
+        // Measured 2026-08-23. The resume artifact of packet 4860ae3b has ONE correction ("15" ->
+        // "multiple" in ResumeSummary). Rendering app/dist against fixtures identical except for
+        // this key: [data-qc="blocks-corrected-for-you"] counts 0 without it and 1 with it.
+        //
+        // `listCorrections` is the SAME function `GET /app/artifact/{id}/corrections` uses. Two
+        // queries for one change log is how the count on one surface drifts from the count on
+        // another - the defect `correctionsState` already guards on the client side.
+        //
+        // An artifact with none returns an EMPTY ARRAY, never an absent key: "nothing needed
+        // correcting" and "nobody asked" are different states and the UI says different things
+        // about them. It cannot tell them apart unless they differ on the wire.
+        corrections: await listCorrections(client, art.id).catch(() => []),
         score, history,
         results,
         engines: {
