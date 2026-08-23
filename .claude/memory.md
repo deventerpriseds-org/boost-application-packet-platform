@@ -2724,3 +2724,73 @@ the screen is executable.**
 **Correction to my own earlier claim this session:** I said the repo had been working from a
 "partial spec". Wrong in the general case — the package was complete and in-repo since 2026-08-19.
 Exactly one document in it was stale, and it was the one that carries the architecture decisions.
+
+## 2026-08-23 — fan-out triage of the 146-row UI gap register, and what it revealed
+
+**The owner asked whether this work should be fanned across subagents.** The answer split, and the
+split is worth keeping:
+
+- **NOT the edits.** The 146 rows do not partition by file. `assetGate.js` is shared by all seven
+  steps and nearly every gap routes through it; parallel agents editing it either conflict or each
+  mint their own label map (the "extend, don't duplicate" failure). `compare-ui.mjs` also measures
+  one built `app/dist`, so a re-measure is only true for one build at a time — fanning the edits
+  destroys the feedback loop that says the number is falling.
+- **YES the triage.** Classifying rows into demo-data / structural / blocked-on-data is read-only,
+  per-step, collision-free. Six agents did it in ~7 minutes wall-clock. **This was being
+  under-used.**
+
+**BRIEF BUG TO NOT REPEAT: I gave `Explore` (read-only, no Write tool) a brief that said "write to
+this file as you go".** Three of six could not, and returned their content in the final message
+instead — recoverable only because they finished. Had they been interrupted, the work was gone.
+**Match the agent TYPE to the brief: if the brief says write, the agent needs Write.**
+
+### THE REGISTER SUBSTANTIALLY OVERSTATES THE GAP — the 146 is not 146 units of work
+
+- **portfolio: 16 of 20 blocked rows are ALREADY BUILT** and rendered nothing only because the
+  captured artifact had no `insertion` rows.
+- **jd: ~10 rows disappear** if the capture uses an opportunity whose evidence resolve has run
+  (`comparisonState()` returned `unresolved`, so the table head never rendered).
+- **resume: 27 of 45 entries are SafetyIQ sample strings.**
+- **3 of 4 "missing controls" are matcher artifacts** — `compare-ui.mjs:102` collects only
+  `button, [role="button"], a`, and the app renders `span.px-link` with `✓`/`⎘` glyphs.
+  Fixing the two spans (`role="button"` + `tabIndex`) closes REAL accessibility defects and stops
+  the phantom rows at the same time.
+- **Rows that measure a banned string can never close.** SPEC 7 bans the engine's vocabulary as a
+  user-facing label, so `fail` / `warn` / `approved` rows are retired BY JUDGEMENT, never by string
+  equality. Recorded so nobody re-opens them.
+
+**Consequence: re-capture against a fully-populated packet BEFORE trusting the next gap number.**
+
+### Real defects the triage surfaced (not UI gaps)
+
+1. **`ResumeSummary` has NO word-count threshold anywhere.** `checks.ts` `WORD_RULES`/
+   `CheckThresholds` carry bands for every portfolio and cover field but none for the resume
+   summary — so the 55–60 word contract that `qc/data.js:9` records as verbatim from prompt 16 is
+   **neither displayed nor enforced**. The headline field of the headline asset. `targetFor()`
+   returns null rather than guessing, which is right — **the fix is the missing threshold, not a
+   literal.** NOT YET FIXED.
+2. **`METHOD_LABEL` exists twice and the two disagree on the same key.** `assetBlocks.js:162` says
+   `template_fill` is 'written for this posting'; `assetGate.js:176` says 'filled straight from the
+   package'. Same row, two meanings, depending which screen you are on. NOT YET FIXED.
+3. **The app states a char rule and measures in words** — "8 lines - 16 words · ≤ 24 chars each"
+   never tells the reader whether the field passes. Five register rows, one fix. NOT YET FIXED.
+4. **Three-way abbreviation split**: prototype `M/D/N`, `assetBlocks.js` `M/N/R`,
+   `postingAnalysis.js:161` `MH/NTH/RESP`. Prototype wins by precedence but `R` is live — **owner
+   call, not a silent flip.**
+5. **`ReqChip` renders `M3` with no legend** on every asset step — an opaque token.
+
+### Fixed and deployed this session
+
+- **`severityMeta()`** — engine-aware finding labels in the prototype's own words. Fixed a live
+  misstatement: `STATE_META` mapped every `fail` to 'Must fix' in red, so both finding-row renderers
+  told the reader they were blocked by a reviewer row that **D6 says cannot block them**. Now
+  'Your call'. Both consumers fixed, not one.
+- **`packetReadiness()`** — the packet gate had reached the screen ONLY as a colour on the QC step
+  circle. Now a word, on every step, plus a reported contradiction when the STORED `p.status` and
+  the COMPUTED gate disagree. `warn` is deliberately not a contradiction (a warn packet reaches
+  ready legitimately via an approval with a reason) — a guard firing there would be cry-wolf.
+- Change-log row now speaks the design's words (`Change it` / `Review →` / `Corrected for you`).
+
+**All guards mutation-proved, each with the mutation verified to have APPLIED to source first.**
+The cry-wolf direction was proved too (`contradicts -> true` must also fail), not just the
+never-fires direction. 223/223 green.

@@ -2908,3 +2908,22 @@ matched (the source carries a `≤` escape, not a literal). Both were re-run wit
 mutation applied. A mutation that does not mutate proves nothing.
 `pkill -f <pattern>` killed this session's own shell twice — the pattern matches the invoking
 command line. Read `/proc/<pid>/exe` instead.
+
+### 2026-08-23 — ACT: attack the 146-row gap register (owner: "begin attacking the 171 continuously until done")
+
+Deployed: `89bf2dc` severity labels · `9f4baf1` change-log wording + video triage ·
+`5de45ae` packet gate words + contradiction + all six triage files.
+
+**Open, with exact call sites** (from `docs/qc-evidence/triage/*.md`, 745 lines):
+
+| # | Item | Where | Note |
+|---|---|---|---|
+| 1 | `ResumeSummary` has no word threshold | `checks.ts` `CheckThresholds`/`WORD_RULES`, `checkPrefs.ts` | Prompt-16 contract neither shown nor enforced. Owner-settable pref, not a literal. |
+| 2 | `METHOD_LABEL` duplicated + contradictory | `assetBlocks.js:162` vs `assetGate.js:176` | Reconcile into one; do not add a third. |
+| 3 | Measurement stated in the wrong unit | `targetFor()` + `AssetBlocks.jsx:353` | Closes 5 register rows at once. |
+| 4 | `ReqChip` legend | `AssetBlocks.jsx:129`, `KIND_ABBR`/`KIND_WORD` | Closes M/D/N rows across all 4 asset steps. |
+| 5 | `M/D/N` vs `M/N/R` vs `MH/NTH/RESP` | 3 files | **OWNER CALL** — `R` is live; prototype says `D`. |
+| 6 | Two click targets are bare `<span>` | `PacketBuilder.jsx:156` + `AssetBlocks.jsx:408` | Accessibility defect AND phantom register rows. |
+| 7 | Re-capture against a populated packet | `compare-ui.mjs` | Register overstates; measure before trusting the next number. |
+
+**Batched verifier not yet run** — owed at this phase boundary per the tiering rule.
