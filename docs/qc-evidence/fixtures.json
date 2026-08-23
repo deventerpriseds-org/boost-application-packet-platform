@@ -1,0 +1,368 @@
+{
+ "/opportunity/2cb56fb3-fc33-4b1a-85b9-06c7aea2fbb3/packet": {
+  "company": "eMoney Advisor",
+  "role": "SVP, Development and Enterprise Architecture",
+  "pkg": {
+   "date": "August 23, 2026",
+   "@Company": "eMoney Advisor",
+   "coldEmail": null,
+   "targetRole": "SVP, Development and Enterprise Architecture",
+   "ResumeSummary": "Visionary executive leader with a proven record of driving engineering strategy and enterprise transformation. Expertise in embedding AI and automation within software development, enhancing operational efficiency, and delivering innovative, customer-centric solutions. Adept at fostering high-performing teams and aligning technology with business objectives to achieve measurable growth and sustainable competitive advantage. Proven ability to redefine software development practices and drive engineering strategy.",
+   "targetCompany": "eMoney Advisor",
+   "SkillsBullets1": "Enterprise Architecture\nSoftware Development\nAI-First Strategy\nPlatform Engineering\nCloud-Native Systems\nAgile Transformation\nData Intelligence\nRisk Management\nDevOps Transformation\nSecurity Governance",
+   "SkillsBullets2": "Customer-Centric Ideas\nGlobal Ops Leadership\nQuality Engineering\nStrategic Roadmapping\nMetrics Optimization\nProduct Delivery\nTechnology Integration\nTeam Collaboration\nChange Management\nStakeholder Engagement",
+   "@CoverLetterBody": "Dear Leadership Team,\n\nAs an accomplished technology executive, I am excited about the opportunity to lead eMoney Advisor's engineering organization into an AI-first, product-centric ecosystem. My leadership philosophy emphasizes aligning strategic technology initiatives with customer needs, resulting in innovative solutions that drive business growth and operational efficiency.\n\nThroughout my career, I have successfully led large-scale digital transformation initiatives that enhance platform interoperability and customer-centric product roadmaps. For example, I orchestrated a multi-year transformation that reduced costs by $3M while modernizing our SaaS solution pipeline. Additionally, my hands-on experience in cloud migrations has improved system reliability to 99.99% uptime and reduced infrastructure spend by 30%.\n\nI am inspired by eMoney Advisor's mission to empower financial professionals through innovative solutions and believe my commitment to a culture of continuous learning and innovation aligns well with your values. As a collaborative leader, I excel in fostering high-performing teams that embrace accountability and drive results.\n\nI am eager to discuss how my experience aligns with the goals of eMoney Advisor and to explore how I can contribute to your mission. Thank you for considering my application.\n\nSincerely,  \nVon Ellis",
+   "@CoverLetterDate": "August 23, 2026",
+   "ExpertiseBullets": "- Driving AI-Enabled Engineering Strategies\n- Leading Agile Transformations Globally\n- Architecting Scalable Cloud-Native Platforms\n- Enhancing Operational Efficiency Metrics\n- Fostering Innovation Through Collaboration",
+   "RelevantBullets1": "Cloud-Native Architecture\nAI & ML Integration\nPlatform Scalability",
+   "RelevantBullets2": "Customer-Centric Product Design\nRisk & Governance\nSoftware Delivery",
+   "RelevantBullets3": "DevSecOps Practices\nStrategic Technology Partnerships\nData-Driven Choices",
+   "@AboutMe1_50words": "I have always maintained a philosophy that innovation flourishes when vision, strategy, and execution move in lockstep, driving continuous progress. By leveraging technology, I have consistently driven operational efficiency and customer impact. My passion lies in building high-performing teams that foster innovation and deliver measurable value across global organizations.",
+   "@AboutMe2_60words": "My career reflects a dedication to leading transformative initiatives through technical leadership and strategic vision. From modernizing systems to embracing AI and data-driven approaches, I have achieved measurable results, including enhanced team performance and operational efficiency. I thrive at the intersection of technology and business strategy, empowering teams to deliver scalable and impactful solutions.",
+   "WorkHistoryBullets1": "Co-led a multi-year digital transformation, enhancing platform interoperability, cross-unit collaboration, and customer-centric roadmaps. Optimized the SaaS solution pipeline, cutting $3M in costs. Established a security-first engineering culture, streamlining monitoring and reducing compliance risks by 40%, ensuring adherence to SOC 2 and GDPR. Led an enterprise-wide Agile transformation, reducing time-to-market by 40%. Collaborated with CTO and CPO to design a 3-year technology roadmap, securing a $13M budget increase for a Software Center of Excellence. Negotiated strategic alliances with AWS, ESRI, and Cloud BI Vendors to enable AI-powered analytics adoption.",
+   "WorkHistoryBullets2": "Led an acquired business cloud migration to AWS and Kubernetes, increasing system reliability to 99.99% uptime while reducing infrastructure spend by 30%. Spearheaded technical due diligence for multiple acquisitions, enabling 15% faster time-to-market for acquired products. Established a white-labeled BI and analytics platform partnership, contributing to 25% increase in operational response times and retention rates. Designed and implemented OKRs and monthly executive ops reviews, increasing engineering efficiency and aligning execution with business goals.",
+   "WorkHistoryBullets3": "Led a major operational overhaul, modernizing legacy infrastructure and improving engineering efficiency by 45% through standardization, custom tool development, automation and third-party DevOps contracts. Implemented complex report automation, eliminating manual data entry and reducing operational costs by $3M annually. Redesigned a predictive analytics suite, converting a consultative service into a scalable digital experience, driving 60% revenue growth and 30% higher retention rates through personalized insights and real-time decision support.",
+   "WorkHistoryBullets4": "Architected a real-time asset tracking platform, reducing data retrieval time by 70% and enabling data-driven operational decision-making. Deployed a GIS-powered field operations information system, increasing efficiency by 50% and enabling real-time mobile workflows for hundreds of field engineers and customers. Implemented automated reporting systems including governance policies, ensuring regulatory compliance and reducing manual reporting efforts by 80%. Developed a SaaS platform integrating real-time data collection, mobile applications, data modeling, and automated reporting, improving revenue-earning operational efficiency by 60% through predictive analytics.",
+   "@ExecutiveProfile_55words": "As a strategic technology leader, I have a proven track record of driving large-scale digital transformation and enterprise software innovation. My leadership in aligning technology with business objectives has resulted in sustained revenue growth, operational efficiency, and enhanced market position. I excel in leading global teams, optimizing technology ecosystems, and delivering AI, cloud, and cybersecurity-enabled solutions.",
+   "@CoreAccomplishments_5blts_180words": "- Led a multi-year digital transformation, improving platform interoperability and reducing costs by $3M while enhancing cross-unit collaboration.  \n- Executed a cloud migration strategy, transitioning 70% of infrastructure to AWS, achieving 99.99% uptime and lowering costs by 30%.  \n- Developed a predictive analytics platform, automating governance processes using AI, increasing decision-making efficiency by 80%.  \n- Established a security-first engineering culture, embedding DevSecOps practices within SDLC workflows, reducing compliance risks by 40%.  \n- Orchestrated strategic partnerships and M&A integrations, streamlining product integration and reducing time-to-market for acquired solutions by 15%."
+  },
+  "id": "4860ae3b-fa3a-46d0-9cfc-e656ae6835a5",
+  "oppId": "2cb56fb3-fc33-4b1a-85b9-06c7aea2fbb3",
+  "status": "review",
+  "round": 1,
+  "jdAnalyzed": false,
+  "feedback": [],
+  "coveredKw": [],
+  "missingKw": [
+   "Experience leading large-scale engineering and architecture organizations (15+ years)",
+   "Proven track record of delivering complex, scalable, enterprise-grade platforms in a regulated environment (financial services preferred)",
+   "Deep expertise in modern architecture patterns (microservices, APIs, cloud-native, event-driven systems)",
+   "Hands-on experience with AI/ML technologies, including generative AI and LLM-based systems",
+   "Experience driving DevOps, SRE, and platform engineering transformations",
+   "Strong understanding of data architecture, data platforms, and AI integration",
+   "Ability to foster a culture of innovation and experimentation",
+   "Thought leadership in emerging technologies, particularly AI/ML in wealth management"
+  ],
+  "atsScore": null,
+  "mustHaves": [],
+  "artifacts": [
+   {
+    "id": "a79a889f-d763-49c6-85b2-85526f4af64e",
+    "type": "compact_resume",
+    "status": "review",
+    "content": "ResumeSummary:\nVisionary engineering executive with extensive experience in leading transformative initiatives and embedding AI-driven practices across the software development lifecycle. Proven ability to align technology strategy with business objectives, driving operational efficiency and innovation. Adept at cultivating high-performing teams and fostering collaboration to deliver scalable, cus"
+   },
+   {
+    "id": "e6a8467d-503e-4d4d-a45a-cb2ed6c66256",
+    "type": "cover",
+    "status": "review",
+    "content": "@Company:\neMoney Advisor\n\n@CoverLetterDate:\nAugust 21, 2026\n\n@CoverLetterBody:\nDear Leadership Team,  \n\nIn an era of rapid technological evolution, the intersection of AI and engineering is where transformative growth occurs. I have consistently harnessed this synergy to redefine how organizations approach software development, ensuring that technology aligns seamlessly with business objectives. M"
+   },
+   {
+    "id": "9776e4be-81d1-4ac1-aac2-aae56e072d2e",
+    "type": "portfolio",
+    "status": "review",
+    "content": "@Company:\neMoney Advisor\n\n@CoverLetterDate:\nAugust 21, 2026\n\n@CoverLetterBody:\nDear Leadership Team,  \n\nIn an era of rapid technological evolution, the intersection of AI and engineering is where transformative growth occurs. I have consistently harnessed this synergy to redefine how organizations approach software development, ensuring that technology aligns seamlessly with business objectives. M"
+   },
+   {
+    "id": "260099a7-a411-4e71-a503-50251543ed81",
+    "type": "video",
+    "status": "todo",
+    "content": null
+   },
+   {
+    "id": "cb6a1c81-dd6d-406c-9e18-a8cca3c0181c",
+    "type": "resume",
+    "status": "review",
+    "content": "ResumeSummary:\nVisionary engineering executive with extensive experience in leading transformative initiatives and embedding AI-driven practices across the software development lifecycle. Proven ability to align technology strategy with business objectives, driving operational efficiency and innovation. Adept at cultivating high-performing teams and fostering collaboration to deliver scalable, cus"
+   }
+  ]
+ },
+ "/opportunity/2cb56fb3-fc33-4b1a-85b9-06c7aea2fbb3/requirements": {
+  "requirements": []
+ },
+ "/opportunity/2cb56fb3-fc33-4b1a-85b9-06c7aea2fbb3": {
+  "opportunity": {
+   "company": "eMoney Advisor",
+   "role": "SVP, Development and Enterprise Architecture",
+   "ats_gaps": [
+    "Experience leading large-scale engineering and architecture organizations (15+ years)",
+    "Proven track record of delivering complex, scalable, enterprise-grade platforms in a regulated environment (financial services preferred)",
+    "Deep expertise in modern architecture patterns (microservices, APIs, cloud-native, event-driven systems)",
+    "Hands-on experience with AI/ML technologies, including generative AI and LLM-based systems",
+    "Experience driving DevOps, SRE, and platform engineering transformations",
+    "Strong understanding of data architecture, data platforms, and AI integration",
+    "Ability to foster a culture of innovation and experimentation",
+    "Thought leadership in emerging technologies, particularly AI/ML in wealth management"
+   ],
+   "ats_scored_at": "2026-08-17T00:40:05.032538+00:00",
+   "id": "2cb56fb3-fc33-4b1a-85b9-06c7aea2fbb3",
+   "stage": "review"
+  }
+ },
+ "/app/opportunities": {
+  "opportunities": [
+   {
+    "company": "eMoney Advisor",
+    "role": "SVP, Development and Enterprise Architecture",
+    "ats_gaps": [
+     "Experience leading large-scale engineering and architecture organizations (15+ years)",
+     "Proven track record of delivering complex, scalable, enterprise-grade platforms in a regulated environment (financial services preferred)",
+     "Deep expertise in modern architecture patterns (microservices, APIs, cloud-native, event-driven systems)",
+     "Hands-on experience with AI/ML technologies, including generative AI and LLM-based systems",
+     "Experience driving DevOps, SRE, and platform engineering transformations",
+     "Strong understanding of data architecture, data platforms, and AI integration",
+     "Ability to foster a culture of innovation and experimentation",
+     "Thought leadership in emerging technologies, particularly AI/ML in wealth management"
+    ],
+    "ats_scored_at": "2026-08-17T00:40:05.032538+00:00",
+    "id": "2cb56fb3-fc33-4b1a-85b9-06c7aea2fbb3",
+    "stage": "review"
+   }
+  ]
+ },
+ "/app/packets": {
+  "packets": [
+   {
+    "id": "4860ae3b-fa3a-46d0-9cfc-e656ae6835a5",
+    "oppId": "2cb56fb3-fc33-4b1a-85b9-06c7aea2fbb3",
+    "company": "eMoney Advisor",
+    "role": "SVP, Development and Enterprise Architecture",
+    "ats_gaps": [
+     "Experience leading large-scale engineering and architecture organizations (15+ years)",
+     "Proven track record of delivering complex, scalable, enterprise-grade platforms in a regulated environment (financial services preferred)",
+     "Deep expertise in modern architecture patterns (microservices, APIs, cloud-native, event-driven systems)",
+     "Hands-on experience with AI/ML technologies, including generative AI and LLM-based systems",
+     "Experience driving DevOps, SRE, and platform engineering transformations",
+     "Strong understanding of data architecture, data platforms, and AI integration",
+     "Ability to foster a culture of innovation and experimentation",
+     "Thought leadership in emerging technologies, particularly AI/ML in wealth management"
+    ],
+    "ats_scored_at": "2026-08-17T00:40:05.032538+00:00",
+    "status": "review"
+   }
+  ]
+ },
+ "/search-prefs": {
+  "prefs": {}
+ },
+ "/swaps": {
+  "swaps": []
+ },
+ "/artifact/a79a889f-d763-49c6-85b2-85526f4af64e/insertions": {
+  "insertions": [],
+  "loop": 0
+ },
+ "/artifact/a79a889f-d763-49c6-85b2-85526f4af64e/corrections": {
+  "corrections": []
+ },
+ "/artifact/a79a889f-d763-49c6-85b2-85526f4af64e/checks-result": {
+  "gate": null,
+  "attention": 0,
+  "results": [],
+  "corrections": []
+ },
+ "/artifact/e6a8467d-503e-4d4d-a45a-cb2ed6c66256/insertions": {
+  "insertions": [],
+  "loop": 0
+ },
+ "/artifact/e6a8467d-503e-4d4d-a45a-cb2ed6c66256/corrections": {
+  "corrections": []
+ },
+ "/artifact/e6a8467d-503e-4d4d-a45a-cb2ed6c66256/checks-result": {
+  "gate": null,
+  "attention": 0,
+  "results": [],
+  "corrections": []
+ },
+ "/artifact/9776e4be-81d1-4ac1-aac2-aae56e072d2e/insertions": {
+  "insertions": [],
+  "loop": 0
+ },
+ "/artifact/9776e4be-81d1-4ac1-aac2-aae56e072d2e/corrections": {
+  "corrections": []
+ },
+ "/artifact/9776e4be-81d1-4ac1-aac2-aae56e072d2e/checks-result": {
+  "gate": null,
+  "attention": 0,
+  "results": [],
+  "corrections": []
+ },
+ "/artifact/260099a7-a411-4e71-a503-50251543ed81/insertions": {
+  "insertions": [],
+  "loop": 0
+ },
+ "/artifact/260099a7-a411-4e71-a503-50251543ed81/corrections": {
+  "corrections": []
+ },
+ "/artifact/260099a7-a411-4e71-a503-50251543ed81/checks-result": {
+  "gate": null,
+  "attention": 0,
+  "results": [],
+  "corrections": []
+ },
+ "/artifact/cb6a1c81-dd6d-406c-9e18-a8cca3c0181c/insertions": {
+  "insertions": [
+   {
+    "id": "0e241982-5ec9-4643-89c8-623a9a7de9c8",
+    "artifact_id": "cb6a1c81-dd6d-406c-9e18-a8cca3c0181c",
+    "merge_field": "ResumeSummary",
+    "generated": true,
+    "before_text": null,
+    "after_text": "Visionary executive leader with a proven record of driving engineering strategy and enterprise transformation. Expertise in embedding AI and automation within software development, enhancing operational efficiency, and delivering innovative, customer-centric solutions. Adept at fostering high-performing teams and aligning technology with business objectives to achieve measurable growth and sustainable competitive advantage. Proven ability to redefine software development practices and drive engineering strategy.",
+    "method": "template_fill",
+    "loop": 0,
+    "list": null,
+    "item_count": 1,
+    "requirement_id": "610dee3d-691c-45dc-a7ed-3a0381702e28",
+    "verbatim_quote": "Modernize development practices through AI-assisted engineering",
+    "confidence": 0.5,
+    "created_at": "2026-08-23T03:36:06.895165+00:00"
+   },
+   {
+    "id": "d81929ea-40c0-4bb3-afa6-29e0fedc3525",
+    "artifact_id": "cb6a1c81-dd6d-406c-9e18-a8cca3c0181c",
+    "merge_field": "SkillsBullets1",
+    "generated": true,
+    "before_text": null,
+    "after_text": "Enterprise Architecture\nSoftware Development\nAI-First Strategy\nPlatform Engineering\nCloud-Native Systems\nAgile Transformation\nData Intelligence\nRisk Management\nDevOps Transformation\nSecurity Governance",
+    "method": "template_fill",
+    "loop": 0,
+    "list": "skills_1",
+    "item_count": 10,
+    "requirement_id": "1b9a71f0-91d7-4c74-82fe-45de67edc0c0",
+    "verbatim_quote": "Define and execute an AI-first engineering strategy",
+    "confidence": 0.6,
+    "created_at": "2026-08-23T03:36:06.895165+00:00"
+   },
+   {
+    "id": "dc6437e3-f896-42d3-887a-b20c59989404",
+    "artifact_id": "cb6a1c81-dd6d-406c-9e18-a8cca3c0181c",
+    "merge_field": "SkillsBullets2",
+    "generated": true,
+    "before_text": null,
+    "after_text": "Customer-Centric Ideas\nGlobal Ops Leadership\nQuality Engineering\nStrategic Roadmapping\nMetrics Optimization\nProduct Delivery\nTechnology Integration\nTeam Collaboration\nChange Management\nStakeholder Engagement",
+    "method": "template_fill",
+    "loop": 0,
+    "list": "skills_2",
+    "item_count": 10,
+    "requirement_id": "ba4a61cb-95bd-4537-8ede-4b1cb4ed4074",
+    "verbatim_quote": "Own and improve key engineering metrics",
+    "confidence": 0.4,
+    "created_at": "2026-08-23T03:36:06.895165+00:00"
+   },
+   {
+    "id": "bab63aa9-85f3-4e64-afff-653de52910bf",
+    "artifact_id": "cb6a1c81-dd6d-406c-9e18-a8cca3c0181c",
+    "merge_field": "ExpertiseBullets",
+    "generated": true,
+    "before_text": null,
+    "after_text": "- Driving AI-Enabled Engineering Strategies\n- Leading Agile Transformations Globally\n- Architecting Scalable Cloud-Native Platforms\n- Enhancing Operational Efficiency Metrics\n- Fostering Innovation Through Collaboration",
+    "method": "template_fill",
+    "loop": 0,
+    "list": null,
+    "item_count": 5,
+    "requirement_id": "ba4a61cb-95bd-4537-8ede-4b1cb4ed4074",
+    "verbatim_quote": "Own and improve key engineering metrics",
+    "confidence": 0.4,
+    "created_at": "2026-08-23T03:36:06.895165+00:00"
+   },
+   {
+    "id": "83bc4538-0616-4845-9ee2-964d4ee08b01",
+    "artifact_id": "cb6a1c81-dd6d-406c-9e18-a8cca3c0181c",
+    "merge_field": "RelevantBullets1",
+    "generated": true,
+    "before_text": null,
+    "after_text": "Cloud-Native Architecture\nAI & ML Integration\nPlatform Scalability",
+    "method": "template_fill",
+    "loop": 0,
+    "list": "relevant_1",
+    "item_count": 3,
+    "requirement_id": "3cb987df-cf4d-418b-9646-b93e01d11fac",
+    "verbatim_quote": "Establish patterns for AI integration",
+    "confidence": 0.5,
+    "created_at": "2026-08-23T03:36:06.895165+00:00"
+   },
+   {
+    "id": "f68c2711-549f-41b8-97bc-f21d5d213da7",
+    "artifact_id": "cb6a1c81-dd6d-406c-9e18-a8cca3c0181c",
+    "merge_field": "RelevantBullets2",
+    "generated": true,
+    "before_text": null,
+    "after_text": "Customer-Centric Product Design\nRisk & Governance\nSoftware Delivery",
+    "method": "template_fill",
+    "loop": 0,
+    "list": "relevant_2",
+    "item_count": 3,
+    "requirement_id": null,
+    "verbatim_quote": null,
+    "confidence": 0,
+    "created_at": "2026-08-23T03:36:06.895165+00:00"
+   },
+   {
+    "id": "dbdd4efe-4ea5-400c-ac20-b27029e7c1f4",
+    "artifact_id": "cb6a1c81-dd6d-406c-9e18-a8cca3c0181c",
+    "merge_field": "RelevantBullets3",
+    "generated": true,
+    "before_text": null,
+    "after_text": "DevSecOps Practices\nStrategic Technology Partnerships\nData-Driven Choices",
+    "method": "template_fill",
+    "loop": 0,
+    "list": "relevant_3",
+    "item_count": 3,
+    "requirement_id": null,
+    "verbatim_quote": null,
+    "confidence": 0,
+    "created_at": "2026-08-23T03:36:06.895165+00:00"
+   }
+  ],
+  "loop": 0
+ },
+ "/artifact/cb6a1c81-dd6d-406c-9e18-a8cca3c0181c/corrections": {
+  "corrections": [
+   {
+    "id": "b1bb8a0e-3f1c-4386-a345-67cd00aa64bd",
+    "artifact_id": "cb6a1c81-dd6d-406c-9e18-a8cca3c0181c",
+    "merge_field": "ResumeSummary",
+    "phrase": "15",
+    "replacement": "multiple",
+    "char_start": 42,
+    "char_end": 44,
+    "before_sha256": "0561b74007f3b09073146bfabecfed6b9a8f21a56f862b05bd1a258db3a773f2",
+    "applied_seq": 1,
+    "reason": "the posting states 15; your profile does not evidence it",
+    "source": "generalized",
+    "run_id": null,
+    "loop": 0,
+    "reverted_by": null,
+    "reverted_at": null,
+    "created_at": "2026-08-22T02:28:56.5917+00:00"
+   }
+  ]
+ },
+ "/artifact/cb6a1c81-dd6d-406c-9e18-a8cca3c0181c/checks-result": {
+  "gate": null,
+  "attention": 0,
+  "results": [],
+  "corrections": [
+   {
+    "id": "b1bb8a0e-3f1c-4386-a345-67cd00aa64bd",
+    "artifact_id": "cb6a1c81-dd6d-406c-9e18-a8cca3c0181c",
+    "merge_field": "ResumeSummary",
+    "phrase": "15",
+    "replacement": "multiple",
+    "char_start": 42,
+    "char_end": 44,
+    "before_sha256": "0561b74007f3b09073146bfabecfed6b9a8f21a56f862b05bd1a258db3a773f2",
+    "applied_seq": 1,
+    "reason": "the posting states 15; your profile does not evidence it",
+    "source": "generalized",
+    "run_id": null,
+    "loop": 0,
+    "reverted_by": null,
+    "reverted_at": null,
+    "created_at": "2026-08-22T02:28:56.5917+00:00"
+   }
+  ]
+ }
+}
