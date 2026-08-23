@@ -415,11 +415,11 @@ function AssetBlock({ row, reqs, swapsForList, wide, artifactId, listOwners, thr
             `ai-edit` route with `section`, which is what QcRail's correction row already uses. The
             reason it belongs here too is the whole argument of this screen: the request is made
             where the sentence is being read, not on a tab that lists sentences. */}
+        {/* role + tabIndex + key handler for the same reason as PacketBuilder's copy control: a
+            bare span has no keyboard path and is announced as text, and compare-ui.mjs (which
+            collects `button, [role="button"], a`) could not see it either - so a control that
+            has existed since P8.6 was being reported as missing from the app. */}
         {!isStatic && artifactId && (
-          {/* role + tabIndex + key handler for the same reason as PacketBuilder's copy control: a
-              bare span has no keyboard path and is announced as text, and compare-ui.mjs (which
-              collects `button, [role="button"], a`) could not see it either - so a control that
-              has existed since P8.6 was being reported as missing from the app. */}
           <span className="px-link" role="button" tabIndex={0} aria-expanded={askOpen}
             data-qc={BLOCK_HOOKS.askChange} data-qc-field={row.merge_field}
             style={{ fontSize: 11.5 }} onClick={() => setAskOpen((v) => !v)}
