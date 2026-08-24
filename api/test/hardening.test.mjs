@@ -3557,8 +3557,35 @@ test('H:changes-carries-a-reason: the note is stored, sent, applied, and retired
 
   assert.ok(/setArtifactStatus:\s*\(artifactId,\s*status,\s*note\)/.test(API),
     'api.js setArtifactStatus dropped its `note` parameter, so the reason never leaves the browser')
-  assert.ok(/onSetStatus\(a,\s*'changes',\s*note/.test(UI),
-    'the Request-changes button no longer passes a note, so nothing is captured')
+
+  // PROPERTY 2, RE-TARGETED 2026-08-23 — the note must still LEAVE THE BROWSER, but it is no
+  // longer a `Request changes` button that sends it.
+  //
+  // That control was removed because it was never a sibling of Regenerate, it was a PARAMETER of
+  // it: it wrote a note, changed nothing visible, and the draft only moved when Regenerate was
+  // pressed afterwards. (The `changes` status it set carries no independent meaning either —
+  // recomputePacket tests only `=== 'approved'` and `!== 'todo'`, so `changes` and `review` produce
+  // an identical packet status, and appPackets.ts:341 is the value's ONLY behavioural use.)
+  // Regenerate now collects the note itself, through the shared `regenerateWithNote` sequencer.
+  //
+  // The guard is retargeted rather than deleted: the PROPERTY it protects — a prompt whose value is
+  // dropped is the worst version of this feature — is unchanged and still worth enforcing. It is
+  // asserted at the SEQUENCER, which is the one place the note can now be dropped, and at the call
+  // site that supplies it. Asserting the old button would pin the UI shape instead of the property.
+  const SEQ = stripComments(readFileSync(new URL('../../app/src/packetBuilder.js', import.meta.url), 'utf8'))
+  assert.ok(/await\s+saveNote\(trimmed\)/.test(SEQ),
+    'regenerateWithNote no longer sends the note — the reason never leaves the browser')
+  assert.ok(/setArtifactStatus\(a\.id,\s*'changes',\s*text\)/.test(UI),
+    "PacketBuilder's saveNote no longer carries the note to setArtifactStatus, so nothing is captured")
+
+  // And the ORDER, which only became a possible defect once one control did both halves. Generate
+  // reads unresolved notes at its start and resolves them at its end (asserted below, server side),
+  // so a note saved concurrently — or after — is consumed having steered nothing, and `resolved` is
+  // exactly what stops it replaying. The save must be awaited BEFORE generate is called.
+  const saveAt = SEQ.indexOf('await saveNote(trimmed)')
+  const genAt = SEQ.indexOf('await generate()')
+  assert.ok(saveAt !== -1 && genAt !== -1 && saveAt < genAt,
+    'regenerateWithNote calls generate before the note is durable — the rebuild ignores it, then resolves it')
 
   // Asserted AT THE CALL SITE, not as a bare word. The first written form of this checked only
   // that `revisionNotes` appeared somewhere in the file — and it appears in the declaration and in

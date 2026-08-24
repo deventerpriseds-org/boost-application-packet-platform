@@ -3037,3 +3037,18 @@ failed note ABORTS rather than falling through to an unsteered rebuild.
 
 **Owner told us both DB connectors have lapsed OAuth** — `Boost_DB_Connector` AND `Azure_pg_mcp`
 both reported "requires authentication" this session. Told the owner; no DB was needed for this work.
+
+**CI CAUGHT WHAT I DID NOT: I ran `./scripts/check.sh app`, which SKIPS the api suite.** The change
+was app-only so the api half looked irrelevant — but `api/test/hardening.test.mjs` reads
+`app/src/**` for its cross-cutting guards, so an app-only change can and did break it. PR #47's
+`api — build + test` failed on `02682c3` (run 32679485567) with `H:changes-carries-a-reason`:
+*"the Request-changes button no longer passes a note"*. **Run the bare `./scripts/check.sh` before
+pushing; the `app`/`api` arguments are for the fast inner loop only.**
+
+The guard was RETARGETED, not deleted — its four properties all still hold, and property 2 ("a
+prompt whose value is dropped is the worst version of this feature") is exactly what the new shape
+could still violate. It now asserts at `regenerateWithNote`, the one place the note can be dropped,
+and at the call site that supplies it. It also gained an ordering assertion (save index < generate
+index) that the old form could not express, because only now does one control do both halves.
+Mutation-proved three ways: note never sent, order inverted, `saveNote` stops carrying the text —
+all three fail the suite; restored green at 104/104 in that file, 762/762 for api overall.
