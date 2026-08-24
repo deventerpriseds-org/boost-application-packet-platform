@@ -42,3 +42,63 @@ export const HIGHLIGHT_LITERALS = [
   '#d9c34a', '#1c1804',              // dark: keyword bg, keyword ink
   '#2e2716', '#8a7748',              // dark: echo wash, echo rule
 ]
+
+/**
+ * Split TEXT into segments, marking every occurrence of one of PHRASES.
+ *
+ * THE GAP THIS CLOSES. The prototype marks posting echoes inside the draft itself (`Marked`,
+ * `qc/assets.jsx:8`); the app had both treatments built and painted them ONLY in margin quotes and
+ * on the JD step — every `HIGHLIGHT_CLASS` call site was one of those, and `BlockBody` rendered
+ * `row.after_text` as a bare string. So the whole provenance margin was a set of pointers into a
+ * sentence that was never marked: "Wording kept from the posting: safety-critical" with nothing in
+ * the draft to look at.
+ *
+ * EXACT, WHOLE-PHRASE, CASE-INSENSITIVE — never fuzzy. A highlight is an ACCUSATION ("these words
+ * came from the employer's ad"), and this repo's standing rule reserves similarity for RANKING. A
+ * near-miss here would paint the writer's own sentence as borrowed, which is worse than painting
+ * nothing. Case is ignored because the generator re-cases phrases at a sentence start; nothing else
+ * is normalised.
+ *
+ * LONGEST PHRASE FIRST, then non-overlapping. Given `safety-critical` and `safety-critical systems`
+ * the shorter one would otherwise consume the head of the longer and leave ` systems` unmarked,
+ * splitting one echo into a marked and an unmarked half.
+ *
+ * Returns `[{ t, mark }]` — `mark` is a HIGHLIGHT_CLASS key or null. Always covers the whole input,
+ * so a caller can render the segments and get the original text back verbatim.
+ */
+export function markRuns(text, phrases, mark = 'postingEcho') {
+  const s = String(text == null ? '' : text)
+  if (!s) return []
+  const list = (Array.isArray(phrases) ? phrases : [])
+    .map((p) => String(p == null ? '' : p).trim())
+    .filter((p) => p.length > 1)
+    .sort((a, b) => b.length - a.length)
+  if (!list.length) return [{ t: s, mark: null }]
+
+  const lower = s.toLowerCase()
+  const taken = []                                  // [start, end) already claimed
+  const free = (a, b) => taken.every(([x, y]) => b <= x || a >= y)
+  for (const p of list) {
+    const needle = p.toLowerCase()
+    let from = 0
+    for (;;) {
+      const i = lower.indexOf(needle, from)
+      if (i < 0) break
+      const j = i + needle.length
+      if (free(i, j)) taken.push([i, j])
+      from = i + 1                                  // +1, not +len: an overlapped hit may still
+    }                                               // start a valid later one
+  }
+  if (!taken.length) return [{ t: s, mark: null }]
+
+  taken.sort((a, b) => a[0] - b[0])
+  const out = []
+  let at = 0
+  for (const [a, b] of taken) {
+    if (a > at) out.push({ t: s.slice(at, a), mark: null })
+    out.push({ t: s.slice(a, b), mark })
+    at = b
+  }
+  if (at < s.length) out.push({ t: s.slice(at), mark: null })
+  return out
+}

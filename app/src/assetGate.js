@@ -94,6 +94,22 @@ export const SEV_LABEL = {
 }
 export const SEV_TONE = { fix: 'red', review: 'yellow', soft: 'panel', fixed: 'green' }
 
+/**
+ * The CSS custom property each severity paints, as WHOLE LITERAL STRINGS.
+ *
+ * Never `var(--proto-${tone})`. A custom-property name built at runtime is the silent-failure shape
+ * highlight.js's header already names: CSS drops a declaration it cannot parse without a word of
+ * warning, so a typo or an unmapped tone renders as "no colour" rather than as an error, and the
+ * screen looks fine while saying nothing. A guard in the suite enforces this and caught exactly that
+ * construct being written here.
+ */
+export const SEV_COLOR = {
+  fix: 'var(--proto-red)',
+  review: 'var(--proto-yellow)',
+  soft: 'var(--proto-ink2)',
+  fixed: 'var(--proto-green)',
+}
+
 /** fail|warn + engine -> severity key, or null for a row that needs no attention. */
 export function severityFor(row) {
   if (!row) return null

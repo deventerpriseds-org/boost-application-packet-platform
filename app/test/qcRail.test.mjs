@@ -16,7 +16,7 @@ import {
   railVerdict, sectionIdForOffender, inertReason, offenderLinks, countLink, MERGE_FIELDS,
   coverageCards, requirementState, openSeqs, offenderSeq, qcStepState, qcStepDone, packetGate,
   loopsModel, rowsForRequirement, swapsForRequirement, pctWidth, packetReadiness,
-  offendersByField, offendersForField,
+  offendersByField, offendersForField, fieldSeverities,
 } from '../src/qcRail.js'
 
 const SRC = new URL('../src/', import.meta.url)
@@ -916,4 +916,57 @@ test('H:wording-ask-reuses-the-field-edit-path: no second route for a reword', (
   assert.match(askLink, /role="button"/)
   assert.match(askLink, /tabIndex=\{0\}/)
   assert.match(askLink, /onKeyDown=/)
+})
+
+test('H:field-severity-only-where-a-finding-names-the-field', () => {
+  // A check that failed for the artifact as a whole and names no merge field must colour NOTHING.
+  // Painting every field for it teaches a reader to ignore colour, which is the cry-wolf failure.
+  const result = { gate: 'fail', attention: 3, results: [
+    { check_key: 'skill_char_limit', state: 'fail', engine: 'deterministic',
+      offenders: ['SkillsBullets1: some very long skill label (31)'] },
+    { check_key: 'word_counts', state: 'fail', engine: 'deterministic',
+      offenders: ['ResumeSummary: 70 words (want 55-60)'] },
+    { check_key: 'posting_wording_kept', state: 'warn', engine: 'deterministic',
+      offenders: ['ResumeSummary: "safety-critical"'] },
+    { check_key: 'ai_tells', state: 'fail', engine: 'deterministic', offenders: ['em-dash x3'] },
+  ] }
+  const sev = fieldSeverities(result)
+  assert.equal(sev.SkillsBullets1, 'fix')
+  assert.equal(sev.ResumeSummary, 'fix', 'the WORST severity wins - fail outranks the warn')
+  assert.equal(Object.keys(sev).length, 2, 'ai_tells names no field and must colour none')
+
+  // AND THE DISCRIMINATING CASE. The assertion above is satisfied even by a bug that attaches a
+  // fieldless finding to some default field, WHENEVER that field is already coloured for another
+  // reason - which it was here, so the check was inert. A payload whose ONLY finding names no field
+  // must colour NOTHING, and that cannot pass by coincidence.
+  assert.deepEqual(fieldSeverities({ gate: 'fail', attention: 1, results: [
+    { check_key: 'ai_tells', state: 'fail', engine: 'deterministic', offenders: ['em-dash x3'] },
+  ] }), {}, 'a finding that names no merge field must colour no field at all')
+})
+
+test('H:field-severity-respects-D6: a reviewer fail is never "fix"', () => {
+  // D6: only a deterministic row may fail an artifact. A reviewer fail is 'soft' ("Your call"), and
+  // a field painted red for one would tell the reader they are blocked by something that cannot
+  // block them - the same misstatement severityFor was written to end.
+  const sev = fieldSeverities({ gate: 'warn', attention: 1, results: [
+    { check_key: 'reviewer_summary', state: 'fail', engine: 'reviewer',
+      offenders: ['ResumeSummary: reads as boilerplate'] },
+  ] })
+  assert.equal(sev.ResumeSummary, 'soft')
+
+  // pass / not_applicable carry no severity and colour nothing.
+  assert.deepEqual(fieldSeverities({ gate: 'pass', attention: 0, results: [
+    { check_key: 'whitespace', state: 'pass', engine: 'deterministic', offenders: ['ResumeSummary: x'] },
+    { check_key: 'facts_needed', state: 'not_applicable', engine: 'deterministic', offenders: ['ResumeSummary: y'] },
+  ] }), {})
+})
+
+test('H:field-severity-paints-through-one-map: no runtime custom-property names', () => {
+  const src = stripComments(readSrc('screens/AssetBlocks.jsx'))
+  assert.match(src, /SEV_COLOR\[fieldSev\]/, 'the measurement must paint through the shared map')
+  // The silent-failure shape highlight.js's header names: CSS drops an unparseable var() without a
+  // word, so a built-at-runtime property renders as "no colour" rather than as an error. A guard in
+  // the suite caught exactly this construct being written here.
+  assert.ok(!/var\(--proto-\$\{/.test(src), 'a custom-property name is being built at runtime')
+  assert.match(src, /data-qc-sev=\{fieldSev \|\| ''\}/, 'the severity must be readable from the DOM')
 })

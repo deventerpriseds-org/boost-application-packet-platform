@@ -36,9 +36,9 @@ import {
   ASSET_ANSWERS_DEFAULT_OPEN, correctionsForField,
   meterModel, reqsForRow, scopeSwaps, shapeOf, sharedSourceNote, statPct, wordCount,
 } from '../assetBlocks.js'
-import { HIGHLIGHT_CLASS } from '../highlight.js'
-import { SEV_LABEL, checkLabel, fieldLabel, severityCounts } from '../assetGate.js'
-import { arr, offendersByField, offendersForField, railChangeLog } from '../qcRail.js'
+import { HIGHLIGHT_CLASS, markRuns } from '../highlight.js'
+import { SEV_COLOR, SEV_LABEL, checkLabel, fieldLabel, severityCounts } from '../assetGate.js'
+import { arr, fieldSeverities, offendersByField, offendersForField, railChangeLog } from '../qcRail.js'
 import { CorrectionRow } from './QcRail.jsx'
 
 export { BLOCK_HOOKS }
@@ -112,6 +112,7 @@ export function useArtifactCorrections(artifactId) {
           log: railChangeLog(result),
           wording: offendersByField(result, 'posting_wording_kept'),
           severity: severityCounts(result),
+          fieldSev: fieldSeverities(result),
         })
       })
       .catch(() => { if (live) setState(null) })
@@ -124,6 +125,7 @@ export function useArtifactCorrections(artifactId) {
     correctedCount: state ? state.log.count : null,
     wording: state ? state.wording : null,
     severity: state ? state.severity : null,
+    fieldSev: state ? state.fieldSev : null,
     refresh: () => setReload((n) => n + 1),
   }
 }
@@ -320,7 +322,7 @@ function DistributionMeter({ rows, filled, unfilled, requirements, scopedSwaps, 
 
 // ── one merge field ─────────────────────────────────────────────────────────────────────────────
 
-function ListBody({ row, swapsForList, artifactId, listOwners }) {
+function ListBody({ row, swapsForList, artifactId, listOwners, phrases }) {
   const model = listBodyModel(row, swapsForList, { artifactId, listOwners })
   return (
     <div>
@@ -335,7 +337,7 @@ function ListBody({ row, swapsForList, artifactId, listOwners }) {
                 {line.from} <span style={{ padding: '0 4px' }}>&rarr;</span>
               </span>
             )}
-            <span style={{ fontWeight: line.from ? 600 : 400 }}>{line.text}</span>
+            <span style={{ fontWeight: line.from ? 600 : 400 }}><Marked text={line.text} phrases={phrases} /></span>
           </div>
           {/* The status and the packet-level marker stack rather than run on, so the column stays
               as narrow as its longest token on a phone. */}
@@ -371,7 +373,7 @@ function ListBody({ row, swapsForList, artifactId, listOwners }) {
   )
 }
 
-function BlockBody({ row, shape, swapsForList, artifactId, listOwners }) {
+function BlockBody({ row, shape, swapsForList, artifactId, listOwners, phrases }) {
   if (shape === 'static') {
     return (
       <div className="px-small" style={{ textTransform: 'none', lineHeight: 1.6 }}>
@@ -380,21 +382,42 @@ function BlockBody({ row, shape, swapsForList, artifactId, listOwners }) {
       </div>
     )
   }
-  if (shape === 'list') return <ListBody row={row} swapsForList={swapsForList} artifactId={artifactId} listOwners={listOwners} />
+  if (shape === 'list') return <ListBody row={row} swapsForList={swapsForList} artifactId={artifactId} listOwners={listOwners} phrases={phrases} />
   if (shape === 'pipe') {
     return (
       <div style={{ fontFamily: 'var(--font-mono)', fontSize: 11.5, lineHeight: 1.9, wordBreak: 'break-word', whiteSpace: 'pre-line' }}>
-        {row.after_text}
+        <Marked text={row.after_text} phrases={phrases} />
       </div>
     )
   }
   return (
-    <div style={{ fontSize: 12.5, lineHeight: 1.65, whiteSpace: 'pre-line' }}>{row.after_text}</div>
+    <div style={{ fontSize: 12.5, lineHeight: 1.65, whiteSpace: 'pre-line' }}>
+      <Marked text={row.after_text} phrases={phrases} />
+    </div>
   )
 }
 
+/**
+ * Draft text with the posting's own wording MARKED inside it — the treatment the prototype applies
+ * (`Marked`, qc/assets.jsx:8) and the app painted only in margin quotes until now.
+ *
+ * Marks ONLY `posting_wording_kept` phrases. The other echo the app knows about is
+ * `posting_figure_echo`, and it is deliberately NOT marked here: those offenders read
+ * `$18M (your profile states ...)` rather than a bare phrase, and a figure taken from the ad is
+ * already CORRECTED by R3 rather than left for the reader to judge — marking it would point at
+ * text the pipeline has usually already rewritten. Keyword marking stays absent because
+ * `term_library_entry` has zero published rows; a highlight with no source would be invented.
+ */
+function Marked({ text, phrases }) {
+  const runs = markRuns(text, phrases)
+  if (!runs.some((r) => r.mark)) return text || null
+  return runs.map((r, i) => (r.mark
+    ? <span key={i} className={HIGHLIGHT_CLASS[r.mark]}>{r.t}</span>
+    : <React.Fragment key={i}>{r.t}</React.Fragment>))
+}
+
 function AssetBlock({ row, reqs, swapsForList, wide, artifactId, listOwners, thresholds,
-  corrections = [], wording = [], wordingExpected = '',
+  corrections = [], wording = [], wordingExpected = '', fieldSev = null,
   correctionBusy, setCorrectionBusy, onCorrectionsChanged }) {
   const [showBefore, setShowBefore] = useState(false)
   const [askOpen, setAskOpen] = useState(false)
@@ -445,8 +468,17 @@ function AssetBlock({ row, reqs, swapsForList, wide, artifactId, listOwners, thr
             an unruled field has. The old line printed lines/words for EVERY field, so a skills list
             read "10 lines - 20 words - <= 24 chars each": a word count beside a character limit,
             two halves that do not answer each other. Seen on the live screen, not inferred. */}
+        {/* STATE COLOUR ON THE MEASUREMENT, not just on the target. Both halves have been correct
+            and unit-matched since the observedFor/targetFor pass, but they painted identically
+            whether the field met its rule or not - a 70-word summary against a 55-60 band looked
+            exactly like a 57-word one. The colour comes from the CHECK ROWS for this field, through
+            the same `severityFor` split the rail and the header use, so a red measurement here and
+            a green gate there cannot disagree. No finding for this field means no colour: an
+            unmeasured field must not read as passing. */}
         {!isStatic && (
-          <span className="px-small">
+          <span className="px-small" data-qc={BLOCK_HOOKS.fieldObserved}
+            data-qc-sev={fieldSev || ''}
+            style={SEV_COLOR[fieldSev] ? { color: SEV_COLOR[fieldSev], fontWeight: 700 } : undefined}>
             {observed || `${count > 1 ? `${count} lines - ` : ''}${words} words`}
           </span>
         )}
@@ -468,7 +500,7 @@ function AssetBlock({ row, reqs, swapsForList, wide, artifactId, listOwners, thr
         )}
       </div>
 
-      <BlockBody row={row} shape={shape} swapsForList={swapsForList} artifactId={artifactId} listOwners={listOwners} />
+      <BlockBody row={row} shape={shape} swapsForList={swapsForList} artifactId={artifactId} listOwners={listOwners} phrases={wording} />
 
       <CountMismatch note={countNote} />
 
@@ -699,7 +731,7 @@ export default function AssetBlocks({ artifact, provenance, fallback, defaultOpe
 
   // The change log, scoped per field into the margins below. One `busy` for the whole panel, not one
   // per row: two undos in flight against the same artifact would race the re-read that follows them.
-  const { rows: correctionRows, correctedCount, wording, severity, refresh: refreshCorrections } = useArtifactCorrections(artifact.id)
+  const { rows: correctionRows, correctedCount, wording, severity, fieldSev, refresh: refreshCorrections } = useArtifactCorrections(artifact.id)
   // The OWNER'S check thresholds, so every field can state the contract the gate actually holds it
   // to. `searchPrefsGet().checks` is the same row Settings writes - one source, so changing 24 to 30
   // there changes what this screen promises.
@@ -810,6 +842,7 @@ export default function AssetBlocks({ artifact, provenance, fallback, defaultOpe
               corrections={correctionsForField(correctionRows, r.merge_field)}
               wording={offendersForField(wording, r.merge_field)}
               wordingExpected={(wording && wording.expected) || ''}
+              fieldSev={fieldSev ? fieldSev[r.merge_field] || null : null}
               correctionBusy={correctionBusy}
               setCorrectionBusy={setCorrectionBusy}
               onCorrectionsChanged={refreshCorrections}

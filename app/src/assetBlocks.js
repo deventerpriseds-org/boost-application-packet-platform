@@ -44,6 +44,7 @@ export const BLOCK_HOOKS = {
   askBox: 'blocks-ask-box',
   askSend: 'blocks-ask-send',
   fieldSlot: 'blocks-field-slot',         // the raw merge field, kept beside the human name
+  fieldObserved: 'blocks-field-observed',  // the measurement, coloured by this field's worst finding
   fieldTarget: 'blocks-field-target',     // the rule the field is held to, from the owner's thresholds
   fieldChangeLog: 'blocks-corrected-for-you', // the field's own "Corrected for you" list (P8.6 inline).
   fieldWordingKept: 'blocks-wording-kept',    // "Wording kept from the posting", in the field's margin

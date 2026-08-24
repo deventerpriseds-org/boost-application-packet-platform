@@ -280,3 +280,78 @@ test('every consumer paints through HIGHLIGHT_CLASS, never a hand-typed class na
   const users = MODULES.filter((f) => readFileSync(f, 'utf8').includes('HIGHLIGHT_CLASS.'))
   assert.ok(users.length >= 2, `both highlights must actually be used; found ${users.length} consumer(s)`)
 })
+
+// ── markRuns: the posting's wording marked INSIDE the draft ──────────────────────────────────────
+//
+// The gap this closes: the prototype marks echoes in the draft text (`Marked`, qc/assets.jsx:8) and
+// the app painted both treatments ONLY in margin quotes and on the JD step — every HIGHLIGHT_CLASS
+// call site was one of those, and BlockBody rendered row.after_text as a bare string. The margin
+// was a set of pointers into a sentence that was never marked.
+import { markRuns } from '../src/highlight.js'
+
+const joined = (runs) => runs.map((r) => r.t).join('')
+const marked = (runs) => runs.filter((r) => r.mark).map((r) => r.t)
+
+test('H:mark-is-lossless: the segments always rebuild the original text exactly', () => {
+  // A renderer walks these segments to draw the field. If they do not concatenate back to the input,
+  // the draft the owner reads is not the draft that was generated — silently, with no error.
+  for (const [text, phrases] of [
+    ['Led safety-critical systems work across three teams.', ['safety-critical']],
+    ['nothing to mark here', ['absent']],
+    ['', ['x']],
+    ['edge', []],
+    ['Safety-critical at the start', ['safety-critical']],
+    ['ends with safety-critical', ['safety-critical']],
+  ]) {
+    assert.equal(joined(markRuns(text, phrases)), text, `lost text for ${JSON.stringify(text)}`)
+  }
+})
+
+test('H:mark-is-exact-never-fuzzy: a highlight is an accusation and must not guess', () => {
+  // Standing rule: fuzzy matching is for RANKING, never for ACCUSING. Marking says "these words came
+  // from the employer's ad" — painting the writer's own sentence as borrowed is worse than painting
+  // nothing, so only exact runs are marked. Case is the one thing ignored, because the generator
+  // re-cases a phrase at a sentence start.
+  assert.deepEqual(marked(markRuns('we ship Safety-Critical systems', ['safety-critical'])),
+    ['Safety-Critical'], 'case must not prevent a match')
+  assert.deepEqual(marked(markRuns('we ship safety critical systems', ['safety-critical'])), [],
+    'a near miss (hyphen dropped) must NOT be marked')
+  assert.deepEqual(marked(markRuns('delivery velocity', ['deliver'])), ['deliver'],
+    'a substring match is exact by definition and is marked')
+  assert.deepEqual(marked(markRuns('anything', [''])), [], 'an empty phrase marks nothing')
+  assert.deepEqual(marked(markRuns('anything', ['a'])), [], 'a single character is not a phrase')
+})
+
+test('H:mark-longest-first: a shorter phrase never splits a longer one', () => {
+  // Given both `safety-critical` and `safety-critical systems`, taking the shorter first consumes
+  // the head of the longer and leaves ` systems` unmarked — one echo rendered as a marked half and
+  // an unmarked half, which reads as two different findings.
+  const runs = markRuns('we build safety-critical systems daily',
+    ['safety-critical', 'safety-critical systems'])
+  assert.deepEqual(marked(runs), ['safety-critical systems'])
+  assert.equal(joined(runs), 'we build safety-critical systems daily')
+})
+
+test('H:mark-every-occurrence-once: repeats are all marked, and never overlap', () => {
+  const runs = markRuns('cloud native and cloud native again', ['cloud native'])
+  assert.deepEqual(marked(runs), ['cloud native', 'cloud native'])
+  // No segment may be emitted twice, which is what an overlap would do to the rebuilt text.
+  assert.equal(joined(runs), 'cloud native and cloud native again')
+})
+
+test('H:mark-renders-in-the-draft: the wiring exists, not just the function', () => {
+  const src = readFileSync(new URL('../src/screens/AssetBlocks.jsx', import.meta.url), 'utf8')
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+  // BlockBody used to render `{row.after_text}` bare. Every shape that prints draft text must go
+  // through the marker, or the margin points at nothing again.
+  // COUNTED, not merely present. There are TWO shapes that print `row.after_text` — the pipe run
+  // and the prose block — and asserting the marker "appears" passes while one of them is reverted
+  // to a bare `{row.after_text}`. Whitespace also defeats an inline `>{row.after_text}<` regex,
+  // which is how this guard first passed a mutation that unmarked half the drafts.
+  assert.equal((src.match(/<Marked text=\{row\.after_text\} phrases=\{phrases\} \/>/g) || []).length, 2,
+    'both draft shapes (pipe and prose) must render through the marker')
+  assert.ok(!/\{row\.after_text\}(?!\s*phrases)/.test(src.replace(/<Marked text=\{row\.after_text\} phrases=\{phrases\} \/>/g, '')),
+    'a draft shape still renders after_text unmarked')
+  assert.match(src, /<Marked text=\{line\.text\} phrases=\{phrases\} \/>/, 'list items must mark too')
+  assert.match(src, /phrases=\{wording\}/, 'the marker must be fed the kept phrases for THIS field')
+})

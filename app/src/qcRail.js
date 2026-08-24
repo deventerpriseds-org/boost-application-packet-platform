@@ -14,7 +14,7 @@
 // "what are the three score parts" and "what colour is a state". Only what is genuinely new to the
 // PACKET-level rail lives here.
 import {
-  engineRows, scoreParts, gateMeta, stateMeta, arr,
+  engineRows, scoreParts, gateMeta, stateMeta, arr, severityFor,
   correctionsState, orderCorrections, correctionRow, correctionSentence, correctionAnomalies,
   correctionSourceText, undoAvailability, revertOutcome, suggestScope,
   CHANGE_LOG_HEADLINE, CORRECTION_SOURCE, CORRECTION_REVERT_ROUTE,
@@ -487,6 +487,37 @@ export function offendersByField(result, checkKey) {
     ;(byField[field] || (byField[field] = [])).push(text)
   }
   return { row, byField, state: row.state, expected: row.expected || '' }
+}
+
+/**
+ * The WORST severity attaching to each merge field — `{ ResumeSummary: 'fix', ... }`.
+ *
+ * Lets a field state its own condition (the measurement line paints red/yellow) without the
+ * component re-deriving severity from state+engine. That split is D6's — a reviewer `fail` may
+ * never block — and a field painted from a second reading of it would be free to contradict the
+ * rail and the asset header, which both go through `severityFor`.
+ *
+ * A row contributes to a field only where one of its OFFENDERS names that field, through the same
+ * `sectionIdForOffender` every other surface uses. A check that failed for the artifact as a whole
+ * and names no field colours nothing: it is not this field's problem, and painting every field for
+ * it is how a screen teaches a reader to ignore colour.
+ */
+export function fieldSeverities(result) {
+  const rank = { fix: 3, review: 2, soft: 1 }
+  const out = {}
+  for (const row of allRows(result)) {
+    const sev = severityFor(row)
+    if (!sev) continue
+    const fields = new Set()
+    for (const o of arr(row.offenders)) {
+      const f = sectionIdForOffender(row.check_key, o)
+      if (f) fields.add(f)
+    }
+    for (const f of fields) {
+      if (!out[f] || rank[sev] > rank[out[f]]) out[f] = sev
+    }
+  }
+  return out
 }
 
 /** The offenders of one grouped check that belong to one field. [] when there are none. */
