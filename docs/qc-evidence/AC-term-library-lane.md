@@ -3,7 +3,10 @@
 **Author:** independent AC subagent (adversarial, non-implementing)
 **Date:** 2026-08-24
 **Tier:** 1 (accusation grade) — this lane feeds `keyword_coverage`, which feeds scoring.
-**Status:** DRAFT — written incrementally as research proceeds.
+**Status:** COMPLETE — 70 acceptance criteria + 15 adversarial findings. Not signed off.
+**Binding correction applied:** exclusion MARKS (`status='rejected'` + reason), it never DELETES.
+See the DESIGN CORRECTION section below; AC-1/4/5/11/12/15 were rewritten in place to match it and
+no delete-style version of any AC remains in this file.
 
 ## Scope under review
 1. Extend `api/src/functions/tests/termMiner.ts` filters so measured junk classes stop reaching curation.
@@ -58,7 +61,13 @@ either of these.
 
 ---
 
-_(sections appended below as research completes)_
+## Contents
+Ground-truth read log · Blocking defect (`covered: 0`) · Extend-don't-duplicate map ·
+**A** junk-class exclusion (AC-1..10) · **B** re-mine (AC-11..15) · **C** curation screen
+(AC-16..24) · **D** promote (AC-25..31) · **E** sequencing/scoring blast radius (AC-32..38) ·
+**F** publish + immutability (AC-39..46) · **G** no-hardcoded-config (AC-47..51) ·
+**H** mark-don't-delete + reason column (AC-52..62) · **I** error states + mutation proofs
+(AC-63..70) · **15 adversarial findings** · recommended sequencing · what I could not verify.
 
 ## Ground-truth read log (what these ACs are derived from, not assumed)
 
@@ -780,3 +789,163 @@ in the manifest.
 library is published, then no surface renders that fabricated prototype constant as live data.
 *Verify:* grep those three files; assert the live app reads the library identity from the API. **"No
 dead UI · never render hardcoded fake names, counts, or statuses as live data."**
+
+---
+
+# ADVERSARIAL FINDINGS — where this scope is wrong, risky, or duplicative
+
+Ordered by how much damage the finding prevents. Each says what I **observed** and what I
+**infer**, separately.
+
+### Finding 1 (BLOCKING) — publishing flips a hardcoded `covered: 0` into a fabricated measured score
+**Observed:** `appChecks.ts:130-137` counts published scoreable entries, then passes
+`keyword: scoreable > 0 ? { covered: 0, scoreable } : null`. `artifactScore.ts:126-128` turns any
+`scoreable > 0` into `round(covered/scoreable*100)`.
+**Inference (high confidence, from reading both files):** the day a version is published, every
+artifact's `keyword_coverage` becomes `0` with the source string `"0/N scoreable library terms
+present"` — a number that reads as measured and is not. Six UI/API consumers render it immediately.
+**Consequence for the scope:** *"a PUBLISH route creating a `term_library` version"* is listed as the
+last step, but publishing is the **most dangerous** step and must not land until the coverage
+numerator is real. The scope as briefed will produce a working publish button that corrupts every
+score in the system. **Sequence: promote -> wire coverage -> verify numerator -> only then publish.**
+
+### Finding 2 (BLOCKING) — the immutability the schema advertises does not hold
+**Observed:** `term_entry_guard_trg` is `before update or delete on term_library_entry`. There is
+**no `insert`**, and **no guard at all on `term_library`**.
+**Inference (high confidence, from the trigger text):** three bypasses exist today —
+(a) `insert` new entries into an already-published library; (b) `update term_library set
+status='draft'`, edit entries, set back to `published`; (c) `update term_library set
+published_at=null`. The scope says *"ACs must test this actually holds"* — it does not hold, and the
+implementer who merely *tests* it will find that out only if the test is written for INSERT, which
+is the one event a reader of the trigger would not think to test. AC-39/AC-40.
+
+### Finding 3 (BLOCKING) — the acceptance criterion "scores record the version they used" has no column
+**Observed:** `artifact_score` (`schema.ts:621-647`) has `keyword_coverage`, `keyword_source`,
+`engine_version`, `weights` — and **no `term_library_id` / version**.
+**Inference:** BACKLOG P1.2b's acceptance (*"adding an alias does not change any historical score,
+because scores record the version they used"*) is currently unsatisfiable. The scope does not mention
+this schema change at all. AC-37.
+
+### Finding 4 (HIGH) — the scope stops one step short of what makes `keyword_coverage` real
+**Observed:** BACKLOG P1.2 specifies `ats_term` rows (`term`, `requirement_ids[]`, `source`,
+`library_id`, `frequency_in_posting`, `status`) and `schema.ts:878` already references
+`insertion.ats_term_id`. No such table exists.
+**Inference:** promote + publish give you a *denominator*. The *numerator* — which library terms this
+posting demands and which the document places — needs per-posting/per-artifact rows. Without them
+the coverage number has no evidence trail, which is precisely what makes it accusation-grade rather
+than merely wrong. **Recommendation: fold `ats_term` into this lane's definition of done, or state
+explicitly that publish is deferred to the lane that builds it.** (Stated as a scope question, not a
+factual determination — the owner decides which lane owns it.)
+
+### Finding 5 (HIGH) — the real surface casing is not captured anywhere, so `case_sensitive_acronym` cannot be populated correctly
+**Observed:** `termsMine` builds `df.set(g, { n, count, samples, surface: g })` where `g` comes from
+`ngramsForDoc`, which returns `termNormalize`d strings. `term_candidate.ngram` is documented as
+*"the literal surface form as it appears in postings"* — **it is not; it is the normalized form.**
+**Inference (high confidence, traced through `ngramsForDoc` -> `out.add(phrase)` -> `df.set`):**
+`SAFe` is stored as `safe`, `SOC 2` as `soc 2`, `P&L` as `p and l`. `matchesEntry`'s
+`case_sensitive_acronym` branch builds its regex from `display_term`, so a promote step that copies
+`ngram` into `display_term` produces a lowercase regex and the mode silently does **nothing** — the
+`AI`/*retail*/*email* false positive returns with a guard that appears to be in place. AC-68.
+**This is also a documentation defect in the schema comment that should be fixed in the same commit.**
+
+### Finding 6 (HIGH) — `merged_into` is unenforced free text on the path into a coverage count
+**Observed:** `term_candidate.merged_into text` — no FK, no check, no referential target (the
+`term_key` it names lives in `term_library_entry`, which may not exist yet at merge time).
+**Inference:** a typo'd merge target silently drops that candidate's evidence at promote time. A
+dropped merge is a **coverage undercount**, i.e. the system under-crediting a real document — the
+same class as a gate passing on absent evidence, but in the opposite direction. AC-21.
+
+### Finding 7 (MEDIUM) — the specificity weights are declared twice and can drift
+**Observed:** `termMiner.ts:131` `specificity()` and `termsCandidates`'s SQL
+`case n when 1 then 0.25 when 2 then 1.0 when 3 then 1.2 else 1.1 end` are the same four numbers in
+two languages.
+**Inference:** the curator's queue order and the miner's own ranking can silently disagree after one
+edit. Making them owner-configurable (required by no-hardcoded-config) **doubles** the drift surface
+unless they are unified first. AC-48.
+
+### Finding 8 (MEDIUM) — promotion crosses a tenancy boundary the scope never mentions
+**Observed:** `term_candidate` is owner-scoped (`unique (owner_email, normalized)`);
+`term_library` / `term_library_entry` are deliberately **not** (`schema.ts:196-198`: *"Deliberately
+NOT owner-scoped: it is shared reference data"*).
+**Inference:** one owner's curation decisions become **global** reference data on promote. With one
+owner today that is invisible; with two it is a cross-tenant data leak of one owner's corpus
+vocabulary and a source of disputes over `term_key` ownership. The `library_key` column is the
+natural place to resolve it (per-owner library keys vs one shared key) but nothing decides it today.
+**This needs an explicit owner decision before promote ships**, not a default chosen by the
+implementer.
+
+### Finding 9 (MEDIUM) — `entry_count` is a stored number nothing maintains
+**Observed:** `term_library.entry_count int not null default 0`; no writer exists.
+**Inference:** it will publish as `0` while the version has N entries — exactly the
+"stale/mismatched numbers" symptom this repo treats as evidence of an off-funnel value. Either
+maintain it in the publish transaction or drop the column. AC-43.
+
+### Finding 10 (MEDIUM) — `appChecks` and the trigger disagree about what "published" means
+**Observed:** `appChecks` filters `l.published_at is not null`; the trigger keys on
+`l.status = 'published'`.
+**Inference:** an **archived** library with `published_at` set still contributes to the scoreable
+denominator, and a `status='published'` row with a null `published_at` is immutable but invisible to
+scoring. Two predicates for one concept is the R4 defect this repo names by hand elsewhere. AC-36.
+
+### Finding 11 (MEDIUM) — the purge loop is O(pending) round trips and non-atomic
+**Observed:** `termsMine` issues one `select` then one `delete` per stale row, outside a transaction,
+inside an HTTP handler, over a queue of 2,734 rows.
+**Inference:** a slow, interruptible, partially-applied pass on the live Function. The
+mark-not-delete change is the natural moment to make it one set-based statement. AC-15.
+
+### Finding 12 (LOW, but the one most likely to be gotten wrong) — "extend the filters" would have been the wrong build
+**Observed:** four of the named offenders are already in `BOILERPLATE`, and `isBoilerplate` uses
+substring matching, so the current code already rejects them; the live rows are stale.
+**Inference:** an implementer working from the brief alone would add four literals that do nothing,
+re-mine, see the rows vanish, and credit the fix to their own change. **The re-mine is the fix.**
+The correct measurement of the new rules is therefore "junk excluded by rules that did not already
+exist", which is *neither* of the two baselines quoted in the brief. AC-11, AC-56.
+
+### Finding 13 (LOW) — naming collision with an unrelated live feature
+**Observed:** `Settings ▸ Intake ▸ AtsSources` (`Settings.jsx:924`) is Greenhouse/Lever/Ashby job
+board ingestion.
+**Inference:** naming the new surface "ATS sources" or putting term controls in that card will make
+two unrelated systems look like one. Use "Term library" / "Keyword library".
+
+### Finding 14 (LOW) — a prototype constant will start lying the moment a real library exists
+**Observed:** `docs/qc-evidence/qc/data.js:25` `TERM_LIB = { id: 'ENG-LEAD v4', size: 1840, sources:
+['O*NET 29.2','Lightcast skills','3.1k exec postings','ATS field dictionaries'] }`, rendered by
+`packet.jsx:103` and `evidence.jsx:177`. Two of those four sources were later **declined**
+(Lightcast, paid) or **never decided** (ATS field dictionaries).
+**Inference:** a fabricated library identity is already rendered somewhere; publishing a real one
+makes the contradiction visible rather than creating it. AC-70.
+
+### Finding 15 (LOW) — six source comments become false on publish
+**Observed:** `assetBlocks.js:364`, `AssetBlocks.jsx:21-22,256,422`, `qcRail.js:272`,
+`postingAnalysis.js:341-343,412`, `artifactScore.ts:73`, `appChecks.ts:128` each assert in prose
+that zero published scoreable entries exist.
+**Inference:** they are load-bearing explanations of why a null is shown. Leaving them in place after
+publish makes the next reader trust a statement the database contradicts. AC-35.
+
+---
+
+## Recommended sequencing (derived from the findings, not from the brief's order)
+
+1. **Reason column + mark-not-delete + exact-match classifier** (AC-52..AC-62, AC-1..AC-15).
+   Reversible, no scoring path. Re-mine and measure.
+2. **Curation screen** (AC-16..AC-24). Read/write `term_candidate` only. Still no scoring path.
+3. **Immutability repairs + `artifact_score` version columns** (AC-37, AC-39, AC-40, AC-36, AC-43).
+   Schema-only, must pass `schemaParity` on a populated database.
+4. **Promote into a DRAFT library** (AC-25..AC-31, AC-68). Draft libraries have
+   `published_at is null`, so `appChecks`'s count stays 0 and **nothing scores**. This is the safe
+   staging ground and it is why promote and publish must be two routes, not one.
+5. **Wire the coverage numerator** (AC-32..AC-35) and prove it on real artifacts.
+6. **Publish** (AC-44..AC-46, AC-69, AC-70) — last, behind an explicit confirmation.
+
+## Two things I could NOT verify from the sandbox, flagged rather than assumed
+
+- **Live row counts.** Every number in this document about `term_candidate` comes from the briefs and
+  from `TERM-LIBRARY-SAMPLES.md`, not from a query I ran. The two briefs disagree (106 vs 81 junk
+  rows), which is itself the reason AC-56 forbids reusing either. Settle with
+  `Boost_DB_Connector` before implementing.
+- **Whether the immutability bypasses actually raise or succeed on the live database.** I read the
+  trigger definition in `schema.ts`; I did not execute it. The claim "INSERT into a published library
+  succeeds today" is a **high-confidence inference from the trigger's event list**
+  (`before update or delete`), and AC-39's local-Postgres test is the step that converts it to proof.
+  Run that test **first** — if it unexpectedly raises, the live database has a trigger the schema
+  file does not, which is a bigger finding than the one I reported.

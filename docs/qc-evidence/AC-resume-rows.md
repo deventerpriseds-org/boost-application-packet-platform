@@ -29,6 +29,9 @@ settle "is it shipped". Treat the inventory's rows 6 and 7 as stale, not as work
 
 That leaves **five** real rows: 2, 9, 10, 11, 12.
 
+*(Sections below appear in the order they were written — ROW 2, 6, 7, 9, 10, 12, 11 — then the
+adversarial summary, which gives the recommended BUILD order. They are not the same order.)*
+
 ---
 
 ## TIER ASSIGNMENT (`CLAUDE.md` → "Match the process to the risk")
@@ -753,3 +756,101 @@ corrected in the same commit**.
 *Verify:* the six files enumerated in the PR body with their post-change state; `ui-verify.yml`
 against the live packet. *(This is not a duplicate of AC-35 — it is this row's obligation to honour
 it, because these chips are one of those six surfaces.)*
+
+---
+
+# ADVERSARIAL SUMMARY — what the inventory gets wrong, what to drop, what to resequence
+
+## 1. Diagnoses that are WRONG against current `main`
+
+| # | Inventory / brief claim | Ground truth | Impact if believed |
+|---|---|---|---|
+| 1 | **ROW 6** asset-level ask is `ABSENT` | Built: `PacketBuilder.jsx:224-227, 275-300`, `api.aiEditArtifact(a.id, {instruction})` with no `section` | A second edit path gets built beside a working one — the exact duplication the brief warns against |
+| 2 | **ROW 7** *"THIS IS CURRENTLY A FALSE CLAIM shown to the user"* | Already fixed: `AssetBlocks.jsx:533-535` renders `Identical - template text is not merged per packet` | Work is redone; worse, the "false claim" framing justifies rushing it |
+| 3 | **ROW 9** *"Blocked on the endpoint returning `total` only… This is an endpoint extension"* | **Not blocked.** `appRequirements.ts:700-716` returns the full `requirements` array with `kind` per row; `AssetBlocks.jsx:807,873` already passes that whole payload into `meterModel`; `postingAnalysis.js:261-273` already splits by kind | An API change is proposed, deployed and verified for a derivation that is ~10 lines of client code. Real cost: a deploy cycle and a tier-1 surface touched for nothing |
+| 4 | **ROW 2** *"a scroll exists at `PacketBuilder.jsx:730`"* | That line scrolls the **JD step** to `[data-qc="posting-analysis"]`. Unrelated to assets, fields or findings | Reviewer believes half the row exists; the actual missing piece (a route from a finding to the asset step) is not scoped |
+| 5 | **ROW 2** *"Behaviour already written at `AssetGateDrawer.jsx:136-175`"* | Scroll + static ring only. **No 200ms transition, no 2.2s clear** — the ring persists until the drawer closes, contradicting SPEC 4.9's "outlines it for ~2s" | A copy-paste "extension" ships a ring that never clears, in two places |
+| 6 | **ROW 11** two blockers (rows + endpoint) | **Four.** Also (3) no per-field *claims* list, without which §18 cannot be computed at all, and (4) `matchesEntry()` returns `boolean`, discarding the exact/variant/loose quality `KeyChip` renders | §18 gets built on an invented claim list — a fabricated accusation on a gate-adjacent surface |
+
+## 2. DROP
+
+- **ROW 6** — shipped. Keep AC-6.1…6.4 (guards + correct the inventory).
+- **ROW 7** — shipped. Keep AC-7.1/7.2 as guards. **AC-7.3 is the only real work in it** and is a
+  *different* defect (a `null` `before_text` renders no `Show original` at all, though SPEC 4.5 says
+  it is on every field) — treat it as a new small row, not as ROW 7.
+- **§18 out of ROW 11** — it has a third, unnamed blocker and is accusation-grade. It should not ride
+  along with the chips.
+
+## 3. RESEQUENCE
+
+| New order | Row | Why |
+|---:|---|---|
+| **1** | **ROW 9** — per-kind stats | Reclassified from blocked to buildable-today. Highest reader value of the five, no dependency, and it is the only tier-1 row that can be closed now. |
+| **2** | **ROW 2** — deep link + focus ring | Buildable today, but bigger than the inventory says (routing, not a box-shadow). Do it as one commit that also fixes the drawer's never-clearing ring. |
+| **3** | **AC-7.3** — the `null before_text` disclosure | Tiny, buildable today, and it is a real SPEC 4.5 divergence nobody has logged. |
+| **4** | **ROW 10** — `rewording` | **Gated on an owner answer (AC-10.0), not on engineering.** Ask before designing a table. |
+| **5** | **ROW 11** — chips | Gated on the term-library lane publishing (their AC-32/AC-34). **AC-11.1 is testable today and should be landed now** as a guard on the honest-unknown. |
+| **—** | **ROW 12** — `PickList` | **Move off the resume lane entirely.** Zero resume impact, portfolio-only. AC-12.1 (a test proving zero resume impact) is the only piece worth landing here. |
+
+**Consequence, stated plainly:** after ROW 9, ROW 2 and AC-7.3, the resume step has **no remaining
+buildable prototype gap**. Everything left is gated on an owner decision (ROW 10), another lane's
+publish (ROW 11), or belongs to a different step (ROW 12). That is a materially different status
+report from "five rows open".
+
+## 4. Cross-cutting ACs — apply to EVERY row above
+
+**AC-X.1 (no dead UI).** Given any control added by these rows, when it is committed, then it is
+wired to a real route or a real store — never a `useState` that forgets, never a disabled stub, never
+a `toast()`. If the backing does not exist, the control is **absent**.
+*Verify:* per-row ACs above; plus a reviewer check that no new `onClick` resolves to a no-op.
+
+**AC-X.2 (never render a false claim).** Given any label these rows add, when it renders, then it is
+true of the data behind it — an unmeasured value states unknown, a measured zero is distinguishable
+from an unmeasured one, and no heading asserts a change that did not happen.
+*Verify:* the null/zero ACs in rows 9, 10 and 11.
+
+**AC-X.3 (pass the computed value down).** Given a parent has already resolved a value (the focused
+field, a swap's `from_label`, a per-kind split), when a child needs it, then it arrives as a prop and
+is not re-derived from the route, the DOM, or a second query.
+*Verify:* AC-2.11, AC-11.8, AC-9.7.
+
+**AC-X.4 (every new guard is mutation-proven).** Given any guard these rows add, when it is
+committed, then the behaviour it guards has been reverted, the suite observed to FAIL, and the
+revert undone — and if the mutation is behaviourally equivalent and correctly fails to fail, that is
+stated rather than claimed as proof.
+*Verify:* the mutation transcript in the PR body. **Never skipped, at any tier.**
+
+**AC-X.5 (H-case naming).** Given any of these guards lands in `api/test/hardening.test.mjs`, when it
+is named, then it uses a **slug** of at least two words (`H:kind-split-denominator`,
+`H:focus-ring-single-source`), never a new numeric ID — `H26` fails the suite on a numeric ID.
+*Verify:* `node --test api/test/hardening.test.mjs`.
+
+**AC-X.6 (build hygiene on every JSX edit).** Given any `.jsx` edit, when it is committed, then the
+smart-quote `sed` sweep has run, the **Python** codepoint scan reports zero U+2018/2019/201C/201D,
+and `cd app && npm run build` exits 0 **after** the sweep (the sweep can itself break a single-quoted
+string).
+*Verify:* the build exit code. Do **not** add a repo-wide smart-quote linter — `CLAUDE.md` records
+one being written and deleted the same night for 8 false positives.
+
+**AC-X.7 (branch + deploy discipline).** Given this work, when it lands, then it is developed on
+`claude/<feature>`, fast-forwarded onto `main` to deploy, and the deploy is verified with
+`./scripts/wait-run.sh sha:<workflow>:$(git rev-parse HEAD)` **run in the background**, never against
+`latest:`.
+*Verify:* the run id for the specific SHA.
+
+## 5. Questions the owner must answer before the affected row starts
+
+1. **ROW 2:** which control fires the deep link — the QC rail's `Review →`, a new
+   `n to fix — <title> →` button on the artifact card (SPEC 4.4), or both? Without this the ring has
+   nothing to reach it.
+2. **ROW 9:** do the three per-kind stats **replace** `Posting lines placed`, or sit beside it? Both
+   without a decision recreates the mismatched-numbers failure `CLAUDE.md` describes.
+3. **ROW 10:** is an intent marker wanted at all, given `Tweak this` already performs the real edit
+   in one click? And if yes, extend `correction`, extend `swap_decision`, or approve a new table?
+4. **AC-7.3:** can the insertions payload distinguish "there was no original" from "we did not record
+   one"? If not, say so — do not invent the distinction.
+5. **ROW 12:** confirm it moves off the resume lane, so the step can be declared done without it.
+
+---
+
+*Analysis only. Nothing under `app/src` or `api/src` was modified; nothing was committed.*
