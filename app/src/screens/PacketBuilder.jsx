@@ -80,7 +80,7 @@ function stepDone(key, p, artifacts, qc) {
 // Exported so the browser probe can mount the REAL card (test/browser/run-asset-blocks.mjs). The
 // header's collapsed default is a rendering fact; asserting it against a replica of this component
 // would prove only that the replica was written to match.
-export function ArtifactCard({ a, busy, setBusy, qcResult, onGenerate, onRegenerate, onSetStatus, onMakeDoc, onMakeSlides, onGenVideo, onArchiveVideo, doc, video, provenance, listOwners, onListsRendered }) {
+export function ArtifactCard({ a, busy, setBusy, qcResult, onGenerate, onRegenerate, onSetStatus, onMakeDoc, onMakeSlides, onGenVideo, onArchiveVideo, doc, video, provenance, listOwners, onListsRendered, focusField = null }) {
   const v = video[a.id] || {}
   const d = doc[a.id] || {}
   const videoUrl = v.url || a.docUrl
@@ -132,7 +132,8 @@ export function ArtifactCard({ a, busy, setBusy, qcResult, onGenerate, onRegener
           could not distinguish generated text from static template text. */}
       {(a.status !== 'todo' || a.content) && (
         <AssetBlocks artifact={a} provenance={provenance} fallback={a.content}
-          label={TYPE_LABEL[a.type] || a.type} listOwners={listOwners} onListsRendered={onListsRendered} />
+          label={TYPE_LABEL[a.type] || a.type} listOwners={listOwners} onListsRendered={onListsRendered}
+          focusField={focusField} />
       )}
 
       {/* Video */}
@@ -660,6 +661,21 @@ export default function PacketBuilder({ id, step }) {
     return artifacts.filter((a) => a.type === stepKey)
   }
 
+  // Option B: a finding names a field, and this is the SECOND destination for it - the draft itself,
+  // beside the drawer route that already existed. The inverse of getArtifactsByStep: an artifact id
+  // resolves to the step that renders it, so `compact_resume` lands on the Resume step exactly as
+  // getArtifactsByStep puts it there. Derived from the same rule rather than a second mapping, or
+  // the two drift the first time a step gains an artifact type.
+  const [fieldFocus, setFieldFocus] = useState(null)     // { artifactId, section }
+  const goToField = useCallback((artifactId, section) => {
+    const a = artifacts.find((x) => x.id === artifactId)
+    if (!a) return                                        // unknown artifact: do nothing, never guess a step
+    const stepKey = (a.type === 'resume' || a.type === 'compact_resume') ? 'resume' : a.type
+    if (!STEPS.some((st) => st.key === stepKey)) return   // an artifact type with no step of its own
+    setFieldFocus({ artifactId, section })
+    setActiveStep(stepKey)
+  }, [artifacts, setActiveStep])
+
   const stepContent = (
     <>
       {/* JD Analysis step */}
@@ -787,7 +803,8 @@ export default function PacketBuilder({ id, step }) {
                 onGenVideo={genVideo} onArchiveVideo={archiveVideo}
                 doc={doc} video={video} provenance={provenance}
                 qcResult={(qcEntries.find((e) => e.artifact.id === a.id) || {}).result || null}
-                listOwners={listOwners} onListsRendered={registerLists} />
+                listOwners={listOwners} onListsRendered={registerLists}
+                focusField={fieldFocus && fieldFocus.artifactId === a.id ? fieldFocus.section : null} />
             ))}
             {nextStep && (
               <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
@@ -808,7 +825,7 @@ export default function PacketBuilder({ id, step }) {
             packetId={p.id} company={p.company} role={p.role}
             entries={qcEntries} setResult={setQcResult}
             requirements={req.data ? req.data.requirements : null} reqError={req.error}
-            reqLoading={!req.data && !req.error} />
+            reqLoading={!req.data && !req.error} onGoToField={goToField} />
           <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
             <button className="px-btn px-btn-accent" onClick={() => setActiveStep('send')}>Next: Review &amp; send →</button>
           </div>

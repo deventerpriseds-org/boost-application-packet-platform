@@ -40,6 +40,7 @@ import { HIGHLIGHT_CLASS, markRuns } from '../highlight.js'
 import { SEV_COLOR, SEV_LABEL, checkLabel, fieldLabel, severityCounts } from '../assetGate.js'
 import { arr, fieldSeverities, findingsByField, offendersByField, offendersForField, railChangeLog } from '../qcRail.js'
 import { CorrectionRow } from './QcRail.jsx'
+import { useScrollToFocus, focusRingStyle } from '../focusRing.js'
 
 export { BLOCK_HOOKS }
 
@@ -429,7 +430,7 @@ function Marked({ text, phrases }) {
     : <React.Fragment key={i}>{r.t}</React.Fragment>))
 }
 
-function AssetBlock({ row, reqs, swapsForList, wide, artifactId, listOwners, thresholds,
+function AssetBlock({ row, reqs, swapsForList, wide, artifactId, listOwners, thresholds, focused = false, focusRef,
   corrections = [], wording = [], wordingExpected = '', fieldSev = null, findings = [],
   correctionBusy, setCorrectionBusy, onCorrectionsChanged }) {
   const [showBefore, setShowBefore] = useState(false)
@@ -747,11 +748,13 @@ function AssetBlock({ row, reqs, swapsForList, wide, artifactId, listOwners, thr
   )
 
   return (
-    <div className={isStatic ? 'px-dashed' : 'px-box'}
+    <div className={isStatic ? 'px-dashed' : 'px-box'} ref={focusRef}
       data-qc={BLOCK_HOOKS.field} data-qc-field={row.merge_field} data-qc-static={isStatic ? '1' : '0'}
+      data-qc-focused={focused ? '1' : '0'}
       style={{
       padding: 14, display: 'grid', gridTemplateColumns: wide ? 'minmax(0,1fr) 250px' : '1fr', gap: 16,
       background: isStatic ? 'var(--proto-panel)' : 'var(--proto-paper)',
+      boxShadow: focusRingStyle(focused),
     }}>
       {content}{margin}
     </div>
@@ -772,10 +775,14 @@ function AssetBlock({ row, reqs, swapsForList, wide, artifactId, listOwners, thr
  * appearing twice as two separate changes. Both are optional: without them a shared swap still says
  * it is packet-level, it just cannot name the sibling.
  */
-export default function AssetBlocks({ artifact, provenance, fallback, defaultOpen = true, label, listOwners, onListsRendered }) {
+export default function AssetBlocks({ artifact, provenance, fallback, defaultOpen = true, label, listOwners, onListsRendered, focusField = null }) {
   const [open, setOpen] = useState(defaultOpen)
   const [state, setState] = useState({ loading: true, error: null, data: null })
   const [ref, wide] = useWideRef(700)
+  // A finding on the QC rail can name a field on THIS asset. The hook is shared with the gate
+  // drawer so the two landings cannot drift; `state.data` is a dependency because the link can
+  // resolve before the rows arrive, and scrolling to an element that does not exist is a no-op.
+  const focusRef = useScrollToFocus(focusField, [state.data, open])
 
   // The change log, scoped per field into the margins below. One `busy` for the whole panel, not one
   // per row: two undos in flight against the same artifact would race the re-read that follows them.
@@ -882,6 +889,8 @@ export default function AssetBlocks({ artifact, provenance, fallback, defaultOpe
             <AssetBlock
               key={`${r.merge_field}-${r.loop}`}
               row={r}
+              focused={!!focusField && r.merge_field === focusField}
+              focusRef={r.merge_field === focusField ? focusRef : undefined}
               reqs={reqsForRow(r, scopedSwaps, reqById)}
               swapsForList={r.list ? scopedSwaps.filter((s) => s.list === r.list) : []}
               wide={wide}

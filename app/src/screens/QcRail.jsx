@@ -179,7 +179,7 @@ function CountLink({ artifactId, row, onOpen }) {
 // One finding. The severity pill is the only colour signal, and not_applicable carries its own grey
 // and its own words so it can never be read as a pass. severityMeta is engine-aware where stateMeta
 // was not: a reviewer `fail` reads 'Your call', because D6 says it cannot block this artifact.
-function CheckRow({ artifactId, row, onOpen }) {
+function CheckRow({ artifactId, row, onOpen, onGoToField }) {
   const m = severityMeta(row)
   const link = countLink(artifactId, row)
   return (
@@ -204,6 +204,19 @@ function CheckRow({ artifactId, row, onOpen }) {
                 onClick={() => onOpen(l.artifact_id, l.section_id)}
                 onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpen(l.artifact_id, l.section_id) } }}
                 style={{ cursor: 'pointer' }}>{l.offender}</span>
+              {/* The SECOND destination (owner decision, option B). The offender name above still
+                  opens the drawer, which answers "what does the system know about this field";
+                  this answers "what does it actually say" by landing on the draft itself, where
+                  the sentence and its edit controls are. Additive on purpose - the existing route
+                  is untouched, so nothing anyone already relies on changes. */}
+              {onGoToField && (
+                <span className="px-link" role="button" tabIndex={0}
+                  data-qc={QC_HOOKS.goToField}
+                  data-qc-artifact={l.artifact_id} data-qc-section={l.section_id}
+                  onClick={() => onGoToField(l.artifact_id, l.section_id)}
+                  onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onGoToField(l.artifact_id, l.section_id) } }}
+                  style={{ cursor: 'pointer', marginLeft: 8, fontSize: 11.5, whiteSpace: 'nowrap' }}>go to the draft -&gt;</span>
+              )}
             </li>
           ))}
         </ul>
@@ -384,7 +397,7 @@ function LoopsTab({ entries, filtered }) {
 
 // Every asset's findings, ordered by what must be acted on first. The ordering is severityWeight()
 // in the module - a reviewer fail sorts BELOW a measured fail because it can never block (D6).
-function ChecksTab({ entries, pick, requirements, onOpen }) {
+function ChecksTab({ entries, pick, requirements, onOpen, onGoToField }) {
   const picked = arr(requirements).find((r) => r.id === pick) || null
   const pickedSeq = picked ? Number(picked.seq) : null
   return (
@@ -406,7 +419,7 @@ function ChecksTab({ entries, pick, requirements, onOpen }) {
                   ? 'No check rows were recorded for this asset.'
                   : 'No finding on this asset names the requirement you picked.'}</Quiet>
             )}
-            {rows.map((r, i) => <CheckRow key={r.check_key + ':' + i} artifactId={e.artifact.id} row={r} onOpen={onOpen} />)}
+            {rows.map((r, i) => <CheckRow key={r.check_key + ':' + i} artifactId={e.artifact.id} row={r} onOpen={onOpen} onGoToField={onGoToField} />)}
             {na.length > 0 && pickedSeq == null && (
               <div className="px-note" data-qc={QC_HOOKS.notApplicable} style={{ marginTop: 4 }}>
                 {na.length} check(s) had nothing to test against and are counted in neither number. That is not a pass:
@@ -424,7 +437,7 @@ function ChecksTab({ entries, pick, requirements, onOpen }) {
 
 // The independent reviewer. D6 is stated on the screen, not only enforced in the engine: a reader
 // who sees a red reviewer row must be able to tell why the asset is not blocked.
-function ReviewTab({ entries, onOpen, filtered }) {
+function ReviewTab({ entries, onOpen, filtered, onGoToField }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }} data-qc={QC_HOOKS.review}>
       <Head title="Independent review"
@@ -442,7 +455,7 @@ function ReviewTab({ entries, onOpen, filtered }) {
           <div key={e.artifact.id} data-qc={QC_HOOKS.asset} data-qc-artifact={e.artifact.id}>
             <Head title={e.label} note={v.text} />
             {rows.length
-              ? rows.map((r, i) => <CheckRow key={r.check_key + ':' + i} artifactId={e.artifact.id} row={r} onOpen={onOpen} />)
+              ? rows.map((r, i) => <CheckRow key={r.check_key + ':' + i} artifactId={e.artifact.id} row={r} onOpen={onOpen} onGoToField={onGoToField} />)
               : <Quiet>{v.ran ? 'The reviewer ran but recorded no findings for this asset.' : 'Nothing here has been second-guessed.'}</Quiet>}
           </div>
         )
@@ -642,7 +655,7 @@ function ChangeLog({ entries, onOpen, onRefresh }) {
 
 // ── the rail ────────────────────────────────────────────────────────────────────────────────────
 
-export default function QcRail({ packetId, company, role, entries, setResult, requirements, reqError, reqLoading = false }) {
+export default function QcRail({ packetId, company, role, entries, setResult, requirements, reqError, reqLoading = false, onGoToField }) {
   const [tab, setTab] = useState('coverage')
   const [pick, setPick] = useState(null)
   const [drawer, setDrawer] = useState(null)          // { artifactId, section }
@@ -821,8 +834,8 @@ export default function QcRail({ packetId, company, role, entries, setResult, re
         {tab === 'coverage' && <CoverageTab requirements={requirements} reqError={reqError} reqLoading={reqLoading} entries={entries} pick={pick} setPick={setPick} />}
         {tab === 'compare' && <CompareTab swaps={swaps.data} loading={swaps.loading} error={swaps.error} pick={pick} />}
         {tab === 'loops' && <LoopsTab entries={entries} filtered={!!picked} />}
-        {tab === 'checks' && <ChecksTab entries={entries} pick={pick} requirements={requirements} onOpen={openField} />}
-        {tab === 'review' && <ReviewTab entries={entries} onOpen={openField} filtered={!!picked} />}
+        {tab === 'checks' && <ChecksTab entries={entries} pick={pick} requirements={requirements} onOpen={openField} onGoToField={onGoToField} />}
+        {tab === 'review' && <ReviewTab entries={entries} onOpen={openField} filtered={!!picked} onGoToField={onGoToField} />}
       </div>
 
       {/* The per-asset verdict is P5.3's drawer, opened OVER this step - not a second QC panel.

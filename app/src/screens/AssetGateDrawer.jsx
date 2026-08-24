@@ -9,6 +9,7 @@ import {
   GATE_HOOKS,
 } from '../assetGate.js'
 import { HIGHLIGHT_CLASS } from '../highlight.js'
+import { useScrollToFocus, focusRingStyle } from '../focusRing.js'
 
 // P5.3 - the per-asset gate drawer.
 //
@@ -134,13 +135,9 @@ export const TABS = [
 // scrolls itself into view and is outlined; nothing else about the tab changes, and a null
 // focusField leaves the tab exactly as it was.
 function BlocksTab({ data, loading, error, focusField }) {
-  const focusRef = useRef(null)
-  useEffect(() => {
-    const el = focusRef.current
-    if (focusField && el && typeof el.scrollIntoView === 'function') {
-      el.scrollIntoView({ block: 'center' })
-    }
-  }, [focusField, data])
+  // The scroll-to-focus behaviour moved to app/src/focusRing.js when the asset step gained the same
+  // gesture. Same hook, same ring, both call sites — see that file for why the ring persists.
+  const focusRef = useScrollToFocus(focusField, [data])
   if (loading) return <Quiet>Loading the blocks...</Quiet>
   if (error) return <Quiet>Could not load the blocks: {error}</Quiet>
   if (!data) return <Quiet>No block record for this asset.</Quiet>
@@ -158,7 +155,7 @@ function BlocksTab({ data, loading, error, focusField }) {
         <div key={r.merge_field} className="px-box-soft" data-qc={GATE_HOOKS.block} data-qc-section={r.merge_field}
           data-qc-field={r.merge_field} data-qc-generated={r.generated ? '1' : '0'}
           ref={r.merge_field === focusField ? focusRef : undefined}
-          style={{ padding: 10, marginBottom: 8, boxShadow: r.merge_field === focusField ? 'inset 0 0 0 2px var(--border-brand)' : undefined }}>
+          style={{ padding: 10, marginBottom: 8, boxShadow: focusRingStyle(r.merge_field === focusField) }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
             <span style={{ fontSize: 13, fontWeight: 600, flex: 1, minWidth: 140 }}>{fieldLabel(r.merge_field)}</span>
             <Pill tone={r.generated ? 'green' : 'panel'}>{r.generated ? 'generated' : 'static template text'}</Pill>
