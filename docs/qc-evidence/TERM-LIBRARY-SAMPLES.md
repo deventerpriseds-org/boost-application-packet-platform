@@ -140,6 +140,61 @@ benefits. `vice president` 234 is real but belongs to the **role taxonomy** (`pe
 
 ---
 
+## Sources — the prototype's list is Jul 30 and two of its four were later superseded
+
+The owner named both places, and both say what they say:
+
+- **`docs/qc-evidence/qc/data.js:25`** — `TERM_LIB = { id: 'ENG-LEAD v4', size: 1840, sources:
+  ['O*NET 29.2', 'Lightcast skills', '3.1k exec postings', 'ATS field dictionaries'], updated:
+  'Jul 30' }`, rendered by `packet.jsx:103` and `evidence.jsx:177`. (Four sources **including**
+  O*NET, not besides it.)
+- **`docs/qc-evidence/BACKLOG.md:79-82`** — the requirement: *"Terms must come from a curated
+  library, not from the model… O\*NET skills, a skills taxonomy such as Lightcast, scraped exec
+  postings, ATS vendor field dictionaries"*, and *"`jd_table`'s ATS Keyword column is a reasonable
+  bootstrap but is model-generated — treat it as candidates to seed the library, not as the library."*
+
+**That list is dated Jul 30. `.claude/QC-EVIDENCE-PLAN.md` records owner decisions from 2026-08-19
+that change two of the four.** The schema's `sources` enum (`schema.ts:230`) reads
+`onet | esco | jd_corpus | nist_csf | cncf | curated` — which is the post-decision list exactly, and
+is how you can tell the schema was written after those decisions rather than from the prototype.
+
+| Prototype source (Jul 30) | Status now | Where |
+|---|---|---|
+| O*NET 29.2 | **Kept**, but demoted to *supplement* | plan:421 |
+| Lightcast skills | **DECLINED — paid.** *"O\*NET only — free, no paid option… No Lightcast, no paid source."* | plan:387 |
+| 3.1k exec postings (scraped) | **Kept and PROMOTED to PRIMARY**, as our own corpus | plan:421-427 |
+| ATS field dictionaries | **NEVER DECIDED — the one genuine open question** | — |
+| *(added)* ESCO | **Included.** *"'O\*NET only' was aimed at paid vendors."* | plan:445 |
+| *(added)* NIST CSF 2.0 + NICE, CNCF landscape | **Safe to ingest wholesale** | plan:429-432 |
+
+Three consequences worth stating plainly:
+
+1. **The corpus is the primary exec source, not a fallback.** *"our own `jd_real` corpus is the
+   PRIMARY exec term source; O\*NET is the supplement — inverting the backlog's assumption"* — on
+   evidence of 1,230 real postings, **876 (71%) C-level/VP/Head-of**, with roadmap 626, board 480,
+   budget 416, operating model 222, digital transformation 153, P&L 83, M&A 66, SOC 2 34, all absent
+   from O*NET. **`termMiner.ts` is that decision implemented.**
+2. **Declining Lightcast cost less than it looks.** O*NET's `Hot Technology` / `In Demand` flags are
+   themselves Lightcast-derived — *"the demand signal we declined to pay for is already in the free
+   dataset."*
+3. **Licensing is already scoped.** Storing the token `TOGAF`/`ITIL`/`SAFe` is nominative use and
+   fine; importing their taxonomies is not. `SAFe` needs case-sensitive matching — `safe` appears in
+   302 postings, `scaled agile` in 8. Same class as the `AI`/*detail* problem.
+
+### Alias handling — already designed in, but the step that USES it does not exist
+
+BACKLOG:94 flags it as load-bearing: *"'SOC 2', 'SOC 2 Type II' and 'SOC2' must be one entry with
+aliases, or coverage counts will be wrong."* The schema honours that in full:
+`aliases text[]` + `alias_normalized text[]` (`schema.ts:221-222`), a **gin index on
+`alias_normalized`** so the matcher indexes alias forms (`:241`), `term_key` stable ACROSS versions
+with `soc_2` as its literal worked example (`:218`), and immutability so adding an alias creates
+version N+1 rather than silently changing a historical score.
+
+**The gap is not the schema — it is that nothing assigns aliases.** That happens when a
+`term_candidate` is promoted to a `term_library_entry`, and the promote step is unbuilt. It is also
+where `artificial intelligence` 151 and `machine learning` 107 fold into `ai_ml`, which is what the
+miner's existing `status: merged` + `merged_into` decision already exists to record.
+
 ## What is deliberately NOT here
 
 - **No model-invented terms.** Every row is corpus-attested. `scoreable` exists so a model

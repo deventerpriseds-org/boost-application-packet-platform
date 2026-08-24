@@ -3011,3 +3011,44 @@ so 2,734 rows are queued with no screen to approve them from; a promote step tur
 candidate into a `term_library_entry` with family/term_type/match_mode/aliases and publishing a
 version; and a re-mine. `artificial intelligence` 151 and `machine learning` 107 are ALIASES of
 `ai_ml`, which is exactly what the miner's existing `status: merged` + `merged_into` decision is for.
+
+### Term-library SOURCES reconciled 2026-08-24 — the prototype's list is Jul 30 and partly superseded
+
+Owner pointed at both recorded places, and both say what they say:
+- `docs/qc-evidence/qc/data.js:25` — `TERM_LIB = { id:'ENG-LEAD v4', size:1840, sources:['O*NET 29.2',
+  'Lightcast skills','3.1k exec postings','ATS field dictionaries'], updated:'Jul 30' }`, rendered by
+  `packet.jsx:103` and `evidence.jsx:177`. (Four sources INCLUDING O*NET.)
+- `docs/qc-evidence/BACKLOG.md:79-82` — the requirement + the `jd_table`-is-model-generated caveat.
+
+**But `.claude/QC-EVIDENCE-PLAN.md` records LATER owner decisions (2026-08-19) that change two of the
+four — and `schema.ts:230`'s `sources` enum (`onet | esco | jd_corpus | nist_csf | cncf | curated`)
+is the post-decision list exactly, which is how you can tell the schema was written after them.**
+
+| Prototype source | Status | Where |
+|---|---|---|
+| O*NET 29.2 | kept, DEMOTED to supplement | plan:421 |
+| Lightcast skills | **DECLINED — paid** ("O*NET only — free, no paid option… No Lightcast") | plan:387 |
+| 3.1k exec postings | kept and **PROMOTED to PRIMARY**, as our own corpus | plan:421-427 |
+| ATS field dictionaries | **NEVER DECIDED — genuine open question** | — |
+| *(added)* ESCO | included ("'O*NET only' was aimed at paid vendors") | plan:445 |
+| *(added)* NIST CSF 2.0 + NICE, CNCF landscape | safe to ingest wholesale | plan:429-432 |
+
+1. **The corpus is PRIMARY, not a fallback** — *"our own `jd_real` corpus is the PRIMARY exec term
+   source; O*NET is the supplement — inverting the backlog's assumption"*, on 1,230 postings, **876
+   (71%) C-level/VP/Head-of**: roadmap 626, board 480, budget 416, operating model 222, digital
+   transformation 153, P&L 83, M&A 66, SOC 2 34 — all absent from O*NET. **`termMiner.ts` IS that
+   decision implemented**, which is a second reason ignoring it was wrong.
+2. **Declining Lightcast cost less than it looks** — O*NET's `Hot Technology`/`In Demand` flags are
+   themselves Lightcast-derived; the demand signal is already in the free dataset.
+3. **Licensing already scoped** — the TOKEN `TOGAF`/`ITIL`/`SAFe` is nominative use and fine;
+   importing their taxonomies is not. `SAFe` needs CASE-SENSITIVE matching: `safe` 302 postings vs
+   `scaled agile` 8 — same class as `AI` matching *detail*/*email*/*retail*.
+
+**Alias handling is already in the schema; what is missing is the step that USES it.**
+BACKLOG:94 — *"'SOC 2', 'SOC 2 Type II' and 'SOC2' must be one entry with aliases, or coverage counts
+will be wrong."* Schema honours it: `aliases` + `alias_normalized` (`:221-222`), **gin index on
+`alias_normalized`** (`:241`), `term_key` stable across versions with `soc_2` as its worked example
+(`:218`), immutability so a new alias makes version N+1 instead of moving a historical score.
+Aliases get ASSIGNED at candidate→library promotion, and that step does not exist — the same place
+`artificial intelligence` 151 / `machine learning` 107 fold into `ai_ml` via the miner's existing
+`status: merged` + `merged_into`.
