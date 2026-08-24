@@ -30,7 +30,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { api } from '../api.js'
 import {
-  BLOCK_HOOKS, observedFor, KIND_ABBR, KIND_WORD, METHOD_LABEL,
+  BLOCK_HOOKS, observedFor, KIND_ABBR, KIND_WORD, KIND_LEGEND, METHOD_LABEL,
   countMismatchNote, deriveItems, draftSizeText, expectationFor, latestRows, listBodyModel, listsOf,
   targetFor,
   ASSET_ANSWERS_DEFAULT_OPEN, correctionsForField,
@@ -38,7 +38,7 @@ import {
 } from '../assetBlocks.js'
 import { HIGHLIGHT_CLASS } from '../highlight.js'
 import { checkLabel, fieldLabel } from '../assetGate.js'
-import { offendersByField, offendersForField, railChangeLog } from '../qcRail.js'
+import { arr, offendersByField, offendersForField, railChangeLog } from '../qcRail.js'
 import { CorrectionRow } from './QcRail.jsx'
 
 export { BLOCK_HOOKS }
@@ -149,8 +149,33 @@ function ReqChip({ req }) {
   return (
     <span className="px-chip" title={`${KIND_WORD[req.kind] || req.kind || 'requirement'} - ${req.item_text || ''}`}
       style={{ background: 'var(--proto-accent-soft)', color: 'var(--text-brand)', fontWeight: 600 }}>
-      {abbr}{n === null ? '' : n}
+      {abbr}{n === null ? '' : ` ${n}`}
     </span>
+  )
+}
+
+/**
+ * What the chip abbreviations mean, spelled out once per asset.
+ *
+ * The chips were opaque tokens on every asset step: `M3`, `N1`, `R2` with the expansion available
+ * only in a `title` tooltip, which does not exist on touch and is invisible to anyone scanning. A
+ * reader could not tell whether `R` was "required" or "responsibility" — and it was the latter,
+ * while `M` was the former, so the obvious guess was wrong.
+ *
+ * ONLY the kinds actually present on this asset, so it stays a legend rather than a glossary of
+ * things the reader cannot see. Rendered from KIND_LEGEND, which is built from the same two maps
+ * the chips read, so a kind can never be chipped and un-legended.
+ */
+function ReqLegend({ reqs }) {
+  const present = new Set(arr(reqs).map((r) => r && r.kind).filter(Boolean))
+  const rows = KIND_LEGEND.filter((l) => present.has(l.kind))
+  if (rows.length < 1) return null
+  return (
+    <div className="px-small" data-qc={BLOCK_HOOKS.reqLegend} style={{ textTransform: 'none', display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+      {rows.map((l) => (
+        <span key={l.kind}><b>{l.abbr}</b> {l.word}</span>
+      ))}
+    </div>
   )
 }
 
@@ -433,10 +458,17 @@ function AssetBlock({ row, reqs, swapsForList, wide, artifactId, listOwners, thr
         </div>
       )}
 
-      {/* The field's own controls, in the prototype's words and the prototype's place: under the
-          text, same position on every field (screens/INDEX.md 11, "Show original  Ask for a change").
+      {/* The field's own controls, in the prototype's place: under the text, same position on every
+          field (screens/INDEX.md 11, "Show original  Ask for a change").
           "Compare with original" was the app's phrasing for the same act; the design says
-          "Show original", and it pairs with "Hide original" which was already correct. */}
+          "Show original", and it pairs with "Hide original" which was already correct.
+
+          "LIST TWEAKS", NOT the prototype's "Ask for a change" - the owner renamed it, and the
+          new name is the more honest one. This control does not ASK anyone for anything: it sends
+          the instruction plus the field's current text to the model and writes the revised text
+          straight back (`appPackets.ts:1299` artifactAiEdit). It is an edit you make, phrased as a
+          list of tweaks. The old name also collided with `Request changes` on the artifact card,
+          which sounded like the same act and was not. */}
       <div style={{ marginTop: 8, display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
         {row.before_text && (
           <span className="px-link" role="button" tabIndex={0} aria-expanded={showBefore}
@@ -463,7 +495,7 @@ function AssetBlock({ row, reqs, swapsForList, wide, artifactId, listOwners, thr
               e.preventDefault()
               setAskOpen((v) => !v)
             }}>
-            {askOpen ? 'Cancel' : 'Ask for a change'}
+            {askOpen ? 'Cancel' : 'List Tweaks'}
           </span>
         )}
       </div>
@@ -473,7 +505,7 @@ function AssetBlock({ row, reqs, swapsForList, wide, artifactId, listOwners, thr
           <div className="px-small" style={{ textTransform: 'none' }}>
             This rewrites <b>{row.merge_field}</b> only. Anything auto-corrected in it can no longer be undone.
           </div>
-          <textarea className="px-input" rows={2} value={ask} placeholder="What should change about this field?"
+          <textarea className="px-input" rows={2} value={ask} placeholder="List the tweaks for this field"
             onChange={(e) => setAsk(e.target.value)} style={{ width: '100%', marginTop: 4, resize: 'vertical' }} />
           {askError && <div className="px-note" style={{ marginTop: 6 }}>{askError}</div>}
           <div style={{ display: 'flex', gap: 6, marginTop: 4 }}>
@@ -556,7 +588,7 @@ function AssetBlock({ row, reqs, swapsForList, wide, artifactId, listOwners, thr
                     if (e.key !== 'Enter' && e.key !== ' ') return
                     e.preventDefault()
                     seedAskReword(phrase)
-                  }}>Ask for a reword</span>
+                  }}>Tweak this</span>
               )}
             </div>
           ))}
@@ -578,6 +610,9 @@ function AssetBlock({ row, reqs, swapsForList, wide, artifactId, listOwners, thr
           <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
             {reqs.map((r) => <ReqChip key={r.id} req={r} />)}
           </div>
+          {/* Directly under the chips it explains, and only for the kinds this field actually
+              carries. A tooltip was the only expansion before, which no touch device shows. */}
+          <div style={{ marginTop: 4 }}><ReqLegend reqs={reqs} /></div>
         </div>
       )}
 

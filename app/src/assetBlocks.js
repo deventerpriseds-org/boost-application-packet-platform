@@ -40,13 +40,14 @@ export const BLOCK_HOOKS = {
   before: 'blocks-before',
   meterToggle: 'blocks-answers-toggle',   // the disclosure on "What this X answers"
   meterSummary: 'blocks-answers-summary', // the counts kept on the COLLAPSED row
-  askChange: 'blocks-ask-change',         // per-field "Ask for a change" (prototype: under the text)
+  askChange: 'blocks-ask-change',         // per-field "List Tweaks" (prototype: "Ask for a change")
   askBox: 'blocks-ask-box',
   askSend: 'blocks-ask-send',
   fieldSlot: 'blocks-field-slot',         // the raw merge field, kept beside the human name
   fieldTarget: 'blocks-field-target',     // the rule the field is held to, from the owner's thresholds
   fieldChangeLog: 'blocks-corrected-for-you', // the field's own "Corrected for you" list (P8.6 inline).
   fieldWordingKept: 'blocks-wording-kept',    // "Wording kept from the posting", in the field's margin
+  reqLegend: 'blocks-req-legend',             // what RQ-MH / RQ-NTH / RESP mean, once per asset
   wordingAsk: 'blocks-wording-ask',           // seeds the field's own ask box with a reword request
   meterCorrected: 'blocks-answers-corrected', // "N corrected" kept on the COLLAPSED row
   // NOT named `corrections`: corrections.test.mjs forbids /\.corrections\b/ in any .jsx so no
@@ -157,8 +158,11 @@ export function draftSizeText(row, expect) {
   return `${bullets}${wordCount(row && row.after_text)} words`
 }
 
-export const KIND_ABBR = { must_have: 'M', nice_to_have: 'N', responsibility: 'R' }
-export const KIND_WORD = { must_have: 'must-have', nice_to_have: 'nice-to-have', responsibility: 'responsibility' }
+// RE-EXPORTED, not redefined — the same discipline as METHOD_LABEL below, and for the same reason.
+// This file used to carry its own `M`/`N`/`R` pair while postingAnalysis.js carried `MH`/`NTH`/
+// `RESP`, so one requirement row rendered two different ways on two screens the reader can open
+// side by side. One definition, one set of words. See postingAnalysis.js for the values' rationale.
+export { KIND_ABBR, KIND_WORD, KIND_LEGEND } from './postingAnalysis.js'
 
 /**
  * How the row's own `method` reads in plain language — RE-EXPORTED, not redefined.

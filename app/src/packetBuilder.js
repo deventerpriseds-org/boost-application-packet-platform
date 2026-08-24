@@ -51,3 +51,53 @@ export const PACKET_HOOKS = {
  * is strictly worse than leaving the draft visible.
  */
 export const ASSET_BODY_DEFAULT_OPEN = true
+
+/**
+ * Regenerate an artifact, optionally steered by a note — the ONE sequencing rule, in one place.
+ *
+ * WHY THIS IS A FUNCTION AND NOT TWO INLINE HANDLERS. It is used by both artifact cards
+ * (PacketBuilder and OppDetail). Written inline it was copied verbatim into the second screen, and
+ * a copy of a rule about ORDERING is exactly the copy that drifts: the day one screen is changed to
+ * fire the two calls concurrently, nothing catches it, and the symptom is silent — a rebuild that
+ * ignored your note.
+ *
+ * THE ORDER IS THE WHOLE POINT. The generate path reads unresolved notes at its START
+ * (`appPackets.ts:503`, into `revisionNotes`) and marks them resolved at its END (`:575`). So the
+ * note must be durable in `packet.feedback` BEFORE generate runs. Fire them together, or generate
+ * first, and the rebuild ignores the note and then resolves it — the note is consumed having
+ * steered nothing, and `resolved` is precisely what stops it replaying, so it is gone.
+ *
+ * A FAILED NOTE ABORTS, it does not fall through to an unsteered rebuild. Three model passes that
+ * the owner believes were steered and were not is the worse outcome, and it is the one that looks
+ * like the model ignoring them rather than like a save that failed.
+ *
+ *   note      the raw prompt result: null/undefined = cancelled, '' = deliberate plain re-roll
+ *   saveNote  async (text) -> the setArtifactStatus response; must report `feedbackAdded`
+ *   generate  async () -> runs the rebuild
+ *
+ * Returns { ran, steered, reason, error } rather than throwing: every caller renders a toast, and
+ * two of the three outcomes are not errors.
+ */
+export async function regenerateWithNote({ note, saveNote, generate }) {
+  if (note === null || note === undefined) return { ran: false, steered: false, reason: 'cancelled' }
+  const trimmed = String(note).trim()
+  if (trimmed) {
+    let res
+    try {
+      res = await saveNote(trimmed)
+    } catch (e) {
+      return { ran: false, steered: false, reason: 'note-failed', error: String((e && e.message) || e) }
+    }
+    // `feedbackAdded: false` is the server telling us the jsonb append failed while the status
+    // change succeeded — it is NON-fatal there by design, and fatal HERE, because the note is the
+    // only reason this rebuild differs from pressing the button with a blank prompt.
+    if (!res || res.error) {
+      return { ran: false, steered: false, reason: 'note-failed', error: String((res && res.error) || 'no response') }
+    }
+    if (!res.feedbackAdded) {
+      return { ran: false, steered: false, reason: 'note-failed', error: 'the note was not stored' }
+    }
+  }
+  await generate()
+  return { ran: true, steered: !!trimmed, reason: trimmed ? 'steered' : 'plain' }
+}

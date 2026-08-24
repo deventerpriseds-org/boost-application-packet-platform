@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useCallback } from 'react'
 import { useApp, go, useRoute } from '../state.jsx'
 import { api } from '../api.js'
+import { regenerateWithNote } from '../packetBuilder.js'
 import { Pill, SignalIcon, MatchScore } from '../shell.jsx'
 import { Loading, ErrorBox, Empty } from './Today.jsx'
 
@@ -541,6 +542,28 @@ function ResumeTab({ o, toast }) {
     try { const r = await api.setArtifactStatus(a.id, status); if (r.error) throw new Error(r.error); toast(`Resume → ${status}`) }
     catch (e) { patch(a.id, { status: prev }); toast(`Update failed: ${e.message || e}`) }
   }
+  /**
+   * Regenerate, optionally steered by a note. The SAME shape as PacketBuilder's — this screen is the
+   * second consumer of the artifact controls, and a fix present in one and absent here is exactly
+   * the "fix all consumers" failure the file already calls out three lines below.
+   *
+   * What was here before was worse than a duplicate: `Request changes` called `setStatus(a,
+   * 'changes')` with NO note argument. The server stores a note only under
+   * `if (status === 'changes' && note)`, so nothing was written, the next Regenerate read zero
+   * unresolved notes and re-rolled with byte-identical inputs. The button set a status that gates
+   * nothing and steered nothing — a dead control, against the "no dead UI" rule.
+   *
+   * Order matters: the note must land in packet.feedback BEFORE generate reads it. See the
+   * PacketBuilder copy of this function for the full reasoning.
+   */
+  const onRegenerate = async (a) => {
+    const r = await regenerateWithNote({
+      note: window.prompt('Regenerate the resume.\n\nAnything to change? Leave blank to rebuild as-is.', ''),
+      saveNote: (text) => api.setArtifactStatus(a.id, 'changes', text),
+      generate: () => generate(a),
+    })
+    if (r.reason === 'note-failed') toast(`Not regenerated - your note could not be saved: ${r.error}`)
+  }
   // The SECOND consumer of generateArtifactDocument. A reachability fix present in PacketBuilder and
   // absent here is the "fix all consumers" failure, so it takes the same options argument.
   const makeDoc = async (a, opts = {}) => {
@@ -604,8 +627,7 @@ function ResumeTab({ o, toast }) {
             {(a.status === 'review' || a.status === 'changes') && (
               <>
                 <button className="px-btn px-btn-green" onClick={() => setStatus(a, 'approved')}>Approve</button>
-                <button className="px-btn" disabled={busy === a.id} onClick={() => generate(a)}>{busy === a.id ? 'Regenerating…' : 'Regenerate'}</button>
-                {a.status !== 'changes' && <button className="px-btn" onClick={() => setStatus(a, 'changes')}>Request changes</button>}
+                <button className="px-btn" disabled={busy === a.id} onClick={() => onRegenerate(a)}>{busy === a.id ? 'Regenerating…' : 'Regenerate'}</button>
               </>
             )}
             {a.status === 'approved' && <button className="px-btn" onClick={() => setStatus(a, 'review')}>Reopen</button>}

@@ -8,8 +8,9 @@
 // watching "a blended must-have count is never printed as one number" fail).
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import { join } from 'node:path'
 import {
-  KIND_ABBR, KIND_SOURCE_NOTE, KIND_SOURCE_SHORT, NO_QUOTE_REASON,
+  KIND_ABBR, KIND_LEGEND, KIND_SOURCE_NOTE, KIND_SOURCE_SHORT, NO_QUOTE_REASON,
   kindSourceNote, noQuoteReason, isQuoted, modelKeywords, groupRequirements,
   summarizeKindSource, isEvidencedKindSource, keywordLibraryState, postingBody,
   KEYWORD_2UP_MIN, keywordColumns, keywordGridTemplate, POSTING_HOOKS,
@@ -274,7 +275,7 @@ test('every kind the extractor emits has an abbreviation for the row chip', () =
 // markup contains — the repo has no DOM test runner, and a rule about test hooks and label text
 // cannot be exercised at runtime here. Comments are stripped before matching so a guard can never
 // fire on the note explaining it (a guard people learn to ignore is worse than no guard).
-import { readFileSync } from 'node:fs'
+import { readFileSync, readdirSync, statSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { PACKET_HOOKS } from '../src/packetBuilder.js'
 
@@ -515,4 +516,60 @@ test('H:keyword-claim-follows-provenance: the rendered screen reads its label fr
   for (const gone of ['Terms the analysis run pulled out of the posting -', 'Compared against your profile and flagged as thin -']) {
     assert.ok(!jsx.includes(gone), `a keyword heading is hand-typed in the .jsx again: ${gone}`)
   }
+})
+
+// ── requirement-kind abbreviations: ONE map, and a legend that covers it ─────────────────────────
+
+test('H:kind-abbr-single-definition: no second abbreviation map anywhere in app/src', () => {
+  // THERE WERE TWO AND THEY DISAGREED. This file said MH/NTH/RESP; assetBlocks.js:160 said M/N/R.
+  // So one requirement row rendered as `MH #3` on the posting-analysis screen and `M3` on every
+  // asset step — the same defect as the METHOD_LABEL pair, found the same way. assetBlocks.js now
+  // RE-EXPORTS this one. A grep, not a behaviour test, because two modules each holding a correct
+  // -looking literal is a structural fact no runtime assertion can see.
+  const strip = (s) => s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')
+  const walk = (dir, out = []) => {
+    for (const name of readdirSync(dir)) {
+      const full = join(dir, name)
+      if (statSync(full).isDirectory()) walk(full, out)
+      else if (/\.(js|jsx)$/.test(name)) out.push(full)
+    }
+    return out
+  }
+  const srcDir = fileURLToPath(new URL('../src/', import.meta.url))
+  const definers = walk(srcDir).filter((f) =>
+    /(?:export\s+)?const\s+KIND_ABBR\s*=/.test(strip(readFileSync(f, 'utf8'))))
+  assert.deepEqual(definers.map((f) => f.slice(srcDir.length)), ['postingAnalysis.js'],
+    'KIND_ABBR must be DEFINED in exactly one module; every other file re-exports or imports it')
+})
+
+test('H:kind-abbr-values: the owner-set abbreviations, and the RQ- stem that carries the meaning', () => {
+  // Owner call 2026-08-23. The stem is the point: a must-have and a nice-to-have are two GRADES of
+  // one thing (a requirement), a responsibility is a different kind of line. M/N/R flattened three
+  // unequal things into three equal-looking letters.
+  assert.equal(KIND_ABBR.must_have, 'RQ-MH')
+  assert.equal(KIND_ABBR.nice_to_have, 'RQ-NTH')
+  assert.equal(KIND_ABBR.responsibility, 'RESP')
+  assert.ok(KIND_ABBR.must_have.startsWith('RQ-') && KIND_ABBR.nice_to_have.startsWith('RQ-'),
+    'both requirement grades must share the RQ- stem')
+  assert.ok(!KIND_ABBR.responsibility.startsWith('RQ-'),
+    'a responsibility is not a requirement and must not carry the stem')
+})
+
+test('H:kind-legend-covers-every-chip: nothing can be chipped and left unexplained', () => {
+  // The chips were opaque tokens with the expansion only in a `title` tooltip — which no touch
+  // device shows. The legend is built FROM the same maps the chips read, so a kind cannot be
+  // rendered without a row explaining it.
+  for (const k of Object.keys(KIND_ABBR)) {
+    const row = KIND_LEGEND.find((l) => l.kind === k)
+    assert.ok(row, `${k} can be chipped but has no legend row`)
+    assert.equal(row.abbr, KIND_ABBR[k])
+    assert.ok(row.word && row.word.length > 2, `${k} has no spelled-out word`)
+  }
+  assert.equal(KIND_LEGEND.length, Object.keys(KIND_ABBR).length)
+
+  // And the asset step must actually RENDER it, not merely be able to.
+  const blocks = readFileSync(new URL('../src/screens/AssetBlocks.jsx', import.meta.url), 'utf8')
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+  assert.match(blocks, /<ReqLegend\s+reqs=/, 'the legend is defined but never rendered')
+  assert.match(blocks, /KIND_LEGEND\.filter/, 'the legend must be derived from KIND_LEGEND, not retyped')
 })

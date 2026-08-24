@@ -28,3 +28,102 @@ test('both screens expose a Rebuild control in the branch where a doc already ex
       `${file}: the Rebuild control is not in the branch where the doc already exists — which is the only state it matters in`)
   }
 })
+
+// ── Regenerate absorbs the note; `Request changes` is gone ───────────────────────────────────────
+//
+// `Request changes` was never a sibling of Regenerate — it was a PARAMETER of it. It wrote a note
+// and returned; the draft only moved when Regenerate was pressed afterwards. And the `changes`
+// status it set carries no meaning: `recomputePacket` tests only `=== 'approved'` and `!== 'todo'`,
+// so `changes` and `review` produce an identical packet status, and the single behavioural use of
+// the value in the whole API is `appPackets.ts:341`, deciding whether to store the note.
+//
+// Worse, OppDetail's copy called `setStatus(a, 'changes')` with NO note argument. The server stores
+// a note only under `if (status === 'changes' && note)`, so nothing was written, the next
+// Regenerate read zero unresolved notes, and it re-rolled with byte-identical inputs. A control
+// that did nothing at all.
+import { regenerateWithNote } from '../src/packetBuilder.js'
+
+const calls = () => {
+  const seen = []
+  return {
+    seen,
+    saveNote: async (t) => { seen.push(`save:${t}`); return { ok: true, feedbackAdded: true } },
+    generate: async () => { seen.push('generate') },
+  }
+}
+
+test('H:regen-note-lands-before-the-rebuild: the note is durable before generate reads it', async () => {
+  // THE ORDER IS THE INVARIANT. The generate path reads unresolved notes at its START
+  // (appPackets.ts:503) and marks them resolved at its END (:575). Generate first — or fire both
+  // together — and the rebuild ignores the note and then resolves it: consumed, having steered
+  // nothing, and gone, because `resolved` is what stops a note replaying.
+  const c = calls()
+  const r = await regenerateWithNote({ note: 'lead with platform work', saveNote: c.saveNote, generate: c.generate })
+  assert.deepEqual(c.seen, ['save:lead with platform work', 'generate'], 'the note must be saved BEFORE generate')
+  assert.deepEqual(r, { ran: true, steered: true, reason: 'steered' })
+})
+
+test('H:regen-note-failure-aborts: an unsteered rebuild is never silently substituted', async () => {
+  // Three model passes the owner believes were steered and were not is the worse outcome, and it
+  // reads as the model ignoring the note rather than as a save that failed.
+  const thrown = { seen: [], saveNote: async () => { throw new Error('offline') }, generate: async () => { thrown.seen.push('generate') } }
+  const a = await regenerateWithNote({ note: 'x', saveNote: thrown.saveNote, generate: thrown.generate })
+  assert.equal(a.ran, false); assert.equal(a.reason, 'note-failed')
+  assert.deepEqual(thrown.seen, [], 'generate ran despite the note never being saved')
+
+  // The server reports a failed jsonb append as `feedbackAdded: false` with a 200 — non-fatal
+  // THERE by design, fatal HERE, because the note is the only thing that makes this rebuild differ
+  // from a blank one. A 200 with the work not done is not a pass.
+  const seen2 = []
+  const b = await regenerateWithNote({
+    note: 'x',
+    saveNote: async () => ({ ok: true, feedbackAdded: false }),
+    generate: async () => { seen2.push('generate') },
+  })
+  assert.equal(b.ran, false); assert.equal(b.reason, 'note-failed')
+  assert.deepEqual(seen2, [], 'a 200 with feedbackAdded:false must not regenerate')
+
+  // An explicit error field, same treatment.
+  const seen3 = []
+  const c3 = await regenerateWithNote({
+    note: 'x', saveNote: async () => ({ error: 'nope' }), generate: async () => { seen3.push('generate') },
+  })
+  assert.equal(c3.ran, false)
+  assert.deepEqual(seen3, [])
+})
+
+test('H:regen-blank-is-a-plain-reroll-and-cancel-does-nothing', async () => {
+  // Blank is a DELIBERATE re-roll and must not write a `changes` status — the server would ignore
+  // an empty note anyway, and writing the status would set a value that gates nothing.
+  const c = calls()
+  const blank = await regenerateWithNote({ note: '', saveNote: c.saveNote, generate: c.generate })
+  assert.deepEqual(c.seen, ['generate'], 'a blank note must not write a status')
+  assert.deepEqual(blank, { ran: true, steered: false, reason: 'plain' })
+
+  // Whitespace is blank. Otherwise a stray space buys a `changes` write the server discards.
+  const c2 = calls()
+  await regenerateWithNote({ note: '   ', saveNote: c2.saveNote, generate: c2.generate })
+  assert.deepEqual(c2.seen, ['generate'])
+
+  // Cancel does NOTHING — the outcome a separate button could not express.
+  const c3 = calls()
+  const cancelled = await regenerateWithNote({ note: null, saveNote: c3.saveNote, generate: c3.generate })
+  assert.deepEqual(c3.seen, [])
+  assert.equal(cancelled.ran, false)
+  assert.equal(cancelled.reason, 'cancelled')
+})
+
+test('H:no-request-changes-control: both screens regenerate through the shared sequencer', () => {
+  const strip = (s) => s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')
+  for (const file of ['PacketBuilder.jsx', 'OppDetail.jsx']) {
+    const src = strip(readFileSync(new URL(`../src/screens/${file}`, import.meta.url), 'utf8'))
+    assert.ok(!/Request changes/.test(src), `${file} still renders a Request changes control`)
+    // The dead form specifically: a 'changes' write with no note reaches the server as a status
+    // that stores nothing and steers nothing.
+    assert.ok(!/setStatus\(\s*a\s*,\s*'changes'\s*\)/.test(src),
+      `${file} writes the 'changes' status with no note - the server discards it`)
+    assert.match(src, /regenerateWithNote\(/, `${file} does not use the shared regenerate sequencer`)
+    // Copied inline instead of shared is how a rule about ORDERING drifts between two screens.
+    assert.ok(!/feedbackAdded/.test(src), `${file} re-implements the note sequencing inline`)
+  }
+})

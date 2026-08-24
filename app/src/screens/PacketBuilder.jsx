@@ -10,7 +10,7 @@ import {
   ProfileCompareCard,
 } from './PostingAnalysis.jsx'
 import { postingBody } from '../postingAnalysis.js'
-import { PACKET_HOOKS, ASSET_BODY_DEFAULT_OPEN } from '../packetBuilder.js'
+import { PACKET_HOOKS, ASSET_BODY_DEFAULT_OPEN, regenerateWithNote } from '../packetBuilder.js'
 import QcRail, { useQcEntries } from './QcRail.jsx'
 import { qcStepState, packetGate, railGateMeta, packetReadiness } from '../qcRail.js'
 
@@ -79,7 +79,7 @@ function stepDone(key, p, artifacts, qc) {
 // Exported so the browser probe can mount the REAL card (test/browser/run-asset-blocks.mjs). The
 // header's collapsed default is a rendering fact; asserting it against a replica of this component
 // would prove only that the replica was written to match.
-export function ArtifactCard({ a, busy, setBusy, onGenerate, onSetStatus, onMakeDoc, onMakeSlides, onGenVideo, onArchiveVideo, doc, video, provenance, listOwners, onListsRendered }) {
+export function ArtifactCard({ a, busy, setBusy, onGenerate, onRegenerate, onSetStatus, onMakeDoc, onMakeSlides, onGenVideo, onArchiveVideo, doc, video, provenance, listOwners, onListsRendered }) {
   const v = video[a.id] || {}
   const d = doc[a.id] || {}
   const videoUrl = v.url || a.docUrl
@@ -202,19 +202,27 @@ export function ArtifactCard({ a, busy, setBusy, onGenerate, onSetStatus, onMake
         {(a.status === 'review' || a.status === 'changes') && (
           <>
             <button className="px-btn px-btn-green" onClick={() => onSetStatus(a, 'approved')}>Approve</button>
-            <button className="px-btn" disabled={busy === a.id} onClick={() => onGenerate(a)}>
+            {/* ONE BUTTON, because `Request changes` was never a sibling of this one - it was a
+                PARAMETER of it, and shipping it as a separate control made it look like an action
+                that does something on its own. It does not: it writes a note and returns, and the
+                draft only moves when Regenerate is pressed afterwards. Two clicks and a modal for
+                what is really "Regenerate, with a note".
+
+                Nor did the `changes` status carry meaning. `recomputePacket` only ever tests
+                `=== 'approved'` and `!== 'todo'`, so `changes` and `review` produce an IDENTICAL
+                packet status; the single behavioural use of the value in the whole API is
+                `appPackets.ts:341`, deciding whether to store the note. It gated nothing.
+
+                So the note is now collected BY Regenerate. Blank re-rolls (today's behaviour);
+                text is written to packet.feedback first and read back by the generate path as
+                `revisionNotes` (appPackets.ts:503), exactly as before - same transport, one control.
+                Cancel does nothing at all, which a separate button could not express.
+
+                `changes` stays in the enum and the schema CHECK - we simply stop writing it. There
+                are live rows carrying it and a migration would buy nothing. */}
+            <button className="px-btn" disabled={busy === a.id} onClick={() => onRegenerate(a)}>
               {busy === a.id ? 'Regenerating…' : 'Regenerate'}
             </button>
-            {a.status !== 'changes' && (
-              <button className="px-btn" onClick={() => {
-                // The reason is the whole point: a status alone told the next Regenerate nothing,
-                // so it re-ran with identical inputs. Cancel leaves the artifact untouched; an
-                // empty note still sends it back, just without steering.
-                const note = window.prompt(`What should change about the ${TYPE_LABEL[a.type]}?`, '')
-                if (note === null) return
-                onSetStatus(a, 'changes', note.trim())
-              }}>Request changes</button>
-            )}
           </>
         )}
         {a.status === 'approved' && (
@@ -502,17 +510,44 @@ export default function PacketBuilder({ id, step }) {
     } catch (err) { setVideo((v) => ({ ...v, [a.id]: { ...v[a.id], archiving: false } })); toast(`Archive failed: ${err.message || err}`) }
   }
 
-  const setStatus = async (a, status, note) => {
+  // Approve and Reopen only. The `note` parameter and its `feedbackAdded` toast branch went with
+  // `Request changes`: this function is now reached only from controls that never pass a note, so
+  // the branch was unreachable. `regenerateWithNote` owns note-carrying status writes.
+  const setStatus = async (a, status) => {
     const prev = a.status
     patchArtifact(a.id, { status })
     try {
-      const res = await api.setArtifactStatus(a.id, status, note)
+      const res = await api.setArtifactStatus(a.id, status)
       if (res.error) throw new Error(res.error)
       setPState((s) => ({ ...s, packet: { ...s.packet, status: res.packetStatus } }))
-      toast(status === 'approved' ? `Approved ${TYPE_LABEL[a.type]}`
-        : res.feedbackAdded ? `${TYPE_LABEL[a.type]} sent back — your note will steer the next rebuild`
-        : `${TYPE_LABEL[a.type]} → ${status}`)
+      toast(status === 'approved' ? `Approved ${TYPE_LABEL[a.type]}` : `${TYPE_LABEL[a.type]} → ${status}`)
     } catch (err) { patchArtifact(a.id, { status: prev }); toast(`Update failed: ${err.message || err}`) }
+  }
+
+  /**
+   * Regenerate, optionally steered by a note — the two controls this screen used to have.
+   *
+   * ORDER MATTERS AND IS THE WHOLE FUNCTION. The note must be in `packet.feedback` BEFORE the
+   * generate call runs, because the generate path reads unresolved notes at its start
+   * (`appPackets.ts:503`) and marks them resolved at its end (`:575`). Firing both at once, or
+   * generating first, produces a rebuild that ignores the note and then resolves it — the note is
+   * consumed having steered nothing, and it is gone, because `resolved` is what stops a note
+   * replaying. So the status write is awaited, and a failure to store the note ABORTS rather than
+   * regenerating without it: an unsteered rebuild the owner believes was steered is the worse
+   * outcome, and it costs three model passes to produce.
+   *
+   * Cancel (null) does nothing. Empty string is a deliberate plain re-roll and skips the note write
+   * entirely — `status === 'changes' && note` on the server would ignore it anyway, and writing
+   * `changes` for an empty note would set a status that means nothing (see the button's comment).
+   */
+  const onRegenerate = async (a) => {
+    const r = await regenerateWithNote({
+      note: window.prompt(
+        `Regenerate the ${TYPE_LABEL[a.type]}.\n\nAnything to change? Leave blank to rebuild as-is.`, ''),
+      saveNote: (text) => api.setArtifactStatus(a.id, 'changes', text),
+      generate: () => generate(a),
+    })
+    if (r.reason === 'note-failed') toast(`Not regenerated - your note could not be saved: ${r.error}`)
   }
 
   // THE OWNER TELLS US THEY APPLIED. Deliberate, never inferred.
@@ -678,7 +713,7 @@ export default function PacketBuilder({ id, step }) {
             )}
             {stepArtifacts.map((a) => (
               <ArtifactCard key={a.id} a={a} busy={busy} setBusy={setBusy}
-                onGenerate={generate} onSetStatus={setStatus}
+                onGenerate={generate} onRegenerate={onRegenerate} onSetStatus={setStatus}
                 onMakeDoc={makeDoc} onMakeSlides={makeSlides}
                 onGenVideo={genVideo} onArchiveVideo={archiveVideo}
                 doc={doc} video={video} provenance={provenance}

@@ -2982,3 +2982,58 @@ still owed at the phase boundary.
 
 **NOT verified live.** These are rendered-locally changes only; nothing has been merged to `main`
 or deployed, and no live capture has been taken.
+
+PR #47 opened; **CI green** (run 32674773374, both `app` and `api` checks), **no reviewer** —
+`get_reviews` returns `[]`. Owner asked for the `verifier` before merge, which is also the batched
+run owed since the phase boundary.
+
+---
+
+#### 2026-08-23 (cont.) — three owner decisions, built
+
+**1. Chips are `RQ-MH` / `RQ-NTH` / `RESP`** (owner call; a fourth option, none of the three offered).
+The stem encodes the hierarchy: must-have and nice-to-have are two GRADES of a requirement, a
+responsibility is a different kind of line. **Building it surfaced a live duplicate** — `KIND_ABBR`
+was defined TWICE and the two disagreed: `assetBlocks.js` `M`/`N`/`R` vs `postingAnalysis.js`
+`MH`/`NTH`/`RESP`, so one requirement rendered `M3` on every asset step and `MH #3` on the posting
+analysis screen. Same defect class as the `METHOD_LABEL` pair. Now ONE definition in
+`postingAnalysis.js`, re-exported. `ReqLegend` renders the expansion under the chips, for the kinds
+present on that field only — previously the only expansion was a `title` tooltip, invisible on touch.
+
+**2. `Request changes` collapsed into `Regenerate`.** Owner: *"request changes seems very similar to
+regenerate"* — correct, and stronger than that: it was never a sibling, it was a **parameter**.
+Evidence: `recomputePacket` tests only `=== 'approved'` and `!== 'todo'`, so `changes` and `review`
+produce an IDENTICAL packet status; the sole behavioural use of the value in the whole API is
+`appPackets.ts:341`, deciding whether to store the note. It gated nothing, and pressing it changed
+nothing visible. **`OppDetail.jsx:608` was worse — a genuinely dead control**: `setStatus(a,
+'changes')` with NO note argument, so nothing was stored, the next Regenerate read zero unresolved
+notes and re-rolled byte-identical inputs. Regenerate now prompts *"Anything to change? Leave blank
+to rebuild as-is."* `changes` stays in the enum/CHECK; we simply stop writing it.
+
+**3. `Ask for a change` → `List Tweaks`** (owner). The new name is the more honest one: the control
+does not ask anyone for anything, it sends the instruction plus the current text to the model and
+writes the result straight back (`artifactAiEdit`). Placeholder and the wording-kept link followed
+(`Tweak this`).
+
+**The sequencing is now ONE shared function**, `regenerateWithNote` (`app/src/packetBuilder.js`) —
+written inline it was immediately copied verbatim into the second screen, and a copy of a rule about
+ORDERING is the copy that drifts. The order is the whole point: generate reads unresolved notes at
+its START (`appPackets.ts:503`) and resolves them at its END (`:575`), so a note saved after — or
+concurrently — is consumed having steered nothing, and `resolved` is what stops it replaying. A
+failed note ABORTS rather than falling through to an unsteered rebuild.
+
+**Eight guards, all mutation-proved** (`H:regen-note-lands-before-the-rebuild`,
+`H:regen-note-failure-aborts`, `H:regen-blank-is-a-plain-reroll-and-cancel-does-nothing`,
+`H:no-request-changes-control`, `H:kind-abbr-single-definition`, `H:kind-abbr-values`,
+`H:kind-legend-covers-every-chip`). Two notes on the proof:
+- **One mutation was behaviourally equivalent and is not claimed as proof.** Swallowing the
+  `saveNote` catch leaves `res` undefined, and the next line's `!res` check still returns
+  `note-failed` — defence in depth. Removing BOTH did fail the suite (M2b).
+- **A guard caught real dead code while being written.** `H:no-request-changes-control` forbids
+  `feedbackAdded` in the screens; it fired on `PacketBuilder.jsx:521`, a toast branch that became
+  unreachable the moment `setStatus` stopped receiving notes. Removed.
+
+240/240 app assertions green, build clean, no smart-quote hits.
+
+**Owner told us both DB connectors have lapsed OAuth** — `Boost_DB_Connector` AND `Azure_pg_mcp`
+both reported "requires authentication" this session. Told the owner; no DB was needed for this work.

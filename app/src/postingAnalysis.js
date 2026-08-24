@@ -158,7 +158,34 @@ export const COMPARE_SCOPE_NOTE =
 
 // ── requirement rows ────────────────────────────────────────────────────────────────────────────
 
-export const KIND_ABBR = { must_have: 'MH', nice_to_have: 'NTH', responsibility: 'RESP' }
+/**
+ * THE one requirement-kind abbreviation. `assetBlocks.js` re-exports this rather than defining a
+ * second — there WERE two, and they disagreed: this file said `MH`/`NTH`/`RESP` while
+ * `assetBlocks.js:160` said `M`/`N`/`R`, so one requirement row rendered as `MH #3` on the posting
+ * analysis screen and `M3` on every asset step. Same defect as the `METHOD_LABEL` pair, same fix.
+ *
+ * THE VALUES ARE THE OWNER'S CALL (2026-08-23), and the reason they are shaped this way is that
+ * they encode the actual hierarchy: a must-have and a nice-to-have are two GRADES OF THE SAME
+ * THING — a requirement, hence the shared `RQ-` stem — while a responsibility is a different kind
+ * of line altogether and takes no stem. `M`/`N`/`R` flattened three unequal things into three
+ * equal-looking letters, and `R` for responsibility sat one letter away from `RESP` in the other
+ * map, which is how the two drifted unnoticed.
+ *
+ * Rendered beside a number (`RQ-MH 3`), so it must stay short enough to chip. Any new kind added
+ * to `requirement.kind` needs an entry here or it degrades to `REQ`/`?` at the call sites.
+ */
+export const KIND_ABBR = { must_have: 'RQ-MH', nice_to_have: 'RQ-NTH', responsibility: 'RESP' }
+
+/** What each abbreviation means, spelled out. The legend renders these; tooltips reuse them. */
+export const KIND_WORD = { must_have: 'must-have', nice_to_have: 'nice-to-have', responsibility: 'responsibility' }
+
+/**
+ * The legend rows, in the order a reader should meet them: the two requirement grades together,
+ * then the responsibility that is not one. Built FROM the two maps above, so a kind can never
+ * appear in a chip and be missing from the legend.
+ */
+export const KIND_LEGEND = ['must_have', 'nice_to_have', 'responsibility']
+  .map((k) => ({ kind: k, abbr: KIND_ABBR[k], word: KIND_WORD[k] }))
 
 // requirement.kind_source records WHY a line was filed where it was.
 export const KIND_SOURCE_NOTE = {

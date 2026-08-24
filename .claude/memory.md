@@ -2858,6 +2858,28 @@ behind it here, so it would be a control that forgets) and its fabricated stat n
 failed the suite. Loosened to match the name inside the brace. When a guard fires on the thing it is
 asking for, the guard is what changes.
 
+**A control that writes a note and returns is a PARAMETER, not an action** (2026-08-23). `Request
+changes` looked like a sibling of `Regenerate` and was not: it wrote a note, changed nothing visible,
+and the draft only moved when Regenerate was pressed after it. The owner spotted it from the outside
+— *"request changes seems very similar to regenerate"* — before the code was read. When a button's
+whole effect is to prepare the NEXT button, it is an input to that button; collapse it into a prompt.
+Two proofs it carried no independent meaning: `recomputePacket` tests only `=== 'approved'` and
+`!== 'todo'` (so `changes` ≡ `review` for the packet), and the sole behavioural use of the value in
+the API is `appPackets.ts:341` deciding whether to store the note.
+
+**Sequencing rules must live in ONE function the moment there are two callers.** `regenerateWithNote`
+(`app/src/packetBuilder.js`) exists because the inline version was copied verbatim into the second
+screen within minutes. The rule it protects is invisible at the call site: generate reads unresolved
+notes at its START (`appPackets.ts:503`) and resolves them at its END (`:575`), so a note saved
+concurrently — or after — is consumed having steered nothing, and `resolved` is exactly what stops it
+replaying. A copy of an ordering rule is the copy that drifts, and the symptom is silent.
+
+**Duplicated constants keep turning up in pairs that DISAGREE.** `KIND_ABBR` was the third:
+`assetBlocks.js` `M`/`N`/`R` against `postingAnalysis.js` `MH`/`NTH`/`RESP`, so one requirement row
+rendered two ways on two screens a reader can open side by side — after `METHOD_LABEL` and the QC
+counts. The tell each time is a re-export that was never made. When touching any label/abbreviation
+map, grep for a second definition BEFORE editing the one you found.
+
 **A `cat >>` append to this file reported success and did not land** (2026-08-23, same session).
 `echo ok && tail -3` printed the new text; `git diff --stat` a minute later showed the file
 unchanged and a `grep` for the heading returned 0. `.claude/actions.md`, edited through the Edit
