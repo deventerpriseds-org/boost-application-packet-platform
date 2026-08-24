@@ -380,7 +380,12 @@ test('the breakpoint number exists in exactly one place', () => {
 test('ATS appears only where it names the term library, its coverage, or its scoring', () => {
   // The rule the branch set itself and then broke in four places: a legend under the Requirements
   // panel, the card sub-description, the analysis result strip, and the header score button.
-  for (const [name, file] of [['PostingAnalysis.jsx', POSTING_ANALYSIS], ['PacketBuilder.jsx', PACKET_BUILDER]]) {
+  // AssetBlocks.jsx was NOT scanned, and that is exactly where the rule got broken: its
+  // ANSWERS_LABEL said "ATS resume" for compact_resume while the other two maps said "Compact
+  // resume", so the same card contradicted itself and no guard could see it. A vocabulary rule that
+  // reads two of the three files holding the vocabulary is a rule with a blind spot.
+  const ASSET_BLOCKS = src('../src/screens/AssetBlocks.jsx')
+  for (const [name, file] of [['PostingAnalysis.jsx', POSTING_ANALYSIS], ['PacketBuilder.jsx', PACKET_BUILDER], ['AssetBlocks.jsx', ASSET_BLOCKS]]) {
     const code = stripComments(file)
     for (const m of code.matchAll(/\bATS\b/g)) {
       const window = code.slice(Math.max(0, m.index - 60), m.index + 60).replace(/\s+/g, ' ')

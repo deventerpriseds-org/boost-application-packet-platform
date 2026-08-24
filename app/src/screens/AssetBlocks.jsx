@@ -44,7 +44,7 @@ import { CorrectionRow } from './QcRail.jsx'
 export { BLOCK_HOOKS }
 
 // The reader-side noun for the panel title. SPEC 7: name things by what the reader recognises.
-const ANSWERS_LABEL = { resume: 'resume', compact_resume: 'ATS resume', cover: 'cover letter',
+const ANSWERS_LABEL = { resume: 'resume', compact_resume: 'compact resume', cover: 'cover letter',
   portfolio: 'portfolio', video: 'intro video' }
 
 // ── shared provenance loader ────────────────────────────────────────────────────────────────────

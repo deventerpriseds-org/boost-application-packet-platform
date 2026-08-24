@@ -44,6 +44,19 @@ export const GATE_HOOKS = {
 // Asset labels. The same map is currently inlined in Library.jsx, OppDetail.jsx and
 // PacketBuilder.jsx; it lives here so those three can converge on one copy rather than a fourth
 // being added. An unknown type falls through to the raw type - never to a blank.
+// `compact_resume` is "Compact resume" in all THREE maps. It was that here and in PacketBuilder's
+// TYPE_LABEL while AssetBlocks' ANSWERS_LABEL said "ATS resume", so one card read "Compact resume"
+// in its header and "What this ATS resume answers" in its own body - the app disagreeing with
+// itself about one artifact, on one screen. Third instance of this shape after METHOD_LABEL and
+// KIND_ABBR.
+//
+// UNIFIED AWAY FROM THE PROTOTYPE, DELIBERATELY. The design calls it the "ATS resume"
+// (qc/data.js:194), but THIS REPO RESERVES "ATS" for the keyword library, its coverage and its
+// scoring - stated at PacketBuilder.jsx's STEPS ("'ATS' is reserved for the keyword library and its
+// coverage (P5.4)... that is posting analysis, not ATS") and enforced by a guard. Spending the word
+// on an artifact name would blur the one term the QC vocabulary depends on staying precise. So the
+// divergence is a choice, recorded here, not a gap - and the first attempt at this fix went the
+// other way and was caught by that guard.
 export const ASSET_LABEL = { resume: 'Resume', compact_resume: 'Compact resume', cover: 'Cover letter', portfolio: 'Portfolio', video: 'Intro video' }
 export const assetLabel = (t) => ASSET_LABEL[t] || String(t || 'Asset').replace(/_/g, ' ')
 export const STATUS_TONE = { todo: 'panel', drafting: 'yellow', review: 'accent', changes: 'red', approved: 'green' }
@@ -215,8 +228,19 @@ export const fieldLabel = (f) => FIELD_LABEL[f] || String(f || '')
 // insertion.method, in the words a reader can act on. `manual` is listed because the column allows
 // it; nothing in this pipeline writes it, and it is never inferred.
 export const METHOD_LABEL = {
-  template_fill: 'filled straight from the package',
-  model_rewrite: 'rewritten by a later pass',
+  // The DESIGN's words (qc/assets.jsx:421 - `s.edited ? 'Written for this posting' : 'From profile'`).
+  // Both readings are accurate for their state, so this is a wording alignment, not a claim change:
+  // `template_fill` means the package value went in UNCHANGED (insertions.ts:87 derives it as
+  // `changed ? 'model_rewrite' : 'template_fill'`), which is exactly "From profile"; `model_rewrite`
+  // means a later pass rewrote it FOR this posting.
+  //
+  // The earlier wording stays recorded because it was chosen to kill a real defect: assetBlocks.js
+  // once labelled `template_fill` "written for this posting", which is false in the FLATTERING
+  // direction - it told the reader a line had been tailored when it was an untouched template fill.
+  // The fix then was precision; the fix now is the design's phrasing for the correct state. Do not
+  // let `template_fill` drift back onto "Written for this posting".
+  template_fill: 'From profile',
+  model_rewrite: 'Written for this posting',
   manual: 'edited by hand',
 }
 
