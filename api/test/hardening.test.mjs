@@ -4063,3 +4063,58 @@ test('H:published-library-is-immutable: the entry trigger covers INSERT, and the
   assert.match(libFn[0], /old\.status\s*=\s*'published'/, 'the library guard must key on the published state')
   assert.match(libFn[0], /new\.status\s*=\s*'draft'/, 'the library guard must specifically refuse the return to draft')
 })
+
+// H:template-id-is-written
+//
+// `artifact.template_id` had THREE read sites and zero writes: `schema.ts` declares it,
+// `appPackets.ts` SELECTs it, and `appPackets.ts` serves it to the client as `templateId`. Measured
+// live before the fix: 195 artifacts, 0 with a value. So the API advertised a field it never
+// populated, and D32 made that a correctness question rather than a cosmetic one - the resume
+// TEMPLATE decides the role focus every prompt is prefixed with, so WHICH template an artifact used
+// is part of explaining its content.
+//
+// THIS TEST EXISTS BECAUSE THE FIX WAS OTHERWISE UN-REVERTABLE-PROOF. An independent verifier
+// reverted it wholesale - dropped `template_id = $3` and renumbered the parameters - and got
+// 765/765 passing plus a green DEFERRED ledger. The whole change could be undone silently. The
+// ledger row that used to cover it was narrowed the moment the writer landed, so its `absent` check
+// no longer watches this. A claim about state that nothing re-checks is exactly what this repo
+// forbids: a mistake becomes a TEST, not a note.
+test('H:template-id-is-written: renderArtifact records the template it copied', () => {
+  const body = stripComments(src('appPackets.ts'))
+
+  // The write must exist, and must carry the SAME binding that was handed to the Drive copy -
+  // recording an id other than the one copied is worse than recording none.
+  const update = body.match(/update artifact set[^`]*template_id\s*=\s*\$(\d+)[^`]*/)
+  assert.ok(update, 'no `update artifact set ... template_id = $n` - the column is unwritten again')
+  assert.match(body, /copyThen\(\s*token\s*,\s*meta\.templateId/,
+    'the copy no longer uses meta.templateId - the recorded id could now differ from the copied one')
+
+  // The parameter the column binds to must be the one carrying meta.templateId. A renumbering that
+  // left `template_id = $3` pointing at `preview` would still match the grep above.
+  const n = Number(update[1])
+  // Take the argument array that follows THIS statement's closing backtick - not the first `[` in
+  // the slice, which lands inside the SQL. Getting this wrong made the test fail on correct code.
+  const stmtAt = body.indexOf('template_id = $')
+  const tickAt = body.indexOf('`', stmtAt)
+  const open = body.indexOf('[', tickAt)
+  const parts = body.slice(open + 1, body.indexOf(']', open)).split(',').map(s => s.trim())
+  assert.ok(parts[n - 1] && /meta\.templateId/.test(parts[n - 1]),
+    `template_id binds $${n}, but argument ${n} is \`${parts[n - 1]}\` - the column would take the wrong value`)
+})
+
+// H:template-source-names-the-real-source
+//
+// `diagDocStructure` reports WHICH template it audited. The first version keyed that on truthiness
+// of the resolved id - but `resolveText` never returns an empty value ("Never ''" in its own
+// interface comment); it falls back to the seed. So the seed branch was DEAD and every audit
+// claimed "owner setting", including the default state AND the case where the owner's id was
+// rejected and silently replaced. That is the P7-8 defect pipelineConfig:96-100 describes, rebuilt
+// inside the diagnostic meant to expose it.
+test('H:template-source-names-the-real-source: keyed on .source, never on truthiness', () => {
+  const body = stripComments(src('diagDocStructure.ts'))
+  assert.match(body, /\.source\s*===\s*'config'/,
+    'templateSource must read the resolver\'s own `source`, not whether a value happens to be truthy')
+  // The specific broken shape: a ternary on the id itself deciding which source to name.
+  assert.ok(!/resolvedTemplateId\s*\?\s*'owner setting/.test(body),
+    'templateSource is keyed on the id being truthy - resolveText never returns empty, so this always says "owner setting"')
+})

@@ -657,9 +657,10 @@ export async function renderArtifact(client: any, art: any, opp: any, pkg: Recor
   // and none of them was a write: `schema.ts` declares it, `appPackets.ts:80` selects it, and
   // `appPackets.ts:200` serves it to the UI as `templateId` — so every artifact reported
   // `templateId: null` while this function had the real id in hand and had just copied that exact
-  // file. `meta.templateId` is the OWNER-RESOLVED id (google.resumeTemplateId, or the per-role
-  // override), never the seed constant, so the row records the document the packet was actually
-  // built from rather than the one a default says it should have been.
+  // file. `meta.templateId` is the id THIS BUILD RESOLVED - `google.resumeTemplateId` when the owner
+  // has set one, the seed constant when they have not (`resolveText` falls back rather than
+  // returning empty). Either way it is the document that was actually copied: the same binding is
+  // passed to `copyThen` above, so the recorded id and the copied id cannot diverge.
   await client.query(`update artifact set doc_url = $1, content = coalesce(nullif(content,''), $2), template_id = $3, status = case when status = 'todo' then 'review' else status end, updated_at = now() where id = $4`, [url, preview, meta.templateId || null, art.id])
   return { url, isSlides: meta.isSlides, cleaned, kindLabel: meta.kindLabel, title: name, supersededDocUrl: superseded }
 }

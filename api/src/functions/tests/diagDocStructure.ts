@@ -73,22 +73,30 @@ export async function diagDocStructure(req: HttpRequest, context: InvocationCont
       ? await getGoogleOAuthToken()
       : await getGoogleToken(process.env.GOOGLE_SERVICE_ACCOUNT_JSON!, 'https://www.googleapis.com/auth/documents https://www.googleapis.com/auth/drive', IMPERSONATE_SUBJECT)
 
-    // The OWNER-RESOLVED template, not the seed constant. This defaulted to RESUME_TEMPLATE_ID,
-    // so the diagnostic audited a document the production builder may not copy: renderArtifact
-    // reads `google.resumeTemplateId` from settings, and pipelineConfig already records that an
-    // owner can set a template id and watch the builder use a different one. A structural audit
-    // that reads the wrong document is worse than none - it reports clean on a file nobody ships.
-    // An explicit ?templateId= still wins, so a specific document can still be inspected on demand.
-    const resolvedTemplateId = await loadPipelineSettings()
-      .then((s) => (s.resumeTemplateId.value || '').trim())
-      .catch(() => '')
-    const templateId = (req.query.get('templateId') || resolvedTemplateId || RESUME_TEMPLATE_ID).trim()
-    const templateSource = req.query.get('templateId') ? 'query'
-      : resolvedTemplateId ? 'owner setting (google.resumeTemplateId)'
-      : 'seed constant - NO owner setting is configured'
+    // The OWNER-RESOLVED template, not whatever the seed table happens to hold. This defaulted to
+    // RESUME_TEMPLATE_ID, so the diagnostic could audit a document the production builder never
+    // copies - the exact drift pipelineConfig:96-100 records ("`source` is not decoration. The
+    // whole P7-8 defect was invisible precisely because the run never said WHICH value it used").
+    //
+    // `source`, NOT truthiness. The first version of this tested `resolvedTemplateId ? … : …`, and
+    // `resolveText` NEVER returns an empty value - its own interface comment says "Never ''", it
+    // falls back to the seed. So the seed branch was DEAD and every audit claimed "owner setting"
+    // including the default state and the case where the owner's id was REJECTED and silently
+    // replaced by the seed. That is a worse version of the defect this block exists to fix: the
+    // diagnostic would audit the seed while naming the owner's setting as its source.
+    const settings = await loadPipelineSettings().catch(() => null)
+    const resumeSetting = settings ? settings.resumeTemplateId : null
+    const queryId = (req.query.get('templateId') || '').trim()
+    const templateId = (queryId || (resumeSetting && resumeSetting.value) || RESUME_TEMPLATE_ID).trim()
+    const templateSource = queryId ? 'query (?templateId=)'
+      : !resumeSetting ? 'seed constant - the pipeline settings could not be read'
+      : resumeSetting.source === 'config' ? 'owner setting (google.resumeTemplateId)'
+      : 'seed constant - no owner setting is configured'
+    // A rejected id is the case that reads as configured and is not. `resolveText` records WHY.
+    const templateSourceNote = (!queryId && resumeSetting && resumeSetting.reason) ? resumeSetting.reason : undefined
     const docId = (req.query.get('docId') || '').trim()
     const makeCopy = req.query.get('copy') !== '0'
-    const out: any = { templateId, templateSource }
+    const out: any = { templateId, templateSource, templateSourceNote }
 
     // 1. Original template — fingerprint + make link-readable so it can be opened for comparison.
     const tpl = await getDoc(token, templateId)
