@@ -45,16 +45,43 @@ export const TEMPLATE_META: Record<string, TemplateMeta> = {
  */
 export interface TemplateIdOverrides {
   resumeTemplateId?: string
+  compactResumeTemplateId?: string
   portfolioTemplateId?: string
   coverLetterTemplateId?: string
 }
 
-/** Which override key backs each artifact type. `compact_resume` shares the resume template. */
+/**
+ * Which override key backs each artifact type.
+ *
+ * `compact_resume` USED TO READ `resumeTemplateId`, and that was a live defect. The owner's Settings
+ * screen offers `google.compactResumeTemplateId`, labelled "Compact resume template"
+ * (`Settings.jsx:1795`) — and in the PRODUCT path nothing read it. Setting it changed nothing and
+ * the packet builder copied the full resume template instead, silently. The only readers were
+ * `pipeline.ts:630` (the legacy batch pipeline) and `mt19.ts` (a test harness), so the two paths
+ * built the compact resume from two different documents. That is the "a setting read by nothing"
+ * class this repo has already been bitten by twice — the sibling case is quoted three lines below
+ * in `renderArtifact`'s own comment.
+ */
 const OVERRIDE_KEY: Record<string, keyof TemplateIdOverrides> = {
   resume: 'resumeTemplateId',
-  compact_resume: 'resumeTemplateId',
+  compact_resume: 'compactResumeTemplateId',
   portfolio: 'portfolioTemplateId',
   cover: 'coverLetterTemplateId',
+}
+
+/**
+ * Types that fall back to another type's id when their own is unset, and to what.
+ *
+ * The fallback is deliberate and it is what makes this fix SAFE TO DEPLOY: an owner who has never
+ * set `google.compactResumeTemplateId` keeps getting exactly the document they get today, because
+ * `compact_resume` still lands on `resumeTemplateId`. Only an owner who HAS set it sees a change —
+ * and that change is the setting finally doing what its label says.
+ *
+ * Without this, the same edit would silently stop building the compact resume for every owner with
+ * the field blank, which is a worse bug than the one being fixed.
+ */
+const OVERRIDE_FALLBACK: Partial<Record<string, keyof TemplateIdOverrides>> = {
+  compact_resume: 'resumeTemplateId',
 }
 
 /**
@@ -67,7 +94,9 @@ const OVERRIDE_KEY: Record<string, keyof TemplateIdOverrides> = {
 export function metaFor(type: string, ids?: TemplateIdOverrides): TemplateMeta | null {
   const meta = TEMPLATE_META[type] || null
   if (!meta || !ids) return meta
-  const override = (ids[OVERRIDE_KEY[type]] || '').trim()
+  const own = (ids[OVERRIDE_KEY[type]] || '').trim()
+  const fallbackKey = OVERRIDE_FALLBACK[type]
+  const override = own || (fallbackKey ? (ids[fallbackKey] || '').trim() : '')
   return override ? { ...meta, templateId: override } : meta
 }
 

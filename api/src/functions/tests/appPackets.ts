@@ -616,8 +616,15 @@ export async function renderArtifact(client: any, art: any, opp: any, pkg: Recor
   // been writable in Auth & Config all along and were read by nothing, so an owner could set a
   // template id and watch the production packet builder copy a different document.
   const settings = await loadPipelineSettings()
+  // `compactResumeTemplateId` is passed as of 2026-08-24 and was NOT before — the exact same defect
+  // the comment above describes, one artifact type later. The owner's Settings screen has offered
+  // "Compact resume template" all along; this path never read it and copied the full resume template
+  // for the compact ATS resume, while `pipeline.ts` used the configured one. Two paths, two
+  // documents, no warning. `metaFor` falls back to the resume id when it is unset, so an owner who
+  // never set it sees no change.
   const meta = metaFor(art.type, {
     resumeTemplateId: settings.resumeTemplateId.value,
+    compactResumeTemplateId: settings.compactResumeTemplateId,
     portfolioTemplateId: settings.portfolioTemplateId.value,
     coverLetterTemplateId: settings.coverLetterTemplateId.value,
   })
