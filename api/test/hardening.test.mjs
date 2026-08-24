@@ -4026,3 +4026,40 @@ test('H:the-change-log-is-on-the-payload-that-renders-it: checks-result publishe
   assert.ok(!/\.corrections\b/.test(apiJs),
     'api.js transports the payload; it must not reach into the change log itself')
 })
+
+// H:published-library-is-immutable
+//
+// The term-library design's central promise is "a score recorded against version N re-renders
+// identically forever". It did not hold. Measured 2026-08-24 against a POPULATED local Postgres
+// 16.13 running main's SCHEMA_SQL: seeding a `published` library and then
+//   insert into term_library_entry (library_id, ...) values ('1111...', 'fedramp', ...)
+// returned `INSERT 0 1`. The trigger fired `before update or delete` only, so INSERT was uncovered.
+//
+// INSERT is not the lesser hole. Coverage is covered/scoreable, so ADDING a scoreable entry moves
+// the DENOMINATOR of every score already recorded against that version — silently, and with no
+// UPDATE anywhere to audit.
+//
+// The second half is the bypass that makes the first guard decorative: the entry guard reads
+// `l.status`, so flipping a published library back to `draft` DISARMS it. Edit freely, re-publish.
+// Hence a matching guard on term_library itself. Both proven on the populated DB after the fix:
+// insert -> ERROR, update -> ERROR, published->draft -> ERROR, while draft insert/edit/publish
+// still succeed and published->archived still succeeds (the guard must not freeze the table).
+test('H:published-library-is-immutable: the entry trigger covers INSERT, and the library cannot be un-published', () => {
+  const schema = stripComments(src('schema.ts'))
+
+  const trg = schema.match(/create trigger term_entry_guard_trg\s+([\s\S]{0,120}?)for each row/)
+  assert.ok(trg, 'term_entry_guard_trg not found — this guard has gone stale')
+  const events = trg[1]
+  for (const ev of ['insert', 'update', 'delete']) {
+    assert.match(events, new RegExp(`\\b${ev}\\b`),
+      `term_entry_guard_trg must fire on ${ev.toUpperCase()} — INSERT into a published library moves the coverage denominator`)
+  }
+
+  // The library row needs its own guard, or un-publishing walks straight past the entry guard.
+  assert.match(schema, /create trigger term_library_guard_trg/,
+    'term_library has no guard — published -> draft -> edit -> re-publish bypasses the entry trigger')
+  const libFn = schema.match(/function term_library_guard\(\)[\s\S]*?\$\$ language plpgsql;/)
+  assert.ok(libFn, 'term_library_guard() body not found')
+  assert.match(libFn[0], /old\.status\s*=\s*'published'/, 'the library guard must key on the published state')
+  assert.match(libFn[0], /new\.status\s*=\s*'draft'/, 'the library guard must specifically refuse the return to draft')
+})

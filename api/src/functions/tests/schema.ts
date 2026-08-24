@@ -243,12 +243,19 @@ create index if not exists term_entry_norm_idx on term_library_entry(normalized)
 
 -- Enforce immutability in the DATABASE, not by convention: the acceptance criterion "adding an alias
 -- does not change any historical score" is only true if published entries genuinely cannot be edited.
+--
+-- INSERT IS COVERED, and it was not until 2026-08-24. The trigger fired before-update-or-delete
+-- only, so an entry could be INSERTED into an already-published library. That is not a lesser hole
+-- than UPDATE: coverage is covered/scoreable, so ADDING a scoreable entry moves the DENOMINATOR
+-- of every score already recorded against that version, and "a score recorded against version N
+-- re-renders identically forever" silently stops being true. Adding a term must create version N+1,
+-- which is exactly what this now forces.
 create or replace function term_entry_guard() returns trigger as $$
 begin
   if exists (select 1 from term_library l
-             where l.id = coalesce(old.library_id, new.library_id) and l.status = 'published') then
-    raise exception 'term_library_entry is immutable once its library version is published (library_id=%)',
-      coalesce(old.library_id, new.library_id);
+             where l.id = coalesce(new.library_id, old.library_id) and l.status = 'published') then
+    raise exception 'term_library_entry is immutable once its library version is published (library_id=%) — add a new version instead',
+      coalesce(new.library_id, old.library_id);
   end if;
   return coalesce(new, old);
 end;
@@ -256,8 +263,34 @@ $$ language plpgsql;
 
 drop trigger if exists term_entry_guard_trg on term_library_entry;
 create trigger term_entry_guard_trg
-  before update or delete on term_library_entry
+  before insert or update or delete on term_library_entry
   for each row execute function term_entry_guard();
+
+-- ...and guard the LIBRARY row itself, or the entry guard above is trivially bypassed: flip
+-- published back to draft, edit the entries the entry-guard now permits, then re-publish. The
+-- entry guard reads l.status, so un-publishing disarms it. A published version is terminal —
+-- it may only be ARCHIVED, never returned to draft and never re-pointed at a different key/version.
+create or replace function term_library_guard() returns trigger as $$
+begin
+  if old.status = 'published' then
+    if new.status = 'draft' then
+      raise exception 'term_library %/v% is published and cannot return to draft — publish a new version instead',
+        old.library_key, old.version;
+    end if;
+    if new.library_key is distinct from old.library_key or new.version is distinct from old.version
+       or new.published_at is distinct from old.published_at then
+      raise exception 'term_library %/v% is published — its identity and publish time are immutable',
+        old.library_key, old.version;
+    end if;
+  end if;
+  return new;
+end;
+$$ language plpgsql;
+
+drop trigger if exists term_library_guard_trg on term_library;
+create trigger term_library_guard_trg
+  before update on term_library
+  for each row execute function term_library_guard();
 
 -- Candidate terms mined from the real posting corpus, awaiting human curation.
 -- This is the EXTRACTION side of the term library: every row is a literal substring of a real

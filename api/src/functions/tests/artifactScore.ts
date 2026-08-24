@@ -47,8 +47,12 @@ export interface ScoreInput {
   requirements?: Array<{ seq: number; kind: string }>
   /** The deterministic check results for this artifact — must_have_coverage is measured there. */
   checks?: CheckResult[]
-  /** Published term-library coverage, when a library version exists. */
-  keyword?: { covered: number; scoreable: number } | null
+  /**
+   * Published term-library coverage, when a library version exists.
+   * `covered: null` means "a library exists but nothing has counted placement yet" — a THIRD state,
+   * distinct from both "no library" and "measured zero". See computeArtifactScore.
+   */
+  keyword?: { covered: number | null; scoreable: number } | null
   /** Reviewer-graded, so it is a stored INPUT and never recomputed here (P4 supplies it). */
   seniority?: number | null
   weights?: Partial<typeof DEFAULT_WEIGHTS>
@@ -121,11 +125,20 @@ export function computeArtifactScore(input: ScoreInput): ArtifactScore {
       }
   }
 
-  // --- keyword coverage: only from a PUBLISHED term library ------------------------------------
+  // --- keyword coverage: a PUBLISHED library AND a measured placement count --------------------
+  // THREE states, not two. A library version can exist while nothing has yet counted how many of
+  // its terms the artifact actually places, and that middle state is NOT zero coverage — it is
+  // unmeasured. Collapsing it to 0 is the fabricated-composite failure this file exists to refuse:
+  // `round(0 / N * 100)` renders as a confident, measured-looking 0%, and a component with no
+  // source is precisely the number a reviewer trusts most. `covered: null` is how a caller says
+  // "a library exists, placement is not counted yet" without inventing a numerator.
   const kwIn = input.keyword
-  const keyword: ScoreComponent = (kwIn && kwIn.scoreable > 0)
-    ? { value: Math.round((kwIn.covered / kwIn.scoreable) * 100), source: `${kwIn.covered}/${kwIn.scoreable} scoreable library terms present` }
-    : { value: null, source: 'no published term-library version has scoreable entries yet' }
+  const keyword: ScoreComponent =
+    !kwIn || kwIn.scoreable <= 0
+      ? { value: null, source: 'no published term-library version has scoreable entries yet' }
+      : (kwIn.covered === null || kwIn.covered === undefined)
+        ? { value: null, source: `${kwIn.scoreable} scoreable library terms, but term placement has not been measured` }
+        : { value: Math.round((kwIn.covered / kwIn.scoreable) * 100), source: `${kwIn.covered}/${kwIn.scoreable} scoreable library terms present` }
 
   // --- seniority: a stored reviewer input, never computed here ---------------------------------
   const seniority: ScoreComponent = (typeof input.seniority === 'number')

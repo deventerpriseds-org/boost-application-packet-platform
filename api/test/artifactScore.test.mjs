@@ -71,6 +71,61 @@ test('an empty term library yields null keyword coverage, never 0 and never 100'
   assert.equal(computeArtifactScore({ keyword: { covered: 3, scoreable: 12 } }).keyword_coverage.value, 25)
 })
 
+// H:no-fabricated-keyword-numerator
+//
+// The test above is titled "never 0 and never 100" but only ever exercised `scoreable: 0`. The
+// fabrication case lives in the gap it left: a PUBLISHED library (`scoreable > 0`) with no
+// placement count. `appChecks.ts` supplied `covered: 0` there, so `keyword_coverage` read as an
+// honest null only while the library was empty, and the first publish would have flipped it to a
+// measured-looking 0% — `round(0/N*100)` — rendered by six consumers (assetGate.js:377,
+// postingAnalysis.js:424, qcRail.js:272, assetBlocks.js:364-404, AssetBlocks.jsx,
+// appReviewer.ts:299-311). Absent evidence is "unmeasured", never "zero".
+test('H:no-fabricated-keyword-numerator: a library with no placement count scores null, not 0', () => {
+  // The state that did not exist before: scoreable entries, numerator not yet counted.
+  for (const covered of [null, undefined]) {
+    const s = computeArtifactScore({ keyword: { covered, scoreable: 12 } })
+    assert.equal(s.keyword_coverage.value, null, 'an uncounted numerator must not produce a number')
+    assert.match(s.keyword_coverage.source, /placement has not been measured/)
+    assert.equal(s.composite, null, 'a null component must keep the composite null')
+  }
+
+  // A REAL measured zero stays expressible and distinguishable — this is what stops the fix from
+  // over-correcting into "0% can never be reported".
+  const measuredZero = computeArtifactScore({ keyword: { covered: 0, scoreable: 12 } })
+  assert.equal(measuredZero.keyword_coverage.value, 0)
+  assert.match(measuredZero.keyword_coverage.source, /0\/12 scoreable library terms present/)
+
+  // The two states must not share a source string, or the UI cannot tell them apart.
+  assert.notEqual(
+    computeArtifactScore({ keyword: { covered: null, scoreable: 12 } }).keyword_coverage.source,
+    measuredZero.keyword_coverage.source,
+  )
+})
+
+// H:no-fabricated-keyword-numerator (structural half)
+//
+// A runtime test cannot stop a future caller re-introducing the literal. This is the source rule:
+// no production caller may hand `computeArtifactScore` a hardcoded zero numerator.
+test('H:no-fabricated-keyword-numerator: no caller constructs a literal covered: 0', () => {
+  // Comments are stripped first: this very file's explanation quotes `covered: 0`, and a guard that
+  // fires on the prose describing it is the cry-wolf failure the repo already deleted a linter for.
+  const stripComments = (s) => s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1')
+  const files = ['appChecks.ts', 'appReviewer.ts']
+  for (const f of files) {
+    const body = stripComments(readFileSync(new URL(`../src/functions/tests/${f}`, import.meta.url), 'utf8'))
+    // Match the LITERAL numerator, not the shape around it. The first version of this guard
+    // anchored on `keyword:\s*\{` and was INERT: the real call site is
+    // `keyword: scoreable > 0 ? { covered: 0, scoreable } : null`, so a ternary sits between the
+    // key and the brace and the pattern never fired. It passed with the defect reinstated — caught
+    // only by mutation-proving it. A hardcoded zero numerator is never correct in production code,
+    // so match that directly and let the shape vary.
+    assert.ok(
+      !/covered:\s*0\s*[,}]/.test(body),
+      `${f} hardcodes a literal covered: 0 — the keyword numerator must be measured or null`,
+    )
+  }
+})
+
 test('seniority is a stored reviewer input, clamped, never inferred', () => {
   assert.equal(computeArtifactScore({ seniority: 82 }).seniority_alignment.value, 82)
   assert.equal(computeArtifactScore({ seniority: 140 }).seniority_alignment.value, 100)

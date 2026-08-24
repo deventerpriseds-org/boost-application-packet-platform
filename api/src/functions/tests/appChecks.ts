@@ -133,7 +133,12 @@ export async function evaluateArtifact(client: any, artifactId: string, owner: s
   const score = computeArtifactScore({
     requirements,
     checks: results,
-    keyword: scoreable > 0 ? { covered: 0, scoreable } : null,
+    // `covered: null`, NEVER 0. Nothing in the product counts per-asset term placement yet, so the
+    // numerator does not exist. A literal 0 here was latent: `keyword_coverage` reads as an honest
+    // null ONLY while `scoreable === 0`, and the instant a library version is published this
+    // ternary would flip and render a measured-looking 0% across six consumers. Null says
+    // "unmeasured"; 0 would claim "we counted, and the answer was none".
+    keyword: scoreable > 0 ? { covered: null, scoreable } : null,
     seniority: null,          // reviewer-graded; P4 supplies it as a stored input
   })
   const uncoveredIds = score.uncovered_requirement_seqs

@@ -3092,3 +3092,39 @@ promotion time; it will not add exec vocabulary. Say that before spending the in
 is **blocked by this sandbox's egress proxy**, so those figures come from search summaries, not the
 licence text. Read the licence text before ingest — exactly the discipline that turned ESCO's
 "verify before ingest" note into a verified CC BY 4.0 today.
+
+## 2026-08-24 — two term-library blockers fixed, and two of my own mistakes caught by the discipline
+
+**BLOCKER 1 — the fabricated coverage numerator.** `appChecks.ts` passed `covered: 0` into
+`computeArtifactScore`. `keyword_coverage` reads as an honest null TODAY only because the library is
+empty; the first publish flips the ternary and renders `round(0/N*100)` = a measured-looking **0%**
+across six consumers. Fixed at BOTH ends: `covered` is now `number | null`, and there are **three**
+states instead of two — no library (null), library but placement uncounted (null, with a DISTINCT
+source string), genuinely measured (the real number). A real 0% stays expressible, so the fix does
+not over-correct into "0% can never be reported".
+
+**MY GUARD WAS INERT ON THE FIRST ATTEMPT.** I anchored the regex on `keyword:\s*\{`, but the real
+call site is `keyword: scoreable > 0 ? { covered: 0, ... }` — a ternary sits between the key and the
+brace, so it never fired. **It passed with the defect reinstated.** Only mutation-proving caught it.
+Rewritten to match the literal numerator (`covered:\s*0\s*[,}]`) and let the shape vary; both
+mutations now kill it. This is the third time a guard has been written that watched the shape I
+happened to type rather than the thing that must not be true.
+
+**BLOCKER 2 — immutability, now PROVEN rather than inferred.** The AC pass called it
+"high-confidence inference". Measured on a POPULATED local Postgres 16.13 running main's SCHEMA_SQL:
+seeding a `published` library and inserting an entry returned **`INSERT 0 1`**. The trigger fired
+`before update or delete` only. **INSERT is not the lesser hole** — coverage is covered/scoreable, so
+ADDING a scoreable entry moves the DENOMINATOR of every score already recorded against that version,
+silently, with no UPDATE anywhere to audit.
+
+**A second bypass made the first guard decorative:** the entry trigger reads `l.status`, so flipping
+a published library back to `draft` DISARMS it — edit freely, re-publish. Added `term_library_guard`.
+Verified on the populated DB: INSERT -> ERROR, UPDATE -> ERROR, published->draft -> ERROR, while
+draft insert/edit/publish still succeed and published->archived still succeeds (a guard that froze
+the table would be its own defect). Both mutations kill `H:published-library-is-immutable`.
+
+**I ALSO BROKE `SCHEMA_SQL` WHILE WRITING THAT COMMENT.** I used backticks for inline code, and
+`SCHEMA_SQL` IS a backtick template literal — so the prose terminated the string and the rest parsed
+as JavaScript (`ReferenceError: covered is not defined`). **`tsc` passed.** Only executing the built
+module caught it. Rule: NEVER use a backtick inside SCHEMA_SQL, and dumping+executing the schema is
+the guard, not the build.
