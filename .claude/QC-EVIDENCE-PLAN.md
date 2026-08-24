@@ -38,6 +38,45 @@ READ THIS BEFORE TRUSTING ANY ROW ABOVE
 ```
 *Update this block on every landing. It is the single place to look after a restart.*
 
+### ▶ OWNER-SET QUEUE — what starts the moment the resume step is 100% (set 2026-08-24)
+
+> **Owner instruction, verbatim: *"mark this as the first thing to do once resume is 100%."***
+
+**THE ITEM:** `swap_decision.override_value` + `override_state` — make the *ships* value of any swap
+**text-editable, everywhere a swap happened**, not only on the resume step. Owner's framing: *"we
+just need to be able to edit the text of anything swapped to in general. it makes things easier.
+thats a wider design fix."* Spec basis: lineage doc §2 (record) and §5c (the ⇄ control exchanges the
+two sides, the ships value is editable so a third option can be typed, nothing is applied silently,
+a reverted suggestion stays auditable). `docs/qc-evidence/IMPORT-NOTE.md` lists it **Not built** —
+absent from both `api/src` and `app/src`. Also `BACKLOG.md` P8.6 and defect-register **C1 + C3**.
+
+**Tier 1.** It admits user-typed text into a stored claim that feeds swap attribution. Independent
+AC subagent BEFORE coding, independent `verifier` after, mutation-prove every new guard, live
+verification. Do not shortcut this because the UI half looks small.
+
+**Why it earned the front of the queue** (measured 2026-08-24 by rendering the prototype with
+`scripts/render-spec.mjs --act keychip`, not by reading the spec): `KeyDetail` already carries
+**3 of the owner's 4 asks** — the replaced template value (`SKILL_ROWS[].orig` → *"Took the place of
+Digital Transformation in Skills 1"*), the posting line that earned the term (`SKILL_ROWS[].quote`),
+and the alternatives bank (`SKILL_BANK` select + *Put back "…"* + *Drop it, leave the line open*).
+**Free-text editing is the only genuine gap**, and it is neither blocked on the term library nor a
+sub-feature of ROW 11.
+
+**What "resume is 100%" means, so the trigger is unambiguous** (`docs/qc-evidence/AC-resume-rows.md`
+§3 RESEQUENCE):
+
+| # | Must be done to fire this queue entry | Note |
+|---:|---|---|
+| 1 | **ROW 9** — per-kind must-have / responsibility / nice-to-have stat split | tier 1; buildable today, NOT endpoint-blocked |
+| 2 | **ROW 2** — deep link + focus ring on the asset card | also fixes the drawer's never-clearing ring |
+| 3 | **AC-7.3** — a `null` `before_text` renders no `Show original`, though SPEC 4.5 says it is on every field | small, unlogged SPEC divergence |
+| 4 | **"Show original" rebuild** — capture the master/template baseline per field at build time | `templateText()` exists at `packetTemplates.ts:175` and is **never called**; `insertions.ts:77` reads `prevPkg`, which is wrong in BOTH states |
+
+**Explicitly NOT part of the trigger** — these stay queued behind their own blockers and must not
+hold the override work: **ROW 10** (gated on the owner answering AC-10.0 before any table is
+designed), **ROW 11** chips (gated on the term-library lane publishing), **ROW 12** (`PickList` is
+portfolio-only, off the resume lane entirely).
+
 Phase status: P0 `done` · P1 `done` · P2 `done` · P3 `landed, never executed in production` ·
 P4 `done` · P5 `done` · P6 `done` · P7 `done (item 1 residual fixed by PR #25)` · P8 `done`.
 
