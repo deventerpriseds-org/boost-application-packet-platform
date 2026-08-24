@@ -3143,3 +3143,40 @@ so a vendor dictionary is a re-wrapped copy of free sources bought with a licens
 **But the field-taxonomy decision now has a concrete job:** research says SECTION PLACEMENT changes
 what a term is worth, so a field taxonomy lets the library record WHICH FIELD a term belongs in
 (summary vs skills vs bullet). A skills taxonomy cannot supply that.
+
+### 2026-08-24 — live DB read via the new write connector: the queue is STALE
+
+Owner added `boost-pg-mcp-write` (read-write). First use was a READ, and it ground-truthed figures
+this session had been citing from workflow logs: **2,734 candidates, ALL `pending`, 0 approved,
+0 `term_library` rows, 0 `term_library_entry` rows, corpus_size 928.** All confirmed.
+
+**GOOD: the exec vocabulary is genuinely there.** Measured, top of the specificity ranking:
+`cross functional` 425, `executive leadership` 303, `decision making` 307, `continuous improvement`
+233, `risk management` 204, `senior leadership` 199, `product management` 195, `product strategy`
+164, `executive level` 160, `emerging technologies` 160, `data driven` 159, `large scale` 158,
+`artificial intelligence` 151, `technology strategy` 149, `product development` 143, `operational
+excellence` 142. The corpus-as-primary-source decision is validated by its own output.
+
+**DEFECT: the candidate queue predates the miner's own blocklist.** Still sitting in the top 45:
+`orientation gender` 239, `regard to race` 220, `dental and vision` 177, `sex sexual` 155,
+`consideration for employment` 123, `receive consideration for employment` 120,
+`applicants will receive` 115, `federal state` 133. **Four of those are LITERAL entries in
+`termMiner.ts`'s `BOILERPLATE` array** (`'regard to'`, `'orientation gender'`, `'sex sexual'`,
+`'dental and vision'`), and `isBoilerplate` does `phrase.includes(b)` — so current code WOULD reject
+them. They are stale rows from a mine that ran before those entries existed. `termsMine` already has
+the purge step for exactly this ("Purge PENDING candidates that the current filters would no longer
+produce"), so **a re-mine fixes it with no code change.**
+
+**Quantified honestly — small by rows, large by what a curator sees first.** Classified all 2,734:
+junk is **106 rows = 3.9%** (degree/education 32, EEO/benefits 24, generic filler 21, job title 21,
+geography/employment-type 8). **But 8 of the top 45 by specificity — ~18% of the first screenful.**
+Row-share understates it because the ranking concentrates boilerplate at the top.
+
+**Consequence for sequencing: RE-MINE BEFORE BUILDING THE CURATION SCREEN.** Putting a curator in
+front of this queue means hand-rejecting boilerplate the code already knows how to reject. The
+exclusion classes derived independently in `TERM-LIBRARY-SAMPLES.md` (section headings, job titles,
+degree fields, geography, benefits, boilerplate) match the measured junk classes exactly — so they
+should become miner FILTERS, not prose in a doc.
+
+`artificial intelligence` at 151 independently confirms the AI/ML alias point: it must fold into
+`ai_ml` at promotion, which is what `status: merged` + `merged_into` already exist to record.
