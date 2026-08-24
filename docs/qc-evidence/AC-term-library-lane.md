@@ -13,6 +13,51 @@
 
 ---
 
+## DESIGN CORRECTION (owner, mid-drafting) — EXCLUSION MARKS, IT DOES NOT DELETE
+
+The original brief framed junk removal as extending `termMiner`'s **filters** so junk "stops
+reaching the queue". The owner corrected this and the correction is binding on every AC below.
+
+**1. Auto-exclusion sets `status='rejected'` with a recorded reason. It never hard-deletes.**
+`termsMine` today runs `delete from term_candidate where id=$1 and status='pending'` for rows the
+current filters no longer produce. A wrong exclusion is then both **invisible** (no row survives to
+inspect) and **unrecoverable**. The schema already carries the right mechanism —
+`status pending|approved|rejected|merged` + `reviewed_at` / `reviewed_by`, written by
+`termsCandidateDecide`. Auto-exclusion reuses it: junk leaves the *review queue* (which defaults to
+`status='pending'`) while staying auditable and one status flip from restoration.
+
+**2. There is no column to record WHY.** `term_candidate` is
+`id, owner_email, ngram, normalized, n, df, sample_opp_ids, status, merged_into, reviewed_at,
+reviewed_by, mined_at, corpus_size`. A reason column must be added, with this repo's
+populated-database migration discipline (H39/H39b, `schemaParity.test.mjs`).
+
+**3. Any auto-exclusion rule must be EXACT / whole-phrase. A prefix or broad regex is banned.**
+The proposed `^chief ` catches 17 live rows and all 17 are genuinely job titles — **clean by luck,
+not by construction**. `chief of staff responsibilities` is a counter-example the same rule would
+silently destroy. Deciding a candidate never reaches the owner **is accusation-grade**, so the
+standing rule applies verbatim: *fuzzy matching is for RANKING, never for ACCUSING.*
+
+**Consequence the implementer must not miss — there are TWO exclusion points, and only one of them
+is auditable:**
+
+| Point | Effect | Auditable? |
+|---|---|---|
+| `ngramsForDoc()` — phrase never becomes an n-gram | **no row is ever created** | **NO** |
+| a classification pass over mined rows — row written/updated with `status='rejected'` + reason | row exists | **YES** |
+
+Putting the new junk classes in `ngramsForDoc` satisfies "stops reaching the queue" and **violates
+the correction**, because on every future mine the phrase silently ceases to exist. So: the new
+classes belong in the classification pass, not in `ngramsForDoc`. See **AC-52..AC-62**.
+
+**Measured baselines — two different measurements exist; neither may be reused as the shipped
+number.** Brief #1 (2,734 pending): junk 106 = degree 32, EEO 24, filler 21, title 21, geo 8.
+Brief #2 (2,734 pending, corpus 928): proposed classes exclude 81 = degree 26, title 22, eeo_extra
+16, geo 9, filler 8. Different rulesets, different counts. **AC-10/AC-56 require the implementer to
+re-measure against the exact ruleset shipped and record that number here**, rather than quoting
+either of these.
+
+---
+
 _(sections appended below as research completes)_
 
 ## Ground-truth read log (what these ACs are derived from, not assumed)
@@ -95,29 +140,40 @@ explicitly before creating them):**
 Every AC below is binary. "Works correctly", "looks right", "should filter" are not ACs and none
 appear. Each carries the concrete verification step.
 
-## A. Miner filter extension (`termMiner.ts`)
+## A. Junk-class exclusion (`termMiner.ts`) — MARKING, not filtering
 
-**AC-1.** Given the five junk classes measured live on 2026-08-24 (degree/education 32,
-EEO/benefits 24, generic filler 21, job title 21, geography/employment-type 8), when
-`ngramsForDoc()` is called on a posting containing each of the 13 named top-45 offenders
-(`long term`, `bachelor degree`, `high performing`, `related field`, `computer science`,
-`orientation gender`, `vice president`, `regard to race`, `dental and vision`, `united states`,
-`sex sexual`, `master degree`, `advanced degree`), then the returned `Set` contains **none of the
-13**.
-*Verify:* a new unit test in `api/test/` (new file `termMiner.test.mjs`, or extend
-`termMatch.test.mjs`) that imports `ngramsForDoc` from `../dist/functions/tests/termMiner.js` and
-asserts `assert.equal(set.has(<phrase>), false)` for each of the 13, **each phrase listed by name in
-the assertion message** so a failure says which one leaked.
+> **Corrected per the owner's design correction above.** These ACs are written against a
+> **classification pass that marks rows `status='rejected'` with a reason**, NOT against
+> `ngramsForDoc` dropping phrases. `ngramsForDoc` keeps only its existing structural rules
+> (stopword edge, all-noise, lone letter, `isBoilerplate`); the new junk classes go in the
+> classification pass so every exclusion leaves an inspectable row.
 
-**AC-2.** Given the same call, when the posting text also contains the high-value exec terms the
-miner exists to preserve — `operating model`, `digital transformation`, `P&L`, `M&A`, `R&D`,
-`executive leadership`, `cross functional`, `go to market`, `data governance`, `identity and access
-management`, `SOC 2`, `CI/CD` — then **all twelve are present** in the returned Set (as their
-`termNormalize` forms, e.g. `p and l`, `ci cd`, `soc 2`).
-*Verify:* same test file, positive assertions in the same `test()` as AC-1 so a filter that passes
+**AC-1.** Given the 13 named top-45 offenders (`long term`, `bachelor degree`, `high performing`,
+`related field`, `computer science`, `orientation gender`, `vice president`, `regard to race`,
+`dental and vision`, `united states`, `sex sexual`, `master degree`, `advanced degree`), when the
+classification pass runs over the mined rows, then **each of the 13 exists as a `term_candidate`
+row with `status='rejected'` and a non-null reason naming its class**, and **none** of the 13
+appears in `status='pending'`.
+*Verify:* a new unit test `api/test/termMiner.test.mjs` importing the exported classifier from
+`../dist/functions/tests/termMiner.js`, asserting `classify(<phrase>)` returns the expected class
+for each of the 13, **each phrase named in the assertion message** so a failure says which one
+leaked. Then live SQL:
+```sql
+select normalized, status, <reason_col> from term_candidate
+ where owner_email=$1 and normalized in (<the 13>);
+```
+Assert 13 rows, all `rejected`, all with a reason.
+
+**AC-2.** Given the same pass, when the high-value exec terms the miner exists to preserve are
+classified — `operating model`, `digital transformation`, `P&L`, `M&A`, `R&D`, `executive
+leadership`, `cross functional`, `go to market`, `data governance`, `identity and access
+management`, `SOC 2`, `CI/CD` — then **all twelve classify as NOT-junk** and remain `pending`
+(in their `termNormalize` forms, e.g. `p and l`, `ci cd`, `soc 2`).
+*Verify:* same test file, positive assertions in the same `test()` as AC-1 so a rule that passes
 AC-1 by over-blocking fails here. **This is the over-blocking guard and it is mandatory** — a
-degree-class filter written as a bare `/degree/` or `/\bcomputer\b/` regex destroys `data
-governance`-adjacent vocabulary and any `... degree of automation` phrasing.
+degree-class rule written as a bare `/degree/` or `/\bcomputer\b/` regex destroys any `... degree of
+automation` phrasing and `computer vision`. Extend the fixture with the 20-known-good-exec-terms set
+the coordinator measured (19 survived; only `chief technology officer` was removed, correctly).
 
 **AC-3.** Given `isBoilerplate()` uses **substring** matching (`BOILERPLATE.some(b =>
 phrase.includes(b))`), when a new blocklist entry is added, then no entry is a substring of a
@@ -132,21 +188,30 @@ is not checked today.)
 
 **AC-4.** Given job titles are a **different axis** owned by `persona` / `taxonomy_title`
 (`schema.ts:195` states this separation explicitly), when `vice president` / `senior vice
-president` / `chief technology officer` / `director of engineering` appear in a posting, then they
-are excluded from term candidates **and** the exclusion reason is recorded as a distinct class from
-boilerplate.
-*Verify:* unit test asserts absence; **plus** the response body of `POST /api/app/qc/terms/mine`
-reports counts per rejection class (see AC-9), and the `job_title` class is non-zero on the live
-corpus.
+president` / `chief technology officer` / `director of engineering` are classified, then they are
+marked `rejected` with class `job_title` — **matched as whole normalized phrases against an
+owner-editable list, NEVER by a prefix regex such as `^chief `**.
+*Verify:* unit test asserts class `job_title` for each; **and** asserts `chief of staff
+responsibilities` and `chief architect roadmap ownership` are **NOT** classified `job_title` — the
+counter-examples `^chief ` would destroy. The response body of `POST /api/app/qc/terms/mine`
+reports counts per class (AC-9) and `job_title` is non-zero on the live corpus.
+*Evidence this is not hypothetical:* `^chief ` was measured to catch 17 live rows, all 17 genuinely
+titles — **clean by luck**. The measurement proves the rule works today; it does not prove the rule
+is right, and this repo's guard rules distinguish those two things.
 
-**AC-5.** Given generic filler (`high performing`, `related field`, `fast paced`, `proven track`),
-when the filter runs, then the rejection is by **whole normalized phrase equality or a
-phrase-boundary rule**, never by an unanchored substring or a fuzzy/similarity score.
-*Verify:* a source grep test in `hardening.test.mjs`: assert the new filter code in `termMiner.ts`
-contains no `levenshtein|similarity|fuzzy|includes(` construct inside the new rejection function
-(comments stripped before matching, per the H-case cry-wolf rule). This is the standing rule
-*"fuzzy matching is for RANKING, never for ACCUSING"* — a filter that removes a curator's candidate
-is accusing.
+**AC-5.** Given every auto-exclusion decides that a candidate never reaches the owner — which is
+**accusation-grade** — when any exclusion class is evaluated, then the match is **whole normalized
+phrase equality, or a whole-token-sequence containment with explicit boundaries**, never an
+unanchored substring, a prefix/suffix regex, or any similarity score.
+*Verify:* a guard test in `hardening.test.mjs` (`H:exclusion-classes-are-exact`) that, with comments
+stripped, asserts the classifier source contains **no** `levenshtein|similarity|fuzzy|\.startsWith\(|
+\^` regex anchor over free text, and that every class rule is expressed as a `Set` lookup or an
+exact list membership test.
+**Mutation-prove:** replace one class rule with `phrase.startsWith('chief ')` and confirm the guard
+FAILS. A guard that cannot fail on the exact pattern the owner rejected is inert.
+*Note the deliberate asymmetry:* the PRE-EXISTING `isBoilerplate` uses substring matching
+(`phrase.includes(b)`). That is grandfathered, but its entries are inspected by AC-3 and **no new
+class may adopt that shape**.
 
 **AC-6.** Given the STOP-set comment already states length is deliberately NOT an edge test because
 `P&L` normalizes to `p and l`, when the new filters are added, then **no new rule rejects a phrase
@@ -187,25 +252,33 @@ order by spec desc limit 45;
 Assert none of the 13 appear. **A zero-row or zero-count result is a result to investigate, not a
 pass** — if `count(*)` for pending drops to 0 the filters over-blocked and AC-10 FAILS.
 
-## B. Re-mine and purge
+## B. Re-mine and stale-row handling
 
 **AC-11.** Given four of the offenders (`regard to`, `orientation gender`, `sex sexual`,
 `dental and vision`) are **already literal `BOILERPLATE` entries** and the live rows are stale from a
-mine that predates them, when `termsMine` runs, then those rows are removed by the **existing purge
-loop with no code change to the purge**, and `staleRemoved` in the response is `>= 4`.
-*Verify:* record `staleRemoved` from the `api-test.yml` job log; then live SQL
-`select count(*) from term_candidate where owner_email=$1 and status='pending' and normalized in
-('regard to race','orientation gender','sex sexual','dental and vision')` returns **0**.
-*(This AC exists to stop the implementer "fixing" a bug that is already fixed in code. Adding these
-four again to the blocklist is a no-op and would be evidence the implementer did not read
-`isBoilerplate`.)*
+mine that predates them, when `termsMine` runs, then those rows leave `pending` **without being
+deleted**: each is updated to `status='rejected'` with reason class `stale_filter`, and the response
+reports `staleMarked >= 4` (the field formerly named `staleRemoved`).
+*Verify:* record the count from the `api-test.yml` job log; then live SQL
+```sql
+select normalized, status, <reason_col> from term_candidate where owner_email=$1
+ and normalized in ('regard to race','orientation gender','sex sexual','dental and vision');
+```
+Assert **4 rows still exist**, all `rejected`, all reason `stale_filter`. A result of 0 rows means
+the delete was left in place and AC-11 FAILS.
+*(This AC also exists to stop the implementer "fixing" a bug that is already fixed: these four are
+in `BOILERPLATE` today and `isBoilerplate` uses substring matching, so re-adding them is a no-op and
+is evidence the implementer did not read the code.)*
 
 **AC-12.** Given a candidate a human has already decided on, when `termsMine` re-runs with stricter
-filters that would now reject that term, then the row is **not** deleted and its `status`,
-`merged_into`, `reviewed_at`, `reviewed_by` are unchanged.
+rules that would now reject that term, then the row is **neither deleted nor re-marked**: its
+`status`, `merged_into`, `reviewed_at`, `reviewed_by` and reason are unchanged. A human decision
+outranks a rule change.
 *Verify:* seed a local Postgres (per CLAUDE.md recipe) with one `status='approved'` row whose
-`normalized` is in the new blocklist; run the purge logic; assert the row survives byte-identical.
-**Mutation-prove:** remove `and status = 'pending'` from the delete and confirm the test FAILS.
+`normalized` is in a new exclusion class; run the pass; assert the row survives byte-identical
+(compare a `row_to_json` snapshot before/after).
+**Mutation-prove:** remove `and status = 'pending'` from the update predicate and confirm the test
+FAILS.
 
 **AC-13.** Given the upsert clause `... do update ... where term_candidate.status = 'pending'`,
 when a re-mine encounters an `approved` row whose df changed, then `df`/`sample_opp_ids`/`corpus_size`
@@ -220,13 +293,14 @@ production, then the run is evidenced by a route response recorded in this file 
 *Verify:* paste the `api-test.yml` job-log body here. A 204/queued response is explicitly **not**
 confirmation (CLAUDE.md "Verify before reporting").
 
-**AC-15.** Given `termsMine` deletes rows one-by-one in a loop with no transaction, when a re-mine
-is interrupted mid-purge, then the queue is left in a state where re-running the route converges
-(no partial-delete corruption) — or the purge is wrapped in a single `delete ... where status =
-'pending' and normalized <> all($2)` statement.
-*Verify:* local Postgres: seed 200 pending rows, run the purge, kill after N deletes, re-run, assert
-final state equals the state from an uninterrupted run. **Flagged as a real risk:** 2,734 rows ×
-one round-trip each is also a latency problem on the live Function.
+**AC-15.** Given `termsMine` today issues one `delete` per stale row in a loop with no transaction,
+when the mark-not-delete change ships, then the pass is a **single set-based `update`** —
+`update term_candidate set status='rejected', <reason_col>='stale_filter', reviewed_at=now(),
+reviewed_by='system:termsMine' where owner_email=$1 and status='pending' and normalized <> all($2)`
+— so an interruption cannot leave a partial state and 2,734 rows cost one round trip, not 2,734.
+*Verify:* source grep asserting no `delete from term_candidate` remains in `termMiner.ts`; local
+Postgres run over 2,734 seeded rows completing in a single statement; interrupt/re-run convergence
+test (final state equals uninterrupted state).
 
 ## C. Curation screen
 
@@ -546,3 +620,163 @@ real number, then the keyword weight is confirmed to be owner-settable (or expli
 owner-approved code-only).
 *Verify:* check `loadThresholds` for a weight column; if absent, this AC is a **finding** requiring
 either a column or a recorded owner approval, per the no-hardcoded-config rule's escape hatch.
+
+## H. Mark-don't-delete, the reason column, and its migration
+
+*(This section implements the owner's design correction. AC-1/4/5/11/12/15 above were corrected in
+place to match it; no delete-style version of them remains in this file.)*
+
+**AC-52.** Given a wrong exclusion must be learnable and recoverable, when any automatic exclusion
+pass runs (junk classification, stale-filter sweep, or any future rule), then **zero rows are hard
+deleted from `term_candidate`**.
+*Verify:* `H:exclusion-never-deletes` in `hardening.test.mjs` — source grep asserting
+`termMiner.ts` contains no `delete from term_candidate` (comments stripped). **Plus** a live
+before/after row count:
+```sql
+select status, count(*) from term_candidate where owner_email=$1 group by status;
+```
+Total across all statuses **must not decrease** across a re-mine. **Mutation-prove:** reinstate the
+delete and confirm the guard FAILS.
+
+**AC-53.** Given `term_candidate` has no column to record why a row was excluded, when the reason
+column is added, then it is a single new column following this schema's conventions (proposed
+`reject_reason text` — nullable, since a human `rejected` via `termsCandidateDecide` may have no
+machine class; an `excluded_class text` alongside is acceptable but only if BOTH are populated by
+the classifier and neither is left write-only).
+*Verify:* `select reject_reason from term_candidate limit 1` succeeds; `EXPECTED_TABLES` /
+`schemaParity` unchanged in table set.
+
+**AC-54.** Given this repo has shipped the "column added inline to `create table if not exists`,
+exit 0, never reaches production" defect **four times**, when the reason column is added, then it is
+added by an **idempotent `alter table ... add column if not exists`** placed AFTER the
+`create table if not exists term_candidate` block, and **no statement anywhere in `SCHEMA_SQL` names
+the new column before that ALTER** (H39/H39b).
+*Verify:* run `api/test/schemaParity.test.mjs` — the fresh-vs-upgraded parity test — and it must
+PASS, not skip. A skip is absent evidence, not a pass. **Additionally run the populated-database
+migration by hand per CLAUDE.md:** apply `origin/main`'s `SCHEMA_SQL`, seed real `term_candidate`
+rows, then apply the branch's `SCHEMA_SQL` on top with `psql -v ON_ERROR_STOP=1`; exit code must be
+0 and the seeded rows must still be present with `reject_reason` null.
+
+**AC-55.** Given the curation queue must not show junk while the excluded set stays auditable, when
+the curation screen loads with no explicit status, then it requests `status=pending` (the route's
+existing default) and offers an explicit "Show excluded" view over `status=rejected` that displays
+the reason per row.
+*Verify:* `ui-verify.yml` on the curation route asserting a known junk term (e.g. `bachelor degree`)
+is **absent** from the default view and **present with its reason** in the excluded view.
+
+**AC-56.** Given a rule change can silently over-reject, when an exclusion pass completes, then the
+route response reports, per class, the number marked **and** the total now in `rejected`, and the
+implementer records the measured numbers for the exact ruleset shipped in this file.
+*Verify:* paste the `POST /api/app/qc/terms/mine` response body here. **Neither of the two prior
+measurements (106-row and 81-row) may be quoted as the result** — they were produced by different
+proposed rulesets against the same 2,734-row queue and they disagree class-by-class
+(degree 32 vs 26, title 21 vs 22, EEO 24 vs 16, filler 21 vs 8). Reusing either would be reporting a
+number that was never measured on the shipped code.
+
+**AC-57.** Given an auto-rejection is a machine decision and a curator decision is a human one, when
+a row is auto-rejected, then `reviewed_by` records a **system identity** distinguishable from an
+owner email (e.g. `system:termsMine`), and the curation UI labels it as automatic.
+*Verify:* SQL asserting every auto-rejected row has `reviewed_by like 'system:%'` and every
+human-decided row has `reviewed_by` equal to an owner email; UI assertion that the excluded view
+distinguishes the two. **Without this, an auto-rejection is indistinguishable from the owner's own
+judgement, and AC-12's "a human decision outranks a rule change" becomes unenforceable.**
+
+**AC-58.** Given a restored candidate must genuinely return to review, when the owner flips an
+auto-rejected row back to `pending`, then it is **not** re-rejected by the next mine.
+*Verify:* local Postgres: mark a row `rejected` by class, flip to `pending` with a human
+`reviewed_by`, re-run the pass, assert it is still `pending`. **This requires the pass to skip rows
+a human has touched** — i.e. the predicate must be `status='pending' and (reviewed_by is null or
+reviewed_by like 'system:%')`, not `status='pending'` alone. **Mutation-prove:** drop the
+`reviewed_by` clause and confirm the test FAILS. *(Cross-check with AC-22: if the decide route's
+whitelist never accepts `pending`, this AC is untestable through the API and AC-22 must be
+implemented first.)*
+
+**AC-59.** Given `termsMine`'s upsert currently only updates rows `where term_candidate.status =
+'pending'`, when a term previously auto-rejected reappears in the corpus with a higher df, then its
+`df` is either refreshed or deliberately frozen — and which one is chosen is stated, not accidental.
+*Verify:* local Postgres test asserting the chosen behaviour explicitly. **Flagged risk:** with
+mark-not-delete, rejected rows now persist forever and their `df` silently ages, so the excluded
+view will display stale frequencies unless this is decided.
+
+**AC-60.** Given the excluded set now grows monotonically, when the queue is inspected after several
+re-mines, then `term_candidate` row growth is bounded and reported (`count(*) by status`), and any
+retention policy is an **owner setting**, not a hardcoded cap.
+*Verify:* live count before/after three re-mines; settings round-trip for any retention value.
+
+**AC-61.** Given the classifier decides what the owner never sees, when it ships, then it is a
+**pure exported function** (`classifyCandidate(normalized, opts) -> { class, reason } | null`)
+independently unit-testable without a DB.
+*Verify:* `api/test/termMiner.test.mjs` imports and exercises it directly; source grep asserts no
+`getPgClient` / `client.query` inside it.
+
+**AC-62.** Given exclusion lists are exactly the kind of thing an owner tunes, when the classifier
+reads its class lists, then they come from the existing per-owner settings store
+(`owner_search_prefs` + `checkPrefs.ts` derived-column pattern), seeded from code — and AC-47's
+configurability guard covers them.
+*Verify:* settings round-trip through `GET/POST /api/app/search-prefs`; the owner adds one term to
+`generic_filler`, re-mines, and that term moves from `pending` to `rejected` with the new reason —
+**proven by SQL, not by the UI reporting success**.
+
+## I. Error states, regression guards, and mutation proofs
+
+**AC-63.** Given the schema is the source of truth, when this lane's schema changes ship
+(reason column, AC-37's version columns, AC-39/AC-40's triggers, AC-36's predicate), then
+`schemaParity.test.mjs` PASSES (not skips) and the populated-database upgrade runs clean under
+`ON_ERROR_STOP=1`.
+*Verify:* run both, paste exit codes and output here.
+
+**AC-64.** Given every new guard must be provably non-inert, when this lane ships, then **each**
+new H-case is mutation-proven: revert the behaviour, confirm the suite FAILS, restore.
+*Verify:* one line per guard in the PR body naming the mutation applied and the assertion that
+fired. A mutation that is behaviourally equivalent and correctly fails to fail must be **said so**,
+not counted as proof. Guards requiring this: AC-5, AC-11(via AC-52), AC-12, AC-26, AC-27, AC-28,
+AC-31, AC-32, AC-36, AC-39, AC-40, AC-47, AC-52, AC-58.
+
+**AC-65.** Given H-case naming is by SLUG and a numeric ID fails `H26`, when new guards are added,
+then every one uses a two-word-minimum slug (`H:exclusion-never-deletes`,
+`H:exclusion-classes-are-exact`, `H:published-library-is-immutable`,
+`H:keyword-coverage-has-no-fabricated-zero`, `H:term-filters-are-configurable`).
+*Verify:* run `api/test/hardening.test.mjs`; `H26` passing is the proof.
+
+**AC-66.** Given a DB outage, when any of the new routes (mine, promote, publish) fails mid-way,
+then the response is a non-2xx with an error naming the step, and no partial library version is left
+in a state where `scoreable > 0` for entries belonging to an incomplete publish.
+*Verify:* local Postgres, kill the connection mid-promote; assert `select count(*) from
+term_library where status='published' and entry_count <> (select count(*) from term_library_entry
+where library_id = term_library.id)` is 0. Promote+publish must be in one transaction.
+
+**AC-67.** Given `resolveOwner` falls back to `demo@executive-engine.local` on a missing `?owner=`,
+when any new route or API method is added, then it passes `owner` explicitly and a test proves a
+missing owner does not silently read the demo tenant.
+*Verify:* route test calling without `?owner=` asserts the response identifies the demo owner
+explicitly rather than returning the production owner's rows. **This is the `listPersonas` bug.**
+*Open question the implementer must answer, not assume:* `term_library` / `term_library_entry` are
+deliberately **NOT owner-scoped** (`schema.ts:196`: *"shared reference data"*) while
+`term_candidate` **is**. Promotion therefore crosses a tenancy boundary — see Finding 8.
+
+**AC-68.** Given a term's surface form differs from its normalized form, when an entry is created,
+then `display_term` preserves the employer's real casing (`SOC 2`, `SAFe`, `P&L`) and is **not** the
+normalized string.
+*Verify:* assert `display_term <> normalized` for every acronym entry; assert
+`case_sensitive_acronym` entries have a `display_term` containing at least one uppercase character —
+otherwise `matchesEntry`'s regex (`new RegExp('\\b' + display_term + '\\b')`) is
+case-insensitively equivalent and the mode does nothing. **Mutation-prove:** set an acronym's
+`display_term` to lowercase and confirm AC-28's false-positive assertion FAILS.
+*Note:* `term_candidate.ngram` stores `v.surface`, which `termsMine` sets to the **normalized**
+string (`df.set(g, { ..., surface: g })` where `g` is already normalized) — **so the original casing
+is NOT captured anywhere in the queue today.** Promotion cannot recover `SAFe` from `safe`. Either
+the miner must record the real surface form, or the promote UI must require the owner to type the
+display form. Binary: one of the two must be implemented and tested.
+
+**AC-69.** Given the terms surface in the UI, when a published library is shown, then the library
+key, version and entry count are rendered (SPEC §4.1: *"Footer names the library (`ENG-LEAD v4`,
+1,840 terms, its sources)"*) along with the source attributions from `source_manifest`.
+*Verify:* `ui-verify.yml` on the JD-analysis ATS keywords tab asserting the library name, version
+and count strings render, and that the O*NET/ESCO attribution strings appear when those sources are
+in the manifest.
+
+**AC-70.** Given `docs/qc-evidence/qc/data.js:25` hardcodes `TERM_LIB = { id: 'ENG-LEAD v4', size:
+1840, sources: [...] }` and is rendered by `packet.jsx:103` and `evidence.jsx:177`, when a real
+library is published, then no surface renders that fabricated prototype constant as live data.
+*Verify:* grep those three files; assert the live app reads the library identity from the API. **"No
+dead UI · never render hardcoded fake names, counts, or statuses as live data."**
