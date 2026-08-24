@@ -2951,3 +2951,63 @@ bare `ai` entry was seeded. **A seeder must de-overlap nested acronyms before tr
 only one source has been consulted. A number now would be the fabricated-composite failure this
 repo forbids. Same reason `soc_codes`/`source_refs` are absent: they need O*NET/ESCO licence and
 attribution handling via `source_manifest`.
+
+### CORRECTION 2026-08-24 — the term-library samples above were wrong twice; owner caught both
+
+Owner: *"you're using only onet but there was also discussion of an option for more executive
+centric items."*
+
+**1. `termMiner.ts` ALREADY EXISTS and had already run — I duplicated it.** 225 lines on `main`,
+three registered routes (`app/qc/terms/mine`, `app/qc/terms/candidates`,
+`app/qc/terms/candidate/{id}`), and `term_candidate` holds **2,734 pending rows mined 2026-08-19**
+(db-query **32688577032**). I wrote ad-hoc extraction SQL without grepping for the system that owns
+this job. Textbook "Extend, don't duplicate".
+
+**2. My terms were O*NET-shaped even though the doc excluded O*NET.** AWS/CI-CD/DevOps/LLM for an
+owner whose personas are VP and Director. **`termMiner.ts:6-8` states its purpose as supplying "the
+executive vocabulary O\*NET does not carry"** (roadmap 626, board 480, budget 416, operating model
+222, digital transformation 153, P&L 83, M&A 66, due diligence 56 — none in O*NET); `schema.ts:265`
+repeats it. I built the thing that header exists to prevent.
+
+**3. Three "findings" I reported as discoveries were already solved in that file.**
+- "Capitalisation measures sentence position" → its `STOP` list.
+- My "exclusion classes" → its `BOILERPLATE` list, whose comments record the SAME numbers from its
+  own first live run (`dental and vision` 177, `regard to race` 220, `orientation gender` 239).
+- "df cannot separate a term from a heading" → it already ranks by SPECIFICITY (phrase-length
+  weighted), for the reason I wrote up as new.
+- And my acronym-only regex would have destroyed `P&L`/`M&A`/`R&D`: `termNormalize` deliberately
+  keeps the token `and` so `P&L` survives as `p and l`.
+
+**The lesson is the one already written down and violated anyway: GREP FOR THE OWNING SYSTEM BEFORE
+EXTRACTING ANYTHING.** One `grep -rn term_librar` would have found `termMiner.ts`, the 2,734 rows,
+and the exec-vocabulary intent in the first minute.
+
+**Corrected samples** (db-query **32688607431**, read from the real queue): `cross functional` 425,
+`executive leadership` 303, `decision making` 307, `continuous improvement` 233, `risk management`
+204, `senior leadership` 199, `product management` 195, `product strategy` 164, `executive level`
+160, `emerging technologies` 160, `data driven` 159, `technology strategy` 149, `operational
+excellence` 142, `operating model` 126, `enterprise wide` 125, `stakeholder management` 121, `change
+management` 121, `digital transformation` 120, `strategic planning` 116, `technology leadership` 114,
+`go to market` 109, `executive presence` 105, `data governance` 105, `product vision` 102.
+**`cross functional` 425 and `executive leadership` 303 both beat `SaaS` 198**, the top term in my
+first draft — the vocabulary this owner is judged on was absent from a list I called complete.
+
+**Two defects found by READING the existing queue rather than re-deriving it:**
+1. **Stale against the current blocklist** — `orientation gender` 239, `regard to race` 220,
+   `dental and vision` 177, `sex sexual` 155, `protected by law` 95 are all in `BOILERPLATE` today
+   but were mined before the list was extended. `termsMine` already purges pending rows the current
+   filters would no longer produce and never touches a human decision, so **a re-mine fixes this
+   with zero code change.**
+2. **Boilerplate the blocklist does not cover yet** — degree requirements (`bachelor degree` 404,
+   `related field` 299, `computer science` 263, `master degree` 154, `advanced degree` 151),
+   employment type (`full time` 208), geography (`united states` 177), EEO tail (`receive
+   consideration` 132, `characteristic protected` 100), benefits (`paid holidays` 125, `long term
+   disability` 88). `vice president` 234 is a real term but belongs to the ROLE taxonomy
+   (`persona`/`taxonomy_title`), a separation `schema.ts:195` already states.
+
+**What is actually left (tier 1, feeds `keyword_coverage` into scoring):** a curation UI — both
+`termsCandidates` and `termsCandidateDecide` are live routes with **ZERO consumers in `app/src`**,
+so 2,734 rows are queued with no screen to approve them from; a promote step turning an approved
+candidate into a `term_library_entry` with family/term_type/match_mode/aliases and publishing a
+version; and a re-mine. `artificial intelligence` 151 and `machine learning` 107 are ALIASES of
+`ai_ml`, which is exactly what the miner's existing `status: merged` + `merged_into` decision is for.

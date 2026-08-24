@@ -3178,6 +3178,52 @@ than taken unilaterally.
 
 ## ACT: ATS term library — samples for sign-off (open, awaiting owner)
 
+**CORRECTED 2026-08-24 after the owner caught it: *"you're using only onet but there was also
+discussion of an option for more executive centric items."* Both halves right.**
+
+**I duplicated a system that already exists — the exact "Extend, don't duplicate" failure.**
+`api/src/functions/tests/termMiner.ts` is 225 lines on `main`, registers THREE live routes
+(`app/qc/terms/mine`, `app/qc/terms/candidates`, `app/qc/terms/candidate/{id}`), and had ALREADY
+RUN: `term_candidate` holds **2,734 pending rows mined 2026-08-19** (db-query run **32688577032**).
+I hand-rolled ad-hoc extraction SQL and never grepped for it.
+
+**And my terms were O*NET-shaped even though my doc excluded O*NET.** 18 samples of
+AWS/CI-CD/DevOps/LLM for an owner whose personas are VP and Director. `termMiner.ts:6-8` states its
+own purpose as supplying *"the executive vocabulary O\*NET does not carry"*; `schema.ts:265` repeats
+it. I built the thing that header exists to avoid.
+
+**Three of my "findings" were already solved in that file.** "Capitalisation measures sentence
+position" is its `STOP` list; my "exclusion classes" rediscovered EEO/benefits boilerplate and its
+comments record the SAME numbers from its own first run (`dental and vision` 177, `regard to race`
+220, `orientation gender` 239); its ranking is already specificity-weighted, not raw df. My
+acronym-only regex would also have destroyed `P&L`/`M&A`/`R&D` — `termNormalize` keeps the token
+`and` precisely so `P&L` survives as `p and l`.
+
+**The corrected samples** (db-query run **32688607431**, read from the real queue) lead with the
+vocabulary that was missing: `cross functional` 425, `executive leadership` 303, `decision making`
+307, `continuous improvement` 233, `risk management` 204, `senior leadership` 199, `product
+management` 195, `product strategy` 164, `executive level` 160, `technology strategy` 149,
+`operational excellence` 142, `operating model` 126, `stakeholder management` 121, `change
+management` 121, `digital transformation` 120, `strategic planning` 116, `technology leadership`
+114, `go to market` 109, `executive presence` 105, `data governance` 105. **`cross functional` 425
+and `executive leadership` 303 both beat `SaaS` 198 — the top term in my first draft.**
+
+**Two defects found by reading the existing queue:** (1) stored candidates are STALE against the
+current blocklist (five blocked phrases still present because they were mined before the list was
+extended) — `termsMine` already purges pending rows the filters would no longer produce, so a
+re-mine fixes it with no code change; (2) boilerplate the blocklist does not yet cover — degree
+requirements (`bachelor degree` 404, `computer science` 263), employment type (`full time` 208),
+geography (`united states` 177), EEO tail, benefits. `vice president` 234 is real but belongs to the
+role taxonomy, not here.
+
+**What is actually left to build:** the curation UI (both read/decide routes are live with ZERO
+consumers in `app/src`), the promote step (nothing turns an approved candidate into a
+`term_library_entry` or publishes a version), and a re-mine. Tier 1, because publishing feeds
+`keyword_coverage` into scoring.
+
+### Original entry (superseded above, kept for the record)
+
+
 Owner: *"so knock out the acts library and give me samples"* — read as the **ATS term library**
 (`term_library` / `term_library_entry`), the blocker behind `keyword_coverage: null`, the
 `Keywords placed` chips, and the `Every library keyword lands in a field` check. Both tables exist
