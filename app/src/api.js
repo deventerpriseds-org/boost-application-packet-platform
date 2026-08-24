@@ -289,6 +289,12 @@ export const api = {
   // The resume template's role focus — the owner's ruling that the resume chosen drives the persona.
   // `resolveRoleFocus` reads `templates/resume-<driveId>` before every other source; these are the
   // read and write for that row, so the value is a setting rather than a code constant.
+  // Which of the owner's resumes a packet is built on. The COLLECTION comes from
+  // templateFocusGet (AppConfig `templates`); this stores the per-packet CHOICE, and choosing also
+  // chooses the persona because resolveRoleFocus reads the resume template id first.
+  // A blank templateId clears back to the owner's configured default -- a real outcome, not an error.
+  packetResumeTemplateSet: (packetId, templateId) =>
+    post(`/app/packet/${packetId}/resume-template`, { templateId: templateId || '' }),
   templateFocusGet: () => get('/config/templates'),
   // `label` is OMITTED when undefined rather than sent as '' — the route treats an absent label as
   // "leave it alone" and a present blank one as "clear it", so sending '' from a caller that only

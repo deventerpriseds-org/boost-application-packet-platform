@@ -1182,6 +1182,27 @@ alter table packet         add column if not exists jd_analyzed_at timestamptz;
 -- are stuck precisely because the evidence for them was only ever in that response. Persisting it
 -- turns "we cannot see what happened" into a row anyone can query afterwards.
 alter table packet         add column if not exists last_build jsonb;
+
+-- PER-PACKET RESUME TEMPLATE (2026-08-24). The owner has more than one resume - a regular one, a
+-- compact one, and different ones per role - and until now the product had exactly one
+-- google.resumeTemplateId for all of them, so "use the Product resume for this opportunity" could
+-- not be expressed at all.
+--
+-- It is a COLUMN rather than a new table because the collection already exists: AppConfig partition
+-- templates holds one resume-<driveId> row per resume template, each carrying its own
+-- roleFocus and (since today) a label. What was missing was only the per-packet CHOICE, and a
+-- choice is one value.
+--
+-- NULL means "use the owner's configured default", which is what every existing packet means, so
+-- this migration changes no behaviour for anything already built.
+--
+-- Choosing the resume also chooses the PERSONA, and that is deliberate rather than incidental: the
+-- owner's ruling is *"let the resume chosen drive the persona"*, and resolveRoleFocus already
+-- takes the resume template id as its highest-priority source. So this one column feeds both the
+-- document that gets copied AND the focus word every generation prompt is prefixed with, with no
+-- second setting to keep in sync.
+alter table packet         add column if not exists resume_template_id text;
+
 alter table library_entity add column if not exists owner_email text not null default 'demo@executive-engine.local';
 alter table library_entity add column if not exists is_demo boolean not null default false;
 create index if not exists opp_owner_idx2 on opportunity(owner_email);

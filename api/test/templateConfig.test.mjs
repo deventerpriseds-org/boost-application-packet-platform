@@ -156,3 +156,72 @@ test('H:template-delete-needs-both-empty: a named template is not deleted by cle
   assert.match(src, /if \(!roleFocus && !keepLabel\)[\s\S]{0,200}?deleteEntity/,
     'the row may only be deleted when it carries neither a focus nor a name')
 })
+
+// ── Per-packet resume selection (Phase 3b) ───────────────────────────────────────────────────────
+//
+// The owner has several resumes -- regular, compact, and different ones per role -- and the product
+// had exactly ONE `google.resumeTemplateId` for all of them, so "use the Product resume for this
+// opportunity" could not be expressed. `packet.resume_template_id` is that choice. NULL means the
+// owner's configured default, which is every packet built before 2026-08-24.
+const PACKETS = readFileSync(new URL('../src/functions/tests/appPackets.ts', import.meta.url), 'utf8')
+const PIPELINE = readFileSync(new URL('../src/functions/tests/pipeline.ts', import.meta.url), 'utf8')
+const SCHEMA = readFileSync(new URL('../src/functions/tests/schema.ts', import.meta.url), 'utf8')
+
+test('H:packet-resume-template-column-exists: the choice is stored, and nullable', () => {
+  assert.match(SCHEMA, /alter table packet\s+add column if not exists resume_template_id text;/,
+    'the per-packet resume choice has no column')
+  // NOT NOT-NULL and NOT defaulted: null is the meaningful value "use the owner's default", and a
+  // default id would silently pin every existing packet to one template.
+  const line = SCHEMA.match(/alter table packet\s+add column if not exists resume_template_id[^;]*/)[0]
+  assert.ok(!/not null|default/i.test(line), 'the column must stay nullable with no default')
+})
+
+test('H:packet-resume-drives-the-copied-document', () => {
+  // renderArtifact must prefer the packet's choice over the global setting, or the picker changes
+  // the role focus while still copying the default document -- worse than not having a picker.
+  assert.match(PACKETS, /resumeTemplateId: packetResume \|\| settings\.resumeTemplateId\.value/,
+    "renderArtifact must prefer the packet's chosen resume over the global default")
+})
+
+test('H:packet-resume-drives-the-role-focus: one column feeds both, never two settings', () => {
+  // The owner's ruling is "let the resume chosen drive the persona". resolveRoleFocus already takes
+  // the resume template id as its first source, so the packet's choice must reach it.
+  assert.match(PACKETS, /resumeTemplateId: packetResumeTemplateId/,
+    'the packet choice is not passed into generation, so the focus would describe a different resume')
+  assert.match(PIPELINE, /const resumeTemplateForFocus = String\(opts\.resumeTemplateId \|\| ''\)\.trim\(\) \|\| settings\.resumeTemplateId\?\.value/,
+    "the packet's choice must win over the global setting when resolving the role focus")
+  assert.match(PIPELINE, /resolveRoleFocus\(\s*\n?\s*roleType, settings\.defaultRoleFocus, opts\.personaRole, resumeTemplateForFocus\)/,
+    'resolveRoleFocus is still reading the global setting directly')
+})
+
+test('H:packet-resume-validated-against-the-collection-not-a-regex', () => {
+  // A Drive-id-shaped string naming no configured template would build from a document the owner
+  // never set up, surfacing as a Google 404 deep inside a build instead of a rejected choice.
+  const fn = PACKETS.slice(PACKETS.indexOf('export async function packetResumeTemplate'))
+  const body = fn.slice(0, fn.indexOf('\n}\n'))
+  assert.match(body, /const known = await knownResumeTemplateIds\(\)/,
+    'the writer must check the id against the configured collection')
+  assert.match(body, /if \(!known\.includes\(templateId\)\)/, 'an unknown template must be rejected')
+  assert.match(body, /requireWrite\(req\)/, 'the writer must require a write session')
+  // Clearing is a real outcome, not an error.
+  assert.match(body, /\[templateId \|\| null, packetId\]/, 'a blank id must clear the choice to null')
+})
+
+test('H:known-resume-templates-share-one-definition-with-the-config-route', () => {
+  // Two definitions of "what counts as one of my resumes" is how a packet ends up pointing at a
+  // document the collection does not contain. Both read the same partition, row shape and seeds.
+  const fn = PACKETS.slice(PACKETS.indexOf('async function knownResumeTemplateIds'))
+  const body = fn.slice(0, fn.indexOf('\n}\n'))
+  assert.match(body, /SEED_TEMPLATE_ROLE_FOCUS/, 'the seeded templates must count as known')
+  assert.match(body, /PartitionKey eq 'templates'/, 'it must read the same partition the config route lists')
+  assert.match(body, /\^resume-\[A-Za-z0-9_-\]\{10,\}\$/, 'it must use the same row-key shape')
+})
+
+test('H:packet-resume-does-not-re-break-the-compact-template', () => {
+  // The compact fix landed hours earlier in the same session. Dropping compactResumeTemplateId from
+  // this call while adding the packet override would silently reinstate it.
+  const call = PACKETS.slice(PACKETS.indexOf('const meta = metaFor(art.type, {'))
+  const passed = call.slice(0, call.indexOf('})'))
+  assert.match(passed, /compactResumeTemplateId: settings\.compactResumeTemplateId/,
+    'the compact template id must still be passed')
+})

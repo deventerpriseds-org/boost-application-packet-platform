@@ -29,6 +29,71 @@ const TYPE_SUB = {
 const STATUS_TONE = { todo: 'panel', drafting: 'yellow', review: 'accent', changes: 'red', approved: 'green' }
 
 // Steps in the packet workflow
+// Which of the owner's resumes this packet is built on.
+//
+// The COLLECTION is AppConfig partition `templates` -- one `resume-<driveId>` row per resume, each
+// carrying its own role focus and (since 2026-08-24) a name. This control stores the per-packet
+// CHOICE. It is read-only about the collection: adding or naming a resume happens in Settings, and
+// duplicating that here would be a second place to manage the same rows.
+//
+// "Owner default" is a REAL option, not an empty state -- it clears the choice back to
+// `google.resumeTemplateId`, which is what every packet built before this existed uses.
+function ResumeTemplatePicker({ packetId, value, onSaved }) {
+  const [rows, setRows] = useState(null)
+  const [saving, setSaving] = useState(false)
+  const [note, setNote] = useState(null)
+
+  useEffect(() => {
+    let live = true
+    api.templateFocusGet()
+      .then((r) => { if (live) setRows((r && r.templates) || []) })
+      .catch(() => { if (live) setRows([]) })
+    return () => { live = false }
+  }, [])
+
+  // One resume and no choice made is the state every owner starts in, and a picker with a single
+  // option is noise. It appears as soon as there is something to choose between.
+  if (!rows || (rows.length < 2 && !value)) return null
+
+  const pick = async (templateId) => {
+    setSaving(true); setNote(null)
+    try {
+      const r = await api.packetResumeTemplateSet(packetId, templateId)
+      if (!r || r.error) throw new Error((r && r.error) || 'could not change the resume')
+      setNote({ ok: true, msg: r.cleared ? 'Using your default resume.' : 'Resume changed - rebuild to apply it.' })
+      if (onSaved) await onSaved()
+    } catch (e) {
+      setNote({ ok: false, msg: String(e.message || e) })
+    } finally { setSaving(false) }
+  }
+
+  const nameOf = (t) => t.label || `Unnamed resume (${String(t.templateId).slice(0, 8)}...)`
+
+  return (
+    <div className="px-box" data-qc="packet-resume-template" style={{ padding: 12, display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+      <div style={{ flex: 1, minWidth: 200 }}>
+        <div style={{ fontSize: 13, fontWeight: 600 }}>Resume this packet is built on</div>
+        <div className="px-small" style={{ color: 'var(--proto-ink2)', marginTop: 2 }}>
+          The resume you pick also sets the role focus every prompt is written for.
+          Changing it takes effect on the next rebuild.
+        </div>
+      </div>
+      <select className="px-input" value={value} disabled={saving} aria-label="Resume template"
+        onChange={(e) => pick(e.target.value)} style={{ minWidth: 220 }}>
+        <option value="">Your default resume</option>
+        {rows.map((t) => (
+          <option key={t.templateId} value={t.templateId}>
+            {nameOf(t)}{t.roleFocus ? ` - ${t.roleFocus}` : ''}
+          </option>
+        ))}
+      </select>
+      {note ? (
+        <div className="px-small" style={{ width: '100%', color: note.ok ? 'var(--text-ok)' : 'var(--text-bad)' }}>{note.msg}</div>
+      ) : null}
+    </div>
+  )
+}
+
 const STEPS = [
   // "ATS" is reserved for the keyword library and its coverage (P5.4). Step 1 extracts
   // responsibilities and requirements from the posting — that is posting analysis, not ATS.
@@ -795,6 +860,14 @@ export default function PacketBuilder({ id, step }) {
                 <span className="px-link" role="button" tabIndex={0} onClick={() => buildAll()}
                   onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); buildAll() } }}>Build entire packet</span> to generate all at once.
               </div>
+            )}
+            {/* WHICH RESUME this packet is built on. Only on the resume step, because that is the
+                only step whose template the owner has more than one of. Choosing here also chooses
+                the persona: `resolveRoleFocus` reads the resume template id before any other
+                source, which is the owner's ruling -- "let the resume chosen drive the persona". */}
+            {activeStep === 'resume' && (
+              <ResumeTemplatePicker packetId={p.id} value={p.resumeTemplateId || ''}
+                onSaved={load} />
             )}
             {stepArtifacts.map((a) => (
               <ArtifactCard key={a.id} a={a} busy={busy} setBusy={setBusy}

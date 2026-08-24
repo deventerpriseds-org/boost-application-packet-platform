@@ -1,4 +1,5 @@
 import { app, HttpRequest, HttpResponseInit, InvocationContext } from '@azure/functions'
+import { TableClient } from '@azure/data-tables'
 import { resolveOwner, requireWrite } from './appSession'
 import { getPgClient } from './pgClient'
 import { getGoogleOAuthToken, HAS_GOOGLE_OAUTH } from './googleAuth'
@@ -7,6 +8,7 @@ import { groundingText, resolvePostingSource } from './jdText'
 import { metaFor, varsForType, copyThen, injectValues, stripLeftoverTokens, shareAnyone } from './packetTemplates'
 import { buildPackageForJD } from './pipeline'
 import { loadPipelineSettings } from './pipelineConfig'
+import { SEED_TEMPLATE_ROLE_FOCUS } from './roleFocus'
 import { writeSwaps } from './appSwaps'
 import { writeInsertions } from './appInsertions'
 import { applyCorrectionPass } from './appCorrections'
@@ -189,6 +191,9 @@ function packetShape(pkt: any, artifacts: any[], opp?: any) {
     // prove D14 without a browser.
     coveredKwProfileCompared: comparesToProfile(jdAnalysisRequest(opp || {}, '')),
     atsScore: pkt.ats_score,
+    // Which resume this packet is built on. NULL = the owner's configured default, and the picker
+    // says so rather than pre-selecting a row that was never chosen.
+    resumeTemplateId: pkt.resume_template_id || null,
     mustHaves: pkt.must_haves || [],
     // missingKw is DERIVED from opportunity.ats_gaps — the posting-grounded gap list produced by
     // atsScoreOne() against jd_real. It is deliberately NOT a packet column: a second gap list
@@ -483,7 +488,7 @@ export async function ensurePackage(client: any, art: any, opp: any, regen: bool
 
   await ensurePkgColumn(client)
   await ensureAnalysisCols(client)
-  const pkt = (await client.query(`select pkg_json, jd_grounded, feedback from packet where id = $1`, [art.packet_id])).rows[0]
+  const pkt = (await client.query(`select pkg_json, jd_grounded, feedback, resume_template_id from packet where id = $1`, [art.packet_id])).rows[0]
   const { jd, grounded } = generationJd(opp)
 
   // A package cached BEFORE X1 was generated from the synthesised pseudo-JD. Reusing it would make
@@ -504,7 +509,16 @@ export async function ensurePackage(client: any, art: any, opp: any, regen: bool
   const revisionNotes = openNotes
     .filter((f: any) => f && f.resolved === false && (!f.type || f.type === art.type))
     .map((f: any) => String(f.note || '')).filter(Boolean)
-  const built = await buildPackageForJD({ key, jd, roleType, company: opp.company, jobTitle: opp.role, revisionNotes })
+  // The packet's chosen resume decides the ROLE FOCUS as well as which document gets copied. That
+  // is the owner's ruling -- "let the resume chosen drive the persona" -- and `resolveRoleFocus`
+  // already takes the resume template id as its highest-priority source, so passing it here is the
+  // whole of it. NULL means "the owner's configured default", which is every packet built before
+  // 2026-08-24, so nothing already generated changes focus.
+  const packetResumeTemplateId = String(pkt?.resume_template_id || '').trim() || null
+  const built = await buildPackageForJD({
+    key, jd, roleType, company: opp.company, jobTitle: opp.role, revisionNotes,
+    resumeTemplateId: packetResumeTemplateId,
+  })
   const pkg = built.pkg
   // D8 - this used to pass `{}`, which logUsage discards, so every production packet build
   // recorded nothing. Each of the three generation passes is metered on its own so the cost of
@@ -622,8 +636,27 @@ export async function renderArtifact(client: any, art: any, opp: any, pkg: Recor
   // for the compact ATS resume, while `pipeline.ts` used the configured one. Two paths, two
   // documents, no warning. `metaFor` falls back to the resume id when it is unset, so an owner who
   // never set it sees no change.
+  //
+  // THE PACKET'S OWN CHOICE WINS for the resume, because the owner has more than one and picked
+  // this one for this opportunity. NULL means "use the owner's default", which is every packet
+  // built before 2026-08-24.
+  //
+  // IT OVERRIDES `resumeTemplateId` ONLY, AND THAT LEAVES A KNOWN SEAM. `compact_resume` resolves
+  // to `google.compactResumeTemplateId` when the owner has set one, and only falls back to the
+  // resume id when they have not. So:
+  //   compact template UNSET -> the compact follows the packet's chosen resume. Consistent.
+  //   compact template SET   -> the compact stays on that ONE global document even when the packet
+  //                             chose a different resume. A Product-resume packet gets the global
+  //                             (engineering) compact.
+  // That is not right, and it is not fixed here: the honest fix is a compact id ON the template row
+  // in AppConfig `templates`, so each resume knows its own compact, rather than a second per-packet
+  // column. Tracked as D:compact-not-per-packet. Do not "simplify" this by dropping
+  // `compactResumeTemplateId` from the call -- that would re-break the defect closed hours earlier.
+  const packetResume = String(
+    (await client.query(`select resume_template_id from packet where id = $1`, [art.packet_id])).rows[0]?.resume_template_id || '',
+  ).trim()
   const meta = metaFor(art.type, {
-    resumeTemplateId: settings.resumeTemplateId.value,
+    resumeTemplateId: packetResume || settings.resumeTemplateId.value,
     compactResumeTemplateId: settings.compactResumeTemplateId,
     portfolioTemplateId: settings.portfolioTemplateId.value,
     coverLetterTemplateId: settings.coverLetterTemplateId.value,
@@ -1371,7 +1404,81 @@ export async function artifactAiEdit(req: HttpRequest, context: InvocationContex
   } finally { try { await client?.end() } catch {} }
 }
 
+
+// POST /api/app/packet/{packetId}/resume-template { templateId }
+//
+// Which of the owner's resumes this packet is built on. The collection is AppConfig partition
+// `templates` (one `resume-<driveId>` row each, carrying its own roleFocus and label); this stores
+// the CHOICE, and choosing here also chooses the persona because `resolveRoleFocus` reads the
+// resume template id first. The owner's ruling: "let the resume chosen drive the persona".
+//
+// A blank/absent templateId CLEARS the choice back to the owner's configured default. That is a
+// real outcome the picker needs, not an error.
+//
+// VALIDATED AGAINST THE COLLECTION, not merely against a regex. A Drive-id-shaped string that names
+// no configured template would build a packet from a document the owner never set up, and the
+// failure would surface as a Google 404 deep inside a build rather than as a rejected choice here.
+/**
+ * The Drive ids that ARE configured resume templates: the seeded ones plus every
+ * `templates/resume-<driveId>` row the owner has added. Same partition, same row shape and same
+ * seed table `GET /api/config/templates` lists from -- deliberately, so "what counts as one of my
+ * resumes" has ONE answer. A second, looser definition here (say, "anything Drive-id shaped") is how
+ * a packet ends up pointing at a document the collection does not contain.
+ *
+ * Degrades to the seeds if Storage is unreachable rather than rejecting every choice: refusing all
+ * of the owner's templates because a table read blipped is worse than accepting a seeded one.
+ */
+async function knownResumeTemplateIds(): Promise<string[]> {
+  const ids = new Set<string>(Object.keys(SEED_TEMPLATE_ROLE_FOCUS))
+  try {
+    const conn = process.env.AZURE_STORAGE_CONNECTION_STRING
+    if (conn) {
+      const client = TableClient.fromConnectionString(conn, 'AppConfig')
+      for await (const e of client.listEntities({ queryOptions: { filter: "PartitionKey eq 'templates'" } })) {
+        const k = String((e as any).rowKey || '')
+        if (/^resume-[A-Za-z0-9_-]{10,}$/.test(k)) ids.add(k.replace(/^resume-/, ''))
+      }
+    }
+  } catch { /* seeds only */ }
+  return [...ids]
+}
+
+export async function packetResumeTemplate(req: HttpRequest, context: InvocationContext): Promise<HttpResponseInit> {
+  if (req.method === 'OPTIONS') return { status: 204, headers: HEADERS }
+  const packetId = req.params.packetId
+  let client
+  try {
+    const guard = requireWrite(req); if (guard) return guard
+    const body = await req.json().catch(() => ({})) as any
+    const templateId = String(body?.templateId || '').trim()
+
+    if (templateId) {
+      const known = await knownResumeTemplateIds()
+      if (!known.includes(templateId)) {
+        return {
+          status: 400, headers: HEADERS,
+          jsonBody: { error: 'that template is not one of the configured resume templates', templateId, known },
+        }
+      }
+    }
+
+    client = await getPgClient()
+    const row = (await client.query(
+      `update packet set resume_template_id = $1, updated_at = now() where id = $2 returning id, resume_template_id`,
+      [templateId || null, packetId],
+    )).rows[0]
+    if (!row) return { status: 404, headers: HEADERS, jsonBody: { error: 'packet not found' } }
+    return {
+      status: 200, headers: HEADERS,
+      jsonBody: { packetId: row.id, resumeTemplateId: row.resume_template_id || null, cleared: !templateId },
+    }
+  } catch (err) {
+    return { status: 500, headers: HEADERS, jsonBody: { error: String(err) } }
+  } finally { try { await client?.end() } catch {} }
+}
+
 app.http('packetGet', { methods: ['GET', 'OPTIONS'], authLevel: 'anonymous', route: 'app/opportunity/{id}/packet', handler: packetGet })
+app.http('packetResumeTemplate', { methods: ['POST', 'OPTIONS'], authLevel: 'anonymous', route: 'app/packet/{packetId}/resume-template', handler: packetResumeTemplate })
 app.http('artifactContent', { methods: ['POST', 'OPTIONS'], authLevel: 'anonymous', route: 'app/artifact/{artifactId}/content', handler: artifactContent })
 app.http('artifactAiEdit', { methods: ['POST', 'OPTIONS'], authLevel: 'anonymous', route: 'app/artifact/{artifactId}/ai-edit', handler: artifactAiEdit })
 app.http('packetsList', { methods: ['GET', 'OPTIONS'], authLevel: 'anonymous', route: 'app/packets', handler: packetsList })

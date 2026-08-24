@@ -329,7 +329,7 @@ export function listBFromCalls(...calls: any[]): Record<string, string> {
 /** The zap token each List-B slot fed. Exported so a test can assert the wiring, not just the shape. */
 export const LIST_B_TOKENS = () => ({ ...LIST_B_TOKEN })
 
-export async function buildPackageForJD(opts: { key: string; jd: string; roleType: string; company: string; jobTitle: string; personaRole?: string | null; revisionNotes?: string[] }): Promise<{ pkg: Record<string, string | null>; steps: string[]; roleFocus: any; roleFocusSource: string; calls: { c1: any; c2: any; c3: any }; usage: Array<{ pass: string; usage: any }>; promptVersions: Record<string, number>; profileText: string; omitList: string; warnings: string[]; qcApplied: boolean; settings: PipelineSettings }> {
+export async function buildPackageForJD(opts: { key: string; jd: string; roleType: string; company: string; jobTitle: string; personaRole?: string | null; revisionNotes?: string[]; resumeTemplateId?: string | null }): Promise<{ pkg: Record<string, string | null>; steps: string[]; roleFocus: any; roleFocusSource: string; calls: { c1: any; c2: any; c3: any }; usage: Array<{ pass: string; usage: any }>; promptVersions: Record<string, number>; profileText: string; omitList: string; warnings: string[]; qcApplied: boolean; settings: PipelineSettings }> {
   const { key, jd, roleType, company, jobTitle } = opts
   const steps: string[] = []
   const warnings: string[] = []
@@ -341,8 +341,14 @@ export async function buildPackageForJD(opts: { key: string; jd: string; roleTyp
   // THE RESUME BEING BUILT decides the focus — the owner's ruling. `settings.resumeTemplateId` is the
   // same resolved value the build copies from (owner override, else the seeded id), so the focus can
   // never describe a different document from the one that gets written.
+  // `opts.resumeTemplateId` is the PACKET's chosen resume when it has one, and it wins because it
+  // names the document this build will actually copy. Falling through to `settings.resumeTemplateId`
+  // keeps every packet that never chose one on the owner's default -- which is all of them before
+  // 2026-08-24. Getting this order wrong would describe the focus of one resume while writing a
+  // different one, the precise failure the comment above is about.
+  const resumeTemplateForFocus = String(opts.resumeTemplateId || '').trim() || settings.resumeTemplateId?.value
   const role = await resolveRoleFocus(
-    roleType, settings.defaultRoleFocus, opts.personaRole, settings.resumeTemplateId?.value)
+    roleType, settings.defaultRoleFocus, opts.personaRole, resumeTemplateForFocus)
   const roleFocus = role.focus
   if (role.warning) warnings.push(`role focus: ${role.warning}`)
   steps.push(`Role focus "${roleFocus}" (source: ${role.source})`)
