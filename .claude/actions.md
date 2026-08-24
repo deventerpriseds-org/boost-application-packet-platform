@@ -3173,3 +3173,32 @@ behind the formatter's back, S3 invent `#0` for a missing seq. 242/242 app, 762/
 seven offender writers AND the parse together, which is accusation-grade code deciding coverage
 counts. That is an owner-level product decision with its own trace, and it is recorded here rather
 than taken unilaterally.
+
+---
+
+## ACT: ATS term library — samples for sign-off (open, awaiting owner)
+
+Owner: *"so knock out the acts library and give me samples"* — read as the **ATS term library**
+(`term_library` / `term_library_entry`), the blocker behind `keyword_coverage: null`, the
+`Keywords placed` chips, and the `Every library keyword lands in a field` check. Both tables exist
+in `schema.ts` with a full design and **zero rows and no writer**.
+
+**Samples, not a seeder.** Deliberate: publishing rows makes `keyword_coverage` a real number that
+feeds scoring, so the seeder is tier 1 and does not get built before the shape is signed off.
+Evidence doc: `docs/qc-evidence/TERM-LIBRARY-SAMPLES.md` — 18 candidates across 5 families, every
+`evidence_df` measured against the real `jd_real` corpus via `db-query.yml` runs **32687462831**
+and **32687509847**.
+
+**Two findings that changed the design, both measured rather than assumed:**
+1. **Capitalisation measures SENTENCE POSITION, not termhood.** Pass 1 ranked capitalised phrases
+   by df and returned `Lead` 850, `Partner` 718, `Proven` 694, `Build` 644 — every one a
+   bullet-initial verb. A seeder that ranks on capitalisation seeds verbs. Pass 2 requires
+   mid-sentence position or a pure acronym, and they vanish.
+2. **Frequency cannot separate a TERM from a SECTION HEADING.** `Responsibilities` 377 and
+   `Qualifications` 288 both outrank `SaaS` 198. df measures commonness; termhood needs a type —
+   which is why `term_type` and `family` are required columns.
+
+**Nothing is invented.** No model-proposed terms, no `confidence` values (one source consulted, so
+a composite would be fabricated), no `soc_codes` (needs O*NET/ESCO licence handling via
+`source_manifest`). The `AI` 836 / `AI/ML` 174 nesting overlap is stated in the doc rather than
+buried — a seeder must de-overlap nested acronyms before trusting any count.

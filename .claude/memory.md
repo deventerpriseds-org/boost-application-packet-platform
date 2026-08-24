@@ -2910,3 +2910,44 @@ tool in the same stretch, survived. Cause not established — a container restor
 candidate and is exactly what CLAUDE.md warns about. **The lesson is the repo's own "verify that an
 edit applied" rule, applied to appends too: after writing to a large file, `grep` for the new
 heading before moving on.** Prefer an anchored Edit over `cat >>` for these two files.
+
+## 2026-08-24 — ATS term library: samples measured from the corpus, seeder NOT built
+
+**Status: candidate rows only, awaiting owner sign-off.** `term_library` / `term_library_entry`
+are in `schema.ts` with a full design (families, term types, match modes, per-source audit,
+immutability) and **zero rows and no writer**. That emptiness is the single upstream cause of
+`keyword_coverage: null`, the unbuildable `Keywords placed` chips, and the unrenderable
+`Every library keyword lands in a field` check.
+
+**Why samples and not a seeder:** publishing rows turns `keyword_coverage` into a real number that
+feeds scoring, which makes the seeder **tier 1** (accusation grade). Tier 1 does not get built
+before the shape is signed off.
+
+`docs/qc-evidence/TERM-LIBRARY-SAMPLES.md` — 18 candidates, 5 families, every `evidence_df` a
+DISTINCT-posting count over the real `jd_real` corpus (`db-query.yml` runs **32687462831** and
+**32687509847**). Nothing model-invented; anything that did not appear in the corpus was dropped.
+
+**Two findings, both measured, both change the design:**
+1. **Capitalisation measures SENTENCE POSITION, not termhood.** Ranking capitalised phrases by df
+   returned `Lead` 850, `Partner` 718, `Proven` 694, `Build` 644, `Establish` 544 — every one a
+   bullet-initial verb. **A seeder that ranks on capitalisation seeds verbs.** Requiring
+   mid-sentence position (preceded by a lowercase word or comma) or a pure acronym removes them.
+2. **Frequency cannot separate a TERM from a SECTION HEADING.** `Responsibilities` 377 and
+   `Qualifications` 288 outrank `SaaS` 198. df measures commonness; termhood needs a type — which
+   is exactly why `term_type` and `family` are required columns. Anything unclassifiable stays out.
+
+**Exclusion classes the corpus produced** (they will recur on every seed run): section headings,
+job titles (`persona`/roles already own that taxonomy), degree fields, geography
+(`owner_fact.identity.location`), benefits, template boilerplate.
+
+**`case_sensitive_acronym` is not decoration.** Matching `AI` case-insensitively hits *detail*,
+*email*, *retail*, *available*, *domain*; `ML` hits *html*. Every acronym entry uses that mode.
+
+**Stated rather than buried:** bare `AI` measured 836, but the acronym pattern also matches the
+`AI` inside `AI/ML` (174), so 836 OVERLAPS and is not a count of postings wanting general AI. No
+bare `ai` entry was seeded. **A seeder must de-overlap nested acronyms before trusting any count.**
+
+**No `confidence` values written** — confidence is defined as independent-source corroboration and
+only one source has been consulted. A number now would be the fabricated-composite failure this
+repo forbids. Same reason `soc_codes`/`source_refs` are absent: they need O*NET/ESCO licence and
+attribution handling via `source_manifest`.
