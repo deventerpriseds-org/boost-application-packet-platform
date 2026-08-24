@@ -3380,3 +3380,26 @@ soon as a second template row exists.
 build only, so existing artifacts keep `before_text = null` and still say "no earlier version" until
 something is rebuilt. The provenance-label change ("From profile" -> "Written for this posting") also
 only appears on rebuilt artifacts.
+
+### ACT — the owner's compact resume Doc (2026-08-24) — VERIFIED, NOT CONFIGURED
+
+**Given:** a Drive FOLDER link first (`/folders/1iER8mC...`), then the Doc
+(`13eIKN2TqAOn3PC4U2pLl4wd-R3zS-8DLOWPRJaIW0O0`).
+
+**Trap avoided:** `isDriveId` is only `/^[A-Za-z0-9_-]{20,128}$/`, so the FOLDER id would have been
+accepted by Settings and failed later trying to copy a folder as a Doc.
+
+**Built to answer "is this Doc usable?": `diag/doc-structure` now reports `placeholders`
+{found, expected, missing, unexpected, usableAsTemplate}** — `expected` from TEMPLATE_META via
+`metaFor(?type=)`, never a hand-list; false when there is nothing to check against; text collected
+on the same walk that enters table cells, plus headers/footers. Commit `cd52cf4`, deployed
+(api run 32784488037).
+
+**Result (run 32784628025) — the Doc is NOT usable as configured:** found only `{{ResumeSummary}}`
+and `{{SkillsBullets}}`; six expected tokens missing; `{{SkillsBullets}}` unexpected.
+**Failure mode had it been configured blind:** filled summary, BLANK Core Skills, no error anywhere,
+because `stripLeftoverTokens` deletes the unfilled token from the output.
+
+**NOT configured. `google.compactResumeTemplateId` remains unset** — deliberately, pending the
+owner's choice between (A) code declares the compact's real set and combines Skills 1+2 into the one
+line, or (B) the Doc is renamed. Logged as `D:compact-template-placeholder-mismatch`.
