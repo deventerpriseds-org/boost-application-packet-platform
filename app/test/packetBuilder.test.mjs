@@ -127,3 +127,53 @@ test('H:no-request-changes-control: both screens regenerate through the shared s
     assert.ok(!/feedbackAdded/.test(src), `${file} re-implements the note sequencing inline`)
   }
 })
+
+// ── the resume step's last four prototype rows ───────────────────────────────────────────────────
+
+const BLOCKS = () => stripC(readFileSync(new URL('../src/screens/AssetBlocks.jsx', import.meta.url), 'utf8'))
+const PACKET = () => stripC(readFileSync(new URL('../src/screens/PacketBuilder.jsx', import.meta.url), 'utf8'))
+const stripC = (s) => s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')
+
+test('H:clear-state-needs-a-loaded-result: "nothing to review" is never the UNCHECKED state', () => {
+  // Without the `checked` guard, an asset whose checks never ran renders the same green sentence as
+  // one that ran clean - the absence of a verdict laundered into a pass, which is the single failure
+  // this whole rail exists to prevent.
+  const src = BLOCKS()
+  assert.match(src, /\{checked && severity && severity\.fix === 0 && severity\.review === 0 && severity\.soft === 0 && \(/,
+    'the clear state must require a LOADED result as well as three zeros')
+  assert.match(src, /Nothing to review on this asset\./)
+  assert.match(src, /checked: !!state,/, 'the hook must report whether a payload actually arrived')
+})
+
+test('H:approve-is-not-offered-when-the-gate-blocks', () => {
+  // The card offered an Approve the server refuses (approvalBlock). The server stays the authority;
+  // this only stops offering an action already known to fail.
+  const src = PACKET()
+  assert.match(src, /const gateBlocks = !!qcResult && qcResult\.gate === 'fail'/)
+  assert.match(src, /<button className="px-btn px-btn-green" disabled=\{gateBlocks\}/,
+    'Approve must be disabled on a failing gate')
+  // `unchecked` must NOT be folded in: the server refuses it too, but "run the checks" is a
+  // different sentence from "fix these findings", and conflating them mislabels the state.
+  assert.ok(!/gate === 'unchecked'/.test(src.slice(src.indexOf('const gateBlocks'), src.indexOf('const gateBlocks') + 200)))
+  assert.match(src, /<GateBadge result=\{qcResult\} compact \/>/, 'the card must show the gate, not just the status')
+})
+
+test('H:one-edit-path: the asset-level tweaks reuse aiEditArtifact with no section', () => {
+  const src = PACKET()
+  // Section-less call = whole artifact (appPackets.ts writes artifact.content); with a section it
+  // writes pkg_json[section]. One route, two scopes - never a second edit path.
+  assert.match(src, /api\.aiEditArtifact\(a\.id, \{ instruction: assetAsk\.trim\(\) \}\)/)
+  assert.equal((src.match(/api\.aiEditArtifact\(/g) || []).length, 1,
+    'exactly one edit call in this screen')
+  assert.ok(!/section:/.test(src.slice(src.indexOf('aiEditArtifact(a.id'), src.indexOf('aiEditArtifact(a.id') + 120)),
+    'the whole-asset edit must NOT pass a section')
+})
+
+test('H:static-field-makes-no-false-before-claim', () => {
+  // "Original - before this posting" on a field nothing changed is a false statement: a static
+  // block's before and after are the same bytes, so there is no "before".
+  const src = BLOCKS()
+  assert.match(src, /row\.before_text === row\.after_text\s*\n?\s*\? 'Identical - template text is not merged per packet'/,
+    'an unchanged field must not be headed as though it changed')
+  assert.match(src, /: 'Original - before this posting'/, 'a field that DID change still says so')
+})

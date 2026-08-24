@@ -14,6 +14,9 @@
  * strings for the old ones.
  */
 export const PACKET_HOOKS = {
+  assetAsk: 'packet-asset-ask',        // whole-asset List Tweaks (the video has no merge fields)
+  assetAskBox: 'packet-asset-ask-box',
+  assetAskSend: 'packet-asset-ask-send',
   assetRebuild: 'asset-rebuild',
   assetCard: 'asset-card',            // one artifact's card (carries data-qc-type)
   assetHeader: 'asset-header',        // its header - the disclosure (carries data-qc-open)

@@ -490,6 +490,51 @@ export function offendersByField(result, checkKey) {
 }
 
 /**
+ * Every finding that names a merge field, grouped by that field — the per-field list the collapsed
+ * header's counts finally have something to expand into.
+ *
+ * THE GAP: the asset header counts `N to fix` / `N to review` / `N your call`, and only TWO of the
+ * five severities rendered anywhere in a field's margin (`fixed`, via the change log, and
+ * `posting_wording_kept`). A deterministic `fail` on this asset was invisible on the very step where
+ * the reader is reading the draft — the number said "1 to fix" and nothing said what.
+ *
+ * `posting_wording_kept` is EXCLUDED here on purpose. It already has a richer block of its own in
+ * the margin (the phrase, its `kept` status, the reword control), and rendering it twice would put
+ * one finding in two places and let the two drift. Everything else lands in this list.
+ *
+ * Offenders are filtered to the ones naming THIS field, so a check that failed across three fields
+ * shows each field only its own — a reader looking at Skills 1 should not be handed Relevant 2's
+ * offender to puzzle over.
+ */
+export function findingsByField(result, exclude = ['posting_wording_kept']) {
+  const skip = new Set(arr(exclude))
+  const out = {}
+  for (const row of allRows(result)) {
+    if (!row || skip.has(row.check_key)) continue
+    const sev = severityFor(row)
+    if (!sev) continue
+    const byField = {}
+    for (const o of arr(row.offenders)) {
+      const f = sectionIdForOffender(row.check_key, o)
+      if (!f) continue
+      const s = String(o)
+      ;(byField[f] || (byField[f] = [])).push(
+        s.startsWith(f + ':') ? s.slice(f.length + 1).trim() : s.trim())
+    }
+    for (const [f, offenders] of Object.entries(byField)) {
+      ;(out[f] || (out[f] = [])).push({
+        check_key: row.check_key, sev, state: row.state, engine: row.engine,
+        expected: row.expected || '', offenders,
+      })
+    }
+  }
+  // Worst first, so the thing that blocks is the thing read first.
+  const rank = { fix: 3, review: 2, soft: 1 }
+  for (const f of Object.keys(out)) out[f].sort((a, b) => rank[b.sev] - rank[a.sev])
+  return out
+}
+
+/**
  * The WORST severity attaching to each merge field — `{ ResumeSummary: 'fix', ... }`.
  *
  * Lets a field state its own condition (the measurement line paints red/yellow) without the

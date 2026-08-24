@@ -47,9 +47,12 @@ export const BLOCK_HOOKS = {
   fieldObserved: 'blocks-field-observed',  // the measurement, coloured by this field's worst finding
   fieldTarget: 'blocks-field-target',     // the rule the field is held to, from the owner's thresholds
   fieldChangeLog: 'blocks-corrected-for-you', // the field's own "Corrected for you" list (P8.6 inline).
+  fieldFindings: 'blocks-field-findings',     // the field's own open findings, all severities
+  fieldFinding: 'blocks-field-finding',       // one of them (carries data-qc-sev)
   fieldWordingKept: 'blocks-wording-kept',    // "Wording kept from the posting", in the field's margin
   reqLegend: 'blocks-req-legend',             // what RQ-MH / RQ-NTH / RESP mean, once per asset
   wordingAsk: 'blocks-wording-ask',           // seeds the field's own ask box with a reword request
+  meterClear: 'blocks-answers-clear',          // checked, and nothing open - NOT the unchecked state
   meterCorrected: 'blocks-answers-corrected', // "N corrected" kept on the COLLAPSED row
   meterToFix: 'blocks-answers-to-fix',        // "N to fix"   - deterministic fails
   meterToReview: 'blocks-answers-to-review',  // "N to review" - warns

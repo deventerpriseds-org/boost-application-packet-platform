@@ -38,7 +38,7 @@ import {
 } from '../assetBlocks.js'
 import { HIGHLIGHT_CLASS, markRuns } from '../highlight.js'
 import { SEV_COLOR, SEV_LABEL, checkLabel, fieldLabel, severityCounts } from '../assetGate.js'
-import { arr, fieldSeverities, offendersByField, offendersForField, railChangeLog } from '../qcRail.js'
+import { arr, fieldSeverities, findingsByField, offendersByField, offendersForField, railChangeLog } from '../qcRail.js'
 import { CorrectionRow } from './QcRail.jsx'
 
 export { BLOCK_HOOKS }
@@ -113,6 +113,7 @@ export function useArtifactCorrections(artifactId) {
           wording: offendersByField(result, 'posting_wording_kept'),
           severity: severityCounts(result),
           fieldSev: fieldSeverities(result),
+          findings: findingsByField(result),
         })
       })
       .catch(() => { if (live) setState(null) })
@@ -126,6 +127,8 @@ export function useArtifactCorrections(artifactId) {
     wording: state ? state.wording : null,
     severity: state ? state.severity : null,
     fieldSev: state ? state.fieldSev : null,
+    findings: state ? state.findings : null,
+    checked: !!state,
     refresh: () => setReload((n) => n + 1),
   }
 }
@@ -255,7 +258,7 @@ function Stat({ label, n, d, sub }) {
  *   with the prototype's prettier one would be inventing a number, which is the one thing this
  *   screen exists to prevent.
  */
-function DistributionMeter({ rows, filled, unfilled, requirements, scopedSwaps, terms, label, corrected, severity }) {
+function DistributionMeter({ rows, filled, unfilled, requirements, scopedSwaps, terms, label, corrected, severity, checked }) {
   const { stats, notes, corrected: correctedCount } = meterModel({ rows, filled, unfilled, requirements, scopedSwaps, terms, corrected })
   const [open, setOpen] = useState(ASSET_ANSWERS_DEFAULT_OPEN)
   if (!stats.length && !notes.length && correctedCount == null) return null
@@ -298,6 +301,16 @@ function DistributionMeter({ rows, filled, unfilled, requirements, scopedSwaps, 
           <span className="px-small" data-qc={BLOCK_HOOKS.meterToReview}
             style={{ textTransform: 'none', fontWeight: 700, color: 'var(--proto-yellow)' }}>
             {severity.review} to review
+          </span>
+        )}
+        {/* THE CHECKED-AND-CLEAR STATE. Without it, "clear" and "never checked" look identical on
+            this row: both render no counts. Guarded on a LOADED result (`checked`) as well as the
+            three zeros, because an empty payload is the UNCHECKED case and calling that "nothing to
+            review" is the absence of a verdict laundered into a pass. */}
+        {checked && severity && severity.fix === 0 && severity.review === 0 && severity.soft === 0 && (
+          <span className="px-small" data-qc={BLOCK_HOOKS.meterClear}
+            style={{ textTransform: 'none', fontWeight: 700, color: 'var(--proto-green)' }}>
+            Nothing to review on this asset.
           </span>
         )}
         {severity && severity.soft > 0 && (
@@ -417,7 +430,7 @@ function Marked({ text, phrases }) {
 }
 
 function AssetBlock({ row, reqs, swapsForList, wide, artifactId, listOwners, thresholds,
-  corrections = [], wording = [], wordingExpected = '', fieldSev = null,
+  corrections = [], wording = [], wordingExpected = '', fieldSev = null, findings = [],
   correctionBusy, setCorrectionBusy, onCorrectionsChanged }) {
   const [showBefore, setShowBefore] = useState(false)
   const [askOpen, setAskOpen] = useState(false)
@@ -512,7 +525,15 @@ function AssetBlock({ row, reqs, swapsForList, wide, artifactId, listOwners, thr
 
       {showBefore && row.before_text && (
         <div className="px-note" data-qc={BLOCK_HOOKS.before} style={{ marginTop: 9 }}>
-          <div className="px-label" style={{ color: 'var(--text-info)', marginBottom: 3 }}>Original - before this posting</div>
+          {/* "before this posting" is a FALSE CLAIM on a field nothing changed. A static block's
+              before and after are the same bytes: the template text was never merged per packet, so
+              there is no "before". Said plainly rather than headed with a change that did not
+              happen. */}
+          <div className="px-label" style={{ color: 'var(--text-info)', marginBottom: 3 }}>
+            {row.before_text === row.after_text
+              ? 'Identical - template text is not merged per packet'
+              : 'Original - before this posting'}
+          </div>
           <div style={{ fontSize: 12, lineHeight: 1.6, whiteSpace: 'pre-line' }}>{row.before_text}</div>
         </div>
       )}
@@ -612,6 +633,33 @@ function AssetBlock({ row, reqs, swapsForList, wide, artifactId, listOwners, thr
             <CorrectionRow key={c.key} row={c} artifactId={artifactId} inField
               busy={correctionBusy} setBusy={setCorrectionBusy}
               onOpen={() => {}} onUndid={onCorrectionsChanged} />
+          ))}
+        </div>
+      )}
+
+      {/* THE FIELD'S OPEN FINDINGS — what the header's counts finally expand into.
+          Only TWO of the five severities rendered anywhere in a margin before this (`fixed`, via
+          the change log, and `posting_wording_kept`), so a deterministic `fail` on this asset was
+          invisible on the step where the reader is reading the draft: "1 to fix" with nothing
+          saying what. `posting_wording_kept` is excluded by the selector because it has its own
+          richer block below - one finding in two places is one finding that can drift. */}
+      {findings.length > 0 && (
+        <div style={{ marginTop: 9 }} data-qc={BLOCK_HOOKS.fieldFindings} data-qc-n={findings.length}>
+          <div className="px-label" style={{ marginBottom: 4 }}>Open on this field</div>
+          {findings.map((f) => (
+            <div key={f.check_key} data-qc={BLOCK_HOOKS.fieldFinding} data-qc-sev={f.sev}
+              style={{ padding: '6px 0', borderTop: '1px solid var(--proto-rule-soft)' }}>
+              <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
+                <span style={{ fontSize: 11.5, fontWeight: 600, flex: 1, minWidth: 0 }}>{checkLabel(f.check_key)}</span>
+                <span className="px-small" style={{ fontWeight: 700, color: SEV_COLOR[f.sev] }}>{SEV_LABEL[f.sev]}</span>
+              </div>
+              {f.offenders.map((o, i) => (
+                <div key={i} className="px-small" style={{ textTransform: 'none', marginTop: 2, lineHeight: 1.45 }}>{o}</div>
+              ))}
+              {f.expected && (
+                <div className="px-small" style={{ textTransform: 'none', marginTop: 2, fontStyle: 'italic' }}>{f.expected}</div>
+              )}
+            </div>
           ))}
         </div>
       )}
@@ -731,7 +779,7 @@ export default function AssetBlocks({ artifact, provenance, fallback, defaultOpe
 
   // The change log, scoped per field into the margins below. One `busy` for the whole panel, not one
   // per row: two undos in flight against the same artifact would race the re-read that follows them.
-  const { rows: correctionRows, correctedCount, wording, severity, fieldSev, refresh: refreshCorrections } = useArtifactCorrections(artifact.id)
+  const { rows: correctionRows, correctedCount, wording, severity, fieldSev, findings, checked, refresh: refreshCorrections } = useArtifactCorrections(artifact.id)
   // The OWNER'S check thresholds, so every field can state the contract the gate actually holds it
   // to. `searchPrefsGet().checks` is the same row Settings writes - one source, so changing 24 to 30
   // there changes what this screen promises.
@@ -827,6 +875,7 @@ export default function AssetBlocks({ artifact, provenance, fallback, defaultOpe
             terms={null}
             corrected={correctedCount}
             severity={severity}
+            checked={checked}
             label={ANSWERS_LABEL[artifact.type] || 'asset'}
           />
           {rows.map((r) => (
@@ -843,6 +892,7 @@ export default function AssetBlocks({ artifact, provenance, fallback, defaultOpe
               wording={offendersForField(wording, r.merge_field)}
               wordingExpected={(wording && wording.expected) || ''}
               fieldSev={fieldSev ? fieldSev[r.merge_field] || null : null}
+              findings={findings ? findings[r.merge_field] || [] : []}
               correctionBusy={correctionBusy}
               setCorrectionBusy={setCorrectionBusy}
               onCorrectionsChanged={refreshCorrections}

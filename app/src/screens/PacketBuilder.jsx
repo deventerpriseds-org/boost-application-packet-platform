@@ -12,6 +12,7 @@ import {
 import { postingBody } from '../postingAnalysis.js'
 import { PACKET_HOOKS, ASSET_BODY_DEFAULT_OPEN, regenerateWithNote } from '../packetBuilder.js'
 import QcRail, { useQcEntries } from './QcRail.jsx'
+import { GateBadge } from './AssetGateDrawer.jsx'
 import { qcStepState, packetGate, railGateMeta, packetReadiness } from '../qcRail.js'
 
 const TYPE_LABEL = {
@@ -79,7 +80,7 @@ function stepDone(key, p, artifacts, qc) {
 // Exported so the browser probe can mount the REAL card (test/browser/run-asset-blocks.mjs). The
 // header's collapsed default is a rendering fact; asserting it against a replica of this component
 // would prove only that the replica was written to match.
-export function ArtifactCard({ a, busy, setBusy, onGenerate, onRegenerate, onSetStatus, onMakeDoc, onMakeSlides, onGenVideo, onArchiveVideo, doc, video, provenance, listOwners, onListsRendered }) {
+export function ArtifactCard({ a, busy, setBusy, qcResult, onGenerate, onRegenerate, onSetStatus, onMakeDoc, onMakeSlides, onGenVideo, onArchiveVideo, doc, video, provenance, listOwners, onListsRendered }) {
   const v = video[a.id] || {}
   const d = doc[a.id] || {}
   const videoUrl = v.url || a.docUrl
@@ -93,6 +94,11 @@ export function ArtifactCard({ a, busy, setBusy, onGenerate, onRegenerate, onSet
   // FIELDS inside it. Opening this header therefore reveals the fields already open - one click,
   // not two - which is exactly the arrangement the plan describes and warns is easy to misread.
   const [open, setOpen] = useState(ASSET_BODY_DEFAULT_OPEN)
+  const gateBlocks = !!qcResult && qcResult.gate === 'fail'
+  const [assetAskOpen, setAssetAskOpen] = useState(false)
+  const [assetAsk, setAssetAsk] = useState('')
+  const [assetAskBusy, setAssetAskBusy] = useState(false)
+  const [assetAskError, setAssetAskError] = useState(null)
   const toggle = () => setOpen((o) => !o)
 
   return (
@@ -105,6 +111,12 @@ export function ArtifactCard({ a, busy, setBusy, onGenerate, onRegenerate, onSet
           <div className="px-small" style={{ marginTop: 2 }}>{TYPE_SUB[a.type]}</div>
         </div>
         <Pill tone={STATUS_TONE[a.status]}>{a.status}</Pill>
+        {/* THE GATE, on the card. Five well-built states already existed in GateBadge and were
+            rendered only inside the drawer, so this step showed a status pill (`review`) with no
+            word about whether the checks pass — and offered an Approve the server refuses. The
+            badge is REUSED, not reimplemented: it reads the server's gate and the two counts
+            through the same selectors, so the card and the drawer cannot disagree. */}
+        <GateBadge result={qcResult} compact />
         <span className="px-link" role="button" tabIndex={0} onClick={toggle}
           data-qc={PACKET_HOOKS.assetToggle} data-qc-open={open ? '1' : '0'}
           onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle() } }}
@@ -201,7 +213,27 @@ export function ArtifactCard({ a, busy, setBusy, onGenerate, onRegenerate, onSet
         )}
         {(a.status === 'review' || a.status === 'changes') && (
           <>
-            <button className="px-btn px-btn-green" onClick={() => onSetStatus(a, 'approved')}>Approve</button>
+            {/* LIST TWEAKS for the WHOLE asset. The per-field control (AssetBlocks) is the one to
+                reach for nearly always; this exists for the artifacts that have no merge fields to
+                reach into — the intro video has none, so the per-field box never appears there and
+                without this there is no way to ask for an edit at all.
+
+                Same route, no `section`: `artifactAiEdit` writes `artifact.content` when section is
+                absent and `packet.pkg_json[section]` when it is present (appPackets.ts:1299). Not a
+                second edit path — the triage's own instruction was "do not build one". */}
+            {!assetAskOpen && (
+              <button className="px-btn" data-qc={PACKET_HOOKS.assetAsk}
+                onClick={() => setAssetAskOpen(true)}>List Tweaks</button>
+            )}
+
+            {/* A BLOCKED GATE DISABLES APPROVE, and says why instead of letting the server refuse.
+                approvalBlock() on the server is still the authority — this does not decide anything,
+                it stops offering an action that is already known to fail. `unchecked` is NOT
+                blocked here: the server refuses it too, but "run the checks" is a different
+                sentence from "fix these findings" and the drawer is where that is said. */}
+            <button className="px-btn px-btn-green" disabled={gateBlocks}
+              title={gateBlocks ? 'The checks block this asset - open QC to see what must be fixed.' : undefined}
+              onClick={() => onSetStatus(a, 'approved')}>Approve</button>
             {/* ONE BUTTON, because `Request changes` was never a sibling of this one - it was a
                 PARAMETER of it, and shipping it as a separate control made it look like an action
                 that does something on its own. It does not: it writes a note and returns, and the
@@ -239,6 +271,33 @@ export function ArtifactCard({ a, busy, setBusy, onGenerate, onRegenerate, onSet
           <button className="px-btn" onClick={() => onSetStatus(a, 'review')}>Reopen</button>
         )}
       </div>
+
+      {assetAskOpen && (
+        <div data-qc={PACKET_HOOKS.assetAskBox} style={{ marginTop: 8 }}>
+          <div className="px-small" style={{ textTransform: 'none' }}>
+            This rewrites the whole {TYPE_LABEL[a.type].toLowerCase()}. For one field, use the
+            field's own List Tweaks below - it changes that field only.
+          </div>
+          <textarea className="px-input" rows={2} value={assetAsk}
+            placeholder={`List the tweaks for the ${TYPE_LABEL[a.type].toLowerCase()}`}
+            onChange={(e) => setAssetAsk(e.target.value)} style={{ width: '100%', marginTop: 4, resize: 'vertical' }} />
+          {assetAskError && <div className="px-note" style={{ marginTop: 6 }}>{assetAskError}</div>}
+          <div style={{ display: 'flex', gap: 6, marginTop: 4 }}>
+            <button type="button" className="px-btn" disabled={assetAskBusy}
+              onClick={() => { setAssetAskOpen(false); setAssetAsk(''); setAssetAskError(null) }}>Cancel</button>
+            <button type="button" className="px-btn px-btn-accent" data-qc={PACKET_HOOKS.assetAskSend}
+              disabled={assetAskBusy || !assetAsk.trim()}
+              onClick={async () => {
+                setAssetAskBusy(true); setAssetAskError(null)
+                try {
+                  await api.aiEditArtifact(a.id, { instruction: assetAsk.trim() })
+                  setAssetAsk(''); setAssetAskOpen(false)
+                } catch (e) { setAssetAskError(String((e && e.message) || e)) }
+                finally { setAssetAskBusy(false) }
+              }}>{assetAskBusy ? 'Sending...' : 'Send'}</button>
+          </div>
+        </div>
+      )}
       </div>
       )}
     </div>
@@ -727,6 +786,7 @@ export default function PacketBuilder({ id, step }) {
                 onMakeDoc={makeDoc} onMakeSlides={makeSlides}
                 onGenVideo={genVideo} onArchiveVideo={archiveVideo}
                 doc={doc} video={video} provenance={provenance}
+                qcResult={(qcEntries.find((e) => e.artifact.id === a.id) || {}).result || null}
                 listOwners={listOwners} onListsRendered={registerLists} />
             ))}
             {nextStep && (
