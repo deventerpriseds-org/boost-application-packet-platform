@@ -3154,3 +3154,179 @@ failures each): replacing the total with the parts, and emitting a 0/0 stat for 
 does not use. **The third was BEHAVIOURALLY EQUIVALENT** (`+ 0`) and correctly failed to fail — that
 proves nothing, so it was replaced with a real one (every kind reporting the overall placed count
 instead of its own), which the tests caught.
+
+## 2026-08-24 — ATS research: what it changes, and a gap it exposed
+
+`docs/qc-evidence/ATS-RESEARCH.md`. Calibration up front: most writing on ATS is content marketing
+by scanner vendors. One source has real method (1.7M applications, 225k resumes, recruiter
+interviews at Amazon/Microsoft/Big Four/F500); the rest agree on MECHANISM and are unreliable on
+STATISTICS.
+
+**The "75% auto-rejected by ATS" figure is unsupported** — traces to a defunct 2013 startup, zero
+peer-reviewed backing. It matters because it drives keyword stuffing: if a robot rejects you, you
+fight the robot. **92% of ATS rank and sort, but RECRUITERS decide where to stop reading.** The
+resume competes for POSITION IN A LIST A HUMAN SCROLLS; it is not fighting a gatekeeper.
+
+**Five stages, and wording only moves two of them:** parse (formatting can destroy it) → knockout
+(hard filters answered on the FORM, no resume wording fixes them) → search/filter (terms matter
+most) → rank → human read. Boolean search is mostly a SOURCING tool, not an incoming screen.
+
+**Three keyword zones, descending value:** summary (high-level, human-recognised) → skills/tools
+(what the vendor taxonomy normalises and filters hit) → experience bullets (**often most
+persuasive** — skills assert, bullets EVIDENCE). **Repetition does not help; placement does.** A
+term in the right place beats the same term repeated — which kills keyword stuffing on effectiveness
+grounds, not just honesty grounds.
+
+**THE RESEARCH CONFIRMS THE OWNER'S READING OF THE LIBRARY**, and the SPEC already encodes it:
+exact → scored; accepted variants (`≈` reworded) → scored; loose → shown NOT scored; model → shown
+NEVER scored (`scoreable`). **The library is not a whitelist on what the AI may WRITE — it is the
+denominator for what COUNTS.** "Generate in a similar style/length to the others" IS the `variant`
+tier, which already scores. Not a design change; a tier the design has and the product never
+populated. The honesty constraint ("mirror the employer's wording only where accurate for you")
+appears in the source material independently — same rule as SPEC R2.
+
+**GAP FOUND — nothing checks whether the rendered document can be PARSED.** Every existing check is
+about TEXT CONTENT (`word_counts`, `skill_char_limit`, `relevant_char_limit`,
+`expertise_phrase_length`, `empty_merge_fields`, `whitespace`, `markup_residue`, `ai_tells`,
+`cross_list_redundancy`, `company_named`, `company_in_body`). A packet can pass every one, score
+well, clear the gate, and still be a two-column template whose skills interleave with job titles the
+moment a parser reads it. Documented breakers: tables/multi-column (serialised L-to-R, so
+row1col1→row1col2 interleaves), headers/footers (**ignored as page furniture** — contact details can
+vanish), text boxes (layer skipped), graphics/skill bars (unreadable), inconsistent dates.
+**BUT THE FIX IS NOT A PER-PACKET CHECK.** Artifacts render from a Google Docs template the owner
+controls, so parse-safety is a property of the TEMPLATE — a ONE-TIME AUDIT, not a check on every
+build. A per-packet check would add ceremony to every packet for a defect that can only change when
+the template changes.
+
+**Vendor dictionaries are a dead end, and now we know why.** Workday's skills field is a structured
+proprietary taxonomy (predefined standardised list, not free text); no free developer download for
+Workday or Greenhouse. **Vendors increasingly build those taxonomies ON Lightcast/EMSI or O*NET** —
+so a vendor dictionary is a re-wrapped copy of free sources bought with a licensing problem.
+**But the field-taxonomy decision now has a concrete job:** research says SECTION PLACEMENT changes
+what a term is worth, so a field taxonomy lets the library record WHICH FIELD a term belongs in
+(summary vs skills vs bullet). A skills taxonomy cannot supply that.
+
+### 2026-08-24 — live DB read via the new write connector: the queue is STALE
+
+Owner added `boost-pg-mcp-write` (read-write). First use was a READ, and it ground-truthed figures
+this session had been citing from workflow logs: **2,734 candidates, ALL `pending`, 0 approved,
+0 `term_library` rows, 0 `term_library_entry` rows, corpus_size 928.** All confirmed.
+
+**GOOD: the exec vocabulary is genuinely there.** Measured, top of the specificity ranking:
+`cross functional` 425, `executive leadership` 303, `decision making` 307, `continuous improvement`
+233, `risk management` 204, `senior leadership` 199, `product management` 195, `product strategy`
+164, `executive level` 160, `emerging technologies` 160, `data driven` 159, `large scale` 158,
+`artificial intelligence` 151, `technology strategy` 149, `product development` 143, `operational
+excellence` 142. The corpus-as-primary-source decision is validated by its own output.
+
+**DEFECT: the candidate queue predates the miner's own blocklist.** Still sitting in the top 45:
+`orientation gender` 239, `regard to race` 220, `dental and vision` 177, `sex sexual` 155,
+`consideration for employment` 123, `receive consideration for employment` 120,
+`applicants will receive` 115, `federal state` 133. **Four of those are LITERAL entries in
+`termMiner.ts`'s `BOILERPLATE` array** (`'regard to'`, `'orientation gender'`, `'sex sexual'`,
+`'dental and vision'`), and `isBoilerplate` does `phrase.includes(b)` — so current code WOULD reject
+them. They are stale rows from a mine that ran before those entries existed. `termsMine` already has
+the purge step for exactly this ("Purge PENDING candidates that the current filters would no longer
+produce"), so **a re-mine fixes it with no code change.**
+
+**Quantified honestly — small by rows, large by what a curator sees first.** Classified all 2,734:
+junk is **106 rows = 3.9%** (degree/education 32, EEO/benefits 24, generic filler 21, job title 21,
+geography/employment-type 8). **But 8 of the top 45 by specificity — ~18% of the first screenful.**
+Row-share understates it because the ranking concentrates boilerplate at the top.
+
+**Consequence for sequencing: RE-MINE BEFORE BUILDING THE CURATION SCREEN.** Putting a curator in
+front of this queue means hand-rejecting boilerplate the code already knows how to reject. The
+exclusion classes derived independently in `TERM-LIBRARY-SAMPLES.md` (section headings, job titles,
+degree fields, geography, benefits, boilerplate) match the measured junk classes exactly — so they
+should become miner FILTERS, not prose in a doc.
+
+`artificial intelligence` at 151 independently confirms the AI/ML alias point: it must fold into
+`ai_ml` at promotion, which is what `status: merged` + `merged_into` already exist to record.
+
+### Filter design measured before writing it (2026-08-24) — and it corrected my own earlier claim
+
+**CORRECTION to "a re-mine fixes it with zero code change."** That is true for exactly FOUR rows and
+no more. Ran `termMiner.ts`'s real `isBoilerplate` (64 entries, substring match) against the 31
+phrases measured in the pending queue's top 45:
+- **4 are STALE** — `regard to race` (matches `regard to`), `orientation gender`, `dental and vision`,
+  `sex sexual`. Current code WOULD reject them, so they predate the blocklist and the existing purge
+  clears them. Claim confirmed.
+- **27 are NOT covered by any current filter**, and critically that includes MORE EEO boilerplate the
+  blocklist never had: `consideration for employment`, `receive consideration for employment`,
+  `applicants will receive`, `federal state`. **So the EEO class needs NEW entries too — a re-mine
+  alone does not clear it.** My earlier framing was too strong; this is the corrected version.
+
+**Proposed filter classes, measured against the live queue before writing any code — 81 rows:**
+| class | would remove | top hits |
+|---|---:|---|
+| degree/education | 26 | bachelor 442, bachelor degree, related field, computer science, master degree, advanced degree, degree in computer science, information systems |
+| job_title | 22 | president 257, vice president, ceo, cto |
+| eeo_extra | 16 | federal state 133, consideration for employment, receive consideration for employment, applicants will receive |
+| geo/employment | 9 | remote 268, full time, united states |
+| generic filler | 8 | long term 457, high performing, end to end, high quality, large scale, world class, day to day, fast paced |
+
+**FALSE-POSITIVE CHECK RUN BEFORE BUILDING — the discipline caught ME, not the filter.** Tested 20
+known-good exec terms against the proposed patterns. **19 survive** (`cross functional` 425,
+`decision making` 307, `executive leadership` 303, `continuous improvement` 233, `risk management`
+204, `senior leadership` 199, `product management` 195, `product strategy` 164, `executive level`
+160, `emerging technologies` 160, `information technology` 159, `data driven` 159, `artificial
+intelligence` 151, `technology strategy` 149, `product development` 143, `operational excellence`
+142, `change management` 121, `digital transformation` 120, `machine learning` 107).
+**One is removed: `chief technology officer` (df 80), by `^chief `.** That is NOT a filter defect —
+the recorded exclusion rule says job titles belong to the `persona`/roles taxonomy, not the term
+library. **My keep-list was wrong; the filter was right.** Worth keeping as the example of why the
+cry-wolf check is run against real data before a guard ships, not after.
+
+## 2026-08-24 — Lane C parse-safety: the AC pass argued the scope DOWN, and found two live defects
+
+`docs/qc-evidence/AC-parse-safety.md` (408 lines). **It recommends AGAINST the largest piece I
+scoped, and I verified its three checkable claims myself rather than taking them.**
+
+**DO NOT build a per-packet parse-safety check.** Reasons, each sufficient:
+1. It would check a **constant** — every packet from template X gets an identical verdict.
+2. `runChecks(input): CheckResult[]` is a **synchronous pure function of merge-field strings**
+   (`checks.ts:186-211,277`). Layout lives only in the Google Doc JSON, so reaching it makes the gate
+   engine async and network-bound — and `appReviewer` re-aggregates checks from a **DB read**, where
+   no document is reachable at all.
+3. A deterministic `fail` **blocks the gate** on a property the owner authored by hand in Google Docs
+   and cannot fix in-app — the always-red-gate failure `checks.ts:224-226` already names.
+4. Portfolio and cover letter are **Google Slides** — text boxes by construction. A uniform
+   structural check condemns them permanently.
+5. Content-level hazards are already covered or are not hazards.
+
+**Ruling on "can generated CONTENT introduce a parse hazard?" — NO.** `injectValues()` is
+`replaceAllText` with plain strings; no `insertTable`, no image, no text box. Of the four candidates
+I named in the brief: HTML residue already `fail`s via `markup_residue`; tabs already `warn` via
+`whitespace`; dates are static template text (the seven resume merge fields carry no employment
+history); and **pipes are NOT a hazard — I was wrong.** VERIFIED MYSELF at `swaps.ts:48`:
+`splitItems` splits on `/\r?\n|(?:\s*[|•·]\s*)/`, so **the pipeline treats `|` as its own item
+separator** and a pipe check would fire on the generator's own correct output. That is the deleted
+smart-quote linter verbatim. The pass refused it as AC-R2.
+
+**A one-time audit alone is ALSO insufficient** — `google.resumeTemplateId` is an owner-editable
+Settings box read by `renderArtifact` on every build, so an audit's half-life is one Settings edit;
+and `pipeline.ts:615-642` resolves a **fourth, per-role** `compactResumeTemplateId` from AppConfig.
+
+**TWO LIVE DEFECTS, both confirmed by my own grep, not taken on the agent's word:**
+- **`artifact.template_id` is NEVER WRITTEN.** It appears in exactly three places — `schema.ts:102`
+  (the `create table`), `appPackets.ts:80` (a `select`), and `appPackets.ts:200`
+  (`templateId: a.template_id`, **served to the UI**). Zero writes. `renderArtifact` resolves the
+  real id, copies that file, then its final `update artifact set …` omits the column. **Every
+  artifact reports `templateId: null`.** ~3-line fix.
+- **`diagDocStructure.ts:75` audits the WRONG document** — `req.query.get('templateId') ||
+  RESUME_TEMPLATE_ID`, the constant rather than the owner-resolved id. Exactly the defect
+  `pipelineConfig.ts:99` already records.
+
+**Recommended instead (~150-250 lines, tier 2/3, extends four existing systems, creates none):**
+write `template_id` in `renderArtifact`; point `fingerprint()` at the resolved id and extend it to
+headers/footers/text boxes; run the audit ONCE and record it; store the verdict on the existing
+AppConfig `templates/resume-<driveId>` row (which already holds `roleFocus`) and show a three-state
+badge in Settings. **`AC-20` (`H:no-parse-safety-in-runchecks`) encodes the REFUSAL itself** so a
+later session cannot add the per-packet check by accident.
+
+Also refused, with reasons: a startup assertion (turns a Doc-formatting opinion into an outage) and
+a CI test (no `GOOGLE_REFRESH_TOKEN` and no egress to `docs.googleapis.com` from CI — permanently
+skipped or permanently red, i.e. an inert guard).
+
+**Separate, larger finding flagged for backlog, NOT this scope:** the product's own "Compact ATS
+Resume" is currently NOT CONFIGURED and never generated.
