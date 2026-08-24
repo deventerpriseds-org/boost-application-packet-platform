@@ -3128,3 +3128,29 @@ the table would be its own defect). Both mutations kill `H:published-library-is-
 as JavaScript (`ReferenceError: covered is not defined`). **`tsc` passed.** Only executing the built
 module caught it. Rule: NEVER use a backtick inside SCHEMA_SQL, and dumping+executing the schema is
 the guard, not the build.
+
+### 2026-08-24 — resume row 9 (per-kind split) built; its recorded blocker did not exist
+
+The gap register said row 9 needed an endpoint extension because
+`GET /app/opportunity/{id}/requirements` "returns `total` only". **That was wrong.** The endpoint
+already returns the rows themselves with `kind` on each (`appRequirements.ts:700-716`),
+`AssetBlocks.jsx:873` already passes the whole payload into `meterModel`, and
+`postingAnalysis.js:261` already has `groupRequirements()`. This was client derivation over data the
+payload always carried — no API change.
+
+**THE DESIGN DECISION THAT MATTERS: the per-kind split does NOT replace the total.**
+`groupRequirements` classifies exactly three kinds, so a row whose `kind` is null or unrecognised
+belongs to NO group. Replacing "Posting lines placed" with the three parts would have silently
+dropped such a row from a coverage count with nothing on screen saying so. The total is the truth;
+the parts are its breakdown. Measured in the test fixture: total 6, parts account for 5.
+
+The recorded objection to the prototype's stat NAMES (`AssetBlocks.jsx:248-259` — "5/5 must-haves"
+against fabricated demo data) does NOT apply here: these come from real `kind` values on real rows.
+Reused `groupRequirements` rather than re-deriving the classification, so the resume step and the
+posting analysis cannot disagree about what a must-have is.
+
+**Deliberately re-introduced three bugs to confirm the tests catch them.** Two were caught (3
+failures each): replacing the total with the parts, and emitting a 0/0 stat for a kind the posting
+does not use. **The third was BEHAVIOURALLY EQUIVALENT** (`+ 0`) and correctly failed to fail — that
+proves nothing, so it was replaced with a real one (every kind reporting the overall placed count
+instead of its own), which the tests caught.
