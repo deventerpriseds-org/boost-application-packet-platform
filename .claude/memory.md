@@ -3413,3 +3413,50 @@ conflict and then proposed a worse fix (a second column) to resolve it.
 
 **Guard this earns:** *before claiming a consumer constrains a change, read the CALLER and establish
 which rows it passes.* Naming the file and line that mentions a column is not evidence about scope.
+
+## 2026-08-24 — how resume templates actually work, and the three changes shipped today
+
+**The model, and it is the owner's own ruling:** *"let the resume chosen drive the persona, right
+now it's only engineering available"*. Direction is **template → role focus**, never role → template.
+`roleFocus.ts:27` explains why the other direction had to be abandoned: the first source used to be
+`templates/<roleType>` where `roleType` is the posting's FREE-TEXT job title, so it looked for
+`templates/director-of-digital-technology-operations-&-innovation` — a row that will never exist for
+any real posting. A job title is open-ended; a template is a closed set the owner controls.
+
+**The collection ALREADY EXISTED and I nearly rebuilt it.** AppConfig partition `templates`, one
+`resume-<driveId>` row per resume carrying its own `roleFocus`; `GET/POST /api/config/templates`
+lists and writes them; `Settings.jsx` `TemplateFocusSettings` renders them. I assumed twice that
+pieces were missing (a list route, a UI) and both times a grep proved me wrong. **Grep before
+scoping, not after.**
+
+**What actually shipped today, three commits, all deployed:**
+
+| | What | Why it was wrong before |
+|---|---|---|
+| `6e489fb` | `compact_resume` gets its own `OVERRIDE_KEY`, with a fallback to the resume id | `google.compactResumeTemplateId` was offered in Settings and read by NOTHING in the product — only by legacy `pipeline.ts` / `mt19.ts`. Two paths built the same document from two templates. Closed `D:compact-resume-template-ignored`. |
+| `f6555ac` | loop-0 `before_text` seeded from MasterContext | `prevPkg = {}` at loop 0, so the draft everyone looks at had no original AND `method` could never be `changed` — every generated field claimed "From profile" even when the model rewrote it. |
+| `35d5ec2` | `packet.resume_template_id` + writer + picker | One global `google.resumeTemplateId` for every resume, so "use the Product resume for this opportunity" was inexpressible. Closed `D:no-template-picker`. |
+
+**The `MASTER_BASELINE_FIELD` map (evidence.ts) is the answer to "where does Show original come
+from".** MasterContext columns map near one-to-one to merge fields — `resumeSummary`→`ResumeSummary`,
+`skills1/2`→`SkillsBullets1/2`, `expertise`→`ExpertiseBullets`, `workHistory1-4`, `aboutMe1/2`,
+`executiveProfile`, `coreAccomplishments`. **NOT the Google Doc template**: it holds
+`{{ResumeSummary}}` at that position, not prose. `relevantProficiencies` maps to all three Relevant
+slots on purpose — one pooled block the packet splits.
+
+**Trap for the next reader:** `TEMPLATE_META.resume.placeholders` is SEVEN fields and does NOT
+include `WorkHistoryBullets1-4`, even though `pipeline.ts` injects vars for them. In the current
+template work history is STATIC text (`appFacts.ts:25` reads it as a primary source of facts). A
+test asserting over work-history insertion rows fails — mine did.
+
+**Still open, logged rather than glossed:** `D:compact-not-per-packet` — with a global compact
+template SET, a Product-resume packet still gets the global compact. Fix direction is a compact id
+ON the template row, not a second per-packet column.
+
+**Two mistakes worth keeping:**
+1. **I broke `SCHEMA_SQL` with backticks in a SQL comment inside a backtick template literal — the
+   exact failure this file already records.** `tsc` passed. Only loading the module caught it.
+   Writing it down did not stop it; running the module did.
+2. **A `sed` mutation whose `||` broke the expression ran against UNMODIFIED source and reported a
+   pass.** A mutation that silently fails to apply is indistinguishable from a working guard. Every
+   mutation now asserts its anchor count before writing.
