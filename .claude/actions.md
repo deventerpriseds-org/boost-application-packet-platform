@@ -3290,3 +3290,19 @@ publish pending) and ROW 12 (portfolio, wrong lane) are explicitly NOT part of i
 item never fires, because two of those three are blocked on things outside the resume lane.
 
 **Nothing built.** This turn is tier 3 — a queue position, not code.
+
+**CORRECTION, same day, to the entry above.** The trigger table named ROW 9 and ROW 2 as
+outstanding. **Both were already on `main`.** I had copied them from `AC-resume-rows.md` §3
+RESEQUENCE — a plan written *before* the lane ran — instead of reading `origin/main`. In the same
+message I also called rows 10 and 11 "settled", which read as "built" when I meant "I have settled
+what the design intends"; they are **not built**. The owner caught both: *"so your sayign 10 and 11
+are done? why are you saying only 9 to do?"*
+
+Corrected by grepping `origin/main` @ `11cd042`. Of the **original seven**: 2, 6, 7, 9 are DONE;
+10 has its block but no store (gated on AC-10.0); 11 is unbuilt (gated on the term-library publish);
+12 is unbuilt and belongs to portfolio. Only **AC-7.3** and the **"Show original" rebuild** actually
+gate the queue entry, and both are buildable today.
+
+**The lesson, and it is the standing rule verbatim:** a planning doc is not a status source. `§3
+RESEQUENCE` is now marked stale-as-status in `QC-EVIDENCE-PLAN.md`. Status answers come from
+`origin/main` with the grep attached, every time.

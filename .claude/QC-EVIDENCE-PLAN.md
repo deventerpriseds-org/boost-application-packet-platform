@@ -62,15 +62,37 @@ and the alternatives bank (`SKILL_BANK` select + *Put back "…"* + *Drop it, le
 **Free-text editing is the only genuine gap**, and it is neither blocked on the term library nor a
 sub-feature of ROW 11.
 
-**What "resume is 100%" means, so the trigger is unambiguous** (`docs/qc-evidence/AC-resume-rows.md`
-§3 RESEQUENCE):
+**What "resume is 100%" means, so the trigger is unambiguous.**
 
-| # | Must be done to fire this queue entry | Note |
+> **CORRECTED 2026-08-24, same day, before anyone acted on it.** The first version of this table
+> listed ROW 9 and ROW 2 as trigger conditions. **Both were already on `main`.** They were copied
+> from `AC-resume-rows.md` §3 RESEQUENCE, which is a *plan* written before the lane ran — the owner
+> caught it by asking "why are you saying only 9 to do?". The rows below are read from
+> `origin/main` at `11cd042`, with the grep that proves each one. **`AC-resume-rows.md` §3 is now
+> stale as a status source; treat it as history.**
+
+State of the **original seven** on `origin/main` @ `11cd042`:
+
+| Row | State | Proof |
+|---|---|---|
+| 2 — focus ring + deep link | **DONE** | `app/src/focusRing.js`; `useScrollToFocus` in `AssetBlocks.jsx` + `AssetGateDrawer.jsx`; `goToField` in `qcRail.js`, `PacketBuilder.jsx`, `QcRail.jsx` |
+| 6 — asset-level ask | **DONE** (pre-existing) | dropped to a regression guard |
+| 7 — `sameAsBefore` | **DONE** (pre-existing) | `AssetBlocks.jsx:534` |
+| 9 — per-kind stat split | **DONE** | `REQ_KIND_STATS` + `groupRequirements` in `app/src/assetBlocks.js` |
+| 10 — `rewording` state | **block built, toggle NOT** | `fieldWordingKept` + `Tweak this`, `AssetBlocks.jsx:683-699`; no store |
+| 11 — `KeyChip` / `KeyDetail` | **NOT built** | zero hits for either identifier in `app/src` |
+| 12 — `PickList` | **NOT built** | zero hits; portfolio-only, off this lane |
+
+**Only two items actually gate this queue entry, and both are buildable today:**
+
+| # | Must be done to fire this queue entry | Proof it is still open |
 |---:|---|---|
-| 1 | **ROW 9** — per-kind must-have / responsibility / nice-to-have stat split | tier 1; buildable today, NOT endpoint-blocked |
-| 2 | **ROW 2** — deep link + focus ring on the asset card | also fixes the drawer's never-clearing ring |
-| 3 | **AC-7.3** — a `null` `before_text` renders no `Show original`, though SPEC 4.5 says it is on every field | small, unlogged SPEC divergence |
-| 4 | **"Show original" rebuild** — capture the master/template baseline per field at build time | `templateText()` exists at `packetTemplates.ts:175` and is **never called**; `insertions.ts:77` reads `prevPkg`, which is wrong in BOTH states |
+| 1 | **AC-7.3** — a field with a `null` baseline renders **no `Show original` at all**, against SPEC 4.5 which puts it on every field | `AssetBlocks.jsx:554` gates the link on `{row.before_text && …}` |
+| 2 | **"Show original" rebuild** — capture the master/template baseline per field at build time | `templateText()` (`packetTemplates.ts:175`) is called **only** from `appFacts.ts:41`, never in the build path; `insertions.ts:77` reads `prevPkg`, wrong in BOTH states |
+
+These two are the same defect seen from two ends — there is no baseline to show, so the control
+hides itself. **Fix the capture (2) and (1) largely dissolves**; keep AC-7.3 as the guard that the
+disclosure is honest when a baseline genuinely does not exist.
 
 **Explicitly NOT part of the trigger** — these stay queued behind their own blockers and must not
 hold the override work: **ROW 10** (gated on the owner answering AC-10.0 before any table is
