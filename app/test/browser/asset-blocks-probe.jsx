@@ -58,7 +58,7 @@ function Probe() {
       <div id="card-artifact">
         <ArtifactCard
           a={{ id: 'art-resume', type: 'resume', status: 'review', content: null }}
-          busy={null} setBusy={noop} onGenerate={noop} onSetStatus={noop} onMakeDoc={noop}
+          busy={null} setBusy={noop} onGenerate={noop} onRegenerate={noop} onSetStatus={noop} onMakeDoc={noop}
           onMakeSlides={noop} onGenVideo={noop} onArchiveVideo={noop} doc={{}} video={{}}
           provenance={provenance} listOwners={listOwners} onListsRendered={register} />
       </div>

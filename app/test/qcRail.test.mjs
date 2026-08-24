@@ -814,15 +814,19 @@ const WORDING_RESULT = (offenders) => ({
 })
 
 test('H:wording-phrase-survives-whole: the phrase reaches the margin exactly as the check found it', () => {
-  // WHAT THIS DOES AND DOES NOT PROVE, stated because the mutation proof said so. Replacing the
-  // by-name strip with `slice(indexOf(':') + 1)` is BEHAVIOURALLY EQUIVALENT on every offender
-  // checks.ts actually emits: the prefix colon IS the first colon, because a merge-field name
-  // contains none. This test does not fail on that mutation and is not claimed to. It pins the
-  // OUTPUT instead - the phrase arrives whole, colons and all, with the quoting removed - which is
-  // the property the margin depends on. The implementation keeps the by-name form anyway because
-  // it is the one that stays correct if an offender is ever attributed without the prefix
-  // (`company_in_body` writes `absent from @CoverLetterBody`), where the colon form would cut into
-  // a string that has no prefix to cut.
+  // WHAT THIS PROVES, and the history of the claim - corrected after an independent verifier
+  // applied the mutation and got the opposite result from the one written here (C-4).
+  //
+  // On the FIELD-PREFIXED offenders checks.ts emits, `slice(indexOf(':') + 1)` and the by-name
+  // strip are behaviourally equivalent: the prefix colon IS the first colon, because a merge-field
+  // name contains none. That much was and is true, and it is why the first draft of this comment
+  // said the test does not fail on that mutation.
+  //
+  // It stopped being true in the same commit. The `company_in_body` case below - an offender with
+  // NO field prefix, where the colon form cuts into a string that has nothing to cut - was added
+  // precisely to discriminate, and it does: the mutation now FAILS here. The comment was left
+  // describing the test as it stood one edit earlier. Stale by two minutes, wrong by the time
+  // anyone read it, and it would have taught the next reader that this guard is weaker than it is.
   const g = offendersByField(WORDING_RESULT([
     'ResumeSummary: "Note: we ship weekly"',
     'SkillsBullets1: "safety-critical systems"',
@@ -867,8 +871,17 @@ test('H:wording-absent-row-is-not-an-empty-one: null and [] mean different thing
 
 test('H:wording-kept-is-rendered-in-the-margin: the selector is wired, not merely exported', () => {
   const src = stripComments(readSrc('screens/AssetBlocks.jsx'))
-  assert.match(src, /offendersForField\(wording, r\.merge_field\)/,
-    'the field margin never receives the kept phrases')
+  // ANCHORED ON THE WHOLE PROP, not on the call appearing somewhere in it. As a bare substring this
+  // was inert: the independent verifier's M12 kept the call and wrapped it in a condition that is
+  // never true —
+  //
+  //     wording={r.merge_field === '__never__' ? offendersForField(wording, r.merge_field) : []}
+  //
+  // — so the suite stayed at 240/240 while the browser rendered ZERO wording blocks. The entire
+  // feature vanished from the page with every guard green. Same shape as the `revisionNotes` miss
+  // already recorded in api/test/hardening.test.mjs: assert at the call site, not as a bare word.
+  assert.match(src, /wording=\{offendersForField\(wording, r\.merge_field\)\}/,
+    'the field margin must receive exactly the offenders for that field - an unconditional pass-through')
   assert.match(src, /data-qc=\{BLOCK_HOOKS\.fieldWordingKept\}/,
     'the margin block is not rendered')
   // REACHABILITY, not just presence. The hook assertion above passes on `{false && wording.length

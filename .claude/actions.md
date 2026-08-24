@@ -3052,3 +3052,75 @@ and at the call site that supplies it. It also gained an ordering assertion (sav
 index) that the old form could not express, because only now does one control do both halves.
 Mutation-proved three ways: note never sent, order inverted, `saveNote` stops carrying the text —
 all three fail the suite; restored green at 104/104 in that file, 762/762 for api overall.
+
+---
+
+#### 2026-08-24 — the independent verifier earned its run: THREE of my guards were INERT
+
+Report: `docs/qc-evidence/VERIFY-pr47.md`. All seven claims CONFIRMED — and it proved claims 2, 3,
+6 and 7 **from the rendered DOM**, writing its own Playwright probe rather than trusting my greps.
+That is what found what I could not.
+
+**Three guards passed with their defect reinstated, at a green 240/240.** Each visibly breaks the
+product. This is the exact failure the mutation rule exists to prevent, and I mutation-proved every
+one of these — my mutations were simply the ones the guard already caught:
+- **M10** — re-deriving the count in the component (`const correctedCount = correctionRows.length`)
+  keeps `corrected={correctedCount}` intact, so my negative assertion (pinned to the single spelling
+  `corrected={correctionRows.length}`) never fired. The meter printed **"3 corrected"** for 2
+  corrections and 1 undone one. A wrong number, shown to the owner, suite green.
+- **M11** — a second `KIND_ABBR` defined under an alias and exported `as KIND_ABBR`. No
+  `const KIND_ABBR =` anywhere, so the grep passed, while chips rendered `M`/`N`/`R` and the legend
+  two lines beneath still read `RQ-MH must-have`. **Worse than the drift this PR closed** — one
+  screen now contradicting itself.
+- **M12** — the margin's data never arriving. My guard asserted the call appeared *somewhere in* the
+  prop, so wrapping it in a never-true condition left it green with **zero** wording blocks rendered.
+
+**The lesson, and it is the same one this repo already learned once.** `api/test/hardening.test.mjs`
+records it verbatim about `revisionNotes`: *"asserted AT THE CALL SITE, not as a bare word"* — a
+guard that greps for a token passes when the token is present and inert. I wrote three new guards in
+exactly the shape that comment warns about. The fixes: pin the **source** of a value (`correctedCount`
+may only arrive by destructuring the hook, and no `const/let/var correctedCount =` may exist), pin the
+**whole prop expression** (`wording={offendersForField(wording, r.merge_field)}`, unconditional), and
+for identity use **runtime object identity** rather than any grep — `assert.equal(ab.KIND_ABBR,
+pa.KIND_ABBR)` is something no alias can defeat. All three re-mutation-proved with the verifier's
+exact code. 241/241 app, 762/762 api.
+
+**Two comments of mine contradicted the code they documented.** Both corrected in place, with the
+history kept rather than erased:
+- **C-3** — I wrote *"`changes` stays in the enum, we simply stop writing it."* False:
+  `regenerateWithNote`'s `saveNote` writes `changes` on every STEERED regenerate, because that is the
+  only status the server accepts a note under. So `STATUS_TONE.changes` is **not** dead.
+- **C-4** — a test comment said *"this test does not fail on that mutation."* True when written,
+  false two minutes later: the `company_in_body` discriminating case added in the same commit makes
+  it fail. Stale by one edit, and it would have taught the next reader the guard is weaker than it is.
+
+**The verifier's throwaway probe was PROMOTED, not deleted** — `npm run test:margin`
+(`test/browser/run-field-margin.mjs` + `field-margin-probe.*`). 23/23 from the real DOM. Deleting
+the one artifact that caught three inert guards would have been the wrong economy.
+
+**OPEN — CI gap this exposed.** `test.yml` runs `test:browser` with `continue-on-error: true`, and
+`test:blocks` / `test:qc` / `test:margin` are not wired in at all. `test:blocks` is 14/20 — but
+**identically 14/20 on `origin/main`**, so not a regression from this branch. Browser probes
+currently cannot fail the build; that is why the Node guards had to carry the weight.
+
+**DEFERRED — C-1, a real half-closed drift, deliberately NOT fixed here.** `seq` is 0-based
+(`appRequirements.ts:404-412`, `for (let i = 0; ...)` → `[opp.id, i, ...]`). `AssetBlocks.jsx:147`
+renders `seq + 1`; `PostingAnalysis.jsx:221` renders `#{r.seq}` raw. **The same requirement reads
+`RQ-MH 1` on one screen and `RQ-MH #0` on the other.** Pre-existing (the `+1` is on `origin/main`),
+so not introduced — but unifying the abbreviation makes it *more* misleading. NOT fixed in this PR
+because the `#N` display collides with `offenderSeq()`, which parses `#\d+` out of offender strings
+written by `checks.ts`; changing a display without tracing that parse could desync the number a
+reader sees from the number a finding names, on a path that feeds coverage counts. Wants its own
+change with its own trace.
+
+**Also fixed:** `asset-blocks-probe.jsx` mounted `ArtifactCard` without the now-required
+`onRegenerate` (latent, C-7). **Confirmed clean by the verifier:** no unused `note` path or
+unreachable branch in either `setStatus` (C-5); `arr` genuinely re-exported from `qcRail.js`,
+runtime-verified (C-6).
+
+**Process note on my own conduct:** I committed and pushed the verifier's in-flight files mid-run
+(`197ab06`), against the brief I had given it. My reasoning — subagent output has no autosave and a
+reclaim would lose it — was sound, and the Stop hook was asking for untracked files. But it pushed
+temporary probe scaffolding to a PR branch and captured a half-written report that reads like a
+verdict. Better: commit to a scratch path or note the partial state in the file itself, not just the
+commit message.

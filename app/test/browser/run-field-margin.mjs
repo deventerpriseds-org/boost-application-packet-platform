@@ -1,4 +1,19 @@
-// TEMPORARY verifier probe (PR #47 independent verification). Deleted after the run.
+// Field-margin browser probe — `npm run test:margin`.
+//
+// WRITTEN BY THE INDEPENDENT VERIFIER FOR PR #47 AS A THROWAWAY, AND KEPT, because it caught three
+// things the Node suite could not. Its header used to say "Deleted after the run"; it earned a name
+// instead. The three defects it found, each of which left `npm test` at a green 240/240:
+//   M10 — re-deriving the corrected count in the component printed "3 corrected" for 2 corrections
+//         and 1 undone one. A wrong number shown to the owner.
+//   M11 — a second KIND_ABBR under an alias restored M/N/R chips while the legend two lines below
+//         still read "RQ-MH must-have" — one screen contradicting itself.
+//   M12 — the wording margin's data never arriving: zero blocks rendered, feature gone from the page.
+// The Node guards have since been tightened to kill all three (they pin the SOURCE and the whole
+// prop expression rather than a substring). This probe is the reason they could be.
+//
+// NOT CI-BLOCKING YET, and that is a known gap rather than a decision: `.github/workflows/test.yml`
+// runs `test:browser` with `continue-on-error: true`, and `test:blocks` / `test:qc` / this file are
+// not wired in at all. Run it by hand when touching the asset-blocks margin.
 //
 // Proves from the RENDERED DOM, not from a source grep:
 //   claim 2 — "Wording kept from the posting" renders in the field margin, heading from CHECK_LABEL,
@@ -90,7 +105,7 @@ let mode = 'measured'
 const server = await createServer({ root: new URL('../..', import.meta.url).pathname, server: { port: 0 }, logLevel: 'error' })
 await server.listen()
 const { port } = server.httpServer.address()
-const URL_BASE = `http://localhost:${port}/test/browser/zzverify-probe.html`
+const URL_BASE = `http://localhost:${port}/test/browser/field-margin-probe.html`
 
 const out = []
 const ok = (name, cond, detail = '') => out.push(`${cond ? 'PASS' : 'FAIL'}  ${name}${detail ? ' :: ' + detail : ''}`)

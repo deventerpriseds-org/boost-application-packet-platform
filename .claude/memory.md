@@ -2858,6 +2858,29 @@ behind it here, so it would be a control that forgets) and its fabricated stat n
 failed the suite. Loosened to match the name inside the brace. When a guard fires on the thing it is
 asking for, the guard is what changes.
 
+**A GREP-SHAPED GUARD IS INERT BY DEFAULT, and mutation-proving it yourself does not prove it**
+(2026-08-24). Three guards I wrote AND mutation-proved were killed by an independent verifier's
+mutations at a green 240/240 — because I mutated the thing my guard already watched, and it mutated
+around it. The three shapes, all worth recognising on sight:
+1. **A negative assertion pinned to one spelling.** Forbidding `corrected={correctionRows.length}`
+   does nothing against `const correctedCount = correctionRows.length` feeding the same prop. Pin
+   the value's SOURCE, not one way of writing the defect.
+2. **A grep for `const X =` to prove single definition.** Defeated by
+   `const ALIAS = {...}; export { ALIAS as X }`. Use RUNTIME OBJECT IDENTITY —
+   `assert.equal(a.X, b.X)` — which a re-export satisfies and a copy never can.
+3. **Asserting a call appears SOMEWHERE IN a prop.** `wording={cond ? call(...) : []}` still
+   contains the call. Anchor the WHOLE expression.
+This repo had already written the lesson down — `api/test/hardening.test.mjs` on `revisionNotes`:
+*"asserted AT THE CALL SITE, not as a bare word"* — and I wrote three new guards in exactly the
+shape that comment warns about. **The generalisation: when you mutation-prove your own guard you
+choose a mutation you already expect it to catch. An adversary picks the one you didn't.** That is
+the whole argument for the independent verifier, and it is now measured, not asserted.
+
+**A DOM probe catches what no source grep can, and is worth keeping.** The verifier wrote
+`npm run test:margin` as a throwaway; it found all three inert guards by rendering the component and
+reading the page. Kept and named. Caveat that made the Node guards carry the weight anyway:
+`test.yml` runs `test:browser` with `continue-on-error: true`, so browser probes cannot fail CI.
+
 **A control that writes a note and returns is a PARAMETER, not an action** (2026-08-23). `Request
 changes` looked like a sibling of `Regenerate` and was not: it wrote a note, changed nothing visible,
 and the draft only moved when Regenerate was pressed after it. The owner spotted it from the outside

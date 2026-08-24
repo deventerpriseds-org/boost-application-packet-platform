@@ -542,6 +542,29 @@ test('H:kind-abbr-single-definition: no second abbreviation map anywhere in app/
     'KIND_ABBR must be DEFINED in exactly one module; every other file re-exports or imports it')
 })
 
+test('H:kind-abbr-single-definition: the re-export is the SAME OBJECT, not a copy', async () => {
+  // THE GREP ABOVE WAS INERT ON ITS OWN, and the independent verifier proved it. Its M11 defined a
+  // second map under an alias and exported it under the canonical name:
+  //
+  //     const ABBR_MAP = { must_have: 'M', nice_to_have: 'N', responsibility: 'R' }
+  //     export { ABBR_MAP as KIND_ABBR }
+  //
+  // No `const KIND_ABBR =` anywhere, so the grep passed at 240/240 — while the chips rendered
+  // `M`/`N`/`R` again and the legend two lines beneath them still read `RQ-MH must-have`. Worse
+  // than the drift this PR closed, because now one screen contradicts ITSELF.
+  //
+  // Identity is the assertion a grep cannot express and an alias cannot defeat: a re-export yields
+  // the very same object, a copy never does. Runtime, not source text.
+  const [ab, pa] = await Promise.all([
+    import('../src/assetBlocks.js'),
+    import('../src/postingAnalysis.js'),
+  ])
+  assert.equal(ab.KIND_ABBR, pa.KIND_ABBR,
+    'assetBlocks.js exports a DIFFERENT KIND_ABBR object - it must re-export postingAnalysis.js\'s')
+  assert.equal(ab.KIND_WORD, pa.KIND_WORD, 'same for KIND_WORD')
+  assert.equal(ab.KIND_LEGEND, pa.KIND_LEGEND, 'same for KIND_LEGEND')
+})
+
 test('H:kind-abbr-values: the owner-set abbreviations, and the RQ- stem that carries the meaning', () => {
   // Owner call 2026-08-23. The stem is the point: a must-have and a nice-to-have are two GRADES of
   // one thing (a requirement), a responsibility is a different kind of line. M/N/R flattened three

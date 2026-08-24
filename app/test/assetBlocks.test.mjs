@@ -808,7 +808,22 @@ test('H:corrected-count-comes-from-the-server: not a re-count of the rows in the
   // itself would keep showing an undone correction in its total.
   assert.match(code, /correctedCount: state \? state\.log\.count : null/,
     'the corrected count must be the server-measured `count`, not a length')
-  assert.ok(!/corrected=\{correctionRows\.length\}/.test(code), 'the count was re-derived in the view')
   assert.match(code, /corrected=\{correctedCount\}/, 'the meter never receives the count')
   assert.match(code, /data-qc=\{BLOCK_HOOKS\.meterCorrected\}/, 'the count is computed but never rendered')
+
+  // THE NEGATIVE ASSERTION WAS PINNED TO ONE SPELLING AND WAS THEREFORE INERT. It forbade exactly
+  // `corrected={correctionRows.length}` — so the independent verifier's M10, which keeps
+  // `corrected={correctedCount}` and instead re-derives the VARIABLE
+  // (`const correctedCount = correctionRows ? correctionRows.length : null`), sailed through at
+  // 240/240 while the meter rendered "3 corrected" for 2 corrections and 1 undone one. A wrong
+  // number shown to the owner, with a green suite.
+  //
+  // The fix is to pin the SOURCE rather than to forbid one wording: `correctedCount` may only ever
+  // arrive by destructuring the hook. Any re-derivation needs a `const correctedCount =`, `let`, or
+  // a rename of the prop — and the prop name is asserted just above, so a rename fails there.
+  assert.match(code, /const \{[^}]*\bcorrectedCount\b[^}]*\} = useArtifactCorrections\(/,
+    'correctedCount must come from the hook, which reports the server-measured count')
+  assert.ok(!/(?:const|let|var)\s+correctedCount\s*=/.test(code),
+    're-derived correctedCount in the component - it must come only from the hook destructure, '
+    + 'or an undone correction is counted again (verifier mutation M10)')
 })

@@ -218,8 +218,18 @@ export function ArtifactCard({ a, busy, setBusy, onGenerate, onRegenerate, onSet
                 `revisionNotes` (appPackets.ts:503), exactly as before - same transport, one control.
                 Cancel does nothing at all, which a separate button could not express.
 
-                `changes` stays in the enum and the schema CHECK - we simply stop writing it. There
-                are live rows carrying it and a migration would buy nothing. */}
+                `changes` IS STILL WRITTEN, and an earlier version of this comment claimed it was
+                not - corrected after an independent verifier caught the contradiction (C-3). The
+                write moved rather than stopped: `regenerateWithNote`'s saveNote calls
+                setArtifactStatus(a.id, 'changes', text) on every STEERED regenerate, because that
+                is the only status the server accepts a note under (appPackets.ts:341). A blank
+                regenerate writes nothing.
+
+                So `STATUS_TONE.changes` is NOT dead - it is reachable from new writes, briefly,
+                between the note landing and the rebuild finishing. Production has never held a
+                `changes` row (measured: artifact statuses are `todo` 173 / `review` 22, nothing
+                else), which is a statement about the OLD control never being used successfully -
+                not a licence to delete the tone. */}
             <button className="px-btn" disabled={busy === a.id} onClick={() => onRegenerate(a)}>
               {busy === a.id ? 'Regenerating…' : 'Regenerate'}
             </button>
