@@ -3306,3 +3306,25 @@ gate the queue entry, and both are buildable today.
 **The lesson, and it is the standing rule verbatim:** a planning doc is not a status source. `§3
 RESEQUENCE` is now marked stale-as-status in `QC-EVIDENCE-PLAN.md`. Status answers come from
 `origin/main` with the grep attached, every time.
+
+### ACT — "Show original" on every field (2026-08-24) — HALF DONE, NOT PUSHED TO MAIN
+
+**Asked:** *"fix the before_text problem."*
+
+**Done (committed on `claude/render-interaction-states`, branch pushed, NOT merged):** the control
+is unconditional; `originalState` in `app/src/assetBlocks.js` picks one of `changed` / `identical` /
+`none`, and `none` states the reason instead of fabricating text. 272/272 pass; all three behaviours
+broken on purpose and caught (1 / 2 / 1 failures); app builds.
+
+**NOT done — the half that actually closes it:** seed loop 0's `before_text` from the master
+baseline, so `none` becomes rare-to-never. `writeInsertions` sets `prevPkg = {}` at loop 0 today.
+
+**Correction recorded in memory.md:** I claimed a closure-crediting gate would block this. It does
+not — `realEdits`/`creditClosures` only ever receive one remediation pass's rows
+(`appRemediation.ts:275`, `loop=$2`, pass >= 1), so loop 0 is never read as an edit. The owner
+caught it: *"the default values arent edits."*
+
+**Open question put to the owner before building:** which source the loop-0 baseline comes from —
+(A) per-section MasterContext columns mapped to merge fields, (B) the resume template Doc's text per
+section (SPEC 219's literal reading), or (C) something else. Cannot see MasterContext column names
+from the sandbox (Storage Table, not Postgres); `api-test.yml` -> `/api/facts` would settle A.

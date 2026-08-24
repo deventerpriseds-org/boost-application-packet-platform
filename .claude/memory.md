@@ -3371,3 +3371,45 @@ wrote nothing.
 **Gotcha for future recipes:** a `variant`-match `KeyChip` renders a nested `≈` span, so the
 smallest element carrying the label has text `≈P&L Ownership` and an anchored `^…$` locator misses
 it. Pick an `exact`-match term (`Cloud-native Services`) or drop the anchors.
+
+## 2026-08-24 — I asserted a gate would block a fix, from a grep, and the gate does not see the rows
+
+**The claim I made:** repointing `before_text` at the master baseline "would make every field look
+edited forever and corrupt closure crediting", citing `remediation.ts:279` / `schema.ts:808`
+(`after_text <> before_text`).
+
+**The ground truth, and the owner caught it in one line — *"the default values arent edits"*:**
+`realEdits`/`creditClosures` are only ever handed ONE remediation pass's rows —
+`appRemediation.ts:275` selects `where artifact_id=$1 and loop=$2`, pass >= 1. And
+`writeInsertions` sets `prevPkg = {}` when `loop === 0`. So **loop 0's `before_text` is already null
+and nothing reads it.** Seeding it changes nothing downstream. I described a comparison that never
+happens.
+
+**Root cause: I grepped for the identifier and stopped at the line that mentioned it, without
+reading which ROWS the caller passes.** A grep tells you a column is referenced; it does not tell
+you the scope it is referenced over. That distinction was the entire answer.
+
+**The design intent, settled from three primary sources rather than from reasoning:**
+- `SPEC.md:84` — "Original / before text | 'Show original' on any field | screen 12"
+- `SPEC.md:199` — "present on every field, **including static template blocks**"
+- `SPEC.md:219` — static blocks show their **actual template text**, `{{merge field}}` placeholders
+  included, with Show original reading "identical, template text is not merged per packet"
+- **`qc/data.js:203`** is the clincher: the Skills field's `before` is
+  `Enterprise Governance | Technology Strategy | Agile Transformation | ...` — **exactly the strings
+  `SKILL_ROWS[].orig` records.** The owner's standing master content, not a pipeline intermediate.
+  `data.js:161` is likewise the master resume summary.
+
+**So the two concepts are NOT in conflict and `before_text` is not misdefined:**
+
+| | means | state |
+|---|---|---|
+| `before_text` | pass n-1's output (`appInsertions.ts:26`) | correct, load-bearing for remediation, leave it |
+| "Show original" | the value the packet STARTED from — the master baseline | wants a value at loop 0, where there is none |
+
+**The fix is to FILL loop 0, not to repoint the column.** Loops >= 1 stay exactly as they are. That
+reconciles the owner's *"there is always an original value"*, SPEC's "every field", and
+remediation's pass-over-pass meaning — all three, with no trade-off. My framing had invented a
+conflict and then proposed a worse fix (a second column) to resolve it.
+
+**Guard this earns:** *before claiming a consumer constrains a change, read the CALLER and establish
+which rows it passes.* Naming the file and line that mentions a column is not evidence about scope.

@@ -388,12 +388,26 @@ export const UNKNOWN_REQS_NOTE =
 // third is the honest-unknown the register keeps demanding: absent evidence is disclosed, never
 // dressed up as a comparison that happened.
 //
-// WHAT `before_text` ACTUALLY IS, because the name invites the wrong reading: it is the PREVIOUS
-// PASS's output, not a template baseline. `appInsertions.ts:26` — "before_text comes from loop-1,
-// so pass n's before is pass n-1's after - never its own." On loop 0 there is no previous pass, so
-// it is legitimately null. It is also load-bearing: `remediation.ts:279` and `schema.ts:808` decide
-// whether a pass GENUINELY rewrote a field with `after_text <> before_text`, and that credits a
-// requirement closure. Nothing here may repoint it — this function only chooses wording.
+// WHY `before_text` IS EMPTY ON THE FIRST DRAFT, AND WHY THAT IS A GAP RATHER THAN THE DESIGN.
+//
+// `appInsertions.ts:26` — "before_text comes from loop-1, so pass n's before is pass n-1's after -
+// never its own", and `writeInsertions` sets `prevPkg = {}` when `loop === 0`. So on the baseline
+// package — the draft everyone actually looks at — every row's before_text is null by construction.
+//
+// The DESIGN wants an original there. SPEC 199 puts "Show original" on every field "including
+// static template blocks"; SPEC 219 has static blocks showing their actual template text; and the
+// prototype's own data proves what "original" means — `qc/data.js:203` gives the Skills list a
+// before of "Enterprise Governance | Technology Strategy | Agile Transformation | ..." which is
+// exactly the set `SKILL_ROWS[].orig` records, i.e. the owner's STANDING master content, not a
+// pipeline intermediate. Owner, confirming: "the show original is always referencing showing the
+// template the prompts are using as a baseline. there is always an original value for those
+// sections."
+//
+// Seeding loop 0's before_text from that master baseline does NOT disturb remediation crediting.
+// `realEdits`/`creditClosures` are only ever handed ONE remediation pass's rows —
+// `appRemediation.ts:275` selects `where artifact_id=$1 and loop=$2` with pass >= 1 — and loop 0
+// rows are never passed to them. A default value is not an edit, and nothing reads loop 0 as one.
+// That work is separate from this function; this one only chooses the wording for whatever it has.
 export const ORIGINAL_NONE_NOTE =
   'This is the first draft for this posting, so there is no earlier version to compare against yet. ' +
   'A later pass that rewrites this field will have one.'
