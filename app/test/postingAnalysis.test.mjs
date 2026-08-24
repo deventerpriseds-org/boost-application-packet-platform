@@ -10,7 +10,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { join } from 'node:path'
 import {
-  KIND_ABBR, KIND_LEGEND, KIND_SOURCE_NOTE, KIND_SOURCE_SHORT, NO_QUOTE_REASON,
+  KIND_ABBR, KIND_LEGEND, reqChipLabel, KIND_SOURCE_NOTE, KIND_SOURCE_SHORT, NO_QUOTE_REASON,
   kindSourceNote, noQuoteReason, isQuoted, modelKeywords, groupRequirements,
   summarizeKindSource, isEvidencedKindSource, keywordLibraryState, postingBody,
   KEYWORD_2UP_MIN, keywordColumns, keywordGridTemplate, POSTING_HOOKS,
@@ -595,4 +595,41 @@ test('H:kind-legend-covers-every-chip: nothing can be chipped and left unexplain
     .replace(/\/\*[\s\S]*?\*\//g, '')
   assert.match(blocks, /<ReqLegend\s+reqs=/, 'the legend is defined but never rendered')
   assert.match(blocks, /KIND_LEGEND\.filter/, 'the legend must be derived from KIND_LEGEND, not retyped')
+})
+
+test('H:req-seq-one-convention: what the reader SEES equals what a finding NAMES', async () => {
+  // C-1, found by the independent verifier on PR #47. `AssetBlocks` rendered `seq + 1` and was the
+  // ONLY 1-based surface in the app, so the same requirement read `RQ-MH 1` on the asset step and
+  // `RQ-MH #0` on posting analysis — and a finding whose offender string begins `#0` pointed at a
+  // chip labelled `1`.
+  //
+  // THE ROUND TRIP IS THE ASSERTION, not the format. Seven api writers emit `` `#${r.seq} …` ``
+  // (checks.ts:588/594/616/680, dimensions.ts:286, reviewer.ts:504, remediation.ts:539) and
+  // offenderSeq() parses `#(\d+)` back out to decide which findings belong to which requirement.
+  // So the number in the chip must survive that parse unchanged. Anything else desyncs the label
+  // from the finding on a path that feeds the open-seq set and the coverage cards.
+  const { offenderSeq } = await import('../src/qcRail.js')
+  for (const seq of [0, 1, 7, 42]) {
+    const shown = reqChipLabel('must_have', seq)
+    const cited = `#${seq} some requirement text`          // exactly what checks.ts writes
+    assert.equal(offenderSeq(cited), seq)
+    assert.ok(shown.endsWith(`#${seq}`),
+      `chip "${shown}" does not carry the stored seq, so it cannot match the finding that cites #${seq}`)
+    assert.equal(Number(shown.slice(shown.indexOf('#') + 1)), offenderSeq(cited),
+      'the number a reader sees must equal the number a finding names')
+  }
+
+  // Degrades rather than inventing a number.
+  assert.equal(reqChipLabel('must_have', null), 'RQ-MH')
+  assert.equal(reqChipLabel('must_have', undefined), 'RQ-MH')
+  assert.equal(reqChipLabel('nonsense_kind', 3), 'REQ #3')
+
+  // BOTH screens through the ONE formatter, and no surface re-offsetting behind its back. The `+1`
+  // lived in a .jsx where no unit test could see it; a grep is the only way to keep it gone.
+  const strip = (s) => s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')
+  for (const f of ['AssetBlocks.jsx', 'PostingAnalysis.jsx']) {
+    const src = strip(readFileSync(new URL(`../src/screens/${f}`, import.meta.url), 'utf8'))
+    assert.match(src, /reqChipLabel\(/, `${f} does not render its chip through the shared formatter`)
+    assert.ok(!/\bseq\s*\+\s*1\b/.test(src), `${f} re-offsets seq — one convention, and it is the stored one`)
+  }
 })

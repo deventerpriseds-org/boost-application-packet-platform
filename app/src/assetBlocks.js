@@ -162,7 +162,7 @@ export function draftSizeText(row, expect) {
 // This file used to carry its own `M`/`N`/`R` pair while postingAnalysis.js carried `MH`/`NTH`/
 // `RESP`, so one requirement row rendered two different ways on two screens the reader can open
 // side by side. One definition, one set of words. See postingAnalysis.js for the values' rationale.
-export { KIND_ABBR, KIND_WORD, KIND_LEGEND } from './postingAnalysis.js'
+export { KIND_ABBR, KIND_WORD, KIND_LEGEND, reqChipLabel } from './postingAnalysis.js'
 
 /**
  * How the row's own `method` reads in plain language — RE-EXPORTED, not redefined.

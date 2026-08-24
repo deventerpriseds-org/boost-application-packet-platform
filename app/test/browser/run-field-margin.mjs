@@ -211,8 +211,10 @@ ok('a field legend lists ONLY the kinds that field carries',
   legends.every((l) => (l.match(/RQ-MH|RQ-NTH|RESP/g) || []).length === 1), JSON.stringify(legends))
 const chipText = await page.evaluate(() =>
   [...document.querySelectorAll('.px-chip')].map((e) => e.innerText.trim()).filter((t) => /RQ-|RESP/.test(t)))
+// `#N`, and N is the STORED 0-based seq. The `+ 1` this once allowed made the asset step the only
+// 1-based surface in the app, so a finding citing `#0` pointed at a chip labelled `1` (C-1).
 ok('the chips themselves read RQ-MH / RQ-NTH / RESP, not M / N / R',
-  chipText.length === 3 && chipText.every((t) => /^(RQ-MH|RQ-NTH|RESP) \d+$/.test(t)), JSON.stringify(chipText))
+  chipText.length === 3 && chipText.every((t) => /^(RQ-MH|RQ-NTH|RESP) #\d+$/.test(t)), JSON.stringify(chipText))
 
 // ---------- claim 3: "N corrected" is the SERVER count ----------
 const corrected = await page.evaluate(() =>

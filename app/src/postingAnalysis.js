@@ -187,6 +187,40 @@ export const KIND_WORD = { must_have: 'must-have', nice_to_have: 'nice-to-have',
 export const KIND_LEGEND = ['must_have', 'nice_to_have', 'responsibility']
   .map((k) => ({ kind: k, abbr: KIND_ABBR[k], word: KIND_WORD[k] }))
 
+/**
+ * THE one way a requirement is named on screen: `RQ-MH #0`.
+ *
+ * `seq` IS 0-BASED AND IS RENDERED RAW. That is not a cosmetic preference, it is the only choice
+ * that keeps the number a reader SEES equal to the number the system NAMES.
+ *
+ * Ground truth for the value: `appRequirements.ts:404-412` inserts `for (let i = 0; ...)` with `i`
+ * as `seq` — 0-based, from the row that creates it. Ground truth for the display: SEVEN places in
+ * the api write that same raw seq into text the reader is shown — `checks.ts:588,594,616,680`,
+ * `dimensions.ts:286`, `reviewer.ts:504`, `remediation.ts:539`, all `` `#${r.seq} …` `` — and
+ * `offenderSeq()` (qcRail.js) parses `#(\d+)` straight back out to decide which findings belong to
+ * which requirement, which feeds the open-seq set and the coverage cards.
+ *
+ * So a 1-based DISPLAY desyncs the chip from the finding that names the same line. `AssetBlocks`
+ * rendered `seq + 1` and was the ONLY 1-based surface in the app: the same requirement read
+ * `RQ-MH 1` on the asset step and `RQ-MH #0` on posting analysis, and a finding citing `#0` pointed
+ * at a chip labelled `1`. Found by an independent verifier on PR #47 (C-1); pre-existing, and made
+ * more misleading, not less, by unifying the abbreviation.
+ *
+ * A HUMAN-FRIENDLY 1-BASED SCHEME IS POSSIBLE BUT IS NOT A BUG FIX. It means changing all seven
+ * offender writers AND `offenderSeq()`'s parse together — accusation-grade code that decides
+ * coverage counts. That is a deliberate product change with its own trace, not something to slip
+ * into a display tweak. Until then the invariant is: ONE convention, and it is the stored one.
+ */
+export function reqChipLabel(kind, seq) {
+  const abbr = KIND_ABBR[kind] || 'REQ'
+  // `Number(null)` is 0 and `Number('')` is 0, both finite — so a Number.isFinite() test alone
+  // renders a MISSING seq as `#0`, a real requirement number invented for a row that has none.
+  // Caught by this function's own guard on the first run. Absent stays absent.
+  if (seq === null || seq === undefined || seq === '') return abbr
+  const n = Number(seq)
+  return Number.isFinite(n) ? `${abbr} #${n}` : abbr
+}
+
 // requirement.kind_source records WHY a line was filed where it was.
 export const KIND_SOURCE_NOTE = {
   posting_required_marker: 'the posting marks this required',

@@ -3103,7 +3103,11 @@ the one artifact that caught three inert guards would have been the wrong econom
 **identically 14/20 on `origin/main`**, so not a regression from this branch. Browser probes
 currently cannot fail the build; that is why the Node guards had to carry the weight.
 
-**DEFERRED — C-1, a real half-closed drift, deliberately NOT fixed here.** `seq` is 0-based
+**C-1 IS NOW FIXED** on `claude/req-seq-display` — see the entry below. The paragraph that follows
+is the deferral reasoning as written at the time, kept because the trace it demanded is what
+determined the fix's direction.
+
+**DEFERRED AT THE TIME — C-1, a real half-closed drift, deliberately NOT fixed in PR #47.** `seq` is 0-based
 (`appRequirements.ts:404-412`, `for (let i = 0; ...)` → `[opp.id, i, ...]`). `AssetBlocks.jsx:147`
 renders `seq + 1`; `PostingAnalysis.jsx:221` renders `#{r.seq}` raw. **The same requirement reads
 `RQ-MH 1` on one screen and `RQ-MH #0` on the other.** Pre-existing (the `+1` is on `origin/main`),
@@ -3124,3 +3128,48 @@ reclaim would lose it — was sound, and the Stop hook was asking for untracked 
 temporary probe scaffolding to a PR branch and captured a half-written report that reads like a
 verdict. Better: commit to a scratch path or note the partial state in the file itself, not just the
 commit message.
+
+---
+
+#### 2026-08-24 — PR #47 MERGED to `main` and DEPLOYED; C-1 fixed immediately after
+
+Owner: *"merge it to main... when will you fix the defect you left deliberately?"* Answer: now.
+The deferral was to keep an accusation-adjacent trace out of an already-large PR, not to park it.
+
+**Merged + deployed.** `main` fast-forwarded `06abee7 → 886836b` (5 commits). Both deploys verified
+by `sha:` — **api-deploy run 32681577811 success**, **executive-engine-deploy run 32681577810
+success**. Not yet confirmed by the owner in their browser.
+
+**C-1 fixed — and the trace inverted the obvious answer.** The instinct was "1-based reads better,
+make PostingAnalysis match AssetBlocks". The trace says the opposite:
+- `seq` is 0-based at the source (`appRequirements.ts:404-412`, `for (let i = 0; ...)`).
+- **SEVEN api sites** write that raw seq into text the reader is shown: `checks.ts:588,594,616,680`,
+  `dimensions.ts:286`, `reviewer.ts:504`, `remediation.ts:539` — all `` `#${r.seq} …` ``.
+- `offenderSeq()` (`qcRail.js:554`) parses `#(\d+)` straight back out, feeding the open-seq set and
+  the coverage cards.
+- Every other display surface — `PostingAnalysis.jsx:221`, `QcRail.jsx:811` — is 0-based.
+
+So **`AssetBlocks.jsx`'s `seq + 1` was the ONLY 1-based surface in the entire app.** It was the
+outlier, not the standard, and "fixing" the other screens would have desynced them from the seven
+writers and the parser. Removing one `+ 1` aligns four surfaces and touches zero tier-1 code.
+
+**Structural, not a grep:** new `reqChipLabel(kind, seq)` in `postingAnalysis.js` is the single
+formatter both screens now render through, so the two cannot drift again by construction.
+
+**THE GUARD ASSERTS THE ROUND TRIP, NOT THE FORMAT** — the number a reader sees must survive
+`offenderSeq()`'s parse unchanged. A format assertion would pass on any self-consistent scheme
+including one desynced from the findings.
+
+**The guard caught a defect in my own formatter on its first run.** `Number(null) === 0` and
+`Number('') === 0`, both finite — so `Number.isFinite()` alone rendered a MISSING seq as `#0`, a
+real requirement number invented for a row that has none. Exactly the "never fabricate" failure.
+Fixed with an explicit null/undefined/'' check; `S3` mutation-proves it.
+
+Mutation-proved three ways, all killed: S1 reinstate `+ 1` in the formatter, S2 a screen re-offsets
+behind the formatter's back, S3 invent `#0` for a missing seq. 242/242 app, 762/762 api, DOM probe
+`npm run test:margin` 23/23.
+
+**A 1-based human-friendly scheme remains possible but is NOT a bug fix** — it means changing all
+seven offender writers AND the parse together, which is accusation-grade code deciding coverage
+counts. That is an owner-level product decision with its own trace, and it is recorded here rather
+than taken unilaterally.

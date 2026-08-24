@@ -18,7 +18,7 @@
 import React, { useEffect, useState } from 'react'
 import { Pill, Overlay } from '../shell.jsx'
 import {
-  KIND_ABBR, kindSourceNote, noQuoteReason, isQuoted,
+  KIND_ABBR, reqChipLabel, kindSourceNote, noQuoteReason, isQuoted,
   groupRequirements, modelKeywords, summarizeKindSource, keywordLibraryState,
   keywordColumns, keywordGridTemplate, POSTING_HOOKS,
   fitLabel, FIT_COLOR, comparisonState, compareColumns, compareGridTemplate,
@@ -218,7 +218,7 @@ function RequirementRow({ r }) {
       style={{ padding: '10px 0', borderBottom: '1px solid var(--proto-rule-soft)' }}>
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap', marginBottom: 5 }}>
         <span className="px-chip" style={{ fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize: 10 }}>
-          {KIND_ABBR[r.kind] || 'REQ'}&nbsp;#{r.seq}
+          {reqChipLabel(r.kind, r.seq)}
         </span>
         <span className="px-small" style={{ color: 'var(--proto-ink3)' }}>
           {r.competency || 'competency unassigned'}

@@ -30,7 +30,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { api } from '../api.js'
 import {
-  BLOCK_HOOKS, observedFor, KIND_ABBR, KIND_WORD, KIND_LEGEND, METHOD_LABEL,
+  BLOCK_HOOKS, observedFor, KIND_ABBR, KIND_WORD, KIND_LEGEND, reqChipLabel, METHOD_LABEL,
   countMismatchNote, deriveItems, draftSizeText, expectationFor, latestRows, listBodyModel, listsOf,
   targetFor,
   ASSET_ANSWERS_DEFAULT_OPEN, correctionsForField,
@@ -144,12 +144,13 @@ function useWideRef(min = 700) {
 
 function ReqChip({ req }) {
   if (!req) return null
-  const abbr = KIND_ABBR[req.kind] || '?'
-  const n = Number.isFinite(Number(req.seq)) ? Number(req.seq) + 1 : null
+  // Through the SHARED formatter, and the `+ 1` that used to be here is gone. It made this the only
+  // 1-based surface in the app, so a finding citing `#0` pointed at a chip labelled `1`. See
+  // reqChipLabel() for the seven api writers and the parser that fix the convention.
   return (
     <span className="px-chip" title={`${KIND_WORD[req.kind] || req.kind || 'requirement'} - ${req.item_text || ''}`}
       style={{ background: 'var(--proto-accent-soft)', color: 'var(--text-brand)', fontWeight: 600 }}>
-      {abbr}{n === null ? '' : ` ${n}`}
+      {reqChipLabel(req.kind, req.seq)}
     </span>
   )
 }
