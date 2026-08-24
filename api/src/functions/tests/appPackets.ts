@@ -653,7 +653,14 @@ export async function renderArtifact(client: any, art: any, opp: any, pkg: Recor
   } catch (e) { console.warn('[packets] insertion provenance not recorded:', String(e)) }
 
   const preview = meta.placeholders.map((p) => (pkg[p] ? `${p}:\n${pkg[p]}` : '')).filter(Boolean).join('\n\n')
-  await client.query(`update artifact set doc_url = $1, content = coalesce(nullif(content,''), $2), status = case when status = 'todo' then 'review' else status end, updated_at = now() where id = $3`, [url, preview, art.id])
+  // `template_id` is WRITTEN here, and was not until 2026-08-24. The column existed in three places
+  // and none of them was a write: `schema.ts` declares it, `appPackets.ts:80` selects it, and
+  // `appPackets.ts:200` serves it to the UI as `templateId` — so every artifact reported
+  // `templateId: null` while this function had the real id in hand and had just copied that exact
+  // file. `meta.templateId` is the OWNER-RESOLVED id (google.resumeTemplateId, or the per-role
+  // override), never the seed constant, so the row records the document the packet was actually
+  // built from rather than the one a default says it should have been.
+  await client.query(`update artifact set doc_url = $1, content = coalesce(nullif(content,''), $2), template_id = $3, status = case when status = 'todo' then 'review' else status end, updated_at = now() where id = $4`, [url, preview, meta.templateId || null, art.id])
   return { url, isSlides: meta.isSlides, cleaned, kindLabel: meta.kindLabel, title: name, supersededDocUrl: superseded }
 }
 

@@ -1,6 +1,7 @@
 import { app, HttpRequest, HttpResponseInit, InvocationContext } from '@azure/functions'
 import { getGoogleToken, getGoogleOAuthToken, HAS_GOOGLE_OAUTH, IMPERSONATE_SUBJECT } from './googleAuth'
 import { RESUME_TEMPLATE_ID, copyTemplate, shareAnyone } from './packetTemplates'
+import { loadPipelineSettings } from './pipelineConfig'
 
 // GET /api/diag/doc-structure — structural fingerprint of the resume template vs a
 // pure copy (copy step only, no injection) vs a generated doc, so we can DIFF the
@@ -72,10 +73,22 @@ export async function diagDocStructure(req: HttpRequest, context: InvocationCont
       ? await getGoogleOAuthToken()
       : await getGoogleToken(process.env.GOOGLE_SERVICE_ACCOUNT_JSON!, 'https://www.googleapis.com/auth/documents https://www.googleapis.com/auth/drive', IMPERSONATE_SUBJECT)
 
-    const templateId = (req.query.get('templateId') || RESUME_TEMPLATE_ID).trim()
+    // The OWNER-RESOLVED template, not the seed constant. This defaulted to RESUME_TEMPLATE_ID,
+    // so the diagnostic audited a document the production builder may not copy: renderArtifact
+    // reads `google.resumeTemplateId` from settings, and pipelineConfig already records that an
+    // owner can set a template id and watch the builder use a different one. A structural audit
+    // that reads the wrong document is worse than none - it reports clean on a file nobody ships.
+    // An explicit ?templateId= still wins, so a specific document can still be inspected on demand.
+    const resolvedTemplateId = await loadPipelineSettings()
+      .then((s) => (s.resumeTemplateId.value || '').trim())
+      .catch(() => '')
+    const templateId = (req.query.get('templateId') || resolvedTemplateId || RESUME_TEMPLATE_ID).trim()
+    const templateSource = req.query.get('templateId') ? 'query'
+      : resolvedTemplateId ? 'owner setting (google.resumeTemplateId)'
+      : 'seed constant - NO owner setting is configured'
     const docId = (req.query.get('docId') || '').trim()
     const makeCopy = req.query.get('copy') !== '0'
-    const out: any = { templateId }
+    const out: any = { templateId, templateSource }
 
     // 1. Original template — fingerprint + make link-readable so it can be opened for comparison.
     const tpl = await getDoc(token, templateId)
