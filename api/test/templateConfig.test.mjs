@@ -225,3 +225,40 @@ test('H:packet-resume-does-not-re-break-the-compact-template', () => {
   assert.match(passed, /compactResumeTemplateId: settings\.compactResumeTemplateId/,
     'the compact template id must still be passed')
 })
+
+// ── "Is this Doc usable as a template?" — the check that was missing ─────────────────────────────
+//
+// diag/doc-structure could report a template as readable and structurally sound while it was
+// COMPLETELY UNUSABLE, because a Doc with none of the {{tokens}} injects nothing and renders as an
+// empty shell. `stripLeftoverTokens` then deletes any unfilled token, so the evidence vanishes from
+// the output too. Found 2026-08-24 when the owner supplied a compact-resume Doc and there was no way
+// to confirm it before pointing production at it.
+const DIAG = readFileSync(new URL('../src/functions/tests/diagDocStructure.ts', import.meta.url), 'utf8')
+
+test('H:doc-audit-reports-placeholders: a template can be proven usable before it is configured', () => {
+  assert.match(DIAG, /usableAsTemplate: expected\.length > 0 && expected\.every/,
+    'the audit must state whether every expected placeholder is present')
+  // An EMPTY expected set must never read as usable — that is the vacuous-pass shape the repo bans.
+  assert.match(DIAG, /expected\.length > 0 &&/,
+    'usableAsTemplate must be false when there is nothing to check against, never vacuously true')
+})
+
+test('H:doc-audit-expects-the-real-injected-set: not a hand-listed copy', () => {
+  // A second list of "what a resume template should contain" would drift from what varsForType
+  // actually injects, and the audit would bless a template the builder cannot fill.
+  assert.match(DIAG, /const expectMeta = metaFor\(expectType\)/,
+    'the expected placeholders must come from TEMPLATE_META via metaFor, not a literal')
+  assert.match(DIAG, /expectMeta \? expectMeta\.placeholders : \[\]/,
+    'an unknown artifact type must yield NO expected set rather than a guessed one')
+  assert.ok(!/expected = \[['"]/.test(DIAG), 'no hand-written placeholder list may appear here')
+})
+
+test('H:doc-audit-scans-tables-and-headers: a placeholder in a cell is not reported missing', () => {
+  // A compact resume is exactly where a token is likely to sit in a table cell, and injectValues
+  // (replaceAllText) is document-wide, so missing those trees would report a PRESENT token as
+  // absent — a false negative that blocks a good template.
+  assert.match(DIAG, /for \(const pe of \(el\.paragraph\?\.elements \|\| \[\]\)\)/,
+    'text must be collected on the same walk that descends into table cells')
+  assert.match(DIAG, /Object\.values\(doc\.headers \|\| \{\}\)[\s\S]{0,80}?Object\.values\(doc\.footers \|\| \{\}\)/,
+    'headers and footers must be scanned too')
+})
