@@ -52,6 +52,7 @@ export const QC_HOOKS = {
   tab: 'qc-tab',
   panel: 'qc-tabpanel',
   filter: 'qc-filter',                   // the active requirement filter
+  goToField: 'qc-go-to-field',           // finding -> the draft itself (the drawer link stays too)
   clearFilter: 'qc-clear-filter',
   coverageCard: 'qc-coverage-card',
   coverageCount: 'qc-coverage-count',

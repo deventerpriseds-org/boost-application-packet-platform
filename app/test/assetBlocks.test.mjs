@@ -855,3 +855,67 @@ test('H:gap-harness-ignores-leading-glyphs: a decorative prefix is not a differe
   // And the strip cannot eat a label whole.
   assert.equal(norm('▸ View draft'), 'View draft')
 })
+
+// ── row 9: the per-kind split ───────────────────────────────────────────────────────────────────
+//
+// The prototype (§10) shows "5/5 must-haves"; the app showed one undifferentiated "Posting lines
+// placed". The blocker recorded against this row was an endpoint change, and that was WRONG:
+// GET /app/opportunity/{id}/requirements already returns the rows with `kind` on each, alongside
+// `total`, and `groupRequirements()` already splits them. This is client derivation over data the
+// payload already carried.
+
+const KIND_PAYLOAD = {
+  total: 6,
+  requirements: [
+    { id: 'm1', kind: 'must_have' }, { id: 'm2', kind: 'must_have' },
+    { id: 'p1', kind: 'responsibility' }, { id: 'p2', kind: 'responsibility' },
+    { id: 'n1', kind: 'nice_to_have' },
+    { id: 'x1', kind: null },            // deliberately unclassified — see the total test below
+  ],
+}
+
+test('the meter splits placed lines by kind, counting only rows this asset cites', () => {
+  const rows = [{ requirement_id: 'm1' }, { requirement_id: 'm1' }, { requirement_id: 'p2' }, { requirement_id: null }]
+  const { stats } = meterModel({ rows, filled: 5, unfilled: 2, requirements: KIND_PAYLOAD, scopedSwaps: [] })
+  const by = (k) => stats.find((s) => s.key === `kind_${k}`)
+
+  assert.deepEqual({ n: by('mustHaves').n, d: by('mustHaves').d }, { n: 1, d: 2 },
+    'm1 cited twice is ONE must-have answered, not two')
+  assert.deepEqual({ n: by('responsibilities').n, d: by('responsibilities').d }, { n: 1, d: 2 })
+  assert.deepEqual({ n: by('niceToHaves').n, d: by('niceToHaves').d }, { n: 0, d: 1 },
+    'a kind the asset answers none of is still a real 0/1 — the denominator exists')
+})
+
+test('a kind the posting does not use produces no stat, never a 0/0', () => {
+  const payload = { total: 2, requirements: [{ id: 'm1', kind: 'must_have' }, { id: 'm2', kind: 'must_have' }] }
+  const { stats } = meterModel({ rows: [{ requirement_id: 'm1' }], filled: 1, unfilled: 0, requirements: payload, scopedSwaps: [] })
+  assert.ok(stats.find((s) => s.key === 'kind_mustHaves'), 'the kind that exists is reported')
+  for (const k of ['responsibilities', 'niceToHaves']) {
+    assert.ok(!stats.some((s) => s.key === `kind_${k}`), `${k} has no rows — it must not appear as 0/0`)
+  }
+  for (const s of stats) assert.ok(s.d > 0, `no stat may carry a zero denominator: ${s.key}`)
+})
+
+// THE ONE THAT MATTERS. groupRequirements classifies exactly three kinds, so a row whose kind is
+// null or unrecognised belongs to NO group. If the per-kind split had replaced the total, that row
+// would vanish from every coverage count on the screen with nothing saying so.
+test('the total is not replaced by the sum of the parts, so an unclassified row is never dropped', () => {
+  const { stats } = meterModel({
+    rows: [{ requirement_id: 'm1' }], filled: 1, unfilled: 0, requirements: KIND_PAYLOAD, scopedSwaps: [],
+  })
+  const lines = stats.find((s) => s.key === 'lines')
+  assert.ok(lines, 'the undifferentiated total must survive alongside the split')
+  assert.equal(lines.d, 6, 'the total counts every requirement row, classified or not')
+
+  const partsD = stats.filter((s) => s.key.startsWith('kind_')).reduce((a, s) => a + s.d, 0)
+  assert.equal(partsD, 5, 'the three kinds account for five of the six rows')
+  assert.ok(partsD < lines.d, 'the parts under-count the total here — which is exactly why the total stays')
+})
+
+test('a payload with no requirement rows still yields the total stat and no kind stats', () => {
+  const { stats } = meterModel({
+    rows: [{ requirement_id: 'm1' }], filled: 1, unfilled: 0, requirements: { total: 4 }, scopedSwaps: [],
+  })
+  assert.ok(stats.find((s) => s.key === 'lines'), 'total is measured and reported')
+  assert.ok(!stats.some((s) => s.key.startsWith('kind_')), 'no rows means no split — not three empty stats')
+})
