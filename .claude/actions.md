@@ -3360,3 +3360,23 @@ prove the owner's packets look right. Two things want eyes on production:
    artifact.
 2. **The picker only appears with 2+ resumes configured**, so with one template it is invisible by
    design, not broken.
+
+**LIVE CONFIRMATION of the new route (api-test run 32782474015, 2026-08-24).** `POST
+/api/app/packet/{id}/resume-template` with a bogus templateId returned **HTTP 400** with
+`{"error":"that template is not one of the configured resume templates","known":
+["1bwOcxvkbihRTUjOzVjrWSPnDomwqy6gOz6229mdzbZw"]}`.
+
+Three things proven, none of them inferred: the route is REACHABLE (that is the handler's own JSON,
+not Azure's route-missing 404, so worker converge is done); validation reads the LIVE AppConfig
+collection rather than a regex; and nothing was mutated, because the check returns before a DB
+connection is opened. The run is marked FAILED only because `api-test.yml` does `if status >= 400:
+exit(1)` — a deliberate 4xx probe reads as a workflow failure, which is the workflow being right.
+
+**It also settles a fact I had only inferred: exactly ONE resume template is configured today.** So
+`ResumeTemplatePicker` is currently hidden by design, not broken. It appears on the resume step as
+soon as a second template row exists.
+
+**Still unconfirmed live, and only the owner can produce it:** the loop-0 baseline populates on a NEW
+build only, so existing artifacts keep `before_text = null` and still say "no earlier version" until
+something is rebuilt. The provenance-label change ("From profile" -> "Written for this posting") also
+only appears on rebuilt artifacts.
