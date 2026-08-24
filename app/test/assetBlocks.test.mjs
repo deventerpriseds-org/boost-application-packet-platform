@@ -17,6 +17,7 @@ import {
   countMismatchNote, deriveItems, draftSizeText, expectationFor, itemCountOf, joinLabels,
   latestRows, listBodyModel, listsOf, meterModel, normLabel, registerListOwners, reqsForRow,
   scopeSwaps, shapeOf, sharedSourceNote, splitItems, statPct, wordCount, observedFor,
+  ORIGINAL_NONE_NOTE, originalState,
 } from '../src/assetBlocks.js'
 
 const src = (rel) => readFileSync(fileURLToPath(new URL(rel, import.meta.url)), 'utf8')
@@ -918,4 +919,65 @@ test('a payload with no requirement rows still yields the total stat and no kind
   })
   assert.ok(stats.find((s) => s.key === 'lines'), 'total is measured and reported')
   assert.ok(!stats.some((s) => s.key.startsWith('kind_')), 'no rows means no split — not three empty stats')
+})
+
+// ── "Show original" — SPEC 4.5 puts it on EVERY field ────────────────────────────────────────────
+//
+// The defect: the control was gated on `row.before_text`, so a field with no earlier version
+// rendered NOTHING and the reader could not tell "unchanged" from "broken" from "first draft".
+// Owner, on seeing it: "i dont understand why you would consider it a dead link leaidng me to
+// believe if it doesnt have original text now it never will, that is black box and not clear."
+//
+// The invariant, not the incident: originalState ALWAYS returns a state with a label, and it NEVER
+// invents text it does not have. Absent evidence is disclosed, never rendered as a comparison.
+
+test('H:show-original-always: every row yields a labelled state, including one with no earlier version', () => {
+  for (const row of [
+    { before_text: 'was', after_text: 'now' },
+    { before_text: 'same', after_text: 'same' },
+    { before_text: null, after_text: 'now' },
+    { before_text: '', after_text: 'now' },
+    {},
+  ]) {
+    const st = originalState(row)
+    assert.ok(st && typeof st.label === 'string' && st.label.length > 0,
+      `every row must produce a non-empty label; got ${JSON.stringify(st)} for ${JSON.stringify(row)}`)
+    assert.ok(['changed', 'identical', 'none'].includes(st.kind), `unexpected kind ${st.kind}`)
+  }
+})
+
+test('H:show-original-no-fabrication: a row with no earlier version renders NO body text and says so', () => {
+  for (const row of [{ before_text: null, after_text: 'now' }, { before_text: '', after_text: 'now' }, {}]) {
+    const st = originalState(row)
+    assert.equal(st.kind, 'none', 'a null or empty before_text is the honest-unknown state')
+    assert.equal(st.text, null, 'NEVER fabricate an original — there is none to show')
+    assert.equal(st.body, ORIGINAL_NONE_NOTE, 'the reason must be stated, not left blank')
+  }
+})
+
+test('H:show-original-not-a-false-claim: identical bytes are not headed "before this posting"', () => {
+  const st = originalState({ before_text: 'same bytes', after_text: 'same bytes' })
+  assert.equal(st.kind, 'identical')
+  assert.ok(!/before this posting/i.test(st.label),
+    'heading an unchanged field as changed is the false claim ROW 7 was about')
+  assert.equal(st.text, 'same bytes', 'the text is still shown so the reader can confirm it')
+})
+
+test('H:show-original-changed: a real earlier version is shown under the changed heading', () => {
+  const st = originalState({ before_text: 'the old paragraph', after_text: 'the new paragraph' })
+  assert.equal(st.kind, 'changed')
+  assert.equal(st.text, 'the old paragraph')
+  assert.match(st.label, /before this posting/i)
+})
+
+// STRUCTURAL: the control must not be re-gated on before_text. A runtime test cannot see JSX, and
+// re-adding `{row.before_text && (` around the toggle is exactly how this regresses — it reads like
+// a tidy-up.
+test('H:show-original-ungated: the toggle in AssetBlocks.jsx is not wrapped in a before_text guard', () => {
+  const src = readFileSync(fileURLToPath(new URL('../src/screens/AssetBlocks.jsx', import.meta.url)), 'utf8')
+  const i = src.indexOf('BLOCK_HOOKS.compareToggle')
+  assert.ok(i > 0, 'the compare toggle must still exist')
+  const before = src.slice(Math.max(0, i - 600), i).replace(/\{\/\*[\s\S]*?\*\/\}/g, '')
+  assert.ok(!/row\.before_text\s*&&\s*\($/m.test(before.trimEnd()),
+    'the Show original control must render unconditionally — originalState decides what it says')
 })

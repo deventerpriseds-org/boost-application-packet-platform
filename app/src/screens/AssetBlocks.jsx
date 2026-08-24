@@ -34,7 +34,7 @@ import {
   countMismatchNote, deriveItems, draftSizeText, expectationFor, latestRows, listBodyModel, listsOf,
   targetFor,
   ASSET_ANSWERS_DEFAULT_OPEN, correctionsForField,
-  meterModel, reqsForRow, scopeSwaps, shapeOf, sharedSourceNote, statPct, wordCount,
+  meterModel, originalState, reqsForRow, scopeSwaps, shapeOf, sharedSourceNote, statPct, wordCount,
 } from '../assetBlocks.js'
 import { HIGHLIGHT_CLASS, markRuns } from '../highlight.js'
 import { SEV_COLOR, SEV_LABEL, checkLabel, fieldLabel, severityCounts } from '../assetGate.js'
@@ -434,6 +434,9 @@ function AssetBlock({ row, reqs, swapsForList, wide, artifactId, listOwners, thr
   corrections = [], wording = [], wordingExpected = '', fieldSev = null, findings = [],
   correctionBusy, setCorrectionBusy, onCorrectionsChanged }) {
   const [showBefore, setShowBefore] = useState(false)
+  // What the "Show original" panel says. Derived in ../assetBlocks.js, never inline: this file
+  // renders, it does not decide. See `originalState` for why before_text may legitimately be null.
+  const original = useMemo(() => originalState(row), [row])
   const [askOpen, setAskOpen] = useState(false)
   const [ask, setAsk] = useState('')
   const [askBusy, setAskBusy] = useState(false)
@@ -524,18 +527,24 @@ function AssetBlock({ row, reqs, swapsForList, wide, artifactId, listOwners, thr
         </div>
       )}
 
-      {showBefore && row.before_text && (
-        <div className="px-note" data-qc={BLOCK_HOOKS.before} style={{ marginTop: 9 }}>
-          {/* "before this posting" is a FALSE CLAIM on a field nothing changed. A static block's
-              before and after are the same bytes: the template text was never merged per packet, so
-              there is no "before". Said plainly rather than headed with a change that did not
-              happen. */}
-          <div className="px-label" style={{ color: 'var(--text-info)', marginBottom: 3 }}>
-            {row.before_text === row.after_text
-              ? 'Identical - template text is not merged per packet'
-              : 'Original - before this posting'}
-          </div>
-          <div style={{ fontSize: 12, lineHeight: 1.6, whiteSpace: 'pre-line' }}>{row.before_text}</div>
+      {showBefore && (
+        <div className="px-note" data-qc={BLOCK_HOOKS.before} data-qc-state={original.kind} style={{ marginTop: 9 }}>
+          {/* Three states, decided in ../assetBlocks.js so `node --test` can hold them:
+                changed   - a real earlier version exists and differs
+                identical - before and after are the same bytes. "before this posting" would be a
+                            FALSE CLAIM on a field nothing changed: the template text was never
+                            merged per packet, so there is no "before".
+                none      - no earlier version exists. Disclosed, not hidden. Hiding it is what made
+                            the control look like a dead link. */}
+          <div className="px-label" style={{ color: 'var(--text-info)', marginBottom: 3 }}>{original.label}</div>
+          {original.text !== null && (
+            <div style={{ fontSize: 12, lineHeight: 1.6, whiteSpace: 'pre-line' }}>{original.text}</div>
+          )}
+          {original.body && (
+            <div className="px-small" style={{ textTransform: 'none', lineHeight: 1.5, color: 'var(--proto-ink2)' }}>
+              {original.body}
+            </div>
+          )}
         </div>
       )}
 
@@ -551,14 +560,16 @@ function AssetBlock({ row, reqs, swapsForList, wide, artifactId, listOwners, thr
           list of tweaks. The old name also collided with `Request changes` on the artifact card,
           which sounded like the same act and was not. */}
       <div style={{ marginTop: 8, display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
-        {row.before_text && (
-          <span className="px-link" role="button" tabIndex={0} aria-expanded={showBefore}
-            data-qc={BLOCK_HOOKS.compareToggle} data-qc-open={showBefore ? '1' : '0'}
-            style={{ fontSize: 11.5 }} onClick={() => setShowBefore((v) => !v)}
-            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setShowBefore((v) => !v) } }}>
-            {showBefore ? 'Hide original' : 'Show original'}
-          </span>
-        )}
+        {/* SPEC 4.5 puts this on EVERY field. It used to be gated on `row.before_text`, so a field
+            with no earlier version showed nothing at all and the reader could not tell "unchanged"
+            from "broken" from "first draft". It is unconditional now; `originalState` decides what
+            the panel says, including the honest "there is none yet". */}
+        <span className="px-link" role="button" tabIndex={0} aria-expanded={showBefore}
+          data-qc={BLOCK_HOOKS.compareToggle} data-qc-open={showBefore ? '1' : '0'}
+          style={{ fontSize: 11.5 }} onClick={() => setShowBefore((v) => !v)}
+          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setShowBefore((v) => !v) } }}>
+          {showBefore ? 'Hide original' : 'Show original'}
+        </span>
         {/* ASK FOR A CHANGE, scoped to THIS field. Not a second edit path - it posts to the same
             `ai-edit` route with `section`, which is what QcRail's correction row already uses. The
             reason it belongs here too is the whole argument of this screen: the request is made

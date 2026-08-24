@@ -42,6 +42,7 @@ test('both screens expose a Rebuild control in the branch where a doc already ex
 // Regenerate read zero unresolved notes, and it re-rolled with byte-identical inputs. A control
 // that did nothing at all.
 import { regenerateWithNote } from '../src/packetBuilder.js'
+import { originalState } from '../src/assetBlocks.js'
 
 const calls = () => {
   const seen = []
@@ -172,8 +173,17 @@ test('H:one-edit-path: the asset-level tweaks reuse aiEditArtifact with no secti
 test('H:static-field-makes-no-false-before-claim', () => {
   // "Original - before this posting" on a field nothing changed is a false statement: a static
   // block's before and after are the same bytes, so there is no "before".
-  const src = BLOCKS()
-  assert.match(src, /row\.before_text === row\.after_text\s*\n?\s*\? 'Identical - template text is not merged per packet'/,
+  //
+  // REWRITTEN 2026-08-24. This case used to grep AssetBlocks.jsx for the literal ternary
+  //   `row.before_text === row.after_text ? 'Identical - ...' : 'Original - ...'`
+  // and it FAILED the moment that logic moved into ../src/assetBlocks.js — even though the
+  // behaviour was unchanged and had just gained four unit tests. It was asserting the INCIDENT
+  // (that string, in that file) rather than the INVARIANT, against CLAUDE.md's own H-case rules 1
+  // and 4. The behaviour is exercisable now that it is out of the .jsx, so it is exercised.
+  // Kept under the same slug because it guards the same claim.
+  assert.equal(originalState({ before_text: 'same bytes', after_text: 'same bytes' }).label,
+    'Identical - template text is not merged per packet',
     'an unchanged field must not be headed as though it changed')
-  assert.match(src, /: 'Original - before this posting'/, 'a field that DID change still says so')
+  assert.equal(originalState({ before_text: 'was', after_text: 'now' }).label,
+    'Original - before this posting', 'a field that DID change still says so')
 })

@@ -377,6 +377,44 @@ export const UNKNOWN_TERMS_NOTE =
 export const UNKNOWN_REQS_NOTE =
   'This posting has no requirement rows yet, so how much of it this asset answers is unknown - not zero.'
 
+// SPEC 4.5 puts "Show original" on EVERY field. The app gated the control on `row.before_text`,
+// so a field with no earlier version rendered no control at all — the reader could not tell the
+// difference between "nothing changed", "the comparison is broken", and "this is the first draft".
+// The owner named that directly: *"i dont understand why you would consider it a dead link leaidng
+// me to believe if it doesnt have original text now it never will, that is black box and not
+// clear."*
+//
+// So the control is always present and this function decides WHAT IT SAYS. Three states, and the
+// third is the honest-unknown the register keeps demanding: absent evidence is disclosed, never
+// dressed up as a comparison that happened.
+//
+// WHAT `before_text` ACTUALLY IS, because the name invites the wrong reading: it is the PREVIOUS
+// PASS's output, not a template baseline. `appInsertions.ts:26` — "before_text comes from loop-1,
+// so pass n's before is pass n-1's after - never its own." On loop 0 there is no previous pass, so
+// it is legitimately null. It is also load-bearing: `remediation.ts:279` and `schema.ts:808` decide
+// whether a pass GENUINELY rewrote a field with `after_text <> before_text`, and that credits a
+// requirement closure. Nothing here may repoint it — this function only chooses wording.
+export const ORIGINAL_NONE_NOTE =
+  'This is the first draft for this posting, so there is no earlier version to compare against yet. ' +
+  'A later pass that rewrites this field will have one.'
+
+export function originalState(row) {
+  const before = row && row.before_text != null && row.before_text !== '' ? String(row.before_text) : null
+  const after = row && row.after_text != null ? String(row.after_text) : null
+  if (before === null) {
+    return { kind: 'none', label: 'No earlier version yet', body: ORIGINAL_NONE_NOTE, text: null }
+  }
+  if (before === after) {
+    return {
+      kind: 'identical',
+      label: 'Identical - template text is not merged per packet',
+      body: null,
+      text: before,
+    }
+  }
+  return { kind: 'changed', label: 'Original - before this posting', body: null, text: before }
+}
+
 // The three kinds `groupRequirements` classifies, in the reading order the posting analysis uses.
 // Labels answer the reader's question ("what does this asset answer?"), per SPEC §7 copy rules.
 export const REQ_KIND_STATS = [
