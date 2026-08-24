@@ -3092,3 +3092,54 @@ promotion time; it will not add exec vocabulary. Say that before spending the in
 is **blocked by this sandbox's egress proxy**, so those figures come from search summaries, not the
 licence text. Read the licence text before ingest — exactly the discipline that turned ESCO's
 "verify before ingest" note into a verified CC BY 4.0 today.
+
+## 2026-08-24 — ATS research: what it changes, and a gap it exposed
+
+`docs/qc-evidence/ATS-RESEARCH.md`. Calibration up front: most writing on ATS is content marketing
+by scanner vendors. One source has real method (1.7M applications, 225k resumes, recruiter
+interviews at Amazon/Microsoft/Big Four/F500); the rest agree on MECHANISM and are unreliable on
+STATISTICS.
+
+**The "75% auto-rejected by ATS" figure is unsupported** — traces to a defunct 2013 startup, zero
+peer-reviewed backing. It matters because it drives keyword stuffing: if a robot rejects you, you
+fight the robot. **92% of ATS rank and sort, but RECRUITERS decide where to stop reading.** The
+resume competes for POSITION IN A LIST A HUMAN SCROLLS; it is not fighting a gatekeeper.
+
+**Five stages, and wording only moves two of them:** parse (formatting can destroy it) → knockout
+(hard filters answered on the FORM, no resume wording fixes them) → search/filter (terms matter
+most) → rank → human read. Boolean search is mostly a SOURCING tool, not an incoming screen.
+
+**Three keyword zones, descending value:** summary (high-level, human-recognised) → skills/tools
+(what the vendor taxonomy normalises and filters hit) → experience bullets (**often most
+persuasive** — skills assert, bullets EVIDENCE). **Repetition does not help; placement does.** A
+term in the right place beats the same term repeated — which kills keyword stuffing on effectiveness
+grounds, not just honesty grounds.
+
+**THE RESEARCH CONFIRMS THE OWNER'S READING OF THE LIBRARY**, and the SPEC already encodes it:
+exact → scored; accepted variants (`≈` reworded) → scored; loose → shown NOT scored; model → shown
+NEVER scored (`scoreable`). **The library is not a whitelist on what the AI may WRITE — it is the
+denominator for what COUNTS.** "Generate in a similar style/length to the others" IS the `variant`
+tier, which already scores. Not a design change; a tier the design has and the product never
+populated. The honesty constraint ("mirror the employer's wording only where accurate for you")
+appears in the source material independently — same rule as SPEC R2.
+
+**GAP FOUND — nothing checks whether the rendered document can be PARSED.** Every existing check is
+about TEXT CONTENT (`word_counts`, `skill_char_limit`, `relevant_char_limit`,
+`expertise_phrase_length`, `empty_merge_fields`, `whitespace`, `markup_residue`, `ai_tells`,
+`cross_list_redundancy`, `company_named`, `company_in_body`). A packet can pass every one, score
+well, clear the gate, and still be a two-column template whose skills interleave with job titles the
+moment a parser reads it. Documented breakers: tables/multi-column (serialised L-to-R, so
+row1col1→row1col2 interleaves), headers/footers (**ignored as page furniture** — contact details can
+vanish), text boxes (layer skipped), graphics/skill bars (unreadable), inconsistent dates.
+**BUT THE FIX IS NOT A PER-PACKET CHECK.** Artifacts render from a Google Docs template the owner
+controls, so parse-safety is a property of the TEMPLATE — a ONE-TIME AUDIT, not a check on every
+build. A per-packet check would add ceremony to every packet for a defect that can only change when
+the template changes.
+
+**Vendor dictionaries are a dead end, and now we know why.** Workday's skills field is a structured
+proprietary taxonomy (predefined standardised list, not free text); no free developer download for
+Workday or Greenhouse. **Vendors increasingly build those taxonomies ON Lightcast/EMSI or O*NET** —
+so a vendor dictionary is a re-wrapped copy of free sources bought with a licensing problem.
+**But the field-taxonomy decision now has a concrete job:** research says SECTION PLACEMENT changes
+what a term is worth, so a field taxonomy lets the library record WHICH FIELD a term belongs in
+(summary vs skills vs bullet). A skills taxonomy cannot supply that.
