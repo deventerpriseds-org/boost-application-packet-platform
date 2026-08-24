@@ -3180,3 +3180,37 @@ should become miner FILTERS, not prose in a doc.
 
 `artificial intelligence` at 151 independently confirms the AI/ML alias point: it must fold into
 `ai_ml` at promotion, which is what `status: merged` + `merged_into` already exist to record.
+
+### Filter design measured before writing it (2026-08-24) — and it corrected my own earlier claim
+
+**CORRECTION to "a re-mine fixes it with zero code change."** That is true for exactly FOUR rows and
+no more. Ran `termMiner.ts`'s real `isBoilerplate` (64 entries, substring match) against the 31
+phrases measured in the pending queue's top 45:
+- **4 are STALE** — `regard to race` (matches `regard to`), `orientation gender`, `dental and vision`,
+  `sex sexual`. Current code WOULD reject them, so they predate the blocklist and the existing purge
+  clears them. Claim confirmed.
+- **27 are NOT covered by any current filter**, and critically that includes MORE EEO boilerplate the
+  blocklist never had: `consideration for employment`, `receive consideration for employment`,
+  `applicants will receive`, `federal state`. **So the EEO class needs NEW entries too — a re-mine
+  alone does not clear it.** My earlier framing was too strong; this is the corrected version.
+
+**Proposed filter classes, measured against the live queue before writing any code — 81 rows:**
+| class | would remove | top hits |
+|---|---:|---|
+| degree/education | 26 | bachelor 442, bachelor degree, related field, computer science, master degree, advanced degree, degree in computer science, information systems |
+| job_title | 22 | president 257, vice president, ceo, cto |
+| eeo_extra | 16 | federal state 133, consideration for employment, receive consideration for employment, applicants will receive |
+| geo/employment | 9 | remote 268, full time, united states |
+| generic filler | 8 | long term 457, high performing, end to end, high quality, large scale, world class, day to day, fast paced |
+
+**FALSE-POSITIVE CHECK RUN BEFORE BUILDING — the discipline caught ME, not the filter.** Tested 20
+known-good exec terms against the proposed patterns. **19 survive** (`cross functional` 425,
+`decision making` 307, `executive leadership` 303, `continuous improvement` 233, `risk management`
+204, `senior leadership` 199, `product management` 195, `product strategy` 164, `executive level`
+160, `emerging technologies` 160, `information technology` 159, `data driven` 159, `artificial
+intelligence` 151, `technology strategy` 149, `product development` 143, `operational excellence`
+142, `change management` 121, `digital transformation` 120, `machine learning` 107).
+**One is removed: `chief technology officer` (df 80), by `^chief `.** That is NOT a filter defect —
+the recorded exclusion rule says job titles belong to the `persona`/roles taxonomy, not the term
+library. **My keep-list was wrong; the filter was right.** Worth keeping as the example of why the
+cry-wolf check is run against real data before a guard ships, not after.
