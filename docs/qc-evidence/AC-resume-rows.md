@@ -189,3 +189,240 @@ approval, and the card today disables `Approve` (`PacketBuilder.jsx:234-236`) wi
 route. **Is ROW 2's destination that button, the QC rail's `Review →`, or both?** The ACs above are
 written against "a finding's go-to-field control" and are agnostic — but shipping the ring without
 deciding which control fires it produces a focus mechanism nothing can reach, i.e. dead UI.
+
+---
+
+## ROW 6 (§15) — asset-level "Ask for a change" — **ALREADY BUILT. DROP.**
+
+### The inventory is wrong here, and the brief inherited it
+
+`COMPONENT-INVENTORY.md:508-511` and `:673` both say `ABSENT`. On `origin/main` it exists:
+
+| Fact | Evidence on `origin/main` |
+|---|---|
+| The control | `PacketBuilder.jsx:224-227` — `<button className="px-btn" data-qc={PACKET_HOOKS.assetAsk} onClick={() => setAssetAskOpen(true)}>List Tweaks</button>` |
+| The box | `:275-300`, hook `PACKET_HOOKS.assetAskBox`, textarea + Cancel + Send |
+| The call | `:293` — `await api.aiEditArtifact(a.id, { instruction: assetAsk.trim() })` — **no `section`**, the same route the field-level control uses with one |
+| Disabled-on-empty | `:289` — `disabled={assetAskBusy \|\| !assetAsk.trim()}` |
+| Busy | `:297` — `Sending...` |
+| Error | `:284` — `assetAskError` in a `px-note` |
+| Hooks registered | `app/src/packetBuilder.js:17-19` — `assetAsk`, `assetAskBox`, `assetAskSend` |
+| Scope warning | `:277-280` — *"This rewrites the whole `<asset>`. For one field, use the field's own List Tweaks below"* |
+| Why it exists | `:216-223` — *"this exists for the artifacts that have no merge fields … Same route, no `section` … Not a second edit path"* |
+
+It is even gated correctly: it renders only for `status === 'review' \|\| 'changes'` (`:214`), so
+there is no ask on a `todo` artifact with nothing to edit.
+
+**Do not build this.** The only work left is a guard so it cannot regress.
+
+**AC-6.1 (regression — one edit path).** Given the codebase, when the test suite runs, then there is
+exactly **one** function in `app/src/api.js` that posts to `ai-edit` (`aiEditArtifact`), and every
+caller passes `section` or omits it — no second route, no second helper.
+*Verify:* source assertion in `app/test/packetBuilder.test.mjs`: `grep` the `app/src` tree for
+`ai-edit`, assert one definition site.
+**Mutation proof:** add a second `aiEditArtifactWhole` helper; the suite must FAIL.
+
+**AC-6.2 (regression — the control stays wired).** Given an artifact in `review`, when the asset card
+renders, then `[data-qc="packet-asset-ask"]` is present; when it is activated and text is typed,
+`[data-qc="packet-asset-ask-send"]` becomes enabled; and on Send exactly one request goes to
+`/app/artifact/{id}/ai-edit` **with no `section` key in the body**.
+*Verify:* `app/test/browser/run-asset-blocks.mjs` mounts the real `ArtifactCard` (exported at
+`PacketBuilder.jsx:83` for exactly this reason). Assert with playwright's router by capturing the
+request body: `JSON.parse(req.postData()).section === undefined`.
+
+**AC-6.3 (regression — empty send stays impossible).** Given the asset ask box is open with only
+whitespace typed, when the reader looks at Send, then it is `disabled`.
+*Verify:* DOM assertion on `[data-qc="packet-asset-ask-send"][disabled]`.
+
+**AC-6.4 (correct the record).** Given `COMPONENT-INVENTORY.md` states this row is `ABSENT`, when
+this finding lands, then rows 6 and 7 of its build-order table are marked closed with the
+`origin/main` line references above, so the next reader does not rebuild a shipped control.
+*Verify:* the file diff. Tier 3 — prose, no ceremony.
+
+---
+
+## ROW 7 (§16) — `sameAsBefore` — **ALREADY BUILT. DROP.**
+
+### The inventory is wrong here too, and the brief's strongest claim is stale
+
+The brief says *"THIS IS CURRENTLY A FALSE CLAIM shown to the user."* **It is not, on `main`.**
+`git show origin/main:app/src/screens/AssetBlocks.jsx` lines 526-539:
+
+```jsx
+{showBefore && row.before_text && (
+  <div className="px-note" data-qc={BLOCK_HOOKS.before} ...>
+    <div className="px-label" ...>
+      {row.before_text === row.after_text
+        ? 'Identical - template text is not merged per packet'
+        : 'Original - before this posting'}
+    </div>
+```
+
+The wording matches SPEC 4.5's *"identical, template text is not merged per packet"*, it is derived
+from `before_text === after_text` exactly as the brief prescribes, and the comment at `:528-531`
+records the reasoning (*"'before this posting' is a FALSE CLAIM on a field nothing changed"*).
+
+**Do not build this.** Guard it instead. Note there **is** a real residual defect below, which the
+inventory did not catch.
+
+**AC-7.1 (regression — the identical case).** Given an insertion row where `before_text ===
+after_text`, when `Show original` is activated, then the panel heading reads exactly
+`Identical - template text is not merged per packet` and **never** contains the substring
+`before this posting`.
+*Verify:* `app/test/browser/run-asset-blocks.mjs` — add a fixture row with identical before/after,
+click `[data-qc="blocks-compare-toggle"]`, read `[data-qc="blocks-before"] .px-label`.
+**Mutation proof:** replace the ternary with the unconditional `'Original - before this posting'`;
+the probe must FAIL.
+
+**AC-7.2 (regression — the changed case).** Given a row where `before_text !== after_text`, when the
+panel opens, then the heading reads `Original - before this posting`.
+*Verify:* same probe, second fixture row.
+
+**AC-7.3 — NEW DEFECT, not in the inventory: a null `before_text` has no disclosure at all.**
+Given an insertion row where `before_text` is `null` (the common case for a freshly generated
+field — see the probe fixtures at `app/test/browser/run-asset-blocks.mjs:36-52`, every one of which
+has `before_text: null`), when the field card renders, then `Show original` is **not rendered**
+(`AssetBlocks.jsx:553` gates on `row.before_text`), so the reader gets no signal at all — neither
+"there was no original" nor "we did not record one". SPEC 4.5 says `Show original` is *"present on
+every field, including static template blocks"*.
+**AC:** Given `before_text` is null, when the field renders, then either the control is present and
+opening it states plainly which of the two cases holds, **or** a one-line note says the original was
+not recorded — but the field must not silently omit a control SPEC says is on every field.
+*Verify:* probe asserts a control or a note exists for a `before_text: null` row.
+**Decide with the owner before building:** null-because-nothing-preceded-it and
+null-because-we-did-not-store-it are two different claims, and this repo's own standing rule is that
+they must not print the same sentence. If the insertion payload cannot distinguish them, say so and
+stop — do not invent the distinction. **This is the honest small win in ROW 7, and it is the part
+nobody has done.**
+
+---
+
+## ROW 9 (§10) — per-kind stat split (must-have / responsibility / nice-to-have)
+
+### ⚠ THE INVENTORY'S DIAGNOSIS IS WRONG — this is NOT blocked on an endpoint
+
+The inventory (`:336-338`) and the brief both say: *"Blocked on `GET
+/app/opportunity/{id}/requirements` returning `total` only — it needs per-kind denominators. This is
+an endpoint extension."*
+
+**It already returns every requirement row, each carrying its `kind`.** Ground truth, read in three
+places:
+
+1. **The endpoint.** `api/src/functions/tests/appRequirements.ts:700-716` returns
+   `{ …, total: rows.length, requirements }` — `requirements` is the full array from
+   `shapeRequirementsForApi`, spread from the DB rows (`:633` `...r`), and `kind` is selected
+   (`:174`, `:408-413`) and constrained to `must_have` / `nice_to_have` / `responsibility`
+   (`ESCALATION_RANK`, `:309`).
+2. **The client already receives it.** `AssetBlocks.jsx:807` reads
+   `provenance.requirements.requirements` and iterates the rows; `:873` passes the same
+   `provenance.requirements` payload straight into `DistributionMeter`, which hands it to
+   `meterModel` (`:262`).
+3. **The client already splits by kind.** `app/src/postingAnalysis.js:261-273` —
+   `groupRequirements(rows)` returns `{ mustHaves, niceToHaves, responsibilities, … }`, and
+   `KIND_ABBR` / `KIND_WORD` / `KIND_LEGEND` (`:177-188`) are the one vocabulary for the three kinds.
+
+So `meterModel` (`assetBlocks.js:380`) reads `requirements.total` **only because that is what it was
+written to read** — the array beside it is untouched. This is a ~10-line derivation change inside
+one existing function, reusing an existing splitter. **No endpoint change. No new system.**
+
+**Consequence for sequencing:** ROW 9 is not "blocked". It is buildable today and should be
+**resequenced above ROW 10, 11 and 12.** It is the only remaining row of the five with no external
+dependency at all.
+
+**Consequence for tier:** it stays **TIER 1** regardless. It renders coverage counts.
+
+### The trap this row must not fall into
+
+`meterModel`'s own header (`:360-368`) and the inventory (`:332-334`) both warn that the prototype's
+four cells are computed against fabricated demo data. The numerator matters as much as the
+denominator: `placedReqIds` (`:379`) is the set of `requirement_id`s the **insertion rows cite**, and
+splitting the denominator by kind while leaving the numerator un-split would produce
+`must-haves: 7 of 3`. Both halves must be filtered by the same kind, from the same row set.
+
+### Acceptance criteria
+
+**AC-9.1 (happy path — three stats, correctly split).** Given a requirements payload with 5
+`must_have`, 4 `responsibility`, 3 `nice_to_have` rows, and an asset whose insertion rows cite
+requirement ids belonging to 3 must-haves and 1 responsibility, when the meter is expanded, then it
+renders three stats reading `3 of 5` must-haves, `1 of 4` responsibilities, `0 of 3` nice-to-haves,
+each using `KIND_WORD` for its label — never a hand-typed string.
+*Verify:* unit test in `app/test/assetBlocks.test.mjs` against `meterModel` directly (it is a pure
+function, exported, and `node --test` can import it); **plus** a DOM assertion in
+`run-asset-blocks.mjs` on `[data-qc="blocks-stat"]` text.
+
+**AC-9.2 (numerator and denominator share one filter).** Given a requirement kind, when its stat is
+computed, then `n` counts only cited requirements **of that kind** and `d` counts only rows of that
+kind, and `n <= d` holds for every stat the meter emits.
+*Verify:* unit test asserts `n <= d` for all stats across a randomised fixture of 200 kind
+assignments. **This is the invariant, not the incident** — it catches the split-denominator bug in
+any future refactor.
+**Mutation proof:** leave the numerator as the un-split `placedReqIds.size`; the suite must FAIL.
+
+**AC-9.3 (extend, do not duplicate).** Given `groupRequirements()` already splits rows by kind
+(`postingAnalysis.js:261`), when this stat is built, then `assetBlocks.js` **imports and calls it**
+rather than writing three new `.filter(r => r.kind === …)` lines.
+*Verify:* source assertion — `app/src/assetBlocks.js` contains no literal `'must_have'` /
+`'nice_to_have'` / `'responsibility'` string; the kinds come from the shared module.
+**Mutation proof:** inline a `r.kind === 'must_have'` filter; the guard must FAIL.
+
+**AC-9.4 (unknown is never zero — the rule this repo already enforces).** Given the requirements
+payload is `null`, absent, or carries an empty `requirements` array, when the meter renders, then
+**no** per-kind stat is drawn and `UNKNOWN_REQS_NOTE` is shown instead — never `0 of 0`, never an
+empty bar, never a `0%` bar.
+*Verify:* unit test asserts `meterModel({ requirements: null }).stats` contains no `must_have` key
+and `.notes` includes `UNKNOWN_REQS_NOTE`; DOM assertion that no `[data-qc="blocks-stat"]` contains
+`of 0`.
+
+**AC-9.5 (a kind with zero rows is omitted, not printed as 0 of 0).** Given a posting with 5
+must-haves and **no** nice-to-have rows at all, when the meter renders, then the nice-to-have stat is
+**omitted entirely** and the must-have stat still renders. A posting genuinely having no
+nice-to-haves is not a measurement failure, so `UNKNOWN_REQS_NOTE` must **not** fire for it.
+*Verify:* unit test — `stats.map(s => s.key)` has no `nice_to_have`; `notes` does not gain a second
+unknown-note. **This is the distinction the row is most likely to get wrong**: `total === 0`
+(nothing parsed → unknown) and `kind count === 0` within a non-empty payload (measured absence) are
+different facts.
+
+**AC-9.6 (an unrecognised kind is surfaced, never silently dropped).** Given a requirement row whose
+`kind` is `null` or a value outside the three, when the meter renders, then those rows are **not**
+silently excluded from every denominator — either a fourth "unclassified" stat appears, or a note
+names the count. The sum of all rendered denominators plus any unclassified count must equal
+`requirements.total`.
+*Verify:* unit test asserts `sum(d) + unclassified === total` for a fixture containing one
+`kind: null` row. **Mutation proof:** drop the unclassified branch; the suite must FAIL.
+*(Rationale: `requirement_kind_source_check` constrains `kind_source`, not `kind`; and `rank()` at
+`appRequirements.ts:310` already defends against an out-of-set kind with `?? 3`, which is proof the
+codebase treats this as reachable.)*
+
+**AC-9.7 (`total` and the split must reconcile — the cross-surface rule).** Given the same
+requirements payload, when both the JD step's `PostingAnalysisCard` and the asset step's meter render
+counts of the same rows, then their per-kind totals are equal.
+*Verify:* unit test that feeds one fixture through `groupRequirements()` and through the new stat
+derivation and asserts the denominators match. (`CLAUDE.md` → "Counts on Today vs Swipe vs Pipeline
+vs Opportunities must reconcile because they read the same funnel.")
+
+**AC-9.8 (the existing `Posting lines placed` stat).** Given the three per-kind stats now render,
+when the meter is read, then the rollup `Posting lines placed` is either **removed** or explicitly
+labelled as the rollup of the three — it must not sit beside them as a fourth, apparently
+independent number that a reader would add to the others.
+*Verify:* DOM assertion; and a stated decision in the commit message. **Ask the owner which** — this
+is a product call, not an engineering one, and shipping both without deciding recreates exactly the
+"stale / mismatched numbers" failure `CLAUDE.md` describes.
+
+**AC-9.9 (colour, per SPEC).** Given a stat where `n === d`, when it renders, then its number is
+`var(--proto-green)`; otherwise the current non-complete colour. No new colour token is introduced.
+*Verify:* `getComputedStyle` in the probe. (§10 of the inventory says the prototype uses
+`--proto-yellow` for incomplete while the app uses `--text-brand`; **keep the app's** — the inventory
+records `--proto-yellow` fails contrast in at least one theme at `QcRail.jsx:512-527`. Do not
+"fix" this toward the prototype without re-running `npm run test:contrast`.)
+
+**AC-9.10 (tier-1 live verification).** Given the change is merged to `main`, when it is verified,
+then a real count is read from the live system, not from a fixture: `db-query.yml` returns
+`select kind, count(*) from requirement where opp_id = '<real opp>' group by kind`, and
+`ui-verify.yml` renders the resume step for `von.ellis@enterpriseds.io` with `expect` naming those
+exact numbers.
+*Verify:* the two run ids and the `UI_VERIFY_RESULT` line, quoted in the verification note.
+**A fixture-only pass does not close a tier-1 row.**
+
+**AC-9.11 (no fabrication).** Given any component of a per-kind stat has no source, when the stat is
+computed, then it is `null` and not rendered — never a partial composite.
+*Verify:* covered by AC-9.4/9.5; asserted explicitly so the reviewer sees the rule was applied.
