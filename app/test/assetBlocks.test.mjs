@@ -827,3 +827,31 @@ test('H:corrected-count-comes-from-the-server: not a re-count of the rows in the
     're-derived correctedCount in the component - it must come only from the hook destructure, '
     + 'or an undone correction is counted again (verifier mutation M10)')
 })
+
+test('H:gap-harness-ignores-leading-glyphs: a decorative prefix is not a different control', () => {
+  // The register counted four "missing controls" on the resume step. TWO of them had existed all
+  // along: `✓ Open Google Doc ↗` (PacketBuilder.jsx:154) and `⎘ Copy tracked link` (:168, wired to
+  // real `api.trackedLink`). The harness matched control text exactly, so the glyph made each read
+  // as a different string from the prototype's, and the gap number overstated the work.
+  //
+  // The fix belongs in the MEASUREMENT: stripping a useful affordance out of the product to satisfy
+  // an exact-text matcher would be gaming the number rather than measuring it.
+  const src = readFileSync(new URL('../../scripts/compare-ui.mjs', import.meta.url), 'utf8')
+  const m = /const GLYPH = (\/[^\n]*\/)\n/.exec(src)
+  assert.ok(m, 'compare-ui.mjs no longer normalises leading glyphs')
+  // eslint-disable-next-line no-eval
+  const GLYPH = eval(m[1])
+  const norm = (t) => t.replace(/\s+/g, ' ').trim().replace(GLYPH, '').trim()
+
+  assert.equal(norm('✓ Open Google Doc ↗'), 'Open Google Doc ↗')
+  assert.equal(norm('⎘ Copy tracked link'), 'Copy tracked link')
+
+  // A TRAILING arrow survives — the prototype uses it too, and stripping it would collapse two
+  // labels that genuinely differ.
+  assert.ok(norm('Open Google Doc ↗').endsWith('↗'))
+  // Words are never touched, so controls that differ by TEXT stay distinct.
+  assert.equal(norm('Show original'), 'Show original')
+  assert.notEqual(norm('Show original'), norm('Hide original'))
+  // And the strip cannot eat a label whole.
+  assert.equal(norm('▸ View draft'), 'View draft')
+})

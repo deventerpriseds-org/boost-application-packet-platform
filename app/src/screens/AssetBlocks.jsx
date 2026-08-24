@@ -37,7 +37,7 @@ import {
   meterModel, reqsForRow, scopeSwaps, shapeOf, sharedSourceNote, statPct, wordCount,
 } from '../assetBlocks.js'
 import { HIGHLIGHT_CLASS } from '../highlight.js'
-import { checkLabel, fieldLabel } from '../assetGate.js'
+import { SEV_LABEL, checkLabel, fieldLabel, severityCounts } from '../assetGate.js'
 import { arr, offendersByField, offendersForField, railChangeLog } from '../qcRail.js'
 import { CorrectionRow } from './QcRail.jsx'
 
@@ -108,7 +108,11 @@ export function useArtifactCorrections(artifactId) {
     api.artifactChecksResult(artifactId)
       .then((result) => {
         if (!live) return
-        setState({ log: railChangeLog(result), wording: offendersByField(result, 'posting_wording_kept') })
+        setState({
+          log: railChangeLog(result),
+          wording: offendersByField(result, 'posting_wording_kept'),
+          severity: severityCounts(result),
+        })
       })
       .catch(() => { if (live) setState(null) })
     return () => { live = false }
@@ -119,6 +123,7 @@ export function useArtifactCorrections(artifactId) {
     // is null for every payload that was never measured. meterModel refuses to print the null.
     correctedCount: state ? state.log.count : null,
     wording: state ? state.wording : null,
+    severity: state ? state.severity : null,
     refresh: () => setReload((n) => n + 1),
   }
 }
@@ -248,7 +253,7 @@ function Stat({ label, n, d, sub }) {
  *   with the prototype's prettier one would be inventing a number, which is the one thing this
  *   screen exists to prevent.
  */
-function DistributionMeter({ rows, filled, unfilled, requirements, scopedSwaps, terms, label, corrected }) {
+function DistributionMeter({ rows, filled, unfilled, requirements, scopedSwaps, terms, label, corrected, severity }) {
   const { stats, notes, corrected: correctedCount } = meterModel({ rows, filled, unfilled, requirements, scopedSwaps, terms, corrected })
   const [open, setOpen] = useState(ASSET_ANSWERS_DEFAULT_OPEN)
   if (!stats.length && !notes.length && correctedCount == null) return null
@@ -275,6 +280,27 @@ function DistributionMeter({ rows, filled, unfilled, requirements, scopedSwaps, 
           <span className="px-small" data-qc={BLOCK_HOOKS.meterCorrected}
             style={{ textTransform: 'none', fontWeight: 700, color: 'var(--proto-green)' }}>
             {correctedCount} corrected
+          </span>
+        )}
+        {/* The rest of the prototype's collapsed-row summary (qc/assets.jsx:218-221). Same three
+            buckets the rail uses, through the SAME `severityFor` split, so the header and the rail
+            can never disagree about how many findings block this asset. A zero bucket is omitted
+            rather than printed - "0 to fix" is not news, and the prototype omits it too. */}
+        {severity && severity.fix > 0 && (
+          <span className="px-small" data-qc={BLOCK_HOOKS.meterToFix}
+            style={{ textTransform: 'none', fontWeight: 700, color: 'var(--proto-red)' }}>
+            {severity.fix} to fix
+          </span>
+        )}
+        {severity && severity.review > 0 && (
+          <span className="px-small" data-qc={BLOCK_HOOKS.meterToReview}
+            style={{ textTransform: 'none', fontWeight: 700, color: 'var(--proto-yellow)' }}>
+            {severity.review} to review
+          </span>
+        )}
+        {severity && severity.soft > 0 && (
+          <span className="px-small" data-qc={BLOCK_HOOKS.meterYourCall} style={{ textTransform: 'none' }}>
+            {severity.soft} your call
           </span>
         )}
         <span style={{ flex: 1 }} />
@@ -673,7 +699,7 @@ export default function AssetBlocks({ artifact, provenance, fallback, defaultOpe
 
   // The change log, scoped per field into the margins below. One `busy` for the whole panel, not one
   // per row: two undos in flight against the same artifact would race the re-read that follows them.
-  const { rows: correctionRows, correctedCount, wording, refresh: refreshCorrections } = useArtifactCorrections(artifact.id)
+  const { rows: correctionRows, correctedCount, wording, severity, refresh: refreshCorrections } = useArtifactCorrections(artifact.id)
   // The OWNER'S check thresholds, so every field can state the contract the gate actually holds it
   // to. `searchPrefsGet().checks` is the same row Settings writes - one source, so changing 24 to 30
   // there changes what this screen promises.
@@ -768,6 +794,7 @@ export default function AssetBlocks({ artifact, provenance, fallback, defaultOpe
             scopedSwaps={scopedSwaps}
             terms={null}
             corrected={correctedCount}
+            severity={severity}
             label={ANSWERS_LABEL[artifact.type] || 'asset'}
           />
           {rows.map((r) => (

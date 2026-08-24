@@ -63,6 +63,7 @@ export interface CheckThresholds {
   expertiseWords: number
   aboutMe1Words: [number, number]
   aboutMe2Words: [number, number]
+  resumeSummaryWords: [number, number]
   execProfileWords: [number, number]
   coreAccomplishmentsWords: [number, number]
   coverWords: [number, number]
@@ -139,6 +140,16 @@ export const DEFAULT_THRESHOLDS: CheckThresholds = {
   expertiseWords: 5,
   aboutMe1Words: [45, 48],
   aboutMe2Words: [75, 80],
+  // 55-60 IS THE OWNER'S OWN PROMPT, not a number invented here. Prompt 16 - the `resume_user`
+  // prompt that writes this field - says `### Resume Summary (55-60 words)` verbatim
+  // (`docs/zap-289877647/prompts/16-update-resume-portfolio-fields-prompt.md`, tightened there from
+  // an earlier `[Originally 65-68]`). The prototype states the same band beside the field
+  // (`56 words - 55-60 words`). So the contract already existed in the prompt and in the design; it
+  // was simply never enforced or shown, and the generator has not been obeying it - the seven
+  // ResumeSummary values in production measure 48, 49, 49, 61, 61, 70, 70 words, none inside the band.
+  // Seeded, not hardcoded: `chk_resume_summary_words_min/max` are owner-settable like every other
+  // threshold ("all such rule numbers need to be available for tweaking in the settings/config").
+  resumeSummaryWords: [55, 60],
   execProfileWords: [50, 55],
   coreAccomplishmentsWords: [98, 125],
   coverWords: [250, 400],
@@ -476,6 +487,7 @@ export function runChecks(input: CheckInput): CheckResult[] {
 
   // --- word counts, only for fields this artifact actually has -----------------------------
   const WORD_RULES: Array<[string, [number, number]]> = [
+    ['ResumeSummary', t.resumeSummaryWords],
     ['@AboutMe1_50words', t.aboutMe1Words],
     ['@AboutMe2_60words', t.aboutMe2Words],
     ['@ExecutiveProfile_55words', t.execProfileWords],

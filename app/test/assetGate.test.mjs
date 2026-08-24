@@ -8,7 +8,7 @@ import { readFileSync } from 'node:fs'
 import {
   footerFor, reconcile, reviewerAttention, attentionSplit, engineRows, scoreParts,
   gateMeta, stateMeta, checkLabel, fieldLabel, assetLabel, STATE_META,
-  SEV_LABEL, severityFor, severityMeta, CHANGE_LOG_HEADLINE, METHOD_LABEL, correctionSentence,
+  SEV_LABEL, severityFor, severityMeta, CHANGE_LOG_HEADLINE, METHOD_LABEL, correctionSentence, severityCounts
 } from '../src/assetGate.js'
 
 // The two payloads a verifier reproduced the AC3 defects with. They are shared by the tests below
@@ -501,4 +501,34 @@ test('H:no-state-word-stutter: the correction row states its state ONCE', () => 
   // because THIS guard is what would otherwise tempt someone to delete the prefix too.
   assert.match(correctionSentence({ phrase: 'a', replacement: 'b', fieldName: 'F', undone: false }), /^Corrected: /)
   assert.match(correctionSentence({ phrase: 'a', replacement: 'b', fieldName: 'F', undone: true }), /^Undone: /)
+})
+
+test('H:severity-counts-share-the-rail-split: the header cannot disagree with the findings below it', () => {
+  // The prototype keeps `N to fix` / `N to review` / `N your call` on the collapsed
+  // "What this X answers" row (qc/assets.jsx:218-221). Those buckets MUST come from `severityFor`,
+  // the same split D6 rests on — a reviewer `fail` is an opinion that may never block, and a header
+  // that re-derived state+engine would be free to call it a blocker while the rail calls it a
+  // judgement, on the same screen.
+  const result = { gate: 'fail', attention: 4, results: [
+    { check_key: 'a', engine: 'deterministic', state: 'fail' },      // to fix
+    { check_key: 'b', engine: 'deterministic', state: 'fail' },      // to fix
+    { check_key: 'c', engine: 'deterministic', state: 'warn' },      // to review
+    { check_key: 'd', engine: 'reviewer', state: 'fail' },           // your call — NEVER a blocker
+    { check_key: 'e', engine: 'deterministic', state: 'pass' },      // counted nowhere
+    { check_key: 'f', engine: 'deterministic', state: 'not_applicable' }, // counted nowhere
+  ] }
+  assert.deepEqual(severityCounts(result), { fix: 2, review: 1, soft: 1 })
+
+  // A reviewer fail must NEVER land in `fix`. This is the assertion that would catch the header
+  // being rebuilt from `state === 'fail'` alone.
+  const reviewerOnly = { gate: 'warn', attention: 1, results: [{ check_key: 'r', engine: 'reviewer', state: 'fail' }] }
+  assert.deepEqual(severityCounts(reviewerOnly), { fix: 0, review: 0, soft: 1 })
+
+  // Settled rows are not work. A header counting passes would report a clean asset as busy.
+  const clean = { gate: 'pass', attention: 0, results: [
+    { check_key: 'p', engine: 'deterministic', state: 'pass' },
+    { check_key: 'n', engine: 'deterministic', state: 'not_applicable' },
+  ] }
+  assert.deepEqual(severityCounts(clean), { fix: 0, review: 0, soft: 0 })
+  assert.deepEqual(severityCounts({}), { fix: 0, review: 0, soft: 0 })
 })

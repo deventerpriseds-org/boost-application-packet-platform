@@ -102,6 +102,27 @@ export function severityFor(row) {
   return row.engine === 'reviewer' ? 'soft' : 'fix'
 }
 
+/**
+ * How many findings sit in each severity bucket — the counts the prototype keeps on the collapsed
+ * "What this X answers" row (`qc/assets.jsx:218-221`: `N corrected`, `N to fix`, `N to review`,
+ * `N your call`).
+ *
+ * Built on `severityFor`, NOT on a second reading of state+engine. That split is the one D6 rests
+ * on — a reviewer `fail` may never block — and a header that re-derived it would be free to
+ * disagree with the rail below it about how many things block this asset.
+ *
+ * `pass` and `not_applicable` fall out entirely: severityFor returns null for both, and a header
+ * that counted them would be reporting settled rows as work.
+ */
+export function severityCounts(result) {
+  const out = { fix: 0, review: 0, soft: 0 }
+  for (const r of [...engineRows(result, 'deterministic'), ...engineRows(result, 'reviewer')]) {
+    const sev = severityFor(r)
+    if (sev && out[sev] !== undefined) out[sev] += 1
+  }
+  return out
+}
+
 /** The words and tone for ONE finding row. Falls back to STATE_META where there is no severity. */
 export function severityMeta(row) {
   const sev = severityFor(row)

@@ -50,6 +50,9 @@ export const BLOCK_HOOKS = {
   reqLegend: 'blocks-req-legend',             // what RQ-MH / RQ-NTH / RESP mean, once per asset
   wordingAsk: 'blocks-wording-ask',           // seeds the field's own ask box with a reword request
   meterCorrected: 'blocks-answers-corrected', // "N corrected" kept on the COLLAPSED row
+  meterToFix: 'blocks-answers-to-fix',        // "N to fix"   - deterministic fails
+  meterToReview: 'blocks-answers-to-review',  // "N to review" - warns
+  meterYourCall: 'blocks-answers-your-call',  // "N your call" - reviewer fails, which never block
   // NOT named `corrections`: corrections.test.mjs forbids /\.corrections\b/ in any .jsx so no
   // component can read `result.corrections` instead of the selector, and BLOCK_HOOKS.corrections
   // would trip it on a name collision alone. The guard is right; the key gets the different name.
@@ -498,6 +501,11 @@ export function correctionsForField(rows, mergeField) {
 // targetFor() and observedFor() key off it; two copies of this map is exactly how the target and
 // the measurement beside it would come to disagree about which fields have a band at all.
 const RANGE = {
+  // The band Prompt 16 already asks the model for — `### Resume Summary (55-60 words)` — now stated
+  // beside the field and enforced by `word_counts`. It was the ONE generated field with no target,
+  // which read as deliberate next to six fields that state one, and the generator has been missing
+  // it every time: 48/49/49/61/61/70/70 words in production, none inside the band.
+  ResumeSummary: 'resumeSummaryWords',
   '@CoverLetterBody': 'coverWords',
   '@AboutMe1_50words': 'aboutMe1Words',
   '@AboutMe2_60words': 'aboutMe2Words',

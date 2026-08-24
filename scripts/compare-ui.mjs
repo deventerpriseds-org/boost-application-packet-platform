@@ -84,7 +84,20 @@ const EXTRACT = () => {
     const r = el.getBoundingClientRect()
     return r.width > 0 && r.height > 0 && getComputedStyle(el).visibility !== 'hidden'
   }
-  const txt = (el) => (el.textContent || '').replace(/\s+/g, ' ').trim()
+  // A LEADING DECORATIVE GLYPH IS NOT A DIFFERENT CONTROL, and matching on one manufactured phantom
+  // rows in every capture. The register recorded four "missing controls" on the resume step; two of
+  // them — `Open Google Doc ↗` and `Copy tracked link` — have existed all along as
+  // `✓ Open Google Doc ↗` and `⎘ Copy tracked link` (PacketBuilder.jsx:154, :168, the latter wired
+  // to real `api.trackedLink`). The register's own notes flagged this at line 39 and the rows were
+  // counted anyway, so the gap number has been overstating the work for as long as it has existed.
+  //
+  // Stripped from the FRONT only, and only glyphs — a check, a copy mark, an arrow, a bullet. Text
+  // is never touched, so `Hide original` and `Show original` stay distinct, and a TRAILING `↗`
+  // survives because the prototype uses it too and dropping it would collapse two real labels.
+  // The fix belongs here rather than in the product: removing a useful affordance to satisfy an
+  // exact-text matcher would be gaming the measurement instead of measuring.
+  const GLYPH = /^[\s✓✔⎘⧉⌘▸▶•·→↵…➕+]+/
+  const txt = (el) => (el.textContent || '').replace(/\s+/g, ' ').trim().replace(GLYPH, '').trim()
   const all = [...document.querySelectorAll('*')].filter(vis)
 
   // A "panel" is a titled block: a short, bold-ish line that opens a region. Matching on weight and

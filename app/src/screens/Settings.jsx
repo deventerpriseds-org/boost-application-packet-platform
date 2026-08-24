@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react'
 import { api, getSessionToken } from '../api.js'
+import { chkValueFor } from '../settings.js'
 import { go, useApp } from '../state.jsx'
 import { Pill } from '../shell.jsx'
 
@@ -1596,6 +1597,11 @@ const CHK_LABELS = {
   chk_relevant_max_chars: ['Longest relevant-experience bullet', ''],
   chk_relevant_allowance: ['Relevant bullets allowed over the limit', ''],
   chk_expertise_words: ['Words per expertise item', ''],
+  // Seeded to 55-60 because that is what YOUR prompt already asks the model for — Prompt 16 reads
+  // "### Resume Summary (55-60 words)". Change it here and the check follows.
+  chk_resume_summary_words_min: ['Resume summary, fewest words',
+    'Prompt 16 asks the model for 55-60 words. This is the band the check holds it to.'],
+  chk_resume_summary_words_max: ['Resume summary, most words', ''],
   chk_cover_words_min: ['Cover letter, fewest words', ''],
   chk_cover_words_max: ['Cover letter, most words', ''],
 }
@@ -1614,9 +1620,9 @@ function ChecksSettings() {
       // The API returns camelCase values keyed by CheckThresholds; map them back onto their columns.
       const byCol = {}
       for (const { column } of c) {
-        const camel = column.replace(/^chk_/, '').replace(/_([a-z])/g, (_, ch) => ch.toUpperCase())
-        const k = camel === 'skillMaxChars' ? 'skillMaxChars' : camel
-        const v = p.checks ? p.checks[k] : undefined
+        // Through the shared, tested mapper — see settings.js for why a direct camel lookup
+        // rendered every min/max control blank.
+        const v = chkValueFor(column, p.checks)
         if (v !== undefined && v !== null) byCol[column] = v
       }
       setCols(c); setVals(byCol); setSaved(byCol)

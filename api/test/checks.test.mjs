@@ -19,7 +19,12 @@ import { runChecks, gateFor, attentionCount, DEFAULT_THRESHOLDS, AI_TELLS } from
 
 const find = (rs, k) => rs.find(r => r.check_key === k)
 const RESUME_FULL = {
-  ResumeSummary: 'A leader who owns roadmap strategy and delivers measurable outcomes.',
+  // INSIDE the 55-60 band (Prompt 16's own contract), because almost every test below builds on
+  // this package and asserts "nothing else in this package should fail". A summary outside the band
+  // makes `word_counts` fail everywhere and turns an unrelated assertion into noise. It is also
+  // simply more honest: a fixture that could never pass the product's own checks is not a fixture
+  // of a good packet.
+  ResumeSummary: 'A pragmatic engineering leader who owns roadmap strategy across several product lines, builds and grows durable delivery teams across regions, and turns a messy operating picture into measurable outcomes that executives and customers can both see clearly, quarter after quarter, without drama or surprise reversals along the way, and who keeps the plan honest when the numbers move against it',
   SkillsBullets1: Array.from({ length: 10 }, (_, i) => `Skill number ${i}`).join('\n'),
   SkillsBullets2: Array.from({ length: 10 }, (_, i) => `Other skill ${i}`).join('\n'),
   ExpertiseBullets: 'One two three four five\nSix seven eight nine ten',
@@ -116,8 +121,20 @@ test('empty merge fields are reported against the template, and clean text passe
 })
 
 test('word bands apply only to the fields an artifact actually has', () => {
+  // THE INVARIANT IS "only the fields this artifact HAS", not "the resume has none".
+  //
+  // This used to assert `find(resume, 'word_counts') === undefined` — true only while ResumeSummary
+  // had no band, which was the defect: Prompt 16 asks the model for `### Resume Summary (55-60
+  // words)` and nothing enforced or displayed it, so production shipped 48/49/49/61/61/70/70 words,
+  // none inside the band. The band now exists, so the old assertion pinned the old state rather
+  // than the rule. The rule itself is unchanged and is what is asserted now: a band belongs to a
+  // FIELD, and a field the artifact does not carry is never judged.
   const resume = runChecks({ type: 'resume', pkg: RESUME_FULL })
-  assert.equal(find(resume, 'word_counts'), undefined, 'the resume template has no word-banded field')
+  const rw = find(resume, 'word_counts')
+  assert.ok(rw, 'the resume carries ResumeSummary, which is word-banded')
+  assert.match(rw.expected, /ResumeSummary 55-60/, 'the resume states its own band')
+  assert.ok(!/CoverLetterBody|AboutMe|ExecutiveProfile/.test(rw.expected),
+    'a band for a field the resume does not have must never be applied to it')
 
   const good = 'word '.repeat(300).trim()
   const cover = runChecks({ type: 'cover', pkg: { '@Company': 'Acme', '@CoverLetterDate': 'x', '@CoverLetterBody': good }, company: 'Acme' })
@@ -394,7 +411,19 @@ test('the engine is deterministic and costs no tokens', () => {
 
 const POSTING = 'You will manage a $18M portfolio across three business units and 60+ sites.'
 const PROFILE = 'Operated 60 sites for a regional utility. Ran platform engineering.'
-const echoPkg = (summary) => ({ ...RESUME_FULL, ResumeSummary: summary })
+// R3's fixtures must land INSIDE the 55-60 word band, or `word_counts` fails on every one of them
+// and drowns the check actually under test. Substituting the phrase dropped the summary under ten
+// words; appending it to the full summary pushed it to 68. Neither is what these tests are about,
+// so the phrase is COMPOSED to a compliant length instead. R3 scans for a figure anywhere in the
+// field, so the phrase's position and the filler around it do not affect what is being exercised.
+const FILLER = 'delivering measurable outcomes across teams and regions with steady quarterly execution and honest reporting to the board'.split(/\s+/)
+const bandWords = (text, target = 58) => {
+  const w = String(text).trim().split(/\s+/).filter(Boolean)
+  if (w.length >= 55) return w.join(' ')   // already in or over band: never truncate the phrase itself
+  for (let i = 0; w.length < target; i++) w.push(FILLER[i % FILLER.length])
+  return w.join(' ')
+}
+const echoPkg = (summary) => ({ ...RESUME_FULL, ResumeSummary: bandWords(summary) })
 
 test('R3 names the field and the exact figure taken from the posting', () => {
   const rs = runChecks({ type: 'resume', pkg: echoPkg('Managed a $18M portfolio across three business units.'),
@@ -442,7 +471,9 @@ test('R3 warns rather than reddening the gate', () => {
   const rs = runChecks({ type: 'resume', pkg: echoPkg('Managed a $18M portfolio across three business units.'),
                          postingText: POSTING, profileText: PROFILE })
   assert.equal(find(rs, 'posting_figure_echo').state, 'warn')
-  assert.ok(!rs.some(r => r.state === 'fail'), 'nothing else in this package should fail')
+  assert.ok(!rs.some(r => r.state === 'fail'),
+    `nothing else in this package should fail, but these did: ${rs.filter(r => r.state === 'fail')
+      .map(r => `${r.check_key} (${r.observed})`).join(', ')}`)
   assert.equal(gateFor(rs), 'warn')
 })
 
