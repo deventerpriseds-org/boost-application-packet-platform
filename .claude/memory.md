@@ -3214,3 +3214,57 @@ intelligence` 151, `technology strategy` 149, `product development` 143, `operat
 the recorded exclusion rule says job titles belong to the `persona`/roles taxonomy, not the term
 library. **My keep-list was wrong; the filter was right.** Worth keeping as the example of why the
 cry-wolf check is run against real data before a guard ships, not after.
+
+## 2026-08-24 — Lane C parse-safety: the AC pass argued the scope DOWN, and found two live defects
+
+`docs/qc-evidence/AC-parse-safety.md` (408 lines). **It recommends AGAINST the largest piece I
+scoped, and I verified its three checkable claims myself rather than taking them.**
+
+**DO NOT build a per-packet parse-safety check.** Reasons, each sufficient:
+1. It would check a **constant** — every packet from template X gets an identical verdict.
+2. `runChecks(input): CheckResult[]` is a **synchronous pure function of merge-field strings**
+   (`checks.ts:186-211,277`). Layout lives only in the Google Doc JSON, so reaching it makes the gate
+   engine async and network-bound — and `appReviewer` re-aggregates checks from a **DB read**, where
+   no document is reachable at all.
+3. A deterministic `fail` **blocks the gate** on a property the owner authored by hand in Google Docs
+   and cannot fix in-app — the always-red-gate failure `checks.ts:224-226` already names.
+4. Portfolio and cover letter are **Google Slides** — text boxes by construction. A uniform
+   structural check condemns them permanently.
+5. Content-level hazards are already covered or are not hazards.
+
+**Ruling on "can generated CONTENT introduce a parse hazard?" — NO.** `injectValues()` is
+`replaceAllText` with plain strings; no `insertTable`, no image, no text box. Of the four candidates
+I named in the brief: HTML residue already `fail`s via `markup_residue`; tabs already `warn` via
+`whitespace`; dates are static template text (the seven resume merge fields carry no employment
+history); and **pipes are NOT a hazard — I was wrong.** VERIFIED MYSELF at `swaps.ts:48`:
+`splitItems` splits on `/\r?\n|(?:\s*[|•·]\s*)/`, so **the pipeline treats `|` as its own item
+separator** and a pipe check would fire on the generator's own correct output. That is the deleted
+smart-quote linter verbatim. The pass refused it as AC-R2.
+
+**A one-time audit alone is ALSO insufficient** — `google.resumeTemplateId` is an owner-editable
+Settings box read by `renderArtifact` on every build, so an audit's half-life is one Settings edit;
+and `pipeline.ts:615-642` resolves a **fourth, per-role** `compactResumeTemplateId` from AppConfig.
+
+**TWO LIVE DEFECTS, both confirmed by my own grep, not taken on the agent's word:**
+- **`artifact.template_id` is NEVER WRITTEN.** It appears in exactly three places — `schema.ts:102`
+  (the `create table`), `appPackets.ts:80` (a `select`), and `appPackets.ts:200`
+  (`templateId: a.template_id`, **served to the UI**). Zero writes. `renderArtifact` resolves the
+  real id, copies that file, then its final `update artifact set …` omits the column. **Every
+  artifact reports `templateId: null`.** ~3-line fix.
+- **`diagDocStructure.ts:75` audits the WRONG document** — `req.query.get('templateId') ||
+  RESUME_TEMPLATE_ID`, the constant rather than the owner-resolved id. Exactly the defect
+  `pipelineConfig.ts:99` already records.
+
+**Recommended instead (~150-250 lines, tier 2/3, extends four existing systems, creates none):**
+write `template_id` in `renderArtifact`; point `fingerprint()` at the resolved id and extend it to
+headers/footers/text boxes; run the audit ONCE and record it; store the verdict on the existing
+AppConfig `templates/resume-<driveId>` row (which already holds `roleFocus`) and show a three-state
+badge in Settings. **`AC-20` (`H:no-parse-safety-in-runchecks`) encodes the REFUSAL itself** so a
+later session cannot add the per-packet check by accident.
+
+Also refused, with reasons: a startup assertion (turns a Doc-formatting opinion into an outage) and
+a CI test (no `GOOGLE_REFRESH_TOKEN` and no egress to `docs.googleapis.com` from CI — permanently
+skipped or permanently red, i.e. an inert guard).
+
+**Separate, larger finding flagged for backlog, NOT this scope:** the product's own "Compact ATS
+Resume" is currently NOT CONFIGURED and never generated.
