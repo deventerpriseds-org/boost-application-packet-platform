@@ -970,3 +970,56 @@ test('H:field-severity-paints-through-one-map: no runtime custom-property names'
   assert.ok(!/var\(--proto-\$\{/.test(src), 'a custom-property name is being built at runtime')
   assert.match(src, /data-qc-sev=\{fieldSev \|\| ''\}/, 'the severity must be readable from the DOM')
 })
+
+// ── option B: a finding's second destination ────────────────────────────────────────────────────
+//
+// Owner decision, 2026-08-24. A finding names a field; today the ONLY route from it is the gate
+// drawer, which shows that field's RECORD (generated or static, item count, pass) and never its
+// text. Option B adds a second route to the draft itself, where the sentence and its edit controls
+// are. Additive by instruction: the drawer link is untouched, so nothing anyone relies on changes.
+test('the go-to-draft hook is registered and distinct from the drawer route', () => {
+  assert.equal(QC_HOOKS.goToField, 'qc-go-to-field')
+  const values = Object.values(QC_HOOKS)
+  assert.equal(new Set(values).size, values.length, 'two hooks sharing a value makes them unselectable apart')
+})
+
+// The control has to be WIRED, not merely present. Three ways this ships broken and looks fine:
+// the span renders but calls the drawer handler; the prop is declared and never threaded to the
+// tabs; or the deep link is resolved in the card (which knows only its own id) instead of the
+// parent (which knows both), so every card rings its own field.
+test('the go-to-draft control calls its own handler, and the prop reaches both tabs', () => {
+  const rail = readFileSync(new URL('../src/screens/QcRail.jsx', import.meta.url), 'utf8')
+
+  // Window starts BEFORE the hook attribute: role/tabIndex sit on the opening line above it.
+  const at = rail.indexOf('QC_HOOKS.goToField')
+  const block = rail.slice(Math.max(0, at - 300), at + 700)
+  assert.match(block, /onClick=\{\(\) => onGoToField\(/, 'the control must call onGoToField, not onOpen')
+  assert.match(block, /onKeyDown=/, 'a span used as a button needs a keyboard path')
+  assert.match(block, /role="button"/)
+
+  // Threaded all the way down, not declared and dropped.
+  for (const tab of ['ChecksTab', 'ReviewTab']) {
+    const sig = new RegExp(`function ${tab}\\(\\{[^}]*onGoToField`)
+    assert.match(rail, sig, `${tab} must accept onGoToField`)
+  }
+  assert.match(rail, /<ChecksTab[^>]*onGoToField=\{onGoToField\}/s)
+  assert.match(rail, /<ReviewTab[^>]*onGoToField=\{onGoToField\}/s)
+  assert.match(rail, /export default function QcRail\(\{[^}]*onGoToField/s, 'QcRail must accept it from the parent')
+})
+
+test('the deep link is resolved by the parent, so one finding rings ONE card', () => {
+  const pb = readFileSync(new URL('../src/screens/PacketBuilder.jsx', import.meta.url), 'utf8')
+  // The artifact-id match happens where BOTH ids are known. A card resolving `fieldFocus` itself
+  // would ring its own field for a finding on a different artifact.
+  assert.match(pb, /focusField=\{fieldFocus && fieldFocus\.artifactId === a\.id \? fieldFocus\.section : null\}/,
+    'the parent must resolve which card owns the focus')
+  assert.match(pb, /focusField=\{focusField\}/, 'and the card must pass through what it was handed')
+  // The step is derived from the same rule getArtifactsByStep uses, not a second mapping.
+  assert.match(pb, /a\.type === 'resume' \|\| a\.type === 'compact_resume'\) \? 'resume' : a\.type/,
+    'compact_resume must land on the Resume step, as getArtifactsByStep puts it there')
+  // SCOPED to goToField's own body. `if (!a) return` appears twice in this file, so an unscoped
+  // match would still pass with THIS guard deleted — the assertion would be watching the wrong one.
+  const fn = pb.slice(pb.indexOf('const goToField = useCallback'), pb.indexOf('}, [artifacts, setActiveStep])'))
+  assert.ok(fn.length > 100, 'goToField body not found - this assertion has gone stale')
+  assert.match(fn, /if \(!a\) return/, 'an unknown artifact id must do nothing, never guess a step')
+})
