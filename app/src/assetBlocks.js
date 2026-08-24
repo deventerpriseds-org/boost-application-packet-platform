@@ -171,6 +171,10 @@ export function draftSizeText(row, expect) {
 // side by side. One definition, one set of words. See postingAnalysis.js for the values' rationale.
 export { KIND_ABBR, KIND_WORD, KIND_LEGEND, reqChipLabel } from './postingAnalysis.js'
 
+// Imported for meterModel's per-kind split. Same rule as the re-export above: ONE definition of
+// which rows are must-haves, so the resume step and the posting analysis cannot disagree.
+import { groupRequirements } from './postingAnalysis.js'
+
 /**
  * How the row's own `method` reads in plain language — RE-EXPORTED, not redefined.
  *
@@ -373,11 +377,23 @@ export const UNKNOWN_TERMS_NOTE =
 export const UNKNOWN_REQS_NOTE =
   'This posting has no requirement rows yet, so how much of it this asset answers is unknown - not zero.'
 
+// The three kinds `groupRequirements` classifies, in the reading order the posting analysis uses.
+// Labels answer the reader's question ("what does this asset answer?"), per SPEC §7 copy rules.
+export const REQ_KIND_STATS = [
+  { key: 'mustHaves', label: 'Must-haves answered', sub: 'required lines this asset cites' },
+  { key: 'responsibilities', label: 'Responsibilities answered', sub: 'responsibility lines this asset cites' },
+  { key: 'niceToHaves', label: 'Nice-to-haves answered', sub: 'preferred lines this asset cites' },
+]
+
 export function meterModel(input) {
   const { rows = [], filled = 0, unfilled = 0, requirements = null, scopedSwaps = [], terms = null,
     corrected = null } = input || {}
   const placedReqIds = new Set(rows.map((r) => r.requirement_id).filter(Boolean))
   const totalReqs = requirements && Number.isFinite(Number(requirements.total)) ? Number(requirements.total) : null
+  // The endpoint returns `total` AND the rows themselves, each carrying `kind`. Reuse the existing
+  // splitter rather than re-deriving the classification here — a second copy of "what counts as a
+  // must-have" is how two screens come to disagree about the same posting.
+  const kindRows = groupRequirements((requirements && requirements.requirements) || [])
   const changed = scopedSwaps.filter((s) => s.action === 'swapped' || s.action === 'added')
   const postingDriven = changed.filter((s) => s.driver === 'posting')
   const fields = filled + unfilled
@@ -387,6 +403,20 @@ export function meterModel(input) {
 
   if (totalReqs !== null && totalReqs > 0) {
     stats.push({ key: 'lines', label: 'Posting lines placed', n: placedReqIds.size, d: totalReqs, sub: 'requirement rows this asset cites' })
+    // Per-kind split (prototype §10). The recorded objection above was to the prototype's stat
+    // NAMES because they sat against fabricated demo data — not to the split itself. These come
+    // from the real `kind` on each requirement row, so the objection does not apply.
+    //
+    // The total STAYS, and is not replaced by the sum of these parts. `groupRequirements` classifies
+    // exactly three kinds, so a row whose kind is null or unrecognised belongs to no group: replacing
+    // the total with the parts would silently drop it from a coverage count. Total is the truth;
+    // these are its breakdown.
+    for (const k of REQ_KIND_STATS) {
+      const rows = kindRows[k.key] || []
+      if (rows.length === 0) continue          // a kind the posting does not use is not a 0/0 stat
+      const placed = rows.filter((r) => r && placedReqIds.has(r.id)).length
+      stats.push({ key: `kind_${k.key}`, label: k.label, n: placed, d: rows.length, sub: k.sub })
+    }
   } else {
     // null (never loaded) and 0 (loaded, empty) are the same story for the reader: unmeasured.
     notes.push(UNKNOWN_REQS_NOTE)
