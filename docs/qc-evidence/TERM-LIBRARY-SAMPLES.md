@@ -181,6 +181,52 @@ Three consequences worth stating plainly:
    fine; importing their taxonomies is not. `SAFe` needs case-sensitive matching — `safe` appears in
    302 postings, `scaled agile` in 8. Same class as the `AI`/*detail* problem.
 
+### Cost of every source (owner: *"ata vendor field is in… need to see cost of the. all. looking for free"*)
+
+**Total for the whole recommended set: $0.** ATS vendor field dictionaries are now IN, and the free
+route for them is named below.
+
+#### Free — usable now
+
+| Source | Cost | Licence / obligation | How this is known |
+|---|---|---|---|
+| **Your own `jd_real` corpus** | **$0** | yours | Already mined: 2,734 candidates, 1,230 postings, 876 (71%) exec. **PRIMARY** source per plan:421 |
+| **O*NET** | **$0** | **CC BY 4.0** — attribution to the *release* + USDOL/ETA required wherever derived terms surface; "O\*NET" is a USDOL trademark. The **Web Services API carries a SEPARATE licence from the bulk download** | repo §12 (already corrected there: it is *not* public domain) |
+| **ESCO** | **$0** | **CC BY 4.0** + Commission Decision 2011/833/EU: *"downloaded, used, reproduced and reused for any purpose and by any interested party free of charge."* Required credit string: **"This service uses the ESCO classification of the European Commission"**. The API itself is EUPL 1.2 | **Verified 2026-08-24** — this closes plan:445's open *"Verify licence terms before ingest"* |
+| **NIST CSF 2.0 + NICE** | **$0** | US Government work, **17 U.S.C. §105 — public domain**, no attribution obligation | repo §12 |
+| **CNCF landscape** | **$0** | **Apache 2.0**, 2,501 names verified — but **NOT** the Crunchbase-derived fields | repo §12 |
+| **HR Open Standards** ← the ATS-field-dictionary answer | **$0** | Standards, JSON + XML schemas, instances and **code lists** are free public downloads; a **free Community account** is needed to download. Paid membership buys only work-in-progress + working-repo access | Verified 2026-08-24 |
+
+#### Paid — declined, or to avoid
+
+| Source | Cost | Status |
+|---|---|---|
+| **Lightcast Open Skills** | Library of 34k+ skills is **browsable free**; **programmatic API access is contract-basis** | **Declined 2026-08-19 as paid — and re-checked 2026-08-24, the decision still holds.** Free consolation already recorded: O*NET's `Hot Technology`/`In Demand` flags are themselves Lightcast-derived |
+| **TOGAF** | commercial use paid | Token is nominative use and fine; **importing the taxonomy is not** (repo §12) |
+| **SAFe / ITIL** | content restricted | Same — token yes, taxonomy no |
+| **HR Open membership** | $1,000/yr (1-50 staff) → $9,995/yr enterprise; $100/yr individual | **Not needed.** Buys work-in-progress access only; the published standards are free |
+
+#### The honest caveat on ATS vendor field dictionaries — read before I ingest it
+
+**There is no free per-vendor dictionary.** Workday, Taleo, iCIMS, Greenhouse and Lever publish API
+docs under their own terms of service, not reusable datasets — free to *read*, not licensed to
+*ingest*. The free, legitimate, vendor-neutral equivalent is **HR Open Standards**, a consortium
+whose members are those ATS vendors, publishing exactly the artefact wanted: canonical field names
+plus **code lists**.
+
+**But it is a FIELD taxonomy, not a skills taxonomy.** It standardises education, certifications,
+licences, employment history and skills *as fields* — so it improves **where a term belongs** and
+**merge-field mapping**, not **which terms exist**. Concretely it serves `family` / `term_type`
+assignment at promotion time and the resume field mapping; it will not add exec vocabulary. That is
+worth knowing before spending the ingest, because it is a different job from what the other five
+sources do.
+
+**One thing still unverified, and flagged rather than assumed:** the exact redistribution terms of
+the HR Open downloads. `hropenstandards.org` is blocked by this sandbox's egress proxy, so the
+figures above come from search summaries, not from the licence text itself. That text gets read
+before ingest — the same discipline ESCO just got, which is how a "verify before ingest" note from
+2026-08-19 turned into a verified CC BY 4.0 today.
+
 ### Alias handling — already designed in, but the step that USES it does not exist
 
 BACKLOG:94 flags it as load-bearing: *"'SOC 2', 'SOC 2 Type II' and 'SOC2' must be one entry with

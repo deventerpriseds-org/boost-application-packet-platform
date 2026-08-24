@@ -3052,3 +3052,43 @@ will be wrong."* Schema honours it: `aliases` + `alias_normalized` (`:221-222`),
 Aliases get ASSIGNED at candidate→library promotion, and that step does not exist — the same place
 `artificial intelligence` 151 / `machine learning` 107 fold into `ai_ml` via the miner's existing
 `status: merged` + `merged_into`.
+
+### Term-library SOURCE COSTS verified 2026-08-24 — everything needed is $0
+
+Owner: *"ata vendor field is in need to see cost of the. all. looking for free"* → ATS vendor field
+dictionaries are IN, and a full cost sweep was requested. **Total for the recommended set: $0.**
+
+**FREE, usable now:**
+| Source | Cost | Licence / obligation |
+|---|---|---|
+| our `jd_real` corpus | $0 | ours; already mined (2,734 candidates) and PRIMARY per plan:421 |
+| O*NET | $0 | **CC BY 4.0** — credit the RELEASE + USDOL/ETA wherever derived terms surface; "O*NET" is a USDOL trademark; **the Web Services API licence differs from the bulk download** |
+| ESCO | $0 | **CC BY 4.0** + Commission Decision 2011/833/EU ("free of charge, any purpose, any party"); required string **"This service uses the ESCO classification of the European Commission"**; API itself EUPL 1.2 |
+| NIST CSF 2.0 + NICE | $0 | US Gov work, **17 U.S.C. §105 public domain** — no attribution obligation |
+| CNCF landscape | $0 | **Apache 2.0**, 2,501 names; NOT the Crunchbase-derived fields |
+| **HR Open Standards** | $0 | free public download of standards + JSON/XML schemas + **code lists**; free Community account to download |
+
+**ESCO's licence is now VERIFIED, closing plan:445's open "Verify licence terms before ingest."**
+That note sat open from 2026-08-19; one lookup settled it.
+
+**PAID / avoid:**
+- **Lightcast Open Skills** — 34k-skill library browsable free, but **programmatic API access is
+  contract-basis**. Re-checked 2026-08-24: **the 2026-08-19 decline still holds.** Free consolation
+  already recorded: O*NET's `Hot Technology`/`In Demand` flags are themselves Lightcast-derived.
+- **TOGAF** (commercial use paid), **SAFe/ITIL** (content restricted) — the TOKEN is nominative use
+  and fine; importing their taxonomies is not.
+- **HR Open membership** $1,000/yr (1-50 staff) → $9,995/yr enterprise, $100/yr individual —
+  **not needed**, it buys work-in-progress/working-repo access only.
+
+**THE ATS-VENDOR ANSWER, and its caveat.** There is **no free per-vendor dictionary**: Workday,
+Taleo, iCIMS, Greenhouse and Lever publish API docs under their own ToS — free to READ, not licensed
+to INGEST. The free vendor-neutral equivalent is **HR Open Standards**, a consortium whose members
+ARE those vendors. **But it is a FIELD taxonomy, not a skills taxonomy** — it standardises education,
+certifications, licences, employment history and skills *as fields*, so it improves WHERE a term
+belongs and merge-field mapping, not WHICH terms exist. It serves `family`/`term_type` assignment at
+promotion time; it will not add exec vocabulary. Say that before spending the ingest.
+
+**Still unverified, flagged not assumed:** HR Open's exact redistribution terms. `hropenstandards.org`
+is **blocked by this sandbox's egress proxy**, so those figures come from search summaries, not the
+licence text. Read the licence text before ingest — exactly the discipline that turned ESCO's
+"verify before ingest" note into a verified CC BY 4.0 today.
