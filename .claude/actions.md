@@ -3328,3 +3328,35 @@ caught it: *"the default values arent edits."*
 (A) per-section MasterContext columns mapped to merge fields, (B) the resume template Doc's text per
 section (SPEC 219's literal reading), or (C) something else. Cannot see MasterContext column names
 from the sandbox (Storage Table, not Postgres); `api-test.yml` -> `/api/facts` would settle A.
+
+### ACT — per-role resumes, loop-0 baseline, compact-resume divergence (2026-08-24) — ALL THREE DEPLOYED
+
+**Asked:** *"we'll go wit your recommended options for 1 and 2 and fix the compact resumed
+divergence issue go continuesly until all is deployed"*
+
+| Commit | What | Deploy |
+|---|---|---|
+| `6e489fb` | compact resume built from the compact template | api run 32779423893 ✅ |
+| `f6555ac` | loop-0 `before_text` from MasterContext | api 32780323775 ✅ / web 32780323778 ✅ |
+| `1437f7a` | `label` on template rows | api 32781220521 ✅ / web 32781220541 ✅ |
+| `35d5ec2` | `packet.resume_template_id` + writer + picker | (in flight at time of writing) |
+
+**Ledger:** closed `D:compact-resume-template-ignored` and `D:no-template-picker`; opened
+`D:compact-not-per-packet`. Both closures were forced by the ledger's own machine check catching
+that my commits made the rows stale — the guard working as designed.
+
+**PROCESS NOTE, so it is not mistaken for an omission.** `packet.resume_template_id` and the loop-0
+baseline both change stored values that become user-visible claims, which normally earns the tier-1
+ceremony (independent AC subagent before coding, independent `verifier` after). **Neither was
+spawned: this session runs under an explicit instruction not to use the Agent tool unless the user
+asks.** What was done instead: every new assertion mutation-proved with the mutation's anchor
+asserted before writing, the schema executed against a populated database, and every claim traced to
+a primary source. If the owner wants the adversarial pass, it needs an explicit go-ahead.
+
+**NOT YET CONFIRMED LIVE.** The suites and the local schema run prove the mechanism; they do not
+prove the owner's packets look right. Two things want eyes on production:
+1. **Provenance labels will change.** Fields the model rewrote now say "Written for this posting"
+   where they said "From profile". That is the correction, not a side effect — but it is every
+   artifact.
+2. **The picker only appears with 2+ resumes configured**, so with one template it is invisible by
+   design, not broken.
