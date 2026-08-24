@@ -33,15 +33,32 @@ test('H:template-focus-writer-is-row-scoped: not a way to write arbitrary AppCon
   assert.match(src, /function isTemplateRow\(rowKey: string\): boolean \{\s*\n\s*return \/\^resume-\[A-Za-z0-9_-\]\{10,\}\$\/\.test\(rowKey\)/,
     'the template row pattern is missing or widened')
   assert.match(src, /if \(!templateId \|\| !isTemplateRow\(rowKey\)\)/, 'the writer does not check the row shape')
-  assert.match(src, /partitionKey: 'templates', rowKey, roleFocus/, 'the writer stores something other than roleFocus')
+
+  // WIDENED 2026-08-24 from `roleFocus` alone to a CLOSED SET of two, because `label` was added for
+  // per-role resumes. The invariant is unchanged and is the point of this case: the writer builds
+  // the entity field by field from named locals, so a caller cannot post arbitrary properties into
+  // AppConfig. If it ever spreads the request body, this fails.
+  const fn = src.slice(src.indexOf('export async function saveTemplateConfig'))
+  const body = fn.slice(0, fn.indexOf('\n}'))
+  const assigned = [...body.matchAll(/entity\.(\w+) =/g)].map((m) => m[1]).sort()
+  assert.deepEqual(assigned, ['label', 'roleFocus'],
+    'the writer stores something other than the two declared fields')
+  assert.ok(!/\.\.\.body/.test(body), 'the writer must never spread the request body into the entity')
 })
 
 test('H:blank-focus-clears-rather-than-storing-empty', () => {
   // A stored empty string would WIN over the seed in `resolveRoleFocus` (it checks the row before the
   // seed) and silently blank the directive every generation prompt is prefixed with — "Tailor every
   // section for a senior  executive". Clearing restores the seed instead.
-  assert.match(src, /if \(!roleFocus\) \{[\s\S]{0,300}?deleteEntity\('templates', rowKey\)/,
-    'a blank role focus is stored rather than cleared')
+  //
+  // RESTATED 2026-08-24. The delete now requires the row to carry no label either (a named template
+  // must survive having its focus cleared), so the old grep for `if (!roleFocus) { ... deleteEntity`
+  // no longer matches. What this case actually guards is unchanged and is asserted directly: a blank
+  // focus is NEVER written as an empty string.
+  assert.match(src, /if \(!roleFocus && !keepLabel\)[\s\S]{0,220}?deleteEntity\('templates', rowKey\)/,
+    'an entirely empty row is not deleted')
+  assert.match(src, /if \(roleFocus\) entity\.roleFocus = roleFocus/,
+    'a blank role focus must never be assigned onto the entity — it would win over the seed')
 })
 
 // ── The compact resume was built from the WRONG template in the product path ─────────────────────
@@ -98,4 +115,44 @@ test('H:every-settings-template-id-reaches-metaFor: no template setting is read 
     assert.match(passed, new RegExp(`\\b${key}\\b`),
       `Settings offers google.${key} but renderArtifact never passes it to metaFor — it would be read by nothing`)
   }
+})
+
+// ── `label` on a template row — what makes a COLLECTION of resumes usable ────────────────────────
+//
+// Added 2026-08-24 for per-role resumes. With one template the screen could print "Resume template"
+// over a Drive id and be clear; with several that is a list of indistinguishable ids. The label is a
+// property of the SAME `templates/resume-<driveId>` row that already carries `roleFocus` — the
+// partition already IS the collection, so this extends it rather than standing up a second store.
+
+test('H:template-label-absent-means-leave-alone-not-clear', () => {
+  // A caller changing only the focus must not wipe the template's name. The route distinguishes an
+  // OMITTED label (keep what is stored) from a PRESENT blank one (clear it) via hasOwnProperty --
+  // `String(body?.label || '')` alone cannot tell those apart, which is how this would silently
+  // erase names.
+  assert.match(src, /hasOwnProperty\.call\(body \|\| \{\}, 'label'\)/,
+    'the writer must distinguish an omitted label from a blank one')
+  assert.match(src, /if \(!hasLabel\)[\s\S]{0,320}?getEntity\('templates', rowKey\)/,
+    'an omitted label must be read back off the stored row, not defaulted to blank')
+})
+
+test('H:template-row-writes-replace-not-merge: a cleared focus really clears', () => {
+  // Merge CANNOT clear a property. Clearing the focus while keeping a label under Merge would leave
+  // the old focus in place and return success -- the silent no-op class this repo keeps paying for.
+  const fn = src.slice(src.indexOf('export async function saveTemplateConfig'))
+  const body = fn.slice(0, fn.indexOf('\n}'))
+  assert.match(body, /upsertEntity\(entity as any, 'Replace'\)/,
+    "the template row must be written with 'Replace' so a blank field actually blanks")
+  assert.ok(!/upsertEntity\([^)]*'Merge'\)/.test(body), 'no Merge write may survive on this row')
+})
+
+test('H:template-row-is-listed-when-it-has-only-a-name', () => {
+  // Membership used to key on `roleFocus` alone. A freshly NAMED template with no focus yet would
+  // then be invisible in the list it was just added to.
+  assert.match(src, /if \(roleFocus \|\| label\) configured\[k\] =/,
+    'a row with only a label must still be listed')
+})
+
+test('H:template-delete-needs-both-empty: a named template is not deleted by clearing its focus', () => {
+  assert.match(src, /if \(!roleFocus && !keepLabel\)[\s\S]{0,200}?deleteEntity/,
+    'the row may only be deleted when it carries neither a focus nor a name')
 })

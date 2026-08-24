@@ -121,20 +121,41 @@ export async function getTemplateConfig(req: HttpRequest, context: InvocationCon
   if (req.method === 'OPTIONS') return { status: 204, headers }
   try {
     const client = TableClient.fromConnectionString(CONN, TABLE)
-    const configured: Record<string, string> = {}
+    // `label` is carried alongside `roleFocus` as of 2026-08-24. With one resume template the screen
+    // could print the word "Resume template" over a Drive id and be perfectly clear; with several,
+    // that is a list of indistinguishable ids and the owner cannot tell which resume is which. The
+    // label is what makes the collection usable, and it is a property of the SAME row rather than a
+    // second store — the `templates` partition already is the collection.
+    //
+    // NOTE the membership test changed with it: a row now counts as configured if it carries EITHER
+    // field. Keying it on `roleFocus` alone would have made a freshly-named template invisible until
+    // someone also gave it a focus.
+    const configured: Record<string, { roleFocus?: string; label?: string }> = {}
     for await (const entity of client.listEntities({ queryOptions: { filter: odata`PartitionKey eq 'templates'` } })) {
       const k = entity.rowKey as string
-      if (isTemplateRow(k) && (entity as any).roleFocus) configured[k] = String((entity as any).roleFocus)
+      if (!isTemplateRow(k)) continue
+      const roleFocus = (entity as any).roleFocus ? String((entity as any).roleFocus) : undefined
+      const label = (entity as any).label ? String((entity as any).label) : undefined
+      if (roleFocus || label) configured[k] = { roleFocus, label }
     }
     // The seeded templates are listed too, so the screen can show a template nobody has configured
     // yet rather than an empty list that looks like nothing exists.
     const templates = Object.entries(SEED_TEMPLATE_ROLE_FOCUS).map(([templateId, seed]) => {
       const row = templateRowKey(templateId)
-      return { templateId, rowKey: row, roleFocus: configured[row] || seed, source: configured[row] ? 'config' : 'seed' }
+      const c = configured[row]
+      return {
+        templateId, rowKey: row,
+        roleFocus: (c && c.roleFocus) || seed,
+        label: (c && c.label) || '',
+        source: (c && c.roleFocus) ? 'config' : 'seed',
+      }
     })
-    for (const [row, roleFocus] of Object.entries(configured)) {
+    for (const [row, c] of Object.entries(configured)) {
       if (!templates.some((t) => t.rowKey === row)) {
-        templates.push({ templateId: row.replace(/^resume-/, ''), rowKey: row, roleFocus, source: 'config' })
+        templates.push({
+          templateId: row.replace(/^resume-/, ''), rowKey: row,
+          roleFocus: c.roleFocus || '', label: c.label || '', source: 'config',
+        })
       }
     }
     return { status: 200, headers, jsonBody: { success: true, templates } }
@@ -151,21 +172,43 @@ export async function saveTemplateConfig(req: HttpRequest, context: InvocationCo
     return { status: 403, headers, jsonBody: { success: false, error: 'a verified session is required to change a template role focus' } }
   }
   try {
-    const body = await req.json() as { templateId?: string; roleFocus?: string }
+    const body = await req.json() as { templateId?: string; roleFocus?: string; label?: string }
     const templateId = String(body?.templateId || '').trim()
     const roleFocus = String(body?.roleFocus || '').trim()
+    // `label` is optional and absent means "leave it alone", NOT "clear it". A caller that only
+    // wants to change the focus must not silently wipe the name off the template.
+    const hasLabel = Object.prototype.hasOwnProperty.call(body || {}, 'label')
+    const label = String(body?.label || '').trim().slice(0, 80)
     const rowKey = templateRowKey(templateId)
     if (!templateId || !isTemplateRow(rowKey)) {
       return { status: 400, headers, jsonBody: { success: false, error: 'templateId must be a Drive id' } }
     }
-    // A blank focus is a DELETE, not a stored empty string: an empty row would win over the seed in
-    // `resolveRoleFocus` and silently blank the directive that every prompt is prefixed with.
-    if (!roleFocus) {
-      try { await TableClient.fromConnectionString(CONN, TABLE).deleteEntity('templates', rowKey) } catch { /* already absent */ }
-      return { status: 200, headers, jsonBody: { success: true, templateId, roleFocus: null, cleared: true } }
+    const client = TableClient.fromConnectionString(CONN, TABLE)
+
+    // What the row should end up holding. An omitted `label` keeps whatever is stored.
+    let keepLabel = label
+    if (!hasLabel) {
+      try {
+        const existing = await client.getEntity('templates', rowKey) as any
+        keepLabel = existing?.label ? String(existing.label) : ''
+      } catch { keepLabel = '' }
     }
-    await TableClient.fromConnectionString(CONN, TABLE).upsertEntity({ partitionKey: 'templates', rowKey, roleFocus }, 'Merge')
-    return { status: 200, headers, jsonBody: { success: true, templateId, roleFocus } }
+
+    // A blank focus AND no label is a DELETE, not a stored empty string: an empty row would win over
+    // the seed in `resolveRoleFocus` and silently blank the directive every prompt is prefixed with.
+    if (!roleFocus && !keepLabel) {
+      try { await client.deleteEntity('templates', rowKey) } catch { /* already absent */ }
+      return { status: 200, headers, jsonBody: { success: true, templateId, roleFocus: null, label: '', cleared: true } }
+    }
+
+    // REPLACE, not Merge. Merge cannot CLEAR a property, so clearing the focus while keeping a label
+    // would leave the old focus in place and report success — the silent no-op class this repo has
+    // already been bitten by. Replace makes the row exactly what is sent, so a blank really blanks.
+    const entity: Record<string, unknown> = { partitionKey: 'templates', rowKey }
+    if (roleFocus) entity.roleFocus = roleFocus
+    if (keepLabel) entity.label = keepLabel
+    await client.upsertEntity(entity as any, 'Replace')
+    return { status: 200, headers, jsonBody: { success: true, templateId, roleFocus: roleFocus || null, label: keepLabel, cleared: !roleFocus } }
   } catch (err) {
     return { status: 500, headers, jsonBody: { success: false, error: String(err) } }
   }

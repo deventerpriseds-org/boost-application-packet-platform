@@ -1810,6 +1810,7 @@ const PIPELINE_LABELS = {
 function TemplateFocusSettings() {
   const [rows, setRows] = useState(null)
   const [vals, setVals] = useState({})
+  const [labels, setLabels] = useState({})
   const [note, setNote] = useState(null)
   const [saving, setSaving] = useState(null)
 
@@ -1817,6 +1818,7 @@ function TemplateFocusSettings() {
     if (!r || r.success === false) { setNote({ ok: false, msg: r?.error || 'could not load template settings' }); setRows([]); return }
     setRows(r.templates || [])
     setVals(Object.fromEntries((r.templates || []).map((t) => [t.templateId, t.roleFocus || ''])))
+    setLabels(Object.fromEntries((r.templates || []).map((t) => [t.templateId, t.label || ''])))
   }).catch((e) => { setNote({ ok: false, msg: String(e.message || e) }); setRows([]) })
 
   useEffect(() => { load() }, [])
@@ -1827,7 +1829,7 @@ function TemplateFocusSettings() {
     if (!sessionValid()) { setNote({ ok: false, msg: 'Sign-in expired — sign out and back in, then Save.' }); return }
     setSaving(templateId); setNote(null)
     try {
-      const r = await api.templateFocusSet(templateId, vals[templateId] || '')
+      const r = await api.templateFocusSet(templateId, vals[templateId] || '', labels[templateId] || '')
       if (!r || r.success === false) throw new Error(r?.error || 'save failed')
       setNote({ ok: true, msg: r.cleared ? 'Cleared — the seeded focus applies again.' : `Saved "${r.roleFocus}".` })
       load()
@@ -1838,24 +1840,38 @@ function TemplateFocusSettings() {
     <Card>
       <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 4 }}>Resume template focus</div>
       <div className="px-small" style={{ color: 'var(--proto-ink2)', marginBottom: 14 }}>
-        Every generation prompt is prefixed with "tailor this for a senior <em>focus</em> executive".
-        The resume template being built decides that word. Clear a value to fall back to the seeded one.
+        Every generation prompt is prefixed with "tailor this for a senior <em>focus</em> executive",
+        and the resume template being built decides that word — so adding a second resume here is how
+        you get a second role. Name each one so you can tell them apart. Clear a focus to fall back to
+        the seeded one.
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
         {rows.length === 0 && <div className="px-small" style={{ color: 'var(--proto-ink2)' }}>No resume templates configured.</div>}
         {rows.map((t) => (
           <div key={t.templateId} style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16 }}>
             <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontSize: 13, fontWeight: 600 }}>Resume template</div>
+              {/* The NAME leads. With one template "Resume template" over a Drive id was clear
+                  enough; with several it is a list of indistinguishable ids, which is the whole
+                  reason `label` exists. An unnamed template says so rather than looking broken. */}
+              <div style={{ fontSize: 13, fontWeight: 600 }}>
+                {t.label || <span style={{ color: 'var(--proto-ink3)', fontWeight: 500 }}>Unnamed resume</span>}
+              </div>
               <div className="px-small" style={{ color: 'var(--proto-ink2)', marginTop: 2, wordBreak: 'break-all' }}>
-                {t.templateId} — {t.source === 'config' ? 'set here' : 'using the seeded focus'}
+                {t.templateId} — {t.source === 'config' ? 'focus set here' : 'using the seeded focus'}
               </div>
             </div>
-            <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
-              <input className="px-input" type="text" value={vals[t.templateId] ?? ''} placeholder="e.g. digital"
+            <div style={{ display: 'flex', gap: 8, flexShrink: 0, alignItems: 'flex-start' }}>
+              <input className="px-input" type="text" value={labels[t.templateId] ?? ''} placeholder="Name, e.g. Product exec"
+                aria-label="Template name"
+                onChange={(e) => setLabels({ ...labels, [t.templateId]: e.target.value })}
+                style={{ width: 180 }} />
+              <input className="px-input" type="text" value={vals[t.templateId] ?? ''} placeholder="Focus, e.g. digital"
+                aria-label="Role focus"
                 onChange={(e) => setVals({ ...vals, [t.templateId]: e.target.value })}
-                style={{ width: 200 }} />
-              <button className="px-btn" disabled={saving === t.templateId || (vals[t.templateId] ?? '') === (t.roleFocus || '')}
+                style={{ width: 160 }} />
+              <button className="px-btn"
+                disabled={saving === t.templateId
+                  || ((vals[t.templateId] ?? '') === (t.roleFocus || '') && (labels[t.templateId] ?? '') === (t.label || ''))}
                 onClick={() => save(t.templateId)}>
                 {saving === t.templateId ? 'Saving…' : 'Save'}
               </button>

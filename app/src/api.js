@@ -290,7 +290,11 @@ export const api = {
   // `resolveRoleFocus` reads `templates/resume-<driveId>` before every other source; these are the
   // read and write for that row, so the value is a setting rather than a code constant.
   templateFocusGet: () => get('/config/templates'),
-  templateFocusSet: (templateId, roleFocus) => post('/config/templates', { templateId, roleFocus }),
+  // `label` is OMITTED when undefined rather than sent as '' — the route treats an absent label as
+  // "leave it alone" and a present blank one as "clear it", so sending '' from a caller that only
+  // meant to change the focus would wipe the template's name.
+  templateFocusSet: (templateId, roleFocus, label) => post('/config/templates',
+    label === undefined ? { templateId, roleFocus } : { templateId, roleFocus, label }),
   dimensionPrefsGet: () => get(`/app/dimension-prefs?owner=${encodeURIComponent(_owner)}`),
   dimensionPrefsSet: ({ family, keys }) => post(`/app/dimension-prefs?owner=${encodeURIComponent(_owner)}`, { family, keys }),
   // LinkedIn role-sweep config + cursor + the exact built queries (preview before enabling).
