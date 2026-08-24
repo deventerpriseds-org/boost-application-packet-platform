@@ -4,6 +4,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { mergeFieldsFor, buildInsertions, LIST_FIELD_TO_LIST } from '../dist/functions/tests/insertions.js'
 import { TEMPLATE_META } from '../dist/functions/tests/packetTemplates.js'
+import { readFileSync } from 'node:fs'
 
 const REQS = [
   { seq: 0, verbatim: 'You will own the integrated product roadmap for corporate hiring technology', item_text: 'x', kind: 'responsibility' },
@@ -110,4 +111,116 @@ test('an unfilled slot is never attributed to a requirement', () => {
 test('buildInsertions is deterministic and makes no model call', () => {
   const input = { type: 'portfolio', pkg: { '@Company': 'Acme', '@AboutMe1_50words': 'about' }, requirements: REQS }
   assert.deepEqual(buildInsertions(input), buildInsertions(input))
+})
+
+// ── The loop-0 baseline: what "Show original" shows, and what makes `method` mean anything ───────
+//
+// Until 2026-08-24 `writeInsertions` set `prevPkg = {}` at loop 0, so on the baseline package --
+// the draft everyone actually looks at -- every row had `before_text = null`. Two defects, one
+// cause: `Show original` had nothing to show (and the app hid the control, which the owner called
+// "black box and not clear"), and `changed` could never be true, so EVERY generated field was
+// recorded `template_fill` and rendered "From profile" even when the model rewrote it wholesale.
+//
+// The baseline is the owner's MasterContext block for the slot. Owner: "the show original is always
+// referencing showing the template the prompts are using as a baseline. there is always an original
+// value for those sections." The prototype agrees -- qc/data.js:203 gives the Skills field a
+// `before` of "Enterprise Governance | Technology Strategy | Agile Transformation | ...", exactly
+// the set SKILL_ROWS records as `orig`.
+import { MASTER_BASELINE_FIELD, masterBaseline } from '../dist/functions/tests/evidence.js'
+
+test('H:master-baseline-covers-the-resume-slots: every resume merge field has an original', () => {
+  // The seven resume placeholders are the ones the owner sees on the resume step. A slot with no
+  // mapping renders "no earlier version", which is honest but is NOT the intended end state here.
+  for (const field of TEMPLATE_META.resume.placeholders) {
+    assert.ok(MASTER_BASELINE_FIELD[field],
+      `resume merge field ${field} has no MasterContext baseline — "Show original" would be empty on it`)
+  }
+})
+
+test('H:master-baseline-omits-absent-blocks: an empty column is not an empty original', () => {
+  const out = masterBaseline({ resumeSummary: 'the master summary', skills1: '', skills2: '   ', expertise: null })
+  assert.deepEqual(Object.keys(out), ['ResumeSummary'],
+    'only blocks with real text become an original; blank/absent stay absent')
+  assert.equal(out.ResumeSummary, 'the master summary')
+  assert.deepEqual(masterBaseline(null), {}, 'a missing MasterContext row yields no baselines, not junk')
+})
+
+test('H:relevant-lists-share-one-pool: the one-to-many mapping is intentional and total', () => {
+  // relevantProficiencies is a single pooled block that the packet splits into three slots. All
+  // three legitimately share it — that IS what each was written from. Asserted so a later reader
+  // does not "fix" the duplication into two-thirds of the fields losing their original.
+  for (const f of ['RelevantBullets1', 'RelevantBullets2', 'RelevantBullets3']) {
+    assert.equal(MASTER_BASELINE_FIELD[f], 'relevantProficiencies', `${f} must map to the shared pool`)
+  }
+})
+
+test('H:baseline-makes-method-separate: copied stays From profile, rewritten becomes Written for this posting', () => {
+  // THE POINT OF THE WHOLE CHANGE. Same call, one field the model copied and one it rewrote.
+  // NOTE the fields chosen: `mergeFieldsFor('resume')` is TEMPLATE_META.resume.placeholders, which
+  // is the SEVEN dynamic slots. Work history is NOT among them — in the current template that
+  // section is static text (appFacts.ts:25 reads it as a primary source of facts), so it never
+  // becomes an insertion row. Asserting against it is how the first draft of this test failed.
+  const prevPkg = masterBaseline({
+    resumeSummary: 'the master summary',
+    skills1: 'A | B | C',
+    expertise: 'Governance | Delivery',
+  })
+  const { rows } = buildInsertions({
+    type: 'resume',
+    pkg: {
+      ResumeSummary: 'a summary rewritten for THIS posting',
+      SkillsBullets1: 'A | B | C',
+      ExpertiseBullets: 'Governance | Delivery',
+    },
+    prevPkg,
+    loop: 0,
+  })
+  const by = Object.fromEntries(rows.map((r) => [r.merge_field, r]))
+
+  assert.equal(by.ResumeSummary.method, 'model_rewrite',
+    'a summary that differs from the master was written for this posting')
+  assert.equal(by.ResumeSummary.before_text, 'the master summary',
+    'and "Show original" must have the master text to show')
+
+  assert.equal(by.SkillsBullets1.method, 'template_fill',
+    'a skills list the model copied verbatim really did come From profile')
+  assert.equal(by.ExpertiseBullets.method, 'template_fill', 'ditto an unchanged expertise list')
+
+  // The regression this replaces: with no baseline, ALL THREE collapse to template_fill and the
+  // rewritten summary claims "From profile".
+  const flat = buildInsertions({
+    type: 'resume',
+    pkg: { ResumeSummary: 'a summary rewritten for THIS posting' },
+    prevPkg: {},
+    loop: 0,
+  }).rows.find((r) => r.merge_field === 'ResumeSummary')
+  assert.equal(flat.method, 'template_fill')
+  assert.equal(flat.before_text, null,
+    'documents the OLD behaviour so the difference this change makes is visible in the suite')
+})
+
+test('H:baseline-is-loop-0-only: a remediation pass still compares against the previous pass', () => {
+  // The master must NOT leak into loops >= 1 — there, "before" means pass n-1's output, and
+  // realEdits/creditClosures depend on that meaning.
+  const { rows } = buildInsertions({
+    type: 'resume',
+    pkg: { ResumeSummary: 'pass 1 text' },
+    prevPkg: { ResumeSummary: 'pass 0 text' },
+    loop: 1,
+  })
+  const r = rows.find((x) => x.merge_field === 'ResumeSummary')
+  assert.equal(r.before_text, 'pass 0 text', 'loop 1 compares against loop 0, never against the master')
+  assert.equal(r.loop, 1)
+})
+
+test('H:baseline-loads-only-at-loop-0: writeInsertions must not read the master on a pass', () => {
+  // Structural: the master read is gated on `loop === 0`. Ungating it would silently redefine
+  // before_text for every remediation pass and corrupt what realEdits measures.
+  const src = readFileSync(new URL('../src/functions/tests/appInsertions.ts', import.meta.url), 'utf8')
+  assert.match(src, /loop === 0 \? await loadMasterBaseline\(\) : \{\}/,
+    'the master baseline must be read at loop 0 ONLY')
+  // ...and a Storage failure must degrade, never throw: losing a disclosure must not cost a build.
+  const fn = src.slice(src.indexOf('async function loadMasterBaseline'))
+  assert.match(fn.slice(0, fn.indexOf('\n}')), /catch \{ return \{\} \}/,
+    'loadMasterBaseline must swallow its errors — the packet still builds without a baseline')
 })

@@ -1,12 +1,37 @@
 // P1.4 persistence + read API. All derivation lives in `insertions.ts`, which imports neither
 // @azure/functions nor pg and is exercised by `api/test/insertions.test.mjs`.
 import { app, HttpRequest, HttpResponseInit, InvocationContext } from '@azure/functions'
+import { TableClient } from '@azure/data-tables'
 import { resolveOwner } from './appSession'
 import { getPgClient } from './pgClient'
 import { buildInsertions } from './insertions'
+import { masterBaseline } from './evidence'
 import { RequirementRef } from './swaps'
 
 const HEADERS = { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': '*', 'Access-Control-Allow-Methods': 'GET,OPTIONS' }
+
+/**
+ * The owner's standing master text, per merge field, for the loop-0 baseline.
+ *
+ * Reads the same MasterContext row and the same PartitionKey filter every other reader uses
+ * (`appFacts.ts:46`, `pipeline.loadProfile`); the merge-field mapping itself is `masterBaseline` in
+ * `evidence.ts`, which is the one place that knows what that table holds.
+ *
+ * SWALLOWS ITS ERRORS ON PURPOSE. The baseline is a disclosure — "here is what this was written
+ * from". If Storage is unreachable, the right outcome is the packet still builds and `Show original`
+ * says it has no earlier version, which `originalState` already words honestly. Throwing here would
+ * trade a missing explanation for a failed build.
+ */
+async function loadMasterBaseline(): Promise<Record<string, string>> {
+  try {
+    const conn = process.env.AZURE_STORAGE_CONNECTION_STRING
+    if (!conn) return {}
+    const ctx = TableClient.fromConnectionString(conn, 'MasterContext')
+    let mc: any = {}
+    for await (const e of ctx.listEntities({ queryOptions: { filter: "PartitionKey eq 'context'" } })) mc = e
+    return masterBaseline(mc)
+  } catch { return {} }
+}
 
 /**
  * Record what was injected into one artifact's merge fields.
@@ -24,6 +49,29 @@ const HEADERS = { 'Content-Type': 'application/json', 'Access-Control-Allow-Orig
  *   loop 1..n  remediation pass n
  * A re-render at the same loop rewrites that loop's rows identically instead of inventing a pass.
  * `before_text` comes from loop-1, so pass n's before is pass n-1's after - never its own.
+ *
+ * AT LOOP 0 THE "BEFORE" IS THE OWNER'S MASTER TEXT (added 2026-08-24).
+ * It used to be nothing at all: `prevPkg` was `{}` on the baseline package, so every row on the
+ * draft everyone actually looks at carried `before_text = null`. Two things were wrong downstream
+ * and both were the same root cause:
+ *   1. `Show original` had nothing to show and the app HID the control, so the reader could not
+ *      tell "unchanged" from "broken" from "first draft". The owner: *"that is black box and not
+ *      clear"*, and *"there is always an original value for those sections"* - which is right, and
+ *      SPEC 199 says the control is on every field.
+ *   2. `method` is derived as `changed ? 'model_rewrite' : 'template_fill'`, and with no before
+ *      NOTHING could ever be `changed`, so every generated loop-0 field was recorded as
+ *      `template_fill` and rendered "From profile" (`assetGate.js:242`) even when the model had
+ *      rewritten it wholesale for this posting. A false provenance claim on the screen whose whole
+ *      job is provenance. With a real baseline the two labels finally separate: work history the
+ *      model copied stays "From profile", a summary it rewrote becomes "Written for this posting",
+ *      which is SPEC 205's three origins and what the prototype renders.
+ *
+ * This does NOT disturb remediation crediting. `realEdits`/`creditClosures` are only ever handed one
+ * remediation pass's rows (`appRemediation.ts:275` selects `loop=$2` with pass >= 1); loop 0 is
+ * never passed to them, so a default value is never counted as an edit.
+ *
+ * A MasterContext read failure DEGRADES to the old behaviour rather than failing the build: the
+ * baseline is a disclosure, and losing it must never cost the owner their packet.
  */
 export async function writeInsertions(client: any, artifactId: string, oppId: string, args: {
   type: string; pkg: Record<string, any>; loop?: number
@@ -33,7 +81,7 @@ export async function writeInsertions(client: any, artifactId: string, oppId: st
     ? (await client.query(
         `select merge_field, after_text from insertion where artifact_id=$1 and loop=$2`, [artifactId, loop - 1])).rows
     : []
-  const prevPkg: Record<string, any> = {}
+  const prevPkg: Record<string, any> = loop === 0 ? await loadMasterBaseline() : {}
   for (const r of prev) prevPkg[r.merge_field] = r.after_text
 
   const reqRows = (await client.query(

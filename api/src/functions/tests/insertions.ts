@@ -63,11 +63,21 @@ export interface BuildInsertionsResult {
  * Build the insertion rows for one artifact.
  *
  * `method` is derived, not asserted:
- *  - `template_fill`  — first time this slot was filled; the package value went straight in.
- *  - `model_rewrite`  — a previous loop had different text here, so a model changed it.
+ *  - `template_fill`  — what ships is what this slot was written FROM, unchanged.
+ *  - `model_rewrite`  — what it was written from differs from what ships, so a model changed it.
  *  - `manual`         — reserved for a human edit; nothing in this pipeline produces it, and it is
  *                       never inferred, because guessing "a human did this" would launder a model
  *                       change as human judgement.
+ *
+ * "WRITTEN FROM" IS `prevPkg`, AND IT MEANS TWO DIFFERENT THINGS BY LOOP — deliberately, because
+ * both are the honest answer to "what did this text replace?":
+ *   loop 0     the owner's MasterContext block for this slot (`evidence.masterBaseline`)
+ *   loop 1..n  pass n-1's output
+ * Until 2026-08-24 loop 0 had no `prevPkg` at all, so `changed` could never be true there and every
+ * generated baseline field was recorded `template_fill` — rendered "From profile"
+ * (`assetGate.js:242`) even for a summary the model wrote from scratch for this posting. The
+ * distinction the two labels exist to draw was unreachable on the one loop most artifacts never
+ * leave.
  *
  * Attribution cites a requirement's VERBATIM — the employer's words — or nothing at all.
  */

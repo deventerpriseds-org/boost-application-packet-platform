@@ -230,9 +230,18 @@ export const fieldLabel = (f) => FIELD_LABEL[f] || String(f || '')
 export const METHOD_LABEL = {
   // The DESIGN's words (qc/assets.jsx:421 - `s.edited ? 'Written for this posting' : 'From profile'`).
   // Both readings are accurate for their state, so this is a wording alignment, not a claim change:
-  // `template_fill` means the package value went in UNCHANGED (insertions.ts:87 derives it as
+  // `template_fill` means the package value went in UNCHANGED (insertions.ts derives it as
   // `changed ? 'model_rewrite' : 'template_fill'`), which is exactly "From profile"; `model_rewrite`
-  // means a later pass rewrote it FOR this posting.
+  // means it was rewritten FOR this posting.
+  //
+  // THESE TWO ONLY STARTED TELLING THE TRUTH ON 2026-08-24. Before then loop 0 had no `before_text`
+  // at all, so `changed` was false for every baseline row and EVERYTHING generated said "From
+  // profile" — including a summary the model wrote from scratch. Seeding loop 0 from the owner's
+  // MasterContext (`appInsertions.loadMasterBaseline`) is what separates them: work history the
+  // model copied verbatim really is "From profile", a rewritten summary really is "Written for this
+  // posting". If a field ever renders "From profile" for text that is plainly tailored, the baseline
+  // is missing for that merge field — check `MASTER_BASELINE_FIELD` in `evidence.ts` before
+  // suspecting this map.
   //
   // The earlier wording stays recorded because it was chosen to kill a real defect: assetBlocks.js
   // once labelled `template_fill` "written for this posting", which is false in the FLATTERING

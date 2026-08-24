@@ -160,6 +160,63 @@ export const MC_LABEL: Record<string, string> = {
   softHardSkillsPool: 'Soft/hard skills pool',
 }
 
+/**
+ * MERGE FIELD -> the MasterContext block the packet's value for it was written FROM.
+ *
+ * This is the "original" behind SPEC 199's `Show original`, and it lives here because this file is
+ * already the one place that knows what MasterContext holds (`MC_KIND` / `MC_LABEL` above). A second
+ * copy of "which column backs which slot" is exactly the drift this repo keeps paying for.
+ *
+ * WHY IT IS THE MASTER AND NOT THE TEMPLATE. The owner: *"the show original is always referencing
+ * showing the template the prompts are using as a baseline. there is always an original value for
+ * those sections."* The prototype agrees and is more specific — `qc/data.js:203` gives the Skills
+ * field a `before` of "Enterprise Governance | Technology Strategy | Agile Transformation | ...",
+ * which is exactly the set `SKILL_ROWS[].orig` records, and `:161` gives ResumeSummary the generic
+ * master summary. Those are MasterContext blocks. The Google Doc template cannot be the source for
+ * these seven slots: it holds `{{ResumeSummary}}` at that position, not prose.
+ *
+ * ONE-TO-MANY IS DELIBERATE for the Relevant lists. `relevantProficiencies` is a single pooled block
+ * and the packet splits it into three slots, so all three legitimately share one original — that IS
+ * the text the prompts started from for each of them. Recorded here rather than silently, because a
+ * reader seeing the same original under three fields should know it is the pool, not a copy-paste
+ * bug.
+ *
+ * NOT MAPPED, on purpose: the portfolio/cover `@`-placeholders that have no standing master block
+ * (`@Company`, `@CoverLetterDate`, `@CoverLetterBody`). An unmapped field keeps a null baseline and
+ * `originalState` discloses that honestly rather than inventing one.
+ */
+export const MASTER_BASELINE_FIELD: Record<string, string> = {
+  ResumeSummary: 'resumeSummary',
+  SkillsBullets1: 'skills1',
+  SkillsBullets2: 'skills2',
+  ExpertiseBullets: 'expertise',
+  RelevantBullets1: 'relevantProficiencies',
+  RelevantBullets2: 'relevantProficiencies',
+  RelevantBullets3: 'relevantProficiencies',
+  WorkHistoryBullets1: 'workHistory1',
+  WorkHistoryBullets2: 'workHistory2',
+  WorkHistoryBullets3: 'workHistory3',
+  WorkHistoryBullets4: 'workHistory4',
+  '@AboutMe1_50words': 'aboutMe1',
+  '@AboutMe2_60words': 'aboutMe2',
+  '@ExecutiveProfile_55words': 'executiveProfile',
+  '@CoreAccomplishments_5blts_180words': 'coreAccomplishments',
+}
+
+/**
+ * The standing master text per merge field, from a MasterContext row. Pure — the caller reads the
+ * table. Returns only fields that HAVE a non-empty block, so an absent one stays absent rather than
+ * becoming an empty-string "original".
+ */
+export function masterBaseline(mc: Record<string, any> | null | undefined): Record<string, string> {
+  const out: Record<string, string> = {}
+  for (const [field, key] of Object.entries(MASTER_BASELINE_FIELD)) {
+    const v = (mc || {})[key]
+    if (typeof v === 'string' && v.trim()) out[field] = v
+  }
+  return out
+}
+
 /** Fields that are the owner's ban list, never a source of evidence. */
 export const NEVER_EVIDENCE = new Set(['itemsToOmit'])
 
