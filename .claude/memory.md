@@ -3330,3 +3330,44 @@ skipped or permanently red, i.e. an inert guard).
 
 **Separate, larger finding flagged for backlog, NOT this scope:** the product's own "Compact ATS
 Resume" is currently NOT CONFIGURED and never generated.
+
+---
+
+## 2026-08-24 — the prototype's evidence UI is BEHIND A CLICK, and that is why it kept getting mis-described
+
+`scripts/render-spec.mjs --act <recipe>` now clicks a control, **asserts the state it opens actually
+appeared**, and crops to the region it changed. Three recipes: `original`, `reword`, `keychip`.
+
+**Why this was needed, and it is the same failure twice.** The resting render shows only the
+affordances — `Show original`, `Reword it`, a keyword chip — and none of the panels they open. So
+every question about what those panels contain was still being answered from prose, which is the
+exact thing `render-spec.mjs` was written to stop. I then compounded it by telling the owner the
+prototype could not be rendered at all, when memory line ~2717 already said *"Never again assert
+what a screen shows from prose alone when the screen is executable."* The owner had to point at my
+own capability. **Read this file before claiming a capability is absent.**
+
+**What the click actually revealed — `KeyDetail`, the row-11 panel, has 3 of the owner's 4 asks:**
+
+| Owner's ask | In the prototype? | Where |
+|---|---|---|
+| what the template value was that got replaced | **yes** — "Took the place of **Digital Transformation** in Skills 1." | `assets.jsx:66`, from `SKILL_ROWS[].orig` |
+| the JD line that caused it to be added | **yes** — *Posting says "to cloud-native services"* | `assets.jsx:64`, `SKILL_ROWS[].quote` |
+| other fitting items that were not used | **yes** — `Swap for another skill…` select over `SKILL_BANK`, plus `Put back "<orig>"` and `Drop it, leave the line open` | `assets.jsx:73-84` |
+| **edit the text directly to what I want** | **NO** | — the one genuine gap |
+
+So the owner's own summary was right: *"you already have 3/4 options, we just need to be able to
+edit the text of anything swapped to in general. thats a wider design fix."* That maps exactly onto
+`swap_decision.override_value` + `override_state` (lineage §2/§5c), already logged in
+`IMPORT-NOTE.md` as **Not built**. It is a general per-swap capability, NOT a row-11 sub-feature,
+and it does not depend on the term library.
+
+**The guard on the new flag, and why it earns its keep.** A click that misses its target would
+screenshot the UNCHANGED page, and that reads as *"the design does not have this feature"* — a
+false negative pointing in exactly the direction that already produced one wrong answer to the
+owner. `--act` refuses to write a file on a miss and names what never appeared. Proven by breaking
+it: pointing `original` at `Ask for a change` printed `ACT_NO_OP ["ORIGINAL","Hide original"]` and
+wrote nothing.
+
+**Gotcha for future recipes:** a `variant`-match `KeyChip` renders a nested `≈` span, so the
+smallest element carrying the label has text `≈P&L Ownership` and an anchored `^…$` locator misses
+it. Pick an `exact`-match term (`Cloud-native Services`) or drop the anchors.
