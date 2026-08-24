@@ -125,11 +125,65 @@ if (!LABEL[STEP]) throw new Error(`--step must be one of ${Object.keys(LABEL).jo
 await page.locator(`text=/^${LABEL[STEP]}$/`).first().click()
 await page.waitForTimeout(1800)
 
+// ---- --act: drive a control, then screenshot the state it opens --------------------------------
+// The prototype's most load-bearing evidence UI is BEHIND A CLICK. A default screenshot shows the
+// affordance ("Show original", a keyword chip, "Reword it") and none of the panel it opens, so
+// "what does the design intend here" cannot be settled from the resting render. Each recipe below
+// names the control, the state it proves, and the region worth cropping to, so the answer to
+// "show me row N" is one command rather than a hand-written playwright script each time.
+const ACTS = {
+  // Row 10 — the posting-echo toggle. Flips "kept" → "rewording" and "Reword it" → "Undo".
+  reword:   { click: 'Reword it',    anchor: 'Wording kept from the posting', pad: 320,
+              proves: ['rewording', 'Undo'] },
+  // "Show original" — opens the ORIGINAL panel. In the prototype `s.before` is ALWAYS present,
+  // which is the whole basis of the owner's "there is always an original value" correction.
+  original: { click: 'Show original', anchor: 'ORIGINAL',                     pad: 260,
+              proves: ['ORIGINAL', 'Hide original'] },
+  // Row 11 — KeyChip → KeyDetail. "Took the place of X" is the swap attribution; the select is
+  // the alternatives bank. The chip must name a term SKILL_ROWS marks action:'swapped' AND whose
+  // match is 'exact' — a 'variant' chip renders a nested "≈" span, so the smallest element
+  // containing the label has text "≈Cycle Time Reduction" and an anchored ^…$ regex misses it.
+  keychip:  { click: 'Cloud-native Services', anchor: 'Took the place of',    pad: 300,
+              proves: ['Took the place of', 'Not comfortable claiming this?', 'Swap for another skill'] },
+}
+const ACT = arg('act', '')
+if (ACT && !ACTS[ACT]) throw new Error(`--act must be one of ${Object.keys(ACTS).join(', ')}`)
+let actResult = null
+if (ACT) {
+  const spec = ACTS[ACT]
+  const target = page.locator(`text=/^${spec.click.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$/`).first()
+  await target.scrollIntoViewIfNeeded()
+  await target.click()
+  await page.waitForTimeout(900)
+  const after = await page.evaluate(() => document.body.innerText)
+  // The click is only meaningful if the state it opens actually appeared. A silent no-op here
+  // (wrong label, control moved) would otherwise produce a screenshot of the UNCHANGED page and
+  // read as "the design does not have this" — the exact false negative this script exists to stop.
+  const missing = spec.proves.filter(p => !after.includes(p))
+  actResult = { act: ACT, clicked: spec.click, proves: spec.proves, missing }
+  if (missing.length) {
+    console.error(`ACT_NO_OP — clicked "${spec.click}" but ${JSON.stringify(missing)} never appeared.`)
+    console.error('The screenshot would show the unchanged page. Not writing it.')
+    await browser.close(); server.close(); process.exit(3)
+  }
+  // Crop to the region the click changed, so the state is legible instead of 4px tall in a full page.
+  const box = await page.locator(`text=/${spec.anchor.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/`).first()
+    .boundingBox().catch(() => null)
+  if (box) {
+    const vp = page.viewportSize()
+    await page.screenshot({ path: OUT, clip: {
+      x: Math.max(0, box.x - spec.pad), y: Math.max(0, box.y - spec.pad),
+      width: Math.min(vp.width, box.width + spec.pad * 2), height: Math.min(vp.height, box.height + spec.pad * 2) } })
+  } else {
+    await page.screenshot({ path: OUT })
+  }
+}
+
 const text = await page.evaluate(() => document.body.innerText)
-await page.screenshot({ path: OUT, fullPage: has('full') })
+if (!ACT) await page.screenshot({ path: OUT, fullPage: has('full') })
 
 console.log(JSON.stringify({
-  step: STEP, out: OUT, tokenValue,
+  step: STEP, out: OUT, tokenValue, act: actResult,
   rail: [...new Set(rail)],
   inlineCorrections: (text.match(/Corrected for you/g) || []).length,
   doneForYou: /Done for you/.test(text),
