@@ -629,6 +629,53 @@ do not claim the assertion is proven.
 Tier 1 is a property of the CODE PATH, not of the change's size. A one-line edit to `checks.ts` is
 tier 1; a 200-line settings screen is tier 2.
 
+## Self-attack BEFORE the verifier, and tier a RE-verification by cost (owner-instructed 2026-08-25)
+
+Both rules live in full in the org skill `verify-work` (steps **0b** and **0c**). They are mirrored
+here because this repo is where they were earned and where the evidence is.
+
+### 0b — find and FIX your own defects before spawning the verifier
+
+**This does not reduce what the verifier checks.** It still re-checks everything, including work you
+believe is proven; that redundancy is what catches you being wrong and it stays. What it removes is
+the LOOP — implement, verify, the verifier finds bugs you could have found, fix, verify AGAIN. Owner:
+*"you just need to attempt to fix the things you find before the validater runs rather than wasting
+loops."*
+
+**Measured on `D:owner-edit-offsets-two-frames`** — 27 minutes, 74 tool calls, 228k tokens, four
+findings, and **three were plain greps I skipped**. Four checks, seconds each:
+
+1. **Who READS what you wrote?** Grep for a CONSUMER of every new column/field/export, not just the
+   writer. *`correction.frame` shipped write-only — the SELECT mapping dropped it, and the field
+   being optional on the interface kept `tsc` quiet.*
+2. **Can the system PRODUCE your fixture?** Drive the real producer or check against what it emits.
+   *Missed twice in one day (VERIFY-30 F4, then the F5 rebuild detector): a guard passed on a
+   hand-assigned `applied_seq` ordering the writers never produce, so the defect was still live.*
+3. **How many HOMES does the concept have** — and **can the existing parity guard even SEE your
+   change?** *A third DDL home was missed, and `H:correction-ddl-parity` compared only the `source`
+   domain, so it was structurally blind to a missing column.*
+4. **Delete each new load-bearing PRODUCTION line — does a test fail?** *This is the one that
+   genuinely needed an independent adversary: deleting a positional check left 840/840 green while
+   96 of 1218 tampered documents got spliced.*
+
+### 0c — on loop 2+, tier by COST, never by "could this have been impacted?"
+
+That question is a judgement, and judging it wrong is how a regression ships. **Measured:** the
+one-line F-1 fix changed what `frameOf` returns for real rows — the INPUT to five of eight claims
+plus the safety floor. "Obviously unaffected" would have been wrong for all but one of them.
+
+| cost | on every loop |
+|---|---|
+| **Cheap + deterministic** (the suite, a build) | **Re-run ALL of it, every loop.** Seconds. The net under everything. |
+| **Expensive re-derivation** (fuzz sweeps, differential runs, schema on a fresh DB, per-guard mutation) | Only what the fix's blast radius touches — and the brief must STATE the radius. |
+
+The loop-2 brief carries a required PRIOR STATE block (what was confirmed, what was refuted, the
+blast radius, the cheap-suite result) ending in **CHALLENGE THE RADIUS** — the verifier is the check
+on the implementer's radius being wrong, so it is handed the reasoning and invited to reject it
+rather than silently inheriting it.
+
+---
+
 ## Feasibility BEFORE implementation — the table comes first (strict rule, owner-instructed 2026-08-25)
 
 ACs say what "done" looks like. They do **not** say whether the thing is buildable today, whether it
