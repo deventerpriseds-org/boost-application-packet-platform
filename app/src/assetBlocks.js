@@ -26,6 +26,8 @@
  * defaults are deliberately opposite, which is exactly why both are readable from the DOM: a fix
  * that flips the wrong one has to be visible.
  */
+import { markRuns } from './highlight.js'
+
 export const BLOCK_HOOKS = {
   root: 'asset-blocks',            // the card root (carries data-qc-open)
   toggle: 'blocks-toggle',         // show/hide the blocks
@@ -339,6 +341,32 @@ export function proposedKeywordDetail(reqs, keyword) {
     }
   }
   return null
+}
+
+/**
+ * Which proposed keywords this field's draft ACTUALLY CONTAINS, and which it does not.
+ *
+ * ONE derivation, computed once, so the highlight, the chip state and the "not in this text" line
+ * can never disagree about the same field. Each of those three is a claim about the same fact; three
+ * places computing it separately is how two of them end up telling the reader different things.
+ *
+ * Presence is decided by `markRuns`, which is whole-word and exact — never a similarity score. A
+ * chip that says a term is present is an ACCUSATION in the same sense a highlight is, and this
+ * repo reserves fuzzy matching for ranking.
+ *
+ * ABSENCE IS REPORTED AS ABSENCE FROM THE TEXT, NEVER AS "REWORDED". Text that does not contain a
+ * keyword is equally consistent with the writer having reworded it and with it never having been
+ * placed at all, and nothing in the product can distinguish those. Saying "reworded" would be a
+ * guess presented as a finding.
+ *
+ * @returns {{present: string[], absent: string[]}} both in the input's order
+ */
+export function keywordPresence(text, keywords) {
+  const list = Array.isArray(keywords) ? keywords : []
+  if (!list.length) return { present: [], absent: [] }
+  const hit = new Set()
+  for (const r of markRuns(text, list, 'keyword')) if (r.mark && r.phrase != null) hit.add(r.phrase)
+  return { present: list.filter((k) => hit.has(k)), absent: list.filter((k) => !hit.has(k)) }
 }
 
 // ── packet-level provenance (decision 9) ────────────────────────────────────────────────────────

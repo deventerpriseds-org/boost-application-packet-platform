@@ -18,7 +18,7 @@ const provenance = {
       // (unlocatable); req-2 has NO keyword, so its field must render no chip group at all rather
       // than an empty one or "0 keywords".
       { id: 'req-1', seq: 1, kind: 'must_have', item_text: 'roadmap ownership', competency: 'product',
-        model_keyword: 'roadmap ownership', verbatim: 'own the product roadmap end to end' },
+        model_keyword: 'hiring technology', verbatim: 'own the product roadmap end to end' },
       { id: 'req-2', seq: 2, kind: 'nice_to_have', item_text: 'vendor selection', competency: 'ops',
         model_keyword: null, verbatim: null },
       { id: 'req-3', seq: 3, kind: 'responsibility', item_text: 'coach PMs', competency: 'people',

@@ -363,9 +363,17 @@ test('H:mark-renders-in-the-draft: the wiring exists, not just the function', ()
   // The hover link is only real if the ACTIVE phrase reaches every shape that prints draft text.
   // Threading it into one shape and not the other is the same half-wiring this guard already
   // caught once for `phrases` itself, and it fails silently: the pipe block simply never lights.
-  assert.match(src, /phrases=\{wording\} active=\{activeWording\}/,
+  assert.match(src, /phrases=\{markPhrases\} active=\{activeWording\}/,
     'BlockBody must receive the active phrase alongside the phrases it marks')
-  assert.match(src, /phrases=\{wording\}/, 'the marker must be fed the kept phrases for THIS field')
+  // `markPhrases` must carry BOTH treatments through the one matcher. Passing only `wording` would
+  // silently drop every keyword highlight; passing them in two separate markRuns calls would let
+  // the two disagree about overlaps, which the longest-first rule can only prevent globally.
+  assert.match(src, /const markPhrases = \[\.\.\.wording, \.\.\.proposedKeywords\.map\(\(k\) => \(\{ phrase: k, mark: 'keyword' \}\)\)\]/,
+    'both posting echoes and proposed keywords must reach the marker in ONE list')
+  // Superseded in form, not in intent: the kept phrases now reach the marker THROUGH markPhrases,
+  // so this pins the spread rather than the old prop. Still the same guarantee - the phrases marked
+  // in a field's draft are that field's own, never a packet-wide list.
+  assert.match(src, /\[\.\.\.wording,/, 'the marker must be fed the kept phrases for THIS field')
 })
 
 

@@ -71,10 +71,12 @@ test('H:proposed-keywords-compute-nothing: the selector counts, scores and grade
 test('H:keyword-chip-says-proposed-on-every-chip: the word is not on the heading alone', () => {
   const jsx = readFileSync(new URL('../src/screens/AssetBlocks.jsx', import.meta.url), 'utf8')
   const i = jsx.indexOf('BLOCK_HOOKS.keywordChip}')
-  assert.ok(i > 0, 'the chip must exist')
-  // Inside the chip element itself, before the map closes. A heading scrolls out of view and a
-  // reader who sees one chip must still see that it is a proposal.
-  const chip = jsx.slice(i, i + 900)
+  const end = jsx.indexOf('BLOCK_HOOKS.keywordDetail', i)
+  assert.ok(i > 0 && end > i, 'the chip must exist and be followed by the detail panel')
+  // BOUNDED BY THE NEXT HOOK, not by a character count. The first version sliced a fixed 900 chars
+  // and broke the moment the chip grew handlers - a guard that fails on unrelated growth teaches
+  // people to edit the guard instead of reading it.
+  const chip = jsx.slice(i, end)
   assert.match(chip, />proposed</, 'the literal word must render inside each chip element')
   // and it must not borrow the visual language of a VERIFIED placement
   assert.ok(!/qc-kw|qc-echo/.test(chip), 'a proposed chip must not wear the highlight classes')

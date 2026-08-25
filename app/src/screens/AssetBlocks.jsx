@@ -34,6 +34,7 @@ import {
   countMismatchNote, deriveItems, draftSizeText, expectationFor, latestRows, listBodyModel, listsOf,
   targetFor,
   ASSET_ANSWERS_DEFAULT_OPEN, correctionsForField,
+  keywordPresence,
   meterModel, originalState, proposedKeywordDetail, proposedKeywordsForRow, reqsForRow, scopeSwaps,
   shapeOf, sharedSourceNote, statPct, wordCount,
 } from '../assetBlocks.js'
@@ -475,6 +476,14 @@ function AssetBlock({ row, reqs, swapsForList, wide, artifactId, listOwners, thr
   // came from can never disagree about which requirements this field cites.
   const proposedKeywords = proposedKeywordsForRow(reqs)
   const openKeywordDetail = openKeyword ? proposedKeywordDetail(reqs, openKeyword) : null
+  // ONE derivation of "does this draft contain this keyword", feeding the highlight, the chip state
+  // AND the not-in-the-text line. Three separate computations of the same fact is how two of them
+  // come to tell the reader different things about one field.
+  const kwPresence = keywordPresence(row.after_text, proposedKeywords)
+  const kwPresent = new Set(kwPresence.present)
+  // Both treatments go through markRuns in ONE pass, so a posting echo and a keyword can never
+  // claim the same characters. `mark` rides per phrase; see highlight.js.
+  const markPhrases = [...wording, ...proposedKeywords.map((k) => ({ phrase: k, mark: 'keyword' }))]
   const [showBefore, setShowBefore] = useState(false)
   // What the "Show original" panel says. Derived in ../assetBlocks.js, never inline: this file
   // renders, it does not decide. See `originalState` for why before_text may legitimately be null.
@@ -559,7 +568,7 @@ function AssetBlock({ row, reqs, swapsForList, wide, artifactId, listOwners, thr
         )}
       </div>
 
-      <BlockBody row={row} shape={shape} swapsForList={swapsForList} artifactId={artifactId} listOwners={listOwners} phrases={wording} active={activeWording} />
+      <BlockBody row={row} shape={shape} swapsForList={swapsForList} artifactId={artifactId} listOwners={listOwners} phrases={markPhrases} active={activeWording} />
 
       <CountMismatch note={countNote} />
 
@@ -775,17 +784,31 @@ function AssetBlock({ row, reqs, swapsForList, wide, artifactId, listOwners, thr
             {proposedKeywords.map((k) => (
               <span key={k} className="px-chip" role="button" tabIndex={0}
                 data-qc={BLOCK_HOOKS.keywordChip} data-qc-keyword={k}
+                data-qc-present={kwPresent.has(k) ? '1' : '0'}
                 onClick={() => setOpenKeyword(openKeyword === k ? null : k)}
                 onKeyDown={(e) => {
                   if (e.key !== 'Enter' && e.key !== ' ') return
                   e.preventDefault()
                   setOpenKeyword(openKeyword === k ? null : k)
                 }}
-                style={{ cursor: 'pointer' }}>
+                onMouseEnter={() => setActiveWording(k)}
+                onMouseLeave={() => setActiveWording(null)}
+                onFocus={() => setActiveWording(k)}
+                onBlur={() => setActiveWording(null)}
+                style={{ cursor: 'pointer', opacity: kwPresent.has(k) ? 1 : 0.72 }}>
                 {/* The word rides on EVERY chip, not on the group heading. A reader who sees one
                     chip must still see that it is a proposal - the owner's constraint is that it
                     can never be mistaken for a validated placement, and a heading scrolls away. */}
                 {k} <span className="px-small" style={{ fontWeight: 700 }}>proposed</span>
+                {/* A statement about the TEXT, never about the writer. "not in this text" is what
+                    can be checked; "reworded" cannot - absent text is equally consistent with a
+                    rewording and with the term never having been placed, and nothing here can tell
+                    those apart. */}
+                {!kwPresent.has(k) && (
+                  <span className="px-small" style={{ fontWeight: 700, color: 'var(--proto-ink2)' }}>
+                    {' '}not in this text
+                  </span>
+                )}
               </span>
             ))}
           </div>

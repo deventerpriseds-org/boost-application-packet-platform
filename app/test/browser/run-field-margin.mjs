@@ -305,6 +305,7 @@ const chipInfo = await page.evaluate(() => {
       hasGroup: !!group,
       chips: group ? [...group.querySelectorAll('[data-qc="blocks-keyword-chip"]')].map((c) => ({
         kw: c.getAttribute('data-qc-keyword'), text: c.innerText.trim(),
+        present: c.getAttribute('data-qc-present'),
         cls: c.className, style: c.getAttribute('style') || '',
       })) : [],
       groupText: group ? group.innerText : '',
@@ -327,7 +328,7 @@ ok('no chip group prints a count, a ratio or a percentage',
 
 const rsChips = (chipInfo.ResumeSummary || {}).chips || []
 ok('one chip per proposed keyword, carrying the keyword itself',
-  rsChips.length === 1 && rsChips[0].kw === 'roadmap ownership', JSON.stringify(rsChips.map((c) => c.kw)))
+  rsChips.length === 1 && rsChips[0].kw === 'hiring technology', JSON.stringify(rsChips.map((c) => c.kw)))
 ok('the literal word "proposed" is inside EVERY chip, not just a heading',
   rsChips.length > 0 && rsChips.every((c) => /\bproposed\b/.test(c.text)),
   JSON.stringify(rsChips.map((c) => c.text)))
@@ -336,7 +337,7 @@ ok('no chip carries the highlight classes or a highlight swatch',
   JSON.stringify(rsChips.map((c) => c.cls)))
 
 await page.evaluate(() => {
-  const c = document.querySelector('[data-qc="blocks-keyword-chip"][data-qc-keyword="roadmap ownership"]')
+  const c = document.querySelector('[data-qc="blocks-keyword-chip"][data-qc-keyword="hiring technology"]')
   if (c) c.click()
 })
 await page.waitForTimeout(150)
@@ -363,6 +364,52 @@ const unloc = await page.evaluate(() => {
 })
 ok('a keyword whose posting line is UNLOCATABLE says so instead of quoting the paraphrase',
   !!unloc && /could not be located/i.test(unloc) && !/coach PMs/.test(unloc), JSON.stringify(unloc))
+
+// ---------- Row 11 Phase B: presence in the draft ----------
+const kwMarks = await page.evaluate(() => {
+  const out = {}
+  for (const card of document.querySelectorAll('[data-qc="blocks-field"]')) {
+    out[card.getAttribute('data-qc-field')] =
+      [...card.querySelectorAll('.qc-kw')].map((e) => e.textContent)
+  }
+  return out
+})
+// AC-B1. 'hiring technology' IS in ResumeSummary's draft, so it is marked in the text.
+ok('a proposed keyword PRESENT in the draft is highlighted there',
+  (kwMarks.ResumeSummary || []).some((t) => /hiring technology/i.test(t)), JSON.stringify(kwMarks))
+// AC-B2. 'coaching' is NOT in SkillsBullets1's draft, so nothing is marked and the chip says so.
+ok('a proposed keyword ABSENT from the draft is highlighted nowhere',
+  (kwMarks.SkillsBullets1 || []).length === 0, JSON.stringify(kwMarks.SkillsBullets1))
+const s1Chips = (chipInfo.SkillsBullets1 || {}).chips || []
+ok('the absent chip is marked not-present and SAYS "not in this text"',
+  s1Chips.length === 1 && s1Chips[0].present === '0' && /not in this text/i.test(s1Chips[0].text),
+  JSON.stringify(s1Chips.map((c) => [c.present, c.text])))
+// Row 3: absence is reported about the TEXT. "Reworded" is undecidable - absent text is equally
+// consistent with a rewording and with the term never having been placed.
+ok('and it never claims the keyword was reworded',
+  s1Chips.every((c) => !/reworded|≈/i.test(c.text)), JSON.stringify(s1Chips.map((c) => c.text)))
+ok('the PRESENT chip is marked present and does NOT carry the absent wording',
+  rsChips.length === 1 && rsChips[0].present === '1' && !/not in this text/i.test(rsChips[0].text),
+  JSON.stringify(rsChips.map((c) => [c.present, c.text])))
+
+// AC-B3. Hovering a chip lights its run through the SAME identity link the wording rows use.
+await page.evaluate(() => {
+  const c = document.querySelector('[data-qc="blocks-keyword-chip"][data-qc-keyword="hiring technology"]')
+  if (c) c.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }))
+})
+await page.waitForTimeout(90)
+const litByChip = await page.evaluate(([cls]) =>
+  [...document.querySelectorAll('.' + cls)].map((e) => e.textContent), [HIGHLIGHT_ACTIVE_CLASS])
+ok('hovering a keyword chip lights its occurrence in the draft',
+  litByChip.length === 1 && /hiring technology/i.test(litByChip[0]), JSON.stringify(litByChip))
+await page.evaluate(() => {
+  const c = document.querySelector('[data-qc="blocks-keyword-chip"][data-qc-keyword="hiring technology"]')
+  if (c) c.dispatchEvent(new MouseEvent('mouseout', { bubbles: true }))
+})
+await page.waitForTimeout(90)
+const afterChip = await page.evaluate(([cls]) => document.querySelectorAll('.' + cls).length,
+  [HIGHLIGHT_ACTIVE_CLASS])
+ok('and leaving the chip releases it', afterChip === 0, String(afterChip))
 
 // ---------- claim 3: an UNMEASURED change log prints nothing ----------
 mode = 'unmeasured'
