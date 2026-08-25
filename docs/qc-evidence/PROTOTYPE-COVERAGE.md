@@ -503,12 +503,21 @@ imports an assistant component.
 **§4.11 tally — 9 rows:** BUILT **0** · PARTIAL **2** · ABSENT **6** · DELIBERATE **1**.
 Against the 8 non-deferred rows: **0 BUILT (0%), 2 present in some form (25%).**
 
-> **This is the single largest un-built surface in the spec, and it is the one row in this document
-> whose classification I am least confident about.** It is either (a) a deliberate architectural
-> replacement, in which case eight rows leave the denominator and every headline below rises, or
-> (b) a real gap. The evidence for (a) is a code comment, and `accuracy-log.md`'s first entry is
-> exactly the failure of treating a code comment as a decision. **Ask the owner which it is** — it
-> moves the headline by about four points on its own.
+> **ASKED AND ANSWERED, 2026-08-25 — and the answer was neither (a) nor (b).** This section used to
+> end by saying the classification rested on a code comment and that the owner should be asked. They
+> were. Owner: *"delay the panel work. I will have to use the systme for a couple of days to see if
+> we need it. i may not need it for the packet creation flow but for assistance at some point while
+> working throught the platform itself is possible."*
+>
+> So it is **not** a deliberate replacement — nobody had decided that, the comment at
+> `AssetBlocks.jsx:495` merely read as though someone had. And it is not a straightforward gap
+> either: the owner's own framing moves the question off the packet-creation flow and onto the
+> platform, which would be a different surface from the one SPEC §4.11 describes.
+>
+> **These eight rows therefore STAY in the denominator.** Reclassifying them DELIBERATE would lift
+> the headline by roughly four points on the strength of a decision that has not been made — the
+> precise way a coverage number gets flattered. Tracked as `D:assistant-panel-owner-trialling`;
+> re-ask after the owner has used the system for a few days.
 
 ### §4.12 Prototype-only comparison mode
 
