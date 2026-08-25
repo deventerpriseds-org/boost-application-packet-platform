@@ -3499,3 +3499,48 @@ api/src` -> zero), unlike `swap_decision` which `writeSwaps` deletes and re-inse
 constraints found: `source` carries `check (source in ('profile_figure','generalized'))` so a third
 value needs the CHECK altered, and `correction_span_matches_phrase` demands real offsets.
 Independent AC passes writing to `docs/qc-evidence/AC-keyword-chips.md` and `AC-swap-override.md`.
+
+---
+
+## ACT — owner decisions on #30, and Row 11 Phase A shipped (2026-08-25)
+
+**DECISION A — an owner override is RE-APPLIED after a rebuild.** Owner: *"im fine iwht your
+recomendation."* The AC pass found the blocking defect: `applyCorrections` has exactly two call
+sites and NEITHER re-applies a stored row, so on `regen: true` the edit is discarded from the
+document while the `correction` row survives, still asserting it was applied. The change log would
+tell the owner an edit is in place that is not in the document — worse than losing it.
+
+**DECISION B — an owner edit NEVER moves the gate, in either direction.** The owner rejected the
+first explanation outright: *"B - is unclear to me i need examples because i actually dont knwo what
+you mean by owner change cited by definition blah blah blah, its not human intuititve."* Correct —
+it was jargon. Re-explained with the two concrete failures and the owner chose **Option 1**.
+
+The two failures the decision resolves, both measured by the AC pass:
+1. Edit `Vendor selection` -> `Supplier negotiation and vendor selection`; `normItem` no longer
+   matches, the row goes `swapped` + `unattributed`, and **`changes_cited` FAILS the packet naming
+   the owner's own words**.
+2. Edit `Vendor selection` -> `Vendor management`; `attribute()` at containment >= 0.34 **silently
+   buys a citation** and the gate goes GREEN. The quieter failure and the more dangerous one — a
+   green light nobody earned.
+
+**Option 1 as decided:** the edited line still RENDERS in the QC list marked as the owner's own, so
+it is visible and auditable, but it can neither fail the packet nor buy a pass. The gate goes back
+to judging only what the MODEL did, which is what it was built for.
+
+**LESSON, recorded because it is about how to ask, not what to build:** the first framing —
+*"an owner-authored change is cited by definition"* — was unusable. A decision request must be
+posed in the owner's terms with a concrete before/after, never in the codebase's vocabulary. The
+owner cannot ratify a design they have to decode first.
+
+**SHIPPED — Row 11 Phase A, proposed keyword chips (`94f8478`, `10640ea`, on `main`).**
+Measured before building: **10,168 of 10,168** requirement rows carry a `model_keyword` across 681
+opportunities (db-query 32804912202), so every field has chips and the "empty margin" risk was not
+real. EXTENDS `reqsForRow` by consuming its output — no new table, endpoint or matcher. The word
+`proposed` is inside every chip rather than on the heading, and chips refuse `qc-kw`/`qc-echo` so a
+proposal can never wear the visual language of a verified placement. The detail panel omits SPEC
+4.6's match grade, `≈` and displacement text: none has a source, and "reworded" is UNDECIDABLE
+rather than merely unsourced — absent text is equally consistent with reworded and never placed.
+284/284 Node, 40/40 browser probe.
+
+**Phase B (highlight placement in the draft; "claims but does not contain") is TIER 1 and NOT built.**
+It names an offender. Its prerequisite — `markRuns` marking inside words — was fixed in `ceab754`.
