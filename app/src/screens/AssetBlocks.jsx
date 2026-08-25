@@ -419,8 +419,26 @@ function BlockBody({ row, shape, swapsForList, artifactId, listOwners, phrases, 
  * `posting_figure_echo`, and it is deliberately NOT marked here: those offenders read
  * `$18M (your profile states ...)` rather than a bare phrase, and a figure taken from the ad is
  * already CORRECTED by R3 rather than left for the reader to judge — marking it would point at
- * text the pipeline has usually already rewritten. Keyword marking stays absent because
- * `term_library_entry` has zero published rows; a highlight with no source would be invented.
+ * text the pipeline has usually already rewritten.
+ *
+ * KEYWORD marking is absent, and the reason is narrower than an earlier version of this comment
+ * said. It read "term_library_entry has zero published rows; a highlight with no source would be
+ * invented", and that sentence caused a real false block: a session quoted it as proof the keyword
+ * chips and the SPEC 4.6 detail panel could not be built at all, and reported the whole row to the
+ * owner as gated on the library. The owner corrected it — *"the ai generates keywords from the
+ * promtps so you will have several it suggests term library or not... no matter what the notes
+ * ssay its a self block unneccasarily"* — and the data agrees:
+ *   `requirement.model_keyword` IS jd_table's ATS Keyword. It is written by the JD parse
+ *   (`requirements.ts:408`), returned by the requirements endpoint (`appRequirements.ts:409`),
+ *   reduced to a distinct list by `postingAnalysis.js:258`, and ALREADY RENDERED on the JD step
+ *   (`PostingAnalysis.jsx:401`).
+ * So a source exists. What `term_library_entry` gates is SCORING — the schema's rule is
+ * `never scoreable`, which is about coverage counts, not about display. A model-proposed keyword
+ * shown WITH that label is honest; the same keyword inside a coverage number is not.
+ *
+ * It stays unmarked HERE only because nothing yet says which keywords a given FIELD places — that
+ * is a per-asset placement question, not a library question. Do not repeat "blocked on the library"
+ * without re-reading this paragraph.
  */
 function Marked({ text, phrases, active = null }) {
   const runs = markRuns(text, phrases)

@@ -628,3 +628,46 @@ do not claim the assertion is proven.
 
 Tier 1 is a property of the CODE PATH, not of the change's size. A one-line edit to `checks.ts` is
 tier 1; a 200-line settings screen is tier 2.
+
+## Feasibility BEFORE implementation — the table comes first (strict rule, owner-instructed 2026-08-25)
+
+ACs say what "done" looks like. They do **not** say whether the thing is buildable today, whether it
+is **already built**, or whether a stated blocker is **real**. Work kept getting scoped, agreed and
+started, then parked hours later when one of those turned out to be false. The owner named it:
+
+> *"we have wasted hours on things you gave the impression of us making progress on only needing to
+> be parked several hours if not days later. this stinks of not doing any feasibility testing in
+> combination with AC before getting started with implementation."*
+
+**Every AC pass publishes this table FIRST**, above the ACs — one row per dependency the work names:
+
+| Dependency | Producer (who writes it) | Consumer (who reads it today) | Proof (command + result) | Verdict |
+|---|---|---|---|---|
+
+Verdict is `EXISTS` / `ABSENT` / **`EXISTS-BUT-CONSTRAINED`**. The third is the one that matters:
+most false blockers are a constraint on one USE being read as the absence of the thing itself.
+`ALREADY BUILT` is a first-class outcome — say it first, then write a regression guard, not a feature.
+
+**"Blocked" / "absent" / "not built" / "there is no X" is the heaviest claim you can make**, and it
+needs a sweep of X's **producers AND consumers**. Never sufficient:
+- a **single-file grep** — a control defined in an imported component has none of its strings in the
+  file that mounts it. Read the import list.
+- a **code comment** describing a limitation — that is a claim about the code, not the code. If the
+  thing has a writer and a reader, the constraint is about how it may be *used*. Say which.
+- **`.claude/actions.md` / `.claude/DEFERRED.md` unchecked** — anything shown to the owner as OPEN
+  must be reconciled against them first, and must name its ORIGIN (owner request / SPEC / prototype
+  inventory). A row whose origin is "the prototype" is a PROPOSAL and is never something the owner
+  is blocking.
+
+Three misses in one session, all the same shape — a claim about what exists, made without tracing
+the data. Each cost real hours:
+
+| Claimed | Truth | The one command that would have settled it |
+|---|---|---|
+| "the term library blocks the keyword chips" | `requirement.model_keyword` had been flowing end to end for months, already rendered on the JD step | `grep -rn model_keyword api/src app/src` |
+| "there is no Undo control in the field margin" | mounted there, imported from `QcRail.jsx` | reading the import list of the file being grepped |
+| "the reword toggle is blocked on an owner decision" | the owner asked for it, it shipped as **List Tweaks**, and `actions.md` recorded it | `grep -rniE reword .claude/actions.md` |
+
+Enforced by the Stop gate as requirement **(h)** (`eds-claude-skills/setup.sh`, `_eds_version` 11+),
+deliberately separate from the integration trace **(g)**: **(g) asks what the change AFFECTS, (h)
+asks whether what the work PRESUMES actually exists.**
