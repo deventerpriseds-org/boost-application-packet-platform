@@ -38,7 +38,7 @@
 // where the least load-bearing item sits, and it is deterministic, which a "pick one" never is.
 
 export type SwapAction = 'kept' | 'swapped' | 'merged' | 'dropped' | 'added'
-export type SwapDriver = 'posting' | 'rule' | 'unattributed'
+export type SwapDriver = 'posting' | 'rule' | 'unattributed' | 'owner'
 
 export interface SkillProvenance {
   label: string

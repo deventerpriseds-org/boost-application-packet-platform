@@ -24,7 +24,7 @@ import { normalizePostingText } from './jdText'
 export type ListKey = 'skills_1' | 'skills_2' | 'relevant_1' | 'relevant_2' | 'relevant_3'
 export type Origin = 'profile_original' | 'pass_a' | 'pass_b'
 export type Action = 'kept' | 'swapped' | 'merged' | 'dropped' | 'added'
-export type Driver = 'posting' | 'rule' | 'unattributed'
+export type Driver = 'posting' | 'rule' | 'unattributed' | 'owner'
 
 export const LISTS: ListKey[] = ['skills_1', 'skills_2', 'relevant_1', 'relevant_2', 'relevant_3']
 

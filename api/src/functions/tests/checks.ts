@@ -907,7 +907,18 @@ export function runChecks(input: CheckInput): CheckResult[] {
   if (!swaps.length) {
     out.push(na('changes_cited', 'no swap rows recorded for this packet', 'every swapped/added item cites a requirement'))
   } else {
-    const changes = swaps.filter(s => s.action === 'swapped' || s.action === 'added')
+    // DECISION B (owner, 2026-08-25): AN EDIT THE OWNER MADE NEVER MOVES THIS GATE, EITHER WAY.
+    //
+    // Both directions matter and the second is the dangerous one. Without this, an owner who
+    // rewrote a line got their packet FAILED and their own words listed as the offender - the
+    // gate accusing them of not justifying their resume to the tool. And the quieter failure: an
+    // edit that happened to score over ATTRIBUTION_THRESHOLD against some requirement would have
+    // been marked 'posting' and bought a citation nobody earned. Excluding owner rows from BOTH the
+    // numerator and the denominator is what keeps this check about what the MODEL did, which is
+    // what it was built for.
+    //
+    // Owner rows are still rendered in the swaps list; they are simply not this check's business.
+    const changes = swaps.filter(s => (s.action === 'swapped' || s.action === 'added') && s.driver !== 'owner')
     const uncited = changes.filter(s => s.driver !== 'posting')
     out.push(!changes.length
       ? ok('changes_cited', 'nothing was swapped or added', 'every swapped/added item cites a requirement')

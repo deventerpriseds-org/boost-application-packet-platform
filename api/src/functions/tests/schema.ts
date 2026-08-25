@@ -562,7 +562,7 @@ create table if not exists swap_decision (
   requirement_id uuid references requirement(id) on delete set null,
   verbatim_quote text,                 -- the EMPLOYER's words, never a paraphrase
   confidence     numeric(4,3) not null default 0,
-  driver         text not null check (driver in ('posting','rule','unattributed')),
+  driver         text not null check (driver in ('posting','rule','unattributed','owner')),
   rationale      text,
   -- P3-21. 'writeSwaps' deleted 'where packet_id=$1' on EVERY build and this table had no loop
   -- column, so pass 2 destroyed pass 1's swap record - the loop deleting its own justification for
@@ -574,6 +574,20 @@ create table if not exists swap_decision (
   -- A citation needs a source: a posting-driven row must carry both, and no other row may claim one.
   check ((driver = 'posting') = (verbatim_quote is not null))
 );
+-- DECISION B (owner, 2026-08-25): an edit the OWNER made never moves the gate, in either
+-- direction. It cannot fail the packet and it cannot buy a citation. That needs a fourth driver,
+-- because the alternative - a separate boolean beside driver - would be a second place that answers
+-- "who made this change", and the two would eventually disagree.
+--
+-- Same lesson as correction.source one migration earlier: the inline CHECK above only decides what a
+-- FRESH database is born with. A create-table-if-not-exists is a no-op on a table that already
+-- exists, so production keeps the old three-value CHECK until an explicit ALTER runs.
+--
+-- The paired check below is unaffected and stays exactly as strict: only a posting-driven row may
+-- carry a verbatim quote, so an owner row carries none. An owner did not cite the employer.
+alter table swap_decision drop constraint if exists swap_decision_driver_check;
+alter table swap_decision add constraint swap_decision_driver_check
+  check (driver in ('posting','rule','unattributed','owner'));
 -- ORDER IS LOAD-BEARING, for the same reason as the check_result unique further down (H34).
 -- On a database where these tables ALREADY exist - production, since P1 - 'create table if not
 -- exists' is a NO-OP and the inline 'loop' column above is never added. The index on the next line

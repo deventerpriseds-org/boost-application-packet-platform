@@ -232,7 +232,7 @@ function CompareTab({ swaps, swapsLoading, swapsError, insertions }) {
                       <td style={{ fontSize: 12, padding: '6px 8px', borderBottom: '1px solid var(--proto-rule-soft)' }}>
                         {s.verbatim_quote
                           ? <span data-qc={GATE_HOOKS.quote}>the posting says <span className={HIGHLIGHT_CLASS.postingEcho}>&quot;{s.verbatim_quote}&quot;</span></span>
-                          : <span className="px-small">{s.driver === 'unattributed' ? 'no line of the posting backs this change' : s.rationale || String(s.driver || '')}</span>}
+                          : <span className="px-small">{s.driver === 'owner' ? 'you changed this yourself' : s.driver === 'unattributed' ? 'no line of the posting backs this change' : s.rationale || String(s.driver || '')}</span>}
                       </td>
                     </tr>
                   ))}
