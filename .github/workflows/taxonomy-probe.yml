@@ -3,14 +3,21 @@
 # WHY THIS EXISTS. The claim "roadmap 626, board 480, budget 416, operating model 222, P&L 83 —
 # none in O*NET" is written in `schema.ts:299` and has been quoted in design decisions ever since,
 # including one that would have made the taxonomies a hard admission gate. Nobody has re-checked it
-# against the taxonomies themselves. The sandbox cannot: `ec.europa.eu` returns 403 CONNECT through
-# the egress proxy, so every previous answer came from a code comment rather than from ESCO.
+# against the taxonomies themselves. Nothing inside a CCR session can: `ec.europa.eu`,
+# `esco.ec.europa.eu` and `www.onetonline.org` are ALL blocked by the egress proxy, and that
+# includes WebFetch (measured 2026-08-25: EGRESS_BLOCKED on all three). WebSearch returns prose
+# about ESCO, never the skill list. So every previous answer came from a code comment.
 #
 # Both sources are free and keyless:
 #   ESCO   — CC BY 4.0, public JSON API, no registration
 #   O*NET  — public domain, bulk text files at onetcenter.org, no API key
 #            (the O*NET Web Services API DOES need a key; the download files do not, which is why
 #             this uses them.)
+#
+# THE WHOLE PROBE IS ONE python3 STEP, ON PURPOSE. The first version did the O*NET half in bash
+# and died on its FIRST real result: GitHub runs `run:` under `bash -e`, and `grep` exits 1 when a
+# term is absent — so "this term is not in O*NET", the single most likely and most interesting
+# answer, killed the job. Absence is a RESULT here, never an error. Python has no exit-code trap.
 #
 # Read the result between the ----- markers in the job log.
 name: Taxonomy Probe
@@ -20,86 +27,146 @@ on:
       terms:
         description: 'Comma-separated terms to look up in BOTH taxonomies'
         required: false
-        default: 'roadmap,P&L,operating model,board,budget,stakeholder management,kubernetes,SOC 2,platform modernization,governance'
+        default: 'roadmap,P&L,profit and loss,operating model,board,budget,stakeholder management,kubernetes,SOC 2,platform modernization,governance,product strategy'
       esco_limit:
         description: 'Max ESCO hits to show per term'
         required: false
-        default: '4'
+        default: '6'
 
 jobs:
   probe:
     runs-on: ubuntu-latest
     steps:
+      - name: Fetch O*NET bulk files
+        id: onet
+        continue-on-error: true
+        run: |
+          set -uo pipefail
+          curl -sSL --retry 3 --max-time 300 \
+            -o /tmp/onet.zip "https://www.onetcenter.org/dl_files/database/db_29_2_text.zip"
+          unzip -o -q /tmp/onet.zip -d /tmp/onet
+          echo "downloaded=1" >> "$GITHUB_OUTPUT"
+
       - name: Probe ESCO and O*NET
         env:
           TERMS: ${{ inputs.terms }}
           ESCO_LIMIT: ${{ inputs.esco_limit }}
+          ONET_DOWNLOADED: ${{ steps.onet.outputs.downloaded }}
         run: |
-          set -uo pipefail
-          echo "----- TAXONOMY PROBE -----"
+          python3 - <<'PY'
+          import json, os, glob, urllib.request, urllib.parse, collections
 
-          # ---- O*NET: bulk files, public domain, no key --------------------------------------
-          # Skills.txt is the 35 cross-occupational SKILLS; "Technology Skills.txt" is the
-          # software/technology list, which is where named tools actually live. Both matter: a term
-          # absent from one may be present in the other, and reporting only one would repeat the
-          # single-source mistake this probe exists to correct.
-          echo
-          echo "== fetching O*NET bulk files =="
-          ONET_OK=1
-          curl -sSL --retry 3 --max-time 180 \
-            -o /tmp/onet.zip "https://www.onetcenter.org/dl_files/database/db_29_2_text.zip" \
-            || ONET_OK=0
-          if [ "$ONET_OK" = "1" ]; then
-            unzip -o -q /tmp/onet.zip -d /tmp/onet || ONET_OK=0
-          fi
-          if [ "$ONET_OK" = "1" ]; then
-            echo "O*NET files present:"
-            find /tmp/onet -name '*.txt' | sed 's|.*/||' | sort | head -40
-            # One flat corpus of every ELEMENT/COMMODITY/TITLE name O*NET publishes, so a term is
-            # tested against the WHOLE taxonomy rather than one file someone happened to pick.
-            find /tmp/onet -name '*.txt' -exec cat {} + 2>/dev/null | tr '\t' '\n' > /tmp/onet_all.txt
-            echo "O*NET corpus lines: $(wc -l < /tmp/onet_all.txt)"
-          else
-            echo "!!! O*NET DOWNLOAD FAILED — O*NET results below are UNKNOWN, not 'absent'."
-          fi
+          TERMS = [t.strip() for t in os.environ["TERMS"].split(",") if t.strip()]
+          LIMIT = os.environ.get("ESCO_LIMIT", "6")
+          ONET_OK = os.environ.get("ONET_DOWNLOADED") == "1"
 
-          echo
-          echo "== per-term results =="
-          IFS=',' read -ra LIST <<< "$TERMS"
-          for raw in "${LIST[@]}"; do
-            term="$(echo "$raw" | sed 's/^ *//; s/ *$//')"
-            [ -z "$term" ] && continue
-            echo
-            echo "### TERM: $term"
+          print("----- TAXONOMY PROBE -----")
 
-            # ---- ESCO ----------------------------------------------------------------------
-            enc=$(printf '%s' "$term" | jq -sRr @uri)
-            esco=$(curl -sS --max-time 45 \
-              "https://ec.europa.eu/esco/api/search?text=${enc}&language=en&type=skill&limit=${ESCO_LIMIT}" \
-              2>/dev/null || echo '')
-            if [ -z "$esco" ]; then
-              echo "  ESCO : REQUEST FAILED (unknown, not absent)"
-            else
-              n=$(echo "$esco" | jq -r '._embedded.results | length' 2>/dev/null || echo 0)
-              if [ "$n" = "0" ] || [ "$n" = "null" ]; then
-                echo "  ESCO : no skill match"
-              else
-                echo "$esco" | jq -r '._embedded.results[] | "  ESCO : " + .title' 2>/dev/null
-              fi
-            fi
+          # ---------------- O*NET ----------------------------------------------------------------
+          # Only NAME-BEARING columns. The bulk release is mostly numeric ratings; searching a flat
+          # cat of every file (what v1 did) matches SOC codes and scale ids and reports them as if
+          # they were skill names. Selecting by HEADER NAME rather than column index means this
+          # stays correct if O*NET reorders columns, and it never invents a match out of a rating.
+          NAME_COLS = {
+              "Element Name",          # Skills / Knowledge / Abilities / Work Activities / Work Styles
+              "Commodity Title",       # Technology Skills, Tools Used, UNSPSC
+              "Example",               # Technology Skills, Tools Used  (the actual named product)
+              "Class Title", "Family Title", "Segment Title",   # UNSPSC hierarchy
+              "DWA Title", "IWA Title",                          # detailed / intermediate work activities
+              "Title",                                           # Occupation Data
+              "Reported Job Title", "Alternate Title",
+              "Task",                                            # Task Statements
+          }
 
-            # ---- O*NET -------------------------------------------------------------------
-            if [ "$ONET_OK" = "1" ]; then
-              hits=$(grep -i -F "$term" /tmp/onet_all.txt 2>/dev/null | sort -u | head -4)
-              if [ -z "$hits" ]; then
-                echo "  O*NET: no match in any published file"
-              else
-                echo "$hits" | sed 's/^/  O*NET: /'
-              fi
-            else
-              echo "  O*NET: UNKNOWN (download failed)"
-            fi
-          done
+          names = collections.defaultdict(set)   # name -> {(file, column)}
+          files_scanned = []
+          if ONET_OK:
+              for path in sorted(glob.glob("/tmp/onet/**/*.txt", recursive=True)):
+                  fname = os.path.basename(path)
+                  try:
+                      with open(path, encoding="utf-8", errors="replace") as fh:
+                          header = fh.readline().rstrip("\n").split("\t")
+                          keep = [i for i, h in enumerate(header) if h.strip() in NAME_COLS]
+                          if not keep:
+                              continue
+                          files_scanned.append(f"{fname} [{', '.join(header[i].strip() for i in keep)}]")
+                          for line in fh:
+                              cells = line.rstrip("\n").split("\t")
+                              for i in keep:
+                                  if i < len(cells):
+                                      v = cells[i].strip()
+                                      if v:
+                                          names[v].add((fname, header[i].strip()))
+                  except Exception as e:
+                      print(f"  !! could not read {fname}: {e}")
 
-          echo
-          echo "----- END TAXONOMY PROBE -----"
+              print(f"\n== O*NET: {len(names):,} distinct published names across {len(files_scanned)} name-bearing files ==")
+              for f in files_scanned:
+                  print(f"   {f}")
+          else:
+              print("\n!!! O*NET DOWNLOAD FAILED — every O*NET line below is UNKNOWN, not 'absent'.")
+
+          lowered = [(n.lower(), n) for n in names]
+
+          def onet_lookup(term):
+              t = term.lower()
+              exact = sorted({orig for low, orig in lowered if low == t})
+              contains = sorted({orig for low, orig in lowered if t in low and low != t})
+              return exact, contains
+
+          # ---------------- ESCO -----------------------------------------------------------------
+          def esco_lookup(term):
+              url = "https://ec.europa.eu/esco/api/search?" + urllib.parse.urlencode(
+                  {"text": term, "language": "en", "type": "skill", "limit": LIMIT})
+              try:
+                  req = urllib.request.Request(url, headers={"Accept": "application/json"})
+                  with urllib.request.urlopen(req, timeout=60) as r:
+                      d = json.loads(r.read().decode("utf-8"))
+              except Exception as e:
+                  return None, f"{type(e).__name__}: {e}"
+              return [x.get("title", "") for x in d.get("_embedded", {}).get("results", [])], None
+
+          print("\n== per-term results ==")
+          for term in TERMS:
+              print(f"\n### TERM: {term}")
+
+              titles, err = esco_lookup(term)
+              if err is not None:
+                  print(f"  ESCO : REQUEST FAILED — {err}  (UNKNOWN, not absent)")
+              elif not titles:
+                  print("  ESCO : no skill match")
+              else:
+                  for t in titles:
+                      print(f"  ESCO : {t}")
+
+              if not ONET_OK:
+                  print("  O*NET: UNKNOWN (download failed)")
+                  continue
+              exact, contains = onet_lookup(term)
+              if not exact and not contains:
+                  print("  O*NET: absent from every published name")
+              for n in exact[:6]:
+                  src = sorted(names[n])[0]
+                  print(f"  O*NET: EXACT    {n}   [{src[0]} · {src[1]}]")
+              for n in contains[:6]:
+                  src = sorted(names[n])[0]
+                  print(f"  O*NET: contains {n}   [{src[0]} · {src[1]}]")
+              if len(contains) > 6:
+                  print(f"  O*NET: ... and {len(contains) - 6} more containing matches")
+
+          # ---------------- What these sources actually look like ---------------------------------
+          # The point of the probe is not only yes/no per term. Seeing the SHAPE of an O*NET name is
+          # what tells you whether a term like "roadmap" was ever going to be in there.
+          if ONET_OK:
+              for fname, col, n in (("Skills.txt", "Element Name", 40),
+                                    ("Knowledge.txt", "Element Name", 40),
+                                    ("Technology Skills.txt", "Example", 30),
+                                    ("Work Activities.txt", "Element Name", 30)):
+                  sample = sorted({k for k, v in names.items() if any(s == (fname, col) for s in v)})
+                  if sample:
+                      print(f"\n== SAMPLE — {fname} · {col} ({len(sample):,} distinct) ==")
+                      for s in sample[:n]:
+                          print(f"   {s}")
+
+          print("\n----- END TAXONOMY PROBE -----")
+          PY
