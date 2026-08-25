@@ -131,13 +131,13 @@ Import list read (`PostingAnalysis.jsx:18-28`): `shell.jsx` (Pill, Overlay), `po
 | 4.1-11 | Row: the posting line **verbatim** | `packet.jsx:41` | BUILT | `PostingAnalysis.jsx:231-237` — a `<blockquote>` with char offsets, plus an explicit paraphrase branch at `:243-248` the prototype has no equivalent for. |
 | 4.1-12 | Row: requirement chip in a 150–210px right column | `packet.jsx:40,43` | PARTIAL | The chip is BUILT (`PostingAnalysis.jsx:220-222`, `reqChipLabel`) but sits **above** the line, not in a right column — the row is a single flow column (`:216-228`). |
 | 4.1-13 | Row: competency spelled out beside the id (R7) | `packet.jsx:43` via `ReqChip` | BUILT | `PostingAnalysis.jsx:225-227` — `{r.competency \|\| 'competency unassigned'}` |
-| 4.1-14 | Row: status dot, green covered / red open | `packet.jsx:39` | ABSENT | No dot in `RequirementRow` (`:214-256`), and no coverage colour anywhere in the file. |
-| 4.1-15 | Row: `evidenced — show the line` link | `packet.jsx:45` | ABSENT | Nothing in `RequirementRow` expands. Repo-wide `grep -rn evidence app/src` returns only `Settings.jsx:1558` (owner facts) and comments — no requirement-evidence renderer. |
-| 4.1-16 | Row: `no evidence found` in red | `packet.jsx:46` | ABSENT | Same. |
-| 4.1-17 | Expanded row: verbatim profile excerpt | `packet.jsx:52` | ABSENT | Same. |
-| 4.1-18 | Expanded row: the excerpt's named source | `packet.jsx:53` | ABSENT | Same. |
-| 4.1-19 | Expanded row: optional supporting note (`ev.extra`) | `packet.jsx:54` | ABSENT | Same. |
-| 4.1-20 | Expanded row: `Where it is used →` | `packet.jsx:56` | ABSENT | Same. |
+| 4.1-14 | Row: status dot, green covered / red open | `packet.jsx:39` | BUILT | `EvidenceLine` (`PostingAnalysis.jsx`) paints a dot through `toneColor(EVIDENCE_TONE[state])`. NOT a two-colour green/red: six states, and `stale`/`misresolved`/`source_missing`/`unverified` are `warn`, because a row whose excerpt merely MOVED is not a gap in the profile. |
+| 4.1-15 | Row: `evidenced — show the line` link | `packet.jsx:45` | BUILT | `show the line` / `hide the line` disclosure, rendered only when the endpoint verdict is `verified` - the one state whose quote may be shown. |
+| 4.1-16 | Row: `no evidence found` in red | `packet.jsx:46` | BUILT | Red, and ONLY for `none`. Guarded by `H:only-verified-may-be-quoted`, which fails if a second state ever says "not found". The other four unprovable states print their own sentence from the API in ink3. |
+| 4.1-17 | Expanded row: verbatim profile excerpt | `packet.jsx:52` | BUILT | `ev.quote`, from the endpoint's `evidence` object, never from the redacted `evidence_*` columns. |
+| 4.1-18 | Expanded row: the excerpt's named source | `packet.jsx:53` | BUILT | `ev.sourceLabel || ev.sourceKey`, with the source kind in parentheses. |
+| 4.1-19 | Expanded row: optional supporting note (`ev.extra`) | `packet.jsx:54` | BUILT | `ev.extra`, verbatim and only when present. |
+| 4.1-20 | Expanded row: `Where it is used →` | `packet.jsx:56` | ABSENT | **The one row of this cluster that did not ship** - `D:jd-evidence-has-no-field-link`. Every piece exists (`goToField` `PacketBuilder.jsx:740`, `swapsForRequirement` `qcRail.js:589`, `useAssetProvenance` `:413`) but a swap is keyed by `list`, not artifact, and the `list -> artifact` map is built by asset cards registering as they RENDER on the resume step, so on the JD step it is empty. |
 | 4.1-21 | Keywords tab: one row per library term | `packet.jsx:87-100` | DELIBERATE | `D:term-library-off-by-owner-decision` (`.claude/DEFERRED.md:191`) — *"we will leave the library turned off for now"*. The app renders `KeywordLibraryState` (`:288-296`) which says so **in words derived from the checks row**, not hardcoded. |
 | 4.1-22 | Keywords tab: term status dot | `packet.jsx:90` | DELIBERATE | Same decision. |
 | 4.1-23 | Keywords tab: green/red term chip | `packet.jsx:93` | DELIBERATE | Same decision. The app's neutral chip (`KeywordChips`, `:304-317`) deliberately refuses the green/red pair — `:319-326` records that rendering an unmeasured list green "lent the unmeasured half the credibility of the measured one". |
@@ -151,7 +151,8 @@ Import list read (`PostingAnalysis.jsx:18-28`): `shell.jsx` (Pill, Overlay), `po
 | 4.1-31 | Legend row, always present | `packet.jsx:163` | BUILT | `PostingAnalysis.jsx:502-511` |
 | 4.1-32 | Three-column layout behind `PARSED_LAYOUT` | `packet.jsx:25,136-152` | BUILT | `PostingAnalysis.jsx:389-392,439-442,575-582` — and it is a **persisted user preference** (`ee_posting_columns`), not a code constant, per the repo's "no hardcoded config" rule. Better than the prototype. |
 
-**§4.1 tally — 32 rows:** BUILT **13** · PARTIAL **3** · ABSENT **8** · DELIBERATE **8**.
+**§4.1 tally — 32 rows:** BUILT **19** · PARTIAL **3** · ABSENT **2** · DELIBERATE **8**.
+(Was BUILT 13 / ABSENT 8 before `df2c9db` shipped the evidence expansion, rows 4.1-14..19.)
 Against the 24 rows that are not owner-deferred: **13 BUILT (54%), 16 present in some form (67%).**
 
 **The one cluster that matters:** rows 4.1-14 → 4.1-20, seven consecutive rows, are one feature —
@@ -459,13 +460,13 @@ Against the 13 non-deferred rows: **12 BUILT (92%), 13 present in some form (100
 | # | Prototype element | Proto ref | Verdict | App citation / note |
 |---|---|---|---|---|
 | 4.10-1 | Per-asset list | `packet.jsx:433-439` | BUILT | `PacketBuilder.jsx:911-923` |
-| 4.10-2 | Per-asset **gate badge** on the list | `packet.jsx:436` | ABSENT | `PacketBuilder.jsx:918-921` renders the label and the status `Pill` only. `GateBadge` is imported into this file (`:15`) and used at `:184` — so this is a **missing mount, not a missing component**, and `qcEntries` is already in scope at `:719`. |
+| 4.10-2 | Per-asset **gate badge** on the list | `packet.jsx:436` | BUILT | `PacketBuilder.jsx:928` — `<GateBadge result={…} compact />` on each asset row of the send list. The component was already imported at `:15` and mounted on the asset step; this is a second mount, not a second gate. |
 | 4.10-3 | Per-asset status pill | `packet.jsx:437` | BUILT | `PacketBuilder.jsx:919` |
-| 4.10-4 | Packet gate card: `n items to fix across m assets` | `packet.jsx:452-455` | ABSENT | Nothing renders it. `packetReadiness()` (`qcRail.js:831-847`) computes the packet gate and a `contradiction` sentence, and `readiness` is assigned at `PacketBuilder.jsx:719` — the data is there; this card is not. |
-| 4.10-5 | "Sending stays locked until each one is fixed or the decision is recorded" | `packet.jsx:456` | PARTIAL | `PacketBuilder.jsx:927` says *"Approve all artifacts above to unlock sending."* — the same idea, sourced from `p.status === 'ready'` (`:715`) rather than from the live fail list. |
-| 4.10-6 | One row per failing item | `packet.jsx:458-467` | ABSENT | No per-item rows on this step. |
-| 4.10-7 | Failing row: `Open field →` | `packet.jsx:465` | ABSENT | Same. |
-| 4.10-8 | `Nothing blocks sending` when the list empties | `packet.jsx:445-448` | PARTIAL | `PacketBuilder.jsx:925-926` shows `Go to outreach →` when `ready`. The affordance appears; the sentence and the derivation-from-the-live-fail-list do not. |
+| 4.10-4 | Packet gate card: `n items to fix across m assets` | `packet.jsx:452-455` | BUILT | `PacketBuilder.jsx:939` `data-qc="send-gate-card"`, counted by `packetFailList()` (`qcRail.js`) so the card and the rows cannot disagree. |
+| 4.10-5 | "Sending stays locked until each one is fixed or the decision is recorded" | `packet.jsx:456` | BUILT | `PacketBuilder.jsx:949`, verbatim. |
+| 4.10-6 | One row per failing item | `packet.jsx:458-467` | BUILT | `PacketBuilder.jsx:956` `data-qc="send-fail-row"`, one per failing item. `unchecked` counts as blocking; reviewer disagreements do not (D6). |
+| 4.10-7 | Failing row: `Open field →` | `packet.jsx:465` | BUILT | `PacketBuilder.jsx:962` `data-qc="send-open-field"`, wired to the existing `goToField` — not a new navigator. |
+| 4.10-8 | `Nothing blocks sending` when the list empties | `packet.jsx:445-448` | BUILT | `PacketBuilder.jsx:944` prints "Nothing blocks sending." off the SAME `packetFailList()` count that drives the rows, so the empty state cannot disagree with the list. |
 
 **§4.10 tally — 8 rows:** BUILT **2** · PARTIAL **2** · ABSENT **4** · DELIBERATE **0**.
 **2 BUILT (25%), 4 present in some form (50%). This is the weakest section in the spec**, and
@@ -538,19 +539,25 @@ OUT-OF-SCOPE** (§4.12, which the spec says *"do not build"*). That leaves **210
 of which **27 are DELIBERATE** — a divergence or omission with a recorded decision, which is not a
 gap and must not be counted as one.
 
-> # **125 of 183 prototype elements present (68%)**
+> # **137 of 183 prototype elements present (75%)**
 >
 > *(183 = 210 measurable rows minus the 27 with a recorded decision behind them.)*
 >
 > | | Count | Share of 183 |
 > |---|---:|---:|
-> | **BUILT** — exists with a `file:line` | **125** | **68.3%** |
-> | **PARTIAL** — exists, states/mounts missing | **28** | 15.3% |
-> | **ABSENT** — genuinely not there | **30** | 16.4% |
-> | *present in some form (BUILT + PARTIAL)* | *153* | *83.6%* |
+> | **BUILT** — exists with a `file:line` | **137** | **74.9%** |
+> | **PARTIAL** — exists, states/mounts missing | **26** | 14.2% |
+> | **ABSENT** — genuinely not there | **20** | 10.9% |
+> | *present in some form (BUILT + PARTIAL)* | *163* | *89.1%* |
 >
 > Counted against all 210 measurable rows including the deliberate omissions:
-> **125 BUILT (59.5%)**, **153 present (72.9%)**.
+> **137 BUILT (65.2%)**, **163 present (77.6%)**.
+>
+> **Moved from 125 (68%) by two shipped commits, both re-verdicted against the code rather than
+> from memory:** `dd4f61c` closed §4.10 Review & send (six rows: the gate card, the per-item rows,
+> `Open field ->`, the asset gate badge, the lock sentence and the empty state) taking that section
+> 25% -> 100%; `df2c9db` closed six of §4.1's seven evidence rows, taking §4.1 54% -> 79%. The
+> seventh, 4.1-20, is `D:jd-evidence-has-no-field-link`.
 >
 > Separately: **27 deliberately omitted or diverged** · **6 not built in the prototype either** ·
 > **5 out of scope by the spec's own instruction**.
@@ -559,7 +566,7 @@ gap and must not be counted as one.
 
 | SPEC § | Surface | Rows | BUILT | PARTIAL | ABSENT | DELIB | BUILT % (of non-deliberate) |
 |---|---|---:|---:|---:|---:|---:|---:|
-| 4.1 | JD analysis — extraction | 32 | 13 | 3 | 8 | 8 | 54% |
+| 4.1 | JD analysis — extraction | 32 | 19 | 3 | 2 | 8 | 79% |
 | 4.2 | JD analysis — posting vs profile | 14 | 10 | 3 | 1 | 0 | 71% |
 | 4.3 | ATS analysis modal | 13 | 6 | 2 | 3 | 2 | 55% |
 | 4.4 | Asset steps — card + header | 33 | 24 | 7 | 0 | 2 | 77% |
@@ -568,10 +575,10 @@ gap and must not be counted as one.
 | 4.7 | Inline "Ask for a change" | 9 | 7 | 1 | 1 | 0 | 78% |
 | 4.8 | QC & evidence step | 25 | 14 | 5 | 2 | 4 | 67% |
 | 4.9 | Per-asset QC drawer | 14 | 12 | 1 | 0 | 1 | 92% |
-| 4.10 | Review & send | 8 | 2 | 2 | 4 | 0 | **25%** |
+| 4.10 | Review & send | 8 | 8 | 0 | 0 | 0 | **100%** |
 | 4.11 | Assistant | 9 | 0 | 2 | 6 | 1 | **0%** |
 | 4.12 | Prototype-only mode | *(5)* | — | — | — | — | out of scope |
-| **Total** | | **210** | **125** | **28** | **30** | **27** | **68%** |
+| **Total** | | **210** | **137** | **26** | **20** | **27** | **75%** |
 
 Coverage is **not** evenly distributed. The two steps the reader spends their time on — the asset
 step (§4.4 + §4.5, 75 rows) and the QC surfaces (§4.8 + §4.9, 39 rows) — are at **74%** and
@@ -635,22 +642,32 @@ question.
 
 ---
 
-## 14. THE TEN HIGHEST-VALUE ABSENT ROWS
+## 14. THE HIGHEST-VALUE ABSENT ROWS
 
 Ranked by what a user would notice first, not by effort.
 
+**Three of the original top three have SHIPPED since this list was written**, and they are kept here
+struck through rather than deleted, so the ranking can be read as a record of what was actually
+worked on rather than as a list that quietly rewrites itself:
+
+| ~~#~~ | Row(s) | Shipped in | Evidence |
+|---|---|---|---|
+| ~~1~~ | ~~**4.1-14 → 4.1-19** — the evidence expansion~~ | `df2c9db` | Deploy run **32885823790** success. Six of seven rows; **4.1-20 remains** and is now ranked below. |
+| ~~2~~ | ~~**4.10-4, 4.10-6, 4.10-7** — the packet gate card, its per-item rows, `Open field →`~~ | `dd4f61c` | `PacketBuilder.jsx:939/956/962`. |
+| ~~3~~ | ~~**4.10-2** — the gate badge on the Review & send list~~ | `dd4f61c` | `PacketBuilder.jsx:928`. |
+
+### The list as it now stands
+
 | # | Row(s) | SPEC | What the user loses | Cheap or expensive |
 |---:|---|---|---|---|
-| 1 | **4.1-14 → 4.1-20** — the whole evidence expansion (status dot, `evidenced — show the line`, `no evidence found`, the excerpt, its source, its note, `Where it is used →`) | §4.1 | **Seven rows, one feature, and it is the spec's own acceptance criterion for the step** — *"every 'evidenced' claim can be expanded to a quote plus source"*. The JD step lists what the posting asks and never says whether the profile can answer it. R2 ("evidence or escalate") has no surface. | The data exists — `D:evidence-resolves-nothing` is **CLOSED** (`.claude/DEFERRED.md:131`), 1→6 evidenced on the live Trinnex posting. This is a renderer plus an endpoint field, not a new system. |
-| 2 | **4.10-4, 4.10-6, 4.10-7** — the packet gate card, its per-item rows, and their `Open field →` | §4.10 | The last screen before sending says *"Approve all artifacts above"* and nothing about **what** is blocking or **where**. The reader is sent back to hunt. | **Cheapest high-value fix in the document.** `qcEntries`, `GateBadge`, `packetReadiness` and `onGoToField` are all already imported into `PacketBuilder.jsx` and in scope at `:719`. |
-| 3 | **4.10-2** — the gate badge on the Review & send list | §4.10 | Five rows of `status` pills that say `review` with no word about whether the checks pass. Exactly the defect that was fixed on the artifact card (`PacketBuilder.jsx:184`) and not here. | One line. The component is imported at `:15`. |
-| 4 | **4.8-10** — the `Needs a decision` list, on the page | §4.8 | SPEC §4.8 is explicit that the two lists are *"on the page, not behind a tab or a search"*. `Done for you` is (`QcRail.jsx:808`); its counterpart is not. The reader sees what was settled and must go tab-hunting for what was not. | Medium. `railAttention`/`attentionSplit` already produce the rows; the ordering rule (§5) is encoded. |
-| 5 | **4.11-1 → 4.11-8** — the assistant panel | §4.11 | Six ABSENT rows. **But read §12 first** — this may be a deliberate architectural replacement, and if it is, it is not a gap at all. It is ranked here because it is unresolved, not because it is proven missing. | Large — or zero, depending on the owner's answer. |
-| 6 | **4.2-1** — the four fit cards | §4.2 | The comparison's headline. A reader lands on the JD step and gets a table; the *"Responsibilities 4/4 · Must-have 5/7"* summary that makes the table scannable is not there. | Small. The grades are already per-row (`postingAnalysis.js:78-81`) and the summary line already counts strong/moderate/weak (`PostingAnalysis.jsx:171-179`). |
-| 7 | **4.6-9, 4.6-10, 4.6-11** — the keyword panel's escape hatches (`Swap for another skill…`, `Drop it, leave the line open`, and the coverage-consequence phrasing) | §4.6 | SPEC §4.6 exists to answer *"what if I am not comfortable claiming this?"*. The panel now opens and explains; it offers no way out. | Medium — needs the profile's skill bank reachable from this surface. The **phrasing** pattern already exists at `AssetBlocks.jsx:495-502`. |
-| 8 | **4.3-9, 4.3-10, 4.3-11** — the QC summary inside the ATS modal | §4.3 | The modal the header score opens is keywords-only. The prototype's version is the packet's at-a-glance verdict. Lower rank because the QC step and the artifact-card badges now carry all of it — this is duplication the app deliberately avoids (D4). | Low value, possibly correct as-is. |
-| 9 | **4.5-40** — `{{merge field}}` placeholders shown inline in static blocks | §4.5 | SPEC §4.5 asks for them explicitly *"so the user can see where merged text lands"*. Without them a template block is an opaque paragraph and the reader cannot tell what will be substituted. | Small, and it is a real comprehension gain on the letterhead / compact-resume blocks. |
-| 10 | **4.5-12** — `PickList` (`type: 'select'` fields) | §4.5 | Portfolio only, so **no resume impact** — which is why it is last despite being a whole missing body shape. `shapeOf()` (`assetBlocks.js:144-151`) has no `select` branch. | Needs per-item candidacy on the insertions payload (which items were available, chosen, blocked), not just the joined text. |
+| 1 | **4.8-10** — the `Needs a decision` list, on the page | §4.8 | SPEC §4.8 is explicit that the two lists are *"on the page, not behind a tab or a search"*. One is; this one is not. | Cheap — the data is already in the rail's payload. |
+| 2 | **4.11-1 → 4.11-8** — the assistant panel | §4.11 | Six ABSENT rows. **But read §12 first** — this may be a deliberate architectural replacement, and the evidence for that is a code comment rather than a recorded decision. **This is an owner question, not an engineering one**, and it moves the headline by ~4 points on its own. | Expensive if real; free if the substitution is ratified. |
+| 3 | **4.2-1** — the four fit cards | §4.2 | The comparison's headline. A reader lands on the JD step and gets a table where the prototype gives four cards. | Moderate. |
+| 4 | **4.6-9, 4.6-10, 4.6-11** — the keyword panel's escape hatches | §4.6 | No way to act on a keyword the reader disagrees with. Related to PC-3 in `PULL-CANDIDATES.md`. | Moderate; partly blocked on the term library being off. |
+| 5 | **4.3-9, 4.3-10, 4.3-11** — the QC summary inside the ATS modal | §4.3 | The modal the header score opens is keywords-only. | Moderate. |
+| 6 | **4.5-40** — `{{merge field}}` placeholders shown inline in static blocks | §4.5 | SPEC §4.5 asks for them explicitly *"so the user can see where merge fields land"*. | Cheap. |
+| 7 | **4.1-20** — `Where it is used →` on an evidenced requirement | §4.1 | The last row of the evidence cluster: a reader can see the excerpt that backs a requirement but cannot jump to the field that uses it. | Cheap-ish, but needs one real change: `D:jd-evidence-has-no-field-link` — a swap is keyed by `list`, not artifact, and the `list → artifact` map is built at render time on a different step. |
+| 8 | **4.5-12** — `PickList` (`type: 'select'` fields) | §4.5 | Portfolio only, so **no resume impact** — which is why it is last despite being a whole missing control. | Expensive, low value. |
 
 **Just outside the ten**, and both one-liners: **4.1-3** (`See where each one is answered →`, the
 JD step's only route into QC) and **4.8-21** (`Ask why` on a swap row).
