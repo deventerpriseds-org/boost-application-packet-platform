@@ -41,7 +41,7 @@ export async function evaluateArtifact(client: any, artifactId: string, owner: s
   if (!art) throw new Error('artifact not found')
 
   const swaps = (await client.query(
-    `select action, driver, to_label, from_label from swap_decision where packet_id=$1`, [art.packet_id])).rows
+    `select action, driver, to_label, from_label, requirement_id, seq, list from swap_decision where packet_id=$1`, [art.packet_id])).rows
 
   // R3 needs BOTH sides or it must not judge. The posting side is the employer's own text —
   // `resolvePostingSource`, never `groundingText`, which falls back to `jd_summary` and would have

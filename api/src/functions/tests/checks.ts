@@ -19,6 +19,7 @@
 // Every one of these is a seeded DEFAULT, overridable per owner — see `CheckThresholds`. Nothing
 // here may become a permanent constant.
 import { splitItems, itemTokens, omitEntries, onOmitList } from './swaps'
+import { fitCompactSkills } from './compactFit'
 import { mergeFieldsFor } from './insertions'
 import { normalizePostingText } from './jdText'
 import { checkAgainstFacts, OwnerFact } from './ownerFacts'
@@ -207,7 +208,11 @@ export interface CheckInput {
   /** The EMPLOYER'S OWN text (resolvePostingSource), never `groundingText`. See the R3 check. */
   postingText?: string
   requirements?: Array<{ seq: number; verbatim: string | null; item_text: string; kind: string }>
-  swaps?: Array<{ action: string; driver: string; to_label: string | null; from_label: string | null }>
+  // `requirement_id`, `seq` and `list` are carried so `compact_skills_fit` can reproduce the SAME
+  // drop decision the render made. Without them this check would rank on `driver` alone and could
+  // name a different item than the one actually removed from the document -- two sources of truth
+  // for a claim that names an offender, which is the drift this repo keeps paying for.
+  swaps?: Array<{ action: string; driver: string; to_label: string | null; from_label: string | null; requirement_id?: string | null; seq?: number | null; list?: string | null }>
   /** The owner's confirmed facts. A requirement a FACT settles is not a document-coverage question. */
   facts?: OwnerFact[]
   /**
@@ -809,6 +814,58 @@ export function runChecks(input: CheckInput): CheckResult[] {
   }
 
   // --- uncited changes. P2.2: always a fail, never a warn. ---------------------------------
+  // ── compact_skills_fit — the owner's "notify me in the right margin" ──────────────────────────
+  //
+  // The compact resume renders ONE Core Skills line where the full resume has two, so the combined
+  // list can overrun the space. The owner: *"if overspill of space becomes an issue, it should be
+  // flagged. the least relevent item could be removed to make it fit and i should be notified that
+  // happened in the right margin."*
+  //
+  // `offenders` NAMES each removed skill and why, never a count — the existing rule, and the whole
+  // point here: "2 skills removed" tells the owner something is wrong without telling them what to
+  // put back.
+  //
+  // It re-runs `fitCompactSkills`, the SAME function the render used, over the same swap rows. Not
+  // a second implementation of the rule: a second one would eventually name a different item than
+  // the document actually lost.
+  //
+  // `warn`, not `fail`. Content was removed to fit and the owner should see it before sending — but
+  // a resume that fits its own template is not a broken packet, and failing the gate on it would
+  // block shipping over a formatting outcome the system chose deliberately.
+  if (input.type === 'compact_resume') {
+    const provenance = (input.swaps || [])
+      .filter(sw => sw.list === 'skills_1' || sw.list === 'skills_2')
+      .map(sw => ({
+        label: String(sw.to_label || sw.from_label || '').trim(),
+        action: sw.action as any, driver: sw.driver as any,
+        requirementId: sw.requirement_id ?? null, seq: sw.seq ?? null,
+      }))
+      .filter(pv => pv.label)
+    const fit = fitCompactSkills({
+      skills1: splitItems(pkg.SkillsBullets1), skills2: splitItems(pkg.SkillsBullets2),
+      provenance, budget: t.compactSkillsMaxChars,
+    })
+    const expected = `the combined Core Skills line fits ${t.compactSkillsMaxChars} characters`
+    if (fit.budgetUnreadable) {
+      // Absent evidence is not a pass: nothing was measured, so nothing may be claimed.
+      out.push(bad('compact_skills_fit', 'the Core Skills budget could not be read, so the line was not measured',
+        expected, ['compactSkillsMaxChars is not a usable number'], 'warn'))
+    } else if (fit.dropped.length) {
+      out.push(bad('compact_skills_fit',
+        `${fit.dropped.length} skill${fit.dropped.length === 1 ? '' : 's'} removed so the Core Skills line fits (${fit.fullLength} chars needed, ${t.compactSkillsMaxChars} available)`,
+        expected,
+        fit.dropped.map(d => `${d.label} — ${d.reason}`), 'warn'))
+    } else if (fit.overBudgetAfterDrops) {
+      out.push(bad('compact_skills_fit',
+        `the Core Skills line is ${fit.fullLength} chars against ${t.compactSkillsMaxChars} and nothing could be removed`,
+        expected,
+        ['every remaining skill answers the posting — removing one would delete evidence this packet counts'],
+        'warn'))
+    } else {
+      out.push(ok('compact_skills_fit', `Core Skills fits: ${fit.text.length} of ${t.compactSkillsMaxChars} chars`, expected))
+    }
+  }
+
   const swaps = input.swaps || []
   if (!swaps.length) {
     out.push(na('changes_cited', 'no swap rows recorded for this packet', 'every swapped/added item cites a requirement'))

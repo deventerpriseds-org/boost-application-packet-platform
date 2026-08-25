@@ -79,6 +79,12 @@ export interface CompactFitResult {
   /** True when nothing had to go. */
   fits: boolean
   /**
+   * The configured budget could not be read (null, NaN, <= 0). Nothing was dropped — content is
+   * shipped unchanged — and this says the fit was never actually enforced, so a reader is never told
+   * "it fits" on the strength of a measurement that did not happen.
+   */
+  budgetUnreadable?: boolean
+  /**
    * Set when the line STILL does not fit after every droppable item is gone. The remaining items all
    * answer the posting, and silently deleting one of those would remove evidence the packet's own
    * coverage claims depend on. It ships over budget and SAYS SO instead.
@@ -91,9 +97,30 @@ export const DEFAULT_SEPARATOR = ' | '
 /** Lower rank leaves first. Only these three tiers exist, and every input is an exact enum value. */
 function rankOf(p: SkillProvenance | undefined): number {
   if (!p) return 0                                        // no record at all: treat as master content
+  // D-4. A row the pipeline ALREADY removed cannot protect the label. Checking `driver` first made
+  // a `dropped`+`posting` row rank 2, and two live skills were deleted to preserve an item that was
+  // not in the document at all. Proven by execution before this line was written.
+  if (p.action === 'dropped') return 0
   if (p.driver === 'posting' || p.requirementId) return 2 // answers the posting - never dropped
   if (p.action === 'swapped' || p.action === 'added') return 1
   return 0
+}
+
+/**
+ * D-1, and it falsified this module's central safety property.
+ *
+ * A label can carry MORE THAN ONE provenance row — it appears in both skills lists, or a later pass
+ * recorded it again. Keeping the FIRST row meant the ORDER of rows decided whether a skill survived:
+ * with identical data, `Kubernetes` answering `req-9` was DELETED when its `kept/unattributed` row
+ * came first and KEPT when its `posting` row came first. Measured by running the built module, not
+ * read. The unit test passed throughout because it never gave one label two rows.
+ *
+ * The rank of a label is therefore the STRONGEST claim any row makes about it. Erring toward keeping
+ * is the only safe direction: the cost of keeping one item too many is a slightly long line, and the
+ * cost of dropping one too few is deleting evidence the packet's coverage claims depend on.
+ */
+function rankForLabel(rows: SkillProvenance[]): number {
+  return rows.reduce((best, r) => Math.max(best, rankOf(r)), 0)
 }
 
 const norm = (s: string) => String(s || '').trim().toLowerCase()
@@ -108,11 +135,21 @@ const norm = (s: string) => String(s || '').trim().toLowerCase()
  */
 export function fitCompactSkills(input: CompactFitInput): CompactFitResult {
   const sep = input.separator ?? DEFAULT_SEPARATOR
-  const budget = Math.max(0, Number(input.budget) || 0)
+  // D-2. `Number(x) || 0` turned NaN/null into a budget of ZERO, so every skill was deleted and the
+  // result reported `fits: true` — a blank Core Skills line declared a success. A budget that cannot
+  // be read is a CONFIGURATION failure, and the safe response to one is to ship the content
+  // unchanged, never to empty the section. Proven by execution: `budget: NaN` returned
+  // `{ text: '', kept: [], fits: true }`.
+  const rawBudget = Number(input.budget)
+  const budgetUsable = Number.isFinite(rawBudget) && rawBudget > 0
+  const budget = budgetUsable ? rawBudget : Number.POSITIVE_INFINITY
 
-  const byLabel = new Map<string, SkillProvenance>()
+  const byLabel = new Map<string, SkillProvenance[]>()
   for (const p of (input.provenance || [])) {
-    if (p && p.label && !byLabel.has(norm(p.label))) byLabel.set(norm(p.label), p)
+    if (!p || !p.label) continue
+    const k = norm(p.label)
+    if (!byLabel.has(k)) byLabel.set(k, [])
+    byLabel.get(k)!.push(p)
   }
 
   // Combined, in document order, de-duplicated.
@@ -129,14 +166,24 @@ export function fitCompactSkills(input: CompactFitInput): CompactFitResult {
   const fullLength = join(items).length
 
   if (fullLength <= budget || items.length === 0) {
-    return { text: join(items), kept: items, dropped: [], fullLength, budget, fits: true }
+    return {
+      text: join(items), kept: items, dropped: [], fullLength,
+      budget: budgetUsable ? budget : 0, fits: true,
+      ...(budgetUsable ? {} : { budgetUnreadable: true }),
+    }
   }
 
   // Droppable, worst first: rank ascending, then LAST position first.
+  // D-3. This sorted on `swap_decision.seq`, which RESTARTS PER LIST (`schema.ts` keys it
+  // `unique (packet_id, list, seq, loop)`), so an item from skills_2 could out-rank one from
+  // skills_1 by position alone and the wrong skill was dropped. Every unit test passed
+  // `skills2: []` — the tie-break was untested in the only configuration this feature exists for.
+  // The correct ordinal is the item's index in the COMBINED line, which is what "the end of the
+  // line" means to a reader.
   const droppable = items
-    .map((label, i) => ({ label, i, rank: rankOf(byLabel.get(norm(label))), seq: byLabel.get(norm(label))?.seq ?? i }))
+    .map((label, i) => ({ label, i, rank: rankForLabel(byLabel.get(norm(label)) || []) }))
     .filter((x) => x.rank < 2)
-    .sort((a, b) => (a.rank - b.rank) || (b.seq - a.seq) || (b.i - a.i))
+    .sort((a, b) => (a.rank - b.rank) || (b.i - a.i))
 
   const gone = new Set<number>()
   const dropped: DroppedSkill[] = []

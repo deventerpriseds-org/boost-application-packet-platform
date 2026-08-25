@@ -6,11 +6,13 @@ import { getGoogleOAuthToken, HAS_GOOGLE_OAUTH } from './googleAuth'
 import { logUsage } from './usageMeter'
 import { groundingText, resolvePostingSource } from './jdText'
 import { metaFor, varsForType, copyThen, injectValues, stripLeftoverTokens, shareAnyone } from './packetTemplates'
+import { fitCompactSkills, CompactFitResult } from './compactFit'
 import { buildPackageForJD } from './pipeline'
 import { loadPipelineSettings } from './pipelineConfig'
 import { SEED_TEMPLATE_ROLE_FOCUS } from './roleFocus'
 import { writeSwaps } from './appSwaps'
 import { writeInsertions } from './appInsertions'
+import { splitItems } from './swaps'
 import { applyCorrectionPass } from './appCorrections'
 import { sourceText } from './appFacts'
 import { summariseBuild, skillLineage, collectAnalysis } from './packetBuild'
@@ -625,6 +627,8 @@ export async function ensurePackage(client: any, art: any, opp: any, regen: bool
  * are keyed on; it does NOT count renders.
  */
 export async function renderArtifact(client: any, art: any, opp: any, pkg: Record<string, string | null>, opts?: { loop?: number }) {
+  // Set only for a compact resume; carried to the check that names anything dropped to fit.
+  let compactFit: CompactFitResult | null = null
   // P7 item 8 - `TEMPLATE_META` is the SEED table, not the answer. `google.resumeTemplateId`,
   // `google.portfolioTemplateId`, `google.coverLetterTemplateId` and `google.outputFolderId` have
   // been writable in Auth & Config all along and were read by nothing, so an owner could set a
@@ -655,6 +659,40 @@ export async function renderArtifact(client: any, art: any, opp: any, pkg: Recor
   const packetResume = String(
     (await client.query(`select resume_template_id from packet where id = $1`, [art.packet_id])).rows[0]?.resume_template_id || '',
   ).trim()
+  // THE COMPACT RESUME'S ONE CORE SKILLS LINE, built here because this is where the document is
+  // produced. The owner: *"the skills are broken into two columns in the regular resume but its a
+  // single block in the compact resume so i think you should be starting with taking the two and
+  // making them one as a part of generating the compact resume."*
+  //
+  // `TEMPLATE_META.compact_resume` declares `{{SkillsBullets}}` and NOTHING ELSE fills it, so
+  // without this the token injects '' and the compact ships with a BLANK Core Skills line -- the
+  // same silent blanking the placeholder correction was made to prevent, arriving by the other
+  // route. That gap existed on this branch for one commit and is why it was marked DO NOT MERGE.
+  //
+  // Relevance comes from `swap_decision`, which already records what the pipeline did to each skill
+  // and why. Nothing is re-derived and nothing is fuzzy.
+  if (art.type === 'compact_resume') {
+    const rows = (await client.query(
+      `select list, seq, action, driver, from_label, to_label, requirement_id
+         from swap_decision
+        where packet_id = $1 and list in ('skills_1','skills_2')
+        order by loop desc, list, seq`, [art.packet_id])).rows
+    // The SHIPPED label is `to_label` where the pipeline changed it, else `from_label`.
+    const provenance = rows.map((r: any) => ({
+      label: String(r.to_label || r.from_label || '').trim(),
+      action: r.action, driver: r.driver, requirementId: r.requirement_id, seq: r.seq,
+    })).filter((p: any) => p.label)
+
+    const thresholds = await loadThresholds(client, opp.owner_email).catch(() => ({} as any))
+    const budget = Number(thresholds?.compactSkillsMaxChars ?? DEFAULT_THRESHOLDS.compactSkillsMaxChars)
+    const fit = fitCompactSkills({
+      skills1: splitItems(pkg.SkillsBullets1), skills2: splitItems(pkg.SkillsBullets2),
+      provenance, budget,
+    })
+    pkg = { ...pkg, SkillsBullets: fit.text }
+    compactFit = fit
+  }
+
   const meta = metaFor(art.type, {
     resumeTemplateId: packetResume || settings.resumeTemplateId.value,
     compactResumeTemplateId: settings.compactResumeTemplateId,

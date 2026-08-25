@@ -125,3 +125,122 @@ test('H:compact-empty-input-is-not-an-error', () => {
   assert.equal(r.fits, true)
   assert.deepEqual(r.dropped, [])
 })
+
+// ── The four defects an independent AC pass found, each proven by EXECUTION first ────────────────
+// Every one of these passed the original suite. They are the shapes the tests did not cover, which
+// is why "mutation-proven" was an overstatement: a mutation proves a test catches one reversion, not
+// that the suite covers the space.
+
+test('H:compact-rank-is-the-strongest-claim: a duplicated label cannot lose its posting evidence', () => {
+  // D-1. Measured before the fix: identical data, and the ORDER of provenance rows decided whether
+  // a skill answering req-9 survived. Kept-row-first DELETED it; posting-row-first kept it.
+  const args = (rows) => ({
+    skills1: ['Kubernetes', 'Filler A'], skills2: ['Kubernetes'], provenance: rows, budget: 6,
+  })
+  const kept  = { label: 'Kubernetes', action: 'kept',    driver: 'unattributed', requirementId: null,    seq: 0 }
+  const post  = { label: 'Kubernetes', action: 'swapped', driver: 'posting',      requirementId: 'req-9', seq: 1 }
+  const other = { label: 'Filler A',   action: 'kept',    driver: 'unattributed', requirementId: null,    seq: 2 }
+
+  for (const rows of [[kept, post, other], [post, kept, other]]) {
+    const r = fitCompactSkills(args(rows))
+    assert.ok(!r.dropped.some((d) => d.label === 'Kubernetes'),
+      `a label with ANY posting row must survive regardless of row order: ${JSON.stringify(r.dropped)}`)
+  }
+})
+
+test('H:compact-unreadable-budget-ships-content-never-blanks-it', () => {
+  // D-2. Measured before the fix: `budget: NaN` returned { text:'', kept:[], fits:true } — every
+  // skill deleted and the blank line reported as a success.
+  for (const budget of [NaN, null, undefined, 0, -5, 'abc']) {
+    const r = fitCompactSkills({ skills1: ['Alpha', 'Bravo', 'Charlie'], skills2: [], budget })
+    assert.deepEqual(r.kept, ['Alpha', 'Bravo', 'Charlie'], `budget ${String(budget)} must not delete content`)
+    assert.deepEqual(r.dropped, [])
+    assert.equal(r.budgetUnreadable, true, 'and it must SAY the fit was never enforced')
+  }
+})
+
+test('H:compact-tie-break-uses-document-position-not-per-list-seq', () => {
+  // D-3. `swap_decision.seq` restarts per list (schema keys it unique per packet+list+seq+loop), so
+  // ordering by it let a skills_2 item out-rank a skills_1 item by position alone. The correct
+  // ordinal is the index in the COMBINED line. Note both lists are populated here — the original
+  // suite passed `skills2: []` everywhere, so this could not have been caught.
+  const r = fitCompactSkills({
+    skills1: ['Alpha', 'Bravo'],
+    skills2: ['Delta', 'Echo'],
+    provenance: [
+      { label: 'Alpha', action: 'kept', driver: 'unattributed', seq: 0 },
+      { label: 'Bravo', action: 'kept', driver: 'unattributed', seq: 1 },
+      { label: 'Delta', action: 'kept', driver: 'unattributed', seq: 0 },   // seq RESTARTS
+      { label: 'Echo',  action: 'kept', driver: 'unattributed', seq: 1 },
+    ],
+    budget: ['Alpha', 'Bravo', 'Delta', 'Echo'].join(DEFAULT_SEPARATOR).length - 1,
+  })
+  assert.deepEqual(r.dropped.map((d) => d.label), ['Echo'],
+    'the last item in the COMBINED line goes first, not the one with the highest per-list seq')
+})
+
+test('H:compact-an-already-dropped-row-does-not-protect-a-label', () => {
+  // D-4. `driver` was checked before `action`, so a dropped+posting row ranked as protected and two
+  // live skills were deleted to preserve an item the pipeline had already removed.
+  // Ghost is placed LAST on purpose. The first draft of this test put it first, and it survived on
+  // the position tie-break rather than on protection — a test that would have passed either way and
+  // proved nothing. Last position isolates the one variable: with the fix Ghost is rank 0 and goes
+  // first; before it, Ghost ranked 2 and a live skill was deleted instead.
+  const r = fitCompactSkills({
+    skills1: ['Live One', 'Live Two', 'Ghost'], skills2: [],
+    provenance: [
+      { label: 'Live One', action: 'kept',    driver: 'unattributed', requirementId: null,    seq: 0 },
+      { label: 'Live Two', action: 'kept',    driver: 'unattributed', requirementId: null,    seq: 1 },
+      { label: 'Ghost',    action: 'dropped', driver: 'posting',      requirementId: 'req-1', seq: 2 },
+    ],
+    budget: 'Live One | Live Two'.length,
+  })
+  assert.deepEqual(r.dropped.map((d) => d.label), ['Ghost'],
+    'an already-dropped row must be droppable, and it goes before any live content')
+  assert.ok(r.kept.includes('Live One') && r.kept.includes('Live Two'),
+    'live content must not be sacrificed to keep a ghost')
+})
+
+// ── The wiring: a declared placeholder MUST have a producer, and drops MUST reach the margin ─────
+import { readFileSync as _rf } from 'node:fs'
+const PACKETS_SRC = _rf(new URL('../src/functions/tests/appPackets.ts', import.meta.url), 'utf8')
+const CHECKS_SRC  = _rf(new URL('../src/functions/tests/checks.ts', import.meta.url), 'utf8')
+const META_SRC    = _rf(new URL('../src/functions/tests/packetTemplates.ts', import.meta.url), 'utf8')
+
+test('H:compact-placeholder-has-a-producer: a declared token nothing fills blanks the document', () => {
+  // THE DEFECT THIS BRANCH BRIEFLY SHIPPED. `TEMPLATE_META.compact_resume` declares
+  // {{SkillsBullets}}; if nothing assigns pkg.SkillsBullets, varsForType injects '' and the compact
+  // resume goes out with a BLANK Core Skills line, silently. Asserted structurally because a
+  // runtime test would need Google and Postgres.
+  assert.match(META_SRC, /placeholders: \['ResumeSummary', 'SkillsBullets'\]/,
+    'the compact resume must declare the combined line')
+  assert.match(PACKETS_SRC, /pkg = \{ \.\.\.pkg, SkillsBullets: fit\.text \}/,
+    'nothing produces pkg.SkillsBullets — the compact resume would ship blank')
+  assert.match(PACKETS_SRC, /if \(art\.type === 'compact_resume'\)/,
+    'the producer must be scoped to the compact resume')
+})
+
+test('H:compact-drop-reaches-the-margin: the owner is told WHICH skill went, not how many', () => {
+  // The owner asked to be "notified that happened in the right margin". The margin renders
+  // check_result offenders, and the repo's rule is that offenders NAME the items: "2 removed" tells
+  // them something is wrong without telling them what to put back.
+  assert.match(CHECKS_SRC, /out\.push\(bad\('compact_skills_fit'/,
+    'there must be a compact_skills_fit finding')
+  assert.match(CHECKS_SRC, /fit\.dropped\.map\(d => `\$\{d\.label\} — \$\{d\.reason\}`\)/,
+    'offenders must name each dropped skill and why')
+  // It must reuse the render's function, not re-implement the rule.
+  assert.match(CHECKS_SRC, /import \{ fitCompactSkills \} from '\.\/compactFit'/,
+    'the check must reuse fitCompactSkills, never a second copy of the drop rule')
+  // An unreadable budget must not read as a pass.
+  assert.match(CHECKS_SRC, /if \(fit\.budgetUnreadable\)/,
+    'a budget that could not be read must be reported, never treated as fitting')
+})
+
+test('H:compact-check-sees-the-same-facts-the-render-did', () => {
+  // Ranking on `driver` alone would let the check name a different skill than the document lost.
+  assert.match(CHECKS_SRC, /requirementId: sw\.requirement_id \?\? null/,
+    'the check must receive requirement_id so it reproduces the render decision')
+  const APPCHECKS = _rf(new URL('../src/functions/tests/appChecks.ts', import.meta.url), 'utf8')
+  assert.match(APPCHECKS, /select action, driver, to_label, from_label, requirement_id, seq, list from swap_decision/,
+    'the swaps projection must carry the fields the ranking reads')
+})
