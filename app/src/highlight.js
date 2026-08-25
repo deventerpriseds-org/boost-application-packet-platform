@@ -31,6 +31,18 @@ export const HIGHLIGHT_CLASS = {
 }
 
 /**
+ * Added ALONGSIDE a HIGHLIGHT_CLASS when the reader is pointing at that phrase from the margin.
+ *
+ * Exported from here rather than typed in the component for the same reason the colours are: the
+ * name is shared by the stylesheet, the component and the DOM probe, and three copies of a string
+ * is how they come to disagree. It carries NO new colour — the treatment is an outline in
+ * `--border-brand`, a token the focus ring already uses — which is deliberate: a new swatch would
+ * have to be registered in HIGHLIGHT_LITERALS below and cleared through the contrast sweep in both
+ * themes, and there is no reader benefit here that a second hue would buy.
+ */
+export const HIGHLIGHT_ACTIVE_CLASS = 'qc-mark-on'
+
+/**
  * Every swatch these two treatments resolve to, light and dark. theme.css is the only file allowed
  * to contain them; the guard that enforces that reads the list from HERE, so a swatch added to the
  * stylesheet and then pasted into a component cannot quietly escape the grep. The first three are
@@ -69,36 +81,41 @@ export const HIGHLIGHT_LITERALS = [
 export function markRuns(text, phrases, mark = 'postingEcho') {
   const s = String(text == null ? '' : text)
   if (!s) return []
+  // `raw` is carried beside the trimmed needle so a marked run can name WHICH phrase produced it,
+  // and name it as the caller's own array element (===-comparable), not as a trimmed copy. That is
+  // what lets a hover link the margin row to its span without re-searching the text: re-finding the
+  // phrase downstream would be a second matcher, and a highlight is an accusation, so this file is
+  // the only place allowed to decide what matched.
   const list = (Array.isArray(phrases) ? phrases : [])
-    .map((p) => String(p == null ? '' : p).trim())
-    .filter((p) => p.length > 1)
-    .sort((a, b) => b.length - a.length)
-  if (!list.length) return [{ t: s, mark: null }]
+    .map((raw) => ({ raw, needle: String(raw == null ? '' : raw).trim() }))
+    .filter((x) => x.needle.length > 1)
+    .sort((a, b) => b.needle.length - a.needle.length)
+  if (!list.length) return [{ t: s, mark: null, phrase: null }]
 
   const lower = s.toLowerCase()
-  const taken = []                                  // [start, end) already claimed
+  const taken = []                                  // [start, end, rawPhrase) already claimed
   const free = (a, b) => taken.every(([x, y]) => b <= x || a >= y)
-  for (const p of list) {
+  for (const { raw, needle: p } of list) {
     const needle = p.toLowerCase()
     let from = 0
     for (;;) {
       const i = lower.indexOf(needle, from)
       if (i < 0) break
       const j = i + needle.length
-      if (free(i, j)) taken.push([i, j])
+      if (free(i, j)) taken.push([i, j, raw])
       from = i + 1                                  // +1, not +len: an overlapped hit may still
     }                                               // start a valid later one
   }
-  if (!taken.length) return [{ t: s, mark: null }]
+  if (!taken.length) return [{ t: s, mark: null, phrase: null }]
 
   taken.sort((a, b) => a[0] - b[0])
   const out = []
   let at = 0
-  for (const [a, b] of taken) {
-    if (a > at) out.push({ t: s.slice(at, a), mark: null })
-    out.push({ t: s.slice(a, b), mark })
+  for (const [a, b, raw] of taken) {
+    if (a > at) out.push({ t: s.slice(at, a), mark: null, phrase: null })
+    out.push({ t: s.slice(a, b), mark, phrase: raw })
     at = b
   }
-  if (at < s.length) out.push({ t: s.slice(at), mark: null })
+  if (at < s.length) out.push({ t: s.slice(at), mark: null, phrase: null })
   return out
 }

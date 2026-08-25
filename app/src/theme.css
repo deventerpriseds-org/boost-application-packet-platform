@@ -249,6 +249,15 @@
     .qc-kw { background: var(--qc-kw-bg); color: var(--qc-kw-fg); border-radius: 3px; padding: 0 4px; box-decoration-break: clone; -webkit-box-decoration-break: clone; }
     .qc-echo { background: var(--qc-echo-bg); color: var(--proto-ink); border-bottom: 2px solid var(--qc-echo-rule); border-radius: 3px 3px 0 0; padding: 1px 4px; box-decoration-break: clone; -webkit-box-decoration-break: clone; }
 
+    /* The reader is pointing at THIS phrase from the margin. Added alongside .qc-kw/.qc-echo, never
+       instead of one, so the mark keeps its own meaning and only gains emphasis. Deliberately NOT a
+       new hue: --border-brand is the token the focus ring already uses, so nothing enters
+       HIGHLIGHT_LITERALS and the D28 contrast sweep has no new selector to clear. An outline rather
+       than a background also means it composes over both marks in both themes without either
+       swatch having to be re-measured. Class name comes from HIGHLIGHT_ACTIVE_CLASS in
+       highlight.js; it is not typed into any component. */
+    .qc-mark-on { outline: 2px solid var(--border-brand); outline-offset: 1px; border-radius: 3px; }
+
     .px-note { background: var(--surface-info-subtle); border:1px solid var(--blue-200); padding:8px 10px; font-size:12px; color: var(--text-info); border-radius: var(--proto-radius-sm); }
 
     .px-link { color: var(--text-link); cursor:pointer; font-weight:500; text-decoration: none; }

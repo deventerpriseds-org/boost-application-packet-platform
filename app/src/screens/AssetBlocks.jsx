@@ -36,7 +36,7 @@ import {
   ASSET_ANSWERS_DEFAULT_OPEN, correctionsForField,
   meterModel, originalState, reqsForRow, scopeSwaps, shapeOf, sharedSourceNote, statPct, wordCount,
 } from '../assetBlocks.js'
-import { HIGHLIGHT_CLASS, markRuns } from '../highlight.js'
+import { HIGHLIGHT_CLASS, HIGHLIGHT_ACTIVE_CLASS, markRuns } from '../highlight.js'
 import { SEV_COLOR, SEV_LABEL, checkLabel, fieldLabel, severityCounts } from '../assetGate.js'
 import { arr, fieldSeverities, findingsByField, offendersByField, offendersForField, railChangeLog } from '../qcRail.js'
 import { CorrectionRow } from './QcRail.jsx'
@@ -351,7 +351,7 @@ function ListBody({ row, swapsForList, artifactId, listOwners, phrases }) {
                 {line.from} <span style={{ padding: '0 4px' }}>&rarr;</span>
               </span>
             )}
-            <span style={{ fontWeight: line.from ? 600 : 400 }}><Marked text={line.text} phrases={phrases} /></span>
+            <span style={{ fontWeight: line.from ? 600 : 400 }}><Marked text={line.text} phrases={phrases} active={active} /></span>
           </div>
           {/* The status and the packet-level marker stack rather than run on, so the column stays
               as narrow as its longest token on a phone. */}
@@ -387,7 +387,7 @@ function ListBody({ row, swapsForList, artifactId, listOwners, phrases }) {
   )
 }
 
-function BlockBody({ row, shape, swapsForList, artifactId, listOwners, phrases }) {
+function BlockBody({ row, shape, swapsForList, artifactId, listOwners, phrases, active = null }) {
   if (shape === 'static') {
     return (
       <div className="px-small" style={{ textTransform: 'none', lineHeight: 1.6 }}>
@@ -400,13 +400,13 @@ function BlockBody({ row, shape, swapsForList, artifactId, listOwners, phrases }
   if (shape === 'pipe') {
     return (
       <div style={{ fontFamily: 'var(--font-mono)', fontSize: 11.5, lineHeight: 1.9, wordBreak: 'break-word', whiteSpace: 'pre-line' }}>
-        <Marked text={row.after_text} phrases={phrases} />
+        <Marked text={row.after_text} phrases={phrases} active={active} />
       </div>
     )
   }
   return (
     <div style={{ fontSize: 12.5, lineHeight: 1.65, whiteSpace: 'pre-line' }}>
-      <Marked text={row.after_text} phrases={phrases} />
+      <Marked text={row.after_text} phrases={phrases} active={active} />
     </div>
   )
 }
@@ -422,17 +422,33 @@ function BlockBody({ row, shape, swapsForList, artifactId, listOwners, phrases }
  * text the pipeline has usually already rewritten. Keyword marking stays absent because
  * `term_library_entry` has zero published rows; a highlight with no source would be invented.
  */
-function Marked({ text, phrases }) {
+function Marked({ text, phrases, active = null }) {
   const runs = markRuns(text, phrases)
   if (!runs.some((r) => r.mark)) return text || null
-  return runs.map((r, i) => (r.mark
-    ? <span key={i} className={HIGHLIGHT_CLASS[r.mark]}>{r.t}</span>
-    : <React.Fragment key={i}>{r.t}</React.Fragment>))
+  return runs.map((r, i) => {
+    if (!r.mark) return <React.Fragment key={i}>{r.t}</React.Fragment>
+    // IDENTITY, not a search. `r.phrase` is the caller's own array element, handed back by
+    // markRuns; `active` is the element the margin row is rendering. `===` between them is the
+    // whole linkage. Any `includes`/`indexOf`/lowercase comparison here would be a SECOND matcher
+    // deciding what a highlight points at, which is the one thing highlight.js exists to own.
+    const on = active != null && r.phrase === active
+    return (
+      <span key={i} className={on ? `${HIGHLIGHT_CLASS[r.mark]} ${HIGHLIGHT_ACTIVE_CLASS}` : HIGHLIGHT_CLASS[r.mark]}>
+        {r.t}
+      </span>
+    )
+  })
 }
 
 function AssetBlock({ row, reqs, swapsForList, wide, artifactId, listOwners, thresholds, focused = false, focusRef,
   corrections = [], wording = [], wordingExpected = '', fieldSev = null, findings = [],
   correctionBusy, setCorrectionBusy, onCorrectionsChanged }) {
+  // Which `wording` entry the reader is pointing at, or null. Lifted to AssetBlock because the two
+  // ends of the link — the draft text (via BlockBody) and the margin row — are both its children,
+  // and this is the lowest node that owns both. The VALUE is an element of `wording` itself, never
+  // a copy or a derived key: `Marked` compares it by identity against what markRuns reports, so a
+  // second identifier here would be a second matcher deciding where a highlight points.
+  const [activeWording, setActiveWording] = useState(null)
   const [showBefore, setShowBefore] = useState(false)
   // What the "Show original" panel says. Derived in ../assetBlocks.js, never inline: this file
   // renders, it does not decide. See `originalState` for why before_text may legitimately be null.
@@ -517,7 +533,7 @@ function AssetBlock({ row, reqs, swapsForList, wide, artifactId, listOwners, thr
         )}
       </div>
 
-      <BlockBody row={row} shape={shape} swapsForList={swapsForList} artifactId={artifactId} listOwners={listOwners} phrases={wording} />
+      <BlockBody row={row} shape={shape} swapsForList={swapsForList} artifactId={artifactId} listOwners={listOwners} phrases={wording} active={activeWording} />
 
       <CountMismatch note={countNote} />
 
@@ -694,7 +710,12 @@ function AssetBlock({ row, reqs, swapsForList, wide, artifactId, listOwners, thr
         <div style={{ marginTop: 9 }} data-qc={BLOCK_HOOKS.fieldWordingKept} data-qc-n={wording.length}>
           <div className="px-label" style={{ marginBottom: 4 }}>{checkLabel('posting_wording_kept')}</div>
           {wording.map((phrase, i) => (
-            <div key={`${phrase}-${i}`} style={{ padding: '6px 0', borderTop: '1px solid var(--proto-rule-soft)' }}>
+            <div key={`${phrase}-${i}`} style={{ padding: '6px 0', borderTop: '1px solid var(--proto-rule-soft)' }}
+              data-qc-phrase={phrase}
+              onMouseEnter={() => setActiveWording(phrase)}
+              onMouseLeave={() => setActiveWording(null)}
+              onFocus={() => setActiveWording(phrase)}
+              onBlur={() => setActiveWording(null)}>
               <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
                 <span style={{ fontSize: 11.5, fontWeight: 600, flex: 1, minWidth: 0 }}>{phrase}</span>
                 <span className="px-small" style={{ fontWeight: 700, color: 'var(--proto-ink2)' }}>kept</span>

@@ -348,10 +348,63 @@ test('H:mark-renders-in-the-draft: the wiring exists, not just the function', ()
   // and the prose block — and asserting the marker "appears" passes while one of them is reverted
   // to a bare `{row.after_text}`. Whitespace also defeats an inline `>{row.after_text}<` regex,
   // which is how this guard first passed a mutation that unmarked half the drafts.
-  assert.equal((src.match(/<Marked text=\{row\.after_text\} phrases=\{phrases\} \/>/g) || []).length, 2,
+  assert.equal((src.match(/<Marked text=\{row\.after_text\} phrases=\{phrases\} active=\{active\} \/>/g) || []).length, 2,
     'both draft shapes (pipe and prose) must render through the marker')
-  assert.ok(!/\{row\.after_text\}(?!\s*phrases)/.test(src.replace(/<Marked text=\{row\.after_text\} phrases=\{phrases\} \/>/g, '')),
+  assert.ok(!/\{row\.after_text\}(?!\s*phrases)/.test(src.replace(/<Marked text=\{row\.after_text\} phrases=\{phrases\} active=\{active\} \/>/g, '')),
     'a draft shape still renders after_text unmarked')
-  assert.match(src, /<Marked text=\{line\.text\} phrases=\{phrases\} \/>/, 'list items must mark too')
+  assert.match(src, /<Marked text=\{line\.text\} phrases=\{phrases\} active=\{active\} \/>/, 'list items must mark too')
+  // The hover link is only real if the ACTIVE phrase reaches every shape that prints draft text.
+  // Threading it into one shape and not the other is the same half-wiring this guard already
+  // caught once for `phrases` itself, and it fails silently: the pipe block simply never lights.
+  assert.match(src, /phrases=\{wording\} active=\{activeWording\}/,
+    'BlockBody must receive the active phrase alongside the phrases it marks')
   assert.match(src, /phrases=\{wording\}/, 'the marker must be fed the kept phrases for THIS field')
+})
+
+
+test('H:markruns-names-the-matching-phrase: a marked run reports WHICH phrase matched, by identity', () => {
+  // The hover link compares `run.phrase === activePhrase`. That only works if markRuns hands back
+  // the CALLER'S OWN array element rather than a trimmed or lowercased copy - two strings that
+  // look identical in a diff are not `===`, and the link would silently never light.
+  const phrases = ['  cloud native  ', 'platform']
+  const runs = markRuns('we ran cloud native platform work', phrases)
+  const hits = runs.filter((r) => r.mark)
+  assert.equal(hits.length, 2)
+  // Identity, not equality: these must be the very objects the caller passed in.
+  assert.ok(hits.some((r) => r.phrase === phrases[0]), 'the untrimmed element itself must come back')
+  assert.ok(hits.some((r) => r.phrase === phrases[1]))
+  // Unmarked runs carry null rather than being absent, so a consumer never reads undefined.
+  assert.ok(runs.filter((r) => !r.mark).every((r) => r.phrase === null))
+})
+
+test('H:hover-link-no-rematch: Marked locates the active span by identity, never by searching', () => {
+  const src = readFileSync(new URL('../src/screens/AssetBlocks.jsx', import.meta.url), 'utf8')
+  const body = src.slice(src.indexOf('function Marked('), src.indexOf('function AssetBlock('))
+      .replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '')
+  // A highlight is an ACCUSATION ("these words came from the employer's ad"). highlight.js is the
+  // one place allowed to decide what matched; a second matcher here would quietly promote this
+  // component to a tier-1 surface. Weakest of the three guards - an aliased helper evades a source
+  // grep - but the failure it blocks is a tier promotion, so it is worth having. Not proof.
+  for (const banned of ['includes(', 'indexOf(', 'toLowerCase(', 'RegExp', 'startsWith(', 'match(']) {
+    assert.ok(!body.includes(banned), `Marked must not use ${banned} to find the active phrase`)
+  }
+  assert.match(body, /r\.phrase === active/, 'the link must be an identity comparison')
+})
+
+test('H:highlight-active-class-single-source: the active class is exported, never typed in a component', () => {
+  const jsx = readFileSync(new URL('../src/screens/AssetBlocks.jsx', import.meta.url), 'utf8')
+  const hl = readFileSync(new URL('../src/highlight.js', import.meta.url), 'utf8')
+  // Same rule the colours already live under: the stylesheet, the component and the DOM probe all
+  // name this class, and three copies of a string is how they come to disagree.
+  assert.match(hl, /HIGHLIGHT_ACTIVE_CLASS = 'qc-mark-on'/)
+  // ANYWHERE in the file, not just as a fully-quoted string. The first version of this assertion
+  // only matched 'qc-mark-on' / "qc-mark-on" / `qc-mark-on`, and its own mutation proof walked
+  // straight past it: substituting the name INSIDE the existing template literal
+  // (`${HIGHLIGHT_CLASS[r.mark]} qc-mark-on`) is not a quoted literal, so the suite stayed green
+  // while the class was hard-coded - a guard that protected nothing. Comments are stripped first so
+  // the class may still be NAMED in prose without failing.
+  const code = jsx.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '')
+  assert.ok(!code.includes('qc-mark-on'),
+    'the active class must reach the component as HIGHLIGHT_ACTIVE_CLASS, never typed into it')
+  assert.match(jsx, /HIGHLIGHT_ACTIVE_CLASS/, 'the component must use the exported name')
 })
