@@ -452,7 +452,26 @@ Key tables (PostgreSQL):
 - iOS testing: requires macOS runner or BrowserStack; categorically unavailable in Linux CCR
 
 ## Active work
-Current task: ACT-18 seniority routing DONE (folders + backfill + reconcile + 12 forward rules,
+Current task: SPEC 4.1 EVIDENCE EXPANSION SHIPPED (rows 4.1-14..19) on
+  `claude/render-interaction-states`. The JD step now says, beside each extracted line, whether the
+  owner's profile backs it — dot, state word, excerpt behind a disclosure, named source record, and
+  the resolver's own note. It is a READER: the spine has been on the wire for months with no
+  consumer. 4.1-20 (`Where it is used ->`) deferred as `D:jd-evidence-has-no-field-link` with the
+  exact one-derivation unblock written down, NOT parked open-ended.
+Next: F5 / `D:owner-edit-offsets-two-frames`. Its AC pass finished (`83a05e3`,
+  `docs/qc-evidence/AC-offset-frames.md`, 549 lines + two executable repro scripts) and RECOMMENDS
+  OPTION (b), disagreeing with the ledger's (a), on evidence it built rather than read:
+  (a) leaves every already-stored row broken AND removes a working capability (a new owner edit on
+  a field holding a legacy row would start being refused), while (b) repairs stored rows with no
+  migration and survived 252 tampered documents (42 positions x 3 mutation classes x 2 seqs) with
+  0 wrong splices. The defect is also WIDER than the ledger says: two owner edits with NO pipeline
+  correction break identically, so the trigger is "any second correction not written in the original
+  frame", and an owner edit of the pipeline's own replacement has no position in the original at all
+  — a case option (a) structurally cannot express. Also two independent failure points, not one:
+  `originalOf` throws AND `before_sha256` is in the wrong frame, so fixing offsets alone yields a
+  refusal whose reason accuses the owner of an edit they never made. Five questions left for the
+  owner, Q1 the consequential one (may the owner edit text a correction created?).
+Prior task: ACT-18 seniority routing DONE (folders + backfill + reconcile + 12 forward rules,
   all verified live via api-test.yml). Next up: unify with ACT-17 router.
 Files in flight: none pending; all mail endpoints committed db2465b → 104b437 (all on main).
 Blocker: none.
@@ -3530,3 +3549,42 @@ substituting the name INSIDE an existing template literal walked straight past i
 stayed green while the class was hard-coded. Widened to reject the string anywhere in the code, with
 comments stripped. This is the third inert-guard incident in this repo: **the mutation proof is the
 only thing that distinguishes a guard from a decoration.**
+
+## Hardening — 2026-08-25 (cont): I built a parallel model of a thing the API already publishes
+
+Building SPEC 4.1's evidence expansion, I wrote `evidenceState(row)` reading the raw `evidence_*`
+columns off the requirement row and inventing three states of my own — `evidenced` / `open` /
+`unknown` — with a sentence for each. It executed correctly against every fixture I fed it, and it
+was wrong in the one way that matters.
+
+**The API already ships a re-validated verdict.** `verifyEvidence` (`evidence.ts:667`) re-checks
+every stored excerpt against the profile as it stands NOW and publishes SIX states plus the ONE
+sentence for each; `requirementsGet` puts them on the wire as `evidenceState` / `evidenceNote` /
+`evidence` / `evidenceSearch`. Worse, `verifyRequirementRows` NULLS every `evidence_*` key on any
+row that is not `verified`, precisely so a consumer reading the old shape cannot render a withdrawn
+excerpt as proof. So my three states read the redacted husk: four genuinely different situations
+arrive looking identical, and my `open` would have printed **"no evidence found in your profile"**
+over a row whose excerpt exists and merely MOVED when the owner edited their CV. `evidence.ts` says
+this about itself, in the file I had not opened: *"telling that owner 'your profile changed' would
+be a false statement about them"*.
+
+**Root cause:** I read the SQL that produces the columns (`appRequirements.ts:455`) and stopped
+there, treating the query as the contract. The contract is the RESPONSE SHAPER thirty lines further
+down the same file. Two proxies for the same thing, and I picked the upstream one because it was
+what my grep hit first.
+
+**Guard:** `H:evidence-read-from-the-verdict-not-the-columns` fails when any screen reads a
+`.evidence_*` property, and `H:evidence-states-match-the-api` parses the `EvidenceState` union out
+of `evidence.ts` and fails when the app's state set drifts from it. Both mutation-proven AND
+counter-proven — they pass on correct-but-different code (reordered map, renamed local, the
+forbidden column named in a comment), so they cannot cry wolf.
+
+**The generalisable rule, and it is the one I keep relearning in a new costume:** when a value
+reaches the app over a wire, the ground truth is the SHAPER that writes the response, never the
+query that feeds it. Same failure as answering from a derived field instead of the primary source
+— only here the "two derived fields" were two layers of one file.
+
+**Counter-proof is now part of the ritual, not just mutation-proof.** A guard must be shown to FAIL
+on the defect AND PASS on correct-but-different code. Three guards this session were inert; two more
+over-reached and fired on correct code. Mutation alone catches the first failure mode and is blind
+to the second.

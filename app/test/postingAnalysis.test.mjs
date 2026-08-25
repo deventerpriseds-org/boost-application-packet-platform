@@ -638,3 +638,110 @@ test('H:req-seq-one-convention: what the reader SEES equals what a finding NAMES
     assert.ok(!/\bseq\s*\+\s*1\b/.test(src), `${f} re-offsets seq — one convention, and it is the stored one`)
   }
 })
+
+// ── SPEC 4.1 evidence: the app READS the endpoint's verdict, and never re-derives it ────────────
+//
+// Context, because these four guards only make sense together. The requirements endpoint has
+// shipped a re-validated evidence verdict for months and the app had NO reader — `grep evidence_
+// app/src` returned Settings labels and nothing else. The first version of the reader I wrote read
+// the raw `evidence_*` columns and invented its own three states, which would have printed "no
+// evidence found in your profile" over a row whose excerpt merely MOVED when the owner edited
+// their CV. `verifyRequirementRows` nulls every `evidence_*` key on a row that is not `verified`,
+// so four genuinely different situations arrive looking identical, and only the verdict tells them
+// apart. These guards keep the app on the verdict.
+
+test('H:evidence-states-match-the-api: the app knows every state verifyEvidence can produce', async () => {
+  const { EVIDENCE_TONE, EVIDENCE_WORD } = await import('../src/postingAnalysis.js')
+  const src = readFileSync(new URL('../../api/src/functions/tests/evidence.ts', import.meta.url), 'utf8')
+  const m = src.match(/export type EvidenceState\s*=\s*([^\n]+)/)
+  assert.ok(m, 'EvidenceState union not found in evidence.ts — this guard is reading the wrong file')
+  const apiStates = Array.from(m[1].matchAll(/'([a-z_]+)'/g)).map((x) => x[1]).sort()
+  assert.ok(apiStates.length >= 6, `expected the full union, parsed only ${apiStates.join(',')}`)
+
+  // `unknown` is the app's own state for a payload that carries no verdict at all (an older
+  // deploy). It is deliberately NOT an API state, so it is excluded from the comparison and
+  // asserted separately — a reader that silently treats a NEW api state as "not checked" is the
+  // failure this guard exists to catch.
+  const appStates = Object.keys(EVIDENCE_TONE).filter((k) => k !== 'unknown').sort()
+  assert.deepEqual(appStates, apiStates,
+    'app evidence states have drifted from evidence.ts — a state the API can emit would render as "not checked for evidence"')
+  assert.deepEqual(Object.keys(EVIDENCE_WORD).sort(), Object.keys(EVIDENCE_TONE).sort(),
+    'every state needs both a badge word and a tone')
+  assert.ok(EVIDENCE_TONE.unknown && EVIDENCE_WORD.unknown, 'the no-verdict fallback must itself be defined')
+})
+
+test('H:evidence-tone-resolves-to-a-real-token: no state paints itself invisible', async () => {
+  const { EVIDENCE_TONE } = await import('../src/postingAnalysis.js')
+  // shell.jsx's own comment: interpolating an unknown tone produces an INVALID declaration and CSS
+  // drops it without a word — "the bug that made todo pills invisible". toneColor() swallows an
+  // unknown tone into ink3, so a mistyped tone here would paint an evidenced row the same grey as
+  // an unchecked one and nothing would report it. Read the real table rather than trusting the call.
+  const shell = readFileSync(new URL('../src/shell.jsx', import.meta.url), 'utf8')
+  const table = shell.slice(shell.indexOf('const TONE_SOLID'), shell.indexOf('export const toneColor'))
+  assert.ok(table.length > 40, 'TONE_SOLID not found in shell.jsx — this guard is reading the wrong region')
+  for (const [state, tone] of Object.entries(EVIDENCE_TONE)) {
+    assert.match(table, new RegExp(`(^|[{,\\s])${tone}\\s*:`, 'm'),
+      `evidence state "${state}" uses tone "${tone}", which TONE_SOLID does not define — toneColor would silently return grey`)
+  }
+  // The three signals must be DISTINGUISHABLE, or the dot carries no information.
+  assert.notEqual(EVIDENCE_TONE.verified, EVIDENCE_TONE.none)
+  assert.notEqual(EVIDENCE_TONE.none, EVIDENCE_TONE.stale,
+    'a row whose evidence merely needs re-resolving must not be painted the same as a real gap in the profile')
+})
+
+test('H:only-verified-may-be-quoted: no unprovable state leaks an excerpt or says "not found"', async () => {
+  const { evidencePresentation, EVIDENCE_WORD } = await import('../src/postingAnalysis.js')
+
+  // A row carrying a quote on the wire but a NON-verified verdict. This shape is not hypothetical:
+  // `verifyRequirementRows` writes the verdict AFTER the redaction, and any future column added to
+  // the join arrives beside it. The verdict is the authority, never the presence of text.
+  for (const state of ['none', 'stale', 'misresolved', 'source_missing', 'unverified', 'wat']) {
+    const p = evidencePresentation({
+      evidenceState: state,
+      evidence: { quote: 'Led vendor selection', sourceLabel: 'Resume 2024' },
+      evidence_quote: 'Led vendor selection',
+      evidenceNote: 'some sentence',
+    })
+    assert.equal(p.provable, false, `${state} must never be provable`)
+    assert.equal(p.quote, null, `${state} leaked an excerpt — only a verified verdict may be shown as a quote`)
+    assert.equal(p.source, null, `${state} leaked a source label`)
+  }
+
+  // "no evidence found" is a claim about the OWNER'S PROFILE and only `none` earns it. Saying it
+  // over `stale` tells an owner their profile lacks something it contains.
+  const found = Object.entries(EVIDENCE_WORD).filter(([, w]) => /not found|no evidence/i.test(w)).map(([s]) => s)
+  assert.deepEqual(found, ['none'],
+    `only "none" may report a gap in the profile; these states also do: ${found.join(', ')}`)
+
+  // And the verified path does carry it all through.
+  const ok = evidencePresentation({
+    evidenceState: 'verified',
+    evidence: { quote: ' Led vendor selection ', sourceLabel: 'Resume 2024', sourceKind: 'resume', extra: 'model proposal', recordChanged: true },
+    evidenceNote: null,
+  })
+  assert.equal(ok.provable, true)
+  assert.equal(ok.quote, 'Led vendor selection')
+  assert.equal(ok.source, 'Resume 2024')
+  assert.equal(ok.extra, 'model proposal')
+  assert.equal(ok.recordChanged, true)
+  assert.equal(ok.search, null, 'a verified row has nothing to explain about what was looked for')
+})
+
+test('H:evidence-read-from-the-verdict-not-the-columns: no screen reads a redacted column', () => {
+  // The pre-redaction shape must never be a source in the app. `chk_evidence_*` Settings KEYS are
+  // not property reads off a requirement row, so this matches the access construct rather than the
+  // bare string — measured: 0 hits across app/src today, 6 `chk_evidence_*` label keys untouched.
+  const strip = (s) => s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')
+  for (const f of ['../src/screens/PostingAnalysis.jsx', '../src/screens/AssetBlocks.jsx', '../src/postingAnalysis.js']) {
+    const src = strip(readFileSync(new URL(f, import.meta.url), 'utf8'))
+    const hits = Array.from(src.matchAll(/\.evidence_[a-z_]+/g)).map((m) => m[0])
+    assert.deepEqual(hits, [],
+      `${f} reads ${hits.join(', ')} — those keys are NULLED for every non-verified row, so reading them cannot tell "stale" from "none"`)
+  }
+  // The reader is actually mounted; a presenter nothing renders is the inert-guard failure.
+  const jsx = readFileSync(new URL('../src/screens/PostingAnalysis.jsx', import.meta.url), 'utf8')
+  assert.match(jsx, /<EvidenceLine\s/, 'EvidenceLine is defined but never mounted')
+  assert.match(jsx, /evidencePresentation\(/, 'PostingAnalysis does not go through the shared presenter')
+  assert.match(jsx, new RegExp(`data-qc=\\{POSTING_HOOKS\\.evidence\\}`), 'the evidence line has no stable hook')
+  assert.match(jsx, new RegExp(`data-qc=\\{POSTING_HOOKS\\.evidenceBody\\}`), 'the excerpt has no stable hook')
+})

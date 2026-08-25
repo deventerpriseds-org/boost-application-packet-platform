@@ -16,7 +16,7 @@
 // provenance) lives in ../postingAnalysis.js so it can be tested without a DOM. This file is the
 // rendering only. Stable `data-qc` hooks are on every surface the acceptance criteria name.
 import React, { useEffect, useState } from 'react'
-import { Pill, Overlay } from '../shell.jsx'
+import { Pill, Overlay, toneColor } from '../shell.jsx'
 import {
   KIND_ABBR, reqChipLabel, kindSourceNote, noQuoteReason, isQuoted,
   groupRequirements, modelKeywords, summarizeKindSource, keywordLibraryState,
@@ -24,6 +24,7 @@ import {
   fitLabel, FIT_COLOR, comparisonState, compareColumns, compareGridTemplate,
   COMPARE_COLUMNS, COMPARE_SCOPE_NOTE, comparisonStaleNote,
   keywordGroupMeaning,
+  evidencePresentation,
 } from '../postingAnalysis.js'
 import { HIGHLIGHT_CLASS } from '../highlight.js'
 
@@ -252,6 +253,102 @@ function RequirementRow({ r }) {
         style={{ marginTop: 3, color: 'var(--proto-ink3)' }}>
         Filed here because {kindSourceNote(r.kind_source)}.
       </div>
+
+      <EvidenceLine r={r} />
+    </div>
+  )
+}
+
+/**
+ * Whether the owner's profile backs THIS requirement, said on the line that states the requirement.
+ *
+ * SPEC 4.1 asks the extraction list to answer "can I back this up?" beside each line, and until now
+ * it could not: the endpoint has shipped nine `evidence_*` columns plus a re-validated verdict for
+ * months (`appRequirements.ts:455`), and `grep evidence_ app/src` returned nothing but Settings
+ * LABELS. The whole spine was built and had no reader.
+ *
+ * WHAT IS AND IS NOT DECIDED HERE. Every word below comes off the payload: the state and its
+ * sentence from `verifyEvidence`'s ONE map, the excerpt only when that verdict says it may be shown
+ * as a quote. This component chooses layout and nothing else.
+ *
+ * NO NUMBER, DELIBERATELY, and the precedent is thirty lines up in this same file: the keyword
+ * surface refuses a coverage percentage because it "made a suggestion look like a measurement". The
+ * resolver's `ratio` is that same shape - a similarity score - and this repo's standing rule keeps
+ * similarity for RANKING and out of anything a reader could take as a finding. So the reader gets
+ * the excerpt and the record it came from, which they can judge, and never a score.
+ */
+function EvidenceLine({ r }) {
+  const ev = evidencePresentation(r)
+  const [open, setOpen] = useState(false)
+  // The excerpt is the only thing worth expanding. Every other state is one sentence, so hiding it
+  // behind a disclosure would cost a click to reveal text that already fits on the line.
+  const expandable = ev.provable
+  const dot = (
+    <span aria-hidden="true" style={{
+      width: 7, height: 7, borderRadius: '50%', flexShrink: 0,
+      background: toneColor(ev.tone),
+    }} />
+  )
+  return (
+    <div data-qc={POSTING_HOOKS.evidence} data-qc-evidence-state={ev.state} style={{ marginTop: 6 }}>
+      <div className="px-small" style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+        {dot}
+        <span style={{ fontWeight: 600, color: ev.state === 'none' ? 'var(--proto-red)' : 'var(--proto-ink2)' }}>
+          {ev.word}
+        </span>
+        {expandable && (
+          <button className="px-link" style={{ fontSize: 12, background: 'none', border: 0, padding: 0, cursor: 'pointer' }}
+            aria-expanded={open ? 'true' : 'false'} onClick={() => setOpen((v) => !v)}>
+            {open ? 'hide the line' : 'show the line'}
+          </button>
+        )}
+        {/* A provable excerpt whose record has since been edited. The quote still holds - it was
+            re-checked against today's bytes - but it was RANKED against an older version, so the
+            endpoint reports it as a reason to re-resolve rather than suppressing it. */}
+        {ev.provable && ev.recordChanged && (
+          <span style={{ color: 'var(--proto-ink3)' }}>· ranked against an earlier version of that record</span>
+        )}
+      </div>
+
+      {/* The one sentence for a state that is not provable, from the API. `none` is the only one
+          that reports a gap in the PROFILE; the other four report that evidence exists and cannot
+          be stood behind right now, which is a pipeline problem and never an accusation. */}
+      {!ev.provable && ev.note && (
+        <div className="px-small" style={{ marginTop: 3, color: ev.state === 'none' ? 'var(--proto-red)' : 'var(--proto-ink3)' }}>
+          {ev.note}
+        </div>
+      )}
+
+      {/* WHAT WAS LOOKED FOR. `evidenceSearch` is computed by the endpoint for exactly this - its
+          own comment says "no evidence found in your profile" is "true and useless: it does not say
+          what was sought, so the owner cannot act on it". It had no reader until now. */}
+      {!ev.provable && ev.search && ev.search.missingWords && ev.search.missingWords.length > 0 && (
+        <div className="px-small" style={{ marginTop: 2, color: 'var(--proto-ink3)' }}>
+          Looked for {ev.search.missingWords.slice(0, 6).join(', ')} and did not find
+          {ev.search.missingWords.length > 6 ? ' them' : ev.search.missingWords.length > 1 ? ' them' : ' it'} in your profile.
+        </div>
+      )}
+
+      {open && ev.provable && (
+        <div data-qc={POSTING_HOOKS.evidenceBody} style={{ marginTop: 5 }}>
+          <blockquote style={{
+            margin: 0, padding: '2px 0 2px 10px', borderLeft: '3px solid var(--proto-green)',
+            fontSize: 13, lineHeight: 1.6,
+          }}>
+            {ev.quote}
+          </blockquote>
+          <div className="px-small" style={{ marginTop: 4, color: 'var(--proto-ink3)' }}>
+            {ev.source
+              ? <>Your words, from {ev.source}{ev.kind ? ` (${ev.kind})` : ''}.</>
+              : <>Your words, from a profile record this row does not name.</>}
+          </div>
+          {/* The resolver's own supporting note, verbatim and only when it exists. A model proposal
+              carries its reasoning here; an exact match usually carries nothing. */}
+          {ev.extra && (
+            <div className="px-small" style={{ marginTop: 2, color: 'var(--proto-ink3)' }}>{ev.extra}</div>
+          )}
+        </div>
+      )}
     </div>
   )
 }

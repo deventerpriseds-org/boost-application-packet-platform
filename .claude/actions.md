@@ -3544,3 +3544,49 @@ rather than merely unsourced — absent text is equally consistent with reworded
 
 **Phase B (highlight placement in the draft; "claims but does not contain") is TIER 1 and NOT built.**
 It names an offender. Its prerequisite — `markRuns` marking inside words — was fixed in `ceab754`.
+
+**SHIPPED — SPEC §4.1 evidence expansion, rows 4.1-14 through 4.1-19.**
+The JD step's extraction list now answers "can I back this up?" beside each line: a status dot, the
+state word, the excerpt behind a disclosure, the named profile record it came from, and the
+resolver's own supporting note. The spine was already there and had NO reader — the requirements
+endpoint has shipped nine `evidence_*` columns plus a re-validated verdict for months
+(`appRequirements.ts:455`), and `grep evidence_ app/src` returned six Settings LABELS and nothing
+else. This is a reader, not a new system.
+
+**A PARALLEL MODEL WAS WRITTEN FIRST AND THROWN AWAY, and that is the part worth keeping.** My
+first version read the raw `evidence_*` columns and invented three states of its own — evidenced /
+open / unknown. `verifyRequirementRows` NULLS every `evidence_*` key on any row that is not
+`verified`, so four genuinely different situations arrive looking identical, and my `open` state
+would have printed **"no evidence found in your profile"** over a row whose excerpt exists and
+merely MOVED when the owner edited their CV. `evidence.ts` says exactly this about its `misresolved`
+state: *"telling that owner 'your profile changed' would be a false statement about them"*. The
+catch was reading the endpoint's response SHAPER rather than the SQL that feeds it — the same
+ground-truth-the-primary-source move, applied to a wire format.
+
+The shipped reader consumes `evidenceState` / `evidenceNote` / `evidence` / `evidenceSearch` and
+re-derives nothing. Six states, none collapsed: `none` is the ONLY one that may report a gap in the
+profile; `stale` / `misresolved` / `source_missing` / `unverified` all mean evidence EXISTS and
+cannot be stood behind right now — a prompt to re-resolve, never an accusation. `evidenceSearch`
+(what was looked for, and which words were missing) had no reader either and now has one; the
+endpoint's own comment calls the bare sentence *"true and useless: it does not say what was
+sought, so the owner cannot act on it"*.
+
+**No number, deliberately.** The resolver's `ratio` is a similarity score, and this same file's
+keyword surface already refuses a coverage percentage because it *"made a suggestion look like a
+measurement"*. The reader gets the excerpt and the record, which they can judge.
+
+Four guards, each mutation-proven AND counter-proven (they pass on correct-but-different code, so
+they cannot cry wolf): `H:evidence-states-match-the-api` parses the `EvidenceState` union out of
+`evidence.ts` and fails when the app's state set drifts; `H:evidence-tone-resolves-to-a-real-token`
+reads `shell.jsx`'s `TONE_SOLID` and fails on a tone `toneColor` would silently resolve to grey;
+`H:only-verified-may-be-quoted` fails when any non-verified verdict leaks an excerpt or a second
+state says "not found"; `H:evidence-read-from-the-verdict-not-the-columns` fails when a screen reads
+a redacted `.evidence_*` column. 832 api / 294 app.
+
+**4.1-20 (`Where it is used →`) did NOT ship** and is `D:jd-evidence-has-no-field-link` in the
+ledger. Not blocked and not parked: every piece exists (`goToField` at `PacketBuilder.jsx:740`,
+`swapsForRequirement` at `qcRail.js:589`, `useAssetProvenance` at `PacketBuilder.jsx:413`) but a
+swap is keyed by `list`, not by artifact, and the `list → artifact` map (`listOwners`) is built by
+asset cards registering as they RENDER on the resume step — so on the JD step it is empty and the
+link would be absent exactly where SPEC asks for it. The unblock is one derivation from the packet's
+own artifacts, written up in the ledger row.

@@ -36,6 +36,8 @@ export const POSTING_HOOKS = {
   quote: 'req-quote',
   paraphrase: 'req-paraphrase',
   kindSource: 'kind-source',
+  evidence: 'req-evidence',            // the expander on a requirement row
+  evidenceBody: 'req-evidence-body',   // the excerpt, its source and any supporting note
   keywords: 'ats-keywords',
   libraryState: 'keyword-library-state',
   modelKeywords: 'model-keywords',
@@ -252,6 +254,105 @@ export function noQuoteReason(matchMethod) {
 /** A row is QUOTED only when the resolver actually located the employer's own words. */
 export function isQuoted(row) {
   return !!(row && typeof row.verbatim === 'string' && row.verbatim.length > 0)
+}
+
+/**
+ * ── EVIDENCE, PRESENTED ─────────────────────────────────────────────────────────────────────────
+ *
+ * THIS FILE DOES NOT DECIDE ANY OF IT. `verifyEvidence` (`api/src/functions/tests/evidence.ts:667`)
+ * re-validates every stored excerpt against the profile as it stands NOW, and the requirements
+ * endpoint ships the verdict on the wire as `evidenceState` + `evidenceNote`. Everything below
+ * READS that verdict. Nothing below re-derives it.
+ *
+ * THIS REPLACED A PARALLEL MODEL I WROTE FIRST, and the correction is the point. That version read
+ * the raw `evidence_*` columns and invented three states - evidenced / open / unknown - with its
+ * own sentence for each. It was wrong twice over. `verifyRequirementRows` NULLS every `evidence_*`
+ * key on any row that is not `verified`, so four genuinely different situations arrive at the app
+ * looking identical, and my `open` state would have printed **"no evidence found in your profile"**
+ * over a row whose excerpt exists and merely moved when the owner edited their CV. That is a false
+ * statement about the owner's profile - the exact thing `EVIDENCE_MISRESOLVED_NOTE` exists to
+ * prevent ("telling that owner 'your profile changed' would be a false statement about them").
+ *
+ * THE SIX STATES, and why none may be collapsed:
+ *   verified        the excerpt is that record's bytes at those offsets today - the ONLY state
+ *                   whose quote may be shown, and the only one carrying `evidence`
+ *   none            no row at all: nothing matched. The ONLY state that may say "not found"
+ *   stale           a row exists; the profile changed under it
+ *   misresolved     a row exists; the profile did NOT change, so the offsets were wrong when written
+ *   source_missing  a row exists; the record it names is gone from the profile
+ *   unverified      a row exists; the profile could not be read, so nothing could be checked
+ *
+ * The last four all mean "there IS evidence and we cannot stand behind it right now" - a prompt to
+ * re-resolve, never an accusation. That is why they share a tone and never share `none`'s words.
+ */
+
+/** Short badge label per state. The SENTENCE is never minted here - it comes from `evidenceNote`. */
+export const EVIDENCE_WORD = {
+  verified: 'evidenced',
+  none: 'no evidence found',
+  stale: 'needs re-resolving',
+  misresolved: 'needs re-resolving',
+  source_missing: 'source record removed',
+  unverified: 'could not be checked',
+  unknown: 'not checked for evidence',
+}
+
+/**
+ * The one place a state becomes a colour.
+ *
+ * `none` is the only red: it is the only state that reports a real gap in the profile. The four
+ * unprovable-but-present states are `warn` - something to fix in the pipeline, not a finding about
+ * the owner. `unknown` is `panel`, the shell's "no signal" grey: an older payload that carries no
+ * verdict must not be painted as either good or bad news.
+ *
+ * THE VALUES ARE `shell.jsx`'s TONE VOCABULARY, not words of our own, because they are passed to
+ * `toneColor()` and that function's whole reason for existing is that an unrecognised tone resolves
+ * SILENTLY - either to ink3 here, or, in the construct it replaced, to a `var(--proto-${tone})`
+ * that CSS drops without a word. A tone named `good` would have painted every evidenced row the
+ * same grey as an unchecked one and nothing would have reported it.
+ */
+export const EVIDENCE_TONE = {
+  verified: 'green',
+  none: 'red',
+  stale: 'warn',
+  misresolved: 'warn',
+  source_missing: 'warn',
+  unverified: 'warn',
+  unknown: 'panel',
+}
+
+/**
+ * Adapt one requirement row into what the margin may render. Pure lookup + shape.
+ *
+ * `provable` is `state === 'verified'`, which is the same thing the endpoint means by shipping a
+ * non-null `evidence` object, and a quote is read from THAT object only - never from the row's
+ * `evidence_*` columns, which are the pre-redaction shape.
+ */
+export function evidencePresentation(row) {
+  const r = row || {}
+  const known = Object.prototype.hasOwnProperty.call(EVIDENCE_TONE, r.evidenceState)
+  const state = known && r.evidenceState !== 'unknown' ? r.evidenceState : 'unknown'
+  const ev = state === 'verified' && r.evidence ? r.evidence : null
+  const trim = (v) => (typeof v === 'string' && v.trim() ? v.trim() : null)
+  return {
+    state,
+    provable: state === 'verified',
+    tone: EVIDENCE_TONE[state],
+    word: EVIDENCE_WORD[state],
+    quote: ev ? trim(ev.quote) : null,
+    source: ev ? (trim(ev.sourceLabel) || trim(ev.sourceKey)) : null,
+    kind: ev ? trim(ev.sourceKind) : null,
+    // The resolver's own supporting note, shown verbatim and only when it exists. A model proposal
+    // carries its reasoning here; an exact match usually carries nothing.
+    extra: ev ? trim(ev.extra) : null,
+    // A provable excerpt whose record has since been edited: the quote holds, the RANKING is stale.
+    // Surfaced rather than suppressed - the endpoint's own comment calls it a reason to re-resolve.
+    recordChanged: !!(ev && ev.recordChanged),
+    // Null when the state is `verified`; otherwise the ONE sentence for this state, from the API.
+    note: trim(r.evidenceNote),
+    // What was looked for, on rows with no provable excerpt. Endpoint-computed, never re-derived.
+    search: state === 'verified' ? null : (r.evidenceSearch || null),
+  }
 }
 
 export function modelKeywords(rows) {
