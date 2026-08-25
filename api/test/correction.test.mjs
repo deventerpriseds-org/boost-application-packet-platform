@@ -193,3 +193,154 @@ test('the change log always ships an array, so "none" and "not asked" stay disti
   assert.match(src, /jsonBody: \{ artifact_id: artifactId, corrections: rows \}/,
     'the corrections key is conditional — an absent key and an empty list are different states')
 })
+
+// ── D:owner-edit-offsets-two-frames — the frame guards ──────────────────────────────────────────
+//
+// An owner edit was un-undoable the moment any other correction shared the field, and it poisoned
+// that field's whole change log: `revertOne` refused BOTH rows, not just the new one. Two writers
+// put offsets into `correction` in two different coordinate systems and one reader assumed a single
+// one. The single-correction case worked perfectly, which is why it shipped.
+//
+// Fixed as option (b) — the READER learns the frame — over the ledger's recommended (a), on measured
+// evidence: (a) rewrites the writer, leaves every stored row broken, and (measured, §E1 of the AC
+// pass) makes a NEW owner edit on an affected field start getting refused.
+import { createHash } from 'node:crypto'
+import { CORRECTION_FRAME, frameOf } from '../dist/functions/tests/correction.js'
+
+const FRAME_FIELD = 'Led $18M supplier negotiation across teams'
+const sha = (s) => createHash('sha256').update(String(s), 'utf8').digest('hex')
+// The §1 fixture, in the two frames its two writers actually produce.
+const genRow = {
+  merge_field: 'F', phrase: '$18M', replacement: '8-figure',
+  char_start: 4, char_end: 8, before_sha256: sha(FRAME_FIELD),
+  applied_seq: 1, reason: 'generalized', source: 'generalized', frame: 'original',
+}
+const appliedText = applyCorrections(FRAME_FIELD, [genRow])          // "Led 8-figure supplier negotiation across teams"
+const ownerRow = {
+  merge_field: 'F', phrase: 'supplier negotiation', replacement: 'Vendor selection',
+  char_start: appliedText.indexOf('supplier negotiation'),
+  char_end: appliedText.indexOf('supplier negotiation') + 'supplier negotiation'.length,
+  before_sha256: sha(appliedText), applied_seq: 2,
+  reason: 'you changed this yourself', source: 'owner_edit', frame: 'applied',
+}
+const bothApplied = applyCorrections(appliedText, [{ ...ownerRow, char_start: ownerRow.char_start, char_end: ownerRow.char_end }])
+
+test('H:revert-across-two-frames: an owner edit beside a pipeline row is undoable, and so is the pipeline row', () => {
+  // AC-1 — the reported defect. Before the fix BOTH of these returned ok:false.
+  const undoOwner = revertOne(bothApplied, [genRow, ownerRow], 2)
+  assert.equal(undoOwner.ok, true, `owner row refused: ${undoOwner.reason}`)
+  assert.equal(undoOwner.text, 'Led 8-figure supplier negotiation across teams')
+
+  // AC-2 — the POISONING half. The pipeline row has no defect of its own and was refused anyway.
+  const undoPipeline = revertOne(bothApplied, [genRow, ownerRow], 1)
+  assert.equal(undoPipeline.ok, true, `pipeline row refused: ${undoPipeline.reason}`)
+  assert.equal(undoPipeline.text, 'Led $18M Vendor selection across teams')
+})
+
+test('H:revert-two-owner-rows: the trigger is a second row in another frame, not "a pipeline row"', () => {
+  // AC-3, and the case the LEDGER DOES NOT NAME. Two owner edits, no pipeline correction at all,
+  // break identically — so an AC written only to the ledger's wording would have left this live.
+  const first = { ...ownerRow, applied_seq: 1, before_sha256: sha(FRAME_FIELD),
+    char_start: FRAME_FIELD.indexOf('supplier negotiation'),
+    char_end: FRAME_FIELD.indexOf('supplier negotiation') + 'supplier negotiation'.length }
+  const afterFirst = applyCorrections(FRAME_FIELD, [first])
+  const second = { merge_field: 'F', phrase: 'across teams', replacement: 'company-wide',
+    char_start: afterFirst.indexOf('across teams'),
+    char_end: afterFirst.indexOf('across teams') + 'across teams'.length,
+    before_sha256: sha(afterFirst), applied_seq: 2, reason: 'you changed this yourself',
+    source: 'owner_edit', frame: 'applied' }
+  const both = applyCorrections(afterFirst, [second])
+  for (const seq of [1, 2]) {
+    const r = revertOne(both, [first, second], seq)
+    assert.equal(r.ok, true, `two owner edits, seq ${seq} refused: ${r.reason}`)
+  }
+})
+
+test('H:revert-legacy-rows-need-no-backfill: a row with NO frame resolves through the source map', () => {
+  // AC-4. Every row already in production predates the column. If this ever fails, the fix has
+  // quietly become a migration — which is precisely what choosing (b) over (a) bought us.
+  const legacyGen = { ...genRow }; delete legacyGen.frame
+  const legacyOwner = { ...ownerRow }; delete legacyOwner.frame
+  assert.equal(legacyGen.frame, undefined)
+  assert.equal(legacyOwner.frame, undefined)
+  assert.equal(frameOf(legacyGen), 'original')
+  assert.equal(frameOf(legacyOwner), 'applied')
+  for (const seq of [1, 2]) {
+    const r = revertOne(bothApplied, [legacyGen, legacyOwner], seq)
+    assert.equal(r.ok, true, `legacy row seq ${seq} refused: ${r.reason}`)
+  }
+})
+
+test('H:correction-frame-declared-not-guessed: an unknown source REFUSES and names itself', () => {
+  // AC-5. A default here would silently pick a coordinate system for a row nobody has reasoned
+  // about — the exact class of bug this whole change exists to remove.
+  // An explicitly DECLARED frame beats the map, by design — so to exercise the map path at all the
+  // fixture must carry no frame. Getting this wrong the first time is instructive: the guard failed
+  // because the code was right.
+  const alien = { ...ownerRow, source: 'imported_from_elsewhere' }
+  delete alien.frame
+  assert.equal(frameOf(alien), null)
+  assert.equal(frameOf({ ...alien, frame: 'applied' }), 'applied',
+    'a row that DECLARES its frame is readable even when its source is unknown to this version')
+  const r = revertOne(bothApplied, [genRow, alien], 1)
+  assert.equal(r.ok, false)
+  assert.match(r.reason, /imported_from_elsewhere/,
+    'the refusal must NAME the source it cannot place, or nobody can act on it')
+  assert.equal(r.text, undefined, 'a refusal writes nothing')
+})
+
+test('H:correction-frame-map-exhaustive: every source in the DB domain has a decided frame', () => {
+  // AC-6. The TS `Record<CorrectionSource, …>` catches a widened UNION at compile time; this catches
+  // a widened DATABASE DOMAIN, which the compiler cannot see. The two must not drift.
+  const schema = readFileSync(new URL('../src/functions/tests/schema.ts', import.meta.url), 'utf8')
+  const m = schema.match(/check \(source in \(([^)]+)\)\)/)
+  assert.ok(m, 'source CHECK not found in schema.ts')
+  const dbSources = Array.from(m[1].matchAll(/'([a-z_]+)'/g)).map((x) => x[1]).sort()
+  assert.deepEqual(Object.keys(CORRECTION_FRAME).sort(), dbSources,
+    'a source the database accepts has no frame, so a row of that kind would be un-undoable')
+  for (const [src, frame] of Object.entries(CORRECTION_FRAME)) {
+    assert.ok(frame === 'original' || frame === 'applied', `${src} has a nonsense frame: ${frame}`)
+  }
+})
+
+test('H:revert-verifies-every-owner-row-hash: not just the target row', () => {
+  // AC-7. Unwinding walks backwards through rows the caller did not ask about. If one of those has
+  // moved, splicing anyway writes into a document nobody can check — so each is verified against
+  // the state IT recorded, not merely the one the reader happens to be undoing.
+  const lying = { ...ownerRow, before_sha256: sha('a state this field was never in') }
+  const r = revertOne(bothApplied, [genRow, lying], 1)
+  assert.equal(r.ok, false, 'a wrong hash on a NON-target row must still refuse')
+  assert.equal(r.text, undefined)
+})
+
+test('H:revert-reason-never-blames-the-owner-falsely: a rebuild is not an edit', () => {
+  // AC-8. When a rebuild plans pipeline rows ON TOP of an existing owner edit, the ordering cannot
+  // be replayed. Today's code returns "this field was edited after the correction was applied",
+  // which accuses the owner of something they did not do. The refusal has to be TRUE.
+  const ownerFirst = { ...ownerRow, applied_seq: 1 }
+  const pipelineAfter = { ...genRow, applied_seq: 2 }
+  const r = revertOne(bothApplied, [ownerFirst, pipelineAfter], 1)
+  assert.equal(r.ok, false, 'this ordering is not replayable and must refuse')
+  // The FALSE sentence is the specific one today's code returns — "this field was edited after the
+  // correction was applied" — which asserts a manual edit invalidated the log when what happened was
+  // a rebuild. Banning the substring "you edited" outright would be too blunt: the honest reason
+  // legitimately says a rebuild happened AFTER the owner edited, which is exactly what occurred.
+  assert.doesNotMatch(r.reason, /(this field|it) was edited after the correction was applied/i,
+    `refusal makes the false claim: "${r.reason}"`)
+  assert.match(r.reason, /rebuil/i, 'the reason should say what actually happened')
+})
+
+test('H:revert-writes-nothing-when-text-moved: the safety floor is not loosened', () => {
+  // AC-10/AC-11. The fix must not buy its new capability by weakening the refusal. Both a
+  // length-CHANGING tamper and a SAME-LENGTH one (which disturbs no offset, so only the hash can
+  // catch it) must still refuse.
+  const longer = bothApplied.replace('Led', 'Led personally')
+  const sameLen = bothApplied.replace('across', 'ACROSS')
+  for (const [label, text] of [['length-changing', longer], ['same-length', sameLen]]) {
+    for (const seq of [1, 2]) {
+      const r = revertOne(text, [genRow, ownerRow], seq)
+      assert.equal(r.ok, false, `${label} tamper, seq ${seq}: spliced instead of refusing`)
+      assert.equal(r.text, undefined)
+    }
+  }
+})

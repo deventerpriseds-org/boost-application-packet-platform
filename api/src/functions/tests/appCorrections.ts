@@ -73,6 +73,7 @@ export async function ensureCorrectionTable(client: any): Promise<void> {
     applied_seq   int not null,
     reason        text not null,
     source        text not null check (source in ('profile_figure','generalized','owner_edit')),
+    frame         text check (frame in ('original','applied')),
     run_id        uuid,
     loop          int not null default 0,
     reverted_by   text,
@@ -83,6 +84,12 @@ export async function ensureCorrectionTable(client: any): Promise<void> {
     constraint correction_sha_shaped          check (before_sha256 ~ '^[0-9a-f]{64}$'),
     constraint correction_revert_paired       check ((reverted_by is null) = (reverted_at is null))
   )`)
+  // Same reason as the copy in schema.ts: the `create table if not exists` above does nothing to a
+  // table that already exists, so the column arrives only here.
+  await client.query(`alter table correction add column if not exists frame text`)
+  await client.query(`alter table correction drop constraint if exists correction_frame_check`)
+  await client.query(`alter table correction add constraint correction_frame_check
+    check (frame is null or frame in ('original','applied'))`)
   await client.query(`create unique index if not exists correction_unique_seq
     on correction (artifact_id, merge_field, applied_seq, coalesce(run_id, '00000000-0000-0000-0000-000000000000'::uuid))`)
   await client.query(`create index if not exists correction_by_artifact on correction (artifact_id, reverted_at)`)
@@ -127,9 +134,12 @@ export async function applyCorrectionPass(
 
     for (const c of all) {
       await client.query(
+        // `frame='original'`: planCorrections is handed the ORIGINAL field text and measures every
+        // offset against it. Declared rather than left to the source->frame map, so the row states
+        // its own coordinate system instead of a reader inferring one from `source` forever.
         `insert into correction (artifact_id, merge_field, phrase, replacement, char_start, char_end,
-           before_sha256, applied_seq, reason, source, run_id, loop)
-         values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+           before_sha256, applied_seq, reason, source, run_id, loop, frame)
+         values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'original')
          on conflict do nothing`,
         [artifactId, c.merge_field, c.phrase, c.replacement, c.char_start, c.char_end,
          c.before_sha256, c.applied_seq, c.reason, c.source, args.runId || null, Math.max(0, Number(args.loop ?? 0) | 0)],
@@ -352,9 +362,13 @@ export async function artifactOwnerEdit(req: HttpRequest, _c: InvocationContext)
       await client.query(`update packet set pkg_json = $1, updated_at = now() where id = $2`,
         [JSON.stringify(pkg), art.packet_id])
       await client.query(
+        // `frame='applied'` — the honest declaration of what this row actually is. `current` is read
+        // out of `pkg_json`, so it already HAS every earlier correction in it, and `first` and the
+        // digest below are both measured against that. This row is not in the original frame and
+        // never was; the defect was a reader that assumed otherwise, not a writer that lied.
         `insert into correction (artifact_id, merge_field, phrase, replacement, char_start, char_end,
-           before_sha256, applied_seq, reason, source)
-         values ($1,$2,$3,$4,$5,$6,$7,$8,$9,'owner_edit')`,
+           before_sha256, applied_seq, reason, source, frame)
+         values ($1,$2,$3,$4,$5,$6,$7,$8,$9,'owner_edit','applied')`,
         [artifactId, mergeField, phrase, replacement, first, first + phrase.length,
          createHash('sha256').update(current).digest('hex'), seq, 'you changed this yourself'])
       await client.query('commit')

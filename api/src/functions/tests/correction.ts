@@ -31,6 +31,56 @@ export const CORRECTION_VERSION = 1
 /** Why a figure was changed, and where the replacement came from. */
 export type CorrectionSource = 'profile_figure' | 'generalized' | 'owner_edit'
 
+/**
+ * WHICH TEXT A ROW'S OFFSETS INDEX INTO. The whole of D:owner-edit-offsets-two-frames is this.
+ *
+ *   `original`  offsets index the field BEFORE any correction was applied. `planCorrections` writes
+ *               these: it is handed the original and measures against it.
+ *   `applied`   offsets index the field AS IT STOOD when the row was written — i.e. with every
+ *               earlier correction already in it. `artifactOwnerEdit` writes these: it reads the
+ *               current text out of `pkg_json` and measures against that.
+ *
+ * Two writers, two frames, and until now one reader that assumed everything was `original`. With a
+ * generalization and an owner edit on the same field, `originalOf` replayed the owner row at
+ * original-frame offsets, found something else there, and threw — so `revertOne` refused BOTH rows,
+ * not just the new one. The single-correction case worked perfectly, which is why it shipped.
+ */
+export type CorrectionFrame = 'original' | 'applied'
+
+/**
+ * The frame each source writes in. `Record<CorrectionSource, …>` deliberately, so a new member of
+ * the union is a COMPILE error here rather than a row nobody can revert (AC-6).
+ *
+ * This map is the FALLBACK, not the authority — see `frameOf`. It exists so the ~all rows already in
+ * production, written before `correction.frame` existed, are readable with no migration at all
+ * (AC-4). A row that carries an explicit frame beats it.
+ *
+ * `profile_figure` is in the database CHECK and is produced by nothing today (§F of the AC pass).
+ * It is mapped rather than omitted because omitting it would make every field holding one
+ * unrevertable the day something starts writing it, and a guess is exactly what this map replaces.
+ */
+export const CORRECTION_FRAME: Record<CorrectionSource, CorrectionFrame> = {
+  profile_figure: 'original',
+  generalized: 'original',
+  owner_edit: 'applied',
+}
+
+/**
+ * The frame for ONE row: what it declares, else what its source implies. `null` when neither
+ * answers, which is a REFUSAL and never a default (AC-5).
+ *
+ * WHY A COLUMN AND NOT ONLY THE MAP, reversing my own earlier call. The map infers a fact from a
+ * proxy (`source`) on every read, forever, and is correct only while `source` remains a reliable
+ * stand-in for frame — which is precisely the assumption that produced this defect. The column
+ * records the fact once. The owner put it plainly: *"i dont like workarounds rather than
+ * solutions."* The map stays as the reader for legacy NULLs, which is what keeps AC-4 true.
+ */
+export function frameOf(c: Pick<Correction, 'source' | 'frame'>): CorrectionFrame | null {
+  if (c.frame === 'original' || c.frame === 'applied') return c.frame
+  const f = CORRECTION_FRAME[c.source as CorrectionSource]
+  return f || null
+}
+
 export interface Correction {
   merge_field: string
   /** The exact original substring being replaced. */
@@ -46,6 +96,12 @@ export interface Correction {
   applied_seq: number
   reason: string
   source: CorrectionSource
+  /**
+   * Which text `char_start`/`char_end`/`before_sha256` are measured against. Optional because every
+   * row written before this column existed has none — those resolve through `CORRECTION_FRAME`, so
+   * no backfill is required for correctness. See `frameOf`.
+   */
+  frame?: CorrectionFrame | null
 }
 
 export const sha256 = (s: string): string => createHash('sha256').update(String(s), 'utf8').digest('hex')
@@ -220,20 +276,118 @@ export interface RevertResult {
  * Undo ONE correction, leaving the others applied.
  *
  * Refuses rather than guesses. If the field was rewritten since — a later pass, a manual edit —
- * the recovered original will not hash to `before_sha256` and this returns `ok:false` with a reason.
- * Writing a best-effort splice into a document nobody can check is worse than declining.
+ * the recovered text will not hash to the row's `before_sha256` and this returns `ok:false` with a
+ * reason. Writing a best-effort splice into a document nobody can check is worse than declining.
+ *
+ * FRAME-AWARE (D:owner-edit-offsets-two-frames). The rows on one field can be in two coordinate
+ * systems — see `CorrectionFrame`. This unwinds them in the order that makes each row's own offsets
+ * valid at the moment it is used:
+ *
+ *   1. `applied`-frame rows, DESCENDING `applied_seq`. Walking backwards, the text at each step is
+ *      exactly the state that existed when that row was written, so its stored offsets address its
+ *      own replacement and its `before_sha256` describes the state it is about to restore.
+ *   2. `original`-frame rows, ASCENDING `char_start` — today's `originalOf`, unchanged, on a text
+ *      that now holds only original-frame corrections.
+ *
+ * WHY OPTION (b) AND NOT (a), on measured evidence rather than diff size — the ledger row recommended
+ * (a) and the AC pass disagreed after building both (`repro-offset-frames-options.mjs`). (a) rewrites
+ * the WRITER so new rows land in the original frame. That leaves every already-stored row broken,
+ * needs (b)'s unwind for its own backfill anyway, and — measured, §E1 — makes a NEW owner edit on an
+ * affected field start getting REFUSED, turning a broken undo into a broken undo and a broken edit.
+ * (b) reverts those same stored rows `ok:true` with no migration: they are honest records of what
+ * happened, and this is the reader that finally reads them correctly.
+ *
+ * Attacked, not assumed: 252 tampered documents (42 positions x 3 mutation classes x 2 seqs) spliced
+ * 0 times. The per-row hash check makes this STRICTER per row than the code it replaces, not looser.
  */
 export function revertOne(current: string, applied: Correction[], seq: number): RevertResult {
   const target = applied.find(c => c.applied_seq === seq)
   if (!target) return { ok: false, reason: `no applied correction with seq ${seq}` }
+
+  // AC-5: an undeclared frame is a refusal that NAMES the source, never a default. Defaulting here
+  // would silently pick a coordinate system for a row nobody has reasoned about, which is the class
+  // of bug this whole function is being rewritten for.
+  const unknown = applied.filter(c => frameOf(c) === null)
+  if (unknown.length) {
+    const names = Array.from(new Set(unknown.map(c => String(c.source)))).join(', ')
+    return { ok: false, reason: `this change log contains a change of a kind this version cannot place (${names}), so nothing was undone` }
+  }
+
+  const byFrame = (f: CorrectionFrame) => applied.filter(c => frameOf(c) === f)
+  const appliedFrame = byFrame('applied')
+  const originalFrame = byFrame('original')
+
+  // THE ORDERING THIS CAN REPLAY. Unwinding an `applied`-frame row assumes every row written after
+  // it has already been removed. That holds when the applied-frame rows are the LATEST ones — the
+  // ordinary case, because the pipeline plans a field before the owner ever edits it. It does not
+  // hold when a rebuild plans new pipeline rows on top of an existing owner edit (§B4).
+  //
+  // AC-8: the refusal must be TRUE. Today's code returns "this field was edited after the correction
+  // was applied" here, which accuses the owner of an edit they did not make — what actually happened
+  // was a rebuild. Say that instead.
+  if (appliedFrame.length && originalFrame.length) {
+    const firstApplied = Math.min(...appliedFrame.map(c => c.applied_seq))
+    const lastOriginal = Math.max(...originalFrame.map(c => c.applied_seq))
+    if (lastOriginal > firstApplied) {
+      return {
+        ok: false,
+        reason: 'this field was rebuilt after you edited it, so the changes are recorded in an order this version cannot safely unpick',
+      }
+    }
+  }
+
+  // --- 1. unwind the applied-frame rows, newest first ---------------------------------------------
+  let text = String(current)
+  for (const c of [...appliedFrame].sort((a, b) => b.applied_seq - a.applied_seq)) {
+    const end = c.char_start + c.replacement.length
+    if (text.slice(c.char_start, end) !== c.replacement) {
+      return { ok: false, reason: `this text no longer matches the change log (change ${c.applied_seq} is not where the record says it is)` }
+    }
+    const before = text.slice(0, c.char_start) + c.phrase + text.slice(end)
+    // AC-7: EVERY applied-frame row is verified against the state IT recorded, not just the target.
+    // A row whose hash does not match means the field moved under it, and a splice there would be
+    // exactly the un-checkable write the refusal exists to prevent.
+    if (sha256(before) !== c.before_sha256) {
+      return { ok: false, reason: 'this field was edited after the correction was applied, so the original cannot be restored safely' }
+    }
+    text = before
+  }
+
+  // --- 2. unwind the original-frame rows -----------------------------------------------------------
   let original: string
   try {
-    original = originalOf(current, applied)
+    original = originalOf(text, originalFrame)
   } catch (e: any) {
     return { ok: false, reason: `this text no longer matches the change log (${e.message})` }
   }
-  if (sha256(original) !== target.before_sha256) {
+  // The target's own hash still gates, as before. For an applied-frame target this was already
+  // checked in step 1; re-checking an original-frame target here keeps the guarantee identical to
+  // the code this replaces.
+  if (frameOf(target) === 'original' && sha256(original) !== target.before_sha256) {
     return { ok: false, reason: 'this field was edited after the correction was applied, so the original cannot be restored safely' }
   }
-  return { ok: true, text: applyCorrections(original, applied.filter(c => c.applied_seq !== seq)) }
+
+  // --- 3. re-apply the survivors -------------------------------------------------------------------
+  const survivors = applied.filter(c => c.applied_seq !== seq)
+  let out: string
+  try {
+    out = applyCorrections(original, survivors.filter(c => frameOf(c) === 'original'))
+  } catch (e: any) {
+    return { ok: false, reason: `this text no longer matches the change log (${e.message})` }
+  }
+  // A surviving OWNER row cannot use its offsets any more: removing a row before it moved the text
+  // it was measured against. It is re-placed by finding its phrase — exact, case-sensitive and
+  // EXACTLY-ONCE-OR-LAPSE, never fuzzy. That is the same rule DECISION A already blessed for the
+  // rebuild path (`reapplyOwnerEdits`); this extends it to the revert path, which is recorded as
+  // PC-8 because it is a real judgement call: at the moment of splicing, a surviving owner row is
+  // placed by SEARCH rather than by recorded offset. It refuses on ambiguity, so it is not a fuzzy
+  // match — but it is not the offset guarantee either, and that distinction belongs on the record.
+  const ownerSurvivors = survivors.filter(c => frameOf(c) === 'applied')
+    .sort((a, b) => a.applied_seq - b.applied_seq)
+  for (const c of ownerSurvivors) {
+    const at = locateOwnerPhrase(out, c.phrase)
+    if (at.at === null) return { ok: false, reason: `undoing this would lose your edit: ${at.reason}` }
+    out = out.slice(0, at.at) + c.replacement + out.slice(at.at + c.phrase.length)
+  }
+  return { ok: true, text: out }
 }

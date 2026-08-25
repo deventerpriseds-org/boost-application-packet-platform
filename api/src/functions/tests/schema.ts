@@ -412,6 +412,10 @@ create table if not exists correction (
   applied_seq   int not null,           -- ascending by char_start, so the change log reads in document order
   reason        text not null,
   source        text not null check (source in ('profile_figure','generalized','owner_edit')),
+  -- WHICH TEXT char_start/char_end/before_sha256 INDEX INTO. Nullable on purpose: every row written
+  -- before this column existed has none, and those resolve through the source->frame map in
+  -- correction.ts, so no backfill is required for a legacy row to be undoable.
+  frame         text check (frame in ('original','applied')),
   run_id        uuid,
   loop          int not null default 0,
   reverted_by   text,
@@ -450,6 +454,14 @@ create unique index if not exists correction_unique_seq
 alter table correction drop constraint if exists correction_source_check;
 alter table correction add constraint correction_source_check
   check (source in ('profile_figure','generalized','owner_edit'));
+-- THE COLUMN ONLY REACHES PRODUCTION THROUGH THIS LINE. The create-table-if-not-exists above is a
+-- NO-OP on a table that already exists, so it takes its new column with it — the exact trap H39
+-- exists for. Nullable and unbackfilled by design: a NULL means "ask the source-to-frame map", which
+-- is what makes every already-stored row undoable without touching a single one of them.
+alter table correction add column if not exists frame text;
+alter table correction drop constraint if exists correction_frame_check;
+alter table correction add constraint correction_frame_check
+  check (frame is null or frame in ('original','applied'));
 create index if not exists correction_by_artifact on correction (artifact_id, reverted_at);
 
 create table if not exists requirement_evidence (
