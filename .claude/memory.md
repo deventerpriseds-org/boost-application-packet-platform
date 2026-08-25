@@ -3642,3 +3642,25 @@ between them.
 `TONE_SOLID` has neither key, so both branches resolved to ink3 — the send-gate rail was the same
 grey whether the packet was blocked or clear. `shell.jsx`'s own comment calls this "the bug that
 made todo pills invisible"; it recurs because an unknown tone is swallowed, never thrown.
+
+## Standing fact — a LOW BUILT-PACKET COUNT IS EXPECTED, never a defect signal (owner, 2026-08-25)
+
+Owner, correcting me directly: *"take note i dont expect more to be build so no failure should be
+becaause of it. i only expected the trinnex packet to be built as a test for this."*
+
+I had reported "39 packets exist, 2 have ever been built" as a loose end worth pulling. It is not
+one. **Do not raise it again, and do not treat `count(built artifacts)` as a health metric.** The
+owner is deliberately building one reference packet, not working a pipeline.
+
+**The two that exist, by name, so no future session has to re-derive them** (db-query 32893118843):
+
+| opp id | company | role | built | note |
+|---|---|---|---|---|
+| `9f9c370a-4ac9-441e-b58e-02e3ffcf669e` | **Trinnex** | Director of Digital Technology Operations & Innovation | 2026-08-23 02:46 | **THE reference test packet the owner means.** Built 46 min BEFORE `31ca007`, so its evidence was deleted by the unscoped delete; repaired 2026-08-25 to 7 rows (1 `anchored`, 6 `proposed`), 7 of 8 requirements verified. |
+| `2cb56fb3-fc33-4b1a-85b9-06c7aea2fbb3` | eMoney Advisor | SVP, Development and Enterprise Architecture | 2026-08-23 03:36 | Built 4 min AFTER the fix, kept its 5 `proposed` rows. The opportunity used for the `ui-verify.yml` runs. |
+
+**Why this matters beyond the one correction.** A denominator chosen without asking what the owner
+INTENDED produces exactly this shape of false alarm: "1 of ~680 opportunities has evidence" sounds
+like a broken pipeline and was actually one deliberately-built test packet plus a bug that had
+already been fixed. **Before reporting a ratio as a problem, establish what the intended
+denominator is.** The owner's intent is part of the ground truth, not context around it.

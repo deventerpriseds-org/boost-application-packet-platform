@@ -3657,5 +3657,17 @@ down, re-derived on every read, correct only while `source` stays a proxy for fr
 assumption that caused this bug. A legacy row needs the same inference either way; the column does
 it once at migration instead of forever. Cost accepted: three DDL copies + a metadata-only backfill.
 
+**CORRECTED BY THE OWNER, same day** — I closed the investigation by flagging "39 packets exist, 2
+have ever been built" as a loose end worth pulling. It is not one. Owner: *"take note i dont expect
+more to be build so no failure should be becaause of it. i only expected the trinnex packet to be
+built as a test for this."* The build count is DELIBERATE and is not a health metric; see the
+standing fact in `memory.md`. Named for good: `9f9c370a` = **Trinnex**, the reference test packet —
+and it is the one that had zero evidence and that I repaired. `2cb56fb3` = eMoney Advisor, built
+after the fix, used for the `ui-verify` runs.
+
+The lesson is not "ask about build counts". It is that **a ratio reported as a problem needs the
+INTENDED denominator established first** — "1 of ~680" read as a broken pipeline and was one
+deliberately-built test packet plus an already-fixed bug.
+
 **OPEN — next step is the owner's call.** Implement F5 as option (b) with the frame column, or
 first measure `chk_evidence_threshold` against the real profile (visible on every packet opened).
