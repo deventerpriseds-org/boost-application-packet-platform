@@ -316,8 +316,15 @@ test('H:mark-is-exact-never-fuzzy: a highlight is an accusation and must not gue
     ['Safety-Critical'], 'case must not prevent a match')
   assert.deepEqual(marked(markRuns('we ship safety critical systems', ['safety-critical'])), [],
     'a near miss (hyphen dropped) must NOT be marked')
-  assert.deepEqual(marked(markRuns('delivery velocity', ['deliver'])), ['deliver'],
-    'a substring match is exact by definition and is marked')
+  // CORRECTED 2026-08-25. This line used to assert the OPPOSITE — `['deliver']`, with the rationale
+  // "a substring match is exact by definition and is marked". That rationale conflates two different
+  // things: the CHARACTERS matching exactly, and the PHRASE matching. Marking `deliver` inside
+  // `delivery` tells the reader "the employer's ad used this word and your sentence borrowed it"
+  // when their sentence says `delivery` — which is precisely the false accusation the module header
+  // forbids. The assertion encoded the defect as intent, and it is why nothing caught that `AI`
+  // marked three times inside "said the detail was available".
+  assert.deepEqual(marked(markRuns('delivery velocity', ['deliver'])), [],
+    'a phrase inside a LONGER WORD is not that phrase and must not be marked')
   assert.deepEqual(marked(markRuns('anything', [''])), [], 'an empty phrase marks nothing')
   assert.deepEqual(marked(markRuns('anything', ['a'])), [], 'a single character is not a phrase')
 })
@@ -441,4 +448,31 @@ test('H:prop-threaded-not-assumed: a component using `active` must DECLARE it', 
   })
   assert.deepEqual(offenders, [],
     `these components use \`active\` without declaring it as a prop: ${offenders.join(', ')}`)
+})
+
+test('H:mark-is-whole-word-not-substring: a highlight is an accusation, so it may not fire inside a word', () => {
+  // MEASURED 2026-08-25 against the real function, before the fix: the needle "AI" marked THREE
+  // times in "Led a team that said the detail was available." (s-AI-d, det-AI-l, av-AI-lable), "ML"
+  // matched inside "HTML", and "Java" matched inside "JavaScript" — while this module's own
+  // docstring claimed "EXACT, WHOLE-PHRASE ... never fuzzy" and called a highlight an ACCUSATION.
+  // The code contradicted its own contract and had never bitten only because the single caller
+  // passes multi-word posting-echo runs. Short needles are exactly what an ATS keyword is.
+  const hits = (t, p) => markRuns(t, [p]).filter((r) => r.mark).map((r) => r.t)
+
+  // must NOT fire inside a longer word
+  assert.deepEqual(hits('Led a team that said the detail was available.', 'AI'), [])
+  assert.deepEqual(hits('Built the HTML pipeline.', 'ML'), [])
+  assert.deepEqual(hits('Wrote JavaScript.', 'Java'), [])
+
+  // must STILL fire on the real vocabulary. A word character is alphanumeric only, so a phrase may
+  // legitimately sit against '-', '&' or '/' — losing these would be a worse failure than the bug,
+  // because the reader would stop seeing borrowed wording that IS there.
+  assert.deepEqual(hits('Built the ML pipeline.', 'ML'), ['ML'])
+  assert.deepEqual(hits('We need safety-critical systems experience.', 'safety-critical systems'),
+    ['safety-critical systems'])
+  assert.deepEqual(hits('Owned P&L for the region.', 'P&L'), ['P&L'])
+  assert.deepEqual(hits('Shipped AI/ML platforms.', 'AI/ML'), ['AI/ML'])
+  // and every occurrence, which is what the hover link depends on
+  assert.deepEqual(hits('Vendor selection and vendor selection review', 'Vendor selection'),
+    ['Vendor selection', 'vendor selection'])
 })

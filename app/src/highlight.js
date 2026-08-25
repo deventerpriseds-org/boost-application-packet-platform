@@ -95,6 +95,17 @@ export function markRuns(text, phrases, mark = 'postingEcho') {
   const lower = s.toLowerCase()
   const taken = []                                  // [start, end, rawPhrase) already claimed
   const free = (a, b) => taken.every(([x, y]) => b <= x || a >= y)
+  // WHOLE-WORD, and this is the line that makes the docstring above true rather than aspirational.
+  // Until 2026-08-25 this was a bare substring search while the comment claimed "EXACT, WHOLE-PHRASE
+  // ... never fuzzy". MEASURED against the real function: the needle "AI" marked THREE times in
+  // "Led a team that said the detail was available." (said, detail, available); "ML" matched inside
+  // "HTML"; "Java" matched inside "JavaScript". It never bit only because the sole caller passes
+  // multi-word posting-echo runs - and short needles are exactly what an ATS keyword is, so the next
+  // caller would have shipped a false accusation on the reader's own sentence.
+  // A word character is alphanumeric ONLY: a phrase may legitimately begin or end against '-', '&'
+  // or '/', which is what keeps "safety-critical systems", "P&L" and "AI/ML" matching.
+  const wordChar = (ch) => ch !== undefined && /[A-Za-z0-9]/.test(ch)
+  const bounded = (a, b) => !wordChar(s[a - 1]) && !wordChar(s[b])
   for (const { raw, needle: p } of list) {
     const needle = p.toLowerCase()
     let from = 0
@@ -102,7 +113,7 @@ export function markRuns(text, phrases, mark = 'postingEcho') {
       const i = lower.indexOf(needle, from)
       if (i < 0) break
       const j = i + needle.length
-      if (free(i, j)) taken.push([i, j, raw])
+      if (bounded(i, j) && free(i, j)) taken.push([i, j, raw])
       from = i + 1                                  // +1, not +len: an overlapped hit may still
     }                                               // start a valid later one
   }
