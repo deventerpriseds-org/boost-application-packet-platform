@@ -3460,3 +3460,33 @@ ON the template row, not a second per-packet column.
 2. **A `sed` mutation whose `||` broke the expression ran against UNMODIFIED source and reported a
    pass.** A mutation that silently fails to apply is indistinguishable from a working guard. Every
    mutation now asserts its anchor count before writing.
+
+## Hardening — 2026-08-25: answered a reachability question from a proxy, twice
+
+**Mistake 1 — built a runner probe without first trying the transports that already existed.**
+The owner: *"you could hav eused tavily or web search"*, then *"tavily is a gh workflow not a
+ocnnector."* Both true. Tavily's `extract_url` mode returned the ESCO API payload in ~8s and was the
+faster path to the first real answer.
+**Guard (fact, so it is never re-derived):** `ec.europa.eu`, `esco.ec.europa.eu`,
+`www.onetonline.org` are egress-blocked to a CCR session **including WebFetch** — measured
+EGRESS_BLOCKED on all three, 2026-08-25. WebSearch returns prose about ESCO, never the skill list.
+`ListConnectors` shows **no Tavily connector**; Tavily is `tavily-search.yml` in eds-claude-skills.
+So: two RUNNER transports work (tavily-search.yml `extract_url`, taxonomy-probe.yml), nothing
+in-session does. Reach for the workflow that already exists before writing a new one.
+
+**Mistake 2 — a `grep` exit code destroyed the evidence.** taxonomy-probe v1 ran under `bash -e`;
+`grep` exits 1 on no match, so *"this term is absent"* — the most likely and most interesting
+answer — killed the job after ONE line of output (run 32799975780).
+**Guard:** absence is a RESULT, never an error. The probe is one `python3` step now; there is no
+exit-code trap there. Generalises: any evidence-gathering step whose interesting outcome is "nothing
+found" must not be written in a shell where "nothing found" is a failure.
+
+**What the owner's challenge actually surfaced — U5, never measured.** Asked *"i thought you already
+pulled the esco and o*net values?"*, the honest answer from the repo was **no**. Only the JD corpus
+was ever pulled (2,734 `term_candidate` rows). `schema.ts:299`'s *"— none in O\*NET"* had no cited
+evidence and `AC-term-library-build.md:661` listed it as open unknown U5. Now measured
+(`docs/qc-evidence/TAXONOMY-PROBE-RESULT.md`, run 32800619474): **0 of 12 terms exact-match either
+taxonomy.** The comment was right; it had simply never been checked, and a design (option B) had
+already been built on top of it in the other direction.
+**Guard:** a parenthetical "(measured: …)" in a code comment is a CLAIM, not evidence. Before any
+design rests on one, find the run id. If there is no run id, it was never measured.

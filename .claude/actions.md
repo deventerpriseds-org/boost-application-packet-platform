@@ -3403,3 +3403,43 @@ because `stripLeftoverTokens` deletes the unfilled token from the output.
 **NOT configured. `google.compactResumeTemplateId` remains unset** — deliberately, pending the
 owner's choice between (A) code declares the compact's real set and combines Skills 1+2 into the one
 line, or (B) the Doc is renamed. Logged as `D:compact-template-placeholder-mismatch`.
+
+---
+
+## ACT — U5 closed: ESCO and O*NET measured against the real taxonomies (2026-08-25)
+
+**Owner:** *"I dont believe roadmap/P&L/operating model are ATS Keywords. let me see relevant
+samples from esco and o*net"* — and then, on transport: *"you could hav eused tavily or web search"*
+/ *"tavily is a gh workflow not a ocnnector."* Both corrections were right.
+
+**Owner's second question — *"i thought you already pulled the esco and o*net values? isnt that how
+we proved feasiblity?"* — answered from the repo, not from memory.** No. What was pulled was the
+JD-corpus mining only: `term_candidate`, 2,734 pending rows, db-query runs 32688577032 /
+32688607431. Those are the "measured" df numbers. The trailing clause **"— none in O\*NET"**
+(`schema.ts:299`, `termMiner.ts:8`) had **no cited evidence anywhere in the repo**, and
+`AC-term-library-build.md:661` listed it as open unknown **U5**, explicitly *"Requires the taxonomy
+files, not the DB."* Corpus half measured; taxonomy half asserted.
+
+**Result — `docs/qc-evidence/TAXONOMY-PROBE-RESULT.md`.** Probe run 32800619474 (ESCO live API +
+O\*NET db_29_2_text), cross-checked by Tavily `/extract` run 32800388544.
+**EXACT matches across 12 terms in either taxonomy: ZERO.** `roadmap` returns literally nothing from
+ESCO and is absent from every published O\*NET name. `schema.ts:299` was right and is now evidenced.
+
+**Two design consequences, both measured rather than argued:**
+1. Taxonomy-as-gate (option B) would publish an EMPTY library — 0 of 12 qualify. O\*NET's whole
+   name-bearing surface is 35 abstract Skills, 33 Knowledge subjects, 41 Work Activities and 8,768
+   software products; no layer of it could hold `roadmap`. Option B is dead on the evidence, and
+   `schema.ts:227-230` ("helpers, never gates") is vindicated.
+2. Attestation must be EXACT. ESCO reports `total: 97` for `profit and loss` with **follow betting
+   strategies** as its top hit; `due diligence` returns *monitor tank thermometer*. A gate keyed on
+   "the search returned something" is risk a6 (`AC-term-library-build.md:423`) realised verbatim.
+
+**Transport fact worth not re-litigating:** `ec.europa.eu`, `esco.ec.europa.eu` and
+`www.onetonline.org` are ALL egress-blocked to a CCR session **including WebFetch** (measured:
+EGRESS_BLOCKED on all three). WebSearch returns prose about ESCO, never the skill list. Tavily is a
+GH workflow (`tavily-search.yml`, `extract_url` mode), not a connector — `ListConnectors` shows no
+Tavily. Two runner transports work; nothing in-session does.
+
+**Open — needs the owner.** Option B is refuted. The anchored authority the owner asked for
+(*"not just pulling words form text used often but not highlighted by the system"*) has to be the
+extracted `requirement` row, with ESCO/O\*NET recorded in `sources` as provenance only.
