@@ -13,7 +13,8 @@
     "test:qc": "node test/browser/run-qc-rail.mjs",
     "test:tones": "node test/browser/run-contrast.mjs",
     "test:contrast": "node test/browser/run-contrast.mjs",
-    "test:margin": "node test/browser/run-field-margin.mjs"
+    "test:margin": "node test/browser/run-field-margin.mjs",
+    "test:posting": "node test/browser/run-posting-analysis.mjs"
   },
   "dependencies": {
     "@azure/msal-browser": "^3.30.0",

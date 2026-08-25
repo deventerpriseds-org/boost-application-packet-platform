@@ -187,3 +187,85 @@ test('H:static-field-makes-no-false-before-claim', () => {
   assert.equal(originalState({ before_text: 'was', after_text: 'now' }).label,
     'Original - before this posting', 'a field that DID change still says so')
 })
+
+// ── H:no-hook-after-an-early-return ─────────────────────────────────────────────────────────────
+//
+// THE MOST EXPENSIVE DEFECT THIS REPO HAS SHIPPED, measured rather than asserted. `a0bf0d1`
+// (2026-08-24) put `useState(fieldFocus)` and `useCallback(goToField)` ~30 lines BELOW
+// `if (pState.loading) return <Loading />`. The first render bails early having run N hooks; the
+// loaded render runs N+2; React aborts the entire tree with error #310, "Rendered more hooks than
+// during the previous render."
+//
+// The packet builder - the core screen of this product - was therefore DEAD ON LOAD for a full day,
+// and every change shipped to it in that window was invisible in production. `npm test` was green
+// at 294/294 the whole time, because a Node suite imports pure modules and never renders a tree.
+//
+// EVIDENCE: ui-verify run 32886100713 (an opportunity WITH evidence rows) and run 32886610272 (a
+// different one with NONE) both returned the error boundary with that identical minified error and
+// a byte-identical 62594-byte screenshot, while `#/settings/roles` rendered fine in run 32886894759
+// - which is what localised it to this screen rather than to the app.
+//
+// THE INVARIANT, not the incident: in any component, every hook call must precede the first
+// early return. Asserted structurally because no runtime test in this suite renders React.
+import { readFileSync as readSrc } from 'node:fs'
+
+test('H:no-hook-after-an-early-return: a conditional hook is invisible here and fatal in the browser', () => {
+  const HOOK = /(^|[^A-Za-z0-9_.])(useState|useEffect|useMemo|useCallback|useRef|useLayoutEffect|useReducer|useContext)\s*\(/
+  // An early return is a `return` guarded on one line - `if (x) return <Y />` - at the top level of
+  // a component body. Matching the GUARDED form only is deliberate: a bare `return (` is the
+  // component's real render and every hook is legitimately above it, so treating that as an early
+  // return would fire on every correct file in the repo.
+  const EARLY_RETURN = /^\s{2}if\s*\(.*\)\s*return\b/
+
+  const screens = ['PacketBuilder.jsx', 'PostingAnalysis.jsx', 'AssetBlocks.jsx', 'QcRail.jsx',
+    'AssetGateDrawer.jsx', 'Settings.jsx', 'Today.jsx', 'Opportunities.jsx']
+  const offenders = []
+  for (const f of screens) {
+    const src = readSrc(new URL(`../src/screens/${f}`, import.meta.url), 'utf8')
+      .replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')
+    const lines = src.split('\n')
+    let guardAt = null
+    for (let i = 0; i < lines.length; i++) {
+      // A new TOP-LEVEL declaration ends the previous function body, so the guard position resets
+      // with it. Matching `export default function` and lower-cased helpers too is not cosmetic:
+      // the first version of this guard matched only `(export )?(function|const) [A-Z]`, so it
+      // carried `filterLabel`'s one-line `if (...) return` in Opportunities.jsx straight past
+      // `export default function Opportunities` and accused a perfectly correct `useState` nine
+      // lines later. Two false positives out of three hits - and a guard people learn to ignore is
+      // worse than no guard, which is why this is checked against the real files rather than
+      // trusted. Any declaration starting at column 0 ends the scope.
+      if (/^(export\s+)?(default\s+)?(async\s+)?(function|const|class)\s/.test(lines[i])) guardAt = null
+      if (guardAt === null && EARLY_RETURN.test(lines[i])) { guardAt = i; continue }
+      if (guardAt !== null && HOOK.test(lines[i])) {
+        offenders.push(`${f}:${i + 1} - hook after the early return at ${f}:${guardAt + 1}: ${lines[i].trim().slice(0, 70)}`)
+        guardAt = null                                  // one report per component, not per line
+      }
+    }
+  }
+  assert.deepEqual(offenders, [],
+    `a hook below an early return renders a different number of hooks on the loading pass than on the loaded pass, which React aborts the whole tree for:\n${offenders.join('\n')}`)
+})
+
+test('H:tone-names-must-exist: a tone the token table lacks paints an invisible signal', () => {
+  // `toneColor(failList.count ? 'bad' : 'good')` shipped in dd4f61c. TONE_SOLID has no `bad` or
+  // `good`, so BOTH branches resolved to ink3 and the gate rail was the same grey whether the packet
+  // was blocked or clear. shell.jsx's own comment calls this "the bug that made todo pills
+  // invisible" - it recurs because an unknown tone is swallowed rather than thrown.
+  const shell = readSrc(new URL('../src/shell.jsx', import.meta.url), 'utf8')
+  const table = shell.slice(shell.indexOf('const TONE_SOLID'), shell.indexOf('export const toneColor'))
+  assert.ok(table.length > 40, 'TONE_SOLID not found - this guard is reading the wrong region')
+  const known = new Set(Array.from(table.matchAll(/(^|[{,\s])([a-zA-Z]+)\s*:/g)).map((m) => m[2]))
+  assert.ok(known.has('green') && known.has('red'), `TONE_SOLID parse looks wrong: ${[...known]}`)
+
+  const bad = []
+  for (const f of ['PacketBuilder.jsx', 'PostingAnalysis.jsx', 'QcRail.jsx', 'Today.jsx', 'AssetGateDrawer.jsx']) {
+    const src = readSrc(new URL(`../src/screens/${f}`, import.meta.url), 'utf8')
+      .replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')
+    // Only LITERAL tones can be checked statically; a variable tone is checked by the map it comes
+    // from (see H:evidence-tone-resolves-to-a-real-token). Literals are where the typos land.
+    for (const m of src.matchAll(/toneColor\(\s*(?:[^()]*\?\s*)?'([a-z]+)'\s*(?::\s*'([a-z]+)'\s*)?\)/g)) {
+      for (const t of [m[1], m[2]].filter(Boolean)) if (!known.has(t)) bad.push(`${f}: toneColor('${t}')`)
+    }
+  }
+  assert.deepEqual(bad, [], `these tones resolve to grey instead of erroring:\n${bad.join('\n')}`)
+})

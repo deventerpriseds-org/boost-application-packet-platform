@@ -707,11 +707,42 @@ export default function PacketBuilder({ id, step }) {
     finally { setApplying(false) }
   }
 
+  // ── EVERY HOOK MUST BE ABOVE THE TWO RETURNS BELOW ──────────────────────────────────────────────
+  //
+  // `fieldFocus` and `goToField` used to sit ~30 lines further down, BELOW `if (pState.loading)`.
+  // That is a conditional hook, and it did not degrade gracefully: the first render bails out early
+  // having run N hooks, the loaded render runs N+2, and React aborts the whole tree with
+  // **error #310, "Rendered more hooks than during the previous render."**
+  //
+  // MEASURED, not reasoned about. `ui-verify.yml` run 32886100713 and run 32886610272 — two
+  // different opportunities, one with five evidence rows and one with none — both returned the
+  // error boundary's "Something went wrong" with an empty body and that identical minified error,
+  // while `#/settings/roles` rendered fine in run 32886894759. So the packet builder, the core
+  // screen of this product, was DEAD ON LOAD from `a0bf0d1` (2026-08-24) until this commit, and
+  // every change shipped to it in between was invisible in production.
+  //
+  // `artifacts` is derived here rather than after the returns because `goToField` closes over it.
+  // Reading it through `pState.packet?.` is what lets the hook live above the guard at all.
+  const artifacts = pState.packet?.artifacts || []
+  // Option B: a finding names a field, and this is the SECOND destination for it - the draft itself,
+  // beside the drawer route that already existed. The inverse of getArtifactsByStep: an artifact id
+  // resolves to the step that renders it, so `compact_resume` lands on the Resume step exactly as
+  // getArtifactsByStep puts it there. Derived from the same rule rather than a second mapping, or
+  // the two drift the first time a step gains an artifact type.
+  const [fieldFocus, setFieldFocus] = useState(null)     // { artifactId, section }
+  const goToField = useCallback((artifactId, section) => {
+    const a = artifacts.find((x) => x.id === artifactId)
+    if (!a) return                                        // unknown artifact: do nothing, never guess a step
+    const stepKey = (a.type === 'resume' || a.type === 'compact_resume') ? 'resume' : a.type
+    if (!STEPS.some((st) => st.key === stepKey)) return   // an artifact type with no step of its own
+    setFieldFocus({ artifactId, section })
+    setActiveStep(stepKey)
+  }, [artifacts, setActiveStep])
+
   if (pState.loading) return <Loading />
   if (pState.error) return <ErrorBox error={pState.error} />
 
   const p = pState.packet
-  const artifacts = p.artifacts || []
   const ready = p.status === 'ready'
   // The stored status and the COMPUTED gate, compared in one place. useQcEntries is fetched
   // screen-wide (only withInsertions/withRemediation are gated on the QC step), so this is live on
@@ -730,21 +761,6 @@ export default function PacketBuilder({ id, step }) {
     if (stepKey === 'resume') return artifacts.filter((a) => a.type === 'resume' || a.type === 'compact_resume')
     return artifacts.filter((a) => a.type === stepKey)
   }
-
-  // Option B: a finding names a field, and this is the SECOND destination for it - the draft itself,
-  // beside the drawer route that already existed. The inverse of getArtifactsByStep: an artifact id
-  // resolves to the step that renders it, so `compact_resume` lands on the Resume step exactly as
-  // getArtifactsByStep puts it there. Derived from the same rule rather than a second mapping, or
-  // the two drift the first time a step gains an artifact type.
-  const [fieldFocus, setFieldFocus] = useState(null)     // { artifactId, section }
-  const goToField = useCallback((artifactId, section) => {
-    const a = artifacts.find((x) => x.id === artifactId)
-    if (!a) return                                        // unknown artifact: do nothing, never guess a step
-    const stepKey = (a.type === 'resume' || a.type === 'compact_resume') ? 'resume' : a.type
-    if (!STEPS.some((st) => st.key === stepKey)) return   // an artifact type with no step of its own
-    setFieldFocus({ artifactId, section })
-    setActiveStep(stepKey)
-  }, [artifacts, setActiveStep])
 
   const stepContent = (
     <>
@@ -935,10 +951,15 @@ export default function PacketBuilder({ id, step }) {
               status - the two can disagree, and packetReadiness exists precisely because they do.
               DETERMINISTIC rows only: a reviewer flag cannot block an artifact (decision D6), so
               listing one here would tell the reader they are blocked by something that cannot
-              block them. */}
+              block them.
+
+              THE RAIL TONE IS `red`/`green`, NOT `bad`/`good`. TONE_SOLID defines no such keys, so
+              toneColor fell through to ink3 and this rail was the SAME grey whether the packet was
+              blocked or clear - a signal that silently carried no signal. Shipped that way in
+              dd4f61c; caught by the tone guard written for the evidence line the same day. */}
           <div className="px-box-soft" data-qc="send-gate-card" data-qc-count={failList.count}
             data-qc-assets={failList.assets}
-            style={{ padding: 12, borderLeft: '3px solid ' + toneColor(failList.count ? 'bad' : 'good') }}>
+            style={{ padding: 12, borderLeft: '3px solid ' + toneColor(failList.count ? 'red' : 'green') }}>
             <div style={{ fontSize: 13, fontWeight: 700 }}>
               {failList.count === 0
                 ? 'Nothing blocks sending.'
