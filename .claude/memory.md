@@ -452,7 +452,21 @@ Key tables (PostgreSQL):
 - iOS testing: requires macOS runner or BrowserStack; categorically unavailable in Linux CCR
 
 ## Active work
-Current task: TWO OWNER-DIRECTED INVESTIGATIONS CLOSED (2026-08-25), both by measurement rather
+Current task: THRESHOLD SWEEP DONE on Trinnex (owner-instructed). 0.7 -> 1 of 8 rule matches,
+  0.6 -> 2 of 8, 0.5 -> 4 of 8. At 0.5 one match is a clear FALSE POSITIVE (*scalable, secure,
+  high-quality software* matched to a CTO/CPO roadmap-collaboration line). Recommend 0.6 or stay at
+  0.7; never 0.5. NOT changed - it is the owner's setting and the measurement is on the record.
+  Settings were recorded, temporarily altered with escalation OFF, and fully restored; Trinnex is
+  back to 8 total / 7 verified / 1 none / 6 proposed.
+  **Owner corrected a premise of mine mid-task**: the skills lists are fact-based and referenceable,
+  so the proposal to stop the matcher quoting them was withdrawn before any code. Do not re-derive it.
+  **Found while measuring**: `D:evidence-score-shown-is-not-the-score-gated` - the stored score is
+  `ratio` (exact-token share, "RANKING ONLY") while the threshold gates `support` (folds allowed), so
+  a row can store 0.25 and still pass 0.5. Latent: nothing renders it yet.
+  **CONNECTORS NEED RE-AUTH** - Boost_DB_Connector / boost-pg-mcp-write / Azure_pg_mcp all report
+  "requires authentication". Owner raised that I never said so; every DB read this session went the
+  slow way through db-query.yml. TELL THE OWNER the moment this appears, per CLAUDE.md.
+Prior task: TWO OWNER-DIRECTED INVESTIGATIONS CLOSED (2026-08-25), both by measurement rather
   than by relaying a claim, after the owner said *"i dont like workarounds rather than solutions."*
   (1) **The empty evidence spine is NOT a live defect.** Wrong denominator on my part: evidence is
   written on BUILD and only TWO opportunities have ever been built. `31ca007` (2026-08-23 03:32:27)
