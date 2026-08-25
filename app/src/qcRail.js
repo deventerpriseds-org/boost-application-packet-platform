@@ -809,6 +809,53 @@ export function packetGate(entries) {
 }
 
 /**
+ * Every item that BLOCKS sending, across the whole packet, one row each.
+ *
+ * SPEC 4.10 asks the send step for "n items to fix across m assets" and a row per failing item with
+ * a way to reach it. Everything needed was already imported into the screen that renders it - the
+ * step simply never asked. This is the asking, in ONE place, so the card, the rows and the count
+ * cannot disagree about what is blocking.
+ *
+ * DETERMINISTIC ROWS ONLY, and that is not a simplification. `railCounts` states the rule this
+ * follows: a reviewer `fail` counts in toReview and NEVER in toFix, because only deterministic rows
+ * can fail an artifact (decision D6). Folding a reviewer flag in here would tell the reader they are
+ * blocked by something that cannot block them - and this list is specifically the answer to "what is
+ * stopping me sending".
+ *
+ * `unchecked` is NOT absent from this list. An asset whose checks never ran cannot be shown as
+ * clear: that is the absent-evidence-is-not-a-pass rule, and on this step it is the difference
+ * between "nothing is wrong" and "nobody looked".
+ */
+export function packetFailList(entries) {
+  const items = []
+  const assets = new Set()
+  for (const e of arr(entries)) {
+    const artifactId = e && (e.artifactId || e.id)
+    const result = e && e.result
+    if (!artifactId) continue
+    if (railGate(result) === 'unchecked') {
+      assets.add(artifactId)
+      items.push({
+        artifactId, type: e.type || null, check_key: null, mergeField: null,
+        observed: 'The checks have not been run for this asset, so there is no verdict to show. That is not a pass.',
+        unchecked: true,
+      })
+      continue
+    }
+    for (const r of allRows(result)) {
+      if (!r || r.state !== 'fail' || r.engine === 'reviewer') continue
+      assets.add(artifactId)
+      items.push({
+        artifactId, type: e.type || null, check_key: r.check_key,
+        mergeField: CHECK_SUBJECT_FIELD[r.check_key] || null,
+        observed: r.observed || '', offenders: arr(r.offenders), unchecked: false,
+      })
+    }
+  }
+  return { items, count: items.length, assets: assets.size }
+}
+
+/**
  * What the packet header may say about readiness - the WORD, and any contradiction behind it.
  *
  * Two independent facts meet in that header and nothing has ever compared them:

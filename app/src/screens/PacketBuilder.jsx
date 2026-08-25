@@ -13,7 +13,7 @@ import { postingBody } from '../postingAnalysis.js'
 import { PACKET_HOOKS, ASSET_BODY_DEFAULT_OPEN, regenerateWithNote } from '../packetBuilder.js'
 import QcRail, { useQcEntries } from './QcRail.jsx'
 import { GateBadge } from './AssetGateDrawer.jsx'
-import { qcStepState, packetGate, railGateMeta, packetReadiness } from '../qcRail.js'
+import { qcStepState, packetGate, railGateMeta, packetReadiness, packetFailList } from '../qcRail.js'
 
 const TYPE_LABEL = {
   resume: 'Resume', compact_resume: 'Compact resume', cover: 'Cover letter',
@@ -717,6 +717,11 @@ export default function PacketBuilder({ id, step }) {
   // screen-wide (only withInsertions/withRemediation are gated on the QC step), so this is live on
   // every step, not just QC.
   const readiness = packetReadiness(p.status, qcEntries)
+  // SPEC 4.10's send step, from the LIVE checks rather than from the stored status. `ready` below is
+  // `p.status === 'ready'` - a stored claim - and packetReadiness already exists to compare the two.
+  // The fail list is what makes the step able to say WHAT is blocking rather than only THAT
+  // something is.
+  const failList = packetFailList(qcEntries)
   const coveredKw = p.coveredKw || []
   const missingKw = p.missingKw || []
   const atsScore = typeof p.atsScore === 'number' ? p.atsScore : null
@@ -916,11 +921,53 @@ export default function PacketBuilder({ id, step }) {
               return (
                 <div key={t} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 0', borderBottom: '1px solid var(--proto-rule-soft)' }}>
                   <div style={{ flex: 1, fontSize: 13, fontWeight: 500 }}>{TYPE_LABEL[t]}</div>
+                  {/* The COMPUTED gate beside the STORED status, because they answer different
+                      questions and can disagree - which is the whole reason packetReadiness exists.
+                      GateBadge was already imported into this file and mounted on the asset step;
+                      this step showed the stored pill alone. */}
+                  <GateBadge result={(qcEntries.find((e) => e.artifactId === a.id) || {}).result} compact />
                   <Pill tone={STATUS_TONE[a.status]}>{a.status}</Pill>
                 </div>
               )
             })}
           </div>
+          {/* THE PACKET GATE CARD (SPEC 4.10). Counted from the live checks, not from the stored
+              status - the two can disagree, and packetReadiness exists precisely because they do.
+              DETERMINISTIC rows only: a reviewer flag cannot block an artifact (decision D6), so
+              listing one here would tell the reader they are blocked by something that cannot
+              block them. */}
+          <div className="px-box-soft" data-qc="send-gate-card" data-qc-count={failList.count}
+            data-qc-assets={failList.assets}
+            style={{ padding: 12, borderLeft: '3px solid ' + toneColor(failList.count ? 'bad' : 'good') }}>
+            <div style={{ fontSize: 13, fontWeight: 700 }}>
+              {failList.count === 0
+                ? 'Nothing blocks sending.'
+                : `${failList.count} item${failList.count === 1 ? '' : 's'} to fix across ${failList.assets} asset${failList.assets === 1 ? '' : 's'}`}
+            </div>
+            {failList.count > 0 && (
+              <div className="px-small" style={{ textTransform: 'none', marginTop: 3, color: 'var(--proto-ink2)' }}>
+                Sending stays locked until each one is fixed or the decision is recorded.
+              </div>
+            )}
+            {/* ONE ROW PER FAILING ITEM, each with a way to reach it. A count with no rows tells the
+                reader they are blocked and leaves them hunting; the prototype pairs them for that
+                reason. */}
+            {failList.items.map((f, i) => (
+              <div key={`${f.artifactId}-${f.check_key || 'unchecked'}-${i}`} data-qc="send-fail-row"
+                data-qc-artifact={f.artifactId} data-qc-check={f.check_key || 'unchecked'}
+                style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginTop: 8, paddingTop: 8, borderTop: '1px solid var(--proto-rule-soft)' }}>
+                <span className="px-small" style={{ fontWeight: 700, minWidth: 92 }}>{TYPE_LABEL[f.type] || f.type || 'asset'}</span>
+                <span style={{ fontSize: 12, flex: 1, minWidth: 160, color: 'var(--proto-ink)' }}>{f.observed}</span>
+                {f.mergeField && (
+                  <button type="button" className="px-btn" data-qc="send-open-field"
+                    data-qc-artifact={f.artifactId} data-qc-section={f.mergeField}
+                    onClick={() => goToField(f.artifactId, f.mergeField)}
+                    style={{ fontSize: 12, padding: '1px 8px' }}>Open field →</button>
+                )}
+              </div>
+            ))}
+          </div>
+
           <div style={{ marginTop: 4 }}>
             {ready
               ? <button className="px-btn px-btn-accent" onClick={() => go(`/compose/${id}`)}>Go to outreach →</button>
