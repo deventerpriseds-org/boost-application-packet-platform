@@ -139,7 +139,6 @@ export const api = {
   requirements: (oppId) => get(`/app/opportunity/${oppId}/requirements?owner=${encodeURIComponent(_owner)}`),
   // The stored verdict of the last checks run for one artifact — gate, attention count, score
   // components (including the term library's own words about why keyword coverage is null).
-  artifactChecksResult: (artifactId) => get(`/app/artifact/${artifactId}/checks-result?owner=${encodeURIComponent(_owner)}`),
   jdStatus: () => get('/app/opportunities/jd-status'),
   enrichOpportunity: (oppId) => post(`/app/opportunity/${oppId}/enrich`, {}),
   matchScore: (oppId) => post(`/app/opportunity/${oppId}/match-score`, {}),
@@ -168,8 +167,6 @@ export const api = {
   // QC evidence reads (P5.2 asset blocks). All three are owner-scoped server-side (resolveOwner →
   // `where o.owner_email = $2`), so they MUST carry ?owner= or they resolve to the demo owner and
   // 404 on the real owner's rows — the same trap that bit listPersonas.
-  artifactInsertions: (artifactId) => get(`/app/artifact/${artifactId}/insertions?owner=${encodeURIComponent(_owner)}`),
-  packetSwaps: (packetId) => get(`/app/packet/${packetId}/swaps?owner=${encodeURIComponent(_owner)}`),
   oppRequirements: (oppId) => get(`/app/opportunity/${oppId}/requirements?owner=${encodeURIComponent(_owner)}`),
   generateArtifact: (artifactId) => post(`/app/artifact/${artifactId}/generate`, {}),
   // `note` rides along on a 'changes' status: the server appends it to packet.feedback and the
