@@ -3588,3 +3588,44 @@ query that feeds it. Same failure as answering from a derived field instead of t
 on the defect AND PASS on correct-but-different code. Three guards this session were inert; two more
 over-reached and fired on correct code. Mutation alone catches the first failure mode and is blind
 to the second.
+
+## Hardening — 2026-08-25 (cont): the core screen was dead on load for a day and the suite was green
+
+Opening any packet rendered the error boundary and nothing else, from `a0bf0d1` (2026-08-24) until
+`d944166`. `dd4f61c`'s Review & send and `df2c9db`'s evidence expansion both shipped into that
+window, so both were invisible in production while being reported as deployed.
+
+**The fault:** `useState(fieldFocus)` / `useCallback(goToField)` sat ~30 lines BELOW
+`if (pState.loading) return <Loading />` in `PacketBuilder.jsx`. Loading render runs N hooks, loaded
+render runs N+2, React aborts the tree — error #310.
+
+**Why nothing caught it.** `npm test` was green at 294/294 the entire time. This suite imports pure
+modules; it never renders a React tree, so a conditional hook is a class of fault it is
+STRUCTURALLY unable to see. Neither is a source grep enough — the code reads fine line by line. The
+only thing that could see it was a real browser against the real route.
+
+**How it was attributed rather than guessed**, which is the part to reuse. The obvious first move —
+"the newest commit touched that screen, so the newest commit broke it" — would have been wrong, and
+would have sent me reverting working code:
+  32886100713  an opportunity WITH five evidence rows   -> error boundary
+  32886610272  a different one with NO evidence at all  -> byte-identical failure (62594 bytes)
+  32886894759  `#/settings/roles`                        -> renders fine
+Identical failure with and without the data the newest change touches RULES THAT CHANGE OUT; the
+third run localises it to the screen rather than the app. `git blame` then named commit and date.
+**Two runs and a blame beat any amount of reading the diff.**
+
+**Guards:** `H:no-hook-after-an-early-return` (eight screens; the invariant, not the incident) and
+`H:tone-names-must-exist`. Both mutation-proven AND counter-proven. The hook guard's FIRST version
+accused two correct files — its scope-reset regex missed `export default function` — and was fixed
+before landing; a guard people learn to ignore is worse than no guard.
+
+**The standing lesson, and it is not "add another test":** a change to a `.jsx` file is not verified
+by `npm test`. `npm test` proves the pure logic. Only `ui-verify.yml` proves the screen still
+renders. Run it after any UI change, and read `UI_VERIFY_RESULT` — the whole failure here is that
+"deployed successfully" was true and "the app works" was false, for a day, with a green suite
+between them.
+
+**Also caught in the same pass:** `toneColor(failList.count ? 'bad' : 'good')` from `dd4f61c`.
+`TONE_SOLID` has neither key, so both branches resolved to ink3 — the send-gate rail was the same
+grey whether the packet was blocked or clear. `shell.jsx`'s own comment calls this "the bug that
+made todo pills invisible"; it recurs because an unknown tone is swallowed, never thrown.

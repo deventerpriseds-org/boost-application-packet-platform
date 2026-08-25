@@ -3590,3 +3590,24 @@ swap is keyed by `list`, not by artifact, and the `list → artifact` map (`list
 asset cards registering as they RENDER on the resume step — so on the JD step it is empty and the
 link would be absent exactly where SPEC asks for it. The unblock is one derivation from the packet's
 own artifacts, written up in the ledger row.
+
+**FIXED — the packet builder was crashing on load, and had been for a day (`d944166`).**
+`a0bf0d1` (2026-08-24) put two hooks below `if (pState.loading) return <Loading />`. React error
+#310. Opening any packet showed the error boundary and nothing else. **Both of today's shipped
+changes to that screen — Review & send (`dd4f61c`) and the evidence expansion (`df2c9db`) — were
+therefore never visible in production**, despite both deploys reporting success.
+
+Attributed by measurement, not by reading the diff: the same failure appeared on an opportunity
+with five evidence rows and on one with none (runs 32886100713 / 32886610272, byte-identical
+screenshots), while `#/settings/roles` rendered fine (run 32886894759). Identical failure with and
+without the newest change's data is what ruled that change out — the obvious guess, "the last commit
+to touch this screen broke it", would have had me reverting working code.
+
+Guards: `H:no-hook-after-an-early-return` across eight screens and `H:tone-names-must-exist`, both
+mutation-proven and counter-proven. Plus `npm run test:posting`, a browser probe that renders the
+real card under DEV React in every evidence state (26/26) — a minified error names a number, this
+names the cause.
+
+**Standing change to how UI work is verified:** `npm test` cannot see a render fault; it imports
+pure modules and never mounts a tree. `ui-verify.yml` is the only thing that can. Every `.jsx`
+change gets one from now on, and `UI_VERIFY_RESULT` gets read.
