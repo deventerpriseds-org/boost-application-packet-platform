@@ -336,7 +336,7 @@ function DistributionMeter({ rows, filled, unfilled, requirements, scopedSwaps, 
 
 // ── one merge field ─────────────────────────────────────────────────────────────────────────────
 
-function ListBody({ row, swapsForList, artifactId, listOwners, phrases }) {
+function ListBody({ row, swapsForList, artifactId, listOwners, phrases, active = null }) {
   const model = listBodyModel(row, swapsForList, { artifactId, listOwners })
   return (
     <div>
@@ -396,7 +396,7 @@ function BlockBody({ row, shape, swapsForList, artifactId, listOwners, phrases, 
       </div>
     )
   }
-  if (shape === 'list') return <ListBody row={row} swapsForList={swapsForList} artifactId={artifactId} listOwners={listOwners} phrases={phrases} />
+  if (shape === 'list') return <ListBody row={row} swapsForList={swapsForList} artifactId={artifactId} listOwners={listOwners} phrases={phrases} active={active} />
   if (shape === 'pipe') {
     return (
       <div style={{ fontFamily: 'var(--font-mono)', fontSize: 11.5, lineHeight: 1.9, wordBreak: 'break-word', whiteSpace: 'pre-line' }}>

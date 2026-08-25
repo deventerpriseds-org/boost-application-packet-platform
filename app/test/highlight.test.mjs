@@ -408,3 +408,37 @@ test('H:highlight-active-class-single-source: the active class is exported, neve
     'the active class must reach the component as HIGHLIGHT_ACTIVE_CLASS, never typed into it')
   assert.match(jsx, /HIGHLIGHT_ACTIVE_CLASS/, 'the component must use the exported name')
 })
+
+test('H:prop-threaded-not-assumed: a component using `active` must DECLARE it', () => {
+  // THE INCIDENT: `active={active}` was added to a <Marked> call site inside ListBody, which never
+  // received `active` as a prop. Result: "active is not defined", the whole asset step rendered
+  // BLANK for any list field, and it reached main. All 275 Node tests stayed green throughout,
+  // because they check pure functions and source shapes - nothing here renders a component. The
+  // browser probe caught it on its first run.
+  //
+  // THE INVARIANT, not the incident: in this file, any top-level component whose BODY references
+  // the bare identifier `active` must declare `active` in its parameter list. That generalises to
+  // the next prop threaded through a chain of renderers, which is where this class of bug lives -
+  // a multi-site edit that lands on a call site in a sibling component.
+  const src = readFileSync(new URL('../src/screens/AssetBlocks.jsx', import.meta.url), 'utf8')
+    .replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '')
+  const starts = [...src.matchAll(/^(?:export default )?function ([A-Za-z0-9_]+)\s*\(/gm)]
+  const offenders = []
+  starts.forEach((m, i) => {
+    const from = m.index
+    const to = i + 1 < starts.length ? starts[i + 1].index : src.length
+    const block = src.slice(from, to)
+    const sig = block.slice(0, block.indexOf(') {') + 1)
+    const body = block.slice(sig.length)
+    // Strip JSX ATTRIBUTE NAMES first. `active={activeWording}` passes a prop down and reads a
+    // local - it is not a reference to a variable called `active`, and flagging it made the guard
+    // fire on the one component that owns the state. What must be caught is the VALUE position:
+    // `active={active}` leaves `{active}` after the strip, `active={activeWording}` does not.
+    const reads = body.replace(/\bactive=/g, '')
+    // ignoring `active:` object keys and `activeXyz` identifiers
+    if (!/\bactive\b(?!\s*:)(?![A-Za-z0-9_])/.test(reads)) return
+    if (!/\bactive\b/.test(sig)) offenders.push(m[1])
+  })
+  assert.deepEqual(offenders, [],
+    `these components use \`active\` without declaring it as a prop: ${offenders.join(', ')}`)
+})

@@ -26,6 +26,7 @@
 import { readdirSync, existsSync } from 'node:fs'
 import { chromium } from 'playwright'
 import { createServer } from 'vite'
+import { HIGHLIGHT_ACTIVE_CLASS, HIGHLIGHT_CLASS } from '../../src/highlight.js'
 
 function chromiumPath() {
   if (process.env.PW_CHROMIUM) return process.env.PW_CHROMIUM
@@ -50,7 +51,7 @@ const insertions = (artifactId) => ({
     {
       merge_field: 'SkillsBullets1', generated: true, loop: 0, list: 'skills_1', item_count: 2,
       method: 'model_rewrite', before_text: null, requirement_id: 'req-3', verbatim_quote: null,
-      after_text: 'Vendor selection\nStakeholder alignment',
+      after_text: 'Vendor selection\nStakeholder alignment and vendor selection review',
     },
     {
       merge_field: 'SkillsBullets2', generated: true, loop: 0, list: 'skills_2', item_count: 1,
@@ -78,7 +79,7 @@ const CORRECTIONS = [
 const WORDING_OFFENDERS = [
   // A phrase that CONTAINS A COLON. Splitting on the first colon would truncate it.
   'ResumeSummary: "Note: we ship weekly"',
-  'SkillsBullets1: "safety-critical systems"',
+  'SkillsBullets1: "Vendor selection"',
   // Names no merge field at all -> must be dropped, never attached to a field.
   '"quarterly business review"',
 ]
@@ -222,6 +223,73 @@ const corrected = await page.evaluate(() =>
 ok('"N corrected" renders on the meter row', corrected.length === 1, JSON.stringify(corrected))
 ok('it prints the SERVER count (2 = 3 rows minus 1 undone), NOT rows.length (3)',
   corrected[0] === '2 corrected', JSON.stringify(corrected))
+
+// ---------- SPEC 4.5: hovering a margin row lights ITS phrase in the draft ----------
+// Asserted from the rendered DOM because the Node guards only prove the WIRING - that the active
+// phrase is threaded to both draft shapes and compared by identity. Whether the gesture actually
+// paints is a different question and this is the only place that can answer it.
+const activeIn = (field) => page.evaluate(([f, cls]) => {
+  const slots = [...document.querySelectorAll('[data-qc="blocks-field-slot"]')]
+  const slot = slots.find((s) => s.innerText.includes(f))
+  if (!slot) return { error: `no field slot for ${f}` }
+  let card = slot
+  while (card && !card.querySelector('[data-qc="blocks-wording-kept"]')) card = card.parentElement
+  if (!card) return { error: `no wording margin in ${f}` }
+  const on = [...card.querySelectorAll('.' + cls)]
+  return { n: on.length, texts: on.map((e) => e.textContent) }
+}, [field, HIGHLIGHT_ACTIVE_CLASS])
+
+const hoverRow = (field, phrase) => page.evaluate(([f, ph]) => {
+  const slots = [...document.querySelectorAll('[data-qc="blocks-field-slot"]')]
+  const slot = slots.find((s) => s.innerText.includes(f))
+  let card = slot
+  while (card && !card.querySelector('[data-qc="blocks-wording-kept"]')) card = card.parentElement
+  const row = card && card.querySelector(`[data-qc-phrase="${ph}"]`)
+  if (!row) return false
+  row.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }))
+  return true
+}, [field, phrase])
+
+const leaveRow = (field, phrase) => page.evaluate(([f, ph]) => {
+  const slots = [...document.querySelectorAll('[data-qc="blocks-field-slot"]')]
+  const slot = slots.find((s) => s.innerText.includes(f))
+  let card = slot
+  while (card && !card.querySelector('[data-qc="blocks-wording-kept"]')) card = card.parentElement
+  const row = card && card.querySelector(`[data-qc-phrase="${ph}"]`)
+  if (row) row.dispatchEvent(new MouseEvent('mouseout', { bubbles: true }))
+}, [field, phrase])
+
+const beforeHover = await activeIn('SkillsBullets1')
+ok('nothing is lit before any hover', beforeHover.n === 0, JSON.stringify(beforeHover))
+
+const hovered = await hoverRow('SkillsBullets1', 'Vendor selection')
+ok('the margin row exposes its phrase to hover', hovered === true, String(hovered))
+await page.waitForTimeout(80)
+const during = await activeIn('SkillsBullets1')
+// BOTH occurrences, not the first. markRuns marks every non-overlapping hit, so the margin row
+// refers to all of them; lighting one would tell the reader there is one. The fixture text carries
+// "Vendor selection" and "vendor selection" - differing in case, which markRuns ignores - so this
+// also proves the link is not accidentally case-sensitive.
+ok('hovering a kept-wording row lights EVERY occurrence of that phrase in the draft',
+  during.n === 2, JSON.stringify(during))
+ok('and lights only that phrase, not every mark in the field',
+  during.texts && during.texts.every((t) => /vendor selection/i.test(t)), JSON.stringify(during.texts))
+
+await leaveRow('SkillsBullets1', 'Vendor selection')
+await page.waitForTimeout(80)
+const after = await activeIn('SkillsBullets1')
+// A setState on enter with no matching leave is the standard form of this bug and leaves the
+// document permanently painted, which is worse than no linkage at all.
+ok('leaving the row RELEASES the highlight', after.n === 0, JSON.stringify(after))
+
+// The margin lists a phrase the draft no longer contains (the check ran against text that was since
+// rewritten). Absent evidence is "there is nothing to point at", never a silent success.
+await hoverRow('ResumeSummary', 'Note: we ship weekly')
+await page.waitForTimeout(80)
+const inert = await activeIn('ResumeSummary')
+ok('a row whose phrase is NOT in the draft lights nothing and throws nothing',
+  inert.n === 0 && !out.some((l) => l.startsWith('PAGEERROR')), JSON.stringify(inert))
+await leaveRow('ResumeSummary', 'Note: we ship weekly')
 
 // ---------- claim 3: an UNMEASURED change log prints nothing ----------
 mode = 'unmeasured'

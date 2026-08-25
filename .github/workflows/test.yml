@@ -56,6 +56,15 @@ jobs:
       - run: npm run test:browser
         working-directory: app
         continue-on-error: true
+      # test:margin IS REQUIRED, unlike the probe above, and the reason is measured rather than
+      # cautious. On 2026-08-25 a prop was threaded into a <Marked> call site that sat inside a
+      # SIBLING component which never received it: "active is not defined", the asset step rendered
+      # BLANK for every list field, and it reached main. `npm test` was green at 275/275 the whole
+      # time - it checks pure functions and source shapes, and nothing in it renders a component.
+      # This probe caught it on its first run. A suite that cannot fail on a blank screen is not
+      # covering the screen, so this one blocks.
+      - run: npm run test:margin
+        working-directory: app
 
   # NO SMART-QUOTE JOB HERE, DELIBERATELY — one was written and removed the same night.
   #
