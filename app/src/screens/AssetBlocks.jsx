@@ -34,7 +34,8 @@ import {
   countMismatchNote, deriveItems, draftSizeText, expectationFor, latestRows, listBodyModel, listsOf,
   targetFor,
   ASSET_ANSWERS_DEFAULT_OPEN, correctionsForField,
-  meterModel, originalState, reqsForRow, scopeSwaps, shapeOf, sharedSourceNote, statPct, wordCount,
+  meterModel, originalState, proposedKeywordDetail, proposedKeywordsForRow, reqsForRow, scopeSwaps,
+  shapeOf, sharedSourceNote, statPct, wordCount,
 } from '../assetBlocks.js'
 import { HIGHLIGHT_CLASS, HIGHLIGHT_ACTIVE_CLASS, markRuns } from '../highlight.js'
 import { SEV_COLOR, SEV_LABEL, checkLabel, fieldLabel, severityCounts } from '../assetGate.js'
@@ -467,6 +468,13 @@ function AssetBlock({ row, reqs, swapsForList, wide, artifactId, listOwners, thr
   // a copy or a derived key: `Marked` compares it by identity against what markRuns reports, so a
   // second identifier here would be a second matcher deciding where a highlight points.
   const [activeWording, setActiveWording] = useState(null)
+  // Which proposed-keyword chip has its panel open, or null. Local to the field: two fields may
+  // legitimately propose the same keyword and opening one must not open the other's.
+  const [openKeyword, setOpenKeyword] = useState(null)
+  // Derived from the SAME `reqs` the requirement chips render, so a keyword and the posting line it
+  // came from can never disagree about which requirements this field cites.
+  const proposedKeywords = proposedKeywordsForRow(reqs)
+  const openKeywordDetail = openKeyword ? proposedKeywordDetail(reqs, openKeyword) : null
   const [showBefore, setShowBefore] = useState(false)
   // What the "Show original" panel says. Derived in ../assetBlocks.js, never inline: this file
   // renders, it does not decide. See `originalState` for why before_text may legitimately be null.
@@ -755,6 +763,53 @@ function AssetBlock({ row, reqs, swapsForList, wide, artifactId, listOwners, thr
           {wordingExpected && (
             <div className="px-small" style={{ textTransform: 'none', marginTop: 4, fontStyle: 'italic' }}>
               {wordingExpected}
+            </div>
+          )}
+        </div>
+      )}
+
+      {proposedKeywords.length > 0 && (
+        <div style={{ marginTop: 9 }} data-qc={BLOCK_HOOKS.keywordChips} data-qc-n={proposedKeywords.length}>
+          <div className="px-label" style={{ marginBottom: 4 }}>Keywords for this line</div>
+          <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+            {proposedKeywords.map((k) => (
+              <span key={k} className="px-chip" role="button" tabIndex={0}
+                data-qc={BLOCK_HOOKS.keywordChip} data-qc-keyword={k}
+                onClick={() => setOpenKeyword(openKeyword === k ? null : k)}
+                onKeyDown={(e) => {
+                  if (e.key !== 'Enter' && e.key !== ' ') return
+                  e.preventDefault()
+                  setOpenKeyword(openKeyword === k ? null : k)
+                }}
+                style={{ cursor: 'pointer' }}>
+                {/* The word rides on EVERY chip, not on the group heading. A reader who sees one
+                    chip must still see that it is a proposal - the owner's constraint is that it
+                    can never be mistaken for a validated placement, and a heading scrolls away. */}
+                {k} <span className="px-small" style={{ fontWeight: 700 }}>proposed</span>
+              </span>
+            ))}
+          </div>
+          {openKeywordDetail && (
+            <div className="px-box" data-qc={BLOCK_HOOKS.keywordDetail}
+              data-qc-keyword={openKeywordDetail.keyword}
+              style={{ marginTop: 6, padding: 8, fontSize: 11.5, lineHeight: 1.5 }}>
+              <div style={{ fontWeight: 700, marginBottom: 3 }}>
+                {openKeywordDetail.keyword} <span className="px-small">proposed</span>
+              </div>
+              {/* No match grade, no approximately-equal marker, no "took the place of". SPEC 4.6
+                  asks for all three and NONE has a source: matchesEntry needs a published
+                  term_library_entry (the library is off by owner decision), and "reworded" is not
+                  merely unsourced but UNDECIDABLE - absent text is equally consistent with
+                  reworded and with never placed. Rendering them would be invention. */}
+              <div style={{ color: 'var(--proto-ink2)' }}>
+                A model reading this posting proposed this keyword for the line below. Nothing has
+                verified that this field contains it, and it counts toward nothing.
+              </div>
+              {openKeywordDetail.verbatim
+                ? <div style={{ marginTop: 4 }}><Verbatim text={openKeywordDetail.verbatim} /></div>
+                : <div className="px-small" style={{ textTransform: 'none', marginTop: 4 }}>
+                    The posting line could not be located, so there is nothing to quote.
+                  </div>}
             </div>
           )}
         </div>

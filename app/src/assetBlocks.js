@@ -49,6 +49,9 @@ export const BLOCK_HOOKS = {
   fieldChangeLog: 'blocks-corrected-for-you', // the field's own "Corrected for you" list (P8.6 inline).
   fieldFindings: 'blocks-field-findings',     // the field's own open findings, all severities
   fieldFinding: 'blocks-field-finding',       // one of them (carries data-qc-sev)
+  keywordChips: 'blocks-keyword-chips',       // the field's PROPOSED ATS keywords (never scoreable)
+  keywordChip: 'blocks-keyword-chip',         // one of them (carries data-qc-keyword)
+  keywordDetail: 'blocks-keyword-detail',     // the panel a chip opens
   fieldWordingKept: 'blocks-wording-kept',    // "Wording kept from the posting", in the field's margin
   reqLegend: 'blocks-req-legend',             // what RQ-MH / RQ-NTH / RESP mean, once per asset
   wordingAsk: 'blocks-wording-ask',           // seeds the field's own ask box with a reword request
@@ -285,6 +288,57 @@ export function reqsForRow(row, scopedSwaps, reqById) {
     if (r) out.push(r)
   }
   return out.sort((a, b) => Number(a.seq) - Number(b.seq))
+}
+
+/**
+ * The PROPOSED ATS keywords for a field — `requirement.model_keyword`, deduped, in `seq` order.
+ *
+ * WHY THIS SITS BESIDE `reqsForRow` RATHER THAN INSIDE IT. `reqsForRow`'s return shape has three
+ * live consumers in AssetBlocks.jsx and two assertions in assetBlocks.test.mjs; widening it to
+ * carry keywords would make every one of them a place where a keyword could leak into a count.
+ * This consumes its output and adds nothing to it.
+ *
+ * THESE ARE PROPOSALS, NOT MEASUREMENTS, AND THE DISTINCTION IS THE WHOLE POINT.
+ * `model_keyword` is jd_table's "ATS Keyword" — MODEL-GENERATED, and both `schema.ts:338` and
+ * `requirements.ts:59` declare it NEVER SCOREABLE. It says "a model reading the posting thought
+ * this was the keyword", not "this field contains this term". Nothing derived here may enter a
+ * coverage count, a score, or the gate; the owner-facing label is the literal word `proposed`, and
+ * `H:keyword-never-reaches-a-count` guards the wall rather than trusting this comment.
+ *
+ * Returns plain strings, deduped by EXACT string. A near-duplicate is left as two chips: collapsing
+ * "roadmap" and "roadmap ownership" would be a similarity judgement, and this repo reserves those
+ * for ranking, never for a claim shown to the reader.
+ *
+ * @param {Array} reqs  the output of `reqsForRow` — already the right rows, already seq-ordered
+ * @returns {string[]}  never `[null]`, never `['']`, never a placeholder
+ */
+export function proposedKeywordsForRow(reqs) {
+  const out = []
+  const seen = new Set()
+  for (const r of Array.isArray(reqs) ? reqs : []) {
+    const k = r && typeof r.model_keyword === 'string' ? r.model_keyword.trim() : ''
+    if (!k || seen.has(k)) continue
+    seen.add(k)
+    out.push(k)
+  }
+  return out
+}
+
+/**
+ * The requirement row a chip stands for, found by EXACT keyword identity within the rows already
+ * resolved for this field. Not a search: the same array the chip was built from.
+ *
+ * `verbatim` is the posting's own substring, or null when the requirement was unlocatable. The
+ * caller must render the null as "the posting line could not be located" and NEVER substitute
+ * `item_text`, which `schema.ts:331` marks as a model paraphrase that is never presented as a quote.
+ */
+export function proposedKeywordDetail(reqs, keyword) {
+  for (const r of Array.isArray(reqs) ? reqs : []) {
+    if (r && typeof r.model_keyword === 'string' && r.model_keyword.trim() === keyword) {
+      return { keyword, seq: r.seq, kind: r.kind, verbatim: r.verbatim || null }
+    }
+  }
+  return null
 }
 
 // ── packet-level provenance (decision 9) ────────────────────────────────────────────────────────
