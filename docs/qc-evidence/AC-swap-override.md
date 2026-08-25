@@ -177,7 +177,7 @@ divergent before this feature:**
 
 | String | Location | Surface |
 |---|---|---|
-| `Corrected for you` | `app/src/screens/AssetBlocks.jsx:643` | the **field margin** |
+| `Corrected for you` | `app/src/screens/AssetBlocks.jsx:677` | the **field margin** |
 | `Done for you` | `app/src/assetGate.js:445` `CHANGE_LOG_HEADLINE` | the **QC rail** |
 | `Changes made` | `SPEC` 4.5 | neither |
 
@@ -341,11 +341,14 @@ extend. It is an owner decision which way `changes_cited` should then count it (
 > config" that is a violation the feature creates.**
 
 **Where (surface):** `CorrectionRow` is defined once (`QcRail.jsx:489`) and mounted twice —
-`QcRail.jsx:635` (the QC rail, `inField` false) and `AssetBlocks.jsx:645` (the field margin,
+`QcRail.jsx:635` (the QC rail, `inField` false) and `AssetBlocks.jsx:679` (the field margin,
 `inField` true, imported at `AssetBlocks.jsx:42`). It **already renders a "Change it" button**
-(`QcRail.jsx:588`) with a suggest panel (`:591-612`) and `suggestScope()` copy
-(`assetGate.js:649`). *(`AC-resume-margin.md` verified all of this at `b319943`; `f50a422` and
-`fb885cf` did not touch it.)* **This is the extend point. Any new correction-editing JSX written
+(`QcRail.jsx:583`) with a suggest panel (`:586-607`) and `suggestScope()` copy
+(`assetGate.js:649`). *(`AC-resume-margin.md` verified this at `b319943`. **Its AssetBlocks line numbers are now STALE** —
+`fb885cf` shifted that file by ~34 lines. Re-measured at `fb885cf`: `import { CorrectionRow } from
+'./QcRail.jsx'` :42; `data-qc={BLOCK_HOOKS.fieldChangeLog}` :676; `Corrected for you` :677;
+`<CorrectionRow … inField>` :679. `QcRail.jsx` is unchanged at :489 / :635; the `Change it` button
+moved to :583. `grep -rn "export function CorrectionRow" app/src/ | wc -l` → **1**.)* **This is the extend point. Any new correction-editing JSX written
 into `AssetBlocks.jsx` is the parallel system `CLAUDE.md` forbids** — and `AC-resume-margin.md`
 records this exact mistake already being made once in this file.
 
@@ -405,7 +408,7 @@ is the mistake that produces an override the pipeline is licensed to delete.
 | 6 | every `pkg`-reading check (`splitItems(pkg[f])`) | `checks.ts:331-332, 344, 376, 559-560, 877` | **YES** — directly |
 | 7 | `swapsGet` → `{swaps, current, changed, unattributed}` | `appSwaps.ts:79-100` | **YES**, via 1 |
 | 8 | the rendered documents | `renderArtifact` → `injectValues` | **YES** |
-| 9 | the change log UI | `api.js:187 artifactChecksResult` → `AssetBlocks.jsx:102-113` → `qcRail.js:193 railChangeLog` → `assetGate.js correctionRow/correctionSentence` → `QcRail.jsx:489 CorrectionRow` mounted at `QcRail.jsx:635` **and** `AssetBlocks.jsx:645` | **PARTIALLY — this is the gap.** `correctionSentence` never receives `source` (HQ2). |
+| 9 | the change log UI | `api.js:187 artifactChecksResult` → `AssetBlocks.jsx:102-113` → `qcRail.js:193 railChangeLog` → `assetGate.js correctionRow/correctionSentence` → `QcRail.jsx:489 CorrectionRow` mounted at `QcRail.jsx:635` **and** `AssetBlocks.jsx:679` | **PARTIALLY — this is the gap.** `correctionSentence` never receives `source` (HQ2). |
 
 **This is the strongest argument for the owner's decision and it should be stated in the PR:**
 consumers 1-8 need **zero** code changes, because the override is applied upstream of all of them.
@@ -680,7 +683,7 @@ prior pass warned about, sitting on the exact helper this feature reads.
 **AC-F1 (one renderer, extended — no new correction JSX).**
 Given this feature ships, when the diff is reviewed, then `grep -rn "export function CorrectionRow" app/src/ | wc -l` → **1**, and `AssetBlocks.jsx` contains no new correction-rendering JSX.
 *Why:* `CorrectionRow` is defined at `QcRail.jsx:489` and mounted at `QcRail.jsx:635` and
-`AssetBlocks.jsx:645`. `AC-resume-margin.md` records a previous pass nearly building a second
+`AssetBlocks.jsx:679`. `AC-resume-margin.md` records a previous pass nearly building a second
 renderer in this same file.
 
 **AC-F2 (`correctionSentence` states WHO acted).**
@@ -695,7 +698,7 @@ an engine correction, with no error anywhere.
 **AC-F3 (both mount points change together).**
 Given AC-F2, when the QC rail renders the same row (`inField` false), then the same assertion holds
 there.
-*Binary:* assert on both `QcRail.jsx:635` and `AssetBlocks.jsx:645` renders.
+*Binary:* assert on both `QcRail.jsx:635` and `AssetBlocks.jsx:679` renders.
 *Why:* one definition, two surfaces; a fix that lands on one is two definitions in disguise.
 
 **AC-F4 (undone orientation is not inverted for an override).**
@@ -707,7 +710,7 @@ the document* is the `replacement`, not the `phrase`.
 Given the override control is rendered, when the owner uses it, then it calls a real route and the
 result is persisted and visible on reload.
 *Binary:* submit; hard-reload; the override is still shown. *Why:* `CLAUDE.md` "No dead UI"; and
-`AssetBlocks.jsx:690-692` records a control deliberately **not** shipped because it would forget.
+`AssetBlocks.jsx:724-726` records a control deliberately **not** shipped because it would forget.
 
 **AC-F6 (JSX build hygiene).**
 Given any `.jsx` edit, when it is committed, then the smart-quote `sed` sweep has been run, the
@@ -748,7 +751,7 @@ State these when reporting, and do **not** present their passing as evidence a g
 
 1. **Renaming the new `source` value** (e.g. `owner_override` → `owner_edit`) while updating all five
    homes together is behaviourally equivalent. No guard here catches it; none should.
-2. **Changing the heading copy** `Corrected for you` → `Changes made` (`AssetBlocks.jsx:643`) is
+2. **Changing the heading copy** `Corrected for you` → `Changes made` (`AssetBlocks.jsx:677`) is
    behaviourally equivalent. A guard pinning that string pins **copy**, not behaviour — label it so.
 3. **Reordering two independent idempotent `ALTER`s** that name no shared column is equivalent;
    `AC-A2` is about `ALTER`-before-**use**, not about `ALTER` order among themselves.
@@ -782,7 +785,7 @@ silently discards the edit while leaving the row asserting it. Three coherent an
 
 **Q-OWNER-2 (HQ2). What does the change log CALL an owner's own edit?** There are already three
 competing strings for one concept and **all three are false for an owner edit**: `Corrected for you`
-(`AssetBlocks.jsx:643`), `Done for you` (`assetGate.js:445` `CHANGE_LOG_HEADLINE`), `Changes made`
+(`AssetBlocks.jsx:677`), `Done for you` (`assetGate.js:445` `CHANGE_LOG_HEADLINE`), `Changes made`
 (SPEC 4.5). *(This is `AC-resume-margin.md` Q1.1, unanswered across two AC passes.)* I need: the
 heading for a mixed log, the per-row wording for an owner row, and the `CORRECTION_SOURCE` copy for
 the new `source` value. **Also confirm the new `source` token itself** — I have used `owner_override`
