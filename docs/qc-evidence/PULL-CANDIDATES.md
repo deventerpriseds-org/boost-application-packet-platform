@@ -161,3 +161,41 @@ guessing — the same refusal `locateOwnerPhrase` already makes everywhere else.
 **What to look for:** owner edits that lapse after a rebuild more often than feels right. If a
 phrase is commonly duplicated in a field, the exactly-once rule is too strict for that surface and
 the row needs an anchor beyond its own text.
+
+---
+
+## PC-9 — the owner MAY edit text a correction wrote, and undoing that correction then refuses
+
+**Status:** decided, not yet shipped (same fix as PC-7/PC-8). **Reverses by:** refusing at write time.
+
+The F5 AC pass's Q1, and the one it called "a product decision, not a technical one". Today the
+owner can edit any words on screen, including words a pipeline correction put there. Three coherent
+answers: allow it and let the underlying undo refuse; allow it and let the undo **lapse** the owner's
+edit with a warning; or forbid the edit at write time.
+
+**Decided: allow it, and the underlying undo refuses** with *"undoing this would lose your edit"*.
+Taken rather than asked because the alternatives are both worse in a way the owner would feel
+immediately - forbidding the edit REMOVES something that works today, and lapsing silently discards
+the owner's own words to restore a machine's. A refusal that names the reason is the only one of the
+three that never loses what a human wrote.
+
+**What to look for:** how often that refusal actually fires in use. If it is common, the real answer
+is a two-step ("undo the correction AND drop my edit?") rather than a flat refusal.
+
+---
+
+## PC-10 — undo-after-rebuild is NOT fixed, and the copy will say so
+
+**Status:** decided scope boundary. **Reverses by:** making `reapplyOwnerEdits` write the row back.
+
+The AC pass's Q2. DECISION A settled that an owner edit survives a rebuild **in the document**; it
+did not settle whether it stays **undoable**. Making it undoable means `reapplyOwnerEdits` writes new
+offsets and a new hash back to the row - a new write on the build path, which DECISION A
+deliberately made read-only.
+
+**Decided: out of scope for the F5 fix**, which makes that fix partial. AC-18 requires the partiality
+be stated in the owner-facing copy rather than buried in a ledger, so the row will say the edit is
+in the document and can no longer be undone, instead of failing with a reason about moved text.
+
+**What to look for:** whether a rebuild is common enough in real use that losing undo matters. If it
+is, this becomes the next piece of work rather than a boundary.
