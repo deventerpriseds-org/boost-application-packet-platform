@@ -63,7 +63,7 @@ export async function ensureCorrectionTable(client: any): Promise<void> {
     before_sha256 text not null,
     applied_seq   int not null,
     reason        text not null,
-    source        text not null check (source in ('profile_figure','generalized')),
+    source        text not null check (source in ('profile_figure','generalized','owner_edit')),
     run_id        uuid,
     loop          int not null default 0,
     reverted_by   text,

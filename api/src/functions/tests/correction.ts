@@ -29,7 +29,7 @@ import { Figure, Echo, generalize } from './figureEcho'
 export const CORRECTION_VERSION = 1
 
 /** Why a figure was changed, and where the replacement came from. */
-export type CorrectionSource = 'profile_figure' | 'generalized'
+export type CorrectionSource = 'profile_figure' | 'generalized' | 'owner_edit'
 
 export interface Correction {
   merge_field: string

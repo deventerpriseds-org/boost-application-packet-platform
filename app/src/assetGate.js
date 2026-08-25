@@ -438,6 +438,12 @@ export const CORRECTION_REVERT_ROUTE = '/app/correction/{correctionId}/revert'
 export const CORRECTION_SOURCE = {
   generalized: 'generalised, because your profile does not evidence a figure of your own',
   profile_figure: 'taken from your own profile',
+  // THIS ENTRY IS WHY WIDENING `source` IS NOT A ONE-LINE SCHEMA EDIT. The fallthrough above is
+  // deliberate and correct, and it is also what makes a half-finished migration INVISIBLE: ship a
+  // new source value without adding it here and the map falls through to the raw database string,
+  // so the owner reads the literal word `owner_edit` on their own screen as though it were copy.
+  // No test catches that; tsc does not catch it; only a person reading the screen does.
+  owner_edit: 'you changed this yourself',
 }
 export const correctionSourceText = (s) => CORRECTION_SOURCE[s] || String(s || 'no source was recorded')
 

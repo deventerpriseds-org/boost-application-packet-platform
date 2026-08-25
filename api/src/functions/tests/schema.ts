@@ -411,7 +411,7 @@ create table if not exists correction (
   before_sha256 text not null,
   applied_seq   int not null,           -- ascending by char_start, so the change log reads in document order
   reason        text not null,
-  source        text not null check (source in ('profile_figure','generalized')),
+  source        text not null check (source in ('profile_figure','generalized','owner_edit')),
   run_id        uuid,
   loop          int not null default 0,
   reverted_by   text,
@@ -432,6 +432,24 @@ create table if not exists correction (
 -- byte-exact duplicate inserted twice and the table held both.
 create unique index if not exists correction_unique_seq
   on correction (artifact_id, merge_field, applied_seq, coalesce(run_id, '00000000-0000-0000-0000-000000000000'::uuid));
+-- WIDENING source NEEDS THIS ALTER. THE INLINE CHECK ABOVE IS NOT ENOUGH, AND THE REASON IS THE
+-- WHOLE DEFECT CLASS: create table if not exists is a NO-OP on a table that already exists, so it
+-- can NEVER alter an existing constraint. Production's correction already exists, so without an
+-- explicit ALTER the OLD two-value CHECK keeps rejecting owner_edit forever while this file reads
+-- as though it allows it.
+--
+-- It is worse than a silent no-op, because appCorrections.ts:53 re-declares this whole table in
+-- ensureCorrectionTable() and api-deploy.yml deploys the CODE (line 82) BEFORE it runs
+-- pg-migrate (line 122). So between those two steps a route can run against a database whose CHECK
+-- has not yet been widened, and an owner's edit is rejected by the database with the code already
+-- live. The ALTER is what closes that window; H:correction-ddl-parity is what stops the two copies
+-- drifting again.
+--
+-- Unconditional, like every other ALTER in this file: a conditional one skips the database that was
+-- created by an older revision, which is exactly the database that needs it.
+alter table correction drop constraint if exists correction_source_check;
+alter table correction add constraint correction_source_check
+  check (source in ('profile_figure','generalized','owner_edit'));
 create index if not exists correction_by_artifact on correction (artifact_id, reverted_at);
 
 create table if not exists requirement_evidence (

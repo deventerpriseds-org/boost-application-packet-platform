@@ -23,7 +23,10 @@ create table if not exists correction (
   constraint correction_span_sane           check (char_start >= 0 and char_end > char_start),
   constraint correction_phrase_nonempty     check (length(phrase) > 0),
   constraint correction_sha_shaped          check (before_sha256 ~ '^[0-9a-f]{64}$'),
-  constraint correction_source_known        check (source in ('profile_figure','generalized')),
+  -- Kept in lockstep with schema.ts and appCorrections.ts. A fixture whose domain is NARROWER than
+  -- production tests a schema nobody runs, and would have passed every assertion below while the
+  -- real table rejected the value. H:correction-ddl-parity holds the three copies together.
+  constraint correction_source_known        check (source in ('profile_figure','generalized','owner_edit')),
   -- AC-12: a revert is recorded, never a DELETE. Both columns move together or neither does.
   constraint correction_revert_paired       check ((reverted_by is null) = (reverted_at is null)),
   -- AC-10: a substituted figure must carry its provenance, or it is a guess wearing a citation.
