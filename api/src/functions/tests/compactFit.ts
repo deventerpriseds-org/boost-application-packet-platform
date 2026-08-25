@@ -79,6 +79,15 @@ export interface CompactFitResult {
   /** True when nothing had to go. */
   fits: boolean
   /**
+   * There is no Core Skills content at all — both source lists were empty or blank.
+   *
+   * WITHOUT THIS, an empty line reported `fits: true` with `dropped: []` and the check printed
+   * "Core Skills fits: 0 of 320 chars" — a PASS on a blank section of a document the owner sends to
+   * employers, which is the exact failure this module exists to prevent, arriving through the front
+   * door. Absent content is not a satisfied constraint.
+   */
+  empty?: boolean
+  /**
    * The configured budget could not be read (null, NaN, <= 0). Nothing was dropped — content is
    * shipped unchanged — and this says the fit was never actually enforced, so a reader is never told
    * "it fits" on the strength of a measurement that did not happen.
@@ -169,6 +178,7 @@ export function fitCompactSkills(input: CompactFitInput): CompactFitResult {
     return {
       text: join(items), kept: items, dropped: [], fullLength,
       budget: budgetUsable ? budget : 0, fits: true,
+      ...(items.length === 0 ? { empty: true } : {}),
       ...(budgetUsable ? {} : { budgetUnreadable: true }),
     }
   }

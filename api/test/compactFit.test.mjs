@@ -244,3 +244,60 @@ test('H:compact-check-sees-the-same-facts-the-render-did', () => {
   assert.match(APPCHECKS, /select action, driver, to_label, from_label, requirement_id, seq, list from swap_decision/,
     'the swaps projection must carry the fields the ranking reads')
 })
+
+// ── Found by an independent verifier on 4c070dd, both live and both mine ─────────────────────────
+
+test('H:compact-empty-line-is-never-a-pass', () => {
+  // F1. An empty combined line returned { text:'', fits:true, dropped:[] } and the check printed
+  // "Core Skills fits: 0 of 320 chars" — a GREEN PASS on a blank section of a document the owner
+  // sends to employers. That is the exact failure this module exists to prevent, arriving through
+  // the front door, and it violates "absent evidence is never a pass".
+  for (const [s1, s2] of [[[], []], [[''], ['  ']], [[], ['']]]) {
+    const r = fitCompactSkills({ skills1: s1, skills2: s2, budget: 320 })
+    assert.equal(r.text, '')
+    assert.equal(r.empty, true, `no content must be DECLARED, not reported as fitting: ${JSON.stringify([s1, s2])}`)
+  }
+  // ...and content present must NOT be flagged empty.
+  assert.equal(fitCompactSkills({ skills1: ['Go'], skills2: [], budget: 320 }).empty, undefined)
+})
+
+test('H:compact-empty-line-fails-the-CHECK-not-just-the-module', async () => {
+  // The module-level case above passed while the CHECK still reported the blank line as a pass —
+  // caught by mutating `if (fit.empty)` to `if (false)` and watching the suite stay green. A flag
+  // nothing reads is not a guard, and this is the layer the owner actually sees.
+  const { runChecks } = await import('../dist/functions/tests/checks.js')
+  const r = runChecks({
+    type: 'compact_resume', pkg: { ResumeSummary: 'x' }, company: 'X', requirements: [], swaps: [],
+    postingText: '', profileText: '', evidence: {}, facts: {}, thresholds: {},
+  }).find((x) => x.check_key === 'compact_skills_fit')
+  assert.ok(r, 'compact_skills_fit must be emitted')
+  assert.equal(r.state, 'fail', 'a blank Core Skills section must not report as fitting')
+  assert.match(r.observed, /empty/i, 'and it must say the line is empty, not quote a character count')
+})
+
+test('H:compact-checks-are-not-fewer-than-the-resume-s', async () => {
+  // F2 — THE REGRESSION THIS BRANCH INTRODUCED, and the implementer wrongly called it "NOT REAL".
+  // `has()` gated on `mergeFieldsFor(type)` — the TEMPLATE PLACEHOLDER list — so when compact_resume
+  // stopped declaring the resume's seven placeholders it silently took SIX checks with it, including
+  // `omission_list`, the owner's never-use list. They did not degrade to `not_applicable`; they were
+  // never emitted, and a gate cannot see a check that never ran.
+  //
+  // Measured before the fix: resume 17 results, compact_resume 12.
+  const { runChecks } = await import('../dist/functions/tests/checks.js')
+  const pkg = {
+    ResumeSummary: 'x', SkillsBullets1: 'Kubernetes | Rust', SkillsBullets2: 'Go | Terraform',
+    ExpertiseBullets: 'a | b', RelevantBullets1: 'c', RelevantBullets2: 'd', RelevantBullets3: 'e',
+  }
+  const run = (type) => runChecks({
+    type, pkg, company: 'X', requirements: [], swaps: [], postingText: '', profileText: '',
+    evidence: {}, facts: { itemsToOmit: 'Rust' }, thresholds: {},
+  }).map((r) => r.check_key)
+
+  const resume = new Set(run('resume'))
+  const compact = new Set(run('compact_resume'))
+  const lost = [...resume].filter((k) => !compact.has(k))
+  assert.deepEqual(lost, [],
+    `the compact resume ships the resume's skills content and must answer the same rules; lost: ${lost.join(', ')}`)
+  assert.ok(compact.has('omission_list'), "the owner's never-use list must be checked on the compact resume")
+  assert.ok(compact.has('compact_skills_fit'), 'and the compact resume keeps its own fit check')
+})

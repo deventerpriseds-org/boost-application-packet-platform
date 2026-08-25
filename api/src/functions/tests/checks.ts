@@ -279,6 +279,22 @@ export function coversText(text: string, r: { verbatim: string | null; item_text
 // Exported so the NORMALISER enforces the same lists these checks measure. Two copies of "which
 // fields are skill lists" is two answers to the same question, and the normaliser exists precisely
 // to satisfy these checks — it cannot be allowed to disagree with them about scope.
+/**
+ * Artifact types whose CHECKABLE content is not the same set as their template placeholders.
+ *
+ * `compact_resume` prints one combined Core Skills line derived from the resume's two lists, so the
+ * skills, relevant and expertise content it ships is the resume's — and every rule about that
+ * content must still apply to it. Its own `{{SkillsBullets}}` is included so a rule that names the
+ * combined slot can find it too.
+ *
+ * Deliberately a narrow, explicit map rather than "always fall back to resume": a type that really
+ * has no skills content must NOT be forced to answer skills checks, which is what the placeholder
+ * gate got right and this must not lose.
+ */
+export const CHECK_FIELDS_FOR: Record<string, string[]> = {
+  compact_resume: [...mergeFieldsFor('resume'), 'SkillsBullets'],
+}
+
 export const SKILL_FIELDS = ['SkillsBullets1', 'SkillsBullets2']
 export const RELEVANT_FIELDS = ['RelevantBullets1', 'RelevantBullets2', 'RelevantBullets3']
 
@@ -292,7 +308,23 @@ export const RELEVANT_FIELDS = ['RelevantBullets1', 'RelevantBullets2', 'Relevan
 export function runChecks(input: CheckInput): CheckResult[] {
   const t: CheckThresholds = { ...DEFAULT_THRESHOLDS, ...(input.thresholds || {}) }
   const pkg = input.pkg || {}
-  const fields = mergeFieldsFor(input.type)
+  // WHICH FIELDS THIS ARTIFACT'S CONTENT COVERS — deliberately NOT its template placeholder list.
+  //
+  // This was `mergeFieldsFor(input.type)`, and when `compact_resume` stopped declaring the resume's
+  // seven placeholders it silently took SIX CHECKS WITH IT: skill_char_limit, skill_list_count,
+  // relevant_char_limit, cross_list_redundancy, expertise_phrase_length and — worst — omission_list,
+  // the owner's never-use list. They did not degrade to `not_applicable`; they were never emitted at
+  // all, and `gateFor` cannot see a check that never ran. Measured by executing runChecks with an
+  // identical pkg: resume 17 results, compact_resume 12.
+  //
+  // The placeholder list answers "which slots does this DOCUMENT have". A check asks "what content
+  // does this artifact SHIP". For the compact resume those differ by design: it renders one combined
+  // Core Skills line built from SkillsBullets1/2, so it ships that skills content and must be held
+  // to every rule about it. Keying the gate on the document's slots made the compact resume
+  // unaccountable for the very text it prints.
+  //
+  // `CHECK_FIELDS_FOR` is the override, and only where the two genuinely differ.
+  const fields = CHECK_FIELDS_FOR[input.type] || mergeFieldsFor(input.type)
   const has = (f: string) => fields.includes(f)
   const out: CheckResult[] = []
 
@@ -846,7 +878,12 @@ export function runChecks(input: CheckInput): CheckResult[] {
       provenance, budget: t.compactSkillsMaxChars,
     })
     const expected = `the combined Core Skills line fits ${t.compactSkillsMaxChars} characters`
-    if (fit.budgetUnreadable) {
+    if (fit.empty) {
+      // A blank Core Skills section is not a satisfied constraint. It used to report
+      // "Core Skills fits: 0 of 320 chars" — a green pass on a document with the section missing.
+      out.push(bad('compact_skills_fit', 'the Core Skills line is empty — no skills reached the compact resume',
+        expected, ['SkillsBullets1 and SkillsBullets2 are both empty in this package'], 'fail'))
+    } else if (fit.budgetUnreadable) {
       // Absent evidence is not a pass: nothing was measured, so nothing may be claimed.
       out.push(bad('compact_skills_fit', 'the Core Skills budget could not be read, so the line was not measured',
         expected, ['compactSkillsMaxChars is not a usable number'], 'warn'))
