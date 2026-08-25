@@ -135,6 +135,10 @@ const ACTS = {
   // Row 10 — the posting-echo toggle. Flips "kept" → "rewording" and "Reword it" → "Undo".
   reword:   { click: 'Reword it',    anchor: 'Wording kept from the posting', pad: 320,
               proves: ['rewording', 'Undo'] },
+  // The SAME crop with no click, so a before/after pair is directly comparable rather than one
+  // cropped shot beside a whole page. `proves` names what the RESTING state shows.
+  'reword-before': { click: null, anchor: 'Wording kept from the posting', pad: 320,
+              proves: ['Reword it', 'kept'] },
   // "Show original" — opens the ORIGINAL panel. In the prototype `s.before` is ALWAYS present,
   // which is the whole basis of the owner's "there is always an original value" correction.
   original: { click: 'Show original', anchor: 'ORIGINAL',                     pad: 260,
@@ -151,10 +155,18 @@ if (ACT && !ACTS[ACT]) throw new Error(`--act must be one of ${Object.keys(ACTS)
 let actResult = null
 if (ACT) {
   const spec = ACTS[ACT]
-  const target = page.locator(`text=/^${spec.click.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$/`).first()
-  await target.scrollIntoViewIfNeeded()
-  await target.click()
-  await page.waitForTimeout(900)
+  if (spec.click) {
+    const target = page.locator(`text=/^${spec.click.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$/`).first()
+    await target.scrollIntoViewIfNeeded()
+    await target.click()
+    await page.waitForTimeout(900)
+  } else {
+    // No click: the resting state. Still scroll the anchor into view so the crop lands in the same
+    // place as its paired --act shot, otherwise a "before/after" compares two different regions.
+    await page.locator(`text=/${spec.anchor.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/`).first()
+      .scrollIntoViewIfNeeded()
+    await page.waitForTimeout(400)
+  }
   const after = await page.evaluate(() => document.body.innerText)
   // The click is only meaningful if the state it opens actually appeared. A silent no-op here
   // (wrong label, control moved) would otherwise produce a screenshot of the UNCHANGED page and
