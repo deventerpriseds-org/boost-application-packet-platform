@@ -117,7 +117,10 @@ export async function swapsGet(req: HttpRequest, context: InvocationContext): Pr
         packetId: pkt.id, loop: latestLoop, candidates, swaps, current,
         passes: [...new Set(swaps.map((s: any) => Number(s.loop)))].sort((a, b) => a - b),
         changed: changes.length,
-        unattributed: changes.filter((s: any) => s.driver !== 'posting').length,
+        // Same exclusion as buildSwaps and changes_cited. Three places counted this and only the
+        // gate was fixed for decision B, so the API answered with a number that disagreed with the
+        // gate it sits beside.
+        unattributed: changes.filter((s: any) => s.driver !== 'owner' && s.driver !== 'posting').length,
       },
     }
   } catch (e: any) {

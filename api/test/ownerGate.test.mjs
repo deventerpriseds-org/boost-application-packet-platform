@@ -155,3 +155,37 @@ test('H:owner-label-match-is-exact: a paraphrase must not inherit the exemption'
   assert.ok(near, 'the near-miss row must exist')
   assert.notEqual(near.driver, 'owner', 'a near miss is not the owner\'s wording')
 })
+
+test('H:gate-and-count-agree: the number beside the gate must not contradict the gate', () => {
+  // Verifier finding F6. THREE places computed "unattributed" and only the GATE was fixed for
+  // decision B, so a packet could pass while the count printed next to it said changes cite
+  // nothing. That is worse than either being wrong alone: a reader who sees a green gate and a
+  // non-zero count cannot tell which to believe.
+  //
+  // ASSERTED AS AGREEMENT, not as two separate numbers. Testing each against a hand-picked
+  // expectation is what let them drift - each was individually "right" against its own fixture.
+  const pkg = { SkillsBullets1: 'Supplier negotiation\nStakeholder alignment' }
+  const built = buildSwaps({
+    call1: { skills1: 'Vendor selection\nStakeholder alignment' },
+    call3: { skills1: 'Supplier negotiation\nStakeholder alignment' },
+    pkg, requirements: [], ownerLabels: ['Supplier negotiation'],
+  })
+  const gate = find(runChecks({ type: 'resume', pkg, swaps: built.swaps }), 'changes_cited')
+  assert.notEqual(gate.state, 'fail', 'the gate must not fail on the owner\'s own edit')
+  assert.equal(built.unattributed, 0,
+    `the count must agree with the gate: gate=${gate.state} but unattributed=${built.unattributed}`)
+
+  // and the agreement must hold in the OTHER direction too - a real uncited model change must
+  // show up in BOTH, or the count is simply always zero and proves nothing.
+  const modelChange = buildSwaps({
+    call1: { skills1: 'Vendor selection\nStakeholder alignment' },
+    call3: { skills1: 'Quantum cryptography\nStakeholder alignment' },
+    pkg: { SkillsBullets1: 'Quantum cryptography\nStakeholder alignment' }, requirements: [],
+  })
+  const gate2 = find(runChecks({
+    type: 'resume', pkg: { SkillsBullets1: 'Quantum cryptography\nStakeholder alignment' },
+    swaps: modelChange.swaps }), 'changes_cited')
+  assert.equal(gate2.state, 'fail', 'an uncited MODEL change must still fail')
+  assert.ok(modelChange.unattributed > 0,
+    `and must still be counted: gate=${gate2.state} but unattributed=${modelChange.unattributed}`)
+})

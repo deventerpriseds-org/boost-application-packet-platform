@@ -244,7 +244,12 @@ export function buildSwaps(input: BuildSwapsInput): BuildSwapsResult {
     }
   }
 
-  const unattributed = swaps.filter(s => (s.action === 'swapped' || s.action === 'added') && s.driver !== 'posting').length
+  // OWNER ROWS ARE NOT UNATTRIBUTED, and this count must agree with changes_cited or the packet
+  // contradicts itself: the gate passes while the number printed beside it says N changes cite
+  // nothing. 'Unattributed' means the MODEL made a change it cannot explain. An owner explaining
+  // their own resume to the tool was never the question.
+  const unattributed = swaps.filter(s =>
+    (s.action === 'swapped' || s.action === 'added') && s.driver !== 'owner' && s.driver !== 'posting').length
   return { candidates, swaps, itemCount, unattributed }
 }
 
