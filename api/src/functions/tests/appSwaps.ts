@@ -38,7 +38,17 @@ export async function writeSwaps(client: any, packetId: string, oppId: string, a
   const refs: RequirementRef[] = reqRows.map((r: any) => ({ seq: r.seq, verbatim: r.verbatim, item_text: r.item_text, kind: r.kind }))
   const idBySeq = new Map<number, string>(reqRows.map((r: any) => [r.seq, r.id]))
 
-  const built = buildSwaps({ call1: args.call1, call3: args.call3, pkg: args.pkg, requirements: refs, profileText: args.profileText, omitList: args.omitList })
+  // THE OWNER'S OWN WORDING, so the rebuild can tell their edits from the model's. Without this the
+  // swap rows come back 'unattributed' and changes_cited fails the packet naming the owner's words -
+  // the failure decision B claims to prevent, which stayed live because nothing produced 'owner'.
+  // Scoped to THIS packet's artifacts; a correction belongs to an artifact, not to the packet.
+  const ownerLabels = (await client.query(
+    `select distinct c.replacement from correction c
+       join artifact a on a.id = c.artifact_id
+      where a.packet_id = $1 and c.source = 'owner_edit' and c.reverted_at is null`,
+    [packetId])).rows.map((r: any) => r.replacement).filter(Boolean)
+
+  const built = buildSwaps({ call1: args.call1, call3: args.call3, pkg: args.pkg, requirements: refs, profileText: args.profileText, omitList: args.omitList, ownerLabels })
 
   await client.query('begin')
   try {

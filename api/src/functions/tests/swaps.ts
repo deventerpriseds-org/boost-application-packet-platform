@@ -143,6 +143,11 @@ export interface BuildSwapsInput {
   requirements?: RequirementRef[]
   profileText?: string      // MasterContext profile, when available — marks items as pre-existing
   omitList?: string         // MasterContext.itemsToOmit — the owner's do-not-use list
+  /**
+   * Labels the OWNER wrote themselves, from `correction` rows with `source='owner_edit'`.
+   * A row whose `to_label` is one of these is theirs, not the model's, and is driven by 'owner'.
+   */
+  ownerLabels?: string[]
 }
 
 export interface BuildSwapsResult {
@@ -163,6 +168,10 @@ export interface BuildSwapsResult {
  */
 export function buildSwaps(input: BuildSwapsInput): BuildSwapsResult {
   const { call1 = {}, call3 = {}, pkg = {}, requirements = [], profileText = '', omitList = '' } = input
+  // Exact strings, because a label either IS the wording the owner typed or it is not. A fuzzy
+  // membership test here would let the model's paraphrase inherit the owner's exemption from the
+  // gate, which is the one thing decision B must not allow.
+  const ownerLabels = new Set((input.ownerLabels || []).map((l) => String(l == null ? '' : l)).filter(Boolean))
   const omitted = omitEntries(omitList)
   const profileNorm = normItem(profileText || '')
   const candidates: CandidateRow[] = []
@@ -191,7 +200,7 @@ export function buildSwaps(input: BuildSwapsInput): BuildSwapsResult {
       const exact = finals.findIndex((x, i) => !claimed.has(i) && normItem(x) === normItem(o))
       if (exact >= 0) {
         claimed.add(exact)
-        swaps.push(row(list, 'kept', o, finals[exact], null, 'unchanged from the first pass'))
+        swaps.push(row(list, 'kept', o, finals[exact], null, 'unchanged from the first pass', ownerLabels))
         continue
       }
       let bestI = -1, bestC = 0
@@ -202,7 +211,7 @@ export function buildSwaps(input: BuildSwapsInput): BuildSwapsResult {
       }
       if (bestI >= 0 && bestC >= SWAP_THRESHOLD) {
         claimed.add(bestI)
-        swaps.push(row(list, 'swapped', o, finals[bestI], attribute(finals[bestI], requirements), 'reworded by the ATS pass'))
+        swaps.push(row(list, 'swapped', o, finals[bestI], attribute(finals[bestI], requirements), 'reworded by the ATS pass', ownerLabels))
         continue
       }
       // No FREE final matches. Before calling it dropped, check the finals another original already
@@ -216,7 +225,7 @@ export function buildSwaps(input: BuildSwapsInput): BuildSwapsResult {
       }
       if (mergeI >= 0 && mergeC >= SWAP_THRESHOLD) {
         swaps.push(row(list, 'merged', o, finals[mergeI], attribute(finals[mergeI], requirements),
-          'folded into an item that already covers it'))
+          'folded into an item that already covers it', ownerLabels))
       } else if (onOmitList(o, omitted)) {
         // Never presented as posting-driven: the owner's list removed it, not the employer's words.
         swaps.push({
@@ -225,13 +234,13 @@ export function buildSwaps(input: BuildSwapsInput): BuildSwapsResult {
           rationale: 'on the owner do-not-use list (MasterContext.itemsToOmit)',
         })
       } else {
-        swaps.push(row(list, 'dropped', o, null, attribute(o, requirements), 'not carried into the final list'))
+        swaps.push(row(list, 'dropped', o, null, attribute(o, requirements), 'not carried into the final list', ownerLabels))
       }
     }
 
     for (let i = 0; i < finals.length; i++) {
       if (claimed.has(i)) continue
-      swaps.push(row(list, 'added', null, finals[i], attribute(finals[i], requirements), 'introduced by the ATS pass'))
+      swaps.push(row(list, 'added', null, finals[i], attribute(finals[i], requirements), 'introduced by the ATS pass', ownerLabels))
     }
   }
 
@@ -240,7 +249,8 @@ export function buildSwaps(input: BuildSwapsInput): BuildSwapsResult {
 }
 
 function row(list: ListKey, action: Action, from: string | null, to: string | null,
-             att: { seq: number; quote: string; confidence: number } | null, rationale: string): SwapRow {
+             att: { seq: number; quote: string; confidence: number } | null, rationale: string,
+             ownerLabels?: Set<string>): SwapRow {
   // `kept` is not a change, so it is never presented as posting-driven even when the text happens to
   // resemble a requirement. Only an actual change can be attributed to the posting.
   const attributable = action === 'swapped' || action === 'added' || action === 'dropped'
@@ -249,7 +259,20 @@ function row(list: ListKey, action: Action, from: string | null, to: string | nu
     requirement_seq: attributable && att ? att.seq : null,
     verbatim_quote: attributable && att ? att.quote : null,
     confidence: attributable && att ? Math.round(att.confidence * 1000) / 1000 : 0,
-    driver: attributable && att ? 'posting' : 'unattributed',
+    // THE OWNER'S OWN WORDING OUTRANKS BOTH, and this branch is what makes decision B reachable
+    // rather than decorative. Without it NOTHING ever emits 'owner': an edit the owner made comes
+    // back through the next build as a label the model did not plan, scores under
+    // ATTRIBUTION_THRESHOLD against every requirement, and lands 'unattributed' - so changes_cited
+    // FAILS the packet and prints the owner's own words as the offender. That is the exact failure
+    // the exemption in checks.ts claims to prevent, and it stayed live because the exemption had
+    // nothing to exempt. Found by an independent verifier, not by the guards, which passed on
+    // hand-built {driver:'owner'} fixtures the system never produced.
+    //
+    // Checked BEFORE attribution on purpose: an owner edit that happens to resemble a requirement
+    // must not be recorded as posting-driven. They did not cite the employer, and a citation they
+    // did not make is the quieter half of decision B.
+    driver: (to && ownerLabels && ownerLabels.has(to)) ? 'owner'
+      : attributable && att ? 'posting' : 'unattributed',
     rationale,
   }
 }

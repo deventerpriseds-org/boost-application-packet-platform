@@ -585,6 +585,17 @@ export async function ensurePackage(client: any, art: any, opp: any, regen: bool
   }
   for (const u of normalised.unresolved) built.warnings.push(`normalise could not fix — ${u}`)
 
+  // AN OWNER EDIT THAT COULD NOT BE RE-APPLIED IS A WARNING, NOT A SILENCE.
+  //
+  // `applyCorrectionPass` reports these and NOTHING READ THEM - the value was assigned and dropped,
+  // so a rebuild could quietly discard the owner's own wording while the change log went on
+  // asserting it was in place. Found by an independent verifier; the module's own doc had already
+  // said "the caller must surface these", which is precisely the kind of instruction that does not
+  // execute. This is the line that makes it true.
+  for (const l of corrections.ownerLapsed || []) {
+    built.warnings.push(`your edit to ${l.row.merge_field} could not be kept — ${l.reason}`)
+  }
+
   await client.query(`update packet set pkg_json = $1, jd_grounded = $2, updated_at = now() where id = $3`,
     [JSON.stringify(pkg), grounded, art.packet_id])
   // A note steers exactly ONE rebuild. Marked resolved only AFTER the generation it fed actually

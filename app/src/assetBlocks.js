@@ -422,7 +422,14 @@ export function listBodyModel(row, swapsForList, opts) {
       text,
       swap,
       from: swap && swap.from_label && swap.from_label !== swap.to_label ? swap.from_label : null,
-      status: swap ? (swap.action === 'kept' ? 'unchanged' : `${swap.action} · ${swap.driver}`) : '',
+      // THE THIRD RENDER SITE, and the one the driver guard missed. It interpolates the raw enum,
+      // so a new value ships as bare machine wording on the list item - "swapped · owner" - while
+      // the two sites the guard DID cover read properly. An independent verifier found it; the
+      // guard was titled "a raw enum value must never reach the screen" and looped over two of the
+      // three places one could.
+      status: swap ? (swap.action === 'kept' ? 'unchanged'
+        : swap.driver === 'owner' ? `${swap.action} · you changed this`
+        : `${swap.action} · ${swap.driver}`) : '',
       sharedSource: !!swap,
     }
   })

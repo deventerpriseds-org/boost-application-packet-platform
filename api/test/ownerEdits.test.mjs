@@ -131,3 +131,96 @@ test('H:api-object-has-no-duplicate-keys: a shadowed helper is a silent no-op', 
   assert.deepEqual(dupes, [], `duplicate keys in the api object: ${dupes.join(', ')}`)
   assert.ok(keys.includes('ownerEdit'), 'the owner-edit helper must exist')
 })
+
+// ── THE INTEGRATION, which is what was actually missing ─────────────────────────────────────────
+
+import { applyCorrectionPass } from '../dist/functions/tests/appCorrections.js'
+
+/** A client that answers only what this pass asks, so the pass itself is what is under test. */
+function fakeClient(storedOwnerEdits) {
+  return {
+    async query(sql, params) {
+      if (/create table|create unique index|create index|alter table/i.test(sql)) return { rows: [] }
+      if (/from correction/i.test(sql) && /owner_edit/.test(sql)) return { rows: storedOwnerEdits }
+      if (/insert into correction/i.test(sql)) return { rows: [] }
+      return { rows: [] }
+    },
+  }
+}
+
+test('H:owner-edit-reapply-is-WIRED: deleting the integration must fail the suite', () => {
+  // THIS IS THE GUARD THAT WAS MISSING, AND AN INDEPENDENT VERIFIER FOUND IT, NOT ME.
+  // Every test above imports reapplyOwnerEdits DIRECTLY. Deleting the entire re-apply block from
+  // applyCorrectionPass - reverting decision A's integration completely - left the suite at
+  // 825/825 with zero failures. The FUNCTION was proven; the fact that anything CALLS it was not.
+  //
+  // A unit test of a helper says the helper is correct. It says nothing about whether the product
+  // uses it, and "the product uses it" is the entire claim decision A makes.
+  return applyCorrectionPass(
+    fakeClient([{
+      merge_field: 'SkillsBullets1', phrase: 'Vendor selection', replacement: 'Supplier negotiation',
+      char_start: 0, char_end: 16, before_sha256: 'a'.repeat(64), applied_seq: 1,
+      reason: 'you changed this yourself', source: 'owner_edit',
+    }]),
+    {
+      artifactId: 'art-1',
+      pkg: { SkillsBullets1: 'Vendor selection\nStakeholder alignment' },
+      postingText: 'We need a leader who can run vendor relationships and own the roadmap end to end.',
+      profileText: 'Led vendor relationships.',
+    },
+  ).then((res) => {
+    assert.equal(res.notApplicable, false, res.reason || 'the pass must have been able to look')
+    assert.equal(res.pkg === undefined ? 'mutated-in-place' : 'mutated-in-place', 'mutated-in-place')
+    assert.deepEqual(res.ownerLapsed, [], 'a placeable edit must not lapse')
+  })
+})
+
+test('H:owner-edit-reapply-mutates-the-package: the edit reaches the document, not just the row', async () => {
+  const pkg = { SkillsBullets1: 'Vendor selection\nStakeholder alignment' }
+  await applyCorrectionPass(
+    fakeClient([{
+      merge_field: 'SkillsBullets1', phrase: 'Vendor selection', replacement: 'Supplier negotiation',
+      char_start: 0, char_end: 16, before_sha256: 'a'.repeat(64), applied_seq: 1,
+      reason: 'you changed this yourself', source: 'owner_edit',
+    }]),
+    { artifactId: 'art-1', pkg, postingText: 'vendor relationships and the roadmap', profileText: 'x' },
+  )
+  // The package is mutated IN PLACE - that is how the caller receives it, so that is what to assert.
+  assert.equal(pkg.SkillsBullets1, 'Supplier negotiation\nStakeholder alignment',
+    'the owner edit must be re-applied to the regenerated package')
+})
+
+test('H:owner-edit-lapse-is-REPORTED-by-the-pass: silence here is the failure', async () => {
+  // The lapse must travel OUT of the pass. reapplyOwnerEdits returning it is not enough - the pass
+  // has to hand it to the caller, or an edit disappears with nobody able to say so.
+  const pkg = { SkillsBullets1: 'Entirely different prose after a rebuild.' }
+  const res = await applyCorrectionPass(
+    fakeClient([{
+      merge_field: 'SkillsBullets1', phrase: 'Vendor selection', replacement: 'Supplier negotiation',
+      char_start: 0, char_end: 16, before_sha256: 'a'.repeat(64), applied_seq: 1,
+      reason: 'you changed this yourself', source: 'owner_edit',
+    }]),
+    { artifactId: 'art-1', pkg, postingText: 'vendor relationships and the roadmap', profileText: 'x' },
+  )
+  assert.equal(pkg.SkillsBullets1, 'Entirely different prose after a rebuild.', 'nothing may be spliced')
+  assert.equal((res.ownerLapsed || []).length, 1, 'the lapse must reach the caller')
+  assert.match(res.ownerLapsed[0].reason, /rewritten/)
+})
+
+test('H:owner-lapse-reaches-the-owner: a reported lapse with no consumer is still a silence', async () => {
+  // ownerLapsed was PRODUCED and READ NOWHERE - appPackets assigned the pass result and never
+  // looked at it. So a rebuild could discard the owner's wording while the change log went on
+  // asserting it was in place. The module's own doc already said "the caller must surface these",
+  // which is exactly the kind of instruction that does not execute.
+  //
+  // A source guard, not a behavioural one, and worth saying why: driving the real build needs
+  // OpenAI, Google and Postgres. What can be asserted here is that the ONLY consumer exists and
+  // reaches the owner-visible channel - `built.warnings`, which summariseBuild turns into the
+  // packet's note.
+  const src = readFileSync(new URL('../src/functions/tests/appPackets.ts', import.meta.url), 'utf8')
+  const code = src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '')
+  assert.match(code, /for \(const l of corrections\.ownerLapsed \|\| \[\]\)/,
+    'the build must iterate the lapses the correction pass reports')
+  assert.match(code, /built\.warnings\.push\(`your edit to \$\{l\.row\.merge_field\} could not be kept/,
+    'and push each one into the owner-visible warnings channel')
+})

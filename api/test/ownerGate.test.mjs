@@ -85,4 +85,73 @@ test('H:new-driver-needs-owner-facing-copy: a raw enum value must never reach th
     assert.ok(/s\.driver === 'owner'/.test(src), `${f} renders a driver but does not handle 'owner'`)
     assert.ok(/you changed this yourself/.test(src), `${f} must say who acted, in the owner's words`)
   }
+  // THE THIRD SITE, missed by the first version of this guard. It interpolates the raw enum into a
+  // list item's status, so 'owner' shipped as the bare word while the two sites above read fine.
+  // Found by an independent verifier. The lesson is in the guard's own title: "a raw enum value
+  // must never reach the screen" is a claim about EVERY screen, and a loop over two of three places
+  // asserts something narrower than what it says.
+  const derive = read('../../app/src/assetBlocks.js')
+  const interpolations = [...derive.matchAll(/\$\{swap\.driver\}/g)]
+  assert.ok(interpolations.length > 0, 'the status line must still exist')
+  assert.match(derive, /swap\.driver === 'owner' \? `\$\{swap\.action\} · you changed this`/,
+    'assetBlocks.js interpolates the raw driver and must special-case owner before it')
+})
+
+// ── THE GUARD THAT WAS MISSING, AND WHY DECISION B SHIPPED INERT ────────────────────────────────
+
+import { buildSwaps } from '../dist/functions/tests/swaps.js'
+
+test('H:owner-driver-is-actually-produced: the exemption must have something to exempt', () => {
+  // FOUND BY AN INDEPENDENT VERIFIER, NOT BY THE GUARDS ABOVE, and that is the lesson.
+  // H:owner-edit-never-fails-the-gate passed from the day it was written - on a hand-built
+  // {driver:'owner'} fixture the system NEVER PRODUCED. swaps.ts emitted only 'rule', 'posting' and
+  // 'unattributed'; nothing anywhere wrote 'owner'. So the exemption in changes_cited was
+  // unreachable, and the failure it claims to prevent - the gate failing a packet and naming the
+  // owner's own words - was still live in production while its guard sat green.
+  //
+  // This test runs the REAL buildSwaps. A guard that only ever sees fixtures it built itself proves
+  // that the code agrees with the fixture, not that the system produces the fixture.
+  const pkg = { SkillsBullets1: 'Supplier negotiation\nStakeholder alignment' }
+  // Newline-separated STRINGS: splitItems() reads these, and an array joins into one item, which
+  // is how the first version of this test produced a phantom extra row and failed for the wrong
+  // reason. The fixture has to be the shape the pipeline actually receives or the test proves
+  // nothing about it.
+  const call1 = { skills1: 'Vendor selection\nStakeholder alignment' }
+  const call3 = { skills1: 'Supplier negotiation\nStakeholder alignment' }
+
+  // WITHOUT the owner's label: exactly the live failure. The rebuild cannot explain the change.
+  const blind = buildSwaps({ call1, call3, pkg, requirements: [] })
+  const blindChanged = blind.swaps.filter((s) => s.action === 'swapped' || s.action === 'added')
+  assert.ok(blindChanged.length > 0, 'the fixture must produce a change to reason about')
+  assert.ok(blindChanged.every((s) => s.driver !== 'owner'),
+    'nothing may claim owner-authorship without being told')
+
+  // WITH it: the row is the owner's, and changes_cited stops accusing them.
+  const seen = buildSwaps({ call1, call3, pkg, requirements: [], ownerLabels: ['Supplier negotiation'] })
+  const mine = seen.swaps.find((s) => s.to_label === 'Supplier negotiation')
+  assert.ok(mine, 'the owner-edited label must appear as a row')
+  assert.equal(mine.driver, 'owner', 'the real pipeline must emit the driver the gate exempts')
+
+  const before = find(runChecks({ type: 'resume', pkg, swaps: blind.swaps }), 'changes_cited')
+  const after = find(runChecks({ type: 'resume', pkg, swaps: seen.swaps }), 'changes_cited')
+  assert.equal(before.state, 'fail', 'the un-flagged case must still fail - that IS the live bug')
+  assert.ok(JSON.stringify(before.offenders).includes('Supplier negotiation'),
+    'and it must be the owner\'s own words being named')
+  assert.notEqual(after.state, 'fail', 'flagged as the owner\'s, the gate must stop failing the packet')
+  assert.ok(!JSON.stringify(after.offenders || []).includes('Supplier negotiation'))
+})
+
+test('H:owner-label-match-is-exact: a paraphrase must not inherit the exemption', () => {
+  // The model's rewording of the owner's phrase is still the MODEL'S change. A fuzzy membership
+  // test here would hand the model the owner's exemption from the gate, which is the quieter half
+  // of decision B wearing a different hat.
+  const pkg = { SkillsBullets1: 'Supplier negotiations\nStakeholder alignment' }
+  const built = buildSwaps({
+    call1: { skills1: 'Vendor selection\nStakeholder alignment' },
+    call3: { skills1: 'Supplier negotiations\nStakeholder alignment' },
+    pkg, requirements: [], ownerLabels: ['Supplier negotiation'],   // singular vs plural
+  })
+  const near = built.swaps.find((s) => s.to_label === 'Supplier negotiations')
+  assert.ok(near, 'the near-miss row must exist')
+  assert.notEqual(near.driver, 'owner', 'a near miss is not the owner\'s wording')
 })
