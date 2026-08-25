@@ -188,6 +188,13 @@ export const api = {
   setArtifactStatusDetailed: (artifactId, status) => postDetailed(`/app/artifact/${artifactId}/status`, { status }),
   artifactInsertions: (artifactId) => get(`/app/artifact/${artifactId}/insertions?owner=${encodeURIComponent(_owner)}`),
   packetSwaps: (packetId) => get(`/app/packet/${packetId}/swaps?owner=${encodeURIComponent(_owner)}`),
+  // #30. The owner rewrites a phrase themselves.
+  //
+  // postDetailed, not post, for exactly the reason revertCorrection uses it: this route REFUSES
+  // with 200 + ok:false when the phrase is absent from the field or appears more than once, and
+  // that refusal is a fact about the owner's own document that has to reach the screen in the
+  // server's own words. post() collapses it into an HTTP error and the owner is told nothing.
+  ownerEdit: (artifactId, body) => postDetailed(`/app/artifact/${artifactId}/owner-edit`, body),
   // P8.1/P8.6 - undo ONE correction. The change log itself rides on artifactChecksResult above, so
   // the log and the counters beside it are the same payload rather than two.
   //

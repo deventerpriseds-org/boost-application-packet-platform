@@ -186,7 +186,8 @@ export { getPgClient }
 
 import { app, HttpRequest, HttpResponseInit, InvocationContext } from '@azure/functions'
 import { resolveOwner, requireWrite } from './appSession'
-import { revertOne } from './correction'
+import { revertOne, locateOwnerPhrase } from './correction'
+import { createHash } from 'node:crypto'
 
 const HEADERS = { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': '*', 'Access-Control-Allow-Methods': 'GET,POST,OPTIONS' }
 
@@ -279,5 +280,92 @@ export async function correctionRevert(req: HttpRequest, _c: InvocationContext):
   } finally { try { await client?.end() } catch {} }
 }
 
+/**
+ * POST /api/app/artifact/{artifactId}/owner-edit — the owner rewrites a phrase themselves.
+ *
+ * EXTENDS `correction` rather than standing up an override store beside it. The owner chose this
+ * over `swap_decision`, and the AC pass had found the reason: `writeSwaps` runs
+ * `delete from swap_decision where packet_id=$1 and loop=$2` and re-inserts on EVERY build, so an
+ * override stored there is destroyed by the next run. Nothing deletes from `correction`.
+ *
+ * A REFUSAL IS A SUCCESSFUL OUTCOME, exactly as it is for revert: 200 with `ok:false` and the reason
+ * in the owner's own words. A 4xx would be swallowed by a generic error path and the owner told
+ * nothing. Every other failure IS a status code — the system did not work, rather than declining.
+ *
+ * THE PHRASE MUST APPEAR EXACTLY ONCE. Zero means the text moved under them since the screen
+ * rendered; two or more means we cannot tell which they meant and editing the wrong one would
+ * silently rewrite a sentence they never looked at. Both refuse. No nearest match, no similarity —
+ * splicing into the owner's document is accusation-grade and this repo reserves fuzzy matching for
+ * ranking.
+ *
+ * `before_sha256` is the hash of the text AS IT IS NOW, which is what makes the edit undoable by the
+ * existing revert route with no special case: an owner edit is a correction like any other, and the
+ * one thing that distinguishes it is `source`.
+ */
+export async function artifactOwnerEdit(req: HttpRequest, _c: InvocationContext): Promise<HttpResponseInit> {
+  if (req.method === 'OPTIONS') return { status: 204, headers: HEADERS }
+  const guard = requireWrite(req); if (guard) return guard
+  const artifactId = req.params.artifactId
+  let client
+  try {
+    const body: any = await req.json().catch(() => ({}))
+    const mergeField = String(body?.merge_field || '').trim()
+    const phrase = String(body?.phrase ?? '')
+    const replacement = String(body?.replacement ?? '')
+    if (!mergeField) return { status: 400, headers: HEADERS, jsonBody: { error: 'merge_field is required' } }
+    if (!phrase) return { status: 400, headers: HEADERS, jsonBody: { error: 'phrase is required' } }
+    // An empty replacement is a DELETION, which is a legitimate edit; the database's own
+    // correction_phrase_nonempty guards the other side. Only a no-op is refused.
+    if (replacement === phrase) {
+      return { status: 200, headers: HEADERS, jsonBody: { ok: false, reason: 'that is the same wording it already has' } }
+    }
+
+    client = await getPgClient()
+    await ensureCorrectionTable(client)
+    const art = (await client.query(
+      `select a.id, a.packet_id, p.pkg_json from artifact a join packet p on p.id = a.packet_id
+        where a.id = $1`, [artifactId])).rows[0]
+    if (!art) return { status: 404, headers: HEADERS, jsonBody: { error: 'no such artifact' } }
+    if (!art.pkg_json) return { status: 409, headers: HEADERS, jsonBody: { error: 'this artifact has no stored package to edit' } }
+    if (!(mergeField in art.pkg_json)) {
+      return { status: 200, headers: HEADERS, jsonBody: { ok: false, reason: `this asset has no ${mergeField} block to edit` } }
+    }
+
+    const current = String(art.pkg_json[mergeField] ?? '')
+    // ONE implementation of "exactly one occurrence, or refuse", shared with reapplyOwnerEdits.
+    // Two copies would eventually accept an edit here that lapses on the very next rebuild for a
+    // different reason, which reads to the owner as the product losing their work at random.
+    const found = locateOwnerPhrase(current, phrase)
+    if (found.at === null) {
+      return { status: 200, headers: HEADERS, jsonBody: { ok: false, reason: found.reason } }
+    }
+    const first = found.at
+
+    const next = current.slice(0, first) + replacement + current.slice(first + phrase.length)
+    const seq = Number((await client.query(
+      `select coalesce(max(applied_seq), 0) + 1 as n from correction where artifact_id = $1 and merge_field = $2`,
+      [artifactId, mergeField])).rows[0]?.n || 1)
+
+    const pkg = { ...art.pkg_json, [mergeField]: next }
+    await client.query('begin')
+    try {
+      await client.query(`update packet set pkg_json = $1, updated_at = now() where id = $2`,
+        [JSON.stringify(pkg), art.packet_id])
+      await client.query(
+        `insert into correction (artifact_id, merge_field, phrase, replacement, char_start, char_end,
+           before_sha256, applied_seq, reason, source)
+         values ($1,$2,$3,$4,$5,$6,$7,$8,$9,'owner_edit')`,
+        [artifactId, mergeField, phrase, replacement, first, first + phrase.length,
+         createHash('sha256').update(current).digest('hex'), seq, 'you changed this yourself'])
+      await client.query('commit')
+    } catch (e) { await client.query('rollback'); throw e }
+
+    return { status: 200, headers: HEADERS, jsonBody: { ok: true, merge_field: mergeField, text: next, applied_seq: seq } }
+  } catch (e: any) {
+    return { status: 500, headers: HEADERS, jsonBody: { error: String(e?.message || e) } }
+  } finally { try { await client?.end() } catch {} }
+}
+
 app.http('artifactCorrectionsGet', { methods: ['GET', 'OPTIONS'], authLevel: 'anonymous', route: 'app/artifact/{artifactId}/corrections', handler: artifactCorrectionsGet })
+app.http('artifactOwnerEdit', { methods: ['POST', 'OPTIONS'], authLevel: 'anonymous', route: 'app/artifact/{artifactId}/owner-edit', handler: artifactOwnerEdit })
 app.http('correctionRevert', { methods: ['POST', 'OPTIONS'], authLevel: 'anonymous', route: 'app/correction/{correctionId}/revert', handler: correctionRevert })

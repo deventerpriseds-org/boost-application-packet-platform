@@ -135,6 +135,32 @@ export function applyCorrections(original: string, rows: Correction[]): string {
  * match: this repo reserves fuzzy matching for ranking, and splicing text into the owner's document
  * is as accusation-grade as it gets.
  */
+/**
+ * Where an owner's phrase sits in a field, or WHY it cannot be placed.
+ *
+ * THE ONE IMPLEMENTATION of "exactly one occurrence, or refuse". Both callers need it and they must
+ * never drift: the write route decides whether to accept the edit at all, and `reapplyOwnerEdits`
+ * decides whether it survives a rebuild. Two copies of this rule would eventually accept an edit at
+ * write time that lapses on the very next build for a different reason, which reads as the product
+ * losing the owner's work at random.
+ *
+ * Exact and case-sensitive. A splice must reproduce what the owner actually saw — markRuns ignores
+ * case because a generator re-cases at a sentence start, and that reasoning does not carry here.
+ */
+export function locateOwnerPhrase(text: string, phrase: string): { at: number } | { at: null; reason: string } {
+  const hay = String(text == null ? '' : text)
+  const needle = String(phrase == null ? '' : phrase)
+  if (!needle) return { at: null, reason: 'the edit records no phrase to find' }
+  const first = hay.indexOf(needle)
+  if (first < 0) {
+    return { at: null, reason: 'this field was rewritten and no longer contains the words you changed' }
+  }
+  if (hay.indexOf(needle, first + 1) >= 0) {
+    return { at: null, reason: 'those words now appear more than once in this field, so it is not clear which one you meant' }
+  }
+  return { at: first }
+}
+
 export function reapplyOwnerEdits(text: string, rows: Correction[]): {
   text: string
   applied: Correction[]
@@ -146,16 +172,9 @@ export function reapplyOwnerEdits(text: string, rows: Correction[]): {
   // Ascending applied_seq so a deterministic order is replayed, not whatever order the rows arrived.
   for (const c of [...rows].sort((a, b) => a.applied_seq - b.applied_seq)) {
     const phrase = String(c.phrase == null ? '' : c.phrase)
-    if (!phrase) { lapsed.push({ row: c, reason: 'the edit records no phrase to find' }); continue }
-    const first = out.indexOf(phrase)
-    if (first < 0) {
-      lapsed.push({ row: c, reason: 'this field was rewritten and no longer contains the words you changed' })
-      continue
-    }
-    if (out.indexOf(phrase, first + 1) >= 0) {
-      lapsed.push({ row: c, reason: 'those words now appear more than once in this field, so it is not clear which one you meant' })
-      continue
-    }
+    const found = locateOwnerPhrase(out, phrase)
+    if (found.at === null) { lapsed.push({ row: c, reason: found.reason }); continue }
+    const first = found.at
     out = out.slice(0, first) + String(c.replacement) + out.slice(first + phrase.length)
     applied.push(c)
   }

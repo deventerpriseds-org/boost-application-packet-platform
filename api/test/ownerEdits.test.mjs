@@ -72,3 +72,62 @@ test('H:owner-edit-replay-is-deterministic: rows replay in applied_seq order', (
   assert.equal(a.text, 'A then B')
   assert.equal(a.text, b.text, 'row arrival order must not change the document')
 })
+
+// ── the write route ─────────────────────────────────────────────────────────────────────────────
+
+import { locateOwnerPhrase } from '../dist/functions/tests/correction.js'
+import { readFileSync } from 'node:fs'
+const routeSrc = () => readFileSync(new URL('../src/functions/tests/appCorrections.ts', import.meta.url), 'utf8')
+
+test('H:owner-phrase-located-in-ONE-place: the write route and the rebuild share the rule', () => {
+  // EXTEND, NOT DUPLICATE. The route decides whether to accept an edit; reapplyOwnerEdits decides
+  // whether it survives a rebuild. Two copies of "exactly once or refuse" would eventually accept
+  // an edit at write time that lapses on the very next build for a DIFFERENT reason - which reads
+  // to the owner as the product losing their work at random.
+  assert.deepEqual(locateOwnerPhrase('Vendor selection here', 'Vendor selection'), { at: 0 })
+  assert.equal(locateOwnerPhrase('nothing like it', 'Vendor selection').at, null)
+  assert.equal(locateOwnerPhrase('a and a', 'a').at, null)
+  assert.equal(locateOwnerPhrase('anything', '').at, null)
+
+  const src = routeSrc()
+  const route = src.slice(src.indexOf('export async function artifactOwnerEdit'))
+    .replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '')
+  assert.match(route, /locateOwnerPhrase\(current, phrase\)/, 'the route must use the shared rule')
+  assert.ok(!/current\.indexOf\(phrase/.test(route),
+    'the route must not re-implement the phrase search it just delegated')
+})
+
+test('H:owner-edit-route-is-session-authenticated: an edit is a mutation, not a read', () => {
+  // resolveOwner accepts an unverified ?owner= for READS. A write must not: this route splices text
+  // into a document and inserts a row that says the OWNER did it. requireWrite is the same gate
+  // every other mutation in this file uses.
+  const src = routeSrc()
+  const route = src.slice(src.indexOf('export async function artifactOwnerEdit'))
+  assert.match(route.slice(0, 400), /const guard = requireWrite\(req\); if \(guard\) return guard/,
+    'requireWrite must run before anything else in the handler')
+  assert.match(src, /app\.http\('artifactOwnerEdit'/, 'the route must be registered or it does not exist')
+})
+
+test('H:owner-edit-refusal-is-200-not-4xx: a decline is a fact the owner must be shown', () => {
+  // Same contract revertOne already established. A refusal here is the system WORKING and declining
+  // - the phrase moved, or it is ambiguous - and the reason is about the owner's own document. A
+  // 4xx would be swallowed by a generic error path and they would be told nothing at all.
+  const src = routeSrc()
+  const route = src.slice(src.indexOf('export async function artifactOwnerEdit'))
+  const refusals = [...route.matchAll(/jsonBody: \{ ok: false, reason:/g)]
+  assert.ok(refusals.length >= 3, `expected the refusal shape at least 3 times, found ${refusals.length}`)
+  assert.ok(!/status: 4\d\d, headers: HEADERS, jsonBody: \{ ok: false/.test(route),
+    'a refusal must never be returned as a 4xx')
+})
+
+test('H:api-object-has-no-duplicate-keys: a shadowed helper is a silent no-op', () => {
+  // An independent AC pass found artifactInsertions and packetSwaps each defined TWICE in this
+  // object literal. Identical, so no live defect - but the LATER definition silently wins, and
+  // editing the earlier one changes nothing while reading like a change. They are gone now; this
+  // keeps them gone, and covers the next one.
+  const src = readFileSync(new URL('../../app/src/api.js', import.meta.url), 'utf8')
+  const keys = [...src.matchAll(/^ {2}([A-Za-z0-9_]+):/gm)].map((m) => m[1])
+  const dupes = [...new Set(keys.filter((k, i) => keys.indexOf(k) !== i))]
+  assert.deepEqual(dupes, [], `duplicate keys in the api object: ${dupes.join(', ')}`)
+  assert.ok(keys.includes('ownerEdit'), 'the owner-edit helper must exist')
+})
