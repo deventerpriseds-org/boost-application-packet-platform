@@ -291,6 +291,79 @@ ok('a row whose phrase is NOT in the draft lights nothing and throws nothing',
   inert.n === 0 && !out.some((l) => l.startsWith('PAGEERROR')), JSON.stringify(inert))
 await leaveRow('ResumeSummary', 'Note: we ship weekly')
 
+// ---------- Row 11 Phase A: PROPOSED keyword chips ----------
+const chipInfo = await page.evaluate(() => {
+  const byField = {}
+  // SCOPED TO THE FIELD CARD, not to [data-qc-field]. The "List Tweaks" link inside the card
+  // carries the same attribute (AssetBlocks.jsx:625), so a bare attribute selector returns the card
+  // AND its own descendant - and the descendant, having no chip group, overwrote the card's entry
+  // and reported every field as chipless while the chips were plainly there.
+  for (const card of document.querySelectorAll('[data-qc="blocks-field"]')) {
+    const field = card.getAttribute('data-qc-field')
+    const group = card.querySelector('[data-qc="blocks-keyword-chips"]')
+    byField[field] = {
+      hasGroup: !!group,
+      chips: group ? [...group.querySelectorAll('[data-qc="blocks-keyword-chip"]')].map((c) => ({
+        kw: c.getAttribute('data-qc-keyword'), text: c.innerText.trim(),
+        cls: c.className, style: c.getAttribute('style') || '',
+      })) : [],
+      groupText: group ? group.innerText : '',
+    }
+  }
+  return byField
+})
+
+const withKw = Object.entries(chipInfo).filter(([, v]) => v.hasGroup).map(([k]) => k)
+ok('the chip group renders on the fields whose requirement carries a keyword',
+  withKw.includes('ResumeSummary') && withKw.includes('SkillsBullets1'), JSON.stringify(withKw))
+ok('a field whose requirement has NO keyword renders no chip group at all',
+  chipInfo.SkillsBullets2 && chipInfo.SkillsBullets2.hasGroup === false,
+  JSON.stringify(Object.fromEntries(Object.entries(chipInfo).map(([k, v]) => [k, v.hasGroup]))))
+const allGroupText = Object.values(chipInfo).map((v) => v.groupText).join(' ')
+ok('and the words "0 keywords" appear nowhere', !/0 keywords/i.test(allGroupText))
+ok('no chip group prints a count, a ratio or a percentage',
+  !/\b\d+\s*(of|\/)\s*\d+/.test(allGroupText) && !/%/.test(allGroupText),
+  JSON.stringify(allGroupText.slice(0, 140)))
+
+const rsChips = (chipInfo.ResumeSummary || {}).chips || []
+ok('one chip per proposed keyword, carrying the keyword itself',
+  rsChips.length === 1 && rsChips[0].kw === 'roadmap ownership', JSON.stringify(rsChips.map((c) => c.kw)))
+ok('the literal word "proposed" is inside EVERY chip, not just a heading',
+  rsChips.length > 0 && rsChips.every((c) => /\bproposed\b/.test(c.text)),
+  JSON.stringify(rsChips.map((c) => c.text)))
+ok('no chip carries the highlight classes or a highlight swatch',
+  rsChips.every((c) => !/qc-kw|qc-echo/.test(c.cls) && !/#fff03a|#fbf2da|#d9c34a/i.test(c.style)),
+  JSON.stringify(rsChips.map((c) => c.cls)))
+
+await page.evaluate(() => {
+  const c = document.querySelector('[data-qc="blocks-keyword-chip"][data-qc-keyword="roadmap ownership"]')
+  if (c) c.click()
+})
+await page.waitForTimeout(150)
+const panel = await page.evaluate(() => {
+  const p = document.querySelector('[data-qc="blocks-keyword-detail"]')
+  return p ? p.innerText : null
+})
+ok('clicking a chip opens the detail panel', !!panel, JSON.stringify(panel && panel.slice(0, 70)))
+ok('the panel quotes the postings own line',
+  !!panel && /own the product roadmap end to end/.test(panel), JSON.stringify(panel))
+ok('the panel repeats "proposed" and shows no match grade or approx marker',
+  !!panel && /\bproposed\b/.test(panel) && !/≈/.test(panel)
+    && !/Exact term|Reworded|Loose|took the place of/i.test(panel), JSON.stringify(panel))
+
+await page.evaluate(() => {
+  const c = document.querySelector('[data-qc="blocks-keyword-chip"][data-qc-keyword="coaching"]')
+  if (c) c.click()
+})
+await page.waitForTimeout(150)
+const unloc = await page.evaluate(() => {
+  const p = [...document.querySelectorAll('[data-qc="blocks-keyword-detail"]')]
+    .find((x) => x.getAttribute('data-qc-keyword') === 'coaching')
+  return p ? p.innerText : null
+})
+ok('a keyword whose posting line is UNLOCATABLE says so instead of quoting the paraphrase',
+  !!unloc && /could not be located/i.test(unloc) && !/coach PMs/.test(unloc), JSON.stringify(unloc))
+
 // ---------- claim 3: an UNMEASURED change log prints nothing ----------
 mode = 'unmeasured'
 await page.reload()

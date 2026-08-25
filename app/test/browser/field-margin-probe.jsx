@@ -13,9 +13,16 @@ const provenance = {
   requirements: {
     total: 3,
     requirements: [
-      { id: 'req-1', seq: 1, kind: 'must_have', item_text: 'roadmap ownership', competency: 'product' },
-      { id: 'req-2', seq: 2, kind: 'nice_to_have', item_text: 'vendor selection', competency: 'ops' },
-      { id: 'req-3', seq: 3, kind: 'responsibility', item_text: 'coach PMs', competency: 'people' },
+      // model_keyword is jd_table's ATS Keyword. THREE deliberately different shapes:
+      // req-1 has a keyword AND a locatable posting line; req-3 has a keyword but verbatim is null
+      // (unlocatable); req-2 has NO keyword, so its field must render no chip group at all rather
+      // than an empty one or "0 keywords".
+      { id: 'req-1', seq: 1, kind: 'must_have', item_text: 'roadmap ownership', competency: 'product',
+        model_keyword: 'roadmap ownership', verbatim: 'own the product roadmap end to end' },
+      { id: 'req-2', seq: 2, kind: 'nice_to_have', item_text: 'vendor selection', competency: 'ops',
+        model_keyword: null, verbatim: null },
+      { id: 'req-3', seq: 3, kind: 'responsibility', item_text: 'coach PMs', competency: 'people',
+        model_keyword: 'coaching', verbatim: null },
     ],
   },
   swaps: { swaps: [] },
