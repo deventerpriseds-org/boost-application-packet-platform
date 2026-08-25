@@ -3490,3 +3490,43 @@ taxonomy.** The comment was right; it had simply never been checked, and a desig
 already been built on top of it in the other direction.
 **Guard:** a parenthetical "(measured: …)" in a code comment is a CLAIM, not evidence. Before any
 design rests on one, find the run id. If there is no run id, it was never measured.
+
+## Hardening — 2026-08-25 (cont): I shipped a blank screen, and the suite could not see it
+
+**The bug.** Threading a hover prop, `active={active}` landed on a `<Marked>` call site at
+`AssetBlocks.jsx:354`, which is inside **`ListBody`** — not `BlockBody`. `ListBody` never received
+the prop. `active is not defined` threw on render and the ENTIRE asset step came back blank for
+every list-shaped field (SkillsBullets, ExpertiseBullets, RelevantBullets — most of the resume).
+It reached `main` and was live for ~20 minutes. Fixed in `fb885cf`.
+
+**Why nothing caught it: `npm test` was GREEN AT 275/275 the whole time.** Every guard in that suite
+checks a pure function or greps source. Not one renders a component. **A suite that cannot fail on a
+blank screen is not covering the screen.**
+
+**Guard 1 (structural).** `npm run test:margin` is now REQUIRED in `.github/workflows/test.yml`,
+not `continue-on-error`. That probe caught this on its first run in weeks — and its own header had
+said it was "not wired into CI, run it by hand when touching the asset-blocks margin", which is
+exactly the instruction nobody executes. An un-run probe is a guard that protects nothing.
+
+**Guard 2 (`H:prop-threaded-not-assumed`).** Any top-level component in `AssetBlocks.jsx` whose body
+READS `active` must declare it as a prop. Asserts the invariant, not the incident: the next prop
+threaded through a chain of renderers is where this class lives — a multi-site edit landing on a
+call site in a sibling component. It strips JSX attribute names first, because `active={activeWording}`
+passes a prop and reads a local; flagging that made the first version fire on the component that owns
+the state. Mutation-proven by deleting `active` from `ListBody`'s signature.
+
+**THE WORSE MISTAKE — a reasoning error, and it is the one to remember.** I ran the failing probe,
+ran `git stash`, saw the SAME failure, and told the owner the breakage was PRE-EXISTING ON MAIN.
+It was mine. `git stash` reverted only my uncommitted PROBE edits; the component bug was already
+COMMITTED. The experiment could not have distinguished the two cases and I reported its result as if
+it had.
+**Guard: a stash proves nothing about committed code.** To test whether a failure predates your work,
+check out the prior commit (`git stash` + `git checkout <sha>^ -- <path>`, or run the probe against a
+worktree at the parent commit) — never assume `stash` reaches work you have already committed.
+
+**A third guard was INERT when first written, caught by its own mutation proof.**
+`H:highlight-active-class-single-source` matched the class only as a fully-quoted string, so
+substituting the name INSIDE an existing template literal walked straight past it and the suite
+stayed green while the class was hard-coded. Widened to reject the string anywhere in the code, with
+comments stripped. This is the third inert-guard incident in this repo: **the mutation proof is the
+only thing that distinguishes a guard from a decoration.**

@@ -3443,3 +3443,59 @@ Tavily. Two runner transports work; nothing in-session does.
 **Open — needs the owner.** Option B is refuted. The anchored authority the owner asked for
 (*"not just pulling words form text used often but not highlighted by the system"*) has to be the
 extracted `requirement` row, with ESCO/O\*NET recorded in `sources` as provenance only.
+
+---
+
+## ACT — resume UI: hover linkage shipped, a crash shipped and fixed, process changed (2026-08-25)
+
+**Owner's two corrections, both of which held:**
+1. *"beign blocked on the term library makes no sense. the ai generates keywords from the promtps so
+   you will have several it suggests term library or not... no matter what the notes ssay its a self
+   block unneccasarily."* — CORRECT. `requirement.model_keyword` is jd_table's ATS Keyword, written
+   by `requirements.ts:408`, selected by `appRequirements.ts:413`, reduced by `postingAnalysis.js:258`
+   and ALREADY RENDERED on the JD step (`PostingAnalysis.jsx:401`). The schema rule `never scoreable`
+   governs SCORING, not DISPLAY. **Row 11 was never blocked.** The misleading comment is corrected at
+   source in `89eb970`.
+2. *"your saying 10 was declined but didnt we ask for it to use the list tweaks approach?"* — CORRECT.
+   ROW 10 is **BUILT the way the owner asked**: `AssetBlocks.jsx:464` `seedAskReword` seeds the
+   field's OWN List Tweaks box with `Reword "<phrase>" ...`, surfaced as "Tweak this" per phrase
+   (`:731`), proven live by the browser probe. Only the prototype's local-state-only toggle was
+   declined. It should never have been on a "what is left" list.
+
+**SHIPPED — hover a kept-wording margin row, light its phrase in the draft (`f50a422`).** SPEC 4.5.
+The link is IDENTITY: `markRuns` returns the caller's own array element per marked run, so `Marked`
+compares `r.phrase === active`. Re-finding the phrase would be a second matcher, and a highlight is
+an accusation. **Verified from the DOM, 29/29** (`npm run test:margin`), including: both occurrences
+light (`n=2, ["Vendor selection","vendor selection"]` — also proving case-insensitivity), leaving
+releases, and a row naming a phrase the draft no longer contains lights nothing and throws nothing.
+Scoped to `posting_wording_kept` (the one margin block whose phrases are actually marked in the body);
+"and vice versa" NOT built — it has no reference implementation anywhere, not even in the prototype.
+
+**REGRESSION I CAUSED AND FIXED (`fb885cf`).** The same commit crashed the asset step blank for every
+list field — `active={active}` landed inside `ListBody`, which never took the prop. Live ~20 min.
+`npm test` stayed green at 275/275 because nothing in it renders a component. Full account and the
+three guards under `## Hardening` in memory.md, including the reasoning error worth more than the
+bug: I called it pre-existing on main after a `git stash` that could not reach my own committed change.
+
+**PROCESS CHANGED AT THE OWNER'S INSTRUCTION.** *"we have wasted hours on things you gave the
+impression of us making progress on only needing to be parked several hours if not days later. this
+stinks of not doing any feasibility testing in combination with AC before getting started with
+implementation. I would like that to be an update to the central eds skills repo as well as the way
+we operate here."* Done in both places:
+- `eds-claude-skills` `a5de2aa` — `define-acceptance-criteria` gains THE FEASIBILITY GATE (a
+  producer/consumer/proof/verdict table published BEFORE any AC, with `EXISTS-BUT-CONSTRAINED` and
+  `ALREADY BUILT` as first-class verdicts), and `setup.sh` STOP_PROMPT gains requirement **(h)**,
+  separate from (g): **(g) asks what the change AFFECTS, (h) asks whether what the work PRESUMES
+  exists.** (h) also blocks the inverse failure — asserting something is blocked/absent without a
+  producers-AND-consumers sweep. `CURRENT_VERSION` 10 -> 11, verified live on this container: all
+  five `_eds` hooks at 11 and the installed prompt contains `(h) FEASIBILITY`.
+- this repo's `CLAUDE.md` `89eb970` — the same rule as local operating discipline.
+- `.claude/accuracy-log.md` CREATED (it did not exist) with the session's wrong-first-answers.
+
+**OPEN — owner has decided, ACs in flight.** Keyword chips label = **"proposed"**; #30 stores the
+override on **`correction`** (extend), not `swap_decision`. Feasibility established before the ACs:
+`correction` has the right shape and **nothing deletes from it** (`grep -rn "delete from correction"
+api/src` -> zero), unlike `swap_decision` which `writeSwaps` deletes and re-inserts every build. Two
+constraints found: `source` carries `check (source in ('profile_figure','generalized'))` so a third
+value needs the CHECK altered, and `correction_span_matches_phrase` demands real offsets.
+Independent AC passes writing to `docs/qc-evidence/AC-keyword-chips.md` and `AC-swap-override.md`.
