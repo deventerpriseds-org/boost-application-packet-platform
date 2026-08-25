@@ -81,19 +81,29 @@ export const HIGHLIGHT_LITERALS = [
 export function markRuns(text, phrases, mark = 'postingEcho') {
   const s = String(text == null ? '' : text)
   if (!s) return []
+  // A phrase entry may be a plain string (marked with the default `mark`) or `{ phrase, mark }`.
+  // TWO TREATMENTS, ONE MATCHER, and that is the point: the field's draft carries both posting
+  // echoes and proposed keywords, and running two passes over the same text would let them disagree
+  // about overlaps — the longest-first, non-overlapping rule below is global or it is nothing. A
+  // second matcher deciding what a highlight points at is exactly what this file exists to prevent.
+  //
   // `raw` is carried beside the trimmed needle so a marked run can name WHICH phrase produced it,
   // and name it as the caller's own array element (===-comparable), not as a trimmed copy. That is
   // what lets a hover link the margin row to its span without re-searching the text: re-finding the
   // phrase downstream would be a second matcher, and a highlight is an accusation, so this file is
   // the only place allowed to decide what matched.
   const list = (Array.isArray(phrases) ? phrases : [])
-    .map((raw) => ({ raw, needle: String(raw == null ? '' : raw).trim() }))
+    .map((e) => {
+      const isObj = e && typeof e === 'object' && !Array.isArray(e)
+      const raw = isObj ? e.phrase : e
+      return { raw, mark: (isObj && e.mark) || mark, needle: String(raw == null ? '' : raw).trim() }
+    })
     .filter((x) => x.needle.length > 1)
     .sort((a, b) => b.needle.length - a.needle.length)
   if (!list.length) return [{ t: s, mark: null, phrase: null }]
 
   const lower = s.toLowerCase()
-  const taken = []                                  // [start, end, rawPhrase) already claimed
+  const taken = []                                  // [start, end, rawPhrase, mark) already claimed
   const free = (a, b) => taken.every(([x, y]) => b <= x || a >= y)
   // WHOLE-WORD, and this is the line that makes the docstring above true rather than aspirational.
   // Until 2026-08-25 this was a bare substring search while the comment claimed "EXACT, WHOLE-PHRASE
@@ -106,14 +116,14 @@ export function markRuns(text, phrases, mark = 'postingEcho') {
   // or '/', which is what keeps "safety-critical systems", "P&L" and "AI/ML" matching.
   const wordChar = (ch) => ch !== undefined && /[A-Za-z0-9]/.test(ch)
   const bounded = (a, b) => !wordChar(s[a - 1]) && !wordChar(s[b])
-  for (const { raw, needle: p } of list) {
+  for (const { raw, mark: m, needle: p } of list) {
     const needle = p.toLowerCase()
     let from = 0
     for (;;) {
       const i = lower.indexOf(needle, from)
       if (i < 0) break
       const j = i + needle.length
-      if (bounded(i, j) && free(i, j)) taken.push([i, j, raw])
+      if (bounded(i, j) && free(i, j)) taken.push([i, j, raw, m])
       from = i + 1                                  // +1, not +len: an overlapped hit may still
     }                                               // start a valid later one
   }
@@ -122,9 +132,9 @@ export function markRuns(text, phrases, mark = 'postingEcho') {
   taken.sort((a, b) => a[0] - b[0])
   const out = []
   let at = 0
-  for (const [a, b, raw] of taken) {
+  for (const [a, b, raw, m] of taken) {
     if (a > at) out.push({ t: s.slice(at, a), mark: null, phrase: null })
-    out.push({ t: s.slice(a, b), mark, phrase: raw })
+    out.push({ t: s.slice(a, b), mark: m, phrase: raw })
     at = b
   }
   if (at < s.length) out.push({ t: s.slice(at), mark: null, phrase: null })
