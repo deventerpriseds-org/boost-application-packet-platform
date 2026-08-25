@@ -3611,3 +3611,51 @@ names the cause.
 **Standing change to how UI work is verified:** `npm test` cannot see a render fault; it imports
 pure modules and never mounts a tree. `ui-verify.yml` is the only thing that can. Every `.jsx`
 change gets one from now on, and `UI_VERIFY_RESULT` gets read.
+
+**INVESTIGATED (owner-directed) — "i dont like workarounds rather than solutions."**
+Two claims I had relayed rather than proven. Both settled by measurement; neither needed a
+workaround, and one of my own decisions was reversed on the owner's principle.
+
+**(1) Why only one opportunity had evidence.** My "1 of ~680" was the WRONG DENOMINATOR and
+overstated it. Evidence is written on BUILD, and only **two** opportunities have ever been built.
+The split between them is exact and is the whole answer:
+
+| | |
+|---|---|
+| `31ca007` "Stop the build from deleting its own evidence" | 2026-08-23 03:32:27 |
+| `9f9c370a` built 02:46 — 46 min BEFORE the fix | 0 rows |
+| `2cb56fb3` built 03:36 — 4 min AFTER the fix | 5 rows survived |
+
+The build resolved evidence, then `evaluateArtifact` ran per-artifact with no model transport and
+its unconditional delete removed rows only the escalation pass could recreate. `31ca007` scoped
+that delete. **The defect was real, is already fixed, and the two builds either side of the commit
+are the proof.** REPAIRED rather than documented: re-resolved `9f9c370a` (api-test 32890861295) —
+8 requirements, **7 verified**, `profileReadable: true`, 14 MasterContext blocks read; 0 → 7 stored
+rows (db-query 32891056217). It was the only affected opportunity, so the repair is complete.
+
+**CORRECTION TO THE RECORD.** I reported that the deterministic matcher had "produced zero rows,
+ever". That came from a snapshot of the one surviving opportunity, whose rows all happened to be
+model proposals — the re-resolve produced an `anchored` row. Logged narrowly as
+`D:evidence-deterministic-reach`: the rule pass reaches ~1 in 8, the model covers 6 more, and
+because `must_have_coverage` counts rule rows ONLY, the gate reads 1 of 8 while the reader sees
+7 of 8. Both numbers are right and the product contradicts itself. The lever is
+`chk_evidence_threshold` — already a per-owner setting, seeded 0.7 for parity with the old
+`COVERAGE_THRESHOLD` and never once tuned against real data. It decides a gate, so it is tier 1:
+measure false excerpts at each threshold, never lower it to make a number look better.
+
+**(2) Why option (a) leaves every stored row broken.** Verified by RUNNING the AC pass's repro
+rather than relaying its conclusion — `node docs/qc-evidence/repro-offset-frames-options.mjs`:
+`E1  ownerEditRowA(...) -> {refused: "this field cannot be rewritten right now (correction 2 is not
+where the record says it is)"}` → *the WRITE route now refuses too: true*. (a) changes only the
+write side; stored rows are in the corrected frame and `revertOne` is untouched, so they still fail
+— and a NEW owner edit on such a field is refused, turning a broken undo into a broken undo AND a
+broken edit. (b) reverts the same rows `ok:true` with no migration.
+
+**PC-7 REVERSED on the owner's principle.** The correction "frame" becomes a RECORDED COLUMN, not
+the code map I had chosen. The map was a permanent inference standing in for a fact nobody wrote
+down, re-derived on every read, correct only while `source` stays a proxy for frame — the exact
+assumption that caused this bug. A legacy row needs the same inference either way; the column does
+it once at migration instead of forever. Cost accepted: three DDL copies + a metadata-only backfill.
+
+**OPEN — next step is the owner's call.** Implement F5 as option (b) with the frame column, or
+first measure `chk_evidence_threshold` against the real profile (visible on every packet opened).

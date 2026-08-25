@@ -452,7 +452,20 @@ Key tables (PostgreSQL):
 - iOS testing: requires macOS runner or BrowserStack; categorically unavailable in Linux CCR
 
 ## Active work
-Current task: SPEC 4.1 EVIDENCE EXPANSION SHIPPED (rows 4.1-14..19) on
+Current task: TWO OWNER-DIRECTED INVESTIGATIONS CLOSED (2026-08-25), both by measurement rather
+  than by relaying a claim, after the owner said *"i dont like workarounds rather than solutions."*
+  (1) **The empty evidence spine is NOT a live defect.** Wrong denominator on my part: evidence is
+  written on BUILD and only TWO opportunities have ever been built. `31ca007` (2026-08-23 03:32:27)
+  fixed the build deleting its own evidence; `9f9c370a` was built 46 min BEFORE it (0 rows),
+  `2cb56fb3` 4 min AFTER (5 rows survived). Repaired the affected one live: 0 -> 7 rows, 7 of 8
+  requirements verified. Only opportunity affected, so the repair is complete.
+  (2) **Option (a) verified broken by running the repro**, not by trusting the AC pass: it changes
+  only the write side, so stored corrected-frame rows still fail AND a new owner edit on such a
+  field is refused. (b) reverts them ok:true with no migration.
+  **PC-7 reversed**: the correction frame becomes a RECORDED COLUMN, not a code map. The map was an
+  inference standing in for a fact nobody wrote down — the same class of assumption that caused the
+  bug. Open: implement F5 as (b) + the column, OR measure chk_evidence_threshold first (owner's call).
+Prior task: SPEC 4.1 EVIDENCE EXPANSION SHIPPED (rows 4.1-14..19) on
   `claude/render-interaction-states`. The JD step now says, beside each extracted line, whether the
   owner's profile backs it — dot, state word, excerpt behind a disclosure, named source record, and
   the resolver's own note. It is a READER: the spine has been on the wire for months with no
