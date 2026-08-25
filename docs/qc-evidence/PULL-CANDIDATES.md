@@ -122,3 +122,42 @@ merge fields (`SkillsBullets1/2`, `RelevantBullets1/2/3`) and refuse the compact
 
 **What to look for:** whether the owner expects to edit the compact resume directly. If so, the
 compact skills text needs to be persisted first — a real change, not a UI tweak.
+
+---
+
+## PC-7 — the correction "frame" will be a map in code, not a recorded column
+
+**Status:** decided, not yet shipped (it lands with the `D:owner-edit-offsets-two-frames` fix).
+**Reverses by:** adding a `frame` column and a metadata-only backfill.
+
+The F5 AC pass left this open as its Q4. Two writers put offsets into `correction` in two different
+coordinate frames, and a reader has to know which. Either the frame is a **column on the row**, or
+it is an **exhaustive map in code** keyed by `source`.
+
+**Decided: the map.** No schema change, no migration, no three-copy DDL edit, and the AC set's own
+guard (AC-6) already asserts the map is exhaustive — a new `source` value with no frame fails the
+suite rather than defaulting to one. Called myself rather than asked, because it is reversible and
+invisible to the owner either way.
+
+**What to look for:** a future writer that stores offsets in a frame the map cannot express. The
+moment the frame stops being a property of *who wrote the row*, it has to become a column.
+
+---
+
+## PC-8 — an owner edit is re-placed by PHRASE when the document is rebuilt
+
+**Status:** decided, not yet shipped (same fix as PC-7). **Reverses by:** refusing instead.
+
+The AC pass's Q5. When a rebuild moves the text, a surviving owner row is re-placed by finding its
+phrase rather than by its stored offsets. Exact, case-sensitive, and **exactly-once-or-lapse** —
+never fuzzy, never "closest match".
+
+**Why this is not a loosening.** It is the rule DECISION A already blessed for the rebuild path;
+this only extends it to the revert path. The per-row hash check stays, and it is *stricter* than
+today's: the AC pass measured 252 tampered documents (42 positions x 3 mutation classes x 2 seqs)
+with **0 wrong splices**. A phrase that appears twice, or zero times, lapses the row rather than
+guessing — the same refusal `locateOwnerPhrase` already makes everywhere else.
+
+**What to look for:** owner edits that lapse after a rebuild more often than feels right. If a
+phrase is commonly duplicated in a field, the exactly-once rule is too strict for that surface and
+the row needs an anchor beyond its own text.
