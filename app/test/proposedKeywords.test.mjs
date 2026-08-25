@@ -2,6 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { proposedKeywordsForRow, proposedKeywordDetail } from '../src/assetBlocks.js'
+import { correctionSentence } from '../src/assetGate.js'
 
 const req = (seq, model_keyword, verbatim = null, kind = 'must_have') =>
   ({ id: `r${seq}`, seq, kind, model_keyword, verbatim })
@@ -80,4 +81,27 @@ test('H:keyword-chip-says-proposed-on-every-chip: the word is not on the heading
   assert.match(chip, />proposed</, 'the literal word must render inside each chip element')
   // and it must not borrow the visual language of a VERIFIED placement
   assert.ok(!/qc-kw|qc-echo/.test(chip), 'a proposed chip must not wear the highlight classes')
+})
+
+// ── #30: an owner edit reads as the owner's, in the log they already have ────────────────────────
+
+test('H:owner-edit-sentence-says-who-acted: "Corrected:" on the owner\'s own words is a lie', () => {
+  // An owner edit and a pipeline correction share ONE component and ONE log - deliberately, because
+  // two renderings of one change is the divergence CorrectionRow exists to prevent. That makes the
+  // SENTENCE the only place who-acted can live, and it matters: "Corrected: ..." on a line the owner
+  // wrote themselves tells them the system rewrote their words.
+  const s = (source, undone = false) => correctionSentence({
+    phrase: 'Vendor selection', replacement: 'Supplier negotiation', fieldName: 'Core skills', undone, source })
+
+  assert.match(s('owner_edit'), /^You changed: "Vendor selection" to "Supplier negotiation" in Core skills\./)
+  assert.match(s('generalized'), /^Corrected: /)
+  assert.match(s('profile_figure'), /^Corrected: /)
+  assert.match(s(undefined), /^Corrected: /, 'an unknown source keeps the existing wording')
+
+  // R1: every sentence opens with its own state word. The row carries no separate label because
+  // eight of nine pill tones fail contrast in at least one theme, so the prefix IS the state.
+  for (const src of ['owner_edit', 'generalized', undefined]) {
+    assert.match(s(src), /^(You changed|Corrected): /, `missing state prefix for ${src}`)
+    assert.match(s(src, true), /^Undone: /, `an undone row must read Undone for ${src}`)
+  }
 })

@@ -561,7 +561,7 @@ export function correctionRow(row, index) {
     undone,
     undoneBy: r.reverted_by || null,
     undoneAt: r.reverted_at || null,
-    sentence: correctionSentence({ phrase, replacement, fieldName: fieldLabel(field), undone }),
+    sentence: correctionSentence({ phrase, replacement, fieldName: fieldLabel(field), undone, source: r.source }),
   }
 }
 
@@ -572,11 +572,18 @@ export function correctionRow(row, index) {
  * revert to flip the row to Undone rather than remove it: a revert that deletes the row deletes the
  * record that the change was ever made, which is the one thing a change log is for.
  */
-export function correctionSentence({ phrase, replacement, fieldName, undone }) {
+export function correctionSentence({ phrase, replacement, fieldName, undone, source }) {
   const where = fieldName ? ' in ' + fieldName : ''
-  return undone
-    ? 'Undone: "' + replacement + '" is back to "' + phrase + '"' + where + '.'
-    : 'Corrected: "' + phrase + '" rewritten as "' + replacement + '"' + where + '.'
+  if (undone) return 'Undone: "' + replacement + '" is back to "' + phrase + '"' + where + '.'
+  // WHO ACTED IS PART OF THE SENTENCE, not a badge beside it. An owner edit and a pipeline
+  // correction sit in the same log, in the same component, and 'Corrected:' on a line the OWNER
+  // wrote would tell them the system rewrote their own words. The prefix is also the state word the
+  // row relies on - R1 guards that this sentence opens with one, and the row deliberately carries
+  // no separate label because eight of nine pill tones fail contrast in at least one theme.
+  if (source === 'owner_edit') {
+    return 'You changed: "' + phrase + '" to "' + replacement + '"' + where + '.'
+  }
+  return 'Corrected: "' + phrase + '" rewritten as "' + replacement + '"' + where + '.'
 }
 
 /**
