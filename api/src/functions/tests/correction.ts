@@ -114,6 +114,55 @@ export function applyCorrections(original: string, rows: Correction[]): string {
 }
 
 /**
+ * Re-apply the OWNER'S own edits to freshly generated text.
+ *
+ * DECISION A, taken by the owner 2026-08-25: an owner override survives a rebuild. The row already
+ * survived — nothing deletes from `correction` — but the TEXT did not, because a rebuild regenerates
+ * the field and `applyCorrections` is only ever called on the pipeline's own freshly-planned rows.
+ * Without this the change log would assert an edit the document does not contain, which is worse
+ * than losing the edit outright.
+ *
+ * MATCHED BY PHRASE, NOT BY THE STORED OFFSETS, and that is the whole design. The offsets describe
+ * the text as it stood when the owner edited it; after a rebuild the field is different prose and
+ * those numbers point at arbitrary characters. `applyCorrections` is right to throw in that case —
+ * it is for replaying a pass against the text that produced it. This is a different job: find the
+ * owner's exact phrase in the NEW text and edit there.
+ *
+ * EXACT AND UNAMBIGUOUS OR NOT AT ALL. The phrase must appear EXACTLY ONCE. Zero occurrences means
+ * the rebuild wrote something else and the edit no longer has a target; two or more means we cannot
+ * tell which the owner meant, and guessing would silently rewrite a sentence they never looked at.
+ * Both cases LAPSE — reported, never applied, never silently dropped. No similarity, no nearest
+ * match: this repo reserves fuzzy matching for ranking, and splicing text into the owner's document
+ * is as accusation-grade as it gets.
+ */
+export function reapplyOwnerEdits(text: string, rows: Correction[]): {
+  text: string
+  applied: Correction[]
+  lapsed: Array<{ row: Correction; reason: string }>
+} {
+  let out = String(text == null ? '' : text)
+  const applied: Correction[] = []
+  const lapsed: Array<{ row: Correction; reason: string }> = []
+  // Ascending applied_seq so a deterministic order is replayed, not whatever order the rows arrived.
+  for (const c of [...rows].sort((a, b) => a.applied_seq - b.applied_seq)) {
+    const phrase = String(c.phrase == null ? '' : c.phrase)
+    if (!phrase) { lapsed.push({ row: c, reason: 'the edit records no phrase to find' }); continue }
+    const first = out.indexOf(phrase)
+    if (first < 0) {
+      lapsed.push({ row: c, reason: 'this field was rewritten and no longer contains the words you changed' })
+      continue
+    }
+    if (out.indexOf(phrase, first + 1) >= 0) {
+      lapsed.push({ row: c, reason: 'those words now appear more than once in this field, so it is not clear which one you meant' })
+      continue
+    }
+    out = out.slice(0, first) + String(c.replacement) + out.slice(first + phrase.length)
+    applied.push(c)
+  }
+  return { text: out, applied, lapsed }
+}
+
+/**
  * Recover the ORIGINAL text from the corrected text and the rows that produced it.
  *
  * Left to right, and — this is the part that is easy to get wrong — with NO drift compensation.

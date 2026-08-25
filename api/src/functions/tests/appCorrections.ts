@@ -20,7 +20,7 @@
 // checks, the document — then sees one corrected package and cannot disagree about it.
 import { getPgClient } from './pgClient'
 import { scanEcho } from './figureEcho'
-import { planCorrections, applyCorrections, Correction } from './correction'
+import { planCorrections, applyCorrections, reapplyOwnerEdits, Correction } from './correction'
 
 export const CORRECTION_PASS_VERSION = 1
 
@@ -31,6 +31,15 @@ const CORRECTABLE = (pkg: Record<string, any>) =>
 export interface PassResult {
   /** Rows written, in document order per field. Empty when nothing needed correcting. */
   rows: Correction[]
+  /**
+   * Owner edits that could NOT be re-applied to the regenerated text, with the reason for each.
+   *
+   * Present and empty when every stored edit was re-applied; a lapse is never silent. The caller
+   * must surface these - an edit the owner made and can no longer see is the one thing this whole
+   * path exists to prevent, and reporting zero lapses because nobody looked is the same failure in
+   * a quieter costume.
+   */
+  ownerLapsed?: Array<{ row: Correction; reason: string }>
   /**
    * True when the pass COULD NOT LOOK — no employer text to compare against. Distinct from "looked
    * and found nothing", and the distinction is the point: both produce zero corrections, and only
@@ -126,7 +135,33 @@ export async function applyCorrectionPass(
          c.before_sha256, c.applied_seq, c.reason, c.source, args.runId || null, Math.max(0, Number(args.loop ?? 0) | 0)],
       )
     }
-    return { rows: all, notApplicable: false, scanned }
+    // DECISION A (owner, 2026-08-25): an owner's own edit SURVIVES A REBUILD.
+    //
+    // The row already survived - nothing deletes from `correction` - but the TEXT did not, because
+    // everything above replays only the pipeline's freshly-planned rows against freshly generated
+    // prose. Without this the change log would tell the owner an edit is in place that the document
+    // does not contain, which is worse than losing it.
+    //
+    // Re-applied by PHRASE, not by the stored offsets: those describe the field as it stood when the
+    // owner edited it, and after a rebuild they point at arbitrary characters. Exactly one
+    // occurrence or the edit LAPSES and is reported - never guessed, never silently dropped.
+    // `reapplyOwnerEdits` owns that rule and is guarded by H:owner-edit-* in ownerEdits.test.mjs.
+    const ownerLapsed: Array<{ row: Correction; reason: string }> = []
+    const stored = (await client.query(
+      `select merge_field, phrase, replacement, char_start, char_end, before_sha256, applied_seq,
+              reason, source
+         from correction
+        where artifact_id = $1 and source = 'owner_edit' and reverted_at is null
+        order by applied_seq`, [artifactId])).rows as Correction[]
+    for (const field of new Set(stored.map((r) => r.merge_field))) {
+      if (!(field in pkg)) continue
+      const mine = stored.filter((r) => r.merge_field === field)
+      const res = reapplyOwnerEdits(String(pkg[field]), mine)
+      pkg[field] = res.text
+      ownerLapsed.push(...res.lapsed)
+    }
+
+    return { rows: all, notApplicable: false, scanned, ownerLapsed }
   } catch (e: any) {
     // Reported, not swallowed. See the doc comment: a silent catch here would leave the user reading
     // uncorrected text under a change log that says nothing happened.
