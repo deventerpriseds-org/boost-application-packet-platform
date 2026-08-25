@@ -125,7 +125,32 @@ compact skills text needs to be persisted first — a real change, not a UI twea
 
 ---
 
-## PC-7 — the correction "frame" will be a map in code, not a recorded column
+## PC-7 — REVERSED: the correction "frame" becomes a RECORDED COLUMN, not a map in code
+
+**Reversed 2026-08-25 by the owner's standing principle**, stated directly: *"i dont like workarounds
+rather than solutions."* My original call is kept below the line so the reversal can be judged.
+
+A `frame` column records, on each row, which coordinate system its offsets are in. The map inferred
+the same thing from `source` on every read, forever. Both work; only one removes the ambiguity.
+
+**Why the map was the workaround.** It is a permanent inference standing in for a fact nobody wrote
+down. It has to be re-derived on every read, it must stay exhaustive as writers are added, and it is
+correct only for as long as `source` remains a reliable proxy for frame — which is exactly the
+assumption that produced this bug in the first place. The backfill argument I used for it does not
+survive contact either: a legacy row's frame has to be inferred from `source` under BOTH designs.
+The column does that inference **once**, at migration, and freezes the answer; the map does it on
+every read until someone deletes it.
+
+**Cost, stated honestly:** a three-copy DDL change (schema.ts inline, the idempotent ALTER, the
+duplicated DDL in appCorrections.ts) plus a metadata-only backfill that touches no document text.
+That is more work than the map and it is the work that makes the ambiguity impossible rather than
+managed.
+
+**What to look for:** nothing, if it lands. This row exists to record the reversal, not to be undone.
+
+---
+
+### (superseded) the original call: a map in code
 
 **Status:** decided, not yet shipped (it lands with the `D:owner-edit-offsets-two-frames` fix).
 **Reverses by:** adding a `frame` column and a metadata-only backfill.
