@@ -13,6 +13,7 @@ create table if not exists correction (
   applied_seq   int  not null,
   reason        text not null,
   source        text not null,
+  frame         text,
   reverted_by   text,
   reverted_at   timestamptz,
   created_at    timestamptz not null default now(),
@@ -27,6 +28,7 @@ create table if not exists correction (
   -- production tests a schema nobody runs, and would have passed every assertion below while the
   -- real table rejected the value. H:correction-ddl-parity holds the three copies together.
   constraint correction_source_known        check (source in ('profile_figure','generalized','owner_edit')),
+  constraint correction_frame_check         check (frame is null or frame in ('original','applied')),
   -- AC-12: a revert is recorded, never a DELETE. Both columns move together or neither does.
   constraint correction_revert_paired       check ((reverted_by is null) = (reverted_at is null)),
   -- AC-10: a substituted figure must carry its provenance, or it is a guess wearing a citation.

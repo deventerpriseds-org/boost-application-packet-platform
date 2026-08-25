@@ -111,7 +111,13 @@ test('the hash is RECOMPUTED — an edit that disturbs no offset is still caught
   assert.notEqual(edited, corrected)
   const r = revertOne(edited, rows, 1)
   assert.equal(r.ok, false, 'a tail edit slipped past the hash')
-  assert.ok(/edited after/.test(r.reason), r.reason)
+  // WORDING UPDATED, NOT LOOSENED. This used to pin /edited after/ — the sentence the module no
+  // longer returns, because it asserted a human edit the code cannot distinguish from a rebuild
+  // (verifier claim 7). The two assertions that matter, `ok === false` and `text === undefined`,
+  // are untouched above and below. This one is now STRICTER: the reason must say the text is stale
+  // AND must not accuse anyone of editing.
+  assert.match(r.reason, /no longer matches/i, r.reason)
+  assert.doesNotMatch(r.reason, /(this field|it) was edited after the correction was applied/i, r.reason)
   assert.equal(r.text, undefined)
 })
 
@@ -205,7 +211,7 @@ test('the change log always ships an array, so "none" and "not asked" stay disti
 // evidence: (a) rewrites the writer, leaves every stored row broken, and (measured, §E1 of the AC
 // pass) makes a NEW owner edit on an affected field start getting refused.
 import { createHash } from 'node:crypto'
-import { CORRECTION_FRAME, frameOf } from '../dist/functions/tests/correction.js'
+import { CORRECTION_FRAME, frameOf, STALE_STATE_REASON } from '../dist/functions/tests/correction.js'
 
 const FRAME_FIELD = 'Led $18M supplier negotiation across teams'
 const sha = (s) => createHash('sha256').update(String(s), 'utf8').digest('hex')
@@ -317,6 +323,13 @@ test('H:revert-reason-never-blames-the-owner-falsely: a rebuild is not an edit',
   // AC-8. When a rebuild plans pipeline rows ON TOP of an existing owner edit, the ordering cannot
   // be replayed. Today's code returns "this field was edited after the correction was applied",
   // which accuses the owner of something they did not do. The refusal has to be TRUE.
+  // THIS ORDERING IS HAND-BUILT AND THE WRITERS DO NOT PRODUCE IT — say so rather than let a reader
+  // think the branch is exercised in the wild. `planCorrections` restarts applied_seq at 1 each pass
+  // while `artifactOwnerEdit` takes max+1, so the owner's row normally holds the HIGHEST seq and
+  // this detector rarely fires. That is exactly why claim 7 was REFUTED: this guard passing was not
+  // evidence the false accusation was gone. The UNCONDITIONAL guarantee now comes from
+  // `H:revert-refusal-names-no-culprit`, which greps every refusal in the module regardless of
+  // reachability. This case remains only to exercise the detector branch itself.
   const ownerFirst = { ...ownerRow, applied_seq: 1 }
   const pipelineAfter = { ...genRow, applied_seq: 2 }
   const r = revertOne(bothApplied, [ownerFirst, pipelineAfter], 1)
@@ -343,4 +356,48 @@ test('H:revert-writes-nothing-when-text-moved: the safety floor is not loosened'
       assert.equal(r.text, undefined)
     }
   }
+})
+
+test('H:revert-positional-check-is-load-bearing: a same-length edit INSIDE the replacement', () => {
+  // FOUND BY THE INDEPENDENT VERIFIER (F-3), and it is the most valuable thing it found: the
+  // positional check in the unwind loop was load-bearing and UNGUARDED. Deleting it left 840/840
+  // green while 96 of 1218 tampered documents got spliced.
+  //
+  // WHY THE HASH CANNOT COVER THIS. Tamper INSIDE the owner's own replacement with a same-length
+  // edit — "Vendor selection" -> "vendor selection". No offset moves. The unwind then splices the
+  // phrase back over exactly those bytes, which DELETES the tampered region, so the recovered
+  // `before` is byte-identical to the untampered pre-state and its digest MATCHES. The hash is
+  // structurally blind here. Only "does this text still hold my replacement?" can see it.
+  //
+  // The pre-existing same-length guard puts its tamper OUTSIDE any replacement, where the hash does
+  // catch it — so it passed with this check deleted. Two tampers that look alike, one of which the
+  // digest cannot see.
+  const tampered = bothApplied.replace('Vendor selection', 'vendor selection')
+  assert.notEqual(tampered, bothApplied, 'the tamper must actually change the text')
+  assert.equal(tampered.length, bothApplied.length, 'and must be SAME-LENGTH, or the hash covers it')
+  for (const seq of [1, 2]) {
+    const r = revertOne(tampered, [genRow, ownerRow], seq)
+    assert.equal(r.ok, false,
+      `same-length tamper inside the owner replacement, seq ${seq}: spliced instead of refusing`)
+    assert.equal(r.text, undefined, 'a refusal writes nothing')
+  }
+})
+
+test('H:revert-refusal-names-no-culprit: never assert a human edited the field', () => {
+  // Claim 7, REFUTED by the verifier on the first attempt. The old sentence asserted a human edit;
+  // when the cause was a rebuild that is a false statement to the owner about their own document.
+  // My first fix DETECTED rebuilds — and the detector was unreachable on real data, because
+  // planCorrections restarts applied_seq at 1 while artifactOwnerEdit takes max+1. The guard passed
+  // only on a hand-built ordering the writers cannot produce.
+  //
+  // So this asserts the INVARIANT rather than the incident: no refusal from this module may claim
+  // the field "was edited", full stop, because the module cannot tell an edit from a rebuild.
+  const src = readFileSync(new URL('../src/functions/tests/correction.ts', import.meta.url), 'utf8')
+    .replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')
+  const accusing = Array.from(src.matchAll(/reason: ?'([^']*was edited[^']*)'/g)).map((m) => m[1])
+  assert.deepEqual(accusing, [],
+    `a refusal accuses the owner of an edit the code cannot verify: ${accusing.join(' | ')}`)
+  // And the live sentence must still say the text is stale, so the refusal remains actionable.
+  assert.match(STALE_STATE_REASON, /no longer matches/i)
+  assert.match(STALE_STATE_REASON, /rebuilt or edited/i, 'name both possibilities, accuse neither')
 })

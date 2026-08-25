@@ -256,6 +256,12 @@ export async function correctionRevert(req: HttpRequest, _c: InvocationContext):
       merge_field: r.merge_field, phrase: r.phrase, replacement: r.replacement,
       char_start: r.char_start, char_end: r.char_end, before_sha256: r.before_sha256,
       applied_seq: r.applied_seq, reason: r.reason, source: r.source,
+      // WITHOUT THIS LINE THE COLUMN IS WRITE-ONLY. `frame` is optional on the interface, so `tsc`
+      // says nothing when it is dropped here, and `frameOf` silently falls back to the source map
+      // for every row — which is the behaviour the column was added to replace. Found by the
+      // independent verifier (F-1): a row storing frame='original' that deliberately contradicted
+      // the map still reverted through the map's answer, proving nothing was reading the column.
+      frame: r.frame ?? null,
     }))
 
     const art = (await client.query(

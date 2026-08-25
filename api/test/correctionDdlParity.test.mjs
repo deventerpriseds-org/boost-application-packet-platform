@@ -100,3 +100,36 @@ test('H:schema-sql-has-no-backticks: a backtick inside SCHEMA_SQL terminates the
   const n = (body.match(/`/g) || []).length
   assert.equal(n, 0, `SCHEMA_SQL contains ${n} backtick(s); each one ends the template literal early`)
 })
+
+test('H:correction-ddl-column-parity: every home declares the same COLUMN SET, not just the same domains', () => {
+  // FOUND BY SELF-ATTACK after the independent verifier reported F-2 — and this is the half that
+  // actually matters. The verifier found that `test/sql/correction.sql` was missing the new `frame`
+  // column. Adding it there fixes ONE column; this fixes the CLASS, because the parity guard above
+  // compares only the `source` domain and is structurally blind to a column that simply is not there.
+  // Without this, the next column added repeats F-2 exactly.
+  //
+  // Columns only — not types, not constraint bodies. The three homes legitimately differ in
+  // whitespace and in comment text, and `test/sql/correction.sql` drops the `if not exists` and the
+  // FK for a standalone fixture. What must NEVER differ is which columns exist, because a route
+  // writing a column one home lacks fails at runtime on whichever database that home created.
+  const columnsOf = (sql) => {
+    const block = correctionBlock(sql)
+    return block.split('\n')
+      .map((l) => l.replace(/--.*$/, '').trim())
+      .map((l) => (l.match(/^([a-z_]+)\s+(uuid|text|int|timestamptz|jsonb|boolean|numeric)\b/) || [])[1])
+      .filter(Boolean)
+      .sort()
+  }
+  const byHome = Object.fromEntries(Object.entries(HOMES).map(([name, rel]) => [name, columnsOf(read(rel))]))
+  const [firstName, ...restNames] = Object.keys(byHome)
+  assert.ok(byHome[firstName].length >= 12,
+    `parsed only ${byHome[firstName].length} columns from ${firstName} — the parser is reading the wrong region`)
+  assert.ok(byHome[firstName].includes('frame'),
+    'the frame column is missing from the migration itself')
+  for (const name of restNames) {
+    assert.deepEqual(byHome[name], byHome[firstName],
+      `${name} declares a different column set than ${firstName}:\n` +
+      `  only in ${name}: ${byHome[name].filter((c) => !byHome[firstName].includes(c)).join(', ') || '(none)'}\n` +
+      `  missing from ${name}: ${byHome[firstName].filter((c) => !byHome[name].includes(c)).join(', ') || '(none)'}`)
+  }
+})

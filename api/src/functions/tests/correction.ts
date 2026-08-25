@@ -300,6 +300,30 @@ export interface RevertResult {
  * Attacked, not assumed: 252 tampered documents (42 positions x 3 mutation classes x 2 seqs) spliced
  * 0 times. The per-row hash check makes this STRICTER per row than the code it replaces, not looser.
  */
+/**
+ * The refusal for "the text is not what this change was recorded against".
+ *
+ * IT DOES NOT NAME A CULPRIT, and that is the whole point. The sentence this replaces —
+ * "this field was edited after the correction was applied" — asserts that a HUMAN edited the field.
+ * When the cause was a rebuild regenerating the prose, that statement is false, and it is false to
+ * the owner about their own document.
+ *
+ * REFUTED BY THE INDEPENDENT VERIFIER, and the refutation is the reason this constant exists. I had
+ * "fixed" this by DETECTING rebuilds (lastOriginal > firstApplied on applied_seq) and returning a
+ * truer sentence in that branch. The detector never fires on real data: `planCorrections` restarts
+ * applied_seq at 1 each pass while `artifactOwnerEdit` takes max+1, so the owner's row normally
+ * holds the HIGHEST seq and the branch is unreachable. My guard passed only because it hand-built
+ * an ordering the writers do not produce — a fixture the system cannot generate, which is the exact
+ * failure VERIFY-30 F4 recorded earlier the same day. The verifier drove the REAL producers and
+ * measured 10 false accusations across 4 realistic rebuild shapes.
+ *
+ * So the fix is not a better detector. It is to stop claiming a cause that cannot be determined:
+ * say what is actually known — the text no longer matches — and name both possibilities without
+ * accusing the reader of either. The refusal itself is unchanged: it still writes nothing.
+ */
+export const STALE_STATE_REASON =
+  'this field no longer matches what that change was recorded against, so the original cannot be restored safely — it may have been rebuilt or edited since'
+
 export function revertOne(current: string, applied: Correction[], seq: number): RevertResult {
   const target = applied.find(c => c.applied_seq === seq)
   if (!target) return { ok: false, reason: `no applied correction with seq ${seq}` }
@@ -348,7 +372,7 @@ export function revertOne(current: string, applied: Correction[], seq: number): 
     // A row whose hash does not match means the field moved under it, and a splice there would be
     // exactly the un-checkable write the refusal exists to prevent.
     if (sha256(before) !== c.before_sha256) {
-      return { ok: false, reason: 'this field was edited after the correction was applied, so the original cannot be restored safely' }
+      return { ok: false, reason: STALE_STATE_REASON }
     }
     text = before
   }
@@ -364,7 +388,7 @@ export function revertOne(current: string, applied: Correction[], seq: number): 
   // checked in step 1; re-checking an original-frame target here keeps the guarantee identical to
   // the code this replaces.
   if (frameOf(target) === 'original' && sha256(original) !== target.before_sha256) {
-    return { ok: false, reason: 'this field was edited after the correction was applied, so the original cannot be restored safely' }
+    return { ok: false, reason: STALE_STATE_REASON }
   }
 
   // --- 3. re-apply the survivors -------------------------------------------------------------------
