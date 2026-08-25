@@ -1,0 +1,105 @@
+# Ask ESCO and O*NET directly what they contain, from a runner with open internet.
+#
+# WHY THIS EXISTS. The claim "roadmap 626, board 480, budget 416, operating model 222, P&L 83 —
+# none in O*NET" is written in `schema.ts:299` and has been quoted in design decisions ever since,
+# including one that would have made the taxonomies a hard admission gate. Nobody has re-checked it
+# against the taxonomies themselves. The sandbox cannot: `ec.europa.eu` returns 403 CONNECT through
+# the egress proxy, so every previous answer came from a code comment rather than from ESCO.
+#
+# Both sources are free and keyless:
+#   ESCO   — CC BY 4.0, public JSON API, no registration
+#   O*NET  — public domain, bulk text files at onetcenter.org, no API key
+#            (the O*NET Web Services API DOES need a key; the download files do not, which is why
+#             this uses them.)
+#
+# Read the result between the ----- markers in the job log.
+name: Taxonomy Probe
+on:
+  workflow_dispatch:
+    inputs:
+      terms:
+        description: 'Comma-separated terms to look up in BOTH taxonomies'
+        required: false
+        default: 'roadmap,P&L,operating model,board,budget,stakeholder management,kubernetes,SOC 2,platform modernization,governance'
+      esco_limit:
+        description: 'Max ESCO hits to show per term'
+        required: false
+        default: '4'
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Probe ESCO and O*NET
+        env:
+          TERMS: ${{ inputs.terms }}
+          ESCO_LIMIT: ${{ inputs.esco_limit }}
+        run: |
+          set -uo pipefail
+          echo "----- TAXONOMY PROBE -----"
+
+          # ---- O*NET: bulk files, public domain, no key --------------------------------------
+          # Skills.txt is the 35 cross-occupational SKILLS; "Technology Skills.txt" is the
+          # software/technology list, which is where named tools actually live. Both matter: a term
+          # absent from one may be present in the other, and reporting only one would repeat the
+          # single-source mistake this probe exists to correct.
+          echo
+          echo "== fetching O*NET bulk files =="
+          ONET_OK=1
+          curl -sSL --retry 3 --max-time 180 \
+            -o /tmp/onet.zip "https://www.onetcenter.org/dl_files/database/db_29_2_text.zip" \
+            || ONET_OK=0
+          if [ "$ONET_OK" = "1" ]; then
+            unzip -o -q /tmp/onet.zip -d /tmp/onet || ONET_OK=0
+          fi
+          if [ "$ONET_OK" = "1" ]; then
+            echo "O*NET files present:"
+            find /tmp/onet -name '*.txt' | sed 's|.*/||' | sort | head -40
+            # One flat corpus of every ELEMENT/COMMODITY/TITLE name O*NET publishes, so a term is
+            # tested against the WHOLE taxonomy rather than one file someone happened to pick.
+            find /tmp/onet -name '*.txt' -exec cat {} + 2>/dev/null | tr '\t' '\n' > /tmp/onet_all.txt
+            echo "O*NET corpus lines: $(wc -l < /tmp/onet_all.txt)"
+          else
+            echo "!!! O*NET DOWNLOAD FAILED — O*NET results below are UNKNOWN, not 'absent'."
+          fi
+
+          echo
+          echo "== per-term results =="
+          IFS=',' read -ra LIST <<< "$TERMS"
+          for raw in "${LIST[@]}"; do
+            term="$(echo "$raw" | sed 's/^ *//; s/ *$//')"
+            [ -z "$term" ] && continue
+            echo
+            echo "### TERM: $term"
+
+            # ---- ESCO ----------------------------------------------------------------------
+            enc=$(printf '%s' "$term" | jq -sRr @uri)
+            esco=$(curl -sS --max-time 45 \
+              "https://ec.europa.eu/esco/api/search?text=${enc}&language=en&type=skill&limit=${ESCO_LIMIT}" \
+              2>/dev/null || echo '')
+            if [ -z "$esco" ]; then
+              echo "  ESCO : REQUEST FAILED (unknown, not absent)"
+            else
+              n=$(echo "$esco" | jq -r '._embedded.results | length' 2>/dev/null || echo 0)
+              if [ "$n" = "0" ] || [ "$n" = "null" ]; then
+                echo "  ESCO : no skill match"
+              else
+                echo "$esco" | jq -r '._embedded.results[] | "  ESCO : " + .title' 2>/dev/null
+              fi
+            fi
+
+            # ---- O*NET -------------------------------------------------------------------
+            if [ "$ONET_OK" = "1" ]; then
+              hits=$(grep -i -F "$term" /tmp/onet_all.txt 2>/dev/null | sort -u | head -4)
+              if [ -z "$hits" ]; then
+                echo "  O*NET: no match in any published file"
+              else
+                echo "$hits" | sed 's/^/  O*NET: /'
+              fi
+            else
+              echo "  O*NET: UNKNOWN (download failed)"
+            fi
+          done
+
+          echo
+          echo "----- END TAXONOMY PROBE -----"
