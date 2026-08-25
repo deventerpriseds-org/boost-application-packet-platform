@@ -24,9 +24,27 @@ export const TEMPLATE_META: Record<string, TemplateMeta> = {
     templateId: RESUME_TEMPLATE_ID, isSlides: false, kindLabel: 'Resume',
     placeholders: ['ResumeSummary', 'SkillsBullets1', 'SkillsBullets2', 'ExpertiseBullets', 'RelevantBullets1', 'RelevantBullets2', 'RelevantBullets3'],
   },
+  // THE COMPACT RESUME IS A DIFFERENT DOCUMENT, and this entry used to deny it.
+  //
+  // It was a verbatim copy of `resume` above -- same templateId, same seven placeholders -- which
+  // was harmless only while both resolved to the same Doc. MEASURED against the owner's real
+  // compact template (`diag/doc-structure?type=compact_resume`, api-test run 32784628025, Doc
+  // "ATS Polished Engineering Compact Resume Template"): it carries `{{ResumeSummary}}` and
+  // `{{SkillsBullets}}` and NOTHING ELSE. Expertise is static prose in that document and there are
+  // no Relevant lists at all.
+  //
+  // Had the seven-placeholder set been used against it, `varsForType` would have injected six
+  // tokens that do not exist, `stripLeftoverTokens` would then have DELETED the unfilled
+  // `{{SkillsBullets}}`, and the packet would have shipped a compact resume with a filled summary
+  // and a BLANK Core Skills line -- no error in the build, and the evidence removed from the output
+  // document itself.
+  //
+  // `SkillsBullets` (singular) is the compact's ONE Core Skills block, built from the full resume's
+  // TWO lists by `fitCompactSkills`. The owner: *"the skills are broken into two columns in the
+  // regular resume but its a single block in the compact resume"*.
   compact_resume: {
     templateId: RESUME_TEMPLATE_ID, isSlides: false, kindLabel: 'Compact Resume',
-    placeholders: ['ResumeSummary', 'SkillsBullets1', 'SkillsBullets2', 'ExpertiseBullets', 'RelevantBullets1', 'RelevantBullets2', 'RelevantBullets3'],
+    placeholders: ['ResumeSummary', 'SkillsBullets'],
   },
   portfolio: {
     templateId: PORTFOLIO_TEMPLATE_ID, isSlides: true, kindLabel: 'Portfolio',

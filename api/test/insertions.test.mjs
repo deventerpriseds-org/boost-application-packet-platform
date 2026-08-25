@@ -19,13 +19,33 @@ test('merge fields come from the template table, never from a second hardcoded l
   assert.deepEqual(mergeFieldsFor('nonsense'), [])
 })
 
-test('the real field counts are 7/7/7/3 — the backlog says the compact resume has 6', () => {
+test('the real field counts are 7/2/7/3 — and the compact resume is no longer a copy of the resume', () => {
   assert.equal(mergeFieldsFor('resume').length, 7)
-  assert.equal(mergeFieldsFor('compact_resume').length, 7)
   assert.equal(mergeFieldsFor('portfolio').length, 7)
   assert.equal(mergeFieldsFor('cover').length, 3)
-  assert.deepEqual(mergeFieldsFor('compact_resume'), mergeFieldsFor('resume'),
-    'compact_resume is a byte-identical duplicate of resume — recorded, not silently reconciled')
+
+  // RESOLVED 2026-08-24. This case previously asserted `compact_resume.length === 7` and
+  // `deepEqual(compact, resume)`, with the comment "a byte-identical duplicate of resume —
+  // recorded, not silently reconciled". That was the right call at the time: the duplication was
+  // real and nobody had measured the actual compact document, so recording it beat guessing.
+  //
+  // It has now been measured. `diag/doc-structure?type=compact_resume` against the owner's
+  // "ATS Polished Engineering Compact Resume Template" (api-test run 32784628025) found
+  // {{ResumeSummary}} and {{SkillsBullets}} and nothing else — Expertise is static prose there and
+  // there are no Relevant lists at all. So the duplicate set was not merely redundant, it was
+  // WRONG for the document it names.
+  //
+  // The assertion now holds the reconciled fact AND the reason the old one existed, so a future
+  // reader does not "restore" the copy.
+  assert.deepEqual(mergeFieldsFor('compact_resume'), ['ResumeSummary', 'SkillsBullets'],
+    'the compact resume has its own two-placeholder set, measured from the real document')
+  assert.notDeepEqual(mergeFieldsFor('compact_resume'), mergeFieldsFor('resume'),
+    'compact_resume must never go back to being a copy of resume')
+
+  // The singular name is the whole point: {{SkillsBullets}} is ONE block built from the resume's
+  // two lists. A stray {{SkillsBullets1}} here would inject a token the compact doc does not have.
+  assert.ok(!mergeFieldsFor('compact_resume').some((f) => /^SkillsBullets[0-9]$/.test(f)),
+    'the compact resume takes the combined line, never the numbered lists')
 })
 
 test('every merge field produces a row and each names its own field', () => {

@@ -55,6 +55,15 @@ export interface CheckThresholds {
   /** D4: how many consecutive identical words count as wording kept from the posting. */
   wordingRunTokens: number
   skillMaxChars: number
+  /**
+   * Characters the COMPACT resume's single Core Skills line can hold.
+   *
+   * A SEEDED FIRST VALUE, not a constant: it cannot be computed, because fitting proportional text
+   * into a 310pt table cell is a rendering question, and the owner tunes it by looking at the
+   * document once. What makes a wrong value safe is that overflow is FLAGGED before the packet
+   * ships rather than discovered by an employer.
+   */
+  compactSkillsMaxChars: number
   skillsTotalMin: number
   skillsTotalMax: number
   skillsSplitTolerance: number
@@ -132,6 +141,7 @@ export interface CheckThresholds {
 export const DEFAULT_THRESHOLDS: CheckThresholds = {
   wordingRunTokens: WORDING_RUN_TOKENS,
   skillMaxChars: 24,
+  compactSkillsMaxChars: 320,
   skillsTotalMin: 20,
   skillsTotalMax: 22,
   skillsSplitTolerance: 1,

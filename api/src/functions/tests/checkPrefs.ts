@@ -43,6 +43,7 @@ export function checkPrefColumns(): Array<{ column: string; type: 'int' | 'numer
 const ENSURE_CHECK_COLUMNS_SQL = `
     alter table owner_search_prefs
       add column if not exists chk_skill_max_chars      int not null default ${DEFAULT_THRESHOLDS.skillMaxChars},
+      add column if not exists chk_compact_skills_chars int not null default ${DEFAULT_THRESHOLDS.compactSkillsMaxChars},
       add column if not exists chk_skills_total_min     int not null default ${DEFAULT_THRESHOLDS.skillsTotalMin},
       add column if not exists chk_skills_total_max     int not null default ${DEFAULT_THRESHOLDS.skillsTotalMax},
       add column if not exists chk_relevant_max_chars   int not null default ${DEFAULT_THRESHOLDS.relevantMaxChars},
@@ -157,7 +158,7 @@ export async function writeCheckPrefs(client: any, owner: string, patch: any): P
 export async function loadThresholds(client: any, owner: string): Promise<Partial<CheckThresholds>> {
   await ensureCheckPrefs(client)
   const r = (await client.query(
-    `select chk_skill_max_chars, chk_skills_total_min, chk_skills_total_max, chk_relevant_max_chars,
+    `select chk_skill_max_chars, chk_compact_skills_chars, chk_skills_total_min, chk_skills_total_max, chk_relevant_max_chars,
             chk_relevant_allowance, chk_expertise_words, chk_cover_words_min, chk_cover_words_max,
             chk_evidence_threshold, chk_evidence_min_tokens,
             chk_evidence_max_sentences, chk_evidence_bullet_run,
@@ -172,6 +173,7 @@ export async function loadThresholds(client: any, owner: string): Promise<Partia
   if (!r) return {}
   return {
     skillMaxChars: r.chk_skill_max_chars,
+    compactSkillsMaxChars: r.chk_compact_skills_chars,
     skillsTotalMin: r.chk_skills_total_min,
     skillsTotalMax: r.chk_skills_total_max,
     relevantMaxChars: r.chk_relevant_max_chars,
