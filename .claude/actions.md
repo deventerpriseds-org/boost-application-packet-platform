@@ -3791,3 +3791,22 @@ dependency, lockfile or workflow. Both browser steps never started —
 caught the blank-asset-step regression `npm test` could not see, **has never run on CI**. Fixed in
 `f5b98c5` with the line `ui-verify.yml:75` already used; verified locally first on this branch's
 code (margin 47/47, browser 52/52). Reported on the PR rather than fixed silently.
+
+**The three small rows are DONE and the verifier's findings are closed** — PR #57, twelve commits.
+4.1-3 (`2de4ae5`), 4.5-40 (`3101025`), 4.8-10 (`8d721a0`), the verifier's three defects (`1a886a8`),
+then two more the AC pass showed were nearly free: 4.2-13 (`eae3d37`) and **4.2-4, which was never a
+gap at all** — `dimensions.ts:504` had been enumerating the missing lines by `#seq` and text all
+along, so it took a regression guard rather than a feature. Coverage 75% -> 78%, delta measured two
+ways and both printed.
+
+**OPEN — two owner decisions gate the rest of the large/medium batch.** Everything else in it is
+either queued and unblocked or should not be built:
+- **Group A axis (4.2-1).** The prototype's four cards count requirement KINDS; the app grades role
+  DIMENSIONS. Per-kind coverage is not a number this system produces (`requirements.ts:61`:
+  `coverage` is `'escalated' | null`). So it is cards over the existing dimension rows (cheap,
+  honest, 6-8 cards not four) OR a new stored per-kind coverage number (tier 1, new API work, and a
+  fourth coverage number `postingAnalysis.js:445` says could not agree with the other three).
+- **Term library publication.** It is simultaneously 4.2-1's fourth card and 4.6-9's data source.
+- **4.6-9 should NOT be built**: `grep -rniE "skill_candidate|skill_bank|skillBank" api/src app/src`
+  returns 14 hits, all `skill_candidate` (a per-packet audit row), zero skill bank. The `<select>`
+  would have nothing real to offer, which the no-fake-data rule forbids.

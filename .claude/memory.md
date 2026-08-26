@@ -1816,6 +1816,40 @@ Read this before touching `packetBuildAll` or the packet screen.
 
 ### Hardening — authentication is not authorization, and I made the same mistake twice in one day
 
+**THE SAME BLIND SPOT, THIRD AND FOURTH TIME: a guard that greps one file proves nothing about the
+file on the other side of the prop.** The independent verifier on PR #57 found three defects, ALL of
+which left the suite 311/0 green, and all of them this shape — in the very commit whose message
+correctly identified the shape and closed it for one case:
+- **F-1**, the sharpest: `anyOpen` read `status === 'open'`, but an asset with findings and no gate
+  row is `'unchecked'`, never `'open'`. So the `Needs a decision` region printed *"Nothing is waiting
+  on you. Every check that could run is clear."* directly beneath two rendered `CheckRow`s. Both
+  halves false. **The region I built to prevent vacuous green produced vacuous green**, one step to
+  the side of where AC 1.8 was looking. Fix: the footer is a claim about what is ON SCREEN, so it
+  reads `rows.length`, not a derived status. The proxy and the screen disagreed and the proxy was
+  trusted — the same failure as answering from a proxy instead of ground truth, in UI form.
+- **F-2**: deleting `onOpenQc` from `PacketBuilder` (feature vanishes) and pointing it at the wrong
+  step both shipped green. Every 4.1-3 assertion grepped `PostingAnalysis.jsx` — the half that
+  cannot see either bug. The AC doc predicted this IN WRITING and I shipped it anyway.
+- **F-3**: `{DECISION_NOTE[a.status]}` -> `{DECISION_NOTE.clear}` left 311/0 while reporting an
+  unchecked asset as clear. The sentences were proved on the module and never on the screen.
+
+The generalisable rule, and it is now four incidents: **when a behaviour spans two files, assert it
+on BOTH sides.** A module guard plus a component guard, not one of them. Closed with three new
+guards, all mutation-proved; 317 tests.
+
+**A verdict in a tracking doc is a claim, and claims go stale in BOTH directions.** The AC pass on
+the large/medium batch overturned FOUR of eleven coverage verdicts, and the expensive one was
+**4.2-4, scored PARTIAL for "does not enumerate the missing items by name" while `dimensions.ts:504`
+had been emitting `...; no excerpt for: #12 <text>; #14 <text>` the whole time.** Building the row as
+written would have created a SECOND, divergent enumeration of one fact. `ALREADY BUILT` is a verdict
+and it has to be looked for — a doc row saying ABSENT is not evidence of absence, and the feasibility
+table exists precisely because the tracker is a proxy for the code.
+
+**Report movement with its method and its baseline, or not at all.** The coverage headline is
+hand-maintained and a mechanical parse of the same tables disagrees by 2 rows in each column. The
+DELTA is identical under both methods, so the movement is reliable while the absolute is not. Both
+are now printed, neither is called proven, and which is right is stated as unestablished.
+
 **A comment asserting an environment fact is not a check of that fact — and a required guard that
 cannot START is worse than no guard.** `test.yml`'s app job had been RED on `main` since at least
 2026-08-25 20:06 (runs 326, 330-333, all `failure`). Cause: both browser steps died at
