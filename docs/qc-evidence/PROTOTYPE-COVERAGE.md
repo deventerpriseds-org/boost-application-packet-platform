@@ -120,7 +120,7 @@ Import list read (`PostingAnalysis.jsx:18-28`): `shell.jsx` (Pill, Overlay), `po
 |---|---|---|---|---|
 | 4.1-1 | Card heading "Extracted from this posting" | `packet.jsx:157` | BUILT | `PostingAnalysis.jsx:428` — "Posting analysis - the source". Renamed. |
 | 4.1-2 | Explanatory sub-line | `packet.jsx:161` | BUILT | `PostingAnalysis.jsx:430-436` |
-| 4.1-3 | `See where each one is answered →` (deep-link to QC) | `packet.jsx:159` | ABSENT | The card's only header control is `Show as tabs/columns` (`:439-442`). The compare card has `See the lines this was built from` (`:204`) but it points the other way — compare → extraction, not extraction → QC. |
+| 4.1-3 | `See where each one is answered →` (deep-link to QC) | `packet.jsx:159` | BUILT | `PostingAnalysis.jsx:547-559` - `See where each one is answered ->`, hooked `POSTING_HOOKS.openQc`, `role="button"`/`tabIndex`/Enter-Space, hidden when the extraction has nothing to point at. Navigation is a PROP calling the one `setActiveStep` (`PacketBuilder.jsx:842`). QC's `pick` filter has no prop and no route segment, so it opens the Coverage list and the sub-line says so rather than implying per-line targeting. Commit `2de4ae5`; wiring guarded after the verifier found both halves unguarded (`1a886a8`). |
 | 4.1-4 | Three-tab strip, one list at a time | `packet.jsx:116-123` | BUILT | `PostingAnalysis.jsx:485-493`, `role="tablist"` / `role="tab"` — better than the prototype's bare divs. |
 | 4.1-5 | Per-tab count `n/m` | `packet.jsx:120` | PARTIAL | `PostingAnalysis.jsx:490` renders `({t.count})` — a **single** total, not `covered/total`. Deliberate: `:400-403` says attaching a coverage number to `model_keyword` "made a suggestion look like a measurement". |
 | 4.1-6 | Count coloured green when complete, red when not | `packet.jsx:120` | ABSENT | No colour on the tab count at `:490`. |
@@ -174,7 +174,7 @@ read it.
 | 4.2-1 | Four fit **cards** (Responsibilities / Must-have / Nice-to-have / ATS keywords) | `packet.jsx:174-188` | ABSENT | No card grid in `ProfileCompareCard`. Grep for a `{n} of {d}` card across `app/src`: only `Swipe.jsx:211` and `PostingAnalysis.jsx:105` (a per-**row** sub-line, not a card). |
 | 4.2-2 | Card: `n of m` big number | `packet.jsx:179-180` | PARTIAL | Survives only as `{r.covered} of {r.total} line(s)` inside each comparison row, `PostingAnalysis.jsx:104-106`. |
 | 4.2-3 | Card: graded verdict word | `packet.jsx:182` | BUILT | `fitLabel()` `postingAnalysis.js:78-81`, rendered `PostingAnalysis.jsx:100-103`. |
-| 4.2-4 | Card: `Missing: <named>` when incomplete | `packet.jsx:184` | PARTIAL | The app names the reason (`compareNote`, `:110-119`) and splits `weak` into `Nothing found` vs `Falls short` (`postingAnalysis.js:66-81`) — a **deliberate improvement**, recorded in that comment — but it does not enumerate the missing items by name. |
+| 4.2-4 | Card: `Missing: <named>` when incomplete | `packet.jsx:184` | BUILT | **Re-verdicted - the PARTIAL was wrong.** The app HAS enumerated the missing lines by name all along: `dimensions.ts:504` emits `...; no excerpt for: #12 <text>; #14 <text>` and `:483` names every judgeable line for the nothing-found case, rendered through `POSTING_HOOKS.compareNote`. Guarded rather than rebuilt (`eae3d37`) - a second `Missing:` list would be two enumerations of one fact. The `weak` split into `Nothing found` / `Falls short` is a deliberate improvement on the prototype's single `No evidence` and is pinned. |
 | 4.2-5 | Comparison table, 4 columns | `packet.jsx:191-194` | BUILT | `COMPARE_COLUMNS` `postingAnalysis.js:150`, rendered `PostingAnalysis.jsx:186-192`. Exported so a test asserts the headings **are** the spec's. |
 | 4.2-6 | Row: dimension label | `packet.jsx:197` | BUILT | `PostingAnalysis.jsx:77` |
 | 4.2-7 | Row: what the posting asks | `packet.jsx:198` | BUILT | `PostingAnalysis.jsx:79-86` — plus a `Model paraphrase - not the employer's wording` disclosure the prototype lacks. |
@@ -183,7 +183,7 @@ read it.
 | 4.2-10 | Row: fit dot + coloured label | `packet.jsx:200-203` | BUILT | `PostingAnalysis.jsx:97-104`, `FIT_COLOR` `postingAnalysis.js:84-89` |
 | 4.2-11 | Grading thresholds (≥0.99 strong, ≥0.7 moderate) | SPEC §4.2 | BUILT | Graded server-side and read off the stored row — `PostingAnalysis.jsx:66-69`: *"nothing here is computed in the browser"*. |
 | 4.2-12 | Scope copy — "graded against your stored profile only" | `packet.jsx:208` | BUILT | `COMPARE_SCOPE_NOTE`, rendered `PostingAnalysis.jsx:199-203` |
-| 4.2-13 | `See how the assets answer these →` button | `packet.jsx:209` | PARTIAL | `PostingAnalysis.jsx:204-207` renders a button, but it goes to the extracted lines (`See the lines this was built from`), not to the QC step. |
+| 4.2-13 | `See how the assets answer these →` button | `packet.jsx:209` | BUILT | `PostingAnalysis.jsx` `ProfileCompareCard` - `See how the assets answer these ->`, hooked `POSTING_HOOKS.compareOpenQc`, taking the SAME `onOpenQc` prop the extraction card already had. Two QC controls on the JD step is deliberate and guarded: distinct labels, distinct hooks, each label asserted to appear exactly once. Commit `eae3d37`. |
 | 4.2-14 | Responsive: 4-col ≥ 900px, 1-col below | `packet.jsx:171` `useWide(900)` | BUILT | `COMPARE_WIDE_MIN = 900`, `compareColumns()` `postingAnalysis.js:127-141`, rendered as `data-qc-cols` at `:180`. |
 | 4.2-15 | The empty / unresolved state | *(prototype has none)* | NOT-IN-PROTOTYPE | `comparisonState()` `postingAnalysis.js:97-122` gives four distinct states; `compareEmpty` `:163-167`. App-only. Excluded from the denominator. |
 
@@ -328,7 +328,7 @@ Import list read (`AssetBlocks.jsx:30-45`) — `CorrectionRow` comes from `QcRai
 | 4.5-37 | Margin: `Wording kept from the posting` | `assets.jsx:122-144` | BUILT | `AssetBlocks.jsx:730-770`; label via `checkLabel('posting_wording_kept')` (`assetGate.js:161`). |
 | 4.5-38 | The `rewording` state on a kept phrase (strike-through + toggle) | `assets.jsx:122-144` | DELIBERATE | `.claude/actions.md:2947-2951` — decided against, substitute shipped as `Ask for a reword` (`AssetBlocks.jsx:499-502,761,765`). **`accuracy-log.md`'s third wrong-ABSENT: origin is the PROTOTYPE, not the owner.** |
 | 4.5-39 | Static blocks show their actual template text | SPEC §4.5 | BUILT | `shapeOf()` → `static` when `!row.generated` (`assetBlocks.js:144-146`); rendered by `BlockBody`. |
-| 4.5-40 | Static blocks show `{{merge field}}` placeholders inline | SPEC §4.5 | ABSENT | Nothing in `AssetBlocks.jsx` or `assetBlocks.js` renders a `{{…}}` placeholder; static bodies print the stored text. Checked both files and the import list; `BlockBody` (`:574`) has no placeholder branch. |
+| 4.5-40 | Static blocks show `{{merge field}}` placeholders inline | SPEC §4.5 | BUILT | `assetBlocks.js` `placeholderToken()` + `AssetBlocks.jsx:404-406`, hooked `BLOCK_HOOKS.fieldPlaceholder`. Derived from `row.merge_field`, never a field-name list; returns null rather than `{{}}`/`{{null}}`. **Scope split deliberately**: the field NAME ships, the template's surrounding PROSE does not (no app route delivers it) and is stated as unavailable instead of implied. The old contradicting sentence is gone. Commit `3101025`. |
 | 4.5-41 | Focus ring + scroll-to-field on the asset card | SPEC §4.9 applied here | **BUILT — CHANGED from PARTIAL** | `useScrollToFocus` `AssetBlocks.jsx:913`, `focusRingStyle(focused)` `:885`, wired `:1020-1021`. Inventory build-order **row 2**. |
 | 4.5-42 | The ring clears after ~2.2s | `screens/` notes | DELIBERATE | `PULL-CANDIDATES.md` **PC-4** — the persistent ring is a deliberate choice; SPEC says nothing about ring timing and the repo has twice removed vanishing affordances for the same reason. |
 | 4.5-43 | Chips deduped / near-duplicates collapsed | *(prototype: exact ids)* | DELIBERATE | `PULL-CANDIDATES.md` **PC-5** — ordered by requirement `seq`, deduped by EXACT string only; collapsing is a similarity judgement this repo reserves for ranking. |
@@ -402,7 +402,7 @@ Against the 9 non-deferred rows: **5 BUILT (56%), 6 present in some form (67%).*
 | 4.8-7 | Done-for-you row: `Corrected for you` + what changed + why | `evidence.jsx` | BUILT | `CorrectionRow` `QcRail.jsx:489-600` |
 | 4.8-8 | Done-for-you row: `Change it` | `evidence.jsx:108` | PARTIAL | The row carries `Undo` (`:578-579`) and `Review →` (`:557`); a separate "Change it" that seeds a rewrite request is not there. The capability is the field's `List Tweaks`. |
 | 4.8-9 | Done-for-you row: `Review →` | `evidence.jsx:109` | BUILT | `QcRail.jsx:557` |
-| 4.8-10 | **`Needs a decision`** list, on the page | `evidence.jsx:92-121` | ABSENT | After `ChangeLog` the app goes straight to the tab strip (`QcRail.jsx:810-830`). The open items live in the **Checks** tab and the drawer, never as a page-level "things the run could not settle" list. Verified by reading the whole render body `:702-860`, not by grep. |
+| 4.8-10 | **`Needs a decision`** list, on the page | `evidence.jsx:92-121` | BUILT | `qcRail.js` `railDecisions()` + `QcRail.jsx` `<Decisions>`, mounted between `<ChangeLog>` and the tab strip - ON THE PAGE, `RAIL_TABS` unchanged. A projection of the payload the rail already fetched, reusing `CheckRow`. Four per-asset states with four different sentences; a finding on an ungated asset is listed, counted apart as `uncounted`, and the contradiction reported. Commit `8d721a0`; footer/lookup defects found by the verifier and closed in `1a886a8`. |
 | 4.8-11 | Attention ordering fail → open → warn → fixed → soft | SPEC §5 | PARTIAL | `railAttention` / `attentionSplit` exist (`qcRail.js`, `assetGate.js`) and severity ordering is encoded, but with no page-level attention list there is no surface where the full ordering renders. |
 | 4.8-12 | `Open field →` deep link on each open item | `evidence.jsx:113` | BUILT | `onGoToField` threaded `PacketBuilder.jsx:901` → `QcRail.jsx:837-838` → `AssetBlocks.jsx:1020` focus ring. R5 is met on this path. |
 | 4.8-13 | Questions offer `Answer` | `evidence.jsx:80,112` | DELIBERATE | Requires the `open` severity, which `assetGate.js:78-87` refuses to mint from state the app does not have (same decision as 4.4-33). |
@@ -548,22 +548,37 @@ OUT-OF-SCOPE** (§4.12, which the spec says *"do not build"*). That leaves **210
 of which **27 are DELIBERATE** — a divergence or omission with a recorded decision, which is not a
 gap and must not be counted as one.
 
-> # **137 of 183 prototype elements present (75%)**
+> # **142 of 183 prototype elements present (78%)**
 >
 > *(183 = 210 measurable rows minus the 27 with a recorded decision behind them.)*
 >
 > | | Count | Share of 183 |
 > |---|---:|---:|
-> | **BUILT** — exists with a `file:line` | **137** | **74.9%** |
-> | **PARTIAL** — exists, states/mounts missing | **26** | 14.2% |
-> | **ABSENT** — genuinely not there | **20** | 10.9% |
-> | *present in some form (BUILT + PARTIAL)* | *163* | *89.1%* |
+> | **BUILT** — exists with a `file:line` | **142** | **77.6%** |
+> | **PARTIAL** — exists, states/mounts missing | **24** | 13.1% |
+> | **ABSENT** — genuinely not there | **17** | 9.3% |
+> | *present in some form (BUILT + PARTIAL)* | *166* | *90.7%* |
 >
 > Counted against all 210 measurable rows including the deliberate omissions:
-> **137 BUILT (65.2%)**, **163 present (77.6%)**.
+> **142 BUILT (67.6%)**, **166 present (79.0%)**.
 >
-> **Moved from 125 (68%) by two shipped commits, both re-verdicted against the code rather than
-> from memory:** `dd4f61c` closed §4.10 Review & send (six rows: the gate card, the per-item rows,
+> **A 2-row discrepancy is disclosed rather than reconciled away.** Parsing the tables
+> mechanically (4th cell of every `| <section>-<n> |` row) gives **144 BUILT / 23 PARTIAL /
+> 18 ABSENT = 185 scored rows**, two more in each direction than this hand-maintained block. The
+> DELTA is identical under both methods — **+5 BUILT, −2 PARTIAL, −3 ABSENT this batch** — so the
+> movement is reliable even though the absolute is off by two somewhere between the parser and the
+> hand count. Which is right is not yet established, so neither number is presented as proven.
+>
+> **Moved from 137 (75%) by the three-small batch plus two rows the AC pass overturned**, all
+> re-verdicted against the code: `2de4ae5` **4.1-3**, `3101025` **4.5-40**, `8d721a0` + `1a886a8`
+> **4.8-10**, `eae3d37` **4.2-13**. The fifth is the one worth reading — **4.2-4 was never a gap.**
+> It was scored PARTIAL for "does not enumerate the missing items by name" while `dimensions.ts:504`
+> had been emitting `...; no excerpt for: #12 <text>; #14 <text>` all along. It is now BUILT with a
+> regression guard rather than a feature; building the feature would have produced a second,
+> divergent enumeration of one fact.
+>
+> **Previously moved from 125 (68%) by two shipped commits, both re-verdicted against the code
+> rather than from memory:** `dd4f61c` closed §4.10 Review & send (six rows: the gate card, the per-item rows,
 > `Open field ->`, the asset gate badge, the lock sentence and the empty state) taking that section
 > 25% -> 100%; `df2c9db` closed six of §4.1's seven evidence rows, taking §4.1 54% -> 79%. The
 > seventh, 4.1-20, is `D:jd-evidence-has-no-field-link`.
