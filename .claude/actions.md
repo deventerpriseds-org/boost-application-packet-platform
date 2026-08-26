@@ -3858,3 +3858,24 @@ a normal quick turn stay silent; one gap does not re-fire next turn). **Its `ok`
 literal tabs did not survive into the shipped heredoc, so a recovered resource stays listed. Caught
 by testing the extracted-as-shipped text rather than eyeballing it. Fix with an explicit separator
 when this is picked back up; do not install it as it stands.
+
+**FAIL-OPEN SHIP GATE — found, fixed, guarded (`c3dd2a3`).** Review & send said "Nothing blocks
+sending." on a packet the QC step called "Blocked - 52 to fix". `useQcEntries` emitted no
+`artifactId`, so `packetFailList` skipped every entry. Fixed at the producer; 319 tests; M1/M3/M3b/
+M3c/M4 all mutation-proved to fail, two counter-proofs pass. **Found by a local render, not by the
+suite** — and my first guard shipped with the same producer/consumer blind spot as the bug.
+
+**Render comparison complete** (`docs/qc-evidence/RENDER-COMPARE-PACKET.md`, 597 lines). Verdicts:
+`jd`/`resume`/`cover`/`portfolio`/`qc` FUNCTIONAL, `video` FUNCTIONAL WITH GAPS, `send` was NOT
+FUNCTIONAL and is now fixed. Seven components genuinely missing module-wide; three are ordinary
+build work (per-asset QC drawer entry point, per-asset legend, docked assistant), two are
+data-blocked (no per-asset term-placement route; no `OPEN_ITEMS` source).
+
+**Instrument bug, worth fixing before trusting local counts:** `build-fixtures.mjs:56` filters check
+rows by `artifact_id` only, but the real endpoint filters by `artifact_id AND run_id`
+(`appChecks.ts:257`). The resume artifact carries 36 rows across 2 run_ids where production returns
+18, so **every local finding count is roughly double**. The app's own reconciliation guard caught and
+reported it, which is the behaviour working as designed.
+
+**4.6-9 in progress:** `skill_bank_entry` executed against a populated DB (`3e46615`). Seeder, route,
+UI and write still to come; tier 1, so an independent verifier is required before it is called done.

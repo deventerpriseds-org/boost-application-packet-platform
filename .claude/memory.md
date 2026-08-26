@@ -1816,6 +1816,32 @@ Read this before touching `packetBuildAll` or the packet screen.
 
 ### Hardening — authentication is not authorization, and I made the same mistake twice in one day
 
+**THE SHIP GATE FAILED OPEN, AND 319 GREEN TESTS SAID NOTHING.** `useQcEntries` emitted entries with
+no `artifactId`; `packetFailList` does `if (!artifactId) continue`, so it skipped EVERY entry and
+returned an empty list. On one packet, one session, one payload: the QC step rendered *"Blocked - 52
+to fix, 1 never checked"* while Review & send rendered *"Nothing blocks sending."* Absent evidence
+rendered as PERMISSION - the exact failure this whole rail exists to prevent, in the one step whose
+job is to say whether a packet may ship.
+
+**The instrument matters more than the fix.** The suite was green throughout. What caught it was a
+LOCAL RENDER of the built app against fixtures (`scripts/render-app.mjs`), driving the real component
+and reading the real DOM, then re-run at `--settle 12000` as a disconfirming test in case it was a
+fetch race. **A suite of pure-function and source-grep tests cannot see a screen.** That is not a gap
+to apologise for, it is a class of defect that needs a different instrument, and this repo already
+owns one - `test:margin` exists for exactly this reason and had itself never run on CI until today.
+
+**MY FIX HAD THE SAME BLIND SPOT AS THE BUG.** The first guard was behavioural and mutation-proved
+against the live defect - and `artifactId: null` still left all 319 green, because the test builds its
+own entries and therefore exercises the SELECTOR, never the PRODUCER. Two-sides-of-the-prop
+blindness, reappearing inside its own fix, one commit after I wrote three guards for that same shape.
+The rule is now explicit: **when a behaviour spans a producer and a consumer, asserting the consumer
+with hand-made inputs proves nothing about the producer.** Assert the value is ASSIGNED FROM its
+source, not merely present - `artifactId:` passing while `artifactId: null` ships is a key-presence
+grep doing what key-presence greps do.
+
+**Fixed at the ONE producer, not the three consumers** - patching `packetFailList` alone would have
+left the badges wrong and put a fourth consumer one commit from the same bug.
+
 **THE SAME BLIND SPOT, THIRD AND FOURTH TIME: a guard that greps one file proves nothing about the
 file on the other side of the prop.** The independent verifier on PR #57 found three defects, ALL of
 which left the suite 311/0 green, and all of them this shape — in the very commit whose message
