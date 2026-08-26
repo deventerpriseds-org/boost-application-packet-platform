@@ -3829,3 +3829,32 @@ the two navigation ACs were provable live the whole time and the AC doc had call
 off a single-file read — the AC doc breaking its own never-claim-absent-from-one-grep rule. The one
 real residual: the script asserts on body text and never reads `location.hash`, so navigation is
 made binary by pairing `expect` with `expect_absent`.
+
+**OPEN — the "away / mechanism died" circuit breaker (owner-specified, DO LAST).** Owner's spec,
+refined across three messages and recorded in full so it is not rebuilt from a half-memory:
+1. **Keep working while the owner is away.** Being asleep is not a reason to stop.
+2. **Try fallbacks first** — *"unless there is a fallback to be used, make all efforts to get around
+   it"*. The breaker trips only when a normally-working mechanism fails AND no route around it made
+   progress.
+3. **Then die, do not loop.** *"if no progress is made"* → stop that line of work. A dead connector
+   should cost one failure and a recorded note, not nine hours of retries.
+4. **Alert by EMAIL via Microsoft Graph**, the way huddle/boost already send — the Function App
+   already holds `MICROSOFT_CLIENT_ID`/`MICROSOFT_CLIENT_SECRET` (the AZURE service principal
+   doubles as the Graph app) and `MICROSOFT_TENANT_ID`. Reuse that path; do not mint a new one.
+5. **Tracker update on every away-belief**, so it is logged for future debugging.
+6. **Somewhere that does not get wiped** — `/root/.claude/*` is wiped on reclaim, so it must ship in
+   `eds-claude-skills/setup.sh` (runs at container BUILD, captured in the environment cache) and the
+   **central skills repo needs the matching update**.
+
+Design settled: a CIRCUIT BREAKER keyed on *which mechanism broke*, not on *how long the owner has
+been gone*. Away-time and container-restore are INPUTS that explain a break, not the thing detected.
+Per-mechanism consecutive-failure counters, a trip threshold, `ok` to clear so a recovered mechanism
+comes straight back, and a session burn ceiling for "the environment is broken, not the task".
+
+**WIP state, honestly:** `setup.sh` in the local clone is patched with a first draft (v18) that is
+NOT committed and NOT installed. Its away-gap and container-restore detection are PROVED against the
+real incident (the 9h27m 03:18->12:44 gap fires; a changed `/proc/stat` btime fires; a first run and
+a normal quick turn stay silent; one gap does not re-fire next turn). **Its `ok` clear is BROKEN** —
+literal tabs did not survive into the shipped heredoc, so a recovered resource stays listed. Caught
+by testing the extracted-as-shipped text rather than eyeballing it. Fix with an explicit separator
+when this is picked back up; do not install it as it stands.
