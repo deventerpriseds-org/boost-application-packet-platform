@@ -3986,3 +3986,26 @@ route is down: `workflow_dispatch` runs have been stuck QUEUED for 2+ hours (329
 from the sandbox; `az` carries no credentials here; and both Boost connectors are `enabledInChat:
 false`. The parser (`skillPool.ts`) and the Slides table reader (`slideTables.ts`) for it are already
 built, tested and on `main`.
+
+**CORRECTION, same day — "every `workflow_dispatch` run is stuck" was WRONG, and it is my third
+claim-about-what-exists made without a sweep.** A `db-query.yml` probe (`32997048872`) dispatched and
+SUCCEEDED in ~2 minutes while the two `api-test.yml` runs from 15:03 and 15:29 were still queued and
+had never been picked up. So the dispatch mechanism is fine; **`api-test.yml` specifically is
+wedged.**
+
+I had retried ONE workflow twice and generalised to the whole mechanism. That is the same shape as
+the three misses already in the feasibility rule: a claim about what is unavailable, made from a
+sample of one, never falsified. The cost here was real — 4.6-9 was reported to the owner as blocked
+on a platform outage when a second workflow could have reached the diag route all along.
+
+**Guard this earns:** *"X is down" needs X exercised at least twice ACROSS THE CLASS, not twice on
+one instance.* A queue, a connector, a host, an API: name the class, then test a SECOND member of it
+before reporting the class as unavailable. One instance failing twice is evidence about that
+instance only. This is the runtime twin of the existing "never claim a capability is ABSENT from a
+single-file grep".
+
+**Second, smaller finding: the phase-tag guard cries wolf on bolded tags.** `eds-phase-tag.py:99`
+matches `text.lstrip().startswith(t)` against bare `'Deployed:'`, so `**Deployed:**` — the natural
+markdown — fails the check. It blocked two compliant summaries. NOT CHANGED: it lives in `setup.sh`,
+shared enforcement config, and the standing rule is to ping the owner before touching any guard.
+Raised for the owner's call.
