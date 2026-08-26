@@ -180,6 +180,52 @@ export function ProfileCompareCard({ comparison, onOpenRequirements, onOpenQc })
             </div>
           )}
 
+          {/* SPEC 4.2-1/2/4 - the fit CARDS, on the axis this app actually grades.
+              The prototype's four cards count requirement KINDS (responsibilities / must-have /
+              nice-to-have / ATS keywords). This app grades role DIMENSIONS, and per-kind coverage is
+              not a number the system produces - requirements.ts:61 makes `coverage` 'escalated' |
+              null, never 'covered'. Building the prototype's four literally would mean minting a
+              FOURTH coverage number that postingAnalysis.js:445 says could not agree with the other
+              three. So the cards summarise the rows in the table directly below, which means every
+              figure here reconciles with it BY CONSTRUCTION - they are the same rows.
+              `covered`/`total` are the API's own (dimensions.ts), never recomputed here. */}
+          {rows.length > 0 && (
+            <div data-qc={POSTING_HOOKS.compareCards}
+              style={{ marginTop: 12, display: 'grid', gap: 10,
+                       gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))' }}>
+              {rows.map((r) => (
+                <div key={r.key} className="px-box" data-qc={POSTING_HOOKS.compareCard}
+                  data-qc-dimension={r.key} data-qc-fit={r.fit} style={{ padding: 11 }}>
+                  <div className="px-label">{r.label}</div>
+                  {/* The big number, and it is only printed when the API sent one. A card that
+                      invents 0 of 0 for an ungraded dimension is the fabricated-composite failure. */}
+                  {Number.isFinite(Number(r.total)) && Number(r.total) > 0 ? (
+                    <div style={{ display: 'flex', alignItems: 'baseline', gap: 5, marginTop: 3 }}>
+                      <b style={{ fontSize: 22, lineHeight: 1, color: FIT_COLOR[r.fit] }}>{r.covered}</b>
+                      <span style={{ fontSize: 13, color: 'var(--proto-ink3)' }}>of {r.total}</span>
+                    </div>
+                  ) : (
+                    <div className="px-small" style={{ marginTop: 5, textTransform: 'none', color: 'var(--proto-ink3)' }}>
+                      nothing to count on this dimension
+                    </div>
+                  )}
+                  <div style={{ fontSize: 11.5, fontWeight: 700, marginTop: 4, color: FIT_COLOR[r.fit] }}>
+                    {fitLabel(r.fit, r.shortfall)}
+                  </div>
+                  {/* 4.2-4 is ALREADY BUILT and this renders the API's OWN enumeration verbatim -
+                      dimensions.ts:504 emits "no excerpt for: #12 <text>". Re-deriving a Missing:
+                      list here would be a second, divergent enumeration of one fact. */}
+                  {r.note && (
+                    <div className="px-small" data-qc={POSTING_HOOKS.compareCardNote}
+                      style={{ textTransform: 'none', marginTop: 3, color: 'var(--proto-ink2)', lineHeight: 1.45 }}>
+                      {r.note}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+
           <div data-qc={POSTING_HOOKS.compareCols} data-qc-cols={cols}
             style={{ marginTop: 12, border: '1px solid var(--proto-rule-soft)', borderRadius: 8, overflow: 'hidden' }}>
             <div style={{ display: 'grid', gridTemplateColumns: compareGridTemplate(vw), gap: 10,

@@ -94,6 +94,13 @@ await page.evaluate((o) => localStorage.setItem('ee_auth_user', JSON.stringify({
 await page.goto(`http://localhost:${PORT}/${ROUTE}`, { waitUntil: 'domcontentloaded' })
 await page.reload({ waitUntil: 'networkidle' })
 await page.waitForTimeout(Number(arg('settle', '3000')))
+// Scroll a named region into view before the shot, so a screenshot can show ONE surface rather than
+// a full page nobody can read. Added for the 4.2-1 fit-card comparison; harmless when unset.
+const SCROLL = arg('scrollto', '')
+if (SCROLL) {
+  await page.evaluate((sel) => { const el = document.querySelector(sel); if (el) el.scrollIntoView({ block: 'center' }) }, SCROLL)
+  await page.waitForTimeout(700)
+}
 
 const text = await page.evaluate(() => document.body.innerText)
 const count = SEL ? await page.locator(SEL).count() : null

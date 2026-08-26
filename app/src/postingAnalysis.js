@@ -63,6 +63,9 @@ export const POSTING_HOOKS = {
   compareSetSource: 'compare-set-source',
   compareCols: 'compare-cols',          // carries data-qc-cols - the responsive rule, selectable
   compareSummary: 'compare-summary',
+  compareCards: 'compare-cards',        // 4.2-1 - the fit-card grid, on the DIMENSION axis
+  compareCard: 'compare-card',          // one card (carries data-qc-dimension and data-qc-fit)
+  compareCardNote: 'compare-card-note', // 4.2-4 - the API's own named-missing enumeration, verbatim
   compareStale: 'compare-stale',        // carries data-qc-stale - why the stored rows are not current
 }
 
