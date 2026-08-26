@@ -452,7 +452,18 @@ Key tables (PostgreSQL):
 - iOS testing: requires macOS runner or BrowserStack; categorically unavailable in Linux CCR
 
 ## Active work
-Current task: **F5 CLOSED and deployed (`5a6728d`)** — see actions.md. Option (b), frame as a
+Current task: **The three SMALL prototype gaps are BUILT and on PR #57** (`claude/three-small-ui-gaps`,
+  commits `2de4ae5` 4.1-3, `3101025` 4.5-40, `8d721a0` 4.8-10). Owner-ordered: three small first,
+  then the large (4.2-1 fit cards) and the two mediums (4.3-9/10/11, 4.6-9/10/11), which are QUEUED.
+  Independent verification is RUNNING; its report lands in `docs/qc-evidence/VERIFY-three-small.md`.
+  **NOT yet merged to `main`, so NOT deployed** — nothing is live until `main` moves.
+  Evidence so far: app 311 pass / 0 fail, build clean, 25 mutations proved to fail, 8 counter-proofs.
+  **The AC pass rewrote two of the three verdicts before any code**, which is the whole argument for
+  feasibility-before-implementation: 4.8-10 was `EXISTS-BUT-CONSTRAINED` (selector + mount missing,
+  every input already rendered elsewhere) and 4.5-40 fuses two asks with different verdicts (the
+  field NAME is on the client; the template PROSE reaches no app route). Accepting either row as the
+  coverage doc wrote it would have parked the work mid-build.
+Prior task: **F5 CLOSED and deployed (`5a6728d`)** — see actions.md. Option (b), frame as a
   RECORDED column, schema executed against a populated DB, 843 tests. The independent verifier
   refuted one claim and found three more defects; all four closed in the same commit, and three of
   the four were greps I had skipped.
@@ -1804,6 +1815,30 @@ Read this before touching `packetBuildAll` or the packet screen.
   yourself shortening it, the thing you actually want is another signal.
 
 ### Hardening — authentication is not authorization, and I made the same mistake twice in one day
+
+**A progress claim states the two SHAs it is measured between, or it is not a progress claim.**
+I told the owner the tab percentages were unchanged and let that read as no progress today. The
+owner pushed back — *"double check that you are right... it seems almost impossible to spend so much
+time today and have no progress"* — and they were right. Ground truth from `origin/main`: 51 commits
+since 2026-08-25 00:00 UTC, and the coverage headline moved 125/183 (68%) at `06df406` to 137/183
+(75%). My statement was true relative to the artifact published mid-session and false relative to
+the day, and I never said which. The guard is the measurement: name the baseline SHA and the current
+SHA, or say nothing about movement.
+
+**A guard written against a fixture the producer does not emit is not a guard.** Third occurrence of
+this exact shape (VERIFY-30 F4, the F5 rebuild detector, now this) — the first one I caught myself,
+in the 0b self-attack, before the verifier ran. Every fixture I first wrote for `railDecisions` used
+the FLAT `results` array, which `engineRows()` only falls back to; production sends a server-side
+grouping (`appChecks.ts:307-319`) that `engineRows` prefers. So the guards were exercising a branch
+the app does not take. The check that catches it is one sentence: **drive the real producer, or read
+its response shaper, before trusting a fixture.**
+
+**Counter-proofs are not optional, and they caught me twice in one change.** A guard must fail on the
+defect AND pass on correct-but-different code. My first derivation guard swept whole files and fired
+on `FIELD_ORDER` and the `ExpertiseBullets` threshold map — correct code, untouched by the change.
+My first row-read guard matched the dotted `row.merge_field` and so rejected `row?.merge_field`, the
+same read written differently. Both were narrowed to the path that actually matters. A guard people
+learn to ignore is worse than none; this repo already deleted a whole linter over it.
 `requireWrite` returns null for any request that resolves to the demo workspace, and a request with
 NO credentials resolves there. So every route that then loaded its object by id alone was open:
 `build-all`, `artifactGenerate`, `artifactDocument`, `artifactSlides`. An opportunity or artifact
