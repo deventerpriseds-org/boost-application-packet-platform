@@ -54,7 +54,43 @@ entry. That is the behaviour that makes the origins list meaningful.
 
 ---
 
-## 3. THE OWNER DECISION — `relevantProficiencies` contributes nothing, and that is deliberate
+> ## RESOLVED 2026-08-26 — the owner chose to recover them, and the parser now does
+> ### `buildSkillPool` yields **64 entries, 0 rejected**. All 36 `relevantProficiencies` terms are in.
+>
+> Owner: *"The expertise terms and items in the groups you identified … need to be broken down into
+> items in similar style and length to the skills1 and skills2 items"*, then *"config store so i can
+> edit them, and yes extend skill_bank_entry"*.
+>
+> | Source | In | Recovered | Category carried |
+> |---|---:|---:|---|
+> | `skills1` | 11 | 11 | — flat field |
+> | `skills2` | 9 | 9 | — flat field |
+> | `expertise` | 7 statements | **8 terms** | — flat field |
+> | `relevantProficiencies` | 36 | **36** | **yes, all 5 groups** |
+> | | | **64 total** | |
+>
+> **34 of the 36 are verbatim.** Only `Corporate AI Use Cases` and `Budget and Cost Control` are
+> reworded. Nothing is rejected any more, and no category name ever became a skill.
+>
+> **The rewordings are a SEED, not a constant** — stored per owner and editable in the UI, because
+> CLAUDE.md's no-hardcoded-config rule permits code to seed a first value and forbids it to be the
+> only value. The parser NEVER rewords on its own: with no map supplied every term is verbatim,
+> guarded by `H:skill-pool-rewords-only-from-the-injected-map-never-from-code`.
+>
+> **One reword may yield SEVERAL terms.** `Budget Development and P&L Management` is genuinely two of
+> the owner's skills; a 1:1 map silently dropped `P&L Management`, which is the same data loss this
+> module exists to prevent. The replacement is re-split with the field separators, so the owner types
+> `Budget Development | P&L Management` and gets two.
+>
+> **Three near-miss pairs stay SEPARATE** (`Data Strategy`/`Enterprise Data Strategy`,
+> `KPI-Driven Execution`/`KPI-Driven Performance`, `Scaled Agile Engineering`/`Scaled Agile
+> Operations`). Dedup is exact-match by design: `schema.ts:745-748` notes a bank feeds a SELECT the
+> owner picks from and a swap that MOVES A GATE, so merging two distinct skills is accusation-grade
+> and unrecoverable once seeded. Tracked as a pull candidate rather than decided by me.
+>
+> The section below is kept as the record of how it stood BEFORE this change.
+
+## 3. THE OWNER DECISION (as it stood) — `relevantProficiencies` contributed nothing
 
 All five of its groups were **rejected**, each for the same reason:
 
