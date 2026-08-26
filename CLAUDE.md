@@ -72,9 +72,25 @@ mismatch silently blanks the setting).
 
 ### READ THIS FIRST: there IS direct live-DB access, via a BROKERED MCP connector
 
-**`Boost_DB_Connector` is this app's live Postgres, reachable in ~1s per query with no
-runner.** `Azure_pg_mcp` is the same thing for the org's other DB (`RAG_AI_Agents`).
-Check with `ListConnectors` at session start and use them.
+**`boost-pg-mcp-write` is THE connector for this app's live Postgres — use that one.** Reachable in
+~1s per query with no runner. **Do not enumerate or query the other two** (owner-instructed,
+2026-08-26: *"you only need one correct? im not sure yo need to keep querying the other two
+connections. i only refresh he boost read write db connector"*):
+
+| Connector | What it is | Use it? |
+|---|---|---|
+| **`boost-pg-mcp-write`** | this app's Postgres; **the one the owner maintains and refreshes** | **YES — this one** |
+| `Boost_DB_Connector` | same database, redundant | no |
+| `Azure_pg_mcp` | a DIFFERENT database (`RAG_AI_Agents`), the org's other app | no — wrong data entirely |
+
+An earlier version of this file named `Boost_DB_Connector` as the canonical one, which is why
+sessions kept listing all three and asking the owner to flip toggles on connectors nobody uses.
+
+**Before reaching for ANY of them, ask what store the data is actually in.** These are Postgres.
+`MasterContext`, `AppConfig`, `Prompts` and `JobApplications` are Azure Storage **TABLES** — no
+Postgres connector reaches them, in any state. Reading those goes through a Function route
+(e.g. `GET /api/diag/skill-sources`) called via `api-test.yml`. A whole afternoon was spent on
+connector state while the data in question was never in Postgres.
 
 **Why the paragraph below is only half true, and how it misled a whole session.** A
 *locally-spawned* client — `psql`, `az`, a stdio MCP — connects **from inside** the
