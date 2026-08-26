@@ -3918,3 +3918,43 @@ repo has now shipped four times.
 **OPEN, owner-facing:** the skill pool cannot be read while `workflow_dispatch` is wedged. Every
 fallback measured and ruled out. Browser URL handed over:
 `https://job-platform-api.azurewebsites.net/api/diag/skill-sources`
+
+**Batched verifier CLOSED — all 12 claims CONFIRMED, blast radius ACCEPTED, and three
+green-but-broken findings now guarded.** What the verifier added were three places where a rule was
+TRUE in the code and enforced by nothing — the "green while broken" class this session shipped four
+times. Each is now a guard, each mutation-proved against a baseline of **343 pass / 0 fail**.
+
+| # | The rule that was unguarded | Guard added | Mutation applied -> result |
+|---|---|---|---|
+| F-1 | `Match score - {model.subject}` (`PostingAnalysis.jsx:809`) names the asset; deleting the interpolation left node 342/0, tally 49/49, posting 26/26 | an assertion in `run-keyword-tally.mjs` reading the HEADING NODE, not the modal | delete `{model.subject}` -> **49/50**, `subject="" row="Resume"`. COUNTER-PROVED: an em-dash separator (correct but different) still passes 50/50 |
+| F-2 | `bandTone`'s fail-closed rule lived in a docblock only; final `'red'`->`'green'` left everything green | `H:band-tone-fails-closed` — 2 allowed inputs, 10 rejected including `'STRONG'`, `null`, `0` | final `'red'`->`'green'` -> **`not ok 334`**, 342/1 |
+| F-3 | the two `not_scored` branches (`qcRail.js:955-976`) differ only in `detail`; distinctness was asserted over `sentence` alone | `H:tally-two-empties-two-sentences` now compares `sentence + ' || ' + detail` and asserts the two branches' details differ | copy branch-1's `detail` over branch-2 -> **`not ok 333`**, 342/1 |
+
+The sweep ran under a `trap ... EXIT` restore and `git diff --stat` confirmed an empty diff after
+each mutation. That is not ceremony: an unguarded sweep earlier today timed out and LEFT a mutation
+applied in `slideTables.ts`. A mutation script that can die holding a mutation is a source of exactly
+the silent corruption it exists to detect.
+
+**Two defects of my own this round, both cheap lessons.**
+
+1. **A failing new guard is a claim about the code AND a claim about the guard — and the second is
+   the likelier one.** My first F-1 assertion failed on CORRECT code: `/Match score\s*-\s*\S/` with
+   no `i` flag, against a heading that CSS `text-transform` renders as `MATCH SCORE - RESUME`. I read
+   that as "the heading is missing" and was one step from re-pointing the probe at a different region
+   to make it pass. Dumping the rendered text and its codepoints settled it in one look — plain
+   ASCII, present all along. The rewritten assertion is STRUCTURAL, not literal: the heading's
+   subject must be non-empty AND equal the label the packet's own row list gives that artifact, so a
+   copy change moves both sides together and it cannot cry wolf.
+2. **This block was first appended to the WRONG FILE** — `/home/user/.claude/actions.md`, the
+   project-root tracker, because the shell's working directory had drifted to `/home/user` and I used
+   a relative path. Caught by `git status` showing `.claude/` unmodified after an append that had
+   reported success. Removed from there, written here. Use an absolute path for tracker writes in a
+   multi-repo session; `cd X && cmd` does not reliably leave the cwd where the next call expects it.
+
+**Connector state GROUND-TRUTHED (`ListConnectors`, not inferred).** The reason no connector tool has
+loaded all session: `Boost_DB_Connector` is `enabledInChat: false`, and `boost-pg-mcp-write` is
+`connected: true, enabledInChat: false`. Both are authenticated and both are toggled OFF for this
+chat — the exact one-toggle case CLAUDE.md says to check before claiming data is unreachable.
+`Azure_pg_mcp` is enabled but its OAuth has lapsed AND it is the wrong database (`RAG_AI_Agents`).
+**For the 4.6-9 skill bank specifically, an enabled Boost connector would still not help**:
+MasterContext is an Azure Storage TABLE, not Postgres.

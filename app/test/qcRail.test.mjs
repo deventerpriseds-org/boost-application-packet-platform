@@ -1372,6 +1372,22 @@ test('H:tally-two-empties-two-sentences: no two states of the QC summary print t
   for (const [want, m] of Object.entries(cases)) assert.equal(m.state, want, `${want} reported ${m.state}`)
   const sentences = Object.values(cases).map((m) => m.sentence)
   assert.equal(new Set(sentences).size, sentences.length, 'two states share a sentence: ' + JSON.stringify(sentences))
+  // AND the CLAIM as a whole, not just its first line. F-3, found by the independent verifier:
+  // the two `not_scored` branches (`qcRail.js:955-976`) share a sentence BY DESIGN and carry the
+  // distinction entirely in `detail` - "the checks have not been run" versus "the checks ran but
+  // stored no score row". Asserting distinctness over `sentence` alone left the details free to
+  // collapse with the suite green, which erases the never-ran / ran-and-stored-nothing split. That
+  // split is not a nicety here: `score: null` on every production artifact means the app lives in
+  // exactly these two states today, and telling them apart is the whole point.
+  const claims = Object.values(cases).map((m) => m.sentence + ' || ' + m.detail)
+  assert.equal(new Set(claims).size, claims.length, 'two states make the same claim: ' + JSON.stringify(claims))
+  // The two that share a sentence must be the ones that differ in detail, stated so a future reader
+  // does not "tidy" them into one.
+  const neverRan = (() => { const e = resume(null); return qcSummaryModel([e], { scored: e, scoredType: 'resume' }) })()
+  const ranNoRow = cases.not_scored
+  assert.equal(neverRan.state, ranNoRow.state, 'precondition: both are the not_scored state')
+  assert.notEqual(neverRan.detail, ranNoRow.detail,
+    'never-ran and ran-but-stored-nothing print the same detail - an absence and a measurement made and discarded')
   // AC B.9 - the empty-packet sentence is qcStepState's own, not a second wording of it.
   assert.ok(cases.no_assets.sentence.includes(NO_ASSETS_REASON), cases.no_assets.sentence)
   assert.ok(qcStepState([]).reason.includes(NO_ASSETS_REASON))
@@ -1381,6 +1397,28 @@ test('H:tally-two-empties-two-sentences: no two states of the QC summary print t
   assert.equal(cases.no_scored_asset.score, null)
   assert.equal(cases.no_scored_asset.headline, null)
   assert.equal(cases.no_scored_asset.rows.length, 1)
+})
+
+test('H:band-tone-fails-closed: an unrecognised verdict is never shown as permission', async () => {
+  // F-2, found by the independent verifier. `assetGate.js:391-396` STATES the rule in prose - "an
+  // unknown band falls to red rather than to green, because an unrecognised verdict is not
+  // permission" - and nothing enforced it: flipping the final 'red' to 'green' left node 342/0,
+  // test:tally 49/49 and test:qc 81/88 (the same 7). Not a regression from this work - main carried
+  // the identical ternary, inlined and equally unguarded - but a rule NAMED without a test behind it
+  // is precisely the class this repo has been bitten by repeatedly.
+  //
+  // Three surfaces render this pill (the drawer's Match tab, the QC rail's compact block, the tally
+  // modal), so a wrong colour here says "acceptable" on three screens at once.
+  const { bandTone } = await import('../src/assetGate.js')
+  assert.equal(bandTone('strong'), 'green')
+  assert.equal(bandTone('acceptable'), 'yellow')
+  // EVERY other input, including ones a server could plausibly send, must fail CLOSED.
+  for (const unknown of ['weak', 'poor', 'unknown', '', null, undefined, 'STRONG', 'Strong', 0, 'pass']) {
+    assert.equal(bandTone(unknown), 'red',
+      `bandTone(${JSON.stringify(unknown)}) is not red - an unrecognised verdict rendered as permission`)
+  }
+  // Case matters: a tolerant match would turn a typo in a stored band into a green light.
+  assert.notEqual(bandTone('STRONG'), 'green')
 })
 
 test('H:tally-rows-are-the-packets-own-artifacts: never a fixed type list', () => {

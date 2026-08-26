@@ -132,6 +132,30 @@ ok('and points at the one place the number is shown', /shown once, above/i.test(
 
 await open('scored')
 const scoredModal = await text(page.locator('[data-qc="keyword-tally"]'))
+
+// F-1, found by the independent verifier: `{model.subject}` could be deleted from the heading
+// "Match score - {model.subject}" and node stayed 342/0, tally 49/49, posting 26/26. The MODEL's
+// `subject` was asserted (qcRail.test.mjs:1412); the RENDERED heading was not - so the fix for a
+// write-only field shipped while the guard for it did not. Same two-sides-of-the-prop blindness as
+// the fail-open ship gate, and the reason this assertion lives in the PROBE: only a render can see
+// whether a value reached the screen.
+//
+// It names the asset because a packet has several and only one carries the score. A bare
+// "Match score" would leave the reader to guess which artifact the number belongs to.
+// Read the HEADING NODE, not the whole modal: the modal also contains the prose sentence "The
+// match score for the resume", so a modal-wide match would pass with the heading gone. The `i` is
+// load-bearing - the heading is uppercased by `text-transform`, so a case-sensitive test fails on
+// correct code (it did, on the first draft of this assertion).
+// Structural, not literal: whatever follows the label must be NON-EMPTY and must be the same name
+// the packet's own row list gives that artifact. Deleting `{model.subject}` empties it; renaming
+// the label moves both sides together, so this cannot cry wolf on a copy change.
+const scoreHead = await text(page.locator('[data-qc="tally-qc-score"] > div').first())
+const headSubject = scoreHead.replace(/^match score\s*[-–—:]?\s*/i, '').trim()
+const resumeRowLabel = await text(page.locator('[data-qc="tally-qc-asset"][data-qc-type="resume"] span').first())
+ok('the score heading NAMES the asset the score belongs to',
+  /^match score\b/i.test(scoreHead) && headSubject.length > 0
+  && headSubject.toLowerCase() === resumeRowLabel.toLowerCase(),
+  `head=${JSON.stringify(scoreHead)} subject=${JSON.stringify(headSubject)} row=${JSON.stringify(resumeRowLabel)}`)
 const kwHits = (scoredModal.match(/71/g) || []).length
 ok('with every part measured, keyword coverage appears EXACTLY ONCE on the screen',
   kwHits === 1, `71 appears ${kwHits}x :: ${scoredModal.slice(0, 400)}`)

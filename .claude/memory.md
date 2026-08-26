@@ -452,11 +452,21 @@ Key tables (PostgreSQL):
 - iOS testing: requires macOS runner or BrowserStack; categorically unavailable in Linux CCR
 
 ## Active work
-**2026-08-26 (later) - GROUPS B AND C BUILT, batched verifier RUNNING** on
-`claude/three-small-ui-gaps` (`67a7e6d`). Group B = the QC summary inside the ATS modal
-(4.3-9/10/11); Group C = the drop hatch (4.6-10/11). Combined cheap tier, both lanes in ONE tree:
-342/342 unit, build clean, test:margin 59/59, test:tally 49/49, zero smart quotes. NOT merged, so
-NOT deployed. `test:qc` is 81/88 with 7 failures PROVED to pre-date this work by reverting to HEAD.
+**2026-08-26 (later) - GROUPS B AND C BUILT, batched verifier CLOSED** on
+`claude/three-small-ui-gaps`. Group B = the QC summary inside the ATS modal (4.3-9/10/11); Group C =
+the drop hatch (4.6-10/11). The verifier CONFIRMED all 12 claims and ACCEPTED the stated blast radius
+(it re-derived it by rendering `main` in a separate worktree - byte-identical). It also found three
+rules that were true in the code and enforced by NOTHING; all three are now guards, each
+mutation-proved, F-1 additionally counter-proved. Cheap tier after the fixes: **343/343 unit**, build
+clean, test:margin 59/59, **test:tally 50/50**, zero smart quotes. `test:qc` is 81/88 with the 7
+failures PROVED to pre-date this work (clean `main` worktree at `b73f8d6` gives the identical 7).
+
+- **F-1** `Match score - {model.subject}` rendered but nothing guarded it -> heading-node assertion
+  in `run-keyword-tally.mjs`; deleting the interpolation now gives 49/50.
+- **F-2** `bandTone`'s fail-closed rule lived only in a docblock -> `H:band-tone-fails-closed`;
+  flipping the final `'red'` to `'green'` now gives `not ok 334`.
+- **F-3** the two `not_scored` branches differ only in `detail` -> `H:tally-two-empties-two-sentences`
+  now compares `sentence + ' || ' + detail`; collapsing them gives `not ok 333`.
 
 **LIVE ON MAIN today (`b73f8d6`)**: the fail-open ship-gate fix (Review & send said "Nothing blocks
 sending" on a packet QC called "Blocked - 52 to fix"), the three small rows (4.1-3, 4.5-40, 4.8-10),
@@ -3867,3 +3877,31 @@ INTENDED produces exactly this shape of false alarm: "1 of ~680 opportunities ha
 like a broken pipeline and was actually one deliberately-built test packet plus a bug that had
 already been fixed. **Before reporting a ratio as a problem, establish what the intended
 denominator is.** The owner's intent is part of the ground truth, not context around it.
+
+## Hardening — 2026-08-26: a failing NEW guard accuses the code, but it is usually accusing itself
+
+The F-1 assertion I wrote to close the verifier's finding **failed on correct code**, and my first
+instinct was to move the probe's read to a different region until it passed. That instinct is the
+dangerous one: it "fixes" a red guard by aiming it somewhere it cannot see the thing it was written
+to protect — which is how an inert guard ships and is believed.
+
+The cause was mine and trivial: `/Match score\s*-\s*\S/` with **no `i` flag**, against a heading that
+CSS `text-transform: uppercase` renders as `MATCH SCORE - RESUME`. The rendered text and its
+codepoints — dumped in one throwaway script — showed plain ASCII, present all along.
+
+**The rule: when a BRAND-NEW guard goes red, prove which of the two claims is false before touching
+either side.** Dump what the system actually rendered/returned. A guard that has never passed has no
+track record; the code it accuses often does.
+
+Two smaller ones from the same round, both already costly once today:
+- **Mutation sweeps run under `trap ... EXIT`.** An unguarded sweep timed out earlier today and left
+  a mutation applied in `slideTables.ts`. A script that can die holding a mutation is a source of the
+  exact silent corruption it exists to detect.
+- **Absolute paths for tracker writes.** A `cat >> .claude/actions.md` reported success while writing
+  to `/home/user/.claude/actions.md`, because the shell's cwd had drifted off the repo. `git status`
+  showing the file unmodified after a "successful" append is the tell.
+
+Guard shape that came out of it: the rewritten F-1 assertion is **structural, not literal** — the
+heading's subject must be non-empty AND equal the label the packet's own row list gives that
+artifact. A copy change moves both sides together, so it cannot cry wolf; a deletion empties one
+side, so it cannot fail open. Counter-proved with an em-dash separator: 50/50.
