@@ -452,6 +452,25 @@ Key tables (PostgreSQL):
 - iOS testing: requires macOS runner or BrowserStack; categorically unavailable in Linux CCR
 
 ## Active work
+**HANDOFF STATE, 2026-08-26 ~20:00 — everything is committed, pushed and landed. Nothing in flight.**
+
+- `origin/main` and `origin/claude/three-small-ui-gaps` both carry all of today's work. Clean tree.
+- **NOTHING IS BLOCKED.** The "4.6-9 is blocked on a platform outage" claim was WRONG and degraded
+  TWICE under evidence (see actions.md). A fresh dispatch of `api-test.yml` succeeded in 8 seconds;
+  the two runs stuck since 15:03 are zombies pinned to the old sha. The skill pool has been READ and
+  PARSED — `docs/qc-evidence/SKILL-POOL.md`, 27 entries, 5 rejected, evidence from run 32997381200.
+- **THE ONE THING WAITING ON THE OWNER:** `relevantProficiencies` is two-level
+  (`Category: a, b, c | …`) and the parser splits on `|` only, so all 5 groups are rejected rather
+  than mangled. (a) leave it out -> bank seeds at 27. (b) teach `splitSkillField` the second level
+  -> ~67 terms, each carrying a category the swap UI could filter by. **Recommend (b)**; not changed
+  unilaterally because it is a claim about what the owner's data means.
+- **NEXT, in order, once that is answered:** the 4.6-9 seeder (per-owner write; note the inherited
+  defect that MasterContext is a single GLOBAL partition), then the `Swap for another skill...`
+  control. After that, the away/circuit-breaker guard the owner asked to be done LAST — it touches
+  `setup.sh` in the central skills repo, so its plan goes to the owner BEFORE any build.
+- **Two guard findings raised, NEITHER changed** (standing rule: never touch a guard without a ping):
+  `eds-phase-tag.py:99` cries wolf on the bolded `**Deployed:**`; and the retry guard below.
+
 **2026-08-26 (later) - GROUPS B AND C ARE LIVE ON `main` (`34eda36`), both deploys SUCCESS**
 (web run 32996534657, api run 32996534614). The coverage re-verdict landed on top at `7c8d5bb`.
 Cheap tier at the merge: app **343/343** unit + build clean + margin 59/59 + tally **50/50** (run
@@ -3911,3 +3930,33 @@ Guard shape that came out of it: the rewritten F-1 assertion is **structural, no
 heading's subject must be non-empty AND equal the label the packet's own row list gives that
 artifact. A copy change moves both sides together, so it cannot cry wolf; a deletion empties one
 side, so it cannot fail open. Counter-proved with an em-dash separator: 50/50.
+
+## Hardening — 2026-08-26: I reported a resource down without ever retrying the failing call
+
+**"4.6-9 is blocked" was wrong, and it degraded twice under evidence before it died:**
+
+1. *"Every `workflow_dispatch` run is stuck"* — I had retried ONE workflow twice. Refuted in two
+   minutes by dispatching a DIFFERENT workflow (`db-query.yml`, `32997048872`, success).
+2. *"`api-test.yml` is wedged"* — refuted by dispatching the SAME workflow again, fresh
+   (`32997381200`, success in **8 seconds**).
+
+The two "stuck" runs were zombies pinned to an old sha. They shared a commit, a minute-window and a
+queue slot, and I read their common failure as a property of the workflow, then of the whole queue.
+
+**The guard the first correction produced was still too weak.** It said *exercise the CLASS twice,
+not one instance twice* — right, but it named the wrong variable. The variable here was not the
+workflow, it was **the RUN**.
+
+> **Before reporting ANY resource unavailable, retry the failing call ITSELF, fresh, at least once.**
+> A stale queued job is not evidence about the queue — it is evidence about that job. Then widen:
+> a second member of the class. Only then is "down" a claim you can make.
+
+**What it cost:** 4.6-9 sat reported to the owner as externally blocked for most of the afternoon;
+two other access routes (Azure Storage, the connectors) were investigated and ruled out to explain a
+blockage that did not exist; and the owner was asked to flip connector toggles that would not have
+helped anyway. The retry that dissolved all of it took eight seconds.
+
+**Related, and the reason this keeps happening:** every miss in `accuracy-log.md` is the same shape —
+a heavy claim about what EXISTS or is AVAILABLE, made from a sample of one, never falsified. The
+feasibility rule already covers the static case (*never claim a capability is ABSENT from a
+single-file grep*). This is its RUNTIME twin, and it now has the same standing.

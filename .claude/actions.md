@@ -4009,3 +4009,39 @@ matches `text.lstrip().startswith(t)` against bare `'Deployed:'`, so `**Deployed
 markdown — fails the check. It blocked two compliant summaries. NOT CHANGED: it lives in `setup.sh`,
 shared enforcement config, and the standing rule is to ping the owner before touching any guard.
 Raised for the owner's call.
+
+**CORRECTION TO THE CORRECTION — `api-test.yml` is NOT wedged either. NOTHING is blocked.** A fresh
+dispatch of the SAME workflow (`32997381200`) completed **success in 8 seconds**. The two runs from
+15:03/15:29 are ZOMBIES pinned to the old sha `b73f8d6`; they never got picked up and never will.
+New dispatches of that identical workflow work fine.
+
+So the claim degraded twice under evidence, and the shape is worth keeping:
+1. *"Every `workflow_dispatch` run is stuck"* — refuted by dispatching a DIFFERENT workflow.
+2. *"`api-test.yml` is wedged"* — refuted by dispatching the SAME workflow AGAIN, fresh.
+
+**The guard from the first correction was still too weak, and this is why.** It said: exercise the
+CLASS twice, not one instance twice. Correct, but incomplete — the real variable here was not the
+workflow, it was **the RUN**. Two stuck runs shared a sha, a minute-window and a queue slot, and I
+treated their common failure as a property of the workflow. **Strengthened guard: before reporting
+any resource unavailable, retry the FAILING CALL ITSELF, fresh, at least once.** A stale queued job
+is not evidence about the queue; it is evidence about that job. Cost of the retry: 8 seconds. Cost of
+not retrying: 4.6-9 was reported to the owner as externally blocked for most of the afternoon, and
+two other routes were investigated and ruled out to explain a blockage that did not exist.
+
+**THE SKILL POOL IS READ AND PARSED — the thing the owner asked for.** Written up in full with
+evidence at `docs/qc-evidence/SKILL-POOL.md`. **27 entries, 5 rejected**, no term invented or
+reworded. `skills1` 11 · `skills2` 9 · `expertise` 7 · `softHardSkillsPool` 0 (it is the exact union
+of the first two, so it lands as an extra ORIGIN rather than a duplicate — correct behaviour) ·
+`relevantProficiencies` **0**.
+
+**ONE OWNER DECISION, and it is the only thing 4.6-9 now waits on.** `relevantProficiencies` is the
+only field with a TWO-LEVEL format (`Category: a, b, c | Category: …`); the parser splits on `|`
+only, so all five groups arrive as 15-27 word strings and are rejected rather than mangled. Refusing
+is the correct default. Options: **(a)** leave it out, bank seeds at 27; **(b)** teach
+`splitSkillField` the second level, bank goes to ~67 and every proficiency carries a category the
+swap UI could filter by. Recommended **(b)** — those ~40 are the most specific terms in the store —
+but NOT changed unilaterally, because it is a claim about what the owner's data means.
+
+**Second guard finding, raised NOT changed:** `eds-phase-tag.py:99` matches `text.lstrip()
+.startswith('Deployed:')`, so the natural markdown `**Deployed:**` fails and it blocked two fully
+compliant summaries. Shared enforcement config in `setup.sh`; the owner decides.
