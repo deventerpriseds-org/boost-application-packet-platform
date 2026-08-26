@@ -171,7 +171,7 @@ read it.
 
 | # | Prototype element | Proto ref | Verdict | App citation / note |
 |---|---|---|---|---|
-| 4.2-1 | Four fit **cards** (Responsibilities / Must-have / Nice-to-have / ATS keywords) | `packet.jsx:174-188` | ABSENT | No card grid in `ProfileCompareCard`. Grep for a `{n} of {d}` card across `app/src`: only `Swipe.jsx:211` and `PostingAnalysis.jsx:105` (a per-**row** sub-line, not a card). |
+| 4.2-1 | Four fit **cards** (Responsibilities / Must-have / Nice-to-have / ATS keywords) | `packet.jsx:174-188` | **BUILT — CHANGED from ABSENT** | `PostingAnalysis.jsx:200` (`POSTING_HOOKS.compareCards`, declared `postingAnalysis.js:66`). **Built on the DIMENSION axis, not the prototype's four kinds** — a deliberate, owner-approved divergence: per-kind coverage is not a number this system produces (`requirements.ts:61`, `coverage` is `'escalated' \| null`), so the prototype's axis would have required inventing one. Owner picked option A after seeing both rendered side by side: *"I'm fine with the 8 and the notes."* Option B (the four kinds) is tracked as a pull candidate. **Independent verification OUTSTANDING** — the batched verifier covered Groups B and C, not this row. |
 | 4.2-2 | Card: `n of m` big number | `packet.jsx:179-180` | PARTIAL | Survives only as `{r.covered} of {r.total} line(s)` inside each comparison row, `PostingAnalysis.jsx:104-106`. |
 | 4.2-3 | Card: graded verdict word | `packet.jsx:182` | BUILT | `fitLabel()` `postingAnalysis.js:78-81`, rendered `PostingAnalysis.jsx:100-103`. |
 | 4.2-4 | Card: `Missing: <named>` when incomplete | `packet.jsx:184` | BUILT | **Re-verdicted - the PARTIAL was wrong.** The app HAS enumerated the missing lines by name all along: `dimensions.ts:504` emits `...; no excerpt for: #12 <text>; #14 <text>` and `:483` names every judgeable line for the nothing-found case, rendered through `POSTING_HOOKS.compareNote`. Guarded rather than rebuilt (`eae3d37`) - a second `Missing:` list would be two enumerations of one fact. The `weak` split into `Nothing found` / `Falls short` is a deliberate improvement on the prototype's single `No evidence` and is pinned. |
@@ -187,8 +187,8 @@ read it.
 | 4.2-14 | Responsive: 4-col ≥ 900px, 1-col below | `packet.jsx:171` `useWide(900)` | BUILT | `COMPARE_WIDE_MIN = 900`, `compareColumns()` `postingAnalysis.js:127-141`, rendered as `data-qc-cols` at `:180`. |
 | 4.2-15 | The empty / unresolved state | *(prototype has none)* | NOT-IN-PROTOTYPE | `comparisonState()` `postingAnalysis.js:97-122` gives four distinct states; `compareEmpty` `:163-167`. App-only. Excluded from the denominator. |
 
-**§4.2 tally — 14 rows (row 15 excluded):** BUILT **10** · PARTIAL **3** · ABSENT **1** · DELIBERATE **0**.
-**10 BUILT (71%), 13 present in some form (93%).**
+**§4.2 tally — 14 rows (row 15 excluded):** BUILT **11** · PARTIAL **3** · ABSENT **0** · DELIBERATE **0**.
+**11 BUILT (79%), 14 present in some form (100%).** *(Was 10 BUILT / 71%; **4.2-1** the fit cards moved ABSENT -> BUILT at `b73f8d6`. §4.2 now has no ABSENT row.)*
 
 The app also carries four surfaces the prototype has no counterpart for — dimension-set provenance
 (`compareSetSource`, `:139-149`), staleness (`compareStale`, `:154-160`), the strong/moderate/weak
@@ -214,15 +214,15 @@ direction reads as though the app is strictly behind, and on this section it is 
 | 4.3-6 | Placed / open keyword chips | `packet.jsx:330-331` | DELIBERATE | `D:term-library-off-by-owner-decision`. `KeywordLibraryState` `:581-584` states it. |
 | 4.3-7 | `n/m placed` | `packet.jsx:333` | DELIBERATE | Same. |
 | 4.3-8 | `Auto-optimize resume` button | `packet.jsx:335` | BUILT | `PostingAnalysis.jsx:587-589` — `Rebuild every asset from this posting`. Renamed and broader. |
-| 4.3-9 | QC Summary block header | `packet.jsx:341` | ABSENT | The overlay has no QC summary. |
-| 4.3-10 | Composite match / requirements / keywords / seniority bars (`ScoreBlock compact`) | `packet.jsx:342` | ABSENT | No `ScoreBlock` equivalent renders inside the modal. |
-| 4.3-11 | Per-asset gate rows with `GateBadge` | `packet.jsx:344-349` | ABSENT **in this surface** | `GateBadge` exists (`AssetGateDrawer.jsx:45-76`) and IS rendered per asset — on the artifact card (`PacketBuilder.jsx:184`) and in the QC rail — but not inside the tally modal. This is a **relocation**, not a missing component. |
+| 4.3-9 | QC Summary block header | `packet.jsx:341` | **BUILT — CHANGED from ABSENT** | `PostingAnalysis.jsx:793-794` (`<QcSummaryBlock>`, hook `POSTING_HOOKS.qcSummary`), mounted in the tally modal at `:881`. The block **derives nothing** — every sentence, row and score comes from `qcSummaryModel()` (`qcRail.js:921-984`), the same `useQcEntries()` payload the QC rail, the step circle, the asset badges and the ship gate read, so the modal cannot state a second opinion nobody can reconcile. Six modelled states, guarded by 11 `H:` cases. |
+| 4.3-10 | Composite match / requirements / keywords / seniority bars (`ScoreBlock compact`) | `packet.jsx:342` | **BUILT — CHANGED from ABSENT** | `PostingAnalysis.jsx:803-830` (`POSTING_HOOKS.qcSummaryScore` + `<ScoreParts>`). `<ScoreParts>` is an **extraction, not a copy** — `main` had three score-part bar renderers (one with a hand-inlined clamp); they are now one component with three consumers, one `pctWidth`, one `bandTone`, verified byte-identical against `main`'s markup by a golden-master probe. The keyword part **defers** rather than restating the library number, so keyword coverage appears exactly once on the screen (guarded: `run-keyword-tally.mjs`). |
+| 4.3-11 | Per-asset gate rows with `GateBadge` | `packet.jsx:344-349` | **BUILT — CHANGED from ABSENT in this surface** | `PostingAnalysis.jsx:838-846`, `GateBadge` **imported** from `AssetGateDrawer.jsx:45` (`PostingAnalysis.jsx:35`) — one definition, six mount sites, never copy-pasted. Rows are the packet's REAL artifact list, not the prototype's fixed four types (which would draw rows for assets a packet does not have). An asset whose checks could not be read is NAMED with `gate unavailable` rather than dropped — a missing row reads as "nothing wrong with it". |
 | 4.3-12 | `Open QC →` button | `packet.jsx:350` | PARTIAL | `PostingAnalysis.jsx:590` offers `Go to the resume step`; there is a QC step (`PacketBuilder.jsx:108`) but the modal does not link to it. |
 | 4.3-13 | **Any navigation out closes the modal first** | `packet.jsx:345,347,350` (`setPanelOpen(false)` on every exit) | PARTIAL | `Overlay` owns close; `onGoResume` / `onBuildAll` are supplied by `PacketBuilder.jsx:941-960` — needs a runtime check to confirm the dismiss ordering (see §14). |
 | 4.3-14 | Model-keyword list inside the modal | *(prototype has none)* | NOT-IN-PROTOTYPE | `PostingAnalysis.jsx:586`. App-only; excluded. |
 
-**§4.3 tally — 13 rows (row 14 excluded):** BUILT **6** · PARTIAL **2** · ABSENT **3** · DELIBERATE **2**.
-Against the 11 non-deferred rows: **6 BUILT (55%), 8 present in some form (73%).**
+**§4.3 tally — 13 rows (row 14 excluded):** BUILT **9** · PARTIAL **2** · ABSENT **0** · DELIBERATE **2**.
+Against the 11 non-deferred rows: **9 BUILT (82%), 11 present in some form (100%).** *(Was 6 BUILT / 55% — the weakest section in the spec bar the assistant. **4.3-9/10/11**, the whole QC summary inside the ATS modal, moved ABSENT -> BUILT at `34eda36`, verifier-CONFIRMED. §4.3 now has no ABSENT row.)*
 
 ---
 
@@ -354,12 +354,12 @@ Against the 35 non-deferred rows: **32 BUILT (91%), 33 present in some form (94%
 | 4.6-7 | Panel: **what it displaced** ("Took the place of X in Skills 1") | `assets.jsx:67` | DELIBERATE | PC-3. `swap_decision` stores `from_label → to_label` and PC-3 names it as the honest future source. |
 | 4.6-8 | Action: `Put back "<original>"` | `assets.jsx:70-74` | PARTIAL | The **capability** exists — `CorrectionRow`'s `Undo` (`QcRail.jsx:578-580` → `POST /app/correction/{id}/revert`) and the Swaps/Original-vs-final tab — but the panel itself does not carry a `Put back` button. Relocated, not absent. |
 | 4.6-9 | Action: `Swap for another skill…` (a select from the skill bank) + `Swap` | `assets.jsx:76-83` | ABSENT | No skill-bank select renders anywhere on the asset step. Checked `AssetBlocks.jsx` and its import list plus `assetBlocks.js`; the only `<select>` on this surface is none. |
-| 4.6-10 | Action: `Drop it, leave the line open` | `assets.jsx:84-85` | ABSENT | No equivalent control. |
-| 4.6-11 | Each action is phrased as an assistant request stating the coverage consequence | `assets.jsx:72,82,85` | ABSENT | The three escape hatches are what carry this; without them there is nothing to phrase. Note `AssetBlocks.jsx:495-502` **does** use exactly this pattern for the reword case (`seedAskReword`), so the mechanism exists and is not wired to this panel. |
+| 4.6-10 | Action: `Drop it, leave the line open` | `assets.jsx:84-85` | **BUILT — CHANGED from ABSENT** | `keywordActions()` `assetBlocks.js:447-456`, rendered `AssetBlocks.jsx:871-878` (`BLOCK_HOOKS.keywordActions`). It **seeds the field's existing ask box** (`seedAsk`) and writes nothing at activation — on Send it is the one `api.aiEditArtifact` call site (`AssetBlocks.jsx:690`); `git diff -- api/` for the lane is empty. A keyword the draft does not contain renders **no control**, only the reason *"This field does not contain it, so there is nothing here to drop."* — the standing no-dead-UI rule. |
+| 4.6-11 | Each action is phrased as an assistant request stating the coverage consequence | `assets.jsx:72,82,85` | **BUILT — CHANGED from ABSENT, with the consequence clause deliberately omitted** | Seeded sentence: `Drop "<kw>" from this field. Rewrite the text without it rather than swapping in a synonym.` The prototype's *coverage consequence* is **not** claimed, and that is the finding, not an oversight: the lane's own hunt (verifier-CONFIRMED, both halves) proved a drop routed through `owner-edit` gains no attribution — `ownerLabels` strips the empty replacement via `.filter(Boolean)` (`appSwaps.ts:45-49`, plus a second filter at `swaps.ts:174`) so `driver:'owner'` cannot fire for a deletion — and splices a hole (`appCorrections.ts:359` → `Led  initiatives`). Copy that promised a coverage effect would have been a claim the system does not record. Guarded by `H:keyword-drop-offers-nothing-it-cannot-do`. |
 | 4.6-12 | `not in this text` on a chip whose keyword the draft lacks | *(prototype has none)* | NOT-IN-PROTOTYPE | App-only, `AssetBlocks.jsx:803-810`, recorded as reversible in PC-1. Excluded. |
 
-**§4.6 tally — 11 rows (row 12 excluded):** BUILT **5** · PARTIAL **1** · ABSENT **3** · DELIBERATE **2**.
-Against the 9 non-deferred rows: **5 BUILT (56%), 6 present in some form (67%).**
+**§4.6 tally — 11 rows (row 12 excluded):** BUILT **7** · PARTIAL **1** · ABSENT **1** · DELIBERATE **2**.
+Against the 9 non-deferred rows: **7 BUILT (78%), 8 present in some form (89%).** *(Was 5 BUILT / 56%; **4.6-10/11**, the drop hatch, moved ABSENT -> BUILT at `34eda36`, verifier-CONFIRMED. The one remaining ABSENT is **4.6-9**, which is blocked on reading the owner's live skill fields, not on code.)*
 
 ---
 
@@ -548,26 +548,34 @@ OUT-OF-SCOPE** (§4.12, which the spec says *"do not build"*). That leaves **210
 of which **27 are DELIBERATE** — a divergence or omission with a recorded decision, which is not a
 gap and must not be counted as one.
 
-> # **142 of 183 prototype elements present (78%)**
+> # **148 of 183 prototype elements present (81%)**
 >
 > *(183 = 210 measurable rows minus the 27 with a recorded decision behind them.)*
 >
 > | | Count | Share of 183 |
 > |---|---:|---:|
-> | **BUILT** — exists with a `file:line` | **142** | **77.6%** |
+> | **BUILT** — exists with a `file:line` | **148** | **80.9%** |
 > | **PARTIAL** — exists, states/mounts missing | **24** | 13.1% |
-> | **ABSENT** — genuinely not there | **17** | 9.3% |
-> | *present in some form (BUILT + PARTIAL)* | *166* | *90.7%* |
+> | **ABSENT** — genuinely not there | **11** | 6.0% |
+> | *present in some form (BUILT + PARTIAL)* | *172* | *94.0%* |
 >
 > Counted against all 210 measurable rows including the deliberate omissions:
-> **142 BUILT (67.6%)**, **166 present (79.0%)**.
+> **148 BUILT (70.5%)**, **172 present (81.9%)**.
 >
 > **A 2-row discrepancy is disclosed rather than reconciled away.** Parsing the tables
-> mechanically (4th cell of every `| <section>-<n> |` row) gives **144 BUILT / 23 PARTIAL /
-> 18 ABSENT = 185 scored rows**, two more in each direction than this hand-maintained block. The
-> DELTA is identical under both methods — **+5 BUILT, −2 PARTIAL, −3 ABSENT this batch** — so the
-> movement is reliable even though the absolute is off by two somewhere between the parser and the
-> hand count. Which is right is not yet established, so neither number is presented as proven.
+> mechanically (4th cell of every `| <section>-<n> |` row) gives **150 BUILT / 23 PARTIAL /
+> 12 ABSENT = 185 scored rows**, two more in each direction than this hand-maintained block. The
+> DELTA is identical under both methods — **+6 BUILT, −6 ABSENT this batch**, and the parser
+> attributes all six to exactly the six rows re-verdicted below — so the movement is reliable even
+> though the absolute is off by two somewhere between the parser and the hand count. Which is right
+> is not yet established, so neither number is presented as proven.
+>
+> **Moved from 142 (78%) by the Groups A/B/C batch**, all re-verdicted against the code and all
+> shipped on `main` at `34eda36`: **4.2-1** the fit cards (`b73f8d6`, on the DIMENSION axis by
+> owner decision), **4.3-9/10/11** the QC summary inside the ATS modal, **4.6-10/11** the drop
+> hatch. Five of the six carry an independent verifier's CONFIRMED verdict; **4.2-1 does not** —
+> it is owner-approved and deployed, but the batched verifier covered Groups B and C only, and the
+> row says so rather than borrowing their assurance.
 >
 > **Moved from 137 (75%) by the three-small batch plus two rows the AC pass overturned**, all
 > re-verdicted against the code: `2de4ae5` **4.1-3**, `3101025` **4.5-40**, `8d721a0` + `1a886a8`
@@ -588,26 +596,35 @@ gap and must not be counted as one.
 
 ### 13b. Per section
 
-| SPEC § | Surface | Rows | BUILT | PARTIAL | ABSENT | DELIB | BUILT % (of non-deliberate) |
-|---|---|---:|---:|---:|---:|---:|---:|
-| 4.1 | JD analysis — extraction | 32 | 19 | 3 | 2 | 8 | 79% |
-| 4.2 | JD analysis — posting vs profile | 14 | 10 | 3 | 1 | 0 | 71% |
-| 4.3 | ATS analysis modal | 13 | 6 | 2 | 3 | 2 | 55% |
-| 4.4 | Asset steps — card + header | 33 | 24 | 7 | 0 | 2 | 77% |
-| 4.5 | Field blocks | 42 | 32 | 1 | 2 | 7 | 91% |
-| 4.6 | Keyword detail panel | 11 | 5 | 1 | 3 | 2 | 56% |
-| 4.7 | Inline "Ask for a change" | 9 | 7 | 1 | 1 | 0 | 78% |
-| 4.8 | QC & evidence step | 25 | 14 | 5 | 2 | 4 | 67% |
-| 4.9 | Per-asset QC drawer | 14 | 12 | 1 | 0 | 1 | 92% |
-| 4.10 | Review & send | 8 | 8 | 0 | 0 | 0 | **100%** |
-| 4.11 | Assistant | 9 | 0 | 2 | 6 | 1 | **0%** |
-| 4.12 | Prototype-only mode | *(5)* | — | — | — | — | out of scope |
-| **Total** | | **210** | **137** | **26** | **20** | **27** | **75%** |
+**Regenerated mechanically at `34eda36`**, not hand-maintained — the previous version of this table
+had gone stale (it still read `137 BUILT / 75%`, the figure from *before* the three-small batch,
+while the headline block above had already moved to 142). Every cell below is the parser's count of
+the 4th cell of each `| <section>-<n> |` row, so this table and the parser figure in §13a agree by
+construction. It therefore carries the parser's totals (150/23/12), which are the ones disclosed
+above as running two rows ahead of the hand-maintained block in each direction.
 
-Coverage is **not** evenly distributed. The two steps the reader spends their time on — the asset
-step (§4.4 + §4.5, 75 rows) and the QC surfaces (§4.8 + §4.9, 39 rows) — are at **74%** and
-**74%**. The two ends of the journey are where the gaps are: the JD step's evidence expansion
-(§4.1) and the send step (§4.10) plus the assistant (§4.11).
+| SPEC § | Surface | BUILT | PARTIAL | ABSENT | DELIB | BUILT % (of non-deliberate) |
+|---|---|---:|---:|---:|---:|---:|
+| 4.1 | JD analysis — extraction | 19 | 3 | 2 | 8 | 79% |
+| 4.2 | JD analysis — posting vs profile | 13 | 1 | 0 | 0 | 93% |
+| 4.3 | ATS analysis modal | 9 | 2 | 0 | 2 | 82% |
+| 4.4 | Asset steps — card + header | 25 | 6 | 0 | 2 | 81% |
+| 4.5 | Field blocks | 34 | 1 | 1 | 6 | 94% |
+| 4.6 | Keyword detail panel | 7 | 1 | 1 | 2 | 78% |
+| 4.7 | Inline "Ask for a change" | 7 | 1 | 1 | 0 | 78% |
+| 4.8 | QC & evidence step | 16 | 5 | 1 | 3 | 73% |
+| 4.9 | Per-asset QC drawer | 12 | 1 | 0 | 1 | 92% |
+| 4.10 | Review & send | 8 | 0 | 0 | 0 | **100%** |
+| 4.11 | Assistant | 0 | 2 | 6 | 1 | **0%** |
+| 4.12 | Prototype-only mode | — | — | — | — | out of scope |
+| **Total** | | **150** | **23** | **12** | **25** | **81%** |
+
+Coverage is **not** evenly distributed, and the shape of the remainder has changed. The three
+sections this batch touched are now the ones with almost nothing left: §4.2 (93%), §4.3 (82%) and
+§4.6 (78%) have **one ABSENT row between them**. What is left is concentrated at the two ends of the
+journey — the JD step's evidence expansion (§4.1, 2 ABSENT) and **the assistant (§4.11), which is 0%
+and holds 6 of the 12 remaining ABSENT rows**, half the entire remainder. §4.8 is now the weakest
+built-out section at 73%.
 
 ### 13c. THE DELTA — against `COMPONENT-INVENTORY.md`, 2026-08-24
 
@@ -670,31 +687,43 @@ question.
 
 Ranked by what a user would notice first, not by effort.
 
-**Three of the original top three have SHIPPED since this list was written**, and they are kept here
+**Eight of the original ten ranks have SHIPPED since this list was written**, and they are kept here
 struck through rather than deleted, so the ranking can be read as a record of what was actually
-worked on rather than as a list that quietly rewrites itself:
+worked on rather than as a list that quietly rewrites itself. What that record shows is that the
+ranking was USED: the work went down it in order, and the two ranks still open are the two that were
+never engineering questions - the assistant (an owner decision) and 4.6-9 (blocked on reading the
+owner's live data, not on code).
 
 | ~~#~~ | Row(s) | Shipped in | Evidence |
 |---|---|---|---|
 | ~~1~~ | ~~**4.1-14 → 4.1-19** — the evidence expansion~~ | `df2c9db` | Deploy run **32885823790** success. Six of seven rows; **4.1-20 remains** and is now ranked below. |
 | ~~2~~ | ~~**4.10-4, 4.10-6, 4.10-7** — the packet gate card, its per-item rows, `Open field →`~~ | `dd4f61c` | `PacketBuilder.jsx:939/956/962`. |
 | ~~3~~ | ~~**4.10-2** — the gate badge on the Review & send list~~ | `dd4f61c` | `PacketBuilder.jsx:928`. |
+| ~~1~~ | ~~**4.8-10** — the `Needs a decision` list, on the page~~ | `8d721a0` + `1a886a8` | `QcRail.jsx` `<Decisions>`, mounted between `<ChangeLog>` and the tab strip. The AC pass re-verdicted this to EXISTS-BUT-CONSTRAINED before any code: every input already rendered elsewhere; only the selector and the mount were missing. |
+| ~~3~~ | ~~**4.2-1** — the four fit cards~~ | `b73f8d6` | `PostingAnalysis.jsx:200`. Built on the DIMENSION axis by owner decision, not the prototype's four kinds. **Independent verification still outstanding.** |
+| ~~4~~ | ~~**4.6-10, 4.6-11** — the drop hatch~~ | `34eda36` | `assetBlocks.js:447`, `AssetBlocks.jsx:871-878`. Verifier-CONFIRMED, including its refutation of its own brief. **4.6-9 is NOT shipped and remains open below.** |
+| ~~5~~ | ~~**4.3-9, 4.3-10, 4.3-11** — the QC summary inside the ATS modal~~ | `34eda36` | `PostingAnalysis.jsx:793-846`. Verifier-CONFIRMED. Took §4.3 from 55% to 82% with no ABSENT row left. |
+| ~~6~~ | ~~**4.5-40** — `{{merge field}}` placeholders inline in static blocks~~ | `3101025` | `assetBlocks.js` `placeholderToken()`. The AC pass split this row: the field NAME is on the client, the template PROSE reaches no app route. |
+| ~~—~~ | ~~**4.1-3** — `See where each one is answered →`~~ | `2de4ae5` | `PostingAnalysis.jsx`, `POSTING_HOOKS.openQc`. Was listed as "just outside the ten". |
 
 ### The list as it now stands
 
 | # | Row(s) | SPEC | What the user loses | Cheap or expensive |
 |---:|---|---|---|---|
-| 1 | **4.8-10** — the `Needs a decision` list, on the page | §4.8 | SPEC §4.8 is explicit that the two lists are *"on the page, not behind a tab or a search"*. One is; this one is not. | Cheap — the data is already in the rail's payload. |
-| 2 | **4.11-1 → 4.11-8** — the assistant panel | §4.11 | Six ABSENT rows. **But read §12 first** — this may be a deliberate architectural replacement, and the evidence for that is a code comment rather than a recorded decision. **This is an owner question, not an engineering one**, and it moves the headline by ~4 points on its own. | Expensive if real; free if the substitution is ratified. |
-| 3 | **4.2-1** — the four fit cards | §4.2 | The comparison's headline. A reader lands on the JD step and gets a table where the prototype gives four cards. | Moderate. |
-| 4 | **4.6-9, 4.6-10, 4.6-11** — the keyword panel's escape hatches | §4.6 | No way to act on a keyword the reader disagrees with. Related to PC-3 in `PULL-CANDIDATES.md`. | Moderate; partly blocked on the term library being off. |
-| 5 | **4.3-9, 4.3-10, 4.3-11** — the QC summary inside the ATS modal | §4.3 | The modal the header score opens is keywords-only. | Moderate. |
-| 6 | **4.5-40** — `{{merge field}}` placeholders shown inline in static blocks | §4.5 | SPEC §4.5 asks for them explicitly *"so the user can see where merge fields land"*. | Cheap. |
-| 7 | **4.1-20** — `Where it is used →` on an evidenced requirement | §4.1 | The last row of the evidence cluster: a reader can see the excerpt that backs a requirement but cannot jump to the field that uses it. | Cheap-ish, but needs one real change: `D:jd-evidence-has-no-field-link` — a swap is keyed by `list`, not artifact, and the `list → artifact` map is built at render time on a different step. |
-| 8 | **4.5-12** — `PickList` (`type: 'select'` fields) | §4.5 | Portfolio only, so **no resume impact** — which is why it is last despite being a whole missing control. | Expensive, low value. |
+| 1 | **4.11-1 → 4.11-8** — the assistant panel | §4.11 | Six ABSENT rows — **half of the 12 that remain in the whole document**. **But read §12 first**: this may be a deliberate architectural replacement, and the evidence for that is a code comment rather than a recorded decision. **This is an owner question, not an engineering one**, and it moves the headline by ~4 points on its own. | Expensive if real; free if the substitution is ratified. |
+| 2 | **4.6-9** — the keyword panel's skill-swap hatch | §4.6 | The one row of §4.6 that did not ship with the drop hatch. Not blocked on code: it needs the owner's live skill fields read, and every route to them is currently down (`workflow_dispatch` wedged, Storage `403 CONNECT` from the sandbox, both Boost connectors `enabledInChat: false`). The parser and the Slides table reader for it are already built and on `main`. | Cheap once the data can be read. |
+| 3 | **4.1-20** — `Where it is used →` on an evidenced requirement | §4.1 | The last row of the evidence cluster: a reader can see the excerpt that backs a requirement but cannot jump to the field that uses it. | Cheap-ish, but needs one real change: `D:jd-evidence-has-no-field-link` — a swap is keyed by `list`, not artifact, and the `list → artifact` map is built at render time on a different step. |
+| 4 | **4.8-21** — `Ask why` on a swap row | §4.8 | A one-liner. Was previously listed as "just outside the ten"; it is now inside it because the ten shrank. | Cheap. |
+| 5 | **4.5-12** — `PickList` (`type: 'select'` fields) | §4.5 | Portfolio only, so **no resume impact** — which is why it is last despite being a whole missing control. | Expensive, low value. |
 
-**Just outside the ten**, and both one-liners: **4.1-3** (`See where each one is answered →`, the
-JD step's only route into QC) and **4.8-21** (`Ask why` on a swap row).
+**The list is down to five, and only one of them is ordinary engineering work.** Rank 1 is an owner
+decision, rank 2 is blocked on data access rather than code, and rank 5 is explicitly low value. The
+honest read is that the prototype-alignment backlog is close to exhausted for the packet module.
+
+**The ranking is not the full ABSENT set, and the two it omits are named rather than dropped.** The
+12 ABSENT rows are the 10 ranked above plus **4.1-6** (the extraction count coloured green when
+complete, red when not — a colour on a number that already renders) and **4.7-8** (`Forwards to the
+assistant`, which cannot be built independently of rank 1 and would move with it).
 
 ---
 
