@@ -3782,3 +3782,12 @@ coverage headline moved **125 of 183 (68%)** at `06df406` to **137 of 183 (75%)*
 was true only relative to the artifact published mid-session, and false relative to the day. The
 guard is the measurement, not the adjective: a progress claim states the two SHAs it is measured
 between, or it is not a progress claim.
+
+**CI was dead, not flaky, and it was dead in the direction that hides things.** While PR #57 was
+open the `app` job failed on all three heads. Ground-truthed against the base branch rather than
+assumed: `test.yml` runs 326 and 330-333 on `main` are all `failure`, and my diff touches no
+dependency, lockfile or workflow. Both browser steps never started —
+`browserType.launch: Executable doesn't exist`. The REQUIRED `test:margin` probe, the one that
+caught the blank-asset-step regression `npm test` could not see, **has never run on CI**. Fixed in
+`f5b98c5` with the line `ui-verify.yml:75` already used; verified locally first on this branch's
+code (margin 47/47, browser 52/52). Reported on the PR rather than fixed silently.

@@ -1816,6 +1816,24 @@ Read this before touching `packetBuildAll` or the packet screen.
 
 ### Hardening — authentication is not authorization, and I made the same mistake twice in one day
 
+**A comment asserting an environment fact is not a check of that fact — and a required guard that
+cannot START is worse than no guard.** `test.yml`'s app job had been RED on `main` since at least
+2026-08-25 20:06 (runs 326, 330-333, all `failure`). Cause: both browser steps died at
+`browserType.launch: Executable doesn't exist at .../chromium_headless_shell-1228/...`. The workflow
+comment claimed *"Chromium is preinstalled on the runner image via Playwright's own download"* — it
+is not; `npm ci` installs the playwright PACKAGE, the binaries are a separate download. So the
+comment stood in for the check.
+
+What it cost: `test:margin` is REQUIRED, and required because it caught a blank-screen regression the
+unit suite structurally cannot see (a prop threaded into a `<Marked>` call site in a sibling that
+never received it — every list field blank, `npm test` green at 275/275). **That probe had never
+executed on CI.** A red X that is always red teaches everyone to ignore the job, which is exactly
+what happened — several sessions merged past it. Fixed in `f5b98c5` by porting the line
+`ui-verify.yml:75` already had. Nothing skipped, disabled or made non-fatal.
+
+The reusable rule: **before trusting a green or dismissing a red, confirm the check actually RAN.**
+A step that exits before any test body runs is not a result in either direction.
+
 **A progress claim states the two SHAs it is measured between, or it is not a progress claim.**
 I told the owner the tab percentages were unchanged and let that read as no progress today. The
 owner pushed back — *"double check that you are right... it seems almost impossible to spend so much
