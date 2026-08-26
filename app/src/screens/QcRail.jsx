@@ -1,13 +1,13 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api } from '../api.js'
 import { Pill, toneColor } from '../shell.jsx'
-import AssetGateDrawer from './AssetGateDrawer.jsx'
-import { assetLabel, checkLabel, fieldLabel, severityMeta, SEV_LABEL, fmtWhen } from '../assetGate.js'
+import AssetGateDrawer, { ScoreParts } from './AssetGateDrawer.jsx'
+import { assetLabel, checkLabel, fieldLabel, severityMeta, SEV_LABEL, fmtWhen, bandTone } from '../assetGate.js'
 import {
   QC_HOOKS, RAIL_TABS, railGate, railGateMeta, railAttention, railCounts, railTotals, railBody,
   railHeadline, verdictLine, railVerdict, engineRows, countLink, coverageCards,
   requirementState, qcStepState, packetGate, loopsModel, notApplicableRows, rowsForRequirement,
-  swapsForRequirement, pctWidth, arr, errText,
+  swapsForRequirement, arr, errText,
   railChangeLog, undoAvailability, revertOutcome, suggestScope, CHANGE_LOG_HEADLINE,
   railDecisions, DECISION_NOTE,
 } from '../qcRail.js'
@@ -853,25 +853,14 @@ export default function QcRail({ packetId, company, role, entries, setResult, re
             {headline.hasNumber
               ? <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                   <span style={{ fontSize: 30, fontWeight: 800, lineHeight: 1.05 }}>{headline.value}</span>
-                  {headline.band && <Pill tone={headline.band === 'strong' ? 'green' : headline.band === 'acceptable' ? 'yellow' : 'red'}>{String(headline.band).replace(/_/g, ' ')}</Pill>}
+                  {headline.band && <Pill tone={bandTone(headline.band)}>{String(headline.band).replace(/_/g, ' ')}</Pill>}
                 </div>
               : <div className="px-small">{headline.why}</div>}
           </div>
           <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {headline.parts.map((p) => (
-              <div key={p.key} data-qc={QC_HOOKS.component} data-qc-part={p.key} data-qc-measured={p.value == null ? '0' : '1'}>
-                <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
-                  <span style={{ fontSize: 12, flex: 1 }}>{p.label}</span>
-                  {p.value == null
-                    ? <Pill tone="panel">not measured</Pill>
-                    : <span style={{ fontSize: 13, fontWeight: 700 }}>{p.value}</span>}
-                </div>
-                {p.value != null && (
-                  <div className="px-bar" style={{ marginTop: 4 }}><i style={{ width: pctWidth(p.value) }} /></div>
-                )}
-                <div className="px-small" style={{ marginTop: 2 }}>{p.source || 'no source was recorded for this part'}</div>
-              </div>
-            ))}
+            {/* The SAME component the drawer's Match tab renders, in its compact variant. This
+                block and that one used to be two copies of one thing. */}
+            <ScoreParts parts={headline.parts} variant="rail" hook={QC_HOOKS.component} />
           </div>
         </div>
       </div>

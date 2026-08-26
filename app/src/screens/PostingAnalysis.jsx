@@ -25,8 +25,15 @@ import {
   COMPARE_COLUMNS, COMPARE_SCOPE_NOTE, comparisonStaleNote,
   keywordGroupMeaning,
   evidencePresentation,
+  TALLY_SCORE_DEFER,
 } from '../postingAnalysis.js'
 import { HIGHLIGHT_CLASS } from '../highlight.js'
+// 4.3-11 is a RELOCATION, not a new component: GateBadge is the badge the packet screen, the
+// packets list and the drawer already render, and <ScoreParts> is the one score-bar renderer the
+// drawer's Match tab and the QC rail render. Both are imported. A copy of either would be a second
+// opinion about a gate, or a second set of bars, on a screen that cannot see the first.
+import { GateBadge, ScoreParts } from './AssetGateDrawer.jsx'
+import { bandTone } from '../assetGate.js'
 
 /**
  * The viewport width, for the keyword list's 2-up / 1-up rule (P8.7).
@@ -769,8 +776,83 @@ export function AnalysisRunCard({ busy, onRun, hasRun, result, extra }) {
   )
 }
 
+// ── SPEC 4.3-9/10/11: the QC summary, inside the tally modal ────────────────────────────────────
+//
+// THIS COMPONENT DERIVES NOTHING. Every sentence, every row and the score itself come from
+// qcSummaryModel() (qcRail.js), which reads the same useQcEntries() payload the QC rail, the step
+// circle, the asset badges and the ship gate read. The modal opens from the JD step, where the
+// reader cannot see the rail to check it against - so a number computed here would be a second
+// opinion nobody could reconcile.
+//
+// What it must NOT say: that the packet is clear (there is no packet-level score, and no verdict is
+// computed here), or a composite for anything but the ONE artifact it names.
+function QcSummaryBlock({ model }) {
+  if (!model) return null
+  const scored = model.state === 'scored'
+  return (
+    <div data-qc={POSTING_HOOKS.qcSummary} data-qc-state={model.state}>
+      <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 6 }}>QC summary</div>
+      <div className="px-note">
+        <b>{model.sentence}</b>{' '}{model.detail}
+        {/* Which artifact this score belongs to, always. artifact_score is per artifact; the packet
+            has no composite of its own and averaging the assets would invent one. */}
+        {model.scope && <div style={{ marginTop: 4 }}>{model.scope}.</div>}
+      </div>
+
+      {scored && (
+        <div data-qc={POSTING_HOOKS.qcSummaryScore} style={{ marginTop: 8 }}>
+          {/* Named, every time. A composite belongs to ONE artifact and the reader has to be able
+              to see which, or a resume's score reads as the packet's. */}
+          <div className="px-small" style={{ textTransform: 'uppercase', letterSpacing: 1, color: 'var(--text-brand)' }}>
+            Match score - {model.subject}
+          </div>
+          {model.headline.hasNumber
+            ? (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                <span style={{ fontSize: 22, fontWeight: 800, lineHeight: 1.05 }}>{model.headline.value}</span>
+                {model.headline.band && <Pill tone={bandTone(model.headline.band)}>{String(model.headline.band).replace(/_/g, ' ')}</Pill>}
+                {/* The other big number in this modal is a MODEL estimate. This one is measured, and
+                    says so on the same line, because the two are inches apart. */}
+                <span className="px-small" style={{ color: 'var(--proto-ink2)' }}>
+                  measured by the checks engine and stored on the asset - not a model estimate
+                </span>
+              </div>
+            )
+            : <div className="px-small">{model.headline.why}</div>}
+        </div>
+      )}
+
+      {scored && (
+        <div style={{ marginTop: 8 }}>
+          <ScoreParts parts={model.headline.parts} variant="drawer"
+            hook={POSTING_HOOKS.qcSummaryPart} defer={TALLY_SCORE_DEFER} />
+        </div>
+      )}
+
+      {model.rows.length > 0 && (
+        <div style={{ marginTop: 6 }}>
+          <div className="px-small" style={{ color: 'var(--proto-ink3)', marginBottom: 2 }}>
+            Every asset this packet actually has, with the gate the checks engine last recorded for it.
+          </div>
+          {model.rows.map((r) => (
+            <div key={r.artifactId || r.type} data-qc={POSTING_HOOKS.qcSummaryRow}
+              data-qc-artifact={r.artifactId || undefined} data-qc-type={r.type || undefined}
+              style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '6px 0', borderBottom: '1px solid var(--proto-rule-soft)' }}>
+              <span style={{ flex: 1, fontSize: 13 }}>{r.label}</span>
+              {/* loading and error are GateBadge's own states. An asset whose checks could not be
+                  read is named with "gate unavailable", never dropped from the list - a missing row
+                  reads as "nothing wrong with it". */}
+              <GateBadge result={r.result} loading={r.loading} error={r.error} compact />
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ── the TALLY: the modal that replaced the 280px right column (D4) ──────────────────────────────
-export function KeywordTallyOverlay({ open, onClose, req, coveredKw, missingKw, gapsScoredAt, atsScore, keywordScore, onBuildAll, buildBusy, onGoResume }) {
+export function KeywordTallyOverlay({ open, onClose, req, coveredKw, missingKw, gapsScoredAt, atsScore, keywordScore, qcSummary, onBuildAll, buildBusy, onGoResume, onGoQc }) {
   if (!open) return null
   const parsedKeywords = modelKeywords(req?.requirements || [])
 
@@ -794,6 +876,10 @@ export function KeywordTallyOverlay({ open, onClose, req, coveredKw, missingKw, 
           <KeywordLibraryState score={keywordScore} />
         </div>
 
+        {/* The QC summary sits BELOW the library state on purpose: the score block defers its
+            keyword part upward to it, so "shown once, above" has to be true of the layout too. */}
+        <QcSummaryBlock model={qcSummary} />
+
         <ModelKeywords parsedKeywords={parsedKeywords} coveredKw={coveredKw} missingKw={missingKw} gapsScoredAt={gapsScoredAt} />
 
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', paddingTop: 10, borderTop: '1px solid var(--proto-rule-soft)' }}>
@@ -801,6 +887,13 @@ export function KeywordTallyOverlay({ open, onClose, req, coveredKw, missingKw, 
             {buildBusy ? 'Building…' : 'Rebuild every asset from this posting'}
           </button>
           <button className="px-btn" onClick={onGoResume}>Go to the resume step</button>
+          {/* SPEC 4.3-9. The SAME close-and-navigate shape as onGoResume, threaded as a prop: this
+              file must not import navigation. Hidden rather than stubbed when no handler is given -
+              a control that does nothing is the dead UI the standing rule forbids. */}
+          {onGoQc && (
+            <button className="px-btn" data-qc={POSTING_HOOKS.tallyOpenQc} onClick={onGoQc}
+              title="Close this panel and open the QC step">Open QC - every finding, per asset</button>
+          )}
         </div>
       </div>
     </Overlay>

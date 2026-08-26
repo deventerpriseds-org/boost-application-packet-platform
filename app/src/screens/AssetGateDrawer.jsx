@@ -5,7 +5,7 @@ import {
   ASSET_LABEL, assetLabel, STATUS_TONE, GATE_META, gateMeta, STATE_META, stateMeta,
   SEV_LABEL, severityFor, severityMeta,
   CHECK_LABEL, checkLabel, FIELD_LABEL, fieldLabel, METHOD_LABEL,
-  footerFor, reconcile, attentionSplit, engineRows, scoreParts, fmtWhen, arr, errText,
+  footerFor, reconcile, attentionSplit, engineRows, scoreParts, fmtWhen, arr, errText, pctWidth, bandTone,
   GATE_HOOKS,
 } from '../assetGate.js'
 import { HIGHLIGHT_CLASS } from '../highlight.js'
@@ -94,6 +94,71 @@ const Offenders = ({ items }) => {
       {list.map((o, i) => <li key={i} style={{ fontSize: 12, color: 'var(--proto-ink)', marginBottom: 2 }}>{String(o)}</li>)}
     </ul>
   )
+}
+
+/**
+ * THE score-part rows: label, value or "not measured", the bar, and the server's prose for WHY a
+ * part has no value. SPEC 4.3-10.
+ *
+ * ONE renderer, three surfaces. This markup existed TWICE before - here in <MatchTab> and again in
+ * QcRail.jsx's compact block - with two copies of the clamp, two "not measured" Pills and two
+ * "no source was recorded" fallbacks. SPEC 4.3-10 asked for it a THIRD time, inside the keyword
+ * tally modal, which is where a paste becomes a divergence: the same three parts saying different
+ * things on two screens is the failure the whole score/gate split exists to prevent.
+ *
+ * `variant` carries the only real difference between the surfaces - the drawer boxes its rows, the
+ * rail runs them flush in a 230px column - and nothing else. No variant may change WHAT is said.
+ *
+ * `defer` is 4.3-10's other half: { kw: 'sentence' } renders that part's label with NO number and
+ * NO bar, and the sentence in place of the source. The tally modal already prints
+ * `score.keyword_coverage` through <KeywordLibraryState>, and the same database column under two
+ * different labels on one screen is one measurement pretending to be two.
+ */
+const SCORE_PART_STYLE = {
+  drawer: {
+    box: 'px-box-soft', row: { padding: 10, marginBottom: 8 },
+    head: { display: 'flex', alignItems: 'center', gap: 8 },
+    label: { fontSize: 13, fontWeight: 600, flex: 1 },
+    value: { fontSize: 15, fontWeight: 700 }, barTop: 6, srcTop: 6,
+  },
+  rail: {
+    box: undefined, row: undefined,
+    head: { display: 'flex', alignItems: 'baseline', gap: 6 },
+    label: { fontSize: 12, flex: 1 },
+    value: { fontSize: 13, fontWeight: 700 }, barTop: 4, srcTop: 2,
+  },
+}
+
+export function ScoreParts({ parts, variant = 'drawer', hook, defer }) {
+  const v = SCORE_PART_STYLE[variant] || SCORE_PART_STYLE.drawer
+  return arr(parts).map((p) => {
+    const deferred = (defer && defer[p.key]) || null
+    // A DEFERRED part is not an unmeasured one. It gets no "not measured" Pill, because the number
+    // exists and is on screen - just once, somewhere else.
+    const measured = !deferred && p.value != null
+    return (
+      <div key={p.key} className={v.box} style={v.row}
+        data-qc={hook || undefined}
+        data-qc-part={hook ? p.key : undefined}
+        data-qc-measured={hook ? (measured ? '1' : '0') : undefined}
+        data-qc-deferred={hook && deferred ? '1' : undefined}>
+        <div style={v.head}>
+          <span style={v.label}>{p.label}</span>
+          {deferred ? null
+            : p.value == null ? <Pill tone="panel">not measured</Pill>
+            : <span style={v.value}>{p.value}</span>}
+        </div>
+        {/* No bar for a part with no value. A 0%-wide bar and "not measured" are two different
+            claims, and the empty bar is the one a reader reads as zero. */}
+        {measured && (
+          <div className="px-bar" style={{ marginTop: v.barTop }}><i style={{ width: pctWidth(p.value) }} /></div>
+        )}
+        <div className="px-small" style={{ marginTop: v.srcTop }}>
+          {deferred || p.source || 'no source was recorded for this part'}
+        </div>
+      </div>
+    )
+  })
 }
 
 // One check row. The severity pill is the only colour signal, and not_applicable carries its own
@@ -301,23 +366,12 @@ function MatchTab({ result }) {
           : (
             <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
               <div style={{ fontSize: 28, fontWeight: 700 }}>{s.composite}</div>
-              <Pill tone={s.band === 'strong' ? 'green' : s.band === 'acceptable' ? 'yellow' : 'red'}>{String(s.band || '').replace(/_/g, ' ')}</Pill>
+              <Pill tone={bandTone(s.band)}>{String(s.band || '').replace(/_/g, ' ')}</Pill>
             </div>
           )}
       </Section>
       <Section title="What it is made of">
-        {parts.map((p) => (
-          <div key={p.key} className="px-box-soft" style={{ padding: 10, marginBottom: 8 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <span style={{ fontSize: 13, fontWeight: 600, flex: 1 }}>{p.label}</span>
-              {p.value == null ? <Pill tone="panel">not measured</Pill> : <span style={{ fontSize: 15, fontWeight: 700 }}>{p.value}</span>}
-            </div>
-            {p.value != null && (
-              <div className="px-bar" style={{ marginTop: 6 }}><i style={{ width: Math.max(0, Math.min(100, Number(p.value))) + '%' }} /></div>
-            )}
-            <div className="px-small" style={{ marginTop: 6 }}>{p.source || 'no source was recorded for this part'}</div>
-          </div>
-        ))}
+        <ScoreParts parts={parts} variant="drawer" />
         {weights && (
           <div className="px-small">weights: must-haves {weights.mustHave}, keywords {weights.keyword}, seniority {weights.seniority} (engine v{s.engine_version})</div>
         )}

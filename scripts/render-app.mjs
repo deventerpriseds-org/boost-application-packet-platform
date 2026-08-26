@@ -94,6 +94,18 @@ await page.evaluate((o) => localStorage.setItem('ee_auth_user', JSON.stringify({
 await page.goto(`http://localhost:${PORT}/${ROUTE}`, { waitUntil: 'domcontentloaded' })
 await page.reload({ waitUntil: 'networkidle' })
 await page.waitForTimeout(Number(arg('settle', '3000')))
+// Optional interaction BEFORE the shot, so a surface that only exists behind a click - a tab, a
+// disclosure, the keyword tally modal - can be rendered here rather than only on a GH runner. The
+// same capability ui-verify.mjs has had as CLICK_SEL since P8.5; this is the local half, added for
+// SPEC 4.3-9's QC summary, which lives inside a modal and is otherwise unreachable from the sandbox.
+const CLICK = arg('click', '')
+if (CLICK) {
+  const target = page.locator(CLICK).first()
+  if (await target.count()) await target.click({ timeout: 5000 })
+  else pageErrors.push(`click selector not found: ${CLICK}`)
+  await page.waitForTimeout(Number(arg('clickwait', '900')))
+}
+
 // Scroll a named region into view before the shot, so a screenshot can show ONE surface rather than
 // a full page nobody can read. Added for the 4.2-1 fit-card comparison; harmless when unset.
 const SCROLL = arg('scrollto', '')
@@ -108,6 +120,7 @@ if (!has('text')) await page.screenshot({ path: OUT, fullPage: has('full') })
 
 console.log(JSON.stringify({
   route: ROUTE,
+  clicked: CLICK || null,
   out: has('text') ? null : OUT,
   bodyLen: text.length,
   count: SEL ? { selector: SEL, count } : null,

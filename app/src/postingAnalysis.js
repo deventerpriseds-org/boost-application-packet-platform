@@ -67,6 +67,30 @@ export const POSTING_HOOKS = {
   compareCard: 'compare-card',          // one card (carries data-qc-dimension and data-qc-fit)
   compareCardNote: 'compare-card-note', // 4.2-4 - the API's own named-missing enumeration, verbatim
   compareStale: 'compare-stale',        // carries data-qc-stale - why the stored rows are not current
+  // SPEC 4.3-9/10/11 - the QC summary inside the tally modal. Prefixed `tally-` so none of them can
+  // collide with QC_HOOKS' `qc-*` on the QC step, which the cross-screen union test checks.
+  qcSummary: 'tally-qc-summary',        // the block root (carries data-qc-state - six of them)
+  qcSummaryScore: 'tally-qc-score',     // the composite, or the sentence saying there is not one
+  qcSummaryPart: 'tally-qc-score-part', // one score part (data-qc-part / -measured / -deferred)
+  qcSummaryRow: 'tally-qc-asset',       // one asset's gate row (carries data-qc-artifact)
+  tallyOpenQc: 'tally-open-qc',         // 4.3-9 - closes the modal and opens the QC step
+}
+
+/**
+ * 4.3-10, resolved as AC B.4 branch (a): the tally modal shows `keyword_coverage` ONCE.
+ *
+ * <KeywordLibraryState> already renders that column in this modal, with three states and the
+ * server's own prose. `scoreParts(score)[1]` is the SAME column under a different label
+ * ("Keywords present"), and the naming rule at the top of PostingAnalysis.jsx means the two labels
+ * are not even interchangeable - "ATS" belongs to the term library and its coverage, so the score
+ * part may not borrow it and the library state may not drop it. Two labels over one number on one
+ * screen is one measurement pretending to be two.
+ *
+ * So the score block defers that part: the row keeps its LABEL - dropping it would hide which three
+ * parts a composite needs - and carries this sentence instead of a number and a bar.
+ */
+export const TALLY_SCORE_DEFER = {
+  kw: 'Shown once, above, as coverage against the ATS term library - the same measurement, in one place.',
 }
 
 // -- the comparison's grade vocabulary (P8.4) ---------------------------------------------------

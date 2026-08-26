@@ -388,6 +388,28 @@ export function scoreParts(score) {
   ]
 }
 
+/**
+ * The colour a stored band is shown in. THREE surfaces render the band pill - the drawer's Match
+ * tab, the QC rail's compact block and the tally modal - and all three had the same ternary typed
+ * out. The mapping is a reading of the SERVER's word, never a re-grading: an unknown band falls to
+ * `red` rather than to green, because an unrecognised verdict is not permission.
+ */
+export const bandTone = (band) => (band === 'strong' ? 'green' : band === 'acceptable' ? 'yellow' : 'red')
+
+/**
+ * A 0-100 value as a bar width, clamped. Never NaN, never negative, never over 100.
+ *
+ * Lives beside scoreParts() because it is the score bar's clamp and the ONE component that draws
+ * that bar (<ScoreParts>, AssetGateDrawer.jsx) reads it from here. It was in qcRail.js while the
+ * drawer hand-inlined `Math.max(0, Math.min(100, Number(p.value)))` - the same clamp written twice,
+ * and the inline copy rendered `NaN%` for a non-numeric value where this one renders `0%`.
+ */
+export function pctWidth(value) {
+  const n = Number(value)
+  if (!Number.isFinite(n)) return '0%'
+  return Math.max(0, Math.min(100, n)) + '%'
+}
+
 export const fmtWhen = (v) => { if (!v) return 'never'; const d = new Date(v); return Number.isNaN(d.getTime()) ? String(v) : d.toLocaleString() }
 export const arr = (v) => (Array.isArray(v) ? v : [])
 export const errText = (e) => String((e && e.message) || e)

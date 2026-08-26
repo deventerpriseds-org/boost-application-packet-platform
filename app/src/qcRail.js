@@ -14,13 +14,13 @@
 // "what are the three score parts" and "what colour is a state". Only what is genuinely new to the
 // PACKET-level rail lives here.
 import {
-  engineRows, scoreParts, gateMeta, stateMeta, arr, severityFor, reconcile,
+  engineRows, scoreParts, gateMeta, stateMeta, arr, severityFor, reconcile, assetLabel, pctWidth,
   correctionsState, orderCorrections, correctionRow, correctionSentence, correctionAnomalies,
   correctionSourceText, undoAvailability, revertOutcome, suggestScope,
   CHANGE_LOG_HEADLINE, CORRECTION_SOURCE, CORRECTION_REVERT_ROUTE,
 } from './assetGate.js'
 
-export { engineRows, scoreParts, gateMeta, stateMeta }
+export { engineRows, scoreParts, gateMeta, stateMeta, pctWidth }
 
 // P8.6's change log reads the SAME payload the gate and the counters read, so its selectors live
 // beside theirs in assetGate.js and are re-exported here rather than reimplemented. A second
@@ -686,12 +686,9 @@ export function swapsForRequirement(swaps, requirementId) {
   return requirementId ? rows.filter((s) => s && s.requirement_id === requirementId) : rows
 }
 
-/** A 0-100 value as a bar width, clamped. Never NaN, never negative, never over 100. */
-export function pctWidth(value) {
-  const n = Number(value)
-  if (!Number.isFinite(n)) return '0%'
-  return Math.max(0, Math.min(100, n)) + '%'
-}
+// pctWidth moved to ./assetGate.js beside scoreParts() - the score-part bar renderer now lives in
+// ONE component (AssetGateDrawer's <ScoreParts>), and that component may not import this module.
+// Re-exported above, so every existing caller and test keeps its import.
 
 // ── coverage ────────────────────────────────────────────────────────────────────────────────────
 
@@ -866,9 +863,11 @@ export function requirementState(card, row) {
  * recorded override. That is approvalBlock() in api/src/functions/tests/appChecks.ts, restated as a
  * question about the whole packet rather than one artifact - the same rule, not a second opinion.
  */
+export const NO_ASSETS_REASON = 'this packet has no assets to check'
+
 export function qcStepState(entries) {
   const list = arr(entries)
-  if (!list.length) return { done: false, reason: 'this packet has no assets to check' }
+  if (!list.length) return { done: false, reason: NO_ASSETS_REASON }
   const unchecked = list.filter((e) => railGate(e && e.result) === 'unchecked')
   if (unchecked.length) {
     return { done: false, reason: unchecked.length + ' asset(s) have never been checked - that is not a pass' }
@@ -891,6 +890,97 @@ export function qcStepState(entries) {
 }
 
 export function qcStepDone(entries) { return qcStepState(entries).done }
+
+/**
+ * SPEC 4.3-9/10/11 - what the keyword tally modal's QC summary says about itself.
+ *
+ * PURE, and it DERIVES NOTHING. No gate, no severity, no count, no arithmetic: every `result` is
+ * handed to <GateBadge> exactly as the server sent it, and the score is read through railHeadline()
+ * - the same selector the QC rail's own block reads. A second opinion about a gate rendered inches
+ * from the first is how one screen comes to contradict another, and this modal sits on the JD step
+ * where the reader cannot see the rail to compare.
+ *
+ * `scored` is the ONE entry whose artifact_score is rendered. The CALLER picks it (PacketBuilder
+ * already computes it as the resume entry) and passes its type, so this module holds no second
+ * hardcoded artifact-type list and the packet never acquires a composite of its own: `artifact_score`
+ * is per artifact, and averaging four of them would be exactly the fabricated composite
+ * computeArtifactScore refuses to produce.
+ *
+ * SIX states, and they are six different sentences, because they are six different claims:
+ *   no_assets         nothing has been built - not a pass, and not "unscored"
+ *   no_scored_asset   assets exist, but the one this block scores is not among them
+ *   unreadable        its checks payload could not be read - an absence of evidence, reported
+ *   reading           the payload is still in flight
+ *   not_scored        the payload arrived with NO score row at all (TODAY'S LIVE STATE: every
+ *                     artifact in docs/qc-evidence/fixtures.json has `score: null`)
+ *   scored            a score row exists; railHeadline() decides whether it has a composite
+ * `not_scored` and a stored row whose `composite` is null are NOT the same claim, and printing one
+ * sentence for both would report "no overall number was stored for this run" for an asset no run
+ * ever touched.
+ */
+export function qcSummaryModel(entries, { scored = null, scoredType = null } = {}) {
+  const list = arr(entries)
+  const subject = assetLabel(scoredType)
+  const lower = subject.toLowerCase()
+  // The rows are the packet's REAL artifacts, in the order the packet lists them - never a fixed
+  // type list, which would draw gate rows for assets this packet does not have.
+  const rows = list.map((e) => ({
+    artifactId: e.artifactId || (e.artifact && e.artifact.id) || null,
+    type: e.type || (e.artifact && e.artifact.type) || null,
+    label: e.label || assetLabel(e.type || (e.artifact && e.artifact.type)),
+    result: e.result || null,
+    loading: !!e.resultLoading,
+    error: e.resultError || null,
+  }))
+  // AC B.8, and it is the same sentence the rail prints for the same reason.
+  const scope = subject + ' only - there is no packet-wide score, and averaging the assets would invent one'
+  const base = { subject, rows, scope, score: null, headline: null }
+  if (!list.length) {
+    return {
+      ...base, state: 'no_assets', rows: [], scope: null,
+      sentence: 'Nothing has been built yet, so ' + NO_ASSETS_REASON + '.',
+      detail: 'There is no gate and no score because there is nothing to check. That is not a pass.',
+    }
+  }
+  if (!scored) {
+    return {
+      ...base, state: 'no_scored_asset',
+      sentence: 'No ' + lower + ' has been built for this packet, so there is no score to show.',
+      detail: 'The assets that do exist are listed below with their own gate. None of their scores stands in for the ' + lower + '.',
+    }
+  }
+  if (scored.resultError) {
+    return {
+      ...base, state: 'unreadable',
+      sentence: 'The checks for the ' + lower + ' could not be read, so no score is shown.',
+      detail: 'The server said: ' + String(scored.resultError) + '. An unread payload is an absence, not a pass.',
+    }
+  }
+  if (!scored.result) {
+    return {
+      ...base, state: scored.resultLoading ? 'reading' : 'not_scored',
+      sentence: scored.resultLoading
+        ? 'Reading the score for the ' + lower + '...'
+        : 'No score has been computed for the ' + lower + ' yet.',
+      detail: scored.resultLoading
+        ? 'Nothing is claimed until it arrives.'
+        : 'The checks have not been run for it, so there is no score row to read. That is an absence, not a zero.',
+    }
+  }
+  const score = scored.result.score || null
+  if (!score) {
+    return {
+      ...base, state: 'not_scored',
+      sentence: 'No score has been computed for the ' + lower + ' yet.',
+      detail: 'The checks ran but stored no score row for it, so there is nothing to read. That is an absence, not a zero.',
+    }
+  }
+  return {
+    ...base, state: 'scored', score, headline: railHeadline(score),
+    sentence: 'The match score for the ' + lower + '.',
+    detail: 'Measured by the checks engine and stored on the artifact, not estimated by a model.',
+  }
+}
 
 /** The gate that colours the step circle: the worst state any asset is in. */
 export function packetGate(entries) {

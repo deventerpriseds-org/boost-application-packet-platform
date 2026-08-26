@@ -13,7 +13,7 @@ import { postingBody } from '../postingAnalysis.js'
 import { PACKET_HOOKS, ASSET_BODY_DEFAULT_OPEN, regenerateWithNote } from '../packetBuilder.js'
 import QcRail, { useQcEntries } from './QcRail.jsx'
 import { GateBadge } from './AssetGateDrawer.jsx'
-import { qcStepState, packetGate, railGateMeta, packetReadiness, packetFailList } from '../qcRail.js'
+import { qcStepState, packetGate, railGateMeta, packetReadiness, packetFailList, qcSummaryModel } from '../qcRail.js'
 
 const TYPE_LABEL = {
   resume: 'Resume', compact_resume: 'Compact resume', cover: 'Cover letter',
@@ -436,8 +436,17 @@ export default function PacketBuilder({ id, step }) {
     withRemediation: activeStep === 'qc',
   })
   const qc = qcStepState(qcEntries)
-  const resumeEntry = qcEntries.find((e) => e.artifact.type === 'resume') || null
+  // ONE literal, named once. Which artifact carries the packet's headline score is a
+  // behaviour-affecting choice the owner may one day want to make in Settings; it was already fixed
+  // to the resume here before SPEC 4.3-9, and this change does not deepen it - the tally modal is
+  // handed the type rather than looking for a second one of its own, and the screen SAYS which
+  // artifact it is scoring rather than presenting it as the packet's.
+  const SCORED_TYPE = 'resume'
+  const resumeEntry = qcEntries.find((e) => e.artifact.type === SCORED_TYPE) || null
   const keywordScore = (resumeEntry && resumeEntry.result && resumeEntry.result.score) || null
+  // SPEC 4.3-9/10/11. Derived ONCE, here, off the same useQcEntries() payload the rail, the step
+  // circle, the asset badges and the ship gate read - so the modal cannot disagree with any of them.
+  const qcSummary = qcSummaryModel(qcEntries, { scored: resumeEntry, scoredType: SCORED_TYPE })
 
   const load = useCallback(async () => {
     try {
@@ -1014,10 +1023,11 @@ export default function PacketBuilder({ id, step }) {
   const keywordTally = (
     <KeywordTallyOverlay
       open={atsOpen} onClose={() => setAtsOpen(false)}
-      req={req.data} keywordScore={keywordScore}
+      req={req.data} keywordScore={keywordScore} qcSummary={qcSummary}
       coveredKw={coveredKw} missingKw={missingKw} gapsScoredAt={p.atsGapsScoredAt} atsScore={atsScore}
       onBuildAll={() => buildAll({ regen: true })} buildBusy={allBusy}
-      onGoResume={() => { setAtsOpen(false); setActiveStep('resume') }} />
+      onGoResume={() => { setAtsOpen(false); setActiveStep('resume') }}
+      onGoQc={() => { setAtsOpen(false); setActiveStep('qc') }} />
   )
 
   if (mobile) {

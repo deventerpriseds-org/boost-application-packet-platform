@@ -801,3 +801,126 @@ test('H:jd-card-keeps-its-existing-header-control: the columns toggle still pers
   assert.match(jsx, /\{columns \? 'Show as tabs' : 'Show as columns'\}/,
     'the Show as tabs/columns control was displaced by the new one')
 })
+
+// ── SPEC 4.3-9/10/11: the QC summary inside the keyword tally modal ─────────────────────────────
+
+/** The source of ONE component, so a guard cannot be satisfied by correct code in its neighbour. */
+function regionOf(code, startsWith) {
+  const at = code.indexOf(startsWith)
+  assert.ok(at > 0, `${startsWith} is gone from the file`)
+  const rest = code.slice(at + startsWith.length)
+  const ends = ['\nfunction ', '\nexport function ', '\n// \u2500'].map((m) => rest.indexOf(m)).filter((i) => i > 0)
+  return code.slice(at, at + startsWith.length + (ends.length ? Math.min(...ends) : rest.length))
+}
+
+test('H:tally-qc-summary-computes-nothing: the modal renders the model, it does not re-decide it', () => {
+  // AC B.1, and it is the AC that sets this change's tier. The tally modal opens from the JD step,
+  // where the reader cannot see the QC rail. A gate word, a count or a composite computed HERE
+  // would be a second opinion with nothing on screen to reconcile it against - the exact shape of
+  // the count bug that put every rule for this rail into qcRail.js in the first place.
+  const region = regionOf(stripComments(POSTING_ANALYSIS), 'function QcSummaryBlock(')
+  for (const banned of ['railGate(', 'gateMeta(', 'scoreParts(', '.filter(', '.reduce(', "=== 'fail'", "=== 'pass'", '/ 3']) {
+    assert.ok(!region.includes(banned), `the QC summary derives its own verdict: ${banned}`)
+  }
+  // Everything it prints comes off the model or off a shared component.
+  assert.match(region, /model\.sentence/)
+  assert.match(region, /model\.headline\.why/, 'the null-composite prose is restated instead of read from railHeadline')
+  assert.match(region, /<GateBadge /, 'the gate is not rendered by the shared badge')
+  assert.match(region, /<ScoreParts /, 'the bars are not rendered by the shared component')
+})
+
+test('H:gate-badge-is-imported-not-copied: 4.3-11 is a relocation, and a relocation may not paste', () => {
+  // The coverage doc calls 4.3-11 "a relocation, not a missing component". A relocation that COPIES
+  // is the duplication the extend-don\'t-duplicate rule forbids, and GateBadge\'s five states -
+  // including "gate unavailable" and "not loaded", which are the two an inline copy always drops -
+  // were already written once and imported by three files.
+  const strip = (s) => s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')
+  const walk = (dir, out = []) => {
+    for (const name of readdirSync(dir)) {
+      const full = join(dir, name)
+      if (statSync(full).isDirectory()) walk(full, out)
+      else if (/\.(js|jsx)$/.test(name)) out.push(full)
+    }
+    return out
+  }
+  const srcDir = fileURLToPath(new URL('../src/', import.meta.url))
+  const definers = walk(srcDir).filter((f) => /function\s+GateBadge\s*\(/.test(strip(readFileSync(f, 'utf8'))))
+  assert.deepEqual(definers.map((f) => f.slice(srcDir.length)), ['screens/AssetGateDrawer.jsx'],
+    'GateBadge must be DEFINED once; every other surface imports it')
+  assert.match(POSTING_ANALYSIS, /import \{ GateBadge, ScoreParts \} from '\.\/AssetGateDrawer\.jsx'/,
+    'the tally modal no longer imports the shared badge and bar renderer')
+})
+
+test('H:score-bar-has-one-home: no surface hand-writes a second set of score bars', () => {
+  // AC B.14. There were TWO before this change - MatchTab and the QC rail\'s compact block - each
+  // with its own clamp, its own "not measured" Pill and its own "no source was recorded" fallback,
+  // and 4.3-10 asked for a THIRD inside the tally modal. Three copies of one statement is how the
+  // same three parts come to say different things on different screens.
+  const strip = (s) => s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')
+  const walk = (dir, out = []) => {
+    for (const name of readdirSync(dir)) {
+      const full = join(dir, name)
+      if (statSync(full).isDirectory()) walk(full, out)
+      else if (/\.(js|jsx)$/.test(name)) out.push(full)
+    }
+    return out
+  }
+  const srcDir = fileURLToPath(new URL('../src/', import.meta.url))
+  // A `px-bar` is only a SCORE bar when it sits beside the score vocabulary. AssetBlocks.jsx:233
+  // draws one for a completion meter and is correct code; a guard that fired on it would be the
+  // cry-wolf failure that got two linters deleted from this repo.
+  const drawers = walk(srcDir).filter((f) => {
+    const code = strip(readFileSync(f, 'utf8'))
+    return code.includes('px-bar') && /not measured|scoreParts|\.parts\.map|SCORE_PART/.test(code)
+  })
+  assert.deepEqual(drawers.map((f) => f.slice(srcDir.length)), ['screens/AssetGateDrawer.jsx'],
+    'a second score-bar renderer is back')
+  assert.ok(!POSTING_ANALYSIS.includes('px-bar'), 'the tally modal hand-writes bars again')
+})
+
+test('H:tally-keyword-number-is-deferred-upward: one measurement, one place, in that order', () => {
+  // AC B.4 branch (a). The deferral sentence says "shown once, above", so the layout has to put
+  // KeywordLibraryState ABOVE the score block. The key-level half of this guard - that the defer
+  // map still matches a key scoreParts() emits - is H:tally-defer-key-tracks-scoreParts.
+  const code = stripComments(POSTING_ANALYSIS)
+  const region = regionOf(code, 'function QcSummaryBlock(')
+  assert.match(region, /defer=\{TALLY_SCORE_DEFER\}/,
+    'the score block no longer defers its keyword part - keyword_coverage is now on this screen twice')
+  const lib = code.indexOf('<KeywordLibraryState')
+  const block = code.indexOf('<QcSummaryBlock')
+  assert.ok(lib > 0 && block > 0 && lib < block,
+    'the score block claims the keyword number is shown ABOVE it, and it is not')
+  // The 30px model estimate keeps its disclaimer, and the composite carries its own provenance:
+  // two big numbers, and the reader must be able to tell which one was measured (AC B.5).
+  assert.match(code, /It is not keyword coverage, and no applicant tracking system produced it/)
+  assert.match(region, /measured by the checks engine and stored on the asset - not a model estimate/)
+})
+
+test('H:tally-summary-is-wired-in-the-packet-screen: the block is not a component nobody mounts', () => {
+  // THE GAP MY OWN DEFECT HUNT FOUND. Every other guard here proves the COMPONENT and the MODEL;
+  // both would stay green with the props never passed, and the QC summary would render nothing at
+  // all on the real screen. The browser probe hands the model in directly, so it cannot see this
+  // either. This is the producer half - the same producer/consumer pairing qcRail.test.mjs keeps
+  // for useQcEntries, and for the same reason: the two sides of a prop are where this repo has
+  // shipped write-only fields before.
+  const builder = stripComments(PACKET_BUILDER)
+  assert.match(builder, /qcSummaryModel\(qcEntries, \{ scored: resumeEntry, scoredType: SCORED_TYPE \}\)/,
+    'the QC summary model is no longer derived off the ONE useQcEntries payload every other consumer reads')
+  assert.match(builder, /qcSummary=\{qcSummary\}/, 'the tally modal is mounted without its model')
+  // AC B.13 - the identical close-and-navigate shape as the existing onGoResume, threaded as a
+  // prop. PostingAnalysis.jsx must never import navigation.
+  assert.match(builder, /onGoQc=\{\(\) => \{ setAtsOpen\(false\); setActiveStep\('qc'\) \}\}/,
+    'Open QC no longer closes the modal and navigates')
+  assert.ok(!/from '\.\.\/state\.jsx'/.test(POSTING_ANALYSIS),
+    'PostingAnalysis.jsx imports navigation instead of taking it as a prop')
+  // The scored artifact type stays ONE literal (the Config check): the modal is handed the type,
+  // it does not look for a second one of its own.
+  assert.match(builder, /const SCORED_TYPE = 'resume'/)
+  // `'resume'` is also this screen's STEP key, a dozen times over, so counting the literal proves
+  // nothing. What must stay singular is the ARTIFACT-TYPE comparison: a second one is a second
+  // place to change when the owner wants to choose which asset carries the score.
+  assert.ok(!/artifact\.type === 'resume'/.test(builder),
+    'the scored artifact type is compared against a literal again instead of SCORED_TYPE')
+  assert.equal((builder.match(/SCORED_TYPE/g) || []).length, 3,
+    'SCORED_TYPE must be declared once and used exactly twice - the lookup and the model call')
+})

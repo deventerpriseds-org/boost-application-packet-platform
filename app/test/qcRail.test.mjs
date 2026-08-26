@@ -17,8 +17,10 @@ import {
   coverageCards, requirementState, openSeqs, offenderSeq, qcStepState, qcStepDone, packetGate,
   loopsModel, rowsForRequirement, swapsForRequirement, pctWidth, packetReadiness,
   offendersByField, offendersForField, fieldSeverities,
-  railDecisions, DECISION_NOTE, packetFailList,
+  railDecisions, DECISION_NOTE, packetFailList, qcSummaryModel, NO_ASSETS_REASON,
 } from '../src/qcRail.js'
+import { scoreParts } from '../src/assetGate.js'
+import { TALLY_SCORE_DEFER } from '../src/postingAnalysis.js'
 
 const SRC = new URL('../src/', import.meta.url)
 const readSrc = (rel) => readFileSync(new URL(rel, SRC), 'utf8')
@@ -1333,4 +1335,122 @@ test('H:qc-entries-carry-what-the-gate-reads: producer and consumers agree on th
   const builder = stripComments(readSrc('screens/PacketBuilder.jsx'))
   assert.ok(/e\.artifactId === a\.id/.test(builder),
     'the asset gate badge no longer matches entries by artifactId')
+})
+
+// ── SPEC 4.3-9/10/11: the QC summary inside the keyword tally modal ─────────────────────────────
+//
+// The modal opens from the JD step, where the reader CANNOT see the QC rail to check it against.
+// Every one of these guards is about that: a sentence, a row or a number that disagrees with the
+// rail has no way of being caught by the person reading it.
+
+const tallyEntry = (id, type, label, result, extra = {}) => ({
+  artifact: { id, type }, artifactId: id, type, label, result,
+  resultLoading: false, resultError: null, ...extra,
+})
+const TALLY_SCORE = {
+  composite: 78, band: 'acceptable',
+  must_have_coverage: 62, must_have_source: 'measured over 13 must-have lines',
+  keyword_coverage: 71, keyword_source: 'measured against term library v4',
+  seniority_alignment: 55, seniority_source: 'graded by the independent reviewer',
+}
+
+test('H:tally-two-empties-two-sentences: no two states of the QC summary print the same claim', () => {
+  // "nothing has been built" and "the thing that carries the score has not been built" and "it was
+  // never checked" are three different facts. One sentence for two of them is how an absence gets
+  // read as a measurement - the failure the whole rail exists to prevent, arriving on a screen that
+  // cannot see the rail.
+  const resume = (result, extra) => tallyEntry('r1', 'resume', 'Resume', result, extra)
+  const cover = tallyEntry('c1', 'cover', 'Cover letter', { gate: 'warn', attention: 1 })
+  const cases = {
+    no_assets: qcSummaryModel([], { scored: null, scoredType: 'resume' }),
+    no_scored_asset: qcSummaryModel([cover], { scored: null, scoredType: 'resume' }),
+    unreadable: (() => { const e = resume(null, { resultError: 'HTTP 500' }); return qcSummaryModel([e], { scored: e, scoredType: 'resume' }) })(),
+    reading: (() => { const e = resume(null, { resultLoading: true }); return qcSummaryModel([e], { scored: e, scoredType: 'resume' }) })(),
+    not_scored: (() => { const e = resume({ gate: 'fail', attention: 2 }); return qcSummaryModel([e], { scored: e, scoredType: 'resume' }) })(),
+    scored: (() => { const e = resume({ gate: 'pass', attention: 0, score: TALLY_SCORE }); return qcSummaryModel([e], { scored: e, scoredType: 'resume' }) })(),
+  }
+  for (const [want, m] of Object.entries(cases)) assert.equal(m.state, want, `${want} reported ${m.state}`)
+  const sentences = Object.values(cases).map((m) => m.sentence)
+  assert.equal(new Set(sentences).size, sentences.length, 'two states share a sentence: ' + JSON.stringify(sentences))
+  // AC B.9 - the empty-packet sentence is qcStepState's own, not a second wording of it.
+  assert.ok(cases.no_assets.sentence.includes(NO_ASSETS_REASON), cases.no_assets.sentence)
+  assert.ok(qcStepState([]).reason.includes(NO_ASSETS_REASON))
+  // AC B.10 - a packet with no resume must not read as an empty packet, and must not borrow the
+  // cover letter's score.
+  assert.ok(!cases.no_scored_asset.sentence.includes(NO_ASSETS_REASON))
+  assert.equal(cases.no_scored_asset.score, null)
+  assert.equal(cases.no_scored_asset.headline, null)
+  assert.equal(cases.no_scored_asset.rows.length, 1)
+})
+
+test('H:tally-rows-are-the-packets-own-artifacts: never a fixed type list', () => {
+  // The prototype hardcodes ['resume','compact_resume','cover','portfolio'] (qc/packet.jsx:344),
+  // which draws gate rows for assets a packet does not have - fake data and dead UI in one row.
+  const mk = (n) => Array.from({ length: n }, (_, i) => tallyEntry('a' + i, 'cover', 'Cover letter', { gate: 'pass', attention: 0 }))
+  for (const n of [2, 5]) {
+    const m = qcSummaryModel(mk(n), { scored: null, scoredType: 'resume' })
+    assert.equal(m.rows.length, n, `${n} artifacts produced ${m.rows.length} rows`)
+  }
+  // Order and identity are the packet's, and the RESULT is passed through untouched: the badge
+  // reads the server's payload, and a copy made here would be a second opinion about a gate.
+  const result = { gate: 'warn', attention: 3, results: [{ state: 'fail', engine: 'reviewer' }] }
+  const entries = [tallyEntry('r1', 'resume', 'Resume', result), tallyEntry('v1', 'video', 'Intro video', null)]
+  const m = qcSummaryModel(entries, { scored: entries[0], scoredType: 'resume' })
+  assert.deepEqual(m.rows.map((r) => r.artifactId), ['r1', 'v1'])
+  assert.equal(m.rows[0].result, result, 'the row must hand the badge the SAME payload object')
+  assert.equal(m.rows[1].result, null, 'an unchecked asset keeps its null - never a substituted gate')
+})
+
+test('H:tally-scores-one-asset-and-says-which: no packet-level composite is ever formed', () => {
+  // artifact_score is per artifact. Averaging four of them would be exactly the fabricated
+  // composite computeArtifactScore refuses to produce, and it is the number a reader trusts most.
+  const strong = tallyEntry('r1', 'resume', 'Resume', { gate: 'pass', attention: 0, score: TALLY_SCORE })
+  const weak = tallyEntry('c1', 'cover', 'Cover letter', { gate: 'fail', attention: 9, score: { ...TALLY_SCORE, composite: 10 } })
+  const m = qcSummaryModel([strong, weak], { scored: strong, scoredType: 'resume' })
+  assert.equal(m.score.composite, 78, 'the scored asset\'s own composite, not a blend')
+  assert.equal(m.headline.value, 78)
+  assert.equal(m.subject, 'Resume')
+  // AC B.8 - the surface must NAME the artifact it is scoring, and refuse a packet-wide one.
+  assert.match(m.scope, /^Resume only - there is no packet-wide score/)
+  for (const bad of [44, 43.5, 88]) assert.ok(!String(m.scope).includes(String(bad)))
+})
+
+test('H:tally-unread-is-not-unscored: an error is reported, never rendered as an absence of score', () => {
+  const err = tallyEntry('r1', 'resume', 'Resume', null, { resultError: 'HTTP 500 from checks-result' })
+  const m = qcSummaryModel([err], { scored: err, scoredType: 'resume' })
+  assert.equal(m.state, 'unreadable')
+  assert.match(m.detail, /HTTP 500 from checks-result/, 'the server\'s own words are dropped')
+  assert.equal(m.score, null)
+  // And the row still names the asset: an omitted asset reads as "nothing wrong with it".
+  assert.equal(m.rows.length, 1)
+  assert.equal(m.rows[0].label, 'Resume')
+  assert.equal(m.rows[0].error, 'HTTP 500 from checks-result')
+})
+
+test('H:tally-defer-key-tracks-scoreParts: the keyword number cannot silently come back', () => {
+  // AC B.4 branch (a) works by KEY. Rename scoreParts' `kw` key and the defer map stops matching -
+  // silently, with no test failing and `keyword_coverage` printed twice on one screen under two
+  // labels. This is the guard for that rename.
+  const keys = scoreParts(TALLY_SCORE).map((p) => p.key)
+  assert.deepEqual(keys, ['must', 'kw', 'sen'])
+  for (const k of Object.keys(TALLY_SCORE_DEFER)) {
+    assert.ok(keys.includes(k), `TALLY_SCORE_DEFER defers "${k}", which scoreParts() no longer emits`)
+  }
+  assert.ok(Object.keys(TALLY_SCORE_DEFER).includes('kw'),
+    'the keyword part is no longer deferred - the tally modal now prints keyword_coverage twice')
+  // The deferral must point somewhere real: KeywordLibraryState is what renders it.
+  assert.match(TALLY_SCORE_DEFER.kw, /term library/i)
+})
+
+test('H:tally-summary-derives-nothing: the model reads selectors, it does not re-decide them', () => {
+  // qcRail.js's own header rule, applied to the newest selector in it. A gate re-derived here would
+  // be a THIRD opinion (checks.ts, railGate, and this) on a screen that shows none of the others.
+  const mod = stripComments(readSrc('qcRail.js'))
+  const at = mod.indexOf('export function qcSummaryModel')
+  assert.ok(at > 0, 'qcSummaryModel is gone')
+  const region = mod.slice(at, mod.indexOf('\nexport ', at + 10))
+  for (const banned of ['railGate(', 'gateMeta(', 'severityFor(', '.filter(', '.reduce(', "=== 'fail'", "=== 'pass'"]) {
+    assert.ok(!region.includes(banned), `qcSummaryModel derives a verdict of its own: ${banned}`)
+  }
+  assert.ok(region.includes('railHeadline('), 'the score must be read through railHeadline, not restated')
 })
