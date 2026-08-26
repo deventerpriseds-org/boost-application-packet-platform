@@ -738,6 +738,34 @@ create index if not exists artifact_score_idx on artifact_score(artifact_id, com
 -- no fact answers; the owner confirms or corrects them, which promotes them to 'owner_stated'.
 -- confirmed_at null means nobody has vouched for it yet, and an unconfirmed fact must never settle a
 -- gate - the same rule as absent evidence being not_applicable rather than pass.
+create table if not exists skill_bank_entry (
+  id            uuid primary key default uuid_generate_v4(),
+  owner_email   text not null,
+  label         text not null,              -- the skill as the owner wrote it, verbatim
+  -- Case/whitespace-folded form, and the ONLY thing uniqueness and dedup are decided on. Exact,
+  -- never fuzzy: a bank feeds a SELECT the owner picks from and a swap that moves a gate, so a
+  -- near-match collapsing two real skills into one is an accusation-grade error. H4's rule -
+  -- fuzzy matching is for RANKING, never for ACCUSING - applies directly.
+  label_norm    text not null,
+  -- Which of the owner's two named sources produced this row. First-class column, not a jsonb key,
+  -- because a re-seed has to be able to expire rows from ONE source without touching the other.
+  origin        text not null check (origin in ('master_context','portfolio_slide')),
+  source_ref    text not null,              -- the field name or slide/table coordinate it came from
+  -- Staleness, reusing correction.before_sha256's idea rather than inventing one: the digest of the
+  -- SOURCE text this row was derived from. A source that changed is detectable without re-parsing.
+  source_sha256 text,
+  fetched_at    timestamptz not null default now(),
+  updated_at    timestamptz not null default now(),
+  -- Idempotent re-seed. Without this the seeder duplicates the whole bank on every run, which is
+  -- exactly the gap that ruled out library_entity (it has no such constraint).
+  unique (owner_email, label_norm),
+  -- A blank label is not a skill. Seeding one would put an empty row in a picker the owner chooses
+  -- from, which is the no-fake-data rule failing quietly rather than loudly.
+  check (length(btrim(label)) > 0),
+  check (length(btrim(label_norm)) > 0)
+);
+create index if not exists skill_bank_entry_owner_idx on skill_bank_entry (owner_email, label_norm);
+
 create table if not exists owner_fact (
   id           uuid primary key default uuid_generate_v4(),
   owner_email  text not null,
@@ -1314,6 +1342,8 @@ alter table requirement_evidence add column if not exists proposal_version int;
 
 // Tables we expect to exist after migration (used by the runner to report).
 export const EXPECTED_TABLES = [
+  // D1/H11: a new store must be declared here or nothing proves it was actually created.
+  'skill_bank_entry',
   'correction',
   'persona', 'opportunity', 'contact', 'packet', 'artifact', 'outreach_message',
   'interview', 'offer', 'library_entity', 'asset_event', 'usage_metering',
