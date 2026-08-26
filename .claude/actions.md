@@ -3879,3 +3879,20 @@ reported it, which is the behaviour working as designed.
 
 **4.6-9 in progress:** `skill_bank_entry` executed against a populated DB (`3e46615`). Seeder, route,
 UI and write still to come; tier 1, so an independent verifier is required before it is called done.
+
+**ACT-2026-08-26-b — 4.2-1 fit cards, option A (owner-confirmed axis), DRAFT `2ec3902`.**
+Owner: *"I'm fine with a for the fit card but I'd like to confirm with a screenshot of the prototype
+and visual of your difference."* Both images rendered locally and delivered.
+
+| gate | state |
+|---|---|
+| AC by independent subagent BEFORE code | **DONE** — `AC-large-medium.md` Group A, 15 ACs (12:44) vs code (14:06) |
+| Implementation | DONE — 8 dimension-axis cards, app builds, 319 tests pass |
+| Guards / tests for the new region | **HELD** — deliberately, pending the owner's call on treatment |
+| Coverage re-verdict for 4.2-1/2/4 | **HELD** — same reason |
+| Independent verifier | **OUTSTANDING** — running now |
+
+Axis is the dimension set, not the prototype's four kinds, because per-kind coverage is not a number
+this system produces (`requirements.ts:61`: `coverage` is `'escalated' | null`). Option B tracked as
+a pull candidate. Open questions put to the owner: card density (8 too many?), whether the note line
+belongs on every card or only where something is missing, and cards above vs below the table.

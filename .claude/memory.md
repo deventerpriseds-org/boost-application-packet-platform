@@ -452,6 +452,16 @@ Key tables (PostgreSQL):
 - iOS testing: requires macOS runner or BrowserStack; categorically unavailable in Linux CCR
 
 ## Active work
+**2026-08-26 — 4.2-1 fit cards (option A) DRAFTED AND RENDERED, guards deliberately held.** The owner
+picked A and asked to see it before committing to the treatment: *"I'm fine with a for the fit card
+but I'd like to confirm with a screenshot of the prototype and visual of your difference."* Both
+rendered LOCALLY (never production) and sent: the prototype's 4 kind-axis cards, and 8 dimension-axis
+cards built in the app and driven by a real `dimensions.ts`-shaped payload, `pageErrors: []`.
+ACs came from an INDEPENDENT subagent BEFORE any code — `AC-large-medium.md` Group A, 15 ACs, doc at
+12:44, code at 14:06. Guards, tests and the coverage re-verdict are HELD until the owner confirms the
+treatment, because a guard pins a shape and pinning the wrong one is worse than none.
+Verification is OUTSTANDING and the row is not done until an independent verifier has run.
+
 Current task: **The three SMALL prototype gaps are BUILT and on PR #57** (`claude/three-small-ui-gaps`,
   commits `2de4ae5` 4.1-3, `3101025` 4.5-40, `8d721a0` 4.8-10). Owner-ordered: three small first,
   then the large (4.2-1 fit cards) and the two mediums (4.3-9/10/11, 4.6-9/10/11), which are QUEUED.
