@@ -3958,3 +3958,31 @@ chat — the exact one-toggle case CLAUDE.md says to check before claiming data 
 `Azure_pg_mcp` is enabled but its OAuth has lapsed AND it is the wrong database (`RAG_AI_Agents`).
 **For the 4.6-9 skill bank specifically, an enabled Boost connector would still not help**:
 MasterContext is an Azure Storage TABLE, not Postgres.
+
+**MERGED AND DEPLOYED — `34eda36` then `7c8d5bb`.** Groups B and C are live (web run 32996534657,
+api run 32996534614, both success). The coverage re-verdict landed on top: six rows ABSENT -> BUILT
+(4.2-1, 4.3-9/10/11, 4.6-10/11), headline **142 -> 148 of 183 (78% -> 81%)**.
+
+Two things the re-verdict states rather than smooths over: **4.2-1 carries "independent verification
+OUTSTANDING"** (owner-approved and deployed, but the batched verifier covered Groups B and C only,
+and the row must not borrow their assurance); and **4.6-11 is BUILT with the prototype's coverage-
+consequence clause deliberately omitted**, because the lane proved a drop routed through `owner-edit`
+gains no attribution and splices a hole — copy promising a coverage effect would be a claim the
+system does not record.
+
+§13b was REGENERATED mechanically rather than hand-adjusted, because it had gone stale: it still read
+`137 BUILT / 75%`, the figure from BEFORE the three-small batch, while the headline had already moved
+to 142. It now agrees with the parser by construction (150/23/12/25, verified equal).
+
+**§14 is down from ten open ranks to five, and the shape of the remainder is the finding.** Only ONE
+of the five is ordinary engineering work. Rank 1 is the assistant (§4.11, 0% built) — an OWNER
+DECISION, not an engineering one, and it holds **6 of the 12 ABSENT rows left in the entire
+document**. Rank 2 is 4.6-9, blocked on DATA ACCESS rather than code. Rank 5 is explicitly low value.
+The prototype-alignment backlog for the packet module is close to exhausted.
+
+**STILL BLOCKED, and none of it is code.** 4.6-9 needs the owner's live skill fields read, and every
+route is down: `workflow_dispatch` runs have been stuck QUEUED for 2+ hours (32985272421 at 15:29,
+32983923158 at 15:03) while push-triggered runs complete in ~1 minute; Azure Storage is `403 CONNECT`
+from the sandbox; `az` carries no credentials here; and both Boost connectors are `enabledInChat:
+false`. The parser (`skillPool.ts`) and the Slides table reader (`slideTables.ts`) for it are already
+built, tested and on `main`.

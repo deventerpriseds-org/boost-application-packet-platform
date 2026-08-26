@@ -452,8 +452,14 @@ Key tables (PostgreSQL):
 - iOS testing: requires macOS runner or BrowserStack; categorically unavailable in Linux CCR
 
 ## Active work
-**2026-08-26 (later) - GROUPS B AND C BUILT, batched verifier CLOSED** on
-`claude/three-small-ui-gaps`. Group B = the QC summary inside the ATS modal (4.3-9/10/11); Group C =
+**2026-08-26 (later) - GROUPS B AND C ARE LIVE ON `main` (`34eda36`), both deploys SUCCESS**
+(web run 32996534657, api run 32996534614). The coverage re-verdict landed on top at `7c8d5bb`.
+Cheap tier at the merge: app **343/343** unit + build clean + margin 59/59 + tally **50/50** (run
+twice) + zero smart quotes; api build clean + **833/833**. Coverage **142 -> 148 of 183 (78% ->
+81%)**; §4.2, §4.3 and §4.6 now have ONE ABSENT row between them, and the assistant (§4.11, 0%)
+holds 6 of the 12 that remain.
+
+Group B = the QC summary inside the ATS modal (4.3-9/10/11); Group C =
 the drop hatch (4.6-10/11). The verifier CONFIRMED all 12 claims and ACCEPTED the stated blast radius
 (it re-derived it by rendering `main` in a separate worktree - byte-identical). It also found three
 rules that were true in the code and enforced by NOTHING; all three are now guards, each
