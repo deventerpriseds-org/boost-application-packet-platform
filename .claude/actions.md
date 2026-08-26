@@ -3896,3 +3896,25 @@ Axis is the dimension set, not the prototype's four kinds, because per-kind cove
 this system produces (`requirements.ts:61`: `coverage` is `'escalated' | null`). Option B tracked as
 a pull candidate. Open questions put to the owner: card density (8 too many?), whether the note line
 belongs on every card or only where something is missing, and cards above vs below the table.
+
+**ACT-2026-08-26-b — Groups B and C, fanned and batched.** Owner: *"keep moving on the large and
+medium items ... fan Inplimentation and verify in batches here"*, with the efficiency rules applied
+as written — cheap deterministic checks re-run in full, expensive re-derivation scoped to blast
+radius, and each lane doing its OWN defect hunt before the verifier sees it.
+
+| Lane | Rows | State |
+|---|---|---|
+| Group B | 4.3-9/10/11 QC summary in the ATS modal | BUILT `67a7e6d`, batched verifier running |
+| Group C | 4.6-10/11 drop hatch | BUILT `aa59426`, same verifier |
+| 4.6-9 skill bank | table + parser + Slides reader + 2 diag routes | BLOCKED on reading the owner's live fields |
+| Group A | 4.2-1 fit cards | DONE and deployed |
+
+**Each lane's own 0b hunt found the thing review would have found**, which is the point of the rule:
+Group B discovered a THIRD score-bar renderer (so the extraction was 3 homes -> 1, not 2 -> 1) and a
+FOURTH state (`score: null` on every production artifact) the AC did not cover; Group C found its
+first guards were fed hand-set booleans rather than the real producer chain — the defect class this
+repo has now shipped four times.
+
+**OPEN, owner-facing:** the skill pool cannot be read while `workflow_dispatch` is wedged. Every
+fallback measured and ruled out. Browser URL handed over:
+`https://job-platform-api.azurewebsites.net/api/diag/skill-sources`
