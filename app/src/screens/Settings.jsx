@@ -1777,6 +1777,115 @@ function DimensionSettings() {
 }
 
 
+// ── Skill wordings (4.6-9) ──────────────────────────────────────────────────────────────────────
+//
+// The owner's MasterContext fields hold 64 skills once parsed, but a handful of them are written as
+// STATEMENTS rather than terms — "Enterprise alignment of strategy and execution" — and the owner
+// asked for those broken down "into items in similar style and length to the skills1 and skills2
+// items". That rewrites the owner's own words, which the parser is forbidden to do on its own
+// initiative, so the rewordings live HERE as a setting the owner controls.
+//
+// Owner, explicitly: "config store so i can edit them". The code seeds the first value and nothing
+// more — exactly what the no-hardcoded-config rule permits and no further.
+//
+// THE PREVIEW IS THE POINT. Editing strings with no visible effect is a text box over a black box:
+// you could not tell a working rewording from one whose key stopped matching. So the screen shows
+// the resulting pool, and surfaces `staleRewords` loudly — a key matching nothing is invisible by
+// nature, because the pool still builds and the counts still look plausible.
+
+function SkillWordingSettings() {
+  const [data, setData] = useState(null)
+  const [rows, setRows] = useState([])
+  const [note, setNote] = useState(null)
+  const [saving, setSaving] = useState(false)
+
+  const load = useCallback(() => {
+    api.skillRewordsGet().then((d) => {
+      if (!d || d.ok === false) { setNote({ ok: false, msg: d?.error || 'could not load skill wordings' }); setData({ effective: {} }); return }
+      setData(d)
+      setRows(Object.entries(d.effective || {}).map(([from, to]) => ({ from, to })))
+    }).catch((e) => { setNote({ ok: false, msg: String(e.message || e) }); setData({ effective: {} }) })
+  }, [])
+  useEffect(() => { load() }, [load])
+
+  if (!data) return <Card style={{ color: 'var(--proto-ink2)' }}>Loading skill wordings…</Card>
+
+  const preview = data.preview || null
+  const stale = preview?.staleRewords || []
+  const isStored = data.stored !== null && data.stored !== undefined
+
+  const save = async () => {
+    if (!sessionValid()) { setNote({ ok: false, msg: 'Sign-in expired — sign out and back in, then Save.' }); return }
+    setSaving(true); setNote(null)
+    try {
+      // The WHOLE map every time — the route replaces rather than merges, so a row the owner deleted
+      // is gone. A merge would make every seeded rewording permanent, which is a constant with extra
+      // steps.
+      const map = {}
+      for (const r of rows) if (r.from.trim() && r.to.trim()) map[r.from.trim()] = r.to.trim()
+      const res = await api.skillRewordsSet(map)
+      if (!res || res.ok === false) throw new Error(res?.error || 'save failed')
+      setNote({ ok: true, msg: `Saved ${Object.keys(map).length} wording(s).${res.dropped?.length ? ` ${res.dropped.length} blank dropped.` : ''}` })
+      load()
+    } catch (e) { setNote({ ok: false, msg: String(e.message || e) }) } finally { setSaving(false) }
+  }
+
+  return (
+    <Card>
+      <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 4 }}>Skill wordings</div>
+      <div className="px-small" style={{ color: 'var(--proto-ink2)', marginBottom: 12 }}>
+        A few of your stored skills are written as sentences rather than terms. These rewrite them for
+        the skill bank. Your source fields are never changed — only what the bank stores.
+        {isStored ? ' These are your saved wordings.' : ' These are the seeded defaults — saving makes them yours.'}
+        {' '}Use <code>|</code> in a replacement to produce two skills.
+      </div>
+
+      {stale.length > 0 && (
+        <div className="px-note" style={{ marginBottom: 12, borderLeft: '3px solid var(--text-bad)' }}>
+          <b>{stale.length} wording{stale.length === 1 ? '' : 's'} no longer match anything.</b>{' '}
+          Your source text has changed since these were written, so they do nothing and the new text is
+          being banked as-is: {stale.map((s) => <code key={s} style={{ marginRight: 6 }}>{s}</code>)}
+        </div>
+      )}
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        {rows.map((r, i) => (
+          <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <input className="px-input" value={r.from} placeholder="your stored phrase" style={{ flex: 2, minWidth: 0 }}
+              onChange={(e) => setRows(rows.map((x, j) => j === i ? { ...x, from: e.target.value } : x))} />
+            <span style={{ color: 'var(--proto-ink3)' }}>→</span>
+            <input className="px-input" value={r.to} placeholder="skill | second skill" style={{ flex: 1, minWidth: 0 }}
+              onChange={(e) => setRows(rows.map((x, j) => j === i ? { ...x, to: e.target.value } : x))} />
+            <button className="px-btn" title="Remove this wording — the phrase will be banked as you wrote it"
+              onClick={() => setRows(rows.filter((_, j) => j !== i))}>Remove</button>
+          </div>
+        ))}
+      </div>
+
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 16, flexWrap: 'wrap' }}>
+        <button className="px-btn px-btn-accent" disabled={saving} onClick={save}>{saving ? 'Saving…' : 'Save'}</button>
+        <button className="px-btn" onClick={() => setRows([...rows, { from: '', to: '' }])}>Add a wording</button>
+        {note ? <span className="px-small" style={{ color: note.ok ? 'var(--text-ok)' : 'var(--text-bad)' }}>{note.msg}</span> : null}
+      </div>
+
+      {preview ? (
+        <div style={{ marginTop: 16, paddingTop: 12, borderTop: '1px solid var(--proto-rule-soft)' }}>
+          <div className="px-small" style={{ color: 'var(--proto-ink2)' }}>
+            <b>{preview.entries} skills</b> in the bank from your stored fields
+            {preview.rejected?.length ? `, ${preview.rejected.length} not usable as a term` : ''}
+            {preview.categories?.length ? ` · grouped into ${preview.categories.length} categories` : ''}
+          </div>
+        </div>
+      ) : data.previewError ? (
+        <div className="px-small" style={{ marginTop: 12, color: 'var(--text-bad)' }}>
+          Preview unavailable: {data.previewError}
+        </div>
+      ) : null}
+    </Card>
+  )
+}
+
+
 // ── Pipeline settings (D:appconfig-unreachable-in-product) ──────────────────────────────────────
 //
 // Ten values the pipeline reads from AppConfig — temperatures, template ids, the output folder, the
@@ -1974,7 +2083,7 @@ export default function Settings({ tab = 'account' }) {
       {active === 'templates' && <TemplatesSettings />}
       {active === 'coach' && <CoachSettings />}
       {active === 'workspace' && <WorkspaceSettings />}
-      {active === 'quality' && <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}><ChecksSettings /><DimensionSettings /><TemplateFocusSettings /><PipelineSettings /></div>}
+      {active === 'quality' && <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}><ChecksSettings /><DimensionSettings /><SkillWordingSettings /><TemplateFocusSettings /><PipelineSettings /></div>}
       {active === 'usage' && <UsageSettings />}
       {active === 'system' && <SystemSettings />}
     </div>

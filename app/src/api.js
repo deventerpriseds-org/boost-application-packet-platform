@@ -305,6 +305,15 @@ export const api = {
   // meant to change the focus would wipe the template's name.
   templateFocusSet: (templateId, roleFocus, label) => post('/config/templates',
     label === undefined ? { templateId, roleFocus } : { templateId, roleFocus, label }),
+  // The owner's skill REWORDINGS (4.6-9). Code seeds the first value; this pair is what makes it a
+  // setting rather than a constant, per the owner's "config store so i can edit them".
+  // GET returns { stored, seed, effective, preview } — preview carries the resulting pool AND
+  // `staleRewords`, the keys that matched nothing, which is the only visible sign the map has
+  // drifted from MasterContext.
+  skillRewordsGet: () => get(`/app/skill-rewords?owner=${encodeURIComponent(_owner)}`),
+  // Sends the WHOLE map, deliberately: the route replaces rather than merges, because a merge cannot
+  // express deleting a rewording — which is the main thing this screen is for.
+  skillRewordsSet: (rewords) => post(`/app/skill-rewords?owner=${encodeURIComponent(_owner)}`, { rewords }),
   dimensionPrefsGet: () => get(`/app/dimension-prefs?owner=${encodeURIComponent(_owner)}`),
   dimensionPrefsSet: ({ family, keys }) => post(`/app/dimension-prefs?owner=${encodeURIComponent(_owner)}`, { family, keys }),
   // LinkedIn role-sweep config + cursor + the exact built queries (preview before enabling).
