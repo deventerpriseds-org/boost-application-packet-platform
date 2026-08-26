@@ -33,6 +33,7 @@ export const POSTING_HOOKS = {
   groupCount: 'group-count',
   kindSourceSplit: 'kind-source-split',
   openQc: 'jd-open-qc',                 // 4.1-3 - the JD step's only route into QC
+  compareOpenQc: 'compare-open-qc',     // 4.2-13 - the SIBLING route, from the comparison card
   row: 'req-row',
   quote: 'req-quote',
   paraphrase: 'req-paraphrase',

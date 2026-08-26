@@ -296,3 +296,67 @@ test('D24: the stale notice is actually MOUNTED, not merely exported', () => {
   assert.match(jsx, /\{stale && \(/, 'the notice is not conditional on there being one')
   assert.match(jsx, /\{stale\.text\}/, 'the notice renders something other than the computed text')
 })
+
+// ── 4.2-13 and 4.2-4 ────────────────────────────────────────────────────────────────────────────
+// The AC pass for this batch overturned BOTH coverage-doc verdicts, and the guards below encode the
+// corrections rather than the original rows:
+//   4.2-13 was scored PARTIAL. Its mechanism shipped the day before in `2de4ae5`; only the
+//          comparison card lacked the prop. Two lines, not new work.
+//   4.2-4  was scored PARTIAL "does not enumerate the missing items by name". WRONG — `dimensions.ts`
+//          has enumerated them, by `#seq` and text, all along. So this row is ALREADY BUILT and its
+//          AC is a REGRESSION GUARD. Building a `Missing:` feature here would be a second,
+//          divergent enumeration of one fact, which is the exact class this repo keeps paying for.
+
+test('H:compare-card-opens-qc-through-the-one-step-api: 4.2-13', () => {
+  // AC A.8 — the SAME prop and the SAME call as the sibling card. Not a second navigation path.
+  const mount = BUILDER_SRC.slice(BUILDER_SRC.indexOf('<ProfileCompareCard'))
+  const props = mount.slice(0, mount.indexOf('/>'))
+  assert.match(props, /onOpenQc=/, 'ProfileCompareCard is not passed onOpenQc — the control renders nowhere')
+  assert.match(props, /setActiveStep\(\s*'qc'\s*\)/, 'the comparison card navigates somewhere other than QC')
+  assert.ok(!/window\.location|history\.pushState/.test(props), 'a second navigation path was introduced')
+  // The card itself renders it, hooked, keyboard-reachable, and gated on having rows to point at.
+  assert.match(CARD_SRC, /data-qc=\{POSTING_HOOKS\.compareOpenQc\}/, 'the control has no stable hook')
+  assert.match(CARD_SRC, /\{onOpenQc && rows\.length > 0 && \(/,
+    'the control is not gated on the card having compared rows — a dead link on an empty card')
+  const at = CARD_SRC.indexOf('POSTING_HOOKS.compareOpenQc')
+  const tag = CARD_SRC.slice(CARD_SRC.lastIndexOf('<span', at), CARD_SRC.indexOf('</span>', at))
+  assert.match(tag, /role="button"/, 'a bare span is invisible to compare-ui.mjs\'s control inventory')
+  assert.match(tag, /tabIndex=\{0\}/)
+  assert.match(tag, /onKeyDown=.*e\.key === 'Enter' \|\| e\.key === ' '/)
+})
+
+test('H:two-qc-controls-are-distinct-not-duplicated: 4.2-13 AC A.10', () => {
+  // TWO QC controls now sit on the JD step, and AC A.10 makes that a decision rather than an
+  // accident: distinct labels AND distinct hooks, or exactly one. Duplicate-surface confusion is
+  // what `PacketBuilder.jsx:1006-1010` and `PostingAnalysis.jsx:6-8` both exist to end.
+  assert.notEqual(POSTING_HOOKS.openQc, POSTING_HOOKS.compareOpenQc, 'the two QC controls share a hook')
+  const labels = ['See where each one is answered', 'See how the assets answer these']
+  for (const l of labels) {
+    const n = CARD_SRC.split(l).length - 1
+    assert.equal(n, 1, `"${l}" appears ${n} times — two controls with one label is the A.10 failure`)
+  }
+  // AC A.9 — neither label may promise per-row targeting. QC's `pick` is internal state with no
+  // prop and no route segment, so NEITHER control can land on one line; both must say so.
+  assert.equal(CARD_SRC.split('opens the coverage list in QC, line by line').length - 1, 2,
+    'one of the two QC controls ships without the honesty sub-line the other carries')
+})
+
+test('H:missing-lines-are-enumerated-ONCE-by-the-api: 4.2-4 is ALREADY BUILT', () => {
+  // AC A.6. `dimensions.ts:504` emits "…; no excerpt for: #12 <text>; #14 <text>" and `:483` names
+  // every judgeable line for the nothing-found case. It renders today through POSTING_HOOKS
+  // .compareNote. The guard is that the app keeps RENDERING the API's string and never re-derives
+  // its own list of missing items — two enumerations of one fact is the divergence, not the feature.
+  assert.match(CARD_SRC, /data-qc=\{POSTING_HOOKS\.compareNote\}/,
+    'the note carrying the API\'s named-missing enumeration is no longer rendered')
+  assert.ok(!/Missing:\s*\$\{|Missing:\s*\{|\.missing\b/.test(CARD_SRC),
+    'the card derives its own Missing: list — it must render the API\'s string, sliced by the API')
+
+  // AC A.7 — the deliberate improvement over the prototype survives. The prototype collapses `weak`
+  // to one label ('No evidence', data.js:583); this app splits it, because "No evidence" is a FALSE
+  // statement about a candidate whose profile speaks to the axis and merely falls short.
+  assert.equal(fitLabel('weak', 'nothing_found'), 'Nothing found')
+  assert.equal(fitLabel('weak', 'falls_short'), 'Falls short')
+  assert.notEqual(fitLabel('weak', 'nothing_found'), fitLabel('weak', 'falls_short'))
+  assert.equal(fitLabel('not_applicable'), 'Not compared')
+  for (const v of Object.values(FIT_LABEL)) assert.notEqual(v, 'No evidence')
+})

@@ -830,7 +830,10 @@ export default function PacketBuilder({ id, step }) {
             onOpenRequirements={() => {
               const el = document.querySelector('[data-qc="posting-analysis"]')
               if (el && el.scrollIntoView) el.scrollIntoView({ behavior: 'smooth', block: 'start' })
-            }} />
+            }}
+            /* 4.2-13: the SAME prop and the SAME call as the extraction card below. One step API,
+               two surfaces - not a second navigation path. */
+            onOpenQc={() => setActiveStep('qc')} />
 
           <PostingAnalysisCard
             req={req.data} reqError={req.error} reloadReq={loadReq}

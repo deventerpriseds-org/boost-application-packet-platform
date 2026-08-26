@@ -122,7 +122,7 @@ function CompareRow({ r, vw }) {
   )
 }
 
-export function ProfileCompareCard({ comparison, onOpenRequirements }) {
+export function ProfileCompareCard({ comparison, onOpenRequirements, onOpenQc }) {
   const vw = useViewportWidth()
   const cols = compareColumns(vw)
   const st = comparisonState(comparison)
@@ -205,6 +205,33 @@ export function ProfileCompareCard({ comparison, onOpenRequirements }) {
           <button className="px-btn" style={{ fontSize: 12 }} onClick={onOpenRequirements}>
             See the lines this was built from
           </button>
+        )}
+        {/* 4.2-13, prototype `qc/packet.jsx:209`. The SAME `onOpenQc` the sibling card already
+            takes - one prop threaded from PacketBuilder, calling the one `setActiveStep`, not a
+            second navigation path.
+
+            TWO QC controls now sit on this screen, and that is deliberate rather than an accident
+            (AC A.10 requires the PR to say which). They are the two halves of the same question
+            asked from different rows: this card grades DIMENSIONS and its control offers to show
+            how the assets answer them; the extraction card lists LINES and its control offers to
+            show where each one is answered. Distinct labels, distinct hooks - a duplicate label is
+            the failure that rule exists to prevent.
+
+            The sub-line carries the same disclosure the sibling does, for the same reason: QC's
+            requirement filter is internal state with no prop and no route segment, so neither
+            control can land on one row. */}
+        {onOpenQc && rows.length > 0 && (
+          <span style={{ textAlign: 'right' }}>
+            <span className="px-link" role="button" tabIndex={0} data-qc={POSTING_HOOKS.compareOpenQc}
+              style={{ fontSize: 12, whiteSpace: 'nowrap' }}
+              onClick={onOpenQc}
+              onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpenQc() } }}>
+              See how the assets answer these &rarr;
+            </span>
+            <span className="px-small" style={{ display: 'block', textTransform: 'none', color: 'var(--proto-ink3)' }}>
+              opens the coverage list in QC, line by line
+            </span>
+          </span>
         )}
       </div>
     </div>
