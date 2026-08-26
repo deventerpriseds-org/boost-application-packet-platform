@@ -836,7 +836,10 @@ export default function PacketBuilder({ id, step }) {
             req={req.data} reqError={req.error} reloadReq={loadReq}
             coveredKw={coveredKw} missingKw={missingKw} gapsScoredAt={p.atsGapsScoredAt}
             onParse={parseJd} parseBusy={parseBusy} hasSummary={!!opp?.jdSummary}
-            keywordScore={keywordScore} />
+            keywordScore={keywordScore}
+            /* 4.1-3: navigation arrives as a prop and calls the ONE existing step API. A second
+               router inside the card would be the parallel system extend-don't-duplicate forbids. */
+            onOpenQc={() => setActiveStep('qc')} />
 
           <AnalysisRunCard
             busy={jdBusy} onRun={runJd} hasRun={!!p.jdAnalyzed} result={runResult}

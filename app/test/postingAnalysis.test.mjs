@@ -745,3 +745,59 @@ test('H:evidence-read-from-the-verdict-not-the-columns: no screen reads a redact
   assert.match(jsx, new RegExp(`data-qc=\\{POSTING_HOOKS\\.evidence\\}`), 'the evidence line has no stable hook')
   assert.match(jsx, new RegExp(`data-qc=\\{POSTING_HOOKS\\.evidenceBody\\}`), 'the excerpt has no stable hook')
 })
+
+// ── 4.1-3, the JD step's only route into QC ─────────────────────────────────────────────────────
+// SPEC row 4.1-3, prototype `qc/packet.jsx:159`. The card had exactly one header control
+// ("Show as tabs/columns") and no way out of the JD step into the answers; the JD step was a
+// dead end. Three separate things can regress independently, so each is asserted separately.
+test('H:jd-qc-link-is-not-inert: the route into QC is real, gated, and keyboard-reachable', () => {
+  const jsx = readFileSync(new URL('../src/screens/PostingAnalysis.jsx', import.meta.url), 'utf8')
+
+  // (1) It is MOUNTED and hangs off the shared hook table, so ui-verify can select it and the
+  //     "hand-types no data-qc" assertion above covers it.
+  assert.match(jsx, /data-qc=\{POSTING_HOOKS\.openQc\}/,
+    'the See-where-each-one-is-answered control is not rendered, or does not carry its hook')
+
+  // (2) It calls the prop, never its own navigation. `setActiveStep` is the ONE step API
+  //     (12 call sites incl. goToField); a second `go()` inside a child screen is the parallel
+  //     system extend-don't-duplicate forbids, and PostingAnalysis.jsx imports no router today.
+  assert.doesNotMatch(jsx, /from\s+'\.\.\/state\.jsx'/,
+    'PostingAnalysis.jsx pulled in the router directly — navigation must arrive as a prop')
+  assert.match(jsx, /onClick=\{onOpenQc\}/, 'the control does not invoke the navigation prop')
+
+  // (3) Hidden, NOT rendered-and-inert, when the extraction produced nothing to point at.
+  //     CLAUDE.md: "If a feature isn't ready, hide the control — don't fake it." A link reading
+  //     "see where each one is answered" with no "each one" is precisely the fake control.
+  assert.match(jsx, /\{onOpenQc && !reqError && rows\.length > 0 && \(/,
+    'the control is not gated on having requirements and no extraction error')
+
+  // (4) A bare <span onClick> is invisible to scripts/compare-ui.mjs, which collects
+  //     `button, [role="button"], a` — that is how a control shipped in P8.6 was reported MISSING
+  //     from the app for weeks (AssetBlocks.jsx:625-632 records it). Also plain keyboard access.
+  //     Scoped to the control's OWN opening tag so a role="button" elsewhere on the screen cannot
+  //     satisfy it — the cry-wolf inverse, a guard that passes on somebody else's markup.
+  const at = jsx.indexOf('POSTING_HOOKS.openQc')
+  //     (`indexOf('>')` cannot delimit the tag — the key handler's own `=>` closes it early.)
+  const tag = jsx.slice(jsx.lastIndexOf('<span', at), jsx.indexOf('</span>', at))
+  assert.match(tag, /role="button"/, 'the control is a bare span — the UI inventory cannot see it')
+  assert.match(tag, /tabIndex=\{0\}/, 'the control cannot be reached by Tab')
+  assert.match(tag, /onKeyDown=.*e\.key === 'Enter' \|\| e\.key === ' '/,
+    'the control cannot be activated from the keyboard')
+
+  // (5) THE ADVERSARIAL ONE (AC 3.4). QC's requirement filter `pick` is internal state with no
+  //     prop and no route segment, so this control CANNOT land on one line — it opens the
+  //     Coverage list. The label carries an arrow and the words "each one"; shipping that while
+  //     implying per-line targeting is the failure. The adjacent sentence must say what it does.
+  assert.match(jsx, /opens the coverage list in QC, line by line/,
+    'the label promises targeting the control does not have, with no sentence saying what it opens')
+})
+
+test('H:jd-card-keeps-its-existing-header-control: the columns toggle still persists', () => {
+  // REGRESSION GUARD 3. Adding a sibling control to the same header row must not displace the
+  // stored preference that was deliberately made a user setting rather than a code constant.
+  const jsx = readFileSync(new URL('../src/screens/PostingAnalysis.jsx', import.meta.url), 'utf8')
+  assert.match(jsx, /localStorage\.setItem\('ee_posting_columns'/,
+    'the columns preference no longer persists')
+  assert.match(jsx, /\{columns \? 'Show as tabs' : 'Show as columns'\}/,
+    'the Show as tabs/columns control was displaced by the new one')
+})

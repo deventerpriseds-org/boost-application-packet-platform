@@ -32,6 +32,7 @@ export const POSTING_HOOKS = {
   group: 'req-group',
   groupCount: 'group-count',
   kindSourceSplit: 'kind-source-split',
+  openQc: 'jd-open-qc',                 // 4.1-3 - the JD step's only route into QC
   row: 'req-row',
   quote: 'req-quote',
   paraphrase: 'req-paraphrase',
