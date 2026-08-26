@@ -3751,3 +3751,34 @@ reject that radius.
 `D:undo-after-rebuild-copy-is-silent` (AC-18 requires the partial fix be stated in owner-facing copy;
 it is not, and the copy is a REFUSAL string so it is not being changed without an owner ping) and
 `D:rebuild-correction-silently-dropped` (untouched).
+
+---
+
+## ACT-2026-08-26-a — the three SMALL prototype gaps, then the large and the medium
+
+Owner, verbatim: *"do the three small ones on tab 6 and tab 1 first and then the large and medium.
+which can be fanned to sub agents but following the same rules from the hooks we've been using"*.
+
+Order is the owner's, not mine:
+
+| # | row | tab | size | state |
+|---|---|---|---|---|
+| 1 | **4.8-10** — `Needs a decision` list ON the QC page (not behind a tab/drawer) | 6 QC | small | AC pass running |
+| 2 | **4.5-40** — static blocks show `{{merge field}}` placeholders inline | 2-5 assets | small | AC pass running |
+| 3 | **4.1-3** — `See where each one is answered →` (JD step's only route into QC) | 1 posting | small | AC pass running |
+| 4 | **4.2-1** + partials 4.2-2/4/13 — the four fit cards | 1 posting | large | queued |
+| 5 | **4.3-9/10/11** — QC summary + score bars inside the ATS modal | 1 posting | medium | queued |
+| 6 | **4.6-9/10/11** — keyword panel escape hatches | 2-5 assets | medium | queued |
+
+ONE AC subagent covers all three small rows rather than three separate passes — the batching rule
+from `verify-work` 0c applied to the AC side. Its feasibility table lands in
+`docs/qc-evidence/AC-three-small.md` BEFORE any code, per the feasibility-before-implementation rule.
+
+**Correction recorded against myself in the same turn.** I told the owner the tab percentages were
+unchanged and let that read as "no progress today". Owner pushed back — *"double check that you are
+right... it seems almost impossible to spend so much time today and have no progress"* — and they
+were right. Ground truth from `origin/main`: **51 commits** since 2026-08-25 00:00 UTC, and the
+coverage headline moved **125 of 183 (68%)** at `06df406` to **137 of 183 (75%)** now. My statement
+was true only relative to the artifact published mid-session, and false relative to the day. The
+guard is the measurement, not the adjective: a progress claim states the two SHAs it is measured
+between, or it is not a progress claim.
