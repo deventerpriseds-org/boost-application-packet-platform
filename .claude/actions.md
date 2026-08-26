@@ -4167,3 +4167,41 @@ mutation changes observable state. Re-run of that one mutation is the proof.
 skill...` control. `buildSkillPool` still has ZERO production consumers, so none of this is live
 behaviour yet - the parser and the route are wired to each other and to the Settings screen, and
 that is all.
+
+**4.6-9 COMPLETE end to end** on `claude/three-small-ui-gaps`, NOT merged so NOT deployed.
+app 349/0 · api 886/0 · both builds clean · zero smart quotes · zero control bytes.
+
+| Piece | Commit | Guards |
+|---|---|---|
+| Two-level parser + categories | `98cd165` | 16, 8/8 mutations |
+| `skill_bank_entry.category` + stop-rule | `be52e75` | executed on a POPULATED db |
+| Rewords route + Settings screen | `4a0b961` | 8 |
+| Seeder | `c954f12` | 5, all 5 mutation-proved individually |
+| Swap control | `61af99a` | 6, 3 mutation-proved |
+
+The bank: **64 skills**, all 36 `relevantProficiencies` terms recovered with their categories, 34 of
+them verbatim. Rewordings are a SEED the owner owns in Settings > Skill wordings.
+
+**FOUR defects of mine this stretch, and the pattern behind them is one thing.** Every one came from
+a BESPOKE SCRIPT run to verify something, while the cheap standard check that already encodes the
+lesson sat unused:
+
+| Defect | What I ran | What already covered it |
+|---|---|---|
+| Backticks ended `SCHEMA_SQL`; migration reported "applied OK (exit 0)" with no column | hand-rolled schema runner, build output suppressed | `npm test` — **`H10` IS this check** |
+| Tracker append to the wrong file, TWICE | `cat >> .claude/actions.md`, drifted cwd | `git status` after the write |
+| Mutation left applied, TWICE; the second time two sweeps collided on one file | background sweeps | not backgrounding them |
+| NUL byte injected by `sed -i`; `tsc` compiled it | `sed -i` with an escaped newline | nothing — this one needed a new guard |
+
+So the guards did not fail. **I routed around them.** The change: `npm test` before ANY bespoke
+verification; no background sweeps (foreground, sequential, one mutation per call, because a batch
+exceeds the 2-minute limit and dies holding a mutation); absolute paths always.
+
+Two structural fixes rather than more prose, because prose demonstrably failed twice each:
+`scripts/track.sh` resolves the repo from its own location and fails loudly when git says the file
+did not change; `H:api-source-has-no-control-bytes` scans every `api/src/functions/tests/*.ts`,
+because the build is NOT a guard here — `tsc` compiled the NUL and the only tell was `grep` saying
+"binary file matches" in passing. Sibling of the smart-quote rule with the opposite conclusion:
+esbuild rejects smart quotes precisely, so the build IS the guard there.
+
+**NOT DONE:** merge to `main`. That is a live action and waits on the owner.
