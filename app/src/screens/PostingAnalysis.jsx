@@ -482,7 +482,7 @@ function ModelKeywords({ parsedKeywords, coveredKw, missingKw, gapsScoredAt }) {
 }
 
 // ── the SOURCE card on the JD step ──────────────────────────────────────────────────────────────
-export function PostingAnalysisCard({ req, reqError, reloadReq, coveredKw, missingKw, gapsScoredAt, onParse, parseBusy, hasSummary, keywordScore }) {
+export function PostingAnalysisCard({ req, reqError, reloadReq, coveredKw, missingKw, gapsScoredAt, onParse, parseBusy, hasSummary, keywordScore, onOpenQc }) {
   const [tab, setTab] = useState('responsibilities')
   // P8.7 makes tabs the layout and keeps the old three-column arrangement available behind a flag.
   // It is a stored preference rather than a code constant so it is the user's to change, per the
@@ -534,10 +534,30 @@ export function PostingAnalysisCard({ req, reqError, reloadReq, coveredKw, missi
             estimate at the top of this packet.
           </div>
         </div>
-        <span className="px-link" style={{ fontSize: 12, whiteSpace: 'nowrap' }}
-          onClick={() => setColumnsPersisted(!columns)}>
-          {columns ? 'Show as tabs' : 'Show as columns'}
-        </span>
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
+          <span className="px-link" style={{ fontSize: 12, whiteSpace: 'nowrap' }}
+            onClick={() => setColumnsPersisted(!columns)}>
+            {columns ? 'Show as tabs' : 'Show as columns'}
+          </span>
+          {/* 4.1-3, the JD step's only route into QC. QC's requirement filter is internal state with
+              no prop and no route segment, so this cannot land on ONE line - it opens the Coverage
+              list, which is every line and how the assets answer it. The second sentence says so
+              rather than letting the arrow imply a targeting the control does not have. Hidden, not
+              inert, when the extraction produced nothing to point at. */}
+          {onOpenQc && !reqError && rows.length > 0 && (
+            <span style={{ textAlign: 'right' }}>
+              <span className="px-link" role="button" tabIndex={0} data-qc={POSTING_HOOKS.openQc}
+                style={{ fontSize: 12, whiteSpace: 'nowrap' }}
+                onClick={onOpenQc}
+                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpenQc() } }}>
+                See where each one is answered &rarr;
+              </span>
+              <span className="px-small" style={{ display: 'block', textTransform: 'none', color: 'var(--proto-ink3)' }}>
+                opens the coverage list in QC, line by line
+              </span>
+            </span>
+          )}
+        </div>
       </div>
 
       {/* what the extraction is standing on - stated, not implied */}
