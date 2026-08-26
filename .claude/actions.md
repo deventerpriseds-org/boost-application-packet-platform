@@ -3810,3 +3810,22 @@ either queued and unblocked or should not be built:
 - **4.6-9 should NOT be built**: `grep -rniE "skill_candidate|skill_bank|skillBank" api/src app/src`
   returns 14 hits, all `skill_candidate` (a per-packet audit row), zero skill bank. The `<select>`
   would have nothing real to offer, which the no-fake-data rule forbids.
+
+**MERGED AND DEPLOYING.** `main` moved `5e79581..028fdec` at 12:5x UTC — twelve commits, CI green on
+the head (run 32970895978). That push is what triggers `executive-engine-deploy.yml`; until it
+finishes and the live UI checks come back, the three regions are **implemented and proved locally,
+NOT yet confirmed live**. The distinction is the standing rule: a local proof shows the mechanism
+works, not that the owner's screen shows it.
+
+Live confirmation needs a packet that actually HAS findings — a `ui-verify` run against a clean
+packet goes green on an empty region and proves nothing. `db-query.yml` is resolving one now, along
+with a real `merge_field` for a `generated=false` row (never guessed —
+`D:compact-template-placeholder-mismatch` is exactly the row where a guessed placeholder would be
+wrong).
+
+The verifier also handed over the exact inputs, and REFUTED the AC doc while doing it:
+`scripts/ui-verify.mjs` has had a `CLICK_SEL` step (`:35-66`) all along, exposed as `click_sel`, so
+the two navigation ACs were provable live the whole time and the AC doc had called them unprovable
+off a single-file read — the AC doc breaking its own never-claim-absent-from-one-grep rule. The one
+real residual: the script asserts on body text and never reads `location.hash`, so navigation is
+made binary by pairing `expect` with `expect_absent`.
