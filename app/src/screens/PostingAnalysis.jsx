@@ -191,7 +191,13 @@ export function ProfileCompareCard({ comparison, onOpenRequirements, onOpenQc })
               `covered`/`total` are the API's own (dimensions.ts), never recomputed here. */}
           {rows.length > 0 && (
             <div data-qc={POSTING_HOOKS.compareCards}
-              style={{ marginTop: 12, display: 'grid', gap: 10,
+              /* `alignItems: start` is the fix for a MEASURED layout defect, not a preference. A
+                 grid row stretches every cell to its tallest sibling by default, so one axis with a
+                 long unevidenced note (1122 characters on a 12-line axis - an ordinary state, not an
+                 edge case) inflated its four neighbours to ~740px of mostly white. The owner kept
+                 the notes deliberately, so the note is not what changes: the STRETCH is. Cards now
+                 size to their own content and the row is as tall as its tallest card only. */
+              style={{ marginTop: 12, display: 'grid', gap: 10, alignItems: 'start',
                        gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))' }}>
               {rows.map((r) => (
                 <div key={r.key} className="px-box" data-qc={POSTING_HOOKS.compareCard}

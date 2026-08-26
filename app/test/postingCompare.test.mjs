@@ -435,6 +435,17 @@ test('H:fit-card-keeps-the-two-weak-labels: A.7', () => {
   assert.notEqual(fitLabel('weak', 'nothing_found'), fitLabel('weak', 'falls_short'))
 })
 
+test('H:fit-cards-do-not-stretch-to-the-tallest-sibling: DEFECT-3', () => {
+  // MEASURED, not aesthetic. A grid row stretches every cell to its tallest sibling by default, so
+  // ONE axis with a long unevidenced note - 1027 characters on a 12-line axis, an ordinary state
+  // with no truncation anywhere - inflated its four neighbours to ~740px of mostly white.
+  // The owner kept the notes deliberately ("I'm fine with the 8 and the notes"), so the note is not
+  // what changes: the STRETCH is. Rendered locally before and after to confirm.
+  const block = CARD_BLOCK()
+  assert.match(block, /alignItems:\s*'start'/,
+    'the card grid stretches every card to its tallest sibling - one long note inflates the whole row')
+})
+
 test('H:fit-card-does-not-re-enumerate-missing-lines: A.6', () => {
   // The existing guard fires on a list labelled `Missing:` but NOT on the same list relabelled
   // `Not evidenced:` - the verifier proved that relabelling ships green, so the guard was
