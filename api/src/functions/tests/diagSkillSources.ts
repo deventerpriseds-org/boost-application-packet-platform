@@ -73,3 +73,44 @@ export async function diagSkillSources(req: HttpRequest, context: InvocationCont
 app.http('diagSkillSources', {
   methods: ['GET', 'OPTIONS'], authLevel: 'anonymous', route: 'diag/skill-sources', handler: diagSkillSources,
 })
+
+// ── the portfolio deck's tables, as a GRID ──────────────────────────────────────────────────────
+// GET /api/diag/slide-tables?id=<presentationId>  — READ-ONLY.
+// Defaults to PORTFOLIO_TEMPLATE_ID, the deck the owner named. Returns every table with its header
+// row and every body row, so the owner can say WHICH column holds skills. Nothing here guesses:
+// picking the column by sniffing headers would be right most of the time and silently wrong the
+// rest, and wrong here means seeding the pool from the wrong column.
+import { getGoogleOAuthToken } from './googleAuth'
+import { PORTFOLIO_TEMPLATE_ID } from './packetTemplates'
+import { extractSlideTables, previewTables } from './slideTables'
+
+export async function diagSlideTables(req: HttpRequest, context: InvocationContext): Promise<HttpResponseInit> {
+  if (req.method === 'OPTIONS') return { status: 204, headers: HEADERS }
+  const id = req.query.get('id') || PORTFOLIO_TEMPLATE_ID
+  try {
+    // The OAuth-user token, exactly as appFacts.sourceText() does it (:40). The service-account
+    // path needs a JSON blob and a scope and owns zero Drive quota; this route reads, so it uses the
+    // same token the rest of the Google reads already use rather than inventing a second auth path.
+    const token = await getGoogleOAuthToken()
+    const res = await fetch(`https://slides.googleapis.com/v1/presentations/${id}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+    if (!res.ok) {
+      // A failed read is reported as a failed read. Returning an empty table list here would be
+      // indistinguishable from "the deck has no tables", and that is how an empty pool gets seeded
+      // from a source nobody actually reached.
+      return { status: 200, headers: HEADERS, jsonBody: { ok: false, id, error: `Google ${res.status} reading ${id}`, tables: [] } }
+    }
+    const tables = extractSlideTables(await res.json())
+    return {
+      status: 200, headers: HEADERS,
+      jsonBody: { ok: true, id, tableCount: tables.length, tables: previewTables(tables) },
+    }
+  } catch (err: any) {
+    return { status: 200, headers: HEADERS, jsonBody: { ok: false, id, error: String(err?.message || err), tables: [] } }
+  }
+}
+
+app.http('diagSlideTables', {
+  methods: ['GET', 'OPTIONS'], authLevel: 'anonymous', route: 'diag/slide-tables', handler: diagSlideTables,
+})
