@@ -9,6 +9,7 @@ import {
   requirementState, qcStepState, packetGate, loopsModel, notApplicableRows, rowsForRequirement,
   swapsForRequirement, pctWidth, arr, errText,
   railChangeLog, undoAvailability, revertOutcome, suggestScope, CHANGE_LOG_HEADLINE,
+  railDecisions, DECISION_NOTE,
 } from '../qcRail.js'
 
 // P5.1 - the packet-level QC & evidence rail.
@@ -653,6 +654,64 @@ function ChangeLog({ entries, onOpen, onRefresh }) {
 
 // P8.6-CHANGELOG-END
 
+/**
+ * SPEC 4.8-10 - "Needs a decision", the change log's sibling, ON THE PAGE.
+ *
+ * It renders railDecisions() and decides NOTHING itself: no severity, no count, no ordering. Those
+ * all come from the module, for the reason the whole file split exists - a count bug shipped from a
+ * .jsx that did its own arithmetic, and the test that greps this file for that arithmetic is what
+ * keeps it from coming back.
+ *
+ * The row treatment is CheckRow, the same component the Checks tab uses, so a finding looks and
+ * behaves identically wherever it is read, including its Open field link.
+ */
+function Decisions({ entries, onOpen, onGoToField }) {
+  const model = railDecisions(entries)
+  return (
+    <div className="px-box" data-qc={QC_HOOKS.decisions} style={{ padding: 16 }}>
+      <Head title="Needs a decision"
+        note="What the run could not settle on its own. Every one of these is waiting on you."
+        right={<span className="px-small" data-qc={QC_HOOKS.decisionCount} data-qc-n={model.rows}>
+          {model.toFix} to fix &middot; {model.toReview} to review
+        </span>} />
+      {model.assets.map((a) => (
+        <div key={a.artifact && a.artifact.id} data-qc={QC_HOOKS.decisionAsset}
+          data-qc-artifact={a.artifact && a.artifact.id} data-qc-state={a.status} style={{ marginTop: 10 }}>
+          <div style={{ fontSize: 13, fontWeight: 600 }}>{a.label}</div>
+          {/* An asset whose findings could not be READ is named rather than dropped: an omitted
+              asset reads as "nothing to decide" for it, which is the same laundering as calling an
+              unchecked asset clear. */}
+          {a.status === 'error' && (
+            <div className="px-note" data-qc={QC_HOOKS.decisionError} style={{ marginTop: 4 }}>
+              The findings for this asset could not be read: {a.error}. Nothing here is a statement
+              that it is clear.
+            </div>
+          )}
+          {a.status !== 'error' && a.status !== 'open' && (
+            <Quiet hook={QC_HOOKS.decisionNote}>{DECISION_NOTE[a.status]}</Quiet>
+          )}
+          {a.rows.map((d, i) => (
+            <CheckRow key={d.row.check_key + ':' + i} artifactId={a.artifact && a.artifact.id}
+              row={d.row} onOpen={onOpen} onGoToField={onGoToField} />
+          ))}
+          {a.anomalies.map((x, i) => (
+            <div key={i} className="px-note" data-qc={QC_HOOKS.decisionAnomaly} style={{ marginTop: 6 }}>{x}</div>
+          ))}
+        </div>
+      ))}
+      {/* The two empties are DIFFERENT statements and the distinction is the point. "Nothing needs a
+          decision" over a packet nobody checked is this feature's vacuous green. */}
+      {!model.anyOpen && (
+        <div className="px-small" data-qc={QC_HOOKS.decisionNote} style={{ marginTop: 10 }}>
+          {model.anyChecked
+            ? 'Nothing is waiting on you. Every check that could run is clear.'
+            : 'No asset in this packet has been checked yet, so nothing has been decided either way.'}
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ── the rail ────────────────────────────────────────────────────────────────────────────────────
 
 export default function QcRail({ packetId, company, role, entries, setResult, requirements, reqError, reqLoading = false, onGoToField }) {
@@ -808,6 +867,11 @@ export default function QcRail({ packetId, company, role, entries, setResult, re
           run settled by itself is the first thing a reader should see, because R1's whole claim is
           that they are reviewing finished work rather than a list of chores. */}
       <ChangeLog entries={entries} onOpen={openField} onRefresh={refreshOne} />
+
+      {/* SPEC 4.8-10, the other half of the same sentence: "the two lists are on the page, not
+          behind a tab or a search". The change log is what the run SETTLED; this is what it could
+          not, and it sits beside it rather than inside the Checks tab. */}
+      <Decisions entries={entries} onOpen={openField} onGoToField={onGoToField} />
 
       {/* Tabs. The picked requirement filters the other tabs, and the clear affordance appears with it. */}
       <div style={{ display: 'flex', gap: 2, borderBottom: '1px solid var(--proto-rule-soft)', overflowX: 'auto', alignItems: 'center' }}>

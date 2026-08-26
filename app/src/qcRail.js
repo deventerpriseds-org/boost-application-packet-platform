@@ -14,7 +14,7 @@
 // "what are the three score parts" and "what colour is a state". Only what is genuinely new to the
 // PACKET-level rail lives here.
 import {
-  engineRows, scoreParts, gateMeta, stateMeta, arr, severityFor,
+  engineRows, scoreParts, gateMeta, stateMeta, arr, severityFor, reconcile,
   correctionsState, orderCorrections, correctionRow, correctionSentence, correctionAnomalies,
   correctionSourceText, undoAvailability, revertOutcome, suggestScope,
   CHANGE_LOG_HEADLINE, CORRECTION_SOURCE, CORRECTION_REVERT_ROUTE,
@@ -71,6 +71,13 @@ export const QC_HOOKS = {
   corrected: 'qc-corrected',             // how many changes were made for the user
   correctionsUndone: 'qc-corrections-undone',
   correctionNote: 'qc-correction-note',  // the sentence for a log that is absent, empty or unreadable
+  // SPEC 4.8-10 - the sibling list: what the run could NOT settle, on the page beside what it did.
+  decisions: 'qc-decisions',             // the region
+  decisionAsset: 'qc-decision-asset',    // one asset inside it (carries data-qc-artifact)
+  decisionNote: 'qc-decision-note',      // clear / unchecked / loading - three DIFFERENT sentences
+  decisionError: 'qc-decision-error',    // an asset whose findings could not be read, named not dropped
+  decisionCount: 'qc-decision-count',    // the two numbers, carried from railTotals - never recomputed
+  decisionAnomaly: 'qc-decision-anomaly',// the payload contradicting itself, REPORTED not resolved
   correction: 'qc-correction',           // one change (carries data-qc-field and data-qc-state)
   correctionOpen: 'qc-correction-open',  // opens the field the change was made in
   correctionUndo: 'qc-correction-undo',
@@ -583,6 +590,85 @@ export function rowsForRequirement(result, seq) {
   const rows = allRows(result)
   if (seq == null) return rows
   return rows.filter((r) => arr(r.offenders).some((o) => offenderSeq(o) === Number(seq)))
+}
+
+/**
+ * SPEC 4.8-10 - "Needs a decision", ON THE PAGE. The sibling of railChangeLog(): the change log is
+ * what the run SETTLED on its own, this is what it could not.
+ *
+ * EVERY INPUT ALREADY EXISTED. The rows, the fail/warn split, the ordering and the deep-link target
+ * are all already rendered in the Checks tab and the gate drawer; what was missing was a page-level
+ * mount, because SPEC 4.8 is explicit that both lists are "on the page, not behind a tab or a
+ * search". So this is a PROJECTION of the payload the rail already fetched - not a second fetch,
+ * not a sixth tab, and above all not a third definition of "needs attention".
+ *
+ * That last point is the one worth guarding. `needsAttention` (assetGate.js) and `NEEDS_ATTENTION`
+ * (above) are already two copies of the same predicate differing only in name, and the existing
+ * "computes nothing" guard greps QcRail.jsx only, so it is structurally blind to a third copy
+ * landing in a module. This function restates nothing: it reads engineRows() and NEEDS_ATTENTION,
+ * the same two things railCounts() reads, which is why its row count and the counts strip cannot
+ * disagree - they are the same rows.
+ *
+ * FOUR PER-ASSET STATES, four different sentences, exactly as ChangeLog has. `unchecked` is not
+ * `clear`: an asset nobody ran the checks on has zero findings, and printing "nothing needs a
+ * decision" over it is the vacuous green this whole rail exists to prevent. `error` is not
+ * `clear` either - an omitted asset reads as nothing-to-decide for it, so it is named.
+ */
+export function railDecisions(entries) {
+  const assets = arr(entries).map((e) => {
+    const result = e && e.result
+    // fail before warn, and the rules' rows before the reviewer's - a blocking finding is acted on
+    // differently from one that only wants a look, and D6 is why they are never summed either.
+    const rows = []
+    for (const [engine, kind] of [['deterministic', 'fix'], ['reviewer', 'review']]) {
+      for (const state of ['fail', 'warn']) {
+        for (const r of engineRows(result, engine).filter(NEEDS_ATTENTION)) {
+          if (r.state === state) rows.push({ row: r, kind, engine })
+        }
+      }
+    }
+    const unchecked = railGate(result) === 'unchecked'
+    const status = e && e.resultLoading ? 'loading'
+      : e && e.resultError ? 'error'
+        : unchecked ? 'unchecked'
+          : rows.length ? 'open' : 'clear'
+    // An asset with NO gate row is excluded from toFix/toReview by railTotals (it is counted in
+    // `unchecked` instead), so any finding it carries is in no number the counts strip shows. Both
+    // obvious moves are wrong: hiding the rows loses a real finding, and adding them to `rows`
+    // makes this list disagree with the strip above it. So they are LISTED and counted separately,
+    // and the contradiction is reported the way reconcile() reports the server's own.
+    const anomalies = arr(reconcile(result))
+    if (unchecked && rows.length) {
+      anomalies.push('this asset has no gate row, so its ' + rows.length +
+        ' open finding(s) are in neither number above - the checks need to be run before they count')
+    }
+    return {
+      artifact: e && e.artifact, label: e && e.label, status, rows, unchecked,
+      error: (e && e.resultError) || null,
+      anomalies,
+    }
+  })
+  const totals = railTotals(entries)
+  return {
+    assets,
+    // COUNTED rows only, so this reconciles with the strip by construction. See `uncounted`.
+    rows: assets.reduce((n, a) => n + (a.unchecked ? 0 : a.rows.length), 0),
+    uncounted: assets.reduce((n, a) => n + (a.unchecked ? a.rows.length : 0), 0),
+    // Carried, never recomputed here. The list and the counts strip read one number so they cannot
+    // drift; a mismatch between them is a bug in this projection, and the guard asserts equality.
+    toFix: totals.toFix,
+    toReview: totals.toReview,
+    unchecked: totals.unchecked,
+    anyOpen: assets.some((a) => a.status === 'open'),
+    anyChecked: totals.checked > 0,
+  }
+}
+
+/** The sentence for an asset with no open decisions, which is NOT one sentence. */
+export const DECISION_NOTE = {
+  clear: 'Every check that could run on this asset is clear.',
+  unchecked: 'The checks have not been run on this asset, so nothing here has been decided either way.',
+  loading: 'Reading the open findings for this asset...',
 }
 
 /** The swap decisions that cite a given requirement id. */

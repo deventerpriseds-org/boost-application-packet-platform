@@ -17,6 +17,7 @@ import {
   coverageCards, requirementState, openSeqs, offenderSeq, qcStepState, qcStepDone, packetGate,
   loopsModel, rowsForRequirement, swapsForRequirement, pctWidth, packetReadiness,
   offendersByField, offendersForField, fieldSeverities,
+  railDecisions, DECISION_NOTE,
 } from '../src/qcRail.js'
 
 const SRC = new URL('../src/', import.meta.url)
@@ -1022,4 +1023,160 @@ test('the deep link is resolved by the parent, so one finding rings ONE card', (
   const fn = pb.slice(pb.indexOf('const goToField = useCallback'), pb.indexOf('}, [artifacts, setActiveStep])'))
   assert.ok(fn.length > 100, 'goToField body not found - this assertion has gone stale')
   assert.match(fn, /if \(!a\) return/, 'an unknown artifact id must do nothing, never guess a step')
+})
+
+// ── SPEC 4.8-10: "Needs a decision", on the page ────────────────────────────────────────────────
+// The change log's sibling. SPEC 4.8 says both lists are "on the page, not behind a tab or a
+// search"; one was, and this one lived only in the Checks tab and the drawer. Every input already
+// existed — this is a PROJECTION of the payload the rail already had, and the guards below are
+// mostly about it staying one.
+
+const DEC_FIX_FAIL = { check_key: 'k_fail', state: 'fail', engine: 'deterministic' }
+const DEC_FIX_WARN = { check_key: 'k_warn', state: 'warn', engine: 'deterministic' }
+const DEC_REV_FAIL = { check_key: 'k_rev', state: 'fail', engine: 'reviewer' }
+const DEC_PASS = { check_key: 'k_ok', state: 'pass', engine: 'deterministic' }
+const decEntry = (id, result, extra = {}) => ({ artifact: { id }, label: id, result, ...extra })
+
+// THE SHAPE PRODUCTION ACTUALLY SENDS. appChecks.ts:307-319 publishes a SERVER-SIDE grouping
+// (`engines.deterministic.results` / `engines.reviewer.results`) alongside the flat array, and
+// engineRows() prefers the grouping — so a fixture built only from `results` exercises the FALLBACK
+// branch and proves nothing about the payload the app receives. Writing guards against a shape the
+// producer does not emit is the defect that shipped twice in one day (VERIFY-30 F4, then the F5
+// rebuild detector); this is the same mistake refusing to happen a third time.
+const decServerEntry = (id, { gate, attention, det = [], rev = [] }) => decEntry(id, {
+  gate, attention, results: [...det, ...rev],
+  engines: { deterministic: { decides: 'pass/warn/fail', results: det },
+             reviewer: { decides: 'warn at most', results: rev, verdict: null } },
+})
+
+test('H:decisions-reconcile-with-the-counts-strip: the list and the numbers are the same rows', () => {
+  // CLAUDE.md's cross-surface rule applied here: the header strip, the per-asset chips, the Checks
+  // tab and this list are FOUR consumers of one payload. `rows` counts only rows on assets the
+  // strip also counts, so equality is structural rather than coincidental.
+  const cases = [
+    [decEntry('a', { gate: 'fail', attention: 3, results: [DEC_FIX_FAIL, DEC_FIX_WARN, DEC_REV_FAIL, DEC_PASS] })],
+    [decEntry('a', { gate: 'pass', attention: 0, results: [DEC_PASS] })],
+    [decEntry('a', { gate: 'fail', attention: 1, results: [DEC_FIX_FAIL] }),
+     decEntry('b', { gate: 'pass', attention: 0, results: [DEC_PASS] })],
+    [decEntry('a', { gate: 'fail', attention: 2, results: [DEC_FIX_FAIL, DEC_REV_FAIL] }),
+     decEntry('b', null)],
+    [],
+  ]
+  for (const entries of cases) {
+    const d = railDecisions(entries)
+    const t = railTotals(entries)
+    assert.equal(d.rows, t.toFix + t.toReview,
+      `the list renders ${d.rows} rows while the strip says ${t.toFix} + ${t.toReview}`)
+    assert.equal(d.toFix, t.toFix)
+    assert.equal(d.toReview, t.toReview)
+    assert.equal(d.unchecked, t.unchecked)
+  }
+})
+
+test('H:decisions-order-is-the-modules: blocking rows come before rows that only want a look', () => {
+  // Asserted on the EMITTED order, not on JSX, because the component is forbidden from sorting.
+  const d = railDecisions([decEntry('a', {
+    gate: 'fail', attention: 3,
+    results: [DEC_REV_FAIL, DEC_FIX_WARN, DEC_FIX_FAIL],   // deliberately worst-case input order
+  })])
+  assert.deepEqual(d.assets[0].rows.map((r) => r.row.check_key), ['k_fail', 'k_warn', 'k_rev'])
+  assert.deepEqual(d.assets[0].rows.map((r) => r.kind), ['fix', 'fix', 'review'])
+})
+
+test('H:decisions-empty-is-not-one-sentence: unchecked is never reported as clear', () => {
+  // THE vacuous-green case. An asset nobody ran the checks on has zero findings; printing "nothing
+  // needs a decision" over it is absent evidence reported as a pass — the exact failure the rail
+  // exists to prevent, and the reason ChangeLog carries four sentences rather than one.
+  const checkedClear = railDecisions([decEntry('a', { gate: 'pass', attention: 0, results: [DEC_PASS] })])
+  assert.equal(checkedClear.assets[0].status, 'clear')
+  assert.equal(checkedClear.anyChecked, true)
+  assert.equal(checkedClear.anyOpen, false)
+
+  const neverChecked = railDecisions([decEntry('a', null)])
+  assert.equal(neverChecked.assets[0].status, 'unchecked')
+  assert.equal(neverChecked.anyChecked, false, 'an unchecked packet must not report itself as checked-and-clear')
+  assert.notEqual(DECISION_NOTE.clear, DECISION_NOTE.unchecked)
+  assert.match(DECISION_NOTE.unchecked, /have not been run/i)
+  assert.doesNotMatch(DECISION_NOTE.unchecked, /\bclear\b/i)
+
+  // Loading is a third state: an asset still being read has not been found clear either.
+  const loading = railDecisions([decEntry('a', null, { resultLoading: true })])
+  assert.equal(loading.assets[0].status, 'loading')
+})
+
+test('H:decisions-name-the-asset-they-could-not-read: an error is never an omission', () => {
+  const d = railDecisions([decEntry('a', null, { resultError: 'HTTP 500' })])
+  assert.equal(d.assets.length, 1, 'the asset was dropped — which reads as "nothing to decide" for it')
+  assert.equal(d.assets[0].status, 'error')
+  assert.equal(d.assets[0].error, 'HTTP 500')
+})
+
+test('H:decisions-report-the-uncounted: a finding in no number is flagged, not hidden or double-counted', () => {
+  // An asset with findings but NO gate row is excluded from toFix/toReview by railTotals. Hiding
+  // its rows loses a real finding; adding them to `rows` makes this list disagree with the strip.
+  // Both are wrong, so they are listed, counted apart, and the contradiction is stated.
+  const d = railDecisions([decEntry('a', { gate: null, attention: 2, results: [DEC_FIX_FAIL, DEC_REV_FAIL] })])
+  assert.equal(d.assets[0].status, 'unchecked')
+  assert.equal(d.assets[0].rows.length, 2, 'the findings were hidden')
+  assert.equal(d.rows, 0, 'uncounted findings leaked into the number the strip also shows')
+  assert.equal(d.uncounted, 2)
+  assert.ok(d.assets[0].anomalies.some((a) => /neither number above/.test(a)),
+    'the payload contradicts the strip and nothing says so')
+})
+
+test('H:decisions-do-not-restate-needs-attention: no third copy of the predicate', () => {
+  // `needsAttention` (assetGate.js) and `NEEDS_ATTENTION` (qcRail.js) are ALREADY two copies
+  // differing only in name. The existing "computes nothing" guard greps QcRail.jsx only and is
+  // structurally blind to a third copy landing in a module, which is exactly where this one went.
+  const pred = /state\s*===\s*['"]fail['"]\s*\|\|[^\n]*state\s*===\s*['"]warn['"]/g
+  let n = 0
+  for (const f of ['qcRail.js', 'assetGate.js']) {
+    n += (stripComments(readSrc(f)).match(pred) || []).length
+  }
+  assert.ok(n <= 2, `${n} definitions of "needs attention" across the two modules — it was 2; ` +
+    'railDecisions must call engineRows()/NEEDS_ATTENTION, not restate the rule')
+})
+
+test('H:decisions-are-on-the-page-not-a-sixth-tab: the mount sits between the log and the tabs', () => {
+  const jsx = stripComments(readSrc('screens/QcRail.jsx'))
+  const log = jsx.indexOf('<ChangeLog ')
+  const dec = jsx.indexOf('<Decisions ')
+  const tabs = jsx.indexOf('RAIL_TABS.map(')
+  assert.ok(dec > 0, 'the Needs-a-decision region is defined but never mounted')
+  assert.ok(log < dec && dec < tabs,
+    'SPEC 4.8 puts both lists ON THE PAGE — this one must sit after the change log and before the tab strip')
+  // And it must not have become a tab instead. RAIL_TABS is pinned by assert.deepEqual above;
+  // this states the intent so a future reader does not "fix" that pin by editing the array.
+  assert.equal(RAIL_TABS.length, 5, 'a sixth tab was added — SPEC 4.8 says NOT behind a tab')
+  assert.ok(!RAIL_TABS.some((t) => /decision/i.test(t.key + t.label)))
+  // The component renders, and decides nothing: no sort, no filter, no arithmetic of its own.
+  const body = jsx.slice(jsx.indexOf('function Decisions('), jsx.indexOf('export default function QcRail'))
+  assert.ok(body.includes('railDecisions(entries)'), 'the region does not go through the module')
+  assert.ok(!/\.sort\(/.test(body), 'the component sorts — ordering is the module\'s job')
+  assert.ok(!/\.filter\(/.test(body), 'the component filters — deciding what needs attention is the module\'s job')
+  assert.ok(!/\.length\s*\+/.test(body), 'the component assembles a count')
+  // It reuses CheckRow rather than growing a second row treatment for the same finding.
+  assert.ok(body.includes('<CheckRow'), 'a second row treatment was built for a finding the Checks tab already renders')
+})
+
+test('H:decisions-hold-on-the-shape-the-api-sends: the grouped payload, not the flat fallback', () => {
+  // Same four claims, re-proved against `engines.{deterministic,reviewer}.results` — the branch
+  // engineRows() actually takes in production. The fixtures above take the other one.
+  const entries = [
+    decServerEntry('a', { gate: 'fail', attention: 3, det: [DEC_REV_FAIL, DEC_FIX_WARN, DEC_FIX_FAIL].filter((r) => r.engine === 'deterministic'), rev: [DEC_REV_FAIL] }),
+    decServerEntry('b', { gate: 'pass', attention: 0, det: [DEC_PASS], rev: [] }),
+    decEntry('c', null),
+  ]
+  const d = railDecisions(entries)
+  const t = railTotals(entries)
+  // reconciles
+  assert.equal(d.rows, t.toFix + t.toReview)
+  assert.equal(d.toFix, 2)
+  assert.equal(d.toReview, 1)
+  // ordering survives the grouped branch: fail, warn, then the reviewer's row
+  assert.deepEqual(d.assets[0].rows.map((r) => r.row.check_key), ['k_fail', 'k_warn', 'k_rev'])
+  assert.deepEqual(d.assets[0].rows.map((r) => r.kind), ['fix', 'fix', 'review'])
+  // the three states still separate
+  assert.deepEqual(d.assets.map((a) => a.status), ['open', 'clear', 'unchecked'])
+  assert.equal(d.anyChecked, true)
 })
