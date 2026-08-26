@@ -12,15 +12,40 @@ import assert from 'node:assert/strict'
 import { SKILL_REWORD_SEED, effectiveRewords, setSkillRewords, loadSkillRewords } from '../dist/functions/tests/appSkillBank.js'
 import { buildSkillPool } from '../dist/functions/tests/skillPool.js'
 
+/**
+ * A fake pg client that EMULATES THE SQL, rather than returning the answer the test wants.
+ *
+ * The first version of this fake was an INERT-GUARD FACTORY and my own mutation sweep caught it:
+ * every matching UPDATE did `state = JSON.parse(params[1])`, i.e. it always REPLACED, whatever the
+ * SQL actually said. So mutating the production write from `set skill_rewords = $2` to
+ * `set skill_rewords = coalesce(skill_rewords,'{}') || $2` changed nothing the test could observe,
+ * and `H:skill-rewords-write-REPLACES-so-a-deletion-sticks` passed with the defect installed.
+ *
+ * That is the same class as a guard passing on a fixture the real writers never produce
+ * (`verify-work` 0b, check 2), with a variant worth naming: **when a test doubles a dependency, the
+ * double must implement the BEHAVIOUR under test, not just return a plausible shape.** A fake that
+ * answers correctly regardless of its input is a mock of the conclusion.
+ *
+ * So this one branches on the two SQL shapes that differ in outcome, and nothing else.
+ */
 function fakeClient(initial = undefined) {
   const state = { skill_rewords: initial }
   const queries = []
   return {
     queries, state,
     async query(sql, params) {
-      queries.push({ sql: sql.replace(/\s+/g, ' ').trim(), params })
-      if (/^select skill_rewords/.test(sql.trim())) return { rows: state.skill_rewords === undefined ? [] : [{ skill_rewords: state.skill_rewords }] }
-      if (/update owner_search_prefs set skill_rewords/.test(sql)) { state.skill_rewords = JSON.parse(params[1]); return { rows: [] } }
+      const flat = sql.replace(/\s+/g, ' ').trim()
+      queries.push({ sql: flat, params })
+      if (/^select skill_rewords/.test(flat)) return { rows: state.skill_rewords === undefined ? [] : [{ skill_rewords: state.skill_rewords }] }
+      if (/update owner_search_prefs set skill_rewords/.test(flat)) {
+        const incoming = JSON.parse(params[1])
+        // The distinction the guard exists to see. `||` is postgres jsonb concatenation: keys absent
+        // from the incoming object SURVIVE, which is exactly why a merge cannot express a deletion.
+        state.skill_rewords = /\|\|/.test(flat)
+          ? { ...(state.skill_rewords || {}), ...incoming }
+          : incoming
+        return { rows: [] }
+      }
       return { rows: [] }
     },
   }

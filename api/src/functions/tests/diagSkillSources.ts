@@ -37,8 +37,21 @@ const HEADERS = {
 // owner already keeps a pool; it is labelled "Soft/hard skills pool" (evidence.ts:160).
 const SKILL_FIELDS = ['skills1', 'skills2', 'softHardSkillsPool', 'expertise', 'relevantProficiencies']
 
-export async function diagSkillSources(req: HttpRequest, context: InvocationContext): Promise<HttpResponseInit> {
-  if (req.method === 'OPTIONS') return { status: 204, headers: HEADERS }
+/**
+ * The MasterContext skill fields, read once.
+ *
+ * EXTRACTED so the rewords route and the seeder read the owner's fields through the SAME function
+ * this diag route does. A second copy of "how we read MasterContext" is how two callers end up
+ * disagreeing about what the owner's data says - the failure this repo calls fixing one consumer and
+ * missing the others.
+ *
+ * Never throws: a failure is returned as `{ ok:false, error }` so a caller reports the reason rather
+ * than showing an empty pool, which would read as "nothing to seed".
+ */
+export async function readSkillFields(): Promise<{
+  ok: boolean; error?: string; entities: number
+  fields: Record<string, { chars: number; text: string | null; present: boolean }>
+}> {
   try {
     const client = TableClient.fromConnectionString(CONN, 'MasterContext')
     const entities: any[] = []
@@ -47,7 +60,7 @@ export async function diagSkillSources(req: HttpRequest, context: InvocationCont
     }
     if (!entities.length) {
       // An empty table is a RESULT to report, never an empty pool to seed from silently.
-      return { status: 200, headers: HEADERS, jsonBody: { ok: false, error: 'MasterContext is empty', fields: {} } }
+      return { ok: false, error: 'MasterContext is empty', entities: 0, fields: {} }
     }
     const ctx = entities[0]
     const fields: Record<string, { chars: number; text: string | null; present: boolean }> = {}
@@ -61,9 +74,20 @@ export async function diagSkillSources(req: HttpRequest, context: InvocationCont
         text: raw,
       }
     }
+    return { ok: true, entities: entities.length, fields }
+  } catch (err: any) {
+    return { ok: false, error: String(err?.message || err), entities: 0, fields: {} }
+  }
+}
+
+export async function diagSkillSources(req: HttpRequest, context: InvocationContext): Promise<HttpResponseInit> {
+  if (req.method === 'OPTIONS') return { status: 204, headers: HEADERS }
+  try {
+    const r = await readSkillFields()
+    if (!r.ok) return { status: 200, headers: HEADERS, jsonBody: { ok: false, error: r.error, fields: {} } }
     return {
       status: 200, headers: HEADERS,
-      jsonBody: { ok: true, partition: 'context', entities: entities.length, fields },
+      jsonBody: { ok: true, partition: 'context', entities: r.entities, fields: r.fields },
     }
   } catch (err: any) {
     return { status: 200, headers: HEADERS, jsonBody: { ok: false, error: String(err?.message || err), fields: {} } }

@@ -4134,3 +4134,36 @@ a checked-in TS table collides with CLAUDE.md's strict no-hardcoded-config rule 
 explicit recorded approval for a code-only value; (iii) confirm extending `skill_bank_entry` rather
 than adding a table. `SKILL-POOL.md` §3 and `memory.md:462` still frame this as the old (a)/(b)
 question and must be rewritten when this lands.
+
+**4.6-9 BUILT so far — parser, schema column, config route, Settings screen.** On
+`claude/three-small-ui-gaps`, NOT merged so NOT deployed. api 880/0, app build clean, zero smart
+quotes. Owner decisions taken: rewordings live in the CONFIG STORE ("config store so i can edit
+them"), and `skill_bank_entry` is EXTENDED with a `category` column rather than a second table.
+
+| Piece | Evidence |
+|---|---|
+| `splitSkillFieldTagged` two-level split | 64 entries, 0 rejected, all 36 `relevantProficiencies` terms recovered with categories. 8/8 mutations caught |
+| `skill_bank_entry.category` + index | EXECUTED on a POPULATED db with main's schema first: both seeded rows survived, column NULL not defaulted, index present |
+| `app/skill-rewords` GET/POST | Extends `owner_search_prefs` (one jsonb column). Replace-not-merge so a deletion sticks |
+| Settings > Skill wordings | Mounted in the `quality` tab; sends the whole map; renders `staleRewords` in a bordered warning |
+
+**AN INERT GUARD OF MY OWN, caught by my own sweep — this is the 0b rule paying for itself.**
+`H:skill-rewords-write-REPLACES-so-a-deletion-sticks` did NOT fail when the write was mutated from
+`set skill_rewords = $2` to `set skill_rewords = coalesce(...) || $2`. Cause: the test's FAKE client
+handles any matching UPDATE with `state = JSON.parse(params[1])` - it always replaces, whatever the
+SQL says. So the fake modelled the ANSWER, not the MECHANISM, and the guard could never see the
+difference it was written to catch.
+
+This is the same class as *"a guard passed on a hand-assigned `applied_seq` ordering the writers
+never produce"* - already in `verify-work` step 0b as check 2 (*can the system PRODUCE your
+fixture?*). The variant worth adding: **when a test doubles a dependency, the DOUBLE must implement
+the behaviour under test, not just return a plausible shape.** A fake that answers correctly
+regardless of the input is a mock of the conclusion.
+
+Fix: the fake client emulates BOTH SQL shapes (plain assignment replaces, `||` merges), so a merge
+mutation changes observable state. Re-run of that one mutation is the proof.
+
+**NOT started yet:** the seeder that writes `skill_bank_entry` rows, and the `Swap for another
+skill...` control. `buildSkillPool` still has ZERO production consumers, so none of this is live
+behaviour yet - the parser and the route are wired to each other and to the Settings screen, and
+that is all.
