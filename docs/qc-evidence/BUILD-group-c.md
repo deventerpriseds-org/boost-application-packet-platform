@@ -63,3 +63,102 @@ a term grammatically, and the rewrite path is the ask box.
 - Hooks: `keywordActions`, `keywordDrop`, `keywordNoAction` — all from `BLOCK_HOOKS`.
 - NOT built: the prototype's `Put back "<orig>"` action — it names a displacement
   (`AssetBlocks.jsx:843-847` records "took the place of" as having no source). NOT built: 4.6-9.
+
+---
+
+## WHAT WAS BUILT
+
+| # | File:line | What |
+|---|---|---|
+| 1 | `app/src/assetBlocks.js:58-60` | `BLOCK_HOOKS.keywordActions` / `.keywordDrop` / `.keywordNoAction` |
+| 2 | `app/src/assetBlocks.js:407-455` | `keywordActions({keyword, present, canEdit}) -> {ask, reason}` — the pure selector. The panel renders its answer; it does not decide. |
+| 3 | `app/src/screens/AssetBlocks.jsx:526-530` | `seedAsk(sentence)` — ONE seed-then-open primitive. `seedAskReword` now **delegates** to it, sentence unchanged. Second caller is the keyword panel. EXTEND, not a second mechanism. |
+| 4 | `app/src/screens/AssetBlocks.jsx:861-901` | The actions region inside `BLOCK_HOOKS.keywordDetail`, below the explanation and the verbatim quote (AC C.1). |
+
+**Rendered copy** (from the browser probe's DOM dump, not from the source):
+```
+Not comfortable claiming this?
+Ask to drop it from this field
+This asks for a rewrite and records no decision. Nothing is sent until you press Send.
+```
+and, for a keyword the draft does not contain:
+```
+This field does not contain it, so there is nothing here to drop.
+```
+Seeded sentence: `Drop "hiring technology" from this field. Rewrite the text without it rather than swapping in a synonym.`
+
+**NOT built, deliberately:** 4.6-9 (separate lane). The prototype's `Put back "<orig>"` action — it names a
+displacement, and `AssetBlocks.jsx:843-847` records "took the place of" as having no source in this app.
+
+## WHAT A DROP WRITES (the tier-1 statement)
+**At activation: nothing.** No request of any kind — proved from the browser, not asserted: every call
+reaching the API mock is recorded, and `apiCalls.length` is unchanged across both the click and the
+Enter path (`59/59`, checks *"activating it SENT NOTHING"* / *"the keyboard path sent nothing either"*).
+On **Send**, the write is whatever the field's existing ask box already writes — `ai-edit`, one call
+site, unchanged (`H:wording-ask-reuses-the-field-edit-path` still counts exactly 1).
+**It does NOT use `owner-edit`, and that is the ground-truthed answer, not an omission** — see t2 above:
+`ownerLabels` filters empty replacements, so an `owner-edit` deletion attributes nothing either, and
+splicing at exact offsets cannot remove a term grammatically.
+
+## GUARDS — every one mutation-proved AND counter-proved
+All in `app/test/proposedKeywords.test.mjs` (the suite that OWNS this panel; a guard placed only in
+`assetBlocks.test.mjs` would be structurally blind to it — REGRESSION GUARD C names both).
+
+| Guard | Mutation (suite must FAIL) | Result |
+|---|---|---|
+| `H:keyword-drop-claims-no-coverage` | selector sentence -> the prototype's *"leave the line it covers open… show a gap"* | FAIL 2 ✔ |
+| " | coverage claim injected into the RENDERED disclosure only | FAIL 1 ✔ |
+| `H:keyword-drop-offers-nothing-it-cannot-do` | delete the `!present` branch | FAIL 2 ✔ |
+| " | JSX passes `present: true` instead of `kwPresent.has(...)` | FAIL 1 ✔ |
+| " | `canEdit: true` (a static block gets an inert control) | FAIL 1 ✔ |
+| " | delete the `keywordNoAction` branch | FAIL 1 ✔ |
+| " | delete the on-screen "records no decision" disclosure | FAIL 1 ✔ |
+| `H:keyword-drop-seeds-the-ask-box-and-sends-nothing` | `seedAskReword` stops delegating | FAIL 1 ✔ |
+| " | the drop control POSTs `api.aiEditArtifact` directly | FAIL 1 ✔ |
+| `H:keyword-drop-quotes-no-posting-text` | selector interpolates `verbatim` | FAIL 1 ✔ |
+| `H:keyword-drop-is-keyboard-reachable` | delete `onKeyDown` | FAIL 1 ✔ |
+| ALL FIVE | delete the entire actions render block | FAIL 5 ✔ |
+| ALL | gut the selector body (always offer) | FAIL 2 ✔ |
+
+Counter-proofs (must still PASS): honest reword of the sentence ✔; defensive `act && act.ask` ✔;
+whitespace/attribute-per-line churn in the region ✔; reworded disclosure ✔.
+Two assertions were LOOSENED because a counter-proof caught them crying wolf: `/\bDrop\b/` ->
+`/\bdrop\b/i`, and `/records no decision/` -> `/no decision/i`. Both still fail their deletion.
+
+## MY OWN 0b DEFECT HUNT — what it caught
+1. **Who reads it?** `keywordActions` has 1 production consumer (`AssetBlocks.jsx:871`), not
+   write-only. The three hooks render in `AssetBlocks.jsx`, which IS `BLOCKS_SRC` in
+   `assetBlocks.test.mjs:356` — so the existing "every hook rendered / none hand-typed" guard can SEE
+   the change. Cross-screen union (`assetGate.test.mjs`, `postingCompare.test.mjs`) green.
+2. **Can the system PRODUCE the fixture?** *Caught a real gap.* The first guards fed hand-set
+   booleans. Now `H:keyword-drop-offers-nothing-it-cannot-do` drives the REAL producers —
+   `proposedKeywordsForRow` -> `keywordPresence` -> `keywordActions` — and the browser probe drives
+   the whole chain from an `insertions` payload.
+3. **How many homes?** One: `assetBlocks.js` + `AssetBlocks.jsx` (`grep -rln keywordDetail app/src`).
+   Seed mechanism: `seedAsk` with exactly 2 callers.
+4. **Delete each load-bearing line** — D1-D4 above. Deleting the whole feature fails 5 guards.
+5. *Caught in the probe itself:* the first keyboard check blanked a React-controlled `<textarea>` from
+   script, so React skipped the re-render and the probe read its OWN blank back and reported the
+   feature broken. Closing the box via its real Cancel button + a real `keyboard.press('Enter')` shows
+   it works. **A false FAIL is as expensive as a false PASS.**
+
+## VERIFICATION RUN (commands and their output)
+- `cd app && npm test` -> **331 tests, 331 pass, 0 fail** (326 before this lane; +5 new guards).
+- `cd app && npm run build` -> `built in 3.39s`, no errors. Smart-quote codepoint scan: **0 hits** on
+  all four changed files.
+- `cd app && npm run test:margin` (real Chromium at `/opt/pw-browsers`, vite dev server, the panel
+  driven by clicks) -> **59/59 checks passed** (47 before; +12 new). This is the RENDERED-DOM proof.
+- `git diff --stat -- api/` -> **empty**. No API change, so AC C.6 (no UI write to `skill_candidate` /
+  `swap_decision`) holds structurally, not by inspection.
+
+## FLAKE OBSERVED, AND ITS CAUSE
+One `npm test` run mid-session reported `tests 239 / fail 6`, the failures naming
+`corrections.test.mjs`, `packetFailList.test.mjs`, `qcRail.test.mjs` — none of which this lane
+touches. 12 consecutive runs since are 331/331, and those three files pass in isolation.
+**Cause: this worktree is being edited by a concurrent lane.** `git status` was clean of modified
+files when this agent started; `git diff --stat` now also lists `assetGate.js`, `postingAnalysis.js`,
+`qcRail.js`, `AssetGateDrawer.jsx`, `PacketBuilder.jsx`, `PostingAnalysis.jsx`, `QcRail.jsx` — Group
+A/B work that appeared during this run. A suite reading those files mid-write is the flake.
+**This lane's diff is confined to 4 files** and every hunk in them is this lane's.
+
+## DONE

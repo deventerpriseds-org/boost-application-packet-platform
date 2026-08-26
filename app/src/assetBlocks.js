@@ -55,6 +55,9 @@ export const BLOCK_HOOKS = {
   keywordChips: 'blocks-keyword-chips',       // the field's PROPOSED ATS keywords (never scoreable)
   keywordChip: 'blocks-keyword-chip',         // one of them (carries data-qc-keyword)
   keywordDetail: 'blocks-keyword-detail',     // the panel a chip opens
+  keywordActions: 'blocks-keyword-actions',   // 4.6-10/11 - "Not comfortable claiming this?"
+  keywordDrop: 'blocks-keyword-drop',         // seeds the field's ask box with a drop REQUEST
+  keywordNoAction: 'blocks-keyword-no-action', // why no drop is offered, said rather than implied
   fieldWordingKept: 'blocks-wording-kept',    // "Wording kept from the posting", in the field's margin
   reqLegend: 'blocks-req-legend',             // what RQ-MH / RQ-NTH / RESP mean, once per asset
   wordingAsk: 'blocks-wording-ask',           // seeds the field's own ask box with a reword request
@@ -402,6 +405,53 @@ export function keywordPresence(text, keywords) {
   const hit = new Set()
   for (const r of markRuns(text, list, 'keyword')) if (r.mark && r.phrase != null) hit.add(r.phrase)
   return { present: list.filter((k) => hit.has(k)), absent: list.filter((k) => !hit.has(k)) }
+}
+
+/**
+ * SPEC 4.6-10/4.6-11 — what the keyword panel may offer a reader who is not comfortable claiming a
+ * proposed keyword, and the honest reason when it may offer nothing.
+ *
+ * A DROP IS A REQUEST, NEVER A RECORDED DECISION, and that is a finding rather than a shortcut.
+ * The prototype's button (docs/qc-evidence/qc/assets.jsx:82) is itself an `onAsk` — every one of its
+ * three actions is. What the prototype's SENTENCE adds is a coverage consequence ("leave the line it
+ * covers open… I would rather show a gap than overstate"), and in this app that sentence would be
+ * false: `requirement.model_keyword` is declared NEVER SCOREABLE (`schema.ts:338`,
+ * `requirements.ts:59`) and the panel two lines above already tells the reader the keyword "counts
+ * toward nothing". Copying the wording would put a contradiction two inches below it.
+ *
+ * NOR CAN `owner-edit` RECORD IT, which is the answer to the obvious "but there IS a writer".
+ * `POST /app/artifact/{id}/owner-edit` exists and is finished, but a drop's `replacement` is the
+ * empty string, and `appSwaps.ts:44-49` builds `ownerLabels` as
+ * `.map(r => r.replacement).filter(Boolean)` — an empty replacement is filtered out before
+ * `swaps.ts:279` ever consults it, so `driver='owner'` cannot fire for a deletion. Routing a drop
+ * there would attribute nothing AND would splice a hole into the sentence
+ * (`Led  initiatives across teams`), because `owner-edit` replaces at exact offsets and only a
+ * rewrite can remove a term grammatically. So the ask box is not the lesser option here; it is the
+ * only one that is both honest and correct.
+ *
+ * Three states, and each is deliberate:
+ *   canEdit false  → NOTHING. A static block or a block with no artifact has no edit path at all,
+ *                    and an inert control is the "no dead UI" failure.
+ *   present false  → no control, and the reason SAID rather than a control that would be a no-op.
+ *                    "Absent evidence is never permission": a drop that cannot do anything must
+ *                    read as unavailable, not as having worked.
+ *   present true   → the request sentence, seeded into the field's own ask box, unsent.
+ *
+ * The sentence names the KEYWORD and nothing else — never the posting's verbatim quote, which may
+ * be null (the panel then says the line could not be located), and never a posting line the panel
+ * cannot name.
+ *
+ * @param {{keyword: string, present: boolean, canEdit: boolean}} args
+ * @returns {{ask: string|null, reason: string|null}}
+ */
+export function keywordActions({ keyword, present, canEdit } = {}) {
+  const k = typeof keyword === 'string' ? keyword.trim() : ''
+  if (!k || !canEdit) return { ask: null, reason: null }
+  if (!present) return { ask: null, reason: 'This field does not contain it, so there is nothing here to drop.' }
+  return {
+    ask: `Drop "${k}" from this field. Rewrite the text without it rather than swapping in a synonym.`,
+    reason: null,
+  }
 }
 
 // ── packet-level provenance (decision 9) ────────────────────────────────────────────────────────

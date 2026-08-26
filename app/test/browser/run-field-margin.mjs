@@ -121,8 +121,14 @@ page.on('console', (m) => {
   out.push('CONSOLE-ERR ' + t)
 })
 
+// Every request the page makes that reaches the API mock, in order. SPEC 4.6-10's whole claim is
+// that activating the drop SENDS NOTHING, and the only way to prove a negative about the network is
+// to record the network.
+const apiCalls = []
+
 await page.route('**/api/app/**', async (route) => {
   const url = route.request().url()
+  apiCalls.push(`${route.request().method()} ${url.replace(/^https?:\/\/[^/]+/, '')}`)
   const ins = /\/artifact\/([^/?]+)\/insertions/.exec(url)
   if (ins) return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(insertions(ins[1])) })
   if (/\/checks-result/.test(url)) {
@@ -364,6 +370,88 @@ const unloc = await page.evaluate(() => {
 })
 ok('a keyword whose posting line is UNLOCATABLE says so instead of quoting the paraphrase',
   !!unloc && /could not be located/i.test(unloc) && !/coach PMs/.test(unloc), JSON.stringify(unloc))
+
+// ---------- SPEC 4.6-10 / 4.6-11: the drop request, from the rendered DOM ----------
+// Proved here rather than by a source grep for the reason this whole probe exists: the Node guards
+// pin the WIRING, and whether the control actually appears in the panel, seeds the right box and
+// stays off the network is a different question that only a browser can answer.
+const dropIn = (kw) => page.evaluate((k) => {
+  const panel = [...document.querySelectorAll('[data-qc="blocks-keyword-detail"]')]
+    .find((x) => x.getAttribute('data-qc-keyword') === k)
+  if (!panel) return { error: `no panel for ${k}` }
+  const drop = panel.querySelector('[data-qc="blocks-keyword-drop"]')
+  const none = panel.querySelector('[data-qc="blocks-keyword-no-action"]')
+  return {
+    drop: drop ? drop.innerText.trim() : null,
+    role: drop ? drop.getAttribute('role') : null,
+    tab: drop ? drop.getAttribute('tabindex') : null,
+    none: none ? none.innerText.trim() : null,
+    actions: panel.querySelector('[data-qc="blocks-keyword-actions"]') ? 1 : 0,
+    text: panel.innerText,
+  }
+}, kw)
+
+const present = await dropIn('hiring technology')
+ok('a keyword the field DOES contain offers the drop request',
+  present.actions === 1 && /drop it from this field/i.test(present.drop || ''), JSON.stringify(present.drop))
+ok('and the control is keyboard-reachable in the rendered DOM, not a bare span',
+  present.role === 'button' && present.tab === '0', JSON.stringify([present.role, present.tab]))
+ok('and it says on screen that nothing is recorded and nothing is sent yet',
+  /no decision/i.test(present.text) && /until you press Send/i.test(present.text),
+  JSON.stringify((present.text || '').split('\n').slice(-1)[0]))
+ok('and NOTHING in the panel claims a coverage effect',
+  !/uncovered|coverage|\bcovered\b|show a gap/i.test(present.text), JSON.stringify(present.text))
+
+const absentKw = await dropIn('coaching')
+ok('a keyword the field does NOT contain offers no control at all',
+  absentKw.drop === null && absentKw.actions === 0, JSON.stringify(absentKw.drop))
+ok('and SAYS why instead of leaving an empty panel or an inert button',
+  /nothing here to drop/i.test(absentKw.none || ''), JSON.stringify(absentKw.none))
+
+const callsBeforeDrop = apiCalls.length
+await page.evaluate(() => {
+  const panel = [...document.querySelectorAll('[data-qc="blocks-keyword-detail"]')]
+    .find((x) => x.getAttribute('data-qc-keyword') === 'hiring technology')
+  panel.querySelector('[data-qc="blocks-keyword-drop"]').click()
+})
+await page.waitForTimeout(200)
+const seeded = await page.evaluate(() => {
+  const box = document.querySelector('[data-qc="blocks-ask-box"] textarea')
+  return { value: box ? box.value : null, boxes: document.querySelectorAll('[data-qc="blocks-ask-box"]').length }
+})
+ok('clicking the drop control opens the FIELD\'S OWN ask box and seeds the request',
+  seeded.boxes === 1 && /drop/i.test(seeded.value || '') && /"hiring technology"/.test(seeded.value || ''),
+  JSON.stringify(seeded.value))
+ok('the seeded sentence claims no coverage effect',
+  !!seeded.value && !/uncovered|coverage|\bcovered\b|show a gap/i.test(seeded.value), JSON.stringify(seeded.value))
+ok('and activating it SENT NOTHING - no ai-edit, no owner-edit, no request at all',
+  apiCalls.length === callsBeforeDrop, JSON.stringify(apiCalls.slice(callsBeforeDrop)))
+
+// The keyboard path is a separate code path from the click and has shipped broken before.
+//
+// The box is CLOSED through its own Cancel button first, not by blanking the textarea from script:
+// React owns that value, so assigning '' to the DOM node leaves the state untouched, the re-render
+// is skipped, and the probe then reads its own blank back and calls the feature broken. Cancel is
+// the real reset (`setAskOpen(false); setAsk('')`), and a real key press is the real gesture.
+await page.evaluate(() => {
+  const box = document.querySelector('[data-qc="blocks-ask-box"]')
+  const cancel = box && [...box.querySelectorAll('button')].find((b) => /^Cancel$/i.test(b.innerText.trim()))
+  if (cancel) cancel.click()
+})
+await page.waitForTimeout(150)
+const closed = await page.locator('[data-qc="blocks-ask-box"]').count()
+ok('Cancel closes the ask box, so the keyboard path starts from nothing', closed === 0, String(closed))
+await page.locator('[data-qc="blocks-keyword-drop"]').first().focus()
+await page.keyboard.press('Enter')
+await page.waitForTimeout(200)
+const viaKey = await page.evaluate(() => {
+  const box = document.querySelector('[data-qc="blocks-ask-box"] textarea')
+  return box ? box.value : null
+})
+ok('Enter on the drop control seeds the same request as the click',
+  !!viaKey && /"hiring technology"/.test(viaKey), JSON.stringify(viaKey))
+ok('and the keyboard path sent nothing either',
+  apiCalls.length === callsBeforeDrop, JSON.stringify(apiCalls.slice(callsBeforeDrop)))
 
 // ---------- Row 11 Phase B: presence in the draft ----------
 const kwMarks = await page.evaluate(() => {

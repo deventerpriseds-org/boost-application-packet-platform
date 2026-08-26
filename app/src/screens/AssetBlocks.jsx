@@ -34,7 +34,7 @@ import {
   countMismatchNote, deriveItems, draftSizeText, expectationFor, latestRows, listBodyModel, listsOf,
   targetFor,
   ASSET_ANSWERS_DEFAULT_OPEN, correctionsForField,
-  keywordPresence,
+  keywordActions, keywordPresence,
   meterModel, originalState, PLACEHOLDER_NOTE, placeholderToken, proposedKeywordDetail,
   proposedKeywordsForRow, reqsForRow, scopeSwaps,
   shapeOf, sharedSourceNote, statPct, wordCount,
@@ -517,10 +517,17 @@ function AssetBlock({ row, reqs, swapsForList, wide, artifactId, listOwners, thr
   // (qc/assets.jsx:139). Here it opens the field's OWN ask box with that sentence already typed -
   // the same box, the same `api.aiEditArtifact(..., { section })` route. Not a second edit path,
   // and nothing is sent until the reader presses Send, so the wording stays theirs to edit.
-  const seedAskReword = (phrase) => {
-    setAsk(`Reword "${phrase}" so it does not repeat the posting's wording.`)
+  //
+  // ONE seed-then-open primitive, so a second surface that wants to phrase a request cannot grow a
+  // second edit path to do it. `seedAskReword` keeps its own sentence and simply delegates; the
+  // keyword panel's drop request (SPEC 4.6-10/4.6-11) is the second caller. Both set state and
+  // return - neither sends, and `api.aiEditArtifact` still has exactly one call site on this screen
+  // (guarded by H:wording-ask-reuses-the-field-edit-path).
+  const seedAsk = (sentence) => {
+    setAsk(sentence)
     setAskOpen(true)
   }
+  const seedAskReword = (phrase) => seedAsk(`Reword "${phrase}" so it does not repeat the posting's wording.`)
   const shape = shapeOf(row)
   const isStatic = shape === 'static'
   const expect = expectationFor(row.merge_field)
@@ -854,6 +861,46 @@ function AssetBlock({ row, reqs, swapsForList, wide, artifactId, listOwners, thr
                 : <div className="px-small" style={{ textTransform: 'none', marginTop: 4 }}>
                     The posting line could not be located, so there is nothing to quote.
                   </div>}
+              {/* SPEC 4.6-10 / 4.6-11 - the escape hatch, phrased as a REQUEST because that is all
+                  it can honestly be. What may be offered is decided in ../assetBlocks.js
+                  (`keywordActions`); this renders the answer. `kwPresent` is the SAME derivation
+                  the highlight and the chip state read - the panel does not compute presence a
+                  fourth time. No coverage claim rides on any of it: the keyword counts toward
+                  nothing, as the sentence above already says. */}
+              {(() => {
+                const act = keywordActions({
+                  keyword: openKeywordDetail.keyword,
+                  present: kwPresent.has(openKeywordDetail.keyword),
+                  canEdit: Boolean(artifactId) && !isStatic,
+                })
+                if (act.ask) {
+                  return (
+                    <div data-qc={BLOCK_HOOKS.keywordActions} style={{ marginTop: 8 }}>
+                      <div className="px-small" style={{ fontWeight: 700 }}>Not comfortable claiming this?</div>
+                      <span className="px-link" role="button" tabIndex={0}
+                        data-qc={BLOCK_HOOKS.keywordDrop}
+                        style={{ fontSize: 11, marginTop: 3, display: 'inline-block' }}
+                        onClick={() => seedAsk(act.ask)}
+                        onKeyDown={(e) => {
+                          if (e.key !== 'Enter' && e.key !== ' ') return
+                          e.preventDefault()
+                          seedAsk(act.ask)
+                        }}>Ask to drop it from this field</span>
+                      {/* Says what it is, so nothing on screen implies a decision was stored. */}
+                      <div className="px-small" style={{ textTransform: 'none', marginTop: 3 }}>
+                        This asks for a rewrite and records no decision. Nothing is sent until you press Send.
+                      </div>
+                    </div>
+                  )
+                }
+                if (act.reason) {
+                  return (
+                    <div className="px-small" data-qc={BLOCK_HOOKS.keywordNoAction}
+                      style={{ textTransform: 'none', marginTop: 8 }}>{act.reason}</div>
+                  )
+                }
+                return null
+              })()}
             </div>
           )}
         </div>
