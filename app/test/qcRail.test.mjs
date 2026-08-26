@@ -1180,3 +1180,82 @@ test('H:decisions-hold-on-the-shape-the-api-sends: the grouped payload, not the 
   assert.deepEqual(d.assets.map((a) => a.status), ['open', 'clear', 'unchecked'])
   assert.equal(d.anyChecked, true)
 })
+
+// ── the three defects the independent verifier found, each of which shipped 311/0 GREEN ──────────
+// All three share one shape, and it is the shape this repo has already paid for twice: A GUARD THAT
+// GREPS ONE FILE PROVES NOTHING ABOUT THE FILE ON THE OTHER SIDE OF THE PROP. It was closed for
+// 4.8-10's predicate in the same commit that left it open for 4.1-3's wiring and for the rail's own
+// sentence lookup.
+
+test('H:decisions-footer-cannot-contradict-the-rows-above-it: F-1', () => {
+  // THE VERIFIER'S F-1, and the sharpest finding of the three: the region printed
+  // "Nothing is waiting on you. Every check that could run is clear." directly beneath two rendered
+  // CheckRows. Both halves false — findings ARE waiting, and asset A's checks never ran, so "every
+  // check that could run is clear" is absent evidence reported as a pass.
+  //
+  // Root cause: `anyOpen` read a derived STATUS while the footer is a claim about what is ON SCREEN.
+  // An asset with findings but no gate row is 'unchecked', never 'open', so the proxy said empty
+  // while the screen said otherwise. The invariant is stated against the rows, not the status.
+  const failDet = { check_key: 'k1', state: 'fail', engine: 'deterministic' }
+  const failRev = { check_key: 'k2', state: 'fail', engine: 'reviewer' }
+  const ungated = decEntry('A', { gate: null, attention: 2, results: [failDet, failRev] })
+  const clean = decEntry('B', { gate: 'pass', attention: 0, results: [DEC_PASS] })
+
+  // the exact payload from the verifier's repro
+  const d = railDecisions([ungated, clean])
+  assert.equal(d.uncounted, 2, 'precondition: the ungated asset still carries two findings')
+  assert.equal(d.anyOpen, true,
+    'the footer would render "every check that could run is clear" over two listed findings')
+
+  // the milder variant of the same root cause: the ungated asset ALONE
+  assert.equal(railDecisions([ungated]).anyOpen, true,
+    'a footer implying emptiness would render over rendered rows')
+
+  // THE INVARIANT, not the incident: the clear-sentence branch is unreachable whenever ANY row is
+  // on screen — counted or not. This is what makes the assertion survive a refactor of `status`.
+  for (const entries of [[ungated], [ungated, clean], [clean, ungated],
+                         [decEntry('C', { gate: 'fail', attention: 1, results: [failDet] })]]) {
+    const m = railDecisions(entries)
+    const rowsOnScreen = m.assets.reduce((n, a) => n + a.rows.length, 0)
+    if (rowsOnScreen > 0) assert.equal(m.anyOpen, true,
+      `${rowsOnScreen} rows render but anyOpen is false — the footer claims the opposite of the screen`)
+  }
+  // and the converse, so this is not satisfied by hardcoding true
+  assert.equal(railDecisions([clean]).anyOpen, false)
+  assert.equal(railDecisions([]).anyOpen, false)
+})
+
+test('H:decisions-sentence-is-looked-up-BY-STATUS: F-3', () => {
+  // THE VERIFIER'S F-3. `H:decisions-empty-is-not-one-sentence` proves the four sentences differ and
+  // that railDecisions returns the right status — and nothing proved the SCREEN looks the sentence
+  // up by that status. Mutating `{DECISION_NOTE[a.status]}` to `{DECISION_NOTE.clear}` left the
+  // suite 311/0 while reporting an UNCHECKED asset to the owner as clear: verbatim AC 1.8's failure.
+  const jsx = stripComments(readSrc('screens/QcRail.jsx'))
+  assert.match(jsx, /DECISION_NOTE\[\s*a\.status\s*\]/,
+    'the screen picks its sentence by a literal key — an unchecked asset can be reported as clear')
+  // No literal member access may stand in for the lookup.
+  for (const k of ['clear', 'unchecked', 'loading']) {
+    assert.ok(!jsx.includes('DECISION_NOTE.' + k),
+      `the screen hardcodes DECISION_NOTE.${k} instead of looking the sentence up by status`)
+  }
+})
+
+test('H:jd-qc-link-is-WIRED-not-just-rendered: F-2', () => {
+  // THE VERIFIER'S F-2, from two mutations that both shipped green:
+  //   A) delete `onOpenQc` from PacketBuilder      -> the control never renders at all (it is gated
+  //                                                   on the prop), so the whole feature vanishes
+  //   B) setActiveStep('qc') -> setActiveStep('jd') -> the control re-opens the step it is already on
+  // Every 4.1-3 assertion greps PostingAnalysis.jsx, which is the half that CANNOT see either bug.
+  // The AC doc predicted this in writing: "Run (i) alone does not prove 3.1 - it proves the words
+  // are on screen, which is exactly the dead-UI failure the standing rule names."
+  const builder = stripComments(readSrc('screens/PacketBuilder.jsx'))
+  const mount = builder.slice(builder.indexOf('<PostingAnalysisCard'))
+  const props = mount.slice(0, mount.indexOf('/>'))
+  assert.match(props, /onOpenQc=/,
+    'PacketBuilder does not pass onOpenQc — the control is gated on that prop, so 4.1-3 renders nowhere')
+  assert.match(props, /setActiveStep\(\s*'qc'\s*\)/,
+    'the navigation prop does not go to the QC step — the control would open the wrong step')
+  // It must use the ONE step API rather than a second router, on this side of the prop too.
+  assert.ok(!/window\.location|history\.pushState/.test(props),
+    'the mount navigates directly instead of through setActiveStep')
+})

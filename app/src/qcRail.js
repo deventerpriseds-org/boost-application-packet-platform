@@ -659,7 +659,16 @@ export function railDecisions(entries) {
     toFix: totals.toFix,
     toReview: totals.toReview,
     unchecked: totals.unchecked,
-    anyOpen: assets.some((a) => a.status === 'open'),
+    // ANY ROW ON SCREEN, not `status === 'open'`. The status form was a real on-screen falsehood
+    // (verifier F-1): an asset with findings but no gate row gets `status: 'unchecked'`, never
+    // 'open', so `anyOpen` came back false on a screen that was rendering its CheckRows — and the
+    // footer then printed "Nothing is waiting on you. Every check that could run is clear." above
+    // two listed findings. Both halves false, and it is the exact vacuous-green laundering AC 1.8
+    // exists to prevent, arriving one step to the side of where AC 1.8 was looking.
+    //
+    // `rows.length` is what the reader can SEE, and the footer is a statement about what they see.
+    // A derived status is a proxy for that; the proxy and the screen disagreed.
+    anyOpen: assets.some((a) => a.rows.length > 0),
     anyChecked: totals.checked > 0,
   }
 }
