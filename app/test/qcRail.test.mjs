@@ -17,7 +17,7 @@ import {
   coverageCards, requirementState, openSeqs, offenderSeq, qcStepState, qcStepDone, packetGate,
   loopsModel, rowsForRequirement, swapsForRequirement, pctWidth, packetReadiness,
   offendersByField, offendersForField, fieldSeverities,
-  railDecisions, DECISION_NOTE,
+  railDecisions, DECISION_NOTE, packetFailList,
 } from '../src/qcRail.js'
 
 const SRC = new URL('../src/', import.meta.url)
@@ -1258,4 +1258,79 @@ test('H:jd-qc-link-is-WIRED-not-just-rendered: F-2', () => {
   // It must use the ONE step API rather than a second router, on this side of the prop too.
   assert.ok(!/window\.location|history\.pushState/.test(props),
     'the mount navigates directly instead of through setActiveStep')
+})
+
+// ── THE SHIP GATE MUST NOT FAIL OPEN ─────────────────────────────────────────────────────────────
+// Found by a local render comparison, not by the suite, and it had been live: the Review & send step
+// reported "Nothing blocks sending." on the SAME packet, in the SAME session, from the SAME payload
+// that the QC step was rendering as "Blocked - 52 to fix, 1 never checked". Measured on a driven
+// render: data-qc-count="0", data-qc-assets="0", zero fail rows, and re-run at --settle 12000 as a
+// disconfirming test in case it was a fetch race. It was not.
+//
+// Cause: useQcEntries emitted { artifact, label, result, ... } with no `artifactId`, while
+// packetFailList reads `e.artifactId || e.id` and does `if (!artifactId) continue` - so it skipped
+// EVERY entry and returned an empty list, which reads as "nothing wrong".
+//
+// This is the worst failure this repo has a name for: absent evidence rendered as PERMISSION.
+// The guard is BEHAVIOURAL, not a source grep for the key - a grep would pass on an entry that
+// carried the key with the wrong value, and would not have caught the `type` half at all.
+
+test('H:ship-gate-cannot-fail-open: a blocking finding always reaches the send step', () => {
+  const shape = (id, type, result) => ({
+    artifact: { id, type }, artifactId: id, type, label: type, result,
+  })
+  const failRow = { check_key: 'ats_parse', state: 'fail', engine: 'deterministic' }
+
+  // A packet with one FAILING asset and one asset nobody checked. Both must block.
+  const entries = [
+    shape('a1', 'resume', { gate: 'fail', attention: 1, results: [failRow] }),
+    shape('a2', 'cover', null),                                   // no gate row at all
+  ]
+  const fl = packetFailList(entries)
+  assert.ok(fl.items.length > 0,
+    'the send step would say "Nothing blocks sending" over a failing packet - the gate FAILS OPEN')
+  assert.ok(fl.count > 0, 'the blocking count is zero on a packet that is blocked')
+  assert.ok(fl.assets > 0, 'no asset is named as blocking')
+  // Both reasons must be represented: a real fail AND an unchecked asset. An unchecked asset is the
+  // absent-evidence case and is the one most easily laundered into a pass.
+  const ids = new Set(fl.items.map((i) => i.artifactId))
+  assert.ok(ids.has('a1'), 'the failing asset is missing from the fail list')
+  assert.ok(ids.has('a2'), 'the UNCHECKED asset is missing - absent evidence is not permission')
+  // Every item must name its asset. An item with a null artifactId cannot be opened or acted on.
+  for (const i of fl.items) assert.ok(i.artifactId, 'a fail-list item names no artifact')
+
+  // And the converse, so this cannot be satisfied by returning items unconditionally.
+  const clean = [shape('a1', 'resume', { gate: 'pass', attention: 0, results: [] })]
+  assert.equal(packetFailList(clean).count, 0, 'a genuinely clean packet must not be reported blocked')
+})
+
+test('H:qc-entries-carry-what-the-gate-reads: producer and consumers agree on the shape', () => {
+  // The mismatch was between ONE producer and THREE consumers, and it survived because nothing
+  // asserted the contract between them. Stated here as the contract, in both directions.
+  const jsx = stripComments(readSrc('screens/QcRail.jsx'))
+  const producer = jsx.slice(jsx.indexOf('const entries = useMemo'), jsx.indexOf('}), [list, checks, ins, rem])'))
+  for (const key of ['artifactId:', 'type:', 'result:', 'label:']) {
+    assert.ok(producer.includes(key), `useQcEntries no longer emits ${key} - a consumer reads it`)
+  }
+  // NOT just "the key is present" - the key must be ASSIGNED FROM THE ARTIFACT. Presence alone was
+  // proved insufficient by mutation: `artifactId: null` left the whole suite green while restoring
+  // the exact fail-open behaviour, because the behavioural test above builds its own entries and so
+  // exercises the SELECTOR, never the PRODUCER. That is the same two-sides-of-the-prop blindness as
+  // the bug itself, reappearing inside its own fix.
+  //
+  // This is a SOURCE-SHAPE assertion and therefore weaker than a behavioural one; there is no DOM
+  // renderer in this suite, so the producer cannot be executed here. The thing that actually caught
+  // the original defect was a local RENDER of the built app against fixtures
+  // (scripts/render-app.mjs), which drove the real component and read the real DOM. Worth knowing
+  // which instrument found it: not this file.
+  assert.match(producer, /artifactId:\s*a(\s*&&\s*a)?\.id/,
+    'artifactId is present but not taken from the artifact id - a null or wrong value here fails the ship gate open')
+  assert.match(producer, /\btype:\s*a(\s*&&\s*a)?\.type/,
+    'type is present but not taken from the artifact - fail-list items would name no asset type')
+  // The consumers that read them, named so a future edit to either side has to look at the other.
+  const mod = stripComments(readSrc('qcRail.js'))
+  assert.ok(/e\.artifactId/.test(mod), 'packetFailList no longer reads artifactId')
+  const builder = stripComments(readSrc('screens/PacketBuilder.jsx'))
+  assert.ok(/e\.artifactId === a\.id/.test(builder),
+    'the asset gate badge no longer matches entries by artifactId')
 })

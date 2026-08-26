@@ -103,6 +103,19 @@ export function useQcEntries(artifacts, { withInsertions = false, withRemediatio
     const rm = rem[a.id] || { loading: false, error: null, data: null }
     return {
       artifact: a,
+      // THE SHIP GATE READS THESE TWO, AND THEY WERE NOT HERE. Without `artifactId`,
+      // packetFailList's `if (!artifactId) continue` (qcRail.js:928) skipped EVERY entry, so the
+      // Review & send step reported "Nothing blocks sending." on a packet the QC step, reading the
+      // same payload in the same session, called "Blocked - 52 to fix, 1 never checked". That is a
+      // gate FAILING OPEN: absent evidence rendered as permission, which is the one thing this rail
+      // exists to prevent. `PacketBuilder.jsx:950` failed the same way and drew "not loaded" on
+      // every asset badge forever.
+      //
+      // Fixed at the ONE producer rather than at the three consumers, per the repo rule that shared
+      // logic belongs at the source everything funnels through - patching packetFailList alone would
+      // have left the badges wrong and put a fourth consumer one commit away from the same bug.
+      artifactId: a.id,
+      type: a.type,
       label: assetLabel(a.type),
       result: c.data,
       resultLoading: c.loading,
