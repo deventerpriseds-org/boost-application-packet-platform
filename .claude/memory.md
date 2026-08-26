@@ -452,7 +452,21 @@ Key tables (PostgreSQL):
 - iOS testing: requires macOS runner or BrowserStack; categorically unavailable in Linux CCR
 
 ## Active work
-Current task: THRESHOLD SWEEP DONE on Trinnex (owner-instructed). 0.7 -> 1 of 8 rule matches,
+Current task: **F5 CLOSED and deployed (`5a6728d`)** — see actions.md. Option (b), frame as a
+  RECORDED column, schema executed against a populated DB, 843 tests. The independent verifier
+  refuted one claim and found three more defects; all four closed in the same commit, and three of
+  the four were greps I had skipped.
+  **Process now mechanism, applied LIVE not just pushed:** `verify-work` 0b (self-attack and fix
+  BEFORE the verifier — does not narrow its coverage) and 0c (loop 2+ tiers by COST, never by
+  "could this have been impacted?"); `setup.sh` **v17** makes SessionStart re-copy skills, because a
+  skill push previously reached nobody — build-time copy, cached output, this session was on
+  `_eds_version` 14 with a skill file from 12:43. Verified: hooks at 17, re-copy present, skill
+  38,929 bytes.
+  **Loop-2 verification RUNNING** under 0c (first real use).
+  **Open, both with ledger rows:** `D:undo-after-rebuild-copy-is-silent` (AC-18 wants the partial fix
+  stated in owner-facing copy; it is a REFUSAL string so NOT changed without an owner ping) and
+  `D:rebuild-correction-silently-dropped`.
+Prior task: THRESHOLD SWEEP DONE on Trinnex (owner-instructed). 0.7 -> 1 of 8 rule matches,
   0.6 -> 2 of 8, 0.5 -> 4 of 8. At 0.5 one match is a clear FALSE POSITIVE (*scalable, secure,
   high-quality software* matched to a CTO/CPO roadmap-collaboration line). Recommend 0.6 or stay at
   0.7; never 0.5. NOT changed - it is the owner's setting and the measurement is on the record.

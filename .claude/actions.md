@@ -3708,3 +3708,46 @@ boost db readwrite connector."* Correct. `Boost_DB_Connector`, `boost-pg-mcp-wri
 says explicitly to TELL THE OWNER rather than silently fall back. I used `db-query.yml` round trips
 (~40s each vs ~1s brokered) all session without mentioning it. Every number stands; the cost was
 wall-clock and the owner's ability to fix it.
+
+**SHIPPED — F5 / `D:owner-edit-offsets-two-frames` CLOSED (`5a6728d`, deployed).**
+An owner edit was un-undoable once any other correction shared the field, and it broke undo for that
+other row too. Fixed as **option (b)** — the reader learns the frame — against the ledger's own
+recommendation of (a), on evidence built rather than read: (a) leaves every stored row broken, needs
+(b)'s unwind for its own backfill, and REMOVES a working capability (a new owner edit on an affected
+field starts being refused). The frame is a **recorded column**, reversing my earlier call on the
+owner's principle *"i dont like workarounds rather than solutions"*; the source-to-frame map survives
+only as the legacy-NULL reader, which is what keeps "no migration" true. Schema EXECUTED against a
+populated PG 16.13. 843 tests.
+
+**The independent verifier REFUTED one claim and found three defects I had not asked about**, all
+closed in the same commit: the honest-refusal fix was unreachable (my guard used an `applied_seq`
+ordering the writers cannot produce — VERIFY-30 F4's exact shape, twice in one day); the new `frame`
+column was WRITE-ONLY; a third DDL home was missed AND the parity guard was blind to a missing
+column; and a load-bearing positional check was unguarded (deleting it left 840/840 green while 96
+of 1218 tampered documents spliced). Three of the four were greps I skipped.
+
+**PROCESS FIXED, LIVE, NOT JUST PUSHED.** Owner: *"you just need to attempt to fix the things you
+find before the validater runs rather than wasting loops"*, then *"why do you keep doing 90% and
+letting the final 10% get lost"*. Both are now mechanism rather than prose:
+- `verify-work` **step 0b** — self-attack and FIX before spawning the verifier (four checks, seconds
+  each, each carrying the incident that earned it). Does NOT narrow verifier coverage.
+- `verify-work` **step 0c** — on loop 2+, tier by COST not by "could this have been impacted?" (that
+  judgement would have been wrong for 5 of 8 claims here). Cheap suite re-runs in full every loop;
+  only expensive re-derivation is scoped, and the brief must STATE the radius and tell the verifier
+  to CHALLENGE it.
+- `setup.sh` **v17** — the reason the above nearly did not count. A skill pushed to the repo reached
+  NOBODY: skills are copied into `/root/.claude/skills/` at container BUILD and that output is
+  cached. Measured — this session was still loading the 34,073-byte copy from 12:43 with zero of the
+  new content, and the container was on `_eds_version` 14, two versions stale. The SessionStart hook
+  already pulled the repo every session and never re-copied the skills; it does now. Applied live and
+  verified: all four hooks report 17, the installed command contains the re-copy, and this session's
+  skill is 38,929 bytes with both rules.
+
+**Loop-2 verification of F5 is RUNNING** under the new 0c rules — first real use: cheap suite across
+everything, independent re-derivation only for the stated radius, verifier explicitly invited to
+reject that radius.
+
+**Two pieces deliberately not in the fix, each with a ledger row:**
+`D:undo-after-rebuild-copy-is-silent` (AC-18 requires the partial fix be stated in owner-facing copy;
+it is not, and the copy is a REFUSAL string so it is not being changed without an owner ping) and
+`D:rebuild-correction-silently-dropped` (untouched).
