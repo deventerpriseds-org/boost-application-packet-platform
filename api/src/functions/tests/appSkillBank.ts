@@ -22,6 +22,7 @@ import { app, HttpRequest, HttpResponseInit, InvocationContext } from '@azure/fu
 import { resolveOwner, requireWrite } from './appSession'
 import { getPgClient } from './pgClient'
 import { readSkillFields } from './diagSkillSources'
+import { createHash } from 'crypto'
 import { buildSkillPool, SkillOrigin } from './skillPool'
 
 const HEADERS = { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': '*', 'Access-Control-Allow-Methods': 'GET,POST,OPTIONS' }
@@ -115,6 +116,57 @@ export function effectiveRewords(stored: Record<string, string> | null): Record<
 }
 
 /**
+ * Write the pool into `skill_bank_entry`. Idempotent, and it DELETES NOTHING.
+ *
+ * `origin` needs no widening and that is worth stating, because it looked like it did: the CHECK
+ * allows `master_context | portfolio_slide`, while `SkillOrigin` carries `skills1`, `expertise`,
+ * `relevantProficiencies`. Those are FIELD names, not stores - they belong in `source_ref`, which
+ * exists for exactly that ("the field name or slide/table coordinate it came from"). The two
+ * vocabularies were never in conflict; one is the store and one is the field within it.
+ *
+ * ONE ROW PER TERM even when the term came from several fields. `source_ref` records all of them,
+ * comma-joined, because the pool already merged them into one entry and splitting them back out here
+ * would put the same skill in the owner's picker twice.
+ *
+ * WHY IT DOES NOT DELETE. The table's own comment says a re-seed must be able to expire rows from one
+ * source without touching another, and that is right eventually - but a term vanishing from the pool
+ * has two possible causes, and only one of them means "the owner removed this skill": they edited
+ * MasterContext, OR a reword key drifted and the parser now produces different text. The second is a
+ * BUG, and deleting the owner's banked skills because of a bug is unrecoverable. So orphans are
+ * COUNTED AND RETURNED, never removed, and the caller shows them. Deletion can be added the day
+ * there is a way to tell those two causes apart.
+ */
+export async function seedSkillBank(client: any, owner: string, pool: { entries: any[] }, digest: string | null): Promise<{
+  inserted: number; updated: number; total: number; orphans: string[]
+}> {
+  const entries = pool?.entries || []
+  let inserted = 0, updated = 0
+  const seenNorm = new Set<string>()
+  for (const e of entries) {
+    const label = String(e.term || '').trim()
+    const norm = String(e.key || '').trim()
+    if (!label || !norm) continue          // the table's own CHECKs; refused here with a reason rather than as a 500
+    seenNorm.add(norm)
+    const sourceRef = (e.origins || []).join(',') || 'unknown'
+    const r = await client.query(
+      `insert into skill_bank_entry (owner_email, label, label_norm, origin, source_ref, source_sha256, category)
+       values ($1,$2,$3,'master_context',$4,$5,$6)
+       on conflict (owner_email, label_norm) do update
+         set label = excluded.label,
+             source_ref = excluded.source_ref,
+             source_sha256 = excluded.source_sha256,
+             category = excluded.category,
+             updated_at = now()
+       returning (xmax = 0) as was_insert`,
+      [owner, label, norm, sourceRef, digest, e.category || null])
+    if (r.rows?.[0]?.was_insert) inserted += 1; else updated += 1
+  }
+  const existing = (await client.query(`select label, label_norm from skill_bank_entry where owner_email=$1`, [owner])).rows || []
+  const orphans = existing.filter((r: any) => !seenNorm.has(r.label_norm)).map((r: any) => r.label)
+  return { inserted, updated, total: entries.length, orphans }
+}
+
+/**
  * GET  /api/app/skill-rewords  — the seed, the owner's stored map, and a LIVE PREVIEW of the pool.
  * POST /api/app/skill-rewords { rewords } — replace the map wholesale.
  *
@@ -181,3 +233,48 @@ export async function skillRewords(req: HttpRequest, context: InvocationContext)
 }
 
 app.http('skillRewords', { methods: ['GET', 'POST', 'OPTIONS'], authLevel: 'anonymous', route: 'app/skill-rewords', handler: skillRewords })
+
+/**
+ * GET  /api/app/skill-bank — what is banked now.
+ * POST /api/app/skill-bank — re-seed it from MasterContext through the owner's rewordings.
+ *
+ * The POST is a WRITE, so it takes `requireWrite`. It is also idempotent: running it twice changes
+ * nothing the second time, which is what makes it safe to offer as a button rather than a migration.
+ */
+export async function skillBank(req: HttpRequest, context: InvocationContext): Promise<HttpResponseInit> {
+  if (req.method === 'OPTIONS') return { status: 204, headers: HEADERS }
+  const { owner } = resolveOwner(req)
+  let client
+  try {
+    client = await getPgClient()
+    await ensureSkillRewords(client)
+
+    if (req.method === 'POST') {
+      const guard = requireWrite(req); if (guard) return guard
+      const src = await readSkillFields()
+      // An unreadable source is a REFUSAL, never an empty seed: writing zero rows here would read as
+      // "the owner has no skills" and would orphan every row already banked.
+      if (!src.ok) return { status: 200, headers: HEADERS, jsonBody: { ok: false, error: src.error, seeded: null } }
+      const sources: Partial<Record<SkillOrigin, string | null>> = {}
+      for (const [k, v] of Object.entries(src.fields)) sources[k as SkillOrigin] = v.text
+      const rewords = effectiveRewords(await loadSkillRewords(client, owner))
+      const pool = buildSkillPool(sources, { rewords })
+      const digest = createHash('sha256').update(Object.values(sources).map(v => v || '').join(' ')).digest('hex')
+      const seeded = await seedSkillBank(client, owner, pool, digest)
+      return {
+        status: 200, headers: HEADERS,
+        jsonBody: { ok: true, seeded, staleRewords: pool.staleRewords, rejected: pool.rejected },
+      }
+    }
+
+    const rows = (await client.query(
+      `select label, category, source_ref, updated_at from skill_bank_entry where owner_email=$1 order by category nulls first, label`,
+      [owner])).rows || []
+    return { status: 200, headers: HEADERS, jsonBody: { ok: true, count: rows.length, entries: rows } }
+  } catch (e: any) {
+    context.error('skillBank', e)
+    return { status: 500, headers: HEADERS, jsonBody: { ok: false, error: String(e?.message || e) } }
+  } finally { try { await client?.end() } catch {} }
+}
+
+app.http('skillBank', { methods: ['GET', 'POST', 'OPTIONS'], authLevel: 'anonymous', route: 'app/skill-bank', handler: skillBank })
