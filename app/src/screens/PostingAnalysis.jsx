@@ -199,7 +199,15 @@ export function ProfileCompareCard({ comparison, onOpenRequirements, onOpenQc })
                   <div className="px-label">{r.label}</div>
                   {/* The big number, and it is only printed when the API sent one. A card that
                       invents 0 of 0 for an ungraded dimension is the fabricated-composite failure. */}
-                  {Number.isFinite(Number(r.total)) && Number(r.total) > 0 ? (
+                  {/* THE SAME GUARD THE ROW USES (`!na && r.total`, :105), not a second opinion.
+                      They had diverged: the card asked `Number(r.total) > 0` while the row asked
+                      `!na && r.total`, so a row with fit 'not_applicable' AND a total would print
+                      "2 of 3" on the card and NO number in the table on the same screen. Not
+                      producible from today's buildComparison - every na() site passes covered/total
+                      null - but loadComparison is a straight column passthrough, so the divergence
+                      is one stored row away, and AC A.2 is precisely about where this number comes
+                      from. Two guards for one question is how two surfaces come to disagree. */}
+                  {r.fit !== 'not_applicable' && r.total ? (
                     <div style={{ display: 'flex', alignItems: 'baseline', gap: 5, marginTop: 3 }}>
                       <b style={{ fontSize: 22, lineHeight: 1, color: FIT_COLOR[r.fit] }}>{r.covered}</b>
                       <span style={{ fontSize: 13, color: 'var(--proto-ink3)' }}>of {r.total}</span>
@@ -215,10 +223,17 @@ export function ProfileCompareCard({ comparison, onOpenRequirements, onOpenQc })
                   {/* 4.2-4 is ALREADY BUILT and this renders the API's OWN enumeration verbatim -
                       dimensions.ts:504 emits "no excerpt for: #12 <text>". Re-deriving a Missing:
                       list here would be a second, divergent enumeration of one fact. */}
-                  {r.note && (
+                  {/* `r.note || r.reason`, exactly as CompareRow:117 does it. The card had only
+                      `r.note`, and dimensions.ts sets note=null / reason=<why> on every
+                      not_applicable row - so a stale comparison rendered EIGHT identical
+                      "nothing to count on this dimension / Not compared" tiles with no explanation,
+                      while the table directly beneath each one said why. An unexplained absence is
+                      the same laundering as a fabricated number: the reader cannot tell "nobody
+                      asked" from "asked and found nothing". */}
+                  {(r.note || r.reason) && (
                     <div className="px-small" data-qc={POSTING_HOOKS.compareCardNote}
                       style={{ textTransform: 'none', marginTop: 3, color: 'var(--proto-ink2)', lineHeight: 1.45 }}>
-                      {r.note}
+                      {r.note || r.reason}
                     </div>
                   )}
                 </div>

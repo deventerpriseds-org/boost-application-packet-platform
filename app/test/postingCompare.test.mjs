@@ -13,6 +13,14 @@ import {
 } from '../src/postingAnalysis.js'
 
 const CARD_SRC = readFileSync(new URL('../src/screens/PostingAnalysis.jsx', import.meta.url), 'utf8')
+// The card grid ONLY. Scoping matters: an assertion run over the whole file would be satisfied by
+// the comparison ROW's code, which already does most of these things correctly - and that is exactly
+// how a guard comes to pass while the surface it names is broken.
+const CARD_BLOCK = () => {
+  const i = CARD_SRC.indexOf('POSTING_HOOKS.compareCards')
+  if (i < 0) throw new Error('the fit-card grid is not rendered at all')
+  return CARD_SRC.slice(i, CARD_SRC.indexOf('POSTING_HOOKS.compareCols'))
+}
 const BUILDER_SRC = readFileSync(new URL('../src/screens/PacketBuilder.jsx', import.meta.url), 'utf8')
 
 const row = (over = {}) => ({
@@ -359,4 +367,81 @@ test('H:missing-lines-are-enumerated-ONCE-by-the-api: 4.2-4 is ALREADY BUILT', (
   assert.notEqual(fitLabel('weak', 'nothing_found'), fitLabel('weak', 'falls_short'))
   assert.equal(fitLabel('not_applicable'), 'Not compared')
   for (const v of Object.values(FIT_LABEL)) assert.notEqual(v, 'No evidence')
+})
+
+// ── 4.2-1 fit cards ─────────────────────────────────────────────────────────────────────────────
+// EVERY assertion below exists because an independent verifier proved the corresponding mutation
+// ships with the suite GREEN. Measured, not imagined: deleting the whole card block left 319/0.
+// These guard BEHAVIOUR, not styling - card size, count-per-row and ordering stay the owner's to
+// change without touching a test.
+
+test('H:fit-cards-exist-and-are-one-per-row: A.1', () => {
+  // Verifier mutation: `rows.map(` -> `rows.slice(0,3).map(` rendered 3 cards over an 8-row table
+  // and the suite stayed GREEN. A card grid that silently drops rows is worse than none - the
+  // reader counts the cards and believes that is the whole comparison.
+  const block = CARD_BLOCK()
+  assert.match(block, /rows\.map\(/, 'the grid no longer renders one card per row')
+  assert.ok(!/rows\.slice\(|\.filter\(/.test(block),
+    'the grid truncates or filters rows - the cards would under-report the table beneath them')
+})
+
+test('H:fit-card-number-is-READ-never-recomputed: A.2, the tier-1 one', () => {
+  // Verifier mutation: `{r.covered}` -> `{r.matched_seqs.length}` - the numerator recomputed in the
+  // browser - left the suite GREEN. `covered`/`total` are the API's measurement (dimensions.ts);
+  // a client recount answers a different question the moment the two drift, and this app has been
+  // bitten by exactly that (railAttention's comment records it).
+  const block = CARD_BLOCK()
+  assert.match(block, /\{\s*r\.covered\s*\}/, 'the numerator is no longer the API\'s `covered`')
+  assert.match(block, /of \{\s*r\.total\s*\}/, 'the denominator is no longer the API\'s `total`')
+  assert.ok(!/matched_seqs|\.length\b/.test(block),
+    'the card derives a count client-side - it must RENDER the API measurement, never recompute it')
+})
+
+test('H:fit-card-never-fabricates-a-count: A.3', () => {
+  // Verifier mutation: the total guard -> `|| true`, fabricating "0 of 0" for an ungraded
+  // dimension. GREEN. A fabricated composite is the number a reviewer trusts most and the one most
+  // likely to be wrong.
+  const block = CARD_BLOCK()
+  assert.match(block, /r\.fit\s*!==\s*'not_applicable'\s*&&\s*r\.total\s*\?/,
+    'the card no longer gates its number on the SAME condition the row uses (:105) - two guards for '
+    + 'one question is how two surfaces come to disagree')
+  assert.match(block, /nothing to count on this dimension/,
+    'an ungraded dimension no longer says so - it would print a number it does not have')
+})
+
+test('H:fit-card-explains-an-absence: A.3, the reason half', () => {
+  // DEFECT-1, found by the verifier and producible from the real producer: the card rendered only
+  // `r.note`, but dimensions.ts sets note=null / reason=<why> on every not_applicable row. A stale
+  // comparison therefore rendered EIGHT identical "Not compared" tiles with no explanation, while
+  // the table beneath each said why. "Nobody asked" and "asked and found nothing" must not look
+  // the same - that is the same laundering as a fabricated number, in the other direction.
+  const block = CARD_BLOCK()
+  assert.match(block, /\{\s*\(\s*r\.note\s*\|\|\s*r\.reason\s*\)/, 'the card no longer falls back to the row reason')
+  assert.match(block, /\{\s*r\.note\s*\|\|\s*r\.reason\s*\}/, 'the card renders note but not reason')
+  // And it must match the ROW's treatment, which is the thing it is summarising.
+  assert.match(CARD_SRC, /\{\(r\.note \|\| r\.reason\) && \(/,
+    'CompareRow no longer renders note-or-reason - the two surfaces have diverged again')
+})
+
+test('H:fit-card-keeps-the-two-weak-labels: A.7', () => {
+  // Verifier mutation: the card verdict hardcoded to 'No evidence' for weak. GREEN. The prototype
+  // collapses both weak states to that one string; this app splits them because "No evidence" is a
+  // FALSE statement about a candidate whose profile speaks to the axis and merely falls short.
+  const block = CARD_BLOCK()
+  assert.match(block, /fitLabel\(\s*r\.fit\s*,\s*r\.shortfall\s*\)/,
+    'the card no longer goes through fitLabel - the weak split would collapse')
+  assert.ok(!/No evidence/.test(block), 'the card hardcodes the prototype\'s single weak label')
+  // The split itself, asserted on the function rather than on the string in the JSX.
+  assert.notEqual(fitLabel('weak', 'nothing_found'), fitLabel('weak', 'falls_short'))
+})
+
+test('H:fit-card-does-not-re-enumerate-missing-lines: A.6', () => {
+  // The existing guard fires on a list labelled `Missing:` but NOT on the same list relabelled
+  // `Not evidenced:` - the verifier proved that relabelling ships green, so the guard was
+  // label-shaped rather than behaviour-shaped. Assert the CONSTRUCT: the card must not derive a
+  // list from the row at all. dimensions.ts:504 already enumerates them and re-deriving is two
+  // enumerations of one fact.
+  const block = CARD_BLOCK()
+  assert.ok(!/\.map\(.*=>.*(seq|text)/.test(block) && !/matched_seqs/.test(block),
+    'the card builds its own list out of the row - it must render the API string verbatim')
 })
