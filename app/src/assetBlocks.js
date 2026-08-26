@@ -57,6 +57,7 @@ export const BLOCK_HOOKS = {
   keywordDetail: 'blocks-keyword-detail',     // the panel a chip opens
   keywordActions: 'blocks-keyword-actions',   // 4.6-10/11 - "Not comfortable claiming this?"
   keywordDrop: 'blocks-keyword-drop',         // seeds the field's ask box with a drop REQUEST
+  keywordSwap: 'blocks-keyword-swap',         // 4.6-9 - the picker of the owner's OWN banked skills
   keywordNoAction: 'blocks-keyword-no-action', // why no drop is offered, said rather than implied
   fieldWordingKept: 'blocks-wording-kept',    // "Wording kept from the posting", in the field's margin
   reqLegend: 'blocks-req-legend',             // what RQ-MH / RQ-NTH / RESP mean, once per asset
@@ -450,6 +451,53 @@ export function keywordActions({ keyword, present, canEdit } = {}) {
   if (!present) return { ask: null, reason: 'This field does not contain it, so there is nothing here to drop.' }
   return {
     ask: `Drop "${k}" from this field. Rewrite the text without it rather than swapping in a synonym.`,
+    reason: null,
+  }
+}
+
+/**
+ * SPEC 4.6-9 — swap this keyword for one of the owner's OWN banked skills.
+ *
+ * EXTENDS `keywordActions` rather than standing beside it: same guard order, same shape, same
+ * honesty. Both are REQUESTS seeded into the field's existing ask box; neither stores a decision.
+ *
+ * WHAT MAKES THIS DIFFERENT FROM THE DROP, and why it needs the bank at all: dropping needs nothing
+ * but the keyword, while swapping needs something to swap TO. That something must be a skill the
+ * OWNER actually claims — `skill_bank_entry`, seeded from their own MasterContext fields — never a
+ * model's suggestion. Offering an invented alternative would put words in the owner's mouth on the
+ * document that represents them, which is the no-fake-data rule at its sharpest.
+ *
+ * SO: no bank, NO CONTROL. Not a disabled control, not a control that opens an empty picker — the
+ * standing no-dead-UI rule, plus a sentence saying where the bank comes from, because "nothing here"
+ * with no explanation reads as broken.
+ *
+ * The candidate list EXCLUDES the keyword itself (swapping a term for itself is a no-op the reader
+ * would have to notice for us) and anything already in the field (which would claim the same thing
+ * twice).
+ *
+ * @param {{keyword: string, present: boolean, canEdit: boolean, bank: Array<{label:string, category:string|null}>, inField: string[]}} args
+ * @returns {{candidates: Array<{label:string, category:string|null}>, ask: (label:string)=>string, reason: string|null}}
+ */
+export function keywordSwapOptions({ keyword, present, canEdit, bank, inField } = {}) {
+  const k = typeof keyword === 'string' ? keyword.trim() : ''
+  const none = { candidates: [], ask: null, reason: null }
+  if (!k || !canEdit) return none
+  if (!present) return { ...none, reason: 'This field does not contain it, so there is nothing here to swap.' }
+  const rows = Array.isArray(bank) ? bank : []
+  if (!rows.length) {
+    return { ...none, reason: 'Your skill bank is empty, so there is nothing of your own to swap in. Seed it in Settings > Skill wordings.' }
+  }
+  const taken = new Set([k.toLowerCase(), ...(Array.isArray(inField) ? inField : []).map((s) => String(s).toLowerCase())])
+  const candidates = rows
+    .filter((r) => r && typeof r.label === 'string' && r.label.trim() && !taken.has(r.label.trim().toLowerCase()))
+    .map((r) => ({ label: r.label.trim(), category: r.category || null }))
+  if (!candidates.length) {
+    return { ...none, reason: 'Every skill in your bank is already claimed in this field.' }
+  }
+  return {
+    candidates,
+    // Names BOTH terms, so the request cannot be read as "drop it" with an unrelated addition.
+    ask: (label) => `Swap "${k}" in this field for "${String(label).trim()}". Rewrite the line so it reads naturally with the replacement.`,
     reason: null,
   }
 }

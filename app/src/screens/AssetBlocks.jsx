@@ -34,7 +34,7 @@ import {
   countMismatchNote, deriveItems, draftSizeText, expectationFor, latestRows, listBodyModel, listsOf,
   targetFor,
   ASSET_ANSWERS_DEFAULT_OPEN, correctionsForField,
-  keywordActions, keywordPresence,
+  keywordActions, keywordSwapOptions, keywordPresence,
   meterModel, originalState, PLACEHOLDER_NOTE, placeholderToken, proposedKeywordDetail,
   proposedKeywordsForRow, reqsForRow, scopeSwaps,
   shapeOf, sharedSourceNote, statPct, wordCount,
@@ -102,6 +102,30 @@ export function useAssetProvenance(oppId, packetId) {
  * grouping is done here, through `offendersByField`, so no component ever holds the raw result and
  * grows its own idea of which field a finding names.
  */
+/**
+ * The owner's banked skills, for the 4.6-9 swap control.
+ *
+ * Loaded ONCE per card rather than per keyword panel: the bank belongs to the OWNER, not to a
+ * keyword or a field, and fetching it when a chip opens would issue the same request every time a
+ * reader browsed chips.
+ *
+ * A failure resolves to an EMPTY ARRAY, never a thrown error and never a retry loop. An empty bank
+ * is already a first-class state the control handles - it renders the reason instead of a picker -
+ * so an unreachable route degrades into "nothing of your own to swap in" rather than breaking the
+ * keyword panel that was working a moment ago.
+ */
+export function useSkillBank() {
+  const [rows, setRows] = useState([])
+  useEffect(() => {
+    let live = true
+    api.skillBankGet()
+      .then((r) => { if (live) setRows(Array.isArray(r?.entries) ? r.entries : []) })
+      .catch(() => { if (live) setRows([]) })
+    return () => { live = false }
+  }, [])
+  return rows
+}
+
 export function useArtifactCorrections(artifactId) {
   const [state, setState] = useState(null)
   const [reload, setReload] = useState(0)
@@ -502,6 +526,7 @@ function AssetBlock({ row, reqs, swapsForList, wide, artifactId, listOwners, thr
   // come to tell the reader different things about one field.
   const kwPresence = keywordPresence(row.after_text, proposedKeywords)
   const kwPresent = new Set(kwPresence.present)
+  const skillBank = useSkillBank()
   // Both treatments go through markRuns in ONE pass, so a posting echo and a keyword can never
   // claim the same characters. `mark` rides per phrase; see highlight.js.
   const markPhrases = [...wording, ...proposedKeywords.map((k) => ({ phrase: k, mark: 'keyword' }))]
@@ -886,6 +911,45 @@ function AssetBlock({ row, reqs, swapsForList, wide, artifactId, listOwners, thr
                           e.preventDefault()
                           seedAsk(act.ask)
                         }}>Ask to drop it from this field</span>
+                      {/* SPEC 4.6-9 - swap it for one of the owner's OWN banked skills. Sits with
+                          the drop because they are the same kind of thing: a request seeded into
+                          this field's ask box, storing nothing. The list is `skill_bank_entry`,
+                          seeded from the owner's own MasterContext fields - never a model's
+                          suggestion, because an alternative the owner does not claim would be words
+                          put in their mouth on the document that represents them.
+                          No bank, NO CONTROL: keywordSwapOptions returns a reason instead, and the
+                          reason is rendered. A disabled control or an empty picker would be the
+                          dead UI the standing rule forbids. */}
+                      {(() => {
+                        const swap = keywordSwapOptions({
+                          keyword: openKeywordDetail.keyword,
+                          present: kwPresent.has(openKeywordDetail.keyword),
+                          canEdit: Boolean(artifactId) && !isStatic,
+                          bank: skillBank,
+                          inField: [...kwPresent],
+                        })
+                        if (swap.candidates.length) {
+                          return (
+                            <div style={{ marginTop: 6 }}>
+                              <select className="px-input" data-qc={BLOCK_HOOKS.keywordSwap}
+                                defaultValue=""
+                                style={{ fontSize: 11, maxWidth: 260 }}
+                                onChange={(e) => { if (e.target.value) { seedAsk(swap.ask(e.target.value)); e.target.value = '' } }}>
+                                <option value="">Swap for another skill…</option>
+                                {swap.candidates.map((c) => (
+                                  <option key={c.label} value={c.label}>
+                                    {c.category ? `${c.label} — ${c.category}` : c.label}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+                          )
+                        }
+                        if (swap.reason) {
+                          return <div className="px-small" style={{ textTransform: 'none', marginTop: 6, color: 'var(--proto-ink2)' }}>{swap.reason}</div>
+                        }
+                        return null
+                      })()}
                       {/* Says what it is, so nothing on screen implies a decision was stored. */}
                       <div className="px-small" style={{ textTransform: 'none', marginTop: 3 }}>
                         This asks for a rewrite and records no decision. Nothing is sent until you press Send.

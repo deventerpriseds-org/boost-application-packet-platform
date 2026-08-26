@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
-import { keywordActions, keywordPresence, proposedKeywordsForRow, proposedKeywordDetail } from '../src/assetBlocks.js'
+import { keywordSwapOptions, keywordActions, keywordPresence, proposedKeywordsForRow, proposedKeywordDetail } from '../src/assetBlocks.js'
 import { correctionSentence } from '../src/assetGate.js'
 
 const req = (seq, model_keyword, verbatim = null, kind = 'must_have') =>
@@ -268,4 +268,74 @@ test('H:keyword-drop-is-keyboard-reachable: a bare span is invisible to the UAT 
   assert.match(control, /tabIndex=\{0\}/)
   assert.match(control, /onKeyDown=/)
   assert.match(control, /e\.key !== 'Enter' && e\.key !== ' '/, 'Enter and Space must both activate it')
+})
+
+// ── SPEC 4.6-9 — swap for one of the owner's OWN banked skills ───────────────────────────────────
+
+test('H:keyword-swap-offers-ONLY-the-owner-own-banked-skills', () => {
+  // The rule that decides whether this control is honest. The alternatives come from
+  // skill_bank_entry, seeded from the owner's own MasterContext fields. A model-suggested
+  // alternative would put words in the owner's mouth on the document that represents them.
+  const out = keywordSwapOptions({
+    keyword: 'hiring technology', present: true, canEdit: true,
+    bank: [{ label: 'Talent Systems', category: 'Execution and Operations' }, { label: 'Data Strategy', category: null }],
+    inField: ['hiring technology'],
+  })
+  assert.deepEqual(out.candidates.map((c) => c.label), ['Talent Systems', 'Data Strategy'])
+  assert.equal(out.reason, null)
+  assert.match(out.ask('Talent Systems'), /Swap "hiring technology" in this field for "Talent Systems"/)
+})
+
+test('H:keyword-swap-shows-NO-control-when-the-bank-is-empty', () => {
+  // No bank means no control - not a disabled one, not an empty picker. Both are the dead UI the
+  // standing rule forbids, and an empty dropdown reads as broken rather than as "you have none yet".
+  const out = keywordSwapOptions({ keyword: 'x', present: true, canEdit: true, bank: [], inField: [] })
+  assert.deepEqual(out.candidates, [])
+  assert.match(out.reason, /skill bank is empty/)
+  assert.match(out.reason, /Settings/, 'the reason must say where to fix it, or it reads as broken')
+})
+
+test('H:keyword-swap-never-offers-the-keyword-itself-or-a-term-already-claimed', () => {
+  // Swapping a term for itself is a no-op the reader would have to notice for us; offering a term
+  // already in the field would claim the same thing twice.
+  const out = keywordSwapOptions({
+    keyword: 'Data Strategy', present: true, canEdit: true,
+    bank: [{ label: 'Data Strategy', category: null }, { label: 'Cloud Architecture', category: null }, { label: 'Risk Management', category: null }],
+    inField: ['data strategy', 'Cloud Architecture'],
+  })
+  assert.deepEqual(out.candidates.map((c) => c.label), ['Risk Management'])
+})
+
+test('H:keyword-swap-says-so-when-every-banked-skill-is-already-claimed', () => {
+  // A real state with a real sentence, rather than an empty list that looks like a loading failure.
+  const out = keywordSwapOptions({
+    keyword: 'A', present: true, canEdit: true,
+    bank: [{ label: 'B', category: null }], inField: ['b'],
+  })
+  assert.deepEqual(out.candidates, [])
+  assert.match(out.reason, /already claimed/)
+})
+
+test('H:keyword-swap-follows-the-same-guards-as-the-drop', () => {
+  // Same guard ORDER as keywordActions, because the two sit together and a reader who cannot edit
+  // must not be offered either. A term not in the field cannot be swapped any more than dropped.
+  const bank = [{ label: 'B', category: null }]
+  assert.deepEqual(keywordSwapOptions({ keyword: 'A', present: true, canEdit: false, bank, inField: [] }).candidates, [])
+  assert.equal(keywordSwapOptions({ keyword: 'A', present: true, canEdit: false, bank, inField: [] }).reason, null)
+  const notPresent = keywordSwapOptions({ keyword: 'A', present: false, canEdit: true, bank, inField: [] })
+  assert.deepEqual(notPresent.candidates, [])
+  assert.match(notPresent.reason, /does not contain it/)
+  assert.deepEqual(keywordSwapOptions({ keyword: '  ', present: true, canEdit: true, bank, inField: [] }).candidates, [])
+})
+
+test('H:keyword-swap-request-records-no-decision', () => {
+  // Same honesty as the drop: it is a REQUEST seeded into the ask box. Nothing here may claim a
+  // coverage effect or imply a stored decision - the drop lane proved a swap through owner-edit
+  // gains no attribution at all.
+  const out = keywordSwapOptions({
+    keyword: 'A', present: true, canEdit: true,
+    bank: [{ label: 'B', category: null }], inField: [],
+  })
+  const ask = out.ask('B')
+  assert.ok(!/coverage|uncovered|gap|score|record/i.test(ask), 'the request implies an effect it does not have: ' + ask)
 })

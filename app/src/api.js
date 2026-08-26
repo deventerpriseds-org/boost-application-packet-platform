@@ -310,6 +310,10 @@ export const api = {
   // GET returns { stored, seed, effective, preview } — preview carries the resulting pool AND
   // `staleRewords`, the keys that matched nothing, which is the only visible sign the map has
   // drifted from MasterContext.
+  // The owner's banked skills (4.6-9). Read-only here; the swap control offers ONLY these,
+  // because an alternative the owner does not claim would be words put in their mouth.
+  skillBankGet: () => get(`/app/skill-bank?owner=${encodeURIComponent(_owner)}`),
+  skillBankSeed: () => post(`/app/skill-bank?owner=${encodeURIComponent(_owner)}`, {}),
   skillRewordsGet: () => get(`/app/skill-rewords?owner=${encodeURIComponent(_owner)}`),
   // Sends the WHOLE map, deliberately: the route replaces rather than merges, because a merge cannot
   // express deleting a rewording — which is the main thing this screen is for.
