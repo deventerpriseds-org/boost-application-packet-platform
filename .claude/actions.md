@@ -4045,3 +4045,92 @@ but NOT changed unilaterally, because it is a claim about what the owner's data 
 **Second guard finding, raised NOT changed:** `eds-phase-tag.py:99` matches `text.lstrip()
 .startswith('Deployed:')`, so the natural markdown `**Deployed:**` fails and it blocked two fully
 compliant summaries. Shared enforcement config in `setup.sh`; the owner decides.
+
+**ACT-2026-08-26-c — the skill bank breakdown. OWNER-DIRECTED, one decision open, NOT started.**
+Owner, having seen the full 27-term list rendered: *"The expertise terms and items in the groups you
+identified ... need to be broken down into items in similar style and lenght to the skills1 and
+skills2 items"*. So this supersedes the earlier (a)/(b)/(c) question — the answer is "break both
+down", and the only thing still open is the wording of four items.
+
+**The two sources need DIFFERENT handling, and conflating them would be the defect:**
+
+| Source | Handling | Yield | Judgement required |
+|---|---|---:|---|
+| `relevantProficiencies` | strip `Category:`, split on `,` | **36** | **NONE** — verified already in house style (1-4 words, Title Case), zero duplicates |
+| `expertise` | split on " and " / " for ", plus 4 rewordings | **~7 new** | **YES** — 4 change the owner's own words |
+
+Bank goes **27 -> ~63**. Two expertise splits (`Strategic Roadmaps`, `M&A Due Diligence`) already
+exist in `skills2`, so they fold in as extra ORIGINS rather than duplicates — the origins machinery
+working as designed.
+
+**THE DESIGN CONSTRAINT, stated before any code and non-negotiable: the parser must NEVER reword at
+runtime.** Splitting is deterministic and may be code. Rewording is a content judgement and lives in
+a small CHECKED-IN MAPPING TABLE — visible in the diff, auditable, editable by the owner. A parser
+that rewrites the owner's words on the fly is exactly the invention the no-fake-data rule forbids,
+and it would be indistinguishable from a model hallucinating a skill.
+
+**The 5 category names become FILTERABLE METADATA, not terms** — Governance and Compliance ·
+Technology Strategy and Transformation · Business and Financial Impact · Data Analytics and AI ·
+Execution and Operations. The swap UI can then offer "another skill in this category", which is a
+better control than a flat list of 63.
+
+**OPEN — the only thing waiting on the owner.** Rows 23/24/25 change their words; 22 is re-casing:
+22 `KPI-driven performance management` -> `KPI-Driven Performance Management`;
+23 `Enterprise alignment of strategy and execution` -> `Strategy and Execution Alignment`;
+24 `Governance frameworks for compliance` -> `Governance Frameworks`;
+25 `Optimizing scaled agile operations` -> `Scaled Agile Operations`.
+
+**Independent AC pass RUNNING** -> `docs/qc-evidence/AC-skill-breakdown.md`. Briefed to hunt the
+cases the implementer will miss: whether the category survives to a CONSUMER (write-only fields are
+this repo's most-repeated defect), what must STILL be rejected after the length guard loosens (a
+guard that now accepts everything stopped guarding), malformed input, and what makes a stale mapping
+table FAIL LOUDLY rather than silently drop a term.
+
+**Two in-flight agent mutations were NOT committed, deliberately.** The git hook flagged
+`assetGate.js` and then `PostingAnalysis.jsx` as uncommitted; both were the VERIFIER mid-sweep, not
+my edits, and its `trap` restored each. **Rule applied: an in-flight mutation from another agent is
+never mine to commit — while a sweep is running, commit only by explicit path, never `git add -A`.**
+Committing one would have shipped a test artifact to production. The verifier's current attack is
+the sharp one: it replaced `{model.subject}` with the resume row's OWN label, testing whether my F-1
+guard's comparison is circular. If `test:tally` still passes under that, the guard proves nothing.
+
+**CORRECTION to the block above — the independent AC pass overturned my brief on three counts.**
+Full doc: `docs/qc-evidence/AC-skill-breakdown.md` (28 ACs, 412 lines). Every finding measured.
+
+1. **`skill_bank_entry` ALREADY EXISTS** — `schema.ts:741`, in `EXPECTED_TABLES`, no reader, no
+   writer, **no `category` column**, and `origin` CHECK allows only `('master_context',
+   'portfolio_slide')` — a different vocabulary from `SkillOrigin`. The seeder EXTENDS this table.
+   I was about to stand up a parallel bank, which is precisely what the extend-don't-duplicate rule
+   exists to stop. Caught by the AC pass, not by me.
+2. **"FOUR require rewording" was wrong — it is EIGHT.** Only `Budget Development and P&L Management`
+   is mechanical end to end. Every other split leaves a lowercase fragment (`compliance`,
+   `technology integration`, `customer-centric innovation`, `execution`) that breaks `skills1`/
+   `skills2` Title Case. And case-correction IS rewording, proven binary: inserting a title-caser
+   into `splitSkillField` **fails the existing `H:skill-pool-strips-formatting-not-wording`**.
+3. **`buildSkillPool` has NO production consumer** — `grep -rn "from './skillPool'" api/src` = 0.
+   Its own header says *"The route that reads MasterContext and the seeder that writes rows both
+   call THIS"*. That sentence is FALSE; `diagSkillSources.ts` returns raw field text and never calls
+   the parser. So "the category reaches a consumer" cannot be satisfied by wiring today.
+
+**Also measured, and it removes the last external dependency:** the live field is recoverable offline
+from the Zapier archive (`docs/zap-289877647/zap-289877647.full.json:220`). Feeding that
+reconstruction to the current parser reproduces SKILL-POOL.md's live numbers EXACTLY — 27 entries,
+5 rejected, 20 duplicates, `bySource {11,9,0,7,0}`, rejection word-counts 15/16/23/23/27. **The whole
+change is verifiable with `npm test`.** Not proven byte-identical to live, so one `api-test.yml`
+dispatch should confirm AC-1's exact 36-term list before trusting it.
+
+**FIVE TRAPS that pass every test written against TODAY's data.** T1 is the dangerous one: reusing
+`looksLikeList` for the second-level split yields the correct 36 today only because every remainder
+has a longest-part of <= 4 words, and `Technology Strategy and Transformation` sits EXACTLY on the
+boundary (`Corporate AI Use Cases` = 4). One 5-word term added later collapses that group from 5
+terms to 1 chunk, which is then rejected at >12 words — **the entire category silently vanishes.**
+
+**TIER 2 with a TIER 1 escalation**: the parser decides nothing today, but the dedup/`origins` ACs
+are accusation-grade already — `schema.ts:745-748` says a swap moves a gate, and merging two of the
+owner's DISTINCT skills is unrecoverable once seeded.
+
+**THREE OWNER DECISIONS, all open** — (i) the 8 rewordings; (ii) where the mapping table lives, since
+a checked-in TS table collides with CLAUDE.md's strict no-hardcoded-config rule and that rule demands
+explicit recorded approval for a code-only value; (iii) confirm extending `skill_bank_entry` rather
+than adding a table. `SKILL-POOL.md` §3 and `memory.md:462` still frame this as the old (a)/(b)
+question and must be rewritten when this lands.
