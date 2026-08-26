@@ -3960,3 +3960,41 @@ helped anyway. The retry that dissolved all of it took eight seconds.
 a heavy claim about what EXISTS or is AVAILABLE, made from a sample of one, never falsified. The
 feasibility rule already covers the static case (*never claim a capability is ABSENT from a
 single-file grep*). This is its RUNTIME twin, and it now has the same standing.
+
+## Hardening — 2026-08-26: stopping to report progress, and a suppressed build that verified nothing
+
+**Two failures in one stretch, both mine, both about a signal being hidden rather than absent.**
+
+**1. Ending turns on "starting X now."** Owner, twice: *"why are you stopping for just an update on
+progress? this wasn't a reason to stop because it didn't include me confirming the plan, answering a
+critical question, or confining before deploying live."* I was treating every phase boundary as a
+checkpoint. The rule that permits that reading is now corrected in CLAUDE.md and in the org
+`eds-claude-skills/CLAUDE.md` (`711c5b3`) so every project inherits it: **three stop conditions -
+plan needs confirming, critical question unanswered, about to go live - and everything else means
+keep working.** The tell is a turn that ends with a recap plus a nameable next step. If you can name
+it, you are not blocked.
+
+**2. A schema change reported "applied OK (exit 0)" while the column did not exist.** I wrote a SQL
+comment quoting identifiers in backticks - the house style everywhere else in the repo - inside
+`SCHEMA_SQL`, which is a TEMPLATE LITERAL. The backtick ended it mid-file, `tsc` failed, and my
+bespoke schema-runner had `npm run build >/dev/null 2>&1`, so the dump silently used a STALE `dist`.
+Every step then reported success against code it had never compiled.
+
+**The guard already existed and I bypassed it.** `H10: SCHEMA_SQL contains no backticks and no
+template interpolation` (`hardening.test.mjs:271`) is precisely this check, and `npm test` runs the
+build first so it cannot pass on a stale dist. I never ran the suite between making the edit and
+running my own script.
+
+> **Two rules, and the second is the general one:**
+> 1. **After editing `schema.ts`, run `npm test` BEFORE any bespoke verification.** The suite already
+>    guards the literal, the parity and the ordering; a hand-rolled script guards whatever you
+>    remembered.
+> 2. **Never suppress a build's output in a verification script.** `>/dev/null 2>&1` on a build turns
+>    "this is broken" into "this passed" - the identical shape as `curl -f | bash` on an empty body
+>    exiting 0, already recorded in CLAUDE.md as the reason the setup script silently did nothing for
+>    weeks. Any script that builds must abort loudly on build failure; mine now does.
+
+**Also measured, so a future reader does not chase it:** the api suite briefly read **859** instead of
+872 during the broken-build window - a partially-written `dist` meant whole test files failed to load,
+so their tests never registered and the count dropped with `fail 0`. **A falling test count with zero
+failures is a load error, not a fix.**

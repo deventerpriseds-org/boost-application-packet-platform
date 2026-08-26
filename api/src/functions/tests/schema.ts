@@ -1338,6 +1338,28 @@ exception when undefined_table then null; end $$;
 alter table requirement_evidence add column if not exists proposal_version int;
 -- The model's one-sentence justification. The extra column is SPEC 4.1's supporting note and is the right
 -- home for it — it is prose about the quote, never a second quote — so no column is added for it.
+
+-- The owner's own grouping for a banked skill: "Governance and Compliance", "Data Analytics and AI".
+-- Only relevantProficiencies carries one (it is written as Category, colon, comma-separated terms,
+-- pipe, next Category); the four flat fields have none, so NULL is a fact about the source rather
+-- than a missing value and the column is nullable with NO default. Defaulting it would assert a
+-- grouping the owner never wrote, which is the no-fake-data rule failing quietly.
+--
+-- NO BACKTICKS ANYWHERE IN THIS COMMENT, and that is not a style note. SCHEMA_SQL is a template
+-- literal: the first draft of this comment quoted identifiers in backticks the way every other doc
+-- in the repo does, which TERMINATED the literal mid-file. tsc failed, and because the schema-runner
+-- script suppressed build output the dump silently used a STALE dist - so the migration reported
+-- "applied OK (exit 0)" while this column did not exist. A suppressed build is how a schema change
+-- verifies itself against code it never compiled.
+--
+-- It earns a column rather than a jsonb key for the same reason origin did: the swap control
+-- filters by it ("another skill in this category"), so it is queried, not just carried.
+--
+-- ADDED BY ALTER, so per H39/H39b nothing above may name it. The index below is placed AFTER this
+-- statement deliberately - the two migration-killing defects this repo already ate were exactly a
+-- create-index and a composite FK naming a column an idempotent ALTER added further down the file.
+alter table skill_bank_entry add column if not exists category text;
+create index if not exists skill_bank_entry_category_idx on skill_bank_entry (owner_email, category);
 `;
 
 // Tables we expect to exist after migration (used by the runner to report).

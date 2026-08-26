@@ -613,6 +613,44 @@ counts, so the same underlying data showed different numbers on different screen
 in the shared `useOpportunities` source so all consumers reflect it. Stale/mismatched numbers almost
 always mean a value was hardcoded or applied off the core funnel — hunt that, don't patch one screen.
 
+## STOP for a decision, never for a status update (strict rule, owner-instructed 2026-08-26)
+
+The rule below ("Confirm the plan before building or deploying") is about **not starting unrequested
+work**. It was being read as "check in at every phase boundary", which is a different and much more
+expensive thing. The owner named it twice in one session:
+
+> *"why are you stopping for just an update on progress? this wasn't a reason to stop because it
+> didn't include me confirming the plan, answering a critical question, or confirming before
+> deploying live"*
+
+**There are exactly THREE reasons to end a turn and wait:**
+
+| # | Stop when | Because |
+|---|---|---|
+| 1 | **The plan needs confirming** — unrequested, multi-file, or hard-to-reverse work is about to start | Starting is the irreversible part |
+| 2 | **A critical question is unanswered** — proceeding under any assumption would be unsafe, or would make the work useless if the assumption is wrong | The answer changes what gets built |
+| 3 | **Something is about to go live** — a push to `main`, a deploy, an outward-facing action | Live is not reversible on the owner's behalf |
+
+**Everything else is a reason to KEEP WORKING**, and reporting it mid-turn is fine — say it and carry
+on in the same turn. Specifically, none of these is a stop:
+- a phase finished (parser done, tests green, guards mutation-proved)
+- a commit landed on a FEATURE branch (nothing is live until `main` moves)
+- an intermediate result is interesting, or a number needs explaining
+- a background agent or sweep returned
+- the next step is obvious and already inside the agreed scope
+- a low-risk judgement call has a safe default — **take the reversible option, note it, keep going**
+  (the standing instruction: *"i dont want anything hold up progress, particularly your questions
+  about low risk items. ship it and have it tracked as a potential item to pull"*)
+
+**The tell that you are about to violate this:** the turn ends with a summary of what was just done
+plus a sentence starting *"Next, I'll…"* or *"Starting on X now"*. If you can name the next step, you
+are not blocked — **do it.** A turn that ends on "starting X now" without starting X is the failure
+this rule exists to stop.
+
+**Batch the reporting instead.** The owner reads the bottom of a turn, so put status there and keep
+the work above it. One turn that does five things and reports them at the end beats five turns that
+each do one thing and stop to say so.
+
 ## Match the process to the risk (strict rule, added 2026-08-22 at the owner's instruction)
 
 Every change was getting the same ceremony: an AC subagent, an implementation, an independent
