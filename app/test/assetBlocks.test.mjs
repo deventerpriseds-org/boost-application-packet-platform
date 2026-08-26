@@ -17,7 +17,7 @@ import {
   countMismatchNote, deriveItems, draftSizeText, expectationFor, itemCountOf, joinLabels,
   latestRows, listBodyModel, listsOf, meterModel, normLabel, registerListOwners, reqsForRow,
   scopeSwaps, shapeOf, sharedSourceNote, splitItems, statPct, wordCount, observedFor,
-  ORIGINAL_NONE_NOTE, originalState,
+  ORIGINAL_NONE_NOTE, originalState, PLACEHOLDER_NOTE, placeholderToken,
 } from '../src/assetBlocks.js'
 
 const src = (rel) => readFileSync(fileURLToPath(new URL(rel, import.meta.url)), 'utf8')
@@ -980,4 +980,95 @@ test('H:show-original-ungated: the toggle in AssetBlocks.jsx is not wrapped in a
   const before = src.slice(Math.max(0, i - 600), i).replace(/\{\/\*[\s\S]*?\*\/\}/g, '')
   assert.ok(!/row\.before_text\s*&&\s*\($/m.test(before.trimEnd()),
     'the Show original control must render unconditionally — originalState decides what it says')
+})
+
+// ── SPEC 4.5-40: the {{merge field}} token, inline in a static block ─────────────────────────────
+// The row asks for two things and the coverage doc scored them as one: the token (the app HAS the
+// field name) and the template's surrounding prose (no app route delivers it — the only readers are
+// server-side diag routes needing a Google token the browser does not hold). Only the first ships;
+// the second is scoped out in writing rather than discovered mid-build.
+
+test('H:placeholder-token-is-derived: the {{token}} comes from the row, never a field-name list', () => {
+  assert.equal(placeholderToken({ merge_field: 'SkillsBullets1' }), '{{SkillsBullets1}}')
+  assert.equal(placeholderToken({ merge_field: 'ResumeSummary' }), '{{ResumeSummary}}')
+  // No literal field list may appear FOR THIS PURPOSE. `shapeOf`'s own comment states the reason:
+  // an allow-list goes stale the moment a template gains a placeholder; TEMPLATE_META in api/src
+  // stays the one home for the field list.
+  //
+  // SCOPED TO THE PLACEHOLDER PATH, and that precision is the point. A first draft of this swept
+  // both whole files and fired on FIELD_ORDER (:274, the display order the app deliberately owns)
+  // and on the ExpertiseBullets threshold-key map (:718-793) — correct code, untouched by this
+  // change. A guard that fires on correct-but-different code is the cry-wolf failure this repo
+  // deleted a whole linter over. What must stay derived is the TOKEN.
+  const fn = stripComments(src('../src/assetBlocks.js'))
+  const body = fn.slice(fn.indexOf('export function placeholderToken'), fn.indexOf('export const PLACEHOLDER_NOTE'))
+  const jsxAll = stripComments(src('../src/screens/AssetBlocks.jsx'))
+  const staticBranch = jsxAll.slice(jsxAll.indexOf("if (shape === 'static')"), jsxAll.indexOf("if (shape === 'list')"))
+  for (const name of ['SkillsBullets', 'ResumeSummary', 'ExpertiseBullets', 'RelevantBullets']) {
+    assert.ok(!body.includes(name), `placeholderToken hardcodes ${name} — the token must come from row.merge_field`)
+    assert.ok(!staticBranch.includes(name), `the static block hardcodes ${name} — the token must come from row.merge_field`)
+  }
+  // And it really is built from the row, not read off some other source. Matched on the FIELD, not
+  // on `row.merge_field` — the dotted form rejected `row?.merge_field`, which is the same read
+  // written differently, and a guard that fails on a refactor gets switched off.
+  assert.match(body, /merge_field/, 'placeholderToken does not read the row\'s merge_field')
+})
+
+test('H:placeholder-never-empty-braces: a row with no field name renders no token', () => {
+  // `{{}}`, `{{null}}` and `{{undefined}}` are each a token the document does not have — an
+  // invented slot is worse than a missing one, because the reader believes it.
+  for (const row of [{}, { merge_field: null }, { merge_field: '' }, { merge_field: '   ' },
+                     { merge_field: undefined }, null, undefined]) {
+    assert.equal(placeholderToken(row), null, `placeholderToken(${JSON.stringify(row)}) invented a token`)
+  }
+})
+
+test('H:placeholder-is-static-only: a generated block is byte-identical to its after_text', () => {
+  // AC 2.4 / regression guard 2. The token is presentational and belongs to the STATIC branch only.
+  // A generated block still renders exactly the bytes of row.after_text — including a leftover
+  // `{{X}}` in the stored value, which is reachable because stripLeftoverTokens runs on the
+  // DOCUMENT, not on the stored package value.
+  const jsx = stripComments(src('../src/screens/AssetBlocks.jsx'))
+  const staticBranch = jsx.slice(jsx.indexOf("if (shape === 'static')"), jsx.indexOf("if (shape === 'list')"))
+  assert.ok(staticBranch.includes('placeholderToken(row)'), 'the static branch no longer builds the token')
+  const rest = jsx.slice(jsx.indexOf("if (shape === 'list')"))
+  assert.ok(!rest.includes('placeholderToken'),
+    'a non-static branch renders the placeholder — a generated block must render row.after_text unchanged')
+  // shapeOf must keep deciding static from `generated` alone, with no field-name allow-list.
+  assert.equal(shapeOf({ generated: false, merge_field: 'SkillsBullets1' }), 'static')
+  assert.equal(shapeOf({ generated: true, after_text: 'one line' }), 'prose')
+})
+
+test('H:no-screen-claims-it-cannot-see-what-it-shows: the static block does not contradict itself', () => {
+  // SIBLING of H:no-stale-not-built-claim (qcRail.test.mjs), which asserts the same class — "no
+  // screen tells the owner a shipped subsystem does not exist" — but greps qcRail.js/QcRail.jsx
+  // ONLY and is structurally blind to this file. Slug, not a number, per the H-case naming rule.
+  //
+  // The sentence this replaces read "The pipeline cannot see that text, so it is not shown as a
+  // draft." True of the template's WORDS; false of the field NAME, which is printed in mono two
+  // lines above and now printed again as {{Token}}. Shipping the token with that sentence standing
+  // puts a contradiction on one screen.
+  const jsx = stripComments(src('../src/screens/AssetBlocks.jsx'))
+  assert.ok(!/pipeline cannot see that text/i.test(jsx),
+    'the screen still tells the owner the pipeline cannot see the very slot it is now printing')
+  // And it must still say what the app genuinely does NOT hold, or the disclosure is simply gone.
+  assert.ok(/does not hold the template/i.test(jsx),
+    'the screen no longer says the template prose is unavailable — that limitation is real and must stay stated')
+})
+
+test('H:placeholder-claims-no-document-read: compact_resume cannot be silently mis-stated', () => {
+  // D:compact-template-placeholder-mismatch is OPEN and the owner's decision. Measured in api-test
+  // run 32784628025: the compact-resume Doc has {{ResumeSummary}} and {{SkillsBullets}} and is
+  // MISSING SkillsBullets1/2, ExpertiseBullets, RelevantBullets1/2/3, while TEMPLATE_META declares
+  // the full resume's seven. So the app may state the pipeline's EXPECTATION and may not assert the
+  // document's CONTENTS. Phrasing it that way is true under either branch of the open decision and
+  // needs no per-type allow-list — which would go stale exactly like a field-name list.
+  assert.match(PLACEHOLDER_NOTE, /has not read your document/i,
+    'the note asserts the document contains the slot — that is not something the app has checked')
+  const jsx = stripComments(src('../src/screens/AssetBlocks.jsx'))
+  assert.ok(jsx.includes('PLACEHOLDER_NOTE'), 'the disclosure is defined but never rendered')
+  assert.ok(jsx.includes('BLOCK_HOOKS.fieldPlaceholder'), 'the token carries no stable hook for ui-verify')
+  // Regression guard 2: the token is IN ADDITION TO the mono slot label, not a replacement for it.
+  assert.ok(jsx.includes('BLOCK_HOOKS.fieldSlot'), 'the mono merge-field slot label was displaced by the token')
+  assert.notEqual(BLOCK_HOOKS.fieldPlaceholder, BLOCK_HOOKS.fieldSlot)
 })

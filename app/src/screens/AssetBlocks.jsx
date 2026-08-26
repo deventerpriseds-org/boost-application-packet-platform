@@ -35,7 +35,8 @@ import {
   targetFor,
   ASSET_ANSWERS_DEFAULT_OPEN, correctionsForField,
   keywordPresence,
-  meterModel, originalState, proposedKeywordDetail, proposedKeywordsForRow, reqsForRow, scopeSwaps,
+  meterModel, originalState, PLACEHOLDER_NOTE, placeholderToken, proposedKeywordDetail,
+  proposedKeywordsForRow, reqsForRow, scopeSwaps,
   shapeOf, sharedSourceNote, statPct, wordCount,
 } from '../assetBlocks.js'
 import { HIGHLIGHT_CLASS, HIGHLIGHT_ACTIVE_CLASS, markRuns } from '../highlight.js'
@@ -391,10 +392,30 @@ function ListBody({ row, swapsForList, artifactId, listOwners, phrases, active =
 
 function BlockBody({ row, shape, swapsForList, artifactId, listOwners, phrases, active = null }) {
   if (shape === 'static') {
+    // SPEC 4.5-40: show the {{token}} inline so the reader can see WHERE merged text lands.
+    //
+    // The sentence underneath used to read "The pipeline cannot see that text, so it is not shown
+    // as a draft" - which is true of the template's surrounding WORDS and false of the field NAME,
+    // printed in mono two lines above this and now printed again here. Shipping the token while
+    // that sentence stood would put a contradiction on one screen, the class
+    // `H:no-stale-not-built-claim` exists to catch (it greps only the QC rail, so it could not see
+    // this file - that guard's file list is extended in the same commit).
+    const token = placeholderToken(row)
     return (
       <div className="px-small" style={{ textTransform: 'none', lineHeight: 1.6 }}>
         No value reached this merge field, so the document keeps whatever the template already says
-        here. The pipeline cannot see that text, so it is not shown as a draft.
+        here.{' '}
+        {token ? (
+          <>
+            Merged text would land at{' '}
+            <span data-qc={BLOCK_HOOKS.fieldPlaceholder}
+              style={{ fontFamily: 'var(--font-mono)', fontWeight: 600, color: 'var(--proto-ink2)' }}>{token}</span>
+            {' '}- {PLACEHOLDER_NOTE}. The app does not hold the template&apos;s surrounding words, so
+            there is no draft to show.
+          </>
+        ) : (
+          <>This block names no merge field, so there is nothing to point at.</>
+        )}
       </div>
     )
   }

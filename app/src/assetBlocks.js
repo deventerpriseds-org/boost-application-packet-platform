@@ -46,6 +46,7 @@ export const BLOCK_HOOKS = {
   askBox: 'blocks-ask-box',
   askSend: 'blocks-ask-send',
   fieldSlot: 'blocks-field-slot',         // the raw merge field, kept beside the human name
+  fieldPlaceholder: 'blocks-field-placeholder', // 4.5-40 - the {{token}} inline, where merged text lands
   fieldObserved: 'blocks-field-observed',  // the measurement, coloured by this field's worst finding
   fieldTarget: 'blocks-field-target',     // the rule the field is held to, from the owner's thresholds
   fieldChangeLog: 'blocks-corrected-for-you', // the field's own "Corrected for you" list (P8.6 inline).
@@ -141,6 +142,40 @@ export function countMismatchNote(recorded, splitCount) {
  *  - `prose` — everything else.
  * A field-name allow-list would go stale the moment a template gains a placeholder.
  */
+/**
+ * SPEC 4.5-40 — the `{{merge field}}` token for a block, so the reader can see WHERE merged text
+ * lands. Derived from `row.merge_field` at render time; there is deliberately no field-name list
+ * here for the same reason `shapeOf` has none — one would go stale the moment a template gains a
+ * placeholder. `{{` / `}}` is the template engine's own syntax (api `packetTemplates.ts` builds
+ * `vars['{{'+key+'}}']`), NOT a preference: making the delimiters user-changeable would let the
+ * screen disagree with the document.
+ *
+ * Returns null — never `{{}}`, `{{null}}` or `{{undefined}}` — when the row names no field.
+ */
+export function placeholderToken(row) {
+  const name = String((row && row.merge_field) || '').trim()
+  return name ? '{{' + name + '}}' : null
+}
+
+/**
+ * What the app can HONESTLY say about that token, and it is less than it looks.
+ *
+ * The app holds the field NAME (it comes down with every insertion row) and does NOT hold the
+ * template's surrounding prose — no app route delivers template body text; the only readers are two
+ * server-side diag routes needing a Google token the browser does not have. So the screen may say
+ * which slot this is and may not claim to have read the document.
+ *
+ * This is also what keeps `D:compact-template-placeholder-mismatch` from becoming a false statement
+ * on screen. Measured (api-test run 32784628025): the owner's compact-resume Doc contains
+ * `{{ResumeSummary}}` and `{{SkillsBullets}}` and is MISSING `SkillsBullets1/2`, `ExpertiseBullets`
+ * and `RelevantBullets1/2/3`, while `TEMPLATE_META.compact_resume` still declares the full resume's
+ * seven. That decision is the owner's and is open. Phrasing the token as the pipeline's EXPECTATION
+ * rather than the document's CONTENTS is true under either branch — and it needs no per-type
+ * allow-list, which would go stale exactly like a field-name list.
+ */
+export const PLACEHOLDER_NOTE =
+  'the slot the pipeline expects to fill - the app has not read your document to confirm it is there'
+
 export function shapeOf(row) {
   if (!row || !row.generated) return 'static'
   const text = row.after_text || ''
