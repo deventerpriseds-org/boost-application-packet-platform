@@ -50,9 +50,24 @@ jobs:
         working-directory: app
       - run: npm test
         working-directory: app
-      # Chromium is preinstalled on the runner image via Playwright's own download; the browser
-      # probe boots its own Vite server. Non-fatal for now: it is newer than the unit suite and a
-      # flake here should not block a correct change. Promote to required once it has a track record.
+      # THE BROWSER HAS TO BE DOWNLOADED. The comment that used to sit here said "Chromium is
+      # preinstalled on the runner image via Playwright's own download", and that was simply not
+      # true — `npm ci` installs the playwright PACKAGE, never the browser binaries. Every run of
+      # this job died at `browserType.launch: Executable doesn't exist at
+      # .../chromium_headless_shell-1228/chrome-headless-shell`, measured across runs 326 and
+      # 330-333 on `main` (2026-08-25 20:06 through 2026-08-26 02:33), all `failure`.
+      #
+      # The consequence is the part worth reading. `test:margin` below is REQUIRED, and required
+      # precisely because it caught a blank-screen regression the unit suite structurally cannot
+      # see. It has never once executed on CI. A required guard that cannot start is not a guard —
+      # it is a red X nobody can act on, which is how the whole job came to be ignored.
+      #
+      # ui-verify.yml:75 already does exactly this. Same line, ported here rather than invented.
+      - run: npx playwright install --with-deps chromium
+        working-directory: app
+      # The browser probe boots its own Vite server. Non-fatal for now: it is newer than the unit
+      # suite and a flake here should not block a correct change. Promote to required once it has a
+      # track record — which it can finally start building now that it runs at all.
       - run: npm run test:browser
         working-directory: app
         continue-on-error: true
