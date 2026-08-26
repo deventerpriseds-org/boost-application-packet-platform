@@ -452,6 +452,23 @@ Key tables (PostgreSQL):
 - iOS testing: requires macOS runner or BrowserStack; categorically unavailable in Linux CCR
 
 ## Active work
+**2026-08-26 (later) - GROUPS B AND C BUILT, batched verifier RUNNING** on
+`claude/three-small-ui-gaps` (`67a7e6d`). Group B = the QC summary inside the ATS modal
+(4.3-9/10/11); Group C = the drop hatch (4.6-10/11). Combined cheap tier, both lanes in ONE tree:
+342/342 unit, build clean, test:margin 59/59, test:tally 49/49, zero smart quotes. NOT merged, so
+NOT deployed. `test:qc` is 81/88 with 7 failures PROVED to pre-date this work by reverting to HEAD.
+
+**LIVE ON MAIN today (`b73f8d6`)**: the fail-open ship-gate fix (Review & send said "Nothing blocks
+sending" on a packet QC called "Blocked - 52 to fix"), the three small rows (4.1-3, 4.5-40, 4.8-10),
+4.2-13, the fit cards, and the read-only `diag/skill-sources` + `diag/slide-tables` routes.
+Coverage 68% -> 78% across the day.
+
+**BLOCKED, and it is NOT the code**: every `workflow_dispatch` run is stuck QUEUED (two attempts)
+while push-triggered runs complete in ~1 minute. So the owner's skill fields cannot be read and
+`ui-verify.yml` is unavailable. Fallbacks MEASURED, not assumed: Azure Storage is `CONNECT tunnel
+failed 403` from the sandbox; `az` is present but carries no credentials here; the DB connector is
+the wrong store entirely (MasterContext is a Storage TABLE, not Postgres). Owner has the browser URL.
+
 **2026-08-26 — 4.2-1 fit cards (option A) DRAFTED AND RENDERED, guards deliberately held.** The owner
 picked A and asked to see it before committing to the treatment: *"I'm fine with a for the fit card
 but I'd like to confirm with a screenshot of the prototype and visual of your difference."* Both
@@ -1825,6 +1842,41 @@ Read this before touching `packetBuildAll` or the packet screen.
   yourself shortening it, the thing you actually want is another signal.
 
 ### Hardening — authentication is not authorization, and I made the same mistake twice in one day
+
+**THE DAY'S REAL LESSON: four defects shipped with a FULLY GREEN suite, and the suite caught none of
+them.** The fail-open ship gate; the decisions footer contradicting the rows directly above it; the
+fit cards (deleting the ENTIRE feature left 319/319 green); and a parser silently turning
+`3D modelling` into `D modelling`. What caught them: rendering the app LOCALLY and looking at it
+(two), an independent verifier deleting things to see what still passed (one), and writing the test
+before trusting the code (one). **This suite is strong on pure logic and structurally blind to
+whether a screen tells the truth.** That is the standing argument for the render harness, not an
+observation about one bad day.
+
+**MY TOOLING AROUND A GUARD IS NOW THE WEAK PART MORE OFTEN THAN THE GUARD ITSELF.** Twice in one
+session: (1) three mutations "passed" because `replace(..., 1)` hit the FIRST occurrence, which was
+in the comparison ROW rather than the card - reporting a sound guard as inert, the inverse of the
+usual failure and just as misleading; (2) a mutation sweep TIMED OUT mid-run and LEFT A MUTATION
+APPLIED in the working tree - the one collapsing interior newlines, which merges two skills into one
+fabricated term. Caught by re-reading the file rather than assuming the sweep had cleaned up. Sweeps
+are now ONE guarded script, backgrounded, so a timeout cannot leave the tree dirty.
+
+**A CLAIM ABOUT WHAT IS BROKEN NEEDS THE SAME SWEEP AS A CLAIM ABOUT WHAT EXISTS.** I told the owner
+"GitHub Actions capacity" from ONE stuck run. Push-triggered runs were completing in a minute the
+whole time; only `workflow_dispatch` is wedged. Identical shape to every absence-claim miss already
+in this file: generalising from one observation without hunting for disconfirming evidence.
+
+**ATTRIBUTING WORK FROM A DIFF IS GUESSING.** I credited Group C with three files that were Group
+B's, inferred from one `package.json` line, then swept them in with a whole-tree `git add -A` while
+they were untracked. Nothing was lost; the near-miss is that the same sweep could have taken one
+lane's unfinished `src/` into another lane's commit. With concurrent lanes: stage by explicit path,
+and ASK the lane which files are its own.
+
+**A BRIEF CAN BE WRONG, AND A GOOD LANE SAYS SO.** I instructed Group C to route a drop through
+`owner-edit` on tier-1 grounds. It refuted both halves from source: a drop's replacement is the
+empty string, which `.filter(Boolean)` strips before `driver` is ever consulted (so no attribution
+is gained), and `owner-edit` replaces at exact offsets so a deletion splices a hole
+(`Led  initiatives`). Both contracts already said so and I had read past them. Brief lanes to
+CHALLENGE the premise, not merely execute it.
 
 **THE SHIP GATE FAILED OPEN, AND 319 GREEN TESTS SAID NOTHING.** `useQcEntries` emitted entries with
 no `artifactId`; `packetFailList` does `if (!artifactId) continue`, so it skipped EVERY entry and
