@@ -4747,3 +4747,36 @@ branch's stash survives** (`git stash list` confirms it). Lesson: `git stash` is
 repo with other people's stashes in it; use a throwaway worktree or read from `git show` instead.
 
 app 386/386, field-margin 59/59, assistant probe 20/20, build green.
+
+
+### ACT — coverage re-counted MECHANICALLY, and nine rows were stale (2026-08-27)
+
+Owner asked what is left in the JD analysis panel to reach 190. Answering it needed the register to
+be true first, and it was not: **nine rows had gone stale**, all understating, all from work shipped
+TODAY. The count moved **151 -> 158 BUILT with zero new code**.
+
+**My first count was also wrong and I did not report it.** A naive parser read the 4th cell and
+returned `None` for 34 rows, because verdicts carry annotations (`**BUILT — CHANGED from ABSENT**`,
+`NOT-IN-PROTOTYPE`, `BUILT (relocated)`). It reported 129 BUILT. Fixed the parser before quoting any
+number — a coverage figure is exactly the kind of claim that gets repeated for weeks.
+
+**Where 190 comes from:** it is the NON-DELIBERATE denominator. 221 rows − 27 DELIBERATE − 5
+unparsed ≈ 189. So "190" ≈ "every row that could be built". **158 / 189 = 83.6%.**
+
+**Re-verdicted (all shipped, none re-built):** 4.1-20 BUILT; 4.7-8 BUILT; 4.11-2, 4.11-3, 4.11-8
+BUILT; 4.11-5 PARTIAL->BUILT; 4.11-9 **DELIBERATE->BUILT** — its DELIBERATE verdict rested on a CODE
+COMMENT claiming the substitution as fact, which is a claim about the code and not a decision by the
+owner. And two moved ABSENT->**DELIBERATE** because they are not buildable honestly: **4.11-1** (the
+dock — arithmetic, no viewport passes) and **4.11-6** (`section` is the caller's input echoed back
+and the route writes one key).
+
+**§4.1 (JD analysis) is 20 BUILT, 3 PARTIAL, 0 ABSENT.** All three PARTIALs are the SAME refusal
+wearing three faces — the app declines to print a coverage ratio it cannot source (4.1-5 `n/m`,
+4.1-10 `n/m evidenced`), plus one layout difference (4.1-12, chip above the line rather than in a
+right column). **Nothing in the JD panel is unbuilt for want of effort.**
+
+**THE STRUCTURAL PROBLEM, third time today.** `DEFERRED.md` has a staleness guard that fired twice
+today and was right both times. `PROTOTYPE-COVERAGE.md` has NONE, so it silently understates by
+however much shipped since anyone last read it. **A backlog nobody re-reconciles reports finished
+work as outstanding**, which is an invitation to rebuild it. This is now the third instance
+(4.6-9 already built, 4.1-6 already refused, and today's nine).
