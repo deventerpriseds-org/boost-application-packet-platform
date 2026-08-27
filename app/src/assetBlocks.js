@@ -55,6 +55,7 @@ export const BLOCK_HOOKS = {
   omitCaveat: 'blocks-omit-caveat',
   restore: 'blocks-restore-original',    // SPEC 4.11-5 "Put back an original", one per real candidate
   shorten: 'blocks-shorten-to-fit',      // SPEC 4.11-5 "Shorten to fit", carrying the field's real rule
+  forward: 'blocks-forward-assistant',   // SPEC 4.7-8 - sends the field's sentence UP to the panel
   fieldSlot: 'blocks-field-slot',         // the raw merge field, kept beside the human name
   fieldPlaceholder: 'blocks-field-placeholder', // 4.5-40 - the {{token}} inline, where merged text lands
   fieldObserved: 'blocks-field-observed',  // the measurement, coloured by this field's worst finding

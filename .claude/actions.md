@@ -4616,3 +4616,53 @@ says so in words, so a deliberate reword reads as a one-line update here rather 
 **Also fixed mid-flight:** my first replacement regex used `[^}]*`, which stopped at the brace inside
 `rewordAction({ phrase })` and failed on correct code. Bounded to the declaration instead. That is
 the second time today a first-draft guard could not see what it was written for.
+
+
+### ACT — SPEC 4.11: the floating assistant panel is BUILT (2026-08-27)
+
+`app/src/assistantPanel.js` (pure) + `app/src/screens/AssistantPanel.jsx`, wired into `PacketBuilder`.
+**REUSE, not a new surface:** `Overlay variant='drawer'` already clamps to `min(680px, 100vw)`, already
+owns the overlay stack, the focus trap and close-on-navigation, and is already what `AssetGateDrawer`
+uses on this same screen. A hand-rolled panel would have been the parallel system — and the one
+without the focus trap.
+
+**Decisions taken, each with its reason recorded in the code rather than only here:**
+- **No breakpoint constant.** The panel floats at every width, so a threshold would have exactly one
+  branch. A rule with one outcome is config that cannot be wrong, which reads as a decision and is
+  not one. AC-5's anti-duplication concern is met by not adding a mechanism.
+- **No request count** on the collapsed button. Nothing aggregates requests per packet; the
+  prototype's count comes from an in-memory fixture. A `0` would be a measurement the reader could
+  trust and we could not.
+- **No scope selector.** Two of SPEC 4.11-4's three chips have no route — `This packet` would be N
+  calls (a second edit path) and `My profile` is owner-closed read-only. The one real scope is
+  STATED in a sentence instead. Three live-looking chips over one working route changes what the
+  reader believes they asked for.
+- **No `Keep`, no `Revert`, not even disabled.** Neither has anything to call. A disabled control
+  still asserts the capability exists; the panel says the limit instead.
+- **ONE element, rendered by BOTH layout branches.** The mobile and desktop returns of this screen
+  have drifted before; a second copy of the JSX is how a fix lands on one size and not the other.
+
+**4.7-8 shipped with it** — `Ask the assistant` forwards the SAME sentence the field controls seed,
+with the artifact bound at the CALL SITE where `a.id` is unambiguous. The field boxes REMAIN (ground
+rule R6); the panel is a second destination, never a replacement.
+
+**Eight guards, all mutation-proved:** seed-not-cleared, scope-invents-an-artifact,
+send-without-an-artifact, a `Keep` control added, limits made write-only, drawer swapped for a modal,
+the mobile branch dropping the panel, and the forward guessing the artifact instead of binding it.
+Each fails the suite. **app 385/385, api 887/887, build green, codepoint scan clean.**
+
+**Self-attack found nothing this time** (every new export has a consumer), but the guard-writing did:
+my first `api.` check fired on the import path `'../api.js'` — a false positive on correct code,
+which is the cry-wolf failure the H-case rules forbid outright. Now matches real member calls. **That
+is three first-draft guards today that could not see what they were written for.** The pattern is
+consistent enough to name: a guard written from the shape of the code I just wrote tends to match
+that shape rather than the invariant, and only running it against a REVERTED behaviour exposes the
+difference.
+
+**The ledger guard fired for the second time today** and was right both times: building the panel
+made `D:assistant-panel-owner-trialling`'s `absent ... AssistantPanel` check stale the moment the code
+landed. Row CLOSED with evidence, and its machine check dropped — for a closed row an `absent` check
+that HITS reads as "the defect REGRESSED", which is backwards once the thing was built on purpose.
+
+**NOT verified live.** Tests and a build are not a rendered browser. `ui-verify.yml` against
+`#/packet/<id>` asserting `Open assistant` is what would confirm it.

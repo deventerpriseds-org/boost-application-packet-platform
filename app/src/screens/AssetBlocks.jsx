@@ -729,6 +729,25 @@ function AssetBlock({ row, reqs, swapsForList, wide, artifactId, listOwners, thr
             Shorten to fit
           </span>
         )}
+        {/* SPEC 4.7-8 "Forwards to the assistant". It forwards the SAME sentence the field's own
+            controls seed - `shorten.ask` when the field has a rule, otherwise a request naming the
+            field - so the two destinations cannot ask for different things. It does NOT replace the
+            box beside it: ground rule R6 keeps correction in place and scoped to the field, and this
+            is a second place to make the request, for a reader who would rather work in one panel.
+            Absent the prop, no control renders. */}
+        {onSeedAssistant && canAsk && (
+          <span className="px-link" role="button" tabIndex={0}
+            data-qc={BLOCK_HOOKS.forward} data-qc-field={row.merge_field}
+            style={{ fontSize: 11.5 }}
+            onClick={() => onSeedAssistant(shorten.ask || `Change ${fieldLabel(row.merge_field)}: `)}
+            onKeyDown={(e) => {
+              if (e.key !== 'Enter' && e.key !== ' ') return
+              e.preventDefault()
+              onSeedAssistant(shorten.ask || `Change ${fieldLabel(row.merge_field)}: `)
+            }}>
+            Ask the assistant
+          </span>
+        )}
         {restores.map((r) => (
           <span key={r.label} className="px-link" role="button" tabIndex={0}
             data-qc={BLOCK_HOOKS.restore} data-qc-label={r.label}
@@ -1114,7 +1133,12 @@ function AssetBlock({ row, reqs, swapsForList, wide, artifactId, listOwners, thr
  * appearing twice as two separate changes. Both are optional: without them a shared swap still says
  * it is packet-level, it just cannot name the sibling.
  */
-export default function AssetBlocks({ artifact, provenance, fallback, defaultOpen = true, label, listOwners, onListsRendered, focusField = null }) {
+export default function AssetBlocks({ artifact, provenance, fallback, defaultOpen = true, label, listOwners, onListsRendered, focusField = null, onSeedAssistant = null }) {
+  // SPEC 4.7-8 / 4.11-9 - "Forwards to the assistant". The SAME sentence a field control seeds
+  // into its own ask box can also be sent up to the panel; the panel is a second DESTINATION,
+  // never a replacement, because ground rule R6 keeps correction in place and scoped to the
+  // field. Absent the prop nothing changes and no forward control renders - no dead UI on a
+  // screen that has not wired it.
   const [open, setOpen] = useState(defaultOpen)
   const [state, setState] = useState({ loading: true, error: null, data: null })
   const [ref, wide] = useWideRef(700)

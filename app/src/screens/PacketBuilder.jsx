@@ -13,6 +13,7 @@ import { postingBody } from '../postingAnalysis.js'
 import { PACKET_HOOKS, ASSET_BODY_DEFAULT_OPEN, regenerateWithNote } from '../packetBuilder.js'
 import QcRail, { useQcEntries } from './QcRail.jsx'
 import { GateBadge } from './AssetGateDrawer.jsx'
+import AssistantPanel from './AssistantPanel.jsx'
 import { qcStepState, packetGate, railGateMeta, packetReadiness, packetFailList, qcSummaryModel, firstFixTarget, listOwnersFromArtifacts, requirementUsage } from '../qcRail.js'
 
 const TYPE_LABEL = {
@@ -145,7 +146,7 @@ function stepDone(key, p, artifacts, qc) {
 // Exported so the browser probe can mount the REAL card (test/browser/run-asset-blocks.mjs). The
 // header's collapsed default is a rendering fact; asserting it against a replica of this component
 // would prove only that the replica was written to match.
-export function ArtifactCard({ a, busy, setBusy, qcResult, onGenerate, onRegenerate, onSetStatus, onMakeDoc, onMakeSlides, onGenVideo, onArchiveVideo, doc, video, provenance, listOwners, onListsRendered, focusField = null, onOpenFirstFix = null }) {
+export function ArtifactCard({ a, busy, setBusy, qcResult, onGenerate, onRegenerate, onSetStatus, onMakeDoc, onMakeSlides, onGenVideo, onArchiveVideo, doc, video, provenance, listOwners, onListsRendered, focusField = null, onOpenFirstFix = null, onSeedAssistant = null }) {
   const v = video[a.id] || {}
   const d = doc[a.id] || {}
   const videoUrl = v.url || a.docUrl
@@ -204,7 +205,7 @@ export function ArtifactCard({ a, busy, setBusy, qcResult, onGenerate, onRegener
       {(a.status !== 'todo' || a.content) && (
         <AssetBlocks artifact={a} provenance={provenance} fallback={a.content}
           label={TYPE_LABEL[a.type] || a.type} listOwners={listOwners} onListsRendered={onListsRendered}
-          focusField={focusField} />
+          focusField={focusField} onSeedAssistant={onSeedAssistant} />
       )}
 
       {/* Video */}
@@ -755,6 +756,16 @@ export default function PacketBuilder({ id, step }) {
   // getArtifactsByStep puts it there. Derived from the same rule rather than a second mapping, or
   // the two drift the first time a step gains an artifact type.
   const [fieldFocus, setFieldFocus] = useState(null)     // { artifactId, section }
+  // SPEC 4.11-9 - "every field-level action seeds this panel". The seed lives HERE rather than in
+  // the panel because the actions that produce it are scattered across the asset cards, and a
+  // sentence travelling upward through a shared slot is the same shape `fieldFocus` already uses
+  // for navigation. `{ text, artifactId }`: the artifact travels WITH the sentence, because the
+  // request is artifact-scoped and inferring it later from the active step would be a guess.
+  const [assistantSeed, setAssistantSeed] = useState(null)
+  const seedAssistant = useCallback((text, artifactId) => {
+    if (!text || !artifactId) return                       // never open a panel that cannot send
+    setAssistantSeed({ text: String(text), artifactId })
+  }, [])
   const goToField = useCallback((artifactId, section) => {
     const a = artifacts.find((x) => x.id === artifactId)
     if (!a) return                                        // unknown artifact: do nothing, never guess a step
@@ -943,7 +954,11 @@ export default function PacketBuilder({ id, step }) {
                   return t ? () => goToField(t.artifactId, t.mergeField) : null
                 })()}
                 listOwners={listOwners} onListsRendered={registerLists}
-                focusField={fieldFocus && fieldFocus.artifactId === a.id ? fieldFocus.section : null} />
+                focusField={fieldFocus && fieldFocus.artifactId === a.id ? fieldFocus.section : null}
+                /* SPEC 4.7-8 - the artifact travels WITH the sentence. Binding it at the call site,
+                   where `a.id` is unambiguous, is what stops the panel inferring which asset a
+                   request meant from whatever step happens to be active. */
+                onSeedAssistant={(text) => seedAssistant(text, a.id)} />
             ))}
             {nextStep && (
               <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
@@ -1070,6 +1085,26 @@ export default function PacketBuilder({ id, step }) {
       onGoToField={(artifactId, section) => { setAtsOpen(false); goToField(artifactId, section) }} />
   )
 
+  // ONE panel element, rendered by BOTH layout branches below. Defined once on purpose: the mobile
+  // and desktop branches of this screen have drifted before, and a second copy of this JSX is how a
+  // fix lands on one size and not the other.
+  //
+  // The artifact is whichever one the SEED named. When the panel is opened cold from its button and
+  // the active step renders exactly one artifact, that one is used; when the step renders two (the
+  // resume step renders `resume` and `compact_resume`) there is no non-guessing answer, so it stays
+  // null and the panel says to open an asset first rather than picking one.
+  const stepArtifacts = getArtifactsByStep(activeStep)
+  const assistantArtifact = assistantSeed
+    ? artifacts.find((a) => a.id === assistantSeed.artifactId) || null
+    : (stepArtifacts.length === 1 ? stepArtifacts[0] : null)
+  const assistant = (
+    <AssistantPanel
+      artifact={assistantArtifact}
+      seed={assistantSeed ? assistantSeed.text : null}
+      onSeedConsumed={() => setAssistantSeed(null)}
+      onSent={load} />
+  )
+
   if (mobile) {
     // ── MOBILE LAYOUT ──────────────────────────────────────────────────────
     const activeIdx = STEPS.findIndex((s) => s.key === activeStep)
@@ -1128,6 +1163,9 @@ export default function PacketBuilder({ id, step }) {
             </button>
           )}
         </div>
+        {/* SPEC 4.11-3 - the panel floats here too. Same element as the desktop
+            branch below, so a fix can never land on one size and miss the other. */}
+        {assistant}
       </div>
     )
   }
@@ -1212,6 +1250,13 @@ export default function PacketBuilder({ id, step }) {
       </div>
 
       {keywordTally}
+
+      {/* SPEC 4.11 - the assistant, floating rather than docked. The SAME element the mobile branch
+          renders: this app's shell caps content at 1280 against the prototype's 1560, so a docked
+          340px column leaves the packet 688px at every viewport against blocks needing ~850px.
+          Owner decision 2026-08-27; the alternative (raise the cap, re-flowing every screen) is in
+          .claude/DEFERRED.md rather than lost. */}
+      {assistant}
     </div>
   )
 }
