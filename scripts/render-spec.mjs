@@ -149,6 +149,15 @@ const ACTS = {
   // containing the label has text "≈Cycle Time Reduction" and an anchored ^…$ regex misses it.
   keychip:  { click: 'Cloud-native Services', anchor: 'Took the place of',    pad: 300,
               proves: ['Took the place of', 'Not comfortable claiming this?', 'Swap for another skill'] },
+  // SPEC 4.11 - the assistant panel, which is COLLAPSED at rest ("Open assistant", row 4.11-2), so
+  // a resting screenshot shows the card and none of the panel. `proves` names the three scopes
+  // because the scope selector (4.11-4) is the row the owner is deciding on, and a silent no-op
+  // here would render the collapsed card and read as "the design has no scopes".
+  assistant: { click: 'Open assistant', anchor: 'Docked', pad: 340,
+              proves: ['This packet', 'This asset', 'My profile', 'Send'] },
+  // The resting card, for the pair - what the reader sees BEFORE opening it.
+  'assistant-before': { click: null, anchor: 'Assistant', pad: 260,
+              proves: ['Open assistant'] },
 }
 const ACT = arg('act', '')
 if (ACT && !ACTS[ACT]) throw new Error(`--act must be one of ${Object.keys(ACTS).join(', ')}`)
