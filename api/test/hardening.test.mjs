@@ -4118,3 +4118,63 @@ test('H:template-source-names-the-real-source: keyed on .source, never on truthi
   assert.ok(!/resolvedTemplateId\s*\?\s*'owner setting/.test(body),
     'templateSource is keyed on the id being truthy - resolveText never returns empty, so this always says "owner setting"')
 })
+
+test('H:cross-list-drop-tells-the-truth-about-the-document', async () => {
+  // FOUND BY AN INDEPENDENT AC PASS, not by this suite, and it had already SHIPPED.
+  // `dedupeAcrossLists` (normalise.ts:100-123) deletes an item that another list still carries. It
+  // runs inside `normalisePackage` at appPackets.ts:561 - BEFORE writeSwaps at :618 - and mutates
+  // the same `pkg`, so the deleted item reaches buildSwaps as an original with no matching final and
+  // fell to the generic branch, which wrote 'not carried into the final list'. That sentence is
+  // FALSE about the document: the item IS carried, in another list.
+  //
+  // The downstream cost is what makes this more than wording. `restoreOptions` (app) offers
+  // "Put back X" for every dropped row that is not omit-driven, so it offered to restore an item the
+  // NEXT build removes again - the self-undoing control that function exists to prevent.
+  const { buildSwaps, CROSS_LIST_RATIONALE_PREFIX } = await import('../dist/functions/tests/swaps.js')
+
+  // `Cloud Architecture` is in call1's skills_1 and is NOT in the shipped SkillsBullets1 - the
+  // deduper removed it - but the shipped RelevantBullets1 carries it.
+  const out = buildSwaps({
+    call1: { skills1: 'Cloud Architecture\nRisk Management', relevant1: 'Cloud Architecture' },
+    pkg: { SkillsBullets1: 'Risk Management', RelevantBullets1: 'Cloud Architecture' },
+  })
+  const dropped = out.swaps.filter((s) => s.action === 'dropped' && s.from_label === 'Cloud Architecture')
+  assert.equal(dropped.length, 1, 'the drop must still be recorded - the item did leave THIS list')
+  assert.ok(dropped[0].rationale.startsWith(CROSS_LIST_RATIONALE_PREFIX),
+    `expected a cross-list rationale, got: ${dropped[0].rationale}`)
+  assert.match(dropped[0].rationale, /RelevantBullets1/, 'it must NAME the list that kept the item')
+  assert.doesNotMatch(dropped[0].rationale, /not carried into the final list/)
+
+  // AND THE CONVERSE, which is what stops this becoming a blanket relabel: an item that is in NO
+  // shipped list really was not carried, and must keep the generic rationale.
+  const gone = buildSwaps({
+    call1: { skills1: 'Cloud Architecture\nRisk Management' },
+    pkg: { SkillsBullets1: 'Risk Management' },
+  }).swaps.filter((s) => s.action === 'dropped' && s.from_label === 'Cloud Architecture')
+  assert.equal(gone.length, 1)
+  assert.equal(gone[0].rationale, 'not carried into the final list')
+
+  // IT MUST NAME THE RIGHT LIST, and this fixture is here because a mutation refused to fail
+  // without it. `shippedIn` keeps the FIRST list that carries an item, which is not a free choice:
+  // `dedupeAcrossLists` keeps the first too (`normalise.ts:118`, `if (!owner) seen.set(n, f)`), so
+  // last-wins would name a list that did NOT keep the item - a false sentence of exactly the kind
+  // this whole change removes, just a subtler one. With the item in only ONE other list, first and
+  // last are the same and the line is untestable; it needs TWO.
+  const two = buildSwaps({
+    call1: { skills1: 'Cloud Architecture\nRisk Management' },
+    pkg: {
+      SkillsBullets1: 'Risk Management',
+      SkillsBullets2: 'Cloud Architecture',
+      RelevantBullets1: 'Cloud Architecture',
+    },
+  }).swaps.filter((s) => s.action === 'dropped' && s.from_label === 'Cloud Architecture')
+  assert.equal(two.length, 1)
+  assert.match(two[0].rationale, /SkillsBullets2/, 'must name the FIRST list that kept it, as the deduper does')
+  assert.doesNotMatch(two[0].rationale, /RelevantBullets1/)
+
+  // It must NOT be a second `driver: 'rule'` row. The app asserts exactly one such write site
+  // (H:omit-caveat-rationale-parity); adding another would silently change what the omit caveat
+  // accuses, so the honest rationale rides the EXISTING driver instead of minting a new one - and
+  // no schema change to the driver CHECK constraint is needed either.
+  assert.notEqual(dropped[0].driver, 'rule')
+})

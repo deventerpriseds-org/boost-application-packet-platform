@@ -4479,3 +4479,52 @@ F-1 (a claim about which run did something), and directly under the two features
 `driver` and `rationale`. Independent AC pass running, briefed to FALSIFY the row first (it has been
 wrong once already) and to state whether any fix would break `omitListCaveat`'s exact-rationale and
 one-`driver:'rule'`-site guards.
+
+
+### ACT — the AC pass on `D:swap-screen-reads-a-dead-pass` found a LIVE DEFECT IN THE CODE I SHIPPED (2026-08-27)
+
+Full ACs in `docs/qc-evidence/AC-swap-pass-provenance.md` (~46KB). Verdicts on the row's three claims:
+**claim 1 CONFIRMED and deeper than stated** (`BuildSwapsInput` has no `call2` field at all, so the
+discriminating input never reaches the function — a rename cannot be a correct fix; and
+`api/test/swaps.test.mjs:176-180` is **the defect written down as an expectation**). **Claim 2
+CONFIRMED as a defect but overstated as to reason and UNDERSTATED as to scope** — five possible
+authors, not two. **Claim 3 NOT ESTABLISHED — its stated proof is a category error**
+(`skillLineage.winner` is per-slot and precedence-ordered, so "Call 2 replaced 4" was never an item
+count), **so the row's stated blocking precondition does not block.**
+
+**FIXED THIS TURN — the defect that was already live, in my own PR #58 code.** `restoreOptions`' doc
+claimed the owner's do-not-use list was *"THE ONLY DETERMINISTIC REVERTER IN THE PIPELINE"*. **False.**
+`dedupeAcrossLists` (`normalise.ts:100-123`) is pure, deterministic, and re-runs every build. Proven,
+not inferred: `normalisePackage` runs at `appPackets.ts:561`, **before** `writeSwaps` at `:618`, and
+mutates the same `pkg` — so its deletions reached `buildSwaps` as originals with no matching final,
+fell to the generic branch, and `restoreOptions` offered *"Put back X"* for an item **the next build
+removes again**. The self-undoing control that function exists to prevent, through a producer its
+guard could not see.
+
+**Two false sentences, one fix.** `'not carried into the final list'` is itself false about the
+document — the item IS carried, in another list. `crossListRationale` now names that list. **The test
+is against the SHIPPED DOCUMENT, not against a report of who acted**: "this item is present in another
+list of the package we are shipping" is verifiable from the package and true whichever code removed
+it, so the sentence cannot become a guess about a producer.
+
+**No schema change, no new `driver`, no guard weakened.** A fifth `driver` value would need the
+five-DDL-home migration; routing the truth through the rationale on the EXISTING driver avoids it and
+leaves `H:omit-caveat-rationale-parity`'s `ruleRows === 1` intact — which is what AC-6 required.
+
+**Six mutations, every one failing correctly**, including W1 reinstating the exact shipped defect.
+**W2 caught a gap I had left:** the rationale NAMES a list, `dedupeAcrossLists` keeps the FIRST
+(`normalise.ts:118`), and with the item in only ONE other list first and last are identical — the line
+was untestable until a two-other-lists fixture existed. Naming the wrong list would have been a false
+sentence of exactly the kind this change removes, just subtler.
+
+api 887/887, app 377/377, build green, `tsc --noEmit` exit 0.
+
+**STILL OPEN on this row (NOT fixed here):** the `pass_b` provenance and the two `'the ATS pass'`
+literals. Those need `call2` threaded into `BuildSwapsInput` and a decision on migrating existing
+`swap_decision` rows (AC-11 lays out A/B/C; option C is rejected because `built.calls` is scope-local).
+**Also ALREADY BUILT and worth reusing rather than rebuilding:** `skillLineage` +
+`packet.last_build.lineage` already answer "which pass wrote this", per slot.
+
+**Correction to my own earlier report:** I read `# pass 874` off streaming output and flagged a drop.
+The authoritative tally was 887/887 — 886 + 1 new test, reconciling exactly. Read the final summary,
+never a line caught mid-stream.

@@ -19,6 +19,7 @@ import {
   scopeSwaps, shapeOf, sharedSourceNote, splitItems, statPct, wordCount, observedFor,
   ORIGINAL_NONE_NOTE, originalState, PLACEHOLDER_NOTE, placeholderToken,
   OMIT_LIST_RATIONALE, omitListCaveat, restoreOptions, shortenAction,
+  CROSS_LIST_RATIONALE_PREFIX, isCrossListDrop,
 } from '../src/assetBlocks.js'
 
 const src = (rel) => readFileSync(fileURLToPath(new URL(rel, import.meta.url)), 'utf8')
@@ -1228,6 +1229,50 @@ test('H:no-blank-or-duplicated-control: a repeated phrase is one control, an emp
   assert.match(omitListCaveat(om).text, /because it is on your do-not-use list/)
   const two = [...om, { loop: 1, action: 'dropped', driver: 'rule', from_label: 'Scrum', rationale: OMIT_LIST_RATIONALE }]
   assert.match(omitListCaveat(two).text, /because they are on your do-not-use list/)
+})
+
+test('H:restore-excludes-the-SECOND-deterministic-reverter: the cross-list drop', () => {
+  // THIS SHIPPED AS A LIVE DEFECT AND AN INDEPENDENT PASS FOUND IT, not this file's own guard.
+  // `restoreOptions`' doc asserted the owner's do-not-use list was "THE ONLY DETERMINISTIC REVERTER
+  // IN THE PIPELINE". False: `dedupeAcrossLists` (normalise.ts:100-123) is pure, deterministic, and
+  // runs on EVERY build, inside normalisePackage at appPackets.ts:561 - BEFORE writeSwaps at :618,
+  // mutating the same pkg. Its deletions arrived as ordinary drops, so a "Put back X" was offered
+  // for an item the next build removes again: the exact self-undoing control this function exists
+  // to prevent, through a producer its guard could not see.
+  //
+  // The guard was not wrong about its own case. It was written against the only reverter its author
+  // knew about, which is why an assertion about "the only X" is worth distrusting on sight.
+  const rows = [
+    { loop: 1, action: 'dropped', driver: 'posting', from_label: 'Real drop', rationale: 'not carried into the final list' },
+    { loop: 1, action: 'dropped', driver: 'rule', from_label: 'Omitted', rationale: OMIT_LIST_RATIONALE },
+    { loop: 1, action: 'dropped', driver: 'posting', from_label: 'Cloud Architecture', rationale: 'already listed in RelevantBullets1; kept there rather than listed twice' },
+  ]
+  assert.deepEqual(restoreOptions({ swapsForList: rows, canEdit: true }).map((o) => o.label), ['Real drop'])
+
+  // NO CAVEAT for the cross-list case, deliberately. The item is still in the document, in another
+  // list, so warning that it "will be reverted" would be its own false sentence - the same mistake
+  // in the opposite direction. Only the omit-list phrase is named.
+  assert.deepEqual(omitListCaveat(rows).phrases, ['Omitted'])
+
+  // Anchored at position 0, not a substring search: a rationale that merely CONTAINS the phrase is
+  // not a cross-list drop, and treating it as one would silently withdraw a legitimate control.
+  assert.equal(isCrossListDrop('already listed in X; kept there rather than listed twice'), true)
+  assert.equal(isCrossListDrop('this was already listed in X'), false)
+  assert.equal(isCrossListDrop('not carried into the final list'), false)
+  assert.equal(isCrossListDrop(null), false)
+})
+
+test('H:cross-list-rationale-parity: the app prefix is the one swaps.ts writes', () => {
+  // Same failure mode as H:omit-caveat-rationale-parity, and the same fix: two repos hold separate
+  // copies of one literal, so a reword on either side silently switches the exclusion OFF and turns
+  // a self-undoing control back on with every other test still green.
+  const swapsSrc = src('../../api/src/functions/tests/swaps.ts')
+  assert.ok(swapsSrc.includes(`CROSS_LIST_RATIONALE_PREFIX = '${CROSS_LIST_RATIONALE_PREFIX}'`),
+    `swaps.ts no longer writes the prefix the app excludes on: ${CROSS_LIST_RATIONALE_PREFIX}`)
+  // And it is genuinely a PREFIX there - built by concatenation at position 0, not embedded mid
+  // sentence, or `startsWith` on this side would never match what the producer emits.
+  assert.match(swapsSrc, /crossListRationale = \(mergeField: string\): string =>\s*\n?\s*`\$\{CROSS_LIST_RATIONALE_PREFIX\}/,
+    'crossListRationale must start with the prefix, or the app-side startsWith cannot match it')
 })
 
 test('H:omit-caveat-rationale-parity: one producer, and it is the rule branch', () => {

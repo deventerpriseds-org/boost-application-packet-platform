@@ -521,11 +521,20 @@ export function keywordSwapOptions({ keyword, present, canEdit, bank, inField } 
  * intent (`docs/qc-evidence/IMPORT-NOTE.md`). Copying the fixture would ship a sentence that is
  * false on most fields, so this DERIVES the caveat and returns null when there is nothing to say.
  *
- * THE ONLY DETERMINISTIC REVERTER IN THE PIPELINE is the owner's do-not-use list. `swaps.ts:231`
- * runs `onOmitList(o, omitted)` on every pass and records the drop as `driver:'rule'` with a fixed
- * rationale — so a phrase taken out by that rule is taken out again on the next loop, whatever the
- * reader does to the field by hand. Every other drop is model-driven and NOT predictable, which is
- * exactly why this matches on the rule rows alone.
+ * THERE ARE TWO DETERMINISTIC REVERTERS, AND THIS ONE OWNS THE FIRST. **The claim originally written
+ * here — that the owner's do-not-use list is the ONLY one — was FALSE, and an independent pass over
+ * `swaps.ts` caught it.** `dedupeAcrossLists` (`normalise.ts:100-123`) is the second: pure,
+ * deterministic, and re-run on every build. It runs inside `normalisePackage` at
+ * `appPackets.ts:561`, BEFORE `writeSwaps` at `:618`, mutating the same `pkg`, so its deletions
+ * reached `restoreOptions` as ordinary drops and it offered to put back an item the next build
+ * removes again — the self-undoing control that function exists to prevent, through a producer this
+ * guard could not see. That reverter is now named by `CROSS_LIST_RATIONALE_PREFIX` and excluded
+ * there; it deliberately does NOT produce a caveat here, because the item is still in the document
+ * (in another list) and warning that it will be "reverted" would be its own false sentence.
+ *
+ * So: `swaps.ts` records the omit drop as `driver:'rule'` with a fixed rationale — a phrase taken
+ * out by that rule is taken out again on the next loop, whatever the reader does by hand. Every
+ * other drop is model-driven and NOT predictable, which is why this matches the rule rows alone.
  *
  * ACCUSATION-GRADE MATCHING, per the standing rule that fuzzy matching is for ranking and never for
  * accusing: the rationale is compared EXACTLY against the string `swaps.ts` writes, not fuzzily and
@@ -542,6 +551,18 @@ export function keywordSwapOptions({ keyword, present, canEdit, bank, inField } 
  * @returns {{phrases: string[], text: string|null}}
  */
 export const OMIT_LIST_RATIONALE = 'on the owner do-not-use list (MasterContext.itemsToOmit)'
+
+/**
+ * The SECOND deterministic reverter, matched by PREFIX because its rationale names the list that
+ * kept the item and so cannot be one constant (`swaps.ts` `crossListRationale`).
+ *
+ * A prefix is not a fuzzy match and this is not the ranking/accusing line being crossed: the prefix
+ * is a literal both sides hold, pinned by `H:cross-list-rationale-parity`, and it decides only
+ * whether to OFFER a control — it never names an offender or moves a gate. What it must not do is
+ * match a rationale that merely CONTAINS the phrase, which is why it is anchored at position 0.
+ */
+export const CROSS_LIST_RATIONALE_PREFIX = 'already listed in '
+export const isCrossListDrop = (rationale) => String(rationale || '').startsWith(CROSS_LIST_RATIONALE_PREFIX)
 
 /**
  * The rows belonging to the LATEST pass, and why anything saying "the last run" must go through it.
@@ -595,11 +616,14 @@ export function omitListCaveat(swapsForList) {
  * NO CANDIDATES, NO CONTROL — the standing no-dead-UI rule. A "Put back an original" on a field that
  * dropped nothing would be a request the reader cannot mean.
  *
- * OMIT-LIST DROPS ARE EXCLUDED, and that is the whole reason this function is not a one-line filter
- * on `action === 'dropped'`. Offering to restore a phrase the owner's own list removes would be
- * offering a request the pipeline is guaranteed to undo on the next pass — dead UI in the most
- * expensive sense, because it appears to work and then silently does not. `omitListCaveat` states
- * that case instead.
+ * BOTH DETERMINISTIC REVERTERS ARE EXCLUDED, and that is the whole reason this is not a one-line
+ * filter on `action === 'dropped'`. Offering to restore a phrase the pipeline removes again is dead
+ * UI in the most expensive sense: it appears to work and then silently does not.
+ *   1. the owner's do-not-use list — `omitListCaveat` states that case instead;
+ *   2. a cross-list drop — the item is still in the document, in the list named by the rationale, so
+ *      there is nothing to put back and no caveat to give. **This second one shipped as a live
+ *      defect and was found by an independent pass, not by this function's own guard**, because the
+ *      guard was written against the only reverter its author knew about.
  *
  * @param {{swapsForList: Array<object>, canEdit: boolean}} args
  * @returns {Array<{label: string, ask: string}>}
@@ -610,7 +634,11 @@ export function restoreOptions({ swapsForList, canEdit } = {}) {
   // pass dropped and the current one already carries would be a request the reader cannot mean.
   const rows = latestLoopRows(swapsForList)
   const labels = [...new Set(rows
-    .filter((s) => s && s.action === 'dropped' && s.rationale !== OMIT_LIST_RATIONALE)
+    .filter((s) => s && s.action === 'dropped'
+      && s.rationale !== OMIT_LIST_RATIONALE
+      // The second deterministic reverter. Restoring a cross-list drop asks for an item the document
+      // ALREADY carries in another list, and the next build's deduper removes it again.
+      && !isCrossListDrop(s.rationale))
     .map((s) => String(s.from_label || '').trim())
     .filter(Boolean))]
   return labels.map((label) => ({

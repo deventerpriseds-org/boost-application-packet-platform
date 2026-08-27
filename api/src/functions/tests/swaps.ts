@@ -166,6 +166,33 @@ export interface BuildSwapsResult {
  * second is `merged`, not a second `swapped` — otherwise the table would claim the document contains
  * two bullets where it contains one.
  */
+/**
+ * The rationale for an item removed from one list because the SHIPPED package already carries it in
+ * another. Exported because the app matches it exactly, the same way it matches the omit rationale.
+ *
+ * WHY THIS EXISTS. `'not carried into the final list'` was written on these drops, and it is FALSE
+ * ABOUT THE DOCUMENT: the item IS carried, in a different list. `dedupeAcrossLists`
+ * (`normalise.ts:100-123`) runs inside `normalisePackage` at `appPackets.ts:561`, which is BEFORE
+ * `writeSwaps` at `:618` and mutates the very `pkg` handed to it — so the deleted item reaches
+ * `buildSwaps` as an original with no matching final and falls to the generic branch.
+ *
+ * Two things went wrong downstream of that one false sentence, and the second is why this is not
+ * cosmetic. `restoreOptions` (`app/src/assetBlocks.js`) offers "Put back X" for every dropped row
+ * that is not omit-driven, so it offered to restore an item the NEXT build removes again — the
+ * self-undoing control that function was written to prevent, arriving through a producer its guard
+ * could not see. `dedupeAcrossLists` is pure and deterministic and re-runs on every build.
+ *
+ * THE TEST IS AGAINST THE SHIPPED DOCUMENT, NOT AGAINST A REPORT OF WHO ACTED. This deliberately
+ * does not ask `normalisePackage` what it changed. "This item is present in another list of the
+ * package we are shipping" is verifiable from the package itself and is true no matter which code
+ * removed it — so the sentence cannot become a guess about a producer, which is the failure the
+ * honest-absence rule forbids. An item removed for any other reason still gets the generic
+ * rationale, because that one is then true.
+ */
+export const CROSS_LIST_RATIONALE_PREFIX = 'already listed in '
+export const crossListRationale = (mergeField: string): string =>
+  `${CROSS_LIST_RATIONALE_PREFIX}${mergeField}; kept there rather than listed twice`
+
 export function buildSwaps(input: BuildSwapsInput): BuildSwapsResult {
   const { call1 = {}, call3 = {}, pkg = {}, requirements = [], profileText = '', omitList = '' } = input
   // Exact strings, because a label either IS the wording the owner typed or it is not. A fuzzy
@@ -177,6 +204,18 @@ export function buildSwaps(input: BuildSwapsInput): BuildSwapsResult {
   const candidates: CandidateRow[] = []
   const swaps: SwapRow[] = []
   let itemCount = 0
+
+  // Where each item of the SHIPPED package lives, so a drop can say whether the document still
+  // carries it elsewhere. Built once over every list before any list is walked, because the answer
+  // for `skills_1` depends on `relevant_3` and vice versa.
+  const shippedIn = new Map<string, string>()
+  for (const l of LISTS) {
+    const lf = LIST_FIELDS[l]
+    for (const item of splitItems(pkg[lf.merge] ?? call3[lf.passB])) {
+      const n = normItem(item)
+      if (n && !shippedIn.has(n)) shippedIn.set(n, lf.merge)
+    }
+  }
 
   for (const list of LISTS) {
     const f = LIST_FIELDS[list]
@@ -234,7 +273,12 @@ export function buildSwaps(input: BuildSwapsInput): BuildSwapsResult {
           rationale: 'on the owner do-not-use list (MasterContext.itemsToOmit)',
         })
       } else {
-        swaps.push(row(list, 'dropped', o, null, attribute(o, requirements), 'not carried into the final list', ownerLabels))
+        // Present in ANOTHER shipped list? Then it was not "not carried" — it is carried, elsewhere,
+        // and saying otherwise is false about the document the owner is about to send.
+        const elsewhere = shippedIn.get(normItem(o))
+        swaps.push(row(list, 'dropped', o, null, attribute(o, requirements),
+          elsewhere && elsewhere !== f.merge ? crossListRationale(elsewhere) : 'not carried into the final list',
+          ownerLabels))
       }
     }
 
