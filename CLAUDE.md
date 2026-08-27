@@ -661,6 +661,14 @@ and I need us to get more efficient while not dropping effectiveness of guards a
 
 So the process is TIERED BY BLAST RADIUS, not applied uniformly.
 
+> **This table is now MIRRORED ORG-WIDE** in `deventerpriseds-org/eds-claude-skills` `CLAUDE.md`,
+> inside the `<!-- GLOBAL-RULES -->` markers that `setup.sh` appends to every session's
+> `/root/.claude/CLAUDE.md`. It lived only here for four days, so the Stop gate that actually enforces
+> never knew about it and kept demanding an AC subagent plus a verifier for every code change —
+> re-imposing the exact ceremony this rule removed. The org copy also carries the OWNER'S FLOW for HOW
+> an AC/verification pass runs once a tier calls for one (backgrounded AC then END THE TURN, fan-out
+> implementation, batched verification). **Change both copies together, or neither.**
+
 | Tier | What it covers | Process |
 |---|---|---|
 | **1 — accusation grade** | Anything that decides `must_have_coverage`, the artifact gate, a score, a coverage count, or that names an offender. Anything that admits model output into a stored claim. | Full: independent AC subagent BEFORE coding, independent `verifier` after, mutation-proof every new guard, live verification. |
