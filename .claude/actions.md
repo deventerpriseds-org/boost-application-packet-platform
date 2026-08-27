@@ -4205,3 +4205,33 @@ because the build is NOT a guard here — `tsc` compiled the NUL and the only te
 esbuild rejects smart quotes precisely, so the build IS the guard there.
 
 **NOT DONE:** merge to `main`. That is a live action and waits on the owner.
+
+**VERIFIER RAN AND FOUND THREE REAL DEFECTS — all closed in `5fd891a`.** It refuted NOTHING about
+shipped behaviour: the production code did what it claimed everywhere testable. Every finding was in
+my GUARDS and my WIRING, which is the more useful outcome — a wrong guard is believed.
+
+| # | Finding | Why it mattered | Fix |
+|---|---|---|---|
+| 1 | **3 of 5 seeder guards INERT** | `bankClient` fake had the exact disease the earlier `fakeClient` fix was meant to end. Removing `on conflict do update`, `returning (xmax = 0)`, or `category = excluded.category` all left the suite GREEN | rewritten against the container's real Postgres 16.13 (`skillRewordsDb.test.mjs`); all three mutations now fail |
+| 2 | **The swap control was UNREACHABLE** | `api.skillBankSeed` had NO caller in `app/src`, and the empty-bank message named a card that had no seed button. The bank was fillable only by an out-of-band POST | seed button added, reporting inserted/updated and that orphans were KEPT |
+| 3 | **`reworded` shipped WRITE-ONLY** | returned by the route, read by nothing — while its own comment calls it *"the one place that must be auditable"* | the screen now lists which phrase became what |
+
+**The lesson, third time in two days and now with a name.** All three of my inert guards came from a
+TEST DOUBLE that modelled the ANSWER rather than the MECHANISM. `verify-work` 0b check 2 already
+asks *"can the system PRODUCE your fixture?"*; the missing half is: **when you double a dependency,
+the double must implement the behaviour under test.** A fake that answers correctly regardless of its
+input is a mock of the conclusion. Corollary that would have prevented all three: **for SQL
+semantics, the only acceptable double is a database** — and this container ships one, so a fake was
+never justified.
+
+**A near-miss worth recording.** The new db file first connected to `postgres` like its four sibling
+db-tests and broke `H:ready-counts-an-overridden-fail-only-in-advisory-mode` in `shipPathDb` — node
+runs test FILES concurrently, so a fifth file applying `SCHEMA_SQL` is DDL churn under a running
+test. Measured 885/1 with it and 881/0 without BEFORE blaming anything, then gave it its own
+database. Guessing whose fault a new failure is has cost this session real time twice.
+
+**Verifier's own honest limits, carried forward rather than buried:** nothing was checked against the
+LIVE system (no `api-test.yml` / `ui-verify.yml` round-trip), because the branch is not deployed. It
+reconstructed MasterContext from the Zapier archive; four of five field char-counts match the
+recorded live values exactly, `relevantProficiencies` is 963 vs 958. And multi-owner separation is
+still open — `MasterContext` is a single GLOBAL partition, pre-existing and not introduced here.
