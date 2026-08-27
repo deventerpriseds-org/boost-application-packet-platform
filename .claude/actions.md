@@ -4433,3 +4433,49 @@ original ledger defect (V5). app 375/375, api 886/886, build green, codepoint sc
 failure it was named for. Both times the shape was the same — the fixture was a SUBSET of what the
 correct implementation requires, so a weaker implementation satisfied it. A guard's fixture has to be
 something only the right implementation survives, not merely something the wrong one happens to fail.
+
+
+### ACT — "what large and medium is left" answered by RE-RECONCILING the register, not by building (2026-08-27)
+
+The owner asked what large/medium work remains. Answering it required reading the source rather than
+the backlog, and **the backlog was wrong in three places out of four**.
+
+**The `AC-large-medium.md` batch is DONE.** Group A (4.2 fit cards) shipped `b73f8d6`; Group B (4.3
+ATS-modal QC summary) and Group C's 4.6-10/11 shipped `34eda36`.
+
+**4.6-9 was ALREADY BUILT** — ranked #2 in `PROTOTYPE-COVERAGE.md` §14 as *"blocked on reading the
+owner's live skill fields"*. The skill-bank work closed that and nobody revisited the rank. Traced
+end to end: `useSkillBank` (`AssetBlocks.jsx:118`) → `api.skillBankGet()` (`api.js:315`) →
+`app/skill-bank` (`appSkillBank.ts:280`) → `keywordSwapOptions` (`assetBlocks.js:491`) → a real
+`<select data-qc={BLOCK_HOOKS.keywordSwap}>` at `AssetBlocks.jsx:998` whose placeholder option is the
+row's own wording. §4.6 now has NO ABSENT row.
+
+**4.1-6 is DELIBERATE, not ABSENT** — and this one was only visible by reading the PROTOTYPE SOURCE,
+which is the precedence-chain lesson from earlier today applied. `packet.jsx:120` is
+`color: t.n === t.d ? green : red` on `{t.n}/{t.d}`: **the colour IS the `n/d` ratio's verdict, not a
+separate feature.** So it inherits 4.1-5, which this app refuses on the record because attaching a
+coverage number to `model_keyword` *"made a suggestion look like a measurement"*
+(`PostingAnalysis.jsx:399-403`). Building it would assert **as a colour** the measurement removed
+**as a number** — strictly worse, because a reader can see a number's basis and cannot see a
+colour's.
+
+**Net: the packet module's prototype backlog has NO unblocked work left at any size.** One owner
+decision (the panel), two rows gated behind it (4.8-21, 4.7-8), one low-value portfolio-only row
+(4.5-12), one DELIBERATE (4.1-6).
+
+**The lesson, and it is the expensive one:** of the four §14 ranks closed today, **three cost no
+implementation** — already built, already refused, or unbuildable. Only 4.1-20 was code. A ranked
+backlog that is never re-reconciled against the source reports work as outstanding that is finished,
+refused, or impossible, and every one of those is an invitation to spend hours on nothing.
+`.claude/DEFERRED.md` has a staleness guard for exactly this; `PROTOTYPE-COVERAGE.md` has none, and
+that is the difference.
+
+**NEXT: `D:swap-screen-reads-a-dead-pass`** — the engineering weight has moved to the ledger's 33
+open rows, and this is the highest-value unblocked one. It is tier 1: `swaps.ts:205/234` store
+*"reworded by the ATS pass"* / *"introduced by the ATS pass"* on every swap and add, while Call 3
+reportedly returns 0 characters for all five `final*` fields and Call 2 did the work — a FALSE
+STATEMENT stored and shown to the owner as the reason their words changed. Same family as today's
+F-1 (a claim about which run did something), and directly under the two features just built on
+`driver` and `rationale`. Independent AC pass running, briefed to FALSIFY the row first (it has been
+wrong once already) and to state whether any fix would break `omitListCaveat`'s exact-rationale and
+one-`driver:'rule'`-site guards.

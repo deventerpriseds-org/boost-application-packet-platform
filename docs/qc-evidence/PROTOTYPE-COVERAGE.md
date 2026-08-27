@@ -123,7 +123,7 @@ Import list read (`PostingAnalysis.jsx:18-28`): `shell.jsx` (Pill, Overlay), `po
 | 4.1-3 | `See where each one is answered →` (deep-link to QC) | `packet.jsx:159` | BUILT | `PostingAnalysis.jsx:547-559` - `See where each one is answered ->`, hooked `POSTING_HOOKS.openQc`, `role="button"`/`tabIndex`/Enter-Space, hidden when the extraction has nothing to point at. Navigation is a PROP calling the one `setActiveStep` (`PacketBuilder.jsx:842`). QC's `pick` filter has no prop and no route segment, so it opens the Coverage list and the sub-line says so rather than implying per-line targeting. Commit `2de4ae5`; wiring guarded after the verifier found both halves unguarded (`1a886a8`). |
 | 4.1-4 | Three-tab strip, one list at a time | `packet.jsx:116-123` | BUILT | `PostingAnalysis.jsx:485-493`, `role="tablist"` / `role="tab"` — better than the prototype's bare divs. |
 | 4.1-5 | Per-tab count `n/m` | `packet.jsx:120` | PARTIAL | `PostingAnalysis.jsx:490` renders `({t.count})` — a **single** total, not `covered/total`. Deliberate: `:400-403` says attaching a coverage number to `model_keyword` "made a suggestion look like a measurement". |
-| 4.1-6 | Count coloured green when complete, red when not | `packet.jsx:120` | ABSENT | No colour on the tab count at `:490`. |
+| 4.1-6 | Count coloured green when complete, red when not | `packet.jsx:120` | **DELIBERATE** | **Re-verdicted 2026-08-27 from ABSENT, by reading the prototype source rather than the render.** `packet.jsx:120` is `color: t.n === t.d ? green : red` on `{t.n}/{t.d}` — **the colour IS the `n/d` ratio's verdict, not a separate feature.** So 4.1-6 is not independently buildable: it inherits 4.1-5, which this app refuses on the record because attaching a coverage number to `model_keyword` *"made a suggestion look like a measurement"* (`PostingAnalysis.jsx:399-403`). Colouring the single total green/red would need a completeness threshold that does not exist, and would assert **as a colour** the very measurement that was removed **as a number** — strictly worse, because a reader can see a number's basis and cannot see a colour's. Shipping it would re-open a decision this repo already made, in a form that hides its own premise. **Closes as DELIBERATE with 4.1-5, not as work.** |
 | 4.1-7 | Responsibilities list | `packet.jsx:124` | BUILT | `PostingAnalysis.jsx:409-411`, `Group` at `:262-283` |
 | 4.1-8 | Requirements list | `packet.jsx:125-132` | BUILT | `PostingAnalysis.jsx:412-419` |
 | 4.1-9 | MUST HAVE / NICE TO HAVE sub-headers | `packet.jsx:127,129` | BUILT | `PostingAnalysis.jsx:414,417` — `Must-have` / `Nice-to-have` |
@@ -353,13 +353,13 @@ Against the 35 non-deferred rows: **32 BUILT (91%), 33 present in some form (94%
 | 4.6-6 | Panel: the note explaining the wording choice | `assets.jsx:66` | BUILT | `AssetBlocks.jsx:826-830` — *"A model reading this posting proposed this keyword for the line below. Nothing has…"* |
 | 4.6-7 | Panel: **what it displaced** ("Took the place of X in Skills 1") | `assets.jsx:67` | DELIBERATE | PC-3. `swap_decision` stores `from_label → to_label` and PC-3 names it as the honest future source. |
 | 4.6-8 | Action: `Put back "<original>"` | `assets.jsx:70-74` | PARTIAL | The **capability** exists — `CorrectionRow`'s `Undo` (`QcRail.jsx:578-580` → `POST /app/correction/{id}/revert`) and the Swaps/Original-vs-final tab — but the panel itself does not carry a `Put back` button. Relocated, not absent. |
-| 4.6-9 | Action: `Swap for another skill…` (a select from the skill bank) + `Swap` | `assets.jsx:76-83` | ABSENT | No skill-bank select renders anywhere on the asset step. Checked `AssetBlocks.jsx` and its import list plus `assetBlocks.js`; the only `<select>` on this surface is none. |
+| 4.6-9 | Action: `Swap for another skill…` (a select from the skill bank) + `Swap` | `assets.jsx:76-83` | **BUILT** | **Re-verdicted 2026-08-27 — the ABSENT verdict below was true when written and went stale when the skill-bank work landed.** Traced end to end: `useSkillBank` (`AssetBlocks.jsx:118`) -> `api.skillBankGet()` (`api.js:315`) -> `app/skill-bank` (`appSkillBank.ts:280`) -> `keywordSwapOptions` (`assetBlocks.js:491`) -> a real `<select data-qc={BLOCK_HOOKS.keywordSwap}>` at `AssetBlocks.jsx:998`, whose placeholder option is the row's own wording, `Swap for another skill...`. Choosing one seeds the field's ask box via `seedAsk` - no second edit path, nothing stored. Empty bank renders a REASON, not a disabled control. *(Prior verdict: "No skill-bank select renders anywhere on the asset step... the only `<select>` on this surface is none." It was a correct reading of the code AT THE TIME; the row was never revisited after the bank shipped.)* |
 | 4.6-10 | Action: `Drop it, leave the line open` | `assets.jsx:84-85` | **BUILT — CHANGED from ABSENT** | `keywordActions()` `assetBlocks.js:447-456`, rendered `AssetBlocks.jsx:871-878` (`BLOCK_HOOKS.keywordActions`). It **seeds the field's existing ask box** (`seedAsk`) and writes nothing at activation — on Send it is the one `api.aiEditArtifact` call site (`AssetBlocks.jsx:690`); `git diff -- api/` for the lane is empty. A keyword the draft does not contain renders **no control**, only the reason *"This field does not contain it, so there is nothing here to drop."* — the standing no-dead-UI rule. |
 | 4.6-11 | Each action is phrased as an assistant request stating the coverage consequence | `assets.jsx:72,82,85` | **BUILT — CHANGED from ABSENT, with the consequence clause deliberately omitted** | Seeded sentence: `Drop "<kw>" from this field. Rewrite the text without it rather than swapping in a synonym.` The prototype's *coverage consequence* is **not** claimed, and that is the finding, not an oversight: the lane's own hunt (verifier-CONFIRMED, both halves) proved a drop routed through `owner-edit` gains no attribution — `ownerLabels` strips the empty replacement via `.filter(Boolean)` (`appSwaps.ts:45-49`, plus a second filter at `swaps.ts:174`) so `driver:'owner'` cannot fire for a deletion — and splices a hole (`appCorrections.ts:359` → `Led  initiatives`). Copy that promised a coverage effect would have been a claim the system does not record. Guarded by `H:keyword-drop-offers-nothing-it-cannot-do`. |
 | 4.6-12 | `not in this text` on a chip whose keyword the draft lacks | *(prototype has none)* | NOT-IN-PROTOTYPE | App-only, `AssetBlocks.jsx:803-810`, recorded as reversible in PC-1. Excluded. |
 
 **§4.6 tally — 11 rows (row 12 excluded):** BUILT **7** · PARTIAL **1** · ABSENT **1** · DELIBERATE **2**.
-Against the 9 non-deferred rows: **7 BUILT (78%), 8 present in some form (89%).** *(Was 5 BUILT / 56%; **4.6-10/11**, the drop hatch, moved ABSENT -> BUILT at `34eda36`, verifier-CONFIRMED. The one remaining ABSENT is **4.6-9**, which is blocked on reading the owner's live skill fields, not on code.)*
+Against the 9 non-deferred rows: **7 BUILT (78%), 8 present in some form (89%).** *(Was 5 BUILT / 56%; **4.6-10/11**, the drop hatch, moved ABSENT -> BUILT at `34eda36`, verifier-CONFIRMED. **4.6-9 has since been BUILT too (re-verdicted 2026-08-27), so §4.6 now has NO ABSENT row.** It was ranked #2 in §14 as *blocked on reading the owner's live skill fields*; the skill-bank work closed that and the rank was never updated. This is the staleness the ledger's own guard exists to catch, in a document the guard does not read.
 
 ---
 
@@ -690,9 +690,14 @@ Ranked by what a user would notice first, not by effort.
 **Eight of the original ten ranks have SHIPPED since this list was written**, and they are kept here
 struck through rather than deleted, so the ranking can be read as a record of what was actually
 worked on rather than as a list that quietly rewrites itself. What that record shows is that the
-ranking was USED: the work went down it in order, and the two ranks still open are the two that were
-never engineering questions - the assistant (an owner decision) and 4.6-9 (blocked on reading the
-owner's live data, not on code).
+ranking was USED: the work went down it in order.
+
+**Updated 2026-08-27: 4.6-9 is no longer open either — it was ALREADY BUILT and the rank had simply
+gone stale.** So of the original ten, only the assistant remains, and it is an owner decision rather
+than an engineering one. Two of the closures since this note was written cost no implementation at
+all: 4.6-9 was found built, and half of the assistant rank was found *unbuildable* rather than
+unbuilt. A ranking that is not re-reconciled reports work as outstanding that is either done or
+impossible, which is the same failure in both directions.
 
 | ~~#~~ | Row(s) | Shipped in | Evidence |
 |---|---|---|---|
@@ -708,22 +713,36 @@ owner's live data, not on code).
 
 ### The list as it now stands
 
-| # | Row(s) | SPEC | What the user loses | Cheap or expensive |
-|---:|---|---|---|---|
-| 1 | **4.11-1 → 4.11-8** — the assistant panel | §4.11 | Six ABSENT rows — **half of the 12 that remain in the whole document**. **But read §12 first**: this may be a deliberate architectural replacement, and the evidence for that is a code comment rather than a recorded decision. **This is an owner question, not an engineering one**, and it moves the headline by ~4 points on its own. | Expensive if real; free if the substitution is ratified. |
-| 2 | **4.6-9** — the keyword panel's skill-swap hatch | §4.6 | The one row of §4.6 that did not ship with the drop hatch. Not blocked on code: it needs the owner's live skill fields read, and every route to them is currently down (`workflow_dispatch` wedged, Storage `403 CONNECT` from the sandbox, both Boost connectors `enabledInChat: false`). The parser and the Slides table reader for it are already built and on `main`. | Cheap once the data can be read. |
-| 3 | **4.1-20** — `Where it is used →` on an evidenced requirement | §4.1 | The last row of the evidence cluster: a reader can see the excerpt that backs a requirement but cannot jump to the field that uses it. | Cheap-ish, but needs one real change: `D:jd-evidence-has-no-field-link` — a swap is keyed by `list`, not artifact, and the `list → artifact` map is built at render time on a different step. |
-| 4 | **4.8-21** — `Ask why` on a swap row | §4.8 | A one-liner. Was previously listed as "just outside the ten"; it is now inside it because the ten shrank. | Cheap. |
-| 5 | **4.5-12** — `PickList` (`type: 'select'` fields) | §4.5 | Portfolio only, so **no resume impact** — which is why it is last despite being a whole missing control. | Expensive, low value. |
+**Re-reconciled 2026-08-27.** Three of the five ranks below have closed since the list was written,
+and **two of the three closed without anyone building the feature** — 4.6-9 was already built, and
+half of the assistant rank turned out to be unbuildable rather than unbuilt. That is the same
+staleness `D:ledger-stale-row-fails` guards in `.claude/DEFERRED.md`, in a document no guard reads.
 
-**The list is down to five, and only one of them is ordinary engineering work.** Rank 1 is an owner
-decision, rank 2 is blocked on data access rather than code, and rank 5 is explicitly low value. The
-honest read is that the prototype-alignment backlog is close to exhausted for the packet module.
+| # | Row(s) | SPEC | State |
+|---:|---|---|---|
+| ~~1~~ | **4.11-1 → 4.11-8** — the assistant panel | §4.11 | **SPLIT, not shipped and not blocked as one thing.** Two rows SHIPPED without the panel (PR #58): **4.11-8** the omit-list caveat, derived and conditional, and **4.11-5**'s two missing quick actions as in-place seeders (three of the five already existed). **Three rows are NOT BUILDABLE on today's data and must not render:** `Revert` has no route for either meaning, `Keep` is worse than vacuous (the route commits before it replies), and **4.11-6** is unreachable because `section` is the caller's input echoed back. **4.11-1's dock is a SHELL decision, not a breakpoint one** — this app caps content at `1280` against the prototype's `1560`, and the 280px difference is exactly the right column D4 deleted, so no viewport passes. What remains is an owner choice: a float-only panel, or raising the shell cap. |
+| ~~2~~ | ~~**4.6-9** — the keyword panel's skill-swap hatch~~ | §4.6 | **ALREADY BUILT — the rank was stale, not the work.** Ranked here as *"blocked on reading the owner's live skill fields"*; the skill-bank work closed that and nobody revisited the rank. Traced end to end 2026-08-27: `useSkillBank` → `api.skillBankGet()` → `app/skill-bank` → `keywordSwapOptions` → the `<select>` at `AssetBlocks.jsx:998`. §4.6 now has no ABSENT row. |
+| ~~3~~ | ~~**4.1-20** — `Where it is used →` on an evidenced requirement~~ | §4.1 | **SHIPPED.** The `list → artifact` map is derived from the packet's own `artifacts` (`listOwnersFromArtifacts`) instead of from render-time registration, so it is populated on the JD step too. `D:jd-evidence-has-no-field-link` is CLOSED. Guarded by `H:jd-field-link-is-wired-not-just-derived` — added after five wiring mutations passed suite AND build, including reverting the exact defect the ledger row described. |
+| 4 | **4.8-21** — `Ask why` on a swap row | §4.8 | **GATED, and it is not the one-liner §14 once called it.** It is specced to seed the assistant panel, so its target does not exist. Moves with rank 1. |
+| 5 | **4.5-12** — `PickList` (`type: 'select'` fields) | §4.5 | **OPEN, expensive, low value.** Portfolio only, so no resume impact. |
 
-**The ranking is not the full ABSENT set, and the two it omits are named rather than dropped.** The
-12 ABSENT rows are the 10 ranked above plus **4.1-6** (the extraction count coloured green when
-complete, red when not — a colour on a number that already renders) and **4.7-8** (`Forwards to the
-assistant`, which cannot be built independently of rank 1 and would move with it).
+**Plus the two the ranking omits, and NEITHER is open work:** **4.1-6** re-verdicted **DELIBERATE**
+2026-08-27 — the prototype's colour is `t.n === t.d ? green : red` on the `n/d` ratio, so it inherits
+4.1-5, which this app refuses on the record; building it would re-assert as a *colour* the
+measurement removed as a *number*. And **4.7-8** (`Forwards to the assistant`) cannot be built
+independently of rank 1 and moves with it.
+
+**The honest read: the packet module's prototype-alignment backlog has NO unblocked work left at any
+size.** What remains is one owner decision (the panel), two rows gated behind it (4.8-21, 4.7-8), one
+row that is explicitly low value and portfolio-only (4.5-12), and one row that closed as DELIBERATE
+rather than as work (4.1-6). The remaining engineering weight for this module has moved to
+`.claude/DEFERRED.md`, which carries **33 open rows**.
+
+**Worth stating because it changes how the next pass should be spent:** of the four ranks closed on
+2026-08-27, **three cost no implementation** — 4.6-9 was already built, 4.1-6 was already decided
+against, and half the assistant rank was unbuildable rather than unbuilt. Only 4.1-20 was code. A
+backlog that is not re-reconciled against the source spends real hours on rows that are already
+finished, already refused, or impossible.
 
 ---
 
