@@ -45,6 +45,10 @@ export const BLOCK_HOOKS = {
   askChange: 'blocks-ask-change',         // per-field "List Tweaks" (prototype: "Ask for a change")
   askBox: 'blocks-ask-box',
   askSend: 'blocks-ask-send',
+  // SPEC 4.7-7. The ask box confirmed FAILURE in place and said nothing at all on success - it just
+  // closed. A reader could not tell "sent and applied" from "the button did nothing", which is the
+  // asymmetry this hook exists to close.
+  askSent: 'blocks-ask-sent',
   fieldSlot: 'blocks-field-slot',         // the raw merge field, kept beside the human name
   fieldPlaceholder: 'blocks-field-placeholder', // 4.5-40 - the {{token}} inline, where merged text lands
   fieldObserved: 'blocks-field-observed',  // the measurement, coloured by this field's worst finding

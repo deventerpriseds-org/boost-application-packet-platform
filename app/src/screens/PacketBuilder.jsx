@@ -234,7 +234,13 @@ export function ArtifactCard({ a, busy, setBusy, qcResult, onGenerate, onRegener
       {a.type !== 'video' && (
         a.docUrl ? (
           <div style={{ display: 'flex', gap: 14, alignItems: 'center', flexWrap: 'wrap' }}>
-            <a href={a.docUrl} target="_blank" rel="noreferrer" className="px-link" style={{ fontSize: 12 }}>
+            {/* SPEC 4.4-8, the DEFENSIBLE HALF ONLY. The prototype renders these three as buttons;
+                converting a real `<a href target="_blank">` into a button REMOVES middle-click,
+                Cmd-click, open-in-new-tab and "Copy link address". The prototype uses a button
+                because its link has no destination - ours does. So the button conversion is declined
+                and recorded as a pull candidate; `nowrap` is the half that was genuinely missing,
+                and it stops a two-word label breaking mid-phrase when the row wraps. */}
+            <a href={a.docUrl} target="_blank" rel="noreferrer" className="px-link" style={{ fontSize: 12, whiteSpace: 'nowrap' }}>
               {a.docUrl.includes('/presentation/') ? '✓ Open Slides ↗' : '✓ Open Google Doc ↗'}
             </a>
             {/* role + tabIndex + a key handler, not a bare span: a click target with no role has no
@@ -242,7 +248,7 @@ export function ArtifactCard({ a, busy, setBusy, qcResult, onGenerate, onRegener
                 already use. It ALSO stops the UI-gap comparator reporting this control as missing -
                 compare-ui.mjs collects `button, [role="button"], a`, so an unlabelled span was
                 invisible to it and showed up as a prototype-only control that already existed. */}
-            <span className="px-link" role="button" tabIndex={0} style={{ fontSize: 12, cursor: 'pointer' }}
+            <span className="px-link" role="button" tabIndex={0} style={{ fontSize: 12, cursor: 'pointer', whiteSpace: 'nowrap' }}
               onClick={() => { try { navigator.clipboard?.writeText(api.trackedLink(a.id)) } catch {} }}
               onKeyDown={(e) => {
                 if (e.key !== 'Enter' && e.key !== ' ') return

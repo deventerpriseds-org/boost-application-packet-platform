@@ -274,3 +274,41 @@ test('H:tone-names-must-exist: a tone the token table lacks paints an invisible 
   }
   assert.deepEqual(bad, [], `these tones resolve to grey instead of erroring:\n${bad.join('\n')}`)
 })
+
+test('H:doc-links-stay-real-links-and-do-not-wrap-mid-label', () => {
+  // SPEC 4.4-8, and this guard exists as much to PIN THE DECLINE as to pin the fix.
+  //
+  // The prototype renders these three as buttons. Converting a real `<a href target="_blank">` into
+  // a button removes middle-click, Cmd-click, open-in-new-tab and "Copy link address" - the
+  // prototype only uses a button because its link has no destination, and ours does. So the button
+  // half is DECLINED, and this asserts the anchor survives: without it, a later pass "completing"
+  // 4.4-8 against the prototype would quietly delete four real browser affordances.
+  const src = PACKET()
+  assert.match(src, /<a href=\{a\.docUrl\} target="_blank" rel="noreferrer"/,
+    'the Google Doc link must stay a real anchor - a button cannot be middle-clicked or copied')
+  // The half that WAS missing: a two-word label must not break mid-phrase when the row wraps.
+  const anchor = src.slice(src.indexOf('<a href={a.docUrl}'), src.indexOf('<a href={a.docUrl}') + 200)
+  assert.match(anchor, /whiteSpace: 'nowrap'/, 'the doc link can break mid-label')
+  const copy = src.slice(src.indexOf('Copy tracked link') - 700, src.indexOf('Copy tracked link'))
+  assert.match(copy, /whiteSpace: 'nowrap'/, 'the copy control can break mid-label')
+})
+
+test('H:ask-box-confirms-success-in-place-not-only-failure', () => {
+  // SPEC 4.7-7. The finding was an ASYMMETRY, not an absence: `askError` rendered in place while
+  // success was silent, so a reader could not tell "sent and applied" from "the button did nothing".
+  const src = BLOCKS()
+  assert.match(src, /BLOCK_HOOKS\.askSent/, 'no success confirmation is rendered at all')
+  // THE STRUCTURAL POINT: the success path runs setAskOpen(false), so a confirmation rendered INSIDE
+  // the ask box would unmount at the instant it became true. It must sit outside that block.
+  const askOpenBlock = src.slice(src.indexOf('{askOpen && ('), src.indexOf('{askSent'))
+  assert.ok(!/BLOCK_HOOKS\.askSent/.test(askOpenBlock),
+    'the confirmation is inside the {askOpen && ...} block, so closing the box destroys it')
+  assert.match(src, /\{askSent && !askOpen &&/, 'the confirmation must render only once the box has closed')
+  // It names WHAT was asked - "Sent" alone does not say which of several asks landed - and the text
+  // is captured BEFORE setAsk('') clears it.
+  assert.match(src, /const sentText = ask\.trim\(\)[\s\S]{0,120}setAsk\(''\)/,
+    'the sent text must be captured before the box is cleared, or the confirmation is empty')
+  // A stale confirmation must not sit above a NEW ask, or it reads as confirming the one being typed.
+  assert.match(src, /setAskSent\(null\)[\s\S]{0,80}setAskOpen\(\(v\) => !v\)/,
+    'opening the ask box must clear a previous confirmation')
+})

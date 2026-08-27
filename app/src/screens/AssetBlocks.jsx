@@ -538,6 +538,10 @@ function AssetBlock({ row, reqs, swapsForList, wide, artifactId, listOwners, thr
   const [ask, setAsk] = useState('')
   const [askBusy, setAskBusy] = useState(false)
   const [askError, setAskError] = useState(null)
+  // SPEC 4.7-7 - the confirmation must OUTLIVE the box that sent it. The success path sets
+  // askOpen(false), so anything rendered inside the box disappears at the moment it would be read;
+  // this sits in the block, beside the change log the edit will show up in.
+  const [askSent, setAskSent] = useState(null)
   // The prototype's "Ask assistant" beside a kept phrase seeds the assistant with a reword request
   // (qc/assets.jsx:139). Here it opens the field's OWN ask box with that sentence already typed -
   // the same box, the same `api.aiEditArtifact(..., { section })` route. Not a second edit path,
@@ -689,6 +693,9 @@ function AssetBlock({ row, reqs, swapsForList, wide, artifactId, listOwners, thr
             onKeyDown={(e) => {
               if (e.key !== 'Enter' && e.key !== ' ') return
               e.preventDefault()
+              // A stale confirmation must not sit above a NEW ask - it would read as confirming the
+              // one being typed. Cleared on open, not on send, so it survives the box closing.
+              setAskSent(null)
               setAskOpen((v) => !v)
             }}>
             {askOpen ? 'Cancel' : 'List Tweaks'}
@@ -713,12 +720,35 @@ function AssetBlock({ row, reqs, swapsForList, wide, artifactId, listOwners, thr
                 setAskBusy(true); setAskError(null)
                 try {
                   await api.aiEditArtifact(artifactId, { instruction: ask.trim(), section: row.merge_field })
+                  // Captured BEFORE the box is cleared: the sentence names what was asked, because
+                  // "Sent" alone does not tell a reader which of several asks landed.
+                  const sentText = ask.trim()
                   setAsk(''); setAskOpen(false)
                   if (onCorrectionsChanged) await onCorrectionsChanged()
+                  setAskSent(sentText)
                 } catch (e) { setAskError(String((e && e.message) || e)) }
                 finally { setAskBusy(false) }
               }}>{askBusy ? 'Sending...' : 'Send'}</button>
           </div>
+        </div>
+      )}
+      {/* SPEC 4.7-7 - success now speaks, in place, where failure already did.
+          OUTSIDE the `askOpen &&` block on purpose: the success path closes the box, so a message
+          rendered inside it would unmount at the instant it became true. The asymmetry was the whole
+          finding - `askError` rendered in place while success was silent, leaving no way to tell
+          "sent and applied" from "the button did nothing".
+          It names what was asked, because "Sent" alone does not say WHICH ask landed, and it points
+          at the change log rather than claiming the text is already different - the edit is applied
+          by the server and shows up there, and promising more than that would be a claim this
+          component cannot check. */}
+      {askSent && !askOpen && (
+        <div className="px-note" data-qc={BLOCK_HOOKS.askSent} style={{ marginTop: 6 }}>
+          <b>Sent.</b> {'\u201c'}{askSent}{'\u201d'} - the change will appear in this field{"'"}s change log.
+          <span className="px-link" role="button" tabIndex={0} style={{ marginLeft: 8, fontSize: 12 }}
+            onClick={() => setAskSent(null)}
+            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setAskSent(null) } }}>
+            Dismiss
+          </span>
         </div>
       )}
     </div>
