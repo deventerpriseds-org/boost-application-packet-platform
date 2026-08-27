@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+# Refuse a commit on `main`. Install: git config core.hooksPath scripts/git-hooks
+#
+# WHY THIS EXISTS, and why it is a hook rather than another line in CLAUDE.md. The rule
+# "HARD RULE: NEVER commit directly to main" has been in CLAUDE.md for weeks, in bold, near the top
+# of the git section. On 2026-08-27 it was broken anyway: a session ran the documented land-and-deploy
+# sequence (`git checkout main && git merge --ff-only <branch> && git push origin main`), skipped the
+# LAST line of that sequence — `git checkout claude/<branch>` — and then made two more commits without
+# noticing the branch had changed under it.
+#
+# That is the shape worth naming: nothing here was a decision to ignore the rule. The working tree
+# looked identical, `git commit` succeeded twice, and the only tell was in `git rev-parse
+# --abbrev-ref HEAD`, which nobody runs between commits. Prose cannot catch a state you are not
+# looking at. A hook can, because it runs whether or not anyone remembered to look.
+#
+# The recovery is cheap ONLY while the commits are unpushed, which is the other reason to fail early:
+#   git branch claude/<name> HEAD && git reset --hard origin/main
+#
+# Escape hatch: `git commit --no-verify`, for the rare case where a commit on main is genuinely
+# intended. Deliberate and visible, which is all this hook asks for.
+BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo '')
+if [ "$BRANCH" = "main" ]; then
+  cat >&2 <<'MSG'
+!!! REFUSING TO COMMIT ON `main` — CLAUDE.md: all development happens on a feature branch.
+
+You are probably here because you ran the land-and-deploy sequence and did not run its last line:
+    git checkout claude/<your-branch>
+
+To move work you have already staged onto a branch:
+    git stash && git checkout -b claude/<name> && git stash pop
+
+If commits are ALREADY on main and unpushed, they are recoverable:
+    git branch claude/<name> HEAD && git reset --hard origin/main
+
+Genuinely meant it? `git commit --no-verify`.
+MSG
+  exit 1
+fi

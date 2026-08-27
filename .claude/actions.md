@@ -4564,3 +4564,20 @@ the drawing that it does not.**
 Group B (AC-3, AC-4) and Group D (AC-8, AC-9). Reuses `Overlay variant='drawer'`; boxes SEED it and
 REMAIN (ground rule R6); `Revert` and `Keep` must NOT render (no route; the edit is committed before
 the reply). Tier 2 - it decides nothing and moves no gate.
+
+
+**MISTAKE + GUARD (2026-08-27): I committed twice directly to `main`.** The land-and-deploy sequence
+ends `git checkout claude/<branch>`; I ran every line but that one, then made two commits without
+noticing HEAD had moved. Caught before any push, so recovery was `git branch claude/assistant-panel-float HEAD`
+then `git reset --hard origin/main` — both commits preserved, `main` back to `26b5631`, nothing lost
+and no deploy touched (they were `.claude/*.md`, and deploys fire on `api/**` / `app/**` paths).
+
+**The rule was already in CLAUDE.md, in bold, and it did not help** — which is the whole argument for
+graduating it: nothing here was a decision to ignore the rule. The tree looked identical, `git commit`
+succeeded twice, and the only tell lived in `git rev-parse --abbrev-ref HEAD`, which nobody runs
+between commits. **Prose cannot catch a state you are not looking at.**
+
+**Guard:** `scripts/git-hooks/pre-commit` refuses a commit on `main` and prints the recovery command;
+enabled via `git config core.hooksPath scripts/git-hooks`. **Mutation-proved in BOTH directions** —
+allowed on a feature branch, refused on `main` — because a hook that refuses everything is as useless
+as one that refuses nothing. Escape hatch is `--no-verify`, deliberate and visible.
