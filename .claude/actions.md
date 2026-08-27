@@ -4581,3 +4581,38 @@ between commits. **Prose cannot catch a state you are not looking at.**
 enabled via `git config core.hooksPath scripts/git-hooks`. **Mutation-proved in BOTH directions** —
 allowed on a feature branch, refused on `main` — because a hook that refuses everything is as useless
 as one that refuses nothing. Escape hatch is `--no-verify`, deliberate and visible.
+
+
+### ACT — guard adapted with owner approval, so the panel can share one sentence (2026-08-27)
+
+Owner: *"go with option 1"*, after I stopped rather than edit a guard unilaterally (standing rule:
+*"dont ever ever ever weaken the refusal or any guard we have without pinging me"*).
+
+**The conflict.** AC-10 requires every quick-action sentence to come from ONE exported table, so the
+assistant panel cannot re-type the reword request. `H:keyword-drop-seeds-the-ask-box-and-sends-nothing`
+pinned that sentence to `AssetBlocks.jsx` by **shape and location** — satisfiable by code that
+duplicated the sentence into a second file, and blocking the extraction that prevents exactly that.
+
+**What changed, and it is STRICTER in both halves:**
+
+| was | now |
+|---|---|
+| `seedAskReword` matches one arrow-function shape | it must **delegate to `seedAsk`** AND **use `rewordAction`** AND never touch `api.` (three assertions, bounded to the declaration) |
+| the sentence appears in `AssetBlocks.jsx` | the sentence appears **exactly once in ALL of `app/src/`**, and in the pure module both surfaces can import |
+| one `api.aiEditArtifact` call site | unchanged |
+| the sentence survives verbatim | **unchanged — still pinned verbatim** |
+
+**Mutation-proved, four cases.** G1 (duplicate the sentence back into the JSX — **the case the old
+guard passed**), G2 (stop delegating to `seedAsk`), G3 (phrase its own sentence) and G4 (reword the
+shared sentence) each fail the suite. Nothing was loosened.
+
+**I mis-predicted G4 and am recording it rather than quietly moving on.** I expected rewording to
+PASS, on the theory that only uniqueness was pinned. It fails — because the wording is pinned too,
+which is what the replaced assertion did on purpose (*"the existing reword sentence must survive
+verbatim"*). The protection is intact and my description of it was wrong. The failure message now
+says so in words, so a deliberate reword reads as a one-line update here rather than a bare
+`found 0` — a guard that fails obscurely is on its way to being ignored.
+
+**Also fixed mid-flight:** my first replacement regex used `[^}]*`, which stopped at the brace inside
+`rewordAction({ phrase })` and failed on correct code. Bounded to the declaration instead. That is
+the second time today a first-draft guard could not see what it was written for.

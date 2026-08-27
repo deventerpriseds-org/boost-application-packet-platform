@@ -1,6 +1,8 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
+import { readFileSync, readdirSync } from 'node:fs'
+import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { keywordSwapOptions, keywordActions, keywordPresence, proposedKeywordsForRow, proposedKeywordDetail } from '../src/assetBlocks.js'
 import { correctionSentence } from '../src/assetGate.js'
 
@@ -215,12 +217,53 @@ test('H:keyword-drop-seeds-the-ask-box-and-sends-nothing: one edit path, one see
   // the reader presses Send, so the wording stays theirs to edit.
   const src = strip(JSX)
   assert.match(src, /const seedAsk = \(sentence\) => \{/, 'the shared seed primitive is gone')
-  assert.match(src, /const seedAskReword = \(phrase\) => seedAsk\(/,
-    'the reword control stopped delegating - that is a second seed mechanism')
-  assert.match(src, /Reword "\$\{phrase\}" so it does not repeat the posting's wording\./,
-    "the existing reword sentence must survive verbatim")
+
+  // ADAPTED 2026-08-27 WITH THE OWNER'S EXPLICIT APPROVAL, and deliberately STRICTER than what it
+  // replaced. The two assertions removed here pinned the reword sentence to a specific arrow-function
+  // SHAPE and to living inside this JSX file. Both were satisfiable by code that duplicated the
+  // sentence into a second file, and both BLOCKED the extraction AC-10 requires so the assistant
+  // panel can consume the same sentence instead of re-typing it. The invariant they were protecting
+  // - one seed mechanism, nothing sent, the sentence unchanged - is asserted below and now holds
+  // across the whole tree rather than in one file.
+  //
+  // Nothing was loosened to make a refactor pass. The old form would go green with the sentence
+  // written twice; this one fails.
+  // Bounded, not open-ended: the delegation must be INSIDE this declaration, not a `seedAsk(` that
+  // happens to appear further down the file. `[^}]*` was the first attempt and it was wrong - the
+  // body now contains `rewordAction({ phrase })`, so it stopped at that inner brace.
+  const rewordDecl = (src.match(/const seedAskReword = [\s\S]{0,200}/) || [''])[0]
+  assert.match(rewordDecl, /seedAsk\(/,
+    'the reword control stopped delegating to seedAsk - that is a second seed mechanism')
+  assert.match(rewordDecl, /rewordAction\(/,
+    'the reword control stopped using the shared sentence and is phrasing its own')
+  assert.ok(!/seedAskReword[^\n]*\bapi\./.test(src),
+    'the reword seeder reaches for the API; a seeder must only set text')
   assert.equal((src.match(/api\.aiEditArtifact\(/g) || []).length, 1,
     'a second edit path was added instead of reusing the field ask box')
+
+  // THE SENTENCE EXISTS EXACTLY ONCE IN app/src, wherever it lives. This is the half that replaces
+  // the location-pin, and it is the stronger claim: a request phrased in the owner's name must have
+  // one author, so that changing it changes it everywhere it is offered.
+  // PINS THE WORDING TOO, exactly as the assertion this replaced did ("the existing reword sentence
+  // must survive verbatim"). Rewording it deliberately is allowed and is a ONE-LINE change here —
+  // that is the guard being honest about itself rather than failing with a bare "found 0".
+  const SENTENCE = 'so it does not repeat the posting\'s wording.'
+  const hits = []
+  const walk = (dir) => {
+    for (const e of readdirSync(dir, { withFileTypes: true })) {
+      const full = join(dir, e.name)
+      if (e.isDirectory()) { walk(full); continue }
+      if (!/\.(js|jsx)$/.test(e.name)) continue
+      const body = strip(readFileSync(full, 'utf8'))
+      if (body.includes(SENTENCE)) hits.push(full)
+    }
+  }
+  walk(fileURLToPath(new URL('../src', import.meta.url)))
+  assert.equal(hits.length, 1, hits.length === 0
+    ? `the reword sentence is GONE from app/src. If you reworded it on purpose, update SENTENCE in this test to match; if not, it was deleted.`
+    : `the reword sentence must exist exactly once in app/src — a request phrased in the owner's name needs one author. Found ${hits.length}: ${hits.join(', ')}`)
+  assert.match(hits[0], /assetBlocks\.js$/,
+    'the shared sentence must live in the pure module both surfaces can import, not in a screen')
 
   const region = actionsRegion()
   assert.match(region, /seedAsk\(act\.ask\)/, 'the drop control does not seed the field ask box')

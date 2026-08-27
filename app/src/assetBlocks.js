@@ -673,6 +673,31 @@ export function restoreOptions({ swapsForList, canEdit } = {}) {
  * @param {{mergeField: string, observed: string|null, target: string|null, canEdit: boolean}} args
  * @returns {{ask: string|null}}
  */
+/**
+ * SPEC 4.11-5 / 4.7 — the reword request, as a sentence.
+ *
+ * EXTRACTED HERE, not written twice, and the extraction required an owner decision because the guard
+ * that protects this sentence pinned it to `AssetBlocks.jsx` by SHAPE AND LOCATION. It lived as a
+ * template literal inside that component, which was correct while the field margin was its only
+ * consumer. The assistant panel is a second consumer, and AC-10 is explicit that every quick-action
+ * sentence comes from ONE exported table so two surfaces cannot drift into asking for subtly
+ * different things in the owner's name.
+ *
+ * `H:keyword-drop-seeds-the-ask-box-and-sends-nothing` was adapted with the owner's approval rather
+ * than worked around: its two location-pins became STRICTER invariant checks — the sentence must
+ * appear exactly once in ALL of `app/src/` (the old form would have passed with it duplicated into a
+ * second file, which is the very thing this move exists to prevent), and `seedAskReword` must
+ * delegate to `seedAsk` and never touch `api.`. Nothing was loosened.
+ *
+ * Same shape as its siblings above (`keywordActions`, `shortenAction`, `restoreOptions`): a REQUEST
+ * the reader can edit before sending, never a decision and never a send.
+ */
+export function rewordAction({ phrase, canEdit = true } = {}) {
+  const p = typeof phrase === 'string' ? phrase.trim() : ''
+  if (!p || !canEdit) return { ask: null }
+  return { ask: `Reword "${p}" so it does not repeat the posting's wording.` }
+}
+
 export function shortenAction({ mergeField, observed, target, canEdit } = {}) {
   if (!mergeField || !canEdit) return { ask: null }
   if (!target) return { ask: null }

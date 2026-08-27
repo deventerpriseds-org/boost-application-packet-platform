@@ -35,7 +35,7 @@ import {
   targetFor,
   ASSET_ANSWERS_DEFAULT_OPEN, correctionsForField,
   keywordActions, keywordSwapOptions, keywordPresence,
-  omitListCaveat, restoreOptions, shortenAction,
+  omitListCaveat, restoreOptions, shortenAction, rewordAction,
   meterModel, originalState, PLACEHOLDER_NOTE, placeholderToken, proposedKeywordDetail,
   proposedKeywordsForRow, reqsForRow, scopeSwaps,
   shapeOf, sharedSourceNote, statPct, wordCount,
@@ -557,7 +557,10 @@ function AssetBlock({ row, reqs, swapsForList, wide, artifactId, listOwners, thr
     setAsk(sentence)
     setAskOpen(true)
   }
-  const seedAskReword = (phrase) => seedAsk(`Reword "${phrase}" so it does not repeat the posting's wording.`)
+  // The SENTENCE lives in `assetBlocks.js` (`rewordAction`), not here. The assistant panel is a
+  // second consumer of it and AC-10 forbids two copies of a request made in the owner's name;
+  // this stays the SEEDER, which is the part that must not grow a second edit path.
+  const seedAskReword = (phrase) => { const a = rewordAction({ phrase }); if (a.ask) seedAsk(a.ask) }
   const shape = shapeOf(row)
   const isStatic = shape === 'static'
   const expect = expectationFor(row.merge_field)
