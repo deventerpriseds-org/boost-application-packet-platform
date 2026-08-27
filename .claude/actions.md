@@ -4705,3 +4705,45 @@ is a run-by-hand check like `test:blocks` and `test:margin`.
 
 **STILL NOT CONFIRMED ON THE LIVE SITE.** A probe proves the component renders correctly; it does not
 prove the deployed app does. That needs `main` + `ui-verify.yml`, and `main` is the owner's call.
+
+
+### ACT — CI RED on PR #59, and it was a real defect I shipped (2026-08-27)
+
+`app — build + unit + browser` failed on `5dc919f` and `95f6350`. Not a flake, not infra: **the
+forward control referenced `onSeedAssistant` inside `AssetBlock`, a component that never received
+it.** In JSX that is a **ReferenceError at render**, so the ENTIRE asset card blanked —
+`run-field-margin.mjs` timed out waiting for `[data-qc="asset-blocks"]` to exist at all.
+
+**Why every guard I wrote missed it, which is the finding worth keeping.** A source grep sees the
+identifier and **cannot see the scope it resolves in**. `H:panel-*` all passed. My own browser probe
+passed 20/20 — because it mounts `AssistantPanel` and nothing else, so it can never see a crash in
+`AssetBlocks`. The only thing that caught it was an EXISTING probe for the file I had edited, and
+**I did not run it before pushing.** I ran the new probe and the Node suite; I did not re-run the
+harness that covers the component I changed.
+
+**Measured, not assumed** — with the binding removed: `test:margin` exits 1, `test:assistant` reports
+20/20, `npm test` reports 385/385.
+
+**The fix has two parts and only one stops the crash**, which a first mutation missed: the `= null`
+default binds the identifier (no crash), and threading it at the `<AssetBlock>` mount makes the
+control actually work. Removing only the mount leaves a silent dead feature. Both are now guarded by
+`H:forward-prop-is-threaded-not-just-referenced`, **mutation-proved against all three shapes** — no
+binding (the shipped defect), declared-but-not-handed-down, and the default export refusing it.
+
+**I also had to correct my own new probe's claim 0**, which I had written as "the host card still
+renders". It cannot see that — it mounts only the panel. Overclaiming what a guard covers is worse
+than not having it, so the comment now states the scope and names what DOES cover it.
+
+**FOURTH first-draft guard today that could not see what it was written for** (near-miss fixtures,
+`[^}]*`, the `api.` import-path false positive, and now claim 0). The pattern is consistent enough to
+be structural, not incidental: **a guard written immediately after the code tends to encode the shape
+of what I just wrote rather than the invariant, and only running it against a REVERTED behaviour
+separates the two.**
+
+**Git recovery note:** while diagnosing I ran `git stash` and popped a PRE-EXISTING stash belonging to
+another branch (`claude/qc-ledger-live`), pulling unrelated `api/` changes into the tree. Recovered
+with `git reset --hard HEAD` — everything of mine was already committed and pushed, and **the other
+branch's stash survives** (`git stash list` confirms it). Lesson: `git stash` is not a scratchpad in a
+repo with other people's stashes in it; use a throwaway worktree or read from `git show` instead.
+
+app 386/386, field-margin 59/59, assistant probe 20/20, build green.

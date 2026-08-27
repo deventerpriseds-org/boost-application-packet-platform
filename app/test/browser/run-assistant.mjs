@@ -59,6 +59,18 @@ await page.route('**/api/**', async (route) => {
 await page.goto(URL_BASE)
 await page.waitForSelector('[data-qc="assistant-open"]')
 
+// ---------- claim 0: THIS PANEL renders without throwing ----------
+// SCOPE, STATED HONESTLY, because the first version of this comment overclaimed. This probe mounts
+// AssistantPanel and NOTHING ELSE, so it can only see render errors in the panel itself. It did NOT
+// and could NOT catch the defect that actually shipped - the forward control in AssetBlocks
+// referencing a prop its component never received, a ReferenceError that blanked the whole asset
+// card. `run-field-margin.mjs` caught that (it mounts AssetBlocks), and the structural half is
+// pinned by `H:forward-prop-is-threaded-not-just-referenced` in the Node suite.
+//
+// Measured: with the binding removed, field-margin exits 1 while this file still reports 20/20.
+ok('0 the panel itself renders without throwing', !out.some((l) => l.startsWith('PAGEERROR')),
+  out.filter((l) => l.startsWith('PAGEERROR')).join(' | '))
+
 // ---------- claim 1: the collapsed affordance ----------
 const openLabel = (await page.locator('[data-qc="assistant-open"]').innerText()).trim()
 ok('1 collapsed affordance reads "Open assistant"', openLabel === 'Open assistant', openLabel)

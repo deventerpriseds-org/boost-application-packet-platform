@@ -145,3 +145,32 @@ test('H:forward-carries-the-artifact-with-the-sentence', () => {
   assert.ok(Object.values(ASSISTANT_HOOKS).every((v) => typeof v === 'string' && v.startsWith('assistant-')),
     'a hook is not namespaced; ui-verify selects on these and a collision is silent')
 })
+
+test('H:forward-prop-is-threaded-not-just-referenced: a prop used in a component it never receives', () => {
+  // THE DEFECT THIS EXISTS FOR SHIPPED, and every guard in this file stayed green while it did.
+  // `onSeedAssistant` was added to the DEFAULT EXPORT's signature and used inside `AssetBlock` - a
+  // different component, which never received it. In JSX that is a ReferenceError at render, so the
+  // entire asset card blanked. A source grep for the identifier finds it and cannot see the SCOPE it
+  // resolves in, which is why every Node assertion passed; `run-field-margin.mjs` caught it because
+  // it MOUNTS the card, and this file's own browser probe did not because it mounts only the panel.
+  //
+  // Structural rather than behavioural on purpose: the runtime proof lives in the probe, and what a
+  // grep CAN do reliably is confirm the identifier is bound everywhere it is used.
+  const BLOCKS = strip(src('../src/screens/AssetBlocks.jsx'))
+  const uses = BLOCKS.includes('onSeedAssistant(')
+  assert.ok(uses, 'the forward control is gone entirely')
+
+  // Every component that USES it must also DECLARE it. `AssetBlock` is the one that renders the
+  // control; the default export is the one that receives it from the screen.
+  const inner = (BLOCKS.match(/function AssetBlock\(\{[\s\S]*?\}\) \{/) || [''])[0]
+  assert.match(inner, /onSeedAssistant/,
+    'AssetBlock uses onSeedAssistant but does not declare it - a ReferenceError at render')
+  const outer = (BLOCKS.match(/export default function AssetBlocks\(\{[\s\S]*?\}\) \{/) || [''])[0]
+  assert.match(outer, /onSeedAssistant/, 'the default export no longer accepts the prop from the screen')
+
+  // ...and it must actually be HANDED DOWN, or the control silently never renders. Declaring it with
+  // a default of null makes the crash go away and the feature go away with it.
+  const mount = (BLOCKS.match(/<AssetBlock\b[\s\S]*?\/>/) || [''])[0]
+  assert.match(mount, /onSeedAssistant=\{onSeedAssistant\}/,
+    'AssetBlock is mounted without the prop - the forward control can never render')
+})

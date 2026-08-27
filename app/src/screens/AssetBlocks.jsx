@@ -508,7 +508,7 @@ function Marked({ text, phrases, active = null }) {
 
 function AssetBlock({ row, reqs, swapsForList, wide, artifactId, listOwners, thresholds, focused = false, focusRef,
   corrections = [], wording = [], wordingExpected = '', fieldSev = null, findings = [],
-  correctionBusy, setCorrectionBusy, onCorrectionsChanged }) {
+  correctionBusy, setCorrectionBusy, onCorrectionsChanged, onSeedAssistant = null }) {
   // Which `wording` entry the reader is pointing at, or null. Lifted to AssetBlock because the two
   // ends of the link — the draft text (via BlockBody) and the margin row — are both its children,
   // and this is the lowest node that owns both. The VALUE is an element of `wording` itself, never
@@ -1259,6 +1259,10 @@ export default function AssetBlocks({ artifact, provenance, fallback, defaultOpe
               wide={wide}
               artifactId={artifact.id}
               listOwners={listOwners}
+              /* Threaded EXPLICITLY. It was referenced in this component before it was passed to it,
+                 which is a ReferenceError at render, not a lint warning - the whole card vanished
+                 and only a rendering probe could see it. */
+              onSeedAssistant={onSeedAssistant}
               thresholds={thresholds}
               corrections={correctionsForField(correctionRows, r.merge_field)}
               wording={offendersForField(wording, r.merge_field)}
