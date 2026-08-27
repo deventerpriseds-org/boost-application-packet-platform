@@ -1,3 +1,42 @@
+# WHERE THINGS LIVE — read this BEFORE grepping code
+
+This index exists because narrative memory failed twice in one day. `actions.md` is ~4,000 lines and
+`memory.md` ~3,900; both are written well and RETRIEVED badly. When the question is *"where does X
+live / does X already exist"*, the answer was in there and I grepped code narrowly instead, twice:
+
+- I told the owner **"nothing edits your master profile."** FALSE. `owner_fact` + Settings > Facts
+  has done exactly that for a long time — the owner had added location and tested it. I had grepped
+  `MasterContext` only, concluded from one store, and never swept the others.
+- I briefed a subagent that **the §4.11 assistant decision was unmade.** FALSE. `DEFERRED.md` held
+  the owner's answer. The subagent trusted the ledger over my brief and did not re-ask.
+
+**The rule this earns: for any "where does X live / does X exist" question, read THIS TABLE FIRST,
+then `DEFERRED.md`, then grep — and sweep EVERY store, never one.**
+
+## The owner's data — five stores, and they are not interchangeable
+
+| What | Store | Written by | Owner-scoped? | Surface |
+|---|---|---|---|---|
+| **Discrete facts** — years, citizenship, clearance, **LOCATION** | `owner_fact` (Postgres) | `POST /app/qc/facts/set`, `/facts/derive` | **YES** `owner_email` | **Settings > Facts** (`FactsSettings`, `Settings.jsx:1473`) |
+| **Profile PROSE** — `skills1`, `skills2`, `expertise`, `relevantProficiencies`, `workHistory*` | **`MasterContext`** (Azure Storage TABLE) | the **Zapier pipeline** — **NO app route writes it**, swept | **NO — one global row**, `PartitionKey eq 'context'`, `entities[0]` | read-only; `GET /api/diag/skill-sources` |
+| **Settings / prefs** — metros, remote-only, `chk_*` thresholds, dimension sets, skill rewordings | `owner_search_prefs` (Postgres) | `/app/search-prefs`, `/app/dimension-prefs`, `/app/skill-rewords` | **YES** | Settings > Quality / Search |
+| **Skill bank** — 64 banked skills w/ category | `skill_bank_entry` (Postgres) | `POST /app/skill-bank` (seeder) | **YES** `unique(owner_email,label_norm)` | Settings > Skill wordings |
+| **Roles / personas** | `persona`, `folder_role_map` | `/app/role-profiles`, mail-watch | **YES** `unique(owner_email,key)` | Settings > Roles |
+
+**The distinction that caused the miss:** *"the master profile"* is TWO stores. `owner_fact` holds
+the confirmable FACTS and is per-owner and editable. `MasterContext` holds the PROSE, is a single
+GLOBAL row, and nothing in the app writes it. Saying "the profile is not editable" is wrong;
+saying "the prose is not editable" is right.
+
+## Consequences that follow from the table
+
+- **The cross-owner risk is MasterContext-only**, and it is about READS by the skill-bank seeder —
+  not about profile editing, which is properly scoped. Guard approved, deferred by the owner until
+  the packet UI is done.
+- **The assistant panel's `My profile` scope splits**: facts -> the existing per-owner route (safe,
+  already built); prose -> a MasterContext WRITE, which does not exist and must not be invented
+  without the owner guard, because one global row means one owner's edit overwrites everyone's.
+
 # Project Memory — boost-application-packet-platform
 Last updated: 2026-08-20
 
