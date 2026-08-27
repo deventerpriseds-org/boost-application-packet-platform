@@ -4815,3 +4815,39 @@ renamed, pattern emptied, verdict word changed. app 391/391.
 `#/packet/e2f9ebf2-...` (a real Crowell & Moring packet, id read from the live API, run
 `33100706481`), expecting `Open assistant`. The panel is proven in a local browser; that is not the
 same as proven on the owner's site, and only this closes the gap.
+
+
+### ACT — an alert for work that was WRITTEN but never TOOK EFFECT (2026-08-27)
+
+Owner: *"how do we start a training sheet that I am constantly alerted about things we wrote that
+isn't deployed. countless hours of work is just lost by not being deployed."*
+
+`scripts/undeployed.sh`. **On its first run it found three real instances, one of them seven weeks
+old:**
+
+| | Finding |
+|---|---|
+| `jd-import.yml` | last run **failure**, 23 Aug. Built to replace a 1,054-char digest with the real 8,619-char posting; the write failed, a repair was committed (`06abee7`), and **it was never re-run**. Production still holds 1,054 chars. |
+| `azure-db-harden.yml` | last run **failure, 10 July** — nobody has looked in seven weeks |
+| `azure-setup.yml` | **never run at all** |
+| `.claude/DEFERRED.md` | **10 rows** say BUILT but NOT VERIFIED LIVE |
+
+**WHY EXISTING GUARDS COULD NOT SEE THIS.** Every check we own answers *"is the CODE correct"* — the
+suites, the mutation proofs, the two ledgers' staleness checks. **None asks "did it ever REACH
+production."** A suite is perfectly green while a workflow written to fix production has never
+successfully run. Git proves a tool EXISTS; nothing proved it ever RAN.
+
+**Five distinct failure shapes, kept separate on purpose** — collapsing them into "not deployed"
+tells you nothing about what to do next: (A) committed not pushed, (B) pushed but not on `main`
+(and it says whether the diff touches `api/`/`app/`, since docs-only is not urgent), (C) on `main`
+but the deploy failed, (D) **a TOOL that never ran or whose last run failed** — the expensive class,
+invisible to git, CI and every test we own — and (E) a ledger row saying built-but-unverified.
+
+**Wired to `SessionStart`** so it is unmissable rather than something someone remembers to run. The
+hook is generic (run each repo's `scripts/undeployed.sh` if present); the script is per-repo. Placed
+in BOTH `settings.json` (immediate) and `eds-claude-skills/setup.sh` (durable — memory records that
+`settings.json` is wiped on container reclaim and `setup.sh` is the surviving path).
+
+**The principle it encodes, which is the answer to the owner's question:** *work that is not
+deployed is work that was not done.* A commit is not a deploy, a deploy is not an effect, and a
+workflow that exists is not a workflow that ran.
