@@ -4219,3 +4219,37 @@ exact defect the ledger row described*, and dropping the `usage &&` no-dead-UI c
 own acceptance sentence names. A derivation nothing passes down is a function with no caller, and no
 unit test can tell. `qcRail.test.mjs:1004` already had the right pattern (a structural source grep
 over the screen file); `H:jd-field-link-is-wired-not-just-derived` applies it to the JD step.
+
+
+### SHOW A VISUAL FOR ANY LAYOUT / VISUAL / DESIGN DECISION — owner-instructed 2026-08-27
+
+> *"I don't understand the difference between the choices of #2 so I will need a visual. commit to
+> memory to give me a visual where applicable for such decisions."*
+
+**When a decision is about something the owner would SEE, a prose description of it is not a
+decision aid — it is a request that they render it in their head from numbers.** I described the
+dock-vs-float choice as `1280` vs `1560` and `604-688px` vs `~850px`. Every number was correct and
+the owner still could not choose, which is the right response to that answer: arithmetic about
+widths is not a picture of two layouts.
+
+**THE RULE.** Any decision whose options differ VISUALLY — layout, spacing, breakpoints, where a
+panel lives, which of two designs, a before/after — is presented WITH A VISUAL, not only in prose.
+Do not ask the owner to choose between two things they cannot see.
+
+**Which visual, in order of preference:**
+1. **The real render**, when the thing exists — `scripts/render-spec.mjs` for prototype surfaces
+   (it wires `theme.css` and the `_ds/<id>/tokens/` import, which an improvised render does NOT —
+   that is how a colourless screenshot got produced once), and `ui-verify.yml` for the LIVE app,
+   which is the only way to see the deployed SPA from here.
+2. **A published Artifact** when the options do not exist yet and must be MOCKED side by side —
+   a decision the owner has to make about something unbuilt. Draw both options to scale, at real
+   viewport widths, with the real numbers on them.
+3. **A diagram** when the point is structure rather than appearance.
+
+**What makes it useful rather than decorative:** draw BOTH options, TO SCALE, at the widths that
+actually matter; put the real measured numbers on the drawing; and show the consequence, not just
+the geometry ("this block needs 850px and gets 604" is the decision — "the centre column is 604px"
+is trivia). Say plainly which parts are measured and which are mocked.
+
+**Applies beyond layout.** The generalisation is: when the owner has to choose and the difference is
+perceptual, produce the percept. Prose is for the reasoning; the visual is for the choice.
