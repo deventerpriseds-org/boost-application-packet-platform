@@ -157,10 +157,15 @@ export function splitSkillFieldTagged(text: string | null | undefined, twoLevel 
         const p = tidy(part)
         if (p) { out.push({ term: p, category: category || null }); any = true }
       }
-      // "Governance and Compliance:" with nothing after it yields NOTHING. Falling through here
-      // would push the CATEGORY NAME as a skill, which is the one thing this branch must not do -
-      // and the pre-change parser did exactly that for a trailing-colon group.
-      if (!any) continue
+      // "Governance and Compliance:" with nothing after it yields NOTHING - `any` stays false, no
+      // term is pushed, and this `continue` skips the single-level fallback below. Falling through
+      // would push the CATEGORY NAME as a skill, which is the one thing this branch must not do, and
+      // the pre-change parser did exactly that for a trailing-colon group.
+      //
+      // `any` is computed but not branched on, deliberately: it documents the empty case at the
+      // point it happens. An earlier draft wrote `if (!any) continue` immediately above this
+      // `continue`, which read as a guard and was dead code - a verifier flagged it.
+      void any
       continue
     }
 

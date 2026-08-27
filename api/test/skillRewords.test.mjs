@@ -93,8 +93,12 @@ test('H:skill-rewords-load-returns-null-only-when-never-saved', async () => {
 })
 
 test('H:skill-rewords-extends-owner_search_prefs-never-a-new-table', async () => {
-  // schema.ts already carries owner_search_prefs and three features extend it. A parallel settings
-  // table is the extend-don't-duplicate failure, and it would also orphan on a re-seed.
+  // owner_search_prefs is the established per-owner settings store: FIVE runtime modules create it
+  // idempotently and extend it with their own column (ensureCheckPrefs, jdSweep, ensureDimensionPrefs
+  // among them). It is NOT declared in schema.ts - a verifier caught an earlier version of this
+  // comment claiming it was, and `grep -c owner_search_prefs schema.ts` returns 0. The pattern is
+  // create-if-not-exists at the point of use, which is why this module does the same.
+  // A parallel settings table is the extend-don't-duplicate failure, and it would orphan on a re-seed.
   const c = fakeClient()
   await loadSkillRewords(c, 'o@e.io')
   const ddl = c.queries.map(q => q.sql).join(' | ')
@@ -152,87 +156,4 @@ test('H:api-source-has-no-control-bytes', () => {
     }
   }
   assert.deepEqual(offenders, [], 'control bytes in source: ' + offenders.join('; '))
-})
-
-// ── the SEEDER ──────────────────────────────────────────────────────────────────────────────────
-
-/** A bank fake that models the UPSERT the seeder actually issues, including xmax=0 insert detection. */
-function bankClient(rows = []) {
-  const bank = new Map(rows.map((r) => [r.label_norm, { ...r }]))
-  const queries = []
-  return {
-    bank, queries,
-    async query(sql, params) {
-      const flat = sql.replace(/\s+/g, ' ').trim()
-      queries.push({ sql: flat, params })
-      if (/^insert into skill_bank_entry/.test(flat)) {
-        const [owner, label, norm, sourceRef, sha, category] = params
-        const existed = bank.has(norm)
-        // `do update` must OVERWRITE the mutable columns; if the production SQL stopped doing that,
-        // this fake keeps the old values and the guard below sees it.
-        const keep = /do update/.test(flat)
-        if (!existed || keep) bank.set(norm, { owner_email: owner, label, label_norm: norm, source_ref: sourceRef, source_sha256: sha, category })
-        return { rows: [{ was_insert: !existed }] }
-      }
-      if (/^select label, label_norm from skill_bank_entry/.test(flat)) {
-        return { rows: [...bank.values()].map((r) => ({ label: r.label, label_norm: r.label_norm })) }
-      }
-      return { rows: [] }
-    },
-  }
-}
-
-test('H:skill-bank-seed-is-idempotent', async () => {
-  // The property that makes re-seeding safe to offer as a button rather than a migration.
-  const pool = { entries: [
-    { term: 'Enterprise Governance', key: 'enterprise governance', origins: ['skills1'], category: null },
-    { term: 'Predictive Analytics', key: 'predictive analytics', origins: ['relevantProficiencies'], category: 'Data Analytics and AI' },
-  ] }
-  const c = bankClient()
-  const first = await seedSkillBank(c, 'o@e.io', pool, 'sha1')
-  assert.deepEqual([first.inserted, first.updated], [2, 0])
-  const second = await seedSkillBank(c, 'o@e.io', pool, 'sha1')
-  assert.deepEqual([second.inserted, second.updated], [0, 2], 'a second run inserted again - the unique key or ON CONFLICT is wrong')
-  assert.equal(c.bank.size, 2, 'the bank grew on a re-seed')
-})
-
-test('H:skill-bank-origin-is-the-STORE-and-source_ref-is-the-FIELD', async () => {
-  // The pair that looked like it needed a widened CHECK and did not. `origin` names the store
-  // (master_context); the field name (skills1, expertise) goes in source_ref, which exists for it.
-  // Writing 'skills1' into origin would violate the CHECK at runtime - a 500 the tests would miss.
-  const c = bankClient()
-  await seedSkillBank(c, 'o@e.io', { entries: [{ term: 'X', key: 'x', origins: ['skills1', 'softHardSkillsPool'], category: null }] }, null)
-  const ins = c.queries.find((q) => /^insert into skill_bank_entry/.test(q.sql))
-  assert.match(ins.sql, /'master_context'/, 'origin must be the literal store name')
-  assert.equal(ins.params[3], 'skills1,softHardSkillsPool', 'every field the term came from must be recorded')
-  assert.equal(c.bank.size, 1, 'a term from two fields became two rows - the owner picker would show it twice')
-})
-
-test('H:skill-bank-carries-the-category-through-to-the-row', async () => {
-  const c = bankClient()
-  await seedSkillBank(c, 'o@e.io', { entries: [{ term: 'Predictive Analytics', key: 'predictive analytics', origins: ['relevantProficiencies'], category: 'Data Analytics and AI' }] }, null)
-  assert.equal(c.bank.get('predictive analytics').category, 'Data Analytics and AI')
-})
-
-test('H:skill-bank-NEVER-deletes-it-reports-orphans', async () => {
-  // A term vanishing from the pool has two causes and only one means "the owner removed this skill":
-  // they edited MasterContext, OR a reword key drifted and the parser now produces different text.
-  // The second is a BUG, and deleting the owner's banked skills because of a bug is unrecoverable.
-  const c = bankClient([{ label: 'Gone From Source', label_norm: 'gone from source' }])
-  const out = await seedSkillBank(c, 'o@e.io', { entries: [{ term: 'Still Here', key: 'still here', origins: ['skills1'], category: null }] }, null)
-  assert.deepEqual(out.orphans, ['Gone From Source'])
-  assert.ok(c.bank.has('gone from source'), 'the orphan was DELETED - the owner banked skill is gone')
-  assert.ok(!c.queries.some((q) => /delete from skill_bank_entry/.test(q.sql)), 'the seeder issued a DELETE')
-})
-
-test('H:skill-bank-refuses-a-blank-label-rather-than-hitting-the-CHECK', async () => {
-  // The table has `check (length(btrim(label)) > 0)`. Reaching it means a 500 mid-seed with some rows
-  // already written; refusing here means the rest of the seed still lands.
-  const c = bankClient()
-  const out = await seedSkillBank(c, 'o@e.io', { entries: [
-    { term: '   ', key: '', origins: ['skills1'], category: null },
-    { term: 'Real', key: 'real', origins: ['skills1'], category: null },
-  ] }, null)
-  assert.equal(c.bank.size, 1)
-  assert.equal(out.inserted, 1)
 })

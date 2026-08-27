@@ -1798,6 +1798,7 @@ function SkillWordingSettings() {
   const [rows, setRows] = useState([])
   const [note, setNote] = useState(null)
   const [saving, setSaving] = useState(false)
+  const [seeding, setSeeding] = useState(false)
 
   const load = useCallback(() => {
     api.skillRewordsGet().then((d) => {
@@ -1828,6 +1829,22 @@ function SkillWordingSettings() {
       setNote({ ok: true, msg: `Saved ${Object.keys(map).length} wording(s).${res.dropped?.length ? ` ${res.dropped.length} blank dropped.` : ''}` })
       load()
     } catch (e) { setNote({ ok: false, msg: String(e.message || e) }) } finally { setSaving(false) }
+  }
+
+  const seed = async () => {
+    if (!sessionValid()) { setNote({ ok: false, msg: 'Sign-in expired — sign out and back in, then seed.' }); return }
+    setSeeding(true); setNote(null)
+    try {
+      const r = await api.skillBankSeed()
+      if (!r || r.ok === false) throw new Error(r?.error || 'seed failed')
+      const s = r.seeded || {}
+      // Orphans are REPORTED because the seeder deliberately never deletes: a term vanishing from
+      // the pool can mean the owner edited their source OR that a reword key drifted, and only the
+      // first means "remove this skill".
+      const orphanNote = s.orphans?.length ? ` ${s.orphans.length} banked skill(s) no longer in your source were kept, not deleted.` : ''
+      setNote({ ok: true, msg: `Banked ${s.total} skill(s) — ${s.inserted} new, ${s.updated} updated.${orphanNote}` })
+      load()
+    } catch (e) { setNote({ ok: false, msg: String(e.message || e) }) } finally { setSeeding(false) }
   }
 
   return (
@@ -1865,6 +1882,16 @@ function SkillWordingSettings() {
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 16, flexWrap: 'wrap' }}>
         <button className="px-btn px-btn-accent" disabled={saving} onClick={save}>{saving ? 'Saving…' : 'Save'}</button>
         <button className="px-btn" onClick={() => setRows([...rows, { from: '', to: '' }])}>Add a wording</button>
+        {/* THE ONLY WAY TO FILL THE BANK, and without it the whole feature was unreachable: an
+            independent verifier found `api.skillBankSeed` had no caller anywhere in app/src, while
+            the keyword panel's empty-bank message told the reader to "Seed it in Settings > Skill
+            wordings" — this card, which had Save, Add and Remove and no seed button. The bank could
+            only be filled by an out-of-band POST, so the swap control could never appear in the
+            product. A message naming a control that does not exist is worse than no message. */}
+        <button className="px-btn" disabled={seeding} onClick={seed}
+          title="Write these skills into your bank, so the keyword panel can offer them as swaps">
+          {seeding ? 'Seeding…' : 'Seed my skill bank'}
+        </button>
         {note ? <span className="px-small" style={{ color: note.ok ? 'var(--text-ok)' : 'var(--text-bad)' }}>{note.msg}</span> : null}
       </div>
 
@@ -1873,8 +1900,31 @@ function SkillWordingSettings() {
           <div className="px-small" style={{ color: 'var(--proto-ink2)' }}>
             <b>{preview.entries} skills</b> in the bank from your stored fields
             {preview.rejected?.length ? `, ${preview.rejected.length} not usable as a term` : ''}
-            {preview.categories?.length ? ` · grouped into ${preview.categories.length} categories` : ''}
+            {preview.categories?.length ? ` \u00b7 grouped into ${preview.categories.length} categories` : ''}
           </div>
+          {/* WHAT WAS ACTUALLY REWRITTEN. This shipped write-only - returned by the route and read by
+              nothing - which is exactly the defect its own comment warns about: rewording is the one
+              place the parser departs from "only ever splits and normalises", so it is the one place
+              that must be auditable. A count is not enough; the reader has to see WHICH of their
+              words were changed and into what. */}
+          {preview.reworded?.length ? (
+            <details style={{ marginTop: 6 }}>
+              <summary className="px-small" style={{ cursor: 'pointer', color: 'var(--proto-ink2)' }}>
+                {preview.reworded.length} of your phrases were rewritten for the bank
+              </summary>
+              <div style={{ marginTop: 6, display: 'flex', flexDirection: 'column', gap: 2 }}>
+                {preview.reworded.map((r, i) => (
+                  <div key={i} className="px-small" style={{ color: 'var(--proto-ink2)' }}>
+                    <span style={{ opacity: 0.75 }}>{r.from}</span> {'\u2192'} <b>{r.to}</b>
+                  </div>
+                ))}
+              </div>
+            </details>
+          ) : (
+            <div className="px-small" style={{ marginTop: 4, color: 'var(--proto-ink2)' }}>
+              Every skill is banked exactly as you wrote it.
+            </div>
+          )}
         </div>
       ) : data.previewError ? (
         <div className="px-small" style={{ marginTop: 12, color: 'var(--text-bad)' }}>
