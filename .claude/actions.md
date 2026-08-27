@@ -4235,3 +4235,35 @@ LIVE system (no `api-test.yml` / `ui-verify.yml` round-trip), because the branch
 reconstructed MasterContext from the Zapier archive; four of five field char-counts match the
 recorded live values exactly, `relevantProficiencies` is 963 vs 958. And multi-owner separation is
 still open — `MasterContext` is a single GLOBAL partition, pre-existing and not introduced here.
+
+**DEFERRED at the owner's instruction — the MasterContext cross-owner guard.** Owner: *"actually
+yes, but do it after the packet ui is done across all tabs"*. Approved to build, sequenced AFTER the
+packet UI. The in-flight `CONFIG_KEYS` edit was REVERTED rather than left in place: a declared key
+with no reader is dead config, and dead config tells the owner they are in control when they are not
+— the exact defect `pipelineConfig.ts`'s own header says it exists to close.
+
+**The finding, so it is not re-derived:** `skillBankSeed` resolves the caller's owner
+(`appSkillBank.ts:246`) then calls `readSkillFields()` (`:254`), which takes NO owner argument and
+reads `PartitionKey eq 'context'` -> `entities[0]`. The bank's DESTINATION is correctly per-owner
+(`unique (owner_email, label_norm)`); the SOURCE is global. So a second signed-in account pressing
+"Seed my skill bank" copies the first owner's skills into their own bank, labelled as theirs —
+silent, not a crash.
+
+NOT introduced here: ten modules read MasterContext identically (`pipeline`, `appApply`, `appFacts`,
+`appInsertions`, `mt13/14/18/19`, `diagSkillSources`). What this work added is the BUTTON, moving the
+exposure from theoretical to one click.
+
+The agreed fix, cheapest first: (1) fail closed at the seeder via a `profile.masterContextOwner`
+config key, trust-on-first-use so nothing is hardcoded and it is editable in Settings > Pipeline;
+(2) record the source partition in `source_ref` so already-banked rows are attributable;
+(3) partition MasterContext by owner — the real fix, its own project, all ten readers moving
+together because a half-migrated table means some readers see the owner's row and some see whichever
+sorts first.
+
+**4.6-9 IS LIVE AND VERIFIED ON THE DEPLOYED SYSTEM.** `main` at `605c9d8`, api run 33031033530 and
+web run 33031033813 both success. `GET /api/app/skill-rewords` against
+`job-platform-api.azurewebsites.net` (run 33031165827, job 98383768158, HTTP 200) returned
+`entries: 64`, `rejected: []`, `staleRewords: []`, `bySource {skills1 11, skills2 9, expertise 8,
+relevantProficiencies 36}` and all five categories. All 12 seeded rewordings matched the owner's real
+text — none drifted — and `reworded` returns every one with from/to/origin, so the field that shipped
+read-by-nothing is now a real audit trail.
