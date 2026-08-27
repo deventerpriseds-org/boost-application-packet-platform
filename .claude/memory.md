@@ -4306,3 +4306,31 @@ tool calls.** The cheapest reliable form is to lead a short interstitial with th
 to — `Fact Finding:`, `Implementing:`, `Verifying:` — rather than opening with the finding itself.
 This is the same class as the guards below: repeated correction without a change in mechanism is not
 learning, and the mechanism here is "tag as you write each block", not "remember at the end".
+
+
+### Hardening — the phase-tag rule failed SEVEN times because I fixed the wrong thing
+
+`eds-phase-tag.py` requires a tag on **every** text block in a turn. It fired on 7 of 8 consecutive
+turns on 2026-08-27 (14/17 blocks, then 1/7, then 4/6). Each time I acknowledged it, and twice I
+wrote a memory note about it — and it kept happening. That is the signature of treating a
+mechanical failure as a discipline failure.
+
+**The actual defect, named precisely.** I tag the block that OPENS a reply and the block that CLOSES
+it. What I do not tag is the one-line preamble I write immediately before a tool call — *"The API is
+reachable, so…"*, *"The log tool keeps returning the tail, but…"*. In my head those are captions on
+the tool call, not prose. To the checker — correctly — they are text blocks like any other.
+
+**The fix is a WRITING RULE with a trigger, not an intention.** The trigger is: *I am about to emit
+text and then immediately call a tool.* At that moment the sentence gets a phase prefix. Every
+sentence I write to the user starts with one, without exception for length or position — a
+five-word aside takes a tag the same as a paragraph.
+
+**Why this is written as a rule about the TRIGGER rather than "remember to tag":** three prior
+attempts said "tag every block" and all three failed, because "every block" is a property I would
+have to check *after* writing, and I never do. A trigger fires *while* writing. This is the same
+distinction the guards below keep re-learning — `DEFERRED.md`'s staleness check works because it
+runs; a prose rule saying "keep the ledger current" did not.
+
+**Do not edit the hook.** It is correctly built and its own header documents a previous version that
+examined only the first block per message and reported PASS while 39 of 58 blocks were untagged. A
+guard that cannot observe the thing it guards is decoration; this one can, and it is right.
