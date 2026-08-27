@@ -4293,3 +4293,53 @@ recorded the owner's 2026-08-25 answer. The agent trusted `DEFERRED.md` over my 
 re-ask. **Guard: before briefing any subagent that a decision is unmade, grep `DEFERRED.md` and
 `actions.md` for it.** This is the same class as the three misses already in the feasibility rule —
 a claim about what exists, asserted without checking the ledger that records it.
+
+**§4.11 assistant panel — scope SETTLED as option (c), and the design-intent read that changed it.**
+Owner: *"c it is, but confirm if owner fact wasn't needed either"*, then the correction that produced
+the real finding: *"why aren't you reading the spec instructions packet not only looking at the
+render to determine intent?"*
+
+**`owner_fact` is NOT needed. Confirmed from three independent sources**, and the third only exists
+because the owner pushed me to read the spec rather than the render:
+
+| Source | Evidence |
+|---|---|
+| prototype `assist.jsx` | `scope` is `React.useState('This packet')` at :25 and **never read again** — not in `send()` (:31-38), not in the render, not passed. It colours a pill. |
+| **SPEC §5 data contracts** | lists `requirement`, `ats_term`, `section`, `swap`, `check`, `mirror`, `attention`, `verdict` — **no profile shape at all** |
+| lineage doc | *"the 13 hardcoded baseline values become a reusable profile **edited in Settings**"* — profile editing belongs in Settings, where `owner_fact` + Settings > Facts already is |
+
+So (c) needs no `owner_fact` write, no `MasterContext` write, no new route.
+
+**THE SENTENCE I MISSED, and it reframes the feature.** SPEC §4.11: *"Every field-level action in the
+UI seeds this panel."* I had the panel and the per-field List Tweaks boxes as PARALLEL entry points
+sharing a route. They are not — **the boxes are SEEDERS and the panel is the DESTINATION.** The
+prototype corroborates: `Assist` takes `seed`/`setSeed` and `useEffect` at :28 opens it pre-filled,
+which is the exact shape `seedAsk` already implements in `AssetBlocks.jsx`.
+
+**Consequence: 4.8-20 and 4.8-21 stop being blocked.** `Undo this` and `Ask why` looked unbuildable
+because they are seeders with no destination — and *"Undo a swap"* / *"Say why"* are two of the
+panel's five quick actions verbatim. They ship with the panel.
+
+**A PROTOTYPE FIXTURE IS NOT A REQUIREMENT.** The omission-list caveat is a HARDCODED STRING at
+`assist.jsx:19`; SPEC requires it to fire *"when a change will be reverted by the next run"*.
+Building from the prototype alone would have shipped decoration. Making it true means reading
+`itemsToOmit` — READ-only, so still no write and no guard dependency.
+
+**ROOT CAUSE, and it is the fourth "consult what already exists" miss today.** `IMPORT-NOTE.md`
+records a precedence chain — lineage doc > SPEC > prototype > screenshots — and I worked BOTTOM-UP
+from the prototype, then from a screenshot of the prototype. Two guards now in the memory index:
+the precedence table, and the render path (`scripts/render-spec.mjs`) with both of its traps —
+`--w 1340` is the default and is BELOW the 1440px dock threshold so the panel is absent at default
+width, and hand-rolling the render yields a COLOURLESS page because `theme.css` `@import`s tokens
+from a path the package does not ship them at. I bypassed that guard by not using the script and
+produced exactly the screenshot the owner had flagged once before.
+
+**Also done this stretch and pushed:** an `assistant` / `assistant-before` recipe added to
+`render-spec.mjs` so §4.11 is one command; verified `tokenValue rgb(248,249,250)`, `act.missing []`,
+`pageErrors []`.
+
+**OPEN:** the independent AC pass for the panel is RUNNING (`docs/qc-evidence/AC-assistant-panel.md`,
+written incrementally). Nothing is built yet. Known unknowns it must settle: whether `Keep`/`Revert`/
+`Re-run QC` have anything to call (there is correction-revert but I believe NO swap-revert route),
+and whether `aiEditArtifact` returns which fields it changed — 4.11-6 requires replies to list the
+exact merge fields touched, and if the route does not report them that row cannot be honest.
