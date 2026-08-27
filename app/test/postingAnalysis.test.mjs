@@ -14,8 +14,7 @@ import {
   kindSourceNote, noQuoteReason, isQuoted, modelKeywords, groupRequirements,
   summarizeKindSource, isEvidencedKindSource, keywordLibraryState, postingBody,
   KEYWORD_2UP_MIN, keywordColumns, keywordGridTemplate, POSTING_HOOKS,
-  KEYWORD_GROUPS, NOT_COMPARED_NOTE, keywordGroupMeaning,
-} from '../src/postingAnalysis.js'
+  KEYWORD_GROUPS, NOT_COMPARED_NOTE, keywordGroupMeaning, tabEvidenceTone, EVIDENCE_TONE } from '../src/postingAnalysis.js'
 
 // The fixture from the AC7 reproduction: one line the posting MARKED required, two the parser
 // DEFAULTED. A single "3" makes all three look marked.
@@ -923,4 +922,75 @@ test('H:tally-summary-is-wired-in-the-packet-screen: the block is not a componen
     'the scored artifact type is compared against a literal again instead of SCORED_TYPE')
   assert.equal((builder.match(/SCORED_TYPE/g) || []).length, 3,
     'SCORED_TYPE must be declared once and used exactly twice - the lookup and the model call')
+})
+
+// ── SPEC 4.1-6 — the tab count's tone ────────────────────────────────────────────────────────────
+
+test('H:tab-tone-never-claims-green-before-anything-is-resolved', () => {
+  // Absent evidence is not a pass. A tab whose rows carry no evidenceState has not been resolved,
+  // and returning green would tell the owner the posting is fully evidenced before the resolver has
+  // run. Null renders UNCOLOURED, which is the honest state.
+  assert.equal(tabEvidenceTone([]), null)
+  assert.equal(tabEvidenceTone([{ id: 1 }, { id: 2 }]), null)
+  assert.equal(tabEvidenceTone(null), null)
+  assert.equal(tabEvidenceTone(undefined), null)
+})
+
+test('H:tab-tone-never-paints-a-warn-state-red', () => {
+  // THE REASON THE PROTOTYPE'S RULE CANNOT BE PORTED. Its `n === d ? green : red` must paint the
+  // four unprovable-but-present states red, and a red count over a `misresolved` row tells the owner
+  // their CV does not support a claim it DOES support - a false statement about their own profile.
+  // EVIDENCE_TONE makes `none` the only red on purpose; this must agree with it, not override it.
+  for (const state of ['stale', 'misresolved', 'source_missing', 'unverified']) {
+    assert.equal(tabEvidenceTone([{ evidenceState: 'verified' }, { evidenceState: state }]), 'warn',
+      `${state} was painted ${tabEvidenceTone([{ evidenceState: state }])} - it is a pipeline warning, not a finding about the owner`)
+  }
+})
+
+test('H:tab-tone-is-worst-state-wins-and-red-is-terminal', () => {
+  assert.equal(tabEvidenceTone([{ evidenceState: 'verified' }, { evidenceState: 'verified' }]), 'green')
+  assert.equal(tabEvidenceTone([{ evidenceState: 'verified' }, { evidenceState: 'none' }]), 'red')
+  // One unevidenced requirement is the thing the reader most needs to see; no number of verified
+  // siblings may soften it, and a warn sibling must not outrank it either.
+  assert.equal(tabEvidenceTone([{ evidenceState: 'misresolved' }, { evidenceState: 'none' }]), 'red')
+  assert.equal(tabEvidenceTone([{ evidenceState: 'none' }, { evidenceState: 'verified' }]), 'red')
+  // BOTH ORDERS, and the second one is why. A mutation replacing `return 'red'` with an assignment
+  // passed this guard until this line existed: with red merely assigned, a LATER warn row overwrites
+  // it and the tab reports `warn` for a posting that has an unevidenced requirement in it. The first
+  // draft only tested warn-then-red, which that mutation gets right by accident.
+  assert.equal(tabEvidenceTone([{ evidenceState: 'none' }, { evidenceState: 'misresolved' }]), 'red',
+    'a warn row AFTER a red one downgraded the tab - red must be terminal regardless of order')
+  assert.equal(tabEvidenceTone([{ evidenceState: 'none' }, { evidenceState: 'unknown' }]), 'red')
+})
+
+test('H:tab-tone-downgrades-green-on-an-unknown-state-but-does-not-warn', () => {
+  // An unknown state is an ABSENCE of information, not a warning about the owner. It must stop the
+  // tab claiming green without accusing anything.
+  assert.equal(tabEvidenceTone([{ evidenceState: 'verified' }, { evidenceState: 'unknown' }]), 'panel')
+  // ...and it must not outrank a real warning or a real failure.
+  assert.equal(tabEvidenceTone([{ evidenceState: 'unknown' }, { evidenceState: 'misresolved' }]), 'warn')
+  assert.equal(tabEvidenceTone([{ evidenceState: 'unknown' }, { evidenceState: 'none' }]), 'red')
+})
+
+test('H:tab-tone-reads-EVIDENCE_TONE-and-never-a-second-map', () => {
+  // A tab and the rows inside it must never disagree about what colour the evidence is. Asserted by
+  // AGREEMENT with the row-level map rather than by restating the expected colours here - restating
+  // them is how the two drift.
+  for (const [state, expected] of Object.entries(EVIDENCE_TONE)) {
+    if (state === 'unknown') continue // handled by its own guard above
+    assert.equal(tabEvidenceTone([{ evidenceState: state }]), expected,
+      `the tab tone for ${state} disagrees with EVIDENCE_TONE`)
+  }
+})
+
+test('H:keywords-tab-is-never-toned', () => {
+  // A colour is a STRONGER claim than a count, and this file already records that attaching a count
+  // to model-suggested keywords "made a suggestion look like a measurement". Toning them would be a
+  // worse version of the same mistake. Deliberate divergence from the prototype, whose third tab is
+  // ATS keywords scored off a term library - not the same thing wearing the same label.
+  const src = readFileSync(new URL('../src/screens/PostingAnalysis.jsx', import.meta.url), 'utf8')
+  const kw = src.slice(src.indexOf("key: 'keywords'"), src.indexOf("key: 'keywords'") + 260)
+  assert.match(kw, /tone: null/, 'the keywords tab must pass tone: null explicitly')
+  assert.ok(!/tabEvidenceTone\(parsedKeywords\)/.test(src),
+    'the keywords tab is being toned - a suggestion must not be rendered as a measurement')
 })

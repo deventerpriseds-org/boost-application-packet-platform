@@ -25,8 +25,7 @@ import {
   COMPARE_COLUMNS, COMPARE_SCOPE_NOTE, comparisonStaleNote,
   keywordGroupMeaning,
   evidencePresentation,
-  TALLY_SCORE_DEFER,
-} from '../postingAnalysis.js'
+  TALLY_SCORE_DEFER, tabEvidenceTone } from '../postingAnalysis.js'
 import { HIGHLIGHT_CLASS } from '../highlight.js'
 // 4.3-11 is a RELOCATION, not a new component: GateBadge is the badge the packet screen, the
 // packets list and the drawer already render, and <ScoreParts> is the one score-bar renderer the
@@ -598,10 +597,18 @@ export function PostingAnalysisCard({ req, reqError, reloadReq, coveredKw, missi
   // The keywords tab is named for what it holds: words. Attaching a MODEL-GENERATED count to the
   // word "ATS" made a suggestion look like a measurement — model_keyword is explicitly "never
   // scoreable" in requirements.ts, so no ATS number can be derived from it at all.
+  // SPEC 4.1-6. `tone` is worst-state-wins over the SAME EVIDENCE_TONE map the rows use, so a tab and
+  // the rows inside it cannot disagree about what colour the evidence is. NULL renders uncoloured.
   const TABS = [
-    { key: 'responsibilities', label: 'Responsibilities', count: responsibilities.length, hint: `${responsibilities.length} lines extracted from the posting` },
-    { key: 'requirements', label: 'Requirements', count: requirements.length, hint: `${requirements.length} lines extracted from the posting` },
-    { key: 'keywords', label: 'Keywords', count: parsedKeywords.length, hint: `${parsedKeywords.length} model-suggested words, excluded from ATS scoring` },
+    { key: 'responsibilities', label: 'Responsibilities', count: responsibilities.length, tone: tabEvidenceTone(responsibilities), hint: `${responsibilities.length} lines extracted from the posting` },
+    { key: 'requirements', label: 'Requirements', count: requirements.length, tone: tabEvidenceTone(requirements), hint: `${requirements.length} lines extracted from the posting` },
+    // NO TONE ON THIS TAB, EVER, and it is a deliberate divergence from the prototype rather than an
+    // omission. These are MODEL-SUGGESTED words: `model_keyword` is explicitly never scoreable, and
+    // this file already records that attaching a count to them "made a suggestion look like a
+    // measurement". A colour is a stronger claim than a count, so it would be a worse version of the
+    // same mistake. The prototype's third tab is ATS keywords scored off a term library; ours is not
+    // the same thing wearing the same label.
+    { key: 'keywords', label: 'Keywords', count: parsedKeywords.length, tone: null, hint: `${parsedKeywords.length} model-suggested words, excluded from ATS scoring` },
   ]
 
   const responsibilitiesPane = (
@@ -705,7 +712,11 @@ export function PostingAnalysisCard({ req, reqError, reloadReq, coveredKw, missi
               <div key={t.key} role="tab" title={t.hint} aria-selected={tab === t.key}
                 data-qc={POSTING_HOOKS.tab} data-qc-tab={t.key} data-qc-active={tab === t.key ? '1' : '0'}
                 className={`px-tab ${tab === t.key ? 'px-tab-active' : 'px-tab-idle'}`} onClick={() => setTab(t.key)}>
-                {t.label} <span style={{ opacity: 0.75 }}>({t.count})</span>
+                {t.label}{' '}
+                <span data-qc-tone={t.tone || undefined}
+                  style={t.tone ? { color: toneColor(t.tone), fontWeight: 700 } : { opacity: 0.75 }}>
+                  ({t.count})
+                </span>
               </div>
             ))}
           </div>

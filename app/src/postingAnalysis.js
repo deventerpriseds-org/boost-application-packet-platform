@@ -357,6 +357,48 @@ export const EVIDENCE_TONE = {
  * non-null `evidence` object, and a quote is read from THAT object only - never from the row's
  * `evidence_*` columns, which are the pre-redaction shape.
  */
+/**
+ * The tone for a TAB COUNT - three states, never the prototype's two.
+ *
+ * SPEC 4.1-6 asks for the count coloured "green when complete, red when not". The prototype's rule
+ * is `t.n === t.d ? green : red` over `r.coverage === 'covered'`, and it CANNOT be ported here for
+ * three independent reasons, each proven from the writer rather than a comment:
+ *
+ * 1. `requirement.coverage` never says 'covered' in this app. `requirements.ts:410` writes
+ *    `coverage: loc.char_start === null ? 'escalated' : null` - two values, neither of them the
+ *    prototype's.
+ * 2. This app's per-row evidence state has SIX values and FOUR of them are `warn` ON PURPOSE.
+ *    A two-colour rule must paint `stale` / `misresolved` / `source_missing` / `unverified` RED, and
+ *    a red count over a `misresolved` row tells the owner their CV does not support a claim it
+ *    actually does support. That is a false statement about their profile, which is the one thing
+ *    a colour must never make.
+ * 3. Some tabs must never be coloured at all - see the `keywords` tab, which is model-suggested and
+ *    explicitly never scoreable.
+ *
+ * So: worst-state-wins over `EVIDENCE_TONE`, the SAME map the rows themselves use, so a tab and the
+ * rows inside it can never disagree about what colour the evidence is.
+ *
+ * NULL when nothing has been resolved yet, and null must render UNCOLOURED. Absent evidence is not
+ * a pass - returning 'green' for an unresolved tab would claim the posting is fully evidenced before
+ * the resolver has run, which is the absent-evidence-is-not-pass rule in a colour.
+ */
+export function tabEvidenceTone(rows) {
+  const list = (Array.isArray(rows) ? rows : []).filter((r) => r && r.evidenceState)
+  if (!list.length) return null
+  let worst = 'green'
+  for (const r of list) {
+    const t = EVIDENCE_TONE[r.evidenceState] || 'panel'
+    // `red` is terminal: one unevidenced requirement is the thing the reader most needs to see, and
+    // no number of verified siblings should soften it.
+    if (t === 'red') return 'red'
+    if (t === 'warn') worst = 'warn'
+    // An UNKNOWN state must not be reported as green. It is not a warning about the owner - it is an
+    // absence of information - so it downgrades a would-be green to neutral and nothing further.
+    else if (t === 'panel' && worst === 'green') worst = 'panel'
+  }
+  return worst
+}
+
 export function evidencePresentation(row) {
   const r = row || {}
   const known = Object.prototype.hasOwnProperty.call(EVIDENCE_TONE, r.evidenceState)
