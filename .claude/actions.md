@@ -4267,3 +4267,29 @@ web run 33031033813 both success. `GET /api/app/skill-rewords` against
 relevantProficiencies 36}` and all five categories. All 12 seeded rewordings matched the owner's real
 text — none drifted — and `reworded` returns every one with from/to/origin, so the field that shipped
 read-by-nothing is now a real audit trail.
+
+**§4.11 ANSWERED 2026-08-27 — deferred again, and explicitly NOT ratified.** Owner: *"hold off on
+the panel until all other UI pieces are done. I can build a packet without it."*
+
+The question was put concretely rather than as a spec row, which is what made it answerable: what
+the per-field **List Tweaks** boxes cannot do that the prototype's panel can — (1) packet-wide
+scope, so *"shorten everything to fit one page"* has nowhere to go; (2) a `My profile` scope, since
+no box edits the master profile; (3) Keep/Revert on a reply, where the boxes apply immediately and
+undo means finding it in the change log.
+
+**The eight rows STAY IN THE DENOMINATOR.** *"I can build a packet without it"* says the packet flow
+is unblocked, not that the panel is unwanted. Marking them DELIBERATE would lift headline coverage
+~4 points on a decision the owner has not made — the exact flattering the coverage doc's §12 warns
+against.
+
+**Consequence to carry:** 4.8-20 `Undo this` and 4.8-21 `Ask why` are blocked WITH it. Both are
+specced to seed the panel, so they are unbuildable rather than cheap, and `PROTOTYPE-COVERAGE.md`
+§14 calling 4.8-21 *"a one-liner"* is wrong — its target does not exist, and there is no swap-revert
+route at all (only correction-revert).
+
+**My own error, recorded because it nearly cost the owner a repeat question.** I briefed the AC pass
+that §4.11 was *"evidenced only by a code comment"*. False — `D:assistant-panel-owner-trialling` had
+recorded the owner's 2026-08-25 answer. The agent trusted `DEFERRED.md` over my brief and did not
+re-ask. **Guard: before briefing any subagent that a decision is unmade, grep `DEFERRED.md` and
+`actions.md` for it.** This is the same class as the three misses already in the feasibility rule —
+a claim about what exists, asserted without checking the ledger that records it.
