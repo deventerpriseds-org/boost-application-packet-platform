@@ -15,7 +15,8 @@
     "test:contrast": "node test/browser/run-contrast.mjs",
     "test:margin": "node test/browser/run-field-margin.mjs",
     "test:posting": "node test/browser/run-posting-analysis.mjs",
-    "test:tally": "node test/browser/run-keyword-tally.mjs"
+    "test:tally": "node test/browser/run-keyword-tally.mjs",
+    "test:assistant": "node test/browser/run-assistant.mjs"
   },
   "dependencies": {
     "@azure/msal-browser": "^3.30.0",

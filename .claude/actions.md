@@ -4666,3 +4666,42 @@ that HITS reads as "the defect REGRESSED", which is backwards once the thing was
 
 **NOT verified live.** Tests and a build are not a rendered browser. `ui-verify.yml` against
 `#/packet/<id>` asserting `Open assistant` is what would confirm it.
+
+
+### ACT — the panel is verified in a REAL BROWSER, not just by tests (2026-08-27)
+
+`npm run test:assistant` (`app/test/browser/run-assistant.mjs`) mounts the real `<AssistantPanel>` in
+Chromium over the same `ee-scrollpane` the shell uses. **19 checks, all passing.**
+
+**Why a browser and not more Node tests.** The Node suite proves the seed REDUCER and greps the
+source. Neither can see the two things most likely to be wrong about a panel: whether the effect
+actually CLEARS its slot (a reducer returning `seed: null` is useless if the effect never tells the
+parent) and whether activating a control SENDS anything. **The only way to prove a negative about the
+network is to record the network** — the probe routes `**/api/**` and asserts the call list is empty.
+
+Proven from the rendered DOM: the sentence arrives verbatim and editable; the slot clears and a spent
+seed does not re-fire over typed text; **zero API calls until Send**; no `Keep`, no `Revert`, limits
+stated instead; Send refused with no asset open and the scope line saying so; **and on a 390px phone,
+a 361px full-height sheet anchored to the edge with zero horizontal overflow.**
+
+**THE PROBE FOUND ITS OWN GAP, which is the part worth keeping.** Mutating `variant="drawer"` ->
+`"modal"` left all 17 original checks GREEN: a modal is `min(560px, 96vw)` = 374px, so it also
+"fits" a phone. **"Fits" was never the claim worth making** — on a phone the difference between a
+full-height sheet from the edge and a floating card is the whole experience. Claim 7 now measures the
+geometry (`height >= vh`, `right === vw`), and the same mutation fails with `height=328 vh=780`,
+`right=374 vw=390`.
+
+**Mutation results: B1** (slot never cleared) fails, **B2** (seeding sends) fails on two checks,
+**B3** (drawer -> modal) fails only after the strengthening above. Nothing vacuous.
+
+**One thing the probe caught that was NOT a defect:** my first version clicked an element behind the
+open drawer and deadlocked. That is the overlay intercepting pointer events **correctly** — the probe
+was wrong, not the panel. Recorded because "the test failed" and "the code is broken" are different
+findings and conflating them is how a working guard gets weakened.
+
+**Registered as `npm run test:assistant`.** Note the standing gap, unchanged by this: `test.yml` runs
+`test:browser` with `continue-on-error: true` and does not wire the per-screen probes at all, so this
+is a run-by-hand check like `test:blocks` and `test:margin`.
+
+**STILL NOT CONFIRMED ON THE LIVE SITE.** A probe proves the component renders correctly; it does not
+prove the deployed app does. That needs `main` + `ui-verify.yml`, and `main` is the owner's call.
