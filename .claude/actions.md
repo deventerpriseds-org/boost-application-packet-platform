@@ -4780,3 +4780,38 @@ today and was right both times. `PROTOTYPE-COVERAGE.md` has NONE, so it silently
 however much shipped since anyone last read it. **A backlog nobody re-reconciles reports finished
 work as outstanding**, which is an invitation to rebuild it. This is now the third instance
 (4.6-9 already built, 4.1-6 already refused, and today's nine).
+
+
+### ACT — PROTOTYPE-COVERAGE.md now has the staleness guard DEFERRED.md always had (2026-08-27)
+
+Owner: *"do both"*. `app/test/prototypeCoverage.test.mjs`, five assertions, all mutation-proved.
+
+**Why here and not more prose:** this document was found UNDERSTATING three times in one day — 4.6-9
+already built, 4.1-6 already refused, and nine rows re-verdicted for 151 -> 158 BUILT with zero new
+code. `DEFERRED.md`'s guard fired twice the same day and was right both times. The asymmetry was the
+whole argument.
+
+**SCOPE, chosen rather than "check everything": only ABSENT rows carry a machine check.** ABSENT is
+the heaviest claim in the document and the only one whose rotting CAUSES work — a stale "not built"
+is an instruction to rebuild something that already works. PARTIAL and BUILT rot toward
+under-claiming, which is cheap. Demanding a pattern for all 221 rows would be ceremony that gets
+deleted the first time it cries wolf.
+
+The three ABSENT rows (4.5-12 PickList, 4.8-21 `Ask why`, 4.11-4 scope selector) now carry
+`check: absent <path> <pattern>` — the same grammar the ledger uses, so there is one convention.
+
+| Guard | Catches |
+|---|---|
+| `H:coverage-every-row-parses` | a verdict cell this guard cannot read — the exact blindness that made my first recount say 129 when the truth was 151 |
+| `H:coverage-absent-rows-carry-a-check` | an ABSENT claim nobody can falsify |
+| `H:coverage-absent-check-is-real` | an empty pattern (`/(?:)/` matches everything) or a path that no longer exists — both stolen from the ledger guard, which learned them the hard way |
+| `H:coverage-stale-absent-fails` | **the one that earns the file**: the pattern now MATCHES, so it was built |
+| `H:coverage-absent-is-rare-enough` | ABSENT swelling past 12, i.e. rows added faster than anyone checks them |
+
+**Five mutations, all failing correctly:** feature built under an ABSENT row, clause removed, file
+renamed, pattern emptied, verdict word changed. app 391/391.
+
+**Live verification triggered** against the deployed app — `ui-verify.yml`, route
+`#/packet/e2f9ebf2-...` (a real Crowell & Moring packet, id read from the live API, run
+`33100706481`), expecting `Open assistant`. The panel is proven in a local browser; that is not the
+same as proven on the owner's site, and only this closes the gap.
