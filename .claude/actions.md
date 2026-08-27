@@ -4528,3 +4528,39 @@ literals. Those need `call2` threaded into `BuildSwapsInput` and a decision on m
 **Correction to my own earlier report:** I read `# pass 874` off streaming output and flagged a drop.
 The authoritative tally was 887/887 — 886 + 1 new test, reconciling exactly. Read the final summary,
 never a line caught mid-stream.
+
+
+### ACT — DECISION: the assistant panel FLOATS (owner, 2026-08-27)
+
+Owner, after the to-scale drawing: *"this was good I get it now... I am fine with floating for now.
+remember the other options in case I complain later."* Both rejected options are preserved verbatim
+in `D:assistant-panel-owner-trialling` so a later complaint costs a re-read, not a re-analysis:
+**(A)** widen the shell 1280 -> 1560 (docks properly, centre 968px, but re-flows every screen,
+partly reverses D4, only helps above ~1800px); **(B)** build neither.
+
+**The owner's follow-up question changed the reasoning, and I had not checked it:** *"this decision
+is desktop only correct? remember this is a mobile responsive solution as well."* My drawing showed
+1440 / 1524 / 1800 and no phone — which silently implied desktop was the whole question.
+
+Ground-truthed after being asked:
+- `PacketBuilder.jsx:1073` is a **separate `if (mobile)` branch** (`useIsMobile`, 768px). The 220px
+  step rail and the two-column layout **never render on a phone** — it gets a horizontal step
+  scroller. **No dock exists on mobile under ANY option.**
+- `shell.jsx:229` `Overlay` already ships `variant='drawer'`, clamps to the viewport, owns the
+  overlay stack and close-on-navigation. **A floating panel IS that component** — one thing serves
+  phone and desktop, where a dock would have needed a second, driftable mobile sheet. So
+  extend-don't-duplicate points the same way the arithmetic already did.
+
+Artifact updated with a phone section and a note owning the original omission:
+`fd0fd34b-4737-487a-bff3-72575df406a1`.
+
+**HARDENING — the visual rule written one message earlier needed this amendment immediately.** A
+to-scale drawing is only as honest as the RANGE it covers. Three desktop widths and no phone reads
+as "no issue there", which is the false-absence failure the ground-truth rule exists to stop, wearing
+a picture instead of a sentence. **Any responsive comparison must include the phone case, or say in
+the drawing that it does not.**
+
+**NEXT (unblocked, decided, ACs already written independently):** the float panel — `AC-assistant-panel.md`
+Group B (AC-3, AC-4) and Group D (AC-8, AC-9). Reuses `Overlay variant='drawer'`; boxes SEED it and
+REMAIN (ground rule R6); `Revert` and `Keep` must NOT render (no route; the edit is committed before
+the reply). Tier 2 - it decides nothing and moves no gate.

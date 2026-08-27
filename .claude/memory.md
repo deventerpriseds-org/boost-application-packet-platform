@@ -4253,3 +4253,31 @@ is trivia). Say plainly which parts are measured and which are mocked.
 
 **Applies beyond layout.** The generalisation is: when the owner has to choose and the difference is
 perceptual, produce the percept. Prose is for the reasoning; the visual is for the choice.
+
+
+### The assistant panel is FLOATING — decided 2026-08-27, with the rejected options kept on purpose
+
+Owner, after seeing the layouts drawn to scale: *"this was good I get it now... I am fine with
+floating for now. **remember the other options in case I complain later**."* That last clause is an
+instruction: the alternatives live in `D:assistant-panel-owner-trialling` verbatim so a later
+complaint does not cost the analysis a second time.
+
+**Rejected, and why:** **(A) widen the shell 1280 -> 1560** — docks exactly as the prototype does and
+the centre reaches 968px, but it re-flows EVERY screen, partly reverses D4, and only helps above
+~1800px. **(B) build neither** — the three field-level seeders already work in place.
+
+**MOBILE IS WHY FLOAT IS RIGHT, NOT MERELY ACCEPTABLE — and I had to be asked before I checked it.**
+The owner: *"this decision is desktop only correct? remember this is a mobile responsive solution as
+well."* My drawing showed 1440 / 1524 / 1800 and no phone at all. What the source says:
+- `PacketBuilder.jsx:1073` is a **separate `if (mobile)` branch** (`useIsMobile`, 768px,
+  `state.jsx:35`). The 220px step rail and the two-column layout **never render on a phone** — mobile
+  gets a horizontal step scroller. **So no dock exists on mobile under ANY option.**
+- `shell.jsx:229` `Overlay` already ships `variant='drawer'`, already clamps to the viewport, already
+  owns the overlay stack and close-on-navigation. **A floating panel IS that component**, so one
+  thing serves phone and desktop; a docked column would have needed a second, driftable mobile sheet.
+
+**The lesson for the visual rule written one message earlier:** a to-scale drawing is only as honest
+as the range it covers. Mine covered three DESKTOP widths and silently implied that was the whole
+space. **Any responsive layout comparison must include the phone case, or say in the drawing that it
+does not** — an omitted breakpoint reads as "no issue there", which is exactly the false-absence
+failure the ground-truth rule exists to stop, wearing a picture instead of a sentence.
