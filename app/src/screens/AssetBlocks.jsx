@@ -35,6 +35,7 @@ import {
   targetFor,
   ASSET_ANSWERS_DEFAULT_OPEN, correctionsForField,
   keywordActions, keywordSwapOptions, keywordPresence,
+  omitListCaveat, restoreOptions, shortenAction,
   meterModel, originalState, PLACEHOLDER_NOTE, placeholderToken, proposedKeywordDetail,
   proposedKeywordsForRow, reqsForRow, scopeSwaps,
   shapeOf, sharedSourceNote, statPct, wordCount,
@@ -571,6 +572,13 @@ function AssetBlock({ row, reqs, swapsForList, wide, artifactId, listOwners, thr
   const countNote = countMismatchNote(measured.recorded, measured.splitCount)
   const words = wordCount(row.after_text)
   const sharedNote = swapsForList.length && shape !== 'list' ? sharedSourceNote(row.list, artifactId, listOwners) : null
+  // SPEC 4.11-5 and 4.11-8, in place. All three read the SAME swap rows and the SAME thresholds the
+  // rest of this block already renders - nothing new is fetched and nothing is re-derived, so a
+  // control can never disagree with the measurement printed a few lines above it.
+  const canAsk = !isStatic && !!artifactId
+  const caveat = omitListCaveat(swapsForList)
+  const restores = restoreOptions({ swapsForList, canEdit: canAsk })
+  const shorten = shortenAction({ mergeField: row.merge_field, observed, target, canEdit: canAsk })
 
   // The reason this block reads the way it does. For a list field the swap rows carry the pipeline's
   // own rationale; for every other field the reason is the attribution (or the honest absence of one).
@@ -701,6 +709,32 @@ function AssetBlock({ row, reqs, swapsForList, wide, artifactId, listOwners, thr
             {askOpen ? 'Cancel' : 'List Tweaks'}
           </span>
         )}
+        {/* SPEC 4.11-5's two remaining quick actions. They are SEEDERS, not a second edit path:
+            each calls `seedAsk`, which types a sentence into the box above and opens it unsent, so
+            the wording stays the reader's to change and `api.aiEditArtifact` still has exactly one
+            call site on this screen (H:wording-ask-reuses-the-field-edit-path).
+            The prototype puts these in a docked panel. They are field-scoped requests, so they
+            belong beside the field - SPEC 2's ground rule R6 and 4.7 both require correction "in
+            place, scoped to the field they are looking at", and a panel is a destination those
+            sentences could later ALSO have, never a replacement for where they are made. */}
+        {shorten.ask && (
+          <span className="px-link" role="button" tabIndex={0}
+            data-qc={BLOCK_HOOKS.shorten} data-qc-field={row.merge_field}
+            style={{ fontSize: 11.5 }}
+            onClick={() => { setAskSent(null); seedAsk(shorten.ask) }}
+            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setAskSent(null); seedAsk(shorten.ask) } }}>
+            Shorten to fit
+          </span>
+        )}
+        {restores.map((r) => (
+          <span key={r.label} className="px-link" role="button" tabIndex={0}
+            data-qc={BLOCK_HOOKS.restore} data-qc-label={r.label}
+            style={{ fontSize: 11.5 }}
+            onClick={() => { setAskSent(null); seedAsk(r.ask) }}
+            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setAskSent(null); seedAsk(r.ask) } }}>
+            Put back {'\u201c'}{r.label}{'\u201d'}
+          </span>
+        ))}
       </div>
 
       {askOpen && (
@@ -1023,6 +1057,18 @@ function AssetBlock({ row, reqs, swapsForList, wide, artifactId, listOwners, thr
           <div className="px-small" style={{ textTransform: 'none', marginTop: 4 }}>
             recorded against the packet, not this asset alone
           </div>
+        </div>
+      )}
+
+      {/* SPEC 4.11-8 - the caveat, sitting under the reasons it qualifies. "Why it changed" already
+          prints the do-not-use rationale; what it does NOT say is that the rule runs again, so a
+          reader who puts the phrase back by hand has no way to know it will come out. That silence
+          is the gap. Conditional by construction: `omitListCaveat` returns null text unless a
+          rule-driven drop was actually recorded on THIS field, so it can never assert a revert that
+          is not coming. */}
+      {caveat.text && (
+        <div className="px-note" data-qc={BLOCK_HOOKS.omitCaveat} data-qc-field={row.merge_field} style={{ marginTop: 9 }}>
+          {caveat.text}
         </div>
       )}
 

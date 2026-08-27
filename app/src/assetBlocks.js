@@ -49,6 +49,12 @@ export const BLOCK_HOOKS = {
   // closed. A reader could not tell "sent and applied" from "the button did nothing", which is the
   // asymmetry this hook exists to close.
   askSent: 'blocks-ask-sent',
+  // SPEC 4.11-8. The caveat is DERIVED and conditional - absent when no rule-driven drop was
+  // recorded for this field - so its absence is assertable and it can never claim a revert that
+  // is not going to happen.
+  omitCaveat: 'blocks-omit-caveat',
+  restore: 'blocks-restore-original',    // SPEC 4.11-5 "Put back an original", one per real candidate
+  shorten: 'blocks-shorten-to-fit',      // SPEC 4.11-5 "Shorten to fit", carrying the field's real rule
   fieldSlot: 'blocks-field-slot',         // the raw merge field, kept beside the human name
   fieldPlaceholder: 'blocks-field-placeholder', // 4.5-40 - the {{token}} inline, where merged text lands
   fieldObserved: 'blocks-field-observed',  // the measurement, coloured by this field's worst finding
@@ -502,6 +508,117 @@ export function keywordSwapOptions({ keyword, present, canEdit, bank, inField } 
     candidates,
     // Names BOTH terms, so the request cannot be read as "drop it" with an unrelated addition.
     ask: (label) => `Swap "${k}" in this field for "${String(label).trim()}". Rewrite the line so it reads naturally with the replacement.`,
+    reason: null,
+  }
+}
+
+/**
+ * SPEC 4.11-8 — the caveat: "a change the next run will revert".
+ *
+ * WHAT THIS IS AND IS NOT. The prototype ships this as `m.note`, a hardcoded string on a fixture
+ * (`qc/assist.jsx:19`), so it reads as a sentence that is always true. SPEC's wording is
+ * conditional — a caveat *when* a change will be reverted — and SPEC outranks the prototype on
+ * intent (`docs/qc-evidence/IMPORT-NOTE.md`). Copying the fixture would ship a sentence that is
+ * false on most fields, so this DERIVES the caveat and returns null when there is nothing to say.
+ *
+ * THE ONLY DETERMINISTIC REVERTER IN THE PIPELINE is the owner's do-not-use list. `swaps.ts:231`
+ * runs `onOmitList(o, omitted)` on every pass and records the drop as `driver:'rule'` with a fixed
+ * rationale — so a phrase taken out by that rule is taken out again on the next loop, whatever the
+ * reader does to the field by hand. Every other drop is model-driven and NOT predictable, which is
+ * exactly why this matches on the rule rows alone.
+ *
+ * ACCUSATION-GRADE MATCHING, per the standing rule that fuzzy matching is for ranking and never for
+ * accusing: the rationale is compared EXACTLY against the string `swaps.ts` writes, not fuzzily and
+ * not by substring on a word like "omit". `H:omit-caveat-rationale-parity` pins the two literals
+ * together, because the api and the app hold separate copies of it.
+ *
+ * WHAT IT SAYS is what is KNOWN — the last run dropped this phrase, and the rule that dropped it is
+ * applied again every run — never a prediction about a run that has not happened. `from_label` is
+ * the owner's own list item and is already rendered a few lines up (`AssetBlocks.jsx:408`); the raw
+ * `itemsToOmit` string is never sent to the client (`evidence.ts:221`, `pipeline.ts:85`) and nothing
+ * here needs it.
+ *
+ * @param {Array<{action?: string, driver?: string, from_label?: string, rationale?: string}>} swapsForList
+ * @returns {{phrases: string[], text: string|null}}
+ */
+export const OMIT_LIST_RATIONALE = 'on the owner do-not-use list (MasterContext.itemsToOmit)'
+
+export function omitListCaveat(swapsForList) {
+  const rows = Array.isArray(swapsForList) ? swapsForList : []
+  const phrases = [...new Set(rows
+    .filter((s) => s && s.action === 'dropped' && s.driver === 'rule' && s.rationale === OMIT_LIST_RATIONALE)
+    .map((s) => String(s.from_label || '').trim())
+    .filter(Boolean))]
+  if (!phrases.length) return { phrases: [], text: null }
+  const one = phrases.length === 1
+  return {
+    phrases,
+    text: `The last run took ${joinLabels(phrases.map((p) => `"${p}"`))} out of this list because ${one ? 'it is' : 'they are'} on your do-not-use list. `
+      + `Putting ${one ? 'it' : 'them'} back by hand may not stick: that list is applied again on every run. `
+      + `Edit the list in Settings if ${one ? 'it belongs' : 'they belong'} here.`,
+  }
+}
+
+/**
+ * SPEC 4.11-5 — "Put back an original", as an IN-PLACE seeder rather than a panel chip.
+ *
+ * The prototype's quick action is a bare template, `'Put back an original phrase that was removed:'`
+ * with the reader left to type which one (`qc/assist.jsx:4-10`). The app can do better without
+ * inventing anything: the dropped rows are already on screen under "Taken out of this list", so the
+ * control can name the actual phrase and there is one control per real candidate.
+ *
+ * NO CANDIDATES, NO CONTROL — the standing no-dead-UI rule. A "Put back an original" on a field that
+ * dropped nothing would be a request the reader cannot mean.
+ *
+ * OMIT-LIST DROPS ARE EXCLUDED, and that is the whole reason this function is not a one-line filter
+ * on `action === 'dropped'`. Offering to restore a phrase the owner's own list removes would be
+ * offering a request the pipeline is guaranteed to undo on the next pass — dead UI in the most
+ * expensive sense, because it appears to work and then silently does not. `omitListCaveat` states
+ * that case instead.
+ *
+ * @param {{swapsForList: Array<object>, canEdit: boolean}} args
+ * @returns {Array<{label: string, ask: string}>}
+ */
+export function restoreOptions({ swapsForList, canEdit } = {}) {
+  if (!canEdit) return []
+  const rows = Array.isArray(swapsForList) ? swapsForList : []
+  const labels = [...new Set(rows
+    .filter((s) => s && s.action === 'dropped' && s.rationale !== OMIT_LIST_RATIONALE)
+    .map((s) => String(s.from_label || '').trim())
+    .filter(Boolean))]
+  return labels.map((label) => ({
+    label,
+    ask: `Put "${label}" back into this list. It was taken out and I want it carried into the final text.`,
+  }))
+}
+
+/**
+ * SPEC 4.11-5 — "Shorten to fit", as an in-place seeder.
+ *
+ * The prototype's sentence is `'Shorten this to fit its word rule: '` — a rule it does not name,
+ * because the fixture has no thresholds. The app HAS the rule and already renders it beside the
+ * field (`observedFor` / `targetFor`, e.g. "56 words - 55-60 words"), so the request carries the
+ * real numbers and the model is not left to guess which limit was meant.
+ *
+ * NO RULE, NO CONTROL. `targetFor` returns null for every field with no stated threshold, and a
+ * "shorten to fit" against no rule is a request with no target — a no-op dressed as a control.
+ * The reason is SAID rather than the control being silently absent, matching `keywordActions`.
+ *
+ * It does NOT gate on the field being over its limit. Whether it is over is decided by the check
+ * rows, and re-deriving that here would be a second opinion on the same question rendered inches
+ * from the first — the exact divergence the "one core source" rule exists to prevent. This is a
+ * REQUEST the reader chooses to send, not an accusation that the field is too long.
+ *
+ * @param {{mergeField: string, observed: string|null, target: string|null, canEdit: boolean}} args
+ * @returns {{ask: string|null, reason: string|null}}
+ */
+export function shortenAction({ mergeField, observed, target, canEdit } = {}) {
+  if (!mergeField || !canEdit) return { ask: null, reason: null }
+  if (!target) return { ask: null, reason: 'This field has no stated length rule, so there is nothing to shorten it to.' }
+  return {
+    ask: observed
+      ? `Shorten this field to fit its rule. It measures ${observed} against ${target}. Keep the meaning and drop the padding.`
+      : `Shorten this field to fit its rule: ${target}. Keep the meaning and drop the padding.`,
     reason: null,
   }
 }

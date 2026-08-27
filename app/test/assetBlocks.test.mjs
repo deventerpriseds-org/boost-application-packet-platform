@@ -18,6 +18,7 @@ import {
   latestRows, listBodyModel, listsOf, meterModel, normLabel, registerListOwners, reqsForRow,
   scopeSwaps, shapeOf, sharedSourceNote, splitItems, statPct, wordCount, observedFor,
   ORIGINAL_NONE_NOTE, originalState, PLACEHOLDER_NOTE, placeholderToken,
+  OMIT_LIST_RATIONALE, omitListCaveat, restoreOptions, shortenAction,
 } from '../src/assetBlocks.js'
 
 const src = (rel) => readFileSync(fileURLToPath(new URL(rel, import.meta.url)), 'utf8')
@@ -1071,4 +1072,110 @@ test('H:placeholder-claims-no-document-read: compact_resume cannot be silently m
   // Regression guard 2: the token is IN ADDITION TO the mono slot label, not a replacement for it.
   assert.ok(jsx.includes('BLOCK_HOOKS.fieldSlot'), 'the mono merge-field slot label was displaced by the token')
   assert.notEqual(BLOCK_HOOKS.fieldPlaceholder, BLOCK_HOOKS.fieldSlot)
+})
+
+// ── SPEC 4.11-8 caveat + 4.11-5's two remaining quick actions ────────────────────────────────────
+//
+// Built 2026-08-27 from `docs/qc-evidence/AC-assistant-panel.md` Group F (AC-16, AC-17) — the two
+// rows of §4.11 the AC pass found to be both wanted and unblocked. Neither needs the assistant
+// panel: they are field-scoped requests, and SPEC §2's ground rule R6 puts those beside the field.
+
+test('H:omit-caveat-only-fires-on-a-recorded-rule-drop: silence when nothing was dropped by the list', () => {
+  // The prototype ships this caveat as a HARDCODED string on a fixture (`qc/assist.jsx:19`), so it
+  // is true on every reply there. SPEC's wording is conditional — "a caveat WHEN a change will be
+  // reverted" — and copying the fixture would print a revert warning on fields nothing reverts.
+  // Absence must therefore be assertable, which is what `[data-qc="blocks-omit-caveat"]` gives
+  // ui-verify.yml.
+  assert.equal(omitListCaveat([]).text, null)
+  assert.equal(omitListCaveat(undefined).text, null)
+  // A drop the MODEL made is not predictable and must NOT produce the caveat.
+  assert.equal(omitListCaveat([{ action: 'dropped', driver: 'posting', from_label: 'Agile', rationale: 'not carried into the final list' }]).text, null)
+  // Right rationale, wrong action — a KEPT row names the phrase but nothing was reverted.
+  assert.equal(omitListCaveat([{ action: 'kept', driver: 'rule', from_label: 'Agile', rationale: OMIT_LIST_RATIONALE }]).text, null)
+})
+
+test('H:omit-caveat-matches-the-rationale-exactly-never-fuzzily: accusation-grade', () => {
+  // CLAUDE.md's standing rule: fuzzy matching is for RANKING, never for ACCUSING. This sentence
+  // tells the owner their own list will undo their edit — it names a cause, so a near-miss on the
+  // rationale must produce nothing rather than a plausible guess.
+  const near = OMIT_LIST_RATIONALE.replace('do-not-use', 'do not use')
+  assert.equal(omitListCaveat([{ action: 'dropped', driver: 'rule', from_label: 'Agile', rationale: near }]).text, null)
+  assert.equal(omitListCaveat([{ action: 'dropped', driver: 'rule', from_label: 'Agile', rationale: 'omit' }]).text, null)
+  const hit = omitListCaveat([{ action: 'dropped', driver: 'rule', from_label: 'Agile', rationale: OMIT_LIST_RATIONALE }])
+  assert.deepEqual(hit.phrases, ['Agile'])
+  assert.match(hit.text, /"Agile"/)
+  // It states what is KNOWN (the LAST run) and hedges the future, because the reader's own edit is
+  // what it is warning about — never "the next run will drop it".
+  assert.match(hit.text, /last run/)
+  assert.match(hit.text, /may not stick/)
+  assert.doesNotMatch(hit.text, /next run will/)
+})
+
+test('H:omit-caveat-never-ships-the-raw-omit-list: only labels already on screen', () => {
+  // `evidence.ts:221` NEVER_EVIDENCE and `pipeline.ts:85` both keep `itemsToOmit` off the wire.
+  // The caveat is built from `from_label`, which is the row already rendered under "Taken out of
+  // this list" — so this function cannot become the leak, whatever it is handed.
+  const out = omitListCaveat([{ action: 'dropped', driver: 'rule', from_label: 'Agile', rationale: OMIT_LIST_RATIONALE, itemsToOmit: 'SECRET-LIST' }])
+  assert.doesNotMatch(out.text, /SECRET-LIST/)
+})
+
+test('H:restore-never-offers-a-phrase-the-rule-will-remove-again: no self-undoing control', () => {
+  // The expensive kind of dead UI: a control that appears to work and is then silently undone on
+  // the next pass. An omit-list drop is exactly that, so it is excluded and the caveat speaks
+  // instead. Both halves are asserted together because they are one decision about one row.
+  const rows = [
+    { action: 'dropped', driver: 'posting', from_label: 'Vendor selection', rationale: 'not carried into the final list' },
+    { action: 'dropped', driver: 'rule', from_label: 'Agile', rationale: OMIT_LIST_RATIONALE },
+  ]
+  const opts = restoreOptions({ swapsForList: rows, canEdit: true })
+  assert.deepEqual(opts.map((o) => o.label), ['Vendor selection'])
+  assert.match(opts[0].ask, /"Vendor selection"/)
+  assert.equal(omitListCaveat(rows).phrases.length, 1)
+  // No candidates and no permission both mean NO CONTROL, not a disabled one.
+  assert.deepEqual(restoreOptions({ swapsForList: rows, canEdit: false }), [])
+  assert.deepEqual(restoreOptions({ swapsForList: [], canEdit: true }), [])
+})
+
+test('H:shorten-carries-the-real-rule-never-a-bare-template: and no rule means no control', () => {
+  // The prototype's sentence is `'Shorten this to fit its word rule: '` — a rule it cannot name,
+  // because the fixture has no thresholds. The app renders "56 words - 55-60 words" beside the
+  // field already, so the request carries those exact strings rather than leaving the model to
+  // guess which limit was meant.
+  const ok = shortenAction({ mergeField: 'ResumeSummary', observed: '70 words', target: '55–60 words', canEdit: true })
+  assert.match(ok.ask, /70 words/)
+  assert.match(ok.ask, /55–60 words/)
+  assert.equal(ok.reason, null)
+  // No stated rule -> no control, and the REASON is said rather than the control vanishing without
+  // explanation (the `keywordActions` precedent).
+  const none = shortenAction({ mergeField: 'ResumeSummary', observed: null, target: null, canEdit: true })
+  assert.equal(none.ask, null)
+  assert.match(none.reason, /no stated length rule/)
+  assert.equal(shortenAction({ mergeField: 'ResumeSummary', observed: '70 words', target: '55–60 words', canEdit: false }).ask, null)
+})
+
+test('H:omit-caveat-rationale-parity: one producer, and it is the rule branch', () => {
+  // The api and the app hold SEPARATE copies of this string and the match must be exact, so a
+  // reword on either side would silently switch the caveat off with every other test still green.
+  // This is the structural rule a runtime test cannot express: it reads the producer's source.
+  const swapsSrc = src('../../api/src/functions/tests/swaps.ts')
+  assert.ok(swapsSrc.includes(`rationale: '${OMIT_LIST_RATIONALE}'`),
+    `swaps.ts no longer writes the rationale the app matches on: ${OMIT_LIST_RATIONALE}`)
+
+  // WHY THE SECOND HALF EXISTS, recorded because it was found by mutation and not by reading.
+  // `omitListCaveat` filters on `driver === 'rule'` AND on the exact rationale. Deleting the driver
+  // half left the whole suite green (measured 2026-08-27: 372/372 with it removed), because today
+  // exactly ONE site writes that rationale and it is the rule branch — so the two conditions are
+  // behaviourally equivalent and no producible fixture can tell them apart. The driver check is
+  // therefore documentation, not protection, and claiming it "guarded" would be claiming a proof
+  // the mutation refused to give.
+  //
+  // What IS load-bearing is the assumption underneath it: that the rationale implies the driver. A
+  // second write site with a different driver would silently change what the caveat accuses without
+  // touching a line of app code. That assumption is what this pins.
+  const sites = swapsSrc.split(`rationale: '${OMIT_LIST_RATIONALE}'`).length - 1
+  assert.equal(sites, 1, 'a second producer of the omit rationale appeared; omitListCaveat assumes exactly one')
+  const before = swapsSrc.slice(0, swapsSrc.indexOf(`rationale: '${OMIT_LIST_RATIONALE}'`))
+  const objStart = before.lastIndexOf('swaps.push({')
+  assert.ok(objStart !== -1 && before.slice(objStart).includes("driver: 'rule'"),
+    'the omit-list rationale is no longer written on a driver:\'rule\' row — omitListCaveat filters on both')
 })

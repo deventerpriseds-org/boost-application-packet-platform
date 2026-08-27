@@ -4343,3 +4343,59 @@ written incrementally). Nothing is built yet. Known unknowns it must settle: whe
 `Re-run QC` have anything to call (there is correction-revert but I believe NO swap-revert route),
 and whether `aiEditArtifact` returns which fields it changed — 4.11-6 requires replies to list the
 exact merge fields touched, and if the route does not report them that row cannot be honest.
+
+### ACT — SPEC §4.11: the AC pass answered the owner's question, and two rows shipped without the panel (2026-08-27)
+
+**Owner's question:** *"I will take the panel now rather than later. does it make sense to have both?
+that's what I believe I want if they use the same functions"*
+
+**Answer: yes, and it is the SPEC's own answer — they are one primitive with two destinations.**
+`assist.jsx:28` (prototype) and `AssetBlocks.jsx:555` `seedAsk` (app) both do *set text → open → leave
+it unsent*. SPEC §2's ground rule **R6** and §4.7 both require correction *"in place, scoped to the
+field they are looking at"*, so the field boxes **seed** the panel and **remain**. Replacing them
+would break a ground rule to satisfy a screen description.
+
+**The independent AC pass** (`docs/qc-evidence/AC-assistant-panel.md`, 689 lines, spawned per the
+tier-1 process; it wrote incrementally to that file rather than holding its findings in context)
+then found the real blocker, and it is arithmetic rather than effort:
+
+| | Prototype | This app |
+|---|---|---|
+| shell content cap | `qc/shell.jsx:96` → **1560** | `app/src/shell.jsx:463` → **1280** |
+| docked assistant | `packet.jsx:541` → 340 open / 280 collapsed | — |
+
+The 280px difference is **exactly the right column decision D4 deleted**. Docking leaves the centre
+at 604–688px against asset blocks needing ~850px, and the cap binds above ~1524px, so **no viewport
+passes**. 4.11-1 is a shell decision, not a breakpoint one. Two stale comments
+(`PacketBuilder.jsx:1180`, `PostingAnalysis.jsx:8`) still cite the pre-D4 "~664px at 1440" figure —
+post-D4 the literal widths give 960px, and I nearly propagated 664 myself.
+
+**Also not buildable honestly, and these must not render:** `Revert` has no route for either meaning
+(`correctionRevert` needs a `correction` row with char offsets + `before_sha256`; `aiEditArtifact`
+creates none; `appSwaps.ts:132` is GET-only), and `Keep` is *worse* than vacuous — the route commits
+`pkg_json` before it replies, so a Keep control would imply a pending approval that does not exist.
+4.11-6 is unreachable: `section` is the caller's input echoed back and the handler writes one key,
+while the prototype's own example changes two fields.
+
+**SHIPPED in this turn — the two rows both wanted and unblocked, no panel, no decision needed:**
+- **4.11-8 the caveat** (`omitListCaveat`) — DERIVED and conditional. The prototype ships it as a
+  hardcoded fixture string (`assist.jsx:19`) that is true on every reply; SPEC's wording is
+  conditional, and SPEC outranks the prototype on intent, so copying the fixture would print a revert
+  warning on fields nothing reverts. Matches the recorded rationale **exactly** (accusation-grade),
+  says what is KNOWN (the last run) and hedges the future.
+- **4.11-5's two missing quick actions** as in-place seeders. `Put back "X"` names the real dropped
+  phrase and **excludes omit-list drops** — offering to restore a phrase the owner's own list removes
+  again is dead UI of the most expensive kind, one that appears to work. `Shorten to fit` carries the
+  field's real rule from `observedFor`/`targetFor` ("70 words / 55–60 words") instead of the
+  prototype's rule-less template. Three of the five already existed as scoped seeders.
+
+**Mutation results, including one that refused to prove:** M2 fuzzy-rationale, M3 restore-stops-
+excluding, M4 shorten-reverts-to-template, M5 literal-drift — each **failed the suite** as required.
+**M1 (deleting the `driver === 'rule'` filter) left all 372 green** — behaviourally equivalent,
+because exactly one site writes that rationale and it is the rule branch. Per CLAUDE.md that is
+stated, not papered over: the driver check is documentation, not protection. What IS load-bearing is
+the assumption underneath it, so `H:omit-caveat-rationale-parity` now pins **one producer, on a
+`driver:'rule'` row** — and M6 (flipping the producer's driver) fails correctly.
+
+**OPEN — one question for the owner:** float-only panel now, or raise the shell cap 1280→1560
+(blast radius: every screen) to get the dock the SPEC describes.

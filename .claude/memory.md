@@ -4120,3 +4120,56 @@ So the guards did not fail — I bypassed them. H10 would have caught the backti
 `scripts/track.sh` is the one piece of machinery added, because the tracker mistake happened twice
 and prose demonstrably did not stop it: it resolves the repo from its own location and FAILS if git
 says the file did not change.
+
+
+### Hardening — the shell cap, not the breakpoint, is what makes SPEC §4.11's dock unbuildable
+
+Measured 2026-08-27 by the independent AC pass, and it is arithmetic rather than opinion. The
+prototype's shell caps content at `maxWidth: 1560` (`qc/shell.jsx:96`); **this app's caps at 1280**
+(`app/src/shell.jsx:463`). The 280px difference is *exactly* the width of the right column decision
+**D4 deleted**. Docking `assist.jsx` (340 open / 280 collapsed) leaves the centre at **604–688px**
+against asset blocks that need **~850px**, and because the cap binds above ~1524px, **no viewport
+width passes** — raising the viewport cannot help. So 4.11-1 is a **shell** decision (blast radius:
+every screen), never a breakpoint one, and anyone reading it as "add a ≥1440 media query" has the
+wrong problem.
+
+**Two comments in this repo are STALE and must not be trusted for a width claim.**
+`PacketBuilder.jsx:1180` and `PostingAnalysis.jsx:8` both still say the centre is *"~664px at 1440"*.
+That describes the **pre-D4** layout; post-D4 the literal widths give **960px**. 664 is
+`1196 − 220 − 16 − 280 − 16` — the arithmetic of the column that no longer exists. **Any AC about
+width must assert a MEASURED width via `ui-verify.yml`, never a number read out of a comment.**
+
+**And the breakpoint mechanism already exists — do not add a second one.** `useViewportWidth()`
+(`PostingAnalysis.jsx:44`) + `keywordColumns` / `KEYWORD_2UP_MIN` (`postingAnalysis.js:618-633`) are
+the app's pattern: the number lives in a `node --test`-loadable module rather than a CSS media query,
+because `ui-verify.yml` *"can set a viewport width but can only SELECT, never read a computed
+style"*. `postingAnalysis.js:627` already names this very feature as its sibling rule. A media query
+here would be invisible to the only tool that can verify it.
+
+### Hardening — a mutation that leaves the suite green is a finding about MY guard, not a formality
+
+`omitListCaveat` filters on `driver === 'rule'` **and** on the exact rationale. Deleting the driver
+half left **372/372 green** (measured, 2026-08-27), because exactly one site writes that rationale
+and it is the rule branch — the two conditions are behaviourally equivalent and **no producible
+fixture can tell them apart**. CLAUDE.md's rule is explicit that this must be said rather than
+papered over: the driver check is documentation, not protection, and calling it "guarded" would
+claim a proof the mutation refused to give.
+
+**The fix was to guard the ASSUMPTION instead of the line.** What is actually load-bearing is that
+*the rationale implies the driver* — a second write site with a different driver would silently
+change what the caveat accuses without touching a line of app code.
+`H:omit-caveat-rationale-parity` now pins **exactly one producer, on a `driver:'rule'` row**, and
+M6 (flipping the producer's driver) fails correctly. Generalises: when a mutation will not fail,
+look one level up for the premise the redundant line is standing on, and guard *that*.
+
+### The design-intent precedence chain, and the failure that earned it
+
+Recorded because I read the RENDER and skipped the SPEC, and the owner caught it —
+*"why aren't you reading the spec instructions packet not only looking at the render to determine
+intent?"* Highest first (`docs/qc-evidence/IMPORT-NOTE.md`):
+**lineage doc → SPEC.md → prototype `qc/*.jsx` → `screens/*.png`.**
+The render is *never* a source of intent. Two things turned on this in one day: SPEC §4.11's
+*"Every field-level action in the UI seeds this panel"* is the sentence that answers "boxes or
+panel?" (**both** — one `seedAsk` primitive, two destinations), and the prototype's caveat is a
+**hardcoded fixture string** while SPEC's is **conditional** — copying the render would have shipped
+a revert warning on every field, most of which nothing reverts.
