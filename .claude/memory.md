@@ -3998,3 +3998,57 @@ running my own script.
 872 during the broken-build window - a partially-written `dist` meant whole test files failed to load,
 so their tests never registered and the count dropped with `fail 0`. **A falling test count with zero
 failures is a load error, not a fix.**
+
+
+## 2026-08-27 — 4.6-9 IS LIVE AND VERIFIED ON THE DEPLOYED SYSTEM
+
+`main` at `605c9d8`. api run **33031033530** and web run **33031033813** both SUCCESS, each waited on
+by SHA rather than "latest" (H15). Verified against `job-platform-api.azurewebsites.net` itself, not
+a local build: `GET /api/app/skill-rewords` — api-test run **33031165827**, job **98383768158**,
+HTTP 200 — returned `entries: 64`, `rejected: []`, `staleRewords: []`,
+`bySource {skills1 11, skills2 9, expertise 8, relevantProficiencies 36}`, all five categories.
+
+**What shipped:** the two-level `relevantProficiencies` split (all 36 of the owner's terms were being
+refused before, each group arriving as one 15-27 word string), the `category` column on
+`skill_bank_entry`, the `app/skill-rewords` config route, the Settings > Skill wordings screen with
+its seed button, and the seeder. 34 of the 36 terms are verbatim; only two are reworded.
+
+**Owner decisions taken and honoured:** rewordings live in the CONFIG STORE (*"config store so i can
+edit them"*), and `skill_bank_entry` was EXTENDED with a category column rather than a second table
+(*"yes extend skill_bank_entry"*).
+
+**DEFERRED by the owner** (*"actually yes, but do it after the packet ui is done across all tabs"*):
+the MasterContext cross-owner guard. Approved, sequenced after the packet UI, fully written up in
+actions.md. The in-flight `CONFIG_KEYS` edit was REVERTED rather than left declared-with-no-reader.
+
+**IN FLIGHT, nothing claimed done:** the packet UI across all seven tabs — 6 ABSENT and 23 PARTIAL
+rows. An independent AC pass is running and must publish a feasibility table first. §4.11 (the
+assistant, 6 of the ABSENT rows) is an OWNER DECISION and no build-ACs are being written for it.
+
+## Hardening — 2026-08-27: I routed around the guards instead of reading them
+
+The owner named the real pattern: *"the guards didn't help speed if you just trip over everyone
+anyway. you have to actually use their insights to attempt to avoid them."* Every mistake in this
+stretch came from a BESPOKE script written to verify something, run in the BACKGROUND, in PARALLEL —
+while the cheap standard check that already encodes the lesson sat unused.
+
+| Mistake | What I ran | What already existed |
+|---|---|---|
+| Backticks broke `SCHEMA_SQL` | hand-rolled schema runner, build output suppressed | `npm test` — **H10 is exactly this check** |
+| Tracker written to the wrong file, TWICE | `cat >> .claude/actions.md` with a drifted cwd | `git status` after the write |
+| A mutation left applied, TWICE | background sweeps; the second time TWO collided on one file | not backgrounding them |
+| Three inert seeder guards | a fake client that modelled the ANSWER | a real Postgres, which this container ships |
+| "Externally blocked", twice | reasoning from two stuck runs | retrying the failing call once |
+
+So the guards did not fail — I bypassed them. H10 would have caught the backticks in 40 seconds.
+
+**Three changes, in force:**
+1. **`npm test` before ANY bespoke verification.** It already contains every lesson this repo learned.
+2. **No background sweeps.** Foreground, sequential, one at a time. Two of these errors are only
+   possible because I parallelised — collision, and a silent kill that left a mutation on disk.
+3. **Read the guard BEFORE writing the code it guards.** H10's text says not to put backticks in
+   `SCHEMA_SQL`. I wrote the comment first and met the guard afterwards.
+
+`scripts/track.sh` is the one piece of machinery added, because the tracker mistake happened twice
+and prose demonstrably did not stop it: it resolves the repo from its own location and FAILS if git
+says the file did not change.
