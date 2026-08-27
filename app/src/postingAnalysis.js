@@ -24,6 +24,7 @@
  * P8.7 hand-typed a 29th (`keyword-columns`) rather than closing it.
  */
 export const POSTING_HOOKS = {
+  usedIn: 'posting-used-in',   // SPEC 4.1-20 - the JD row's link into the field a swap landed in
   card: 'posting-analysis',
   stale: 'posting-stale',
   tab: 'jd-tab',

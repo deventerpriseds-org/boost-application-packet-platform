@@ -17,7 +17,7 @@ import {
   coverageCards, requirementState, openSeqs, offenderSeq, qcStepState, qcStepDone, packetGate,
   loopsModel, rowsForRequirement, swapsForRequirement, pctWidth, packetReadiness,
   offendersByField, offendersForField, fieldSeverities,
-  railDecisions, DECISION_NOTE, packetFailList, qcSummaryModel, NO_ASSETS_REASON, firstFixTarget } from '../src/qcRail.js'
+  railDecisions, DECISION_NOTE, packetFailList, qcSummaryModel, NO_ASSETS_REASON, firstFixTarget, listOwnersFromArtifacts, requirementUsage } from '../src/qcRail.js'
 import { scoreParts } from '../src/assetGate.js'
 import { TALLY_SCORE_DEFER } from '../src/postingAnalysis.js'
 
@@ -1589,4 +1589,61 @@ test('H:qc-summary-rows-carry-their-own-fix-target', () => {
   assert.ok(byId.r1.fixTarget.mergeField)
   // the unchecked asset gets null, so the component renders no click for it
   assert.equal(byId.c1.fixTarget, null, 'an unchecked row carried a navigation target')
+})
+
+// ── SPEC 4.1-20 — `Where it is used →` on the JD step ────────────────────────────────────────────
+
+test('H:list-owners-derived-from-artifacts-not-render-registration', () => {
+  // THE WHOLE REASON 4.1-20 NEVER SHIPPED. The app's existing `listOwners` is built by asset cards
+  // REGISTERING as they render, so on the JD step - the step this link lives on - it is {} and the
+  // link would be absent exactly where SPEC asks for it. Deriving from the packet's own artifacts
+  // makes the map available before any card has mounted.
+  const entries = [
+    { artifactId: 'r1', type: 'resume', label: 'Resume', insertions: { insertions: [{ list: 'A' }, { list: 'B' }] } },
+    { artifactId: 'c1', type: 'cover', label: 'Cover letter', insertions: { insertions: [{ list: 'B' }] } },
+  ]
+  const owners = listOwnersFromArtifacts(entries)
+  assert.deepEqual(Object.keys(owners).sort(), ['A', 'B'])
+  assert.deepEqual(owners.A.map((o) => o.id), ['r1'])
+  // One list rendered by two assets keeps BOTH, in packet order - the resume and the compact resume
+  // render identical templates, and collapsing them would lose the sibling the change is shared with.
+  assert.deepEqual(owners.B.map((o) => o.id), ['r1', 'c1'])
+})
+
+test('H:list-owners-is-empty-not-partial-when-insertions-are-absent', () => {
+  // Insertions load asynchronously. A PARTIAL map is worse than none: it renders the link for the
+  // artifacts that happened to load and silently hides it for the rest, so the reader concludes the
+  // requirement was never used. Empty means the caller renders no links at all.
+  assert.deepEqual(listOwnersFromArtifacts([{ artifactId: 'r1', type: 'resume' }]), {})
+  assert.deepEqual(listOwnersFromArtifacts([{ artifactId: 'r1', insertions: { insertions: [] } }]), {})
+  assert.deepEqual(listOwnersFromArtifacts([]), {})
+  assert.deepEqual(listOwnersFromArtifacts(null), {})
+})
+
+test('H:requirement-usage-is-null-unless-a-swap-actually-names-it', () => {
+  // The ledger row for this feature is explicit: render the link "ONLY where a swap actually names
+  // the requirement (no dead UI)". Every not-found path must be null, not a best guess.
+  const owners = { A: [{ id: 'r1', label: 'Resume' }] }
+  const swaps = { swaps: [{ requirement_id: 'q1', list: 'A', merge_field: '@Bullets' }] }
+  assert.deepEqual(requirementUsage(swaps, 'q1', owners),
+    { artifactId: 'r1', list: 'A', label: 'Resume', mergeField: '@Bullets' })
+  // no swap for this requirement
+  assert.equal(requirementUsage(swaps, 'q2', owners), null)
+  // a swap whose list NO artifact renders - the map cannot place it, so there is nowhere to go
+  assert.equal(requirementUsage({ swaps: [{ requirement_id: 'q1', list: 'Ghost' }] }, 'q1', owners), null)
+  // insertions not loaded yet
+  assert.equal(requirementUsage(swaps, 'q1', {}), null)
+  assert.equal(requirementUsage(swaps, 'q1', null), null)
+  // no swaps at all
+  assert.equal(requirementUsage(null, 'q1', owners), null)
+})
+
+test('H:requirement-usage-falls-back-to-the-list-when-no-merge-field', () => {
+  // A swap row may carry no merge_field. The list name is the honest fallback - it is what
+  // insertion.list ties back to the field - and returning a target with a null section would hand
+  // the navigator nothing to focus.
+  const owners = { A: [{ id: 'r1', label: 'Resume' }] }
+  const u = requirementUsage({ swaps: [{ requirement_id: 'q1', list: 'A' }] }, 'q1', owners)
+  assert.equal(u.mergeField, 'A')
+  assert.ok(u.mergeField, 'the target must always carry something the navigator can focus')
 })

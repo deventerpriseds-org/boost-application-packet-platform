@@ -681,6 +681,61 @@ export const DECISION_NOTE = {
 }
 
 /** The swap decisions that cite a given requirement id. */
+/**
+ * `list -> artifact`, derived from the PACKET'S OWN ARTIFACTS rather than from render-time
+ * registration.
+ *
+ * SPEC 4.1-20 (`Where it is used ->`) is the one row of the JD evidence cluster that did not ship,
+ * and the reason was never a missing feature. Every piece existed: `goToField`, `swapsForRequirement`
+ * and the swaps themselves. What was missing is this hop - a swap row is keyed by LIST, not by
+ * artifact, so turning one into a navigation needs to know which artifact renders that list.
+ *
+ * The app already had such a map (`listOwners`, PacketBuilder) and it could not be used here: it is
+ * populated by asset cards REGISTERING as they render, so on the JD step - where the reader is - it
+ * is `{}`, and the link would be absent exactly where SPEC asks for it. Deriving it from the packet's
+ * own artifacts makes it available on every step, including before any asset card has mounted.
+ *
+ * Returns `{}` rather than a partial map when insertions have not loaded, so the caller renders no
+ * link at all instead of a link that resolves to nothing.
+ */
+export function listOwnersFromArtifacts(entries) {
+  const out = {}
+  for (const e of arr(entries)) {
+    const artifactId = e && (e.artifactId || (e.artifact && e.artifact.id))
+    if (!artifactId) continue
+    for (const row of arr(e.insertions && e.insertions.insertions)) {
+      const list = row && row.list
+      if (!list) continue
+      if (!out[list]) out[list] = []
+      if (!out[list].some((o) => o.id === artifactId)) {
+        out[list].push({ id: artifactId, label: e.label || assetLabel(e.type || (e.artifact && e.artifact.type)) })
+      }
+    }
+  }
+  return out
+}
+
+/**
+ * Where a requirement is USED: the artifact and merge field a swap for it landed in, or null.
+ *
+ * NULL IS THE CONTRACT. A requirement with no swap, a swap whose list no artifact renders, or
+ * insertions that have not loaded all return null, and the caller must render NO LINK - the ledger
+ * row for this feature says the link appears "ONLY where a swap actually names the requirement (no
+ * dead UI)".
+ */
+export function requirementUsage(swaps, requirementId, owners) {
+  const rows = swapsForRequirement(swaps, requirementId)
+  const map = owners || {}
+  for (const s of arr(rows)) {
+    const list = s && s.list
+    if (!list) continue
+    const holder = arr(map[list])[0]
+    if (!holder || !holder.id) continue
+    return { artifactId: holder.id, list, label: holder.label || null, mergeField: s.merge_field || list }
+  }
+  return null
+}
+
 export function swapsForRequirement(swaps, requirementId) {
   const rows = arr(swaps && swaps.swaps)
   return requirementId ? rows.filter((s) => s && s.requirement_id === requirementId) : rows

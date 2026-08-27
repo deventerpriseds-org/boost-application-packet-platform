@@ -13,7 +13,7 @@ import { postingBody } from '../postingAnalysis.js'
 import { PACKET_HOOKS, ASSET_BODY_DEFAULT_OPEN, regenerateWithNote } from '../packetBuilder.js'
 import QcRail, { useQcEntries } from './QcRail.jsx'
 import { GateBadge } from './AssetGateDrawer.jsx'
-import { qcStepState, packetGate, railGateMeta, packetReadiness, packetFailList, qcSummaryModel, firstFixTarget } from '../qcRail.js'
+import { qcStepState, packetGate, railGateMeta, packetReadiness, packetFailList, qcSummaryModel, firstFixTarget, listOwnersFromArtifacts, requirementUsage } from '../qcRail.js'
 
 const TYPE_LABEL = {
   resume: 'Resume', compact_resume: 'Compact resume', cover: 'Cover letter',
@@ -441,7 +441,11 @@ export default function PacketBuilder({ id, step }) {
   // this one map. `null` still means no run has been read yet - a state of its own, not zero.
   const artifactList = pState.packet ? pState.packet.artifacts : null
   const { entries: qcEntries, setResult: setQcResult } = useQcEntries(artifactList, {
-    withInsertions: activeStep === 'qc',
+    // SPEC 4.1-20 needs insertions on the JD STEP as well: `list -> artifact` is derived from them,
+    // and the whole reason that row never shipped is that the old map was built by asset cards
+    // registering as they RENDER, so on this step it was empty - the link would have been absent
+    // exactly where SPEC asks for it.
+    withInsertions: activeStep === 'qc' || activeStep === 'jd',
     // D:remediation-never-ran — fetched on the same terms as insertions, so the Remediation loops
     // tab reads the real ledger instead of falling back to insertion.loop and reporting that as
     // "nothing has been remediated".
@@ -854,7 +858,10 @@ export default function PacketBuilder({ id, step }) {
             }}
             /* 4.2-13: the SAME prop and the SAME call as the extraction card below. One step API,
                two surfaces - not a second navigation path. */
-            onOpenQc={() => setActiveStep('qc')} />
+            onOpenQc={() => setActiveStep('qc')}
+            swaps={provenance.swaps}
+            listOwners={listOwnersFromArtifacts(qcEntries)}
+            onGoToField={goToField} />
 
           <PostingAnalysisCard
             req={req.data} reqError={req.error} reloadReq={loadReq}
@@ -863,7 +870,10 @@ export default function PacketBuilder({ id, step }) {
             keywordScore={keywordScore}
             /* 4.1-3: navigation arrives as a prop and calls the ONE existing step API. A second
                router inside the card would be the parallel system extend-don't-duplicate forbids. */
-            onOpenQc={() => setActiveStep('qc')} />
+            onOpenQc={() => setActiveStep('qc')}
+            swaps={provenance.swaps}
+            listOwners={listOwnersFromArtifacts(qcEntries)}
+            onGoToField={goToField} />
 
           <AnalysisRunCard
             busy={jdBusy} onRun={runJd} hasRun={!!p.jdAnalyzed} result={runResult}

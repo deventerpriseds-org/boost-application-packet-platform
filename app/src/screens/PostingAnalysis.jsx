@@ -17,6 +17,7 @@
 // rendering only. Stable `data-qc` hooks are on every surface the acceptance criteria name.
 import React, { useEffect, useState } from 'react'
 import { Pill, Overlay, toneColor } from '../shell.jsx'
+import { requirementUsage } from '../qcRail.js'
 import {
   KIND_ABBR, reqChipLabel, kindSourceNote, noQuoteReason, isQuoted,
   groupRequirements, modelKeywords, summarizeKindSource, keywordLibraryState,
@@ -312,7 +313,7 @@ export function ProfileCompareCard({ comparison, onOpenRequirements, onOpenQc })
 }
 
 // ── one extracted line ──────────────────────────────────────────────────────────────────────────
-function RequirementRow({ r }) {
+function RequirementRow({ r, usage = null, onGoToFieldRef = null }) {
   const quoted = isQuoted(r)
   return (
     <div data-qc={POSTING_HOOKS.row} data-qc-kind={r.kind} data-qc-quoted={quoted ? '1' : '0'}
@@ -355,6 +356,30 @@ function RequirementRow({ r }) {
       </div>
 
       <EvidenceLine r={r} />
+
+      {/* SPEC 4.1-20 - `Where it is used ->`. The last row of the evidence cluster, and the only one
+          that did not ship, because a swap is keyed by LIST and turning one into a navigation needs
+          to know which artifact renders that list.
+          RENDERED ONLY WHEN A SWAP ACTUALLY NAMES THIS REQUIREMENT and that swap's list resolves to
+          a real artifact - `requirementUsage` returns null for "no swap", "list nobody renders" and
+          "insertions not loaded yet" alike, and every one of those must render NOTHING rather than a
+          link that goes nowhere. The absence is the honest state: not every requirement was answered
+          by a change to the draft. */}
+      {usage && onGoToFieldRef && (
+        <div style={{ marginTop: 4 }}>
+          <span className="px-link" role="button" tabIndex={0} data-qc={POSTING_HOOKS.usedIn}
+            data-qc-artifact={usage.artifactId} data-qc-section={usage.mergeField}
+            style={{ fontSize: 12, cursor: 'pointer' }}
+            onClick={() => onGoToFieldRef(usage.artifactId, usage.mergeField)}
+            onKeyDown={(e) => {
+              if (e.key !== 'Enter' && e.key !== ' ') return
+              e.preventDefault()
+              onGoToFieldRef(usage.artifactId, usage.mergeField)
+            }}>
+            Where it is used {'\u2192'}{usage.label ? ` (${usage.label})` : ''}
+          </span>
+        </div>
+      )}
     </div>
   )
 }
@@ -457,7 +482,7 @@ function EvidenceLine({ r }) {
 // marked required plus two the parser defaulted presents a guess as a fact — which is exactly what
 // requirements.ts keeps kind_source to prevent. The prose note below is not a substitute: the
 // NUMBER is what a reader takes away.
-function Group({ title, note, rows, qc }) {
+function Group({ title, note, rows, qc, usageOf = null, onGoToFieldRef = null }) {
   const split = summarizeKindSource(rows)
   return (
     <div style={{ marginTop: 14 }} data-qc={POSTING_HOOKS.group} data-qc-group={qc}>
@@ -473,7 +498,7 @@ function Group({ title, note, rows, qc }) {
       {note && <div className="px-small" style={{ marginTop: 2, color: 'var(--proto-ink2)' }}>{note}</div>}
       {rows.length === 0
         ? <div className="px-small" style={{ marginTop: 8, color: 'var(--proto-ink3)' }}>None found in this posting.</div>
-        : rows.map((r) => <RequirementRow key={r.id || `${r.kind}-${r.seq}`} r={r} />)}
+        : rows.map((r) => <RequirementRow key={r.id || `${r.kind}-${r.seq}`} r={r} usage={usageOf ? usageOf(r) : null} onGoToFieldRef={onGoToFieldRef} />)}
     </div>
   )
 }
@@ -582,7 +607,7 @@ function ModelKeywords({ parsedKeywords, coveredKw, missingKw, gapsScoredAt }) {
 }
 
 // ── the SOURCE card on the JD step ──────────────────────────────────────────────────────────────
-export function PostingAnalysisCard({ req, reqError, reloadReq, coveredKw, missingKw, gapsScoredAt, onParse, parseBusy, hasSummary, keywordScore, onOpenQc }) {
+export function PostingAnalysisCard({ req, reqError, reloadReq, coveredKw, missingKw, gapsScoredAt, onParse, parseBusy, hasSummary, keywordScore, onOpenQc, swaps = null, listOwners = null, onGoToField = null }) {
   const [tab, setTab] = useState('responsibilities')
   // P8.7 makes tabs the layout and keeps the old three-column arrangement available behind a flag.
   // It is a stored preference rather than a code constant so it is the user's to change, per the
@@ -599,6 +624,11 @@ export function PostingAnalysisCard({ req, reqError, reloadReq, coveredKw, missi
   // scoreable" in requirements.ts, so no ATS number can be derived from it at all.
   // SPEC 4.1-6. `tone` is worst-state-wins over the SAME EVIDENCE_TONE map the rows use, so a tab and
   // the rows inside it cannot disagree about what colour the evidence is. NULL renders uncoloured.
+  // SPEC 4.1-20. ONE resolver for the card, so every group asks the same question the same way.
+  // Returns null unless a swap names this requirement AND its list resolves to an artifact the
+  // packet actually has - the link must not appear where it cannot go.
+  const usageOf = (r) => (swaps && listOwners ? requirementUsage(swaps, r && r.id, listOwners) : null)
+
   const TABS = [
     { key: 'responsibilities', label: 'Responsibilities', count: responsibilities.length, tone: tabEvidenceTone(responsibilities), hint: `${responsibilities.length} lines extracted from the posting` },
     { key: 'requirements', label: 'Requirements', count: requirements.length, tone: tabEvidenceTone(requirements), hint: `${requirements.length} lines extracted from the posting` },
@@ -612,14 +642,14 @@ export function PostingAnalysisCard({ req, reqError, reloadReq, coveredKw, missi
   ]
 
   const responsibilitiesPane = (
-    <Group title="Responsibilities" rows={responsibilities} qc="responsibilities"
+    <Group title="Responsibilities" rows={responsibilities} qc="responsibilities" usageOf={usageOf} onGoToFieldRef={onGoToField}
       note="What the job does day to day. A separate class from requirements, never mixed in with them." />
   )
   const requirementsPane = (
     <>
-      <Group title="Must-have" rows={mustHaves} qc="must_have"
+      <Group title="Must-have" rows={mustHaves} qc="must_have" usageOf={usageOf} onGoToFieldRef={onGoToField}
         note="Requirements the posting states as required, or that the parser defaulted to required. The count above splits the two." />
-      <Group title="Nice-to-have" rows={niceToHaves} qc="nice_to_have"
+      <Group title="Nice-to-have" rows={niceToHaves} qc="nice_to_have" usageOf={usageOf} onGoToFieldRef={onGoToField}
         note="Requirements the posting marks preferred or optional. Same class as must-have, lower bar." />
     </>
   )
