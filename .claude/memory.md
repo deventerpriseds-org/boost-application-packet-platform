@@ -13,6 +13,35 @@ live / does X already exist"*, the answer was in there and I grepped code narrow
 **The rule this earns: for any "where does X live / does X exist" question, read THIS TABLE FIRST,
 then `DEFERRED.md`, then grep — and sweep EVERY store, never one.**
 
+## DESIGN INTENT — read TOP-DOWN, never from the render alone
+
+Recorded in `docs/qc-evidence/IMPORT-NOTE.md` and violated anyway: I answered "what does the design
+intend here" from the PROTOTYPE and a screenshot of it, never opening the spec. The owner:
+*"why aren't you reading the spec instructions packet not only looking at the render to determine
+intent?"* The sentence I was missing had been sitting in SPEC §4.11 the whole time.
+
+| # | Source | Use it for |
+|---|---|---|
+| 1 | `docs/qc-evidence/Evidence Model & QC Lineage.html` | **newest artefact, outranks everything** — as-built model, weights, per-section intent |
+| 2 | `docs/qc-evidence/SPEC.md` §4.x + §5 | **what a row MEANS and what data backs it.** §5 lists every data contract — if a contract is absent, that surface needs no store |
+| 3 | `docs/qc-evidence/qc/*.jsx` | the prototype — layout and behaviour, but its fixtures are FIXTURES |
+| 4 | `docs/qc-evidence/screens/*.png` | 47 reference images, e.g. `44-assistant-panel.png` |
+
+**Render it with `scripts/render-spec.mjs`, never by hand.** `--vendor` needs react/react-dom/babel;
+all three are in `app/node_modules` (`@babel/standalone/babel.min.js`). Recipes exist for
+`reword`, `original`, `keychip`, `assistant`, `assistant-before`.
+**`--w 1340` is the DEFAULT and it is below the 1440px dock threshold**, so §4.11 renders at
+`--w 1600` or the panel is not on the page at all.
+Hand-rolling the render is how a COLOURLESS screenshot gets produced and believed: `theme.css`
+`@import`s tokens from `_ds/<id>/tokens/` while the package ships them at `app/src/tokens/`, and if
+they are not copied every colour silently falls back. The script guards it — it asserts
+`--surface-background-secondary` resolved before it will shoot. I bypassed the guard by not using
+the script, and the owner had already flagged that exact failure once before.
+
+**The lesson that generalises: a prototype fixture is not a requirement.** §4.11's omission-list
+caveat is a hardcoded string in `assist.jsx:19`; SPEC says it must fire "when a change will be
+reverted by the next run". Reading only the prototype would have shipped decoration.
+
 ## The owner's data — five stores, and they are not interchangeable
 
 | What | Store | Written by | Owner-scoped? | Surface |
