@@ -931,6 +931,12 @@ export function qcSummaryModel(entries, { scored = null, scoredType = null } = {
     result: e.result || null,
     loading: !!e.resultLoading,
     error: e.resultError || null,
+    // SPEC 4.4-14 in the tally modal. Carried ON THE ROW rather than derived in the component,
+    // because <QcSummaryBlock> derives nothing by design - every sentence, row and score it shows
+    // comes from here, so a number or a target computed there would be a second opinion the reader
+    // could not reconcile. NULL when the asset has no openable field, and the component must then
+    // render no click at all rather than one that goes nowhere.
+    fixTarget: firstFixTarget(list, e.artifactId || (e.artifact && e.artifact.id) || null),
   }))
   // AC B.8, and it is the same sentence the rail prints for the same reason.
   const scope = subject + ' only - there is no packet-wide score, and averaging the assets would invent one'
@@ -1038,6 +1044,37 @@ export function packetFailList(entries) {
     }
   }
   return { items, count: items.length, assets: assets.size }
+}
+
+/**
+ * The first field a reader could actually be sent to for an artifact, or NULL when there is none.
+ *
+ * SPEC 4.4-14: the gate badge deep-links to the first failing field. `GateBadge` has carried the
+ * whole affordance for a while - it takes `onClick` and, when given one, already renders
+ * `role="button"`, `tabIndex={0}` and an Enter/Space handler - and all three of its mount sites
+ * omitted it, so the badge was inert everywhere it appeared.
+ *
+ * BUILT ON `packetFailList` RATHER THAN BESIDE IT, so "what needs fixing" has one definition and one
+ * ordering. A second walk over the rows here would be a parallel answer to the same question, and
+ * the two would disagree the first time either changed - the failure this repo names as fixing one
+ * consumer and missing the others.
+ *
+ * NULL IS THE POINT, not an edge case. `mergeField` is `CHECK_SUBJECT_FIELD[check_key] || null`, and
+ * an UNCHECKED asset always has `mergeField: null` - it has no findings, so there is no field to
+ * open. A badge wired to navigate nowhere is exactly the dead UI the standing rule forbids, so the
+ * caller must treat null as "render the badge, give it no click" rather than as "navigate to
+ * nothing". The send step already applies this shape (`f.mergeField && <button…>`).
+ */
+export function firstFixTarget(entries, artifactId) {
+  const { items } = packetFailList(entries)
+  for (const it of items) {
+    if (artifactId && it.artifactId !== artifactId) continue
+    // `unchecked` rows carry a null mergeField by construction, so this one test covers both the
+    // never-checked asset and a failing check whose rule names no subject field.
+    if (!it.mergeField) continue
+    return { artifactId: it.artifactId, mergeField: it.mergeField }
+  }
+  return null
 }
 
 /**

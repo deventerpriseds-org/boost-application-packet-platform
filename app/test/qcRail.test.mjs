@@ -17,8 +17,7 @@ import {
   coverageCards, requirementState, openSeqs, offenderSeq, qcStepState, qcStepDone, packetGate,
   loopsModel, rowsForRequirement, swapsForRequirement, pctWidth, packetReadiness,
   offendersByField, offendersForField, fieldSeverities,
-  railDecisions, DECISION_NOTE, packetFailList, qcSummaryModel, NO_ASSETS_REASON,
-} from '../src/qcRail.js'
+  railDecisions, DECISION_NOTE, packetFailList, qcSummaryModel, NO_ASSETS_REASON, firstFixTarget } from '../src/qcRail.js'
 import { scoreParts } from '../src/assetGate.js'
 import { TALLY_SCORE_DEFER } from '../src/postingAnalysis.js'
 
@@ -1491,4 +1490,103 @@ test('H:tally-summary-derives-nothing: the model reads selectors, it does not re
     assert.ok(!region.includes(banned), `qcSummaryModel derives a verdict of its own: ${banned}`)
   }
   assert.ok(region.includes('railHeadline('), 'the score must be read through railHeadline, not restated')
+})
+
+// ── SPEC 4.4-14 — the gate badge deep-links to the first failing field ───────────────────────────
+
+test('H:first-fix-target-is-null-when-there-is-nowhere-to-go', () => {
+  // THE CASE THAT MATTERS. `GateBadge` renders role="button", tabIndex and an Enter/Space handler
+  // the moment it is given an onClick, so a target that resolves to nothing does not merely do
+  // nothing - it advertises itself as actionable to a keyboard and a screen reader. That is the
+  // dead UI the standing rule forbids, and it is why null is a first-class return rather than an
+  // edge case the caller can shrug at.
+  //
+  // An UNCHECKED asset always has `mergeField: null` (packetFailList builds it that way), so it has
+  // no field to open even though it very much has a problem.
+  const unchecked = [{ artifactId: 'a1', type: 'resume', result: null }]
+  assert.equal(firstFixTarget(unchecked, 'a1'), null, 'an unchecked asset offered a navigation target')
+
+  // A passing asset likewise: nothing is failing, so there is nothing to open.
+  const passing = [{ artifactId: 'a1', type: 'resume', result: { gate: 'pass', results: [] } }]
+  assert.equal(firstFixTarget(passing, 'a1'), null)
+
+  // And an artifact that is not in the list at all.
+  assert.equal(firstFixTarget(passing, 'nope'), null)
+  assert.equal(firstFixTarget([], 'a1'), null)
+  assert.equal(firstFixTarget(null, 'a1'), null)
+})
+
+test('H:first-fix-target-reads-packetFailList-not-a-second-walk', () => {
+  // One definition of "what needs fixing", one ordering. A second walk over the rows here would be
+  // a parallel answer to the same question, and the two would disagree the first time either
+  // changed - which is this repo's most-repeated defect (fix one consumer, miss the others).
+  // Asserted by AGREEMENT rather than by implementation: the target must be the first item of
+  // packetFailList that has an openable field, for the same input.
+  const entries = [{
+    artifactId: 'a1', type: 'resume',
+    result: { gate: 'fail', results: [
+      { check_key: 'placeholder_left', state: 'fail', engine: 'deterministic', observed: 'x' },
+      { check_key: 'company_named', state: 'fail', engine: 'deterministic', observed: 'y' },
+    ] },
+  }]
+  const { items } = packetFailList(entries)
+  const expected = items.find((i) => i.mergeField)
+  const got = firstFixTarget(entries, 'a1')
+  assert.ok(expected, 'precondition: the fixture must produce at least one openable finding')
+  assert.deepEqual(got, { artifactId: expected.artifactId, mergeField: expected.mergeField })
+})
+
+test('H:first-fix-target-skips-a-finding-that-names-no-field', () => {
+  // `mergeField` is `CHECK_SUBJECT_FIELD[check_key] || null`, so a real failing check can still have
+  // no subject field. Such a row must be SKIPPED rather than returned with a null field - returning
+  // it would hand the caller a target it cannot navigate to, which is the null case wearing a
+  // disguise.
+  const entries = [{
+    artifactId: 'a1', type: 'resume',
+    result: { gate: 'fail', results: [
+      // A REAL check key that maps to no subject field - `placeholder_left` is not in
+      // CHECK_SUBJECT_FIELD, which holds only company_named and company_in_body. Using a real one
+      // rather than an invented key proves the skip against the actual map.
+      { check_key: 'placeholder_left', state: 'fail', engine: 'deterministic', observed: 'x' },
+    ] },
+  }]
+  const t = firstFixTarget(entries, 'a1')
+  assert.ok(t === null || t.mergeField, 'a target was returned with no field to open: ' + JSON.stringify(t))
+})
+
+test('H:first-fix-target-never-crosses-artifacts', () => {
+  // The badge is per-asset. Returning another asset's field would send the reader to a document they
+  // did not click on, which is worse than no link.
+  const entries = [
+    { artifactId: 'a1', type: 'resume', result: { gate: 'pass', results: [] } },
+    // `company_named` is one of only TWO keys in CHECK_SUBJECT_FIELD. The first draft of this
+    // fixture used `placeholder_left`, which maps to nothing - so it produced mergeField: null and
+    // the test failed against CORRECT code. Exactly the "can the system produce your fixture?"
+    // check: a fixture the mapping cannot yield proves nothing about the mapping.
+    { artifactId: 'a2', type: 'cover', result: { gate: 'fail', results: [
+      { check_key: 'company_named', state: 'fail', engine: 'deterministic', observed: 'x' },
+    ] } },
+  ]
+  assert.equal(firstFixTarget(entries, 'a1'), null, 'a passing asset borrowed another asset\'s finding')
+  const t2 = firstFixTarget(entries, 'a2')
+  assert.equal(t2 && t2.artifactId, 'a2')
+})
+
+test('H:qc-summary-rows-carry-their-own-fix-target', () => {
+  // The tally modal's <QcSummaryBlock> derives NOTHING - every sentence, row and score comes from
+  // qcSummaryModel. Computing the target in the component would be a second opinion the reader
+  // cannot reconcile against the rail, so it rides on the row.
+  const entries = [
+    { artifactId: 'r1', type: 'resume', label: 'Resume', result: { gate: 'fail', results: [
+      { check_key: 'company_named', state: 'fail', engine: 'deterministic', observed: 'x' },
+    ] } },
+    { artifactId: 'c1', type: 'cover', label: 'Cover letter', result: null },
+  ]
+  const m = qcSummaryModel(entries, { scored: entries[0], scoredType: 'resume' })
+  const byId = Object.fromEntries(m.rows.map((r) => [r.artifactId, r]))
+  assert.ok('fixTarget' in byId.r1, 'the row does not carry a fixTarget at all')
+  assert.equal(byId.r1.fixTarget && byId.r1.fixTarget.artifactId, 'r1')
+  assert.ok(byId.r1.fixTarget.mergeField)
+  // the unchecked asset gets null, so the component renders no click for it
+  assert.equal(byId.c1.fixTarget, null, 'an unchecked row carried a navigation target')
 })

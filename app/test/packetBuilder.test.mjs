@@ -156,7 +156,12 @@ test('H:approve-is-not-offered-when-the-gate-blocks', () => {
   // `unchecked` must NOT be folded in: the server refuses it too, but "run the checks" is a
   // different sentence from "fix these findings", and conflating them mislabels the state.
   assert.ok(!/gate === 'unchecked'/.test(src.slice(src.indexOf('const gateBlocks'), src.indexOf('const gateBlocks') + 200)))
-  assert.match(src, /<GateBadge result=\{qcResult\} compact \/>/, 'the card must show the gate, not just the status')
+  // Matches the MOUNT, not the exact markup. The original pinned `compact />` including the closing
+  // slash, so adding SPEC 4.4-14's `onClick` broke a guard whose subject had not changed - the badge
+  // was still mounted with the same result. A guard that fires on correct code is the cry-wolf
+  // failure hardening rule 2 forbids, and the fix is to assert the invariant (the card shows the
+  // GATE, not just the status pill) rather than the punctuation around it.
+  assert.match(src, /<GateBadge result=\{qcResult\} compact/, 'the card must show the gate, not just the status')
 })
 
 test('H:one-edit-path: the asset-level tweaks reuse aiEditArtifact with no section', () => {

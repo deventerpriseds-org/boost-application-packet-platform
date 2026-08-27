@@ -786,7 +786,7 @@ export function AnalysisRunCard({ busy, onRun, hasRun, result, extra }) {
 //
 // What it must NOT say: that the packet is clear (there is no packet-level score, and no verdict is
 // computed here), or a composite for anything but the ONE artifact it names.
-function QcSummaryBlock({ model }) {
+function QcSummaryBlock({ model, onGoToField = null }) {
   if (!model) return null
   const scored = model.state === 'scored'
   return (
@@ -842,7 +842,15 @@ function QcSummaryBlock({ model }) {
               {/* loading and error are GateBadge's own states. An asset whose checks could not be
                   read is named with "gate unavailable", never dropped from the list - a missing row
                   reads as "nothing wrong with it". */}
-              <GateBadge result={r.result} loading={r.loading} error={r.error} compact />
+              {/* SPEC 4.4-14 in this surface. The target is carried ON THE ROW by qcSummaryModel -
+                  this block derives nothing, so computing it here would be the second opinion the
+                  reader cannot reconcile. Both halves must be present: a navigator from the mount
+                  site AND a row that actually has an openable field. Either missing means NO click,
+                  never a click that goes nowhere. */}
+              <GateBadge result={r.result} loading={r.loading} error={r.error} compact
+                onClick={onGoToField && r.fixTarget
+                  ? () => onGoToField(r.fixTarget.artifactId, r.fixTarget.mergeField)
+                  : undefined} />
             </div>
           ))}
         </div>
@@ -852,7 +860,7 @@ function QcSummaryBlock({ model }) {
 }
 
 // ── the TALLY: the modal that replaced the 280px right column (D4) ──────────────────────────────
-export function KeywordTallyOverlay({ open, onClose, req, coveredKw, missingKw, gapsScoredAt, atsScore, keywordScore, qcSummary, onBuildAll, buildBusy, onGoResume, onGoQc }) {
+export function KeywordTallyOverlay({ open, onClose, req, coveredKw, missingKw, gapsScoredAt, atsScore, keywordScore, qcSummary, onBuildAll, buildBusy, onGoResume, onGoQc, onGoToField }) {
   if (!open) return null
   const parsedKeywords = modelKeywords(req?.requirements || [])
 
@@ -878,7 +886,7 @@ export function KeywordTallyOverlay({ open, onClose, req, coveredKw, missingKw, 
 
         {/* The QC summary sits BELOW the library state on purpose: the score block defers its
             keyword part upward to it, so "shown once, above" has to be true of the layout too. */}
-        <QcSummaryBlock model={qcSummary} />
+        <QcSummaryBlock model={qcSummary} onGoToField={onGoToField} />
 
         <ModelKeywords parsedKeywords={parsedKeywords} coveredKw={coveredKw} missingKw={missingKw} gapsScoredAt={gapsScoredAt} />
 

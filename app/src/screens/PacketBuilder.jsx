@@ -13,7 +13,7 @@ import { postingBody } from '../postingAnalysis.js'
 import { PACKET_HOOKS, ASSET_BODY_DEFAULT_OPEN, regenerateWithNote } from '../packetBuilder.js'
 import QcRail, { useQcEntries } from './QcRail.jsx'
 import { GateBadge } from './AssetGateDrawer.jsx'
-import { qcStepState, packetGate, railGateMeta, packetReadiness, packetFailList, qcSummaryModel } from '../qcRail.js'
+import { qcStepState, packetGate, railGateMeta, packetReadiness, packetFailList, qcSummaryModel, firstFixTarget } from '../qcRail.js'
 
 const TYPE_LABEL = {
   resume: 'Resume', compact_resume: 'Compact resume', cover: 'Cover letter',
@@ -145,7 +145,7 @@ function stepDone(key, p, artifacts, qc) {
 // Exported so the browser probe can mount the REAL card (test/browser/run-asset-blocks.mjs). The
 // header's collapsed default is a rendering fact; asserting it against a replica of this component
 // would prove only that the replica was written to match.
-export function ArtifactCard({ a, busy, setBusy, qcResult, onGenerate, onRegenerate, onSetStatus, onMakeDoc, onMakeSlides, onGenVideo, onArchiveVideo, doc, video, provenance, listOwners, onListsRendered, focusField = null }) {
+export function ArtifactCard({ a, busy, setBusy, qcResult, onGenerate, onRegenerate, onSetStatus, onMakeDoc, onMakeSlides, onGenVideo, onArchiveVideo, doc, video, provenance, listOwners, onListsRendered, focusField = null, onOpenFirstFix = null }) {
   const v = video[a.id] || {}
   const d = doc[a.id] || {}
   const videoUrl = v.url || a.docUrl
@@ -181,7 +181,13 @@ export function ArtifactCard({ a, busy, setBusy, qcResult, onGenerate, onRegener
             word about whether the checks pass — and offered an Approve the server refuses. The
             badge is REUSED, not reimplemented: it reads the server's gate and the two counts
             through the same selectors, so the card and the drawer cannot disagree. */}
-        <GateBadge result={qcResult} compact />
+        {/* SPEC 4.4-14. `GateBadge` has always taken `onClick` and, when given one, already renders
+            role="button", tabIndex and an Enter/Space handler - all three of its mount sites simply
+            never passed one, so the badge was inert everywhere it appeared.
+            NULL means NO CLICK, never a click that goes nowhere: an unchecked asset has no findings
+            and therefore no field to open, and a badge that navigates nowhere is the dead UI the
+            standing rule forbids. */}
+        <GateBadge result={qcResult} compact onClick={onOpenFirstFix || undefined} />
         <span className="px-link" role="button" tabIndex={0} onClick={toggle}
           data-qc={PACKET_HOOKS.assetToggle} data-qc-open={open ? '1' : '0'}
           onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle() } }}
@@ -912,6 +918,14 @@ export default function PacketBuilder({ id, step }) {
                 onGenVideo={genVideo} onArchiveVideo={archiveVideo}
                 doc={doc} video={video} provenance={provenance}
                 qcResult={(qcEntries.find((e) => e.artifact.id === a.id) || {}).result || null}
+                onOpenFirstFix={(() => {
+                  // Computed at the CALL SITE because `goToField` and the full entry list live here.
+                  // `firstFixTarget` returns null when the asset has no openable field - unchecked,
+                  // or a failing rule that names no subject - and null must reach GateBadge as an
+                  // absent handler rather than as a no-op click.
+                  const t = firstFixTarget(qcEntries, a.id)
+                  return t ? () => goToField(t.artifactId, t.mergeField) : null
+                })()}
                 listOwners={listOwners} onListsRendered={registerLists}
                 focusField={fieldFocus && fieldFocus.artifactId === a.id ? fieldFocus.section : null} />
             ))}
@@ -956,7 +970,11 @@ export default function PacketBuilder({ id, step }) {
                       questions and can disagree - which is the whole reason packetReadiness exists.
                       GateBadge was already imported into this file and mounted on the asset step;
                       this step showed the stored pill alone. */}
-                  <GateBadge result={(qcEntries.find((e) => e.artifactId === a.id) || {}).result} compact />
+                  <GateBadge result={(qcEntries.find((e) => e.artifactId === a.id) || {}).result} compact
+                    onClick={(() => {
+                      const t = firstFixTarget(qcEntries, a.id)
+                      return t ? () => goToField(t.artifactId, t.mergeField) : undefined
+                    })()} />
                   <Pill tone={STATUS_TONE[a.status]}>{a.status}</Pill>
                 </div>
               )
@@ -1027,7 +1045,13 @@ export default function PacketBuilder({ id, step }) {
       coveredKw={coveredKw} missingKw={missingKw} gapsScoredAt={p.atsGapsScoredAt} atsScore={atsScore}
       onBuildAll={() => buildAll({ regen: true })} buildBusy={allBusy}
       onGoResume={() => { setAtsOpen(false); setActiveStep('resume') }}
-      onGoQc={() => { setAtsOpen(false); setActiveStep('qc') }} />
+      onGoQc={() => { setAtsOpen(false); setActiveStep('qc') }}
+      /* CLOSE FIRST, THEN NAVIGATE - the same ordering as onGoResume and onGoQc above, and the
+         prototype's `setPanelOpen(false)` before `setStep(...)`. Navigating with the modal still
+         open leaves the reader on the field they asked for, behind an overlay. This is the third
+         exit the modal was missing: 4.3-13's ordering was already right for the two exits that
+         existed, and the residual was that the gate rows had no exit at all. */
+      onGoToField={(artifactId, section) => { setAtsOpen(false); goToField(artifactId, section) }} />
   )
 
   if (mobile) {
