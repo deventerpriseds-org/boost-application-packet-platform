@@ -4399,3 +4399,14 @@ the assumption underneath it, so `H:omit-caveat-rationale-parity` now pins **one
 
 **OPEN — one question for the owner:** float-only panel now, or raise the shell cap 1280→1560
 (blast radius: every screen) to get the dock the SPEC describes.
+
+
+**CI red on PR #58, and the guard was right.** `api — build + test` failed on `87eaa0e`:
+`D:ledger-stale-row-fails` reporting *"/onGoToField/ now matches app/src/screens/PostingAnalysis.jsx
+— the thing was built, close the row"*. Not a flake and not infra: **4.1-20 built the very hop
+`D:jd-evidence-has-no-field-link` claims is missing**, so the row's `check: absent ... onGoToField`
+went stale the moment the code landed — the identical flip `D:resume-summary-band` recorded, and
+exactly the staleness the ledger exists to refuse. **Closed the row with evidence; the guard was not
+touched.** Regression cover for 4.1-20 does not depend on the ledger row: `listOwnersFromArtifacts`
+and `requirementUsage` are asserted in `app/test/qcRail.test.mjs:1605-1619`. api 886/886, app
+372/372, app build green.
