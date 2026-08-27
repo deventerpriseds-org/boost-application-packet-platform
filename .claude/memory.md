@@ -4281,3 +4281,28 @@ as the range it covers. Mine covered three DESKTOP widths and silently implied t
 space. **Any responsive layout comparison must include the phone case, or say in the drawing that it
 does not** — an omitted breakpoint reads as "no issue there", which is exactly the false-absence
 failure the ground-truth rule exists to stop, wearing a picture instead of a sentence.
+
+
+### `#/packet/<id>` takes an OPPORTUNITY id, not a packet id
+
+Cost a failed `ui-verify` run on 2026-08-27. `packetsList` returns BOTH — `id` (the packet) and
+`oppId` — and the route wants `oppId`, because `PacketBuilder` fetches `/app/opportunity/{id}`.
+Passing the packet id renders **"Could not reach the service layer — GET /app/opportunity/… → HTTP 404"**.
+
+**Two things worth keeping.** The app behaved WELL: it named the exact failing request instead of
+showing a blank screen, which is what made the diagnosis one glance rather than an investigation.
+And the screenshot was the fastest evidence available — `ui-verify` pushes it to the `ui-shots`
+branch, so `git show origin/ui-shots:latest.png` beats fighting the log tool for `UI_VERIFY_RESULT`.
+
+### Hardening — the phase-tag hook fired on five of six turns, and I kept treating it as a slip
+
+`eds-phase-tag.py` requires a phase tag on EVERY text block in a turn, not just the first. It fired
+repeatedly on 2026-08-27 (14 of 17 blocks in one turn) and each time I acknowledged it and then did
+the same thing again, because I was tagging the OPENING block and treating the running commentary
+between tool calls as exempt. It is not exempt.
+
+**The rule, concretely: every block of prose I emit gets a tag, including one-line asides between
+tool calls.** The cheapest reliable form is to lead a short interstitial with the phase it belongs
+to — `Fact Finding:`, `Implementing:`, `Verifying:` — rather than opening with the finding itself.
+This is the same class as the guards below: repeated correction without a change in mechanism is not
+learning, and the mechanism here is "tag as you write each block", not "remember at the end".
