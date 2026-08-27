@@ -4173,3 +4173,49 @@ The render is *never* a source of intent. Two things turned on this in one day: 
 panel?" (**both** — one `seedAsk` primitive, two destinations), and the prototype's caveat is a
 **hardcoded fixture string** while SPEC's is **conditional** — copying the render would have shipped
 a revert warning on every field, most of which nothing reverts.
+
+
+### Hardening — a guard whose fixtures are a SUBSET of the requirement cannot see its own failure
+
+Twice in one turn (2026-08-27), and the second time it was my fix for the first. Both had the same
+shape, and an independent verifier found both.
+
+1. `H:omit-caveat-matches-the-rationale-exactly-never-fuzzily` used two near-miss rationales
+   (`'do not use'`, `'omit'`). Both are **shorter** than the literal, so a fuzzy
+   `rationale.includes('do-not-use')` implementation passed them and the suite stayed **372/372
+   green with the exactness removed** — on the most accusation-grade line in the diff.
+2. Its companion `H:omit-caveat-rationale-parity` pinned **that** producer rather than **that there
+   is only one**. Adding a second `driver:'rule'` drop with a different rationale: `tsc` clean, api
+   886/886, app 372/372 — blind. Worse, those rows produce **no caveat AND a "Put back X" control**,
+   i.e. exactly the self-undoing UI the sibling function exists to prevent.
+
+**The rule: a fixture must be something only the CORRECT implementation survives.** A subset fixture
+is satisfied by every weaker implementation too. For an exactness claim that means a **superset**
+(`LITERAL + ' (superseded)'`), never another near-miss; for a uniqueness claim it means counting the
+construct, never matching one instance of it.
+
+### Hardening — a run-specific sentence must be built from that run's rows
+
+`AssetBlocks.jsx` reads `provenance.swaps.swaps`, which is **every pass** — the API says so itself
+(`appSwaps.ts:113`) and offers `current` alongside it; `appSwaps.ts:55` deletes only the rebuilt
+loop, so earlier rows persist, and `scopeSwaps` filters on `list` and never on `loop`.
+
+That is correct for a change LOG, which is meant to show every pass. It is wrong the moment a
+sentence names a specific run: measured, a loop-1 omit drop that **loop 2 kept** still rendered
+*"The last run took X out of this list."* `latestLoopRows()` is the fix, applied where the claim is
+made rather than at the shared source — the shared array has other consumers that legitimately want
+every pass, so re-pointing it would have been a much larger blast radius for a narrower bug.
+
+**Generalises:** before writing UI copy that names *when* something happened, check whether the data
+behind it is scoped to that when. Pre-existing unscoped wiring becomes a correctness bug the moment
+something attaches a temporal claim to it.
+
+### Hardening — pure-function tests cannot see whether anyone CALLS them
+
+Closing `D:jd-evidence-has-no-field-link` leaned on `listOwnersFromArtifacts` and `requirementUsage`
+being unit-tested. The verifier showed the lean was too heavy: **five wiring mutations passed the
+whole suite AND the build** — including reverting `withInsertions` to `activeStep === 'qc'`, *the
+exact defect the ledger row described*, and dropping the `usage &&` no-dead-UI condition the row's
+own acceptance sentence names. A derivation nothing passes down is a function with no caller, and no
+unit test can tell. `qcRail.test.mjs:1004` already had the right pattern (a structural source grep
+over the screen file); `H:jd-field-link-is-wired-not-just-derived` applies it to the JD step.

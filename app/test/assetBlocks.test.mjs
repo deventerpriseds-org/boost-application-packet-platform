@@ -1101,6 +1101,12 @@ test('H:omit-caveat-matches-the-rationale-exactly-never-fuzzily: accusation-grad
   const near = OMIT_LIST_RATIONALE.replace('do-not-use', 'do not use')
   assert.equal(omitListCaveat([{ action: 'dropped', driver: 'rule', from_label: 'Agile', rationale: near }]).text, null)
   assert.equal(omitListCaveat([{ action: 'dropped', driver: 'rule', from_label: 'Agile', rationale: 'omit' }]).text, null)
+  // THE FIXTURE THAT MAKES THIS GUARD REAL, added after an independent verifier proved the two
+  // above could not see the failure they were written for. Both are SHORTER than the literal, so a
+  // fuzzy `rationale.includes('do-not-use')` implementation passed them and the suite stayed
+  // 372/372 green with the exactness gone. A SUPERSET is what a substring test cannot survive.
+  assert.equal(omitListCaveat([{ action: 'dropped', driver: 'rule', from_label: 'Agile', rationale: OMIT_LIST_RATIONALE + ' (superseded)' }]).text, null)
+  assert.equal(omitListCaveat([{ action: 'dropped', driver: 'rule', from_label: 'Agile', rationale: 'previously ' + OMIT_LIST_RATIONALE }]).text, null)
   const hit = omitListCaveat([{ action: 'dropped', driver: 'rule', from_label: 'Agile', rationale: OMIT_LIST_RATIONALE }])
   assert.deepEqual(hit.phrases, ['Agile'])
   assert.match(hit.text, /"Agile"/)
@@ -1134,6 +1140,16 @@ test('H:restore-never-offers-a-phrase-the-rule-will-remove-again: no self-undoin
   // No candidates and no permission both mean NO CONTROL, not a disabled one.
   assert.deepEqual(restoreOptions({ swapsForList: rows, canEdit: false }), [])
   assert.deepEqual(restoreOptions({ swapsForList: [], canEdit: true }), [])
+  // ONLY a dropped row can be put back. The verifier found this filter unguarded while the
+  // IDENTICAL line in omitListCaveat was covered — two functions written in one commit with
+  // asymmetric coverage. Without it, every kept/added/swapped item grows a "Put back X" offering
+  // to restore something that is already there.
+  assert.deepEqual(restoreOptions({ canEdit: true, swapsForList: [
+    { action: 'kept', from_label: 'A', rationale: 'x' },
+    { action: 'added', from_label: 'B', rationale: 'x' },
+    { action: 'swapped', from_label: 'C', rationale: 'x' },
+    { action: 'merged', from_label: 'D', rationale: 'x' },
+  ] }), [])
 })
 
 test('H:shorten-carries-the-real-rule-never-a-bare-template: and no rule means no control', () => {
@@ -1144,13 +1160,74 @@ test('H:shorten-carries-the-real-rule-never-a-bare-template: and no rule means n
   const ok = shortenAction({ mergeField: 'ResumeSummary', observed: '70 words', target: '55–60 words', canEdit: true })
   assert.match(ok.ask, /70 words/)
   assert.match(ok.ask, /55–60 words/)
-  assert.equal(ok.reason, null)
+  assert.equal('reason' in ok, false)
   // No stated rule -> no control, and the REASON is said rather than the control vanishing without
   // explanation (the `keywordActions` precedent).
   const none = shortenAction({ mergeField: 'ResumeSummary', observed: null, target: null, canEdit: true })
   assert.equal(none.ask, null)
-  assert.match(none.reason, /no stated length rule/)
+  // NO `reason`, and this asserts its ABSENCE rather than its text. The first version returned one
+  // and nothing rendered it — a write-only field whose only reader was this test, which is how a
+  // JSDoc came to claim a sentence the reader never saw. Asserting the absence stops it coming back
+  // silently; if a caller ever needs it, the test has to change with the renderer.
+  assert.equal('reason' in none, false, 'shortenAction must not return a field no caller renders')
   assert.equal(shortenAction({ mergeField: 'ResumeSummary', observed: '70 words', target: '55–60 words', canEdit: false }).ask, null)
+})
+
+test('H:run-scoped-claims-read-the-latest-pass-only: "the last run" means the last run', () => {
+  // THE ONE REAL CORRECTNESS BUG THE VERIFIER FOUND, and it was invisible from the diff. The screen
+  // reads `provenance.swaps.swaps`, which is EVERY pass (`appSwaps.ts:113` says so and offers
+  // `current` alongside it), and `scopeSwaps` filters on `list` and never on `loop`. Harmless for a
+  // change LOG, which is meant to show every pass. Not harmless for a sentence naming a specific
+  // run: measured, a loop-1 omit drop that loop 2 KEPT produced "The last run took X out of this
+  // list" — and the last run had kept it.
+  const rows = [
+    { loop: 1, action: 'dropped', driver: 'rule', from_label: 'OldPhrase', rationale: OMIT_LIST_RATIONALE },
+    { loop: 1, action: 'dropped', driver: 'posting', from_label: 'OldDrop', rationale: 'not carried into the final list' },
+    { loop: 2, action: 'kept', driver: 'rule', from_label: 'OldPhrase', rationale: 'x' },
+    { loop: 2, action: 'dropped', driver: 'rule', from_label: 'NewPhrase', rationale: OMIT_LIST_RATIONALE },
+  ]
+  // Only loop 2's drop is named. The stale loop-1 claim must be gone in BOTH directions.
+  assert.deepEqual(omitListCaveat(rows).phrases, ['NewPhrase'])
+  assert.doesNotMatch(omitListCaveat(rows).text, /OldPhrase/)
+  // ... and the stale loop-1 restore offer with it: putting back something the current pass already
+  // carries is a request the reader cannot mean.
+  assert.deepEqual(restoreOptions({ swapsForList: rows, canEdit: true }).map((o) => o.label), [])
+
+  // A row that cannot be shown to be current is dropped once ANY row carries a loop - absent
+  // evidence is never a pass.
+  assert.deepEqual(omitListCaveat([
+    { action: 'dropped', driver: 'rule', from_label: 'NoLoop', rationale: OMIT_LIST_RATIONALE },
+    { loop: 3, action: 'kept', driver: 'rule', from_label: 'z', rationale: 'x' },
+  ]).phrases, [])
+  // But data predating the column has exactly one pass to speak of, so it is NOT silently blanked.
+  assert.deepEqual(omitListCaveat([
+    { action: 'dropped', driver: 'rule', from_label: 'NoLoop', rationale: OMIT_LIST_RATIONALE },
+  ]).phrases, ['NoLoop'])
+})
+
+test('H:no-blank-or-duplicated-control: a repeated phrase is one control, an empty one is none', () => {
+  // F-5 from the verifier's line-deletion sweep: the `new Set` dedupe and the blank-label
+  // `.filter(Boolean)` were both unguarded in both functions. Neither is exotic — the same phrase
+  // dropped from two lists is the ordinary case (swap rows are keyed by PACKET and list, which is
+  // why sharedSourceNote exists), and it would draw two identical "Put back X" controls side by
+  // side. A blank label draws a control naming nothing.
+  const dupes = [
+    { loop: 1, action: 'dropped', driver: 'posting', from_label: 'Vendor selection', rationale: 'a' },
+    { loop: 1, action: 'dropped', driver: 'posting', from_label: 'Vendor selection', rationale: 'b' },
+    { loop: 1, action: 'dropped', driver: 'posting', from_label: '   ', rationale: 'c' },
+    { loop: 1, action: 'dropped', driver: 'posting', from_label: null, rationale: 'd' },
+  ]
+  assert.deepEqual(restoreOptions({ swapsForList: dupes, canEdit: true }).map((o) => o.label), ['Vendor selection'])
+  const om = [
+    { loop: 1, action: 'dropped', driver: 'rule', from_label: 'Agile', rationale: OMIT_LIST_RATIONALE },
+    { loop: 1, action: 'dropped', driver: 'rule', from_label: 'Agile', rationale: OMIT_LIST_RATIONALE },
+    { loop: 1, action: 'dropped', driver: 'rule', from_label: '', rationale: OMIT_LIST_RATIONALE },
+  ]
+  assert.deepEqual(omitListCaveat(om).phrases, ['Agile'])
+  // Singular reads as singular. The ternary is one word each way and nothing else asserted it.
+  assert.match(omitListCaveat(om).text, /because it is on your do-not-use list/)
+  const two = [...om, { loop: 1, action: 'dropped', driver: 'rule', from_label: 'Scrum', rationale: OMIT_LIST_RATIONALE }]
+  assert.match(omitListCaveat(two).text, /because they are on your do-not-use list/)
 })
 
 test('H:omit-caveat-rationale-parity: one producer, and it is the rule branch', () => {
@@ -1174,6 +1251,14 @@ test('H:omit-caveat-rationale-parity: one producer, and it is the rule branch', 
   // touching a line of app code. That assumption is what this pins.
   const sites = swapsSrc.split(`rationale: '${OMIT_LIST_RATIONALE}'`).length - 1
   assert.equal(sites, 1, 'a second producer of the omit rationale appeared; omitListCaveat assumes exactly one')
+  // AND EXACTLY ONE `driver: 'rule'` ROW, which is the half the first version missed. The verifier
+  // added a SECOND rule-driven drop carrying a DIFFERENT rationale: tsc clean, api 886/886, app
+  // 372/372 — the guard was blind, because it pinned THAT producer rather than that there is only
+  // one. Those rows are the worst case available: they produce no caveat AND a "Put back X"
+  // control, i.e. exactly the self-undoing UI restoreOptions exists to prevent.
+  const ruleRows = (swapsSrc.match(/driver: 'rule'/g) || []).length
+  assert.equal(ruleRows, 1,
+    'a second driver:\'rule\' drop exists; it produces no caveat and a restore control that the next pass undoes')
   const before = swapsSrc.slice(0, swapsSrc.indexOf(`rationale: '${OMIT_LIST_RATIONALE}'`))
   const objStart = before.lastIndexOf('swaps.push({')
   assert.ok(objStart !== -1 && before.slice(objStart).includes("driver: 'rule'"),

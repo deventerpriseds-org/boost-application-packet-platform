@@ -1647,3 +1647,40 @@ test('H:requirement-usage-falls-back-to-the-list-when-no-merge-field', () => {
   assert.equal(u.mergeField, 'A')
   assert.ok(u.mergeField, 'the target must always carry something the navigator can focus')
 })
+
+test('H:jd-field-link-is-wired-not-just-derived: the hop 4.1-20 built stays connected', () => {
+  // WHY A SOURCE GREP AND NOT A UNIT TEST. `listOwnersFromArtifacts` and `requirementUsage` are pure
+  // and already asserted above, and closing `D:jd-evidence-has-no-field-link` leaned on that. An
+  // independent verifier showed the lean was too heavy: FIVE wiring mutations passed the whole suite
+  // AND the build, including reverting `withInsertions` to `activeStep === 'qc'` — the exact original
+  // defect the ledger row described — and dropping the `usage &&` condition the row's own acceptance
+  // sentence names. Pure functions cannot see whether anyone calls them. This is the same structural
+  // pattern the QcRail deep-link guard above uses, aimed at the JD step.
+  const pb = readFileSync(new URL('../src/screens/PacketBuilder.jsx', import.meta.url), 'utf8')
+  const pa = readFileSync(new URL('../src/screens/PostingAnalysis.jsx', import.meta.url), 'utf8')
+
+  // 1. The insertions the map is DERIVED FROM must be loaded on the JD step, not the QC step alone.
+  //    This is the defect the ledger row described: listOwners was empty exactly where SPEC asks
+  //    for the link.
+  assert.match(pb, /withInsertions:\s*activeStep === 'qc' \|\| activeStep === 'jd'/,
+    'the JD step must load insertions, or listOwnersFromArtifacts has nothing to map')
+
+  // 2. Both props reach the card. A derivation nothing passes down is a function with no caller.
+  const card = pb.slice(pb.indexOf('<PostingAnalysisCard'))
+  const openTag = card.slice(0, card.indexOf('/>'))
+  assert.match(openTag, /listOwners=\{listOwnersFromArtifacts\(qcEntries\)\}/)
+  assert.match(openTag, /onGoToField=\{goToField\}/,
+    'the JD card must reuse the existing navigator, never a second one')
+
+  // 3. Threaded all the way to the row that renders the link.
+  assert.match(pa, /export function PostingAnalysisCard\(\{[^}]*onGoToField/s)
+  assert.match(pa, /function Group\(\{[^}]*onGoToFieldRef/s)
+  assert.match(pa, /function RequirementRow\(\{[^}]*onGoToFieldRef/s)
+  assert.match(pa, /<RequirementRow[^>]*onGoToFieldRef=\{onGoToFieldRef\}/s)
+
+  // 4. NO DEAD UI, which is the row's own acceptance sentence: a requirement no swap names shows no
+  //    link at all. Both halves of the condition are load-bearing and the verifier proved neither
+  //    was guarded — dropping `usage &&` renders a link that navigates nowhere.
+  assert.match(pa, /\{usage && onGoToFieldRef && \(/,
+    'the link must render only when a swap names the requirement AND a navigator exists')
+})

@@ -4410,3 +4410,26 @@ exactly the staleness the ledger exists to refuse. **Closed the row with evidenc
 touched.** Regression cover for 4.1-20 does not depend on the ledger row: `listOwnersFromArtifacts`
 and `requirementUsage` are asserted in `app/test/qcRail.test.mjs:1605-1619`. api 886/886, app
 372/372, app build green.
+
+
+**The independent verifier refuted three of ten claims and found five defects — all fixed in the
+same turn, before reporting.** Evidence: `docs/qc-evidence/VERIFY-pr58.md`. This is the 0b rule
+working as intended, and the verifier earned its cost: two of these were invisible from the diff.
+
+| # | Finding | Fix |
+|---|---|---|
+| **F-1** | **A real correctness bug.** The screen reads `provenance.swaps.swaps` — EVERY pass — and `scopeSwaps` filters on `list`, never `loop`. So a loop-1 omit drop that loop 2 KEPT still rendered *"The last run took X out of this list"*. The last run had kept it. | `latestLoopRows()`, applied in both new functions. Rows with no `loop` are dropped once any row carries one; data predating the column is unfiltered. |
+| **F-3** | **The "never fuzzily" guard could not see a fuzzy implementation.** Both near-miss fixtures were SHORTER than the literal, so `rationale.includes('do-not-use')` passed them — 372/372 green with the exactness gone, on the most accusation-grade line in the diff. | Superset fixtures (`… + ' (superseded)'`, `'previously ' + …`), which a substring cannot survive. |
+| **C8/M3** | **My replacement guard had the same shape of hole.** It pinned THAT producer, not that there is only ONE. A second `driver:'rule'` drop with a different rationale: tsc clean, 886/886, 372/372, guard blind — and those rows produce no caveat AND a "Put back X" the next pass undoes. | Assert exactly one `driver: 'rule'` in `swaps.ts`. |
+| **F-4** | `restoreOptions`' `action === 'dropped'` filter unguarded, while the IDENTICAL line in `omitListCaveat` was covered — asymmetric coverage in one commit. | Fixture with kept/added/swapped/merged rows. |
+| **F-2** | `shortenAction().reason` was **write-only** — the JSDoc claimed a sentence no caller rendered, and the test asserted its text. | Removed the field and the claim. The sibling precedent renders its reason inside an OPENED panel; this control sits in the always-visible row, where the absence explains itself. Test now asserts `'reason' in x === false`. |
+| **C10** | Closing `D:jd-evidence-has-no-field-link` leaned on two pure functions. **Five wiring mutations passed suite AND build**, including reverting `withInsertions` to `activeStep === 'qc'` — the exact original defect — and dropping the `usage &&` no-dead-UI condition the row's own acceptance sentence names. | `H:jd-field-link-is-wired-not-just-derived`, the same source-grep pattern `qcRail.test.mjs:1004` uses for QcRail. |
+| **F-5** | Dedupe, blank-label filter and the singular/plural ternary unguarded. | One compact case; all four mutations fail. |
+
+**Eleven mutations, all failing correctly** — including the verifier's own break (V1) and the
+original ledger defect (V5). app 375/375, api 886/886, build green, codepoint scan clean.
+
+**The lesson worth keeping:** twice in one turn I wrote a guard whose fixtures could not express the
+failure it was named for. Both times the shape was the same — the fixture was a SUBSET of what the
+correct implementation requires, so a weaker implementation satisfied it. A guard's fixture has to be
+something only the right implementation survives, not merely something the wrong one happens to fail.

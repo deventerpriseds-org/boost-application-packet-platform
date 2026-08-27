@@ -543,8 +543,33 @@ export function keywordSwapOptions({ keyword, present, canEdit, bank, inField } 
  */
 export const OMIT_LIST_RATIONALE = 'on the owner do-not-use list (MasterContext.itemsToOmit)'
 
+/**
+ * The rows belonging to the LATEST pass, and why anything saying "the last run" must go through it.
+ *
+ * `AssetBlocks.jsx` reads `provenance.swaps.swaps`, which is EVERY pass — the audit trail. The API
+ * says so in its own words (`appSwaps.ts:113`: *"`swaps` is EVERY pass; `current` is the latest pass
+ * alone"*) and `appSwaps.ts:55` deletes only the rebuilt loop, so rows from earlier passes persist.
+ * `scopeSwaps` filters on `list` and never on `loop`.
+ *
+ * That is harmless for a change LOG, which is meant to show every pass. It is not harmless for a
+ * sentence that says *"the last run took X out"*: found by the independent verifier, a loop-1 omit
+ * drop that loop 2 KEPT still produced that sentence, and the last run had kept it. A claim about a
+ * specific run must be built from that run's rows.
+ *
+ * Rows with no usable `loop` are dropped once ANY row carries one — they cannot be shown to be
+ * current, and "absent evidence is never a pass". When no row carries a loop at all (data predating
+ * the column) there is only one pass to speak of, so the rows are returned unfiltered.
+ */
+export function latestLoopRows(swaps) {
+  const rows = (Array.isArray(swaps) ? swaps : []).filter(Boolean)
+  const loops = rows.map((s) => Number(s.loop)).filter((n) => Number.isFinite(n))
+  if (!loops.length) return rows
+  const latest = Math.max(...loops)
+  return rows.filter((s) => Number(s.loop) === latest)
+}
+
 export function omitListCaveat(swapsForList) {
-  const rows = Array.isArray(swapsForList) ? swapsForList : []
+  const rows = latestLoopRows(swapsForList)
   const phrases = [...new Set(rows
     .filter((s) => s && s.action === 'dropped' && s.driver === 'rule' && s.rationale === OMIT_LIST_RATIONALE)
     .map((s) => String(s.from_label || '').trim())
@@ -581,7 +606,9 @@ export function omitListCaveat(swapsForList) {
  */
 export function restoreOptions({ swapsForList, canEdit } = {}) {
   if (!canEdit) return []
-  const rows = Array.isArray(swapsForList) ? swapsForList : []
+  // Latest pass only, for the same reason the caveat is: offering to restore something an EARLIER
+  // pass dropped and the current one already carries would be a request the reader cannot mean.
+  const rows = latestLoopRows(swapsForList)
   const labels = [...new Set(rows
     .filter((s) => s && s.action === 'dropped' && s.rationale !== OMIT_LIST_RATIONALE)
     .map((s) => String(s.from_label || '').trim())
@@ -600,9 +627,15 @@ export function restoreOptions({ swapsForList, canEdit } = {}) {
  * field (`observedFor` / `targetFor`, e.g. "56 words - 55-60 words"), so the request carries the
  * real numbers and the model is not left to guess which limit was meant.
  *
- * NO RULE, NO CONTROL. `targetFor` returns null for every field with no stated threshold, and a
- * "shorten to fit" against no rule is a request with no target — a no-op dressed as a control.
- * The reason is SAID rather than the control being silently absent, matching `keywordActions`.
+ * NO RULE, NO CONTROL, AND NO EXPLANATION EITHER — deliberately, and this reversed a first attempt.
+ * It originally returned a `reason` string on the `keywordActions` precedent, and the independent
+ * verifier caught that the field was WRITE-ONLY: the test asserted its text while no caller rendered
+ * it, so the JSDoc claimed a sentence the reader never saw. The two are not the same situation.
+ * `keywordActions`' reason renders inside an OPENED keyword panel, where the reader has asked about
+ * one term and an empty panel would read as broken. This control sits in the always-visible row
+ * beside every field, where a note on every unruled field is noise — and the absence explains
+ * itself, because a field with no rule visibly shows no target beside its measurement.
+ * So: no reason, and no claim to one.
  *
  * It does NOT gate on the field being over its limit. Whether it is over is decided by the check
  * rows, and re-deriving that here would be a second opinion on the same question rendered inches
@@ -610,16 +643,15 @@ export function restoreOptions({ swapsForList, canEdit } = {}) {
  * REQUEST the reader chooses to send, not an accusation that the field is too long.
  *
  * @param {{mergeField: string, observed: string|null, target: string|null, canEdit: boolean}} args
- * @returns {{ask: string|null, reason: string|null}}
+ * @returns {{ask: string|null}}
  */
 export function shortenAction({ mergeField, observed, target, canEdit } = {}) {
-  if (!mergeField || !canEdit) return { ask: null, reason: null }
-  if (!target) return { ask: null, reason: 'This field has no stated length rule, so there is nothing to shorten it to.' }
+  if (!mergeField || !canEdit) return { ask: null }
+  if (!target) return { ask: null }
   return {
     ask: observed
       ? `Shorten this field to fit its rule. It measures ${observed} against ${target}. Keep the meaning and drop the padding.`
       : `Shorten this field to fit its rule: ${target}. Keep the meaning and drop the padding.`,
-    reason: null,
   }
 }
 
