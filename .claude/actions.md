@@ -5127,3 +5127,56 @@ so the hash covered a different row set. My first attempt to correct for it used
 actually ran at 13:05:28. Only hashing the **11,953 oldest** rows reproduced the baseline exactly.
 **A fingerprint over a live table is not a constant; it is a constant only over a fixed row set, and
 "the rows that existed when I measured" has to be reconstructed precisely, not approximated.**
+
+### The four loop-2 fixes, and the ROOT of the empty Relevant blocks
+
+**Owner, 2026-08-28:** *"we can fix the 4 but the verification can't take just as long. did you run the
+quicker verification on what had passed and more expensive on what had failed on reruns?"* — **No, and
+that was the right criticism.** Loop 2's brief did carry a PRIOR STATE block, but I still asked it to
+rebuild a populated database from scratch for D1-D5 and D8, so it cost 27 minutes. **Loop 3 was tiered
+properly:** the cheap deterministic tier (both suites, both builds) re-run in FULL, and expensive DB
+re-derivation scoped to the migration block, which is the entire blast radius of these four fixes.
+
+| fix | proof |
+|---|---|
+| **L2-F2** two guards went blind to the loop form | `schemaRenamePairs()` now reads BOTH a literal `alter table X rename column Y to Z` AND the VALUES tuples of a `format('… %I …')` loop. Loop 1's two mutations FIRE again: M2 (block below the adds) 1 failure, M3 (review_verdict pair deleted) fires by name. Both were GREEN before this fix. |
+| **L2-F1** third stored value | Executed: `before: jd_real,jd_text,raw_jd` -> `after: jd_html,jd_posting_raw,jd_posting_snapshot`. **My first attempt at this proof was worthless** — the seed INSERTs failed on an unrelated `prompt_source` CHECK, so `before` read `(none)` and the migration had nothing to migrate. Absent evidence is not a pass; I re-seeded with a valid `prompt_source` and got the real result. |
+| **L2-F3** asymmetric refusal | Empty OLD + populated NEW now **exit 0** with the stale column gone (was abort/3). BOTH populated still **exit 3** with both values intact. |
+| **L2-F4** unscoped `information_schema` | 2 lookups now filtered to `table_schema='public'`. |
+| **deploy fix** | `DEPLOYED_SHA` set in `api-deploy.yml`, returned by `appHealth.ts` as `deployedSha`, and the poll waits for EQUALITY and **fails the job** if convergence never happens. `H:deploy-waits-for-its-own-build` mutation-proven THREE ways. **The first mutation reported a false clean because the edit silently did not apply** — re-run after confirming the file actually changed, it fired. A mutation that does not apply is not a mutation. |
+
+Deploy window (D1) re-checked after all four edits: 3 runs exit 0, data recovered. `dimensionsDb` 7/7
+and `schemaParity` 2/2 in isolation, **0 skipped**; app 391/391.
+
+**A regression the fixes exposed, worth its own note:** `dimensionsDb` failed with
+`column "jd_text_sha256" of relation "requirement" does not exist` — because `origin/main` NOW CARRIES
+THE RENAME, so `schemaSqlAt('origin/main')` returns the post-rename schema and the fixture's old names
+became wrong in the opposite direction from this morning. **That fixture is a mirror of the base
+schema, not a free-standing choice of names: when a rename lands on main, it moves with it.** Comment
+updated to say so, since it has now been wrong in both directions in one day.
+
+### ROOT CAUSE — the empty Relevant blocks are not a dedup defect
+
+The owner rejected my first explanation: *"I find it hard to believe the skills that were there didn't
+satisfy at all. this is supposed to swap the least relevant skills with ones that are missing vs the
+jd requirements… the template is clean so it's some step after that which is the root."* Correct on
+every count. Traced from the rebuild's own stored lineage — logged as
+`D:call3-empty-falls-through-to-a-wholesale-rewrite`:
+
+1. **Call 3 returned EMPTY** for both skills slots. `assemblePackage` is
+   `firstNonEmpty(call3.finalSkills1, call2.skills1, …)`, so an empty QC pass is indistinguishable
+   from one that wasn't needed. **It falls through silently** — not one of the build's 23 warnings
+   says Call 3 produced nothing.
+2. **Call 2 retained 0 of Call 1's 10 items**, though its documented instruction is to replace only
+   *the least relevant*. Call 1's list was concrete (Cloud Architecture, DevSecOps Practices); Call
+   2's was generic (Business Alignment, Culture of Innovation). **No retention floor is checked**, so
+   "replace the weak ones" and "replace everything" look identical to the assembler.
+3. **Call 2 has no cross-slot awareness** — the same ten items went to `skills1` and, split 3/3/3, to
+   `relevant1/2/3`. The owner named this exactly: *"missing a check to see if they exist before adding
+   which would prevent the wasteful dedup."*
+4. `dedupeAcrossLists` then correctly removed all nine, emptying the Relevant blocks.
+
+**Why it survived for weeks:** the model has always duplicated across slots — the OLD build's loop-3
+rows show every `RelevantBullets1` item already in `SkillsBullets1` — but before the normaliser landed
+(2026-08-22) the duplicates were RENDERED TWICE rather than removed. The normaliser did not cause the
+defect; it made a long-standing one visible.

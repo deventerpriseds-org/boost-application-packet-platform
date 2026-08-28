@@ -91,7 +91,8 @@ jobs:
             --resource-group EnterpriseDS_ResourceGRP \
             --settings \
               GOOGLE_SERVICE_ACCOUNT_JSON='${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}' \
-              ZAPIER_DOCS_FOLDER_ID='1MlVLMSQ0EQJoAtpKC1Mv7mDCAJDmdJTt'
+              ZAPIER_DOCS_FOLDER_ID='1MlVLMSQ0EQJoAtpKC1Mv7mDCAJDmdJTt' \
+              DEPLOYED_SHA='${{ github.sha }}'
 
       # A table registered in SCHEMA_SQL is not thereby IN production. `comparison_dimension` was
       # registered in all three places — that is what ledger row D21 closed — and still did not exist
@@ -112,12 +113,28 @@ jobs:
 
           # A new deploy restarts the worker and the route 404s until it converges. Poll for
           # readiness rather than guessing a sleep length.
-          for i in $(seq 1 30); do
-            code=$(curl -s -o /dev/null -w '%{http_code}' "$API/api/health" || true)
-            [ "$code" = "200" ] && break
-            echo "worker not up yet (health=$code), attempt $i"
+          #
+          # POLL FOR THE SHA, NOT FOR A 200. A 200 proves SOMETHING is serving, not that THIS build
+          # is -- the old worker answers 200 just as happily. On 2026-08-28 this poll cleared in ~85s
+          # against a ~90-120s convergence, so the pg-migrate below ran the PREVIOUS bundle's
+          # SCHEMA_SQL, answered `ok:true, "Schema applied... 31/31 tables present"`, and the JD
+          # column rename had not happened. Green deploy, old schema, no error anywhere. The only
+          # thing that distinguishes the two workers is which commit they are running, so that is
+          # what we wait for. `DEPLOYED_SHA` is set in the app settings above and returned by
+          # /api/health.
+          WANT="${{ github.sha }}"
+          converged=""
+          for i in $(seq 1 40); do
+            got=$(curl -s --max-time 10 "$API/api/health" | python3 -c "import json,sys; print((json.load(sys.stdin).get('deployedSha') or ''))" 2>/dev/null || true)
+            if [ "$got" = "$WANT" ]; then converged=yes; echo "worker is serving $WANT after $i attempt(s)"; break; fi
+            echo "waiting for $WANT to serve (health reports '${got:-<none>}'), attempt $i"
             sleep 6
           done
+          if [ -z "$converged" ]; then
+            echo "FAILED: the worker never reported deployedSha=$WANT. Refusing to migrate, because"
+            echo "pg-migrate would run whichever bundle IS serving and report success for it."
+            exit 1
+          fi
 
           body=$(curl -sS -X POST "$API/api/diag/pg-migrate")
           echo "$body" | head -c 4000

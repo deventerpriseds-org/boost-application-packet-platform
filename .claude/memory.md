@@ -4499,3 +4499,33 @@ Guarded by `H:rename-survives-the-deploy-window`, mutation-proven against the ex
 real production risk. The verifier measured it: ~4 ms exclusive window, 164 ms for the 11,503-row
 update. **I stated a speculative risk in a PR body and in a message to the owner without measuring it,
 when measuring it took one command.** Calibrate warnings to evidence the same way as claims.
+
+### Hardening — a refactor for readability silently disarmed two mutation-proved guards
+
+**The miss.** I collapsed seven literal `alter table X rename column Y to Z` statements into one
+plpgsql loop over a VALUES list using `execute format('… %I …')`. Both guards that find renames do so
+by regex for that literal, and `%I` is not `\w+`. **10 renames visible before, 3 after.** The two
+mutations I had recorded as FIRING hours earlier both went green. The guards did not fail — they had
+nothing left to say. Found by an independent verifier, not by me, and not by the suite.
+
+**The transferable rule:** a guard that derives its input from the SHAPE of the code it guards is
+silently disarmed by any refactor of that shape. Key the guard off the FACT (a rename happens), not
+off one spelling of it — `schemaRenamePairs()` now reads both forms. And when you refactor code that a
+guard reads, **re-run that guard's mutation, not just the suite**: green after a refactor proves the
+guard still runs, never that it still sees anything.
+
+**Second lesson, same session, about proof hygiene.** Three separate times today a check I ran proved
+nothing and looked like it had:
+- a mutation that **did not apply** (shell escaping) reported "correctly failed to fail";
+- a seed INSERT that **failed on an unrelated CHECK** left `before: (none)`, so the migration had no
+  rows to migrate and "passed";
+- an offset fingerprint compared across a **live table that had gained rows**, so it differed for a
+  reason that had nothing to do with the change.
+Each was caught only by looking at the intermediate value rather than the verdict. **Before believing
+any negative result, confirm the setup actually took**: the mutation changed the file, the seed rows
+exist, the row set is the same one. Absent evidence is `not_applicable`, never `pass`.
+
+**Third: a fixture that mirrors `origin/main` moves when main moves.** `dimensionsDb`'s `populatedDb`
+applies `schemaSqlAt('origin/main')`. I reverted it to pre-rename names this morning (correct then),
+and after the rename LANDED the same names broke it in the opposite direction. It is a mirror of the
+base schema, not a naming choice.

@@ -4297,6 +4297,43 @@ test('H:jd-column-rename-complete: no executable reference to a pre-rename JD co
 // consumer then reads the new name, gets NULL, and for `resolvePostingSource` that is a LEGITIMATE
 // state (`source: null`) rather than an error -- so the system degrades silently. This guard is the
 // only thing standing between that outcome and a future edit that moves a block for tidiness.
+/**
+ * Every (table, oldCol, newCol) rename the schema performs, in BOTH forms it can be written.
+ *
+ * WHY THIS EXISTS, and it is the sharpest lesson of the JD rename. Two guards below found renames by
+ * matching the literal `alter table X rename column Y to Z`. A refactor then replaced seven literal
+ * statements with one plpgsql loop over a VALUES list executing `format('alter table %I rename
+ * column %I to %I', ...)`. `%I` is not `\w+`, so the renames became INVISIBLE to both guards. They
+ * did not fail -- they had nothing left to say. Measured by an independent verifier: 10 renames
+ * visible before the refactor, 3 after (only the untouched `remediation_loop` literals), and the two
+ * mutations that had been recorded as FIRING both went green.
+ *
+ * A guard that derives its input from the SHAPE of the code it guards is silently disarmed by any
+ * refactor of that shape. Reading both forms is the fix; the general rule is that a guard must key
+ * off the FACT (a rename happens) rather than off one spelling of it.
+ */
+export function schemaRenamePairs (sql) {
+  const pairs = []
+  const add = (tbl, oldCol, newCol) => {
+    if (!pairs.some((p) => p.tbl === tbl && p.oldCol === oldCol && p.newCol === newCol)) {
+      pairs.push({ tbl, oldCol, newCol })
+    }
+  }
+  // Form 1 -- a literal statement.
+  for (const m of sql.matchAll(/alter table\s+(\w+)\s+rename column\s+(\w+)\s+to\s+(\w+)/g)) {
+    add(m[1], m[2], m[3])
+  }
+  // Form 2 -- a VALUES tuple driving a `format('alter table %I rename column %I to %I', ...)` loop.
+  // Only read tuples when such a format() call is actually present, so an unrelated 3-tuple list
+  // elsewhere in the schema cannot be mistaken for a rename table.
+  if (/format\(\s*'alter table %I rename column %I to %I'/.test(sql)) {
+    for (const m of sql.matchAll(/\(\s*'(\w+)'\s*,\s*'(\w+)'\s*,\s*'(\w+)'\s*\)/g)) {
+      add(m[1], m[2], m[3])
+    }
+  }
+  return pairs
+}
+
 test('H:rename-precedes-its-adds: a guarded rename runs before the add of the column it creates', () => {
   const whole = src('schema.ts')
   const sql = whole.slice(whole.indexOf('SCHEMA_SQL = '))
@@ -4304,9 +4341,12 @@ test('H:rename-precedes-its-adds: a guarded rename runs before the add of the co
   // Every `rename column OLD to NEW` in the file, wherever it lives, with the end of the `do $$`
   // block that contains it. Keyed off the rename itself rather than off one named block, so a
   // second rename block added later inherits the guard without anyone remembering to extend it.
-  for (const m of sql.matchAll(/alter table\s+(\w+)\s+rename column\s+(\w+)\s+to\s+(\w+)/g)) {
-    const [, table, , newCol] = m
-    const renameAt = m.index
+  for (const r of schemaRenamePairs(sql)) {
+    const table = r.tbl, newCol = r.newCol
+    // Position of the rename, whichever form it takes. A VALUES tuple's position is the tuple's.
+    const lit = sql.indexOf(`rename column ${r.oldCol} to ${newCol}`)
+    const tup = sql.search(new RegExp(`\\(\\s*'${r.tbl}'\\s*,\\s*'${r.oldCol}'\\s*,\\s*'${newCol}'\\s*\\)`))
+    const renameAt = lit >= 0 ? lit : tup
     const addRe = new RegExp(`alter table\\s+${table}\\s+add column if not exists\\s+${newCol}\\b`, 'g')
     for (const a of sql.matchAll(addRe)) {
       if (a.index < renameAt) {
@@ -4348,11 +4388,10 @@ test('H:rename-covers-every-table-declaring-the-column: every table declaring a 
   // table -> set of NEW column names the migration renames TO on that table
   const renamed = new Map()
   const newNames = new Set()
-  for (const m of sql.matchAll(/alter table\s+(\w+)\s+rename column\s+(\w+)\s+to\s+(\w+)/g)) {
-    const [, table, , newCol] = m
-    if (!renamed.has(table)) renamed.set(table, new Set())
-    renamed.get(table).add(newCol)
-    newNames.add(newCol)
+  for (const r of schemaRenamePairs(sql)) {
+    if (!renamed.has(r.tbl)) renamed.set(r.tbl, new Set())
+    renamed.get(r.tbl).add(r.newCol)
+    newNames.add(r.newCol)
   }
   // Nothing to check on a schema with no renames — and say so rather than passing vacuously.
   if (!newNames.size) return
@@ -4424,4 +4463,42 @@ test('H:rename-survives-the-deploy-window: a rename handles the new column alrea
   // (blocking every deploy) or never (dropping real data).
   assert.match(block, /is not null/,
     'the refusal is not conditioned on the new column holding data')
+})
+
+// ---------------------------------------------------------------------------------------------
+// H:deploy-waits-for-its-own-build — the migration must not run against whatever bundle happens to
+// be serving.
+//
+// MEASURED IN PRODUCTION, 2026-08-28. `api-deploy.yml` polled `GET /api/health` for a 200 and then
+// POSTed `/api/diag/pg-migrate`. `/api/health` carried no build identity, so a 200 proved the app was
+// UP, not that the NEW code was serving. Run 33180519012 polled at 14:30:45 and migrated at 14:32:10
+// -- ~85s, against a ~90-120s worker convergence -- so pg-migrate executed the PREVIOUS bundle's
+// SCHEMA_SQL and answered, truthfully, `ok:true, "Schema applied... 31/31 tables present"`. The JD
+// rename had not happened. `information_schema` still showed every old column. The deploy was GREEN.
+//
+// This is not specific to that rename: EVERY schema change inherits it, and it fails green, which is
+// the worst way for a migration to fail. The fix gives the running code an identity and waits for it.
+//
+// Asserted structurally because there is no way to exercise a deploy from a test process. All three
+// halves are required and each fails differently if dropped: without the app setting the value is
+// always null; without the health field the poll can never see it; without the equality check the
+// poll is back to accepting any 200.
+test('H:deploy-waits-for-its-own-build: pg-migrate cannot run against an older bundle', () => {
+  const wf = readFileSync(new URL('../../.github/workflows/api-deploy.yml', import.meta.url).pathname, 'utf8')
+  const health = src('appHealth.ts')
+
+  assert.match(health, /deployedSha/,
+    '/api/health does not report which build is answering, so the deploy poll cannot tell the new ' +
+    'worker from the old one and pg-migrate can migrate the previous bundle')
+  assert.match(wf, /DEPLOYED_SHA=?'?\$\{\{ github\.sha \}\}'?/,
+    'api-deploy.yml never sets DEPLOYED_SHA on the Function App, so /api/health will always report null')
+  assert.match(wf, /deployedSha/,
+    'the deploy does not read deployedSha back, so it is still polling for a bare 200')
+  // The equality is the whole point: polling for the FIELD but not comparing it would pass the two
+  // assertions above while restoring the exact defect.
+  assert.ok(/\$got"?\s*=\s*"?\$WANT/.test(wf) || /got.*==.*WANT/.test(wf),
+    'the deploy polls for deployedSha but never compares it to the commit being deployed')
+  // And it must refuse rather than migrate anyway when convergence never happens.
+  assert.match(wf, /Refusing to migrate/,
+    'when the worker never reports the deployed sha the workflow must FAIL, not fall through to pg-migrate')
 })

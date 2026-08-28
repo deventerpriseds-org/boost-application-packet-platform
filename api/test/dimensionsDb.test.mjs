@@ -7,12 +7,19 @@
 // constraint added to an existing table is never applied at all. The database this test builds is
 // the one production has: `origin/main`'s SCHEMA_SQL, plus the columns the ensure-paths added
 // (`jd_text`, `jd_real`, …, which are NOT in SCHEMA_SQL), plus requirement, evidence and fact rows.
-// THESE STAY PRE-RENAME ON PURPOSE. `populatedDb` models the database a migration MEETS: built by
-// `origin/main`'s SCHEMA_SQL and main's ensure-paths, so it carries the OLD column names. The test
-// body then applies the WORKING TREE's schema on top — that is the migration under test. Renaming
-// these to the post-rename names (a blanket sweep did exactly that on 2026-08-28) destroys the
-// fixture: it builds a database that already has the new names, so the rename's `not exists`
-// guard is false and the migration is never exercised at all.
+// THESE TRACK `origin/main`, WHICH IS THE POINT AND ALSO THE TRAP. `populatedDb` models the database
+// a migration MEETS: built by
+// `origin/main`'s SCHEMA_SQL and main's ensure-paths. The test body then applies the WORKING TREE's
+// schema on top — that is the migration under test.
+//
+// So these names must match whatever `origin/main` CURRENTLY declares, and that moved twice in one
+// day: a blanket sweep renamed them while main was still pre-rename (breaking the fixture, which
+// then built a database that already had the new names and never exercised the migration at all),
+// and then the rename LANDED on main, making the old names wrong in the opposite direction —
+// `column "jd_text_sha256" of relation "requirement" does not exist`.
+//
+// The rule: when a rename lands on main, this fixture moves with it. It is not a free-standing
+// choice of names; it is a mirror of the base schema, and a stale mirror fails loudly either way.
 //
 // Skipped, loudly, when no local PostgreSQL is available — a DB test that silently no-ops is
 // absent evidence read as a pass.
@@ -96,10 +103,10 @@ async function populatedDb(name) {
   // The columns the live database has from ensure-paths rather than from SCHEMA_SQL. Reproducing
   // that is the point: the database a migration meets is the one the ensure-paths built.
   await c.query(`alter table opportunity
-    add column if not exists raw_jd text, add column if not exists jd_real text,
+    add column if not exists jd_posting_raw text, add column if not exists jd_html text,
     add column if not exists jd_summary text, add column if not exists jd_table jsonb,
-    add column if not exists jd_text text, add column if not exists jd_text_sha256 text,
-    add column if not exists jd_text_truncated boolean`)
+    add column if not exists jd_posting_snapshot text, add column if not exists jd_posting_snapshot_sha256 text,
+    add column if not exists jd_posting_snapshot_truncated boolean`)
   // `requirement_evidence.proposal_version` is an ensure-path column for the same reason the
   // opportunity ones are: `ensureEvidenceTable` adds it, SCHEMA_SQL's ALTER widens the CHECK, and
   // `loadRequirementsWithEvidence` selects it. Reproducing it here is keeping the fixture faithful
@@ -112,7 +119,7 @@ async function populatedDb(name) {
 
   const owner = 'von.ellis@enterpriseds.io'
   const opp = (await c.query(
-    `insert into opportunity (owner_email, company, role, stage, jd_text, jd_text_sha256)
+    `insert into opportunity (owner_email, company, role, stage, jd_posting_snapshot, jd_posting_snapshot_sha256)
      values ($1,'SafetyIQ','VP of Engineering','saved','posting body','deadbeef') returning id`, [owner])).rows[0].id
   const lines = [
     [0, 'Requires 10+ years of engineering leadership experience', 'must_have'],
@@ -125,7 +132,7 @@ async function populatedDb(name) {
   for (const [seq, text, kind] of lines) {
     await c.query(
       `insert into requirement (opp_id, seq, item_text, verbatim, char_start, char_end, match_method,
-         kind, kind_source, weight, jd_text_sha256, extractor_version)
+         kind, kind_source, weight, jd_posting_snapshot_sha256, extractor_version)
        values ($1,$2,$3,null,null,null,'unlocatable',$4,'category_default',2,'deadbeef',2)`,
       [opp, seq, text, kind])
   }

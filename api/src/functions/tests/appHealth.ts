@@ -26,6 +26,14 @@ export async function appHealth(req: HttpRequest): Promise<HttpResponseInit> {
   out.checks.tavily = { ok: !!(process.env.TAVILY_API_KEY || '').trim() }
   out.checks.session = { ok: !!(process.env.SESSION_SIGNING_SECRET || process.env.MICROSOFT_CLIENT_SECRET) }
   out.ok = out.checks.db.ok
+  // WHICH BUILD IS ANSWERING. Without this, a 200 from /api/health proves only that SOMETHING is
+  // serving -- and on 2026-08-28 that cost us a migration. `api-deploy.yml` polls this route for a
+  // 200 and then POSTs /api/diag/pg-migrate; the OLD worker answers 200 just as happily as the new
+  // one, the poll cleared in ~85s against a ~90-120s worker convergence, and pg-migrate ran the
+  // PREVIOUS bundle's SCHEMA_SQL. It reported `ok:true, "Schema applied... 31/31 tables present"`
+  // and the JD rename had not happened. The deploy was green and the schema was the old one.
+  // The workflow now polls until this value EQUALS the commit it just deployed.
+  out.deployedSha = process.env.DEPLOYED_SHA || null
   return { status: out.ok ? 200 : 503, headers: HEADERS, jsonBody: out }
 }
 

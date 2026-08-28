@@ -1289,3 +1289,38 @@ select table_schema, table_name from information_schema.columns
 ```
 If that returns only `public` rows, this is theoretical. **Fix is one clause per lookup:**
 `and table_schema = 'public'` (or `current_schema()`), plus schema-qualifying the `format`.
+
+### L2-F2, continued — what the now-blind guard would have let ship, measured at the database level
+
+Because the hardening suite is green on M3a (the deleted `review_verdict` pair), I took that
+mutation all the way to a database rather than stopping at the test result:
+
+```
+$ # M3a still applied, rebuilt, SCHEMA_SQL re-dumped
+$ psql -v ON_ERROR_STOP=1 -q -d m3aup    -f /tmp/schema_main_nv.sql ; -f /tmp/seed.sql
+$ psql -v ON_ERROR_STOP=1 -q -d m3aup    -f /tmp/schema_M3a_nv.sql       MUTATED on POPULATED db EXIT=0
+$ psql -v ON_ERROR_STOP=1 -q -d m3afresh -f /tmp/schema_M3a_nv.sql       MUTATED on FRESH db     EXIT=0
+
+--- review_verdict JD columns ---
+upgraded: jd_text_sha256                    <-- keeps the OLD name forever
+fresh:    jd_posting_snapshot_sha256        <-- new name, because create table carries it
+```
+And then the branch's own verdict writer (`appReviewer.ts:272`) against that upgraded database:
+```
+$ insert into review_verdict (..., posting_source, jd_posting_snapshot_sha256) values (...)
+ERROR:  column "jd_posting_snapshot_sha256" of relation "review_verdict" does not exist
+```
+So the deleted pair is not cosmetic — **every reviewer verdict write would 42703 on production**,
+which is precisely the incident the guard's own comment records. `H:rename-covers-every-table-declaring-the-column`
+was written to make that class impossible to reintroduce, and after this refactor it no longer can.
+
+**What still covers it.** The upgraded-vs-fresh column sets diverge (shown above), and that
+divergence is exactly the comparison `schemaParity.test.mjs` makes — loop 1 measured that same test
+catching the analogous `opportunity` deletion (`+ [ 'opportunity.jd_text text null=YES default=NONE' ]`).
+I executed the comparison by hand on the two real databases; I did **not** get a clean run of
+`schemaParity.test.mjs` itself against this mutation, because the DB-backed suites are extremely
+I/O-bound in this container (`p84pg` logged a single checkpoint with `sync files=3892, total=270s`,
+and `dimensionsDb.test.mjs` was still running after 31 minutes before I killed it). So:
+**Observation** — the divergence schemaParity asserts on is present. **Inference** — schemaParity
+would therefore fail. The behaviour is very likely still covered; the *guard* is not, and the guard
+is the thing that names the offending table and explains why.

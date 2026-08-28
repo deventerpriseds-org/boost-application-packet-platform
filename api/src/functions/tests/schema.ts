@@ -1150,7 +1150,8 @@ alter table opportunity    add column if not exists base_score int;
 do $$
 declare
   r record;
-  n bigint;
+  n_new bigint;
+  n_old bigint;
 begin
   for r in
     select * from (values
@@ -1167,17 +1168,36 @@ begin
     -- on every deploy, which it must be -- SCHEMA_SQL is applied every time.
     continue when not exists (
       select 1 from information_schema.columns
-       where table_name = r.tbl and column_name = r.old_col);
+       where table_schema = 'public' and table_name = r.tbl and column_name = r.old_col);
 
     if exists (select 1 from information_schema.columns
-                where table_name = r.tbl and column_name = r.new_col) then
-      execute format('select count(*) from %I where %I is not null', r.tbl, r.new_col) into n;
-      if n > 0 then
+                where table_schema = 'public' and table_name = r.tbl and column_name = r.new_col) then
+      -- BOTH columns exist. Exactly one of them can be the real data, and which one it is is decided
+      -- by which is EMPTY -- an empty column is a placeholder some path created, never data.
+      --
+      -- L2-F3. The first version only handled "new is empty" and raised on everything else, which
+      -- made the refusal ASYMMETRIC: once the rename had happened and a stale path re-created the OLD
+      -- name as an empty column, every subsequent deploy hit the raise and aborted the whole
+      -- migration. That is a self-inflicted outage on a database that is already CORRECT. The
+      -- symmetric reading is the honest one: drop whichever side is empty, refuse only when BOTH
+      -- hold rows, because only then is there a real question about which is authoritative.
+      execute format('select count(*) from %I where %I is not null', r.tbl, r.new_col) into n_new;
+      execute format('select count(*) from %I where %I is not null', r.tbl, r.old_col) into n_old;
+
+      if n_new > 0 and n_old > 0 then
         raise exception
-          'jd-rename: %.% still exists and %.% already holds % non-null row(s). Refusing to guess which is authoritative.',
-          r.tbl, r.old_col, r.tbl, r.new_col, n;
+          'jd-rename: %.% holds % non-null row(s) and %.% holds %. Both carry data; refusing to guess which is authoritative.',
+          r.tbl, r.old_col, n_old, r.tbl, r.new_col, n_new;
       end if;
-      execute format('alter table %I drop column %I', r.tbl, r.new_col);
+
+      if n_new = 0 then
+        -- the deploy-window placeholder: drop it and let the rename proceed
+        execute format('alter table %I drop column %I', r.tbl, r.new_col);
+      else
+        -- the rename ALREADY happened; the old name is the empty leftover. Drop it and move on.
+        execute format('alter table %I drop column %I', r.tbl, r.old_col);
+        continue;
+      end if;
     end if;
 
     execute format('alter table %I rename column %I to %I', r.tbl, r.old_col, r.new_col);
@@ -1205,6 +1225,13 @@ update requirement set jd_source = 'jd_posting_raw' where jd_source = 'raw_jd';
 -- not only where a constraint happens to police it.
 update review_verdict set posting_source = 'jd_html'        where posting_source = 'jd_real';
 update review_verdict set posting_source = 'jd_posting_raw' where posting_source = 'raw_jd';
+-- L2-F1. This column holds a THIRD old value, and the schema alone cannot tell you so -- the
+-- producer can. 'appReviewer.ts' writes 'resolved.source || <the snapshot column name>', so when the
+-- snapshot was consulted the stored literal was 'jd_text', which is neither of the two
+-- resolvePostingSource values. Migrating only the two visible in the union left the same fact
+-- recorded under two names, which is precisely the confusion this rename exists to end.
+-- GROUND TRUTH FOR A VALUE MIGRATION IS THE WRITER, NOT THE TYPE.
+update review_verdict set posting_source = 'jd_posting_snapshot' where posting_source = 'jd_text';
 do $$
 begin
   if not exists (select 1 from pg_constraint
