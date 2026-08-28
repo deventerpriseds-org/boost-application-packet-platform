@@ -520,6 +520,53 @@ Key tables (PostgreSQL):
 - iOS testing: requires macOS runner or BrowserStack; categorically unavailable in Linux CCR
 
 ## Active work
+**HANDOFF STATE, 2026-08-28 ~03:00 — the Trinnex three-step repair is COMPLETE and measured live.**
+
+The three steps the owner sequenced (*"okay fix the data then the rename"* -> *"go"* -> *"go ahead
+and rebuild"*) are all done for the DATA half. Full numbers in `actions.md`.
+
+1. **Source imported.** `jd-import.yml` fixed to write `raw_jd` (the SOURCE), not `jd_text` (a
+   snapshot the next extraction regenerates). `raw_jd` 1,054 -> **8,618** chars.
+2. **Requirements re-extracted.** 8 -> **21**; located 4 -> **18**; must-haves 2 -> **7**;
+   must-haves LOCATED **0 -> 5**.
+3. **Packet rebuilt.** Job `c34c7f15-815a-4550-a690-5878d8842f3d`, `done` 02:51:17, `built:4
+   failed:0`. Packet is `85cee965-f435-4b8e-910f-c806232092ce` (the id in earlier notes was WRONG —
+   this one came from the DB). New `pkg_json` (7,988 -> 7,784), four NEW Google documents,
+   swap_decision 36 -> 39 rows with a completely different shape (kept 20 -> 5, dropped 7 -> 19).
+   New check run: 40 pass / 13 warn / **14 fail** / 2 n/a. `must_have_coverage` now fails against 7
+   REAL must-haves where it used to pass against 2 paraphrases of a digest — an honest red replacing
+   a flattering green, which is the whole point of the repair.
+
+**NOT CONFIRMED BY THE OWNER.** The rebuilt documents have not been opened by anyone. Per the
+standing rule this is *implemented and measured in the database, NOT confirmed live by the owner.*
+
+**TWO NEW LEDGER ROWS from the rebuild** — `D:relevant-bullets-empty-after-cross-list-drop` (the
+resume renders three EMPTY bullet blocks; `empty_merge_fields` already fails x2 on it) and
+`D:call3-returns-empty-and-14kb-is-discarded` (measured size for open task #19).
+
+**THE RENAME IS BLOCKED ON THE OWNER — and the block is real, not ceremony.** The feasibility pass
+(`docs/qc-evidence/AC-jd-field-rename.md`, 743 lines, written by an independent subagent) found the
+plan of record materially wrong:
+- **It is not a pure rename.** `jd_real`/`raw_jd` are created by **five REQUEST-TIME `ensure*`
+  helpers** and by SCHEMA_SQL *not at all*. Rename only the schema and the next `jd-parse` request
+  re-creates the old columns EMPTY, and `resolvePostingSource` returns `source: null` — which the
+  system treats as a LEGITIMATE state for 116 of 1,349 opportunities. Silent, on production,
+  invisible to `tsc` and to a fresh-DB schema run.
+- **`requirement.jd_source` stores the strings `'jd_real'`/`'raw_jd'` as DATA** under a CHECK
+  constraint (`schema.ts:351`), and `create table if not exists` does NOT update it on a populated
+  database (proven on local PG 16.13). Rename the TS union without a constraint migration and every
+  requirement extraction fails at INSERT.
+- **Scope is 234 unique lines / 40 files, not "102 refs / 32 files"** — ~358 refs / ~45 files if the
+  sibling `jd_text_sha256` (82 refs) and `jd_text_truncated` (11) are included, and leaving them out
+  yields `jd_posting_snapshot` + `jd_text_sha256`, which is LESS coherent than today.
+
+**Two blocking owner decisions before any code is written:** (1) `requirement.jd_source` — rename the
+stored values, or keep the legacy strings? (2) sibling columns — in or out? A cheap alternative is on
+the table: comment + H-case at `jdText.ts:85` recording that the axis is FORMAT not provenance,
+which addresses the one recorded incident at ~2% of the risk.
+
+---
+
 **HANDOFF STATE, 2026-08-26 ~20:00 — everything is committed, pushed and landed. Nothing in flight.**
 
 - `origin/main` and `origin/claude/three-small-ui-gaps` both carry all of today's work. Clean tree.
@@ -4367,3 +4414,30 @@ schema is a claim about the schema, not the schema — the same class as "a code
 about the code". **The owner saying "that's not true" IS ground truth; my analysis was the thing
 that was wrong, and it took three pushes because I repeated the claim instead of testing it.**
 Two greps for `update opportunity set <col>` settled what three paragraphs of prose had got wrong.
+
+### Hardening — I edited a ledger row and did not run the ledger's own guard
+
+**The miss.** Earlier this session I rewrote `D:jd-field-renames` with the settled rename targets and
+landed it on `main` (`91da5e2`). The rewrite left the row at **6 columns instead of 5** — an extra
+`|` between the owner-quote cell and the `resolvePostingSource` note. Three assertions in
+`api/test/deferredLedger.test.mjs` failed on it, and one of them mattered: at 6 columns the row's
+`check:` directive lands in the wrong cell, `checkOf()` returns null, and **the row silently stops
+being machine-checked**. A ledger row that has quietly opted out of its own staleness guard is
+exactly the failure that guard exists to prevent.
+
+**It shipped because I ran no suite before landing a `.claude/*.md` edit.** The tiering rule says
+prose is tier 3 — *"just make the change"* — and I applied that to `DEFERRED.md`. **`DEFERRED.md` is
+not prose.** It is a machine-parsed table with a guard over it, a floor on row count, a grammar for
+`check:`, and a vacuity test. Editing it is closer to editing a fixture than to editing a comment.
+
+**The guardrail:** `.claude/DEFERRED.md`, `.claude/actions.md` and `docs/qc-evidence/*.md` rows are
+**tier 2, not tier 3** — any edit to a row runs `node --test test/deferredLedger.test.mjs` (233 ms)
+before the commit. The tell is whether a test file parses the thing you are editing; if it does, the
+edit is not prose no matter how much of it is English.
+
+**Second, smaller lesson:** both new rows I added in the same commit initially carried `check: grep`
+clauses pointing at code that **already exists** (`CROSS_LIST_RATIONALE_PREFIX`, `summariseBuild`).
+Those pass forever and would never stale — a check that cannot fail is not a check (the file's own
+`D:ledger-guard-not-vacuous` says so). Rewritten as `check: absent … Relevant Skills bullet list` and
+`check: absent … Missing ATS Skills` — patterns that appear only once the fix lands, so the row
+fails the day it goes stale. Verified both are currently absent from `api/src` before committing.
