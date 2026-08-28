@@ -4851,3 +4851,42 @@ in BOTH `settings.json` (immediate) and `eds-claude-skills/setup.sh` (durable �
 **The principle it encodes, which is the answer to the owner's question:** *work that is not
 deployed is work that was not done.* A commit is not a deploy, a deploy is not an effect, and a
 workflow that exists is not a workflow that ran.
+
+
+### ACT — the 23 Aug JD import DID write; it wrote the WRONG COLUMN and was undone (2026-08-27)
+
+Owner approved fixing the data before the rename. Reading the failed run's log BEFORE re-running it
+overturned the premise everyone was working from — including mine an hour earlier.
+
+**The run did not fail to write. It wrote, and something threw the write away.** From
+run `32665506496`'s own log:
+
+```
+20:47:46  UPDATE 1
+20:47:46  stored jd_text: 8618 chars
+20:47:46  ##[error] stored length (8618) does not match the file (8619)
+20:49:30  (row updated_at) -> jd_text back to 1054
+```
+
+**Two separate defects, and only one was known:**
+
+1. **The off-by-one was already fixed** by `06abee7` — `printf '%s' "$(cat "$FILE")"` strips the
+   trailing newline the `\set` never stores. Verified in the file, not assumed.
+2. **THE REAL DEFECT, unknown until now: it wrote `jd_text`, the SNAPSHOT.** `jd_text` is not
+   authorable — `requirements.ts:419` recomputes it from `resolvePostingSource(opp)` on every
+   extraction and persists it so stored char offsets keep addressing the words they were measured
+   on. Writing the snapshot while leaving `raw_jd` at 1,054 means the next extraction regenerates it
+   from the unchanged digest. **Re-running the tool as it stood would have repeated this exactly.**
+
+**Fixed:** the import now writes `raw_jd`; the refuse-if-shorter guard and the undo trail read
+`raw_jd`; the post-write check reads `raw_jd`; the closing message states plainly that `jd_text` is
+still the old snapshot and that **the import is not finished until requirements are re-extracted**.
+
+**NEW GUARD for the failure this demonstrated one level up:** refuse if `jd_real` is non-empty.
+`resolvePostingSource` PREFERS `jd_real`, so importing into `raw_jd` on such a row is a write that
+succeeds and changes nothing a reader sees — the same "reported success, no effect" class. Trinnex
+has `jd_real` NULL, so the import proceeds.
+
+**Why this vindicates the sequencing the owner chose.** Renaming first would have renamed a tool
+that was writing to the wrong column, and the rename would have looked like the cause of the next
+failure. Fix the data, then the names.
