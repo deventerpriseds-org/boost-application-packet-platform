@@ -5026,3 +5026,66 @@ deleted to make the suite green.
 populated database, but it has NOT run against production, and the AC-13 fingerprint
 (`3727da7653e2ceda64f51a800a53e535`) has NOT been re-checked live. Expect a short window of
 `column does not exist` errors during worker convergence.
+
+### Loop 2 — the independent verifier REFUTED the change, and it was right
+
+An independent `verifier` subagent (no shared context) checked C1-C12 against a real PG 16.13 with
+main's schema, the `ensure*` DDL, and seeded rows. **All twelve of my claims were CONFIRMED** — and it
+still found a **blocker** I had not looked for, plus one I had missed.
+
+**F2 — BLOCKER. The DEPLOY WINDOW.** `api-deploy.yml` deploys the CODE, polls `/api/health` until the
+worker serves, and only THEN posts `/api/diag/pg-migrate`. In that window the new code runs against
+the OLD database, and the request-time `ensure*` helpers execute
+`add column if not exists jd_html text` on ordinary traffic — `jdBackfillTick` (3 min) and
+`jdParseTick` (5 min) reach one with no human involved. So the migration meets a database where the
+NEW columns already exist and are EMPTY, my `and not exists (…jd_html)` guard evaluates FALSE, the
+rename never fires, and **the migration exits 0**. Measured by the verifier:
+
+    branch schema exit=0                       <-- GREEN
+    jd_real = '<p>HTML BODY ONE</p>'   jd_html = (null)
+    jd_text = 'SNAPSHOT ONE ...'       jd_posting_snapshot = (null)
+
+It does **not** self-heal — the double condition that makes the block idempotent is what makes the
+stranding permanent — and it **half-migrates**, because `requirement` and `review_verdict` have no
+ensure* path so they DO rename while `opportunity` does not, leaving `requirement.jd_source` reading
+`'jd_html'` while `opportunity.jd_html` is NULL.
+
+**How I missed it.** I traced the five `ensure*` helpers as something the RENAME had to cover, and
+never asked what they do DURING THE DEPLOY WINDOW. The repo's own `dimensionsDb` comment states the
+hazard verbatim — *"`api-deploy.yml` deploys the code BEFORE it runs `pg-migrate`, so a read-path
+column that only SCHEMA_SQL adds is missing for the length of that window"* — and I read that comment
+while fixing the fixture and did not apply it to my own change.
+
+**The fix.** An empty new column is a PLACEHOLDER the window created, not data: drop it, then rename.
+A NON-EMPTY new column beside a surviving old one is genuinely ambiguous, so the block now REFUSES
+loudly rather than guessing. Driven from a VALUES list in one loop instead of seven hand-copied
+blocks — the hand-copied version is how a table got missed in the first place.
+
+Proven by execution on PG 16.13, all three paths:
+
+| scenario | result |
+|---|---|
+| deploy window (new columns pre-created EMPTY) | `jd_html=<p>HTML BODY ONE</p>`, `jd_posting_raw=PLAIN SOURCE ONE`, `jd_posting_snapshot=SNAPSHOT ONE…`; **old columns: NONE** |
+| idempotency after that recovery | runs 2, 3, 4 all **exit 0**, data intact |
+| old column + NON-EMPTY new column | **psql exit 3** — `jd-rename: opportunity.jd_real still exists and opportunity.jd_html already holds 1 non-null row(s). Refusing to guess which is authoritative.` Both values left intact. |
+
+**F1 — `review_verdict.posting_source`** stores the SAME renamed vocabulary as `requirement.jd_source`
+(both written from `resolvePostingSource(...).source`, `appReviewer.ts:215`) and was not value-migrated.
+It survived only because that column has no CHECK, so nothing failed loudly — it would simply have
+read `'jd_real'` forever while every other surface said `'jd_html'`. Now migrated.
+**The rule: a value is part of a rename wherever a renamed identifier is STORED, not only where a
+constraint polices it.**
+
+**A claim in my PR body that the verifier DISPROVED:** I warned about `ACCESS EXCLUSIVE` lock risk.
+Measured at production scale (11,957 rows): `UPDATE 11503` **164 ms**, `UPDATE 453` **13 ms**,
+`ALTER TABLE` **3.5 ms**, whole schema re-run **135 ms**. The exclusive window is ~4 ms. **Not a real
+risk** — I was speculating, and said so with more confidence than the evidence supported.
+
+**The verifier also corrected itself**, which is worth recording: it first reported guard 3 as having
+a coverage hole, then refuted its own finding on running the third DB suite (`schemaParity` catches
+it) and downgraded it to a precision note, leaving the original claim in the file so the correction is
+auditable.
+
+**Fourth guard added and mutation-proven:** `H:rename-survives-the-deploy-window`. Reverting the block
+to the `new column exists => skip` shape fails it with *"never drops the empty placeholder a
+deploy-window ensure* helper creates"*.

@@ -1118,58 +1118,70 @@ alter table opportunity    add column if not exists base_score int;
 -- add ran first it would create an EMPTY 'jd_posting_snapshot', the 'not exists' guard would then be
 -- false, the rename would never fire, and the real data would sit in 'jd_text' forever behind a
 -- fully-populated old column and an empty new one -- a silent no-op that looks like success.
+-- THE DEPLOY WINDOW IS WHY THIS IS NOT A PLAIN GUARDED RENAME. An independent verifier proved the
+-- first version of this block silently strands every value, and it is worth stating exactly how,
+-- because the failure exits 0 and never self-heals.
+--
+-- 'api-deploy.yml' deploys the CODE, polls /api/health until the worker is serving, and only THEN
+-- posts /api/diag/pg-migrate. In that window the new code is live against the OLD database, and the
+-- five request-time 'ensure*' helpers run 'add column if not exists jd_html text' on ordinary
+-- traffic -- 'jdBackfillTick' every 3 minutes and 'jdParseTick' every 5 minutes reach one with no
+-- human involved. So by the time the migration runs, the NEW columns already exist and are EMPTY.
+--
+-- A guard of the form 'old exists AND new does NOT exist' is then FALSE, the rename never fires, and
+-- the migration reports success. Measured:
+--
+--     branch schema exit=0            <-- GREEN
+--     jd_real  = '<p>HTML BODY ONE</p>'   jd_html = (null)
+--     jd_text  = 'SNAPSHOT ONE ...'       jd_posting_snapshot = (null)
+--
+-- Runs 2 and 3 do not recover it: the same double condition that makes the block idempotent is what
+-- makes the stranding permanent. Worse, it half-migrates -- 'requirement' and 'review_verdict' have
+-- no ensure* path so they DO rename, and 'requirement.jd_source' still flips to 'jd_html' while
+-- 'opportunity.jd_html' is NULL.
+--
+-- THE FIX: an empty new column is a PLACEHOLDER the deploy window created, not data. Drop it, then
+-- rename. A NON-EMPTY new column alongside a surviving old one is genuinely ambiguous, so the block
+-- REFUSES LOUDLY rather than guessing which one is authoritative -- absent evidence is never a pass,
+-- and picking wrong here would destroy the employer's posting text.
+--
+-- Driven from a list rather than seven copy-pasted blocks: the first version repeated the guard by
+-- hand and a table was missed. One loop cannot be missed.
 do $$
+declare
+  r record;
+  n bigint;
 begin
-  if exists (select 1 from information_schema.columns
-              where table_name = 'opportunity' and column_name = 'jd_real')
-     and not exists (select 1 from information_schema.columns
-              where table_name = 'opportunity' and column_name = 'jd_html') then
-    alter table opportunity rename column jd_real to jd_html;
-  end if;
-  if exists (select 1 from information_schema.columns
-              where table_name = 'opportunity' and column_name = 'raw_jd')
-     and not exists (select 1 from information_schema.columns
-              where table_name = 'opportunity' and column_name = 'jd_posting_raw') then
-    alter table opportunity rename column raw_jd to jd_posting_raw;
-  end if;
-  if exists (select 1 from information_schema.columns
-              where table_name = 'opportunity' and column_name = 'jd_text')
-     and not exists (select 1 from information_schema.columns
-              where table_name = 'opportunity' and column_name = 'jd_posting_snapshot') then
-    alter table opportunity rename column jd_text to jd_posting_snapshot;
-  end if;
-  if exists (select 1 from information_schema.columns
-              where table_name = 'opportunity' and column_name = 'jd_text_sha256')
-     and not exists (select 1 from information_schema.columns
-              where table_name = 'opportunity' and column_name = 'jd_posting_snapshot_sha256') then
-    alter table opportunity rename column jd_text_sha256 to jd_posting_snapshot_sha256;
-  end if;
-  if exists (select 1 from information_schema.columns
-              where table_name = 'opportunity' and column_name = 'jd_text_truncated')
-     and not exists (select 1 from information_schema.columns
-              where table_name = 'opportunity' and column_name = 'jd_posting_snapshot_truncated') then
-    alter table opportunity rename column jd_text_truncated to jd_posting_snapshot_truncated;
-  end if;
-  -- THREE TABLES CARRY jd_text_sha256, NOT ONE. 'requirement' pins the snapshot each offset was
-  -- measured against, and 'review_verdict' records which snapshot the reviewer judged. Renaming only
-  -- the 'opportunity' copy was a real defect in the first draft of this block: the CREATE TABLE
-  -- declarations for both were renamed by the sweep while the migration was not, so on a POPULATED
-  -- database the writers began naming a column that had never been renamed. Caught by
-  -- 'dimensionsDb.test.mjs' -- which builds a populated database with the previous schema and applies
-  -- this one on top -- with 'column "jd_posting_snapshot_sha256" of relation "requirement" does not
-  -- exist'. A fresh-database run cannot see it, because there the CREATE TABLE carries the new name.
-  if exists (select 1 from information_schema.columns
-              where table_name = 'requirement' and column_name = 'jd_text_sha256')
-     and not exists (select 1 from information_schema.columns
-              where table_name = 'requirement' and column_name = 'jd_posting_snapshot_sha256') then
-    alter table requirement rename column jd_text_sha256 to jd_posting_snapshot_sha256;
-  end if;
-  if exists (select 1 from information_schema.columns
-              where table_name = 'review_verdict' and column_name = 'jd_text_sha256')
-     and not exists (select 1 from information_schema.columns
-              where table_name = 'review_verdict' and column_name = 'jd_posting_snapshot_sha256') then
-    alter table review_verdict rename column jd_text_sha256 to jd_posting_snapshot_sha256;
-  end if;
+  for r in
+    select * from (values
+      ('opportunity',    'jd_real',           'jd_html'),
+      ('opportunity',    'raw_jd',            'jd_posting_raw'),
+      ('opportunity',    'jd_text',           'jd_posting_snapshot'),
+      ('opportunity',    'jd_text_sha256',    'jd_posting_snapshot_sha256'),
+      ('opportunity',    'jd_text_truncated', 'jd_posting_snapshot_truncated'),
+      ('requirement',    'jd_text_sha256',    'jd_posting_snapshot_sha256'),
+      ('review_verdict', 'jd_text_sha256',    'jd_posting_snapshot_sha256')
+    ) as t(tbl, old_col, new_col)
+  loop
+    -- The old column is gone: this rename already happened. This is what makes the block re-runnable
+    -- on every deploy, which it must be -- SCHEMA_SQL is applied every time.
+    continue when not exists (
+      select 1 from information_schema.columns
+       where table_name = r.tbl and column_name = r.old_col);
+
+    if exists (select 1 from information_schema.columns
+                where table_name = r.tbl and column_name = r.new_col) then
+      execute format('select count(*) from %I where %I is not null', r.tbl, r.new_col) into n;
+      if n > 0 then
+        raise exception
+          'jd-rename: %.% still exists and %.% already holds % non-null row(s). Refusing to guess which is authoritative.',
+          r.tbl, r.old_col, r.tbl, r.new_col, n;
+      end if;
+      execute format('alter table %I drop column %I', r.tbl, r.new_col);
+    end if;
+
+    execute format('alter table %I rename column %I to %I', r.tbl, r.old_col, r.new_col);
+  end loop;
 end $$;
 
 -- THE VALUE MIGRATION. 'requirement.jd_source' stores the old column names as DATA -- 11,501 rows
@@ -1184,6 +1196,15 @@ end $$;
 alter table requirement drop constraint if exists requirement_jd_source_check;
 update requirement set jd_source = 'jd_html'        where jd_source = 'jd_real';
 update requirement set jd_source = 'jd_posting_raw' where jd_source = 'raw_jd';
+
+-- F1, found by the same verifier. 'review_verdict.posting_source' stores the SAME renamed vocabulary
+-- as 'requirement.jd_source' -- both are written from 'resolvePostingSource(...).source', whose union
+-- changed in this commit ('appReviewer.ts:215'). It was missed because it has no CHECK constraint, so
+-- nothing failed loudly: post-migration it would simply keep reading 'jd_real' forever while every
+-- other surface said 'jd_html'. A value is part of a rename whenever a renamed identifier is STORED,
+-- not only where a constraint happens to police it.
+update review_verdict set posting_source = 'jd_html'        where posting_source = 'jd_real';
+update review_verdict set posting_source = 'jd_posting_raw' where posting_source = 'raw_jd';
 do $$
 begin
   if not exists (select 1 from pg_constraint

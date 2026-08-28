@@ -4374,3 +4374,54 @@ test('H:rename-covers-every-table-declaring-the-column: every table declaring a 
   }
   assert.deepEqual(offenders, [], offenders.join(' | '))
 })
+
+// ---------------------------------------------------------------------------------------------
+// H:rename-survives-the-deploy-window — a guarded rename must not assume the new column is absent.
+//
+// THE MEASURED FAILURE, found by an independent verifier against the first version of this
+// migration. `api-deploy.yml` deploys the CODE, polls /api/health until the worker serves, and only
+// THEN posts /api/diag/pg-migrate. In that window the new code runs against the OLD database, and the
+// request-time `ensure*` helpers execute `add column if not exists jd_html text` on ordinary traffic
+// -- `jdBackfillTick` (3 min) and `jdParseTick` (5 min) reach one with no human involved.
+//
+// So the migration meets a database where the NEW columns already exist and are EMPTY. A guard of the
+// form "old exists AND new does NOT exist" is then false, the rename never fires, and the migration
+// EXITS 0. Measured on PG 16.13 before the fix:
+//
+//     branch schema exit=0                       <-- GREEN
+//     jd_real = '<p>HTML BODY ONE</p>'   jd_html = (null)
+//     jd_text = 'SNAPSHOT ONE ...'       jd_posting_snapshot = (null)
+//
+// It does not self-heal on later runs, and it half-migrates: `requirement` and `review_verdict` have
+// no ensure* path so they DO rename while `opportunity` does not.
+//
+// After the fix, the same scenario yields:
+//     jd_html=<p>HTML BODY ONE</p>  jd_posting_raw=PLAIN SOURCE ONE  jd_posting_snapshot=SNAPSHOT ONE
+//     old columns still present: NONE
+//
+// This is a SOURCE assertion, not a database one, because the DB behaviour is covered by
+// `schemaParity`/`dimensionsDb` and what rots here is the SHAPE of the guard: someone simplifying
+// the block back to a plain `not exists` would reintroduce the stranding with every suite green.
+test('H:rename-survives-the-deploy-window: a rename handles the new column already existing empty', () => {
+  const whole = src('schema.ts')
+  const sql = whole.slice(whole.indexOf('SCHEMA_SQL = '))
+  const i = sql.indexOf('BEGIN jd-rename-migration')
+  const j = sql.indexOf('END jd-rename-migration')
+  assert.ok(i > 0 && j > i, 'the jd-rename migration block is not delimited by its sentinels any more')
+  const block = sql.slice(i, j)
+
+  // The empty placeholder the deploy window creates must be DROPPED, not treated as "already done".
+  assert.match(block, /drop column/,
+    'the rename block never drops the empty placeholder a deploy-window ensure* helper creates, so ' +
+    'the rename will silently not fire and every value stays under the old name')
+
+  // And a NON-empty new column must ABORT rather than be dropped -- dropping it would destroy data.
+  assert.match(block, /raise exception/,
+    'the rename block does not refuse when BOTH the old column and a non-empty new column exist; ' +
+    'guessing which is authoritative can destroy the employer posting text')
+
+  // The refusal must be conditioned on the column actually holding rows, or it either fires always
+  // (blocking every deploy) or never (dropping real data).
+  assert.match(block, /is not null/,
+    'the refusal is not conditioned on the new column holding data')
+})

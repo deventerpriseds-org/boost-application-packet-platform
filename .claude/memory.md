@@ -4470,3 +4470,32 @@ what I thought was a hung suite. It was not hung — it was slow (46 files, seve
 own PostgreSQL). Every `pkill` killed a run that was progressing, and one `pkill -f p84pg` matched
 its own shell and killed the command issuing it. **Before killing a long-running job, check whether
 its output is still growing.** `wc -l` on the log answers it in one call.
+
+### Hardening — I verified the RENAME and never asked what happens DURING THE DEPLOY
+
+**The miss, and it was a blocker.** An independent verifier confirmed all twelve claims I made about
+the JD rename and still found a defect that would have stranded every posting in production, silently,
+with the migration reporting success. `api-deploy.yml` deploys the CODE and only afterwards runs
+`pg-migrate`. In that window the new code's request-time `ensure*` helpers create the NEW columns
+EMPTY against the OLD database, which makes a `not exists (<new>)` guard false, so the rename never
+fires and never self-heals.
+
+**Why my verification could not see it.** Every scenario I executed started from a database in one of
+two states: pre-rename, or post-rename. The failure lives in a THIRD state that only the deployment
+sequence produces — new columns present and empty, old columns present and full. **A migration must be
+proven against the database the DEPLOY PIPELINE actually hands it, not only against "before" and
+"after".** For this repo that means: apply the previous schema, then run the new code's `ensure*` DDL,
+THEN the migration.
+
+**The cheapest tell I ignored.** `dimensionsDb.test.mjs` states the hazard verbatim in a comment —
+*"`api-deploy.yml` deploys the code BEFORE it runs `pg-migrate`, so a read-path column that only
+SCHEMA_SQL adds is missing for the length of that window."* I read that comment while repairing the
+fixture and did not apply it to my own change. **A comment describing a deployment hazard is a
+checklist item for every schema change, not background colour for the file it sits in.**
+
+Guarded by `H:rename-survives-the-deploy-window`, mutation-proven against the exact shape that failed.
+
+**Second lesson, about confidence.** I told the owner the migration's `ACCESS EXCLUSIVE` locks were a
+real production risk. The verifier measured it: ~4 ms exclusive window, 164 ms for the 11,503-row
+update. **I stated a speculative risk in a PR body and in a message to the owner without measuring it,
+when measuring it took one command.** Calibrate warnings to evidence the same way as claims.
