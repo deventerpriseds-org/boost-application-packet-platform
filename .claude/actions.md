@@ -4890,3 +4890,41 @@ has `jd_real` NULL, so the import proceeds.
 **Why this vindicates the sequencing the owner chose.** Renaming first would have renamed a tool
 that was writing to the wrong column, and the rename would have looked like the cause of the next
 failure. Fix the data, then the names.
+
+
+### ACT — TRINNEX DATA FIXED, measured in production (2026-08-28)
+
+Owner approved data-before-rename, then `go` on each destructive step. Both verified by QUERYING
+PRODUCTION, never from a green run.
+
+**Step 1 — the source.** `jd-import.yml` (now writing `raw_jd`, not the snapshot), dry run first,
+then `confirm=WRITE`. `raw_jd` **1,054 -> 8,618**, head reads the employer's prose
+(*"To support collaboration and business needs, candidates must currently reside on the East…"*)
+rather than the `"Company: Trinnex… Employment: Full-time…"` digest.
+
+**Step 2 — re-extraction.** `POST /api/app/opportunity/9f9c370a…/jd-parse`. HTTP 200 `ok:true` —
+**and that response reports no counts, so it proved nothing.** The DB did:
+
+| | before | after |
+|---|---:|---:|
+| `jd_text` snapshot | 1,054 | **8,618** |
+| requirements | 8 | **21** |
+| located | 4 (50%) | **18 (86%)** |
+| must-haves | 2 | **7** |
+| **must-haves LOCATED** | **0** | **5** |
+
+**The before-state was worse than the ledger recorded: ZERO of two must-haves were anchorable.**
+Every must-have the resume was tailored against was a model paraphrase of a digest with no employer
+text behind it. 8 -> 21 means thirteen real requirements were in the ad and never seen.
+
+**`jd_text` regenerating 1,054 -> 8,618 by itself is the proof the diagnosis was right:** it is a
+snapshot, so writing it was always futile and writing the source was always the fix. That is exactly
+what silently undid the 23 Aug run.
+
+**Two process notes.** A `db-query` failed first on `opportunity_id`; the column is `opp_id` — read
+the schema rather than guessing twice. And the before-state was captured BEFORE the write, which is
+the only reason these numbers are a comparison rather than an assertion.
+
+**STILL OPEN:** the packet's stored assets were built against the OLD requirements. Re-extraction
+replaced the requirement rows, not the resume. Rebuilding the packet is a third destructive step and
+has NOT been done.
