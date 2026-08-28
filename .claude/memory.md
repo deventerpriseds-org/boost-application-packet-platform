@@ -4334,3 +4334,36 @@ runs; a prose rule saying "keep the ledger current" did not.
 **Do not edit the hook.** It is correctly built and its own header documents a previous version that
 examined only the first block per message and reported PASS while 39 of 58 blocks were untagged. A
 guard that cannot observe the thing it guards is decoration; this one can, and it is right.
+
+
+### The JD column names, settled — and the two wrong answers I gave before getting there
+
+Owner, 2026-08-27, after pushing back THREE times: *"I am fine with keeping jd real but renamed as
+jd html"*.
+
+```
+jd_real  -> jd_html               HTML from the job-board API (normalizePostingText)
+raw_jd   -> jd_posting            plain text, from anywhere else (toBmp)
+jd_text  -> jd_posting_snapshot   frozen copy + sha256; EVERY stored offset indexes this
+jd_source   unchanged             which of the two won
+```
+
+**One rule instead of three column names: the name states what is TRUE of the column.** Format,
+role, copy-ness. Nothing claims to be "real" or "the text".
+
+**MISTAKE 1 — I proposed `jd_text -> jd_summary` (inherited from the ledger row) and it was
+backwards.** `requirements.ts:361` is explicit: `jd_text` is *"the EXACT string every offset
+indexes"*, taken from `resolvePostingSource` — the EMPLOYER'S words. Calling it `jd_summary` would
+have made the one column guaranteed not to be model output read as model output.
+
+**MISTAKE 2 — I claimed `jd_real` and `raw_jd` differ by PROVENANCE (page vs email). FALSE, and the
+owner rejected it twice before I swept.** `appJdParse:155,219,316` writes PAGE-FETCHED text into
+`raw_jd`; `mailWatch:356` and `appCapture:47` also write it. Only `jdBackfill:66,512` + `jdSearch`
+write `jd_real`. The actual difference is **FORMAT**, not where it came from.
+
+**The lesson, and it is the ground-truth rule in its exact failure shape:** I answered from
+`CLAUDE.md`'s prose description of the columns instead of sweeping the WRITERS. A doc describing a
+schema is a claim about the schema, not the schema — the same class as "a code comment is a claim
+about the code". **The owner saying "that's not true" IS ground truth; my analysis was the thing
+that was wrong, and it took three pushes because I repeated the claim instead of testing it.**
+Two greps for `update opportunity set <col>` settled what three paragraphs of prose had got wrong.
