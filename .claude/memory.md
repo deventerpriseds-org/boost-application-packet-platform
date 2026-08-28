@@ -4343,7 +4343,7 @@ jd html"*.
 
 ```
 jd_real  -> jd_html               HTML from the job-board API (normalizePostingText)
-raw_jd   -> jd_posting            plain text, from anywhere else (toBmp)
+raw_jd   -> jd_posting_raw        plain text, from anywhere else (toBmp)
 jd_text  -> jd_posting_snapshot   frozen copy + sha256; EVERY stored offset indexes this
 jd_source   unchanged             which of the two won
 ```
