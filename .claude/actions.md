@@ -5089,3 +5089,41 @@ auditable.
 **Fourth guard added and mutation-proven:** `H:rename-survives-the-deploy-window`. Reverting the block
 to the `new column exists => skip` shape fails it with *"never drops the empty placeholder a
 deploy-window ensure* helper creates"*.
+
+### DEPLOYED — and the deploy silently migrated the WRONG bundle first
+
+`main` = `ea30d93`. `api-deploy.yml` run 33180519012 went **green**, and the rename had **not
+happened**. Read of `information_schema` at 14:34 still showed every old column, on all three tables.
+
+**Root cause:** the workflow polls `GET /api/health` for a 200 and then POSTs `/api/diag/pg-migrate`.
+`/api/health` carries **no build identifier**, so a 200 proves the app is UP, not that the NEW bundle
+is serving. The poll cleared in ~85s; a worker takes ~90-120s to converge. `pg-migrate` therefore ran
+the OLD bundle's SCHEMA_SQL and truthfully answered `ok:true, "Schema applied… 31/31 tables present"`.
+Logged as `D:deploy-migrates-against-the-old-bundle` — **it is not specific to this rename; every
+future schema change inherits it.**
+
+**Recovery:** re-POST `/api/diag/pg-migrate` after convergence (run 33181008006). **This only worked
+because of the F2 fix.** By then the converged new code's `ensure*` helpers had created the new
+columns EMPTY — precisely the deploy-window state the verifier caught. The pre-fix block would have
+seen `not exists(<new>)` as false and skipped the rename permanently. The shipped block drops the
+empty placeholders and renames.
+
+**VERIFIED IN PRODUCTION, by reading the database:**
+
+| check | result |
+|---|---|
+| old columns anywhere | **`NONE - all renamed`** |
+| new columns on `opportunity` | `jd_html, jd_posting_raw, jd_posting_snapshot, …_sha256, …_truncated` |
+| `requirement.jd_source` | **`jd_html` 11,508 · `jd_posting_raw` 452** |
+| CHECK constraint | `jd_source = ANY (ARRAY['jd_html','jd_posting_raw'])` |
+| content preserved | 1,513 with `jd_html` (11,271,315 chars), 1,651 with `jd_posting_raw` |
+| **offset invariant** | **`3727da7653e2ceda64f51a800a53e535` — byte-identical to baseline** |
+
+**How the offset check nearly gave a false alarm, and the correction.** The whole-table fingerprint
+came back `fac72cbb…`, not the baseline. The cause was mine: the system ingested live during the
+90 minutes since I took the baseline (requirements 11,953 -> 11,960, opportunities 2,124 -> 2,125),
+so the hash covered a different row set. My first attempt to correct for it used
+`created_at < 13:05:00` and returned **11,950** rows — three short, because the baseline query
+actually ran at 13:05:28. Only hashing the **11,953 oldest** rows reproduced the baseline exactly.
+**A fingerprint over a live table is not a constant; it is a constant only over a fixed row set, and
+"the rows that existed when I measured" has to be reconstructed precisely, not approximated.**
