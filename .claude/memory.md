@@ -4557,3 +4557,32 @@ problem and started widening the poll budget. That was inference. One look at th
 payload — `{status, timestamp, storage, tables}`, no `ok`, no `checks` — showed instantly that it was
 not the handler I had edited. **Read the response before theorising about the timeout.** The timing fix
 was independently worth making, but it was not the cause and I nearly shipped it as if it were.
+
+### Retention signal for the skills swap — MEASURED 0/20, option C dead (2026-08-28)
+
+`supportIn` cannot protect a two-word template skill item. 420 pairs (21 live Trinnex requirements
+× 20 live skill items), two floor settings, **0 protected in both**; drop pool 20/20. Twelve of the
+twenty are refused by a SAFETY-FLOOR rule an owner setting may not override, so no amount of
+tuning reaches them. Full record + reproduce commands: `docs/qc-evidence/RETENTION-SIGNAL-MEASUREMENT.md`
+(landed on main as `2c693d1`, PR #62). Owner visual:
+https://claude.ai/code/artifact/f07b02b8-3206-4668-b236-da1c69a17ab2
+
+**`supportIn` is a pure deterministic token function** — one import (`sentenceBounds`), no model
+call, no network, no `await`. So these refusals are an INSTRUMENT MISMATCH, not a model failing:
+a literal citation judge pointed at a semantic relevance question. Refusing "Team Development" as
+*proof* of "Build and develop high-performing engineering teams" is correct for a citation judge
+and useless as a relevance ranking. Nothing here argues for changing `supportIn` or the gate.
+
+Three consequences, none implemented yet:
+- the coverage-based retention design (option C) is **ruled out by data**, not by preference;
+- the owner's literal rule — incumbent stays until they click switch — needs **no coverage
+  judgement at all**, which is cheaper AND closer to what was asked;
+- because the pool is 20/20, ORDER of the right-rail proposals is the entire ergonomics. A TOKEN
+  matcher cannot rank these either (it reads "Team Development" as generic vocabulary), so the
+  open recommendation is **option D: LLM ranking of the rail order only** — ranking, never
+  accusing; it must not reach a score, a gate, or evidence.
+
+**Method note worth keeping.** I nearly wrote the worked example from a hand token count. Running
+`supportIn` with `threshold:0` returns the real `support` / `missing`, and the hand count was wrong
+(weak verbs are excluded from the denominator: 2-of-6, not 2-of-7). *Measure the number you are
+about to publish, even when you think you can derive it.*
