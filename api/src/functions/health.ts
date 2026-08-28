@@ -29,6 +29,14 @@ export async function health(
         status: 'ok',
         timestamp: new Date().toISOString(),
         storage: 'connected',
+        // WHICH BUILD IS ANSWERING. `api-deploy.yml` polls THIS route and waits for this value to
+        // equal the commit it just deployed, because a 200 alone proves only that SOMETHING is
+        // serving. On 2026-08-28 the old worker answered 200, the poll passed, and pg-migrate ran
+        // the PREVIOUS bundle's SCHEMA_SQL -- reporting `ok:true` for a schema that was not the one
+        // being deployed. It must stay on the handler registered as `app.http('health')`: the first
+        // attempt at this put it on `appHealth.ts`, which serves a DIFFERENT route, so the poll saw
+        // nothing on all 40 attempts and the deploy failed on a change that was otherwise correct.
+        deployedSha: process.env.DEPLOYED_SHA || null,
         tables
       }
     }

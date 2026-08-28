@@ -47,6 +47,7 @@ jobs:
             --name job-platform-api \
             --resource-group EnterpriseDS_ResourceGRP \
             --settings \
+              "DEPLOYED_SHA=${{ github.sha }}" \
               "AZURE_STORAGE_CONNECTION_STRING=${{ secrets.AZURE_STORAGE_CONNECTION_STRING }}" \
               "OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}" \
               "MICROSOFT_CLIENT_ID=${{ secrets.AZURE_CLIENT_ID }}" \
@@ -91,8 +92,7 @@ jobs:
             --resource-group EnterpriseDS_ResourceGRP \
             --settings \
               GOOGLE_SERVICE_ACCOUNT_JSON='${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}' \
-              ZAPIER_DOCS_FOLDER_ID='1MlVLMSQ0EQJoAtpKC1Mv7mDCAJDmdJTt' \
-              DEPLOYED_SHA='${{ github.sha }}'
+              ZAPIER_DOCS_FOLDER_ID='1MlVLMSQ0EQJoAtpKC1Mv7mDCAJDmdJTt'
 
       # A table registered in SCHEMA_SQL is not thereby IN production. `comparison_dimension` was
       # registered in all three places — that is what ledger row D21 closed — and still did not exist
@@ -122,9 +122,17 @@ jobs:
           # thing that distinguishes the two workers is which commit they are running, so that is
           # what we wait for. `DEPLOYED_SHA` is set in the app settings above and returned by
           # /api/health.
+          # BUDGET: 90 x 6s = 9 minutes. The first version allowed 40 x 6s = 4 minutes and FAILED the
+          # deploy of d02e300 -- `health reports '<none>'` on all 40 attempts. Two causes, both mine:
+          # `DEPLOYED_SHA` was being set in the POST-deploy settings step, and setting app settings
+          # RESTARTS the Function App, so the convergence clock started over after the zip deploy had
+          # already finished. It is now set BEFORE the deploy, making the code deploy the last
+          # restart. The budget is widened anyway because 90-120s is the documented typical case, not
+          # a ceiling, and the cost of waiting is a slower deploy while the cost of giving up too
+          # early is a red deploy on a correct change.
           WANT="${{ github.sha }}"
           converged=""
-          for i in $(seq 1 40); do
+          for i in $(seq 1 90); do
             got=$(curl -s --max-time 10 "$API/api/health" | python3 -c "import json,sys; print((json.load(sys.stdin).get('deployedSha') or ''))" 2>/dev/null || true)
             if [ "$got" = "$WANT" ]; then converged=yes; echo "worker is serving $WANT after $i attempt(s)"; break; fi
             echo "waiting for $WANT to serve (health reports '${got:-<none>}'), attempt $i"

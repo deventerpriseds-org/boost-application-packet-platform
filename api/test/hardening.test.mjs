@@ -4485,11 +4485,32 @@ test('H:rename-survives-the-deploy-window: a rename handles the new column alrea
 // poll is back to accepting any 200.
 test('H:deploy-waits-for-its-own-build: pg-migrate cannot run against an older bundle', () => {
   const wf = readFileSync(new URL('../../.github/workflows/api-deploy.yml', import.meta.url).pathname, 'utf8')
-  const health = src('appHealth.ts')
+  // FIND THE HANDLER BY ITS ROUTE REGISTRATION, NOT BY A FILENAME. The first version of this guard
+  // asserted `deployedSha` existed in `appHealth.ts` -- and `appHealth.ts` does not serve
+  // `/api/health`. `app.http('health', ...)` in `functions/health.ts` does. So the field went into a
+  // route nothing polls, the guard passed, and the deploy of d02e300 FAILED with
+  // `health reports '<none>'` on all 40 attempts: the poll could never have converged, at any
+  // timeout. A guard that names a file asserts where I THINK the code is; a guard that resolves the
+  // ROUTE asserts what the deploy will actually call.
+  const fnDir = new URL('../src/functions/', import.meta.url).pathname
+  const candidates = []
+  const walk = (d) => {
+    for (const e of readdirSync(d)) {
+      const full = join(d, e)
+      try { walk(full) } catch { if (e.endsWith('.ts')) candidates.push(full) }
+    }
+  }
+  walk(fnDir)
+  const registrar = candidates.filter((f) => /app\.http\(\s*'health'/.test(readFileSync(f, 'utf8')))
+  assert.equal(registrar.length, 1,
+    `expected exactly one file registering app.http('health'), found ${registrar.length} — the deploy ` +
+    'poll targets /api/health and this guard must follow the route, not a guessed filename')
+  const health = readFileSync(registrar[0], 'utf8')
 
   assert.match(health, /deployedSha/,
-    '/api/health does not report which build is answering, so the deploy poll cannot tell the new ' +
-    'worker from the old one and pg-migrate can migrate the previous bundle')
+    `${registrar[0].split('/').pop()} serves /api/health but does not report which build is answering, ` +
+    'so the deploy poll cannot tell the new worker from the old one and pg-migrate can migrate the ' +
+    'previous bundle')
   assert.match(wf, /DEPLOYED_SHA=?'?\$\{\{ github\.sha \}\}'?/,
     'api-deploy.yml never sets DEPLOYED_SHA on the Function App, so /api/health will always report null')
   assert.match(wf, /deployedSha/,

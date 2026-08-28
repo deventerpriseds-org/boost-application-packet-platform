@@ -5180,3 +5180,32 @@ every count. Traced from the rebuild's own stored lineage — logged as
 rows show every `RelevantBullets1` item already in `SkillsBullets1` — but before the normaliser landed
 (2026-08-22) the duplicates were RENDERED TWICE rather than removed. The normaliser did not cause the
 defect; it made a long-standing one visible.
+
+### The deploy guard fired on its first real run — and caught my own broken implementation
+
+`main` = `d02e300`. `api-deploy.yml` run 33194941555 **FAILED**, correctly:
+
+    waiting for d02e300… to serve (health reports '<none>'), attempt 40
+    FAILED: the worker never reported deployedSha=d02e300…. Refusing to migrate, because
+    pg-migrate would run whichever bundle IS serving and report success for it.
+
+**This morning the same step migrated the wrong bundle and went green. Today it refused.** That is
+the guard working — on a defect that was mine.
+
+**Root cause: `deployedSha` was added to `appHealth.ts`, which does not serve `/api/health`.**
+`api/src/functions/health.ts` registers `app.http('health', …)`. The live payload settles it —
+`{status, timestamp, storage, tables}`, not the `{ok, passed, total, checks}` shape of the file I
+edited. So the poll could never have converged at any timeout.
+
+**And `H:deploy-waits-for-its-own-build` PASSED throughout**, because it asserted `deployedSha`
+existed in `appHealth.ts` — the same wrong file. Fixed by making the guard **resolve the route**:
+it now finds the single file registering `app.http('health')` and asserts on that, failing with
+*"health.ts serves /api/health but does not report which build is answering"*. Mutation-proven by
+deleting the field from the real handler.
+
+**A correction to what I told the owner mid-incident:** I attributed the failure to restart timing
+(`DEPLOYED_SHA` was set in the POST-deploy settings step, and setting app settings restarts the app)
+and began widening the poll budget. That was inference, offered before I had read the response body.
+The wrong-handler bug is the actual cause. The timing change is still correct and kept — the setting
+now goes in the PRE-deploy step so the code deploy is the last restart, and the budget is 90x6s
+rather than 40x6s — but it was not the reason the deploy failed, and I said it was.

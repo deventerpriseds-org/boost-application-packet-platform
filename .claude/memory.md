@@ -4529,3 +4529,31 @@ exist, the row set is the same one. Absent evidence is `not_applicable`, never `
 applies `schemaSqlAt('origin/main')`. I reverted it to pre-rename names this morning (correct then),
 and after the rename LANDED the same names broke it in the opposite direction. It is a mirror of the
 base schema, not a naming choice.
+
+### Hardening — three guards in one day asserted the WRONG THING, and all three passed while broken
+
+**The pattern, stated once because it recurred three times on 2026-08-28:**
+
+| # | guard asserted | reality | how it surfaced |
+|---|---|---|---|
+| 1 | `check: grep <file> <symbol>` on code that already existed | passes forever, can never stale | caught while writing it |
+| 2 | rename pairs matched as literal `alter table X rename column Y to Z` | a refactor to `execute format('… %I …')` made 7 of 10 renames invisible; both mutations went green | independent verifier |
+| 3 | `deployedSha` exists in `appHealth.ts` | **`appHealth.ts` does not serve `/api/health`** — `functions/health.ts` does. The field went to a route nothing polls | the deploy FAILED with `health reports '<none>'` on all 40 attempts |
+
+**The common root: each guard asserted a fact about a FILE I had chosen, not about the THING that
+matters.** #2 keyed off one spelling of a rename; #3 keyed off a filename I assumed served a route.
+Both are proxies. Both passed while the feature was broken, which is worse than no guard.
+
+**The rule: a guard must resolve its subject the same way production does.**
+- For a route, find the file that REGISTERS it (`app.http('health'`) and assert on that — never name
+  the file yourself. The route is the fact; the filename is a guess.
+- For a schema rename, read every FORM the rename can be written in, not the one currently used.
+- Then mutation-prove **against the real defect**, not against a convenient edit. #3's fix was proven
+  by deleting the field from the handler that actually serves the route, and it now names `health.ts`
+  in its own failure message.
+
+**Second lesson, on diagnosis.** When the deploy failed I told the owner the cause was a restart-timing
+problem and started widening the poll budget. That was inference. One look at the actual `/api/health`
+payload — `{status, timestamp, storage, tables}`, no `ok`, no `checks` — showed instantly that it was
+not the handler I had edited. **Read the response before theorising about the timeout.** The timing fix
+was independently worth making, but it was not the cause and I nearly shipped it as if it were.
