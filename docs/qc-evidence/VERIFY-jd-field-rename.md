@@ -617,3 +617,453 @@ both restored. `git status --porcelain` in the repo shows only this file:
 Nothing committed, nothing pushed.
 
 *Verification complete.*
+
+---
+---
+
+## Loop 2 — verification of the deploy-window fix (ea30d93)
+
+Second independent verifier. No shared context with the implementer and none with the loop-1
+verifier beyond the PRIOR STATE summary in my brief and the loop-1 report above, which I read
+before starting. Every line below is a command and its real output, or is explicitly labelled
+as inference.
+
+`git rev-parse HEAD` → `ea30d9329323de0ecfc78ffecb86bd8c0ab4fe3e`
+`git status --porcelain` → empty (clean tree, so the built `dist/` matches the source I read).
+Substrate: **PostgreSQL 16.13** (`/usr/lib/postgresql/16`), fresh cluster on `/tmp/pgsock:55432`.
+
+```
+$ psql -c "select version()"
+ PostgreSQL 16.13 (Ubuntu 16.13-0ubuntu0.24.04.1) on x86_64-pc-linux-gnu ...
+```
+
+Both schemas were obtained the way CLAUDE.md prescribes — branch from the **built module**, main
+from `git show origin/main:...` — never hand-copied:
+
+```
+$ cd api && npm run build            # tsc, exit 0
+$ node -e "import('./dist/functions/tests/schema.js').then(m=>fs.writeFileSync('/tmp/schema_branch.sql', m.SCHEMA_SQL))"
+$ git show origin/main:api/src/functions/tests/schema.ts > /tmp/main_schema.ts   # then sliced SCHEMA_SQL
+1485 /tmp/schema_branch.sql
+1352 /tmp/schema_main.sql
+```
+pgvector is absent here, so `create extension vector` / `vector(1536)` / the hnsw index were
+stubbed in BOTH files identically; everything else executes for real.
+
+Sanity check that the dump really carries the new loop (not a stale build):
+```
+$ sed -n '/BEGIN jd-rename-migration/,/END jd-rename-migration/p' /tmp/schema_branch_nv.sql | grep "('.*',.*'.*',.*'.*')"
+      ('opportunity',    'jd_real',           'jd_html'),
+      ('opportunity',    'raw_jd',            'jd_posting_raw'),
+      ('opportunity',    'jd_text',           'jd_posting_snapshot'),
+      ('opportunity',    'jd_text_sha256',    'jd_posting_snapshot_sha256'),
+      ('opportunity',    'jd_text_truncated', 'jd_posting_snapshot_truncated'),
+      ('requirement',    'jd_text_sha256',    'jd_posting_snapshot_sha256'),
+      ('review_verdict', 'jd_text_sha256',    'jd_posting_snapshot_sha256')
+```
+
+---
+
+### D6 — the loop covers every pair — **CONFIRMED**
+
+I derived the required set myself, from execution, rather than reading the VALUES list and
+agreeing with it. Two independent halves, because the seven pairs do not all live in one place.
+
+**Half 1 — the pairs SCHEMA_SQL itself declares.** Build a fresh database from main's schema and
+a fresh one from the branch's, then diff every column in `public`:
+
+```
+$ psql -v ON_ERROR_STOP=1 -q -d freshmain   -f /tmp/schema_main_nv.sql     # exit 0
+$ psql -v ON_ERROR_STOP=1 -q -d freshbranch -f /tmp/schema_branch_nv.sql   # exit 0
+$ comm -23 cols_main.txt cols_branch.txt        # only in MAIN = the old names
+opportunity.jd_text
+opportunity.jd_text_sha256
+opportunity.jd_text_truncated
+requirement.jd_text_sha256
+review_verdict.jd_text_sha256
+$ comm -13 cols_main.txt cols_branch.txt        # only in BRANCH = the new names
+opportunity.jd_posting_snapshot
+opportunity.jd_posting_snapshot_sha256
+opportunity.jd_posting_snapshot_truncated
+requirement.jd_posting_snapshot_sha256
+review_verdict.jd_posting_snapshot_sha256
+```
+Five pairs, and the pairing is unambiguous (same table, same suffix). No sixth old column is
+left behind anywhere in the schema — the "only in main" list is exhaustive by construction.
+
+**Half 2 — the two pairs that exist ONLY in request-time helpers** (`jd_real`, `raw_jd` are not
+in either SCHEMA_SQL, so the diff above cannot see them). Swept every `.ts` in `api/src` on both
+refs, not one file:
+
+```
+$ for f in $(git ls-tree -r --name-only origin/main api/src | grep '\.ts$'); do
+    git show origin/main:$f | grep -nE "add column if not exists" | grep -iE "jd|raw_jd|posting"; done
+appCapture.ts:46        raw_jd
+appJdParse.ts:20,26     raw_jd , jd_real
+appRequirements.ts:116-118  jd_text, jd_text_sha256, jd_text_truncated   (on table `opportunity`)
+jdBackfill.ts:21        jd_real
+mailWatch.ts:355        raw_jd
+
+$ grep -rnE "add column if not exists" api/src --include=*.ts | grep -iE "jd|raw_jd|posting"   # branch
+appCapture.ts:46        jd_posting_raw
+appJdParse.ts:20,26     jd_posting_raw , jd_html
+appRequirements.ts:116-118  jd_posting_snapshot, _sha256, _truncated     (on table `opportunity`)
+jdBackfill.ts:21        jd_html
+mailWatch.ts:355        jd_posting_raw
+```
+So the helper-only pairs are exactly `opportunity.jd_real→jd_html` and
+`opportunity.raw_jd→jd_posting_raw`. Nothing else changed name.
+
+**Union = 7 pairs = the VALUES list, exactly.** No pair was lost in the rewrite from seven
+hand-written blocks to one loop. **D6 CONFIRMED.**
+
+---
+
+### Blast-radius challenge (schema level) — the stated radius holds for DDL, with one addition the implementer did already make
+
+I did not take "nothing else changed" on trust. Diffing every constraint and every index between
+the two FRESH databases:
+
+```
+$ comm -23 con_main.txt con_branch.txt      # only in main
+requirement requirement_jd_source_check CHECK ((jd_source = ANY (ARRAY['jd_real'::text, 'raw_jd'::text])))
+$ comm -13 con_main.txt con_branch.txt      # only in branch
+requirement requirement_jd_source_check CHECK ((jd_source = ANY (ARRAY['jd_html'::text, 'jd_posting_raw'::text])))
+$ comm -23 idx_main.txt idx_branch.txt ; comm -13 idx_main.txt idx_branch.txt
+(both empty)
+```
+One CHECK changed, zero index changes, and the migration already drops+re-adds that CHECK around
+the value UPDATEs. **No un-migrated DDL object outside the stated radius.**
+
+---
+
+### D7 part 1 — `review_verdict.posting_source` carries NO CHECK, before or after
+
+The refusal risk for the new UPDATEs is a constraint rejecting the new vocabulary. There is none:
+
+```
+$ psql -At -d freshbranch -c "select coalesce(string_agg(conname,','),'(none)') from pg_constraint
+    where conrelid='review_verdict'::regclass and contype='c'
+      and pg_get_constraintdef(oid) like '%posting_source%'"
+(none)
+```
+And on `freshmain`, `review_verdict`'s only CHECKs are `grade`, `prompt_source`,
+`seniority_alignment` — `posting_source` is unconstrained on both refs. The two new UPDATEs
+cannot be rejected. (Value migration itself is proven under D1/D7 below.)
+
+---
+
+### The substrate for D1-D5, D8 — a populated, production-shaped database
+
+Built independently of loop 1. `jd_real`/`raw_jd` are not in main's SCHEMA_SQL, so the seed adds
+them exactly as the main-era helpers do (`appCapture.ts:46`, `appJdParse.ts:20,26`,
+`jdBackfill.ts:21`, `mailWatch.ts:355`), then seeds all three affected tables with the OLD
+vocabulary, deliberately including a NULL in each renamed column, an em-dash, an HTML entity and
+an embedded apostrophe so a lossy path would show:
+
+```
+$ psql -v ON_ERROR_STOP=1 -q -d dw -f /tmp/schema_main_nv.sql   # exit 0
+$ psql -v ON_ERROR_STOP=1 -q -d dw -f /tmp/seed.sql             # exit 0
+    id    |                         jd_real                          |        raw_jd         |            jd_text             |  sha   | jd_text_truncated
+ 11111111 | <p>HTML BODY ONE &amp; ampersand — em-dash, O'Brien</p>  | PLAIN SOURCE ONE      | SNAPSHOT ONE the offsets index | aaaaaa | f
+ 22222222 |                                                          | PLAIN SOURCE TWO only | SNAPSHOT TWO body              | bbbbbb | t
+ 33333333 | <div>HTML THREE</div>                                    |                       |                                |        |
+```
+plus 4 `requirement` rows (`jd_source` ∈ {`jd_real`,`raw_jd`,NULL}) and 3 `review_verdict` rows
+(`posting_source` ∈ {`jd_real`,`raw_jd`,NULL}).
+
+The deploy window is reproduced by executing the **branch's own** `ensure*` DDL verbatim, from the
+files, against that old database — `jdBackfill.ts:19-22`, `appJdParse.ts:19-27`,
+`appRequirements.ts:114-118`, `appCapture.ts:46`, `mailWatch.ts:355`:
+
+```
+$ psql -v ON_ERROR_STOP=1 -q -d dw -f /tmp/deploywindow.sql     # exit 0
+$ psql -At -d dw -c "select column_name from information_schema.columns
+                      where table_name='opportunity' and (column_name like 'jd\_%' or column_name='raw_jd')"
+jd_html  jd_posting_raw  jd_posting_snapshot  jd_posting_snapshot_sha256  jd_posting_snapshot_truncated
+jd_real  jd_text  jd_text_sha256  jd_text_truncated  raw_jd        (+ jd_company/jd_title/... unrelated)
+```
+This is precisely loop-1's F2 state: old columns populated, new columns present and empty.
+(`requirement` and `review_verdict` are untouched by the window — no `ensure*` helper alters them,
+which is why the old block half-migrated.)
+
+---
+
+### D1 — the deploy window is genuinely fixed — **CONFIRMED**
+
+```
+$ psql -v ON_ERROR_STOP=1 -q -d dw -f /tmp/schema_branch_nv.sql
+BRANCH SCHEMA run1 exit=0        (grep -iE "error|exception" on the log: no hits)
+
+    id    |                         jd_html                          |    jd_posting_raw     |      jd_posting_snapshot       |  sha   | t
+ 11111111 | <p>HTML BODY ONE &amp; ampersand — em-dash, O'Brien</p>  | PLAIN SOURCE ONE      | SNAPSHOT ONE the offsets index | aaaaaa | f
+ 22222222 |                                                          | PLAIN SOURCE TWO only | SNAPSHOT TWO body              | bbbbbb | t
+ 33333333 | <div>HTML THREE</div>                                    |                       |                                |        |
+```
+Every value moved. Compare against loop-1's measured output for the same scenario, where all three
+new columns were `(NULL/EMPTY)` and the old columns held everything.
+
+**Old columns gone, everywhere — not just on `opportunity`:**
+```
+$ psql -At -d dw -c "select table_name||'.'||column_name from information_schema.columns
+    where table_schema='public' and column_name in
+      ('jd_real','raw_jd','jd_text','jd_text_sha256','jd_text_truncated')"
+(no rows)
+```
+
+**Byte-exact, not eyeballed** — an equality assertion per row, including the NULLs:
+```
+$ psql -At -d dw -c "select (...jd_html = '<p>HTML BODY ONE &amp; ampersand — em-dash, O''Brien</p>'
+      and jd_posting_raw='PLAIN SOURCE ONE' and jd_posting_snapshot='SNAPSHOT ONE the offsets index'
+      and jd_posting_snapshot_sha256=repeat('a',64) and jd_posting_snapshot_truncated=false),
+    (row 2: jd_html IS NULL and the rest exact), (row 3: only jd_html set, rest IS NULL)"
+1|1|1
+```
+All three rows exact. NULL stayed NULL; no coalescing to `''`, no truncation.
+
+**Both value migrations fired in the same run:**
+```
+$ select coalesce(jd_source,'(null)'), count(*) from requirement group by 1
+ (null) 1 | jd_html 2 | jd_posting_raw 1
+$ select coalesce(posting_source,'(null)'), count(*) from review_verdict group by 1
+ (null) 1 | jd_html 1 | jd_posting_raw 1
+```
+and `requirement.jd_posting_snapshot_sha256` still pins the right hashes (`aaaaaa` ×2, `bbbbbb` ×2).
+
+---
+
+### D2 — still idempotent from the recovered state — **CONFIRMED**
+
+```
+$ for n in 2 3 4; do psql -v ON_ERROR_STOP=1 -q -d dw -f /tmp/schema_branch_nv.sql; echo "run $n exit=$?"; done
+run 2 exit=0
+run 3 exit=0
+run 4 exit=0
+```
+Data after run 4 is identical to after run 1 (same three rows, same counts), and
+`old_cols_left = 0`. The `continue when not exists(old)` short-circuit is what carries this: on
+runs 2-4 no pair matches, the loop is a no-op, and the two value UPDATEs match zero rows.
+
+---
+
+### D3 — the ordinary path (no deploy window) still works — **CONFIRMED**
+
+Fresh populated old database, **no** `ensure*` DDL applied, so the new columns genuinely do not
+exist (`count = 0` verified before the run):
+
+```
+$ for n in 1 2 3; do psql -v ON_ERROR_STOP=1 -q -d ord -f /tmp/schema_branch_nv.sql; echo "ordinary run $n exit=$?"; done
+ordinary run 1 exit=0
+ordinary run 2 exit=0
+ordinary run 3 exit=0
+```
+Same three rows recovered byte-for-byte, `old_cols_left = 0`, both value migrations applied. The
+refactor did not break the case that already worked.
+
+**Column attributes survive the rename** (a `rename column` preserves type/nullability — checked,
+not assumed, because `requirement.jd_text_sha256` is `NOT NULL` on main):
+```
+ opportunity    | jd_html                       | text    | YES
+ opportunity    | jd_posting_snapshot_truncated | boolean | YES
+ requirement    | jd_posting_snapshot_sha256    | text    | NO     <-- NOT NULL preserved
+ review_verdict | jd_posting_snapshot_sha256    | text    | YES
+```
+
+---
+
+### D4 — the refusal is real and safe — **CONFIRMED**
+
+Deploy window, then the live new code actually WRITES to the new column (what `jdBackfillTick`
+does when it fetches a posting) while `jd_real` still holds the old value:
+
+```
+    id    |                         jd_real                          |            jd_html
+ 11111111 | <p>HTML BODY ONE &amp; ampersand — em-dash, O'Brien</p>  | <p>FETCHED BY THE NEW CODE</p>
+
+$ psql -v ON_ERROR_STOP=1 -q -d ambig -f /tmp/schema_branch_nv.sql
+EXIT=3
+psql:...:1175: ERROR:  jd-rename: opportunity.jd_real still exists and opportunity.jd_html already
+                       holds 1 non-null row(s). Refusing to guess which is authoritative.
+```
+Non-zero exit — so `api-deploy.yml`'s migrate step fails loudly rather than reporting success.
+
+**Nothing was dropped and nothing was renamed:**
+```
+$ select column_name ... in (the 8 old+new names)
+jd_html  jd_posting_raw  jd_posting_snapshot  jd_real  jd_text  jd_text_sha256  jd_text_truncated  raw_jd
+    id    |                jd_real                 |            jd_html             |    raw_jd    | jd_posting_raw |   jd_text    | jd_posting_snapshot
+ 11111111 | <p>HTML BODY ONE ... O'Brien</p>       | <p>FETCHED BY THE NEW CODE</p> | PLAIN ...ONE |                | SNAPSHOT ONE |
+```
+Both values intact. The `drop column` never executed for pairs 1 and 2 either — see D8.
+
+---
+
+### D5 — the refusal cannot fire spuriously, at realistic scale — **CONFIRMED**
+
+20,000 seeded postings + the 3 originals, and 20,004 `requirement` rows; deploy-window DDL
+applied so all five new `opportunity` columns exist and are **entirely NULL**:
+
+```
+$ select count(*) rows, count(jd_html), count(jd_posting_raw), count(jd_posting_snapshot),
+         count(jd_posting_snapshot_sha256), count(jd_posting_snapshot_truncated) from opportunity
+20003 | 0 | 0 | 0 | 0 | 0
+
+$ psql -v ON_ERROR_STOP=1 -q -d bulk -f /tmp/schema_branch_nv.sql
+EXIT=0  wall=0.55s          (grep -cE "ERROR" on the log: 0)
+
+$ select count(*) rows, count(jd_html), count(jd_posting_raw), count(jd_posting_snapshot), count(jd_posting_snapshot_sha256)
+20003 | 20002 | 20002 | 20002 | 20002        <-- 20002, because row 22222222 has jd_real NULL by design
+$ old_cols_left = 0
+$ select coalesce(jd_source,'(null)'), count(*) from requirement group by 1
+ (null) 1 | jd_html 10018 | jd_posting_raw 9985
+$ select jd_html, jd_posting_raw, left(jd_posting_snapshot,30) from opportunity where company='Co 17777'
+<p>html 17777</p>|raw 17777|snapshot body 17777 xxxxxxxxxx
+```
+No spurious refusal, no data loss, and the whole migration is sub-second on 20k rows — so the
+`count(*)` probe the fix adds per pair is not a performance concern either.
+
+---
+
+### D8 — `raise exception` leaves NO partial rename committed — **CONFIRMED (it rolls back)**
+
+The answer is that the entire `do $$ ... $$` is **one statement**, so under psql's autocommit it is
+one implicit transaction: a `raise exception` on pair #3 undoes the drops and renames pairs #1 and
+#2 already performed inside the same block. Proven rather than reasoned:
+
+Setup — ambiguity on pair #3 ONLY (`jd_text` vs a non-empty `jd_posting_snapshot`); pairs #1 and #2
+have clean empty placeholders that the loop would drop-and-rename:
+```
+$ select count(jd_html), count(jd_posting_raw), count(jd_posting_snapshot) from opportunity
+0 | 0 | 1
+$ psql -v ON_ERROR_STOP=1 -q -d rollb -f /tmp/schema_branch_nv.sql
+EXIT=3
+psql:...:1175: ERROR:  jd-rename: opportunity.jd_text still exists and opportunity.jd_posting_snapshot
+                       already holds 1 non-null row(s). Refusing to guess which is authoritative.
+
+--- columns after the abort ---
+jd_html  jd_posting_raw  jd_posting_snapshot  jd_real  jd_text  raw_jd
+--- values ---
+ 11111111 | jd_real=<p>HTML BODY ONE ...</p> | raw_jd=PLAIN SOURCE ONE | jd_text=SNAPSHOT ONE ...
+          | jd_html=(null) | jd_posting_raw=(null) | jd_posting_snapshot=WRITTEN BY NEW CODE
+```
+`jd_real` and `raw_jd` are **still there**, and the empty `jd_html`/`jd_posting_raw` placeholders
+were **not** dropped. Had the block not been atomic, those two `drop column` + `rename` pairs would
+have persisted and the database would be in a third, hand-made state. It is not.
+
+**The resulting state is recoverable by a later run** once a human resolves the ambiguity:
+```
+$ psql -d rollb -c "update opportunity set jd_text=jd_posting_snapshot where jd_posting_snapshot is not null;
+                     alter table opportunity drop column jd_posting_snapshot;"
+$ psql -v ON_ERROR_STOP=1 -q -d rollb -f /tmp/schema_branch_nv.sql
+recovery run EXIT=0
+ 11111111 | jd_html=<p>HTML BODY ONE ...</p> | jd_posting_raw=PLAIN SOURCE ONE | jd_posting_snapshot=WRITTEN BY NEW CODE
+$ old_cols_left = 0 ;  jd_source: (null) 1 | jd_html 2 | jd_posting_raw 1
+```
+
+**Consequence worth stating explicitly (observation, not a defect in the block).** `ON_ERROR_STOP=1`
+means a refusal aborts **the rest of SCHEMA_SQL**, not merely this block — every statement below
+line 1175 silently never runs on that deploy. Measured on the refused database:
+```
+$ select coalesce(jd_source,'(null)'), count(*) from requirement group by 1
+ (null) 1 | jd_real 2 | raw_jd 1                      <-- value migration never ran
+$ select pg_get_constraintdef(oid) from pg_constraint where conname='requirement_jd_source_check'
+CHECK ((jd_source = ANY (ARRAY['jd_real'::text, 'raw_jd'::text])))   <-- CHECK never re-added
+```
+That is the correct and intended behaviour for a refusal (nothing half-applied), but it means an
+unrelated schema change landing in the same deploy is also blocked until the ambiguity is cleared
+by hand. This is inherent to `ON_ERROR_STOP` + a single migration file, not something the fix
+introduced.
+
+---
+
+### D7 — F1 is fixed for TWO of the THREE values that column holds — **PARTIALLY CONFIRMED**
+
+**The two the fix covers work.** Proven under D1/D2/D3 above: `review_verdict.posting_source`
+`jd_real → jd_html` and `raw_jd → jd_posting_raw`, on every path, with no CHECK to reject them
+(`posting_source` is a bare `text` on both refs — see the constraint dump earlier).
+
+---
+
+## FINDING L2-F1 (NEW) — `review_verdict.posting_source` also stores `'jd_text'`, and that value is NOT migrated
+
+**Severity: real, same class and blast radius as loop-1's F1 — silent data-integrity, no crash.**
+This is the *same column* F1 was about; the fix migrated two of its three old values.
+
+**Ground truth is the producer, not the schema.** `review_verdict.posting_source` is written from
+one expression, and on `origin/main` that expression can emit a third literal:
+
+```
+$ git show origin/main:api/src/functions/tests/appReviewer.ts | sed -n '116,117p'
+  const postingText: string = art.jd_text || resolved.text
+  const postingSource = art.jd_text ? (resolved.source || 'jd_text') : resolved.source
+                                                        ^^^^^^^^^^^
+```
+The branch changed that same line to the new name:
+```
+$ sed -n '116,117p' api/src/functions/tests/appReviewer.ts
+  const postingText: string = art.jd_posting_snapshot || resolved.text
+  const postingSource = art.jd_posting_snapshot ? (resolved.source || 'jd_posting_snapshot') : resolved.source
+```
+So `'jd_text'` and `'jd_posting_snapshot'` are the same fact under two names — exactly the
+condition the migration exists to remove — and the migration does not touch it:
+```
+$ sed -n '1197,1207p' api/src/functions/tests/schema.ts
+update requirement     set jd_source      = 'jd_html'        where jd_source      = 'jd_real';
+update requirement     set jd_source      = 'jd_posting_raw' where jd_source      = 'raw_jd';
+update review_verdict  set posting_source = 'jd_html'        where posting_source = 'jd_real';
+update review_verdict  set posting_source = 'jd_posting_raw' where posting_source = 'raw_jd';
+```
+There is no `where posting_source = 'jd_text'`.
+
+**PROVEN BY EXECUTION** — populated old database, a verdict row written the way main's line 117
+writes it, then the branch SCHEMA_SQL:
+```
+$ psql -q -d third -c "insert into review_verdict (..., posting_source, jd_text_sha256)
+                       values (..., 'jd_text', repeat('a',64))"
+=== BEFORE ===            === AFTER (migration EXIT=0) ===
+ (null)   1                (null)          1
+ jd_real  1                jd_html         1
+ jd_text  1                jd_text         1     <-- STRANDED
+ raw_jd   1                jd_posting_raw  1
+```
+The migration exits 0 and leaves the row saying `jd_text`, a column name that no longer exists,
+while every new row for the identical case says `jd_posting_snapshot`.
+
+**It is the only such literal — I swept both refs, every file, not one.**
+```
+$ for f in $(git ls-tree -r --name-only origin/main api/src app/src | grep -E '\.(ts|tsx|js|jsx)$'); do
+    git show origin/main:$f | grep -nE "'jd_text'" | grep -v "jd_text_sha256|jd_text_truncated|jd_text_len"; done
+api/src/functions/tests/appReviewer.ts:117      <-- the only hit, on either ref
+```
+And the sibling `*_source` columns are NOT this vocabulary — `artifact_score.must_have_source` /
+`keyword_source` / `seniority_source` store a `"<covered>/<judged>"` denominator string built by
+`artifactScore.ts:194`, never a column name. `requirement.jd_source` is CHECK-bounded to
+`jd_real|raw_jd`, so it cannot carry `jd_text`. **`review_verdict.posting_source` is the only
+column with the gap.**
+
+**Reachability of the `'jd_text'` write (INFERENCE from tracing the code, not a production count).**
+`art` is `... o.jd_real, o.raw_jd, o.why_surfaced, o.jd_text ...` (`appReviewer.ts:97-100` on main),
+so the literal is written whenever `opportunity.jd_text` is non-empty AND
+`resolvePostingSource` returns `source: null` — i.e. `normalizePostingText(jd_real)` is empty and
+`raw_jd` is empty *or* `isAlertDigest(raw_jd, why_surfaced)`. `jd_text` is a snapshot persisted at
+extraction time while `raw_jd`/`why_surfaced` keep being rewritten afterwards (`mailWatch.ts:355`),
+so a posting whose later alert email flips `isAlertDigest` to true lands exactly here. I judge this
+**uncommon but reachable**; I have NOT measured how many production rows carry it — the Postgres
+connectors in this session are unauthenticated (`boost-pg-mcp-write` and the others all reported
+"requires authentication"), so I could not query live. **The one query that would settle the count:**
+```sql
+select posting_source, count(*) from review_verdict group by 1 order by 2 desc;
+```
+If it returns zero `jd_text` rows the finding is cosmetic; if it returns any, they are stranded.
+
+**Fix is one line, in the block that already exists:**
+```sql
+update review_verdict set posting_source = 'jd_posting_snapshot' where posting_source = 'jd_text';
+```
+It must be ordered with the other two (any order — the three source values are disjoint).
+
+**Why the existing guards do not catch it.** `H:jd-column-rename-complete` whitelists the
+`BEGIN/END jd-rename-migration` block and scans for old *column names in executable code*; the
+stranded value is DATA, and there is no guard asserting that every literal the old code could
+store has an UPDATE. The same structural blindness that hid loop-1's F1 (no CHECK to fail loudly)
+hides this one.
