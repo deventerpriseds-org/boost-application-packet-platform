@@ -96,7 +96,7 @@ export async function runReview(
 ): Promise<ReviewOutcome> {
   const art = (await client.query(
     `select a.id, a.type, a.packet_id, p.opp_id, p.pkg_json,
-            o.company, o.role, o.owner_email, o.jd_real, o.raw_jd, o.why_surfaced, o.jd_text, o.jd_text_sha256
+            o.company, o.role, o.owner_email, o.jd_html, o.jd_posting_raw, o.why_surfaced, o.jd_posting_snapshot, o.jd_posting_snapshot_sha256
        from artifact a join packet p on p.id = a.packet_id join opportunity o on o.id = p.opp_id
       where a.id = $1 and o.owner_email = $2`, [artifactId, owner])).rows[0]
   if (!art) throw new Error('artifact not found')
@@ -105,16 +105,16 @@ export async function runReview(
   if (!gateRow) throw new Error('run the deterministic checks first — a review attaches to a check run')
   const runId: string = gateRow.run_id
 
-  const reqRows: Array<ReviewRequirement & { jd_text_sha256: string | null }> = (await client.query(
-    `select id, seq, kind, item_text, verbatim, char_start, char_end, jd_text_sha256
+  const reqRows: Array<ReviewRequirement & { jd_posting_snapshot_sha256: string | null }> = (await client.query(
+    `select id, seq, kind, item_text, verbatim, char_start, char_end, jd_posting_snapshot_sha256
        from requirement where opp_id=$1 order by seq`, [art.opp_id])).rows
   const requirements: ReviewRequirement[] = reqRows
 
-  // The posting body the offsets were measured against. `jd_text` is the stored canonical string;
+  // The posting body the offsets were measured against. `jd_posting_snapshot` is the stored canonical string;
   // resolvePostingSource is the same function the extractor used, never a second regex.
   const resolved = resolvePostingSource(art)
-  const postingText: string = art.jd_text || resolved.text
-  const postingSource = art.jd_text ? (resolved.source || 'jd_text') : resolved.source
+  const postingText: string = art.jd_posting_snapshot || resolved.text
+  const postingSource = art.jd_posting_snapshot ? (resolved.source || 'jd_posting_snapshot') : resolved.source
 
   const finish = async (ran: boolean, reason: string, rows: CheckResult[], verdict: any | null): Promise<ReviewOutcome> =>
     persist(client, artifactId, runId, rows, verdict, ran, reason, !!gateRow.override_by)
@@ -132,7 +132,7 @@ export async function runReview(
   // re-extraction partially completed, and consulting only the first would let a stale set through.
   // The opportunity's own digest counts too — it is the posting the offsets were measured against.
   const recorded = Array.from(new Set(
-    [...reqRows.map(r => r.jd_text_sha256), art.jd_text_sha256].filter(Boolean) as string[]))
+    [...reqRows.map(r => r.jd_posting_snapshot_sha256), art.jd_posting_snapshot_sha256].filter(Boolean) as string[]))
   if (recorded.length && !recorded.includes(digest)) {
     // Requirement offsets are only valid against the exact body they were measured on (schema).
     // The posting has been re-fetched since; every span citation would resolve against a different
@@ -213,7 +213,7 @@ export async function runReview(
     prompt_version: sys.version,
     prompt_source: sys.source,
     posting_source: postingSource,
-    jd_text_sha256: digest,
+    jd_posting_snapshot_sha256: digest,
   })
 }
 
@@ -269,7 +269,7 @@ async function persist(
         `insert into review_verdict
            (artifact_id, run_id, grade, seniority_alignment, agreed, disagreed, reviewer_stricter,
             reviewer_looser, citations, dropped_citations, critique, reviewer_model, prompt_key,
-            prompt_version, prompt_source, blind, posting_source, jd_text_sha256, ran_at)
+            prompt_version, prompt_source, blind, posting_source, jd_posting_snapshot_sha256, ran_at)
          values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,true,$16,$17, now())
          on conflict (artifact_id, run_id) do update set
            grade = excluded.grade, seniority_alignment = excluded.seniority_alignment,
@@ -279,13 +279,13 @@ async function persist(
            critique = excluded.critique, reviewer_model = excluded.reviewer_model,
            prompt_key = excluded.prompt_key, prompt_version = excluded.prompt_version,
            prompt_source = excluded.prompt_source, posting_source = excluded.posting_source,
-           jd_text_sha256 = excluded.jd_text_sha256, ran_at = now()`,
+           jd_posting_snapshot_sha256 = excluded.jd_posting_snapshot_sha256, ran_at = now()`,
         [artifactId, runId, verdict.grade, verdict.seniority_alignment,
          verdict.agreement.agreed, verdict.agreement.disagreed,
          verdict.agreement.reviewer_stricter, verdict.agreement.reviewer_looser,
          JSON.stringify(verdict.accepted), JSON.stringify(verdict.dropped), verdict.critique,
          REVIEWER_MODEL, verdict.prompt_key, verdict.prompt_version, verdict.prompt_source,
-         verdict.posting_source, verdict.jd_text_sha256])
+         verdict.posting_source, verdict.jd_posting_snapshot_sha256])
     }
 
     // --- the score's seniority component ---------------------------------------------------------

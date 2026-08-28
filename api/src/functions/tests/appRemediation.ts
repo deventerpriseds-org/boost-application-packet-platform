@@ -149,7 +149,7 @@ export async function artifactRemediate(req: HttpRequest, context: InvocationCon
     if (!grounded) {
       return { status: 200, headers: HEADERS, jsonBody: {
         ok: false, artifactId, converged: false, haltReason: 'ungrounded', passes: 0, escalations: 0,
-        summary: 'Not remediated: this opportunity has no job posting on file (jd_real and raw_jd are both empty), so there is nothing to remediate against. A package built from our own metadata about the job cannot evidence the employer\'s requirements. Fetch the posting first.',
+        summary: 'Not remediated: this opportunity has no job posting on file (jd_html and jd_posting_raw are both empty), so there is nothing to remediate against. A package built from our own metadata about the job cannot evidence the employer\'s requirements. Fetch the posting first.',
       } }
     }
 

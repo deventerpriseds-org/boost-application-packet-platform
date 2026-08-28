@@ -2,7 +2,7 @@
 // offsets against a job posting must go through here, or they will disagree about what the posting
 // even says.
 //
-// Why this exists (measured, not theoretical): `opportunity.jd_real` stores `descriptionHtml`
+// Why this exists (measured, not theoretical): `opportunity.jd_html` stores `descriptionHtml`
 // (jdBackfill.ts), so ampersands arrive HTML-ENCODED. The previous normalization stripped tags but
 // never decoded entities, so the literal string "P&amp;L" was fed to the scorer. Across the live
 // corpus that is 872 of 1,230 real postings (71%) containing `&amp;`, and "P&L" reads as present in
@@ -27,7 +27,7 @@ export function decodeEntities(input: string): string {
  * Characters outside the Basic Multilingual Plane — emoji, mostly, which postings use decoratively
  * ("Join our rocket ship 🚀"). Each one is TWO UTF-16 code units in JavaScript but ONE character in
  * Postgres, so a `char_start` measured with `String.prototype.slice` does not address the same place
- * as `substring(jd_text from char_start+1)`. Measured: 63 of 3,090 requirement rows (2%) failed the
+ * as `substring(jd_posting_snapshot from char_start+1)`. Measured: 63 of 3,090 requirement rows (2%) failed the
  * SQL re-verification for exactly this reason, on postings where `octet_length` exceeded `length`.
  *
  * Replacing each with a single space makes the two indexings identical, which is what lets one SQL
@@ -62,7 +62,7 @@ export function normalizePostingText(html: any): string {
  * the parsed summary/requirements. Used by BOTH scorers so they cannot disagree.
  */
 export function groundingText(opp: any): string {
-  return normalizePostingText(opp?.jd_real)
+  return normalizePostingText(opp?.jd_html)
     || normalizePostingText([opp?.jd_summary, opp?.jd_requirements].filter(Boolean).join('\n'))
 }
 
@@ -82,12 +82,12 @@ export function isAlertDigest(rawJd: string, whySurfaced: string): boolean {
  * that records offsets or quotes must use THIS function and accept `source:null` when the real
  * posting is absent (116 of the 1,349 parsed opportunities, measured 2026-08-19).
  */
-export function resolvePostingSource(opp: any): { text: string; source: 'jd_real' | 'raw_jd' | null } {
-  const real = normalizePostingText(opp?.jd_real)
-  if (real) return { text: real, source: 'jd_real' }
-  const raw = opp?.raw_jd || ''
-  // raw_jd skips the HTML normalizer, so fold astral characters here or its offsets stop being
-  // addressable from SQL — the same invariant normalizePostingText guarantees for jd_real.
-  if (raw && !isAlertDigest(raw, opp?.why_surfaced || '')) return { text: toBmp(raw), source: 'raw_jd' }
+export function resolvePostingSource(opp: any): { text: string; source: 'jd_html' | 'jd_posting_raw' | null } {
+  const real = normalizePostingText(opp?.jd_html)
+  if (real) return { text: real, source: 'jd_html' }
+  const raw = opp?.jd_posting_raw || ''
+  // jd_posting_raw skips the HTML normalizer, so fold astral characters here or its offsets stop being
+  // addressable from SQL — the same invariant normalizePostingText guarantees for jd_html.
+  if (raw && !isAlertDigest(raw, opp?.why_surfaced || '')) return { text: toBmp(raw), source: 'jd_posting_raw' }
   return { text: '', source: null }
 }

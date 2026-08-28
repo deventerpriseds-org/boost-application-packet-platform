@@ -337,7 +337,7 @@ function joinedRow(mc = MC, seq = 0) {
   const ev = resolveEvidence(REQ, profileRecords(mc, TEMPLATE))
   assert.ok(ev, 'fixture is broken: the requirement no longer resolves against the profile')
   return {
-    seq, item_text: REQ, verbatim: REQ, jd_text_sha256: 'jd-sha',
+    seq, item_text: REQ, verbatim: REQ, jd_posting_snapshot_sha256: 'jd-sha',
     char_start: 0, char_end: REQ.length, kind: 'must_have',
     evidence_quote: ev.quote,
     evidence_source_kind: ev.source_kind,

@@ -106,7 +106,7 @@ test('H3: the requirement extractor never grounds quotes in model output', () =>
   const code = stripComments(body)
   assert.ok(!/\bgroundingText\s*\(/.test(code), 'requirements.ts must not call groundingText')
   const r = buildRequirements({
-    jd_real: null, raw_jd: null,
+    jd_html: null, jd_posting_raw: null,
     jd_summary: 'A leader who will own the integrated product roadmap.',
     jd_table: '<table><tr><td>skills</td><td>Own the integrated product roadmap.</td><td>k</td></tr></table>',
   })
@@ -310,14 +310,14 @@ test('H12: rule modules import neither @azure/functions nor pg', () => {
 
 // ---------------------------------------------------------------------------------------------
 // H13 — Generation was fed a synthesised pseudo-JD because the opportunity projection was
-// duplicated across four call sites and every one of them omitted jd_real.
+// duplicated across four call sites and every one of them omitted jd_html.
 test('H13: there is ONE opportunity projection for generation, and it selects the real posting', () => {
   const body = src('appPackets.ts')
   assert.ok(/const OPP_FIELDS = /.test(body))
   const proj = body.slice(body.indexOf('const OPP_FIELDS'), body.indexOf('const OPP_FIELDS') + 400)
-  assert.ok(/jd_real/.test(proj), 'the projection must carry the employer posting')
+  assert.ok(/jd_html/.test(proj), 'the projection must carry the employer posting')
   assert.ok(!/select company, role, comp_range, why_surfaced, company_signals, pain_hypotheses, persona_key from opportunity/.test(body),
-    'the old jd_real-less projection must not reappear')
+    'the old jd_html-less projection must not reappear')
 })
 
 // ---------------------------------------------------------------------------------------------
@@ -654,7 +654,7 @@ test('H24: a figure scanner only ever reports text that is actually there', () =
 // H25 — An accusation-grade check fired on text that had done nothing wrong.
 //
 // R3 names the field and the exact string a candidate supposedly lifted from the employer's ad. Its
-// first rule was the backlog's literal wording — "no numeric string that also appears in jd_real" —
+// first rule was the backlog's literal wording — "no numeric string that also appears in jd_html" —
 // and measured against a real resume package with a posting reading "three business units" it
 // produced three offenders:
 //     ResumeSummary: (none)   SkillsBullets1: 3   SkillsBullets2: 3   ExpertiseBullets: three
@@ -710,7 +710,7 @@ test('H25: R3 accuses a claim, never a coincidence of digits', () => {
 // disagreed about what "empty" means.
 //
 // `scanEcho` decides emptiness against the NORMALIZED posting; `runChecks` re-derived it from the
-// RAW string. `opportunity.jd_real` stores `descriptionHtml`, so `<p></p>` is a non-empty raw
+// RAW string. `opportunity.jd_html` stores `descriptionHtml`, so `<p></p>` is a non-empty raw
 // string and an empty posting. Measured before the fix, with a generated summary stating an $18M
 // P&L and 60 engineers:
 //     runChecks(postingText: '<p></p>')      -> state=pass  "no posting-only figures across 1 field(s)"
@@ -4177,4 +4177,200 @@ test('H:cross-list-drop-tells-the-truth-about-the-document', async () => {
   // accuses, so the honest rationale rides the EXISTING driver instead of minting a new one - and
   // no schema change to the driver CHECK constraint is needed either.
   assert.notEqual(dropped[0].driver, 'rule')
+})
+
+// ---------------------------------------------------------------------------------------------
+// H:jd-column-rename-complete — a PARTIAL rename of the JD columns is strictly worse than either
+// end state, and its worst failure mode is SILENT.
+//
+// The evidence, measured 2026-08-28 before the rename was written (see
+// `docs/qc-evidence/AC-jd-field-rename.md`, an independent feasibility pass):
+//
+//   - `jd_real` and `raw_jd` are created by SCHEMA_SQL *not at all*. Their only DDL homes are FIVE
+//     request-time `ensure*` helpers (`appJdParse.ts`, `jdBackfill.ts`, `mailWatch.ts`,
+//     `appCapture.ts`) plus `appRequirements.ts` for `jd_posting_snapshot`. Rename the schema and miss one of
+//     those, and the very next ordinary user request runs `add column if not exists jd_real` and
+//     re-creates it EMPTY beside the populated `jd_html`.
+//   - A consumer still naming the old column then reads NULL rather than erroring, so
+//     `resolvePostingSource` returns `source: null` — which `jdText.ts:83` documents as a LEGITIMATE
+//     state. The system degrades to "no employer text" with no error raised anywhere.
+//   - Nothing else can see this: `add column if not exists` succeeds either way, `tsc` cannot read a
+//     SQL string (~20 of the references live in template literals), and a fresh-database schema run
+//     skips every `create table if not exists` on the database that actually matters.
+//
+// So the invariant is asserted structurally, over the source, because there is no runtime this can
+// be exercised against from a test process. This is the "source grep for a structural rule a runtime
+// test cannot express" case CLAUDE.md permits, not a lazy substitute for a behavioural test.
+//
+// THE ONE WHITELIST is the migration block itself, which must name the old columns in order to
+// rename them. It is delimited by sentinels rather than a line range, because a line range silently
+// stops matching the moment anything above it moves — the same class of failure as a guard that
+// compares only one domain and is structurally blind to the rest.
+const JD_OLD_NAMES = ['jd_real', 'raw_jd', 'jd_text', 'jd_text_sha256', 'jd_text_truncated']
+const JD_RENAME_BEGIN = 'BEGIN jd-rename-migration'
+const JD_RENAME_END = 'END jd-rename-migration'
+
+/** Blank out comment text so a line that merely DISCUSSES an old name is not an offender. */
+function stripCommentary (text, ext) {
+  let t = text.replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, ' '))
+  if (ext === '.yml' || ext === '.yaml') {
+    return t.split('\n').map((l) => l.replace(/(^|\s)#.*$/, '$1')).join('\n')
+  }
+  // `(?<![:\\])` keeps `https://…` out of the comment rule; SQL `--` is stripped at line start or
+  // after whitespace, which is where it legally begins.
+  return t.split('\n').map((l) => l.replace(/(?<![:\\])\/\/.*$/, '').replace(/(^|\s)--.*$/, '$1')).join('\n')
+}
+
+/** Every file the rename must reach. `api/test` is excluded on purpose — fixtures are covered by
+ *  their own suites, and a test asserting the OLD name is how a rename gets proven, not violated. */
+function jdScanFiles () {
+  const root = new URL('../../', import.meta.url).pathname
+  const out = []
+  const walk = (p) => {
+    if (!existsSync(p)) return
+    if (/node_modules|worktrees|\/dist\/|\.git\//.test(p)) return
+    let st
+    try { st = readdirSync(p) } catch { out.push(p); return }   // a file, not a directory
+    for (const e of st) walk(join(p, e))
+  }
+  const files = []
+  const collect = (p) => {
+    if (!existsSync(p)) return
+    try {
+      for (const e of readdirSync(p)) collect(join(p, e))
+    } catch {
+      if (/\.(ts|js|jsx|mjs|yml|yaml|sh)$/.test(p) && !/node_modules|worktrees/.test(p)) files.push(p)
+    }
+  }
+  for (const d of ['api/src', 'app/src', 'scripts', '.github/workflows']) collect(join(root, d))
+  void walk; void out
+  return { root, files }
+}
+
+test('H:jd-column-rename-complete: no executable reference to a pre-rename JD column name', () => {
+  const { root, files } = jdScanFiles()
+  // A scan that has gone blind reports zero offenders and reads exactly like success. This floor is
+  // the same defence `D:ledger-citation-resolves` uses for the same reason.
+  assert.ok(files.length > 40, `the JD rename scan found only ${files.length} files — it has gone blind`)
+
+  const offenders = []
+  for (const f of files) {
+    const rel = f.slice(root.length)
+    const raw = readFileSync(f, 'utf8')
+    const ext = f.slice(f.lastIndexOf('.'))
+    const body = stripCommentary(raw, ext)
+    const lines = body.split('\n')
+    // The migration block is allowed to name the old columns; nothing else is.
+    let inMigration = false
+    lines.forEach((line, i) => {
+      if (raw.split('\n')[i].includes(JD_RENAME_BEGIN)) { inMigration = true; return }
+      if (raw.split('\n')[i].includes(JD_RENAME_END)) { inMigration = false; return }
+      if (inMigration) return
+      for (const name of JD_OLD_NAMES) {
+        if (new RegExp(`\\b${name}\\b`).test(line)) offenders.push(`${rel}:${i + 1} still names ${name}`)
+      }
+    })
+  }
+  assert.deepEqual(offenders, [],
+    `${offenders.length} executable reference(s) to a pre-rename JD column name remain. A PARTIAL ` +
+    `rename re-creates the old column empty on the next request and degrades to source:null silently:\n` +
+    offenders.slice(0, 40).join('\n'))
+})
+
+// ---------------------------------------------------------------------------------------------
+// H:rename-precedes-its-adds — a guarded RENAME must run before the `add column if not exists` for
+// the name it renames TO, or the rename silently never fires.
+//
+// H39b already asserts that a statement never names a column added later. This is the MIRROR shape
+// and H39b is structurally blind to it: here the offending statement is an `add column` that runs
+// too EARLY, and the victim is a conditional rename whose `not exists (<new>)` guard the add has
+// just falsified. Nothing errors. The migration exits 0.
+//
+// PROVEN BY EXECUTION on PostgreSQL 16.13, not argued. Populated database, real data in `jd_text`,
+// the jd-rename block moved below the three `add column if not exists jd_posting_snapshot*` lines:
+//
+//     exit=0
+//     jd_text (OLD) still holds:          THE REAL SNAPSHOT
+//     jd_posting_snapshot (NEW) holds:    NULL
+//
+// A fully-populated old column beside an empty new one, and a migration that reported success. Every
+// consumer then reads the new name, gets NULL, and for `resolvePostingSource` that is a LEGITIMATE
+// state (`source: null`) rather than an error -- so the system degrades silently. This guard is the
+// only thing standing between that outcome and a future edit that moves a block for tidiness.
+test('H:rename-precedes-its-adds: a guarded rename runs before the add of the column it creates', () => {
+  const whole = src('schema.ts')
+  const sql = whole.slice(whole.indexOf('SCHEMA_SQL = '))
+  const offenders = []
+  // Every `rename column OLD to NEW` in the file, wherever it lives, with the end of the `do $$`
+  // block that contains it. Keyed off the rename itself rather than off one named block, so a
+  // second rename block added later inherits the guard without anyone remembering to extend it.
+  for (const m of sql.matchAll(/alter table\s+(\w+)\s+rename column\s+(\w+)\s+to\s+(\w+)/g)) {
+    const [, table, , newCol] = m
+    const renameAt = m.index
+    const addRe = new RegExp(`alter table\\s+${table}\\s+add column if not exists\\s+${newCol}\\b`, 'g')
+    for (const a of sql.matchAll(addRe)) {
+      if (a.index < renameAt) {
+        offenders.push(
+          `add column if not exists ${table}.${newCol} at ${a.index} runs BEFORE the rename that ` +
+          `creates it at ${renameAt} — the add creates an empty column, the rename's ` +
+          `"not exists" guard then evaluates false, and the real data stays under the old name`)
+      }
+    }
+  }
+  assert.deepEqual(offenders, [], offenders.join(' | '))
+})
+
+// ---------------------------------------------------------------------------------------------
+// H:rename-covers-every-table-declaring-the-column — a renamed column usually lives on MORE THAN ONE
+// table, and renaming the declarations is not the same as migrating them.
+//
+// MEASURED, in this repo, while writing the jd-rename migration. `jd_text_sha256` is declared on
+// THREE tables -- `opportunity`, `requirement` (it pins the snapshot each offset was measured
+// against) and `review_verdict` (which snapshot the reviewer judged). The source sweep renamed all
+// three DECLARATIONS; the migration renamed only `opportunity`. On a fresh database nothing is wrong,
+// because `create table` carries the new name. On a POPULATED one -- every real database -- the
+// `create table if not exists` is skipped, the column keeps its old name, and the writers start
+// naming a column that does not exist:
+//
+//     error: column "jd_posting_snapshot_sha256" of relation "requirement" does not exist   (42703)
+//
+// Caught by `dimensionsDb.test.mjs`, which builds a populated database and applies the new schema on
+// top. That test found it; this guard is what makes the class impossible to reintroduce, because the
+// next rename will have its own set of tables and nobody will remember this one.
+//
+// The rule is derived from the migration itself rather than hardcoded to the JD columns, so it
+// covers the NEXT rename for free. If a genuinely NEW table ever declares a renamed column and
+// legitimately needs no migration, the fix is to say so here -- not to delete the guard.
+test('H:rename-covers-every-table-declaring-the-column: every table declaring a renamed column has a rename', () => {
+  const whole = src('schema.ts')
+  const sql = whole.slice(whole.indexOf('SCHEMA_SQL = '))
+
+  // table -> set of NEW column names the migration renames TO on that table
+  const renamed = new Map()
+  const newNames = new Set()
+  for (const m of sql.matchAll(/alter table\s+(\w+)\s+rename column\s+(\w+)\s+to\s+(\w+)/g)) {
+    const [, table, , newCol] = m
+    if (!renamed.has(table)) renamed.set(table, new Set())
+    renamed.get(table).add(newCol)
+    newNames.add(newCol)
+  }
+  // Nothing to check on a schema with no renames — and say so rather than passing vacuously.
+  if (!newNames.size) return
+
+  const offenders = []
+  for (const t of sql.matchAll(/create table if not exists (\w+)\s*\(([\s\S]*?)\n\);/g)) {
+    const [, table, body] = t
+    for (const line of body.split('\n')) {
+      const decl = /^\s{2,}(\w+)\s+(text|boolean|int|integer|uuid|jsonb|numeric|timestamptz)\b/.exec(line)
+      if (!decl) continue
+      const col = decl[1]
+      if (!newNames.has(col)) continue
+      if (!(renamed.get(table) || new Set()).has(col)) {
+        offenders.push(
+          `${table}.${col} is declared with a POST-rename name but the migration never renames it on ` +
+          `${table} — on a populated database that column keeps its old name and every writer breaks`)
+      }
+    }
+  }
+  assert.deepEqual(offenders, [], offenders.join(' | '))
 })

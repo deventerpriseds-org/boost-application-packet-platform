@@ -43,8 +43,8 @@ export async function appCapture(req: HttpRequest, context: InvocationContext): 
     // Store raw page text for JD parsing — best-effort, don't fail the insert
     if (r.inserted && r.id && text) {
       try {
-        await client.query(`alter table opportunity add column if not exists raw_jd text`)
-        await client.query(`update opportunity set raw_jd = $1 where id = $2`, [text, r.id])
+        await client.query(`alter table opportunity add column if not exists jd_posting_raw text`)
+        await client.query(`update opportunity set jd_posting_raw = $1 where id = $2`, [text, r.id])
       } catch {}
     }
     return { status: 200, headers: HEADERS, jsonBody: { ok: true, inserted: r.inserted, reason: r.reason, id: r.id, opportunity: { company: o.company, role: o.role, location: o.location } } }

@@ -178,7 +178,7 @@ function Overview({ o, toast, id, reload }) {
     try { const r = await api.parseJd(o.id); if (r.error) throw new Error(r.error); toast('JD parsed — reloading…'); reload && reload() }
     catch (e) { toast(`Parse failed: ${e.message || e}`) } finally { setParsing(false) }
   }
-  // A JD not yet fetched carries the anchor-truth placeholder (jd_real still null). Distinguish it
+  // A JD not yet fetched carries the anchor-truth placeholder (jd_html still null). Distinguish it
   // from a real parsed summary so the placeholder is never shown as if it were the real description.
   const jdNotRetrieved = !o.jdSummary || String(o.jdSummary).startsWith('Full job description not yet retrieved')
   return (

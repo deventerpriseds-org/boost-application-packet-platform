@@ -442,7 +442,7 @@ export function runChecks(input: CheckInput): CheckResult[] {
   if (echoUnits.length) {
     const scans = echoUnits.map(({ f, text }) => ({ f, r: scanEcho(text, input.postingText || '', input.profileText || '') }))
     // The SCAN decides whether it could look, not this function. Re-deriving it here from the raw
-    // strings tested a different thing: `jd_real` is HTML, so a markup-only posting (`<p></p>`) is a
+    // strings tested a different thing: `jd_html` is HTML, so a markup-only posting (`<p></p>`) is a
     // non-empty raw string and an empty posting — and this check reported `pass` on a document it
     // had never compared to anything, then `gateFor` turned that into a green gate. The profile
     // half was worse: a markup-only profile produced false ACCUSATIONS, naming figures as stolen

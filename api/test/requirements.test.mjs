@@ -161,11 +161,11 @@ test('weightFor is deterministic and bounded 1..3', () => {
 
 // ---------------------------------------------------------------- assembly
 
-test('buildRequirements: one row per jd_table row, and every located verbatim slices back out of jd_text', () => {
-  const r = buildRequirements({ jd_real: POSTING, jd_table: TABLE })
+test('buildRequirements: one row per jd_table row, and every located verbatim slices back out of jd_posting_snapshot', () => {
+  const r = buildRequirements({ jd_html: POSTING, jd_table: TABLE })
   assert.equal(r.rows.length, 3, 'row count equals jd_table row count')
-  assert.equal(r.jd_source, 'jd_real')
-  assert.equal(r.jd_text, normalizePostingText(POSTING), 'jd_text IS the string offsets index')
+  assert.equal(r.jd_source, 'jd_html')
+  assert.equal(r.jd_posting_snapshot, normalizePostingText(POSTING), 'jd_posting_snapshot IS the string offsets index')
   assert.ok(!r.posting_truncated)
   for (const row of r.rows) {
     assert.ok(['must_have', 'nice_to_have', 'responsibility'].includes(row.kind), 'no null kind')
@@ -174,8 +174,8 @@ test('buildRequirements: one row per jd_table row, and every located verbatim sl
     if (row.char_start === null) {
       assert.equal(row.verbatim, null); assert.equal(row.coverage, 'escalated')
     } else {
-      assert.equal(r.jd_text.slice(row.char_start, row.char_end), row.verbatim, 'THE invariant')
-      assert.ok(row.char_end > row.char_start && row.char_start >= 0 && row.char_end <= r.jd_text.length)
+      assert.equal(r.jd_posting_snapshot.slice(row.char_start, row.char_end), row.verbatim, 'THE invariant')
+      assert.ok(row.char_end > row.char_start && row.char_start >= 0 && row.char_end <= r.jd_posting_snapshot.length)
       assert.equal(row.coverage, null)
     }
   }
@@ -185,17 +185,17 @@ test('buildRequirements: one row per jd_table row, and every located verbatim sl
 
 test('buildRequirements: entity-decoded on BOTH sides — the measured P&L failure mode', () => {
   const r = buildRequirements({
-    jd_real: '<p>You will have owned P&amp;L for a business unit of scale.</p>',
+    jd_html: '<p>You will have owned P&amp;L for a business unit of scale.</p>',
     jd_table: '<table><tr><td>skills</td><td>Owned P&amp;L for a business unit.</td><td>P&amp;L</td></tr></table>',
   })
   assert.equal(r.rows[0].match_method !== 'unlocatable', true, 'P&L must not be invisible to the locator')
-  assert.equal(r.jd_text.slice(r.rows[0].char_start, r.rows[0].char_end), r.rows[0].verbatim)
+  assert.equal(r.jd_posting_snapshot.slice(r.rows[0].char_start, r.rows[0].char_end), r.rows[0].verbatim)
   assert.match(r.rows[0].verbatim, /P&L/)
   assert.ok(!/&amp;/.test(r.rows[0].item_text))
 })
 
 test('buildRequirements: the model Item is kept SEPARATE from the posting quote', () => {
-  const r = buildRequirements({ jd_real: POSTING, jd_table: TABLE })
+  const r = buildRequirements({ jd_html: POSTING, jd_table: TABLE })
   const row = r.rows[0]
   assert.equal(row.item_text, 'Own the integrated product roadmap for corporate hiring technology.')
   assert.notEqual(row.verbatim, row.item_text, 'a paraphrase must never be stored as the quote')
@@ -205,41 +205,41 @@ test('buildRequirements: the model Item is kept SEPARATE from the posting quote'
 
 test('buildRequirements: no employer posting => no offsets into MODEL text', () => {
   const r = buildRequirements({
-    jd_real: null, raw_jd: null,
+    jd_html: null, jd_posting_raw: null,
     jd_summary: 'A leader who will own the integrated product roadmap for corporate hiring technology.',
     jd_requirements: '<ul><li>10+ years of product management experience.</li></ul>',
     jd_table: TABLE,
   })
   assert.equal(r.jd_source, null)
-  assert.equal(r.jd_text, '')
+  assert.equal(r.jd_posting_snapshot, '')
   assert.equal(r.rows.length, 3, 'rows are never dropped')
   assert.ok(r.rows.every(x => x.match_method === 'no_posting' && x.char_start === null),
     'quoting the model summary back as the employer is the failure this prevents')
   assert.equal(r.located_rate, 0)
 })
 
-test('buildRequirements: raw_jd is used when jd_real is absent, but an alert digest is not', () => {
+test('buildRequirements: jd_posting_raw is used when jd_html is absent, but an alert digest is not', () => {
   const raw = 'We need 10+ years of product management experience for this role.'
-  const ok = buildRequirements({ jd_real: null, raw_jd: raw, jd_table: TABLE })
-  assert.equal(ok.jd_source, 'raw_jd')
-  assert.equal(ok.jd_text, raw)
+  const ok = buildRequirements({ jd_html: null, jd_posting_raw: raw, jd_table: TABLE })
+  assert.equal(ok.jd_source, 'jd_posting_raw')
+  assert.equal(ok.jd_posting_snapshot, raw)
 
   const digest = buildRequirements({
-    jd_real: null, raw_jd: 'New LinkedIn alert: 10+ years of product management experience',
+    jd_html: null, jd_posting_raw: 'New LinkedIn alert: 10+ years of product management experience',
     why_surfaced: 'LinkedIn alert', jd_table: TABLE,
   })
   assert.equal(digest.jd_source, null, 'a digest is many jobs — never quote it as this posting')
 })
 
 test('buildRequirements: no table is survivable', () => {
-  assert.deepEqual(buildRequirements({ jd_real: 'text', jd_table: null }).rows, [])
+  assert.deepEqual(buildRequirements({ jd_html: 'text', jd_table: null }).rows, [])
 })
 
 test('buildRequirements: a posting past the model window flags truncation and keeps its rows', () => {
   const filler = 'We value collaboration and curiosity. '.repeat(400)   // > 12000 chars
   const posting = filler + 'Nothing here matches the table at all.'
   assert.ok(posting.length > MODEL_WINDOW)
-  const r = buildRequirements({ jd_real: posting, jd_table: TABLE })
+  const r = buildRequirements({ jd_html: posting, jd_table: TABLE })
   assert.equal(r.posting_truncated, true, 'a reviewer must know the parser never saw the whole posting')
   assert.equal(r.rows.length, 3, 'rows are never dropped for being unlocatable')
   assert.ok(r.rows.some(x => x.match_method === 'beyond_model_window'),
@@ -251,33 +251,33 @@ test('buildRequirements: two identical table rows never cite the same span twice
             + '<tr><td>responsibilities</td><td>Drive operational excellence across the portfolio.</td><td>ops</td></tr></table>'
   const posting = 'Drive operational excellence across the whole portfolio. '
     + 'What you will do: drive operational excellence across the whole portfolio.'
-  const r = buildRequirements({ jd_real: posting, jd_table: dup })
+  const r = buildRequirements({ jd_html: posting, jd_table: dup })
   assert.equal(r.rows.length, 2)
   const starts = r.rows.map(x => x.char_start)
   assert.notEqual(starts[0], starts[1])
 })
 
 test('buildRequirements never claims coverage before an evidence engine exists', () => {
-  const r = buildRequirements({ jd_real: POSTING, jd_table: TABLE })
+  const r = buildRequirements({ jd_html: POSTING, jd_table: TABLE })
   assert.ok(r.rows.every(x => x.coverage === null || x.coverage === 'escalated'))
 })
 
 test('buildRequirements is pure: same input twice, identical output', () => {
-  const opp = { jd_real: POSTING, jd_table: TABLE }
+  const opp = { jd_html: POSTING, jd_table: TABLE }
   assert.deepEqual(buildRequirements(opp), buildRequirements(opp))
 })
 
 test('every located row is addressable from SQL: JS index == Postgres character index', () => {
   const r = buildRequirements({
-    jd_real: '<p>🚀 Responsibilities: You will own our integrated product roadmap for the '
+    jd_html: '<p>🚀 Responsibilities: You will own our integrated product roadmap for the '
       + 'corporate hiring technology suite. 📈 Requirements: 10+ years of product management experience.</p>',
     jd_table: TABLE,
   })
-  assert.equal([...r.jd_text].length, r.jd_text.length, 'jd_text must contain no astral characters')
+  assert.equal([...r.jd_posting_snapshot].length, r.jd_posting_snapshot.length, 'jd_posting_snapshot must contain no astral characters')
   for (const row of r.rows) {
     if (row.char_start === null) continue
-    assert.equal(r.jd_text.slice(row.char_start, row.char_end), row.verbatim)
-    // What Postgres substring(jd_text from char_start+1 for len) would return.
-    assert.equal([...r.jd_text].slice(row.char_start, row.char_end).join(''), row.verbatim)
+    assert.equal(r.jd_posting_snapshot.slice(row.char_start, row.char_end), row.verbatim)
+    // What Postgres substring(jd_posting_snapshot from char_start+1 for len) would return.
+    assert.equal([...r.jd_posting_snapshot].slice(row.char_start, row.char_end).join(''), row.verbatim)
   }
 })

@@ -18,8 +18,8 @@ test('numeric entity', () => assert.equal(normalizePostingText('R&#38;D budget')
 test('hex entity', () => assert.equal(normalizePostingText('R&#x26;D'), 'R&D'))
 test('script/style stripped', () => assert.equal(normalizePostingText('<script>var x="&amp;"</script>Hello'), 'Hello'))
 test('null safe', () => assert.equal(normalizePostingText(null), ''))
-test('groundingText prefers jd_real', () => assert.equal(groundingText({ jd_real: '<b>P&amp;L</b>' }), 'P&L'))
-test('groundingText falls back to summary', () => assert.equal(groundingText({ jd_real: '', jd_summary: 'Owns M&amp;A' }), 'Owns M&A'))
+test('groundingText prefers jd_html', () => assert.equal(groundingText({ jd_html: '<b>P&amp;L</b>' }), 'P&L'))
+test('groundingText falls back to summary', () => assert.equal(groundingText({ jd_html: '', jd_summary: 'Owns M&amp;A' }), 'Owns M&A'))
 test('does not over-decode', () => assert.equal(decodeEntities('5 &lt; 6'), '5 < 6'))
 
 // A JavaScript string index and a Postgres character index must address the SAME position, or the

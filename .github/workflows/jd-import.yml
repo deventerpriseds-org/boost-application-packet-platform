@@ -1,10 +1,10 @@
 name: JD Import
 
-# Write a job posting's REAL text into opportunity.raw_jd from a file committed in this repo.
+# Write a job posting's REAL text into opportunity.jd_posting_raw from a file committed in this repo.
 #
-# IT WRITES raw_jd - THE SOURCE - NOT jd_text. Corrected 2026-08-27 after the 23 Aug run wrote
-# jd_text successfully (UPDATE 1, 8618 chars) and was silently undone two minutes later, because
-# jd_text is a SNAPSHOT that every extraction recomputes from resolvePostingSource. See the block
+# IT WRITES jd_posting_raw - THE SOURCE - NOT jd_posting_snapshot. Corrected 2026-08-27 after the 23 Aug run wrote
+# jd_posting_snapshot successfully (UPDATE 1, 8618 chars) and was silently undone two minutes later, because
+# jd_posting_snapshot is a SNAPSHOT that every extraction recomputes from resolvePostingSource. See the block
 # above the write for the measurement.
 #
 # WHY A COMMITTED FILE AND NOT A WORKFLOW INPUT. Two reasons, both learned today:
@@ -15,10 +15,10 @@ name: JD Import
 #     means the exact content written to production is reviewable in git BEFORE it is written, and
 #     diffable afterwards. Nothing routes through an agent's retyping unseen.
 #
-# WHY THIS EXISTS AT ALL. Measured on the Trinnex opportunity 2026-08-23: opportunity.jd_text held
+# WHY THIS EXISTS AT ALL. Measured on the Trinnex opportunity 2026-08-23: opportunity.jd_posting_snapshot held
 # 1,054 chars against a 8,619-char posting - 12.2%. What was stored was a DIGEST ("Company: ...
 # Role: ... Employment: Full-time"), not the ad. Requirements are extracted downstream and their
-# quotes are located against jd_text, so a digest makes anchoring impossible and lets invented
+# quotes are located against jd_posting_snapshot, so a digest makes anchoring impossible and lets invented
 # requirements sit beside true ones with no way to tell them apart. 5 of that opportunity's 10
 # requirements were unlocatable, and BOTH real Minimum Qualifications were absent entirely.
 #
@@ -83,26 +83,26 @@ jobs:
 
           # WRITE THE SOURCE, NOT THE SNAPSHOT. This is the defect that made the 23 Aug run useless
           # even though its write LANDED. Measured from that run's own log: at 20:47:46 it wrote
-          # jd_text = 8618 chars, UPDATE 1. At 20:49:30 the row was 1054 chars again.
+          # jd_posting_snapshot = 8618 chars, UPDATE 1. At 20:49:30 the row was 1054 chars again.
           #
-          # `jd_text` is not authorable. It is a SNAPSHOT that `requirements.ts:419` recomputes from
-          # `resolvePostingSource(opp)` on every extraction - jd_real, else raw_jd - and persists so
+          # `jd_posting_snapshot` is not authorable. It is a SNAPSHOT that `requirements.ts:419` recomputes from
+          # `resolvePostingSource(opp)` on every extraction - jd_html, else jd_posting_raw - and persists so
           # stored char offsets keep pointing at the words they were measured on. Writing the
           # snapshot while leaving the source alone means the next extraction regenerates it from
           # the unchanged 1,054-char digest and throws the import away. Which is exactly what
           # happened, silently, two minutes later.
           #
-          # So this writes raw_jd, and jd_text is left for the re-extraction to rebuild.
-          OLD_CHARS=$(psql -t -A -X -c "select coalesce(length(raw_jd),0) from opportunity where id='$OPP'")
-          echo "current raw_jd: $OLD_CHARS chars"
+          # So this writes jd_posting_raw, and jd_posting_snapshot is left for the re-extraction to rebuild.
+          OLD_CHARS=$(psql -t -A -X -c "select coalesce(length(jd_posting_raw),0) from opportunity where id='$OPP'")
+          echo "current jd_posting_raw: $OLD_CHARS chars"
 
-          # AND REFUSE IF jd_real WOULD WIN ANYWAY. resolvePostingSource prefers jd_real over
-          # raw_jd, so importing into raw_jd on a row that has jd_real is a write that succeeds and
+          # AND REFUSE IF jd_html WOULD WIN ANYWAY. resolvePostingSource prefers jd_html over
+          # jd_posting_raw, so importing into jd_posting_raw on a row that has jd_html is a write that succeeds and
           # changes nothing a reader will ever see - the same "reported success, no effect" class
           # this whole file exists to catch, one level up.
-          REAL_CHARS=$(psql -t -A -X -c "select coalesce(length(jd_real),0) from opportunity where id='$OPP'")
+          REAL_CHARS=$(psql -t -A -X -c "select coalesce(length(jd_html),0) from opportunity where id='$OPP'")
           if [ "${REAL_CHARS:-0}" -gt 0 ]; then
-            echo "::error::jd_real holds $REAL_CHARS chars and resolvePostingSource PREFERS it, so writing raw_jd would have no effect. Import into jd_real, or clear it deliberately first."
+            echo "::error::jd_html holds $REAL_CHARS chars and resolvePostingSource PREFERS it, so writing jd_posting_raw would have no effect. Import into jd_html, or clear it deliberately first."
             exit 1
           fi
           if [ "$OLD_CHARS" = "" ]; then echo "::error::no opportunity $OPP"; exit 1; fi
@@ -111,9 +111,9 @@ jobs:
             exit 1
           fi
 
-          echo "----- CURRENT raw_jd (the undo trail - copy this before proceeding) -----"
-          psql -t -A -X -c "select coalesce(raw_jd,'(null)') from opportunity where id='$OPP'"
-          echo "----- END CURRENT raw_jd -----"
+          echo "----- CURRENT jd_posting_raw (the undo trail - copy this before proceeding) -----"
+          psql -t -A -X -c "select coalesce(jd_posting_raw,'(null)') from opportunity where id='$OPP'"
+          echo "----- END CURRENT jd_posting_raw -----"
 
           if [ "$CONFIRM" != "WRITE" ]; then
             echo "DRY RUN - nothing written. Re-dispatch with confirm=WRITE to apply."
@@ -124,21 +124,21 @@ jobs:
           psql -v ON_ERROR_STOP=1 -X <<SQL
           \set jd \`cat "$FILE"\`
           update opportunity
-             set raw_jd = :'jd',
+             set jd_posting_raw = :'jd',
                  job_url = nullif('$JOB_URL',''),
                  updated_at = now()
            where id = '$OPP';
           SQL
 
-          AFTER=$(psql -t -A -X -c "select length(raw_jd) from opportunity where id='$OPP'")
-          echo "stored raw_jd: $AFTER chars"
+          AFTER=$(psql -t -A -X -c "select length(jd_posting_raw) from opportunity where id='$OPP'")
+          echo "stored jd_posting_raw: $AFTER chars"
           # A write that reports success without changing the row is the failure mode that matters.
           if [ "$AFTER" != "$NEW_CHARS" ]; then
             echo "::error::stored length ($AFTER) does not match the file ($NEW_CHARS) - the write did not land as expected."
             exit 1
           fi
-          echo "OK - raw_jd replaced."
-          echo "jd_text is STILL the old snapshot ($OLD_CHARS chars) and that is correct - it is rebuilt"
+          echo "OK - jd_posting_raw replaced."
+          echo "jd_posting_snapshot is STILL the old snapshot ($OLD_CHARS chars) and that is correct - it is rebuilt"
           echo "from the source by the next extraction. THE IMPORT IS NOT FINISHED UNTIL REQUIREMENTS ARE"
           echo "RE-EXTRACTED: until then the packet still reads the old requirements, located against the"
           echo "old snapshot. That second step is deliberately not automated here - it is destructive too."

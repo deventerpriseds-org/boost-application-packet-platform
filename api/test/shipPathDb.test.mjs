@@ -180,7 +180,7 @@ async function seedEvidenceFixture(c) {
   for (const seq of [1, 2]) {
     ids[seq] = (await c.query(
       `insert into requirement
-         (opp_id, seq, kind, item_text, match_method, kind_source, weight, jd_text_sha256, extractor_version)
+         (opp_id, seq, kind, item_text, match_method, kind_source, weight, jd_posting_snapshot_sha256, extractor_version)
        values ($1,$2,'must_have',$3,'unlocatable','category_default',2,'sha',1) returning id`,
       [opp, seq, `requirement number ${seq}`])).rows[0].id
   }

@@ -6,7 +6,7 @@
 // `opportunity.jd_table` is a model-generated `<table>` of Category | Item | ATS Keyword — 1349 of
 // 1821 opportunities have one. Reading real rows shows the Item column is a PARAPHRASE, not a quote:
 //   "Lead the operational performance of the renewable-generation portfolio."
-// The backlog's acceptance ("each row's verbatim is a substring of jd_real at its offsets") is
+// The backlog's acceptance ("each row's verbatim is a substring of jd_html at its offsets") is
 // therefore NOT satisfiable by storing Items — a paraphrase has no offsets in the posting.
 //
 // So the Item is kept as `item_text`, and `verbatim` is resolved back to the posting's OWN words by
@@ -358,9 +358,9 @@ export const sha256 = (s: string) => createHash('sha256').update(s, 'utf8').dige
 
 export interface BuildResult {
   rows: RequirementRow[]
-  jd_text: string              // the EXACT string every offset indexes. Persist it, or offsets rot.
-  jd_text_sha256: string       // lets a single SQL statement prove a row still matches its posting
-  jd_source: 'jd_real' | 'raw_jd' | null
+  jd_posting_snapshot: string              // the EXACT string every offset indexes. Persist it, or offsets rot.
+  jd_posting_snapshot_sha256: string       // lets a single SQL statement prove a row still matches its posting
+  jd_source: 'jd_html' | 'jd_posting_raw' | null
   posting_truncated: boolean   // posting is longer than the JD parser was ever shown
   located: number              // rows with real offsets
   located_rate: number         // 0..1 — the honest measure of how much of this posting is evidenced
@@ -369,7 +369,7 @@ export interface BuildResult {
 /**
  * Build the requirement rows for one opportunity row (as selected from `opportunity`).
  *
- * Offsets index `jd_text`, which is the EMPLOYER'S text (`resolvePostingSource`) and never
+ * Offsets index `jd_posting_snapshot`, which is the EMPLOYER'S text (`resolvePostingSource`) and never
  * `jd_summary`/`jd_requirements`. When no employer text exists — 116 of the 1,349 parsed
  * opportunities — every row is `no_posting` with null offsets, rather than quoting the model's own
  * summary back at the reviewer as if the employer had written it.
@@ -416,7 +416,7 @@ export function buildRequirements(opp: any): BuildResult {
 
   const located = rows.filter(r => r.char_start !== null).length
   return {
-    rows, jd_text: jdText, jd_text_sha256: sha256(jdText), jd_source: source,
+    rows, jd_posting_snapshot: jdText, jd_posting_snapshot_sha256: sha256(jdText), jd_source: source,
     posting_truncated: truncated, located, located_rate: rows.length ? located / rows.length : 0,
   }
 }

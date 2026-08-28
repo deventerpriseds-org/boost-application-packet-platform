@@ -198,7 +198,7 @@ function packetShape(pkt: any, artifacts: any[], opp?: any) {
     resumeTemplateId: pkt.resume_template_id || null,
     mustHaves: pkt.must_haves || [],
     // missingKw is DERIVED from opportunity.ats_gaps — the posting-grounded gap list produced by
-    // atsScoreOne() against jd_real. It is deliberately NOT a packet column: a second gap list
+    // atsScoreOne() against jd_html. It is deliberately NOT a packet column: a second gap list
     // sourced from jdAnalysis (which never reads the posting) would be a weaker parallel truth.
     // atsGapsScoredAt distinguishes "scored, no gaps" from "never scored" so the UI can say which.
     missingKw: (opp && opp.ats_gaps) || [],
@@ -400,10 +400,10 @@ async function ensurePkgColumn(client: any) {
 }
 
 // ONE projection for every caller that grounds generation in an opportunity. It was duplicated
-// across four call sites and all four omitted jd_real, which is how generation ended up reading a
+// across four call sites and all four omitted jd_html, which is how generation ended up reading a
 // synthesised pseudo-JD instead of the posting (X1). A single constant is what stops that recurring.
 export const OPP_FIELDS = `select id, company, role, comp_range, why_surfaced, company_signals,
-  pain_hypotheses, persona_key, jd_real, raw_jd from opportunity`
+  pain_hypotheses, persona_key, jd_html, jd_posting_raw from opportunity`
 
 /**
  * One artifact — and only if the resolved owner owns the opportunity it hangs off.
@@ -430,7 +430,7 @@ export async function loadOwnedArtifact(client: any, artifactId: string, owner: 
  * The text the generator is grounded in.
  *
  * Was: a pseudo-JD assembled from role + company + why_surfaced + company_signals + pain_hypotheses,
- * with `jd_real` never selected. Every figure, quote and claim the pipeline produced was therefore
+ * with `jd_html` never selected. Every figure, quote and claim the pipeline produced was therefore
  * derived from our own metadata about the job rather than from the employer's posting — and P1.4's
  * provenance rows would have recorded those fabrications as evidence, with P8.2's figure scan
  * passing vacuously because there were no real figures to scan.
@@ -1277,7 +1277,7 @@ export async function jdAnalysis(req: HttpRequest, context: InvocationContext): 
     const guard = requireWrite(req); if (guard) return guard
     if (!key) return { status: 200, headers: HEADERS, jsonBody: { error: 'OPENAI_API_KEY not set' } }
     client = await getPgClient(); await ensureContentColumn(client); await ensureAnalysisCols(client)
-    const opp = (await client.query(`select company, role, comp_range, why_surfaced, company_signals, pain_hypotheses, jd_real, jd_summary, jd_requirements from opportunity where id = $1`, [oppId])).rows[0]
+    const opp = (await client.query(`select company, role, comp_range, why_surfaced, company_signals, pain_hypotheses, jd_html, jd_summary, jd_requirements from opportunity where id = $1`, [oppId])).rows[0]
     if (!opp) return { status: 404, headers: HEADERS, jsonBody: { error: 'opportunity not found' } }
     const { pkt } = await loadPacket(client, oppId)
 

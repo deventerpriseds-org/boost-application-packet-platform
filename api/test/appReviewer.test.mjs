@@ -15,10 +15,10 @@ const POSTING = 'We are hiring. Requirements: reside on the East Coast, US citiz
 // engine reached NO coverage verdict on them. r2 judged and covered, r3 judged and uncovered — which
 // is exactly what "1/2 must-have requirements evidenced" with r3 uncovered describes.
 const REQS = [
-  { id: 'r0', seq: 0, kind: 'must_have', item_text: 'reside on the East Coast', verbatim: 'reside on the East Coast', char_start: null, char_end: null, jd_text_sha256: null },
-  { id: 'r1', seq: 1, kind: 'must_have', item_text: 'US citizenship', verbatim: 'US citizenship', char_start: null, char_end: null, jd_text_sha256: null },
-  { id: 'r2', seq: 2, kind: 'must_have', item_text: 'ten years of experience', verbatim: 'ten years of experience', char_start: null, char_end: null, jd_text_sha256: null },
-  { id: 'r3', seq: 3, kind: 'must_have', item_text: 'deep experience with roadmap strategy and execution', verbatim: 'deep experience with roadmap strategy and execution', char_start: null, char_end: null, jd_text_sha256: null },
+  { id: 'r0', seq: 0, kind: 'must_have', item_text: 'reside on the East Coast', verbatim: 'reside on the East Coast', char_start: null, char_end: null, jd_posting_snapshot_sha256: null },
+  { id: 'r1', seq: 1, kind: 'must_have', item_text: 'US citizenship', verbatim: 'US citizenship', char_start: null, char_end: null, jd_posting_snapshot_sha256: null },
+  { id: 'r2', seq: 2, kind: 'must_have', item_text: 'ten years of experience', verbatim: 'ten years of experience', char_start: null, char_end: null, jd_posting_snapshot_sha256: null },
+  { id: 'r3', seq: 3, kind: 'must_have', item_text: 'deep experience with roadmap strategy and execution', verbatim: 'deep experience with roadmap strategy and execution', char_start: null, char_end: null, jd_posting_snapshot_sha256: null },
 ]
 
 /**
@@ -36,7 +36,7 @@ function fakeClient(scoreRow) {
       const q = String(sql).replace(/\s+/g, ' ').trim()
       if (/^(begin|commit|rollback)$/i.test(q)) return { rows: [] }
       if (q.startsWith('select a.id, a.type')) {
-        return { rows: [{ id: 'art1', type: 'resume', packet_id: 'p1', opp_id: 'o1', pkg_json: { ResumeSummary: 'x' }, company: 'Acme', role: 'Director', owner_email: 'o@e.io', jd_real: POSTING, raw_jd: null, why_surfaced: null, jd_text: POSTING, jd_text_sha256: null }] }
+        return { rows: [{ id: 'art1', type: 'resume', packet_id: 'p1', opp_id: 'o1', pkg_json: { ResumeSummary: 'x' }, company: 'Acme', role: 'Director', owner_email: 'o@e.io', jd_html: POSTING, jd_posting_raw: null, why_surfaced: null, jd_posting_snapshot: POSTING, jd_posting_snapshot_sha256: null }] }
       }
       if (q.startsWith('select run_id, override_by from artifact_gate')) return { rows: [{ run_id: 'run1', override_by: null }] }
       if (q.startsWith('select id, seq, kind, item_text')) return { rows: REQS }

@@ -232,7 +232,7 @@ create table if not exists term_library_entry (
   soc_codes         text[] not null default '{}',
   scoreable         boolean not null default true,  -- false = display-only; enforces "model terms never score"
   confidence        numeric(4,3),               -- derived from independent-source corroboration, not a model
-  evidence_df       int,                        -- document frequency in jd_real at seed time
+  evidence_df       int,                        -- document frequency in jd_html at seed time
   weight            numeric,
   added_at          timestamptz not null default now(),
   unique (library_id, term_key)
@@ -320,7 +320,7 @@ create index if not exists term_cand_status_idx on term_candidate(owner_email, s
 -- in the posting so any downstream claim can be re-read at its source.
 --
 -- item_text is what the MODEL wrote (jd_table's Item column is a paraphrase, measured on live
--- rows). verbatim is the EMPLOYER'S own words at [char_start, char_end) in opportunity.jd_text.
+-- rows). verbatim is the EMPLOYER'S own words at [char_start, char_end) in opportunity.jd_posting_snapshot.
 -- They are separate columns on purpose: conflating them fabricates evidence that P1.3's
 -- verbatim_quote and P4's citation validator would then cite as if the employer had written it.
 -- A row that could not be located keeps null offsets and a null verbatim rather than inventing either.
@@ -348,8 +348,8 @@ create table if not exists requirement (
   -- than migrated - by remediation_loop.closed, which is per (artifact, pass) by construction.
   weight         int not null check (weight between 1 and 3),
   source_category text,
-  jd_source      text check (jd_source in ('jd_real','raw_jd')),
-  jd_text_sha256 text not null,             -- offsets are only valid against THIS posting body
+  jd_source      text check (jd_source in ('jd_html','jd_posting_raw')),
+  jd_posting_snapshot_sha256 text not null,             -- offsets are only valid against THIS posting body
   extractor_version int not null,
   created_at     timestamptz not null default now(),
   unique (opp_id, seq),
@@ -381,7 +381,7 @@ create index if not exists requirement_kind_idx on requirement(opp_id, kind);
 -- quote is a literal substring of the STORED PROFILE RECORD named by source_key, at
 -- [char_start, char_end). Same discipline as requirement.verbatim, pointed at the candidate's
 -- profile instead of the employer's posting. record_sha256 is what makes a stale offset detectable
--- after the owner edits their profile, exactly as jd_text_sha256 does for the posting.
+-- after the owner edits their profile, exactly as jd_posting_snapshot_sha256 does for the posting.
 -- P8.1 / R1 — what the engine fixed before the user saw it, and how to put it back.
 --
 -- ONE ROW PER CHANGED SPAN, not per field: a ResumeSummary can carry three independently undoable
@@ -822,7 +822,7 @@ create table if not exists review_verdict (
   -- Which column the posting text came from, and the digest of the exact string the citations were
   -- verified against. A citation is only meaningful against THAT body.
   posting_source text,
-  jd_text_sha256 text,
+  jd_posting_snapshot_sha256 text,
   ran_at        timestamptz not null default now(),
   unique (artifact_id, run_id)
 );
@@ -1084,12 +1084,123 @@ alter table opportunity    add column if not exists matched_variation text;
 alter table opportunity    add column if not exists title_tier text;
 alter table opportunity    add column if not exists is_favorite boolean not null default false;
 alter table opportunity    add column if not exists base_score int;
+-- BEGIN jd-rename-migration (whitelisted by H:jd-column-rename-complete)
+--
+-- 2026-08-28. The three JD columns were renamed because their old names LIED about the axis they
+-- differ on. 'jd_real' vs 'raw_jd' reads as a provenance distinction -- "real = fetched from the
+-- page, raw = from the email" -- and that is false: 'appJdParse.ts' writes page-fetched text into
+-- 'raw_jd'. The real axis is FORMAT. 'jd_real' held HTML and was normalised through
+-- 'normalizePostingText'; 'raw_jd' held plain text and skipped that normaliser. A session read the
+-- names the obvious way, got it backwards, and had to be corrected by the owner.
+--
+--   jd_real            -> jd_html                          (HTML posting body)
+--   raw_jd             -> jd_posting_raw                   (plain-text posting SOURCE)
+--   jd_text            -> jd_posting_snapshot              (hash-pinned SNAPSHOT the offsets index)
+--   jd_text_sha256     -> jd_posting_snapshot_sha256
+--   jd_text_truncated  -> jd_posting_snapshot_truncated
+--
+-- 'jd_fetch_log.jd_text_len' is deliberately NOT renamed: it is a different table recording the
+-- length of text fetched from a provider, not this snapshot. Renaming it would make it lie.
+--
+-- WHY A GUARDED 'do $$' BLOCK AND NOT A BARE RENAME. SCHEMA_SQL re-runs on every deploy under
+-- 'psql -v ON_ERROR_STOP=1'. A bare 'alter table ... rename column jd_real to jd_html' succeeds on
+-- deploy #1 and on deploy #2 raises 'column "jd_real" does not exist', which ABORTS THE WHOLE
+-- MIGRATION at that line -- every statement below it silently never runs. Proven by execution on
+-- PostgreSQL 16.13. There is no 'IF EXISTS' for a column in 'RENAME COLUMN' (also proven: it does
+-- not parse), so idempotency requires the conditional block. This extends the identical idiom
+-- already in this file for 'remediation_loop.must_have_check_key' -- it is not a new pattern.
+--
+-- THE DOUBLE CONDITION IS LOAD-BEARING. Old column present AND new column absent. The first half
+-- alone re-fires if anything re-creates the old column, and five request-time 'ensure*' helpers
+-- used to do exactly that. The second half alone would skip a genuine first run.
+--
+-- ORDERING (H39/H39b): this block MUST stay ABOVE the 'add column if not exists' lines below. If an
+-- add ran first it would create an EMPTY 'jd_posting_snapshot', the 'not exists' guard would then be
+-- false, the rename would never fire, and the real data would sit in 'jd_text' forever behind a
+-- fully-populated old column and an empty new one -- a silent no-op that looks like success.
+do $$
+begin
+  if exists (select 1 from information_schema.columns
+              where table_name = 'opportunity' and column_name = 'jd_real')
+     and not exists (select 1 from information_schema.columns
+              where table_name = 'opportunity' and column_name = 'jd_html') then
+    alter table opportunity rename column jd_real to jd_html;
+  end if;
+  if exists (select 1 from information_schema.columns
+              where table_name = 'opportunity' and column_name = 'raw_jd')
+     and not exists (select 1 from information_schema.columns
+              where table_name = 'opportunity' and column_name = 'jd_posting_raw') then
+    alter table opportunity rename column raw_jd to jd_posting_raw;
+  end if;
+  if exists (select 1 from information_schema.columns
+              where table_name = 'opportunity' and column_name = 'jd_text')
+     and not exists (select 1 from information_schema.columns
+              where table_name = 'opportunity' and column_name = 'jd_posting_snapshot') then
+    alter table opportunity rename column jd_text to jd_posting_snapshot;
+  end if;
+  if exists (select 1 from information_schema.columns
+              where table_name = 'opportunity' and column_name = 'jd_text_sha256')
+     and not exists (select 1 from information_schema.columns
+              where table_name = 'opportunity' and column_name = 'jd_posting_snapshot_sha256') then
+    alter table opportunity rename column jd_text_sha256 to jd_posting_snapshot_sha256;
+  end if;
+  if exists (select 1 from information_schema.columns
+              where table_name = 'opportunity' and column_name = 'jd_text_truncated')
+     and not exists (select 1 from information_schema.columns
+              where table_name = 'opportunity' and column_name = 'jd_posting_snapshot_truncated') then
+    alter table opportunity rename column jd_text_truncated to jd_posting_snapshot_truncated;
+  end if;
+  -- THREE TABLES CARRY jd_text_sha256, NOT ONE. 'requirement' pins the snapshot each offset was
+  -- measured against, and 'review_verdict' records which snapshot the reviewer judged. Renaming only
+  -- the 'opportunity' copy was a real defect in the first draft of this block: the CREATE TABLE
+  -- declarations for both were renamed by the sweep while the migration was not, so on a POPULATED
+  -- database the writers began naming a column that had never been renamed. Caught by
+  -- 'dimensionsDb.test.mjs' -- which builds a populated database with the previous schema and applies
+  -- this one on top -- with 'column "jd_posting_snapshot_sha256" of relation "requirement" does not
+  -- exist'. A fresh-database run cannot see it, because there the CREATE TABLE carries the new name.
+  if exists (select 1 from information_schema.columns
+              where table_name = 'requirement' and column_name = 'jd_text_sha256')
+     and not exists (select 1 from information_schema.columns
+              where table_name = 'requirement' and column_name = 'jd_posting_snapshot_sha256') then
+    alter table requirement rename column jd_text_sha256 to jd_posting_snapshot_sha256;
+  end if;
+  if exists (select 1 from information_schema.columns
+              where table_name = 'review_verdict' and column_name = 'jd_text_sha256')
+     and not exists (select 1 from information_schema.columns
+              where table_name = 'review_verdict' and column_name = 'jd_posting_snapshot_sha256') then
+    alter table review_verdict rename column jd_text_sha256 to jd_posting_snapshot_sha256;
+  end if;
+end $$;
+
+-- THE VALUE MIGRATION. 'requirement.jd_source' stores the old column names as DATA -- 11,501 rows
+-- reading 'jd_real' and 452 reading 'raw_jd', measured on production 2026-08-28 -- under a CHECK
+-- constraint. 'create table if not exists' does NOT update a CHECK on a populated database (proven
+-- on PG 16.13), so the constraint must be dropped and re-added explicitly. Order matters: DROP the
+-- old constraint, THEN rewrite the rows, THEN add the new constraint. Rewriting first would violate
+-- the still-live old constraint and abort the migration.
+--
+-- Idempotent by construction: the UPDATEs match nothing on a second run, and both constraint
+-- statements are guarded.
+alter table requirement drop constraint if exists requirement_jd_source_check;
+update requirement set jd_source = 'jd_html'        where jd_source = 'jd_real';
+update requirement set jd_source = 'jd_posting_raw' where jd_source = 'raw_jd';
+do $$
+begin
+  if not exists (select 1 from pg_constraint
+                  where conrelid = 'requirement'::regclass
+                    and conname = 'requirement_jd_source_check') then
+    alter table requirement add constraint requirement_jd_source_check
+      check (jd_source in ('jd_html','jd_posting_raw'));
+  end if;
+end $$;
+-- END jd-rename-migration
+
 -- The canonical posting text every requirement offset indexes, plus its digest. Stored, not
--- recomputed: an offset is only meaningful against the exact string it was measured on, and jd_real
+-- recomputed: an offset is only meaningful against the exact string it was measured on, and jd_html
 -- is re-fetched by the backfill timer.
-alter table opportunity    add column if not exists jd_text text;
-alter table opportunity    add column if not exists jd_text_sha256 text;
-alter table opportunity    add column if not exists jd_text_truncated boolean;
+alter table opportunity    add column if not exists jd_posting_snapshot text;
+alter table opportunity    add column if not exists jd_posting_snapshot_sha256 text;
+alter table opportunity    add column if not exists jd_posting_snapshot_truncated boolean;
 -- P3 idempotent adds (safe on databases created before the remediation loop existed).
 --
 -- F2. 'remediation_loop' was created by an earlier revision of THIS lane with must_have_* columns,

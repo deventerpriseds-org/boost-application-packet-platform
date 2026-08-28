@@ -172,7 +172,7 @@ export async function runOneQuery(
   return out
 }
 
-// Fill jd_real for a set of freshly-inserted opps, bounded + paced (same fetch as the backfill sweep).
+// Fill jd_html for a set of freshly-inserted opps, bounded + paced (same fetch as the backfill sweep).
 export async function fillJdsForFresh(
   client: any, fresh: Array<{ id: string; job_id: string }>, cap: number,
 ): Promise<{ jdFetched: number; jdStored: number; jdOutcomes: Record<string, number> }> {
@@ -226,7 +226,7 @@ export async function runRoleSearch(owner: string, opts: { tpr?: string; locatio
       await sleepJitter(3000)                    // human pacing between queries
     }
 
-    // Inline JD-fetch phase: fill jd_real for the NEW opps this cycle found (shared, bounded, paced).
+    // Inline JD-fetch phase: fill jd_html for the NEW opps this cycle found (shared, bounded, paced).
     if (fetchJds) {
       const jd = await fillJdsForFresh(client, fresh, jdFetchCap)
       summary.jdFetched = jd.jdFetched; summary.jdStored = jd.jdStored; summary.jdOutcomes = jd.jdOutcomes

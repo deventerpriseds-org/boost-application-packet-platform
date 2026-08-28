@@ -35,7 +35,7 @@ export async function evaluateArtifact(client: any, artifactId: string, owner: s
 }> {
   const art = (await client.query(
     `select a.id, a.type, a.packet_id, p.opp_id, p.pkg_json, o.company, o.owner_email,
-            o.jd_real, o.raw_jd, o.why_surfaced
+            o.jd_html, o.jd_posting_raw, o.why_surfaced
        from artifact a join packet p on p.id = a.packet_id join opportunity o on o.id = p.opp_id
       where a.id = $1`, [artifactId])).rows[0]
   if (!art) throw new Error('artifact not found')

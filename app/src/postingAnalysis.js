@@ -643,7 +643,7 @@ export function keywordGridTemplate(width) {
 // ── the posting body on the JD step (AC31) ──────────────────────────────────────────────────────
 // `jdSummary` is opportunity.jd_summary and `why` is opportunity.why_surfaced. BOTH are model
 // output. Neither may appear under a heading that says it is the posting. The employer's own text
-// is opportunity.jd_text, whose length arrives as `jdTextLen` from the requirements endpoint, and
+// is opportunity.jd_posting_snapshot, whose length arrives as `jdTextLen` from the requirements endpoint, and
 // the only place it is ever shown verbatim is a located requirement row.
 export function postingBody({ jdSummary, why, jdTextLen } = {}) {
   const summary = typeof jdSummary === 'string' ? jdSummary.trim() : ''

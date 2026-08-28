@@ -52,7 +52,7 @@ export function isMarked(f: Figure): boolean {
  * number AND the word it counts, because on its own it is not a claim about anything.
  *
  * This is not a refinement, it is the difference between a usable check and noise. The blanket rule
- * ("no numeric string that also appears in jd_real") was measured against a real package: a posting
+ * ("no numeric string that also appears in jd_html") was measured against a real package: a posting
  * saying "three business units" accused the filler bullets "Skill number 3", "Other skill 3" and
  * "One two three four five" - three offenders, none of which mentions a business unit. Requiring
  * the counted noun to match too costs a contrived miss ("three units" vs "three divisions") and
@@ -342,7 +342,7 @@ export interface ScanResult {
  * this whole layer exists to prevent.
  */
 export function scanEcho(generated: string, postingText: string, profileText: string): ScanResult {
-  // The SAME normalizer the extractor and the reviewer use — never a second regex. `jd_real` is HTML
+  // The SAME normalizer the extractor and the reviewer use — never a second regex. `jd_html` is HTML
   // and its entities must be decoded, or "P&L" is invisible (measured: present in 83 postings,
   // matched in zero, before that fix).
   const posting = normalizePostingText(postingText)
@@ -350,7 +350,7 @@ export function scanEcho(generated: string, postingText: string, profileText: st
     return { echoes: [], shared: [], notApplicable: true, reason: 'no employer posting text to compare against' }
   }
   // BOTH sides are decided here, against the NORMALIZED string, because a caller that re-derives
-  // "is there text" from the raw one gets a different answer: `jd_real` is HTML, so `<p></p>` is a
+  // "is there text" from the raw one gets a different answer: `jd_html` is HTML, so `<p></p>` is a
   // non-empty raw string and an empty posting. A caller testing the raw string called that a clean
   // PASS on a document it had never compared to anything — the vacuous green this layer exists to
   // prevent — and the profile half was worse, producing false ACCUSATIONS off a markup-only
@@ -496,7 +496,7 @@ const joined = (t: Tok[]): string => ` ${t.map(x => x.w).join(' ')} `
 const contains = (hay: string, run: string[]): boolean => hay.includes(` ${run.join(' ')} `)
 
 export function scanWording(generated: string, postingText: string, profileText: string, runTokens: number = WORDING_RUN_TOKENS): WordingScan {
-  // The SAME normalizer `scanEcho` uses. `jd_real` is HTML; a second regex here would be a second
+  // The SAME normalizer `scanEcho` uses. `jd_html` is HTML; a second regex here would be a second
   // definition of what the employer actually wrote.
   const posting = normalizePostingText(postingText)
   if (!posting.trim()) {

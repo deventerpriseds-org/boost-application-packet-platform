@@ -544,26 +544,25 @@ standing rule this is *implemented and measured in the database, NOT confirmed l
 resume renders three EMPTY bullet blocks; `empty_merge_fields` already fails x2 on it) and
 `D:call3-returns-empty-and-14kb-is-discarded` (measured size for open task #19).
 
-**THE RENAME IS BLOCKED ON THE OWNER — and the block is real, not ceremony.** The feasibility pass
-(`docs/qc-evidence/AC-jd-field-rename.md`, 743 lines, written by an independent subagent) found the
-plan of record materially wrong:
-- **It is not a pure rename.** `jd_real`/`raw_jd` are created by **five REQUEST-TIME `ensure*`
-  helpers** and by SCHEMA_SQL *not at all*. Rename only the schema and the next `jd-parse` request
-  re-creates the old columns EMPTY, and `resolvePostingSource` returns `source: null` — which the
-  system treats as a LEGITIMATE state for 116 of 1,349 opportunities. Silent, on production,
-  invisible to `tsc` and to a fresh-DB schema run.
-- **`requirement.jd_source` stores the strings `'jd_real'`/`'raw_jd'` as DATA** under a CHECK
-  constraint (`schema.ts:351`), and `create table if not exists` does NOT update it on a populated
-  database (proven on local PG 16.13). Rename the TS union without a constraint migration and every
-  requirement extraction fails at INSERT.
-- **Scope is 234 unique lines / 40 files, not "102 refs / 32 files"** — ~358 refs / ~45 files if the
-  sibling `jd_text_sha256` (82 refs) and `jd_text_truncated` (11) are included, and leaving them out
-  yields `jd_posting_snapshot` + `jd_text_sha256`, which is LESS coherent than today.
+**THE RENAME IS BUILT AND PROVEN LOCALLY — NOT DEPLOYED.** The owner took both heavier options:
+full rename INCLUDING the siblings, and MIGRATE the stored `requirement.jd_source` values with a
+constraint migration. Branch `claude/jd-field-rename`. Full detail in `actions.md`.
 
-**Two blocking owner decisions before any code is written:** (1) `requirement.jd_source` — rename the
-stored values, or keep the legacy strings? (2) sibling columns — in or out? A cheap alternative is on
-the table: comment + H-case at `jdText.ts:85` recording that the axis is FORMAT not provenance,
-which addresses the one recorded incident at ~2% of the risk.
+- `jd_real`->`jd_html`, `raw_jd`->`jd_posting_raw`, `jd_text`->`jd_posting_snapshot` (+`_sha256`,
+  `_truncated`). **345 substitutions / 33 files.**
+- **`jd_fetch_log.jd_text_len` is deliberately NOT renamed** — different table, different concept
+  (length of provider-fetched text). Word-boundary regexes, not a blanket replace.
+- Migration is a guarded `do $$` block ABOVE the adds, plus drop-constraint / update-rows /
+  add-constraint for **11,953** `requirement.jd_source` rows.
+- **Executed on PG 16.13 against a POPULATED database** (main schema + the five request-time
+  `ensure*` columns replayed): 3 runs exit=0, data preserved, **offset fingerprint unchanged**.
+- **Three guards, all mutation-proven** — the rename-completeness guard fired on 109 references
+  before the change; the ordering guard is proven at the DATABASE level (mis-ordered, the migration
+  exits 0 while the data stays in the old column); the third catches the real defect I shipped.
+
+**PRODUCTION BASELINE, captured before any change** — re-check after deploy:
+`offset fingerprint = 3727da7653e2ceda64f51a800a53e535`, 2,124 opportunities, 11,953 requirements,
+`jd_source` 11,501 `jd_real` + 452 `raw_jd`.
 
 ---
 
@@ -4441,3 +4440,33 @@ Those pass forever and would never stale — a check that cannot fail is not a c
 `D:ledger-guard-not-vacuous` says so). Rewritten as `check: absent … Relevant Skills bullet list` and
 `check: absent … Missing ATS Skills` — patterns that appear only once the fix lands, so the row
 fails the day it goes stale. Verified both are currently absent from `api/src` before committing.
+
+### Hardening — my verification was narrower than my change, and the suite caught what I did not
+
+**The miss.** The JD rename had to move five columns. I proved it on a populated PostgreSQL 16.13 —
+three idempotent runs, data preserved, the offset fingerprint unchanged — and I was wrong anyway.
+`jd_text_sha256` is declared on **three** tables (`opportunity`, `requirement`, `review_verdict`);
+my migration renamed one. `dimensionsDb.test.mjs` found it: *column "jd_posting_snapshot_sha256" of
+relation "requirement" does not exist*.
+
+**Why my proof missed it.** I asserted on `opportunity`'s column list and on a fingerprint computed
+from `requirement.char_start/char_end`. Neither reads `requirement`'s column NAMES. **A verification
+that touches a table without asserting on the thing you changed about it is not verification of that
+table** — the fingerprint gave me false confidence precisely because it queried `requirement` and
+passed.
+
+**The guardrail** is `H:rename-covers-every-table-declaring-the-column`, derived from the migration
+itself rather than hardcoded to these columns, so the next rename inherits it. Mutation-proven by
+deleting the `requirement` rename — the exact defect that shipped — and watching it fail.
+
+**The transferable rule, and it is the "how many HOMES does the concept have" check from `verify-work`
+step 0b applied one level deeper:** I ran that check for the DDL `add column if not exists` homes and
+found five. I did **not** run it for the `create table` column DECLARATIONS, which are a different set
+of homes for the same concept. Enumerate both, every time. `grep` for the column name in
+`create table` blocks, not only in `alter table`.
+
+**A second, cheaper lesson from the same hour:** I repeatedly ran `pkill -f "node --test"` to clear
+what I thought was a hung suite. It was not hung — it was slow (46 files, several spinning up their
+own PostgreSQL). Every `pkill` killed a run that was progressing, and one `pkill -f p84pg` matched
+its own shell and killed the command issuing it. **Before killing a long-running job, check whether
+its output is still growing.** `wc -l` on the log answers it in one call.

@@ -829,7 +829,7 @@ export default function PacketBuilder({ id, step }) {
               both are written by a model. Printing either under a heading reading "The posting"
               attributed the model's words to the employer, and for the ~116 opportunities with no
               stored posting text it was why_surfaced - a note about why WE surfaced the row - being
-              passed off as what the employer wrote. The employer's own text is opportunity.jd_text,
+              passed off as what the employer wrote. The employer's own text is opportunity.jd_posting_snapshot,
               and the only place it is ever shown is a located line in the card below. */}
           {(() => {
             const pb = postingBody({ jdSummary: opp?.jdSummary, why: opp?.why, jdTextLen: req.data?.jdTextLen })

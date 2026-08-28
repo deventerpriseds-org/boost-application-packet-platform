@@ -128,7 +128,7 @@ test('no posting text is NOT a clean scan', () => {
 })
 
 test('an HTML posting is compared through the one canonical normalizer', () => {
-  // jd_real stores descriptionHtml. Comparing against raw HTML — or against a second, private regex
+  // jd_html stores descriptionHtml. Comparing against raw HTML — or against a second, private regex
   // — is how two consumers end up disagreeing about what the posting says.
   const r = scanEcho('Managed a $18M P&L across three business units.',
                      '<div><p>Own a $18M P&amp;L across three business units.</p></div>', 'Profile.')
@@ -303,7 +303,7 @@ test('the noun a figure counts skips stopwords, hyphens and proper nouns', () =>
 })
 
 test('missing either side is decided against the NORMALIZED text, in one place', () => {
-  // `jd_real` is HTML, so `<p></p>` is a non-empty raw string and an empty posting. A caller that
+  // `jd_html` is HTML, so `<p></p>` is a non-empty raw string and an empty posting. A caller that
   // re-derived emptiness from the raw string disagreed with the scanner and reported a clean PASS
   // on a document it had never compared to anything.
   for (const posting of ['<p></p>', '<div><br/></div>', '&nbsp;&nbsp;', '  <br>  ', '<script>var x=1</script>']) {

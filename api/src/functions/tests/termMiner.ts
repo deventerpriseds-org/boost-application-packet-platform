@@ -1,6 +1,6 @@
 // Corpus term miner — the EXTRACTION half of the term library.
 //
-// Mines n-grams from real job postings (`opportunity.jd_real`) and records them as CANDIDATES for
+// Mines n-grams from real job postings (`opportunity.jd_html`) and records them as CANDIDATES for
 // human curation. Every candidate is a literal substring of a real posting with a countable document
 // frequency, so this is extraction, not generation — which is what lets it satisfy the spec's
 // "terms must not be model-generated" rule while supplying the executive vocabulary O*NET does not
@@ -108,8 +108,8 @@ export async function termsMine(req: HttpRequest, context: InvocationContext): P
 
     client = await getPgClient()
     const rows = (await client.query(
-      `select id, jd_real, jd_summary, jd_requirements from opportunity
-        where owner_email = $1 and not dismissed and length(coalesce(jd_real,'')) > 200`, [owner])).rows
+      `select id, jd_html, jd_summary, jd_requirements from opportunity
+        where owner_email = $1 and not dismissed and length(coalesce(jd_html,'')) > 200`, [owner])).rows
 
     const df = new Map<string, { n: number; count: number; samples: string[]; surface: string }>()
     for (const o of rows) {

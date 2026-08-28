@@ -4928,3 +4928,101 @@ the only reason these numbers are a comparison rather than an assertion.
 **STILL OPEN:** the packet's stored assets were built against the OLD requirements. Re-extraction
 replaced the requirement rows, not the resume. Rebuilding the packet is a third destructive step and
 has NOT been done.
+
+---
+
+## JD column rename — `jd_real`/`raw_jd`/`jd_text` → `jd_html`/`jd_posting_raw`/`jd_posting_snapshot`
+
+**Owner decisions taken 2026-08-28, both the heavier option:** (1) **full rename including the
+siblings** `jd_text_sha256` and `jd_text_truncated`, guard written first; (2) **migrate the stored
+`requirement.jd_source` values** with a constraint migration rather than keeping legacy strings.
+
+**The feasibility pass came first and was written by an independent subagent**
+(`docs/qc-evidence/AC-jd-field-rename.md`, 743 lines). It found the plan of record wrong in three
+ways, and every one of them changed what got built:
+
+1. **`jd_real` and `raw_jd` are created by SCHEMA_SQL *not at all*** — their only DDL homes are five
+   REQUEST-TIME `ensure*` helpers. Confirmed independently here: applying `main`'s SCHEMA_SQL to a
+   fresh database and trying to seed `jd_real` failed with *column "jd_real" of relation
+   "opportunity" does not exist*. Renaming only the schema would leave five code paths re-creating
+   the old columns EMPTY on ordinary user requests.
+2. **`requirement.jd_source` stores the old names as DATA** under a CHECK constraint. Live count:
+   **11,501 rows `'jd_real'` + 452 `'raw_jd'`**, constraint
+   `CHECK ((jd_source = ANY (ARRAY['jd_real'::text, 'raw_jd'::text])))`.
+3. **Scope is 234 unique lines / 40 files, not "102 refs / 32 files"** — the estimate I had been
+   carrying was out by ~2.5x.
+
+**Production baseline captured BEFORE any change** (AC-13's invariant is the last row):
+
+| | value |
+|---|---:|
+| opportunities | 2,124 |
+| with `jd_real` / `raw_jd` / `jd_text` | 1,512 / 1,650 / 796 |
+| chars held | 11,261,420 / 5,636,682 / 5,437,948 |
+| `jd_text_sha256` set / `jd_text_truncated` | 796 / 30 |
+| requirements / located | 11,953 / 10,044 |
+| **offset fingerprint** | **`3727da7653e2ceda64f51a800a53e535`** |
+
+**345 substitutions across 33 files**, applied with word-boundary regexes rather than a blanket
+replace. That mattered: **`jd_fetch_log.jd_text_len` must NOT be renamed** — it is a different table
+recording the length of text fetched from a provider, not this snapshot. A naive `jd_text` ->
+`jd_posting_snapshot` sweep would have silently renamed it too. The feasibility doc did not list it;
+enumerating every identifier built on the three stems is what surfaced it.
+
+**The migration is a guarded `do $$` block, and had to be.** A bare `alter table ... rename column`
+succeeds on deploy #1 and on deploy #2 raises `column "jd_real" does not exist`, which under
+`ON_ERROR_STOP=1` **aborts the entire migration** — every statement below it silently never runs.
+There is no `IF EXISTS` for a column in `RENAME COLUMN` (it does not parse). The block extends the
+idiom already in this file for `remediation_loop.must_have_check_key`; it is not a new pattern.
+
+**PROVEN BY EXECUTION on PostgreSQL 16.13**, against a database carrying `main`'s schema PLUS the
+five request-time `ensure*` columns replayed, seeded with real rows — because a fresh-database run
+proves nothing here:
+
+| invariant | result |
+|---|---|
+| idempotent | **3 consecutive runs, exit=0, 0 errors** |
+| all five columns renamed | `jd_html, jd_posting_raw, jd_posting_snapshot, …_sha256, …_truncated` |
+| data preserved (renamed, not re-added) | `jd_html=<p>employer HTML</p>`, snapshot + sha intact |
+| `jd_source` values migrated | `jd_html n=1`, `jd_posting_raw n=1` |
+| **offset fingerprint** | **unchanged** (`f91acb72e5230f162ace40cbd47edd18` before and after) |
+| CHECK constraint | replaced with `('jd_html','jd_posting_raw')` |
+
+### A defect I shipped into the first draft, and what caught it
+
+**`jd_text_sha256` is declared on THREE tables, not one** — `opportunity`, `requirement` (it pins the
+snapshot each offset was measured against) and `review_verdict`. The source sweep renamed all three
+DECLARATIONS; my migration renamed only `opportunity`. On a fresh database nothing is wrong; on a
+POPULATED one the `create table if not exists` is skipped, the column keeps its old name, and the
+writers name a column that does not exist:
+
+    error: column "jd_posting_snapshot_sha256" of relation "requirement" does not exist   (42703)
+
+**My own manual DB verification did NOT catch it** — I asserted on `opportunity`'s columns and on the
+offset fingerprint, and neither touches `requirement`'s column NAME. `dimensionsDb.test.mjs` caught
+it, because it builds a populated database with the previous schema and applies the new one on top.
+That is the rule working exactly as written, and my verification being narrower than my change.
+
+### Three guards, all mutation-proven
+
+| guard | proof it is not inert |
+|---|---|
+| `H:jd-column-rename-complete` — no executable reference to a pre-rename name in `api/src`, `app/src`, `scripts`, `.github/workflows` | **Fired on 109 references before the rename.** Reinstating one (`jdBackfill.ts:21` back to `jd_real`) fails the suite naming that file; restoring gives 0 failures. |
+| `H:rename-precedes-its-adds` — a guarded rename runs before the `add column` for the name it creates | Moving the block below the adds fails the suite naming all three columns. **And proven at the database level:** with the block moved, the migration **exits 0** while `jd_text` still holds `THE REAL SNAPSHOT` and `jd_posting_snapshot` is `NULL`. A silent no-op reported as success. |
+| `H:rename-covers-every-table-declaring-the-column` — every table declaring a renamed column has a rename for that table | Removing the `requirement` rename — **the exact defect that shipped** — fails with `requirement.jd_posting_snapshot_sha256 is declared with a POST-rename name but the migration never renames it on requirement`. |
+
+The third is derived from the migration itself rather than hardcoded to the JD columns, so the next
+rename inherits it. `H39b` could not see any of these: it asserts a statement never names a column
+added LATER, and all three of these are the mirror shape.
+
+**AC-14 re-verified: `jd-import.yml` still writes the SOURCE.** It sets `jd_posting_raw`, and still
+refuses with `::error::jd_html holds N chars and resolvePostingSource PREFERS it` — the fix that made
+step 1 of the Trinnex repair work is intact, not undone by the sweep.
+
+**AC-17 preserved:** `H13`'s projection assertion still exists and now asserts `jd_html`. It was not
+deleted to make the suite green.
+
+**NOT YET DONE — the live half.** Nothing is deployed. The migration has been proven locally against a
+populated database, but it has NOT run against production, and the AC-13 fingerprint
+(`3727da7653e2ceda64f51a800a53e535`) has NOT been re-checked live. Expect a short window of
+`column does not exist` errors during worker convergence.

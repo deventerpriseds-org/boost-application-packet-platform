@@ -13,17 +13,17 @@ const HEADERS = {
   'Access-Control-Allow-Headers': 'Content-Type',
 }
 
-// Ensure the 5 JD columns and raw_jd exist on the opportunity table.
+// Ensure the 5 JD columns and jd_posting_raw exist on the opportunity table.
 async function ensureJdColumns(client: any) {
   await client.query(`
     alter table opportunity
-      add column if not exists raw_jd         text,
+      add column if not exists jd_posting_raw         text,
       add column if not exists jd_title       text,
       add column if not exists jd_company     text,
       add column if not exists jd_summary     text,
       add column if not exists jd_requirements text,
       add column if not exists jd_table       text,
-      add column if not exists jd_real         text,
+      add column if not exists jd_html         text,
       add column if not exists jd_fetched_at   timestamptz
   `)
 }
@@ -56,7 +56,7 @@ async function fetchPageText(url: string): Promise<string | null> {
 // A LinkedIn job-ALERT email lists several jobs and its subject/headline is usually a SIBLING job, so
 // LLM-parsing it fabricates the wrong jd_title/jd_company for EVERY opp that shares the email (PROVEN:
 // opp "VP Software Eng / The Phoenix Group" got jd_title "Managing VP … / Gartner" — the email subject).
-// Only a SINGLE-job source may be parsed: the real fetched posting (jd_real) or a genuine single JD
+// Only a SINGLE-job source may be parsed: the real fetched posting (jd_html) or a genuine single JD
 // (extension/ATS). The shared alert email must NEVER feed the JD fields.
 
 // The single-job JD text to parse, or '' when the only source is the shared alert email (refuse).
@@ -86,7 +86,7 @@ async function structureRequirements(client: any, oppId: string, ctx?: any) {
   try {
     await ensureRequirementCols(client)
     const opp = (await client.query(
-      `select id, jd_real, raw_jd, why_surfaced, jd_table from opportunity where id=$1`, [oppId])).rows[0]
+      `select id, jd_html, jd_posting_raw, why_surfaced, jd_table from opportunity where id=$1`, [oppId])).rows[0]
     if (opp) await writeRequirements(client, opp)
   } catch (e) { ctx?.log?.(`requirements: skipped for ${oppId}: ${e}`) }
 }
@@ -124,7 +124,7 @@ async function runJdParse(rawJd: string, key: string): Promise<any> {
 }
 
 // POST /api/app/opportunity/{id}/jd-parse
-// Parses raw_jd (or fetches from why_surfaced URL) and stores 5 JD fields.
+// Parses jd_posting_raw (or fetches from why_surfaced URL) and stores 5 JD fields.
 export async function jdParse(req: HttpRequest, context: InvocationContext): Promise<HttpResponseInit> {
   if (req.method === 'OPTIONS') return { status: 204, headers: HEADERS }
   const oppId = req.params.id
@@ -136,11 +136,11 @@ export async function jdParse(req: HttpRequest, context: InvocationContext): Pro
     client = await getPgClient()
     await ensureJdColumns(client)
     const opp = (await client.query(
-      `select id, company, role, jd_real, raw_jd, why_surfaced from opportunity where id = $1`, [oppId]
+      `select id, company, role, jd_html, jd_posting_raw, why_surfaced from opportunity where id = $1`, [oppId]
     )).rows[0]
     if (!opp) return { status: 404, headers: HEADERS, jsonBody: { error: 'not found' } }
 
-    // Only parse a SINGLE-job source (jd_real, or a genuine single JD). The shared LinkedIn alert
+    // Only parse a SINGLE-job source (jd_html, or a genuine single JD). The shared LinkedIn alert
     // email must never feed the JD fields — it fabricates a sibling job. See resolveJdSource.
     let rawJd: string = resolveJdSource(opp)
 
@@ -152,7 +152,7 @@ export async function jdParse(req: HttpRequest, context: InvocationContext): Pro
         const fetched = await fetchPageText(url) || ''
         if (fetched && !isAlertDigest(fetched, opp.why_surfaced || '')) {
           rawJd = fetched
-          await client.query(`update opportunity set raw_jd = $1 where id = $2`, [fetched, oppId])
+          await client.query(`update opportunity set jd_posting_raw = $1 where id = $2`, [fetched, oppId])
         }
       }
     }
@@ -194,7 +194,7 @@ export async function jdBackfill(req: HttpRequest, context: InvocationContext): 
     await ensureJdColumns(client)
 
     const { rows } = await client.query(
-      `select id, company, role, jd_real, raw_jd, why_surfaced from opportunity
+      `select id, company, role, jd_html, jd_posting_raw, why_surfaced from opportunity
        where owner_email = $1
          and not dismissed
          and jd_summary is null
@@ -216,7 +216,7 @@ export async function jdBackfill(req: HttpRequest, context: InvocationContext): 
             const fetched = await fetchPageText(url) || ''
             if (fetched && !isAlertDigest(fetched, opp.why_surfaced || '')) {
               rawJd = fetched
-              await client.query(`update opportunity set raw_jd = $1 where id = $2`, [fetched, opp.id])
+              await client.query(`update opportunity set jd_posting_raw = $1 where id = $2`, [fetched, opp.id])
             }
           }
         }
@@ -269,8 +269,8 @@ export async function jdStatus(req: HttpRequest, context: InvocationContext): Pr
         count(*) filter (where not is_demo and not dismissed)                         as total,
         count(*) filter (where not is_demo and not dismissed and jd_summary is not null) as parsed,
         count(*) filter (where not is_demo and not dismissed and jd_summary is null)    as pending,
-        count(*) filter (where not is_demo and not dismissed and raw_jd is not null and jd_summary is null) as has_raw_jd,
-        count(*) filter (where not is_demo and not dismissed and raw_jd is null and jd_summary is null)     as no_source
+        count(*) filter (where not is_demo and not dismissed and jd_posting_raw is not null and jd_summary is null) as has_raw_jd,
+        count(*) filter (where not is_demo and not dismissed and jd_posting_raw is null and jd_summary is null)     as no_source
       from opportunity
     `)
     const row = r.rows[0]
@@ -294,7 +294,7 @@ export async function jdParseTick(timer: Timer, context: InvocationContext): Pro
     client = await getPgClient()
     await ensureJdColumns(client)
     const { rows } = await client.query(`
-      select id, company, role, jd_real, raw_jd, why_surfaced, owner_email
+      select id, company, role, jd_html, jd_posting_raw, why_surfaced, owner_email
       from opportunity
       where not dismissed and not is_demo and jd_summary is null
       order by created_at desc
@@ -313,7 +313,7 @@ export async function jdParseTick(timer: Timer, context: InvocationContext): Pro
             const fetched = await fetchPageText(url) || ''
             if (fetched && !isAlertDigest(fetched, opp.why_surfaced || '')) {
               rawJd = fetched
-              await client.query(`update opportunity set raw_jd = $1 where id = $2`, [fetched, opp.id])
+              await client.query(`update opportunity set jd_posting_raw = $1 where id = $2`, [fetched, opp.id])
             }
           }
         }

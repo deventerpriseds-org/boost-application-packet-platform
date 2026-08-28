@@ -352,8 +352,8 @@ export async function insertOpp(client: any, owner: string, o: any, source = 'Li
   } catch { /* columns not present yet — retag will catch up */ }
   if (rawJd) {
     try {
-      await client.query(`alter table opportunity add column if not exists raw_jd text`)
-      await client.query(`update opportunity set raw_jd = $1 where id = $2`, [rawJd, id])
+      await client.query(`alter table opportunity add column if not exists jd_posting_raw text`)
+      await client.query(`update opportunity set jd_posting_raw = $1 where id = $2`, [rawJd, id])
     } catch {}
   }
   // Capture the LinkedIn jobId + canonical URL so the real JD can be fetched later (ACT-22b).
@@ -398,7 +398,7 @@ export async function routeOpportunity(
   const res = await insertOpp(client, owner, o, opts.source || 'Email', opts.why, opts.receivedAt, opts.rawJd)
   if (!res.inserted || !res.id) return res
   // ACT-44 (owner directive) — fetch the REAL JD inline at ingest, right after job_id resolves, so opps
-  // land WITH jd_real instead of a blank alert placeholder ("i dont want rules to make it to the pipeline
+  // land WITH jd_html instead of a blank alert placeholder ("i dont want rules to make it to the pipeline
   // without job descriptions already"). Direct-from-Azure (no proxy/credits — the decided path). Best-
   // effort + small jitter to share LinkedIn's single-IP throttle: a block/failure/no-jobId just leaves
   // jd_fetched_at null for the bounded jdBackfillTick retry — it NEVER blocks the insert. Dynamic import
@@ -434,7 +434,7 @@ async function ingestText(rawText: string, owner: string, source = 'Email', rece
   try {
     client = await getPgClient()
     const opps = await parseAlert(rawText)
-    const cleanJd = rawText.replace(/\s*\{\{JOB:\d+\}\}/g, '')  // strip capture markers from stored raw_jd
+    const cleanJd = rawText.replace(/\s*\{\{JOB:\d+\}\}/g, '')  // strip capture markers from stored jd_posting_raw
     const results = []
     for (const o of opps) {
       // Route through the unified hub so folder→role and AI classification are consistent.

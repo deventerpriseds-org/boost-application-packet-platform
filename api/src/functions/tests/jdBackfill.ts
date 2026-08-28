@@ -18,19 +18,19 @@ const HEADERS = {
 async function ensureCols(client: any): Promise<void> {
   await client.query(`alter table opportunity add column if not exists job_id text`)
   await client.query(`alter table opportunity add column if not exists job_url text`)
-  await client.query(`alter table opportunity add column if not exists jd_real text`)
+  await client.query(`alter table opportunity add column if not exists jd_html text`)
   await client.query(`alter table opportunity add column if not exists jd_fetched_at timestamptz`)
 }
 
 const guestUrl = (jobId: string) => `https://www.linkedin.com/jobs-guest/jobs/api/jobPosting/${jobId}`
 
-// Ensure the jd_real/jd_fetched_at columns exist without needing the full ensureCols dance.
+// Ensure the jd_html/jd_fetched_at columns exist without needing the full ensureCols dance.
 // Exposed so callers outside this file (e.g. the inline search fetch) can be defensive on first run.
 export async function ensureJdCols(client: any): Promise<void> { await ensureCols(client) }
 
 // Fetch ONE opp's real JD from the LinkedIn guest endpoint, classify, log to jd_fetch_log, and
 // persist. Shared by the paced backfill sweep and the inline search fetch so both stay identical:
-// ok_jd → store jd_real; auth_required/not_found → mark fetched (terminal on guest endpoint) so it
+// ok_jd → store jd_html; auth_required/not_found → mark fetched (terminal on guest endpoint) so it
 // isn't retried forever; blocked/empty/etc → leave for a later attempt. Direct-from-Azure, no proxy.
 // Caller is responsible for pacing (jitter/sleep) between calls. Returns the outcome + whether stored.
 export async function fetchAndStoreJd(
@@ -63,10 +63,10 @@ export async function fetchAndStoreJd(
   })
   let stored = false
   if (outcome === 'ok_jd' && jd.descriptionHtml) {
-    await client.query(`update opportunity set jd_real = $1, jd_fetched_at = now() where id = $2`, [jd.descriptionHtml, row.id])
+    await client.query(`update opportunity set jd_html = $1, jd_fetched_at = now() where id = $2`, [jd.descriptionHtml, row.id])
     stored = true
   } else if (outcome === 'auth_required' || outcome === 'not_found') {
-    await client.query(`update opportunity set jd_fetched_at = now() where id = $1 and jd_real is null`, [row.id])
+    await client.query(`update opportunity set jd_fetched_at = now() where id = $1 and jd_html is null`, [row.id])
   }
   return { outcome, stored }
 }
@@ -218,14 +218,14 @@ app.http('mailRecoverTargeted', { methods: ['POST', 'OPTIONS'], authLevel: 'anon
 // mined from LinkedIn SOCIAL emails (networking digests / connection invites), NOT job alerts.
 // Root cause (ground-truthed 2026-08-01): a networking email filed into a role-mapped folder
 // bypassed isAlert; parseAlert's LLM extracted the PEOPLE named in it (their employer+title)
-// as opportunities → rows with no job_id, no jd_real. The ingest gate (isLinkedInSocialSender
+// as opportunities → rows with no job_id, no jd_html. The ingest gate (isLinkedInSocialSender
 // in mailWatch) now prevents new ones; this cleans up the existing ones.
 //
-// EVIDENCE-BASED + reversible: for each candidate (recent, LinkedIn-source, no job_id, no jd_real)
+// EVIDENCE-BASED + reversible: for each candidate (recent, LinkedIn-source, no job_id, no jd_html)
 // we $search the mailbox for its company. A candidate is a phantom ONLY if matching emails exist
 // AND every one is a LinkedIn social sender / non-alert with no job anchor matching the company.
 // If ANY real job-alert email (isAlert=true) or a matching job anchor exists → it's a REAL opp
-// (job_id extraction merely failed; raw_jd already holds the JD) → KEEP. No emails at all →
+// (job_id extraction merely failed; jd_posting_raw already holds the JD) → KEEP. No emails at all →
 // ambiguous → KEEP. This is why we never blanket-dismiss on the SQL shape alone: a 40-row sample
 // showed only ~4 of the recent no-job_id opps were phantoms; the other 36 were real postings.
 //
@@ -251,7 +251,7 @@ export async function mailDismissPhantoms(req: HttpRequest, _ctx: InvocationCont
     const opps = (await client.query(
       `select id, company, role from opportunity
          where owner_email=$1 and job_id is null and not is_demo and not dismissed
-           and coalesce(length(jd_real),0)=0 and coalesce(source,'') ilike '%linkedin%'
+           and coalesce(length(jd_html),0)=0 and coalesce(source,'') ilike '%linkedin%'
            and created_at >= $2::timestamptz
          order by created_at desc limit $3`, [cfg.ownerEmail, since, limit])).rows
     const startMs = Date.now()
@@ -443,7 +443,7 @@ export async function jdBackfillScan(req: HttpRequest, _ctx: InvocationContext):
 
 // ---------------------------------------------------------------------------
 // POST /api/mail/jd-backfill/fetch — fetch REAL JDs for opps that have a jobId, via scrape.do
-// cheap mode, escalating to super proxy on a block. Stores jd_real + jd_fetched_at and logs every
+// cheap mode, escalating to super proxy on a block. Stores jd_html + jd_fetched_at and logs every
 // attempt to jd_fetch_log (with concurrency + runTag) so this same run doubles as the rate-limit
 // experiment. Body: { limit?: 20, concurrency?: 5, favoritesOnly?: true, superOnBlock?: true, runTag? }
 // ---------------------------------------------------------------------------
@@ -509,12 +509,12 @@ export async function jdBackfillFetch(req: HttpRequest, _ctx: InvocationContext)
       }
       bump(outcome)
       if (outcome === 'ok_jd' && jd.descriptionHtml) {
-        await client.query(`update opportunity set jd_real = $1, jd_fetched_at = now() where id = $2`, [jd.descriptionHtml, row.id])
+        await client.query(`update opportunity set jd_html = $1, jd_fetched_at = now() where id = $2`, [jd.descriptionHtml, row.id])
         stored++
       } else if (outcome === 'auth_required' || outcome === 'not_found') {
         // Terminal on the guest endpoint (job needs login / is gone). Mark fetched so the sweep skips
-        // it next time — the logged-in Chrome-extension path can capture these later. Leaves jd_real null.
-        await client.query(`update opportunity set jd_fetched_at = now() where id = $1 and jd_real is null`, [row.id])
+        // it next time — the logged-in Chrome-extension path can capture these later. Leaves jd_html null.
+        await client.query(`update opportunity set jd_fetched_at = now() where id = $1 and jd_html is null`, [row.id])
       }
       return outcome
     }

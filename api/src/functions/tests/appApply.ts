@@ -196,9 +196,9 @@ export async function atsBackfill(req: HttpRequest, _ctx: InvocationContext): Pr
     await ensureAtsCols(client)
     const favClause = favoritesOnly ? 'and is_favorite = true' : ''
     const rows = (await client.query(
-      `select id, role, company, jd_real, jd_summary, jd_requirements from opportunity
+      `select id, role, company, jd_html, jd_summary, jd_requirements from opportunity
          where owner_email=$1 and not dismissed and not is_demo and ats_score is null
-           and coalesce(length(jd_real),0) > 200 ${favClause}
+           and coalesce(length(jd_html),0) > 200 ${favClause}
          order by is_favorite desc, source_date desc nulls last limit $2`, [owner, limit])).rows
     const mc = await masterContextSummary()
     let scored = 0; const start = Date.now()
@@ -220,9 +220,9 @@ export async function atsBackfillTick(_t: Timer, context: InvocationContext): Pr
     client = await getPgClient()
     await ensureAtsCols(client)
     const rows = (await client.query(
-      `select id, role, company, jd_real, jd_summary, jd_requirements from opportunity
+      `select id, role, company, jd_html, jd_summary, jd_requirements from opportunity
          where owner_email=$1 and not dismissed and not is_demo and ats_score is null
-           and coalesce(length(jd_real),0) > 200
+           and coalesce(length(jd_html),0) > 200
          order by is_favorite desc, source_date desc nulls last limit 4`, [owner])).rows
     if (!rows.length) { context.log('ats-backfill: backlog clear'); return }
     const mc = await masterContextSummary()

@@ -7,6 +7,12 @@
 // constraint added to an existing table is never applied at all. The database this test builds is
 // the one production has: `origin/main`'s SCHEMA_SQL, plus the columns the ensure-paths added
 // (`jd_text`, `jd_real`, …, which are NOT in SCHEMA_SQL), plus requirement, evidence and fact rows.
+// THESE STAY PRE-RENAME ON PURPOSE. `populatedDb` models the database a migration MEETS: built by
+// `origin/main`'s SCHEMA_SQL and main's ensure-paths, so it carries the OLD column names. The test
+// body then applies the WORKING TREE's schema on top — that is the migration under test. Renaming
+// these to the post-rename names (a blanket sweep did exactly that on 2026-08-28) destroys the
+// fixture: it builds a database that already has the new names, so the rename's `not exists`
+// guard is false and the migration is never exercised at all.
 //
 // Skipped, loudly, when no local PostgreSQL is available — a DB test that silently no-ops is
 // absent evidence read as a pass.

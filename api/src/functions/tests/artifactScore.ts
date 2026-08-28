@@ -5,7 +5,7 @@
 //
 //   opportunity.match_score  — model-generated fit for the ROLE. NOT posting-grounded: appApply
 //                              builds its prompt from role/company/why_surfaced/signals/pains plus a
-//                              MasterContext summary, and never reads jd_real. Then MUTATED in place
+//                              MasterContext summary, and never reads jd_html. Then MUTATED in place
 //                              by the role-taxonomy boost.
 //   opportunity.base_score   — the same number captured once BEFORE that boost.
 //   opportunity.ats_score    — posting-grounded, from atsScoreOne against the real posting text.

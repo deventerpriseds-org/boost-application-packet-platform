@@ -62,7 +62,7 @@ async function seed(c, { sha = RECORD_SHA, reqText = REQ } = {}) {
      values ($1,'eMoney','VP Eng','enriched') returning id`, [OWNER])).rows[0].id
   const req = (await c.query(
     `insert into requirement (opp_id, seq, kind, item_text, verbatim, char_start, char_end,
-                              match_method, kind_source, weight, jd_text_sha256, extractor_version)
+                              match_method, kind_source, weight, jd_posting_snapshot_sha256, extractor_version)
      values ($1, 29, 'must_have', $2, $2, 100, $3, 'exact','category_default',2,'sha',1) returning id`,
     [opp, reqText, 100 + reqText.length])).rows[0].id
   await c.query(
@@ -176,7 +176,7 @@ test('H:confirmation-survives-re-extraction: an identical claim keeps its decisi
     // Re-extracted identically, and evidence re-resolved to the identical claim.
     const req = (await c.query(
       `insert into requirement (opp_id, seq, kind, item_text, verbatim, char_start, char_end,
-                                match_method, kind_source, weight, jd_text_sha256, extractor_version)
+                                match_method, kind_source, weight, jd_posting_snapshot_sha256, extractor_version)
        values ($1, 29, 'must_have', $2, $2, 100, $3, 'exact','category_default',2,'sha',1) returning id`,
       [opp, REQ, 100 + REQ.length])).rows[0].id
     await c.query(
@@ -222,7 +222,7 @@ test('H:escalation-spends-its-cap-on-must-haves-first: the gate-deciding rows ar
     // The REAL live shape: responsibilities occupy the low seqs, must-haves the high ones.
     const mk = (seq, kind, text) => c.query(
       `insert into requirement (opp_id, seq, kind, item_text, verbatim, char_start, char_end,
-                                match_method, kind_source, weight, jd_text_sha256, extractor_version)
+                                match_method, kind_source, weight, jd_posting_snapshot_sha256, extractor_version)
        values ($1,$2,$3,$4,$4,100,$5,'exact','category_default',2,'sha',1)`,
       [opp, seq, kind, text, 100 + text.length])
     for (let i = 0; i < 21; i++) await mk(i, 'responsibility', `responsibility number ${i} of the role`)
