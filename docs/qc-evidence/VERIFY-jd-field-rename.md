@@ -1067,3 +1067,225 @@ It must be ordered with the other two (any order — the three source values are
 stranded value is DATA, and there is no guard asserting that every literal the old code could
 store has an UPDATE. The same structural blindness that hid loop-1's F1 (no CHECK to fail loudly)
 hides this one.
+
+---
+
+### D9 part 1 — the NEW guard `H:rename-survives-the-deploy-window` is NOT inert — **CONFIRMED**
+
+Mutations in a throwaway worktree (`git worktree add /tmp/mutwt2 ea30d93 --detach`); the repo tree
+was never modified. Baseline unmutated: `node --test test/hardening.test.mjs` → **112 pass, 0 fail,
+0 skipped** (loop 1 saw 111; this commit adds one).
+
+Each of the guard's three assertions was proved independently, then the real regression:
+
+| Mutation | Result |
+|---|---|
+| **M4a** — `execute format('alter table %I drop column %I', ...)` → `null;` (never drop the placeholder) | `not ok 112 - H:rename-survives-the-deploy-window` — **FIRES** (pass 111 / fail 1) |
+| **M4b** — `raise exception` → `raise notice` (refuse quietly instead of aborting) | **FIRES** (111/1) |
+| **M4c** — `where %I is not null` → `where true or ...` (refusal fires unconditionally) | **FIRES** (111/1) |
+| **M5** — the whole inner branch replaced by `continue when exists(new)`, i.e. the exact pre-fix semantics | **FIRES** (111/1) |
+
+M5 is the mutation that matters, and I did not stop at the guard going red — I proved the mutation
+**reintroduces the real defect**, so the guard is protecting behaviour and not a string:
+
+```
+$ # M5 applied, rebuilt, SCHEMA_SQL re-dumped, run against a fresh deploy-window database
+$ psql -v ON_ERROR_STOP=1 -q -d m5 -f /tmp/schema_M5_nv.sql
+MUTATED schema on the deploy-window db EXIT=0        <-- GREEN, exactly loop-1's F2
+    id    |                     jd_real                     | jd_html |          jd_text          |  snap
+ 11111111 | <p>HTML BODY ONE &amp; ampersand — em-dash...</p>| (NULL)  | SNAPSHOT ONE the offsets… | (NULL)
+ 22222222 | (null)                                          | (NULL)  | SNAPSHOT TWO body         | (NULL)
+ 33333333 | <div>HTML THREE</div>                           | (NULL)  | (null)                    | (NULL)
+```
+Stranded again, exit 0. The guard is live and it guards the right thing. **D9 part 1 CONFIRMED.**
+
+---
+
+## FINDING L2-F2 (NEW) — the refactor SILENTLY DISABLED the two pre-existing rename guards for these columns
+
+**Severity: real.** This is the regression the brief asked me to hunt, and it is not in the stated
+blast radius — the implementer said "`hardening.test.mjs` (one new guard). Nothing else changed."
+Two existing guards changed behaviour **without their code being touched**, because both derive
+their input by regex from the migration's *shape*, and the shape changed.
+
+### The mechanism
+
+Both guards find renames with the same literal pattern:
+```
+$ grep -n "matchAll(/alter table" test/hardening.test.mjs
+  (H:rename-precedes-its-adds)                       /alter table\s+(\w+)\s+rename column\s+(\w+)\s+to\s+(\w+)/g
+  (H:rename-covers-every-table-declaring-the-column) /alter table\s+(\w+)\s+rename column\s+(\w+)\s+to\s+(\w+)/g
+```
+The refactor replaced seven literal `alter table opportunity rename column jd_real to jd_html`
+statements with one `execute format('alter table %I rename column %I to %I', ...)`. `%I` is not
+`\w+`, so **the JD renames are now invisible to both guards.** Measured directly:
+
+```
+$ node -e "<the guards' own regex, applied to SCHEMA_SQL at each ref>"
+9428adc (pre-fix)     -> matches: 10   opportunity.jd_real->jd_html, opportunity.raw_jd->jd_posting_raw,
+                                       opportunity.jd_text->jd_posting_snapshot, opportunity.jd_text_sha256->…,
+                                       opportunity.jd_text_truncated->…, requirement.jd_text_sha256->…,
+                                       review_verdict.jd_text_sha256->…,
+                                       remediation_loop.must_have_check_key->close_check_key, (+2 more)
+ea30d93 (branch HEAD) -> matches: 3    remediation_loop.must_have_check_key->close_check_key,
+                                       remediation_loop.must_have_state->close_state,
+                                       remediation_loop.prev_must_have_state->prev_close_state
+```
+**Seven of ten renames vanished from both guards' input.** Only the three pre-existing
+`remediation_loop` renames — still written as literal SQL — are still seen. The guards do not fail;
+they simply have nothing to say about the JD columns any more, and they still report green.
+
+### Proven by mutation — the identical defects loop 1 measured as CAUGHT now sail through
+
+Loop 1 recorded, against `9428adc`:
+> **M2 — `H:rename-precedes-its-adds` FIRES ✅** (block relocated below the adds)
+> **M3 — `H:rename-covers-every-table-declaring-the-column` FIRES ✅** (review_verdict rename deleted)
+
+The same two mutations against `ea30d93`:
+
+```
+########## M2: move the whole BEGIN/END jd-rename-migration block BELOW the adds ##########
+# pass 112
+# fail 0                                   <-- GREEN. Loop 1: "FIRES", pass 110 / fail 1.
+
+########## M3a: delete the review_verdict pair from the VALUES list ##########
+$ sed -n '/select \* from (values/,/as t(tbl/p' src/functions/tests/schema.ts
+      ('opportunity',    'jd_real',           'jd_html'),
+      ('opportunity',    'raw_jd',            'jd_posting_raw'),
+      ('opportunity',    'jd_text',           'jd_posting_snapshot'),
+      ('opportunity',    'jd_text_sha256',    'jd_posting_snapshot_sha256'),
+      ('opportunity',    'jd_text_truncated', 'jd_posting_snapshot_truncated'),
+      ('requirement',    'jd_text_sha256',    'jd_posting_snapshot_sha256')
+    ) as t(tbl, old_col, new_col)          <-- review_verdict pair GONE
+# pass 112
+# fail 0                                   <-- GREEN. Loop 1: "FIRES", pass 110 / fail 1.
+
+########## M3b: delete the opportunity jd_text -> jd_posting_snapshot pair ##########
+# pass 112
+# fail 0
+```
+`git diff` against `ea30d93:api/src/functions/tests/schema.ts` confirmed the tree was pristine
+before each mutation and restored after.
+
+### What this costs, per guard
+
+- **`H:rename-covers-every-table-declaring-the-column`** — this is the guard written *because* the
+  first draft renamed only the `opportunity` copy of `jd_text_sha256`. Dropping a pair from the
+  VALUES list is now a one-line deletion that the hardening suite waves through. Whether anything
+  else catches it is measured under D10 below.
+- **`H:rename-precedes-its-adds`** (the H39/H39b ordering invariant) — no longer enforced for these
+  columns. *Mitigating, and I want to be precise rather than alarming:* the fix itself makes the
+  ordering hazard much less dangerous, because an `add column` that ran first now creates an EMPTY
+  column which the loop DROPS and renames. So this one is a lost guard rather than a live bug. It
+  still matters for the next rename someone writes as `execute format`.
+- **`H:rename-survives-the-deploy-window`** is unaffected — it greps the block for `drop column` /
+  `raise exception` / `is not null`, not for rename statements, which is why it survives the very
+  shape change that blinded its two neighbours.
+
+### The narrow fix
+
+Teach both regexes the `format` form as well as the literal one, e.g. accept `%I` as an identifier
+token and read the pairs out of the VALUES list — or, more simply, keep the VALUES list as the
+single declaration and have the guards parse *it*. Deleting either guard is not the fix; they are
+green today only because they can no longer see the thing they were written to police.
+
+---
+
+### HUNT-1 — does `format('%I')` quote every identifier here correctly? — **CONFIRMED, no problem**
+
+`%I` quotes only when the identifier requires it; all seven table/column names are lowercase
+`[a-z_]`, so it emits them bare:
+```
+$ select format('alter table %I rename column %I to %I','opportunity','jd_real','jd_html'),
+         format('select count(*) from %I where %I is not null','review_verdict','jd_posting_snapshot_sha256')
+alter table opportunity rename column jd_real to jd_html | select count(*) from review_verdict where jd_posting_snapshot_sha256 is not null
+```
+And the whole path executes for real under D1/D3/D5. `%I` is also the correct choice over `%s` —
+it is the injection-safe form — and the `information_schema` lookups correctly use the raw
+parameter (`table_name = r.tbl`) rather than a quoted one, which is the right pairing.
+
+### HUNT-4 — ordering hazard from "one statement instead of seven"? — **not applicable / no change**
+
+The pre-fix version was already a single `do $$ ... end $$;`. The diff turns seven `if` blocks
+inside that one statement into one loop inside the same one statement. Statement granularity, and
+therefore transaction granularity, is unchanged. (Its consequence is measured under D8.)
+
+---
+
+## FINDING L2-F3 (NEW) — the refusal is ASYMMETRIC: an EMPTY *old* column beside a populated *new* one blocks every future deploy
+
+**Severity: moderate — no data loss, but it hard-fails the deploy and needs a manual DROP.**
+This is a hazard the fix introduces; the pre-fix block skipped this state silently.
+
+The block asks "is the NEW column empty?" and treats emptiness as proof of a placeholder. It never
+asks the same question of the OLD column. So the mirror-image placeholder — an empty **old** column
+recreated by code running the OLD `ensure*` DDL after the migration already succeeded — reads as
+genuine ambiguity and raises.
+
+**Reachable by a rollback, or by a stale worker** (CLAUDE.md documents ~90-120s of Azure Functions
+worker convergence on every deploy, and `azure-functions-deploy-verify` exists precisely because old
+and new workers coexist). `origin/main`'s helpers still execute
+`add column if not exists jd_real / raw_jd / jd_text / jd_text_sha256 / jd_text_truncated`.
+
+**PROVEN BY EXECUTION:**
+```
+$ # 1. normal successful migration on a populated database
+migration #1 exit=0        (jd_html now holds 2 non-null rows, jd_real gone)
+
+$ # 2. OLD code runs again — main's ensure* DDL, verbatim
+$ psql -f /tmp/oldcode.sql        old ensure* exit=0
+$ select count(*) rows, count(jd_real) old_nonnull, count(jd_html) new_nonnull from opportunity
+3 | 0 | 2                  <-- jd_real recreated, ENTIRELY EMPTY; jd_html holds the data
+
+$ # 3. the next deploy runs the migration again
+migration #2 EXIT=3
+ERROR:  jd-rename: opportunity.jd_real still exists and opportunity.jd_html already holds 2
+        non-null row(s). Refusing to guess which is authoritative.
+```
+Every subsequent deploy now fails at that line and — per D8 — the whole rest of SCHEMA_SQL is
+skipped, until a human runs `alter table opportunity drop column jd_real`. No data is at risk, but
+the deploy pipeline is stuck and the error message points at the *populated* column as the problem
+rather than at the empty one that actually caused it.
+
+**Narrow fix, symmetric with the one already there:** before raising, check the OLD column too —
+if the old column is entirely NULL while the new one holds rows, the old column is the placeholder,
+so drop *it* and `continue`. Only raise when BOTH hold rows. That is the genuinely ambiguous case
+the comment describes, and it is the only one worth refusing on.
+
+---
+
+## FINDING L2-F4 (NEW, lower severity) — the `information_schema` lookups have no `table_schema` filter, and this commit turns that from a silent skip into a deploy-blocking refusal
+
+`schema.ts` contains **zero** occurrences of `table_schema` (file-wide convention, so the omission
+itself is pre-existing, not introduced here). What changed is the consequence.
+
+```
+$ grep -c "table_schema" api/src/functions/tests/schema.ts
+0
+```
+
+**Before the fix**, a same-named table in another schema made `exists(old)` true and
+`not exists(new)` false, so the pair was skipped — harmless.
+**After the fix**, the same state reaches the `count(*)` probe. `%I` has no schema qualification, so
+the probe resolves via `search_path` and counts the rows of `public.opportunity`, then raises:
+
+```
+$ # public is already fully migrated; add an unrelated table in another schema
+$ create schema archive; create table archive.opportunity (id int, jd_real text, jd_html text);
+$ psql -v ON_ERROR_STOP=1 -q -d multisch -f /tmp/schema_branch_nv.sql
+migration #2 EXIT=3
+ERROR:  jd-rename: opportunity.jd_real still exists and opportunity.jd_html already holds 2
+        non-null row(s). Refusing to guess which is authoritative.
+```
+`public.opportunity` has no `jd_real` at all; the refusal is entirely false and permanent.
+
+**Likelihood: unmeasured.** I could not query the production database to see whether
+`boost_resume_n_packet_builder` has any schema besides `public` — the Postgres MCP connectors in
+this session all reported "requires authentication". **The query that would settle it:**
+```sql
+select table_schema, table_name from information_schema.columns
+ where column_name in ('jd_real','raw_jd','jd_text','jd_text_sha256','jd_text_truncated')
+ group by 1,2;
+```
+If that returns only `public` rows, this is theoretical. **Fix is one clause per lookup:**
+`and table_schema = 'public'` (or `current_schema()`), plus schema-qualifying the `format`.
