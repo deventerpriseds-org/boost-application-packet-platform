@@ -656,8 +656,9 @@ Prior task: **F5 CLOSED and deployed (`5a6728d`)** — see actions.md. Option (b
   refuted one claim and found three more defects; all four closed in the same commit, and three of
   the four were greps I had skipped.
   **Process now mechanism, applied LIVE not just pushed:** `verify-work` 0b (self-attack and fix
-  BEFORE the verifier — does not narrow its coverage) and 0c (loop 2+ tiers by COST, never by
-  "could this have been impacted?"); `setup.sh` **v17** makes SessionStart re-copy skills, because a
+  BEFORE the verifier — does not narrow its coverage) and 0c (**SUPERSEDED 2026-08-29 — see below**: it
+  tiered by COST, which SKIPPED out-of-radius claims; it now re-verifies EVERY claim every loop and
+  tiers only DEPTH); `setup.sh` **v17** makes SessionStart re-copy skills, because a
   skill push previously reached nobody — build-time copy, cached output, this session was on
   `_eds_version` 14 with a skill file from 12:43. Verified: hooks at 17, re-copy present, skill
   38,929 bytes.

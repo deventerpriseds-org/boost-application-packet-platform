@@ -5239,3 +5239,36 @@ working tree shared by every lane, and `git stash` is repository-global. Use `gi
 `git stash` in this repo.
 
 **Nothing in `api/` or `app/` was changed and nothing was deployed.**
+
+---
+
+## 2026-08-29 — `verify-work` 0c superseded: coverage is TOTAL, only DEPTH is tiered
+
+**Supersedes the 0c description recorded earlier in this file** (the "tier by COST" entry), which is
+left in place as history of what was built that day.
+
+The owner asked whether the re-verification tiering was mechanized anywhere. It was not — a sweep of
+every installed hook payload, `setup.sh`, both `CLAUDE.md` copies and the Stop gate prompt found
+zero. It lived only in `verify-work.md`, read only when the skill is invoked. The owner then
+tightened the rule itself:
+
+> *"if you don't check something just because it passed it could break from an unrelated fix and you
+> wouldn't detect it. That's why it still needs to verify everything but a quicker not necessarily
+> cheaper version that doesn't spend as much time as it does in things that just failed and was
+> supposedly fixed."*
+
+**Cost-tiering was a SKIP.** A claim outside the fix's blast radius was not re-checked at all. Now:
+every claim is re-checked every loop; previously-CONFIRMED ones at reduced depth, previously-REFUTED
+ones in full.
+
+**This repo's change is prose only** — `CLAUDE.md` §0c (heading, table and the paragraph that follows
+it) plus the stale present-tense line at `memory.md:659`. The enforcement lives in
+`eds-claude-skills`: `eds-verify-loop.py`, a third `Stop` command hook at `_eds_version` 20, with 71
+tests and 7 mutation proofs. Evidence link: `deventerpriseds-org/eds-claude-skills` commit `aee9ac9`
+on `claude/boost-app-setup-approach-4uruha`.
+
+**Found while fixing it:** the rule had **four** prose homes, not one. `verify-work.md` §0c, §6
+(older and more categorical, missed by the first sweep), this repo's `CLAUDE.md`, and
+`memory.md:659`. Two sweeps in that session missed a home — one by searching with the leading
+hypothesis' vocabulary, one by grepping a hand-typed file list instead of an enumerated one. Both are
+logged in `eds-claude-skills/.claude/accuracy-log.md`.

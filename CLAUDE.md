@@ -683,7 +683,7 @@ do not claim the assertion is proven.
 Tier 1 is a property of the CODE PATH, not of the change's size. A one-line edit to `checks.ts` is
 tier 1; a 200-line settings screen is tier 2.
 
-## Self-attack BEFORE the verifier, and tier a RE-verification by cost (owner-instructed 2026-08-25)
+## Self-attack BEFORE the verifier, and re-verify EVERYTHING every loop (owner-instructed 2026-08-25, tightened 2026-08-29)
 
 Both rules live in full in the org skill `verify-work` (steps **0b** and **0c**). They are mirrored
 here because this repo is where they were earned and where the evidence is.
@@ -712,21 +712,41 @@ findings, and **three were plain greps I skipped**. Four checks, seconds each:
    genuinely needed an independent adversary: deleting a positional check left 840/840 green while
    96 of 1218 tampered documents got spliced.*
 
-### 0c — on loop 2+, tier by COST, never by "could this have been impacted?"
+### 0c — every loop re-verifies EVERY claim; only DEPTH is tiered
 
-That question is a judgement, and judging it wrong is how a regression ships. **Measured:** the
-one-line F-1 fix changed what `frameOf` returns for real rows — the INPUT to five of eight claims
-plus the safety floor. "Obviously unaffected" would have been wrong for all but one of them.
+**Coverage is TOTAL on every loop.** Never drop a claim because it passed last loop. Owner,
+2026-08-29:
 
-| cost | on every loop |
+> *"if you don't check something just because it passed it could break from an unrelated fix and you
+> wouldn't detect it. That's why it still needs to verify everything but a quicker not necessarily
+> cheaper version that doesn't spend as much time as it does in things that just failed and was
+> supposedly fixed."*
+
+Never decide depth by asking "could this have been impacted?" — that is a judgement, and judging it
+wrong is how a regression ships. **Measured:** the one-line F-1 fix changed what `frameOf` returns
+for real rows — the INPUT to five of eight claims plus the safety floor. "Obviously unaffected"
+would have been wrong for all but one of them.
+
+| last loop's verdict | on every loop — no row is skipped |
 |---|---|
-| **Cheap + deterministic** (the suite, a build) | **Re-run ALL of it, every loop.** Seconds. The net under everything. |
-| **Expensive re-derivation** (fuzz sweeps, differential runs, schema on a fresh DB, per-guard mutation) | Only what the fix's blast radius touches — and the brief must STATE the radius. |
+| **Cheap + deterministic** (the suite, a build) | **Re-run ALL of it, every loop.** Seconds. The total-coverage floor under everything. |
+| **Previously CONFIRMED** | **Re-checked at reduced depth** — fastest check that would still expose a regression. Faster, never absent; state HOW it was re-confirmed. |
+| **Previously REFUTED, now fixed** | **Full re-derivation** (fuzz sweeps, differential runs, schema on a fresh DB, per-guard mutation). This is where the time saved above is spent. |
 
-The loop-2 brief carries a required PRIOR STATE block (what was confirmed, what was refuted, the
-blast radius, the cheap-suite result) ending in **CHALLENGE THE RADIUS** — the verifier is the check
-on the implementer's radius being wrong, so it is handed the reasoning and invited to reject it
-rather than silently inheriting it.
+The loop-2 brief carries a required PRIOR STATE block under a `## VERIFY LOOP` header (`work:` slug +
+`loop:` integer). Its field labels are a frozen contract checked literally by `eds-verify-loop.py` on
+Stop: `Previously CONFIRMED - RE-CHECKED THIS LOOP`,
+`Previously REFUTED / now fixed - FULL RE-DERIVATION`, `Blast radius of the fix`,
+`Cheap suite re-run covering EVERYTHING` — ending in
+**CHALLENGE THE RADIUS**, the verifier being the check on the implementer's depth allocation being
+wrong, so it is handed the reasoning and invited to reject it rather than silently inheriting it.
+
+Two of those fields are read backwards easily. **`Blast radius of the fix` survives with its meaning
+INVERTED**: it no longer selects *what* is checked, it selects *where DEPTH is spent* — coverage stays
+total regardless of the radius. **`Cheap suite re-run covering EVERYTHING`** is the total-coverage
+floor and takes a real command and a real result, not an intention. The old
+`Previously CONFIRMED and *not re-derived*…` field is RETIRED and a brief containing that phrase is
+now BLOCKED by the checker. Full text of the rule: org skill `verify-work` §0c.
 
 ---
 
