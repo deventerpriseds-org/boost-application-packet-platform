@@ -4725,3 +4725,34 @@ I asserted a capability's behaviour from my own model of it rather than from the
 observation. **The user's stated observation IS ground truth**; when my analysis says the thing they
 watched happen is impossible, my analysis is what is wrong. It took a screenshot and a live timed
 test to settle something one honest "I don't actually know, let's measure it" would have.
+
+## `boost-pg-mcp-write` is the PREFERRED live-DB transport; a lapse is a NUDGE, not a detour (2026-08-29)
+
+**Owner-instructed, verbatim:** *"make a note to use the boost-pg-mcp-write as the preferred option
+and unless I tell you to essentially work continuously, nudge more for a reset if a step requires
+it's abilities which I may then advise to switch to the workflow or refresh and unblock proceeding.
+remember to check before implementation steps require db"*
+
+**The rule, now in `CLAUDE.md` under Live Database Access:**
+1. PRE-FLIGHT before an implementation step — does it need live Postgres? Say so UP FRONT, not
+   three tool calls in.
+2. Lapsed/off + step needs it → name the step, name the query, ask for a refresh, STOP. Do not
+   quietly reroute through `db-query.yml`. The choice between refresh and workflow is the owner's.
+3. Only exception: an explicit "work continuously" instruction — then take the fallback, and say in
+   the same turn which step took it.
+4. `db-query.yml` stays the correct FALLBACK. It is not the default.
+
+**Measured the moment it was reconnected** — two queries, ~1s each, both ground truth this session
+had been reasoning about from source alone:
+- `select action, count(*) from swap_decision group by action` → **kept 35, swapped 15, dropped 8,
+  added 7**. So 15 rows carry the two actions the fixed-slot rule makes illegal; AC-12's
+  back-compat requirement is about REAL rows, not a hypothetical.
+- `pg_get_constraintdef` on `swap_decision` → **`swap_decision_list_check` admits only
+  `skills_1, skills_2, relevant_1, relevant_2, relevant_3`**. `expertise` is rejected BY PRODUCTION,
+  confirming from the live database what the AC pass had inferred from `schema.ts:567`. AC-14
+  option (i) therefore genuinely requires an explicit `ALTER` — `create table if not exists` is a
+  no-op there (`schema.ts:594-596`).
+
+**Why this matters beyond convenience:** both facts were previously "read from the schema file",
+which is a proxy. The connector turned them into ground truth in two seconds. That is the argument
+for nudging rather than routing around.
