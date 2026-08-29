@@ -112,8 +112,15 @@ export async function writeInsertions(client: any, artifactId: string, oppId: st
     // whole-package build, and `appRemediation.ts:179` guarded by `firstPass === 1`. A later
     // remediation run deliberately does NOT rewrite loop 0 (`appRemediation.ts:177`), so this
     // cannot delete a run's own earlier passes.
-    if (loop === 0) await client.query(`delete from insertion where artifact_id=$1`, [artifactId])
-    else await client.query(`delete from insertion where artifact_id=$1 and loop=$2`, [artifactId, loop])
+    // Braced deliberately. `H34` proves the unscoped clear is INSIDE an `if (loop === 0) { … }`
+    // block by walking its braces, because the earlier proximity test was defeated by a delete that
+    // merely sat near a `loop === 0` mention. A brace-less `if` gives that check nothing to walk, so
+    // the braces are load-bearing here, not style.
+    if (loop === 0) {
+      await client.query(`delete from insertion where artifact_id=$1`, [artifactId])
+    } else {
+      await client.query(`delete from insertion where artifact_id=$1 and loop=$2`, [artifactId, loop])
+    }
     for (const r of built.rows) {
       await client.query(
         `insert into insertion

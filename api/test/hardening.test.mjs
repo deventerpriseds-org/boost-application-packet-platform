@@ -1323,6 +1323,35 @@ test('H33: every server-side body toggle has a caller that can send it', () => {
 // an UNCONDITIONAL packet-wide delete. A delete reachable only under `loop === 0` can never run on
 // pass 2, so the guard below still fails on the exact construct that prompted it — proven by
 // mutation, not assumed: restoring the unconditional delete re-fails this test.
+/**
+ * The [start, end) span of every `if (loop === 0) { ... }` block in a source file.
+ *
+ * Brace-walking, not a character window. H34's carve-out originally accepted any unscoped delete
+ * with a `loop === 0` mention within 400 characters, which tests NEARNESS rather than SCOPE. An
+ * independent verifier defeated it in one edit -- `const isGroundZero = loop === 0` on its own
+ * line, a trivial `if (isGroundZero) {}` after it, then an UNCONDITIONAL packet-wide delete. That
+ * is the P3-21 incident restored verbatim and the suite passed 893/893.
+ *
+ * String and template literals are skipped so a brace inside a SQL string cannot close a block
+ * early -- these files are full of `delete from x where y=$1` inside backticks.
+ */
+function guardedBlocks(code) {
+  const spans = []
+  const re = /\bif\s*\(\s*loop\s*===\s*0\s*\)\s*\{/g
+  let m
+  while ((m = re.exec(code))) {
+    let depth = 0, i = m.index + m[0].length - 1, quote = null
+    for (; i < code.length; i++) {
+      const c = code[i], prev = code[i - 1]
+      if (quote) { if (c === quote && prev !== '\\') quote = null; continue }
+      if (c === '"' || c === "'" || c === '`') { quote = c; continue }
+      if (c === '{') depth++
+      else if (c === '}') { depth--; if (depth === 0) { spans.push([m.index, i]); break } }
+    }
+  }
+  return spans
+}
+
 test('H34: provenance deletes are scoped to a pass, except at ground zero (loop 0)', () => {
   const offenders = []
   for (const [file, body] of allSources()) {
@@ -1333,15 +1362,32 @@ test('H34: provenance deletes are scoped to a pass, except at ground zero (loop 
     while ((m = re.exec(code))) {
       const [, table, predicate] = m
       if (/\bloop\s*=/.test(predicate)) continue
-      // The ONLY permitted unscoped clear: one guarded by an explicit `loop === 0` test in the 400
-      // characters preceding it. Bounded deliberately — an unguarded delete elsewhere in a file that
-      // happens to mention `loop === 0` somewhere must still be caught.
-      const before = code.slice(Math.max(0, m.index - 400), m.index)
-      if (/\bloop\s*===\s*0\b/.test(before)) continue
+      // CONTAINMENT, NOT PROXIMITY. The first version of this carve-out accepted any unscoped
+      // delete with a `loop === 0` mention in the preceding 400 characters, which is a test of
+      // NEARNESS and not of SCOPE. An independent verifier broke it in one edit — the P3-21
+      // incident reinstated verbatim, and the whole suite passed 893/893:
+      //
+      //     const isGroundZero = loop === 0
+      //     if (isGroundZero) { console.log('ground zero') }
+      //     await client.query(`delete from swap_decision where packet_id=$1`, [packetId])
+      //
+      // The delete there runs on EVERY loop; only the mention was nearby. Comments were already
+      // stripped, so the miss was real code, which is exactly the case that matters. My own
+      // mutation had only tried the literal construct and so proved the guard caught one shape
+      // while I assumed it caught the class.
+      //
+      // So find each `if (loop === 0)` and walk its braces to get the block's true extent, then
+      // require the delete to sit INSIDE one. A mention that does not open a block protects
+      // nothing and no longer excuses anything.
+      if (guardedBlocks(code).some(([s, e]) => m.index > s && m.index < e)) continue
       offenders.push(`${file}: delete from ${table} where ${predicate.trim().slice(0, 60)}`)
     }
   }
-  assert.deepEqual(offenders, [], 'a packet-wide provenance delete outside loop 0 erases every earlier pass')
+  assert.deepEqual(offenders, [],
+    'a packet-wide provenance delete outside loop 0 erases every earlier pass. The carve-out requires '
+    + 'the delete to sit INSIDE a BRACED `if (loop === 0) { ... }` block -- a brace-less if, or a '
+    + '`loop === 0` mention that does not open the block containing the delete, is not a scope and '
+    + 'does not qualify')
 })
 
 test('H34b: swap_decision and skill_candidate carry the pass in their key', () => {
@@ -4588,4 +4634,53 @@ test('H:rebuild-clears-superseded-loops: writing loop 0 clears later passes in b
     'appSwaps.ts: skill_candidate must be cleared with swap_decision or candidates outlive their swaps')
   assert.ok(/delete from swap_decision where packet_id=\$1 and loop=\$2/.test(swp),
     'appSwaps.ts: loops 1..n must still delete only their own rows (P3-21)')
+})
+
+// ── H:loop-zero-clear-rests-on-the-cache-hit ────────────────────────────────────────────────────
+//
+// THE DEPENDENCY THAT MAKES THE LOOP-0 CLEAR SAFE, PINNED — because it is NOT the one the
+// implementer believed, and an independent verifier had to say so.
+//
+// The claim made when `H:rebuild-clears-superseded-loops` shipped was: "a loop-0 clear cannot run
+// during a live remediation run, because `appRemediation.ts` guards its baseline write with
+// `firstPass === 1`." THAT IS WRONG. `firstPass` guards `writeInsertions` only. `writeSwaps` is
+// never called from `appRemediation.ts` at all — its single call site is `appPackets.ts`
+// `ensurePackage`, which remediation invokes on EVERY run, before that guard.
+//
+// What actually keeps it safe is the CACHE HIT: `ensurePackage` returns early when a package is
+// already stored and still grounded, so run 2+ never reaches the generate-and-writeSwaps path.
+// Remediation refuses to run at all when `!grounded`, so any packet that completed a pass has
+// `jd_grounded = true` and hits the cache next time.
+//
+// That is a real invariant and it holds — but nothing named it, so editing the cache predicate
+// would silently reopen a packet-wide provenance delete inside a live loop with the suite green.
+// This test is that name. If the early return or its predicate moves, come back and re-derive
+// whether `writeSwaps` can now be reached on a second remediation pass BEFORE relaxing this.
+test('H:loop-zero-clear-rests-on-the-cache-hit: ensurePackage still returns early on a cached package', () => {
+  const pk = stripComments(src('appPackets.ts'))
+
+  // The early return must exist and must precede the generation path that calls writeSwaps.
+  const cachedAt = pk.search(/const cached[^\n]*=\s*\(!regen/)
+  const returnAt = pk.search(/if \(cached\) return \{/)
+  const swapsAt = pk.search(/writeSwaps\(/)
+  assert.ok(cachedAt > -1, 'appPackets.ts: the `cached` predicate is gone — the loop-0 clear in '
+    + 'writeSwaps is no longer protected from a second remediation pass')
+  assert.ok(returnAt > cachedAt, 'appPackets.ts: `if (cached) return` no longer follows the predicate')
+  assert.ok(swapsAt > returnAt, 'appPackets.ts: writeSwaps is no longer AFTER the cache early-return — '
+    + 'a remediation run on pass 2+ could now reach it and clear every earlier pass of the live run')
+
+  // And the predicate must still be the conjunction the argument depends on: a stored package,
+  // no explicit regen, and not stale-ungrounded. Dropping any term re-opens the path.
+  const pred = pk.slice(cachedAt, returnAt)
+  for (const term of ['!regen', '!staleUngrounded', 'pkg_json']) {
+    assert.ok(pred.includes(term),
+      `appPackets.ts: the cache predicate no longer tests ${term}; the loop-0 provenance clear `
+      + 'depends on this early return being taken on every remediation pass after the first')
+  }
+
+  // writeSwaps must still be called with the literal ground-zero loop. If a caller ever passes a
+  // computed pass number here, the clear stops being ground-zero-only and the carve-out is void.
+  assert.match(pk, /writeSwaps\([^)]*\{[\s\S]{0,400}?loop:\s*0\s*,?\s*\}/,
+    'appPackets.ts: writeSwaps is no longer called with a literal `loop: 0` — a computed loop would '
+    + 'make the unscoped clear reachable on a real remediation pass')
 })
