@@ -5209,3 +5209,58 @@ and began widening the poll budget. That was inference, offered before I had rea
 The wrong-handler bug is the actual cause. The timing change is still correct and kept — the setting
 now goes in the PRE-deploy step so the code deploy is the last restart, and the budget is 90x6s
 rather than 40x6s — but it was not the reason the deploy failed, and I said it was.
+
+---
+
+## ACT-2026-08-29-a — Environment provisioning for the parallel-session lane (`claude/boost-app-setup-approach-ejv09v`)
+
+**Request (owner, session start):** run `setup.sh` from the org skills repo, report exactly what
+hooks / skills / subagents are officially registered, describe the resulting function-development
+approach, and make sure the `boost-pg-mcp-write` custom connector is wired up. Context: this lane
+runs **in parallel with other sessions on the same codebase**.
+
+**Status: CLOSED — provisioned and verified from installed state, not from the script's own claims.**
+
+**Why this entry exists at all.** The container came up COLD: no `/root/.claude/CLAUDE.md`, no
+`/home/user/.claude/`, no `/workspace`. The environment's cached setup output had not been applied
+here, so every guard the org relies on — the Stop gate, the rewind autosave, the phase tag — was
+absent and silently so. A session that had started work in that state would have had none of them.
+
+**Verified after the run (`_eds_version` 19, exit 0):**
+
+| Registered | Evidence read back |
+|---|---|
+| 6 hooks, all v19 | `/home/user/.claude/settings.json` parsed: `SessionStart`(cmd), `Stop`(agent haiku-4.5 + `eds-phase-tag.py`), `PostToolUse`(autosave), `UserPromptSubmit`(drift check + agent guard, phase-tag reminder) |
+| 16 skills | `ls /root/.claude/skills/*.md` = 16, matches the repo's 16 |
+| 1 subagent (`verifier`) | `/root/.claude/agents/verifier.md`, 9643 bytes |
+| 3 guard scripts | `eds-git-guard.sh`, `eds-agent-guard.sh`, `eds-phase-tag.py` — all `-rwxr-xr-x`, all smoke-tested exit 0 |
+| 9 CLIs | gh, kubectl, az, vercel, wrangler, railway, supabase, flyctl, aws |
+| permissions | `launcher-settings.json` carries allowlist + `autoMode` ONLY — its two hooks are foreign (`_eds=None`), so the v7+ split held and there is no double-firing gate |
+
+**`boost-pg-mcp-write`: live, and it is the right database.** `ListConnectors` →
+`connected: true, enabledInChat: true`. Ground-truthed rather than assumed:
+`select current_database(), current_user, version()` → `boost_resume_n_packet_builder` /
+`mcp_readwrite_boost` / PostgreSQL 17.10. `Boost_DB_Connector` and `Azure_pg_mcp` are both
+`enabledInChat: false`, which matches CLAUDE.md's instruction to use exactly one and not enumerate
+the others.
+
+**Two things the run did NOT do on its own, both fixed by hand — worth knowing for the next cold
+container:**
+1. `/workspace/eds-claude-skills` did not exist. `SESSION_CMD` creates it, but `SessionStart` had
+   already fired before the hooks were installed, so it could not have run. Cloned manually.
+2. `register_repo_root` **rejects `/workspace/eds-claude-skills`** — it returned
+   *"does not match the managed session's clone target `/home/user/eds-claude-skills`"*. In a
+   managed multi-repo session the org repo is ALREADY attached under `/home/user`, so bootstrap's
+   documented `/workspace` path is the wrong argument here. Registering `/home/user/eds-claude-skills`
+   returned `context_reload_requested`. The `/workspace` clone is still worth having (it is the clone
+   with a working push remote for editing skills), but it is not what `register_repo_root` wants.
+
+**Autosave proven, not assumed.** `autosave` exiting 0 is not evidence it mirrored anything —
+`git ls-remote origin 'refs/heads/eds-wip/*'` shows live wip refs on both repos from other lanes.
+No ref for this branch, correctly, because the tree is clean and there was nothing to snapshot.
+
+**Parallel-session posture recorded here because it is the standing risk for this lane:** both repos
+were fetched and are level with `origin/main` (skills `cbf8f7b`, boost `2c693d1`), and this branch
+carries no commits beyond main. With other sessions live on the same code, `git fetch` before
+answering any status question and before every commit/push is not optional — the working tree is not
+the source of truth, `origin` is.

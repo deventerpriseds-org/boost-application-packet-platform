@@ -4557,3 +4557,47 @@ problem and started widening the poll budget. That was inference. One look at th
 payload — `{status, timestamp, storage, tables}`, no `ok`, no `checks` — showed instantly that it was
 not the handler I had edited. **Read the response before theorising about the timeout.** The timing fix
 was independently worth making, but it was not the cause and I nearly shipped it as if it were.
+
+---
+
+## Session 2026-08-29 — a cold container had ZERO org guards, and nothing said so
+
+**Status: environment provisioned at `_eds_version` 19, verified from installed state. Detail in
+`.claude/actions.md` ACT-2026-08-29-a.** Lane `claude/boost-app-setup-approach-ejv09v`, running in
+parallel with other sessions on this repo.
+
+### Hardening — "the environment is set up" is a claim about state, and nothing re-checks it
+
+This container started with **no** `/root/.claude/CLAUDE.md`, **no** `/home/user/.claude/settings.json`
+and **no** `/workspace`. The Stop gate, the rewind autosave, the orphaned-subagent guard and the
+phase tag were all absent. Nothing announced this. The session simply began, and every file in the
+repo describing "the hooks that are always on" was, at that moment, false.
+
+This is the exact shape `.claude/DEFERRED.md` was built for — *a claim about state that nothing
+re-checks* — applied to the guard layer itself. The guards cannot warn you they are missing, because
+being missing is precisely what stops them running. The setup script's own cached-output model is
+what makes it plausible: caching is invisible when it works, and equally invisible when it did not
+apply.
+
+**The rule: at session start, prove the guards are installed by READING THEM, before trusting any
+document that says they are.** One command settles it and it is cheap:
+
+```bash
+python3 -c "import json;d=json.load(open('/home/user/.claude/settings.json'));print({e:[h.get('_eds_version') for g in v for h in g['hooks']] for e,v in d['hooks'].items()})"
+```
+
+Absent file or missing events ⇒ run `bash setup.sh` from the skills repo before doing anything else.
+Do not infer it from the presence of the repo, from CLAUDE.md, or from a previous session's notes.
+
+**Corollary, and the more general lesson:** a script exiting 0 is not evidence of what it installed.
+Every claim in the summary this session gave the owner was read back from the artifact — the parsed
+settings file, `ls` of the skills directory, the connector's own `select current_database()`,
+`git ls-remote` for the autosave refs — never from the script's stdout. `autosave` exiting 0 in
+particular says nothing about whether a ref reached origin; only `ls-remote` does.
+
+### The documented bootstrap path is wrong for a managed multi-repo session
+
+`bootstrap.md` says to clone to `/workspace/eds-claude-skills` and register that. In this session
+`register_repo_root` **refused** it: *"does not match the managed session's clone target
+`/home/user/eds-claude-skills`"*. The org repo is already attached under `/home/user` here. Register
+that path; keep the `/workspace` clone only as the editable copy with a working push remote.
