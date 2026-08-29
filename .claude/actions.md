@@ -6,6 +6,40 @@ Status values: `open` | `in-progress` | `blocked` | `done`
 
 ---
 
+## Open
+
+<!-- SessionStart extracts the range between the two headings that bracket this section. Before they
+     existed it matched nothing and surfaced 0 lines out of 5,279 — measured 2026-08-29.
+     DO NOT write either heading's literal text inside this range, including in a comment: the range
+     ends at the FIRST line matching the closing pattern, so a note quoting it truncates the section
+     it is explaining. That happened here on the first attempt — 3 lines extracted instead of 30.
+     Keep this section SHORT and CURATED: it is read into context at every session start, so it is an
+     index of what is live, not a second copy of the ledger. Detail stays in the ACT entries below
+     and in `.claude/DEFERRED.md`. -->
+
+**Open ledger rows** (full detail in `.claude/DEFERRED.md`, which is the authority):
+
+| Row | What is not done |
+|---|---|
+| `D3` | The AC-10 profile-figure resolver. Needs `profile_source_key` / `profile_char_start` / `profile_char_end` on `correction` — i.e. `schema.ts`, another lane's file. |
+| `D11` | P7 item 4's remedy is an owner decision (see `D29`); the config fix is NOT verified live. |
+| `D13` | The per-rebuild superseded Drive file still leaks (see `D31`). Not verified live — no Drive call from that branch. |
+| `D14` | `covered_kw` does not mean covered. Relabel landed (PR #26, `3153f1a`); the LIVE half is unconfirmed and one `ui-verify` attempt was INCONCLUSIVE — do not repeat it unchanged. |
+| `D20` | A bare truthy body read (`if (body?.x)`) is out of H33's scope; `appFacts.ts` `body.confirm` is invisible to the guard. |
+| `D23b` | `owner_fact.value_num` is written on TWO scales and the STORAGE is unfixed. Size it first: `select key, value, value_num from owner_fact where key in ('scope.largest_team','scope.largest_budget')`. |
+| `D34` | **Every lane shares ONE working tree and ONE `.git`.** Use `git worktree`; never `git stash` in this repo. |
+
+**Awaiting owner confirmation, not agent work:**
+- The Trinnex rebuild (packet `85cee965-…`) is measured in the database but **no rebuilt document has been opened by anyone**. Implemented and measured, NOT confirmed live.
+
+**Current lane (2026-08-29):** `verify-work` §0c superseded — coverage is TOTAL every loop, only DEPTH
+is tiered. Prose landed here; the enforcement is `eds-claude-skills` (`eds-verify-loop.py`, a third
+`Stop` hook). Entry at the end of this file.
+
+## Closed
+
+Everything below is the historical ACT ledger, oldest first. Individual rows carry their own status.
+
 ## ACT-1 — Fix Today KPI 0-counts
 
 **Requested:** ~2026-07-20
@@ -3731,10 +3765,15 @@ find before the validater runs rather than wasting loops"*, then *"why do you ke
 letting the final 10% get lost"*. Both are now mechanism rather than prose:
 - `verify-work` **step 0b** — self-attack and FIX before spawning the verifier (four checks, seconds
   each, each carrying the incident that earned it). Does NOT narrow verifier coverage.
-- `verify-work` **step 0c** — on loop 2+, tier by COST not by "could this have been impacted?" (that
-  judgement would have been wrong for 5 of 8 claims here). Cheap suite re-runs in full every loop;
-  only expensive re-derivation is scoped, and the brief must STATE the radius and tell the verifier
-  to CHALLENGE it.
+- `verify-work` **step 0c** — ⚠️ **SUPERSEDED 2026-08-29, see the entry at the end of this file.**
+  As written that day it tiered by COST: *"only expensive re-derivation is scoped"* — which SKIPPED
+  out-of-radius claims entirely, and an unrelated fix could then break a previously-passing claim
+  undetected. The rule now re-verifies EVERY claim every loop and tiers only DEPTH. The half of this
+  bullet that survives is the last clause: the brief must state the radius and tell the verifier to
+  CHALLENGE it. Left in place as the record of what was built that day, not as current guidance.
+  ~~on loop 2+, tier by COST not by "could this have been impacted?" (that judgement would have been
+  wrong for 5 of 8 claims here). Cheap suite re-runs in full every loop; only expensive
+  re-derivation is scoped~~
 - `setup.sh` **v17** — the reason the above nearly did not count. A skill pushed to the repo reached
   NOBODY: skills are copied into `/root/.claude/skills/` at container BUILD and that output is
   cached. Measured — this session was still loading the 34,073-byte copy from 12:43 with zero of the
@@ -5248,3 +5287,96 @@ sweep plus import lists before "3 rows left" is treated as final.
 
 **Consequence:** jd, resume, cover and portfolio have no genuinely missing rows — the parallel lanes
 are unblocked.
+
+---
+
+## ACT-2026-08-29-a — Arm the enforcement environment for a parallel-session lane
+
+**Asked:** run `setup.sh` from `eds-claude-skills`, report exactly what got registered, describe the
+resulting development approach, and add the `boost-pg-mcp-write` connector.
+
+**Status: DONE for the environment half; verified by reading the installed files, not by trusting
+the script's own output.**
+
+- `setup.sh` at `cbf8f7b` (== `origin/main` of eds-claude-skills), exit 0.
+- Hooks written to `/home/user/.claude/settings.json` at `_eds_version` **19** — events
+  `SessionStart`, `Stop` (x2: haiku gate + `eds-phase-tag.py`), `PostToolUse`, `UserPromptSubmit` (x2).
+  `/root/.claude/launcher-settings.json` carries **zero** `_eds` hooks (confirmed by parsing it), so
+  the launcher's per-start regeneration cannot wipe the gate.
+- 16 skills to `/root/.claude/skills/`, 1 agent (`verifier`) to `/root/.claude/agents/`.
+- Three guards installed and smoke-run, all exit 0: `eds-git-guard.sh check`,
+  `eds-agent-guard.sh reconcile`, `eds-phase-tag.py`.
+- `register_repo_root(deventerpriseds-org/eds-claude-skills, /home/user/eds-claude-skills)` — bootstrap.
+- `boost-pg-mcp-write` live: `select current_database()` returns `boost_resume_n_packet_builder` as
+  `mcp_readwrite_boost`, 50 public tables, and `opportunity` / `packet` / `requirement` /
+  `owner_fact` / `correction` / `comparison_dimension` / `artifact_score` / `persona` all resolve.
+  This is the connector to use — not `Boost_DB_Connector`, not `Azure_pg_mcp`.
+
+**Parallel-lane hazard restated (D34):** `/home/user/boost-application-packet-platform` is one
+working tree shared by every lane, and `git stash` is repository-global. Use `git worktree`; never
+`git stash` in this repo.
+
+**Nothing in `api/` or `app/` was changed and nothing was deployed.**
+
+---
+
+## 2026-08-29 — `verify-work` 0c superseded: coverage is TOTAL, only DEPTH is tiered
+
+**Supersedes the 0c description recorded earlier in this file** (the "tier by COST" entry), which is
+left in place as history of what was built that day.
+
+The owner asked whether the re-verification tiering was mechanized anywhere. It was not — a sweep of
+every installed hook payload, `setup.sh`, both `CLAUDE.md` copies and the Stop gate prompt found
+zero. It lived only in `verify-work.md`, read only when the skill is invoked. The owner then
+tightened the rule itself:
+
+> *"if you don't check something just because it passed it could break from an unrelated fix and you
+> wouldn't detect it. That's why it still needs to verify everything but a quicker not necessarily
+> cheaper version that doesn't spend as much time as it does in things that just failed and was
+> supposedly fixed."*
+
+**Cost-tiering was a SKIP.** A claim outside the fix's blast radius was not re-checked at all. Now:
+every claim is re-checked every loop; previously-CONFIRMED ones at reduced depth, previously-REFUTED
+ones in full.
+
+**This repo's change is prose only** — `CLAUDE.md` §0c (heading, table and the paragraph that follows
+it) plus the stale present-tense line at `memory.md:659`. The enforcement lives in
+`eds-claude-skills`: `eds-verify-loop.py`, a third `Stop` command hook at `_eds_version` 20, with 71
+tests and 7 mutation proofs. Evidence link: `deventerpriseds-org/eds-claude-skills` commit `aee9ac9`
+on `claude/boost-app-setup-approach-4uruha`.
+
+**Found while fixing it:** the rule had **four** prose homes, not one. `verify-work.md` §0c, §6
+(older and more categorical, missed by the first sweep), this repo's `CLAUDE.md`, and
+`memory.md:659`. Two sweeps in that session missed a home — one by searching with the leading
+hypothesis' vocabulary, one by grepping a hand-typed file list instead of an enumerated one. Both are
+logged in `eds-claude-skills/.claude/accuracy-log.md`.
+
+---
+
+### ACT: long AC/verifier passes move OFF this session onto a runner (2026-08-29)
+
+**Origin:** owner, repeatedly, culminating in *"why are you running long agents in the fairground
+instead of running them in the background and with the turn ended so we can continue discussion or
+other parallel tasks"* and, when offered the lazy fix, *"horrible do not adopt such a lazy
+solution."*
+
+**The thing that was actually wrong:** I claimed three times that a backgrounded `Agent` subagent
+leaves this session responsive. It does not. The owner supplied a screenshot ("Brewing… 1 running
+task", input box relabelled "Queue feedback…") and then ran a live test: they typed at ~25s, I saw
+it 93 seconds later, and only because they pressed stop — which killed the agent. Reaching the
+session required destroying the work.
+
+**Status: DONE for this repo (prose), DONE upstream (mechanism).** `CLAUDE.md` gains
+"A long AC or verification pass belongs on a RUNNER, not in this session". No workflow or script is
+copied here: `claude-task.yml` in `deventerpriseds-org/eds-claude-skills` already takes a
+`target_repo` input, and it is proven against THIS repo — run `33264119335` step 3 completed
+`success` in 2s with `target_repo` set to boost. Copying it would be the parallel system the
+"Extend, don't duplicate" rule forbids.
+
+**Evidence:** `deventerpriseds-org/eds-claude-skills` runs 33263712582 / 33264119335 / 33264723050 /
+33265508308 / 33265802936; `docs/qc-evidence/SPEC-ab-test.md` in that repo holds the pre-registered
+A/B and its result (arm B1 3/5, arm B2 5/5 against a five-defect answer key).
+
+**Open, carried upstream, not blocking here:** runner hardening — secret ingestion via broad
+`context_globs`, no retry after a partial, per-read vs wall-clock timeout, artifact naming for a
+partial, `output_name` validation.

@@ -533,6 +533,58 @@ still while it runs. Background it, keep working, act on the wake.
   `app.http` route registrations, and smoke-test the previously-passing live
   endpoints before considering it done.
 
+## A long AC or verification pass belongs on a RUNNER, not in this session (owner-instructed 2026-08-29)
+
+An in-session `Agent` subagent makes this CCR session **unresponsive while it runs**. This was
+measured, not inferred: on 2026-08-29 the owner typed a message at ~25s into a background subagent
+and it sat QUEUED and undelivered for **93 seconds**, surfacing only when they pressed stop — which
+killed the agent. The client shows "Brewing… 1 running task" and relabels the input box "Queue
+feedback…", and queued text is lost if the screen sleeps. So the only way to reach the session was
+to destroy the work in flight. `run_in_background: true` does **not** fix this; the turn stays
+active while the parent keeps issuing tool calls.
+
+**A GitHub runner has no such coupling.** Long AC passes and verifier passes on this repo run
+through `claude-task.yml` in `deventerpriseds-org/eds-claude-skills` — dispatched from here, with
+**this** repo checked out as `_target/`.
+
+> **Do NOT copy `claude-task.yml` or `scripts/claude_task.py` into this repo.** The workflow already
+> takes a `target_repo` input for exactly this. Proven, not assumed: run `33264119335` step 3
+> ("Check out the target repo") completed `success` in 2s with `target_repo` set to this repository
+> (that run's failure was step 5, a pre-streaming `RemoteDisconnected` since fixed). A second copy
+> would be a parallel system to maintain, and the "Extend, don't duplicate" rule above forbids it.
+
+```
+mcp__github__actions_run_trigger(
+  method="run_workflow",
+  owner="deventerpriseds-org", repo="eds-claude-skills",   # <- the WORKFLOW lives there
+  workflow_id="claude-task.yml", ref="main",
+  inputs={
+    "prompt": "<the full AC or verifier brief>",
+    "target_repo": "deventerpriseds-org/boost-application-packet-platform",
+    "target_ref": "claude/<your-feature-branch>",     # defaults to main -- pass YOUR branch
+    "context_globs": "_target/CLAUDE.md,_target/.claude/*.md,_target/api/src/functions/**/*.ts",
+    "effort": "high",
+    "output_name": "VERIFY-<slug>-<loop>.md",
+  })
+```
+
+Then background the wait, download the artifact, and **commit it to `docs/qc-evidence/`** under the
+name the verdict contract expects (`AC-<slug>.md`, `VERIFY-<slug>-<loop>.md`). The eds Stop gate
+accepts a dispatched workflow run plus that committed evidence file in place of a subagent spawn —
+but only if the file carries per-claim `CONFIRMED` / `REFUTED` / `NOT_APPLICABLE` verdicts. Prose
+does not satisfy it.
+
+Three things that bit us building this, so nobody re-derives them:
+- **It is SINGLE-SHOT, not an agent loop.** It cannot grep, follow an import, or execute anything.
+  The compensation is a 1M context — stuff the files in up front via `context_globs`. Expect it to
+  be comparable on anything requiring only reading and **worse** on anything requiring execution.
+- **`effort: high` is the default and that is deliberate.** The same brief at `xhigh` over 398 KB
+  ran 7m29s, spent ~$1.61, and still stopped on `max_tokens` mid-answer. Raise it per-run, never
+  as a floor.
+- **A partial artifact is labelled.** The output file opens with an `INCOMPLETE` banner written
+  before the stream starts and is rewritten only once the outcome is known, and `stop_reason:
+  max_tokens` fails the job. A truncated answer that reads as finished is worse than no file.
+
 ## No dead UI (standing rule)
 
 Every button, link, and selector must be wired before committing.
@@ -683,7 +735,7 @@ do not claim the assertion is proven.
 Tier 1 is a property of the CODE PATH, not of the change's size. A one-line edit to `checks.ts` is
 tier 1; a 200-line settings screen is tier 2.
 
-## Self-attack BEFORE the verifier, and tier a RE-verification by cost (owner-instructed 2026-08-25)
+## Self-attack BEFORE the verifier, and re-verify EVERYTHING every loop (owner-instructed 2026-08-25, tightened 2026-08-29)
 
 Both rules live in full in the org skill `verify-work` (steps **0b** and **0c**). They are mirrored
 here because this repo is where they were earned and where the evidence is.
@@ -712,21 +764,41 @@ findings, and **three were plain greps I skipped**. Four checks, seconds each:
    genuinely needed an independent adversary: deleting a positional check left 840/840 green while
    96 of 1218 tampered documents got spliced.*
 
-### 0c — on loop 2+, tier by COST, never by "could this have been impacted?"
+### 0c — every loop re-verifies EVERY claim; only DEPTH is tiered
 
-That question is a judgement, and judging it wrong is how a regression ships. **Measured:** the
-one-line F-1 fix changed what `frameOf` returns for real rows — the INPUT to five of eight claims
-plus the safety floor. "Obviously unaffected" would have been wrong for all but one of them.
+**Coverage is TOTAL on every loop.** Never drop a claim because it passed last loop. Owner,
+2026-08-29:
 
-| cost | on every loop |
+> *"if you don't check something just because it passed it could break from an unrelated fix and you
+> wouldn't detect it. That's why it still needs to verify everything but a quicker not necessarily
+> cheaper version that doesn't spend as much time as it does in things that just failed and was
+> supposedly fixed."*
+
+Never decide depth by asking "could this have been impacted?" — that is a judgement, and judging it
+wrong is how a regression ships. **Measured:** the one-line F-1 fix changed what `frameOf` returns
+for real rows — the INPUT to five of eight claims plus the safety floor. "Obviously unaffected"
+would have been wrong for all but one of them.
+
+| last loop's verdict | on every loop — no row is skipped |
 |---|---|
-| **Cheap + deterministic** (the suite, a build) | **Re-run ALL of it, every loop.** Seconds. The net under everything. |
-| **Expensive re-derivation** (fuzz sweeps, differential runs, schema on a fresh DB, per-guard mutation) | Only what the fix's blast radius touches — and the brief must STATE the radius. |
+| **Cheap + deterministic** (the suite, a build) | **Re-run ALL of it, every loop.** Seconds. The total-coverage floor under everything. |
+| **Previously CONFIRMED** | **Re-checked at reduced depth** — fastest check that would still expose a regression. Faster, never absent; state HOW it was re-confirmed. |
+| **Previously REFUTED, now fixed** | **Full re-derivation** (fuzz sweeps, differential runs, schema on a fresh DB, per-guard mutation). This is where the time saved above is spent. |
 
-The loop-2 brief carries a required PRIOR STATE block (what was confirmed, what was refuted, the
-blast radius, the cheap-suite result) ending in **CHALLENGE THE RADIUS** — the verifier is the check
-on the implementer's radius being wrong, so it is handed the reasoning and invited to reject it
-rather than silently inheriting it.
+The loop-2 brief carries a required PRIOR STATE block under a `## VERIFY LOOP` header (`work:` slug +
+`loop:` integer). Its field labels are a frozen contract checked literally by `eds-verify-loop.py` on
+Stop: `Previously CONFIRMED - RE-CHECKED THIS LOOP`,
+`Previously REFUTED / now fixed - FULL RE-DERIVATION`, `Blast radius of the fix`,
+`Cheap suite re-run covering EVERYTHING` — ending in
+**CHALLENGE THE RADIUS**, the verifier being the check on the implementer's depth allocation being
+wrong, so it is handed the reasoning and invited to reject it rather than silently inheriting it.
+
+Two of those fields are read backwards easily. **`Blast radius of the fix` survives with its meaning
+INVERTED**: it no longer selects *what* is checked, it selects *where DEPTH is spent* — coverage stays
+total regardless of the radius. **`Cheap suite re-run covering EVERYTHING`** is the total-coverage
+floor and takes a real command and a real result, not an intention. The old
+`Previously CONFIRMED and *not re-derived*…` field is RETIRED and a brief containing that phrase is
+now BLOCKED by the checker. Full text of the rule: org skill `verify-work` §0c.
 
 ---
 

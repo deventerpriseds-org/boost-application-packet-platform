@@ -520,6 +520,18 @@ Key tables (PostgreSQL):
 - iOS testing: requires macOS runner or BrowserStack; categorically unavailable in Linux CCR
 
 ## Active work
+
+**SESSION 2026-08-29 — enforcement environment armed (this session is a PARALLEL lane).**
+`eds-claude-skills/setup.sh` @ `cbf8f7b` run to completion (exit 0): hooks at `_eds_version` 19 in
+`/home/user/.claude/settings.json` (SessionStart, Stop x2, PostToolUse, UserPromptSubmit x2), 16
+skills, the `verifier` agent, and the three guards (`eds-git-guard.sh`, `eds-agent-guard.sh`,
+`eds-phase-tag.py`) — each smoke-run at exit 0. `launcher-settings.json` verified to hold **no**
+`_eds` hooks, so the launcher's per-start regeneration cannot wipe the gate. Live DB reach confirmed
+through **`boost-pg-mcp-write`** (`boost_resume_n_packet_builder`, 50 public tables) — that is the
+one connector to use. Detail in `actions.md` ACT-2026-08-29-a.
+Because other sessions are on this same checkout, **D34 applies**: work in a `git worktree`, never
+`git stash` here.
+
 **HANDOFF STATE, 2026-08-28 ~03:00 — the Trinnex three-step repair is COMPLETE and measured live.**
 
 The three steps the owner sequenced (*"okay fix the data then the rename"* -> *"go"* -> *"go ahead
@@ -644,8 +656,9 @@ Prior task: **F5 CLOSED and deployed (`5a6728d`)** — see actions.md. Option (b
   refuted one claim and found three more defects; all four closed in the same commit, and three of
   the four were greps I had skipped.
   **Process now mechanism, applied LIVE not just pushed:** `verify-work` 0b (self-attack and fix
-  BEFORE the verifier — does not narrow its coverage) and 0c (loop 2+ tiers by COST, never by
-  "could this have been impacted?"); `setup.sh` **v17** makes SessionStart re-copy skills, because a
+  BEFORE the verifier — does not narrow its coverage) and 0c (**SUPERSEDED 2026-08-29 — see below**: it
+  tiered by COST, which SKIPPED out-of-radius claims; it now re-verifies EVERY claim every loop and
+  tiers only DEPTH); `setup.sh` **v17** makes SessionStart re-copy skills, because a
   skill push previously reached nobody — build-time copy, cached output, this session was on
   `_eds_version` 14 with a skill file from 12:43. Verified: hooks at 17, re-copy present, skill
   38,929 bytes.
@@ -4682,3 +4695,33 @@ AND consumers and read the import lists for those three.
 **Consequence for the parallel UI work:** jd, resume, cover and portfolio have NO genuinely missing
 rows between them. The lanes are unblocked; what remains is one portfolio-only pick-list, one
 `Ask why`, and a scope selector.
+
+---
+
+## Long agent work does not run in this session any more (2026-08-29)
+
+**Feature status: LANDED (prose here; mechanism in `eds-claude-skills`).**
+
+A running in-session `Agent` subagent makes this CCR session unresponsive — measured, not inferred:
+owner typed at ~25s, message sat queued and undelivered for 93s, surfaced only on stop, which killed
+the agent. `run_in_background: true` does not change this; the turn stays active while the parent
+keeps issuing tool calls.
+
+**Where long AC/verifier passes go instead:** `claude-task.yml` in `deventerpriseds-org/eds-claude-skills`,
+dispatched from here with `target_repo` pointing at this repo. **Do not copy that workflow here** —
+the `target_repo` input exists for this and is proven against boost (run 33264119335, step 3, 2s,
+`success`). Output lands in `docs/qc-evidence/` as `AC-<slug>.md` / `VERIFY-<slug>-<loop>.md` with
+per-claim `CONFIRMED` / `REFUTED` / `NOT_APPLICABLE` verdicts — the eds Stop gate accepts a
+dispatched run plus that committed file in place of a subagent spawn, but only with real verdicts.
+
+**Known limits, measured:** it is SINGLE-SHOT, not an agent loop — it cannot grep, follow an import,
+or execute. `effort: high` is the default because `xhigh` over 398 KB ran 7m29s, cost ~$1.61 and
+still hit `max_tokens` mid-answer. A killed run's artifact is still uploaded and opens with an
+`INCOMPLETE` banner.
+
+### Hardening — three wrong answers of mine, all the same shape
+
+I asserted a capability's behaviour from my own model of it rather than from the owner's stated
+observation. **The user's stated observation IS ground truth**; when my analysis says the thing they
+watched happen is impossible, my analysis is what is wrong. It took a screenshot and a live timed
+test to settle something one honest "I don't actually know, let's measure it" would have.
