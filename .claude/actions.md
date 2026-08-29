@@ -5380,3 +5380,80 @@ A/B and its result (arm B1 3/5, arm B2 5/5 against a five-defect answer key).
 **Open, carried upstream, not blocking here:** runner hardening — secret ingestion via broad
 `context_globs`, no retry after a partial, per-read vs wall-clock timeout, artifact naming for a
 partial, `output_name` validation.
+
+---
+
+## `4.8-21` Swaps `Ask why` — BUILT, PROVEN BY CLICK, DEPLOYED (2026-08-29)
+
+**Origin:** owner, *"deploy ask why"*.
+
+**What shipped.** A fifth column on `CompareTab` (`app/src/screens/QcRail.jsx:345,364`) rendering an
+`Ask why` control behind `{ask && …}`. Clicking it opens the assistant panel seeded from the swap
+row's IDENTITY — the label and the list name — not from the attribution text, which is why it did
+not have to wait on the `swaps.ts:222` fix.
+
+**Proven by a real click, locally, no deploy required.** `scripts/prove-ask-why.mjs` drives the built
+`app/dist` under Playwright with route-keyed fixtures and `page.route('**/api/**')` interception:
+**8/8 assertions**, seeded text observed as `Why did you change "Engineering Leadership" in Skills 1?`.
+Committed `6106181`.
+
+**Three false failures on the way, all harness, none product** — each is a class worth keeping:
+1. searched the SPEC's tab name `Swaps`; the app renders `Original vs final` (`qcRail.js:93-99`) →
+   read as "3 of 5 tabs absent".
+2. took a `fullPage` screenshot between counting the node and clicking it; the screenshot detached
+   the node → read as a React unmount bug.
+3. asserted on `document.body.innerText`, which EXCLUDES form-field values, so the textarea seed was
+   invisible → read as "no seed written".
+
+**Deployed and verified.**
+- `executive-engine-deploy.yml` run **33275421256 → success** for `6106181`, waited by
+  `wait-run.sh sha:` (never `latest:` — H15).
+- Pre-merge suites: app **396/396**, api **894 tests / 0 fail**, both builds clean.
+- Live render re-check on the deployed bundle: `ui-verify.yml` run **33275588060 → success**,
+  route `#/packet/2cb56fb3-fc33-4b1a-85b9-06c7aea2fbb3/qc`, EXPECT
+  `Original vs final;Coverage;Checks`. Screenshot pushed to branch `ui-shots` as
+  `packet-2cb56fb3-fc33-4b1a-85b9-06c7aea2fbb3-qc.png`.
+
+**What that evidence does NOT cover, deliberately stated.** `ui-verify.mjs` asserts text presence and
+does not click, so the LIVE click is not re-proven by it — the click proof is the local Playwright
+run. Status is *implemented, mechanism proven locally, deployed, NOT yet confirmed live by the owner*.
+
+**Rows still open after this:** `4.5-12` pick-list (portfolio only), `4.11-4` scope selector. The
+caveat from the coverage sweep stands — both absences rest on grep alone and need a producer+consumer
+sweep before "2 rows left" is final.
+
+---
+
+## Fixed-slot swap pairing — AC pass landed, and the owner settled the open question (2026-08-29)
+
+**AC + feasibility pass:** `docs/qc-evidence/AC-fixed-slot-swap-pairing.md` — 514 lines, 17 numbered
+observations, a 19-row feasibility table, 16 ACs each with its falsifier. The container was restored
+mid-turn and killed the agent, but the file had already been written incrementally and survived
+intact — the "name a file and write to it as you go" rule paying for itself measurably.
+
+**Owner's answer, verbatim:** *"fixed slot counts change per template"*. This closes the
+derived-vs-typed question and it OVERRIDES the AC pass's own recommendation, which proposed a global
+`chk_*` threshold with a MasterContext fallback. That recommendation is wrong for a reason the pass
+itself proved: `diagSkillSources.ts:16-22` shows the Google Doc holds NO slot structure — its
+placeholders are exactly `{{ExpertiseBullets}} {{RelevantBullets1..3}} {{ResumeSummary}}
+{{SkillsBullets1..2}}` and nothing else — so a slot count can be read from neither the doc nor the
+master pool. It is a stored property OF THE TEMPLATE.
+
+**Where it goes — extend, do not duplicate.** A per-template store already exists: `AppConfig`
+partition `templates`, row `resume-<driveId>`, holding `roleFocus` + `label`, with
+`GET/POST /api/config/templates` (`config.ts:120-211`) and a Settings screen already rendering the
+collection. Slot counts are new properties on THAT row — not new global `chk_*` columns.
+
+**Trap on that row, found while reading it:** `saveTemplateConfig` upserts with `'Replace'`
+(`config.ts:210`) and only re-writes `roleFocus`/`label`. Adding slot properties without extending
+that preserve-logic means editing a role focus silently WIPES the slot counts. `config.ts:186-196`
+already does exactly this dance for `label`; the same shape must cover the new fields.
+
+**Consequence for the AC file:** §1a's recommendation and AC-8's precedence
+(`ownerSetting > master > unknown`) are SUPERSEDED — the precedence becomes
+`templateRow.slots[field] > unknown`, with no master-derived fallback, and the pooled-Relevant
+problem (O-9) dissolves: each of `RelevantBullets1..3` carries its own count on the template row.
+The rest of the pass stands unchanged — O-11 (`dedupeAcrossLists` already breaks the invariant),
+O-12 (the swallowing try/catch makes a throw the QUIETEST outcome available, not the loudest),
+O-13's 15 consumers of `swap.action`, and Reading B (`added`/`dropped` become a REPORTED violation,
+never suppressed).
