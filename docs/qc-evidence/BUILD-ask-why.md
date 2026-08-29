@@ -142,3 +142,43 @@ the row was re-verdicted.
   conversational follow-up, and nothing in this change claims the reason was previously missing.
 - **Nothing is sent.** The button seeds the panel unsent, per `applySeed`'s contract; the reader
   presses send.
+
+---
+
+## Click proof — local Playwright, no deploy needed (2026-08-29)
+
+The unit suite (396/396) proves the sentence, the binding and the null-refusals. It does NOT prove
+the panel opens on a click, because it never mounts the page. This does. `scripts/prove-ask-why.mjs`
+runs the built app from `app/dist` against the fixture harness — the same rig that renders the seven
+step screenshots — clicks the real control and asserts on the result.
+
+```
+PASS  Ask why renders on the swap rows -- 39 button(s)
+PASS  the button is bound to an artifact -- cfdd82e7-35e9-49e9-a492-c1bb7b46d861
+PASS  no seeded question on screen BEFORE the click
+PASS  a "Why did you change" question appears AFTER the click
+      seeded text: "Why did you change \"Engineering Leadership\" in Skills 1?"
+PASS  the question names a LABEL, not the raw list enum
+PASS  the question names the human list name
+PASS  the question is UNSENT, still sitting in the composer
+PASS  the assistant panel is open
+```
+
+Screenshot: `docs/qc-evidence/screens/app-ask-why-seeded.png`.
+
+### Three ways the TEST lied before the feature was cleared, all worth knowing
+
+1. **Searched the SPEC's tab name, not the app's.** The spec calls it `Swaps`; the app labels it
+   `Original vs final` (`qcRail.js:95`). The probe reported three of five QC tabs ABSENT. All five
+   render. Same error as reporting the swap arrow missing because the source emits `&rarr;`.
+2. **A `fullPage` screenshot between the count and the click.** On this 128k-character page the
+   resize detaches the node: 39 buttons counted, then `no button in DOM` 2.5s later. That read as a
+   React unmount bug. A time-series probe showed the panel stable at 39 buttons for six seconds —
+   there was no bug, the screenshot caused it.
+3. **`document.body.innerText` does not include form field VALUES.** The seed lands in a textarea,
+   so the assertion reported a working feature as broken. Read `.value`, not the body text.
+
+Every one of those was the harness, not the product. That is the same class as the three false
+defect reports earlier the same day: an absence created by the instrument, reported as an absence in
+the app. The rule that survives: **when a click test fails, suspect the test until the screenshot
+says otherwise.**
