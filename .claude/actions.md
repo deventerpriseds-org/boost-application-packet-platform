@@ -5209,3 +5209,42 @@ and began widening the poll budget. That was inference, offered before I had rea
 The wrong-handler bug is the actual cause. The timing change is still correct and kept — the setting
 now goes in the PRE-deploy step so the code deploy is the last restart, and the budget is 90x6s
 rather than 40x6s — but it was not the reason the deploy failed, and I said it was.
+
+## ACT-2027 — Re-check every PROTOTYPE-COVERAGE row claimed missing: the backlog is 3, not 25
+
+**Asked:** *"render each prototype packet step view ... and compare with the current app versions to
+determine how much is truly closed in the PROTOTYPE-COVERAGE.md"*, then, when I proposed
+re-measuring all 183 rows: *"I don't understand why you can't just look at what was claimed to be
+missing and see if it still is?"* The second message is the correction — only the rows the doc
+CLAIMS are missing needed checking.
+
+**Scope actually needed:** 3 ABSENT + 22 PARTIAL = **25 rows**, not 183.
+
+**Evidence.**
+1. Rows extracted mechanically from `docs/qc-evidence/PROTOTYPE-COVERAGE.md` — every `| 4.x-n |`
+   row whose 4th cell is ABSENT or PARTIAL.
+2. Each control's string grepped in `app/src`, including alternate spellings where the doc's
+   phrasing returned nothing.
+3. App-side render of all seven steps committed at `ad9e8f1` (`docs/qc-evidence/screens/app-*.png`),
+   beside the 47 pre-existing prototype captures.
+
+**Verdict — 21 of 25 are BUILT, doc stale.** `Go to field` (`onGoToField`, `QcRail.jsx:196/226`,
+telemetry key `qc-go-to-field`), `Put back` x5, `Change it` x2, `Ask for a change` x4,
+`Re-run QC`, `Open QC`, the three expanded counters, composite + coverage headers. Screenshots
+additionally settle SS4.11 (scored 0%, mounts everywhere), SS4.8 (scored 73%, renders), SS4.10.
+
+**Still open — 3 rows:** `4.5-12` pick-list (portfolio only), `4.8-21` Swaps `Ask why`,
+`4.11-4` scope selector.
+**DELIBERATE, not a gap:** `4.8-20` Swaps `Undo this` — `assistantPanel.js:107` records the
+decision: *"Undo is per field, in the field itself, not from here."*
+
+**Root cause of the drift:** `Go to field` was scored PARTIAL because the measurement matched the
+prototype's LITERAL STRING rather than the capability. Same class as reporting the swap arrow
+missing because the code emits `&rarr;` and the grep looked for `->`.
+
+**Open caveat, deliberately not closed:** the 3 absences rest on grep alone. A hit proves presence,
+so the 21 BUILT verdicts are safe; an absence is the heaviest claim and needs a producer+consumer
+sweep plus import lists before "3 rows left" is treated as final.
+
+**Consequence:** jd, resume, cover and portfolio have no genuinely missing rows — the parallel lanes
+are unblocked.

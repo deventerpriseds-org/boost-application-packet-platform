@@ -4643,3 +4643,42 @@ Also `docs/qc-evidence/LOCAL-RENDER-UAT.md` so the next session inherits the ren
 **Still missing, and it is the one the owner has been pointing at all day:** nothing forces a LOOK at
 the render before a claim about the UI. The fixture guards protect the input; they do not protect
 against reasoning from source instead of from pixels.
+
+### PROTOTYPE-COVERAGE.md re-checked against current code — the backlog is 3 rows, not 25 (2026-08-29)
+
+**Owner's correction, and it was the right one:** *"I don't understand why you can't just look at what
+was claimed to be missing and see if it still is?"* I had proposed re-measuring all 183 rows. Only
+the rows the doc CLAIMS ARE MISSING needed checking — 3 ABSENT + 22 PARTIAL = **25 rows**, and the
+check took two greps.
+
+**Method.** Parsed every `| 4.x-n |` row whose 4th cell is ABSENT or PARTIAL out of
+`docs/qc-evidence/PROTOTYPE-COVERAGE.md`, then grepped each control's string in `app/src`.
+
+**Result — 21 of 25 are BUILT and the doc is stale.** `Go to field` (as `onGoToField`,
+`QcRail.jsx:196/226`, with its own telemetry key `qc-go-to-field`), `Put back` ×5, `Change it` ×2,
+`Ask for a change` ×4, `Re-run QC`, `Open QC`, the Must-haves / Responsibilities / Nice-to-haves
+counters, composite + coverage headers in both `postingAnalysis.js` and `qcRail.js`. Plus the three
+sections the app screenshots settled: §4.11 assistant (scored 0%, mounts on every step), §4.8 QC
+(scored 73%, the whole gate card + Done-for-you + Needs-a-decision renders), §4.10 send.
+
+**Genuinely open — 3 rows:**
+- `4.5-12` pick-list (`type:'select'`) — `PickList` 0 hits. Portfolio only.
+- `4.8-21` Swaps `Ask why` — 0 hits any spelling. Was gated on the assistant panel, which now exists.
+- `4.11-4` scope selector (This packet / This asset / My profile) — 0 hits.
+
+**And one that is DELIBERATE, not a gap:** `4.8-20` Swaps `Undo this`. `assistantPanel.js:107` states
+the design outright — *"Undo is per field, in the field itself, not from here."*
+
+**WHY THE DOC DRIFTED, and it is my own recurring failure:** `Go to field` was scored PARTIAL because
+the measurement searched the PROTOTYPE'S LITERAL STRING; the app implements the capability as
+`onGoToField`. A grep matching a SPELLING instead of a CAPABILITY — the identical error that made me
+report the swap arrow missing this morning when the code renders `&rarr;` rather than `->`.
+
+**Caveat I am not hiding:** the 21 "built" verdicts are safe because a hit proves presence. The 3
+absences were established by grep alone, which is exactly the instrument the repo's own rule says is
+never sufficient for the heaviest claim. Before anyone treats "3 rows left" as final, sweep producers
+AND consumers and read the import lists for those three.
+
+**Consequence for the parallel UI work:** jd, resume, cover and portfolio have NO genuinely missing
+rows between them. The lanes are unblocked; what remains is one portfolio-only pick-list, one
+`Ask why`, and a scope selector.
