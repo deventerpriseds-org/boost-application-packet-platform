@@ -8,8 +8,11 @@ Status values: `open` | `in-progress` | `blocked` | `done`
 
 ## Open
 
-<!-- The SessionStart hook extracts exactly `/## Open/,/## Closed/` from this file. Before these two
-     headings existed it matched nothing and surfaced 0 lines out of 5,279 — measured 2026-08-29.
+<!-- SessionStart extracts the range between the two headings that bracket this section. Before they
+     existed it matched nothing and surfaced 0 lines out of 5,279 — measured 2026-08-29.
+     DO NOT write either heading's literal text inside this range, including in a comment: the range
+     ends at the FIRST line matching the closing pattern, so a note quoting it truncates the section
+     it is explaining. That happened here on the first attempt — 3 lines extracted instead of 30.
      Keep this section SHORT and CURATED: it is read into context at every session start, so it is an
      index of what is live, not a second copy of the ledger. Detail stays in the ACT entries below
      and in `.claude/DEFERRED.md`. -->
