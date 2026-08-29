@@ -5209,3 +5209,34 @@ and began widening the poll budget. That was inference, offered before I had rea
 The wrong-handler bug is the actual cause. The timing change is still correct and kept — the setting
 now goes in the PRE-deploy step so the code deploy is the last restart, and the budget is 90x6s
 rather than 40x6s — but it was not the reason the deploy failed, and I said it was.
+
+---
+
+## ACT-68 — Apply eds-claude-skills `setup.sh` (v19) live + register the boost Postgres connector
+
+**Asked (2026-08-29):** *"run the setup sh in eds skills repo and provide a summary of all the hooks,
+skills, subagents you have officially registered and a detailed description of the approach you will
+follow for function development as a result of it being active… be sure to add boost-pg-mcp-write
+from the custom connectors i added in claude"* — for a session running in PARALLEL with others on
+this codebase.
+
+**Status: DONE — verified by reading the written files, not the installer's stdout.**
+
+| Item | Evidence |
+|---|---|
+| Hooks `_eds_version 19`, 4 events | `/home/user/.claude/settings.json` parsed: SessionStart, Stop (agent + `eds-phase-tag.py`), PostToolUse `Write\|Edit\|NotebookEdit`, UserPromptSubmit (x2) |
+| Platform hooks NOT destroyed | `launcher-settings.json` still holds `session-start-git-identity.sh` + `stop-hook-git-check.sh` |
+| Allowlist merged additively | `permissions.allow` += `mcp__github__create_repository`, `mcp__github__fork_repository`; `autoMode.allow` = `['$defaults','Bash(git push*)']` |
+| 3 guard scripts installed, executable | `eds-git-guard.sh`, `eds-phase-tag.py`, `eds-agent-guard.sh` in `/root/.claude/` |
+| Drift guard functional | `eds-git-guard.sh check` in this repo -> exit 0 |
+| 16 skills + `verifier` agent | `/root/.claude/skills/`, `/root/.claude/agents/` |
+| Bootstrap | `register_repo_root` -> `context_reload_requested` |
+| `boost-pg-mcp-write` live | `select current_database(), current_user` -> `boost_resume_n_packet_builder` / `mcp_readwrite_boost`, 50 public tables |
+
+**Gotcha worth keeping:** `register_repo_root` **rejects** `/workspace/eds-claude-skills` in this
+session shape — the managed clone target is `/home/user/eds-claude-skills` and the error names it.
+`setup.sh`'s SessionStart hook still clones to `/workspace`, so the two paths coexist; register the
+`/home/user` one.
+
+**No application code changed** — Tier 3 by the blast-radius table, so no AC subagent and no
+verifier, per the tiering rule this same setup installs.

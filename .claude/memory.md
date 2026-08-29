@@ -520,6 +520,35 @@ Key tables (PostgreSQL):
 - iOS testing: requires macOS runner or BrowserStack; categorically unavailable in Linux CCR
 
 ## Active work
+
+**SESSION SETUP, 2026-08-29 — eds-claude-skills `setup.sh` v19 applied live; parallel-session lane.**
+
+Ran `setup.sh` from `/home/user/eds-claude-skills` (`HEAD cbf8f7b` = `origin/main`, in sync).
+Verified from the written files, not from the script's own stdout:
+
+- **Hooks: `_eds_version 19` on all four events** in `/home/user/.claude/settings.json` —
+  `SessionStart` (command), `Stop` (agent gate + `eds-phase-tag.py` command), `PostToolUse`
+  (`Write|Edit|NotebookEdit` -> autosave), `UserPromptSubmit` (drift check + agent reconcile +
+  phase-tag reminder).
+- **Launcher untouched except additively**: the two platform hooks
+  (`session-start-git-identity.sh`, `stop-hook-git-check.sh`) survived; `permissions.allow` gained
+  `mcp__github__create_repository` + `mcp__github__fork_repository`; `autoMode.allow` =
+  `['$defaults', 'Bash(git push*)']`.
+- **Guards on disk + executable**: `eds-git-guard.sh`, `eds-phase-tag.py`, `eds-agent-guard.sh`.
+  `eds-git-guard.sh check` run in this repo -> exit 0, no drift.
+- **16 skills + 1 agent (`verifier`)** registered to `/root/.claude/`.
+- **Bootstrap**: `register_repo_root(deventerpriseds-org/eds-claude-skills,
+  /home/user/eds-claude-skills)` -> `context_reload_requested`. NOTE the managed clone target is
+  `/home/user/eds-claude-skills`, NOT `/workspace/eds-claude-skills` — passing the workspace path
+  is rejected outright in this session shape.
+- **`boost-pg-mcp-write` confirmed LIVE**, not just listed: `current_database() =
+  boost_resume_n_packet_builder`, `current_user = mcp_readwrite_boost`, 50 public tables. This is
+  the one connector to use; do not enumerate `Boost_DB_Connector` or `Azure_pg_mcp`.
+
+Repo state at session start: `boost` HEAD `2c693d1` == `origin/main`, clean tree, on branch
+`claude/eds-skills-setup-summary-ngpaos`. **Other sessions are working this codebase in parallel** —
+fetch before every answer about state, and re-check before every commit.
+
 **HANDOFF STATE, 2026-08-28 ~03:00 — the Trinnex three-step repair is COMPLETE and measured live.**
 
 The three steps the owner sequenced (*"okay fix the data then the rename"* -> *"go"* -> *"go ahead
