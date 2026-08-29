@@ -176,6 +176,36 @@ async function appSide(browser, step, fixtures) {
 if (!existsSync(join(DIST, 'index.html'))) { console.error(`no app build at ${DIST}`); process.exit(2) }
 const fixtures = FIXTURES ? JSON.parse(await readFile(resolve(FIXTURES), 'utf8')) : {}
 
+// ---- THE CANARY: prove the instrument can SEE before letting it report an absence ---------------
+//
+// Every false finding this harness has produced has one shape: the fixture starved the app of an
+// input, the app correctly rendered nothing, and the agent reported the nothing as a missing
+// feature. On 2026-08-29 that happened three times in one session, the worst being a report to the
+// owner that the 24/20 skill character limits had been "removed from the app's code and/or
+// pipeline". They had not; `/search-prefs` in the fixture simply carried no `checks` object, so
+// `targetFor()` returned null for all 24 thresholds. Live DB the same hour: 24 and 20.
+//
+// So before a single gap is counted, assert the fixture carries the inputs whose absence is
+// INDISTINGUISHABLE FROM A MISSING FEATURE. A harness that cannot see a known-present thing has no
+// standing to say anything is absent.
+const prefs = Object.entries(fixtures).find(([k]) => k.includes('search-prefs'))?.[1]
+const canaries = []
+if (!prefs || !prefs.checks) {
+  canaries.push('/search-prefs has no `checks` — EVERY rule label ("<= 24 chars each", word bands, '
+    + 'the gate contract) renders as unset and reads exactly like the product having lost its limits')
+}
+if (!Object.keys(fixtures).some((k) => k.includes('/swaps'))) {
+  canaries.push('no /swaps key — every `original -> final` row renders as a bare list, which reads '
+    + 'exactly like the swap feature being absent')
+}
+if (canaries.length) {
+  console.error('\n!!! HARNESS CANARY FAILED - this run CANNOT measure the app:')
+  for (const c of canaries) console.error('    ' + c)
+  console.error('\n    Any "the app is missing X" read off this run would be a claim about the '
+    + 'FIXTURE.\n    Rebuild it with scripts/build-fixtures.mjs from a full dump first.\n')
+  process.exit(1)
+}
+
 // Stage the prototype the way render-spec.mjs does, including the token path its theme.css @imports
 // but the package does not ship at.
 const WORK = '/tmp/compare-proto'
