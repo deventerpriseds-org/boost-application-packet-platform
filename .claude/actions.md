@@ -5264,3 +5264,47 @@ were fetched and are level with `origin/main` (skills `cbf8f7b`, boost `2c693d1`
 carries no commits beyond main. With other sessions live on the same code, `git fetch` before
 answering any status question and before every commit/push is not optional — the working tree is not
 the source of truth, `origin` is.
+
+---
+
+## ACT-2026-08-29-b — Ingest the tracking corpus; two docs found materially stale
+
+**Request (owner):** *"this boost repo has already been using actions and memory files etc are you
+picked up with all of that information?"* — plus *"fix in the skill please as suggested"* (the
+`register_repo_root` path defect, done in `eds-claude-skills` PR #25).
+
+**Status: CLOSED — corpus ingested, two stale docs corrected.**
+
+**Honest starting position.** The first answer was *no*. Before this pass I had read the tail of
+`memory.md` (30 of 4,603 lines), grepped `ACT-` headers from `actions.md`, and read the head of
+`DEFERRED.md`. That is a sample, not the picture, and reporting it as "picked up" would have been
+the exact failure `.claude/accuracy-log.md` exists to stop.
+
+**What was actually read:** `DEFERRED.md` in full via a status-token parse (**44 OPEN / 47 CLOSED /
+0 WONTDO**), `accuracy-log.md` in full (3 rows, all one shape — an absence claimed from a shallow
+grep), `SESSION-HANDOFF.md` in full, `HANDOVER.md` §§1-3, `memory.md` section index plus the
+2026-08-27/28 entries, `git log -15`, and the `.claude/ac|map|verify|wip` inventories (13 AC docs,
+3 maps, 1 verification, 1 parked patch).
+
+**Two corrections to `SESSION-HANDOFF.md`, both measured before editing:**
+
+1. **§2 claimed no test framework exists.** It does: `npm ci && npm test` in `api/` gives **892
+   tests, 874 pass, 0 fail, 18 skipped, 7.5s** across 47 files, plus 17 unit + 9 browser runners in
+   `app/`. The doc contradicted `memory.md`'s own 2026-08-27 rule #1. Table replaced with the real
+   scripts, the measurement, its date, and the `npm ci`-first gotcha.
+2. **§11 "Current state" was 9 days stale** — describing `main` at `01cf5b0` when it is `2c693d1` —
+   with no staleness marker. Marked historical and pointed at `DEFERRED.md` → `memory.md` tail →
+   `HANDOVER.md` → `git log` instead.
+3. **§6 documented a broken container as though it were the layout** ("that path does not exist",
+   "not installed into `/root/.claude/skills/`"). That is what a container looks like when
+   `setup.sh` never ran. Replaced with the fix plus the one-line `settings.json` check.
+
+**Operational fact this pass surfaced, which changes how this lane must work: `D34`.** The lanes
+share ONE working directory and ONE `.git`, and `git stash` is repository-global — a stash captures
+whatever another lane had uncommitted, and `stash pop` pops a shared stack. **Never `git stash` in
+this repo; use `git worktree`.** Checked at 14:0x: the reflog shows only this session's checkouts,
+so no lane is concurrently in the tree right now, and `git stash list` is empty.
+
+**Not done, deliberately:** `setup.sh`'s `SESSION_CMD` still prints the wrong `register_repo_root`
+path at every session start. It is the only ACTIVE consumer of that defect, but fixing it needs
+`CURRENT_VERSION` 19 → 20 or it is inert everywhere already provisioned. Held for owner sign-off.

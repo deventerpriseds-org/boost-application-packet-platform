@@ -4601,3 +4601,43 @@ particular says nothing about whether a ref reached origin; only `ls-remote` doe
 `register_repo_root` **refused** it: *"does not match the managed session's clone target
 `/home/user/eds-claude-skills`"*. The org repo is already attached under `/home/user` here. Register
 that path; keep the `/workspace` clone only as the editable copy with a working push remote.
+
+### Hardening — SESSION-HANDOFF.md said the test suites did not exist. There are 892 tests.
+
+Found 2026-08-29 while ingesting the tracking corpus. `SESSION-HANDOFF.md` §2 stated, as a table
+with bolded certainty, `test: does not exist` for BOTH packages, and in prose: *"There is no test
+framework, no lint config... So 'run the tests' is not available — verification is the
+GitHub-Actions loop in §4."*
+
+**Ground truth, measured in a cold container:** `cd api && npm ci && npm test` →
+**892 tests, 874 pass, 0 fail, 18 skipped, 7.5 seconds.** 47 test files under `api/test/`,
+17 unit files plus 9 browser runners under `app/test/`.
+
+**Why this was the expensive kind of wrong.** The doc did not merely omit the suite, it told the
+reader the suite does not exist and redirected verification to a GitHub-Actions round trip costing
+minutes. And it contradicted `memory.md`'s own 2026-08-27 hardening entry, whose rule #1 is
+*"`npm test` before ANY bespoke verification — it already contains every lesson this repo learned."*
+A session reading §2 skips the exact guard that entry exists to enforce, then writes the bespoke
+script that entry exists to prevent. Two documents, opposite instructions, no way for a reader to
+tell which was current.
+
+**The claim was true when written (2026-08-16) and was never revisited.** That is the mechanism, and
+it is the same one that let the `/workspace` register-path defect sit for four days: **an absence
+claim decays silently, because nothing fails when it goes stale.** A wrong presence claim gets
+caught the moment someone follows it and the thing is not there. A wrong ABSENCE claim just quietly
+stops people from looking.
+
+**The rule: an absence claim in a durable doc must carry the command that re-derives it.**
+"`test: does not exist`" is unfalsifiable prose; "`npm test` → 892 tests, 0 fail (2026-08-29)" is a
+claim the next reader can re-run in seconds and catch when it rots. Date every capability claim, and
+put the command next to it.
+
+**Also corrected in the same file:** §11 "Current state" described `main` at `01cf5b0` (2026-08-16)
+while `main` is `2c693d1` — ~9 days of QC/evidence work later — with no staleness marker at all; and
+§6 documented a container with no `/workspace` and nothing in `/root/.claude/skills/` as though that
+were the layout, when it is what a container looks like when `setup.sh` never ran.
+
+**Gotcha worth keeping:** on a fresh container `npm test` fails with ~40 lines of `TS2591: Cannot
+find name 'process'` / `TS2307: Cannot find module '@azure/functions'`, because the `test` script
+runs `tsc` first. That is a missing `npm ci`, not a broken build and not a real type error. It looks
+exactly like the repo is in a bad state; it is not.
