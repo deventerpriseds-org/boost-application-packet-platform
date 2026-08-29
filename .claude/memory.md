@@ -4557,3 +4557,42 @@ problem and started widening the poll budget. That was inference. One look at th
 payload — `{status, timestamp, storage, tables}`, no `ok`, no `checks` — showed instantly that it was
 not the handler I had edited. **Read the response before theorising about the timeout.** The timing fix
 was independently worth making, but it was not the cause and I nearly shipped it as if it were.
+
+## 2026-08-29 — EDS discipline stack v19 armed in-session; boost-pg-mcp-write is the live-DB path
+
+New parallel session on this repo. `setup.sh` from `eds-claude-skills` (`cbf8f7b`, v19) run and
+**verified from disk rather than from its own exit code**. Full evidence in `actions.md`
+(`ACT-2026-08-29-a`); the parts worth carrying forward:
+
+**What is now enforced mechanically, not by my memory of a rule.** Six hooks at `_eds_version: 19`
+in `/home/user/.claude/settings.json` — the project-root file, never `launcher-settings.json`, which
+is regenerated from a stock template on every launch and would silently drop them. The `Stop` gate
+runs as a haiku agent and hard-blocks a completion claim; a second `Stop` hook checks the phase tag
+in code, because the model-judged version raced the transcript flush. `PostToolUse` mirrors every
+edit to `refs/heads/eds-wip/<branch>`; `UserPromptSubmit` checks for a container rewind and for
+orphaned subagents, and demands the phase tag on the reply.
+
+**A clean-tree autosave that pushes nothing is the guard working.** `eds-git-guard.sh:87` exits 0 on
+an empty `git status --porcelain`. I nearly recorded "autosave pushed no ref" as a defect; the source
+line settles it, and five `eds-wip/*` refs from other lanes prove the push path works through the CCR
+proxy in this repo. Worth remembering because the same shape — an absent artefact read as a broken
+mechanism — is what the ground-truth rule exists to catch.
+
+**`boost-pg-mcp-write` is the one Postgres connector, and it is live.** `connected: true`,
+`enabledInChat: true`; queried directly: `boost_resume_n_packet_builder` as `mcp_readwrite_boost`,
+PG 17.10, 50 public tables, `opportunity`/`persona`/`packet`/`correction`/`requirement` all present.
+The other two were deliberately **not** queried (owner-instructed) — both are `enabledInChat: false`,
+and `Azure_pg_mcp` is a different database entirely. GitHub Actions (`db-query.yml`) stays the
+FALLBACK for when this connector lapses, never the default. Reminder that survives from before: the
+Azure Storage **tables** (`MasterContext`, `AppConfig`, `Prompts`, `JobApplications`) are not in
+Postgres and no connector reaches them — those go through a Function route via `api-test.yml`.
+
+**One honest gap.** `SessionStart` fired before the hooks existed, so `/workspace/eds-claude-skills`
+is absent this session and the banner did not print. Not load-bearing — the org repo is attached at
+`/home/user/eds-claude-skills` and bootstrap was closed with `register_repo_root`. Self-heals next
+session.
+
+**Parallel-session posture.** Started at `2c693d1` with local == `origin/<branch>` == `origin/main`
+and a clean tree. Other sessions are on this same codebase, so the rewind/drift rule is doing double
+duty: `git fetch origin` before every commit, push, deploy **and before answering any status
+question** — a stale local checkout is the specific way a parallel session gets contradicted.

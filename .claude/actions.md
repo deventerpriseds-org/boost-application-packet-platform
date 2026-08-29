@@ -5209,3 +5209,56 @@ and began widening the poll budget. That was inference, offered before I had rea
 The wrong-handler bug is the actual cause. The timing change is still correct and kept — the setting
 now goes in the PRE-deploy step so the code deploy is the last restart, and the budget is 90x6s
 rather than 40x6s — but it was not the reason the deploy failed, and I said it was.
+
+## ACT-2026-08-29-a — EDS setup.sh v19 registered in this session + boost-pg-mcp-write confirmed live
+
+**Request (owner):** run `setup.sh` from the eds-claude-skills repo, summarise every hook / skill /
+subagent officially registered, state the resulting function-development approach, and add the
+`boost-pg-mcp-write` custom connector. Session runs in PARALLEL with other sessions on this repo.
+
+**Status: DONE — verified on disk, not from the script's own success message.**
+
+- `bash setup.sh` (repo `deventerpriseds-org/eds-claude-skills`, HEAD `cbf8f7b`, `CURRENT_VERSION = 19`)
+  exited **0**. Log: `scratchpad/setup-run.log`.
+- **6 hook objects across 4 events**, all `_eds_version: 19`, written to
+  `/home/user/.claude/settings.json` (re-read from disk to confirm persistence):
+  `SessionStart` (discipline banner + workspace clone + memory/actions/accuracy-log replay),
+  `Stop` x2 (haiku verification-gate agent + `eds-phase-tag.py`),
+  `PostToolUse[Write|Edit|NotebookEdit]` (`eds-git-guard.sh autosave`),
+  `UserPromptSubmit` x2 (`eds-git-guard.sh check` + `eds-agent-guard.sh reconcile`; phase-tag printf).
+- `launcher-settings.json` carries **only** `permissions.allow`
+  (`Skill`, `mcp__github__create_repository`, `mcp__github__fork_repository`) and
+  `autoMode.allow` (`$defaults`, `Bash(git push*)`). `grep -c '_eds'` on it = **0** — the v7+
+  migration is correct and no hook can fire twice.
+- Guard scripts installed and **executed**, not merely present: `eds-git-guard.sh` (9684 B),
+  `eds-agent-guard.sh` (3929 B), `eds-phase-tag.py` (7967 B) — all exit 0.
+- **16 org skills** copied to `/root/.claude/skills/`; `verifier` subagent at
+  `/root/.claude/agents/verifier.md`.
+- Bootstrap closed with `register_repo_root(deventerpriseds-org/eds-claude-skills,
+  /home/user/eds-claude-skills)` → `context_reload_requested`.
+
+**`boost-pg-mcp-write` — ground-truthed, not assumed.** `ListConnectors` reports
+`installState: connected`, `connected: true`, `enabledInChat: true`. Live query returned
+`db=boost_resume_n_packet_builder`, `user=mcp_readwrite_boost`, PostgreSQL 17.10, 50 public tables,
+all 5 key tables (`opportunity`, `persona`, `packet`, `correction`, `requirement`) present.
+Per CLAUDE.md the other two Postgres connectors were **not** queried — `Azure_pg_mcp` and
+`Boost_DB_Connector` are both `enabledInChat: false` and neither is the connector the owner refreshes.
+
+**Observation vs interpretation — one thing that reads like a failure and is not.** `autosave` pushed
+**no** WIP ref for this branch. That is correct behaviour, not a broken guard: `eds-git-guard.sh:87`
+is `[ -n "$(git status --porcelain)" ] || exit 0` — a clean tree is a deliberate few-ms no-op. The
+push path itself is proven working in this repo through the CCR proxy by five refs already on origin
+from other lanes (`eds-wip/claude/assistant-panel-float`, `…/incumbent-wins-swap`, `…/jd-field-rename`,
+`…/qc-ledger-live`, `…/qc-p8-1-wire`).
+
+**Known gap, stated rather than papered over.** `SessionStart` had already fired before the hooks were
+installed, so it will not run again in this session: `/workspace/eds-claude-skills` is **absent** and
+the discipline banner / memory replay did not auto-print here. Neither is load-bearing — the org repo
+is attached at `/home/user/eds-claude-skills` and both tracking files were read directly. The hook
+fires normally from the next session onward.
+
+**Parallel-session baseline at start:** boost repo local `HEAD` == `origin/claude/boost-app-setup-approach-lkjoid`
+== `origin/main` == `2c693d1`, clean worktree. Re-fetch before every commit/push per the rewind rule.
+
+**Evidence:** `/home/user/.claude/settings.json` (6 hooks, v19); `scratchpad/setup-run.log:162-164`;
+`ListConnectors` + live `execute_sql` result above.
