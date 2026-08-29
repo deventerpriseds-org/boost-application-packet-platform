@@ -5209,3 +5209,38 @@ and began widening the poll budget. That was inference, offered before I had rea
 The wrong-handler bug is the actual cause. The timing change is still correct and kept — the setting
 now goes in the PRE-deploy step so the code deploy is the last restart, and the budget is 90x6s
 rather than 40x6s — but it was not the reason the deploy failed, and I said it was.
+
+---
+
+## ACT-68 — Provision the EDS guard stack on a cold container + register boost-pg-mcp-write
+
+**Requested (2026-08-29):** run `setup.sh` from `eds-claude-skills`, report exactly which hooks,
+skills and subagents are registered, describe the resulting function-development approach, and add
+the `boost-pg-mcp-write` custom connector. Session runs in PARALLEL with other sessions on this repo.
+
+**Status: DONE — every item below verified by reading the installed artifact, not the script source.**
+
+Container was COLD: `/home/user/.claude/` did not exist, so no `_eds` hook was active before this run.
+
+- `setup.sh` ran to completion at `_eds_version` **19**. `eds-claude-skills` local HEAD `cbf8f7b`
+  == `origin/main` (fetched first).
+- **16 skills** -> `/root/.claude/skills/`; **1 agent** (`verifier`) -> `/root/.claude/agents/`.
+- **4 hook events** written to `/home/user/.claude/settings.json` (NOT `launcher-settings.json`,
+  which the launcher regenerates from a stock template on every process start):
+  `SessionStart`, `UserPromptSubmit` (x2), `PostToolUse` (`Write|Edit|NotebookEdit`), `Stop` (x2).
+- Guards on disk: `eds-git-guard.sh`, `eds-agent-guard.sh`, `eds-phase-tag.py`.
+- `launcher-settings.json` got allowlist + `autoMode.allow = ['$defaults', 'Bash(git push*)']` only.
+- 9/9 CLIs present (gh, kubectl, az, vercel, wrangler, railway, supabase, flyctl, aws).
+
+**`boost-pg-mcp-write` — CONNECTED AND PROVEN, not assumed.** Tools were already exposed to the
+session as deferred schemas; loaded them and ran a live probe:
+`select current_database(), current_user, count(*) from opportunity`
+-> `boost_resume_n_packet_builder` / `mcp_readwrite_boost` / **2150 rows**, sub-second, no runner.
+This is the ONE Postgres connector to use here (per CLAUDE.md); `Boost_DB_Connector` and
+`Azure_pg_mcp` are deliberately not queried.
+
+**Evidence:** hook inventory read back out of `/home/user/.claude/settings.json` via `json.load`;
+Stop-gate prompt and `eds-phase-tag.py` TAGS tuple read from the installed files.
+
+**Caveat recorded, not glossed:** `/home/user/.claude/settings.json` does NOT survive a container
+reclaim (owner-corrected 2026-08-25). `setup.sh` is the durable path — re-run it after any reclaim.

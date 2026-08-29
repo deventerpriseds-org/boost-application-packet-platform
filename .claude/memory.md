@@ -4557,3 +4557,24 @@ problem and started widening the poll budget. That was inference. One look at th
 payload — `{status, timestamp, storage, tables}`, no `ok`, no `checks` — showed instantly that it was
 not the handler I had edited. **Read the response before theorising about the timeout.** The timing fix
 was independently worth making, but it was not the cause and I nearly shipped it as if it were.
+
+---
+
+## Session 2026-08-29 — EDS guard stack provisioned on a cold container (ACT-68)
+
+**Environment fact worth carrying forward: this container started with NO EDS hooks.**
+`/home/user/.claude/` did not exist. Anything a prior session's notes say about the gate being
+active did NOT apply until `setup.sh` was re-run here. `_eds_version` **19** is now installed across
+`SessionStart`, `UserPromptSubmit`, `PostToolUse` and `Stop`. 16 skills, 1 agent (`verifier`).
+
+**Live DB access is available and proven this session** — `boost-pg-mcp-write` returned
+`boost_resume_n_packet_builder` / `mcp_readwrite_boost` / 2150 `opportunity` rows in ~1s. No
+`db-query.yml` round-trip is needed for reads while that connector is up.
+
+**Parallel-session discipline for this stretch of work.** Other sessions are on this same codebase.
+Working branch here is `claude/boost-app-setup-approach-6xdoef`. `origin/main` was `2c693d1` at
+session start. Re-fetch before every commit/push and before answering any "is X done" question —
+the local tree is not evidence of what is on `main`.
+
+**Known limit, not a resolved item:** `/home/user/.claude/settings.json` is wiped by a container
+reclaim. The hooks are only as durable as the next reclaim; `setup.sh` is what restores them.
