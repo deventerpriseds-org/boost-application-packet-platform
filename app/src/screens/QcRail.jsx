@@ -7,7 +7,7 @@ import {
   QC_HOOKS, RAIL_TABS, railGate, railGateMeta, railAttention, railCounts, railTotals, railBody,
   railHeadline, verdictLine, railVerdict, engineRows, countLink, coverageCards,
   requirementState, qcStepState, packetGate, loopsModel, notApplicableRows, rowsForRequirement,
-  swapsForRequirement, arr, errText,
+  swapsForRequirement, swapAskWhy, listOwnersFromArtifacts, arr, errText,
   railChangeLog, undoAvailability, revertOutcome, suggestScope, CHANGE_LOG_HEADLINE,
   railDecisions, DECISION_NOTE,
 } from '../qcRail.js'
@@ -311,7 +311,13 @@ function CoverageTab({ requirements, reqError, reqLoading, entries, pick, setPic
 
 // Original vs final. The packet-level swap table, filtered by the picked requirement when there is
 // one. Packet-level is said out loud: one swap row covers every asset built from this packet.
-function CompareTab({ swaps, loading, error, pick }) {
+//
+// SPEC 4.8-21's `Ask why` is the last column. It SEEDS the assistant panel and sends nothing - the
+// sentence, the artifact it binds to and every reason it may be absent are `swapAskWhy` in
+// qcRail.js, so this file still computes nothing. The prototype draws `Undo this` beside it; that
+// one is NOT here and must not be, because there is no swap-revert route to call (`appSwaps.ts` is
+// GET-only) and a control with no target is the dead UI this repo bans.
+function CompareTab({ swaps, loading, error, pick, owners, onAsk }) {
   if (loading) return <Quiet>Loading what the tailoring pass changed...</Quiet>
   if (error) return <Quiet>Could not load the comparison: {error}</Quiet>
   const all = arr(swaps && swaps.swaps)
@@ -327,13 +333,17 @@ function CompareTab({ swaps, loading, error, pick }) {
         <table style={{ borderCollapse: 'collapse', width: '100%', minWidth: 420 }}>
           <thead>
             <tr>
-              {['Original', 'Final', 'What happened', 'Why'].map((h) => (
-                <th key={h} style={{ textAlign: 'left', fontSize: 11, color: 'var(--proto-ink2)', padding: '6px 8px', borderBottom: '1px solid var(--proto-rule-soft)', whiteSpace: 'nowrap' }}>{h}</th>
+              {/* The last header is deliberately blank: the `Ask why` column is an action, and a
+                  heading over it would read as a fifth fact about the swap. */}
+              {['Original', 'Final', 'What happened', 'Why', ''].map((h) => (
+                <th key={h || 'ask'} style={{ textAlign: 'left', fontSize: 11, color: 'var(--proto-ink2)', padding: '6px 8px', borderBottom: '1px solid var(--proto-rule-soft)', whiteSpace: 'nowrap' }}>{h}</th>
               ))}
             </tr>
           </thead>
           <tbody>
-            {rows.map((s) => (
+            {rows.map((s) => {
+              const ask = onAsk ? swapAskWhy(s, owners) : null
+              return (
               <tr key={s.id || (s.list + ':' + s.seq)}>
                 <td style={{ fontSize: 12, padding: '6px 8px', borderBottom: '1px solid var(--proto-rule-soft)' }}>{s.from_label || '-'}</td>
                 <td style={{ fontSize: 12, padding: '6px 8px', borderBottom: '1px solid var(--proto-rule-soft)' }}>{s.to_label || '-'}</td>
@@ -345,8 +355,20 @@ function CompareTab({ swaps, loading, error, pick }) {
                     ? <span>the posting says &quot;{s.verbatim_quote}&quot;</span>
                     : <span className="px-small">{s.driver === 'owner' ? 'you changed this yourself' : s.driver === 'unattributed' ? 'no line of the posting backs this change' : s.rationale || String(s.driver || '')}</span>}
                 </td>
+                <td style={{ padding: '6px 8px', borderBottom: '1px solid var(--proto-rule-soft)', whiteSpace: 'nowrap' }}>
+                  {/* Rendered ONLY where the question has an artifact to be about and a label to
+                      name. `swapAskWhy` returns null otherwise - a row whose list no asset renders,
+                      or insertions that have not loaded - and a button that opened a panel unable to
+                      send would be exactly the control-with-no-target this column refuses. */}
+                  {ask && (
+                    <button className="px-btn" data-qc={QC_HOOKS.askWhy} data-qc-artifact={ask.artifactId}
+                      style={{ fontSize: 11 }}
+                      onClick={() => onAsk(ask.text, ask.artifactId)}>Ask why</button>
+                  )}
+                </td>
               </tr>
-            ))}
+              )
+            })}
           </tbody>
         </table>
       </div>
@@ -727,7 +749,7 @@ function Decisions({ entries, onOpen, onGoToField }) {
 
 // ── the rail ────────────────────────────────────────────────────────────────────────────────────
 
-export default function QcRail({ packetId, company, role, entries, setResult, requirements, reqError, reqLoading = false, onGoToField }) {
+export default function QcRail({ packetId, company, role, entries, setResult, requirements, reqError, reqLoading = false, onGoToField, onSeedAssistant = null }) {
   const [tab, setTab] = useState('coverage')
   const [pick, setPick] = useState(null)
   const [drawer, setDrawer] = useState(null)          // { artifactId, section }
@@ -769,6 +791,11 @@ export default function QcRail({ packetId, company, role, entries, setResult, re
 
   const picked = arr(requirements).find((r) => r.id === pick) || null
   const drawerEntry = drawer ? entries.find((e) => e.artifact.id === drawer.artifactId) : null
+
+  // SPEC 4.8-21. The SAME `list -> artifact` map 4.1-20 derives, from the same `entries`, rather
+  // than a second one built for this button: a swap row carries no artifact and the assistant seed
+  // requires one, which is precisely the hop `listOwnersFromArtifacts` already exists to make.
+  const listOwners = useMemo(() => listOwnersFromArtifacts(entries), [entries])
 
   return (
     <div data-qc={QC_HOOKS.rail} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
@@ -898,7 +925,8 @@ export default function QcRail({ packetId, company, role, entries, setResult, re
 
       <div data-qc={QC_HOOKS.panel} data-qc-panel={tab}>
         {tab === 'coverage' && <CoverageTab requirements={requirements} reqError={reqError} reqLoading={reqLoading} entries={entries} pick={pick} setPick={setPick} />}
-        {tab === 'compare' && <CompareTab swaps={swaps.data} loading={swaps.loading} error={swaps.error} pick={pick} />}
+        {tab === 'compare' && <CompareTab swaps={swaps.data} loading={swaps.loading} error={swaps.error} pick={pick}
+          owners={listOwners} onAsk={onSeedAssistant} />}
         {tab === 'loops' && <LoopsTab entries={entries} filtered={!!picked} />}
         {tab === 'checks' && <ChecksTab entries={entries} pick={pick} requirements={requirements} onOpen={openField} onGoToField={onGoToField} />}
         {tab === 'review' && <ReviewTab entries={entries} onOpen={openField} filtered={!!picked} onGoToField={onGoToField} />}

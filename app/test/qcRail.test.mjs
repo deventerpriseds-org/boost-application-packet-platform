@@ -17,8 +17,8 @@ import {
   coverageCards, requirementState, openSeqs, offenderSeq, qcStepState, qcStepDone, packetGate,
   loopsModel, rowsForRequirement, swapsForRequirement, pctWidth, packetReadiness,
   offendersByField, offendersForField, fieldSeverities,
-  railDecisions, DECISION_NOTE, packetFailList, qcSummaryModel, NO_ASSETS_REASON, firstFixTarget, listOwnersFromArtifacts, requirementUsage } from '../src/qcRail.js'
-import { scoreParts } from '../src/assetGate.js'
+  railDecisions, DECISION_NOTE, packetFailList, qcSummaryModel, NO_ASSETS_REASON, firstFixTarget, listOwnersFromArtifacts, requirementUsage, swapAskWhy } from '../src/qcRail.js'
+import { scoreParts, FIELD_LABEL } from '../src/assetGate.js'
 import { TALLY_SCORE_DEFER } from '../src/postingAnalysis.js'
 
 const SRC = new URL('../src/', import.meta.url)
@@ -1683,4 +1683,116 @@ test('H:jd-field-link-is-wired-not-just-derived: the hop 4.1-20 built stays conn
   //    was guarded — dropping `usage &&` renders a link that navigates nowhere.
   assert.match(pa, /\{usage && onGoToFieldRef && \(/,
     'the link must render only when a swap names the requirement AND a navigator exists')
+})
+
+// ── SPEC 4.8-21 — `Ask why` on a swap row ───────────────────────────────────────────────────────
+
+test('H:ask-why-never-names-the-raw-list-enum: the question says "Skills 1", never "skills_1"', () => {
+  // THE DEFECT THIS EXISTS TO PREVENT, and it is one the prototype hands you. `evidence.jsx:233`
+  // interpolates `${r.list}` — correct THERE, where the prototype's fixture holds display names.
+  // In this app `swap_decision.list` is a CHECK-constrained enum (`api/.../schema.ts:567`:
+  // 'skills_1','skills_2','relevant_1','relevant_2','relevant_3'), so copying the prototype's
+  // sentence verbatim puts `skills_1` in front of the reader. That is the same class as
+  // `assetBlocks.js:765` — the THIRD render site, which shipped `swapped · owner` on a list item
+  // because a guard covered two of the three places a raw enum could reach the screen.
+  //
+  // The resolution is the one table: insertion.merge_field -> FIELD_LABEL (`assetGate.js:208`),
+  // which already heads the field, writes the correction sentences and labels the gate drawer.
+  const entries = [
+    { artifactId: 'r1', type: 'resume', label: 'Resume',
+      insertions: { insertions: [{ list: 'skills_1', merge_field: 'SkillsBullets1' }] } },
+  ]
+  const owners = listOwnersFromArtifacts(entries)
+  const ask = swapAskWhy({ list: 'skills_1', from_label: 'Stakeholder management', to_label: 'Cross-functional leadership' }, owners)
+
+  assert.equal(ask.text, 'Why did you change "Stakeholder management" in Skills 1?')
+  assert.equal(ask.artifactId, 'r1', 'the question must be bound to the asset that renders the list')
+  // The invariant, not the incident: NO list key may appear in a sentence a reader sees, whichever
+  // one the row names.
+  for (const key of ['skills_1', 'skills_2', 'relevant_1', 'relevant_2', 'relevant_3']) {
+    assert.ok(!ask.text.includes(key), `the seeded question leaks the raw list enum ${key}`)
+  }
+  // An `added` row has no original. It still names a real label and a real field - never `-`, which
+  // is what the Original column prints for it.
+  const added = swapAskWhy({ list: 'skills_1', from_label: null, to_label: 'Cross-functional leadership' }, owners)
+  assert.equal(added.text, 'Why did you add "Cross-functional leadership" to Skills 1?')
+  // A field FIELD_LABEL does not know still resolves to the slot name, never to the list enum.
+  const other = listOwnersFromArtifacts([{ artifactId: 'c1', label: 'Cover letter',
+    insertions: { insertions: [{ list: 'relevant_2', merge_field: '@SomeNewSlot' }] } }])
+  assert.equal(swapAskWhy({ list: 'relevant_2', from_label: 'A' }, other).text,
+    'Why did you change "A" in @SomeNewSlot?')
+
+  // ...and that fallback is DEFENSIVE ONLY, proven against the producer rather than assumed.
+  // `insertions.ts:20 LIST_FIELD_TO_LIST` is the only thing that ever writes `insertion.list`, and
+  // it writes it from exactly five merge fields. Every one of them must be a key FIELD_LABEL knows,
+  // or a real swap row would seed a sentence ending in a bare template slot. (CLAUDE.md 0b: "can
+  // the system PRODUCE your fixture?" - a guard that passes on a hand-made row the writers never
+  // emit has proven nothing.)
+  const producer = readFileSync(new URL('../../api/src/functions/tests/insertions.ts', import.meta.url), 'utf8')
+  const block = producer.slice(producer.indexOf('LIST_FIELD_TO_LIST'))
+  const fields = [...block.slice(0, block.indexOf('}')).matchAll(/^\s*(\w+):\s*'/gm)].map((m) => m[1])
+  assert.equal(fields.length, 5, 'the producer map did not parse - re-read insertions.ts before trusting this')
+  for (const f of fields) {
+    assert.notEqual(FIELD_LABEL[f], undefined,
+      `insertion.list can be written for ${f}, but FIELD_LABEL does not name it - the question would end in a raw slot`)
+  }
+})
+
+test('H:ask-why-is-null-unless-it-has-an-artifact-to-be-about', () => {
+  // NO DEAD UI, and here it is also a hard requirement rather than a preference: `seedAssistant`
+  // (`PacketBuilder.jsx:765`) returns early without an artifactId — "never open a panel that cannot
+  // send", because `canSend` (`assistantPanel.js:116`) needs one. A swap row is PACKET-level and
+  // carries no artifact at all (`swap_decision` has no artifact_id column), so a row the map cannot
+  // place would render a button whose click does nothing whatsoever.
+  const owners = listOwnersFromArtifacts([{ artifactId: 'r1', label: 'Resume',
+    insertions: { insertions: [{ list: 'skills_1', merge_field: 'SkillsBullets1' }] } }])
+  // a list NO artifact renders
+  assert.equal(swapAskWhy({ list: 'relevant_3', from_label: 'A' }, owners), null)
+  // insertions not loaded yet — the map is {} by contract, not partial
+  assert.equal(swapAskWhy({ list: 'skills_1', from_label: 'A' }, {}), null)
+  assert.equal(swapAskWhy({ list: 'skills_1', from_label: 'A' }, null), null)
+  // a row naming nothing a question could be about
+  assert.equal(swapAskWhy({ list: 'skills_1', from_label: null, to_label: null }, owners), null)
+  assert.equal(swapAskWhy({ list: 'skills_1', from_label: '  ', to_label: '' }, owners), null)
+  // no list, no swap
+  assert.equal(swapAskWhy({ from_label: 'A' }, owners), null)
+  assert.equal(swapAskWhy(null, owners), null)
+})
+
+test('H:ask-why-seeds-the-panel-and-sends-nothing', () => {
+  // The whole row is a SPEC 4.11 substitution wearing a 4.8 name: the prototype's `onAsk` is the
+  // assistant-panel SEED and nothing else (`AC-packet-ui-final.md` §2f). A seeder that sends is a
+  // second edit path wearing a different name (`assistantPanel.js:74`), so the wiring is asserted
+  // structurally — a pure function cannot see whether the component calls `api.` next to it.
+  const jsx = stripComments(readSrc('screens/QcRail.jsx'))
+  const pb = stripComments(readSrc('screens/PacketBuilder.jsx'))
+
+  // 1. The sentence and the binding come from the module. The .jsx composes neither.
+  assert.match(jsx, /swapAskWhy\(s,\s*owners\)/, 'the row must ask the module for the question')
+  assert.ok(!/Why did you (change|add)/.test(jsx),
+    'the question is hand-typed in the component - it must come from swapAskWhy, or the enum rule has two homes')
+
+  // 2. Rendered ONLY behind the null check. Dropping it is exactly the dead button the case above
+  //    proves swapAskWhy refuses to describe.
+  assert.match(jsx, /\{ask && \(/, 'the button must render only when the question has a target')
+  assert.match(jsx, /data-qc=\{QC_HOOKS\.askWhy\}/)
+
+  // 3. It seeds. It does not send, and it does not mutate the swap.
+  assert.match(jsx, /onClick=\{\(\)\s*=>\s*onAsk\(ask\.text,\s*ask\.artifactId\)\}/,
+    'the click must hand the sentence AND its artifact to the seeder')
+  const cell = jsx.slice(jsx.indexOf('QC_HOOKS.askWhy'))
+  assert.ok(!/api\./.test(cell.slice(0, 400)), 'Ask why must call no route - there is none, and it seeds rather than acts')
+
+  // 4. The prototype's sibling `Undo this` must NOT appear. `appSwaps.ts` is GET-only, so it would
+  //    be a control with no target - the one thing AC 34 forbade outright.
+  assert.ok(!/Undo the swap of|>Undo this</.test(jsx),
+    'no per-swap undo may ship: there is no swap-revert route for it to call')
+
+  // 5. Threaded from the seed slot that owns the panel, using the map 4.1-20 already derives rather
+  //    than a second one.
+  assert.match(jsx, /listOwnersFromArtifacts\(entries\)/)
+  assert.match(jsx, /owners=\{listOwners\}\s+onAsk=\{onSeedAssistant\}/s)
+  const railTag = pb.slice(pb.indexOf('<QcRail'))
+  assert.match(railTag.slice(0, railTag.indexOf('/>')), /onSeedAssistant=\{seedAssistant\}/,
+    'the rail must reach the SAME seed slot the asset cards use, never a second one')
 })

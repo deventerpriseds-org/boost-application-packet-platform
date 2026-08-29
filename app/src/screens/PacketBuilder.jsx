@@ -979,7 +979,13 @@ export default function PacketBuilder({ id, step }) {
             packetId={p.id} company={p.company} role={p.role}
             entries={qcEntries} setResult={setQcResult}
             requirements={req.data ? req.data.requirements : null} reqError={req.error}
-            reqLoading={!req.data && !req.error} onGoToField={goToField} />
+            reqLoading={!req.data && !req.error} onGoToField={goToField}
+            /* SPEC 4.8-21 - the swaps table's `Ask why`. The artifact still travels WITH the
+               sentence, exactly as the asset cards bind it at :961; the difference is only WHERE it
+               is resolved. An asset card knows its own `a.id`; a swap row is packet-level and has
+               none, so the rail resolves it from the list the swap names and hands it over here.
+               Nothing is inferred from the active step in either case. */
+            onSeedAssistant={seedAssistant} />
           <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
             <button className="px-btn px-btn-accent" onClick={() => setActiveStep('send')}>Next: Review &amp; send →</button>
           </div>

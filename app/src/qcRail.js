@@ -16,7 +16,7 @@
 import {
   engineRows, scoreParts, gateMeta, stateMeta, arr, severityFor, reconcile, assetLabel, pctWidth,
   correctionsState, orderCorrections, correctionRow, correctionSentence, correctionAnomalies,
-  correctionSourceText, undoAvailability, revertOutcome, suggestScope,
+  correctionSourceText, undoAvailability, revertOutcome, suggestScope, fieldLabel,
   CHANGE_LOG_HEADLINE, CORRECTION_SOURCE, CORRECTION_REVERT_ROUTE,
 } from './assetGate.js'
 
@@ -84,6 +84,9 @@ export const QC_HOOKS = {
   correctionSuggest: 'qc-correction-suggest',
   correctionRefusal: 'qc-correction-refusal',   // the server's own words when an undo is declined
   correctionAnomaly: 'qc-correction-anomaly',
+  // SPEC 4.8-21 - `Ask why` on a swap row. Carries the artifact the question was bound to, because
+  // the swap row itself is packet-level and the binding is the part that can be wrong.
+  askWhy: 'qc-ask-why',
 }
 
 // The five tabs P5.1 specifies, in the backlog's order.
@@ -697,6 +700,15 @@ export const DECISION_NOTE = {
  *
  * Returns `{}` rather than a partial map when insertions have not loaded, so the caller renders no
  * link at all instead of a link that resolves to nothing.
+ *
+ * EACH OWNER ALSO CARRIES `mergeField`, and that is the only human name a swap row can be given.
+ * `swap_decision` has no `merge_field` column at all (`schema.ts:564`) and its `list` is a raw enum
+ * - `skills_1 | skills_2 | relevant_1 | relevant_2 | relevant_3`, a CHECK constraint, not copy. The
+ * insertion row that ties the list to a field is the ONLY place the field name exists on the client,
+ * so it is carried here, once, beside the artifact it was already resolving. `sharedSourceNote`
+ * already takes `list` and uses it purely as a map key rather than in its sentence; this keeps that
+ * discipline available to every caller instead of leaving the next one to interpolate the enum
+ * (which is exactly `assetBlocks.js:765`, the third render site that shipped `swapped - owner`).
  */
 export function listOwnersFromArtifacts(entries) {
   const out = {}
@@ -708,7 +720,11 @@ export function listOwnersFromArtifacts(entries) {
       if (!list) continue
       if (!out[list]) out[list] = []
       if (!out[list].some((o) => o.id === artifactId)) {
-        out[list].push({ id: artifactId, label: e.label || assetLabel(e.type || (e.artifact && e.artifact.type)) })
+        out[list].push({
+          id: artifactId,
+          label: e.label || assetLabel(e.type || (e.artifact && e.artifact.type)),
+          mergeField: row.merge_field || null,
+        })
       }
     }
   }
@@ -739,6 +755,55 @@ export function requirementUsage(swaps, requirementId, owners) {
 export function swapsForRequirement(swaps, requirementId) {
   const rows = arr(swaps && swaps.swaps)
   return requirementId ? rows.filter((s) => s && s.requirement_id === requirementId) : rows
+}
+
+/**
+ * SPEC 4.8-21 - `Ask why` on a swap row. The QUESTION the button seeds, or null.
+ *
+ * It seeds and it sends nothing. `docs/qc-evidence/qc/evidence.jsx:233` calls `onAsk(...)`, which is
+ * the assistant-panel seed and nothing else, so this row is a SPEC 4.11 substitution wearing a 4.8
+ * name (`AC-packet-ui-final.md` 2f, AC 34). Two conditions from that AC pass survive and are met
+ * here: no swap-revert mutation is built - there is none, `appSwaps.ts` is GET-only, which is also
+ * why the prototype's sibling `Undo this` does not ship beside this button - and the `Why` column
+ * keeps printing the answer it already prints, so this is a conversational follow-up rather than a
+ * claim that the reason was missing.
+ *
+ * NULL IS THE CONTRACT, same as `requirementUsage`, and for two independent reasons:
+ *
+ *  - `seedAssistant` (`PacketBuilder.jsx:765`) refuses a seed with no artifact - "never open a panel
+ *    that cannot send", because `canSend` needs one. A swap row is PACKET-level and carries no
+ *    artifact at all, so a row whose list no artifact renders (or whose insertions have not loaded)
+ *    has nothing to seed and must render NO BUTTON. That is the repo's no-dead-UI rule, not caution.
+ *  - a row with neither a `from_label` nor a `to_label` names nothing a question could be about.
+ *
+ * THE SENTENCE NEVER CONTAINS `swap.list`. The prototype interpolates it, and in the prototype it is
+ * a display name ("Core Skills"); here it is a CHECK-constrained enum (`schema.ts:567`,
+ * `skills_1 | relevant_2 | ...`). It is resolved through the insertion row's `merge_field` to
+ * `fieldLabel` - the ONE table that already heads the field, writes the correction sentences and
+ * labels the gate drawer - so `skills_1` reaches the reader as "Skills 1". If no merge field
+ * resolved, the owning asset's label is the fallback; the enum is never a fallback.
+ *
+ * @param {{list?: string, from_label?: string|null, to_label?: string|null}|null} swap
+ * @param {Record<string, Array<{id: string, label?: string, mergeField?: string|null}>>} owners
+ * @returns {{artifactId: string, where: string, text: string}|null}
+ */
+export function swapAskWhy(swap, owners) {
+  const s = swap || null
+  const list = s && s.list
+  if (!list) return null
+  const holder = arr((owners || {})[list])[0]
+  if (!holder || !holder.id) return null
+  const from = s.from_label ? String(s.from_label).trim() : ''
+  const to = s.to_label ? String(s.to_label).trim() : ''
+  if (!from && !to) return null
+  // `fieldLabel(null)` is the empty string, so the asset label carries the sentence when the
+  // insertion row named no field. One of the two is always present.
+  const where = (holder.mergeField ? fieldLabel(holder.mergeField) : '') || holder.label || ''
+  if (!where) return null
+  const text = from
+    ? `Why did you change "${from}" in ${where}?`
+    : `Why did you add "${to}" to ${where}?`
+  return { artifactId: holder.id, where, text }
 }
 
 // pctWidth moved to ./assetGate.js beside scoreParts() - the score-part bar renderer now lives in
