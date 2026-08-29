@@ -6,6 +6,37 @@ Status values: `open` | `in-progress` | `blocked` | `done`
 
 ---
 
+## Open
+
+<!-- The SessionStart hook extracts exactly `/## Open/,/## Closed/` from this file. Before these two
+     headings existed it matched nothing and surfaced 0 lines out of 5,279 — measured 2026-08-29.
+     Keep this section SHORT and CURATED: it is read into context at every session start, so it is an
+     index of what is live, not a second copy of the ledger. Detail stays in the ACT entries below
+     and in `.claude/DEFERRED.md`. -->
+
+**Open ledger rows** (full detail in `.claude/DEFERRED.md`, which is the authority):
+
+| Row | What is not done |
+|---|---|
+| `D3` | The AC-10 profile-figure resolver. Needs `profile_source_key` / `profile_char_start` / `profile_char_end` on `correction` — i.e. `schema.ts`, another lane's file. |
+| `D11` | P7 item 4's remedy is an owner decision (see `D29`); the config fix is NOT verified live. |
+| `D13` | The per-rebuild superseded Drive file still leaks (see `D31`). Not verified live — no Drive call from that branch. |
+| `D14` | `covered_kw` does not mean covered. Relabel landed (PR #26, `3153f1a`); the LIVE half is unconfirmed and one `ui-verify` attempt was INCONCLUSIVE — do not repeat it unchanged. |
+| `D20` | A bare truthy body read (`if (body?.x)`) is out of H33's scope; `appFacts.ts` `body.confirm` is invisible to the guard. |
+| `D23b` | `owner_fact.value_num` is written on TWO scales and the STORAGE is unfixed. Size it first: `select key, value, value_num from owner_fact where key in ('scope.largest_team','scope.largest_budget')`. |
+| `D34` | **Every lane shares ONE working tree and ONE `.git`.** Use `git worktree`; never `git stash` in this repo. |
+
+**Awaiting owner confirmation, not agent work:**
+- The Trinnex rebuild (packet `85cee965-…`) is measured in the database but **no rebuilt document has been opened by anyone**. Implemented and measured, NOT confirmed live.
+
+**Current lane (2026-08-29):** `verify-work` §0c superseded — coverage is TOTAL every loop, only DEPTH
+is tiered. Prose landed here; the enforcement is `eds-claude-skills` (`eds-verify-loop.py`, a third
+`Stop` hook). Entry at the end of this file.
+
+## Closed
+
+Everything below is the historical ACT ledger, oldest first. Individual rows carry their own status.
+
 ## ACT-1 — Fix Today KPI 0-counts
 
 **Requested:** ~2026-07-20
