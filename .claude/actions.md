@@ -5209,3 +5209,33 @@ and began widening the poll budget. That was inference, offered before I had rea
 The wrong-handler bug is the actual cause. The timing change is still correct and kept — the setting
 now goes in the PRE-deploy step so the code deploy is the last restart, and the budget is 90x6s
 rather than 40x6s — but it was not the reason the deploy failed, and I said it was.
+
+---
+
+## ACT-2026-08-29-a — Arm the enforcement environment for a parallel-session lane
+
+**Asked:** run `setup.sh` from `eds-claude-skills`, report exactly what got registered, describe the
+resulting development approach, and add the `boost-pg-mcp-write` connector.
+
+**Status: DONE for the environment half; verified by reading the installed files, not by trusting
+the script's own output.**
+
+- `setup.sh` at `cbf8f7b` (== `origin/main` of eds-claude-skills), exit 0.
+- Hooks written to `/home/user/.claude/settings.json` at `_eds_version` **19** — events
+  `SessionStart`, `Stop` (x2: haiku gate + `eds-phase-tag.py`), `PostToolUse`, `UserPromptSubmit` (x2).
+  `/root/.claude/launcher-settings.json` carries **zero** `_eds` hooks (confirmed by parsing it), so
+  the launcher's per-start regeneration cannot wipe the gate.
+- 16 skills to `/root/.claude/skills/`, 1 agent (`verifier`) to `/root/.claude/agents/`.
+- Three guards installed and smoke-run, all exit 0: `eds-git-guard.sh check`,
+  `eds-agent-guard.sh reconcile`, `eds-phase-tag.py`.
+- `register_repo_root(deventerpriseds-org/eds-claude-skills, /home/user/eds-claude-skills)` — bootstrap.
+- `boost-pg-mcp-write` live: `select current_database()` returns `boost_resume_n_packet_builder` as
+  `mcp_readwrite_boost`, 50 public tables, and `opportunity` / `packet` / `requirement` /
+  `owner_fact` / `correction` / `comparison_dimension` / `artifact_score` / `persona` all resolve.
+  This is the connector to use — not `Boost_DB_Connector`, not `Azure_pg_mcp`.
+
+**Parallel-lane hazard restated (D34):** `/home/user/boost-application-packet-platform` is one
+working tree shared by every lane, and `git stash` is repository-global. Use `git worktree`; never
+`git stash` in this repo.
+
+**Nothing in `api/` or `app/` was changed and nothing was deployed.**

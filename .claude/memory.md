@@ -520,6 +520,18 @@ Key tables (PostgreSQL):
 - iOS testing: requires macOS runner or BrowserStack; categorically unavailable in Linux CCR
 
 ## Active work
+
+**SESSION 2026-08-29 — enforcement environment armed (this session is a PARALLEL lane).**
+`eds-claude-skills/setup.sh` @ `cbf8f7b` run to completion (exit 0): hooks at `_eds_version` 19 in
+`/home/user/.claude/settings.json` (SessionStart, Stop x2, PostToolUse, UserPromptSubmit x2), 16
+skills, the `verifier` agent, and the three guards (`eds-git-guard.sh`, `eds-agent-guard.sh`,
+`eds-phase-tag.py`) — each smoke-run at exit 0. `launcher-settings.json` verified to hold **no**
+`_eds` hooks, so the launcher's per-start regeneration cannot wipe the gate. Live DB reach confirmed
+through **`boost-pg-mcp-write`** (`boost_resume_n_packet_builder`, 50 public tables) — that is the
+one connector to use. Detail in `actions.md` ACT-2026-08-29-a.
+Because other sessions are on this same checkout, **D34 applies**: work in a `git worktree`, never
+`git stash` here.
+
 **HANDOFF STATE, 2026-08-28 ~03:00 — the Trinnex three-step repair is COMPLETE and measured live.**
 
 The three steps the owner sequenced (*"okay fix the data then the rename"* -> *"go"* -> *"go ahead
