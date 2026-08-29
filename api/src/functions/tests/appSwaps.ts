@@ -52,8 +52,22 @@ export async function writeSwaps(client: any, packetId: string, oppId: string, a
 
   await client.query('begin')
   try {
-    await client.query(`delete from swap_decision where packet_id=$1 and loop=$2`, [packetId, loop])
-    await client.query(`delete from skill_candidate where packet_id=$1 and loop=$2`, [packetId, loop])
+    // LOOP 0 IS GROUND ZERO — the same rule `writeInsertions` applies, and it must be applied HERE
+    // TOO or the two tables disagree about which pass is current. That disagreement is exactly the
+    // defect measured on 2026-08-29: `listBodyModel` (`assetBlocks.js:757`) keys `byTo` on
+    // `to_label` and matches it against the rendered line, so a swap set describing one pass and an
+    // insertion set describing another produces NO match on every row — `from` is null and every
+    // `original → final` arrow silently disappears. The arrow code was correct the whole time.
+    //
+    // The scoped delete below stays for loops 1..n: P3-21 records that an unscoped delete once
+    // DESTROYED the first pass's swap record, which is why `loop` was added to this table at all.
+    if (loop === 0) {
+      await client.query(`delete from swap_decision where packet_id=$1`, [packetId])
+      await client.query(`delete from skill_candidate where packet_id=$1`, [packetId])
+    } else {
+      await client.query(`delete from swap_decision where packet_id=$1 and loop=$2`, [packetId, loop])
+      await client.query(`delete from skill_candidate where packet_id=$1 and loop=$2`, [packetId, loop])
+    }
 
     const candidateId = new Map<string, string>()
     for (const c of built.candidates) {

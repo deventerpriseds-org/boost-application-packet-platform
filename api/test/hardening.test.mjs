@@ -1303,19 +1303,45 @@ test('H33: every server-side body toggle has a caller that can send it', () => {
 // packet screen showing only the last pass's decisions as if they were the whole story.
 // The invariant, not the incident: any writer that clears provenance for a packet must scope the
 // clear to the pass it is rewriting.
-test('H34: provenance deletes are scoped to a pass, never to a whole packet', () => {
+// AMENDED 2026-08-29, with the owner's explicit approval, to carve out ground zero — and the
+// carve-out is deliberately narrow because the incident above must still be caught.
+//
+// WHY THE ORIGINAL RULE WAS BROADER THAN ITS OWN RATIONALE. H34's invariant is "scope the clear to
+// the pass it is rewriting". At loop 0 there IS no earlier pass of the current build to protect:
+// loop 0 is only ever written at ground zero — `appPackets.ts` renderArtifact for a whole-package
+// build, and `appRemediation.ts:179` guarded by `firstPass === 1`, with a later run deliberately
+// NOT rewriting loop 0. The rows a loop-0 clear removes describe a draft that has just been
+// replaced, so keeping them is not provenance, it is a stale higher number outranking newer text.
+//
+// WHAT THAT COST, measured on the Trinnex resume (artifact cfdd82e7, production, 2026-08-29):
+// a rebuild wrote loop 0 on 08-28 while loops 1-3 from 08-20 survived. `insertionsGet` picks
+// `current` with `Math.max(loop)`, so the screen served the EIGHT-DAY-OLD pass — 7 items, 4 over
+// the 24-char limit — while the rebuild's own compliant 10 items sat beside it unread. Three
+// separate defects were reported off that one cause and none of them were real.
+//
+// THE CARVE-OUT CANNOT REACH THE ORIGINAL INCIDENT. That incident was pass 2 destroying pass 1 via
+// an UNCONDITIONAL packet-wide delete. A delete reachable only under `loop === 0` can never run on
+// pass 2, so the guard below still fails on the exact construct that prompted it — proven by
+// mutation, not assumed: restoring the unconditional delete re-fails this test.
+test('H34: provenance deletes are scoped to a pass, except at ground zero (loop 0)', () => {
   const offenders = []
   for (const [file, body] of allSources()) {
     const code = stripComments(body)
-    // The real construct: a DELETE from a provenance table keyed by packet alone.
+    // The real construct: a DELETE from a provenance table keyed by packet or artifact alone.
     const re = /delete\s+from\s+(swap_decision|skill_candidate|insertion)\s+where\s+([^`'"]*)/gi
     let m
     while ((m = re.exec(code))) {
       const [, table, predicate] = m
-      if (!/\bloop\s*=/.test(predicate)) offenders.push(`${file}: delete from ${table} where ${predicate.trim().slice(0, 60)}`)
+      if (/\bloop\s*=/.test(predicate)) continue
+      // The ONLY permitted unscoped clear: one guarded by an explicit `loop === 0` test in the 400
+      // characters preceding it. Bounded deliberately — an unguarded delete elsewhere in a file that
+      // happens to mention `loop === 0` somewhere must still be caught.
+      const before = code.slice(Math.max(0, m.index - 400), m.index)
+      if (/\bloop\s*===\s*0\b/.test(before)) continue
+      offenders.push(`${file}: delete from ${table} where ${predicate.trim().slice(0, 60)}`)
     }
   }
-  assert.deepEqual(offenders, [], 'a packet-wide provenance delete erases every earlier pass')
+  assert.deepEqual(offenders, [], 'a packet-wide provenance delete outside loop 0 erases every earlier pass')
 })
 
 test('H34b: swap_decision and skill_candidate carry the pass in their key', () => {
@@ -4522,4 +4548,44 @@ test('H:deploy-waits-for-its-own-build: pg-migrate cannot run against an older b
   // And it must refuse rather than migrate anyway when convergence never happens.
   assert.match(wf, /Refusing to migrate/,
     'when the worker never reports the deployed sha the workflow must FAIL, not fall through to pg-migrate')
+})
+
+// ── H:rebuild-clears-superseded-loops ───────────────────────────────────────────────────────────
+//
+// EVIDENCE (production, opp 9f9c370a, artifact cfdd82e7 `resume`, read 2026-08-29):
+//
+//   loop 0 | 10 items | longest 24 | 0 over limit | written 2026-08-28 02:50:40  <- the rebuild
+//   loop 1 |  … 2026-08-20 00:44:30
+//   loop 2 |  … 2026-08-20 16:41:35
+//   loop 3 |  7 items | longest 31 | 4 over limit | written 2026-08-20 16:44:40  <- what shipped
+//
+// `insertionsGet` picks `current` with `Math.max(loop)`, so the EIGHT-DAY-OLD pass outranked the
+// rebuild that replaced it: the owner saw 31- and 37-character skill lines against a live 24-char
+// limit, and every `original -> final` arrow vanished because `listBodyModel` matched loop-3 lines
+// against loop-0 `to_label`s. Three separate "bugs" were reported off this one cause; none of them
+// were real. A rebuild writes loop 0 in place while the passes that refined the SUPERSEDED draft
+// survive and keep winning on number.
+//
+// THE INVARIANT: writing loop 0 is ground zero and must clear every later pass, in BOTH tables.
+// Asserted on both because a fix to one alone leaves insertions and swaps describing different
+// passes, which is precisely the state that made the arrows disappear.
+test('H:rebuild-clears-superseded-loops: writing loop 0 clears later passes in both writers', () => {
+  const ins = src('appInsertions.ts')
+  const swp = src('appSwaps.ts')
+
+  // The unscoped delete must exist AND be reachable only under loop 0 — an unconditional unscoped
+  // delete would destroy a live remediation run's earlier passes (the defect P3-21 added `loop` for).
+  assert.ok(/if\s*\(\s*loop\s*===\s*0\s*\)[\s\S]{0,400}?delete from insertion where artifact_id=\$1\s*`/.test(ins),
+    'appInsertions.ts: a loop-0 write must clear EVERY loop for the artifact, or a stale higher-numbered '
+    + 'pass keeps outranking the rebuild that replaced it')
+  assert.ok(/delete from insertion where artifact_id=\$1 and loop=\$2/.test(ins),
+    'appInsertions.ts: loops 1..n must still delete only their own rows (P3-21)')
+
+  assert.ok(/if\s*\(\s*loop\s*===\s*0\s*\)[\s\S]{0,600}?delete from swap_decision where packet_id=\$1\s*`/.test(swp),
+    'appSwaps.ts: a loop-0 write must clear EVERY swap loop, or swaps and insertions describe different '
+    + 'passes and every original->final arrow silently disappears')
+  assert.ok(/delete from skill_candidate where packet_id=\$1\s*`/.test(swp),
+    'appSwaps.ts: skill_candidate must be cleared with swap_decision or candidates outlive their swaps')
+  assert.ok(/delete from swap_decision where packet_id=\$1 and loop=\$2/.test(swp),
+    'appSwaps.ts: loops 1..n must still delete only their own rows (P3-21)')
 })
