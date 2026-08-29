@@ -5210,7 +5210,7 @@ The wrong-handler bug is the actual cause. The timing change is still correct an
 now goes in the PRE-deploy step so the code deploy is the last restart, and the budget is 90x6s
 rather than 40x6s — but it was not the reason the deploy failed, and I said it was.
 
-## ACT-2027 — Re-check every PROTOTYPE-COVERAGE row claimed missing: the backlog is 3, not 25
+## ACT-68 — Re-check every PROTOTYPE-COVERAGE row claimed missing: the backlog is 3, not 25
 
 **Asked:** *"render each prototype packet step view ... and compare with the current app versions to
 determine how much is truly closed in the PROTOTYPE-COVERAGE.md"*, then, when I proposed
