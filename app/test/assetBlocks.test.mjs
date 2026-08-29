@@ -1309,3 +1309,34 @@ test('H:omit-caveat-rationale-parity: one producer, and it is the rule branch', 
   assert.ok(objStart !== -1 && before.slice(objStart).includes("driver: 'rule'"),
     'the omit-list rationale is no longer written on a driver:\'rule\' row — omitListCaveat filters on both')
 })
+
+// ── a line with no swap row must not render a blank status ──────────────────────────────────────
+//
+// Owner, 2026-08-29, looking at the live packet: *"the prototype shows the buttons regardless and
+// an unchanged value if not swapped. that's better than showing nothing which doesn't match the
+// design and leaves me wondering if something broken"*. The prototype's own list
+// (`docs/qc-evidence/qc/assets.jsx:292`) renders `unchanged` for every non-swapped item; the app
+// rendered an empty string, and an empty cell in a provenance column is indistinguishable from a
+// broken one.
+//
+// The claim is still evidence-bounded, which is why the second case exists: `unchanged` is only
+// asserted when the list HAS attribution and this line simply was not named by it. With no swap
+// rows at all nothing judged the list, and reporting absent evidence as a finding is the one thing
+// this codebase refuses to do everywhere else.
+test('an unswapped line says "unchanged" when the list has attribution', () => {
+  const m = listBodyModel(LIST_ROW, [SWAP], { artifactId: 'art-resume', listOwners: {} })
+  const untouched = m.lines.find((l) => !l.swap)
+  assert.ok(untouched, 'the fixture must contain a line no swap row names')
+  assert.equal(untouched.text, 'Ran the intake process')
+  assert.equal(untouched.status, 'unchanged',
+    'a line the attribution did not name survived the pass — saying nothing reads as broken')
+})
+
+test('an unswapped line stays silent when the list has NO attribution', () => {
+  const m = listBodyModel(LIST_ROW, [], { artifactId: 'art-resume', listOwners: {} })
+  assert.equal(m.lines.length, 2)
+  for (const l of m.lines) {
+    assert.equal(l.status, '',
+      'with no swap rows nothing judged this list, so "unchanged" would report absent evidence as a finding')
+  }
+})

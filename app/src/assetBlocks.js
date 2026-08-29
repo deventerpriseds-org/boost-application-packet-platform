@@ -767,9 +767,19 @@ export function listBodyModel(row, swapsForList, opts) {
       // the two sites the guard DID cover read properly. An independent verifier found it; the
       // guard was titled "a raw enum value must never reach the screen" and looped over two of the
       // three places one could.
+      // A BLANK STATUS READS AS BROKEN, and the prototype never leaves one (`qc/assets.jsx:292`
+      // renders `unchanged` for every non-swapped item). Owner, 2026-08-29: *"the prototype shows
+      // the buttons regardless and an unchanged value if not swapped. that's better than showing
+      // nothing which doesn't match the design and leaves me wondering if something broken"*.
+      //
+      // BUT `unchanged` IS A PROVENANCE CLAIM, so it is only made where the evidence supports it.
+      // When this list HAS swap rows, attribution ran and simply did not name this line — so the
+      // line demonstrably survived the pass and `unchanged` is true. When the list has NO swap rows
+      // at all, nothing judged it: saying `unchanged` there would report absent evidence as a
+      // finding, which is the one thing this codebase refuses to do everywhere else.
       status: swap ? (swap.action === 'kept' ? 'unchanged'
         : swap.driver === 'owner' ? `${swap.action} · you changed this`
-        : `${swap.action} · ${swap.driver}`) : '',
+        : `${swap.action} · ${swap.driver}`) : (swaps.length ? 'unchanged' : ''),
       sharedSource: !!swap,
     }
   })

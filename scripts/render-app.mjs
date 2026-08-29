@@ -22,6 +22,7 @@
 //   node scripts/render-app.mjs --route '#/packet/<oppId>/resume' --fixtures f.json --text
 
 import { chromium } from 'playwright-core'
+import { assertFixtureCanSee } from './lib/fixture-canary.mjs'
 import { createServer } from 'node:http'
 import { readFile } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
@@ -44,6 +45,11 @@ if (!existsSync(join(DIST, 'index.html'))) {
   process.exit(2)
 }
 const fixtures = FIXTURES ? JSON.parse(await readFile(resolve(FIXTURES), 'utf8')) : {}
+// The same canary compare-ui.mjs runs. THIS script is the one that actually produced the
+// "app renders nothing" reading on 2026-08-29 (627 chars of shell, pageErrors: []), so leaving it
+// unguarded while guarding its sibling would have left the hole exactly where it was walked into.
+// Skipped when no --fixtures was given: rendering against the real API is not a starved fixture.
+if (FIXTURES) assertFixtureCanSee(fixtures, 'render-app.mjs')
 
 // ---- serve the built SPA (any unknown path falls back to index.html, as the host does) ----------
 const MIME = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css',

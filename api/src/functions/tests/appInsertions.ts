@@ -93,7 +93,27 @@ export async function writeInsertions(client: any, artifactId: string, oppId: st
 
   await client.query('begin')
   try {
-    await client.query(`delete from insertion where artifact_id=$1 and loop=$2`, [artifactId, loop])
+    // LOOP 0 IS GROUND ZERO — it clears every later pass, not just its own rows.
+    //
+    // Measured on the Trinnex resume (artifact cfdd82e7), 2026-08-29. A whole-package rebuild on
+    // 08-28 wrote loop 0 in place, while loops 1-3 from 08-20 survived untouched. `insertionsGet`
+    // picks `current` with `Math.max(loop)` (`appInsertions.ts:130`), so the screen served the
+    // EIGHT-DAY-OLD pass 3 — 7 items, 4 of them over the 24-char limit — while the rebuild's own
+    // loop 0 sat beside it with 10 compliant items at exactly 24. The owner saw the stale text and
+    // the swap arrows vanished, because `listBodyModel` matched loop-3 lines against loop-0
+    // `to_label`s and found nothing.
+    //
+    // Loops 1..n are edits to a draft. When the draft is regenerated they describe a document that
+    // no longer exists, so keeping them is not history, it is a newer number outranking newer text.
+    // A rebuild restarts the pass count from zero, which is what the owner asked for and what the
+    // numbering already implies.
+    //
+    // Safe because loop 0 is only ever written at ground zero: `appPackets.ts` renderArtifact for a
+    // whole-package build, and `appRemediation.ts:179` guarded by `firstPass === 1`. A later
+    // remediation run deliberately does NOT rewrite loop 0 (`appRemediation.ts:177`), so this
+    // cannot delete a run's own earlier passes.
+    if (loop === 0) await client.query(`delete from insertion where artifact_id=$1`, [artifactId])
+    else await client.query(`delete from insertion where artifact_id=$1 and loop=$2`, [artifactId, loop])
     for (const r of built.rows) {
       await client.query(
         `insert into insertion

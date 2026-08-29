@@ -4570,3 +4570,89 @@ problem and started widening the poll budget. That was inference. One look at th
 payload — `{status, timestamp, storage, tables}`, no `ok`, no `checks` — showed instantly that it was
 not the handler I had edited. **Read the response before theorising about the timeout.** The timing fix
 was independently worth making, but it was not the cause and I nearly shipped it as if it were.
+
+### Retention signal for the skills swap — MEASURED 0/20, option C dead (2026-08-28)
+
+`supportIn` cannot protect a two-word template skill item. 420 pairs (21 live Trinnex requirements
+× 20 live skill items), two floor settings, **0 protected in both**; drop pool 20/20. Twelve of the
+twenty are refused by a SAFETY-FLOOR rule an owner setting may not override, so no amount of
+tuning reaches them. Full record + reproduce commands: `docs/qc-evidence/RETENTION-SIGNAL-MEASUREMENT.md`
+(landed on main as `2c693d1`, PR #62). Owner visual:
+https://claude.ai/code/artifact/f07b02b8-3206-4668-b236-da1c69a17ab2
+
+**`supportIn` is a pure deterministic token function** — one import (`sentenceBounds`), no model
+call, no network, no `await`. So these refusals are an INSTRUMENT MISMATCH, not a model failing:
+a literal citation judge pointed at a semantic relevance question. Refusing "Team Development" as
+*proof* of "Build and develop high-performing engineering teams" is correct for a citation judge
+and useless as a relevance ranking. Nothing here argues for changing `supportIn` or the gate.
+
+Three consequences, none implemented yet:
+- the coverage-based retention design (option C) is **ruled out by data**, not by preference;
+- the owner's literal rule — incumbent stays until they click switch — needs **no coverage
+  judgement at all**, which is cheaper AND closer to what was asked;
+- because the pool is 20/20, ORDER of the right-rail proposals is the entire ergonomics. A TOKEN
+  matcher cannot rank these either (it reads "Team Development" as generic vocabulary), so the
+  open recommendation is **option D: LLM ranking of the rail order only** — ranking, never
+  accusing; it must not reach a score, a gate, or evidence.
+
+**Method note worth keeping.** I nearly wrote the worked example from a hand token count. Running
+`supportIn` with `threshold:0` returns the real `support` / `missing`, and the hand count was wrong
+(weak verbs are excluded from the denominator: 2-of-6, not 2-of-7). *Measure the number you are
+about to publish, even when you think you can derive it.*
+
+### 2026-08-29 — three false alarms from a starved harness, and two REAL defects under them
+
+**The pattern that cost the whole day: an absence created by MY INPUT, reported as an absence in the
+product.** Three times, same shape, each one alarming the owner:
+
+| I claimed | Ground truth | My input error |
+|---|---|---|
+| `supportIn` protects 0/20 template items | wrong question entirely | fed it the two-word LABEL; production feeds PROFILE RECORDS (`evidence.ts:406,482`) |
+| 5 of 7 packet steps missing their UI | app renders fine | raw-dump fixture; key `packet` substring-matched `/packets` |
+| char limits disconnected from the pipeline | **live at 24/20 in production** | fixture `/search-prefs` payload had no `checks` key |
+
+Live proof of the last one, read from `owner_search_prefs` via the boost connector:
+`chk_skill_max_chars = 24`, `chk_relevant_max_chars = 20` for von.ellis@enterpriseds.io.
+
+**Owner, twice, and he is right:** *"why would lines of code be a comparison for UI completeness?"*
+and *"you are not mechanized to rely on rendering above code."* I had a working local render and used
+it to produce a `bodyLen` table instead of LOOKING at what it drew. A screenshot settled in 30s what
+three greps got wrong.
+
+**RULE: never claim a UI element is absent from a grep. Render it and look.** `&rarr;` vs `->` is
+exactly why — I reported the swap arrow as missing because my pattern could not match the entity.
+
+#### The two REAL defects, both found from production data, both still unfixed
+
+1. **Swap attribution dies after loop 0.** `swap_decision` rows for packet `85cee965` are ALL
+   `loop = 0`; the rendered text is `loop = 3`. `listBodyModel` (`assetBlocks.js:757`) keys `byTo` on
+   `to_label` and matches the rendered line; the loop-0 swaps say `Engineering Leadership →
+   Engineering Execution`, while the loop-3 list still CONTAINS `Engineering Leadership`. No match →
+   `from: null` → every line renders flat. The arrow code (`AssetBlocks.jsx:377`, shipped `3a577b6`
+   2026-08-20, never reverted) is correct and INERT. **This is tracker item #20, already scoped with
+   ACs written, and it sat pending while I investigated it from scratch — CHECK THE TRACKER FIRST.**
+2. **A rewrite made an item LONGER and over the limit.** `Digital Transformation` (22, legal) became
+   `Digital Transformation Strategy` (31) against a 24 limit. The gate correctly reports
+   `longest 31 chars · ≤ 24 chars each` on SHIPPED content. Note the normalise rewrite prompt
+   (`appPackets.ts:562`) only ever SHORTENS, so it is NOT the culprit — the lengthening pass is
+   elsewhere and is still unidentified.
+
+**Owner's deeper concern, open:** adding "Strategy" to a term that already satisfied the requirement
+is a logic flaw his ORIGINAL prompts would not have made. He suspects the pipeline is drifting off
+his Prompts-table prompts onto code-built ones. Evidence that the concern is well-founded:
+`appPackets.ts:562` builds its rewrite prompt IN CODE, not from the Prompts table. And a guard for
+exactly this already exists but covers ONE pass only — `reviewer.ts:444` warns
+`no active "<key>" row in the Prompts table — the built-in fallback was used`. **Whether the
+resume/skills writers have any equivalent prompt-source check is the open question.**
+
+#### Guards added today (instrument-grade, not product-grade)
+
+The repo's guards all assert things about the PRODUCT. Nothing asserted the INSTRUMENT was configured
+before its output was believed — `build-fixtures.mjs` printed `!!! THIN FIXTURE SET` and I proceeded,
+because a warning is advisory. Added: hard-fail on a thin fixture set, and a shared canary that
+asserts the harness can SEE a known-present value before any absence is reported.
+Also `docs/qc-evidence/LOCAL-RENDER-UAT.md` so the next session inherits the render approach.
+
+**Still missing, and it is the one the owner has been pointing at all day:** nothing forces a LOOK at
+the render before a claim about the UI. The fixture guards protect the input; they do not protect
+against reasoning from source instead of from pixels.

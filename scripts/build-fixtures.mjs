@@ -85,7 +85,39 @@ f[`/opportunity/${OPP}/requirements`] = { requirements }
 f[`/opportunity/${OPP}`] = { opportunity: { ...opp, id: OPP, stage: pk.status } }
 f['/app/opportunities'] = { opportunities: [{ ...opp, id: OPP, stage: pk.status }] }
 f['/app/packets'] = { packets: [{ id: pk.id, oppId: OPP, ...opp, status: pk.status }] }
-f['/search-prefs'] = { prefs: {} }
+// THE OWNER'S CHECK THRESHOLDS, and they are NOT optional decoration.
+//
+// This line used to read `{ prefs: {} }` with no `checks` key at all, and that single omission is
+// why a session on 2026-08-29 told the owner the 24/20 skill character limits had been "removed
+// from the app's code and/or pipeline" - a catastrophe report about a defect that did not exist.
+// `AssetBlocks.jsx:1158` reads thresholds from `searchPrefsGet().checks`; with no `checks` the
+// value is null, `targetFor()` (assetBlocks.js:1036) returns null for EVERY merge field, and all
+// 24 thresholds silently render as unset. The rule label degrades from
+// `longest 22 chars - <= 24 chars each` to `7 lines - 18 words`, which reads exactly like the
+// product having lost its limits. Confirmed live the same day:
+// `select chk_skill_max_chars, chk_relevant_max_chars from owner_search_prefs` -> 24, 20.
+//
+// So the fixture MUST carry them, and their absence is fatal below rather than cosmetic.
+// NOTE the key: `raw.checkPrefs`/`raw.thresholds`, NEVER `raw.checks` — `raw.checks` is already
+// the flat per-artifact check RESULT rows (see `checkResultFor` above). Reaching for it here would
+// hand the UI a list of results where it expects a thresholds object, which is the same shape of
+// silent-garbage bug this whole guard exists to stop. Caught while writing this fix.
+//
+// The dump carries the raw `owner_search_prefs` row (`chk_skill_max_chars`, …); the client wants
+// the camelCase shape `checkPrefs.ts:175` builds (`skillMaxChars`, …). Mapped MECHANICALLY by the
+// naming convention rather than by a hand-maintained key list, so a threshold added to the table
+// tomorrow reaches the fixture without anyone remembering to edit this file.
+//
+// KNOWN LIMIT, stated rather than hidden: paired bands stored as two columns
+// (`chk_about_me1_words_min`/`_max`) arrive as `aboutMe1WordsMin`/`Max`, not as the `[45, 48]`
+// tuple the app reads. The single-value thresholds — every char limit, every count — are exact.
+const camel = (s) => s.replace(/^chk_/, '').replace(/_([a-z0-9])/g, (_, c) => c.toUpperCase())
+const checkPrefs = raw.checkPrefs
+  ? Object.fromEntries(Object.entries(raw.checkPrefs)
+      .filter(([k]) => k.startsWith('chk_'))
+      .map(([k, v]) => [camel(k), v]))
+  : null
+f['/search-prefs'] = { prefs: raw.prefs || {}, checks: checkPrefs }
 f['/swaps'] = { swaps }
 
 for (const a of artifacts) {
@@ -97,18 +129,37 @@ for (const a of artifacts) {
     { gate: null, attention: 0, results: [], corrections: corrections.filter((c) => c.artifact_id === a.id) }
 }
 
+// A THIN FIXTURE SET INFLATES THE GAP AND READS AS PRODUCT REGRESSION.
+//
+// THIS USED TO BE A WARNING AND THAT WAS NOT ENOUGH. On 2026-08-29 a session read
+// `!!! THIN FIXTURE SET - the next gap number will be INFLATED` on its own terminal, proceeded
+// anyway, and reported three separate "the app is missing X" findings to the owner. All three were
+// the fixture. An advisory warning on a MEASURING INSTRUMENT is worth nothing, because the whole
+// failure mode is an agent that already believes its number. So: an instrument that cannot measure
+// now REFUSES TO EMIT A NUMBER.
+//
+// `--allow-thin` is the deliberate escape hatch (a quick smoke render where no gap will be
+// counted). It must be typed on purpose, and it prints what is missing anyway.
+const thin = []
+if (!requirements.length) thin.push('requirements (drives "Posting lines answered", coverage cards)')
+if (!(raw.checks || []).length && !raw.checkResults) thin.push('checkResults (drives the whole Checks tab and every gate word)')
+if (!swaps.length) thin.push('swaps (drives the Swaps tab, and every `orig -> final` row)')
+// The one that cost the most. See the `/search-prefs` comment above.
+if (!f['/search-prefs'].checks) thin.push('checks thresholds (drives EVERY rule label: `<= 24 chars each`, word bands, the gate)')
+if (thin.length) {
+  const how = process.argv.includes('--allow-thin')
+  console.error(`\n!!! THIN FIXTURE SET - a gap number measured against this file measures the FILE, not the app:`)
+  for (const t of thin) console.error('    missing: ' + t)
+  console.error('    Pull these from the live DB via fixture-refresh.yml (or db-query.yml) first.')
+  if (!how) {
+    console.error('\n    REFUSING TO WRITE A FIXTURE THAT WILL BE MISREAD AS A MEASUREMENT.')
+    console.error('    Pass --allow-thin ONLY for a smoke render where you will count nothing.\n')
+    process.exit(1)
+  }
+  console.error('\n    --allow-thin given: written anyway. DO NOT report a gap count from this file.\n')
+}
+
 await writeFile(resolve(OUT), JSON.stringify(f, null, 1))
 console.log(`wrote ${Object.keys(f).length} route keys -> ${OUT}`)
 console.log(`  ${opp.company} · ${opp.role} | ${artifacts.length} artifacts, ${insertions.length} insertions`)
 
-// A THIN FIXTURE SET INFLATES THE GAP AND READS AS PRODUCT REGRESSION. Say so loudly rather than
-// letting the next comparison quietly measure the fixture instead of the app.
-const thin = []
-if (!requirements.length) thin.push('requirements (drives "Posting lines answered", coverage cards)')
-if (!(raw.checks || []).length && !raw.checkResults) thin.push('checkResults (drives the whole Checks tab and every gate word)')
-if (!swaps.length) thin.push('swaps (drives the Swaps tab)')
-if (thin.length) {
-  console.log('\n!!! THIN FIXTURE SET - the next gap number will be INFLATED and NOT comparable:')
-  for (const t of thin) console.log('    missing: ' + t)
-  console.log('    Pull these from the live DB via db-query.yml before trusting a measurement.')
-}
