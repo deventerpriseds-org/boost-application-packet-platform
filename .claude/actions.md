@@ -5209,3 +5209,31 @@ and began widening the poll budget. That was inference, offered before I had rea
 The wrong-handler bug is the actual cause. The timing change is still correct and kept — the setting
 now goes in the PRE-deploy step so the code deploy is the last restart, and the budget is 90x6s
 rather than 40x6s — but it was not the reason the deploy failed, and I said it was.
+
+---
+
+## ACT-68 — Re-apply the eds guard stack and confirm the live-DB connector (2026-08-29)
+
+**Asked:** *"run the setup sh in eds skills repo and provide a summary of all the hooks, skills,
+subagents you have officially registered and a detailed description of the approach you will follow
+for function development as a result of it being active"* + *"be sure to add boost-pg-mcp-write from
+the custom connectors i added in claude"*.
+
+**Status: DONE.** Tier 3 (environment + prose; no application logic changed).
+
+- `bash setup.sh` run from `/home/user/eds-claude-skills` @ `cbf8f7b` (= `origin/main`).
+  All 9 CLIs resolved (gh, kubectl, az, vercel, wrangler, railway, supabase, flyctl, aws).
+- Registered: 16 skills → `/root/.claude/skills/`; 1 agent (`verifier`) → `/root/.claude/agents/`;
+  hooks at `_eds_version` **19** in `/home/user/.claude/settings.json` across SessionStart,
+  UserPromptSubmit (git/agent guard + phase-tag demand), PostToolUse (autosave), Stop (gate agent +
+  `eds-phase-tag.py`).
+- Bootstrap completed by hand: `register_repo_root(deventerpriseds-org/eds-claude-skills,
+  /home/user/eds-claude-skills)` → `context_reload_requested`. Note the managed clone target is
+  `/home/user/...`; the hook's `/workspace/...` path is REJECTED by `register_repo_root` in this
+  session shape.
+- **`boost-pg-mcp-write` is live, proven by query** — `boost_resume_n_packet_builder` /
+  `mcp_readwrite_boost`, 50 public tables; `connected: true, enabledInChat: true`. Nothing needed
+  "adding"; it was already the enabled connector. The other four are off or point elsewhere.
+
+**Evidence:** setup output "Skills registered: 16 / Agents registered: 1 / … eds hooks installed
+(version 19)"; `execute_sql` result above; `ListConnectors` output.

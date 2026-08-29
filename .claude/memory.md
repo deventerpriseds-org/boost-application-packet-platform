@@ -520,6 +520,24 @@ Key tables (PostgreSQL):
 - iOS testing: requires macOS runner or BrowserStack; categorically unavailable in Linux CCR
 
 ## Active work
+**SESSION SETUP, 2026-08-29 — eds guard stack re-applied at `_eds_version` 19; boost-pg-mcp-write proven live.**
+
+Ran `setup.sh` from the org skills repo in-session (the SessionStart hook had not fired — hooks were
+installed mid-session, so bootstrap ran by hand). Registered: **16 skills**, **1 agent** (`verifier`),
+**4 hook events** (SessionStart, UserPromptSubmit x2, PostToolUse, Stop x2), all stamped v19 in
+`/home/user/.claude/settings.json` — NOT `launcher-settings.json`, which the launcher regenerates
+every process start.
+
+`boost-pg-mcp-write` verified by query, not by assumption: `select current_database(), current_user`
+returned `boost_resume_n_packet_builder` / `mcp_readwrite_boost`, 50 public tables.
+`ListConnectors` shows it `connected: true, enabledInChat: true`. The other four connectors
+(`Azure_pg_mcp`, `Boost_DB_Connector`, `huddle-pg-mcp-write`, `nexus-pg-mcp-write`) are
+`enabledInChat: false` or point at a different database — per the standing rule, not queried.
+
+Parallel-session note: other sessions are working this same codebase. `origin/main` at `2c693d1`
+when this session started; local matched. Re-fetch before every answer about state, every commit,
+and every push.
+
 **HANDOFF STATE, 2026-08-28 ~03:00 — the Trinnex three-step repair is COMPLETE and measured live.**
 
 The three steps the owner sequenced (*"okay fix the data then the rename"* -> *"go"* -> *"go ahead
