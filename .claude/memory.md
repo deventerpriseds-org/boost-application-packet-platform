@@ -4656,3 +4656,33 @@ Also `docs/qc-evidence/LOCAL-RENDER-UAT.md` so the next session inherits the ren
 **Still missing, and it is the one the owner has been pointing at all day:** nothing forces a LOOK at
 the render before a claim about the UI. The fixture guards protect the input; they do not protect
 against reasoning from source instead of from pixels.
+
+---
+
+## Long agent work does not run in this session any more (2026-08-29)
+
+**Feature status: LANDED (prose here; mechanism in `eds-claude-skills`).**
+
+A running in-session `Agent` subagent makes this CCR session unresponsive — measured, not inferred:
+owner typed at ~25s, message sat queued and undelivered for 93s, surfaced only on stop, which killed
+the agent. `run_in_background: true` does not change this; the turn stays active while the parent
+keeps issuing tool calls.
+
+**Where long AC/verifier passes go instead:** `claude-task.yml` in `deventerpriseds-org/eds-claude-skills`,
+dispatched from here with `target_repo` pointing at this repo. **Do not copy that workflow here** —
+the `target_repo` input exists for this and is proven against boost (run 33264119335, step 3, 2s,
+`success`). Output lands in `docs/qc-evidence/` as `AC-<slug>.md` / `VERIFY-<slug>-<loop>.md` with
+per-claim `CONFIRMED` / `REFUTED` / `NOT_APPLICABLE` verdicts — the eds Stop gate accepts a
+dispatched run plus that committed file in place of a subagent spawn, but only with real verdicts.
+
+**Known limits, measured:** it is SINGLE-SHOT, not an agent loop — it cannot grep, follow an import,
+or execute. `effort: high` is the default because `xhigh` over 398 KB ran 7m29s, cost ~$1.61 and
+still hit `max_tokens` mid-answer. A killed run's artifact is still uploaded and opens with an
+`INCOMPLETE` banner.
+
+### Hardening — three wrong answers of mine, all the same shape
+
+I asserted a capability's behaviour from my own model of it rather than from the owner's stated
+observation. **The user's stated observation IS ground truth**; when my analysis says the thing they
+watched happen is impossible, my analysis is what is wrong. It took a screenshot and a live timed
+test to settle something one honest "I don't actually know, let's measure it" would have.

@@ -533,6 +533,58 @@ still while it runs. Background it, keep working, act on the wake.
   `app.http` route registrations, and smoke-test the previously-passing live
   endpoints before considering it done.
 
+## A long AC or verification pass belongs on a RUNNER, not in this session (owner-instructed 2026-08-29)
+
+An in-session `Agent` subagent makes this CCR session **unresponsive while it runs**. This was
+measured, not inferred: on 2026-08-29 the owner typed a message at ~25s into a background subagent
+and it sat QUEUED and undelivered for **93 seconds**, surfacing only when they pressed stop — which
+killed the agent. The client shows "Brewing… 1 running task" and relabels the input box "Queue
+feedback…", and queued text is lost if the screen sleeps. So the only way to reach the session was
+to destroy the work in flight. `run_in_background: true` does **not** fix this; the turn stays
+active while the parent keeps issuing tool calls.
+
+**A GitHub runner has no such coupling.** Long AC passes and verifier passes on this repo run
+through `claude-task.yml` in `deventerpriseds-org/eds-claude-skills` — dispatched from here, with
+**this** repo checked out as `_target/`.
+
+> **Do NOT copy `claude-task.yml` or `scripts/claude_task.py` into this repo.** The workflow already
+> takes a `target_repo` input for exactly this. Proven, not assumed: run `33264119335` step 3
+> ("Check out the target repo") completed `success` in 2s with `target_repo` set to this repository
+> (that run's failure was step 5, a pre-streaming `RemoteDisconnected` since fixed). A second copy
+> would be a parallel system to maintain, and the "Extend, don't duplicate" rule above forbids it.
+
+```
+mcp__github__actions_run_trigger(
+  method="run_workflow",
+  owner="deventerpriseds-org", repo="eds-claude-skills",   # <- the WORKFLOW lives there
+  workflow_id="claude-task.yml", ref="main",
+  inputs={
+    "prompt": "<the full AC or verifier brief>",
+    "target_repo": "deventerpriseds-org/boost-application-packet-platform",
+    "target_ref": "claude/<your-feature-branch>",     # defaults to main -- pass YOUR branch
+    "context_globs": "_target/CLAUDE.md,_target/.claude/*.md,_target/api/src/functions/**/*.ts",
+    "effort": "high",
+    "output_name": "VERIFY-<slug>-<loop>.md",
+  })
+```
+
+Then background the wait, download the artifact, and **commit it to `docs/qc-evidence/`** under the
+name the verdict contract expects (`AC-<slug>.md`, `VERIFY-<slug>-<loop>.md`). The eds Stop gate
+accepts a dispatched workflow run plus that committed evidence file in place of a subagent spawn —
+but only if the file carries per-claim `CONFIRMED` / `REFUTED` / `NOT_APPLICABLE` verdicts. Prose
+does not satisfy it.
+
+Three things that bit us building this, so nobody re-derives them:
+- **It is SINGLE-SHOT, not an agent loop.** It cannot grep, follow an import, or execute anything.
+  The compensation is a 1M context — stuff the files in up front via `context_globs`. Expect it to
+  be comparable on anything requiring only reading and **worse** on anything requiring execution.
+- **`effort: high` is the default and that is deliberate.** The same brief at `xhigh` over 398 KB
+  ran 7m29s, spent ~$1.61, and still stopped on `max_tokens` mid-answer. Raise it per-run, never
+  as a floor.
+- **A partial artifact is labelled.** The output file opens with an `INCOMPLETE` banner written
+  before the stream starts and is rewritten only once the outcome is known, and `stop_reason:
+  max_tokens` fails the job. A truncated answer that reads as finished is worse than no file.
+
 ## No dead UI (standing rule)
 
 Every button, link, and selector must be wired before committing.

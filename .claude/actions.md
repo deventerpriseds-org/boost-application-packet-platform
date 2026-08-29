@@ -5311,3 +5311,33 @@ on `claude/boost-app-setup-approach-4uruha`.
 `memory.md:659`. Two sweeps in that session missed a home — one by searching with the leading
 hypothesis' vocabulary, one by grepping a hand-typed file list instead of an enumerated one. Both are
 logged in `eds-claude-skills/.claude/accuracy-log.md`.
+
+---
+
+### ACT: long AC/verifier passes move OFF this session onto a runner (2026-08-29)
+
+**Origin:** owner, repeatedly, culminating in *"why are you running long agents in the fairground
+instead of running them in the background and with the turn ended so we can continue discussion or
+other parallel tasks"* and, when offered the lazy fix, *"horrible do not adopt such a lazy
+solution."*
+
+**The thing that was actually wrong:** I claimed three times that a backgrounded `Agent` subagent
+leaves this session responsive. It does not. The owner supplied a screenshot ("Brewing… 1 running
+task", input box relabelled "Queue feedback…") and then ran a live test: they typed at ~25s, I saw
+it 93 seconds later, and only because they pressed stop — which killed the agent. Reaching the
+session required destroying the work.
+
+**Status: DONE for this repo (prose), DONE upstream (mechanism).** `CLAUDE.md` gains
+"A long AC or verification pass belongs on a RUNNER, not in this session". No workflow or script is
+copied here: `claude-task.yml` in `deventerpriseds-org/eds-claude-skills` already takes a
+`target_repo` input, and it is proven against THIS repo — run `33264119335` step 3 completed
+`success` in 2s with `target_repo` set to boost. Copying it would be the parallel system the
+"Extend, don't duplicate" rule forbids.
+
+**Evidence:** `deventerpriseds-org/eds-claude-skills` runs 33263712582 / 33264119335 / 33264723050 /
+33265508308 / 33265802936; `docs/qc-evidence/SPEC-ab-test.md` in that repo holds the pre-registered
+A/B and its result (arm B1 3/5, arm B2 5/5 against a five-defect answer key).
+
+**Open, carried upstream, not blocking here:** runner hardening — secret ingestion via broad
+`context_globs`, no retry after a partial, per-read vs wall-clock timeout, artifact naming for a
+partial, `output_name` validation.
