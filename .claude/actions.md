@@ -3731,10 +3731,15 @@ find before the validater runs rather than wasting loops"*, then *"why do you ke
 letting the final 10% get lost"*. Both are now mechanism rather than prose:
 - `verify-work` **step 0b** — self-attack and FIX before spawning the verifier (four checks, seconds
   each, each carrying the incident that earned it). Does NOT narrow verifier coverage.
-- `verify-work` **step 0c** — on loop 2+, tier by COST not by "could this have been impacted?" (that
-  judgement would have been wrong for 5 of 8 claims here). Cheap suite re-runs in full every loop;
-  only expensive re-derivation is scoped, and the brief must STATE the radius and tell the verifier
-  to CHALLENGE it.
+- `verify-work` **step 0c** — ⚠️ **SUPERSEDED 2026-08-29, see the entry at the end of this file.**
+  As written that day it tiered by COST: *"only expensive re-derivation is scoped"* — which SKIPPED
+  out-of-radius claims entirely, and an unrelated fix could then break a previously-passing claim
+  undetected. The rule now re-verifies EVERY claim every loop and tiers only DEPTH. The half of this
+  bullet that survives is the last clause: the brief must state the radius and tell the verifier to
+  CHALLENGE it. Left in place as the record of what was built that day, not as current guidance.
+  ~~on loop 2+, tier by COST not by "could this have been impacted?" (that judgement would have been
+  wrong for 5 of 8 claims here). Cheap suite re-runs in full every loop; only expensive
+  re-derivation is scoped~~
 - `setup.sh` **v17** — the reason the above nearly did not count. A skill pushed to the repo reached
   NOBODY: skills are copied into `/root/.claude/skills/` at container BUILD and that output is
   cached. Measured — this session was still loading the 34,073-byte copy from 12:43 with zero of the
