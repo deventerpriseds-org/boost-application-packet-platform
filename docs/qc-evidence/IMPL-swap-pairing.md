@@ -246,6 +246,45 @@ One-line revert if the parent disagrees; the test asserts the mapping explicitly
 
 ---
 
+## 4b. F-1 — a PRE-EXISTING defect the verifier found, and I fixed (in `swaps.ts`, my file)
+
+**The bug.** `row()` computed `requirement_seq` / `verbatim_quote` / `confidence` from `att`
+**independently of** `driver`. So an owner-typed line that happened to clear
+`ATTRIBUTION_THRESHOLD` against a requirement's verbatim came out as
+`driver='owner'` **with a non-NULL `verbatim_quote'`.
+
+**Why that is severe rather than cosmetic.** `swap_decision` carries
+`check ((driver = 'posting') = (verbatim_quote is not null))`. Postgres **rejects** that row →
+the `writeSwaps` transaction aborts → `appPackets.ts:617-622` swallows the throw into a
+`console.warn` → **the packet ships with a COMPLETELY EMPTY swap table, every list**, and
+`changes_cited: not_applicable` beside it. The trigger is the owner editing a line to say what the
+employer asked for — the single most likely edit they make. It is the same
+quietest-possible-failure shape as AC-9a, arriving through a different door.
+
+**The fix.** Decide `driver` FIRST, then derive the citation from it:
+`const cites = driver === 'posting' && att`. The two sides of the DDL's equivalence are now
+impossible to separate in this function. It is also the semantically right answer, not merely the
+one the CHECK accepts: the owner did not cite the employer, and recording a citation they never
+made is the quieter half of decision B.
+
+**Pre-existing, not a regression** — the same shape was live before the pairing rewrite; the
+rewrite only made it easier to reach, because positional pairing turns former drop+add pairs into
+`swapped` rows, and `swapped` is attributable.
+
+**Two guards, both mutation-proved** (`const cites = attributable && att`, the defect reinstated):
+
+| Guard | Under the mutation |
+|---|---|
+| `F-1: an owner row that also matches a requirement carries NO citation` | **FAILS** |
+| `F-1: the DB citation contract holds for EVERY row this module can emit` | **FAILS** |
+
+> **The second guard was VACUOUS on its first draft, and I only know that because I mutated it.**
+> Its fixture's only owner label was `'Supplier negotiation'`, which matches no requirement — so no
+> owner row ever held an `att` and the collision could not arise. Reinstating the defect left it
+> GREEN while the targeted test failed. Fixed by adding an owner label that *does* attribute; the
+> fixture comment records this so nobody "simplifies" it back. This is exactly the
+> inert-guard-is-worse-than-none case, caught by the one step that is never skipped.
+
 ## 5. VERIFICATION — real commands, real output
 
 ### 5a. Build
@@ -263,6 +302,10 @@ Re-measured at hand-off, excluding the three DB-backed files (see the environmen
 ```
 ls test/*.test.mjs | grep -vE "buildQueueDb|dimensionsDb|schemaParity" | xargs node --test
 # tests 893   # pass 887   # fail 6   # skipped 0
+```
+And again after the F-1 fix and its two guards (§4b):
+```
+# tests 895   # pass 889   # fail 6   # skipped 0
 ```
 **The same six failures both times, and the same six named below.** Nothing new appeared.
 
@@ -288,7 +331,8 @@ ls test/*.test.mjs | grep -vE "buildQueueDb|dimensionsDb|schemaParity" | xargs n
 > `buildQueueDb.test.mjs` — a DB-backed file that **references none of my modules**
 > (`grep -nE "swaps|appSwaps|appInsertions|swap_decision|skill_candidate|buildSwaps|masterBaseline"`
 > over all three DB files returns **zero hits**; they import `appDimensions`, `appBuildQueue` and
-> `SCHEMA_SQL` only). Re-measured against a clean build in §5g.
+> `SCHEMA_SQL` only). A re-run against a clean build was ATTEMPTED and also did not reach a
+> verdict — see §5g.
 
 The 6 failures, every one accounted for and **none in a file I touched**:
 
@@ -393,11 +437,27 @@ production's *existing* constraint matches `origin/main`'s — that is the AC-15
    to the 892-passing figure either. Excluding them compares like with like.
 
 They began running — and taking >25s each — only once the parallel agent started a local
-PostgreSQL for its own schema work. **Their contents were not measured to a verdict here**, and a
-verdict on them belongs to whoever owns `schema.ts` / `appDimensions.ts`. `schemaParity` in
-particular is worth a clean run now that `schema.ts` has settled: it is the guard that would catch
-a fresh-vs-upgraded disagreement of exactly the HN-1 shape, which §5f only proved for the two
-`list` CHECKs specifically rather than for the whole file.
+PostgreSQL for its own schema work.
+
+**ATTEMPTED, AND STILL NO VERDICT — stated plainly rather than glossed.** Run against a clean
+build: `timeout 400 node --test test/buildQueueDb.test.mjs test/dimensionsDb.test.mjs
+test/schemaParity.test.mjs`. The tests were **killed by the timeout** — raw output `Terminated`,
+`EXIT=143` — having produced no TAP summary. **So these three files are NOT known to pass and NOT
+known to fail on this branch.** The exclusion in 5b rests entirely on the two structural reasons
+above, not on a green run.
+
+> **A trap worth naming, because it nearly wrote a false line into this file.** The background-task
+> notification for that run reported ***"completed (exit code 0)"***. That 0 is the OUTER SHELL's
+> status — the last command in the chain was an `echo` — while the tests themselves exited 143.
+> Reading the notification instead of the output would have turned a timeout into a "passed".
+> Same class as the repo's standing rule that a queued workflow is not a confirmation: **read the
+> output, never the wrapper's status.**
+
+A verdict on these belongs to whoever owns `schema.ts` / `appDimensions.ts`, and they need a
+per-file run with a much longer budget (each spins up databases). `schemaParity` in particular is
+worth a clean run now that `schema.ts` has settled: it is the guard that would catch a
+fresh-vs-upgraded disagreement of exactly the HN-1 shape, which §5f only proved for the two `list`
+CHECKs specifically rather than for the whole file.
 
 ### 5h. Self-attack sweep (§0b) before handing off
 1. **Who reads what I wrote?** `grep -rn "LISTS\b\|ListKey\|LIST_FIELDS" api/src app/src` → **no

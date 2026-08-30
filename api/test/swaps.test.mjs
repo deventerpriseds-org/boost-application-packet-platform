@@ -410,6 +410,72 @@ test('AC-6: an owner-written label keeps driver=owner and stays out of unattribu
   assert.notEqual(near.driver, 'owner')
 })
 
+// F-1 (found by the independent verifier; PRE-EXISTING, not introduced by the pairing rewrite).
+// An owner-typed line that HAPPENS TO MATCH a requirement's verbatim used to produce
+// driver='owner' WITH a non-NULL verbatim_quote, because the three citation fields were computed
+// from `att` independently of the driver. `swap_decision` has
+//   check ((driver = 'posting') = (verbatim_quote is not null))
+// so Postgres REJECTS that row, which aborts the whole writeSwaps transaction; appPackets.ts:619
+// swallows the throw and the packet ships with a COMPLETELY EMPTY swap table — every list, not just
+// the offending one. The trigger is the owner editing a line to say what the employer asked for,
+// which is the most likely edit they make.
+test('F-1: an owner row that also matches a requirement carries NO citation', () => {
+  const verbatim = 'You will own the integrated product roadmap for corporate hiring technology'
+  const r = buildSwaps({
+    call1: {}, call3: {},
+    pkg: { SkillsBullets1: verbatim },
+    master: { SkillsBullets1: 'Clinical trial submissions' },
+    requirements: REQS,
+    ownerLabels: [verbatim],
+  })
+  const s = r.swaps.find(x => x.action === 'swapped')
+  // the fixture must actually be attributable, or this proves nothing
+  assert.ok(similarity(verbatim, REQS[0].verbatim) >= ATTRIBUTION_THRESHOLD,
+    'fixture must score above the attribution threshold, else the collision never arises')
+  assert.equal(s.driver, 'owner')
+  assert.equal(s.verbatim_quote, null, 'the owner did not cite the employer')
+  assert.equal(s.requirement_seq, null)
+  assert.equal(s.confidence, 0)
+})
+
+test('F-1: the DB citation contract holds for EVERY row this module can emit', () => {
+  // Asserted as the equivalence the DDL states, over a package that exercises kept / swapped /
+  // added / dropped / merged / owner / rule all at once — not one hand-picked row.
+  const r = buildSwaps({
+    call1: { skills2: 'Vendor selection' }, call3: {},
+    pkg: {
+      SkillsBullets1: 'Owned the integrated product roadmap for corporate hiring technology\nA one',
+      SkillsBullets2: 'Supplier negotiation',
+      RelevantBullets1: 'Product roadmap ownership and strategy',
+      ExpertiseBullets: 'Governance',
+    },
+    master: {
+      SkillsBullets1: 'A one\nClinical trial submissions\nCI/CD pipeline tuning',
+      RelevantBullets1: 'Product roadmap ownership\nProduct roadmap strategy',
+      ExpertiseBullets: 'Governance',
+    },
+    requirements: REQS,
+    omitList: 'CI/CD pipeline tuning',
+    // BOTH kinds of owner label, deliberately: one that matches no requirement, and one that DOES
+    // (the roadmap line clears ATTRIBUTION_THRESHOLD against REQS[0]). Without the second, this
+    // sweep never sees an owner row holding an `att`, and the F-1 collision it exists to catch
+    // cannot arise — proven: with only 'Supplier negotiation' here, reinstating the F-1 defect left
+    // this test GREEN while the targeted test above failed.
+    ownerLabels: ['Supplier negotiation', 'Owned the integrated product roadmap for corporate hiring technology'],
+  })
+  const seen = new Set(r.swaps.map(x => x.action))
+  assert.ok(seen.size >= 4, `the fixture must exercise several actions, saw: ${[...seen].join(',')}`)
+  assert.ok(new Set(r.swaps.map(x => x.driver)).size >= 3, 'and several drivers')
+  for (const row of r.swaps) {
+    assert.equal(row.driver === 'posting', row.verbatim_quote !== null,
+      `check ((driver='posting') = (verbatim_quote is not null)) violated: ${JSON.stringify(row)}`)
+    // and the three citation fields move together — a seq without a quote is the same lie
+    assert.equal(row.verbatim_quote !== null, row.requirement_seq !== null,
+      `quote and requirement_seq disagree: ${JSON.stringify(row)}`)
+    if (row.verbatim_quote === null) assert.equal(row.confidence, 0)
+  }
+})
+
 // ── AC-7 — when the counts agree, every row is kept or swapped ───────────────────────────────────
 test('AC-7: n slots in and n slots out gives exactly n rows, all kept or swapped', () => {
   const r = buildSwaps({

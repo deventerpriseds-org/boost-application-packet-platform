@@ -527,11 +527,35 @@ function row(list: ListKey, action: Action, from: string | null, to: string | nu
   // `kept` is not a change, so it is never presented as posting-driven even when the text happens to
   // resemble a requirement. Only an actual change can be attributed to the posting.
   const attributable = action === 'swapped' || action === 'added' || action === 'dropped'
+  // THE DRIVER IS DECIDED FIRST, AND THE CITATION IS DERIVED FROM IT. The three citation fields
+  // used to be computed independently from `att`, which let a row carry `driver='owner'` AND a
+  // `verbatim_quote` at the same time — see F-1 below.
+  const driver: Driver = (to && ownerLabels && ownerLabels.has(to)) ? 'owner'
+    : attributable && att ? 'posting' : 'unattributed'
+  // ONLY A 'posting' ROW MAY CARRY A CITATION, and that is a DB contract, not a preference:
+  // `swap_decision` has `check ((driver = 'posting') = (verbatim_quote is not null))`
+  // (`schema.ts`). Deriving the quote from `driver` rather than from `att` makes the two sides of
+  // that equivalence impossible to separate here.
+  //
+  // FINDING F-1, found by the independent verifier on this branch and PRE-EXISTING (the same shape
+  // was live before the pairing rewrite). An owner-typed line that happens to match a requirement's
+  // verbatim scored above ATTRIBUTION_THRESHOLD, so `att` was non-null while the owner branch above
+  // set `driver='owner'` — producing `driver='owner'` with a non-NULL quote. Postgres REJECTS that
+  // row, which aborts the whole `writeSwaps` transaction, and `appPackets.ts:617-622` swallows the
+  // throw into a console.warn — so ONE such row shipped the packet with a COMPLETELY EMPTY swap
+  // table, every list, and `changes_cited: not_applicable` beside it. The quietest possible failure,
+  // triggered by the owner editing a line to say what the employer asked for, which is the single
+  // most likely edit they make.
+  //
+  // Suppressing the quote is also the semantically right answer, not just the one the CHECK accepts:
+  // the owner did not cite the employer. Recording a citation they never made is the quieter half of
+  // decision B wearing the DB's clothes.
+  const cites = driver === 'posting' && att
   return {
     list, action, from_label: from, to_label: to,
-    requirement_seq: attributable && att ? att.seq : null,
-    verbatim_quote: attributable && att ? att.quote : null,
-    confidence: attributable && att ? Math.round(att.confidence * 1000) / 1000 : 0,
+    requirement_seq: cites ? att.seq : null,
+    verbatim_quote: cites ? att.quote : null,
+    confidence: cites ? Math.round(att.confidence * 1000) / 1000 : 0,
     // THE OWNER'S OWN WORDING OUTRANKS BOTH, and this branch is what makes decision B reachable
     // rather than decorative. Without it NOTHING ever emits 'owner': an edit the owner made comes
     // back through the next build as a label the model did not plan, scores under
@@ -544,8 +568,7 @@ function row(list: ListKey, action: Action, from: string | null, to: string | nu
     // Checked BEFORE attribution on purpose: an owner edit that happens to resemble a requirement
     // must not be recorded as posting-driven. They did not cite the employer, and a citation they
     // did not make is the quieter half of decision B.
-    driver: (to && ownerLabels && ownerLabels.has(to)) ? 'owner'
-      : attributable && att ? 'posting' : 'unattributed',
+    driver,
     rationale,
   }
 }
