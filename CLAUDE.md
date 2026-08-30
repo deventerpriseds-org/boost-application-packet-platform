@@ -544,12 +544,12 @@ destroy the work in flight. `run_in_background: true` does **not** fix this; the
 while the parent keeps issuing tool calls.
 
 **What changed on 2026-08-30 is the VEHICLE.** This section previously sent every long pass to
-`claude-task.yml`. That is a single Messages API call: it **cannot grep, follow an import, or
+`cross-container-pass.yml`. That is a single Messages API call: it **cannot grep, follow an import, or
 execute anything**, so a verifier running on it can only reason about what an assertion *would*
 evaluate — and the one thing that has actually caught inert guards in this org is a running
 adversary. **That is its one real and unchanging deficit.**
 
-> **CORRECTION, 2026-08-30 — do not read `claude-task.yml` as credit-blocked.** This section
+> **CORRECTION, 2026-08-30 — do not read `cross-container-pass.yml` as credit-blocked.** This section
 > previously said it *"needs metered API credit, which ran out mid-pipeline"* (run 33277232470).
 > That run did fail exactly that way, but the TENSE was wrong: **a balance is a STATE, not a
 > property.** Re-probed 2026-08-30 (run 33288812332): `end_turn`, `in=33 out=11`, artifact
@@ -589,13 +589,13 @@ of which takes seconds:
     git show origin/main:scripts/verify.sh | head -3      # is it on main
     claude -p --model claude-sonnet-5 "Reply with exactly: ok"   # does the engine answer
 
-### `claude-task.yml` keeps exactly ONE role — and it is the reason not to delete it
+### `cross-container-pass.yml` keeps exactly ONE role — and it is the reason not to delete it
 
 It runs on **GitHub's machines**, so it is the **only vehicle that survives a container restore**.
 `verify.sh` spawns a child of this container and dies with it: it survives *interrupts*, not
 *restores*. Still true, and still the reason not to fork it:
 
-> **Do NOT copy `claude-task.yml` or `scripts/claude_task.py` into this repo.** The workflow already
+> **Do NOT copy `cross-container-pass.yml` or `scripts/cross_container_pass.py` into this repo.** The workflow already
 > takes a `target_repo` input for exactly this. Proven, not assumed: run `33264119335` step 3
 > ("Check out the target repo") completed `success` in 2s with `target_repo` set to this repository.
 > A second copy is a parallel system to maintain, and "Extend, don't duplicate" forbids it.
@@ -604,7 +604,7 @@ It runs on **GitHub's machines**, so it is the **only vehicle that survives a co
 mcp__github__actions_run_trigger(
   method="run_workflow",
   owner="deventerpriseds-org", repo="eds-claude-skills",   # <- the WORKFLOW lives there
-  workflow_id="claude-task.yml", ref="main",
+  workflow_id="cross-container-pass.yml", ref="main",
   inputs={
     "prompt": "<the full AC or verifier brief>",
     "target_repo": "deventerpriseds-org/boost-application-packet-platform",
@@ -644,6 +644,51 @@ Either way, commit the artifact to `docs/qc-evidence/` under the name the verdic
 (`AC-<slug>.md`, `VERIFY-<slug>-<loop>.md`). The eds Stop gate accepts a committed evidence file in
 place of a subagent spawn **only if** it carries per-claim `CONFIRMED` / `REFUTED` /
 `NOT_APPLICABLE` verdicts. Prose does not satisfy it.
+
+
+## WHICH VEHICLE RUNS A PASS — pick by the two questions that actually differ
+
+An AC pass and a verification pass are the same act: an independent read. There are three ways to
+run one, and agents keep choosing wrongly because the names described their vintage rather than
+their role. Only TWO properties separate them.
+
+| vehicle | holds my turn (you cannot type) | survives a container reclaim | cost |
+|---|---|---|---|
+| in-session `Agent` subagent | **YES — the owner is locked out** | no | free (session plan) |
+| `scripts/verify.sh` (detached `claude -p`) | no | no | free (session plan) |
+| `.github/workflows/cross-container-pass.yml` | no | **YES — runs on GitHub's machines** | **metered API** |
+
+**DEFAULT: `scripts/verify.sh`.** Free, can execute (it runs suites, applies mutations, observes the
+result), and it does not hold the turn.
+
+    scripts/verify.sh --kind AC <slug> <brief> --context "<globs>"    -> AC-<slug>.md
+    scripts/verify.sh <slug> <loop> <brief>    --context "<globs>"    -> VERIFY-<slug>-<loop>.md
+
+`--kind` changes ONLY the prompt and the artifact name. There is one `claude -p` invocation in that
+file and both kinds use it, so **AC and verification cost exactly the same** — a question that has
+been asked more than once because dollar figures were quoted without saying what they meant. Any
+per-run dollar amount in these files is `claude -p`'s own `total_cost_usd`: what the work WOULD cost
+on the metered API, not a charge. Both run on this session's plan credential.
+
+**"Local" does not mean "blocking", and that is the confusion worth killing.** What locks the owner
+out is my TURN staying open, not where the work runs. An `Agent` subagent runs inside my turn, so
+their typed message sits queued in grey — measured at 93 seconds, and the only way in was the stop
+button, which killed the agent. `verify.sh` forks a child, redirects its stdout to a FILE, and exits
+in under a second; my turn ends and the owner has the floor. **The redirect is load-bearing:** a
+backgrounded child inherits stdout, and any caller capturing output waits for EOF, so an earlier
+version printed "launched" instantly and still blocked for the whole run.
+
+**Use `cross-container-pass.yml` for exactly ONE reason: the pass must survive a container reclaim.**
+A reclaim SIGKILLs this container and takes any detached child with it — `verify.sh` survives
+*interrupts*, not *restores*. Nothing else recommends the runner: it is a single Messages API call,
+so it **cannot grep, follow an import, or execute anything** (1M context is the compensation — stuff
+the files in up front), and it bills metered credit because a GitHub runner has no session and must
+present an Anthropic credential of its own.
+
+**Before reaching for the runner, prefer chunking.** Reclaim-survival is a property of the WORK, not
+the vehicle: measured across one real reclaim, a one-pass run died at 9,122 bytes with 0 chunks
+durable, while a chunked run that committed AND PUSHED per chunk survived with 56,374 bytes and 2 of
+5 chunks resumable. A commit that is not pushed is still inside the container.
 
 ## No dead UI (standing rule)
 
