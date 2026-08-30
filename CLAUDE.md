@@ -579,9 +579,15 @@ aborts non-zero by design rather than running a pass that silently lacks a file.
 cache WRITE 65,688 tok = $0.41 against cache READ 65,377 = $0.03. Opus cost 2.7x Sonnet for
 identical verifier output.
 
-**STATUS — check before relying on it.** `verify.sh` is on `eds-claude-skills` PR **#28**, green and
-mergeable, **not yet merged to that repo's `main`**. Until it lands, `claude-task.yml` is what a
-boost session can dispatch. Verify the PR's state rather than assuming either way.
+**STATUS — re-probe, do not remember.** `verify.sh` is **MERGED to `eds-claude-skills` `main`**
+(PR #28), and the engine it runs on was smoke-tested live on 2026-08-30: `claude -p --model
+claude-sonnet-5` returned `ok`, rc=0, on the session credential with no API key. An earlier version
+of this line said "not yet merged" and stayed wrong after #28 landed — a STATE recorded as a
+standing fact, the same error as the credit claim above. The two commands that re-check it, either
+of which takes seconds:
+
+    git show origin/main:scripts/verify.sh | head -3      # is it on main
+    claude -p --model claude-sonnet-5 "Reply with exactly: ok"   # does the engine answer
 
 ### `claude-task.yml` keeps exactly ONE role — and it is the reason not to delete it
 
