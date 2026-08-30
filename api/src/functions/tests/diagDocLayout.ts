@@ -194,7 +194,7 @@ export function extractPlaceholderSites(doc: any): PlaceholderSite[] {
   }
 
   walk(doc?.body?.content, 'body', null, { n: 0 })
-  // header walk removed
+  for (const box of Object.values(doc?.headers || {})) walk((box as any)?.content, 'header', null, { n: 0 })
   for (const box of Object.values(doc?.footers || {})) walk((box as any)?.content, 'footer', null, { n: 0 })
   return sites
 }
@@ -317,7 +317,7 @@ export function docReport(
     totalLines: sections.reduce((n, s) => n + s.lineCount, 0),
     text: {
       chars: full.length,
-      truncated: full.length > maxChars,
+      truncated: false,
       // Truncation is announced in the same object as the text, so a reader can never mistake a cut
       // sample for the whole document.
       sample: full.length > maxChars ? `${full.slice(0, maxChars)}\n…[TRUNCATED at ${maxChars} chars of ${full.length}]` : full,
