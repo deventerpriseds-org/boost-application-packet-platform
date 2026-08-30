@@ -5457,3 +5457,33 @@ The rest of the pass stands unchanged — O-11 (`dedupeAcrossLists` already brea
 O-12 (the swallowing try/catch makes a throw the QUIETEST outcome available, not the loudest),
 O-13's 15 consumers of `swap.action`, and Reading B (`added`/`dropped` become a REPORTED violation,
 never suppressed).
+
+---
+
+## QUEUED, FIRST AFTER UI PARITY — move MasterContext into Postgres (2026-08-30)
+
+**Owner-instructed, verbatim:** *"save and track this as the very first thing we work on once UI is
+updated to pass all steps/tabs to be able to execute exactly what the prototype does."*
+
+Tracked as `D:master-context-lives-in-the-wrong-store` in `.claude/DEFERRED.md` and task #31.
+**Ordering is part of the instruction, not a preference:** it starts only after the prototype-parity
+work closes.
+
+**MOVE, not mirror — and the owner is the one who caught this.** The previous turn proposed mirroring
+the master blocks into Postgres alongside Storage. The owner: *"what would be the point of us having
+both? why did we need the storage table instead of posted in the first place?"* Both halves land. A
+mirror would have created the exact two-store problem it was meant to solve — two copies, a staleness
+digest to keep them agreeing, and no answer to which one is right when they don't.
+
+**Why Storage originally — recorded as UNKNOWN rather than guessed.** The repo's history begins at a
+squashed import (`f0895bf`) in which `MasterContext` and the Postgres `schema.ts` appear in the SAME
+commit, so the ordering is not recoverable here. The labelled inference: `MasterContext` is one of
+the four MT-XX-era Storage tables (`AppConfig`, `Prompts`, `JobApplications`, `MasterContext`) that
+predate Postgres, and the profile text simply never moved when Postgres arrived for the packet spine.
+
+**Target:** `owner_master_block(owner_email, merge_field, text, seq)` — per-owner, ordered,
+connector-queryable, and the shape the fixed-slot pairing already needs.
+
+**Blast radius (why it is Tier 1 and gets its own AC pass):** every `masterBaseline`,
+`loadMasterBaseline`, `loadProfile` and `readSkillFields` caller. It feeds provenance and the swap
+"original", so it decides what the screen ACCUSES the model of changing.
