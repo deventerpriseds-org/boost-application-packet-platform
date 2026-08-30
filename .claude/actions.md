@@ -5666,3 +5666,42 @@ rule is needed for which terms belong to which of the three slots.
 recorded as honest rows rather than hidden — which is the design. **But `fixed_slot_count` still
 reports `not_applicable`**, because `appPackets.ts` does not thread the per-template counts into the
 build. The evidence exists; the gate cannot yet see it. That wiring is the next unit.
+
+---
+
+## Slot counts SEEDED programmatically, not typed by the owner (2026-08-30)
+
+**Owner: *"why do I have to type them I instead of you programatically?"*** — a fair challenge, and I
+had the rule backwards. CLAUDE.md's no-hardcoded-config rule says *"the code may only SEED the
+first/default value — which the user can then change"* and *"seeding a per-owner default row is
+fine"*. Seeding is the SANCTIONED move; a bare literal with no UI path is what is banned. I read it
+as "the owner must enter it" and handed them data entry.
+
+**Written via `api-test.yml POST /api/config/templates`, read back rather than trusted:**
+
+| write | run | result |
+|---|---|---|
+| 11 / 9 / 7 (seeded from the master item counts) | 33312446969 | success; read-back 33312521219 confirmed integers stored, `roleFocus` survived the Replace, relevant slots still `null` |
+| **10 / 8 / 6** (owner: *"change to 10,8, and 6 just in case"*) | **33312671993** | success |
+
+**The owner's numbers are probably the better ones and the reason is in the code's own comment.**
+I seeded from what the master lists HOLD; a slot count is what the printed PAGE FITS.
+`Settings.jsx:1975-1982` states it: the Google Doc's placeholders are one token per list expanding
+to whatever is injected, *"so how many lines fit on the page is a fact about the PRINTED page that no
+code can read off the template. Only the owner knows it, so only the owner can say."* The rendered
+Trinnex resume shipped 10 items in Skills 1, which matches the owner's 10 rather than my 11.
+
+**Relevant 1-3 deliberately left `null`** — three slots share one pooled `relevantProficiencies` key,
+so there is no honest per-slot number and inventing one would be fabricating a composite.
+
+**Where the owner changes them:** Settings ▸ **Quality** ▸ the **Resume templates** card,
+`#/settings/quality` (`Settings.jsx:2226`, `TemplateFocusSettings` at `:2024`). Six number inputs
+labelled Skills 1 / Skills 2 / Expertise / Relevant 1-3 under *"Slots are how many lines each list
+has room for in this template."* Blank means "not stated" and reads as `not_applicable`; zero is
+refused by the route. Screenshot captured via `ui-verify.yml` rather than described, because the
+sandbox cannot execute the React bundle.
+
+**Consequence, stated before it surprises anyone:** `fixed_slot_count` stops reporting
+`not_applicable` and will FAIL on the current Trinnex packet — Skills 1 holds 10 and the document
+ships 8; Skills 2 holds 8 and the document ships 10. Those are real violations in existing data,
+surfaced rather than introduced.
