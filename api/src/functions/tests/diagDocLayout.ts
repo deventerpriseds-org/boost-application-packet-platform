@@ -167,7 +167,7 @@ export function extractPlaceholderSites(doc: any): PlaceholderSite[] {
             container: bullet ? 'listItem' : 'paragraph',
             namedStyleType: el.paragraph.paragraphStyle?.namedStyleType ?? null,
             bulletNestingLevel: bullet ? (bullet.nestingLevel ?? 0) : null,
-            table: cell,
+            table: null,
             paragraphText: text.trim(),
           })
         }

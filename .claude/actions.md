@@ -5705,3 +5705,36 @@ sandbox cannot execute the React bundle.
 `not_applicable` and will FAIL on the current Trinnex packet — Skills 1 holds 10 and the document
 ships 8; Skills 2 holds 8 and the document ships 10. Those are real violations in existing data,
 surfaced rather than introduced.
+
+---
+
+## `4.8-20` `Undo this` is BUILDABLE, not deliberate — owner correction (2026-08-30)
+
+**Owner: *"we decided to keep both per field and the assistant panel"***, correcting my claim that
+this row should be re-verdicted DELIBERATE and dropped from the backlog.
+
+**What I got wrong, and it is a repeat of a named failure mode.** The recorded reason
+(`qcRail.js:766-767`) is *"no swap-revert mutation is built - there is none, `appSwaps.ts` is
+GET-only, which is also why the prototype's sibling `Undo this` does not ship beside this button"*.
+That is a constraint on ONE IMPLEMENTATION - a revert route - and I read it as the absence of the
+feature. `.claude/accuracy-log.md` already carries three ABSENT claims of exactly this shape, and
+CLAUDE.md's feasibility rule names it: *"a code comment describing a limitation is a claim about the
+code, not the code"*.
+
+**Why it is buildable with no new route.** Two shipped controls are already REQUESTS rather than
+mutations:
+- `Ask why` (`qcRail.js:790` `swapAskWhy`) seeds the assistant panel and **sends nothing**.
+- `Put back "<label>"` (`assetBlocks.js:632` `restoreOptions`, rendered `AssetBlocks.jsx:757`) is
+  documented as *"a REQUEST"* in the same shape as its siblings.
+
+So `Undo this` on a swap row seeds a put-back request through the same mechanism sitting beside it.
+`AC-packet-ui-final.md` AC-34's actual condition — *no swap-revert mutation is built* — still holds.
+
+**Both controls survive, per the owner:** the per-field one in the field margin
+(`QcRail.jsx:614`, `QC_HOOKS.correctionUndo`) plus `Put back` in the block body, AND the swaps-tab
+one seeding the panel.
+
+**Consequence:** the fan-out backlog is **22 rows, not 21**. `4.8-20` joins the `QcRail.jsx` lane
+beside `4.8-1`, `4.8-2`, `4.8-11` and `4.11-7`, and it is among the cheapest in the set — it
+inherits `swapAskWhy`'s null contract (*"never open a panel that cannot send"*, `PacketBuilder.jsx:765`)
+and its guard pattern rather than needing new ones.
