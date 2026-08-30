@@ -5308,3 +5308,45 @@ so no lane is concurrently in the tree right now, and `git stash list` is empty.
 **Not done, deliberately:** `setup.sh`'s `SESSION_CMD` still prints the wrong `register_repo_root`
 path at every session start. It is the only ACTIVE consumer of that defect, but fixing it needs
 `CURRENT_VERSION` 19 → 20 or it is inert everywhere already provisioned. Held for owner sign-off.
+
+---
+
+## ACT-2026-08-29-c — Sync the session to the latest `setup.sh` (v19 → v27)
+
+**Request (owner):** *"sync skill from eds repo to latest setup sh and hook and file usage and
+mechanized behavior."* Followed mid-turn by *"pause on this, another session is about to update main
+first."*
+
+**Status: SYNC DONE. Downstream work PAUSED at the owner's instruction.**
+
+**Evidence.** `eds-claude-skills` `main` had moved `cbf8f7b` → `c68f460` under a parallel lane's
+PR #28 — `CURRENT_VERSION` 19 → **27**, 760 changed lines in `setup.sh`. Cloned to
+`/tmp/eds-claude-skills-sync`, ran its `setup.sh`, exit 0. Log line:
+`/home/user/.claude/settings.json: eds hooks installed (version 27)`, preceded by
+`replacing 1/2/1/2 existing _eds hook(s)` on the four events.
+
+Read back from the settings file (never from the script's stdout): **8 hooks, all v27** — hook count
+rose from 6 because `Stop` gained `eds-verify-loop.py` and `PostToolUse` gained the mid-turn
+phase-tag reminder. Three new guard scripts on disk and executable: `eds-availability-guard.sh`,
+`eds-session-memory.py`, `eds-verify-loop.py`. 16 skills, `verifier` agent present.
+
+**Bootstrap:** `register_repo_root(owner=deventerpriseds-org, repo=eds-claude-skills)` →
+`context_reload_requested`.
+
+**Two findings, both recorded in `memory.md` under Hardening:**
+1. **The sync skill's own step 4 is broken** — it verifies against
+   `/root/.claude/launcher-settings.json`, which has deliberately held no eds hooks since v7. Its
+   snippet prints nothing today, which is indistinguishable from a failed sync. Same defect class as
+   the `bootstrap.md` `/workspace` path already fixed in eds-claude-skills PR #25.
+2. **The mid-turn phase-tag hook is live and not inert** — confirmed by the probe `setup.sh`'s own
+   comment demands (the line returns attached to each tool result), and it drew a real Stop-gate
+   block this turn on 6 untagged mid-turn blocks.
+
+**PAUSED, not done — nothing pushed to either repo beyond this tracking commit:**
+- eds-claude-skills **PR #25 now conflicts** with the new `main` on `.claude/memory.md` and
+  `CLAUDE.md` (both text appends; `bootstrap.md` itself is untouched by the other lane, so the fix
+  is clean). Resolution deferred until the owner says the incoming `main` update has landed —
+  resolving against a base that is about to move would just have to be redone.
+- The sync-skill step-4 fix is queued to fold into PR #25 at the same time.
+- Still open from ACT-2026-08-29-b: whether to bump `CURRENT_VERSION` and correct `SESSION_CMD`'s
+  wrong `register_repo_root` path. **Note it is now a 27 → 28 bump, not 19 → 20.**

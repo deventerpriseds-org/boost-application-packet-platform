@@ -4641,3 +4641,51 @@ were the layout, when it is what a container looks like when `setup.sh` never ra
 find name 'process'` / `TS2307: Cannot find module '@azure/functions'`, because the `test` script
 runs `tsc` first. That is a missing `npm ci`, not a broken build and not a real type error. It looks
 exactly like the repo is in a bad state; it is not.
+
+---
+
+## 2026-08-29 (cont) — env synced v19 → v27; and the sync skill sent me to the wrong file
+
+**Feature status: environment enforcement — v27 INSTALLED and read back from
+`/home/user/.claude/settings.json`.** Synced from `eds-claude-skills` `main` @ `c68f460` (the repo
+had moved from `cbf8f7b` under a parallel lane's PR #28: 760 changed lines in `setup.sh` alone).
+
+Hook count went 6 → 8. New since v19:
+
+| Hook | What it mechanizes |
+|---|---|
+| `PostToolUse` matcher `.*` | Phase-tag reminder after EVERY tool call |
+| `Stop` → `eds-verify-loop.py` | Re-verification-loop contract: coverage TOTAL every loop, only DEPTH tiered |
+| `UserPromptSubmit` → `eds-availability-guard.sh` | Away-gap, container-restore, dead-resource ledger |
+| `SessionStart` → `eds-session-memory.py` | Per-repo memory surfacing, replacing cwd-relative reads |
+
+### Hardening — the sync skill's verify step reads a file that has held no hooks since v7
+
+`.claude/skills/sync-setup-script.md` step 4 hands you a snippet that opens
+`/root/.claude/launcher-settings.json` and prints `_eds_version` from it. **Since v7 the eds hooks
+are deliberately NOT in that file** — the launcher regenerates it from a stock template on every
+process start, which is exactly why they were moved to `/home/user/.claude/settings.json`. Running
+the skill's own snippet today prints nothing.
+
+**Why that is worse than a stale doc.** The step exists to answer "did the sync actually land?", and
+its failure mode is a silent empty result — indistinguishable from a sync that did nothing. It is a
+verification step that cannot fail loudly and cannot succeed correctly. I only avoided it because
+this session had already learned where the hooks live; a session following the skill literally would
+have concluded the sync failed and re-run it.
+
+**Same defect class as the `bootstrap.md` `/workspace` path, and that is the point:** three times
+now, a *skill* has named a path that moved. The guard is structural — **a skill step that verifies
+installed state must derive the path, or fail loudly when the file is absent, never open a
+hardcoded one and print whatever it finds.** An empty result must be an error, not an answer.
+
+### Confirmed NOT inert — the one claim worth making carefully
+
+The mid-turn `PostToolUse` reminder is a JSON `additionalContext` envelope, because a bare `printf`
+on `PostToolUse` goes to the transcript and never reaches the model — setup.sh's own comment records
+that its first version shipped inert for ten minutes. **Observed live this session:** the line came
+back attached to the tool result on every call after install. That is the probe the comment asks
+for, and it passed.
+
+And it immediately caught its target: the Stop gate blocked this turn with *"6 of 11 text blocks
+lack a phase tag"*, every offender a mid-turn block written after a tool call — the exact 86% case
+the hook was measured against.
