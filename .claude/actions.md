@@ -5300,8 +5300,12 @@ additionally settle SS4.11 (scored 0%, mounts everywhere), SS4.8 (scored 73%, re
 
 **Still open — 3 rows:** `4.5-12` pick-list (portfolio only), `4.8-21` Swaps `Ask why`,
 `4.11-4` scope selector.
-**DELIBERATE, not a gap:** `4.8-20` Swaps `Undo this` — `assistantPanel.js:107` records the
-decision: *"Undo is per field, in the field itself, not from here."*
+**~~DELIBERATE, not a gap:~~ SUPERSEDED 2026-08-30 — see the `4.8-20` entry at the end of this file.**
+This paragraph read `assistantPanel.js:107` (*"Undo is per field, in the field itself, not from
+here"*) as closing the row. The owner has since ruled the opposite: *"we decided to keep both per
+field and the assistant panel"*. `4.8-20` is OPEN and buildable as a seeded request, the same
+mechanism `Ask why` and `Put back` already ship. `PROTOTYPE-COVERAGE.md:415` had it right as PARTIAL
+all along — this summary was the stale half, which is why the two disagreed.
 
 **Root cause of the drift:** `Go to field` was scored PARTIAL because the measurement matched the
 prototype's LITERAL STRING rather than the capability. Same class as reporting the swap arrow

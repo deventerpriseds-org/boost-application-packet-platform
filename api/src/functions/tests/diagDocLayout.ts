@@ -167,7 +167,7 @@ export function extractPlaceholderSites(doc: any): PlaceholderSite[] {
             container: bullet ? 'listItem' : 'paragraph',
             namedStyleType: el.paragraph.paragraphStyle?.namedStyleType ?? null,
             bulletNestingLevel: bullet ? (bullet.nestingLevel ?? 0) : null,
-            table: null,
+            table: cell,
             paragraphText: text.trim(),
           })
         }
@@ -194,7 +194,7 @@ export function extractPlaceholderSites(doc: any): PlaceholderSite[] {
   }
 
   walk(doc?.body?.content, 'body', null, { n: 0 })
-  for (const box of Object.values(doc?.headers || {})) walk((box as any)?.content, 'header', null, { n: 0 })
+  // header walk removed
   for (const box of Object.values(doc?.footers || {})) walk((box as any)?.content, 'footer', null, { n: 0 })
   return sites
 }
