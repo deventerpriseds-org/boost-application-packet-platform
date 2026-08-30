@@ -521,6 +521,57 @@ Key tables (PostgreSQL):
 
 ## Active work
 
+<!-- NEWEST FIRST, and the SessionStart surfacer emits this heading plus 60 LINES and nothing else.
+     Every line here costs a line of what a new session sees: WRITE NEW STATE AT THE TOP AND DELETE
+     WHAT IT SUPERSEDES. Detail goes in a dated section below and is LINKED from here. -->
+
+**2026-08-30 — THE AC / VERIFIER VEHICLE CHANGED. `## Long agent work does not run in this session
+any more (2026-08-29)` further down this file, and the matching section in `CLAUDE.md`, are now
+SUPERSEDED — do not follow either as written.** They send long passes to `claude-task.yml`, which is
+a single Messages API call: it cannot grep, follow an import, or EXECUTE, and it needs metered API
+credit. **(That last half is CORRECTED: run 33277232470 did fail on a spent balance, but a balance
+is a STATE — re-probed 2026-08-30, run 33288812332, `end_turn`/`in=33 out=11`/success, the credit
+is LIVE and the runner works today. Evidence:
+`eds-claude-skills/docs/qc-evidence/FEASIBILITY-runner-credit.md`. The toollessness is the real,
+unchanging deficit.)**
+
+**Use `scripts/verify.sh` in `eds-claude-skills` instead** — one vehicle, two kinds:
+
+    scripts/verify.sh --kind AC <slug> <brief> --context "<globs>"    -> docs/qc-evidence/AC-<slug>.md
+    scripts/verify.sh <slug> <loop> <brief>    --context "<globs>"    -> VERIFY-<slug>-<loop>.md
+
+Detached `claude -p` on the session's own credential: it does **not** hold the session, needs **no
+API key**, and **CAN execute** — it runs suites, applies mutations and observes the result, which is
+the one thing that has actually caught inert guards here. Proven 2026-08-30: AC pass 12 turns/105s/
+$0.87, verifier 45 turns/336s/$2.36 with 9/9 CONFIRMED. **Always pass `--context`** — the A/B is
+settled, arm B2 (target-repo files in the room) scored 5/5 where B1 scored 3/5, and a glob matching
+nothing aborts non-zero by design.
+
+**STATUS, so this is not read as already-available:** verify.sh is on `eds-claude-skills` PR **#28**,
+green and mergeable, **NOT yet merged to its `main`**. Until it lands, `claude-task.yml` is still
+what a boost session can dispatch. Re-check the PR rather than assuming either way.
+
+**`claude-task.yml` keeps exactly ONE role, and it is the reason to keep it:** it runs on GitHub's
+machines, so it is the **only vehicle that survives a container restore**. `verify.sh` is a child of
+this container and dies with it — it survives *interrupts*, not *restores*.
+
+**THE MITIGATION IS A PROPERTY OF THE WORK, NOT THE VEHICLE, and it is measured.** Same task across
+one real restore: a one-pass run died at 9,122 bytes with **0** chunks durable; a chunked run that
+committed AND PUSHED after each chunk survived with **56,374 bytes, 2 of 5 chunks durable and
+resumable**. **Chunk every long pass; commit and push per chunk.** A commit that is not pushed is
+still inside the container — that bug was in the chunk script itself.
+
+**Self-hosting the containers is NOT available** (asked and checked 2026-08-30):
+`list_environments` returns three environments, all `kind: anthropic_cloud`, no `ccpool_` pool.
+Re-run that one call rather than re-deriving it.
+
+**A pass is ALIVE iff its OUTPUT IS GROWING.** Never `pgrep` for it — the pattern matches this
+session's own `claude`, and `pkill -f` will kill your own shell because its command line contains
+whatever you searched for. Both happened on 2026-08-30; I declared a verifier dead 14 seconds before
+it delivered 9/9. The JSON log is written only at the END, so 0 bytes proves nothing mid-run.
+
+---
+
 **SESSION 2026-08-29 — enforcement environment armed (this session is a PARALLEL lane).**
 `eds-claude-skills/setup.sh` @ `cbf8f7b` run to completion (exit 0): hooks at `_eds_version` 19 in
 `/home/user/.claude/settings.json` (SessionStart, Stop x2, PostToolUse, UserPromptSubmit x2), 16
@@ -4700,7 +4751,16 @@ rows between them. The lanes are unblocked; what remains is one portfolio-only p
 
 ## Long agent work does not run in this session any more (2026-08-29)
 
-**Feature status: LANDED (prose here; mechanism in `eds-claude-skills`).**
+> **SUPERSEDED-BY: the 2026-08-30 entry at the top of `## Active work` in this file.**
+> The PREMISE below still holds — an in-session subagent makes this session unresponsive, and that
+> was measured. **The VEHICLE it names does not.** `claude-task.yml` is a single Messages API call
+> that cannot execute and needs metered credit, which ran out (run 33277232470). It has been
+> replaced by `scripts/verify.sh --kind AC|VERIFY` in `eds-claude-skills`, which is detached, runs
+> on the session credential with no API key, and CAN execute. Read the top entry before acting on
+> anything below. `claude-task.yml` retains exactly one role: it runs on GitHub's machines, so it is
+> the only vehicle that survives a container restore.
+
+**Feature status: SUPERSEDED as guidance; kept as the record of why the in-session route was left.**
 
 A running in-session `Agent` subagent makes this CCR session unresponsive — measured, not inferred:
 owner typed at ~25s, message sat queued and undelivered for 93s, surfaced only on stop, which killed

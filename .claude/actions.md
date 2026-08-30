@@ -17,6 +17,32 @@ Status values: `open` | `in-progress` | `blocked` | `done`
      index of what is live, not a second copy of the ledger. Detail stays in the ACT entries below
      and in `.claude/DEFERRED.md`. -->
 
+### ACT:runner-vehicle — the AC/verifier vehicle this repo was told to use is SUPERSEDED (2026-08-30)
+- **Status:** ✅ CLOSED as a documentation change. **Read the top of `## Active work` in
+  `.claude/memory.md` before dispatching any long pass.**
+- **What was wrong:** `CLAUDE.md` and memory both sent long AC/verifier passes to `claude-task.yml`
+  — a single Messages API call that **cannot execute** (so a verifier on it can only reason about
+  what an assertion *would* evaluate) and that needs metered credit which **ran out** (run
+  33277232470). Both now point at `scripts/verify.sh --kind AC|VERIFY` in `eds-claude-skills`:
+  detached, session credential, no API key, and it CAN run suites and mutations.
+- **Not yet available — do not read this as shipped.** `verify.sh` is on `eds-claude-skills`
+  PR **#28**, green and mergeable, NOT merged to that repo's `main`. Until it lands,
+  `claude-task.yml` is what a boost session can dispatch. Check the PR, don't assume.
+- **`claude-task.yml` is NOT deleted and must not be:** it runs on GitHub's machines and is the only
+  vehicle that survives a container restore. `verify.sh` dies with the container.
+- **CORRECTION, same day (owner-caught).** This row first said the runner "needs metered credit
+  which ran out". **A balance is a STATE, not a property** — re-probed 2026-08-30 (run 33288812332):
+  `end_turn`, `in=33 out=11`, artifact complete, success in 14s. **The credit is live; the runner
+  works today.** Only the toollessness is a real, unchanging deficit. Evidence and the re-check
+  command: `eds-claude-skills/docs/qc-evidence/FEASIBILITY-runner-credit.md`. Consequence: the
+  hybrid is a COST question, not a feasibility one, and the gap is narrow (~$1.61 API-runner vs
+  $2.36 verify.sh, which did strictly more) — which weakens the case for migrating at all.
+- **Measured, and it applies to every long pass regardless of vehicle:** chunk the work, commit AND
+  PUSH per chunk. One-pass across a real restore → 0 chunks durable; chunked → 2 of 5 durable and
+  resumable.
+- **Not a way out:** self-hosted containers are unavailable — `list_environments` returns three
+  `anthropic_cloud` environments, no `ccpool_`.
+
 **Open ledger rows** (full detail in `.claude/DEFERRED.md`, which is the authority):
 
 | Row | What is not done |

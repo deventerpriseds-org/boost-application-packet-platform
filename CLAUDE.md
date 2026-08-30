@@ -557,25 +557,66 @@ still while it runs. Background it, keep working, act on the wake.
   `app.http` route registrations, and smoke-test the previously-passing live
   endpoints before considering it done.
 
-## A long AC or verification pass belongs on a RUNNER, not in this session (owner-instructed 2026-08-29)
+## A long AC or verification pass does not run IN this session (2026-08-29; vehicle replaced 2026-08-30)
 
-An in-session `Agent` subagent makes this CCR session **unresponsive while it runs**. This was
-measured, not inferred: on 2026-08-29 the owner typed a message at ~25s into a background subagent
-and it sat QUEUED and undelivered for **93 seconds**, surfacing only when they pressed stop — which
-killed the agent. The client shows "Brewing… 1 running task" and relabels the input box "Queue
-feedback…", and queued text is lost if the screen sleeps. So the only way to reach the session was
-to destroy the work in flight. `run_in_background: true` does **not** fix this; the turn stays
-active while the parent keeps issuing tool calls.
+**The premise is unchanged and was measured.** An in-session `Agent` subagent makes this CCR session
+**unresponsive while it runs**: on 2026-08-29 the owner typed at ~25s into a background subagent and
+the message sat QUEUED and undelivered for **93 seconds**, surfacing only when they pressed stop —
+which killed the agent. The client shows "Brewing… 1 running task" and relabels the input box "Queue
+feedback…", and queued text is lost if the screen sleeps. The only way to reach the session was to
+destroy the work in flight. `run_in_background: true` does **not** fix this; the turn stays active
+while the parent keeps issuing tool calls.
 
-**A GitHub runner has no such coupling.** Long AC passes and verifier passes on this repo run
-through `claude-task.yml` in `deventerpriseds-org/eds-claude-skills` — dispatched from here, with
-**this** repo checked out as `_target/`.
+**What changed on 2026-08-30 is the VEHICLE.** This section previously sent every long pass to
+`claude-task.yml`. That is a single Messages API call: it **cannot grep, follow an import, or
+execute anything**, so a verifier running on it can only reason about what an assertion *would*
+evaluate — and the one thing that has actually caught inert guards in this org is a running
+adversary. **That is its one real and unchanging deficit.**
+
+> **CORRECTION, 2026-08-30 — do not read `claude-task.yml` as credit-blocked.** This section
+> previously said it *"needs metered API credit, which ran out mid-pipeline"* (run 33277232470).
+> That run did fail exactly that way, but the TENSE was wrong: **a balance is a STATE, not a
+> property.** Re-probed 2026-08-30 (run 33288812332): `end_turn`, `in=33 out=11`, artifact
+> complete, success in 14s — **the credit is live and the runner works today.** Evidence and the
+> command that re-checks it: `eds-claude-skills/docs/qc-evidence/FEASIBILITY-runner-credit.md`.
+> Re-probe rather than remember; the toollessness above is the deficit that does not change.
+
+### Use `scripts/verify.sh` in `eds-claude-skills` — one vehicle, two kinds
+
+```
+scripts/verify.sh --kind AC <slug> <brief-file> --context "<globs>"   # -> docs/qc-evidence/AC-<slug>.md
+scripts/verify.sh <slug> <loop> <brief-file>    --context "<globs>"   # -> VERIFY-<slug>-<loop>.md
+```
+
+Detached `claude -p` on the session's own credential. It does **not** hold the session (it returns
+in under a second and prints the artifact path), needs **no API key**, and **CAN execute** — it runs
+suites, applies mutations and observes the result. Measured 2026-08-30 on real work: an AC pass at
+12 turns / 105s / $0.87 that found a regression the implementer had missed, and a verifier at
+45 turns / 336s / $2.36 returning 9/9 CONFIRMED.
+
+**Always pass `--context`.** The A/B that settled this compared two arms of the same vehicle on the
+same model: with the target repo's files in the room it scored **5/5**; without, **3/5**, for no
+other reason. Context inclusion is a required input, not a tuning knob — and a glob matching nothing
+aborts non-zero by design rather than running a pass that silently lacks a file.
+
+**Prefer Sonnet and batch inside one cache window.** The bill is the CONTEXT, not the reasoning:
+cache WRITE 65,688 tok = $0.41 against cache READ 65,377 = $0.03. Opus cost 2.7x Sonnet for
+identical verifier output.
+
+**STATUS — check before relying on it.** `verify.sh` is on `eds-claude-skills` PR **#28**, green and
+mergeable, **not yet merged to that repo's `main`**. Until it lands, `claude-task.yml` is what a
+boost session can dispatch. Verify the PR's state rather than assuming either way.
+
+### `claude-task.yml` keeps exactly ONE role — and it is the reason not to delete it
+
+It runs on **GitHub's machines**, so it is the **only vehicle that survives a container restore**.
+`verify.sh` spawns a child of this container and dies with it: it survives *interrupts*, not
+*restores*. Still true, and still the reason not to fork it:
 
 > **Do NOT copy `claude-task.yml` or `scripts/claude_task.py` into this repo.** The workflow already
 > takes a `target_repo` input for exactly this. Proven, not assumed: run `33264119335` step 3
-> ("Check out the target repo") completed `success` in 2s with `target_repo` set to this repository
-> (that run's failure was step 5, a pre-streaming `RemoteDisconnected` since fixed). A second copy
-> would be a parallel system to maintain, and the "Extend, don't duplicate" rule above forbids it.
+> ("Check out the target repo") completed `success` in 2s with `target_repo` set to this repository.
+> A second copy is a parallel system to maintain, and "Extend, don't duplicate" forbids it.
 
 ```
 mcp__github__actions_run_trigger(
@@ -592,22 +633,35 @@ mcp__github__actions_run_trigger(
   })
 ```
 
-Then background the wait, download the artifact, and **commit it to `docs/qc-evidence/`** under the
-name the verdict contract expects (`AC-<slug>.md`, `VERIFY-<slug>-<loop>.md`). The eds Stop gate
-accepts a dispatched workflow run plus that committed evidence file in place of a subagent spawn —
-but only if the file carries per-claim `CONFIRMED` / `REFUTED` / `NOT_APPLICABLE` verdicts. Prose
-does not satisfy it.
+Its limits, so nobody re-derives them: single-shot (no tools, 1M context is the compensation —
+stuff the files in up front); `effort: high` is the default because `xhigh` over 398 KB ran 7m29s,
+cost ~$1.61 and still hit `max_tokens` mid-answer; a partial artifact opens with an `INCOMPLETE`
+banner and `stop_reason: max_tokens` fails the job.
 
-Three things that bit us building this, so nobody re-derives them:
-- **It is SINGLE-SHOT, not an agent loop.** It cannot grep, follow an import, or execute anything.
-  The compensation is a 1M context — stuff the files in up front via `context_globs`. Expect it to
-  be comparable on anything requiring only reading and **worse** on anything requiring execution.
-- **`effort: high` is the default and that is deliberate.** The same brief at `xhigh` over 398 KB
-  ran 7m29s, spent ~$1.61, and still stopped on `max_tokens` mid-answer. Raise it per-run, never
-  as a floor.
-- **A partial artifact is labelled.** The output file opens with an `INCOMPLETE` banner written
-  before the stream starts and is rewritten only once the outcome is known, and `stop_reason:
-  max_tokens` fails the job. A truncated answer that reads as finished is worse than no file.
+### Restore-survival is a property of the WORK, not the vehicle — and this part is measured
+
+Same task across one real container restore: a **one-pass** run died at 9,122 bytes mid-sentence
+with **0** chunks durable; a **chunked** run that committed **and pushed** after each chunk survived
+with **56,374 bytes and 2 of 5 chunks durable and resumable**. **Chunk every long pass; commit AND
+push per chunk** — a commit that is not pushed is still inside the container, which was a real bug
+in the chunk script itself.
+
+Self-hosting the containers is **not** an escape route: `list_environments` (2026-08-30) returns
+three environments, all `kind: anthropic_cloud`, with no `ccpool_` pool. Re-run that one call rather
+than re-deriving it.
+
+### A pass is ALIVE iff its OUTPUT IS GROWING
+
+Never `pgrep` for it: the pattern matches this session's own `claude`, and `pkill -f` will kill your
+own shell because that shell's command line contains whatever you searched for. Both happened on
+2026-08-30, and a verifier was declared dead **14 seconds before it delivered 9/9**. The JSON log is
+written only at the END of a run, so 0 bytes proves nothing mid-run — read the `.out` sidecar's
+mtime.
+
+Either way, commit the artifact to `docs/qc-evidence/` under the name the verdict contract expects
+(`AC-<slug>.md`, `VERIFY-<slug>-<loop>.md`). The eds Stop gate accepts a committed evidence file in
+place of a subagent spawn **only if** it carries per-claim `CONFIRMED` / `REFUTED` /
+`NOT_APPLICABLE` verdicts. Prose does not satisfy it.
 
 ## No dead UI (standing rule)
 
