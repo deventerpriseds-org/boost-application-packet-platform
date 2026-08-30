@@ -4756,3 +4756,38 @@ had been reasoning about from source alone:
 **Why this matters beyond convenience:** both facts were previously "read from the schema file",
 which is a proxy. The connector turned them into ground truth in two seconds. That is the argument
 for nudging rather than routing around.
+
+## Hardening — F-1: an owner edit that quoted the posting emptied the WHOLE swap table (2026-08-30)
+
+**Root cause.** In `swaps.ts` `row()`, `requirement_seq` / `verbatim_quote` / `confidence` were
+derived from the attribution result **independently of** `driver`. Nothing tied the two together, so
+the two could contradict each other: an owner-typed line that happened to match a requirement's
+verbatim produced `driver='owner'` **with a non-null quote**.
+
+**Why that is not a cosmetic inconsistency.** `schema.ts:587` enforces
+`check ((driver = 'posting') = (verbatim_quote is not null))`. The contradictory row is REJECTED,
+which aborts the whole `writeSwaps` transaction; `appPackets.ts:619` swallows the throw into a
+`console.warn`; and the packet then ships with an **empty swap table for every list** — no arrows, no
+originals, no `unchanged` statuses, and no error anywhere. The trigger is the owner editing a line to
+say what the employer asked for, which is the single most likely edit they make.
+
+**Guardrail (the invariant, not the incident).** Decide `driver` FIRST, then derive the citation from
+it: `const cites = driver === 'posting' && att` (`swaps.ts:553`). A citation can no longer exist
+without the driver that justifies it. This is also the semantically correct answer — an owner did not
+cite the employer — so the DB CHECK and the meaning now agree instead of merely coinciding.
+
+**Third instance of the same shape, and worth naming as a class:** a THROW inside `writeSwaps` is the
+QUIETEST outcome available, not the loudest, because the only caller swallows it. AC-9 encodes the
+same lesson for count mismatches. Any future work in this file must assume a throw is invisible.
+
+**A guard of ours was VACUOUS on its first draft.** The second new guard's fixture had one owner
+label, and it matched no requirement — so the collision it claimed to test could never arise, and the
+guard stayed GREEN with the defect reinstated. Caught only by mutating it. Fixed by adding an owner
+label that does attribute, with a comment so nobody simplifies it back. **An inert guard is worse
+than no guard, because it is believed.**
+
+**Also recorded — a reporting trap.** A background run was reported as *"completed (exit code 0)"*
+while its raw output read `Terminated` / `EXIT=143`: the zero was the OUTER SHELL's status (the last
+command in the chain was an `echo`), not the tests'. Reading the notification instead of the output
+would have turned a timeout into a pass. Same class as this repo's rule that a queued workflow is not
+a confirmation — **read the output, never the wrapper's exit code.**

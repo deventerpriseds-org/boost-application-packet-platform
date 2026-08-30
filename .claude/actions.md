@@ -5487,3 +5487,34 @@ connector-queryable, and the shape the fixed-slot pairing already needs.
 **Blast radius (why it is Tier 1 and gets its own AC pass):** every `masterBaseline`,
 `loadMasterBaseline`, `loadProfile` and `readSkillFields` caller. It feeds provenance and the swap
 "original", so it decides what the screen ACCUSES the model of changing.
+
+---
+
+## F-1 — an owner edit that quoted the posting emptied the whole swap table (2026-08-30)
+
+**Status: FIXED on `claude/incumbent-wins-swap` (`0bc81f2`), NOT yet on `main`, NOT yet verified live.**
+
+**Found by** the independent verifier pass on the fixed-slot swap-pairing work; **fixed** in the
+implementing pass rather than left as a note.
+
+**Defect.** `driver` and the citation fields were computed independently in `swaps.ts` `row()`, so an
+owner-typed line matching a requirement's verbatim produced `driver='owner'` with a non-null quote —
+rejected by `schema.ts:587`, aborting the `writeSwaps` transaction, swallowed at
+`appPackets.ts:619`, and the packet ships with an EMPTY swap table for every list.
+
+**Fix.** `const cites = driver === 'posting' && att` — the driver decides, the citation follows.
+
+**Pre-existing, not a regression**, but the Option-A rewrite makes it easier to reach: positional
+pairing converts former drop+add pairs into `swapped`, and `swapped` is attributable.
+
+**Evidence.** `tsc` clean; **134/134** on swaps, insertions, checks, ownerGate, compactFit. Two new
+guards, both mutation-proved — after the second was found VACUOUS on its first draft and rewritten.
+Full account in `docs/qc-evidence/IMPL-swap-pairing.md` §4b.
+
+**Still open on this branch:** 4 `templateConfig` source-grep guards fail because the slot-count
+rewrite widened the writer's named-field set from 2 to 8 (**owner decision pending** — my read is
+that widening the named set while KEEPING the no-spread assertion is an update, not a weakening);
+`schemaParity` needs a re-run against a quiet database (its failure was
+`database "parity_fresh" is being accessed by other users`, a local Postgres session of mine, not a
+parity fault); the six AC-16 H-cases; the `appPackets.ts:618` slots wiring; and AC-15, the live
+9-of-14 flip, which is the measurement that actually proves the change worked.
