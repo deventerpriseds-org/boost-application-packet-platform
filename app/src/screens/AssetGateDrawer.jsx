@@ -6,7 +6,7 @@ import {
   SEV_LABEL, severityFor, severityMeta,
   CHECK_LABEL, checkLabel, FIELD_LABEL, fieldLabel, METHOD_LABEL,
   footerFor, reconcile, attentionSplit, engineRows, scoreParts, fmtWhen, arr, errText, pctWidth, bandTone,
-  GATE_HOOKS,
+  firstFixFinding, bySeverity, GATE_HOOKS,
 } from '../assetGate.js'
 import { HIGHLIGHT_CLASS } from '../highlight.js'
 import { useScrollToFocus, focusRingStyle } from '../focusRing.js'
@@ -61,13 +61,43 @@ export function GateBadge({ result, loading, error, onClick, compact = false }) 
   // rows — that is what reconcile() reports in the drawer. It is just not a count of things to fix.
   const split = attentionSplit(result)
   const title = m.word + ' - ' + m.blurb + (result.computedAt ? ' (checked ' + fmtWhen(result.computedAt) + ')' : '')
+  // SPEC 4.4-14 - `{n} to fix — {title} →` (`docs/qc-evidence/qc/packet.jsx:266`).
+  //
+  // The COUNT is the link, which is the half that was missing. The badge as a whole has taken an
+  // onClick for a while, but RENDER-SWEEP.md measured `role: null`, `tabindex: null` and
+  // `cursor: "default"` on the live badge - because the callers' handler resolved to null, not
+  // because the affordance was absent (that producer defect is fixed in `packetFailList`). Even
+  // wired, a whole-badge click leaves the reader nothing to aim at and never names where they land.
+  //
+  // `firstFixFinding` names the finding, from the same severity order the lists it links into are
+  // sorted by. NULL from it, or no onClick, and the count renders as the plain Pill it always was -
+  // the count is a fact about the asset and must survive whether or not it can be clicked, which is
+  // why the link WRAPS it rather than replacing it.
+  const fix = onClick ? firstFixFinding(result) : null
+  const openFix = fix
+    ? (e) => { if (e && e.stopPropagation) e.stopPropagation(); onClick(e) }
+    : null
+  const toFixPill = <Pill tone={result.gate === 'fail' ? 'red' : 'yellow'}>{split.fix} to fix</Pill>
   return (
     <span onClick={onClick} title={title} role={onClick ? 'button' : undefined} tabIndex={onClick ? 0 : undefined}
       data-qc={GATE_HOOKS.badge} data-qc-gate={result.gate == null ? 'unchecked' : String(result.gate)}
       onKeyDown={onClick ? (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClick(e) } } : undefined}
       style={{ display: 'inline-flex', alignItems: 'center', gap: 6, cursor: onClick ? 'pointer' : 'default' }}>
       <span data-qc={GATE_HOOKS.gate}><Pill tone={m.tone}>{m.word}</Pill></span>
-      {split.fix > 0 && <span data-qc={GATE_HOOKS.toFix} data-qc-n={split.fix}><Pill tone={result.gate === 'fail' ? 'red' : 'yellow'}>{split.fix} to fix</Pill></span>}
+      {split.fix > 0 && (openFix
+        ? (
+          <span data-qc={GATE_HOOKS.toFixLink} data-qc-check={fix.check_key || ''}
+            role="button" tabIndex={0} onClick={openFix}
+            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openFix(e) } }}
+            title={'Open ' + fix.title}
+            style={{ display: 'inline-flex', alignItems: 'baseline', gap: 5, cursor: 'pointer', maxWidth: 260 }}>
+            <span data-qc={GATE_HOOKS.toFix} data-qc-n={split.fix}>{toFixPill}</span>
+            <span className="px-link" style={{ fontSize: 11.5, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+              {fix.title} -&gt;
+            </span>
+          </span>
+        )
+        : <span data-qc={GATE_HOOKS.toFix} data-qc-n={split.fix}>{toFixPill}</span>)}
       {split.review > 0 && <span data-qc={GATE_HOOKS.toReview} data-qc-n={split.review}><Pill tone="yellow">{split.review} to review</Pill></span>}
       {!compact && result.override && <span data-qc={GATE_HOOKS.exception}><Pill tone="accent">exception</Pill></span>}
     </span>
@@ -248,8 +278,14 @@ function ChecksTab({ result }) {
   if (!result) return <Quiet>Loading the checks...</Quiet>
   if (result.gate == null) return <Quiet>The checks have not been run for this asset. Run them from the footer.</Quiet>
   const rows = engineRows(result, 'deterministic')
-  const order = { fail: 0, warn: 1, not_applicable: 2, pass: 3 }
-  const sorted = [...rows].sort((a, b) => (order[a.state] ?? 9) - (order[b.state] ?? 9))
+  // SPEC 4.8-11. This carried its own `{ fail: 0, warn: 1, not_applicable: 2, pass: 3 }` - a FOURTH
+  // ordering of one claim, kept only because this file may not import qcRail.js. `bySeverity` moved
+  // beside `ATTENTION_ORDER` in assetGate.js precisely so it could be read from here instead.
+  // Behaviourally identical on this tab, which sorts deterministic rows only and where state and
+  // severity coincide; the point is that it can no longer DRIFT, and that a reviewer row appearing
+  // here would now be ordered by the rule the rest of the app uses rather than by a local table
+  // that has never seen one.
+  const sorted = bySeverity(rows)
   const split = attentionSplit(result)
   const na = rows.filter((r) => r.state === 'not_applicable').length
   if (!sorted.length) return <Quiet>No deterministic checks were recorded for this asset.</Quiet>

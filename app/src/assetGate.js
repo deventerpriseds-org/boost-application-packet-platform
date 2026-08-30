@@ -27,6 +27,11 @@ export const GATE_HOOKS = {
   badge: 'gate-badge',                 // the gate pill group, header and card alike
   gate: 'gate-word',                   // the gate word itself
   toFix: 'gate-to-fix',                // findings from the measured rules
+  // SPEC 4.4-14 - the `n to fix — <title> →` deep link WRAPPING that count. Its own hook, because
+  // the count and the control are two different assertions: `gate-to-fix` renders on every blocked
+  // asset, this one renders only where the click has somewhere to land, and a sweep must be able to
+  // tell "the number is missing" from "the number is inert".
+  toFixLink: 'gate-to-fix-link',
   toReview: 'gate-to-review',          // findings from the independent reviewer - never added to toFix
   summary: 'gate-summary',             // the one reconciled strip shown above every tab
   disagreement: 'gate-disagreement',   // reconcile(): the server's own numbers do not agree
@@ -129,6 +134,116 @@ export function severityFor(row) {
   if (row.state === 'warn') return 'review'
   if (row.state !== 'fail') return null
   return row.engine === 'reviewer' ? 'soft' : 'fix'
+}
+
+/**
+ * SPEC 4.8-11 - the order attention is READ in: fail -> open -> warn -> fixed -> soft.
+ *
+ * THIS IS A CLAIM ABOUT SEVERITY, so it is stated ONCE, here, in the same module that owns the
+ * severity vocabulary itself - not as a literal array retyped at each sort site. `severityWeight`
+ * (qcRail.js) and `railDecisions`'s per-asset ordering both read it, which is why the Checks tab and
+ * the "Needs a decision" list cannot present the same findings in two different orders.
+ *
+ * It is expressed in the SEVERITY keys `severityFor` already returns rather than in raw
+ * state+engine, because that mapping is D6's and re-deriving it here would let this order and the
+ * gate disagree about what a reviewer `fail` is. That re-derivation is exactly the defect this row
+ * names: the previous ordering ranked a reviewer FAIL (`soft`, "Your call") ABOVE a reviewer WARN
+ * (`review`), because it sorted on state before engine - so an opinion the gate may never act on
+ * outranked a finding asking for a decision.
+ *
+ * `open` HAS NO PRODUCER TODAY and that is deliberate on both counts. It keeps its position in the
+ * order because the order is the design's claim and a gap in it would be invisible; it gets no
+ * SEV_LABEL entry because the app has no source for the bucket (see SEV_LABEL's own note - minting
+ * a label for it would invent the bucket). `fixed` likewise has no `severityFor` branch: corrections
+ * are their own region (`correctionsState`), counted separately and never folded into either number.
+ * So two of the five are ORDERED-BUT-UNPRODUCED, which is a statement about the data, not a gap in
+ * this list.
+ */
+export const ATTENTION_ORDER = ['fix', 'open', 'review', 'fixed', 'soft']
+
+/**
+ * Where one severity sorts. Lower is read first. NOTHING is dropped.
+ *
+ * An UNRECOGNISED severity sorts to the TOP (-1), not to the bottom and not out of the list. That
+ * follows `bandTone` two hundred lines below - "an unknown band falls to `red` rather than to green,
+ * because an unrecognised verdict is not permission" - and it is the difference between a sort and a
+ * filter: a `.indexOf()` used raw returns -1 for an unknown key too, but a caller that then treats
+ * the miss as "no severity" silently DELETES the row, which is how a finding nobody has a label for
+ * disappears from the one list that exists to show it.
+ *
+ * `null` (a pass, or not_applicable - `severityFor` returns null for both) is not an unknown
+ * severity, it is the ABSENCE of one, and it sorts after everything rather than to the top. Those
+ * rows are not attention rows at all; `railCounts` counts neither.
+ */
+export function attentionRank(sev) {
+  if (sev == null) return ATTENTION_ORDER.length + 1
+  const i = ATTENTION_ORDER.indexOf(sev)
+  return i === -1 ? -1 : i
+}
+
+/**
+ * Ordering weight for a finding. Higher sorts first. DERIVED from `attentionRank`.
+ *
+ * IT LIVES HERE, BESIDE THE ORDER IT READS, and qcRail.js re-exports it - the same move `pctWidth`
+ * made and for the same reason: the gate drawer may not import qcRail.js, so a copy of this rule was
+ * the only way it could order anything, and it had one (`ChecksTab`'s own
+ * `{ fail: 0, warn: 1, not_applicable: 2, pass: 3 }`). That made FOUR orderings of one claim -
+ * `severityWeight`, `railDecisions`'s engine nest, this table, and `ATTENTION_ORDER` itself.
+ * Behaviourally the drawer's table happened to agree, because it only ever sorted deterministic
+ * rows, where state and severity coincide. It would have stopped agreeing the moment it saw a
+ * reviewer row, and nothing would have said so.
+ *
+ * A reviewer `fail` weighs LESS than a deterministic `fail` (D6): one is a measured fact about the
+ * text that blocks the artifact, the other is a model's opinion that can never block it.
+ *
+ * `not_applicable` outranks `pass` because it is an open question - something could not be checked -
+ * while a pass is settled. Neither has a severity, so both sit below every attention row, and they
+ * keep their own two weights rather than collapsing into one.
+ */
+const SEVERITY_BASE = (ATTENTION_ORDER.length + 2) * 10
+
+export function severityWeight(row) {
+  const sev = severityFor(row)
+  // An unrecognised severity ranks -1 and therefore weighs MORE than `fix` - deliberately. See
+  // attentionRank: an unrecognised verdict is not permission, and burying it is the one outcome
+  // worse than showing it in the wrong place.
+  if (sev != null) return SEVERITY_BASE - attentionRank(sev) * 10
+  if (row && row.state === 'not_applicable') return 10
+  return 0
+}
+
+/** Findings ordered by what a reader must act on first. Stable within a weight. */
+export function bySeverity(rows) {
+  return arr(rows)
+    .map((r, i) => ({ r, i }))
+    .sort((a, b) => (severityWeight(b.r) - severityWeight(a.r)) || (a.i - b.i))
+    .map((x) => x.r)
+}
+
+/**
+ * The first finding a reader would be sent to fix on this asset, with the words to name it.
+ *
+ * SPEC 4.4-14's `<title>` half. The prototype's button reads `{n} to fix — {it.title} →`
+ * (`docs/qc-evidence/qc/packet.jsx:266`), where `title` is the FINDING's name, not the field's - so
+ * this returns `checkLabel(check_key)`, which is already the one table that names a check on every
+ * other surface.
+ *
+ * `fix` SEVERITY ONLY, through `severityFor`, so it can never name a reviewer row: D6 says only a
+ * deterministic row can block, and a badge that reads "3 to fix - <a reviewer's opinion>" would name
+ * as a blocker the one row that cannot block. Ordering is `attentionRank`, so the finding the badge
+ * names is the same one that sorts first in the lists it links into.
+ *
+ * NULL when nothing is failing, which the caller must render as NO deep link rather than as a click
+ * that goes nowhere - the same contract `firstFixTarget` (qcRail.js) keeps for the destination.
+ */
+export function firstFixFinding(result) {
+  const rows = [...engineRows(result, 'deterministic'), ...engineRows(result, 'reviewer')]
+    .map((r, i) => ({ r, i, sev: severityFor(r) }))
+    .filter((x) => x.sev === 'fix')
+    .sort((a, b) => (attentionRank(a.sev) - attentionRank(b.sev)) || (a.i - b.i))
+  const first = rows[0]
+  if (!first) return null
+  return { check_key: first.r.check_key || null, title: checkLabel(first.r.check_key) }
 }
 
 /**
@@ -648,6 +763,35 @@ export function undoAvailability(row) {
         + 'the build of the API that sent it cannot revert a correction yet' }
   }
   return { can: true, reason: '' }
+}
+
+/**
+ * SPEC 4.11-7's `Keep` - may this change be ACCEPTED, and if not, why not.
+ *
+ * IT NEVER CAN, AND THAT IS A FACT ABOUT THE DATA, not a gap in the build. The prototype's reply
+ * carries Keep / Revert / Re-run QC (`docs/qc-evidence/qc/assist.jsx:95-97`) because there a reply
+ * PROPOSES a change the reader then accepts. In this app a correction is applied before the reader
+ * ever sees it - that is R1's whole claim, the change log is a record of finished work - so there is
+ * no pending state for an acceptance to move. A `Keep` button here would send nothing, change
+ * nothing and record nothing, which is precisely the `onClick={() => toast('...')}` the no-dead-UI
+ * rule names. `PROTOTYPE-COVERAGE.md:723` reached the same conclusion independently: *"`Keep` is
+ * worse than vacuous (the route commits before it replies)"*.
+ *
+ * So this returns the REASON, in the shape `undoAvailability` already uses, and the row renders that
+ * sentence where the control would have been. The reader learns the change is already theirs; they
+ * are not handed a button that pretends to give it to them.
+ *
+ * TWO BRANCHES, because an undone row and an applied one are different states and one sentence would
+ * be false for one of them.
+ */
+export function keepAvailability(row) {
+  if (row && row.undone) {
+    return { can: false,
+      reason: 'this change was undone, so there is nothing to keep - use the field itself to make it again' }
+  }
+  return { can: false,
+    reason: 'this change is already applied to your text and recorded here, so there is nothing to accept - '
+      + 'undo it if you would rather it was not' }
 }
 
 /**
