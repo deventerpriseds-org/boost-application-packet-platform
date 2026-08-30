@@ -20,6 +20,20 @@
 // omission list accounts for. That is the failure P2.2 needs to see, and it must not be diluted by
 // laundering rule-driven drops into it — or by inventing a rule for a model's unexplained choice.
 import { normalizePostingText } from './jdText'
+// THE POOLED-FIELD PARSER, REUSED RATHER THAN REWRITTEN. `skillPool.ts` already owns the rules for
+// `Category: term, term | Category: …` — first-colon-only, category stripped BEFORE the comma split,
+// a trailing-colon group emitting NOTHING so a category name can never become a term, and the
+// deliberate refusal to SNIFF the second level (`H:skill-pool-two-level-split-is-declared-never-
+// sniffed`). A third splitter here would be the parallel system "Extend, don't duplicate" forbids,
+// and it would drift from the pool the skill bank is built from.
+//
+// THE IMPORT DIRECTION IS FORCED, and it is worth recording why this file does NOT import the
+// merge-field→MasterContext-key map from `evidence.ts`, which is where that map lives:
+// `evidence.ts` → `reviewer.ts` → `insertions.ts` → `swaps.ts` is a CYCLE. `skillPool.ts` is a leaf
+// (zero imports), so importing it is safe and keeps this module pure. The key is therefore
+// re-declared on `LIST_FIELDS` below and pinned to `evidence.MASTER_BASELINE_FIELD` by a parity
+// test (`H:master-key-parity`), which is the same shape as the DDL-parity guards elsewhere.
+import { splitSkillFieldTagged, TWO_LEVEL_FIELDS, SkillOrigin } from './skillPool'
 
 export type ListKey = 'skills_1' | 'skills_2' | 'relevant_1' | 'relevant_2' | 'relevant_3' | 'expertise'
 export type Origin = 'profile_original' | 'pass_a' | 'pass_b'
@@ -43,13 +57,57 @@ export const LISTS: ListKey[] = ['skills_1', 'skills_2', 'relevant_1', 'relevant
  * ALTER runs (`schema.ts:594-596` — a create-if-not-exists is a no-op on an existing table).
  * `writeSwaps` probes for it rather than letting a rejected insert abort the whole transaction.
  */
-export const LIST_FIELDS: Record<ListKey, { passA: string; passB: string; merge: string }> = {
-  skills_1:   { passA: 'skills1',   passB: 'finalSkills1',   merge: 'SkillsBullets1' },
-  skills_2:   { passA: 'skills2',   passB: 'finalSkills2',   merge: 'SkillsBullets2' },
-  relevant_1: { passA: 'relevant1', passB: 'finalRelevant1', merge: 'RelevantBullets1' },
-  relevant_2: { passA: 'relevant2', passB: 'finalRelevant2', merge: 'RelevantBullets2' },
-  relevant_3: { passA: 'relevant3', passB: 'finalRelevant3', merge: 'RelevantBullets3' },
-  expertise:  { passA: 'expertise', passB: 'finalExpertise', merge: 'ExpertiseBullets' },
+export const LIST_FIELDS: Record<ListKey, { passA: string; passB: string; merge: string; masterKey: string }> = {
+  skills_1:   { passA: 'skills1',   passB: 'finalSkills1',   merge: 'SkillsBullets1',   masterKey: 'skills1' },
+  skills_2:   { passA: 'skills2',   passB: 'finalSkills2',   merge: 'SkillsBullets2',   masterKey: 'skills2' },
+  relevant_1: { passA: 'relevant1', passB: 'finalRelevant1', merge: 'RelevantBullets1', masterKey: 'relevantProficiencies' },
+  relevant_2: { passA: 'relevant2', passB: 'finalRelevant2', merge: 'RelevantBullets2', masterKey: 'relevantProficiencies' },
+  relevant_3: { passA: 'relevant3', passB: 'finalRelevant3', merge: 'RelevantBullets3', masterKey: 'relevantProficiencies' },
+  expertise:  { passA: 'expertise', passB: 'finalExpertise', merge: 'ExpertiseBullets', masterKey: 'expertise' },
+}
+
+/**
+ * Is this list's MASTER block a pooled two-level field (`Category: term, term | Category: …`)?
+ *
+ * Read off `skillPool.TWO_LEVEL_FIELDS`, never re-listed here — the declaration lives in exactly one
+ * place, which is the whole reason that set exists as a set rather than a boolean argument.
+ *
+ * NOTE the deliberate asymmetry with the Call-1 fallback: `call1.relevant1` is an ORDINARY per-list
+ * block the resume writer produced, NOT a pool. Only the MASTER text for these fields is two-level.
+ * So this flag gates the master split alone, and `poolMode` in `buildSwaps` additionally requires
+ * `fromMaster` — splitting a Call-1 relevant list with the two-level parser would be wrong.
+ */
+export const isPooledMasterField = (list: ListKey): boolean =>
+  TWO_LEVEL_FIELDS.has(LIST_FIELDS[list].masterKey as SkillOrigin)
+
+/** One baseline item, with the owner's own grouping when the source field carried one. */
+export interface BaselineItem { label: string; category: string | null }
+
+/**
+ * Split a list's MASTER block into baseline items.
+ *
+ * THE DEFECT THIS FIXES, measured in production 2026-08-30 (`swap_decision`, live rows):
+ * all 15 relevant rows carried a `from_label` that was a whole CATEGORY GROUP — e.g. the 149-char
+ * `"Governance and Compliance: Standards and Compliance, AI/ML Strategy, Cybersecurity Leadership,
+ * Data Strategy, Policy Development, Customer-Centricity"` — presented to the owner as one
+ * "original" skill of theirs. `splitItems` splits on `|`/newline/bullet only, so the pooled block's
+ * five groups arrived whole, and the identical five strings appeared in ALL THREE relevant lists:
+ * 15 rows derived from 5 source strings. `evidence.ts:193-195` is why all three share the key.
+ *
+ * `isRejected` is deliberately NOT applied. The skill BANK rejects a >12-word fragment because a
+ * pool of skills must not contain prose; a BASELINE is a record of what the owner's block said, and
+ * dropping part of it would under-report their own text. A malformed group therefore survives here
+ * as one long item — visible and honest — rather than vanishing.
+ *
+ * INHERITED CONSTRAINT, stated rather than re-decided: inside a two-level group the comma split is
+ * UNCONDITIONAL (`skillPool.ts:156`), so a single proficiency containing a comma — the
+ * "Mergers, Acquisitions and Divestitures" shape — would split. That trade-off was made in
+ * `skillPool.ts` with its own tests and its own reasoning; re-deciding it here would be the second
+ * splitter this import exists to avoid. The live field contains no such term (36 terms, verified).
+ */
+export function splitBaselineItems(list: ListKey, block: any): BaselineItem[] {
+  if (!isPooledMasterField(list)) return splitItems(block).map(label => ({ label, category: null }))
+  return splitSkillFieldTagged(block, true).map(t => ({ label: t.term, category: t.category }))
 }
 
 /**
@@ -208,6 +266,25 @@ export interface ListCounts {
   mergeField: string
   /** Which text the `from_label`s came from. `none` = the list has no baseline text at all. */
   baselineSource: 'master' | 'call1' | 'none'
+  /**
+   * `pool` when the baseline is the owner's POOLED two-level block shared by several lists
+   * (`relevantProficiencies` — see `splitBaselineItems`), `list` when it is this list's own text.
+   *
+   * It is not decoration: under `pool` the pairing DELIBERATELY stops after set-membership, so a
+   * reader comparing `originalCount` against the emitted rows would otherwise conclude rows were
+   * lost. See the block comment on PHASE 2 in `buildSwaps`.
+   */
+  baselineMode: 'list' | 'pool'
+  /**
+   * Pooled baseline terms this list did not use. `0` for a `list` baseline, where an unused
+   * baseline item is a `dropped` row instead.
+   *
+   * REPORTED AS A NUMBER, NEVER AS `droppedLabels`. The pool holds 36 terms and a relevant list has
+   * 2-3 slots, so ~33 non-selections per list is the NORMAL state — naming them would put ~99 of
+   * the owner's own proficiencies on screen under "Taken out of this list"
+   * (`app/src/screens/AssetBlocks.jsx:404-411`) and would accuse each of them three times over.
+   */
+  unusedBaseline: number
   originalCount: number
   finalCount: number
   /** The fixed slot count, or null for UNKNOWN. NEVER 0 — a 0 would declare every item illegal. */
@@ -355,12 +432,46 @@ export function buildSwaps(input: BuildSwapsInput): BuildSwapsResult {
     // returns `{}` entirely, so an absent key means "no master text is known for this field".
     // Falling back to Call 1 there keeps the row honest in the only way available; reporting zero
     // originals would claim the packet invented every line the owner already had.
-    const masterItems = splitItems(master[f.merge])
+    const masterBase = splitBaselineItems(list, master[f.merge])
+    const masterItems = masterBase.map(b => b.label)
     const call1Items = splitItems(call1[f.passA])
     const fromMaster = masterItems.length > 0
     const originals = fromMaster ? masterItems : call1Items
     const baselineSource: ListCounts['baselineSource'] =
       fromMaster ? 'master' : (originals.length ? 'call1' : 'none')
+    // POOL MODE requires BOTH: the master field is two-level AND the master is what we are actually
+    // using. The Call-1 fallback is an ordinary per-list block written by the resume writer, so a
+    // list that fell back keeps the fixed-slot pairing it has always had.
+    const poolMode = fromMaster && isPooledMasterField(list)
+    // The owner's own grouping for a pooled term, so a `kept` row can name it. Keyed by `normItem`
+    // because that is the key everything else in this function pairs on.
+    const categoryOf = new Map<string, string>()
+    for (const b of masterBase) {
+      const n = normItem(b.label)
+      if (n && b.category && !categoryOf.has(n)) categoryOf.set(n, b.category)
+    }
+    /**
+     * THE CATEGORY, CARRIED WITHOUT A SCHEMA CHANGE — requirement 2, and the mechanism was chosen by
+     * checking who READS it, not by adding a field.
+     *
+     * `swap_decision` has no category column, and adding an unpersisted `from_category` to `SwapRow`
+     * would ship write-only — the exact defect `.claude/memory.md` records for `correction.frame`
+     * (written, never selected, `tsc` silent because the field was optional). `rationale` IS a
+     * persisted free-text column and IS returned by `GET /api/app/packet/{id}/swaps`
+     * (`appSwaps.ts` selects `s.*`), so the category travels on it.
+     *
+     * SAFE AGAINST THE TWO EXACT-MATCH CONSUMERS, checked before writing it:
+     *   - `OMIT_LIST_RATIONALE` is compared with `===` and only on `action==='dropped' && driver==='rule'`
+     *     (`app/src/assetBlocks.js:596`);
+     *   - `CROSS_LIST_RATIONALE_PREFIX` is `startsWith`, anchored at position 0, and only on `dropped`
+     *     (`assetBlocks.js:566,642`).
+     * This suffix is appended ONLY to `kept` rows, so it can collide with neither, and
+     * `AssetBlocks.jsx:588` excludes `kept` from the rendered rationale list.
+     */
+    const withCategory = (label: string, text: string): string => {
+      const cat = categoryOf.get(normItem(label))
+      return cat ? `${text} (${cat})` : text
+    }
     const finals = splitItems(pkg[f.merge] ?? call3[f.passB])
     itemCount += finals.length
     const slot = slotsFor(f.merge, input.slots)
@@ -410,11 +521,25 @@ export function buildSwaps(input: BuildSwapsInput): BuildSwapsResult {
     // pairs with leftover i of the final. Explicitly NOT by similarity: a swap row names the owner's
     // line as the thing that was replaced, and similarity drops stopwords, so near-identical labels
     // score 1.0 and the wrong line gets named. Fuzzy is for ranking, never for accusing.
+    //
+    // ── AND WHY POOL MODE SWITCHES PHASE 2 OFF ENTIRELY ──────────────────────────────────────────
+    // The justification above is that the two lists are THE SAME FIXED SLOTS: `skills1` has 11
+    // master items for 11 slots, so leftover i of the master genuinely occupied the slot leftover i
+    // of the final now occupies. That premise is FALSE for a pool. `relevantProficiencies` holds 36
+    // terms (measured live 2026-08-30) and `relevant_1` ships 3 items — pool term #k never occupied
+    // slot #k, and there is nothing in the data that says which of the 36 belongs to which of the
+    // three lists. Pairing them by index is accusation-by-arbitrary-position, the same class of
+    // error as the accusation-by-similarity this phase was written to replace, and inventing the
+    // missing assignment would be the "never fabricate a composite" failure.
+    //
+    // So under `poolMode` nothing is paired past set-membership: a final that IS one of the owner's
+    // terms is `kept`, and everything else in the list is an honest `added` with a null `from_label`.
+    // "This is not one of your 36 terms" is true, actionable and names no innocent original.
     const leftOrig: number[] = []
     for (let oi = 0; oi < originals.length; oi++) if (!pairFor.has(oi)) leftOrig.push(oi)
     const leftFinal: number[] = []
     for (let fi = 0; fi < finals.length; fi++) if (!claimed.has(fi)) leftFinal.push(fi)
-    const nPos = Math.min(leftOrig.length, leftFinal.length)
+    const nPos = poolMode ? 0 : Math.min(leftOrig.length, leftFinal.length)
     for (let k = 0; k < nPos; k++) {
       pairFor.set(leftOrig[k], leftFinal[k])
       positional.add(leftOrig[k])
@@ -424,16 +549,32 @@ export function buildSwaps(input: BuildSwapsInput): BuildSwapsResult {
     const c = { kept: 0, swapped: 0, merged: 0, dropped: 0, added: 0 }
     const droppedLabels: string[] = []
     const addedLabels: string[] = []
+    let unusedBaseline = 0
 
     for (let oi = 0; oi < originals.length; oi++) {
       const o = originals[oi]
       const fi = pairFor.get(oi)
       if (fi !== undefined && !positional.has(oi)) {
         swaps.push(row(list, 'kept', o, finals[fi], null,
-          fromMaster ? 'unchanged from the master template' : 'unchanged from the first pass', ownerLabels))
+          fromMaster ? withCategory(o, 'unchanged from the master template') : 'unchanged from the first pass',
+          ownerLabels))
         c.kept++
         continue
       }
+      // POOL MODE: an unpaired pooled term was never IN this list, so there is no true sentence to
+      // write about it and NO ROW IS EMITTED. Every branch below states something about this list —
+      // "dropped", "merged into", "on the do-not-use list", "already listed in X" — and all four are
+      // false of a term the list never held. Concretely: 36 pooled terms against a 3-slot list
+      // leaves ~33 leftovers per list, ~99 across the three, each rendered under "Taken out of this
+      // list" (`AssetBlocks.jsx:404-411`) and each accused three times. The `merged` fallback is the
+      // sharpest of the four, because it is `similarity() >= SWAP_THRESHOLD`: measured on the live
+      // data, similarity('AI/ML Strategy', 'AI/ML & Data Plan') = 0.67, so the owner's own term
+      // would be reported as folded into a final in whichever lists happened to score — fuzzy
+      // matching used to ACCUSE, which this repo forbids outright.
+      //
+      // It is counted, not silent: `ListCounts.unusedBaseline` carries the number so a caller can
+      // say "3 of your 36 proficiencies are on this list" without naming 33 offenders.
+      if (poolMode) { unusedBaseline++; continue }
       if (fi !== undefined) {
         // A POSITIONAL PAIR IS AN OBSERVATION ABOUT A SLOT, NOT A CITATION. `attribute` still has to
         // clear ATTRIBUTION_THRESHOLD against a requirement's VERBATIM for this to carry a quote;
@@ -495,8 +636,13 @@ export function buildSwaps(input: BuildSwapsInput): BuildSwapsResult {
     // make the counts agree would be the "never fabricate a composite" failure in its purest form.
     for (let k = nPos; k < leftFinal.length; k++) {
       const fi = leftFinal[k]
+      // In POOL MODE this is EVERY final that is not verbatim one of the owner's terms, and the
+      // sentence has to say pool rather than "this list": the owner never had a `RelevantBullets1`
+      // list to be absent from, they had 36 proficiencies. "not present in the master pool" is the
+      // one statement that is true of the document, of the master, and of all three lists at once.
       swaps.push(row(list, 'added', null, finals[fi], attribute(finals[fi], requirements),
-        fromMaster ? 'not present in the master template list' : 'not present in the first-pass list',
+        poolMode ? 'not present in the master pool'
+          : fromMaster ? 'not present in the master template list' : 'not present in the first-pass list',
         ownerLabels))
       c.added++
       addedLabels.push(finals[fi])
@@ -504,6 +650,7 @@ export function buildSwaps(input: BuildSwapsInput): BuildSwapsResult {
 
     lists.push({
       list, mergeField: f.merge, baselineSource,
+      baselineMode: poolMode ? 'pool' : 'list', unusedBaseline,
       originalCount: originals.length, finalCount: finals.length,
       slots: slot.n, slotSource: slot.source,
       expected: slot.n, observed: finals.length,

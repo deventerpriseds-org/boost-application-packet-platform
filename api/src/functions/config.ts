@@ -5,6 +5,13 @@ import { requireWrite, resolveOwner } from './tests/appSession'
 // whitelist that drifts, and this one decides what may be read and written.
 import { CONFIG_KEYS } from './tests/pipelineConfig'
 import { SEED_TEMPLATE_ROLE_FOCUS, templateRowKey } from './tests/roleFocus'
+// The six per-template slot counts. Same rule as `CONFIG_KEYS` above: imported, never re-listed.
+// See the block comment at "FIXED SLOT COUNTS, per template" below for why they live in a separate
+// PURE module rather than here.
+import {
+  SLOT_FIELDS, SlotField, SlotCounts,
+  slotProp, readSlot, readSlots, hasAnySlot, EMPTY_SLOTS,
+} from './tests/slots'
 
 const CONN = process.env.AZURE_STORAGE_CONNECTION_STRING!
 const TABLE = 'AppConfig'
@@ -133,57 +140,20 @@ function isTemplateRow(rowKey: string): boolean {
 // It is NOT a `chk_*` threshold on `owner_search_prefs`: that store is per-OWNER, and one owner with
 // two resumes has two different slot counts. The row keyed by the template's Drive id is the only
 // key that cannot drift from the document being copied.
-export const SLOT_FIELDS = [
-  'SkillsBullets1', 'SkillsBullets2', 'ExpertiseBullets',
-  'RelevantBullets1', 'RelevantBullets2', 'RelevantBullets3',
-] as const
-export type SlotField = typeof SLOT_FIELDS[number]
-export type SlotCounts = Record<SlotField, number | null>
-
-/** Storage property name for a slot count. Prefixed so it can never collide with `roleFocus`,
- *  `label`, or any field added later, and so the read side can enumerate slots from `SLOT_FIELDS`
- *  alone rather than from a second whitelist that would drift from it. */
-function slotProp(field: SlotField): string { return `slot_${field}` }
-
-/**
- * A stored slot count, or `null`.
- *
- * **`null`, NEVER `0` — this is AC-8 and it is load-bearing.** An unset count means "unknown", and
- * the downstream slot check must read that as `not_applicable`. A `0` would mean "this list has zero
- * legal slots", which declares every item in the list illegal and names innocent items as offenders.
- * The repo's standing rule is *"absent evidence is `not_applicable`, never `pass`"* — and equally
- * never an accusation. So anything that is not a positive integer reads back as `null`, including a
- * stored `0`, a negative, a fraction, or a value some other writer left as a string.
- */
-function readSlot(entity: any, field: SlotField): number | null {
-  const raw = entity ? (entity as any)[slotProp(field)] : undefined
-  if (raw === undefined || raw === null || raw === '') return null
-  // Same type gate as the writer, and for the same reason: `Number(true)` is 1, so a boolean sitting
-  // in this property — Azure Tables stores booleans natively, and this row is older than this field —
-  // would read as a slot count of ONE and declare every item past the first illegal.
-  if (typeof raw !== 'number' && !(typeof raw === 'string' && /^[0-9]+$/.test(raw.trim()))) return null
-  const n = Number(typeof raw === 'string' ? raw.trim() : raw)
-  if (!Number.isInteger(n) || n <= 0) return null
-  return n
-}
-
-function readSlots(entity: any): SlotCounts {
-  const out = {} as SlotCounts
-  for (const f of SLOT_FIELDS) out[f] = readSlot(entity, f)
-  return out
-}
-
-/** True when the row carries at least one slot count. Used by BOTH the membership test on the read
- *  and the delete test on the write — a template that has only slot counts is still a configured
- *  template, and must neither vanish from the list nor be deleted by a blank focus. */
-function hasAnySlot(slots: SlotCounts): boolean {
-  return SLOT_FIELDS.some((f) => slots[f] !== null)
-}
-
-const EMPTY_SLOTS: SlotCounts = {
-  SkillsBullets1: null, SkillsBullets2: null, ExpertiseBullets: null,
-  RelevantBullets1: null, RelevantBullets2: null, RelevantBullets3: null,
-}
+//
+// THE DEFINITIONS MOVED, 2026-08-30 — `SLOT_FIELDS`, `SlotField`, `SlotCounts`, `slotProp`,
+// `readSlot`, `readSlots`, `hasAnySlot` and `EMPTY_SLOTS` now live in `tests/slots.ts`. Nothing
+// about this route changed; what changed is that the counts finally reach a CONSUMER. This file
+// calls `app.http(...)` at module scope, so the pipeline could not import from it without pulling
+// route registration into the build and into `node --test` — and the owner's setting therefore
+// reached nothing.
+//
+// They are NOT re-exported from here, deliberately. No TypeScript module imports from `config.ts`
+// today (`grep -rn "from './config'\|from '../config'" api/src` is empty — it is a route-registration
+// entry file), so a re-export would be dead weight AND a trap: it would make this file look like a
+// legitimate place to import slot definitions from, which is precisely the import that pulls
+// `app.http` into the pipeline and caused this defect. **Import from `tests/slots` instead.**
+// `H:slot-fields-have-exactly-one-definition` fails the suite if anyone routes around it.
 
 // GET /api/config/templates — every configured template focus, plus the seeds for those with none.
 export async function getTemplateConfig(req: HttpRequest, context: InvocationContext): Promise<HttpResponseInit> {

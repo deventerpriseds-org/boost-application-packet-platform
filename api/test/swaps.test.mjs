@@ -609,8 +609,12 @@ test('expertise is a real swap list, paired off the master like any other', () =
   // The field names are the assembler's, read from mt17.ts:150
   //   ExpertiseBullets: firstNonEmpty(call1.expertise, call3.finalExpertise, call3.expertise)
   // — not guessed from the merge field, which would leave the call1 fallback structurally dead.
+  // `masterKey` joined on 2026-08-30: it names the MasterContext block this list's master text is
+  // read from, which is what tells `splitBaselineItems` whether that block is the pooled two-level
+  // shape. Expertise's is its own flat field, so it is NOT pooled — asserted below and again in
+  // `H:pooled-mode-is-relevant-only`.
   assert.deepEqual(LIST_FIELDS.expertise, {
-    passA: 'expertise', passB: 'finalExpertise', merge: 'ExpertiseBullets',
+    passA: 'expertise', passB: 'finalExpertise', merge: 'ExpertiseBullets', masterKey: 'expertise',
   })
   // and the Call-1 fallback actually reaches text when there is no master block
   const noMaster = buildSwaps({
@@ -671,4 +675,183 @@ test('an omit-list item with a positional partner is a SWAP; with none it is a r
   assert.equal(emptied.driver, 'rule')
   assert.equal(emptied.verbatim_quote, null)
   assert.match(emptied.rationale, /do-not-use list/)
+})
+
+// ═════════════════════════════════════════════════════════════════════════════════════════════════
+// THE POOLED RELEVANT BASELINE (2026-08-30)
+//
+// THE DEFECT, measured in PRODUCTION, not hypothesised. `boost-pg-mcp-write`:
+//   select distinct from_label from swap_decision
+//    where from_label like '%: %' and list like 'relevant%' and length(from_label) > 100
+// returned exactly FIVE rows, 135-245 characters each, and those five strings were the `from_label`
+// of ALL FIFTEEN relevant rows across relevant_1/2/3 — e.g.
+//   "Governance and Compliance: Standards and Compliance, AI/ML Strategy, Cybersecurity Leadership,
+//    Data Strategy, Policy Development, Customer-Centricity"                         (149 chars)
+// presented to the owner as ONE "original" skill of theirs, and triple-counted across the three
+// lists. Root cause: `evidence.ts:193-195` maps RelevantBullets1/2/3 to the ONE pooled
+// MasterContext key `relevantProficiencies`, and `splitItems` splits only on `|`/newline/bullet —
+// which yields the five CATEGORY GROUPS, not the 36 terms inside them.
+//
+// THE FIXTURE BELOW IS THE LIVE MASTER, VERBATIM. It is the concatenation of those five production
+// `from_label`s — i.e. text the SYSTEM PRODUCED, not a hand-made row the writers never emit. The
+// same 36 terms / 5 categories are independently pinned by docs/qc-evidence/AC-skill-breakdown.md:97.
+const LIVE_POOL = [
+  'Governance and Compliance: Standards and Compliance, AI/ML Strategy, Cybersecurity Leadership, Data Strategy, Policy Development, Customer-Centricity',
+  'Technology Strategy and Transformation: Digital Platform Maturity, SaaS Growth Strategy, Tech-Driven Innovation, Corporate AI Use Cases',
+  'Business and Financial Impact: P&L Optimization, Budget and Cost Control, Investment Strategy, Business Decision Modeling, M&A Integrations, Strategic Partnerships, Portfolio Management, Profitability Analysis',
+  'Data Analytics and AI: Enterprise Data Strategy, Data Insights Automation, AI/ML Advancements, Data-Driven Decisioning, Predictive Analytics, BI and Visualization, KPI-Driven Execution, Real-Time Intelligence',
+  'Execution and Operations: Scaled Agile Engineering, Business Process Re-Engineering, Strategic Roadmapping, Product Design, Innovation Frameworks, Cost Optimization, AI in Operations, Platform Scalability, Global Leadership, Tech Talent Strategy',
+].join(' | ')
+
+const POOL_MASTER = {
+  RelevantBullets1: LIVE_POOL, RelevantBullets2: LIVE_POOL, RelevantBullets3: LIVE_POOL,
+}
+// The RelevantBullets1/2/3 that actually shipped in that packet — the live `to_label`s of the same
+// fifteen rows, in seq order. Again: what the system emitted, not an invented shape.
+const LIVE_FINALS = {
+  RelevantBullets1: 'AI/ML & Data Plan\nEnterprise Architecture Governance\nPlatform Scalability',
+  RelevantBullets2: 'Cloud Infrastructure Management\nDev Practices',
+  RelevantBullets3: 'Secured Engineering\nAgile Development\nContinuous Quality Engineering',
+}
+const relRows = (r) => r.swaps.filter((s) => s.list.startsWith('relevant'))
+
+test('H:relevant-from-label-is-a-term-never-a-category-line', () => {
+  const r = buildSwaps({ call1: {}, call3: {}, pkg: { ...LIVE_FINALS }, master: POOL_MASTER })
+  const rows = relRows(r)
+  assert.ok(rows.length, 'no relevant rows at all — the fixture stopped exercising the path')
+
+  // THE MEASUREMENT. Before: every relevant from_label was 135-245 chars and contained the
+  // "Category: term, term" shape. After: the longest is 20.
+  for (const s of rows) {
+    const f = s.from_label
+    if (f === null) continue
+    assert.ok(f.length <= 60, `from_label is ${f.length} chars, a category line came through: ${JSON.stringify(f)}`)
+    // The precise structural discriminator, not a length heuristic: a category LINE is
+    // "<label>: <term>, <term>". A term never carries a colon followed by a comma-separated tail.
+    assert.ok(!/:\s.*,/.test(f), `from_label still has the "Category: a, b" shape: ${JSON.stringify(f)}`)
+  }
+
+  // and it is not merely SHORT — it must be one of the owner's 36 actual terms.
+  const POOL_TERMS = new Set(LIVE_POOL.split(' | ')
+    .flatMap((g) => g.slice(g.indexOf(':') + 1).split(',').map((t) => t.trim())))
+  assert.equal(POOL_TERMS.size, 36, `the fixture no longer parses to 36 terms (${POOL_TERMS.size})`)
+  for (const s of rows) {
+    if (s.from_label === null) continue
+    assert.ok(POOL_TERMS.has(s.from_label),
+      `from_label is not one of the owner's 36 proficiencies: ${JSON.stringify(s.from_label)}`)
+  }
+})
+
+test('H:pooled-term-in-the-final-is-kept-not-swapped-off-a-category', () => {
+  // `Platform Scalability` IS the owner's own term (Execution and Operations, 8th) and it SHIPPED in
+  // relevant_1. Production reported it as `swapped` FROM
+  // "Business and Financial Impact: P&L Optimization, ..." — a term the owner still has, named as a
+  // replacement for a 209-char line they never wrote. Set membership must call it `kept`.
+  const r = buildSwaps({ call1: {}, call3: {}, pkg: { ...LIVE_FINALS }, master: POOL_MASTER })
+  const ps = relRows(r).filter((s) => s.to_label === 'Platform Scalability')
+  assert.equal(ps.length, 1, JSON.stringify(ps))
+  assert.equal(ps[0].action, 'kept')
+  assert.equal(ps[0].from_label, 'Platform Scalability')
+  // REQUIREMENT 2 — the category is not lost. `swap_decision` has no category column and an
+  // unpersisted SwapRow field would ship write-only (the `correction.frame` defect), so it rides on
+  // `rationale`, which IS persisted and IS returned by GET /api/app/packet/{id}/swaps.
+  assert.equal(ps[0].rationale, 'unchanged from the master template (Execution and Operations)')
+})
+
+test('H:pooled-baseline-accuses-nobody-and-never-twice', () => {
+  const r = buildSwaps({ call1: {}, call3: {}, pkg: { ...LIVE_FINALS }, master: POOL_MASTER })
+  const rows = relRows(r)
+
+  // 36 pooled terms against a 2-3 slot list leaves ~34 unpaired per list. Emitting those as
+  // `dropped` would print ~99 of the owner's own proficiencies under "Taken out of this list"
+  // (AssetBlocks.jsx:404-411), and would name each of them in all three lists.
+  for (const a of ['dropped', 'merged', 'swapped']) {
+    assert.equal(rows.filter((s) => s.action === a).length, 0,
+      `a pooled baseline emitted ${a} rows: ` + JSON.stringify(rows.filter((s) => s.action === a)))
+  }
+  // AND NOTHING MAY QUIETLY VANISH. Found by mutation M1: re-enabling Phase 2 under pool mode does
+  // not produce a `swapped` row (the leftover branch's poolMode guard swallows it) — it CLAIMS the
+  // final, so that final stops being `added` and disappears from the table altogether. Suppressing
+  // a false accusation must never suppress a true row, so every shipped item is accounted for
+  // exactly once. Without this assertion M1 was invisible here.
+  for (const l of r.lists.filter((x) => x.baselineMode === 'pool')) {
+    const mine = rows.filter((s) => s.list === l.list)
+    assert.equal(mine.length, l.finalCount,
+      `${l.list} ships ${l.finalCount} items but the table has ${mine.length} rows`)
+    assert.equal(mine.filter((s) => s.to_label !== null).length, l.finalCount)
+    assert.equal(new Set(mine.map((s) => s.to_label)).size, l.finalCount, `${l.list} double-claims a final`)
+  }
+  for (const l of r.lists.filter((x) => x.baselineMode === 'pool')) {
+    assert.deepEqual(l.droppedLabels, [], `${l.list} named pooled offenders`)
+    // counted, never silent
+    assert.equal(l.unusedBaseline, l.originalCount - l.kept)
+    assert.equal(l.originalCount, 36)
+  }
+
+  // NO DUPLICATE ACCUSATION, asserted structurally rather than by counting today's rows: any
+  // from_label that appears in more than one list must belong to a NON-accusing action. `kept` is
+  // the only action whose from_label equals its to_label, so it accuses nobody.
+  const byLabel = new Map()
+  for (const s of rows) {
+    if (s.from_label === null) continue
+    const seen = byLabel.get(s.from_label) || []
+    seen.push(s)
+    byLabel.set(s.from_label, seen)
+  }
+  for (const [label, group] of byLabel) {
+    if (group.length < 2) continue
+    for (const s of group) {
+      assert.equal(s.action, 'kept', `"${label}" is named by a ${s.action} row in ${group.length} lists`)
+      assert.equal(s.from_label, s.to_label)
+    }
+  }
+})
+
+test('H:pooled-mode-is-relevant-only-and-only-off-the-master', () => {
+  // REQUIREMENT 4 — skills and expertise are measured correct in production today (11/11, 9/9, 7/7
+  // exact) and must not move. Proven two ways, not asserted.
+  //
+  // (1) The flag itself. `isPooledMasterField` reads `skillPool.TWO_LEVEL_FIELDS`, which holds
+  //     `relevantProficiencies` alone.
+  for (const l of ['skills_1', 'skills_2', 'expertise']) {
+    assert.equal(LIST_FIELDS[l].masterKey === 'relevantProficiencies', false, l)
+  }
+
+  // (2) BEHAVIOURALLY: a skills master that happens to LOOK two-level must still be ONE item,
+  //     because skills1 is not a pooled field. If the two-level split ever leaked to skills, this
+  //     fails — the whole point of declaring rather than sniffing.
+  const skillsShaped = buildSwaps({
+    call1: {}, call3: {},
+    pkg: { SkillsBullets1: 'Ops: Alpha, Beta' },
+    master: { SkillsBullets1: 'Ops: Alpha, Beta' },
+  })
+  const sk = skillsShaped.swaps.filter((s) => s.list === 'skills_1')
+  assert.deepEqual(sk.map((s) => s.from_label), ['Ops: Alpha, Beta'],
+    'the two-level split leaked into skills_1')
+  assert.equal(listOf(skillsShaped, 'skills_1').baselineMode, 'list')
+  assert.equal(listOf(skillsShaped, 'skills_1').originalCount, 1)
+
+  // (3) The CALL-1 FALLBACK for a relevant list is an ordinary per-list block the resume writer
+  //     produced, NOT a pool — so with no master text it keeps the fixed-slot pairing it always had,
+  //     positional swaps and all. Pool mode requires the master to actually be in use.
+  const fallback = buildSwaps({
+    call1: { relevant1: 'Alpha\nBeta' }, call3: {},
+    pkg: { RelevantBullets1: 'Alpha\nGamma' },
+  })
+  const l1 = listOf(fallback, 'relevant_1')
+  assert.equal(l1.baselineSource, 'call1')
+  assert.equal(l1.baselineMode, 'list')
+  assert.deepEqual(fallback.swaps.filter((s) => s.list === 'relevant_1').map((s) => s.action),
+    ['kept', 'swapped'])
+})
+
+test('H:master-key-parity: LIST_FIELDS.masterKey mirrors evidence.MASTER_BASELINE_FIELD', async () => {
+  // `swaps.ts` cannot IMPORT the map — evidence.ts -> reviewer.ts -> insertions.ts -> swaps.ts is a
+  // cycle — so the key is re-declared there and pinned here. Without this the two drift silently and
+  // a relevant list quietly stops being pooled (or a skills list starts being).
+  const { MASTER_BASELINE_FIELD } = await import('../dist/functions/tests/evidence.js')
+  for (const list of LISTS) {
+    assert.equal(LIST_FIELDS[list].masterKey, MASTER_BASELINE_FIELD[LIST_FIELDS[list].merge],
+      `${list}: swaps.ts says ${LIST_FIELDS[list].masterKey}, evidence.ts says ${MASTER_BASELINE_FIELD[LIST_FIELDS[list].merge]}`)
+  }
 })

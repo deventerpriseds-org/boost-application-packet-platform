@@ -617,7 +617,26 @@ export async function ensurePackage(client: any, art: any, opp: any, regen: bool
   try {
     await writeSwaps(client, art.packet_id, opp.id, {
       call1: built.calls.c1, call3: built.calls.c3, pkg,
-      profileText: built.profileText, omitList: built.omitList, loop: 0,
+      profileText: built.profileText, omitList: built.omitList,
+      // THE OWNER'S PER-TEMPLATE FIXED SLOT COUNTS, from the row `resolveRoleFocus` already read for
+      // this build's chosen resume (`built.slots`). `writeSwaps` passes them straight to `buildSwaps`,
+      // which is pure and never reads config itself.
+      //
+      // NOT re-derived here on purpose. The counts must describe the SAME resume the focus and the
+      // copy describe, and `packetResumeTemplateId || settings.resumeTemplateId` is resolved inside
+      // `buildPackageForJD`. A second resolution here is a second answer to "which resume is this",
+      // free to disagree the day a packet's choice and the global default differ — which is the
+      // whole reason the per-packet column exists.
+      //
+      // All-null when the owner has set nothing, and `slotsFor` reads that as UNKNOWN. Never zeros:
+      // a `0` would tell the pairing this list has no legal slots at all.
+      slots: built.slots,
+      // `loop: 0` STAYS LAST. `H:loop-zero-clear-rests-on-the-cache-hit` pins it as the final
+      // property of this call, because the ground-zero clear inside `writeSwaps` is only safe while
+      // this caller passes a LITERAL 0 — and appending `slots` after it broke that guard on the
+      // first attempt. The invariant is real, so the new field moved above it rather than the
+      // assertion being widened to accommodate it.
+      loop: 0,
     })
   } catch (e) { console.warn('[packets] swap provenance not recorded:', String(e)) }
   return {

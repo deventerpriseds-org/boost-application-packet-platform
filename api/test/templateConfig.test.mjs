@@ -10,6 +10,18 @@ import { readFileSync } from 'node:fs'
 
 const src = readFileSync(new URL('../src/functions/config.ts', import.meta.url), 'utf8')
 
+// WHERE THE SLOT DEFINITIONS WENT, 2026-08-30 — read this before assuming a guard below has gone
+// stale. `SLOT_FIELDS`, `slotProp`, `readSlot`, `readSlots`, `hasAnySlot` and `EMPTY_SLOTS` are no
+// longer DECLARED in `config.ts`; they moved to the pure `tests/slots.ts` and are imported here.
+// Nothing about this route changed, which is why every case below still matches unmodified: the
+// guards assert on the CALL SITES inside `getTemplateConfig` / `saveTemplateConfig`, and those are
+// exactly where they were. What the move bought is a consumer — `config.ts` calls `app.http(...)`
+// at module scope, so the pipeline could not import from it, and the owner's counts therefore
+// reached nothing. `api/test/slots.test.mjs` owns the guards for the move itself
+// (`H:slots-module-is-pure`, `H:slot-fields-have-exactly-one-definition`) and for the wire from
+// this row to the gate (`H:template-slots-are-carried-at-every-hop`,
+// `H:template-slots-reach-the-gate`). Do not restate those here.
+
 test('H:appconfig-writes-need-a-verified-session-not-requireWrite', () => {
   // `requireWrite` allows a write when `verified || owner === DEMO_EMAIL`, and `resolveOwner`
   // DEFAULTS the owner to DEMO_EMAIL when no `?owner=` is supplied — so an unauthenticated POST

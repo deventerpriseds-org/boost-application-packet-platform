@@ -16,6 +16,7 @@ import { resolvePostingSource } from './jdText'
 import { ensureEvidenceTable, writeEvidence, loadRequirementsWithEvidence } from './appRequirements'
 import { listCorrections } from './appCorrections'
 import { EvidenceInput, EvidenceRow } from './evidence'
+import { resolveTemplateSlots } from './roleFocus'
 
 const HEADERS = { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': '*', 'Access-Control-Allow-Methods': 'GET,POST,OPTIONS' }
 
@@ -34,11 +35,32 @@ export async function evaluateArtifact(client: any, artifactId: string, owner: s
   artifact_id: string; run_id: string; gate: string; attention: number; results: CheckResult[]; score: ArtifactScore
 }> {
   const art = (await client.query(
-    `select a.id, a.type, a.packet_id, p.opp_id, p.pkg_json, o.company, o.owner_email,
+    `select a.id, a.type, a.packet_id, p.opp_id, p.pkg_json, p.resume_template_id, o.company, o.owner_email,
             o.jd_html, o.jd_posting_raw, o.why_surfaced
        from artifact a join packet p on p.id = a.packet_id join opportunity o on o.id = p.opp_id
       where a.id = $1`, [artifactId])).rows[0]
   if (!art) throw new Error('artifact not found')
+
+  // THE OWNER'S PER-TEMPLATE FIXED SLOT COUNTS — the input `fixed_slot_count` grades against.
+  //
+  // Nothing supplied these until 2026-08-30, so the check reported `not_applicable` for EVERY packet
+  // while the setting sat filled in on the template row. Measured on the rebuilt Trinnex packet the
+  // same day: `skills_1` shipped 8 items against a template holding 11 and `skills_2` shipped 10
+  // against 9, recorded honestly as `dropped`/`added` swap rows, and the gate could not see any of it.
+  //
+  // READ FROM THE PACKET'S OWN RESUME, through the same `templates/<rowKey>` reader the build used,
+  // so the counts the gate grades against are the counts the swap pairing paired against. NULL
+  // `resume_template_id` (every packet before 2026-08-24) means the owner's default, which resolves
+  // to no per-template row and therefore all-null — `not_applicable`, unchanged from today.
+  //
+  // NOT passed in as an argument by `ensurePackage`: this function is also reached directly from the
+  // checks route, long after any build, from an artifact id alone. A parameter would be absent on
+  // that path and present on the other, which is a check that grades differently depending on who
+  // asked. One derivation, from the stored row, for both callers.
+  //
+  // An unreadable table yields all-null, never zeros and never a throw: a slot count that cannot be
+  // read must not become a `fail`, and a `0` would declare every item in the list illegal.
+  const slots = await resolveTemplateSlots(art.resume_template_id)
 
   const swaps = (await client.query(
     `select action, driver, to_label, from_label, requirement_id, seq, list from swap_decision where packet_id=$1`, [art.packet_id])).rows
@@ -116,6 +138,7 @@ export async function evaluateArtifact(client: any, artifactId: string, owner: s
     evidence,
     facts: await loadFacts(client, owner || art.owner_email),
     thresholds,
+    slots,
   })
 
   const runId = randomUUID()
