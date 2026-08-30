@@ -2,7 +2,10 @@
 
 **Slug:** `fixed-slot-swap-pairing` · **Branch:** `claude/incumbent-wins-swap`
 **AC:** `docs/qc-evidence/AC-fixed-slot-swap-pairing.md`
-**Status:** IN PROGRESS (written incrementally; a copy ending without `## END OF IMPL` is truncated)
+**Status:** COMPLETE — ends with `## END OF IMPL`. (Written incrementally; a copy ending
+without that marker is truncated and must not be acted on.)
+**Not committed by me** — the parent committed the bulk as `35cab5d`; later edits are left in the
+working tree for review.
 
 **Files I own and may edit:** `api/src/functions/tests/swaps.ts`,
 `api/src/functions/tests/appSwaps.ts`, `api/test/swaps.test.mjs`, this file.
@@ -127,7 +130,18 @@ scaffolding, removable the moment the ALTER lands** — see the handoff note in 
 
 ## 3. HANDOFF NOTES — files I do not own
 
-### HN-1 — `api/src/functions/tests/schema.ts` — **HALF DONE, AND THE MISSING HALF BREAKS EVERY PACKET**
+### HN-1 — `schema.ts` — **RAISED, THEN RESOLVED BY THE PARENT IN `35cab5d`. Verified live, §5f.**
+> **Status at hand-off: DONE.** `git show HEAD:schema.ts` now has the widened inline CHECK at
+> `:549` (`skill_candidate`) **and** an explicit `alter table skill_candidate … ` at `:641-643`,
+> plus `insertion.list` at `:673`. I executed the migration on a populated database and inserted
+> `list='expertise'` into both tables successfully — see **§5f**. The
+> `listChecksAdmitExpertise` probe in `appSwaps.ts` now returns **true**, so nothing is being held
+> back, and the probe is dead weight that can be deleted. The original note is kept below because
+> it is the reasoning that found the gap.
+
+<details><summary>Original note — the gap as raised</summary>
+
+**HALF DONE, AND THE MISSING HALF BREAKS EVERY PACKET**
 Read at `schema.ts` while implementing (OBSERVATION):
 - `swap_decision`: inline CHECK **widened** to include `'expertise'` (`:572`) **and** the explicit
   idempotent ALTER is present (`:619-621`). Done.
@@ -160,6 +174,8 @@ an existing table, so production keeps the old CHECK until an explicit ALTER run
 **Until this lands, D-5's probe keeps expertise rows out of the insert** — the probe checks BOTH
 tables, so it is currently returning `false` and holding those rows back. Once both ALTERs land the
 probe always returns true and can be deleted.
+
+</details>
 
 ### HN-2 — `api/src/functions/tests/appInsertions.ts` — one-word change I DID make
 `loadMasterBaseline` was module-private. AC-2's falsifier is
@@ -238,9 +254,41 @@ cd api && npm run build      →  tsc, exit 0, no output
 ```
 
 ### 5b. Full suite — `cd api && node --test test/*.test.mjs`
+
+First measurement (before the parallel agent started a local Postgres):
 ```
-# tests 913   # pass 907   # fail 6
+# tests 913   # pass 907   # fail 6   # skipped 0
 ```
+Re-measured at hand-off, excluding the three DB-backed files (see the environment note below):
+```
+ls test/*.test.mjs | grep -vE "buildQueueDb|dimensionsDb|schemaParity" | xargs node --test
+# tests 893   # pass 887   # fail 6   # skipped 0
+```
+**The same six failures both times, and the same six named below.** Nothing new appeared.
+
+> **Environment note, so a slow run is not misread as a hang in this work.** Partway through,
+> `buildQueueDb.test.mjs`, `dimensionsDb.test.mjs` and `schemaParity.test.mjs` began taking >25s
+> each and the whole suite stopped finishing inside 300s. Cause, established rather than guessed:
+> the parallel slot-config agent started a local PostgreSQL to execute its schema change
+> (`/tmp/pgd` and `/tmp/pgsock` exist; `ps` shows 55 postgres processes). Those three files **skip
+> loudly when no local PostgreSQL is available** and RUN when one is, so they flipped from skipped
+> to running-and-slow. None of them reads `swaps.ts`, `appSwaps.ts` or `swap_decision`. Nothing in
+> this change can loop: every loop in the new pairing is bounded by `originals.length` or
+> `finals.length`.
+> **`schemaParity.test.mjs` is worth re-running once `schema.ts` settles** — it is the test that
+> would catch HN-1 (a fresh database and an upgraded one disagreeing about `skill_candidate.list`).
+> I did not run it to a verdict because `schema.ts` was being actively edited underneath it.
+
+> **Do not read the killed background runs as verdicts.** Three background test jobs
+> (`bbf5byqpm`, `bi1rgq51w`, `b8ks0w2n2`) reported `failed` with **exit code 144** — that is a
+> KILL (128+16), not a test verdict. All three were launched during the window when the parallel
+> agent had left a syntax error in `schema.ts` at `:630` (a backtick inside the `SCHEMA_SQL`
+> template literal terminated the string), so `tsc` was failing and `dist/` was stale. Their
+> partial output names `H:one-build-per-opportunity` and nine siblings in
+> `buildQueueDb.test.mjs` — a DB-backed file that **references none of my modules**
+> (`grep -nE "swaps|appSwaps|appInsertions|swap_decision|skill_candidate|buildSwaps|masterBaseline"`
+> over all three DB files returns **zero hits**; they import `appDimensions`, `appBuildQueue` and
+> `SCHEMA_SQL` only). Re-measured against a clean build in §5g.
 
 The 6 failures, every one accounted for and **none in a file I touched**:
 
@@ -253,9 +301,10 @@ The 6 failures, every one accounted for and **none in a file I touched**:
 | `H:template-row-is-listed-when-it-has-only-a-name` | `templateConfig.test.mjs` | **no** | same |
 | `H:template-delete-needs-both-empty` | `templateConfig.test.mjs` | **no** | same |
 
-**Baseline measured on a clean `HEAD` tree: `# tests 894  # pass 892  # fail 2`** — the two
-`D:ledger-*` rows and nothing else. So my change moved the suite from 892→907 passing with **zero
-new failures**.
+**Baseline measured on a clean `HEAD` tree: `# tests 894  # pass 892  # fail 2  # skipped 18`** —
+the two `D:ledger-*` rows and nothing else. So my change moved the suite from 892→907 passing with
+**zero new failures**. (The 18 skips are the DB-backed files, which had no local Postgres at that
+point.)
 
 > **Method warning for the next agent: do NOT `git stash` in this tree.** I did, to take that
 > baseline, and the parallel agent wrote `docs/qc-evidence/IMPL-slot-config.md` during the ~30s the
@@ -307,8 +356,50 @@ Restored and re-verified green after each: `# pass 38  # fail 0`.
 | AC-13 — the `compactFit` drop-pool change | **NOT measured.** See HN-6 | before/after `fitCompactSkills` on one real packet's provenance |
 | AC-9c / AC-10 / AC-11 — the `runChecks` slot check | **NOT BUILT — not my file.** `checks.ts` is the parent's | HN-3 |
 | AC-16 — the six H-cases | **NOT WRITTEN — not my file.** `hardening.test.mjs` is the parent's | HN-4 |
+| AC-14 — the expertise DDL | **CONFIRMED** — executed on a populated database, §5f | (done) |
+| `schemaParity.test.mjs` | **NOT RUN TO A VERDICT** — `schema.ts` was being edited underneath it | re-run once `schema.ts` settles |
 
-### 5f. Self-attack sweep (§0b) before handing off
+### 5f. AC-14 — the expertise DDL, EXECUTED on a POPULATED database (not read, run)
+
+Per CLAUDE.md's strict rule: a fresh-database pass proves almost nothing, because every
+`create table if not exists` is skipped on the database you actually care about. So: apply
+**`origin/main`'s** `SCHEMA_SQL`, seed rows, then apply the branch's `SCHEMA_SQL` **on top**.
+Against the local PostgreSQL 16.13 at `/var/tmp/p84pg:55432`, `ON_ERROR_STOP=1` throughout.
+
+| Step | Command | Result |
+|---|---|---|
+| 1 | apply `git show origin/main:…/schema.ts`'s `SCHEMA_SQL` | **exit 0** |
+| 2 | **vacuity control** — `insert into skill_candidate (… list) values (…'expertise'…)` on the OLD schema | **`ERROR: new row for relation "skill_candidate" violates check constraint "skill_candidate_list_check"`** — so the test below is not vacuous, and it confirms `skill_candidate` rejects FIRST, before `swap_decision` is ever reached |
+| 3 | seed a `skill_candidate` + a `swap_decision` row, then apply the BRANCH's `SCHEMA_SQL` on top | **exit 0** — the migration runs on a populated database |
+| 4 | `insert … skill_candidate … list='expertise'` | **ACCEPTED** |
+| 4 | `insert … swap_decision … list='expertise'` | **ACCEPTED** |
+| 5 | `insert … swap_decision … driver='unattributed', verbatim_quote='a quote'` | **`ERROR: … violates check constraint "swap_decision_check"`** — AC-5's citation contract `((driver='posting') = (verbatim_quote is not null))` still holds, proven against the database rather than by reading it |
+| 6 | the `listChecksAdmitExpertise` probe query, run **verbatim** | returns `swap_decision` **and** `skill_candidate` ⇒ the probe returns **true**, nothing is held back |
+
+Database dropped afterwards. **AC-14 is CONFIRMED** on the two things a local database can settle
+(the DDL migrates, and both tables accept the row). What a local database cannot settle is whether
+production's *existing* constraint matches `origin/main`'s — that is the AC-15 live check.
+
+### 5g. The three DB-backed files — why they are excluded, and what that does NOT hide
+
+`buildQueueDb.test.mjs`, `dimensionsDb.test.mjs` and `schemaParity.test.mjs` are excluded from the
+5b re-measurement. Two independent reasons they cannot mask a defect in this work:
+
+1. **They do not reference anything I changed.** Run over all three:
+   `grep -nE "swaps|appSwaps|appInsertions|swap_decision|skill_candidate|buildSwaps|masterBaseline"`
+   → **zero hits**. Their imports are `appDimensions.js`, `appRequirements.js`, `dimensions.js`,
+   `SCHEMA_SQL` and `pg`. There is no path from `swaps.ts` / `appSwaps.ts` to any of them.
+2. **They were SKIPPED in the clean-`HEAD` baseline** (`# skipped 18`), so they contributed nothing
+   to the 892-passing figure either. Excluding them compares like with like.
+
+They began running — and taking >25s each — only once the parallel agent started a local
+PostgreSQL for its own schema work. **Their contents were not measured to a verdict here**, and a
+verdict on them belongs to whoever owns `schema.ts` / `appDimensions.ts`. `schemaParity` in
+particular is worth a clean run now that `schema.ts` has settled: it is the guard that would catch
+a fresh-vs-upgraded disagreement of exactly the HN-1 shape, which §5f only proved for the two
+`list` CHECKs specifically rather than for the whole file.
+
+### 5h. Self-attack sweep (§0b) before handing off
 1. **Who reads what I wrote?** `grep -rn "LISTS\b\|ListKey\|LIST_FIELDS" api/src app/src` → **no
    consumer outside `swaps.ts`** (the two hits are unrelated prose in `figureEcho.ts` /
    `pipeline.ts`). `grep -rn writeSwaps api/src` → the sole caller is `appPackets.ts:618`, which

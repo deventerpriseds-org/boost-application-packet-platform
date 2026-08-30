@@ -114,7 +114,7 @@ export async function writeSwaps(client: any, packetId: string, oppId: string, a
     master, slots: args.slots,
   })
 
-  // Hold expertise rows back until the DDL admits them — see `listCheckAdmitsExpertise`. Reported in
+  // Hold expertise rows back until the DDL admits them — see `listChecksAdmitExpertise`. Reported in
   // the return value AND on the log, never silently: a list that produced rows the database refused
   // is a fact the caller has to be able to see.
   const admitsExpertise = await listChecksAdmitExpertise(client)

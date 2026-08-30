@@ -207,6 +207,17 @@ export interface CheckInput {
   profileText?: string
   /** The EMPLOYER'S OWN text (resolvePostingSource), never `groundingText`. See the R3 check. */
   postingText?: string
+  /**
+   * How many lines each list's TEMPLATE holds, keyed by merge field — the owner's per-template
+   * setting, resolved by the caller.
+   *
+   * A missing key and a `null` mean the same thing and are the SAFE state: the check reports
+   * `not_applicable`. A `0` must never be passed for "unset" — it would declare every item in the
+   * list illegal. Owner, 2026-08-29: *"fixed slot counts change per template"*, so this is read
+   * from the template's own config row and is deliberately NOT derived from the master text, which
+   * would be right for one template and silently wrong for the next.
+   */
+  slots?: Record<string, number | null>
   requirements?: Array<{ seq: number; verbatim: string | null; item_text: string; kind: string }>
   // `requirement_id`, `seq` and `list` are carried so `compact_skills_fit` can reproduce the SAME
   // drop decision the render made. Without them this check would rank on `driver` alone and could
@@ -351,6 +362,66 @@ export function runChecks(input: CheckInput): CheckResult[] {
             `${t.skillsTotalMin}-${t.skillsTotalMax} total, evenly split within ${t.skillsSplitTolerance}`, offenders, 'warn')
       : ok('skill_list_count', `${total} skills split ${n1}/${n2}`,
            `${t.skillsTotalMin}-${t.skillsTotalMax} total, evenly split within ${t.skillsSplitTolerance}`))
+  }
+
+  // --- FIXED SLOTS ------------------------------------------------------------------------
+  //
+  // Owner, 2026-08-29: *"the 10 can't be increased to 12 or reduce to 8 etc so only swaps are
+  // allowed not adds or drops given the limited space in the resume template"*, and *"also relevant
+  // and expertise counts"*. The template prints a fixed number of lines; a list that gains or loses
+  // one overflows the page or leaves a hole.
+  //
+  // WHY THIS IS A CHECK AND NOT AN EXCEPTION IN `buildSwaps`. Making the pairing refuse to emit
+  // `added`/`dropped` could only be done by fabricating a pair or dropping the row - hiding, which
+  // the owner rules out. And a THROW is the QUIETEST outcome available here, not the loudest:
+  // `appPackets.ts:617-622` swallows it into a console.warn and the packet ships with an EMPTY swap
+  // table. So the violation is REPORTED, on the gate the owner already reads, with the offenders
+  // named. `buildSwaps` still emits the honest `added`/`dropped` rows that evidence it.
+  //
+  // ABSENT EVIDENCE IS `not_applicable`, NEVER `pass` AND NEVER `fail`. A slot count the owner has
+  // not set is `null` - never `0`, which would declare every item in the list illegal - and an
+  // unset count means nobody has said how many lines this template holds. Accusing a document on
+  // that basis is the accusation-grade error this file exists to avoid.
+  const SLOT_FIELDS = [...SKILL_FIELDS, ...RELEVANT_FIELDS, 'ExpertiseBullets']
+  const slotFields = SLOT_FIELDS.filter(has)
+  if (slotFields.length) {
+    // The compact resume DELIBERATELY drops skills to fit a character budget (`fitCompactSkills`),
+    // so a slot count is meaningless for it. Emitted as not_applicable rather than skipped: a check
+    // that silently stops being emitted is invisible to `gateFor`, which is exactly how six checks
+    // disappeared from the compact resume once (see the CHECK_FIELDS_FOR comment above).
+    if (input.type === 'compact_resume') {
+      out.push(na('fixed_slot_count',
+        'the compact resume fits skills to a character budget and drops to fit (fitCompactSkills)',
+        'every list ships exactly the slot count its template declares'))
+    } else {
+      const slots = input.slots || {}
+      const known = slotFields.filter(f => typeof slots[f] === 'number' && (slots[f] as number) > 0)
+      if (!known.length) {
+        out.push(na('fixed_slot_count',
+          `no per-template slot count is set for ${slotFields.join(', ')}`,
+          'every list ships exactly the slot count its template declares'))
+      } else {
+        const offenders: string[] = []
+        const seen: string[] = []
+        for (const f of known) {
+          const expected = slots[f] as number
+          const observed = splitItems(pkg[f]).length
+          seen.push(`${f} ${observed}/${expected}`)
+          if (observed !== expected) {
+            offenders.push(`${f}: template holds ${expected}, document ships ${observed} (${observed > expected ? `${observed - expected} added` : `${expected - observed} dropped`})`)
+          }
+        }
+        const unset = slotFields.filter(f => !known.includes(f))
+        // The unset lists are NAMED in the observed text rather than quietly excluded, so a partial
+        // measurement never reads as a whole one.
+        const note = unset.length ? `; not set: ${unset.join(', ')}` : ''
+        out.push(offenders.length
+          ? bad('fixed_slot_count', `${seen.join(', ')}${note}`,
+                'every list ships exactly the slot count its template declares', offenders)
+          : ok('fixed_slot_count', `${seen.join(', ')}${note}`,
+               'every list ships exactly the slot count its template declares'))
+      }
+    }
   }
 
   if (relevantByList.length) {

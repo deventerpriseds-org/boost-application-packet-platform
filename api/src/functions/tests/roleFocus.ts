@@ -15,6 +15,17 @@ export interface ResolvedRoleFocus {
   source: RoleFocusSource
   /** Present whenever the role did NOT resolve from configuration. Callers must surface it. */
   warning?: string
+  // NEXT UNIT, deliberately NOT added yet: `slots: Record<string, number|null>` — the template's
+  // fixed slot counts, which live on the SAME `templates/<rowKey>` entity this function already
+  // fetches for `roleFocus`, so they ride along without a sixth reader of that partition.
+  //
+  // It is not here yet because the reader (`SLOT_FIELDS` / `readSlot`) currently lives in
+  // `functions/config.ts`, which calls `app.http(...)` at module scope. Importing it from this
+  // file would pull route registration into the pipeline and into `node --test`, and this module
+  // is reached by most of the build. The correct shape is a small PURE `tests/slots.ts` that BOTH
+  // `config.ts` and this file import — one definition, two consumers — rather than a second copy
+  // of "which merge fields have slot counts". Until that lands, `runChecks` reports
+  // `fixed_slot_count: not_applicable`, which is the correct state for a count nobody supplied.
 }
 
 /** Code seed. Only the FIRST value: the owner changes it at Auth & Config → `openai.defaultRoleFocus`. */
