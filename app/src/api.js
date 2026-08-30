@@ -303,8 +303,17 @@ export const api = {
   // `label` is OMITTED when undefined rather than sent as '' — the route treats an absent label as
   // "leave it alone" and a present blank one as "clear it", so sending '' from a caller that only
   // meant to change the focus would wipe the template's name.
-  templateFocusSet: (templateId, roleFocus, label) => post('/config/templates',
-    label === undefined ? { templateId, roleFocus } : { templateId, roleFocus, label }),
+  //
+  // `slots` is the SAME contract, one level down: the six fixed slot counts
+  // (SkillsBullets1, SkillsBullets2, ExpertiseBullets, RelevantBullets1..3). A key omitted from the
+  // object is left alone; a key present with `null` clears it; a key present with a positive whole
+  // number sets it. The whole `slots` object is omitted when undefined so a caller that only meant
+  // to rename a template cannot wipe its counts — the row is written with Replace.
+  templateFocusSet: (templateId, roleFocus, label, slots) => post('/config/templates', {
+    templateId, roleFocus,
+    ...(label === undefined ? {} : { label }),
+    ...(slots === undefined ? {} : { slots }),
+  }),
   // The owner's skill REWORDINGS (4.6-9). Code seeds the first value; this pair is what makes it a
   // setting rather than a constant, per the owner's "config store so i can edit them".
   // GET returns { stored, seed, effective, preview } — preview carries the resulting pool AND
