@@ -641,9 +641,13 @@ alter table swap_decision add constraint swap_decision_list_check
 alter table skill_candidate drop constraint if exists skill_candidate_list_check;
 alter table skill_candidate add constraint skill_candidate_list_check
   check (list in ('skills_1','skills_2','relevant_1','relevant_2','relevant_3','expertise'));
-alter table insertion drop constraint if exists insertion_list_check;
-alter table insertion add constraint insertion_list_check
-  check (list in ('skills_1','skills_2','relevant_1','relevant_2','relevant_3','expertise'));
+-- The matching ALTER for the insertion table is NOT here. It is BELOW that table's own create,
+-- because insertion is created ~20 lines further down and an ALTER cannot precede its table on a
+-- FRESH database: ERROR: relation "insertion" does not exist, which aborts the entire migration.
+-- Measured, and it is the exact MIRROR of the trap this file already documents twice: a
+-- populated-database run passes it (the table is already there) while a fresh one dies. Both
+-- directions have now cost a migration here, so the rule is two-sided - a statement must come
+-- AFTER the ALTER that adds what it names, AND after the CREATE of the table it alters.
 -- ORDER IS LOAD-BEARING, for the same reason as the check_result unique further down (H34).
 -- On a database where these tables ALREADY exist - production, since P1 - 'create table if not
 -- exists' is a NO-OP and the inline 'loop' column above is never added. The index on the next line
@@ -681,6 +685,16 @@ create table if not exists insertion (
   check (generated or (after_text is null and verbatim_quote is null and item_count = 0))
 );
 create index if not exists insertion_artifact_idx on insertion(artifact_id, loop);
+-- EXPERTISE on insertion.list — the third of the three list CHECKs (see the pair beside
+-- swap_decision above). It lives HERE, after the create, and the first attempt put it up there with
+-- its two siblings: on a fresh database that produced
+--   ERROR: relation "insertion" does not exist
+-- and aborted the whole migration, while the populated-database check passed because the table was
+-- already present. The inline CHECK on the create above carries 'expertise' for a fresh database;
+-- this ALTER is what reaches production, where the create is a no-op.
+alter table insertion drop constraint if exists insertion_list_check;
+alter table insertion add constraint insertion_list_check
+  check (list in ('skills_1','skills_2','relevant_1','relevant_2','relevant_3','expertise'));
 
 -- P2.1 — one row per check per artifact per run. offenders names the specific items, never a
 -- count: a count tells a reviewer something is wrong without telling them what to fix.

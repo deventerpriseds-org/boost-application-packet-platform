@@ -706,3 +706,87 @@ test('H:a-confirmed-proposal-is-not-reported-as-awaiting: the tail cannot contra
     `THE TAIL CONTRADICTS THE NUMERATOR. It reports ${m[1]} proposals "awaiting your confirmation ` +
     `... not counted either way", but one of them is confirmed and IS counted. Observed: ${cov.observed}`)
 })
+
+// ── H:fixed-slot-count — the owner's fixed-slot rule, and the three states it must never confuse ──
+//
+// The check decides a GATE and NAMES OFFENDERS, so it is accusation-grade: a false `fail` accuses a
+// document that is correct, and a false `pass` lets a document that broke the template ship. It
+// arrived with ZERO coverage - an independent verifier inverted all three of its states (unknown ->
+// pass, the compact_resume branch deleted so the check goes absent, mismatch -> pass) and the suite
+// stayed green on every one. These cases exist so that can never be true again.
+//
+// Owner, 2026-08-29: *"the 10 can't be increased to 12 or reduce to 8 etc so only swaps are allowed
+// not adds or drops given the limited space in the resume template"*, and *"also relevant and
+// expertise counts"*, and *"fixed slot counts change per template"*.
+
+const SLOT_PKG = {
+  SkillsBullets1: 'A\nB\nC',            // 3 items
+  SkillsBullets2: 'D\nE',               // 2 items
+  ExpertiseBullets: 'F\nG',             // 2 items
+  RelevantBullets1: 'H', RelevantBullets2: 'I', RelevantBullets3: 'J',
+}
+
+test('H:fixed-slot-count-unknown-is-not-applicable: a count nobody set accuses nobody', () => {
+  // ABSENT EVIDENCE IS not_applicable, NEVER pass AND NEVER fail. Both directions matter: `pass`
+  // reports an unmeasured document as verified, `fail` accuses one on a number nobody supplied.
+  const r = find(runChecks({ type: 'resume', pkg: SLOT_PKG }), 'fixed_slot_count')
+  assert.ok(r, 'the check must be EMITTED even when it cannot decide - gateFor cannot see an absent check')
+  assert.equal(r.state, 'not_applicable')
+  assert.match(r.observed, /no per-template slot count is set/)
+
+  // A slot count of 0 is the trap this guards: it would declare every item in the list illegal.
+  // `0` must be treated as unset, exactly like null and like an absent key.
+  const zero = find(runChecks({ type: 'resume', pkg: SLOT_PKG, slots: { SkillsBullets1: 0 } }), 'fixed_slot_count')
+  assert.equal(zero.state, 'not_applicable', 'a slot count of 0 must never be read as "zero slots allowed"')
+})
+
+test('H:fixed-slot-count-fails-on-a-mismatch-and-names-the-offender', () => {
+  const r = find(runChecks({ type: 'resume', pkg: SLOT_PKG, slots: { SkillsBullets1: 5, SkillsBullets2: 2 } }), 'fixed_slot_count')
+  assert.equal(r.state, 'fail', 'a document that lost two slots must trip the gate, not warn')
+  assert.equal(r.offenders.length, 1, 'only the list that actually broke is named')
+  assert.match(r.offenders[0], /SkillsBullets1: template holds 5, document ships 3 \(2 dropped\)/)
+  // The gate is the whole point of the fail: a finding nothing acts on is decoration. `gateFor`
+  // returns the CheckState directly, and only a DETERMINISTIC fail reaches 'fail' - a reviewer fail
+  // degrades to 'warn' - so this also pins the check's `engine` as deterministic.
+  assert.equal(r.engine, 'deterministic')
+  assert.equal(gateFor([r]), 'fail')
+})
+
+test('H:fixed-slot-count-passes-only-on-an-exact-match, and names what it could not measure', () => {
+  const r = find(runChecks({ type: 'resume', pkg: SLOT_PKG, slots: { SkillsBullets1: 3, SkillsBullets2: 2 } }), 'fixed_slot_count')
+  assert.equal(r.state, 'pass')
+  assert.equal(r.offenders.length, 0)
+  // A PARTIAL measurement must never read as a whole one: the four lists with no count are named in
+  // the observed text, so a reader can tell "all lists correct" from "the two I could check".
+  assert.match(r.observed, /not set: RelevantBullets1, RelevantBullets2, RelevantBullets3, ExpertiseBullets/)
+
+  // An over-count is a violation in the other direction and must be worded as such.
+  const over = find(runChecks({ type: 'resume', pkg: SLOT_PKG, slots: { SkillsBullets1: 2 } }), 'fixed_slot_count')
+  assert.equal(over.state, 'fail')
+  assert.match(over.offenders[0], /\(1 added\)/)
+})
+
+test('H:fixed-slot-count-is-emitted-for-compact-resume-as-not-applicable, never absent', () => {
+  // `checks.ts:311-325` records what happens when a check silently stops being emitted: six of them
+  // vanished from the compact resume and `gateFor` could not see any of them. So the compact resume
+  // - which DELIBERATELY drops skills to fit a character budget - gets an explicit not_applicable
+  // naming that reason, rather than being skipped.
+  const rs = runChecks({ type: 'compact_resume', pkg: SLOT_PKG, slots: { SkillsBullets1: 3, SkillsBullets2: 2 } })
+  const r = find(rs, 'fixed_slot_count')
+  assert.ok(r, 'ABSENT from the results array is the failure this case exists for, not merely not_applicable')
+  assert.equal(r.state, 'not_applicable')
+  assert.match(r.observed, /fitCompactSkills/)
+})
+
+test('H:fixed-slot-count-covers-relevant-and-expertise, not just skills', () => {
+  // Scope is the owner's, stated twice: *"also relevant and expertise counts"*. A check that quietly
+  // covered only the two skills lists would satisfy every other case above and still be wrong.
+  const r = find(runChecks({
+    type: 'resume', pkg: SLOT_PKG,
+    slots: { ExpertiseBullets: 4, RelevantBullets2: 3 },
+  }), 'fixed_slot_count')
+  assert.equal(r.state, 'fail')
+  assert.equal(r.offenders.length, 2)
+  assert.ok(r.offenders.some(o => /^ExpertiseBullets: template holds 4, document ships 2/.test(o)))
+  assert.ok(r.offenders.some(o => /^RelevantBullets2: template holds 3, document ships 1/.test(o)))
+})

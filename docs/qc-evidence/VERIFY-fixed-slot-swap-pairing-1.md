@@ -8,7 +8,8 @@ Independent verifier. No shared context with the implementers. Branch
 `claude/incumbent-wins-swap`, commits `35cab5d`, `2cd6f69`.
 Every verdict below cites a command actually run in this container and its real output.
 
-**STATUS: IN PROGRESS** — this banner is rewritten to COMPLETE only when every claim has a verdict.
+**STATUS: COMPLETE** — every claim carries a literal CONFIRMED / REFUTED / NOT_APPLICABLE verdict.
+Ends with `## END OF VERIFY PASS`; a copy without that marker is truncated.
 
 Method note: I did not read the implementers' tests for the behavioural claims. I wrote my own
 probes against the BUILT module (`api/dist/functions/tests/*.js`, `cd api && npm run build` clean)
@@ -358,3 +359,496 @@ Structural note on the guard's real shape: the check is inside `if (slotFields.l
 SkillsBullets]`, so `slotFields` is non-empty and the branch is reached. For `cover_letter` the check
 is genuinely ABSENT from the results array — correct (a cover letter ships none of these lists) and
 outside AC-11's scope, but recorded here because it is the same code path.
+
+---
+
+## Claim 9 — AC-12: existing `added`/`dropped` rows still read and render
+
+**CONFIRMED**, in three places — the live database, an upgraded local database, and the renderer.
+
+**Live database** (`db-query.yml` run `33289063388`, job `99197348962`, conclusion `success`, read
+from the job log — not from the 204):
+
+```
+ action  | n
+---------+----
+ added   |  7
+ dropped |  8
+ kept    | 35
+ swapped | 15
+(4 rows)
+```
+
+That is the 8 dropped / 7 added the brief names, still present and readable.
+
+**Upgrade path** — seeded one row of each action on main's schema, then applied this branch's schema
+over the populated database (full harness under Claim 10):
+
+```
+after upgrade:  added=1  dropped=1  kept=1  swapped=1   skill_candidate=2  insertion=1
+action CHECK after upgrade:
+  CHECK ((action = ANY (ARRAY['kept','swapped','merged','dropped','added'])))
+```
+
+All five action values remain legal (AC-12a: no migration touches `action`, and none is needed).
+
+**Renderer** — `listBodyModel` executed directly on a `dropped` row (see Claim 11's probe) keeps
+populating `model.dropped` from `swaps.filter(s => s.action === 'dropped' && s.from_label)`
+(`app/src/assetBlocks.js:789`), unchanged by this branch:
+
+```
+$ git diff 82f1fbf..2cd6f69 --stat -- app/src/assetBlocks.js
+(no output — the file is untouched on this branch)
+```
+
+`restoreOptions`, `omitListCaveat` and both pill ternaries live in that same untouched file, so
+AC-12b holds by the file being unmodified rather than by my assertion. `changes_cited`
+(`checks.ts:921`) is likewise outside this branch's diff to `checks.ts` (which only adds the
+FIXED SLOTS block at `:367-425`).
+
+---
+
+## Claim 10 — AC-14 / DDL: `skill_candidate`, `swap_decision` and `insertion` admit `list='expertise'`
+
+**CONFIRMED for the upgrade path — and REFUTED for a fresh database.** Both halves were executed;
+the second is finding **F-2** and it is the most serious defect in this pass.
+
+### The vacuity control first — the OLD schema must reject `expertise`
+
+Local PostgreSQL 16.13, `main`'s `SCHEMA_SQL` applied to a fresh database, then real rows seeded
+(one opportunity, one packet, one artifact, two `skill_candidate`, four `swap_decision` covering
+`kept`/`dropped`/`added`/`swapped`, one `insertion`). Then, on that POPULATED database:
+
+```
+ERROR:  new row for relation "swap_decision" violates check constraint "swap_decision_list_check"
+ERROR:  new row for relation "skill_candidate" violates check constraint "skill_candidate_list_check"
+ERROR:  new row for relation "insertion" violates check constraint "insertion_list_check"
+```
+
+All three reject `expertise` before the change. The control is not vacuous.
+
+### The upgrade — this branch's schema applied ON TOP of that populated database
+
+```
+$ psql -v ON_ERROR_STOP=1 -q -d upg -f /tmp/schema_nv.sql
+branch schema exit=0
+$ psql -v ON_ERROR_STOP=1 -q -d upg -f /tmp/schema_nv.sql     # idempotency
+re-run exit=0
+
+CHECK constraints after upgrade:
+  swap_decision   CHECK ((list = ANY (ARRAY['skills_1','skills_2','relevant_1','relevant_2','relevant_3','expertise'])))
+  skill_candidate CHECK ((list = ANY (ARRAY['skills_1','skills_2','relevant_1','relevant_2','relevant_3','expertise'])))
+  insertion       CHECK ((list = ANY (ARRAY['skills_1','skills_2','relevant_1','relevant_2','relevant_3','expertise'])))
+
+$ insert ... list='expertise' into all three
+INSERT 0 1
+INSERT 0 1
+INSERT 0 1
+```
+
+All three now admit it, the seeded rows survived, and the migration is idempotent. **CONFIRMED.**
+
+### FINDING F-2 (REFUTED, blocking) — the same SCHEMA_SQL ABORTS on a fresh database
+
+The repo's rule warns that fresh-database success proves nothing about an upgrade. This is the
+mirror image and it is worse, because it means a NEW environment cannot be built at all:
+
+```
+$ psql -v ON_ERROR_STOP=1 -q -d freshb -f /tmp/schema_nv.sql        # this branch
+psql:/tmp/schema_nv.sql:634: ERROR:  relation "insertion" does not exist
+branch-on-fresh exit=3
+
+$ psql -v ON_ERROR_STOP=1 -q -d freshm -f /tmp/schema_main_nv.sql   # main, control
+main-on-fresh exit=0
+```
+
+The ordering defect, located exactly:
+
+```
+$ grep -n "create table if not exists insertion|alter table insertion drop constraint" /tmp/schema_nv.sql
+609:alter table swap_decision drop constraint if exists swap_decision_list_check;
+631:alter table skill_candidate drop constraint if exists skill_candidate_list_check;
+634:alter table insertion drop constraint if exists insertion_list_check;      <-- ALTER
+654:create table if not exists insertion (                                     <-- CREATE, 20 lines LATER
+```
+
+The `insertion` ALTER was placed beside its two siblings, but `insertion`'s `create table` sits
+further down the file than `swap_decision`'s and `skill_candidate`'s do. With `ON_ERROR_STOP=1` the
+whole migration aborts at line 634, so `insertion` and every statement after it — roughly 900 of the
+1555 lines — is never applied.
+
+This is precisely the invariant `H39`/`H39b` encode, generalised from column to table: **a statement
+naming a table must come after that table's `create table`.** It was invisible to the implementers'
+own populated-database check (which I reproduced at exit 0) because `insertion` already existed
+there.
+
+**The repo's own suite already catches it** — see Claim 13. `schemaParity.test.mjs`'s
+*"a database built by UPGRADE is identical to one built FRESH"* fails with `relation "insertion" does
+not exist` (code `42P01`), as do `buildQueueDb.test.mjs` (10 cases) and
+`H:dimension-ddl-parity`. The guard was not missing; it was not run.
+
+**Fix:** move line 634's ALTER (and its matching `add constraint`) to after line 654's `create table
+if not exists insertion`, then re-run `node --test api/test/schemaParity.test.mjs`.
+
+---
+
+## Claim 11 — `ExpertiseBullets` -> `'expertise'` in `LIST_FIELD_TO_LIST`, and the blank-status consequence
+
+**CONFIRMED**, both halves, by execution rather than by reading.
+
+The map, read out of the built module:
+
+```
+LIST_FIELD_TO_LIST = {
+  SkillsBullets1: 'skills_1',  SkillsBullets2: 'skills_2',
+  RelevantBullets1: 'relevant_1', RelevantBullets2: 'relevant_2', RelevantBullets3: 'relevant_3',
+  ExpertiseBullets: 'expertise'
+}
+```
+
+The chain from that entry to a blank status, traced end to end:
+
+1. `insertions.ts:117` — `list: LIST_FIELD_TO_LIST[field] ?? null`. Without the entry the insertion
+   row for `ExpertiseBullets` stores `list = null`.
+2. `AssetBlocks.jsx:1258` — `swapsForList={r.list ? scopedSwaps.filter(s => s.list === r.list) : []}`.
+   A null `list` yields the empty array, unconditionally.
+3. `assetBlocks.js:781` — `status: swap ? (...) : (swaps.length ? 'unchanged' : '')`. An empty
+   `swaps` array makes the final ternary produce `''`.
+
+Executed, both sides:
+
+```
+-- BEFORE (row.list = null => swapsForList = [])
+"Exp one"   status=""  sharedSource=false
+"Exp two"   status=""  sharedSource=false
+"Exp three" status=""  sharedSource=false
+every status blank? true
+
+-- AFTER (row.list = 'expertise' => the rows are filtered in)
+"Exp one"   status="unchanged"        sharedSource=true
+"Exp two"   status="swapped · posting" sharedSource=true
+"Exp three" status="unchanged"        sharedSource=false
+any blank status? false
+```
+
+The implementers' account of this defect is accurate. Note the fix only takes effect once the DDL
+admits `expertise` — `writeSwaps` holds those rows back otherwise (`appSwaps.ts`
+`listChecksAdmitExpertise`), so on production, where the ALTER has not run, Expertise still renders
+blank until the migration lands. That is correct conservative behaviour, not a defect, but it means
+this fix is **not yet live** and cannot be until F-2 is fixed and deployed.
+
+---
+
+## Claim 12 — MUTATION-PROVING every new guard, done by me, not accepted from the implementers
+
+I reverted each guarded behaviour in the **pinned worktree**, rebuilt, and ran
+`node --test test/swaps.test.mjs test/insertions.test.mjs test/checks.test.mjs`
+(baseline for those three files at the pinned commit: **105 pass, 0 fail**). Every mutation was
+checked for being a real textual change first — a no-op mutation would have reported "NO-OP" and
+been discarded rather than silently counted as proof.
+
+| # | Behaviour reverted | fail | The guard that fired | Verdict |
+|---|---|---|---|---|
+| M1 | `originals = fromMaster ? masterItems : call1Items` -> `= call1Items` | 14 | `AC-1: from_label comes from the master template, and never from call1 alone` (+13 collateral) | **PROVEN** |
+| M2 | Phase-1 set-membership lookup disabled | 8 | `AC-3: a label in BOTH master and final is kept…`, `AC-3: duplicates are matched one for one…` | **PROVEN** |
+| M3 | Leftovers paired by **greedy `similarity()`** instead of position | **1** | `AC-4: leftovers pair by relative position, NOT by similarity` | **PROVEN** |
+| M4 | `verbatim_quote` falls back to `to` when nothing attributed (fabricate a citation) | 2 | `AC-5: a positional pair below ATTRIBUTION_THRESHOLD cites nothing` | **PROVEN** |
+| M5 | The `driver: … ? 'owner'` branch deleted from `row()` | 1 | `AC-6: an owner-written label keeps driver=owner and stays out of unattributed` | **PROVEN** |
+| M6 | `slotsFor` returns `{n: 0}` instead of `{n: null}` for unknown | 1 | `AC-8: slotsFor is per-template or UNKNOWN, and unknown is null — never 0` | **PROVEN** |
+| M7 | `buildSwaps` **throws** on a count mismatch | 4 | `AC-9a: buildSwaps does not throw on a count mismatch` (+3) | **PROVEN** |
+| M8 | `ExpertiseBullets: 'expertise'` removed from `LIST_FIELD_TO_LIST` | 1 | `list-backed fields name their list, and prose fields do not` | **PROVEN** |
+
+**M3 is the one that matters most, and it also settles the vacuity question the brief raised.**
+Greedy-similarity pairing was caught by exactly ONE test — the disagreement fixture. The *canonical*
+`A/B/C/D` vs `A/X/Y/Z` test (`AC-4: the canonical … pairs B->X, C->Y, D->Z`) stayed **green** under
+M3, because in that fixture similarity and position happen to agree. So the canonical test alone
+would have been vacuous, exactly as the AC warned, and the disagreement fixture is what carries the
+whole assertion. It exists and it works.
+
+### The gap probes — three accusation-grade behaviours with NO guard at all
+
+I then reverted three behaviours in `checks.ts` that the ACs treat as load-bearing, expecting a
+failure. **None came.** Baseline for the three files is 105 pass / 0 fail; each mutation left it
+unchanged:
+
+| # | Behaviour reverted in `checks.ts` | fail | Verdict |
+|---|---|---|---|
+| M9 | Unknown slot count reports **`pass`** instead of `not_applicable` (AC-10's exact falsifier) | **0** | **UNGUARDED** |
+| M10 | The `compact_resume` branch removed, so `fixed_slot_count` goes **ABSENT** from the results array (AC-11's exact falsifier) | **0** | **UNGUARDED** |
+| M11 | A mismatch reports **`pass`** instead of `fail`, so the gate never trips (AC-9c's exact falsifier) | **0** | **UNGUARDED** |
+
+M11 was re-run against the **entire** api suite to rule out a guard living elsewhere:
+
+```
+FULL suite with the fixed_slot_count FAIL branch disabled:
+# tests 916   # pass 895   # fail 18   # cancelled 3      <- identical to the unmutated branch
+```
+
+Corroborated structurally — no test file anywhere mentions the check:
+
+```
+$ grep -rln "fixed_slot_count" api/test/
+(no output)
+```
+
+**FINDING F-3.** `fixed_slot_count` is a new **accusation-grade** check: it names offending lists,
+carries `state: 'fail'`, and `gateFor` turns the packet's gate on it. It has **zero test coverage**.
+All three of its states — `pass`, `fail`, `not_applicable` — can be silently inverted and the suite
+stays green. This is the repo's own "an inert guard is worse than no guard, because it is believed"
+failure, arriving one level up: the *check* is the guard, and nothing guards the guard.
+
+The behaviour is correct **today** — I verified all three states directly under Claims 6, 7 and 8.
+What is missing is anything that keeps it correct tomorrow.
+
+---
+
+## Claim 13 — Cheap suite re-run covering EVERYTHING
+
+**REFUTED.** The suite is not green, and `origin/main` is.
+
+All runs below are in dedicated worktrees so that the concurrent edits described in Claim 15 could
+not affect them.
+
+| Tree | commit | api tests | pass | fail | cancelled |
+|---|---|---|---|---|---|
+| `origin/main` | `6106181` | 894 | **894** | **0** | 0 |
+| branch **base** | `82f1fbf` | 894 | 892 | **2** | 0 |
+| **branch under review** | `2cd6f69` | 916 | 895 | **18** | 3 |
+
+```
+$ cd api && node --test --test-timeout=20000 test/*.mjs
+# tests 916   # pass 895   # fail 18   # cancelled 3   # duration_ms 33749
+```
+
+App side:
+
+| Tree | app tests | pass | fail | build |
+|---|---|---|---|---|
+| `origin/main` | 396 | **396** | **0** | — |
+| branch `2cd6f69` | 396 | 395 | **1** | `vite build` ✓ built in 3.77s |
+
+Both builds succeed (`api`: `tsc` clean; `app`: `vite build` clean). It is only the tests that fail.
+
+### Attribution — 16 of the 18 api failures are introduced by the two commits under review
+
+The 2 failures on the branch base (`D:ledger-status-is-a-token`,
+`D:ledger-manual-names-its-vehicle`, both in `deferredLedger.test.mjs`) come from ledger rows added
+in `b8ca0e9`/`82f1fbf` and are **pre-existing, not this work's**. Every other failure is new:
+
+| Cause | Failing cases | Root |
+|---|---|---|
+| **F-2, the schema ordering defect** | `buildQueueDb.test.mjs` ×10, `dimensionsDb.test.mjs` `H:dimension-ddl-parity`, `schemaParity.test.mjs` *"a database built by UPGRADE is identical to one built FRESH"* (+3 file-level wrappers, +3 cancelled) | all report `relation "insertion" does not exist`, code `42P01` |
+| **F-4, `config.ts` broke four pre-existing structural guards** | `H:blank-focus-clears-rather-than-storing-empty`, `H:template-label-absent-means-leave-alone-not-clear`, `H:template-row-is-listed-when-it-has-only-a-name`, `H:template-delete-needs-both-empty` | `templateConfig.test.mjs`, untouched by this branch and green on `main` |
+
+### FINDING F-4 — four template guards are red; the behaviour is fine, the guards are stale
+
+I checked whether these are real regressions or stale patterns, because the two need opposite fixes.
+They are **stale patterns**. The guard greps for
+
+```
+/if \(!roleFocus && !keepLabel\)[\s\S]{0,220}?deleteEntity\('templates', rowKey\)/
+```
+
+and `config.ts:324` now reads
+
+```
+if (!roleFocus && !keepLabel && !hasAnySlot(keepSlots)) {
+```
+
+The added `&& !hasAnySlot(keepSlots)` is **correct** — a row carrying only slot counts should not be
+deleted — and it breaks the literal regex. Same class for the other three. So the behaviour is
+right and the assertions need updating to match; but four red guards is still four guards that are
+no longer protecting anything, and they cannot be left red.
+
+### FINDING F-5 — the one app failure is a hard-coded count, and I proved the real invariant still holds
+
+`H:ask-why-never-names-the-raw-list-enum` fails on
+`assert.equal(fields.length, 5, 'the producer map did not parse')` — `LIST_FIELD_TO_LIST` now has
+six entries. Its own message says the count is a parse sanity check, not the invariant. The
+invariant is *"every field the producer can write is a key `FIELD_LABEL` knows"*, and I tested that
+by execution rather than trusting the reading:
+
+```
+$ node probe4.mjs
+expertise change -> {"artifactId":"r1","where":"Expertise","text":"Why did you change \"Stakeholder management\" in Expertise?"}
+expertise add    -> {"artifactId":"r1","where":"Expertise","text":"Why did you add \"Cross-functional leadership\" to Expertise?"}
+leaks any raw enum? false
+```
+
+`FIELD_LABEL.ExpertiseBullets = 'Expertise'` already exists (`app/src/assetGate.js:212`), so the
+sentence renders correctly and no raw enum reaches the reader. Changing the `5` to a `6` restores a
+fully green app suite, and nothing else:
+
+```
+$ sed -i "s/fields.length, 5/fields.length, 6/" test/qcRail.test.mjs && npm test
+# tests 396   # pass 396   # fail 0
+```
+
+**No user-facing defect here** — but it is a red test, and it is the guard that would catch the
+*next* list added without a label.
+
+---
+
+## Claim 14 — the KNOWN AND ADMITTED items: are they accurately described?
+
+### "`appPackets.ts:618` passes no `slots` and ignores the return, so `fixed_slot_count` is `not_applicable` in production"
+
+**CONFIRMED, and it is INERT rather than WRONG.** Read at the call site:
+
+```
+617  try {
+618    await writeSwaps(client, art.packet_id, opp.id, {
+619      call1: built.calls.c1, call3: built.calls.c3, pkg,
+620      profileText: built.profileText, omitList: built.omitList, loop: 0,
+621    })
+622  } catch (e) { console.warn('[packets] swap provenance not recorded:', String(e)) }
+```
+
+No `slots`, no `master` (loaded inside `writeSwaps`), and the return value is discarded. Swept both
+directions for any other supplier:
+
+```
+$ grep -rn "runChecks(" api/src --include=*.ts | grep -v dist
+api/src/functions/tests/appChecks.ts:108:  const results = runChecks({
+api/src/functions/tests/checks.ts:319:export function runChecks(...)
+
+$ grep -rn "slots" appChecks.ts appPackets.ts appRemediation.ts
+(no output — nothing passes slots to runChecks either)
+```
+
+So in production `input.slots` is `undefined`, `known.length` is 0, and the check emits
+`not_applicable` with *"no per-template slot count is set for …"* — which I reproduced exactly
+(Claim 6). **It accuses nobody**: `not_applicable` cannot fail a gate, cannot name an offender, and
+`slotsFor` cannot degrade to `{n: 0}`. The description is accurate and the state is the honest one.
+The feature is simply **not yet reachable end to end**.
+
+### "`roleFocus.ts` carries a handoff comment instead of the wiring"
+
+**CONFIRMED.** The entire `roleFocus.ts` diff on this branch is an 11-line comment inside
+`ResolvedRoleFocus` — no `slots` field, no code:
+
+```
++  // NEXT UNIT, deliberately NOT added yet: `slots: Record<string, number|null>` …
++  // … Until that lands, `runChecks` reports
++  // `fixed_slot_count: not_applicable`, which is the correct state for a count nobody supplied.
+```
+
+Accurately described, and it names the right reason (importing `config.ts` would pull `app.http`
+route registration into `node --test`). The proposed `tests/slots.ts` is the "extend, don't
+duplicate" shape.
+
+### "The six AC-16 H-cases are NOT yet written"
+
+**CONFIRMED — outstanding.**
+
+```
+$ git diff --stat 82f1fbf..2cd6f69 -- api/test/hardening.test.mjs
+(no output — the file is untouched)
+
+$ grep -rn "test('H:swap-original|test('H:swap-pairs|test('H:fixed-slot|test('H:slot-count|test('H:slot-check|test('H:swap-actions" api/test/
+(no output — none written)
+```
+
+All six slugs appear only as prose, in `AC-fixed-slot-swap-pairing.md` and `IMPL-swap-pairing.md`.
+Note this overlaps F-3: `H:slot-count-unknown-is-not-applicable` and
+`H:slot-check-is-emitted-for-every-list` are precisely the two that would have caught mutations M9
+and M10.
+
+---
+
+## Claim 15 — a process finding the brief did not ask for, but which affects every verdict above
+
+**The working tree moved while I was verifying it.** At the start of this pass
+`git status --porcelain` was clean at `2cd6f69`. Twenty minutes later:
+
+```
+$ git status --porcelain
+ M api/src/functions/tests/swaps.ts
+ M api/test/swaps.test.mjs
+ M docs/qc-evidence/IMPL-swap-pairing.md
+
+$ ls -l --time-style=full-iso api/src/functions/tests/swaps.ts
+-rw-r--r-- 1 root root 32812 2026-08-30 02:54:48 ... swaps.ts        # 5 seconds before I looked
+```
+
+Two tests named `F-1: an owner row that also matches a requirement carries NO citation` and
+`F-1: the DB citation contract holds for EVERY row this module can emit` appeared in the working
+tree — present in neither `35cab5d` nor `2cd6f69`. Someone is fixing F-1 concurrently.
+
+**How I handled it, so these verdicts remain reproducible:** I moved all execution into
+`git worktree` checkouts pinned to fixed commits (`2cd6f69`, `82f1fbf`, `origin/main`) and re-ran
+every behavioural probe against the pinned build. Every result reported above reproduced identically
+there. I did not `git stash` and did not touch the shared tree beyond this verdict file.
+
+**Consequence for the reader:** this report is a verdict on `2cd6f69`. If the concurrent work lands
+the F-1 fix, re-check F-1 only — every other finding is independent of `row()`.
+
+---
+
+# VERDICT SUMMARY
+
+| # | Claim | Verdict |
+|---|---|---|
+| 1 | AC-1 — no `from_label` from `call1[passA]` when a master block exists; `call1` fallback is honest degradation | **CONFIRMED** |
+| 2 | AC-3 — set membership, order-independent, duplicates one-for-one | **CONFIRMED** |
+| 3 | AC-4 — leftovers pair by POSITION, on a fixture where similarity disagrees (non-vacuous) | **CONFIRMED** |
+| 4 | AC-5 — sub-threshold positional pair: `unattributed`, NULL quote, 0 confidence, DB contract held | **CONFIRMED** |
+| 5 | AC-6 — owner exemption yields `driver='owner'`, excluded from `unattributed` | **CONFIRMED** |
+| 6 | AC-7/8/10 — `slotsFor` never `{n:0}`; `fixed_slot_count` `not_applicable` when unknown | **CONFIRMED** |
+| 7 | AC-9 — no throw **and** a deterministic `fail` check row (both halves) | **CONFIRMED** |
+| 8 | AC-11 — `compact_resume` emits `not_applicable`, PRESENT in the results array | **CONFIRMED** |
+| 9 | AC-12 — existing `added`/`dropped` rows read and render (live DB: 8 dropped, 7 added) | **CONFIRMED** |
+| 10 | AC-14/DDL — all three tables admit `expertise` **on upgrade**, with the vacuity control | **CONFIRMED** |
+| 10b | …the same schema on a **FRESH** database | **REFUTED** — F-2 |
+| 11 | `ExpertiseBullets -> 'expertise'`, and the blank-status consequence | **CONFIRMED** |
+| 12 | Every new guard mutation-proved (M1-M8) | **CONFIRMED** |
+| 12b | `fixed_slot_count`'s three states guarded by anything | **REFUTED** — F-3, M9/M10/M11 all fail=0 |
+| 13 | Cheap suite re-run covering EVERYTHING | **REFUTED** — 18 api + 1 app failures; `main` is 894/894 and 396/396 |
+| 14 | Known-and-admitted items accurately described (inert `slots`, `roleFocus` comment, unwritten H-cases) | **CONFIRMED** |
+| 15 | Verdicts pinned against a concurrently-moving tree | **CONFIRMED** (method note) |
+
+**CONFIRMED 13 · REFUTED 3 · NOT_APPLICABLE 0**
+
+The pairing engine itself — the substance of this work — is correct, and I could not break it:
+every behavioural AC passed, and every guard I tried to defeat fired. The three refutations are all
+about what surrounds it: a migration that cannot build a new database, a gate-deciding check nobody
+guards, and a red suite.
+
+## REQUIRED BEFORE DONE
+
+1. **F-2 — BLOCKING.** Move the `alter table insertion drop/add constraint … insertion_list_check`
+   pair from `schema.ts` line 634 to **after** `create table if not exists insertion` (line 654).
+   Verify with `psql -v ON_ERROR_STOP=1 -f <schema> -d <FRESH db>` **and**
+   `node --test api/test/schemaParity.test.mjs`. Until this lands the migration aborts on any new
+   environment, and the expertise DDL cannot ship.
+2. **F-3.** Write the two H-cases that mutations M9 and M10 defeated —
+   `H:slot-count-unknown-is-not-applicable` and `H:slot-check-is-emitted-for-every-list` — plus one
+   for M11 (a mismatch must be `fail`). Mutation-prove each. These are AC-16 items already agreed.
+3. **F-1.** Null `verbatim_quote` / `requirement_seq` / `confidence` when `driver` resolves to
+   `'owner'`, or the row is rejected by `swap_decision`'s CHECK and the whole swap table is lost to
+   the swallowing catch. Pre-existing on `main`, but this branch increases its reachability. (Work
+   appeared in the tree during this pass — re-verify.)
+4. **F-4.** Update the four `templateConfig.test.mjs` guards to match the corrected
+   `!roleFocus && !keepLabel && !hasAnySlot(keepSlots)` behaviour. Behaviour is right; the greps are
+   stale.
+5. **F-5.** `api/test/qcRail.test.mjs` — `fields.length, 5` -> `6`. One character; restores a green
+   app suite.
+6. **Outstanding, not blocking:** the remaining four AC-16 H-cases; a consumer for
+   `ListCounts.baselineSource` (currently write-only); and the `tests/slots.ts` extraction that
+   makes `fixed_slot_count` reachable end to end.
+
+## NOT VERIFIABLE FROM HERE
+
+- **AC-15** (the live 9-of-14 regression case flips) — **NOT_APPLICABLE**. It needs a packet
+  *rebuilt on this branch*, and this branch is not deployed (`api-deploy.yml` fires on `main`
+  only). What would settle it, in order: land the branch, then
+  `api-test.yml {"method":"POST","path":"/api/app/opportunity/<uuid>/build"}`, then
+  `db-query.yml "select from_label from swap_decision where packet_id='<id>'"`, then
+  `api-test.yml {"method":"GET","path":"/api/diag/skill-sources"}`, and assert every `from_label`
+  appears in the master blocks. I read the CURRENT live counts (Claim 9) but those are pre-change
+  rows and prove nothing about the new pairing.
+- **AC-13** (the compact-resume drop-pool before/after measurement) — **NOT_APPLICABLE**. No
+  before/after record exists in the branch, and producing one needs the same live rebuild. Flagged
+  because AC-13 is met *by having measured it*, and it has not been measured.
+
+## END OF VERIFY PASS

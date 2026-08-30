@@ -4791,3 +4791,39 @@ while its raw output read `Terminated` / `EXIT=143`: the zero was the OUTER SHEL
 command in the chain was an `echo`), not the tests'. Reading the notification instead of the output
 would have turned a timeout into a pass. Same class as this repo's rule that a queued workflow is not
 a confirmation — **read the output, never the wrapper's exit code.**
+
+## Hardening — F-2 and F-3, both found by the independent verifier, both mine (2026-08-30)
+
+### F-2 — the ordering rule is TWO-SIDED, and I walked into the side this file did not document
+`alter table insertion drop constraint …` was placed TWENTY LINES ABOVE
+`create table if not exists insertion`. On a FRESH database that is
+`ERROR: relation "insertion" does not exist` and it aborts the entire migration. **My own
+populated-database proof passed it**, because there the table already exists — the exact MIRROR of
+the trap `H39`/`H39b` describe.
+
+**Invariant, restated two-sided:** a statement must come AFTER the ALTER that adds what it names,
+**AND after the CREATE of the table it alters.** The file only ever recorded the first half, and the
+first half is the half that a populated-DB test catches. The second half is only visible on a fresh
+database — so **both directions must be executed, every time.** One defect, 13 of 18 suite failures.
+
+### F-3 — a gate-deciding check shipped with ZERO coverage
+`fixed_slot_count` names offenders and can turn the gate `fail`, and nothing tested it. The verifier
+inverted all three states — unknown→`pass`, the compact_resume branch deleted so the check goes
+ABSENT, mismatch→`pass` — and the suite stayed **green on every one**. Five cases now cover it and
+all three mutations fire (1 / 3 / 1 failures). **Tier 1 means the guard ships WITH the check, in the
+same commit — not after.**
+
+### The backtick trap bit TWICE IN ONE SESSION, so it stops being prose
+A backtick inside `SCHEMA_SQL` (a template literal) terminates the string and `tsc` parses raw SQL as
+TypeScript. I did it once, wrote a warning comment about it — and then **did it again inside the
+warning comment itself**. Prose demonstrably does not guard this. It needs
+`H:schema-sql-has-no-backticks` as a real source-grep test (count must be 0), which cannot cry wolf
+because a backtick there is always a syntax error rather than a style preference.
+
+### My own DEFERRED.md rows broke the ledger guards — the guards were right
+`D:ledger-status-is-a-token` and `D:ledger-manual-names-its-vehicle` failed because I wrote a status
+of `QUEUED — **FIRST ITEM AFTER UI PARITY**` (statuses are the tokens `OPEN`/`CLOSED`/`WONTDO`, and
+emphasis belongs in the description) and a check directive of
+`` `check: db-query.yml "…"` `` instead of the required
+`` `check: (grep|absent|manual) <arg> — <rest>` ``. Both fixed by conforming, not by widening the
+guard. **A guard that fires on my own new writing is the guard working.**

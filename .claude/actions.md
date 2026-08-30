@@ -5518,3 +5518,37 @@ that widening the named set while KEEPING the no-spread assertion is an update, 
 `database "parity_fresh" is being accessed by other users`, a local Postgres session of mine, not a
 parity fault); the six AC-16 H-cases; the `appPackets.ts:618` slots wiring; and AC-15, the live
 9-of-14 flip, which is the measurement that actually proves the change worked.
+
+---
+
+## F-2 / F-3 — the verifier found two blocking defects, both mine, both fixed (2026-08-30)
+
+**Status: FIXED on `claude/incumbent-wins-swap`, NOT on `main`, NOT verified live.**
+
+**Verifier verdict on `2cd6f69`: 13 CONFIRMED · 3 REFUTED · 2 NOT_APPLICABLE**
+(`docs/qc-evidence/VERIFY-fixed-slot-swap-pairing-1.md`, 854 lines). It wrote its own probes against
+the built module rather than trusting the implementers' tests, all eight guard mutations it attempted
+fired, and when the working tree changed under it mid-pass it moved every probe into pinned
+`git worktree` checkouts and re-ran everything there.
+
+- **F-2** — my `insertion` ALTER preceded that table's own CREATE, so the migration aborted on a
+  FRESH database while passing on a populated one. **13 of the 18 failures.** Fixed; now proven in
+  BOTH directions — fresh exit 0, populated exit 0, `insertion` accepts `expertise` in both.
+- **F-3** — `fixed_slot_count` had zero coverage. Five cases added; all three state-inversion
+  mutations now fire.
+- Two of my own `.claude/DEFERRED.md` rows broke the ledger guards (a prose status, a malformed
+  `check:` directive). Fixed by conforming to the format.
+
+**Suite: 920 tests, 914 pass, 6 fail — down from 18.** With F-2 fixed the three DB-backed files
+(`buildQueueDb`, `dimensionsDb`, `schemaParity`) run and pass; F-2 was why they were red.
+
+**The 6 remaining are all in `templateConfig.test.mjs`** — 4 stale source-grep guards, plus 2 that
+the verifier independently proved are stale rather than regressions: they broke on a CORRECT
+behaviour change (`&& !hasAnySlot(keepSlots)` added to the delete condition, so a template with slot
+counts is not deleted by clearing its focus). **OWNER DECISION PENDING** on widening the writer's
+named-field set from 2 to 8 while KEEPING the no-spread assertion.
+
+**Also outstanding:** one app test hard-codes `fields.length, 5`; the verifier executed `swapAskWhy`
+on an expertise row and it renders "in Expertise" with no raw enum leak, so `5 → 6` restores 396/396.
+**AC-15 and AC-13 are NOT_APPLICABLE until the branch is deployed** — both need a packet rebuilt on
+it; AC-15's exact three-workflow sequence is named in the verify file.
