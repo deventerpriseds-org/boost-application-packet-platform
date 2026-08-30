@@ -566,8 +566,15 @@ test('H:gate-count-is-the-deep-link-and-names-the-finding', () => {
 
   // NO DEAD UI, both directions. No handler -> no link; and the COUNT must survive without one,
   // because the number is a fact about the asset whether or not it can be clicked.
-  assert.match(badge, /const fix = onClick \? firstFixFinding\(result\) : null/,
+  // RESTATED 2026-08-30. The invariant is UNCHANGED - no handler, no link - but the expression is no
+  // longer a single call: the badge now prefers the finding the CALLER's handler will actually open
+  // (`firstFix`) and falls back to computing its own. Pinning the old literal would have forced the
+  // fix to be reverted to keep a guard green, which is the tail wagging the dog.
+  assert.match(badge, /const fix = onClick \? [^\n]*: null/,
     'a link must not be offered when the caller gave no handler')
+  assert.match(badge, /firstFix \|\| firstFixFinding\(result\)/,
+    'the caller-supplied finding must WIN - computing our own selects independently of the '
+    + 'destination and can name a different row than the one the click opens')
   assert.match(badge, /GATE_HOOKS\.toFix\}/, 'the plain count must still render on its own hook')
 
   // The nested click must not fire the outer one as well.

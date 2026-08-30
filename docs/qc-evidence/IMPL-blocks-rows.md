@@ -107,7 +107,7 @@ portfolio came out at 41 placed against a total of 39, which is what exposed the
 | compact_resume | **47** | **2** | **10** | 35 |
 | intro video | 0 | 0 | 0 | 0 |
 
-OBSERVATION: on the resume step the header prints `40 to fix · 33 to review` = 73 findings, and the
+OBSERVATION: on the resume step the header prints `70 to fix · 3 to review` = 73 findings, and the
 field margins below it render **20**. 53 have no home on that screen. On the compact resume, 2 of
 47. The 10 `compact_resume` rows in column 4 are `relevant_char_limit` / `whitespace` /
 `empty_merge_fields` naming `RelevantBullets1/2/3` and `ExpertiseBullets` — fields the **resume**
@@ -161,7 +161,7 @@ canary-satisfying patch `RENDER-SWEEP.md:45-52` records). **`pageErrors: []`.**
 | `[data-qc="blocks-unplaced"]` | did not exist | **2**, `data-qc-n` = **53** and **45** |
 | `[data-qc="blocks-unplaced-row"]` | — | **98** |
 
-**The reconciliation, read off the same page.** The two headers print `40 to fix` + `33 to review`
+**The reconciliation, read off the same page.** The two headers print `70 to fix` + `3 to review`
 = 73 and `26 to fix` + `21 to review` = 47. `blocks-field-findings` renders 8 groups (20 + 2 rows).
 `53 + 20 = 73` and `45 + 2 = 47` — the header's own counts now equal what the screen shows.
 
@@ -284,3 +284,9 @@ above satisfies that condition literally: it renders the COMPLEMENT of what the 
 finding is enumerated twice. What the AC did not have is the measurement — 53 of the resume's 73
 counted findings had no home on the screen at all. It reasoned about the findings that WERE
 relocated; the ones that were not are the row.
+
+
+> **CORRECTED 2026-08-30 by RENDER-SWEEP-2.md.** This file said the headers print `40 to fix + 33 to review`.
+> The rendered badge prints **`70 to fix + 3 to review`**; 40/33 is what `severityCounts` returns, not what the
+> screen shows. Both total 73, so the reconciliation this row rests on is unaffected - but the sentence was
+> false against the DOM, which is the one thing an evidence file may never be.

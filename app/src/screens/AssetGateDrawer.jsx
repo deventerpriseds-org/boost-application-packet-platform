@@ -42,7 +42,7 @@ export {
  * The gate badge. result is the WHOLE checks-result payload, deliberately: passing gate and
  * attention as two separate props is exactly how a caller ends up sourcing them from two places.
  */
-export function GateBadge({ result, loading, error, onClick, compact = false }) {
+export function GateBadge({ result, loading, error, onClick, firstFix = null, compact = false }) {
   if (error) return <span data-qc={GATE_HOOKS.badge} data-qc-gate="unavailable" title={String(error)}><Pill tone="panel">gate unavailable</Pill></span>
   if (!result) return <span data-qc={GATE_HOOKS.badge} data-qc-gate="unloaded"><Pill tone="panel">{loading ? 'checking...' : 'not loaded'}</Pill></span>
   const m = gateMeta(result.gate)
@@ -73,7 +73,11 @@ export function GateBadge({ result, loading, error, onClick, compact = false }) 
   // sorted by. NULL from it, or no onClick, and the count renders as the plain Pill it always was -
   // the count is a fact about the asset and must survive whether or not it can be clicked, which is
   // why the link WRAPS it rather than replacing it.
-  const fix = onClick ? firstFixFinding(result) : null
+  // `firstFix` is the finding the CALLER's handler will actually open. Prefer it: computing our
+  // own from `result` selects independently of the destination and can name a different row -
+  // measured on the live packet, `Skill lines fit the template ->` landing on RelevantBullets1.
+  // `firstFixFinding` remains the fallback for a caller that supplies a handler but no target.
+  const fix = onClick ? (firstFix || firstFixFinding(result)) : null
   const openFix = fix
     ? (e) => { if (e && e.stopPropagation) e.stopPropagation(); onClick(e) }
     : null

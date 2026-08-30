@@ -17,7 +17,7 @@ import {
   engineRows, scoreParts, gateMeta, stateMeta, arr, severityFor, reconcile, assetLabel, pctWidth,
   correctionsState, orderCorrections, correctionRow, correctionSentence, correctionAnomalies,
   correctionSourceText, undoAvailability, keepAvailability, revertOutcome, suggestScope, fieldLabel,
-  ATTENTION_ORDER, attentionRank, firstFixFinding, severityWeight, bySeverity,
+  ATTENTION_ORDER, attentionRank, firstFixFinding, severityWeight, bySeverity, checkLabel,
   CHANGE_LOG_HEADLINE, CORRECTION_SOURCE, CORRECTION_REVERT_ROUTE,
 } from './assetGate.js'
 
@@ -1286,7 +1286,23 @@ export function firstFixTarget(entries, artifactId) {
     // `unchecked` rows carry a null mergeField by construction, so this one test covers both the
     // never-checked asset and a failing check whose rule names no subject field.
     if (!it.mergeField) continue
-    return { artifactId: it.artifactId, mergeField: it.mergeField }
+    // NAMES THE FINDING IT ACTUALLY OPENS, and that pairing is the whole point of returning it here.
+    //
+    // The badge used to take its TITLE from `firstFixFinding(result)` and its DESTINATION from this
+    // function, and the two select independently: `firstFixFinding` takes the first `fix` row
+    // whatever its offenders say, while this one SKIPS every row with a null mergeField. Measured on
+    // the live packet (RENDER-SWEEP-2.md, both assets): the badge read
+    // `70 to fix - Skill lines fit the template ->` and landed on `RelevantBullets1`, because
+    // `skill_char_limit` is exactly the check that correctly resolves no field. A control that names
+    // one finding and opens another is a false statement about where the reader is going - the same
+    // class as a swap row naming an "original" the owner never wrote.
+    //
+    // One selection now serves both. `checkLabel` is assetGate's own map, so the wording cannot
+    // drift from the rail this link lands in.
+    return {
+      artifactId: it.artifactId, mergeField: it.mergeField,
+      check_key: it.check_key || null, title: checkLabel(it.check_key),
+    }
   }
   return null
 }

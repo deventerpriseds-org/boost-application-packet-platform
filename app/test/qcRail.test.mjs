@@ -1534,7 +1534,13 @@ test('H:first-fix-target-reads-packetFailList-not-a-second-walk', () => {
   const expected = items.find((i) => i.mergeField)
   const got = firstFixTarget(entries, 'a1')
   assert.ok(expected, 'precondition: the fixture must produce at least one openable finding')
-  assert.deepEqual(got, { artifactId: expected.artifactId, mergeField: expected.mergeField })
+  // The target now also NAMES the finding it opens, so the badge cannot title itself from a
+  // different row than the one the click lands on. Asserted field by field rather than by widening
+  // the deepEqual, so a future key cannot be added silently.
+  assert.equal(got.artifactId, expected.artifactId)
+  assert.equal(got.mergeField, expected.mergeField)
+  assert.equal(got.check_key, expected.check_key, 'the target must carry the check it opens')
+  assert.ok(got.title && typeof got.title === 'string', 'and its human label, from assetGate checkLabel')
 })
 
 test('H:first-fix-target-skips-a-finding-that-names-no-field', () => {
@@ -2035,8 +2041,12 @@ test('H:fail-list-field-is-resolved-from-the-offenders-not-a-two-key-map', () =>
   }]
   assert.equal(packetFailList(entries).items[0].mergeField, 'RelevantBullets1',
     'a real failing resume check still resolves to no field')
-  assert.deepEqual(firstFixTarget(entries, 'a1'), { artifactId: 'a1', mergeField: 'RelevantBullets1' },
-    'so the badge has nowhere to send the reader and renders inert')
+  const _t = firstFixTarget(entries, 'a1')
+  assert.equal(_t.artifactId, 'a1')
+  assert.equal(_t.mergeField, 'RelevantBullets1', 'so the badge has somewhere to send the reader')
+  // The pairing this row now guards: the title the badge prints must be the title of THIS finding.
+  assert.equal(_t.check_key, packetFailList(entries).items[0].check_key,
+    'the badge would otherwise name one finding and open another - measured live on both assets')
   // The other two producers, so this rests on the CLASS of offender rather than on one check.
   assert.equal(firstOffenderField({ check_key: 'word_counts',
     offenders: ['@AboutMe1_50words: 61 words (want 45-55)'] }), '@AboutMe1_50words')

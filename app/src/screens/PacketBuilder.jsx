@@ -146,7 +146,7 @@ function stepDone(key, p, artifacts, qc) {
 // Exported so the browser probe can mount the REAL card (test/browser/run-asset-blocks.mjs). The
 // header's collapsed default is a rendering fact; asserting it against a replica of this component
 // would prove only that the replica was written to match.
-export function ArtifactCard({ a, busy, setBusy, qcResult, onGenerate, onRegenerate, onSetStatus, onMakeDoc, onMakeSlides, onGenVideo, onArchiveVideo, doc, video, provenance, listOwners, onListsRendered, focusField = null, onOpenFirstFix = null, onSeedAssistant = null, fieldOwners = null, onGoToField = null }) {
+export function ArtifactCard({ a, busy, setBusy, qcResult, onGenerate, onRegenerate, onSetStatus, onMakeDoc, onMakeSlides, onGenVideo, onArchiveVideo, doc, video, provenance, listOwners, onListsRendered, focusField = null, onOpenFirstFix = null, firstFix = null, onSeedAssistant = null, fieldOwners = null, onGoToField = null }) {
   const v = video[a.id] || {}
   const d = doc[a.id] || {}
   const videoUrl = v.url || a.docUrl
@@ -188,7 +188,7 @@ export function ArtifactCard({ a, busy, setBusy, qcResult, onGenerate, onRegener
             NULL means NO CLICK, never a click that goes nowhere: an unchecked asset has no findings
             and therefore no field to open, and a badge that navigates nowhere is the dead UI the
             standing rule forbids. */}
-        <GateBadge result={qcResult} compact onClick={onOpenFirstFix || undefined} />
+        <GateBadge result={qcResult} compact onClick={onOpenFirstFix || undefined} firstFix={firstFix} />
         <span className="px-link" role="button" tabIndex={0} onClick={toggle}
           data-qc={PACKET_HOOKS.assetToggle} data-qc-open={open ? '1' : '0'}
           onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle() } }}
@@ -966,6 +966,9 @@ export default function PacketBuilder({ id, step }) {
                   const t = firstFixTarget(qcEntries, a.id)
                   return t ? () => goToField(t.artifactId, t.mergeField) : null
                 })()}
+                /* The badge must NAME the finding this handler opens, not a different one it
+                   selected for itself. See `firstFixTarget` for the measured mismatch. */
+                firstFix={firstFixTarget(qcEntries, a.id)}
                 listOwners={listOwners} onListsRendered={registerLists}
                 fieldOwners={fieldOwners} onGoToField={goToField}
                 focusField={fieldFocus && fieldFocus.artifactId === a.id ? fieldFocus.section : null}
