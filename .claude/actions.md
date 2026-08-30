@@ -5619,3 +5619,50 @@ local substitutes for it. Sequence: `api-test.yml` rebuild → `db-query.yml` re
 **Also inert until wired:** `appPackets.ts` does not thread the slot counts into the build, so
 `fixed_slot_count` reports `not_applicable` — the correct state for a count nobody supplied, not a
 silent pass. The fix is a small pure `tests/slots.ts` that both `config.ts` and `roleFocus.ts` import.
+
+---
+
+## AC-15 MEASURED LIVE — the skills fix works; the RELEVANT lists have a different defect (2026-08-30)
+
+**Owner: "go ahead".** Trinnex packet `4860ae3b` rebuilt on deployed code with `{"regen":true}`
+(api-test run **33310711727**, swap rows rewritten 12:10:02Z). `regen` is load-bearing: without it
+`ensurePackage` (`appPackets.ts:500-504`) returns the CACHED `pkg_json`, makes zero model calls, and
+a "rebuild" proves nothing — the flag was once hardcoded `false` for exactly this reason.
+
+### BEFORE (old code, written 08-23) vs AFTER, both measured against the live MasterContext blocks
+(`api-test.yml GET /api/diag/skill-sources`, run 33310582159)
+
+| | before | after |
+|---|---:|---:|
+| swap rows | 29 | 43 |
+| `from_label` **absent from the master entirely** | **21 / 29 (72%)** | **0 / 43** |
+| `from_label` an EXACT master item | 8 (and only 4 in its own list) | **27** (+1 `added` row with a null from_label, correctly) |
+| `expertise` rows | 0 | **7** |
+
+**Skills and Expertise are FIXED and it is exact, not approximate.** `skills_1`'s eleven
+`from_label`s are the eleven items of `MasterContext.skills1`, in master order. `skills_2`'s nine are
+`skills2`'s nine. `expertise`'s seven are `expertise`'s seven. The 21 invented "originals" the screen
+used to attribute to the owner — `Enterprise Architecture`, `AI-First Strategy`, `Cloud-Native
+Systems`, `DevOps Transformation`, `Security Governance` — are gone.
+
+### THE NEW DEFECT, found by this measurement: `relevant_*` originals are CATEGORY LINES, not items
+All 15 relevant rows carry a `from_label` like
+`"Governance and Compliance: Standards and Compliance, AI/ML Strategy, Cybersecurity Leadership, …"`
+— a whole 130-character category group presented as one "original" skill. Worse, **the identical
+five category strings appear in all three relevant lists**, because `evidence.ts:193-195` maps
+`RelevantBullets1`, `2` and `3` to the ONE pooled `relevantProficiencies` key. Fifteen rows derived
+from five source strings, triple-counted.
+
+This is **O-9 of the AC pass, arriving in production exactly as predicted**: *"deriving from the
+master gives the SAME number to all three Relevant lists, which is wrong for every one of them."*
+The pass flagged it for the COUNT; it applies identically to the BASELINE. AC-15's literal claim
+still holds (nothing is absent from the master) — and the rows are still not usable. **Do not read
+"0 absent" as "relevant is fixed".** `splitItems` must split the pooled block into its terms, and a
+rule is needed for which terms belong to which of the three slots.
+
+### The fixed-slot rule is now VISIBLE in the data, and violated everywhere
+`skills_1` master 11 → ships 8 (2 dropped, 1 merged). `skills_2` master 9 → ships 10 (1 added).
+`expertise` master 7 → ships 5. Under the owner's rule these are illegal outcomes, and they are now
+recorded as honest rows rather than hidden — which is the design. **But `fixed_slot_count` still
+reports `not_applicable`**, because `appPackets.ts` does not thread the per-template counts into the
+build. The evidence exists; the gate cannot yet see it. That wiring is the next unit.
