@@ -120,6 +120,21 @@ if (SCROLL) {
   await page.waitForTimeout(700)
 }
 
+// A PROBE FILE, for the case `--count` cannot express: several selectors on one page, an
+// `inputValue()` read (form field values are NOT in `document.body.innerText` - that trap cost
+// three false failures in one session), or a click chain that has to assert between steps.
+// Added 2026-08-30 for the RENDER-SWEEP pass, which measures 22+ coverage rows and would
+// otherwise need either 22 separate 10s renders or a fourth bespoke harness. Additive and
+// optional: every existing invocation is unaffected because PROBE is '' unless asked for.
+// The file default-exports `async (page) => any`; whatever it returns is printed as `probe`.
+const PROBE = arg('probe', '')
+let probe = null
+if (PROBE) {
+  const mod = await import(`file://${resolve(PROBE)}`)
+  try { probe = await mod.default(page) }
+  catch (e) { probe = { probeError: String(e).slice(0, 400) } }
+}
+
 const text = await page.evaluate(() => document.body.innerText)
 const count = SEL ? await page.locator(SEL).count() : null
 if (!has('text')) await page.screenshot({ path: OUT, fullPage: has('full') })
@@ -130,6 +145,7 @@ console.log(JSON.stringify({
   out: has('text') ? null : OUT,
   bodyLen: text.length,
   count: SEL ? { selector: SEL, count } : null,
+  probe,
   // Every fixture that was actually asked for, and every /api/ call that fell through to `{}`.
   // The second list is the important one: an unfixtured call is a screen rendering on nothing.
   servedFixtures: [...new Set(served)],

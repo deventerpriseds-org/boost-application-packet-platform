@@ -317,7 +317,7 @@ export function docReport(
     totalLines: sections.reduce((n, s) => n + s.lineCount, 0),
     text: {
       chars: full.length,
-      truncated: false,
+      truncated: full.length > maxChars,
       // Truncation is announced in the same object as the text, so a reader can never mistake a cut
       // sample for the whole document.
       sample: full.length > maxChars ? `${full.slice(0, maxChars)}\n…[TRUNCATED at ${maxChars} chars of ${full.length}]` : full,

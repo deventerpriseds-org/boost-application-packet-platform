@@ -72,6 +72,24 @@ function checkResultFor(artifactId) {
 const checkResults = raw.checkResults ||
   Object.fromEntries((raw.artifacts || []).map((a) => [a.id, checkResultFor(a.id)]))
 
+// TRAP 3, the same shape as trap 2 and found the same way - by rendering. The artifact rows were
+// being passed through RAW (`doc_url`, `drive_url`, `template_id`, `updated_at`), but the real
+// endpoint SHAPES them: `appPackets.ts:207` maps every artifact to
+// `{ id, type, status, templateId, docUrl, driveUrl, content, updatedAt }`. `PacketBuilder.jsx:236`
+// renders the `✓ Open Google Doc ↗` / `✓ Open Slides ↗` / `Copy tracked link` row behind
+// `a.docUrl ? … : …`, so with the snake_case key that whole row is CONDITIONALLY HIDDEN and a
+// measurement reports three built controls as missing. Measured 2026-08-30 during RENDER-SWEEP:
+// SPEC 4.4-5/6/7/8 all read as not-rendered against a fixture whose artifacts carried a perfectly
+// good `doc_url`. Mapping mechanically here, from the endpoint's own projection.
+const artifactShape = (rows) => (rows || []).map((a) => ({
+  id: a.id, type: a.type, status: a.status,
+  templateId: a.templateId ?? a.template_id,
+  docUrl: a.docUrl ?? a.doc_url,
+  driveUrl: a.driveUrl ?? a.drive_url,
+  content: a.content,
+  updatedAt: a.updatedAt ?? a.updated_at,
+}))
+
 const f = {}
 // FLAT - see trap 2.
 f[`/opportunity/${OPP}/packet`] = {
@@ -79,9 +97,24 @@ f[`/opportunity/${OPP}/packet`] = {
   id: pk.id, oppId: pk.opp_id, status: pk.status, round: pk.round,
   jdAnalyzed: pk.jd_analyzed, feedback: pk.feedback || [],
   coveredKw: pk.covered_kw || [], missingKw: opp.ats_gaps || [],
-  atsScore: pk.ats_score, mustHaves: pk.must_haves || [], artifacts,
+  atsScore: pk.ats_score, mustHaves: pk.must_haves || [], artifacts: artifactShape(artifacts),
 }
-f[`/opportunity/${OPP}/requirements`] = { requirements }
+// TRAP 4, same class as traps 2 and 3, found the same way. The real endpoint
+// (`appRequirements.ts:704`) returns `{ ..., total: rows.length, located, requirements }`, and
+// `total` is LOAD-BEARING on the client: `meterModel` (`assetBlocks.js:883`) gates the whole
+// measured branch on `Number.isFinite(Number(requirements.total))`, so with `total` absent it
+// takes the else branch and prints "This posting has no requirement rows yet ... unknown - not
+// zero" — for a fixture carrying 21 perfectly good requirement rows. Everything in that branch
+// disappears with it, INCLUDING the three per-kind stats `REQ_KIND_STATS` (`Must-haves answered`
+// / `Responsibilities answered` / `Nice-to-haves answered`, SPEC 4.4-24/25/26). Measured
+// 2026-08-30 during RENDER-SWEEP: those three read as not-built until `total` was supplied.
+// Derived mechanically from the rows, exactly as the endpoint derives it.
+f[`/opportunity/${OPP}/requirements`] = {
+  oppId: OPP,
+  requirements,
+  total: requirements.length,
+  located: requirements.filter((r) => r.char_start !== null && r.char_start !== undefined).length,
+}
 f[`/opportunity/${OPP}`] = { opportunity: { ...opp, id: OPP, stage: pk.status } }
 f['/app/opportunities'] = { opportunities: [{ ...opp, id: OPP, stage: pk.status }] }
 f['/app/packets'] = { packets: [{ id: pk.id, oppId: OPP, ...opp, status: pk.status }] }
