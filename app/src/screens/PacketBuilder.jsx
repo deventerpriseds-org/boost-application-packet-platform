@@ -4,7 +4,7 @@ import { api } from '../api.js'
 import { Pill, toneColor } from '../shell.jsx'
 import { Loading, ErrorBox } from './Today.jsx'
 import AssetBlocks, { useAssetProvenance } from './AssetBlocks.jsx'
-import { registerListOwners } from '../assetBlocks.js'
+import { registerListOwners, registerFieldOwners } from '../assetBlocks.js'
 import {
   PostingAnalysisCard, AnalysisRunCard, KeywordTallyOverlay, MatchEstimateButton, ProfileLink,
   ProfileCompareCard,
@@ -146,7 +146,7 @@ function stepDone(key, p, artifacts, qc) {
 // Exported so the browser probe can mount the REAL card (test/browser/run-asset-blocks.mjs). The
 // header's collapsed default is a rendering fact; asserting it against a replica of this component
 // would prove only that the replica was written to match.
-export function ArtifactCard({ a, busy, setBusy, qcResult, onGenerate, onRegenerate, onSetStatus, onMakeDoc, onMakeSlides, onGenVideo, onArchiveVideo, doc, video, provenance, listOwners, onListsRendered, focusField = null, onOpenFirstFix = null, onSeedAssistant = null }) {
+export function ArtifactCard({ a, busy, setBusy, qcResult, onGenerate, onRegenerate, onSetStatus, onMakeDoc, onMakeSlides, onGenVideo, onArchiveVideo, doc, video, provenance, listOwners, onListsRendered, focusField = null, onOpenFirstFix = null, onSeedAssistant = null, fieldOwners = null, onGoToField = null }) {
   const v = video[a.id] || {}
   const d = doc[a.id] || {}
   const videoUrl = v.url || a.docUrl
@@ -205,7 +205,11 @@ export function ArtifactCard({ a, busy, setBusy, qcResult, onGenerate, onRegener
       {(a.status !== 'todo' || a.content) && (
         <AssetBlocks artifact={a} provenance={provenance} fallback={a.content}
           label={TYPE_LABEL[a.type] || a.type} listOwners={listOwners} onListsRendered={onListsRendered}
-          focusField={focusField} onSeedAssistant={onSeedAssistant} />
+          focusField={focusField} onSeedAssistant={onSeedAssistant}
+          /* SPEC 4.4-29 - the SAME navigator the QC rail's deep links use (`goToField`), not a
+             second one, so a finding opened from the asset header and the same finding opened from
+             the rail land identically. */
+          fieldOwners={fieldOwners} onGoToField={onGoToField} />
       )}
 
       {/* Video */}
@@ -429,8 +433,17 @@ export default function PacketBuilder({ id, step }) {
   // the compact resume render the SAME change; this registry is what lets each card name the other
   // instead of the one decision reading as two (decision 9, sharedSource).
   const [listOwners, setListOwners] = useState({})
-  const registerLists = useCallback((artifactId, label, lists) => {
+  // SPEC 4.4-29. `mergeField -> [{id,label}]`, from the SAME report. A finding on the compact resume
+  // can name `RelevantBullets1`, a field only the RESUME renders (10 such rows on the production
+  // fixture), and turning that into a navigation needs to know which asset owns the field. The
+  // list-keyed map above cannot answer it - it is keyed by list because a swap_decision row is, and
+  // no list backs `ResumeSummary` or `@CoverLetterBody`. Derived at render time rather than from
+  // `listOwnersFromArtifacts` because `useQcEntries` fetches insertions only on the QC and JD steps,
+  // so on the asset steps - where this list renders - that derivation would be `{}`.
+  const [fieldOwners, setFieldOwners] = useState({})
+  const registerLists = useCallback((artifactId, label, lists, fields) => {
     setListOwners((prev) => registerListOwners(prev, artifactId, label, lists))
+    setFieldOwners((prev) => registerFieldOwners(prev, artifactId, label, fields))
   }, [])
   // ONE source for every asset's QC payload (P5.1). The step circle, the QC rail, the per-asset
   // drawer and the keyword surfaces all read this same map, so no two of them can show different
@@ -954,6 +967,7 @@ export default function PacketBuilder({ id, step }) {
                   return t ? () => goToField(t.artifactId, t.mergeField) : null
                 })()}
                 listOwners={listOwners} onListsRendered={registerLists}
+                fieldOwners={fieldOwners} onGoToField={goToField}
                 focusField={fieldFocus && fieldFocus.artifactId === a.id ? fieldFocus.section : null}
                 /* SPEC 4.7-8 - the artifact travels WITH the sentence. Binding it at the call site,
                    where `a.id` is unambiguous, is what stops the panel inferring which asset a
