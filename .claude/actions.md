@@ -30,6 +30,13 @@ Status values: `open` | `in-progress` | `blocked` | `done`
   `claude-task.yml` is what a boost session can dispatch. Check the PR, don't assume.
 - **`claude-task.yml` is NOT deleted and must not be:** it runs on GitHub's machines and is the only
   vehicle that survives a container restore. `verify.sh` dies with the container.
+- **CORRECTION, same day (owner-caught).** This row first said the runner "needs metered credit
+  which ran out". **A balance is a STATE, not a property** — re-probed 2026-08-30 (run 33288812332):
+  `end_turn`, `in=33 out=11`, artifact complete, success in 14s. **The credit is live; the runner
+  works today.** Only the toollessness is a real, unchanging deficit. Evidence and the re-check
+  command: `eds-claude-skills/docs/qc-evidence/FEASIBILITY-runner-credit.md`. Consequence: the
+  hybrid is a COST question, not a feasibility one, and the gap is narrow (~$1.61 API-runner vs
+  $2.36 verify.sh, which did strictly more) — which weakens the case for migrating at all.
 - **Measured, and it applies to every long pass regardless of vehicle:** chunk the work, commit AND
   PUSH per chunk. One-pass across a real restore → 0 chunks durable; chunked → 2 of 5 durable and
   resumable.

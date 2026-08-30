@@ -547,7 +547,15 @@ while the parent keeps issuing tool calls.
 `claude-task.yml`. That is a single Messages API call: it **cannot grep, follow an import, or
 execute anything**, so a verifier running on it can only reason about what an assertion *would*
 evaluate — and the one thing that has actually caught inert guards in this org is a running
-adversary. It also needs metered API credit, which **ran out mid-pipeline** (run 33277232470).
+adversary. **That is its one real and unchanging deficit.**
+
+> **CORRECTION, 2026-08-30 — do not read `claude-task.yml` as credit-blocked.** This section
+> previously said it *"needs metered API credit, which ran out mid-pipeline"* (run 33277232470).
+> That run did fail exactly that way, but the TENSE was wrong: **a balance is a STATE, not a
+> property.** Re-probed 2026-08-30 (run 33288812332): `end_turn`, `in=33 out=11`, artifact
+> complete, success in 14s — **the credit is live and the runner works today.** Evidence and the
+> command that re-checks it: `eds-claude-skills/docs/qc-evidence/FEASIBILITY-runner-credit.md`.
+> Re-probe rather than remember; the toollessness above is the deficit that does not change.
 
 ### Use `scripts/verify.sh` in `eds-claude-skills` — one vehicle, two kinds
 

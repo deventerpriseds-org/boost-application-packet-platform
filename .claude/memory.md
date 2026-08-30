@@ -529,7 +529,11 @@ Key tables (PostgreSQL):
 any more (2026-08-29)` further down this file, and the matching section in `CLAUDE.md`, are now
 SUPERSEDED — do not follow either as written.** They send long passes to `claude-task.yml`, which is
 a single Messages API call: it cannot grep, follow an import, or EXECUTE, and it needs metered API
-credit that ran out mid-pipeline (run 33277232470).
+credit. **(That last half is CORRECTED: run 33277232470 did fail on a spent balance, but a balance
+is a STATE — re-probed 2026-08-30, run 33288812332, `end_turn`/`in=33 out=11`/success, the credit
+is LIVE and the runner works today. Evidence:
+`eds-claude-skills/docs/qc-evidence/FEASIBILITY-runner-credit.md`. The toollessness is the real,
+unchanging deficit.)**
 
 **Use `scripts/verify.sh` in `eds-claude-skills` instead** — one vehicle, two kinds:
 
