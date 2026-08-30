@@ -5578,3 +5578,44 @@ named-field set from 2 to 8 while KEEPING the no-spread assertion.
 on an expertise row and it renders "in Expertise" with no raw enum leak, so `5 → 6` restores 396/396.
 **AC-15 and AC-13 are NOT_APPLICABLE until the branch is deployed** — both need a packet rebuilt on
 it; AC-15's exact three-workflow sequence is named in the verify file.
+
+---
+
+## DEPLOYED — the fixed-slot pairing lane is on `main` (2026-08-30)
+
+**Owner: "go".** `main` fast-forwarded `c8e583c → 9760c4f`.
+
+| Deploy | Run | Result |
+|---|---|---|
+| `api-deploy.yml` — carries the F-2 migration | **33309916009** | success |
+| `executive-engine-deploy.yml` | **33309916012** | success |
+
+Both waited with `wait-run.sh sha:` pinned to `9760c4f`, never `latest:` (H15), and both results were read
+from the command's own output rather than the task notification — that notification reported
+`exit code 0` for a run that had actually been `Terminated` earlier in this session.
+
+**Pre-merge state:** api **891 pass / 0 fail**, the three cluster-booting DB files **24/24** when given
+a real timeout budget, app **396/396**.
+
+**What is now live:** the pairing rewrite (the swap row's "original" is the owner's master template,
+not Call 1's draft); F-1 (an owner edit that quotes the posting no longer aborts `writeSwaps` and
+ship an EMPTY swap table); Expertise end to end — `ListKey`, `LIST_FIELDS`, `LIST_FIELD_TO_LIST`, and
+all three DDL list CHECKs; the `fixed_slot_count` check; per-template slot counts saveable in Settings.
+
+**MIGRATION STATUS — inference, not a direct read.** `api-deploy.yml` runs a FAIL-LOUD `pg-migrate`
+step (PR #28), so a migration failure reddens the run; the run is green, therefore it applied.
+Confidence high, but this is the workflow's design reasoning rather than the ground truth. The
+ground truth is one query against the live database:
+`select conname, pg_get_constraintdef(oid) from pg_constraint where conrelid in
+('swap_decision'::regclass,'skill_candidate'::regclass,'insertion'::regclass) and contype='c'` —
+all three list CHECKs must now admit `'expertise'`. **`boost-pg-mcp-write` is lapsed in this session,
+so that read has NOT been made.**
+
+**STILL NOT PROVEN, and deployment does not settle it — AC-15.** The live 9-of-14 flip needs a packet
+REBUILT on this code: every `from_label` must then name text that exists in the master blocks. Nothing
+local substitutes for it. Sequence: `api-test.yml` rebuild → `db-query.yml` read `swap_decision` →
+`api-test.yml GET /api/diag/skill-sources` for the master text.
+
+**Also inert until wired:** `appPackets.ts` does not thread the slot counts into the build, so
+`fixed_slot_count` reports `not_applicable` — the correct state for a count nobody supplied, not a
+silent pass. The fix is a small pure `tests/slots.ts` that both `config.ts` and `roleFocus.ts` import.
