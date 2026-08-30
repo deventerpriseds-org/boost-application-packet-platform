@@ -5742,3 +5742,37 @@ one seeding the panel.
 beside `4.8-1`, `4.8-2`, `4.8-11` and `4.11-7`, and it is among the cheapest in the set — it
 inherits `swapAskWhy`'s null contract (*"never open a panel that cannot send"*, `PacketBuilder.jsx:765`)
 and its guard pattern rather than needing new ones.
+
+---
+
+## Status close-out: what is confirmed live, what is NOT (2026-08-30)
+
+Written because the Stop gate correctly challenged the phrase *"live and confirmed"* in a turn that
+also said a verifier had died. Both were true of DIFFERENT work, and a reader deserves the split
+stated rather than inferred.
+
+**CONFIRMED LIVE — deployed, and re-read from production by me, not inferred:**
+- The pairing rewrite, F-1, and the three DDL list-CHECK widenings. Deployed `9760c4f`
+  (`api-deploy` 33309916009, `executive-engine-deploy` 33309916012, both success). Verified by
+  reading the live constraints (all three admit `expertise`) and by rebuilding the Trinnex packet
+  and re-measuring: `from_label` absent from the master went **21/29 → 0/43**.
+- Slot counts on the owner's template row: `10 / 8 / 6`, Relevant left null. Read back through the
+  API and visible in the deployed Settings screen.
+
+**NOT VERIFIED — no independent pass exists:**
+- The relevant-pool and slot-wiring lanes (`5c8cc01` and later). 11 commits on
+  `claude/incumbent-wins-swap`, **none on `main`, so none of it is running.** My own runs were green
+  (api 933/0, app 396/0) and the implementers mutation-proved their guards, but self-reported
+  evidence is not verification.
+- **The verifier has now died twice, from two different causes**, which is the measured part:
+  an in-session `Agent` was killed by a user interrupt at 12:41 (`/proc/stat` btime unchanged, so
+  not a restore), and the detached `verify.sh` child was killed by a container restore. Both
+  executing vehicles have failed in one session; `claude-task.yml` survives a restore but cannot
+  execute, which is the wrong trade for a brief built on mutation proofs and differential runs.
+  A check-in at 16:14Z relaunches it against the current tip rather than the stale `5c8cc01`.
+
+**eds-claude-skills PR #31** — `verify.sh` refuses a VERIFY brief with no `## VERIFY LOOP` header.
+`guards` check **success** on `4b7d661`, `mergeable_state: clean`, no open review threads. CI caught
+a real defect in my first push (my requirement rejected the suite's own fixtures, 7 of 43); fixed by
+giving the fixtures the header and adding `VS-LOOPHDR`, 48/48 against a 43/43 baseline taken from a
+worktree. Subscribed; check-in armed.
