@@ -1731,7 +1731,14 @@ test('H:ask-why-never-names-the-raw-list-enum: the question says "Skills 1", nev
   const producer = readFileSync(new URL('../../api/src/functions/tests/insertions.ts', import.meta.url), 'utf8')
   const block = producer.slice(producer.indexOf('LIST_FIELD_TO_LIST'))
   const fields = [...block.slice(0, block.indexOf('}')).matchAll(/^\s*(\w+):\s*'/gm)].map((m) => m[1])
-  assert.equal(fields.length, 5, 'the producer map did not parse - re-read insertions.ts before trusting this')
+  // ASSERT THE SET, NOT THE COUNT (2026-08-30). This was `fields.length === 5` and it broke the day
+  // `ExpertiseBullets` legitimately joined the map. A bare count is a rubber stamp: the only repair
+  // it ever invites is bumping the number, which is exactly what someone does when a field is
+  // WRONGLY added or silently REMOVED. Naming the set costs the same line and says which fields.
+  assert.deepEqual(fields.slice().sort(),
+    ['ExpertiseBullets', 'RelevantBullets1', 'RelevantBullets2', 'RelevantBullets3',
+     'SkillsBullets1', 'SkillsBullets2'],
+    'the producer map did not parse, or its fields changed - re-read insertions.ts before trusting this')
   for (const f of fields) {
     assert.notEqual(FIELD_LABEL[f], undefined,
       `insertion.list can be written for ${f}, but FIELD_LABEL does not name it - the question would end in a raw slot`)

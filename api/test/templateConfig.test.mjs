@@ -44,6 +44,18 @@ test('H:template-focus-writer-is-row-scoped: not a way to write arbitrary AppCon
   assert.deepEqual(assigned, ['label', 'roleFocus'],
     'the writer stores something other than the two declared fields')
   assert.ok(!/\.\.\.body/.test(body), 'the writer must never spread the request body into the entity')
+
+  // WIDENED AGAIN 2026-08-30, and NOT by relaxing anything — by closing a hole this case had gone
+  // blind to. Slot counts are written through a COMPUTED key (`entity[slotProp(f)] = n`), which
+  // `entity\.(\w+) =` cannot see, so the deepEqual above kept passing at two named fields while
+  // EIGHT more properties were being written by a path it never looked at. The invariant was still
+  // true — `slotProp(f)` iterates the fixed SLOT_FIELDS, never caller input — but the guard had
+  // stopped proving it, which is the vacuous-guard failure this repo keeps paying for.
+  const computed = [...body.matchAll(/entity\[([^\]]+)\] =/g)].map((m) => m[1].trim()).sort()
+  assert.deepEqual(computed, ['slotProp(f)'],
+    'a computed write onto the entity must come from slotProp over the declared slot fields, never from caller input')
+  assert.match(body, /for \(const f of SLOT_FIELDS\)[\s\S]{0,200}?entity\[slotProp\(f\)\] = n/,
+    'the computed write must be driven by SLOT_FIELDS — a loop over anything caller-supplied reopens arbitrary AppConfig writes')
 })
 
 test('H:blank-focus-clears-rather-than-storing-empty', () => {
@@ -55,8 +67,15 @@ test('H:blank-focus-clears-rather-than-storing-empty', () => {
   // must survive having its focus cleared), so the old grep for `if (!roleFocus) { ... deleteEntity`
   // no longer matches. What this case actually guards is unchanged and is asserted directly: a blank
   // focus is NEVER written as an empty string.
-  assert.match(src, /if \(!roleFocus && !keepLabel\)[\s\S]{0,220}?deleteEntity\('templates', rowKey\)/,
+  // RESTATED AGAIN 2026-08-30. A third term joined the condition (`&& !hasAnySlot(keepSlots)`), so
+  // the pattern now tolerates further conjuncts instead of pinning the exact two — and REQUIRES the
+  // slot term by name, because a template configured only with counts must survive a cleared focus.
+  // Tolerating extra conjuncts without demanding this one would have been the relaxation it looks
+  // like; demanding it makes the guard stricter than it was.
+  assert.match(src, /if \(!roleFocus && !keepLabel(?: && [^)]+)*\)[\s\S]{0,260}?deleteEntity\('templates', rowKey\)/,
     'an entirely empty row is not deleted')
+  assert.match(src, /if \(!roleFocus && !keepLabel && !hasAnySlot\(keepSlots\)\)/,
+    'a template carrying only slot counts must not be deleted by clearing its focus')
   assert.match(src, /if \(roleFocus\) entity\.roleFocus = roleFocus/,
     'a blank role focus must never be assigned onto the entity — it would win over the seed')
 })
@@ -131,7 +150,14 @@ test('H:template-label-absent-means-leave-alone-not-clear', () => {
   // erase names.
   assert.match(src, /hasOwnProperty\.call\(body \|\| \{\}, 'label'\)/,
     'the writer must distinguish an omitted label from a blank one')
-  assert.match(src, /if \(!hasLabel\)[\s\S]{0,320}?getEntity\('templates', rowKey\)/,
+  // RESTRUCTURED 2026-08-30: the stored row is now read UNCONDITIONALLY (slots are routinely
+  // partially omitted, so the preserve dance can no longer be gated on the label alone), and the
+  // keep decision is a ternary rather than an `if (!hasLabel)` block. The SEMANTICS asserted here
+  // are unchanged and are now asserted directly on that ternary — an omitted label keeps what is
+  // stored, and only an absent/unreadable row falls back to blank.
+  assert.match(src, /getEntity\('templates', rowKey\)[\s\S]{0,200}?catch[\s\S]{0,60}?existing = null/,
+    'the stored row must be read before the entity is rebuilt, or Replace silently wipes it')
+  assert.match(src, /const keepLabel = hasLabel \? label : \(existing\?\.label \? String\(existing\.label\) : ''\)/,
     'an omitted label must be read back off the stored row, not defaulted to blank')
 })
 
@@ -148,12 +174,20 @@ test('H:template-row-writes-replace-not-merge: a cleared focus really clears', (
 test('H:template-row-is-listed-when-it-has-only-a-name', () => {
   // Membership used to key on `roleFocus` alone. A freshly NAMED template with no focus yet would
   // then be invisible in the list it was just added to.
-  assert.match(src, /if \(roleFocus \|\| label\) configured\[k\] =/,
+  // A third disjunct joined it 2026-08-30 (`|| hasAnySlot(slots)`), so the pattern tolerates more
+  // and names the new one, for the same reason as the delete condition above: a template configured
+  // only with slot counts must appear in the list it was just added to.
+  // The gap is bounded rather than enumerated: a further disjunct may itself contain parentheses
+  // (`hasAnySlot(slots)`), which a `[^)]` class cannot cross. The two original disjuncts stay
+  // adjacent and required, and the assertion below pins the exact current condition.
+  assert.match(src, /if \(roleFocus \|\| label[\s\S]{0,60}?\) configured\[k\] =/,
     'a row with only a label must still be listed')
+  assert.match(src, /if \(roleFocus \|\| label \|\| hasAnySlot\(slots\)\) configured\[k\] =/,
+    'a row with only slot counts must be listed too')
 })
 
 test('H:template-delete-needs-both-empty: a named template is not deleted by clearing its focus', () => {
-  assert.match(src, /if \(!roleFocus && !keepLabel\)[\s\S]{0,200}?deleteEntity/,
+  assert.match(src, /if \(!roleFocus && !keepLabel(?: && [^)]+)*\)[\s\S]{0,260}?deleteEntity/,
     'the row may only be deleted when it carries neither a focus nor a name')
 })
 
