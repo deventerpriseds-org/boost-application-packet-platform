@@ -106,3 +106,75 @@ build, extending `ReqChip` (`AssetBlocks.jsx:1150`), not a surfacing job.
   internally correct; an earlier reading of mine said otherwise and was wrong.
 - **`COVERAGE_THRESHOLD` is not to be lowered.** Owner-decided. It is shared by four decisions across
   every field, and was raised 0.5 → 0.7 to fix a real false positive.
+
+---
+
+# A1, EXACTLY — TWO OF THE FOUR "no"s ARE CAUSED BY WORD ENDINGS
+
+Owner, 2026-09-01: *"but you showed me a table that said no when the match is clear"*. They are right,
+and the per-token breakdown says something sharper than "it cannot do paraphrase". Executed
+(`/tmp/why.mjs`, `api/dist`), Trinnex summary against its own requirement rows:
+
+```
+#15  3/5 = 0.60   HIT: align, engineering, business      MISS: strategy, goals
+#12  4/6 = 0.67   HIT: engineering, technology, software  MISS: leadership, organizations
+#9   4/7 = 0.57   HIT: build, high-performing, engineering, teams   MISS: develop, managers, technical
+#7   2/4 = 0.50   HIT: emerging, technologies             MISS: opportunities, apply
+```
+
+## The misses are not all the same KIND, and that is the finding
+
+| miss | requirement's word | the summary's word | what kind of miss |
+|---|---|---|---|
+| #15 `strategy` | strateg**y** | strateg**ies** | **INFLECTION — the same word, pluralised** |
+| #12 `leadership` | leader**ship** | **leader** | **INFLECTION — the same word** |
+| #15 `goals` | goals | objectives | synonym |
+| #7 `apply` | apply | leverage | synonym |
+| #7 `opportunities` | opportunities | — | JD framing, absent |
+| #9 `develop`, `managers`, `technical` | — | — | **genuinely absent — a fair "no"** |
+
+**Fix the inflections alone and two rows cross the line, with no threshold change and no model:**
+
+- **#15: 3/5 = 0.60 → 4/5 = 0.80 → PASSES**
+- **#12: 4/6 = 0.67 → 5/6 = 0.83 → PASSES**
+
+## The mechanism, and why it is arbitrary rather than merely strict
+
+`coversIn` tests `covText.includes(tk)` — a **raw substring test with no stemming or lemmatisation**.
+That means it succeeds **only when the requirement's token happens to be a literal prefix or substring
+of a word in the candidate text**, and fails otherwise:
+
+| requirement token | summary word | `includes()` | why |
+|---|---|---|---|
+| `align` | align**ing** | **true** | the JD token is a prefix of the longer word |
+| `build` | build**ing** | **true** | same |
+| `strategy` | strateg**ies** | **false** | `strategies` does not contain the string `strategy` |
+| `leadership` | **leader** | **false** | the JD token is LONGER than the document's word |
+
+**So the check is not consistently strict — it is inconsistently lucky.** Whether an inflected match
+counts depends on which side happens to be longer. Nothing in the code intends this; it is what a bare
+`includes()` does.
+
+## What this changes about the plan
+
+1. **A stemmer is a DETERMINISTIC fix with no model and no threshold change.** This is OD-1's option
+   (c), and it is far cheaper than that option was costed at. It should go FIRST, ahead of A2/A3 —
+   it is small, it is testable, and it demonstrably fixes half of the observed misses on the owner's
+   own packet.
+2. **Only the SYNONYM misses (`goals`/`objectives`, `apply`/`leverage`) need judgement**, which is
+   where option (b) or a synonym table actually belongs. That is a much smaller surface than "make
+   coverage paraphrase-aware".
+3. **#9 stays a fair "no"** — the summary genuinely does not say *managers* or *technical*. A
+   recogniser that passed it would be wrong. **Any fix must keep #9 failing**, and that is the
+   regression test.
+
+## CAVEAT, stated before anyone builds it
+
+Stemming **loosens** the predicate, and `COVERAGE_THRESHOLD` was raised 0.5 → 0.7 to fix a real false
+positive (`checks.ts:668-673`, the *"digital water technology"* case). This is a loosening of a
+different kind — it matches words that genuinely ARE the same word, rather than lowering the bar for
+how many must match — but that distinction has to be **proved, not asserted**:
+
+- the Trinnex `#9` row must still FAIL after the change (the guard against over-matching);
+- the historical false positive the threshold was raised for must be re-run and must still fail;
+- the stemmer must be mutation-proved: revert it, confirm #15 and #12 drop back under 0.70.
