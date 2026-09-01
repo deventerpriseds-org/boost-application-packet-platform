@@ -287,3 +287,81 @@ one command that would have led with the truth was
 `grep -rn "openai(" api/src/functions/tests/*.ts` — two files, neither in the decision path. **When
 asked "why does it say no", establish WHAT KIND OF THING is deciding before characterising how it is
 tuned.**
+
+---
+
+# I REPORTED TWO WRONG ANSWERS AS IF THEY WERE CORRECT BEHAVIOUR
+
+Owner, 2026-09-01: *"why are the second two examples false and you didn't notice that is incorrect?"*
+
+I printed this and annotated it as a fact about the stemmer's scope:
+
+```
+sameWord('strategy','strategies') = true
+sameWord('leadership','leader')   = false     <- I labelled this "derivational, not inflectional"
+sameWord('goals','objectives')    = false     <- I labelled this "synonym"
+```
+
+**Both `false`s are WRONG ANSWERS to the question the system is actually asking.** `leadership` and
+`leader` are the same word. A document saying *"Visionary technology **leader**"* does address a
+requirement reading *"Engineering & Technology **Leadership**"*. I described the tool's limitation and
+let it stand in for the correct answer — the same error as reading the shipped summaries by eye and
+calling them clean, earlier in this same investigation. **A tool's boundary is not a definition of
+correctness.**
+
+## The defect is far wider than one plural — measured
+
+`requirementSupport.forms()` handles **INFLECTIONAL** suffixes only (`-s`, `-es`, `-ies`, `-ed`,
+`-ing`). It handles **NO DERIVATIONAL** morphology at all. Executed against `api/dist`:
+
+```
+forms('leadership') = { leadership }          forms('leader')  = { leader }
+forms('management') = { management }          forms('manager') = { manager }
+forms('governance') = { governance }          forms('govern')  = { govern }
+forms('delivery')   = { delivery }            forms('deliver') = { deliver }
+forms('operations') = { operations, operation }   forms('operate') = { operate }
+
+sameWord('leadership','leader')   = false     WRONG
+sameWord('management','manager')  = false     WRONG
+sameWord('governance','govern')   = false     WRONG
+sameWord('delivery','deliver')    = false     WRONG
+sameWord('operations','operate')  = false     WRONG
+sameWord('engineering','engineer') = true     <- correct, and ONLY because -ing is inflectional
+```
+
+**`governance`, `delivery`, `operations`, `management`, `leadership` are the vocabulary executive job
+postings are built from.** The Trinnex posting alone contains *"engineering standards, **governance**,
+metrics"*, *"modern software **delivery** practices"*, *"machine learning **operations**"*,
+*"**Manage** engineering priorities"* and *"Engineering & Technology **Leadership**"*. This is not a
+corner case; it is the core noun vocabulary of the domain, failing on every row.
+
+## Corrected arithmetic on the owner's four rows
+
+| row | blocking misses | with inflection only | with inflection + derivation |
+|---|---|---|---|
+| #15 | `strategy`, `goals` | 0.60 → **0.80 PASSES** (strategy fixed) | 0.80 PASSES |
+| #12 | `leadership`, `organizations` | 0.67 — still fails | **0.83 PASSES** (leadership↔leader) |
+| #7 | `opportunities`, `apply` | 0.50 — fails | 0.50 — fails (both are synonym/framing) |
+| #9 | `develop`, `managers`, `technical` | 0.57 — fails | 0.57 — fails, **and correctly so** |
+
+**Two of four, not one of four** — and the second one only once the stemmer stops treating a
+derivational pair as two different words.
+
+## What this does to the conclusion
+
+It does **not** rescue the lexical approach; it sharpens why the owner is right. Even with correct
+morphology, `goals`/`objectives` and `apply`/`leverage` still fail, and those are ordinary English
+synonyms in a domain built on them. A morphology fix converts a broken matcher into a merely
+inadequate one. **The judgement question is unchanged and remains the owner's call** (§ "the honest
+choice", options 1-3 above).
+
+## The pattern in my own reporting, which is now three instances
+
+1. Read the shipped summaries by eye, called them clean. The measurement disagreed.
+2. Saw two numbers on one card, inferred a shared source. The trace disagreed.
+3. Printed two wrong answers from a helper and annotated them as scope rather than defect.
+
+All three are the same shape: **accepting a proxy — my eye, an inference, a tool's output — in place
+of the ground truth of whether the answer is RIGHT.** The guard that would have caught all three is to
+ask, of every value reported: *is this the correct answer to the user's question?* — not *is this what
+the code returns?*
