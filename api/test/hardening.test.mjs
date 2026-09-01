@@ -4746,3 +4746,39 @@ test('H:the-judge-reports-what-it-did', () => {
   }
   assert.match(body, /results, score, judge \}/, 'and it must actually be returned')
 })
+
+test('H:every-evidence-alias-reaches-the-gate: a column selected and then dropped is invisible', () => {
+  // WRITTEN BECAUSE A MUTATION CAME BACK INERT. Deleting `decision: r.evidence_decision ?? null`
+  // from the appChecks mapping failed no test, and that is a whole-feature no-op: the owner's veto
+  // is written to the database, read back by the loader's SELECT, and then silently discarded three
+  // lines before `ruleEvidenceOf` -- the only code that acts on it. The gate would keep counting a
+  // row the owner rejected, with every other test still green.
+  //
+  // It is the same shape as `H:every-evidence-count-has-a-reader` one level up, and `tsc` cannot
+  // see it: both new fields are OPTIONAL on EvidenceRow, so an absent key type-checks perfectly.
+  //
+  // THE INVARIANT, not the incident: for every `evidence_X` alias the loader projects, if `X` is a
+  // declared field of EvidenceRow then the mapping in appChecks must actually read it. A column
+  // added to the join and to the interface but forgotten in the mapping fails here, whatever it is
+  // called. A source grep rather than a runtime test, per the hardening rule's carve-out for
+  // structural claims a behavioural test cannot express -- the failure is an ABSENT line.
+  const reqSrc = readFileSync(new URL('../src/functions/tests/appRequirements.ts', import.meta.url), 'utf8')
+  const sql = reqSrc.slice(reqSrc.indexOf('export async function loadRequirementsWithEvidence'))
+  const aliases = [...sql.slice(0, sql.indexOf('order by r.seq')).matchAll(/as\s+evidence_([a-z0-9_]+)/g)].map(m => m[1])
+  assert.ok(aliases.length >= 12, `only ${aliases.length} evidence aliases found — the scan has gone stale`)
+
+  const evSrc = readFileSync(new URL('../src/functions/tests/evidence.ts', import.meta.url), 'utf8')
+  const iface = evSrc.slice(evSrc.indexOf('export interface EvidenceRow'))
+  const body = iface.slice(0, iface.indexOf('\n}'))
+  // Comments carry field names in prose; strip them or the guard cries wolf on a mention.
+  const code = body.split('\n').filter(l => !/^\s*(\/\/|\*|\/\*)/.test(l)).join('\n')
+  const declared = new Set([...code.matchAll(/^\s*([a-z_][a-z0-9_]*)\??\s*:/gm)].map(m => m[1]))
+
+  const chkSrc = readFileSync(new URL('../src/functions/tests/appChecks.ts', import.meta.url), 'utf8')
+  const missing = aliases.filter(a => declared.has(a) && !chkSrc.includes(`r.evidence_${a}`))
+  assert.deepEqual(missing, [],
+    `THE LOADER SELECTS THESE AND THE GATE NEVER SEES THEM: ${missing.join(', ')}. ` +
+    'Each is projected by loadRequirementsWithEvidence and declared on EvidenceRow, but the ' +
+    'appChecks mapping does not read it — so it is written, queried, and dropped before the only ' +
+    'code that would act on it. tsc cannot catch this while the field is optional.')
+})
