@@ -365,3 +365,69 @@ All three are the same shape: **accepting a proxy — my eye, an inference, a to
 of the ground truth of whether the answer is RIGHT.** The guard that would have caught all three is to
 ask, of every value reported: *is this the correct answer to the user's question?* — not *is this what
 the code returns?*
+
+---
+
+# THE `#9 MUST FAIL` ACCEPTANCE BAR WAS WRONG — I set it by word-matching
+
+Owner, 2026-09-01:
+
+> *"being able to tell the essence of the summary sounds like someone who is technical is the thing an
+> llm can do that word matching can't. that's why I'm shocked you didn't think the summary covers
+> technical expertise."*
+
+**They are right, and this is the same error as the three already logged in this file.** I wrote
+*"#9 must STILL FAIL"* into two committed artifacts as the guard on the judge, and my stated reason
+was that *"the summary genuinely does not say **managers** or **technical**"* — which is a
+WORD-MATCHING test. I applied the lexical criterion to decide what the semantic judge must conclude,
+while arguing that the lexical criterion is the defect.
+
+## The row, read properly
+
+**Requirement #9:** *"Build, lead, and develop high-performing engineering managers and technical
+teams."*
+
+**The summary:** *"Visionary **technology leader**… aligning **engineering strategies** with business
+objectives. Adept at **building high-performing teams** and fostering a culture of collaboration and
+innovation, **delivering scalable and secure software solutions**."*
+
+| element of #9 | is it addressed? |
+|---|---|
+| build high-performing teams | **yes, almost word for word** |
+| **technical** teams | **yes — by meaning.** A *technology leader* aligning *engineering strategies* and delivering *scalable and secure software solutions* is describing technical teams. Reading that is precisely the thing a model can do and a substring test cannot. |
+| develop **managers** specifically | **thinner.** Developing engineering *managers* is a claim about growing leaders, which the summary does not clearly make. |
+
+**So #9 is ARGUABLE — mostly covered, one genuinely thinner element — not a clean "no".** Declaring it
+a hard fail encoded my own bad reading as the standard the judge had to reproduce.
+
+## The acceptance bar, CORRECTED
+
+**Wrong bar (retired):** *"#9 must come back ABSENT."*
+
+**Correct bar:** the judge must return a verdict **with its reasoning and a citation from the
+document**, so the owner can overrule it. For a partially-covered row like #9 the valuable output is
+*"covered on team-building and technical scope, thin on developing managers"* — not a boolean either
+way. **A judge that must reproduce a pre-decided answer is not being tested; it is being fitted.**
+
+## What the adversarial guard should be INSTEAD
+
+The guard still has to exist — a judge that finds coverage everywhere is worse than the threshold it
+replaces. It just has to be a case where the document has **no claim at all**, rather than one where
+the wording differs:
+
+- a requirement naming a **specific credential, employer, product or technology the profile never
+  mentions** — the model must return ABSENT, because there is nothing to cite;
+- a document that **name-drops the posting's vocabulary with no substance** behind it — flagged in the
+  stuffing lane, not counted in the coverage lane;
+- and the structural one: **any verdict whose quote is not byte-present in the document is REFUSED**
+  before it is shown, which is machine-checkable and needs no judgement at all.
+
+## The pattern, fourth instance
+
+1. Read the shipped summaries by eye and called them clean — measurement disagreed.
+2. Saw two numbers on one card and inferred a shared source — the trace disagreed.
+3. Printed a helper's wrong answers and called them scope rather than defect.
+4. **Set the judge's acceptance bar by word-matching while arguing word-matching is the defect.**
+
+All four: **a proxy accepted in place of the question "is this the right answer?"** The owner has
+caught every one.
