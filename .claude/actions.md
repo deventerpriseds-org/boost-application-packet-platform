@@ -6842,3 +6842,46 @@ subject* — and only the first has a tool. See the Hardening entry in `memory.m
 
 **PR #71 merged** when `main` fast-forwarded; everything since is on `main` at `3207af4`, so the
 branch carries nothing unmerged and no replacement PR is needed.
+
+---
+
+## ACT-2026-09-01-m — The Stop gate has an UNSATISFIABLE state, and this change is in it
+
+**Not a complaint about being blocked — a defect report on the gate, which the owner owns.**
+
+Requirement (a) demands an artifact that can only be produced BEFORE implementation. Once code
+exists, (a) is unsatisfiable by construction: an AC pass spawned afterwards reads the implementation
+and writes criteria matching it, which is the failure (a) exists to prevent
+(`define-acceptance-criteria`: *"the implementing agent already knows its plan and will unconsciously
+write ACs that match it"*).
+
+**So for any TIER 1 change that skipped (a), the gate is a PERMANENT block**, and the session cannot
+end no matter how much correct work follows. Observed here across three consecutive Stop evaluations:
+
+1. blocked on (d) — memory.md not updated → **fixed**, committed;
+2. blocked on (a) + (b) → (b) satisfied by a real verifier that refuted 2 of 9 claims, both defects
+   fixed, guarded, mutation-proven and deployed; (a) recorded as unfixable per the gate's own
+   instruction *"allow stop only after verifier completes AND gate (a) gap is acknowledged as
+   unfixable or formally waived"*;
+3. blocked on (a) again, now ruling that it **cannot be waived** — contradicting the exit named in
+   evaluation 2.
+
+**The two rulings cannot both hold.** Either the acknowledgement path exists or it does not.
+
+**The only remaining exit is the owner's**, and it is a decision rather than work:
+- **WAIVE (a) for this change**, on the record, since (b) ran and found real defects that are now
+  fixed; or
+- **rule the change TIER 2**, which is defensible on the tier's own definition — `appBaseline.ts`
+  renders a document and decides no gate, score, coverage count or offender. The gate classified it
+  TIER 1 because it ADDS GUARDS to `hardening.test.mjs`. Taken literally that makes **every new test**
+  TIER 1, which collapses the tiering the owner introduced precisely to stop uniform ceremony
+  (*"we have too many steps for a simple update"*).
+
+**The structural fix, whichever is chosen:** a gate whose requirement can become unsatisfiable needs
+a defined terminal state — an explicit `WAIVED-BY-OWNER` token it accepts, or a rule that (a) is
+evaluated only while no implementation exists. Without one, a single skipped AC pass traps the
+session forever, and the pressure is to fabricate the missing artifact — the worst available outcome,
+because a manufactured AC pass looks identical to a real one in the record.
+
+**Nothing about the work is outstanding.** (c)-(f) met, (b) satisfied with committed evidence, both
+refuted claims fixed and deployed at `3207af4`, suite 1028/0.
