@@ -4785,7 +4785,10 @@ test('H:baseline-standing-fields: @Company and @CoverLetterDate are always popul
   // Master content must SURVIVE the overlay, and the overlay must win only on its own two keys.
   const withMaster = baselinePkg({ ResumeSummary: 'a standing summary', SkillsBullets1: 'x | y' })
   assert.equal(withMaster.ResumeSummary, 'a standing summary')
-  assert.equal(withMaster.SkillsBullets1, 'x | y')
+  // The ITEMS survive; the stored separator does not. This assertion used to read
+  // `equal(..., 'x | y')`, which encoded the pipes DEFECT as expected behaviour and would have
+  // defended it against the fix -- a test asserting the incident rather than the invariant.
+  assert.deepEqual(withMaster.SkillsBullets1.split('\n'), ['x', 'y'])
   assert.equal(withMaster['@Company'], BASELINE_COMPANY_PLACEHOLDER)
 
   // A caller override wins over the seed — this is what keeps the value user-changeable rather
@@ -4799,4 +4802,55 @@ test('H:baseline-standing-fields: @Company and @CoverLetterDate are always popul
   const blank = baselinePkg({}, { company: '   ', date: '' })
   assert.equal(blank['@Company'], BASELINE_COMPANY_PLACEHOLDER)
   assert.equal(blank['@CoverLetterDate'], todayIso())
+})
+
+// THE SHAPE OF A RENDERED LIST — the check this suite did not have.
+//
+// The owner opened the baseline documents and found two defects no assertion could have told him:
+// skills/expertise/relevant rendered as `A|B|C` instead of bullets, and all 36 pooled relevant terms
+// in each of three slots. `checks.ts` WORD_RULES covers only the six PROSE fields, so nothing
+// anywhere checked the SHAPE of any of the six SLOT_FIELDS.
+//
+// WHY THE PIPES ONLY EVER APPEARED HERE, which is the part worth encoding. In a normal build the
+// master text is PROMPT INPUT — `pipeline.ts:405` passes `mc` to `resolveZapVars(prompts.resume_user,
+// mc, jd)` and the document is filled from `parseResumePackage(<model output>)`. The model emits
+// bullet lists, so the pipe-delimited STORAGE format never reaches a document. `appBaseline` was the
+// first path to render master text directly, so it was the first to surface the stored separator.
+// ` | ` is the COMPACT resume's separator (`compactFit.ts` DEFAULT_SEPARATOR), not the full resume's.
+test('H:baseline-shape: rendered slot fields are newline items, capped by the configured slot count', async () => {
+  const { shapeSlotFields } = await import('../dist/functions/tests/appBaseline.js')
+  const { SLOT_FIELDS } = await import('../dist/functions/tests/slots.js')
+
+  // The live stored shapes, verbatim from diag/skill-sources (api-test run 33548874453).
+  const master = {
+    SkillsBullets1: 'Enterprise Governance|Technology Strategy|Risk Management|Digital Transformation',
+    SkillsBullets2: 'Strategic Roadmaps|Stakeholder Engagement|Revenue Optimization',
+    ExpertiseBullets: 'Budget Development and P&L Management|KPI-driven performance management',
+    RelevantBullets1: 'Governance and Compliance: A, B | Technology Strategy: C, D',
+    ResumeSummary: 'A prose summary | with an incidental pipe that must survive.',
+  }
+  const slots = { SkillsBullets1: 3, SkillsBullets2: null, ExpertiseBullets: null,
+                  RelevantBullets1: 2, RelevantBullets2: null, RelevantBullets3: null }
+  const out = shapeSlotFields(master, slots)
+
+  // NO SEPARATOR SURVIVES IN A SLOT FIELD. This is the defect the owner actually saw.
+  for (const f of SLOT_FIELDS) {
+    if (!out[f]) continue
+    assert.ok(!out[f].includes('|'), `${f} still contains a pipe separator: ${out[f]}`)
+  }
+
+  // Items become newline-separated, and a configured count TRIMS.
+  assert.deepEqual(out.SkillsBullets1.split('\n'),
+    ['Enterprise Governance', 'Technology Strategy', 'Risk Management'])   // capped at 3 of 4
+  assert.equal(out.SkillsBullets2.split('\n').length, 3)                    // null cap -> all kept
+  assert.equal(out.RelevantBullets1.split('\n').length, 2)                  // capped at 2
+
+  // A NULL COUNT NEVER TRIMS. slots.ts: an unset count means unknown, and inventing one "accuses
+  // every item past it" — so an absent count must pass the list through whole, not truncate it.
+  const untrimmed = shapeSlotFields(master, undefined)
+  assert.equal(untrimmed.SkillsBullets1.split('\n').length, 4)
+
+  // PROSE IS NOT A LIST. ResumeSummary is not a slot field and must survive byte-identical,
+  // incidental pipe and all — splitting a paragraph on punctuation would shred it.
+  assert.equal(out.ResumeSummary, master.ResumeSummary)
 })

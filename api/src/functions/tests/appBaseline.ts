@@ -4,6 +4,10 @@ import { resolveOwner, requireWrite } from './appSession'
 import { renderArtifact } from './appPackets'
 import { loadMasterBaseline } from './appInsertions'
 import { metaFor } from './packetTemplates'
+import { loadPipelineSettings } from './pipelineConfig'
+import { splitItems } from './swaps'
+import { resolveTemplateSlots } from './roleFocus'
+import { SLOT_FIELDS, SlotField, SlotCounts } from './slots'
 
 /**
  * POST /api/app/baseline-artifacts — build MASTER-FILLED copies of the packet templates.
@@ -77,11 +81,61 @@ export function todayIso(now: Date = new Date()): string {
  */
 export function baselinePkg(
   master: Record<string, string>,
-  opts?: { company?: string; date?: string },
+  opts?: { company?: string; date?: string; slots?: SlotCounts },
 ): Record<string, string | null> {
   const company = (opts?.company || '').trim() || BASELINE_COMPANY_PLACEHOLDER
   const date = (opts?.date || '').trim() || todayIso()
-  return { ...master, '@Company': company, '@CoverLetterDate': date }
+  return {
+    ...shapeSlotFields(master, opts?.slots),
+    '@Company': company,
+    '@CoverLetterDate': date,
+  }
+}
+
+/**
+ * Turn the master blocks into what the RESUME TEMPLATE renders: a newline-separated list, trimmed
+ * to the slot's configured capacity. Non-slot fields (prose, `@`-placeholders) pass through
+ * untouched — they are paragraphs, not lists.
+ *
+ * TWO DEFECTS FIXED HERE, both found by the owner reading the document I built (2026-09-01).
+ *
+ * 1. PIPES. The master blocks are stored pipe-delimited — `skills1` is literally
+ *    `"Enterprise Governance|Technology Strategy|..."` (diag/skill-sources, run 33548874453) — and
+ *    the first version of this file injected that string verbatim, so the resume rendered pipes.
+ *    ` | ` is the COMPACT resume's separator (`compactFit.ts:104 DEFAULT_SEPARATOR`), used to fold
+ *    the full resume's two columns into the compact's one Core Skills line. The originating Zap
+ *    stores these as bullet lists and formats them through `<ul>/<li>` and back to
+ *    "a plain text bullet list" (`docs/zap-289877647/baseline/04-current-skills.md`, prompts 19+27).
+ *    Owner: *"the template resume doesn't use pipes."* `splitItems` is the repo's existing splitter
+ *    and already handles `\n`, `|`, `•` and `·` — reused rather than re-implemented, because a
+ *    second splitter that disagreed with the one that built the package is a defect this repo has
+ *    already paid for once (`swaps.ts:115`).
+ *
+ * 2. THE WHOLE LIBRARY IN EVERY RELEVANT SLOT. `MASTER_BASELINE_FIELD` maps `RelevantBullets1`,
+ *    `2` AND `3` to the same pooled `relevantProficiencies` key, deliberately — it is the pool the
+ *    prompts split from, and as provenance "before" text that is correct. As a render package it is
+ *    not: all 36 terms went into each of three slots. The originating Zap carried THREE separate
+ *    lists with a stated hard requirement of *"no more than 3 items"* each.
+ *
+ * THE TRIM IS BY SLOT COUNT AND ONLY WHERE ONE IS CONFIGURED. `slots.ts` is emphatic that an unset
+ * count means UNKNOWN and that inventing one "accuses every item past it" — so a `null` count passes
+ * the full list through rather than guessing a length. Nothing here seeds a count.
+ */
+export function shapeSlotFields(
+  master: Record<string, string>,
+  slots?: SlotCounts,
+): Record<string, string> {
+  const out: Record<string, string> = { ...master }
+  for (const field of SLOT_FIELDS) {
+    const raw = out[field]
+    if (typeof raw !== 'string' || !raw.trim()) continue
+    const items = splitItems(raw)
+    if (!items.length) continue
+    const cap = slots ? slots[field as SlotField] : null
+    const kept = typeof cap === 'number' && cap > 0 ? items.slice(0, cap) : items
+    out[field] = kept.join('\n')
+  }
+  return out
 }
 
 /** Types this route will build. `cover` is excluded — see the note in the handler. */
@@ -128,7 +182,15 @@ export async function baselineArtifacts(req: HttpRequest, _context: InvocationCo
     if (!pkt) pkt = (await client.query(`insert into packet (opp_id) values ($1) returning *`, [opp.id])).rows[0]
 
     const master = await loadMasterBaseline()
-    const pkg = baselinePkg(master, { company: body.company, date: body.date })
+    // The template's own fixed slot counts, off the SAME row `resolveRoleFocus` reads. Never seeded:
+    // an unset count stays null and the list passes through whole.
+    // The SAME id `renderArtifact` will copy: the packet's own choice when it has one, else the
+    // owner's configured default. Resolving it differently here would let the counts describe a
+    // different document than the one being filled.
+    const settings = await loadPipelineSettings()
+    const slots = await resolveTemplateSlots(
+      String(pkt.resume_template_id || '').trim() || settings.resumeTemplateId.value)
+    const pkg = baselinePkg(master, { company: body.company, date: body.date, slots })
 
     const built: any[] = []
     for (const type of types) {
@@ -159,6 +221,7 @@ export async function baselineArtifacts(req: HttpRequest, _context: InvocationCo
         oppId: opp.id,
         packetId: pkt.id,
         masterFieldCount: Object.keys(master).length,
+        slots,
         filledFields: filled,
         company: pkg['@Company'],
         coverLetterDate: pkg['@CoverLetterDate'],
