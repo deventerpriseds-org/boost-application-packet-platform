@@ -6286,3 +6286,57 @@ lookup — not started, owner's call.**
 
 **Delivered instead:** the newest complete tailored set (eMoney Advisor, 2026-08-30) as the reference
 for the JD-analysis parity work, explicitly labelled as tailored rather than baseline.
+
+---
+
+## ACT-2026-09-01-b — The FIVE source templates, resolved live (supersedes the wrong answer in -a)
+
+**Owner correction:** *"the links you gave me are not what i asked for. i explicitly said from the
+template original content not built for emoney etc."* **The owner was right.** ACT-2026-09-01-a
+answered with BUILT artifacts (eMoney/Trinnex/Cloudflare output). The ask was for the SOURCE
+templates the build copies — the documents holding `{{Placeholder}}` tokens, before any injection.
+
+**Status: ANSWERED. Read-only, no prompts, no build.**
+
+**Ground truth = seed constants OVERLAID with live config**, because `pipelineConfig.ts` resolves
+each key as "config value if set, else the seeded first value". Reporting either half alone is a
+proxy. `GET /api/config?owner=von.ellis@enterpriseds.io` via `api-test.yml`
+(run 33544716509, job 99979269657) → **HTTP 200**, and it returns **only two** overrides:
+
+    "google.compactResumeTemplateId": "13eIKN2TqAOn3PC4U2pLl4wd-R3zS-8DLOWPRJaIW0O0"
+    "openai.generateModel": "gpt-4o-mini"
+
+So resume / portfolio / coverLetter / outputFolder are NOT overridden and resolve to
+`SEED_DRIVE_IDS` (`packetTemplates.ts:13-16`):
+
+| Kind | Resolved id | Format | Source |
+|---|---|---|---|
+| Resume | `1bwOcxvkbihRTUjOzVjrWSPnDomwqy6gOz6229mdzbZw` | Google Doc | seed |
+| Compact resume | `13eIKN2TqAOn3PC4U2pLl4wd-R3zS-8DLOWPRJaIW0O0` | Google Doc | **config override** |
+| Portfolio | `1ULZZLBs9zwLEN6c8hcXvBCNPk0YyTGg0yIlFSYkGIec` | Google **Slides** | seed |
+| Cover letter | `1QN4Cnw4R9krUH4kEpl_lnhoPOkY5PG2oUKRMjxBfWV0` | Google **Slides** | seed |
+| Output folder | `1MlVLMSQ0EQJoAtpKC1Mv7mDCAJDmdJTt` | Drive folder | seed |
+
+**Still true from -a, and unchanged by this:** there is no CV template, because there is no `cv`
+artifact type. Four document templates exist; `compact_resume` is a shorter resume, not a CV.
+
+**The compact resume has NO seed** — `SEED_DRIVE_IDS` holds four ids and compact is not one of them;
+`pipelineConfig.ts:242` resolves it to `''` when unset. It exists only because the owner configured
+it. Its placeholder set is also different: `{{ResumeSummary}}` and `{{SkillsBullets}}` only, against
+the full resume's seven.
+
+### Hardening — I answered the question I could run, not the one that was asked
+
+The request said "using the mastercontext for content" and "baseline", and I attached to those two
+words while skipping *"template original"*. `GET /api/app/assets` was easy to run and returned
+confident, well-formed, completely wrong output — 14 real links to documents built FOR specific
+employers, the exact opposite of an un-injected template.
+
+**The tell I ignored:** my own answer had to explain that everything was JD-tailored and that no
+baseline existed. When the honest form of an answer is "here is a list of things that are not what
+you asked for", that is the signal to re-read the request, not to ship the list with a caveat.
+
+**Guard:** before running the first retrieval, restate the ask as a NOUN — *"the source template
+file"* vs *"a document built from it"* — and confirm the retrieval targets that noun. `artifact`
+rows and `TEMPLATE_META` ids are different tables entirely; no amount of care inside the wrong one
+recovers it.

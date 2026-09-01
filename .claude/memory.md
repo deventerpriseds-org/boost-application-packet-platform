@@ -5181,3 +5181,44 @@ The ask named three deliverables; one of them does not exist as a concept in thi
 for the nearest-looking row (`compact_resume`) and calling it the CV would have been the same error
 the accuracy log already records three times — answering from a proxy. The check constraint is the
 primary source and it settles the question in one read.
+
+---
+
+## 2026-09-01 — the five SOURCE templates, and answering the wrong question first
+
+**The resolved template set** (seed constants overlaid with live config — `GET /api/config` returns
+only `google.compactResumeTemplateId` and `openai.generateModel`, so the other four fall through to
+`SEED_DRIVE_IDS` in `packetTemplates.ts:13-16`):
+
+| Kind | Id | Format |
+|---|---|---|
+| Resume | `1bwOcxvkbihRTUjOzVjrWSPnDomwqy6gOz6229mdzbZw` | Google Doc |
+| Compact resume | `13eIKN2TqAOn3PC4U2pLl4wd-R3zS-8DLOWPRJaIW0O0` | Google Doc (config-only) |
+| Portfolio | `1ULZZLBs9zwLEN6c8hcXvBCNPk0YyTGg0yIlFSYkGIec` | Google Slides |
+| Cover letter | `1QN4Cnw4R9krUH4kEpl_lnhoPOkY5PG2oUKRMjxBfWV0` | Google Slides |
+| Output folder | `1MlVLMSQ0EQJoAtpKC1Mv7mDCAJDmdJTt` | Drive folder |
+
+**Read the pair, never one half.** Every id resolves as *config value if set, else seeded first
+value*. Quoting `packetTemplates.ts` alone is a proxy and will be wrong the moment the owner sets a
+key — which they have, for exactly one of the five.
+
+### Hardening — the honest caveat WAS the signal, and I shipped past it
+
+Asked for links to the original templates, I ran `GET /api/app/assets` and returned 14 links to
+documents built for eMoney, Trinnex, Cloudflare and Anthropic. The owner: *"the links you gave me are
+not what i asked for. i explicitly said from the template original content not built for emoney etc."*
+
+I attached to "baseline" and "mastercontext" and read straight past *"template original"*. The
+retrieval was easy to run, returned HTTP 200, and was confidently, entirely wrong — `artifact` rows
+and template ids are different tables, so no rigour inside the query could have saved it.
+
+**The generalisable tell, which this repo has not written down before:** my answer required a long
+caveat explaining that everything returned was tailored and that no baseline existed. **When the
+honest form of an answer is "here is a list of things that are not what you asked for", that is the
+moment to re-read the request** — not to ship the list with the caveat attached. A caveat that large
+is a mis-targeted query announcing itself.
+
+**Guard:** before the first retrieval, restate the ask as a NOUN and confirm the query targets it —
+*"the source template file"* vs *"a document built from that template"*. This is the sibling of the
+existing "answered from a proxy" rows in `accuracy-log.md`: there the source was wrong, here the
+OBJECT was.
