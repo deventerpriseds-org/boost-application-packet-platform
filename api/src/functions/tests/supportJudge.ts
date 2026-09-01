@@ -14,27 +14,38 @@
 //
 // NOTHING HERE CALLS THE NETWORK. The transport is injected, exactly as `evidenceProposal` does it.
 //
-// WHY A SECOND READ IS NOT JUST "ASKING THE SAME MODEL TWICE".
+// WHY THIS IS NOT "ASKING THE SAME MODEL TWICE" -- REWRITTEN 2026-09-01 BECAUSE THE FIRST ANSWER
+// WAS WRONG, and both the owner and an independent AC pass said so before it shipped anywhere.
 //
-// `escalateOne` already asks "does this record support this requirement, and if so quote it", and
-// `verifyProposal` already proves the quote is real. If counting a proposal were safe, the fix would
-// be deleting one condition in `checks.ts` -- and it is not safe, for the reason written there: the
-// model's answer is CONFIRMING, so it finds support at the rate it was asked to find support.
+// The first version handed this pass `e.quote` -- THE SPAN THE PROPOSAL PASS HAD ALREADY CHOSEN --
+// and asked what that span fails to show. Two objections, arriving independently, and both correct:
 //
-// This pass asks the FALSIFYING question instead, and it is asked in the order that matters: the
-// model must FIRST list what the requirement asks that the excerpt does not show, and only then may
-// it claim support. A model that has just written "does not show: SOC 2 certification" cannot
-// coherently claim the excerpt shows it. That is disconfirming evidence made mechanical rather than
-// hoped for, and `missing` being non-empty REFUSES the row by code, not by the model's own verdict.
+//   the owner   "why would finding a match require what's missing instead of what's matching?"
+//   AC B-6      it "must be given a materially different view -- at minimum the requirement plus the
+//               source record, not merely the span the first pass already chose. A second question
+//               asked of the same model about the same self-selected span is a weaker independence
+//               claim than it appears."
 //
-// THREE THINGS MUST ALL HOLD, or the row stays exactly where it is today:
-//   1. the model declares nothing missing,
-//   2. it claims support,
-//   3. and it cites a span that is byte-present in THE EXCERPT -- the same `indexOf` discipline
-//      `verifyProposal` applies to the record, applied one level in.
-// Any failure -- a throw, an unparseable answer, a missing list, an uncited claim, a fabricated
-// quote -- leaves the row `proposed`, which is today's behaviour. The lane can only ever ADD a
-// judged row; it can never withdraw one, and it can never make a row worse than it is now.
+// Both name the same hole: selecting the excerpt is EXACTLY what the first pass was for, so a
+// mis-selected excerpt is the failure most likely to be present, and a challenge that can only ask
+// "does this span show it?" is structurally unable to see it.
+//
+// SO THIS PASS NOW ANSWERS THE SAME QUESTION, INDEPENDENTLY, AND THE TEST IS AGREEMENT.
+// It is given the requirement and the WHOLE RECORD -- never the first pass's answer -- and asked
+// what the owner said a match question should ask: which words here show this? The row is promoted
+// only when the two independently-chosen spans OVERLAP (`spansOverlap`, checked in code from stored
+// offsets). Two reads landing on the same words is a machine-checkable fact; "the model said nothing
+// was missing" is the model's own report about itself.
+//
+// FOUR THINGS MUST ALL HOLD, or the row stays exactly where it is today:
+//   1. it cites a span byte-present in THE RECORD -- `verifyProposal`'s own discipline,
+//   2. that span OVERLAPS the one the proposal pass chose,
+//   3. it declares nothing missing (kept: it catches a model contradicting itself, which is real,
+//      and it is now one condition of several rather than the whole warrant),
+//   4. and it claims support.
+// Any failure -- a throw, an unparseable answer, a named gap, an uncited claim, a fabricated quote,
+// or two reads that disagree about where the evidence is -- leaves the row `proposed`, which is
+// today's behaviour. The lane can only ever ADD a vetted row; it can never withdraw one.
 import { sha256 } from './evidence'
 
 /** Bump when the prompt or the acceptance rules change, so a row can be attributed to a ruleset. */
@@ -71,27 +82,38 @@ export const SUPPORT_SYSTEM = [
   'overstating costs the candidate their credibility with an employer.',
 ].join('\n')
 
-export function buildSupportUser(requirement: string, excerpt: string): string {
+export function buildSupportUser(requirement: string, record: string): string {
   return [
     'THE REQUIREMENT:',
     String(requirement || ''),
     '',
-    'THE EXCERPT (this, and nothing else, is what you are judging):',
-    String(excerpt || ''),
+    'THE RECORD FROM THE CANDIDATE\'S PROFILE (this, and nothing else, is what you are reading):',
+    String(record || ''),
     '',
     'ANSWER IN THIS ORDER:',
-    '1. "missing": every distinct thing the requirement asks for that this excerpt does NOT show.',
-    '   Be concrete -- a named certification, a named technology, a scale, a responsibility. If the',
-    '   excerpt shows all of it, return an empty list.',
-    '2. "supported": true ONLY if "missing" is empty and this excerpt, on its own, shows what the',
-    '   requirement asks. Otherwise false.',
-    '3. "quote": when supported, the exact span of THE EXCERPT that shows it. Copy it character for',
-    '   character -- a quote not present verbatim in the excerpt is discarded and your answer with it.',
-    '4. "why": one short sentence, saying what in the excerpt shows it.',
+    '1. "quote": the exact span of THE RECORD that shows the candidate has what the requirement asks',
+    '   for -- or null if no part of it does. Copy it character for character; a quote not present',
+    '   verbatim in the record is discarded and your answer with it. Quote the SMALLEST span that',
+    '   actually shows it.',
+    '2. "missing": every distinct thing the requirement asks for that this record does NOT show. Be',
+    '   concrete -- a named certification, a named technology, a scale, a responsibility.',
+    '3. "supported": true ONLY if "missing" is empty and your quote shows what the requirement asks.',
+    '4. "why": one short sentence, saying what in the record shows it.',
     '',
-    'Return STRICT JSON: {"missing":[<string>],"supported":<bool>,"quote":<string|null>,"why":<string>}',
+    'Return STRICT JSON: {"quote":<string|null>,"missing":[<string>],"supported":<bool>,"why":<string>}',
     'No prose, no markdown, no extra keys.',
   ].join('\n')
+}
+
+/**
+ * Do two independently-chosen spans point at the same thing?
+ *
+ * THE AGREEMENT TEST, and it is the property that makes this pass worth making. Half-open ranges, so
+ * touching ends do not count: `[0,5)` and `[5,9)` are adjacent, not overlapping, and two reads that
+ * picked adjacent sentences did not pick the same evidence.
+ */
+export function spansOverlap(aStart: number, aEnd: number, bStart: number, bEnd: number): boolean {
+  return aStart < bEnd && bStart < aEnd
 }
 
 /**

@@ -219,3 +219,40 @@ test('H:the-judge-can-add-coverage-and-can-never-take-it-away', async () => {
       quote: 'Aligning engineering strategies with business objectives', why: 'same claim' }]]) })).state,
     'pass', 'and the judge still fixes it — the half worth having is untouched')
 })
+
+// ─── AGREEMENT: two independent reads must land on the same words ──────────────────────────────
+//
+// Rebuilt 2026-09-01 after the owner asked "why would finding a match require what's missing
+// instead of what's matching?" and AC B-6 independently required "a materially different view --
+// at minimum the requirement plus the source record, not merely the span the first pass chose".
+
+test('H:touching-spans-are-not-agreement', async () => {
+  const { spansOverlap } = await import('../dist/functions/tests/supportJudge.js')
+  // Half-open ranges. Two reads that picked ADJACENT sentences did not pick the same evidence, and
+  // an off-by-one here would silently turn "next to each other" into "the same words".
+  assert.equal(spansOverlap(0, 5, 5, 9), false, 'adjacent is not overlapping')
+  assert.equal(spansOverlap(5, 9, 0, 5), false, 'and it is symmetric')
+  assert.equal(spansOverlap(0, 6, 5, 9), true, 'one shared character is agreement')
+  assert.equal(spansOverlap(10, 20, 0, 100), true, 'contained is agreement')
+  assert.equal(spansOverlap(0, 100, 10, 20), true)
+  assert.equal(spansOverlap(0, 5, 6, 9), false, 'a gap between them is not')
+})
+
+test('H:the-challenge-reads-the-whole-record-not-the-chosen-span', () => {
+  // THE INDEPENDENCE PROPERTY, asserted on the prompt because that is where the view is decided.
+  // The first version passed `e.quote` — the span the proposal pass had already picked — so the
+  // challenge could only ask "does this span show it?" and structurally could not ask "was that the
+  // right span?", which is the failure most likely to be present because SELECTING the span is
+  // exactly what the first pass was for.
+  const RECORD = `Ran the platform org. ${EXCERPT}. Later led the SOC 2 programme.`
+  const p = buildSupportUser(REQ, RECORD)
+  assert.ok(p.includes(RECORD), 'the WHOLE record must be in the prompt')
+  assert.match(p, /THE RECORD FROM THE CANDIDATE/,
+    'and it must be presented as the record, not as a pre-selected excerpt')
+  // The match question comes FIRST now — the owner's point: finding a match asks what matches.
+  const quoteAt = p.indexOf('"quote"')
+  const missingAt = p.indexOf('"missing"')
+  assert.ok(quoteAt > -1 && missingAt > -1)
+  assert.ok(quoteAt < missingAt,
+    'the pass is asked WHICH WORDS SHOW IT first; the gap list is a second, narrower question')
+})

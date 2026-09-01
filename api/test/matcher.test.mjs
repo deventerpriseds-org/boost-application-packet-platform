@@ -1674,3 +1674,54 @@ test('H:no-challenge-happens-unless-the-owner-asked-for-one', async () => {
   assert.equal(out.vetted, 0)
   assert.equal(c.inserts[0][9], 'proposed')
 })
+
+// AGREEMENT AT THE SEAM — two independent reads must land on the same words (2026-09-01).
+//
+// The owner: "why would finding a match require what's missing instead of what's matching?"
+// AC B-6: the falsifying pass "must be given a materially different view -- at minimum the
+// requirement plus the source record, not merely the span the first pass already chose."
+// Both name the same hole, and this is the guard for the fix.
+
+// A record with TWO plausible-looking places, so a second read CAN land somewhere else.
+const TWO_SPOT_REC = {
+  key: 'workHistory1', kind: 'work_history', label: 'Work history · CTO',
+  text: 'Reduced outages from nine hours to one across the payments platform. Separately, ran a graduate hiring programme for two years.',
+}
+
+test('H:a-vetted-row-needs-two-reads-that-agree-on-where-the-evidence-is', async () => {
+  // Both reads point at the SAME sentence -> promoted.
+  const agree = twoCalls({ missing: [], supported: true,
+    quote: 'Reduced outages from nine hours to one', why: 'the excerpt states the reliability work' })
+  const c1 = fakeClient(escRows)
+  const out1 = await writeEvidence(c1, 'opp-1', [TWO_SPOT_REC],
+    { escalate: true, vetProposals: true }, undefined, agree.fetchJson)
+  assert.equal(out1.vetted, 1)
+  assert.equal(c1.inserts[0][9], 'vetted')
+
+  // The second read finds evidence in a DIFFERENT part of the record -> NOT promoted. This is the
+  // case the old design could not see at all, because it was only ever shown the first read's span.
+  const disagree = twoCalls({ missing: [], supported: true,
+    quote: 'ran a graduate hiring programme for two years', why: 'this is what shows it' })
+  const c2 = fakeClient(escRows)
+  const out2 = await writeEvidence(c2, 'opp-1', [TWO_SPOT_REC],
+    { escalate: true, vetProposals: true }, undefined, disagree.fetchJson)
+  assert.equal(out2.vetted, 0, 'two reads that disagree about WHERE the evidence is must not count')
+  assert.equal(c2.inserts[0][9], 'proposed', 'the row stays exactly where it was')
+  assert.equal(out2.escalation_refusals.support_span_disagreed, 1,
+    'and the disagreement is counted under its own name — it is not an outage and not a refusal')
+})
+
+test('H:the-second-read-is-handed-the-record-never-the-first-reads-answer', async () => {
+  // Asserted on what the transport actually RECEIVED, because "independent" is a property of the
+  // input, and the previous version failed exactly here while claiming otherwise in its comments.
+  const t = twoCalls({ missing: [], supported: true,
+    quote: 'Reduced outages from nine hours to one', why: 'w' })
+  await writeEvidence(fakeClient(escRows), 'opp-1', [TWO_SPOT_REC],
+    { escalate: true, vetProposals: true }, undefined, t.fetchJson)
+  assert.equal(t.seen.length, 2)
+  const second = t.seen[1].user
+  assert.ok(second.includes(TWO_SPOT_REC.text),
+    'the second call must contain the WHOLE record — both candidate spans, not just the chosen one')
+  assert.ok(second.includes('Separately, ran a graduate hiring programme'),
+    'including the part the first read did NOT pick, or it cannot disagree')
+})

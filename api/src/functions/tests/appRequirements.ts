@@ -18,7 +18,7 @@ import { claimTokens, segments, tokensOf, sameWord } from './requirementSupport'
 import { writeComparison, comparisonPayload } from './appDimensions'
 import { escalateOne, PROPOSAL_VERSION, type EscalationOutcome } from './evidenceProposal'
 import {
-  SUPPORT_SYSTEM, buildSupportUser, parseSupportVerdict, vettedNote,
+  SUPPORT_SYSTEM, buildSupportUser, parseSupportVerdict, vettedNote, spansOverlap,
 } from './supportJudge'
 import { openAiJson, contentJson, type FetchJson } from './openaiJson'
 // IMPORTED, never redeclared — M3: the citation floors have one home (`reviewer.ts`), and the
@@ -359,10 +359,18 @@ export async function writeEvidence(
       // confirmed. On the owner's live Trinnex packet 15 of 17 evidence rows are proposed, so the
       // number reads 0/12 and nothing in the product could move it but twelve clicks.
       //
-      // This asks the FALSIFYING question — what does the requirement ask that this excerpt does NOT
-      // show — and a non-empty answer refuses the row in code before the model's own verdict is read.
-      // What survives is stamped `judged` and counts; everything else stays `proposed`, which is
-      // exactly where it is today. See `supportJudge.ts` for why order is the safety property.
+      // It answers the SAME question the proposal pass answered -- which words in this record show
+      // this requirement -- over the WHOLE RECORD, never over the span the first pass chose, and
+      // never seeing that span. The row is promoted only when the two independently-chosen spans
+      // OVERLAP. Two reads landing on the same words is a fact code can check; a model's report that
+      // it found nothing missing is the model's own account of itself.
+      //
+      // The FIRST version of this handed the pass `e.quote` and asked what that span failed to show.
+      // The owner ("why would finding a match require what's missing instead of what's matching?")
+      // and AC B-6 ("a materially different view -- at minimum the requirement plus the source
+      // record") both named the same hole before it ran anywhere, and they were right: selecting the
+      // excerpt is what the first pass was FOR, so a mis-selected excerpt is the failure most likely
+      // to be present and the one that version could not see.
       //
       // OFF unless the owner turned the judge on, and every failure leaves the row `proposed`.
       let method = e.method
@@ -370,11 +378,19 @@ export async function writeEvidence(
       if (opts.vetProposals) {
         try {
           const v = parseSupportVerdict(
-            contentJson(await fetchJson(SUPPORT_SYSTEM, buildSupportUser(requirement, e.quote))), e.quote)
-          if (v.supported && v.quote) {
+            contentJson(await fetchJson(SUPPORT_SYSTEM, buildSupportUser(requirement, rec.text))), rec.text)
+          const agrees = v.supported && v.char_start != null && v.char_end != null
+            && spansOverlap(v.char_start, v.char_end, e.char_start, e.char_end)
+          if (agrees) {
             method = 'vetted'
-            extra = vettedNote(v.why, v.quote)
+            extra = vettedNote(v.why, v.quote as string)
             vetted++
+          } else if (v.supported) {
+            // THE NEW OUTCOME, and the one worth counting: both reads found evidence and they
+            // pointed at DIFFERENT PARTS of the record. That is not an outage and not a refusal --
+            // it is a disagreement about where the evidence is, which is exactly what this pass was
+            // rebuilt to be able to see.
+            note('support_span_disagreed')
           } else {
             // Named rather than collapsed: "it found a gap" and "we never reached the model" are
             // different facts about a run, and only the second is an outage.
