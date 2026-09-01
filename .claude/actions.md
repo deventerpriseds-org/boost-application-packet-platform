@@ -6137,3 +6137,56 @@ weakened without asking first. Put to the owner.
 2. `coverage_refused: 8` on 7 calls — the DOCUMENT judge claimed eight quotes that were not
    byte-present. Harmless now that the judge is additive (a refused verdict falls back to the lexical
    rule), and visible only because of the F-8 fix made an hour earlier. Worth watching.
+
+### ACT: proposals count until vetoed — the gate, the veto data, the veto UI (2026-09-01)
+
+**ORIGIN: owner request, verbatim.** *"I already said proposals can count until vetoed. make room
+for the vetoed data and confirm a way to use what we gain to get the score until library is added to
+suppliment not drop it. why wouldn't the reviewer run when the packet is built?"*
+
+Four workstreams. **A and B are BUILT AND PUSHED, NOT LIVE. C and D are not started.**
+
+| # | Workstream | Status | Evidence |
+|---|---|---|---|
+| A | a proposal counts until vetoed | **built, pushed, NOT DEPLOYED** | `0d73371`, `9c3fa07` |
+| B | make room for the vetoed data | **built, pushed, NOT DEPLOYED** | `0d73371`, `620776e` |
+| B2 | the veto UI — three states, the `missing` text | **built, pushed, NOT DEPLOYED** | `3a75eb1`, `a1f2b68` |
+| C | an interim keyword score before the term library | **NOT STARTED** — ACs written | `docs/qc-evidence/AC-interim-score-and-reviewer.md` (`9949f8c`) |
+| D | wire the reviewer into the packet build | **NOT STARTED** — ACs written | same file |
+
+**THE SHIPPED DEFECT THIS FOUND, and it is the reason the lane was worth doing in this order.** The
+veto button already existed on the JD panel and **wrote nothing**. `PostingAnalysis.jsx` calls
+`evidenceConfirm(decision:'reject')`; the handler was an `UPDATE evidence_confirmation ... where
+withdrawn_at is null` with **no INSERT**, so it could only ever land on a claim the owner had
+already CONFIRMED. For a proposal they had never confirmed — the normal case, and the only case that
+matters once proposals count — it matched **zero rows** and returned `{ok: true}`. Zero tests
+covered the reject path. Guarded now by `H:a-veto-is-written-without-a-prior-confirmation`.
+
+**WHAT IS BUILT (A + B):** `evidence_confirmation` gains `decision` (`confirmed`/`vetoed`, default
+`confirmed` because every existing row came from the confirm path) and `missing`; `ruleEvidenceOf`
+is a fail-CLOSED allow-list with the veto checked first; the observed string names every counted row
+that rests on model warrant, by its strength; the retired "not counted either way" clause is gone.
+Both new columns are on the **ensure path** as well as `SCHEMA_SQL`, because `api-deploy.yml`
+deploys code before `pg-migrate` and a read-path column that only `SCHEMA_SQL` adds 500s in between.
+
+**Suites: api 1027/1027, app 427/427.** Four mutations FIRED on the gate work, four on the UI work.
+
+**AN INDEPENDENT VERIFIER IS RUNNING AND HAS NOT FINISHED.** `docs/qc-evidence/VERIFY-veto-lane-1.md`
+(brief: `BRIEF-verify-veto-lane.md`). The first run settled **C10 only** — both suites, run fresh,
+matching the claim — before a container restore SIGKILLed it. **10 of 11 claims are UNVERIFIED**, and
+the highest-severity one (C5: a vetoed row must never read as a confirmation) is among them. Nothing
+here may be reported as verified until that artifact carries per-claim verdicts.
+
+**NOT LIVE.** `main` has not moved. `check: git log --oneline origin/main -1` must show a commit at
+or after `a1f2b68` before any of this affects the owner's packets.
+
+**Two of my own errors this lane, both recorded in memory.md's Hardening section:** a guard that
+PASSED ON BROKEN CODE (a file-wide grep satisfied by an unrelated line two lines below — now scoped
+and re-mutated), and three test failures I reported as pre-existing that were **mine** (a `|` and a
+`||` inside a markdown table cell in my own ledger edit, splitting one row into eight columns).
+
+**BLOCKED ON THE OWNER for C:** the interim keyword score parses `Missing ATS Skills` out of
+`packet.last_build.analysis`, which is free model prose. The owner chose to parse against REAL DATA
+rather than build against a guessed shape — correct, and it needs `boost-pg-mcp-write`, which is
+`connected: true` but `enabledInChat: false`. `check: manual — read the Missing ATS Skills body for
+packet 85cee965 before writing a parser`
