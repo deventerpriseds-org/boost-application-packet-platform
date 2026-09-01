@@ -854,6 +854,15 @@ the P8.3 build was on a gate path, and the two most expensive (`dimensions.ts` g
 proposal, and two sibling checks left unfiltered) would each have sat in `main` under several more
 commits if the verifier had waited for a phase boundary.
 
+**USE `/workspace/eds-claude-skills/scripts/mutate.sh`, NOT A HAND-ROLLED SCRIPT.** Measured on
+this repo 2026-09-01: of ~20 hand-run mutations in one lane, **two had anchors that never matched**,
+and the inline harness printed `INERT -- the guard did not fire` for both. The mutation never ran, so
+nothing was tested; one of the two, re-run correctly, DID fire. The harness has THREE outcomes —
+`FIRED` / `INERT` / **`NOT-APPLIED`** — and the third is the whole point, because a two-outcome
+script reports "your guard is worthless" when it means "I did nothing". It also refuses an ambiguous
+anchor, refuses a dirty file, and ASSERTS the restore against HEAD (a hand-rolled script's timeout
+once left a guard DELETED in this repo's source).
+
 **THE ONE STEP THAT IS NEVER SKIPPED, AT ANY TIER: mutation-prove a NEW guard.** Write the guard,
 revert the behaviour it guards, confirm the suite FAILS, restore. It costs one command. Three guards
 in a single session passed with their defect reinstated and would have shipped as protection that
