@@ -178,3 +178,112 @@ how many must match — but that distinction has to be **proved, not asserted**:
 - the Trinnex `#9` row must still FAIL after the change (the guard against over-matching);
 - the historical false positive the threshold was raised for must be re-run and must still fail;
 - the stemmer must be mutation-proved: revert it, confirm #15 and #12 drop back under 0.70.
+
+---
+
+# THE ARCHITECTURAL ANSWER — coverage is decided by STRING MATCHING, with zero model judgement
+
+Owner, 2026-09-01: *"this is clearly word matching functions instead of llm judgement. you didn't dig
+deep enough to tell me the truth"*. **Correct on both counts.** Everything above described symptoms —
+a threshold, a plural — one turn at a time. The architecture is the finding, and this is it.
+
+## 1. NINE lexical thresholds decide everything. No model participates.
+
+`grep -rn "openai(" api/src/functions/tests/*.ts` returns **two files: `pipeline.ts` and `mt19.ts`** —
+generation and the legacy MT path. **`checks.ts`, `evidence.ts`, `requirementSupport.ts`,
+`dimensions.ts` and `swaps.ts` never call a model.** Every coverage, evidence, placement and
+attribution decision in this system is a token-overlap ratio compared against a tuned constant:
+
+| constant | file | what it decides |
+|---|---|---|
+| `COVERAGE_THRESHOLD = 0.7` | `checks.ts:264` | does the DOCUMENT cover the requirement |
+| `EVIDENCE_THRESHOLD = 0.7` | `evidence.ts:287` | does the PROFILE evidence the requirement |
+| `MIN_JUDGEABLE_TOKENS = 3` | `checks.ts:266`, `evidence.ts:296` | is it judgeable at all |
+| `RESOLVE_MIN_TOKENS = 2` | `evidence.ts:310` | |
+| `ANCHOR_THRESHOLD = 0.6` | `requirements.ts:193` | locating the employer's verbatim |
+| `MIN_STEM = 4` | `requirementSupport.ts:103` | how far a word may be stemmed |
+| `SWAP_THRESHOLD = 0.5` | `swaps.ts:152` | is this the same item, reworded |
+| `ATTRIBUTION_THRESHOLD = 0.34` | `swaps.ts:201` | |
+| `WORDING_RUN_TOKENS = 8` | `figureEcho.ts:466` | is this stuffing |
+
+**This is deliberate, and it is written down.** `checks.ts:781` — *"a model may PROPOSE, only an exact
+rule may ACCUSE, and `must_have_coverage` is the accusation."* An LLM evidence path exists
+(`evidenceProposal.ts:274` writes `method:'proposed'`) and is **structurally barred from counting** at
+three separate places (`appRequirements.ts:212`, `dimensions.ts:455`, `checks.ts` `ruleEvidenceOf`).
+Its only escape hatch is `confirmed_at`, which **A5 proves nothing writes.** So the model's judgement
+is not merely distrusted — it is unreachable.
+
+**The owner never made this decision.** It is a design choice inherited from the fabrication-safety
+rules, and it is the root cause of "it says no when the match is clear."
+
+## 2. THE SAME CONCEPT HAS TWO IMPLEMENTATIONS, and the owner is looking at the naive one
+
+| | matcher | stemming? | used by |
+|---|---|---|---|
+| **good** | `requirementSupport.sameWord` / `forms()` | **YES** — `MIN_STEM=4`, irregulars, `-ies`→`-y`, `-ed`, `-es`, de-doubling | `evidence.ts:43,358` (*"the judgement itself lives in `requirementSupport.supportIn`"*), `appRequirements.ts:17` |
+| **naive** | `swaps.itemTokens` + `covText.includes(tk)` | **NO** — raw substring | **`checks.ts:277` `coversIn`** — the function that produced every "no" on the owner's screen |
+
+**Executed proof** (`/tmp/same.mjs`, against `api/dist`):
+
+```
+sameWord('strategy','strategies') = true      <- #15's blocking miss, ALREADY SOLVED in this repo
+sameWord('managers','manager')   = true
+sameWord('leadership','leader')  = false      <- derivational, not inflectional
+sameWord('goals','objectives')   = false      <- synonym
+sameWord('apply','leverage')     = false      <- synonym
+forms('strategies') = { strategies, strategy }
+```
+
+The existing stemmer's own comment names `strategies -> strategy` and `teams -> team` as worked
+examples. **The exact failure on the owner's summary is a documented example of a function this
+codebase already ships and `coversIn` does not call.** That is not a missing capability — it is the
+"extend, don't duplicate / fix all consumers" violation this repo's own CLAUDE.md exists to prevent,
+and `coversIn`'s docstring compounds it by claiming to be *"the SAME predicate that decides
+`must_have_coverage`"*, which it is not.
+
+## 3. What wiring the EXISTING matcher into `coversIn` actually buys — measured, not estimated
+
+Of the six blocking misses across the owner's four near-miss rows:
+
+| miss | kind | fixed by the existing stemmer? |
+|---|---|---|
+| #15 `strategy` | inflection | **YES** → #15 goes 3/5 = 0.60 → **4/5 = 0.80, PASSES** |
+| #12 `leadership` | derivational (`leader`) | no |
+| #15 `goals`, #7 `apply`, #7 `opportunities` | synonym / framing | no |
+| #9 `develop`, `managers`, `technical` | genuinely absent | no — and correctly so |
+
+**One of four rows. The other three need to understand that `goals` and `objectives` mean the same
+thing, and that `leader` and `leadership` are the same claim.** No threshold, no stemmer and no
+regular expression does that. **That is judgement, and the owner is right that it is what the job
+needs.**
+
+## 4. So the honest choice, stated plainly
+
+The system's safety model is *"only an exact rule may accuse"*. On the owner's real data that rule
+returns **0 of 19** on a document that visibly addresses the role, and **0 of 12** from a profile that
+visibly contains the experience. **A rule that is never wrong in the fabrication direction is wrong in
+the other direction on essentially every row.**
+
+Three ways forward, and they are not equivalent:
+
+1. **Wire the existing stemmer into `coversIn`.** Cheap, deterministic, no new dependency, fixes
+   exactly one of four rows. **Necessary and nowhere near sufficient.** Also removes a real
+   duplication defect regardless of what else is decided.
+2. **Make the model's judgement REACHABLE** — build the `confirmed_at` writer (A5) so a proposal can
+   be promoted by a human. Keeps the house rule intact (a person accuses, not the model) and is the
+   smallest change that admits semantics at all.
+3. **Let the model decide coverage directly** — the owner's option (b). Deletes the house rule. Every
+   count then rests on unverified model reasoning, which is exactly what the rule was written to
+   prevent — **but the display the owner is also asking for is what makes it auditable**, and that
+   changes the risk materially.
+
+**These are the owner's call, and (1) is the only one that is unambiguously correct on its own merits.**
+
+## 5. My own failure here, recorded
+
+The owner had to ask three times. I reported the threshold (turn 1), then the plural (turn 2), then
+the architecture (turn 3) — each true, each a symptom, and the ordering wasted the owner's time. The
+one command that would have led with the truth was
+`grep -rn "openai(" api/src/functions/tests/*.ts` — two files, neither in the decision path. **When
+asked "why does it say no", establish WHAT KIND OF THING is deciding before characterising how it is
+tuned.**
