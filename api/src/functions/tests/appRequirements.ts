@@ -111,6 +111,27 @@ export async function ensureEvidenceTable(client: any) {
       unique (opp_id, requirement_text, source_key, char_start, char_end, record_sha256)
     )`)
   await client.query(`create index if not exists evidence_confirmation_opp_idx on evidence_confirmation(opp_id)`)
+  // ON THE ENSURE PATH FOR THE SAME REASON `proposal_version` IS, and the test suite proved it
+  // rather than my reading it: `dimensionsDb.test.mjs` builds the database a migration actually
+  // MEETS -- `origin/main`'s SCHEMA_SQL plus the ensure-path columns -- and
+  // `loadRequirementsWithEvidence` failed on it with `column c.decision does not exist`.
+  //
+  // That is not a test artefact, it is a production window. `api-deploy.yml` deploys the code at
+  // its "Deploy to Azure Functions" step and calls `pg-migrate` only afterwards, so between those
+  // two steps the running code SELECTs these two columns from a database that has not got them and
+  // every requirements read 500s. The rule the precedent above states: WRITES can wait for the
+  // migration, READS cannot, and both of these are on the read path via the decision join.
+  //
+  // Cheap in the way the CHECK swap is not: a nullable column with no default is catalogue-only in
+  // Postgres 11+ (no table rewrite), and `if not exists` makes the steady-state call a no-op, so
+  // this stays safe on the hot path four artifacts of one packet enter concurrently. `decision`
+  // takes its default here for the same reason SCHEMA_SQL gives it one -- every row already in the
+  // table was written by the confirm path, so 'confirmed' is what those rows have always meant.
+  // The CHECK constraint that pins the domain stays in SCHEMA_SQL alone, because adding it needs
+  // the ACCESS EXCLUSIVE lock this function exists to avoid.
+  await client.query(`alter table evidence_confirmation
+    add column if not exists decision text not null default 'confirmed',
+    add column if not exists missing text[]`)
 }
 
 export async function ensureRequirementCols(client: any) {
@@ -562,8 +583,25 @@ export async function loadRequirementsWithEvidence(client: any, oppId: string): 
             -- ALSO PREFIXED evidence_ DELIBERATELY: verifyRequirementRows redacts a stale row by
             -- nulling every key starting with that prefix. A column named confirmed_at would
             -- survive redaction and keep asserting a human vouched for a quote already withdrawn.
-            c.confirmed_at as evidence_confirmed_at,
-            c.confirmed_by as evidence_confirmed_by
+            --
+            -- THE case EXPRESSION IS LOAD-BEARING: WITHOUT IT A VETO INVERTS INTO AN APPROVAL.
+            -- This join matches a decision row of EITHER polarity -- that is deliberate, the veto
+            -- has to reach ruleEvidenceOf through the same identity join -- so a bare
+            -- c.confirmed_at would set evidence_confirmed_at on a VETOED claim. isConfirmed would
+            -- then read true for the exact row the owner rejected, and ruleEvidenceOf treats
+            -- confirmed as the strongest warrant there is. The owner clicking "Not this one"
+            -- would have PROMOTED the row. Polarity is checked here, once, at the source.
+            --
+            -- NO BACKTICKS IN THIS COMMENT. It lives inside a template literal, and the first
+            -- draft quoted these identifiers the way every other comment in this file does, which
+            -- TERMINATED the literal and produced six TS1005 errors 200 lines away. schema.ts
+            -- carries the same warning for the same reason; it applies to every SQL string here.
+            case when c.decision = 'confirmed' then c.confirmed_at end as evidence_confirmed_at,
+            case when c.decision = 'confirmed' then c.confirmed_by end as evidence_confirmed_by,
+            -- The veto itself. Prefixed evidence_ like the rest so verifyRequirementRows redacts it
+            -- with the row: a decision about an excerpt is meaningless once that excerpt is stale.
+            c.decision     as evidence_decision,
+            c.missing      as evidence_missing
        from requirement r
        left join lateral (
          select * from requirement_evidence x where x.requirement_id = r.id
@@ -1000,33 +1038,72 @@ export async function evidenceConfirm(req: HttpRequest, context: InvocationConte
     if (!row.source_key) {
       return { status: 409, headers: HEADERS, jsonBody: { error: 'this requirement has no evidence to decide on' } }
     }
-    // Only a MODEL proposal is a decision for the owner. A deterministic row is already a rule's
-    // finding and needs no human; "confirming" one would imply the human added something.
-    if (row.method !== 'proposed') {
+    // Only a MODEL-WARRANTED row is a decision for the owner. A deterministic row is already a
+    // rule's finding and needs no human; deciding on one would imply the human added something.
+    //
+    // `vetted` JOINED `proposed` HERE when proposals began counting by default. A vetted row rests
+    // on two model reads agreeing -- stronger corroboration, still not a rule -- and it counts
+    // toward must_have_coverage exactly as a proposed row now does. Leaving it un-decidable would
+    // have made the strongest model claims the ONLY ones the owner could not veto, which is the
+    // opposite of the intended order. `exact` and `anchored` keep the 409: vetoing a rule match is
+    // a different act (the rule is wrong), not this endpoint's job.
+    if (row.method !== 'proposed' && row.method !== 'vetted') {
       return { status: 409, headers: HEADERS, jsonBody: { error: `this excerpt was resolved by a rule (${row.method}), so there is nothing to confirm`, method: row.method } }
     }
 
     if (decision === 'reject') {
-      // A rejection WITHDRAWS any existing confirmation for this exact claim and records why. It is
-      // not a delete: "the owner confirmed this and later took it back" must stay reconstructable.
-      await client.query(
-        `update evidence_confirmation set withdrawn_at = now(), withdrawn_reason = $1
-          where opp_id=$2 and requirement_text=$3 and source_key=$4 and char_start=$5
-            and char_end=$6 and record_sha256=$7 and withdrawn_at is null`,
-        ['rejected by the owner', row.opp_id, row.requirement_text, row.source_key,
-         row.char_start, row.char_end, row.record_sha256])
-      return { status: 200, headers: HEADERS, jsonBody: { ok: true, decision: 'reject', seq } }
+      // THIS PATH WAS INERT AND RETURNED ok:true WHILE WRITING NOTHING. Measured 2026-09-01 by
+      // reading it: the whole branch was an UPDATE ... where withdrawn_at is null, with no INSERT.
+      // A veto only lands on a row that already exists, and a row only exists once the owner has
+      // CONFIRMED that exact claim -- so for any proposal the owner had never confirmed (the normal
+      // case, and the ONLY case that matters now that proposals count by default) the update
+      // matched ZERO ROWS and the handler still returned {ok: true, decision: 'reject'}. The owner
+      // clicked "Not this one" in PostingAnalysis.jsx, saw a success, and nothing was recorded
+      // anywhere. Zero tests covered the reject path at all, which is why it survived shipping.
+      //
+      // A veto is now a first-class decision row, written whether or not a confirmation preceded it.
+      // ON CONFLICT flips an existing decision rather than inserting a second row: the unique key is
+      // the CLAIM, and a claim has exactly one current decision. Flipping also clears withdrawn_*,
+      // because a fresh decision is not a withdrawn one -- the same reasoning the confirm path below
+      // already applies in the other direction.
+      //
+      // `confirmed_by` carries the actor for both polarities. The name is now half-right and the
+      // column is NOT NULL and read elsewhere, so renaming it is its own change rather than a
+      // side effect of this one; `decision` is what says which act the actor performed.
+      const vetoed = (await client.query(
+        `insert into evidence_confirmation
+           (opp_id, requirement_text, source_key, char_start, char_end, quote, record_sha256,
+            confirmed_by, decision)
+         values ($1,$2,$3,$4,$5,$6,$7,$8,'vetoed')
+         on conflict (opp_id, requirement_text, source_key, char_start, char_end, record_sha256)
+         do update set decision = 'vetoed', confirmed_by = excluded.confirmed_by,
+                       confirmed_at = now(), withdrawn_at = null, withdrawn_reason = null
+         returning id`,
+        [row.opp_id, row.requirement_text, row.source_key, row.char_start, row.char_end,
+         row.quote, row.record_sha256, owner])).rows[0]
+      // The row id is returned so a caller can prove the write happened. The defect this replaces
+      // was invisible precisely because the response said nothing about what was written.
+      return { status: 200, headers: HEADERS, jsonBody: { ok: true, decision: 'reject', seq, vetoId: vetoed?.id || null, vetoedBy: owner } }
     }
 
     // IDEMPOTENT. Confirming twice is one confirmation with its ORIGINAL timestamp and actor — the
-    // unique key is the claim identity, and `do nothing` keeps the first decision rather than
+    // unique key is the claim identity, and the update below keeps the first decision rather than
     // re-stamping it to whoever clicked last.
+    //
+    // `decision = 'confirmed'` IS THE UN-VETO, and it is why this line is not merely defensive.
+    // Once a veto is a decision row on this same unique key, a confirm arriving afterward has to
+    // say so explicitly: without it, the conflict branch would clear withdrawn_* on a row still
+    // reading `decision = 'vetoed'` and the owner's yes would be silently discarded — the mirror of
+    // the inert-reject defect above, in the other direction. `confirmed_at` and `confirmed_by` are
+    // deliberately NOT re-stamped here, preserving the original-timestamp property for a repeated
+    // yes; a veto reversal is a change of decision, and `decision` is the column that records it.
     await client.query(
       `insert into evidence_confirmation
-         (opp_id, requirement_text, source_key, char_start, char_end, quote, record_sha256, confirmed_by)
-       values ($1,$2,$3,$4,$5,$6,$7,$8)
+         (opp_id, requirement_text, source_key, char_start, char_end, quote, record_sha256,
+          confirmed_by, decision)
+       values ($1,$2,$3,$4,$5,$6,$7,$8,'confirmed')
        on conflict (opp_id, requirement_text, source_key, char_start, char_end, record_sha256)
-       do update set withdrawn_at = null, withdrawn_reason = null`,
+       do update set decision = 'confirmed', withdrawn_at = null, withdrawn_reason = null`,
       [row.opp_id, row.requirement_text, row.source_key, row.char_start, row.char_end,
        row.quote, row.record_sha256, owner])
     return { status: 200, headers: HEADERS, jsonBody: { ok: true, decision: 'confirm', seq, confirmedBy: owner } }

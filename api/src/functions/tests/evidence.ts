@@ -118,6 +118,24 @@ export interface EvidenceRow {
    */
   confirmed_at?: string | null
   confirmed_by?: string | null
+  /**
+   * THE OWNER'S DECISION ON THIS CLAIM, and the only thing that removes a counted row.
+   *
+   * `'confirmed'` | `'vetoed'` | null-or-undefined for a claim nobody has decided on. Since the
+   * owner's instruction that "proposals can count until vetoed", a model-warranted row counts on
+   * creation and this is the escape hatch — so `'vetoed'` is the value with teeth, and the absence
+   * of a value means undecided, NEVER rejected. Read `undefined` as "no one has looked", which is
+   * why nothing here defaults.
+   */
+  decision?: 'confirmed' | 'vetoed' | null
+  /**
+   * What a second, independent read said the excerpt fails to show.
+   *
+   * Persisted so the owner deciding whether to veto can see the REASON corroboration was declined,
+   * not just the excerpt. Null means no second read ran; an empty array means one ran and named
+   * nothing — different facts, so neither defaults to the other.
+   */
+  missing?: string[] | null
   /** Digest of the record body the offsets index. Offsets rot silently without it. */
   record_sha256: string
   resolver_version: number

@@ -124,18 +124,35 @@ const input = (method, extra) => ({
 })
 const coverage = (rs) => rs.find(r => r.check_key === 'must_have_coverage')
 
-test('H:a-vetted-row-counts-and-a-proposed-one-does-not', () => {
-  // BOTH HALVES, in one case, because they are one decision. `vetted` counts BECAUSE it is not
-  // `proposed` — there is no clause naming it — which is easy to break by widening `isProposed` and
-  // easy to miss. Pinning only the half that counts would let the other half rot silently.
+test('H:both-model-methods-count-and-are-disclosed-by-their-strength', () => {
+  // RENAMED, BECAUSE THE OLD NAME BECAME A FALSE STATEMENT. It read
+  // `H:a-vetted-row-counts-and-a-proposed-one-does-not`, and since the owner's instruction that
+  // "proposals can count until vetoed" a proposed row counts too. A guard whose NAME asserts the
+  // opposite of the behaviour is worse than no guard: the next reader trusts the name.
+  //
+  // WHAT SURVIVES, AND WHY IT IS STILL ONE CASE. The old comment's point was that `vetted` counted
+  // BECAUSE it was not `proposed` -- no clause named it -- so pinning one half let the other rot.
+  // That fragility is gone (an explicit allow-list names both), but the two halves are still one
+  // decision, and there is a NEW way for them to rot: they now count EQUALLY while resting on very
+  // different warrants -- one model's say-so versus two independent reads agreeing. If the surface
+  // stopped distinguishing them, the owner would have no way to tell which claims to look at first,
+  // and the veto they are being asked to exercise becomes guesswork. So the case now pins that both
+  // count AND that each is named by its own strength.
   const asProposed = coverage(runChecks(input('proposed')))
-  assert.equal(asProposed.state, 'fail', 'an unconfirmed proposal must NOT count — this is the 0/12')
-  assert.match(asProposed.observed, /0\/1 must-haves evidenced/)
-  assert.match(asProposed.observed, /awaiting your confirmation/)
+  assert.equal(asProposed.state, 'pass', 'a proposal counts until vetoed — the owner\'s instruction')
+  assert.match(asProposed.observed, /1\/1 must-haves evidenced/)
+  assert.match(asProposed.observed, /on a model's proposal alone — counted until you veto/,
+    'a row resting on one model read must say exactly that')
+  assert.doesNotMatch(asProposed.observed, /vetted/,
+    'a proposal must not borrow the stronger warrant\'s wording')
 
   const asVetted = coverage(runChecks(input('vetted', 'vetted: challenged ...')))
-  assert.equal(asVetted.state, 'pass', 'a challenged row that held DOES count — this is the fix')
+  assert.equal(asVetted.state, 'pass', 'a challenged row that held counts')
   assert.match(asVetted.observed, /1\/1 must-haves evidenced/)
+  assert.match(asVetted.observed, /vetted: a model challenged the match and it held/,
+    'the stronger warrant must be named as such, not collapsed into "a model proposed it"')
+  assert.doesNotMatch(asVetted.observed, /on a model's proposal alone/,
+    'a vetted row rests on two independent reads and must not be reported as one')
 })
 
 test('H:a-counted-vet-is-named-where-the-number-is-read', () => {

@@ -964,8 +964,44 @@ export function runChecks(input: CheckInput): CheckResult[] {
      * which is why `H:a-judged-row-counts-and-a-proposed-one-does-not` pins both halves.
      */
     const isVetted = (r: { seq: number }) => evidenceOf(r)?.method === 'vetted'
-    const ruleEvidenceOf = (r: { seq: number }) =>
-      (isProposed(r) && !isConfirmed(r) ? null : evidenceOf(r))
+    /**
+     * THE OWNER SAID NO. The only thing that removes a row from the numerator.
+     *
+     * Owner, 2026-09-01: "I already said proposals can count until vetoed." A model-warranted row
+     * now counts on creation, so the decision that carries weight is the NO, and it is checked
+     * FIRST below — before any method is consulted — because no warrant outranks the owner
+     * rejecting the claim. A vetoed row is not downgraded to "proposed", it is out.
+     */
+    const isVetoed = (r: { seq: number }) => evidenceOf(r)?.decision === 'vetoed'
+    /**
+     * WHICH METHODS COUNT — AN ALLOW-LIST, AND THE DIRECTION IS THE POINT.
+     *
+     * This replaces `(isProposed(r) && !isConfirmed(r) ? null : evidenceOf(r))`, which was
+     * FAIL-OPEN: it named the one method that did NOT count, so anything else counted by default.
+     * `vetted` counted only because no clause excluded it — the comment above says so in as many
+     * words — and any fifth value added to the DB CHECK later would have started counting the
+     * moment it was written, with nothing here mentioning it and no test failing.
+     *
+     * As a set, a value not listed here does not count. Adding one to the schema's CHECK and
+     * forgetting this line now yields an UNDER-count, which is visible and honest, instead of an
+     * over-count that silently inflates the one number a reviewer trusts most. Fail closed, the
+     * direction every other rule in this file already takes.
+     */
+    const COUNTS: ReadonlySet<string> = new Set(['exact', 'anchored', 'proposed', 'vetted'])
+    /**
+     * ORDER IS THE SAFETY PROPERTY, exactly as it is in `parseSupportVerdict`.
+     *
+     * Veto first: a rejected claim is out however it was warranted, including one the owner had
+     * previously confirmed and has since changed their mind about. Only then does method decide.
+     * `isConfirmed` no longer gates anything on its own — a confirmed row counts because its method
+     * is in the allow-list, and confirmation is now a stronger BADGE rather than the sole path off
+     * zero. That is the whole of the owner's instruction: proposals count until vetoed.
+     */
+    const ruleEvidenceOf = (r: { seq: number }) => {
+      if (isVetoed(r)) return null
+      const e = evidenceOf(r)
+      return e && COUNTS.has(String(e.method)) ? e : null
+    }
     const label = (r: { seq: number; verbatim: string | null; item_text: string }) =>
       `#${r.seq} ${(r.verbatim || r.item_text).slice(0, 80)}`
 
@@ -1012,16 +1048,36 @@ export function runChecks(input: CheckInput): CheckResult[] {
       // proposal), but this is an accusation-grade surface: a reviewer who cannot trust the
       // parenthetical cannot audit the number in front of it, which is the whole reason the
       // exclusions are named rather than absorbed.
-      const proposed = coverable.filter(r => isProposed(r) && !isConfirmed(r))
-      if (proposed.length) excluded.push(`${proposed.length} model-proposed, awaiting your confirmation`)
-      // JUDGED ROWS ARE IN THE NUMERATOR, so they are named in the SAME sentence rather than left for
-      // someone to discover in the evidence panel. This is the identical discipline the parenthetical
-      // above exists for, pointed the other way: that one says what was left OUT, this says what a
-      // model put IN. A count that rose because a model was consulted must say so where the number is
-      // read, or "coverage rose" is not falsifiable.
-      const vettedRows = coverable.filter(r => isVetted(r))
-      const includedNote = vettedRows.length
-        ? ` (${vettedRows.length} vetted: a model challenged the match and it held, quoting your own words)` : ''
+      // THE SENTENCE THAT USED TO SAY THE OPPOSITE OF WHAT THE NUMBER DOES.
+      //
+      // Until the owner's instruction that "proposals can count until vetoed", an unconfirmed
+      // proposal was excluded, and this line correctly filed it under "not counted either way".
+      // It counts now. Leaving that push here would have reproduced, exactly, the defect the
+      // comment above records an independent verifier catching against live production: a
+      // parenthetical asserting rows were uncounted while the numerator was made of them. So the
+      // proposals move from `excluded` to `includedNote` in the same commit that makes them count.
+      //
+      // A row already VETOED is not in this set — `isVetoed` is checked first, and a vetoed row is
+      // named in `excluded` below instead, which is where it now honestly belongs.
+      const proposed = coverable.filter(r => isProposed(r) && !isConfirmed(r) && !isVetoed(r))
+      // ROWS A MODEL PUT IN THE NUMERATOR ARE NAMED IN THE SAME SENTENCE AS THE NUMBER.
+      //
+      // This is the accusation-grade disclosure and it is not optional: counting proposals inverts
+      // this file's own house rule ("a model may PROPOSE, only an exact rule may ACCUSE"), and an
+      // inversion that is not stated on the surface a reviewer reads is indistinguishable from the
+      // rule having been dropped. A reviewer must be able to tell a better profile from a chattier
+      // model by reading one line, so both model-warranted kinds are named with their strength:
+      // `proposed` is one model's say-so, `vetted` is two independent reads agreeing.
+      const vettedRows = coverable.filter(r => isVetted(r) && !isVetoed(r))
+      const included: string[] = []
+      if (proposed.length) included.push(`${proposed.length} on a model's proposal alone — counted until you veto`)
+      if (vettedRows.length) included.push(`${vettedRows.length} vetted: a model challenged the match and it held, quoting your own words`)
+      const includedNote = included.length ? ` (${included.join('; ')})` : ''
+      // THE VETO, SAID OUT LOUD. A number that dropped because the owner rejected a claim must say
+      // so, for the same reason a number that rose because a model was consulted must: otherwise
+      // the owner cannot tell their own veto from the resolver losing a row.
+      const vetoedRows = coverable.filter(r => isVetoed(r))
+      if (vetoedRows.length) excluded.push(`${vetoedRows.length} you vetoed`)
       if (eligibility.length) excluded.push(`${eligibility.length} not reachable by any generated field`)
       const factOwned = mustHaves.length - coverable.length - eligibility.length
       if (factOwned > 0) excluded.push(`${factOwned} answered from your profile facts`)
@@ -1033,9 +1089,19 @@ export function runChecks(input: CheckInput): CheckResult[] {
         ? na('must_have_coverage', 'the posting produced no must-have requirements to judge', COVERAGE_EXPECT)
         : unevidenced.length
           ? { ...bad('must_have_coverage', `${coverable.length - unevidenced.length}/${coverable.length} must-haves evidenced${includedNote}${tail}`,
-                COVERAGE_EXPECT, unevidenced.map(r => isProposed(r)
-                  ? `${label(r)} — a model proposes "${(evidenceOf(r)!.quote || '').slice(0, 90)}" from ${evidenceOf(r)!.source_label}; confirm it`
-                  : `${label(r)} — ${NO_EVIDENCE_NOTE}`)), judged: judgedIds }
+                COVERAGE_EXPECT, unevidenced.map(r =>
+                  // A VETOED ROW IS NOT AN UNEVIDENCED ONE AND MUST NOT READ AS ONE. It has an
+                  // excerpt, and the owner looked at that excerpt and said no. Falling through to
+                  // NO_EVIDENCE_NOTE would tell them nothing was found — inviting them to hunt for
+                  // evidence they have already rejected — and falling through to the "confirm it"
+                  // branch would ask them to confirm the very claim they just vetoed. Both read as
+                  // the app having ignored them, which is the failure this branch is ordered to
+                  // prevent: veto first, exactly as `ruleEvidenceOf` orders it.
+                  isVetoed(r)
+                    ? `${label(r)} — you vetoed the proposed excerpt from ${evidenceOf(r)!.source_label}; nothing else supports it`
+                    : isProposed(r)
+                      ? `${label(r)} — a model proposes "${(evidenceOf(r)!.quote || '').slice(0, 90)}" from ${evidenceOf(r)!.source_label}; confirm it`
+                      : `${label(r)} — ${NO_EVIDENCE_NOTE}`)), judged: judgedIds }
           : { ...ok('must_have_coverage', `${coverable.length}/${coverable.length} must-haves evidenced${includedNote}${tail}`, COVERAGE_EXPECT), judged: judgedIds })
 
       // `ruleEvidenceOf`, for the same reason `must_have_coverage` uses it. An INDEPENDENT VERIFIER

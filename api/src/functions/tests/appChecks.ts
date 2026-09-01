@@ -132,6 +132,14 @@ export async function evaluateArtifact(client: any, artifactId: string, owner: s
       // waiting. Without this the gate cannot distinguish them and coverage stays pinned at 0.
       confirmed_at: r.evidence_confirmed_at ?? null,
       confirmed_by: r.evidence_confirmed_by ?? null,
+      // THE VETO, and it must be carried here or it does not exist as far as the gate is concerned.
+      // `H:every-evidence-count-has-a-reader` was written after two fields shipped write-only; the
+      // same shape one level up is a column selected by the loader and dropped by this mapping,
+      // which `tsc` cannot catch because both new fields are optional on EvidenceRow. Without these
+      // two lines the owner's veto lands in the database, reads back in the SELECT, and is silently
+      // discarded three lines before the only code that would act on it.
+      decision: r.evidence_decision ?? null,
+      missing: r.evidence_missing ?? null,
     } as EvidenceRow)])),
   }
 

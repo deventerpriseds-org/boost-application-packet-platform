@@ -1637,6 +1637,57 @@ alter table requirement_evidence add column if not exists proposal_version int;
 -- create-index and a composite FK naming a column an idempotent ALTER added further down the file.
 alter table skill_bank_entry add column if not exists category text;
 create index if not exists skill_bank_entry_category_idx on skill_bank_entry (owner_email, category);
+
+-- THE OWNER'S VETO. A DECISION HAS A POLARITY; IT IS NOT ONLY EVER A YES.
+--
+-- Owner, 2026-09-01: "I already said proposals can count until vetoed. make room for the vetoed
+-- data." Under that instruction a model-proposed evidence row COUNTS toward must_have_coverage on
+-- creation, and the owner's veto is the only thing that removes it. That inverts the load: the
+-- important decision is now the NO, and this table could only record a YES.
+--
+-- WHY A COLUMN AND NOT A SECOND TABLE. The hard part of this table is its identity key -- this
+-- requirement text, this excerpt, from this record, at these offsets, with that record's digest --
+-- which exists because writeRequirements runs "delete from requirement where opp_id = $1" on every
+-- re-extraction and the parent FK cascades. That key is IDENTICAL for a yes and a no: both say
+-- "about THIS exact claim". Duplicating it into a vetoed_evidence table is the parallel-system
+-- shape "Extend, don't duplicate" forbids, and it would need every future change made twice.
+-- A veto and a confirmation are the same SHAPE of claim with opposite POLARITY. One column.
+--
+-- THE DEFAULT IS 'confirmed' AND THAT IS NOT ARBITRARY. Every row already in this table was written
+-- by the confirm path, so 'confirmed' is what those rows have always meant. A default of 'vetoed'
+-- would silently reinterpret the owner's past yeses as noes -- the most damaging backfill available
+-- here, and the mirror of the no-fake-data rule: never assert a decision a human did not make.
+--
+-- WHY withdrawn_at IS NOT REUSED FOR THIS. It was tempting and it is wrong. Today withdrawn_* means
+-- "undo a yes". If a veto were stored as a withdrawal, then "the owner never confirmed this" and
+-- "the owner actively rejected this" would be the same row, and they are opposite facts about
+-- whether a human looked at the claim at all. With decision present, withdrawn_* keeps one clean
+-- meaning -- "undo whichever decision this row holds" -- and its existing CHECK
+-- ((withdrawn_at is null) = (withdrawn_reason is null)) is unaffected and still correct.
+--
+-- ADDED BY ALTER, so per H39/H39b nothing ABOVE may name it, and the constraint and index below sit
+-- AFTER the column deliberately. The two migration-killing defects this repo already ate were
+-- exactly a create-index and a composite FK naming a column an idempotent ALTER added further down.
+alter table evidence_confirmation add column if not exists decision text not null default 'confirmed';
+-- DROP-THEN-ADD, per this file's own rule: "add constraint" is not idempotent, so an already-present
+-- old constraint would otherwise abort the migration or be silently swallowed.
+alter table evidence_confirmation drop constraint if exists evidence_confirmation_decision_check;
+do $$ begin
+  alter table evidence_confirmation add constraint evidence_confirmation_decision_check
+    check (decision in ('confirmed','vetoed'));
+exception when undefined_table then null; end $$;
+-- WHAT A SECOND READ SAID THE EXCERPT FAILS TO SHOW, kept rather than counted and thrown away.
+-- supportJudge names the gaps and appRequirements tallied them into an in-memory
+-- escalation_refusals counter that dies with the request, so an owner asked to veto a proposal
+-- could see the excerpt but never the reason a second read declined to corroborate it -- which is
+-- the single most useful thing the challenge pass produces. NULL means no second read ran; an empty
+-- array means one ran and named nothing. Those are different facts, so the column is nullable with
+-- no default rather than defaulting to '{}'.
+alter table evidence_confirmation add column if not exists missing text[];
+-- The veto lookup is per-opportunity and reads only the live decisions, which is exactly the shape
+-- ruleEvidenceOf needs on every check run.
+create index if not exists evidence_confirmation_decision_idx
+  on evidence_confirmation (opp_id, decision, withdrawn_at);
 `;
 
 // Tables we expect to exist after migration (used by the runner to report).
