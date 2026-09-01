@@ -60,3 +60,23 @@ grep -n "awaiting your confirmation\|do not count toward the coverage gate" api/
 -> line 994 (live code, not a comment)
 ```
 
+## C8 — screen and gate cannot disagree about what counts: CONFIRMED (mutation-proved independently)
+
+`checks.ts`'s `COUNTS` allow-list (`['exact','anchored','proposed','vetted']`) and
+`postingAnalysis.js`'s `countsNow` allow-list are structurally identical, both check the veto first
+(`isVetoed(r)` in the gate, `trim(ev.decision) !== 'vetoed'` in the screen), and are pinned by
+`H:the-screen-and-the-gate-agree-about-what-counts` (`app/test/postingAnalysis.test.mjs:1147`),
+which is scoped to the `countsNow` expression specifically (not a whole-file grep — the commit
+history shows `a1f2b68` fixed exactly the whole-file-grep-passes-on-broken-code failure mode here).
+
+Ran two independent mutations myself (not inherited from the implementer's own mutation-proving),
+using `/workspace/eds-claude-skills/scripts/mutate.sh`:
+
+1. Added a bogus 5th method `'zzz'` to the gate's `COUNTS` set only (screen unchanged) →
+   `FIRED: 'H:the-screen-and-the-gate-agree-about-what-counts' failed with the defect reinstated.`
+2. Stripped the veto check out of the screen's `countsNow` expression only (gate unchanged) →
+   `FIRED: 'H:the-screen-and-the-gate-agree-about-what-counts' failed with the defect reinstated.`
+
+Both mutations restored cleanly (`restored: <file> matches HEAD`). The guard is real in both
+directions it claims to cover.
+
