@@ -6009,3 +6009,45 @@ established and every claim gets full depth.
 
 **The standing correction:** for a Tier-1 change, the AC subagent goes out BEFORE the first line of
 implementation, and `main` does not move until the verifier has reported. Neither happened here.
+
+### CORRECTIONS from the adversarial AC pass (`AC-resolve-the-0-of-12.md`, 573 lines, `26f4ac1`)
+
+**1. I OVERSTATED THE PROBLEM, USING A PREMISE I HAD ALREADY CORRECTED ONCE THIS SESSION.**
+`supportJudge.ts` and commit `155db07` both say *"nothing in the product could move it but twelve
+clicks"*. Twelve clicks is a WORKING PATH: the confirm route is live (`appRequirements.ts:982`) and so
+is its control — `PostingAnalysis.jsx:441-445` renders *"Yes, that is my evidence"* / *"Not this
+one"*. Verified by reading both, just now.
+
+This is the A5 error a second time. Earlier this session I recorded that A5 (*"nothing writes
+`confirmed_at`"*) was WRONG and that I had labelled it PROVEN off a single-file grep — and then I
+reused the same stale framing to justify a build. **The honest case for the vet lane is a usability
+one — twelve manual confirmations per packet is not a product — and it stands on its own without
+the false impossibility.**
+
+**2. THE TOGGLE ALONE DOES NOT MOVE THE NUMBER, AND MY OWN INSTRUCTIONS SAID IT WOULD.**
+`vetted` is written only during an escalation pass, and `writeEvidence` DELETES the opportunity's
+evidence rows before re-proposing (`appRequirements.ts:210-216`, the `canEscalate` branch). So
+existing `proposed` rows do not become `vetted` by flipping a setting. **It takes two steps:**
+
+    1. turn on Settings ▸ Quality ▸ "Let a model judge what your documents cover"
+    2. RE-RESOLVE the opportunity, so the escalation pass runs again and can stamp `vetted`
+
+The row above this one named only step 1. Anyone following it exactly would flip the switch, still
+see 0/12, and conclude the work did nothing.
+
+**3. Open findings from the same pass, NOT yet fixed** — held only because an independent verifier is
+mutating these files right now and two writers on one file is how a mutation gets committed:
+
+| finding | why it matters |
+|---|---|
+| `ruleEvidenceOf` is **fail-open** (`checks.ts:947`): `vetted` counts by NOT being `proposed`, and `isVetted` is defined but unused there | any future `method` value counts the day it enters the CHECK constraint. Must become a positive allow-list |
+| stuffing hits are **silently dropped** when `scanWording` returns `not_applicable` (`checks.ts:622-626`) | that fires on an empty PROFILE text — an input the model's read never needed |
+| **the challenge is handed the span the first pass chose**, so it can ask "does this span show it?" and structurally cannot ask "was that the right span?" | the independence claim is weaker than the code's comments assert |
+| one toggle, **three** risk surfaces (`coverageJudge` also drives `appealOverclaims` and `vetProposals`), and the Settings copy describes only document coverage — the word "profile" does not appear | the owner cannot consent to what the control does not say |
+| the `escalate` default-ON comment still argues a proposed row *"can never count toward coverage"* | five lines below, `vetProposals` makes that false |
+
+**4. The AC pass's verdict on the house rule, which I should not have softened.** `checks.ts` argues
+*"WHY THIS IS NOT THE HOUSE RULE BEING QUIETLY DROPPED"*. The AC pass's reading: it IS the rule being
+traded, the owner authorised the trade, and recording an authorised trade as a technical non-event is
+how the next session widens it believing no ping is needed. That comment needs rewriting to say
+plainly: this is a trade, it was authorised on 2026-09-01, and widening it needs a new ping.
