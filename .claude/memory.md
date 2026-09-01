@@ -5151,3 +5151,33 @@ for, and it passed.
 And it immediately caught its target: the Stop gate blocked this turn with *"6 of 11 text blocks
 lack a phase tag"*, every offender a mid-turn block written after a tool call — the exact 86% case
 the hook was measured against.
+
+---
+
+## 2026-09-01 — there are no baseline artifacts, and the schema forbids them
+
+Asked for links to baseline resume / CV / portfolio slides built from MasterContext without running
+prompts. Answered read-only from `GET /api/app/assets` (HTTP 200, 14 assets) plus `schema.ts`.
+
+**Standing facts worth not re-deriving:**
+
+- **Every artifact is opportunity-bound. `packet.opp_id` is `not null` (`schema.ts:84`)**, and
+  `artifact.packet_id` references `packet(id)`. So a candidate-level document that belongs to no JD
+  has nowhere to live. "No baseline exists" is a consequence of the schema, not an oversight.
+- **`cv` is not an artifact type.** `('resume','compact_resume','cover','portfolio','video')`
+  (`schema.ts:100`). `compact_resume` is a shorter resume; it is not a CV. Anyone asked for "the CV"
+  should be told the type does not exist rather than handed `compact_resume` as if it were one.
+- **Minting a Google link does NOT require a model.** `artifactDocument` (`appPackets.ts:850`) and
+  `artifactSlides` (`:954`) render `artifact.content` into a Doc/Deck with no OpenAI call, each
+  gated on content already existing. The model-bearing path is content GENERATION, and the separate
+  template-copy + merge-field injection path at `:772`. Useful whenever the ask is "without running
+  the prompts": the last mile is already prompt-free.
+- **Live asset inventory as of 2026-09-01:** 14 artifacts across 4 opportunities — eMoney Advisor
+  (2026-08-30, the newest complete set), Trinnex (2026-08-29), Anthropic (resume only) and Cloudflare
+  (the only one with a video). Cloudflare's portfolio is the only asset with `opens > 0`.
+
+**Method note, because the request contained a false premise and it would have been easy to miss.**
+The ask named three deliverables; one of them does not exist as a concept in this system. Reaching
+for the nearest-looking row (`compact_resume`) and calling it the CV would have been the same error
+the accuracy log already records three times — answering from a proxy. The check constraint is the
+primary source and it settles the question in one read.

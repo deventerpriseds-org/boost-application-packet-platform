@@ -6245,3 +6245,44 @@ phase-tag reminder. Three new guard scripts on disk and executable: `eds-availab
 - The sync-skill step-4 fix is queued to fold into PR #25 at the same time.
 - Still open from ACT-2026-08-29-b: whether to bump `CURRENT_VERSION` and correct `SESSION_CMD`'s
   wrong `register_repo_root` path. **Note it is now a 27 → 28 bump, not 19 → 20.**
+
+---
+
+## ACT-2026-09-01-a — Baseline artifact links from MasterContext (pre-work for JD-analysis UI parity)
+
+**Request (owner):** *"give me links to baseline artifacts using the mastercontext for content
+without running the prompts or analysis... id expect the link to a resume, cv, and portfolio slides."*
+
+**Status: ANSWERED — and the answer is that NO baseline artifact exists. Nothing was built or run.**
+
+**Method.** Read-only. `GET /api/app/assets?owner=von.ellis@enterpriseds.io` via `api-test.yml`
+(run 33543732688, job 99976054528) — **HTTP 200, `count: 14`**. A GET runs no prompt and no analysis,
+which is what the request asked for. Schema read from `api/src/functions/tests/schema.ts`.
+
+**Three findings, each from the primary source rather than inference:**
+
+1. **All 14 assets are JD-tailored. Zero baselines.** Every row carries a non-null `oppId` — the set
+   spans eMoney Advisor (2026-08-30), Trinnex (2026-08-29), Anthropic and Cloudflare (both
+   2026-07-10). None is a candidate-level document.
+
+2. **A baseline artifact is structurally IMPOSSIBLE today, not merely absent.** `artifact.packet_id`
+   references `packet(id)`, and `packet.opp_id` is **`not null`** (`schema.ts:84`). An artifact must
+   hang off a packet, and a packet must hang off an opportunity. There is no home for a document not
+   tied to a specific JD.
+
+3. **There is no `cv` artifact type.** The check constraint is
+   `type in ('resume','compact_resume','cover','portfolio','video')` (`schema.ts:100`), and `cv`
+   appears nowhere in `schema.ts`. `compact_resume` is a SHORTER resume, not a CV — the owner's
+   expected trio does not map onto what exists.
+
+**Feasibility for building true baselines without prompts — `EXISTS-BUT-CONSTRAINED`.** The
+link-minting step is already model-free: `artifactDocument` (`appPackets.ts:850`) and `artifactSlides`
+(`:954`) create the Google Doc/Deck straight from `artifact.content` with no OpenAI call, each
+guarded by `if (!art.content) return 400 'generate the content first'`. So MasterContext text could
+be rendered to real links with zero prompts. What blocks it is finding 2 — the artifact still needs a
+packet and therefore an opportunity. A true baseline needs either a synthetic baseline opportunity or
+a schema change making `opp_id` nullable. **That is a build with a schema decision in it, not a
+lookup — not started, owner's call.**
+
+**Delivered instead:** the newest complete tailored set (eMoney Advisor, 2026-08-30) as the reference
+for the JD-analysis parity work, explicitly labelled as tailored rather than baseline.
