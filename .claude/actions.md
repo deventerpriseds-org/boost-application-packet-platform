@@ -6678,3 +6678,45 @@ so 24 is treated as the binding rule — flagged rather than silently resolved.
 **NOT APPLIED to the baseline document, deliberately.** These 9 are derived FROM the Trinnex JD, so
 they are tailored content. Writing them into `Baseline (Master Context)` would make that document
 JD-specific — the exact property the owner asked the baseline NOT to have.
+
+---
+
+## ACT-2026-09-01-i — Owner revision: the AI cluster was redundant. Two swaps applied.
+
+**Owner:** *"the ai is a little redundant. replace AI in operations to Ops automation, and AI/ML
+advancements to Data Insights."*
+
+**Correct, and worth stating plainly: my nine carried THREE AI-prefixed terms** — `AI in Operations`,
+`Corporate AI Use Cases`, `AI/ML Advancements` — against a Library whose whole "Data Analytics and
+AI" category the resume already touches via S1 `AI/Data Science Strategy`. I optimised each pick
+against its own ATS keyword and never looked at the nine as a SET. Three of nine words starting "AI"
+reads as one idea repeated, which is the opposite of what a Relevant list is for.
+
+**Applied:** `AI in Operations` (16) → **`Ops Automation`** (14); `AI/ML Advancements` (18) →
+**`Data Insights`** (13). One AI term remains, `Corporate AI Use Cases`, which is the strongest of
+the three for `AI adoption`.
+
+**The revised nine and the split:**
+
+    Relevant Skills 1: Portfolio Management (20) | Tech-Driven Innovation (22) | Ops Automation (14)
+    Relevant Skills 2: Tech Talent Strategy (20) | Innovation Frameworks (21)  | Data Insights (13)
+    Relevant Skills 3: Corporate AI Use Cases (22) | Strategic Partnerships (22) | Global Leadership (17)
+
+**Char rule still passes** — longest is 22, so no list holds any item over 24. The >20 distribution
+is unchanged at 1/1/2, because both swaps replaced items that were already under 20.
+
+**Two honest notes on the swap, neither of which changes the decision:**
+
+1. **Neither replacement is a verbatim Library term.** The pool holds `AI in Operations` and
+   `Data Insights Automation`; `Ops Automation` and `Data Insights` are the owner's own wordings.
+   The Zap rule anticipates this — *"Replace terms with the next most related or relevant item"* —
+   and the owner is the author of the Library, so this is curation, not drift. Recorded because a
+   later reader diffing the nine against the 36 will find two that do not match.
+2. **`AI knowledge` loses its dedicated pick.** It was `AI/ML Advancements`; `Data Insights` does not
+   carry it, so it now rests on `Corporate AI Use Cases` alone. In exchange `Data Insights` reaches
+   `performance monitoring`, which nothing else in the nine covered. Net ATS coverage is unchanged at
+   eight of the unused keywords, with the emphasis moved off AI.
+
+**Still not applied to any document** — these remain Trinnex-derived, so writing them into
+`Baseline (Master Context)` would make that document JD-specific. Awaiting the owner's call on
+whether they land on the Trinnex packet instead.
