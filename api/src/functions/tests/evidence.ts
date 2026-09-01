@@ -344,6 +344,14 @@ export interface ResolveOptions {
   /** Maximum model calls one run may make. */
   escalateMax?: number
   /**
+   * May a model APPEAL a withdrawal made by the exact overclaim rule (`verifyReasoning`)?
+   *
+   * Rides the owner's coverage-judge switch rather than adding a fourth one: it is the same
+   * decision -- "let a model read, where a word-match cannot" -- applied to the third layer that
+   * made it. Absent means off, and off is today's behaviour exactly.
+   */
+  appealOverclaims?: boolean
+  /**
    * Token->record-count map for the WHOLE profile, computed once by `resolveAll`.
    *
    * Passed in rather than recomputed per requirement: it is a property of the profile, not of the

@@ -257,5 +257,8 @@ export function resolveOptionsFrom(t: Partial<CheckThresholds>): ResolveOptions 
     // which is written from their prompts before this pass runs at all.
     escalate: t.evidenceEscalate !== false,
     escalateMax: t.evidenceEscalateMax,
+    // `=== true`, like the column it reads: an owner who has never touched the judge setting keeps
+    // today's withdrawals exactly. The appeal can only ever OVERTURN a withdrawal, never cause one.
+    appealOverclaims: t.coverageJudge === true,
   }
 }

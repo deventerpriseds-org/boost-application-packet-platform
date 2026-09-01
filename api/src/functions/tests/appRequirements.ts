@@ -319,6 +319,9 @@ export async function writeEvidence(
         outcome = await escalateOne(requirement, records, {
           fetchJson, neverEvidence: NEVER_EVIDENCE, minQuoteChars,
           minTokens: typeof opts.minTokens === 'number' ? opts.minTokens : 2,
+          // Rides the owner's coverage-judge switch (checkPrefs.resolveOptionsFrom). Off keeps
+          // today's withdrawals exactly; on lets a CITED answer overturn one, never cause one.
+          appeal: opts.appealOverclaims === true,
           resolverVersion: RESOLVER_VERSION,
         })
       } catch (e: any) {
