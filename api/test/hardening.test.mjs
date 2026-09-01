@@ -4700,3 +4700,49 @@ test('H:loop-zero-clear-rests-on-the-cache-hit: ensurePackage still returns earl
     'appPackets.ts: writeSwaps is no longer called with a literal `loop: 0` — a computed loop would '
     + 'make the unscoped clear reachable on a real remediation pass')
 })
+
+// ---------------------------------------------------------------------------------------------
+// H:every-evidence-count-has-a-reader — a count nobody reads is a measurement that does not exist.
+//
+// F-9, found by an independent verifier: `vetted` shipped WRITE-ONLY. It was added to
+// `writeEvidence`'s return with the explicit rationale that "a caller must be able to see the
+// number a model moved" — and then omitted from the ONE place those counts surface
+// (`appPackets.ts`). TypeScript stayed quiet because that caller destructures a subset. `vetted` is
+// the count that MOVES must_have_coverage, so the number that changed was the only one invisible.
+//
+// THE INVARIANT, NOT THE INCIDENT: every count the evidence pass returns must be read somewhere.
+// This is the same class as the `correction.frame` write-only defect the repo's CLAUDE.md cites,
+// and the same self-attack the rules prescribe ("Who READS what you wrote?").
+test('H:every-evidence-count-has-a-reader', () => {
+  const body = src('appRequirements.ts')
+  // The declared return type of writeEvidence — read from the source, not from memory.
+  const at = body.indexOf('export async function writeEvidence')
+  assert.ok(at > -1, 'writeEvidence moved — this scan has gone stale')
+  const sig = body.slice(at, body.indexOf('> {', at))
+  const counts = [...sig.matchAll(/(\w+):\s*number\b/g)].map(m => m[1])
+  assert.ok(counts.length >= 6, `expected the count block, found ${JSON.stringify(counts)}`)
+
+  const readers = src('appPackets.ts') + src('appChecks.ts')
+  const unread = counts.filter(c => !new RegExp(`evidence\\?\\.${c}\\b`).test(readers))
+  assert.deepEqual(unread, [],
+    `these counts are written and never read: ${unread.join(', ')} — a coverage change is only ` +
+    'attributable if the run recorded which pass moved it')
+})
+
+// H:the-judge-reports-what-it-did — F-8, same verifier, same class one level up.
+//
+// `runCoverageJudge` and `runStuffingRead` each return `{ calls, refused, failures }` and every one
+// was discarded at `evaluateArtifact`'s return. Three live consequences: a model OUTAGE was
+// invisible (the owner was told "too short to judge either way" when the call had failed), the
+// count of times a model claimed a quote the document does not contain was dropped — while
+// `coverageJudge.ts` names each refusal separately precisely because "only the second is a defect
+// worth alerting on" — and nobody could say what the judge spent.
+test('H:the-judge-reports-what-it-did', () => {
+  const body = stripComments(src('appChecks.ts'))
+  assert.match(body, /const judge = coverage \|\| stuffing \?/,
+    'evaluateArtifact must report the judge passes, not silently discard them')
+  for (const field of ['coverage_calls', 'coverage_refused', 'stuffing_calls', 'failures']) {
+    assert.ok(body.includes(field), `the judge report drops ${field}`)
+  }
+  assert.match(body, /results, score, judge \}/, 'and it must actually be returned')
+})

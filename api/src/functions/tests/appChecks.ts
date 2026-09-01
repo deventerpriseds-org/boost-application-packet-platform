@@ -35,6 +35,12 @@ export { ensureCheckPrefs, loadThresholds, resolveOptionsFor, resolveOptionsFrom
  */
 export async function evaluateArtifact(client: any, artifactId: string, owner: string): Promise<{
   artifact_id: string; run_id: string; gate: string; attention: number; results: CheckResult[]; score: ArtifactScore
+  /** What the model passes did, or null when they did not run. See the return statement for why. */
+  judge: {
+    coverage_calls: number | null; coverage_cache_hits: number | null; coverage_refused: number | null
+    coverage_unanswered: number | null; stuffing_calls: number | null; stuffing_refused: number | null
+    failures: string[]
+  } | null
 }> {
   const art = (await client.query(
     `select a.id, a.type, a.packet_id, p.opp_id, p.pkg_json, p.resume_template_id, o.company, o.owner_email,
@@ -254,7 +260,24 @@ export async function evaluateArtifact(client: any, artifactId: string, owner: s
     await client.query('commit')
   } catch (e) { await client.query('rollback'); throw e }
 
-  return { artifact_id: artifactId, run_id: runId, gate, attention, results, score }
+  // F-8, from an independent verifier: `runCoverageJudge` and `runStuffingRead` both return
+  // `{ calls, refused, failures }` and every one of those was DISCARDED at this line. Three live
+  // consequences: a judge outage was invisible (the owner was told "too short to judge either way"
+  // when the truth was that the call failed), `refused` -- the count of times a model claimed a
+  // quote the document does not contain -- was dropped despite `coverageJudge.ts` naming each
+  // refusal separately because "only the second is a defect worth alerting on", and nobody could
+  // say what the judge SPENT. Reported here so the route's caller can see all three; null when the
+  // judge did not run, which is not the same as zero.
+  const judge = coverage || stuffing ? {
+    coverage_calls: coverage?.calls ?? null,
+    coverage_cache_hits: coverage?.cacheHits ?? null,
+    coverage_refused: coverage?.refused ?? null,
+    coverage_unanswered: coverage?.silent?.length ?? null,
+    stuffing_calls: stuffing?.calls ?? null,
+    stuffing_refused: stuffing?.refused ?? null,
+    failures: [...(coverage?.failures || []).map(f => `${f.field}: ${f.error}`), ...(stuffing?.failures || [])],
+  } : null
+  return { artifact_id: artifactId, run_id: runId, gate, attention, results, score, judge }
 }
 
 /**

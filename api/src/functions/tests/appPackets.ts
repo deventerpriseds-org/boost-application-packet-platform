@@ -1184,7 +1184,18 @@ export async function runPacketBuild(
       // model only if the run recorded which one moved.
       evidence: evidence?.error ? { error: String(evidence.error).slice(0, 200) } : {
         total: evidence?.total ?? null, evidenced: evidence?.evidenced ?? null,
+        // Both found write-only by H:every-evidence-count-has-a-reader on its FIRST run, and both
+        // pre-date the judge work. `profile_records: 0` is the "we did not look" signal this
+        // codebase cares about more than any other -- zero evidence against zero records is not a
+        // measurement of the candidate -- and it was computed and thrown away.
+        unevidenced: evidence?.unevidenced ?? null,
+        profile_records: evidence?.profile_records ?? null,
         proposed: evidence?.proposed ?? 0, escalated: evidence?.escalated ?? 0,
+        // F-9, from an independent verifier: `vetted` shipped WRITE-ONLY. The comment above says a
+        // coverage change must be attributable -- and `vetted` is the one count that MOVES coverage,
+        // so omitting it left the number that changed as the only number nobody could see. TypeScript
+        // stayed quiet because this destructures a subset.
+        vetted: evidence?.vetted ?? 0,
         refused: evidence?.refused ?? null,
       },
       // DERIVED, not hardcoded. This was the literal `false` for the whole life of the route, so the
