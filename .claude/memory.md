@@ -5017,3 +5017,29 @@ and a model may defend — quoting the excerpt, defending every disputed term, a
 **The number the owner watches has NOT moved.** `must_have_coverage` reads `ruleEvidenceOf` (the
 PROFILE side, `supportIn`), which this pass did not touch. Anyone reading "the judge shipped" as "0/12
 is fixed" is wrong.
+
+## CORRECTION — how the profile side actually decides, after the owner's challenge (2026-09-01)
+
+The entry above describes the FIRST design and it is superseded. It said a proposal is promoted when
+a model "names what is missing first" and finds nothing. **That framing was wrong and the owner said
+so:** *"why would finding a match require what's missing instead of what's matching?"* An independent
+AC pass had written the same objection as **B-6** before the code ran anywhere.
+
+**The hole both named:** the second pass was handed `e.quote` — the span the FIRST pass had already
+chosen — so it could only ask *"does this span show it?"*. Selecting the span is exactly what the
+first pass was for, which makes a mis-selected span the failure most likely to be present and the
+one thing that design could not see.
+
+**What it does now.** The second pass answers the SAME question the first did — *which words in this
+record show this requirement* — over the **whole record**, never seeing the first answer. A row is
+promoted only when the two independently-chosen spans **OVERLAP** (`spansOverlap`, half-open, checked
+in code from stored offsets). Two reads landing on the same words is a fact code can check. The gap
+list is kept as one condition of several, because it does catch a model contradicting itself.
+
+**And a vetted row now SURVIVES a re-resolve** while its `record_sha256` still matches — the same
+staleness rule `evidence_confirmation` uses. Before that fix the next pass deleted it and re-asked,
+so the gate could flap between two runs over unchanged text.
+
+**Still true:** `must_have_coverage` counts `vetted`, and nothing else about the ladder changed —
+`exact`/`anchored` (a rule found it), `proposed` (shown, never counted), `vetted` (two reads agreed),
+`confirmed_at` (the owner said yes).
