@@ -6075,3 +6075,30 @@ the honest handling. Three are genuine gaps (F-10, F-11, F-12).
 **C2 is the load-bearing claim and it holds:** with the judge OFF, **4000/4000** cases identical
 against a real build of the pre-change commit. That is what made shipping-before-verifying survivable
 rather than harmless.
+
+### The four blockers are closed — 2026-09-01
+
+| # | blocker | commit | how it was proven |
+|---|---|---|---|
+| 1 | the second read was handed the span the first pass chose | `95ae6c5` | 3 mutations via `mutate.sh`, all FIRED |
+| 2 | F-10, no cache: the gate could flap between runs | `c75ee07` | 2 DB cases against a real cluster + 1 mutation |
+| 3 | Settings copy named one of three surfaces | `2bb3f88` | app 424/424 |
+| 4 | F-8/F-9, counts written and never read | `9fd8b16` | a guard on the INVARIANT, which found two more |
+
+**The redesign, in one line:** the second pass now answers the SAME question the first did — *which
+words in this record show this requirement* — over the WHOLE record, never seeing the first answer,
+and the row counts only when the two independently-chosen spans **overlap**. The owner
+(*"why would finding a match require what's missing instead of what's matching?"*) and AC **B-6**
+(*"a materially different view"*) named that hole separately, before it ran anywhere.
+
+**Three errors of mine caught in the same stretch, all one shape — a literal written from memory:**
+1. a mutation anchor that no longer matched, because a smart-quote sweep had rewritten the very
+   characters I typed;
+2. a guard pattern assuming one field per line, which found two of eight;
+3. backticks in a heredoc, which ate three words out of a commit message (amended).
+
+The guard for that class now exists and is **on PATH** in every session: `shape.mjs` prints the real
+shape of an export or an expression, `mutate.sh` refuses an anchor that does not match. `setup.sh`
+symlinks `scripts/` into `/usr/local/bin` — previously they were reachable only by an agent that
+already knew the clone path, which is why `mutate.sh` sat unused for the two hours after it was
+written FOR these failures.
