@@ -161,45 +161,78 @@ the code says so. **This is an owner decision, not an implementation detail — 
 ---
 
 
-### 0.6 LATE FINDING — the confirm UI landed in the working tree WHILE this pass was running
+### 0.6 LATE FINDING — the confirm control was BUILT AND COMMITTED while this pass ran, and it carries the live number this file was blocked on
 
-**Observation, with timestamps.** Early in this pass, `grep -rn "evidence-confirm\|evidenceConfirm"
-app/src/` returned **nothing** — the basis for F-G7's "API complete, no button". Re-run at the end of
-the pass it returns **five matches**. The mtimes settle it: `app/src/api.js` 11:13:45,
-`api/src/functions/tests/appRequirements.ts` 11:14:22, `app/src/screens/PostingAnalysis.jsx` 11:16:51,
-against `date` 11:17:09. **A concurrent lane is building the human confirm path right now, and none
-of it is committed** (`git status` shows all five files as `M`/untracked against `5501839`).
+**This section was written three times as the tree moved under me. What follows is the final,
+verified state, at `bb7e620`.**
 
-What is in that uncommitted tree, read from `git diff`:
+**Observation, with timestamps.** Early in this pass `grep -rn "evidence-confirm" app/src/` returned
+**nothing** — the basis for F-G7's "API complete, no button". Mid-pass it returned five matches
+against an uncommitted tree (`app/src/api.js` 11:13:45, `appRequirements.ts` 11:14:22,
+`PostingAnalysis.jsx` 11:16:51, vs `date` 11:17:09). By the end of the pass it was **committed**:
 
-| file | what was added |
-|---|---|
-| `app/src/api.js:228` | `evidenceConfirm: (seq, body) => postDetailed('/app/requirement/${seq}/evidence-confirm', body)` |
-| `app/src/postingAnalysis.js:31-34` | test ids `evidence-confirm`, `-yes`, `-no`, `-confirmed`; `awaitingConfirmation = method === 'proposed' && !confirmedAt` |
-| `app/src/screens/PostingAnalysis.jsx` | `RequirementRow` → `EvidenceLine` with the confirm control, `+87` lines |
-| `api/src/functions/tests/appRequirements.ts:~653` | `confirmedAt` / `confirmedBy` added **inside** the evidence verdict object, with a comment citing `H:evidence-read-from-the-verdict-not-the-columns` |
+```
+$ git log --oneline -2
+bb7e620 Build the confirm control: 15 verified proposals were sitting uncounted
+5501839 Corrected scope: I misread the owner twice, and both corrections widen the work
+```
 
-**Three consequences for this file, and they are not cosmetic:**
+**A concurrent lane built OD-G1 option (c) — the human confirm control — and shipped it to the
+branch.** `git show --stat bb7e620`: 6 files, +201/-8, including `app/test/postingAnalysis.test.mjs`
++65 and four new mutation-proved guards (`H:proposal-awaits-a-human`,
+`H:rule-evidence-is-never-asked-to-be-confirmed`, `H:confirmation-reads-the-verdict`,
+`H:confirm-control-is-hidden-without-a-target`).
 
-1. **F-G7 is upgraded** from `EXISTS-BUT-CONSTRAINED (no button)` to **IN PROGRESS**. Anyone
-   implementing lane 2 must read that lane's work before writing any confirm UI — building a second
-   one is the "extend, don't duplicate" failure, and it would be committed against a tree that
-   already has the first.
-2. **OD-G1 changes shape.** Option (c) is not a proposal any more. If the human confirm path ships,
-   `must_have_coverage` moves off zero **with the house rule intact and no model trusted**, which
-   makes option (a) an optional second step decided against real verdicts rather than a leap. That is
-   a strictly better sequence than the one this file was going to recommend.
-3. **Line numbers below 650 in `appRequirements.ts` are HEAD numbers; those above are +9.** The
-   uncommitted diff inserts nine lines at ~653. **Every `appRequirements.ts:NNN` citation in this
-   file is a WORKING-TREE number** (route `:957`, insert `:943`, withdraw `:931`, 409 `:923`) — the
-   brief's `:948` for the route is the same line at HEAD and is not wrong, it is a different frame.
-   Everything below 650 shifts by 9 the moment that work commits or is discarded, so re-grep the
-   construct rather than trusting the number.
+#### It answers §2's queries P2 and P3 with LIVE data, which this pass could not reach
 
-> **Interpretation, separated:** I did not read that lane's intent, only its diff. It looks like the
-> `OD-2` / confirm-button work both this file and `AC-llm-coverage-judge.md` independently recommend
-> — but **that is an inference from four file diffs, not something I confirmed with whoever wrote
-> them.** Reconcile before building.
+Quoted from that commit message, which states it was *"Measured live via boost-pg-mcp-write before
+building anything"*:
+
+> *"`requirement_evidence` holds **15 'proposed' rows across 15 requirements and 2 'anchored'**, every
+> proposal carrying a verified quote from the owner's own profile, **all uncounted, on screens
+> reporting zero coverage.**"*
+>
+> Named Trinnex rows: **#0** *"Lead engineering execution"* ← *"Led an enterprise-wide Agile
+> transformation, reducing time-to-market by 40%"*; **#4** *"Drive continuous improvement through
+> DevSecOps"* ← *"Established a security-first engineering culture, embedding DevSecOps practices
+> within SDLC"*; **#20** the degree requirement ← *"Bachelor of Science with Honors in Information
+> Systems, University of Maryland"*.
+
+**This resolves AC-G2's decision table, and it lands on the first row.** The `0 of 12` is **not** the
+escalation cap (F-G12) and **not**, on these rows, the compound-requirement extractor: fifteen
+model proposals with byte-verified citations from the owner's own profile already exist and are
+excluded by the **admission rule** at `checks.ts:807`. That is the diagnosis AC-G2 was written to
+obtain, and it is now obtained.
+
+> **It does NOT resolve AC-G9.** `D:compound-requirements-unevidenceable` measured `0 of 38` on a
+> *different* posting (`c5671835`); fifteen proposals on Trinnex says nothing about that one. AC-G9
+> stands as written.
+
+#### Three consequences for this file
+
+1. **F-G7 is now `ALREADY BUILT`, not `EXISTS-BUT-CONSTRAINED`.** Do not write a confirm control;
+   read `PostingAnalysis.jsx`'s `EvidenceLine` and extend it.
+2. **OD-G1 option (c) is DONE, which changes the recommended sequence rather than the options.**
+   The human accuser now exists end to end, so `must_have_coverage` can move off zero **with the
+   house rule intact and no model verdict trusted** — the moment the owner clicks. **That makes
+   option (a) — admitting proposals automatically — a decision the owner can now make with real
+   confirmed/rejected verdicts in front of them, instead of in the abstract.** It is the cheap test
+   before the expensive change, and it arrived without this file asking for it.
+3. **The `appRequirements.ts` line-number caveat is RESOLVED.** The nine inserted lines are now
+   committed, so every `appRequirements.ts:NNN` citation in this file (route `:957`, insert `:943`,
+   withdraw `:931`, 409 `:923`) is correct at `bb7e620`. The brief's `:948` for the route was correct
+   at `5501839`. Both were right in their own frame; neither is right in the other's.
+
+#### One thing that commit records which this file should carry forward
+
+It corrects `DIAG-coverage-recognition.md` **A5** — *"`confirmed_at` … read by two places and written
+by nothing"*, marked **PROVEN** there — and names the cause: *"my sweep searched `evidence/confirm`
+and `confirmed_at=` and missed a hyphenated route with a camelCase handler."* That is the same
+finding `AC-llm-coverage-judge.md` §0.2 reached independently, and the same failure mode `CLAUDE.md`
+names as the org's most repeated error: **a capability declared ABSENT from a single-name grep.**
+**A5 in `DIAG-coverage-recognition.md` is stale and should be struck**, or the next pass will re-derive
+the same wrong blocker for a third time.
+
 
 ## 1. FEASIBILITY TABLE — every dependency these two lanes name
 
@@ -217,7 +250,7 @@ is quoted in §1.2.
 | **F-G4** | **A typed outage that is NOT a negative verdict** | `escalateOne` | `appRequirements.ts:330-334` `note('transport_failed')` / `note('unparseable')` | `EscalationOutcome` (`:192`) = `accepted \| refused \| skipped \| transport_failed \| unparseable`, with the comment *"a tier that stores them the same way records an outage as an absence of evidence"* | **ALREADY BUILT at the tier** — but see F-G5, it does not reach `checks.ts` |
 | **F-G5** | **A way for `checks.ts` to KNOW the model tier failed** | — | `CheckInput.evidence: EvidenceInput` (`checks.ts:235`) carries **`profileReadable` and `bySeq` only** (`appChecks.ts:102-103`) | `grep -n "escalation_refusals" api/src/functions/tests/checks.ts` → **no match**. The counts are computed in `appRequirements.ts:381` and never reach the checks | **ABSENT — and this is the single most important gap in lane 2.** Today an outage is invisible: the row is simply missing and the requirement reads as unevidenced. That is the SAFE direction now, and it stops being safe the moment a proposal can count. AC-G3 |
 | **F-G6** | **The one line that bars the model's verdict from the gate** | — | `checks.ts:807-808` `ruleEvidenceOf = (r) => (isProposed(r) && !isConfirmed(r) ? null : evidenceOf(r))`; numerator `:827` | read `:784` `isProposed`, `:806` `isConfirmed`, `:807` `ruleEvidenceOf`, `:827` `unevidenced` | **EXISTS** — **this is the whole lane.** Two sibling bars: `dimensions.ts:455` `method !== 'proposed'`, `appRequirements.ts:212` `e.method <> 'proposed'` |
-| **F-G7** | **A HUMAN confirm path (a person, not the model, as accuser)** | `appRequirements.ts:943` insert `evidence_confirmation`; `:931` withdraw on reject; route `:957` `POST app/requirement/{seq}/evidence-confirm`; `:923` refuses non-`proposed` with 409 | `appRequirements.ts:483` `c.confirmed_at`; `checks.ts:806` `isConfirmed` | route read. `grep -rn "evidence-confirm" app/src/` → **NO MATCH at 11:0x, FIVE MATCHES at 11:17** — the UI landed in the working tree DURING this pass. See §0.6 | **EXISTS-BUT-CONSTRAINED → NOW IN PROGRESS.** API complete and tested; the button is being built right now, uncommitted, by a concurrent lane. Confirms `AC-llm-coverage-judge.md` §0.2 and refutes `DIAG` A5 |
+| **F-G7** | **A HUMAN confirm path (a person, not the model, as accuser)** | `appRequirements.ts:943` insert `evidence_confirmation`; `:931` withdraw on reject; route `:957` `POST app/requirement/{seq}/evidence-confirm`; `:923` refuses non-`proposed` with 409 | `appRequirements.ts:483` `c.confirmed_at`; `checks.ts:806` `isConfirmed` | route read. `grep -rn "evidence-confirm" app/src/` → **no match early in this pass, FIVE matches and a commit (`bb7e620`) by the end.** See §0.6 | **ALREADY BUILT — as of `bb7e620`, mid-pass.** Route, writer, withdrawal, idempotency, the 409, DB tests, AND now the UI control with four mutation-proved guards. Refutes `DIAG` A5, which should be struck |
 | **F-G8** | **`must_have_coverage` reaching a gate `fail`** | `checks.ts:867` `bad(...)` with no severity ⇒ default `'fail'`+`'deterministic'` | `:1025` turns that pair into gate `fail` | parsed every `bad(` call — see §0.1 | **EXISTS-BUT-CONSTRAINED** — it does reach the gate, but it is **one of thirteen** checks that can, not the only one |
 | **F-G9** | **The safety floor a model swap would delete** | `requirementSupport.ts:346` `SAFETY_FLOOR_RULES` | `supportIn` `:729,738,745,746`; `H:safety-floor-not-configurable` | `/tmp/probe_support.mjs` — at **threshold 0.0, the loosest reachable setting**, `missing_specific_token` and `generic_overlap_only` still refuse (§1.2) | **EXISTS-BUT-CONSTRAINED — see §0.2.** Six rules an owner setting can never reach. AC-G4 |
 | **F-G10** | **Owner settings for the model tier** | `checkPrefs.ts:58-59` `chk_evidence_escalate boolean`, `chk_evidence_escalate_max int`; whitelist DERIVED from the DDL (`:34 checkPrefColumns`) | `checkPrefs.ts:246-247`; Settings labels `Settings.jsx:1584,1586` | `grep -n chk_evidence Settings.jsx` → both labelled | **ALREADY BUILT** — an LLM on/off toggle + per-run cap with a UI control is the shipped precedent. Adding a column auto-exposes it to the API writer; only a label is needed |
@@ -429,6 +462,12 @@ records: how many must-have rows already carry a `method='proposed'` row, and wh
 > | no proposed rows, `over_cap` non-zero | the **budget** (`chk_evidence_escalate_max`, default 12) | a setting change, no code — F-G12 |
 > | no proposed rows, cap not hit, model declined | the **requirement rows** | `D:compound-requirements-unevidenceable` — see AC-G9 |
 >
+> **ANSWERED MID-PASS — see §0.6. The result is row 1.** `bb7e620` measured live:
+> **15 `proposed` rows across 15 requirements, 2 `anchored`, every proposal carrying a verified quote
+> from the owner's own profile, all uncounted while the screens reported zero coverage.** So the
+> cause is the **admission rule**, not the cap and not the extractor on these rows. The AC stands as
+> the re-measurement to run before implementing, but the diagnosis is no longer open.
+>
 > The brief asks *"does a reasoning judge fix that, or is the extractor still the blocker?"* **This
 > query answers it, it costs one round-trip, and it must be run before implementation** rather than
 > after. `FEASIBILITY-llm-judgement.md` §7 already made this mistake in the other direction by
@@ -550,7 +589,7 @@ twice, then `must_have_coverage` is **byte-identical across the two runs**, and 
 > **Read the existing behaviour before designing this — it is nearly solved and the brief assumes it
 > is not.** `appRequirements.ts:292` `const open = rows.filter(r => !bySeq.get(r.seq))` already means
 > only rows with NO evidence are escalated, so a stored proposal is not re-judged. `record_sha256`
-> (`evidenceProposal.ts:276`) already pins the record text the quote came from, and
+> (`evidenceProposal.ts:275`) already pins the record text the quote came from, and
 > `proposal_version` and `resolver_version` are already stored. **The pieces of the content key the
 > brief asks me to specify already exist as columns.**
 >
@@ -861,13 +900,14 @@ scope chooses to replace.
 |---|---|---|---|
 | **(a) admit `proposed` rows into `ruleEvidenceOf`** | one line | **Every `proposed` row already in the corpus starts counting the next time checks run, silently and retroactively.** §2 query P2 is the number. Also removes four safety-floor rules from the gate path for those rows (AC-G4) | **Recommended, but ONLY after P2 is run.** Its failure mode is measurable; (b)'s is silent |
 | **(b) a new `method` value written by a new path** | DDL + 3 consumers + writer | Nothing retroactive — but `appRequirements.ts:212` `e.method <> 'proposed'` would **admit the new value by accident**, because it names what is excluded, not what is included | Against, unless P2 returns a number you are unwilling to accept retroactively |
-| **(c) the CONFIRM BUTTON — a HUMAN accuser** | **ALREADY IN PROGRESS, uncommitted — §0.6** | Raises `must_have_coverage` off zero **with no model trusted at all**. Keeps the house rule intact | **It is already being built. Do not duplicate it** — check that lane before writing any confirm UI |
+| **(c) the CONFIRM BUTTON — a HUMAN accuser** | **DONE — shipped as `bb7e620` during this pass (§0.6)** | Raises `must_have_coverage` off zero **with no model trusted at all**. Keeps the house rule intact | **Already built. Do not duplicate it.** It is also why (a) is no longer urgent: you can now watch yourself confirm or reject 15 real proposals before deciding whether a model should count without you |
 
-> **(c) is not an alternative to (a) — it is the thing to do first**, and `AC-llm-coverage-judge.md`
-> OD-2 says the same on independent evidence. **It is also no longer hypothetical: it appeared in
-> this working tree while this pass was running (§0.6).** That materially changes OD-G1: if the human
-> confirm path ships, `must_have_coverage` moves off zero with the house rule intact, and (a) becomes
-> a second, optional step you can decide with real verdicts in front of you rather than a leap.
+> **(c) was the thing to do first, and it is now done** (`bb7e620`, §0.6) — `AC-llm-coverage-judge.md`
+> OD-2 recommended it on independent evidence and a concurrent lane shipped it mid-pass. **So the
+> live question is no longer "how do we move the number", it is "having seen 15 real proposals, do
+> you want them to count WITHOUT you clicking?"** That is a much better question to be asked, and it
+> is only askable because (c) exists. **Recommendation: use the control on the 15 rows first, then
+> answer (a) from what you saw.**
 
 ### OD-G2 — BLOCKING. The always-on escalation default was granted on a premise lane 2 removes
 
@@ -957,7 +997,7 @@ Observation separated from interpretation, so a wrong inference is catchable.
 | **OBSERVED** (executed, reproducible) | `# tests 948 # pass 941 # fail 0 # skipped 7` on `5501839`; **thirteen** checks take a gate-failing state, not one; `supportIn` applies nine gates of which one is owner-settable, and `missing_specific_token` / `generic_overlap_only` still refuse at `threshold = 0`; **`supportIn` ACCEPTS the adversarial name-drop at support 0.714, missing exactly `build` and `develop`**; `ATTRIBUTION_RE` does not cover *"my colleague"*; `scanWording` on a stuffed summary = **0 offenders at runTokens 8,7,6,5** and **2 at 4, 3 at 3**; a REWORDED lift = **0 offenders at every run length 2-8**; a phrase also in the profile = 0 at every run length; absent posting/profile ⇒ `notApplicable`; `AI-first` is ONE token and is caught in context at n≤4, missed at n=8; `grep -rn "evidence-confirm" app/src/` → no match; `grep -rn "chk_wording_run_tokens" app/src/` → no match; `escalation_refusals` never appears in `checks.ts` |
 | **INFERRED** (reasoned, not executed) | that admitting `proposed` rows makes the model a bypass around four safety-floor rules — this follows from reading `escalateOne` (which re-applies only `requirementClass`) against `SAFETY_FLOOR_RULES`, but **no run has demonstrated a floor-violating proposal being accepted**, which is exactly why AC-G4's mutation is mandatory; that lane 2 adds zero new model calls under OD-G1(a) — true by construction since `escalateOne` already runs, but the call volume is unmeasured (AC-S9) |
 | **NOT DONE** | **No live data was read.** Every Trinnex/eMoney figure in the brief — `0 of 12`, `0 of 38`, `skills_1 11/11`, `skills_2 9/9`, `expertise 7/7`, *"reuses vocabulary from 8 of 8 requirements"*, *"lifts `AI-first` verbatim"* — is **repeated from the brief and UNVERIFIED by this pass** (F-G15, §2). The probes in §1.3 use Trinnex-*shaped* synthetic text from the JD fragments quoted in `DIAG-coverage-recognition.md`; they prove a MECHANISM, not the owner's numbers |
-| **MOVED UNDER ME** | The working tree changed DURING the pass: `app/src/api.js`, `app/src/postingAnalysis.js`, `app/src/screens/PostingAnalysis.jsx` and `api/src/functions/tests/appRequirements.ts` were modified at 11:13-11:16 by a concurrent lane (§0.6). One grep in this file therefore has two honest answers depending on when it ran, and it is recorded both ways rather than as the later one |
+| **MOVED UNDER ME** | The branch advanced DURING the pass, `5501839` → `bb7e620`: a concurrent lane built and committed the human confirm control (§0.6). One grep in this file has three honest answers depending on when it ran (no match / uncommitted / committed) and all three are recorded rather than only the last. **Everything cited in this file was re-verified against the tree at `bb7e620` after that commit landed.** The live numbers in §0.6 are quoted from that commit's message, NOT measured by this pass |
 | **NOT ATTEMPTED** | No code was written. Nothing was committed or pushed. No branch was changed. This pass produced this file only |
 
 ### 6.1 Where I disagree with the brief, stated rather than absorbed
@@ -984,16 +1024,25 @@ Observation separated from interpretation, so a wrong inference is catchable.
 
 ## 7. STATUS
 
-**COMPLETE.** Feasibility table (§1), pre-flight (§2), ACs (§3 — `AC-G1..G13`, `AC-S0..S9`),
-mutation register (§4), open decisions (§5), honest limits (§6).
+**COMPLETE**, at `bb7e620` (the branch advanced from `5501839` mid-pass — §0.6). Feasibility table
+(§1), pre-flight (§2), ACs (§3 — `AC-G1..G13`, `AC-S0..S9`), mutation register (§4), open decisions
+(§5), honest limits (§6).
+
+**59 of 59 file:line citations in this document were re-verified programmatically against the tree at
+`bb7e620`** after the concurrent commit landed (one, `evidenceProposal.ts:276`, was off by one and is
+corrected to `:275`). `cd api && node --test test/*.mjs` at that commit: **`# tests 948  # pass 941
+# fail 0  # skipped 7`**.
 
 **If you read one thing: §0.3.** The lane-2 judge is already built, live and on by default; the lane
 is a decision about what `checks.ts:807` admits, and OD-G1 + OD-G2 must be answered before any code
 is written.
 
 **If you read a second thing: §0.6.** The human confirm button — the option that moves
-`must_have_coverage` off zero with NO model trusted — appeared in this working tree while this pass
-was running. It is uncommitted. Reconcile with that lane before writing any confirm UI, and re-grep
-any `appRequirements.ts` line number below 650 rather than trusting it.
+`must_have_coverage` off zero with NO model trusted — was built and **committed as `bb7e620` while
+this pass was running.** It also carries the live measurement this file was blocked on: **15
+`proposed` rows across 15 requirements, every one with a verified quote from the owner's own profile,
+all uncounted.** That resolves AC-G2's diagnosis (the cause is the admission rule, not the escalation
+cap), and it turns OD-G1 from *"how do we move the number"* into *"having seen 15 real proposals, do
+you want them to count without you clicking?"* — a better question, askable only because (c) shipped.
 
 **Nothing was built, committed, pushed, or branched. This pass produced this file only.**
