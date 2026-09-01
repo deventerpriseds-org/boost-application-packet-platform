@@ -32,6 +32,11 @@ export const POSTING_HOOKS = {
   confirmYes: 'evidence-confirm-yes',
   confirmNo: 'evidence-confirm-no',
   confirmed: 'evidence-confirmed',
+  // A proposal that was CHALLENGED and held, and therefore COUNTS. Hooked separately from
+  // `confirmed` because "a model was challenged on this and it held" and "you said yes" are
+  // different warrants, and a UAT run has to be able to tell them apart on the page.
+  vetted: 'evidence-vetted',
+  vettedWhy: 'evidence-vetted-why',
   card: 'posting-analysis',
   stale: 'posting-stale',
   tab: 'jd-tab',
@@ -445,6 +450,15 @@ export function evidencePresentation(row) {
     confirmedBy: ev ? trim(ev.confirmedBy) : null,
     // The one question the control asks: is this a model's suggestion still awaiting a human?
     awaitingConfirmation: !!(ev && trim(ev.method) === 'proposed' && !trim(ev.confirmedAt)),
+    // VETTED — a proposal that was CHALLENGED and held, and the only model row that counts toward
+    // coverage. The owner has to be able to see which rows those are, because they are the ones
+    // moving the number: "coverage rose" is not falsifiable if a reader cannot tell a better profile
+    // from a chattier model. The reasoning behind it is already carried in `extra`, which is why
+    // this is a flag rather than a second copy of the sentence.
+    //
+    // It deliberately does NOT imply a human agreed. A vetted row still offers the confirm control,
+    // because the owner overruling a model is the point of that control existing.
+    vetted: !!(ev && trim(ev.method) === 'vetted'),
     // Null when the state is `verified`; otherwise the ONE sentence for this state, from the API.
     note: trim(r.evidenceNote),
     // What was looked for, on rows with no provable excerpt. Endpoint-computed, never re-derived.

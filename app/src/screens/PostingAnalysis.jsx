@@ -495,6 +495,17 @@ function EvidenceLine({ r, oppId = null, onConfirmed = null }) {
             · you confirmed this{ev.confirmedBy ? ` (${ev.confirmedBy})` : ''}
           </span>
         )}
+        {/* WHY THIS ROW IS IN THE COUNT. A vetted row is the only model row that moves
+            must_have_coverage, so the reason it counts belongs beside the state word rather than
+            behind a disclosure - "coverage rose" has to be checkable at a glance, or a reader
+            cannot tell a better profile from a chattier model. It is deliberately NOT phrased as
+            agreement: a model was challenged and held, which is not the same as the owner saying
+            yes, and the confirm control below still offers them that. */}
+        {ev.vetted && !ev.confirmedAt && (
+          <span data-qc={POSTING_HOOKS.vetted} style={{ color: 'var(--proto-ink2)', fontWeight: 600 }}>
+            · vetted: challenged for what it misses, and it held
+          </span>
+        )}
       </div>
 
       {/* A model's proposal the owner has not ruled on. Rendered ONLY when there is somewhere to send
@@ -502,6 +513,16 @@ function EvidenceLine({ r, oppId = null, onConfirmed = null }) {
           says hide the control rather than show one that cannot work. */}
       {ev.awaitingConfirmation && oppId && (
         <ConfirmProposal seq={r.seq} oppId={oppId} onConfirmed={onConfirmed} />
+      )}
+
+      {/* THE REASONING, OUT FROM BEHIND THE DISCLOSURE for a vetted row. Everywhere else `extra` is
+          a supporting note on an excerpt the reader can already see; here it is the argument for a
+          number that changed, and an argument nobody opens is an argument nobody checked. */}
+      {ev.vetted && ev.extra && (
+        <div className="px-small" data-qc={POSTING_HOOKS.vettedWhy}
+             style={{ marginTop: 3, color: 'var(--proto-ink3)' }}>
+          {ev.extra}
+        </div>
       )}
 
       {/* The one sentence for a state that is not provable, from the API. `none` is the only one

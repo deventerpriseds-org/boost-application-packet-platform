@@ -1057,3 +1057,49 @@ test('H:confirm-control-is-hidden-without-a-target', () => {
   assert.match(src, /ev\.awaitingConfirmation\s*&&\s*oppId\s*&&/,
     'the confirm control must be gated on BOTH an open proposal and somewhere to send the answer')
 })
+
+// ─── VETTED — the model row that COUNTS, and why the owner has to see which ones they are ───────
+//
+// `must_have_coverage` reads `ruleEvidenceOf`: a `proposed` row does not count, a `vetted` one does.
+// So a vetted row is the only place in this product where a model's reading moves the number the
+// gate reads, and "coverage rose" has to be checkable on the page — a reader must be able to tell a
+// better profile from a chattier model.
+
+test('H:a-vetted-row-is-marked-and-is-not-mistaken-for-agreement', () => {
+  const v = evidencePresentation(evRow({ method: 'vetted', extra: 'vetted: challenged for what it fails to show...' }))
+  assert.equal(v.vetted, true, 'a vetted row must be identifiable on the page')
+  assert.equal(v.confirmedAt, null, 'and it is NOT a confirmation — no human has said yes')
+  assert.equal(v.awaitingConfirmation, false,
+    'the "awaiting your confirmation" state belongs to `proposed` alone; a vetted row already counts')
+
+  for (const method of ['proposed', 'exact', 'anchored']) {
+    assert.equal(evidencePresentation(evRow({ method })).vetted, false,
+      `${method} must not be marked vetted`)
+  }
+  assert.equal(evidencePresentation({ evidenceState: 'none', evidence: null }).vetted, false,
+    'an empty verdict is never vetted')
+})
+
+test('H:the-reason-a-row-counts-is-on-the-page-not-behind-a-click', () => {
+  // `extra` renders inside the disclosure everywhere else, which is right for a supporting note on
+  // an excerpt already visible. For a vetted row it is the ARGUMENT FOR A NUMBER THAT CHANGED, and
+  // an argument nobody opens is an argument nobody checked.
+  const jsx = readFileSync(new URL('../src/screens/PostingAnalysis.jsx', import.meta.url), 'utf8')
+  const line = jsx.slice(jsx.indexOf('function EvidenceLine'), jsx.indexOf('function Group'))
+  const why = line.indexOf('POSTING_HOOKS.vettedWhy')
+  const disclosure = line.indexOf('{open && ev.provable && (')
+  assert.ok(why > -1, 'the vetted reasoning has no renderer')
+  assert.ok(disclosure > -1, 'the disclosure block moved — this scan has gone stale')
+  assert.ok(why < disclosure,
+    'the vetted reasoning must render OUTSIDE the "show the line" disclosure')
+  // AND IT MUST ACTUALLY RENDER. The first version of this case checked only the POSITION of the
+  // hook, so disabling the block outright — `{false && ev.extra && ...}` — passed it. Mutation
+  // testing caught that (M34, 2026-09-01): a guard that pins where something sits and not whether
+  // it happens is the inert kind this repo treats as worse than none, because it is believed.
+  const block = line.slice(Math.max(0, why - 400), why)
+  assert.match(block, /\{ev\.vetted && ev\.extra && \(/,
+    'the vetted reasoning must be gated on ev.vetted && ev.extra — not disabled, not always-on')
+  assert.match(line, /POSTING_HOOKS\.vetted[^W]/, 'the vetted marker itself must render')
+  assert.match(line, /challenged for what it misses/,
+    'the marker must say what vetted MEANS — the word alone is not self-explanatory')
+})
