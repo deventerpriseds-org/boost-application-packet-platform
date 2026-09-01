@@ -141,3 +141,74 @@ test('H:judge-module-stays-pure', () => {
   }
   assert.ok(COVERAGE_BASES.includes('absent'), 'absent is a first-class basis, not an error state')
 })
+
+// ─── the WIRING: checks.ts prefers the verdict, falls back, and never guesses ──────────────────
+//
+// `evidence_placed` is the one check `covers()` feeds (`checks.ts:905`). These exercise runChecks
+// end to end rather than the pure parser, because the defect worth guarding is in the seam.
+import { runChecks } from '../dist/functions/tests/checks.js'
+
+// evidence_placed only runs on requirements the PROFILE already evidences, so the fixture needs a
+// rule-method evidence row — `anchored`, not `proposed`, since a proposal is not rule evidence.
+const REQ_15 = { id: 'r15', seq: 15, kind: 'must_have',
+  verbatim: 'Ability to align engineering strategy with business goals', item_text: '' }
+const evidenceFor = (seqs) => ({
+  profileReadable: true,
+  bySeq: Object.fromEntries(seqs.map(s => [s, {
+    quote: 'Designed and implemented OKRs and monthly executive ops reviews',
+    source_label: 'Work history 2', method: 'anchored', confirmed_at: null,
+  }])),
+})
+const base = {
+  type: 'resume',
+  pkg: { ResumeSummary: SUMMARY },
+  requirements: [REQ_15],
+  evidence: evidenceFor([15]),
+  profileText: 'Von Ellis. Engineering leadership across regulated enterprises.',
+  postingText: 'Ability to align engineering strategy with business goals',
+}
+const placed = (rs) => rs.find(r => r.check_key === 'evidence_placed')
+
+test('H:judge-verdict-beats-the-word-match', () => {
+  // The whole point. `coversIn` scores this pair 0.60 and calls it absent because `strategy` is not
+  // a substring of `strategies`. Measured on the owner's live Trinnex row. With a verdict, the
+  // judge's reading wins and the same document stops being accused of omitting what it says.
+  const without = placed(runChecks(base))
+  assert.equal(without.state, 'warn', 'the lexical rule reports this document as not placing #15')
+  assert.equal(without.offenders.length, 1)
+
+  const withJudge = placed(runChecks({ ...base,
+    judgeVerdicts: new Map([[15, { covered: true, basis: 'synonym',
+      quote: 'aligning engineering strategies with business objectives', why: 'same claim, reworded' }]]) }))
+  assert.equal(withJudge.state, 'pass', 'the judge says the document places it, and that wins')
+  assert.equal(withJudge.offenders.length, 0)
+})
+
+test('H:no-verdict-map-changes-nothing', () => {
+  // The regression that matters most: every existing test, and every run with the judge disabled,
+  // must behave exactly as before. Absence of the map is the untouched path, not a special case.
+  //
+  // PIN THE OUTCOME, not just the two spellings of "no map". A first version of this asserted only
+  // that `judgeVerdicts: undefined` matched the field being absent — which are the same value on
+  // every read path, so it could not fail and mutation-proving caught it inert (2026-09-01). What
+  // makes it a guard is asserting WHAT the judge-less path produces: the lexical rule's own answer,
+  // warn with #15 named, exactly as before this wiring existed.
+  const a = placed(runChecks(base))
+  assert.equal(a.state, 'warn', 'with no judge, evidence_placed still reports the lexical answer')
+  assert.equal(a.offenders.length, 1)
+  assert.ok(String(a.offenders[0]).includes('align engineering strategy'),
+    'and still names the requirement the lexical rule found unplaced')
+  const b = placed(runChecks({ ...base, judgeVerdicts: undefined }))
+  assert.deepEqual({ s: a.state, o: a.offenders }, { s: b.state, o: b.offenders })
+})
+
+test('H:judge-silence-is-not-a-no', () => {
+  // ASKED AND UNANSWERED IS NOT "ABSENT". A requirement in the map's keyset-that-was-asked but with
+  // no verdict must be excluded from placement, never fall through to the lexical rule — reporting
+  // the fallback's opinion as the judge's finding is absent evidence read as a finding, which is
+  // the failure mode this file's whole design is against. An EMPTY map means "asked, answered
+  // nothing", so #15 is dropped rather than accused.
+  const silent = placed(runChecks({ ...base, judgeVerdicts: new Map() }))
+  assert.notEqual(silent.state, 'warn', 'an unanswered requirement must not be reported as unplaced')
+  assert.equal(silent.offenders.length, 0, 'and must never appear as an offender')
+})

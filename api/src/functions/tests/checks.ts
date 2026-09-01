@@ -208,6 +208,19 @@ export interface CheckInput {
   /** The EMPLOYER'S OWN text (resolvePostingSource), never `groundingText`. See the R3 check. */
   postingText?: string
   /**
+   * The coverage judge's verdicts for THIS artifact, keyed by requirement `seq`.
+   *
+   * Absent (the default, and every existing test) = the lexical `coversIn` decides, unchanged.
+   * Present = the judge's verdict decides for the requirements it answered, and a requirement it
+   * was asked about and did NOT answer is excluded from placement rather than falling back — see
+   * `covers`/`judgeSilent` for why those are different facts.
+   *
+   * INJECTED because `H12` forbids this module the framework and driver imports; the
+   * impure caller obtains the map once per artifact. That is what keeps the suite deterministic
+   * with a model in the production path.
+   */
+  judgeVerdicts?: Map<number, { covered: boolean; basis: string; quote: string | null; why: string }>
+  /**
    * How many lines each list's TEMPLATE holds, keyed by merge field — the owner's per-template
    * setting, resolved by the caller.
    *
@@ -678,7 +691,33 @@ export function runChecks(input: CheckInput): CheckResult[] {
    *    short words carry almost no evidence, and a requirement made only of them is exactly the
    *    fragment case above.
    */
-  const covers = (r: { verbatim: string | null; item_text: string }) => coversIn(covText, r)
+  /**
+   * THE JUDGE'S VERDICT WINS WHERE THERE IS ONE; the lexical rule is the fallback.
+   *
+   * `coversIn` demands 70% LITERAL content-word overlap and cannot match `strategy` against
+   * `strategies`. Measured on the owner's Trinnex packet: 0 of 19 requirements counted, with
+   * "align engineering strategy with business goals" answered by "aligning engineering strategies
+   * with business objectives" scoring 0.60 and counting as nothing. `coverageJudge` reads the same
+   * question with a model and must quote the document to be believed.
+   *
+   * INJECTED, NOT FETCHED — H12 keeps this module free of the framework and driver imports, and that is
+   * what makes the whole suite deterministic. The impure caller obtains the map once per artifact
+   * and passes it in; with no map, every existing test and every run with the judge disabled
+   * behaves exactly as before.
+   *
+   * A verdict is only ever consulted for a requirement it actually covers. `judgeUnjudged` below
+   * carries the ones the judge was asked about and did not answer — those must NOT fall through to
+   * the lexical rule, because "the judge did not answer" and "the lexical rule says no" are
+   * different facts and reporting the second for the first is absent evidence read as a finding.
+   */
+  const verdicts = input.judgeVerdicts
+  const covers = (r: { seq?: number; verbatim: string | null; item_text: string }) => {
+    const v = verdicts && r.seq != null ? verdicts.get(Number(r.seq)) : undefined
+    return v ? v.covered : coversIn(covText, r)
+  }
+  /** Asked and unanswered — excluded from placement rather than judged by the fallback. */
+  const judgeSilent = (r: { seq?: number }) =>
+    !!verdicts && r.seq != null && !verdicts.has(Number(r.seq))
 
   const COVERAGE_EXPECT = 'every must-have requirement is evidenced by a verbatim excerpt from your profile'
   const RESP_EXPECT = 'every responsibility is evidenced by a verbatim excerpt from your profile'
@@ -901,7 +940,13 @@ export function runChecks(input: CheckInput): CheckResult[] {
       // this check called it "absent from this asset". Accusing a document of omitting something it
       // says, because the requirement was too short to measure, is absent evidence read as a
       // finding, one layer down from where the rest of this file guards against it.
-      const placeable = evidenced.filter(r => itemTokens(r.verbatim || r.item_text).length >= MIN_JUDGEABLE_TOKENS)
+      // A requirement the JUDGE was asked about and did not answer is dropped here for the same
+      // reason the too-thin ones are: it was not judged, so calling it "absent from this asset"
+      // would report the lexical fallback's opinion as the judge's finding. It joins `tooThin` in
+      // the "not counted either way" note rather than becoming an offender.
+      const placeable = evidenced
+        .filter(r => itemTokens(r.verbatim || r.item_text).length >= MIN_JUDGEABLE_TOKENS)
+        .filter(r => !judgeSilent(r))
       const unplaced = placeable.filter(r => !covers(r))
       const tooThin = evidenced.length - placeable.length
       const thinNote = tooThin ? ` (${tooThin} too short to judge either way)` : ''
