@@ -6621,3 +6621,60 @@ closest thing to a source document that exists.
 `baseline/` copies match the live table item-for-item (36/36 on relevant, verified in ACT-…-f). The
 only transformation between them is the encoding: the Zap holds bullet lists, the table holds the
 same items pipe-delimited.
+
+---
+
+## ACT-2026-09-01-h — The 9 Relevant Proficiencies, derived against the Trinnex JD by the Zap's own rule
+
+**Owner supplied the rule verbatim** (Zap "Relevant Proficiencies" steps 1-2): select 9 from the
+Library aligned to the JD's ATS keywords, **excluding anything already covered by Skills1/Skills2**
+(step 2 adds: and the core competencies), balance to cover UNUSED ATS hard skills, order by match
+score, split into 3 lists of 3, and *"no more than one item greater than 24 characters"* per list.
+
+**Inputs, all ground-truthed:**
+- 21 ATS keywords for Trinnex — `select distinct model_keyword ... opp_id 9f9c370a` (db-query run
+  33553712047). The `api/app/.../requirements` response is 1,685 lines; the projection is the readable form.
+- Skills1 (11), Skills2 (9), expertise (7), relevantProficiencies (36) — diag/skill-sources run 33548874453.
+
+**Redundancy pass — 27 of 36 Library terms are already covered and were excluded**, e.g.
+`AI/ML Strategy`→S1 *AI/Data Science Strategy*; `Standards and Compliance`→S2 *Regulatory Compliance*;
+`Strategic Roadmapping`→S2 *Strategic Roadmaps*; `KPI-Driven Execution`→expertise *KPI-driven
+performance management*; `Scaled Agile Engineering`→expertise *Optimizing scaled agile operations*;
+`P&L Optimization`/`Budget and Cost Control`→expertise *Budget Development and P&L Management*;
+`M&A Integrations`→S2 *M&A Due Diligence*.
+
+**The 9 selected, ordered by ATS match:**
+
+| # | Term | Ch | Unused ATS keyword it covers |
+|---|---|---|---|
+| 1 | Portfolio Management | 20 | `portfolio management` (exact) |
+| 2 | Tech Talent Strategy | 20 | `team development`, `engineering management` |
+| 3 | AI in Operations | 16 | `AI adoption` |
+| 4 | Tech-Driven Innovation | 22 | `technological innovation` |
+| 5 | Innovation Frameworks | 21 | `innovation culture` |
+| 6 | Corporate AI Use Cases | 22 | `AI adoption`, `AI knowledge` |
+| 7 | Strategic Partnerships | 22 | `cross-functional partnership` |
+| 8 | AI/ML Advancements | 18 | `AI knowledge` |
+| 9 | Global Leadership | 17 | `leadership experience`, `leadership success` |
+
+Keywords already covered and therefore NOT re-targeted: `technology strategy`, `cloud expertise`,
+`compliance`, `strategic alignment`, `continuous improvement` (S1/S2). Non-skill keywords ignored:
+`bachelor's degree`, `preferred background`.
+
+**The split (3/3/3):**
+
+    Relevant Skills 1: Portfolio Management | Tech-Driven Innovation | AI in Operations
+    Relevant Skills 2: Tech Talent Strategy | Innovation Frameworks  | AI/ML Advancements
+    Relevant Skills 3: Corporate AI Use Cases | Strategic Partnerships | Global Leadership
+
+**Char rule: PASSES the stated hard requirement.** Longest term is 22 chars, so no list has ANY item
+over 24, let alone two.
+
+**But steps 1 and 2 state DIFFERENT thresholds (20 vs 24) and step 1's is unsatisfiable here.** Four
+of the nine exceed 20 chars, and 4 items cannot be spread one-per-list across 3 lists. The split
+above puts 1/1/2 of them. Step 2 is the later and final instruction ("Maintain the Output as..."),
+so 24 is treated as the binding rule — flagged rather than silently resolved.
+
+**NOT APPLIED to the baseline document, deliberately.** These 9 are derived FROM the Trinnex JD, so
+they are tailored content. Writing them into `Baseline (Master Context)` would make that document
+JD-specific — the exact property the owner asked the baseline NOT to have.
