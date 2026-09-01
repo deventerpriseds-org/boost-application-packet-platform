@@ -5384,3 +5384,24 @@ caller that handed it anything but model output — which is why the pipe-delimi
 never once reached a document in a normal build (`pipeline.ts:405` puts the master text in the
 PROMPT). Any future path that renders stored text directly inherits the same obligation: split,
 shape, and cap before injecting.
+
+### Hardening — three owner catches on one feature is what skipping the AC pass costs
+
+`appBaseline.ts` was built across three passes and NONE was preceded by an independent AC subagent.
+The owner caught, in order: pipe separators rendered instead of bullets; the whole 36-term Library
+in each of three 3-item slots; and three AI-prefixed terms among nine picks.
+
+**All three are SHAPE questions** — what must a rendered slot field look like, how many items does a
+slot hold, what must the SET look like as a whole. A cold read of "what does done look like here?"
+asks all three before any code exists. I answered none of them because I went from instruction to
+implementation and let the document be the first place the shape was ever examined.
+
+**The gap cannot be closed retroactively and must not be papered over.** An AC pass spawned after the
+fact is handed the implementation and writes criteria that match it — the skill says so directly.
+Producing one would satisfy the gate's shape while inverting its purpose, and a later reader would
+count it as a real pass. Recorded as an accepted gap in `ACT-2026-09-01-k` instead.
+
+**The trigger, so this is mechanical rather than remembered: spawn the AC pass when the owner's
+instruction first names a DELIVERABLE SHAPE** — "build copies of these artifacts with the
+mastercontext information" is that moment — **before the first file is opened.** Not after the first
+defect is reported, which is when I reached for one.

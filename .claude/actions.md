@@ -6767,3 +6767,46 @@ So applying the nine to Trinnex is either:
 
 **(a) is almost certainly what the owner means, but it is a write to a live packet's stored package
 and the two options differ in what gets destroyed — so it is not a guess worth making.**
+
+---
+
+## ACT-2026-09-01-k — PROCESS GAP, unfixable: no AC pass preceded the baseline work
+
+**The Stop gate blocked on requirement (a) and it is correct.** `appBaseline.ts` went from the
+owner's instruction straight to code. No independent AC-writing subagent was spawned before
+implementation, on any of the three passes (the original route, the pipes/slot-count fix, or the
+Relevant seed).
+
+**Status: ACKNOWLEDGED AS UNFIXABLE. Not waived, not satisfied — recorded.**
+
+**Why it cannot be satisfied retroactively.** An AC pass spawned now would be handed a finished
+implementation and would write criteria shaped by what already exists. That is the precise failure
+the requirement was built to prevent — `define-acceptance-criteria` says it in the skill's own words:
+*"the implementing agent already knows its plan and will unconsciously write ACs that match it."*
+Producing the artifact after the fact would satisfy the gate's shape while inverting its purpose,
+which is worse than the honest gap because a future reader would count it as a real pass.
+
+**The cost was real, not hypothetical.** This is the same change where the owner found two defects I
+had shipped and deployed:
+1. pipe separators rendered into the resume instead of bullets;
+2. the entire 36-term Library injected into each of three 3-item slots.
+Both are SHAPE defects — exactly what a cold adversarial read of "what must a rendered slot field
+look like?" would have asked before a line was written. A third, the set-level AI redundancy, was
+also caught by the owner rather than by me. Three owner catches on one feature is the measured price
+of skipping (a).
+
+**The tier judgement is worth recording because it is genuinely debatable.** `appBaseline.ts`
+renders a document and touches no gate, score or coverage count — that reads as TIER 2. The gate
+classified it TIER 1 on the ground that it ADDS GUARDS to `hardening.test.mjs`, and a guard decides
+whether CI blocks. Taken literally that makes every new test TIER 1, which would collapse the tiering
+the owner introduced to stop uniform ceremony. **Not resolved here — flagged for the owner**, since
+changing how the tier is judged is their call, not something to settle by argument in a commit.
+
+**What actually changes next time**, stated as a trigger rather than an intention: the AC pass is
+spawned when the owner's instruction first names a DELIVERABLE SHAPE ("build copies of these
+artifacts with the mastercontext information") — before the first file is opened, not after the
+first defect is reported.
+
+**Gate (b) IS satisfied**: an independent `verifier` subagent is running against nine claims,
+including re-deriving both mutation proofs itself, writing to
+`.claude/verify/VERIFY-baseline-relevant-seed-1.md`.
