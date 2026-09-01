@@ -5266,3 +5266,35 @@ output*. Three constraints, and each of my first two answers satisfied exactly o
 against every one. An answer satisfying one of three is not close — it is a different object. Both
 wrong answers were falsifiable in one line: the eMoney docs had a company name in them; the
 templates still had `{{Placeholder}}` tokens.
+
+---
+
+## 2026-09-01 — baseline artifacts shipped; and a mutation that does not COMPILE reads as INERT
+
+**`POST /api/app/baseline-artifacts`** (`appBaseline.ts`, `ff6adea` on `main`) builds master-filled
+copies: `loadMasterBaseline()` for content, `renderArtifact()` for copy-and-inject, no model call
+anywhere in the path. Container opportunity `Baseline (Master Context)`, `dismissed = true`.
+`@Company` seeds to `Company X`, `@CoverLetterDate` to today, both overridable per call. Portfolio
+coverage rises 4/7 → 6/7; `cover` stays off the default list because its body would be stripped.
+
+### Hardening — `mutate.sh` reports INERT when the mutation fails to BUILD, and INERT is the alarming word
+
+Measured today. Mutation 1 for `H:baseline-no-model` replaced a line with a call to `ensurePackage`,
+which this file does not import. `npm test` runs `tsc` first, so the build failed, the suite never
+ran, the must-fail pattern never appeared, and the harness printed **"INERT: the guard protects
+nothing."** The guard is real — it FIRED on the next attempt.
+
+This is the SAME failure the harness was built to end, arriving through a door it does not watch.
+`NOT-APPLIED` exists because an anchor that does not match means nothing was tested; a mutation that
+applies but does not COMPILE also means nothing was tested, and there is no outcome for it. It is
+reported as the one verdict that says "your protection is worthless", which is the answer most
+likely to get acted on wrongly — exactly the asymmetry the harness's own header warns about.
+
+**The rule: a mutation must COMPILE.** Reinstate the defect with something the type-checker accepts —
+for a banned-string guard, a bare exported const carrying the string, never a call to a symbol that
+is not imported. **And when a guard you expect to FIRE reports INERT, read the build output before
+believing it.** The honest verdict there was "not proven", not "broken".
+
+Worth carrying to `mutate.sh` itself: it could distinguish these by checking whether the test command
+failed at the BUILD step rather than in a test body, and report a fourth outcome. Not done here —
+recorded so the next lane that trips it does not re-derive it.

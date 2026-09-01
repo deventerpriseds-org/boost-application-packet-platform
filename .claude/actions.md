@@ -6393,3 +6393,50 @@ rather than a documented limit.
 packet an `opp_id`. Options: a synthetic "Baseline / Master" opportunity (no schema change, works
 today, appears in opportunity counts unless filtered) vs. making `opp_id` nullable (structurally
 right, Tier 1 — `opp_id` is joined across the funnel).
+
+---
+
+## ACT-2026-09-01-d — Master-filled baseline artifacts BUILT (closes -c)
+
+**Owner:** *"make standing data for those 2/3 — company = Company X, coverletterdate = today. I
+accept your recommendation go."*
+
+**Status: route SHIPPED and deployed (`ff6adea` on `main`). Documents pending the live call.**
+
+**What was built.** `api/src/functions/tests/appBaseline.ts` →
+`POST /api/app/baseline-artifacts`. It wires the two halves that already existed and adds no
+generation of its own: `loadMasterBaseline()` for content, `renderArtifact()` for the copy-and-inject.
+Per the owner's standing values, `@Company` seeds to `Company X` and `@CoverLetterDate` to today,
+both overridable per call so neither is a hardcoded constant.
+
+Coverage moves with those two: **portfolio 4/7 → 6/7** (only `@CoverLetterBody` unmapped), resume
+stays **7/7**. `cover` is off the default type list — its three placeholders are exactly the two
+standing values plus `@CoverLetterBody`, so it would ship a deck whose body had been stripped.
+
+**The container opportunity** is `Baseline (Master Context)` / `Standing profile — no posting`,
+created once, reused, and `dismissed = true` so it stays out of the discovery funnel and the counts
+that read it. The clean alternative is a nullable `packet.opp_id`, which is Tier 1 because `opp_id`
+is joined across the funnel — recorded, not taken.
+
+**Guards, both MUTATION-PROVEN with `eds-claude-skills/scripts/mutate.sh`:**
+
+| Guard | Mutation | Outcome |
+|---|---|---|
+| `H:baseline-no-model` | added `export const _probe = 'api.openai.com'` | **FIRED** |
+| `H:baseline-standing-fields` | dropped the `@Company` overlay | **FIRED** |
+
+Suite: **1024 tests, 1013 pass, 0 fail, 11 skipped.** Both packages build.
+
+### The first mutation reported INERT and that verdict was WRONG — worth knowing
+
+Mutation 1 replaced the pkg line with a call to `ensurePackage`, which is not imported here. `npm
+test` runs `tsc` first, so the BUILD failed, the suite never ran, the pattern never appeared, and
+`mutate.sh` reported **INERT — "the guard protects nothing"**. It protects plenty; the mutation had
+simply never been exercised.
+
+This is the harness's own documented failure mode arriving from a new direction. `mutate.sh` added
+`NOT-APPLIED` for an anchor that does not match, but a mutation that DOES apply and then fails to
+COMPILE lands in the same blind spot and is reported as the alarming outcome. **Rule: a mutation
+must compile.** When a `FIRED`-expected guard reports `INERT`, check the build output before
+believing the verdict — the honest reading was "not proven", not "worthless". Re-run with a
+compiling mutation (a bare exported const carrying the banned string) and it FIRED immediately.
