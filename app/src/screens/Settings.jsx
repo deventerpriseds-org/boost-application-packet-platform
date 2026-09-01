@@ -1585,8 +1585,12 @@ const CHK_LABELS = {
     'When a requirement shares no words with your profile, a model looks for a passage that supports it anyway. It may only quote your profile exactly, and what it finds is shown for your confirmation rather than counted toward your score.'],
   chk_evidence_escalate_max: ['Most model lookups per run',
     'Caps the cost of one build. Requirements beyond the cap are left unevidenced and reported.'],
-  chk_coverage_judge: ['Let a model judge what your documents cover',
-    'Without this, a requirement counts as covered only when your document repeats about 70% of its words, so "aligning engineering strategies with business objectives" does not count as covering "align engineering strategy with business goals". With it, a model reads both and decides — and it must quote the words in your document that do the covering, or its answer is thrown away.'],
+  chk_coverage_judge: ['Let AI read for meaning instead of matching words',
+    'This turns on three things, and the second one changes a number you are scored on. ' +
+    '(1) YOUR DOCUMENTS. Today a requirement counts as covered only when your text repeats about 70% of its words, so "aligning engineering strategies with business objectives" does not count as covering "align engineering strategy with business goals". With this on, AI reads both and decides - and it has to quote the words in your document that do the covering. ' +
+    '(2) YOUR PROFILE, and this is the one that moves your score. When AI finds a line in your profile that supports a requirement, a second AI reads that whole record on its own, without seeing the first answer, and has to land on the same words. If they agree, the requirement COUNTS toward your coverage without you clicking anything. If they point at different places, it waits for you exactly as it does now. ' +
+    '(3) APPEALS. When a rule throws out an AI explanation for naming something your quote does not contain, AI may appeal by quoting the part of your own text that answers it. It can only ever put an explanation back, never take one away. ' +
+    'Everything AI claims here has to point at your own words, and code checks that it really did before you ever see it.'],
   chk_coverage_judge_max: ['Most coverage lookups per run',
     'Caps the cost of one build. One lookup covers one section of one document, and anything past the cap is left unjudged and reported rather than counted as missing.'],
   chk_coverage_judge_min_quote: ['Shortest quote that can show coverage',
