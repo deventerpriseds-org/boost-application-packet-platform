@@ -248,3 +248,80 @@ is being asked.**
 
 **The next step is NOT a fix.** It is identifying which artifact the owner is reading. Building
 against the wrong one is the specific failure `CLAUDE.md`'s feasibility rule exists to prevent.
+
+---
+
+# THE OWNER IS RIGHT — MEASURED ON THE REAL PAIR, 2026-09-01
+
+The section above said the shipped summaries "do not look stuffed". **That was eyeballing, and it
+was wrong.** Measuring the real shipped summary against the real posting's requirement rows settles
+it (`/tmp/real.mjs` against `api/dist`; requirements from db-query run 33464953337, summary from
+run 33464691925).
+
+## The summary harvests vocabulary from EIGHT OF EIGHT requirements
+
+eMoney Advisor packet. Shipped `ResumeSummary` (556 chars) vs that opportunity's `requirement` rows:
+
+| req | employer's line (abridged) | overlap | words lifted into the summary |
+|---|---|---|---|
+| #4 | *Foster a culture of innovation among engineering teams* | **0.67** | foster, innovation, engineering, teams |
+| #11 | *Lead global engineering teams to deliver high-quality products* | **0.67** | global, engineering, teams, deliver |
+| #9 | *Define and execute an AI-first engineering strategy* | **0.60** | **ai-first**, engineering, strategy |
+| #7 | *Lead the transition to a platform engineering model* | 0.50 | platform, engineering |
+| #6 | *…evolve the enterprise architecture vision across application, data, and AI…* | 0.36 | platform, strategy, vision, ai |
+| #5 | *build and scale high-quality, intelligent platforms, systems* | 0.33 | build, platforms |
+| #0 | *…into an AI-first, platform-driven, product-centric ecosystem* | 0.30 | evolution, engineering, **ai-first** |
+| #1 | *…embedding AI, automation, and data intelligence* | 0.22 | software, ai |
+
+**Not one requirement scores zero.** `AI-first` — the employer's signature term, hyphenated exactly
+as they wrote it — appears in the summary. *"Foster a culture of innovation"* becomes *"fostering
+innovation"*; *"global engineering teams"* becomes *"global teams"*; *"evolve the enterprise
+architecture"* becomes *"architectural evolution"*. This is precisely what the owner described:
+*"a hack full of verbatim lines from the jd that isn't subtle at all."*
+
+## AND IT IS WORSE THAN THAT: the summary gets NOTHING for it
+
+```
+requirements CLOSED by the summary: 0 of 8
+posting_wording_kept offenders:     0   (needs 8 consecutive exact tokens)
+```
+
+- **0 of 8 requirements count as covered.** 0.67 and 0.60 sit under `COVERAGE_THRESHOLD` 0.7, so the
+  document takes every gram of the stuffing risk and earns **zero** coverage credit.
+- **The anti-stuffing check reports zero offenders**, exactly as OBSERVATION 4 predicted: the lifting
+  is phrase-level, never 8 consecutive tokens, so `posting_wording_kept` is structurally blind to it.
+
+**Both of our safeguards are silent on a document that a human reader identifies as stuffed in one
+look.** That is the finding.
+
+## WHICH STAGE — Call 3, and WE CHANGED WHAT IT IS FED
+
+The summary is written at loop 0, and `mt17.ts:137` gives `call3.updatedResumeSummary` precedence.
+Call 3 is the owner's **`ats_user`** ATS QC prompt — untouched, and not ours to edit. But
+`pipeline.ts:525-534`:
+
+```ts
+const base3 = resolveZapVars(prompts['ats_user'] || 'ATS QC.', mc, jd, undefined, atsExtra)
+const { merged: call3Input, improvised } = mergeCallTwo(c1, c2)
+const r3 = await openai(prompts['ats_system'] ..., `${base3}\n\nINPUTS:\n${JSON.stringify(call3Input)}`, ...)
+```
+
+**`mergeCallTwo(c1, c2)` is what Call 3 sees, and its contents changed on 2026-08-22.** `D31` records
+that Call 2's output had been failing to parse and was **discarded on every build** — so Call 3 used
+to receive Call 1 alone. Deploy `4fb00e1` fixed the parse, and Call 3 has received Call 2's refined
+output ever since.
+
+**HYPOTHESIS, dated and checkable — NOT yet proven:** the owner's ATS prompt behaves differently
+because the input we hand it changed, not because the prompt changed. The test is to compare
+`ResumeSummary` values on `insertion` rows created before and after 2026-08-22. `resolveZapVars` also
+injects `jd` into the prompt text, so how much of the posting Call 3 sees is a second variable worth
+measuring.
+
+## WHAT THIS DOES AND DOES NOT CHANGE
+
+- **STANDS:** the remediation loop is not the cause (0 rows at `loop >= 1`). That correction holds.
+- **RETRACTED:** "the shipped summaries do not show the symptom." They do; I read them by eye instead
+  of measuring, and the measurement disagrees with the eye. Recorded rather than quietly edited,
+  because reading text and calling it clean is the same class of error as trusting a proxy.
+- **NEW AND UNGUARDED:** phrase-level JD harvesting is invisible to `posting_wording_kept` AND earns
+  no coverage. Whatever is built next, a guard for this shape is the part with evidence behind it.
