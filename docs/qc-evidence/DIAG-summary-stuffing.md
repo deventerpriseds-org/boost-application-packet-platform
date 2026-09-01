@@ -411,3 +411,54 @@ the click was buying.
 `ReqChip` + `ReqLegend`. That is the surface — it gains paraphrase-matched lines alongside cited ones,
 visibly distinguished, with the backing evidence in the detail panel like the keyword chips already do.
 That is the *"similar experience to what we've done elsewhere"* the owner named.
+
+---
+
+# THE CHIP-VS-COUNT TRACE — and my "inconsistency" call was WRONG
+
+I flagged `POSTING LINE ANSWERED: RQ-MH #12` sitting beside `0 of 12 responsibilities answered` as an
+inconsistency, guessing the count came from `coversIn`. **Traced to source, it does not.** They answer
+two different questions and both are internally correct.
+
+## The three populations, each traced
+
+| # | what the owner sees | fed by | the question it actually answers |
+|---|---|---|---|
+| 1 | **chip** `POSTING LINE ANSWERED: RQ-MH #12` | `reqsForRow` (`assetBlocks.js:344-346`) reads `row.requirement_id`, written by `appInsertions.ts:126-132` as `idBySeq.get(r.requirement_seq)` | **"Which posting line was this field WRITTEN AGAINST?"** — authoring intent, recorded at write time |
+| 2 | **count** `0 of 12 responsibilities answered` | `responsibilities_addressed` = `resp.filter(r => !ruleEvidenceOf(r))` (`checks.ts:877`) | **"Which responsibilities does the owner's stored PROFILE evidence with a rule-found verbatim excerpt?"** — says nothing about the summary |
+| 3 | *(not on this card)* | `coversIn` → `covers()` (`checks.ts:681`) → `evidence_placed` | **"Of the things the profile evidences, which ones reached this document?"** |
+
+`ruleEvidenceOf` (`checks.ts:807`) is `evidenceOf` minus unconfirmed model proposals — a
+`requirement_evidence` row, i.e. an excerpt from the PROFILE. So #2 is a profile↔posting measurement
+that never looks at the summary text at all.
+
+**Correction on the record:** the app is NOT telling the owner two different things about one field.
+It is telling them one thing about *authoring intent* and one thing about *profile evidence*. I
+inferred a shared source from two numbers appearing on one card — the same proxy-instead-of-source
+error this file has now made twice. Traced, not guessed, this time: `assetBlocks.js:344`,
+`appInsertions.ts:131`, `checks.ts:877`, `checks.ts:807`.
+
+## THE ACTUAL GAP — and it is cleaner than an inconsistency
+
+**None of the three answers the question the owner asked.** *"Tell me what is being covered from the
+JD by such paraphrasing"* needs a fourth measurement:
+
+> **which JD lines does THIS TEXT address, including by paraphrase, and what backs each one.**
+
+- #1 knows what the writer *aimed* at, not what the text achieved.
+- #2 is about the profile, not the text.
+- #3 requires 0.70 literal overlap, so every paraphrase is invisible to it — which is exactly why the
+  four Trinnex near-misses (0.67, 0.60, 0.57, 0.50) appear nowhere on the owner's screen.
+
+So this is genuinely **ABSENT**, not `EXISTS-BUT-CONSTRAINED`, and the owner's request is a real
+build rather than a surfacing job. It EXTENDS `ReqChip` (`AssetBlocks.jsx:1150`) — the chip row gains
+paraphrase-matched lines beside the cited one, visibly distinguished, with the backing evidence in the
+detail panel the keyword chips already use.
+
+## A SEPARATE FINDING, worth its own row
+
+`0 of 12 responsibilities answered` means **the owner's stored profile has no rule-found evidence for
+ANY of the twelve Trinnex responsibilities.** That is not a display bug and not about the summary — it
+is the profile↔posting matcher returning nothing on a real posting, which is the shape
+`D:compound-requirements-unevidenceable` describes. It should not be folded into the paraphrase work,
+and it is a large part of why the screen reads as broken to the owner.
