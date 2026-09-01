@@ -4912,3 +4912,34 @@ and follow its steps.
 **Carry this into every session:** check the installed `_eds_version` against the repo's
 `CURRENT_VERSION` early. A stale session fails silently — the hooks still fire, they are just the
 wrong ones, and a gate that has been fixed upstream keeps blocking on the old rule.
+
+## The ResumeSummary reads as JD stuffing because the COVERAGE PREDICATE pays for stuffing (2026-09-01)
+
+Owner: *"this one is a hack full of verbatim lines from the jd that isn't subtle at all and would get
+me accused of stuffing."* Full evidence: `docs/qc-evidence/DIAG-summary-stuffing.md`.
+
+**Not a prompt problem — the owner's prompts are untouched and still drive Call 1.** `coversIn`
+(`checks.ts:263-282`) closes a requirement only when **70% of the employer's content words appear
+LITERALLY** in the text. Executed at `1c43ea8`: a subtle paraphrase scores 2/7 = 0.29 and the
+requirement stays OPEN; a near-verbatim lift scores 7/7 and CLOSES. **No paraphrase reaches 0.70.**
+P3 rewrites `ResumeSummary` against that score every pass, and `scopeForRequirements` withholds only
+fields that solely cover a CLOSED requirement — so a tasteful generic summary covers nothing and is
+in scope forever. `buildScopedPrompt` hands over the employer's exact sentences and forbids only
+*inventing*, never *copying*.
+
+`posting_wording_kept` does not brake it: 8-consecutive-token exact run, severity `warn`. A summary
+stitched from short JD phrases closes a requirement with **0 offenders** (executed).
+
+**JotForm ran Call 1 + Call 3 and stopped.** The P3 loop is ours; it turned the summary into a
+coverage-optimisation target. That is the whole difference.
+
+**OPEN, one query short:** whether the summary the owner is reading came from a remediation pass or
+Call 1 is INFERENCE until `select loop, method, left(after_text,200) from insertion where
+merge_field='ResumeSummary' order by loop;` is run. `boost-pg-mcp-write` lapsed; nudged, not
+rerouted.
+
+### Hardening — an append with the wrong cwd writes a REAL file to the wrong place, silently
+`cat >> .claude/actions.md` ran with cwd `/home/user` after a shell reset and created
+`/home/user/.claude/actions.md`. It echoed `done` and exited 0. Two turns of ledger rows lived
+outside the repo where no commit would ever pick them up. **Always `cd` to the repo in the same
+command as a `>>` append, and confirm with `git status` — not with the command's exit code.**

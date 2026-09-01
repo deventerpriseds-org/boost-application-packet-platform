@@ -5776,3 +5776,63 @@ stated rather than inferred.
 a real defect in my first push (my requirement rejected the suite's own fixtures, 7 of 43); fixed by
 giving the fixtures the header and adding `VS-LOOPHDR`, 48/48 against a 43/43 baseline taken from a
 worktree. Subscribed; check-in armed.
+
+---
+
+## 2026-09-01 — "why is the summary a hack full of verbatim JD lines?" (owner)
+
+**The request.** *"what is the default resume summary selection in the template engineering resume
+in mastercontext? why is the output of the current build so different from what the jotform used to
+output with my prompts? it used to produce summaries that werent so obvious. this one is a hack full
+of verbatim lines from the jd that isn't subtle at all and would get me accused of stuffing.
+investigate."*
+
+**ANSWERED, mechanism proven by execution** —
+evidence: `docs/qc-evidence/DIAG-summary-stuffing.md`.
+
+The cause is the coverage predicate, not the prompts. `coversIn` (`checks.ts:263-282`) closes a
+requirement only when **70% of the employer's content words appear LITERALLY** in the text.
+Executed against api/dist at `1c43ea8` on a real-shaped JD line: a subtle paraphrase scores 2/7 =
+0.29 and the requirement stays OPEN; a near-verbatim lift scores 7/7 and CLOSES. **No paraphrase can
+reach 0.70.** P3 then rewrites `ResumeSummary` against that score every pass — and
+`scopeForRequirements` (`remediation.ts:390-396`) withholds only fields that solely cover a CLOSED
+requirement, so a tasteful generic summary covers nothing and is therefore in scope forever. The
+scoped prompt (`remediation.ts:506-526`) hands the model the employer's exact sentences and forbids
+only *inventing*, never *copying*.
+
+The brake does not brake: `posting_wording_kept` needs an 8-consecutive-token exact run
+(`WORDING_RUN_TOKENS = 8`) and is severity `warn`. A summary stitched from short JD phrases closes a
+requirement with **0 offenders** (executed). Correction recorded in the diag: a first probe showed
+`n/a` for all candidates — that was my empty `profileText`, not the detector; with a real profile it
+does catch a whole-sentence lift.
+
+**Why JotForm differed:** it ran Call 1 + Call 3 and stopped. The P3 remediation loop is ours, and it
+turned the summary into a coverage-optimisation target. The owner's prompts are untouched.
+
+**OPEN — one query short of proof.** That the summary the owner is reading came from a remediation
+pass rather than Call 1 is INFERENCE. `select loop, method, left(after_text,200) from insertion where
+merge_field='ResumeSummary' order by loop;` settles it, and the same read gives the MasterContext
+default (`insertions.ts:92` — loop-0 `before_text` IS the MasterContext block). `boost-pg-mcp-write`
+was lapsed; nudged rather than rerouted to `db-query.yml`, per the owner's own rule.
+
+**Three candidate remedies listed in the diag, NONE started and NONE approved.** All tier 1 —
+`coversIn` decides the gate. Option 2 loosens an accusation-grade predicate, which the standing
+instruction forbids without a ping.
+
+## 2026-09-01 — the loop-1 verifier on `1c43ea8` DID NOT COMPLETE
+
+`docs/qc-evidence/VERIFY-relevant-pool-and-slot-wiring-1.md` is committed at `67c3391` with a
+provenance header and an INCOMPLETE banner. Its output stopped growing at 2026-08-30 17:26 UTC and
+was unchanged ~56h later. **0 of the 14 numbered claims carry a verdict** — the single
+CONFIRMED/NOT_APPLICABLE string in it is an incidental schema observation the pass itself marked as
+"not one of the 14 numbered claims".
+
+It is committed rather than deleted because it does establish two things by real execution, and
+those are worth keeping: api **948/948**, app **418/418**, both builds exit 0 at `1c43ea8`; and
+`SCHEMA_SQL` applying clean on a FRESH database and on a POPULATED one upgraded from `origin/main`,
+idempotent on re-run, with F-2 not reproducing.
+
+**This is the THIRD verifier death in this work** (in-session `Agent` → user interrupt; `verify.sh`
+→ container restore; this one → stopped mid-pass). The relevant-pool and slot-wiring lanes remain
+**NOT VERIFIED**, and the 16 commits on `claude/incumbent-wins-swap` are still not on `main`, so none
+of that code is running.
