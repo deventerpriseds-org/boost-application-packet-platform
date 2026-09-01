@@ -431,3 +431,75 @@ the wording differs:
 
 All four: **a proxy accepted in place of the question "is this the right answer?"** The owner has
 caught every one.
+
+---
+
+# A6 — THE MODEL'S OWN REASONING IS CHECKED BY WORD-MATCHING TOO, and it withdraws correct evidence
+
+**Correcting myself first.** One turn earlier I told the owner *"reasoning is stored, never verified."*
+**False, and it is the fifth absence-claim in this investigation I asserted without a full sweep.**
+`verifyProposal` does not read it — but **`verifyReasoning` (`evidenceProposal.ts:340`) does**, and it
+fired on **2 of the 10** proposals on the owner's Trinnex packet (db-query run 33503167998).
+
+## What it does
+
+```ts
+const named = [...namedEntityTokens(reqText)]
+const overclaimed = named.filter(t => carries(r, t) && !carries(q, t))
+```
+
+It takes the requirement's **named tokens**, and withdraws the model's explanation for any token the
+REASONING mentions that the QUOTE does not literally contain. It is an **overclaim/hallucination
+check, not a relevance check** — and it is `carries()`, i.e. token containment. **Lexical, again.**
+
+## It withdrew a correct match
+
+| | |
+|---|---|
+| **requirement #20** | *"Bachelor's degree in Computer Science, Software Engineering, Data Science, Engineering, **or related technical field**."* |
+| **quote** | *"Bachelor of Science with Honors in **Information Systems**, University of Maryland"* |
+| **verdict** | *"a model's explanation was withdrawn: it credited the excerpt with computer, software, engineering, which it does not contain"* |
+
+**The match is right.** The requirement explicitly admits *"or related technical field"*, and
+Information Systems is one. The model reasoned about a computer-science-related degree; the quote says
+*Information Systems*; so `computer`/`software`/`engineering` count as overclaimed and the explanation
+is withdrawn. **The check cannot read "or related technical field" — it can only ask whether the
+strings appear.** #19 (*Preferred Qualifications — experience within infrastructure, utilities,
+environmental services*) was withdrawn the same way.
+
+## The finding: the SAME substitution at THREE layers
+
+| layer | function | the judgement it stands in for | what it actually does |
+|---|---|---|---|
+| does the DOCUMENT cover it | `coversIn` (`checks.ts:276`) | meaning | 70% literal token overlap |
+| does the PROFILE evidence it | `supportIn` (`requirementSupport.ts:658`) | meaning | nine gates ending in literal overlap |
+| **is the model's reasoning HONEST** | **`verifyReasoning` (`evidenceProposal.ts:340`)** | **did it overclaim** | **token containment — withdraws sound evidence** |
+
+Each re-implements *"does this text contain these words"* as a proxy for reading. **A6 is the worst of
+the three**, because it is the layer that was supposed to make the model's judgement trustworthy, and
+it fails in the direction that destroys good evidence rather than admitting bad.
+
+## Consequence for the confirm button — the owner was right to challenge it
+
+Owner: *"isn't this confirm button just a patch workaround instead of getting to the root problem?"*
+
+**Yes, and more sharply than I first conceded.** Of the 10 Trinnex proposals, 8 stand and **2 were
+withdrawn before any human could see them** — at least one wrongly. **No amount of clicking can
+recover those two**, because the withdrawal happens upstream of the confirm path. The button
+compensates for a verifier that rejects sound evidence; it cannot repair it.
+
+**The button keeps its place as the OVERRULE path** — the owner must be able to reject a bad match and
+accept a borderline one in both directions — but it is not the fix and must not be presented as one.
+
+## SCOPE CHANGE — `verifyReasoning` joins the judge lanes
+
+Added to the corrected scope table in `FEASIBILITY-llm-judgement.md`. It belongs with the other two
+for the same reason and on the same terms: **it is a judgement, so it is judged; the citation stays
+machine-checked.** The honest question it should ask is *"does this explanation claim anything the
+excerpt does not support?"* — which is what the current code is reaching for and cannot express with
+`carries()`.
+
+**Keep what is sound in it.** The overclaim check is a real safety property and must not be dropped —
+a model asserting the excerpt says something it does not IS the failure worth catching. What must
+change is the test for it, not its existence. The `missNote` path (naming which requirement words are
+absent, beside a standing explanation rather than instead of it) is good design and should survive.
