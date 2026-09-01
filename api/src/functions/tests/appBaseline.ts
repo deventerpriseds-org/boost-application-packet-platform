@@ -144,12 +144,25 @@ export function baselinePkg(
  * an empty or malformed one falls back rather than blanking the slot — a blank Relevant column is
  * the silent-deletion failure `stripLeftoverTokens` already causes once.
  */
-export function relevantOverlay(lists?: readonly (readonly string[])[]): Record<string, string> {
-  const src = (Array.isArray(lists) && lists.length ? lists : SEED_RELEVANT_LISTS)
+export function relevantOverlay(lists?: readonly (readonly unknown[])[]): Record<string, string> {
+  const src: readonly unknown[] = Array.isArray(lists) ? lists : []
   const out: Record<string, string> = {}
   RELEVANT_FIELDS.forEach((field, i) => {
-    const items = (src[i] || []).map((x: unknown) => String(x || '').trim()).filter(Boolean)
-    if (items.length) out[field] = items.join('\n')
+    // PER SLOT, not per call. The first version chose between the caller's lists and the seed with
+    // one outer test (`Array.isArray(lists) && lists.length`), so a caller list that was non-empty
+    // but SHORT passed it and slots 2-3 fell through to no key at all -- leaving the pooled 36-term
+    // Library text the seed exists to replace. REFUTED as C5 by the independent verifier, which
+    // measured `relevant: [['Only','One','List']]` leaving Library text in RelevantBullets2/3.
+    //
+    // A non-array element is coerced rather than mapped: `relevant: ['a','b','c']` -- a flat array,
+    // the likeliest caller mistake -- previously threw `(src[i]||[]).map is not a function`, which
+    // the route turned into an HTTP 500. A malformed input must degrade to the seed, never 500.
+    const raw = src[i]
+    const items = (Array.isArray(raw) ? raw : [])
+      .map((x: unknown) => String(x ?? '').trim())
+      .filter(Boolean)
+    const kept = items.length ? items : [...SEED_RELEVANT_LISTS[i]]
+    out[field] = kept.join('\n')
   })
   return out
 }
@@ -192,7 +205,13 @@ export function shapeSlotFields(
     const raw = out[field]
     if (typeof raw !== 'string' || !raw.trim()) continue
     const items = splitItems(raw)
-    if (!items.length) continue
+    // A SEPARATORS-ONLY BLOCK MUST NOT SURVIVE. `continue` left `out[field]` as the raw string, so a
+    // stored value of `"|"` or `"|||"` rendered its pipes into the document -- the exact defect this
+    // function exists to remove, reached through the one branch that skips the rewrite. REFUTED as
+    // C1 by the independent verifier. Deleting the key is right rather than writing '': an absent
+    // key leaves the template's own token for `stripLeftoverTokens` to clear, whereas '' injects
+    // emptiness and is indistinguishable from content that was legitimately blank.
+    if (!items.length) { delete out[field]; continue }
     const cap = slots ? slots[field as SlotField] : null
     const kept = typeof cap === 'number' && cap > 0 ? items.slice(0, cap) : items
     out[field] = kept.join('\n')

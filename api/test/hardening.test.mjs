@@ -4909,3 +4909,62 @@ test('H:baseline-relevant-seed: three lists of three, within the character rule,
   assert.deepEqual(relevantOverlay([]).RelevantBullets1.split('\n'), [...SEED_RELEVANT_LISTS[0]])
   assert.deepEqual(relevantOverlay(undefined).RelevantBullets2.split('\n'), [...SEED_RELEVANT_LISTS[1]])
 })
+
+// THE TWO DEFECTS AN INDEPENDENT VERIFIER FOUND IN GUARDS THAT WERE THEMSELVES MUTATION-PROVEN.
+//
+// H:baseline-shape and H:baseline-relevant-seed both FIRED under five mutations -- they are real --
+// and both were still BLIND to the inputs below, which sat in HEAD with the suite 1026/1026 green.
+// That is the lesson worth encoding: a guard proving it can fail is not a guard proving it covers
+// the input space. Each case here is an input the earlier guards never constructed.
+// Evidence: .claude/verify/VERIFY-baseline-relevant-seed-1.md (C1 REFUTED, C5 REFUTED).
+test('H:baseline-shape-empty-items: a separators-only block leaves no separator behind', async () => {
+  const { shapeSlotFields } = await import('../dist/functions/tests/appBaseline.js')
+
+  // The old code hit `if (!items.length) continue`, leaving out[field] as the RAW string -- so the
+  // pipes rendered, through the one branch that skips the rewrite.
+  for (const raw of ['|', '|||', ' | ', '•', '-|-']) {
+    const out = shapeSlotFields({ SkillsBullets1: raw })
+    assert.ok(!('SkillsBullets1' in out) || !out.SkillsBullets1.includes('|'),
+      `separators-only input ${JSON.stringify(raw)} left ${JSON.stringify(out.SkillsBullets1)}`)
+  }
+
+  // The key is DELETED, not set to ''. An absent key leaves the template's own token for
+  // stripLeftoverTokens to clear; '' injects emptiness that reads as legitimately-blank content.
+  assert.equal('SkillsBullets1' in shapeSlotFields({ SkillsBullets1: '|||' }), false)
+
+  // And a block with even ONE real item still renders that item -- the fix must not eat content.
+  assert.equal(shapeSlotFields({ SkillsBullets1: '|Governance|' }).SkillsBullets1, 'Governance')
+})
+
+test('H:baseline-relevant-per-slot: a short or malformed caller list falls back PER SLOT', async () => {
+  const { relevantOverlay, SEED_RELEVANT_LISTS, RELEVANT_FIELDS, baselinePkg } =
+    await import('../dist/functions/tests/appBaseline.js')
+
+  // THE DEFECT: one supplied list used to satisfy the outer `lists.length` test, so slots 2 and 3
+  // got no key and kept the pooled 36-term Library -- exactly what the seed exists to replace.
+  const short = relevantOverlay([['Only', 'One', 'List']])
+  assert.deepEqual(short.RelevantBullets1.split('\n'), ['Only', 'One', 'List'])
+  assert.deepEqual(short.RelevantBullets2.split('\n'), [...SEED_RELEVANT_LISTS[1]])
+  assert.deepEqual(short.RelevantBullets3.split('\n'), [...SEED_RELEVANT_LISTS[2]])
+
+  // Every malformed element falls back to ITS OWN slot's seed rather than vanishing.
+  for (const bad of [[[]], [['']], [[null]], [['   ']], [null], [undefined], [42], ['str']]) {
+    const out = relevantOverlay(bad)
+    assert.deepEqual(out.RelevantBullets1.split('\n'), [...SEED_RELEVANT_LISTS[0]],
+      `input ${JSON.stringify(bad)} did not fall back`)
+  }
+
+  // A FLAT ARRAY MUST NOT THROW. `relevant: ['a','b','c']` is the likeliest caller mistake and used
+  // to raise `(src[i]||[]).map is not a function`, which the route converted to an HTTP 500.
+  assert.doesNotThrow(() => relevantOverlay(['a', 'b', 'c']))
+  assert.deepEqual(relevantOverlay(['a', 'b', 'c']).RelevantBullets1.split('\n'),
+    [...SEED_RELEVANT_LISTS[0]])
+
+  // EVERY slot is always present, so pooled Library text can never survive in one of them.
+  const pooled = 'Governance and Compliance: A, B | Technology Strategy: C, D'
+  const pkg = baselinePkg({ RelevantBullets1: pooled, RelevantBullets2: pooled, RelevantBullets3: pooled },
+    { relevant: [['Solo']] })
+  for (const f of RELEVANT_FIELDS) {
+    assert.ok(!pkg[f].includes('Governance and Compliance:'), `${f} kept pooled Library text`)
+  }
+})
