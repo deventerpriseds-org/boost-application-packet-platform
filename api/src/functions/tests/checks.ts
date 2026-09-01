@@ -1073,16 +1073,32 @@ export function runChecks(input: CheckInput): CheckResult[] {
       // reason the too-thin ones are: it was not judged, so calling it "absent from this asset"
       // would report the lexical fallback's opinion as the judge's finding. It joins `tooThin` in
       // the "not counted either way" note rather than becoming an offender.
+      // F-4, found by an independent verifier: these two populations were counted TOGETHER and
+      // reported under the wording of the first. A requirement dropped because the JUDGE never
+      // answered — a model outage, a cap, an unparseable reply — was shown to the owner as
+      // "too short to judge either way", which is a statement about THEIR POSTING. An outage
+      // presented as a property of the owner's own data is the worst way for it to appear, because
+      // there is nothing they can do about it and nothing tells them not to try.
+      const thin = evidenced.filter(r => itemTokens(r.verbatim || r.item_text).length < MIN_JUDGEABLE_TOKENS)
+      const silent = evidenced.filter(r => itemTokens(r.verbatim || r.item_text).length >= MIN_JUDGEABLE_TOKENS
+        && judgeSilent(r))
       const placeable = evidenced
         .filter(r => itemTokens(r.verbatim || r.item_text).length >= MIN_JUDGEABLE_TOKENS)
         .filter(r => !judgeSilent(r))
       const unplaced = placeable.filter(r => !covers(r))
-      const tooThin = evidenced.length - placeable.length
-      const thinNote = tooThin ? ` (${tooThin} too short to judge either way)` : ''
+      const notes = [
+        thin.length ? `${thin.length} too short to judge either way` : '',
+        silent.length ? `${silent.length} the model was asked about and did not answer` : '',
+      ].filter(Boolean)
+      const thinNote = notes.length ? ` (${notes.join(', ')})` : ''
       out.push(!evidenced.length
         ? na('evidence_placed', 'no requirement in this posting is evidenced by your profile yet', PLACED_EXPECT)
         : !placeable.length
-          ? na('evidence_placed', `${evidenced.length} evidenced requirement(s), none long enough to judge placement`, PLACED_EXPECT)
+          ? na('evidence_placed',
+              silent.length
+                ? `${evidenced.length} evidenced requirement(s), none judged${thinNote}`
+                : `${evidenced.length} evidenced requirement(s), none long enough to judge placement`,
+              PLACED_EXPECT)
           : unplaced.length
             ? bad('evidence_placed', `${placeable.length - unplaced.length}/${placeable.length} evidenced requirements appear in this document${thinNote}`,
                   PLACED_EXPECT, unplaced.map(r => `${label(r)} — evidenced by ${evidenceOf(r)!.source_label}, absent from this asset`), 'warn')

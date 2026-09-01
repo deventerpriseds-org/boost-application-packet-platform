@@ -324,3 +324,31 @@ test('H:judge-silence-is-not-a-no', () => {
   assert.notEqual(silent.state, 'warn', 'an unanswered requirement must not be reported as unplaced')
   assert.equal(silent.offenders.length, 0, 'and must never appear as an offender')
 })
+
+test('H:an-outage-is-not-reported-as-a-property-of-the-posting', () => {
+  // F-4, found by an independent verifier. "Too short to judge either way" is a statement about the
+  // OWNER'S POSTING; "the model did not answer" is a statement about OUR RUN. They were counted
+  // together and reported under the first wording, so a model outage read as a defect in their data
+  // — the worst way for an outage to appear, because there is nothing they can do about it and
+  // nothing tells them not to try.
+  const THIN = { id: 'r1', seq: 1, kind: 'must_have', verbatim: 'Own it', item_text: '' }
+  const REAL = { id: 'r2', seq: 2, kind: 'must_have',
+    verbatim: 'Ability to align engineering strategy with business goals', item_text: '' }
+  const input = (judgeVerdicts) => ({
+    type: 'resume', pkg: { ResumeSummary: SUMMARY }, requirements: [THIN, REAL],
+    evidence: evidenceFor([1, 2]), profileText: '...', postingText: '...', judgeVerdicts,
+  })
+  const placed = (rs) => rs.find(r => r.check_key === 'evidence_placed')
+
+  // Asked, unanswered: the note must say so, and must NOT call it short.
+  const silent = placed(runChecks(input(new Map())))
+  assert.match(silent.observed, /the model was asked about and did not answer/)
+  assert.match(silent.observed, /1 too short to judge either way/,
+    'and the genuinely short one is still counted under its own, separate wording')
+
+  // No judge at all: only the length note, and nothing implying a model was involved.
+  const noJudge = placed(runChecks(input(undefined)))
+  assert.match(noJudge.observed, /1 too short to judge either way/)
+  assert.ok(!/did not answer/.test(noJudge.observed),
+    'a run with no judge must not report a model that was never asked')
+})
