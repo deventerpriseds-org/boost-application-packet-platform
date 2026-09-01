@@ -696,3 +696,93 @@ Verdict summary for the Stop gate's evidence contract:
 | brief: (A) points a fuzzy matcher at an accusation-grade predicate | **CONFIRMED but narrowed** — `evidence_placed` names offenders and is accusation-grade, though it warns rather than fails (C-6) |
 | paraphrase coverage is unbuilt | **REFUTED** — the propose/confirm tier exists (F3, F4) |
 | the loop has ever executed in production | **NOT_APPLICABLE — unverified, needs Q1** (F15, OD-0) |
+
+---
+
+## 8. OWNER DECISIONS RECORDED — 2026-09-01
+
+Answers given by the owner in response to §5. **This section is the decision of record; §5 is the
+question that produced it.**
+
+### OD-2 — CLOSED: the threshold is NOT touched
+
+Owner: *"I don't understand why the threshold needs to be bothered... is it exclusive to the resume
+summary?"*
+
+**It is not exclusive to anything — and that is the answer.** `coversIn` has five call sites and not
+one of them is field-specific (verified by grep, 2026-09-01):
+
+| call site | what the threshold decides there |
+|---|---|
+| `checks.ts:681` → `covers()` | `evidence_placed` AND `responsibilities_addressed`, for **every** merge field |
+| `remediation.ts:334` | `credited` — whether a pass really closed what it claimed |
+| `remediation.ts:384` | `scopeForRequirements` — which fields are WITHHELD from rewriting |
+| `remediation.ts:478` | the seqs a text is treated as covering |
+
+So lowering `COVERAGE_THRESHOLD` to help the summary would loosen **every field and four separate
+decisions at once**, including the one that protects fields from being rewritten. `checks.ts:670-680`
+records that it was raised 0.5 → 0.7 precisely to stop a resume passing on words that appear in it
+naturally for the role.
+
+**DECISION: `COVERAGE_THRESHOLD` stays at 0.7. It is out of scope.** Any paraphrase tolerance is a
+separately-named path beside it, never a change to this number. The three guards that pin it
+(`hardening.test.mjs:216`, `remediation.test.mjs:532`, `H38`) stay exactly as they are, and AC-A3 is
+rewritten to assert that they still hold rather than to relax them.
+
+*Note for the record: the owner's instinct here was correct and this pass's framing was not. §5's
+OD-2 presented lowering the threshold as a live option because the parent session's diagnosis
+described `coversIn` as "the gate"; §1 had already refuted that. Asking to widen a shared number to
+fix one field is the "patch one screen" failure `CLAUDE.md` names.*
+
+### OD-3 — CLOSED: `@CoreAccomplishments_5blts_180words` is PROSE
+Owner: *"yes"*. It joins the prose set: no auto-rewrite, coverage reported in the right panel, and a
+Rewrite button.
+
+### OD-4 — portfolio and cover letter: **List Tweaks, not a second Rewrite button**
+Owner: *"tweaks"*. **Reading of record:** those two artifacts keep the existing `List Tweaks`
+control; the new `Rewrite` button is mounted on the resume's prose sections only. This is the
+narrower and cheaper reading and is one line to extend later if it is wrong — flagged to the owner
+rather than assumed silently.
+
+### OD-5 — CLOSED: fix versioning FIRST, so a manual Rewrite is undoable
+Owner: *"fix version"*. This pulls **`D:every-build-is-destructive`** into scope as a prerequisite:
+`artifact.version_history` is appended at `appPackets.ts:218` with **`{"len": N}` — a character
+count, not the text** — and nothing reads it. A Rewrite button shipped on top of that is an
+irreversible overwrite of the owner's prose. **The version write must store the prior CONTENT before
+`Rewrite` is wired.** ACs for this are additive to §4 group C and are the first implementation step.
+
+### OD-6 — escalation vs a right-panel note, and the nudge
+
+Owner: *"what is an escalation vs a right panel note? either way the nudge should be included"*.
+
+**They are not two styles of the same thing — one is a tracked record, the other is display text.**
+
+| | **Escalation** | **Right-panel note** |
+|---|---|---|
+| what it is | a row in the `escalation` table (`schema.ts:1036`) | text rendered in the QC rail |
+| survives a rebuild | **yes** | no |
+| has a state | `open` / `resolved` / `accepted`, `unique (artifact_id, requirement_id)` so it updates rather than stacking | none |
+| you can act on it | **two ways: supply evidence → `resolved`, which REOPENS the loop; or accept the gap → `accepted`, and the score keeps reporting it** | nothing to act on |
+| what it must say | `detail` is required to state **what was searched and why it could not be closed** — an escalation reading only "not covered" asks you to redo the search the system already did | whatever it says |
+| deep-links | yes (P3-35) | no |
+
+**RECOMMENDATION AND DECISION: escalation.** It already exists, it is durable, it forces the
+"what was searched" discipline, and — the deciding property — it gives an **accept the gap** path, so
+a requirement your profile genuinely cannot evidence stops nagging without anything pretending it was
+covered. A note has none of that and vanishes on the next build.
+
+**The nudge is included either way, per the owner.** The escalation's `ask` field carries it, and the
+Rewrite button is mounted on the section itself so the nudge and the action are in the same place.
+
+### STILL OPEN — the owner has not answered these
+
+- **OD-0 (BLOCKING).** Whether the remediation loop is the culprit at all. `D:remediation-never-ran`
+  measures `remediation_loop` at 0 rows in production; if that holds, the stuffed summary came from
+  Call 1/Call 3 and this work is redesigning something that has never run. `boost-pg-mcp-write` was
+  still unavailable at 02:5x UTC 2026-09-01 (re-probed). Needs a connector refresh or an explicit
+  instruction to use `db-query.yml`.
+- **OD-1.** Whether paraphrase counts automatically or only after an owner click. The owner asked
+  *"A is using llm correct?"* and was answered — the proposal tier already exists and already uses a
+  model, gated on a click — but has not yet said whether to keep the gate. **Nothing in group A is
+  implementable until this is answered**, because it decides whether (A) is a UI surfacing job
+  (option a), a rule-writing job (option c), or a guard removal (option b, not recommended).
