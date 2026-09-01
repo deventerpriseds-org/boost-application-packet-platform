@@ -5938,3 +5938,52 @@ Nothing shipped here changes it.
 
 **Status: implemented, mechanism verified locally, NOT yet confirmed live.** Both toggles default OFF,
 so landing this changes nothing for the owner until they turn it on.
+
+---
+
+## ACT:resolve-the-0-of-12 — the profile side, the stuffing lane, and the JD panel
+
+**Owner instruction (2026-09-01):** *"resume the resolve the zero out of 12 everything that you work
+on should work not get put off till later continue dealing with the support in the stuffing Lane
+showing the verdict and reasoning and the JD panel etc"*
+
+**THE ONE LINE THAT PINNED THE 0/12.** `ruleEvidenceOf` (`checks.ts`) nulls any `proposed` row the
+owner has not confirmed. On the live Trinnex packet **15 of 17** evidence rows are `proposed`, so the
+number read 0/12 and nothing in the product could move it but twelve clicks.
+
+| commit | lane |
+|---|---|
+| `155db07` | **the profile side** — a proposal that is CHALLENGED and holds is stamped `vetted` and COUNTS |
+| `92c432d` | **the JD panel** — the vetted marker and the reason it counts, outside the disclosure |
+| `ed7e453` | **the stuffing lane** — the scattered kind `scanWording` structurally cannot see |
+
+**Why counting a plain proposal would not have been safe, and why this is not that.** The proposal
+pass asks a CONFIRMING question and finds support at the rate it was asked to. The challenge asks the
+falsifying one FIRST — *what does the requirement ask that this excerpt does NOT show?* — and a
+non-empty answer refuses the row **in code**, before the model's own yes/no is read.
+
+**NAMING — the owner caught this mid-build:** *"either our labeling and taxonomy is not intuitive to a
+human and we've name things that are counterintuitive or something else"*. They were right. The
+method was called `judged`, a word carrying no information in a pipeline where everything judges
+something — and `checks.ts` **already used `judged`** for an unrelated thing. Renamed to `vetted`, and
+the four methods now read as an escalating warrant: `exact`/`anchored` (a rule found it) → `proposed`
+(a model suggested it) → `vetted` (a model was challenged on it and it held) → `confirmed_at` (the
+owner said yes).
+
+**Evidence.** api **1011/1011**, app **424/424**, both builds clean. **Seventeen guards
+mutation-proved** in this pass. Two existing guards FIRED on the widened `method` domain — one says in
+its own words *"a fourth added without a thought here should fail"* — and were updated deliberately,
+not relaxed.
+
+**Three of my own defects caught by the process, recorded because that is the point of it:**
+1. A UI guard was **INERT** — it pinned where the reasoning rendered, not *whether*; disabling the
+   block passed it. Strengthened, and the same mutation now fails.
+2. Two mutations (M26, S3) did not apply at all — a bad shell anchor and the wrong line — and were
+   **re-run properly rather than reported as proven**.
+3. `H:every-chk-column-is-selected` caught three settings columns mapped but missing from the
+   loader's SELECT.
+
+**STATUS: implemented, mechanism verified locally, NOT yet confirmed live.** Everything is behind
+`chk_coverage_judge`, which is **OFF**. Until it is turned on, the live number stays 0/12 — the code
+is on `main` and does nothing observable. Turning it on is one toggle in **Settings ▸ Quality**, or
+one `db-query.yml` UPDATE.
