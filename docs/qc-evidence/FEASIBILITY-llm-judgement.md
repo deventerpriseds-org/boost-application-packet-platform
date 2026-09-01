@@ -181,3 +181,53 @@ the cheap-test-before-the-expensive-change rule, and it makes the expensive chan
 (`apply`/`leverage`, `goals`/`objectives`); **#9 must come back ABSENT** — the summary genuinely does
 not say *managers* or *technical*, and a judge that claims it does is worse than the threshold it was
 brought in to replace. **That row is the guard on the judge.**
+
+---
+
+# CORRECTED SCOPE — I misread the owner twice, and both corrections widen the work
+
+Owner, 2026-09-01:
+
+> *"when I said include the gate I meant fold this in with the rest of what you've been working on
+> instead of deleting it… you misunderstood me when you thought I was saying you overscoped it. what
+> is done today by actors simply needs to be swapped by a model that can reason instead of word
+> matching but only where it makes sense"*
+
+**Correction 1.** *"The gate should be included"* did **not** mean "put the document judge on
+`must_have_coverage`". It meant **do not defer the gate change out of scope** — I had written that it
+*"shouldn't be decided before you've looked at a page of real verdicts"* and the owner was refusing
+that deferral, not specifying a call site.
+
+**Correction 2.** *"It should be simple"* was **not** a complaint that I overscoped. I read it as one
+and cut the work down to a display-only judge. The owner's actual point is the opposite in direction
+and broader in scope: **every place a lexical actor decides something today should be a model that
+reasons — wherever reasoning is the right tool.**
+
+**These two corrections RECONCILE with the AC pass's OD-1 finding instead of conflicting with it.**
+That pass proved `coversIn` is not on the gate and the gate is decided on the PROFILE side. So
+"include the gate" and "swap the actors where it makes sense" resolve to the same answer: **do the
+profile side too.** OD-1 is therefore **(ii) AND (iii) together, not either/or** — and never (i).
+
+## The scope, corrected — "only where it makes sense" made concrete
+
+| decision | today | becomes | why this is or is not a reasoning task |
+|---|---|---|---|
+| **document covers it** — `coversIn`, `COVERAGE_THRESHOLD` | 70% literal overlap | **MODEL** | Produces every wrong "no" the owner has seen. Gives the count and the per-line display. |
+| **profile evidences it** — `supportIn`, `EVIDENCE_THRESHOLD` | 70% literal overlap | **MODEL — AND THIS IS THE GATE** | `must_have_coverage` is the only check defaulting to `fail`+`deterministic`, and `:1025` turns exactly that into a gate fail. It reads `ruleEvidenceOf`, the profile path. **It is also where Trinnex returns 0 of 12.** This row is what "include the gate" means. |
+| **is this stuffing** — `scanWording`, `WORDING_RUN_TOKENS` | 8 consecutive exact tokens | **MODEL** | *"Is this the employer's sentence in a coat?"* is judgement. Proven blind to phrase-level lifting, which is the shape the owner actually objected to. |
+| **locate the sentence** — `locate`, `ANCHOR_THRESHOLD` | 0.6 anchor score | **HYBRID** — model picks the sentence, **code computes the offsets** | Choosing which sentence is reasoning. Counting characters is not, and the whole evidence spine depends on those offsets being exact. This is the clearest case of *"only where it makes sense."* |
+| **same item, reworded** — `similarity`, `SWAP_THRESHOLD`, `ATTRIBUTION_THRESHOLD` | containment 0.5 / 0.34 | **STAYS LEXICAL** | RANKING, which `CLAUDE.md` explicitly permits to be fuzzy. Not producing wrong answers anyone has seen. Changing it would be change for its own sake. |
+
+## Consequences for the plan already written
+
+- **`AC-llm-coverage-judge.md` covers the FIRST ROW ONLY.** Its 21 ACs, feasibility table and mutation
+  register stand as written and are not wasted — but they are one lane of five, and its OD-1 is now
+  ANSWERED rather than open.
+- **A second AC pass is needed for the gate lane** (`supportIn`) and the stuffing lane
+  (`scanWording`). The gate lane is the one that carries the real risk: it is the only one that can
+  turn a packet's ship decision, and it is where determinism, the `not_applicable`-on-failure rule and
+  the mutation proofs matter most.
+- **OD-2 (the confirm button) is unaffected and still the cheapest item on the board.** The API is
+  finished; only a control in `app/src` is missing. It raises `must_have_coverage` off zero with a
+  HUMAN as the accuser, so it is worth doing whatever else is decided.
+- **`locate` and `similarity` are now explicitly OUT, with a reason** rather than as a deferral.
