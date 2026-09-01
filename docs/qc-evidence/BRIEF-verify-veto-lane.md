@@ -27,7 +27,24 @@ allocation above is the implementer's judgement and you are the check on it bein
 
 You are an INDEPENDENT verifier. You did not write this code. Prove or disprove each claim below
 from observable evidence only, and write your artifact **incrementally as you go** to
-`docs/qc-evidence/VERIFY-veto-lane-1.md` — a previous pass on this repo died having written nothing.
+`docs/qc-evidence/VERIFY-veto-lane-1.md`.
+
+**COMMIT AND PUSH THE ARTIFACT AFTER EVERY CLAIM YOU SETTLE**, on branch
+`claude/incumbent-wins-swap`:
+
+    git add docs/qc-evidence/VERIFY-veto-lane-1.md && git commit -q -m "VERIFY veto-lane: <claim>" \
+      && git push -q origin claude/incumbent-wins-swap
+
+This is not bookkeeping, it is the only thing that makes your work survive. This container has been
+restored THREE times in ninety minutes, and each restore SIGKILLs you with no notice. Measured on
+this exact task: the first attempt at this brief settled C10, wrote it to disk, and was killed — the
+file survived only because it happened to be on a mounted path, and nothing was committed. A commit
+that is not PUSHED is still inside the container and dies with it.
+
+Order the claims cheapest-first so that a death costs the least: C10, C6, C8, C9, C2 (fast), then
+C1, C3, C7, C11, then C4 and C5 (a real database). Note C10 is already settled below by the killed
+run — RE-RUN IT ANYWAY rather than inheriting it, per the total-coverage rule, but do it first and
+quickly.
 
 Repo: `/home/user/boost-application-packet-platform`, branch `claude/incumbent-wins-swap` at
 `a1f2b68`. Commits under review: `0d73371`, `620776e`, `9c3fa07`, `3a75eb1`, `a1f2b68`.
