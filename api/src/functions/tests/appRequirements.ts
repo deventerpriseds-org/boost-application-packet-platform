@@ -8,7 +8,7 @@ import { resolveOwner, requireWrite } from './appSession'
 import { getPgClient } from './pgClient'
 import { buildRequirements } from './requirements'
 import {
-  resolveAll, ProfileRecord, ResolveOptions, NO_EVIDENCE_NOTE, RESOLVER_VERSION,
+  resolveAll, ProfileRecord, ResolveOptions, NO_EVIDENCE_NOTE, RESOLVER_VERSION, sha256,
   verifyEvidence, tallyHealth, EvidenceHealth, EvidenceVerdict, EvidenceState,
   refusalReason, NEVER_EVIDENCE,
 } from './evidence'
@@ -207,13 +207,32 @@ export async function writeEvidence(
     // So the delete is scoped to the rows this call is actually able to re-derive. A transport-less
     // call replaces the deterministic rows it owns and leaves model proposals alone; a call that CAN
     // escalate still replaces everything, because it will re-propose.
+    //
+    // AND A VETTED ROW SURVIVES A RE-RESOLVE, WHICH IS WHAT MAKES THE GATE STOP FLAPPING.
+    //
+    // F-10, from an independent verifier: the coverage judge next door builds a whole cache table on
+    // the principle that a model asked twice may answer differently and a flapping gate is worse than
+    // a consistently wrong one -- while the lane that actually moves `must_have_coverage` had none of
+    // it, because this delete removed every vetted row and the next pass re-asked from scratch.
+    //
+    // The fix is not a second cache. The verdict is ALREADY PERSISTED -- `method='vetted'` with its
+    // citation in `extra` -- so the only defect was deleting it. A vetted row is kept exactly as long
+    // as the record it was read from is unchanged, using `record_sha256`, the same staleness rule
+    // `evidence_confirmation` uses for the owner's own decisions: edit the profile and the digest
+    // stops matching, so the row is re-derived rather than silently inherited.
+    //
+    // Re-EXTRACTION is a different operation and still clears these, by FK cascade from `requirement`
+    // -- correct, because the requirement TEXT may have changed and the verdict was about that text.
+    const liveDigests = records.map(r => sha256(r.text))
     await client.query(
       canEscalate
         ? `delete from requirement_evidence e using requirement r
-            where e.requirement_id = r.id and r.opp_id = $1`
+            where e.requirement_id = r.id and r.opp_id = $1
+              and not (e.method = 'vetted' and e.record_sha256 = any($2::text[]))`
         : `delete from requirement_evidence e using requirement r
-            where e.requirement_id = r.id and r.opp_id = $1 and e.method <> 'proposed'`,
-      [oppId])
+            where e.requirement_id = r.id and r.opp_id = $1 and e.method <> 'proposed'
+              and not (e.method = 'vetted' and e.record_sha256 = any($2::text[]))`,
+      [oppId, liveDigests])
     for (const r of rows) {
       const e = bySeq.get(r.seq) || null
       if (!e) continue
@@ -295,7 +314,15 @@ export async function writeEvidence(
     const minQuoteChars = MIN_QUOTE_CHARS
     // Only rows the deterministic pass could not settle, and only up to the cap. `slice` before the
     // loop rather than a break inside it, so what was skipped is knowable rather than implicit.
-    const open = rows.filter((r: any) => !bySeq.get(r.seq))
+    // A requirement whose vetted row SURVIVED the delete is already answered. Re-asking would spend
+    // a call to overwrite an answer with a possibly different one -- which is the flapping this was
+    // just fixed to prevent, reintroduced one loop later.
+    const keptVetted = new Set<string>(((await client.query(
+      `select distinct e.requirement_id from requirement_evidence e
+         join requirement r on r.id = e.requirement_id
+        where r.opp_id = $1 and e.method = 'vetted'`, [oppId])).rows || [])
+      .map((x: any) => String(x.requirement_id)))
+    const open = rows.filter((r: any) => !bySeq.get(r.seq) && !keptVetted.has(String(r.id)))
     /**
      * SPEND THE CAP ON WHAT DECIDES THE GATE, and this is a defect fix rather than a preference.
      *
