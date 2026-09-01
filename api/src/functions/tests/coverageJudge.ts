@@ -263,6 +263,66 @@ export function verdictKey(input: {
   ].join('\u0000'))
 }
 
+/**
+ * ONE VERDICT PER REQUIREMENT, from the several fields that were asked.
+ *
+ * WHY THIS EXISTS AT ALL, and it is not a detail. `covers()` decides on `covText` — EVERY present
+ * field of the artifact, joined and normalised (`checks.ts:526,710`). So "does this artifact cover
+ * the requirement" is a question about the union, while the judge is asked one field at a time.
+ * Asking about the joined text instead would be simpler and wrong twice over: the quote would be
+ * cited from a synthetic concatenation no reader can point at, and its offsets would index a string
+ * that exists nowhere — the concatenation trap `requirement_evidence.source_key` is written to avoid.
+ *
+ * THE COMPOSITION, and each rule is a decision rather than an implementation accident:
+ *  - ONE covered field is enough. The union is what `covers()` answers, and a requirement addressed
+ *    in the cover letter is addressed by the artifact.
+ *  - A stronger basis wins among covering fields, so the stored quote is the best one available
+ *    rather than whichever field happened to be asked first.
+ *  - Not-covered EVERYWHERE is a real "no", and it is returned as such.
+ *  - **A requirement no field answered is SILENT, never a "no".** It is left OUT of the map so
+ *    `judgeSilent` excludes it from placement. Returning `absent` for it would report the model's
+ *    silence as the model's finding — absent evidence read as a finding, one composition step below
+ *    where anyone would look for it. A requirement answered "no" by one field and unanswered by
+ *    another is silent too: the fields that did not answer might have been the ones that covered it.
+ */
+const BASIS_RANK: Record<CoverageBasis, number> = { direct: 3, synonym: 2, near_phrasing: 1, absent: 0 }
+
+export function combineFieldVerdicts(
+  perField: Array<{ field: string; result: JudgeResult }>,
+  askedSeqs: number[],
+): { verdicts: Map<number, CoverageVerdict & { field: string }>; silent: number[] } {
+  const covering = new Map<number, CoverageVerdict & { field: string }>()
+  const denied = new Map<number, CoverageVerdict & { field: string }>()
+  const answered = new Map<number, Set<string>>()
+  const fields = (perField || []).map(p => p.field)
+
+  for (const { field, result } of perField || []) {
+    for (const v of result.verdicts) {
+      if (!answered.has(v.seq)) answered.set(v.seq, new Set())
+      answered.get(v.seq)!.add(field)
+      if (v.covered) {
+        const held = covering.get(v.seq)
+        if (!held || BASIS_RANK[v.basis] > BASIS_RANK[held.basis]) covering.set(v.seq, { ...v, field })
+      } else if (!denied.has(v.seq)) {
+        denied.set(v.seq, { ...v, field })
+      }
+    }
+  }
+
+  const verdicts = new Map<number, CoverageVerdict & { field: string }>()
+  const silent: number[] = []
+  for (const seq of askedSeqs) {
+    const hit = covering.get(seq)
+    if (hit) { verdicts.set(seq, hit); continue }
+    // Every field that was asked has to have answered before a "no" is a no.
+    const heard = answered.get(seq)
+    const no = denied.get(seq)
+    if (no && heard && fields.every(f => heard.has(f))) { verdicts.set(seq, no); continue }
+    silent.push(seq)
+  }
+  return { verdicts, silent }
+}
+
 /** The verdict lookup `checks.ts` consumes. Keyed by seq, per field. */
 export type VerdictMap = Map<string, Map<number, CoverageVerdict>>
 

@@ -11,6 +11,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import {
   buildCoverageUser, parseCoverageVerdicts, judgeableRequirements, verdictMap, verdictKey,
+  combineFieldVerdicts,
   COVERAGE_BASES, JUDGE_VERSION, PROMPT_VERSION,
 } from '../dist/functions/tests/coverageJudge.js'
 
@@ -140,6 +141,67 @@ test('H:judge-module-stays-pure', () => {
     assert.ok(!src.includes(banned), `coverageJudge.ts references ${banned} — it is no longer pure`)
   }
   assert.ok(COVERAGE_BASES.includes('absent'), 'absent is a first-class basis, not an error state')
+})
+
+// ─── COMPOSITION: covers() asks about the whole artifact, the judge is asked one field at a time ─
+
+const res = (verdicts, unjudged = []) => ({ verdicts, refused: [], unjudged })
+const V = (seq, covered, basis = covered ? 'synonym' : 'absent') => ({
+  seq, covered, basis, quote: covered ? 'aligning engineering strategies' : null,
+  char_start: covered ? 26 : null, char_end: covered ? 57 : null, why: 'r', judge_version: JUDGE_VERSION,
+})
+
+test('H:one-covering-field-covers-the-artifact', () => {
+  // `covers()` decides on covText — EVERY present field joined (checks.ts:526,710). A requirement
+  // addressed in the cover letter is addressed by the artifact, so the union is the right answer
+  // and a per-field "no" beside a per-field "yes" must not cancel it.
+  const { verdicts, silent } = combineFieldVerdicts([
+    { field: 'ResumeSummary', result: res([V(15, false)]) },
+    { field: 'CoverLetterBody', result: res([V(15, true)]) },
+  ], [15])
+  assert.equal(verdicts.get(15).covered, true)
+  assert.equal(verdicts.get(15).field, 'CoverLetterBody', 'and it names the field the quote came from')
+  assert.deepEqual(silent, [])
+})
+
+test('H:the-strongest-basis-carries-the-quote', () => {
+  // Among covering fields the better reading wins, so the stored quote is the best one available
+  // rather than whichever field happened to be asked first.
+  const { verdicts } = combineFieldVerdicts([
+    { field: 'ResumeSummary', result: res([{ ...V(15, true), basis: 'near_phrasing' }]) },
+    { field: 'ExecProfile', result: res([{ ...V(15, true), basis: 'direct' }]) },
+  ], [15])
+  assert.equal(verdicts.get(15).basis, 'direct')
+  assert.equal(verdicts.get(15).field, 'ExecProfile')
+})
+
+test('H:a-no-needs-every-field-to-have-answered', () => {
+  // THE COMPOSITION-LEVEL VERSION OF THE SAME RULE THE PARSER ENFORCES. One field says no and the
+  // other never answered — the silent one might have been the field that covered it, so the honest
+  // result is silence, not "absent". Reporting a partial answer as a finding is exactly the failure
+  // this whole tier is built against, one step below where anyone would look for it.
+  const partial = combineFieldVerdicts([
+    { field: 'ResumeSummary', result: res([V(15, false)]) },
+    { field: 'CoverLetterBody', result: res([], [15]) },
+  ], [15])
+  assert.equal(partial.verdicts.has(15), false, 'a partially-answered requirement is not a verdict')
+  assert.deepEqual(partial.silent, [15])
+
+  // Every field answered no — that IS a no, and it is returned as one.
+  const all = combineFieldVerdicts([
+    { field: 'ResumeSummary', result: res([V(15, false)]) },
+    { field: 'CoverLetterBody', result: res([V(15, false)]) },
+  ], [15])
+  assert.equal(all.verdicts.get(15).covered, false)
+  assert.deepEqual(all.silent, [])
+})
+
+test('H:a-requirement-nobody-answered-is-silent', () => {
+  const { verdicts, silent } = combineFieldVerdicts(
+    [{ field: 'ResumeSummary', result: res([V(15, true)], [12]) }], [15, 12])
+  assert.equal(verdicts.get(15).covered, true)
+  assert.equal(verdicts.has(12), false, 'never invented as absent')
+  assert.deepEqual(silent, [12])
 })
 
 // ─── the CACHE KEY: a model answers twice and may differ, so the answer is stored ──────────────
