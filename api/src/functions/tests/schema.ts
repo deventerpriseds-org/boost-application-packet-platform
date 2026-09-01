@@ -539,6 +539,66 @@ create table if not exists evidence_confirmation (
 );
 create index if not exists evidence_confirmation_opp_idx on evidence_confirmation(opp_id);
 
+-- THE COVERAGE JUDGE'S VERDICTS -- does THIS DOCUMENT address this line of the posting.
+--
+-- WHY A NEW TABLE RATHER THAN AN EXISTING ONE (Extend-don't-duplicate, answered before building).
+-- Three stores were checked and none can hold this. artifact_score has uncovered_requirement_ids
+-- and judged_requirement_ids, but both are bare uuid[] -- no column can carry a basis, a quote, a
+-- reason or a prompt version. check_result is per CHECK KEY, not per requirement, so a verdict has
+-- nowhere to sit in it. requirement_evidence answers the OTHER question entirely: what in the
+-- CANDIDATE'S PROFILE supports the requirement. This one answers what in the DOCUMENT WE WROTE
+-- addresses it. Merging them would fuse the two populations that must_have_coverage and
+-- evidence_placed exist to keep apart.
+--
+-- KEYED ON THE TEXT, NOT ON THE ROW, for exactly the reason evidence_confirmation is:
+-- writeRequirements runs delete from requirement where opp_id=$1 on every re-extraction, so an id
+-- or a seq is destroyed or silently reused. requirement_text survives it.
+--
+-- verdict_key IS THE CACHE, AND EVERY INPUT IS IN IT. A threshold answers identically twice; a
+-- model may not, and a gate that flips between two runs of unchanged code is worse than one that is
+-- wrong consistently. The key is a sha256 over the requirement text, the field name, the FIELD TEXT,
+-- the model, the prompt version and the judge version -- so editing one character of the document,
+-- changing the prompt, or the model-consolidation sweep landing all produce a MISS and a re-judge,
+-- rather than a stale answer no current code would produce.
+--
+-- lexical_covered IS STORED BESIDE covered, deliberately. It is what coversIn said about the same
+-- pair, so a disagreement is queryable rather than anecdotal -- the measurement that says whether
+-- the judge is earning its calls, and the column the UI reads to show both readings.
+create table if not exists requirement_coverage (
+  id               uuid primary key default uuid_generate_v4(),
+  opp_id           uuid not null references opportunity(id) on delete cascade,
+  -- Provenance only, NEVER identity: the verdict is a function of the text, and an artifact that is
+  -- rebuilt with byte-identical text must hit the cache rather than pay for the same answer again.
+  artifact_id      uuid references artifact(id) on delete set null,
+  field            text not null,
+  requirement_text text not null,
+  verdict_key      text not null,
+  covered          boolean not null,
+  basis            text not null check (basis in ('direct','synonym','near_phrasing','absent')),
+  -- A span of the FIELD TEXT at [char_start, char_end), the same offset discipline
+  -- requirement_evidence carries, pointed at the document instead of the profile.
+  quote            text,
+  char_start       int,
+  char_end         int,
+  why              text not null,
+  lexical_covered  boolean not null,
+  judge_version    int not null,
+  prompt_version   int not null,
+  model            text not null,
+  created_at       timestamptz not null default now(),
+  -- Coverage without a quote is the one thing this whole tier exists to refuse. The parser drops
+  -- such a verdict before it is ever stored; this is the same rule where the database can enforce it.
+  check (covered = (quote is not null)),
+  check (not (covered and basis = 'absent')),
+  check (why <> ''),
+  check ((quote is null) = (char_start is null)),
+  check ((char_start is null) = (char_end is null)),
+  check (char_start is null or (char_start >= 0 and char_end > char_start)),
+  check (quote is null or length(quote) = char_end - char_start),
+  unique (opp_id, verdict_key)
+);
+create index if not exists req_coverage_opp_idx on requirement_coverage(opp_id, created_at desc);
+
 -- P1.3 — what the pipeline CHANGED, and whether the posting explains it.
 -- One candidate row per item in every list, INCLUDING unchanged ones: the packet screen shows all
 -- originals against all finals, so "we looked at this and kept it" is a different statement from
@@ -1589,5 +1649,5 @@ export const EXPECTED_TABLES = [
   'term_library', 'term_library_entry', 'term_candidate', 'requirement',
   'skill_candidate', 'swap_decision', 'insertion', 'check_result', 'artifact_gate', 'artifact_score', 'owner_fact', 'review_verdict',
   'remediation_loop', 'escalation', 'requirement_evidence', 'comparison_dimension',
-  'packet_build_job', 'evidence_confirmation'
+  'packet_build_job', 'evidence_confirmation', 'requirement_coverage'
 ]

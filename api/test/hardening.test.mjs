@@ -289,7 +289,10 @@ test('H11: every table this layer added is registered for migration', () => {
                    // of the defect: dropping the name from EXPECTED_TABLES fails this case on
                    // "not in EXPECTED_TABLES", and renaming the CREATE in SCHEMA_SQL fails it on
                    // "not in SCHEMA_SQL".
-                   'comparison_dimension']) {
+                   'comparison_dimension',
+                   // The coverage judge's verdicts. A model-decided check state that pg-migrate
+                   // never created would fail at runtime as "no such relation" on the gate path.
+                   'requirement_coverage']) {
     assert.ok(schema.includes(`create table if not exists ${t} `) || schema.includes(`create table if not exists ${t}(`),
       `${t} is not in SCHEMA_SQL`)
     assert.ok(new RegExp(`'${t}'`).test(schema.slice(schema.indexOf('EXPECTED_TABLES'))),

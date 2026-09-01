@@ -27,14 +27,26 @@
 // `must_have_coverage` and `evidence_placed` exist to keep apart. This answers only: does this text
 // address this line of the posting.
 import { itemTokens } from './swaps'
+import { sha256 } from './evidence'
 
 /** How the document addresses the requirement. `absent` is a real answer, not a failure. */
 export type CoverageBasis = 'direct' | 'synonym' | 'near_phrasing' | 'absent'
 
 export const COVERAGE_BASES: CoverageBasis[] = ['direct', 'synonym', 'near_phrasing', 'absent']
 
-/** The version stamped on every stored verdict, so a prompt change is visible in the data. */
+/** The version stamped on every stored verdict, so a contract change is visible in the data. */
 export const JUDGE_VERSION = 1
+
+/**
+ * The PROMPT's own version, separate from `JUDGE_VERSION` and bumped whenever a word of
+ * `COVERAGE_SYSTEM` or `buildCoverageUser` changes.
+ *
+ * Two versions rather than one because they answer different questions. `JUDGE_VERSION` says what
+ * SHAPE a stored verdict has; this says what was ASKED. A prompt edit that leaves the shape alone
+ * would otherwise serve every cached verdict from the old wording forever — the gate reporting a
+ * state no current code would produce. It is in the cache key for exactly that reason.
+ */
+export const PROMPT_VERSION = 1
 
 export interface JudgeRequirement { seq: number; kind: string; verbatim: string | null; item_text: string }
 
@@ -44,6 +56,16 @@ export interface CoverageVerdict {
   basis: CoverageBasis
   /** A span of the FIELD TEXT, verified present. Null whenever `covered` is false. */
   quote: string | null
+  /**
+   * WHERE in the field text the quote sits, `[char_start, char_end)`. Null with the quote.
+   *
+   * Carried rather than left to be re-derived, and the reason is the same one `requirement_evidence`
+   * stores offsets for: `indexOf` already found the span here, so re-running it downstream is a
+   * second implementation of one answer, and the day the two disagree is the day a highlight lands
+   * on different words than the verdict was made from.
+   */
+  char_start: number | null
+  char_end: number | null
   /** The model's reason, shown to the owner. Never empty on an accepted verdict. */
   why: string
   judge_version: number
@@ -166,7 +188,11 @@ export function parseCoverageVerdicts(
     const covered = row?.covered === true
     if (covered && basis === 'absent') { refused.push({ seq, refusal: 'basis_absent_but_covered' }); continue }
 
-    if (!covered) { seen.add(seq); verdicts.push({ seq, covered: false, basis, quote: null, why, judge_version: JUDGE_VERSION }); continue }
+    if (!covered) {
+      seen.add(seq)
+      verdicts.push({ seq, covered: false, basis, quote: null, char_start: null, char_end: null, why, judge_version: JUDGE_VERSION })
+      continue
+    }
 
     const quote = typeof row?.quote === 'string' ? row.quote.trim() : ''
     if (!quote) { refused.push({ seq, refusal: 'covered_without_quote' }); continue }
@@ -177,7 +203,10 @@ export function parseCoverageVerdicts(
     // The DOCUMENT's own bytes at the found offsets, never the model's string. Equal by construction
     // here because `indexOf` found it — which is exactly why re-slicing is free and closes the gap
     // if that ever stops being true.
-    verdicts.push({ seq, covered: true, basis, quote: text.slice(at, at + quote.length), why, judge_version: JUDGE_VERSION })
+    verdicts.push({
+      seq, covered: true, basis, quote: text.slice(at, at + quote.length),
+      char_start: at, char_end: at + quote.length, why, judge_version: JUDGE_VERSION,
+    })
   }
 
   const unjudged = [...wanted.keys()].filter(s => !seen.has(s)).sort((a, b) => a - b)
@@ -194,6 +223,44 @@ export function parseCoverageVerdicts(
  */
 export function judgeableRequirements(reqs: JudgeRequirement[], minTokens: number): JudgeRequirement[] {
   return (reqs || []).filter(r => itemTokens(reqText(r)).length >= minTokens)
+}
+
+/**
+ * THE CACHE KEY, and every input that can change an answer is in it.
+ *
+ * A threshold answers identically twice; a model may not — so a verdict is stored and re-served
+ * rather than re-asked, and a gate that flipped between two runs of unchanged code would be worse
+ * than one that is wrong consistently.
+ *
+ * WHAT IS IN IT, and why each one:
+ *  - `requirement` — the question. Re-extraction rewrites requirement rows, so the TEXT is the
+ *    identity here, exactly as `evidence_confirmation` keys on `requirement_text` rather than an id.
+ *  - `field` and `fieldText` — the document being judged. One character of an edit is a different
+ *    document and must MISS; serving the old verdict over edited prose is the stale-answer bug this
+ *    whole key exists to prevent.
+ *  - `model` — a different model is a different judge. The consolidation sweep
+ *    (`D:model-is-43-literals`) will change this value, and every cached verdict must fall out when
+ *    it does rather than silently survive.
+ *  - `PROMPT_VERSION` and `JUDGE_VERSION` — what was asked, and the shape of the answer.
+ *
+ * NUL is the separator rather than a printable character. A space or a pipe can occur inside a
+ * requirement or a document, so two different inputs could join to the same string by straddling
+ * that boundary; NUL cannot appear in any of them.
+ *
+ * `sha256` is IMPORTED rather than injected, and that is deliberate: a key computed by two digests
+ * is two caches. `evidence.ts` already owns the one digest this codebase hashes with.
+ */
+export function verdictKey(input: {
+  requirement: string; field: string; fieldText: string; model: string
+}): string {
+  return sha256([
+    `judge:${JUDGE_VERSION}`,
+    `prompt:${PROMPT_VERSION}`,
+    `model:${input.model}`,
+    `field:${input.field}`,
+    `req:${input.requirement}`,
+    `text:${input.fieldText}`,
+  ].join('\u0000'))
 }
 
 /** The verdict lookup `checks.ts` consumes. Keyed by seq, per field. */

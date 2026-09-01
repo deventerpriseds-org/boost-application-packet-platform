@@ -119,6 +119,34 @@ export interface CheckThresholds {
   evidenceEscalate: boolean
   evidenceEscalateMax: number
   /**
+   * THE COVERAGE JUDGE — does a model decide whether this DOCUMENT addresses a requirement, in
+   * place of `coversIn`'s 70% literal word overlap?
+   *
+   * OFF by default, and unlike `evidenceEscalate` above that default is not timidity. The
+   * escalation tier can only ADD a proposal beside a requirement that had none, so ON is safe there.
+   * This one CHANGES A CHECK'S STATE: a verdict decides whether `evidence_placed` names a
+   * requirement as unplaced. Anything that can turn a warn into a pass starts off, and the owner
+   * turns it on once they have seen it read their own packet correctly.
+   *
+   * `coverageJudgeMaxCalls` caps calls per run on the `evidenceEscalateMax` precedent — one call
+   * per FIELD, not per requirement (the prompt batches every requirement into one ask), so the cap
+   * bounds fields judged rather than requirements.
+   *
+   * `coverageJudgeMinQuoteChars` is the same floor `verifyProposal` applies to a profile excerpt,
+   * pointed at the document: a two-character "quote" is present in every document ever written and
+   * proves nothing about coverage.
+   *
+   * NO MODEL COLUMN, deliberately. The model is a literal in 32 files (`D:model-is-43-literals`),
+   * and giving the judge its own model setting would make it the ONE model-configurable call in the
+   * product — the parallel-system shape `Extend, don't duplicate` forbids. It uses what the rest of
+   * the pipeline uses until that sweep lands, at the owner's instruction (2026-09-01): "for now it
+   * can continue using the model the prompt does now, ie gpt4o". The model still participates in
+   * the verdict key, so the sweep invalidates cached verdicts rather than silently keeping them.
+   */
+  coverageJudge: boolean
+  coverageJudgeMaxCalls: number
+  coverageJudgeMinQuoteChars: number
+  /**
    * ADVISORY GATE MODE — does a `fail` BLOCK approval, or may the owner override it with a reason?
    *
    * OFF by default, and the default is the whole safety argument: with this false, `approvalBlock`
@@ -170,7 +198,14 @@ export const DEFAULT_THRESHOLDS: CheckThresholds = {
   evidenceBulletRun: EVIDENCE_BULLET_RUN,
   evidenceEscalate: true,
   evidenceEscalateMax: 12,
-  // FALSE. An owner who has never touched the setting keeps today's behaviour exactly.
+  // FALSE, and for a different reason than `evidenceEscalate` being true: this one can change a
+  // check's state, so an owner who has never touched it gets today's lexical answer exactly.
+  coverageJudge: false,
+  coverageJudgeMaxCalls: 12,
+  // `MIN_QUOTE_CHARS` (reviewer.ts:157), the floor the profile side already uses. Named here rather
+  // than imported so this module stays free of the reviewer's dependencies; the two are held
+  // together by H:judge-quote-floor-matches-the-profile-side.
+  coverageJudgeMinQuoteChars: 20,
   gateAdvisory: false,
 }
 

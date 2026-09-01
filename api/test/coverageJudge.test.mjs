@@ -10,8 +10,8 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import {
-  buildCoverageUser, parseCoverageVerdicts, judgeableRequirements, verdictMap,
-  COVERAGE_BASES, JUDGE_VERSION,
+  buildCoverageUser, parseCoverageVerdicts, judgeableRequirements, verdictMap, verdictKey,
+  COVERAGE_BASES, JUDGE_VERSION, PROMPT_VERSION,
 } from '../dist/functions/tests/coverageJudge.js'
 
 // The live summary, verbatim from insertion.after_text.
@@ -140,6 +140,56 @@ test('H:judge-module-stays-pure', () => {
     assert.ok(!src.includes(banned), `coverageJudge.ts references ${banned} — it is no longer pure`)
   }
   assert.ok(COVERAGE_BASES.includes('absent'), 'absent is a first-class basis, not an error state')
+})
+
+// ─── the CACHE KEY: a model answers twice and may differ, so the answer is stored ──────────────
+
+const KEY = { requirement: REQS[2].verbatim, field: 'ResumeSummary', fieldText: SUMMARY, model: 'gpt-4o' }
+
+test('H:verdict-key-changes-with-the-document', () => {
+  // AC-8b. One character of an edit is a DIFFERENT DOCUMENT and must miss the cache. Serving the
+  // old verdict over edited prose is the stale-answer failure the key exists to prevent — and it
+  // would be invisible, because a hit looks exactly like a correct answer.
+  const same = verdictKey(KEY)
+  assert.equal(same, verdictKey({ ...KEY }), 'identical inputs are one key')
+  assert.notEqual(same, verdictKey({ ...KEY, fieldText: SUMMARY.replace('Visionary', 'visionary') }))
+  assert.notEqual(same, verdictKey({ ...KEY, requirement: KEY.requirement + '.' }))
+  assert.notEqual(same, verdictKey({ ...KEY, field: 'CoverLetter' }))
+  assert.notEqual(same, verdictKey({ ...KEY, model: 'gpt-4o-mini' }),
+    'a different model is a different judge — the consolidation sweep must invalidate, not inherit')
+})
+
+test('H:verdict-key-carries-the-prompt-version', () => {
+  // AC-8a. The version is IN the key, so editing the prompt cannot leave every cached verdict
+  // answering the old question. Asserted structurally because the constant cannot be varied at
+  // runtime: the built key must not be reproducible without the version that produced it.
+  const src = readFileSync(new URL('../src/functions/tests/coverageJudge.ts', import.meta.url), 'utf8')
+  const body = src.slice(src.indexOf('export function verdictKey'))
+  assert.ok(/PROMPT_VERSION/.test(body), 'verdictKey must include PROMPT_VERSION')
+  assert.ok(/JUDGE_VERSION/.test(body), 'verdictKey must include JUDGE_VERSION')
+  assert.ok(/input\.model/.test(body), 'verdictKey must include the model')
+  assert.ok(/input\.fieldText/.test(body), 'verdictKey must include the field text')
+  assert.equal(typeof PROMPT_VERSION, 'number')
+  // NUL, not a space or a pipe: a separator that can occur inside a requirement or a document lets
+  // two different inputs join to one string.
+  assert.ok(/join\('\\u0000'\)/.test(body), 'the separator must be NUL')
+})
+
+test('H:verdict-carries-the-offsets-it-was-made-from', () => {
+  // The quote and its position are ONE fact. Downstream re-running indexOf is a second
+  // implementation of an answer this module already has, and the day they disagree a highlight
+  // lands on different words than the verdict was made from.
+  const quote = 'aligning engineering strategies with business objectives'
+  const r = parseCoverageVerdicts({ verdicts: [
+    { seq: 15, covered: true, basis: 'synonym', quote, why: 'same claim, reworded' },
+    { seq: 12, covered: false, basis: 'absent', quote: null, why: 'no claim of leading an org' },
+  ] }, REQS.slice(1), SUMMARY)
+  const v = r.verdicts.find(x => x.seq === 15)
+  assert.equal(SUMMARY.slice(v.char_start, v.char_end), quote, 'the offsets index the quote exactly')
+  assert.equal(v.char_start, SUMMARY.indexOf(quote))
+  const no = r.verdicts.find(x => x.seq === 12)
+  assert.deepEqual([no.quote, no.char_start, no.char_end], [null, null, null],
+    'no quote means no offsets — never 0, which is a position')
 })
 
 // ─── the WIRING: checks.ts prefers the verdict, falls back, and never guesses ──────────────────
