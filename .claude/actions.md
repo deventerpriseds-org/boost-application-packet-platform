@@ -5836,3 +5836,30 @@ idempotent on re-run, with F-2 not reproducing.
 → container restore; this one → stopped mid-pass). The relevant-pool and slot-wiring lanes remain
 **NOT VERIFIED**, and the 16 commits on `claude/incumbent-wins-swap` are still not on `main`, so none
 of that code is running.
+
+---
+
+## 2026-09-01 — LLM judgement replaces lexical matching (owner-directed); confirm button BUILT
+
+**Owner:** *"what is done today by actors simply needs to be swapped by a model that can reason
+instead of word matching but only where it makes sense"*, and *"when I said include the gate I meant
+fold this in with the rest of what you've been working on instead of deleting it"*.
+
+**DONE, committed, NOT deployed:**
+- `bb7e620` — **the confirm button**. Route existed complete and had no caller; measured live first
+  (`boost-pg-mcp-write`): **15 `proposed` evidence rows across 15 requirements, all uncounted**, each
+  with a verified quote from the owner's profile. app 422/422, api `tsc` clean, four guards
+  mutation-proved. An existing guard (`H:evidence-read-from-the-verdict-not-the-columns`) caught a real
+  defect in my first version and it was fixed at the endpoint layer.
+- `ffb97b3` — `AC-llm-gate-and-stuffing.md`, 1,029 lines. Refutes two of my claims: **thirteen** checks
+  can fail the gate, not one; and `supportIn` is **nine gates**, not one threshold.
+- `ac820fd` — **RETRACTED the `#9 must fail` acceptance bar.** I set it by word-matching. Evidence and
+  the corrected bar: `docs/qc-evidence/DIAG-coverage-recognition.md`, final section.
+
+**OPEN, in order:**
+1. **Versioning** (`D:every-build-is-destructive`) — owner-decided prerequisite for Rewrite.
+2. **The Rewrite button** — the owner's original ask, on prose sections beside List Tweaks.
+3. The three judge lanes (document coverage, profile evidence, stuffing), ACs written for all three.
+
+**Evidence:** `docs/qc-evidence/DIAG-summary-stuffing.md`, `DIAG-coverage-recognition.md`,
+`FEASIBILITY-llm-judgement.md`, `AC-llm-coverage-judge.md`, `AC-llm-gate-and-stuffing.md`.

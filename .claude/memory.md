@@ -4943,3 +4943,46 @@ rerouted.
 `/home/user/.claude/actions.md`. It echoed `done` and exited 0. Two turns of ledger rows lived
 outside the repo where no commit would ever pick them up. **Always `cd` to the repo in the same
 command as a `>>` append, and confirm with `git status` — not with the command's exit code.**
+
+## Coverage is decided by string matching, not judgement — and the acceptance bar I wrote was too (2026-09-01)
+
+**Feature status.** `AC-llm-coverage-judge.md` (21 ACs, document lane) and `AC-llm-gate-and-stuffing.md`
+(1,029 lines, gate + stuffing lanes) are written and committed. The **confirm button is BUILT** on
+`claude/incumbent-wins-swap` (`bb7e620`) — app 422/422, api `tsc` clean, four new guards each
+mutation-proved. **NOT DEPLOYED: nothing is on `main`, and the owner has not pressed one.**
+
+**The architecture, measured.** `grep -rn "openai(" api/src/functions/tests/*.ts` returns two files —
+`pipeline.ts` and `mt19.ts`, generation only. **No model participates in any coverage, evidence,
+placement or attribution decision.** Nine tuned lexical constants do. An LLM path exists
+(`evidenceProposal.ts` + `verifyProposal`, citation checked byte-exact) and is barred from counting in
+three places. The house rule is `checks.ts:781` — *"a model may PROPOSE, only an exact rule may
+ACCUSE"*. **The rule is sound; equating "verifiable" with "lexical" is the defect.**
+
+**Owner's decision, recorded:** swap the lexical actors for a model that reasons **only where it makes
+sense** — document coverage, profile evidence and stuffing become model judgements; `locate()` goes
+hybrid (model picks the sentence, code computes offsets); `similarity()` stays lexical (ranking).
+"Include the gate" meant *do not defer it out of scope*, not "put the document judge on
+must_have_coverage".
+
+### Hardening — FOUR instances of one pattern, all caught by the owner
+1. Read the shipped summaries by eye and called them clean — measurement disagreed.
+2. Saw two numbers on one card and inferred a shared source — the trace disagreed.
+3. Printed `sameWord`'s wrong answers and called them scope rather than defect.
+4. **Set the judge's acceptance bar (`#9 must fail`) by word-matching, while arguing word-matching is
+   the defect.** #9 is mostly covered: a *technology leader* aligning *engineering strategies* and
+   delivering *scalable, secure software* IS describing technical teams — reading that is the whole
+   point of using a model.
+
+**The guard:** of every value reported, ask *is this the correct answer to the question asked?* — not
+*is this what the code returns?* Never let a tool's limitation define correctness, and never write an
+acceptance bar that requires a judge to reproduce an answer I pre-decided by the method being replaced.
+
+**Also corrected:** two of my own "PROVEN" claims were wrong from single-name greps — the confirm ROUTE
+existed (`appRequirements.ts:948`), and `app/src` does render evidence (via `evidencePresentation`).
+And `must_have_coverage` is not the only gate-failing check: **thirteen** take `bad()`'s default.
+
+### Active work
+- **NEXT: versioning (`D:every-build-is-destructive`)** — `artifact.version_history` stores `{"len": N}`,
+  a character count, not the text. The owner decided (OD-5) this is fixed **before** the Rewrite button,
+  because a Rewrite over it is an irreversible overwrite of their own prose.
+- Then the **Rewrite button** — the owner's original ask, distinct from the confirm button.
