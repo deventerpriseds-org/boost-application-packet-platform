@@ -785,9 +785,29 @@ export function runChecks(input: CheckInput): CheckResult[] {
    * different facts and reporting the second for the first is absent evidence read as a finding.
    */
   const verdicts = input.judgeVerdicts
+  /**
+   * STRICTLY ADDITIVE: a verdict may turn "not covered" into "covered". It may NEVER do the reverse.
+   *
+   * F-7, found by an independent verifier (VERIFY-coverage-judge-3.md) and a defect I shipped. The
+   * safeguard this whole tier rests on — "the model must point at words the document contains, and
+   * code checks that it did" — binds only the model's YES. A `covered: false` is accepted with
+   * `quote: null`, because you cannot cite an absence. And `covered: false` is the branch that
+   * produces the OFFENDER LINE. So one uncited model sentence could turn a passing check into a
+   * named accusation about a document containing the requirement WORD FOR WORD:
+   *
+   *   document    "Aligning engineering strategy with business goals is what I have done for a decade."
+   *   requirement "Ability to align engineering strategy with business goals"
+   *   lexical     pass, no offenders
+   *   judge "no"  warn, "#0 ... absent from this asset"
+   *
+   * The lexical rule it replaced could not do that. The judge exists to fix FALSE NEGATIVES — a
+   * document that says it in other words — so its yes is the half worth having and its no adds
+   * nothing an exact rule cannot already see. Making it additive means an uncited "no" is inert
+   * rather than accusatory, which is also what every claim made for this lane already said it was.
+   */
   const covers = (r: { seq?: number; verbatim: string | null; item_text: string }) => {
     const v = verdicts && r.seq != null ? verdicts.get(Number(r.seq)) : undefined
-    return v ? v.covered : coversIn(covText, r)
+    return (v?.covered === true) || coversIn(covText, r)
   }
   /** Asked and unanswered — excluded from placement rather than judged by the fallback. */
   const judgeSilent = (r: { seq?: number }) =>

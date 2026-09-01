@@ -159,3 +159,63 @@ test('H:a-deterministic-row-is-unaffected-by-any-of-this', () => {
   assert.equal(o.state, 'pass')
   assert.match(o.observed, /1\/1 must-haves evidenced/)
 })
+
+// ─── F-3, from VERIFY-coverage-judge-3: a gap in the wrong container is still a gap ─────────────
+
+test('H:a-gap-named-outside-an-array-still-refuses-the-row', () => {
+  // THE ONE MALFORMED INPUT THAT USED TO RESOLVE TOWARD ADMITTING THE CLAIM. The prompt asks for
+  // `"missing":[<string>]`; a model answering `missing: 'SOC 2 cert'` is a JSON-shape slip, not an
+  // exotic input. It used to be discarded by `Array.isArray(...) ? ... : []`, and the row was then
+  // promoted to `vetted` — which counts toward the gate. Every other malformed shape in this module
+  // refuses. Found by an independent verifier, not by me.
+  const v = parseSupportVerdict({
+    missing: 'a named SOC 2 certification', supported: true,
+    quote: 'tied engineering delivery to revenue targets', why: 'w',
+  }, EXCERPT)
+  assert.equal(v.supported, false, 'a gap named as a bare string must still refuse the row')
+  assert.equal(v.refusal, 'missing_named')
+  assert.deepEqual(v.missing, ['a named SOC 2 certification'], 'and it is reported, not swallowed')
+
+  // Absent is still absent — the honest empty case must keep working.
+  assert.equal(parseSupportVerdict({
+    supported: true, quote: 'tied engineering delivery to revenue targets', why: 'w',
+  }, EXCERPT).supported, true, 'no `missing` key at all is an empty gap list, not a refusal')
+})
+
+// ─── F-7, from VERIFY-coverage-judge-3: the judge may only ADD coverage ────────────────────────
+
+test('H:the-judge-can-add-coverage-and-can-never-take-it-away', async () => {
+  // A DEFECT I SHIPPED. The citation safeguard binds only the model's YES — a `covered:false` is
+  // accepted with `quote:null`, because an absence cannot be cited — and `covered:false` is the
+  // branch that produces the offender line. So one uncited model sentence could turn a passing
+  // check into a named accusation about a document containing the requirement WORD FOR WORD.
+  const { runChecks } = await import('../dist/functions/tests/checks.js')
+  const VERBATIM = 'Ability to align engineering strategy with business goals is what I have done for a decade.'
+  const req = { id: 'r0', seq: 0, kind: 'must_have',
+    verbatim: 'Ability to align engineering strategy with business goals', item_text: '' }
+  const base = {
+    type: 'resume', pkg: { ResumeSummary: VERBATIM }, requirements: [req],
+    evidence: { profileReadable: true, bySeq: { 0: { quote: EXCERPT, source_label: 'Work history 1',
+      source_key: 'work:1', char_start: 0, char_end: EXCERPT.length, method: 'anchored',
+      extra: null, confirmed_at: null, ratio: null } } },
+    profileText: EXCERPT, postingText: req.verbatim,
+  }
+  const placed = (rs) => rs.find(r => r.check_key === 'evidence_placed')
+
+  const lexical = placed(runChecks(base))
+  assert.equal(lexical.state, 'pass', 'the document contains the requirement verbatim')
+
+  const modelSaysNo = placed(runChecks({ ...base,
+    judgeVerdicts: new Map([[0, { covered: false, basis: 'absent', quote: null, why: 'I do not think so' }]]) }))
+  assert.equal(modelSaysNo.state, 'pass',
+    'an uncited model "no" must NOT accuse a document that says it word for word')
+  assert.equal(modelSaysNo.offenders.length, 0)
+
+  // And the direction the tier exists for still works: a document that says it in OTHER words.
+  const REWORDED = { ...base, pkg: { ResumeSummary: 'Aligning engineering strategies with business objectives for a decade.' } }
+  assert.equal(placed(runChecks(REWORDED)).state, 'warn', 'the lexical rule misses the paraphrase')
+  assert.equal(placed(runChecks({ ...REWORDED,
+    judgeVerdicts: new Map([[0, { covered: true, basis: 'synonym',
+      quote: 'Aligning engineering strategies with business objectives', why: 'same claim' }]]) })).state,
+    'pass', 'and the judge still fixes it — the half worth having is untouched')
+})

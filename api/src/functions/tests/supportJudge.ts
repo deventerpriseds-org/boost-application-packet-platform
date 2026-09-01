@@ -108,7 +108,17 @@ export function parseSupportVerdict(raw: any, excerpt: string): SupportVerdict {
   if (!raw || typeof raw !== 'object') {
     return { ...base, supported: false, missing: [], why: '', refusal: 'unparseable' }
   }
-  const missing = (Array.isArray(raw.missing) ? raw.missing : [])
+  // F-3, found by an independent verifier and a defect I shipped: this read
+  // `Array.isArray(raw.missing) ? raw.missing : []`, so a model naming its gap as a BARE STRING —
+  // `missing: 'SOC 2 cert'` against a prompt asking for `["..."]`, a JSON-shape slip rather than an
+  // exotic input — had its gap DISCARDED and the row promoted to `vetted`, which counts toward the
+  // gate. Every other malformed shape in this module refuses; this one alone resolved in the
+  // direction that ADMITS the claim, against the file's own rule that absent evidence is never a
+  // pass. A named gap in the wrong container is still a named gap.
+  const rawMissing = raw.missing
+  const missing = (Array.isArray(rawMissing) ? rawMissing
+    : rawMissing == null ? []
+    : [rawMissing])
     .map((m: any) => String(m || '').trim()).filter(Boolean)
   const why = String(raw.why || '').trim()
 
