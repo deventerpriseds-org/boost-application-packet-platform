@@ -1168,9 +1168,17 @@ test('H:the-screen-and-the-gate-agree-about-what-counts', () => {
     `THE SCREEN AND THE GATE DISAGREE ABOUT WHAT COUNTS. checks.ts counts [${gateMethods}] and ` +
     `postingAnalysis.js counts [${screenMethods}]. One of them is telling the owner something the ` +
     'other will not honour.')
-  // And the veto is checked in both, first. A copy of the list that forgot the veto would pass the
-  // comparison above while counting rows the owner rejected.
-  assert.match(screen, /trim\(ev\.decision\) !== 'vetoed'/, 'the screen must exclude a vetoed row')
+  // And the veto is checked in both. A copy of the list that forgot it would pass the comparison
+  // above while counting rows the owner rejected.
+  //
+  // SCOPED TO THE `countsNow` EXPRESSION, because the file-wide version of this assertion PASSED ON
+  // BROKEN CODE. Measured by mutation: deleting the veto check from `countsNow` left this guard
+  // green, because `decidable` contains the same string two lines below and satisfied the match.
+  // A structural grep is only worth what its scope is worth -- the same lesson postingCompare's
+  // CARD_BLOCK helper was written for, arriving here from the other direction: there a whole-file
+  // scan fired on correct code, here it stayed silent on broken code.
+  assert.match(s[0], /trim\(ev\.decision\) !== 'vetoed'/,
+    'countsNow no longer excludes a vetoed row — the screen would count what the owner rejected')
   assert.match(gate, /if \(isVetoed\(r\)\) return null/, 'the gate must exclude a vetoed row, first')
 })
 
