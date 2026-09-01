@@ -80,3 +80,21 @@ using `/workspace/eds-claude-skills/scripts/mutate.sh`:
 Both mutations restored cleanly (`restored: <file> matches HEAD`). The guard is real in both
 directions it claims to cover.
 
+## C9 — veto is legible: 3 states distinct, no warrant badge beside a veto, missing reaches control: CONFIRMED
+
+Read `PostingAnalysis.jsx` `EvidenceLine` directly: `confirmed` badge requires `!ev.vetoed`, `vetted`
+badge requires `!ev.confirmedAt && !ev.vetoed`, `countingNow` badge requires `ev.countsNow` (which
+structurally excludes vetoed rows per C8), and the `vetoed` badge itself renders unconditionally on
+`ev.vetoed` with a distinct red, "you vetoed this — it is not counted". So a vetoed row can only ever
+show the vetoed badge, never a confirmed/vetted/counting-now badge beside it. `missing={ev.missing}`
+is passed into `<ConfirmProposal>`, which renders it above the yes/no buttons when non-empty.
+
+Mutation-proved independently: stripped the `!ev.vetoed` guard from the `confirmed` badge only →
+`FIRED: 'H:a-veto-is-visible-and-outranks-every-other-badge' failed with the defect reinstated.`
+Restored cleanly.
+
+Noted as a design choice, not a defect: once a row is vetoed (or confirmed), `decidable` goes false
+and the confirm/reject buttons disappear — there is no UI path to *undo* a veto from this control.
+The code comment says this is deliberate ("undoing a decision is a separate act with its own
+affordance"), and the brief's claims don't ask for undo, so this is not scored against C9.
+
