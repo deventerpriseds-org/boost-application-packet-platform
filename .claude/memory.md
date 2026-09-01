@@ -5405,3 +5405,32 @@ count it as a real pass. Recorded as an accepted gap in `ACT-2026-09-01-k` inste
 instruction first names a DELIVERABLE SHAPE** — "build copies of these artifacts with the
 mastercontext information" is that moment — **before the first file is opened.** Not after the first
 defect is reported, which is when I reached for one.
+
+### Hardening — a guard that FIRES is not a guard that COVERS
+
+The independent verifier refuted 2 of 9 claims on code whose guards had already been
+mutation-proven five times. `H:baseline-shape` and `H:baseline-relevant-seed` are genuinely
+load-bearing — five mutations, five FIRED — and both were still blind to inputs that sat in HEAD with
+the suite 1026/1026 green:
+
+| Defect | The input the guard never constructed |
+|---|---|
+| C1 | a separators-only block (`"|"`), returned verbatim by `if (!items.length) continue` |
+| C5 | a caller list that is non-empty but SHORT — `[['a','b','c']]` — passing an OUTER `lists.length` test while slots 2-3 keep the pooled Library |
+
+**Mutation-proving answers "can this guard fail?", not "does this guard cover its subject?"** Both
+questions are necessary and only the first has a tool. I wrote each guard from the happy path I had
+just implemented, so its fixtures were the inputs I already had in mind — which is precisely the
+blind spot an AC pass written BEFORE the code is supposed to remove, and this feature had no AC pass
+(`ACT-2026-09-01-k`).
+
+**The cheap habit that would have caught both: for every branch you write, ask what input REACHES it,
+and make that input a fixture.** `if (!items.length) continue` and `Array.isArray(lists) &&
+lists.length` are each one branch, and neither had a test that entered it. A guard whose fixtures
+never reach a branch cannot see what that branch does.
+
+**Also worth keeping, from C7.** The verifier confirmed "no model call" by tracing the CALL graph — 28
+functions across 11 files — not the import closure, which is 50 files and DOES contain OpenAI
+transport (`appPackets` → `pipeline`). A grep of imports would have given the wrong answer. It ran a
+sanity control proving its analyser could still find the model path from `artifactDocument`, so the
+negative is a measured absence rather than a broken tool.

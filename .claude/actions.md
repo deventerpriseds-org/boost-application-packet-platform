@@ -6810,3 +6810,35 @@ first defect is reported.
 **Gate (b) IS satisfied**: an independent `verifier` subagent is running against nine claims,
 including re-deriving both mutation proofs itself, writing to
 `.claude/verify/VERIFY-baseline-relevant-seed-1.md`.
+
+---
+
+## ACT-2026-09-01-l — Verifier refuted 2 of 9; both fixed, both now guarded (CLOSES -j and -k)
+
+**Gate (b) delivered, and it earned its keep.** 7 CONFIRMED, 2 REFUTED. Evidence committed at
+`.claude/verify/VERIFY-baseline-relevant-seed-1.md` (483 lines, per-claim verdicts).
+
+**C5 REFUTED — the serious one.** `relevantOverlay` chose between caller lists and the seed with one
+OUTER test. A short-but-non-empty caller list passed it, leaving slots 2-3 with no key and therefore
+the pooled 36-term Library — the exact thing the seed replaces. A flat array threw a `TypeError` the
+route turned into an HTTP 500. **Fixed:** fallback is chosen PER SLOT; a non-array element degrades
+to that slot's seed instead of throwing.
+
+**C1 REFUTED — narrow but real.** A separators-only block (`"|"`) was returned verbatim by
+`if (!items.length) continue`, rendering pipes through the one branch that skips the rewrite.
+**Fixed:** the key is DELETED, not set to `''` — an absent key leaves the template's token for
+`stripLeftoverTokens`, whereas `''` injects emptiness indistinguishable from real blank content.
+
+**Two new H-cases, both mutation-proven FIRED:** `H:baseline-shape-empty-items`,
+`H:baseline-relevant-per-slot`. Suite **1028 pass, 0 fail**. Deployed `3207af4` on `main`.
+
+**Neither defect ever affected output.** Every live stored value has real items, and nothing has
+called the route with a `relevant` override. Latent, not broken — stated so the record does not imply
+a production incident.
+
+**The lesson, which is the durable part:** both guards had FIRED under five mutations and both were
+blind to these inputs. Mutation-proving answers *can this guard fail*, not *does it cover its
+subject* — and only the first has a tool. See the Hardening entry in `memory.md`.
+
+**PR #71 merged** when `main` fast-forwarded; everything since is on `main` at `3207af4`, so the
+branch carries nothing unmerged and no replacement PR is needed.
