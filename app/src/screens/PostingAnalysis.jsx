@@ -419,7 +419,7 @@ function RequirementRow({ r, usage = null, onGoToFieldRef = null, oppId = null, 
  * and 409 (the excerpt is not a model proposal). Each is a fact the owner has to be able to act on,
  * so `postDetailed` carries the sentence up and it is printed rather than replaced.
  */
-function ConfirmProposal({ seq, oppId, onConfirmed }) {
+function ConfirmProposal({ seq, oppId, onConfirmed, missing = null }) {
   const [busy, setBusy] = useState(null)
   const [err, setErr] = useState(null)
   const send = async (decision) => {
@@ -434,9 +434,26 @@ function ConfirmProposal({ seq, oppId, onConfirmed }) {
   return (
     <div style={{ marginTop: 5 }} data-qc={POSTING_HOOKS.confirm}>
       <div className="px-small" style={{ color: 'var(--proto-ink3)', textTransform: 'none' }}>
-        A model found this line in your profile. It does not count toward coverage until you say it
-        is right.
+        {/* THIS SENTENCE USED TO SAY THE OPPOSITE AND WAS TRUE WHEN WRITTEN. It read "It does not
+            count toward coverage until you say it is right", which described the gate exactly until
+            proposals began counting on creation. A screen that tells the owner a row is excluded
+            while the gate counts it is worse than no explanation: it makes the number they are
+            looking at unreconcilable with the rows in front of them. */}
+        A model found this line in your profile, and it is counting toward your coverage now. Say so
+        if it is right, or veto it and it stops counting.
       </div>
+      {/* WHAT A SECOND READ SAID THIS EXCERPT FAILS TO SHOW. Until now this was computed on every
+          escalation, counted into a request-scoped tally, and thrown away -- so the app asked the
+          owner for a judgement while withholding the one thing it had learned that bears on it.
+          Rendered ABOVE the buttons deliberately: it is the input to the decision, not a footnote
+          about it. */}
+      {missing && missing.length > 0 && (
+        <div className="px-small" data-qc={POSTING_HOOKS.missing}
+             style={{ marginTop: 4, color: 'var(--proto-ink3)', textTransform: 'none' }}>
+          A second read could not find {missing.length === 1 ? 'this' : 'these'} in the excerpt:{' '}
+          <span style={{ color: 'var(--proto-ink2)' }}>{missing.join('; ')}</span>
+        </div>
+      )}
       <div style={{ display: 'flex', gap: 8, marginTop: 4, flexWrap: 'wrap' }}>
         <button className="px-btn px-btn-sm" disabled={!!busy} data-qc={POSTING_HOOKS.confirmYes}
           onClick={() => send('confirm')}>
@@ -490,7 +507,7 @@ function EvidenceLine({ r, oppId = null, onConfirmed = null }) {
         {/* WHO STOOD BEHIND IT. Printed beside the state rather than replacing it, because "a model
             found this" and "you accepted it" are two different facts and the reader needs both — the
             second is what makes it count. */}
-        {ev.confirmedAt && (
+        {ev.confirmedAt && !ev.vetoed && (
           <span data-qc={POSTING_HOOKS.confirmed} style={{ color: 'var(--proto-green)', fontWeight: 600 }}>
             · you confirmed this{ev.confirmedBy ? ` (${ev.confirmedBy})` : ''}
           </span>
@@ -501,9 +518,31 @@ function EvidenceLine({ r, oppId = null, onConfirmed = null }) {
             cannot tell a better profile from a chattier model. It is deliberately NOT phrased as
             agreement: a model was challenged and held, which is not the same as the owner saying
             yes, and the confirm control below still offers them that. */}
-        {ev.vetted && !ev.confirmedAt && (
+        {ev.vetted && !ev.confirmedAt && !ev.vetoed && (
           <span data-qc={POSTING_HOOKS.vetted} style={{ color: 'var(--proto-ink2)', fontWeight: 600 }}>
             · vetted: challenged for what it misses, and it held
+          </span>
+        )}
+        {/* COUNTING ON A MODEL'S SAY-SO ALONE — the weakest warrant that still moves the number,
+            and therefore the one that most needs saying out loud. The gate's own observed string
+            carries the same disclosure for the same reason: counting proposals inverts the house
+            rule that only an exact rule may accuse, and an inversion nobody can see is
+            indistinguishable from the rule having been dropped. Deliberately NOT green — it is
+            true, not settled, and colouring it like a confirmation would overstate it. */}
+        {ev.countsNow && ev.method === 'proposed' && !ev.confirmedAt && (
+          <span data-qc={POSTING_HOOKS.countingNow} style={{ color: 'var(--proto-ink3)' }}>
+            · counting on a model's word — veto it if it is wrong
+          </span>
+        )}
+        {/* THE OWNER'S NO, and it wins the row. Placed last so it renders after every warrant
+            badge, mirroring `ruleEvidenceOf`'s own order: the veto is checked first there and
+            outranks every method, so on screen it must not appear as one more note beside
+            "vetted" or "you confirmed this". Red, because a row that stopped counting is a
+            reduction the owner needs to recognise as their own doing rather than a resolver
+            regression. */}
+        {ev.vetoed && (
+          <span data-qc={POSTING_HOOKS.vetoed} style={{ color: 'var(--proto-red)', fontWeight: 600 }}>
+            · you vetoed this — it is not counted
           </span>
         )}
       </div>
@@ -511,8 +550,8 @@ function EvidenceLine({ r, oppId = null, onConfirmed = null }) {
       {/* A model's proposal the owner has not ruled on. Rendered ONLY when there is somewhere to send
           the answer — without `oppId` the route cannot be called, and `CLAUDE.md`'s no-dead-UI rule
           says hide the control rather than show one that cannot work. */}
-      {ev.awaitingConfirmation && oppId && (
-        <ConfirmProposal seq={r.seq} oppId={oppId} onConfirmed={onConfirmed} />
+      {ev.decidable && oppId && (
+        <ConfirmProposal seq={r.seq} oppId={oppId} onConfirmed={onConfirmed} missing={ev.missing} />
       )}
 
       {/* THE REASONING, OUT FROM BEHIND THE DISCLOSURE for a vetted row. Everywhere else `extra` is

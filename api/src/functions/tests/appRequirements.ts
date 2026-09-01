@@ -779,6 +779,24 @@ export function shapeRequirementsForApi(joined: any[], records: ProfileRecord[] 
       // behaviour the confirmation join was built for.
       confirmedAt: r.evidence_confirmed_at ?? null,
       confirmedBy: r.evidence_confirmed_by ?? null,
+      // THE OWNER'S DECISION, INSIDE THE VERDICT FOR THE SAME REASON THE CONFIRMATION IS.
+      // `H:evidence-read-from-the-verdict-not-the-columns` forbids a screen reading the raw
+      // `evidence_*` columns, and it caught exactly that being done for `confirmed_at`. A veto has
+      // the identical property: it is a decision ABOUT THIS EXCERPT, so when the excerpt fails
+      // re-validation and this whole object goes null, the veto must go with it. A veto surviving
+      // its own excerpt would suppress a row on the strength of a judgement the owner made about
+      // text that is no longer there.
+      //
+      // 'vetoed' | 'confirmed' | null, and null means UNDECIDED -- never rejected. The screen needs
+      // all three states because they are three different things to show the owner, and collapsing
+      // "nobody looked" into "rejected" is the same fail-open-in-the-wrong-direction mistake the
+      // gate's allow-list exists to prevent.
+      decision: r.evidence_decision ?? null,
+      // What a second read said this excerpt fails to show. This is the material the owner needs in
+      // order to veto WELL rather than merely quickly -- until now it was tallied into a
+      // request-scoped counter and discarded, so the app asked for a judgement while withholding
+      // the one thing it had learned that bears on it.
+      missing: Array.isArray(r.evidence_missing) ? r.evidence_missing : null,
     },
     // The state, and the sentence for it, from the ONE map in evidence.ts. `evidenceNote` is null
     // only when the excerpt is provable; "no evidence found in your profile" is now ONE of five
