@@ -6340,3 +6340,56 @@ you asked for", that is the signal to re-read the request, not to ship the list 
 file"* vs *"a document built from it"* — and confirm the retrieval targets that noun. `artifact`
 rows and `TEMPLATE_META` ids are different tables entirely; no amount of care inside the wrong one
 recovers it.
+
+---
+
+## ACT-2026-09-01-c — Master-filled artifact copies: FEASIBILITY (supersedes -a and -b)
+
+**Owner, third correction:** *"I didn't ask for the templates I asked for the same process we use to
+build copies of these artifacts but with the mastercontext information and no prompt output changes
+applied. those templates don't have the master content applied to the placeholders."*
+
+**The object, stated as a noun before any query this time:** a Drive COPY of each template whose
+`{{Placeholder}}` tokens carry MasterContext content, produced by the existing copy-and-inject path,
+with zero model calls. Not the template (that was -b). Not a tailored build (that was -a).
+
+**Status: FEASIBILITY COMPLETE — BOTH HALVES ALREADY EXIST. Nothing built; awaiting the owner's call
+on one binding decision.**
+
+### The mechanism is already there — this is wiring, not construction
+
+| Dependency | Producer | Consumer today | Proof | Verdict |
+|---|---|---|---|---|
+| MasterContext → merge-field record | `loadMasterBaseline()` `appInsertions.ts:25` → `masterBaseline()` `evidence.ts:221` | `appInsertions.ts:84` as the loop-0 "before"; `appSwaps.ts:93` | read both | **EXISTS** |
+| Copy template + inject a pkg | `renderArtifact()` `appPackets.ts:659` | `appPackets.ts:784`, `appRemediation.ts:481` | read | **EXISTS** |
+| Doing it with NO model call | `renderArtifact` takes `pkg` as a PARAMETER and makes no OpenAI call; generation happens upstream in `buildPackageForJD` (`appPackets.ts:520`) | — | read | **EXISTS** |
+| A caller wiring the two | — | — | `grep loadMasterBaseline` returns 4 sites, none calls `renderArtifact` | **ABSENT** |
+| An artifact row to render into | `artifact.packet_id` → `packet.opp_id` **NOT NULL** (`schema.ts:84`) | — | schema read | **EXISTS-BUT-CONSTRAINED** |
+
+`renderArtifact(client, art, opp, await loadMasterBaseline())` is, essentially, the whole feature.
+
+### Coverage is NOT uniform, and this is the part that needs a decision
+
+`MASTER_BASELINE_FIELD` (`evidence.ts:198`) maps 15 merge fields. `@Company`,
+`@CoverLetterDate` and `@CoverLetterBody` are **deliberately unmapped** — no standing master block.
+Against each template's `placeholders` (`packetTemplates.ts:23-55`):
+
+| Template | Placeholders | Filled from master | Coverage |
+|---|---|---|---|
+| **resume** | 7 | all 7 | **7/7 — clean** |
+| **portfolio** (slides) | 7 | the 4 `@AboutMe*` / `@ExecutiveProfile` / `@CoreAccomplishments` | **4/7** |
+| **compact_resume** | 2 | `ResumeSummary` only | **1/2** |
+| **cover** (slides) | 3 | none | **0/3** |
+
+**`compact_resume`'s miss is a NAMING mismatch, not missing data.** Its placeholder is
+`{{SkillsBullets}}` (no digit); the map has `SkillsBullets1`/`SkillsBullets2`. The data exists.
+
+**The consequence is deletion, not a visible gap.** `stripLeftoverTokens` removes any unfilled
+`{{...}}` after injection, so an unmapped placeholder does not render as a token — the text
+disappears. A master-filled cover letter would come out **blank**, and that would look like a bug
+rather than a documented limit.
+
+**NOT STARTED. Awaiting the owner on the artifact binding** — every artifact needs a packet and every
+packet an `opp_id`. Options: a synthetic "Baseline / Master" opportunity (no schema change, works
+today, appears in opportunity counts unless filtered) vs. making `opp_id` nullable (structurally
+right, Tier 1 — `opp_id` is joined across the funnel).

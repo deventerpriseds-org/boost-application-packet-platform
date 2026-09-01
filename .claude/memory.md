@@ -5222,3 +5222,47 @@ is a mis-targeted query announcing itself.
 *"the source template file"* vs *"a document built from that template"*. This is the sibling of the
 existing "answered from a proxy" rows in `accuracy-log.md`: there the source was wrong, here the
 OBJECT was.
+
+---
+
+## 2026-09-01 — master-filled artifact copies: both halves already exist
+
+**`renderArtifact(client, art, opp, pkg, opts)` (`appPackets.ts:659`) takes `pkg` as a PARAMETER and
+makes no model call.** It resolves the template, `copyThen(...)` copies it, `injectValues(token,
+fileId, varsForType(art.type, pkg), meta.isSlides)` fills the placeholders, and it writes `doc_url`.
+Every OpenAI call in that flow happens UPSTREAM, in `buildPackageForJD` (`appPackets.ts:520`).
+
+**`loadMasterBaseline()` (`appInsertions.ts:25`) already returns MasterContext in exactly the shape
+`pkg` wants** — `masterBaseline()` (`evidence.ts:221`) maps the Azure Table row through
+`MASTER_BASELINE_FIELD` to merge-field keys. It is already used as the loop-0 "before" text and by
+`appSwaps.ts:93`.
+
+So "build the artifacts from master content with no prompts" is
+`renderArtifact(client, art, opp, await loadMasterBaseline())`. **Nothing calls the two together** —
+`grep loadMasterBaseline` gives four sites and none of them renders. That gap is the entire feature.
+
+**Coverage is uneven and the failure mode is silent.** `MASTER_BASELINE_FIELD` maps 15 fields;
+`@Company`, `@CoverLetterDate`, `@CoverLetterBody` are unmapped on purpose. Per template: resume
+**7/7**, portfolio **4/7**, compact_resume **1/2**, cover **0/3**. And `stripLeftoverTokens` DELETES
+an unfilled `{{...}}` after injection — so an unmapped placeholder does not show as a leftover token,
+its text simply vanishes. A master-filled cover letter renders BLANK and reads as a bug.
+
+`compact_resume` is the cheap one: its placeholder is `{{SkillsBullets}}` (no digit) while the map
+has `SkillsBullets1`/`2`. A naming mismatch, not absent data.
+
+### Hardening — three wrong answers to one request, and only the third was a real search
+
+Asked for "links to baseline artifacts using the mastercontext, no prompts", I returned (1) tailored
+artifacts built for eMoney, then (2) the empty source templates. Both were real, both HTTP 200, both
+wrong. The owner had to correct me twice, the second time quoting his own words back.
+
+**What actually went wrong is narrower than "I misread".** Each time I latched onto ONE noun in the
+request and searched for it — "baseline" → `artifact` rows; "template" → `TEMPLATE_META` — when the
+request was a COMPOSITE: *a copy of the template* **with** *master content in it* **and** *no prompt
+output*. Three constraints, and each of my first two answers satisfied exactly one.
+
+**The guard, sharper than the one I wrote last turn:** when a request contains a *transformation*
+("X built from Y without Z"), name all three parts before querying and check the candidate answer
+against every one. An answer satisfying one of three is not close — it is a different object. Both
+wrong answers were falsifiable in one line: the eMoney docs had a company name in them; the
+templates still had `{{Placeholder}}` tokens.
