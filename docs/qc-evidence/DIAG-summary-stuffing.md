@@ -168,3 +168,83 @@ Both touch a gate, so both need ACs before any code.
 
 **Do not edit anything in the Prompts table.** Standing owner instruction: *"i still want my original
 prompts to be driving what the resume draft is."*
+
+---
+
+# CORRECTION, 2026-09-01 — MEASURED LIVE. THE REMEDIATION LOOP IS NOT THE CAUSE.
+
+Everything above describes a real mechanism. **It has never been applied to `ResumeSummary`.** The
+falsification test this document itself named was run, via `db-query.yml` (the owner instructed the
+workflow transport after `boost-pg-mcp-write` stayed lapsed), and it came back against the hypothesis.
+
+## The measurement — run 33464643167
+
+| probe | result |
+|---|---|
+| `select count(*) from remediation_loop` | **1** — not 0. `D:remediation-never-ran`'s stated claim is stale; a pass HAS executed. |
+| `insertion` rows where `merge_field='ResumeSummary'` | **4** |
+| those rows grouped by `loop`, `method` | **`loop 0` / `model_rewrite` → 4.** ZERO rows at `loop >= 1`. |
+
+**A remediation pass writes `insertion` rows at `loop >= 1`. There are none for this field.** So the
+loop has never rewritten a resume summary, and every summary in production was produced at loop 0 —
+by Call 1 / Call 3. `mt17.ts:137` settles which one wins:
+
+```ts
+ResumeSummary: firstNonEmpty(call3.updatedResumeSummary, call1.resumeSummary, call2.resumeSummary)
+```
+
+**Call 3 is the ATS QC pass and it OUTRANKS Call 1.** If a summary is being optimised toward posting
+keywords, that is the pass doing it — and it runs on the owner's own prompt, which is not ours to
+edit.
+
+## The owner's MasterContext default (question 1, answered) — run 33464691925
+
+651 characters, first 300:
+
+> *"Visionary executive leader with a track record of aligning top-level goals to technology strategy
+> and execution to drive continuous value creation, operational efficiency, and enterprise
+> transformations. Adept at leading high-impact initiatives, optimizing digital ecosystems, and
+> strengthening gover…"*
+
+## What actually shipped — and it does NOT look stuffed
+
+Two distinct summaries across the four rows (556 and 437 chars):
+
+> *"Visionary engineering executive with a proven ability to drive AI-first transformations and
+> architectural evolution in the software development lifecycle. Expert in aligning technology
+> strategy with business goals, fostering innovation, and building high-performing global teams…"*
+
+> *"Visionary technology leader with a robust track record in driving enterprise transformations and
+> aligning engineering strategies with business objectives. Adept at building high-performing teams
+> and fostering a culture of collaboration and innovation…"*
+
+Generic executive prose. No verbatim posting sentences visible.
+
+## The deployed checks agree — and that agreement is WORTH ALMOST NOTHING
+
+Run 33464754745, `check_result` for the stored artifacts:
+
+| check | state | offenders |
+|---|---|---|
+| `posting_wording_kept` | **pass** ×3 | 0 — *"no passage of 8+ words matches the posting"* |
+| `posting_figure_echo` | **pass** ×3 | 0 |
+| `ai_tells` | `warn` ×2, `pass` ×1 | 1 — `landscape of` |
+
+**Do not read those passes as exoneration.** §OBSERVATION 4 of this document PROVED, by execution,
+that `posting_wording_kept` is structurally blind to phrase-level stuffing: it needs an
+8-consecutive-token exact run, and a summary stitched from short JD phrases closes a requirement with
+**zero** offenders. So a `pass` here is consistent both with "not stuffed" and with "stuffed in
+exactly the shape this check cannot see". **The only detector we have cannot settle the question it
+is being asked.**
+
+## STATUS — the hypothesis is retired; the owner's complaint is NOT explained
+
+- **RETIRED:** "the P3 remediation loop stuffed the summary." Refuted by measurement.
+- **STILL TRUE:** the mechanism in §OBSERVATION 1-4. It remains a live hazard for any field the loop
+  DOES rewrite, and the detector's blindness is real and unfixed.
+- **UNEXPLAINED:** the document the owner is actually reading. The stored summaries do not show the
+  symptom. Either they are looking at a newer build, a different field, or the rendered Google Doc —
+  or the stuffing is in the shape our detector cannot see. **Asked; not yet answered.**
+
+**The next step is NOT a fix.** It is identifying which artifact the owner is reading. Building
+against the wrong one is the specific failure `CLAUDE.md`'s feasibility rule exists to prevent.
