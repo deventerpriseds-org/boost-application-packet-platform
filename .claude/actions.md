@@ -5894,3 +5894,47 @@ mid-pass stall). They are self-reported green only. Recorded here rather than le
 
 **NEXT, per the owner:** the remaining **9-11 UI parity rows**, then the judge lanes (ACs written for
 all four decisions).
+
+---
+
+## ACT:coverage-judge — a model reads the document, and code checks that it pointed at real words
+
+**Owner instruction (2026-09-01):** *"what is done today by actors simply needs to be swapped by a
+model that can reason instead of word matching but only where it makes sense"*, then *"when I said
+include the gate I meant fold this in with the rest of what you've been working on"*, then *"write it
+into the diagnosis and add verifyReasoning to the judge scope. go until deployed"*.
+
+**BUILT on `claude/incumbent-wins-swap`, five commits, all pushed. NOT ON `main`. NOT RUN LIVE.**
+
+| commit | what |
+|---|---|
+| `fa6a9ca` | `checks.ts` prefers a verdict, falls back to `coversIn`, and excludes an unanswered requirement rather than accusing it |
+| `1557ead` | `requirement_coverage` + `verdictKey` cache + three `chk_coverage_judge*` settings |
+| `167d7e8` | one verdict per requirement, composed from the fields that were asked |
+| `8f21606` | `appCoverage.ts` — cache, call, store; every failure is silence, never a "no" |
+| `cee07a7` | A6 — the overclaim rule keeps accusing; a cited appeal may overturn it |
+
+**Evidence.** api suite **988/988**; app build clean; `SCHEMA_SQL` executed on a POPULATED database
+with main's schema applied first (psql exit 0); all eight `requirement_coverage` constraint cases
+exercised against a real cluster; `test/coverageDb.test.mjs` proves the SQL itself (a fake client
+proves logic and nothing about column names). **Twenty guards mutation-proved** — each one FAILS the
+suite with its defect reinstated.
+
+**Three defects this pass caught in its OWN work, recorded because they are the reason the process
+exists:**
+1. `H:no-verdict-map-changes-nothing` was INERT as first written — it compared `judgeVerdicts:
+   undefined` to the field being absent, the same value on every read path. Mutation-proving found it;
+   it now pins what the judge-less path produces.
+2. Two runner tests used `CoverLetterBody` as a second resume field. `checkFieldsFor('resume')` does
+   not contain it, so they exercised a one-field artifact while claiming to test two.
+3. `H:every-chk-column-is-selected` (an existing guard) caught three columns mapped but missing from
+   the loader's SELECT — a setting that would have done nothing.
+
+**NOT DONE, and it is the one that moves the owner's number:** `supportIn` — the PROFILE side.
+`must_have_coverage` runs on `ruleEvidenceOf`, so **the 0/12 does not move until that lane lands.**
+Nothing shipped here changes it.
+
+**Also open:** the stuffing lane (`scanWording`), and showing the verdict + reasoning in the JD panel.
+
+**Status: implemented, mechanism verified locally, NOT yet confirmed live.** Both toggles default OFF,
+so landing this changes nothing for the owner until they turn it on.

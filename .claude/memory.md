@@ -4997,3 +4997,23 @@ verified; it is.
 **`main` moved `9760c4f` → `d889e78` (40 commits) on the owner's instruction.** api 924/0, app 422/0
 pre-deploy. **The relevant-pool and slot-wiring lanes went out UNVERIFIED** — three verifier deaths —
 and that is stated, not hidden. Next: the 9-11 UI parity rows, then the judge lanes.
+
+## Coverage judge — built 2026-09-01, OFF by default, not yet live
+
+`coverageJudge.ts` (pure: prompt, parse, verify, compose, cache key) + `appCoverage.ts` (impure:
+cache, call, store) + `requirement_coverage` + `chk_coverage_judge` / `_max` / `_min_quote`.
+`checks.ts` consults a verdict for `evidence_placed` and falls back to `coversIn` when there is none.
+
+**Three facts kept apart, and this is the design:** a verdict exists (the judge wins), no map at all
+(the lexical rule, unchanged), asked-and-unanswered (**excluded from placement, never accused**).
+Every failure path — transport, cap, unparseable, an unreadable cache, a refused write — produces
+silence rather than a negative verdict.
+
+**A6 was fixed by APPEAL, not by narrowing.** `namedEntityTokens` counts any non-first capitalised
+word, so a Title Case degree list made `computer`/`software`/`engineering` accusable and withdrew
+correct evidence. Narrowing that population would weaken a guard, so the accusation is byte-identical
+and a model may defend — quoting the excerpt, defending every disputed term, and failing closed.
+
+**The number the owner watches has NOT moved.** `must_have_coverage` reads `ruleEvidenceOf` (the
+PROFILE side, `supportIn`), which this pass did not touch. Anyone reading "the judge shipped" as "0/12
+is fixed" is wrong.

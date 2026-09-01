@@ -503,3 +503,53 @@ excerpt does not support?"* — which is what the current code is reaching for a
 a model asserting the excerpt says something it does not IS the failure worth catching. What must
 change is the test for it, not its existence. The `missNote` path (naming which requirement words are
 absent, beside a standing explanation rather than instead of it) is good design and should survive.
+
+---
+
+# WHAT WAS BUILT — 2026-09-01, and how it differs from what this diagnosis proposed
+
+## The shape that survived contact with the code
+
+The diagnosis proposed replacing three word-matchers with model judgement. Two are now built, and the
+**third was built differently on purpose**, which is the part worth reading.
+
+| layer | what shipped | state |
+|---|---|---|
+| does the DOCUMENT cover it (`coversIn`) | a judge whose every citation is verified byte-exact against the field, wired into `evidence_placed` behind `chk_coverage_judge` | **BUILT, OFF BY DEFAULT** |
+| is the model's reasoning honest (`verifyReasoning`) | the exact rule is UNCHANGED and a cited appeal may overturn its withdrawal | **BUILT, OFF BY DEFAULT** |
+| does the PROFILE evidence it (`supportIn`) | not started — this is the one on the GATE | **OPEN** |
+
+## A6 was NOT fixed the way this document implied, and the reason matters
+
+This document says the test must change, *"not its existence"*. Reading the code makes the mechanism
+exact: `namedEntityTokens` (`requirementSupport.ts:205`) counts **any non-first capitalised word** as
+a named entity, so a Title Case degree list produces `computer`, `software`, `engineering` as
+"acronyms". The narrow accusation the module's own comment describes — *"an acronym or product name is
+present or it is not"* — is not the accusation it actually makes.
+
+**Narrowing that population would have fixed both live rows and weakened a guard**: a genuine overclaim
+on a plain capitalised name (`Java`, `Amazon`) would stop being withdrawn. The owner's standing
+instruction is that no guard is weakened without asking, so the accusation was left byte-identical and
+an **appeal** was added instead:
+
+- the model must quote the span **of the excerpt** that stands in for each disputed term, verified with
+  the same byte-exact `indexOf` used one function up;
+- it must defend **every** disputed term, because the withdrawal was made for all of them;
+- **every failure leaves the withdrawal standing** — no transport, a throw, an unparseable answer, a
+  quote absent from the excerpt, a term left undefended.
+
+So the guard cannot be weakened by anything going wrong. It can only be overturned by a positive,
+cited answer, and the dispute is stored with the row that survived it.
+
+**This is a better outcome than the one proposed**, and only because reading the code first showed the
+population was wrong for a knowable reason. A model asked to police `verifyReasoning`'s judgement
+would have relocated the problem; a model asked to *cite the excerpt* answers it.
+
+## What is still open, honestly
+
+- **`supportIn` — the profile side — is untouched, and it is the one that decides the gate.**
+  `must_have_coverage` runs on `ruleEvidenceOf`, not on `covers()`, so the 0/12 the owner sees does not
+  move until this lane lands. Nothing shipped today changes that number.
+- **Nothing is confirmed live.** Every claim above is from the suite (988/988), from mutation-proving
+  each guard, and from executing the schema and the SQL against a real cluster. The judge has not yet
+  run against the owner's packet with a real model, and its default is OFF until it has.
