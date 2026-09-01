@@ -5339,3 +5339,48 @@ model touched the output; `H:baseline-standing-fields` proves two values land. N
 output is *shaped like a resume*. `checks.ts` `WORD_RULES` covers only the six PROSE fields, so
 there is no separator or item-count check on any of the six `SLOT_FIELDS` anywhere in the suite —
 a real gap the owner found by looking at the document, which no assertion could have told him.
+
+---
+
+## 2026-09-01 (cont) — the Relevant seed, and the two defects that produced it
+
+**Feature status: `appBaseline` COMPLETE for the JD-less case — deployed `7d10e64` on `main`.**
+`SEED_RELEVANT_LISTS` + `relevantOverlay()` supply the three Relevant slots; `shapeSlotFields`
+supplies the rest. Suite 1015 pass, 0 fail.
+
+**The standing values, so they are not re-derived:**
+
+    Relevant Skills 1: Portfolio Management | Tech-Driven Innovation | Ops Automation
+    Relevant Skills 2: Tech Talent Strategy | Innovation Frameworks  | Data Insights
+    Relevant Skills 3: Corporate AI Use Cases | Strategic Partnerships | Global Leadership
+
+Derived by the owner's Zap rule against the Trinnex JD (exclude anything Skills1/Skills2/competencies
+cover, order by ATS match, split 3/3/3 — 27 of 36 Library terms dropped), then corrected by the owner
+for AI redundancy. Seeded, not hardcoded: overridable via `relevant` in the request body.
+
+**Guards mutation-proven:** `H:baseline-relevant-seed` FIRED on restoring `AI/ML Advancements`, and
+on deleting the `relevantOverlay` spread. `H:baseline-shape` FIRED on reinstating the pipes and on
+making a null slot count truncate.
+
+### Hardening — I optimised nine picks individually and never read them as a SET
+
+The owner: *"the ai is a little redundant."* My nine carried THREE AI-prefixed terms. Each was
+defensible alone — one for `AI adoption`, one for `AI knowledge`, one for the AI operations
+keyword — and the set was obviously wrong the moment anyone looked at it as a list. **I optimised
+per-item against a per-item criterion and never evaluated the collection the reader actually sees.**
+
+The generalisation, which is not specific to skills: **when the deliverable is a SET — a list, a
+column, a menu, a dashboard row — the acceptance check must run over the set, not only over each
+member.** Per-member correctness cannot detect repetition, imbalance, or a missing dimension, and
+those are exactly what a reader notices first.
+
+That is now enforced rather than remembered: `H:baseline-relevant-seed` asserts distinctness across
+the nine and at most one AI-prefixed term, so a later edit cannot quietly reintroduce the cluster.
+
+### The other lesson, from the same object: `renderArtifact` is a RENDERER
+
+It injects what it is handed. Normalisation lives in the caller, and until `appBaseline` there was no
+caller that handed it anything but model output — which is why the pipe-delimited storage format had
+never once reached a document in a normal build (`pipeline.ts:405` puts the master text in the
+PROMPT). Any future path that renders stored text directly inherits the same obligation: split,
+shape, and cap before injecting.
