@@ -6720,3 +6720,50 @@ is unchanged at 1/1/2, because both swaps replaced items that were already under
 **Still not applied to any document** — these remain Trinnex-derived, so writing them into
 `Baseline (Master Context)` would make that document JD-specific. Awaiting the owner's call on
 whether they land on the Trinnex packet instead.
+
+---
+
+## ACT-2026-09-01-j — The nine SEEDED as the no-JD fallback; Trinnex half pending
+
+**Owner:** *"Yes use them for Trinnex and the fallback values if ever generating one from scratch
+with[out] a jd to compare against for pulling from the mastercontext list."*
+
+That resolves the objection in ACT-…-h. The nine were held back because they are Trinnex-derived and
+would make a "baseline" JD-specific; the owner has now made them the STANDING FALLBACK, which is
+their decision to make and turns tailored output into a deliberate default.
+
+**PART A — DONE and deployed (`7d10e64` on `main`).** `SEED_RELEVANT_LISTS` in `appBaseline.ts`,
+applied by `relevantOverlay()` after `shapeSlotFields`. Without it a JD-less build takes
+`items.slice(0, 3)` of the 36-term Library — the first nine in storage order, all of
+"Governance and Compliance" plus part of "Technology Strategy". That answers *which nine fit*, not
+*which nine are worth showing*.
+
+Seeded, not hardcoded: overridable per call via `relevant` in the body. A malformed or empty list
+falls back rather than blanking the slot — a blank Relevant column is the silent-deletion failure
+`stripLeftoverTokens` already causes once, and it must not arrive by a second route.
+
+`H:baseline-relevant-seed` asserts shape (3×3), the Zap's final character rule (≤1 item over 24 per
+list), distinctness, **≤1 AI-prefixed term** (the owner's correction, so a later edit cannot
+reintroduce the cluster), that the overlay beats the pooled Library text, and that a caller list wins
+while a malformed one falls back. **Mutation-proven twice:**
+
+| Mutation | Outcome |
+|---|---|
+| restore `AI/ML Advancements` into list 2 | **FIRED** |
+| delete the `relevantOverlay` spread from `baselinePkg` | **FIRED** |
+
+Suite 1015 pass, 0 fail.
+
+**PART B — Trinnex: NOT applied, and it needs one decision.** The Trinnex artifacts already exist
+with model-written content in every field. `packet.pkg_json` is the store (`appPackets.ts:599`
+writes it after a build; `appCorrections.ts:283/368` on an owner edit). The existing owner-edit
+route, `POST /api/app/artifact/{id}/owner-edit`, is **substring-based** — phrase, replacement,
+char offsets, `before_sha256` — which is the wrong shape for replacing three whole fields.
+
+So applying the nine to Trinnex is either:
+  (a) a targeted `pkg_json` write of the three `RelevantBullets` fields + re-render, keeping the
+      model's summary, skills and work history; or
+  (b) a full rebuild, which regenerates everything and loses the current tailoring.
+
+**(a) is almost certainly what the owner means, but it is a write to a live packet's stored package
+and the two options differ in what gets destroyed — so it is not a guess worth making.**
