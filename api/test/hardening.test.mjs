@@ -289,7 +289,10 @@ test('H11: every table this layer added is registered for migration', () => {
                    // of the defect: dropping the name from EXPECTED_TABLES fails this case on
                    // "not in EXPECTED_TABLES", and renaming the CREATE in SCHEMA_SQL fails it on
                    // "not in SCHEMA_SQL".
-                   'comparison_dimension']) {
+                   'comparison_dimension',
+                   // The coverage judge's verdicts. A model-decided check state that pg-migrate
+                   // never created would fail at runtime as "no such relation" on the gate path.
+                   'requirement_coverage']) {
     assert.ok(schema.includes(`create table if not exists ${t} `) || schema.includes(`create table if not exists ${t}(`),
       `${t} is not in SCHEMA_SQL`)
     assert.ok(new RegExp(`'${t}'`).test(schema.slice(schema.indexOf('EXPECTED_TABLES'))),
@@ -1303,19 +1306,91 @@ test('H33: every server-side body toggle has a caller that can send it', () => {
 // packet screen showing only the last pass's decisions as if they were the whole story.
 // The invariant, not the incident: any writer that clears provenance for a packet must scope the
 // clear to the pass it is rewriting.
-test('H34: provenance deletes are scoped to a pass, never to a whole packet', () => {
+// AMENDED 2026-08-29, with the owner's explicit approval, to carve out ground zero — and the
+// carve-out is deliberately narrow because the incident above must still be caught.
+//
+// WHY THE ORIGINAL RULE WAS BROADER THAN ITS OWN RATIONALE. H34's invariant is "scope the clear to
+// the pass it is rewriting". At loop 0 there IS no earlier pass of the current build to protect:
+// loop 0 is only ever written at ground zero — `appPackets.ts` renderArtifact for a whole-package
+// build, and `appRemediation.ts:179` guarded by `firstPass === 1`, with a later run deliberately
+// NOT rewriting loop 0. The rows a loop-0 clear removes describe a draft that has just been
+// replaced, so keeping them is not provenance, it is a stale higher number outranking newer text.
+//
+// WHAT THAT COST, measured on the Trinnex resume (artifact cfdd82e7, production, 2026-08-29):
+// a rebuild wrote loop 0 on 08-28 while loops 1-3 from 08-20 survived. `insertionsGet` picks
+// `current` with `Math.max(loop)`, so the screen served the EIGHT-DAY-OLD pass — 7 items, 4 over
+// the 24-char limit — while the rebuild's own compliant 10 items sat beside it unread. Three
+// separate defects were reported off that one cause and none of them were real.
+//
+// THE CARVE-OUT CANNOT REACH THE ORIGINAL INCIDENT. That incident was pass 2 destroying pass 1 via
+// an UNCONDITIONAL packet-wide delete. A delete reachable only under `loop === 0` can never run on
+// pass 2, so the guard below still fails on the exact construct that prompted it — proven by
+// mutation, not assumed: restoring the unconditional delete re-fails this test.
+/**
+ * The [start, end) span of every `if (loop === 0) { ... }` block in a source file.
+ *
+ * Brace-walking, not a character window. H34's carve-out originally accepted any unscoped delete
+ * with a `loop === 0` mention within 400 characters, which tests NEARNESS rather than SCOPE. An
+ * independent verifier defeated it in one edit -- `const isGroundZero = loop === 0` on its own
+ * line, a trivial `if (isGroundZero) {}` after it, then an UNCONDITIONAL packet-wide delete. That
+ * is the P3-21 incident restored verbatim and the suite passed 893/893.
+ *
+ * String and template literals are skipped so a brace inside a SQL string cannot close a block
+ * early -- these files are full of `delete from x where y=$1` inside backticks.
+ */
+function guardedBlocks(code) {
+  const spans = []
+  const re = /\bif\s*\(\s*loop\s*===\s*0\s*\)\s*\{/g
+  let m
+  while ((m = re.exec(code))) {
+    let depth = 0, i = m.index + m[0].length - 1, quote = null
+    for (; i < code.length; i++) {
+      const c = code[i], prev = code[i - 1]
+      if (quote) { if (c === quote && prev !== '\\') quote = null; continue }
+      if (c === '"' || c === "'" || c === '`') { quote = c; continue }
+      if (c === '{') depth++
+      else if (c === '}') { depth--; if (depth === 0) { spans.push([m.index, i]); break } }
+    }
+  }
+  return spans
+}
+
+test('H34: provenance deletes are scoped to a pass, except at ground zero (loop 0)', () => {
   const offenders = []
   for (const [file, body] of allSources()) {
     const code = stripComments(body)
-    // The real construct: a DELETE from a provenance table keyed by packet alone.
+    // The real construct: a DELETE from a provenance table keyed by packet or artifact alone.
     const re = /delete\s+from\s+(swap_decision|skill_candidate|insertion)\s+where\s+([^`'"]*)/gi
     let m
     while ((m = re.exec(code))) {
       const [, table, predicate] = m
-      if (!/\bloop\s*=/.test(predicate)) offenders.push(`${file}: delete from ${table} where ${predicate.trim().slice(0, 60)}`)
+      if (/\bloop\s*=/.test(predicate)) continue
+      // CONTAINMENT, NOT PROXIMITY. The first version of this carve-out accepted any unscoped
+      // delete with a `loop === 0` mention in the preceding 400 characters, which is a test of
+      // NEARNESS and not of SCOPE. An independent verifier broke it in one edit — the P3-21
+      // incident reinstated verbatim, and the whole suite passed 893/893:
+      //
+      //     const isGroundZero = loop === 0
+      //     if (isGroundZero) { console.log('ground zero') }
+      //     await client.query(`delete from swap_decision where packet_id=$1`, [packetId])
+      //
+      // The delete there runs on EVERY loop; only the mention was nearby. Comments were already
+      // stripped, so the miss was real code, which is exactly the case that matters. My own
+      // mutation had only tried the literal construct and so proved the guard caught one shape
+      // while I assumed it caught the class.
+      //
+      // So find each `if (loop === 0)` and walk its braces to get the block's true extent, then
+      // require the delete to sit INSIDE one. A mention that does not open a block protects
+      // nothing and no longer excuses anything.
+      if (guardedBlocks(code).some(([s, e]) => m.index > s && m.index < e)) continue
+      offenders.push(`${file}: delete from ${table} where ${predicate.trim().slice(0, 60)}`)
     }
   }
-  assert.deepEqual(offenders, [], 'a packet-wide provenance delete erases every earlier pass')
+  assert.deepEqual(offenders, [],
+    'a packet-wide provenance delete outside loop 0 erases every earlier pass. The carve-out requires '
+    + 'the delete to sit INSIDE a BRACED `if (loop === 0) { ... }` block -- a brace-less if, or a '
+    + '`loop === 0` mention that does not open the block containing the delete, is not a scope and '
+    + 'does not qualify')
 })
 
 test('H34b: swap_decision and skill_candidate carry the pass in their key', () => {
@@ -3251,11 +3326,24 @@ test('H:model-evidence-is-labelled: a model-proposed evidence row has its own me
   const schema = readFileSync(new URL('../src/functions/tests/schema.ts', import.meta.url), 'utf8')
   const sql = schema.slice(schema.indexOf('SCHEMA_SQL = `') + 14, schema.indexOf('\n`;'))
 
-  // (1) The three provenances, and no more — a fourth added without a thought here should fail.
+  // (1) The FOUR provenances, and no more — a fifth added without a thought here should fail, and
+  // this guard did exactly that when `judged` was added (2026-09-01), which is why it says four now
+  // rather than having been quietly widened to "at least three".
+  //
+  // `judged` is the one that COUNTS toward coverage, so its admission was the deliberate act:
+  // a proposal that survived an adversarial second read (supportJudge.ts) naming what the excerpt
+  // does NOT show before it could claim support, cited to a byte-verified span. It is a separate
+  // value from `proposed` precisely so a query can still tell "a model named this" from "a model
+  // named this AND it survived being attacked" — collapsing them would lose the distinction the
+  // gate now depends on.
   const checks = [...sql.matchAll(/method in \(([^)]*)\)/g)].map(m => m[1].replace(/\s|'/g, ''))
   assert.ok(checks.length >= 1, 'the method CHECK has vanished from SCHEMA_SQL')
-  assert.ok(checks.some(c => c === 'exact,anchored,proposed'),
-    `no method CHECK admits a model-proposed row: found ${JSON.stringify(checks)}`)
+  assert.ok(checks.some(c => c === 'exact,anchored,proposed,vetted'),
+    `no method CHECK admits both a proposed and a judged row: found ${JSON.stringify(checks)}`)
+  for (const c of checks) {
+    if (/proposed/.test(c)) assert.equal(c, 'exact,anchored,proposed,vetted',
+      `a method CHECK admits a different set: ${c} — two homes that disagree is an insert one permits and the other rejects`)
+  }
 
   // (2) Nullable, never defaulted. A default is the silent version of lying about provenance.
   assert.match(sql, /add column if not exists proposal_version int;/,
@@ -4522,4 +4610,139 @@ test('H:deploy-waits-for-its-own-build: pg-migrate cannot run against an older b
   // And it must refuse rather than migrate anyway when convergence never happens.
   assert.match(wf, /Refusing to migrate/,
     'when the worker never reports the deployed sha the workflow must FAIL, not fall through to pg-migrate')
+})
+
+// ── H:rebuild-clears-superseded-loops ───────────────────────────────────────────────────────────
+//
+// EVIDENCE (production, opp 9f9c370a, artifact cfdd82e7 `resume`, read 2026-08-29):
+//
+//   loop 0 | 10 items | longest 24 | 0 over limit | written 2026-08-28 02:50:40  <- the rebuild
+//   loop 1 |  … 2026-08-20 00:44:30
+//   loop 2 |  … 2026-08-20 16:41:35
+//   loop 3 |  7 items | longest 31 | 4 over limit | written 2026-08-20 16:44:40  <- what shipped
+//
+// `insertionsGet` picks `current` with `Math.max(loop)`, so the EIGHT-DAY-OLD pass outranked the
+// rebuild that replaced it: the owner saw 31- and 37-character skill lines against a live 24-char
+// limit, and every `original -> final` arrow vanished because `listBodyModel` matched loop-3 lines
+// against loop-0 `to_label`s. Three separate "bugs" were reported off this one cause; none of them
+// were real. A rebuild writes loop 0 in place while the passes that refined the SUPERSEDED draft
+// survive and keep winning on number.
+//
+// THE INVARIANT: writing loop 0 is ground zero and must clear every later pass, in BOTH tables.
+// Asserted on both because a fix to one alone leaves insertions and swaps describing different
+// passes, which is precisely the state that made the arrows disappear.
+test('H:rebuild-clears-superseded-loops: writing loop 0 clears later passes in both writers', () => {
+  const ins = src('appInsertions.ts')
+  const swp = src('appSwaps.ts')
+
+  // The unscoped delete must exist AND be reachable only under loop 0 — an unconditional unscoped
+  // delete would destroy a live remediation run's earlier passes (the defect P3-21 added `loop` for).
+  assert.ok(/if\s*\(\s*loop\s*===\s*0\s*\)[\s\S]{0,400}?delete from insertion where artifact_id=\$1\s*`/.test(ins),
+    'appInsertions.ts: a loop-0 write must clear EVERY loop for the artifact, or a stale higher-numbered '
+    + 'pass keeps outranking the rebuild that replaced it')
+  assert.ok(/delete from insertion where artifact_id=\$1 and loop=\$2/.test(ins),
+    'appInsertions.ts: loops 1..n must still delete only their own rows (P3-21)')
+
+  assert.ok(/if\s*\(\s*loop\s*===\s*0\s*\)[\s\S]{0,600}?delete from swap_decision where packet_id=\$1\s*`/.test(swp),
+    'appSwaps.ts: a loop-0 write must clear EVERY swap loop, or swaps and insertions describe different '
+    + 'passes and every original->final arrow silently disappears')
+  assert.ok(/delete from skill_candidate where packet_id=\$1\s*`/.test(swp),
+    'appSwaps.ts: skill_candidate must be cleared with swap_decision or candidates outlive their swaps')
+  assert.ok(/delete from swap_decision where packet_id=\$1 and loop=\$2/.test(swp),
+    'appSwaps.ts: loops 1..n must still delete only their own rows (P3-21)')
+})
+
+// ── H:loop-zero-clear-rests-on-the-cache-hit ────────────────────────────────────────────────────
+//
+// THE DEPENDENCY THAT MAKES THE LOOP-0 CLEAR SAFE, PINNED — because it is NOT the one the
+// implementer believed, and an independent verifier had to say so.
+//
+// The claim made when `H:rebuild-clears-superseded-loops` shipped was: "a loop-0 clear cannot run
+// during a live remediation run, because `appRemediation.ts` guards its baseline write with
+// `firstPass === 1`." THAT IS WRONG. `firstPass` guards `writeInsertions` only. `writeSwaps` is
+// never called from `appRemediation.ts` at all — its single call site is `appPackets.ts`
+// `ensurePackage`, which remediation invokes on EVERY run, before that guard.
+//
+// What actually keeps it safe is the CACHE HIT: `ensurePackage` returns early when a package is
+// already stored and still grounded, so run 2+ never reaches the generate-and-writeSwaps path.
+// Remediation refuses to run at all when `!grounded`, so any packet that completed a pass has
+// `jd_grounded = true` and hits the cache next time.
+//
+// That is a real invariant and it holds — but nothing named it, so editing the cache predicate
+// would silently reopen a packet-wide provenance delete inside a live loop with the suite green.
+// This test is that name. If the early return or its predicate moves, come back and re-derive
+// whether `writeSwaps` can now be reached on a second remediation pass BEFORE relaxing this.
+test('H:loop-zero-clear-rests-on-the-cache-hit: ensurePackage still returns early on a cached package', () => {
+  const pk = stripComments(src('appPackets.ts'))
+
+  // The early return must exist and must precede the generation path that calls writeSwaps.
+  const cachedAt = pk.search(/const cached[^\n]*=\s*\(!regen/)
+  const returnAt = pk.search(/if \(cached\) return \{/)
+  const swapsAt = pk.search(/writeSwaps\(/)
+  assert.ok(cachedAt > -1, 'appPackets.ts: the `cached` predicate is gone — the loop-0 clear in '
+    + 'writeSwaps is no longer protected from a second remediation pass')
+  assert.ok(returnAt > cachedAt, 'appPackets.ts: `if (cached) return` no longer follows the predicate')
+  assert.ok(swapsAt > returnAt, 'appPackets.ts: writeSwaps is no longer AFTER the cache early-return — '
+    + 'a remediation run on pass 2+ could now reach it and clear every earlier pass of the live run')
+
+  // And the predicate must still be the conjunction the argument depends on: a stored package,
+  // no explicit regen, and not stale-ungrounded. Dropping any term re-opens the path.
+  const pred = pk.slice(cachedAt, returnAt)
+  for (const term of ['!regen', '!staleUngrounded', 'pkg_json']) {
+    assert.ok(pred.includes(term),
+      `appPackets.ts: the cache predicate no longer tests ${term}; the loop-0 provenance clear `
+      + 'depends on this early return being taken on every remediation pass after the first')
+  }
+
+  // writeSwaps must still be called with the literal ground-zero loop. If a caller ever passes a
+  // computed pass number here, the clear stops being ground-zero-only and the carve-out is void.
+  assert.match(pk, /writeSwaps\([^)]*\{[\s\S]{0,400}?loop:\s*0\s*,?\s*\}/,
+    'appPackets.ts: writeSwaps is no longer called with a literal `loop: 0` — a computed loop would '
+    + 'make the unscoped clear reachable on a real remediation pass')
+})
+
+// ---------------------------------------------------------------------------------------------
+// H:every-evidence-count-has-a-reader — a count nobody reads is a measurement that does not exist.
+//
+// F-9, found by an independent verifier: `vetted` shipped WRITE-ONLY. It was added to
+// `writeEvidence`'s return with the explicit rationale that "a caller must be able to see the
+// number a model moved" — and then omitted from the ONE place those counts surface
+// (`appPackets.ts`). TypeScript stayed quiet because that caller destructures a subset. `vetted` is
+// the count that MOVES must_have_coverage, so the number that changed was the only one invisible.
+//
+// THE INVARIANT, NOT THE INCIDENT: every count the evidence pass returns must be read somewhere.
+// This is the same class as the `correction.frame` write-only defect the repo's CLAUDE.md cites,
+// and the same self-attack the rules prescribe ("Who READS what you wrote?").
+test('H:every-evidence-count-has-a-reader', () => {
+  const body = src('appRequirements.ts')
+  // The declared return type of writeEvidence — read from the source, not from memory.
+  const at = body.indexOf('export async function writeEvidence')
+  assert.ok(at > -1, 'writeEvidence moved — this scan has gone stale')
+  const sig = body.slice(at, body.indexOf('> {', at))
+  const counts = [...sig.matchAll(/(\w+):\s*number\b/g)].map(m => m[1])
+  assert.ok(counts.length >= 6, `expected the count block, found ${JSON.stringify(counts)}`)
+
+  const readers = src('appPackets.ts') + src('appChecks.ts')
+  const unread = counts.filter(c => !new RegExp(`evidence\\?\\.${c}\\b`).test(readers))
+  assert.deepEqual(unread, [],
+    `these counts are written and never read: ${unread.join(', ')} — a coverage change is only ` +
+    'attributable if the run recorded which pass moved it')
+})
+
+// H:the-judge-reports-what-it-did — F-8, same verifier, same class one level up.
+//
+// `runCoverageJudge` and `runStuffingRead` each return `{ calls, refused, failures }` and every one
+// was discarded at `evaluateArtifact`'s return. Three live consequences: a model OUTAGE was
+// invisible (the owner was told "too short to judge either way" when the call had failed), the
+// count of times a model claimed a quote the document does not contain was dropped — while
+// `coverageJudge.ts` names each refusal separately precisely because "only the second is a defect
+// worth alerting on" — and nobody could say what the judge spent.
+test('H:the-judge-reports-what-it-did', () => {
+  const body = stripComments(src('appChecks.ts'))
+  assert.match(body, /const judge = coverage \|\| stuffing \?/,
+    'evaluateArtifact must report the judge passes, not silently discard them')
+  for (const field of ['coverage_calls', 'coverage_refused', 'stuffing_calls', 'failures']) {
+    assert.ok(body.includes(field), `the judge report drops ${field}`)
+  }
+  assert.match(body, /results, score, judge \}/, 'and it must actually be returned')
 })

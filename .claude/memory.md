@@ -520,6 +520,69 @@ Key tables (PostgreSQL):
 - iOS testing: requires macOS runner or BrowserStack; categorically unavailable in Linux CCR
 
 ## Active work
+
+<!-- NEWEST FIRST, and the SessionStart surfacer emits this heading plus 60 LINES and nothing else.
+     Every line here costs a line of what a new session sees: WRITE NEW STATE AT THE TOP AND DELETE
+     WHAT IT SUPERSEDES. Detail goes in a dated section below and is LINKED from here. -->
+
+**2026-08-30 — THE AC / VERIFIER VEHICLE CHANGED. `## Long agent work does not run in this session
+any more (2026-08-29)` further down this file, and the matching section in `CLAUDE.md`, are now
+SUPERSEDED — do not follow either as written.** They send long passes to `claude-task.yml`, which is
+a single Messages API call: it cannot grep, follow an import, or EXECUTE, and it needs metered API
+credit. **(That last half is CORRECTED: run 33277232470 did fail on a spent balance, but a balance
+is a STATE — re-probed 2026-08-30, run 33288812332, `end_turn`/`in=33 out=11`/success, the credit
+is LIVE and the runner works today. Evidence:
+`eds-claude-skills/docs/qc-evidence/FEASIBILITY-runner-credit.md`. The toollessness is the real,
+unchanging deficit.)**
+
+**Use `scripts/verify.sh` in `eds-claude-skills` instead** — one vehicle, two kinds:
+
+    scripts/verify.sh --kind AC <slug> <brief> --context "<globs>"    -> docs/qc-evidence/AC-<slug>.md
+    scripts/verify.sh <slug> <loop> <brief>    --context "<globs>"    -> VERIFY-<slug>-<loop>.md
+
+Detached `claude -p` on the session's own credential: it does **not** hold the session, needs **no
+API key**, and **CAN execute** — it runs suites, applies mutations and observes the result, which is
+the one thing that has actually caught inert guards here. Proven 2026-08-30: AC pass 12 turns/105s/
+$0.87, verifier 45 turns/336s/$2.36 with 9/9 CONFIRMED. **Always pass `--context`** — the A/B is
+settled, arm B2 (target-repo files in the room) scored 5/5 where B1 scored 3/5, and a glob matching
+nothing aborts non-zero by design.
+
+**STATUS, so this is not read as already-available:** verify.sh is on `eds-claude-skills` PR **#28**,
+green and mergeable, **NOT yet merged to its `main`**. Until it lands, `claude-task.yml` is still
+what a boost session can dispatch. Re-check the PR rather than assuming either way.
+
+**`claude-task.yml` keeps exactly ONE role, and it is the reason to keep it:** it runs on GitHub's
+machines, so it is the **only vehicle that survives a container restore**. `verify.sh` is a child of
+this container and dies with it — it survives *interrupts*, not *restores*.
+
+**THE MITIGATION IS A PROPERTY OF THE WORK, NOT THE VEHICLE, and it is measured.** Same task across
+one real restore: a one-pass run died at 9,122 bytes with **0** chunks durable; a chunked run that
+committed AND PUSHED after each chunk survived with **56,374 bytes, 2 of 5 chunks durable and
+resumable**. **Chunk every long pass; commit and push per chunk.** A commit that is not pushed is
+still inside the container — that bug was in the chunk script itself.
+
+**Self-hosting the containers is NOT available** (asked and checked 2026-08-30):
+`list_environments` returns three environments, all `kind: anthropic_cloud`, no `ccpool_` pool.
+Re-run that one call rather than re-deriving it.
+
+**A pass is ALIVE iff its OUTPUT IS GROWING.** Never `pgrep` for it — the pattern matches this
+session's own `claude`, and `pkill -f` will kill your own shell because its command line contains
+whatever you searched for. Both happened on 2026-08-30; I declared a verifier dead 14 seconds before
+it delivered 9/9. The JSON log is written only at the END, so 0 bytes proves nothing mid-run.
+
+---
+
+**SESSION 2026-08-29 — enforcement environment armed (this session is a PARALLEL lane).**
+`eds-claude-skills/setup.sh` @ `cbf8f7b` run to completion (exit 0): hooks at `_eds_version` 19 in
+`/home/user/.claude/settings.json` (SessionStart, Stop x2, PostToolUse, UserPromptSubmit x2), 16
+skills, the `verifier` agent, and the three guards (`eds-git-guard.sh`, `eds-agent-guard.sh`,
+`eds-phase-tag.py`) — each smoke-run at exit 0. `launcher-settings.json` verified to hold **no**
+`_eds` hooks, so the launcher's per-start regeneration cannot wipe the gate. Live DB reach confirmed
+through **`boost-pg-mcp-write`** (`boost_resume_n_packet_builder`, 50 public tables) — that is the
+one connector to use. Detail in `actions.md` ACT-2026-08-29-a.
+Because other sessions are on this same checkout, **D34 applies**: work in a `git worktree`, never
+`git stash` here.
+
 **HANDOFF STATE, 2026-08-28 ~03:00 — the Trinnex three-step repair is COMPLETE and measured live.**
 
 The three steps the owner sequenced (*"okay fix the data then the rename"* -> *"go"* -> *"go ahead
@@ -644,8 +707,9 @@ Prior task: **F5 CLOSED and deployed (`5a6728d`)** — see actions.md. Option (b
   refuted one claim and found three more defects; all four closed in the same commit, and three of
   the four were greps I had skipped.
   **Process now mechanism, applied LIVE not just pushed:** `verify-work` 0b (self-attack and fix
-  BEFORE the verifier — does not narrow its coverage) and 0c (loop 2+ tiers by COST, never by
-  "could this have been impacted?"); `setup.sh` **v17** makes SessionStart re-copy skills, because a
+  BEFORE the verifier — does not narrow its coverage) and 0c (**SUPERSEDED 2026-08-29 — see below**: it
+  tiered by COST, which SKIPPED out-of-radius claims; it now re-verifies EVERY claim every loop and
+  tiers only DEPTH); `setup.sh` **v17** makes SessionStart re-copy skills, because a
   skill push previously reached nobody — build-time copy, cached output, this session was on
   `_eds_version` 14 with a skill file from 12:43. Verified: hooks at 17, re-copy present, skill
   38,929 bytes.
@@ -4557,6 +4621,404 @@ problem and started widening the poll budget. That was inference. One look at th
 payload — `{status, timestamp, storage, tables}`, no `ok`, no `checks` — showed instantly that it was
 not the handler I had edited. **Read the response before theorising about the timeout.** The timing fix
 was independently worth making, but it was not the cause and I nearly shipped it as if it were.
+
+### Retention signal for the skills swap — MEASURED 0/20, option C dead (2026-08-28)
+
+`supportIn` cannot protect a two-word template skill item. 420 pairs (21 live Trinnex requirements
+× 20 live skill items), two floor settings, **0 protected in both**; drop pool 20/20. Twelve of the
+twenty are refused by a SAFETY-FLOOR rule an owner setting may not override, so no amount of
+tuning reaches them. Full record + reproduce commands: `docs/qc-evidence/RETENTION-SIGNAL-MEASUREMENT.md`
+(landed on main as `2c693d1`, PR #62). Owner visual:
+https://claude.ai/code/artifact/f07b02b8-3206-4668-b236-da1c69a17ab2
+
+**`supportIn` is a pure deterministic token function** — one import (`sentenceBounds`), no model
+call, no network, no `await`. So these refusals are an INSTRUMENT MISMATCH, not a model failing:
+a literal citation judge pointed at a semantic relevance question. Refusing "Team Development" as
+*proof* of "Build and develop high-performing engineering teams" is correct for a citation judge
+and useless as a relevance ranking. Nothing here argues for changing `supportIn` or the gate.
+
+Three consequences, none implemented yet:
+- the coverage-based retention design (option C) is **ruled out by data**, not by preference;
+- the owner's literal rule — incumbent stays until they click switch — needs **no coverage
+  judgement at all**, which is cheaper AND closer to what was asked;
+- because the pool is 20/20, ORDER of the right-rail proposals is the entire ergonomics. A TOKEN
+  matcher cannot rank these either (it reads "Team Development" as generic vocabulary), so the
+  open recommendation is **option D: LLM ranking of the rail order only** — ranking, never
+  accusing; it must not reach a score, a gate, or evidence.
+
+**Method note worth keeping.** I nearly wrote the worked example from a hand token count. Running
+`supportIn` with `threshold:0` returns the real `support` / `missing`, and the hand count was wrong
+(weak verbs are excluded from the denominator: 2-of-6, not 2-of-7). *Measure the number you are
+about to publish, even when you think you can derive it.*
+
+### 2026-08-29 — three false alarms from a starved harness, and two REAL defects under them
+
+**The pattern that cost the whole day: an absence created by MY INPUT, reported as an absence in the
+product.** Three times, same shape, each one alarming the owner:
+
+| I claimed | Ground truth | My input error |
+|---|---|---|
+| `supportIn` protects 0/20 template items | wrong question entirely | fed it the two-word LABEL; production feeds PROFILE RECORDS (`evidence.ts:406,482`) |
+| 5 of 7 packet steps missing their UI | app renders fine | raw-dump fixture; key `packet` substring-matched `/packets` |
+| char limits disconnected from the pipeline | **live at 24/20 in production** | fixture `/search-prefs` payload had no `checks` key |
+
+Live proof of the last one, read from `owner_search_prefs` via the boost connector:
+`chk_skill_max_chars = 24`, `chk_relevant_max_chars = 20` for von.ellis@enterpriseds.io.
+
+**Owner, twice, and he is right:** *"why would lines of code be a comparison for UI completeness?"*
+and *"you are not mechanized to rely on rendering above code."* I had a working local render and used
+it to produce a `bodyLen` table instead of LOOKING at what it drew. A screenshot settled in 30s what
+three greps got wrong.
+
+**RULE: never claim a UI element is absent from a grep. Render it and look.** `&rarr;` vs `->` is
+exactly why — I reported the swap arrow as missing because my pattern could not match the entity.
+
+#### The two REAL defects, both found from production data, both still unfixed
+
+1. **Swap attribution dies after loop 0.** `swap_decision` rows for packet `85cee965` are ALL
+   `loop = 0`; the rendered text is `loop = 3`. `listBodyModel` (`assetBlocks.js:757`) keys `byTo` on
+   `to_label` and matches the rendered line; the loop-0 swaps say `Engineering Leadership →
+   Engineering Execution`, while the loop-3 list still CONTAINS `Engineering Leadership`. No match →
+   `from: null` → every line renders flat. The arrow code (`AssetBlocks.jsx:377`, shipped `3a577b6`
+   2026-08-20, never reverted) is correct and INERT. **This is tracker item #20, already scoped with
+   ACs written, and it sat pending while I investigated it from scratch — CHECK THE TRACKER FIRST.**
+2. **A rewrite made an item LONGER and over the limit.** `Digital Transformation` (22, legal) became
+   `Digital Transformation Strategy` (31) against a 24 limit. The gate correctly reports
+   `longest 31 chars · ≤ 24 chars each` on SHIPPED content. Note the normalise rewrite prompt
+   (`appPackets.ts:562`) only ever SHORTENS, so it is NOT the culprit — the lengthening pass is
+   elsewhere and is still unidentified.
+
+**Owner's deeper concern, open:** adding "Strategy" to a term that already satisfied the requirement
+is a logic flaw his ORIGINAL prompts would not have made. He suspects the pipeline is drifting off
+his Prompts-table prompts onto code-built ones. Evidence that the concern is well-founded:
+`appPackets.ts:562` builds its rewrite prompt IN CODE, not from the Prompts table. And a guard for
+exactly this already exists but covers ONE pass only — `reviewer.ts:444` warns
+`no active "<key>" row in the Prompts table — the built-in fallback was used`. **Whether the
+resume/skills writers have any equivalent prompt-source check is the open question.**
+
+#### Guards added today (instrument-grade, not product-grade)
+
+The repo's guards all assert things about the PRODUCT. Nothing asserted the INSTRUMENT was configured
+before its output was believed — `build-fixtures.mjs` printed `!!! THIN FIXTURE SET` and I proceeded,
+because a warning is advisory. Added: hard-fail on a thin fixture set, and a shared canary that
+asserts the harness can SEE a known-present value before any absence is reported.
+Also `docs/qc-evidence/LOCAL-RENDER-UAT.md` so the next session inherits the render approach.
+
+**Still missing, and it is the one the owner has been pointing at all day:** nothing forces a LOOK at
+the render before a claim about the UI. The fixture guards protect the input; they do not protect
+against reasoning from source instead of from pixels.
+
+### PROTOTYPE-COVERAGE.md re-checked against current code — the backlog is 3 rows, not 25 (2026-08-29)
+
+**Owner's correction, and it was the right one:** *"I don't understand why you can't just look at what
+was claimed to be missing and see if it still is?"* I had proposed re-measuring all 183 rows. Only
+the rows the doc CLAIMS ARE MISSING needed checking — 3 ABSENT + 22 PARTIAL = **25 rows**, and the
+check took two greps.
+
+**Method.** Parsed every `| 4.x-n |` row whose 4th cell is ABSENT or PARTIAL out of
+`docs/qc-evidence/PROTOTYPE-COVERAGE.md`, then grepped each control's string in `app/src`.
+
+**Result — 21 of 25 are BUILT and the doc is stale.** `Go to field` (as `onGoToField`,
+`QcRail.jsx:196/226`, with its own telemetry key `qc-go-to-field`), `Put back` ×5, `Change it` ×2,
+`Ask for a change` ×4, `Re-run QC`, `Open QC`, the Must-haves / Responsibilities / Nice-to-haves
+counters, composite + coverage headers in both `postingAnalysis.js` and `qcRail.js`. Plus the three
+sections the app screenshots settled: §4.11 assistant (scored 0%, mounts on every step), §4.8 QC
+(scored 73%, the whole gate card + Done-for-you + Needs-a-decision renders), §4.10 send.
+
+**Genuinely open — 3 rows:**
+- `4.5-12` pick-list (`type:'select'`) — `PickList` 0 hits. Portfolio only.
+- `4.8-21` Swaps `Ask why` — 0 hits any spelling. Was gated on the assistant panel, which now exists.
+- `4.11-4` scope selector (This packet / This asset / My profile) — 0 hits.
+
+**And one that is DELIBERATE, not a gap:** `4.8-20` Swaps `Undo this`. `assistantPanel.js:107` states
+the design outright — *"Undo is per field, in the field itself, not from here."*
+
+**WHY THE DOC DRIFTED, and it is my own recurring failure:** `Go to field` was scored PARTIAL because
+the measurement searched the PROTOTYPE'S LITERAL STRING; the app implements the capability as
+`onGoToField`. A grep matching a SPELLING instead of a CAPABILITY — the identical error that made me
+report the swap arrow missing this morning when the code renders `&rarr;` rather than `->`.
+
+**Caveat I am not hiding:** the 21 "built" verdicts are safe because a hit proves presence. The 3
+absences were established by grep alone, which is exactly the instrument the repo's own rule says is
+never sufficient for the heaviest claim. Before anyone treats "3 rows left" as final, sweep producers
+AND consumers and read the import lists for those three.
+
+**Consequence for the parallel UI work:** jd, resume, cover and portfolio have NO genuinely missing
+rows between them. The lanes are unblocked; what remains is one portfolio-only pick-list, one
+`Ask why`, and a scope selector.
+
+---
+
+## Long agent work does not run in this session any more (2026-08-29)
+
+> **SUPERSEDED-BY: the 2026-08-30 entry at the top of `## Active work` in this file.**
+> The PREMISE below still holds — an in-session subagent makes this session unresponsive, and that
+> was measured. **The VEHICLE it names does not.** `claude-task.yml` is a single Messages API call
+> that cannot execute and needs metered credit, which ran out (run 33277232470). It has been
+> replaced by `scripts/verify.sh --kind AC|VERIFY` in `eds-claude-skills`, which is detached, runs
+> on the session credential with no API key, and CAN execute. Read the top entry before acting on
+> anything below. `claude-task.yml` retains exactly one role: it runs on GitHub's machines, so it is
+> the only vehicle that survives a container restore.
+
+**Feature status: SUPERSEDED as guidance; kept as the record of why the in-session route was left.**
+
+A running in-session `Agent` subagent makes this CCR session unresponsive — measured, not inferred:
+owner typed at ~25s, message sat queued and undelivered for 93s, surfaced only on stop, which killed
+the agent. `run_in_background: true` does not change this; the turn stays active while the parent
+keeps issuing tool calls.
+
+**Where long AC/verifier passes go instead:** `claude-task.yml` in `deventerpriseds-org/eds-claude-skills`,
+dispatched from here with `target_repo` pointing at this repo. **Do not copy that workflow here** —
+the `target_repo` input exists for this and is proven against boost (run 33264119335, step 3, 2s,
+`success`). Output lands in `docs/qc-evidence/` as `AC-<slug>.md` / `VERIFY-<slug>-<loop>.md` with
+per-claim `CONFIRMED` / `REFUTED` / `NOT_APPLICABLE` verdicts — the eds Stop gate accepts a
+dispatched run plus that committed file in place of a subagent spawn, but only with real verdicts.
+
+**Known limits, measured:** it is SINGLE-SHOT, not an agent loop — it cannot grep, follow an import,
+or execute. `effort: high` is the default because `xhigh` over 398 KB ran 7m29s, cost ~$1.61 and
+still hit `max_tokens` mid-answer. A killed run's artifact is still uploaded and opens with an
+`INCOMPLETE` banner.
+
+### Hardening — three wrong answers of mine, all the same shape
+
+I asserted a capability's behaviour from my own model of it rather than from the owner's stated
+observation. **The user's stated observation IS ground truth**; when my analysis says the thing they
+watched happen is impossible, my analysis is what is wrong. It took a screenshot and a live timed
+test to settle something one honest "I don't actually know, let's measure it" would have.
+
+## `boost-pg-mcp-write` is the PREFERRED live-DB transport; a lapse is a NUDGE, not a detour (2026-08-29)
+
+**Owner-instructed, verbatim:** *"make a note to use the boost-pg-mcp-write as the preferred option
+and unless I tell you to essentially work continuously, nudge more for a reset if a step requires
+it's abilities which I may then advise to switch to the workflow or refresh and unblock proceeding.
+remember to check before implementation steps require db"*
+
+**The rule, now in `CLAUDE.md` under Live Database Access:**
+1. PRE-FLIGHT before an implementation step — does it need live Postgres? Say so UP FRONT, not
+   three tool calls in.
+2. Lapsed/off + step needs it → name the step, name the query, ask for a refresh, STOP. Do not
+   quietly reroute through `db-query.yml`. The choice between refresh and workflow is the owner's.
+3. Only exception: an explicit "work continuously" instruction — then take the fallback, and say in
+   the same turn which step took it.
+4. `db-query.yml` stays the correct FALLBACK. It is not the default.
+
+**Measured the moment it was reconnected** — two queries, ~1s each, both ground truth this session
+had been reasoning about from source alone:
+- `select action, count(*) from swap_decision group by action` → **kept 35, swapped 15, dropped 8,
+  added 7**. So 15 rows carry the two actions the fixed-slot rule makes illegal; AC-12's
+  back-compat requirement is about REAL rows, not a hypothetical.
+- `pg_get_constraintdef` on `swap_decision` → **`swap_decision_list_check` admits only
+  `skills_1, skills_2, relevant_1, relevant_2, relevant_3`**. `expertise` is rejected BY PRODUCTION,
+  confirming from the live database what the AC pass had inferred from `schema.ts:567`. AC-14
+  option (i) therefore genuinely requires an explicit `ALTER` — `create table if not exists` is a
+  no-op there (`schema.ts:594-596`).
+
+**Why this matters beyond convenience:** both facts were previously "read from the schema file",
+which is a proxy. The connector turned them into ground truth in two seconds. That is the argument
+for nudging rather than routing around.
+
+## Hardening — F-1: an owner edit that quoted the posting emptied the WHOLE swap table (2026-08-30)
+
+**Root cause.** In `swaps.ts` `row()`, `requirement_seq` / `verbatim_quote` / `confidence` were
+derived from the attribution result **independently of** `driver`. Nothing tied the two together, so
+the two could contradict each other: an owner-typed line that happened to match a requirement's
+verbatim produced `driver='owner'` **with a non-null quote**.
+
+**Why that is not a cosmetic inconsistency.** `schema.ts:587` enforces
+`check ((driver = 'posting') = (verbatim_quote is not null))`. The contradictory row is REJECTED,
+which aborts the whole `writeSwaps` transaction; `appPackets.ts:619` swallows the throw into a
+`console.warn`; and the packet then ships with an **empty swap table for every list** — no arrows, no
+originals, no `unchanged` statuses, and no error anywhere. The trigger is the owner editing a line to
+say what the employer asked for, which is the single most likely edit they make.
+
+**Guardrail (the invariant, not the incident).** Decide `driver` FIRST, then derive the citation from
+it: `const cites = driver === 'posting' && att` (`swaps.ts:553`). A citation can no longer exist
+without the driver that justifies it. This is also the semantically correct answer — an owner did not
+cite the employer — so the DB CHECK and the meaning now agree instead of merely coinciding.
+
+**Third instance of the same shape, and worth naming as a class:** a THROW inside `writeSwaps` is the
+QUIETEST outcome available, not the loudest, because the only caller swallows it. AC-9 encodes the
+same lesson for count mismatches. Any future work in this file must assume a throw is invisible.
+
+**A guard of ours was VACUOUS on its first draft.** The second new guard's fixture had one owner
+label, and it matched no requirement — so the collision it claimed to test could never arise, and the
+guard stayed GREEN with the defect reinstated. Caught only by mutating it. Fixed by adding an owner
+label that does attribute, with a comment so nobody simplifies it back. **An inert guard is worse
+than no guard, because it is believed.**
+
+**Also recorded — a reporting trap.** A background run was reported as *"completed (exit code 0)"*
+while its raw output read `Terminated` / `EXIT=143`: the zero was the OUTER SHELL's status (the last
+command in the chain was an `echo`), not the tests'. Reading the notification instead of the output
+would have turned a timeout into a pass. Same class as this repo's rule that a queued workflow is not
+a confirmation — **read the output, never the wrapper's exit code.**
+
+## Hardening — F-2 and F-3, both found by the independent verifier, both mine (2026-08-30)
+
+### F-2 — the ordering rule is TWO-SIDED, and I walked into the side this file did not document
+`alter table insertion drop constraint …` was placed TWENTY LINES ABOVE
+`create table if not exists insertion`. On a FRESH database that is
+`ERROR: relation "insertion" does not exist` and it aborts the entire migration. **My own
+populated-database proof passed it**, because there the table already exists — the exact MIRROR of
+the trap `H39`/`H39b` describe.
+
+**Invariant, restated two-sided:** a statement must come AFTER the ALTER that adds what it names,
+**AND after the CREATE of the table it alters.** The file only ever recorded the first half, and the
+first half is the half that a populated-DB test catches. The second half is only visible on a fresh
+database — so **both directions must be executed, every time.** One defect, 13 of 18 suite failures.
+
+### F-3 — a gate-deciding check shipped with ZERO coverage
+`fixed_slot_count` names offenders and can turn the gate `fail`, and nothing tested it. The verifier
+inverted all three states — unknown→`pass`, the compact_resume branch deleted so the check goes
+ABSENT, mismatch→`pass` — and the suite stayed **green on every one**. Five cases now cover it and
+all three mutations fire (1 / 3 / 1 failures). **Tier 1 means the guard ships WITH the check, in the
+same commit — not after.**
+
+### The backtick trap bit TWICE IN ONE SESSION, so it stops being prose
+A backtick inside `SCHEMA_SQL` (a template literal) terminates the string and `tsc` parses raw SQL as
+TypeScript. I did it once, wrote a warning comment about it — and then **did it again inside the
+warning comment itself**. Prose demonstrably does not guard this. It needs
+`H:schema-sql-has-no-backticks` as a real source-grep test (count must be 0), which cannot cry wolf
+because a backtick there is always a syntax error rather than a style preference.
+
+### My own DEFERRED.md rows broke the ledger guards — the guards were right
+`D:ledger-status-is-a-token` and `D:ledger-manual-names-its-vehicle` failed because I wrote a status
+of `QUEUED — **FIRST ITEM AFTER UI PARITY**` (statuses are the tokens `OPEN`/`CLOSED`/`WONTDO`, and
+emphasis belongs in the description) and a check directive of
+`` `check: db-query.yml "…"` `` instead of the required
+`` `check: (grep|absent|manual) <arg> — <rest>` ``. Both fixed by conforming, not by widening the
+guard. **A guard that fires on my own new writing is the guard working.**
+
+## Ops: this session ran FIVE hook versions behind, and nobody would have noticed (2026-08-30)
+
+**Owner: *"make sure there aren't any ops improvements only updated local and not pushed for future
+sessions. use the eds sync skill"*.** Both halves were worth asking.
+
+**Nothing was local-only.** The skills repo working tree is clean; the two commits ahead of `main`
+(`f706d38`, `4b7d661`) are pushed and open as PR #31. The `/root/.claude/eds-*` hook scripts are
+generated by `setup.sh` heredocs rather than being standalone files, and all six carried the
+container's build-time mtime — untouched by this session, so nothing to lose.
+
+**But the session was stale, and this is the real finding.** Installed `_eds_version` was **24**;
+the repo's `setup.sh` declares **29**. Five versions of hook fixes — including the phase-tag and
+verify-loop checkers that gate this session's own work — were never reaching it. The CCR Setup
+script field runs only at container BUILD, so a repo push does not touch a running session; only the
+sync applies it live.
+
+Synced and VERIFIED BY READING BACK, not by the run's exit code: `_eds_version` now **29**, all six
+hook scripts rewritten. `sync-setup-script.md` is a skill FILE at `/root/.claude/skills/`, not a
+registered slash-command — invoking it via the Skill tool fails with `Unknown skill`; read the file
+and follow its steps.
+
+**Carry this into every session:** check the installed `_eds_version` against the repo's
+`CURRENT_VERSION` early. A stale session fails silently — the hooks still fire, they are just the
+wrong ones, and a gate that has been fixed upstream keeps blocking on the old rule.
+
+## The ResumeSummary reads as JD stuffing because the COVERAGE PREDICATE pays for stuffing (2026-09-01)
+
+Owner: *"this one is a hack full of verbatim lines from the jd that isn't subtle at all and would get
+me accused of stuffing."* Full evidence: `docs/qc-evidence/DIAG-summary-stuffing.md`.
+
+**Not a prompt problem — the owner's prompts are untouched and still drive Call 1.** `coversIn`
+(`checks.ts:263-282`) closes a requirement only when **70% of the employer's content words appear
+LITERALLY** in the text. Executed at `1c43ea8`: a subtle paraphrase scores 2/7 = 0.29 and the
+requirement stays OPEN; a near-verbatim lift scores 7/7 and CLOSES. **No paraphrase reaches 0.70.**
+P3 rewrites `ResumeSummary` against that score every pass, and `scopeForRequirements` withholds only
+fields that solely cover a CLOSED requirement — so a tasteful generic summary covers nothing and is
+in scope forever. `buildScopedPrompt` hands over the employer's exact sentences and forbids only
+*inventing*, never *copying*.
+
+`posting_wording_kept` does not brake it: 8-consecutive-token exact run, severity `warn`. A summary
+stitched from short JD phrases closes a requirement with **0 offenders** (executed).
+
+**JotForm ran Call 1 + Call 3 and stopped.** The P3 loop is ours; it turned the summary into a
+coverage-optimisation target. That is the whole difference.
+
+**OPEN, one query short:** whether the summary the owner is reading came from a remediation pass or
+Call 1 is INFERENCE until `select loop, method, left(after_text,200) from insertion where
+merge_field='ResumeSummary' order by loop;` is run. `boost-pg-mcp-write` lapsed; nudged, not
+rerouted.
+
+### Hardening — an append with the wrong cwd writes a REAL file to the wrong place, silently
+`cat >> .claude/actions.md` ran with cwd `/home/user` after a shell reset and created
+`/home/user/.claude/actions.md`. It echoed `done` and exited 0. Two turns of ledger rows lived
+outside the repo where no commit would ever pick them up. **Always `cd` to the repo in the same
+command as a `>>` append, and confirm with `git status` — not with the command's exit code.**
+
+## Coverage is decided by string matching, not judgement — and the acceptance bar I wrote was too (2026-09-01)
+
+**Feature status.** `AC-llm-coverage-judge.md` (21 ACs, document lane) and `AC-llm-gate-and-stuffing.md`
+(1,029 lines, gate + stuffing lanes) are written and committed. The **confirm button is BUILT** on
+`claude/incumbent-wins-swap` (`bb7e620`) — app 422/422, api `tsc` clean, four new guards each
+mutation-proved. **NOT DEPLOYED: nothing is on `main`, and the owner has not pressed one.**
+
+**The architecture, measured.** `grep -rn "openai(" api/src/functions/tests/*.ts` returns two files —
+`pipeline.ts` and `mt19.ts`, generation only. **No model participates in any coverage, evidence,
+placement or attribution decision.** Nine tuned lexical constants do. An LLM path exists
+(`evidenceProposal.ts` + `verifyProposal`, citation checked byte-exact) and is barred from counting in
+three places. The house rule is `checks.ts:781` — *"a model may PROPOSE, only an exact rule may
+ACCUSE"*. **The rule is sound; equating "verifiable" with "lexical" is the defect.**
+
+**Owner's decision, recorded:** swap the lexical actors for a model that reasons **only where it makes
+sense** — document coverage, profile evidence and stuffing become model judgements; `locate()` goes
+hybrid (model picks the sentence, code computes offsets); `similarity()` stays lexical (ranking).
+"Include the gate" meant *do not defer it out of scope*, not "put the document judge on
+must_have_coverage".
+
+### Hardening — FOUR instances of one pattern, all caught by the owner
+1. Read the shipped summaries by eye and called them clean — measurement disagreed.
+2. Saw two numbers on one card and inferred a shared source — the trace disagreed.
+3. Printed `sameWord`'s wrong answers and called them scope rather than defect.
+4. **Set the judge's acceptance bar (`#9 must fail`) by word-matching, while arguing word-matching is
+   the defect.** #9 is mostly covered: a *technology leader* aligning *engineering strategies* and
+   delivering *scalable, secure software* IS describing technical teams — reading that is the whole
+   point of using a model.
+
+**The guard:** of every value reported, ask *is this the correct answer to the question asked?* — not
+*is this what the code returns?* Never let a tool's limitation define correctness, and never write an
+acceptance bar that requires a judge to reproduce an answer I pre-decided by the method being replaced.
+
+**Also corrected:** two of my own "PROVEN" claims were wrong from single-name greps — the confirm ROUTE
+existed (`appRequirements.ts:948`), and `app/src` does render evidence (via `evidencePresentation`).
+And `must_have_coverage` is not the only gate-failing check: **thirteen** take `bad()`'s default.
+
+### Active work
+- **NEXT: versioning (`D:every-build-is-destructive`)** — `artifact.version_history` stores `{"len": N}`,
+  a character count, not the text. The owner decided (OD-5) this is fixed **before** the Rewrite button,
+  because a Rewrite over it is an irreversible overwrite of their own prose.
+- Then the **Rewrite button** — the owner's original ask, distinct from the confirm button.
+
+### A6 and the deploy (2026-09-01)
+The lexical substitution is at **three** layers, not two: `coversIn`, `supportIn`, and
+`verifyReasoning` — the last being the check meant to make the model's judgement trustworthy, which
+instead withdraws sound evidence (Trinnex #20: *Information Systems* rejected against *"or related
+technical field"*). Sixth instance of my own absence-claim pattern: I said reasoning was never
+verified; it is.
+
+**`main` moved `9760c4f` → `d889e78` (40 commits) on the owner's instruction.** api 924/0, app 422/0
+pre-deploy. **The relevant-pool and slot-wiring lanes went out UNVERIFIED** — three verifier deaths —
+and that is stated, not hidden. Next: the 9-11 UI parity rows, then the judge lanes.
+
+## Coverage judge — built 2026-09-01, OFF by default, not yet live
+
+`coverageJudge.ts` (pure: prompt, parse, verify, compose, cache key) + `appCoverage.ts` (impure:
+cache, call, store) + `requirement_coverage` + `chk_coverage_judge` / `_max` / `_min_quote`.
+`checks.ts` consults a verdict for `evidence_placed` and falls back to `coversIn` when there is none.
+
+**Three facts kept apart, and this is the design:** a verdict exists (the judge wins), no map at all
+(the lexical rule, unchanged), asked-and-unanswered (**excluded from placement, never accused**).
+Every failure path — transport, cap, unparseable, an unreadable cache, a refused write — produces
+silence rather than a negative verdict.
+
+**A6 was fixed by APPEAL, not by narrowing.** `namedEntityTokens` counts any non-first capitalised
+word, so a Title Case degree list made `computer`/`software`/`engineering` accusable and withdrew
+correct evidence. Narrowing that population would weaken a guard, so the accusation is byte-identical
+and a model may defend — quoting the excerpt, defending every disputed term, and failing closed.
+
+**The number the owner watches has NOT moved.** `must_have_coverage` reads `ruleEvidenceOf` (the
+PROFILE side, `supportIn`), which this pass did not touch. Anyone reading "the judge shipped" as "0/12
+is fixed" is wrong.
+
+---
 
 ---
 

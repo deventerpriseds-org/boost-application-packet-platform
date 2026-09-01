@@ -25,6 +25,7 @@
 // the production DB via db-query.yml. See scripts/render-app.mjs for the fixture format.
 
 import { chromium } from 'playwright-core'
+import { assertFixtureCanSee } from './lib/fixture-canary.mjs'
 import { createServer } from 'node:http'
 import { readFile, writeFile, mkdir, cp } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
@@ -175,6 +176,9 @@ async function appSide(browser, step, fixtures) {
 // ---- assemble ------------------------------------------------------------------------------------
 if (!existsSync(join(DIST, 'index.html'))) { console.error(`no app build at ${DIST}`); process.exit(2) }
 const fixtures = FIXTURES ? JSON.parse(await readFile(resolve(FIXTURES), 'utf8')) : {}
+
+// The canary lives in one place and guards BOTH fixture consumers - see the file's header.
+assertFixtureCanSee(fixtures, 'compare-ui.mjs')
 
 // Stage the prototype the way render-spec.mjs does, including the token path its theme.css @imports
 // but the package does not ship at.

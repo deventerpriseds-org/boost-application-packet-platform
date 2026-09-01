@@ -107,6 +107,30 @@ limit, both are one toggle:**
   lapsed. A CCR session cannot run the OAuth flow. **TELL THE OWNER** so they can re-auth.
   Do not silently fall back to GitHub Actions and never mention it.
 
+#### `boost-pg-mcp-write` is the PREFERRED transport, and a lapse is a NUDGE, not a detour
+(owner-instructed 2026-08-29: *"make a note to use the boost-pg-mcp-write as the preferred option
+and unless I tell you to essentially work continuously, nudge more for a reset if a step requires
+it's abilities which I may then advise to switch to the workflow or refresh and unblock proceeding.
+remember to check before implementation steps require db"*)
+
+1. **PRE-FLIGHT, BEFORE an implementation step begins — not mid-step.** Ask: does this step need
+   to read or write live Postgres (a measurement, a regression baseline, a row count, an AC's
+   verification)? Say so up front. Discovering it three tool calls in, after the plan is committed,
+   is the failure this rule prevents.
+2. **If it does and the connector is lapsed or off, NUDGE and STOP.** Name the step, name the query
+   it needs, and ask for a refresh. Do not quietly reroute through `db-query.yml`. The owner will
+   then either refresh it (fastest — ~1s per query) or tell you to use the workflow. **That choice
+   is theirs, not yours.**
+3. **The one exception: an explicit "work continuously" instruction.** If the owner has said to keep
+   going without stopping, take the `db-query.yml` fallback rather than blocking — and say in the
+   same turn which step took the fallback and what a refresh would have got faster, so they can
+   still choose to reconnect.
+4. **A lapse is cheap to fix and expensive to route around.** Measured 2026-08-29: the connector was
+   reported lapsed, the owner reconnected it in one message, and the next query
+   (`select action, count(*) from swap_decision group by action` → kept 35, swapped 15, dropped 8,
+   added 7) returned in about a second. The `db-query.yml` equivalent is a dispatch, a poll and a log
+   read. `db-query.yml` remains the correct fallback — it is not the default.
+
 *(2026-08-23: a session read the paragraph below, concluded the live data was unreachable,
 and built `fixture-refresh.yml` plus a chain of `db-query.yml` round-trips to haul data out
 through job logs — while `Azure_pg_mcp` sat `enabledInChat: true` and two system reminders
@@ -533,6 +557,163 @@ still while it runs. Background it, keep working, act on the wake.
   `app.http` route registrations, and smoke-test the previously-passing live
   endpoints before considering it done.
 
+## A long AC or verification pass does not run IN this session (2026-08-29; vehicle replaced 2026-08-30)
+
+**The premise is unchanged and was measured.** An in-session `Agent` subagent makes this CCR session
+**unresponsive while it runs**: on 2026-08-29 the owner typed at ~25s into a background subagent and
+the message sat QUEUED and undelivered for **93 seconds**, surfacing only when they pressed stop —
+which killed the agent. The client shows "Brewing… 1 running task" and relabels the input box "Queue
+feedback…", and queued text is lost if the screen sleeps. The only way to reach the session was to
+destroy the work in flight. `run_in_background: true` does **not** fix this; the turn stays active
+while the parent keeps issuing tool calls.
+
+**What changed on 2026-08-30 is the VEHICLE.** This section previously sent every long pass to
+`cross-container-pass.yml`. That is a single Messages API call: it **cannot grep, follow an import, or
+execute anything**, so a verifier running on it can only reason about what an assertion *would*
+evaluate — and the one thing that has actually caught inert guards in this org is a running
+adversary. **That is its one real and unchanging deficit.**
+
+> **CORRECTION, 2026-08-30 — do not read `cross-container-pass.yml` as credit-blocked.** This section
+> previously said it *"needs metered API credit, which ran out mid-pipeline"* (run 33277232470).
+> That run did fail exactly that way, but the TENSE was wrong: **a balance is a STATE, not a
+> property.** Re-probed 2026-08-30 (run 33288812332): `end_turn`, `in=33 out=11`, artifact
+> complete, success in 14s — **the credit is live and the runner works today.** Evidence and the
+> command that re-checks it: `eds-claude-skills/docs/qc-evidence/FEASIBILITY-runner-credit.md`.
+> Re-probe rather than remember; the toollessness above is the deficit that does not change.
+
+### Use `scripts/verify.sh` in `eds-claude-skills` — one vehicle, two kinds
+
+```
+scripts/verify.sh --kind AC <slug> <brief-file> --context "<globs>"   # -> docs/qc-evidence/AC-<slug>.md
+scripts/verify.sh <slug> <loop> <brief-file>    --context "<globs>"   # -> VERIFY-<slug>-<loop>.md
+```
+
+Detached `claude -p` on the session's own credential. It does **not** hold the session (it returns
+in under a second and prints the artifact path), needs **no API key**, and **CAN execute** — it runs
+suites, applies mutations and observes the result. Measured 2026-08-30 on real work: an AC pass at
+12 turns / 105s / $0.87 that found a regression the implementer had missed, and a verifier at
+45 turns / 336s / $2.36 returning 9/9 CONFIRMED.
+
+**Always pass `--context`.** The A/B that settled this compared two arms of the same vehicle on the
+same model: with the target repo's files in the room it scored **5/5**; without, **3/5**, for no
+other reason. Context inclusion is a required input, not a tuning knob — and a glob matching nothing
+aborts non-zero by design rather than running a pass that silently lacks a file.
+
+**Prefer Sonnet and batch inside one cache window.** The bill is the CONTEXT, not the reasoning:
+cache WRITE 65,688 tok = $0.41 against cache READ 65,377 = $0.03. Opus cost 2.7x Sonnet for
+identical verifier output.
+
+**STATUS — re-probe, do not remember.** `verify.sh` is **MERGED to `eds-claude-skills` `main`**
+(PR #28), and the engine it runs on was smoke-tested live on 2026-08-30: `claude -p --model
+claude-sonnet-5` returned `ok`, rc=0, on the session credential with no API key. An earlier version
+of this line said "not yet merged" and stayed wrong after #28 landed — a STATE recorded as a
+standing fact, the same error as the credit claim above. The two commands that re-check it, either
+of which takes seconds:
+
+    git show origin/main:scripts/verify.sh | head -3      # is it on main
+    claude -p --model claude-sonnet-5 "Reply with exactly: ok"   # does the engine answer
+
+### `cross-container-pass.yml` keeps exactly ONE role — and it is the reason not to delete it
+
+It runs on **GitHub's machines**, so it is the **only vehicle that survives a container restore**.
+`verify.sh` spawns a child of this container and dies with it: it survives *interrupts*, not
+*restores*. Still true, and still the reason not to fork it:
+
+> **Do NOT copy `cross-container-pass.yml` or `scripts/cross_container_pass.py` into this repo.** The workflow already
+> takes a `target_repo` input for exactly this. Proven, not assumed: run `33264119335` step 3
+> ("Check out the target repo") completed `success` in 2s with `target_repo` set to this repository.
+> A second copy is a parallel system to maintain, and "Extend, don't duplicate" forbids it.
+
+```
+mcp__github__actions_run_trigger(
+  method="run_workflow",
+  owner="deventerpriseds-org", repo="eds-claude-skills",   # <- the WORKFLOW lives there
+  workflow_id="cross-container-pass.yml", ref="main",
+  inputs={
+    "prompt": "<the full AC or verifier brief>",
+    "target_repo": "deventerpriseds-org/boost-application-packet-platform",
+    "target_ref": "claude/<your-feature-branch>",     # defaults to main -- pass YOUR branch
+    "context_globs": "_target/CLAUDE.md,_target/.claude/*.md,_target/api/src/functions/**/*.ts",
+    "effort": "high",
+    "output_name": "VERIFY-<slug>-<loop>.md",
+  })
+```
+
+Its limits, so nobody re-derives them: single-shot (no tools, 1M context is the compensation —
+stuff the files in up front); `effort: high` is the default because `xhigh` over 398 KB ran 7m29s,
+cost ~$1.61 and still hit `max_tokens` mid-answer; a partial artifact opens with an `INCOMPLETE`
+banner and `stop_reason: max_tokens` fails the job.
+
+### Restore-survival is a property of the WORK, not the vehicle — and this part is measured
+
+Same task across one real container restore: a **one-pass** run died at 9,122 bytes mid-sentence
+with **0** chunks durable; a **chunked** run that committed **and pushed** after each chunk survived
+with **56,374 bytes and 2 of 5 chunks durable and resumable**. **Chunk every long pass; commit AND
+push per chunk** — a commit that is not pushed is still inside the container, which was a real bug
+in the chunk script itself.
+
+Self-hosting the containers is **not** an escape route: `list_environments` (2026-08-30) returns
+three environments, all `kind: anthropic_cloud`, with no `ccpool_` pool. Re-run that one call rather
+than re-deriving it.
+
+### A pass is ALIVE iff its OUTPUT IS GROWING
+
+Never `pgrep` for it: the pattern matches this session's own `claude`, and `pkill -f` will kill your
+own shell because that shell's command line contains whatever you searched for. Both happened on
+2026-08-30, and a verifier was declared dead **14 seconds before it delivered 9/9**. The JSON log is
+written only at the END of a run, so 0 bytes proves nothing mid-run — read the `.out` sidecar's
+mtime.
+
+Either way, commit the artifact to `docs/qc-evidence/` under the name the verdict contract expects
+(`AC-<slug>.md`, `VERIFY-<slug>-<loop>.md`). The eds Stop gate accepts a committed evidence file in
+place of a subagent spawn **only if** it carries per-claim `CONFIRMED` / `REFUTED` /
+`NOT_APPLICABLE` verdicts. Prose does not satisfy it.
+
+
+## WHICH VEHICLE RUNS A PASS — pick by the two questions that actually differ
+
+An AC pass and a verification pass are the same act: an independent read. There are three ways to
+run one, and agents keep choosing wrongly because the names described their vintage rather than
+their role. Only TWO properties separate them.
+
+| vehicle | holds my turn (you cannot type) | survives a container reclaim | cost |
+|---|---|---|---|
+| in-session `Agent` subagent | **YES — the owner is locked out** | no | free (session plan) |
+| `scripts/verify.sh` (detached `claude -p`) | no | no | free (session plan) |
+| `.github/workflows/cross-container-pass.yml` | no | **YES — runs on GitHub's machines** | **metered API** |
+
+**DEFAULT: `scripts/verify.sh`.** Free, can execute (it runs suites, applies mutations, observes the
+result), and it does not hold the turn.
+
+    scripts/verify.sh --kind AC <slug> <brief> --context "<globs>"    -> AC-<slug>.md
+    scripts/verify.sh <slug> <loop> <brief>    --context "<globs>"    -> VERIFY-<slug>-<loop>.md
+
+`--kind` changes ONLY the prompt and the artifact name. There is one `claude -p` invocation in that
+file and both kinds use it, so **AC and verification cost exactly the same** — a question that has
+been asked more than once because dollar figures were quoted without saying what they meant. Any
+per-run dollar amount in these files is `claude -p`'s own `total_cost_usd`: what the work WOULD cost
+on the metered API, not a charge. Both run on this session's plan credential.
+
+**"Local" does not mean "blocking", and that is the confusion worth killing.** What locks the owner
+out is my TURN staying open, not where the work runs. An `Agent` subagent runs inside my turn, so
+their typed message sits queued in grey — measured at 93 seconds, and the only way in was the stop
+button, which killed the agent. `verify.sh` forks a child, redirects its stdout to a FILE, and exits
+in under a second; my turn ends and the owner has the floor. **The redirect is load-bearing:** a
+backgrounded child inherits stdout, and any caller capturing output waits for EOF, so an earlier
+version printed "launched" instantly and still blocked for the whole run.
+
+**Use `cross-container-pass.yml` for exactly ONE reason: the pass must survive a container reclaim.**
+A reclaim SIGKILLs this container and takes any detached child with it — `verify.sh` survives
+*interrupts*, not *restores*. Nothing else recommends the runner: it is a single Messages API call,
+so it **cannot grep, follow an import, or execute anything** (1M context is the compensation — stuff
+the files in up front), and it bills metered credit because a GitHub runner has no session and must
+present an Anthropic credential of its own.
+
+**Before reaching for the runner, prefer chunking.** Reclaim-survival is a property of the WORK, not
+the vehicle: measured across one real reclaim, a one-pass run died at 9,122 bytes with 0 chunks
+durable, while a chunked run that committed AND PUSHED per chunk survived with 56,374 bytes and 2 of
+5 chunks resumable. A commit that is not pushed is still inside the container.
+
 ## No dead UI (standing rule)
 
 Every button, link, and selector must be wired before committing.
@@ -673,6 +854,15 @@ the P8.3 build was on a gate path, and the two most expensive (`dimensions.ts` g
 proposal, and two sibling checks left unfiltered) would each have sat in `main` under several more
 commits if the verifier had waited for a phase boundary.
 
+**USE `/workspace/eds-claude-skills/scripts/mutate.sh`, NOT A HAND-ROLLED SCRIPT.** Measured on
+this repo 2026-09-01: of ~20 hand-run mutations in one lane, **two had anchors that never matched**,
+and the inline harness printed `INERT -- the guard did not fire` for both. The mutation never ran, so
+nothing was tested; one of the two, re-run correctly, DID fire. The harness has THREE outcomes —
+`FIRED` / `INERT` / **`NOT-APPLIED`** — and the third is the whole point, because a two-outcome
+script reports "your guard is worthless" when it means "I did nothing". It also refuses an ambiguous
+anchor, refuses a dirty file, and ASSERTS the restore against HEAD (a hand-rolled script's timeout
+once left a guard DELETED in this repo's source).
+
 **THE ONE STEP THAT IS NEVER SKIPPED, AT ANY TIER: mutation-prove a NEW guard.** Write the guard,
 revert the behaviour it guards, confirm the suite FAILS, restore. It costs one command. Three guards
 in a single session passed with their defect reinstated and would have shipped as protection that
@@ -683,7 +873,7 @@ do not claim the assertion is proven.
 Tier 1 is a property of the CODE PATH, not of the change's size. A one-line edit to `checks.ts` is
 tier 1; a 200-line settings screen is tier 2.
 
-## Self-attack BEFORE the verifier, and tier a RE-verification by cost (owner-instructed 2026-08-25)
+## Self-attack BEFORE the verifier, and re-verify EVERYTHING every loop (owner-instructed 2026-08-25, tightened 2026-08-29)
 
 Both rules live in full in the org skill `verify-work` (steps **0b** and **0c**). They are mirrored
 here because this repo is where they were earned and where the evidence is.
@@ -712,21 +902,41 @@ findings, and **three were plain greps I skipped**. Four checks, seconds each:
    genuinely needed an independent adversary: deleting a positional check left 840/840 green while
    96 of 1218 tampered documents got spliced.*
 
-### 0c — on loop 2+, tier by COST, never by "could this have been impacted?"
+### 0c — every loop re-verifies EVERY claim; only DEPTH is tiered
 
-That question is a judgement, and judging it wrong is how a regression ships. **Measured:** the
-one-line F-1 fix changed what `frameOf` returns for real rows — the INPUT to five of eight claims
-plus the safety floor. "Obviously unaffected" would have been wrong for all but one of them.
+**Coverage is TOTAL on every loop.** Never drop a claim because it passed last loop. Owner,
+2026-08-29:
 
-| cost | on every loop |
+> *"if you don't check something just because it passed it could break from an unrelated fix and you
+> wouldn't detect it. That's why it still needs to verify everything but a quicker not necessarily
+> cheaper version that doesn't spend as much time as it does in things that just failed and was
+> supposedly fixed."*
+
+Never decide depth by asking "could this have been impacted?" — that is a judgement, and judging it
+wrong is how a regression ships. **Measured:** the one-line F-1 fix changed what `frameOf` returns
+for real rows — the INPUT to five of eight claims plus the safety floor. "Obviously unaffected"
+would have been wrong for all but one of them.
+
+| last loop's verdict | on every loop — no row is skipped |
 |---|---|
-| **Cheap + deterministic** (the suite, a build) | **Re-run ALL of it, every loop.** Seconds. The net under everything. |
-| **Expensive re-derivation** (fuzz sweeps, differential runs, schema on a fresh DB, per-guard mutation) | Only what the fix's blast radius touches — and the brief must STATE the radius. |
+| **Cheap + deterministic** (the suite, a build) | **Re-run ALL of it, every loop.** Seconds. The total-coverage floor under everything. |
+| **Previously CONFIRMED** | **Re-checked at reduced depth** — fastest check that would still expose a regression. Faster, never absent; state HOW it was re-confirmed. |
+| **Previously REFUTED, now fixed** | **Full re-derivation** (fuzz sweeps, differential runs, schema on a fresh DB, per-guard mutation). This is where the time saved above is spent. |
 
-The loop-2 brief carries a required PRIOR STATE block (what was confirmed, what was refuted, the
-blast radius, the cheap-suite result) ending in **CHALLENGE THE RADIUS** — the verifier is the check
-on the implementer's radius being wrong, so it is handed the reasoning and invited to reject it
-rather than silently inheriting it.
+The loop-2 brief carries a required PRIOR STATE block under a `## VERIFY LOOP` header (`work:` slug +
+`loop:` integer). Its field labels are a frozen contract checked literally by `eds-verify-loop.py` on
+Stop: `Previously CONFIRMED - RE-CHECKED THIS LOOP`,
+`Previously REFUTED / now fixed - FULL RE-DERIVATION`, `Blast radius of the fix`,
+`Cheap suite re-run covering EVERYTHING` — ending in
+**CHALLENGE THE RADIUS**, the verifier being the check on the implementer's depth allocation being
+wrong, so it is handed the reasoning and invited to reject it rather than silently inheriting it.
+
+Two of those fields are read backwards easily. **`Blast radius of the fix` survives with its meaning
+INVERTED**: it no longer selects *what* is checked, it selects *where DEPTH is spent* — coverage stays
+total regardless of the radius. **`Cheap suite re-run covering EVERYTHING`** is the total-coverage
+floor and takes a real command and a real result, not an intention. The old
+`Previously CONFIRMED and *not re-derived*…` field is RETIRED and a brief containing that phrase is
+now BLOCKED by the checker. Full text of the rule: org skill `verify-work` §0c.
 
 ---
 

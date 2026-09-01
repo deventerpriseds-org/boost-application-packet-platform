@@ -16,13 +16,31 @@ import { attribute, splitItems, RequirementRef } from './swaps'
 
 export type Method = 'model_rewrite' | 'template_fill' | 'manual'
 
-/** The list-backed fields, whose text is traceable to skill_candidate rows. */
+/**
+ * The list-backed fields, whose text is traceable to skill_candidate rows.
+ *
+ * EXPERTISE JOINED THIS MAP ON 2026-08-30, and the reason is a rendering defect rather than
+ * tidiness. `listBodyModel` (`app/src/assetBlocks.js:754`) takes `swapsForList` — the swap rows for
+ * ONE list, selected by this very column — so a `null` here means the Expertise list is handed an
+ * empty swap array. Its own comment then makes the honest call and renders a BLANK status on every
+ * line, because with no swap rows nothing judged them and `unchanged` would be a provenance claim
+ * with no evidence. The owner rejected that outcome directly, 2026-08-29: *"the prototype shows the
+ * buttons regardless and an unchanged value if not swapped. that's better than showing nothing
+ * which doesn't match the design and leaves me wondering if something broken"*.
+ *
+ * So the fix is not to loosen the blank-status rule — it is to give Expertise the swap rows it was
+ * missing. That needed three things, and all three had to land together or the change is inert:
+ * `'expertise'` in `swaps.ts` `ListKey`/`LIST_FIELDS`, the three DDL CHECKs widened
+ * (`skill_candidate`, `swap_decision`, `insertion` — `skill_candidate` rejects FIRST), and this
+ * entry. Owner scope, 2026-08-29: *"also relevant and expertise counts"*.
+ */
 export const LIST_FIELD_TO_LIST: Record<string, string> = {
   SkillsBullets1: 'skills_1',
   SkillsBullets2: 'skills_2',
   RelevantBullets1: 'relevant_1',
   RelevantBullets2: 'relevant_2',
   RelevantBullets3: 'relevant_3',
+  ExpertiseBullets: 'expertise',
 }
 
 export interface InsertionRow {

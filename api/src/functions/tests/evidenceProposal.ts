@@ -202,6 +202,11 @@ export interface EscalateOptions {
   minQuoteChars: number
   /** The resolver's own token floor — a requirement too thin to judge is too thin to escalate. */
   minTokens: number
+  /**
+   * May a model appeal a withdrawal the exact overclaim rule made? Absent means no, and no is
+   * today's behaviour. See THE APPEAL above for why this cannot weaken the guard.
+   */
+  appeal?: boolean
   resolverVersion: number
 }
 
@@ -246,7 +251,54 @@ export async function escalateOne(
   // the model's raw sentence. See `verifyReasoning`: an exact rule withdraws a named-entity
   // overclaim, and everything else is published beside a deterministic statement of what the excerpt
   // does not mention.
-  const verdict = verifyReasoning(requirement, rec.text.slice(a.char_start, a.char_end), a.reasoning)
+  const excerpt = rec.text.slice(a.char_start, a.char_end)
+  const verdict = verifyReasoning(requirement, excerpt, a.reasoning)
+
+  // THE APPEAL. Only reached when the exact rule ALREADY withdrew the sentence, and it can only
+  // overturn that withdrawal — never cause one. Every failure below leaves the withdrawal standing,
+  // which is why this cannot weaken the guard: no transport, a throw, an unparseable answer, a
+  // quote that is not in the excerpt, or one disputed term left undefended all fall through to the
+  // withdrawn result unchanged.
+  let appeal: OverclaimAppeal | undefined
+  if (verdict.withdrawn && opts.appeal) {
+    try {
+      const rawAppeal = await opts.fetchJson(APPEAL_SYSTEM, buildAppealUser(requirement, excerpt, verdict.overclaimed))
+      const parsedAppeal = contentJson(rawAppeal)
+      if (parsedAppeal && typeof parsedAppeal === 'object') {
+        appeal = parseAppeal(parsedAppeal, excerpt, verdict.overclaimed)
+      }
+    } catch { /* the withdrawal stands, exactly as it does today */ }
+  }
+
+  if (appeal?.overturned) {
+    // The model's sentence is restored, and WHAT RESTORED IT is stored with it: the disputed terms
+    // and the span of the excerpt cited for each. An overturned withdrawal that read as an ordinary
+    // note would be indistinguishable from one that was never disputed, and the owner would have no
+    // way to see that a rule objected and was answered.
+    const cited = appeal.upheld.map(u => `${u.term} -> "${u.quote}"`).join('; ')
+    const clean = String(a.reasoning || '').trim()
+    return {
+      kind: 'accepted',
+      reasoning: `${clean} — a rule disputed ${verdict.overclaimed.join(', ')}; the excerpt was cited for each: ${cited}`,
+      reasoningWithdrawn: false,
+      overclaimed: verdict.overclaimed,
+      row: {
+        quote: excerpt,
+        source_kind: rec.kind,
+        source_label: rec.label,
+        source_key: a.source_key,
+        char_start: a.char_start,
+        char_end: a.char_end,
+        extra: `${clean} — a rule disputed ${verdict.overclaimed.join(', ')}; the excerpt was cited for each: ${cited}`,
+        ratio: null,
+        method: 'proposed',
+        record_sha256: sha256(rec.text),
+        resolver_version: opts.resolverVersion,
+        proposal_version: PROPOSAL_VERSION,
+      },
+    }
+  }
+
   return {
     kind: 'accepted',
     reasoning: verdict.note,
@@ -256,7 +308,7 @@ export async function escalateOne(
       // The record's own bytes at the verified offsets — never the model's string. On this path the
       // two are equal by construction (verifyProposal found the quote with indexOf), which is
       // exactly why re-slicing costs nothing and closes the gap if that ever stops being true.
-      quote: rec.text.slice(a.char_start, a.char_end),
+      quote: excerpt,
       source_kind: rec.kind,
       source_label: rec.label,
       source_key: a.source_key,
@@ -336,6 +388,105 @@ export interface ReasoningVerdict {
 }
 
 const carries = (toks: string[], t: string) => toks.includes(t) || toks.some(h => sameWord(t, h))
+
+// --- THE APPEAL: the exact rule still accuses, and only a CITED answer overturns it -------------
+//
+// A6, measured on the owner's live Trinnex packet (db-query run 33503167998): `verifyReasoning`
+// withdrew 2 of 10 explanations, and at least one was CORRECT.
+//
+//   requirement #20  "Bachelor's degree in Computer Science, Software Engineering, Data Science,
+//                     Engineering, or related technical field."
+//   excerpt          "Bachelor of Science with Honors in Information Systems, University of Maryland"
+//   withdrawn on     computer, software, engineering
+//
+// The requirement admits *"or related technical field"* in its own words, and Information Systems is
+// one. The rule cannot read that clause; it can only ask whether the strings appear.
+//
+// WHY THE FIX IS NOT "ACCUSE ON FEWER TOKENS". The population is wrong for a knowable reason --
+// `namedEntityTokens` (`requirementSupport.ts:205`) counts ANY non-first capitalised word, so a Title
+// Case degree list produces `computer`, `software`, `engineering` as "named entities". Narrowing it
+// to acronym-shaped tokens would fix these two cases and WEAKEN A GUARD: a real overclaim on a plain
+// capitalised name would stop being withdrawn. That trade is the owner's to make, not mine.
+//
+// SO THE ACCUSATION IS UNCHANGED AND AN APPEAL IS ADDED. The exact rule withdraws exactly what it
+// withdraws today. A model may then DEFEND the sentence, and only on terms it cannot fake:
+//
+//   - it must quote the span OF THE EXCERPT that stands in for the disputed term, verified with the
+//     same byte-exact `indexOf` `verifyProposal` uses -- so "Information Systems" is a defence and a
+//     paraphrase of one is not;
+//   - it must defend EVERY disputed term. A partial defence leaves the withdrawal standing, because
+//     the withdrawal was for all of them;
+//   - and every failure -- no transport, an unparseable answer, a quote that is not in the excerpt,
+//     a term left undefended -- LEAVES THE WITHDRAWAL IN PLACE. The guard is never weakened by
+//     something going wrong; it can only ever be overturned by a positive, cited answer.
+//
+// This keeps the house rule intact rather than trading it away: an exact rule still accuses, and the
+// model's role is to show the words that answer the accusation.
+
+export interface OverclaimAppeal {
+  /** Disputed terms the model defended with a verified span of the excerpt. */
+  upheld: Array<{ term: string; quote: string }>
+  /** True only when EVERY disputed term was upheld. */
+  overturned: boolean
+}
+
+export const APPEAL_SYSTEM = [
+  'An exact rule has withdrawn an explanation because it credited an excerpt with terms the excerpt does not contain.',
+  'You decide whether the excerpt nevertheless stands in for each term, and you show it by quoting the excerpt.',
+  'You never quote the requirement, and you never argue from what the excerpt implies about the person.',
+  'Leaving a term undefended is a correct answer. The withdrawal then stands, which is the safe outcome.',
+].join('\n')
+
+export function buildAppealUser(requirement: string, quote: string, disputed: string[]): string {
+  return [
+    'THE REQUIREMENT:',
+    String(requirement || ''),
+    '',
+    'THE EXCERPT FROM THE CANDIDATE\'S PROFILE:',
+    String(quote || ''),
+    '',
+    `THE DISPUTED TERMS: ${disputed.join(', ')}`,
+    '',
+    'For each disputed term, does THIS EXCERPT stand in for it, as the requirement is written?',
+    '',
+    'RULES:',
+    '1. Quote the exact span of the EXCERPT that stands in for the term. Copy it character for',
+    '   character -- a quote not present verbatim in the excerpt is discarded and your answer with it.',
+    '2. The requirement\'s own wording decides what counts. A requirement reading "or related field"',
+    '   admits a related one; a requirement naming a specific product or certification does not.',
+    '3. Defend only what the excerpt shows. An undefended term is a correct and useful answer, and',
+    '   the withdrawal it caused then stands.',
+    '',
+    'Return STRICT JSON: {"upheld":[{"term":"<one of the disputed terms>","quote":"<span of the excerpt>"}]}',
+    'No prose, no markdown, no extra keys.',
+  ].join('\n')
+}
+
+/**
+ * Read the appeal, refusing anything the model cannot point at.
+ *
+ * `quote.indexOf(span)` on the ORIGINAL excerpt -- no lower-casing, no normalisation, deliberately
+ * identical to `verifyProposal`'s rule. And the withdrawal is overturned ONLY when every disputed
+ * term is defended: it was made for all of them, so upholding some leaves it standing.
+ */
+export function parseAppeal(raw: any, quote: string, disputed: string[]): OverclaimAppeal {
+  const text = String(quote || '')
+  const want = new Set(disputed.map(t => t.toLowerCase()))
+  const upheld: OverclaimAppeal['upheld'] = []
+  const seen = new Set<string>()
+  for (const row of Array.isArray(raw?.upheld) ? raw.upheld : []) {
+    const term = String(row?.term || '').toLowerCase().trim()
+    if (!want.has(term) || seen.has(term)) continue
+    const span = typeof row?.quote === 'string' ? row.quote.trim() : ''
+    if (!span) continue
+    const at = text.indexOf(span)
+    if (at === -1) continue
+    seen.add(term)
+    // The EXCERPT's own bytes at the found offsets, never the model's string.
+    upheld.push({ term, quote: text.slice(at, at + span.length) })
+  }
+  return { upheld, overturned: disputed.length > 0 && seen.size === want.size }
+}
 
 export function verifyReasoning(requirement: string, quote: string, reasoning: string): ReasoningVerdict {
   const reqText = String(requirement || '')

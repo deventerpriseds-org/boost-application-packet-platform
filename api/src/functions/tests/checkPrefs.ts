@@ -57,6 +57,12 @@ const ENSURE_CHECK_COLUMNS_SQL = `
       add column if not exists chk_evidence_bullet_run  int not null default ${DEFAULT_THRESHOLDS.evidenceBulletRun},
       add column if not exists chk_evidence_escalate  boolean not null default ${DEFAULT_THRESHOLDS.evidenceEscalate},
       add column if not exists chk_evidence_escalate_max int not null default ${DEFAULT_THRESHOLDS.evidenceEscalateMax},
+      -- THE COVERAGE JUDGE. Off by default: unlike escalation, a verdict changes a check's state,
+      -- so the owner turns it on after seeing it read their own packet. There is deliberately no
+      -- model column here (D:model-is-43-literals) -- see CheckThresholds.coverageJudge.
+      add column if not exists chk_coverage_judge      boolean not null default ${DEFAULT_THRESHOLDS.coverageJudge},
+      add column if not exists chk_coverage_judge_max  int not null default ${DEFAULT_THRESHOLDS.coverageJudgeMaxCalls},
+      add column if not exists chk_coverage_judge_min_quote int not null default ${DEFAULT_THRESHOLDS.coverageJudgeMinQuoteChars},
       -- Whether a 'fail' gate BLOCKS approval or may be overridden with a recorded reason. Default
       -- false = today's behaviour. See CheckThresholds.gateAdvisory for why this exists and why it
       -- deliberately does not touch the gate value or the check rows.
@@ -163,6 +169,7 @@ export async function loadThresholds(client: any, owner: string): Promise<Partia
             chk_evidence_threshold, chk_evidence_min_tokens,
             chk_evidence_max_sentences, chk_evidence_bullet_run,
             chk_evidence_escalate, chk_evidence_escalate_max, chk_gate_advisory,
+            chk_coverage_judge, chk_coverage_judge_max, chk_coverage_judge_min_quote,
             chk_skills_split_tolerance, chk_wording_run_tokens,
             chk_resume_summary_words_min, chk_resume_summary_words_max,
             chk_about_me1_words_min, chk_about_me1_words_max,
@@ -189,6 +196,11 @@ export async function loadThresholds(client: any, owner: string): Promise<Partia
     // existed must read as OFF, never as "truthy enough".
     gateAdvisory: r.chk_gate_advisory === true,
     evidenceEscalateMax: r.chk_evidence_escalate_max ?? undefined,
+    // `=== true` again, and here it is the SAFE direction rather than the awkward one: an owner
+    // whose row predates this column reads as OFF, which is the lexical behaviour they already have.
+    coverageJudge: r.chk_coverage_judge === true,
+    coverageJudgeMaxCalls: r.chk_coverage_judge_max ?? undefined,
+    coverageJudgeMinQuoteChars: r.chk_coverage_judge_min_quote ?? undefined,
     skillsSplitTolerance: r.chk_skills_split_tolerance ?? undefined,
     wordingRunTokens: r.chk_wording_run_tokens ?? undefined,
     aboutMe1Words: [r.chk_about_me1_words_min, r.chk_about_me1_words_max],
@@ -245,5 +257,9 @@ export function resolveOptionsFrom(t: Partial<CheckThresholds>): ResolveOptions 
     // which is written from their prompts before this pass runs at all.
     escalate: t.evidenceEscalate !== false,
     escalateMax: t.evidenceEscalateMax,
+    // `=== true`, like the column it reads: an owner who has never touched the judge setting keeps
+    // today's withdrawals exactly. The appeal can only ever OVERTURN a withdrawal, never cause one.
+    appealOverclaims: t.coverageJudge === true,
+    vetProposals: t.coverageJudge === true,
   }
 }

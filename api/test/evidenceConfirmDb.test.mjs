@@ -268,3 +268,83 @@ test('H:escalation-spends-its-cap-on-must-haves-first: the gate-deciding rows ar
       'every attempt the cap bought must be a must-have while any must-have is still unevidenced')
   } finally { await c.end() }
 })
+
+// ─── F-10: a vetted verdict survives a re-resolve, so the gate stops flapping ──────────────────
+//
+// From an independent verifier: the coverage judge builds a whole cache table on the principle that
+// a model asked twice may answer differently and a flapping gate is worse than a consistently wrong
+// one — while the lane that actually moves `must_have_coverage` had none of it, because the
+// re-resolve deleted every vetted row and the next pass re-asked from scratch.
+//
+// AGAINST A REAL DATABASE, because the fix is one SQL clause. A fake client would happily "pass" a
+// `not (e.method = 'vetted' and e.record_sha256 = any($2::text[]))` that Postgres rejects or that
+// matches nothing.
+
+const RECORD = { key: 'work:career', kind: 'work_history', label: 'Career',
+  text: 'Reduced outages from nine hours to one across the payments platform.' }
+
+test('H:a-vetted-verdict-is-not-thrown-away-by-the-next-resolve',
+  { skip: !HAVE_PG && 'no local postgres' }, async () => {
+  const c = new Client(CONN); await c.connect()
+  try {
+    await c.query(schemaSql()); await ensureEvidenceTable(c)
+    const { opp, req } = await seed(c)
+
+    // A vetted row, exactly as the vet lane writes one: the record's own bytes, its digest, and the
+    // citation in `extra`.
+    const { createHash } = await import('node:crypto')
+    const sha = createHash('sha256').update(RECORD.text, 'utf8').digest('hex')
+    const quote = 'Reduced outages from nine hours to one'
+    await c.query(
+      `insert into requirement_evidence
+         (requirement_id, quote, source_kind, source_label, source_key, char_start, char_end,
+          extra, ratio, method, record_sha256, resolver_version, proposal_version)
+       values ($1,$2,'work_history','Career','work:career',0,$3,'vetted: challenged ...',null,'vetted',$4,1,1)`,
+      [req, quote, quote.length, sha])
+
+    // A re-resolve WITH a transport — the path that used to delete everything. The transport throws,
+    // so nothing new can be written: whatever survives, survived the delete.
+    let asked = 0
+    await writeEvidence(c, opp, [RECORD], { escalate: true, vetProposals: true },
+      (rows) => rows.map(r => ({ seq: r.seq, requirement_text: r.item_text, evidence: null })),
+      async () => { asked++; throw new Error('no proposal') }).catch(() => {})
+
+    const after = (await c.query(
+      `select e.method, e.extra from requirement_evidence e
+         join requirement r on r.id = e.requirement_id where r.opp_id = $1`, [opp])).rows
+    assert.equal(after.length, 1, 'the vetted row survived the re-resolve')
+    assert.equal(after[0].method, 'vetted')
+    assert.match(after[0].extra, /vetted: challenged/, 'with its citation intact')
+    assert.equal(asked, 0,
+      'and the pass did not re-ask about a requirement it had already answered — re-asking is the ' +
+      'flapping this fixes, reintroduced one loop later')
+  } finally { await c.end() }
+})
+
+test('H:an-edited-profile-invalidates-a-vetted-verdict',
+  { skip: !HAVE_PG && 'no local postgres' }, async () => {
+  // The other half, and the reason the digest is the key rather than the method alone. A verdict is
+  // about words that were there; edit them and it must be re-derived, never silently inherited —
+  // the same staleness rule `evidence_confirmation` applies to the owner's own decisions.
+  const c = new Client(CONN); await c.connect()
+  try {
+    await c.query(schemaSql()); await ensureEvidenceTable(c)
+    const { opp, req } = await seed(c)
+    const quote = 'Reduced outages from nine hours to one'
+    await c.query(
+      `insert into requirement_evidence
+         (requirement_id, quote, source_kind, source_label, source_key, char_start, char_end,
+          extra, ratio, method, record_sha256, resolver_version, proposal_version)
+       values ($1,$2,'work_history','Career','work:career',0,$3,'vetted: challenged ...',null,'vetted',$4,1,1)`,
+      [req, quote, quote.length, 'f'.repeat(64)])   // a digest of some OTHER version of the record
+
+    await writeEvidence(c, opp, [RECORD], { escalate: true, vetProposals: true },
+      (rows) => rows.map(r => ({ seq: r.seq, requirement_text: r.item_text, evidence: null })),
+      async () => { throw new Error('no proposal') }).catch(() => {})
+
+    const after = (await c.query(
+      `select count(*)::int n from requirement_evidence e
+         join requirement r on r.id = e.requirement_id where r.opp_id = $1`, [opp])).rows[0].n
+    assert.equal(after, 0, 'a verdict read from a version of the record that no longer exists is dropped')
+  } finally { await c.end() }
+})

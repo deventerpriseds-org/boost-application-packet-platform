@@ -119,6 +119,34 @@ export interface CheckThresholds {
   evidenceEscalate: boolean
   evidenceEscalateMax: number
   /**
+   * THE COVERAGE JUDGE — does a model decide whether this DOCUMENT addresses a requirement, in
+   * place of `coversIn`'s 70% literal word overlap?
+   *
+   * OFF by default, and unlike `evidenceEscalate` above that default is not timidity. The
+   * escalation tier can only ADD a proposal beside a requirement that had none, so ON is safe there.
+   * This one CHANGES A CHECK'S STATE: a verdict decides whether `evidence_placed` names a
+   * requirement as unplaced. Anything that can turn a warn into a pass starts off, and the owner
+   * turns it on once they have seen it read their own packet correctly.
+   *
+   * `coverageJudgeMaxCalls` caps calls per run on the `evidenceEscalateMax` precedent — one call
+   * per FIELD, not per requirement (the prompt batches every requirement into one ask), so the cap
+   * bounds fields judged rather than requirements.
+   *
+   * `coverageJudgeMinQuoteChars` is the same floor `verifyProposal` applies to a profile excerpt,
+   * pointed at the document: a two-character "quote" is present in every document ever written and
+   * proves nothing about coverage.
+   *
+   * NO MODEL COLUMN, deliberately. The model is a literal in 32 files (`D:model-is-43-literals`),
+   * and giving the judge its own model setting would make it the ONE model-configurable call in the
+   * product — the parallel-system shape `Extend, don't duplicate` forbids. It uses what the rest of
+   * the pipeline uses until that sweep lands, at the owner's instruction (2026-09-01): "for now it
+   * can continue using the model the prompt does now, ie gpt4o". The model still participates in
+   * the verdict key, so the sweep invalidates cached verdicts rather than silently keeping them.
+   */
+  coverageJudge: boolean
+  coverageJudgeMaxCalls: number
+  coverageJudgeMinQuoteChars: number
+  /**
    * ADVISORY GATE MODE — does a `fail` BLOCK approval, or may the owner override it with a reason?
    *
    * OFF by default, and the default is the whole safety argument: with this false, `approvalBlock`
@@ -170,7 +198,14 @@ export const DEFAULT_THRESHOLDS: CheckThresholds = {
   evidenceBulletRun: EVIDENCE_BULLET_RUN,
   evidenceEscalate: true,
   evidenceEscalateMax: 12,
-  // FALSE. An owner who has never touched the setting keeps today's behaviour exactly.
+  // FALSE, and for a different reason than `evidenceEscalate` being true: this one can change a
+  // check's state, so an owner who has never touched it gets today's lexical answer exactly.
+  coverageJudge: false,
+  coverageJudgeMaxCalls: 12,
+  // `MIN_QUOTE_CHARS` (reviewer.ts:157), the floor the profile side already uses. Named here rather
+  // than imported so this module stays free of the reviewer's dependencies; the two are held
+  // together by H:judge-quote-floor-matches-the-profile-side.
+  coverageJudgeMinQuoteChars: 20,
   gateAdvisory: false,
 }
 
@@ -207,6 +242,39 @@ export interface CheckInput {
   profileText?: string
   /** The EMPLOYER'S OWN text (resolvePostingSource), never `groundingText`. See the R3 check. */
   postingText?: string
+  /**
+   * The coverage judge's verdicts for THIS artifact, keyed by requirement `seq`.
+   *
+   * Absent (the default, and every existing test) = the lexical `coversIn` decides, unchanged.
+   * Present = the judge's verdict decides for the requirements it answered, and a requirement it
+   * was asked about and did NOT answer is excluded from placement rather than falling back — see
+   * `covers`/`judgeSilent` for why those are different facts.
+   *
+   * INJECTED because `H12` forbids this module the framework and driver imports; the
+   * impure caller obtains the map once per artifact. That is what keeps the suite deterministic
+   * with a model in the production path.
+   */
+  judgeVerdicts?: Map<number, { covered: boolean; basis: string; quote: string | null; why: string }>
+  /**
+   * Passages a model read as the posting's vocabulary rather than the writer's claim, each already
+   * verified byte-present in the field it names (`stuffingJudge.parseStuffing`).
+   *
+   * Absent means the lane did not run, and `posting_wording_kept` then reports exactly what
+   * `scanWording` alone reports — the untouched path. It can only ever ADD passages to a `warn` the
+   * writer decides; nothing here can fail a gate.
+   */
+  stuffingHits?: Array<{ field: string; phrase: string; why: string }>
+  /**
+   * How many lines each list's TEMPLATE holds, keyed by merge field — the owner's per-template
+   * setting, resolved by the caller.
+   *
+   * A missing key and a `null` mean the same thing and are the SAFE state: the check reports
+   * `not_applicable`. A `0` must never be passed for "unset" — it would declare every item in the
+   * list illegal. Owner, 2026-08-29: *"fixed slot counts change per template"*, so this is read
+   * from the template's own config row and is deliberately NOT derived from the master text, which
+   * would be right for one template and silently wrong for the next.
+   */
+  slots?: Record<string, number | null>
   requirements?: Array<{ seq: number; verbatim: string | null; item_text: string; kind: string }>
   // `requirement_id`, `seq` and `list` are carried so `compact_skills_fit` can reproduce the SAME
   // drop decision the render made. Without them this check would rank on `driver` alone and could
@@ -295,6 +363,17 @@ export const CHECK_FIELDS_FOR: Record<string, string[]> = {
   compact_resume: [...mergeFieldsFor('resume'), 'SkillsBullets'],
 }
 
+/**
+ * THE field list for an artifact type — one derivation, exported.
+ *
+ * `runChecks` builds `covText` from exactly this (`:526`, `:710`), and the coverage judge asks about
+ * exactly these fields. A second copy of "which fields does this type have" in the judge would drift,
+ * and the day it drifted the judge would be answering about a document the check never looked at.
+ */
+export function checkFieldsFor(type: string): string[] {
+  return CHECK_FIELDS_FOR[type] || mergeFieldsFor(type)
+}
+
 export const SKILL_FIELDS = ['SkillsBullets1', 'SkillsBullets2']
 export const RELEVANT_FIELDS = ['RelevantBullets1', 'RelevantBullets2', 'RelevantBullets3']
 
@@ -324,7 +403,7 @@ export function runChecks(input: CheckInput): CheckResult[] {
   // unaccountable for the very text it prints.
   //
   // `CHECK_FIELDS_FOR` is the override, and only where the two genuinely differ.
-  const fields = CHECK_FIELDS_FOR[input.type] || mergeFieldsFor(input.type)
+  const fields = checkFieldsFor(input.type)
   const has = (f: string) => fields.includes(f)
   const out: CheckResult[] = []
 
@@ -351,6 +430,66 @@ export function runChecks(input: CheckInput): CheckResult[] {
             `${t.skillsTotalMin}-${t.skillsTotalMax} total, evenly split within ${t.skillsSplitTolerance}`, offenders, 'warn')
       : ok('skill_list_count', `${total} skills split ${n1}/${n2}`,
            `${t.skillsTotalMin}-${t.skillsTotalMax} total, evenly split within ${t.skillsSplitTolerance}`))
+  }
+
+  // --- FIXED SLOTS ------------------------------------------------------------------------
+  //
+  // Owner, 2026-08-29: *"the 10 can't be increased to 12 or reduce to 8 etc so only swaps are
+  // allowed not adds or drops given the limited space in the resume template"*, and *"also relevant
+  // and expertise counts"*. The template prints a fixed number of lines; a list that gains or loses
+  // one overflows the page or leaves a hole.
+  //
+  // WHY THIS IS A CHECK AND NOT AN EXCEPTION IN `buildSwaps`. Making the pairing refuse to emit
+  // `added`/`dropped` could only be done by fabricating a pair or dropping the row - hiding, which
+  // the owner rules out. And a THROW is the QUIETEST outcome available here, not the loudest:
+  // `appPackets.ts:617-622` swallows it into a console.warn and the packet ships with an EMPTY swap
+  // table. So the violation is REPORTED, on the gate the owner already reads, with the offenders
+  // named. `buildSwaps` still emits the honest `added`/`dropped` rows that evidence it.
+  //
+  // ABSENT EVIDENCE IS `not_applicable`, NEVER `pass` AND NEVER `fail`. A slot count the owner has
+  // not set is `null` - never `0`, which would declare every item in the list illegal - and an
+  // unset count means nobody has said how many lines this template holds. Accusing a document on
+  // that basis is the accusation-grade error this file exists to avoid.
+  const SLOT_FIELDS = [...SKILL_FIELDS, ...RELEVANT_FIELDS, 'ExpertiseBullets']
+  const slotFields = SLOT_FIELDS.filter(has)
+  if (slotFields.length) {
+    // The compact resume DELIBERATELY drops skills to fit a character budget (`fitCompactSkills`),
+    // so a slot count is meaningless for it. Emitted as not_applicable rather than skipped: a check
+    // that silently stops being emitted is invisible to `gateFor`, which is exactly how six checks
+    // disappeared from the compact resume once (see the CHECK_FIELDS_FOR comment above).
+    if (input.type === 'compact_resume') {
+      out.push(na('fixed_slot_count',
+        'the compact resume fits skills to a character budget and drops to fit (fitCompactSkills)',
+        'every list ships exactly the slot count its template declares'))
+    } else {
+      const slots = input.slots || {}
+      const known = slotFields.filter(f => typeof slots[f] === 'number' && (slots[f] as number) > 0)
+      if (!known.length) {
+        out.push(na('fixed_slot_count',
+          `no per-template slot count is set for ${slotFields.join(', ')}`,
+          'every list ships exactly the slot count its template declares'))
+      } else {
+        const offenders: string[] = []
+        const seen: string[] = []
+        for (const f of known) {
+          const expected = slots[f] as number
+          const observed = splitItems(pkg[f]).length
+          seen.push(`${f} ${observed}/${expected}`)
+          if (observed !== expected) {
+            offenders.push(`${f}: template holds ${expected}, document ships ${observed} (${observed > expected ? `${observed - expected} added` : `${expected - observed} dropped`})`)
+          }
+        }
+        const unset = slotFields.filter(f => !known.includes(f))
+        // The unset lists are NAMED in the observed text rather than quietly excluded, so a partial
+        // measurement never reads as a whole one.
+        const note = unset.length ? `; not set: ${unset.join(', ')}` : ''
+        out.push(offenders.length
+          ? bad('fixed_slot_count', `${seen.join(', ')}${note}`,
+                'every list ships exactly the slot count its template declares', offenders)
+          : ok('fixed_slot_count', `${seen.join(', ')}${note}`,
+               'every list ships exactly the slot count its template declares'))
+      }
+    }
   }
 
   if (relevantByList.length) {
@@ -486,9 +625,28 @@ export function runChecks(input: CheckInput): CheckResult[] {
       out.push(na('posting_wording_kept', wBlocked.r.reason || 'nothing to compare against', WORDING_EXPECT))
     } else {
       const wHits = wScans.flatMap(({ f, r }) => r.kept.map(k => `${f}: "${k.phrase}"`))
-      out.push(wHits.length
-        ? bad('posting_wording_kept', `${wHits.length} passage(s) read as the posting's wording — your call`,
-              WORDING_EXPECT, wHits, 'warn')
+      // THE HALF A SUBSTRING SEARCH CANNOT SEE, folded into THIS check rather than added beside it.
+      //
+      // `scanWording` finds CONTIGUOUS runs of 8+ tokens lifted from the ad. The failure the owner
+      // actually reported — "a hack full of verbatim lines from the jd ... would get me accused of
+      // stuffing" — is not contiguous: it is the posting's nouns scattered through a sentence that
+      // never claims the writer did any of them. On the live Trinnex summary `scanWording` finds
+      // NOTHING while the same passage scores 0 of 19 on coverage: full of the posting's vocabulary,
+      // empty of its claims.
+      //
+      // ONE CHECK, because it is one question to the writer ("is this your wording or theirs?") with
+      // one remedy (their judgement, never an auto-correct). Two checks would be two rows saying the
+      // same thing about the same sentence, and the owner would have to reconcile them. Each hit
+      // names how it was found, so an exact run is never confused with a model's reading.
+      const sHits = (input.stuffingHits || [])
+        .map(h => `${h.field}: "${h.phrase}" — ${h.why}`)
+      const all = [...wHits, ...sHits]
+      out.push(all.length
+        ? bad('posting_wording_kept',
+              sHits.length
+                ? `${all.length} passage(s) read as the posting's wording — your call (${sHits.length} raised by a model reading for name-dropping)`
+                : `${all.length} passage(s) read as the posting's wording — your call`,
+              WORDING_EXPECT, all, 'warn')
         : ok('posting_wording_kept', `no passage of ${t.wordingRunTokens}+ words matches the posting`, WORDING_EXPECT))
     }
   }
@@ -607,7 +765,53 @@ export function runChecks(input: CheckInput): CheckResult[] {
    *    short words carry almost no evidence, and a requirement made only of them is exactly the
    *    fragment case above.
    */
-  const covers = (r: { verbatim: string | null; item_text: string }) => coversIn(covText, r)
+  /**
+   * THE JUDGE'S VERDICT WINS WHERE THERE IS ONE; the lexical rule is the fallback.
+   *
+   * `coversIn` demands 70% LITERAL content-word overlap and cannot match `strategy` against
+   * `strategies`. Measured on the owner's Trinnex packet: 0 of 19 requirements counted, with
+   * "align engineering strategy with business goals" answered by "aligning engineering strategies
+   * with business objectives" scoring 0.60 and counting as nothing. `coverageJudge` reads the same
+   * question with a model and must quote the document to be believed.
+   *
+   * INJECTED, NOT FETCHED — H12 keeps this module free of the framework and driver imports, and that is
+   * what makes the whole suite deterministic. The impure caller obtains the map once per artifact
+   * and passes it in; with no map, every existing test and every run with the judge disabled
+   * behaves exactly as before.
+   *
+   * A verdict is only ever consulted for a requirement it actually covers. `judgeUnjudged` below
+   * carries the ones the judge was asked about and did not answer — those must NOT fall through to
+   * the lexical rule, because "the judge did not answer" and "the lexical rule says no" are
+   * different facts and reporting the second for the first is absent evidence read as a finding.
+   */
+  const verdicts = input.judgeVerdicts
+  /**
+   * STRICTLY ADDITIVE: a verdict may turn "not covered" into "covered". It may NEVER do the reverse.
+   *
+   * F-7, found by an independent verifier (VERIFY-coverage-judge-3.md) and a defect I shipped. The
+   * safeguard this whole tier rests on — "the model must point at words the document contains, and
+   * code checks that it did" — binds only the model's YES. A `covered: false` is accepted with
+   * `quote: null`, because you cannot cite an absence. And `covered: false` is the branch that
+   * produces the OFFENDER LINE. So one uncited model sentence could turn a passing check into a
+   * named accusation about a document containing the requirement WORD FOR WORD:
+   *
+   *   document    "Aligning engineering strategy with business goals is what I have done for a decade."
+   *   requirement "Ability to align engineering strategy with business goals"
+   *   lexical     pass, no offenders
+   *   judge "no"  warn, "#0 ... absent from this asset"
+   *
+   * The lexical rule it replaced could not do that. The judge exists to fix FALSE NEGATIVES — a
+   * document that says it in other words — so its yes is the half worth having and its no adds
+   * nothing an exact rule cannot already see. Making it additive means an uncited "no" is inert
+   * rather than accusatory, which is also what every claim made for this lane already said it was.
+   */
+  const covers = (r: { seq?: number; verbatim: string | null; item_text: string }) => {
+    const v = verdicts && r.seq != null ? verdicts.get(Number(r.seq)) : undefined
+    return (v?.covered === true) || coversIn(covText, r)
+  }
+  /** Asked and unanswered — excluded from placement rather than judged by the fallback. */
+  const judgeSilent = (r: { seq?: number }) =>
+    !!verdicts && r.seq != null && !verdicts.has(Number(r.seq))
 
   const COVERAGE_EXPECT = 'every must-have requirement is evidenced by a verbatim excerpt from your profile'
   const RESP_EXPECT = 'every responsibility is evidenced by a verbatim excerpt from your profile'
@@ -733,6 +937,33 @@ export function runChecks(input: CheckInput): CheckResult[] {
      * row never carries one, so there is nothing to disambiguate.
      */
     const isConfirmed = (r: { seq: number }) => !!evidenceOf(r)?.confirmed_at
+    /**
+     * A proposal that was CHALLENGED and held (`supportJudge.ts`), and the third way a
+     * row can be evidenced. It COUNTS.
+     *
+     * WHY THIS IS NOT THE HOUSE RULE BEING QUIETLY DROPPED. The rule above says a model may propose
+     * and only an exact rule may accuse, and the reason it holds is stated there: the proposal pass
+     * asks a CONFIRMING question, so it finds support at the rate it was asked to. A `judged` row is
+     * not that answer given twice. To be stamped `judged` a row had to pass a pass whose FIRST
+     * required output is what the excerpt does NOT show — and a non-empty `missing` list REFUSES the
+     * row in code, before the model's own verdict is even read. The claim is then cited to a span of
+     * the excerpt and verified byte-exact, exactly as the proposal's own quote is.
+     *
+     * SO THE STANDARD MOVED, DELIBERATELY AND IN ONE DIRECTION, and the owner asked for it:
+     * "resolve the zero out of 12" (2026-09-01). What did not move: the row still carries a quote
+     * that is byte-present in the owner's profile, still names the record it came from, and still
+     * says on its face that a model put it there — `vettedNote` writes the citation into `extra`.
+     * A reviewer can tell a better profile from a chattier model, which is the property that makes
+     * this auditable rather than merely higher.
+     *
+     * OFF BY DEFAULT. Nothing is stamped `judged` unless the owner turned the judge on, so an
+     * untouched install sees exactly the number it sees today.
+     *
+     * NOTE FOR ANYONE EDITING `ruleEvidenceOf`: `judged` counts because it is not `proposed`, not
+     * because of a clause naming it. That is easy to break by widening `isProposed` and easy to miss,
+     * which is why `H:a-judged-row-counts-and-a-proposed-one-does-not` pins both halves.
+     */
+    const isVetted = (r: { seq: number }) => evidenceOf(r)?.method === 'vetted'
     const ruleEvidenceOf = (r: { seq: number }) =>
       (isProposed(r) && !isConfirmed(r) ? null : evidenceOf(r))
     const label = (r: { seq: number; verbatim: string | null; item_text: string }) =>
@@ -783,6 +1014,14 @@ export function runChecks(input: CheckInput): CheckResult[] {
       // exclusions are named rather than absorbed.
       const proposed = coverable.filter(r => isProposed(r) && !isConfirmed(r))
       if (proposed.length) excluded.push(`${proposed.length} model-proposed, awaiting your confirmation`)
+      // JUDGED ROWS ARE IN THE NUMERATOR, so they are named in the SAME sentence rather than left for
+      // someone to discover in the evidence panel. This is the identical discipline the parenthetical
+      // above exists for, pointed the other way: that one says what was left OUT, this says what a
+      // model put IN. A count that rose because a model was consulted must say so where the number is
+      // read, or "coverage rose" is not falsifiable.
+      const vettedRows = coverable.filter(r => isVetted(r))
+      const includedNote = vettedRows.length
+        ? ` (${vettedRows.length} vetted: a model challenged the match and it held, quoting your own words)` : ''
       if (eligibility.length) excluded.push(`${eligibility.length} not reachable by any generated field`)
       const factOwned = mustHaves.length - coverable.length - eligibility.length
       if (factOwned > 0) excluded.push(`${factOwned} answered from your profile facts`)
@@ -793,11 +1032,11 @@ export function runChecks(input: CheckInput): CheckResult[] {
       out.push(!coverable.length
         ? na('must_have_coverage', 'the posting produced no must-have requirements to judge', COVERAGE_EXPECT)
         : unevidenced.length
-          ? { ...bad('must_have_coverage', `${coverable.length - unevidenced.length}/${coverable.length} must-haves evidenced${tail}`,
+          ? { ...bad('must_have_coverage', `${coverable.length - unevidenced.length}/${coverable.length} must-haves evidenced${includedNote}${tail}`,
                 COVERAGE_EXPECT, unevidenced.map(r => isProposed(r)
                   ? `${label(r)} — a model proposes "${(evidenceOf(r)!.quote || '').slice(0, 90)}" from ${evidenceOf(r)!.source_label}; confirm it`
                   : `${label(r)} — ${NO_EVIDENCE_NOTE}`)), judged: judgedIds }
-          : { ...ok('must_have_coverage', `${coverable.length}/${coverable.length} must-haves evidenced${tail}`, COVERAGE_EXPECT), judged: judgedIds })
+          : { ...ok('must_have_coverage', `${coverable.length}/${coverable.length} must-haves evidenced${includedNote}${tail}`, COVERAGE_EXPECT), judged: judgedIds })
 
       // `ruleEvidenceOf`, for the same reason `must_have_coverage` uses it. An INDEPENDENT VERIFIER
       // caught that this line and `evidence_placed` below were left on the unfiltered `evidenceOf`,
@@ -830,14 +1069,36 @@ export function runChecks(input: CheckInput): CheckResult[] {
       // this check called it "absent from this asset". Accusing a document of omitting something it
       // says, because the requirement was too short to measure, is absent evidence read as a
       // finding, one layer down from where the rest of this file guards against it.
-      const placeable = evidenced.filter(r => itemTokens(r.verbatim || r.item_text).length >= MIN_JUDGEABLE_TOKENS)
+      // A requirement the JUDGE was asked about and did not answer is dropped here for the same
+      // reason the too-thin ones are: it was not judged, so calling it "absent from this asset"
+      // would report the lexical fallback's opinion as the judge's finding. It joins `tooThin` in
+      // the "not counted either way" note rather than becoming an offender.
+      // F-4, found by an independent verifier: these two populations were counted TOGETHER and
+      // reported under the wording of the first. A requirement dropped because the JUDGE never
+      // answered — a model outage, a cap, an unparseable reply — was shown to the owner as
+      // "too short to judge either way", which is a statement about THEIR POSTING. An outage
+      // presented as a property of the owner's own data is the worst way for it to appear, because
+      // there is nothing they can do about it and nothing tells them not to try.
+      const thin = evidenced.filter(r => itemTokens(r.verbatim || r.item_text).length < MIN_JUDGEABLE_TOKENS)
+      const silent = evidenced.filter(r => itemTokens(r.verbatim || r.item_text).length >= MIN_JUDGEABLE_TOKENS
+        && judgeSilent(r))
+      const placeable = evidenced
+        .filter(r => itemTokens(r.verbatim || r.item_text).length >= MIN_JUDGEABLE_TOKENS)
+        .filter(r => !judgeSilent(r))
       const unplaced = placeable.filter(r => !covers(r))
-      const tooThin = evidenced.length - placeable.length
-      const thinNote = tooThin ? ` (${tooThin} too short to judge either way)` : ''
+      const notes = [
+        thin.length ? `${thin.length} too short to judge either way` : '',
+        silent.length ? `${silent.length} the model was asked about and did not answer` : '',
+      ].filter(Boolean)
+      const thinNote = notes.length ? ` (${notes.join(', ')})` : ''
       out.push(!evidenced.length
         ? na('evidence_placed', 'no requirement in this posting is evidenced by your profile yet', PLACED_EXPECT)
         : !placeable.length
-          ? na('evidence_placed', `${evidenced.length} evidenced requirement(s), none long enough to judge placement`, PLACED_EXPECT)
+          ? na('evidence_placed',
+              silent.length
+                ? `${evidenced.length} evidenced requirement(s), none judged${thinNote}`
+                : `${evidenced.length} evidenced requirement(s), none long enough to judge placement`,
+              PLACED_EXPECT)
           : unplaced.length
             ? bad('evidence_placed', `${placeable.length - unplaced.length}/${placeable.length} evidenced requirements appear in this document${thinNote}`,
                   PLACED_EXPECT, unplaced.map(r => `${label(r)} — evidenced by ${evidenceOf(r)!.source_label}, absent from this asset`), 'warn')

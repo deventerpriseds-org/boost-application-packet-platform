@@ -617,7 +617,26 @@ export async function ensurePackage(client: any, art: any, opp: any, regen: bool
   try {
     await writeSwaps(client, art.packet_id, opp.id, {
       call1: built.calls.c1, call3: built.calls.c3, pkg,
-      profileText: built.profileText, omitList: built.omitList, loop: 0,
+      profileText: built.profileText, omitList: built.omitList,
+      // THE OWNER'S PER-TEMPLATE FIXED SLOT COUNTS, from the row `resolveRoleFocus` already read for
+      // this build's chosen resume (`built.slots`). `writeSwaps` passes them straight to `buildSwaps`,
+      // which is pure and never reads config itself.
+      //
+      // NOT re-derived here on purpose. The counts must describe the SAME resume the focus and the
+      // copy describe, and `packetResumeTemplateId || settings.resumeTemplateId` is resolved inside
+      // `buildPackageForJD`. A second resolution here is a second answer to "which resume is this",
+      // free to disagree the day a packet's choice and the global default differ — which is the
+      // whole reason the per-packet column exists.
+      //
+      // All-null when the owner has set nothing, and `slotsFor` reads that as UNKNOWN. Never zeros:
+      // a `0` would tell the pairing this list has no legal slots at all.
+      slots: built.slots,
+      // `loop: 0` STAYS LAST. `H:loop-zero-clear-rests-on-the-cache-hit` pins it as the final
+      // property of this call, because the ground-zero clear inside `writeSwaps` is only safe while
+      // this caller passes a LITERAL 0 — and appending `slots` after it broke that guard on the
+      // first attempt. The invariant is real, so the new field moved above it rather than the
+      // assertion being widened to accommodate it.
+      loop: 0,
     })
   } catch (e) { console.warn('[packets] swap provenance not recorded:', String(e)) }
   return {
@@ -1165,7 +1184,18 @@ export async function runPacketBuild(
       // model only if the run recorded which one moved.
       evidence: evidence?.error ? { error: String(evidence.error).slice(0, 200) } : {
         total: evidence?.total ?? null, evidenced: evidence?.evidenced ?? null,
+        // Both found write-only by H:every-evidence-count-has-a-reader on its FIRST run, and both
+        // pre-date the judge work. `profile_records: 0` is the "we did not look" signal this
+        // codebase cares about more than any other -- zero evidence against zero records is not a
+        // measurement of the candidate -- and it was computed and thrown away.
+        unevidenced: evidence?.unevidenced ?? null,
+        profile_records: evidence?.profile_records ?? null,
         proposed: evidence?.proposed ?? 0, escalated: evidence?.escalated ?? 0,
+        // F-9, from an independent verifier: `vetted` shipped WRITE-ONLY. The comment above says a
+        // coverage change must be attributable -- and `vetted` is the one count that MOVES coverage,
+        // so omitting it left the number that changed as the only number nobody could see. TypeScript
+        // stayed quiet because this destructures a subset.
+        vetted: evidence?.vetted ?? 0,
         refused: evidence?.refused ?? null,
       },
       // DERIVED, not hardcoded. This was the literal `false` for the whole life of the route, so the
