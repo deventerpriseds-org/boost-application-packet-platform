@@ -5863,3 +5863,34 @@ fold this in with the rest of what you've been working on instead of deleting it
 
 **Evidence:** `docs/qc-evidence/DIAG-summary-stuffing.md`, `DIAG-coverage-recognition.md`,
 `FEASIBILITY-llm-judgement.md`, `AC-llm-coverage-judge.md`, `AC-llm-gate-and-stuffing.md`.
+
+## 2026-09-01 — A6 found, and 40 commits DEPLOYED to production
+
+**A6 — the model's own reasoning is checked by word-matching too.** `verifyReasoning`
+(`evidenceProposal.ts:340`) withdraws the model's explanation for any named token the reasoning
+mentions and the quote does not literally contain. Fired on **2 of 10** Trinnex proposals (db-query
+**33503167998**) and **#20 was withdrawn wrongly** — a BSc in *Information Systems* satisfies the
+requirement's own *"or related technical field"* clause, which `carries()` cannot read. **So the same
+lexical substitution occurs at THREE layers**: `coversIn`, `supportIn`, and now `verifyReasoning`.
+Evidence: `docs/qc-evidence/DIAG-coverage-recognition.md` §A6. `verifyReasoning` added to the judge
+scope (`FEASIBILITY-llm-judgement.md`), with its overclaim property preserved — the test changes, not
+its existence.
+
+**This settles the owner's challenge to the confirm button in their favour.** 8 of 10 proposals stand,
+2 were withdrawn upstream of the confirm path, so no amount of clicking recovers them. The button is
+the OVERRULE path, not the fix.
+
+**Also corrected: my own claim that "reasoning is stored, never verified" was FALSE** — the fifth
+absence-claim in this investigation asserted without a full sweep.
+
+**DEPLOYED — owner-instructed ("go until deployed"), `main` moved `9760c4f` → `d889e78`, 40 commits.**
+Pre-deploy: api **924 pass / 0 fail** / 24 skipped, app **422 pass / 0 fail**, both builds green.
+Contents include the confirm button, the relevant-pool and slot-wiring lanes, the prototype-parity
+rows, and all diagnosis/AC artifacts.
+
+**STATED RISK, accepted by the owner's instruction:** the relevant-pool and slot-wiring lanes have
+**never been independently verified** — the verifier died three times (interrupt, container restore,
+mid-pass stall). They are self-reported green only. Recorded here rather than left implicit.
+
+**NEXT, per the owner:** the remaining **9-11 UI parity rows**, then the judge lanes (ACs written for
+all four decisions).

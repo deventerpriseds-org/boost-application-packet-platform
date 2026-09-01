@@ -4986,3 +4986,14 @@ And `must_have_coverage` is not the only gate-failing check: **thirteen** take `
   a character count, not the text. The owner decided (OD-5) this is fixed **before** the Rewrite button,
   because a Rewrite over it is an irreversible overwrite of their own prose.
 - Then the **Rewrite button** — the owner's original ask, distinct from the confirm button.
+
+### A6 and the deploy (2026-09-01)
+The lexical substitution is at **three** layers, not two: `coversIn`, `supportIn`, and
+`verifyReasoning` — the last being the check meant to make the model's judgement trustworthy, which
+instead withdraws sound evidence (Trinnex #20: *Information Systems* rejected against *"or related
+technical field"*). Sixth instance of my own absence-claim pattern: I said reasoning was never
+verified; it is.
+
+**`main` moved `9760c4f` → `d889e78` (40 commits) on the owner's instruction.** api 924/0, app 422/0
+pre-deploy. **The relevant-pool and slot-wiring lanes went out UNVERIFIED** — three verifier deaths —
+and that is stated, not hidden. Next: the 9-11 UI parity rows, then the judge lanes.
