@@ -2,7 +2,12 @@
      WHY:        Committed rather than passed inline so the cross-container runner can read it from the
                  checked-out tree, and so the ACs stay auditable against the brief that produced them.
      SUPERSEDES: nothing.
-     SUPERSEDED-BY: nothing -- current.
+     SUPERSEDED-BY: BRIEF-proposal-counts-and-veto.md (workstreams A+B) and
+                 BRIEF-interim-score-and-reviewer.md (workstreams C+D). SPLIT because this brief
+                 asked for a feasibility table, ACs for four workstreams and nine design answers in
+                 ONE reply, and the single-shot runner hit max_tokens on it (run 33544936097,
+                 artifact uploaded as cross-container-pass-TRUNCATED-33544936097-1). Kept for the
+                 record; do not run it.
      EVIDENCE:   the ACs it produces land at docs/qc-evidence/AC-proposals-count-until-vetoed.md -->
 
 # AC BRIEF — "a proposal counts until vetoed", and the two score holes beside it
