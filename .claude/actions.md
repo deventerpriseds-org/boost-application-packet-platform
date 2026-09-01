@@ -6051,3 +6051,27 @@ mutating these files right now and two writers on one file is how a mutation get
 traded, the owner authorised the trade, and recording an authorised trade as a technical non-event is
 how the next session widens it believing no ping is needed. That comment needs rewriting to say
 plainly: this is a trade, it was authorised on 2026-09-01, and widening it needs a new ping.
+
+### VERIFIER RESULT — `VERIFY-coverage-judge-3.md`, 849 lines, loop 3
+
+**11 CONFIRMED · 1 REFUTED · 2 mixed · 12 findings.** The refutation and the adversarial finding were
+both real defects **I shipped**, and both were live on `main` before this ran — the cost of deploying
+before verification, stated rather than glossed.
+
+| finding | status |
+|---|---|
+| **F-7** the citation safeguard bound only the model's YES; an uncited `covered:false` could turn a passing check into a named accusation about a document containing the requirement **verbatim** | **FIXED** `fc357bb` — `covers()` is now strictly additive; mutation-proved |
+| **F-3** a gap named as a bare string (`missing: 'SOC 2'`) was discarded and the row promoted to `vetted`, which counts toward the gate — the one malformed input resolving toward ADMITTING the claim | **FIXED** `fc357bb` — mutation-proved |
+| **F-4** a judge outage was reported to the owner as "too short to judge either way", a statement about THEIR posting | **FIXED** `2b4f00a` — and the guard caught the same conflation in a second branch the verifier did not name, the one a TOTAL outage lands in |
+| **F-8** every diagnostic the judge produces (`calls`, `refused`, `failures`, `silent`) is discarded by its only caller — an outage is invisible, and cost is unmeasurable | **OPEN** |
+| **F-9** `writeEvidence`'s `vetted` count is write-only; `appPackets` reports `{total, evidenced, proposed, escalated, refused}` and no reader exists | **OPEN** — the exact "who READS what you wrote?" self-attack check, skipped |
+| **F-10** `supportKey` is dead code: the vet lane has NO cache, and every resolve deletes all evidence rows and re-asks. The coverage judge next door builds a cache table on the principle that a flapping gate is worse than a consistently wrong one; the lane that actually moves `must_have_coverage` has none of it | **OPEN — the most consequential of the three** |
+| **F-11 / F-12** nothing pins `PROMPT_VERSION` behaviourally in the cache key; nothing pins `supported !== true` | **OPEN** (guards, not defects) |
+
+**On C12 (are the guards inert?): 38 of 43 mutations caught.** Two survivors are *behaviourally
+equivalent* mutations that correctly fail to fail — the verifier did not claim those proven, which is
+the honest handling. Three are genuine gaps (F-10, F-11, F-12).
+
+**C2 is the load-bearing claim and it holds:** with the judge OFF, **4000/4000** cases identical
+against a real build of the pre-change commit. That is what made shipping-before-verifying survivable
+rather than harmless.
