@@ -354,6 +354,17 @@ export const CHECK_FIELDS_FOR: Record<string, string[]> = {
   compact_resume: [...mergeFieldsFor('resume'), 'SkillsBullets'],
 }
 
+/**
+ * THE field list for an artifact type — one derivation, exported.
+ *
+ * `runChecks` builds `covText` from exactly this (`:526`, `:710`), and the coverage judge asks about
+ * exactly these fields. A second copy of "which fields does this type have" in the judge would drift,
+ * and the day it drifted the judge would be answering about a document the check never looked at.
+ */
+export function checkFieldsFor(type: string): string[] {
+  return CHECK_FIELDS_FOR[type] || mergeFieldsFor(type)
+}
+
 export const SKILL_FIELDS = ['SkillsBullets1', 'SkillsBullets2']
 export const RELEVANT_FIELDS = ['RelevantBullets1', 'RelevantBullets2', 'RelevantBullets3']
 
@@ -383,7 +394,7 @@ export function runChecks(input: CheckInput): CheckResult[] {
   // unaccountable for the very text it prints.
   //
   // `CHECK_FIELDS_FOR` is the override, and only where the two genuinely differ.
-  const fields = CHECK_FIELDS_FOR[input.type] || mergeFieldsFor(input.type)
+  const fields = checkFieldsFor(input.type)
   const has = (f: string) => fields.includes(f)
   const out: CheckResult[] = []
 

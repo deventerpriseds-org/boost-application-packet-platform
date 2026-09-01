@@ -17,6 +17,8 @@ import { ensureEvidenceTable, writeEvidence, loadRequirementsWithEvidence } from
 import { listCorrections } from './appCorrections'
 import { EvidenceInput, EvidenceRow } from './evidence'
 import { resolveTemplateSlots } from './roleFocus'
+import { runCoverageJudge, judgeVerdictsFor } from './appCoverage'
+import { openAiJson } from './openaiJson'
 
 const HEADERS = { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': '*', 'Access-Control-Allow-Methods': 'GET,POST,OPTIONS' }
 
@@ -127,11 +129,46 @@ export async function evaluateArtifact(client: any, artifactId: string, owner: s
     } as EvidenceRow)])),
   }
 
+  // THE COVERAGE JUDGE — and yes, this is a transport on the gate path, which the comment above
+  // forbids. Read that comment again before deleting this one: its argument is about `writeEvidence`
+  // PERSISTING ROWS SHARED BY THE FOUR ARTIFACTS OF ONE PACKET. Four concurrent runs each propose
+  // different evidence for the same opportunity, the last committer wins, and the other three are
+  // then gated against rows that no longer exist. Every clause of that turns on the rows being
+  // shared. None of it applies here, and the reasons are structural rather than hopeful:
+  //
+  //   - A VERDICT IS ABOUT ONE ARTIFACT'S OWN TEXT. The resume's summary and the cover letter's body
+  //     are different documents; there is no shared row for a concurrent run to overwrite.
+  //   - THE ROW IS CONTENT-ADDRESSED. `verdict_key` is a digest of the requirement, the field, the
+  //     field's text, the model and the prompt version — so two runs that would write the same row
+  //     are writing the same ANSWER, and the write is `on conflict do nothing`. Last-committer-wins
+  //     cannot produce a different state.
+  //   - A SECOND RUN OF UNCHANGED TEXT SPENDS NOTHING and answers identically, which is the property
+  //     the escalation tier could not have and the reason it had to move off this path.
+  //
+  // OFF BY DEFAULT (`chk_coverage_judge`), and every failure — transport, cap, unparseable, a query
+  // that throws — yields SILENCE for the affected field rather than a negative verdict. The whole
+  // call is wrapped because a judge that throws must not take the gate down with it: an artifact
+  // still gets its checks, computed lexically, exactly as before this existed.
+  const judgeModel = process.env.OPENAI_MODEL || 'gpt-4o'
+  const coverage = await runCoverageJudge(client, {
+    oppId: art.opp_id,
+    artifactId: art.id,
+    type: art.type,
+    pkg: art.pkg_json || {},
+    requirements,
+    thresholds,
+    model: judgeModel,
+    // Temperature 0, at the owner's instruction. The model is the same literal the rest of the
+    // pipeline uses — see CheckThresholds.coverageJudge for why it is not a setting yet.
+    fetchJson: openAiJson({ feature: 'coverage:judge', model: judgeModel, temperature: 0, maxTokens: 2000 }),
+  }).catch(() => undefined)
+
   const results = runChecks({
     type: art.type,
     pkg: art.pkg_json || {},
     company: art.company,
     requirements,
+    judgeVerdicts: coverage && judgeVerdictsFor(coverage),
     swaps,
     postingText: posting.text,
     profileText: profile,
