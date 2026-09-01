@@ -66,6 +66,48 @@ export const BASELINE_ROLE = 'Standing profile — no posting'
  */
 export const BASELINE_COMPANY_PLACEHOLDER = 'Company X'
 
+/**
+ * The SEEDED Relevant Proficiencies — the fallback when there is no JD to select against.
+ *
+ * WHY A SEED IS NEEDED AT ALL, and why "first 3 of the pool" is not it. `relevantProficiencies` is a
+ * 36-term LIBRARY, and the three template slots hold 3 each. With no JD, `shapeSlotFields` would
+ * take `items.slice(0, 3)` — the first nine terms in storage order, which is all of
+ * "Governance and Compliance" and part of "Technology Strategy". Mechanically correct and
+ * editorially arbitrary: it answers "which nine fit" rather than "which nine are worth showing".
+ *
+ * HOW THESE NINE WERE CHOSEN. By the owner's own Zap rule, run against the Trinnex JD: select 9
+ * aligned to the posting's ATS keywords, **excluding anything already covered by Skills1, Skills2 or
+ * the core competencies**, ordered by match, split 3/3/3. The redundancy pass dropped 27 of the 36 —
+ * `AI/ML Strategy` against S1 `AI/Data Science Strategy`, `Strategic Roadmapping` against S2
+ * `Strategic Roadmaps`, `KPI-Driven Execution` against the expertise KPI line, and so on. The nine
+ * that survived cover the ATS keywords nothing else in the packet reaches: `portfolio management`,
+ * `team development`, `technological innovation`, `innovation culture`, `AI adoption`,
+ * `cross-functional partnership`, `performance monitoring` and leadership.
+ *
+ * The owner then corrected the set: it carried THREE AI-prefixed terms, because each pick had been
+ * optimised against its own keyword and the nine were never read as a group. *"the ai is a little
+ * redundant. replace AI in operations to Ops automation, and AI/ML advancements to Data Insights."*
+ * Those two are the owner's wordings rather than verbatim Library entries — the Zap rule explicitly
+ * allows replacing a term with a more relevant one, and the owner authored the Library.
+ *
+ * A SEED, NOT A CONSTANT. Overridable per call via `relevant` in the body, so the owner changes it
+ * without a deploy — the repo's standing rule is that code may only seed a first value.
+ *
+ * THE CHARACTER RULE. The Zap states it twice and differently: step 1 says no more than one item
+ * over 20 characters per list, step 2 says over 24. Step 1's is UNSATISFIABLE here — four of the
+ * nine exceed 20 and four items cannot be spread one-per-list across three lists. Step 2 is the
+ * later, final instruction ("Maintain the Output as..."), so 24 binds; the longest term below is 22,
+ * so every list passes with room. `H:baseline-relevant-seed` asserts it rather than trusting this note.
+ */
+export const SEED_RELEVANT_LISTS: readonly (readonly string[])[] = [
+  ['Portfolio Management', 'Tech-Driven Innovation', 'Ops Automation'],
+  ['Tech Talent Strategy', 'Innovation Frameworks', 'Data Insights'],
+  ['Corporate AI Use Cases', 'Strategic Partnerships', 'Global Leadership'],
+] as const
+
+/** The three Relevant slots, in template order — the seed above maps onto these positionally. */
+export const RELEVANT_FIELDS = ['RelevantBullets1', 'RelevantBullets2', 'RelevantBullets3'] as const
+
 /** Today as YYYY-MM-DD. A rule, not a stored constant — "today" is what the owner asked for. */
 export function todayIso(now: Date = new Date()): string {
   return now.toISOString().slice(0, 10)
@@ -81,15 +123,35 @@ export function todayIso(now: Date = new Date()): string {
  */
 export function baselinePkg(
   master: Record<string, string>,
-  opts?: { company?: string; date?: string; slots?: SlotCounts },
+  opts?: { company?: string; date?: string; slots?: SlotCounts; relevant?: readonly (readonly string[])[] },
 ): Record<string, string | null> {
   const company = (opts?.company || '').trim() || BASELINE_COMPANY_PLACEHOLDER
   const date = (opts?.date || '').trim() || todayIso()
+  const shaped = shapeSlotFields(master, opts?.slots)
   return {
-    ...shapeSlotFields(master, opts?.slots),
+    ...shaped,
+    ...relevantOverlay(opts?.relevant),
     '@Company': company,
     '@CoverLetterDate': date,
   }
+}
+
+/**
+ * The three Relevant slots, from the caller's lists or the seed.
+ *
+ * Applied AFTER `shapeSlotFields` on purpose: without it those three fields carry the whole Library
+ * sliced to length, which is the arbitrary answer this seed exists to replace. A caller list wins,
+ * an empty or malformed one falls back rather than blanking the slot — a blank Relevant column is
+ * the silent-deletion failure `stripLeftoverTokens` already causes once.
+ */
+export function relevantOverlay(lists?: readonly (readonly string[])[]): Record<string, string> {
+  const src = (Array.isArray(lists) && lists.length ? lists : SEED_RELEVANT_LISTS)
+  const out: Record<string, string> = {}
+  RELEVANT_FIELDS.forEach((field, i) => {
+    const items = (src[i] || []).map((x: unknown) => String(x || '').trim()).filter(Boolean)
+    if (items.length) out[field] = items.join('\n')
+  })
+  return out
 }
 
 /**
@@ -190,7 +252,7 @@ export async function baselineArtifacts(req: HttpRequest, _context: InvocationCo
     const settings = await loadPipelineSettings()
     const slots = await resolveTemplateSlots(
       String(pkt.resume_template_id || '').trim() || settings.resumeTemplateId.value)
-    const pkg = baselinePkg(master, { company: body.company, date: body.date, slots })
+    const pkg = baselinePkg(master, { company: body.company, date: body.date, slots, relevant: body.relevant })
 
     const built: any[] = []
     for (const type of types) {

@@ -4854,3 +4854,58 @@ test('H:baseline-shape: rendered slot fields are newline items, capped by the co
   // incidental pipe and all — splitting a paragraph on punctuation would shred it.
   assert.equal(out.ResumeSummary, master.ResumeSummary)
 })
+
+// THE SEEDED RELEVANT LISTS — the nine that replace "whichever nine happened to be first".
+//
+// With no JD, shapeSlotFields takes items.slice(0, 3) of a 36-term LIBRARY: the first nine in
+// storage order, all of one category and part of another. Mechanically correct, editorially
+// arbitrary. These nine came from the owner's own Zap rule run against the Trinnex JD (exclude
+// anything Skills1/Skills2/competencies already cover, order by ATS match, split 3/3/3), then
+// corrected by the owner for AI redundancy: "replace AI in operations to Ops automation, and AI/ML
+// advancements to Data Insights".
+test('H:baseline-relevant-seed: three lists of three, within the character rule, overridable', async () => {
+  const { SEED_RELEVANT_LISTS, RELEVANT_FIELDS, relevantOverlay, baselinePkg } =
+    await import('../dist/functions/tests/appBaseline.js')
+
+  // SHAPE: exactly three lists of exactly three. The template holds 3 per slot and the Zap states
+  // it as a hard requirement; a fourth item would be silently dropped by the slot trim.
+  assert.equal(SEED_RELEVANT_LISTS.length, 3)
+  for (const list of SEED_RELEVANT_LISTS) assert.equal(list.length, 3)
+
+  // THE CHARACTER RULE, asserted rather than trusted to a comment. The Zap's final wording is "no
+  // more than one item greater than 24 characters, including spaces in any list".
+  for (const list of SEED_RELEVANT_LISTS) {
+    const over24 = list.filter(t => t.length > 24)
+    assert.ok(over24.length <= 1, `list has ${over24.length} items over 24 chars: ${over24.join(', ')}`)
+  }
+
+  // NO DUPLICATES ACROSS THE NINE. Three slots printed side by side make a repeat obvious in a way
+  // one pooled block hides -- the same reason fitCompactSkills collapses duplicates.
+  const all = SEED_RELEVANT_LISTS.flat()
+  assert.equal(new Set(all.map(s => s.toLowerCase())).size, 9, 'the nine must be distinct')
+
+  // THE AI CORRECTION HOLDS. The owner's point was that three AI-prefixed terms read as one idea
+  // repeated. This fails if a later edit reintroduces the cluster.
+  const aiTerms = all.filter(t => /\bAI\b|AI\//i.test(t))
+  assert.ok(aiTerms.length <= 1, `expected at most one AI-prefixed term, got: ${aiTerms.join(', ')}`)
+
+  // THE OVERLAY WINS over the pooled Library text, which is the whole point -- without it these
+  // three fields carry the 36-term pool sliced to length.
+  const pooled = 'Governance and Compliance: A, B | Technology Strategy: C, D | Business: E, F'
+  const pkg = baselinePkg({ RelevantBullets1: pooled, RelevantBullets2: pooled, RelevantBullets3: pooled })
+  RELEVANT_FIELDS.forEach((f, i) => {
+    assert.deepEqual(pkg[f].split('\n'), [...SEED_RELEVANT_LISTS[i]])
+  })
+
+  // A CALLER LIST WINS over the seed -- this is what keeps the nine a seeded first value rather
+  // than a hardcoded constant, per the repo's no-hardcoded-config rule.
+  const custom = relevantOverlay([['A', 'B'], ['C'], ['D', 'E', 'F']])
+  assert.deepEqual(custom.RelevantBullets1.split('\n'), ['A', 'B'])
+  assert.deepEqual(custom.RelevantBullets3.split('\n'), ['D', 'E', 'F'])
+
+  // AND A MALFORMED ONE FALLS BACK rather than blanking the slot. A blank Relevant column is the
+  // silent-deletion failure stripLeftoverTokens already causes once; it must not arrive by a
+  // second route.
+  assert.deepEqual(relevantOverlay([]).RelevantBullets1.split('\n'), [...SEED_RELEVANT_LISTS[0]])
+  assert.deepEqual(relevantOverlay(undefined).RelevantBullets2.split('\n'), [...SEED_RELEVANT_LISTS[1]])
+})
