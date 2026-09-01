@@ -4746,3 +4746,57 @@ test('H:the-judge-reports-what-it-did', () => {
   }
   assert.match(body, /results, score, judge \}/, 'and it must actually be returned')
 })
+
+// ── Master-filled baseline artifacts (appBaseline.ts) ────────────────────────────────────────────
+//
+// The owner asked three times for "the same process we use to build copies of these artifacts but
+// with the mastercontext information and no prompt output changes applied". The first two answers
+// were the tailored builds and the empty templates. The route exists to be neither, and its whole
+// value is the NEGATIVE property — that no model wrote any of it. A guard on that property has to
+// be structural, because a reintroduced generation call would pass every behavioural test in this
+// suite while silently making the output prompt-derived again.
+test('H:baseline-no-model: the baseline route reaches no model transport, directly or by import', () => {
+  const src = readFileSync(new URL('../src/functions/tests/appBaseline.ts', import.meta.url), 'utf8')
+  // Strip comments first: this file DISCUSSES OpenAI and buildPackageForJD at length, and a guard
+  // that fires on its own explanatory prose is the cry-wolf failure hardening rule 2 forbids.
+  const code = src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')
+  for (const banned of ['api.openai.com', 'buildPackageForJD', 'ensurePackage', 'assemblePackage', 'artifactAiEdit']) {
+    assert.ok(!code.includes(banned),
+      `appBaseline.ts must not reach generation (${banned}); its output would then be prompt-derived`)
+  }
+  // The positive half: it must still go through the SHARED render path rather than growing its own
+  // copy of the copy-and-inject logic, which is what "extend, don't duplicate" requires here.
+  assert.ok(code.includes('renderArtifact'), 'baseline must render via the shared renderArtifact')
+  assert.ok(code.includes('loadMasterBaseline'), 'baseline content must come from loadMasterBaseline')
+})
+
+// The two placeholders MasterContext cannot fill. Left unset they are DELETED by
+// stripLeftoverTokens rather than left visible, so the failure is silent blank space in a slide.
+// The owner supplied the standing values on 2026-09-01: company = Company X, coverletterdate = today.
+test('H:baseline-standing-fields: @Company and @CoverLetterDate are always populated', async () => {
+  const { baselinePkg, todayIso, BASELINE_COMPANY_PLACEHOLDER } =
+    await import('../dist/functions/tests/appBaseline.js')
+
+  // Empty master — the seeded first values must still land.
+  const bare = baselinePkg({})
+  assert.equal(bare['@Company'], BASELINE_COMPANY_PLACEHOLDER)
+  assert.equal(bare['@CoverLetterDate'], todayIso())
+
+  // Master content must SURVIVE the overlay, and the overlay must win only on its own two keys.
+  const withMaster = baselinePkg({ ResumeSummary: 'a standing summary', SkillsBullets1: 'x | y' })
+  assert.equal(withMaster.ResumeSummary, 'a standing summary')
+  assert.equal(withMaster.SkillsBullets1, 'x | y')
+  assert.equal(withMaster['@Company'], BASELINE_COMPANY_PLACEHOLDER)
+
+  // A caller override wins over the seed — this is what keeps the value user-changeable rather
+  // than a hardcoded constant, per the repo's no-hardcoded-config rule.
+  const overridden = baselinePkg({}, { company: 'Acme', date: '2026-01-02' })
+  assert.equal(overridden['@Company'], 'Acme')
+  assert.equal(overridden['@CoverLetterDate'], '2026-01-02')
+
+  // Blank/whitespace input must fall back to the seed rather than injecting an empty string, which
+  // would be stripped and blank the field — the exact defect the standing values exist to prevent.
+  const blank = baselinePkg({}, { company: '   ', date: '' })
+  assert.equal(blank['@Company'], BASELINE_COMPANY_PLACEHOLDER)
+  assert.equal(blank['@CoverLetterDate'], todayIso())
+})
