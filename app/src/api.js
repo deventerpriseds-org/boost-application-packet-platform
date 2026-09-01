@@ -207,6 +207,25 @@ export const api = {
   // session and resolveOwner() ignores ?owner= entirely for one, so sending it would suggest the
   // client picks the owner for a mutation.
   revertCorrection: (correctionId) => postDetailed(`/app/correction/${correctionId}/revert`, {}),
+  // The owner accepts or refuses a MODEL-PROPOSED excerpt. This is the only thing that can move a
+  // `proposed` row into `must_have_coverage`'s numerator, so it is the single control that lets the
+  // owner be the accuser the engine's house rule requires ("a model may PROPOSE, only an exact rule
+  // may ACCUSE" — a human is an exact rule).
+  //
+  // The route shipped complete — writer, withdrawal, idempotency, a 409 refusing anything that is
+  // not a proposal — and had no caller in `app/`, so fifteen verified proposals sat uncounted in
+  // production while the screen reported zero coverage.
+  //
+  // postDetailed, not post, for the same reason revertCorrection uses it: this route REFUSES in the
+  // owner's own terms — 403 when the session is not verified (a confirmation whose actor is
+  // "whoever sent the request" is an audit row worth nothing), 404 when the row is not theirs, 409
+  // when the excerpt is not a model proposal. Each of those is a fact the owner must read; post()
+  // would collapse all three into "HTTP error".
+  //
+  // No ?owner=, deliberately: this is a write. requireWrite() takes the owner from the verified
+  // session and resolveOwner() ignores ?owner= for a mutation, so sending it would imply the client
+  // picks whose confirmation this is.
+  evidenceConfirm: (seq, body) => postDetailed(`/app/requirement/${seq}/evidence-confirm`, body),
   // Same defect as `analyzeJd` above, shipped a second time and found by a reachability sweep.
   // `appPackets.ts:382` reads `regen` off this route's body and `:319` honours it; this helper took
   // no options argument, so it could not send it. Nor could anything else: `coachTools.ts:28` posts

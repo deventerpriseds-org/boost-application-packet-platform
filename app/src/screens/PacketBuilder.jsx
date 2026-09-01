@@ -892,6 +892,10 @@ export default function PacketBuilder({ id, step }) {
             coveredKw={coveredKw} missingKw={missingKw} gapsScoredAt={p.atsGapsScoredAt}
             onParse={parseJd} parseBusy={parseBusy} hasSummary={!!opp?.jdSummary}
             keywordScore={keywordScore}
+            /* The confirm control needs an opportunity to post against, and `reloadReq` above is
+               already this card's refresh - so accepting an excerpt re-reads the same payload the
+               row was rendered from rather than patching local state and letting the two drift. */
+            oppId={id}
             /* 4.1-3: navigation arrives as a prop and calls the ONE existing step API. A second
                router inside the card would be the parallel system extend-don't-duplicate forbids. */
             onOpenQc={() => setActiveStep('qc')}

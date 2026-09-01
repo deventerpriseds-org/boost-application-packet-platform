@@ -25,6 +25,13 @@
  */
 export const POSTING_HOOKS = {
   usedIn: 'posting-used-in',   // SPEC 4.1-20 - the JD row's link into the field a swap landed in
+  // The owner accepts or refuses a model-proposed excerpt. This is the ONLY control that promotes a
+  // `proposed` row into must_have_coverage's numerator, so it is the one that lets the owner be the
+  // accuser the engine's house rule demands.
+  confirm: 'evidence-confirm',
+  confirmYes: 'evidence-confirm-yes',
+  confirmNo: 'evidence-confirm-no',
+  confirmed: 'evidence-confirmed',
   card: 'posting-analysis',
   stale: 'posting-stale',
   tab: 'jd-tab',
@@ -420,6 +427,24 @@ export function evidencePresentation(row) {
     // A provable excerpt whose record has since been edited: the quote holds, the RANKING is stale.
     // Surfaced rather than suppressed - the endpoint's own comment calls it a reason to re-resolve.
     recordChanged: !!(ev && ev.recordChanged),
+    // WHO FOUND IT, and WHETHER A HUMAN HAS STOOD BEHIND IT. Both were already on the payload and
+    // had no reader, which is why the owner could see a model's excerpt and had no way to accept it.
+    //
+    // `method` distinguishes a deterministic rule's excerpt from a model's proposal. `checks.ts`
+    // states the rule this serves: "a model may PROPOSE, only an exact rule may ACCUSE" — a
+    // `proposed` row is shown but does NOT count toward `must_have_coverage`, and confirming it is
+    // the ONLY thing that promotes it. So the two fields together decide whether a confirm control
+    // belongs on this row at all.
+    method: ev ? trim(ev.method) : null,
+    // A proposal a human has accepted — READ FROM THE VERDICT, never from the raw columns.
+    // `H:evidence-read-from-the-verdict-not-the-columns` caught the first version of this reading
+    // `r.evidence_confirmed_at` directly and was right to: those keys are nulled for every
+    // non-verified row, so read that way they cannot tell "the confirmation lapsed" from "nobody
+    // ever confirmed it". Inside `ev`, a confirmation vanishes with the quote it vouched for.
+    confirmedAt: ev ? trim(ev.confirmedAt) : null,
+    confirmedBy: ev ? trim(ev.confirmedBy) : null,
+    // The one question the control asks: is this a model's suggestion still awaiting a human?
+    awaitingConfirmation: !!(ev && trim(ev.method) === 'proposed' && !trim(ev.confirmedAt)),
     // Null when the state is `verified`; otherwise the ONE sentence for this state, from the API.
     note: trim(r.evidenceNote),
     // What was looked for, on rows with no provable excerpt. Endpoint-computed, never re-derived.

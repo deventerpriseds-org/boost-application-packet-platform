@@ -650,6 +650,15 @@ export function shapeRequirementsForApi(joined: any[], records: ProfileRecord[] 
       // A provable excerpt whose record has since changed: the quote still holds, the RANKING does
       // not. Surfaced rather than suppressed — it is a reason to re-resolve, not to withhold.
       recordChanged: r.evidence_record_changed === true,
+      // WHETHER A HUMAN HAS STOOD BEHIND THIS EXCERPT — and it belongs INSIDE the verdict, not
+      // beside it. `H:evidence-read-from-the-verdict-not-the-columns` forbids a screen reading the
+      // raw `evidence_confirmed_*` columns, and it caught this being done: those keys are nulled for
+      // every non-verified row, so read directly they cannot tell "the confirmation lapsed" from
+      // "nobody ever confirmed it". Placed here, a confirmation is dropped with the quote it vouched
+      // for — because this whole object is null when `evidence_quote` is — which is the fail-closed
+      // behaviour the confirmation join was built for.
+      confirmedAt: r.evidence_confirmed_at ?? null,
+      confirmedBy: r.evidence_confirmed_by ?? null,
     },
     // The state, and the sentence for it, from the ONE map in evidence.ts. `evidenceNote` is null
     // only when the excerpt is provable; "no evidence found in your profile" is now ONE of five
