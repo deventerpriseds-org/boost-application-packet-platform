@@ -117,3 +117,67 @@ in one call), which is exactly the shape `buildProposalUser` already builds.
 
 **Nothing above is started. This needs the owner's go-ahead: it is multi-file, it deletes a standing
 safety rule by design, and it changes what a gate means.**
+
+---
+
+# THE OWNER IS RIGHT AND I OVERSCOPED IT
+
+Owner, 2026-09-01: *"it should be simple to ask an llm of these requirements and responsibilities etc
+how many are covered by synonyms, near phrasing it else to help determine what is covered and what is
+[not]"*
+
+**It is simple, and everything expensive in §3-§6 above came from an assumption I added and the owner
+never asked for: that the LLM verdict must REPLACE `coversIn` in the gate path on day one.**
+
+Drop that assumption and the cost collapses:
+
+| what made it expensive | why it disappears |
+|---|---|
+| 948 test fixtures | **Nothing existing changes**, so no existing test changes |
+| H12 purity / verdict injection | The new judge is its OWN module, called from the build path which is already impure. `coversIn` is not touched. |
+| determinism at the gate, content hashing | **The gate does not read it yet.** A verdict that decides nothing cannot flicker a gate. |
+| deleting *"only an exact rule may accuse"* | **Not deleted.** The rule still governs the gate; this is a measurement shown beside it. |
+
+## The minimal build — additive, nothing existing modified
+
+1. **`coverageJudge.ts` — pure, no I/O, so H12 is not even in play.**
+   - `buildCoverageUser(requirements[], documentText)` → one prompt carrying ALL the requirements and
+     the field text. Same shape as `evidenceProposal.buildProposalUser` (`:105`), which is the
+     precedent to copy rather than reinvent.
+   - `parseCoverageVerdict(json, requirements, documentText)` → per requirement:
+     `{ covered, basis: 'direct'|'synonym'|'near_phrasing'|'absent', quote, why }`, and — the safety
+     property, lifted from `verifyProposal` (`:122`) — **every claimed `quote` is checked byte-exact
+     against the document**. A verdict citing text the document does not contain is REFUSED, not
+     shown. The model cannot assert coverage without pointing at real words.
+2. **One call site** in the build path, batched **once per artifact**: 21 requirements in, 21 verdicts
+   out, **4 calls per packet**.
+3. **One table.** Checked first, per "extend, don't duplicate": the existing home for artifact×
+   requirement coverage is `artifact_score.uncovered_requirement_ids` / `judged_requirement_ids`
+   (`schema.ts:768,774`) — **bare uuid arrays with nowhere to put a basis, a quote or a reason.** They
+   cannot carry this, so a `requirement_coverage` row per (artifact_id, run_id, requirement_id) is
+   justified rather than duplicative.
+4. **Render it** in the existing `ReqChip` row (`AssetBlocks.jsx:1150`), which is the surface already
+   agreed.
+
+## What this gets on day one
+
+- **The count the owner asked for**: *"of these 21, N are covered — 4 directly, 3 by synonym, 2 by near
+  phrasing"* — instead of `0 of 12`.
+- **The display**: which JD line each one answers, on what basis, quoting the document.
+- **A free evaluation of whether the LLM's judgement is any good**, on the owner's real packets, side
+  by side with the lexical answer — **before anything depends on it.** The two disagree on the four
+  Trinnex rows by construction, so the first run is itself the experiment.
+
+## What deliberately comes LATER, as its own decision
+
+Letting the **gate** read this. That is the change that deletes the house rule, needs stored
+determinism, and can genuinely break a packet's ship path. **It should not be decided before the owner
+has looked at a page of real verdicts.** Ordering it second is not caution for its own sake — it is
+the cheap-test-before-the-expensive-change rule, and it makes the expensive change optional.
+
+## Acceptance bar stays the Trinnex four
+
+#15 and #12 should come back **covered, with a document quote**; #7 is the interesting one
+(`apply`/`leverage`, `goals`/`objectives`); **#9 must come back ABSENT** — the summary genuinely does
+not say *managers* or *technical*, and a judge that claims it does is worse than the threshold it was
+brought in to replace. **That row is the guard on the judge.**
