@@ -6566,3 +6566,58 @@ missed in MY RENDERING, not lost from the data — no history repair is needed.
 
 The Zap baseline holds 11 and 9 items, the same as MasterContext, against slot counts of 10 and 8.
 The lists have always been one over. Not an injection artifact and not something that was overwritten.
+
+---
+
+## ACT-2026-09-01-g — Drive searched: there is NO source resume. MasterContext was AUTHORED, not extracted.
+
+**Owner:** *"you'll need to find what resume was used for extracting the master context... try to match
+content from what we have in master context to the docs in the drive directory to find which one is
+the baseline used and was extracted."*
+
+**Answer: no such document exists. The premise — that MasterContext was extracted FROM a resume — is
+not what happened.** Evidence below; this is a negative claim so it carries a full sweep.
+
+**Built `diag/master-source`** (nothing could answer this: `diag/folders` lists only the two role
+TEMPLATE folders and every file in them is placeholder-laden, `diag/doc-structure` reads one known
+id). It searches Drive by `fullText` for the owner's most distinctive master items, exports each
+candidate, and scores **exact containment** — naming a document as the origin of the profile is
+accusation-grade, and this repo's rule is that fuzzy matching ranks but never accuses.
+
+**Result (run 33551059488, HTTP 200): 108 candidate documents scanned, 41 master items scored.**
+
+| Rank | Document | Match | Tokens |
+|---|---|---|---|
+| 1 | `Baseline (Master Context) — Resume` | 33/41 (80%) | 0 |
+| 2 | `Von Ellis Compact Resume: Peregrine…VP of Software` | 21/41 (51%) | 0 |
+| 3 | `Custom Prep: Mews-VP of Product & Engineering` | 20/41 (49%) | 0 |
+| 4-12 | further compact resumes / custom preps | 14-19/41 (34-46%) | 0 |
+
+**Rank 1 is circular** — that is the document I built FROM MasterContext three hours ago. Excluding
+it, nothing exceeds 51%, and every remaining candidate is a generated OUTPUT (a compact resume or a
+custom prep for a named employer), not a source.
+
+**The decisive detail: every candidate misses the SAME items** — the executive-profile prose and the
+`skills1` terms (Enterprise Governance, Technology Strategy, Cybersecurity Compliance, Cloud
+Architecture, AI/Data Science Strategy, Change Management). **No document in Drive contains the
+skills1 list.** A document those were extracted from would contain them by definition.
+
+### Where the content actually came from
+
+**All 13 master blocks are Zapier `set_value` nodes** — hand-authored constants in Zap 289877647,
+nodes 289877648-289877659:
+
+    02-current-resume-summary      node 289877648  set_value
+    04-current-skills             node 289877650  set_value
+    06-relevant-skills            node 289877652  set_value
+    ...                           (13 of 13, all set_value)
+
+`set_value` is a literal the owner typed into the Zap. **MasterContext is the ORIGIN, not a
+derivative** — it was authored in Zapier and later copied into the Azure Storage table. That is why
+no Drive resume contains it, and why the archived `docs/zap-289877647/baseline/` files are the
+closest thing to a source document that exists.
+
+**Consequence for the earlier question — nothing was overwritten and nothing is missing.** The
+`baseline/` copies match the live table item-for-item (36/36 on relevant, verified in ACT-…-f). The
+only transformation between them is the encoding: the Zap holds bullet lists, the table holds the
+same items pipe-delimited.
