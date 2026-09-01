@@ -677,10 +677,14 @@ test('M30/H40: the DETERMINISTIC resolver emits only its own two methods, and th
   assert.ok(!/method: '(?!exact|anchored)/.test(ev), 'evidence.ts may not emit a third method value')
 
   // Both declarations carry the SAME union, or an insert that one permits the other rejects.
+  // FOUR values since 2026-09-01: `judged` is a proposal that survived the adversarial second read
+  // and is the one that counts toward coverage. The invariant above is untouched by it — the
+  // DETERMINISTIC resolver still emits only its own two, and `judged` comes from supportJudge, never
+  // from here.
   for (const [file, re] of [
-    ['appRequirements.ts', /method\s+text not null check \(method in \('exact','anchored','proposed'\)\)/],
-    ['schema.ts', /method in \('exact','anchored','proposed'\)/],
-  ]) assert.ok(re.test(src(file)), `${file} must declare the three-value union`)
+    ['appRequirements.ts', /method\s+text not null check \(method in \('exact','anchored','proposed','vetted'\)\)/],
+    ['schema.ts', /method in \('exact','anchored','proposed','vetted'\)/],
+  ]) assert.ok(re.test(src(file)), `${file} must declare the four-value union`)
 
   // THE LESSON, AS AN ASSERTION RATHER THAN A PARAGRAPH. `ensureEvidenceTable` runs on every
   // request and four artifacts of one packet enter it concurrently. `create table if not exists`
@@ -1580,4 +1584,93 @@ test('H:pre-store-offset-check-is-a-tautology-and-says-so', () => {
   // no comment; that lesson is already recorded against `M24` and this is the same class.
   assert.ok(!/structurally cannot/.test(s),
     'a comment claims the check structurally cannot reject — it can, for a mismatched pair')
+})
+
+// =================================================================================================
+// THE CHALLENGE — the only thing that lets a model row COUNT (`supportJudge.ts`, 2026-09-01)
+// =================================================================================================
+//
+// `must_have_coverage` reads `ruleEvidenceOf`, which nulls any `proposed` row the owner has not
+// confirmed. On the owner's live Trinnex packet 15 of 17 evidence rows are proposed, so it reads
+// 0/12 and nothing in the product could move it but twelve clicks. A proposal that is then
+// CHALLENGED — asked what the excerpt fails to show, before it may claim support — and holds is
+// stamped `vetted` and counts.
+//
+// These pin the SEAM. `proposalVet.test.mjs` pins the rules; a correct rule the writer never calls,
+// or calls when the owner has not asked, is a feature nobody has.
+
+// The challenge's answer, after the proposal's. `GOOD.quote` is what it must cite from.
+const VET_HELD = { missing: [], supported: true, quote: 'Reduced outages from nine hours to one',
+  why: 'the excerpt states the reliability improvement the requirement asks for' }
+const VET_GAP = { missing: ['a named platform scale'], supported: true,
+  quote: 'Reduced outages from nine hours to one', why: 'it shows reliability work' }
+
+// Call 1 is the proposal, call 2 is the challenge.
+const twoCalls = (second) => {
+  const seen = []
+  const fetchJson = async (system, user) => {
+    seen.push({ system, user })
+    return { choices: [{ message: { content: JSON.stringify(seen.length === 1 ? GOOD : second) } }] }
+  }
+  return { fetchJson, seen }
+}
+
+test('H:the-challenge-is-what-turns-a-proposal-into-something-that-counts', async () => {
+  const t = twoCalls(VET_HELD)
+  const c = fakeClient(escRows)
+  const out = await writeEvidence(c, 'opp-1', [ESC_REC],
+    { escalate: true, vetProposals: true }, undefined, t.fetchJson)
+
+  assert.equal(t.seen.length, 2, 'the proposal, then the challenge')
+  assert.match(t.seen[1].user, /does NOT show/, 'the second call must be the challenge, not a repeat')
+  assert.equal(out.vetted, 1, 'and it is counted separately from `proposed`')
+  const row = c.inserts[0]
+  assert.ok(row, 'a row was written')
+  assert.equal(row[9], 'vetted', 'stored as vetted — the value must_have_coverage counts')
+  assert.match(row[7], /challenged/, 'and the note says the claim was attacked, not just accepted')
+  assert.match(row[7], /Reduced outages from nine hours to one/, 'carrying the citation')
+})
+
+test('H:a-challenge-that-finds-a-gap-leaves-the-row-exactly-where-it-was', async () => {
+  // The model names something missing and claims support in the same breath. The row stays
+  // `proposed` — shown to the owner, not counted — which is today's behaviour, and the gap is
+  // counted under its own name so a run that vetted nothing is explicable rather than mysterious.
+  const t = twoCalls(VET_GAP)
+  const c = fakeClient(escRows)
+  const out = await writeEvidence(c, 'opp-1', [ESC_REC],
+    { escalate: true, vetProposals: true }, undefined, t.fetchJson)
+  assert.equal(out.vetted, 0)
+  assert.equal(out.proposed, 1, 'the row is still evidence to SHOW')
+  assert.equal(c.inserts[0][9], 'proposed')
+  assert.equal(out.escalation_refusals.support_missing_named, 1,
+    'named rather than collapsed — "it found a gap" is not "we never reached the model"')
+})
+
+test('H:a-challenge-that-cannot-run-leaves-the-row-exactly-where-it-was', async () => {
+  // FAIL CLOSED. An outage must never promote a row, and must never demote one either: the proposal
+  // still stands on its own verified quote, exactly as it does today.
+  const seen = []
+  const fetchJson = async () => {
+    seen.push(1)
+    if (seen.length === 1) return { choices: [{ message: { content: JSON.stringify(GOOD) } }] }
+    throw new Error('OpenAI HTTP 503')
+  }
+  const c = fakeClient(escRows)
+  const out = await writeEvidence(c, 'opp-1', [ESC_REC],
+    { escalate: true, vetProposals: true }, undefined, fetchJson)
+  assert.equal(out.vetted, 0)
+  assert.equal(out.proposed, 1)
+  assert.equal(c.inserts[0][9], 'proposed')
+  assert.equal(out.escalation_refusals.support_transport_failed, 1)
+})
+
+test('H:no-challenge-happens-unless-the-owner-asked-for-one', async () => {
+  // Off is today's behaviour EXACTLY: one call, a `proposed` row, and nothing counted. The switch is
+  // a real switch rather than a label on something that runs anyway.
+  const t = twoCalls(VET_HELD)
+  const c = fakeClient(escRows)
+  const out = await writeEvidence(c, 'opp-1', [ESC_REC], { escalate: true }, undefined, t.fetchJson)
+  assert.equal(t.seen.length, 1, 'the challenge call is never made')
+  assert.equal(out.vetted, 0)
+  assert.equal(c.inserts[0][9], 'proposed')
 })

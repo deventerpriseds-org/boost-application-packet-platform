@@ -889,6 +889,33 @@ export function runChecks(input: CheckInput): CheckResult[] {
      * row never carries one, so there is nothing to disambiguate.
      */
     const isConfirmed = (r: { seq: number }) => !!evidenceOf(r)?.confirmed_at
+    /**
+     * A proposal that was CHALLENGED and held (`supportJudge.ts`), and the third way a
+     * row can be evidenced. It COUNTS.
+     *
+     * WHY THIS IS NOT THE HOUSE RULE BEING QUIETLY DROPPED. The rule above says a model may propose
+     * and only an exact rule may accuse, and the reason it holds is stated there: the proposal pass
+     * asks a CONFIRMING question, so it finds support at the rate it was asked to. A `judged` row is
+     * not that answer given twice. To be stamped `judged` a row had to pass a pass whose FIRST
+     * required output is what the excerpt does NOT show — and a non-empty `missing` list REFUSES the
+     * row in code, before the model's own verdict is even read. The claim is then cited to a span of
+     * the excerpt and verified byte-exact, exactly as the proposal's own quote is.
+     *
+     * SO THE STANDARD MOVED, DELIBERATELY AND IN ONE DIRECTION, and the owner asked for it:
+     * "resolve the zero out of 12" (2026-09-01). What did not move: the row still carries a quote
+     * that is byte-present in the owner's profile, still names the record it came from, and still
+     * says on its face that a model put it there — `vettedNote` writes the citation into `extra`.
+     * A reviewer can tell a better profile from a chattier model, which is the property that makes
+     * this auditable rather than merely higher.
+     *
+     * OFF BY DEFAULT. Nothing is stamped `judged` unless the owner turned the judge on, so an
+     * untouched install sees exactly the number it sees today.
+     *
+     * NOTE FOR ANYONE EDITING `ruleEvidenceOf`: `judged` counts because it is not `proposed`, not
+     * because of a clause naming it. That is easy to break by widening `isProposed` and easy to miss,
+     * which is why `H:a-judged-row-counts-and-a-proposed-one-does-not` pins both halves.
+     */
+    const isVetted = (r: { seq: number }) => evidenceOf(r)?.method === 'vetted'
     const ruleEvidenceOf = (r: { seq: number }) =>
       (isProposed(r) && !isConfirmed(r) ? null : evidenceOf(r))
     const label = (r: { seq: number; verbatim: string | null; item_text: string }) =>
@@ -939,6 +966,14 @@ export function runChecks(input: CheckInput): CheckResult[] {
       // exclusions are named rather than absorbed.
       const proposed = coverable.filter(r => isProposed(r) && !isConfirmed(r))
       if (proposed.length) excluded.push(`${proposed.length} model-proposed, awaiting your confirmation`)
+      // JUDGED ROWS ARE IN THE NUMERATOR, so they are named in the SAME sentence rather than left for
+      // someone to discover in the evidence panel. This is the identical discipline the parenthetical
+      // above exists for, pointed the other way: that one says what was left OUT, this says what a
+      // model put IN. A count that rose because a model was consulted must say so where the number is
+      // read, or "coverage rose" is not falsifiable.
+      const vettedRows = coverable.filter(r => isVetted(r))
+      const includedNote = vettedRows.length
+        ? ` (${vettedRows.length} vetted: a model challenged the match and it held, quoting your own words)` : ''
       if (eligibility.length) excluded.push(`${eligibility.length} not reachable by any generated field`)
       const factOwned = mustHaves.length - coverable.length - eligibility.length
       if (factOwned > 0) excluded.push(`${factOwned} answered from your profile facts`)
@@ -949,11 +984,11 @@ export function runChecks(input: CheckInput): CheckResult[] {
       out.push(!coverable.length
         ? na('must_have_coverage', 'the posting produced no must-have requirements to judge', COVERAGE_EXPECT)
         : unevidenced.length
-          ? { ...bad('must_have_coverage', `${coverable.length - unevidenced.length}/${coverable.length} must-haves evidenced${tail}`,
+          ? { ...bad('must_have_coverage', `${coverable.length - unevidenced.length}/${coverable.length} must-haves evidenced${includedNote}${tail}`,
                 COVERAGE_EXPECT, unevidenced.map(r => isProposed(r)
                   ? `${label(r)} — a model proposes "${(evidenceOf(r)!.quote || '').slice(0, 90)}" from ${evidenceOf(r)!.source_label}; confirm it`
                   : `${label(r)} — ${NO_EVIDENCE_NOTE}`)), judged: judgedIds }
-          : { ...ok('must_have_coverage', `${coverable.length}/${coverable.length} must-haves evidenced${tail}`, COVERAGE_EXPECT), judged: judgedIds })
+          : { ...ok('must_have_coverage', `${coverable.length}/${coverable.length} must-haves evidenced${includedNote}${tail}`, COVERAGE_EXPECT), judged: judgedIds })
 
       // `ruleEvidenceOf`, for the same reason `must_have_coverage` uses it. An INDEPENDENT VERIFIER
       // caught that this line and `evidence_placed` below were left on the unfiltered `evidenceOf`,

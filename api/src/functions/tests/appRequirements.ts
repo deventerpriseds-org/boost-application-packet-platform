@@ -17,7 +17,10 @@ import { resolveOptionsFor } from './checkPrefs'
 import { claimTokens, segments, tokensOf, sameWord } from './requirementSupport'
 import { writeComparison, comparisonPayload } from './appDimensions'
 import { escalateOne, PROPOSAL_VERSION, type EscalationOutcome } from './evidenceProposal'
-import { openAiJson, type FetchJson } from './openaiJson'
+import {
+  SUPPORT_SYSTEM, buildSupportUser, parseSupportVerdict, vettedNote,
+} from './supportJudge'
+import { openAiJson, contentJson, type FetchJson } from './openaiJson'
 // IMPORTED, never redeclared — M3: the citation floors have one home (`reviewer.ts`), and the
 // escalation tier must clear the SAME floor the deterministic path does, not a copy of it.
 import { MIN_QUOTE_CHARS } from './reviewer'
@@ -49,7 +52,7 @@ export async function ensureEvidenceTable(client: any) {
       char_end       int not null,
       extra          text,
       ratio          numeric,
-      method         text not null check (method in ('exact','anchored','proposed')),
+      method         text not null check (method in ('exact','anchored','proposed','vetted')),
       record_sha256  text not null,
       resolver_version int not null,
       proposal_version int,
@@ -168,7 +171,7 @@ export async function writeEvidence(
   // The escalation tier's own counts, ALWAYS present and zero when it did not run. Without them a
   // coverage rise is unattributable after the fact — a reviewer cannot tell a better profile from a
   // chattier model, and coverage is the number the gate and the score both read.
-  escalated: number; proposed: number; escalation_refusals: Record<string, number>
+  escalated: number; proposed: number; vetted: number; escalation_refusals: Record<string, number>
 }> {
   const rows = (await client.query(
     `select id, seq, kind, verbatim, item_text from requirement where opp_id=$1 order by seq`, [oppId])).rows
@@ -269,6 +272,9 @@ export async function writeEvidence(
   // is leave rows unevidenced, which is exactly what they were a moment earlier.
   let escalated = 0
   let proposed = 0
+  // Rows the second read promoted. Reported separately from `proposed` because they are the ones
+  // that COUNT, and a caller must be able to see the number a model moved.
+  let vetted = 0
   // SEPARATE FROM `refused`, and the separation is a bug fix rather than tidiness. `evidenced` below
   // is computed as `deterministic rows - refused`, so an escalation-path refusal was subtracting
   // from the DETERMINISTIC count — a population it has nothing to do with. Measured by an
@@ -347,6 +353,36 @@ export async function writeEvidence(
       const rec = byKey.get(e.source_key)
       if (!rec || rec.text.slice(e.char_start, e.char_end) !== e.quote) { escRefused++; note('offset_mismatch'); continue }
 
+      // THE SECOND READ — the only thing that can make a model row COUNT toward coverage.
+      //
+      // `must_have_coverage` reads `ruleEvidenceOf`, which nulls any `proposed` row the owner has not
+      // confirmed. On the owner's live Trinnex packet 15 of 17 evidence rows are proposed, so the
+      // number reads 0/12 and nothing in the product could move it but twelve clicks.
+      //
+      // This asks the FALSIFYING question — what does the requirement ask that this excerpt does NOT
+      // show — and a non-empty answer refuses the row in code before the model's own verdict is read.
+      // What survives is stamped `judged` and counts; everything else stays `proposed`, which is
+      // exactly where it is today. See `supportJudge.ts` for why order is the safety property.
+      //
+      // OFF unless the owner turned the judge on, and every failure leaves the row `proposed`.
+      let method = e.method
+      let extra = e.extra
+      if (opts.vetProposals) {
+        try {
+          const v = parseSupportVerdict(
+            contentJson(await fetchJson(SUPPORT_SYSTEM, buildSupportUser(requirement, e.quote))), e.quote)
+          if (v.supported && v.quote) {
+            method = 'vetted'
+            extra = vettedNote(v.why, v.quote)
+            vetted++
+          } else {
+            // Named rather than collapsed: "it found a gap" and "we never reached the model" are
+            // different facts about a run, and only the second is an outage.
+            note(`support_${v.refusal || 'declined'}`)
+          }
+        } catch { note('support_transport_failed') }
+      }
+
       // ONE ROW, ONE SAVEPOINT. A proposed insert that the database rejects — most plausibly a CHECK
       // on an environment whose migration has not run — must cost that row and nothing else. Without
       // the savepoint the failed statement poisons the surrounding transaction in Postgres and every
@@ -360,7 +396,7 @@ export async function writeEvidence(
            values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
            on conflict (requirement_id, source_key, char_start, char_end) do nothing`,
           [r.id, e.quote, e.source_kind, e.source_label, e.source_key, e.char_start, e.char_end,
-           e.extra, e.ratio, e.method, e.record_sha256, e.resolver_version, PROPOSAL_VERSION])
+           extra, e.ratio, method, e.record_sha256, e.resolver_version, PROPOSAL_VERSION])
         await client.query('commit')
         proposed++
       } catch (err) {
@@ -381,7 +417,7 @@ export async function writeEvidence(
     // and `proposed` below is what lets any caller separate the two populations.
     evidenced: evidenced + proposed, unevidenced: rows.length - evidenced - proposed,
     refused: refused + escRefused, profile_records: records.length,
-    escalated, proposed, escalation_refusals,
+    escalated, proposed, vetted, escalation_refusals,
   }
 }
 

@@ -91,11 +91,21 @@ export interface EvidenceRow {
    */
   ratio: number | null
   /**
-   * How the excerpt was found. `proposed` means a MODEL named it and an exact substring check
-   * accepted it — the quote is every bit as verbatim, but a rule did not choose it, and a reader
-   * must be able to tell. The database CHECK enforces the same three values.
+   * How the excerpt was found, and the four values are four different warrants:
+   *
+   *   `exact` / `anchored`  a deterministic rule chose it.
+   *   `proposed`            a MODEL named it and an exact substring check accepted it — the quote is
+   *                         every bit as verbatim, but a rule did not choose it, so it is shown and
+   *                         never counted until the owner confirms it.
+   *   `vetted`              a proposal that was then CHALLENGED and held: the challenge had to
+   *                         list what the excerpt does NOT show before it could claim support, a
+   *                         non-empty list refuses the row in code, and the claim is cited to a
+   *                         byte-verified span of the excerpt. This one COUNTS toward coverage. See
+   *                         `supportJudge.ts` and `checks.ts`'s `isJudged`.
+   *
+   * The database CHECK enforces the same four values, in both DDL homes.
    */
-  method: 'exact' | 'anchored' | 'proposed'
+  method: 'exact' | 'anchored' | 'proposed' | 'vetted'
   /** The proposal ruleset that judged a `proposed` row. NULL means no model was involved. */
   proposal_version?: number | null
   /**
@@ -351,6 +361,14 @@ export interface ResolveOptions {
    * made it. Absent means off, and off is today's behaviour exactly.
    */
   appealOverclaims?: boolean
+  /**
+   * May an accepted proposal be CHALLENGED and, if it holds, COUNT
+   * toward coverage as `judged`?
+   *
+   * Rides the owner's coverage-judge switch, like `appealOverclaims`. Absent means off, and off is
+   * today's behaviour: every model row stays `proposed` until the owner confirms it.
+   */
+  vetProposals?: boolean
   /**
    * Token->record-count map for the WHOLE profile, computed once by `resolveAll`.
    *

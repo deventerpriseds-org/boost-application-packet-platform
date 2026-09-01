@@ -260,5 +260,6 @@ export function resolveOptionsFrom(t: Partial<CheckThresholds>): ResolveOptions 
     // `=== true`, like the column it reads: an owner who has never touched the judge setting keeps
     // today's withdrawals exactly. The appeal can only ever OVERTURN a withdrawal, never cause one.
     appealOverclaims: t.coverageJudge === true,
+    vetProposals: t.coverageJudge === true,
   }
 }

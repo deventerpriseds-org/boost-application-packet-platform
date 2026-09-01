@@ -3326,11 +3326,24 @@ test('H:model-evidence-is-labelled: a model-proposed evidence row has its own me
   const schema = readFileSync(new URL('../src/functions/tests/schema.ts', import.meta.url), 'utf8')
   const sql = schema.slice(schema.indexOf('SCHEMA_SQL = `') + 14, schema.indexOf('\n`;'))
 
-  // (1) The three provenances, and no more — a fourth added without a thought here should fail.
+  // (1) The FOUR provenances, and no more — a fifth added without a thought here should fail, and
+  // this guard did exactly that when `judged` was added (2026-09-01), which is why it says four now
+  // rather than having been quietly widened to "at least three".
+  //
+  // `judged` is the one that COUNTS toward coverage, so its admission was the deliberate act:
+  // a proposal that survived an adversarial second read (supportJudge.ts) naming what the excerpt
+  // does NOT show before it could claim support, cited to a byte-verified span. It is a separate
+  // value from `proposed` precisely so a query can still tell "a model named this" from "a model
+  // named this AND it survived being attacked" — collapsing them would lose the distinction the
+  // gate now depends on.
   const checks = [...sql.matchAll(/method in \(([^)]*)\)/g)].map(m => m[1].replace(/\s|'/g, ''))
   assert.ok(checks.length >= 1, 'the method CHECK has vanished from SCHEMA_SQL')
-  assert.ok(checks.some(c => c === 'exact,anchored,proposed'),
-    `no method CHECK admits a model-proposed row: found ${JSON.stringify(checks)}`)
+  assert.ok(checks.some(c => c === 'exact,anchored,proposed,vetted'),
+    `no method CHECK admits both a proposed and a judged row: found ${JSON.stringify(checks)}`)
+  for (const c of checks) {
+    if (/proposed/.test(c)) assert.equal(c, 'exact,anchored,proposed,vetted',
+      `a method CHECK admits a different set: ${c} — two homes that disagree is an insert one permits and the other rejects`)
+  }
 
   // (2) Nullable, never defaulted. A default is the silent version of lying about provenance.
   assert.match(sql, /add column if not exists proposal_version int;/,

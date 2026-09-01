@@ -1607,7 +1607,7 @@ create unique index if not exists pbj_one_live_per_opp
 alter table requirement_evidence drop constraint if exists requirement_evidence_method_check;
 do $$ begin
   alter table requirement_evidence add constraint requirement_evidence_method_check
-    check (method in ('exact','anchored','proposed'));
+    check (method in ('exact','anchored','proposed','vetted'));
 exception when undefined_table then null; end $$;
 -- NULL means no model was involved, which is what every existing row means and why the column is
 -- nullable rather than defaulted. A default would backfill 1 onto 'exact' rows and assert model
