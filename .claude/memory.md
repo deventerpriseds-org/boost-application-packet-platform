@@ -5298,3 +5298,44 @@ believing it.** The honest verdict there was "not proven", not "broken".
 Worth carrying to `mutate.sh` itself: it could distinguish these by checking whether the test command
 failed at the BUILD step rather than in a test body, and report a fourth outcome. Not done here —
 recorded so the next lane that trips it does not re-derive it.
+
+---
+
+## 2026-09-01 — the baseline artifacts rendered pipes and the whole Library; my defect
+
+Owner, on the documents I had just handed him: *"why do the skills, competencies and relevant items
+have pipe separation instead of bullets... why is the relevant list far exceeding the count limits.
+this must be the Library not the starting template list."* Both right, both mine.
+
+**Three standing facts, each ground-truthed, so nobody re-derives them:**
+
+- **MasterContext blocks are PIPE-DELIMITED in storage.** `skills1` is literally
+  `"Enterprise Governance|Technology Strategy|..."` (`GET /api/diag/skill-sources`, run 33548874453).
+  `splitItems`/`splitSkills` split on `/\r?\n|(?:\s*[|•·]\s*)/` and rejoin with `\n`. Anything that
+  injects a master block without that pass renders the pipes.
+- **`relevantProficiencies` is the POOL** — 958 chars, 5 categories, ~36 terms — and
+  `MASTER_BASELINE_FIELD` maps `RelevantBullets1`, `2` AND `3` to it deliberately, because the
+  prompts split it. Correct as provenance "before" text; **wrong as a render package.**
+- **The resume template's slot counts are `SkillsBullets1:10, SkillsBullets2:8, ExpertiseBullets:6,
+  RelevantBullets1/2/3: null`** (`GET /api/config/templates`, run 33548971200). The three Relevant
+  counts are UNCONFIGURED, which is why nothing constrained the injection. Master holds 11/9/7 — each
+  list is exactly ONE over its known count.
+
+### Hardening — `loadMasterBaseline()` is a PROVENANCE reader, not a package builder
+
+The name says baseline and the shape is `Record<mergeField, string>` — identical to what
+`renderArtifact` wants — so it looked like a drop-in package. It is not. Its real job is the loop-0
+"before" text for the change log, where the pooled one-to-many mapping and the raw stored formatting
+are both *correct*. Feeding it to a renderer keeps the type-check happy and produces a wrong document.
+
+**The generalisable rule: a matching TYPE is not a matching CONTRACT.** Before reusing a producer,
+read what its existing CONSUMER does with it — `appInsertions.ts:84` stores it for display and
+`appSwaps.ts:93` runs it through `splitBaselineItems` FIRST. Both consumers transform it; I was the
+only caller that did not, and `Record<string,string>` → `Record<string,string|null>` hid that
+completely.
+
+**And every guard I wrote was about PROVENANCE, none about SHAPE.** `H:baseline-no-model` proves no
+model touched the output; `H:baseline-standing-fields` proves two values land. Neither says the
+output is *shaped like a resume*. `checks.ts` `WORD_RULES` covers only the six PROSE fields, so
+there is no separator or item-count check on any of the six `SLOT_FIELDS` anywhere in the suite —
+a real gap the owner found by looking at the document, which no assertion could have told him.

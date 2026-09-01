@@ -6440,3 +6440,69 @@ COMPILE lands in the same blind spot and is reported as the alarming outcome. **
 must compile.** When a `FIRED`-expected guard reports `INERT`, check the build output before
 believing the verdict — the honest reading was "not proven", not "worthless". Re-run with a
 compiling mutation (a bare exported const carrying the banned string) and it FIRED immediately.
+
+---
+
+## ACT-2026-09-01-e — The baseline artifacts are WRONG: pipes not bullets, and the Library in every Relevant slot
+
+**Owner, on the documents built in -d:** *"why do the skills, competencies and relevant items have
+pipe separation instead of bullets for regular resume. also why is the relevant list far exceeding
+the count limits. this must be the Library not the starting template list which has the exact number
+of items to fit the template."*
+
+**Both observations CONFIRMED against primary sources. The defect is mine — `appBaseline.ts` fed
+`loadMasterBaseline()` straight into `renderArtifact()` and skipped everything the real pipeline does
+between them. Not a data problem, and nothing was "replaced" in history.**
+
+### Evidence 1 — the master blocks are literally pipe-delimited
+
+`GET /api/diag/skill-sources` (run 33548874453, HTTP 200) returns them verbatim:
+
+    skills1  (225 ch): "Enterprise Governance|Technology Strategy|Risk Management|..."
+    skills2  (180 ch): "Strategic Roadmaps|Stakeholder Engagement|..."
+    expertise(286 ch): "Budget Development and P&L Management|KPI-driven performance management|..."
+
+The real path never injects these raw. `splitItems`/`splitSkills` split on `/\r?\n|(?:\s*[|•·]\s*)/`
+and rejoin with `\n`; model output arrives newline-formed. I injected the stored string, so the
+document renders the pipes. **`renderArtifact` is a renderer, not a normaliser** — it injects what it
+is handed, which is correct behaviour and why nothing caught this.
+
+### Evidence 2 — `relevantProficiencies` IS the Library, and it went into all three slots WHOLE
+
+`MASTER_BASELINE_FIELD` (`evidence.ts:203-205`) maps `RelevantBullets1`, `2` AND `3` to the SAME
+`relevantProficiencies` key — deliberately, because it is the POOL the prompts split from. That is
+correct for its real job (provenance "before" text) and wrong as a render package.
+
+The field is 958 chars, two-level, **5 categories / ~36 terms** (`Governance and Compliance: ... |
+Technology Strategy and Transformation: ...`). My pkg put all 36 into each of the three slots.
+
+### Evidence 3 — the slot counts exist, I ignored them, and THREE OF SIX ARE UNSET
+
+`GET /api/config/templates` (run 33548971200, HTTP 200) for `1bwOcxvk…`:
+
+| Slot | Count | Master items | Verdict |
+|---|---|---|---|
+| SkillsBullets1 | **10** | 11 | one OVER |
+| SkillsBullets2 | **8** | 9 | one OVER |
+| ExpertiseBullets | **6** | 7 | one OVER |
+| RelevantBullets1/2/3 | **null** | 36 pooled | **no count is configured** |
+
+`slots.ts` is explicit that `null` means UNKNOWN and must read as `not_applicable`: *"a seeded count
+is an invented number, and an invented slot count accuses every item past it."* So nothing in the
+system constrained the Relevant injection — the guard that would have caught this is unconfigured,
+not missing.
+
+**Owner's own words are already in `slots.ts`:** *"the 10 can't be increased to 12 or reduce to 8 etc
+so only swaps are allowed not adds or drops"*, *"also relevant and expertise counts"*.
+
+### Why no test caught it
+
+`checks.ts` `WORD_RULES` covers only the six PROSE fields (`ResumeSummary`, `@AboutMe*`,
+`@ExecutiveProfile*`, `@CoreAccomplishments*`, `@CoverLetterBody`). **There is no list-count or
+separator check on any of the six `SLOT_FIELDS`**, and `H:baseline-standing-fields` asserted the two
+standing values only. Every guard I wrote was about provenance; none was about SHAPE.
+
+**NOT FIXED YET — two of the three parts need the owner:**
+1. Pipes → newline items: unambiguous, mine to fix.
+2. Skills/Expertise are each ONE over a KNOWN count — trimming drops one of the owner's own items.
+3. Relevant has NO configured count — any split I choose is an invented number.
