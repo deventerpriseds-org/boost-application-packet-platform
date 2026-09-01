@@ -256,6 +256,15 @@ export interface CheckInput {
    */
   judgeVerdicts?: Map<number, { covered: boolean; basis: string; quote: string | null; why: string }>
   /**
+   * Passages a model read as the posting's vocabulary rather than the writer's claim, each already
+   * verified byte-present in the field it names (`stuffingJudge.parseStuffing`).
+   *
+   * Absent means the lane did not run, and `posting_wording_kept` then reports exactly what
+   * `scanWording` alone reports — the untouched path. It can only ever ADD passages to a `warn` the
+   * writer decides; nothing here can fail a gate.
+   */
+  stuffingHits?: Array<{ field: string; phrase: string; why: string }>
+  /**
    * How many lines each list's TEMPLATE holds, keyed by merge field — the owner's per-template
    * setting, resolved by the caller.
    *
@@ -616,9 +625,28 @@ export function runChecks(input: CheckInput): CheckResult[] {
       out.push(na('posting_wording_kept', wBlocked.r.reason || 'nothing to compare against', WORDING_EXPECT))
     } else {
       const wHits = wScans.flatMap(({ f, r }) => r.kept.map(k => `${f}: "${k.phrase}"`))
-      out.push(wHits.length
-        ? bad('posting_wording_kept', `${wHits.length} passage(s) read as the posting's wording — your call`,
-              WORDING_EXPECT, wHits, 'warn')
+      // THE HALF A SUBSTRING SEARCH CANNOT SEE, folded into THIS check rather than added beside it.
+      //
+      // `scanWording` finds CONTIGUOUS runs of 8+ tokens lifted from the ad. The failure the owner
+      // actually reported — "a hack full of verbatim lines from the jd ... would get me accused of
+      // stuffing" — is not contiguous: it is the posting's nouns scattered through a sentence that
+      // never claims the writer did any of them. On the live Trinnex summary `scanWording` finds
+      // NOTHING while the same passage scores 0 of 19 on coverage: full of the posting's vocabulary,
+      // empty of its claims.
+      //
+      // ONE CHECK, because it is one question to the writer ("is this your wording or theirs?") with
+      // one remedy (their judgement, never an auto-correct). Two checks would be two rows saying the
+      // same thing about the same sentence, and the owner would have to reconcile them. Each hit
+      // names how it was found, so an exact run is never confused with a model's reading.
+      const sHits = (input.stuffingHits || [])
+        .map(h => `${h.field}: "${h.phrase}" — ${h.why}`)
+      const all = [...wHits, ...sHits]
+      out.push(all.length
+        ? bad('posting_wording_kept',
+              sHits.length
+                ? `${all.length} passage(s) read as the posting's wording — your call (${sHits.length} raised by a model reading for name-dropping)`
+                : `${all.length} passage(s) read as the posting's wording — your call`,
+              WORDING_EXPECT, all, 'warn')
         : ok('posting_wording_kept', `no passage of ${t.wordingRunTokens}+ words matches the posting`, WORDING_EXPECT))
     }
   }

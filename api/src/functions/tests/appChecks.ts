@@ -17,7 +17,7 @@ import { ensureEvidenceTable, writeEvidence, loadRequirementsWithEvidence } from
 import { listCorrections } from './appCorrections'
 import { EvidenceInput, EvidenceRow } from './evidence'
 import { resolveTemplateSlots } from './roleFocus'
-import { runCoverageJudge, judgeVerdictsFor } from './appCoverage'
+import { runCoverageJudge, judgeVerdictsFor, runStuffingRead } from './appCoverage'
 import { openAiJson } from './openaiJson'
 
 const HEADERS = { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': '*', 'Access-Control-Allow-Methods': 'GET,POST,OPTIONS' }
@@ -163,12 +163,24 @@ export async function evaluateArtifact(client: any, artifactId: string, owner: s
     fetchJson: openAiJson({ feature: 'coverage:judge', model: judgeModel, temperature: 0, maxTokens: 2000 }),
   }).catch(() => undefined)
 
+  // THE STUFFING READ, on the same switch and the same transport. It can only ever add passages to
+  // `posting_wording_kept`, which is a `warn` the writer decides -- so unlike the coverage judge it
+  // has no path to a gate at all, and a failure here raises nothing rather than raising doubt.
+  const stuffing = await runStuffingRead({
+    type: art.type,
+    pkg: art.pkg_json || {},
+    postingText: posting.text,
+    thresholds,
+    fetchJson: openAiJson({ feature: 'wording:stuffing', model: judgeModel, temperature: 0, maxTokens: 1500 }),
+  }).catch(() => undefined)
+
   const results = runChecks({
     type: art.type,
     pkg: art.pkg_json || {},
     company: art.company,
     requirements,
     judgeVerdicts: coverage && judgeVerdictsFor(coverage),
+    stuffingHits: stuffing?.hits,
     swaps,
     postingText: posting.text,
     profileText: profile,

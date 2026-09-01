@@ -31,6 +31,7 @@ import {
   coversIn, checkFieldsFor, MIN_JUDGEABLE_TOKENS, type CheckThresholds,
 } from './checks'
 import { normalizePostingText } from './jdText'
+import { STUFFING_SYSTEM, buildStuffingUser, parseStuffing } from './stuffingJudge'
 
 export interface CoverageRunInput {
   oppId: string
@@ -217,4 +218,59 @@ export function judgeVerdictsFor(result: CoverageRunResult) {
   const out = new Map<number, { covered: boolean; basis: string; quote: string | null; why: string }>()
   for (const [seq, v] of result.verdicts) out.set(seq, { covered: v.covered, basis: v.basis, quote: v.quote, why: v.why })
   return out
+}
+
+/**
+ * THE STUFFING READ — does a passage name the posting's topics without claiming any of them?
+ *
+ * LIVES HERE rather than in a module of its own because it is the same shape as the coverage judge
+ * and shares every part of it: the same transport, the same per-field loop, the same rule that a
+ * citation is verified byte-exact before anyone sees it, and the same owner switch. A second runner
+ * would be a second place to fix the day any of those changes.
+ *
+ * WHAT IT ADDS TO WHAT ALREADY EXISTS. `scanWording` finds contiguous runs of 8+ tokens lifted from
+ * the ad; this finds the scattered kind it structurally cannot see. Both feed ONE check
+ * (`posting_wording_kept`), which is a `warn` the writer decides and can never fail a gate.
+ *
+ * NOT CACHED, deliberately and with the cost stated rather than hidden. A verdict about a
+ * REQUIREMENT is worth storing because the gate reads it and must not flip between runs; this
+ * produces a `warn` a person reads, so a re-run that returns slightly different prose costs nothing
+ * but a call. It is bounded by the SAME per-run cap as the judge and runs only on fields that carry
+ * prose. Tracked as `D:stuffing-read-is-not-cached` if that stops being an acceptable trade.
+ */
+export async function runStuffingRead(input: {
+  type: string
+  pkg: Record<string, any>
+  postingText: string
+  thresholds: Partial<CheckThresholds>
+  fetchJson: FetchJson
+}): Promise<{ hits: Array<{ field: string; phrase: string; why: string }>; calls: number; refused: number; failures: string[] }> {
+  const off = { hits: [], calls: 0, refused: 0, failures: [] as string[] }
+  if (input.thresholds?.coverageJudge !== true) return off
+  const posting = String(input.postingText || '').trim()
+  if (!posting) return off          // nothing to compare against is not a finding
+
+  const fields = judgeableFields(input.type, input.pkg)
+  if (!fields.length) return off
+  const maxCalls = input.thresholds.coverageJudgeMaxCalls ?? 12
+
+  const hits: Array<{ field: string; phrase: string; why: string }> = []
+  const failures: string[] = []
+  let calls = 0
+  let refused = 0
+  for (const { field, text } of fields) {
+    if (calls >= maxCalls) { failures.push(`${field}: cap`); continue }
+    try {
+      calls++
+      const parsed = parseStuffing(
+        contentJson(await input.fetchJson(STUFFING_SYSTEM, buildStuffingUser(field, text, posting))), text)
+      refused += parsed.refused.length
+      for (const h of parsed.hits) hits.push({ field, phrase: h.phrase, why: h.why })
+    } catch (e: any) {
+      // A read that could not run raises NOTHING. Silence is the correct output of a failure here:
+      // this surface accuses the owner's own prose, so an outage must never produce a finding.
+      failures.push(`${field}: ${String(e?.message || e).slice(0, 120)}`)
+    }
+  }
+  return { hits, calls, refused, failures }
 }
