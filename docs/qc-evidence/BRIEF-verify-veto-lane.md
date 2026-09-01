@@ -9,6 +9,22 @@
 
 # VERIFY BRIEF — proposals count until vetoed (loop 1)
 
+## VERIFY LOOP
+work: veto-lane
+loop: 1
+
+Loop 1: there is no prior state to carry. Nothing in this lane has been independently verified
+before, so every claim below is a first derivation at full depth — none is being re-checked at
+reduced depth, and none is a previously-REFUTED item returning after a fix.
+
+Cheap suite re-run covering EVERYTHING: `cd api && npm test` and `cd app && npm test`, both run in
+full as claim C10 rather than assumed from the implementer's report.
+
+CHALLENGE THE RADIUS: the implementer scoped this brief to the veto lane. If the change reaches
+further than that — a consumer of `must_have_coverage`, the artifact gate, the score, the
+remediation loop, or a screen reading any of them — say so and verify it anyway. The depth
+allocation above is the implementer's judgement and you are the check on it being wrong.
+
 You are an INDEPENDENT verifier. You did not write this code. Prove or disprove each claim below
 from observable evidence only, and write your artifact **incrementally as you go** to
 `docs/qc-evidence/VERIFY-veto-lane-1.md` — a previous pass on this repo died having written nothing.
