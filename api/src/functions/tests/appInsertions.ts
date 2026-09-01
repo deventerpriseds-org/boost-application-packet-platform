@@ -22,7 +22,7 @@ const HEADERS = { 'Content-Type': 'application/json', 'Access-Control-Allow-Orig
  * says it has no earlier version, which `originalState` already words honestly. Throwing here would
  * trade a missing explanation for a failed build.
  */
-async function loadMasterBaseline(): Promise<Record<string, string>> {
+export async function loadMasterBaseline(): Promise<Record<string, string>> {
   try {
     const conn = process.env.AZURE_STORAGE_CONNECTION_STRING
     if (!conn) return {}

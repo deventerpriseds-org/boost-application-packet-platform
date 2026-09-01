@@ -107,6 +107,30 @@ limit, both are one toggle:**
   lapsed. A CCR session cannot run the OAuth flow. **TELL THE OWNER** so they can re-auth.
   Do not silently fall back to GitHub Actions and never mention it.
 
+#### `boost-pg-mcp-write` is the PREFERRED transport, and a lapse is a NUDGE, not a detour
+(owner-instructed 2026-08-29: *"make a note to use the boost-pg-mcp-write as the preferred option
+and unless I tell you to essentially work continuously, nudge more for a reset if a step requires
+it's abilities which I may then advise to switch to the workflow or refresh and unblock proceeding.
+remember to check before implementation steps require db"*)
+
+1. **PRE-FLIGHT, BEFORE an implementation step begins — not mid-step.** Ask: does this step need
+   to read or write live Postgres (a measurement, a regression baseline, a row count, an AC's
+   verification)? Say so up front. Discovering it three tool calls in, after the plan is committed,
+   is the failure this rule prevents.
+2. **If it does and the connector is lapsed or off, NUDGE and STOP.** Name the step, name the query
+   it needs, and ask for a refresh. Do not quietly reroute through `db-query.yml`. The owner will
+   then either refresh it (fastest — ~1s per query) or tell you to use the workflow. **That choice
+   is theirs, not yours.**
+3. **The one exception: an explicit "work continuously" instruction.** If the owner has said to keep
+   going without stopping, take the `db-query.yml` fallback rather than blocking — and say in the
+   same turn which step took the fallback and what a refresh would have got faster, so they can
+   still choose to reconnect.
+4. **A lapse is cheap to fix and expensive to route around.** Measured 2026-08-29: the connector was
+   reported lapsed, the owner reconnected it in one message, and the next query
+   (`select action, count(*) from swap_decision group by action` → kept 35, swapped 15, dropped 8,
+   added 7) returned in about a second. The `db-query.yml` equivalent is a dispatch, a poll and a log
+   read. `db-query.yml` remains the correct fallback — it is not the default.
+
 *(2026-08-23: a session read the paragraph below, concluded the live data was unreachable,
 and built `fixture-refresh.yml` plus a chain of `db-query.yml` round-trips to haul data out
 through job logs — while `Azure_pg_mcp` sat `enabledInChat: true` and two system reminders

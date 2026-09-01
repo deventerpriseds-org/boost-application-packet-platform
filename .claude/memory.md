@@ -4785,3 +4785,204 @@ I asserted a capability's behaviour from my own model of it rather than from the
 observation. **The user's stated observation IS ground truth**; when my analysis says the thing they
 watched happen is impossible, my analysis is what is wrong. It took a screenshot and a live timed
 test to settle something one honest "I don't actually know, let's measure it" would have.
+
+## `boost-pg-mcp-write` is the PREFERRED live-DB transport; a lapse is a NUDGE, not a detour (2026-08-29)
+
+**Owner-instructed, verbatim:** *"make a note to use the boost-pg-mcp-write as the preferred option
+and unless I tell you to essentially work continuously, nudge more for a reset if a step requires
+it's abilities which I may then advise to switch to the workflow or refresh and unblock proceeding.
+remember to check before implementation steps require db"*
+
+**The rule, now in `CLAUDE.md` under Live Database Access:**
+1. PRE-FLIGHT before an implementation step — does it need live Postgres? Say so UP FRONT, not
+   three tool calls in.
+2. Lapsed/off + step needs it → name the step, name the query, ask for a refresh, STOP. Do not
+   quietly reroute through `db-query.yml`. The choice between refresh and workflow is the owner's.
+3. Only exception: an explicit "work continuously" instruction — then take the fallback, and say in
+   the same turn which step took it.
+4. `db-query.yml` stays the correct FALLBACK. It is not the default.
+
+**Measured the moment it was reconnected** — two queries, ~1s each, both ground truth this session
+had been reasoning about from source alone:
+- `select action, count(*) from swap_decision group by action` → **kept 35, swapped 15, dropped 8,
+  added 7**. So 15 rows carry the two actions the fixed-slot rule makes illegal; AC-12's
+  back-compat requirement is about REAL rows, not a hypothetical.
+- `pg_get_constraintdef` on `swap_decision` → **`swap_decision_list_check` admits only
+  `skills_1, skills_2, relevant_1, relevant_2, relevant_3`**. `expertise` is rejected BY PRODUCTION,
+  confirming from the live database what the AC pass had inferred from `schema.ts:567`. AC-14
+  option (i) therefore genuinely requires an explicit `ALTER` — `create table if not exists` is a
+  no-op there (`schema.ts:594-596`).
+
+**Why this matters beyond convenience:** both facts were previously "read from the schema file",
+which is a proxy. The connector turned them into ground truth in two seconds. That is the argument
+for nudging rather than routing around.
+
+## Hardening — F-1: an owner edit that quoted the posting emptied the WHOLE swap table (2026-08-30)
+
+**Root cause.** In `swaps.ts` `row()`, `requirement_seq` / `verbatim_quote` / `confidence` were
+derived from the attribution result **independently of** `driver`. Nothing tied the two together, so
+the two could contradict each other: an owner-typed line that happened to match a requirement's
+verbatim produced `driver='owner'` **with a non-null quote**.
+
+**Why that is not a cosmetic inconsistency.** `schema.ts:587` enforces
+`check ((driver = 'posting') = (verbatim_quote is not null))`. The contradictory row is REJECTED,
+which aborts the whole `writeSwaps` transaction; `appPackets.ts:619` swallows the throw into a
+`console.warn`; and the packet then ships with an **empty swap table for every list** — no arrows, no
+originals, no `unchanged` statuses, and no error anywhere. The trigger is the owner editing a line to
+say what the employer asked for, which is the single most likely edit they make.
+
+**Guardrail (the invariant, not the incident).** Decide `driver` FIRST, then derive the citation from
+it: `const cites = driver === 'posting' && att` (`swaps.ts:553`). A citation can no longer exist
+without the driver that justifies it. This is also the semantically correct answer — an owner did not
+cite the employer — so the DB CHECK and the meaning now agree instead of merely coinciding.
+
+**Third instance of the same shape, and worth naming as a class:** a THROW inside `writeSwaps` is the
+QUIETEST outcome available, not the loudest, because the only caller swallows it. AC-9 encodes the
+same lesson for count mismatches. Any future work in this file must assume a throw is invisible.
+
+**A guard of ours was VACUOUS on its first draft.** The second new guard's fixture had one owner
+label, and it matched no requirement — so the collision it claimed to test could never arise, and the
+guard stayed GREEN with the defect reinstated. Caught only by mutating it. Fixed by adding an owner
+label that does attribute, with a comment so nobody simplifies it back. **An inert guard is worse
+than no guard, because it is believed.**
+
+**Also recorded — a reporting trap.** A background run was reported as *"completed (exit code 0)"*
+while its raw output read `Terminated` / `EXIT=143`: the zero was the OUTER SHELL's status (the last
+command in the chain was an `echo`), not the tests'. Reading the notification instead of the output
+would have turned a timeout into a pass. Same class as this repo's rule that a queued workflow is not
+a confirmation — **read the output, never the wrapper's exit code.**
+
+## Hardening — F-2 and F-3, both found by the independent verifier, both mine (2026-08-30)
+
+### F-2 — the ordering rule is TWO-SIDED, and I walked into the side this file did not document
+`alter table insertion drop constraint …` was placed TWENTY LINES ABOVE
+`create table if not exists insertion`. On a FRESH database that is
+`ERROR: relation "insertion" does not exist` and it aborts the entire migration. **My own
+populated-database proof passed it**, because there the table already exists — the exact MIRROR of
+the trap `H39`/`H39b` describe.
+
+**Invariant, restated two-sided:** a statement must come AFTER the ALTER that adds what it names,
+**AND after the CREATE of the table it alters.** The file only ever recorded the first half, and the
+first half is the half that a populated-DB test catches. The second half is only visible on a fresh
+database — so **both directions must be executed, every time.** One defect, 13 of 18 suite failures.
+
+### F-3 — a gate-deciding check shipped with ZERO coverage
+`fixed_slot_count` names offenders and can turn the gate `fail`, and nothing tested it. The verifier
+inverted all three states — unknown→`pass`, the compact_resume branch deleted so the check goes
+ABSENT, mismatch→`pass` — and the suite stayed **green on every one**. Five cases now cover it and
+all three mutations fire (1 / 3 / 1 failures). **Tier 1 means the guard ships WITH the check, in the
+same commit — not after.**
+
+### The backtick trap bit TWICE IN ONE SESSION, so it stops being prose
+A backtick inside `SCHEMA_SQL` (a template literal) terminates the string and `tsc` parses raw SQL as
+TypeScript. I did it once, wrote a warning comment about it — and then **did it again inside the
+warning comment itself**. Prose demonstrably does not guard this. It needs
+`H:schema-sql-has-no-backticks` as a real source-grep test (count must be 0), which cannot cry wolf
+because a backtick there is always a syntax error rather than a style preference.
+
+### My own DEFERRED.md rows broke the ledger guards — the guards were right
+`D:ledger-status-is-a-token` and `D:ledger-manual-names-its-vehicle` failed because I wrote a status
+of `QUEUED — **FIRST ITEM AFTER UI PARITY**` (statuses are the tokens `OPEN`/`CLOSED`/`WONTDO`, and
+emphasis belongs in the description) and a check directive of
+`` `check: db-query.yml "…"` `` instead of the required
+`` `check: (grep|absent|manual) <arg> — <rest>` ``. Both fixed by conforming, not by widening the
+guard. **A guard that fires on my own new writing is the guard working.**
+
+## Ops: this session ran FIVE hook versions behind, and nobody would have noticed (2026-08-30)
+
+**Owner: *"make sure there aren't any ops improvements only updated local and not pushed for future
+sessions. use the eds sync skill"*.** Both halves were worth asking.
+
+**Nothing was local-only.** The skills repo working tree is clean; the two commits ahead of `main`
+(`f706d38`, `4b7d661`) are pushed and open as PR #31. The `/root/.claude/eds-*` hook scripts are
+generated by `setup.sh` heredocs rather than being standalone files, and all six carried the
+container's build-time mtime — untouched by this session, so nothing to lose.
+
+**But the session was stale, and this is the real finding.** Installed `_eds_version` was **24**;
+the repo's `setup.sh` declares **29**. Five versions of hook fixes — including the phase-tag and
+verify-loop checkers that gate this session's own work — were never reaching it. The CCR Setup
+script field runs only at container BUILD, so a repo push does not touch a running session; only the
+sync applies it live.
+
+Synced and VERIFIED BY READING BACK, not by the run's exit code: `_eds_version` now **29**, all six
+hook scripts rewritten. `sync-setup-script.md` is a skill FILE at `/root/.claude/skills/`, not a
+registered slash-command — invoking it via the Skill tool fails with `Unknown skill`; read the file
+and follow its steps.
+
+**Carry this into every session:** check the installed `_eds_version` against the repo's
+`CURRENT_VERSION` early. A stale session fails silently — the hooks still fire, they are just the
+wrong ones, and a gate that has been fixed upstream keeps blocking on the old rule.
+
+## The ResumeSummary reads as JD stuffing because the COVERAGE PREDICATE pays for stuffing (2026-09-01)
+
+Owner: *"this one is a hack full of verbatim lines from the jd that isn't subtle at all and would get
+me accused of stuffing."* Full evidence: `docs/qc-evidence/DIAG-summary-stuffing.md`.
+
+**Not a prompt problem — the owner's prompts are untouched and still drive Call 1.** `coversIn`
+(`checks.ts:263-282`) closes a requirement only when **70% of the employer's content words appear
+LITERALLY** in the text. Executed at `1c43ea8`: a subtle paraphrase scores 2/7 = 0.29 and the
+requirement stays OPEN; a near-verbatim lift scores 7/7 and CLOSES. **No paraphrase reaches 0.70.**
+P3 rewrites `ResumeSummary` against that score every pass, and `scopeForRequirements` withholds only
+fields that solely cover a CLOSED requirement — so a tasteful generic summary covers nothing and is
+in scope forever. `buildScopedPrompt` hands over the employer's exact sentences and forbids only
+*inventing*, never *copying*.
+
+`posting_wording_kept` does not brake it: 8-consecutive-token exact run, severity `warn`. A summary
+stitched from short JD phrases closes a requirement with **0 offenders** (executed).
+
+**JotForm ran Call 1 + Call 3 and stopped.** The P3 loop is ours; it turned the summary into a
+coverage-optimisation target. That is the whole difference.
+
+**OPEN, one query short:** whether the summary the owner is reading came from a remediation pass or
+Call 1 is INFERENCE until `select loop, method, left(after_text,200) from insertion where
+merge_field='ResumeSummary' order by loop;` is run. `boost-pg-mcp-write` lapsed; nudged, not
+rerouted.
+
+### Hardening — an append with the wrong cwd writes a REAL file to the wrong place, silently
+`cat >> .claude/actions.md` ran with cwd `/home/user` after a shell reset and created
+`/home/user/.claude/actions.md`. It echoed `done` and exited 0. Two turns of ledger rows lived
+outside the repo where no commit would ever pick them up. **Always `cd` to the repo in the same
+command as a `>>` append, and confirm with `git status` — not with the command's exit code.**
+
+## Coverage is decided by string matching, not judgement — and the acceptance bar I wrote was too (2026-09-01)
+
+**Feature status.** `AC-llm-coverage-judge.md` (21 ACs, document lane) and `AC-llm-gate-and-stuffing.md`
+(1,029 lines, gate + stuffing lanes) are written and committed. The **confirm button is BUILT** on
+`claude/incumbent-wins-swap` (`bb7e620`) — app 422/422, api `tsc` clean, four new guards each
+mutation-proved. **NOT DEPLOYED: nothing is on `main`, and the owner has not pressed one.**
+
+**The architecture, measured.** `grep -rn "openai(" api/src/functions/tests/*.ts` returns two files —
+`pipeline.ts` and `mt19.ts`, generation only. **No model participates in any coverage, evidence,
+placement or attribution decision.** Nine tuned lexical constants do. An LLM path exists
+(`evidenceProposal.ts` + `verifyProposal`, citation checked byte-exact) and is barred from counting in
+three places. The house rule is `checks.ts:781` — *"a model may PROPOSE, only an exact rule may
+ACCUSE"*. **The rule is sound; equating "verifiable" with "lexical" is the defect.**
+
+**Owner's decision, recorded:** swap the lexical actors for a model that reasons **only where it makes
+sense** — document coverage, profile evidence and stuffing become model judgements; `locate()` goes
+hybrid (model picks the sentence, code computes offsets); `similarity()` stays lexical (ranking).
+"Include the gate" meant *do not defer it out of scope*, not "put the document judge on
+must_have_coverage".
+
+### Hardening — FOUR instances of one pattern, all caught by the owner
+1. Read the shipped summaries by eye and called them clean — measurement disagreed.
+2. Saw two numbers on one card and inferred a shared source — the trace disagreed.
+3. Printed `sameWord`'s wrong answers and called them scope rather than defect.
+4. **Set the judge's acceptance bar (`#9 must fail`) by word-matching, while arguing word-matching is
+   the defect.** #9 is mostly covered: a *technology leader* aligning *engineering strategies* and
+   delivering *scalable, secure software* IS describing technical teams — reading that is the whole
+   point of using a model.
+
+**The guard:** of every value reported, ask *is this the correct answer to the question asked?* — not
+*is this what the code returns?* Never let a tool's limitation define correctness, and never write an
+acceptance bar that requires a judge to reproduce an answer I pre-decided by the method being replaced.
+
+**Also corrected:** two of my own "PROVEN" claims were wrong from single-name greps — the confirm ROUTE
+existed (`appRequirements.ts:948`), and `app/src` does render evidence (via `evidencePresentation`).
+And `must_have_coverage` is not the only gate-failing check: **thirteen** take `bad()`'s default.
+
+### Active work
+- **NEXT: versioning (`D:every-build-is-destructive`)** — `artifact.version_history` stores `{"len": N}`,
+  a character count, not the text. The owner decided (OD-5) this is fixed **before** the Rewrite button,
+  because a Rewrite over it is an irreversible overwrite of their own prose.
+- Then the **Rewrite button** — the owner's original ask, distinct from the confirm button.

@@ -14,7 +14,8 @@ import {
   kindSourceNote, noQuoteReason, isQuoted, modelKeywords, groupRequirements,
   summarizeKindSource, isEvidencedKindSource, keywordLibraryState, postingBody,
   KEYWORD_2UP_MIN, keywordColumns, keywordGridTemplate, POSTING_HOOKS,
-  KEYWORD_GROUPS, NOT_COMPARED_NOTE, keywordGroupMeaning, tabEvidenceTone, EVIDENCE_TONE } from '../src/postingAnalysis.js'
+  KEYWORD_GROUPS, NOT_COMPARED_NOTE, keywordGroupMeaning, tabEvidenceTone, EVIDENCE_TONE,
+  evidencePresentation } from '../src/postingAnalysis.js'
 
 // The fixture from the AC7 reproduction: one line the posting MARKED required, two the parser
 // DEFAULTED. A single "3" makes all three look marked.
@@ -993,4 +994,66 @@ test('H:keywords-tab-is-never-toned', () => {
   assert.match(kw, /tone: null/, 'the keywords tab must pass tone: null explicitly')
   assert.ok(!/tabEvidenceTone\(parsedKeywords\)/.test(src),
     'the keywords tab is being toned - a suggestion must not be rendered as a measurement')
+})
+
+// ─── the confirm control: a model's proposal only counts once a human says so ──────────────────
+//
+// `checks.ts` states the rule these guard: "a model may PROPOSE, only an exact rule may ACCUSE, and
+// must_have_coverage is the accusation". A `proposed` excerpt is shown and does NOT count;
+// confirming it is the only promotion, because a human IS an exact rule. Measured in production the
+// day the control shipped: 15 proposed rows across 15 requirements, every one carrying a verified
+// quote from the owner's own profile, all uncounted, on screens reporting zero coverage.
+const evRow = (over = {}) => ({
+  evidenceState: 'verified',
+  evidence: { quote: 'Led an enterprise-wide Agile transformation', sourceLabel: 'Work history 1',
+    method: 'proposed', confirmedAt: null, confirmedBy: null, ...over },
+})
+
+test('H:proposal-awaits-a-human: an unconfirmed model proposal asks, a confirmed one does not', () => {
+  const open = evidencePresentation(evRow())
+  assert.equal(open.method, 'proposed')
+  assert.equal(open.awaitingConfirmation, true, 'an unconfirmed proposal must offer the control')
+  assert.equal(open.confirmedAt, null)
+
+  const done = evidencePresentation(evRow({ confirmedAt: '2026-09-01T12:00:00Z', confirmedBy: 'von.ellis@enterpriseds.io' }))
+  assert.equal(done.awaitingConfirmation, false, 'a confirmed proposal must not ask again')
+  assert.equal(done.confirmedBy, 'von.ellis@enterpriseds.io', 'who vouched for it is shown, not just that someone did')
+})
+
+test('H:rule-evidence-is-never-asked-to-be-confirmed', () => {
+  // `anchored` and `exact` are a RULE's excerpts and already count. Offering "is this your
+  // evidence?" on one would ask the owner to ratify something no model proposed, and imply the
+  // deterministic path needs their permission to count. It does not.
+  for (const method of ['anchored', 'exact']) {
+    const p = evidencePresentation(evRow({ method }))
+    assert.equal(p.awaitingConfirmation, false, `${method} evidence must never show the confirm control`)
+  }
+  // No excerpt at all: nothing to confirm, and the control must not appear over an empty verdict.
+  const none = evidencePresentation({ evidenceState: 'none', evidence: null })
+  assert.equal(none.awaitingConfirmation, false)
+  assert.equal(none.method, null)
+})
+
+test('H:confirmation-reads-the-verdict-not-the-columns', () => {
+  // The FIRST version of this feature read `r.evidence_confirmed_at` off the raw row and
+  // `H:evidence-read-from-the-verdict-not-the-columns` failed it, correctly: those keys are nulled
+  // for every non-verified row, so read directly they cannot tell "the confirmation lapsed" from
+  // "nobody ever confirmed it". Inside the verdict, a confirmation is dropped with the quote it
+  // vouched for. This asserts the fix rather than trusting the memory of it.
+  const redacted = evidencePresentation({
+    evidenceState: 'stale', evidence: null,
+    evidence_confirmed_at: '2026-09-01T12:00:00Z', evidence_confirmed_by: 'von.ellis@enterpriseds.io',
+  })
+  assert.equal(redacted.confirmedAt, null,
+    'a redacted row must not report a confirmation recovered from the raw columns')
+  assert.equal(redacted.awaitingConfirmation, false)
+})
+
+test('H:confirm-control-is-hidden-without-a-target', () => {
+  // No dead UI. The route is POST /app/requirement/{seq}/evidence-confirm and it needs the
+  // opportunity in the body, so with no `oppId` the button could not work - it is hidden, not shown
+  // and broken. Structural: the render is guarded by `oppId` in the same expression.
+  const src = readFileSync(new URL('../src/screens/PostingAnalysis.jsx', import.meta.url), 'utf8')
+  assert.match(src, /ev\.awaitingConfirmation\s*&&\s*oppId\s*&&/,
+    'the confirm control must be gated on BOTH an open proposal and somewhere to send the answer')
 })

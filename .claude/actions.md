@@ -5300,8 +5300,12 @@ additionally settle SS4.11 (scored 0%, mounts everywhere), SS4.8 (scored 73%, re
 
 **Still open — 3 rows:** `4.5-12` pick-list (portfolio only), `4.8-21` Swaps `Ask why`,
 `4.11-4` scope selector.
-**DELIBERATE, not a gap:** `4.8-20` Swaps `Undo this` — `assistantPanel.js:107` records the
-decision: *"Undo is per field, in the field itself, not from here."*
+**~~DELIBERATE, not a gap:~~ SUPERSEDED 2026-08-30 — see the `4.8-20` entry at the end of this file.**
+This paragraph read `assistantPanel.js:107` (*"Undo is per field, in the field itself, not from
+here"*) as closing the row. The owner has since ruled the opposite: *"we decided to keep both per
+field and the assistant panel"*. `4.8-20` is OPEN and buildable as a seeded request, the same
+mechanism `Ask why` and `Put back` already ship. `PROTOTYPE-COVERAGE.md:415` had it right as PARTIAL
+all along — this summary was the stale half, which is why the two disagreed.
 
 **Root cause of the drift:** `Go to field` was scored PARTIAL because the measurement matched the
 prototype's LITERAL STRING rather than the capability. Same class as reporting the swap arrow
@@ -5406,3 +5410,456 @@ A/B and its result (arm B1 3/5, arm B2 5/5 against a five-defect answer key).
 **Open, carried upstream, not blocking here:** runner hardening — secret ingestion via broad
 `context_globs`, no retry after a partial, per-read vs wall-clock timeout, artifact naming for a
 partial, `output_name` validation.
+
+---
+
+## `4.8-21` Swaps `Ask why` — BUILT, PROVEN BY CLICK, DEPLOYED (2026-08-29)
+
+**Origin:** owner, *"deploy ask why"*.
+
+**What shipped.** A fifth column on `CompareTab` (`app/src/screens/QcRail.jsx:345,364`) rendering an
+`Ask why` control behind `{ask && …}`. Clicking it opens the assistant panel seeded from the swap
+row's IDENTITY — the label and the list name — not from the attribution text, which is why it did
+not have to wait on the `swaps.ts:222` fix.
+
+**Proven by a real click, locally, no deploy required.** `scripts/prove-ask-why.mjs` drives the built
+`app/dist` under Playwright with route-keyed fixtures and `page.route('**/api/**')` interception:
+**8/8 assertions**, seeded text observed as `Why did you change "Engineering Leadership" in Skills 1?`.
+Committed `6106181`.
+
+**Three false failures on the way, all harness, none product** — each is a class worth keeping:
+1. searched the SPEC's tab name `Swaps`; the app renders `Original vs final` (`qcRail.js:93-99`) →
+   read as "3 of 5 tabs absent".
+2. took a `fullPage` screenshot between counting the node and clicking it; the screenshot detached
+   the node → read as a React unmount bug.
+3. asserted on `document.body.innerText`, which EXCLUDES form-field values, so the textarea seed was
+   invisible → read as "no seed written".
+
+**Deployed and verified.**
+- `executive-engine-deploy.yml` run **33275421256 → success** for `6106181`, waited by
+  `wait-run.sh sha:` (never `latest:` — H15).
+- Pre-merge suites: app **396/396**, api **894 tests / 0 fail**, both builds clean.
+- Live render re-check on the deployed bundle: `ui-verify.yml` run **33275588060 → success**,
+  route `#/packet/2cb56fb3-fc33-4b1a-85b9-06c7aea2fbb3/qc`, EXPECT
+  `Original vs final;Coverage;Checks`. Screenshot pushed to branch `ui-shots` as
+  `packet-2cb56fb3-fc33-4b1a-85b9-06c7aea2fbb3-qc.png`.
+
+**What that evidence does NOT cover, deliberately stated.** `ui-verify.mjs` asserts text presence and
+does not click, so the LIVE click is not re-proven by it — the click proof is the local Playwright
+run. Status is *implemented, mechanism proven locally, deployed, NOT yet confirmed live by the owner*.
+
+**Rows still open after this:** `4.5-12` pick-list (portfolio only), `4.11-4` scope selector. The
+caveat from the coverage sweep stands — both absences rest on grep alone and need a producer+consumer
+sweep before "2 rows left" is final.
+
+---
+
+## Fixed-slot swap pairing — AC pass landed, and the owner settled the open question (2026-08-29)
+
+**AC + feasibility pass:** `docs/qc-evidence/AC-fixed-slot-swap-pairing.md` — 514 lines, 17 numbered
+observations, a 19-row feasibility table, 16 ACs each with its falsifier. The container was restored
+mid-turn and killed the agent, but the file had already been written incrementally and survived
+intact — the "name a file and write to it as you go" rule paying for itself measurably.
+
+**Owner's answer, verbatim:** *"fixed slot counts change per template"*. This closes the
+derived-vs-typed question and it OVERRIDES the AC pass's own recommendation, which proposed a global
+`chk_*` threshold with a MasterContext fallback. That recommendation is wrong for a reason the pass
+itself proved: `diagSkillSources.ts:16-22` shows the Google Doc holds NO slot structure — its
+placeholders are exactly `{{ExpertiseBullets}} {{RelevantBullets1..3}} {{ResumeSummary}}
+{{SkillsBullets1..2}}` and nothing else — so a slot count can be read from neither the doc nor the
+master pool. It is a stored property OF THE TEMPLATE.
+
+**Where it goes — extend, do not duplicate.** A per-template store already exists: `AppConfig`
+partition `templates`, row `resume-<driveId>`, holding `roleFocus` + `label`, with
+`GET/POST /api/config/templates` (`config.ts:120-211`) and a Settings screen already rendering the
+collection. Slot counts are new properties on THAT row — not new global `chk_*` columns.
+
+**Trap on that row, found while reading it:** `saveTemplateConfig` upserts with `'Replace'`
+(`config.ts:210`) and only re-writes `roleFocus`/`label`. Adding slot properties without extending
+that preserve-logic means editing a role focus silently WIPES the slot counts. `config.ts:186-196`
+already does exactly this dance for `label`; the same shape must cover the new fields.
+
+**Consequence for the AC file:** §1a's recommendation and AC-8's precedence
+(`ownerSetting > master > unknown`) are SUPERSEDED — the precedence becomes
+`templateRow.slots[field] > unknown`, with no master-derived fallback, and the pooled-Relevant
+problem (O-9) dissolves: each of `RelevantBullets1..3` carries its own count on the template row.
+The rest of the pass stands unchanged — O-11 (`dedupeAcrossLists` already breaks the invariant),
+O-12 (the swallowing try/catch makes a throw the QUIETEST outcome available, not the loudest),
+O-13's 15 consumers of `swap.action`, and Reading B (`added`/`dropped` become a REPORTED violation,
+never suppressed).
+
+---
+
+## QUEUED, FIRST AFTER UI PARITY — move MasterContext into Postgres (2026-08-30)
+
+**Owner-instructed, verbatim:** *"save and track this as the very first thing we work on once UI is
+updated to pass all steps/tabs to be able to execute exactly what the prototype does."*
+
+Tracked as `D:master-context-lives-in-the-wrong-store` in `.claude/DEFERRED.md` and task #31.
+**Ordering is part of the instruction, not a preference:** it starts only after the prototype-parity
+work closes.
+
+**MOVE, not mirror — and the owner is the one who caught this.** The previous turn proposed mirroring
+the master blocks into Postgres alongside Storage. The owner: *"what would be the point of us having
+both? why did we need the storage table instead of posted in the first place?"* Both halves land. A
+mirror would have created the exact two-store problem it was meant to solve — two copies, a staleness
+digest to keep them agreeing, and no answer to which one is right when they don't.
+
+**Why Storage originally — recorded as UNKNOWN rather than guessed.** The repo's history begins at a
+squashed import (`f0895bf`) in which `MasterContext` and the Postgres `schema.ts` appear in the SAME
+commit, so the ordering is not recoverable here. The labelled inference: `MasterContext` is one of
+the four MT-XX-era Storage tables (`AppConfig`, `Prompts`, `JobApplications`, `MasterContext`) that
+predate Postgres, and the profile text simply never moved when Postgres arrived for the packet spine.
+
+**Target:** `owner_master_block(owner_email, merge_field, text, seq)` — per-owner, ordered,
+connector-queryable, and the shape the fixed-slot pairing already needs.
+
+**Blast radius (why it is Tier 1 and gets its own AC pass):** every `masterBaseline`,
+`loadMasterBaseline`, `loadProfile` and `readSkillFields` caller. It feeds provenance and the swap
+"original", so it decides what the screen ACCUSES the model of changing.
+
+---
+
+## F-1 — an owner edit that quoted the posting emptied the whole swap table (2026-08-30)
+
+**Status: FIXED on `claude/incumbent-wins-swap` (`0bc81f2`), NOT yet on `main`, NOT yet verified live.**
+
+**Found by** the independent verifier pass on the fixed-slot swap-pairing work; **fixed** in the
+implementing pass rather than left as a note.
+
+**Defect.** `driver` and the citation fields were computed independently in `swaps.ts` `row()`, so an
+owner-typed line matching a requirement's verbatim produced `driver='owner'` with a non-null quote —
+rejected by `schema.ts:587`, aborting the `writeSwaps` transaction, swallowed at
+`appPackets.ts:619`, and the packet ships with an EMPTY swap table for every list.
+
+**Fix.** `const cites = driver === 'posting' && att` — the driver decides, the citation follows.
+
+**Pre-existing, not a regression**, but the Option-A rewrite makes it easier to reach: positional
+pairing converts former drop+add pairs into `swapped`, and `swapped` is attributable.
+
+**Evidence.** `tsc` clean; **134/134** on swaps, insertions, checks, ownerGate, compactFit. Two new
+guards, both mutation-proved — after the second was found VACUOUS on its first draft and rewritten.
+Full account in `docs/qc-evidence/IMPL-swap-pairing.md` §4b.
+
+**Still open on this branch:** 4 `templateConfig` source-grep guards fail because the slot-count
+rewrite widened the writer's named-field set from 2 to 8 (**owner decision pending** — my read is
+that widening the named set while KEEPING the no-spread assertion is an update, not a weakening);
+`schemaParity` needs a re-run against a quiet database (its failure was
+`database "parity_fresh" is being accessed by other users`, a local Postgres session of mine, not a
+parity fault); the six AC-16 H-cases; the `appPackets.ts:618` slots wiring; and AC-15, the live
+9-of-14 flip, which is the measurement that actually proves the change worked.
+
+---
+
+## F-2 / F-3 — the verifier found two blocking defects, both mine, both fixed (2026-08-30)
+
+**Status: FIXED on `claude/incumbent-wins-swap`, NOT on `main`, NOT verified live.**
+
+**Verifier verdict on `2cd6f69`: 13 CONFIRMED · 3 REFUTED · 2 NOT_APPLICABLE**
+(`docs/qc-evidence/VERIFY-fixed-slot-swap-pairing-1.md`, 854 lines). It wrote its own probes against
+the built module rather than trusting the implementers' tests, all eight guard mutations it attempted
+fired, and when the working tree changed under it mid-pass it moved every probe into pinned
+`git worktree` checkouts and re-ran everything there.
+
+- **F-2** — my `insertion` ALTER preceded that table's own CREATE, so the migration aborted on a
+  FRESH database while passing on a populated one. **13 of the 18 failures.** Fixed; now proven in
+  BOTH directions — fresh exit 0, populated exit 0, `insertion` accepts `expertise` in both.
+- **F-3** — `fixed_slot_count` had zero coverage. Five cases added; all three state-inversion
+  mutations now fire.
+- Two of my own `.claude/DEFERRED.md` rows broke the ledger guards (a prose status, a malformed
+  `check:` directive). Fixed by conforming to the format.
+
+**Suite: 920 tests, 914 pass, 6 fail — down from 18.** With F-2 fixed the three DB-backed files
+(`buildQueueDb`, `dimensionsDb`, `schemaParity`) run and pass; F-2 was why they were red.
+
+**The 6 remaining are all in `templateConfig.test.mjs`** — 4 stale source-grep guards, plus 2 that
+the verifier independently proved are stale rather than regressions: they broke on a CORRECT
+behaviour change (`&& !hasAnySlot(keepSlots)` added to the delete condition, so a template with slot
+counts is not deleted by clearing its focus). **OWNER DECISION PENDING** on widening the writer's
+named-field set from 2 to 8 while KEEPING the no-spread assertion.
+
+**Also outstanding:** one app test hard-codes `fields.length, 5`; the verifier executed `swapAskWhy`
+on an expertise row and it renders "in Expertise" with no raw enum leak, so `5 → 6` restores 396/396.
+**AC-15 and AC-13 are NOT_APPLICABLE until the branch is deployed** — both need a packet rebuilt on
+it; AC-15's exact three-workflow sequence is named in the verify file.
+
+---
+
+## DEPLOYED — the fixed-slot pairing lane is on `main` (2026-08-30)
+
+**Owner: "go".** `main` fast-forwarded `c8e583c → 9760c4f`.
+
+| Deploy | Run | Result |
+|---|---|---|
+| `api-deploy.yml` — carries the F-2 migration | **33309916009** | success |
+| `executive-engine-deploy.yml` | **33309916012** | success |
+
+Both waited with `wait-run.sh sha:` pinned to `9760c4f`, never `latest:` (H15), and both results were read
+from the command's own output rather than the task notification — that notification reported
+`exit code 0` for a run that had actually been `Terminated` earlier in this session.
+
+**Pre-merge state:** api **891 pass / 0 fail**, the three cluster-booting DB files **24/24** when given
+a real timeout budget, app **396/396**.
+
+**What is now live:** the pairing rewrite (the swap row's "original" is the owner's master template,
+not Call 1's draft); F-1 (an owner edit that quotes the posting no longer aborts `writeSwaps` and
+ship an EMPTY swap table); Expertise end to end — `ListKey`, `LIST_FIELDS`, `LIST_FIELD_TO_LIST`, and
+all three DDL list CHECKs; the `fixed_slot_count` check; per-template slot counts saveable in Settings.
+
+**MIGRATION STATUS — inference, not a direct read.** `api-deploy.yml` runs a FAIL-LOUD `pg-migrate`
+step (PR #28), so a migration failure reddens the run; the run is green, therefore it applied.
+Confidence high, but this is the workflow's design reasoning rather than the ground truth. The
+ground truth is one query against the live database:
+`select conname, pg_get_constraintdef(oid) from pg_constraint where conrelid in
+('swap_decision'::regclass,'skill_candidate'::regclass,'insertion'::regclass) and contype='c'` —
+all three list CHECKs must now admit `'expertise'`. **`boost-pg-mcp-write` is lapsed in this session,
+so that read has NOT been made.**
+
+**STILL NOT PROVEN, and deployment does not settle it — AC-15.** The live 9-of-14 flip needs a packet
+REBUILT on this code: every `from_label` must then name text that exists in the master blocks. Nothing
+local substitutes for it. Sequence: `api-test.yml` rebuild → `db-query.yml` read `swap_decision` →
+`api-test.yml GET /api/diag/skill-sources` for the master text.
+
+**Also inert until wired:** `appPackets.ts` does not thread the slot counts into the build, so
+`fixed_slot_count` reports `not_applicable` — the correct state for a count nobody supplied, not a
+silent pass. The fix is a small pure `tests/slots.ts` that both `config.ts` and `roleFocus.ts` import.
+
+---
+
+## AC-15 MEASURED LIVE — the skills fix works; the RELEVANT lists have a different defect (2026-08-30)
+
+**Owner: "go ahead".** Trinnex packet `4860ae3b` rebuilt on deployed code with `{"regen":true}`
+(api-test run **33310711727**, swap rows rewritten 12:10:02Z). `regen` is load-bearing: without it
+`ensurePackage` (`appPackets.ts:500-504`) returns the CACHED `pkg_json`, makes zero model calls, and
+a "rebuild" proves nothing — the flag was once hardcoded `false` for exactly this reason.
+
+### BEFORE (old code, written 08-23) vs AFTER, both measured against the live MasterContext blocks
+(`api-test.yml GET /api/diag/skill-sources`, run 33310582159)
+
+| | before | after |
+|---|---:|---:|
+| swap rows | 29 | 43 |
+| `from_label` **absent from the master entirely** | **21 / 29 (72%)** | **0 / 43** |
+| `from_label` an EXACT master item | 8 (and only 4 in its own list) | **27** (+1 `added` row with a null from_label, correctly) |
+| `expertise` rows | 0 | **7** |
+
+**Skills and Expertise are FIXED and it is exact, not approximate.** `skills_1`'s eleven
+`from_label`s are the eleven items of `MasterContext.skills1`, in master order. `skills_2`'s nine are
+`skills2`'s nine. `expertise`'s seven are `expertise`'s seven. The 21 invented "originals" the screen
+used to attribute to the owner — `Enterprise Architecture`, `AI-First Strategy`, `Cloud-Native
+Systems`, `DevOps Transformation`, `Security Governance` — are gone.
+
+### THE NEW DEFECT, found by this measurement: `relevant_*` originals are CATEGORY LINES, not items
+All 15 relevant rows carry a `from_label` like
+`"Governance and Compliance: Standards and Compliance, AI/ML Strategy, Cybersecurity Leadership, …"`
+— a whole 130-character category group presented as one "original" skill. Worse, **the identical
+five category strings appear in all three relevant lists**, because `evidence.ts:193-195` maps
+`RelevantBullets1`, `2` and `3` to the ONE pooled `relevantProficiencies` key. Fifteen rows derived
+from five source strings, triple-counted.
+
+This is **O-9 of the AC pass, arriving in production exactly as predicted**: *"deriving from the
+master gives the SAME number to all three Relevant lists, which is wrong for every one of them."*
+The pass flagged it for the COUNT; it applies identically to the BASELINE. AC-15's literal claim
+still holds (nothing is absent from the master) — and the rows are still not usable. **Do not read
+"0 absent" as "relevant is fixed".** `splitItems` must split the pooled block into its terms, and a
+rule is needed for which terms belong to which of the three slots.
+
+### The fixed-slot rule is now VISIBLE in the data, and violated everywhere
+`skills_1` master 11 → ships 8 (2 dropped, 1 merged). `skills_2` master 9 → ships 10 (1 added).
+`expertise` master 7 → ships 5. Under the owner's rule these are illegal outcomes, and they are now
+recorded as honest rows rather than hidden — which is the design. **But `fixed_slot_count` still
+reports `not_applicable`**, because `appPackets.ts` does not thread the per-template counts into the
+build. The evidence exists; the gate cannot yet see it. That wiring is the next unit.
+
+---
+
+## Slot counts SEEDED programmatically, not typed by the owner (2026-08-30)
+
+**Owner: *"why do I have to type them I instead of you programatically?"*** — a fair challenge, and I
+had the rule backwards. CLAUDE.md's no-hardcoded-config rule says *"the code may only SEED the
+first/default value — which the user can then change"* and *"seeding a per-owner default row is
+fine"*. Seeding is the SANCTIONED move; a bare literal with no UI path is what is banned. I read it
+as "the owner must enter it" and handed them data entry.
+
+**Written via `api-test.yml POST /api/config/templates`, read back rather than trusted:**
+
+| write | run | result |
+|---|---|---|
+| 11 / 9 / 7 (seeded from the master item counts) | 33312446969 | success; read-back 33312521219 confirmed integers stored, `roleFocus` survived the Replace, relevant slots still `null` |
+| **10 / 8 / 6** (owner: *"change to 10,8, and 6 just in case"*) | **33312671993** | success |
+
+**The owner's numbers are probably the better ones and the reason is in the code's own comment.**
+I seeded from what the master lists HOLD; a slot count is what the printed PAGE FITS.
+`Settings.jsx:1975-1982` states it: the Google Doc's placeholders are one token per list expanding
+to whatever is injected, *"so how many lines fit on the page is a fact about the PRINTED page that no
+code can read off the template. Only the owner knows it, so only the owner can say."* The rendered
+Trinnex resume shipped 10 items in Skills 1, which matches the owner's 10 rather than my 11.
+
+**Relevant 1-3 deliberately left `null`** — three slots share one pooled `relevantProficiencies` key,
+so there is no honest per-slot number and inventing one would be fabricating a composite.
+
+**Where the owner changes them:** Settings ▸ **Quality** ▸ the **Resume templates** card,
+`#/settings/quality` (`Settings.jsx:2226`, `TemplateFocusSettings` at `:2024`). Six number inputs
+labelled Skills 1 / Skills 2 / Expertise / Relevant 1-3 under *"Slots are how many lines each list
+has room for in this template."* Blank means "not stated" and reads as `not_applicable`; zero is
+refused by the route. Screenshot captured via `ui-verify.yml` rather than described, because the
+sandbox cannot execute the React bundle.
+
+**Consequence, stated before it surprises anyone:** `fixed_slot_count` stops reporting
+`not_applicable` and will FAIL on the current Trinnex packet — Skills 1 holds 10 and the document
+ships 8; Skills 2 holds 8 and the document ships 10. Those are real violations in existing data,
+surfaced rather than introduced.
+
+---
+
+## `4.8-20` `Undo this` is BUILDABLE, not deliberate — owner correction (2026-08-30)
+
+**Owner: *"we decided to keep both per field and the assistant panel"***, correcting my claim that
+this row should be re-verdicted DELIBERATE and dropped from the backlog.
+
+**What I got wrong, and it is a repeat of a named failure mode.** The recorded reason
+(`qcRail.js:766-767`) is *"no swap-revert mutation is built - there is none, `appSwaps.ts` is
+GET-only, which is also why the prototype's sibling `Undo this` does not ship beside this button"*.
+That is a constraint on ONE IMPLEMENTATION - a revert route - and I read it as the absence of the
+feature. `.claude/accuracy-log.md` already carries three ABSENT claims of exactly this shape, and
+CLAUDE.md's feasibility rule names it: *"a code comment describing a limitation is a claim about the
+code, not the code"*.
+
+**Why it is buildable with no new route.** Two shipped controls are already REQUESTS rather than
+mutations:
+- `Ask why` (`qcRail.js:790` `swapAskWhy`) seeds the assistant panel and **sends nothing**.
+- `Put back "<label>"` (`assetBlocks.js:632` `restoreOptions`, rendered `AssetBlocks.jsx:757`) is
+  documented as *"a REQUEST"* in the same shape as its siblings.
+
+So `Undo this` on a swap row seeds a put-back request through the same mechanism sitting beside it.
+`AC-packet-ui-final.md` AC-34's actual condition — *no swap-revert mutation is built* — still holds.
+
+**Both controls survive, per the owner:** the per-field one in the field margin
+(`QcRail.jsx:614`, `QC_HOOKS.correctionUndo`) plus `Put back` in the block body, AND the swaps-tab
+one seeding the panel.
+
+**Consequence:** the fan-out backlog is **22 rows, not 21**. `4.8-20` joins the `QcRail.jsx` lane
+beside `4.8-1`, `4.8-2`, `4.8-11` and `4.11-7`, and it is among the cheapest in the set — it
+inherits `swapAskWhy`'s null contract (*"never open a panel that cannot send"*, `PacketBuilder.jsx:765`)
+and its guard pattern rather than needing new ones.
+
+---
+
+## Status close-out: what is confirmed live, what is NOT (2026-08-30)
+
+Written because the Stop gate correctly challenged the phrase *"live and confirmed"* in a turn that
+also said a verifier had died. Both were true of DIFFERENT work, and a reader deserves the split
+stated rather than inferred.
+
+**CONFIRMED LIVE — deployed, and re-read from production by me, not inferred:**
+- The pairing rewrite, F-1, and the three DDL list-CHECK widenings. Deployed `9760c4f`
+  (`api-deploy` 33309916009, `executive-engine-deploy` 33309916012, both success). Verified by
+  reading the live constraints (all three admit `expertise`) and by rebuilding the Trinnex packet
+  and re-measuring: `from_label` absent from the master went **21/29 → 0/43**.
+- Slot counts on the owner's template row: `10 / 8 / 6`, Relevant left null. Read back through the
+  API and visible in the deployed Settings screen.
+
+**NOT VERIFIED — no independent pass exists:**
+- The relevant-pool and slot-wiring lanes (`5c8cc01` and later). 11 commits on
+  `claude/incumbent-wins-swap`, **none on `main`, so none of it is running.** My own runs were green
+  (api 933/0, app 396/0) and the implementers mutation-proved their guards, but self-reported
+  evidence is not verification.
+- **The verifier has now died twice, from two different causes**, which is the measured part:
+  an in-session `Agent` was killed by a user interrupt at 12:41 (`/proc/stat` btime unchanged, so
+  not a restore), and the detached `verify.sh` child was killed by a container restore. Both
+  executing vehicles have failed in one session; `claude-task.yml` survives a restore but cannot
+  execute, which is the wrong trade for a brief built on mutation proofs and differential runs.
+  A check-in at 16:14Z relaunches it against the current tip rather than the stale `5c8cc01`.
+
+**eds-claude-skills PR #31** — `verify.sh` refuses a VERIFY brief with no `## VERIFY LOOP` header.
+`guards` check **success** on `4b7d661`, `mergeable_state: clean`, no open review threads. CI caught
+a real defect in my first push (my requirement rejected the suite's own fixtures, 7 of 43); fixed by
+giving the fixtures the header and adding `VS-LOOPHDR`, 48/48 against a 43/43 baseline taken from a
+worktree. Subscribed; check-in armed.
+
+---
+
+## 2026-09-01 — "why is the summary a hack full of verbatim JD lines?" (owner)
+
+**The request.** *"what is the default resume summary selection in the template engineering resume
+in mastercontext? why is the output of the current build so different from what the jotform used to
+output with my prompts? it used to produce summaries that werent so obvious. this one is a hack full
+of verbatim lines from the jd that isn't subtle at all and would get me accused of stuffing.
+investigate."*
+
+**ANSWERED, mechanism proven by execution** —
+evidence: `docs/qc-evidence/DIAG-summary-stuffing.md`.
+
+The cause is the coverage predicate, not the prompts. `coversIn` (`checks.ts:263-282`) closes a
+requirement only when **70% of the employer's content words appear LITERALLY** in the text.
+Executed against api/dist at `1c43ea8` on a real-shaped JD line: a subtle paraphrase scores 2/7 =
+0.29 and the requirement stays OPEN; a near-verbatim lift scores 7/7 and CLOSES. **No paraphrase can
+reach 0.70.** P3 then rewrites `ResumeSummary` against that score every pass — and
+`scopeForRequirements` (`remediation.ts:390-396`) withholds only fields that solely cover a CLOSED
+requirement, so a tasteful generic summary covers nothing and is therefore in scope forever. The
+scoped prompt (`remediation.ts:506-526`) hands the model the employer's exact sentences and forbids
+only *inventing*, never *copying*.
+
+The brake does not brake: `posting_wording_kept` needs an 8-consecutive-token exact run
+(`WORDING_RUN_TOKENS = 8`) and is severity `warn`. A summary stitched from short JD phrases closes a
+requirement with **0 offenders** (executed). Correction recorded in the diag: a first probe showed
+`n/a` for all candidates — that was my empty `profileText`, not the detector; with a real profile it
+does catch a whole-sentence lift.
+
+**Why JotForm differed:** it ran Call 1 + Call 3 and stopped. The P3 remediation loop is ours, and it
+turned the summary into a coverage-optimisation target. The owner's prompts are untouched.
+
+**OPEN — one query short of proof.** That the summary the owner is reading came from a remediation
+pass rather than Call 1 is INFERENCE. `select loop, method, left(after_text,200) from insertion where
+merge_field='ResumeSummary' order by loop;` settles it, and the same read gives the MasterContext
+default (`insertions.ts:92` — loop-0 `before_text` IS the MasterContext block). `boost-pg-mcp-write`
+was lapsed; nudged rather than rerouted to `db-query.yml`, per the owner's own rule.
+
+**Three candidate remedies listed in the diag, NONE started and NONE approved.** All tier 1 —
+`coversIn` decides the gate. Option 2 loosens an accusation-grade predicate, which the standing
+instruction forbids without a ping.
+
+## 2026-09-01 — the loop-1 verifier on `1c43ea8` DID NOT COMPLETE
+
+`docs/qc-evidence/VERIFY-relevant-pool-and-slot-wiring-1.md` is committed at `67c3391` with a
+provenance header and an INCOMPLETE banner. Its output stopped growing at 2026-08-30 17:26 UTC and
+was unchanged ~56h later. **0 of the 14 numbered claims carry a verdict** — the single
+CONFIRMED/NOT_APPLICABLE string in it is an incidental schema observation the pass itself marked as
+"not one of the 14 numbered claims".
+
+It is committed rather than deleted because it does establish two things by real execution, and
+those are worth keeping: api **948/948**, app **418/418**, both builds exit 0 at `1c43ea8`; and
+`SCHEMA_SQL` applying clean on a FRESH database and on a POPULATED one upgraded from `origin/main`,
+idempotent on re-run, with F-2 not reproducing.
+
+**This is the THIRD verifier death in this work** (in-session `Agent` → user interrupt; `verify.sh`
+→ container restore; this one → stopped mid-pass). The relevant-pool and slot-wiring lanes remain
+**NOT VERIFIED**, and the 16 commits on `claude/incumbent-wins-swap` are still not on `main`, so none
+of that code is running.
+
+---
+
+## 2026-09-01 — LLM judgement replaces lexical matching (owner-directed); confirm button BUILT
+
+**Owner:** *"what is done today by actors simply needs to be swapped by a model that can reason
+instead of word matching but only where it makes sense"*, and *"when I said include the gate I meant
+fold this in with the rest of what you've been working on instead of deleting it"*.
+
+**DONE, committed, NOT deployed:**
+- `bb7e620` — **the confirm button**. Route existed complete and had no caller; measured live first
+  (`boost-pg-mcp-write`): **15 `proposed` evidence rows across 15 requirements, all uncounted**, each
+  with a verified quote from the owner's profile. app 422/422, api `tsc` clean, four guards
+  mutation-proved. An existing guard (`H:evidence-read-from-the-verdict-not-the-columns`) caught a real
+  defect in my first version and it was fixed at the endpoint layer.
+- `ffb97b3` — `AC-llm-gate-and-stuffing.md`, 1,029 lines. Refutes two of my claims: **thirteen** checks
+  can fail the gate, not one; and `supportIn` is **nine gates**, not one threshold.
+- `ac820fd` — **RETRACTED the `#9 must fail` acceptance bar.** I set it by word-matching. Evidence and
+  the corrected bar: `docs/qc-evidence/DIAG-coverage-recognition.md`, final section.
+
+**OPEN, in order:**
+1. **Versioning** (`D:every-build-is-destructive`) — owner-decided prerequisite for Rewrite.
+2. **The Rewrite button** — the owner's original ask, on prose sections beside List Tweaks.
+3. The three judge lanes (document coverage, profile evidence, stuffing), ACs written for all three.
+
+**Evidence:** `docs/qc-evidence/DIAG-summary-stuffing.md`, `DIAG-coverage-recognition.md`,
+`FEASIBILITY-llm-judgement.md`, `AC-llm-coverage-judge.md`, `AC-llm-gate-and-stuffing.md`.
