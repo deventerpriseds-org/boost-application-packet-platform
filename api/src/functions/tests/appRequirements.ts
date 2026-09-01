@@ -987,11 +987,23 @@ export async function evidenceResolve(req: HttpRequest, context: InvocationConte
         // accepts nothing that is not byte-exact in the record it names — and it would still be
         // misleading, because "evidenced by a verbatim excerpt" reads as "a rule found this". Which
         // rows a model chose is the owner's business, so the count says so.
+        //
+        // FOUND BY AN INDEPENDENT VERIFIER (VERIFY-veto-lane-1.md, C6 REFUTED) and it is the second
+        // half of a defect I fixed only in `checks.ts`. That clause read "...awaiting your
+        // confirmation; they are shown but do not count toward the coverage gate", which was exactly
+        // true until proposals began counting, and is now the OPPOSITE of what `ruleEvidenceOf`
+        // does. Two surfaces state this fact and I updated one -- the repo's own "fix all consumers,
+        // not just the one you found" rule, broken in the very lane that inverted the rule.
+        //
+        // Nothing caught it because no test asserted this literal: `grep` for either retired phrase
+        // across `api/test` and `app/test` returned zero hits against it. `H:no-surface-says-a-
+        // counted-proposal-is-uncounted` now sweeps BOTH files for the retired wording, so a third
+        // surface written later fails rather than shipping a contradiction.
         note: (out.evidenced === out.total
           ? 'every requirement is evidenced by a verbatim excerpt of your profile'
           : `${out.total - out.evidenced} requirement(s): ${NO_EVIDENCE_NOTE}`)
           + (out.proposed
-              ? ` — ${out.proposed} of them proposed by a model and awaiting your confirmation; they are shown but do not count toward the coverage gate`
+              ? ` — ${out.proposed} of them found by a model rather than a rule; they count toward your coverage until you veto them`
               : ''),
       },
     }

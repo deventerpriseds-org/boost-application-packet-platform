@@ -4782,3 +4782,47 @@ test('H:every-evidence-alias-reaches-the-gate: a column selected and then droppe
     'appChecks mapping does not read it — so it is written, queried, and dropped before the only ' +
     'code that would act on it. tsc cannot catch this while the field is optional.')
 })
+
+test('H:no-surface-says-a-counted-proposal-is-uncounted: one fact, every surface', () => {
+  // FOUND BY AN INDEPENDENT VERIFIER, and it is the "fix all consumers" rule broken inside the very
+  // lane that inverted the rule. Two places tell the owner what a model-proposed row is worth:
+  // `checks.ts`'s must_have_coverage observed string, and `appRequirements.ts`'s evidenceResolve
+  // note. I updated the first and left the second reading "...awaiting your confirmation; they are
+  // shown but do not count toward the coverage gate" -- true until proposals began counting, and
+  // the exact opposite of `ruleEvidenceOf` afterwards.
+  //
+  // Nothing caught it because no test asserted that literal. This sweeps for the retired wording
+  // across BOTH source trees, so a third surface written later fails here rather than shipping a
+  // contradiction of the gate. Comments are stripped first: this file's own history records two
+  // guards that fired on a COMMENT and had to be rewritten, and the comments above the fixed line
+  // deliberately QUOTE the retired phrase to explain it.
+  const RETIRED = [
+    'awaiting your confirmation',
+    'do not count toward the coverage gate',
+    'does not count toward coverage until',
+  ]
+  const files = [
+    '../src/functions/tests/checks.ts',
+    '../src/functions/tests/appRequirements.ts',
+    '../../app/src/screens/PostingAnalysis.jsx',
+    '../../app/src/postingAnalysis.js',
+  ]
+  const offenders = []
+  for (const rel of files) {
+    const src = readFileSync(new URL(rel, import.meta.url), 'utf8')
+    // Strip line comments and block comments. A phrase inside a comment is the RECORD of the fix,
+    // not the defect -- and a guard that cannot tell those apart is the cry-wolf failure this repo
+    // deleted a whole linter over.
+    const code = src
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .split('\n').filter((l) => !/^\s*(\/\/|\*)/.test(l)).join('\n')
+      .replace(/\{\/\*[\s\S]*?\*\/\}/g, '')
+    for (const phrase of RETIRED) {
+      if (code.includes(phrase)) offenders.push(`${rel}: "${phrase}"`)
+    }
+  }
+  assert.deepEqual(offenders, [],
+    'A SURFACE STILL TELLS THE OWNER A COUNTED ROW IS EXCLUDED: ' + offenders.join(', ') + '. ' +
+    'A model-proposed row counts toward must_have_coverage until vetoed (ruleEvidenceOf). Any ' +
+    'sentence saying it is awaiting confirmation, or does not count, contradicts the number beside it.')
+})
