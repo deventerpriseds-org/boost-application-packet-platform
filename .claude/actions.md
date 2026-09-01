@@ -6506,3 +6506,63 @@ standing values only. Every guard I wrote was about provenance; none was about S
 1. Pipes → newline items: unambiguous, mine to fix.
 2. Skills/Expertise are each ONE over a KNOWN count — trimming drops one of the owner's own items.
 3. Relevant has NO configured count — any split I choose is an invented number.
+
+---
+
+## ACT-2026-09-01-f — The originating version FOUND: 3 items per Relevant list, plain-text bullets
+
+**Owner:** *"we have to look for the version used to build the rest of the master context and pull
+the relevant items that were missed. also the template resume doesn't use pipes so I feel like
+something is using or overwrote what is meant for the compact resume."*
+
+**Both instincts correct. The originating version is the archived Zap 289877647
+(`docs/zap-289877647/`), and it answers every open question.**
+
+### 1. The pipe format IS the compact resume's — proven
+
+`compactFit.ts:104` — **`export const DEFAULT_SEPARATOR = ' | '`**. That is the compact resume's
+single Core Skills line, built by `fitCompactSkills` from the full resume's TWO columns.
+
+And the stored `softHardSkillsPool` is *"Enterprise Governance | Technology Strategy | ..."* —
+skills1 (11) + skills2 (9) = 20 items joined with exactly that separator. The compact combined line,
+sitting in MasterContext.
+
+**The original is BULLETS, not pipes.** `baseline/04-current-skills.md` (node 289877650) stores:
+
+    Skills1
+        • Enterprise Governance
+        • Technology Strategy
+        ...
+
+and the Zap's own formatting nodes are explicit — node 290709248 wraps each list in `<ul>/<li>`, then
+node 291230256 strips the tags to *"leave a plain text bullet list"*. The resume template has always
+wanted a plain-text bullet list. The pipe encoding is a later flattening.
+
+### 2. THE RELEVANT SLOT COUNT IS 3 — the owner's own hard requirement
+
+From the Zap prompt, verbatim:
+
+> *"Maintain the Output as Three Separate Lists (**Hard requirement - Each list should be no more
+> than 3 items** and no more than one item greater than 24 characters in any list.)"*
+> `### Relevant Skills 1 ###` `### Relevant Skills 2 ###` `### Relevant Skills 3 ###`
+
+So `RelevantBullets1/2/3` = **3 each, 9 total**. This is NOT an invented count — it is recovered from
+the originating version, which is exactly what `slots.ts` requires before a count may be stored.
+
+The original pipeline carried THREE separate right-sized lists (node 289877662, Items 17/19/21).
+**MasterContext collapsed them into ONE pooled 36-term `relevantProficiencies`.** That pool is the
+LIBRARY; the three lists are the starting template lists. The owner named this precisely.
+
+My baseline put all 36 into each of three slots that hold 3 — **12x over, three times.**
+
+### 3. NOTHING is missing from MasterContext — measured, not assumed
+
+Diffed the Zap baseline's `06-relevant-skills.md` against the live field, normalising `&`/`and` and
+punctuation: **36 items both sides, categories 6/4/8/8/10 both sides, zero missing, zero added.**
+The re-encoding (`&`→`and`, bullets→commas, blocks joined with ` | `) is lossless. So the items were
+missed in MY RENDERING, not lost from the data — no history repair is needed.
+
+### 4. Skills/expertise overflow PREDATES everything
+
+The Zap baseline holds 11 and 9 items, the same as MasterContext, against slot counts of 10 and 8.
+The lists have always been one over. Not an injection artifact and not something that was overwritten.
