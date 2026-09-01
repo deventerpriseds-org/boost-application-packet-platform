@@ -325,3 +325,89 @@ measuring.
   because reading text and calling it clean is the same class of error as trusting a proxy.
 - **NEW AND UNGUARDED:** phrase-level JD harvesting is invisible to `posting_wording_kept` AND earns
   no coverage. Whatever is built next, a guard for this shape is the part with evidence behind it.
+
+---
+
+# THE SUMMARY THE OWNER IS ACTUALLY LOOKING AT — TRINNEX, measured 2026-09-01
+
+## First, my own error, named
+
+There are **two** packets carrying a `ResumeSummary`, and I conflated them (db-query run 33465421502):
+
+| company | role | summary | chars |
+|---|---|---|---|
+| eMoney Advisor | SVP, Development and Enterprise Architecture | *"Visionary **engineering executive**… **AI-first**…"* | 556 |
+| **Trinnex** | Director of Digital Technology Operations & Innovation | *"Visionary **technology leader**… robust track record…"* | 437 |
+
+The section above measured **eMoney's** summary against **eMoney's** JD — that pairing was right, and
+that finding stands for that packet. But I reported it as the owner's problem, and **the owner's
+screen shows TRINNEX**. I then compounded it by re-measuring the Trinnex text against eMoney's
+requirements — a wrong pairing whose numbers are void. Root cause both times: I selected rows by
+`created_at DESC` instead of joining each summary to its own opportunity. **Order is not identity.**
+
+## The correct measurement — Trinnex summary vs Trinnex requirements
+
+The 54-word summary on screen, against all 19 judgeable rows of that posting:
+
+| req | kind | employer's line | overlap | counts? |
+|---|---|---|---|---|
+| #12 | must_have | *Engineering & Technology Leadership — proven experience leading software engineering organizations* | **0.67** | **no** |
+| #15 | must_have | *Ability to align engineering strategy with business goals* | **0.60** | **no** |
+| #9 | responsibility | *Build, lead, and develop high-performing engineering managers and technical teams* | **0.57** | **no** |
+| #7 | responsibility | *opportunities to apply emerging technologies* | **0.50** | **no** |
+| …15 others | | | 0.00–0.33 | no |
+
+```
+COUNTS as covered:              0 of 19
+NEAR MISS (>= 0.40, uncounted): 4
+posting_wording_kept offenders: 0
+```
+
+## Both of the owner's points are correct, and they are the SAME four rows
+
+**1. It reads as JD restatement.** Put them side by side:
+
+| the posting says | the summary says |
+|---|---|
+| *"align engineering strategy with business goals"* | *"aligning engineering strategies with business objectives"* |
+| *"Build… high-performing engineering managers and technical teams"* | *"building high-performing teams"* |
+| *"opportunities to apply emerging technologies"* | *"leverage emerging technologies"* |
+
+Two words swapped on #15. This is smoother than eMoney's blunt `AI-first` lift, and it is still the
+employer's sentence wearing a coat — exactly *"isn't subtle at all and would get me accused of
+stuffing."*
+
+**2. And it earns NOTHING.** `0 of 19`, which is the app's *"0 of 12 responsibilities answered"* seen
+from the other side. **All of the stuffing exposure, none of the coverage credit** — and
+`posting_wording_kept` reports zero, because none of it is an 8-token run.
+
+**The four near-misses are simultaneously the evidence of stuffing AND the coverage the owner is not
+being given credit for.** They are not two problems. A paraphrase-aware coverage path and an
+anti-restatement guard are reading the same four rows and disagreeing about what to call them — which
+is why the display, not the arithmetic, is what the owner asked for.
+
+## AN INCONSISTENCY ALREADY ON SCREEN — verify before building on it
+
+The screenshot shows **`POSTING LINE ANSWERED: RQ-MH #12`** on this field, while the header on the
+same screen reads **`0 of 12 responsibilities answered`**. `coversText` scores #12 at 0.67 — under
+threshold, so the coverage check does NOT count it. So the chip and the count are fed by **different
+sources**: the chip by a requirement citation recorded when the field was written, the count by
+`coversIn`. **OBSERVATION, not yet traced to source** — confirm where `reqs` reaches `AssetBlocks.jsx`
+from before treating it as a defect. If it holds, the app is already telling the owner two different
+things about the same field, and the display work has to reconcile them rather than add a third.
+
+## OWNER DECISION — option (b), WITH the display
+
+*"b, but it still needs to tell me what is being covered and from the jd by such paraphrasing similar
+experience to what we've done elsewhere"*
+
+Paraphrase **counts automatically**; no confirm click. The house-rule concern was raised and the owner
+decided after it, so it is the plan. **Recorded honestly: (b) plus a mandatory display is materially
+safer than bare (b).** The hazard in (b) was a SILENT count; if every auto-counted paraphrase must
+show which JD line it answers and what backs it, nothing is claimed invisibly — which is most of what
+the click was buying.
+
+**EXTEND, do not duplicate:** `AssetBlocks.jsx:1150` already renders *"Posting lines answered"* with
+`ReqChip` + `ReqLegend`. That is the surface — it gains paraphrase-matched lines alongside cited ones,
+visibly distinguished, with the backing evidence in the detail panel like the keyword chips already do.
+That is the *"similar experience to what we've done elsewhere"* the owner named.
