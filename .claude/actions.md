@@ -6102,3 +6102,38 @@ shape of an export or an expression, `mutate.sh` refuses an anchor that does not
 symlinks `scripts/` into `/usr/local/bin` — previously they were reachable only by an agent that
 already knew the clone path, which is why `mutate.sh` sat unused for the two hours after it was
 written FOR these failures.
+
+### FLIPPED ON, LIVE — and the measurement says the gate condition is wrong (2026-09-01 16:47)
+
+`main` `bf6fd36`, api deploy `33533250226` + web `33533250146` both **success**. Toggle set for
+`von.ellis@enterpriseds.io`: `chk_coverage_judge = t`, cap 12, min-quote 20.
+
+**Re-resolve** (`POST /api/app/opportunity/9f9c370a.../evidence`, run `33533511977`):
+
+    escalated 11   proposed 9   vetted 0
+    escalation_refusals: { support_missing_named: 9, over_cap: 1,
+                           quote_not_in_record: 1, model_declined: 1, not_worth_escalating: 1 }
+
+**Checks with the judge on** (run `33533731959`): `must_have_coverage` = **2/6 (33)** — the two
+`anchored` rows. The vet lane contributed **nothing**.
+
+**THE FINDING: `support_missing_named: 9` — the challenge ran on all nine and every one named a gap.**
+The agreement test never even got to speak. Look at the requirements it was asked about:
+*"Strong understanding of cloud platforms AND modern software delivery practices"*, *"Working
+knowledge of applied AI, intelligent agents, machine learning..."* — multi-part, so ANY single
+excerpt is missing something and a conscientious model says so. **Requiring an empty gap list is
+therefore not a strict gate, it is a closed one**, and `vetted` will essentially never happen.
+
+This is the owner's original objection arriving as data: *"why would finding a match require what's
+missing instead of what's matching?"* I kept the gap list as one condition among several; the
+measurement says it is the ONLY condition that binds.
+
+**NOT CHANGED UNILATERALLY** — removing it loosens a gate, and the standing rule is that no guard is
+weakened without asking first. Put to the owner.
+
+**Two things worth fixing whichever way that goes:**
+1. the `missing` text is **counted and discarded** — the owner cannot see WHAT the model said was
+   missing, which is the most useful thing it produced. Same class as F-8.
+2. `coverage_refused: 8` on 7 calls — the DOCUMENT judge claimed eight quotes that were not
+   byte-present. Harmless now that the judge is additive (a refused verdict falls back to the lexical
+   rule), and visible only because of the F-8 fix made an hour earlier. Worth watching.
