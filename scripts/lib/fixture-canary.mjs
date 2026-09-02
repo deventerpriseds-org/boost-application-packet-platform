@@ -36,7 +36,16 @@ const REQUIRED = [
   {
     has: (f) => {
       const req = Object.entries(f).find(([k]) => k.endsWith('/requirements'))?.[1]
-      return !!(req && req.comparison)
+      const c = req && req.comparison
+      // NOT `!!c`. An UNRESOLVED opportunity returns a real API body -- `{resolved:false,
+      // dimensions:[]}` (appDimensions.ts:258-264) -- which passes a truthiness test while
+      // `compare-cards`, `compare-cols`, `compare-card` and `compare-summary` still do not render
+      // at all. That fixture is the original defect wearing a new hat, and a canary it satisfies is
+      // an inert guard: believed, and protecting nothing.
+      return !!(c && c.resolved === true
+        && Array.isArray(c.dimensions) && c.dimensions.length
+        && c.summary && typeof c.summary.graded === 'number'
+        && c.set && Array.isArray(c.set.keys) && c.set.keys.length)
     },
     why: 'the /requirements fixture has no `comparison` — the ENTIRE "posting against your profile" '
       + 'surface (the fit cards, the DIMENSION/asks-for/evidences/FIT table, "Run again") renders as '
