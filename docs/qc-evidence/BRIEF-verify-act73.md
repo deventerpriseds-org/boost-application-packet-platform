@@ -1,3 +1,10 @@
+## VERIFY LOOP
+work: act73
+loop: 1
+
+Loop 1: there is no prior state to re-check — every claim below is derived from scratch. Coverage is
+total, which on a first loop simply means all of C1-C11 with no row skipped.
+
 # Verifier brief — ACT-73 (PR #73), loop 1
 
 You are an INDEPENDENT verifier. You did not write any of this and must not assume it is correct.
