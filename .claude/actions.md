@@ -7275,3 +7275,40 @@ reclassified DELIBERATE to flatter the count.
 **Ten guards this lane, every one mutation-proved FIRED.** One NOT-APPLIED (wrong anchor indent) and
 one false INERT (I piped the test command through `grep -q`, so the must-fail pattern could never
 match) -- both my harness errors, both caught by the harness reporting honestly rather than guessing.
+
+---
+
+## ACT-70 — PROTOTYPE-COVERAGE headline collides across parallel render lanes
+
+**Found 2026-09-02** while confirming CI on PR #69, not asked for.
+
+Three lanes are rendering steps into `PROTOTYPE-COVERAGE.md` concurrently and each re-counts the
+one headline. Read from each branch's FILE:
+
+| Lane | Step | Headline in its file |
+|---|---|---|
+| `claude/boost-app-setup-approach-ejv09v` (on `main`) | `jd` | §16 |
+| `claude/eds-skills-setup-summary-ngpaos` (PR #69) | QC + Review & send | 161/183 (88.0%) |
+| `claude/boost-app-setup-approach-6xdoef` (PR #66) | `cover` | 164/183 (89.6%) |
+
+**Ground truth: the reconciled number is `165/183 (90.2%)`, PARTIAL 17, ABSENT 1.** Row-verdict diff
+against `origin/main@3acd4c4` — #69 moved `4.8-20` only; #66 moved `4.4-14/-24/-25/-26`; **overlap
+zero**. Both are correct against their own base and neither is correct against `main` once the other
+lands. Merge order does not matter; the second lane recounts.
+
+**Status: REPORTED, not fixed.** The reconciliation belongs to whichever PR lands second.
+
+**Proposed guard (NOT built — unrequested code):** a CI check that recomputes the headline from the
+`| 4.x-n |` rows using the method §13-CURRENT already documents, and fails when the stated headline
+disagrees. This lane fixed the same class of defect twice by hand inside the file today (the §4.8
+and §4.10 tallies, one of which contradicted the table directly above it). Fixing it by hand a third
+time is the failure the "turn recurring mistakes into guards, not more prose" rule names.
+
+## ACT-69 — status update
+
+Complete and green: PR #69 head `2078b48`, `Tests` run 33644691133 **success**, `mergeable_state:
+clean`. Two items carried forward as OPEN by decision, not oversight:
+- **§17d `fixture-refresh.yml` `run_id` predicate** — a code change the owner did not request; the
+  recommended shape is recorded in §17d.
+- **`boost-pg-mcp-write` lapsed** — reconnect card rendered; the connector is the preferred
+  transport and this pass took the `fixture-refresh.yml` fallback.

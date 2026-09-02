@@ -521,6 +521,36 @@ Key tables (PostgreSQL):
 
 ## Active work
 
+**PARITY HEADLINE COLLISION, 2026-09-02 - THREE LANES, AND THE TRUE NUMBER IS 165/183 (90.2%).**
+
+`PROTOTYPE-COVERAGE.md` is being rendered into by three lanes at once, each re-counting the same
+headline against a tree that does not contain the others' row moves. Read from the FILES on each
+branch, not from commit titles:
+
+| Lane | Step rendered | Headline in ITS file |
+|---|---|---|
+| `...-ejv09v` (landed on main) | `jd` | SS16 |
+| `...-ngpaos` (PR #69, mine) | QC + Review & send | **161/183 (88.0%)** |
+| `...-6xdoef` (PR #66) | `cover` | **164/183 (89.6%)** |
+
+**Neither 161 nor 164 is right, and there is NO conflict between them.** Diffing row verdicts
+against `origin/main` at `3acd4c4`: I moved exactly ONE row (`4.8-20` PARTIAL->BUILT); #66 moved
+FOUR (`4.4-14`, `4.4-24`, `4.4-25`, `4.4-26`, all PARTIAL->BUILT). **Overlap: zero.** Applying both
+sets to the shared base gives **BUILT 165 / 183 = 90.2%, PARTIAL 17, ABSENT 1**. Whichever lands
+second must recount; the merge itself is trivial.
+
+**The structural point, which is the reusable one:** a hand-maintained headline in a file that
+several lanes write to is guaranteed to be stale the moment a second lane lands - this is the SAME
+failure this very lane just fixed twice inside the file (the SS4.8 and SS4.10 tallies). The count is
+already mechanical; what is missing is that nothing RE-RUNS it at merge time. A CI check that
+recomputes the headline from the rows and fails when they disagree would end the whole class.
+Logged as ACT-70, not built - it is a code change nobody asked for.
+
+**Two items deliberately NOT applied, both tracked rather than done:**
+- `fixture-refresh.yml` needs the live route's `run_id` predicate (SS17d). Code change, unrequested.
+- `boost-pg-mcp-write` is lapsed; reconnect card rendered for the owner.
+
+
 **RENDER PASS 2026-09-02 - SS4.8 QC + SS4.10 Review & send SEEN ON SCREEN; parity 161/183 (88.0%).**
 
 Closed `PROTOTYPE-COVERAGE.md` SS15's own limit 2 (*"a component can be built and never reach the
