@@ -7063,3 +7063,25 @@ every packet. Both invisible in the spec, both obvious in one row of production 
 **Three of my own errors this lane**, all in memory.md Hardening: a bad conflict-hunk splice that
 broke one file and silently shortened two, three INERT mutation verdicts that were my own
 invocation, and two fixture shapes asserted without reading.
+
+### ACT-2026-09-02-b — the baseline/tweak flow is now a SKILL, not tribal knowledge
+
+Owner: *"shouldn't we make this a skill that we can use anytime I need to make a tweak to a section
+or for a baseline build with or without values to tweak?"* Yes — and the argument for it is the
+session's own record: the same two operations were re-derived four times, and aimed at the **wrong
+target twice**.
+
+`eds-claude-skills/.claude/skills/baseline-build-and-tweak.md` (`b6b3240`). Both operations were
+ALREADY deployed routes; nothing new was built. What was missing was knowing which call to make.
+
+It leads with **target selection**, because that is what actually went wrong — "use them for
+<Company>" in a message that also says "MasterContext" does NOT authorise editing that company's
+tuned packet. Then the two call shapes, the `jd_grounded` pre-flight (a stale cache regenerates from
+the model and discards both the overlay and the tailoring), the three non-optional checks
+(`qcApplied: null` proves no model ran; `cleanedTokens`/`warnings` prove no token survived;
+`diag/doc-layout` reads the DOCUMENT — a correct package does not prove a correct page), and four
+traps that each cost a loop.
+
+**Open, for the owner:** `SkillsBullets2` carries 9 items against a template capacity of 8. All nine
+render and `slotOverflow` reports it rather than dropping "Change Management" silently — but cutting
+one or widening the slot is the owner's call, not mine.
