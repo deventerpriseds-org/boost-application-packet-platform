@@ -5032,6 +5032,13 @@ test('H:baseline-slot-overflow: an over-capacity list is REPORTED, never silentl
   assert.deepEqual(slotOverflow({ SkillsBullets2: nine }, { ...slots, SkillsBullets2: null }), [])
   assert.deepEqual(slotOverflow({ SkillsBullets2: nine }, undefined), [])
 
+  // A capacity of ZERO or below is not a capacity. Treating one as real makes `items > cap` true for
+  // EVERY non-empty slot, turning the report into a firehose that fires on correct content -- the
+  // cry-wolf failure hardening rule 2 forbids. Found by mutation: dropping `|| cap <= 0` left the
+  // suite green, so this sub-rule was unguarded.
+  assert.deepEqual(slotOverflow({ ExpertiseBullets: 'a\nb' }, { ...slots, ExpertiseBullets: 0 }), [])
+  assert.deepEqual(slotOverflow({ ExpertiseBullets: 'a\nb' }, { ...slots, ExpertiseBullets: -1 }), [])
+
   // Blank lines are not items -- a trailing newline must not manufacture an overflow.
   assert.deepEqual(slotOverflow({ ExpertiseBullets: 'a\nb\n\n' }, slots), [])
 })
