@@ -34,6 +34,27 @@ const REQUIRED = [
       + 'gate contract) renders as unset and reads exactly like the product having lost its limits',
   },
   {
+    has: (f) => {
+      const req = Object.entries(f).find(([k]) => k.endsWith('/requirements'))?.[1]
+      const c = req && req.comparison
+      // NOT `!!c`. An UNRESOLVED opportunity returns a real API body -- `{resolved:false,
+      // dimensions:[]}` (appDimensions.ts:258-264) -- which passes a truthiness test while
+      // `compare-cards`, `compare-cols`, `compare-card` and `compare-summary` still do not render
+      // at all. That fixture is the original defect wearing a new hat, and a canary it satisfies is
+      // an inert guard: believed, and protecting nothing.
+      return !!(c && c.resolved === true
+        && Array.isArray(c.dimensions) && c.dimensions.length
+        && c.summary && typeof c.summary.graded === 'number'
+        && c.set && Array.isArray(c.set.keys) && c.set.keys.length)
+    },
+    why: 'the /requirements fixture has no `comparison` — the ENTIRE "posting against your profile" '
+      + 'surface (the fit cards, the DIMENSION/asks-for/evidences/FIT table, "Run again") renders as '
+      + '"Loading the comparison..." and reads exactly like a surface nobody built. Measured '
+      + '2026-09-02: this single absence accounted for ~19 of the 27 panels the jd step had been '
+      + 'reported as missing since UI-GAP-REGISTER. `appRequirements.ts:846-851` returns it; '
+      + '`build-fixtures.mjs` never emitted it, so the harness has never once been able to see it',
+  },
+  {
     has: (f) => Object.keys(f).some((k) => k.includes('/swaps')),
     why: 'no /swaps key — every `original -> final` row renders as a bare list, which reads exactly '
       + 'like the swap feature never having been built',

@@ -109,11 +109,32 @@ f[`/opportunity/${OPP}/packet`] = {
 // / `Responsibilities answered` / `Nice-to-haves answered`, SPEC 4.4-24/25/26). Measured
 // 2026-08-30 during RENDER-SWEEP: those three read as not-built until `total` was supplied.
 // Derived mechanically from the rows, exactly as the endpoint derives it.
-f[`/opportunity/${OPP}/requirements`] = {
-  oppId: OPP,
-  requirements,
-  total: requirements.length,
-  located: requirements.filter((r) => r.char_start !== null && r.char_start !== undefined).length,
+//
+// TRAP 5, and the one that cost the most: `comparison` CANNOT BE DERIVED HERE AT ALL.
+// `comparisonPayload` (appDimensions.ts:254) returns `dimensions` from the `comparison_dimension`
+// table PLUS `summary`, `set` and `stale`, each derived in TypeScript from DIMENSION_CATALOGUE,
+// the owner's dimension prefs and DIMENSION_VERSION. Porting that here would be a second dimension
+// brain in JS, and a re-derived fixture MEASURES ITSELF -- drift renders as app gaps, which is the
+// canary's own failure mode pushed one level deeper where it cannot see, because a wrong `summary`
+// is present and truthy. So when the refresh captured the real route, that body is passed through
+// VERBATIM and nothing here reshapes it.
+if (raw.apiRequirements) {
+  f[`/opportunity/${OPP}/requirements`] = raw.apiRequirements
+} else {
+  // The derived shape is the FALLBACK, and it is loud, because its silent version is exactly how
+  // ~19 of 27 "missing panels" on the jd step stayed phantom for weeks
+  // (docs/qc-evidence/PROTOTYPE-COVERAGE.md 16a). A quiet degradation of the instrument is
+  // indistinguishable from a product regression.
+  console.error('!!! DERIVED /requirements - comparison will be MISSING from this fixture.')
+  console.error('    The dump has no `apiRequirements`. Re-run fixture-refresh.yml, which captures')
+  console.error('    the real route; a fixture built this way cannot see the compare surface and')
+  console.error('    the canary in scripts/lib/fixture-canary.mjs will refuse it.')
+  f[`/opportunity/${OPP}/requirements`] = {
+    oppId: OPP,
+    requirements,
+    total: requirements.length,
+    located: requirements.filter((r) => r.char_start !== null && r.char_start !== undefined).length,
+  }
 }
 f[`/opportunity/${OPP}`] = { opportunity: { ...opp, id: OPP, stage: pk.status } }
 f['/app/opportunities'] = { opportunities: [{ ...opp, id: OPP, stage: pk.status }] }

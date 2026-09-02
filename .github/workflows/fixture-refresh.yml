@@ -88,6 +88,84 @@ jobs:
           )::text
           SQL
 
+      # CAPTURE THE API'S OWN /requirements BODY -- do not rebuild it here.
+      #
+      # WHY THIS STEP EXISTS. `comparison` (the whole "posting against your profile" surface: the fit
+      # cards and the DIMENSION/asks-for/evidences/FIT table) is NOT a table read. `comparisonPayload`
+      # (appDimensions.ts:254) returns `dimensions` from `comparison_dimension` PLUS `summary`, `set`
+      # and `stale`, each DERIVED in TypeScript from the dimension catalogue and DIMENSION_VERSION.
+      # Re-deriving those in the builder would be a second dimension brain in JS, and a re-derived
+      # fixture MEASURES ITSELF: any drift renders as app gaps. Measured 2026-09-02 -- the absence of
+      # this one key made ~19 of 27 "missing panels" on the jd step phantom for weeks
+      # (docs/qc-evidence/PROTOTYPE-COVERAGE.md 16a).
+      #
+      # A GH runner can reach the Function App; the sandbox cannot. So the runner asks the real route
+      # and stores the answer VERBATIM. Zero derivation, immune to catalogue/version drift.
+      - name: Capture the API's /requirements body (comparison lives here)
+        env:
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+          OPP: ${{ github.event.inputs.opp }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PYEOF'
+          import os, json, time, hmac, hashlib, base64, urllib.request, urllib.error, urllib.parse
+          opp = os.environ['OPP']
+          secret = os.environ['AZURE_CLIENT_SECRET']
+          dump = json.load(open('raw-dump.json'))
+          owner = (dump.get('opp') or {}).get('owner_email')
+          if not owner:
+              raise SystemExit('no owner_email on the dumped opportunity - cannot mint a token')
+
+          # Same scheme as api-test.yml: the Function signs with SESSION_SIGNING_SECRET ||
+          # MICROSOFT_CLIENT_SECRET (== AZURE_CLIENT_SECRET), so this verifies server-side.
+          def b64url(b):
+              if isinstance(b, str): b = b.encode()
+              return base64.urlsafe_b64encode(b).decode().rstrip('=')
+          now = int(time.time())
+          head = b64url(json.dumps({'alg':'HS256','typ':'JWT'}, separators=(',',':')))
+          load = b64url(json.dumps({'email':owner,'provider':'fixture-refresh','iat':now,'exp':now+3600}, separators=(',',':')))
+          sig  = b64url(hmac.new(secret.encode(), f'{head}.{load}'.encode(), hashlib.sha256).digest())
+          token = f'{head}.{load}.{sig}'
+
+          url = ('https://job-platform-api.azurewebsites.net/api/app/opportunity/'
+                 f'{opp}/requirements?owner={urllib.parse.quote(owner)}')
+          req = urllib.request.Request(url, headers={'Authorization': f'Bearer {token}'})
+          try:
+              with urllib.request.urlopen(req) as r:
+                  status, body = r.status, json.loads(r.read())
+          except urllib.error.HTTPError as e:
+              raise SystemExit(f'AC-4: /requirements returned HTTP {e.code} - refusing to commit')
+
+          # AC-4: a non-200 or an error-shaped body never reaches the branch.
+          if status != 200 or not isinstance(body, dict) or 'error' in body:
+              raise SystemExit(f'AC-4: HTTP {status} / error body - refusing to commit')
+          cmp_ = body.get('comparison')
+          if not isinstance(cmp_, dict):
+              raise SystemExit('AC-4: the response carries no `comparison` key - refusing to commit')
+
+          # AC-2: an UNRESOLVED comparison is the defect wearing a new hat. With dimensions:[] the
+          # compare cards and the 4-column table do not render at all, and the fixture would pass a
+          # naive canary while leaving the same ~19 panels missing.
+          if cmp_.get('resolved') is not True or not (cmp_.get('dimensions') or []):
+              raise SystemExit(
+                  f'AC-2: opportunity {opp} has no comparison_dimension rows - resolve it, or pick '
+                  'an opportunity that has been resolved; a fixture built from it cannot see the '
+                  'compare surface.')
+
+          # AC-5: never freeze a transient profile-read failure into the instrument. Baking one in
+          # renders the evidence surface as broken PRODUCT - the same class as the 24/20 report.
+          if 'profile UNREADABLE' in (body.get('profileSources') or []):
+              raise SystemExit('AC-5: profileSources says UNREADABLE - the profile read failed; '
+                               'capturing this would bake an outage into the fixture')
+
+          dump['apiRequirements'] = body
+          json.dump(dump, open('raw-dump.json','w'))
+          d = cmp_.get('dimensions') or []
+          graded = len([r for r in d if r.get('fit') not in (None, 'not_applicable')])
+          print(f'captured /requirements: {len(body.get("requirements") or [])} requirements, '
+                f'{len(d)} dimensions ({graded} graded), total={body.get("total")}')
+          PYEOF
+
       - name: Report what came back
         run: |
           set -euo pipefail
