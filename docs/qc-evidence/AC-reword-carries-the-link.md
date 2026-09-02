@@ -37,3 +37,59 @@ substrate (`Marked`/`markRuns`), the durable requirement identity (`requirement.
 NOT `requirement.id`), and the deploy-safety pattern (self-healing `ensureCorrectionTable`) all
 already exist and are reusable. What does NOT hold as stated is the implementer's specific column
 choice (`requirement_id` as an FK) — see §3.
+
+---
+
+## 2. THE ORDERING ARGUMENT — verified, HOLDS
+
+**Claim to test:** scoring must happen AFTER the final reword, not before, because a score
+computed on pre-reword text describes a document that never ships.
+
+**Verified against the actual pipeline, not the analogy alone.**
+
+```
+grep -n "applyCorrectionPass\|normalisePackage(pkg\|update packet set pkg_json" \
+  api/src/functions/tests/appPackets.ts
+```
+Result: `:565 applyCorrectionPass(...)` → `:588 normalisePackage(pkg, ...)` → `:626 update packet
+set pkg_json = $1 ... where id = $3`, strictly in that order, inside `ensurePackage`, and nothing
+after `:626` mutates `pkg` before `ensurePackage` returns.
+
+```
+grep -n "p.pkg_json" api/src/functions/tests/appChecks.ts
+```
+Result: `:47`, inside `evaluateArtifact`'s own top query — `select ... p.pkg_json ... from packet
+p join artifact a ... where a.id = $1`. This is a **fresh SELECT against the database**, not a
+value threaded in from the caller. Whatever the last `update packet set pkg_json` wrote is what
+`evaluateArtifact` scores.
+
+```
+grep -n "buildTemplatedArtifact\|evaluateArtifact(client" api/src/functions/tests/appPackets.ts
+```
+Result: `evaluateArtifact(client, art.id, owner)` is called at `:1189`, inside the post-build loop
+that runs strictly after `buildTemplatedArtifact` (→ `ensurePackage`) has already returned and
+already written `pkg_json` for every artifact of the packet (`:843`/`:922`/`:1106` are the three
+call sites of `buildTemplatedArtifact`, all upstream of `:1189` in the same route handler).
+
+**So the pipeline ALREADY enforces "score what shipped, not what was drafted"** — this is not a
+new pattern the reword pass would be introducing, it is the existing pattern
+`applyCorrectionPass`/`normalisePackage` already follow, stated explicitly in the `appPackets.ts:
+557-562` comment: *"Everything below this line reads the corrected package... Run it in
+appChecks instead and `pkg_json` ... [is] written from the ORIGINAL text while the user reads the
+corrected document — and the remediation loop credits closures against text that never
+shipped."* That is the exact failure shape the brief cites (Call 1's ATS table describing a
+superseded draft, reporting 0% on a resume placing 67% — `atsKeywords.ts:26-37`).
+
+**Verdict: the ordering argument HOLDS, and a reword pass that ran AFTER `evaluateArtifact` (or
+in a place `evaluateArtifact`'s `pkg_json` read cannot see) would reproduce the exact defect this
+repo already paid for once.** The correct location is inside `ensurePackage`, after
+`applyCorrectionPass` and after (or interleaved with) `normalisePackage`, and strictly before the
+`update packet set pkg_json` write at `:626` — the same slot the P8.1/R1 correction pass already
+occupies, for the same stated reason.
+
+One qualification found by reading rather than assumed: `normalisePackage` (`normalise.ts:232`)
+only touches **list fields** (character-limit shortening of bullet items) — a targeted grep for
+`ResumeSummary` inside `normalise.ts` returns no hits — so there is no existing interaction to
+preserve between a ResumeSummary reword and the list-normaliser; they operate on disjoint fields
+and their relative order to each other does not matter, only that BOTH complete before the
+`pkg_json` write.
