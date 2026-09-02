@@ -84,3 +84,81 @@ Re-ran `mutate.sh` myself (not trusting the PR's reported outcomes) for every gu
   this is TIER 1 (a coverage-count / CI-gate guard), flagging it rather than silently accepting the
   brief's framing.
 
+## C7 — `fixture-refresh.yml`'s new `check_result` join reproduces the live route exactly
+
+**CONFIRMED**, on all three sub-claims:
+
+1. **Semantics match.** Live route (`appChecks.ts:388-390`): `g = select * from artifact_gate where
+   artifact_id=$1`; `results = g ? select * from check_result where artifact_id=$1 and run_id=$2
+   (using g.run_id) : []`. The new SQL (`fixture-refresh.yml`, `checks` key):
+   `select ... from check_result cr join artifact_gate g on g.artifact_id = cr.artifact_id and
+   g.run_id = cr.run_id where cr.artifact_id in (...)`. An INNER JOIN on both `artifact_id` and
+   `run_id` is the set-based equivalent of "for each artifact, only the rows whose run_id equals
+   that artifact's gate's run_id" — same predicate as the route.
+2. **No-gate case matches.** An artifact with no `artifact_gate` row contributes nothing to the
+   join (no `g` row to match), exactly matching the route's `g ? ... : []`.
+3. **Cannot multiply rows — verified from the schema, not asserted from the comment.**
+   `artifact_gate.artifact_id` is declared `primary key` (`schema.ts:791`), so at most one `g` row
+   exists per `artifact_id`; the join's `g.run_id = cr.run_id` predicate then admits at most that one
+   row per `check_result` row. No fan-out is possible.
+
+Same reasoning holds for the `scores` key (`artifact_score s join artifact_gate g on
+g.artifact_id=s.artifact_id and g.run_id=s.run_id`) — and `artifact_score` additionally carries
+`unique (artifact_id, run_id)` (`schema.ts:841`), so the join is 1:1 on both sides, doubly
+confirming no multiplication. `scoreHistory` is correctly NOT run-scoped (deliberately, per its own
+comment) and matches the route's unconditional `... order by computed_at desc limit 10`, using a
+`LATERAL` join to cap per-artifact rather than per-packet — verified this is necessary: a flat
+`limit 10` over a packet-wide query would starve artifacts after the first, which the LATERAL avoids.
+
+## C8 — new `artifact_score`/history keys match live-route key names, checked against actual consumers
+
+**CONFIRMED**, traced to the real reader, not the brief's description:
+- `AssetGateDrawer.jsx:389`: `const s = result.score` — top-level `score` key, matching
+  `checkResultFor()`'s returned `{ ..., score, history, ... }` (`build-fixtures.mjs`).
+- `assetGate.js:497-503` (`scoreParts`) reads `score.must_have_coverage`, `score.keyword_coverage`,
+  `score.seniority_alignment`, `score.must_have_source` / `keyword_source` / `seniority_source` —
+  exact snake_case `artifact_score` column names. The dump's `row_to_json(s)` on that table produces
+  identically-named JSON keys, and the live route's `score` field is the raw pg row from
+  `select * from artifact_score ...` — same shape both ways.
+- `AssetGateDrawer.jsx:395,422-424`: `history.map(h => ...)` reads `h.computed_at`, `h.composite`,
+  `h.must_have_coverage` — a subset of the four columns (`composite, band, must_have_coverage,
+  computed_at`) the SQL's `scoreHistory` LATERAL projects; matches.
+
+## C9 — the extended thin-fixture refusal extends the EXISTING guard and cannot false-positive on a legitimate fixture
+
+**CONFIRMED** on both parts asked, **with one reportable gap found by direct testing (not reading)**.
+
+- **Single mechanism, not parallel.** `grep -n "const thin\|thin.push\|if (thin.length)"` shows one
+  `const thin = []` (L225), pushes from four pre-existing checks plus the two NEW ones (`artifact_score`
+  absence at L251, duplicate `check_key` at L267), and exactly one `if (thin.length)` refusal block
+  (L273) gated by the same `--allow-thin` flag. Not a second refusal path.
+- **No false positive on a legitimate fixture** — tested directly, not inferred. Built a synthetic
+  `raw-dump.json` with one gated, scored, non-duplicated artifact plus `apiRequirements.comparison`
+  resolved. `node scripts/build-fixtures.mjs --raw ... --opp opp1 --out ...` → exit 0, no thin warning.
+- **Both new checks genuinely FIRE on the defects they claim to catch** (tested by injection, not
+  read): (a) removed the `scores` array entirely from an otherwise-legitimate dump with one gated
+  artifact → exit 1, `missing: artifact_score ...`. (b) appended a second `check_result` row for the
+  same artifact/check_key under a different `run_id` (simulating a fixture-refresh run that skipped
+  the join) → exit 1, `missing: checks scoped to the gate's run - artifact art1 carries 2 result rows
+  for 1 distinct check_key ...`.
+
+**Gap found, not claimed by C9 but worth flagging (TIER 1 adjacent — this feeds coverage claims
+elsewhere in the doc):** the `artifact_score` predicate is `gated.length && !gated.some(a =>
+score(a))` — it fires only when **every** gated artifact lacks a score. Constructed a fixture with
+TWO gated artifacts, one scored and one not (`gate: 'fail'`, no score row) — the guard did **not**
+fire (exit 0), and the written fixture would render the unscored artifact's Match tab as "No score
+has been computed... " while its own gate reads `fail` with 3 findings — the exact contradiction
+§17f names as the failure mode. The source comment states this narrowness is deliberate ("so it can
+never cry wolf"), so this is a known, accepted tradeoff rather than an oversight — but it means the
+guard protects only the all-or-nothing case, not a partially-thin fixture. Recorded here since it
+bears on how much confidence the fixture-parity work actually buys.
+
+## C11 — suites actually pass
+
+**CONFIRMED**, all run directly (not taken on the PR's word):
+- `cd api && npm test` → **1062/1062 pass, 0 fail.**
+- `node --test app/test/prototypeCoverage.test.mjs` → **10/10 pass, 0 fail.**
+- `cd app && npm run build` → exit 0, `✓ built in 3.36s`, no compile errors.
+- Extra (beyond the brief's minimum, for confidence): `node --test app/test/*.test.mjs` (full app
+  suite) → **436/436 pass, 0 fail.**
+
