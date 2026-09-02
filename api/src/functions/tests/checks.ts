@@ -978,7 +978,9 @@ export function runChecks(input: CheckInput): CheckResult[] {
      *
      * NOTE FOR ANYONE EDITING `ruleEvidenceOf`: `judged` counts because it is not `proposed`, not
      * because of a clause naming it. That is easy to break by widening `isProposed` and easy to miss,
-     * which is why `H:a-judged-row-counts-and-a-proposed-one-does-not` pins both halves.
+     * AND NOTHING PINS IT -- corrected 2026-09-02, a citation audit found the test this line named
+     * (`H:a-judged-row-counts-and-a-proposed-one-does-not`) does not exist. The paragraph above is
+     * the only statement of the invariant; widen `isProposed` with that in mind.
      */
     const isVetted = (r: { seq: number }) => evidenceOf(r)?.method === 'vetted'
     /**

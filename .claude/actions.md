@@ -4871,7 +4871,7 @@ The three ABSENT rows (4.5-12 PickList, 4.8-21 `Ask why`, 4.11-4 scope selector)
 | `H:coverage-absent-rows-carry-a-check` | an ABSENT claim nobody can falsify |
 | `H:coverage-absent-check-is-real` | an empty pattern (`/(?:)/` matches everything) or a path that no longer exists — both stolen from the ledger guard, which learned them the hard way |
 | `H:coverage-stale-absent-fails` | **the one that earns the file**: the pattern now MATCHES, so it was built |
-| `H:coverage-absent-is-rare-enough` | ABSENT swelling past 12, i.e. rows added faster than anyone checks them |
+| `H:coverage-absent-is-rare-enough-to-mean-something` | ABSENT swelling past 12, i.e. rows added faster than anyone checks them |
 
 **Five mutations, all failing correctly:** feature built under an ABSENT row, clause removed, file
 renamed, pattern emptied, verdict word changed. app 391/391.
@@ -7747,7 +7747,38 @@ judgement a checker could not make anyway ("re-point at the test that really cov
 the claim?"). Revisit the guard only if these recur — recurrence is the evidence that would justify
 it, and there is none yet.
 
-**OPEN — awaiting the owner's answer:** do the five edits, or leave them.
+**RESOLVED 2026-09-02 — owner: "fix by hand". All five applied, plus two the same scan found later.**
+
+Two of the five turned out **not to be misnamed — they were FALSE**. No test asserts `refused`
+increments through the `resolver` seam, and nothing pins judged-vs-proposed counting. Re-pointing
+them would have invented a guard; both comments were rewritten to say the behaviour is UNPROVEN.
+That distinction is the argument against the checker restated: a pattern-matcher can only ever
+re-point, and re-pointing here would have made the file *more* wrong.
+
+| id | disposition |
+|---|---|
+| `H:coverage-absent-is-rare-enough` | re-pointed to `…-to-mean-something` (actions.md:4874). The row at 7726 KEEPS the broken name — it is the record of the defect, and an assertion caught me about to rewrite both |
+| `H:offsets-from-original` | re-pointed to `H32` (`requirementSupport.ts`) |
+| `H:safety-floor-not-configurable` | re-pointed to `M17/M37` in `matcher.test.mjs` |
+| `H:refusal-guard-fires` | **claim deleted** — rewritten to "NOT CURRENTLY EXERCISED … the branch below is UNPROVEN rather than proven" |
+| `H:a-judged-row-counts-and-a-proposed-one-does-not` | **claim deleted** — rewritten to "AND NOTHING PINS IT" |
+| `H:pooled-mode-is-relevant-only` (found later) | re-pointed to `…-and-only-off-the-master` — same truncation shape as row 2 |
+| `H:proposed-evidence-cannot-pass-the-gate` (found later) | **claim was OBSOLETE, not just dangling.** `matcher.test.mjs:1441` argued the escalation toggle is safe ON because "a proposed row can never reach the gate". The owner INVERTED that rule on 2026-09-01 ("proposals can count until vetoed"), so the sentence was false as well as dead. Re-pointed to `H:a-vetoed-row-cannot-pass-the-gate` and the reversal recorded inline |
+
+**Re-scan: 13 dangling ids → 12, and every one of the 12 is now accounted for** — 2 built at
+runtime (`` test(`H:coverage-${name}`) ``), 3 illustrative examples inside naming-convention
+comments (`H:schema-parity`, `H:no-vacuous-gate`, `H45c`), and 7 deliberate correction prose that
+names a dead id in order to say it is dead. **Zero live false claims remain.** The residual is
+exactly the shape that defeats a checker, which is why the count does not go to zero and should not
+be driven there.
+
+**Side effect the suite caught, and it is the good kind.** `deferredLedger.test.mjs` failed on
+`D:hslug-scan-one-file` — its `check: grep` no longer matched, because the ACT-j rewrite of `H26`
+removed the single-file `readFileSync` the row names. A stale-row guard reporting its own row stale
+is the ledger working. Row CLOSED with the wider finding recorded: the blindness was not only
+cross-file, `test('H45c: x')` also minted past the frozen range invisibly.
+
+Evidence: api 1063/1063, app 441/441, `tsc` clean.
 
 ### ACT-2026-09-02-l — I PUSHED CONFLICT MARKERS. Hardening lesson, not a footnote.
 

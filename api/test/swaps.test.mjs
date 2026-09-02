@@ -613,7 +613,7 @@ test('expertise is a real swap list, paired off the master like any other', () =
   // `masterKey` joined on 2026-08-30: it names the MasterContext block this list's master text is
   // read from, which is what tells `splitBaselineItems` whether that block is the pooled two-level
   // shape. Expertise's is its own flat field, so it is NOT pooled — asserted below and again in
-  // `H:pooled-mode-is-relevant-only`.
+  // `H:pooled-mode-is-relevant-only-and-only-off-the-master`.
   assert.deepEqual(LIST_FIELDS.expertise, {
     passA: 'expertise', passB: 'finalExpertise', merge: 'ExpertiseBullets', masterKey: 'expertise',
   })

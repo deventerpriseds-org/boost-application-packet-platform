@@ -1437,9 +1437,15 @@ test('H:escalation-on-by-default: the seed is ON, and an owner saying false stil
   // safe-by-default posture the toggle shipped with hours earlier, so it is pinned rather than left
   // to a literal someone re-reads later and "corrects".
   //
-  // What makes ON safe is not the toggle — it is that a proposed row can never reach the gate
-  // (`H:proposed-evidence-cannot-pass-the-gate`). The tier only ever adds information beside a
+  // What makes ON safe is not the toggle — it is that the owner's veto outranks every warrant
+  // (`H:a-vetoed-row-cannot-pass-the-gate`). The tier only ever adds information beside a
   // requirement that had none.
+  //
+  // CORRECTED 2026-09-02: this used to cite `H:proposed-evidence-cannot-pass-the-gate` and argue
+  // that a proposed row can NEVER reach the gate. That case was renamed and its rule INVERTED on
+  // the owner's instruction ("I already said proposals can count until vetoed"), so the sentence
+  // had become false as well as dangling — a proposed row does reach the gate now, and the veto is
+  // what holds it back. Found by a citation scan; see `checks.test.mjs` for the inversion itself.
   assert.equal(DEFAULT_THRESHOLDS.evidenceEscalate, true, 'the seed must be ON')
 
   // THE THREE STATES, and the middle one is the reason this is `!== false` rather than `=== true`.
