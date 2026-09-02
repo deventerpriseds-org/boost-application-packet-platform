@@ -7094,6 +7094,84 @@ every packet. Both invisible in the spec, both obvious in one row of production 
 broke one file and silently shortened two, three INERT mutation verdicts that were my own
 invocation, and two fixture shapes asserted without reading.
 
+### ACT-2026-09-02-b — the baseline/tweak flow is now a SKILL, not tribal knowledge
+
+Owner: *"shouldn't we make this a skill that we can use anytime I need to make a tweak to a section
+or for a baseline build with or without values to tweak?"* Yes — and the argument for it is the
+session's own record: the same two operations were re-derived four times, and aimed at the **wrong
+target twice**.
+
+`eds-claude-skills/.claude/skills/baseline-build-and-tweak.md` (`b6b3240`). Both operations were
+ALREADY deployed routes; nothing new was built. What was missing was knowing which call to make.
+
+It leads with **target selection**, because that is what actually went wrong — "use them for
+<Company>" in a message that also says "MasterContext" does NOT authorise editing that company's
+tuned packet. Then the two call shapes, the `jd_grounded` pre-flight (a stale cache regenerates from
+the model and discards both the overlay and the tailoring), the three non-optional checks
+(`qcApplied: null` proves no model ran; `cleanedTokens`/`warnings` prove no token survived;
+`diag/doc-layout` reads the DOCUMENT — a correct package does not prove a correct page), and four
+traps that each cost a loop.
+
+**Open, for the owner:** `SkillsBullets2` carries 9 items against a template capacity of 8. All nine
+render and `slotOverflow` reports it rather than dropping "Change Management" silently — but cutting
+one or widening the slot is the owner's call, not mine.
+
+### ACT-2026-09-02-c — the `jd` step was RENDERED, and the standing gap number was the instrument
+
+Owner: *"render the current jd analysis page vs the screenshot we took of the prototype... be sure
+to lean on render as well as reading the code as equal if not more importance."*
+
+Both sides rendered locally (`render-spec.mjs`, `render-app.mjs`, `compare-ui.mjs`) and **looked
+at**. Findings in `docs/qc-evidence/PROTOTYPE-COVERAGE.md` §16, which supersedes the `jd` row of
+§1a (`266% · 27 panels · 3 controls`).
+
+**~19 of the 27 "missing panels" are ONE fixture gap.** The whole "posting against your profile"
+surface is fed by `comparison`; the app rendered `"Loading the comparison..."`, which
+`postingAnalysis.js:149` returns *only* when `comparison` is undefined. `appRequirements.ts:846-851`
+returns it; `build-fixtures.mjs` never emitted it and the dump never carried the dimension rows.
+**The harness has never once been able to see that surface**, so every quote of that row since
+`UI-GAP-REGISTER.md` counted a blind spot as product absence.
+
+**Four more apparent gaps refuted by source** — the collapsed nav (owner-decided, `shell.jsx:369`),
+the `from email` badge (built, gated on `opp.source`), the answered-link (built, renamed), and the
+per-kind coverage fractions (deliberate: minting a fourth coverage number that `postingAnalysis.js`
+says could not agree with the other three).
+
+**Real remaining gaps: two** — the `M1–M5 / D1–D4 / N1–N3` id legend, and a numeric match in the
+header. Against that the app substantially EXCEEDS the prototype on provenance (character offsets,
+anchor-vs-exact, quote-vs-paraphrase, per-row evidence state, 21 parsed responsibilities vs 4).
+
+**Guard added:** `comparison` is now a `fixture-canary` REQUIRED input. **`render-app.mjs` and
+`compare-ui.mjs` now REFUSE to run** against the committed fixture until the dump and builder carry
+it — the doctrine working as designed, and stated to the owner rather than hidden.
+
+**OPEN:** extend `fixture-refresh.yml` + `build-fixtures.mjs` to carry `comparison`, then re-measure.
+Until then the comparison surface is UNSCORED, not scored zero.
+
+### ACT-2026-09-02-d — a purposeful divergence is not a gap (owner-stated)
+
+> *"we have disproven and improved several things so rollback isn't necessary if the difference is
+> purposeful and not work left to be done... does that apply here in any way?"*
+
+It applied to **every remaining row** of `PROTOTYPE-COVERAGE.md` §16c, which is now corrected to
+**zero confirmed prototype-side gaps on the `jd` step**:
+
+1. **"the id legend is absent"** — BUILT, and on that very screen (`PostingAnalysis.jsx:895-898`).
+   I asserted it from a screenshot **truncated at the fold**. Absence claimed from a partial view is
+   the same error this pass spent its length catching in the fixture; I made it with the render.
+2. **"the id scheme is a gap"** — an owner decision (2026-08-23) that is strictly better:
+   `RQ-MH`/`RQ-NTH`/`RESP` encode that two requirement grades share a stem and a responsibility does
+   not. The prototype's `M/D/N` is the flattening it replaced.
+3. **"no numeric match in the header"** — a deliberate refusal. The prototype prints
+   `ATS MATCH 92%` / `AUDITABLE MATCH 95 FAIL`; the app says *"no applicant tracking system produced
+   it"* and renders `not run yet` when the score is null. That is this repo's **never fabricate a
+   composite** rule applied AGAINST the prototype.
+
+**The standing rule this earns:** the prototype is a proposal, not a specification, and parity is
+not the goal where the app has deliberately corrected it. Before scoring any row a gap, ask whether
+the divergence is RECORDED — a comment citing the owner, a decision in `actions.md`, a rule in
+`CLAUDE.md`. **A parity document that cannot tell a divergence from a deficit will keep proposing
+that the product be made worse.**
 
 ## D:swap-screen-reads-a-dead-pass — the row settled against live data, 2026-09-02
 
@@ -7160,3 +7238,40 @@ while named offenders render on the QC step instead.
 
 **OPEN, one item, not applied here:** give `fixture-refresh.yml` the `run_id` predicate. Filed in
 §16d with the recommended shape. This ACT changed no `app/` or `api/` source.
+
+## Continuous lane, 2026-09-02 — comments, lineage, 4.11 dock, 4.5-12 pick list
+
+Owner: *"fix both comments and take the lineage row / then fix comparison to happen before the
+corrections / finish 4.5 and 4.11... on desktop wide the panel rather than float but you will need a
+different approach of your choosing for mobile / do all of this continuously without stopping so
+much."*
+
+**All four landed on `main` and deployed.** `e66987c` (comments + lineage, api-deploy `33641267013`
+success), `6996da2` (4.11 dock), `5d37e3d` (4.5-12 pick list).
+
+**Comments + lineage.** `skillLineage` compared the SHIPPED package against each raw call, but
+`const pkg = built.pkg` is one reference and both `applyCorrectionPass` and `normalisePackage`
+mutate it in place, so `winner` read `none` on 4 of 5 slots. Snapshotted before the correction pass.
+Separately the precedence order tested call3 -> call2 -> call1, which credited a PASS-THROUGH as
+authorship -- live on RelevantBullets2/3, where call1 and call2 were byte-identical at 73 chars.
+Reversed to earliest-matching-pass.
+
+**4.11.** Shell cap 1280 -> 1560 (the prototype's own) is what made docking possible; the August
+refusal was arithmetic, not preference. Three modes, one body: `dock` at >= 1450 (DERIVED from
+NAV + GUTTER + MIN_CONTENT + DOCK + GUTTER, never typed), `float` below, `sheet` on mobile via a new
+Overlay variant rising from the bottom edge. Two existing guards encoded the REVERSED decision and
+were replaced, not deleted -- and the replacements are stronger, because the old one asserted
+`data-qc-mode="float"` as a literal and could not tell a mode that was chosen from one that was typed.
+
+**4.5-12.** Scored ABSENT on the wrong half of its own reason. `shapeOf` still has no `select` shape
+and none was invented; the row's real dependency, "per-item candidacy on the insertions payload",
+had been satisfied for months by `swapsForList`. Third row this week to close because the RANKING was
+stale rather than the work.
+
+**Baseline: 160/183 BUILT (87.4%), 22 PARTIAL, 1 ABSENT.** The last row, 4.11-4, stays ABSENT: two of
+its three scope options have no route, so shipping it means shipping two dead controls. NOT
+reclassified DELIBERATE to flatter the count.
+
+**Ten guards this lane, every one mutation-proved FIRED.** One NOT-APPLIED (wrong anchor indent) and
+one false INERT (I piped the test command through `grep -q`, so the must-fail pattern could never
+match) -- both my harness errors, both caught by the harness reporting honestly rather than guessing.

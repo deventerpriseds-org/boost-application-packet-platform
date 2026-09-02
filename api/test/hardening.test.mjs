@@ -5236,3 +5236,100 @@ test('H:reviewer-setting-joins-the-existing-family: no second settings surface',
     'the column must be in the SELECT too — a column the loader does not project is unreadable, ' +
     'which is the exact shape H:every-chk-column-is-selected was written for')
 })
+
+// ── the fixture instrument: it must SEE the surface it scores ────────────────────────────────────
+// Measured 2026-09-02: `comparison` was absent from every fixture this pipeline ever built, and that
+// ONE key made ~19 of the 27 "missing panels" on the jd step phantom for weeks. The guards below
+// assert the invariants, not that incident. Evidence: docs/qc-evidence/PROTOTYPE-COVERAGE.md 16a,
+// docs/qc-evidence/AC-fixture-comparison.md.
+
+const REPO = new URL('../../', import.meta.url).pathname
+
+test('H:fixture-requirements-is-the-api-body: a captured route is passed through, never reshaped', async () => {
+  const { writeFileSync, mkdtempSync, readFileSync } = await import('node:fs')
+  const { execFileSync } = await import('node:child_process')
+  const { tmpdir } = await import('node:os')
+  const dir = mkdtempSync(`${tmpdir()}/fx-`)
+  const OPP = '00000000-0000-0000-0000-00000000dead'
+
+  // The captured body carries keys the builder's DERIVED shape does not, and a `total` that
+  // deliberately DISAGREES with requirements.length - so any re-derivation is visible.
+  const apiRequirements = {
+    oppId: OPP, requirements: [{ seq: 1, kind: 'must_have', text: 'a' }],
+    total: 99, located: 7, evidenced: 1, unevidenced: 0,
+    comparison: { resolved: true, dimensions: [{ key: 'k', fit: 'strong' }], summary: { graded: 1 }, set: { keys: ['k'] } },
+  }
+  writeFileSync(`${dir}/raw.json`, JSON.stringify({
+    packet: { id: 'p', status: 'review' }, opp: { id: OPP, owner_email: 'o@e.io' },
+    artifacts: [{ id: 'a1', packet_id: 'p', type: 'resume', status: 'review' }],
+    insertions: [], corrections: [],
+    requirements: [{ seq: 1, opp_id: OPP, kind: 'must_have', text: 'a', char_start: 0 }],
+    gates: [], checks: [{ artifact_id: 'a1', name: 'c', pass: true }],
+    swaps: [{ packet_id: 'p', seq: 1, action: 'kept' }],
+    checkPrefs: { owner_email: 'o@e.io', chk_skill_max_chars: 24 },
+    apiRequirements,
+  }))
+  execFileSync('node', [`${REPO}scripts/build-fixtures.mjs`, '--raw', `${dir}/raw.json`,
+    '--opp', OPP, '--out', `${dir}/f.json`], { cwd: REPO })
+  const out = JSON.parse(readFileSync(`${dir}/f.json`, 'utf8'))
+
+  // THE INVARIANT: identical, key for key. `total: 99` surviving is what proves nothing re-derived it.
+  assert.deepStrictEqual(out[`/opportunity/${OPP}/requirements`], apiRequirements)
+})
+
+test('H:canary-refuses-a-hollow-comparison: a present-but-empty comparison fails like an absent one', async () => {
+  const { execFileSync } = await import('node:child_process')
+
+  // THE SHIPPED PREDICATE, exercised - not a local copy of it. `assertFixtureCanSee` calls
+  // process.exit, so each stub is fed to it in a CHILD process and the exit code is the verdict.
+  // An earlier draft of this test re-implemented the predicate inline and would have passed with
+  // the guard reverted: it graded a copy. That is the inert-guard failure this file exists to stop,
+  // committed inside a guard against inert guards.
+  const verdict = (comparison) => {
+    const fixtures = {
+      '/search-prefs': { checks: { skill_max_chars: 24 } },
+      '/swaps': { swaps: [] },
+      '/opportunity/x/requirements': comparison === undefined ? {} : { comparison },
+    }
+    const src = `import('${REPO}scripts/lib/fixture-canary.mjs')`
+      + `.then(m => { m.assertFixtureCanSee(${JSON.stringify(fixtures)}, 'test'); process.exit(0) })`
+    try { execFileSync('node', ['-e', src], { stdio: 'pipe' }); return 0 } catch (e) { return e.status }
+  }
+
+  // Every hollow stub must be REFUSED. `{resolved:true,dimensions:[]}` is the one a `!!comparison`
+  // check lets through, and it is a REAL API body - what the route returns for an opportunity
+  // nobody has resolved. Accepting it leaves the same ~19 panels missing.
+  for (const stub of [
+    undefined,
+    {},
+    { resolved: true, dimensions: [] },
+    { resolved: false, dimensions: [{ key: 'x' }] },
+    { resolved: true, dimensions: [{ key: 'x' }], summary: null },
+    { resolved: true, dimensions: [{ key: 'x' }], summary: { graded: 1 }, set: { keys: [] } },
+  ]) {
+    assert.equal(verdict(stub), 1, `hollow comparison ACCEPTED: ${JSON.stringify(stub) || 'undefined'}`)
+  }
+
+  // ...and a real resolved one must be allowed through, or the canary blocks every measurement.
+  assert.equal(verdict({
+    resolved: true, dimensions: [{ key: 'k', fit: 'strong' }],
+    summary: { graded: 1 }, set: { keys: ['k'] },
+  }), 0, 'a real resolved comparison was refused')
+})
+
+test('H:no-dimension-logic-outside-api: the dimension brain has ONE home', async () => {
+  const { readdirSync, readFileSync, statSync } = await import('node:fs')
+  // Comments stripped first - this file and build-fixtures.mjs both DISCUSS the catalogue at
+  // length, and a guard that fires on the sentence explaining it is the cry-wolf failure.
+  const strip = (t) => t.replace(/\/\*[\s\S]*?\*\//g, '').split('\n')
+    .map((l) => l.replace(/^\s*\/\/.*$/, '')).join('\n')
+  const banned = /\b(DIMENSION_CATALOGUE|DIMENSION_SETS|comparisonStaleness|roleFamilyOf|dimensionsFor)\b/
+  const walk = (d) => readdirSync(d).flatMap((n) => {
+    const p = `${d}/${n}`
+    if (statSync(p).isDirectory()) return walk(p)
+    return /\.(mjs|js)$/.test(n) ? [p] : []
+  })
+  const offenders = walk(`${REPO}scripts`).filter((p) => banned.test(strip(readFileSync(p, 'utf8'))))
+  assert.deepEqual(offenders, [],
+    'dimension logic copied into scripts/ - a re-derived fixture measures itself')
+})
