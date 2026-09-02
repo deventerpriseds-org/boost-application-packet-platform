@@ -520,6 +520,47 @@ Key tables (PostgreSQL):
 - iOS testing: requires macOS runner or BrowserStack; categorically unavailable in Linux CCR
 
 ## Active work
+**2026-09-02 — SPEC 4.6 DISPLACEMENT SHIPPED, and the row that called it unsourced was WRONG.**
+Commit `ac0f68d` + two test commits on `claude/boost-app-setup-approach-rjxhca`.
+
+The keyword panel now renders "Took the place of X in Skills 1." The old comment
+(`AssetBlocks.jsx:1156-1161`) said SPEC 4.6's three additions had NO source; `PULL-CANDIDATES.md`
+PC-3 names `swap_decision.from_label -> to_label` in its own text, two paragraphs below. The comment
+was written from the other two additions and swept the third along -- then read back as fact.
+**This is the SECOND instance of the failure `CLAUDE.md`'s feasibility table already logs once**
+("the term library blocks the keyword chips" -> wrong, `model_keyword` had been flowing for months).
+
+**FEASIBILITY MEASURED BEFORE BUILDING** (db-query run **33687166561**, the connector having lapsed):
+35 distinct swapped TO-labels, 7,220 distinct `model_keyword`s, **11 exact joins**. So the line
+renders on real rows and returns null for the rest. Not empty, not universal -- checked rather than
+assumed, which is the whole point of the table.
+
+**The owner's challenge was right on two of three §4.5 rows.** The grade is derivable from OUTPUT,
+not from a library: `term_library_entry` being empty is irrelevant because the prototype never
+visualises a library -- `libTerms()` is `ATS_TERMS.filter(t => t.source === 'library')`, a flag
+filter used as a denominator. Measured live: **5,396 EXACT vs 6,804 VARIANT** (posting verbatim
+contains the keyword or not). So `4.5-29`/`4.5-30` are REOPENED as buildable. What survives is
+narrower: every app chip is a `model_keyword`, declared never scoreable (`schema.ts:338`), so a
+grade would rank something the panel says counts toward nothing.
+
+`4.5-33` and `4.5-38` stay closed, now on evidence rather than argument: `N2` is the only
+`coverage: 'open'` requirement in the prototype fixture and it sits on a TERM, never on a field
+section, so the red `ReqChip` branch is unreachable in the §4.5 margin -- confirmed by rendering it
+(`/tmp/shots/proto-keychip.png`, every POSTING LINES ANSWERED chip green).
+
+## Hardening -- 2026-09-02: mutation-proving caught MY TESTS twice, not the guards
+Both new guards came back **INERT** first time, and both times the fault was the fixture:
+1. Every non-`swapped` row was ALSO excluded by a second condition (`dropped` had no TO, `added` no
+   FROM, `kept` had FROM === TO), so deleting the `action` check changed nothing. Fixed by adding a
+   `kept` row with a real from/to pair -- **not hypothetical: production carries 55 rows with both
+   labels against 35 `swapped`**, so ~20 rows would render a FALSE "took the place of".
+2. With a populated `to_label`, an empty keyword falls through the loop anyway, so deleting
+   `if (!k) return null` was equivalent. A BLANK `to_label` separates them -- `normLabel('')` matches
+   and the empty keyword walks off with a displacement claim.
+**Guardrail: an INERT result is a claim about the FIXTURE until you have found the input that makes
+the mutation non-equivalent.** The harness says this in its own output and it was right twice.
+All four guards now FIRED via `/workspace/eds-claude-skills/scripts/mutate.sh`.
+
 **2026-09-02 — §4.5 (Portfolio) IS 35/39, AND THE REMAINING 4 ARE NOT BUILDABLE HONESTLY.** Asked to
 "get us to 40". Ground-truthed against the LIVE DB now the connector is back, not against the docs:
 
