@@ -5811,6 +5811,16 @@ be stale — the one there predated the `checkPrefs` key).
 
 ## Hardening
 
+**2026-09-02 — the phase tag must be BARE, never bolded.** `eds-phase-tag.py` matches
+`text.strip().startswith(TAG)` against literal `'Fact Finding:'` etc. (line 47). Writing
+`**Fact Finding:**` fails the check even though it reads correctly to a human — measured: 10 of 10
+text blocks in one turn rejected while every one of them opened with the words. It applies to
+EVERY text block in the turn, not just the first (the v15 fix), so a block emitted between two tool
+calls needs its own tag. Root cause: assumed the checker parsed markdown; it does a plain string
+compare. Guard: the checker itself already catches this — the lesson is to read the matcher before
+assuming a format is equivalent.
+
+
 - **A `--theirs` merge resolution on `.claude/actions.md` silently discarded a tracking append I had
   stated I would re-add.** Caught only because PR #66 showed `changed_files: 1`. Root cause: I
   resolved and committed in one step without diffing the result against my own commit.
