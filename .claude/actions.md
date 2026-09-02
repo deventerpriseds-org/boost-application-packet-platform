@@ -7324,7 +7324,6 @@ reclassified DELIBERATE to flatter the count.
 one false INERT (I piped the test command through `grep -q`, so the must-fail pattern could never
 match) -- both my harness errors, both caught by the harness reporting honestly rather than guessing.
 
-<<<<<<< HEAD
 ### ACT-2026-09-02-e — the fixture now carries `comparison`, and the jd step was RE-MEASURED
 
 Owner: *"fix the fixture builder to carry comparison, then re-measure."* Done, TIER 1, ACs first
@@ -7392,7 +7391,6 @@ denominator — spec rows, not strings — and is at **164/183 (89.6%)** with th
 and four rows re-verdicted (`826c846`, `8369424`, `beb44e5`). This measurement's value is as a
 CANDIDATE LIST feeding that instrument, not as a second headline competing with it. Two headline
 numbers from two instruments is the state §1a already warns about.
-=======
 ---
 
 ## ACT-70 — PROTOTYPE-COVERAGE headline collides across parallel render lanes
@@ -7457,7 +7455,6 @@ the state, not by argument.
 
 **OPEN, neither applied (both fixture, not product):** `run_id` predicate (§17d) and `artifact_score`
 (§17f) in `fixture-refresh.yml`. No `app/` or `api/` source changed by this ACT.
->>>>>>> origin/main
 ### ACT-68b — the five PARTIAL rows on the cover step, resolved (2026-09-02)
 
 **Asked:** *"merge it to main and resolve the remaining 5. I need a visual for 4.4-29."*
@@ -7513,7 +7510,6 @@ null.** Read back from production (`33651206610`), not inferred from a 200.
 id that 404'd, and `artifact_score.created_at` which does not exist (the column is `computed_at`).
 The schema was 5 lines away both times.
 
-<<<<<<< HEAD
 ### ACT-2026-09-02-g — the JD-analysis rows re-verdicted, and EVERY tally line was stale
 
 Owner asked whether §4.1-§4.3 could "sit dormant and untouched". **Confirmed: yes.** The parity
@@ -7636,7 +7632,6 @@ resolve to a defined case) has a LIVE failure — ~4-5 dangling citations — bu
 binary: an H-slug is open-ended prose that truncates, wraps and interpolates, so the cleanest variant
 false-accuses ~6 of 11 findings including H26's own comment. The AC pass's recommendation, which I
 accept: **a five-minute hand fix, not a guard.** Not silently dropped.
-=======
 ---
 
 ## ACT-72 — Merge the render + intent lanes to `main`; close I1 with live data
@@ -7714,7 +7709,6 @@ regex only, not a semantic rewrite. Inherent to string matching.
 **Still open, unchanged:** the 8 stale per-section tally lines (own commit), `13-RENDER`'s `83 of 84`
 (different formula), and the 4th `fixture-canary.mjs` REQUIRED entry (blocked until
 `fixture-refresh.yml` is dispatched).
->>>>>>> origin/main
 
 ### ACT-2026-09-02-k — citation resolution MEASURED; six danglers found; guard NOT built, with a reason
 
@@ -7754,3 +7748,36 @@ the claim?"). Revisit the guard only if these recur — recurrence is the eviden
 it, and there is none yet.
 
 **OPEN — awaiting the owner's answer:** do the five edits, or leave them.
+
+### ACT-2026-09-02-l — I PUSHED CONFLICT MARKERS. Hardening lesson, not a footnote.
+
+While recording ACT-k I ran `git merge origin/main` and `git add -A && git commit` in **one chained
+command**. The merge conflicted; `add -A` staged the conflicted files; the commit succeeded and I
+**pushed `75a5969` containing conflict markers** in `PROTOTYPE-COVERAGE.md`, `prototypeCoverage.test.mjs`
+and `actions.md`. Nothing in my own tooling stopped it — I caught it only because the next command's
+output looked wrong.
+
+**THE RULE: never chain `git merge` with `git add -A && git commit` in one invocation.** `git merge`
+exits NON-ZERO on conflict, but `;`-separation and a following `&&` chain let the commit run anyway.
+Merge, then LOOK (`git status --porcelain | grep '^UU'`), then stage.
+
+**What the repair surfaced — both lanes had built complementary guards in the same file:** mine on
+per-section tallies, theirs on the global headline. Kept both. Naive keep-both concatenation broke
+the file's syntax (conflict hunks do not respect JS structure), so it was rebuilt as
+`origin/main`'s file + my block re-appended, verified with `node --check`.
+
+**Then the guards earned their keep, three times in a row, on the merge itself:**
+1. `H:headline-matches-the-rows` (theirs): headline stated 170/181, merged rows said **172** — row
+   moves across lanes are ADDITIVE, so the merged truth is higher than either lane reported.
+2. `H:coverage-every-tally-is-read` (mine, AC-5): their tally format carries a parenthetical before
+   the colon, which my regex missed. It reported *"tally line(s) no longer parse for: 4.8, 4.10"*
+   **by name** instead of silently checking nothing. That is the exact failure AC-5 exists for.
+3. Once parsing, it found §4.8 stating BUILT 18 / PARTIAL 4 against merged rows saying **19 / 3**.
+
+**And the not-vacuous fixture caught two of MY errors:** the §4.10 anchor no longer matched the
+reformatted line (reported `applied no change - it would report the guard inert`, refusing a false
+result), and rebuilding from their base had silently reverted my `parse(lines = …)` change, so
+fixtures were being checked against the unmutated file — a genuinely INERT guard, caught by the
+assertion that exists to catch exactly that.
+
+Headline now **172 of 181 (95.0%)**, ABSENT **1**. api 140/140, app 441/441.

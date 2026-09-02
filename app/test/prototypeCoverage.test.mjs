@@ -120,154 +120,6 @@ test('H:coverage-absent-is-rare-enough-to-mean-something', () => {
     `${absent.length} ABSENT rows. Either the backlog grew a lot, or rows are being marked absent without being checked.`)
 })
 
-<<<<<<< HEAD
-
-// ── A STATED TALLY MUST EQUAL ITS OWN ROWS ───────────────────────────────────────────────────────
-//
-// WHY, MEASURED 2026-09-02. All ELEVEN per-section tally lines had drifted from their rows, every
-// one UNDER-claiming. `§4.10` read `BUILT 2 · PARTIAL 2 · ABSENT 4` against eight rows that all say
-// BUILT; `§4.11` read `BUILT 0 · ABSENT 6` against rows saying BUILT 5 · ABSENT 1. The headline in
-// §13-CURRENT stayed correct the whole time because a person recomputed it every pass. The section
-// lines had no such discipline: a DERIVED VALUE WITH NO DERIVER AND NO CONSUMER THAT VALIDATES IT.
-//
-// ON THIS FILE'S OWN SCOPE NOTE (above): it argues ABSENT-only, because demanding a hand-written
-// `check:` pattern for 221 rows is ceremony, and because row-level under-claiming is cheap. Both
-// still hold. Neither applies here — this check demands NO annotation from anyone, it computes; and
-// "under-claiming is cheap" is true of a ROW (granular, read by one person) and measurably false of
-// a TALLY (quoted, aggregated into the headline, 100% incidence).
-//
-// THREE DESIGN CHOICES ARE THE INDEPENDENT AC PASS'S, NOT MINE, and each corrects a real defect in
-// the version I withdrew (docs/qc-evidence/AC-tally-drift-guard.md):
-//   1. It REUSES `parse()`. My version read "the 4th cell", but rows carry 3, 5, 6 and 7 cells —
-//      §4.12 is a 3-cell table with the verdict in cell 2 — so it resolved NOTHING for those rows
-//      and only looked right via an accidental `cells.length < 4` skip. A second parser, in the one
-//      file whose header records a second parser reporting "129 BUILT against a real 151".
-//   2. Rows are attributed BY ID PREFIX, never by markdown section: `:487`'s single heading covers
-//      §4.11 AND §4.12, 14 rows against a correct `§4.11 tally — 9 rows`.
-//   3. The scan unit is the TALLY LINE, not the section. `:346` is an orphan fragment
-//      `ABSENT **2** · DELIBERATE **7**.` sitting inside §4.5, whose rows hold 0 ABSENT and 6
-//      DELIBERATE. A section-scoped scanner fires TWICE on a correct document, on day one. It is
-//      deliberately left in place as a permanent negative control.
-const TALLY_RE = /^\*\*§(4\.\d+) tally — (\d+) rows?:\*\*/
-const EXPECTED_TALLIES = ['4.1', '4.2', '4.3', '4.4', '4.5', '4.6', '4.7', '4.8', '4.9', '4.10', '4.11']
-// §4.12 has five rows and no tally, legitimately: all five are OUT-OF-SCOPE, which §0 excludes from
-// the denominator. Named, with its reason, so a NEW section cannot appear with no summary in silence.
-const TALLY_EXEMPT = ['4.12']
-
-function tallies(lines) {
-  const out = []
-  lines.forEach((line, i) => {
-    const m = TALLY_RE.exec(line)
-    if (!m) return
-    const stated = {}
-    for (const [, v, n] of line.matchAll(
-      /\b(BUILT|PARTIAL|ABSENT|DELIBERATE|NOT-IN-PROTOTYPE|OUT-OF-SCOPE)\*{0,2} \*\*(\d+)\*\*/g)) {
-      stated[v] = Number(n)
-    }
-    out.push({ n: i + 1, section: m[1], statedRows: Number(m[2]), stated })
-  })
-  return out
-}
-
-/** Rows grouped by the id prefix they declare — never by where they sit in the file. */
-function countsBySection(rows) {
-  const by = {}
-  for (const r of rows) {
-    const c = (by[r.section] ||= {})
-    if (r.verdict) c[r.verdict] = (c[r.verdict] || 0) + 1
-  }
-  return by
-}
-
-// The assertions, as named functions over (lines, rows) so the not-vacuous test below can run the
-// SAME code CI runs against a mutated copy. A fixture exercising a simplified copy proves nothing.
-const T = {
-  // AC-1 / AC-10: every number the line states equals the recount. `?? 0` is load-bearing — a
-  // stated category the rows do not have must FAIL, and `if (!counted[v]) continue` would pass it.
-  'tally-matches-rows': (lines, rows) => {
-    const by = countsBySection(rows)
-    return tallies(lines).flatMap((t) => Object.entries(t.stated)
-      .filter(([v, stated]) => ((by[t.section] || {})[v] ?? 0) !== stated)
-      .map(([v, stated]) => `§${t.section} (line ${t.n}) says ${v} ${stated}, rows say ${(by[t.section] || {})[v] ?? 0}`))
-  },
-  // AC-8 + AC-9: the stated N must be the real row count, and the numbers must ACCOUNT for all of
-  // them. Together these close the omission hole -- dropping a non-zero category from a line leaves
-  // sum(stated) < N, which is the §4.10/§4.11 under-claim shape.
-  'tally-accounts-for-every-row': (lines, rows) => {
-    const by = countsBySection(rows)
-    const problems = []
-    for (const t of tallies(lines)) {
-      const real = Object.values(by[t.section] || {}).reduce((a, b) => a + b, 0)
-      if (real !== t.statedRows) problems.push(`§${t.section} (line ${t.n}) says ${t.statedRows} rows, counted ${real}`)
-      const sum = Object.values(t.stated).reduce((a, b) => a + b, 0)
-      if (sum !== t.statedRows) problems.push(`§${t.section} (line ${t.n}) numbers sum to ${sum} but it claims ${t.statedRows} rows - a category is missing from the line`)
-    }
-    return problems
-  },
-  // AC-5 + AC-6, and the most important assertion here: every other one is VACUOUS the moment a
-  // line stops matching. Without this the failure mode is not "the guard misfires", it is "the
-  // guard silently stops existing" - the original defect one level up.
-  'every-tally-is-read': (lines, rows) => {
-    const seen = tallies(lines).map((t) => t.section).sort()
-    const problems = []
-    const missing = EXPECTED_TALLIES.filter((s) => !seen.includes(s))
-    const extra = seen.filter((s) => !EXPECTED_TALLIES.includes(s))
-    if (missing.length) problems.push(`tally line(s) no longer parse for: ${missing.join(', ')}`)
-    if (extra.length) problems.push(`unexpected tally section(s): ${extra.join(', ')}`)
-    for (const s of [...new Set(rows.map((r) => r.section))]) {
-      if (!EXPECTED_TALLIES.includes(s) && !TALLY_EXEMPT.includes(s)) {
-        problems.push(`§${s} has rows but no tally line and is not in TALLY_EXEMPT`)
-      }
-    }
-    return problems
-  },
-  // AC-4: a row whose verdict does not resolve is counted nowhere, so it would silently shrink the
-  // recount and make a stale line look correct.
-  'tally-rows-resolve-a-verdict': (lines, rows) =>
-    rows.filter((r) => !r.verdict).map((r) => `row ${r.id} (line ${r.n}) resolved no verdict`),
-}
-
-for (const [name, fn] of Object.entries(T)) {
-  test(`H:coverage-${name}`, () => {
-    const lines = readFileSync(DOC, 'utf8').split('\n')
-    assert.deepEqual(fn(lines, parse(lines)), [])
-  })
-}
-
-test('H:coverage-tally-guard-not-vacuous: every assertion above fires on its own reinstated defect', () => {
-  const LINES = readFileSync(DOC, 'utf8').split('\n')
-  // Anchor + change assertions are the point: an anchor that stopped matching would report the
-  // guard INERT when nothing was actually tested. That exact false-INERT happened on this lane today.
-  const swap = (find, replace) => {
-    const i = LINES.findIndex((l) => l.startsWith(find))
-    assert.notEqual(i, -1, `fixture anchor "${find}" not found - the fixture has gone stale`)
-    const out = [...LINES]
-    out[i] = replace(out[i])
-    assert.notEqual(out[i], LINES[i], `fixture for "${find}" applied no change - it would report the guard inert`)
-    return out
-  }
-  const fixtures = [
-    // The real §4.10 defect, put back verbatim.
-    ['tally-matches-rows', swap('**§4.10 tally', (l) =>
-      l.replace('BUILT **8**.', 'BUILT **2** · PARTIAL **2** · ABSENT **4**.'))],
-    // The omission variant: drop a non-zero category, leaving the numbers short of the stated N.
-    ['tally-accounts-for-every-row', swap('**§4.1 tally', (l) =>
-      l.replace(' · DELIBERATE **10**', ''))],
-    // A line that stops parsing must not silently disable the guard.
-    ['every-tally-is-read', swap('**§4.7 tally', (l) => l.replace('**§4.7 tally', '**S4.7 tally'))],
-    // A row whose verdict cannot be resolved.
-    ['tally-rows-resolve-a-verdict', swap('| 4.10-1 |', (l) =>
-      l.replace(/\bBUILT\b/, 'looks fine'))],
-  ]
-  const proven = []
-  for (const [name, lines] of fixtures) {
-    const problems = T[name](lines, parse(lines))
-    assert.ok(problems.length > 0, `${name} did NOT fire on its own reinstated defect - the guard is inert`)
-    proven.push(`${name}: ${problems[0].slice(0, 76)}`)
-  }
-  assert.equal(proven.length, Object.keys(T).length,
-    `every assertion in T must have a fixture; proven ${proven.length} of ${Object.keys(T).length}`)
-=======
 // ── ACT-70: the headline must equal the rows ─────────────────────────────────────────────────────
 //
 // WHY THIS EXISTS, measured rather than imagined. `13-CURRENT` holds ONE hand-maintained headline
@@ -384,5 +236,154 @@ test('H:headline-guard-has-exactly-one-row-parser', () => {
   assert.equal(hits, 1,
     'the `| <section>-<n> |` row pattern must appear exactly ONCE in this file - every guard reuses '
     + `parse(). Found ${hits} copies, which is a second parser waiting to disagree with the first.`)
->>>>>>> origin/main
+})
+
+// ── A STATED TALLY MUST EQUAL ITS OWN ROWS ───────────────────────────────────────────────────────
+//
+// WHY, MEASURED 2026-09-02. All ELEVEN per-section tally lines had drifted from their rows, every
+// one UNDER-claiming. `§4.10` read `BUILT 2 · PARTIAL 2 · ABSENT 4` against eight rows that all say
+// BUILT; `§4.11` read `BUILT 0 · ABSENT 6` against rows saying BUILT 5 · ABSENT 1. The headline in
+// §13-CURRENT stayed correct the whole time because a person recomputed it every pass. The section
+// lines had no such discipline: a DERIVED VALUE WITH NO DERIVER AND NO CONSUMER THAT VALIDATES IT.
+//
+// ON THIS FILE'S OWN SCOPE NOTE (above): it argues ABSENT-only, because demanding a hand-written
+// `check:` pattern for 221 rows is ceremony, and because row-level under-claiming is cheap. Both
+// still hold. Neither applies here — this check demands NO annotation from anyone, it computes; and
+// "under-claiming is cheap" is true of a ROW (granular, read by one person) and measurably false of
+// a TALLY (quoted, aggregated into the headline, 100% incidence).
+//
+// THREE DESIGN CHOICES ARE THE INDEPENDENT AC PASS'S, NOT MINE, and each corrects a real defect in
+// the version I withdrew (docs/qc-evidence/AC-tally-drift-guard.md):
+//   1. It REUSES `parse()`. My version read "the 4th cell", but rows carry 3, 5, 6 and 7 cells —
+//      §4.12 is a 3-cell table with the verdict in cell 2 — so it resolved NOTHING for those rows
+//      and only looked right via an accidental `cells.length < 4` skip. A second parser, in the one
+//      file whose header records a second parser reporting "129 BUILT against a real 151".
+//   2. Rows are attributed BY ID PREFIX, never by markdown section: `:487`'s single heading covers
+//      §4.11 AND §4.12, 14 rows against a correct `§4.11 tally — 9 rows`.
+//   3. The scan unit is the TALLY LINE, not the section. `:346` is an orphan fragment
+//      `ABSENT **2** · DELIBERATE **7**.` sitting inside §4.5, whose rows hold 0 ABSENT and 6
+//      DELIBERATE. A section-scoped scanner fires TWICE on a correct document, on day one. It is
+//      deliberately left in place as a permanent negative control.
+// A tally line may carry a parenthetical before the colon (`— 25 rows (RE-COUNTED …):**`),
+// which a sibling lane introduced on 2026-09-02. AC-5 caught it by NAME rather than by
+// silently checking nothing, which is the whole reason that assertion exists.
+const TALLY_RE = /^\*\*§(4\.\d+) tally — (\d+) rows?[^:]*:\*\*/
+const EXPECTED_TALLIES = ['4.1', '4.2', '4.3', '4.4', '4.5', '4.6', '4.7', '4.8', '4.9', '4.10', '4.11']
+// §4.12 has five rows and no tally, legitimately: all five are OUT-OF-SCOPE, which §0 excludes from
+// the denominator. Named, with its reason, so a NEW section cannot appear with no summary in silence.
+const TALLY_EXEMPT = ['4.12']
+
+function tallies(lines) {
+  const out = []
+  lines.forEach((line, i) => {
+    const m = TALLY_RE.exec(line)
+    if (!m) return
+    const stated = {}
+    for (const [, v, n] of line.matchAll(
+      /\b(BUILT|PARTIAL|ABSENT|DELIBERATE|NOT-IN-PROTOTYPE|OUT-OF-SCOPE)\*{0,2} \*\*(\d+)\*\*/g)) {
+      stated[v] = Number(n)
+    }
+    out.push({ n: i + 1, section: m[1], statedRows: Number(m[2]), stated })
+  })
+  return out
+}
+
+/** Rows grouped by the id prefix they declare — never by where they sit in the file. */
+function countsBySection(rows) {
+  const by = {}
+  for (const r of rows) {
+    const c = (by[r.section] ||= {})
+    if (r.verdict) c[r.verdict] = (c[r.verdict] || 0) + 1
+  }
+  return by
+}
+
+// The assertions, as named functions over (lines, rows) so the not-vacuous test below can run the
+// SAME code CI runs against a mutated copy. A fixture exercising a simplified copy proves nothing.
+const T = {
+  // AC-1 / AC-10: every number the line states equals the recount. `?? 0` is load-bearing — a
+  // stated category the rows do not have must FAIL, and `if (!counted[v]) continue` would pass it.
+  'tally-matches-rows': (lines, rows) => {
+    const by = countsBySection(rows)
+    return tallies(lines).flatMap((t) => Object.entries(t.stated)
+      .filter(([v, stated]) => ((by[t.section] || {})[v] ?? 0) !== stated)
+      .map(([v, stated]) => `§${t.section} (line ${t.n}) says ${v} ${stated}, rows say ${(by[t.section] || {})[v] ?? 0}`))
+  },
+  // AC-8 + AC-9: the stated N must be the real row count, and the numbers must ACCOUNT for all of
+  // them. Together these close the omission hole -- dropping a non-zero category from a line leaves
+  // sum(stated) < N, which is the §4.10/§4.11 under-claim shape.
+  'tally-accounts-for-every-row': (lines, rows) => {
+    const by = countsBySection(rows)
+    const problems = []
+    for (const t of tallies(lines)) {
+      const real = Object.values(by[t.section] || {}).reduce((a, b) => a + b, 0)
+      if (real !== t.statedRows) problems.push(`§${t.section} (line ${t.n}) says ${t.statedRows} rows, counted ${real}`)
+      const sum = Object.values(t.stated).reduce((a, b) => a + b, 0)
+      if (sum !== t.statedRows) problems.push(`§${t.section} (line ${t.n}) numbers sum to ${sum} but it claims ${t.statedRows} rows - a category is missing from the line`)
+    }
+    return problems
+  },
+  // AC-5 + AC-6, and the most important assertion here: every other one is VACUOUS the moment a
+  // line stops matching. Without this the failure mode is not "the guard misfires", it is "the
+  // guard silently stops existing" - the original defect one level up.
+  'every-tally-is-read': (lines, rows) => {
+    const seen = tallies(lines).map((t) => t.section).sort()
+    const problems = []
+    const missing = EXPECTED_TALLIES.filter((s) => !seen.includes(s))
+    const extra = seen.filter((s) => !EXPECTED_TALLIES.includes(s))
+    if (missing.length) problems.push(`tally line(s) no longer parse for: ${missing.join(', ')}`)
+    if (extra.length) problems.push(`unexpected tally section(s): ${extra.join(', ')}`)
+    for (const s of [...new Set(rows.map((r) => r.section))]) {
+      if (!EXPECTED_TALLIES.includes(s) && !TALLY_EXEMPT.includes(s)) {
+        problems.push(`§${s} has rows but no tally line and is not in TALLY_EXEMPT`)
+      }
+    }
+    return problems
+  },
+  // AC-4: a row whose verdict does not resolve is counted nowhere, so it would silently shrink the
+  // recount and make a stale line look correct.
+  'tally-rows-resolve-a-verdict': (lines, rows) =>
+    rows.filter((r) => !r.verdict).map((r) => `row ${r.id} (line ${r.n}) resolved no verdict`),
+}
+
+for (const [name, fn] of Object.entries(T)) {
+  test(`H:coverage-${name}`, () => {
+    const lines = readFileSync(DOC, 'utf8').split('\n')
+    assert.deepEqual(fn(lines, parse(lines)), [])
+  })
+}
+
+test('H:coverage-tally-guard-not-vacuous: every assertion above fires on its own reinstated defect', () => {
+  const LINES = readFileSync(DOC, 'utf8').split('\n')
+  // Anchor + change assertions are the point: an anchor that stopped matching would report the
+  // guard INERT when nothing was actually tested. That exact false-INERT happened on this lane today.
+  const swap = (find, replace) => {
+    const i = LINES.findIndex((l) => l.startsWith(find))
+    assert.notEqual(i, -1, `fixture anchor "${find}" not found - the fixture has gone stale`)
+    const out = [...LINES]
+    out[i] = replace(out[i])
+    assert.notEqual(out[i], LINES[i], `fixture for "${find}" applied no change - it would report the guard inert`)
+    return out
+  }
+  const fixtures = [
+    // The real §4.10 defect, put back verbatim.
+    ['tally-matches-rows', swap('**§4.10 tally', (l) =>
+      l.replace('BUILT **8** · PARTIAL **0**', 'BUILT **2** · PARTIAL **2**'))],
+    // The omission variant: drop a non-zero category, leaving the numbers short of the stated N.
+    ['tally-accounts-for-every-row', swap('**§4.1 tally', (l) =>
+      l.replace(' · DELIBERATE **10**', ''))],
+    // A line that stops parsing must not silently disable the guard.
+    ['every-tally-is-read', swap('**§4.7 tally', (l) => l.replace('**§4.7 tally', '**S4.7 tally'))],
+    // A row whose verdict cannot be resolved.
+    ['tally-rows-resolve-a-verdict', swap('| 4.10-1 |', (l) =>
+      l.replace(/\bBUILT\b/, 'looks fine'))],
+  ]
+  const proven = []
+  for (const [name, lines] of fixtures) {
+    const problems = T[name](lines, parse(lines))
+    assert.ok(problems.length > 0, `${name} did NOT fire on its own reinstated defect - the guard is inert`)
+    proven.push(`${name}: ${problems[0].slice(0, 76)}`)
+  }
+  assert.equal(proven.length, Object.keys(T).length,
+    `every assertion in T must have a fixture; proven ${proven.length} of ${Object.keys(T).length}`)
 })
