@@ -7474,3 +7474,37 @@ cross-check against the real §4.11 defect: **FIRED**.
 **Honest gap the AC pass surfaced and I am not papering over:** `H26` enforces slug naming by reading
 `new URL('./hardening.test.mjs')`, so it is **structurally blind to `app/test/`**. These H-cases are
 slug-named by discipline, not by enforcement.
+
+### ACT-2026-09-02-j — H26 fixed, and the REGEX was the bigger hole (owner-prompted)
+
+Owner: *"don't you need to fix the h26 problem?"* Yes — I had named it and walked away, which is the
+flagged-not-fixed pattern this repo has been bitten by before.
+
+**The AC pass rejected my framing.** I briefed it on scope (one file vs many). It found the worse
+defect one level down: **H26's capture regex could not see 258 of the 689 cases that already exist,
+including SIX IN ITS OWN FILE** (`H5c`, `H39c`, `H39d`). Widening the glob while keeping that regex
+would have reproduced, for the third time, the *"STRUCTURALLY BLIND to the actual failure"* verdict
+H26's own comment block records about an earlier attempt.
+
+**Proven, not argued:** `test('H45: x')` and `test('H45b: x')` are caught by the mint ban;
+**`test('H45c: x')` was INVISIBLE and minted a number past the frozen range with the suite green.**
+The counter-retirement mechanism was one keystroke wide.
+
+**Adjudication adopted — option (B):** an id may repeat WITHIN one file (one guard, several
+assertions) but never across two. (A) was rejected on HARM, not tidiness: the four live repeats carry
+unique full titles and are cited externally, so renaming them converts *resolves-to-two* into
+*resolves-to-nothing* — which this repo treats as worse.
+
+**Shipped:** title-first recogniser covering all seven registration forms (numeric, `b`-suffix,
+ANY-letter suffix, slug+clause, slug-as-whole-title, UPPERCASE, and the aliased `t(` registrar);
+scope = `api/test` + `app/test`; template-literal ids excluded by construction so the guard cannot
+accuse correct code. **The `>= 52` floor is retired** — it had rotted to 2.5x stale against a real
+131 — and replaced with file-SET equality, which has no literal to rot. Scan now sees **688 cases,
+682 distinct**. Suite 136/136 api, 436/436 app. **4 mutations, 4 FIRED**, including one that blinds
+the recogniser itself and correctly fails rather than reporting a quiet zero.
+
+**OPEN, deliberately deferred with a reason:** AC-11 (an H-id cited from source or `actions.md` must
+resolve to a defined case) has a LIVE failure — ~4-5 dangling citations — but could not be made
+binary: an H-slug is open-ended prose that truncates, wraps and interpolates, so the cleanest variant
+false-accuses ~6 of 11 findings including H26's own comment. The AC pass's recommendation, which I
+accept: **a five-minute hand fix, not a guard.** Not silently dropped.
