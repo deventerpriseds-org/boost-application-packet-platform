@@ -447,3 +447,41 @@ confirmed by the misses that slip past it.
 invisible to me until a machine said so. That is the column the RECONCILIATION warns is really a
 record of my writing-down habit — so here they are, written down at the moment of catching rather
 than reconstructed later, which is the discipline that section asks for.
+
+## 2026-09-02 (later still) — I PARAPHRASED A FROZEN CONTRACT LABEL. Twice, one turn apart.
+
+**Claim:** that my loop-2 verifier brief satisfied the re-verification contract. I had just written,
+about the first instance of this, *"the substance was there, the shape wasn't — and shape IS the
+contract here."*
+
+**Ground truth:** `eds-verify-loop.py` blocked again, naming three of four fields as missing. The
+fourth — `Cheap suite re-run covering EVERYTHING:` — matched, and that asymmetry is the whole
+diagnosis: the checker wants the label **verbatim, with the colon immediately after it.** I had
+decorated three of them and left one alone:
+
+| what I wrote | why it failed |
+|---|---|
+| `Previously CONFIRMED - RE-CHECKED THIS LOOP (reduced depth, but NONE skipped …):` | parenthetical inserted BEFORE the colon |
+| `Previously REFUTED / now fixed - FULL RE-DERIVATION (spend the depth here):` | same |
+| `Blast radius of the fix — this selects where DEPTH is spent …:` | em-dash clause before the colon |
+| `Cheap suite re-run covering EVERYTHING:` | **untouched — and it passed** |
+
+**The single source that would have settled it up front:** the checker's own error text, which
+prints each required field as a literal string. It was on screen in the turn before. I read it as a
+description of what to include rather than as the string to emit.
+
+**Root cause:** the same one this log keeps naming, one level in — I wrote what the contract MEANS
+instead of what the checker READS. The first instance omitted the header; this one improved it. Both
+are "my rendering of the requirement" substituted for the requirement.
+
+**Cost:** one verifier killed at ~1 minute and re-spawned. Cheap only because loop 1's brief had
+told it to write incrementally, and because I checked `ListAgents` before assuming anything.
+
+**Guard:** none built, and deliberately. This is already mechanically enforced — the checker caught
+it both times, immediately, by name. A second guard on top of a working guard is ceremony. The fix
+is behavioural and narrow: **when a checker prints a required literal, COPY IT, never retype it.**
+Elaboration goes after the colon, never inside the label.
+
+**Note for the trend table:** both instances are `instrument-caught`. Neither reached the owner, and
+neither would have been caught by `eds-accuracy-log.py`, shipped this same session — that is now the
+fourth independent confirmation of its stated narrow scope.
