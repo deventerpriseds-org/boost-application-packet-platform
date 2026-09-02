@@ -55,9 +55,34 @@ const swaps = raw.swaps || []
 function checkResultFor(artifactId) {
   const rows = (raw.checks || []).filter((c) => c.artifact_id === artifactId)
   const gate = (raw.gates || []).find((g) => g.artifact_id === artifactId) || null
+  // `score` and `history` are TWO DIFFERENT QUESTIONS and the route answers them differently, so
+  // they are read from two different dump keys rather than sliced out of one.
+  //
+  // `score` is the gate's run and nothing else - `select * from artifact_score where artifact_id=$1
+  // and run_id=$2`, null when there is no gate row. The dump's `scores` array is already scoped
+  // that way by the join in fixture-refresh.yml, so `find` here can only match the right row.
+  //
+  // `history` is EVERY run, newest first, capped at ten - and it is returned even for an artifact
+  // with no gate. `artifact_id` rides along on each history row only so this line can route it; the
+  // real route projects four columns and it is stripped back to four here, because a fixture that
+  // carries MORE than the route does is a parity defect in the other direction - it would let a
+  // panel render locally off a field production never sends.
+  //
+  // WHY THIS MATTERS AT ALL: with `score` absent the drawer's Match tab renders "No score has been
+  // computed for this asset yet - the checks have not been run" on an asset the gate simultaneously
+  // calls Blocked with 86 findings (AssetGateDrawer.jsx MatchTab, `if (!s) return <Quiet>...`). Two
+  // statements that cannot both be true, and the reader files it as a product defect. It is not
+  // one - it was this file never setting the key. docs/qc-evidence/PROTOTYPE-COVERAGE.md 17f.
+  const score = (raw.scores || []).find((s) => s.artifact_id === artifactId) || null
+  const history = (raw.scoreHistory || [])
+    .filter((h) => h.artifact_id === artifactId)
+    .map(({ composite, band, must_have_coverage, computed_at }) =>
+      ({ composite, band, must_have_coverage, computed_at }))
   return {
     gate: gate ? gate.gate : null,
     attention: gate ? gate.attention_count : 0,
+    score,
+    history,
     results: rows,
     engines: {
       deterministic: { results: rows.filter((r) => r.engine !== 'reviewer') },
@@ -180,7 +205,10 @@ for (const a of artifacts) {
   f[`/artifact/${a.id}/corrections`] = { corrections: corrections.filter((c) => c.artifact_id === a.id) }
   f[`/artifact/${a.id}/checks-result`] = checkResults[a.id] ||
     // An ABSENT gate, never a fabricated pass - the same rule the product itself follows.
-    { gate: null, attention: 0, results: [], corrections: corrections.filter((c) => c.artifact_id === a.id) }
+    // `score: null` / `history: []` for the same reason the route sends them: "no score" and "the
+    // key was never populated" are different states and the UI can only tell them apart if they
+    // differ on the wire.
+    { gate: null, attention: 0, score: null, history: [], results: [], corrections: corrections.filter((c) => c.artifact_id === a.id) }
 }
 
 // A THIN FIXTURE SET INFLATES THE GAP AND READS AS PRODUCT REGRESSION.
@@ -200,6 +228,48 @@ if (!(raw.checks || []).length && !raw.checkResults) thin.push('checkResults (dr
 if (!swaps.length) thin.push('swaps (drives the Swaps tab, and every `orig -> final` row)')
 // The one that cost the most. See the `/search-prefs` comment above.
 if (!f['/search-prefs'].checks) thin.push('checks thresholds (drives EVERY rule label: `<= 24 chars each`, word bands, the gate)')
+
+// ── THE SAME REFUSAL, EXTENDED TO THE TWO WAYS THE CHECKS PAYLOAD CAN LIE ────────────────────────
+//
+// This block is the instrument's "refuse to emit a number it cannot stand behind" gate, so both of
+// these belong IN it rather than in a second guard beside it. Both are measured, not hypothetical -
+// docs/qc-evidence/PROTOTYPE-COVERAGE.md 17d and 17f, and both are present in the fixtures.json
+// committed beside this file (168 result rows carrying 19 findings; `score` absent on all five
+// artifacts).
+//
+// 1. THE SCORE IS ABSENT. The live route returns `score` and `history` on every /checks-result
+//    (appChecks.ts artifactChecksGet). Without them the drawer's Match tab says "No score has been
+//    computed for this asset yet - the checks have not been run" about an asset the gate in the SAME
+//    payload calls Blocked. That is a quiet, plausible, correct-looking lie, which is exactly the
+//    class of fixture starvation this whole file exists to refuse.
+//
+//    THE PREDICATE IS DELIBERATELY NARROW so it can never cry wolf: it fires only when at least one
+//    artifact HAS a gate and NOT ONE of them carries a score. An artifact with no gate legitimately
+//    has no score (the route returns null), so a packet of un-checked artifacts must not trip this.
+const gated = artifacts.filter((a) => (f[`/artifact/${a.id}/checks-result`] || {}).gate)
+if (gated.length && !gated.some((a) => f[`/artifact/${a.id}/checks-result`].score)) {
+  thin.push('artifact_score (drives the drawer\'s whole Match tab - without it every checked asset '
+    + 'reads "No score has been computed for this asset yet", contradicting its own gate)')
+}
+// 2. THE CHECKS ARE NOT SCOPED TO THE GATE'S RUN. A dump taken from a fixture-refresh.yml without
+//    the run_id join carries the artifact's WHOLE history - measured live 2026-09-02: 271 rows
+//    across 26 distinct check_key for artifact cfdd82e7, where the route sends 25. The signature is
+//    unmistakable and needs no access to the DB: a check_key appearing TWICE for one artifact. The
+//    route orders by check_key over a single run, so a duplicate is impossible in production.
+//
+//    This is an over-supply rather than an absence, so it is reported in its own words - but it is
+//    refused by the same mechanism, because the consequence is identical: a count read off it is a
+//    claim about the file. `screens/app-send.png` reads "112 items to fix" where live reads "14".
+for (const a of artifacts) {
+  const keys = (f[`/artifact/${a.id}/checks-result`].results || []).map((r) => r.check_key)
+  const dup = keys.find((k, i) => keys.indexOf(k) !== i)
+  if (dup === undefined) continue
+  thin.push(`checks scoped to the gate's run - artifact ${a.id} carries ${keys.length} result rows `
+    + `for ${new Set(keys).size} distinct check_key (e.g. "${dup}" more than once). The dump was `
+    + `taken WITHOUT the run_id join in fixture-refresh.yml, so it is every historical run at once; `
+    + `every rule repeats and the "items to fix" count is inflated`)
+  break
+}
 if (thin.length) {
   const how = process.argv.includes('--allow-thin')
   console.error(`\n!!! THIN FIXTURE SET - a gap number measured against this file measures the FILE, not the app:`)
