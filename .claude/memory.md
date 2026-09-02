@@ -521,6 +521,45 @@ Key tables (PostgreSQL):
 
 ## Active work
 
+**INTENT PROBE 2026-09-02 - the owner corrected the METHOD, and it changed three verdicts.**
+
+Owner: *"you are overthinking things a bit with what you do and don't call a gap. use playwright to
+click through both and determine if the intent is covered by an upgrade or alternative or if it's
+missing. to say it's not a gap because it hasn't had enough development to be able to do it is
+silly."* He is right, and the correction is structural: **DELIBERATE had become a bucket holding a
+real decision, a control with no data to render it, and a control nobody tried to reach.** Only the
+first is a decision; the other two are UNPROVEN, and filing them as "not a gap" flattered the count.
+
+New unit of measure = an INTENT (something a person can DO), scored COVERED /
+COVERED-BY-ALTERNATIVE / MISSING, with the state MANUFACTURED when the packet lacks the data.
+**14 intents: 12 COVERED, 2 COVERED-BY-ALTERNATIVE, 1 MISSING, 0 excused.** PROTOTYPE-COVERAGE.md
+SS17e; parity 161 -> **162 of 183 (88.5%)**.
+
+Three rows I had scored wrongly, ALL reachable and NONE needing code:
+- **4.8-8 `Change it`** was PARTIAL on *"is not there"*. It IS there, under the prototype's own
+  name, on every correction row beside `Review ->`, `Re-run QC` and `Undo`. Invisible only because
+  this packet has ZERO corrections. Injecting three into `checks-result.corrections[]` rendered all
+  four controls, and an id-less row correctly swapped `Undo` for a refusal sentence.
+- **4.10-8 `Nothing blocks sending.`** was left source-only. Forcing every gate to `pass` produced
+  it exactly, with zero fail rows and the footer still saying *"Approve all artifacts above"* - gate
+  pass and approved stay distinct.
+- **4.8-22 loop detail** I excused as *"unexercised by this data"*. Injecting a 2-pass `remediation`
+  ledger flipped the tab to *"what it closed, what it left open, and why it stopped"*.
+
+Genuinely MISSING, named rather than buried: **`Leave open`** (defer a raised question). Nearly
+vacuous - not confirming already leaves it open - but the RECORD of a deliberate defer is absent.
+`Answer` is COVERED-BY-ALTERNATIVE as **`confirm it`**, which is narrower and better defined.
+
+**HARDENING - "absence of data is not absence of a feature."** The guard is a habit plus a tool:
+`scripts/intent-probe.mjs` (new) drives either side through a SCRIPTED SEQUENCE, because most
+prototype verbs sit two interactions deep and the two existing renderers take a single `--click`.
+Whenever a control cannot be seen, MANUFACTURE the state and click it before writing any verdict.
+Second fixture gap found the same way: `fixture-refresh.yml` omits `artifact_score`, so the drawer
+Match tab claims *"the checks have not been run"* on an asset the gate calls Blocked with 86
+findings (SS17f). With SS17d's missing `run_id` predicate that is TWO reasons a local render is
+trustworthy for STRUCTURE and never for COUNTS or SCORES.
+
+
 **PARITY HEADLINE COLLISION, 2026-09-02 - THREE LANES, AND THE TRUE NUMBER IS 165/183 (90.2%).**
 
 `PROTOTYPE-COVERAGE.md` is being rendered into by three lanes at once, each re-counting the same

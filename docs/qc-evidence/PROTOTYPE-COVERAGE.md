@@ -409,7 +409,7 @@ Against the 9 non-deferred rows: **7 BUILT (78%), 8 present in some form (89%).*
 | 4.8-5 | Header: per-asset gate chips | `evidence.jsx` | BUILT | `QcRail.jsx:744-768` — label, gate pill, `n to fix`, `n to review`, clickable into the drawer. |
 | 4.8-6 | **`Done for you`** list, on the page | `evidence.jsx:92-121` | BUILT | `ChangeLog` `QcRail.jsx:612-650`, mounted `:808` with the comment *"ON THE PAGE (SPEC 4.8) - not behind a tab and not behind a search."* |
 | 4.8-7 | Done-for-you row: `Corrected for you` + what changed + why | `evidence.jsx` | BUILT | `CorrectionRow` `QcRail.jsx:489-600` |
-| 4.8-8 | Done-for-you row: `Change it` | `evidence.jsx:108` | PARTIAL | The row carries `Undo` (`:578-579`) and `Review →` (`:557`); a separate "Change it" that seeds a rewrite request is not there. The capability is the field's `List Tweaks`. |
+| 4.8-8 | Done-for-you row: `Change it` | `evidence.jsx:108` | **BUILT — CHANGED from PARTIAL 2026-09-02, by INTERACTION** | **The control is called `Change it`, exactly as in the prototype, and it renders on every correction row.** The old PARTIAL said it *"is not there"* and that the capability was the field's `List Tweaks`; both are wrong. It could not be seen because THIS packet has zero corrections, so `ChangeLog` renders its empty state — which is not the same as the control being absent. Proven by injecting three corrections into the `checks-result` payload (`corrections[]`, the key `correctionsState` reads) and re-rendering: the row printed `Corrected: "safety engineers" rewritten as "safety two" in Resume summary.` alongside **`Review →`, `Change it`, `Re-run QC` and `Undo`**. A row sent WITHOUT an `id` correctly replaced `Undo` with *"this change log was sent without an identifier for this row…"* rather than a dead button. Evidence `screens/render-0902-corrections.png`. |
 | 4.8-9 | Done-for-you row: `Review →` | `evidence.jsx:109` | BUILT | `QcRail.jsx:557` |
 | 4.8-10 | **`Needs a decision`** list, on the page | `evidence.jsx:92-121` | BUILT | `qcRail.js` `railDecisions()` + `QcRail.jsx` `<Decisions>`, mounted between `<ChangeLog>` and the tab strip - ON THE PAGE, `RAIL_TABS` unchanged. A projection of the payload the rail already fetched, reusing `CheckRow`. Four per-asset states with four different sentences; a finding on an ungated asset is listed, counted apart as `uncounted`, and the contradiction reported. Commit `8d721a0`; footer/lookup defects found by the verifier and closed in `1a886a8`. |
 | 4.8-11 | Attention ordering fail → open → warn → fixed → soft | SPEC §5 | PARTIAL | `railAttention` / `attentionSplit` exist (`qcRail.js`, `assetGate.js`) and severity ordering is encoded, but with no page-level attention list there is no surface where the full ordering renders. |
@@ -567,20 +567,25 @@ already made once.
 > regarding prototype UI parity progress."* Read §13-CURRENT for the live picture; §13a below is
 > the 2026-08-25 measurement, kept for its delta narrative and NOT current.
 
-> # **161 of 183 prototype elements present (88.0%)**
+> # **162 of 183 prototype elements present (88.5%)**
 >
 > | | Count | Share of 183 |
 > |---|---:|---:|
-> | **BUILT** | **161** | **88.0%** |
-> | **PARTIAL** | 21 | 11.5% |
+> | **BUILT** | **162** | **88.5%** |
+> | **PARTIAL** | 20 | 10.9% |
 > | **ABSENT** | **1** | **0.5%** |
 > | *present (BUILT + PARTIAL)* | *182* | *99.5%* |
 >
-> **+1 on 2026-09-02 from the RENDER pass (§17), not from new code.** `4.8-20` (`Undo this` on a
+> **+2 on 2026-09-02 from the RENDER and INTENT passes (§17), not from new code.** `4.8-20` (`Undo this` on a
 > swap row) was carrying PARTIAL on the claim that a per-swap undo "does not [exist]" — it renders,
-> and `QcRail.jsx:382-386` ships it. That is the fourth row in this document to close by being
-> re-read rather than rebuilt, which is the pattern §14 keeps recording: **the rank goes stale
-> faster than the code does.**
+> and `QcRail.jsx:382-386` ships it. `4.8-8` (`Change it`) followed on the INTENT probe (§17e): it
+> was scored *"is not there"* when in fact the packet simply had no correction for it to render on,
+> and injecting one produced the control under the prototype's own name. Two more rows —
+> `4.10-8` and `4.8-22`'s loop detail — were confirmed the same way and were already BUILT.
+>
+> **Four rows in this document have now closed by being re-read or re-clicked rather than rebuilt**,
+> which is the pattern §14 keeps recording: **the rank goes stale faster than the code does** — and,
+> per the owner on 2026-09-02, *absence of data is not absence of a feature*.
 >
 > **+11 BUILT since the 148 (80.9%) headline in §13a**, which was measured 2026-08-25 and never
 > caught up with the rows that shipped after it.
@@ -1094,10 +1099,81 @@ went through the real route, show each check **once**.
 COUNTS from a local fixture render as unusable and its STRUCTURE as sound — the same warning
 `screens/INDEX.md` already carries.
 
-### 17e. What this pass did NOT settle
 
-- **4.10-8** (`Nothing blocks sending.`) — needs a packet whose gate passes; this one is blocked.
-- **4.8-22** loop detail — needs a packet that has been through a second remediation pass.
-- **4.8-25** (a picked requirement filters the other tabs) — not exercised; no requirement was
-  clicked in this pass.
-- Every section other than §4.8 and §4.10 is **still source-only**, exactly as §15 says.
+### 17e. INTENT PROBE — clicked through BOTH sides, 2026-09-02
+
+**Why this exists, and what it replaces.** The owner: *"you are overthinking things a bit with what
+you do and don't call a gap. use playwright to click through both and determine if the intent is
+covered by an upgrade or alternative or if it's missing. to say it's not a gap because it hasn't had
+enough development to be able to do it is silly."*
+
+That is a correction to the METHOD, and it is right. `DELIBERATE` had become a bucket holding three
+different things: a real recorded decision, a control that could not be SEEN because the packet had
+no data to render it, and a control nobody had tried to reach. Only the first is a decision. The
+other two are **unproven**, and calling them "not a gap" flattered the count.
+
+**So the unit here is an INTENT — something a person can DO in the prototype — not a component.**
+Both sides were driven with Playwright: the prototype from `Packet QC Prototype.html` (React/Babel
+vendored locally, `pageErrors: []`), the app from `app/dist` against the fixture. **Where the packet
+lacked the data to render a control, the state was MANUFACTURED and the control clicked**, rather
+than excused.
+
+| # | Intent (the prototype's verb) | In the app | Verdict |
+|---|---|---|---|
+| I1 | See a per-asset match score | drawer `Match` tab, score-part rows | **COVERED — surface + live data confirmed, rendered number NOT visually confirmed.** `appChecks.ts:392-397` returns `score` + `history`; the fixture has neither, so the tab shows its empty state locally. See §17f. |
+| I2 | Open per-asset detail | gate chip → drawer, 5 tabs + `Re-run checks` / `Approve` | **COVERED** (clicked) |
+| I3 | `Answer` a raised question | **`confirm it`**, with *"awaiting your confirmation"* and *"not counted either way"* | **COVERED BY ALTERNATIVE** — narrower and better defined: it confirms a model proposal into a counted claim rather than accepting free text. |
+| I4 | `Leave open` (defer a question) | nothing | **MISSING** — and small: not confirming already leaves it open, so the loss is only the RECORD of a deliberate defer. Named here rather than hidden in DELIBERATE. |
+| I5 | `Change it` on a correction | **`Change it`** — same verb | **COVERED** (proven by injecting corrections; see 4.8-8) |
+| I6 | `Review →` on a correction | `Review →` | **COVERED** (same injection) |
+| I7 | `Open field →` | `go to the draft ->` per offender on QC; `Open field →` on send | **COVERED** |
+| I8 | `Open asset →` | no inline verb; the step rail and the gate chip → drawer both reach it | **COVERED BY ALTERNATIVE** |
+| I9 | A picked requirement filters the other tabs | `filtered to #12` + `clear`, and it **persisted across a tab switch** to Checks | **COVERED** (clicked; 4.8-25 was BUILT-by-reading and is now BUILT-by-interaction) |
+| I10 | `Undo this` on a swap | renders on `swapped`/`dropped`/`added`; correctly absent on `kept` | **COVERED** |
+| I11 | `Ask why` on a swap | renders | **COVERED** |
+| I12 | Open the assistant | `Open assistant` | **COVERED** |
+| I13 | `Nothing blocks sending` empty state | forced every gate to `pass`: card read exactly **`Nothing blocks sending.`**, zero fail rows, footer still *"Approve all artifacts above to unlock sending"* | **COVERED** (manufactured; 4.10-8 no longer source-only) |
+| I14 | Loop detail — what closed, what remained, where it halted | injected a 2-pass `remediation` ledger: tab flipped to *"Each pass below is a real remediation run: what it closed, what it left open, and why it stopped… 5 requirement(s) the loop could not close are waiting on you"* | **COVERED** (manufactured; 4.8-22 detail is real, not merely structural) |
+
+**Score: 12 COVERED · 2 COVERED-BY-ALTERNATIVE · 1 MISSING · 0 excused.** The one MISSING row (I4)
+is named as missing even though it is nearly vacuous, because the alternative — filing it under a
+decision nobody made — is how the previous count drifted.
+
+**Three things §17 got wrong before this probe, all the same shape:** 4.8-8 `Change it` was scored
+PARTIAL/absent, 4.10-8 was left source-only, and 4.8-22's loop detail was called *"unexercised by
+this data"* as if that settled it. **All three were reachable; none needed code.** The lesson is the
+owner's: absence of data is not absence of a feature, and it is cheaper to manufacture the state
+than to argue about it.
+
+### 17f. A SECOND fixture gap, found the same way — `artifact_score`
+
+`fixture-refresh.yml` selects `artifacts, insertions, corrections, requirements, gates, checks,
+swaps, checkPrefs` — **not `artifact_score`**, and `build-fixtures.mjs` therefore never sets the
+`score` / `history` keys the live route returns (`appChecks.ts:392-397`). Locally the drawer's
+`Match` tab consequently reads *"No score has been computed for this asset yet - the checks have not
+been run"* on an asset the gate simultaneously reports as `Blocked` with 86 findings — two
+statements that cannot both be true, and a reader could easily file that contradiction as a product
+defect. It is not one; it is the same class as §17d.
+
+**Two fixture fixes are now named and neither is applied here:** the `run_id` predicate (§17d) and
+`artifact_score` (this row). Together they are why a local render may be trusted for STRUCTURE and
+never for COUNTS or SCORES.
+
+### 17g. What this pass did NOT settle
+
+Kept deliberately short, and each row names the ONE thing that would close it — no row here is
+excused, they are simply not yet done.
+
+- **I1, the per-asset match NUMBER.** The surface and the live data are both confirmed to exist; the
+  rendered figure is not. Closes by adding `artifact_score` to the fixture (§17f) or by a live
+  drawer click.
+- **4.8-11, attention ORDERING** (fail → open → warn → fixed → soft). `railAttention` /
+  `attentionSplit` encode it, but no single surface renders the full ordering, so there is nothing to
+  photograph. Stays PARTIAL.
+- **Every section other than §4.8 and §4.10** is still source-only here — §16 covers `jd`, and a
+  third lane has since rendered `cover`. §15 limit 1 (a component starved of data) is closed for the
+  three intents manufactured in §17e and open everywhere else.
+
+**Two items previously listed here are now SETTLED and have moved into §17e:** `4.10-8`
+(`Nothing blocks sending.`) and `4.8-22` (loop detail). Both were reachable by manufacturing the
+state; neither needed code.

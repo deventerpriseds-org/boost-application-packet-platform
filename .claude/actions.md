@@ -7312,3 +7312,32 @@ clean`. Two items carried forward as OPEN by decision, not oversight:
   recommended shape is recorded in §17d.
 - **`boost-pg-mcp-write` lapsed** — reconnect card rendered; the connector is the preferred
   transport and this pass took the `fixture-refresh.yml` fallback.
+
+---
+
+## ACT-71 — Intent probe: click through both sides, score intents not components
+
+**Asked (2026-09-02):** *"you are overthinking things a bit with what you do and don't call a gap.
+use playwright to click through both and determine if the intent is covered by an upgrade or
+alternative or if it's missing. to say it's not a gap because it hasn't had enough development to be
+able to do it is silly."*
+
+**Status: DONE.** `PROTOTYPE-COVERAGE.md` §17e/§17f added; 4.8-8 re-verdicted; parity **162/183
+(88.5%)**. New instrument `scripts/intent-probe.mjs`. Five interaction PNGs committed.
+
+| Intent | Result |
+|---|---|
+| `Change it` | **COVERED** — renders on every correction row (proven by injecting corrections) |
+| `Nothing blocks sending.` | **COVERED** — proven by forcing every gate to `pass` |
+| loop detail (closed/remained/halted) | **COVERED** — proven by injecting a 2-pass ledger |
+| requirement filter across tabs | **COVERED** — `filtered to #12`, persisted across a tab switch |
+| `Answer` | **COVERED BY ALTERNATIVE** — `confirm it` |
+| `Open asset →` | **COVERED BY ALTERNATIVE** — step rail + drawer |
+| `Leave open` | **MISSING** — named, though near-vacuous |
+
+**Method change, and why:** DELIBERATE was absorbing three different things. Only a recorded
+decision is DELIBERATE; a control starved of data is UNPROVEN and must be settled by manufacturing
+the state, not by argument.
+
+**OPEN, neither applied (both fixture, not product):** `run_id` predicate (§17d) and `artifact_score`
+(§17f) in `fixture-refresh.yml`. No `app/` or `api/` source changed by this ACT.
