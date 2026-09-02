@@ -1,0 +1,129 @@
+// The model output that reached no document — its pure logic. The React usage is in the screens
+// that mount it, per the same split `assetBlocks.js` / `AssetBlocks.jsx` and `postingAnalysis.js` /
+// `PostingAnalysis.jsx` already use.
+//
+// WHAT THIS IS. `collectAnalysis` (api `packetBuild.ts`) captures every section a model produced
+// that maps to no merge field, so its text is placed in no document. It has been written to
+// `last_build.analysis` on every build since P7 and NOTHING HAS EVER READ IT. Measured 2026-09-02,
+// db-query run 33657794878 — 22 stored sections across the owner's packets:
+//
+//     Word and Character Requirements Check   4,473 chars   TRUNCATED
+//     Job Description Summary                 4,374 chars   TRUNCATED
+//     Jobscan Extraction                      2,893
+//     Missing ATS Skills                      1,620         (the interim keyword score reads this)
+//     Missing ATS Swap Suggestions              935
+//     Skills1 / Skills2 / Relevant Skills…    103–345       (the pre-swap originals)
+//
+// WHY IT WENT UNNOTICED, recorded so nobody re-derives it: `jdAnalysis` ALSO returns a field called
+// `analysis`, and that one IS read (`PacketBuilder.jsx:570`). A grep for `analysis` in `app/src`
+// finds a live consumer and stops. Two different objects, one name.
+//
+// THE PLACEMENT RULE, and it is the whole design. Every section goes BESIDE THE THING IT IS ABOUT
+// rather than onto a page of its own: the JD summary and the extraction belong on the JD step, the
+// length check belongs with the field blocks, the swap suggestions belong with the swap rows. That
+// is the same rule this app already follows for corrections — SPEC 2's R6, "in place, scoped to the
+// field they are looking at" — and it is why a sixth step was rejected. A step you visit once reads
+// as clutter; a panel next to the thing it explains reads as an explanation.
+//
+// ANYTHING WITH NO HOME STILL SHOWS. `HOME_OTHER` is not a bin for the awkward ones — it is the
+// guarantee that adding a section to a prompt can never silently drop it from the UI, which is the
+// failure that produced this whole row.
+
+/** Where a section is rendered. One value per real destination, plus the catch-all. */
+export const HOME_JD = 'jd'
+export const HOME_FIELDS = 'fields'
+export const HOME_SWAPS = 'swaps'
+export const HOME_OTHER = 'other'
+
+/**
+ * Title → home. Matched on a NORMALISED title, never a substring of the body.
+ *
+ * EXACT-ISH ON PURPOSE. These titles come from the owner's own prompts and are stable, but a model
+ * varies capitalisation and spacing, so the key is lowercased and whitespace-collapsed and nothing
+ * more. A fuzzy match would let "Missing ATS Swap Suggestions" land on the "Missing ATS Skills"
+ * rule — two different sections whose titles share three words — and the reader would show the
+ * wrong text under the wrong heading, which is worse than showing it under "Other".
+ */
+const HOMES = [
+  ['job description summary', HOME_JD],
+  ['jobscan extraction', HOME_JD],
+  ['missing ats skills', HOME_JD],
+  ['missing ats swap suggestions', HOME_SWAPS],
+  ['word and character requirements check', HOME_FIELDS],
+]
+
+export const normTitle = (t) => String(t == null ? '' : t).replace(/\s+/g, ' ').trim().toLowerCase()
+
+/** The home for one title. Unknown titles are `other` — never dropped. */
+export function homeOf(title) {
+  const n = normTitle(title)
+  if (!n) return HOME_OTHER
+  const hit = HOMES.find(([k]) => k === n)
+  return hit ? hit[1] : HOME_OTHER
+}
+
+/**
+ * The sections for one home, in the order they should read.
+ *
+ * DEDUPED BY (title, body). The live data has the SAME title stored more than once — "Missing ATS
+ * Skills" appears at 1,620 and 796 chars, "Job Description Summary" three times — because
+ * `collectAnalysis` walks Call 1 and Call 2 and both may emit a section of that name. Showing the
+ * pair without distinguishing them invites the reader to think one is a correction of the other.
+ * Identical bodies collapse; DIFFERENT bodies are both kept and each says which pass wrote it,
+ * because that difference is real information about the pipeline.
+ */
+export function sectionsFor(sections, home) {
+  const rows = Array.isArray(sections) ? sections : []
+  const seen = new Set()
+  const out = []
+  for (const s of rows) {
+    if (!s || homeOf(s.title) !== home) continue
+    const body = String(s.body == null ? '' : s.body)
+    if (!body.trim()) continue
+    const key = `${normTitle(s.title)} ${body}`
+    if (seen.has(key)) continue
+    seen.add(key)
+    out.push({
+      title: String(s.title == null ? '' : s.title).trim(),
+      body,
+      call: Number(s.call) || null,
+      chars: Number(s.chars) || body.length,
+      // TRUNCATION IS STATED, NOT HIDDEN. `chars` is what the model produced and `body` is what was
+      // stored; when they differ the reader is looking at part of a section and has to be told, or
+      // they will read a cut-off sentence as the model's own ending.
+      truncated: s.truncated === true || (Number(s.chars) || 0) > body.length,
+    })
+  }
+  return out
+}
+
+/** How many sections a home has, for a disclosure label that has to be honest before it opens. */
+export const countFor = (sections, home) => sectionsFor(sections, home).length
+
+/**
+ * THE CACHE KEY, and why this is a function rather than a literal.
+ *
+ * The payload is SEMI-DYNAMIC: it can only change when a build runs. So the route returns `builtAt`
+ * and a client keyed on `(packetId, builtAt)` may hold a response indefinitely — a rebuild changes
+ * the key rather than invalidating an entry, which means there is no staleness window and nothing
+ * to expire. Owner-requested, and it is the right shape here precisely because the data is
+ * immutable between builds.
+ *
+ * NULL WHEN EITHER PART IS MISSING, which disables caching rather than minting a key that collides.
+ * A packet with no `builtAt` would otherwise share one key with every other such packet — the
+ * cache would serve one packet's analysis for another, which is the worst failure available here.
+ */
+export function analysisCacheKey(packetId, builtAt) {
+  const p = String(packetId == null ? '' : packetId).trim()
+  const b = String(builtAt == null ? '' : builtAt).trim()
+  if (!p || !b) return null
+  return `pkt-analysis:${p}:${b}`
+}
+
+/** Hooks, for the same reason every other module here has them: a verifier reads the DOM. */
+export const ANALYSIS_HOOKS = {
+  toggle: 'analysis-toggle',     // the disclosure; absent when the home has no sections
+  panel: 'analysis-panel',       // the body root (carries data-qc-home)
+  section: 'analysis-section',   // one section (carries data-qc-title / data-qc-call)
+  truncated: 'analysis-cut',     // the "this was cut" note, never silent
+}

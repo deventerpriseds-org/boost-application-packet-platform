@@ -281,3 +281,136 @@ where nobody reads it.
 in the same turn, not at session end. Eight of the ten rows above were reconstructed hours later from
 the transcript, and reconstruction is where a `owner-caught 1` gets written for a session where the
 entry directly above says all four were reported to the owner.
+## 2026-09-02 — "the stuffing premise did not survive measurement" (n=1, owner caught it)
+
+**Claim I made:** the `ResumeSummary` exclusion from the ATS keyword numerator rests on a premise
+that "did not survive measurement" — the summary is paraphrase, contains zero of the packet's nine
+ATS keywords, so counting it cannot inflate. I edited the code, replaced the guard, mutation-proved
+the replacement, and was about to land it.
+
+**Ground truth:** I measured **ONE packet** (Trinnex, `9f9c370a`) and generalised to the pipeline.
+The owner named the counter-example from memory: *"we looked at the emoney packet and found verbatim
+keywords it requirements inserted."* They were right. eMoney (`2cb56fb3`) against its own
+requirements:
+
+| Summary | Requirement |
+|---|---|
+| "establishing governance and risk management practices" | #10 "Establish governance, security, and risk management practices" |
+| "building high-performing global teams" | #17 "Build, lead, and inspire a high-performing global organization" |
+| "AI-first transformations" | #9 "Define and execute an AI-first engineering strategy" |
+| "delivering scalable, resilient platforms" | #23 "delivering complex, scalable, enterprise-grade platforms" |
+
+The first is the JD sentence with two words deleted. **The premise is alive.** Reverted.
+
+**The single source that would have settled it up front:** the same query across ALL packets, not
+one. I even wrote that query — `verbatim_in_summary` counted per opportunity — and then replaced it
+with a single-packet read because the aggregate felt slower.
+
+**Root-cause pattern:** *a sample of one, reported as a property of the system.* This is the same
+shape as "the credit ran out" and "verify.sh is not yet merged" — a measurement true of one instance
+stated as a standing fact — but worse, because here I had already noticed the variance existed and
+narrowed the query anyway.
+
+**Guard this implies (and why it is not another prose rule):** a claim that a PIPELINE behaviour is
+absent must be measured across the population the pipeline produced, not one row. Cheap and
+mechanical: any query used to retire a guard must have no `limit 1` and no single-id `where`. That
+is checkable by reading the SQL before running it, and it is the check I skipped.
+
+**Second-order cost:** the owner's actual ask was never "delete the exclusion" — it was *"it needs a
+final step to take what it lands on and use synonyms etc so it means verbatim but doesn't read
+verbatim."* Deleting the guard would have removed the symptom's detector while leaving the cause.
+The exclusion stays until the reword step exists.
+
+---
+
+## 2026-09-02 — THE LOG ITSELF WAS THE MISS: 5 entries against ~67 refutations
+
+The owner asked *"have you been logging accuracy? how are you grading? it seems like ac is finding a
+lot of mistakes... is it overdoing it or are you underdoing it?"* Counting, for the first time:
+
+| | Count |
+|---|---|
+| Verification passes with verdicts | 21 |
+| CONFIRMED verdicts | ~398 |
+| REFUTED verdicts | ~67 (**14%**) |
+| Entries in THIS log before today | 5 |
+
+**Four of those five were caught by the OWNER, one by a verifier.** So this log has been recording
+the owner's catches, not my error rate — it measured their patience. A log biased toward
+owner-caught misses under-reports by roughly an order of magnitude and, worse, systematically
+excludes the class the machine is better at finding: silent ones.
+
+**There was no grading.** Verdicts live per-claim inside `docs/qc-evidence/VERIFY-*.md` and nothing
+aggregated them, so "is the verifier over-firing" was unanswerable until someone counted.
+
+### The answer, from the record rather than from feel: I am underdoing it
+
+- **Refutation class is severe, not cosmetic.** Same-day examples: `keywordPresent` matched `Cloud`
+  inside `Cloudera` (inflates a score the owner reads); `H:one-composite-formula` passed 1050/1050
+  with the weights swapped (a guard protecting nothing); `correction.requirement_id` would break on
+  every JD re-parse because `writeRequirements` deletes and re-inserts requirements.
+- **No recorded case of overturning a verifier finding exists.** If it were over-firing there would
+  be a trail of findings successfully refuted. There is none.
+- **The one case that LOOKS like verifier overreach went the other way** — `dfb7fc3`, another
+  session: verifier found a partial-score hole, the agent nearly rejected it on a theory about the
+  data, and one production query reversed the AGENT.
+
+**Honest limit on that conclusion:** absence of recorded overturns may partly reflect not recording
+them either. The class of what gets refuted is the stronger signal than the count.
+
+### Root cause across every entry in this log
+
+**Claiming absence or completion from evidence that cannot support it.** Four of five prior entries
+are that shape, and today added three more (n=1 stuffing; `p.packetId` where the field is `p.id`;
+asserting `artifact_score.created_at` exists — the column is `computed_at`). The variants differ;
+the move is identical — *state it, then look, instead of look, then state it.*
+
+### The guard, since prose here has demonstrably not been enough
+
+**Every REFUTED verdict gets a row in this log, in the commit that fixes it** — the same discipline
+`CLAUDE.md` already demands for H-cases ("a mistake becomes a TEST, not a note"). A refutation the
+owner never sees is a mistake that gets to happen twice. The count above is the baseline: if this
+log does not grow at roughly the rate `VERIFY-*.md` accrues REFUTED verdicts, it is lying again.
+
+---
+
+## RECONCILIATION 2026-09-02 — two lanes wrote this file at once, and THEIRS CORRECTS MINE
+
+Both entries above landed the same day from different sessions. They are kept in full because they
+measured different things, but **where they disagree, the other lane is right and my trend table is
+the thing that was wrong.**
+
+**What they measured that I did not:** 21 verification passes, ~398 CONFIRMED and **~67 REFUTED**
+verdicts sitting in `docs/qc-evidence/VERIFY-*.md`, against **5** entries in this log. That is an
+aggregate over the actual artifacts. My trend table counted misses I remembered and wrote down.
+
+**The correction, stated plainly:**
+
+1. **My `owner-caught` column is a BIASED instrument and I called it "the metric".** Their entry
+   names exactly why: a log fed by owner catches *"measured their patience"*, not my error rate, and
+   it systematically excludes the class the machine is better at finding — the silent ones. A column
+   that cannot see silent misses cannot be the metric for whether misses are declining.
+2. **My `instrument-caught` column has the same defect one level down.** It counts what I noticed an
+   instrument catching and then chose to record — not what the instruments actually caught. `0 → 0 →
+   3 → 8` is a record of my writing-down habit improving, which is worth something, but it is not an
+   error rate and I presented it as a trend in errors.
+3. **My "10 misses" for 2026-09-02 is near-certainly an undercount.** Against a ~14% refutation rate
+   across 21 passes, ten is what I could reconstruct, not what happened.
+
+**What survives from my entry:** the individual rows (each is a real, specific miss with its
+evidence), the `reached origin` column (binary and checkable — `75a5969`), and the observation that
+the two owner-caught misses that day were **scope**, not fact. What does NOT survive is reading the
+table as a measurement of whether my mistakes are declining. **It is a log of my catches, not of my
+misses.**
+
+**Their guard supersedes the one I proposed**, and it is better for a reason worth naming: *every
+REFUTED verdict gets a row in this log, in the commit that fixes it*, with the count above as the
+baseline — *"if this log does not grow at roughly the rate `VERIFY-*.md` accrues REFUTED verdicts,
+it is lying again."* That trigger is **countable**. Mine — "the turn contained a correction" — is a
+model judgement on a transcript, which is exactly the open-ended shape this org's own rules say gets
+muted within a week. A gate item should be built on their trigger, not mine.
+
+**The irony is the lesson and belongs in the log rather than in conversation:** my entry above
+diagnosed this file's failure as *"a claim about state that nothing re-checks"* and then presented a
+hand-tallied table as the state. The other lane re-checked it against the artifacts. Same move,
+one level up.

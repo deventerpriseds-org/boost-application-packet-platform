@@ -14,6 +14,7 @@ import { PACKET_HOOKS, ASSET_BODY_DEFAULT_OPEN, regenerateWithNote } from '../pa
 import QcRail, { useQcEntries } from './QcRail.jsx'
 import { GateBadge } from './AssetGateDrawer.jsx'
 import AssistantPanel from './AssistantPanel.jsx'
+import AnalysisPanel from './AnalysisPanel.jsx'
 import { assistantMode, DOCK_MIN_VIEWPORT } from '../assistantPanel.js'
 import { qcStepState, packetGate, railGateMeta, packetReadiness, packetFailList, qcSummaryModel, firstFixTarget, listOwnersFromArtifacts, requirementUsage } from '../qcRail.js'
 
@@ -905,6 +906,14 @@ export default function PacketBuilder({ id, step }) {
             swaps={provenance.swaps}
             listOwners={listOwnersFromArtifacts(qcEntries)}
             onGoToField={goToField} />
+
+          {/* The model output that reached NO document. Mounted here rather than on a page of its
+              own because the two biggest sections -- the JD summary (4,374 chars) and the Jobscan
+              extraction (2,893) -- are about THIS posting, and the rule this app already follows for
+              corrections is "in place, scoped to the thing they are looking at" (SPEC 2, R6).
+              Sections belonging elsewhere are routed to their own homes by `homeOf`; nothing is
+              dropped. Renders nothing when this packet has no unplaced analysis. */}
+          <AnalysisPanel packetId={p.id} home="jd" />
 
           <AnalysisRunCard
             busy={jdBusy} onRun={runJd} hasRun={!!p.jdAnalyzed} result={runResult}

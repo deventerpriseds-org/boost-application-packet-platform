@@ -188,6 +188,10 @@ export const api = {
   setArtifactStatusDetailed: (artifactId, status) => postDetailed(`/app/artifact/${artifactId}/status`, { status }),
   artifactInsertions: (artifactId) => get(`/app/artifact/${artifactId}/insertions?owner=${encodeURIComponent(_owner)}`),
   packetSwaps: (packetId) => get(`/app/packet/${packetId}/swaps?owner=${encodeURIComponent(_owner)}`),
+  // The model output that reached no document. `?owner=` for the same reason every owner-scoped
+  // call here carries it: `resolveOwner` falls back to the demo account without it, which is how
+  // `listPersonas` once silently read someone else's data.
+  packetAnalysis: (packetId) => get(`/app/packet/${packetId}/analysis?owner=${encodeURIComponent(_owner)}`),
   // #30. The owner rewrites a phrase themselves.
   //
   // postDetailed, not post, for exactly the reason revertCorrection uses it: this route REFUSES
