@@ -22,6 +22,8 @@ import {
   CROSS_LIST_RATIONALE_PREFIX, isCrossListDrop,
   attentionWithFields, unplacedFindings, unplacedOf, unplacedTarget, unplacedReason,
   registerFieldOwners, NO_OWNER_REASON, UNPLACED_LINK_HOOK,
+
+  pickListModel, pickListAsk,
 } from '../src/assetBlocks.js'
 import { severityCounts } from '../src/assetGate.js'
 import { findingsByField, QC_HOOKS } from '../src/qcRail.js'
@@ -1512,4 +1514,56 @@ test('H:one-report-two-registries: fields and lists come from the SAME card call
     'both registries must be fed from that one report')
   assert.match(pb, /fieldOwners=\{fieldOwners\} onGoToField=\{goToField\}/,
     'the asset card must be handed the SAME navigator the QC rail is handed, never a second one')
+})
+
+// ── SPEC 4.5-12 — the pick list ─────────────────────────────────────────────────────────────────
+
+test('H:pick-list-shows-what-was-considered-not-only-what-shipped', () => {
+  // THE POINT OF THE ROW. A dropped item is the one the owner CANNOT otherwise see -- it is not on
+  // the page to be seen -- so a pick list that only lists what shipped would be a list of things
+  // already visible, which is no control at all.
+  const rows = [
+    { action: 'kept', to_label: 'Product roadmap', requirement_id: 'r1' },
+    { action: 'added', to_label: 'Hiring technology', requirement_id: null },
+    { action: 'dropped', from_label: 'Banned wording', driver: 'rule', rationale: OMIT_LIST_RATIONALE },
+    { action: 'dropped', from_label: 'Lives elsewhere', driver: 'rule', rationale: 'already listed in Skills 2' },
+  ]
+  const items = pickListModel(rows, { onPage: ['Product roadmap', 'Hiring technology'] })
+  assert.equal(items.length, 4, 'every considered item must appear, including the dropped ones')
+  const by = Object.fromEntries(items.map((i) => [i.text, i]))
+
+  assert.equal(by['Product roadmap'].selected, true)
+  assert.equal(by['Hiring technology'].selected, true)
+  assert.equal(by['Banned wording'].selected, false, 'a dropped item is not on the page')
+
+  // BLOCKED IS THE OWNER'S DO-NOT-USE LIST AND NOTHING ELSE. A cross-list drop is not a ban -- the
+  // item is fine and lives in another list -- and striking it through would accuse the owner's own
+  // wording of being forbidden. Exact match on the rationale, never a substring: this repo's
+  // standing rule is that anything naming an offender is exact, never fuzzy.
+  assert.equal(by['Banned wording'].blocked, true)
+  assert.equal(by['Lives elsewhere'].blocked, false,
+    'a cross-list drop was marked as banned - it is not on the do-not-use list')
+  assert.match(by['Lives elsewhere'].note, /already listed in/)
+})
+
+test('H:pick-list-seeds-a-request-and-sets-nothing', () => {
+  // There is no route that reorders a list. The checkboxes compose a SENTENCE; if they ever appear
+  // to commit, the control is lying about what it did. The ask must name the field and every chosen
+  // item, so the assistant is not guessing at "these" against the owner's own document.
+  const ask = pickListAsk('Skills 1', ['Product roadmap', 'Hiring technology'])
+  assert.match(ask, /Skills 1/)
+  assert.match(ask, /Product roadmap \| Hiring technology/)
+  assert.equal(pickListAsk('Skills 1', []), null, 'an empty selection must produce NO sentence')
+  assert.equal(pickListAsk('Skills 1', ['   ']), null, 'whitespace is not a selection')
+
+  // NO CANDIDATES, NO CONTROL.
+  assert.deepEqual(pickListModel([], {}), [])
+  assert.deepEqual(pickListModel(null, {}), [])
+
+  const BLOCKS = readFileSync(new URL('../src/screens/AssetBlocks.jsx', import.meta.url), 'utf8')
+  assert.match(BLOCKS, /onAsk=\{\(sentence\) => \{ setAskSent\(null\); seedAsk\(sentence\) \}\}/,
+    'the pick list must route through seedAsk, the same seeder its neighbours use - a second edit ' +
+    'path would be the parallel system, and it would be the one without the confirmation')
+  assert.ok(!/pickList[\s\S]{0,400}api\.\w+\(/.test(BLOCKS),
+    'the pick list calls an API directly - it seeds, it does not commit')
 })

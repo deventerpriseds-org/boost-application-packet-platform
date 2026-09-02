@@ -300,7 +300,7 @@ Import list read (`AssetBlocks.jsx:30-45`) — `CorrectionRow` comes from `QcRai
 | 4.5-9 | Body: list shape, `original → final` rows | `assets.jsx:283-303` (`FieldList`) | BUILT | `ListBody` in `AssetBlocks.jsx`; `shapeOf()` → `list`. Inventory §13: *"BUILT, with a different and better-sourced status column."* |
 | 4.5-10 | Body: `unchanged` on a kept row | `assets.jsx:299` | BUILT | Same component; the app's status column is sourced from `swap_decision.action`. |
 | 4.5-11 | Body: pipe block, monospace | `assets.jsx` | BUILT | `shapeOf()` `assetBlocks.js:147` → `pipe` |
-| 4.5-12 | Body: **pick-list** (`type: 'select'`, checkboxes + per-item requirement) | `assets.jsx:305-...` (`PickList`) | ABSENT | `shapeOf()` (`assetBlocks.js:144-151`) returns only `static` / `pipe` / `list` / `prose` — **no `select` shape exists.** Verified by reading the function, not by grep. Portfolio-only in the prototype, so no resume impact; needs per-item candidacy on the insertions payload. `check: absent app/src/assetBlocks.js 'select'` |
+| 4.5-12 | Body: **pick-list** (`type: 'select'`, checkboxes + per-item requirement) | `assets.jsx:305-...` (`PickList`) | **BUILT — CHANGED from ABSENT 2026-09-02** | SHIPPED as `PickList` (`AssetBlocks.jsx`), model `pickListModel`/`pickListAsk` (`assetBlocks.js`), mounted on `shape === 'list'` fields beside the other field seeders. **The blocker was the second half of this row, not the first.** `shapeOf()` still returns only `static` / `pipe` / `list` / `prose` and no `select` shape was invented -- inventing one would mean inventing a field type the pipeline never produces. What unblocked it was that the row's stated dependency, *"needs per-item candidacy on the insertions payload"*, had already been satisfied: `swapsForList` is threaded to every block and a swap row per candidate IS per-item candidacy, so nothing new is fetched. It SEEDS the assistant and commits nothing, exactly as the prototype's own control does (`onAsk`), because no route reorders a list. Guarded by `H:pick-list-shows-what-was-considered-not-only-what-shipped` and `H:pick-list-seeds-a-request-and-sets-nothing`, both mutation-proved. ORIGINAL NOTE: `shapeOf()` (`assetBlocks.js:144-151`) returns only `static` / `pipe` / `list` / `prose` — **no `select` shape exists.** Verified by reading the function, not by grep. Portfolio-only in the prototype, so no resume impact; needs per-item candidacy on the insertions payload. `check: absent app/src/assetBlocks.js 'select'` |
 | 4.5-13 | **Keyword hits highlighted in the draft text** | `assets.jsx:8-22` (`Marked`) | **BUILT — CHANGED from ABSENT** | `markRuns` imported `AssetBlocks.jsx:41`, called `:446`, `Marked` at `:446-460`, phrases assembled `:486`. Inventory build-order **row 1**, the top-ranked gap and "the unlock for four other rows" — it is built. |
 | 4.5-14 | Posting echoes highlighted (pale tan + underline) | `assets.jsx:8-22` | BUILT | Same pass — `:484` *"Both treatments go through markRuns in ONE pass"*; classes `HIGHLIGHT_CLASS.postingEcho` (`highlight.js`), tokens `theme.css`. |
 | 4.5-15 | Hovering a margin row lights its phrase in the text | `assets.jsx:159` | **BUILT — CHANGED from ABSENT** | `onMouseEnter={() => setActiveWording(phrase)}` `AssetBlocks.jsx:750`, and for a keyword chip `:794`; `active` compared by identity at `:451-456` with `HIGHLIGHT_ACTIVE_CLASS`. |
@@ -547,23 +547,34 @@ already made once.
 > regarding prototype UI parity progress."* Read §13-CURRENT for the live picture; §13a below is
 > the 2026-08-25 measurement, kept for its delta narrative and NOT current.
 
-> # **159 of 183 prototype elements present (86.9%)**
+> # **160 of 183 prototype elements present (87.4%)**
 >
 > | | Count | Share of 183 |
 > |---|---:|---:|
-> | **BUILT** | **159** | **86.9%** |
+> | **BUILT** | **160** | **87.4%** |
 > | **PARTIAL** | 22 | 12.0% |
-> | **ABSENT** | **2** | **1.1%** |
-> | *present (BUILT + PARTIAL)* | *181* | *98.9%* |
+> | **ABSENT** | **1** | **0.5%** |
+> | *present (BUILT + PARTIAL)* | *182* | *99.5%* |
 >
 > **+11 BUILT since the 148 (80.9%) headline in §13a**, which was measured 2026-08-25 and never
 > caught up with the rows that shipped after it.
 >
-> **ONLY TWO ROWS ARE ABSENT, and neither is ordinary open work:**
-> - **4.5-12** `PickList` (`type: 'select'`) — `shapeOf()` (`assetBlocks.js:144-151`) emits only
->   `static`/`pipe`/`list`/`prose`. Portfolio-only, no resume impact; the ranking calls it
->   *"expensive, low value"*.
-> - **4.11-4** — one of the assistant-panel rows, gated on the owner's shell-cap decision.
+> **UPDATED 2026-09-02, second pass.** The owner directed *"finish 4.5 and 4.11... on desktop wide
+> the panel rather than float but you will need a different approach of your choosing for mobile."*
+> Both landed:
+> - **4.11-1** the assistant now DOCKS as a third column at `>= 1450px`, floats below that, and uses
+>   a new bottom-`sheet` Overlay variant on mobile. The shell cap moved 1280 -> 1560 (the
+>   prototype's own), which is the arithmetic that made docking possible at all.
+> - **4.5-12** `PickList` SHIPPED. It was scored ABSENT on `shapeOf()` having no `select` shape, but
+>   the row's real dependency was *"per-item candidacy on the insertions payload"* -- and that had
+>   already been satisfied for months by `swapsForList`. No new shape, no new fetch.
+>
+> **ONE ROW REMAINS ABSENT, and it is not open work:**
+> - **4.11-4**, the scope selector (This packet / This asset / My profile). **Two of its three
+>   options have no route behind them**, so building it would ship two controls that do nothing --
+>   the no-dead-UI rule this repo enforces outright. `assistantScope()` STATES the scope instead.
+>   Left ABSENT rather than reclassified DELIBERATE to flatter the count; the number is only worth
+>   something if a row moves when the code does.
 >
 > **METHOD, and the trap in it.** Counted mechanically from the 4th cell of every
 > `| <section>-<n> |` row, taking the verdict token appearing EARLIEST in the cell. Matching on

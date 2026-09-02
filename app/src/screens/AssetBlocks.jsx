@@ -32,6 +32,7 @@ import { api } from '../api.js'
 import {
   BLOCK_HOOKS, observedFor, KIND_ABBR, KIND_WORD, KIND_LEGEND, reqChipLabel, METHOD_LABEL,
   countMismatchNote, deriveItems, draftSizeText, expectationFor, latestRows, listBodyModel, listsOf,
+  pickListModel, pickListAsk,
   targetFor,
   ASSET_ANSWERS_DEFAULT_OPEN, correctionsForField,
   keywordActions, keywordSwapOptions, keywordPresence,
@@ -452,6 +453,95 @@ function DistributionMeter({ rows, filled, unfilled, requirements, scopedSwaps, 
 
 // ── one merge field ─────────────────────────────────────────────────────────────────────────────
 
+/**
+ * SPEC 4.5-12 - the pick list. Every item CONSIDERED for this list, not just the ones that shipped.
+ *
+ * IT SEEDS, IT DOES NOT SET. There is no route that reorders a list, so the checkboxes compose a
+ * REQUEST rather than an edit -- the same honest shape `keywordSwapOptions` and `Ask why` already
+ * use. A checkbox that silently changed nothing would be the dead UI the standing rule bans.
+ *
+ * NO CANDIDATES, NO CONTROL, for the same reason: a disclosure that opens onto "nothing was
+ * considered" is a promise the data cannot keep.
+ */
+// `label`, NOT `fieldLabel`: this module imports a fieldLabel() FUNCTION from assetGate.js, and a
+// prop of the same name shadows it inside this component. Nothing breaks today because the string
+// is what is wanted here, but the next person to call fieldLabel() in this scope gets a string.
+function PickList({ items, label, onAsk }) {
+  const [open, setOpen] = useState(false)
+  const [sel, setSel] = useState(() => items.filter((i) => i.selected).map((i) => i.text))
+  const [q, setQ] = useState('')
+  if (!items.length) return null
+  const chosen = new Set(sel)
+  // The prototype shows a filter above ten rows; below that it is chrome on a list you can already
+  // read in one glance.
+  const filtered = q
+    ? items.filter((i) => i.text.toLowerCase().includes(q.toLowerCase()))
+    : items
+  const ask = pickListAsk(label, items.filter((i) => chosen.has(i.text)).map((i) => i.text))
+  return (
+    <div style={{ marginTop: 10 }}>
+      <span className="px-link" role="button" tabIndex={0}
+        data-qc={BLOCK_HOOKS.pickToggle}
+        onClick={() => setOpen((v) => !v)}
+        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setOpen((v) => !v) } }}
+        style={{ fontSize: 12 }}>
+        {open ? 'Hide' : 'Choose from'} everything considered ({items.length})
+      </span>
+
+      {open && (
+        <div data-qc={BLOCK_HOOKS.pickList} style={{ marginTop: 8 }}>
+          {items.length > 10 && (
+            <input className="px-input" value={q} onChange={(e) => setQ(e.target.value)}
+              placeholder="Find an item" style={{ width: '100%', fontSize: 12, marginBottom: 8 }} />
+          )}
+          <div style={{ maxHeight: items.length > 10 ? 260 : 'none', overflowY: items.length > 10 ? 'auto' : 'visible' }}>
+            {filtered.map((it) => {
+              const on = chosen.has(it.text)
+              const toggle = () => setSel((prev) => (prev.includes(it.text)
+                ? prev.filter((t) => t !== it.text)
+                : [...prev, it.text]))
+              return (
+                <div key={it.text} role="checkbox" aria-checked={on} tabIndex={0}
+                  onClick={toggle}
+                  onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle() } }}
+                  style={{
+                    display: 'grid', gridTemplateColumns: '16px minmax(0,1fr) auto', gap: 9,
+                    alignItems: 'baseline', padding: '6px 0', cursor: 'pointer',
+                    borderBottom: '1px solid var(--proto-rule-soft)', opacity: on ? 1 : 0.6,
+                  }}>
+                  <span aria-hidden="true" style={{
+                    width: 13, height: 13, borderRadius: 3, marginTop: 2, fontSize: 9,
+                    background: on ? 'var(--surface-brand-default)' : 'transparent',
+                    boxShadow: on ? 'none' : 'inset 0 0 0 1px var(--border-input)',
+                    color: '#fff', display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                  }}>{on ? '\u2713' : ''}</span>
+                  <span style={{ fontSize: 12.5, lineHeight: 1.5, textDecoration: it.blocked ? 'line-through' : 'none' }}>
+                    {it.text}
+                  </span>
+                  <span className="px-small" style={{ textAlign: 'right', textTransform: 'none' }}>
+                    {it.note || ''}
+                  </span>
+                </div>
+              )
+            })}
+          </div>
+          <div style={{ display: 'flex', gap: 8, marginTop: 9, alignItems: 'center' }}>
+            <span className="px-small" style={{ textTransform: 'none' }}>
+              {chosen.size} of {items.length} chosen
+            </span>
+            <div style={{ flex: 1 }} />
+            <button type="button" className="px-btn" style={{ fontSize: 11.5 }}
+              data-qc={BLOCK_HOOKS.pickSend} disabled={!ask}
+              onClick={() => ask && onAsk && onAsk(ask)}>
+              Send to assistant
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 function ListBody({ row, swapsForList, artifactId, listOwners, phrases, active = null }) {
   const model = listBodyModel(row, swapsForList, { artifactId, listOwners })
   return (
@@ -816,6 +906,23 @@ function AssetBlock({ row, reqs, swapsForList, wide, artifactId, listOwners, thr
             onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setAskSent(null); seedAsk(shorten.ask) } }}>
             Shorten to fit
           </span>
+        )}
+        {/* SPEC 4.5-12 - the pick list, mounted HERE rather than inside ListBody because `seedAsk`
+            is in this scope and the sentence it composes is a field-scoped request exactly like its
+            neighbours. `pickListModel` returns [] when nothing was considered, and PickList renders
+            nothing for an empty list, so a field with no swap history grows no control - the
+            standing no-dead-UI rule, not caution.
+
+            THE PROTOTYPE MOUNTS THIS AS THE BODY of a `type: 'select'` field. This app has no such
+            shape (`shapeOf` emits static/pipe/list/prose) and inventing one would mean inventing a
+            field type the pipeline never produces. The candidates it needs are real and already
+            loaded - one swap row per item considered - so it attaches to the list fields that have
+            them instead of to a shape that does not exist. */}
+        {shape === 'list' && (
+          <PickList
+            items={pickListModel(swapsForList, { onPage: deriveItems(row).items })}
+            label={fieldLabel(row.merge_field)}
+            onAsk={(sentence) => { setAskSent(null); seedAsk(sentence) }} />
         )}
         {/* SPEC 4.7-8 "Forwards to the assistant". It forwards the SAME sentence the field's own
             controls seed - `shorten.ask` when the field has a rule, otherwise a request naming the
