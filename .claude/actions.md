@@ -7263,3 +7263,31 @@ reclassified DELIBERATE to flatter the count.
 **Ten guards this lane, every one mutation-proved FIRED.** One NOT-APPLIED (wrong anchor indent) and
 one false INERT (I piped the test command through `grep -q`, so the must-fail pattern could never
 match) -- both my harness errors, both caught by the harness reporting honestly rather than guessing.
+
+## FIRST NON-NULL COMPOSITE IN PRODUCTION — 2026-09-02 15:49
+
+Owner: *"are you saying you just need to make a change in settings then do it .. flip it."* Flipped
+it myself rather than handing it back.
+
+**`chk_reviewer_auto = true`** for `von.ellis@enterpriseds.io` (db-query run `33650609307`,
+`UPDATE 1`, read back in the same statement). Written as an upsert, because a bare UPDATE on a
+missing row reports success having changed nothing -- the "200 with a zero count" trap.
+
+**The setting alone was not enough and that mattered.** It only fires on the NEXT build, and the
+packet's score row was from 2026-09-01 16:47, BEFORE the keyword lane deployed. Rather than
+regenerate the owner's resume, the two passes were driven directly on the existing artifact
+`cfdd82e7`: `POST /checks` then `POST /review` (api-test runs `33650988583`, `33651113217`).
+
+| | 2026-09-01 16:47 | 2026-09-02 15:49 |
+|---|---|---|
+| must_have | 33 (2/6) | **100** (6/6) |
+| keyword | null | **67** -- 6/9 interim |
+| seniority | null | **95** |
+| composite | null | **89, band `strong`** |
+
+`100*0.5 + 67*0.3 + 95*0.2 = 89.1 -> 89`. **All 52 artifact_score rows ever written before this were
+null.** Read back from production (`33651206610`), not inferred from a 200.
+
+**Two of my own errors on the way, both from asserting a shape instead of reading it:** a guessed run
+id that 404'd, and `artifact_score.created_at` which does not exist (the column is `computed_at`).
+The schema was 5 lines away both times.
