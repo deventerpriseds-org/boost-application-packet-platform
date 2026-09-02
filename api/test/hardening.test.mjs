@@ -5333,3 +5333,198 @@ test('H:no-dimension-logic-outside-api: the dimension brain has ONE home', async
   assert.deepEqual(offenders, [],
     'dimension logic copied into scripts/ - a re-derived fixture measures itself')
 })
+
+// ── the fixture instrument, part 2: it must answer the SAME QUESTION production answers ──────────
+// Measured 2026-09-02 against the live DB (connector boost-pg-mcp-write). The route
+// `artifactChecksGet` (api/src/functions/tests/appChecks.ts) scopes BOTH check_result and
+// artifact_score to the gate's run; fixture-refresh.yml scoped neither, and pulled no score at all.
+// Consequence: artifact cfdd82e7 returned 271 check rows across 26 distinct check_key where the
+// route sends 25, screens/app-send.png reads "112 items to fix" where live reads "14", and the
+// drawer's Match tab said "No score has been computed for this asset yet" about an asset the gate
+// in the SAME payload called Blocked. docs/qc-evidence/PROTOTYPE-COVERAGE.md 17d + 17f.
+
+test('H:fixture-checks-follow-the-gates-run: the dump asks the route\'s question, not a wider one', () => {
+  // A SOURCE GREP, deliberately: the behaviour under test is a SQL predicate inside a YAML heredoc
+  // that only a live Postgres can execute, and this suite has neither. What a grep CAN assert is
+  // the structural invariant that made the two payloads disagree - that the fixture's check_result
+  // and artifact_score reads are joined to artifact_gate on BOTH columns. (The predicate itself was
+  // executed: against production, returning 71 check rows where the unjoined form returns 239, and
+  // against a local PostgreSQL 16 seeded with three runs, returning 3 rows where the old form
+  // returned 8. Evidence: docs/qc-evidence/PROGRESS-fixture-parity.md.)
+  const yml = readFileSync(new URL('../../.github/workflows/fixture-refresh.yml', import.meta.url), 'utf8')
+  const strip = (t) => t.split('\n').filter((l) => !/^\s*(--|#)/.test(l)).join('\n')
+  const sql = strip(yml)
+
+  for (const [key, table] of [['checks', 'check_result'], ['scores', 'artifact_score']]) {
+    const i = sql.indexOf(`'${key}',`)
+    assert.ok(i > -1, `fixture-refresh.yml no longer selects '${key}' - the fixture cannot carry it`)
+    // The value expression runs until the NEXT top-level key of the json_build_object, or the end.
+    // (An earlier draft cut at the first `)),` and truncated the block to one line - the guard then
+    // failed on correct SQL, which is the cry-wolf failure this file's rule 2 forbids. Caught by
+    // running it, which is the only reason it is not in the shipped guard.)
+    const rest = sql.slice(i + key.length + 3)
+    const next = rest.search(/\n\s+'\w+',\s+\(select/)
+    const block = next > -1 ? rest.slice(0, next) : rest
+    assert.match(block, new RegExp(`from\\s+${table}\\s`),
+      `'${key}' must read ${table}`)
+    assert.match(block, /join\s+artifact_gate\s+g/,
+      `'${key}' must be joined to artifact_gate - without it the dump carries EVERY historical run, ` +
+      'which is how a locally-rendered Checks tab came to repeat every rule and read 112 items to fix')
+    assert.match(block, /g\.artifact_id\s*=\s*\w+\.artifact_id\s+and\s+g\.run_id\s*=\s*\w+\.run_id/,
+      `'${key}' must join on BOTH artifact_id AND run_id. artifact_id alone re-admits every run; ` +
+      'run_id alone is not a predicate at all')
+    // Not "the latest by created_at". That is a DIFFERENT question - it disagrees with the gate the
+    // moment a run finishes after the one the gate was written from - and the brief for this fix
+    // named it as the wrong answer specifically.
+    assert.doesNotMatch(block, /order\s+by\s+\w*\.?(created_at|computed_at)\s+desc\s+limit\s+1\b/,
+      `'${key}' must follow the GATE's run, never "the latest run"`)
+  }
+
+  // history is the ONE read that is deliberately NOT run-scoped, because the route's is not either:
+  // `where artifact_id=$1 order by computed_at desc limit 10`, unconditional. Asserted explicitly so
+  // a future "make it consistent" edit cannot quietly break parity in the name of tidiness.
+  const h = sql.slice(sql.indexOf("'scoreHistory',"))
+  assert.match(h.slice(0, 600), /order\s+by\s+s\.computed_at\s+desc\s+limit\s+10/,
+    'scoreHistory must be the route\'s last-10-by-computed_at, per artifact')
+  assert.match(h.slice(0, 600), /cross\s+join\s+lateral/,
+    'the cap must be PER ARTIFACT - a plain `limit 10` over the packet starves four artifacts to feed one')
+})
+
+test('H:fixture-heredoc-has-no-backticks: an unquoted heredoc runs what you put in backticks', () => {
+  // NOT hypothetical. `git show HEAD~:...` had `-- `/search-prefs`.checks` inside `<<SQL`, and
+  // running that step verbatim under bash printed:
+  //     /tmp/step_before.sh: line 4: /search-prefs: No such file or directory
+  // i.e. bash EXECUTED /search-prefs while expanding the SQL. It was harmless only because the pair
+  // was balanced and the path does not exist; an odd number of backticks swallows SQL, and a
+  // backtick around anything that IS a command runs it on the runner with the DB password in env.
+  const yml = readFileSync(new URL('../../.github/workflows/fixture-refresh.yml', import.meta.url), 'utf8')
+  const body = yml.slice(yml.indexOf('<<SQL'), yml.indexOf('\n          SQL\n'))
+  assert.ok(body.length > 100, 'could not locate the SQL heredoc - this guard has gone blind')
+  const offenders = body.split('\n').map((l, i) => [i, l]).filter(([, l]) => l.includes('`'))
+  assert.deepEqual(offenders, [],
+    'backtick inside the unquoted SQL heredoc - bash will treat it as command substitution')
+})
+
+test('H:fixture-carries-the-score: the instrument refuses a payload that contradicts its own gate', async () => {
+  const { writeFileSync, mkdtempSync } = await import('node:fs')
+  const { execFileSync } = await import('node:child_process')
+  const { tmpdir } = await import('node:os')
+  const OPP = '00000000-0000-0000-0000-00000000beef'
+
+  // THE SHIPPED SCRIPT, run in a child process, so the exit code is the verdict - the same shape as
+  // H:canary-refuses-a-hollow-comparison, and for the same reason: a test that re-implements the
+  // predicate grades a copy of itself and passes with the guard reverted.
+  const build = (dump) => {
+    const dir = mkdtempSync(`${tmpdir()}/fxs-`)
+    writeFileSync(`${dir}/raw.json`, JSON.stringify(dump))
+    try {
+      execFileSync('node', [`${REPO}scripts/build-fixtures.mjs`, '--raw', `${dir}/raw.json`,
+        '--opp', OPP, '--out', `${dir}/f.json`], { cwd: REPO, stdio: 'pipe' })
+      return { code: 0, err: '', out: JSON.parse(readFileSync(`${dir}/f.json`, 'utf8')) }
+    } catch (e) { return { code: e.status, err: String(e.stderr || ''), out: null } }
+  }
+  const base = (over) => ({
+    packet: { id: 'p', status: 'review' }, opp: { id: OPP, owner_email: 'o@e.io' },
+    artifacts: [{ id: 'a1', packet_id: 'p', type: 'resume', status: 'review' }],
+    insertions: [], corrections: [],
+    requirements: [{ seq: 1, opp_id: OPP, kind: 'must_have', text: 'a', char_start: 0 }],
+    gates: [{ artifact_id: 'a1', run_id: 'r3', gate: 'fail', attention_count: 1 }],
+    checks: [{ artifact_id: 'a1', run_id: 'r3', check_key: 'skill_char_limit', engine: 'deterministic', state: 'fail' }],
+    scores: [{ artifact_id: 'a1', run_id: 'r3', composite: 89, band: 'strong', must_have_coverage: 100 }],
+    scoreHistory: [{ artifact_id: 'a1', composite: 89, band: 'strong', must_have_coverage: 100, computed_at: '2026-01-03' }],
+    swaps: [{ packet_id: 'p', seq: 1, action: 'kept' }],
+    checkPrefs: { owner_email: 'o@e.io', chk_skill_max_chars: 24 },
+    apiRequirements: {
+      oppId: OPP, requirements: [], total: 0, located: 0,
+      comparison: { resolved: true, dimensions: [{ key: 'k', fit: 'strong' }], summary: { graded: 1 }, set: { keys: ['k'] } },
+    },
+    ...over,
+  })
+
+  // 1. A COMPLETE dump is written, and the score reaches the key the client reads.
+  const ok = build(base())
+  assert.equal(ok.code, 0, 'a complete dump was refused - the guard cries wolf')
+  const r = ok.out['/artifact/a1/checks-result']
+  assert.equal(r.score.composite, 89, 'the score never reached /checks-result')
+  assert.equal(r.history.length, 1, 'the history never reached /checks-result')
+  // The route projects FOUR columns. artifact_id rides along in the dump purely to route the row and
+  // must be stripped: a fixture carrying MORE than production sends is a parity defect in the other
+  // direction - a panel could render locally off a field the real route never delivers.
+  assert.deepEqual(Object.keys(r.history[0]).sort(),
+    ['band', 'composite', 'computed_at', 'must_have_coverage'],
+    'history rows must carry exactly the four columns appChecks.ts projects')
+
+  // 2. THE SCORE ABSENT - the §17f defect - must be REFUSED, not warned about.
+  assert.equal(build(base({ scores: [] })).code, 1,
+    'a gated artifact with no score was accepted; the Match tab would say "no score has been ' +
+    'computed" about an asset the same payload calls Blocked')
+
+  // 3. THE PREDICATE MUST BE NARROW ENOUGH NOT TO CRY WOLF. An artifact with NO GATE legitimately
+  //    has no score - the route returns `score: null` for it - so the SCORE rule must stay silent.
+  //    Asserted on the MESSAGE, not the exit code: an un-gated dump also trips the pre-existing
+  //    `checkResults` rule, so a bare `code === 0` here would be testing that other rule and would
+  //    pass with this one reverted. (Found by running it: the first draft asserted code 0 and failed
+  //    for exactly that reason.)
+  const ungated = build(base({ gates: [], scores: [], scoreHistory: [] }))
+  assert.ok(!/artifact_score/.test(ungated.err),
+    'the score rule fired for an artifact with no gate, whose correct state IS having no score:\n'
+    + ungated.err)
+
+  // 4. CHECKS NOT SCOPED TO THE GATE'S RUN - the §17d defect - must be REFUSED. The signature needs
+  //    no DB: the route orders one run by check_key, so a repeated check_key is impossible in
+  //    production and proves the dump is every run at once.
+  assert.equal(build(base({ checks: [
+    { artifact_id: 'a1', run_id: 'r2', check_key: 'skill_char_limit', engine: 'deterministic', state: 'fail' },
+    { artifact_id: 'a1', run_id: 'r3', check_key: 'skill_char_limit', engine: 'deterministic', state: 'fail' },
+  ] })).code, 1, 'a dump carrying the same check_key twice for one artifact was accepted')
+})
+
+test('H:fixture-score-gap-is-per-artifact: one starved asset among scored ones must still refuse', async () => {
+  // FOUND BY AN INDEPENDENT VERIFIER, not by the author. The first version of this predicate fired
+  // only when NOT ONE gated artifact carried a score, so a PARTIAL dump - 3 scored, 1 starved -
+  // passed silently and the starved asset's Match tab lied about its own gate.
+  //
+  // The author's first instinct was to reject the tightening on the theory that a gated artifact can
+  // legitimately have no score row, making the strict form cry wolf. PRODUCTION SETTLED IT INSTEAD:
+  // packet 85cee965 read live 2026-09-02 has FOUR gated artifacts and all four carry a score row
+  // (three with a null composite, one with 89); only the un-gated `video` artifact has none, and
+  // that case is exempt by the route's own `const score = g ? ... : null`. So the strict form is
+  // what production actually looks like.
+  //
+  // Runs the SHIPPED script in a child process on purpose: a test that re-implements the predicate
+  // grades a copy of itself and passes with the guard reverted.
+  const { writeFileSync, mkdtempSync } = await import('node:fs')
+  const { execFileSync } = await import('node:child_process')
+  const { tmpdir } = await import('node:os')
+  const OPP = '00000000-0000-0000-0000-0000000partial'.slice(0, 36)
+  const dump = {
+    packet: { id: 'p', status: 'review' }, opp: { id: OPP, owner_email: 'o@e.io' },
+    artifacts: [{ id: 'a1', packet_id: 'p', type: 'resume', status: 'review' },
+      { id: 'a2', packet_id: 'p', type: 'cover', status: 'review' }],
+    insertions: [], corrections: [],
+    requirements: [{ seq: 1, opp_id: OPP, kind: 'must_have', text: 'a', char_start: 0 }],
+    // BOTH gated. a2 is the starved one.
+    gates: [{ artifact_id: 'a1', run_id: 'r3', gate: 'fail', attention_count: 1 },
+      { artifact_id: 'a2', run_id: 'r4', gate: 'fail', attention_count: 1 }],
+    checks: [{ artifact_id: 'a1', run_id: 'r3', check_key: 'skill_char_limit', engine: 'deterministic', state: 'fail' },
+      { artifact_id: 'a2', run_id: 'r4', check_key: 'word_counts', engine: 'deterministic', state: 'fail' }],
+    scores: [{ artifact_id: 'a1', run_id: 'r3', composite: 89, band: 'strong', must_have_coverage: 100 }],
+    scoreHistory: [{ artifact_id: 'a1', composite: 89, band: 'strong', must_have_coverage: 100, computed_at: '2026-01-03' }],
+    swaps: [{ packet_id: 'p', seq: 1, action: 'kept' }],
+    checkPrefs: { owner_email: 'o@e.io', chk_skill_max_chars: 24 },
+    apiRequirements: { oppId: OPP, requirements: [], total: 0, located: 0,
+      comparison: { resolved: true, dimensions: [{ key: 'k', fit: 'strong' }], summary: { graded: 1 }, set: { keys: ['k'] } } },
+  }
+  const dir = mkdtempSync(`${tmpdir()}/fxp-`)
+  writeFileSync(`${dir}/raw.json`, JSON.stringify(dump))
+  let code = 0, err = ''
+  try {
+    execFileSync('node', [`${REPO}scripts/build-fixtures.mjs`, '--raw', `${dir}/raw.json`,
+      '--opp', OPP, '--out', `${dir}/f.json`], { cwd: REPO, stdio: 'pipe' })
+  } catch (e) { code = e.status; err = String(e.stderr || '') }
+  assert.notEqual(code, 0,
+    'a dump where one of two GATED artifacts has no score was WRITTEN - the partial case slips '
+    + 'through and that asset will contradict its own gate on screen')
+  assert.match(err, /artifact_score missing on 1 of 2/,
+    `the refusal must name the ratio and the offender so a reader knows what to fix; got: ${err}`)
+})
