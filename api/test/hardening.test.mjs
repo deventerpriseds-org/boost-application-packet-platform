@@ -5478,3 +5478,53 @@ test('H:fixture-carries-the-score: the instrument refuses a payload that contrad
     { artifact_id: 'a1', run_id: 'r3', check_key: 'skill_char_limit', engine: 'deterministic', state: 'fail' },
   ] })).code, 1, 'a dump carrying the same check_key twice for one artifact was accepted')
 })
+
+test('H:fixture-score-gap-is-per-artifact: one starved asset among scored ones must still refuse', async () => {
+  // FOUND BY AN INDEPENDENT VERIFIER, not by the author. The first version of this predicate fired
+  // only when NOT ONE gated artifact carried a score, so a PARTIAL dump - 3 scored, 1 starved -
+  // passed silently and the starved asset's Match tab lied about its own gate.
+  //
+  // The author's first instinct was to reject the tightening on the theory that a gated artifact can
+  // legitimately have no score row, making the strict form cry wolf. PRODUCTION SETTLED IT INSTEAD:
+  // packet 85cee965 read live 2026-09-02 has FOUR gated artifacts and all four carry a score row
+  // (three with a null composite, one with 89); only the un-gated `video` artifact has none, and
+  // that case is exempt by the route's own `const score = g ? ... : null`. So the strict form is
+  // what production actually looks like.
+  //
+  // Runs the SHIPPED script in a child process on purpose: a test that re-implements the predicate
+  // grades a copy of itself and passes with the guard reverted.
+  const { writeFileSync, mkdtempSync } = await import('node:fs')
+  const { execFileSync } = await import('node:child_process')
+  const { tmpdir } = await import('node:os')
+  const OPP = '00000000-0000-0000-0000-0000000partial'.slice(0, 36)
+  const dump = {
+    packet: { id: 'p', status: 'review' }, opp: { id: OPP, owner_email: 'o@e.io' },
+    artifacts: [{ id: 'a1', packet_id: 'p', type: 'resume', status: 'review' },
+      { id: 'a2', packet_id: 'p', type: 'cover', status: 'review' }],
+    insertions: [], corrections: [],
+    requirements: [{ seq: 1, opp_id: OPP, kind: 'must_have', text: 'a', char_start: 0 }],
+    // BOTH gated. a2 is the starved one.
+    gates: [{ artifact_id: 'a1', run_id: 'r3', gate: 'fail', attention_count: 1 },
+      { artifact_id: 'a2', run_id: 'r4', gate: 'fail', attention_count: 1 }],
+    checks: [{ artifact_id: 'a1', run_id: 'r3', check_key: 'skill_char_limit', engine: 'deterministic', state: 'fail' },
+      { artifact_id: 'a2', run_id: 'r4', check_key: 'word_counts', engine: 'deterministic', state: 'fail' }],
+    scores: [{ artifact_id: 'a1', run_id: 'r3', composite: 89, band: 'strong', must_have_coverage: 100 }],
+    scoreHistory: [{ artifact_id: 'a1', composite: 89, band: 'strong', must_have_coverage: 100, computed_at: '2026-01-03' }],
+    swaps: [{ packet_id: 'p', seq: 1, action: 'kept' }],
+    checkPrefs: { owner_email: 'o@e.io', chk_skill_max_chars: 24 },
+    apiRequirements: { oppId: OPP, requirements: [], total: 0, located: 0,
+      comparison: { resolved: true, dimensions: [{ key: 'k', fit: 'strong' }], summary: { graded: 1 }, set: { keys: ['k'] } } },
+  }
+  const dir = mkdtempSync(`${tmpdir()}/fxp-`)
+  writeFileSync(`${dir}/raw.json`, JSON.stringify(dump))
+  let code = 0, err = ''
+  try {
+    execFileSync('node', [`${REPO}scripts/build-fixtures.mjs`, '--raw', `${dir}/raw.json`,
+      '--opp', OPP, '--out', `${dir}/f.json`], { cwd: REPO, stdio: 'pipe' })
+  } catch (e) { code = e.status; err = String(e.stderr || '') }
+  assert.notEqual(code, 0,
+    'a dump where one of two GATED artifacts has no score was WRITTEN - the partial case slips '
+    + 'through and that asset will contradict its own gate on screen')
+  assert.match(err, /artifact_score missing on 1 of 2/,
+    `the refusal must name the ratio and the offender so a reader knows what to fix; got: ${err}`)
+})
