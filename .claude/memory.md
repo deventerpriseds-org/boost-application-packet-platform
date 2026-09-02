@@ -521,6 +521,40 @@ Key tables (PostgreSQL):
 
 ## Active work
 
+**ALL THREE OPEN ITEMS CLOSED 2026-09-02 (owner: "go ahead ... close fanning out where you can").**
+
+- **ACT-70 headline guard** -- 5 guards APPENDED to the EXISTING
+  `app/test/prototypeCoverage.test.mjs`, reusing its `parse()`. Scope is `13-CURRENT` ONLY;
+  13a/13b/13c/13d are frozen by the doc's own caption and 13-RENDER uses a section-subset formula,
+  so guarding them would flag correct content.
+- **SS17d / SS17f fixture parity** -- `fixture-refresh.yml` joins `artifact_gate` on BOTH
+  `artifact_id` and `run_id` (carrying both halves of the live route: scope to the gate's run, and
+  contribute nothing for an artifact with no gate) and now pulls `artifact_score` + history;
+  `build-fixtures.mjs` maps them onto `/checks-result` and EXTENDS the existing thin-fixture
+  refusal. Fanned out to a subagent, which also found an incidental defect: a backtick pair inside
+  an UNQUOTED heredoc that bash was executing while expanding the SQL.
+
+**The AC pass settled a discrepancy I had flagged and could not settle myself.** The doc's prose
+calls its method "4th cell, earliest token"; that is an IMPRECISE description of `parse()`. Measured
+across the live file they agree on 216 of 221 rows and differ only on the five 3-column `4.12-*`
+rows, where a literal 4th-cell reader returns null. Those are OUT-OF-SCOPE and excluded either way,
+so every number quoted today stands. **The prose is not a spec; the running code is.**
+
+**It also found 8 of 11 per-section tally lines are stale RIGHT NOW** (measured, deltas recorded).
+I fixed SS4.8 and SS4.10 by hand earlier today; the other 8 are a separate mechanical commit,
+deliberately NOT smuggled in as a side effect of adding a guard.
+
+**HARDENING -- an INERT mutation caught a guard that would have shipped believed and protecting
+nothing.** The single-parser guard needed THREE versions. v1 asserted one `function parse(`; the
+mutation applied and came back INERT, because a second function of the SAME name breaks module load
+before any assertion runs, so the named test never fails. It was also the wrong shape -- a duplicate
+`parse` is self-defeating in JS, while the real risk is a second parser under a DIFFERENT name that
+drifts (how an ad-hoc recount once reported 129 BUILT against a real 151). v2 searched for the row
+pattern and MATCHED ITSELF, needle and haystack being the same string. v3 assembles the needle from
+two halves and FIRED against a `parseAgain()`. Lesson: **an INERT result is information, not a
+nuisance -- and a mutation that breaks module load is not a proof of anything.**
+
+
 **LANDED 2026-09-02: intent probe + render passes are on `main` at `e99be2b`. Parity 169/182 (92.9%).**
 
 Owner said "merge" and the connector was reconnected in the same message. PR #69 merged. Only

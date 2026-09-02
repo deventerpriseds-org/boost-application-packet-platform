@@ -7465,3 +7465,31 @@ workflow round-trip had not.
 
 **STILL OPEN, unchanged and deliberate:** the two fixture fixes (`run_id` §17d, `artifact_score`
 §17f) and the headline-recount CI guard (ACT-70). All three are unrequested code.
+
+---
+
+## ACT-73 — Close all three open items: ACT-70 guard + §17d run_id + §17f artifact_score
+
+**Asked (2026-09-02):** *"go ahead / close fanning out where you can"* — all three items previously
+listed as open and unrequested.
+
+**Status: DONE, pending independent verification.**
+
+| Item | Where | Proof |
+|---|---|---|
+| ACT-70 headline guard | `app/test/prototypeCoverage.test.mjs` (+5 tests, extends existing `parse()`) | 6 mutations: 5 FIRED, 1 INERT→rewritten→FIRED |
+| §17d `run_id` predicate | `.github/workflows/fixture-refresh.yml` | agent ran the step verbatim on local PG16: checks 8→3 |
+| §17f `artifact_score` | same + `scripts/build-fixtures.mjs` | scores ABSENT→1, history ABSENT→3 |
+| Incidental | backtick pair in an UNQUOTED heredoc bash was executing | reproduced on HEAD |
+
+**Suites:** api **1062/1062**, prototypeCoverage **10/10**, app build clean.
+
+**Deliberately NOT done, each with a reason:**
+- The 8 stale per-section tally lines → own commit (mechanical, deserves its own review).
+- `13-RENDER`'s `83 of 84` → different formula; fast-follow once this guard is proven.
+- A 4th `REQUIRED` entry in `fixture-canary.mjs` → would hard-block `render-app.mjs` immediately,
+  since the committed `fixtures.json` has no score until the workflow is dispatched.
+
+**Consequence to know:** re-running `build-fixtures.mjs` against the CURRENT committed dump will now
+REFUSE (no `scores`, duplicate `check_key`s). Intended — `fixture-refresh.yml` must be dispatched
+before the next local render.
