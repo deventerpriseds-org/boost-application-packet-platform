@@ -22,7 +22,9 @@ import { normalizePostingText, decodeEntities, groundingText } from '../dist/fun
 import { buildRequirements, locate, mapKind, sentenceBounds } from '../dist/functions/tests/requirements.js'
 import { onOmitList, omitEntries, similarity, itemTokens } from '../dist/functions/tests/swaps.js'
 import { runChecks, gateFor, attentionCount, COVERAGE_THRESHOLD, MIN_JUDGEABLE_TOKENS } from '../dist/functions/tests/checks.js'
-import { computeArtifactScore, judgedMustHaveIds, mustHaveSource, parseMustHaveSource } from '../dist/functions/tests/artifactScore.js'
+// DEFAULT_WEIGHTS joins this existing import so H:one-composite-formula can compare the
+// reviewer's inline weighted sum against the ONE implementation that is supposed to own it.
+import { computeArtifactScore, judgedMustHaveIds, mustHaveSource, parseMustHaveSource, DEFAULT_WEIGHTS } from '../dist/functions/tests/artifactScore.js'
 import { deriveFacts } from '../dist/functions/tests/ownerFacts.js'
 import { parseResumePackage, headingKeysFor } from '../dist/functions/tests/resumeParser.js'
 import { validateCitations, reviewerChecks, agreementFor } from '../dist/functions/tests/reviewer.js'
@@ -5138,4 +5140,54 @@ test('H:no-surface-says-a-counted-proposal-is-uncounted: one fact, every surface
     'A SURFACE STILL TELLS THE OWNER A COUNTED ROW IS EXCLUDED: ' + offenders.join(', ') + '. ' +
     'A model-proposed row counts toward must_have_coverage until vetoed (ruleEvidenceOf). Any ' +
     'sentence saying it is awaiting confirmation, or does not count, contradicts the number beside it.')
+})
+
+test('H:one-composite-formula: the reviewer path and computeArtifactScore agree', () => {
+  // FOUND BY THE INTEGRATION TRACE this change required, and it was latent until this change.
+  //
+  // There are TWO weighted-sum implementations. `computeArtifactScore` owns one; `appReviewer.ts`
+  // :309 writes the other inline, when a reviewer verdict arrives, to fold seniority into a row the
+  // deterministic pass already wrote. The comment four lines above it says the composite is
+  // "recomputed through computeArtifactScore ... so the null-unless-all-three rule stays in one
+  // place" — the null rule does, the ARITHMETIC does not.
+  //
+  // It was unreachable until now: `keyword_coverage` was null on all 52 artifact_score rows ever
+  // written, and the branch is gated on it being non-null, so the second formula had never once
+  // executed. The interim ATS keyword score makes it live. A drift between the two would show the
+  // owner one composite before a review and a different one after, with nothing to explain it.
+  //
+  // This asserts AGREEMENT rather than deleting the duplicate: `computeArtifactScore` derives
+  // must_have from `checks`, so the reviewer path — which has only the stored INTEGER — cannot call
+  // it for the composite without a signature change. That is a real refactor on a scoring path and
+  // is tracked rather than smuggled in here. Until then, the two must not disagree.
+  const src = readFileSync(new URL('../src/functions/tests/appReviewer.ts', import.meta.url), 'utf8')
+  const m = /const composite = \([\s\S]*?\)\s*\?\s*Math\.round\(([\s\S]*?)\)\s*:\s*null/.exec(src)
+  assert.ok(m, 'the reviewer composite is no longer where this guard reads it — re-point it')
+  const expr = m[1]
+  // The three weights it applies, in the order the components are weighted.
+  const weights = [...expr.matchAll(/\?\?\s*(0\.\d+)/g)].map(x => Number(x[1]))
+  assert.deepEqual(weights, [DEFAULT_WEIGHTS.mustHave, DEFAULT_WEIGHTS.keyword, DEFAULT_WEIGHTS.seniority],
+    `THE TWO COMPOSITE FORMULAS DISAGREE. appReviewer weights [${weights}] and computeArtifactScore ` +
+    `weights [${[DEFAULT_WEIGHTS.mustHave, DEFAULT_WEIGHTS.keyword, DEFAULT_WEIGHTS.seniority]}]. ` +
+    'The owner would see one composite before a review and another after it, with no explanation.')
+
+  // And it must still refuse a partial composite — all three components, or null.
+  assert.match(src, /s\.must_have_coverage !== null && s\.keyword_coverage !== null/,
+    'the reviewer path must require must_have AND keyword before computing a composite')
+  // The arithmetic agrees on a worked example, not only on the constants.
+  const byHand = Math.round(50 * DEFAULT_WEIGHTS.mustHave + 67 * DEFAULT_WEIGHTS.keyword + 95 * DEFAULT_WEIGHTS.seniority)
+  const viaFn = computeArtifactScore({
+    requirements: [],
+    // `engine: 'deterministic'` is REQUIRED and its absence is silent: artifactScore.ts:104 filters
+    // on it so a reviewer row keyed `must_have_coverage` cannot feed a model's opinion into a
+    // number the gate presents as measured. Omit it and the component is null with
+    // "no must_have_coverage check was run" — a fixture the system does not produce.
+    // `offenders` must be an ARRAY, not absent: the uncovered-seq walk iterates it unguarded.
+    // Two shape corrections in one fixture, both found by RUNNING it rather than reading it.
+    checks: [{ check_key: 'must_have_coverage', engine: 'deterministic', state: 'fail',
+               observed: '3/6 must-haves evidenced', offenders: [] }],
+    keyword: { covered: 67, scoreable: 100 }, seniority: 95,
+  })
+  assert.equal(viaFn.composite, byHand,
+    'computeArtifactScore and the reviewer formula must produce the same number for the same inputs')
 })
