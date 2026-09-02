@@ -5771,3 +5771,36 @@ Earlier the same day backticks inside a TypeScript template literal terminated i
 TS1005 errors 200 lines away. **Backticks are live in two different languages here; quote the
 heredoc, always.** The commit is on `main` and is not worth a force-push to fix — the content is
 correct in this file, which is the thing that gets read.
+
+---
+
+## 2026-09-02 — cover step RENDERED; parity 164/183 (ACT-68a)
+
+**The cover letter step has no unbuilt row.** 80 of 85 BUILT (94.1%), 85 of 85 present, zero ABSENT
+across §4.4-§4.7. Doc headline moved 159 -> 164 of 183 (89.6%): +4 from the render pass
+(`4.4-14`, `4.4-24/25/26`), +1 because `4.5-12` shipped on `main` in `5d37e3d` during it.
+
+**Use `scripts/render-app.mjs` for parity questions — reading alone under-reports.** All four rows
+above were PARTIAL on a reading and are built when the page is drawn. But the render is not
+sufficient either: every visible render-vs-prototype difference on this step turned out to be a
+DATA state (no static row in this packet; 2 `.qc-echo` spans actually painting; `MATCH ESTIMATE -`
+because `jd_analyzed = False`). **Render + code + data together, or the answer is wrong in one
+direction or the other.**
+
+**The fixture canary works and must not be bypassed.** The first render refused to run because
+`/search-prefs` had no `checks`; a `--allow-thin` shortcut would have made every word-count rule
+read as unset. Rebuild via `fixture-refresh.yml` (the dump on the `ui-fixtures` branch can itself
+be stale — the one there predated the `checkPrefs` key).
+
+## Hardening
+
+- **A `--theirs` merge resolution on `.claude/actions.md` silently discarded a tracking append I had
+  stated I would re-add.** Caught only because PR #66 showed `changed_files: 1`. Root cause: I
+  resolved and committed in one step without diffing the result against my own commit.
+  **Guardrail: after resolving a tracker conflict with `--theirs`/`--ours`, run
+  `git diff <my-commit> -- <file>` before committing.** It cost nothing here only by luck —
+  `ACT-2026-08-29-a` already recorded the same work, and a blind re-add would have created a
+  second `ACT-68` colliding with a parallel session's entry.
+- **Phase tags must be BARE text at the start of a block.** `eds-phase-tag.py:has_tag` is
+  `text.lstrip().startswith(t)` against plain strings, so `**Fact Finding:**` FAILS on the markdown
+  bold. Two Stop cycles were spent on this. Write `Fact Finding: ...`, unformatted, every block.
