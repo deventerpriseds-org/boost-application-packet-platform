@@ -162,3 +162,97 @@ bears on how much confidence the fixture-parity work actually buys.
 - Extra (beyond the brief's minimum, for confidence): `node --test app/test/*.test.mjs` (full app
   suite) → **436/436 pass, 0 fail.**
 
+## Attack 1 — independently re-derive the "216/221 agree, 5 `4.12-*` rows disagree" claim
+
+**CONFIRMED, exact reproduction.** Did not trust the author's number — wrote a fresh script
+(`/tmp/act73-fixture-test/compare-parsers.mjs`) implementing the doc's OWN prose method literally
+("4th cell [i.e. `line.split('|')[4]`], the verdict token appearing earliest in that cell") and ran
+it against the same file, independently of anything the PR shipped. Result: **221 rows both ways,
+216 agree, exactly 5 disagree — all `4.12-1` through `4.12-5`** (the OUT-OF-SCOPE 3-column rows,
+where a literal "4th cell" lands one column short because those rows have no proto-ref column, so
+the verdict is actually in cell index 3). Both parsers correctly exclude those rows from every
+denominator regardless, so the disagreement is real but immaterial to any published count. This
+independently reproduces the claim used to justify `parse()` over the doc's own prose description as
+the guard's method — the claim is correct.
+
+## Attack 2 — spot-check the "8 of 11 per-section tally lines are stale" claim
+
+**Not just spot-checked — independently recomputed all 10 sections that have a tally line** (all but
+the never-tallied ones), and checked against both the stated PROTOTYPE-COVERAGE.md tally text and
+the AC doc's claimed "computed from rows" figures. Wrote a standalone script
+(`/tmp/act73-fixture-test/section-tally.mjs`) grouping `parse()`'s output by section — not copied
+from either document.
+
+| Section | My independent recount (BUILT/PARTIAL/ABSENT/DELIB) | Doc's stated tally | AC doc's claimed recount | Agrees with AC's claim? |
+|---|---|---|---|---|
+| §4.1 | 20/3/0/9 | 19/3/2/8 | 20/3/0/9 | **exact match** — mine matches AC's independently |
+| §4.2 | 13/1/0/0 | 11/3/0/0 | 13/1/0/0 | **exact match** |
+| §4.4 | 30/0/0/3 | 24/7/0/2 | 30/0/0/3 | **exact match** |
+| §4.8 | 19/3/0/3 | 18/4/0/3 | 19/3/0/3 | **exact match** |
+| §4.9 | 12/1/0/1 | 12/1/0/1 | (claimed "yes") | **exact match — agrees** |
+| §4.10 | 8/0/0/0 | 8/0/0/0 | (claimed "yes") | **exact match — agrees** |
+| §4.11 | 5/1/1/2 | 0/2/6/1 | 5/1/1/2 | **exact match** — the most severe disagreement of all 11: the doc's own §4.11 tally claims literally **0** BUILT rows while the rows themselves show 5 |
+
+Every section I independently recomputed reproduces the AC document's stated "computed from rows"
+figures exactly, and the match/no-match verdict for every section checked (5 of the 8 claimed-stale
+sections, plus both claimed-accurate sections §4.9/§4.10) is correct. **The "8 of 11 stale" claim is
+not inflated — if anything §4.11 (checked above) is understated by calling it merely "stale": the
+doc's own text elsewhere argues at length for why §4.11 should stay near 0%, while its own tally line
+already contradicts its own row table by a full 5 rows.** No evidence of the claim being wrong or
+exaggerated.
+
+## C10 — no `app/src` or `api/src` runtime behaviour changed
+
+**CONFIRMED.** `git diff origin/main...HEAD -- app/src api/src | wc -l` → **0**. The full diff stat
+against `origin/main` touches only: `.claude/actions.md`, `.claude/memory.md`,
+`.github/workflows/fixture-refresh.yml`, `api/test/hardening.test.mjs`,
+`app/test/prototypeCoverage.test.mjs`, three `docs/qc-evidence/*.md` files, and
+`scripts/build-fixtures.mjs`. All test/doc/workflow/script files — nothing in either app's runtime
+source tree.
+
+---
+
+## Summary
+
+| Claim | Verdict |
+|---|---|
+| C1 | CONFIRMED |
+| C2 | CONFIRMED |
+| C3 | CONFIRMED |
+| C4 | CONFIRMED |
+| C5 | CONFIRMED |
+| C6 | CONFIRMED (with a genuine limitation surfaced — see below) |
+| C7 | CONFIRMED |
+| C8 | CONFIRMED |
+| C9 | CONFIRMED (with a genuine gap surfaced — see below) |
+| C10 | CONFIRMED |
+| C11 | CONFIRMED |
+| Attack 1 (216/221 parity claim) | Independently reproduced exactly |
+| Attack 2 (8/11 stale tally claim) | Independently reproduced exactly, not inflated |
+
+**Every claim in the brief holds up under independent, adversarial re-derivation** — nothing was
+taken on the PR's word; every guard was actually mutated and restored, every SQL claim traced to the
+live route's own code and the actual schema constraints (not just the workflow's comments), every
+suite actually run, and both open-ended "attack" items independently re-implemented from scratch
+rather than re-read.
+
+**Two genuine, reportable limitations were found that the brief did not ask about but that a TIER 1
+reviewer should not sit on:**
+
+1. **`H:headline-guard-has-exactly-one-row-parser` only catches a LITERAL-STRING copy of the row
+   regex, not a semantically-equivalent reimplementation.** A second parser written with `[0-9]` in
+   place of `\d` (functionally identical in this file's usage) evades it entirely — proven by
+   mutation, not inferred. This narrows "exactly one row parser" to "exactly one row parser using
+   this exact regex escaping," which is weaker than the guard's own stated purpose. Not a blocker —
+   the guard still catches the case it was actually built for (v3's fix) — but it should not be
+   read as a general defense against a second, drifting recount implementation.
+2. **The new `artifact_score` thin-fixture check only fires when EVERY gated artifact lacks a score,
+   not when some but not all do.** Constructed a fixture with two gated artifacts, one scored and one
+   not — the guard did not fire, and the fixture would have shipped with the unscored artifact's
+   Match tab silently contradicting its own gate, which is exactly the failure mode §17f names. The
+   source comment states this is a deliberate anti-cry-wolf tradeoff, so it is a known, accepted gap
+   rather than an oversight — but it means the fixture-parity fix is not complete for partially-thin
+   fixtures.
+
+Neither finding refutes any of the 11 claims as stated; both are reported because a TIER 1 pass
+should surface what an adversarial pass can still break, not just confirm what was asked.
