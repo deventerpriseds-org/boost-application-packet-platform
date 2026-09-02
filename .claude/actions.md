@@ -5275,6 +5275,36 @@ The wrong-handler bug is the actual cause. The timing change is still correct an
 now goes in the PRE-deploy step so the code deploy is the last restart, and the budget is 90x6s
 rather than 40x6s — but it was not the reason the deploy failed, and I said it was.
 
+---
+
+## ACT-68 — Apply eds-claude-skills `setup.sh` (v19) live + register the boost Postgres connector
+
+**Asked (2026-08-29):** *"run the setup sh in eds skills repo and provide a summary of all the hooks,
+skills, subagents you have officially registered and a detailed description of the approach you will
+follow for function development as a result of it being active… be sure to add boost-pg-mcp-write
+from the custom connectors i added in claude"* — for a session running in PARALLEL with others on
+this codebase.
+
+**Status: DONE — verified by reading the written files, not the installer's stdout.**
+
+| Item | Evidence |
+|---|---|
+| Hooks `_eds_version 19`, 4 events | `/home/user/.claude/settings.json` parsed: SessionStart, Stop (agent + `eds-phase-tag.py`), PostToolUse `Write\|Edit\|NotebookEdit`, UserPromptSubmit (x2) |
+| Platform hooks NOT destroyed | `launcher-settings.json` still holds `session-start-git-identity.sh` + `stop-hook-git-check.sh` |
+| Allowlist merged additively | `permissions.allow` += `mcp__github__create_repository`, `mcp__github__fork_repository`; `autoMode.allow` = `['$defaults','Bash(git push*)']` |
+| 3 guard scripts installed, executable | `eds-git-guard.sh`, `eds-phase-tag.py`, `eds-agent-guard.sh` in `/root/.claude/` |
+| Drift guard functional | `eds-git-guard.sh check` in this repo -> exit 0 |
+| 16 skills + `verifier` agent | `/root/.claude/skills/`, `/root/.claude/agents/` |
+| Bootstrap | `register_repo_root` -> `context_reload_requested` |
+| `boost-pg-mcp-write` live | `select current_database(), current_user` -> `boost_resume_n_packet_builder` / `mcp_readwrite_boost`, 50 public tables |
+
+**Gotcha worth keeping:** `register_repo_root` **rejects** `/workspace/eds-claude-skills` in this
+session shape — the managed clone target is `/home/user/eds-claude-skills` and the error names it.
+`setup.sh`'s SessionStart hook still clones to `/workspace`, so the two paths coexist; register the
+`/home/user` one.
+
+**No application code changed** — Tier 3 by the blast-radius table, so no AC subagent and no
+verifier, per the tiering rule this same setup installs.
 ## ACT-68 — Re-check every PROTOTYPE-COVERAGE row claimed missing: the backlog is 3, not 25
 
 **Asked:** *"render each prototype packet step view ... and compare with the current app versions to
@@ -7226,6 +7256,36 @@ changed it" — a trap for whoever fixes this next.
 `profile_original`/`pass_a`/`pass_b`), `call2` threaded into `buildSwaps`, and its consumers moved —
 a schema migration across several files. Owner's call, not taken unilaterally.
 
+---
+
+## ACT-69 — Render the QC + Review & send pages against the prototype, and update PROTOTYPE-COVERAGE.md
+
+**Asked (2026-09-02):** *"render the current QC and f review page in the packets module vs the
+screenshot we took of the prototype and determine our progress on UI look and function parity. the
+PROTOTYPE-COVERAGE.md file is likely stale but you can use that as well to support. update it with
+your findings and be sure to lean on render as well as reading the code as equal if not more
+importance. We have disproven and improved several things so rollback isn't necessary if the
+difference is purposeful and not work left to be done."*
+
+**Status: DONE.** `PROTOTYPE-COVERAGE.md` §16 added, two stale tallies replaced, one row re-verdicted,
+headline 160 → **161 of 183 (88.0%)**. Seven render PNGs committed.
+
+| Finding | Evidence |
+|---|---|
+| §4.10 tally contradicted its own table — *"2 BUILT (25%), the weakest section"* vs 8/8 BUILT rows | mechanical recount + `render-0902-live-send.png` |
+| §4.8 tally stale — read `BUILT 14 / ABSENT 2` for a section with 0 ABSENT | mechanical recount → 18/22 (82%) |
+| 4.8-20 `Undo this` PARTIAL → BUILT | `render-0902-tab-compare.png` + `QcRail.jsx:382-386` |
+| All 5 QC tabs render, `pageErrors: []` on every click | `render-0902-tab-*.png` |
+| §4.10 8/8 confirmed ON SCREEN incl. `Open field →` | `ui-verify` run 33643149667 |
+| **Fixture is not run-scoped** — `fixture-refresh.yml` lacks the live route's `run_id` predicate | 246 rows / 26 check_key; `app-send.png` 112 vs live 14 |
+
+**Deliberate divergences confirmed, NOT logged as gaps** (per the owner's "rollback isn't necessary
+if the difference is purposeful"): no per-asset MATCH score (never-fabricate-a-composite), no
+keyword tally on coverage rows (term-library decision), fail rows show the observed measurement
+while named offenders render on the QC step instead.
+
+**OPEN, one item, not applied here:** give `fixture-refresh.yml` the `run_id` predicate. Filed in
+§16d with the recommended shape. This ACT changed no `app/` or `api/` source.
 
 ## Continuous lane, 2026-09-02 — comments, lineage, 4.11 dock, 4.5-12 pick list
 
@@ -7264,6 +7324,7 @@ reclassified DELIBERATE to flatter the count.
 one false INERT (I piped the test command through `grep -q`, so the must-fail pattern could never
 match) -- both my harness errors, both caught by the harness reporting honestly rather than guessing.
 
+<<<<<<< HEAD
 ### ACT-2026-09-02-e — the fixture now carries `comparison`, and the jd step was RE-MEASURED
 
 Owner: *"fix the fixture builder to carry comparison, then re-measure."* Done, TIER 1, ACs first
@@ -7331,6 +7392,72 @@ denominator — spec rows, not strings — and is at **164/183 (89.6%)** with th
 and four rows re-verdicted (`826c846`, `8369424`, `beb44e5`). This measurement's value is as a
 CANDIDATE LIST feeding that instrument, not as a second headline competing with it. Two headline
 numbers from two instruments is the state §1a already warns about.
+=======
+---
+
+## ACT-70 — PROTOTYPE-COVERAGE headline collides across parallel render lanes
+
+**Found 2026-09-02** while confirming CI on PR #69, not asked for.
+
+Three lanes are rendering steps into `PROTOTYPE-COVERAGE.md` concurrently and each re-counts the
+one headline. Read from each branch's FILE:
+
+| Lane | Step | Headline in its file |
+|---|---|---|
+| `claude/boost-app-setup-approach-ejv09v` (on `main`) | `jd` | §16 |
+| `claude/eds-skills-setup-summary-ngpaos` (PR #69) | QC + Review & send | 161/183 (88.0%) |
+| `claude/boost-app-setup-approach-6xdoef` (PR #66) | `cover` | 164/183 (89.6%) |
+
+**Ground truth: the reconciled number is `165/183 (90.2%)`, PARTIAL 17, ABSENT 1.** Row-verdict diff
+against `origin/main@3acd4c4` — #69 moved `4.8-20` only; #66 moved `4.4-14/-24/-25/-26`; **overlap
+zero**. Both are correct against their own base and neither is correct against `main` once the other
+lands. Merge order does not matter; the second lane recounts.
+
+**Status: REPORTED, not fixed.** The reconciliation belongs to whichever PR lands second.
+
+**Proposed guard (NOT built — unrequested code):** a CI check that recomputes the headline from the
+`| 4.x-n |` rows using the method §13-CURRENT already documents, and fails when the stated headline
+disagrees. This lane fixed the same class of defect twice by hand inside the file today (the §4.8
+and §4.10 tallies, one of which contradicted the table directly above it). Fixing it by hand a third
+time is the failure the "turn recurring mistakes into guards, not more prose" rule names.
+
+## ACT-69 — status update
+
+Complete and green: PR #69 head `2078b48`, `Tests` run 33644691133 **success**, `mergeable_state:
+clean`. Two items carried forward as OPEN by decision, not oversight:
+- **§17d `fixture-refresh.yml` `run_id` predicate** — a code change the owner did not request; the
+  recommended shape is recorded in §17d.
+- **`boost-pg-mcp-write` lapsed** — reconnect card rendered; the connector is the preferred
+  transport and this pass took the `fixture-refresh.yml` fallback.
+
+---
+
+## ACT-71 — Intent probe: click through both sides, score intents not components
+
+**Asked (2026-09-02):** *"you are overthinking things a bit with what you do and don't call a gap.
+use playwright to click through both and determine if the intent is covered by an upgrade or
+alternative or if it's missing. to say it's not a gap because it hasn't had enough development to be
+able to do it is silly."*
+
+**Status: DONE.** `PROTOTYPE-COVERAGE.md` §17e/§17f added; 4.8-8 re-verdicted; parity **166/183 (90.7%)** after merging the cover lane. New instrument `scripts/intent-probe.mjs`. Five interaction PNGs committed.
+
+| Intent | Result |
+|---|---|
+| `Change it` | **COVERED** — renders on every correction row (proven by injecting corrections) |
+| `Nothing blocks sending.` | **COVERED** — proven by forcing every gate to `pass` |
+| loop detail (closed/remained/halted) | **COVERED** — proven by injecting a 2-pass ledger |
+| requirement filter across tabs | **COVERED** — `filtered to #12`, persisted across a tab switch |
+| `Answer` | **COVERED BY ALTERNATIVE** — `confirm it` |
+| `Open asset →` | **COVERED BY ALTERNATIVE** — step rail + drawer |
+| `Leave open` | **MISSING** — named, though near-vacuous |
+
+**Method change, and why:** DELIBERATE was absorbing three different things. Only a recorded
+decision is DELIBERATE; a control starved of data is UNPROVEN and must be settled by manufacturing
+the state, not by argument.
+
+**OPEN, neither applied (both fixture, not product):** `run_id` predicate (§17d) and `artifact_score`
+(§17f) in `fixture-refresh.yml`. No `app/` or `api/` source changed by this ACT.
+>>>>>>> origin/main
 ### ACT-68b — the five PARTIAL rows on the cover step, resolved (2026-09-02)
 
 **Asked:** *"merge it to main and resolve the remaining 5. I need a visual for 4.4-29."*
@@ -7386,6 +7513,7 @@ null.** Read back from production (`33651206610`), not inferred from a 200.
 id that 404'd, and `artifact_score.created_at` which does not exist (the column is `computed_at`).
 The schema was 5 lines away both times.
 
+<<<<<<< HEAD
 ### ACT-2026-09-02-g — the JD-analysis rows re-verdicted, and EVERY tally line was stale
 
 Owner asked whether §4.1-§4.3 could "sit dormant and untouched". **Confirmed: yes.** The parity
@@ -7508,3 +7636,121 @@ resolve to a defined case) has a LIVE failure — ~4-5 dangling citations — bu
 binary: an H-slug is open-ended prose that truncates, wraps and interpolates, so the cleanest variant
 false-accuses ~6 of 11 findings including H26's own comment. The AC pass's recommendation, which I
 accept: **a five-minute hand fix, not a guard.** Not silently dropped.
+=======
+---
+
+## ACT-72 — Merge the render + intent lanes to `main`; close I1 with live data
+
+**Asked (2026-09-02):** *"merge and fyi the connector is reconnected"*
+
+**Status: DONE.** `main` at `e99be2b`, PR #69 merged. Parity **169 of 182 (92.9%)**.
+
+| Step | Evidence |
+|---|---|
+| Merged `origin/main` (3rd headline collision) | recounted from rows: 169/182, higher than either lane |
+| api suite before fast-forward | **1059/1059 pass** |
+| No deploy fired | landed paths `.claude/ docs/ scripts/ .gitignore`; triggers are `api/**` and `app/**` |
+| PR #69 | `merged: true`, closed 17:33 |
+| **I1 per-asset score CLOSED** | `Overall 89 strong` + 3 parts; production values from `artifact_score` run `8e3163cf` via `boost-pg-mcp-write` |
+| Near-miss caught pre-push | stray root `package.json`/lock from `npm i`, removed and `.gitignore`d |
+
+**Connector:** `boost-pg-mcp-write` reconnected and used — it settled I1 in one query where a
+workflow round-trip had not.
+
+**STILL OPEN, unchanged and deliberate:** the two fixture fixes (`run_id` §17d, `artifact_score`
+§17f) and the headline-recount CI guard (ACT-70). All three are unrequested code.
+
+---
+
+## ACT-73 — Close all three open items: ACT-70 guard + §17d run_id + §17f artifact_score
+
+**Asked (2026-09-02):** *"go ahead / close fanning out where you can"* — all three items previously
+listed as open and unrequested.
+
+**Status: DONE, pending independent verification.**
+
+| Item | Where | Proof |
+|---|---|---|
+| ACT-70 headline guard | `app/test/prototypeCoverage.test.mjs` (+5 tests, extends existing `parse()`) | 6 mutations: 5 FIRED, 1 INERT→rewritten→FIRED |
+| §17d `run_id` predicate | `.github/workflows/fixture-refresh.yml` | agent ran the step verbatim on local PG16: checks 8→3 |
+| §17f `artifact_score` | same + `scripts/build-fixtures.mjs` | scores ABSENT→1, history ABSENT→3 |
+| Incidental | backtick pair in an UNQUOTED heredoc bash was executing | reproduced on HEAD |
+
+**Suites:** api **1062/1062**, prototypeCoverage **10/10**, app build clean.
+
+**Deliberately NOT done, each with a reason:**
+- The 8 stale per-section tally lines → own commit (mechanical, deserves its own review).
+- `13-RENDER`'s `83 of 84` → different formula; fast-follow once this guard is proven.
+- A 4th `REQUIRED` entry in `fixture-canary.mjs` → would hard-block `render-app.mjs` immediately,
+  since the committed `fixtures.json` has no score until the workflow is dispatched.
+
+**Consequence to know:** re-running `build-fixtures.mjs` against the CURRENT committed dump will now
+REFUSE (no `scores`, duplicate `check_key`s). Intended — `fixture-refresh.yml` must be dispatched
+before the next local render.
+
+---
+
+## ACT-74 — Verify ACT-73, and close the partial-score hole the verifier found
+
+**Follows ACT-73.** Independent pass + the one fix it earned.
+
+**Status: DONE.** api **1063/1063**, prototypeCoverage **10/10**, tree clean.
+
+| Item | Result |
+|---|---|
+| `VERIFY-act73-1.md` | **11/11 CONFIRMED, 0 REFUTED**, committed with per-claim verdicts |
+| Attack 1 — 216/221 parser agreement | **independently reproduced exactly** → 169/182 stands |
+| Attack 2 — 8/11 stale tallies | **independently reproduced exactly**, not inflated |
+| Partial-score hole | predicate tightened per-artifact; message now names ratio + offenders |
+| `H:fixture-score-gap-is-per-artifact` | added; mutation **FIRED** |
+
+**The finding worth keeping:** I nearly rejected the verifier's gap on a theory about what the data
+could look like. Reading production (`85cee965`: 4 gated artifacts, all 4 scored) reversed my
+answer in one query.
+
+**Limitation recorded, not fixed:** the single-parser guard catches a literal-string copy of the row
+regex only, not a semantic rewrite. Inherent to string matching.
+
+**Still open, unchanged:** the 8 stale per-section tally lines (own commit), `13-RENDER`'s `83 of 84`
+(different formula), and the 4th `fixture-canary.mjs` REQUIRED entry (blocked until
+`fixture-refresh.yml` is dispatched).
+>>>>>>> origin/main
+
+### ACT-2026-09-02-k — citation resolution MEASURED; six danglers found; guard NOT built, with a reason
+
+Follow-on to ACT-j, which deferred this as "not binary". The owner asked for a visual to weigh the
+options, so it was measured rather than left as an estimate.
+
+**Method:** scan `api/test` + `app/test` for registered test names (the widened recogniser from
+ACT-j), then match every back-ticked `H:` reference in `api/src`, `app/src` and `.claude/actions.md`.
+
+**Result at `faf2d1d`: 682 tests defined · 97 ids cited · 6 that resolve to nothing.**
+
+| id | cited from | verdict |
+|---|---|---|
+| `H:coverage-tally-matches-rows` | actions.md | **FALSE ALARM** — exists, built at runtime as `` test(`H:coverage-${name}`) ``, so no literal to match |
+| `H:coverage-absent-is-rare-enough` | actions.md | TRUNCATED — real name is `…-to-mean-something` |
+| `H:refusal-guard-fires` | `appRequirements.ts:272` | DANGLING — *"Exercised by X … asserts `refused` increments"* |
+| `H:a-judged-row-counts-and-a-proposed-one-does-not` | `checks.ts:981` | DANGLING — *"which is why X pins both halves"* |
+| `H:offsets-from-original` | `requirementSupport.ts:31` | DANGLING — *"See X"* |
+| `H:safety-floor-not-configurable` | `requirementSupport.ts:320` | DANGLING — **a value is exported SPECIFICALLY for a test that does not exist** |
+
+**All six are LIVE claims**, not history notes — each tells a reader something is protected. The harm
+is silent: the reader believes the behaviour is guarded and edits freely, and nothing fails because
+nothing is watching.
+
+**GUARD NOT BUILT, and this is the reason rather than a punt.** Measured ~50% false-positive rate.
+Three shapes defeat a pattern-matcher, each with a live instance: an id built at runtime (row 1 —
+correct code the checker calls broken), a long id WRAPPED across lines in a comment, and a note that
+names something deliberately to say it is GONE (flagging that accuses the only honest comment in the
+file). Against `CLAUDE.md`'s standing rule — *a guard people learn to ignore is worse than none* —
+a checker wrong half the time is muted within a week and then protects nothing while looking like it
+does. The D-ledger equivalent works only because `D\d{1,2}[a-z]?` is a CLOSED lexical form; an
+H-slug is open-ended prose.
+
+**Recommendation put to the owner with a visual** (artifact `3577a1ad`): five hand edits, each a
+judgement a checker could not make anyway ("re-point at the test that really covers this, or delete
+the claim?"). Revisit the guard only if these recur — recurrence is the evidence that would justify
+it, and there is none yet.
+
+**OPEN — awaiting the owner's answer:** do the five edits, or leave them.
