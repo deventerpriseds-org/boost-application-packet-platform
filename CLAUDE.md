@@ -121,6 +121,34 @@ remember to check before implementation steps require db"*)
    it needs, and ask for a refresh. Do not quietly reroute through `db-query.yml`. The owner will
    then either refresh it (fastest — ~1s per query) or tell you to use the workflow. **That choice
    is theirs, not yours.**
+
+   **RENDER THE RECONNECT CARD — do not write the nudge as prose.** A sentence saying "the connector
+   needs re-auth" makes the owner leave the conversation, find the settings screen and identify the
+   right connector themselves. The card is one click. Owner, 2026-09-01: *"how do we create a
+   skill/rule that you present this when you need a reconnection? You've done so inconsistently but
+   it is quite efficient."*
+
+   Two calls, in this order:
+
+   ```
+   ListConnectors(keywords: ["boost", "postgres"])      -> each entry carries a directoryUuid
+   SuggestConnectors(uuids: ["<directoryUuid>", ...])   -> renders the clickable card
+   ```
+
+   `boost-pg-mcp-write` is `404ab1eb-d85f-49ad-9896-3b0be98b3179`; `Boost_DB_Connector` is
+   `42f9b20a-5c8e-4d6b-b1e9-f099ae5c2330`. Read the uuid from `ListConnectors` rather than pasting
+   these — a reinstall mints a new one and a stale uuid renders the wrong row.
+
+   **`SuggestConnectors`' own description says the uuids must come from `SearchMcpRegistry`. They do
+   not have to.** `ListConnectors` returns the same `directoryUuid` field, and the call succeeds from
+   those — verified 2026-09-01, returning `boost-pg-mcp-write` (`installState: connected` -> a **Use**
+   button) and `Boost_DB_Connector` (`unknown` -> **Connect**), which is exactly the card the owner
+   screenshotted. `SearchMcpRegistry` is for connectors the owner does NOT yet have; for one that is
+   installed and merely lapsed, `ListConnectors` is the right source and the registry search is a
+   detour.
+
+   **Still STOP after rendering it.** The card is the ask, not the answer — it does not reconnect
+   anything, and a card followed by three more tool calls buries the thing the owner has to click.
 3. **The one exception: an explicit "work continuously" instruction.** If the owner has said to keep
    going without stopping, take the `db-query.yml` fallback rather than blocking — and say in the
    same turn which step took the fallback and what a refresh would have got faster, so they can

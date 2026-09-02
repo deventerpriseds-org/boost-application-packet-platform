@@ -4747,6 +4747,319 @@ test('H:the-judge-reports-what-it-did', () => {
   assert.match(body, /results, score, judge \}/, 'and it must actually be returned')
 })
 
+// ── Master-filled baseline artifacts (appBaseline.ts) ────────────────────────────────────────────
+//
+// The owner asked three times for "the same process we use to build copies of these artifacts but
+// with the mastercontext information and no prompt output changes applied". The first two answers
+// were the tailored builds and the empty templates. The route exists to be neither, and its whole
+// value is the NEGATIVE property — that no model wrote any of it. A guard on that property has to
+// be structural, because a reintroduced generation call would pass every behavioural test in this
+// suite while silently making the output prompt-derived again.
+test('H:baseline-no-model: the baseline route reaches no model transport, directly or by import', () => {
+  const src = readFileSync(new URL('../src/functions/tests/appBaseline.ts', import.meta.url), 'utf8')
+  // Strip comments first: this file DISCUSSES OpenAI and buildPackageForJD at length, and a guard
+  // that fires on its own explanatory prose is the cry-wolf failure hardening rule 2 forbids.
+  const code = src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')
+  for (const banned of ['api.openai.com', 'buildPackageForJD', 'ensurePackage', 'assemblePackage', 'artifactAiEdit']) {
+    assert.ok(!code.includes(banned),
+      `appBaseline.ts must not reach generation (${banned}); its output would then be prompt-derived`)
+  }
+  // The positive half: it must still go through the SHARED render path rather than growing its own
+  // copy of the copy-and-inject logic, which is what "extend, don't duplicate" requires here.
+  assert.ok(code.includes('renderArtifact'), 'baseline must render via the shared renderArtifact')
+  assert.ok(code.includes('loadMasterBaseline'), 'baseline content must come from loadMasterBaseline')
+})
+
+// The two placeholders MasterContext cannot fill. Left unset they are DELETED by
+// stripLeftoverTokens rather than left visible, so the failure is silent blank space in a slide.
+// The owner supplied the standing values on 2026-09-01: company = Company X, coverletterdate = today.
+test('H:baseline-standing-fields: @Company and @CoverLetterDate are always populated', async () => {
+  const { baselinePkg, todayIso, BASELINE_COMPANY_PLACEHOLDER } =
+    await import('../dist/functions/tests/appBaseline.js')
+
+  // Empty master — the seeded first values must still land.
+  const bare = baselinePkg({})
+  assert.equal(bare['@Company'], BASELINE_COMPANY_PLACEHOLDER)
+  assert.equal(bare['@CoverLetterDate'], todayIso())
+
+  // Master content must SURVIVE the overlay, and the overlay must win only on its own two keys.
+  const withMaster = baselinePkg({ ResumeSummary: 'a standing summary', SkillsBullets1: 'x | y' })
+  assert.equal(withMaster.ResumeSummary, 'a standing summary')
+  // The ITEMS survive; the stored separator does not. This assertion used to read
+  // `equal(..., 'x | y')`, which encoded the pipes DEFECT as expected behaviour and would have
+  // defended it against the fix -- a test asserting the incident rather than the invariant.
+  assert.deepEqual(withMaster.SkillsBullets1.split('\n'), ['x', 'y'])
+  assert.equal(withMaster['@Company'], BASELINE_COMPANY_PLACEHOLDER)
+
+  // A caller override wins over the seed — this is what keeps the value user-changeable rather
+  // than a hardcoded constant, per the repo's no-hardcoded-config rule.
+  const overridden = baselinePkg({}, { company: 'Acme', date: '2026-01-02' })
+  assert.equal(overridden['@Company'], 'Acme')
+  assert.equal(overridden['@CoverLetterDate'], '2026-01-02')
+
+  // Blank/whitespace input must fall back to the seed rather than injecting an empty string, which
+  // would be stripped and blank the field — the exact defect the standing values exist to prevent.
+  const blank = baselinePkg({}, { company: '   ', date: '' })
+  assert.equal(blank['@Company'], BASELINE_COMPANY_PLACEHOLDER)
+  assert.equal(blank['@CoverLetterDate'], todayIso())
+})
+
+// THE SHAPE OF A RENDERED LIST — the check this suite did not have.
+//
+// The owner opened the baseline documents and found two defects no assertion could have told him:
+// skills/expertise/relevant rendered as `A|B|C` instead of bullets, and all 36 pooled relevant terms
+// in each of three slots. `checks.ts` WORD_RULES covers only the six PROSE fields, so nothing
+// anywhere checked the SHAPE of any of the six SLOT_FIELDS.
+//
+// WHY THE PIPES ONLY EVER APPEARED HERE, which is the part worth encoding. In a normal build the
+// master text is PROMPT INPUT — `pipeline.ts:405` passes `mc` to `resolveZapVars(prompts.resume_user,
+// mc, jd)` and the document is filled from `parseResumePackage(<model output>)`. The model emits
+// bullet lists, so the pipe-delimited STORAGE format never reaches a document. `appBaseline` was the
+// first path to render master text directly, so it was the first to surface the stored separator.
+// ` | ` is the COMPACT resume's separator (`compactFit.ts` DEFAULT_SEPARATOR), not the full resume's.
+test('H:baseline-shape: rendered slot fields are newline items, capped by the configured slot count', async () => {
+  const { shapeSlotFields } = await import('../dist/functions/tests/appBaseline.js')
+  const { SLOT_FIELDS } = await import('../dist/functions/tests/slots.js')
+
+  // The live stored shapes, verbatim from diag/skill-sources (api-test run 33548874453).
+  const master = {
+    SkillsBullets1: 'Enterprise Governance|Technology Strategy|Risk Management|Digital Transformation',
+    SkillsBullets2: 'Strategic Roadmaps|Stakeholder Engagement|Revenue Optimization',
+    ExpertiseBullets: 'Budget Development and P&L Management|KPI-driven performance management',
+    RelevantBullets1: 'Governance and Compliance: A, B | Technology Strategy: C, D',
+    ResumeSummary: 'A prose summary | with an incidental pipe that must survive.',
+  }
+  const slots = { SkillsBullets1: 3, SkillsBullets2: null, ExpertiseBullets: null,
+                  RelevantBullets1: 2, RelevantBullets2: null, RelevantBullets3: null }
+  const out = shapeSlotFields(master, slots)
+
+  // NO SEPARATOR SURVIVES IN A SLOT FIELD. This is the defect the owner actually saw.
+  for (const f of SLOT_FIELDS) {
+    if (!out[f]) continue
+    assert.ok(!out[f].includes('|'), `${f} still contains a pipe separator: ${out[f]}`)
+  }
+
+  // Items become newline-separated, and a configured count TRIMS.
+  assert.deepEqual(out.SkillsBullets1.split('\n'),
+    ['Enterprise Governance', 'Technology Strategy', 'Risk Management'])   // capped at 3 of 4
+  assert.equal(out.SkillsBullets2.split('\n').length, 3)                    // null cap -> all kept
+  assert.equal(out.RelevantBullets1.split('\n').length, 2)                  // capped at 2
+
+  // A NULL COUNT NEVER TRIMS. slots.ts: an unset count means unknown, and inventing one "accuses
+  // every item past it" — so an absent count must pass the list through whole, not truncate it.
+  const untrimmed = shapeSlotFields(master, undefined)
+  assert.equal(untrimmed.SkillsBullets1.split('\n').length, 4)
+
+  // PROSE IS NOT A LIST. ResumeSummary is not a slot field and must survive byte-identical,
+  // incidental pipe and all — splitting a paragraph on punctuation would shred it.
+  assert.equal(out.ResumeSummary, master.ResumeSummary)
+})
+
+// THE SEEDED RELEVANT LISTS — the nine that replace "whichever nine happened to be first".
+//
+// With no JD, shapeSlotFields takes items.slice(0, 3) of a 36-term LIBRARY: the first nine in
+// storage order, all of one category and part of another. Mechanically correct, editorially
+// arbitrary. These nine came from the owner's own Zap rule run against the Trinnex JD (exclude
+// anything Skills1/Skills2/competencies already cover, order by ATS match, split 3/3/3), then
+// corrected by the owner for AI redundancy: "replace AI in operations to Ops automation, and AI/ML
+// advancements to Data Insights".
+test('H:baseline-relevant-seed: three lists of three, within the character rule, overridable', async () => {
+  const { SEED_RELEVANT_LISTS, RELEVANT_FIELDS, relevantOverlay, baselinePkg } =
+    await import('../dist/functions/tests/appBaseline.js')
+
+  // SHAPE: exactly three lists of exactly three. The template holds 3 per slot and the Zap states
+  // it as a hard requirement; a fourth item would be silently dropped by the slot trim.
+  assert.equal(SEED_RELEVANT_LISTS.length, 3)
+  for (const list of SEED_RELEVANT_LISTS) assert.equal(list.length, 3)
+
+  // THE CHARACTER RULE, asserted rather than trusted to a comment. The Zap's final wording is "no
+  // more than one item greater than 24 characters, including spaces in any list".
+  for (const list of SEED_RELEVANT_LISTS) {
+    const over24 = list.filter(t => t.length > 24)
+    assert.ok(over24.length <= 1, `list has ${over24.length} items over 24 chars: ${over24.join(', ')}`)
+  }
+
+  // NO DUPLICATES ACROSS THE NINE. Three slots printed side by side make a repeat obvious in a way
+  // one pooled block hides -- the same reason fitCompactSkills collapses duplicates.
+  const all = SEED_RELEVANT_LISTS.flat()
+  assert.equal(new Set(all.map(s => s.toLowerCase())).size, 9, 'the nine must be distinct')
+
+  // THE AI CORRECTION HOLDS. The owner's point was that three AI-prefixed terms read as one idea
+  // repeated. This fails if a later edit reintroduces the cluster.
+  const aiTerms = all.filter(t => /\bAI\b|AI\//i.test(t))
+  assert.ok(aiTerms.length <= 1, `expected at most one AI-prefixed term, got: ${aiTerms.join(', ')}`)
+
+  // THE OVERLAY WINS over the pooled Library text, which is the whole point -- without it these
+  // three fields carry the 36-term pool sliced to length.
+  const pooled = 'Governance and Compliance: A, B | Technology Strategy: C, D | Business: E, F'
+  const pkg = baselinePkg({ RelevantBullets1: pooled, RelevantBullets2: pooled, RelevantBullets3: pooled })
+  RELEVANT_FIELDS.forEach((f, i) => {
+    assert.deepEqual(pkg[f].split('\n'), [...SEED_RELEVANT_LISTS[i]])
+  })
+
+  // A CALLER LIST WINS over the seed -- this is what keeps the nine a seeded first value rather
+  // than a hardcoded constant, per the repo's no-hardcoded-config rule.
+  const custom = relevantOverlay([['A', 'B'], ['C'], ['D', 'E', 'F']])
+  assert.deepEqual(custom.RelevantBullets1.split('\n'), ['A', 'B'])
+  assert.deepEqual(custom.RelevantBullets3.split('\n'), ['D', 'E', 'F'])
+
+  // AND A MALFORMED ONE FALLS BACK rather than blanking the slot. A blank Relevant column is the
+  // silent-deletion failure stripLeftoverTokens already causes once; it must not arrive by a
+  // second route.
+  assert.deepEqual(relevantOverlay([]).RelevantBullets1.split('\n'), [...SEED_RELEVANT_LISTS[0]])
+  assert.deepEqual(relevantOverlay(undefined).RelevantBullets2.split('\n'), [...SEED_RELEVANT_LISTS[1]])
+})
+
+// THE TWO DEFECTS AN INDEPENDENT VERIFIER FOUND IN GUARDS THAT WERE THEMSELVES MUTATION-PROVEN.
+//
+// H:baseline-shape and H:baseline-relevant-seed both FIRED under five mutations -- they are real --
+// and both were still BLIND to the inputs below, which sat in HEAD with the suite 1026/1026 green.
+// That is the lesson worth encoding: a guard proving it can fail is not a guard proving it covers
+// the input space. Each case here is an input the earlier guards never constructed.
+// Evidence: .claude/verify/VERIFY-baseline-relevant-seed-1.md (C1 REFUTED, C5 REFUTED).
+test('H:baseline-shape-empty-items: a separators-only block leaves no separator behind', async () => {
+  const { shapeSlotFields } = await import('../dist/functions/tests/appBaseline.js')
+
+  // The old code hit `if (!items.length) continue`, leaving out[field] as the RAW string -- so the
+  // pipes rendered, through the one branch that skips the rewrite.
+  for (const raw of ['|', '|||', ' | ', '•', '-|-']) {
+    const out = shapeSlotFields({ SkillsBullets1: raw })
+    assert.ok(!('SkillsBullets1' in out) || !out.SkillsBullets1.includes('|'),
+      `separators-only input ${JSON.stringify(raw)} left ${JSON.stringify(out.SkillsBullets1)}`)
+  }
+
+  // The key is DELETED, not set to ''. An absent key leaves the template's own token for
+  // stripLeftoverTokens to clear; '' injects emptiness that reads as legitimately-blank content.
+  assert.equal('SkillsBullets1' in shapeSlotFields({ SkillsBullets1: '|||' }), false)
+
+  // And a block with even ONE real item still renders that item -- the fix must not eat content.
+  assert.equal(shapeSlotFields({ SkillsBullets1: '|Governance|' }).SkillsBullets1, 'Governance')
+})
+
+test('H:baseline-relevant-per-slot: a short or malformed caller list falls back PER SLOT', async () => {
+  const { relevantOverlay, SEED_RELEVANT_LISTS, RELEVANT_FIELDS, baselinePkg } =
+    await import('../dist/functions/tests/appBaseline.js')
+
+  // THE DEFECT: one supplied list used to satisfy the outer `lists.length` test, so slots 2 and 3
+  // got no key and kept the pooled 36-term Library -- exactly what the seed exists to replace.
+  const short = relevantOverlay([['Only', 'One', 'List']])
+  assert.deepEqual(short.RelevantBullets1.split('\n'), ['Only', 'One', 'List'])
+  assert.deepEqual(short.RelevantBullets2.split('\n'), [...SEED_RELEVANT_LISTS[1]])
+  assert.deepEqual(short.RelevantBullets3.split('\n'), [...SEED_RELEVANT_LISTS[2]])
+
+  // Every malformed element falls back to ITS OWN slot's seed rather than vanishing.
+  for (const bad of [[[]], [['']], [[null]], [['   ']], [null], [undefined], [42], ['str']]) {
+    const out = relevantOverlay(bad)
+    assert.deepEqual(out.RelevantBullets1.split('\n'), [...SEED_RELEVANT_LISTS[0]],
+      `input ${JSON.stringify(bad)} did not fall back`)
+  }
+
+  // A FLAT ARRAY MUST NOT THROW. `relevant: ['a','b','c']` is the likeliest caller mistake and used
+  // to raise `(src[i]||[]).map is not a function`, which the route converted to an HTTP 500.
+  assert.doesNotThrow(() => relevantOverlay(['a', 'b', 'c']))
+  assert.deepEqual(relevantOverlay(['a', 'b', 'c']).RelevantBullets1.split('\n'),
+    [...SEED_RELEVANT_LISTS[0]])
+
+  // EVERY slot is always present, so pooled Library text can never survive in one of them.
+  const pooled = 'Governance and Compliance: A, B | Technology Strategy: C, D'
+  const pkg = baselinePkg({ RelevantBullets1: pooled, RelevantBullets2: pooled, RelevantBullets3: pooled },
+    { relevant: [['Solo']] })
+  for (const f of RELEVANT_FIELDS) {
+    assert.ok(!pkg[f].includes('Governance and Compliance:'), `${f} kept pooled Library text`)
+  }
+})
+
+test('H:baseline-slot-override: a named slot list is honoured VERBATIM, and only a real slot', async () => {
+  const { slotOverrides, baselinePkg, SEED_RELEVANT_LISTS } =
+    await import('../dist/functions/tests/appBaseline.js')
+
+  // THE GAP THIS CLOSES: `relevant` set the three Relevant lists positionally and nothing could set
+  // Skills or Core Competencies, so changing them meant hand-writing packet.pkg_json and
+  // re-rendering. Owner, 2026-09-01: "just have a second step after it finishes to update the
+  // relevant section yourself if there is no model to do it in the first pass."
+  const out = slotOverrides({ SkillsBullets1: ['SW Engineering', 'Portfolio Management'] })
+  assert.deepEqual(out.SkillsBullets1.split('\n'), ['SW Engineering', 'Portfolio Management'])
+
+  // ONLY SLOT_FIELDS. An unknown key must not become a merge field, and a prose block must not be
+  // overwritable by a list -- a typo'd key that wrote through would silently replace the summary.
+  const stray = slotOverrides({ ResumeSummary: ['x'], NotAField: ['y'], '@Company': ['z'] })
+  assert.deepEqual(Object.keys(stray), [])
+
+  // AN EMPTY OR BLANK LIST IS IGNORED, NEVER APPLIED. Blanking a slot is the silent-deletion
+  // failure; "the caller sent nothing" must not erase what MasterContext supplied.
+  for (const empty of [[], [''], ['  '], [null], 42, true, {}]) {
+    assert.deepEqual(Object.keys(slotOverrides({ ExpertiseBullets: empty })), [],
+      `input ${JSON.stringify(empty)} was applied instead of ignored`)
+  }
+  const kept = baselinePkg({ ExpertiseBullets: 'Alpha|Beta' }, { fields: { ExpertiseBullets: [] } })
+  assert.deepEqual(kept.ExpertiseBullets.split('\n'), ['Alpha', 'Beta'])
+
+  // NOT TRIMMED TO THE SLOT COUNT. slots.ts: an invented count "accuses every item past it"; the
+  // same applies to a list the caller stated. Nine items against a capacity of eight all survive.
+  const nine = ['a1', 'a2', 'a3', 'a4', 'a5', 'a6', 'a7', 'a8', 'a9']
+  const pkg = baselinePkg({}, {
+    slots: { SkillsBullets1: 10, SkillsBullets2: 8, ExpertiseBullets: 6, RelevantBullets1: 3, RelevantBullets2: 3, RelevantBullets3: 3 },
+    fields: { SkillsBullets2: nine },
+  })
+  assert.deepEqual(pkg.SkillsBullets2.split('\n'), nine)
+
+  // A NAMED FIELD BEATS THE POSITIONAL SHORTHAND when a caller sends both. One field, one winner.
+  const both = baselinePkg({}, {
+    relevant: [['pos1', 'pos2', 'pos3']],
+    fields: { RelevantBullets1: ['named1'] },
+  })
+  assert.deepEqual(both.RelevantBullets1.split('\n'), ['named1'])
+  // ...and the slots `fields` did not name still fall back to the seed, unchanged.
+  assert.deepEqual(both.RelevantBullets2.split('\n'), [...SEED_RELEVANT_LISTS[1]])
+})
+
+test('H:baseline-slot-overflow: an over-capacity list is REPORTED, never silently trimmed', async () => {
+  const { slotOverflow } = await import('../dist/functions/tests/appBaseline.js')
+  const slots = { SkillsBullets1: 10, SkillsBullets2: 8, ExpertiseBullets: 6, RelevantBullets1: 3, RelevantBullets2: 3, RelevantBullets3: 3 }
+
+  // Measured on the owner's own 2026-09-01 lists: the right-hand skills column carried NINE items
+  // against a configured capacity of eight. Honouring it verbatim is only safe because this says so.
+  const nine = Array.from({ length: 9 }, (_, i) => `s${i}`).join('\n')
+  assert.deepEqual(slotOverflow({ SkillsBullets2: nine }, slots),
+    [{ field: 'SkillsBullets2', items: 9, capacity: 8 }])
+
+  // Silent at capacity and under it -- a guard that fires on correct input is the cry-wolf failure.
+  assert.deepEqual(slotOverflow({ SkillsBullets2: Array.from({ length: 8 }, (_, i) => `s${i}`).join('\n') }, slots), [])
+  assert.deepEqual(slotOverflow({ ExpertiseBullets: 'a\nb' }, slots), [])
+
+  // A NULL capacity means UNKNOWN and must stay silent: reporting overflow against a guessed
+  // capacity is the invented-count failure slots.ts forbids, wearing a warning's clothes.
+  assert.deepEqual(slotOverflow({ SkillsBullets2: nine }, { ...slots, SkillsBullets2: null }), [])
+  assert.deepEqual(slotOverflow({ SkillsBullets2: nine }, undefined), [])
+
+  // A capacity of ZERO or below is not a capacity. Treating one as real makes `items > cap` true for
+  // EVERY non-empty slot, turning the report into a firehose that fires on correct content -- the
+  // cry-wolf failure hardening rule 2 forbids. Found by mutation: dropping `|| cap <= 0` left the
+  // suite green, so this sub-rule was unguarded.
+  assert.deepEqual(slotOverflow({ ExpertiseBullets: 'a\nb' }, { ...slots, ExpertiseBullets: 0 }), [])
+  assert.deepEqual(slotOverflow({ ExpertiseBullets: 'a\nb' }, { ...slots, ExpertiseBullets: -1 }), [])
+
+  // Blank lines are not items -- a trailing newline must not manufacture an overflow.
+  assert.deepEqual(slotOverflow({ ExpertiseBullets: 'a\nb\n\n' }, slots), [])
+})
+
+test('H:baseline-slot-element-type: a non-string ELEMENT is dropped, never String()-coerced', async () => {
+  const { slotOverrides, baselinePkg } = await import('../dist/functions/tests/appBaseline.js')
+
+  // FOUND BY THE INDEPENDENT VERIFIER, not by reading (VERIFY-baseline-slot-overrides-1, "Also
+  // report"): the type gate was top-level only, so junk inside an ACCEPTED array was coerced --
+  // `['a', {}, ['b','c']]` wrote "a\n[object Object]\nb,c" into a merge field.
+  const out = slotOverrides({ SkillsBullets1: ['a', {}, ['b', 'c'], 42, null, undefined, true, 'd'] })
+  assert.deepEqual(out.SkillsBullets1.split('\n'), ['a', 'd'])
+  assert.ok(!out.SkillsBullets1.includes('[object Object]'))
+  assert.ok(!out.SkillsBullets1.includes('b,c'))
+
+  // An array of ONLY junk empties the list, which means the field is ignored -- so MasterContext
+  // survives rather than being replaced by nothing. The safe direction, asserted rather than hoped.
+  assert.deepEqual(Object.keys(slotOverrides({ ExpertiseBullets: [{}, 42, null] })), [])
+  const kept = baselinePkg({ ExpertiseBullets: 'Alpha|Beta' }, { fields: { ExpertiseBullets: [{}, 7] } })
+  assert.deepEqual(kept.ExpertiseBullets.split('\n'), ['Alpha', 'Beta'])
+})
 test('H:every-evidence-alias-reaches-the-gate: a column selected and then dropped is invisible', () => {
   // WRITTEN BECAUSE A MUTATION CAME BACK INERT. Deleting `decision: r.evidence_decision ?? null`
   // from the appChecks mapping failed no test, and that is a whole-feature no-op: the owner's veto
