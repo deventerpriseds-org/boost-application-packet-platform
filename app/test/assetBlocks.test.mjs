@@ -1638,4 +1638,13 @@ test('H:displacement-tolerates-junk-input-without-throwing', () => {
   assert.equal(keywordDisplacement([null, undefined, {}], 'X'), null)
   assert.equal(keywordDisplacement([{ action: 'swapped', from_label: 'A', to_label: 'B' }], ''), null)
   assert.equal(keywordDisplacement([{ action: 'swapped', from_label: 'A', to_label: 'B' }], null), null)
+  // THE ROW THAT MAKES THE EMPTY-KEYWORD REFUSAL NON-EQUIVALENT, found by mutation-proving. With a
+  // populated to_label an empty keyword falls through the loop and returns null anyway, so deleting
+  // `if (!k) return null` changed nothing and the harness reported INERT. A BLANK to_label is the
+  // case that separates them: normLabel('') === normLabel(undefined) === '', so an empty keyword
+  // MATCHES the row and walks away with a displacement claim for a term that does not exist.
+  const blankTo = [{ action: 'swapped', from_label: 'Real Predecessor', to_label: '  ', list: 'Skills 1' }]
+  assert.equal(keywordDisplacement(blankTo, ''), null)
+  assert.equal(keywordDisplacement(blankTo, null), null)
+  assert.equal(keywordDisplacement([{ action: 'swapped', from_label: 'Real Predecessor' }], ''), null)
 })
