@@ -16,3 +16,8 @@ local.settings.json
 
 # Subagent worktrees — transient, never part of the repo
 .claude/worktrees/
+
+# scratch deps pulled in for scripts/intent-probe.mjs (playwright-core, @babel/standalone)
+/package.json
+/package-lock.json
+/node_modules/
