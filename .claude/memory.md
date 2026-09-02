@@ -5762,3 +5762,12 @@ Found the same way, and worth more than the row that surfaced it: `overlayVarian
 `OVERLAY_VARIANTS[v] || OVERLAY_VARIANTS.modal`, so a TYPO does not throw -- it silently renders a
 centred dialog. `variant="sheeet"` would have shipped as a modal on every phone and looked merely odd.
 Nothing checked for that before; the guard now does.
+
+**Footnote, same day, same class of bug twice:** the commit recording this lost the phrase
+`OVERLAY_VARIANTS[v] || modal` because it used `git commit -m "..."` with BACKTICKS inside double
+quotes, and bash ran them as command substitution (`OVERLAY_VARIANTS[v]: command not found`). Every
+other commit this lane used `git commit -F - <<'MSG'` — a QUOTED heredoc — and survived intact.
+Earlier the same day backticks inside a TypeScript template literal terminated it and produced six
+TS1005 errors 200 lines away. **Backticks are live in two different languages here; quote the
+heredoc, always.** The commit is on `main` and is not worth a force-push to fix — the content is
+correct in this file, which is the thing that gets read.
