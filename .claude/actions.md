@@ -7417,3 +7417,28 @@ tally is what gets quoted.
 (disabling its own assertion), which cannot make that test fail. Re-aimed at the DOCUMENT — putting
 `§4.10`'s stale numbers back — it **FIRED**. For a guard whose subject is a file, the file is what
 you mutate.
+
+### ACT-2026-09-02-h — the tally guard was WITHDRAWN to satisfy (a) honestly, not backfilled
+
+The Stop gate blocked: a check that gates a coverage count is TIER 1, and I wrote it with no
+independent AC pass. It was right. `ACT-2026-09-01-m` records that (a) becomes unsatisfiable once
+code exists, and that fabricating a retroactive AC artifact is the worst available outcome — a
+manufactured pass looks identical to a real one in the record.
+
+**What was different this time: a third option existed.** The guard is ~40 lines, so instead of
+faking (a) or arguing the tier down, I REMOVED it, and the ACs are being written cold against a tree
+where it is absent. That makes (a) genuinely true rather than backfilled, at the cost of one pass.
+
+**Kept, because it is data and prose rather than TIER 1 code:** the six §4.1-§4.3 row re-verdicts,
+the 11 recounted tally lines, and the 170/181 headline. Every doc reference to the withdrawn guard
+was swept so the file does not advertise protection it does not have — claiming an absent guard is
+worse than having none, because it is believed.
+
+**Also owed and now paid: requirement (g), the integration trace.** ONE core system —
+`PROTOTYPE-COVERAGE.md`; every parity number derives from its rows. UPSTREAM producers: the parity
+lane's commits, my §4.1-4.3 re-verdicts, `gap-all-*.json` feeding candidates. **Nothing produces the
+tally lines** — a derived value with no deriver, which IS the defect. DOWNSTREAM consumers:
+§13-CURRENT's headline (recomputed by hand each pass), `.claude/actions.md`, the existing ABSENT
+guard in `prototypeCoverage.test.mjs`, and the owner reading status. The tallies had **no consumer
+that validated them**, which is exactly why 11 of 11 rotted while the hand-recomputed headline stayed
+correct. EXTEND, not new: `prototypeCoverage.test.mjs` already owns doc staleness.

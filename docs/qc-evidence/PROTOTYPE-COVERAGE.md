@@ -160,7 +160,7 @@ Import list read (`PostingAnalysis.jsx:18-28`): `shell.jsx` (Pill, Overlay), `po
 | 4.1-31 | Legend row, always present | `packet.jsx:163` | BUILT | `PostingAnalysis.jsx:502-511` |
 | 4.1-32 | Three-column layout behind `PARSED_LAYOUT` | `packet.jsx:25,136-152` | BUILT | `PostingAnalysis.jsx:389-392,439-442,575-582` — and it is a **persisted user preference** (`ee_posting_columns`), not a code constant, per the repo's "no hardcoded config" rule. Better than the prototype. |
 
-**§4.1 tally — 32 rows:** BUILT **20** · PARTIAL **2** · DELIBERATE **10**. *(Counts RECOUNTED from the rows 2026-09-02. The previous line was stale — rows had been re-verdicted and the tally never followed, so this section was UNDER-claiming. `H:coverage-tally-matches-rows` now fails the suite on any such drift.)*
+**§4.1 tally — 32 rows:** BUILT **20** · PARTIAL **2** · DELIBERATE **10**. *(Counts RECOUNTED from the rows 2026-09-02. The previous line was stale — rows had been re-verdicted and the tally never followed, so this section was UNDER-claiming. a guard against such drift is in progress (withdrawn pending its AC pass).)*
 (Was BUILT 13 / ABSENT 8 before `df2c9db` shipped the evidence expansion, rows 4.1-14..19.)
 Against the 24 rows that are not owner-deferred: **13 BUILT (54%), 16 present in some form (67%).**
 
@@ -196,7 +196,7 @@ read it.
 | 4.2-14 | Responsive: 4-col ≥ 900px, 1-col below | `packet.jsx:171` `useWide(900)` | BUILT | `COMPARE_WIDE_MIN = 900`, `compareColumns()` `postingAnalysis.js:127-141`, rendered as `data-qc-cols` at `:180`. |
 | 4.2-15 | The empty / unresolved state | *(prototype has none)* | NOT-IN-PROTOTYPE | `comparisonState()` `postingAnalysis.js:97-122` gives four distinct states; `compareEmpty` `:163-167`. App-only. Excluded from the denominator. |
 
-**§4.2 tally — 15 rows:** BUILT **14** · NOT-IN-PROTOTYPE **1**. *(Counts RECOUNTED from the rows 2026-09-02. The previous line was stale — rows had been re-verdicted and the tally never followed, so this section was UNDER-claiming. `H:coverage-tally-matches-rows` now fails the suite on any such drift.)*
+**§4.2 tally — 15 rows:** BUILT **14** · NOT-IN-PROTOTYPE **1**. *(Counts RECOUNTED from the rows 2026-09-02. The previous line was stale — rows had been re-verdicted and the tally never followed, so this section was UNDER-claiming. a tally-drift guard (IN PROGRESS — withdrawn pending its independent AC pass, since a check that gates a coverage count is TIER 1).)*
 **11 BUILT (79%), 14 present in some form (100%).** *(Was 10 BUILT / 71%; **4.2-1** the fit cards moved ABSENT -> BUILT at `b73f8d6`. §4.2 now has no ABSENT row.)*
 
 The app also carries four surfaces the prototype has no counterpart for — dimension-set provenance
@@ -230,7 +230,7 @@ direction reads as though the app is strictly behind, and on this section it is 
 | 4.3-13 | **Any navigation out closes the modal first** | `packet.jsx:345,347,350` (`setPanelOpen(false)` on every exit) | **BUILT — CHANGED from PARTIAL** | `Overlay` owns close; `onGoResume` / `onBuildAll` are supplied by `PacketBuilder.jsx:941-960` — needs a runtime check to confirm the dismiss ordering (see §14). **Re-verdicted 2026-09-02 against the RENDER** (§16/§17 evidence, `/tmp/app-jd2.png`). Close-first-then-navigate IS implemented: `PacketBuilder.jsx:1108-1115` calls `setAtsOpen(false)` BEFORE `setActiveStep(...)` on every exit handler, with a comment naming the prototype ordering it mirrors (`setPanelOpen(false)` before `setStep`). |
 | 4.3-14 | Model-keyword list inside the modal | *(prototype has none)* | NOT-IN-PROTOTYPE | `PostingAnalysis.jsx:586`. App-only; excluded. |
 
-**§4.3 tally — 14 rows:** BUILT **11** · DELIBERATE **2** · NOT-IN-PROTOTYPE **1**. *(Counts RECOUNTED from the rows 2026-09-02. The previous line was stale — rows had been re-verdicted and the tally never followed, so this section was UNDER-claiming. `H:coverage-tally-matches-rows` now fails the suite on any such drift.)*
+**§4.3 tally — 14 rows:** BUILT **11** · DELIBERATE **2** · NOT-IN-PROTOTYPE **1**. *(Counts RECOUNTED from the rows 2026-09-02. The previous line was stale — rows had been re-verdicted and the tally never followed, so this section was UNDER-claiming. a tally-drift guard (IN PROGRESS — withdrawn pending its independent AC pass, since a check that gates a coverage count is TIER 1).)*
 Against the 11 non-deferred rows: **9 BUILT (82%), 11 present in some form (100%).** *(Was 6 BUILT / 55% — the weakest section in the spec bar the assistant. **4.3-9/10/11**, the whole QC summary inside the ATS modal, moved ABSENT -> BUILT at `34eda36`, verifier-CONFIRMED. §4.3 now has no ABSENT row.)*
 
 ---
@@ -280,7 +280,7 @@ Against the 11 non-deferred rows: **9 BUILT (82%), 11 present in some form (100%
 | 4.4-32 | `Nothing to review on this asset.` | `assets.jsx:279` | **BUILT — CHANGED from ABSENT** | `AssetBlocks.jsx:309-316` (`BLOCK_HOOKS.meterClear`), guarded on a **loaded** result so "clear" and "never checked" cannot look alike. Inventory build-order row 8. |
 | 4.4-33 | `open` / "Needs your answer" severity | `assets.jsx:248` | DELIBERATE | `assetGate.js:78-87` refuses to mint this bucket from state the app does not have. Inventory: *"ABSENT by design and correctly so"*. |
 
-**§4.4 tally — 33 rows:** BUILT **30** · DELIBERATE **3**. *(RECOUNTED from the rows 2026-09-02 — the stated line had gone stale as rows were re-verdicted, so this section was UNDER-claiming. `H:coverage-tally-matches-rows` now fails the suite on any such drift.)*
+**§4.4 tally — 33 rows:** BUILT **30** · DELIBERATE **3**. *(RECOUNTED from the rows 2026-09-02 — the stated line had gone stale as rows were re-verdicted, so this section was UNDER-claiming. a tally-drift guard (IN PROGRESS — withdrawn pending its independent AC pass, since a check that gates a coverage count is TIER 1).)*
 Against the 31 non-deferred rows: **24 BUILT (77%), 31 present in some form (100%)** — every row
 has at least a partial counterpart.
 
@@ -342,7 +342,7 @@ Import list read (`AssetBlocks.jsx:30-45`) — `CorrectionRow` comes from `QcRai
 | 4.5-42 | The ring clears after ~2.2s | `screens/` notes | DELIBERATE | `PULL-CANDIDATES.md` **PC-4** — the persistent ring is a deliberate choice; SPEC says nothing about ring timing and the repo has twice removed vanishing affordances for the same reason. |
 | 4.5-43 | Chips deduped / near-duplicates collapsed | *(prototype: exact ids)* | DELIBERATE | `PULL-CANDIDATES.md` **PC-5** — ordered by requirement `seq`, deduped by EXACT string only; collapsing is a similarity judgement this repo reserves for ranking. |
 
-**§4.5 tally — 43 rows:** BUILT **36** · DELIBERATE **6** · NOT-IN-PROTOTYPE **1**. *(RECOUNTED from the rows 2026-09-02 — the stated line had gone stale as rows were re-verdicted, so this section was UNDER-claiming. `H:coverage-tally-matches-rows` now fails the suite on any such drift.)*
+**§4.5 tally — 43 rows:** BUILT **36** · DELIBERATE **6** · NOT-IN-PROTOTYPE **1**. *(RECOUNTED from the rows 2026-09-02 — the stated line had gone stale as rows were re-verdicted, so this section was UNDER-claiming. a tally-drift guard (IN PROGRESS — withdrawn pending its independent AC pass, since a check that gates a coverage count is TIER 1).)*
 ABSENT **2** · DELIBERATE **7**.
 Against the 35 non-deferred rows: **32 BUILT (91%), 33 present in some form (94%).**
 
@@ -367,7 +367,7 @@ Against the 35 non-deferred rows: **32 BUILT (91%), 33 present in some form (94%
 | 4.6-11 | Each action is phrased as an assistant request stating the coverage consequence | `assets.jsx:72,82,85` | **BUILT — CHANGED from ABSENT, with the consequence clause deliberately omitted** | Seeded sentence: `Drop "<kw>" from this field. Rewrite the text without it rather than swapping in a synonym.` The prototype's *coverage consequence* is **not** claimed, and that is the finding, not an oversight: the lane's own hunt (verifier-CONFIRMED, both halves) proved a drop routed through `owner-edit` gains no attribution — `ownerLabels` strips the empty replacement via `.filter(Boolean)` (`appSwaps.ts:45-49`, plus a second filter at `swaps.ts:174`) so `driver:'owner'` cannot fire for a deletion — and splices a hole (`appCorrections.ts:359` → `Led  initiatives`). Copy that promised a coverage effect would have been a claim the system does not record. Guarded by `H:keyword-drop-offers-nothing-it-cannot-do`. |
 | 4.6-12 | `not in this text` on a chip whose keyword the draft lacks | *(prototype has none)* | NOT-IN-PROTOTYPE | App-only, `AssetBlocks.jsx:803-810`, recorded as reversible in PC-1. Excluded. |
 
-**§4.6 tally — 12 rows:** BUILT **8** · PARTIAL **1** · DELIBERATE **2** · NOT-IN-PROTOTYPE **1**. *(RECOUNTED from the rows 2026-09-02 — the stated line had gone stale as rows were re-verdicted, so this section was UNDER-claiming. `H:coverage-tally-matches-rows` now fails the suite on any such drift.)*
+**§4.6 tally — 12 rows:** BUILT **8** · PARTIAL **1** · DELIBERATE **2** · NOT-IN-PROTOTYPE **1**. *(RECOUNTED from the rows 2026-09-02 — the stated line had gone stale as rows were re-verdicted, so this section was UNDER-claiming. a tally-drift guard (IN PROGRESS — withdrawn pending its independent AC pass, since a check that gates a coverage count is TIER 1).)*
 Against the 9 non-deferred rows: **7 BUILT (78%), 8 present in some form (89%).** *(Was 5 BUILT / 56%; **4.6-10/11**, the drop hatch, moved ABSENT -> BUILT at `34eda36`, verifier-CONFIRMED. **4.6-9 has since been BUILT too (re-verdicted 2026-08-27), so §4.6 now has NO ABSENT row.** It was ranked #2 in §14 as *blocked on reading the owner's live skill fields*; the skill-bank work closed that and the rank was never updated. This is the staleness the ledger's own guard exists to catch, in a document the guard does not read.
 
 ---
@@ -388,7 +388,7 @@ Against the 9 non-deferred rows: **7 BUILT (78%), 8 present in some form (89%).*
 | 4.7-8 | Forwards to the assistant | SPEC §4.7 | **BUILT — CHANGED from ABSENT** | `Ask the assistant` (`BLOCK_HOOKS.forward`) forwards the SAME sentence the field's own controls seed, with the artifact bound at the call site. The field box REMAINS beside it — ground rule R6 keeps correction in place and scoped to the field, so the panel is a second destination, never a replacement. |
 | 4.7-9 | Asset-level equivalent for artifacts with no merge fields | *(prototype: `packet.jsx:257`)* | BUILT | `PacketBuilder.jsx:290-292` + `:344+` — exists precisely because the intro video has no merge fields. |
 
-**§4.7 tally — 9 rows:** BUILT **9**. *(RECOUNTED from the rows 2026-09-02 — the stated line had gone stale as rows were re-verdicted, so this section was UNDER-claiming. `H:coverage-tally-matches-rows` now fails the suite on any such drift.)*
+**§4.7 tally — 9 rows:** BUILT **9**. *(RECOUNTED from the rows 2026-09-02 — the stated line had gone stale as rows were re-verdicted, so this section was UNDER-claiming. a tally-drift guard (IN PROGRESS — withdrawn pending its independent AC pass, since a check that gates a coverage count is TIER 1).)*
 **7 BUILT (78%), 8 present in some form (89%).**
 
 ---
@@ -428,7 +428,7 @@ Against the 9 non-deferred rows: **7 BUILT (78%), 8 present in some form (89%).*
 | 4.8-24 | Tab: **Review** — blind second model: grade, agreement, prompt version, citations, critique | `evidence.jsx:291-334` | BUILT | `ReviewTab` `QcRail.jsx:440-480` |
 | 4.8-25 | A picked requirement filters the other tabs | `evidence.jsx:378` | BUILT | `QcRail.jsx:820-830` — `filtered to #{seq}` + a `clear` affordance, keyboard-reachable. |
 
-**§4.8 tally — 25 rows:** BUILT **17** · PARTIAL **5** · DELIBERATE **3**. *(RECOUNTED from the rows 2026-09-02 — the stated line had gone stale as rows were re-verdicted, so this section was UNDER-claiming. `H:coverage-tally-matches-rows` now fails the suite on any such drift.)*
+**§4.8 tally — 25 rows:** BUILT **17** · PARTIAL **5** · DELIBERATE **3**. *(RECOUNTED from the rows 2026-09-02 — the stated line had gone stale as rows were re-verdicted, so this section was UNDER-claiming. a tally-drift guard (IN PROGRESS — withdrawn pending its independent AC pass, since a check that gates a coverage count is TIER 1).)*
 Against the 21 non-deferred rows: **14 BUILT (67%), 19 present in some form (90%).**
 
 ---
@@ -456,7 +456,7 @@ Against the 21 non-deferred rows: **14 BUILT (67%), 19 present in some form (90%
 | 4.9-15 | `unchecked` as a distinct footer state | *(prototype has none)* | NOT-IN-PROTOTYPE | `assetGate.js:268-271`. App-only; excluded. |
 | 4.9-16 | Advisory-mode override with a recorded reason | *(prototype has none)* | NOT-IN-PROTOTYPE | `assetGate.js:272-282`. App-only; excluded. |
 
-**§4.9 tally — 16 rows:** BUILT **12** · PARTIAL **1** · DELIBERATE **1** · NOT-IN-PROTOTYPE **2**. *(RECOUNTED from the rows 2026-09-02 — the stated line had gone stale as rows were re-verdicted, so this section was UNDER-claiming. `H:coverage-tally-matches-rows` now fails the suite on any such drift.)*
+**§4.9 tally — 16 rows:** BUILT **12** · PARTIAL **1** · DELIBERATE **1** · NOT-IN-PROTOTYPE **2**. *(RECOUNTED from the rows 2026-09-02 — the stated line had gone stale as rows were re-verdicted, so this section was UNDER-claiming. a tally-drift guard (IN PROGRESS — withdrawn pending its independent AC pass, since a check that gates a coverage count is TIER 1).)*
 Against the 13 non-deferred rows: **12 BUILT (92%), 13 present in some form (100%).**
 **§4.9 is the best-covered section in the spec.**
 
@@ -477,7 +477,7 @@ Against the 13 non-deferred rows: **12 BUILT (92%), 13 present in some form (100
 | 4.10-7 | Failing row: `Open field →` | `packet.jsx:465` | BUILT | `PacketBuilder.jsx:962` `data-qc="send-open-field"`, wired to the existing `goToField` — not a new navigator. |
 | 4.10-8 | `Nothing blocks sending` when the list empties | `packet.jsx:445-448` | BUILT | `PacketBuilder.jsx:944` prints "Nothing blocks sending." off the SAME `packetFailList()` count that drives the rows, so the empty state cannot disagree with the list. |
 
-**§4.10 tally — 8 rows:** BUILT **8**. *(RECOUNTED from the rows 2026-09-02 — the stated line had gone stale as rows were re-verdicted, so this section was UNDER-claiming. `H:coverage-tally-matches-rows` now fails the suite on any such drift.)*
+**§4.10 tally — 8 rows:** BUILT **8**. *(RECOUNTED from the rows 2026-09-02 — the stated line had gone stale as rows were re-verdicted, so this section was UNDER-claiming. a tally-drift guard (IN PROGRESS — withdrawn pending its independent AC pass, since a check that gates a coverage count is TIER 1).)*
 **2 BUILT (25%), 4 present in some form (50%). This is the weakest section in the spec**, and
 notably the cheapest to close — every input (`qcEntries`, `GateBadge`, `packetReadiness`,
 `onGoToField`) is already imported into the very file that renders it.
@@ -509,7 +509,7 @@ imports an assistant component.
 | 4.11-8 | Caveat when a change will be reverted by the next run (the omission list) | `assist.jsx` | **BUILT — CHANGED from ABSENT** | `omitListCaveat` (`assetBlocks.js`), rendered at `BLOCK_HOOKS.omitCaveat`. **DERIVED and conditional**, not the prototype's hardcoded fixture string: it fires only on a rule-driven omit drop recorded on THIS field and in the LATEST loop, matches the rationale exactly (accusation-grade), and says what the last run DID rather than predicting the next. |
 | 4.11-9 | **Every field-level action seeds this panel** | SPEC §4.11 | **BUILT — CHANGED from DELIBERATE** | **The DELIBERATE verdict rested on a CODE COMMENT (`AssetBlocks.jsx:495`) claiming the substitution as fact — a claim about the code, not a decision by the owner.** The panel now exists and is seeded: `seedAssistant(text, a.id)` at the call site -> `applySeed` (set text, open, CLEAR the slot) -> the reader edits and sends. **Nothing is sent by seeding**, proven by recording the network in `run-assistant.mjs` claim 4. The field boxes remain, so this is SEED-AND-REMAIN rather than the replacement the comment implied. |
 
-**§4.11 tally — 9 rows:** BUILT **5** · PARTIAL **1** · ABSENT **1** · DELIBERATE **2**. *(RECOUNTED from the rows 2026-09-02 — the stated line had gone stale as rows were re-verdicted, so this section was UNDER-claiming. `H:coverage-tally-matches-rows` now fails the suite on any such drift.)*
+**§4.11 tally — 9 rows:** BUILT **5** · PARTIAL **1** · ABSENT **1** · DELIBERATE **2**. *(RECOUNTED from the rows 2026-09-02 — the stated line had gone stale as rows were re-verdicted, so this section was UNDER-claiming. a tally-drift guard (IN PROGRESS — withdrawn pending its independent AC pass, since a check that gates a coverage count is TIER 1).)*
 Against the 8 non-deferred rows: **0 BUILT (0%), 2 present in some form (25%).**
 
 > **ASKED AND ANSWERED, 2026-08-25 — and the answer was neither (a) nor (b).** This section used to
@@ -576,8 +576,8 @@ already made once.
 > headline above was being recomputed; the section lines were not. Worst case `§4.10`, which read
 > `BUILT 2 · PARTIAL 2 · ABSENT 4` against eight rows that all say BUILT. `§4.11` read `BUILT 0 ·
 > ABSENT 6` against rows saying BUILT 5 · ABSENT 1. All 11 are now recounted from their own rows,
-> and `H:coverage-tally-matches-rows` (`app/test/prototypeCoverage.test.mjs`) fails the suite if a
-> stated tally ever disagrees with them again.
+> and a guard to keep them honest is IN PROGRESS — withdrawn pending an independent AC pass, because a
+> check that gates a coverage count is TIER 1 and its criteria must be written cold, before the code.
 >
 > The denominator moved 183 -> 182 because `4.4-8` closed as **DELIBERATE** (a divergence with a
 > recorded reason is not a gap and is excluded, per §0). Counted against the old 183 for a like-for
