@@ -7063,3 +7063,39 @@ every packet. Both invisible in the spec, both obvious in one row of production 
 **Three of my own errors this lane**, all in memory.md Hardening: a bad conflict-hunk splice that
 broke one file and silently shortened two, three INERT mutation verdicts that were my own
 invocation, and two fixture shapes asserted without reading.
+
+
+## D:swap-screen-reads-a-dead-pass — the row settled against live data, 2026-09-02
+
+One `db-query.yml` run (`33635773017`, opportunity `9f9c370a`) settled all three parts of the row,
+and the answer differed from the row on two of them.
+
+**(1) PROVEN, not hypothesised.** `len(call3)` is **0 for all five `final*` fields**. Call 3 emitted
+nothing on this packet, and `swaps.ts:494` stamps `origin: 'pass_b'` — which means Call 3 — on every
+final item Call 1 did not produce. A pass that produced zero characters cannot have introduced
+anything, so the label is false by construction and needs no reconciliation to say so.
+
+**(2) ALREADY FIXED, and fixed better than the row asked.** No `ATS pass` literal survives anywhere
+in `swaps.ts`. Rather than naming the correct pass, the rationales stopped naming a pass at all and
+now state the RELATION — *"replaces the master template item in this slot"*, *"not present in the
+master template list"*, *"unchanged from the master template"*. A statement that names no pass cannot
+credit the wrong one. Marked FIXED in the ledger.
+
+**(3) THE BLOCKING PRECONDITION CANNOT BE DISCHARGED — the numbers it was defined on are gone.** The
+row froze kept 8 / swapped 1 / dropped 1 / added 1. The same opportunity now reads kept 16 / swapped
+5 / dropped 8 / added 7 across 36 rows, because the packet was rebuilt under the master-baseline
+change. Re-stated in the ledger rather than left as a blocker nobody could clear: this is the "a
+STATE recorded as a standing fact" error, and the row had been carrying it since 2026-08-22.
+
+**A second defect surfaced in the same read — now `D:lineage-winner-is-none`.** `last_build.lineage`
+reports `winner: 'none'` on **4 of 5 slots**. `skillLineage` picks a winner by comparing the SHIPPED
+package to each raw call, but `applyCorrectionPass` and the master merge both run first, so nothing
+matches. `packetBuild.ts:120` wrote the epitaph before it happened: *"a lineage that reports none on
+every row of a healthy build is worse than no lineage — it is a panel that always says the same wrong
+thing, and it would have been believed."* Also recorded there: `winner` tests `call2` BEFORE `call1`,
+and `c1_eq_c2` is true for RelevantBullets2/3 (73 chars each), so `winner='call2'` never meant "Call 2
+changed it" — a trap for whoever fixes this next.
+
+**Not started: the fix.** Making `origin` truthful needs a fourth enum value (the CHECK admits only
+`profile_original`/`pass_a`/`pass_b`), `call2` threaded into `buildSwaps`, and its consumers moved —
+a schema migration across several files. Owner's call, not taken unilaterally.

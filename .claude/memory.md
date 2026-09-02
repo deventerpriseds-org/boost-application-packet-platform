@@ -5652,3 +5652,22 @@ and proved the guard real after three false INERTs. And put the absolute `cd` in
 `parseAtsKeywords` changed nothing, because the live header has `<th>` cells only and the `<td>`
 requirement drops it anyway. That is a real "not proven", and the fix was to add a mixed `<th>`/`<td>`
 header case — ordinary model output — which made the mutation bite.
+
+
+### A ledger row's numbers are a STATE, not a standing fact (2026-09-02)
+
+`D:swap-screen-reads-a-dead-pass` carried a **blocking precondition** — "settle the 2-vs-4 count
+first" — computed on 2026-08-22 from kept 8 / swapped 1 / dropped 1 / added 1. On 2026-09-02 the same
+opportunity read kept 16 / swapped 5 / dropped 8 / added 7 across 36 rows. The packet had been rebuilt
+under the master-baseline change, so **the blocker referenced numbers that no longer existed and could
+never be discharged by anyone.** It had been quietly gating task #20 for eleven days.
+
+This is the same error as *"the credit ran out"* and *"verify.sh is not yet merged"*: a measurement
+written down in the present tense becomes a permanent claim. **Re-measure a row's numbers before
+treating them as a blocker** — one query, and it cost nothing to check.
+
+The corollary that made it worth the query: the row's OTHER two items had also moved. Item (2) was
+already fixed in source, so I would have spent a lane re-fixing it. Item (1) turned out **provable**
+rather than hypothesised — `len(call3) = 0` on all five fields, so the pass being credited emitted
+nothing at all. **The row was wrong in all three cells, in three different directions.** Reading it as
+a to-do list would have produced one wasted fix, one unfixable blocker, and one missed proof.
