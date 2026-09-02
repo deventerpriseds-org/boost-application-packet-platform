@@ -5042,3 +5042,21 @@ test('H:baseline-slot-overflow: an over-capacity list is REPORTED, never silentl
   // Blank lines are not items -- a trailing newline must not manufacture an overflow.
   assert.deepEqual(slotOverflow({ ExpertiseBullets: 'a\nb\n\n' }, slots), [])
 })
+
+test('H:baseline-slot-element-type: a non-string ELEMENT is dropped, never String()-coerced', async () => {
+  const { slotOverrides, baselinePkg } = await import('../dist/functions/tests/appBaseline.js')
+
+  // FOUND BY THE INDEPENDENT VERIFIER, not by reading (VERIFY-baseline-slot-overrides-1, "Also
+  // report"): the type gate was top-level only, so junk inside an ACCEPTED array was coerced --
+  // `['a', {}, ['b','c']]` wrote "a\n[object Object]\nb,c" into a merge field.
+  const out = slotOverrides({ SkillsBullets1: ['a', {}, ['b', 'c'], 42, null, undefined, true, 'd'] })
+  assert.deepEqual(out.SkillsBullets1.split('\n'), ['a', 'd'])
+  assert.ok(!out.SkillsBullets1.includes('[object Object]'))
+  assert.ok(!out.SkillsBullets1.includes('b,c'))
+
+  // An array of ONLY junk empties the list, which means the field is ignored -- so MasterContext
+  // survives rather than being replaced by nothing. The safe direction, asserted rather than hoped.
+  assert.deepEqual(Object.keys(slotOverrides({ ExpertiseBullets: [{}, 42, null] })), [])
+  const kept = baselinePkg({ ExpertiseBullets: 'Alpha|Beta' }, { fields: { ExpertiseBullets: [{}, 7] } })
+  assert.deepEqual(kept.ExpertiseBullets.split('\n'), ['Alpha', 'Beta'])
+})

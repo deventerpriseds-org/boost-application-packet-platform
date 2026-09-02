@@ -261,8 +261,15 @@ export function slotOverrides(fields: unknown): Partial<Record<SlotField, string
     if (!Array.isArray(raw) && typeof raw !== 'string') continue
     // A string is split with the repo's own splitter, so a caller may pass either shape and get the
     // same answer the package builder would give.
+    // PER ELEMENT, NOT JUST PER FIELD. The type gate above is top-level only, so an object or a
+    // nested array INSIDE an accepted array was still `String()`-coerced: `['a', {}, ['b','c']]`
+    // wrote `"a\n[object Object]\nb,c"` into the merge field. Found by the independent verifier
+    // (docs/qc-evidence/VERIFY-baseline-slot-overrides-1.md, "Also report") -- the same class of gap
+    // C2 closes at the top level, one level down. A list item is a STRING; anything else is dropped,
+    // and if that empties the list the field falls through to "ignored" and MasterContext survives.
     const items = (Array.isArray(raw) ? raw : splitItems(raw))
-      .map((x: unknown) => String(x ?? '').trim())
+      .filter((x: unknown): x is string => typeof x === 'string')
+      .map((x: string) => x.trim())
       .filter(Boolean)
     if (!items.length) continue
     out[field] = items.join('\n')
