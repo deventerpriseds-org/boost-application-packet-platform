@@ -185,10 +185,23 @@ lot of mistakes... is it overdoing it or are you underdoing it?"* Counting, for 
 
 | | Count |
 |---|---|
-| Verification passes with verdicts | 21 |
-| CONFIRMED verdicts | ~398 |
-| REFUTED verdicts | ~67 (**14%**) |
+| Verification passes with verdicts | 19 |
+| CONFIRMED verdicts | **140** |
+| REFUTED verdicts | **31 (18%)** |
 | Entries in THIS log before today | 5 |
+
+> **CORRECTED an hour after first writing this row, by the tool built to check it.** The numbers I
+> first gave the owner — "~398 confirmed, ~67 refuted, 14%" — came from `grep -c CONFIRMED`, which
+> counts every line containing the WORD, including prose like *"confirmed by reading the source"*.
+> `scripts/accuracy-trend.mjs` counts only a verdict in a VERDICT POSITION and gets 140/31.
+>
+> **The rate barely moved (14% -> 18%) but the absolutes were inflated ~2.5x, and I had already
+> written them into this log as the baseline.** That is this log's own failure mode happening while
+> writing the entry about it: a number produced by a convenient command, reported without checking
+> what the command actually counts. The inflated version also flattered me — a larger denominator
+> makes the rate look smaller.
+>
+> Left visible rather than silently overwritten, because the correction is the more useful record.
 
 **Four of those five were caught by the OWNER, one by a verifier.** So this log has been recording
 the owner's catches, not my error rate — it measured their patience. A log biased toward
@@ -226,3 +239,25 @@ the move is identical — *state it, then look, instead of look, then state it.*
 `CLAUDE.md` already demands for H-cases ("a mistake becomes a TEST, not a note"). A refutation the
 owner never sees is a mistake that gets to happen twice. The count above is the baseline: if this
 log does not grow at roughly the rate `VERIFY-*.md` accrues REFUTED verdicts, it is lying again.
+
+### The measurement, so decline is observable rather than asserted
+
+Owner, same day: *"be sure you are updating the accuracy log so that your mistakes are on a
+consistent decline."* A prose log cannot show a trend — it accumulates anecdotes, and the writer
+picks which ones. `scripts/accuracy-trend.mjs` counts verdicts across every `VERIFY-*.md`, dates
+them from git rather than mtime (a container restore rewrites mtimes), and prints the rate per pass.
+
+**Baseline, 2026-09-02:** 19 passes, 31 refuted / 171 verdicts = **18%**. Earlier half 20%, recent
+half 16%.
+
+Three honesty constraints built into the tool rather than left to the reader:
+
+- **It refuses to weight by severity.** That is the exact knob a motivated reader turns to make a
+  bad month look fine. Severity belongs in prose where a human judges it; the number stays blunt.
+- **It prints the pass COUNT beside the rate**, and says outright that a rate falling because fewer
+  passes ran is not improvement. The cheapest way to fake this metric is to stop running verifiers.
+- **The trend is first-half vs second-half, not a fitted line.** With 19 points a regression reads as
+  more precision than exists.
+
+**A 16% recent rate is not a success.** Roughly one claim in six still fails an independent read.
+The target is the direction, and the number above is what the next session has to beat.
