@@ -7385,3 +7385,35 @@ null.** Read back from production (`33651206610`), not inferred from a 200.
 **Two of my own errors on the way, both from asserting a shape instead of reading it:** a guessed run
 id that 404'd, and `artifact_score.created_at` which does not exist (the column is `computed_at`).
 The schema was 5 lines away both times.
+
+### ACT-2026-09-02-g — the JD-analysis rows re-verdicted, and EVERY tally line was stale
+
+Owner asked whether §4.1-§4.3 could "sit dormant and untouched". **Confirmed: yes.** The parity
+lane's commits (`5d37e3d`, `826c846`, `8369424`, `d28be1d`) edit §4.4, §4.5 and §4.8 — never §4.1-4.3.
+So the JD-analysis area sat on a source-only read from 26-27 August while my §16/§17 render evidence
+was appended BELOW it and never reconciled INTO the rows.
+
+**Six open rows, re-verdicted against the render:** `4.2-2`, `4.3-12`, `4.3-13` -> **BUILT**;
+`4.1-5` -> **DELIBERATE** (its own note already argued the refusal, citing a code comment — the
+verdict cell contradicted its evidence); `4.1-10` and `4.1-12` **stay PARTIAL** with reasons stamped.
+`4.1-10` deliberately NOT promoted: §0 requires a DELIBERATE verdict to cite a decision, and
+"better-sourced" asserted in this file is not one.
+
+**THE BIGGER FIND — all 11 per-section tally lines were stale, every one UNDER-claiming.** The
+headline was being recomputed each pass; the section lines never were. Worst: `§4.10` read
+`BUILT 2 · PARTIAL 2 · ABSENT 4` against eight rows that all say BUILT; `§4.11` read
+`BUILT 0 · ABSENT 6` against rows saying BUILT 5 · ABSENT 1. Recounted mechanically from the rows.
+
+**Headline: 167/182 (91.8%) -> 170/181 (93.9%).** It reconciles exactly — my +3 BUILT and -4 PARTIAL
+are the whole delta, so the other lane's number was right and only the section lines had rotted.
+**ABSENT across the entire document is now 1.**
+
+**GUARD: `H:coverage-tally-matches-rows`** (`app/test/prototypeCoverage.test.mjs`) recounts each
+section and fails on any disagreement with its stated line. It extends the existing staleness guard,
+whose scope note said PARTIAL/BUILT drift is "cheap" — true of a ROW, false of a TALLY, because the
+tally is what gets quoted.
+
+**Mutation note worth keeping:** my first mutation came back INERT because I aimed it at the TEST
+(disabling its own assertion), which cannot make that test fail. Re-aimed at the DOCUMENT — putting
+`§4.10`'s stale numbers back — it **FIRED**. For a guard whose subject is a file, the file is what
+you mutate.

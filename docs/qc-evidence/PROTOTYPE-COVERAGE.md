@@ -131,14 +131,14 @@ Import list read (`PostingAnalysis.jsx:18-28`): `shell.jsx` (Pill, Overlay), `po
 | 4.1-2 | Explanatory sub-line | `packet.jsx:161` | BUILT | `PostingAnalysis.jsx:430-436` |
 | 4.1-3 | `See where each one is answered →` (deep-link to QC) | `packet.jsx:159` | BUILT | `PostingAnalysis.jsx:547-559` - `See where each one is answered ->`, hooked `POSTING_HOOKS.openQc`, `role="button"`/`tabIndex`/Enter-Space, hidden when the extraction has nothing to point at. Navigation is a PROP calling the one `setActiveStep` (`PacketBuilder.jsx:842`). QC's `pick` filter has no prop and no route segment, so it opens the Coverage list and the sub-line says so rather than implying per-line targeting. Commit `2de4ae5`; wiring guarded after the verifier found both halves unguarded (`1a886a8`). |
 | 4.1-4 | Three-tab strip, one list at a time | `packet.jsx:116-123` | BUILT | `PostingAnalysis.jsx:485-493`, `role="tablist"` / `role="tab"` — better than the prototype's bare divs. |
-| 4.1-5 | Per-tab count `n/m` | `packet.jsx:120` | PARTIAL | `PostingAnalysis.jsx:490` renders `({t.count})` — a **single** total, not `covered/total`. Deliberate: `:400-403` says attaching a coverage number to `model_keyword` "made a suggestion look like a measurement". |
+| 4.1-5 | Per-tab count `n/m` | `packet.jsx:120` | **DELIBERATE — CHANGED from PARTIAL** | `PostingAnalysis.jsx:490` renders `({t.count})` — a **single** total, not `covered/total`. Deliberate: `:400-403` says attaching a coverage number to `model_keyword` "made a suggestion look like a measurement". **Re-verdicted 2026-09-02 against the RENDER** (§16/§17 evidence, `/tmp/app-jd2.png`). The verdict contradicted its own evidence: the note already said *"Deliberate: `:400-403` says attaching a coverage number made a suggestion look like a measurement."* A recorded refusal cited to a code comment is DELIBERATE by §0, not a shortfall — the same rule as the match-header (§16c). |
 | 4.1-6 | Count coloured green when complete, red when not | `packet.jsx:120` | **DELIBERATE** | **Re-verdicted 2026-08-27 from ABSENT, by reading the prototype source rather than the render.** `packet.jsx:120` is `color: t.n === t.d ? green : red` on `{t.n}/{t.d}` — **the colour IS the `n/d` ratio's verdict, not a separate feature.** So 4.1-6 is not independently buildable: it inherits 4.1-5, which this app refuses on the record because attaching a coverage number to `model_keyword` *"made a suggestion look like a measurement"* (`PostingAnalysis.jsx:399-403`). Colouring the single total green/red would need a completeness threshold that does not exist, and would assert **as a colour** the very measurement that was removed **as a number** — strictly worse, because a reader can see a number's basis and cannot see a colour's. Shipping it would re-open a decision this repo already made, in a form that hides its own premise. **Closes as DELIBERATE with 4.1-5, not as work.** |
 | 4.1-7 | Responsibilities list | `packet.jsx:124` | BUILT | `PostingAnalysis.jsx:409-411`, `Group` at `:262-283` |
 | 4.1-8 | Requirements list | `packet.jsx:125-132` | BUILT | `PostingAnalysis.jsx:412-419` |
 | 4.1-9 | MUST HAVE / NICE TO HAVE sub-headers | `packet.jsx:127,129` | BUILT | `PostingAnalysis.jsx:414,417` — `Must-have` / `Nice-to-have` |
-| 4.1-10 | Sub-header `n/m evidenced` | `packet.jsx:63-72` | PARTIAL | `PostingAnalysis.jsx:270-275` renders `{split.total}` plus a **kind_source** split, not an *evidenced* ratio. A different and better-sourced number; the evidenced ratio itself does not render. |
+| 4.1-10 | Sub-header `n/m evidenced` | `packet.jsx:63-72` | PARTIAL | `PostingAnalysis.jsx:270-275` renders `{split.total}` plus a **kind_source** split, not an *evidenced* ratio. A different and better-sourced number; the evidenced ratio itself does not render. **Re-checked 2026-09-02 against the render — STAYS PARTIAL.** The substitution may well be better, but §0 requires a DELIBERATE verdict to cite a decision (`PULL-CANDIDATES`, `actions.md`, or a code comment) and this row cites none. "Better-sourced" asserted in this file is not a recorded decision. |
 | 4.1-11 | Row: the posting line **verbatim** | `packet.jsx:41` | BUILT | `PostingAnalysis.jsx:231-237` — a `<blockquote>` with char offsets, plus an explicit paraphrase branch at `:243-248` the prototype has no equivalent for. |
-| 4.1-12 | Row: requirement chip in a 150–210px right column | `packet.jsx:40,43` | PARTIAL | The chip is BUILT (`PostingAnalysis.jsx:220-222`, `reqChipLabel`) but sits **above** the line, not in a right column — the row is a single flow column (`:216-228`). |
+| 4.1-12 | Row: requirement chip in a 150–210px right column | `packet.jsx:40,43` | PARTIAL | The chip is BUILT (`PostingAnalysis.jsx:220-222`, `reqChipLabel`) but sits **above** the line, not in a right column — the row is a single flow column (`:216-228`). **Re-checked 2026-09-02 against the render — STAYS PARTIAL.** Confirmed in both source and screenshot: the chip sits in a flex row with `marginBottom: 5` ABOVE the line (`PostingAnalysis.jsx:322-329`), not in a right column. A real layout divergence with no recorded reason. |
 | 4.1-13 | Row: competency spelled out beside the id (R7) | `packet.jsx:43` via `ReqChip` | BUILT | `PostingAnalysis.jsx:225-227` — `{r.competency \|\| 'competency unassigned'}` |
 | 4.1-14 | Row: status dot, green covered / red open | `packet.jsx:39` | BUILT | `EvidenceLine` (`PostingAnalysis.jsx`) paints a dot through `toneColor(EVIDENCE_TONE[state])`. NOT a two-colour green/red: six states, and `stale`/`misresolved`/`source_missing`/`unverified` are `warn`, because a row whose excerpt merely MOVED is not a gap in the profile. |
 | 4.1-15 | Row: `evidenced — show the line` link | `packet.jsx:45` | BUILT | `show the line` / `hide the line` disclosure, rendered only when the endpoint verdict is `verified` - the one state whose quote may be shown. |
@@ -160,7 +160,7 @@ Import list read (`PostingAnalysis.jsx:18-28`): `shell.jsx` (Pill, Overlay), `po
 | 4.1-31 | Legend row, always present | `packet.jsx:163` | BUILT | `PostingAnalysis.jsx:502-511` |
 | 4.1-32 | Three-column layout behind `PARSED_LAYOUT` | `packet.jsx:25,136-152` | BUILT | `PostingAnalysis.jsx:389-392,439-442,575-582` — and it is a **persisted user preference** (`ee_posting_columns`), not a code constant, per the repo's "no hardcoded config" rule. Better than the prototype. |
 
-**§4.1 tally — 32 rows:** BUILT **19** · PARTIAL **3** · ABSENT **2** · DELIBERATE **8**.
+**§4.1 tally — 32 rows:** BUILT **20** · PARTIAL **2** · DELIBERATE **10**. *(Counts RECOUNTED from the rows 2026-09-02. The previous line was stale — rows had been re-verdicted and the tally never followed, so this section was UNDER-claiming. `H:coverage-tally-matches-rows` now fails the suite on any such drift.)*
 (Was BUILT 13 / ABSENT 8 before `df2c9db` shipped the evidence expansion, rows 4.1-14..19.)
 Against the 24 rows that are not owner-deferred: **13 BUILT (54%), 16 present in some form (67%).**
 
@@ -181,7 +181,7 @@ read it.
 | # | Prototype element | Proto ref | Verdict | App citation / note |
 |---|---|---|---|---|
 | 4.2-1 | Four fit **cards** (Responsibilities / Must-have / Nice-to-have / ATS keywords) | `packet.jsx:174-188` | **BUILT — CHANGED from ABSENT** | `PostingAnalysis.jsx:200` (`POSTING_HOOKS.compareCards`, declared `postingAnalysis.js:66`). **Built on the DIMENSION axis, not the prototype's four kinds** — a deliberate, owner-approved divergence: per-kind coverage is not a number this system produces (`requirements.ts:61`, `coverage` is `'escalated' \| null`), so the prototype's axis would have required inventing one. Owner picked option A after seeing both rendered side by side: *"I'm fine with the 8 and the notes."* Option B (the four kinds) is tracked as a pull candidate. **Independent verification OUTSTANDING** — the batched verifier covered Groups B and C, not this row. |
-| 4.2-2 | Card: `n of m` big number | `packet.jsx:179-180` | PARTIAL | Survives only as `{r.covered} of {r.total} line(s)` inside each comparison row, `PostingAnalysis.jsx:104-106`. |
+| 4.2-2 | Card: `n of m` big number | `packet.jsx:179-180` | **BUILT — CHANGED from PARTIAL** | Survives only as `{r.covered} of {r.total} line(s)` inside each comparison row, `PostingAnalysis.jsx:104-106`. **Re-verdicted 2026-09-02 against the RENDER** (§16/§17 evidence, `/tmp/app-jd2.png`). The claim that it "survives only inside each comparison row" predates any render and is refuted by one: the dimension CARDS carry the big `n of m` — a bold `1` of 1 on Leadership tenure, `0` of 2 on Organization size — above a `4 of 8 dimension(s) compared` header. This row was written while the fixture starved the comparison surface, so nobody had seen it. |
 | 4.2-3 | Card: graded verdict word | `packet.jsx:182` | BUILT | `fitLabel()` `postingAnalysis.js:78-81`, rendered `PostingAnalysis.jsx:100-103`. |
 | 4.2-4 | Card: `Missing: <named>` when incomplete | `packet.jsx:184` | BUILT | **Re-verdicted - the PARTIAL was wrong.** The app HAS enumerated the missing lines by name all along: `dimensions.ts:504` emits `...; no excerpt for: #12 <text>; #14 <text>` and `:483` names every judgeable line for the nothing-found case, rendered through `POSTING_HOOKS.compareNote`. Guarded rather than rebuilt (`eae3d37`) - a second `Missing:` list would be two enumerations of one fact. The `weak` split into `Nothing found` / `Falls short` is a deliberate improvement on the prototype's single `No evidence` and is pinned. |
 | 4.2-5 | Comparison table, 4 columns | `packet.jsx:191-194` | BUILT | `COMPARE_COLUMNS` `postingAnalysis.js:150`, rendered `PostingAnalysis.jsx:186-192`. Exported so a test asserts the headings **are** the spec's. |
@@ -196,7 +196,7 @@ read it.
 | 4.2-14 | Responsive: 4-col ≥ 900px, 1-col below | `packet.jsx:171` `useWide(900)` | BUILT | `COMPARE_WIDE_MIN = 900`, `compareColumns()` `postingAnalysis.js:127-141`, rendered as `data-qc-cols` at `:180`. |
 | 4.2-15 | The empty / unresolved state | *(prototype has none)* | NOT-IN-PROTOTYPE | `comparisonState()` `postingAnalysis.js:97-122` gives four distinct states; `compareEmpty` `:163-167`. App-only. Excluded from the denominator. |
 
-**§4.2 tally — 14 rows (row 15 excluded):** BUILT **11** · PARTIAL **3** · ABSENT **0** · DELIBERATE **0**.
+**§4.2 tally — 15 rows:** BUILT **14** · NOT-IN-PROTOTYPE **1**. *(Counts RECOUNTED from the rows 2026-09-02. The previous line was stale — rows had been re-verdicted and the tally never followed, so this section was UNDER-claiming. `H:coverage-tally-matches-rows` now fails the suite on any such drift.)*
 **11 BUILT (79%), 14 present in some form (100%).** *(Was 10 BUILT / 71%; **4.2-1** the fit cards moved ABSENT -> BUILT at `b73f8d6`. §4.2 now has no ABSENT row.)*
 
 The app also carries four surfaces the prototype has no counterpart for — dimension-set provenance
@@ -226,11 +226,11 @@ direction reads as though the app is strictly behind, and on this section it is 
 | 4.3-9 | QC Summary block header | `packet.jsx:341` | **BUILT — CHANGED from ABSENT** | `PostingAnalysis.jsx:793-794` (`<QcSummaryBlock>`, hook `POSTING_HOOKS.qcSummary`), mounted in the tally modal at `:881`. The block **derives nothing** — every sentence, row and score comes from `qcSummaryModel()` (`qcRail.js:921-984`), the same `useQcEntries()` payload the QC rail, the step circle, the asset badges and the ship gate read, so the modal cannot state a second opinion nobody can reconcile. Six modelled states, guarded by 11 `H:` cases. |
 | 4.3-10 | Composite match / requirements / keywords / seniority bars (`ScoreBlock compact`) | `packet.jsx:342` | **BUILT — CHANGED from ABSENT** | `PostingAnalysis.jsx:803-830` (`POSTING_HOOKS.qcSummaryScore` + `<ScoreParts>`). `<ScoreParts>` is an **extraction, not a copy** — `main` had three score-part bar renderers (one with a hand-inlined clamp); they are now one component with three consumers, one `pctWidth`, one `bandTone`, verified byte-identical against `main`'s markup by a golden-master probe. The keyword part **defers** rather than restating the library number, so keyword coverage appears exactly once on the screen (guarded: `run-keyword-tally.mjs`). |
 | 4.3-11 | Per-asset gate rows with `GateBadge` | `packet.jsx:344-349` | **BUILT — CHANGED from ABSENT in this surface** | `PostingAnalysis.jsx:838-846`, `GateBadge` **imported** from `AssetGateDrawer.jsx:45` (`PostingAnalysis.jsx:35`) — one definition, six mount sites, never copy-pasted. Rows are the packet's REAL artifact list, not the prototype's fixed four types (which would draw rows for assets a packet does not have). An asset whose checks could not be read is NAMED with `gate unavailable` rather than dropped — a missing row reads as "nothing wrong with it". |
-| 4.3-12 | `Open QC →` button | `packet.jsx:350` | PARTIAL | `PostingAnalysis.jsx:590` offers `Go to the resume step`; there is a QC step (`PacketBuilder.jsx:108`) but the modal does not link to it. |
-| 4.3-13 | **Any navigation out closes the modal first** | `packet.jsx:345,347,350` (`setPanelOpen(false)` on every exit) | PARTIAL | `Overlay` owns close; `onGoResume` / `onBuildAll` are supplied by `PacketBuilder.jsx:941-960` — needs a runtime check to confirm the dismiss ordering (see §14). |
+| 4.3-12 | `Open QC →` button | `packet.jsx:350` | **BUILT — CHANGED from PARTIAL** | `PostingAnalysis.jsx:590` offers `Go to the resume step`; there is a QC step (`PacketBuilder.jsx:108`) but the modal does not link to it. **Re-verdicted 2026-09-02 against the RENDER** (§16/§17 evidence, `/tmp/app-jd2.png`). The note *"the modal does not link to it"* is STALE. `PostingAnalysis.jsx:1077` renders `Open QC - every finding, per asset`, `title="Close this panel and open the QC step"`, wired to `onGoQc`. |
+| 4.3-13 | **Any navigation out closes the modal first** | `packet.jsx:345,347,350` (`setPanelOpen(false)` on every exit) | **BUILT — CHANGED from PARTIAL** | `Overlay` owns close; `onGoResume` / `onBuildAll` are supplied by `PacketBuilder.jsx:941-960` — needs a runtime check to confirm the dismiss ordering (see §14). **Re-verdicted 2026-09-02 against the RENDER** (§16/§17 evidence, `/tmp/app-jd2.png`). Close-first-then-navigate IS implemented: `PacketBuilder.jsx:1108-1115` calls `setAtsOpen(false)` BEFORE `setActiveStep(...)` on every exit handler, with a comment naming the prototype ordering it mirrors (`setPanelOpen(false)` before `setStep`). |
 | 4.3-14 | Model-keyword list inside the modal | *(prototype has none)* | NOT-IN-PROTOTYPE | `PostingAnalysis.jsx:586`. App-only; excluded. |
 
-**§4.3 tally — 13 rows (row 14 excluded):** BUILT **9** · PARTIAL **2** · ABSENT **0** · DELIBERATE **2**.
+**§4.3 tally — 14 rows:** BUILT **11** · DELIBERATE **2** · NOT-IN-PROTOTYPE **1**. *(Counts RECOUNTED from the rows 2026-09-02. The previous line was stale — rows had been re-verdicted and the tally never followed, so this section was UNDER-claiming. `H:coverage-tally-matches-rows` now fails the suite on any such drift.)*
 Against the 11 non-deferred rows: **9 BUILT (82%), 11 present in some form (100%).** *(Was 6 BUILT / 55% — the weakest section in the spec bar the assistant. **4.3-9/10/11**, the whole QC summary inside the ATS modal, moved ABSENT -> BUILT at `34eda36`, verifier-CONFIRMED. §4.3 now has no ABSENT row.)*
 
 ---
@@ -280,7 +280,7 @@ Against the 11 non-deferred rows: **9 BUILT (82%), 11 present in some form (100%
 | 4.4-32 | `Nothing to review on this asset.` | `assets.jsx:279` | **BUILT — CHANGED from ABSENT** | `AssetBlocks.jsx:309-316` (`BLOCK_HOOKS.meterClear`), guarded on a **loaded** result so "clear" and "never checked" cannot look alike. Inventory build-order row 8. |
 | 4.4-33 | `open` / "Needs your answer" severity | `assets.jsx:248` | DELIBERATE | `assetGate.js:78-87` refuses to mint this bucket from state the app does not have. Inventory: *"ABSENT by design and correctly so"*. |
 
-**§4.4 tally — 33 rows:** BUILT **24** · PARTIAL **7** · ABSENT **0** · DELIBERATE **2**.
+**§4.4 tally — 33 rows:** BUILT **30** · DELIBERATE **3**. *(RECOUNTED from the rows 2026-09-02 — the stated line had gone stale as rows were re-verdicted, so this section was UNDER-claiming. `H:coverage-tally-matches-rows` now fails the suite on any such drift.)*
 Against the 31 non-deferred rows: **24 BUILT (77%), 31 present in some form (100%)** — every row
 has at least a partial counterpart.
 
@@ -342,7 +342,7 @@ Import list read (`AssetBlocks.jsx:30-45`) — `CorrectionRow` comes from `QcRai
 | 4.5-42 | The ring clears after ~2.2s | `screens/` notes | DELIBERATE | `PULL-CANDIDATES.md` **PC-4** — the persistent ring is a deliberate choice; SPEC says nothing about ring timing and the repo has twice removed vanishing affordances for the same reason. |
 | 4.5-43 | Chips deduped / near-duplicates collapsed | *(prototype: exact ids)* | DELIBERATE | `PULL-CANDIDATES.md` **PC-5** — ordered by requirement `seq`, deduped by EXACT string only; collapsing is a similarity judgement this repo reserves for ranking. |
 
-**§4.5 tally — 42 rows (4.5-16 excluded as NOT-IN-PROTOTYPE):** BUILT **32** · PARTIAL **1** ·
+**§4.5 tally — 43 rows:** BUILT **36** · DELIBERATE **6** · NOT-IN-PROTOTYPE **1**. *(RECOUNTED from the rows 2026-09-02 — the stated line had gone stale as rows were re-verdicted, so this section was UNDER-claiming. `H:coverage-tally-matches-rows` now fails the suite on any such drift.)*
 ABSENT **2** · DELIBERATE **7**.
 Against the 35 non-deferred rows: **32 BUILT (91%), 33 present in some form (94%).**
 
@@ -367,7 +367,7 @@ Against the 35 non-deferred rows: **32 BUILT (91%), 33 present in some form (94%
 | 4.6-11 | Each action is phrased as an assistant request stating the coverage consequence | `assets.jsx:72,82,85` | **BUILT — CHANGED from ABSENT, with the consequence clause deliberately omitted** | Seeded sentence: `Drop "<kw>" from this field. Rewrite the text without it rather than swapping in a synonym.` The prototype's *coverage consequence* is **not** claimed, and that is the finding, not an oversight: the lane's own hunt (verifier-CONFIRMED, both halves) proved a drop routed through `owner-edit` gains no attribution — `ownerLabels` strips the empty replacement via `.filter(Boolean)` (`appSwaps.ts:45-49`, plus a second filter at `swaps.ts:174`) so `driver:'owner'` cannot fire for a deletion — and splices a hole (`appCorrections.ts:359` → `Led  initiatives`). Copy that promised a coverage effect would have been a claim the system does not record. Guarded by `H:keyword-drop-offers-nothing-it-cannot-do`. |
 | 4.6-12 | `not in this text` on a chip whose keyword the draft lacks | *(prototype has none)* | NOT-IN-PROTOTYPE | App-only, `AssetBlocks.jsx:803-810`, recorded as reversible in PC-1. Excluded. |
 
-**§4.6 tally — 11 rows (row 12 excluded):** BUILT **7** · PARTIAL **1** · ABSENT **1** · DELIBERATE **2**.
+**§4.6 tally — 12 rows:** BUILT **8** · PARTIAL **1** · DELIBERATE **2** · NOT-IN-PROTOTYPE **1**. *(RECOUNTED from the rows 2026-09-02 — the stated line had gone stale as rows were re-verdicted, so this section was UNDER-claiming. `H:coverage-tally-matches-rows` now fails the suite on any such drift.)*
 Against the 9 non-deferred rows: **7 BUILT (78%), 8 present in some form (89%).** *(Was 5 BUILT / 56%; **4.6-10/11**, the drop hatch, moved ABSENT -> BUILT at `34eda36`, verifier-CONFIRMED. **4.6-9 has since been BUILT too (re-verdicted 2026-08-27), so §4.6 now has NO ABSENT row.** It was ranked #2 in §14 as *blocked on reading the owner's live skill fields*; the skill-bank work closed that and the rank was never updated. This is the staleness the ledger's own guard exists to catch, in a document the guard does not read.
 
 ---
@@ -388,7 +388,7 @@ Against the 9 non-deferred rows: **7 BUILT (78%), 8 present in some form (89%).*
 | 4.7-8 | Forwards to the assistant | SPEC §4.7 | **BUILT — CHANGED from ABSENT** | `Ask the assistant` (`BLOCK_HOOKS.forward`) forwards the SAME sentence the field's own controls seed, with the artifact bound at the call site. The field box REMAINS beside it — ground rule R6 keeps correction in place and scoped to the field, so the panel is a second destination, never a replacement. |
 | 4.7-9 | Asset-level equivalent for artifacts with no merge fields | *(prototype: `packet.jsx:257`)* | BUILT | `PacketBuilder.jsx:290-292` + `:344+` — exists precisely because the intro video has no merge fields. |
 
-**§4.7 tally — 9 rows:** BUILT **7** · PARTIAL **1** · ABSENT **1** · DELIBERATE **0**.
+**§4.7 tally — 9 rows:** BUILT **9**. *(RECOUNTED from the rows 2026-09-02 — the stated line had gone stale as rows were re-verdicted, so this section was UNDER-claiming. `H:coverage-tally-matches-rows` now fails the suite on any such drift.)*
 **7 BUILT (78%), 8 present in some form (89%).**
 
 ---
@@ -428,7 +428,7 @@ Against the 9 non-deferred rows: **7 BUILT (78%), 8 present in some form (89%).*
 | 4.8-24 | Tab: **Review** — blind second model: grade, agreement, prompt version, citations, critique | `evidence.jsx:291-334` | BUILT | `ReviewTab` `QcRail.jsx:440-480` |
 | 4.8-25 | A picked requirement filters the other tabs | `evidence.jsx:378` | BUILT | `QcRail.jsx:820-830` — `filtered to #{seq}` + a `clear` affordance, keyboard-reachable. |
 
-**§4.8 tally — 25 rows:** BUILT **14** · PARTIAL **5** · ABSENT **2** · DELIBERATE **4**.
+**§4.8 tally — 25 rows:** BUILT **17** · PARTIAL **5** · DELIBERATE **3**. *(RECOUNTED from the rows 2026-09-02 — the stated line had gone stale as rows were re-verdicted, so this section was UNDER-claiming. `H:coverage-tally-matches-rows` now fails the suite on any such drift.)*
 Against the 21 non-deferred rows: **14 BUILT (67%), 19 present in some form (90%).**
 
 ---
@@ -456,7 +456,7 @@ Against the 21 non-deferred rows: **14 BUILT (67%), 19 present in some form (90%
 | 4.9-15 | `unchecked` as a distinct footer state | *(prototype has none)* | NOT-IN-PROTOTYPE | `assetGate.js:268-271`. App-only; excluded. |
 | 4.9-16 | Advisory-mode override with a recorded reason | *(prototype has none)* | NOT-IN-PROTOTYPE | `assetGate.js:272-282`. App-only; excluded. |
 
-**§4.9 tally — 14 rows (15, 16 excluded):** BUILT **12** · PARTIAL **1** · ABSENT **0** · DELIBERATE **1**.
+**§4.9 tally — 16 rows:** BUILT **12** · PARTIAL **1** · DELIBERATE **1** · NOT-IN-PROTOTYPE **2**. *(RECOUNTED from the rows 2026-09-02 — the stated line had gone stale as rows were re-verdicted, so this section was UNDER-claiming. `H:coverage-tally-matches-rows` now fails the suite on any such drift.)*
 Against the 13 non-deferred rows: **12 BUILT (92%), 13 present in some form (100%).**
 **§4.9 is the best-covered section in the spec.**
 
@@ -477,7 +477,7 @@ Against the 13 non-deferred rows: **12 BUILT (92%), 13 present in some form (100
 | 4.10-7 | Failing row: `Open field →` | `packet.jsx:465` | BUILT | `PacketBuilder.jsx:962` `data-qc="send-open-field"`, wired to the existing `goToField` — not a new navigator. |
 | 4.10-8 | `Nothing blocks sending` when the list empties | `packet.jsx:445-448` | BUILT | `PacketBuilder.jsx:944` prints "Nothing blocks sending." off the SAME `packetFailList()` count that drives the rows, so the empty state cannot disagree with the list. |
 
-**§4.10 tally — 8 rows:** BUILT **2** · PARTIAL **2** · ABSENT **4** · DELIBERATE **0**.
+**§4.10 tally — 8 rows:** BUILT **8**. *(RECOUNTED from the rows 2026-09-02 — the stated line had gone stale as rows were re-verdicted, so this section was UNDER-claiming. `H:coverage-tally-matches-rows` now fails the suite on any such drift.)*
 **2 BUILT (25%), 4 present in some form (50%). This is the weakest section in the spec**, and
 notably the cheapest to close — every input (`qcEntries`, `GateBadge`, `packetReadiness`,
 `onGoToField`) is already imported into the very file that renders it.
@@ -509,7 +509,7 @@ imports an assistant component.
 | 4.11-8 | Caveat when a change will be reverted by the next run (the omission list) | `assist.jsx` | **BUILT — CHANGED from ABSENT** | `omitListCaveat` (`assetBlocks.js`), rendered at `BLOCK_HOOKS.omitCaveat`. **DERIVED and conditional**, not the prototype's hardcoded fixture string: it fires only on a rule-driven omit drop recorded on THIS field and in the LATEST loop, matches the rationale exactly (accusation-grade), and says what the last run DID rather than predicting the next. |
 | 4.11-9 | **Every field-level action seeds this panel** | SPEC §4.11 | **BUILT — CHANGED from DELIBERATE** | **The DELIBERATE verdict rested on a CODE COMMENT (`AssetBlocks.jsx:495`) claiming the substitution as fact — a claim about the code, not a decision by the owner.** The panel now exists and is seeded: `seedAssistant(text, a.id)` at the call site -> `applySeed` (set text, open, CLEAR the slot) -> the reader edits and sends. **Nothing is sent by seeding**, proven by recording the network in `run-assistant.mjs` claim 4. The field boxes remain, so this is SEED-AND-REMAIN rather than the replacement the comment implied. |
 
-**§4.11 tally — 9 rows:** BUILT **0** · PARTIAL **2** · ABSENT **6** · DELIBERATE **1**.
+**§4.11 tally — 9 rows:** BUILT **5** · PARTIAL **1** · ABSENT **1** · DELIBERATE **2**. *(RECOUNTED from the rows 2026-09-02 — the stated line had gone stale as rows were re-verdicted, so this section was UNDER-claiming. `H:coverage-tally-matches-rows` now fails the suite on any such drift.)*
 Against the 8 non-deferred rows: **0 BUILT (0%), 2 present in some form (25%).**
 
 > **ASKED AND ANSWERED, 2026-08-25 — and the answer was neither (a) nor (b).** This section used to
@@ -556,14 +556,28 @@ already made once.
 > regarding prototype UI parity progress."* Read §13-CURRENT for the live picture; §13a below is
 > the 2026-08-25 measurement, kept for its delta narrative and NOT current.
 
-> # **167 of 182 prototype elements present (91.8%)**
+> # **170 of 181 prototype elements present (93.9%)**
 >
-> | | Count | Share of 182 |
+> | | Count | Share of 181 |
 > |---|---:|---:|
-> | **BUILT** | **167** | **91.8%** |
-> | **PARTIAL** | 14 | 7.7% |
+> | **BUILT** | **170** | **93.9%** |
+> | **PARTIAL** | 10 | 5.5% |
 > | **ABSENT** | **1** | **0.5%** |
-> | *present (BUILT + PARTIAL)* | *181* | *99.5%* |
+> | *present (BUILT + PARTIAL)* | *180* | *99.4%* |
+>
+> **+3 BUILT / -4 PARTIAL on 2026-09-02 from the JD-ANALYSIS re-verdict (§4.1-§4.3).** That area had
+> never been touched by the parity lane -- its commits edit §4.4, §4.5 and §4.8 -- so it sat on a
+> source-only read from 26-27 August while §16/§17's render evidence was appended below it and never
+> reconciled INTO the rows. `4.2-2`, `4.3-12` and `4.3-13` are now BUILT and `4.1-5` closed as
+> DELIBERATE (which is why the denominator moved 182 -> 181). `4.1-10` and `4.1-12` stay PARTIAL with
+> their reasons stamped.
+>
+> **AND EVERY PER-SECTION TALLY LINE WAS STALE — all 11 of them, every one under-claiming.** The
+> headline above was being recomputed; the section lines were not. Worst case `§4.10`, which read
+> `BUILT 2 · PARTIAL 2 · ABSENT 4` against eight rows that all say BUILT. `§4.11` read `BUILT 0 ·
+> ABSENT 6` against rows saying BUILT 5 · ABSENT 1. All 11 are now recounted from their own rows,
+> and `H:coverage-tally-matches-rows` (`app/test/prototypeCoverage.test.mjs`) fails the suite if a
+> stated tally ever disagrees with them again.
 >
 > The denominator moved 183 -> 182 because `4.4-8` closed as **DELIBERATE** (a divergence with a
 > recorded reason is not a gap and is excluded, per §0). Counted against the old 183 for a like-for
