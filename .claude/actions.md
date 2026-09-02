@@ -6951,3 +6951,24 @@ Xylem title from `VICE PRESIDENT, ENTERPRISE SOFTWARE STRATEGY` to `VICE PRESIDE
 DIGITAL STRATEGY`. Same packet, same owner, same route — so the resume template being copied
 resolved differently across those five hours. Cause unestablished; reported to the owner rather
 than guessed at.
+
+### ACT-2026-09-02-a — verification loop 1 (independent)
+
+`docs/qc-evidence/VERIFY-baseline-slot-overrides-1.md`, committed at `66673c3`. Detached
+`claude -p` (Sonnet, 35 turns, 715s, $1.80 notional), no shared context with the implementer.
+**10/10 CONFIRMED.** It executed rather than reasoned: called the built `dist/` functions with
+adversarial inputs instead of trusting the suite, and ran 5 mutations itself — four from the brief
+plus one of its own (swapping spread precedence to break named-beats-positional) — all **FIRED**.
+
+Two things it produced that no amount of self-review would have:
+
+1. **A false-INERT mechanism in the mutation harness.** `npm run build && node --test` can
+   short-circuit: `tsc` exits non-zero on a mutation's type error yet still emits JS, so the suite
+   never runs and `mutate.sh` reports INERT. Use `;`. Recorded in memory as hardening lesson 4,
+   alongside the already-known "mutate.sh restores SOURCE, not `dist/`".
+2. **A real defect outside every stated claim** — element-level coercion inside an accepted array,
+   `['a', {}, ['b','c']]` -> `"a\n[object Object]\nb,c"` in a merge field. Fixed at `c9f29dd`,
+   guarded by `H:baseline-slot-element-type`, mutation **FIRED**, suite 126/126.
+
+**The lesson worth keeping:** every claim I thought to write passed. The value was entirely in the
+claim I did not think to write. That is the argument for requirement (b) in one line.

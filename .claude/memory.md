@@ -5473,7 +5473,11 @@ stale and REGENERATES from the model, discarding the overlay and rewriting every
 **Prove the result by reading the DOCUMENT, not the response:**
 `GET /api/diag/doc-layout?artifactId=<id>&type=resume` returns the rendered text per section.
 
-Guards: `H:baseline-slot-override`, `H:baseline-slot-overflow` (4 mutations, 4 FIRED).
+Guards: `H:baseline-slot-override`, `H:baseline-slot-overflow`, `H:baseline-slot-element-type`.
+Independently verified: `docs/qc-evidence/VERIFY-baseline-slot-overrides-1.md` -- **10/10 CONFIRMED**
+by a detached `claude -p` verifier that did NOT write the code, ran the built functions with
+adversarial inputs, and mutation-proved the guards itself (5 mutations including one of its own
+design, all FIRED). Six mutations total across implementer + verifier, six FIRED. Suite 126/126.
 
 ### Hardening — three lessons from this build
 1. **A re-stated target REPLACES the earlier one; never merge them.** Asked for a MasterContext
@@ -5487,6 +5491,15 @@ Guards: `H:baseline-slot-override`, `H:baseline-slot-overflow` (4 mutations, 4 F
 3. **An INERT mutation is a coverage hole until proven equivalent.** Dropping `|| cap <= 0` left
    the suite green; it was not equivalent (a capacity of 0 would flag every non-empty slot). The
    assertion was added and the mutation then FIRED.
+4. **Chain a mutation's TEST_CMD with `;`, never `&&`.** `tsc` exits non-zero on the mutation's type
+   error but STILL emits JS (this tsconfig has no `noEmitOnError`), so `&&` short-circuits, the
+   suite never runs, and `mutate.sh` reports a FALSE **INERT** -- "your guard is worthless" when it
+   means "I did nothing". Found by the independent verifier on its own first mutation run.
+5. **The verifier earns its keep on the claim NOBODY WROTE.** All 10 stated claims came back
+   CONFIRMED; the thing worth having was the finding OUTSIDE them -- the type gate was top-level
+   only, so `['a', {}, ['b','c']]` wrote `"a\n[object Object]\nb,c"` into a merge field and would
+   have rendered it into a resume. Self-verification cannot find the check you did not think to
+   write, which is exactly why (b) is not satisfiable by the implementer reading their own output.
 
 ### Open, uncaused by this work
 The STATIC template content changed between the 21:30 and 02:20 baseline builds — certifications
