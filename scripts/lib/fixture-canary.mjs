@@ -34,6 +34,18 @@ const REQUIRED = [
       + 'gate contract) renders as unset and reads exactly like the product having lost its limits',
   },
   {
+    has: (f) => {
+      const req = Object.entries(f).find(([k]) => k.endsWith('/requirements'))?.[1]
+      return !!(req && req.comparison)
+    },
+    why: 'the /requirements fixture has no `comparison` — the ENTIRE "posting against your profile" '
+      + 'surface (the fit cards, the DIMENSION/asks-for/evidences/FIT table, "Run again") renders as '
+      + '"Loading the comparison..." and reads exactly like a surface nobody built. Measured '
+      + '2026-09-02: this single absence accounted for ~19 of the 27 panels the jd step had been '
+      + 'reported as missing since UI-GAP-REGISTER. `appRequirements.ts:846-851` returns it; '
+      + '`build-fixtures.mjs` never emitted it, so the harness has never once been able to see it',
+  },
+  {
     has: (f) => Object.keys(f).some((k) => k.includes('/swaps')),
     why: 'no /swaps key — every `original -> final` row renders as a bare list, which reads exactly '
       + 'like the swap feature never having been built',

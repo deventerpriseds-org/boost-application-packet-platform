@@ -6,6 +6,14 @@
 **This is a measurement, not a design document.** Nothing under `app/src` or `api/src` was
 touched. No file other than this one was modified.
 
+> ### UPDATE 2026-09-02 — the `jd` step was RENDERED, and the standing number for it is WRONG
+>
+> Every measurement in this file below was **read from source**; its own closing line says *"no
+> live UI was verified, nothing was run."* On 2026-09-02 both sides of the `jd` step were rendered
+> and looked at. **§16 supersedes the `jd` row of §1a** (`266% · 27 panels missing · 3 controls`):
+> roughly **19 of those 27 panels are the measuring instrument, not the app.** Read §16 before
+> citing any `jd` figure from this document.
+
 > **Written incrementally, section by section.** If this document ends mid-table, everything above
 > the cut is complete and citable; nothing below it was started.
 
@@ -809,3 +817,93 @@ is a source measurement, honestly labelled as one.
 
 *Measurement only. Nothing under `app/src` or `api/src` was read-modified; this file is the only
 one written. No fix was applied to anything reported here.*
+
+
+---
+
+## 16. THE `jd` STEP, RENDERED — 2026-09-02
+
+**Method, and why it differs from every section above.** Owner: *"be sure to lean on render as well
+as reading the code as equal if not more importance."* Both sides were rendered locally, headless,
+in about two seconds each, and **looked at**:
+
+```
+node scripts/render-spec.mjs --step jd --vendor /tmp/vendor --out /tmp/spec-jd.png
+node scripts/render-app.mjs  --route '#/packet/2cb56fb3-.../jd' \
+     --fixtures docs/qc-evidence/fixtures.json --out /tmp/app-jd.png
+node scripts/compare-ui.mjs  --step jd --vendor /tmp/vendor --fixtures ... --json /tmp/gap-jd.json
+```
+
+App render: `bodyLen 10146`, `unmatched: []`, `pageErrors: []`. Prototype render: no page errors.
+
+### 16a. THE HEADLINE FINDING — the instrument, not the app
+
+`compare-ui` reported **27 panels and 3 controls only in the prototype**. Looking at the two
+screenshots and then tracing each row to source, **the single largest cause is a fixture that
+cannot see the surface it is scoring**:
+
+| Reported "missing" | Actually |
+|---|---|
+| Posting vs your profile · Strong match · Must-have requirements · Nice-to-have requirements · No evidence · ATS keywords · Moderate match · Dimension · The posting asks for · Your profile evidences · Leadership tenure · Organization size · Budget owned · Compliance ownership · Platform modernization · Cycle time regulated · Domain background · Public sector · **"Run again"** | **ONE fixture gap.** All of it is `ProfileCompareCard`, fed by `comparison` (`PacketBuilder.jsx:878` ← `req.data?.comparison`). The app rendered `"Loading the comparison..."`, which `postingAnalysis.js:149` returns **only when `comparison` is undefined**. |
+
+**The route returns it.** `appRequirements.ts:846-851` builds `comparison` via `comparisonPayload`
+and includes it in the response. **`build-fixtures.mjs` never emitted it**, and
+`fixture-refresh.yml`'s dump covers `requirement` but not the dimension rows it is computed from.
+
+**So this harness has never once been able to see the comparison surface** — which means the
+`jd 266% · 27 · 3` row in §1a, carried since `UI-GAP-REGISTER.md` (2026-08-23), has counted an
+instrument blind spot as product absence every time it was quoted.
+
+Fixed structurally rather than noted: **`comparison` is now a `fixture-canary` REQUIRED input**
+(`scripts/lib/fixture-canary.mjs`). It meets that file's own admission test exactly — its absence
+"renders as plausible, quiet, correct-looking UI" rather than crashing. **Consequence, stated
+plainly: `render-app.mjs` and `compare-ui.mjs` now REFUSE to run** against the committed fixture
+until the dump and builder carry `comparison`. That is the doctrine working as designed — *an
+instrument that cannot see has no standing to report an absence* — not a regression.
+
+### 16b. Four more "gaps" that the render suggested and source REFUTED
+
+Each of these looked like a gap in the screenshot. None is.
+
+| Looked missing | Ground truth |
+|---|---|
+| Full labelled left nav (app shows an icon rail) | **DELIBERATE.** `shell.jsx:369` cites the owner: *"nav menu needs to be collapsible and collapsed by default"*, and 375 adds that collapsed keeps the icons deliberately. |
+| `from email` provenance badge | **BUILT.** `PacketBuilder.jsx:822`, gated on `opp?.source`. The eMoney fixture opportunity has no `source`, so it correctly does not render. |
+| `See how the assets answer these →` | **BUILT, renamed** — `See where each one is answered →`, `PostingAnalysis.jsx:824`. |
+| Per-kind coverage fractions (`4/4`, `7/8`, `12/13`) vs the app's raw counts `(21) (14) (35)` | **DELIBERATE, with a recorded reason.** `PostingAnalysis.jsx:191-199`: the prototype counts requirement KINDS; this app grades role DIMENSIONS, and per-kind coverage "is not a number the system produces — `requirements.ts:61` makes `coverage` `'escalated' \| null`, never `'covered'`". Building the prototype's four literally would mint a **fourth coverage number** that could not agree with the other three. `qcRail.js:917` is the same refusal: nice-to-have is *"unmeasured rather than zero"*. |
+
+### 16c. What the app genuinely does NOT have
+
+After removing the fixture artifacts, the renames and the recorded decisions, the `jd` step's real
+prototype-side gaps are small:
+
+| Gap | Evidence |
+|---|---|
+| The `M1–M5 / D1–D4 / N1–N3` id legend and those id prefixes | Prototype renders the legend under the rows; the app uses `RESP #0` + `competency unassigned`. Different id scheme, no legend. |
+| A numeric match in the header | Prototype: `ATS MATCH 92%` and `AUDITABLE MATCH 95 FAIL`. App: `MATCH ESTIMATE —` with a red `Blocked` chip and **no number** on this opportunity. |
+
+### 16d. Where the app substantially EXCEEDS the prototype
+
+The `266%` in §1a is misleading as a score but directionally right: on this step the app is the
+richer surface, and the excess is **provenance**, which is the product's whole argument.
+
+- Per-line source attribution the prototype has no counterpart for: *"The employer's words,
+  characters 61-181 of the posting (located by anchor, not an exact string match)"*, *"parser read
+  it as: …"*, *"Filed here because from the section the posting listed it under."*
+- An explicit **`Model paraphrase - not a quote from the employer, because this wording could not be
+  located in the posting text`** state — the prototype cannot distinguish a quote from a paraphrase.
+- `not checked for evidence` per row; `Where it is used → (Compact resume)`; `Show as columns`;
+  `Match & keyword run`.
+- **21 responsibilities** parsed against the prototype's mocked 4.
+
+### 16e. Verdict
+
+**Look:** close. Same shell, same step rail, same card rhythm, same type scale; the app's header
+trades two big numbers for a state chip, and the nav is collapsed by owner decision.
+
+**Function:** the app is **ahead** of the prototype on this step everywhere except the two rows in
+§16c — and the comparison surface, which **could not be judged in this pass** and must not be
+scored again until the fixture carries `comparison`.
+
+**Open follow-up (named, not done):** extend `fixture-refresh.yml`'s dump and `build-fixtures.mjs`
+to carry `comparison`, then re-run this measurement. Until then the harness refuses, by design.

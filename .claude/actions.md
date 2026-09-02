@@ -7085,3 +7085,35 @@ traps that each cost a loop.
 **Open, for the owner:** `SkillsBullets2` carries 9 items against a template capacity of 8. All nine
 render and `slotOverflow` reports it rather than dropping "Change Management" silently — but cutting
 one or widening the slot is the owner's call, not mine.
+
+### ACT-2026-09-02-c — the `jd` step was RENDERED, and the standing gap number was the instrument
+
+Owner: *"render the current jd analysis page vs the screenshot we took of the prototype... be sure
+to lean on render as well as reading the code as equal if not more importance."*
+
+Both sides rendered locally (`render-spec.mjs`, `render-app.mjs`, `compare-ui.mjs`) and **looked
+at**. Findings in `docs/qc-evidence/PROTOTYPE-COVERAGE.md` §16, which supersedes the `jd` row of
+§1a (`266% · 27 panels · 3 controls`).
+
+**~19 of the 27 "missing panels" are ONE fixture gap.** The whole "posting against your profile"
+surface is fed by `comparison`; the app rendered `"Loading the comparison..."`, which
+`postingAnalysis.js:149` returns *only* when `comparison` is undefined. `appRequirements.ts:846-851`
+returns it; `build-fixtures.mjs` never emitted it and the dump never carried the dimension rows.
+**The harness has never once been able to see that surface**, so every quote of that row since
+`UI-GAP-REGISTER.md` counted a blind spot as product absence.
+
+**Four more apparent gaps refuted by source** — the collapsed nav (owner-decided, `shell.jsx:369`),
+the `from email` badge (built, gated on `opp.source`), the answered-link (built, renamed), and the
+per-kind coverage fractions (deliberate: minting a fourth coverage number that `postingAnalysis.js`
+says could not agree with the other three).
+
+**Real remaining gaps: two** — the `M1–M5 / D1–D4 / N1–N3` id legend, and a numeric match in the
+header. Against that the app substantially EXCEEDS the prototype on provenance (character offsets,
+anchor-vs-exact, quote-vs-paraphrase, per-row evidence state, 21 parsed responsibilities vs 4).
+
+**Guard added:** `comparison` is now a `fixture-canary` REQUIRED input. **`render-app.mjs` and
+`compare-ui.mjs` now REFUSE to run** against the committed fixture until the dump and builder carry
+it — the doctrine working as designed, and stated to the owner rather than hidden.
+
+**OPEN:** extend `fixture-refresh.yml` + `build-fixtures.mjs` to carry `comparison`, then re-measure.
+Until then the comparison surface is UNSCORED, not scored zero.
