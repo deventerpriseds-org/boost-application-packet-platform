@@ -1582,6 +1582,14 @@ test('H:displacement-names-only-a-recorded-swap', () => {
   const swaps = [
     { action: 'swapped', from_label: 'Digital Transformation', to_label: 'Cloud-native Services', list: 'Skills 1' },
     { action: 'kept', from_label: 'Kept Thing', to_label: 'Kept Thing', list: 'Skills 1' },
+    // THE ROW THE FIRST VERSION OF THIS TEST LACKED, and mutation-proving is what found it. Every
+    // other non-swapped row here is ALSO excluded by a second condition (dropped has no TO, added
+    // has no FROM, the kept row above has FROM === TO), so deleting the `action` check changed
+    // nothing and the harness correctly reported INERT. This row is excluded by the action check
+    // and NOTHING ELSE: a real from/to pair on a row that is not a swap. It is not hypothetical --
+    // production carries 55 rows with both labels against only 35 `swapped` (db-query 33687166561),
+    // so ~20 rows would produce a FALSE "took the place of" without the action check.
+    { action: 'kept', from_label: 'Old Wording', to_label: 'Current Wording', list: 'Skills 1' },
     { action: 'dropped', from_label: 'Dropped Thing', to_label: null, list: 'Skills 2' },
     { action: 'added', from_label: null, to_label: 'Added Thing', list: 'Skills 2' },
   ]
@@ -1591,6 +1599,7 @@ test('H:displacement-names-only-a-recorded-swap', () => {
   // A KEPT row displaced nothing. An ADDED row went into empty space. Neither may claim a
   // predecessor - that sentence names an offender and must come from a recorded swap only.
   assert.equal(keywordDisplacement(swaps, 'Kept Thing'), null)
+  assert.equal(keywordDisplacement(swaps, 'Current Wording'), null)
   assert.equal(keywordDisplacement(swaps, 'Added Thing'), null)
   assert.equal(keywordDisplacement(swaps, 'Dropped Thing'), null)
   // A keyword nothing swapped for is null, not a guess.
