@@ -243,13 +243,26 @@ if (!f['/search-prefs'].checks) thin.push('checks thresholds (drives EVERY rule 
 //    payload calls Blocked. That is a quiet, plausible, correct-looking lie, which is exactly the
 //    class of fixture starvation this whole file exists to refuse.
 //
-//    THE PREDICATE IS DELIBERATELY NARROW so it can never cry wolf: it fires only when at least one
-//    artifact HAS a gate and NOT ONE of them carries a score. An artifact with no gate legitimately
-//    has no score (the route returns null), so a packet of un-checked artifacts must not trip this.
+//    AN ARTIFACT WITH NO GATE IS EXEMPT and always will be: the route itself returns
+//    `const score = g ? (query) : null`, so no gate legitimately means no score. A packet of
+//    un-checked artifacts must not trip this.
+//
+//    TIGHTENED 2026-09-02 from "not ONE gated artifact has a score" to "EVERY gated artifact has
+//    one", after an independent verifier pointed out the partial case slipped through: 3 of 4 scored
+//    and one silently starved would have passed. I nearly rejected that on the theory that a gated
+//    artifact can legitimately lack a score row and tightening would cry wolf -- then checked
+//    production instead of theorising. Packet 85cee965, read live: all FOUR gated artifacts carry a
+//    score row (three with a null composite, one with 89), and only the un-gated `video` artifact
+//    has none. So the strict form matches production exactly and the loose form was hiding a hole.
+//    A gated artifact with no score row means the dump was taken mid-write, which is precisely the
+//    starvation this file refuses.
 const gated = artifacts.filter((a) => (f[`/artifact/${a.id}/checks-result`] || {}).gate)
-if (gated.length && !gated.some((a) => f[`/artifact/${a.id}/checks-result`].score)) {
-  thin.push('artifact_score (drives the drawer\'s whole Match tab - without it every checked asset '
-    + 'reads "No score has been computed for this asset yet", contradicting its own gate)')
+const unscored = gated.filter((a) => !f[`/artifact/${a.id}/checks-result`].score)
+if (gated.length && unscored.length) {
+  thin.push(`artifact_score missing on ${unscored.length} of ${gated.length} GATED artifact(s) `
+    + `(${unscored.map((a) => a.id.slice(0, 8)).join(', ')}) - it drives the drawer's whole Match `
+    + 'tab, and without it a checked asset reads "No score has been computed for this asset yet" '
+    + 'while the gate in the SAME payload calls it Blocked')
 }
 // 2. THE CHECKS ARE NOT SCOPED TO THE GATE'S RUN. A dump taken from a fixture-refresh.yml without
 //    the run_id join carries the artifact's WHOLE history - measured live 2026-09-02: 271 rows
