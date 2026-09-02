@@ -521,6 +521,39 @@ Key tables (PostgreSQL):
 
 ## Active work
 
+**ACT-73 VERIFIED 2026-09-02 -- 11/11 CONFIRMED, 0 REFUTED, and the verifier found a real hole.**
+
+Independent pass (`VERIFY-act73-1.md`, committed with per-claim verdicts) re-ran every mutation
+itself, traced every SQL claim to the live route AND the schema, ran the suites, and
+**independently re-implemented both attack items from scratch**: the 216/221 parser agreement
+reproduced exactly (so 169/182 and every parity figure quoted today STAND), and the "8 of 11 tally
+lines stale" claim reproduced exactly, not inflated.
+
+**HARDENING -- I nearly argued away a real defect, and production settled it instead of me.**
+The verifier reported the `artifact_score` thin-fixture check fired only when NOT ONE gated artifact
+had a score, so a partial dump (3 scored, 1 starved) passed silently. My first instinct was to REJECT
+the tightening on the theory that a gated artifact can legitimately lack a score row, making the
+strict form cry wolf -- which would itself have been the fire-on-correct-content failure this repo
+forbids. Instead of theorising I read production through `boost-pg-mcp-write`: packet `85cee965` has
+FOUR gated artifacts and **all four carry a score row** (three with a null composite, one with 89);
+only the un-gated `video` artifact has none, and that case was already exempt by the route's own
+`const score = g ? ... : null`. **The strict form is what production looks like; the loose form was
+hiding a hole and my objection was wrong.** Guard: when about to reject a finding on a theory about
+what the data "could" look like, READ THE DATA -- one query beat the argument.
+
+**HARDENING -- two INERT mutations in one session, both correct, both catching a believed-but-inert
+guard.** (1) The single-parser guard needed three versions; v1's mutation broke module load so the
+named test never ran, v2's needle matched itself. (2) Reverting the tightened score predicate broke
+NOTHING, proving the tightening was unguarded -- every existing H-case exercises the ALL-absent case
+that both forms catch. Added `H:fixture-score-gap-is-per-artifact` (two gated artifacts, one scored),
+and the same mutation then FIRED. **An INERT result is information; a two-outcome harness would have
+said "your guard is worthless" when it meant "I did nothing".**
+
+**Limitation RECORDED, not fixed:** the single-parser guard catches only a LITERAL-STRING copy of the
+row regex -- a rewrite using `[0-9]` for `\d` evades it, proven by the verifier's own mutation. That
+is inherent to string matching, and chasing it is how a linter starts crying wolf.
+
+
 **ALL THREE OPEN ITEMS CLOSED 2026-09-02 (owner: "go ahead ... close fanning out where you can").**
 
 - **ACT-70 headline guard** -- 5 guards APPENDED to the EXISTING

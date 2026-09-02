@@ -7493,3 +7493,30 @@ listed as open and unrequested.
 **Consequence to know:** re-running `build-fixtures.mjs` against the CURRENT committed dump will now
 REFUSE (no `scores`, duplicate `check_key`s). Intended — `fixture-refresh.yml` must be dispatched
 before the next local render.
+
+---
+
+## ACT-74 — Verify ACT-73, and close the partial-score hole the verifier found
+
+**Follows ACT-73.** Independent pass + the one fix it earned.
+
+**Status: DONE.** api **1063/1063**, prototypeCoverage **10/10**, tree clean.
+
+| Item | Result |
+|---|---|
+| `VERIFY-act73-1.md` | **11/11 CONFIRMED, 0 REFUTED**, committed with per-claim verdicts |
+| Attack 1 — 216/221 parser agreement | **independently reproduced exactly** → 169/182 stands |
+| Attack 2 — 8/11 stale tallies | **independently reproduced exactly**, not inflated |
+| Partial-score hole | predicate tightened per-artifact; message now names ratio + offenders |
+| `H:fixture-score-gap-is-per-artifact` | added; mutation **FIRED** |
+
+**The finding worth keeping:** I nearly rejected the verifier's gap on a theory about what the data
+could look like. Reading production (`85cee965`: 4 gated artifacts, all 4 scored) reversed my
+answer in one query.
+
+**Limitation recorded, not fixed:** the single-parser guard catches a literal-string copy of the row
+regex only, not a semantic rewrite. Inherent to string matching.
+
+**Still open, unchanged:** the 8 stale per-section tally lines (own commit), `13-RENDER`'s `83 of 84`
+(different formula), and the 4th `fixture-canary.mjs` REQUIRED entry (blocked until
+`fixture-refresh.yml` is dispatched).
