@@ -5348,6 +5348,54 @@ sweep plus import lists before "3 rows left" is treated as final.
 **Consequence:** jd, resume, cover and portfolio have no genuinely missing rows — the parallel lanes
 are unblocked.
 
+### ACT-68a — the COVER step, RENDERED: the grep-only caveat is discharged for this step (2026-09-02)
+
+**This closes the "Open caveat, deliberately not closed" above, for the cover letter step only.**
+That caveat is right that an absence needs more than a grep. So the cover step was **drawn**, not
+grepped: `scripts/render-app.mjs` against the real `app/dist` bundle on
+`#/packet/2cb56fb3.../cover`, fixture rebuilt by `build-fixtures.mjs` from a fresh
+`fixture-refresh.yml` dump (run `33642729577`), compared against `screens/19-23`. `pageErrors: []`,
+12 fixtures served, 41 `data-qc` hooks, 34 interactive elements. Written up as
+`PROTOTYPE-COVERAGE.md` §13-RENDER (commit `826c846`, merge `8369424`).
+
+**Four more rows re-verdicted PARTIAL -> BUILT**, all confirmed three ways (rendered + code +
+guarded by a passing test): `4.4-14` (the to-fix count is a link that names its destination),
+`4.4-24`/`4.4-25`/`4.4-26` (the per-kind must-have / responsibility / nice-to-have counters,
+`assetBlocks.js:887-889` + `:914-922`, guarded `app/test/assetBlocks.test.mjs:866-899`).
+`4.4-24`'s cell also named a blocker that was never real -- *"needs per-kind denominators on
+`GET /app/opportunity/{id}/requirements`"*; the split is derived client-side by
+`groupRequirements` (`postingAnalysis.js:512`) from rows that endpoint already returns.
+
+**Doc headline 159 -> 164 of 183 (89.6%)**: +4 here, +1 because `4.5-12` (pick list) shipped on
+`main` in `5d37e3d` during this pass. **Cover step: 80 of 85 BUILT (94.1%), 85 of 85 present --
+no ABSENT row remains in §4.4-§4.7.** Of the 3 rows this ACT listed as open, only `4.8-21` and
+`4.11-4` survive, and neither is on the cover step.
+
+**THE FINDING WORTH KEEPING, and it argues against render-only comparison as much as against
+grep-only.** Three differences are plainly visible between the app render and the prototype
+screenshots. **All three are DATA states, and a screenshot-only comparison would have filed every
+one as a gap:**
+- the letterhead/template block (`screens/23`) -- the static renderer exists
+  (`AssetBlocks.jsx:507`, SPEC 4.5-40); this packet has no static row, all three cover insertions
+  are `generated=True` (read from the DB dump).
+- inline highlighting (`screens/21`) -- the posting-echo treatment IS painting: the DOM probe
+  counted **2 `.qc-echo` spans** on the page. Only the *keyword* mark is 0, and its reason is
+  per-asset placement, NOT the term library (`AssetBlocks.jsx:561-577` is explicit that the
+  library reading caused a real false block once already).
+- `MATCH ESTIMATE -` where the prototype shows `92%` -- `packet.jd_analyzed = False`, so the em
+  dash is honest. The opportunity's `ats_score = 78` is a different, triage-time measurement.
+
+**Method note:** the first render REFUSED to run -- `HARNESS CANARY FAILED - /search-prefs has no
+checks`. Without it every word-count rule would have rendered unset and read like the product
+having lost its limits (the 2026-08-29 entry in `.claude/accuracy-log.md`). Fixed with a real
+`fixture-refresh.yml` round trip, not a hand-patched fixture.
+
+**Mistake logged against myself:** resolving an `actions.md` merge with `--theirs` discarded a
+tracking append I had said I would re-add, and I did not notice until the PR showed
+`changed_files: 1`. It cost nothing only because `ACT-2026-08-29-a` already recorded the same work
+-- re-adding it blind would have produced a SECOND `ACT-68`. **After a `--theirs` resolution on a
+tracker, diff the file against your own commit before pushing.**
+
 ---
 
 ## ACT-2026-08-29-a — Arm the enforcement environment for a parallel-session lane
@@ -7322,8 +7370,7 @@ use playwright to click through both and determine if the intent is covered by a
 alternative or if it's missing. to say it's not a gap because it hasn't had enough development to be
 able to do it is silly."*
 
-**Status: DONE.** `PROTOTYPE-COVERAGE.md` §17e/§17f added; 4.8-8 re-verdicted; parity **162/183
-(88.5%)**. New instrument `scripts/intent-probe.mjs`. Five interaction PNGs committed.
+**Status: DONE.** `PROTOTYPE-COVERAGE.md` §17e/§17f added; 4.8-8 re-verdicted; parity **166/183 (90.7%)** after merging the cover lane. New instrument `scripts/intent-probe.mjs`. Five interaction PNGs committed.
 
 | Intent | Result |
 |---|---|
