@@ -485,3 +485,56 @@ Elaboration goes after the colon, never inside the label.
 **Note for the trend table:** both instances are `instrument-caught`. Neither reached the owner, and
 neither would have been caught by `eds-accuracy-log.py`, shipped this same session — that is now the
 fourth independent confirmation of its stated narrow scope.
+
+## 2026-09-02 (loop 2) — MY FIX FOR THE VERIFIER'S FINDING WAS ITSELF REFUTED
+
+Written under the rule the gate being built enforces: **every REFUTED verdict gets a row.** Two
+loops, ten defects, four blocking, and both times I handed the work over believing it was sound.
+
+### The one that matters: I fixed the symptom and called it the cause
+
+| | |
+|---|---|
+| **Claim** | Replacing "a transcript mention counts as a write" with `mtime >= session start` fixed F-2/F-3 (read and write being the same event). |
+| **Ground truth** | **REFUTED.** `mtime >= session start` means *"the bytes changed recently"*, not *"this session wrote it"*. This org's sessions run for DAYS — the live transcript measured **105.1 hours over 6,907 rows** — and a `git clone` stamps every file inside that window. All 9 eds VERIFY artifacts carried mtime `2026-09-01T17:12`. Run against the real transcript, the gate blocked on three files the session only **read**. |
+| **The single source that would have settled it** | **This session's own live transcript.** Not a fixture — the real one, whose span and whose clone-stamped mtimes are both readable in one command. The verifier used it and found the defect in minutes. I tested against synthetic fixtures where session-start and file-write times were whatever I chose. |
+| **Root cause** | I built the fixture to match my model instead of testing the model against the environment. A fixture I author cannot refute me — it can only confirm the assumption I encoded in it. |
+
+**The second, and it is the more embarrassing one.** `'AC-stop-gate-accuracy-log.md'.endswith(
+'accuracy-log.md')` is `True` — so **the feature's own AC document satisfied the log requirement**,
+and the session that built the gate passed it trivially. `ARTIFACT` was three anchored regexes; the
+log side was a bare suffix test. I wrote both, in the same file, minutes apart, and never compared
+their rigour.
+
+### What changed, and why it is not a third heuristic
+
+Two loops proved *"did this session write it"* unanswerable from a transcript or a clock. So the
+checker stopped asking. It asks a **relative** question needing no author: **is a REFUTED verdict
+newer than the accuracy log?** A clone ties, so it cannot fire on a fresh tree. Reading moves no
+mtime, so a read can neither trigger nor disarm. `session_start()`, `written_since()`, `LOG_NAME`
+and the datetime import are deleted — **the surviving model is smaller than either it replaced.**
+
+**The generalisable lesson, and it is not "test more":** *when two attempts at a predicate both
+fail, the question is wrong, not the threshold.* Both failed heuristics were answers to "who wrote
+this file" — a question the available evidence cannot settle. Changing the question dissolved three
+findings (F-2, F-3, G-1) that patching the answer had only relocated.
+
+### Smaller misses in the same round, all instrument-caught
+
+- **Corrupted `setup.sh` mid-edit** by taking `s.index('def load(path):')` across the whole file
+  when it appears **three** times — the splice cut across two heredocs. Restored from git, redone
+  scoped to the block. Third splice-corruption in this repo's history; the standing rule is already
+  written and I broke it anyway.
+- **Paraphrased a frozen contract label twice**, one turn apart, having just written *"the shape IS
+  the contract"*. The checker prints the required literal; I retyped it with decorations.
+- **A test fixture that could not fail**: a "no accuracy log in the tree" case nested INSIDE a tree
+  that has one, so `find_log` walked up and found it. The assertion failed for the right reason.
+- **Claimed `endswith` was gone from the checker** on a `hasattr` probe; a `grep` found two
+  occurrences, both in a comment. The probe answered a different question than the one I asked.
+
+### For the trend table
+
+All of these are `instrument-caught`; none reached the owner. And none would have been caught by
+`eds-accuracy-log.py` itself — no `REFUTED` verdict artifact was involved in any of them. That is
+the **fifth** independent confirmation of the narrow scope published with it, which is the one thing
+in this whole exercise that has held up unchanged across three verification loops.
