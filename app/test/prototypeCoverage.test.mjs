@@ -218,14 +218,23 @@ test('H:headline-guard-window-excludes-the-frozen-blocks', () => {
     "the 13-CURRENT window has widened to include 13-RENDER, which uses a different formula")
 })
 
-test('H:headline-guard-has-exactly-one-parser', () => {
-  // AC5. The failure this forbids is not hypothetical: an earlier ad-hoc recount reported 129 BUILT
-  // against a real 151 because it used its own parser, and H:coverage-every-row-parses exists
-  // because of it. Two parsers in one file WILL diverge, and the one that disagrees with the tests
-  // is the one people quote. Matched on the declaration form only, so a helper named `parseFoo`
-  // cannot trip it.
+test('H:headline-guard-has-exactly-one-row-parser', () => {
+  // AC5, REWRITTEN TWICE, and both rewrites were earned by a mutation rather than by review.
+  //
+  // v1 asserted exactly one `function parse(`. The mutation proving it inserted a second function
+  // of the SAME name, which breaks module load before any assertion runs -- so the named test never
+  // failed and mutate.sh correctly refused to call it proven (INERT, mutation applied). It was also
+  // guarding the wrong shape: a literal duplicate `parse` is self-defeating in JS anyway. The real
+  // risk is a second parser under a DIFFERENT name that re-implements the row regex and drifts,
+  // which is how an ad-hoc recount once reported 129 BUILT against a real 151.
+  //
+  // v2 searched for the row pattern -- and matched ITSELF, because the needle and the thing it
+  // looks for are the same string. The needle is therefore assembled from two halves so it cannot
+  // appear contiguously in this file except where a real parser writes it.
   const src = readFileSync(fileURLToPath(import.meta.url), 'utf8')
-  const defs = src.match(/^function parse\s*\(/gm) || []
-  assert.equal(defs.length, 1,
-    `this file must define exactly ONE row parser and every guard must reuse it; found ${defs.length}`)
+  const needle = String.raw`(\d+` + String.raw`\.\d+)-`
+  const hits = src.split(needle).length - 1
+  assert.equal(hits, 1,
+    'the `| <section>-<n> |` row pattern must appear exactly ONCE in this file - every guard reuses '
+    + `parse(). Found ${hits} copies, which is a second parser waiting to disagree with the first.`)
 })
