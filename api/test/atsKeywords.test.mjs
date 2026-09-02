@@ -161,3 +161,49 @@ test('H:ats-keywords-deduplicate: one keyword listed twice is one denominator en
   </table>`
   assert.equal(parseAtsKeywords(dupes).length, 1, 'a repeated keyword must not double the denominator')
 })
+
+test('H:ats-match-has-word-boundaries: a prefix is not a keyword', () => {
+  // REFUTED BY AN INDEPENDENT VERIFIER (VERIFY-ats-keyword-score-1.md, C6). `keywordPresent`'s own
+  // header claimed "whole-phrase ... and nothing cleverer" while the implementation was an unguarded
+  // substring test. The shipped cases only probed multi-word near-misses, never a short keyword that
+  // is a PREFIX of a longer word — and real ATS lists are full of single terms.
+  //
+  // Every one of these was counted as COVERED before the fix. The direction is the dangerous one:
+  // each false positive INFLATES the score.
+  for (const [kw, text] of [
+    ['Cloud',   'We use Cloudera for data warehousing'],
+    ['Program', 'Extensive Programming experience'],
+    ['Manage',  'Strong Management background'],
+    ['Lead',    'Leadership'],
+    ['Test',    'Automated Testing pipeline'],
+  ]) {
+    assert.equal(keywordPresent(kw, text), false,
+      `"${kw}" was counted as present in "${text}" — a prefix of a longer word is not the keyword`)
+  }
+  // ...while genuine occurrences still match, including at the edges and beside punctuation.
+  for (const [kw, text] of [
+    ['Cloud',   'Cloud architecture at scale'],
+    ['Cloud',   'Delivered cloud'],
+    ['Agile',   'Agile, Scrum, Kanban'],
+    ['Python',  'Python/Django services'],
+    ['C++',     'Shipped C++ tooling'],
+    ['.NET',    'Migrated .NET services'],
+  ]) {
+    assert.equal(keywordPresent(kw, text), true, `"${kw}" is genuinely present in "${text}"`)
+  }
+})
+
+test('H:ats-all-td-header-is-still-a-header', () => {
+  // The residual risk the verifier found attacking C4 past its wording: the `<th>` test was the only
+  // defence, so a model rendering the header as `<td><b>ATS Optimized Keywords</b></td>` put its
+  // LABEL in the keyword list — a denominator entry no document can ever cover.
+  const noTh = `<table>
+    <tr><td>ATS Optimized Keywords</td><td>Skills Covered</td><td>Location</td></tr>
+    <tr><td>Business Alignment</td><td>Missing</td><td>Missing</td></tr>
+    <tr><td>Governance Frameworks</td><td>Missing</td><td>Missing</td></tr>
+  </table>`
+  assert.deepEqual(parseAtsKeywords(noTh), ['Business Alignment', 'Governance Frameworks'],
+    'a header row with no <th> inflated the denominator with its own label')
+  // A table that DOES use <th> is unaffected — every <td> row is still a keyword.
+  assert.equal(parseAtsKeywords(LIVE_TABLE).length, 9, 'the <th> path must not lose a keyword')
+})

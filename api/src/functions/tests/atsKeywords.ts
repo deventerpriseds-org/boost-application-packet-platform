@@ -79,8 +79,21 @@ export function parseAtsKeywords(body: string | null | undefined): string[] {
   const src = typeof body === 'string' ? body : ''
   if (!src.trim()) return []
   const out: string[] = []
+  // A HEADER ROW WITH NO `<th>` AT ALL is still a header. Found by an independent verifier attacking
+  // C4 beyond its wording: the `<th>` test is the only defence, so a model rendering the header as
+  // `<td><b>ATS Optimized Keywords</b></td>` puts its LABEL in the keyword list — a denominator
+  // entry no document can ever cover, dragging every score down by one row's worth. LLM table output
+  // omitting `<th>` semantics is ordinary, not exotic.
+  //
+  // Structural rather than a wording match: if the table declares NO `<th>` anywhere, its first row
+  // is treated as the header. Safe in both directions — a real all-`<td>` table has a header to lose
+  // and loses it; a table that DOES use `<th>` is unaffected and keeps every `<td>` row.
+  const hasTh = /<th[\s>]/i.test(src)
+  let seen = 0
   for (const [, tr] of src.matchAll(/<tr[^>]*>([\s\S]*?)<\/tr>/gi)) {
+    seen++
     if (/<th[\s>]/i.test(tr)) continue                      // the header, not a keyword
+    if (!hasTh && seen === 1) continue                       // ...and the same row without <th>
     const first = /<td[^>]*>([\s\S]*?)<\/td>/i.exec(tr)
     if (!first) continue
     // Strip any nested markup and collapse whitespace: the cell is prose, not HTML we own.
@@ -108,7 +121,31 @@ export function parseAtsKeywords(body: string | null | undefined): string[] {
 export function keywordPresent(keyword: string, shipped: string): boolean {
   const norm = (s: string) => String(s || '').replace(/\s+/g, ' ').toLowerCase()
   const k = norm(keyword)
-  return !!k && norm(shipped).includes(k)
+  if (!k) return false
+  // WORD BOUNDARIES, because `.includes()` IS NOT WHOLE-PHRASE and this header claimed it was.
+  //
+  // REFUTED BY AN INDEPENDENT VERIFIER (VERIFY-ats-keyword-score-1.md, C6). The doc above said
+  // "whole-phrase ... and nothing cleverer"; the code was an unguarded substring test, and the
+  // shipped tests only probed multi-word near-misses (`Leadership Experience` vs
+  // `Engineering Leadership`) — never a short keyword that is a PREFIX of a longer word. Measured
+  // false positives it produced:
+  //
+  //     Cloud   in "We use Cloudera for data warehousing"     -> counted as covered
+  //     Program in "Extensive Programming experience"         -> counted as covered
+  //     Manage  in "Strong Management background"             -> counted as covered
+  //     Lead    in "Leadership"                               -> counted as covered
+  //
+  // Real ATS lists are full of single terms — Agile, Python, Cloud — so this is ordinary input, not
+  // a synthetic worst case. And the error direction is the dangerous one: every false positive
+  // INFLATES the score, which is the number a reviewer trusts most and the one this file's own rule
+  // ("fuzzy matching is for RANKING, never for ACCUSING") exists to protect.
+  //
+  // `\b` is not enough on its own: a keyword may legitimately contain regex metacharacters (C++,
+  // .NET), so it is escaped first. The boundary is asserted with lookarounds rather than `\b` at
+  // the edges, because `\b` before a non-word character (as in "+") does not mean what it looks
+  // like it means.
+  const esc = k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  return new RegExp(`(^|[^a-z0-9])${esc}($|[^a-z0-9])`, 'i').test(norm(shipped))
 }
 
 /**

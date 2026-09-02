@@ -75,20 +75,43 @@ export function bandFor(composite: number | null, bands = DEFAULT_BANDS): Band |
 }
 
 /**
- * Compute the decomposed score.
+ * THE ONE COMPOSITE FORMULA. Both call sites use this; neither writes the arithmetic itself.
  *
- * A component with no honest source is `null`, and **the composite is null unless ALL THREE are
- * present**. A composite computed from one of three components, or from a zero standing in for
- * "unknown", is a fabricated number wearing a score's clothes — and it is precisely the number a
- * reviewer would trust most. Today that means:
- *   - must_have_coverage  measured, from requirement rows via the deterministic check
- *   - keyword_coverage    null — the term library has ZERO published entries (measured live)
- *   - seniority_alignment null — reviewer-graded, and the reviewer does not exist until P4
- * so the composite is null and the UI must show three components and no headline number, rather
- * than a confident 100 that means "we checked one third of one thing".
+ * EXTRACTED AFTER AN INDEPENDENT VERIFIER REFUTED THE GUARD THAT WAS SUPPOSED TO KEEP TWO COPIES IN
+ * SYNC (VERIFY-ats-keyword-score-1.md, C9). There were two: this file's, and an inline weighted sum
+ * in `appReviewer.ts` that folds a reviewer's seniority grade into a row the deterministic pass
+ * already wrote. `H:one-composite-formula` asserted they agreed by extracting the three `?? 0.x`
+ * literals from the reviewer's source, in textual order, and comparing them to DEFAULT_WEIGHTS.
  *
- * Reproducible: same inputs and same engine_version give the same number, with no model call.
+ * The verifier broke it in one move: SWAP WHICH COMPONENT EACH WEIGHT MULTIPLIES, leaving the three
+ * literals in the same textual order.
+ *
+ *     must_have_coverage * (s.weights?.keyword  ?? 0.5)     <- 0.5 now weights the wrong component
+ *   + keyword_coverage   * (s.weights?.mustHave ?? 0.3)
+ *
+ * 1050/1050 still passed. The guard checked that the same three numbers appeared, never which
+ * variable each one multiplied — so it asserted "the same literals are textually present", not
+ * "the two formulas agree", which is a different and much weaker claim.
+ *
+ * The verifier's own recommendation, taken: remove the duplicate rather than guard it. A source grep
+ * keeping two implementations in sync is a guard that must anticipate every way they can diverge;
+ * one function has no divergence to anticipate.
+ *
+ * NULL UNLESS ALL THREE, and it stays here rather than at either call site. A partial composite is
+ * the number a reviewer trusts most and the one most likely to be wrong, and the database CHECK
+ * (`schema.ts`) refuses one too -- three layers agreeing, none of them the only one.
  */
+export function weightedComposite(
+  mustHave: number | null,
+  keyword: number | null,
+  seniority: number | null,
+  weights: typeof DEFAULT_WEIGHTS = DEFAULT_WEIGHTS,
+): number | null {
+  if (mustHave === null || keyword === null || seniority === null) return null
+  const w = { ...DEFAULT_WEIGHTS, ...(weights || {}) }
+  return Math.round(mustHave * w.mustHave + keyword * w.keyword + seniority * w.seniority)
+}
+
 export function computeArtifactScore(input: ScoreInput): ArtifactScore {
   const weights = { ...DEFAULT_WEIGHTS, ...(input.weights || {}) }
   const bands = { ...DEFAULT_BANDS, ...(input.bands || {}) }
@@ -153,10 +176,7 @@ export function computeArtifactScore(input: ScoreInput): ArtifactScore {
     ? { value: Math.max(0, Math.min(100, Math.round(input.seniority))), source: 'reviewer-graded (stored input)' }
     : { value: null, source: 'not graded — the independent reviewer (P4) has not run' }
 
-  const all = [mustHave.value, keyword.value, seniority.value]
-  const composite = all.every(v => v !== null)
-    ? Math.round(mustHave.value! * weights.mustHave + keyword.value! * weights.keyword + seniority.value! * weights.seniority)
-    : null
+  const composite = weightedComposite(mustHave.value, keyword.value, seniority.value, weights)
 
   return {
     must_have_coverage: mustHave,
