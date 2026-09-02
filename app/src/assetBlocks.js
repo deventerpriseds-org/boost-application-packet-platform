@@ -75,7 +75,8 @@ export const BLOCK_HOOKS = {
   fieldFinding: 'blocks-field-finding',       // one of them (carries data-qc-sev)
   keywordChips: 'blocks-keyword-chips',       // the field's PROPOSED ATS keywords (never scoreable)
   keywordChip: 'blocks-keyword-chip',         // one of them (carries data-qc-keyword)
-  keywordDetail: 'blocks-keyword-detail',     // the panel a chip opens
+  keywordDetail: 'blocks-keyword-detail',
+  keywordDisplaced: 'blocks-keyword-detail-displaced', // SPEC 4.6 "Took the place of X"
   keywordActions: 'blocks-keyword-actions',   // 4.6-10/11 - "Not comfortable claiming this?"
   keywordDrop: 'blocks-keyword-drop',         // seeds the field's ask box with a drop REQUEST
   keywordSwap: 'blocks-keyword-swap',         // 4.6-9 - the picker of the owner's OWN banked skills
@@ -505,6 +506,55 @@ export function keywordActions({ keyword, present, canEdit } = {}) {
  * @param {{keyword: string, present: boolean, canEdit: boolean, bank: Array<{label:string, category:string|null}>, inField: string[]}} args
  * @returns {{candidates: Array<{label:string, category:string|null}>, ask: (label:string)=>string, reason: string|null}}
  */
+/**
+ * SPEC 4.6 - "Took the place of X in Skills 1", the displacement line in the keyword panel.
+ *
+ * THIS ROW WAS RECORDED AS UNSOURCED AND THAT WAS WRONG. The comment this replaces said SPEC 4.6's
+ * three additions "NONE has a source". `PULL-CANDIDATES.md` PC-3, two paragraphs below its own
+ * match-grade reasoning, names the source outright: *"the honest fix is a real source for
+ * displacement (`swap_decision` already stores `from_label` -> `to_label`)"*. The claim was made by
+ * reading a comment rather than the data, which is the failure `CLAUDE.md`'s feasibility table
+ * already logs once as "the term library blocks the keyword chips".
+ *
+ * WHAT IS AND IS NOT CLAIMED. This reports a RECORDED swap, never an inferred one:
+ *   - `action` must be exactly `swapped`. A `kept` row displaced nothing; a `dropped` row has no TO
+ *     side to key on; an `added` row went into empty space. Only `swapped` names a predecessor.
+ *   - `from_label` must be present AND different from `to_label`. A row whose sides are equal
+ *     records no displacement, and rendering "took the place of X" where X is the term itself is
+ *     the sort of sentence that reads as a bug.
+ * There is no fuzzy match here: `normLabel` is the same case/punctuation fold `listBodyModel` and
+ * `pickListModel` already key on, so the three cannot disagree about which swap backs a label.
+ * Fuzzy matching is for RANKING, and this sentence NAMES a predecessor, which is an accusation.
+ *
+ * `list` is carried through as the swap recorded it and may be null - the prototype interpolates it
+ * unconditionally (`qc/assets.jsx:70`), but this app has rows with no list, and "in null" on screen
+ * is worse than a sentence that simply stops. The caller renders the shorter form.
+ *
+ * @returns {{from: string, list: string|null}|null} null when nothing displaced this keyword
+ */
+export function keywordDisplacement(swapsForList, keyword) {
+  const k = normLabel(keyword)
+  if (!k) return null
+  for (const s of Array.isArray(swapsForList) ? swapsForList : []) {
+    if (!s || s.action !== 'swapped') continue
+    if (normLabel(s.to_label) !== k) continue
+    const from = typeof s.from_label === 'string' ? s.from_label.trim() : ''
+    if (!from || normLabel(from) === k) continue
+    const list = typeof s.list === 'string' && s.list.trim() ? s.list.trim() : null
+    return { from, list }
+  }
+  return null
+}
+
+/**
+ * The sentence for the displacement line, so the component cannot compose its own - the same reason
+ * `pickListAsk` and `keywordSwapOptions`' ask are named here rather than inlined.
+ */
+export function keywordDisplacementText(d) {
+  if (!d || !d.from) return null
+  return d.list ? `Took the place of ${d.from} in ${d.list}.` : `Took the place of ${d.from}.`
+}
+
 export function keywordSwapOptions({ keyword, present, canEdit, bank, inField } = {}) {
   const k = typeof keyword === 'string' ? keyword.trim() : ''
   const none = { candidates: [], ask: null, reason: null }
