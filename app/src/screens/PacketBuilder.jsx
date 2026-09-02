@@ -268,7 +268,7 @@ export function ArtifactCard({ a, busy, setBusy, qcResult, onGenerate, onRegener
                 on precisely the artifacts where a cache bypass matters there was no control to press
                 — the dead-UI defect moved one layer up, where the api.js diff makes it look solved. */}
             <span data-qc={PACKET_HOOKS.assetRebuild} className="px-link"
-              style={{ fontSize: 12, cursor: d.busy ? 'default' : 'pointer', opacity: d.busy ? 0.6 : 1 }}
+              style={{ fontSize: 12, cursor: d.busy ? 'default' : 'pointer', opacity: d.busy ? 0.6 : 1, whiteSpace: 'nowrap' }}
               role="button" aria-disabled={d.busy ? 'true' : 'false'} tabIndex={d.busy ? -1 : 0}
               onClick={() => { if (!d.busy) ((a.type === 'portfolio' || a.type === 'cover') ? onMakeSlides : onMakeDoc)(a, { regen: true }) }}
               onKeyDown={(e) => {

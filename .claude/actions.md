@@ -7263,3 +7263,28 @@ reclassified DELIBERATE to flatter the count.
 **Ten guards this lane, every one mutation-proved FIRED.** One NOT-APPLIED (wrong anchor indent) and
 one false INERT (I piped the test command through `grep -q`, so the must-fail pattern could never
 match) -- both my harness errors, both caught by the harness reporting honestly rather than guessing.
+
+### ACT-68b — the five PARTIAL rows on the cover step, resolved (2026-09-02)
+
+**Asked:** *"merge it to main and resolve the remaining 5. I need a visual for 4.4-29."*
+PR #66 merged to `main` at `63ddd4f` (docs + trackers only; neither deploy workflow watches those
+paths, so nothing shipped). Then all five rows were driven, not read.
+
+| Row | Verdict | Instrument |
+|---|---|---|
+| 4.4-29 | **BUILT** | rendered: 2 `Go to field in Resume ->` on the resume step, 34 on QC. Screenshot committed at `screens/4.4-29-go-to-field.png` |
+| 4.7-7 | **BUILT** | driven: Send pressed, box closed, `blocks-ask-sent` persisted |
+| 4.5-3 | **BUILT** | measured: viewport 1080 -> card 715px (wide), 1000 -> 635px (stacks). 700 container == 1080 viewport |
+| 4.4-8 | **DELIBERATE** | read: button conversion declined on the record; `nowrap` completed on the third control |
+| 4.6-8 | **PARTIAL, upstream** | measured: 30 swapped rows x 35 keywords = **0 joins**; fuzzy-matching them REFUSED as an accusation |
+
+**Cover step: 83 of 84 BUILT (98.8%), 1 PARTIAL, 0 ABSENT. Doc 167 of 182 (91.8%).**
+
+**The one open item is a PIPELINE item, not UI.** Nothing records which keyword drove a swap, so
+`Put back "<original>"` cannot be rendered in the keyword panel without asserting a link the data
+does not support. Fixing it means recording that association upstream in the swap engine.
+
+**Two fixture traps hit and cleared in this pass**, both by the canary rather than by noticing:
+`/search-prefs` missing `checks`, then `/requirements` missing `comparison` (a canary rule a
+parallel lane added mid-pass). Both needed a real `fixture-refresh.yml` round trip; the dump on the
+`ui-fixtures` branch was itself stale twice over.
