@@ -217,3 +217,15 @@ test('H:headline-guard-window-excludes-the-frozen-blocks', () => {
   assert.ok(!block.includes('83 of 84'),
     "the 13-CURRENT window has widened to include 13-RENDER, which uses a different formula")
 })
+
+test('H:headline-guard-has-exactly-one-parser', () => {
+  // AC5. The failure this forbids is not hypothetical: an earlier ad-hoc recount reported 129 BUILT
+  // against a real 151 because it used its own parser, and H:coverage-every-row-parses exists
+  // because of it. Two parsers in one file WILL diverge, and the one that disagrees with the tests
+  // is the one people quote. Matched on the declaration form only, so a helper named `parseFoo`
+  // cannot trip it.
+  const src = readFileSync(fileURLToPath(import.meta.url), 'utf8')
+  const defs = src.match(/^function parse\s*\(/gm) || []
+  assert.equal(defs.length, 1,
+    `this file must define exactly ONE row parser and every guard must reuse it; found ${defs.length}`)
+})
