@@ -1247,7 +1247,7 @@ than excused.
 
 | # | Intent (the prototype's verb) | In the app | Verdict |
 |---|---|---|---|
-| I1 | See a per-asset match score | drawer `Match` tab, score-part rows | **COVERED — surface + live data confirmed, rendered number NOT visually confirmed.** `appChecks.ts:392-397` returns `score` + `history`; the fixture has neither, so the tab shows its empty state locally. See §17f. |
+| I1 | See a per-asset match score | drawer `Match` tab, score-part rows | **COVERED — CLOSED 2026-09-02, number seen.** The tab renders `Overall 89 strong` over three parts: `Must-haves evidenced 100`, `Keywords present 67`, `Seniority fit not measured`. Evidence `screens/render-0902-drawer-score-89.png`. **The values are production's**, read from `artifact_score` for the gate's CURRENT run `8e3163cf` via `boost-pg-mcp-write`: `composite 89, band strong, must_have 100, keyword 67`. This row was left open earlier the same day and closed by another lane's work, not this one — `chk_reviewer_auto` was flipped and both passes driven, turning the first non-null composite in production (all 52 prior `artifact_score` rows were null). An earlier live call of mine returned no composite because the gate then pointed at run `50c95241`, whose score was null — the surface was never the problem. |
 | I2 | Open per-asset detail | gate chip → drawer, 5 tabs + `Re-run checks` / `Approve` | **COVERED** (clicked) |
 | I3 | `Answer` a raised question | **`confirm it`**, with *"awaiting your confirmation"* and *"not counted either way"* | **COVERED BY ALTERNATIVE** — narrower and better defined: it confirms a model proposal into a counted claim rather than accepting free text. |
 | I4 | `Leave open` (defer a question) | nothing | **MISSING** — and small: not confirming already leaves it open, so the loss is only the RECORD of a deliberate defer. Named here rather than hidden in DELIBERATE. |
@@ -1291,9 +1291,8 @@ never for COUNTS or SCORES.
 Kept deliberately short, and each row names the ONE thing that would close it — no row here is
 excused, they are simply not yet done.
 
-- **I1, the per-asset match NUMBER.** The surface and the live data are both confirmed to exist; the
-  rendered figure is not. Closes by adding `artifact_score` to the fixture (§17f) or by a live
-  drawer click.
+- ~~**I1, the per-asset match NUMBER.**~~ **CLOSED** — see §17e. The figure renders (`Overall 89
+  strong`) on production's own values.
 - **4.8-11, attention ORDERING** (fail → open → warn → fixed → soft). `railAttention` /
   `attentionSplit` encode it, but no single surface renders the full ordering, so there is nothing to
   photograph. Stays PARTIAL.

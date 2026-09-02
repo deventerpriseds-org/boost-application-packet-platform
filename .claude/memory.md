@@ -521,6 +521,35 @@ Key tables (PostgreSQL):
 
 ## Active work
 
+**LANDED 2026-09-02: intent probe + render passes are on `main` at `e99be2b`. Parity 169/182 (92.9%).**
+
+Owner said "merge" and the connector was reconnected in the same message. PR #69 merged. Only
+`.claude/`, `docs/`, `scripts/`, `.gitignore` landed - NEITHER deploy path (`api/**`, `app/**`) was
+touched, so no production deploy fired. api suite 1059/1059 before the fast-forward.
+
+**I1, the last unproven row, is CLOSED - and NOT by this lane.** The drawer Match tab renders
+`Overall 89 strong` over `Must-haves evidenced 100 / Keywords present 67 / Seniority fit not
+measured`. The values are production's, read from `artifact_score` for the gate's CURRENT run
+`8e3163cf` through `boost-pg-mcp-write`. Another session flipped `chk_reviewer_auto` and drove both
+passes, producing the first non-null composite in production - all 52 prior `artifact_score` rows
+were null. **My earlier live call returned no composite because the gate then pointed at run
+`50c95241`, whose score was null.** The surface was never the problem, and I was right about the
+cause but the fix was someone else's.
+
+**THE HEADLINE COLLIDED THREE TIMES IN ONE AFTERNOON** - cover lane 167/182, this lane 166/183, jd
+lane earlier. Each correct against a tree that could not see the others; every conflict landed on
+the same block. Resolution every time: keep both sets of row moves, take the incoming structure,
+**recount from the rows, never adopt a lane's figure**. The merged number is always HIGHER than any
+lane reports because row moves are additive: 169/182.
+
+**HARDENING - a near-miss caught in the diff, not after the push.** `npm i` for the probe's deps
+(`playwright-core`, `@babel/standalone`) minted a root `package.json` + lock that are not this
+project's - `api/` and `app/` each own theirs - and they were staged for `main`. Caught by reading
+`git diff --name-only origin/main HEAD` BEFORE pushing, removed, and now `.gitignore`d so the next
+probe run cannot re-stage them. The guard is the habit: diff the file LIST against origin before
+moving `main`, not just the content.
+
+
 **INTENT PROBE 2026-09-02 - the owner corrected the METHOD, and it changed three verdicts.**
 
 Owner: *"you are overthinking things a bit with what you do and don't call a gap. use playwright to

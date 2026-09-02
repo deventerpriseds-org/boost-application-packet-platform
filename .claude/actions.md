@@ -7442,3 +7442,26 @@ null.** Read back from production (`33651206610`), not inferred from a 200.
 **Two of my own errors on the way, both from asserting a shape instead of reading it:** a guessed run
 id that 404'd, and `artifact_score.created_at` which does not exist (the column is `computed_at`).
 The schema was 5 lines away both times.
+
+---
+
+## ACT-72 — Merge the render + intent lanes to `main`; close I1 with live data
+
+**Asked (2026-09-02):** *"merge and fyi the connector is reconnected"*
+
+**Status: DONE.** `main` at `e99be2b`, PR #69 merged. Parity **169 of 182 (92.9%)**.
+
+| Step | Evidence |
+|---|---|
+| Merged `origin/main` (3rd headline collision) | recounted from rows: 169/182, higher than either lane |
+| api suite before fast-forward | **1059/1059 pass** |
+| No deploy fired | landed paths `.claude/ docs/ scripts/ .gitignore`; triggers are `api/**` and `app/**` |
+| PR #69 | `merged: true`, closed 17:33 |
+| **I1 per-asset score CLOSED** | `Overall 89 strong` + 3 parts; production values from `artifact_score` run `8e3163cf` via `boost-pg-mcp-write` |
+| Near-miss caught pre-push | stray root `package.json`/lock from `npm i`, removed and `.gitignore`d |
+
+**Connector:** `boost-pg-mcp-write` reconnected and used — it settled I1 in one query where a
+workflow round-trip had not.
+
+**STILL OPEN, unchanged and deliberate:** the two fixture fixes (`run_id` §17d, `artifact_score`
+§17f) and the headline-recount CI guard (ACT-70). All three are unrequested code.
