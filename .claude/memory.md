@@ -5671,3 +5671,30 @@ already fixed in source, so I would have spent a lane re-fixing it. Item (1) tur
 rather than hypothesised — `len(call3) = 0` on all five fields, so the pass being credited emitted
 nothing at all. **The row was wrong in all three cells, in three different directions.** Reading it as
 a to-do list would have produced one wasted fix, one unfixable blocker, and one missed proof.
+
+
+### THE UI-PARITY BASELINE IS `docs/qc-evidence/PROTOTYPE-COVERAGE.md` (owner-confirmed 2026-09-02)
+
+Asked "which of the 11 UI parity rows are next", I answered from the §14 RANKED LIST inside that
+document — a reading of the row tables that had gone stale — and had to be corrected: *"that's not
+where we were working from. it was a log of what needs to be done. your liking at the wrong
+baseline."* The owner then named it: *"I believe it's PROTOTYPE-COVERAGE.md."*
+
+**Two lessons, and the second is the reusable one.**
+
+1. **The ROW TABLES are authoritative; §14 is a ranking OF them and goes stale.** Three of its five
+   ranks have now closed without anyone building anything (4.6-9, 4.1-20, 4.8-21). 4.8-21 was ranked
+   "GATED, its target does not exist" while its own row table already read `BUILT - CHANGED from
+   ABSENT 2026-08-29`. Never answer a status question from a ranking when the table it ranks is
+   right there.
+2. **COUNT BY EARLIEST POSITION, NOT BY CONTAINMENT.** Parsing the verdict cell with
+   `any(token in cell)` scores `BUILT - CHANGED from ABSENT` as **ABSENT**. That produced 134/181
+   with 18 phantom ABSENT rows and would have reported parity going BACKWARDS. Taking the token that
+   appears earliest gives **159/183 = 86.9%**, and the proof it is right is external: `DEFERRED.md`
+   independently quotes "2 ABSENT + 22 PARTIAL", which the positional count reproduces exactly and
+   the containment count does not. **When a parse of your own docs disagrees with a number written
+   elsewhere, the parser is the suspect.**
+
+Live state now recorded in §13-CURRENT: **159/183 BUILT (86.9%)**, 22 PARTIAL, **2 ABSENT** — 4.5-12
+(PickList, portfolio-only, low value) and 4.11-4 (gated on the shell-cap decision). The old 148/183
+headline was measured 2026-08-25 and never caught up.

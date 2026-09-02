@@ -540,6 +540,43 @@ already made once.
 
 ## 13. THE HEADLINE, AND THE DELTA
 
+### 13-CURRENT. Re-counted 2026-09-02 — THIS IS THE LIVE NUMBER
+
+> **THIS DOCUMENT IS THE BASELINE for prototype UI-parity progress** — owner-confirmed
+> 2026-09-02: *"I believe it's PROTOTYPE-COVERAGE.md ... update it for what is now done
+> regarding prototype UI parity progress."* Read §13-CURRENT for the live picture; §13a below is
+> the 2026-08-25 measurement, kept for its delta narrative and NOT current.
+
+> # **159 of 183 prototype elements present (86.9%)**
+>
+> | | Count | Share of 183 |
+> |---|---:|---:|
+> | **BUILT** | **159** | **86.9%** |
+> | **PARTIAL** | 22 | 12.0% |
+> | **ABSENT** | **2** | **1.1%** |
+> | *present (BUILT + PARTIAL)* | *181* | *98.9%* |
+>
+> **+11 BUILT since the 148 (80.9%) headline in §13a**, which was measured 2026-08-25 and never
+> caught up with the rows that shipped after it.
+>
+> **ONLY TWO ROWS ARE ABSENT, and neither is ordinary open work:**
+> - **4.5-12** `PickList` (`type: 'select'`) — `shapeOf()` (`assetBlocks.js:144-151`) emits only
+>   `static`/`pipe`/`list`/`prose`. Portfolio-only, no resume impact; the ranking calls it
+>   *"expensive, low value"*.
+> - **4.11-4** — one of the assistant-panel rows, gated on the owner's shell-cap decision.
+>
+> **METHOD, and the trap in it.** Counted mechanically from the 4th cell of every
+> `| <section>-<n> |` row, taking the verdict token appearing EARLIEST in the cell. Matching on
+> mere containment instead scores `BUILT - CHANGED from ABSENT` as ABSENT and yields a false
+> 134/181 with 18 phantom ABSENT rows -- that error was made and caught on 2026-09-02, and the
+> corroboration that the positional count is right is that `.claude/DEFERRED.md` independently
+> quotes "2 ABSENT + 22 PARTIAL", which this method reproduces exactly.
+>
+> **The §14 ranked list was stale in the other direction** and is corrected in the same pass:
+> 4.8-21 was ranked GATED while the row table had already scored it BUILT. THREE of the five
+> ranks in §14 have now closed without anyone building anything. **A rank is not a verdict —
+> the row tables are authoritative; §14 is a reading of them that goes stale.**
+
 ### 13a. The number
 
 Every prototype element enumerated: **221**. Eleven are excluded from the denominator with a
