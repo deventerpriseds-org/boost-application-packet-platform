@@ -93,3 +93,170 @@ only touches **list fields** (character-limit shortening of bullet items) — a 
 preserve between a ResumeSummary reword and the list-normaliser; they operate on disjoint fields
 and their relative order to each other does not matter, only that BOTH complete before the
 `pkg_json` write.
+
+---
+
+## 3. EXTEND-DON'T-DUPLICATE — `correction` is the right TABLE, `requirement_id` is the wrong COLUMN
+
+**Claim to test:** the reword is "a new `source` value plus ONE new column (`requirement_id`)" on
+`correction` — not a new table.
+
+### 3a. The table itself: HOLDS
+
+`correction` already carries exactly the shape a reword needs to be stored, undone, and
+audited — verified by reading `schema.ts:403-432` column by column against what a reword record
+requires:
+
+| What a reword needs to record | `correction` column that already does it |
+|---|---|
+| which field, which span was replaced | `merge_field`, `char_start`, `char_end` |
+| the text that was there before | `phrase` |
+| the text that replaced it | `replacement` |
+| the field cannot have moved under it since | `before_sha256` (recomputed on revert, `schema.ts:399-401`) |
+| document order / undo replay order | `applied_seq` |
+| why | `reason` |
+| which kind of correction this is | `source` (needs a 4th value) |
+| coordinate system (pre- vs post-pipeline text) | `frame` |
+| which remediation loop pass produced it | `loop` |
+| undo, without deleting the record | `reverted_by`/`reverted_at` |
+| the row cannot lie about its own span | `correction_span_matches_phrase` CHECK (`:426`) |
+
+Every one of those already exists. A second table would duplicate all eleven columns and the four
+CHECK constraints, which is precisely the parallel-system shape "Extend, don't duplicate" (this
+repo's `CLAUDE.md`) forbids. **Verdict: extending `correction` HOLDS** — with one column, not a
+new table, matching the implementer's claim.
+
+The revert/audit machinery is also semantically compatible, not merely structurally compatible: a
+reword IS a phrase→replacement span swap with a before-hash guard, exactly like `profile_figure`
+and `generalized` corrections already are. Undoing a reword (restore the original phrasing) is the
+same replay-minus-one-row operation `revertOne` (`correction.ts`, called from
+`appCorrections.ts:199`) already performs for the other two sources. Nothing about "meaning
+preserved but reworded" requires new revert semantics.
+
+### 3b. The `source` widening: HOLDS, and the guard rails are already built for it
+
+```
+grep -n "source in (" api/src/functions/tests/schema.ts api/src/functions/tests/appCorrections.ts \
+  api/test/sql/correction.sql
+```
+Result (already shown in §1): three homes, one value set, byte-identical. `H:correction-ddl-parity`
+(`api/test/correctionDdlParity.test.mjs:35`), `H:correction-source-widened-by-alter` (`:63`), and
+`H:correction-ddl-column-parity` (`:104`) already assert (a) the three homes agree, (b) the inline
+CHECK and the ALTER admit the same values, (c) the ALTER runs textually after the `create table`
+(H39/H39b ordering), and (d) all three homes declare the same column SET. **A 4th `source` value
+(e.g. `'reworded'`) and a new `requirement_text` column would be caught by name if any home were
+missed — the guard infrastructure for exactly this change already exists and does not need to be
+built.** This is a second, independent point of feasibility beyond "the table shape fits": the
+*safety net* for widening it is also already in place.
+
+### 3c. The specific column, `requirement_id` (FK): REFUTED — must be `requirement_text` instead
+
+This is the one place the implementer's claim does not survive contact with the code.
+
+```
+grep -n "delete from requirement where opp_id" api/src/functions/tests/appRequirements.ts
+```
+Result: `:506` and `:535` — `writeRequirements` runs an unconditional `delete from requirement
+where opp_id=$1` **on every re-extraction of the posting**, then re-inserts fresh rows with
+`default uuid_generate_v4()`. `requirement.id` is not stable across a JD re-parse.
+
+This is not a theoretical risk this AC pass is inventing — it is a lesson the schema already
+encodes, twice, in the immediate neighbourhood of where the brief wants to add a third FK:
+
+- `requirement_coverage` (`schema.ts:567-599`, written by the very coverage judge this brief asks
+  about in §4): *"KEYED ON THE TEXT, NOT ON THE ROW... `writeRequirements` runs `delete from
+  requirement where opp_id=$1` on every re-extraction, so an id or a seq is destroyed or silently
+  reused. `requirement_text` survives it."* (`:553-555`)
+- `evidence_confirmation` (`schema.ts:515-539`): *"The requirement as EXTRACTED TEXT, never its id
+  or seq — both are destroyed or reused by re-extraction. This is what survives `delete from
+  requirement`."* (`:518-520`)
+
+Both of the two existing tables that need to survive a JD re-parse and point at "this
+requirement" made the SAME choice, for the SAME stated reason, and both explicitly reject
+`requirement_id` as the key. A `correction.requirement_id uuid references requirement(id)` column
+would behave exactly like `swap_decision.requirement_id` (`schema.ts:642`, `on delete set null`)
+— the one place in this schema that DOES use the FK — which silently orphans to `null` the moment
+the posting is re-extracted. For `swap_decision` that is a tolerated provenance loss (it is a
+record of what one build's remediation did, not a live coverage claim). For a reword link that
+feeds `keyword_coverage` — a component of the composite artifact score, i.e. a *currently live*
+number the owner reads — silently losing the link on the next JD re-parse would make the score's
+sourcing flicker for a reason invisible in the UI: exactly the kind of drift `H:correction-ddl-*`
+and the "never fabricate a composite" rule exist to prevent.
+
+**Verdict: extend `correction` — HOLDS. The specific column proposed, `requirement_id` as an FK —
+REFUTED.** The new column should be `requirement_text` (or the same `verdict_key`-style composite
+identity `requirement_coverage` already uses: requirement text + field + field text + model), not
+an id. `requirement.verbatim` (the employer's original phrase, already stored and offset-anchored
+at extraction time — §1) remains available for display by joining on `requirement_text` against
+whichever `requirement` row currently exists for that opportunity; if none currently exists (a
+re-parse dropped or reworded the requirement), the correct behaviour is the same one
+`evidence_confirmation`/`requirement_coverage` already have for a stale key: the link is still
+shown as "this paraphrase covered a requirement stated at the time" with the requirement's own
+text quoted from the stored `requirement_text` column, not silently nulled.
+
+---
+
+## 4. THE REDUNDANCY QUESTION — genuinely two producers, not a distinction without a difference
+
+**Claim to test:** does `chk_coverage_judge` (`requirement_coverage`, `appCoverage.ts`) already
+make the reword link redundant?
+
+**What the judge actually does, read from `appCoverage.ts` and `schema.ts:542-600`:**
+`runCoverageJudge` asks a model, for each judgeable field of an artifact (`checkFieldsFor(type)` —
+confirmed by grep below to include `ResumeSummary` for a resume), whether the CURRENT shipped
+text of that field covers a given requirement, and if so stores `basis` (`direct` / `synonym` /
+`near_phrasing` / `absent`), a `quote` + `char_start`/`char_end` **into the field text as it
+currently reads**, and `why`. This verdict feeds `must_have_coverage` (`checks.ts:804-827`,
+`judgeVerdicts` → `covers()`), one of the THREE components of the composite artifact score
+(`artifact_score.must_have_coverage`, `schema.ts:825`).
+
+```
+grep -n "export function checkFieldsFor" -A3 api/src/functions/tests/checks.ts
+```
+Result: `checkFieldsFor(type)` returns `CHECK_FIELDS_FOR[type] || mergeFieldsFor(type)` (`:390-392`)
+— for `resume`, `mergeFieldsFor('resume')` includes `ResumeSummary` (confirmed by the P1.5 comment
+at `checks.ts:320`: *"The resume's seven merge fields are ResumeSummary, SkillsBullets1/2,
+ExpertiseBullets and RelevantBullets1-3"*). **So the judge already runs on ResumeSummary today,
+whatever it currently says, verbatim or reworded.**
+
+**Where they genuinely differ — three separate axes, not one:**
+
+1. **Which score component they feed.** The judge feeds `must_have_coverage`
+   (`checks.ts:804-827`, `artifact_score.must_have_coverage`). The reword link, as scoped by the
+   brief, feeds `keyword_coverage` (`atsKeywords.ts`, `artifact_score.keyword_coverage`) — a
+   DIFFERENT, currently-interim, DIFFERENTLY-COMPUTED number (whole-phrase lexical presence against
+   the resume's own ATS keyword list, `atsKeywords.ts:121-149`, deliberately NOT the judge's
+   semantic verdict). These are two of the three named components of one composite
+   (`artifactScore.ts:37,90`), and today `keyword_coverage` is null for every resume whose
+   `ResumeSummary` is the ONLY field carrying a given keyword, because `ATS_SHIPPED_FIELDS`
+   excludes it (§1). The judge cannot substitute for the reword link here because **it does not
+   write to `keyword_coverage` at all** — it is structurally a different pipe.
+2. **What each is a claim ABOUT.** The judge's `basis='direct'` on a `ResumeSummary` span that is
+   the employer's own sentence with two words deleted is an HONEST verdict: the text really does
+   cover the requirement, because it IS (nearly) the requirement's own words. That is not wrong,
+   but it does not help the owner's stated goal — *"it needs a final step to... make sure the
+   resume summary means verbatim but doesn't read verbatim"* — because the judge only reports
+   whether coverage exists, never whether the WORDING is safe to ship. A `basis='direct'` verdict
+   on a near-verbatim span is, if anything, the closest thing today to an automated detector for
+   the exact rows the brief's evidence table shows (`opp 2cb56fb3`), and per finding in §1 it is a
+   MODEL judgment (still no deterministic detector exists for this pattern).
+3. **When each runs relative to the reword.** The judge is called from `evaluateArtifact`
+   (`appChecks.ts:168-179`), which — per §2 — runs strictly AFTER the reword's natural placement
+   (inside `ensurePackage`, before the `pkg_json` write). So once a reword pass exists, the judge
+   will automatically re-run on the REWORDED text on every subsequent `evaluateArtifact` call —
+   it does not need to be told the reword happened. But the reword pass, when it runs, does NOT
+   have `requirement_coverage` rows to consult yet (they are written by the check route that runs
+   afterward), so it cannot simply read the judge's prior verdict to decide what to reword — it
+   needs its own detection of "this span is too close to the employer's wording" (§1's ABSENT
+   row), which is a different, EARLIER-arriving fact than the judge's LATER coverage verdict.
+
+**Verdict: genuinely two producers feeding two different score components, not a distinction
+without a difference.** Building the reword link is not building a second `chk_coverage_judge`;
+it is building the ONE MISSING piece — a deterministic-enough near-echo detector plus a stored
+requirement link — that neither the judge (semantic coverage, doesn't touch `keyword_coverage`,
+runs after the fact) nor `scanWording`/`posting_wording_kept` (contiguous 8-token exact match,
+advisory-only, explicitly refuses to rewrite anything — §1) currently provide. The one place they
+SHOULD interact, and do not yet: a future implementation could use `requirement_coverage.basis =
+'direct'` verdicts as an additional signal for which ResumeSummary spans are reword candidates,
+which would be extending the judge's existing output rather than duplicating it — noted here as a
+design opportunity, not asserted as required.
