@@ -7520,3 +7520,36 @@ regex only, not a semantic rewrite. Inherent to string matching.
 **Still open, unchanged:** the 8 stale per-section tally lines (own commit), `13-RENDER`'s `83 of 84`
 (different formula), and the 4th `fixture-canary.mjs` REQUIRED entry (blocked until
 `fixture-refresh.yml` is dispatched).
+
+
+## ACT:reword-link + ACT:mastercontext-move — design corrected, migration started (2026-09-02)
+
+Owner: *"fix the reword design and start mastercontext in parallel."* Both landed on
+`claude/incumbent-wins-swap` at **`86e0e0b`**; the reader that preceded them is LIVE on `main`
+**`b8e3246`** (api run `33690495389`, web run `33690495375`, both success).
+
+**ACT:reword-link — DESIGN CORRECTED, not yet built.** `correction.requirement_id` is REFUTED and
+replaced by `correction.requirement_text`. Evidence: `AC-reword-carries-the-link.md` §3c, which
+found `writeRequirements` (`appRequirements.ts:506`, `:535`) runs an unconditional
+`delete from requirement where opp_id=$1` on every re-extraction and re-inserts with
+`default uuid_generate_v4()`. The id does not survive a JD re-parse. `requirement_coverage`
+(`schema.ts:553-555`) and `evidence_confirmation` (`:518-520`) already key on the extracted TEXT and
+each say in its own comment that an id or seq is *"destroyed or silently reused"*. A third FK would
+have broken on the owner's next re-parse and taken every reword link with it. **Status: design ready,
+implementation NOT started.**
+
+**ACT:mastercontext-move — AC pass launched, and the sweep resized the work before the brief was
+written.** `grep -rn "PartitionKey eq 'context'" api/src` returns **10 raw read sites across 9
+files** — five in the product (`pipeline.ts` TWICE at `:209`/`:391`, plus `appApply`, `appFacts`,
+`appInsertions`, `diagSkillSources`), the rest the legacy MT-XX harness. There is **no single
+accessor**; `loadMasterBaseline` is the nearest thing and most sites bypass it. Proposed sequencing,
+handed to the pass for confirmation rather than asserted: introduce ONE accessor with the Storage
+backing UNCHANGED, then swap the store. Swapping first is nine simultaneous edits with no way to
+bisect a failure.
+
+**THE OPEN QUESTION THAT COULD RESIZE IT AGAIN:** the sweep found READERS ONLY. Who WRITES
+`MasterContext`? If the writer is the Jotform/zap pipeline or a manual Storage edit, a move Postgres
+owns is overwritten or orphaned on the owner's next edit, and the real first step is a writer. The
+brief forbids assuming a writer exists here because readers do — the same absence-claim error this
+repo's accuracy log is full of, in reverse. **Status: AC pass running, implementation NOT started,
+and it should not start until the writer question is answered.**

@@ -6031,3 +6031,40 @@ be stale — the one there predated the `checkPrefs` key).
 - **Phase tags must be BARE text at the start of a block.** `eds-phase-tag.py:has_tag` is
   `text.lstrip().startswith(t)` against plain strings, so `**Fact Finding:**` FAILS on the markdown
   bold. Two Stop cycles were spent on this. Write `Fact Finding: ...`, unformatted, every block.
+
+
+### Feature status, end of 2026-09-02
+
+**LIVE on `main` `b8e3246`** — the unread-analysis reader. `GET /app/packet/{id}/analysis`,
+`packetAnalysis.js`, `AnalysisPanel` on the JD step, semi-dynamic cache keyed `(packetId, builtAt)`.
+Five guards, all mutation-proved. Deploys confirmed: api `33690495389`, web `33690495375`. ~16,000
+characters per build that had been stored since P7 and never displayed now have a reader.
+
+**DESIGN READY, NOT BUILT — the reword link.** `correction.requirement_text`, never
+`requirement_id`. The FK was refuted before any code existed because `writeRequirements` deletes and
+re-inserts every requirement on a JD re-parse. Two existing tables already made this exact choice for
+this exact reason and say so in the schema.
+
+**STARTED, NOT BUILT — MasterContext into Postgres.** AC pass running. The sweep found **no single
+accessor**: 10 raw read sites, 9 files, `pipeline.ts` twice. The migration is therefore two commits,
+not one — introduce the accessor, then swap the store.
+
+**BLOCKED ON A FACT, not a decision:** who WRITES `MasterContext`. The sweep found readers only. If
+the writer is outside this repo the move is the wrong first step, and no amount of AC work changes
+that.
+
+### The accuracy measurement now exists, and its first act was to correct me
+
+`scripts/accuracy-trend.mjs` counts verdicts across every `VERIFY-*.md`. Baseline: **19 passes, 31
+refuted / 171 = 18%**, earlier half 20%, recent half 16%.
+
+**It caught my own reported figures within a minute.** I had told the owner "~398 confirmed, ~67
+refuted" from `grep -c CONFIRMED`, which counts every line containing the WORD — including prose like
+*"confirmed by reading the source"*. The real counts are 140 and 31: inflated ~2.5x, and already
+written into the accuracy log as its baseline. **The inflated version flattered me** — a bigger
+denominator makes the rate look smaller.
+
+The lesson is not "grep carefully". It is that **a number produced by a convenient command is a
+claim, and claims get checked** — including, especially, the ones measuring my own reliability. The
+tool refuses to weight by severity for the same reason: that is the knob that makes a bad month look
+fine.
