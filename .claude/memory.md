@@ -521,6 +521,166 @@ Key tables (PostgreSQL):
 
 ## Active work
 
+**LANDED 2026-09-02: intent probe + render passes are on `main` at `e99be2b`. Parity 169/182 (92.9%).**
+
+Owner said "merge" and the connector was reconnected in the same message. PR #69 merged. Only
+`.claude/`, `docs/`, `scripts/`, `.gitignore` landed - NEITHER deploy path (`api/**`, `app/**`) was
+touched, so no production deploy fired. api suite 1059/1059 before the fast-forward.
+
+**I1, the last unproven row, is CLOSED - and NOT by this lane.** The drawer Match tab renders
+`Overall 89 strong` over `Must-haves evidenced 100 / Keywords present 67 / Seniority fit not
+measured`. The values are production's, read from `artifact_score` for the gate's CURRENT run
+`8e3163cf` through `boost-pg-mcp-write`. Another session flipped `chk_reviewer_auto` and drove both
+passes, producing the first non-null composite in production - all 52 prior `artifact_score` rows
+were null. **My earlier live call returned no composite because the gate then pointed at run
+`50c95241`, whose score was null.** The surface was never the problem, and I was right about the
+cause but the fix was someone else's.
+
+**THE HEADLINE COLLIDED THREE TIMES IN ONE AFTERNOON** - cover lane 167/182, this lane 166/183, jd
+lane earlier. Each correct against a tree that could not see the others; every conflict landed on
+the same block. Resolution every time: keep both sets of row moves, take the incoming structure,
+**recount from the rows, never adopt a lane's figure**. The merged number is always HIGHER than any
+lane reports because row moves are additive: 169/182.
+
+**HARDENING - a near-miss caught in the diff, not after the push.** `npm i` for the probe's deps
+(`playwright-core`, `@babel/standalone`) minted a root `package.json` + lock that are not this
+project's - `api/` and `app/` each own theirs - and they were staged for `main`. Caught by reading
+`git diff --name-only origin/main HEAD` BEFORE pushing, removed, and now `.gitignore`d so the next
+probe run cannot re-stage them. The guard is the habit: diff the file LIST against origin before
+moving `main`, not just the content.
+
+
+**INTENT PROBE 2026-09-02 - the owner corrected the METHOD, and it changed three verdicts.**
+
+Owner: *"you are overthinking things a bit with what you do and don't call a gap. use playwright to
+click through both and determine if the intent is covered by an upgrade or alternative or if it's
+missing. to say it's not a gap because it hasn't had enough development to be able to do it is
+silly."* He is right, and the correction is structural: **DELIBERATE had become a bucket holding a
+real decision, a control with no data to render it, and a control nobody tried to reach.** Only the
+first is a decision; the other two are UNPROVEN, and filing them as "not a gap" flattered the count.
+
+New unit of measure = an INTENT (something a person can DO), scored COVERED /
+COVERED-BY-ALTERNATIVE / MISSING, with the state MANUFACTURED when the packet lacks the data.
+**14 intents: 12 COVERED, 2 COVERED-BY-ALTERNATIVE, 1 MISSING, 0 excused.** PROTOTYPE-COVERAGE.md
+SS17e; parity -> **166 of 183 (90.7%)** once merged with the cover lane.
+
+Three rows I had scored wrongly, ALL reachable and NONE needing code:
+- **4.8-8 `Change it`** was PARTIAL on *"is not there"*. It IS there, under the prototype's own
+  name, on every correction row beside `Review ->`, `Re-run QC` and `Undo`. Invisible only because
+  this packet has ZERO corrections. Injecting three into `checks-result.corrections[]` rendered all
+  four controls, and an id-less row correctly swapped `Undo` for a refusal sentence.
+- **4.10-8 `Nothing blocks sending.`** was left source-only. Forcing every gate to `pass` produced
+  it exactly, with zero fail rows and the footer still saying *"Approve all artifacts above"* - gate
+  pass and approved stay distinct.
+- **4.8-22 loop detail** I excused as *"unexercised by this data"*. Injecting a 2-pass `remediation`
+  ledger flipped the tab to *"what it closed, what it left open, and why it stopped"*.
+
+Genuinely MISSING, named rather than buried: **`Leave open`** (defer a raised question). Nearly
+vacuous - not confirming already leaves it open - but the RECORD of a deliberate defer is absent.
+`Answer` is COVERED-BY-ALTERNATIVE as **`confirm it`**, which is narrower and better defined.
+
+**HARDENING - "absence of data is not absence of a feature."** The guard is a habit plus a tool:
+`scripts/intent-probe.mjs` (new) drives either side through a SCRIPTED SEQUENCE, because most
+prototype verbs sit two interactions deep and the two existing renderers take a single `--click`.
+Whenever a control cannot be seen, MANUFACTURE the state and click it before writing any verdict.
+Second fixture gap found the same way: `fixture-refresh.yml` omits `artifact_score`, so the drawer
+Match tab claims *"the checks have not been run"* on an asset the gate calls Blocked with 86
+findings (SS17f). With SS17d's missing `run_id` predicate that is TWO reasons a local render is
+trustworthy for STRUCTURE and never for COUNTS or SCORES.
+
+
+**PARITY HEADLINE COLLISION, 2026-09-02 - THREE LANES, AND THE TRUE NUMBER IS 165/183 (90.2%).**
+
+`PROTOTYPE-COVERAGE.md` is being rendered into by three lanes at once, each re-counting the same
+headline against a tree that does not contain the others' row moves. Read from the FILES on each
+branch, not from commit titles:
+
+| Lane | Step rendered | Headline in ITS file |
+|---|---|---|
+| `...-ejv09v` (landed on main) | `jd` | SS16 |
+| `...-ngpaos` (PR #69, mine) | QC + Review & send | **161/183 (88.0%)** |
+| `...-6xdoef` (PR #66) | `cover` | **164/183 (89.6%)** |
+
+**Neither 161 nor 164 is right, and there is NO conflict between them.** Diffing row verdicts
+against `origin/main` at `3acd4c4`: I moved exactly ONE row (`4.8-20` PARTIAL->BUILT); #66 moved
+FOUR (`4.4-14`, `4.4-24`, `4.4-25`, `4.4-26`, all PARTIAL->BUILT). **Overlap: zero.** Applying both
+sets to the shared base gives **BUILT 165 / 183 = 90.2%, PARTIAL 17, ABSENT 1**. Whichever lands
+second must recount; the merge itself is trivial.
+
+**The structural point, which is the reusable one:** a hand-maintained headline in a file that
+several lanes write to is guaranteed to be stale the moment a second lane lands - this is the SAME
+failure this very lane just fixed twice inside the file (the SS4.8 and SS4.10 tallies). The count is
+already mechanical; what is missing is that nothing RE-RUNS it at merge time. A CI check that
+recomputes the headline from the rows and fails when they disagree would end the whole class.
+Logged as ACT-70, not built - it is a code change nobody asked for.
+
+**Two items deliberately NOT applied, both tracked rather than done:**
+- `fixture-refresh.yml` needs the live route's `run_id` predicate (SS17d). Code change, unrequested.
+- `boost-pg-mcp-write` is lapsed; reconnect card rendered for the owner.
+
+
+**RENDER PASS 2026-09-02 - SS4.8 QC + SS4.10 Review & send SEEN ON SCREEN; parity 161/183 (88.0%).**
+
+Closed `PROTOTYPE-COVERAGE.md` SS15's own limit 2 (*"a component can be built and never reach the
+screen for want of a mount... these need `ui-verify.yml` against the live app"*), which had stood
+since 2026-08-25 with *"no live UI was verified, nothing was run."* Both steps rendered LIVE
+(`ui-verify` runs 33642950751 / 33643149667) plus all five QC tabs locally. Evidence committed as
+`docs/qc-evidence/screens/render-0902-*.png`; findings in SS16.
+
+- **Two per-section tallies were stale and one CONTRADICTED ITS OWN TABLE.** SS4.10 read *"2 BUILT
+  (25%) ... the weakest section in the spec"* while all 8 of its rows already carried BUILT with a
+  `file:line`, and SS13a had recorded `dd4f61c` taking it to 100%. SS4.8 read `BUILT 14 / ABSENT 2`
+  for a section with 0 ABSENT. Both replaced with a mechanical recount (SS4.8 18/22 = 82%,
+  SS4.10 8/8 = 100%).
+- **4.8-20 `Undo this` PARTIAL -> BUILT by render** - it ships (`QcRail.jsx:382-386`, `swapUndo`)
+  and renders paired with `Ask why`; `kept` rows correctly show `Ask why` alone. Fourth row in that
+  doc to close by re-reading rather than rebuilding.
+- **The live app is AHEAD of the prototype in three places**: four numbers instead of two on the QC
+  header, `what we saw` / `what it should be` on every decision row with per-offender
+  `go to the draft ->`, and a named first-fix deep link on each send row. The missing per-asset
+  MATCH score is the *never fabricate a composite* rule, not a gap.
+
+**HARDENING - a fixture that is not RUN-SCOPED reads as a product defect, and nearly was reported
+as one.** `fixture-refresh.yml:74-76` selects `from check_result where artifact_id in (...)` with
+**no `run_id` predicate**; the live route (`appChecks.ts`) uses `where artifact_id=$1 and
+run_id=$2` off `artifact_gate`. So the fixture carries every historical run - 246 rows / 26
+distinct `check_key` on the resume, `skill_char_limit` x14 - and the locally-rendered Checks tab
+repeats each rule. I had drafted that as an app defect ("the Checks tab renders every loop flat")
+before reading the two queries. **The committed `app-send.png` reads `112 items to fix`; live reads
+`14`** - the 112 was never the product. Root cause: the instrument answers a different question
+than production. Guard: the fixture SQL must carry the live route's `run_id` predicate; until it
+does, COUNTS off a local fixture render are unusable and only STRUCTURE is citable - now stated in
+`screens/INDEX.md` and SS16d. The app already detects it, printing *"the server counted 7
+finding(s) needing attention but sent 54 such row(s)"*.
+
+
+**SESSION SETUP, 2026-08-29 — eds-claude-skills `setup.sh` v19 applied live; parallel-session lane.**
+
+Ran `setup.sh` from `/home/user/eds-claude-skills` (`HEAD cbf8f7b` = `origin/main`, in sync).
+Verified from the written files, not from the script's own stdout:
+
+- **Hooks: `_eds_version 19` on all four events** in `/home/user/.claude/settings.json` —
+  `SessionStart` (command), `Stop` (agent gate + `eds-phase-tag.py` command), `PostToolUse`
+  (`Write|Edit|NotebookEdit` -> autosave), `UserPromptSubmit` (drift check + agent reconcile +
+  phase-tag reminder).
+- **Launcher untouched except additively**: the two platform hooks
+  (`session-start-git-identity.sh`, `stop-hook-git-check.sh`) survived; `permissions.allow` gained
+  `mcp__github__create_repository` + `mcp__github__fork_repository`; `autoMode.allow` =
+  `['$defaults', 'Bash(git push*)']`.
+- **Guards on disk + executable**: `eds-git-guard.sh`, `eds-phase-tag.py`, `eds-agent-guard.sh`.
+  `eds-git-guard.sh check` run in this repo -> exit 0, no drift.
+- **16 skills + 1 agent (`verifier`)** registered to `/root/.claude/`.
+- **Bootstrap**: `register_repo_root(deventerpriseds-org/eds-claude-skills,
+  /home/user/eds-claude-skills)` -> `context_reload_requested`. NOTE the managed clone target is
+  `/home/user/eds-claude-skills`, NOT `/workspace/eds-claude-skills` — passing the workspace path
+  is rejected outright in this session shape.
+- **`boost-pg-mcp-write` confirmed LIVE**, not just listed: `current_database() =
+  boost_resume_n_packet_builder`, `current_user = mcp_readwrite_boost`, 50 public tables. This is
+  the one connector to use; do not enumerate `Boost_DB_Connector` or `Azure_pg_mcp`.
+
+Repo state at session start: `boost` HEAD `2c693d1` == `origin/main`, clean tree, on branch
+`claude/eds-skills-setup-summary-ngpaos`. **Other sessions are working this codebase in parallel** —
+fetch before every answer about state, and re-check before every commit.
 <!-- NEWEST FIRST, and the SessionStart surfacer emits this heading plus 60 LINES and nothing else.
      Every line here costs a line of what a new session sees: WRITE NEW STATE AT THE TOP AND DELETE
      WHAT IT SUPERSEDES. Detail goes in a dated section below and is LINKED from here. -->
