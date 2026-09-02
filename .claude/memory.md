@@ -520,6 +520,34 @@ Key tables (PostgreSQL):
 - iOS testing: requires macOS runner or BrowserStack; categorically unavailable in Linux CCR
 
 ## Active work
+**2026-09-02 — §4.5 (Portfolio) IS 35/39, AND THE REMAINING 4 ARE NOT BUILDABLE HONESTLY.** Asked to
+"get us to 40". Ground-truthed against the LIVE DB now the connector is back, not against the docs:
+
+- `term_library_entry` = **0 rows** (`scoreable` = 0). So `4.5-29` (`~` reworded prefix) and `4.5-30`
+  (match grade Exact/Reworded/Loose) have NO SOURCE -- PC-3's premise verified against the primary
+  source rather than its own say-so. PC-3 additionally holds "reworded" is *undecidable*: absent text
+  is equally consistent with reworded and with never-placed.
+- `4.5-33` (chip colour split covered/open) -- the `open` state CANNOT OCCUR: a chip in a field's
+  margin *is* a line that field answers. Painting it is dead UI for an unreachable state.
+- `4.5-38` (rewording toggle) -- the prototype flips local state and nothing persists it; shipping it
+  is "a control that forgets" (`actions.md:3007-3011`). Substitute `Ask for a reword` already ships.
+- `4.5-16` is NOT-IN-PROTOTYPE and excluded from the denominator, so **the denominator is 39, not 40**.
+
+**40/40 is therefore not reachable without violating "no dead UI" or "no fake data".** The one
+genuinely buildable item PC-3 itself names is DISPLACEMENT TEXT ("took the place of X"), and it HAS a
+live source: `swap_decision` 79 rows, **55 with both `from_label` and `to_label`**, 35 `swapped`. Put
+to the owner rather than built unasked.
+
+**ACT-68 corrected the same day:** it listed 3 rows still open; two (`4.5-12`, `4.8-21`) had shipped.
+Only `4.11-4` (scope selector) is genuinely absent -- swept repo-wide, not single-file-grepped.
+
+## Hardening -- 2026-09-02: a summary that RESTATES another file's verdicts cannot stay true
+`ACT-68` copied `PROTOTYPE-COVERAGE.md`'s answers instead of citing its rows, so it went stale the
+moment the coverage doc moved -- and the stale half was what got read back as fact, prompting "so
+you saying the Portfolio section is already complete". Two of its three "still open" rows had
+shipped. **Guardrail: a tracker entry cites the coverage row id and lets that file own the verdict;
+it never restates it.** Same shape as the repo's existing "one core source, every consumer reads it"
+rule -- a second home for a verdict is a second home for a number.
 
 **LANDED 2026-09-02: intent probe + render passes are on `main` at `e99be2b`. Parity 169/182 (92.9%).**
 

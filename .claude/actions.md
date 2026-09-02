@@ -5328,8 +5328,19 @@ telemetry key `qc-go-to-field`), `Put back` x5, `Change it` x2, `Ask for a chang
 `Re-run QC`, `Open QC`, the three expanded counters, composite + coverage headers. Screenshots
 additionally settle SS4.11 (scored 0%, mounts everywhere), SS4.8 (scored 73%, renders), SS4.10.
 
-**Still open — 3 rows:** `4.5-12` pick-list (portfolio only), `4.8-21` Swaps `Ask why`,
-`4.11-4` scope selector.
+**~~Still open — 3 rows:~~ CORRECTED 2026-09-02 — it is ONE row, not three.** Two of the three
+shipped after this summary was written and it was never updated; `PROTOTYPE-COVERAGE.md` and the
+code both disagreed with it. Re-checked against the code, not against the doc:
+
+| row | this summary said | ground truth | proof |
+|---|---|---|---|
+| `4.5-12` pick-list (portfolio only) | open | **BUILT** | `PickList()` `AssetBlocks.jsx:469`, mounted `:922`; `pickListModel`/`pickListAsk` `assetBlocks.js:1319/1359`; guards `H:pick-list-shows-what-was-considered-not-only-what-shipped` + `H:pick-list-seeds-a-request-and-sets-nothing` (`app/test/assetBlocks.test.mjs:1521/1549`) |
+| `4.8-21` Swaps `Ask why` | open | **BUILT** (changed 2026-08-29) | `swapAskWhy()` `qcRail.js:813`, consumed `QcRail.jsx:10,323` |
+| `4.11-4` scope selector | open | **STILL ABSENT — the only one** | swept, not single-file-grepped: `grep -rlniE "'(this packet|this asset|my profile)'" app/src/` returns NOTHING. `AssistantPanel.jsx:88` states why — *"SCOPE IS STATED, NOT SELECTED … Two of the prototype's three chips have no route behind them"*; `assistantScope()` renders a sentence instead. |
+
+**The lesson, not just the fix:** this summary was a SECOND home for a verdict `PROTOTYPE-COVERAGE.md`
+already owned, so it went stale the moment the coverage doc moved. A prose summary that restates
+another file's verdicts has no way to stay true. Cite the coverage doc's row; do not copy its answer.
 **~~DELIBERATE, not a gap:~~ SUPERSEDED 2026-08-30 — see the `4.8-20` entry at the end of this file.**
 This paragraph read `assistantPanel.js:107` (*"Undo is per field, in the field itself, not from
 here"*) as closing the row. The owner has since ruled the opposite: *"we decided to keep both per
