@@ -123,7 +123,7 @@ export function todayIso(now: Date = new Date()): string {
  */
 export function baselinePkg(
   master: Record<string, string>,
-  opts?: { company?: string; date?: string; slots?: SlotCounts; relevant?: readonly (readonly string[])[] },
+  opts?: { company?: string; date?: string; slots?: SlotCounts; relevant?: readonly (readonly string[])[]; fields?: unknown },
 ): Record<string, string | null> {
   const company = (opts?.company || '').trim() || BASELINE_COMPANY_PLACEHOLDER
   const date = (opts?.date || '').trim() || todayIso()
@@ -131,6 +131,10 @@ export function baselinePkg(
   return {
     ...shaped,
     ...relevantOverlay(opts?.relevant),
+    // AFTER `relevantOverlay` so an explicit `fields.RelevantBullets1` beats the positional
+    // `relevant` shorthand when a caller sends both. One field, one winner, stated rather than
+    // left to key order.
+    ...slotOverrides(opts?.fields),
     '@Company': company,
     '@CoverLetterDate': date,
   }
@@ -219,6 +223,80 @@ export function shapeSlotFields(
   return out
 }
 
+/**
+ * Caller-supplied lists for NAMED slots — the owner's "second step", generalised.
+ *
+ * WHY THIS EXISTS. `relevant` already let a caller set the three Relevant lists positionally, but
+ * Skills and Core Competencies had no input at all, so the only way to change them was to hand-write
+ * `packet.pkg_json` and re-render. The owner named the shape directly (2026-09-01): *"you have the
+ * template and the approach to updating the placeholders and the data to apply to the placeholders.
+ * end of story... just have a second step after it finishes to update the relevant section yourself
+ * if there is no model to do it in the first pass."* This is that second step as a route input.
+ *
+ * ONLY `SLOT_FIELDS` ARE ACCEPTED. An unrecognised key is ignored rather than written through, so a
+ * typo can neither invent a merge field nor overwrite a prose block (`ResumeSummary`, the
+ * `@`-placeholders) with a list. The whitelist is `SLOT_FIELDS` itself rather than a second copy,
+ * because a divergent whitelist is a defect this repo has already paid for.
+ *
+ * AN EMPTY LIST IS IGNORED, NOT APPLIED. Same reasoning as `relevantOverlay`: a blank slot is the
+ * silent-deletion failure, and "the caller sent nothing for this field" must not be able to erase
+ * content that MasterContext supplied.
+ *
+ * NOT TRIMMED TO THE SLOT COUNT, DELIBERATELY. `slots.ts` is emphatic that a count is a fact about
+ * the printed page and that inventing one "accuses every item past it". A caller who states a list
+ * has stated it; silently dropping its tail would be that same accusation with the caller as the
+ * victim. Over-capacity is REPORTED instead — see `slotOverflow`, which is why this can be honoured
+ * verbatim without the result being a surprise.
+ */
+export function slotOverrides(fields: unknown): Partial<Record<SlotField, string>> {
+  const out: Partial<Record<SlotField, string>> = {}
+  if (!fields || typeof fields !== 'object' || Array.isArray(fields)) return out
+  const src = fields as Record<string, unknown>
+  for (const field of SLOT_FIELDS) {
+    const raw = src[field]
+    // ARRAY OR STRING ONLY. `String(raw)` on anything else COERCES it into a one-item list -- the
+    // first version turned `42` into `['42']` and `true` into `['true']` and wrote that into a merge
+    // field. Caught by `H:baseline-slot-override` before it shipped; a number is not a list, and
+    // the honest response to one is to ignore it rather than to render it.
+    if (!Array.isArray(raw) && typeof raw !== 'string') continue
+    // A string is split with the repo's own splitter, so a caller may pass either shape and get the
+    // same answer the package builder would give.
+    const items = (Array.isArray(raw) ? raw : splitItems(raw))
+      .map((x: unknown) => String(x ?? '').trim())
+      .filter(Boolean)
+    if (!items.length) continue
+    out[field] = items.join('\n')
+  }
+  return out
+}
+
+/** One slot whose list is longer than the template's configured capacity. */
+export interface SlotOverflow { field: SlotField; items: number; capacity: number }
+
+/**
+ * Slots carrying more items than the template has room for.
+ *
+ * The counterpart to honouring an override verbatim: the caller learns their list will not fit
+ * INSTEAD of losing its tail without being told. A `null` capacity means UNKNOWN and is silent —
+ * reporting overflow against a guessed capacity would be the invented-count failure `slots.ts`
+ * forbids, dressed as a warning.
+ */
+export function slotOverflow(
+  pkg: Record<string, unknown>,
+  slots?: SlotCounts,
+): SlotOverflow[] {
+  const out: SlotOverflow[] = []
+  for (const field of SLOT_FIELDS) {
+    const cap = slots ? slots[field] : null
+    if (typeof cap !== 'number' || cap <= 0) continue
+    const v = pkg?.[field]
+    if (typeof v !== 'string' || !v.trim()) continue
+    const items = v.split('\n').map((l) => l.trim()).filter(Boolean).length
+    if (items > cap) out.push({ field, items, capacity: cap })
+  }
+  return out
+}
+
 /** Types this route will build. `cover` is excluded — see the note in the handler. */
 export const BASELINE_TYPES = ['resume', 'portfolio'] as const
 
@@ -271,7 +349,7 @@ export async function baselineArtifacts(req: HttpRequest, _context: InvocationCo
     const settings = await loadPipelineSettings()
     const slots = await resolveTemplateSlots(
       String(pkt.resume_template_id || '').trim() || settings.resumeTemplateId.value)
-    const pkg = baselinePkg(master, { company: body.company, date: body.date, slots, relevant: body.relevant })
+    const pkg = baselinePkg(master, { company: body.company, date: body.date, slots, relevant: body.relevant, fields: body.fields })
 
     const built: any[] = []
     for (const type of types) {
@@ -304,6 +382,9 @@ export async function baselineArtifacts(req: HttpRequest, _context: InvocationCo
         masterFieldCount: Object.keys(master).length,
         slots,
         filledFields: filled,
+        // A list longer than the template's room is reported rather than silently trimmed, so the
+        // caller sees it here instead of discovering a missing tail by reading the document.
+        slotOverflow: slotOverflow(pkg as Record<string, unknown>, slots),
         company: pkg['@Company'],
         coverLetterDate: pkg['@CoverLetterDate'],
         artifacts: built,

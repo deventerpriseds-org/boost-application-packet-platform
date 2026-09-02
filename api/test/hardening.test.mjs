@@ -4968,3 +4968,70 @@ test('H:baseline-relevant-per-slot: a short or malformed caller list falls back 
     assert.ok(!pkg[f].includes('Governance and Compliance:'), `${f} kept pooled Library text`)
   }
 })
+
+test('H:baseline-slot-override: a named slot list is honoured VERBATIM, and only a real slot', async () => {
+  const { slotOverrides, baselinePkg, SEED_RELEVANT_LISTS } =
+    await import('../dist/functions/tests/appBaseline.js')
+
+  // THE GAP THIS CLOSES: `relevant` set the three Relevant lists positionally and nothing could set
+  // Skills or Core Competencies, so changing them meant hand-writing packet.pkg_json and
+  // re-rendering. Owner, 2026-09-01: "just have a second step after it finishes to update the
+  // relevant section yourself if there is no model to do it in the first pass."
+  const out = slotOverrides({ SkillsBullets1: ['SW Engineering', 'Portfolio Management'] })
+  assert.deepEqual(out.SkillsBullets1.split('\n'), ['SW Engineering', 'Portfolio Management'])
+
+  // ONLY SLOT_FIELDS. An unknown key must not become a merge field, and a prose block must not be
+  // overwritable by a list -- a typo'd key that wrote through would silently replace the summary.
+  const stray = slotOverrides({ ResumeSummary: ['x'], NotAField: ['y'], '@Company': ['z'] })
+  assert.deepEqual(Object.keys(stray), [])
+
+  // AN EMPTY OR BLANK LIST IS IGNORED, NEVER APPLIED. Blanking a slot is the silent-deletion
+  // failure; "the caller sent nothing" must not erase what MasterContext supplied.
+  for (const empty of [[], [''], ['  '], [null], 42, true, {}]) {
+    assert.deepEqual(Object.keys(slotOverrides({ ExpertiseBullets: empty })), [],
+      `input ${JSON.stringify(empty)} was applied instead of ignored`)
+  }
+  const kept = baselinePkg({ ExpertiseBullets: 'Alpha|Beta' }, { fields: { ExpertiseBullets: [] } })
+  assert.deepEqual(kept.ExpertiseBullets.split('\n'), ['Alpha', 'Beta'])
+
+  // NOT TRIMMED TO THE SLOT COUNT. slots.ts: an invented count "accuses every item past it"; the
+  // same applies to a list the caller stated. Nine items against a capacity of eight all survive.
+  const nine = ['a1', 'a2', 'a3', 'a4', 'a5', 'a6', 'a7', 'a8', 'a9']
+  const pkg = baselinePkg({}, {
+    slots: { SkillsBullets1: 10, SkillsBullets2: 8, ExpertiseBullets: 6, RelevantBullets1: 3, RelevantBullets2: 3, RelevantBullets3: 3 },
+    fields: { SkillsBullets2: nine },
+  })
+  assert.deepEqual(pkg.SkillsBullets2.split('\n'), nine)
+
+  // A NAMED FIELD BEATS THE POSITIONAL SHORTHAND when a caller sends both. One field, one winner.
+  const both = baselinePkg({}, {
+    relevant: [['pos1', 'pos2', 'pos3']],
+    fields: { RelevantBullets1: ['named1'] },
+  })
+  assert.deepEqual(both.RelevantBullets1.split('\n'), ['named1'])
+  // ...and the slots `fields` did not name still fall back to the seed, unchanged.
+  assert.deepEqual(both.RelevantBullets2.split('\n'), [...SEED_RELEVANT_LISTS[1]])
+})
+
+test('H:baseline-slot-overflow: an over-capacity list is REPORTED, never silently trimmed', async () => {
+  const { slotOverflow } = await import('../dist/functions/tests/appBaseline.js')
+  const slots = { SkillsBullets1: 10, SkillsBullets2: 8, ExpertiseBullets: 6, RelevantBullets1: 3, RelevantBullets2: 3, RelevantBullets3: 3 }
+
+  // Measured on the owner's own 2026-09-01 lists: the right-hand skills column carried NINE items
+  // against a configured capacity of eight. Honouring it verbatim is only safe because this says so.
+  const nine = Array.from({ length: 9 }, (_, i) => `s${i}`).join('\n')
+  assert.deepEqual(slotOverflow({ SkillsBullets2: nine }, slots),
+    [{ field: 'SkillsBullets2', items: 9, capacity: 8 }])
+
+  // Silent at capacity and under it -- a guard that fires on correct input is the cry-wolf failure.
+  assert.deepEqual(slotOverflow({ SkillsBullets2: Array.from({ length: 8 }, (_, i) => `s${i}`).join('\n') }, slots), [])
+  assert.deepEqual(slotOverflow({ ExpertiseBullets: 'a\nb' }, slots), [])
+
+  // A NULL capacity means UNKNOWN and must stay silent: reporting overflow against a guessed
+  // capacity is the invented-count failure slots.ts forbids, wearing a warning's clothes.
+  assert.deepEqual(slotOverflow({ SkillsBullets2: nine }, { ...slots, SkillsBullets2: null }), [])
+  assert.deepEqual(slotOverflow({ SkillsBullets2: nine }, undefined), [])
+
+  // Blank lines are not items -- a trailing newline must not manufacture an overflow.
+  assert.deepEqual(slotOverflow({ ExpertiseBullets: 'a\nb\n\n' }, slots), [])
+})
