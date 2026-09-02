@@ -10,6 +10,7 @@ import { getPgClient } from './pgClient'
 import { runChecks, gateFor, attentionCount, CheckResult } from './checks'
 import { loadThresholds, resolveOptionsFrom } from './checkPrefs'
 import { computeArtifactScore, ArtifactScore } from './artifactScore'
+import { atsCoverage, atsCoverageSource, ATS_SHIPPED_FIELDS } from './atsKeywords'
 import { loadFacts, sourceText } from './appFacts'
 import { shapeVerdict } from './appReviewer'
 import { resolvePostingSource } from './jdText'
@@ -43,7 +44,7 @@ export async function evaluateArtifact(client: any, artifactId: string, owner: s
   } | null
 }> {
   const art = (await client.query(
-    `select a.id, a.type, a.packet_id, p.opp_id, p.pkg_json, p.resume_template_id, o.company, o.owner_email,
+    `select a.id, a.type, a.packet_id, p.opp_id, p.pkg_json, p.last_build, p.resume_template_id, o.company, o.owner_email,
             o.jd_html, o.jd_posting_raw, o.why_surfaced
        from artifact a join packet p on p.id = a.packet_id join opportunity o on o.id = p.opp_id
       where a.id = $1`, [artifactId])).rows[0]
@@ -216,15 +217,44 @@ export async function evaluateArtifact(client: any, artifactId: string, owner: s
   const scoreable = Number((await client.query(
     `select count(*)::int as n from term_library_entry e join term_library l on l.id = e.library_id
       where e.scoreable = true and l.published_at is not null`).catch(() => ({ rows: [{ n: 0 }] }))).rows[0]?.n || 0)
+  // THE INTERIM KEYWORD MEASUREMENT — a real number before the term library exists.
+  //
+  // Owner, 2026-09-01: "confirm a way to use what we gain to get the score until library is added to
+  // suppliment not drop it." `keyword_coverage` has been null on all 52 artifact_score rows ever
+  // written, and a composite needs all three components, so no artifact has ever had one.
+  //
+  // THE LIBRARY STRICTLY WINS, and this ordering IS the "supplement, not replace" instruction. When
+  // a published version has scoreable entries, that path is taken and the interim source is not
+  // consulted at all -- never blended, never averaged. Blending two differently-sourced numbers
+  // would produce a composite whose provenance no one could state, which is the fabricated-composite
+  // failure `artifactScore.ts`'s own header forbids.
+  //
+  // RESUME ONLY, deliberately. The ATS keyword table is emitted by the resume prompt alone (zap node
+  // 289877661); a cover letter does not place the resume's skills lines, and crediting it with the
+  // resume's coverage would invent a measurement for a document nothing measured.
+  let interimKw: { covered: number; scoreable: number; source: string } | null = null
+  if (scoreable === 0 && art.type === 'resume') {
+    const sections: Array<{ title?: string; body?: string }> =
+      Array.isArray((art.last_build as any)?.analysis) ? (art.last_build as any).analysis : []
+    const table = sections.find(x => String(x?.title || '').trim().toLowerCase() === 'missing ats skills')
+    const cov = atsCoverage(table?.body, ATS_SHIPPED_FIELDS.map(f => (art.pkg_json || {})[f]))
+    if (cov.covered !== null && cov.total !== null) {
+      interimKw = { covered: cov.covered, scoreable: cov.total, source: atsCoverageSource(cov) }
+    }
+  }
   const score = computeArtifactScore({
     requirements,
     checks: results,
-    // `covered: null`, NEVER 0. Nothing in the product counts per-asset term placement yet, so the
-    // numerator does not exist. A literal 0 here was latent: `keyword_coverage` reads as an honest
-    // null ONLY while `scoreable === 0`, and the instant a library version is published this
-    // ternary would flip and render a measured-looking 0% across six consumers. Null says
-    // "unmeasured"; 0 would claim "we counted, and the answer was none".
-    keyword: scoreable > 0 ? { covered: null, scoreable } : null,
+    // `covered: null`, NEVER 0, on the LIBRARY path. Nothing counts per-asset term placement against
+    // a published library yet, so that numerator does not exist. A literal 0 here was latent:
+    // `keyword_coverage` reads as an honest null ONLY while `scoreable === 0`, and the instant a
+    // library version is published this ternary would flip and render a measured-looking 0% across
+    // six consumers. Null says "unmeasured"; 0 would claim "we counted, and the answer was none".
+    keyword: scoreable > 0
+      ? { covered: null, scoreable }
+      : interimKw
+        ? { covered: interimKw.covered, scoreable: interimKw.scoreable, source: interimKw.source }
+        : null,
     seniority: null,          // reviewer-graded; P4 supplies it as a stored input
   })
   const uncoveredIds = score.uncovered_requirement_seqs

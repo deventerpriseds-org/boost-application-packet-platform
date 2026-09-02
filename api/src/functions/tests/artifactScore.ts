@@ -52,7 +52,15 @@ export interface ScoreInput {
    * `covered: null` means "a library exists but nothing has counted placement yet" — a THIRD state,
    * distinct from both "no library" and "measured zero". See computeArtifactScore.
    */
-  keyword?: { covered: number | null; scoreable: number } | null
+  /**
+   * `source` is OPTIONAL AND LOAD-BEARING WHEN PRESENT. Without it the two sentences below
+   * hardcode "scoreable library terms", which was true while the published term library was
+   * the only possible source and became a LIE the moment an interim source existed: an ATS
+   * keyword count would have been reported to the owner as library coverage, so a jump in the
+   * number the day a library is published would be unattributable. A caller supplying a
+   * differently-sourced numerator MUST name it.
+   */
+  keyword?: { covered: number | null; scoreable: number; source?: string } | null
   /** Reviewer-graded, so it is a stored INPUT and never recomputed here (P4 supplies it). */
   seniority?: number | null
   weights?: Partial<typeof DEFAULT_WEIGHTS>
@@ -138,7 +146,7 @@ export function computeArtifactScore(input: ScoreInput): ArtifactScore {
       ? { value: null, source: 'no published term-library version has scoreable entries yet' }
       : (kwIn.covered === null || kwIn.covered === undefined)
         ? { value: null, source: `${kwIn.scoreable} scoreable library terms, but term placement has not been measured` }
-        : { value: Math.round((kwIn.covered / kwIn.scoreable) * 100), source: `${kwIn.covered}/${kwIn.scoreable} scoreable library terms present` }
+        : { value: Math.round((kwIn.covered / kwIn.scoreable) * 100), source: kwIn.source || `${kwIn.covered}/${kwIn.scoreable} scoreable library terms present` }
 
   // --- seniority: a stored reviewer input, never computed here ---------------------------------
   const seniority: ScoreComponent = (typeof input.seniority === 'number')
