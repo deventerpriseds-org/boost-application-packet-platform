@@ -358,6 +358,12 @@ function joinedRow(mc = MC, seq = 0) {
     // deterministic row -- a rule needs no human warrant.
     evidence_confirmed_at: null,
     evidence_confirmed_by: null,
+    // The owner's DECISION on this claim, either polarity, and what a second read said the excerpt
+    // fails to show. Both null for the same reason as the two above: this fixture is a
+    // deterministic row, so no human has decided on it and no challenge pass ever ran. Null here
+    // is "undecided", never "vetoed" -- the distinction ruleEvidenceOf turns on.
+    evidence_decision: null,
+    evidence_missing: null,
     evidence_resolved_at: new Date('2026-08-20T00:00:00Z'),
   }
 }

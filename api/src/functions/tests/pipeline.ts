@@ -3,6 +3,7 @@ import { TableClient } from '@azure/data-tables'
 import { getGoogleToken, getGoogleOAuthToken, HAS_GOOGLE_OAUTH, IMPERSONATE_SUBJECT, getMicrosoftToken } from './googleAuth'
 import { resolveZapVars } from './zapVars'
 import { resolveRoleFocus, roleDirective } from './roleFocus'
+import { SlotCounts } from './slots'
 import { assemblePackage, mergeCallTwo, call2Draft } from './mt17'
 import { headingKeysFor, parseResumePackage } from './resumeParser'
 import { parseAgentJson, isEmptyResult } from './agentJson'
@@ -329,7 +330,7 @@ export function listBFromCalls(...calls: any[]): Record<string, string> {
 /** The zap token each List-B slot fed. Exported so a test can assert the wiring, not just the shape. */
 export const LIST_B_TOKENS = () => ({ ...LIST_B_TOKEN })
 
-export async function buildPackageForJD(opts: { key: string; jd: string; roleType: string; company: string; jobTitle: string; personaRole?: string | null; revisionNotes?: string[]; resumeTemplateId?: string | null }): Promise<{ pkg: Record<string, string | null>; steps: string[]; roleFocus: any; roleFocusSource: string; calls: { c1: any; c2: any; c3: any }; usage: Array<{ pass: string; usage: any }>; promptVersions: Record<string, number>; profileText: string; omitList: string; warnings: string[]; qcApplied: boolean; settings: PipelineSettings }> {
+export async function buildPackageForJD(opts: { key: string; jd: string; roleType: string; company: string; jobTitle: string; personaRole?: string | null; revisionNotes?: string[]; resumeTemplateId?: string | null }): Promise<{ pkg: Record<string, string | null>; steps: string[]; roleFocus: any; roleFocusSource: string; slots: SlotCounts; calls: { c1: any; c2: any; c3: any }; usage: Array<{ pass: string; usage: any }>; promptVersions: Record<string, number>; profileText: string; omitList: string; warnings: string[]; qcApplied: boolean; settings: PipelineSettings }> {
   const { key, jd, roleType, company, jobTitle } = opts
   const steps: string[] = []
   const warnings: string[] = []
@@ -352,6 +353,19 @@ export async function buildPackageForJD(opts: { key: string; jd: string; roleTyp
   const roleFocus = role.focus
   if (role.warning) warnings.push(`role focus: ${role.warning}`)
   steps.push(`Role focus "${roleFocus}" (source: ${role.source})`)
+  // THE SAME ROW ALSO CARRIES THE FIXED SLOT COUNTS, and this is where they enter the build. They
+  // are returned rather than consumed here: the two things that need them — the swap pairing
+  // (`writeSwaps` -> `buildSwaps`) and the gate's `fixed_slot_count` check — both live downstream of
+  // this function, and `resumeTemplateForFocus` is the only place that knows WHICH resume this
+  // build is for. Deriving them again downstream would be a second answer to that question.
+  //
+  // Reported in `steps` for the same reason every other resolution is: a count that silently failed
+  // to resolve is indistinguishable from one nobody set, and the difference matters — the first is
+  // a fault, the second is the owner not having filled the form in.
+  const setSlots = Object.entries(role.slots).filter(([, n]) => n !== null)
+  steps.push(setSlots.length
+    ? `Template slot counts: ${setSlots.map(([f, n]) => `${f} ${n}`).join(', ')}`
+    : 'Template slot counts: none set — the fixed-slot check will report not_applicable')
 
   // X6 — the version is loaded alongside the content. This projection took `content` only, so
   // nothing downstream could say WHICH prompt produced a given package. P4 requires a
@@ -547,7 +561,7 @@ export async function buildPackageForJD(opts: { key: string; jd: string; roleTyp
     { pass: 'portfolio', usage: (r2 as any)?.usage },
     { pass: 'ats-qc', usage: (r3 as any)?.usage },
   ]
-  return { pkg, steps, roleFocus, roleFocusSource: role.source, calls: { c1, c2, c3 }, usage, promptVersions, profileText, omitList, warnings, qcApplied, settings }
+  return { pkg, steps, roleFocus, roleFocusSource: role.source, slots: role.slots, calls: { c1, c2, c3 }, usage, promptVersions, profileText, omitList, warnings, qcApplied, settings }
 }
 
 // GET /api/jobs?status=received — list jobs for the approval queue

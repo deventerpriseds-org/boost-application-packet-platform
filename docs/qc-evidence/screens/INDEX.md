@@ -85,3 +85,36 @@ and overlap content in some shots.
 | 45-current-app-mode.png | "Current app" — the layer removed, today's behavior |
 | 46-current-app-mode-lower.png | Current app: the collapsed draft string and the empty-chip bug note |
 | 47-qc-layer-highlight-off.png | QC layer with "Highlight additions" off — production appearance |
+
+---
+
+## The APP side, same seven steps (added 2026-08-29)
+
+The 47 captures above are the PROTOTYPE — the denominator `PROTOTYPE-COVERAGE.md` measures against,
+and they do not need re-taking. What was missing was the other half of the comparison: what the app
+actually renders. These seven are that half, taken at the same ~924px width, against real Trinnex
+data (opp `9f9c370a`) through the local fixture harness at `main` = `025a54b`.
+
+| File | Step | app / proto body chars |
+|---|---|---|
+| app-jd.png | Posting analysis | 6,997 / 3,355 |
+| app-resume.png | Resume | 15,889 / 13,990 |
+| app-cover.png | Cover letter | 4,209 / 4,746 |
+| app-portfolio.png | Portfolio | 14,021 / 7,213 |
+| app-video.png | Intro video | 736 / 781 |
+| app-qc.png | QC & evidence | 128,803 / 6,575 |
+| app-send.png | Review & send | 7,720 / 915 |
+
+**READ THESE FOR STRUCTURE, NOT FOR VALUES.** Which panels, controls and states exist is what the
+coverage comparison needs and is what these prove. The specific numbers and findings inside them are
+NOT current: the harness serves a point-in-time fixture dump, so `app-qc.png` shows a
+`skill_char_limit` finding reading *"5 of 20 skills exceed 30 chars"* from an older check run, while
+the live row for that same check reads `pass — 20 skills, longest 22 — every skill <= 24` as of
+15:47 on 2026-08-29. Reading a finding off one of these as current is the exact trap that produced
+three false defect reports earlier the same day.
+
+**Character counts are not a completeness measure either** — the owner named that directly. `app-qc`
+at 19x the prototype is an outlier that still wants explaining, not a score.
+
+Regenerate with `/tmp/render-all.mjs <oppId> <route-keyed fixtures>`; see `LOCAL-RENDER-UAT.md` for
+the fixture requirements, and note `build-fixtures.mjs` must be run on a raw dump first.

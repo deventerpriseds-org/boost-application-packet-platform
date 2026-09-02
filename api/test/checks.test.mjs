@@ -591,44 +591,91 @@ const proposedRow = () =>
      char_start: 0, char_end: 37, extra: 'Cutting outage duration improves reliability.',
      ratio: null, method: 'proposed', record_sha256: '', resolver_version: 2, proposal_version: 1 })
 
-test('H:proposed-evidence-cannot-pass-the-gate: a model may propose, only a rule may accuse', () => {
-  // THE PLACE THE ESCALATION TIER COULD HAVE LOOSENED THE WHOLE ENGINE SILENTLY.
+test('H:a-vetoed-row-cannot-pass-the-gate: the owner\'s no outranks every warrant', () => {
+  // THIS GUARD WAS INVERTED ON PURPOSE, AND THE INVERSION IS THE OWNER\'S.
   //
-  // A proposed row is byte-exact in the record it names — `verifyProposal` accepts nothing else — so
-  // it is indistinguishable from a deterministic row by inspection. But byte-exactness is not
-  // RELEVANCE: the deterministic path also clears a lexical floor (token overlap at
-  // EVIDENCE_THRESHOLD, a distinctive token, the conjunction and negation rules) and a proposed row
-  // clears none of them by design, because it exists for the cases where no word is shared. Its only
-  // relevance judge is the model, and its `reasoning` is stored, never verified.
+  // It used to read `H:proposed-evidence-cannot-pass-the-gate` and assert the house rule that a
+  // model may PROPOSE and only an exact rule may ACCUSE. Owner, 2026-09-01: "I already said
+  // proposals can count until vetoed." So a proposed row now counts on creation and the veto is
+  // the escape hatch -- which moves the thing worth guarding, it does not remove it.
   //
-  // If this check counted it, `must_have_coverage` — whose own comment calls it accusation-grade —
-  // would quietly move from "verbatim AND lexically supported" to "verbatim", and no surface would
-  // say so. So a proposed row is evidence to SHOW, never evidence to PASS ON.
+  // WHAT THE OLD RULE WAS PROTECTING, restated for the new shape. The danger was never "a model
+  // contributed"; it was "a model contributed and nothing said so, so a coverage rise could not be
+  // audited". Two properties now carry that, and both are asserted here:
+  //   1. the owner\'s VETO is absolute -- no method, and no prior confirmation, survives it;
+  //   2. a counted proposal is NAMED on the surface the number is read from.
+  // Deleting this case when the rule changed would have left the veto -- the only remaining brake
+  // on model-warranted coverage -- with no test at all.
   const reqs = [{ seq: 0, verbatim: 'Improve operational reliability across the platform', item_text: '', kind: 'must_have' }]
 
+  // A proposal now COUNTS. This is the owner\'s instruction, asserted rather than assumed.
   const withProposed = runChecks({
     type: 'resume', pkg: RESUME_FULL, requirements: reqs,
     evidence: { profileReadable: true, bySeq: { 0: proposedRow() } },
   })
   const c = find(withProposed, 'must_have_coverage')
-  assert.notEqual(c.state, 'pass', 'a model-proposed excerpt must NOT turn the gate green on its own')
-  assert.equal(c.state, 'fail')
-  assert.match(c.observed, /model-proposed, awaiting your confirmation/,
-    'the count must say a model was involved, or a coverage rise is unattributable')
+  assert.equal(c.state, 'pass', 'a model proposal must COUNT until vetoed -- the owner\'s instruction')
+  // ...and it must say so IN THE SAME SENTENCE as the number. A count that rose because a model was
+  // consulted and does not admit it is exactly the unfalsifiable number this file forbids: the
+  // reviewer cannot tell a better profile from a chattier model.
+  assert.match(c.observed, /on a model's proposal alone — counted until you veto/,
+    'the number must disclose that a model alone supports it')
+  // The old wording claimed these rows were NOT counted. Leaving it would have reproduced the
+  // self-contradicting sentence an independent verifier caught against live production.
+  assert.doesNotMatch(c.observed, /not counted either way/,
+    'the tail must not claim the counted rows were excluded')
 
-  // The excerpt is SHOWN, not hidden. Leaving the owner a blank when a model found something real
-  // would be the opposite failure — this is strictly better information than "nothing found".
-  assert.match(c.offenders[0], /a model proposes "reduced outages from nine hours to one"/)
-  assert.match(c.offenders[0], /confirm it/)
+  // THE VETO IS ABSOLUTE. Same row, same byte-exact quote, same method -- the owner said no.
+  const vetoed = runChecks({
+    type: 'resume', pkg: RESUME_FULL, requirements: reqs,
+    evidence: { profileReadable: true, bySeq: { 0: { ...proposedRow(), decision: 'vetoed' } } },
+  })
+  const v = find(vetoed, 'must_have_coverage')
+  assert.notEqual(v.state, 'pass', 'a vetoed row must not turn the gate green')
+  assert.match(v.observed, /1 you vetoed/, 'the drop must be attributed to the owner, not left unexplained')
+  // And the offender must not ask them to confirm what they just rejected, nor claim nothing was
+  // found. Both read as the app having ignored the click.
+  assert.match(v.offenders[0], /you vetoed the proposed excerpt/)
+  assert.doesNotMatch(v.offenders[0], /confirm it/)
 
-  // And the identical row with a DETERMINISTIC method does pass — so the difference is provenance
-  // and nothing else. Without this half the case would also pass if coverage were broken outright.
+  // A VETO OUTRANKS A CONFIRMATION. `decision` and `confirmed_at` cannot honestly disagree -- the
+  // loader\'s case expression makes confirmed_at null on a vetoed row -- but if a future edit let
+  // them, the veto must still win. Fail closed on a contradiction rather than picking the yes.
+  const both = runChecks({
+    type: 'resume', pkg: RESUME_FULL, requirements: reqs,
+    evidence: { profileReadable: true, bySeq: { 0: { ...proposedRow(), decision: 'vetoed', confirmed_at: '2026-09-01T00:00:00Z' } } },
+  })
+  assert.notEqual(find(both, 'must_have_coverage').state, 'pass',
+    'a contradictory row must resolve toward the veto, never toward the confirmation')
+
+  // A rule-found row still passes and is NOT named as model-warranted -- so the disclosure tracks
+  // provenance rather than being printed unconditionally.
   const withRule = runChecks({
     type: 'resume', pkg: RESUME_FULL, requirements: reqs,
     evidence: { profileReadable: true, bySeq: { 0: { ...proposedRow(), method: 'anchored', ratio: 1 } } },
   })
-  assert.equal(find(withRule, 'must_have_coverage').state, 'pass',
-    'the same excerpt from a RULE is coverage — only the provenance may change the verdict')
+  const r = find(withRule, 'must_have_coverage')
+  assert.equal(r.state, 'pass')
+  assert.doesNotMatch(r.observed, /on a model's proposal alone/,
+    'a rule-found row must not be reported as model-warranted')
+})
+
+test('H:an-unknown-method-does-not-count: the allow-list fails closed', () => {
+  // `ruleEvidenceOf` used to name the ONE method that did not count, so anything else counted by
+  // default -- `vetted` counted only because no clause excluded it, which the source comment said
+  // out loud. A fifth value added to the schema CHECK would have started counting the moment it was
+  // written, with nothing here mentioning it and no test failing.
+  //
+  // It is an allow-list now, and this pins the DIRECTION: a method nobody taught this file about
+  // produces an UNDER-count, which is visible and honest, never an over-count that silently
+  // inflates the one number a reviewer trusts most.
+  const reqs = [{ seq: 0, verbatim: 'Improve operational reliability across the platform', item_text: '', kind: 'must_have' }]
+  const rs = runChecks({
+    type: 'resume', pkg: RESUME_FULL, requirements: reqs,
+    evidence: { profileReadable: true, bySeq: { 0: { ...proposedRow(), method: 'telepathy' } } },
+  })
+  assert.notEqual(find(rs, 'must_have_coverage').state, 'pass',
+    'a method not in the allow-list must not count -- fail closed')
 })
 
 test('H:proposed-evidence-cannot-pass-ANY-evidence-check: all three, not just the one I remembered', () => {
@@ -647,24 +694,32 @@ test('H:proposed-evidence-cannot-pass-ANY-evidence-check: all three, not just th
   const bySeq = { 0: proposedRow(), 1: proposedRow() }
   const rs = runChecks({ type: 'resume', pkg: RESUME_FULL, requirements: reqs, evidence: { profileReadable: true, bySeq } })
 
+  // RE-POINTED AT THE VETO, and the SHAPE of this case is why it survives the rule change intact.
+  // Its value was never the specific verdict -- it was being written over the SET of
+  // evidence-reading checks rather than over one name, because the defect it caught was
+  // `must_have_coverage` getting filtered while two siblings 34 and 46 lines below were left on the
+  // unfiltered `evidenceOf`. That failure mode is unchanged: `ruleEvidenceOf` now checks the veto
+  // FIRST, and a sibling that reads `evidenceOf` directly would honour a proposal and ignore a
+  // veto. A fourth evidence-reading check added later still fails here.
+  const vetoedRows = { 0: { ...proposedRow(), decision: 'vetoed' }, 1: { ...proposedRow(), decision: 'vetoed' } }
+  const vr = runChecks({ type: 'resume', pkg: RESUME_FULL, requirements: reqs, evidence: { profileReadable: true, bySeq: vetoedRows } })
   for (const key of ['must_have_coverage', 'responsibilities_addressed', 'evidence_placed']) {
-    const c = find(rs, key)
+    const c = find(vr, key)
     assert.ok(c, `${key} is missing — the scan has gone stale`)
     assert.notEqual(c.state, 'pass',
-      `${key} passed on model-proposed evidence alone — a model may propose, only a rule may accuse`)
+      `${key} passed on evidence the owner VETOED — every evidence-reading check must go through ruleEvidenceOf`)
   }
+  // `evidence_placed` specifically must not ACCUSE on a vetoed row either. Its question is "of what
+  // the profile evidences, what reached this asset" — counting a vetoed row would charge the
+  // document with omitting something the owner has said does not support the requirement.
+  assert.equal(find(vr, 'evidence_placed').state, 'not_applicable',
+    'evidence_placed must have nothing to judge when the only evidence is vetoed')
 
-  // `evidence_placed` specifically must not ACCUSE either. Its question is "of what the profile
-  // evidences, what reached this asset" — counting a proposed row would make it charge the document
-  // with omitting something only a model ever claimed was relevant.
-  assert.equal(find(rs, 'evidence_placed').state, 'not_applicable',
-    'evidence_placed must have nothing to judge when the only evidence is proposed')
-
-  // Same rows from a RULE: all three become judgeable again, so the difference is provenance alone.
-  const ruleRows = { 0: { ...proposedRow(), method: 'anchored', ratio: 1 }, 1: { ...proposedRow(), method: 'anchored', ratio: 1 } }
-  const rr = runChecks({ type: 'resume', pkg: RESUME_FULL, requirements: reqs, evidence: { profileReadable: true, bySeq: ruleRows } })
-  assert.equal(find(rr, 'must_have_coverage').state, 'pass')
-  assert.notEqual(find(rr, 'evidence_placed').state, 'not_applicable')
+  // Un-vetoed, the SAME rows are judgeable — so the difference is the owner's decision alone, not
+  // some unrelated breakage. Without this half the case would also pass if coverage broke outright.
+  assert.equal(find(rs, 'must_have_coverage').state, 'pass',
+    'an un-vetoed proposal must count — the owner\'s instruction, and the contrast this case rests on')
+  assert.notEqual(find(rs, 'evidence_placed').state, 'not_applicable')
 })
 
 // A CONFIRMED PROPOSAL IS NOT "AWAITING YOUR CONFIRMATION".
@@ -700,9 +755,109 @@ test('H:a-confirmed-proposal-is-not-reported-as-awaiting: the tail cannot contra
   })
   const cov = results.find(r => r.check_key === 'must_have_coverage')
   assert.ok(cov, 'must_have_coverage must be produced')
-  const m = /(\d+) model-proposed, awaiting your confirmation/.exec(cov.observed)
-  assert.ok(m, `expected an awaiting-confirmation clause, got: ${cov.observed}`)
+  // THE INVARIANT HERE DID NOT CHANGE -- only the sentence it reads did, and that is the point.
+  // This case exists because the observed string once claimed five rows were uncounted while its
+  // own numerator was made of two of them. Counting proposals moves those rows from the excluded
+  // clause to the included one; it does NOT make it acceptable for the clause to disagree with the
+  // number beside it. So the assertion follows the rows.
+  //
+  // All three rows now count -- one confirmed, two on the proposal alone -- and the disclosure must
+  // name exactly the two that rest on a model's say-so. Naming three would credit the model with
+  // the owner's own decision; naming one would hide a model-warranted row.
+  const m = /(\d+) on a model's proposal alone/.exec(cov.observed)
+  assert.ok(m, `expected a counted-on-a-proposal clause, got: ${cov.observed}`)
   assert.equal(Number(m[1]), 2,
-    `THE TAIL CONTRADICTS THE NUMERATOR. It reports ${m[1]} proposals "awaiting your confirmation ` +
-    `... not counted either way", but one of them is confirmed and IS counted. Observed: ${cov.observed}`)
+    `THE DISCLOSURE CONTRADICTS THE NUMERATOR. It reports ${m[1]} rows resting on a model's ` +
+    `proposal alone, but one of the three was CONFIRMED BY THE OWNER and must not be counted as ` +
+    `model-warranted. Observed: ${cov.observed}`)
+  // And the retired wording must not come back: it asserted these rows were excluded, which is now
+  // false for every one of them.
+  assert.doesNotMatch(cov.observed, /awaiting your confirmation/,
+    'the retired clause claimed counted rows were uncounted')
+  assert.doesNotMatch(cov.observed, /not counted either way/,
+    'nothing here is uncounted any more — the tail must not say so')
+})
+
+// ── H:fixed-slot-count — the owner's fixed-slot rule, and the three states it must never confuse ──
+//
+// The check decides a GATE and NAMES OFFENDERS, so it is accusation-grade: a false `fail` accuses a
+// document that is correct, and a false `pass` lets a document that broke the template ship. It
+// arrived with ZERO coverage - an independent verifier inverted all three of its states (unknown ->
+// pass, the compact_resume branch deleted so the check goes absent, mismatch -> pass) and the suite
+// stayed green on every one. These cases exist so that can never be true again.
+//
+// Owner, 2026-08-29: *"the 10 can't be increased to 12 or reduce to 8 etc so only swaps are allowed
+// not adds or drops given the limited space in the resume template"*, and *"also relevant and
+// expertise counts"*, and *"fixed slot counts change per template"*.
+
+const SLOT_PKG = {
+  SkillsBullets1: 'A\nB\nC',            // 3 items
+  SkillsBullets2: 'D\nE',               // 2 items
+  ExpertiseBullets: 'F\nG',             // 2 items
+  RelevantBullets1: 'H', RelevantBullets2: 'I', RelevantBullets3: 'J',
+}
+
+test('H:fixed-slot-count-unknown-is-not-applicable: a count nobody set accuses nobody', () => {
+  // ABSENT EVIDENCE IS not_applicable, NEVER pass AND NEVER fail. Both directions matter: `pass`
+  // reports an unmeasured document as verified, `fail` accuses one on a number nobody supplied.
+  const r = find(runChecks({ type: 'resume', pkg: SLOT_PKG }), 'fixed_slot_count')
+  assert.ok(r, 'the check must be EMITTED even when it cannot decide - gateFor cannot see an absent check')
+  assert.equal(r.state, 'not_applicable')
+  assert.match(r.observed, /no per-template slot count is set/)
+
+  // A slot count of 0 is the trap this guards: it would declare every item in the list illegal.
+  // `0` must be treated as unset, exactly like null and like an absent key.
+  const zero = find(runChecks({ type: 'resume', pkg: SLOT_PKG, slots: { SkillsBullets1: 0 } }), 'fixed_slot_count')
+  assert.equal(zero.state, 'not_applicable', 'a slot count of 0 must never be read as "zero slots allowed"')
+})
+
+test('H:fixed-slot-count-fails-on-a-mismatch-and-names-the-offender', () => {
+  const r = find(runChecks({ type: 'resume', pkg: SLOT_PKG, slots: { SkillsBullets1: 5, SkillsBullets2: 2 } }), 'fixed_slot_count')
+  assert.equal(r.state, 'fail', 'a document that lost two slots must trip the gate, not warn')
+  assert.equal(r.offenders.length, 1, 'only the list that actually broke is named')
+  assert.match(r.offenders[0], /SkillsBullets1: template holds 5, document ships 3 \(2 dropped\)/)
+  // The gate is the whole point of the fail: a finding nothing acts on is decoration. `gateFor`
+  // returns the CheckState directly, and only a DETERMINISTIC fail reaches 'fail' - a reviewer fail
+  // degrades to 'warn' - so this also pins the check's `engine` as deterministic.
+  assert.equal(r.engine, 'deterministic')
+  assert.equal(gateFor([r]), 'fail')
+})
+
+test('H:fixed-slot-count-passes-only-on-an-exact-match, and names what it could not measure', () => {
+  const r = find(runChecks({ type: 'resume', pkg: SLOT_PKG, slots: { SkillsBullets1: 3, SkillsBullets2: 2 } }), 'fixed_slot_count')
+  assert.equal(r.state, 'pass')
+  assert.equal(r.offenders.length, 0)
+  // A PARTIAL measurement must never read as a whole one: the four lists with no count are named in
+  // the observed text, so a reader can tell "all lists correct" from "the two I could check".
+  assert.match(r.observed, /not set: RelevantBullets1, RelevantBullets2, RelevantBullets3, ExpertiseBullets/)
+
+  // An over-count is a violation in the other direction and must be worded as such.
+  const over = find(runChecks({ type: 'resume', pkg: SLOT_PKG, slots: { SkillsBullets1: 2 } }), 'fixed_slot_count')
+  assert.equal(over.state, 'fail')
+  assert.match(over.offenders[0], /\(1 added\)/)
+})
+
+test('H:fixed-slot-count-is-emitted-for-compact-resume-as-not-applicable, never absent', () => {
+  // `checks.ts:311-325` records what happens when a check silently stops being emitted: six of them
+  // vanished from the compact resume and `gateFor` could not see any of them. So the compact resume
+  // - which DELIBERATELY drops skills to fit a character budget - gets an explicit not_applicable
+  // naming that reason, rather than being skipped.
+  const rs = runChecks({ type: 'compact_resume', pkg: SLOT_PKG, slots: { SkillsBullets1: 3, SkillsBullets2: 2 } })
+  const r = find(rs, 'fixed_slot_count')
+  assert.ok(r, 'ABSENT from the results array is the failure this case exists for, not merely not_applicable')
+  assert.equal(r.state, 'not_applicable')
+  assert.match(r.observed, /fitCompactSkills/)
+})
+
+test('H:fixed-slot-count-covers-relevant-and-expertise, not just skills', () => {
+  // Scope is the owner's, stated twice: *"also relevant and expertise counts"*. A check that quietly
+  // covered only the two skills lists would satisfy every other case above and still be wrong.
+  const r = find(runChecks({
+    type: 'resume', pkg: SLOT_PKG,
+    slots: { ExpertiseBullets: 4, RelevantBullets2: 3 },
+  }), 'fixed_slot_count')
+  assert.equal(r.state, 'fail')
+  assert.equal(r.offenders.length, 2)
+  assert.ok(r.offenders.some(o => /^ExpertiseBullets: template holds 4, document ships 2/.test(o)))
+  assert.ok(r.offenders.some(o => /^RelevantBullets2: template holds 3, document ships 1/.test(o)))
 })

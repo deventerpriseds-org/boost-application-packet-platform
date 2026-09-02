@@ -413,7 +413,7 @@ Against the 9 non-deferred rows: **7 BUILT (78%), 8 present in some form (89%).*
 | 4.8-18 | Swaps: verbatim posting quote | `evidence.jsx` | BUILT | `CompareTab` renders the stored quote column; `qcRail.js:324` guards it — *"a quote gets read as evidence"* — with a test greping for the column name. |
 | 4.8-19 | Swaps: the reason | `evidence.jsx` | BUILT | Same table (`rationale`). |
 | 4.8-20 | Swaps: `Undo this` | `evidence.jsx:232` | PARTIAL | Correction undo exists (`QcRail.jsx:578-579`); a per-**swap** undo on this tab does not. |
-| 4.8-21 | Swaps: `Ask why` | `evidence.jsx:233` | ABSENT | No equivalent control on `CompareTab` (`:300-355`, read in full). `check: absent app/src/screens/QcRail.jsx Ask why` |
+| 4.8-21 | Swaps: `Ask why` | `evidence.jsx:233` | **BUILT — CHANGED from ABSENT 2026-08-29** | Last column of `CompareTab`; the sentence, the artifact binding and every reason it is absent are `swapAskWhy` (`qcRail.js`). **It is a §4.11 substitution, per `AC-packet-ui-final.md` §2f/AC 34, and stays inside that AC's limits:** it seeds the assistant panel and sends nothing, no swap-revert mutation was built (there is none — `appSwaps.ts` is GET-only, which is why the prototype's `Undo this` does NOT ship beside it), and the `Why` column still prints the answer it always printed. **It is NOT the one-liner §14 called it:** the prototype interpolates `${r.list}`, which here is a CHECK-constrained enum (`skills_1`), so the list is resolved through `insertion.merge_field` → `FIELD_LABEL` to read "Skills 1". Guarded by `H:ask-why-never-names-the-raw-list-enum`, `H:ask-why-is-null-unless-it-has-an-artifact-to-be-about`, `H:ask-why-seeds-the-panel-and-sends-nothing`. |
 | 4.8-22 | Tab: **Passes** — what each loop closed / what remained / where it halted | `evidence.jsx:247-264` | BUILT | `LoopsTab` `QcRail.jsx:356-399` |
 | 4.8-23 | Tab: **Checks** — grouped by name, observed vs target, named offenders | `evidence.jsx:266-289` | BUILT | `ChecksTab` `QcRail.jsx:400-439`; `CheckRow` `:182-239`; offenders `AssetGateDrawer.jsx:93-100`. |
 | 4.8-24 | Tab: **Review** — blind second model: grade, agreement, prompt version, citations, critique | `evidence.jsx:291-334` | BUILT | `ReviewTab` `QcRail.jsx:440-480` |
@@ -539,6 +539,43 @@ already made once.
 ---
 
 ## 13. THE HEADLINE, AND THE DELTA
+
+### 13-CURRENT. Re-counted 2026-09-02 — THIS IS THE LIVE NUMBER
+
+> **THIS DOCUMENT IS THE BASELINE for prototype UI-parity progress** — owner-confirmed
+> 2026-09-02: *"I believe it's PROTOTYPE-COVERAGE.md ... update it for what is now done
+> regarding prototype UI parity progress."* Read §13-CURRENT for the live picture; §13a below is
+> the 2026-08-25 measurement, kept for its delta narrative and NOT current.
+
+> # **159 of 183 prototype elements present (86.9%)**
+>
+> | | Count | Share of 183 |
+> |---|---:|---:|
+> | **BUILT** | **159** | **86.9%** |
+> | **PARTIAL** | 22 | 12.0% |
+> | **ABSENT** | **2** | **1.1%** |
+> | *present (BUILT + PARTIAL)* | *181* | *98.9%* |
+>
+> **+11 BUILT since the 148 (80.9%) headline in §13a**, which was measured 2026-08-25 and never
+> caught up with the rows that shipped after it.
+>
+> **ONLY TWO ROWS ARE ABSENT, and neither is ordinary open work:**
+> - **4.5-12** `PickList` (`type: 'select'`) — `shapeOf()` (`assetBlocks.js:144-151`) emits only
+>   `static`/`pipe`/`list`/`prose`. Portfolio-only, no resume impact; the ranking calls it
+>   *"expensive, low value"*.
+> - **4.11-4** — one of the assistant-panel rows, gated on the owner's shell-cap decision.
+>
+> **METHOD, and the trap in it.** Counted mechanically from the 4th cell of every
+> `| <section>-<n> |` row, taking the verdict token appearing EARLIEST in the cell. Matching on
+> mere containment instead scores `BUILT - CHANGED from ABSENT` as ABSENT and yields a false
+> 134/181 with 18 phantom ABSENT rows -- that error was made and caught on 2026-09-02, and the
+> corroboration that the positional count is right is that `.claude/DEFERRED.md` independently
+> quotes "2 ABSENT + 22 PARTIAL", which this method reproduces exactly.
+>
+> **The §14 ranked list was stale in the other direction** and is corrected in the same pass:
+> 4.8-21 was ranked GATED while the row table had already scored it BUILT. THREE of the five
+> ranks in §14 have now closed without anyone building anything. **A rank is not a verdict —
+> the row tables are authoritative; §14 is a reading of them that goes stale.**
 
 ### 13a. The number
 
@@ -723,7 +760,7 @@ staleness `D:ledger-stale-row-fails` guards in `.claude/DEFERRED.md`, in a docum
 | ~~1~~ | **4.11-1 → 4.11-8** — the assistant panel | §4.11 | **SPLIT, not shipped and not blocked as one thing.** Two rows SHIPPED without the panel (PR #58): **4.11-8** the omit-list caveat, derived and conditional, and **4.11-5**'s two missing quick actions as in-place seeders (three of the five already existed). **Three rows are NOT BUILDABLE on today's data and must not render:** `Revert` has no route for either meaning, `Keep` is worse than vacuous (the route commits before it replies), and **4.11-6** is unreachable because `section` is the caller's input echoed back. **4.11-1's dock is a SHELL decision, not a breakpoint one** — this app caps content at `1280` against the prototype's `1560`, and the 280px difference is exactly the right column D4 deleted, so no viewport passes. What remains is an owner choice: a float-only panel, or raising the shell cap. |
 | ~~2~~ | ~~**4.6-9** — the keyword panel's skill-swap hatch~~ | §4.6 | **ALREADY BUILT — the rank was stale, not the work.** Ranked here as *"blocked on reading the owner's live skill fields"*; the skill-bank work closed that and nobody revisited the rank. Traced end to end 2026-08-27: `useSkillBank` → `api.skillBankGet()` → `app/skill-bank` → `keywordSwapOptions` → the `<select>` at `AssetBlocks.jsx:998`. §4.6 now has no ABSENT row. |
 | ~~3~~ | ~~**4.1-20** — `Where it is used →` on an evidenced requirement~~ | §4.1 | **SHIPPED.** The `list → artifact` map is derived from the packet's own `artifacts` (`listOwnersFromArtifacts`) instead of from render-time registration, so it is populated on the JD step too. `D:jd-evidence-has-no-field-link` is CLOSED. Guarded by `H:jd-field-link-is-wired-not-just-derived` — added after five wiring mutations passed suite AND build, including reverting the exact defect the ledger row described. |
-| 4 | **4.8-21** — `Ask why` on a swap row | §4.8 | **GATED, and it is not the one-liner §14 once called it.** It is specced to seed the assistant panel, so its target does not exist. Moves with rank 1. |
+| ~~4~~ | ~~**4.8-21** — `Ask why` on a swap row~~ | §4.8 | **SHIPPED — the rank was stale, not the work, and this is the THIRD rank in this table to close that way.** Re-checked against source 2026-09-02: `QcRail.jsx:388` renders a real `<button>` carrying `data-qc={QC_HOOKS.askWhy}` and `data-qc-artifact={ask.artifactId}`, fed by `swapAskWhy(s, owners)` at `:359`; the seed builder is `qcRail.js:813` with its null contract documented at `:784`. Its sibling `swapUndo` shipped alongside it. The 'target does not exist' verdict was written when the row was read as needing the 4.11 panel; it seeds through `onAsk` instead, which exists. |
 | 5 | **4.5-12** — `PickList` (`type: 'select'` fields) | §4.5 | **OPEN, expensive, low value.** Portfolio only, so no resume impact. |
 
 **Plus the two the ranking omits, and NEITHER is open work:** **4.1-6** re-verdicted **DELIBERATE**
@@ -732,8 +769,10 @@ staleness `D:ledger-stale-row-fails` guards in `.claude/DEFERRED.md`, in a docum
 measurement removed as a *number*. And **4.7-8** (`Forwards to the assistant`) cannot be built
 independently of rank 1 and moves with it.
 
+**RE-CHECKED 2026-09-02 AGAINST SOURCE — the read below holds and is now STRONGER.** 4.8-21 has since been proven SHIPPED (see rank 4), so only 4.7-8 remains gated behind the panel decision. **Any count of "9-11 remaining UI parity rows" is STALE** — it predates the 2026-08-27 re-reconciliation and does not survive this table. Exactly ONE row in this list is open and unblocked: 4.5-12, which is portfolio-only and explicitly low value.
+
 **The honest read: the packet module's prototype-alignment backlog has NO unblocked work left at any
-size.** What remains is one owner decision (the panel), two rows gated behind it (4.8-21, 4.7-8), one
+size.** What remains is one owner decision (the panel), one row gated behind it (4.7-8), one
 row that is explicitly low value and portfolio-only (4.5-12), and one row that closed as DELIBERATE
 rather than as work (4.1-6). The remaining engineering weight for this module has moved to
 `.claude/DEFERRED.md`, which carries **33 open rows**.

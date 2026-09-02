@@ -22,7 +22,12 @@ import { normalizePostingText, decodeEntities, groundingText } from '../dist/fun
 import { buildRequirements, locate, mapKind, sentenceBounds } from '../dist/functions/tests/requirements.js'
 import { onOmitList, omitEntries, similarity, itemTokens } from '../dist/functions/tests/swaps.js'
 import { runChecks, gateFor, attentionCount, COVERAGE_THRESHOLD, MIN_JUDGEABLE_TOKENS } from '../dist/functions/tests/checks.js'
-import { computeArtifactScore, judgedMustHaveIds, mustHaveSource, parseMustHaveSource } from '../dist/functions/tests/artifactScore.js'
+// DEFAULT_WEIGHTS joins this existing import so H:one-composite-formula can compare the
+// reviewer's inline weighted sum against the ONE implementation that is supposed to own it.
+import { computeArtifactScore, judgedMustHaveIds, mustHaveSource, parseMustHaveSource, DEFAULT_WEIGHTS, weightedComposite } from '../dist/functions/tests/artifactScore.js'
+// DEFAULT_THRESHOLDS for H:reviewer-auto-is-off-by-default -- the seeded value IS the guard, so it
+// is read from the module rather than restated as a literal that could drift from it.
+import { DEFAULT_THRESHOLDS } from '../dist/functions/tests/checks.js'
 import { deriveFacts } from '../dist/functions/tests/ownerFacts.js'
 import { parseResumePackage, headingKeysFor } from '../dist/functions/tests/resumeParser.js'
 import { validateCitations, reviewerChecks, agreementFor } from '../dist/functions/tests/reviewer.js'
@@ -289,7 +294,10 @@ test('H11: every table this layer added is registered for migration', () => {
                    // of the defect: dropping the name from EXPECTED_TABLES fails this case on
                    // "not in EXPECTED_TABLES", and renaming the CREATE in SCHEMA_SQL fails it on
                    // "not in SCHEMA_SQL".
-                   'comparison_dimension']) {
+                   'comparison_dimension',
+                   // The coverage judge's verdicts. A model-decided check state that pg-migrate
+                   // never created would fail at runtime as "no such relation" on the gate path.
+                   'requirement_coverage']) {
     assert.ok(schema.includes(`create table if not exists ${t} `) || schema.includes(`create table if not exists ${t}(`),
       `${t} is not in SCHEMA_SQL`)
     assert.ok(new RegExp(`'${t}'`).test(schema.slice(schema.indexOf('EXPECTED_TABLES'))),
@@ -1303,19 +1311,91 @@ test('H33: every server-side body toggle has a caller that can send it', () => {
 // packet screen showing only the last pass's decisions as if they were the whole story.
 // The invariant, not the incident: any writer that clears provenance for a packet must scope the
 // clear to the pass it is rewriting.
-test('H34: provenance deletes are scoped to a pass, never to a whole packet', () => {
+// AMENDED 2026-08-29, with the owner's explicit approval, to carve out ground zero — and the
+// carve-out is deliberately narrow because the incident above must still be caught.
+//
+// WHY THE ORIGINAL RULE WAS BROADER THAN ITS OWN RATIONALE. H34's invariant is "scope the clear to
+// the pass it is rewriting". At loop 0 there IS no earlier pass of the current build to protect:
+// loop 0 is only ever written at ground zero — `appPackets.ts` renderArtifact for a whole-package
+// build, and `appRemediation.ts:179` guarded by `firstPass === 1`, with a later run deliberately
+// NOT rewriting loop 0. The rows a loop-0 clear removes describe a draft that has just been
+// replaced, so keeping them is not provenance, it is a stale higher number outranking newer text.
+//
+// WHAT THAT COST, measured on the Trinnex resume (artifact cfdd82e7, production, 2026-08-29):
+// a rebuild wrote loop 0 on 08-28 while loops 1-3 from 08-20 survived. `insertionsGet` picks
+// `current` with `Math.max(loop)`, so the screen served the EIGHT-DAY-OLD pass — 7 items, 4 over
+// the 24-char limit — while the rebuild's own compliant 10 items sat beside it unread. Three
+// separate defects were reported off that one cause and none of them were real.
+//
+// THE CARVE-OUT CANNOT REACH THE ORIGINAL INCIDENT. That incident was pass 2 destroying pass 1 via
+// an UNCONDITIONAL packet-wide delete. A delete reachable only under `loop === 0` can never run on
+// pass 2, so the guard below still fails on the exact construct that prompted it — proven by
+// mutation, not assumed: restoring the unconditional delete re-fails this test.
+/**
+ * The [start, end) span of every `if (loop === 0) { ... }` block in a source file.
+ *
+ * Brace-walking, not a character window. H34's carve-out originally accepted any unscoped delete
+ * with a `loop === 0` mention within 400 characters, which tests NEARNESS rather than SCOPE. An
+ * independent verifier defeated it in one edit -- `const isGroundZero = loop === 0` on its own
+ * line, a trivial `if (isGroundZero) {}` after it, then an UNCONDITIONAL packet-wide delete. That
+ * is the P3-21 incident restored verbatim and the suite passed 893/893.
+ *
+ * String and template literals are skipped so a brace inside a SQL string cannot close a block
+ * early -- these files are full of `delete from x where y=$1` inside backticks.
+ */
+function guardedBlocks(code) {
+  const spans = []
+  const re = /\bif\s*\(\s*loop\s*===\s*0\s*\)\s*\{/g
+  let m
+  while ((m = re.exec(code))) {
+    let depth = 0, i = m.index + m[0].length - 1, quote = null
+    for (; i < code.length; i++) {
+      const c = code[i], prev = code[i - 1]
+      if (quote) { if (c === quote && prev !== '\\') quote = null; continue }
+      if (c === '"' || c === "'" || c === '`') { quote = c; continue }
+      if (c === '{') depth++
+      else if (c === '}') { depth--; if (depth === 0) { spans.push([m.index, i]); break } }
+    }
+  }
+  return spans
+}
+
+test('H34: provenance deletes are scoped to a pass, except at ground zero (loop 0)', () => {
   const offenders = []
   for (const [file, body] of allSources()) {
     const code = stripComments(body)
-    // The real construct: a DELETE from a provenance table keyed by packet alone.
+    // The real construct: a DELETE from a provenance table keyed by packet or artifact alone.
     const re = /delete\s+from\s+(swap_decision|skill_candidate|insertion)\s+where\s+([^`'"]*)/gi
     let m
     while ((m = re.exec(code))) {
       const [, table, predicate] = m
-      if (!/\bloop\s*=/.test(predicate)) offenders.push(`${file}: delete from ${table} where ${predicate.trim().slice(0, 60)}`)
+      if (/\bloop\s*=/.test(predicate)) continue
+      // CONTAINMENT, NOT PROXIMITY. The first version of this carve-out accepted any unscoped
+      // delete with a `loop === 0` mention in the preceding 400 characters, which is a test of
+      // NEARNESS and not of SCOPE. An independent verifier broke it in one edit — the P3-21
+      // incident reinstated verbatim, and the whole suite passed 893/893:
+      //
+      //     const isGroundZero = loop === 0
+      //     if (isGroundZero) { console.log('ground zero') }
+      //     await client.query(`delete from swap_decision where packet_id=$1`, [packetId])
+      //
+      // The delete there runs on EVERY loop; only the mention was nearby. Comments were already
+      // stripped, so the miss was real code, which is exactly the case that matters. My own
+      // mutation had only tried the literal construct and so proved the guard caught one shape
+      // while I assumed it caught the class.
+      //
+      // So find each `if (loop === 0)` and walk its braces to get the block's true extent, then
+      // require the delete to sit INSIDE one. A mention that does not open a block protects
+      // nothing and no longer excuses anything.
+      if (guardedBlocks(code).some(([s, e]) => m.index > s && m.index < e)) continue
+      offenders.push(`${file}: delete from ${table} where ${predicate.trim().slice(0, 60)}`)
     }
   }
-  assert.deepEqual(offenders, [], 'a packet-wide provenance delete erases every earlier pass')
+  assert.deepEqual(offenders, [],
+    'a packet-wide provenance delete outside loop 0 erases every earlier pass. The carve-out requires '
+    + 'the delete to sit INSIDE a BRACED `if (loop === 0) { ... }` block -- a brace-less if, or a '
+    + '`loop === 0` mention that does not open the block containing the delete, is not a scope and '
+    + 'does not qualify')
 })
 
 test('H34b: swap_decision and skill_candidate carry the pass in their key', () => {
@@ -3251,11 +3331,24 @@ test('H:model-evidence-is-labelled: a model-proposed evidence row has its own me
   const schema = readFileSync(new URL('../src/functions/tests/schema.ts', import.meta.url), 'utf8')
   const sql = schema.slice(schema.indexOf('SCHEMA_SQL = `') + 14, schema.indexOf('\n`;'))
 
-  // (1) The three provenances, and no more — a fourth added without a thought here should fail.
+  // (1) The FOUR provenances, and no more — a fifth added without a thought here should fail, and
+  // this guard did exactly that when `judged` was added (2026-09-01), which is why it says four now
+  // rather than having been quietly widened to "at least three".
+  //
+  // `judged` is the one that COUNTS toward coverage, so its admission was the deliberate act:
+  // a proposal that survived an adversarial second read (supportJudge.ts) naming what the excerpt
+  // does NOT show before it could claim support, cited to a byte-verified span. It is a separate
+  // value from `proposed` precisely so a query can still tell "a model named this" from "a model
+  // named this AND it survived being attacked" — collapsing them would lose the distinction the
+  // gate now depends on.
   const checks = [...sql.matchAll(/method in \(([^)]*)\)/g)].map(m => m[1].replace(/\s|'/g, ''))
   assert.ok(checks.length >= 1, 'the method CHECK has vanished from SCHEMA_SQL')
-  assert.ok(checks.some(c => c === 'exact,anchored,proposed'),
-    `no method CHECK admits a model-proposed row: found ${JSON.stringify(checks)}`)
+  assert.ok(checks.some(c => c === 'exact,anchored,proposed,vetted'),
+    `no method CHECK admits both a proposed and a judged row: found ${JSON.stringify(checks)}`)
+  for (const c of checks) {
+    if (/proposed/.test(c)) assert.equal(c, 'exact,anchored,proposed,vetted',
+      `a method CHECK admits a different set: ${c} — two homes that disagree is an insert one permits and the other rejects`)
+  }
 
   // (2) Nullable, never defaulted. A default is the silent version of lying about provenance.
   assert.match(sql, /add column if not exists proposal_version int;/,
@@ -4522,4 +4615,624 @@ test('H:deploy-waits-for-its-own-build: pg-migrate cannot run against an older b
   // And it must refuse rather than migrate anyway when convergence never happens.
   assert.match(wf, /Refusing to migrate/,
     'when the worker never reports the deployed sha the workflow must FAIL, not fall through to pg-migrate')
+})
+
+// ── H:rebuild-clears-superseded-loops ───────────────────────────────────────────────────────────
+//
+// EVIDENCE (production, opp 9f9c370a, artifact cfdd82e7 `resume`, read 2026-08-29):
+//
+//   loop 0 | 10 items | longest 24 | 0 over limit | written 2026-08-28 02:50:40  <- the rebuild
+//   loop 1 |  … 2026-08-20 00:44:30
+//   loop 2 |  … 2026-08-20 16:41:35
+//   loop 3 |  7 items | longest 31 | 4 over limit | written 2026-08-20 16:44:40  <- what shipped
+//
+// `insertionsGet` picks `current` with `Math.max(loop)`, so the EIGHT-DAY-OLD pass outranked the
+// rebuild that replaced it: the owner saw 31- and 37-character skill lines against a live 24-char
+// limit, and every `original -> final` arrow vanished because `listBodyModel` matched loop-3 lines
+// against loop-0 `to_label`s. Three separate "bugs" were reported off this one cause; none of them
+// were real. A rebuild writes loop 0 in place while the passes that refined the SUPERSEDED draft
+// survive and keep winning on number.
+//
+// THE INVARIANT: writing loop 0 is ground zero and must clear every later pass, in BOTH tables.
+// Asserted on both because a fix to one alone leaves insertions and swaps describing different
+// passes, which is precisely the state that made the arrows disappear.
+test('H:rebuild-clears-superseded-loops: writing loop 0 clears later passes in both writers', () => {
+  const ins = src('appInsertions.ts')
+  const swp = src('appSwaps.ts')
+
+  // The unscoped delete must exist AND be reachable only under loop 0 — an unconditional unscoped
+  // delete would destroy a live remediation run's earlier passes (the defect P3-21 added `loop` for).
+  assert.ok(/if\s*\(\s*loop\s*===\s*0\s*\)[\s\S]{0,400}?delete from insertion where artifact_id=\$1\s*`/.test(ins),
+    'appInsertions.ts: a loop-0 write must clear EVERY loop for the artifact, or a stale higher-numbered '
+    + 'pass keeps outranking the rebuild that replaced it')
+  assert.ok(/delete from insertion where artifact_id=\$1 and loop=\$2/.test(ins),
+    'appInsertions.ts: loops 1..n must still delete only their own rows (P3-21)')
+
+  assert.ok(/if\s*\(\s*loop\s*===\s*0\s*\)[\s\S]{0,600}?delete from swap_decision where packet_id=\$1\s*`/.test(swp),
+    'appSwaps.ts: a loop-0 write must clear EVERY swap loop, or swaps and insertions describe different '
+    + 'passes and every original->final arrow silently disappears')
+  assert.ok(/delete from skill_candidate where packet_id=\$1\s*`/.test(swp),
+    'appSwaps.ts: skill_candidate must be cleared with swap_decision or candidates outlive their swaps')
+  assert.ok(/delete from swap_decision where packet_id=\$1 and loop=\$2/.test(swp),
+    'appSwaps.ts: loops 1..n must still delete only their own rows (P3-21)')
+})
+
+// ── H:loop-zero-clear-rests-on-the-cache-hit ────────────────────────────────────────────────────
+//
+// THE DEPENDENCY THAT MAKES THE LOOP-0 CLEAR SAFE, PINNED — because it is NOT the one the
+// implementer believed, and an independent verifier had to say so.
+//
+// The claim made when `H:rebuild-clears-superseded-loops` shipped was: "a loop-0 clear cannot run
+// during a live remediation run, because `appRemediation.ts` guards its baseline write with
+// `firstPass === 1`." THAT IS WRONG. `firstPass` guards `writeInsertions` only. `writeSwaps` is
+// never called from `appRemediation.ts` at all — its single call site is `appPackets.ts`
+// `ensurePackage`, which remediation invokes on EVERY run, before that guard.
+//
+// What actually keeps it safe is the CACHE HIT: `ensurePackage` returns early when a package is
+// already stored and still grounded, so run 2+ never reaches the generate-and-writeSwaps path.
+// Remediation refuses to run at all when `!grounded`, so any packet that completed a pass has
+// `jd_grounded = true` and hits the cache next time.
+//
+// That is a real invariant and it holds — but nothing named it, so editing the cache predicate
+// would silently reopen a packet-wide provenance delete inside a live loop with the suite green.
+// This test is that name. If the early return or its predicate moves, come back and re-derive
+// whether `writeSwaps` can now be reached on a second remediation pass BEFORE relaxing this.
+test('H:loop-zero-clear-rests-on-the-cache-hit: ensurePackage still returns early on a cached package', () => {
+  const pk = stripComments(src('appPackets.ts'))
+
+  // The early return must exist and must precede the generation path that calls writeSwaps.
+  const cachedAt = pk.search(/const cached[^\n]*=\s*\(!regen/)
+  const returnAt = pk.search(/if \(cached\) return \{/)
+  const swapsAt = pk.search(/writeSwaps\(/)
+  assert.ok(cachedAt > -1, 'appPackets.ts: the `cached` predicate is gone — the loop-0 clear in '
+    + 'writeSwaps is no longer protected from a second remediation pass')
+  assert.ok(returnAt > cachedAt, 'appPackets.ts: `if (cached) return` no longer follows the predicate')
+  assert.ok(swapsAt > returnAt, 'appPackets.ts: writeSwaps is no longer AFTER the cache early-return — '
+    + 'a remediation run on pass 2+ could now reach it and clear every earlier pass of the live run')
+
+  // And the predicate must still be the conjunction the argument depends on: a stored package,
+  // no explicit regen, and not stale-ungrounded. Dropping any term re-opens the path.
+  const pred = pk.slice(cachedAt, returnAt)
+  for (const term of ['!regen', '!staleUngrounded', 'pkg_json']) {
+    assert.ok(pred.includes(term),
+      `appPackets.ts: the cache predicate no longer tests ${term}; the loop-0 provenance clear `
+      + 'depends on this early return being taken on every remediation pass after the first')
+  }
+
+  // writeSwaps must still be called with the literal ground-zero loop. If a caller ever passes a
+  // computed pass number here, the clear stops being ground-zero-only and the carve-out is void.
+  assert.match(pk, /writeSwaps\([^)]*\{[\s\S]{0,400}?loop:\s*0\s*,?\s*\}/,
+    'appPackets.ts: writeSwaps is no longer called with a literal `loop: 0` — a computed loop would '
+    + 'make the unscoped clear reachable on a real remediation pass')
+})
+
+// ---------------------------------------------------------------------------------------------
+// H:every-evidence-count-has-a-reader — a count nobody reads is a measurement that does not exist.
+//
+// F-9, found by an independent verifier: `vetted` shipped WRITE-ONLY. It was added to
+// `writeEvidence`'s return with the explicit rationale that "a caller must be able to see the
+// number a model moved" — and then omitted from the ONE place those counts surface
+// (`appPackets.ts`). TypeScript stayed quiet because that caller destructures a subset. `vetted` is
+// the count that MOVES must_have_coverage, so the number that changed was the only one invisible.
+//
+// THE INVARIANT, NOT THE INCIDENT: every count the evidence pass returns must be read somewhere.
+// This is the same class as the `correction.frame` write-only defect the repo's CLAUDE.md cites,
+// and the same self-attack the rules prescribe ("Who READS what you wrote?").
+test('H:every-evidence-count-has-a-reader', () => {
+  const body = src('appRequirements.ts')
+  // The declared return type of writeEvidence — read from the source, not from memory.
+  const at = body.indexOf('export async function writeEvidence')
+  assert.ok(at > -1, 'writeEvidence moved — this scan has gone stale')
+  const sig = body.slice(at, body.indexOf('> {', at))
+  const counts = [...sig.matchAll(/(\w+):\s*number\b/g)].map(m => m[1])
+  assert.ok(counts.length >= 6, `expected the count block, found ${JSON.stringify(counts)}`)
+
+  const readers = src('appPackets.ts') + src('appChecks.ts')
+  const unread = counts.filter(c => !new RegExp(`evidence\\?\\.${c}\\b`).test(readers))
+  assert.deepEqual(unread, [],
+    `these counts are written and never read: ${unread.join(', ')} — a coverage change is only ` +
+    'attributable if the run recorded which pass moved it')
+})
+
+// H:the-judge-reports-what-it-did — F-8, same verifier, same class one level up.
+//
+// `runCoverageJudge` and `runStuffingRead` each return `{ calls, refused, failures }` and every one
+// was discarded at `evaluateArtifact`'s return. Three live consequences: a model OUTAGE was
+// invisible (the owner was told "too short to judge either way" when the call had failed), the
+// count of times a model claimed a quote the document does not contain was dropped — while
+// `coverageJudge.ts` names each refusal separately precisely because "only the second is a defect
+// worth alerting on" — and nobody could say what the judge spent.
+test('H:the-judge-reports-what-it-did', () => {
+  const body = stripComments(src('appChecks.ts'))
+  assert.match(body, /const judge = coverage \|\| stuffing \?/,
+    'evaluateArtifact must report the judge passes, not silently discard them')
+  for (const field of ['coverage_calls', 'coverage_refused', 'stuffing_calls', 'failures']) {
+    assert.ok(body.includes(field), `the judge report drops ${field}`)
+  }
+  assert.match(body, /results, score, judge \}/, 'and it must actually be returned')
+})
+
+// ── Master-filled baseline artifacts (appBaseline.ts) ────────────────────────────────────────────
+//
+// The owner asked three times for "the same process we use to build copies of these artifacts but
+// with the mastercontext information and no prompt output changes applied". The first two answers
+// were the tailored builds and the empty templates. The route exists to be neither, and its whole
+// value is the NEGATIVE property — that no model wrote any of it. A guard on that property has to
+// be structural, because a reintroduced generation call would pass every behavioural test in this
+// suite while silently making the output prompt-derived again.
+test('H:baseline-no-model: the baseline route reaches no model transport, directly or by import', () => {
+  const src = readFileSync(new URL('../src/functions/tests/appBaseline.ts', import.meta.url), 'utf8')
+  // Strip comments first: this file DISCUSSES OpenAI and buildPackageForJD at length, and a guard
+  // that fires on its own explanatory prose is the cry-wolf failure hardening rule 2 forbids.
+  const code = src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')
+  for (const banned of ['api.openai.com', 'buildPackageForJD', 'ensurePackage', 'assemblePackage', 'artifactAiEdit']) {
+    assert.ok(!code.includes(banned),
+      `appBaseline.ts must not reach generation (${banned}); its output would then be prompt-derived`)
+  }
+  // The positive half: it must still go through the SHARED render path rather than growing its own
+  // copy of the copy-and-inject logic, which is what "extend, don't duplicate" requires here.
+  assert.ok(code.includes('renderArtifact'), 'baseline must render via the shared renderArtifact')
+  assert.ok(code.includes('loadMasterBaseline'), 'baseline content must come from loadMasterBaseline')
+})
+
+// The two placeholders MasterContext cannot fill. Left unset they are DELETED by
+// stripLeftoverTokens rather than left visible, so the failure is silent blank space in a slide.
+// The owner supplied the standing values on 2026-09-01: company = Company X, coverletterdate = today.
+test('H:baseline-standing-fields: @Company and @CoverLetterDate are always populated', async () => {
+  const { baselinePkg, todayIso, BASELINE_COMPANY_PLACEHOLDER } =
+    await import('../dist/functions/tests/appBaseline.js')
+
+  // Empty master — the seeded first values must still land.
+  const bare = baselinePkg({})
+  assert.equal(bare['@Company'], BASELINE_COMPANY_PLACEHOLDER)
+  assert.equal(bare['@CoverLetterDate'], todayIso())
+
+  // Master content must SURVIVE the overlay, and the overlay must win only on its own two keys.
+  const withMaster = baselinePkg({ ResumeSummary: 'a standing summary', SkillsBullets1: 'x | y' })
+  assert.equal(withMaster.ResumeSummary, 'a standing summary')
+  // The ITEMS survive; the stored separator does not. This assertion used to read
+  // `equal(..., 'x | y')`, which encoded the pipes DEFECT as expected behaviour and would have
+  // defended it against the fix -- a test asserting the incident rather than the invariant.
+  assert.deepEqual(withMaster.SkillsBullets1.split('\n'), ['x', 'y'])
+  assert.equal(withMaster['@Company'], BASELINE_COMPANY_PLACEHOLDER)
+
+  // A caller override wins over the seed — this is what keeps the value user-changeable rather
+  // than a hardcoded constant, per the repo's no-hardcoded-config rule.
+  const overridden = baselinePkg({}, { company: 'Acme', date: '2026-01-02' })
+  assert.equal(overridden['@Company'], 'Acme')
+  assert.equal(overridden['@CoverLetterDate'], '2026-01-02')
+
+  // Blank/whitespace input must fall back to the seed rather than injecting an empty string, which
+  // would be stripped and blank the field — the exact defect the standing values exist to prevent.
+  const blank = baselinePkg({}, { company: '   ', date: '' })
+  assert.equal(blank['@Company'], BASELINE_COMPANY_PLACEHOLDER)
+  assert.equal(blank['@CoverLetterDate'], todayIso())
+})
+
+// THE SHAPE OF A RENDERED LIST — the check this suite did not have.
+//
+// The owner opened the baseline documents and found two defects no assertion could have told him:
+// skills/expertise/relevant rendered as `A|B|C` instead of bullets, and all 36 pooled relevant terms
+// in each of three slots. `checks.ts` WORD_RULES covers only the six PROSE fields, so nothing
+// anywhere checked the SHAPE of any of the six SLOT_FIELDS.
+//
+// WHY THE PIPES ONLY EVER APPEARED HERE, which is the part worth encoding. In a normal build the
+// master text is PROMPT INPUT — `pipeline.ts:405` passes `mc` to `resolveZapVars(prompts.resume_user,
+// mc, jd)` and the document is filled from `parseResumePackage(<model output>)`. The model emits
+// bullet lists, so the pipe-delimited STORAGE format never reaches a document. `appBaseline` was the
+// first path to render master text directly, so it was the first to surface the stored separator.
+// ` | ` is the COMPACT resume's separator (`compactFit.ts` DEFAULT_SEPARATOR), not the full resume's.
+test('H:baseline-shape: rendered slot fields are newline items, capped by the configured slot count', async () => {
+  const { shapeSlotFields } = await import('../dist/functions/tests/appBaseline.js')
+  const { SLOT_FIELDS } = await import('../dist/functions/tests/slots.js')
+
+  // The live stored shapes, verbatim from diag/skill-sources (api-test run 33548874453).
+  const master = {
+    SkillsBullets1: 'Enterprise Governance|Technology Strategy|Risk Management|Digital Transformation',
+    SkillsBullets2: 'Strategic Roadmaps|Stakeholder Engagement|Revenue Optimization',
+    ExpertiseBullets: 'Budget Development and P&L Management|KPI-driven performance management',
+    RelevantBullets1: 'Governance and Compliance: A, B | Technology Strategy: C, D',
+    ResumeSummary: 'A prose summary | with an incidental pipe that must survive.',
+  }
+  const slots = { SkillsBullets1: 3, SkillsBullets2: null, ExpertiseBullets: null,
+                  RelevantBullets1: 2, RelevantBullets2: null, RelevantBullets3: null }
+  const out = shapeSlotFields(master, slots)
+
+  // NO SEPARATOR SURVIVES IN A SLOT FIELD. This is the defect the owner actually saw.
+  for (const f of SLOT_FIELDS) {
+    if (!out[f]) continue
+    assert.ok(!out[f].includes('|'), `${f} still contains a pipe separator: ${out[f]}`)
+  }
+
+  // Items become newline-separated, and a configured count TRIMS.
+  assert.deepEqual(out.SkillsBullets1.split('\n'),
+    ['Enterprise Governance', 'Technology Strategy', 'Risk Management'])   // capped at 3 of 4
+  assert.equal(out.SkillsBullets2.split('\n').length, 3)                    // null cap -> all kept
+  assert.equal(out.RelevantBullets1.split('\n').length, 2)                  // capped at 2
+
+  // A NULL COUNT NEVER TRIMS. slots.ts: an unset count means unknown, and inventing one "accuses
+  // every item past it" — so an absent count must pass the list through whole, not truncate it.
+  const untrimmed = shapeSlotFields(master, undefined)
+  assert.equal(untrimmed.SkillsBullets1.split('\n').length, 4)
+
+  // PROSE IS NOT A LIST. ResumeSummary is not a slot field and must survive byte-identical,
+  // incidental pipe and all — splitting a paragraph on punctuation would shred it.
+  assert.equal(out.ResumeSummary, master.ResumeSummary)
+})
+
+// THE SEEDED RELEVANT LISTS — the nine that replace "whichever nine happened to be first".
+//
+// With no JD, shapeSlotFields takes items.slice(0, 3) of a 36-term LIBRARY: the first nine in
+// storage order, all of one category and part of another. Mechanically correct, editorially
+// arbitrary. These nine came from the owner's own Zap rule run against the Trinnex JD (exclude
+// anything Skills1/Skills2/competencies already cover, order by ATS match, split 3/3/3), then
+// corrected by the owner for AI redundancy: "replace AI in operations to Ops automation, and AI/ML
+// advancements to Data Insights".
+test('H:baseline-relevant-seed: three lists of three, within the character rule, overridable', async () => {
+  const { SEED_RELEVANT_LISTS, RELEVANT_FIELDS, relevantOverlay, baselinePkg } =
+    await import('../dist/functions/tests/appBaseline.js')
+
+  // SHAPE: exactly three lists of exactly three. The template holds 3 per slot and the Zap states
+  // it as a hard requirement; a fourth item would be silently dropped by the slot trim.
+  assert.equal(SEED_RELEVANT_LISTS.length, 3)
+  for (const list of SEED_RELEVANT_LISTS) assert.equal(list.length, 3)
+
+  // THE CHARACTER RULE, asserted rather than trusted to a comment. The Zap's final wording is "no
+  // more than one item greater than 24 characters, including spaces in any list".
+  for (const list of SEED_RELEVANT_LISTS) {
+    const over24 = list.filter(t => t.length > 24)
+    assert.ok(over24.length <= 1, `list has ${over24.length} items over 24 chars: ${over24.join(', ')}`)
+  }
+
+  // NO DUPLICATES ACROSS THE NINE. Three slots printed side by side make a repeat obvious in a way
+  // one pooled block hides -- the same reason fitCompactSkills collapses duplicates.
+  const all = SEED_RELEVANT_LISTS.flat()
+  assert.equal(new Set(all.map(s => s.toLowerCase())).size, 9, 'the nine must be distinct')
+
+  // THE AI CORRECTION HOLDS. The owner's point was that three AI-prefixed terms read as one idea
+  // repeated. This fails if a later edit reintroduces the cluster.
+  const aiTerms = all.filter(t => /\bAI\b|AI\//i.test(t))
+  assert.ok(aiTerms.length <= 1, `expected at most one AI-prefixed term, got: ${aiTerms.join(', ')}`)
+
+  // THE OVERLAY WINS over the pooled Library text, which is the whole point -- without it these
+  // three fields carry the 36-term pool sliced to length.
+  const pooled = 'Governance and Compliance: A, B | Technology Strategy: C, D | Business: E, F'
+  const pkg = baselinePkg({ RelevantBullets1: pooled, RelevantBullets2: pooled, RelevantBullets3: pooled })
+  RELEVANT_FIELDS.forEach((f, i) => {
+    assert.deepEqual(pkg[f].split('\n'), [...SEED_RELEVANT_LISTS[i]])
+  })
+
+  // A CALLER LIST WINS over the seed -- this is what keeps the nine a seeded first value rather
+  // than a hardcoded constant, per the repo's no-hardcoded-config rule.
+  const custom = relevantOverlay([['A', 'B'], ['C'], ['D', 'E', 'F']])
+  assert.deepEqual(custom.RelevantBullets1.split('\n'), ['A', 'B'])
+  assert.deepEqual(custom.RelevantBullets3.split('\n'), ['D', 'E', 'F'])
+
+  // AND A MALFORMED ONE FALLS BACK rather than blanking the slot. A blank Relevant column is the
+  // silent-deletion failure stripLeftoverTokens already causes once; it must not arrive by a
+  // second route.
+  assert.deepEqual(relevantOverlay([]).RelevantBullets1.split('\n'), [...SEED_RELEVANT_LISTS[0]])
+  assert.deepEqual(relevantOverlay(undefined).RelevantBullets2.split('\n'), [...SEED_RELEVANT_LISTS[1]])
+})
+
+// THE TWO DEFECTS AN INDEPENDENT VERIFIER FOUND IN GUARDS THAT WERE THEMSELVES MUTATION-PROVEN.
+//
+// H:baseline-shape and H:baseline-relevant-seed both FIRED under five mutations -- they are real --
+// and both were still BLIND to the inputs below, which sat in HEAD with the suite 1026/1026 green.
+// That is the lesson worth encoding: a guard proving it can fail is not a guard proving it covers
+// the input space. Each case here is an input the earlier guards never constructed.
+// Evidence: .claude/verify/VERIFY-baseline-relevant-seed-1.md (C1 REFUTED, C5 REFUTED).
+test('H:baseline-shape-empty-items: a separators-only block leaves no separator behind', async () => {
+  const { shapeSlotFields } = await import('../dist/functions/tests/appBaseline.js')
+
+  // The old code hit `if (!items.length) continue`, leaving out[field] as the RAW string -- so the
+  // pipes rendered, through the one branch that skips the rewrite.
+  for (const raw of ['|', '|||', ' | ', '•', '-|-']) {
+    const out = shapeSlotFields({ SkillsBullets1: raw })
+    assert.ok(!('SkillsBullets1' in out) || !out.SkillsBullets1.includes('|'),
+      `separators-only input ${JSON.stringify(raw)} left ${JSON.stringify(out.SkillsBullets1)}`)
+  }
+
+  // The key is DELETED, not set to ''. An absent key leaves the template's own token for
+  // stripLeftoverTokens to clear; '' injects emptiness that reads as legitimately-blank content.
+  assert.equal('SkillsBullets1' in shapeSlotFields({ SkillsBullets1: '|||' }), false)
+
+  // And a block with even ONE real item still renders that item -- the fix must not eat content.
+  assert.equal(shapeSlotFields({ SkillsBullets1: '|Governance|' }).SkillsBullets1, 'Governance')
+})
+
+test('H:baseline-relevant-per-slot: a short or malformed caller list falls back PER SLOT', async () => {
+  const { relevantOverlay, SEED_RELEVANT_LISTS, RELEVANT_FIELDS, baselinePkg } =
+    await import('../dist/functions/tests/appBaseline.js')
+
+  // THE DEFECT: one supplied list used to satisfy the outer `lists.length` test, so slots 2 and 3
+  // got no key and kept the pooled 36-term Library -- exactly what the seed exists to replace.
+  const short = relevantOverlay([['Only', 'One', 'List']])
+  assert.deepEqual(short.RelevantBullets1.split('\n'), ['Only', 'One', 'List'])
+  assert.deepEqual(short.RelevantBullets2.split('\n'), [...SEED_RELEVANT_LISTS[1]])
+  assert.deepEqual(short.RelevantBullets3.split('\n'), [...SEED_RELEVANT_LISTS[2]])
+
+  // Every malformed element falls back to ITS OWN slot's seed rather than vanishing.
+  for (const bad of [[[]], [['']], [[null]], [['   ']], [null], [undefined], [42], ['str']]) {
+    const out = relevantOverlay(bad)
+    assert.deepEqual(out.RelevantBullets1.split('\n'), [...SEED_RELEVANT_LISTS[0]],
+      `input ${JSON.stringify(bad)} did not fall back`)
+  }
+
+  // A FLAT ARRAY MUST NOT THROW. `relevant: ['a','b','c']` is the likeliest caller mistake and used
+  // to raise `(src[i]||[]).map is not a function`, which the route converted to an HTTP 500.
+  assert.doesNotThrow(() => relevantOverlay(['a', 'b', 'c']))
+  assert.deepEqual(relevantOverlay(['a', 'b', 'c']).RelevantBullets1.split('\n'),
+    [...SEED_RELEVANT_LISTS[0]])
+
+  // EVERY slot is always present, so pooled Library text can never survive in one of them.
+  const pooled = 'Governance and Compliance: A, B | Technology Strategy: C, D'
+  const pkg = baselinePkg({ RelevantBullets1: pooled, RelevantBullets2: pooled, RelevantBullets3: pooled },
+    { relevant: [['Solo']] })
+  for (const f of RELEVANT_FIELDS) {
+    assert.ok(!pkg[f].includes('Governance and Compliance:'), `${f} kept pooled Library text`)
+  }
+})
+
+test('H:baseline-slot-override: a named slot list is honoured VERBATIM, and only a real slot', async () => {
+  const { slotOverrides, baselinePkg, SEED_RELEVANT_LISTS } =
+    await import('../dist/functions/tests/appBaseline.js')
+
+  // THE GAP THIS CLOSES: `relevant` set the three Relevant lists positionally and nothing could set
+  // Skills or Core Competencies, so changing them meant hand-writing packet.pkg_json and
+  // re-rendering. Owner, 2026-09-01: "just have a second step after it finishes to update the
+  // relevant section yourself if there is no model to do it in the first pass."
+  const out = slotOverrides({ SkillsBullets1: ['SW Engineering', 'Portfolio Management'] })
+  assert.deepEqual(out.SkillsBullets1.split('\n'), ['SW Engineering', 'Portfolio Management'])
+
+  // ONLY SLOT_FIELDS. An unknown key must not become a merge field, and a prose block must not be
+  // overwritable by a list -- a typo'd key that wrote through would silently replace the summary.
+  const stray = slotOverrides({ ResumeSummary: ['x'], NotAField: ['y'], '@Company': ['z'] })
+  assert.deepEqual(Object.keys(stray), [])
+
+  // AN EMPTY OR BLANK LIST IS IGNORED, NEVER APPLIED. Blanking a slot is the silent-deletion
+  // failure; "the caller sent nothing" must not erase what MasterContext supplied.
+  for (const empty of [[], [''], ['  '], [null], 42, true, {}]) {
+    assert.deepEqual(Object.keys(slotOverrides({ ExpertiseBullets: empty })), [],
+      `input ${JSON.stringify(empty)} was applied instead of ignored`)
+  }
+  const kept = baselinePkg({ ExpertiseBullets: 'Alpha|Beta' }, { fields: { ExpertiseBullets: [] } })
+  assert.deepEqual(kept.ExpertiseBullets.split('\n'), ['Alpha', 'Beta'])
+
+  // NOT TRIMMED TO THE SLOT COUNT. slots.ts: an invented count "accuses every item past it"; the
+  // same applies to a list the caller stated. Nine items against a capacity of eight all survive.
+  const nine = ['a1', 'a2', 'a3', 'a4', 'a5', 'a6', 'a7', 'a8', 'a9']
+  const pkg = baselinePkg({}, {
+    slots: { SkillsBullets1: 10, SkillsBullets2: 8, ExpertiseBullets: 6, RelevantBullets1: 3, RelevantBullets2: 3, RelevantBullets3: 3 },
+    fields: { SkillsBullets2: nine },
+  })
+  assert.deepEqual(pkg.SkillsBullets2.split('\n'), nine)
+
+  // A NAMED FIELD BEATS THE POSITIONAL SHORTHAND when a caller sends both. One field, one winner.
+  const both = baselinePkg({}, {
+    relevant: [['pos1', 'pos2', 'pos3']],
+    fields: { RelevantBullets1: ['named1'] },
+  })
+  assert.deepEqual(both.RelevantBullets1.split('\n'), ['named1'])
+  // ...and the slots `fields` did not name still fall back to the seed, unchanged.
+  assert.deepEqual(both.RelevantBullets2.split('\n'), [...SEED_RELEVANT_LISTS[1]])
+})
+
+test('H:baseline-slot-overflow: an over-capacity list is REPORTED, never silently trimmed', async () => {
+  const { slotOverflow } = await import('../dist/functions/tests/appBaseline.js')
+  const slots = { SkillsBullets1: 10, SkillsBullets2: 8, ExpertiseBullets: 6, RelevantBullets1: 3, RelevantBullets2: 3, RelevantBullets3: 3 }
+
+  // Measured on the owner's own 2026-09-01 lists: the right-hand skills column carried NINE items
+  // against a configured capacity of eight. Honouring it verbatim is only safe because this says so.
+  const nine = Array.from({ length: 9 }, (_, i) => `s${i}`).join('\n')
+  assert.deepEqual(slotOverflow({ SkillsBullets2: nine }, slots),
+    [{ field: 'SkillsBullets2', items: 9, capacity: 8 }])
+
+  // Silent at capacity and under it -- a guard that fires on correct input is the cry-wolf failure.
+  assert.deepEqual(slotOverflow({ SkillsBullets2: Array.from({ length: 8 }, (_, i) => `s${i}`).join('\n') }, slots), [])
+  assert.deepEqual(slotOverflow({ ExpertiseBullets: 'a\nb' }, slots), [])
+
+  // A NULL capacity means UNKNOWN and must stay silent: reporting overflow against a guessed
+  // capacity is the invented-count failure slots.ts forbids, wearing a warning's clothes.
+  assert.deepEqual(slotOverflow({ SkillsBullets2: nine }, { ...slots, SkillsBullets2: null }), [])
+  assert.deepEqual(slotOverflow({ SkillsBullets2: nine }, undefined), [])
+
+  // A capacity of ZERO or below is not a capacity. Treating one as real makes `items > cap` true for
+  // EVERY non-empty slot, turning the report into a firehose that fires on correct content -- the
+  // cry-wolf failure hardening rule 2 forbids. Found by mutation: dropping `|| cap <= 0` left the
+  // suite green, so this sub-rule was unguarded.
+  assert.deepEqual(slotOverflow({ ExpertiseBullets: 'a\nb' }, { ...slots, ExpertiseBullets: 0 }), [])
+  assert.deepEqual(slotOverflow({ ExpertiseBullets: 'a\nb' }, { ...slots, ExpertiseBullets: -1 }), [])
+
+  // Blank lines are not items -- a trailing newline must not manufacture an overflow.
+  assert.deepEqual(slotOverflow({ ExpertiseBullets: 'a\nb\n\n' }, slots), [])
+})
+
+test('H:baseline-slot-element-type: a non-string ELEMENT is dropped, never String()-coerced', async () => {
+  const { slotOverrides, baselinePkg } = await import('../dist/functions/tests/appBaseline.js')
+
+  // FOUND BY THE INDEPENDENT VERIFIER, not by reading (VERIFY-baseline-slot-overrides-1, "Also
+  // report"): the type gate was top-level only, so junk inside an ACCEPTED array was coerced --
+  // `['a', {}, ['b','c']]` wrote "a\n[object Object]\nb,c" into a merge field.
+  const out = slotOverrides({ SkillsBullets1: ['a', {}, ['b', 'c'], 42, null, undefined, true, 'd'] })
+  assert.deepEqual(out.SkillsBullets1.split('\n'), ['a', 'd'])
+  assert.ok(!out.SkillsBullets1.includes('[object Object]'))
+  assert.ok(!out.SkillsBullets1.includes('b,c'))
+
+  // An array of ONLY junk empties the list, which means the field is ignored -- so MasterContext
+  // survives rather than being replaced by nothing. The safe direction, asserted rather than hoped.
+  assert.deepEqual(Object.keys(slotOverrides({ ExpertiseBullets: [{}, 42, null] })), [])
+  const kept = baselinePkg({ ExpertiseBullets: 'Alpha|Beta' }, { fields: { ExpertiseBullets: [{}, 7] } })
+  assert.deepEqual(kept.ExpertiseBullets.split('\n'), ['Alpha', 'Beta'])
+})
+test('H:every-evidence-alias-reaches-the-gate: a column selected and then dropped is invisible', () => {
+  // WRITTEN BECAUSE A MUTATION CAME BACK INERT. Deleting `decision: r.evidence_decision ?? null`
+  // from the appChecks mapping failed no test, and that is a whole-feature no-op: the owner's veto
+  // is written to the database, read back by the loader's SELECT, and then silently discarded three
+  // lines before `ruleEvidenceOf` -- the only code that acts on it. The gate would keep counting a
+  // row the owner rejected, with every other test still green.
+  //
+  // It is the same shape as `H:every-evidence-count-has-a-reader` one level up, and `tsc` cannot
+  // see it: both new fields are OPTIONAL on EvidenceRow, so an absent key type-checks perfectly.
+  //
+  // THE INVARIANT, not the incident: for every `evidence_X` alias the loader projects, if `X` is a
+  // declared field of EvidenceRow then the mapping in appChecks must actually read it. A column
+  // added to the join and to the interface but forgotten in the mapping fails here, whatever it is
+  // called. A source grep rather than a runtime test, per the hardening rule's carve-out for
+  // structural claims a behavioural test cannot express -- the failure is an ABSENT line.
+  const reqSrc = readFileSync(new URL('../src/functions/tests/appRequirements.ts', import.meta.url), 'utf8')
+  const sql = reqSrc.slice(reqSrc.indexOf('export async function loadRequirementsWithEvidence'))
+  const aliases = [...sql.slice(0, sql.indexOf('order by r.seq')).matchAll(/as\s+evidence_([a-z0-9_]+)/g)].map(m => m[1])
+  assert.ok(aliases.length >= 12, `only ${aliases.length} evidence aliases found — the scan has gone stale`)
+
+  const evSrc = readFileSync(new URL('../src/functions/tests/evidence.ts', import.meta.url), 'utf8')
+  const iface = evSrc.slice(evSrc.indexOf('export interface EvidenceRow'))
+  const body = iface.slice(0, iface.indexOf('\n}'))
+  // Comments carry field names in prose; strip them or the guard cries wolf on a mention.
+  const code = body.split('\n').filter(l => !/^\s*(\/\/|\*|\/\*)/.test(l)).join('\n')
+  const declared = new Set([...code.matchAll(/^\s*([a-z_][a-z0-9_]*)\??\s*:/gm)].map(m => m[1]))
+
+  const chkSrc = readFileSync(new URL('../src/functions/tests/appChecks.ts', import.meta.url), 'utf8')
+  const missing = aliases.filter(a => declared.has(a) && !chkSrc.includes(`r.evidence_${a}`))
+  assert.deepEqual(missing, [],
+    `THE LOADER SELECTS THESE AND THE GATE NEVER SEES THEM: ${missing.join(', ')}. ` +
+    'Each is projected by loadRequirementsWithEvidence and declared on EvidenceRow, but the ' +
+    'appChecks mapping does not read it — so it is written, queried, and dropped before the only ' +
+    'code that would act on it. tsc cannot catch this while the field is optional.')
+})
+
+test('H:no-surface-says-a-counted-proposal-is-uncounted: one fact, every surface', () => {
+  // FOUND BY AN INDEPENDENT VERIFIER, and it is the "fix all consumers" rule broken inside the very
+  // lane that inverted the rule. Two places tell the owner what a model-proposed row is worth:
+  // `checks.ts`'s must_have_coverage observed string, and `appRequirements.ts`'s evidenceResolve
+  // note. I updated the first and left the second reading "...awaiting your confirmation; they are
+  // shown but do not count toward the coverage gate" -- true until proposals began counting, and
+  // the exact opposite of `ruleEvidenceOf` afterwards.
+  //
+  // Nothing caught it because no test asserted that literal. This sweeps for the retired wording
+  // across BOTH source trees, so a third surface written later fails here rather than shipping a
+  // contradiction of the gate. Comments are stripped first: this file's own history records two
+  // guards that fired on a COMMENT and had to be rewritten, and the comments above the fixed line
+  // deliberately QUOTE the retired phrase to explain it.
+  const RETIRED = [
+    'awaiting your confirmation',
+    'do not count toward the coverage gate',
+    'does not count toward coverage until',
+  ]
+  const files = [
+    '../src/functions/tests/checks.ts',
+    '../src/functions/tests/appRequirements.ts',
+    '../../app/src/screens/PostingAnalysis.jsx',
+    '../../app/src/postingAnalysis.js',
+  ]
+  const offenders = []
+  for (const rel of files) {
+    const src = readFileSync(new URL(rel, import.meta.url), 'utf8')
+    // Strip line comments and block comments. A phrase inside a comment is the RECORD of the fix,
+    // not the defect -- and a guard that cannot tell those apart is the cry-wolf failure this repo
+    // deleted a whole linter over.
+    const code = src
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .split('\n').filter((l) => !/^\s*(\/\/|\*)/.test(l)).join('\n')
+      .replace(/\{\/\*[\s\S]*?\*\/\}/g, '')
+    for (const phrase of RETIRED) {
+      if (code.includes(phrase)) offenders.push(`${rel}: "${phrase}"`)
+    }
+  }
+  assert.deepEqual(offenders, [],
+    'A SURFACE STILL TELLS THE OWNER A COUNTED ROW IS EXCLUDED: ' + offenders.join(', ') + '. ' +
+    'A model-proposed row counts toward must_have_coverage until vetoed (ruleEvidenceOf). Any ' +
+    'sentence saying it is awaiting confirmation, or does not count, contradicts the number beside it.')
+})
+
+test('H:one-composite-formula: there is ONE, and both call sites call it', () => {
+  // REPLACES a guard an independent verifier proved INERT (VERIFY-ats-keyword-score-1.md, C9).
+  //
+  // The old one extracted the three `?? 0.x` literals from `appReviewer.ts` in textual order and
+  // compared them to DEFAULT_WEIGHTS. The verifier broke it by SWAPPING WHICH COMPONENT EACH WEIGHT
+  // MULTIPLIES, leaving the literals in the same order — 1050/1050 passed with the reviewer weighting
+  // must_have at 0.3 and keyword at 0.5. It asserted "the same numbers are textually present", not
+  // "the formulas agree".
+  //
+  // THE FIX WAS STRUCTURAL, NOT A BETTER REGEX: `weightedComposite` is now the only implementation
+  // and both sites call it. So this guard no longer polices agreement between two copies — it
+  // polices that there is still only ONE, which is a claim a source grep can actually settle.
+  const rev = readFileSync(new URL('../src/functions/tests/appReviewer.ts', import.meta.url), 'utf8')
+  const code = rev.split('\n').filter(l => !/^\s*(\/\/|\*)/.test(l)).join('\n')
+  assert.match(code, /weightedComposite\(/, 'the reviewer must CALL the shared formula')
+  // No second implementation: nothing outside artifactScore.ts may multiply a component by a weight.
+  assert.ok(!/\*\s*\(?s\.weights\?\.(mustHave|keyword|seniority)/.test(code),
+    'THE REVIEWER HAS ITS OWN WEIGHTED SUM AGAIN. Two implementations cannot be kept in sync by a ' +
+    'guard — the last one that tried was defeated by reordering which weight hit which component.')
+
+  // The shared function refuses a partial composite, at the only place that can now decide it.
+  assert.equal(weightedComposite(50, 67, 95), Math.round(50 * 0.5 + 67 * 0.3 + 95 * 0.2))
+  for (const partial of [[null, 67, 95], [50, null, 95], [50, 67, null]]) {
+    assert.equal(weightedComposite(...partial), null,
+      `a composite was produced from ${JSON.stringify(partial)} — two of three is not a composite`)
+  }
+  // ...and computeArtifactScore routes through it rather than keeping its own copy.
+  const viaFn = computeArtifactScore({
+    requirements: [],
+    checks: [{ check_key: 'must_have_coverage', engine: 'deterministic', state: 'fail',
+               observed: '3/6 must-haves evidenced', offenders: [] }],
+    keyword: { covered: 67, scoreable: 100 }, seniority: 95,
+  })
+  assert.equal(viaFn.composite, weightedComposite(50, 67, 95),
+    'computeArtifactScore must produce exactly what the shared formula produces')
+})
+
+test('H:reviewer-auto-is-off-by-default: an LLM call per artifact is the owner\'s spend', () => {
+  // FOUR model calls per packet build. Defaulting this ON would spend the owner's money on every
+  // build without them choosing it — the same reason `chk_coverage_judge` was defaulted OFF. R1/R7:
+  // at the seeded default a build must behave byte-identically to before.
+  assert.equal(DEFAULT_THRESHOLDS.reviewerAuto, false,
+    'the reviewer must not run unless the owner turned it on')
+  const prefs = readFileSync(new URL('../src/functions/tests/checkPrefs.ts', import.meta.url), 'utf8')
+  assert.match(prefs, /add column if not exists chk_reviewer_auto\s+boolean not null default \$\{DEFAULT_THRESHOLDS\.reviewerAuto\}/,
+    'the column default must be DERIVED from the threshold, not a second literal that can drift')
+  // A NULL from a row written before the column existed must read as OFF, never as "enabled".
+  assert.match(prefs, /reviewerAuto: r\.chk_reviewer_auto === true/,
+    'a truthy test would read a pre-existing NULL as enabled for owners who never opted in')
+})
+
+test('H:reviewer-follows-the-checks: never called when evaluateArtifact threw', () => {
+  // `runReview` refuses with "run the deterministic checks first" when no artifact_gate row exists,
+  // so calling it after a throw produces a SECOND failure describing the same root cause and buries
+  // the first. R3. Structural: the call must be gated on the success flag, in the same expression.
+  const src = readFileSync(new URL('../src/functions/tests/appPackets.ts', import.meta.url), 'utf8')
+  const i = src.indexOf('await runReview(')
+  assert.ok(i > 0, 'the reviewer has no caller again — this is the defect the wiring fixed')
+  const guard = src.slice(Math.max(0, i - 400), i)
+  assert.match(guard, /if \(reviewerOn && checksRan\)/,
+    'the review call must require BOTH the owner setting and a successful deterministic pass')
+  // ...and its own try/catch, so one model outage cannot cost the other three artifacts their
+  // checks and scores. R5 — the isolation pattern is extended, never replaced by a build-wide catch.
+  const after = src.slice(i - 60, i + 400)
+  assert.match(after, /try \{ await runReview\([\s\S]*?\}\s*catch \(e\) \{[\s\S]*?checkWarnings\.push/,
+    'a failed review must be a warning on that artifact, not an exception that ends the build')
+})
+
+test('H:reviewer-outcome-is-reported: a silent reviewer is how the score stayed null', () => {
+  // The whole reason this feature was invisible for weeks is that nothing said whether it ran. R4:
+  // the build response reports it beside every other spend, and the three states stay DISTINCT —
+  // not enabled, enabled-but-everything-failed, and graded — because collapsing them into one
+  // boolean is how "the score is still null" becomes un-diagnosable again.
+  const src = readFileSync(new URL('../src/functions/tests/appPackets.ts', import.meta.url), 'utf8')
+  assert.match(src, /review: \{ enabled: reviewerOn, artifacts: reviewed \}/,
+    'the build response must say whether the reviewer ran and on what')
+  assert.match(src, /const reviewed: string\[\] = \[\]/, 'and it must be populated from real calls')
+})
+
+test('H:reviewer-setting-joins-the-existing-family: no second settings surface', () => {
+  // "Extend, don't duplicate". The chk_* family already has a column set, a reader, a whitelisted
+  // writer and a Settings screen; a new toggle that invented any of those would be the parallel
+  // system this repo has been bitten by before. The writer whitelist is DERIVED from the ensure
+  // statement, so being in that statement is what makes the knob writable — no list to update.
+  const prefs = readFileSync(new URL('../src/functions/tests/checkPrefs.ts', import.meta.url), 'utf8')
+  assert.match(prefs, /chk_reviewer_auto/, 'the setting must live in the chk_* family')
+  const sel = prefs.slice(prefs.indexOf('chk_coverage_judge, chk_coverage_judge_max'))
+  assert.match(sel.slice(0, 300), /chk_reviewer_auto/,
+    'the column must be in the SELECT too — a column the loader does not project is unreadable, ' +
+    'which is the exact shape H:every-chk-column-is-selected was written for')
 })

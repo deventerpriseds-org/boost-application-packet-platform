@@ -18,6 +18,9 @@ import { sourceText } from './appFacts'
 import { summariseBuild, skillLineage, collectAnalysis } from './packetBuild'
 import { approvalBlock, evaluateArtifact } from './appChecks'
 import { loadThresholds } from './checkPrefs'
+// The independent reviewer. Imported HERE for the first time: it has been deployed and
+// callable since P4 with no caller anywhere in the product.
+import { runReview } from './appReviewer'
 import { DEFAULT_THRESHOLDS } from './checks'
 import { normalisePackage } from './normalise'
 // The evidence pass, called in-process rather than over HTTP — see resolveEvidenceForOpp. No cycle:
@@ -522,6 +525,30 @@ export async function ensurePackage(client: any, art: any, opp: any, regen: bool
     resumeTemplateId: packetResumeTemplateId,
   })
   const pkg = built.pkg
+  // THE ASSEMBLED PACKAGE, FROZEN BEFORE ANYTHING MUTATES IT — this is `skillLineage`'s input.
+  //
+  // `pkg` IS `built.pkg` (same reference), and both `applyCorrectionPass` and `normalisePackage`
+  // edit it IN PLACE (`normalise.ts:121` is a bare `pkg[f] = joinItems(kept)`). So by the time
+  // lineage was captured at the bottom of this function, the text it compared against Call 1/2/3
+  // had already been through the owner's corrections and cross-list dedup, matched none of them,
+  // and `winner` fell through to 'none'.
+  //
+  // MEASURED, not theorised: db-query run 33635773017 on opportunity 9f9c370a returned
+  // `winner='none'` for RelevantBullets1/2/3 and SkillsBullets2 — 4 of 5 slots — which is exactly
+  // the failure `packetBuild.ts` warns about in its own header: "a lineage that reports none on
+  // every row of a healthy build is worse than no lineage: it is a panel that always says the same
+  // wrong thing, and it would have been believed."
+  //
+  // A SHALLOW COPY IS SUFFICIENT AND IS THE POINT: every merge-field value is a string, and the
+  // mutators reassign whole values (`pkg[f] = ...`) rather than editing them in place, so the
+  // snapshot's strings cannot be reached by any later write.
+  //
+  // WHY THE PRE-CORRECTION PACKAGE IS THE RIGHT COMPARAND, and not a convenience: `assemblePackage`
+  // builds each field as `firstNonEmpty(call1.x, call2.x, call3.x)`, so the assembled package IS one
+  // of the three calls per field, by construction. Comparing against it answers "which pass produced
+  // this field" exactly. The owner's later corrections are a different fact and are already recorded
+  // as `correction` rows; folding them in here would only destroy the answer, which is what it did.
+  const assembled: Record<string, any> = { ...built.pkg }
   // D8 - this used to pass `{}`, which logUsage discards, so every production packet build
   // recorded nothing. Each of the three generation passes is metered on its own so the cost of
   // the QC pass is separable from the cost of writing the resume.
@@ -617,14 +644,36 @@ export async function ensurePackage(client: any, art: any, opp: any, regen: bool
   try {
     await writeSwaps(client, art.packet_id, opp.id, {
       call1: built.calls.c1, call3: built.calls.c3, pkg,
-      profileText: built.profileText, omitList: built.omitList, loop: 0,
+      profileText: built.profileText, omitList: built.omitList,
+      // THE OWNER'S PER-TEMPLATE FIXED SLOT COUNTS, from the row `resolveRoleFocus` already read for
+      // this build's chosen resume (`built.slots`). `writeSwaps` passes them straight to `buildSwaps`,
+      // which is pure and never reads config itself.
+      //
+      // NOT re-derived here on purpose. The counts must describe the SAME resume the focus and the
+      // copy describe, and `packetResumeTemplateId || settings.resumeTemplateId` is resolved inside
+      // `buildPackageForJD`. A second resolution here is a second answer to "which resume is this",
+      // free to disagree the day a packet's choice and the global default differ — which is the
+      // whole reason the per-packet column exists.
+      //
+      // All-null when the owner has set nothing, and `slotsFor` reads that as UNKNOWN. Never zeros:
+      // a `0` would tell the pairing this list has no legal slots at all.
+      slots: built.slots,
+      // `loop: 0` STAYS LAST. `H:loop-zero-clear-rests-on-the-cache-hit` pins it as the final
+      // property of this call, because the ground-zero clear inside `writeSwaps` is only safe while
+      // this caller passes a LITERAL 0 — and appending `slots` after it broke that guard on the
+      // first attempt. The invariant is real, so the new field moved above it rather than the
+      // assertion being widened to accommodate it.
+      loop: 0,
     })
   } catch (e) { console.warn('[packets] swap provenance not recorded:', String(e)) }
   return {
     pkg, generated: true, grounded, warnings: built.warnings, qcApplied: built.qcApplied,
     // The three calls are discarded when this scope ends, and the merged package alone cannot say
     // which pass wrote a given skill. Captured HERE, where all three are still in hand.
-    lineage: skillLineage(built.calls.c1, built.calls.c2, built.calls.c3, pkg),
+    // `assembled`, NOT `pkg` — see the snapshot at the top of this function. `pkg` has been through
+    // applyCorrectionPass and normalisePackage by now and matches no call's output, which is what
+    // made `winner` read 'none' on 4 of 5 slots in production.
+    lineage: skillLineage(built.calls.c1, built.calls.c2, built.calls.c3, assembled),
     analysis: collectAnalysis(built.calls.c1, built.calls.c2),
   }
 }
@@ -1117,12 +1166,44 @@ export async function runPacketBuild(
     // SEPARATE connections; this caller has one.
     const checked: string[] = []
     const checkWarnings: string[] = []
+    // THE REVIEWER'S FIRST CALLER IN THE PRODUCT. `runReview` has been built, deployed and callable
+    // since P4 and nothing has ever invoked it: `artifact_score.seniority_alignment` is null on 51
+    // of the 52 rows ever written, the one exception being a manual dispatch on 2026-08-20 that
+    // graded 95. Seniority carries 0.2 of the composite and `computeArtifactScore` returns null
+    // unless all three components are present, so an unrun reviewer alone has been sufficient to
+    // keep EVERY composite null since the feature shipped.
+    //
+    // OFF BY DEFAULT (`reviewerAuto`), because this is an LLM call per artifact -- four per packet
+    // build -- and that is the owner's spend to authorise. At the seeded default this loop behaves
+    // byte-identically to before.
+    // Read the SAME way `gateAdvisory` is read two hundred lines up -- `loadThresholds` returns
+    // the resolved thresholds directly, and the `.catch` keeps a settings-table hiccup from
+    // failing a build that has already produced four documents.
+    const reviewerOn = (await loadThresholds(client, owner).catch(() => ({} as any)))?.reviewerAuto === true
+    const reviewed: string[] = []
     for (const r of results) {
       if (r.error) continue
       const art = artifacts.find((a: any) => a.type === r.type)
       if (!art) continue
-      try { await evaluateArtifact(client, art.id, owner); checked.push(r.type) }
+      let checksRan = false
+      try { await evaluateArtifact(client, art.id, owner); checked.push(r.type); checksRan = true }
       catch (e) { checkWarnings.push(`${r.type}: checks did not run, so this artifact cannot be approved yet (${String(e).slice(0, 200)})`) }
+      // ONLY AFTER THE DETERMINISTIC PASS SUCCEEDED. `runReview` refuses with "run the deterministic
+      // checks first" when no `artifact_gate` row exists, so calling it after a throw produces a
+      // second failure describing the same root cause and buries the first. `checksRan` is a local
+      // flag rather than a test of `checked` because two artifacts can share a type in a rebuild.
+      //
+      // SEQUENTIAL, INSIDE THE SAME LOOP, ON THE SAME CONNECTION -- deliberately not `Promise.all`.
+      // `evaluateArtifact` is already sequential here for the begin/commit-nesting reason, and the
+      // reviewer's own `persist()` UPDATE runs against this same client.
+      //
+      // ITS OWN TRY/CATCH, so a model outage on one artifact cannot cost the other three their
+      // checks, scores or verdicts. This extends the `checkWarnings` isolation already proven here
+      // rather than wrapping the loop.
+      if (reviewerOn && checksRan) {
+        try { await runReview(client, art.id, owner); reviewed.push(r.type) }
+        catch (e) { checkWarnings.push(`${r.type}: the independent review did not run, so this artifact has no seniority grade (${String(e).slice(0, 200)})`) }
+      }
     }
     // PERSIST THE OUTCOME BEFORE RETURNING IT. The response below is routinely lost — `build-all`
     // runs ~3 minutes and the gateway cuts at 4 (D35, measured twice) — and `warnings` is the only
@@ -1160,12 +1241,34 @@ export async function runPacketBuild(
       warnings: evidence?.error
         ? [...summary.warnings, ...checkWarnings, `evidence resolve did not run: ${String(evidence.error).slice(0, 200)}`]
         : [...summary.warnings, ...checkWarnings],
+      // WHAT THE REVIEWER DID, reported beside every other spend this build made rather than left
+      // to be inferred from a null column later. The same discipline `evaluateArtifact`'s own
+      // `judge` field carries: a reviewer OUTAGE has to be visible exactly where a coverage-judge
+      // outage already is, or it becomes a second silent failure mode.
+      //
+      // THE THREE STATES ARE DIFFERENT FACTS and the shape keeps them apart: `enabled: false` means
+      // the owner has not turned it on (and nothing was spent), `enabled: true` with an empty
+      // `artifacts` list means it was on and every call failed -- the failures are in `warnings`
+      // above -- and a populated list names what was graded. Collapsing those into one boolean is
+      // how "the score is still null" becomes un-diagnosable.
+      review: { enabled: reviewerOn, artifacts: reviewed },
       // The measured result, not a boolean. `evidenced`/`proposed`/`escalated` are what make a
       // coverage change attributable later — a reviewer can tell a better profile from a chattier
       // model only if the run recorded which one moved.
       evidence: evidence?.error ? { error: String(evidence.error).slice(0, 200) } : {
         total: evidence?.total ?? null, evidenced: evidence?.evidenced ?? null,
+        // Both found write-only by H:every-evidence-count-has-a-reader on its FIRST run, and both
+        // pre-date the judge work. `profile_records: 0` is the "we did not look" signal this
+        // codebase cares about more than any other -- zero evidence against zero records is not a
+        // measurement of the candidate -- and it was computed and thrown away.
+        unevidenced: evidence?.unevidenced ?? null,
+        profile_records: evidence?.profile_records ?? null,
         proposed: evidence?.proposed ?? 0, escalated: evidence?.escalated ?? 0,
+        // F-9, from an independent verifier: `vetted` shipped WRITE-ONLY. The comment above says a
+        // coverage change must be attributable -- and `vetted` is the one count that MOVES coverage,
+        // so omitting it left the number that changed as the only number nobody could see. TypeScript
+        // stayed quiet because this destructures a subset.
+        vetted: evidence?.vetted ?? 0,
         refused: evidence?.refused ?? null,
       },
       // DERIVED, not hardcoded. This was the literal `false` for the whole life of the route, so the

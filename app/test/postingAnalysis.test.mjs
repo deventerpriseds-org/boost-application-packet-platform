@@ -14,7 +14,8 @@ import {
   kindSourceNote, noQuoteReason, isQuoted, modelKeywords, groupRequirements,
   summarizeKindSource, isEvidencedKindSource, keywordLibraryState, postingBody,
   KEYWORD_2UP_MIN, keywordColumns, keywordGridTemplate, POSTING_HOOKS,
-  KEYWORD_GROUPS, NOT_COMPARED_NOTE, keywordGroupMeaning, tabEvidenceTone, EVIDENCE_TONE } from '../src/postingAnalysis.js'
+  KEYWORD_GROUPS, NOT_COMPARED_NOTE, keywordGroupMeaning, tabEvidenceTone, EVIDENCE_TONE,
+  evidencePresentation } from '../src/postingAnalysis.js'
 
 // The fixture from the AC7 reproduction: one line the posting MARKED required, two the parser
 // DEFAULTED. A single "3" makes all three look marked.
@@ -993,4 +994,229 @@ test('H:keywords-tab-is-never-toned', () => {
   assert.match(kw, /tone: null/, 'the keywords tab must pass tone: null explicitly')
   assert.ok(!/tabEvidenceTone\(parsedKeywords\)/.test(src),
     'the keywords tab is being toned - a suggestion must not be rendered as a measurement')
+})
+
+// ─── the confirm control: a model's proposal only counts once a human says so ──────────────────
+//
+// `checks.ts` states the rule these guard: "a model may PROPOSE, only an exact rule may ACCUSE, and
+// must_have_coverage is the accusation". A `proposed` excerpt is shown and does NOT count;
+// confirming it is the only promotion, because a human IS an exact rule. Measured in production the
+// day the control shipped: 15 proposed rows across 15 requirements, every one carrying a verified
+// quote from the owner's own profile, all uncounted, on screens reporting zero coverage.
+const evRow = (over = {}) => ({
+  evidenceState: 'verified',
+  evidence: { quote: 'Led an enterprise-wide Agile transformation', sourceLabel: 'Work history 1',
+    method: 'proposed', confirmedAt: null, confirmedBy: null, ...over },
+})
+
+test('H:an-undecided-model-row-offers-the-decision: and a decided one does not ask again', () => {
+  // RENAMED FROM `H:proposal-awaits-a-human`, because nothing is awaited any more. Since the
+  // owner's instruction that proposals count until vetoed, the row is ALREADY in the numerator and
+  // the control offers an OVERRULE rather than a promotion. The old name described the opposite
+  // behaviour, and a guard whose name lies is worse than none — the next reader trusts the name.
+  const open = evidencePresentation(evRow())
+  assert.equal(open.method, 'proposed')
+  assert.equal(open.decidable, true, 'an undecided proposal must offer the control')
+  assert.equal(open.countsNow, true, 'and it counts while it is undecided — the owner\'s instruction')
+  assert.equal(open.confirmedAt, null)
+
+  const done = evidencePresentation(evRow({ confirmedAt: '2026-09-01T12:00:00Z', confirmedBy: 'von.ellis@enterpriseds.io' }))
+  assert.equal(done.decidable, false, 'a confirmed proposal must not ask again')
+  assert.equal(done.confirmedBy, 'von.ellis@enterpriseds.io', 'who vouched for it is shown, not just that someone did')
+
+  // A VETTED ROW IS DECIDABLE TOO, and this half is the one most easily missed. It also counts on
+  // model warrant, so excluding it would make the STRONGEST model claims the only ones the owner
+  // cannot overrule — the opposite of the intended order.
+  assert.equal(evidencePresentation(evRow({ method: 'vetted' })).decidable, true,
+    'a vetted row counts on model warrant and must remain vetoable')
+
+  // ONCE VETOED, THE CONTROL STOPS ASKING. Re-offering "is this your evidence?" on a row the owner
+  // just rejected reads as the app having ignored the click.
+  const no = evidencePresentation(evRow({ decision: 'vetoed' }))
+  assert.equal(no.vetoed, true)
+  assert.equal(no.decidable, false, 'a vetoed row must not be asked about again')
+  assert.equal(no.countsNow, false, 'and it must stop counting')
+})
+
+test('H:rule-evidence-is-never-asked-to-be-confirmed', () => {
+  // `anchored` and `exact` are a RULE's excerpts and already count. Offering "is this your
+  // evidence?" on one would ask the owner to ratify something no model proposed, and imply the
+  // deterministic path needs their permission to count. It does not.
+  for (const method of ['anchored', 'exact']) {
+    const p = evidencePresentation(evRow({ method }))
+    assert.equal(p.decidable, false, `${method} evidence must never show the confirm control`)
+    assert.equal(p.countsNow, true, `${method} evidence counts on the rule alone`)
+  }
+  // No excerpt at all: nothing to decide, and the control must not appear over an empty verdict.
+  const none = evidencePresentation({ evidenceState: 'none', evidence: null })
+  assert.equal(none.decidable, false)
+  assert.equal(none.countsNow, false, 'an empty verdict counts for nothing — absent evidence is never a pass')
+  assert.equal(none.method, null)
+})
+
+test('H:confirmation-reads-the-verdict-not-the-columns', () => {
+  // The FIRST version of this feature read `r.evidence_confirmed_at` off the raw row and
+  // `H:evidence-read-from-the-verdict-not-the-columns` failed it, correctly: those keys are nulled
+  // for every non-verified row, so read directly they cannot tell "the confirmation lapsed" from
+  // "nobody ever confirmed it". Inside the verdict, a confirmation is dropped with the quote it
+  // vouched for. This asserts the fix rather than trusting the memory of it.
+  const redacted = evidencePresentation({
+    evidenceState: 'stale', evidence: null,
+    evidence_confirmed_at: '2026-09-01T12:00:00Z', evidence_confirmed_by: 'von.ellis@enterpriseds.io',
+  })
+  assert.equal(redacted.confirmedAt, null,
+    'a redacted row must not report a confirmation recovered from the raw columns')
+  assert.equal(redacted.decidable, false)
+
+  // THE VETO HAS THE IDENTICAL PROPERTY and needed saying, because it is the more dangerous half:
+  // a decision is about THIS EXCERPT, so when the excerpt stops being provable the decision must go
+  // with it. A veto outliving its own excerpt would suppress a row on the strength of a judgement
+  // the owner made about text that is no longer there.
+  const redactedVeto = evidencePresentation({
+    evidenceState: 'stale', evidence: null,
+    evidence_decision: 'vetoed', evidence_missing: ['SOC 2'],
+  })
+  assert.equal(redactedVeto.vetoed, false,
+    'a veto must not be recovered from the raw columns of a redacted row')
+  assert.equal(redactedVeto.missing, null)
+  assert.equal(redactedVeto.countsNow, false, 'a redacted row counts either way — there is no excerpt')
+})
+
+test('H:confirm-control-is-hidden-without-a-target', () => {
+  // No dead UI. The route is POST /app/requirement/{seq}/evidence-confirm and it needs the
+  // opportunity in the body, so with no `oppId` the button could not work - it is hidden, not shown
+  // and broken. Structural: the render is guarded by `oppId` in the same expression.
+  const src = readFileSync(new URL('../src/screens/PostingAnalysis.jsx', import.meta.url), 'utf8')
+  assert.match(src, /ev\.decidable\s*&&\s*oppId\s*&&/,
+    'the confirm control must be gated on BOTH an open decision and somewhere to send the answer')
+})
+
+// ─── VETTED — the model row that COUNTS, and why the owner has to see which ones they are ───────
+//
+// `must_have_coverage` reads `ruleEvidenceOf`: a `proposed` row does not count, a `vetted` one does.
+// So a vetted row is the only place in this product where a model's reading moves the number the
+// gate reads, and "coverage rose" has to be checkable on the page — a reader must be able to tell a
+// better profile from a chattier model.
+
+test('H:a-vetted-row-is-marked-and-is-not-mistaken-for-agreement', () => {
+  const v = evidencePresentation(evRow({ method: 'vetted', extra: 'vetted: challenged for what it fails to show...' }))
+  assert.equal(v.vetted, true, 'a vetted row must be identifiable on the page')
+  assert.equal(v.confirmedAt, null, 'and it is NOT a confirmation — no human has said yes')
+  assert.equal(v.decidable, true,
+    'a vetted row counts on model warrant, so the owner must still be able to overrule it')
+  assert.equal(v.countsNow, true, 'a vetted row counts')
+
+  for (const method of ['proposed', 'exact', 'anchored']) {
+    assert.equal(evidencePresentation(evRow({ method })).vetted, false,
+      `${method} must not be marked vetted`)
+  }
+  assert.equal(evidencePresentation({ evidenceState: 'none', evidence: null }).vetted, false,
+    'an empty verdict is never vetted')
+})
+
+test('H:the-reason-a-row-counts-is-on-the-page-not-behind-a-click', () => {
+  // `extra` renders inside the disclosure everywhere else, which is right for a supporting note on
+  // an excerpt already visible. For a vetted row it is the ARGUMENT FOR A NUMBER THAT CHANGED, and
+  // an argument nobody opens is an argument nobody checked.
+  const jsx = readFileSync(new URL('../src/screens/PostingAnalysis.jsx', import.meta.url), 'utf8')
+  const line = jsx.slice(jsx.indexOf('function EvidenceLine'), jsx.indexOf('function Group'))
+  const why = line.indexOf('POSTING_HOOKS.vettedWhy')
+  const disclosure = line.indexOf('{open && ev.provable && (')
+  assert.ok(why > -1, 'the vetted reasoning has no renderer')
+  assert.ok(disclosure > -1, 'the disclosure block moved — this scan has gone stale')
+  assert.ok(why < disclosure,
+    'the vetted reasoning must render OUTSIDE the "show the line" disclosure')
+  // AND IT MUST ACTUALLY RENDER. The first version of this case checked only the POSITION of the
+  // hook, so disabling the block outright — `{false && ev.extra && ...}` — passed it. Mutation
+  // testing caught that (M34, 2026-09-01): a guard that pins where something sits and not whether
+  // it happens is the inert kind this repo treats as worse than none, because it is believed.
+  const block = line.slice(Math.max(0, why - 400), why)
+  assert.match(block, /\{ev\.vetted && ev\.extra && \(/,
+    'the vetted reasoning must be gated on ev.vetted && ev.extra — not disabled, not always-on')
+  assert.match(line, /POSTING_HOOKS\.vetted[^W]/, 'the vetted marker itself must render')
+  assert.match(line, /challenged for what it misses/,
+    'the marker must say what vetted MEANS — the word alone is not self-explanatory')
+})
+
+// ─── THE VETO ───────────────────────────────────────────────────────────────────────────────────
+//
+// Since the owner's instruction that "proposals can count until vetoed", the veto is the ONLY thing
+// that removes a row from `must_have_coverage`. That makes it the single most load-bearing control
+// on this screen, and it shipped INERT: the button existed and the backend wrote nothing.
+
+test('H:the-screen-and-the-gate-agree-about-what-counts', () => {
+  // `countsNow` deliberately DUPLICATES `ruleEvidenceOf`'s rule, because the screen has no access
+  // to the gate's own decision and the alternative is worse: a row rendered as counting while the
+  // gate excludes it gives the owner a number they cannot reconcile with the rows in front of them,
+  // which is this repo's "stale/mismatched numbers" failure with the two surfaces one click apart.
+  //
+  // Duplication is only safe while something fails when the two drift. This is that something: it
+  // reads the method allow-list out of BOTH sources and compares them. Adding a method to the
+  // gate's COUNTS and not to the screen — or the reverse — fails here rather than shipping a
+  // disagreement nobody sees.
+  const gate = readFileSync(new URL('../../api/src/functions/tests/checks.ts', import.meta.url), 'utf8')
+  const m = /const COUNTS: ReadonlySet<string> = new Set\(\[([^\]]*)\]\)/.exec(gate)
+  assert.ok(m, 'the gate\'s method allow-list is no longer where this guard reads it — re-point it')
+  const gateMethods = [...m[1].matchAll(/'([a-z_]+)'/g)].map((x) => x[1]).sort()
+
+  const screen = readFileSync(new URL('../src/postingAnalysis.js', import.meta.url), 'utf8')
+  const s = /countsNow: [\s\S]*?\[([^\]]*)\]\.includes/.exec(screen)
+  assert.ok(s, 'the screen\'s method allow-list is no longer where this guard reads it — re-point it')
+  const screenMethods = [...s[1].matchAll(/'([a-z_]+)'/g)].map((x) => x[1]).sort()
+
+  assert.deepEqual(screenMethods, gateMethods,
+    `THE SCREEN AND THE GATE DISAGREE ABOUT WHAT COUNTS. checks.ts counts [${gateMethods}] and ` +
+    `postingAnalysis.js counts [${screenMethods}]. One of them is telling the owner something the ` +
+    'other will not honour.')
+  // And the veto is checked in both. A copy of the list that forgot it would pass the comparison
+  // above while counting rows the owner rejected.
+  //
+  // SCOPED TO THE `countsNow` EXPRESSION, because the file-wide version of this assertion PASSED ON
+  // BROKEN CODE. Measured by mutation: deleting the veto check from `countsNow` left this guard
+  // green, because `decidable` contains the same string two lines below and satisfied the match.
+  // A structural grep is only worth what its scope is worth -- the same lesson postingCompare's
+  // CARD_BLOCK helper was written for, arriving here from the other direction: there a whole-file
+  // scan fired on correct code, here it stayed silent on broken code.
+  assert.match(s[0], /trim\(ev\.decision\) !== 'vetoed'/,
+    'countsNow no longer excludes a vetoed row — the screen would count what the owner rejected')
+  assert.match(gate, /if \(isVetoed\(r\)\) return null/, 'the gate must exclude a vetoed row, first')
+})
+
+test('H:a-veto-is-visible-and-outranks-every-other-badge', () => {
+  // A row that stopped counting must say WHY, and say it was the owner's own doing — otherwise a
+  // drop in coverage is indistinguishable from the resolver losing a row, which is the exact
+  // "stale numbers are a symptom" confusion this repo keeps paying for.
+  const src = readFileSync(new URL('../src/screens/PostingAnalysis.jsx', import.meta.url), 'utf8')
+  assert.match(src, /data-qc=\{POSTING_HOOKS\.vetoed\}/, 'the veto state must render at all')
+  assert.match(src, /you vetoed this/, 'and it must say the owner did it, not merely that it is excluded')
+
+  // THE ORDERING PROPERTY, mirroring `ruleEvidenceOf`: the veto outranks every warrant, so no
+  // warrant badge may render beside it. Without this a vetoed row could show "you confirmed this"
+  // or "vetted: ... and it held" next to "you vetoed this" — two contradictory claims on one line.
+  for (const hook of ['confirmed', 'vetted']) {
+    const i = src.indexOf(`POSTING_HOOKS.${hook}}`)
+    assert.ok(i > 0, `the ${hook} badge is no longer rendered — the scan has gone stale`)
+    const guard = src.slice(Math.max(0, i - 260), i)
+    assert.match(guard, /!ev\.vetoed/,
+      `the ${hook} badge renders on a VETOED row. The owner would see their rejection and a warrant ` +
+      'for the same excerpt on the same line.')
+  }
+
+  // The material for the decision reaches the control. Counted and discarded until now, so the app
+  // asked for a judgement while withholding what it had learned that bears on it.
+  assert.match(src, /missing=\{ev\.missing\}/, 'the control must receive what a second read could not find')
+  assert.match(src, /data-qc=\{POSTING_HOOKS\.missing\}/, 'and must render it')
+})
+
+test('H:the-control-does-not-claim-a-proposal-is-uncounted', () => {
+  // THE SENTENCE THAT WAS TRUE WHEN WRITTEN AND BECAME A LIE. The control read "It does not count
+  // toward coverage until you say it is right", which described the gate exactly until proposals
+  // began counting on creation. A screen that tells the owner a row is excluded while the gate
+  // counts it makes the number unreconcilable with the rows beside it — and this is the copy the
+  // owner reads at the exact moment they are deciding whether to veto.
+  const src = readFileSync(new URL('../src/screens/PostingAnalysis.jsx', import.meta.url), 'utf8')
+  assert.ok(!/does not count toward coverage until/.test(src),
+    'the retired sentence claims a counted row is excluded')
+  assert.match(src, /counting toward your coverage now/,
+    'the control must say the row is already counting, which is what makes the veto meaningful')
 })

@@ -103,8 +103,15 @@ test('list-backed fields name their list, and prose fields do not', () => {
   assert.equal(r.rows.find(x => x.merge_field === 'ResumeSummary').list, null)
   assert.equal(r.rows.find(x => x.merge_field === 'SkillsBullets1').item_count, 3,
     'the count comes from the text, so a UI block cannot invent one')
+  // ExpertiseBullets joined on 2026-08-30. It is asserted here rather than left to the map's own
+  // shape because a MISSING entry is silent: `insertion.list` is written null, `listBodyModel` is
+  // handed an empty swap array, and the Expertise list renders a blank status on every line - which
+  // reads as broken and is the outcome the owner rejected. A null is not a type error anywhere.
   assert.deepEqual(Object.keys(LIST_FIELD_TO_LIST).sort(),
-    ['RelevantBullets1', 'RelevantBullets2', 'RelevantBullets3', 'SkillsBullets1', 'SkillsBullets2'])
+    ['ExpertiseBullets', 'RelevantBullets1', 'RelevantBullets2', 'RelevantBullets3',
+     'SkillsBullets1', 'SkillsBullets2'])
+  assert.equal(r.rows.find(x => x.merge_field === 'ExpertiseBullets')?.list ?? 'expertise', 'expertise',
+    'ExpertiseBullets must name its list, or its swap rows can never be joined to its lines')
 })
 
 test('attribution cites the employer words, or nothing', () => {

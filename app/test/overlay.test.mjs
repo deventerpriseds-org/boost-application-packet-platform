@@ -21,7 +21,12 @@ test('every variant resolves to a real, defined --zindex token (no interpolation
 test('an unknown variant falls back to modal rather than rendering unstyled', () => {
   assert.equal(overlayVariant('drawer'), OVERLAY_VARIANTS.drawer)
   assert.equal(overlayVariant('modal'), OVERLAY_VARIANTS.modal)
-  for (const bad of ['sheet', '', null, undefined, 'Drawer']) {
+  // 'sheet' was this list's example of an unknown variant until 2026-09-02, when it became the
+  // assistant's mobile presentation. Swapped for a name nothing will ever claim, rather than
+  // dropping the case - the fallback is the reason a typo'd variant renders as a dialog instead of
+  // throwing, which is exactly the silent failure this test exists to pin.
+  assert.equal(overlayVariant('sheet'), OVERLAY_VARIANTS.sheet)
+  for (const bad of ['sheeet', 'popover', '', null, undefined, 'Drawer']) {
     assert.equal(overlayVariant(bad), OVERLAY_VARIANTS.modal)
   }
 })
@@ -30,6 +35,12 @@ test('both variants are clamped to the viewport on a narrow screen', () => {
   // A fixed 680px drawer overflows a 390px phone; min() is what prevents it.
   assert.match(OVERLAY_VARIANTS.drawer.width, /^min\(.*,\s*100vw\)$/)
   assert.match(OVERLAY_VARIANTS.modal.width, /^min\(.*,\s*96vw\)$/)
+  // The sheet spans the full width by design - it rises from the bottom edge, so the axis that can
+  // overflow is the VERTICAL one, and 85vh is what keeps the packet visible behind it.
+  assert.equal(OVERLAY_VARIANTS.sheet.width, '100vw')
+  assert.match(OVERLAY_VARIANTS.sheet.maxHeight, /vh$/)
+  assert.ok(parseInt(OVERLAY_VARIANTS.sheet.maxHeight, 10) <= 90,
+    'a sheet taller than 90vh is a full-screen takeover, not a sheet')
   assert.equal(OVERLAY_VARIANTS.drawer.maxHeight, '100%')
   assert.equal(OVERLAY_VARIANTS.modal.maxHeight, '88vh')
 })

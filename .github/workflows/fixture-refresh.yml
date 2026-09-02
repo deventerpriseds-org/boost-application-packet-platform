@@ -75,7 +75,16 @@ jobs:
                               from check_result cr
                               where cr.artifact_id in (select id from artifact where packet_id = '$PKT')),
             'swaps',         (select coalesce(json_agg(row_to_json(s) order by s.seq), '[]'::json)
-                              from swap_decision s where s.packet_id = '$PKT')
+                              from swap_decision s where s.packet_id = '$PKT'),
+            -- THE OWNER'S CHECK THRESHOLDS. Without these the fixture renders every rule label
+            -- ("<= 24 chars each", the word bands, the gate contract) as unset, which reads exactly
+            -- like the product having lost its limits - and on 2026-08-29 was reported to the owner
+            -- as precisely that catastrophe. The values were live all along (24 / 20).
+            -- build-fixtures.mjs maps chk_snake_case -> camelCase and serves this as
+            -- `/search-prefs`.checks, the shape AssetBlocks.jsx:1158 reads.
+            'checkPrefs',    (select row_to_json(sp) from owner_search_prefs sp
+                              where sp.owner_email = (select owner_email from opportunity
+                                                      where id = '$OPP'))
           )::text
           SQL
 

@@ -39,6 +39,7 @@ import {
   meterModel, originalState, PLACEHOLDER_NOTE, placeholderToken, proposedKeywordDetail,
   proposedKeywordsForRow, reqsForRow, scopeSwaps,
   shapeOf, sharedSourceNote, statPct, wordCount,
+  attentionWithFields, unplacedOf, unplacedTarget, unplacedReason, UNPLACED_LINK_HOOK,
 } from '../assetBlocks.js'
 import { HIGHLIGHT_CLASS, HIGHLIGHT_ACTIVE_CLASS, markRuns } from '../highlight.js'
 import { SEV_COLOR, SEV_LABEL, checkLabel, fieldLabel, severityCounts } from '../assetGate.js'
@@ -143,6 +144,9 @@ export function useArtifactCorrections(artifactId) {
           severity: severityCounts(result),
           fieldSev: fieldSeverities(result),
           findings: findingsByField(result),
+          // SPEC 4.4-29. Derived HERE, from the payload this hook already holds, so the header's
+          // "N to fix" and the list of what those N actually are can never come from two reads.
+          attention: attentionWithFields(result),
         })
       })
       .catch(() => { if (live) setState(null) })
@@ -157,6 +161,7 @@ export function useArtifactCorrections(artifactId) {
     severity: state ? state.severity : null,
     fieldSev: state ? state.fieldSev : null,
     findings: state ? state.findings : null,
+    attention: state ? state.attention : null,
     checked: !!state,
     refresh: () => setReload((n) => n + 1),
   }
@@ -257,6 +262,89 @@ function Stat({ label, n, d, sub }) {
       </div>
       <div className="px-bar"><i style={{ width: `${pct}%`, background: all ? 'var(--proto-green)' : 'var(--surface-brand-default)' }} /></div>
       <div className="px-small" style={{ textTransform: 'none', marginTop: 4 }}>{sub}</div>
+    </div>
+  )
+}
+
+/**
+ * SPEC 4.4-29 — the header's open-items list, reduced to the half the field margins cannot carry.
+ *
+ * The prototype (`qc/assets.jsx:248-259`) lists every open item on the asset header and puts
+ * `Go to field →` on the ones that name a section. 4.4-28 moved that list into each field's margin,
+ * which is right for a finding that names a field this card renders — the reader is already in it,
+ * and a link that scrolls 200px is noise. What the relocation never covered is the REST, and the
+ * header kept counting them: on the production fixture the resume prints 73 and its margins render
+ * 20; the compact resume prints 47 and renders 2 (see `unplacedFindings`).
+ *
+ * So this renders the COMPLEMENT and nothing else. No finding is enumerated twice, and the header's
+ * own numbers reconcile with what the screen shows.
+ *
+ * COLLAPSED BY DEFAULT because the count is genuinely large, and the count is the reason to open it
+ * — the same rule the answers meter follows. The container renders whenever there is one, carrying
+ * `data-qc-n`, so the reconciliation is assertable from the DOM without expanding anything.
+ *
+ * NO DEAD UI, twice over: nothing renders at all when every finding found a margin, and a row shows
+ * `Go to field →` only where `unplacedTarget` resolves a real artifact and field. Where it does not,
+ * the row prints WHY — `inertReason`, the rail's own wording, not a second phrasing of it.
+ */
+function UnplacedFindings({ rows, artifactId, fieldOwners, onGoToField }) {
+  const [open, setOpen] = useState(false)
+  if (!rows || !rows.length) return null
+  const toggle = () => setOpen((v) => !v)
+  return (
+    <div className="px-box" data-qc={BLOCK_HOOKS.unplaced} data-qc-n={rows.length} data-qc-open={open ? '1' : '0'}
+      style={{ padding: 12, display: 'flex', flexDirection: 'column', gap: open ? 8 : 0 }}>
+      <div role="button" tabIndex={0} aria-expanded={open} onClick={toggle}
+        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle() } }}
+        style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap', cursor: 'pointer' }}>
+        <div style={{ fontSize: 13, fontWeight: 700 }}>
+          {rows.length} open {rows.length === 1 ? 'finding' : 'findings'} with no field of their own
+        </div>
+        <span className="px-small" style={{ textTransform: 'none', flex: 1, minWidth: 120 }}>
+          counted on this header, but they name no field this asset renders, so no margin below shows them
+        </span>
+        <span className="px-link" style={{ fontSize: 11.5 }}>{open ? 'Hide' : 'Show'}</span>
+      </div>
+
+      {open && rows.map((f, i) => {
+        const target = unplacedTarget(f, fieldOwners, artifactId)
+        const reason = unplacedReason(f, fieldOwners, artifactId)
+        return (
+          <div key={`${f.check_key}-${i}`} data-qc={BLOCK_HOOKS.unplacedRow}
+            data-qc-sev={f.sev} data-qc-check={f.check_key}
+            style={{ padding: '6px 0', borderTop: '1px solid var(--proto-rule-soft)' }}>
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, flexWrap: 'wrap' }}>
+              <span style={{ fontSize: 11.5, fontWeight: 600, flex: 1, minWidth: 0 }}>{checkLabel(f.check_key)}</span>
+              <span className="px-small" style={{ fontWeight: 700, color: SEV_COLOR[f.sev] }}>{SEV_LABEL[f.sev]}</span>
+              {/* The prototype's own condition, and this repo's no-dead-UI rule: the link exists
+                  only where a field and the asset that renders it both resolve. */}
+              {target && onGoToField && (
+                <span className="px-link" role="button" tabIndex={0}
+                  data-qc={UNPLACED_LINK_HOOK}
+                  data-qc-target-field={target.mergeField}
+                  data-qc-target-self={target.self ? '1' : '0'}
+                  style={{ fontSize: 11.5, whiteSpace: 'nowrap' }}
+                  onClick={() => onGoToField(target.artifactId, target.mergeField)}
+                  onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onGoToField(target.artifactId, target.mergeField) } }}>
+                  {target.self || !target.label
+                    ? 'Go to field →'
+                    : `Go to field in ${target.label} →`}
+                </span>
+              )}
+            </div>
+            {f.offenders.map((o, j) => (
+              <div key={j} className="px-small" style={{ textTransform: 'none', marginTop: 2, lineHeight: 1.45 }}>{o}</div>
+            ))}
+            {f.expected && (
+              <div className="px-small" style={{ textTransform: 'none', marginTop: 2, fontStyle: 'italic' }}>{f.expected}</div>
+            )}
+            {!target && reason && (
+              <div className="px-small" data-qc={BLOCK_HOOKS.unplacedReason}
+                style={{ textTransform: 'none', marginTop: 2, color: 'var(--proto-ink3)' }}>{reason}</div>
+            )}
+          </div>
+        )
+      })}
     </div>
   )
 }
@@ -1133,7 +1221,7 @@ function AssetBlock({ row, reqs, swapsForList, wide, artifactId, listOwners, thr
  * appearing twice as two separate changes. Both are optional: without them a shared swap still says
  * it is packet-level, it just cannot name the sibling.
  */
-export default function AssetBlocks({ artifact, provenance, fallback, defaultOpen = true, label, listOwners, onListsRendered, focusField = null, onSeedAssistant = null }) {
+export default function AssetBlocks({ artifact, provenance, fallback, defaultOpen = true, label, listOwners, onListsRendered, focusField = null, onSeedAssistant = null, fieldOwners = null, onGoToField = null }) {
   // SPEC 4.7-8 / 4.11-9 - "Forwards to the assistant". The SAME sentence a field control seeds
   // into its own ask box can also be sent up to the panel; the panel is a second DESTINATION,
   // never a replacement, because ground rule R6 keeps correction in place and scoped to the
@@ -1149,7 +1237,7 @@ export default function AssetBlocks({ artifact, provenance, fallback, defaultOpe
 
   // The change log, scoped per field into the margins below. One `busy` for the whole panel, not one
   // per row: two undos in flight against the same artifact would race the re-read that follows them.
-  const { rows: correctionRows, correctedCount, wording, severity, fieldSev, findings, checked, refresh: refreshCorrections } = useArtifactCorrections(artifact.id)
+  const { rows: correctionRows, correctedCount, wording, severity, fieldSev, findings, attention, checked, refresh: refreshCorrections } = useArtifactCorrections(artifact.id)
   // The OWNER'S check thresholds, so every field can state the contract the gate actually holds it
   // to. `searchPrefsGet().checks` is the same row Settings writes - one source, so changing 24 to 30
   // there changes what this screen promises.
@@ -1188,10 +1276,22 @@ export default function AssetBlocks({ artifact, provenance, fallback, defaultOpe
   // Report which lists this asset renders, so sibling cards can say a swap is shared with it. Keyed
   // on the sorted list names so an unchanged set never re-fires.
   const listsKey = useMemo(() => Array.from(listsInAsset).sort().join(','), [listsInAsset])
+  // SPEC 4.4-29. The merge fields this card renders, reported on the SAME callback and the same
+  // terms as the lists: one report per card, two maps derived from it, so a card can never be
+  // registered as an owner of its lists and not of its fields. Keyed on the sorted names for the
+  // same reason - an unchanged set never re-fires.
+  const fieldsKey = useMemo(() => rows.map((r) => r.merge_field).filter(Boolean).sort().join(','), [rows])
   useEffect(() => {
     if (!onListsRendered) return
-    onListsRendered(artifact.id, label || artifact.type, listsKey ? listsKey.split(',') : [])
-  }, [artifact.id, artifact.type, label, listsKey, onListsRendered])
+    onListsRendered(artifact.id, label || artifact.type,
+      listsKey ? listsKey.split(',') : [], fieldsKey ? fieldsKey.split(',') : [])
+  }, [artifact.id, artifact.type, label, listsKey, fieldsKey, onListsRendered])
+
+  // THE COMPLEMENT of what the margins below render. `attention` is null until the checks payload
+  // arrives, and an empty list renders nothing at all - never a "0 findings" box.
+  const unplaced = useMemo(
+    () => (attention ? unplacedOf(attention, fieldsKey ? fieldsKey.split(',') : []) : []),
+    [attention, fieldsKey])
 
   if (state.loading) return <div className="px-small">Loading blocks...</div>
 
@@ -1248,6 +1348,10 @@ export default function AssetBlocks({ artifact, provenance, fallback, defaultOpe
             checked={checked}
             label={ANSWERS_LABEL[artifact.type] || 'asset'}
           />
+          {/* SPEC 4.4-29 - directly under the counts it reconciles, above the fields whose margins
+              carry the other half. */}
+          <UnplacedFindings rows={unplaced} artifactId={artifact.id}
+            fieldOwners={fieldOwners} onGoToField={onGoToField} />
           {rows.map((r) => (
             <AssetBlock
               key={`${r.merge_field}-${r.loop}`}

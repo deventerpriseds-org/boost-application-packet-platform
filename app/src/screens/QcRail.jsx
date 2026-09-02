@@ -7,9 +7,9 @@ import {
   QC_HOOKS, RAIL_TABS, railGate, railGateMeta, railAttention, railCounts, railTotals, railBody,
   railHeadline, verdictLine, railVerdict, engineRows, countLink, coverageCards,
   requirementState, qcStepState, packetGate, loopsModel, notApplicableRows, rowsForRequirement,
-  swapsForRequirement, arr, errText,
-  railChangeLog, undoAvailability, revertOutcome, suggestScope, CHANGE_LOG_HEADLINE,
-  railDecisions, DECISION_NOTE,
+  swapsForRequirement, swapAskWhy, swapUndo, listOwnersFromArtifacts, arr, errText,
+  railChangeLog, undoAvailability, keepAvailability, revertOutcome, suggestScope, CHANGE_LOG_HEADLINE,
+  railDecisions, DECISION_NOTE, severityFor,
 } from '../qcRail.js'
 
 // P5.1 - the packet-level QC & evidence rail.
@@ -196,8 +196,14 @@ function CountLink({ artifactId, row, onOpen }) {
 function CheckRow({ artifactId, row, onOpen, onGoToField }) {
   const m = severityMeta(row)
   const link = countLink(artifactId, row)
+  // SPEC 4.8-11. `data-qc-sev` below carries the SEVERITY the list was ordered by, beside the raw
+  // state and engine it is derived from. Without it the rendered order can only be checked against
+  // state+engine - which is the very derivation D6 owns and the ordering defect got wrong - so a
+  // sweep could read `fail, fail, warn` as correct while a reviewer fail sat above a warn. It is
+  // read from the module (`severityFor`), never re-derived here.
   return (
     <div className="px-box-soft" data-qc={QC_HOOKS.check} data-qc-state={row.state} data-qc-engine={row.engine || 'deterministic'}
+      data-qc-sev={severityFor(row) || ''}
       style={{ padding: 10, marginBottom: 8 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
         <span style={{ fontSize: 13, fontWeight: 600, flex: 1, minWidth: 140 }}>{checkLabel(row.check_key)}</span>
@@ -311,7 +317,21 @@ function CoverageTab({ requirements, reqError, reqLoading, entries, pick, setPic
 
 // Original vs final. The packet-level swap table, filtered by the picked requirement when there is
 // one. Packet-level is said out loud: one swap row covers every asset built from this packet.
-function CompareTab({ swaps, loading, error, pick }) {
+//
+// SPEC 4.8-20 + 4.8-21 - `Undo this` and `Ask why`, the prototype's PAIR, in the last column. Both
+// SEED the assistant panel and send nothing; the sentence, the artifact each binds to and every
+// reason either may be absent are `swapUndo` / `swapAskWhy` in qcRail.js, so this file still
+// computes nothing.
+//
+// THE COMMENT THAT USED TO BE HERE SAID `Undo this` "is NOT here and must not be, because there is
+// no swap-revert route to call". The premise is still true - `appSwaps.ts` is GET-only and NOTHING
+// here calls a mutation - but it was the wrong conclusion: it read a constraint on ONE
+// implementation as the absence of the control, when the prototype's own `Undo this`
+// (`docs/qc-evidence/qc/evidence.jsx:232`) is a seed, not a mutation, and calls the identical
+// `onAsk(...)` its `Ask why` neighbour on `:233` does. The owner decided to keep both. What the
+// no-dead-UI rule actually forbids is a control with no TARGET, and `swapUndo` returns null in every
+// such case - no owning artifact, nothing named, or a `kept` row where no change was made.
+function CompareTab({ swaps, loading, error, pick, owners, onAsk }) {
   if (loading) return <Quiet>Loading what the tailoring pass changed...</Quiet>
   if (error) return <Quiet>Could not load the comparison: {error}</Quiet>
   const all = arr(swaps && swaps.swaps)
@@ -327,13 +347,18 @@ function CompareTab({ swaps, loading, error, pick }) {
         <table style={{ borderCollapse: 'collapse', width: '100%', minWidth: 420 }}>
           <thead>
             <tr>
-              {['Original', 'Final', 'What happened', 'Why'].map((h) => (
-                <th key={h} style={{ textAlign: 'left', fontSize: 11, color: 'var(--proto-ink2)', padding: '6px 8px', borderBottom: '1px solid var(--proto-rule-soft)', whiteSpace: 'nowrap' }}>{h}</th>
+              {/* The last header is deliberately blank: the `Ask why` column is an action, and a
+                  heading over it would read as a fifth fact about the swap. */}
+              {['Original', 'Final', 'What happened', 'Why', ''].map((h) => (
+                <th key={h || 'ask'} style={{ textAlign: 'left', fontSize: 11, color: 'var(--proto-ink2)', padding: '6px 8px', borderBottom: '1px solid var(--proto-rule-soft)', whiteSpace: 'nowrap' }}>{h}</th>
               ))}
             </tr>
           </thead>
           <tbody>
-            {rows.map((s) => (
+            {rows.map((s) => {
+              const ask = onAsk ? swapAskWhy(s, owners) : null
+              const undo = onAsk ? swapUndo(s, owners) : null
+              return (
               <tr key={s.id || (s.list + ':' + s.seq)}>
                 <td style={{ fontSize: 12, padding: '6px 8px', borderBottom: '1px solid var(--proto-rule-soft)' }}>{s.from_label || '-'}</td>
                 <td style={{ fontSize: 12, padding: '6px 8px', borderBottom: '1px solid var(--proto-rule-soft)' }}>{s.to_label || '-'}</td>
@@ -345,8 +370,30 @@ function CompareTab({ swaps, loading, error, pick }) {
                     ? <span>the posting says &quot;{s.verbatim_quote}&quot;</span>
                     : <span className="px-small">{s.driver === 'owner' ? 'you changed this yourself' : s.driver === 'unattributed' ? 'no line of the posting backs this change' : s.rationale || String(s.driver || '')}</span>}
                 </td>
+                <td style={{ padding: '6px 8px', borderBottom: '1px solid var(--proto-rule-soft)', whiteSpace: 'nowrap' }}>
+                  {/* Each rendered ONLY where its own request has an artifact to be about and a
+                      label to name. `swapUndo` / `swapAskWhy` return null otherwise - a row whose
+                      list no asset renders, or insertions that have not loaded - and a button that
+                      opened a panel unable to send would be exactly the control-with-no-target this
+                      column refuses. The two absences are NOT the same: on a `kept` row `Undo this`
+                      goes and `Ask why` stays, because nothing was changed to undo but why it was
+                      left alone is still a real question. */}
+                  <div style={{ display: 'flex', gap: 6 }}>
+                    {undo && (
+                      <button className="px-btn" data-qc={QC_HOOKS.undoSwap} data-qc-artifact={undo.artifactId}
+                        data-qc-action={s.action || ''} style={{ fontSize: 11 }}
+                        onClick={() => onAsk(undo.text, undo.artifactId)}>Undo this</button>
+                    )}
+                    {ask && (
+                      <button className="px-btn" data-qc={QC_HOOKS.askWhy} data-qc-artifact={ask.artifactId}
+                        style={{ fontSize: 11 }}
+                        onClick={() => onAsk(ask.text, ask.artifactId)}>Ask why</button>
+                    )}
+                  </div>
+                </td>
               </tr>
-            ))}
+              )
+            })}
           </tbody>
         </table>
       </div>
@@ -505,6 +552,8 @@ export function CorrectionRow({ row, artifactId, onOpen, onUndid, busy, setBusy,
   const [askOpen, setAskOpen] = useState(false)
   const [ask, setAsk] = useState('')
   const undo = undoAvailability(row)
+  // SPEC 4.11-7's `Keep`. It never can be, and the module says why - see keepAvailability.
+  const keep = keepAvailability(row)
   const scope = suggestScope(row)
   const mine = busy && busy.key === row.key
   const canSend = ask.trim().length > 0
@@ -522,6 +571,21 @@ export function CorrectionRow({ row, artifactId, onOpen, onUndid, busy, setBusy,
       // with a reason, not a generic failure, and it is shown as one.
       setRefusal(revertOutcome((e && e.body) || { reason: errText(e) }).reason)
     } finally { setBusy(null) }
+  }
+
+  // SPEC 4.11-7's `Re-run QC`, on the row that records a change.
+  //
+  // A REAL ROUTE, not a seed: `api.runArtifactChecks` is the same call the gate drawer's footer
+  // makes (`AssetGateDrawer.jsx` GATE_HOOKS.runChecks), and it is followed by the same re-read every
+  // other action on this row ends with, so the gate, the counts and this log describe one moment.
+  // Reaching it previously meant opening the drawer; the prototype puts it on the change itself,
+  // which is where a reader who has just undone something is standing.
+  const doRerun = async () => {
+    setBusy({ key: row.key, what: 'rerun' }); setRefusal(null)
+    try {
+      await api.runArtifactChecks(artifactId)
+      await onUndid()
+    } catch (e) { setRefusal(errText(e)) } finally { setBusy(null) }
   }
 
   const doAsk = async () => {
@@ -595,7 +659,21 @@ export function CorrectionRow({ row, artifactId, onOpen, onUndid, busy, setBusy,
         <button type="button" className="px-btn" data-qc={QC_HOOKS.correctionSuggest}
           data-qc-section={row.merge_field} onClick={() => setAskOpen((v) => !v)} disabled={!!busy}
           style={{ fontSize: 12 }}>Change it</button>
+        {/* SPEC 4.11-7's third control. Rendered only where there is an artifact to run the checks
+            FOR - the in-field variant is mounted with one, but a row with none has no request to
+            make and gets no button. */}
+        {artifactId && (
+          <button type="button" className="px-btn" data-qc={QC_HOOKS.correctionRerun}
+            data-qc-artifact={artifactId} onClick={doRerun} disabled={!!busy}
+            style={{ fontSize: 12 }}>{mine && busy.what === 'rerun' ? 'Re-running...' : 'Re-run QC'}</button>
+        )}
       </div>
+      {/* SPEC 4.11-7's FIRST control, and the reason it is a sentence rather than a button. A
+          correction is applied before the reader ever sees it, so there is no pending state for a
+          `Keep` to move: the button would send nothing and record nothing. The rule is the repo's -
+          a control with nothing to act on must not render, and the reason renders in its place. */}
+      <div className="px-small" data-qc={QC_HOOKS.correctionKeepNote} data-qc-available="0"
+        style={{ marginTop: 4 }}>{keep.reason}</div>
       {askOpen && (
         <div style={{ marginTop: 6 }}>
           <div className="px-small" style={{ letterSpacing: '.4px' }}>{scope.label}</div>
@@ -727,7 +805,7 @@ function Decisions({ entries, onOpen, onGoToField }) {
 
 // ── the rail ────────────────────────────────────────────────────────────────────────────────────
 
-export default function QcRail({ packetId, company, role, entries, setResult, requirements, reqError, reqLoading = false, onGoToField }) {
+export default function QcRail({ packetId, company, role, entries, setResult, requirements, reqError, reqLoading = false, onGoToField, onSeedAssistant = null }) {
   const [tab, setTab] = useState('coverage')
   const [pick, setPick] = useState(null)
   const [drawer, setDrawer] = useState(null)          // { artifactId, section }
@@ -769,6 +847,11 @@ export default function QcRail({ packetId, company, role, entries, setResult, re
 
   const picked = arr(requirements).find((r) => r.id === pick) || null
   const drawerEntry = drawer ? entries.find((e) => e.artifact.id === drawer.artifactId) : null
+
+  // SPEC 4.8-21. The SAME `list -> artifact` map 4.1-20 derives, from the same `entries`, rather
+  // than a second one built for this button: a swap row carries no artifact and the assistant seed
+  // requires one, which is precisely the hop `listOwnersFromArtifacts` already exists to make.
+  const listOwners = useMemo(() => listOwnersFromArtifacts(entries), [entries])
 
   return (
     <div data-qc={QC_HOOKS.rail} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
@@ -898,7 +981,8 @@ export default function QcRail({ packetId, company, role, entries, setResult, re
 
       <div data-qc={QC_HOOKS.panel} data-qc-panel={tab}>
         {tab === 'coverage' && <CoverageTab requirements={requirements} reqError={reqError} reqLoading={reqLoading} entries={entries} pick={pick} setPick={setPick} />}
-        {tab === 'compare' && <CompareTab swaps={swaps.data} loading={swaps.loading} error={swaps.error} pick={pick} />}
+        {tab === 'compare' && <CompareTab swaps={swaps.data} loading={swaps.loading} error={swaps.error} pick={pick}
+          owners={listOwners} onAsk={onSeedAssistant} />}
         {tab === 'loops' && <LoopsTab entries={entries} filtered={!!picked} />}
         {tab === 'checks' && <ChecksTab entries={entries} pick={pick} requirements={requirements} onOpen={openField} onGoToField={onGoToField} />}
         {tab === 'review' && <ReviewTab entries={entries} onOpen={openField} filtered={!!picked} onGoToField={onGoToField} />}
