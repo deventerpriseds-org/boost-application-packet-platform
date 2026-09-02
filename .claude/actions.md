@@ -7294,3 +7294,40 @@ as legitimate — *"a kind the posting does not use is not a 0/0 stat"* — not 
 **Recorded because it favours the app:** the rendered comparison distinguishes `Nothing found`
 (asked, unevidenced) from `Not compared` (never asked). The prototype has ONE label for both. That is
 this repo's "absent evidence is `not_applicable`, never a shortfall" rule, which the prototype breaks.
+
+### ACT-2026-09-02-f — all seven steps re-measured at `f57526d`; my prediction was WRONG
+
+Raw: `docs/qc-evidence/gap-all-f57526d.json` (`compare-ui --all`, fixed fixture, app rebuilt).
+
+| step | panels was | now | controls was | now |
+|---|---:|---:|---:|---:|
+| jd | 27 | **16** | 3 | **2** |
+| resume | 62 | 60 | 4 | 2 |
+| cover | 22 | 22 | 3 | 1 |
+| portfolio | 24 | 22 | 4 | 2 |
+| video | 2 | 2 | 0 | 0 |
+| qc | 22 | 20 | 4 | 4 |
+| send | 6 | 6 | 1 | 0 |
+| **total** | **165** | **148** | **19** | **11** |
+
+**THE PREDICTION THAT FAILED.** I told the owner the other six steps' numbers were "suspect in the
+same direction" and that I expected them to "fall substantially". They did not: −2, 0, −2, 0, −2, 0.
+**The comparison surface exists ONLY on the jd step**, so fixing the fixture could only ever help jd,
+and the ~11 rows it recovered are all there. The small movements elsewhere are other sessions' UI
+work landing, not my fix. I did at least refuse to guess a number; the directional claim was still
+wrong and is retracted here.
+
+**`video` is effectively at parity** and should stop being counted as 2: its only two prototype-only
+rows are `SafetyIQ · Head of Engineering` (a mockup demo value, excluded by §0) and `fail` (the
+deliberate match-header refusal, §16c). Prototype bodyLen 932 vs app 739 — proportionate, not starved.
+
+**WHAT 148 IS NOT.** It is not a backlog. It is a string-level diff that cannot tell a rename from a
+deliberate divergence from a real gap — on jd, classifying 16 such rows yielded **zero** real gaps.
+Extrapolating that ratio to the other steps would be exactly the error this whole lane exists to
+stop, so it is not extrapolated.
+
+**DO NOT DUPLICATE THE CLASSIFICATION.** Another session is already doing it against a better
+denominator — spec rows, not strings — and is at **164/183 (89.6%)** with the `cover` step rendered
+and four rows re-verdicted (`826c846`, `8369424`, `beb44e5`). This measurement's value is as a
+CANDIDATE LIST feeding that instrument, not as a second headline competing with it. Two headline
+numbers from two instruments is the state §1a already warns about.
