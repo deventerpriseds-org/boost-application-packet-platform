@@ -44,6 +44,20 @@ test('H:ats-header-row-is-not-a-keyword: the denominator is 9, not 10', () => {
   assert.ok(!kws.some(k => /ATS Optimized Keywords/i.test(k)), 'the header leaked into the keyword list')
   assert.equal(kws[0], 'Engineering Execution')
   assert.equal(kws[8], 'Regulated Industries')
+
+  // A MIXED HEADER IS WHAT MAKES THE `<th>` SKIP LOAD-BEARING, and without this case the skip is
+  // behaviourally equivalent to the `<td>` requirement below it — proven by mutation: deleting the
+  // skip changed nothing, because the live header carries `<th>` cells only and has no `<td>` to
+  // pick up. A model that emits `<th>` for the first cell and `<td>` for the rest is ordinary
+  // output, and against that the skip is the only thing standing between a header label and the
+  // denominator.
+  const mixedHeader = `<table>
+    <tr><th>ATS Optimized Keywords</th><td>Skills Covered</td><td>Location</td></tr>
+    <tr><td>Business Alignment</td><td>Missing</td><td>Missing</td></tr>
+  </table>`
+  assert.deepEqual(parseAtsKeywords(mixedHeader), ['Business Alignment'],
+    'a header row with any <td> put its label in the keyword list — the denominator is inflated ' +
+    'and one entry can never be covered')
 })
 
 test('H:ats-numerator-comes-from-what-shipped: never from the table\'s own Missing column', () => {
