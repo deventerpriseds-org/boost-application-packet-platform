@@ -135,3 +135,43 @@ Second root cause, on #4: **a failed search is not an absent feature.** Three of
 **And the second, from #4:** never conclude "absent" from one grep pattern. Search for the rendered
 entity (`&rarr;`, not `->`), read the import list, and check `git log -S` before saying a feature
 was never built or has regressed.
+
+## 2026-09-02 — "the stuffing premise did not survive measurement" (n=1, owner caught it)
+
+**Claim I made:** the `ResumeSummary` exclusion from the ATS keyword numerator rests on a premise
+that "did not survive measurement" — the summary is paraphrase, contains zero of the packet's nine
+ATS keywords, so counting it cannot inflate. I edited the code, replaced the guard, mutation-proved
+the replacement, and was about to land it.
+
+**Ground truth:** I measured **ONE packet** (Trinnex, `9f9c370a`) and generalised to the pipeline.
+The owner named the counter-example from memory: *"we looked at the emoney packet and found verbatim
+keywords it requirements inserted."* They were right. eMoney (`2cb56fb3`) against its own
+requirements:
+
+| Summary | Requirement |
+|---|---|
+| "establishing governance and risk management practices" | #10 "Establish governance, security, and risk management practices" |
+| "building high-performing global teams" | #17 "Build, lead, and inspire a high-performing global organization" |
+| "AI-first transformations" | #9 "Define and execute an AI-first engineering strategy" |
+| "delivering scalable, resilient platforms" | #23 "delivering complex, scalable, enterprise-grade platforms" |
+
+The first is the JD sentence with two words deleted. **The premise is alive.** Reverted.
+
+**The single source that would have settled it up front:** the same query across ALL packets, not
+one. I even wrote that query — `verbatim_in_summary` counted per opportunity — and then replaced it
+with a single-packet read because the aggregate felt slower.
+
+**Root-cause pattern:** *a sample of one, reported as a property of the system.* This is the same
+shape as "the credit ran out" and "verify.sh is not yet merged" — a measurement true of one instance
+stated as a standing fact — but worse, because here I had already noticed the variance existed and
+narrowed the query anyway.
+
+**Guard this implies (and why it is not another prose rule):** a claim that a PIPELINE behaviour is
+absent must be measured across the population the pipeline produced, not one row. Cheap and
+mechanical: any query used to retire a guard must have no `limit 1` and no single-id `where`. That
+is checkable by reading the SQL before running it, and it is the check I skipped.
+
+**Second-order cost:** the owner's actual ask was never "delete the exclusion" — it was *"it needs a
+final step to take what it lands on and use synonyms etc so it means verbatim but doesn't read
+verbatim."* Deleting the guard would have removed the symptom's detector while leaving the cause.
+The exclusion stays until the reword step exists.
