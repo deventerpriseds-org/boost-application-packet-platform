@@ -111,3 +111,56 @@ test('H:lineage-is-diagnostic-only: it must never reach an accusation-grade tabl
       `packetBuild writes ${table} — the capture module must not touch a scoring table`)
   }
 })
+
+test('H:lineage-credits-the-earliest-matching-pass: a pass-through is not authorship', () => {
+  // THE DEFECT THIS REINSTATES. `skillLineage` used to test call3 -> call2 -> call1 and take the
+  // first match, "the precedence order the assembler applies". That cannot tell "Call 2 wrote this"
+  // from "Call 2 handed Call 1's list straight through", and it silently reported the second as the
+  // first — an unfalsifiable label, because `call2` merely meant "the text equals Call 2's output".
+  //
+  // MEASURED, and it is the MAJORITY case, not an edge one: db-query run 33635773017, opportunity
+  // 9f9c370a, had call1 and call2 byte-identical at 73 chars on BOTH RelevantBullets2 and
+  // RelevantBullets3. Two of five slots were mislabelled on the owner's live packet.
+  const passthrough = 'Product roadmap\nStakeholder alignment'
+  const rows = skillLineage(
+    { skills1: passthrough, relevant2: passthrough },
+    { skills1: passthrough, relevant2: passthrough },   // Call 2 changed NOTHING
+    {},                                                  // Call 3 returned nothing, as in production
+    { SkillsBullets1: passthrough, RelevantBullets2: passthrough },
+  )
+  for (const slot of ['SkillsBullets1', 'RelevantBullets2']) {
+    const r = rows.find((x) => x.slot === slot)
+    assert.equal(r.winner, 'call1',
+      `${slot}: a pass Call 2 did not change must be credited to Call 1, not to whichever pass the ` +
+      'assembler happens to prefer')
+  }
+
+  // And the reverse still resolves: when Call 2 genuinely differs, it wins.
+  const changed = 'Integrated product roadmap for hiring technology\nStakeholder alignment'
+  const r2 = skillLineage({ skills1: passthrough }, { skills1: changed }, {},
+    { SkillsBullets1: changed }).find((x) => x.slot === 'SkillsBullets1')
+  assert.equal(r2.winner, 'call2', 'a real Call 2 rewrite must still be credited to Call 2')
+})
+
+test('H:lineage-compares-the-preassembly-package: not the corrected one', () => {
+  // THE DEFECT THIS REINSTATES, measured on db-query run 33635773017: `winner` read 'none' on 4 of
+  // 5 slots. `skillLineage` was handed `pkg`, which IS `built.pkg` by reference, and both
+  // applyCorrectionPass and normalisePackage mutate it in place (`normalise.ts:121` is a bare
+  // `pkg[f] = joinItems(kept)`). By capture time the text matched no call's output and every
+  // comparison fell through — the "panel that always says the same wrong thing" this file's own
+  // header warns about.
+  //
+  // A SOURCE ASSERTION, deliberately: the defect is WHICH VARIABLE is passed at one call site, and
+  // no unit test can observe that without standing up the whole build. Scoped to the call itself so
+  // it cannot be satisfied by an unrelated line — the failure mode of a file-wide grep that this
+  // repo has already shipped once.
+  const s = src('appPackets.ts')
+  assert.match(s, /lineage: skillLineage\(built\.calls\.c1, built\.calls\.c2, built\.calls\.c3, assembled\)/,
+    'lineage must be computed from the frozen pre-correction snapshot, never from the mutated pkg')
+  assert.match(s, /const assembled: Record<string, any> = \{ \.\.\.built\.pkg \}/,
+    'and that snapshot must be taken before applyCorrectionPass runs')
+  const snapAt = s.indexOf('const assembled: Record<string, any>')
+  const corrAt = s.indexOf('await applyCorrectionPass(')
+  assert.ok(snapAt > 0 && corrAt > 0 && snapAt < corrAt,
+    'the snapshot must be taken BEFORE the correction pass — after it, it is a copy of the damage')
+})

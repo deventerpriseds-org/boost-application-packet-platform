@@ -5,6 +5,13 @@ import { requireWrite, resolveOwner } from './tests/appSession'
 // whitelist that drifts, and this one decides what may be read and written.
 import { CONFIG_KEYS } from './tests/pipelineConfig'
 import { SEED_TEMPLATE_ROLE_FOCUS, templateRowKey } from './tests/roleFocus'
+// The six per-template slot counts. Same rule as `CONFIG_KEYS` above: imported, never re-listed.
+// See the block comment at "FIXED SLOT COUNTS, per template" below for why they live in a separate
+// PURE module rather than here.
+import {
+  SLOT_FIELDS, SlotField, SlotCounts,
+  slotProp, readSlot, readSlots, hasAnySlot, EMPTY_SLOTS,
+} from './tests/slots'
 
 const CONN = process.env.AZURE_STORAGE_CONNECTION_STRING!
 const TABLE = 'AppConfig'
@@ -109,12 +116,44 @@ export async function saveConfig(
 // PARTITION rather than a second store: `templates` already existed and `resolveRoleFocus` already
 // read from it — what was missing was any way to write it.
 
-/** Only `roleFocus`, and only on a `resume-` row. A writer that accepts arbitrary fields on
- *  arbitrary rows is a way to put anything into AppConfig, which is what the projection above
- *  exists to prevent on the read side. */
+/** Only `roleFocus`, `label` and the six slot counts, and only on a `resume-` row. A writer that
+ *  accepts arbitrary fields on arbitrary rows is a way to put anything into AppConfig, which is what
+ *  the projection above exists to prevent on the read side. */
 function isTemplateRow(rowKey: string): boolean {
   return /^resume-[A-Za-z0-9_-]{10,}$/.test(rowKey)
 }
+
+// ── FIXED SLOT COUNTS, per template ─────────────────────────────────────────────────────────────
+//
+// The owner's ruling: *"fixed slot counts change per template"* and *"the 10 can't be increased to
+// 12 or reduce to 8 etc so only swaps are allowed not adds or drops given the limited space in the
+// resume template"*, plus *"also relevant and expertise counts"*.
+//
+// WHY THIS IS STORED AND NOT DERIVED. The Google Doc holds no slot structure to read: its
+// placeholders are exactly `{{ExpertiseBullets}} {{RelevantBullets1..3}} {{ResumeSummary}}
+// {{SkillsBullets1}} {{SkillsBullets2}}` and nothing else (proven live, `diagSkillSources.ts:16-22`,
+// api-test run 32973162995). One token per list expands to whatever text is injected, so "ten fit on
+// the page" is a fact about the RENDERED page that no code can read off the template. It is a
+// property OF THE TEMPLATE, so it lives on the template's row — beside `roleFocus` and `label`,
+// which are the two properties that already answer "what is this resume".
+//
+// It is NOT a `chk_*` threshold on `owner_search_prefs`: that store is per-OWNER, and one owner with
+// two resumes has two different slot counts. The row keyed by the template's Drive id is the only
+// key that cannot drift from the document being copied.
+//
+// THE DEFINITIONS MOVED, 2026-08-30 — `SLOT_FIELDS`, `SlotField`, `SlotCounts`, `slotProp`,
+// `readSlot`, `readSlots`, `hasAnySlot` and `EMPTY_SLOTS` now live in `tests/slots.ts`. Nothing
+// about this route changed; what changed is that the counts finally reach a CONSUMER. This file
+// calls `app.http(...)` at module scope, so the pipeline could not import from it without pulling
+// route registration into the build and into `node --test` — and the owner's setting therefore
+// reached nothing.
+//
+// They are NOT re-exported from here, deliberately. No TypeScript module imports from `config.ts`
+// today (`grep -rn "from './config'\|from '../config'" api/src` is empty — it is a route-registration
+// entry file), so a re-export would be dead weight AND a trap: it would make this file look like a
+// legitimate place to import slot definitions from, which is precisely the import that pulls
+// `app.http` into the pipeline and caused this defect. **Import from `tests/slots` instead.**
+// `H:slot-fields-have-exactly-one-definition` fails the suite if anyone routes around it.
 
 // GET /api/config/templates — every configured template focus, plus the seeds for those with none.
 export async function getTemplateConfig(req: HttpRequest, context: InvocationContext): Promise<HttpResponseInit> {
@@ -130,13 +169,18 @@ export async function getTemplateConfig(req: HttpRequest, context: InvocationCon
     // NOTE the membership test changed with it: a row now counts as configured if it carries EITHER
     // field. Keying it on `roleFocus` alone would have made a freshly-named template invisible until
     // someone also gave it a focus.
-    const configured: Record<string, { roleFocus?: string; label?: string }> = {}
+    //
+    // The six SLOT COUNTS joined the same row on 2026-08-30, and the membership test widened again
+    // for the same reason it widened for `label`: a template whose only configuration is its slot
+    // counts is configured, and keying membership on the older fields would make it invisible.
+    const configured: Record<string, { roleFocus?: string; label?: string; slots: SlotCounts }> = {}
     for await (const entity of client.listEntities({ queryOptions: { filter: odata`PartitionKey eq 'templates'` } })) {
       const k = entity.rowKey as string
       if (!isTemplateRow(k)) continue
       const roleFocus = (entity as any).roleFocus ? String((entity as any).roleFocus) : undefined
       const label = (entity as any).label ? String((entity as any).label) : undefined
-      if (roleFocus || label) configured[k] = { roleFocus, label }
+      const slots = readSlots(entity)
+      if (roleFocus || label || hasAnySlot(slots)) configured[k] = { roleFocus, label, slots }
     }
     // The seeded templates are listed too, so the screen can show a template nobody has configured
     // yet rather than an empty list that looks like nothing exists.
@@ -148,6 +192,10 @@ export async function getTemplateConfig(req: HttpRequest, context: InvocationCon
         roleFocus: (c && c.roleFocus) || seed,
         label: (c && c.label) || '',
         source: (c && c.roleFocus) ? 'config' : 'seed',
+        // No slot count is SEEDED. A seeded count would be an invented number, and an invented slot
+        // count is an accusation: every item past it is illegal. An unconfigured template reports
+        // `null` for all six, which the slot check must read as `not_applicable`.
+        slots: (c && c.slots) || { ...EMPTY_SLOTS },
       }
     })
     for (const [row, c] of Object.entries(configured)) {
@@ -155,6 +203,7 @@ export async function getTemplateConfig(req: HttpRequest, context: InvocationCon
         templates.push({
           templateId: row.replace(/^resume-/, ''), rowKey: row,
           roleFocus: c.roleFocus || '', label: c.label || '', source: 'config',
+          slots: c.slots,
         })
       }
     }
@@ -164,7 +213,7 @@ export async function getTemplateConfig(req: HttpRequest, context: InvocationCon
   }
 }
 
-// POST /api/config/templates { templateId, roleFocus }
+// POST /api/config/templates { templateId, roleFocus, label?, slots? }
 export async function saveTemplateConfig(req: HttpRequest, context: InvocationContext): Promise<HttpResponseInit> {
   if (req.method === 'OPTIONS') return { status: 204, headers }
   const { verified } = resolveOwner(req)
@@ -172,7 +221,10 @@ export async function saveTemplateConfig(req: HttpRequest, context: InvocationCo
     return { status: 403, headers, jsonBody: { success: false, error: 'a verified session is required to change a template role focus' } }
   }
   try {
-    const body = await req.json() as { templateId?: string; roleFocus?: string; label?: string }
+    const body = await req.json() as {
+      templateId?: string; roleFocus?: string; label?: string
+      slots?: Record<string, unknown>
+    }
     const templateId = String(body?.templateId || '').trim()
     const roleFocus = String(body?.roleFocus || '').trim()
     // `label` is optional and absent means "leave it alone", NOT "clear it". A caller that only
@@ -183,32 +235,88 @@ export async function saveTemplateConfig(req: HttpRequest, context: InvocationCo
     if (!templateId || !isTemplateRow(rowKey)) {
       return { status: 400, headers, jsonBody: { success: false, error: 'templateId must be a Drive id' } }
     }
-    const client = TableClient.fromConnectionString(CONN, TABLE)
-
-    // What the row should end up holding. An omitted `label` keeps whatever is stored.
-    let keepLabel = label
-    if (!hasLabel) {
-      try {
-        const existing = await client.getEntity('templates', rowKey) as any
-        keepLabel = existing?.label ? String(existing.label) : ''
-      } catch { keepLabel = '' }
+    // The six slot counts follow the SAME rule as `label`, and for the same reason spelled out below
+    // at the Replace: an omitted field means "leave it alone", never "clear it". A caller editing
+    // only the role focus must not silently wipe the counts off the template.
+    //
+    // A field that IS present is either a positive integer, or an explicit clear (`null` / `''`).
+    // Anything else is REJECTED rather than coerced. Coercing `0` or `-3` or `"ten"` into a number
+    // would store a count that declares real items illegal; coercing it to `null` would report
+    // success for a value the owner meant to set. A key nobody declared is ignored — the same
+    // deny-by-default as the pipeline whitelist above.
+    const sentSlots = (body && typeof body.slots === 'object' && body.slots) ? body.slots as Record<string, unknown> : null
+    const explicit: Partial<Record<SlotField, number | null>> = {}
+    for (const f of SLOT_FIELDS) {
+      if (!sentSlots || !Object.prototype.hasOwnProperty.call(sentSlots, f)) continue
+      const raw = sentSlots[f]
+      if (raw === null || raw === '' || raw === undefined) { explicit[f] = null; continue }
+      // The TYPE is checked before the value, because `Number()` is far too generous to be a
+      // validator on its own. `Number(true)` is 1 and `Number(['5'])` is 5 — both pass an
+      // `Number.isInteger(n) && n > 0` test, so a stray boolean would have been stored as a slot
+      // count of ONE, which declares every item past the first illegal. Found by probe, 2026-08-30.
+      // Only a real number, or a string of digits (which is what a form input sends), is a count.
+      const isCount = typeof raw === 'number' || (typeof raw === 'string' && /^[0-9]+$/.test(raw.trim()))
+      const n = isCount ? Number(typeof raw === 'string' ? raw.trim() : raw) : NaN
+      if (!Number.isInteger(n) || n <= 0) {
+        return {
+          status: 400, headers,
+          jsonBody: { success: false, error: `${f} must be a positive whole number, or null to clear it (received ${JSON.stringify(raw)})` },
+        }
+      }
+      explicit[f] = n
     }
 
-    // A blank focus AND no label is a DELETE, not a stored empty string: an empty row would win over
-    // the seed in `resolveRoleFocus` and silently blank the directive every prompt is prefixed with.
-    if (!roleFocus && !keepLabel) {
+    const client = TableClient.fromConnectionString(CONN, TABLE)
+
+    // ONE read of the stored row, serving both preserve-dances. It used to run only when `label` was
+    // omitted; slots are routinely partially omitted, so it is now unconditional. `label` semantics
+    // are unchanged — an unreadable or absent row still yields ''.
+    let existing: any = null
+    try { existing = await client.getEntity('templates', rowKey) as any } catch { existing = null }
+
+    // What the row should end up holding. An omitted `label` keeps whatever is stored.
+    const keepLabel = hasLabel ? label : (existing?.label ? String(existing.label) : '')
+
+    // Same for every slot: an explicit value wins, otherwise whatever is stored survives. `readSlot`
+    // is the ONE place that decides what a stored value means, so a junk value cannot re-enter
+    // through the preserve path as anything but `null`.
+    const keepSlots = {} as SlotCounts
+    for (const f of SLOT_FIELDS) {
+      keepSlots[f] = Object.prototype.hasOwnProperty.call(explicit, f)
+        ? (explicit[f] as number | null)
+        : readSlot(existing, f)
+    }
+
+    // A blank focus AND no label AND no slot count is a DELETE, not a stored empty string: an empty
+    // row would win over the seed in `resolveRoleFocus` and silently blank the directive every
+    // prompt is prefixed with. The slot term is what stops a template configured ONLY with counts
+    // from being destroyed by someone clearing its focus.
+    if (!roleFocus && !keepLabel && !hasAnySlot(keepSlots)) {
       try { await client.deleteEntity('templates', rowKey) } catch { /* already absent */ }
-      return { status: 200, headers, jsonBody: { success: true, templateId, roleFocus: null, label: '', cleared: true } }
+      return { status: 200, headers, jsonBody: { success: true, templateId, roleFocus: null, label: '', slots: { ...EMPTY_SLOTS }, cleared: true } }
     }
 
     // REPLACE, not Merge. Merge cannot CLEAR a property, so clearing the focus while keeping a label
     // would leave the old focus in place and report success — the silent no-op class this repo has
     // already been bitten by. Replace makes the row exactly what is sent, so a blank really blanks.
+    //
+    // Replace is ALSO exactly why `keepLabel` and `keepSlots` exist: under Replace, a property this
+    // handler does not write is gone. Every field the row may carry must be reconstructed here, and
+    // a field added later without a preserve line will be silently wiped by the next focus edit.
     const entity: Record<string, unknown> = { partitionKey: 'templates', rowKey }
     if (roleFocus) entity.roleFocus = roleFocus
     if (keepLabel) entity.label = keepLabel
+    // A cleared slot is written as ABSENT, never as 0 — under Replace, omitting it IS the clear.
+    // Storing 0 would read back as "this list has zero legal slots" (AC-8).
+    for (const f of SLOT_FIELDS) {
+      const n = keepSlots[f]
+      if (n !== null) entity[slotProp(f)] = n
+    }
     await client.upsertEntity(entity as any, 'Replace')
-    return { status: 200, headers, jsonBody: { success: true, templateId, roleFocus: roleFocus || null, label: keepLabel, cleared: !roleFocus } }
+    return {
+      status: 200, headers,
+      jsonBody: { success: true, templateId, roleFocus: roleFocus || null, label: keepLabel, slots: keepSlots, cleared: !roleFocus },
+    }
   } catch (err) {
     return { status: 500, headers, jsonBody: { success: false, error: String(err) } }
   }

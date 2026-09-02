@@ -9,7 +9,12 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
-import { ASSISTANT_HOOKS, ASSISTANT_LIMITS, applySeed, assistantScope, canSend } from '../src/assistantPanel.js'
+import {
+  ASSISTANT_HOOKS, ASSISTANT_LIMITS, applySeed, assistantScope, canSend,
+  assistantMode, dockedContentWidth, DOCK_MIN_VIEWPORT, DOCK_WIDTH, MIN_CONTENT,
+  NAV_WIDTH, GUTTER, SHELL_CAP,
+} from '../src/assistantPanel.js'
+import { OVERLAY_VARIANTS } from '../src/overlay.js'
 
 const src = (rel) => readFileSync(fileURLToPath(new URL(rel, import.meta.url)), 'utf8')
 const strip = (s) => s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')
@@ -107,31 +112,82 @@ test('H:panel-has-one-edit-path-and-reuses-the-shared-drawer', () => {
   // REUSE, not a hand-rolled panel. The shared drawer already clamps to min(680px, 100vw) - which is
   // what makes this work on a phone - and already owns the focus trap and close-on-navigation. A
   // second positioned panel would be the parallel system, and it would be the one without the trap.
-  assert.match(PANEL, /variant="drawer"/, 'the panel stopped using the shared Overlay drawer')
+  //
+  // The literal `variant="drawer"` assertion this replaced went stale on 2026-09-02 when mobile
+  // gained its own `sheet` edge. The INTENT is unchanged and is what is asserted now: every variant
+  // this panel names must be a REAL entry in the shared table.
+  //
+  // STRONGER THAN THE OLD CHECK, for a reason worth keeping: `overlayVariant` is
+  // `OVERLAY_VARIANTS[variant] || OVERLAY_VARIANTS.modal`, so a TYPO does not throw - it silently
+  // renders a centred modal. A misspelled 'sheeet' would have shipped as a dialog on every phone
+  // and looked merely odd rather than broken. Nothing checked for that before.
+  assert.match(PANEL, /<Overlay/, 'the panel stopped using the shared Overlay')
+  const variants = [...PANEL.matchAll(/variant=(?:"([a-z]+)"|\{[^}]*?'([a-z]+)'\s*:\s*'([a-z]+)'\})/g)]
+    .flatMap((m) => [m[1], m[2], m[3]]).filter(Boolean)
+  assert.ok(variants.length > 0, 'the panel names no Overlay variant at all')
+  for (const v of variants) {
+    assert.ok(Object.prototype.hasOwnProperty.call(OVERLAY_VARIANTS, v),
+      `variant "${v}" is not in OVERLAY_VARIANTS - overlayVariant() would silently fall back to modal`)
+  }
   assert.match(PANEL, /from '\.\.\/shell\.jsx'/, 'the panel no longer imports the shared shell overlay')
 })
 
 // ── the layout decision, recorded where it is enforced ──────────────────────────────────────────
 
-test('H:panel-floats-and-is-defined-ONCE-for-both-layouts', () => {
-  // The mode is asserted in the DOM rather than inferred from what is absent, so a verifier reading
-  // the live page learns which layout decision this app made.
-  assert.match(PANEL, /data-qc-mode="float"/, 'the panel no longer declares its mode')
-  assert.ok(!/data-qc-mode="docked"/.test(PANEL),
-    'a docked mode appeared - the shell caps content at 1280 and a dock leaves 688px against ~850px needed')
+test('H:panel-mode-is-derived-and-declared-not-hardcoded', () => {
+  // REPLACES H:panel-floats-and-is-defined-ONCE-for-both-layouts, which asserted
+  // `data-qc-mode="float"` as a LITERAL and forbade any dock breakpoint. That guard was correct for
+  // the decision it encoded (owner, 2026-08-27: float everywhere, because a 1280 shell cap left the
+  // packet 688px against blocks needing ~850) and the owner REVERSED that decision on 2026-09-02:
+  // *"on desktop wide the panel rather than float."* Replaced rather than deleted, and the
+  // replacement is strictly stronger: the old one could not tell a mode that was CHOSEN from one
+  // that was typed.
+  assert.match(PANEL, /data-qc-mode=\{mode\}/,
+    'the panel must declare the mode it is actually in, not a literal that cannot disagree with itself')
+  assert.ok(!/data-qc-mode="[a-z]+"/.test(PANEL),
+    'a hardcoded mode string came back - it makes the DOM record unfalsifiable')
 
-  // ONE element, rendered by BOTH branches. PacketBuilder's mobile and desktop returns have drifted
-  // before; two copies of this JSX is how a fix lands on one size and not the other.
+  // Three real modes, and mobile beats wide. A device reporting both must get the sheet: the mobile
+  // branch renders no rail and no columns, so there is nothing to dock beside.
+  assert.equal(assistantMode({ mobile: false, wide: true }), 'dock')
+  assert.equal(assistantMode({ mobile: false, wide: false }), 'float')
+  assert.equal(assistantMode({ mobile: true, wide: false }), 'sheet')
+  assert.equal(assistantMode({ mobile: true, wide: true }), 'sheet',
+    'mobile must win over wide - a phone has no columns to dock beside')
+  assert.equal(assistantMode(), 'float', 'the no-argument default must be the safe one')
+})
+
+test('H:dock-never-squeezes-the-packet-below-what-blocks-need', () => {
+  // THE INVARIANT THE WHOLE DECISION RESTS ON, and the one a later tweak would silently break.
+  // Docking was refused in August purely on this sum; it is allowed now only because the shell cap
+  // moved to 1560. If someone widens DOCK_WIDTH or lowers the threshold, the packet quietly gets
+  // narrower and nothing in a diff says so - which is exactly how the 688px squeeze happened.
+  assert.ok(dockedContentWidth(DOCK_MIN_VIEWPORT) >= MIN_CONTENT,
+    `docking at the threshold leaves ${dockedContentWidth(DOCK_MIN_VIEWPORT)}px, under the ${MIN_CONTENT}px blocks need`)
+  assert.ok(dockedContentWidth(SHELL_CAP) >= MIN_CONTENT,
+    'docking at the shell cap must also clear the minimum')
+
+  // DERIVED, not typed. A literal threshold is what lets the two drift apart.
+  assert.ok(!/DOCK_MIN_VIEWPORT = \d/.test(MODULE),
+    'DOCK_MIN_VIEWPORT is a literal - it must be computed from NAV + GUTTER + MIN_CONTENT + DOCK')
+  assert.ok(DOCK_MIN_VIEWPORT >= NAV_WIDTH + GUTTER + MIN_CONTENT + DOCK_WIDTH + GUTTER,
+    'the threshold does not actually cover the columns it is made of')
+
+  // Below the threshold there is no dock to have.
+  assert.ok(dockedContentWidth(1280) < MIN_CONTENT,
+    'the old 1280 cap must still fail the test - it is why this was refused in August')
+})
+
+test('H:panel-mounts-exactly-once-per-layout', () => {
+  // ONE element, and the float/dock renders are MUTUALLY EXCLUSIVE. Two mounts means two textareas
+  // holding two drafts, and a seed consumed by whichever instance reacted first - a silent
+  // data-loss bug, not a cosmetic one. The mobile branch renders its own.
   assert.equal((BUILDER.match(/<AssistantPanel/g) || []).length, 1,
-    'the panel is constructed more than once - the mobile and desktop branches can now drift')
-  assert.equal((BUILDER.match(/\{assistant\}/g) || []).length, 2,
-    'the shared panel element is not rendered by exactly two branches (mobile + desktop)')
-
-  // No new viewport rule. AC-5 forbids standing up a second breakpoint mechanism beside
-  // keywordColumns; since the panel floats at every width there is no threshold to add, and a rule
-  // with one branch is config that cannot be wrong - which reads as a decision and is not one.
-  assert.ok(!/1440|assistantMode/.test(MODULE),
-    'a dock breakpoint appeared in the panel module; the panel floats at every width')
+    'the panel is constructed more than once - the branches can now drift')
+  assert.match(BUILDER, /\{assistantMode_ === 'dock' && assistant\}/,
+    'the docked column must be gated on the mode')
+  assert.match(BUILDER, /\{assistantMode_ === 'float' && assistant\}/,
+    'the floating render must be gated on the SAME mode, or dock mode mounts the panel twice')
 })
 
 test('H:forward-carries-the-artifact-with-the-sentence', () => {

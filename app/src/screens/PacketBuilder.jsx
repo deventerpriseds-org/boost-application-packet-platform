@@ -1,10 +1,10 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react'
-import { useApp, go, useIsMobile } from '../state.jsx'
+import { useApp, go, useIsMobile, useIsWide } from '../state.jsx'
 import { api } from '../api.js'
 import { Pill, toneColor } from '../shell.jsx'
 import { Loading, ErrorBox } from './Today.jsx'
 import AssetBlocks, { useAssetProvenance } from './AssetBlocks.jsx'
-import { registerListOwners } from '../assetBlocks.js'
+import { registerListOwners, registerFieldOwners } from '../assetBlocks.js'
 import {
   PostingAnalysisCard, AnalysisRunCard, KeywordTallyOverlay, MatchEstimateButton, ProfileLink,
   ProfileCompareCard,
@@ -14,6 +14,7 @@ import { PACKET_HOOKS, ASSET_BODY_DEFAULT_OPEN, regenerateWithNote } from '../pa
 import QcRail, { useQcEntries } from './QcRail.jsx'
 import { GateBadge } from './AssetGateDrawer.jsx'
 import AssistantPanel from './AssistantPanel.jsx'
+import { assistantMode, DOCK_MIN_VIEWPORT } from '../assistantPanel.js'
 import { qcStepState, packetGate, railGateMeta, packetReadiness, packetFailList, qcSummaryModel, firstFixTarget, listOwnersFromArtifacts, requirementUsage } from '../qcRail.js'
 
 const TYPE_LABEL = {
@@ -146,7 +147,7 @@ function stepDone(key, p, artifacts, qc) {
 // Exported so the browser probe can mount the REAL card (test/browser/run-asset-blocks.mjs). The
 // header's collapsed default is a rendering fact; asserting it against a replica of this component
 // would prove only that the replica was written to match.
-export function ArtifactCard({ a, busy, setBusy, qcResult, onGenerate, onRegenerate, onSetStatus, onMakeDoc, onMakeSlides, onGenVideo, onArchiveVideo, doc, video, provenance, listOwners, onListsRendered, focusField = null, onOpenFirstFix = null, onSeedAssistant = null }) {
+export function ArtifactCard({ a, busy, setBusy, qcResult, onGenerate, onRegenerate, onSetStatus, onMakeDoc, onMakeSlides, onGenVideo, onArchiveVideo, doc, video, provenance, listOwners, onListsRendered, focusField = null, onOpenFirstFix = null, firstFix = null, onSeedAssistant = null, fieldOwners = null, onGoToField = null }) {
   const v = video[a.id] || {}
   const d = doc[a.id] || {}
   const videoUrl = v.url || a.docUrl
@@ -188,7 +189,7 @@ export function ArtifactCard({ a, busy, setBusy, qcResult, onGenerate, onRegener
             NULL means NO CLICK, never a click that goes nowhere: an unchecked asset has no findings
             and therefore no field to open, and a badge that navigates nowhere is the dead UI the
             standing rule forbids. */}
-        <GateBadge result={qcResult} compact onClick={onOpenFirstFix || undefined} />
+        <GateBadge result={qcResult} compact onClick={onOpenFirstFix || undefined} firstFix={firstFix} />
         <span className="px-link" role="button" tabIndex={0} onClick={toggle}
           data-qc={PACKET_HOOKS.assetToggle} data-qc-open={open ? '1' : '0'}
           onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle() } }}
@@ -205,7 +206,11 @@ export function ArtifactCard({ a, busy, setBusy, qcResult, onGenerate, onRegener
       {(a.status !== 'todo' || a.content) && (
         <AssetBlocks artifact={a} provenance={provenance} fallback={a.content}
           label={TYPE_LABEL[a.type] || a.type} listOwners={listOwners} onListsRendered={onListsRendered}
-          focusField={focusField} onSeedAssistant={onSeedAssistant} />
+          focusField={focusField} onSeedAssistant={onSeedAssistant}
+          /* SPEC 4.4-29 - the SAME navigator the QC rail's deep links use (`goToField`), not a
+             second one, so a finding opened from the asset header and the same finding opened from
+             the rail land identically. */
+          fieldOwners={fieldOwners} onGoToField={onGoToField} />
       )}
 
       {/* Video */}
@@ -263,7 +268,7 @@ export function ArtifactCard({ a, busy, setBusy, qcResult, onGenerate, onRegener
                 on precisely the artifacts where a cache bypass matters there was no control to press
                 — the dead-UI defect moved one layer up, where the api.js diff makes it look solved. */}
             <span data-qc={PACKET_HOOKS.assetRebuild} className="px-link"
-              style={{ fontSize: 12, cursor: d.busy ? 'default' : 'pointer', opacity: d.busy ? 0.6 : 1 }}
+              style={{ fontSize: 12, cursor: d.busy ? 'default' : 'pointer', opacity: d.busy ? 0.6 : 1, whiteSpace: 'nowrap' }}
               role="button" aria-disabled={d.busy ? 'true' : 'false'} tabIndex={d.busy ? -1 : 0}
               onClick={() => { if (!d.busy) ((a.type === 'portfolio' || a.type === 'cover') ? onMakeSlides : onMakeDoc)(a, { regen: true }) }}
               onKeyDown={(e) => {
@@ -386,6 +391,8 @@ export function ArtifactCard({ a, busy, setBusy, qcResult, onGenerate, onRegener
 export default function PacketBuilder({ id, step }) {
   const { toast } = useApp()
   const mobile = useIsMobile()
+  const wide = useIsWide(DOCK_MIN_VIEWPORT)
+  const assistantMode_ = assistantMode({ mobile, wide })
   const [pState, setPState] = useState({ loading: true, error: null, packet: null })
   const [opp, setOpp] = useState(null)
   const [applying, setApplying] = useState(false)
@@ -429,8 +436,17 @@ export default function PacketBuilder({ id, step }) {
   // the compact resume render the SAME change; this registry is what lets each card name the other
   // instead of the one decision reading as two (decision 9, sharedSource).
   const [listOwners, setListOwners] = useState({})
-  const registerLists = useCallback((artifactId, label, lists) => {
+  // SPEC 4.4-29. `mergeField -> [{id,label}]`, from the SAME report. A finding on the compact resume
+  // can name `RelevantBullets1`, a field only the RESUME renders (10 such rows on the production
+  // fixture), and turning that into a navigation needs to know which asset owns the field. The
+  // list-keyed map above cannot answer it - it is keyed by list because a swap_decision row is, and
+  // no list backs `ResumeSummary` or `@CoverLetterBody`. Derived at render time rather than from
+  // `listOwnersFromArtifacts` because `useQcEntries` fetches insertions only on the QC and JD steps,
+  // so on the asset steps - where this list renders - that derivation would be `{}`.
+  const [fieldOwners, setFieldOwners] = useState({})
+  const registerLists = useCallback((artifactId, label, lists, fields) => {
     setListOwners((prev) => registerListOwners(prev, artifactId, label, lists))
+    setFieldOwners((prev) => registerFieldOwners(prev, artifactId, label, fields))
   }, [])
   // ONE source for every asset's QC payload (P5.1). The step circle, the QC rail, the per-asset
   // drawer and the keyword surfaces all read this same map, so no two of them can show different
@@ -879,6 +895,10 @@ export default function PacketBuilder({ id, step }) {
             coveredKw={coveredKw} missingKw={missingKw} gapsScoredAt={p.atsGapsScoredAt}
             onParse={parseJd} parseBusy={parseBusy} hasSummary={!!opp?.jdSummary}
             keywordScore={keywordScore}
+            /* The confirm control needs an opportunity to post against, and `reloadReq` above is
+               already this card's refresh - so accepting an excerpt re-reads the same payload the
+               row was rendered from rather than patching local state and letting the two drift. */
+            oppId={id}
             /* 4.1-3: navigation arrives as a prop and calls the ONE existing step API. A second
                router inside the card would be the parallel system extend-don't-duplicate forbids. */
             onOpenQc={() => setActiveStep('qc')}
@@ -953,7 +973,11 @@ export default function PacketBuilder({ id, step }) {
                   const t = firstFixTarget(qcEntries, a.id)
                   return t ? () => goToField(t.artifactId, t.mergeField) : null
                 })()}
+                /* The badge must NAME the finding this handler opens, not a different one it
+                   selected for itself. See `firstFixTarget` for the measured mismatch. */
+                firstFix={firstFixTarget(qcEntries, a.id)}
                 listOwners={listOwners} onListsRendered={registerLists}
+                fieldOwners={fieldOwners} onGoToField={goToField}
                 focusField={fieldFocus && fieldFocus.artifactId === a.id ? fieldFocus.section : null}
                 /* SPEC 4.7-8 - the artifact travels WITH the sentence. Binding it at the call site,
                    where `a.id` is unambiguous, is what stops the panel inferring which asset a
@@ -979,7 +1003,13 @@ export default function PacketBuilder({ id, step }) {
             packetId={p.id} company={p.company} role={p.role}
             entries={qcEntries} setResult={setQcResult}
             requirements={req.data ? req.data.requirements : null} reqError={req.error}
-            reqLoading={!req.data && !req.error} onGoToField={goToField} />
+            reqLoading={!req.data && !req.error} onGoToField={goToField}
+            /* SPEC 4.8-21 - the swaps table's `Ask why`. The artifact still travels WITH the
+               sentence, exactly as the asset cards bind it at :961; the difference is only WHERE it
+               is resolved. An asset card knows its own `a.id`; a swap row is packet-level and has
+               none, so the rail resolves it from the list the swap names and hands it over here.
+               Nothing is inferred from the active step in either case. */
+            onSeedAssistant={seedAssistant} />
           <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
             <button className="px-btn px-btn-accent" onClick={() => setActiveStep('send')}>Next: Review &amp; send →</button>
           </div>
@@ -1102,7 +1132,8 @@ export default function PacketBuilder({ id, step }) {
       artifact={assistantArtifact}
       seed={assistantSeed ? assistantSeed.text : null}
       onSeedConsumed={() => setAssistantSeed(null)}
-      onSent={load} />
+      onSent={load}
+      mode={assistantMode_} />
   )
 
   if (mobile) {
@@ -1214,8 +1245,13 @@ export default function PacketBuilder({ id, step }) {
         )}
       </div>
 
-      {/* Two columns since D4: nav rail + content. The old 280px right keyword column is gone, which is
-          what gives the centre its width back (1280 shell cap - 196 nav leaves ~664px at 1440). */}
+      {/* THREE COLUMNS WHEN DOCKED, two otherwise: nav rail + content [+ assistant].
+          The keyword column D4 deleted is NOT what came back here -- that was a data panel; this is
+          SPEC 4.11's assistant, and it only fits because the shell cap moved to the prototype's own
+          1560 (owner decision 2026-09-02). The arithmetic lives in `assistantPanel.js`, not here:
+          `dockedContentWidth(1560) = 968px` against blocks needing ~850, and `DOCK_MIN_VIEWPORT`
+          is DERIVED from those parts so narrowing the column can never silently squeeze the packet.
+          Below that width `assistantMode` returns 'float' and this row is two columns again. */}
       <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start' }}>
         {/* Left: step list */}
         <div style={{ width: 220, flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 2 }}>
@@ -1247,16 +1283,22 @@ export default function PacketBuilder({ id, step }) {
           {stepContent}
         </div>
 
+        {/* Right: SPEC 4.11's assistant, DOCKED. Rendered here and nowhere else in this branch —
+            the float render at the bottom of this component is gated on the same mode so the panel
+            can never mount twice. `flexShrink: 0` and the fixed DOCK_WIDTH are what make the
+            centre column's `flex: 1` resolve to the width the arithmetic promised; letting the
+            column flex would hand the packet back the squeeze this design exists to avoid. */}
+        {assistantMode_ === 'dock' && assistant}
+
       </div>
 
       {keywordTally}
 
-      {/* SPEC 4.11 - the assistant, floating rather than docked. The SAME element the mobile branch
-          renders: this app's shell caps content at 1280 against the prototype's 1560, so a docked
-          340px column leaves the packet 688px at every viewport against blocks needing ~850px.
-          Owner decision 2026-08-27; the alternative (raise the cap, re-flowing every screen) is in
-          .claude/DEFERRED.md rather than lost. */}
-      {assistant}
+      {/* SPEC 4.11 - float mode only. When `assistantMode` says 'dock' the panel has already been
+          rendered as the third column above, and rendering it here too would mount it twice: two
+          textareas holding two drafts, and a seed consumed by whichever instance reacted first.
+          The mobile branch renders its own 'sheet' and never reaches this line. */}
+      {assistantMode_ === 'float' && assistant}
     </div>
   )
 }

@@ -80,3 +80,58 @@ against the decisions ledger, so a CLOSED row was re-reported as OPEN and attrib
 inventory) and be checked against `.claude/actions.md` + `.claude/DEFERRED.md` before it is shown to
 the owner. A row whose origin is "the prototype" is a PROPOSAL, and must never be presented as
 something the owner is blocking.
+
+---
+
+## 2026-08-29 — FOUR wrong answers in one session, all ONE class: an absence I created, reported as an absence in the product
+
+The individual mistakes matter less than the shape, which repeated four times in a day despite the
+"Ground-truth before answering" rule already being written in `CLAUDE.md` twice over. **Prose did
+not prevent it. Two exits now do.**
+
+| # | Claimed to the owner | Ground truth | The input error | Single source that would have settled it |
+|---|---|---|---|---|
+| 1 | `supportIn` protects **0 of 20** template skill items; "option C ruled out by data" | the measurement answered a question nobody asked | fed `recordText` a **two-word label**; production feeds **profile records** | `evidence.ts:406` — read the only two production callers |
+| 2 | **5 of 7 packet steps** are missing their UI (app bodies 615-628 chars) | app was fine | used a **raw dump** as a route-keyed fixture; key `packet` matched `/packets` | `build-fixtures.mjs` header — it documents this exact trap |
+| 3 | **"the 24/20 character limits have been removed from the app's code and/or pipeline"** | **live at 24 and 20** | fixture `/search-prefs` carried no `checks`, so all 24 thresholds rendered unset | `select chk_skill_max_chars, chk_relevant_max_chars from owner_search_prefs` |
+| 4 | "the app has no `original -> final` swap row" | shipped `3a577b6`, 2026-08-20, never reverted | grepped for a literal `->`; the source emits `&rarr;` | `git log -S'line.from' -- app/src/screens/AssetBlocks.jsx` |
+
+**#3 is the expensive one.** It was delivered as a catastrophe report. The owner's reply names the
+real cost: *"that is a catastrophe because it means I have no clue when you randomly knew that up."*
+A false alarm about a core safety property does not just waste a turn — it makes every future report
+less believable.
+
+### Root cause, stated structurally
+
+Every guard in this repo asserts things about **the product**. H-cases assert product invariants; the
+Stop gate asserts process steps. **Nothing asserted that the measuring instrument was correctly
+configured before its output was believed.** `build-fixtures.mjs` *did* print
+`!!! THIN FIXTURE SET - the next gap number will be INFLATED and NOT comparable`. I read it and
+proceeded. It was advisory. **An advisory warning on an instrument is worth nothing, because the
+failure mode is an agent that already believes its number.**
+
+Second root cause, on #4: **a failed search is not an absent feature.** Three of the four are
+"absent" claims, which `CLAUDE.md` already calls the heaviest claim available.
+
+### Guards this earned (all mutation-proved the same day)
+
+1. **`build-fixtures.mjs` exits 1 and writes NOTHING** on a thin set — now including a missing
+   `checks` thresholds object. `--allow-thin` must be typed on purpose. *Proved: thin dump ->
+   `exit=1`, no file; with the flag -> `exit=0`, file written.*
+2. **`compare-ui.mjs` runs a CANARY before any comparison** and exits 1 when the fixture cannot
+   carry a finding (`/search-prefs` without `checks`, or no `/swaps` key). *Proved against the exact
+   fixture that produced #3: `real exit code = 1`, no report written.*
+3. **`fixture-refresh.yml` now dumps `owner_search_prefs`** so a fixture can carry the thresholds at
+   all — they were never dumped, so NO fixture in this repo's history had them.
+4. **`docs/qc-evidence/LOCAL-RENDER-UAT.md`** — the method, its two instruments, and every one of
+   these four failures, so the next session inherits the ways the harness lies.
+
+**The standing rule, and it is about instruments rather than products:**
+
+> **An instrument that cannot see has no standing to report an absence.** Before reporting that the
+> app is missing X, prove the harness can see a known-present X. If it cannot, the finding is about
+> the harness.
+
+**And the second, from #4:** never conclude "absent" from one grep pattern. Search for the rendered
+entity (`&rarr;`, not `->`), read the import list, and check `git log -S` before saying a feature
+was never built or has regressed.

@@ -16,18 +16,24 @@
 import {
   engineRows, scoreParts, gateMeta, stateMeta, arr, severityFor, reconcile, assetLabel, pctWidth,
   correctionsState, orderCorrections, correctionRow, correctionSentence, correctionAnomalies,
-  correctionSourceText, undoAvailability, revertOutcome, suggestScope,
+  correctionSourceText, undoAvailability, keepAvailability, revertOutcome, suggestScope, fieldLabel,
+  ATTENTION_ORDER, attentionRank, firstFixFinding, severityWeight, bySeverity, checkLabel,
   CHANGE_LOG_HEADLINE, CORRECTION_SOURCE, CORRECTION_REVERT_ROUTE,
 } from './assetGate.js'
 
 export { engineRows, scoreParts, gateMeta, stateMeta, pctWidth }
+
+// SPEC 4.8-11. The severity ORDER is assetGate's, re-exported here for the same reason the score
+// selectors are: the rail reads one definition of "what is read first" rather than keeping a second
+// copy that is free to drift from the drawer's.
+export { ATTENTION_ORDER, attentionRank, firstFixFinding, severityFor, severityWeight, bySeverity }
 
 // P8.6's change log reads the SAME payload the gate and the counters read, so its selectors live
 // beside theirs in assetGate.js and are re-exported here rather than reimplemented. A second
 // definition of "how many corrections" is the whole failure this rail was built to prevent.
 export {
   correctionsState, orderCorrections, correctionRow, correctionSentence, correctionAnomalies,
-  correctionSourceText, undoAvailability, revertOutcome, suggestScope,
+  correctionSourceText, undoAvailability, keepAvailability, revertOutcome, suggestScope,
   CHANGE_LOG_HEADLINE, CORRECTION_SOURCE, CORRECTION_REVERT_ROUTE,
 }
 
@@ -84,6 +90,19 @@ export const QC_HOOKS = {
   correctionSuggest: 'qc-correction-suggest',
   correctionRefusal: 'qc-correction-refusal',   // the server's own words when an undo is declined
   correctionAnomaly: 'qc-correction-anomaly',
+  // SPEC 4.8-21 - `Ask why` on a swap row. Carries the artifact the question was bound to, because
+  // the swap row itself is packet-level and the binding is the part that can be wrong.
+  askWhy: 'qc-ask-why',
+  // SPEC 4.8-20 - `Undo this`, its sibling on the same row and the same seed mechanism. Its own
+  // hook rather than a variant attribute on `qc-ask-why`, because the two have DIFFERENT absence
+  // rules (a `kept` row keeps Ask why and loses this one), and a sweep that cannot tell them apart
+  // cannot tell a correct absence from a missing control.
+  undoSwap: 'qc-undo-swap',
+  // SPEC 4.11-7 - `Re-run QC` on a recorded change. See the CorrectionRow comment for why this is
+  // the row that carries it and what was NOT built beside it.
+  correctionRerun: 'qc-correction-rerun',
+  // SPEC 4.11-7 - the sentence standing in for a control that must not render.
+  correctionKeepNote: 'qc-correction-keep-note',
 }
 
 // The five tabs P5.1 specifies, in the backlog's order.
@@ -201,32 +220,11 @@ export function railChangeLog(result) {
   return correctionsState(result)
 }
 
-/**
- * Ordering weight for a finding. Higher sorts first.
- *
- * A reviewer `fail` MUST weigh less than a deterministic `fail` (D6): one is a measured fact about
- * the text that blocks the artifact, the other is a model's opinion that can never block it. Ranking
- * them equally puts an opinion at the top of a list of blockers.
- *
- * `not_applicable` outranks `pass` because it is an open question - something could not be checked -
- * while a pass is settled. It still counts toward NEITHER number above.
- */
-export function severityWeight(row) {
-  const engine = row && row.engine === 'reviewer' ? 'reviewer' : 'deterministic'
-  const state = row && row.state
-  if (state === 'fail') return engine === 'reviewer' ? 50 : 100
-  if (state === 'warn') return engine === 'reviewer' ? 40 : 60
-  if (state === 'not_applicable') return 10
-  return 0
-}
-
-/** Findings ordered by what a reader must act on first. Stable within a weight. */
-export function bySeverity(rows) {
-  return arr(rows)
-    .map((r, i) => ({ r, i }))
-    .sort((a, b) => (severityWeight(b.r) - severityWeight(a.r)) || (a.i - b.i))
-    .map((x) => x.r)
-}
+// `severityWeight` and `bySeverity` MOVED to ./assetGate.js beside `ATTENTION_ORDER`, the order they
+// derive from - the same move `pctWidth` made, and for the same reason. The gate drawer may not
+// import this module, so while the rule lived here the drawer's Checks tab had to carry its own
+// copy (`{ fail: 0, warn: 1, not_applicable: 2, pass: 3 }`), making FOUR orderings of one claim.
+// Re-exported above, so every existing caller and test keeps its import unchanged.
 
 /**
  * The rows that could not be checked, each carrying the SERVER's reason.
@@ -438,6 +436,27 @@ export function offenderLinks(artifactId, row) {
 }
 
 /**
+ * The FIRST merge field one check's offenders name, or null.
+ *
+ * A thin read of `sectionIdForOffender` over `row.offenders`, in payload order, stopping at the
+ * first that resolves. It exists so `packetFailList` reaches the field through the same single parse
+ * as every other surface instead of consulting `CHECK_SUBJECT_FIELD` alone - see the comment there
+ * for the defect that produced.
+ *
+ * NULL, never a guess. `sectionIdForOffender` already refuses an offender naming two fields (the
+ * finding is the relationship between them) and one naming none, and this inherits both refusals
+ * rather than falling back to "the first field mentioned anywhere".
+ */
+export function firstOffenderField(row) {
+  const key = row && row.check_key
+  for (const o of arr(row && row.offenders)) {
+    const f = sectionIdForOffender(key, o)
+    if (f) return f
+  }
+  return null
+}
+
+/**
  * The count rendered against one check, and whether it may be clicked.
  *
  * `count` is the number of offenders the server sent - the finding's own size. It is clickable only
@@ -617,16 +636,23 @@ export function rowsForRequirement(result, seq) {
 export function railDecisions(entries) {
   const assets = arr(entries).map((e) => {
     const result = e && e.result
-    // fail before warn, and the rules' rows before the reviewer's - a blocking finding is acted on
-    // differently from one that only wants a look, and D6 is why they are never summed either.
-    const rows = []
-    for (const [engine, kind] of [['deterministic', 'fix'], ['reviewer', 'review']]) {
-      for (const state of ['fail', 'warn']) {
-        for (const r of engineRows(result, engine).filter(NEEDS_ATTENTION)) {
-          if (r.state === state) rows.push({ row: r, kind, engine })
-        }
-      }
-    }
+    // SPEC 4.8-11 - ORDERED BY SEVERITY, through the one rank every other surface reads.
+    //
+    // This used to be a hand-rolled nest: engine outermost, then `['fail','warn']`. That produced
+    // deterministic-fail, deterministic-warn, reviewer-fail, reviewer-warn - which puts a reviewer
+    // `fail` (severity `soft`, "Your call", the row that may never block) ABOVE a reviewer `warn`
+    // (severity `review`), the exact inversion 4.8-11 names. It was also a THIRD ordering of the same
+    // rows, free to disagree with `bySeverity` above it and with the drawer's Checks tab.
+    //
+    // `attentionRank` sorts; the sort is stable within a rank (index tie-break), so two renders of
+    // one payload are identical. `kind` is still the ENGINE's own word - it says which of the two
+    // counters the row belongs to, which is not the same question as how urgently it reads, and D6
+    // is why those two are never collapsed.
+    const rows = [...engineRows(result, 'deterministic').filter(NEEDS_ATTENTION).map((r) => ({ r, engine: 'deterministic', kind: 'fix' })),
+      ...engineRows(result, 'reviewer').filter(NEEDS_ATTENTION).map((r) => ({ r, engine: 'reviewer', kind: 'review' }))]
+      .map((x, i) => ({ ...x, i, sev: severityFor(x.r) }))
+      .sort((a, b) => (attentionRank(a.sev) - attentionRank(b.sev)) || (a.i - b.i))
+      .map((x) => ({ row: x.r, kind: x.kind, engine: x.engine, sev: x.sev }))
     const unchecked = railGate(result) === 'unchecked'
     const status = e && e.resultLoading ? 'loading'
       : e && e.resultError ? 'error'
@@ -697,6 +723,15 @@ export const DECISION_NOTE = {
  *
  * Returns `{}` rather than a partial map when insertions have not loaded, so the caller renders no
  * link at all instead of a link that resolves to nothing.
+ *
+ * EACH OWNER ALSO CARRIES `mergeField`, and that is the only human name a swap row can be given.
+ * `swap_decision` has no `merge_field` column at all (`schema.ts:564`) and its `list` is a raw enum
+ * - `skills_1 | skills_2 | relevant_1 | relevant_2 | relevant_3`, a CHECK constraint, not copy. The
+ * insertion row that ties the list to a field is the ONLY place the field name exists on the client,
+ * so it is carried here, once, beside the artifact it was already resolving. `sharedSourceNote`
+ * already takes `list` and uses it purely as a map key rather than in its sentence; this keeps that
+ * discipline available to every caller instead of leaving the next one to interpolate the enum
+ * (which is exactly `assetBlocks.js:765`, the third render site that shipped `swapped - owner`).
  */
 export function listOwnersFromArtifacts(entries) {
   const out = {}
@@ -708,7 +743,11 @@ export function listOwnersFromArtifacts(entries) {
       if (!list) continue
       if (!out[list]) out[list] = []
       if (!out[list].some((o) => o.id === artifactId)) {
-        out[list].push({ id: artifactId, label: e.label || assetLabel(e.type || (e.artifact && e.artifact.type)) })
+        out[list].push({
+          id: artifactId,
+          label: e.label || assetLabel(e.type || (e.artifact && e.artifact.type)),
+          mergeField: row.merge_field || null,
+        })
       }
     }
   }
@@ -739,6 +778,110 @@ export function requirementUsage(swaps, requirementId, owners) {
 export function swapsForRequirement(swaps, requirementId) {
   const rows = arr(swaps && swaps.swaps)
   return requirementId ? rows.filter((s) => s && s.requirement_id === requirementId) : rows
+}
+
+/**
+ * SPEC 4.8-21 - `Ask why` on a swap row. The QUESTION the button seeds, or null.
+ *
+ * It seeds and it sends nothing. `docs/qc-evidence/qc/evidence.jsx:233` calls `onAsk(...)`, which is
+ * the assistant-panel seed and nothing else, so this row is a SPEC 4.11 substitution wearing a 4.8
+ * name (`AC-packet-ui-final.md` 2f, AC 34). Two conditions from that AC pass survive and are met
+ * here: no swap-revert mutation is built - there is none, `appSwaps.ts` is GET-only, which is also
+ * why the prototype's sibling `Undo this` does not ship beside this button - and the `Why` column
+ * keeps printing the answer it already prints, so this is a conversational follow-up rather than a
+ * claim that the reason was missing.
+ *
+ * NULL IS THE CONTRACT, same as `requirementUsage`, and for two independent reasons:
+ *
+ *  - `seedAssistant` (`PacketBuilder.jsx:765`) refuses a seed with no artifact - "never open a panel
+ *    that cannot send", because `canSend` needs one. A swap row is PACKET-level and carries no
+ *    artifact at all, so a row whose list no artifact renders (or whose insertions have not loaded)
+ *    has nothing to seed and must render NO BUTTON. That is the repo's no-dead-UI rule, not caution.
+ *  - a row with neither a `from_label` nor a `to_label` names nothing a question could be about.
+ *
+ * THE SENTENCE NEVER CONTAINS `swap.list`. The prototype interpolates it, and in the prototype it is
+ * a display name ("Core Skills"); here it is a CHECK-constrained enum (`schema.ts:567`,
+ * `skills_1 | relevant_2 | ...`). It is resolved through the insertion row's `merge_field` to
+ * `fieldLabel` - the ONE table that already heads the field, writes the correction sentences and
+ * labels the gate drawer - so `skills_1` reaches the reader as "Skills 1". If no merge field
+ * resolved, the owning asset's label is the fallback; the enum is never a fallback.
+ *
+ * @param {{list?: string, from_label?: string|null, to_label?: string|null}|null} swap
+ * @param {Record<string, Array<{id: string, label?: string, mergeField?: string|null}>>} owners
+ * @returns {{artifactId: string, where: string, text: string}|null}
+ */
+export function swapAskWhy(swap, owners) {
+  const s = swap || null
+  const list = s && s.list
+  if (!list) return null
+  const holder = arr((owners || {})[list])[0]
+  if (!holder || !holder.id) return null
+  const from = s.from_label ? String(s.from_label).trim() : ''
+  const to = s.to_label ? String(s.to_label).trim() : ''
+  if (!from && !to) return null
+  // `fieldLabel(null)` is the empty string, so the asset label carries the sentence when the
+  // insertion row named no field. One of the two is always present.
+  const where = (holder.mergeField ? fieldLabel(holder.mergeField) : '') || holder.label || ''
+  if (!where) return null
+  const text = from
+    ? `Why did you change "${from}" in ${where}?`
+    : `Why did you add "${to}" to ${where}?`
+  return { artifactId: holder.id, where, text }
+}
+
+/**
+ * SPEC 4.8-20 - `Undo this` on a swap row. The REQUEST the button seeds, or null.
+ *
+ * OWNER-DECIDED, and previously mis-closed. The recorded objection (the paragraph above, and
+ * `PROTOTYPE-COVERAGE.md:415-416`) is that **no swap-revert MUTATION is built** - `appSwaps.ts` is
+ * GET-only. That is true and is untouched here: this ships no route, calls no mutation and asserts
+ * no revert. It is the SEEDED REQUEST its neighbour `Ask why` already is - the prototype's own
+ * mechanism for it, `docs/qc-evidence/qc/evidence.jsx:232`, which calls the same `onAsk(...)` on the
+ * same row as `:233` and nothing else. A constraint on ONE implementation is not the absence of the
+ * control, and `AC-packet-ui-final.md` AC-34's actual condition - that no swap-revert mutation be
+ * built - still holds.
+ *
+ * IT INHERITS `swapAskWhy`'s NULL CONTRACT EXACTLY, and for the same two reasons: `seedAssistant`
+ * (`PacketBuilder.jsx:765`) refuses a seed with no artifact ("never open a panel that cannot send"),
+ * and a row naming neither a `from_label` nor a `to_label` describes nothing a request could act on.
+ * No artifact, no button - the repo's no-dead-UI rule, not caution.
+ *
+ * IT ADDS ONE REFUSAL `swapAskWhy` DOES NOT HAVE: `action: 'kept'`. A kept row is the tailoring pass
+ * deciding to change nothing, so there is no change to undo, and a control offering to undo it would
+ * be dead in the strictest sense - it would send a request about an event that never happened.
+ * `Ask why` stays correct on those rows (why something was KEPT is a real question), which is
+ * exactly why this is a separate refusal rather than a shared one.
+ *
+ * THE SENTENCE NEVER CONTAINS `swap.list`, same as `swapAskWhy`: the prototype interpolates it as a
+ * display name, here it is a CHECK-constrained enum (`schema.ts:567`, `skills_1 | relevant_2 | ...`)
+ * resolved through the insertion row's `merge_field` to `fieldLabel`, so `skills_1` reaches the
+ * reader as "Skills 1".
+ *
+ * @param {{list?: string, action?: string, from_label?: string|null, to_label?: string|null}|null} swap
+ * @param {Record<string, Array<{id: string, label?: string, mergeField?: string|null}>>} owners
+ * @returns {{artifactId: string, where: string, text: string}|null}
+ */
+export function swapUndo(swap, owners) {
+  const s = swap || null
+  const list = s && s.list
+  if (!list) return null
+  // Nothing happened on a kept row, so there is nothing to put back.
+  if (String(s.action || '') === 'kept') return null
+  const holder = arr((owners || {})[list])[0]
+  if (!holder || !holder.id) return null
+  const from = s.from_label ? String(s.from_label).trim() : ''
+  const to = s.to_label ? String(s.to_label).trim() : ''
+  if (!from && !to) return null
+  const where = (holder.mergeField ? fieldLabel(holder.mergeField) : '') || holder.label || ''
+  if (!where) return null
+  // THREE SENTENCES, because the three actions are three different asks and one wording would be
+  // wrong for two of them. A drop has no replacement to name; an add has no original to restore.
+  const text = from && to
+    ? `Undo the swap of "${from}" for "${to}" in ${where}, and tell me which posting line loses its coverage.`
+    : from
+      ? `Put "${from}" back in ${where} - it was dropped and I would rather keep it.`
+      : `Undo adding "${to}" to ${where}.`
+  return { artifactId: holder.id, where, text }
 }
 
 // pctWidth moved to ./assetGate.js beside scoreParts() - the score-part bar renderer now lives in
@@ -1093,7 +1236,23 @@ export function packetFailList(entries) {
       assets.add(artifactId)
       items.push({
         artifactId, type: e.type || null, check_key: r.check_key,
-        mergeField: CHECK_SUBJECT_FIELD[r.check_key] || null,
+        // THE FIELD IS RESOLVED FROM THE OFFENDERS, through `sectionIdForOffender` - the module's
+        // ONE parse, the same one `offenderLinks`, `findingsByField` and `fieldSeverities` use.
+        //
+        // It read `CHECK_SUBJECT_FIELD[check_key] || null`, and that map holds exactly TWO keys
+        // (`company_named`, `company_in_body`). So every finding on a resume - `skill_char_limit`,
+        // `word_counts`, `whitespace`, all of them - produced `mergeField: null`, `firstFixTarget`
+        // returned null for the whole asset, and `PacketBuilder.jsx:191` passed
+        // `onClick={undefined}`. That is why RENDER-SWEEP.md's 4.4-14 row measured a badge reading
+        // `Blocked | 70 to fix | 3 to review` with `getComputedStyle().cursor === "default"` whose
+        // click moved nothing: not a missing handler - the handler was already wired at
+        // `PacketBuilder.jsx:953` - but a target this function could never produce for it.
+        //
+        // `CHECK_SUBJECT_FIELD` is NOT dropped: it is the last branch of `sectionIdForOffender`
+        // itself, so a check whose rule fixes its own subject still resolves, and it is kept here as
+        // the explicit fallback for a failing row that sent NO offenders at all (which is the shape
+        // every existing H-case in packetFailList.test.mjs is built on).
+        mergeField: firstOffenderField(r) || CHECK_SUBJECT_FIELD[r.check_key] || null,
         observed: r.observed || '', offenders: arr(r.offenders), unchecked: false,
       })
     }
@@ -1127,7 +1286,23 @@ export function firstFixTarget(entries, artifactId) {
     // `unchecked` rows carry a null mergeField by construction, so this one test covers both the
     // never-checked asset and a failing check whose rule names no subject field.
     if (!it.mergeField) continue
-    return { artifactId: it.artifactId, mergeField: it.mergeField }
+    // NAMES THE FINDING IT ACTUALLY OPENS, and that pairing is the whole point of returning it here.
+    //
+    // The badge used to take its TITLE from `firstFixFinding(result)` and its DESTINATION from this
+    // function, and the two select independently: `firstFixFinding` takes the first `fix` row
+    // whatever its offenders say, while this one SKIPS every row with a null mergeField. Measured on
+    // the live packet (RENDER-SWEEP-2.md, both assets): the badge read
+    // `70 to fix - Skill lines fit the template ->` and landed on `RelevantBullets1`, because
+    // `skill_char_limit` is exactly the check that correctly resolves no field. A control that names
+    // one finding and opens another is a false statement about where the reader is going - the same
+    // class as a swap row naming an "original" the owner never wrote.
+    //
+    // One selection now serves both. `checkLabel` is assetGate's own map, so the wording cannot
+    // drift from the rail this link lands in.
+    return {
+      artifactId: it.artifactId, mergeField: it.mergeField,
+      check_key: it.check_key || null, title: checkLabel(it.check_key),
+    }
   }
   return null
 }

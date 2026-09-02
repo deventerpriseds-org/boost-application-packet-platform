@@ -17,7 +17,8 @@
 // rendering only. Stable `data-qc` hooks are on every surface the acceptance criteria name.
 import React, { useEffect, useState } from 'react'
 import { Pill, Overlay, toneColor } from '../shell.jsx'
-import { requirementUsage } from '../qcRail.js'
+import { requirementUsage, errText } from '../qcRail.js'
+import { api } from '../api.js'
 import {
   KIND_ABBR, reqChipLabel, kindSourceNote, noQuoteReason, isQuoted,
   groupRequirements, modelKeywords, summarizeKindSource, keywordLibraryState,
@@ -313,7 +314,7 @@ export function ProfileCompareCard({ comparison, onOpenRequirements, onOpenQc })
 }
 
 // ── one extracted line ──────────────────────────────────────────────────────────────────────────
-function RequirementRow({ r, usage = null, onGoToFieldRef = null }) {
+function RequirementRow({ r, usage = null, onGoToFieldRef = null, oppId = null, onConfirmed = null }) {
   const quoted = isQuoted(r)
   return (
     <div data-qc={POSTING_HOOKS.row} data-qc-kind={r.kind} data-qc-quoted={quoted ? '1' : '0'}
@@ -355,7 +356,7 @@ function RequirementRow({ r, usage = null, onGoToFieldRef = null }) {
         Filed here because {kindSourceNote(r.kind_source)}.
       </div>
 
-      <EvidenceLine r={r} />
+      <EvidenceLine r={r} oppId={oppId} onConfirmed={onConfirmed} />
 
       {/* SPEC 4.1-20 - `Where it is used ->`. The last row of the evidence cluster, and the only one
           that did not ship, because a swap is keyed by LIST and turning one into a navigation needs
@@ -402,7 +403,77 @@ function RequirementRow({ r, usage = null, onGoToFieldRef = null }) {
  * similarity for RANKING and out of anything a reader could take as a finding. So the reader gets
  * the excerpt and the record it came from, which they can judge, and never a score.
  */
-function EvidenceLine({ r }) {
+/**
+ * Accept or refuse a MODEL-PROPOSED excerpt.
+ *
+ * WHY THIS CONTROL IS THE WHOLE FEATURE. `checks.ts` states the engine's house rule: *"a model may
+ * PROPOSE, only an exact rule may ACCUSE, and `must_have_coverage` is the accusation."* A
+ * `method: 'proposed'` row is therefore SHOWN and does not count — and confirming it is the one
+ * thing that promotes it, because a human IS an exact rule. Measured on production the day this
+ * shipped: 15 proposed rows across 15 requirements, every one carrying a verified quote from the
+ * owner's own profile, all uncounted, on screens reporting zero coverage.
+ *
+ * REFUSALS ARE RENDERED IN THE SERVER'S OWN WORDS. The route answers 403 (the session is not
+ * verified — a confirmation whose actor is "whoever sent the request" is an audit row worth
+ * nothing), 404 (not the owner's row, deliberately not 403, so a stranger cannot learn it exists)
+ * and 409 (the excerpt is not a model proposal). Each is a fact the owner has to be able to act on,
+ * so `postDetailed` carries the sentence up and it is printed rather than replaced.
+ */
+function ConfirmProposal({ seq, oppId, onConfirmed, missing = null }) {
+  const [busy, setBusy] = useState(null)
+  const [err, setErr] = useState(null)
+  const send = async (decision) => {
+    setBusy(decision); setErr(null)
+    try {
+      await api.evidenceConfirm(seq, { oppId, decision })
+      if (onConfirmed) await onConfirmed()
+    } catch (e) {
+      setErr(errText(e))
+    } finally { setBusy(null) }
+  }
+  return (
+    <div style={{ marginTop: 5 }} data-qc={POSTING_HOOKS.confirm}>
+      <div className="px-small" style={{ color: 'var(--proto-ink3)', textTransform: 'none' }}>
+        {/* THIS SENTENCE USED TO SAY THE OPPOSITE AND WAS TRUE WHEN WRITTEN. It read "It does not
+            count toward coverage until you say it is right", which described the gate exactly until
+            proposals began counting on creation. A screen that tells the owner a row is excluded
+            while the gate counts it is worse than no explanation: it makes the number they are
+            looking at unreconcilable with the rows in front of them. */}
+        A model found this line in your profile, and it is counting toward your coverage now. Say so
+        if it is right, or veto it and it stops counting.
+      </div>
+      {/* WHAT A SECOND READ SAID THIS EXCERPT FAILS TO SHOW. Until now this was computed on every
+          escalation, counted into a request-scoped tally, and thrown away -- so the app asked the
+          owner for a judgement while withholding the one thing it had learned that bears on it.
+          Rendered ABOVE the buttons deliberately: it is the input to the decision, not a footnote
+          about it. */}
+      {missing && missing.length > 0 && (
+        <div className="px-small" data-qc={POSTING_HOOKS.missing}
+             style={{ marginTop: 4, color: 'var(--proto-ink3)', textTransform: 'none' }}>
+          A second read could not find {missing.length === 1 ? 'this' : 'these'} in the excerpt:{' '}
+          <span style={{ color: 'var(--proto-ink2)' }}>{missing.join('; ')}</span>
+        </div>
+      )}
+      <div style={{ display: 'flex', gap: 8, marginTop: 4, flexWrap: 'wrap' }}>
+        <button className="px-btn px-btn-sm" disabled={!!busy} data-qc={POSTING_HOOKS.confirmYes}
+          onClick={() => send('confirm')}>
+          {busy === 'confirm' ? 'Saving…' : 'Yes, that is my evidence'}
+        </button>
+        <button className="px-btn px-btn-sm" disabled={!!busy} data-qc={POSTING_HOOKS.confirmNo}
+          onClick={() => send('reject')}>
+          {busy === 'reject' ? 'Saving…' : 'Not this one'}
+        </button>
+      </div>
+      {err && (
+        <div className="px-small" style={{ marginTop: 4, color: 'var(--proto-red)', textTransform: 'none' }}>
+          {err}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function EvidenceLine({ r, oppId = null, onConfirmed = null }) {
   const ev = evidencePresentation(r)
   const [open, setOpen] = useState(false)
   // The excerpt is the only thing worth expanding. Every other state is one sentence, so hiding it
@@ -433,7 +504,65 @@ function EvidenceLine({ r }) {
         {ev.provable && ev.recordChanged && (
           <span style={{ color: 'var(--proto-ink3)' }}>· ranked against an earlier version of that record</span>
         )}
+        {/* WHO STOOD BEHIND IT. Printed beside the state rather than replacing it, because "a model
+            found this" and "you accepted it" are two different facts and the reader needs both — the
+            second is what makes it count. */}
+        {ev.confirmedAt && !ev.vetoed && (
+          <span data-qc={POSTING_HOOKS.confirmed} style={{ color: 'var(--proto-green)', fontWeight: 600 }}>
+            · you confirmed this{ev.confirmedBy ? ` (${ev.confirmedBy})` : ''}
+          </span>
+        )}
+        {/* WHY THIS ROW IS IN THE COUNT. A vetted row is the only model row that moves
+            must_have_coverage, so the reason it counts belongs beside the state word rather than
+            behind a disclosure - "coverage rose" has to be checkable at a glance, or a reader
+            cannot tell a better profile from a chattier model. It is deliberately NOT phrased as
+            agreement: a model was challenged and held, which is not the same as the owner saying
+            yes, and the confirm control below still offers them that. */}
+        {ev.vetted && !ev.confirmedAt && !ev.vetoed && (
+          <span data-qc={POSTING_HOOKS.vetted} style={{ color: 'var(--proto-ink2)', fontWeight: 600 }}>
+            · vetted: challenged for what it misses, and it held
+          </span>
+        )}
+        {/* COUNTING ON A MODEL'S SAY-SO ALONE — the weakest warrant that still moves the number,
+            and therefore the one that most needs saying out loud. The gate's own observed string
+            carries the same disclosure for the same reason: counting proposals inverts the house
+            rule that only an exact rule may accuse, and an inversion nobody can see is
+            indistinguishable from the rule having been dropped. Deliberately NOT green — it is
+            true, not settled, and colouring it like a confirmation would overstate it. */}
+        {ev.countsNow && ev.method === 'proposed' && !ev.confirmedAt && (
+          <span data-qc={POSTING_HOOKS.countingNow} style={{ color: 'var(--proto-ink3)' }}>
+            · counting on a model's word — veto it if it is wrong
+          </span>
+        )}
+        {/* THE OWNER'S NO, and it wins the row. Placed last so it renders after every warrant
+            badge, mirroring `ruleEvidenceOf`'s own order: the veto is checked first there and
+            outranks every method, so on screen it must not appear as one more note beside
+            "vetted" or "you confirmed this". Red, because a row that stopped counting is a
+            reduction the owner needs to recognise as their own doing rather than a resolver
+            regression. */}
+        {ev.vetoed && (
+          <span data-qc={POSTING_HOOKS.vetoed} style={{ color: 'var(--proto-red)', fontWeight: 600 }}>
+            · you vetoed this — it is not counted
+          </span>
+        )}
       </div>
+
+      {/* A model's proposal the owner has not ruled on. Rendered ONLY when there is somewhere to send
+          the answer — without `oppId` the route cannot be called, and `CLAUDE.md`'s no-dead-UI rule
+          says hide the control rather than show one that cannot work. */}
+      {ev.decidable && oppId && (
+        <ConfirmProposal seq={r.seq} oppId={oppId} onConfirmed={onConfirmed} missing={ev.missing} />
+      )}
+
+      {/* THE REASONING, OUT FROM BEHIND THE DISCLOSURE for a vetted row. Everywhere else `extra` is
+          a supporting note on an excerpt the reader can already see; here it is the argument for a
+          number that changed, and an argument nobody opens is an argument nobody checked. */}
+      {ev.vetted && ev.extra && (
+        <div className="px-small" data-qc={POSTING_HOOKS.vettedWhy}
+             style={{ marginTop: 3, color: 'var(--proto-ink3)' }}>
+          {ev.extra}
+        </div>
+      )}
 
       {/* The one sentence for a state that is not provable, from the API. `none` is the only one
           that reports a gap in the PROFILE; the other four report that evidence exists and cannot
@@ -482,7 +611,7 @@ function EvidenceLine({ r }) {
 // marked required plus two the parser defaulted presents a guess as a fact — which is exactly what
 // requirements.ts keeps kind_source to prevent. The prose note below is not a substitute: the
 // NUMBER is what a reader takes away.
-function Group({ title, note, rows, qc, usageOf = null, onGoToFieldRef = null }) {
+function Group({ title, note, rows, qc, usageOf = null, onGoToFieldRef = null, oppId = null, onConfirmed = null }) {
   const split = summarizeKindSource(rows)
   return (
     <div style={{ marginTop: 14 }} data-qc={POSTING_HOOKS.group} data-qc-group={qc}>
@@ -498,7 +627,8 @@ function Group({ title, note, rows, qc, usageOf = null, onGoToFieldRef = null })
       {note && <div className="px-small" style={{ marginTop: 2, color: 'var(--proto-ink2)' }}>{note}</div>}
       {rows.length === 0
         ? <div className="px-small" style={{ marginTop: 8, color: 'var(--proto-ink3)' }}>None found in this posting.</div>
-        : rows.map((r) => <RequirementRow key={r.id || `${r.kind}-${r.seq}`} r={r} usage={usageOf ? usageOf(r) : null} onGoToFieldRef={onGoToFieldRef} />)}
+        : rows.map((r) => <RequirementRow key={r.id || `${r.kind}-${r.seq}`} r={r} usage={usageOf ? usageOf(r) : null}
+            onGoToFieldRef={onGoToFieldRef} oppId={oppId} onConfirmed={onConfirmed} />)}
     </div>
   )
 }
@@ -607,7 +737,7 @@ function ModelKeywords({ parsedKeywords, coveredKw, missingKw, gapsScoredAt }) {
 }
 
 // ── the SOURCE card on the JD step ──────────────────────────────────────────────────────────────
-export function PostingAnalysisCard({ req, reqError, reloadReq, coveredKw, missingKw, gapsScoredAt, onParse, parseBusy, hasSummary, keywordScore, onOpenQc, swaps = null, listOwners = null, onGoToField = null }) {
+export function PostingAnalysisCard({ req, reqError, reloadReq, coveredKw, missingKw, gapsScoredAt, onParse, parseBusy, hasSummary, keywordScore, onOpenQc, swaps = null, listOwners = null, onGoToField = null, oppId = null }) {
   const [tab, setTab] = useState('responsibilities')
   // P8.7 makes tabs the layout and keeps the old three-column arrangement available behind a flag.
   // It is a stored preference rather than a code constant so it is the user's to change, per the
@@ -643,13 +773,16 @@ export function PostingAnalysisCard({ req, reqError, reloadReq, coveredKw, missi
 
   const responsibilitiesPane = (
     <Group title="Responsibilities" rows={responsibilities} qc="responsibilities" usageOf={usageOf} onGoToFieldRef={onGoToField}
+      oppId={oppId} onConfirmed={reloadReq}
       note="What the job does day to day. A separate class from requirements, never mixed in with them." />
   )
   const requirementsPane = (
     <>
       <Group title="Must-have" rows={mustHaves} qc="must_have" usageOf={usageOf} onGoToFieldRef={onGoToField}
+        oppId={oppId} onConfirmed={reloadReq}
         note="Requirements the posting states as required, or that the parser defaulted to required. The count above splits the two." />
       <Group title="Nice-to-have" rows={niceToHaves} qc="nice_to_have" usageOf={usageOf} onGoToFieldRef={onGoToField}
+        oppId={oppId} onConfirmed={reloadReq}
         note="Requirements the posting marks preferred or optional. Same class as must-have, lower bar." />
     </>
   )

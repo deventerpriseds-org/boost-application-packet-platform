@@ -72,6 +72,24 @@ function checkResultFor(artifactId) {
 const checkResults = raw.checkResults ||
   Object.fromEntries((raw.artifacts || []).map((a) => [a.id, checkResultFor(a.id)]))
 
+// TRAP 3, the same shape as trap 2 and found the same way - by rendering. The artifact rows were
+// being passed through RAW (`doc_url`, `drive_url`, `template_id`, `updated_at`), but the real
+// endpoint SHAPES them: `appPackets.ts:207` maps every artifact to
+// `{ id, type, status, templateId, docUrl, driveUrl, content, updatedAt }`. `PacketBuilder.jsx:236`
+// renders the `✓ Open Google Doc ↗` / `✓ Open Slides ↗` / `Copy tracked link` row behind
+// `a.docUrl ? … : …`, so with the snake_case key that whole row is CONDITIONALLY HIDDEN and a
+// measurement reports three built controls as missing. Measured 2026-08-30 during RENDER-SWEEP:
+// SPEC 4.4-5/6/7/8 all read as not-rendered against a fixture whose artifacts carried a perfectly
+// good `doc_url`. Mapping mechanically here, from the endpoint's own projection.
+const artifactShape = (rows) => (rows || []).map((a) => ({
+  id: a.id, type: a.type, status: a.status,
+  templateId: a.templateId ?? a.template_id,
+  docUrl: a.docUrl ?? a.doc_url,
+  driveUrl: a.driveUrl ?? a.drive_url,
+  content: a.content,
+  updatedAt: a.updatedAt ?? a.updated_at,
+}))
+
 const f = {}
 // FLAT - see trap 2.
 f[`/opportunity/${OPP}/packet`] = {
@@ -79,13 +97,81 @@ f[`/opportunity/${OPP}/packet`] = {
   id: pk.id, oppId: pk.opp_id, status: pk.status, round: pk.round,
   jdAnalyzed: pk.jd_analyzed, feedback: pk.feedback || [],
   coveredKw: pk.covered_kw || [], missingKw: opp.ats_gaps || [],
-  atsScore: pk.ats_score, mustHaves: pk.must_haves || [], artifacts,
+  atsScore: pk.ats_score, mustHaves: pk.must_haves || [], artifacts: artifactShape(artifacts),
 }
-f[`/opportunity/${OPP}/requirements`] = { requirements }
+// TRAP 4, same class as traps 2 and 3, found the same way. The real endpoint
+// (`appRequirements.ts:704`) returns `{ ..., total: rows.length, located, requirements }`, and
+// `total` is LOAD-BEARING on the client: `meterModel` (`assetBlocks.js:883`) gates the whole
+// measured branch on `Number.isFinite(Number(requirements.total))`, so with `total` absent it
+// takes the else branch and prints "This posting has no requirement rows yet ... unknown - not
+// zero" — for a fixture carrying 21 perfectly good requirement rows. Everything in that branch
+// disappears with it, INCLUDING the three per-kind stats `REQ_KIND_STATS` (`Must-haves answered`
+// / `Responsibilities answered` / `Nice-to-haves answered`, SPEC 4.4-24/25/26). Measured
+// 2026-08-30 during RENDER-SWEEP: those three read as not-built until `total` was supplied.
+// Derived mechanically from the rows, exactly as the endpoint derives it.
+//
+// TRAP 5, and the one that cost the most: `comparison` CANNOT BE DERIVED HERE AT ALL.
+// `comparisonPayload` (appDimensions.ts:254) returns `dimensions` from the `comparison_dimension`
+// table PLUS `summary`, `set` and `stale`, each derived in TypeScript from DIMENSION_CATALOGUE,
+// the owner's dimension prefs and DIMENSION_VERSION. Porting that here would be a second dimension
+// brain in JS, and a re-derived fixture MEASURES ITSELF -- drift renders as app gaps, which is the
+// canary's own failure mode pushed one level deeper where it cannot see, because a wrong `summary`
+// is present and truthy. So when the refresh captured the real route, that body is passed through
+// VERBATIM and nothing here reshapes it.
+if (raw.apiRequirements) {
+  f[`/opportunity/${OPP}/requirements`] = raw.apiRequirements
+} else {
+  // The derived shape is the FALLBACK, and it is loud, because its silent version is exactly how
+  // ~19 of 27 "missing panels" on the jd step stayed phantom for weeks
+  // (docs/qc-evidence/PROTOTYPE-COVERAGE.md 16a). A quiet degradation of the instrument is
+  // indistinguishable from a product regression.
+  console.error('!!! DERIVED /requirements - comparison will be MISSING from this fixture.')
+  console.error('    The dump has no `apiRequirements`. Re-run fixture-refresh.yml, which captures')
+  console.error('    the real route; a fixture built this way cannot see the compare surface and')
+  console.error('    the canary in scripts/lib/fixture-canary.mjs will refuse it.')
+  f[`/opportunity/${OPP}/requirements`] = {
+    oppId: OPP,
+    requirements,
+    total: requirements.length,
+    located: requirements.filter((r) => r.char_start !== null && r.char_start !== undefined).length,
+  }
+}
 f[`/opportunity/${OPP}`] = { opportunity: { ...opp, id: OPP, stage: pk.status } }
 f['/app/opportunities'] = { opportunities: [{ ...opp, id: OPP, stage: pk.status }] }
 f['/app/packets'] = { packets: [{ id: pk.id, oppId: OPP, ...opp, status: pk.status }] }
-f['/search-prefs'] = { prefs: {} }
+// THE OWNER'S CHECK THRESHOLDS, and they are NOT optional decoration.
+//
+// This line used to read `{ prefs: {} }` with no `checks` key at all, and that single omission is
+// why a session on 2026-08-29 told the owner the 24/20 skill character limits had been "removed
+// from the app's code and/or pipeline" - a catastrophe report about a defect that did not exist.
+// `AssetBlocks.jsx:1158` reads thresholds from `searchPrefsGet().checks`; with no `checks` the
+// value is null, `targetFor()` (assetBlocks.js:1036) returns null for EVERY merge field, and all
+// 24 thresholds silently render as unset. The rule label degrades from
+// `longest 22 chars - <= 24 chars each` to `7 lines - 18 words`, which reads exactly like the
+// product having lost its limits. Confirmed live the same day:
+// `select chk_skill_max_chars, chk_relevant_max_chars from owner_search_prefs` -> 24, 20.
+//
+// So the fixture MUST carry them, and their absence is fatal below rather than cosmetic.
+// NOTE the key: `raw.checkPrefs`/`raw.thresholds`, NEVER `raw.checks` — `raw.checks` is already
+// the flat per-artifact check RESULT rows (see `checkResultFor` above). Reaching for it here would
+// hand the UI a list of results where it expects a thresholds object, which is the same shape of
+// silent-garbage bug this whole guard exists to stop. Caught while writing this fix.
+//
+// The dump carries the raw `owner_search_prefs` row (`chk_skill_max_chars`, …); the client wants
+// the camelCase shape `checkPrefs.ts:175` builds (`skillMaxChars`, …). Mapped MECHANICALLY by the
+// naming convention rather than by a hand-maintained key list, so a threshold added to the table
+// tomorrow reaches the fixture without anyone remembering to edit this file.
+//
+// KNOWN LIMIT, stated rather than hidden: paired bands stored as two columns
+// (`chk_about_me1_words_min`/`_max`) arrive as `aboutMe1WordsMin`/`Max`, not as the `[45, 48]`
+// tuple the app reads. The single-value thresholds — every char limit, every count — are exact.
+const camel = (s) => s.replace(/^chk_/, '').replace(/_([a-z0-9])/g, (_, c) => c.toUpperCase())
+const checkPrefs = raw.checkPrefs
+  ? Object.fromEntries(Object.entries(raw.checkPrefs)
+      .filter(([k]) => k.startsWith('chk_'))
+      .map(([k, v]) => [camel(k), v]))
+  : null
+f['/search-prefs'] = { prefs: raw.prefs || {}, checks: checkPrefs }
 f['/swaps'] = { swaps }
 
 for (const a of artifacts) {
@@ -97,18 +183,37 @@ for (const a of artifacts) {
     { gate: null, attention: 0, results: [], corrections: corrections.filter((c) => c.artifact_id === a.id) }
 }
 
+// A THIN FIXTURE SET INFLATES THE GAP AND READS AS PRODUCT REGRESSION.
+//
+// THIS USED TO BE A WARNING AND THAT WAS NOT ENOUGH. On 2026-08-29 a session read
+// `!!! THIN FIXTURE SET - the next gap number will be INFLATED` on its own terminal, proceeded
+// anyway, and reported three separate "the app is missing X" findings to the owner. All three were
+// the fixture. An advisory warning on a MEASURING INSTRUMENT is worth nothing, because the whole
+// failure mode is an agent that already believes its number. So: an instrument that cannot measure
+// now REFUSES TO EMIT A NUMBER.
+//
+// `--allow-thin` is the deliberate escape hatch (a quick smoke render where no gap will be
+// counted). It must be typed on purpose, and it prints what is missing anyway.
+const thin = []
+if (!requirements.length) thin.push('requirements (drives "Posting lines answered", coverage cards)')
+if (!(raw.checks || []).length && !raw.checkResults) thin.push('checkResults (drives the whole Checks tab and every gate word)')
+if (!swaps.length) thin.push('swaps (drives the Swaps tab, and every `orig -> final` row)')
+// The one that cost the most. See the `/search-prefs` comment above.
+if (!f['/search-prefs'].checks) thin.push('checks thresholds (drives EVERY rule label: `<= 24 chars each`, word bands, the gate)')
+if (thin.length) {
+  const how = process.argv.includes('--allow-thin')
+  console.error(`\n!!! THIN FIXTURE SET - a gap number measured against this file measures the FILE, not the app:`)
+  for (const t of thin) console.error('    missing: ' + t)
+  console.error('    Pull these from the live DB via fixture-refresh.yml (or db-query.yml) first.')
+  if (!how) {
+    console.error('\n    REFUSING TO WRITE A FIXTURE THAT WILL BE MISREAD AS A MEASUREMENT.')
+    console.error('    Pass --allow-thin ONLY for a smoke render where you will count nothing.\n')
+    process.exit(1)
+  }
+  console.error('\n    --allow-thin given: written anyway. DO NOT report a gap count from this file.\n')
+}
+
 await writeFile(resolve(OUT), JSON.stringify(f, null, 1))
 console.log(`wrote ${Object.keys(f).length} route keys -> ${OUT}`)
 console.log(`  ${opp.company} · ${opp.role} | ${artifacts.length} artifacts, ${insertions.length} insertions`)
 
-// A THIN FIXTURE SET INFLATES THE GAP AND READS AS PRODUCT REGRESSION. Say so loudly rather than
-// letting the next comparison quietly measure the fixture instead of the app.
-const thin = []
-if (!requirements.length) thin.push('requirements (drives "Posting lines answered", coverage cards)')
-if (!(raw.checks || []).length && !raw.checkResults) thin.push('checkResults (drives the whole Checks tab and every gate word)')
-if (!swaps.length) thin.push('swaps (drives the Swaps tab)')
-if (thin.length) {
-  console.log('\n!!! THIN FIXTURE SET - the next gap number will be INFLATED and NOT comparable:')
-  for (const t of thin) console.log('    missing: ' + t)
-  console.log('    Pull these from the live DB via db-query.yml before trusting a measurement.')
-}

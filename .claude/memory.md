@@ -520,6 +520,68 @@ Key tables (PostgreSQL):
 - iOS testing: requires macOS runner or BrowserStack; categorically unavailable in Linux CCR
 
 ## Active work
+
+<!-- NEWEST FIRST, and the SessionStart surfacer emits this heading plus 60 LINES and nothing else.
+     Every line here costs a line of what a new session sees: WRITE NEW STATE AT THE TOP AND DELETE
+     WHAT IT SUPERSEDES. Detail goes in a dated section below and is LINKED from here. -->
+
+**2026-08-30 — THE AC / VERIFIER VEHICLE CHANGED. `## Long agent work does not run in this session
+any more (2026-08-29)` further down this file, and the matching section in `CLAUDE.md`, are now
+SUPERSEDED — do not follow either as written.** They send long passes to `claude-task.yml`, which is
+a single Messages API call: it cannot grep, follow an import, or EXECUTE, and it needs metered API
+credit. **(That last half is CORRECTED: run 33277232470 did fail on a spent balance, but a balance
+is a STATE — re-probed 2026-08-30, run 33288812332, `end_turn`/`in=33 out=11`/success, the credit
+is LIVE and the runner works today. Evidence:
+`eds-claude-skills/docs/qc-evidence/FEASIBILITY-runner-credit.md`. The toollessness is the real,
+unchanging deficit.)**
+
+**Use `scripts/verify.sh` in `eds-claude-skills` instead** — one vehicle, two kinds:
+
+    scripts/verify.sh --kind AC <slug> <brief> --context "<globs>"    -> docs/qc-evidence/AC-<slug>.md
+    scripts/verify.sh <slug> <loop> <brief>    --context "<globs>"    -> VERIFY-<slug>-<loop>.md
+
+Detached `claude -p` on the session's own credential: it does **not** hold the session, needs **no
+API key**, and **CAN execute** — it runs suites, applies mutations and observes the result, which is
+the one thing that has actually caught inert guards here. Proven 2026-08-30: AC pass 12 turns/105s/
+$0.87, verifier 45 turns/336s/$2.36 with 9/9 CONFIRMED. **Always pass `--context`** — the A/B is
+settled, arm B2 (target-repo files in the room) scored 5/5 where B1 scored 3/5, and a glob matching
+nothing aborts non-zero by design.
+
+**STATUS, so this is not read as already-available:** verify.sh is on `eds-claude-skills` PR **#28**,
+green and mergeable, **NOT yet merged to its `main`**. Until it lands, `claude-task.yml` is still
+what a boost session can dispatch. Re-check the PR rather than assuming either way.
+
+**`claude-task.yml` keeps exactly ONE role, and it is the reason to keep it:** it runs on GitHub's
+machines, so it is the **only vehicle that survives a container restore**. `verify.sh` is a child of
+this container and dies with it — it survives *interrupts*, not *restores*.
+
+**THE MITIGATION IS A PROPERTY OF THE WORK, NOT THE VEHICLE, and it is measured.** Same task across
+one real restore: a one-pass run died at 9,122 bytes with **0** chunks durable; a chunked run that
+committed AND PUSHED after each chunk survived with **56,374 bytes, 2 of 5 chunks durable and
+resumable**. **Chunk every long pass; commit and push per chunk.** A commit that is not pushed is
+still inside the container — that bug was in the chunk script itself.
+
+**Self-hosting the containers is NOT available** (asked and checked 2026-08-30):
+`list_environments` returns three environments, all `kind: anthropic_cloud`, no `ccpool_` pool.
+Re-run that one call rather than re-deriving it.
+
+**A pass is ALIVE iff its OUTPUT IS GROWING.** Never `pgrep` for it — the pattern matches this
+session's own `claude`, and `pkill -f` will kill your own shell because its command line contains
+whatever you searched for. Both happened on 2026-08-30; I declared a verifier dead 14 seconds before
+it delivered 9/9. The JSON log is written only at the END, so 0 bytes proves nothing mid-run.
+
+---
+
+**SESSION 2026-08-29 — enforcement environment armed (this session is a PARALLEL lane).**
+`eds-claude-skills/setup.sh` @ `cbf8f7b` run to completion (exit 0): hooks at `_eds_version` 19 in
+`/home/user/.claude/settings.json` (SessionStart, Stop x2, PostToolUse, UserPromptSubmit x2), 16
+skills, the `verifier` agent, and the three guards (`eds-git-guard.sh`, `eds-agent-guard.sh`,
+`eds-phase-tag.py`) — each smoke-run at exit 0. `launcher-settings.json` verified to hold **no**
+`_eds` hooks, so the launcher's per-start regeneration cannot wipe the gate. Live DB reach confirmed
+through **`boost-pg-mcp-write`** (`boost_resume_n_packet_builder`, 50 public tables) — that is the
+one connector to use. Detail in `actions.md` ACT-2026-08-29-a.
+Because other sessions are on this same checkout, **D34 applies**: work in a `git worktree`, never
+`git stash` here.
 **SESSION SETUP, 2026-08-29 — eds guard stack re-applied at `_eds_version` 19; boost-pg-mcp-write proven live.**
 
 Ran `setup.sh` from the org skills repo in-session (the SessionStart hook had not fired — hooks were
@@ -662,8 +724,9 @@ Prior task: **F5 CLOSED and deployed (`5a6728d`)** — see actions.md. Option (b
   refuted one claim and found three more defects; all four closed in the same commit, and three of
   the four were greps I had skipped.
   **Process now mechanism, applied LIVE not just pushed:** `verify-work` 0b (self-attack and fix
-  BEFORE the verifier — does not narrow its coverage) and 0c (loop 2+ tiers by COST, never by
-  "could this have been impacted?"); `setup.sh` **v17** makes SessionStart re-copy skills, because a
+  BEFORE the verifier — does not narrow its coverage) and 0c (**SUPERSEDED 2026-08-29 — see below**: it
+  tiered by COST, which SKIPPED out-of-radius claims; it now re-verifies EVERY claim every loop and
+  tiers only DEPTH); `setup.sh` **v17** makes SessionStart re-copy skills, because a
   skill push previously reached nobody — build-time copy, cached output, this session was on
   `_eds_version` 14 with a skill file from 12:43. Verified: hooks at 17, re-copy present, skill
   38,929 bytes.
@@ -4575,3 +4638,1186 @@ problem and started widening the poll budget. That was inference. One look at th
 payload — `{status, timestamp, storage, tables}`, no `ok`, no `checks` — showed instantly that it was
 not the handler I had edited. **Read the response before theorising about the timeout.** The timing fix
 was independently worth making, but it was not the cause and I nearly shipped it as if it were.
+
+### Retention signal for the skills swap — MEASURED 0/20, option C dead (2026-08-28)
+
+`supportIn` cannot protect a two-word template skill item. 420 pairs (21 live Trinnex requirements
+× 20 live skill items), two floor settings, **0 protected in both**; drop pool 20/20. Twelve of the
+twenty are refused by a SAFETY-FLOOR rule an owner setting may not override, so no amount of
+tuning reaches them. Full record + reproduce commands: `docs/qc-evidence/RETENTION-SIGNAL-MEASUREMENT.md`
+(landed on main as `2c693d1`, PR #62). Owner visual:
+https://claude.ai/code/artifact/f07b02b8-3206-4668-b236-da1c69a17ab2
+
+**`supportIn` is a pure deterministic token function** — one import (`sentenceBounds`), no model
+call, no network, no `await`. So these refusals are an INSTRUMENT MISMATCH, not a model failing:
+a literal citation judge pointed at a semantic relevance question. Refusing "Team Development" as
+*proof* of "Build and develop high-performing engineering teams" is correct for a citation judge
+and useless as a relevance ranking. Nothing here argues for changing `supportIn` or the gate.
+
+Three consequences, none implemented yet:
+- the coverage-based retention design (option C) is **ruled out by data**, not by preference;
+- the owner's literal rule — incumbent stays until they click switch — needs **no coverage
+  judgement at all**, which is cheaper AND closer to what was asked;
+- because the pool is 20/20, ORDER of the right-rail proposals is the entire ergonomics. A TOKEN
+  matcher cannot rank these either (it reads "Team Development" as generic vocabulary), so the
+  open recommendation is **option D: LLM ranking of the rail order only** — ranking, never
+  accusing; it must not reach a score, a gate, or evidence.
+
+**Method note worth keeping.** I nearly wrote the worked example from a hand token count. Running
+`supportIn` with `threshold:0` returns the real `support` / `missing`, and the hand count was wrong
+(weak verbs are excluded from the denominator: 2-of-6, not 2-of-7). *Measure the number you are
+about to publish, even when you think you can derive it.*
+
+### 2026-08-29 — three false alarms from a starved harness, and two REAL defects under them
+
+**The pattern that cost the whole day: an absence created by MY INPUT, reported as an absence in the
+product.** Three times, same shape, each one alarming the owner:
+
+| I claimed | Ground truth | My input error |
+|---|---|---|
+| `supportIn` protects 0/20 template items | wrong question entirely | fed it the two-word LABEL; production feeds PROFILE RECORDS (`evidence.ts:406,482`) |
+| 5 of 7 packet steps missing their UI | app renders fine | raw-dump fixture; key `packet` substring-matched `/packets` |
+| char limits disconnected from the pipeline | **live at 24/20 in production** | fixture `/search-prefs` payload had no `checks` key |
+
+Live proof of the last one, read from `owner_search_prefs` via the boost connector:
+`chk_skill_max_chars = 24`, `chk_relevant_max_chars = 20` for von.ellis@enterpriseds.io.
+
+**Owner, twice, and he is right:** *"why would lines of code be a comparison for UI completeness?"*
+and *"you are not mechanized to rely on rendering above code."* I had a working local render and used
+it to produce a `bodyLen` table instead of LOOKING at what it drew. A screenshot settled in 30s what
+three greps got wrong.
+
+**RULE: never claim a UI element is absent from a grep. Render it and look.** `&rarr;` vs `->` is
+exactly why — I reported the swap arrow as missing because my pattern could not match the entity.
+
+#### The two REAL defects, both found from production data, both still unfixed
+
+1. **Swap attribution dies after loop 0.** `swap_decision` rows for packet `85cee965` are ALL
+   `loop = 0`; the rendered text is `loop = 3`. `listBodyModel` (`assetBlocks.js:757`) keys `byTo` on
+   `to_label` and matches the rendered line; the loop-0 swaps say `Engineering Leadership →
+   Engineering Execution`, while the loop-3 list still CONTAINS `Engineering Leadership`. No match →
+   `from: null` → every line renders flat. The arrow code (`AssetBlocks.jsx:377`, shipped `3a577b6`
+   2026-08-20, never reverted) is correct and INERT. **This is tracker item #20, already scoped with
+   ACs written, and it sat pending while I investigated it from scratch — CHECK THE TRACKER FIRST.**
+2. **A rewrite made an item LONGER and over the limit.** `Digital Transformation` (22, legal) became
+   `Digital Transformation Strategy` (31) against a 24 limit. The gate correctly reports
+   `longest 31 chars · ≤ 24 chars each` on SHIPPED content. Note the normalise rewrite prompt
+   (`appPackets.ts:562`) only ever SHORTENS, so it is NOT the culprit — the lengthening pass is
+   elsewhere and is still unidentified.
+
+**Owner's deeper concern, open:** adding "Strategy" to a term that already satisfied the requirement
+is a logic flaw his ORIGINAL prompts would not have made. He suspects the pipeline is drifting off
+his Prompts-table prompts onto code-built ones. Evidence that the concern is well-founded:
+`appPackets.ts:562` builds its rewrite prompt IN CODE, not from the Prompts table. And a guard for
+exactly this already exists but covers ONE pass only — `reviewer.ts:444` warns
+`no active "<key>" row in the Prompts table — the built-in fallback was used`. **Whether the
+resume/skills writers have any equivalent prompt-source check is the open question.**
+
+#### Guards added today (instrument-grade, not product-grade)
+
+The repo's guards all assert things about the PRODUCT. Nothing asserted the INSTRUMENT was configured
+before its output was believed — `build-fixtures.mjs` printed `!!! THIN FIXTURE SET` and I proceeded,
+because a warning is advisory. Added: hard-fail on a thin fixture set, and a shared canary that
+asserts the harness can SEE a known-present value before any absence is reported.
+Also `docs/qc-evidence/LOCAL-RENDER-UAT.md` so the next session inherits the render approach.
+
+**Still missing, and it is the one the owner has been pointing at all day:** nothing forces a LOOK at
+the render before a claim about the UI. The fixture guards protect the input; they do not protect
+against reasoning from source instead of from pixels.
+
+### PROTOTYPE-COVERAGE.md re-checked against current code — the backlog is 3 rows, not 25 (2026-08-29)
+
+**Owner's correction, and it was the right one:** *"I don't understand why you can't just look at what
+was claimed to be missing and see if it still is?"* I had proposed re-measuring all 183 rows. Only
+the rows the doc CLAIMS ARE MISSING needed checking — 3 ABSENT + 22 PARTIAL = **25 rows**, and the
+check took two greps.
+
+**Method.** Parsed every `| 4.x-n |` row whose 4th cell is ABSENT or PARTIAL out of
+`docs/qc-evidence/PROTOTYPE-COVERAGE.md`, then grepped each control's string in `app/src`.
+
+**Result — 21 of 25 are BUILT and the doc is stale.** `Go to field` (as `onGoToField`,
+`QcRail.jsx:196/226`, with its own telemetry key `qc-go-to-field`), `Put back` ×5, `Change it` ×2,
+`Ask for a change` ×4, `Re-run QC`, `Open QC`, the Must-haves / Responsibilities / Nice-to-haves
+counters, composite + coverage headers in both `postingAnalysis.js` and `qcRail.js`. Plus the three
+sections the app screenshots settled: §4.11 assistant (scored 0%, mounts on every step), §4.8 QC
+(scored 73%, the whole gate card + Done-for-you + Needs-a-decision renders), §4.10 send.
+
+**Genuinely open — 3 rows:**
+- `4.5-12` pick-list (`type:'select'`) — `PickList` 0 hits. Portfolio only.
+- `4.8-21` Swaps `Ask why` — 0 hits any spelling. Was gated on the assistant panel, which now exists.
+- `4.11-4` scope selector (This packet / This asset / My profile) — 0 hits.
+
+**And one that is DELIBERATE, not a gap:** `4.8-20` Swaps `Undo this`. `assistantPanel.js:107` states
+the design outright — *"Undo is per field, in the field itself, not from here."*
+
+**WHY THE DOC DRIFTED, and it is my own recurring failure:** `Go to field` was scored PARTIAL because
+the measurement searched the PROTOTYPE'S LITERAL STRING; the app implements the capability as
+`onGoToField`. A grep matching a SPELLING instead of a CAPABILITY — the identical error that made me
+report the swap arrow missing this morning when the code renders `&rarr;` rather than `->`.
+
+**Caveat I am not hiding:** the 21 "built" verdicts are safe because a hit proves presence. The 3
+absences were established by grep alone, which is exactly the instrument the repo's own rule says is
+never sufficient for the heaviest claim. Before anyone treats "3 rows left" as final, sweep producers
+AND consumers and read the import lists for those three.
+
+**Consequence for the parallel UI work:** jd, resume, cover and portfolio have NO genuinely missing
+rows between them. The lanes are unblocked; what remains is one portfolio-only pick-list, one
+`Ask why`, and a scope selector.
+
+---
+
+## Long agent work does not run in this session any more (2026-08-29)
+
+> **SUPERSEDED-BY: the 2026-08-30 entry at the top of `## Active work` in this file.**
+> The PREMISE below still holds — an in-session subagent makes this session unresponsive, and that
+> was measured. **The VEHICLE it names does not.** `claude-task.yml` is a single Messages API call
+> that cannot execute and needs metered credit, which ran out (run 33277232470). It has been
+> replaced by `scripts/verify.sh --kind AC|VERIFY` in `eds-claude-skills`, which is detached, runs
+> on the session credential with no API key, and CAN execute. Read the top entry before acting on
+> anything below. `claude-task.yml` retains exactly one role: it runs on GitHub's machines, so it is
+> the only vehicle that survives a container restore.
+
+**Feature status: SUPERSEDED as guidance; kept as the record of why the in-session route was left.**
+
+A running in-session `Agent` subagent makes this CCR session unresponsive — measured, not inferred:
+owner typed at ~25s, message sat queued and undelivered for 93s, surfaced only on stop, which killed
+the agent. `run_in_background: true` does not change this; the turn stays active while the parent
+keeps issuing tool calls.
+
+**Where long AC/verifier passes go instead:** `claude-task.yml` in `deventerpriseds-org/eds-claude-skills`,
+dispatched from here with `target_repo` pointing at this repo. **Do not copy that workflow here** —
+the `target_repo` input exists for this and is proven against boost (run 33264119335, step 3, 2s,
+`success`). Output lands in `docs/qc-evidence/` as `AC-<slug>.md` / `VERIFY-<slug>-<loop>.md` with
+per-claim `CONFIRMED` / `REFUTED` / `NOT_APPLICABLE` verdicts — the eds Stop gate accepts a
+dispatched run plus that committed file in place of a subagent spawn, but only with real verdicts.
+
+**Known limits, measured:** it is SINGLE-SHOT, not an agent loop — it cannot grep, follow an import,
+or execute. `effort: high` is the default because `xhigh` over 398 KB ran 7m29s, cost ~$1.61 and
+still hit `max_tokens` mid-answer. A killed run's artifact is still uploaded and opens with an
+`INCOMPLETE` banner.
+
+### Hardening — three wrong answers of mine, all the same shape
+
+I asserted a capability's behaviour from my own model of it rather than from the owner's stated
+observation. **The user's stated observation IS ground truth**; when my analysis says the thing they
+watched happen is impossible, my analysis is what is wrong. It took a screenshot and a live timed
+test to settle something one honest "I don't actually know, let's measure it" would have.
+
+## `boost-pg-mcp-write` is the PREFERRED live-DB transport; a lapse is a NUDGE, not a detour (2026-08-29)
+
+**Owner-instructed, verbatim:** *"make a note to use the boost-pg-mcp-write as the preferred option
+and unless I tell you to essentially work continuously, nudge more for a reset if a step requires
+it's abilities which I may then advise to switch to the workflow or refresh and unblock proceeding.
+remember to check before implementation steps require db"*
+
+**The rule, now in `CLAUDE.md` under Live Database Access:**
+1. PRE-FLIGHT before an implementation step — does it need live Postgres? Say so UP FRONT, not
+   three tool calls in.
+2. Lapsed/off + step needs it → name the step, name the query, ask for a refresh, STOP. Do not
+   quietly reroute through `db-query.yml`. The choice between refresh and workflow is the owner's.
+3. Only exception: an explicit "work continuously" instruction — then take the fallback, and say in
+   the same turn which step took it.
+4. `db-query.yml` stays the correct FALLBACK. It is not the default.
+
+**Measured the moment it was reconnected** — two queries, ~1s each, both ground truth this session
+had been reasoning about from source alone:
+- `select action, count(*) from swap_decision group by action` → **kept 35, swapped 15, dropped 8,
+  added 7**. So 15 rows carry the two actions the fixed-slot rule makes illegal; AC-12's
+  back-compat requirement is about REAL rows, not a hypothetical.
+- `pg_get_constraintdef` on `swap_decision` → **`swap_decision_list_check` admits only
+  `skills_1, skills_2, relevant_1, relevant_2, relevant_3`**. `expertise` is rejected BY PRODUCTION,
+  confirming from the live database what the AC pass had inferred from `schema.ts:567`. AC-14
+  option (i) therefore genuinely requires an explicit `ALTER` — `create table if not exists` is a
+  no-op there (`schema.ts:594-596`).
+
+**Why this matters beyond convenience:** both facts were previously "read from the schema file",
+which is a proxy. The connector turned them into ground truth in two seconds. That is the argument
+for nudging rather than routing around.
+
+## Hardening — F-1: an owner edit that quoted the posting emptied the WHOLE swap table (2026-08-30)
+
+**Root cause.** In `swaps.ts` `row()`, `requirement_seq` / `verbatim_quote` / `confidence` were
+derived from the attribution result **independently of** `driver`. Nothing tied the two together, so
+the two could contradict each other: an owner-typed line that happened to match a requirement's
+verbatim produced `driver='owner'` **with a non-null quote**.
+
+**Why that is not a cosmetic inconsistency.** `schema.ts:587` enforces
+`check ((driver = 'posting') = (verbatim_quote is not null))`. The contradictory row is REJECTED,
+which aborts the whole `writeSwaps` transaction; `appPackets.ts:619` swallows the throw into a
+`console.warn`; and the packet then ships with an **empty swap table for every list** — no arrows, no
+originals, no `unchanged` statuses, and no error anywhere. The trigger is the owner editing a line to
+say what the employer asked for, which is the single most likely edit they make.
+
+**Guardrail (the invariant, not the incident).** Decide `driver` FIRST, then derive the citation from
+it: `const cites = driver === 'posting' && att` (`swaps.ts:553`). A citation can no longer exist
+without the driver that justifies it. This is also the semantically correct answer — an owner did not
+cite the employer — so the DB CHECK and the meaning now agree instead of merely coinciding.
+
+**Third instance of the same shape, and worth naming as a class:** a THROW inside `writeSwaps` is the
+QUIETEST outcome available, not the loudest, because the only caller swallows it. AC-9 encodes the
+same lesson for count mismatches. Any future work in this file must assume a throw is invisible.
+
+**A guard of ours was VACUOUS on its first draft.** The second new guard's fixture had one owner
+label, and it matched no requirement — so the collision it claimed to test could never arise, and the
+guard stayed GREEN with the defect reinstated. Caught only by mutating it. Fixed by adding an owner
+label that does attribute, with a comment so nobody simplifies it back. **An inert guard is worse
+than no guard, because it is believed.**
+
+**Also recorded — a reporting trap.** A background run was reported as *"completed (exit code 0)"*
+while its raw output read `Terminated` / `EXIT=143`: the zero was the OUTER SHELL's status (the last
+command in the chain was an `echo`), not the tests'. Reading the notification instead of the output
+would have turned a timeout into a pass. Same class as this repo's rule that a queued workflow is not
+a confirmation — **read the output, never the wrapper's exit code.**
+
+## Hardening — F-2 and F-3, both found by the independent verifier, both mine (2026-08-30)
+
+### F-2 — the ordering rule is TWO-SIDED, and I walked into the side this file did not document
+`alter table insertion drop constraint …` was placed TWENTY LINES ABOVE
+`create table if not exists insertion`. On a FRESH database that is
+`ERROR: relation "insertion" does not exist` and it aborts the entire migration. **My own
+populated-database proof passed it**, because there the table already exists — the exact MIRROR of
+the trap `H39`/`H39b` describe.
+
+**Invariant, restated two-sided:** a statement must come AFTER the ALTER that adds what it names,
+**AND after the CREATE of the table it alters.** The file only ever recorded the first half, and the
+first half is the half that a populated-DB test catches. The second half is only visible on a fresh
+database — so **both directions must be executed, every time.** One defect, 13 of 18 suite failures.
+
+### F-3 — a gate-deciding check shipped with ZERO coverage
+`fixed_slot_count` names offenders and can turn the gate `fail`, and nothing tested it. The verifier
+inverted all three states — unknown→`pass`, the compact_resume branch deleted so the check goes
+ABSENT, mismatch→`pass` — and the suite stayed **green on every one**. Five cases now cover it and
+all three mutations fire (1 / 3 / 1 failures). **Tier 1 means the guard ships WITH the check, in the
+same commit — not after.**
+
+### The backtick trap bit TWICE IN ONE SESSION, so it stops being prose
+A backtick inside `SCHEMA_SQL` (a template literal) terminates the string and `tsc` parses raw SQL as
+TypeScript. I did it once, wrote a warning comment about it — and then **did it again inside the
+warning comment itself**. Prose demonstrably does not guard this. It needs
+`H:schema-sql-has-no-backticks` as a real source-grep test (count must be 0), which cannot cry wolf
+because a backtick there is always a syntax error rather than a style preference.
+
+### My own DEFERRED.md rows broke the ledger guards — the guards were right
+`D:ledger-status-is-a-token` and `D:ledger-manual-names-its-vehicle` failed because I wrote a status
+of `QUEUED — **FIRST ITEM AFTER UI PARITY**` (statuses are the tokens `OPEN`/`CLOSED`/`WONTDO`, and
+emphasis belongs in the description) and a check directive of
+`` `check: db-query.yml "…"` `` instead of the required
+`` `check: (grep|absent|manual) <arg> — <rest>` ``. Both fixed by conforming, not by widening the
+guard. **A guard that fires on my own new writing is the guard working.**
+
+## Ops: this session ran FIVE hook versions behind, and nobody would have noticed (2026-08-30)
+
+**Owner: *"make sure there aren't any ops improvements only updated local and not pushed for future
+sessions. use the eds sync skill"*.** Both halves were worth asking.
+
+**Nothing was local-only.** The skills repo working tree is clean; the two commits ahead of `main`
+(`f706d38`, `4b7d661`) are pushed and open as PR #31. The `/root/.claude/eds-*` hook scripts are
+generated by `setup.sh` heredocs rather than being standalone files, and all six carried the
+container's build-time mtime — untouched by this session, so nothing to lose.
+
+**But the session was stale, and this is the real finding.** Installed `_eds_version` was **24**;
+the repo's `setup.sh` declares **29**. Five versions of hook fixes — including the phase-tag and
+verify-loop checkers that gate this session's own work — were never reaching it. The CCR Setup
+script field runs only at container BUILD, so a repo push does not touch a running session; only the
+sync applies it live.
+
+Synced and VERIFIED BY READING BACK, not by the run's exit code: `_eds_version` now **29**, all six
+hook scripts rewritten. `sync-setup-script.md` is a skill FILE at `/root/.claude/skills/`, not a
+registered slash-command — invoking it via the Skill tool fails with `Unknown skill`; read the file
+and follow its steps.
+
+**Carry this into every session:** check the installed `_eds_version` against the repo's
+`CURRENT_VERSION` early. A stale session fails silently — the hooks still fire, they are just the
+wrong ones, and a gate that has been fixed upstream keeps blocking on the old rule.
+
+## The ResumeSummary reads as JD stuffing because the COVERAGE PREDICATE pays for stuffing (2026-09-01)
+
+Owner: *"this one is a hack full of verbatim lines from the jd that isn't subtle at all and would get
+me accused of stuffing."* Full evidence: `docs/qc-evidence/DIAG-summary-stuffing.md`.
+
+**Not a prompt problem — the owner's prompts are untouched and still drive Call 1.** `coversIn`
+(`checks.ts:263-282`) closes a requirement only when **70% of the employer's content words appear
+LITERALLY** in the text. Executed at `1c43ea8`: a subtle paraphrase scores 2/7 = 0.29 and the
+requirement stays OPEN; a near-verbatim lift scores 7/7 and CLOSES. **No paraphrase reaches 0.70.**
+P3 rewrites `ResumeSummary` against that score every pass, and `scopeForRequirements` withholds only
+fields that solely cover a CLOSED requirement — so a tasteful generic summary covers nothing and is
+in scope forever. `buildScopedPrompt` hands over the employer's exact sentences and forbids only
+*inventing*, never *copying*.
+
+`posting_wording_kept` does not brake it: 8-consecutive-token exact run, severity `warn`. A summary
+stitched from short JD phrases closes a requirement with **0 offenders** (executed).
+
+**JotForm ran Call 1 + Call 3 and stopped.** The P3 loop is ours; it turned the summary into a
+coverage-optimisation target. That is the whole difference.
+
+**OPEN, one query short:** whether the summary the owner is reading came from a remediation pass or
+Call 1 is INFERENCE until `select loop, method, left(after_text,200) from insertion where
+merge_field='ResumeSummary' order by loop;` is run. `boost-pg-mcp-write` lapsed; nudged, not
+rerouted.
+
+### Hardening — an append with the wrong cwd writes a REAL file to the wrong place, silently
+`cat >> .claude/actions.md` ran with cwd `/home/user` after a shell reset and created
+`/home/user/.claude/actions.md`. It echoed `done` and exited 0. Two turns of ledger rows lived
+outside the repo where no commit would ever pick them up. **Always `cd` to the repo in the same
+command as a `>>` append, and confirm with `git status` — not with the command's exit code.**
+
+## Coverage is decided by string matching, not judgement — and the acceptance bar I wrote was too (2026-09-01)
+
+**Feature status.** `AC-llm-coverage-judge.md` (21 ACs, document lane) and `AC-llm-gate-and-stuffing.md`
+(1,029 lines, gate + stuffing lanes) are written and committed. The **confirm button is BUILT** on
+`claude/incumbent-wins-swap` (`bb7e620`) — app 422/422, api `tsc` clean, four new guards each
+mutation-proved. **NOT DEPLOYED: nothing is on `main`, and the owner has not pressed one.**
+
+**The architecture, measured.** `grep -rn "openai(" api/src/functions/tests/*.ts` returns two files —
+`pipeline.ts` and `mt19.ts`, generation only. **No model participates in any coverage, evidence,
+placement or attribution decision.** Nine tuned lexical constants do. An LLM path exists
+(`evidenceProposal.ts` + `verifyProposal`, citation checked byte-exact) and is barred from counting in
+three places. The house rule is `checks.ts:781` — *"a model may PROPOSE, only an exact rule may
+ACCUSE"*. **The rule is sound; equating "verifiable" with "lexical" is the defect.**
+
+**Owner's decision, recorded:** swap the lexical actors for a model that reasons **only where it makes
+sense** — document coverage, profile evidence and stuffing become model judgements; `locate()` goes
+hybrid (model picks the sentence, code computes offsets); `similarity()` stays lexical (ranking).
+"Include the gate" meant *do not defer it out of scope*, not "put the document judge on
+must_have_coverage".
+
+### Hardening — FOUR instances of one pattern, all caught by the owner
+1. Read the shipped summaries by eye and called them clean — measurement disagreed.
+2. Saw two numbers on one card and inferred a shared source — the trace disagreed.
+3. Printed `sameWord`'s wrong answers and called them scope rather than defect.
+4. **Set the judge's acceptance bar (`#9 must fail`) by word-matching, while arguing word-matching is
+   the defect.** #9 is mostly covered: a *technology leader* aligning *engineering strategies* and
+   delivering *scalable, secure software* IS describing technical teams — reading that is the whole
+   point of using a model.
+
+**The guard:** of every value reported, ask *is this the correct answer to the question asked?* — not
+*is this what the code returns?* Never let a tool's limitation define correctness, and never write an
+acceptance bar that requires a judge to reproduce an answer I pre-decided by the method being replaced.
+
+**Also corrected:** two of my own "PROVEN" claims were wrong from single-name greps — the confirm ROUTE
+existed (`appRequirements.ts:948`), and `app/src` does render evidence (via `evidencePresentation`).
+And `must_have_coverage` is not the only gate-failing check: **thirteen** take `bad()`'s default.
+
+### Active work
+- **NEXT: versioning (`D:every-build-is-destructive`)** — `artifact.version_history` stores `{"len": N}`,
+  a character count, not the text. The owner decided (OD-5) this is fixed **before** the Rewrite button,
+  because a Rewrite over it is an irreversible overwrite of their own prose.
+- Then the **Rewrite button** — the owner's original ask, distinct from the confirm button.
+
+### A6 and the deploy (2026-09-01)
+The lexical substitution is at **three** layers, not two: `coversIn`, `supportIn`, and
+`verifyReasoning` — the last being the check meant to make the model's judgement trustworthy, which
+instead withdraws sound evidence (Trinnex #20: *Information Systems* rejected against *"or related
+technical field"*). Sixth instance of my own absence-claim pattern: I said reasoning was never
+verified; it is.
+
+**`main` moved `9760c4f` → `d889e78` (40 commits) on the owner's instruction.** api 924/0, app 422/0
+pre-deploy. **The relevant-pool and slot-wiring lanes went out UNVERIFIED** — three verifier deaths —
+and that is stated, not hidden. Next: the 9-11 UI parity rows, then the judge lanes.
+
+## Coverage judge — built 2026-09-01, OFF by default, not yet live
+
+`coverageJudge.ts` (pure: prompt, parse, verify, compose, cache key) + `appCoverage.ts` (impure:
+cache, call, store) + `requirement_coverage` + `chk_coverage_judge` / `_max` / `_min_quote`.
+`checks.ts` consults a verdict for `evidence_placed` and falls back to `coversIn` when there is none.
+
+**Three facts kept apart, and this is the design:** a verdict exists (the judge wins), no map at all
+(the lexical rule, unchanged), asked-and-unanswered (**excluded from placement, never accused**).
+Every failure path — transport, cap, unparseable, an unreadable cache, a refused write — produces
+silence rather than a negative verdict.
+
+**A6 was fixed by APPEAL, not by narrowing.** `namedEntityTokens` counts any non-first capitalised
+word, so a Title Case degree list made `computer`/`software`/`engineering` accusable and withdrew
+correct evidence. Narrowing that population would weaken a guard, so the accusation is byte-identical
+and a model may defend — quoting the excerpt, defending every disputed term, and failing closed.
+
+**The number the owner watches has NOT moved.** `must_have_coverage` reads `ruleEvidenceOf` (the
+PROFILE side, `supportIn`), which this pass did not touch. Anyone reading "the judge shipped" as "0/12
+is fixed" is wrong.
+
+---
+
+---
+
+## Session 2026-08-29 — a cold container had ZERO org guards, and nothing said so
+
+**Status: environment provisioned at `_eds_version` 19, verified from installed state. Detail in
+`.claude/actions.md` ACT-2026-08-29-a.** Lane `claude/boost-app-setup-approach-ejv09v`, running in
+parallel with other sessions on this repo.
+
+### Hardening — "the environment is set up" is a claim about state, and nothing re-checks it
+
+This container started with **no** `/root/.claude/CLAUDE.md`, **no** `/home/user/.claude/settings.json`
+and **no** `/workspace`. The Stop gate, the rewind autosave, the orphaned-subagent guard and the
+phase tag were all absent. Nothing announced this. The session simply began, and every file in the
+repo describing "the hooks that are always on" was, at that moment, false.
+
+This is the exact shape `.claude/DEFERRED.md` was built for — *a claim about state that nothing
+re-checks* — applied to the guard layer itself. The guards cannot warn you they are missing, because
+being missing is precisely what stops them running. The setup script's own cached-output model is
+what makes it plausible: caching is invisible when it works, and equally invisible when it did not
+apply.
+
+**The rule: at session start, prove the guards are installed by READING THEM, before trusting any
+document that says they are.** One command settles it and it is cheap:
+
+```bash
+python3 -c "import json;d=json.load(open('/home/user/.claude/settings.json'));print({e:[h.get('_eds_version') for g in v for h in g['hooks']] for e,v in d['hooks'].items()})"
+```
+
+Absent file or missing events ⇒ run `bash setup.sh` from the skills repo before doing anything else.
+Do not infer it from the presence of the repo, from CLAUDE.md, or from a previous session's notes.
+
+**Corollary, and the more general lesson:** a script exiting 0 is not evidence of what it installed.
+Every claim in the summary this session gave the owner was read back from the artifact — the parsed
+settings file, `ls` of the skills directory, the connector's own `select current_database()`,
+`git ls-remote` for the autosave refs — never from the script's stdout. `autosave` exiting 0 in
+particular says nothing about whether a ref reached origin; only `ls-remote` does.
+
+### The documented bootstrap path is wrong for a managed multi-repo session
+
+`bootstrap.md` says to clone to `/workspace/eds-claude-skills` and register that. In this session
+`register_repo_root` **refused** it: *"does not match the managed session's clone target
+`/home/user/eds-claude-skills`"*. The org repo is already attached under `/home/user` here. Register
+that path; keep the `/workspace` clone only as the editable copy with a working push remote.
+
+### Hardening — SESSION-HANDOFF.md said the test suites did not exist. There are 892 tests.
+
+Found 2026-08-29 while ingesting the tracking corpus. `SESSION-HANDOFF.md` §2 stated, as a table
+with bolded certainty, `test: does not exist` for BOTH packages, and in prose: *"There is no test
+framework, no lint config... So 'run the tests' is not available — verification is the
+GitHub-Actions loop in §4."*
+
+**Ground truth, measured in a cold container:** `cd api && npm ci && npm test` →
+**892 tests, 874 pass, 0 fail, 18 skipped, 7.5 seconds.** 47 test files under `api/test/`,
+17 unit files plus 9 browser runners under `app/test/`.
+
+**Why this was the expensive kind of wrong.** The doc did not merely omit the suite, it told the
+reader the suite does not exist and redirected verification to a GitHub-Actions round trip costing
+minutes. And it contradicted `memory.md`'s own 2026-08-27 hardening entry, whose rule #1 is
+*"`npm test` before ANY bespoke verification — it already contains every lesson this repo learned."*
+A session reading §2 skips the exact guard that entry exists to enforce, then writes the bespoke
+script that entry exists to prevent. Two documents, opposite instructions, no way for a reader to
+tell which was current.
+
+**The claim was true when written (2026-08-16) and was never revisited.** That is the mechanism, and
+it is the same one that let the `/workspace` register-path defect sit for four days: **an absence
+claim decays silently, because nothing fails when it goes stale.** A wrong presence claim gets
+caught the moment someone follows it and the thing is not there. A wrong ABSENCE claim just quietly
+stops people from looking.
+
+**The rule: an absence claim in a durable doc must carry the command that re-derives it.**
+"`test: does not exist`" is unfalsifiable prose; "`npm test` → 892 tests, 0 fail (2026-08-29)" is a
+claim the next reader can re-run in seconds and catch when it rots. Date every capability claim, and
+put the command next to it.
+
+**Also corrected in the same file:** §11 "Current state" described `main` at `01cf5b0` (2026-08-16)
+while `main` is `2c693d1` — ~9 days of QC/evidence work later — with no staleness marker at all; and
+§6 documented a container with no `/workspace` and nothing in `/root/.claude/skills/` as though that
+were the layout, when it is what a container looks like when `setup.sh` never ran.
+
+**Gotcha worth keeping:** on a fresh container `npm test` fails with ~40 lines of `TS2591: Cannot
+find name 'process'` / `TS2307: Cannot find module '@azure/functions'`, because the `test` script
+runs `tsc` first. That is a missing `npm ci`, not a broken build and not a real type error. It looks
+exactly like the repo is in a bad state; it is not.
+
+---
+
+## 2026-08-29 (cont) — env synced v19 → v27; and the sync skill sent me to the wrong file
+
+**Feature status: environment enforcement — v27 INSTALLED and read back from
+`/home/user/.claude/settings.json`.** Synced from `eds-claude-skills` `main` @ `c68f460` (the repo
+had moved from `cbf8f7b` under a parallel lane's PR #28: 760 changed lines in `setup.sh` alone).
+
+Hook count went 6 → 8. New since v19:
+
+| Hook | What it mechanizes |
+|---|---|
+| `PostToolUse` matcher `.*` | Phase-tag reminder after EVERY tool call |
+| `Stop` → `eds-verify-loop.py` | Re-verification-loop contract: coverage TOTAL every loop, only DEPTH tiered |
+| `UserPromptSubmit` → `eds-availability-guard.sh` | Away-gap, container-restore, dead-resource ledger |
+| `SessionStart` → `eds-session-memory.py` | Per-repo memory surfacing, replacing cwd-relative reads |
+
+### Hardening — the sync skill's verify step reads a file that has held no hooks since v7
+
+`.claude/skills/sync-setup-script.md` step 4 hands you a snippet that opens
+`/root/.claude/launcher-settings.json` and prints `_eds_version` from it. **Since v7 the eds hooks
+are deliberately NOT in that file** — the launcher regenerates it from a stock template on every
+process start, which is exactly why they were moved to `/home/user/.claude/settings.json`. Running
+the skill's own snippet today prints nothing.
+
+**Why that is worse than a stale doc.** The step exists to answer "did the sync actually land?", and
+its failure mode is a silent empty result — indistinguishable from a sync that did nothing. It is a
+verification step that cannot fail loudly and cannot succeed correctly. I only avoided it because
+this session had already learned where the hooks live; a session following the skill literally would
+have concluded the sync failed and re-run it.
+
+**Same defect class as the `bootstrap.md` `/workspace` path, and that is the point:** three times
+now, a *skill* has named a path that moved. The guard is structural — **a skill step that verifies
+installed state must derive the path, or fail loudly when the file is absent, never open a
+hardcoded one and print whatever it finds.** An empty result must be an error, not an answer.
+
+### Confirmed NOT inert — the one claim worth making carefully
+
+The mid-turn `PostToolUse` reminder is a JSON `additionalContext` envelope, because a bare `printf`
+on `PostToolUse` goes to the transcript and never reaches the model — setup.sh's own comment records
+that its first version shipped inert for ten minutes. **Observed live this session:** the line came
+back attached to the tool result on every call after install. That is the probe the comment asks
+for, and it passed.
+
+And it immediately caught its target: the Stop gate blocked this turn with *"6 of 11 text blocks
+lack a phase tag"*, every offender a mid-turn block written after a tool call — the exact 86% case
+the hook was measured against.
+
+---
+
+## 2026-09-01 — there are no baseline artifacts, and the schema forbids them
+
+Asked for links to baseline resume / CV / portfolio slides built from MasterContext without running
+prompts. Answered read-only from `GET /api/app/assets` (HTTP 200, 14 assets) plus `schema.ts`.
+
+**Standing facts worth not re-deriving:**
+
+- **Every artifact is opportunity-bound. `packet.opp_id` is `not null` (`schema.ts:84`)**, and
+  `artifact.packet_id` references `packet(id)`. So a candidate-level document that belongs to no JD
+  has nowhere to live. "No baseline exists" is a consequence of the schema, not an oversight.
+- **`cv` is not an artifact type.** `('resume','compact_resume','cover','portfolio','video')`
+  (`schema.ts:100`). `compact_resume` is a shorter resume; it is not a CV. Anyone asked for "the CV"
+  should be told the type does not exist rather than handed `compact_resume` as if it were one.
+- **Minting a Google link does NOT require a model.** `artifactDocument` (`appPackets.ts:850`) and
+  `artifactSlides` (`:954`) render `artifact.content` into a Doc/Deck with no OpenAI call, each
+  gated on content already existing. The model-bearing path is content GENERATION, and the separate
+  template-copy + merge-field injection path at `:772`. Useful whenever the ask is "without running
+  the prompts": the last mile is already prompt-free.
+- **Live asset inventory as of 2026-09-01:** 14 artifacts across 4 opportunities — eMoney Advisor
+  (2026-08-30, the newest complete set), Trinnex (2026-08-29), Anthropic (resume only) and Cloudflare
+  (the only one with a video). Cloudflare's portfolio is the only asset with `opens > 0`.
+
+**Method note, because the request contained a false premise and it would have been easy to miss.**
+The ask named three deliverables; one of them does not exist as a concept in this system. Reaching
+for the nearest-looking row (`compact_resume`) and calling it the CV would have been the same error
+the accuracy log already records three times — answering from a proxy. The check constraint is the
+primary source and it settles the question in one read.
+
+---
+
+## 2026-09-01 — the five SOURCE templates, and answering the wrong question first
+
+**The resolved template set** (seed constants overlaid with live config — `GET /api/config` returns
+only `google.compactResumeTemplateId` and `openai.generateModel`, so the other four fall through to
+`SEED_DRIVE_IDS` in `packetTemplates.ts:13-16`):
+
+| Kind | Id | Format |
+|---|---|---|
+| Resume | `1bwOcxvkbihRTUjOzVjrWSPnDomwqy6gOz6229mdzbZw` | Google Doc |
+| Compact resume | `13eIKN2TqAOn3PC4U2pLl4wd-R3zS-8DLOWPRJaIW0O0` | Google Doc (config-only) |
+| Portfolio | `1ULZZLBs9zwLEN6c8hcXvBCNPk0YyTGg0yIlFSYkGIec` | Google Slides |
+| Cover letter | `1QN4Cnw4R9krUH4kEpl_lnhoPOkY5PG2oUKRMjxBfWV0` | Google Slides |
+| Output folder | `1MlVLMSQ0EQJoAtpKC1Mv7mDCAJDmdJTt` | Drive folder |
+
+**Read the pair, never one half.** Every id resolves as *config value if set, else seeded first
+value*. Quoting `packetTemplates.ts` alone is a proxy and will be wrong the moment the owner sets a
+key — which they have, for exactly one of the five.
+
+### Hardening — the honest caveat WAS the signal, and I shipped past it
+
+Asked for links to the original templates, I ran `GET /api/app/assets` and returned 14 links to
+documents built for eMoney, Trinnex, Cloudflare and Anthropic. The owner: *"the links you gave me are
+not what i asked for. i explicitly said from the template original content not built for emoney etc."*
+
+I attached to "baseline" and "mastercontext" and read straight past *"template original"*. The
+retrieval was easy to run, returned HTTP 200, and was confidently, entirely wrong — `artifact` rows
+and template ids are different tables, so no rigour inside the query could have saved it.
+
+**The generalisable tell, which this repo has not written down before:** my answer required a long
+caveat explaining that everything returned was tailored and that no baseline existed. **When the
+honest form of an answer is "here is a list of things that are not what you asked for", that is the
+moment to re-read the request** — not to ship the list with the caveat attached. A caveat that large
+is a mis-targeted query announcing itself.
+
+**Guard:** before the first retrieval, restate the ask as a NOUN and confirm the query targets it —
+*"the source template file"* vs *"a document built from that template"*. This is the sibling of the
+existing "answered from a proxy" rows in `accuracy-log.md`: there the source was wrong, here the
+OBJECT was.
+
+---
+
+## 2026-09-01 — master-filled artifact copies: both halves already exist
+
+**`renderArtifact(client, art, opp, pkg, opts)` (`appPackets.ts:659`) takes `pkg` as a PARAMETER and
+makes no model call.** It resolves the template, `copyThen(...)` copies it, `injectValues(token,
+fileId, varsForType(art.type, pkg), meta.isSlides)` fills the placeholders, and it writes `doc_url`.
+Every OpenAI call in that flow happens UPSTREAM, in `buildPackageForJD` (`appPackets.ts:520`).
+
+**`loadMasterBaseline()` (`appInsertions.ts:25`) already returns MasterContext in exactly the shape
+`pkg` wants** — `masterBaseline()` (`evidence.ts:221`) maps the Azure Table row through
+`MASTER_BASELINE_FIELD` to merge-field keys. It is already used as the loop-0 "before" text and by
+`appSwaps.ts:93`.
+
+So "build the artifacts from master content with no prompts" is
+`renderArtifact(client, art, opp, await loadMasterBaseline())`. **Nothing calls the two together** —
+`grep loadMasterBaseline` gives four sites and none of them renders. That gap is the entire feature.
+
+**Coverage is uneven and the failure mode is silent.** `MASTER_BASELINE_FIELD` maps 15 fields;
+`@Company`, `@CoverLetterDate`, `@CoverLetterBody` are unmapped on purpose. Per template: resume
+**7/7**, portfolio **4/7**, compact_resume **1/2**, cover **0/3**. And `stripLeftoverTokens` DELETES
+an unfilled `{{...}}` after injection — so an unmapped placeholder does not show as a leftover token,
+its text simply vanishes. A master-filled cover letter renders BLANK and reads as a bug.
+
+`compact_resume` is the cheap one: its placeholder is `{{SkillsBullets}}` (no digit) while the map
+has `SkillsBullets1`/`2`. A naming mismatch, not absent data.
+
+### Hardening — three wrong answers to one request, and only the third was a real search
+
+Asked for "links to baseline artifacts using the mastercontext, no prompts", I returned (1) tailored
+artifacts built for eMoney, then (2) the empty source templates. Both were real, both HTTP 200, both
+wrong. The owner had to correct me twice, the second time quoting his own words back.
+
+**What actually went wrong is narrower than "I misread".** Each time I latched onto ONE noun in the
+request and searched for it — "baseline" → `artifact` rows; "template" → `TEMPLATE_META` — when the
+request was a COMPOSITE: *a copy of the template* **with** *master content in it* **and** *no prompt
+output*. Three constraints, and each of my first two answers satisfied exactly one.
+
+**The guard, sharper than the one I wrote last turn:** when a request contains a *transformation*
+("X built from Y without Z"), name all three parts before querying and check the candidate answer
+against every one. An answer satisfying one of three is not close — it is a different object. Both
+wrong answers were falsifiable in one line: the eMoney docs had a company name in them; the
+templates still had `{{Placeholder}}` tokens.
+
+---
+
+## 2026-09-01 — baseline artifacts shipped; and a mutation that does not COMPILE reads as INERT
+
+**`POST /api/app/baseline-artifacts`** (`appBaseline.ts`, `ff6adea` on `main`) builds master-filled
+copies: `loadMasterBaseline()` for content, `renderArtifact()` for copy-and-inject, no model call
+anywhere in the path. Container opportunity `Baseline (Master Context)`, `dismissed = true`.
+`@Company` seeds to `Company X`, `@CoverLetterDate` to today, both overridable per call. Portfolio
+coverage rises 4/7 → 6/7; `cover` stays off the default list because its body would be stripped.
+
+### Hardening — `mutate.sh` reports INERT when the mutation fails to BUILD, and INERT is the alarming word
+
+Measured today. Mutation 1 for `H:baseline-no-model` replaced a line with a call to `ensurePackage`,
+which this file does not import. `npm test` runs `tsc` first, so the build failed, the suite never
+ran, the must-fail pattern never appeared, and the harness printed **"INERT: the guard protects
+nothing."** The guard is real — it FIRED on the next attempt.
+
+This is the SAME failure the harness was built to end, arriving through a door it does not watch.
+`NOT-APPLIED` exists because an anchor that does not match means nothing was tested; a mutation that
+applies but does not COMPILE also means nothing was tested, and there is no outcome for it. It is
+reported as the one verdict that says "your protection is worthless", which is the answer most
+likely to get acted on wrongly — exactly the asymmetry the harness's own header warns about.
+
+**The rule: a mutation must COMPILE.** Reinstate the defect with something the type-checker accepts —
+for a banned-string guard, a bare exported const carrying the string, never a call to a symbol that
+is not imported. **And when a guard you expect to FIRE reports INERT, read the build output before
+believing it.** The honest verdict there was "not proven", not "broken".
+
+Worth carrying to `mutate.sh` itself: it could distinguish these by checking whether the test command
+failed at the BUILD step rather than in a test body, and report a fourth outcome. Not done here —
+recorded so the next lane that trips it does not re-derive it.
+
+---
+
+## 2026-09-01 — the baseline artifacts rendered pipes and the whole Library; my defect
+
+Owner, on the documents I had just handed him: *"why do the skills, competencies and relevant items
+have pipe separation instead of bullets... why is the relevant list far exceeding the count limits.
+this must be the Library not the starting template list."* Both right, both mine.
+
+**Three standing facts, each ground-truthed, so nobody re-derives them:**
+
+- **MasterContext blocks are PIPE-DELIMITED in storage.** `skills1` is literally
+  `"Enterprise Governance|Technology Strategy|..."` (`GET /api/diag/skill-sources`, run 33548874453).
+  `splitItems`/`splitSkills` split on `/\r?\n|(?:\s*[|•·]\s*)/` and rejoin with `\n`. Anything that
+  injects a master block without that pass renders the pipes.
+- **`relevantProficiencies` is the POOL** — 958 chars, 5 categories, ~36 terms — and
+  `MASTER_BASELINE_FIELD` maps `RelevantBullets1`, `2` AND `3` to it deliberately, because the
+  prompts split it. Correct as provenance "before" text; **wrong as a render package.**
+- **The resume template's slot counts are `SkillsBullets1:10, SkillsBullets2:8, ExpertiseBullets:6,
+  RelevantBullets1/2/3: null`** (`GET /api/config/templates`, run 33548971200). The three Relevant
+  counts are UNCONFIGURED, which is why nothing constrained the injection. Master holds 11/9/7 — each
+  list is exactly ONE over its known count.
+
+### Hardening — `loadMasterBaseline()` is a PROVENANCE reader, not a package builder
+
+The name says baseline and the shape is `Record<mergeField, string>` — identical to what
+`renderArtifact` wants — so it looked like a drop-in package. It is not. Its real job is the loop-0
+"before" text for the change log, where the pooled one-to-many mapping and the raw stored formatting
+are both *correct*. Feeding it to a renderer keeps the type-check happy and produces a wrong document.
+
+**The generalisable rule: a matching TYPE is not a matching CONTRACT.** Before reusing a producer,
+read what its existing CONSUMER does with it — `appInsertions.ts:84` stores it for display and
+`appSwaps.ts:93` runs it through `splitBaselineItems` FIRST. Both consumers transform it; I was the
+only caller that did not, and `Record<string,string>` → `Record<string,string|null>` hid that
+completely.
+
+**And every guard I wrote was about PROVENANCE, none about SHAPE.** `H:baseline-no-model` proves no
+model touched the output; `H:baseline-standing-fields` proves two values land. Neither says the
+output is *shaped like a resume*. `checks.ts` `WORD_RULES` covers only the six PROSE fields, so
+there is no separator or item-count check on any of the six `SLOT_FIELDS` anywhere in the suite —
+a real gap the owner found by looking at the document, which no assertion could have told him.
+
+---
+
+## 2026-09-01 (cont) — the Relevant seed, and the two defects that produced it
+
+**Feature status: `appBaseline` COMPLETE for the JD-less case — deployed `7d10e64` on `main`.**
+`SEED_RELEVANT_LISTS` + `relevantOverlay()` supply the three Relevant slots; `shapeSlotFields`
+supplies the rest. Suite 1015 pass, 0 fail.
+
+**The standing values, so they are not re-derived:**
+
+    Relevant Skills 1: Portfolio Management | Tech-Driven Innovation | Ops Automation
+    Relevant Skills 2: Tech Talent Strategy | Innovation Frameworks  | Data Insights
+    Relevant Skills 3: Corporate AI Use Cases | Strategic Partnerships | Global Leadership
+
+Derived by the owner's Zap rule against the Trinnex JD (exclude anything Skills1/Skills2/competencies
+cover, order by ATS match, split 3/3/3 — 27 of 36 Library terms dropped), then corrected by the owner
+for AI redundancy. Seeded, not hardcoded: overridable via `relevant` in the request body.
+
+**Guards mutation-proven:** `H:baseline-relevant-seed` FIRED on restoring `AI/ML Advancements`, and
+on deleting the `relevantOverlay` spread. `H:baseline-shape` FIRED on reinstating the pipes and on
+making a null slot count truncate.
+
+### Hardening — I optimised nine picks individually and never read them as a SET
+
+The owner: *"the ai is a little redundant."* My nine carried THREE AI-prefixed terms. Each was
+defensible alone — one for `AI adoption`, one for `AI knowledge`, one for the AI operations
+keyword — and the set was obviously wrong the moment anyone looked at it as a list. **I optimised
+per-item against a per-item criterion and never evaluated the collection the reader actually sees.**
+
+The generalisation, which is not specific to skills: **when the deliverable is a SET — a list, a
+column, a menu, a dashboard row — the acceptance check must run over the set, not only over each
+member.** Per-member correctness cannot detect repetition, imbalance, or a missing dimension, and
+those are exactly what a reader notices first.
+
+That is now enforced rather than remembered: `H:baseline-relevant-seed` asserts distinctness across
+the nine and at most one AI-prefixed term, so a later edit cannot quietly reintroduce the cluster.
+
+### The other lesson, from the same object: `renderArtifact` is a RENDERER
+
+It injects what it is handed. Normalisation lives in the caller, and until `appBaseline` there was no
+caller that handed it anything but model output — which is why the pipe-delimited storage format had
+never once reached a document in a normal build (`pipeline.ts:405` puts the master text in the
+PROMPT). Any future path that renders stored text directly inherits the same obligation: split,
+shape, and cap before injecting.
+
+### Hardening — three owner catches on one feature is what skipping the AC pass costs
+
+`appBaseline.ts` was built across three passes and NONE was preceded by an independent AC subagent.
+The owner caught, in order: pipe separators rendered instead of bullets; the whole 36-term Library
+in each of three 3-item slots; and three AI-prefixed terms among nine picks.
+
+**All three are SHAPE questions** — what must a rendered slot field look like, how many items does a
+slot hold, what must the SET look like as a whole. A cold read of "what does done look like here?"
+asks all three before any code exists. I answered none of them because I went from instruction to
+implementation and let the document be the first place the shape was ever examined.
+
+**The gap cannot be closed retroactively and must not be papered over.** An AC pass spawned after the
+fact is handed the implementation and writes criteria that match it — the skill says so directly.
+Producing one would satisfy the gate's shape while inverting its purpose, and a later reader would
+count it as a real pass. Recorded as an accepted gap in `ACT-2026-09-01-k` instead.
+
+**The trigger, so this is mechanical rather than remembered: spawn the AC pass when the owner's
+instruction first names a DELIVERABLE SHAPE** — "build copies of these artifacts with the
+mastercontext information" is that moment — **before the first file is opened.** Not after the first
+defect is reported, which is when I reached for one.
+
+### Hardening — a guard that FIRES is not a guard that COVERS
+
+The independent verifier refuted 2 of 9 claims on code whose guards had already been
+mutation-proven five times. `H:baseline-shape` and `H:baseline-relevant-seed` are genuinely
+load-bearing — five mutations, five FIRED — and both were still blind to inputs that sat in HEAD with
+the suite 1026/1026 green:
+
+| Defect | The input the guard never constructed |
+|---|---|
+| C1 | a separators-only block (`"|"`), returned verbatim by `if (!items.length) continue` |
+| C5 | a caller list that is non-empty but SHORT — `[['a','b','c']]` — passing an OUTER `lists.length` test while slots 2-3 keep the pooled Library |
+
+**Mutation-proving answers "can this guard fail?", not "does this guard cover its subject?"** Both
+questions are necessary and only the first has a tool. I wrote each guard from the happy path I had
+just implemented, so its fixtures were the inputs I already had in mind — which is precisely the
+blind spot an AC pass written BEFORE the code is supposed to remove, and this feature had no AC pass
+(`ACT-2026-09-01-k`).
+
+**The cheap habit that would have caught both: for every branch you write, ask what input REACHES it,
+and make that input a fixture.** `if (!items.length) continue` and `Array.isArray(lists) &&
+lists.length` are each one branch, and neither had a test that entered it. A guard whose fixtures
+never reach a branch cannot see what that branch does.
+
+**Also worth keeping, from C7.** The verifier confirmed "no model call" by tracing the CALL graph — 28
+functions across 11 files — not the import closure, which is 50 files and DOES contain OpenAI
+transport (`appPackets` → `pipeline`). A grep of imports would have given the wrong answer. It ran a
+sanity control proving its analyser could still find the model path from `artifactDocument`, so the
+negative is a measured absence rather than a broken tool.
+
+## Baseline route: named per-slot overrides (2026-09-02)
+
+`POST /api/app/baseline-artifacts` builds MASTER-FILLED template copies with **no model call**.
+Two ways to set list slots, both optional:
+
+```jsonc
+{
+  "company": "Trinnex",              // -> @Company; defaults to "Company X"
+  "types": ["resume"],               // default ["resume","portfolio"]; "cover" renders blank, see the route note
+  "relevant": [[...],[...],[...]],   // positional shorthand for the three Relevant lists
+  "fields": {                        // NAMED per-slot override -- wins over `relevant`
+    "SkillsBullets1": [...], "SkillsBullets2": [...], "ExpertiseBullets": [...],
+    "RelevantBullets1": [...], "RelevantBullets2": [...], "RelevantBullets3": [...]
+  }
+}
+```
+
+- Only `SLOT_FIELDS` keys are honoured; anything else is ignored (a typo cannot overwrite
+  `ResumeSummary` or an `@`-placeholder with a list).
+- Array or string only. `42`/`true` are ignored, not coerced into a one-item list.
+- An empty/blank list is ignored, never applied — it cannot blank a slot MasterContext filled.
+- **Not trimmed to the slot count.** Over-capacity is reported in the response as
+  `slotOverflow: [{field, items, capacity}]`. Live example: the owner's skills column 2 carries 9
+  items against a capacity of 8; all nine render and the response says so.
+- Template slot counts (as configured today): Skills1 10, Skills2 8, Expertise 6, Relevant 3/3/3.
+
+**HOW TO CHANGE A BUILT PACKET'S SLOTS INSTEAD** (a real tuned packet, not the baseline): the
+baseline route builds its pkg in-process and never reads `pkg_json`, so `fields` does NOT apply
+there. Use the two-step — `POST /api/app/artifact/{id}/content {"pkg":{...}}` merges
+(`{...cur, ...body.pkg}`, so everything else is preserved), then
+`POST /api/app/artifact/{id}/document {}` re-renders. **Check `packet.jd_grounded` FIRST**: if it
+is not `true` while the opportunity has posting text, `buildTemplatedArtifact` treats the cache as
+stale and REGENERATES from the model, discarding the overlay and rewriting every tailored field.
+`qcApplied: null` in the render response is the proof the cached package was used and no model ran.
+
+**Prove the result by reading the DOCUMENT, not the response:**
+`GET /api/diag/doc-layout?artifactId=<id>&type=resume` returns the rendered text per section.
+
+Guards: `H:baseline-slot-override`, `H:baseline-slot-overflow`, `H:baseline-slot-element-type`.
+Independently verified: `docs/qc-evidence/VERIFY-baseline-slot-overrides-1.md` -- **10/10 CONFIRMED**
+by a detached `claude -p` verifier that did NOT write the code, ran the built functions with
+adversarial inputs, and mutation-proved the guards itself (5 mutations including one of its own
+design, all FIRED). Six mutations total across implementer + verifier, six FIRED. Suite 126/126.
+
+### Hardening — three lessons from this build
+1. **A re-stated target REPLACES the earlier one; never merge them.** Asked for a MasterContext
+   build with the nine, I edited the Trinnex tuned packet instead (carrying forward "use them for
+   Trinnex" from hours earlier) and then re-rendered a compact resume nobody asked for. Owner:
+   *"i clearly said i wanted a mastercontext build with the 9 added in the second step... why do
+   what i didnt ask for?"*
+2. **`mutate.sh` restores SOURCE, not `dist/`.** The harness's last build compiled the mutant, so
+   running the suite immediately after reports against mutated output — it showed a bogus failure
+   and read as a red commit. Always `npm run build` after a mutation run.
+3. **An INERT mutation is a coverage hole until proven equivalent.** Dropping `|| cap <= 0` left
+   the suite green; it was not equivalent (a capacity of 0 would flag every non-empty slot). The
+   assertion was added and the mutation then FIRED.
+4. **Chain a mutation's TEST_CMD with `;`, never `&&`.** `tsc` exits non-zero on the mutation's type
+   error but STILL emits JS (this tsconfig has no `noEmitOnError`), so `&&` short-circuits, the
+   suite never runs, and `mutate.sh` reports a FALSE **INERT** -- "your guard is worthless" when it
+   means "I did nothing". Found by the independent verifier on its own first mutation run.
+5. **The verifier earns its keep on the claim NOBODY WROTE.** All 10 stated claims came back
+   CONFIRMED; the thing worth having was the finding OUTSIDE them -- the type gate was top-level
+   only, so `['a', {}, ['b','c']]` wrote `"a\n[object Object]\nb,c"` into a merge field and would
+   have rendered it into a resume. Self-verification cannot find the check you did not think to
+   write, which is exactly why (b) is not satisfiable by the implementer reading their own output.
+
+### Open, uncaused by this work
+The STATIC template content changed between the 21:30 and 02:20 baseline builds — certifications
+became the MIT set, Xylem title `ENTERPRISE SOFTWARE STRATEGY` -> `SOFTWARE & DIGITAL STRATEGY`.
+Same packet, same route, so the resume template resolved differently across those hours. Cause
+unestablished.
+
+## Hardening — a guard that PASSED ON BROKEN CODE, and the scoping rule behind it (2026-09-01)
+
+**RE-WRITTEN 2026-09-02 because the first copy was LOST.** It was appended to this file and never
+reached a commit — a container restore took it, and the loss surfaced only during a merge, when the
+marker was absent from `ORIG_HEAD`. That is its own lesson, and the cheaper one: **append to a
+memory file and COMMIT in the same breath.** An uncommitted lesson is not a lesson.
+
+**The defect.** `H:the-screen-and-the-gate-agree-about-what-counts` asserts that the veto is
+excluded in `postingAnalysis.js`'s `countsNow`. It did so with a **file-wide** grep:
+
+```js
+assert.match(screen, /trim\(ev\.decision\) !== 'vetoed'/, 'the screen must exclude a vetoed row')
+```
+
+Measured by mutation: deleting the veto check from `countsNow` left the guard **GREEN**, because
+`decidable` — two lines below — contains the identical string and satisfied the match. The guard
+named `countsNow` and could be satisfied by any line in a 700-line file.
+
+**Root cause.** A structural grep is worth exactly what its SCOPE is worth. The whole file was
+passed to `assert.match` because that was the easiest thing to pass, and the string chosen was not
+unique to the expression being guarded.
+
+**The guardrail.** The assertion now runs against the regex capture of the `countsNow` expression
+itself, so it can only be satisfied by the line it names. Re-mutated: **FIRED**.
+
+**THE GENERAL RULE, and it cuts both ways in one file on one day:**
+
+| direction | case | symptom |
+|---|---|---|
+| scope too WIDE, assertion positive | `H:the-screen-and-the-gate-agree-about-what-counts` | passed on broken code — an unrelated line satisfied it |
+| scope too WIDE, assertion negative | `H:missing-lines-are-enumerated-ONCE-by-the-api` | fired on correct code — greps all of `PostingAnalysis.jsx` for `.missing`, and the evidence line legitimately renders the API's own array |
+
+`postingCompare.test.mjs`'s own `CARD_BLOCK` helper had already written the principle down — *"an
+assertion run over the whole file would be satisfied by the comparison ROW's code, and that is
+exactly how a guard comes to pass while the surface it names is broken"* — and it was still made
+twice in one session.
+
+**Before writing a source grep, ask what ELSE in the searched text could satisfy it.** If the answer
+is anything, slice to the construct first. A behavioural test is preferred and was available for
+half of these.
+
+**A second lesson from the same exercise.** Two `INERT` verdicts reported mid-work were NOT weak
+guards — they were harness USAGE errors: once a test command missing a `cd` (so the build failed and
+`&&` short-circuited), once naming a source-grep guard as the must-fail pattern for a BEHAVIOURAL
+mutation. `mutate.sh` reports what it observes; it cannot tell a guard that did not fire from a test
+command that never ran the guard. **Read the mutated run's own output before believing an INERT.**
+
+## Merging two long-lived branches: NEVER splice a conflict hunk by regex (2026-09-02)
+
+Merging `origin/main` (29 commits from a parallel session) into `claude/incumbent-wins-swap`
+conflicted in three append-only files. The hunks were resolved with
+
+```python
+pat.sub(lambda m: m.group(2) + m.group(1), s)   # theirs + mine
+```
+
+which is **wrong**, and it broke `hardening.test.mjs` with `SyntaxError: Unexpected end of input`.
+A conflict hunk's two sides are not "their additions" and "my additions" — they are two versions of
+a REGION that both include shared context, so concatenating them duplicates some lines and drops
+others, cutting mid-function.
+
+**The correct resolution for an append-only file** is to take one side WHOLE and append only what
+the other side added after the merge base:
+
+```python
+mine, theirs = git_show('ORIG_HEAD', path), git_show('origin/main', path)
+i = mine.index(FIRST_THING_I_ADDED); j = mine.rfind('\n\n', 0, i)
+open(path,'w').write(theirs.rstrip('\n') + '\n' + mine[j:].lstrip('\n'))
+```
+
+**The build caught the test file; nothing would have caught the two prose files.** `memory.md` and
+`actions.md` took the same bad splice and stayed syntactically valid — silently short. Rebuilt the
+same way and diffed against both parents to prove nothing was lost.
+
+## Feature: keyword_coverage has a real source before the term library (2026-09-02, LIVE)
+
+`atsKeywords.ts` → `appChecks.ts`. Deployed on `main` `0c3721e` (api-deploy run `33631740581`,
+success). Owner's instruction: *"use what we gain to get the score until library is added to
+suppliment not drop it."*
+
+**Where the number comes from.** The `Missing ATS Skills` section of `packet.last_build.analysis`,
+captured by `collectAnalysis` from Call 1. **Column 1 only** — the ATS keyword list, the denominator.
+The numerator is recomputed against the shipped `pkg_json` skills fields (`ATS_SHIPPED_FIELDS`).
+Resume artifacts only. Library strictly WINS when published — taken instead of, never blended.
+
+**Trinnex, live: 6/9 = 67%.** `must_have` and `keyword` are now both fillable; the composite still
+needs `seniority`, which is null because the reviewer has no caller (workstream D).
+
+## Hardening — the obvious implementation of the keyword score was DEFAMATORY (2026-09-02)
+
+**Column 2 of that table holds the covering skill "else Missing" — a ready-made coverage answer, and
+reading it is wrong.** On the owner's live packet all 9 rows say `Missing`, and **6 of those 9 are
+present verbatim in the shipped resume**. A parser trusting column 2 reports **0%** on a document
+that places 67% of the keywords.
+
+**Root cause: the table describes the PRE-SWAP draft.** Call 1 writes it; Call 3's ATS-QC merge runs
+afterwards. It is a true statement about a document that no longer exists.
+
+**The owner caught this by insisting on real data** — *"I dont understand the alternative, it sounds
+like kicking the can down the road, so i am inclined to parse against real dta"*. Building from the
+PROMPT alone would have produced exactly the wrong parser, and it would also have missed a `<th>`
+header row the prompt never mentions (10 `<tr>` for 9 keywords — an off-by-one in every denominator,
+in the same direction, forever).
+
+**The rule this earns: a spec says what was ASKED FOR; only the data says what is PRODUCED.** When
+parsing model output, read a real sample before writing the parser. Both defects here were invisible
+in the prompt and obvious in one row of production data.
+
+## Hardening — the integration trace found a SECOND composite formula (2026-09-02)
+
+Required by the Stop gate as (g), and it earned its place. `appReviewer.ts:309` computes the
+composite with its own inline weighted sum, while the comment four lines above claims it is
+"recomputed through computeArtifactScore ... so the null-unless-all-three rule stays in one place".
+The null rule is; the ARITHMETIC is not.
+
+**It had never executed.** The branch is gated on `keyword_coverage !== null`, and that column was
+null on all 52 `artifact_score` rows ever written. The interim keyword score is what makes it live —
+so a change in one file activated dead code in another, which is precisely what a producer/consumer
+trace is for and what a diff review would not have shown.
+
+`H:one-composite-formula` pins the two together (weights, the all-three requirement, and a worked
+example). Mutation-proved twice: dropping the keyword-null check FIRED, drifting the keyword weight
+0.3→0.4 FIRED.
+
+## `mutate.sh` INERT is usually MY invocation, not a weak guard (2026-09-02, third occurrence)
+
+Three INERT verdicts in one lane, all mine, none a real finding:
+
+| # | cause |
+|---|---|
+| 1 | test command missing a `cd`, so `npm run build` failed and `&&` short-circuited — the test never ran |
+| 2 | named a source-grep guard as the must-fail pattern for a BEHAVIOURAL mutation |
+| 3 | same missing `cd`, **three times in a row**, while saying each time that I had added it |
+
+**The harness cannot tell "the guard did not fire" from "your command never reached the guard".** It
+reports what it observes, and INERT is the honest report for both.
+
+**So: before believing an INERT, apply the mutation BY HAND and run the test.** It took one command
+and proved the guard real after three false INERTs. And put the absolute `cd` in the test command —
+`cd /path/to/api && node --test ...` — because `mutate.sh` does not run it from your shell's cwd.
+
+**One genuinely equivalent mutation, for contrast:** deleting the `<th>` skip from
+`parseAtsKeywords` changed nothing, because the live header has `<th>` cells only and the `<td>`
+requirement drops it anyway. That is a real "not proven", and the fix was to add a mixed `<th>`/`<td>`
+header case — ordinary model output — which made the mutation bite.
+
+
+### A ledger row's numbers are a STATE, not a standing fact (2026-09-02)
+
+`D:swap-screen-reads-a-dead-pass` carried a **blocking precondition** — "settle the 2-vs-4 count
+first" — computed on 2026-08-22 from kept 8 / swapped 1 / dropped 1 / added 1. On 2026-09-02 the same
+opportunity read kept 16 / swapped 5 / dropped 8 / added 7 across 36 rows. The packet had been rebuilt
+under the master-baseline change, so **the blocker referenced numbers that no longer existed and could
+never be discharged by anyone.** It had been quietly gating task #20 for eleven days.
+
+This is the same error as *"the credit ran out"* and *"verify.sh is not yet merged"*: a measurement
+written down in the present tense becomes a permanent claim. **Re-measure a row's numbers before
+treating them as a blocker** — one query, and it cost nothing to check.
+
+The corollary that made it worth the query: the row's OTHER two items had also moved. Item (2) was
+already fixed in source, so I would have spent a lane re-fixing it. Item (1) turned out **provable**
+rather than hypothesised — `len(call3) = 0` on all five fields, so the pass being credited emitted
+nothing at all. **The row was wrong in all three cells, in three different directions.** Reading it as
+a to-do list would have produced one wasted fix, one unfixable blocker, and one missed proof.
+
+
+### THE UI-PARITY BASELINE IS `docs/qc-evidence/PROTOTYPE-COVERAGE.md` (owner-confirmed 2026-09-02)
+
+Asked "which of the 11 UI parity rows are next", I answered from the §14 RANKED LIST inside that
+document — a reading of the row tables that had gone stale — and had to be corrected: *"that's not
+where we were working from. it was a log of what needs to be done. your liking at the wrong
+baseline."* The owner then named it: *"I believe it's PROTOTYPE-COVERAGE.md."*
+
+**Two lessons, and the second is the reusable one.**
+
+1. **The ROW TABLES are authoritative; §14 is a ranking OF them and goes stale.** Three of its five
+   ranks have now closed without anyone building anything (4.6-9, 4.1-20, 4.8-21). 4.8-21 was ranked
+   "GATED, its target does not exist" while its own row table already read `BUILT - CHANGED from
+   ABSENT 2026-08-29`. Never answer a status question from a ranking when the table it ranks is
+   right there.
+2. **COUNT BY EARLIEST POSITION, NOT BY CONTAINMENT.** Parsing the verdict cell with
+   `any(token in cell)` scores `BUILT - CHANGED from ABSENT` as **ABSENT**. That produced 134/181
+   with 18 phantom ABSENT rows and would have reported parity going BACKWARDS. Taking the token that
+   appears earliest gives **159/183 = 86.9%**, and the proof it is right is external: `DEFERRED.md`
+   independently quotes "2 ABSENT + 22 PARTIAL", which the positional count reproduces exactly and
+   the containment count does not. **When a parse of your own docs disagrees with a number written
+   elsewhere, the parser is the suspect.**
+
+Live state now recorded in §13-CURRENT: **159/183 BUILT (86.9%)**, 22 PARTIAL, **2 ABSENT** — 4.5-12
+(PickList, portfolio-only, low value) and 4.11-4 (gated on the shell-cap decision). The old 148/183
+headline was measured 2026-08-25 and never caught up.
+
+
+### A BRIEF THAT ASSERTS THE DIAGNOSIS LAUNDERS MY ERROR INTO THE VERIFIER (2026-09-02)
+
+I told the owner `origin='pass_b'` credits Call 3 with work it did not do, put that in the ledger
+row, then put it in the AC brief as a PREMISE. The independent pass accepted it, designed six ACs
+around it, and priced a production migration to fix it. **All of it rested on my misreading.**
+
+`swaps.ts:490-494` assigns origin by MEMBERSHIP, never authorship: an item in `finals` and not in
+`originals` gets `pass_b`, and `finals` is `pkg[f.merge] ?? call3[f.passB]` -- the SHIPPED package
+first, Call 3 only as a fallback this packet never reached. So `pass_b` means "in what shipped, not
+in the baseline", which is TRUE of a Call-2 insertion. The Call-3 binding lives in ONE COMMENT
+(`swaps.ts:8`). `schema.ts:611` defines no meaning for the values at all.
+
+**The tell I ignored:** I read `LIST_FIELDS[*].passB = 'finalSkills1'` -- a FIELD-NAME GROUP -- as a
+definition of the enum value `pass_b`. Two different things that share a name. The five seconds of
+reading `originOf`'s call sites would have settled it, and I had already read that exact region
+twice while writing the ledger row.
+
+**The rule this earns, and it is about how to WRITE A BRIEF, not about being careful:** hand the
+pass the MEASUREMENT, never the diagnosis. "`len(call3)=0` on all five fields; items are stored
+`origin='pass_b'`; what does that value mean and is it true?" would have had it read `originOf` and
+correct me in its first section. Instead I wrote "`pass_b` means Call 3, prove the fix", and an
+independent adversary spent its whole run inside my error. **An independent pass can only falsify
+what you leave open; a premise is the one thing it will not check.**
+
+Cost: one AC pass, a near-miss production migration on a database column nothing reads, and a
+decision put to the owner twice on a false basis.
+
+
+### THE MIGRATION I ALMOST SHIPPED, AND WHY THE BRIEF WAS THE DEFECT (2026-09-02)
+
+The owner chose "widen the database now". I had already put that option in front of them on a false
+premise -- and the withdrawal is recorded above. What belongs HERE is the second-order lesson, because
+the first-order one ("read `originOf`'s call sites") is not a rule anyone can follow reliably.
+
+**An AC brief that states the DIAGNOSIS launders the implementer's error into the verifier.** I wrote
+"`pass_b` means Call 3, prove the fix" and an independent pass spent its whole run inside that
+premise, designing six criteria and pricing a production migration for a defect that was not in the
+data. It could not have caught me: **a premise is the one thing an adversary does not check.** Hand
+over the MEASUREMENT instead -- "`len(call3)=0` on all five fields; rows are stored `origin='pass_b'`;
+what does that value mean and is it true?" -- and the same pass reads `originOf` and corrects you in
+its first section.
+
+**The owner's own question was the right answer to their own choice**: *"should you design the page
+that will use it first so you know the requirements or the other way around?"* Reader first. Both
+fields were write-only, so any shape chosen ahead of a reader is a guess cast in DDL.
+
+### A GUARD THAT ENCODES A DECISION MUST BE REPLACED WHEN THE DECISION REVERSES, NOT DELETED
+
+`H:panel-floats-and-is-defined-ONCE-for-both-layouts` asserted `data-qc-mode="float"` as a literal and
+FORBADE any dock breakpoint. It was correct for the 2026-08-27 float-everywhere decision. When the
+owner reversed that on 2026-09-02, the guard became an obstacle -- and deleting it would have silently
+dropped the invariants it also carried (one mount, one definition).
+
+**Replaced, with the reversal named in the replacement's comment, and made stronger:** the old guard
+could not distinguish a mode that was CHOSEN from one that was TYPED. This is the difference between
+weakening a guard (banned without asking) and re-aiming one whose target moved. The tell that it is
+the second: the new assertion fails on the old code too.
+
+Found the same way, and worth more than the row that surfaced it: `overlayVariant` is
+`OVERLAY_VARIANTS[v] || OVERLAY_VARIANTS.modal`, so a TYPO does not throw -- it silently renders a
+centred dialog. `variant="sheeet"` would have shipped as a modal on every phone and looked merely odd.
+Nothing checked for that before; the guard now does.
+
+**Footnote, same day, same class of bug twice:** the commit recording this lost the phrase
+`OVERLAY_VARIANTS[v] || modal` because it used `git commit -m "..."` with BACKTICKS inside double
+quotes, and bash ran them as command substitution (`OVERLAY_VARIANTS[v]: command not found`). Every
+other commit this lane used `git commit -F - <<'MSG'` — a QUOTED heredoc — and survived intact.
+Earlier the same day backticks inside a TypeScript template literal terminated it and produced six
+TS1005 errors 200 lines away. **Backticks are live in two different languages here; quote the
+heredoc, always.** The commit is on `main` and is not worth a force-push to fix — the content is
+correct in this file, which is the thing that gets read.
+
+---
+
+## 2026-09-02 — cover step RENDERED; parity 164/183 (ACT-68a)
+
+**The cover letter step has no unbuilt row.** 80 of 85 BUILT (94.1%), 85 of 85 present, zero ABSENT
+across §4.4-§4.7. Doc headline moved 159 -> 164 of 183 (89.6%): +4 from the render pass
+(`4.4-14`, `4.4-24/25/26`), +1 because `4.5-12` shipped on `main` in `5d37e3d` during it.
+
+**Use `scripts/render-app.mjs` for parity questions — reading alone under-reports.** All four rows
+above were PARTIAL on a reading and are built when the page is drawn. But the render is not
+sufficient either: every visible render-vs-prototype difference on this step turned out to be a
+DATA state (no static row in this packet; 2 `.qc-echo` spans actually painting; `MATCH ESTIMATE -`
+because `jd_analyzed = False`). **Render + code + data together, or the answer is wrong in one
+direction or the other.**
+
+**The fixture canary works and must not be bypassed.** The first render refused to run because
+`/search-prefs` had no `checks`; a `--allow-thin` shortcut would have made every word-count rule
+read as unset. Rebuild via `fixture-refresh.yml` (the dump on the `ui-fixtures` branch can itself
+be stale — the one there predated the `checkPrefs` key).
+
+## Hardening
+
+- **A `--theirs` merge resolution on `.claude/actions.md` silently discarded a tracking append I had
+  stated I would re-add.** Caught only because PR #66 showed `changed_files: 1`. Root cause: I
+  resolved and committed in one step without diffing the result against my own commit.
+  **Guardrail: after resolving a tracker conflict with `--theirs`/`--ours`, run
+  `git diff <my-commit> -- <file>` before committing.** It cost nothing here only by luck —
+  `ACT-2026-08-29-a` already recorded the same work, and a blind re-add would have created a
+  second `ACT-68` colliding with a parallel session's entry.
+- **Phase tags must be BARE text at the start of a block.** `eds-phase-tag.py:has_tag` is
+  `text.lstrip().startswith(t)` against plain strings, so `**Fact Finding:**` FAILS on the markdown
+  bold. Two Stop cycles were spent on this. Write `Fact Finding: ...`, unformatted, every block.

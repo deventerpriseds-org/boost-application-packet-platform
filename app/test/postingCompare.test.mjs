@@ -356,7 +356,25 @@ test('H:missing-lines-are-enumerated-ONCE-by-the-api: 4.2-4 is ALREADY BUILT', (
   // its own list of missing items — two enumerations of one fact is the divergence, not the feature.
   assert.match(CARD_SRC, /data-qc=\{POSTING_HOOKS\.compareNote\}/,
     'the note carrying the API\'s named-missing enumeration is no longer rendered')
-  assert.ok(!/Missing:\s*\$\{|Missing:\s*\{|\.missing\b/.test(CARD_SRC),
+  // SCOPED TO THE COMPARISON REGION, and this is a narrowing rather than a relaxation.
+  //
+  // The assertion ran over the WHOLE FILE, and PostingAnalysis.jsx also renders the evidence line,
+  // which legitimately reads `ev.missing` -- the array the API returns naming what a second read
+  // could not find in a proposed excerpt. That is the API's own value rendered verbatim, in a
+  // different component, about a different subject; it is not the comparison card re-deriving a
+  // Missing: list, which is the one thing this case exists to forbid. Left unscoped the guard fires
+  // on correct code, and a guard people learn to ignore is worse than none -- this repo deleted a
+  // whole linter for exactly that.
+  //
+  // The file's own CARD_BLOCK helper already states the principle ("an assertion run over the whole
+  // file would be satisfied by the comparison ROW's code... that is exactly how a guard comes to
+  // pass while the surface it names is broken"). The same reasoning applies in reverse here.
+  // The region spans BOTH the comparison row and the fit cards -- neither may re-derive the list --
+  // and ends where the evidence-line components begin.
+  const COMPARE_REGION = CARD_SRC.slice(
+    CARD_SRC.indexOf('POSTING_HOOKS.compareNote'), CARD_SRC.indexOf('function ConfirmProposal'))
+  assert.ok(COMPARE_REGION.length > 500, 'the comparison region did not slice — the markers have moved')
+  assert.ok(!/Missing:\s*\$\{|Missing:\s*\{|\.missing\b/.test(COMPARE_REGION),
     'the card derives its own Missing: list — it must render the API\'s string, sliced by the API')
 
   // AC A.7 — the deliberate improvement over the prototype survives. The prototype collapses `weak`

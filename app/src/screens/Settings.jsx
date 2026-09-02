@@ -1585,6 +1585,16 @@ const CHK_LABELS = {
     'When a requirement shares no words with your profile, a model looks for a passage that supports it anyway. It may only quote your profile exactly, and what it finds is shown for your confirmation rather than counted toward your score.'],
   chk_evidence_escalate_max: ['Most model lookups per run',
     'Caps the cost of one build. Requirements beyond the cap are left unevidenced and reported.'],
+  chk_coverage_judge: ['Let AI read for meaning instead of matching words',
+    'This turns on three things, and the second one changes a number you are scored on. ' +
+    '(1) YOUR DOCUMENTS. Today a requirement counts as covered only when your text repeats about 70% of its words, so "aligning engineering strategies with business objectives" does not count as covering "align engineering strategy with business goals". With this on, AI reads both and decides - and it has to quote the words in your document that do the covering. ' +
+    '(2) YOUR PROFILE, and this is the one that moves your score. When AI finds a line in your profile that supports a requirement, a second AI reads that whole record on its own, without seeing the first answer, and has to land on the same words. If they agree, the requirement COUNTS toward your coverage without you clicking anything. If they point at different places, it waits for you exactly as it does now. ' +
+    '(3) APPEALS. When a rule throws out an AI explanation for naming something your quote does not contain, AI may appeal by quoting the part of your own text that answers it. It can only ever put an explanation back, never take one away. ' +
+    'Everything AI claims here has to point at your own words, and code checks that it really did before you ever see it.'],
+  chk_coverage_judge_max: ['Most coverage lookups per run',
+    'Caps the cost of one build. One lookup covers one section of one document, and anything past the cap is left unjudged and reported rather than counted as missing.'],
+  chk_coverage_judge_min_quote: ['Shortest quote that can show coverage',
+    'A quote shorter than this is ignored. "leader" appears in almost any executive document and shows nothing about what it covers.'],
   chk_evidence_bullet_run: ['Citation width',
     'How many bullet items one quote may span. LOWER IS BROADER: 1 quotes the whole field, 3 quotes just the items that carry the match.'],
   chk_evidence_threshold: ['Evidence match threshold',
@@ -1966,10 +1976,66 @@ const PIPELINE_LABELS = {
 // through to a code constant, and a Director of Digital posting was written for "a senior
 // engineering executive". A template is a closed set the owner controls, which is what makes it a
 // key that can actually be configured.
+// The six fixed slot counts, and the order they are shown in — the order the lists appear in the
+// resume itself, so the screen reads like the document.
+//
+// The owner's ruling: *"fixed slot counts change per template"*, *"the 10 can't be increased to 12
+// or reduce to 8 etc so only swaps are allowed not adds or drops given the limited space in the
+// resume template"*, *"also relevant and expertise counts"*.
+//
+// Why it is typed and not read from the document: the Google Doc's placeholders are exactly
+// {{ExpertiseBullets}} {{RelevantBullets1..3}} {{ResumeSummary}} {{SkillsBullets1}}
+// {{SkillsBullets2}} and nothing else (diagSkillSources.ts:16-22, proven live). One token per list
+// expands to whatever is injected, so how many lines fit on the page is a fact about the PRINTED
+// page that no code can read off the template. Only the owner knows it, so only the owner can say.
+//
+// Blank is a real and meaningful value: it means "not stated", which downstream must treat as
+// not_applicable. It is NOT zero, and zero is refused by the route.
+const SLOT_CONTROLS = [
+  ['SkillsBullets1', 'Skills 1'],
+  ['SkillsBullets2', 'Skills 2'],
+  ['ExpertiseBullets', 'Expertise'],
+  ['RelevantBullets1', 'Relevant 1'],
+  ['RelevantBullets2', 'Relevant 2'],
+  ['RelevantBullets3', 'Relevant 3'],
+]
+
+/** The API's slots object -> the string-valued form state this screen edits. `null` becomes '' so a
+ *  blank input round-trips as "not stated" rather than as the string "null". */
+function slotsToForm(slots) {
+  const out = {}
+  for (const [field] of SLOT_CONTROLS) {
+    const n = slots ? slots[field] : null
+    out[field] = (n === null || n === undefined) ? '' : String(n)
+  }
+  return out
+}
+
+/** The form state -> the API's slots object. Every field is sent EXPLICITLY, including the blanks:
+ *  this screen shows all six, so a blank here is the owner saying "clear it", not "leave it alone".
+ *  (The route's omit-means-leave-alone rule is for callers that edit only some fields.) */
+function formToSlots(form) {
+  const out = {}
+  for (const [field] of SLOT_CONTROLS) {
+    const v = String((form && form[field]) ?? '').trim()
+    out[field] = v === '' ? null : Number(v)
+  }
+  return out
+}
+
+function sameSlots(form, slots) {
+  return SLOT_CONTROLS.every(([field]) => {
+    const a = String((form && form[field]) ?? '').trim()
+    const b = (slots && slots[field] !== null && slots[field] !== undefined) ? String(slots[field]) : ''
+    return a === b
+  })
+}
+
 function TemplateFocusSettings() {
   const [rows, setRows] = useState(null)
   const [vals, setVals] = useState({})
   const [labels, setLabels] = useState({})
+  const [slots, setSlots] = useState({})
   const [note, setNote] = useState(null)
   const [saving, setSaving] = useState(null)
 
@@ -1978,17 +2044,25 @@ function TemplateFocusSettings() {
     setRows(r.templates || [])
     setVals(Object.fromEntries((r.templates || []).map((t) => [t.templateId, t.roleFocus || ''])))
     setLabels(Object.fromEntries((r.templates || []).map((t) => [t.templateId, t.label || ''])))
+    setSlots(Object.fromEntries((r.templates || []).map((t) => [t.templateId, slotsToForm(t.slots)])))
   }).catch((e) => { setNote({ ok: false, msg: String(e.message || e) }); setRows([]) })
 
   useEffect(() => { load() }, [])
 
   if (!rows) return <Card style={{ color: 'var(--proto-ink2)' }}>Loading template settings…</Card>
 
+  const setSlot = (templateId, field, v) => setSlots({
+    ...slots,
+    [templateId]: { ...(slots[templateId] || {}), [field]: v.replace(/[^0-9]/g, '') },
+  })
+
   const save = async (templateId) => {
     if (!sessionValid()) { setNote({ ok: false, msg: 'Sign-in expired — sign out and back in, then Save.' }); return }
     setSaving(templateId); setNote(null)
     try {
-      const r = await api.templateFocusSet(templateId, vals[templateId] || '', labels[templateId] || '')
+      const r = await api.templateFocusSet(
+        templateId, vals[templateId] || '', labels[templateId] || '', formToSlots(slots[templateId]),
+      )
       if (!r || r.success === false) throw new Error(r?.error || 'save failed')
       setNote({ ok: true, msg: r.cleared ? 'Cleared — the seeded focus applies again.' : `Saved "${r.roleFocus}".` })
       load()
@@ -1997,43 +2071,69 @@ function TemplateFocusSettings() {
 
   return (
     <Card>
-      <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 4 }}>Resume template focus</div>
+      <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 4 }}>Resume templates</div>
       <div className="px-small" style={{ color: 'var(--proto-ink2)', marginBottom: 14 }}>
         Every generation prompt is prefixed with "tailor this for a senior <em>focus</em> executive",
         and the resume template being built decides that word — so adding a second resume here is how
         you get a second role. Name each one so you can tell them apart. Clear a focus to fall back to
         the seeded one.
+        <br /><br />
+        <strong>Slots</strong> are how many lines each list has room for in <em>this</em> template.
+        They are fixed: a swap replaces a line, it never adds or removes one. Nothing can read these
+        off the document — the template holds one placeholder per list, not a number of lines — so
+        count them once and type them here. Leave a box empty if you have not counted it yet; empty
+        means "not stated" and nothing will be judged against it. It does not mean zero.
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
         {rows.length === 0 && <div className="px-small" style={{ color: 'var(--proto-ink2)' }}>No resume templates configured.</div>}
         {rows.map((t) => (
-          <div key={t.templateId} style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16 }}>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              {/* The NAME leads. With one template "Resume template" over a Drive id was clear
-                  enough; with several it is a list of indistinguishable ids, which is the whole
-                  reason `label` exists. An unnamed template says so rather than looking broken. */}
-              <div style={{ fontSize: 13, fontWeight: 600 }}>
-                {t.label || <span style={{ color: 'var(--proto-ink3)', fontWeight: 500 }}>Unnamed resume</span>}
+          <div key={t.templateId} style={{ borderTop: '1px solid var(--proto-line)', paddingTop: 12 }}>
+            <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16 }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                {/* The NAME leads. With one template "Resume template" over a Drive id was clear
+                    enough; with several it is a list of indistinguishable ids, which is the whole
+                    reason `label` exists. An unnamed template says so rather than looking broken. */}
+                <div style={{ fontSize: 13, fontWeight: 600 }}>
+                  {t.label || <span style={{ color: 'var(--proto-ink3)', fontWeight: 500 }}>Unnamed resume</span>}
+                </div>
+                <div className="px-small" style={{ color: 'var(--proto-ink2)', marginTop: 2, wordBreak: 'break-all' }}>
+                  {t.templateId} — {t.source === 'config' ? 'focus set here' : 'using the seeded focus'}
+                </div>
               </div>
-              <div className="px-small" style={{ color: 'var(--proto-ink2)', marginTop: 2, wordBreak: 'break-all' }}>
-                {t.templateId} — {t.source === 'config' ? 'focus set here' : 'using the seeded focus'}
+              <div style={{ display: 'flex', gap: 8, flexShrink: 0, alignItems: 'flex-start' }}>
+                <input className="px-input" type="text" value={labels[t.templateId] ?? ''} placeholder="Name, e.g. Product exec"
+                  aria-label="Template name"
+                  onChange={(e) => setLabels({ ...labels, [t.templateId]: e.target.value })}
+                  style={{ width: 180 }} />
+                <input className="px-input" type="text" value={vals[t.templateId] ?? ''} placeholder="Focus, e.g. digital"
+                  aria-label="Role focus"
+                  onChange={(e) => setVals({ ...vals, [t.templateId]: e.target.value })}
+                  style={{ width: 160 }} />
+                <button className="px-btn"
+                  disabled={saving === t.templateId
+                    || ((vals[t.templateId] ?? '') === (t.roleFocus || '')
+                      && (labels[t.templateId] ?? '') === (t.label || '')
+                      && sameSlots(slots[t.templateId], t.slots))}
+                  onClick={() => save(t.templateId)}>
+                  {saving === t.templateId ? 'Saving…' : 'Save'}
+                </button>
               </div>
             </div>
-            <div style={{ display: 'flex', gap: 8, flexShrink: 0, alignItems: 'flex-start' }}>
-              <input className="px-input" type="text" value={labels[t.templateId] ?? ''} placeholder="Name, e.g. Product exec"
-                aria-label="Template name"
-                onChange={(e) => setLabels({ ...labels, [t.templateId]: e.target.value })}
-                style={{ width: 180 }} />
-              <input className="px-input" type="text" value={vals[t.templateId] ?? ''} placeholder="Focus, e.g. digital"
-                aria-label="Role focus"
-                onChange={(e) => setVals({ ...vals, [t.templateId]: e.target.value })}
-                style={{ width: 160 }} />
-              <button className="px-btn"
-                disabled={saving === t.templateId
-                  || ((vals[t.templateId] ?? '') === (t.roleFocus || '') && (labels[t.templateId] ?? '') === (t.label || ''))}
-                onClick={() => save(t.templateId)}>
-                {saving === t.templateId ? 'Saving…' : 'Save'}
-              </button>
+            {/* The fixed slot counts sit UNDER the name rather than beside it: six numbers in the
+                same row as two text inputs is a row nobody can read, and they belong to the
+                template exactly as much as its focus does. One Save writes the whole row. */}
+            <div style={{ marginTop: 10, display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'flex-end' }}>
+              {SLOT_CONTROLS.map(([field, label]) => (
+                <label key={field} style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+                  <span className="px-small" style={{ color: 'var(--proto-ink2)' }}>{label}</span>
+                  <input className="px-input" type="number" min="1" step="1" inputMode="numeric"
+                    value={(slots[t.templateId] || {})[field] ?? ''}
+                    placeholder="—"
+                    aria-label={`${label} slots for ${t.label || t.templateId}`}
+                    onChange={(e) => setSlot(t.templateId, field, e.target.value)}
+                    style={{ width: 72 }} />
+                </label>
+              ))}
             </div>
           </div>
         ))}

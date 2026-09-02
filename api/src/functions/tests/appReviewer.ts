@@ -16,7 +16,7 @@ import { TableClient } from '@azure/data-tables'
 import { resolveOwner, requireWrite } from './appSession'
 import { getPgClient } from './pgClient'
 import { gateFor, attentionCount, CheckResult } from './checks'
-import { computeArtifactScore, judgedMustHaveIds } from './artifactScore'
+import { computeArtifactScore, judgedMustHaveIds, weightedComposite } from './artifactScore'
 import { resolvePostingSource } from './jdText'
 import { parseAgentJson } from './agentJson'
 import { logUsage } from './usageMeter'
@@ -306,11 +306,17 @@ async function persist(
         })
         // must_have and keyword keep the values the deterministic pass measured; only the seniority
         // component and the composite that depends on it are rewritten.
-        const composite = (s.must_have_coverage !== null && s.keyword_coverage !== null)
-          ? Math.round(s.must_have_coverage * (s.weights?.mustHave ?? 0.5)
-                     + s.keyword_coverage * (s.weights?.keyword ?? 0.3)
-                     + recomputed.seniority_alignment.value! * (s.weights?.seniority ?? 0.2))
-          : null
+        // ONE FORMULA, CALLED — not a second copy of the arithmetic kept in sync by a source grep.
+        //
+        // This WAS an inline weighted sum. An independent verifier broke the guard that policed it
+        // (VERIFY-ats-keyword-score-1.md, C9) by swapping which component each weight multiplied
+        // while leaving the three literals in the same textual order: 1050/1050 still passed, and
+        // the composite here would have disagreed with `computeArtifactScore`'s for the same inputs.
+        // The null-unless-all-three rule lives inside `weightedComposite` too, so this call site can
+        // no longer get either half wrong.
+        const composite = weightedComposite(
+          s.must_have_coverage, s.keyword_coverage, recomputed.seniority_alignment.value,
+          s.weights || undefined)
         await client.query(
           `update artifact_score set seniority_alignment=$1, seniority_source=$2, composite=$3, band=$4
             where artifact_id=$5 and run_id=$6`,

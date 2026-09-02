@@ -32,6 +32,7 @@ import { api } from '../api.js'
 import {
   BLOCK_HOOKS, observedFor, KIND_ABBR, KIND_WORD, KIND_LEGEND, reqChipLabel, METHOD_LABEL,
   countMismatchNote, deriveItems, draftSizeText, expectationFor, latestRows, listBodyModel, listsOf,
+  pickListModel, pickListAsk,
   targetFor,
   ASSET_ANSWERS_DEFAULT_OPEN, correctionsForField,
   keywordActions, keywordSwapOptions, keywordPresence,
@@ -39,6 +40,7 @@ import {
   meterModel, originalState, PLACEHOLDER_NOTE, placeholderToken, proposedKeywordDetail,
   proposedKeywordsForRow, reqsForRow, scopeSwaps,
   shapeOf, sharedSourceNote, statPct, wordCount,
+  attentionWithFields, unplacedOf, unplacedTarget, unplacedReason, UNPLACED_LINK_HOOK,
 } from '../assetBlocks.js'
 import { HIGHLIGHT_CLASS, HIGHLIGHT_ACTIVE_CLASS, markRuns } from '../highlight.js'
 import { SEV_COLOR, SEV_LABEL, checkLabel, fieldLabel, severityCounts } from '../assetGate.js'
@@ -143,6 +145,9 @@ export function useArtifactCorrections(artifactId) {
           severity: severityCounts(result),
           fieldSev: fieldSeverities(result),
           findings: findingsByField(result),
+          // SPEC 4.4-29. Derived HERE, from the payload this hook already holds, so the header's
+          // "N to fix" and the list of what those N actually are can never come from two reads.
+          attention: attentionWithFields(result),
         })
       })
       .catch(() => { if (live) setState(null) })
@@ -157,6 +162,7 @@ export function useArtifactCorrections(artifactId) {
     severity: state ? state.severity : null,
     fieldSev: state ? state.fieldSev : null,
     findings: state ? state.findings : null,
+    attention: state ? state.attention : null,
     checked: !!state,
     refresh: () => setReload((n) => n + 1),
   }
@@ -257,6 +263,89 @@ function Stat({ label, n, d, sub }) {
       </div>
       <div className="px-bar"><i style={{ width: `${pct}%`, background: all ? 'var(--proto-green)' : 'var(--surface-brand-default)' }} /></div>
       <div className="px-small" style={{ textTransform: 'none', marginTop: 4 }}>{sub}</div>
+    </div>
+  )
+}
+
+/**
+ * SPEC 4.4-29 — the header's open-items list, reduced to the half the field margins cannot carry.
+ *
+ * The prototype (`qc/assets.jsx:248-259`) lists every open item on the asset header and puts
+ * `Go to field →` on the ones that name a section. 4.4-28 moved that list into each field's margin,
+ * which is right for a finding that names a field this card renders — the reader is already in it,
+ * and a link that scrolls 200px is noise. What the relocation never covered is the REST, and the
+ * header kept counting them: on the production fixture the resume prints 73 and its margins render
+ * 20; the compact resume prints 47 and renders 2 (see `unplacedFindings`).
+ *
+ * So this renders the COMPLEMENT and nothing else. No finding is enumerated twice, and the header's
+ * own numbers reconcile with what the screen shows.
+ *
+ * COLLAPSED BY DEFAULT because the count is genuinely large, and the count is the reason to open it
+ * — the same rule the answers meter follows. The container renders whenever there is one, carrying
+ * `data-qc-n`, so the reconciliation is assertable from the DOM without expanding anything.
+ *
+ * NO DEAD UI, twice over: nothing renders at all when every finding found a margin, and a row shows
+ * `Go to field →` only where `unplacedTarget` resolves a real artifact and field. Where it does not,
+ * the row prints WHY — `inertReason`, the rail's own wording, not a second phrasing of it.
+ */
+function UnplacedFindings({ rows, artifactId, fieldOwners, onGoToField }) {
+  const [open, setOpen] = useState(false)
+  if (!rows || !rows.length) return null
+  const toggle = () => setOpen((v) => !v)
+  return (
+    <div className="px-box" data-qc={BLOCK_HOOKS.unplaced} data-qc-n={rows.length} data-qc-open={open ? '1' : '0'}
+      style={{ padding: 12, display: 'flex', flexDirection: 'column', gap: open ? 8 : 0 }}>
+      <div role="button" tabIndex={0} aria-expanded={open} onClick={toggle}
+        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle() } }}
+        style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap', cursor: 'pointer' }}>
+        <div style={{ fontSize: 13, fontWeight: 700 }}>
+          {rows.length} open {rows.length === 1 ? 'finding' : 'findings'} with no field of their own
+        </div>
+        <span className="px-small" style={{ textTransform: 'none', flex: 1, minWidth: 120 }}>
+          counted on this header, but they name no field this asset renders, so no margin below shows them
+        </span>
+        <span className="px-link" style={{ fontSize: 11.5 }}>{open ? 'Hide' : 'Show'}</span>
+      </div>
+
+      {open && rows.map((f, i) => {
+        const target = unplacedTarget(f, fieldOwners, artifactId)
+        const reason = unplacedReason(f, fieldOwners, artifactId)
+        return (
+          <div key={`${f.check_key}-${i}`} data-qc={BLOCK_HOOKS.unplacedRow}
+            data-qc-sev={f.sev} data-qc-check={f.check_key}
+            style={{ padding: '6px 0', borderTop: '1px solid var(--proto-rule-soft)' }}>
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, flexWrap: 'wrap' }}>
+              <span style={{ fontSize: 11.5, fontWeight: 600, flex: 1, minWidth: 0 }}>{checkLabel(f.check_key)}</span>
+              <span className="px-small" style={{ fontWeight: 700, color: SEV_COLOR[f.sev] }}>{SEV_LABEL[f.sev]}</span>
+              {/* The prototype's own condition, and this repo's no-dead-UI rule: the link exists
+                  only where a field and the asset that renders it both resolve. */}
+              {target && onGoToField && (
+                <span className="px-link" role="button" tabIndex={0}
+                  data-qc={UNPLACED_LINK_HOOK}
+                  data-qc-target-field={target.mergeField}
+                  data-qc-target-self={target.self ? '1' : '0'}
+                  style={{ fontSize: 11.5, whiteSpace: 'nowrap' }}
+                  onClick={() => onGoToField(target.artifactId, target.mergeField)}
+                  onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onGoToField(target.artifactId, target.mergeField) } }}>
+                  {target.self || !target.label
+                    ? 'Go to field →'
+                    : `Go to field in ${target.label} →`}
+                </span>
+              )}
+            </div>
+            {f.offenders.map((o, j) => (
+              <div key={j} className="px-small" style={{ textTransform: 'none', marginTop: 2, lineHeight: 1.45 }}>{o}</div>
+            ))}
+            {f.expected && (
+              <div className="px-small" style={{ textTransform: 'none', marginTop: 2, fontStyle: 'italic' }}>{f.expected}</div>
+            )}
+            {!target && reason && (
+              <div className="px-small" data-qc={BLOCK_HOOKS.unplacedReason}
+                style={{ textTransform: 'none', marginTop: 2, color: 'var(--proto-ink3)' }}>{reason}</div>
+            )}
+          </div>
+        )
+      })}
     </div>
   )
 }
@@ -363,6 +452,95 @@ function DistributionMeter({ rows, filled, unfilled, requirements, scopedSwaps, 
 }
 
 // ── one merge field ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * SPEC 4.5-12 - the pick list. Every item CONSIDERED for this list, not just the ones that shipped.
+ *
+ * IT SEEDS, IT DOES NOT SET. There is no route that reorders a list, so the checkboxes compose a
+ * REQUEST rather than an edit -- the same honest shape `keywordSwapOptions` and `Ask why` already
+ * use. A checkbox that silently changed nothing would be the dead UI the standing rule bans.
+ *
+ * NO CANDIDATES, NO CONTROL, for the same reason: a disclosure that opens onto "nothing was
+ * considered" is a promise the data cannot keep.
+ */
+// `label`, NOT `fieldLabel`: this module imports a fieldLabel() FUNCTION from assetGate.js, and a
+// prop of the same name shadows it inside this component. Nothing breaks today because the string
+// is what is wanted here, but the next person to call fieldLabel() in this scope gets a string.
+function PickList({ items, label, onAsk }) {
+  const [open, setOpen] = useState(false)
+  const [sel, setSel] = useState(() => items.filter((i) => i.selected).map((i) => i.text))
+  const [q, setQ] = useState('')
+  if (!items.length) return null
+  const chosen = new Set(sel)
+  // The prototype shows a filter above ten rows; below that it is chrome on a list you can already
+  // read in one glance.
+  const filtered = q
+    ? items.filter((i) => i.text.toLowerCase().includes(q.toLowerCase()))
+    : items
+  const ask = pickListAsk(label, items.filter((i) => chosen.has(i.text)).map((i) => i.text))
+  return (
+    <div style={{ marginTop: 10 }}>
+      <span className="px-link" role="button" tabIndex={0}
+        data-qc={BLOCK_HOOKS.pickToggle}
+        onClick={() => setOpen((v) => !v)}
+        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setOpen((v) => !v) } }}
+        style={{ fontSize: 12 }}>
+        {open ? 'Hide' : 'Choose from'} everything considered ({items.length})
+      </span>
+
+      {open && (
+        <div data-qc={BLOCK_HOOKS.pickList} style={{ marginTop: 8 }}>
+          {items.length > 10 && (
+            <input className="px-input" value={q} onChange={(e) => setQ(e.target.value)}
+              placeholder="Find an item" style={{ width: '100%', fontSize: 12, marginBottom: 8 }} />
+          )}
+          <div style={{ maxHeight: items.length > 10 ? 260 : 'none', overflowY: items.length > 10 ? 'auto' : 'visible' }}>
+            {filtered.map((it) => {
+              const on = chosen.has(it.text)
+              const toggle = () => setSel((prev) => (prev.includes(it.text)
+                ? prev.filter((t) => t !== it.text)
+                : [...prev, it.text]))
+              return (
+                <div key={it.text} role="checkbox" aria-checked={on} tabIndex={0}
+                  onClick={toggle}
+                  onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle() } }}
+                  style={{
+                    display: 'grid', gridTemplateColumns: '16px minmax(0,1fr) auto', gap: 9,
+                    alignItems: 'baseline', padding: '6px 0', cursor: 'pointer',
+                    borderBottom: '1px solid var(--proto-rule-soft)', opacity: on ? 1 : 0.6,
+                  }}>
+                  <span aria-hidden="true" style={{
+                    width: 13, height: 13, borderRadius: 3, marginTop: 2, fontSize: 9,
+                    background: on ? 'var(--surface-brand-default)' : 'transparent',
+                    boxShadow: on ? 'none' : 'inset 0 0 0 1px var(--border-input)',
+                    color: '#fff', display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                  }}>{on ? '\u2713' : ''}</span>
+                  <span style={{ fontSize: 12.5, lineHeight: 1.5, textDecoration: it.blocked ? 'line-through' : 'none' }}>
+                    {it.text}
+                  </span>
+                  <span className="px-small" style={{ textAlign: 'right', textTransform: 'none' }}>
+                    {it.note || ''}
+                  </span>
+                </div>
+              )
+            })}
+          </div>
+          <div style={{ display: 'flex', gap: 8, marginTop: 9, alignItems: 'center' }}>
+            <span className="px-small" style={{ textTransform: 'none' }}>
+              {chosen.size} of {items.length} chosen
+            </span>
+            <div style={{ flex: 1 }} />
+            <button type="button" className="px-btn" style={{ fontSize: 11.5 }}
+              data-qc={BLOCK_HOOKS.pickSend} disabled={!ask}
+              onClick={() => ask && onAsk && onAsk(ask)}>
+              Send to assistant
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
 
 function ListBody({ row, swapsForList, artifactId, listOwners, phrases, active = null }) {
   const model = listBodyModel(row, swapsForList, { artifactId, listOwners })
@@ -728,6 +906,23 @@ function AssetBlock({ row, reqs, swapsForList, wide, artifactId, listOwners, thr
             onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setAskSent(null); seedAsk(shorten.ask) } }}>
             Shorten to fit
           </span>
+        )}
+        {/* SPEC 4.5-12 - the pick list, mounted HERE rather than inside ListBody because `seedAsk`
+            is in this scope and the sentence it composes is a field-scoped request exactly like its
+            neighbours. `pickListModel` returns [] when nothing was considered, and PickList renders
+            nothing for an empty list, so a field with no swap history grows no control - the
+            standing no-dead-UI rule, not caution.
+
+            THE PROTOTYPE MOUNTS THIS AS THE BODY of a `type: 'select'` field. This app has no such
+            shape (`shapeOf` emits static/pipe/list/prose) and inventing one would mean inventing a
+            field type the pipeline never produces. The candidates it needs are real and already
+            loaded - one swap row per item considered - so it attaches to the list fields that have
+            them instead of to a shape that does not exist. */}
+        {shape === 'list' && (
+          <PickList
+            items={pickListModel(swapsForList, { onPage: deriveItems(row).items })}
+            label={fieldLabel(row.merge_field)}
+            onAsk={(sentence) => { setAskSent(null); seedAsk(sentence) }} />
         )}
         {/* SPEC 4.7-8 "Forwards to the assistant". It forwards the SAME sentence the field's own
             controls seed - `shorten.ask` when the field has a rule, otherwise a request naming the
@@ -1133,7 +1328,7 @@ function AssetBlock({ row, reqs, swapsForList, wide, artifactId, listOwners, thr
  * appearing twice as two separate changes. Both are optional: without them a shared swap still says
  * it is packet-level, it just cannot name the sibling.
  */
-export default function AssetBlocks({ artifact, provenance, fallback, defaultOpen = true, label, listOwners, onListsRendered, focusField = null, onSeedAssistant = null }) {
+export default function AssetBlocks({ artifact, provenance, fallback, defaultOpen = true, label, listOwners, onListsRendered, focusField = null, onSeedAssistant = null, fieldOwners = null, onGoToField = null }) {
   // SPEC 4.7-8 / 4.11-9 - "Forwards to the assistant". The SAME sentence a field control seeds
   // into its own ask box can also be sent up to the panel; the panel is a second DESTINATION,
   // never a replacement, because ground rule R6 keeps correction in place and scoped to the
@@ -1149,7 +1344,7 @@ export default function AssetBlocks({ artifact, provenance, fallback, defaultOpe
 
   // The change log, scoped per field into the margins below. One `busy` for the whole panel, not one
   // per row: two undos in flight against the same artifact would race the re-read that follows them.
-  const { rows: correctionRows, correctedCount, wording, severity, fieldSev, findings, checked, refresh: refreshCorrections } = useArtifactCorrections(artifact.id)
+  const { rows: correctionRows, correctedCount, wording, severity, fieldSev, findings, attention, checked, refresh: refreshCorrections } = useArtifactCorrections(artifact.id)
   // The OWNER'S check thresholds, so every field can state the contract the gate actually holds it
   // to. `searchPrefsGet().checks` is the same row Settings writes - one source, so changing 24 to 30
   // there changes what this screen promises.
@@ -1188,10 +1383,22 @@ export default function AssetBlocks({ artifact, provenance, fallback, defaultOpe
   // Report which lists this asset renders, so sibling cards can say a swap is shared with it. Keyed
   // on the sorted list names so an unchanged set never re-fires.
   const listsKey = useMemo(() => Array.from(listsInAsset).sort().join(','), [listsInAsset])
+  // SPEC 4.4-29. The merge fields this card renders, reported on the SAME callback and the same
+  // terms as the lists: one report per card, two maps derived from it, so a card can never be
+  // registered as an owner of its lists and not of its fields. Keyed on the sorted names for the
+  // same reason - an unchanged set never re-fires.
+  const fieldsKey = useMemo(() => rows.map((r) => r.merge_field).filter(Boolean).sort().join(','), [rows])
   useEffect(() => {
     if (!onListsRendered) return
-    onListsRendered(artifact.id, label || artifact.type, listsKey ? listsKey.split(',') : [])
-  }, [artifact.id, artifact.type, label, listsKey, onListsRendered])
+    onListsRendered(artifact.id, label || artifact.type,
+      listsKey ? listsKey.split(',') : [], fieldsKey ? fieldsKey.split(',') : [])
+  }, [artifact.id, artifact.type, label, listsKey, fieldsKey, onListsRendered])
+
+  // THE COMPLEMENT of what the margins below render. `attention` is null until the checks payload
+  // arrives, and an empty list renders nothing at all - never a "0 findings" box.
+  const unplaced = useMemo(
+    () => (attention ? unplacedOf(attention, fieldsKey ? fieldsKey.split(',') : []) : []),
+    [attention, fieldsKey])
 
   if (state.loading) return <div className="px-small">Loading blocks...</div>
 
@@ -1248,6 +1455,10 @@ export default function AssetBlocks({ artifact, provenance, fallback, defaultOpe
             checked={checked}
             label={ANSWERS_LABEL[artifact.type] || 'asset'}
           />
+          {/* SPEC 4.4-29 - directly under the counts it reconciles, above the fields whose margins
+              carry the other half. */}
+          <UnplacedFindings rows={unplaced} artifactId={artifact.id}
+            fieldOwners={fieldOwners} onGoToField={onGoToField} />
           {rows.map((r) => (
             <AssetBlock
               key={`${r.merge_field}-${r.loop}`}
