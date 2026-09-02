@@ -18,6 +18,9 @@ import { sourceText } from './appFacts'
 import { summariseBuild, skillLineage, collectAnalysis } from './packetBuild'
 import { approvalBlock, evaluateArtifact } from './appChecks'
 import { loadThresholds } from './checkPrefs'
+// The independent reviewer. Imported HERE for the first time: it has been deployed and
+// callable since P4 with no caller anywhere in the product.
+import { runReview } from './appReviewer'
 import { DEFAULT_THRESHOLDS } from './checks'
 import { normalisePackage } from './normalise'
 // The evidence pass, called in-process rather than over HTTP — see resolveEvidenceForOpp. No cycle:
@@ -1136,12 +1139,44 @@ export async function runPacketBuild(
     // SEPARATE connections; this caller has one.
     const checked: string[] = []
     const checkWarnings: string[] = []
+    // THE REVIEWER'S FIRST CALLER IN THE PRODUCT. `runReview` has been built, deployed and callable
+    // since P4 and nothing has ever invoked it: `artifact_score.seniority_alignment` is null on 51
+    // of the 52 rows ever written, the one exception being a manual dispatch on 2026-08-20 that
+    // graded 95. Seniority carries 0.2 of the composite and `computeArtifactScore` returns null
+    // unless all three components are present, so an unrun reviewer alone has been sufficient to
+    // keep EVERY composite null since the feature shipped.
+    //
+    // OFF BY DEFAULT (`reviewerAuto`), because this is an LLM call per artifact -- four per packet
+    // build -- and that is the owner's spend to authorise. At the seeded default this loop behaves
+    // byte-identically to before.
+    // Read the SAME way `gateAdvisory` is read two hundred lines up -- `loadThresholds` returns
+    // the resolved thresholds directly, and the `.catch` keeps a settings-table hiccup from
+    // failing a build that has already produced four documents.
+    const reviewerOn = (await loadThresholds(client, owner).catch(() => ({} as any)))?.reviewerAuto === true
+    const reviewed: string[] = []
     for (const r of results) {
       if (r.error) continue
       const art = artifacts.find((a: any) => a.type === r.type)
       if (!art) continue
-      try { await evaluateArtifact(client, art.id, owner); checked.push(r.type) }
+      let checksRan = false
+      try { await evaluateArtifact(client, art.id, owner); checked.push(r.type); checksRan = true }
       catch (e) { checkWarnings.push(`${r.type}: checks did not run, so this artifact cannot be approved yet (${String(e).slice(0, 200)})`) }
+      // ONLY AFTER THE DETERMINISTIC PASS SUCCEEDED. `runReview` refuses with "run the deterministic
+      // checks first" when no `artifact_gate` row exists, so calling it after a throw produces a
+      // second failure describing the same root cause and buries the first. `checksRan` is a local
+      // flag rather than a test of `checked` because two artifacts can share a type in a rebuild.
+      //
+      // SEQUENTIAL, INSIDE THE SAME LOOP, ON THE SAME CONNECTION -- deliberately not `Promise.all`.
+      // `evaluateArtifact` is already sequential here for the begin/commit-nesting reason, and the
+      // reviewer's own `persist()` UPDATE runs against this same client.
+      //
+      // ITS OWN TRY/CATCH, so a model outage on one artifact cannot cost the other three their
+      // checks, scores or verdicts. This extends the `checkWarnings` isolation already proven here
+      // rather than wrapping the loop.
+      if (reviewerOn && checksRan) {
+        try { await runReview(client, art.id, owner); reviewed.push(r.type) }
+        catch (e) { checkWarnings.push(`${r.type}: the independent review did not run, so this artifact has no seniority grade (${String(e).slice(0, 200)})`) }
+      }
     }
     // PERSIST THE OUTCOME BEFORE RETURNING IT. The response below is routinely lost — `build-all`
     // runs ~3 minutes and the gateway cuts at 4 (D35, measured twice) — and `warnings` is the only
@@ -1179,6 +1214,17 @@ export async function runPacketBuild(
       warnings: evidence?.error
         ? [...summary.warnings, ...checkWarnings, `evidence resolve did not run: ${String(evidence.error).slice(0, 200)}`]
         : [...summary.warnings, ...checkWarnings],
+      // WHAT THE REVIEWER DID, reported beside every other spend this build made rather than left
+      // to be inferred from a null column later. The same discipline `evaluateArtifact`'s own
+      // `judge` field carries: a reviewer OUTAGE has to be visible exactly where a coverage-judge
+      // outage already is, or it becomes a second silent failure mode.
+      //
+      // THE THREE STATES ARE DIFFERENT FACTS and the shape keeps them apart: `enabled: false` means
+      // the owner has not turned it on (and nothing was spent), `enabled: true` with an empty
+      // `artifacts` list means it was on and every call failed -- the failures are in `warnings`
+      // above -- and a populated list names what was graded. Collapsing those into one boolean is
+      // how "the score is still null" becomes un-diagnosable.
+      review: { enabled: reviewerOn, artifacts: reviewed },
       // The measured result, not a boolean. `evidenced`/`proposed`/`escalated` are what make a
       // coverage change attributable later — a reviewer can tell a better profile from a chattier
       // model only if the run recorded which one moved.

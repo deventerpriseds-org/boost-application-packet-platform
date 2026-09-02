@@ -61,6 +61,7 @@ const ENSURE_CHECK_COLUMNS_SQL = `
       -- so the owner turns it on after seeing it read their own packet. There is deliberately no
       -- model column here (D:model-is-43-literals) -- see CheckThresholds.coverageJudge.
       add column if not exists chk_coverage_judge      boolean not null default ${DEFAULT_THRESHOLDS.coverageJudge},
+      add column if not exists chk_reviewer_auto       boolean not null default ${DEFAULT_THRESHOLDS.reviewerAuto},
       add column if not exists chk_coverage_judge_max  int not null default ${DEFAULT_THRESHOLDS.coverageJudgeMaxCalls},
       add column if not exists chk_coverage_judge_min_quote int not null default ${DEFAULT_THRESHOLDS.coverageJudgeMinQuoteChars},
       -- Whether a 'fail' gate BLOCKS approval or may be overridden with a recorded reason. Default
@@ -170,6 +171,7 @@ export async function loadThresholds(client: any, owner: string): Promise<Partia
             chk_evidence_max_sentences, chk_evidence_bullet_run,
             chk_evidence_escalate, chk_evidence_escalate_max, chk_gate_advisory,
             chk_coverage_judge, chk_coverage_judge_max, chk_coverage_judge_min_quote,
+            chk_reviewer_auto,
             chk_skills_split_tolerance, chk_wording_run_tokens,
             chk_resume_summary_words_min, chk_resume_summary_words_max,
             chk_about_me1_words_min, chk_about_me1_words_max,
@@ -199,6 +201,9 @@ export async function loadThresholds(client: any, owner: string): Promise<Partia
     // `=== true` again, and here it is the SAFE direction rather than the awkward one: an owner
     // whose row predates this column reads as OFF, which is the lexical behaviour they already have.
     coverageJudge: r.chk_coverage_judge === true,
+    // `=== true` like its sibling, not a truthy test: a NULL from a row written before the
+    // column existed must read as OFF, never as "the owner enabled this".
+    reviewerAuto: r.chk_reviewer_auto === true,
     coverageJudgeMaxCalls: r.chk_coverage_judge_max ?? undefined,
     coverageJudgeMinQuoteChars: r.chk_coverage_judge_min_quote ?? undefined,
     skillsSplitTolerance: r.chk_skills_split_tolerance ?? undefined,

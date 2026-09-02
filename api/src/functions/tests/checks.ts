@@ -144,6 +144,20 @@ export interface CheckThresholds {
    * the verdict key, so the sweep invalidates cached verdicts rather than silently keeping them.
    */
   coverageJudge: boolean
+  /**
+   * Run the INDEPENDENT REVIEWER on every artifact a packet build checks.
+   *
+   * OFF BY DEFAULT, and the default is the whole safety story. The reviewer is an LLM call per
+   * artifact -- four per packet build -- so turning it on is a COST decision the owner makes,
+   * not one the code makes for them. At its seeded default every existing build behaves exactly
+   * as it does today.
+   *
+   * It exists because `runReview` has been built, deployed and callable since P4 and NOTHING IN
+   * THE PRODUCT CALLS IT: `artifact_score.seniority_alignment` is null on 51 of 52 rows ever
+   * written, the one exception being a manual dispatch on 2026-08-20. Seniority is 0.2 of the
+   * composite, so an unrun reviewer alone has been enough to keep every composite null.
+   */
+  reviewerAuto: boolean
   coverageJudgeMaxCalls: number
   coverageJudgeMinQuoteChars: number
   /**
@@ -201,6 +215,9 @@ export const DEFAULT_THRESHOLDS: CheckThresholds = {
   // FALSE, and for a different reason than `evidenceEscalate` being true: this one can change a
   // check's state, so an owner who has never touched it gets today's lexical answer exactly.
   coverageJudge: false,
+  // OFF. An LLM call per artifact is the owner's spend to authorise, and R1/R7 pin that a
+  // fresh owner sees byte-identical behaviour until they turn it on.
+  reviewerAuto: false,
   coverageJudgeMaxCalls: 12,
   // `MIN_QUOTE_CHARS` (reviewer.ts:157), the floor the profile side already uses. Named here rather
   // than imported so this module stays free of the reviewer's dependencies; the two are held

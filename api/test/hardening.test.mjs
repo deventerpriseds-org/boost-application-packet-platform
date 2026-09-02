@@ -25,6 +25,9 @@ import { runChecks, gateFor, attentionCount, COVERAGE_THRESHOLD, MIN_JUDGEABLE_T
 // DEFAULT_WEIGHTS joins this existing import so H:one-composite-formula can compare the
 // reviewer's inline weighted sum against the ONE implementation that is supposed to own it.
 import { computeArtifactScore, judgedMustHaveIds, mustHaveSource, parseMustHaveSource, DEFAULT_WEIGHTS } from '../dist/functions/tests/artifactScore.js'
+// DEFAULT_THRESHOLDS for H:reviewer-auto-is-off-by-default -- the seeded value IS the guard, so it
+// is read from the module rather than restated as a literal that could drift from it.
+import { DEFAULT_THRESHOLDS } from '../dist/functions/tests/checks.js'
 import { deriveFacts } from '../dist/functions/tests/ownerFacts.js'
 import { parseResumePackage, headingKeysFor } from '../dist/functions/tests/resumeParser.js'
 import { validateCitations, reviewerChecks, agreementFor } from '../dist/functions/tests/reviewer.js'
@@ -5190,4 +5193,67 @@ test('H:one-composite-formula: the reviewer path and computeArtifactScore agree'
   })
   assert.equal(viaFn.composite, byHand,
     'computeArtifactScore and the reviewer formula must produce the same number for the same inputs')
+})
+
+// ─── THE REVIEWER'S FIRST CALLER ────────────────────────────────────────────────────────────────
+//
+// `runReview` shipped in P4 and NOTHING CALLED IT. `artifact_score.seniority_alignment` is null on
+// 51 of the 52 rows ever written; the exception is a manual dispatch on 2026-08-20 that graded 95.
+// Seniority is 0.2 of the composite and `computeArtifactScore` returns null unless all three
+// components are present, so one unwired call has kept EVERY composite null since the feature
+// shipped. These guard the wiring, and above all that it stays OFF until the owner says otherwise.
+
+test('H:reviewer-auto-is-off-by-default: an LLM call per artifact is the owner\'s spend', () => {
+  // FOUR model calls per packet build. Defaulting this ON would spend the owner's money on every
+  // build without them choosing it — the same reason `chk_coverage_judge` was defaulted OFF. R1/R7:
+  // at the seeded default a build must behave byte-identically to before.
+  assert.equal(DEFAULT_THRESHOLDS.reviewerAuto, false,
+    'the reviewer must not run unless the owner turned it on')
+  const prefs = readFileSync(new URL('../src/functions/tests/checkPrefs.ts', import.meta.url), 'utf8')
+  assert.match(prefs, /add column if not exists chk_reviewer_auto\s+boolean not null default \$\{DEFAULT_THRESHOLDS\.reviewerAuto\}/,
+    'the column default must be DERIVED from the threshold, not a second literal that can drift')
+  // A NULL from a row written before the column existed must read as OFF, never as "enabled".
+  assert.match(prefs, /reviewerAuto: r\.chk_reviewer_auto === true/,
+    'a truthy test would read a pre-existing NULL as enabled for owners who never opted in')
+})
+
+test('H:reviewer-follows-the-checks: never called when evaluateArtifact threw', () => {
+  // `runReview` refuses with "run the deterministic checks first" when no artifact_gate row exists,
+  // so calling it after a throw produces a SECOND failure describing the same root cause and buries
+  // the first. R3. Structural: the call must be gated on the success flag, in the same expression.
+  const src = readFileSync(new URL('../src/functions/tests/appPackets.ts', import.meta.url), 'utf8')
+  const i = src.indexOf('await runReview(')
+  assert.ok(i > 0, 'the reviewer has no caller again — this is the defect the wiring fixed')
+  const guard = src.slice(Math.max(0, i - 400), i)
+  assert.match(guard, /if \(reviewerOn && checksRan\)/,
+    'the review call must require BOTH the owner setting and a successful deterministic pass')
+  // ...and its own try/catch, so one model outage cannot cost the other three artifacts their
+  // checks and scores. R5 — the isolation pattern is extended, never replaced by a build-wide catch.
+  const after = src.slice(i - 60, i + 400)
+  assert.match(after, /try \{ await runReview\([\s\S]*?\}\s*catch \(e\) \{[\s\S]*?checkWarnings\.push/,
+    'a failed review must be a warning on that artifact, not an exception that ends the build')
+})
+
+test('H:reviewer-outcome-is-reported: a silent reviewer is how the score stayed null', () => {
+  // The whole reason this feature was invisible for weeks is that nothing said whether it ran. R4:
+  // the build response reports it beside every other spend, and the three states stay DISTINCT —
+  // not enabled, enabled-but-everything-failed, and graded — because collapsing them into one
+  // boolean is how "the score is still null" becomes un-diagnosable again.
+  const src = readFileSync(new URL('../src/functions/tests/appPackets.ts', import.meta.url), 'utf8')
+  assert.match(src, /review: \{ enabled: reviewerOn, artifacts: reviewed \}/,
+    'the build response must say whether the reviewer ran and on what')
+  assert.match(src, /const reviewed: string\[\] = \[\]/, 'and it must be populated from real calls')
+})
+
+test('H:reviewer-setting-joins-the-existing-family: no second settings surface', () => {
+  // "Extend, don't duplicate". The chk_* family already has a column set, a reader, a whitelisted
+  // writer and a Settings screen; a new toggle that invented any of those would be the parallel
+  // system this repo has been bitten by before. The writer whitelist is DERIVED from the ensure
+  // statement, so being in that statement is what makes the knob writable — no list to update.
+  const prefs = readFileSync(new URL('../src/functions/tests/checkPrefs.ts', import.meta.url), 'utf8')
+  assert.match(prefs, /chk_reviewer_auto/, 'the setting must live in the chk_* family')
+  const sel = prefs.slice(prefs.indexOf('chk_coverage_judge, chk_coverage_judge_max'))
+  assert.match(sel.slice(0, 300), /chk_reviewer_auto/,
+    'the column must be in the SELECT too — a column the loader does not project is unreadable, ' +
+    'which is the exact shape H:every-chk-column-is-selected was written for')
 })
