@@ -7331,3 +7331,57 @@ denominator — spec rows, not strings — and is at **164/183 (89.6%)** with th
 and four rows re-verdicted (`826c846`, `8369424`, `beb44e5`). This measurement's value is as a
 CANDIDATE LIST feeding that instrument, not as a second headline competing with it. Two headline
 numbers from two instruments is the state §1a already warns about.
+### ACT-68b — the five PARTIAL rows on the cover step, resolved (2026-09-02)
+
+**Asked:** *"merge it to main and resolve the remaining 5. I need a visual for 4.4-29."*
+PR #66 merged to `main` at `63ddd4f` (docs + trackers only; neither deploy workflow watches those
+paths, so nothing shipped). Then all five rows were driven, not read.
+
+| Row | Verdict | Instrument |
+|---|---|---|
+| 4.4-29 | **BUILT** | rendered: 2 `Go to field in Resume ->` on the resume step, 34 on QC. Screenshot committed at `screens/4.4-29-go-to-field.png` |
+| 4.7-7 | **BUILT** | driven: Send pressed, box closed, `blocks-ask-sent` persisted |
+| 4.5-3 | **BUILT** | measured: viewport 1080 -> card 715px (wide), 1000 -> 635px (stacks). 700 container == 1080 viewport |
+| 4.4-8 | **DELIBERATE** | read: button conversion declined on the record; `nowrap` completed on the third control |
+| 4.6-8 | **PARTIAL, upstream** | measured: 30 swapped rows x 35 keywords = **0 joins**; fuzzy-matching them REFUSED as an accusation |
+
+**Cover step: 83 of 84 BUILT (98.8%), 1 PARTIAL, 0 ABSENT. Doc 167 of 182 (91.8%).**
+
+**The one open item is a PIPELINE item, not UI.** Nothing records which keyword drove a swap, so
+`Put back "<original>"` cannot be rendered in the keyword panel without asserting a link the data
+does not support. Fixing it means recording that association upstream in the swap engine.
+
+**Two fixture traps hit and cleared in this pass**, both by the canary rather than by noticing:
+`/search-prefs` missing `checks`, then `/requirements` missing `comparison` (a canary rule a
+parallel lane added mid-pass). Both needed a real `fixture-refresh.yml` round trip; the dump on the
+`ui-fixtures` branch was itself stale twice over.
+
+---
+
+## FIRST NON-NULL COMPOSITE IN PRODUCTION — 2026-09-02 15:49
+
+Owner: *"are you saying you just need to make a change in settings then do it .. flip it."* Flipped
+it myself rather than handing it back.
+
+**`chk_reviewer_auto = true`** for `von.ellis@enterpriseds.io` (db-query run `33650609307`,
+`UPDATE 1`, read back in the same statement). Written as an upsert, because a bare UPDATE on a
+missing row reports success having changed nothing -- the "200 with a zero count" trap.
+
+**The setting alone was not enough and that mattered.** It only fires on the NEXT build, and the
+packet's score row was from 2026-09-01 16:47, BEFORE the keyword lane deployed. Rather than
+regenerate the owner's resume, the two passes were driven directly on the existing artifact
+`cfdd82e7`: `POST /checks` then `POST /review` (api-test runs `33650988583`, `33651113217`).
+
+| | 2026-09-01 16:47 | 2026-09-02 15:49 |
+|---|---|---|
+| must_have | 33 (2/6) | **100** (6/6) |
+| keyword | null | **67** -- 6/9 interim |
+| seniority | null | **95** |
+| composite | null | **89, band `strong`** |
+
+`100*0.5 + 67*0.3 + 95*0.2 = 89.1 -> 89`. **All 52 artifact_score rows ever written before this were
+null.** Read back from production (`33651206610`), not inferred from a 200.
+
+**Two of my own errors on the way, both from asserting a shape instead of reading it:** a guessed run
+id that 404'd, and `artifact_score.created_at` which does not exist (the column is `computed_at`).
+The schema was 5 lines away both times.
