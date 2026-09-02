@@ -7215,3 +7215,34 @@ reclassified DELIBERATE to flatter the count.
 **Ten guards this lane, every one mutation-proved FIRED.** One NOT-APPLIED (wrong anchor indent) and
 one false INERT (I piped the test command through `grep -q`, so the must-fail pattern could never
 match) -- both my harness errors, both caught by the harness reporting honestly rather than guessing.
+
+### ACT-2026-09-02-e — the fixture now carries `comparison`, and the jd step was RE-MEASURED
+
+Owner: *"fix the fixture builder to carry comparison, then re-measure."* Done, TIER 1, ACs first
+(`docs/qc-evidence/AC-fixture-comparison.md`), findings in `PROTOTYPE-COVERAGE.md` §17.
+
+**The AC pass rejected my plan and was right.** I would have extended the builder; the hole was
+UPSTREAM of it (`comparison_dimension` appears 0 times in `fixture-refresh.yml`), and re-deriving
+`summary`/`set`/`stale` in JS would have been a second dimension brain whose drift renders as app
+gaps — a fixture that measures itself. The runner captures the real route instead; zero derivation.
+
+**Result: 27 → 16 panels, 3 → 2 controls, bodyLen 10,146 → 16,196, with NO app code changed.**
+Eleven "gaps" were the instrument. All 16 remaining classify as rename / deliberate / demo value, so
+the step still has **zero confirmed gaps** — and the comparison surface is now MEASURED, not assumed.
+
+**Two of my own defects caught in flight, both worth keeping:**
+1. My first `H:canary-refuses-a-hollow-comparison` **re-implemented the predicate inline**, so it
+   graded a copy and would have passed with the guard reverted — an inert guard committed inside a
+   guard against inert guards. Rewritten to exercise the shipped canary in a child process; the
+   mutation then FIRED.
+2. The AC pass judged my earlier `!!comparison` canary too weak: an unresolved opportunity returns a
+   REAL body that passes it while nothing renders. Strengthened to `resolved===true` + non-empty
+   `dimensions` + numeric `summary.graded` + non-empty `set.keys`.
+
+**AC-12, honestly:** the gate it named has cleared (`total` present, the "unknown - not zero" branch
+gone). The three per-kind labels did not render for this asset, which `assetBlocks.js:923` documents
+as legitimate — *"a kind the posting does not use is not a 0/0 stat"* — not a regression.
+
+**Recorded because it favours the app:** the rendered comparison distinguishes `Nothing found`
+(asked, unevidenced) from `Not compared` (never asked). The prototype has ONE label for both. That is
+this repo's "absent evidence is `not_applicable`, never a shortfall" rule, which the prototype breaks.

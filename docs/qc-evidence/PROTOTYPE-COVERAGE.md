@@ -970,3 +970,59 @@ deficit will keep proposing that the product be made worse.
 
 **Open follow-up (named, not done):** extend `fixture-refresh.yml`'s dump and `build-fixtures.mjs`
 to carry `comparison`, then re-run this measurement. Until then the harness refuses, by design.
+
+
+---
+
+## 17. RE-MEASURED after the fixture was fixed — 2026-09-02
+
+§16a said the comparison surface **could not be judged** and must not be scored until the fixture
+carried it. It now does (`fixture-refresh.yml` captures the real `/requirements` body; the builder
+passes it through verbatim). This is the re-measurement that section demanded.
+
+### 17a. The numbers
+
+| | before | after |
+|---|---:|---:|
+| panels only in prototype | 27 | **16** |
+| controls only in prototype | 3 | **2** |
+| app `bodyLen` | 10,146 | **16,196** |
+
+**Eleven rows recovered by fixing the instrument alone.** No app code changed between the two runs.
+
+Reproducible: `git show origin/ui-fixtures:raw-dump.json > /tmp/r.json && node scripts/build-fixtures.mjs
+--raw /tmp/r.json --opp 2cb56fb3-… --out /tmp/f.json && cmp /tmp/f.json docs/qc-evidence/fixtures.json`
+→ **exit 0** (AC-6). The captured body: `comparison.resolved true`, **8 dimensions, 4 graded**,
+`set.keys 8`, `total 35`, `located 33`.
+
+### 17b. The remaining 16 + 2, classified — still ZERO confirmed gaps
+
+| Prototype-only row | Classification |
+|---|---|
+| `Posting vs your profile` · `Run again` · `Re-parse JD` · `JD analysis` · `Extracted from this posting` · `Cycle time, regulated` | **Renames.** The app renders `This posting, against your profile`, `Run analysis`, `Parse posting`, `Posting analysis`, `Posting analysis - the source`, `Cycle time` — all confirmed in the app-side output of the same run. |
+| `Must-have requirements` · `Nice-to-have requirements` · `ATS keywords` · `No evidence` · `Moderate match` · `12/13` | **DELIBERATE** (§16b). The prototype's cards count requirement KINDS; the app grades role DIMENSIONS and refuses to mint a fourth coverage number. Its own vocabulary — `Nothing found`, `Not compared`, `no evidence found` — appears in the app-only list. |
+| `M1–M5` · `D1–D4` · `N1–N3` · `fail` | **DELIBERATE** (§16c). The `RQ-MH`/`RQ-NTH`/`RESP` scheme and the refusal to print an unmeasured composite. |
+| `from email` | **BUILT**, gated on `opp.source`; this opportunity has none. |
+| `SafetyIQ · Head of Engineering` | A prototype **demo value**, not a component — excluded from the denominator by §0. |
+
+### 17c. What the rendered comparison actually shows — the app is AHEAD here too
+
+The surface that had never been seen is not a catch-up of the prototype; it is a stronger instrument:
+
+- **Eight dimension cards**, against the prototype's four kind-cards.
+- A stated denominator and provenance: *"4 of 8 dimension(s) compared"*, *"Seeded dimension set for
+  default - you have not changed it yet."*
+- A summary that refuses to average away an absence: *"1 strong · 0 moderate · 3 weak · 4 not
+  compared (Budget owned, Compliance ownership, Cycle time, Public sector), **not counted either
+  way**"*.
+- **`Nothing found` and `Not compared` are DIFFERENT STATES.** The posting asked and nothing
+  evidenced it, versus the posting never asked. The prototype has one label, `No evidence`, for
+  both — which is precisely the "absent evidence is `not_applicable`, never a shortfall" rule this
+  repo enforces, and the prototype does not.
+- Each unevidenced row cites the specific posting lines it wanted (`#0`, `#17`, `#12`, `#24`).
+
+### 17d. Verdict
+
+**`jd` step: zero confirmed prototype-side gaps, with the comparison surface now measured rather
+than assumed.** The `266% · 27 · 3` row in §1a is retracted in full: 11 of those panels were the
+instrument, and every one of the remaining 16 is a rename, a recorded decision, or a demo value.
