@@ -521,6 +521,41 @@ Key tables (PostgreSQL):
 
 ## Active work
 
+**RENDER PASS 2026-09-02 - SS4.8 QC + SS4.10 Review & send SEEN ON SCREEN; parity 161/183 (88.0%).**
+
+Closed `PROTOTYPE-COVERAGE.md` SS15's own limit 2 (*"a component can be built and never reach the
+screen for want of a mount... these need `ui-verify.yml` against the live app"*), which had stood
+since 2026-08-25 with *"no live UI was verified, nothing was run."* Both steps rendered LIVE
+(`ui-verify` runs 33642950751 / 33643149667) plus all five QC tabs locally. Evidence committed as
+`docs/qc-evidence/screens/render-0902-*.png`; findings in SS16.
+
+- **Two per-section tallies were stale and one CONTRADICTED ITS OWN TABLE.** SS4.10 read *"2 BUILT
+  (25%) ... the weakest section in the spec"* while all 8 of its rows already carried BUILT with a
+  `file:line`, and SS13a had recorded `dd4f61c` taking it to 100%. SS4.8 read `BUILT 14 / ABSENT 2`
+  for a section with 0 ABSENT. Both replaced with a mechanical recount (SS4.8 18/22 = 82%,
+  SS4.10 8/8 = 100%).
+- **4.8-20 `Undo this` PARTIAL -> BUILT by render** - it ships (`QcRail.jsx:382-386`, `swapUndo`)
+  and renders paired with `Ask why`; `kept` rows correctly show `Ask why` alone. Fourth row in that
+  doc to close by re-reading rather than rebuilding.
+- **The live app is AHEAD of the prototype in three places**: four numbers instead of two on the QC
+  header, `what we saw` / `what it should be` on every decision row with per-offender
+  `go to the draft ->`, and a named first-fix deep link on each send row. The missing per-asset
+  MATCH score is the *never fabricate a composite* rule, not a gap.
+
+**HARDENING - a fixture that is not RUN-SCOPED reads as a product defect, and nearly was reported
+as one.** `fixture-refresh.yml:74-76` selects `from check_result where artifact_id in (...)` with
+**no `run_id` predicate**; the live route (`appChecks.ts`) uses `where artifact_id=$1 and
+run_id=$2` off `artifact_gate`. So the fixture carries every historical run - 246 rows / 26
+distinct `check_key` on the resume, `skill_char_limit` x14 - and the locally-rendered Checks tab
+repeats each rule. I had drafted that as an app defect ("the Checks tab renders every loop flat")
+before reading the two queries. **The committed `app-send.png` reads `112 items to fix`; live reads
+`14`** - the 112 was never the product. Root cause: the instrument answers a different question
+than production. Guard: the fixture SQL must carry the live route's `run_id` predicate; until it
+does, COUNTS off a local fixture render are unusable and only STRUCTURE is citable - now stated in
+`screens/INDEX.md` and SS16d. The app already detects it, printing *"the server counted 7
+finding(s) needing attention but sent 54 such row(s)"*.
+
+
 **SESSION SETUP, 2026-08-29 — eds-claude-skills `setup.sh` v19 applied live; parallel-session lane.**
 
 Ran `setup.sh` from `/home/user/eds-claude-skills` (`HEAD cbf8f7b` = `origin/main`, in sync).

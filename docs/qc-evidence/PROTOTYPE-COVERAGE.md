@@ -412,15 +412,17 @@ Against the 9 non-deferred rows: **7 BUILT (78%), 8 present in some form (89%).*
 | 4.8-17 | Swaps: covering keyword | `evidence.jsx` | DELIBERATE | Same library decision. |
 | 4.8-18 | Swaps: verbatim posting quote | `evidence.jsx` | BUILT | `CompareTab` renders the stored quote column; `qcRail.js:324` guards it — *"a quote gets read as evidence"* — with a test greping for the column name. |
 | 4.8-19 | Swaps: the reason | `evidence.jsx` | BUILT | Same table (`rationale`). |
-| 4.8-20 | Swaps: `Undo this` | `evidence.jsx:232` | PARTIAL | Correction undo exists (`QcRail.jsx:578-579`); a per-**swap** undo on this tab does not. |
+| 4.8-20 | Swaps: `Undo this` | `evidence.jsx:232` | **BUILT — CHANGED from PARTIAL 2026-09-02, by RENDER** | **Seen on screen**, not inferred: `shots/tab-compare.png` shows an `Undo this` button on every `swapped` / `dropped` / `added` row of the `Original vs final` tab, beside `Ask why`. Source: `QcRail.jsx:382-386` renders a real `<button data-qc={QC_HOOKS.undoSwap}>`, fed by `swapUndo(s, owners)` at `:360` (contract `qcRail.js:833-864`). The old PARTIAL read *"a per-swap undo on this tab does not [exist]"* and was already contradicted by commits `9002e3d` / `a86e8be`. **The `kept` rows correctly show `Ask why` ALONE** — `swapUndo` returns null when nothing was changed to undo, which is the no-dead-UI rule holding, not a missing control. |
 | 4.8-21 | Swaps: `Ask why` | `evidence.jsx:233` | **BUILT — CHANGED from ABSENT 2026-08-29** | Last column of `CompareTab`; the sentence, the artifact binding and every reason it is absent are `swapAskWhy` (`qcRail.js`). **It is a §4.11 substitution, per `AC-packet-ui-final.md` §2f/AC 34, and stays inside that AC's limits:** it seeds the assistant panel and sends nothing, no swap-revert mutation was built (there is none — `appSwaps.ts` is GET-only, which is why the prototype's `Undo this` does NOT ship beside it), and the `Why` column still prints the answer it always printed. **It is NOT the one-liner §14 called it:** the prototype interpolates `${r.list}`, which here is a CHECK-constrained enum (`skills_1`), so the list is resolved through `insertion.merge_field` → `FIELD_LABEL` to read "Skills 1". Guarded by `H:ask-why-never-names-the-raw-list-enum`, `H:ask-why-is-null-unless-it-has-an-artifact-to-be-about`, `H:ask-why-seeds-the-panel-and-sends-nothing`. |
 | 4.8-22 | Tab: **Passes** — what each loop closed / what remained / where it halted | `evidence.jsx:247-264` | BUILT | `LoopsTab` `QcRail.jsx:356-399` |
 | 4.8-23 | Tab: **Checks** — grouped by name, observed vs target, named offenders | `evidence.jsx:266-289` | BUILT | `ChecksTab` `QcRail.jsx:400-439`; `CheckRow` `:182-239`; offenders `AssetGateDrawer.jsx:93-100`. |
 | 4.8-24 | Tab: **Review** — blind second model: grade, agreement, prompt version, citations, critique | `evidence.jsx:291-334` | BUILT | `ReviewTab` `QcRail.jsx:440-480` |
 | 4.8-25 | A picked requirement filters the other tabs | `evidence.jsx:378` | BUILT | `QcRail.jsx:820-830` — `filtered to #{seq}` + a `clear` affordance, keyboard-reachable. |
 
-**§4.8 tally — 25 rows:** BUILT **14** · PARTIAL **5** · ABSENT **2** · DELIBERATE **4**.
-Against the 21 non-deferred rows: **14 BUILT (67%), 19 present in some form (90%).**
+**§4.8 tally — 25 rows (RE-COUNTED 2026-09-02, mechanically, after the render pass):** BUILT **18** · PARTIAL **4** · ABSENT **0** · DELIBERATE **3**.
+Against the 22 non-deferred rows: **18 BUILT (82%), 22 present in some form (100%).**
+
+> **The previous line read `BUILT 14 · PARTIAL 5 · ABSENT 2 · DELIBERATE 4 / 14 BUILT (67%), 19 present (90%)` and was wrong on every > number** — it was the 2026-08-25 hand count and never moved when the rows beneath it did. It is not a rounding drift: it still carried > **2 ABSENT** for a section whose table now has none (4.8-21 `Ask why` shipped `3a9f28e`, 4.8-20 `Undo this` shipped and is re-verdicted > above). Counted by the same mechanical method §13-CURRENT uses — 4th cell of each `| 4.8-n |` row, earliest verdict token — so the two > agree by construction rather than by hand.
 
 ---
 
@@ -468,10 +470,9 @@ Against the 13 non-deferred rows: **12 BUILT (92%), 13 present in some form (100
 | 4.10-7 | Failing row: `Open field →` | `packet.jsx:465` | BUILT | `PacketBuilder.jsx:962` `data-qc="send-open-field"`, wired to the existing `goToField` — not a new navigator. |
 | 4.10-8 | `Nothing blocks sending` when the list empties | `packet.jsx:445-448` | BUILT | `PacketBuilder.jsx:944` prints "Nothing blocks sending." off the SAME `packetFailList()` count that drives the rows, so the empty state cannot disagree with the list. |
 
-**§4.10 tally — 8 rows:** BUILT **2** · PARTIAL **2** · ABSENT **4** · DELIBERATE **0**.
-**2 BUILT (25%), 4 present in some form (50%). This is the weakest section in the spec**, and
-notably the cheapest to close — every input (`qcEntries`, `GateBadge`, `packetReadiness`,
-`onGoToField`) is already imported into the very file that renders it.
+**§4.10 tally — 8 rows (RE-COUNTED 2026-09-02, and CONFIRMED BY RENDER):** BUILT **8** · PARTIAL **0** · ABSENT **0** · DELIBERATE **0**. **8 BUILT (100%).**
+
+> **The previous line read `BUILT 2 · PARTIAL 2 · ABSENT 4 ... 2 BUILT (25%). This is the weakest section in the spec.` That was stale, and > it contradicted the table directly above it** — all eight rows already carried a BUILT verdict with a `file:line`, and §13a had already > recorded that `dd4f61c` *"closed §4.10 Review & send (six rows) taking that section 25% -> 100%"*. A reader reaching this section first > would have been told the best-covered section in the spec was the worst. **Every row is now also confirmed on screen** — see §16.
 
 ---
 
@@ -547,14 +548,20 @@ already made once.
 > regarding prototype UI parity progress."* Read §13-CURRENT for the live picture; §13a below is
 > the 2026-08-25 measurement, kept for its delta narrative and NOT current.
 
-> # **160 of 183 prototype elements present (87.4%)**
+> # **161 of 183 prototype elements present (88.0%)**
 >
 > | | Count | Share of 183 |
 > |---|---:|---:|
-> | **BUILT** | **160** | **87.4%** |
-> | **PARTIAL** | 22 | 12.0% |
+> | **BUILT** | **161** | **88.0%** |
+> | **PARTIAL** | 21 | 11.5% |
 > | **ABSENT** | **1** | **0.5%** |
 > | *present (BUILT + PARTIAL)* | *182* | *99.5%* |
+>
+> **+1 on 2026-09-02 from the RENDER pass (§16), not from new code.** `4.8-20` (`Undo this` on a
+> swap row) was carrying PARTIAL on the claim that a per-swap undo "does not [exist]" — it renders,
+> and `QcRail.jsx:382-386` ships it. That is the fourth row in this document to close by being
+> re-read rather than rebuilt, which is the pattern §14 keeps recording: **the rank goes stale
+> faster than the code does.**
 >
 > **+11 BUILT since the 148 (80.9%) headline in §13a**, which was measured 2026-08-25 and never
 > caught up with the rows that shipped after it.
@@ -852,10 +859,127 @@ inputs={ "route": "#/packet/<id>", "owner": "von.ellis@enterpriseds.io",
   on, 17 rows re-enter the denominator as work, and the headline falls to about **63%** until they
   are built.
 
-**What was NOT done:** no workflow was dispatched, no live UI was verified, nothing was run. This
-is a source measurement, honestly labelled as one.
+**What was NOT done ~~at the time this section was written~~ — SUPERSEDED 2026-09-02 for §4.8 and
+§4.10 ONLY.** The sentence below was true of the 2026-08-25 pass and stayed true for a week. It is
+now false for the QC step and Review & send, which were rendered against the LIVE app and against a
+run-scoped fixture on 2026-09-02 — **see §16**. It remains TRUE and unretracted for every other
+section, and limit **1** (a component built but starved of data) is untouched everywhere.
+
+> ~~no workflow was dispatched, no live UI was verified, nothing was run. This is a source
+> measurement, honestly labelled as one.~~
 
 ---
 
 *Measurement only. Nothing under `app/src` or `api/src` was read-modified; this file is the only
 one written. No fix was applied to anything reported here.*
+
+
+---
+
+## 16. RENDER PASS — §4.8 and §4.10 seen on screen (2026-09-02)
+
+**This section exists because §15 limit 2 said it had to.** That limit reads: *"A component can be
+built and never reach the screen for want of a mount... These need `ui-verify.yml` against the live
+app."* Every verdict below was produced by looking at a rendered page, then reconciled against
+source — never by source alone.
+
+### 16a. What was rendered, and by which instrument
+
+| Shot | Instrument | Data | Route |
+|---|---|---|---|
+| `screens/render-0902-live-qc.png` | `ui-verify.yml` run **33642950751** | **LIVE production** | `#/packet/9f9c370a…/qc` |
+| `screens/render-0902-live-send.png` | `ui-verify.yml` run **33643149667** | **LIVE production** | `#/packet/9f9c370a…/send` |
+| `screens/render-0902-tab-{coverage,compare,loops,checks,review}.png` | `scripts/render-app.mjs` | fixture from `fixture-refresh.yml` run **33642945263** | `…/qc` + `--click [data-qc-tab=…]` |
+
+Packet `85cee965-f435-4b8e-910f-c806232092ce` (Trinnex · Director of Digital Technology Operations
+& Innovation), 924px wide to match the prototype captures. All five tab clicks returned
+`pageErrors: []`.
+
+### 16b. §4.10 Review & send — CONFIRMED ON SCREEN, 8/8
+
+`render-0902-live-send.png` against prototype `37-review-and-send.png` + `38-review-send-gate-list.png`:
+
+| Row | Prototype | Live app | Verdict |
+|---|---|---|---|
+| 4.10-1 per-asset list | 5 rows | 5 rows (Resume, Compact resume, Cover letter, Portfolio one-pager, Intro video) | **rendered** |
+| 4.10-2 gate badge | `GATE` chip | `Blocked` / `Not checked` per row | **rendered** |
+| 4.10-3 status pill | `review` / `approved` / `todo` | `review` / `todo` | **rendered** |
+| 4.10-4 gate card | `1 item to fix across 1 asset` | `14 items to fix across 5 assets` | **rendered** |
+| 4.10-5 lock sentence | verbatim | verbatim | **rendered** |
+| 4.10-6 one row per item | 1 row | 14 rows | **rendered** |
+| 4.10-7 `Open field →` | on the row | **on 4 of 14 rows** | **rendered — see 16d** |
+| 4.10-8 empty state | — | not exercised (this packet is blocked) | source-only |
+
+**Two divergences, both deliberate and neither work left to do:**
+
+1. **No per-asset MATCH score.** The prototype pills read `97 · 3 to review`; the app prints
+   `Blocked · 6 to fix` and no number. That is the *"never fabricate a composite"* rule
+   (`.claude/memory.md`, `qcRail.js` `railHeadline`) — the live header states it outright: *"Resume
+   only — there is no packet-wide score, and averaging the assets would invent one."* Scoring this
+   as a gap would be scoring honesty as a defect.
+2. **The app adds a first-fix deep link the prototype has no counterpart for** — each asset row
+   carries `Every change cites the posting →`, naming the specific blocking check. Ahead of spec.
+
+**One real, small divergence:** the prototype's fail row is *rule title* + *named offenders*
+(`Every library keyword lands in a field` / `FedRAMP — open · Roadmap Alignment — cut for length`).
+The app's row is the *observed measurement* (`3 of 12 changes cite nothing`). The named offenders
+DO render — but on the QC step's `Needs a decision` list, not here. Relocated, not missing.
+
+### 16c. §4.8 QC & evidence — CONFIRMED ON SCREEN
+
+All five tabs render (`Coverage · Original vs final · Remediation loops · Checks · Independent
+review`); the strip is unconditional at `QcRail.jsx:961-978`.
+
+| Row | Seen |
+|---|---|
+| 4.8-1 / 4.8-2 composite + must-have coverage | **PROSE, deliberately, not a number** — *"No overall number: a composite is only computed when all three parts exist, and 2 of them do not."* `Must-haves evidenced 33` renders with a bar; `Keywords present`/`Seniority fit` read `not measured` with a reason each. PARTIAL is the correct verdict and the reason is a recorded decision, not a gap. |
+| 4.8-4 the numbers | **four**, not the prototype's two: `21 to fix · 0 to review · 1 never checked · 0 corrected for you`, with an explainer. Ahead of spec. |
+| 4.8-5 per-asset gate chips | all 5 assets, gate + `n to fix` + `n counted` |
+| 4.8-6 `Done for you` | on the page, per asset, with a real empty state per asset |
+| 4.8-10 `Needs a decision` | on the page, richer than the prototype: bold rule title, count, `Fix before approval` / `Review` pill, **`what we saw:` / `what it should be:`**, and named offenders each carrying `go to the draft →` |
+| 4.8-14 Coverage tab | `Requirements · must have 7/7`, `nice to have — not measured` (with the reason), `Responsibilities 11/11` |
+| 4.8-16/-18/-19 Swaps tab | `Original / Final / What happened / Why`, `swapped·dropped·kept·added`, verbatim posting quote, and `no line of the posting backs this change` where there is none |
+| 4.8-20 / 4.8-21 | **`Undo this` and `Ask why` both render**, paired, in the last column |
+| 4.8-22 Passes tab | renders; **the loop DETAIL is unexercised** — no asset in this packet has had a second pass, so it correctly prints *"generated once and never revisited"* rather than inventing a loop history. Structure confirmed, "what closed / where it halted" not exercised by this data. |
+| 4.8-23 Checks tab | grouped by rule, `what we saw` / `what it should be`, offenders named with their measured values |
+| 4.8-24 Review tab | all five prototype sub-parts render: prompt source (`reviewer_system v1 from the Prompts table`), grade, coverage agreement (`1 agreed, 4 disagreed (1 stricter, 3 looser); 5 not comparable`), citations (`4 of 7 citations did not verify`), critique — plus an honest *"has not run for this asset"* per unreviewed asset |
+
+### 16d. A DEFECT IN THE MEASURING INSTRUMENT, not in the app — `fixture-refresh.yml` pulls every run
+
+**This nearly became a false defect report and is recorded so it cannot become one again.** The
+locally-rendered `Checks` tab shows `Skill lines fit the template` **twice, byte-identical**, and
+`Relevant-experience lines fit` twice. That is not what the app does.
+
+**Ground truth, from the two queries rather than from the pictures:**
+
+- the live route filters to one run — `appChecks.ts`: ``select * from check_result where
+  artifact_id=$1 and run_id=$2``, where `run_id` comes from `artifact_gate`;
+- `fixture-refresh.yml:74-76` has **no `run_id` predicate** — ``from check_result cr where
+  cr.artifact_id in (...)`` — so it returns the artifact's whole history.
+
+Measured in the dump: the resume artifact carries **246 rows across 26 distinct `check_key`** —
+`skill_char_limit` appears **14 times**, one per historical run. The live QC and send pages, which
+went through the real route, show each check **once**.
+
+**Consequences, both worth keeping:**
+
+1. **`screens/app-send.png` (2026-08-29) reads `112 items to fix across 5 assets`. The live number
+   is `14`.** The 112 was never the product — it was the unfiltered fixture. Any parity read taken
+   off the committed `app-*.png` captures inherits this.
+2. **The app already catches it.** The rail prints *"the server counted 7 finding(s) needing
+   attention but sent 54 such row(s)"* — a contradiction notice firing on an over-supplied payload,
+   which is the harness being wrong loudly instead of the app rendering it silently.
+
+**Recommended fix (NOT applied here — this document does not modify code):** give
+`fixture-refresh.yml` the same `run_id` predicate the live route uses, joined through
+`artifact_gate`, so the fixture and production answer the same question. Until then, treat row
+COUNTS from a local fixture render as unusable and its STRUCTURE as sound — the same warning
+`screens/INDEX.md` already carries.
+
+### 16e. What this pass did NOT settle
+
+- **4.10-8** (`Nothing blocks sending.`) — needs a packet whose gate passes; this one is blocked.
+- **4.8-22** loop detail — needs a packet that has been through a second remediation pass.
+- **4.8-25** (a picked requirement filters the other tabs) — not exercised; no requirement was
+  clicked in this pass.
+- Every section other than §4.8 and §4.10 is **still source-only**, exactly as §15 says.

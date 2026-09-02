@@ -7129,3 +7129,34 @@ changed it" — a trap for whoever fixes this next.
 **Not started: the fix.** Making `origin` truthful needs a fourth enum value (the CHECK admits only
 `profile_original`/`pass_a`/`pass_b`), `call2` threaded into `buildSwaps`, and its consumers moved —
 a schema migration across several files. Owner's call, not taken unilaterally.
+
+---
+
+## ACT-69 — Render the QC + Review & send pages against the prototype, and update PROTOTYPE-COVERAGE.md
+
+**Asked (2026-09-02):** *"render the current QC and f review page in the packets module vs the
+screenshot we took of the prototype and determine our progress on UI look and function parity. the
+PROTOTYPE-COVERAGE.md file is likely stale but you can use that as well to support. update it with
+your findings and be sure to lean on render as well as reading the code as equal if not more
+importance. We have disproven and improved several things so rollback isn't necessary if the
+difference is purposeful and not work left to be done."*
+
+**Status: DONE.** `PROTOTYPE-COVERAGE.md` §16 added, two stale tallies replaced, one row re-verdicted,
+headline 160 → **161 of 183 (88.0%)**. Seven render PNGs committed.
+
+| Finding | Evidence |
+|---|---|
+| §4.10 tally contradicted its own table — *"2 BUILT (25%), the weakest section"* vs 8/8 BUILT rows | mechanical recount + `render-0902-live-send.png` |
+| §4.8 tally stale — read `BUILT 14 / ABSENT 2` for a section with 0 ABSENT | mechanical recount → 18/22 (82%) |
+| 4.8-20 `Undo this` PARTIAL → BUILT | `render-0902-tab-compare.png` + `QcRail.jsx:382-386` |
+| All 5 QC tabs render, `pageErrors: []` on every click | `render-0902-tab-*.png` |
+| §4.10 8/8 confirmed ON SCREEN incl. `Open field →` | `ui-verify` run 33643149667 |
+| **Fixture is not run-scoped** — `fixture-refresh.yml` lacks the live route's `run_id` predicate | 246 rows / 26 check_key; `app-send.png` 112 vs live 14 |
+
+**Deliberate divergences confirmed, NOT logged as gaps** (per the owner's "rollback isn't necessary
+if the difference is purposeful"): no per-asset MATCH score (never-fabricate-a-composite), no
+keyword tally on coverage rows (term-library decision), fail rows show the observed measurement
+while named offenders render on the QC step instead.
+
+**OPEN, one item, not applied here:** give `fixture-refresh.yml` the `run_id` predicate. Filed in
+§16d with the recommended shape. This ACT changed no `app/` or `api/` source.

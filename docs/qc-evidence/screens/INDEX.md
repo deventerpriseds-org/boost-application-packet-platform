@@ -118,3 +118,22 @@ at 19x the prototype is an outlier that still wants explaining, not a score.
 
 Regenerate with `/tmp/render-all.mjs <oppId> <route-keyed fixtures>`; see `LOCAL-RENDER-UAT.md` for
 the fixture requirements, and note `build-fixtures.mjs` must be run on a raw dump first.
+
+## Render pass 2026-09-02 — §4.8 / §4.10 parity (see PROTOTYPE-COVERAGE.md §16)
+
+| File | Instrument | Data | Shows |
+|---|---|---|---|
+| render-0902-live-qc.png | `ui-verify.yml` run 33642950751 | **LIVE production** | QC step: gate, four numbers, per-asset chips, Done for you, Needs a decision |
+| render-0902-live-send.png | `ui-verify.yml` run 33643149667 | **LIVE production** | Review & send: 5 asset rows, gate card `14 items to fix across 5 assets`, `Open field →` on 4 rows |
+| render-0902-tab-coverage.png | `render-app.mjs` | fixture (run 33642945263) | Coverage tab: must-have 7/7, nice-to-have `not measured`, Responsibilities 11/11 |
+| render-0902-tab-compare.png | `render-app.mjs` | fixture | Original vs final: `Undo this` + `Ask why` paired in the last column |
+| render-0902-tab-checks.png | `render-app.mjs` | fixture | Checks tab grouped by rule with named offenders |
+| render-0902-tab-review.png | `render-app.mjs` | fixture | Independent review: prompt source, grade, agreement, citations, critique |
+| render-0902-tab-loops.png | `render-app.mjs` | fixture | Remediation loops: honest "generated once and never revisited" |
+
+**COUNTS OFF THE FIXTURE SHOTS ARE UNUSABLE — structure only.** `fixture-refresh.yml` has no
+`run_id` predicate while the live route does, so the fixture carries every historical check run
+(246 rows / 26 distinct `check_key` on the resume). That is why the fixture `Checks` tab repeats a
+rule and why the older `app-send.png` reads `112 items` where live reads `14`. PROTOTYPE-COVERAGE.md
+§16d has the evidence and the fix. The two `render-0902-live-*.png` shots went through the real
+route and do not have this problem.
