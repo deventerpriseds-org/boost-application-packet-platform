@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react'
+import { SHELL_CAP } from './assistantPanel.js'
 import { createPortal } from 'react-dom'
 import { useApp, useRoute, go, useIsMobile } from './state.jsx'
 import { overlayVariant, FOCUSABLE_SELECTOR, wrapFocusIndex, routeKeyOf, hasNavigated } from './overlay.js'
@@ -460,7 +461,7 @@ export function DesktopShell({ children, title }) {
         {/* `ee-scrollpane` marks the element that actually scrolls (body is overflow:hidden), so
             Overlay can freeze the page behind it and restore the position on close. */}
         <div className="px-fade ee-scrollpane" key={active} style={{ flex: 1, overflow: 'auto', padding: mobile ? 14 : 24 }}>
-          <div style={{ maxWidth: 1280, margin: '0 auto' }}>{children}</div>
+          <div style={{ maxWidth: SHELL_CAP, margin: '0 auto' }}>{children}</div>
         </div>
       </div>
       {mobile && <BottomNav />}

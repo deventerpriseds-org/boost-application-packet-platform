@@ -1,32 +1,41 @@
 // SPEC 4.11 — the assistant panel's pure logic. The React component is screens/AssistantPanel.jsx,
 // per the same split assetBlocks.js / AssetBlocks.jsx and overlay.js / shell.jsx already use.
 //
-// WHY THIS PANEL FLOATS AND DOES NOT DOCK, recorded here because the next person to read SPEC 4.11
-// will find a docked right column drawn in the prototype and wonder where it went.
+// THREE MODES, AND THE ARITHMETIC THAT PICKS THEM. Owner decision 2026-09-02, REVERSING the
+// 2026-08-27 float-everywhere call: *"on desktop wide the panel rather than float but you will need
+// a different approach of your choosing for mobile."*
 //
-// It is arithmetic, not preference. The prototype's shell caps content at 1560 (`qc/shell.jsx:96`);
-// this app's caps at 1280 (`shell.jsx:463`). Docking the prototype's 340px column leaves the packet
-// `1280 - 220 rail - 16 - 340 - 16 = 688px` against asset blocks that need ~850px — and because the
-// cap binds above ~1524px, NO viewport width passes. The 280px difference between the two shells is
-// exactly the right-hand column decision D4 deleted, so docking would rebuild what D4 removed.
-// The owner chose floating on 2026-08-27 after seeing the layouts drawn to scale; the alternative
-// (raise the shell cap, re-flowing every screen) is kept in `.claude/DEFERRED.md` rather than lost.
+// The old decision was not wrong when it was made -- it was arithmetic. This app's shell capped
+// content at 1280, so docking the prototype's 340px column left the packet
+// `1280 - 220 rail - 16 - 340 - 16 = 688px` against asset blocks needing ~850px, at EVERY width,
+// because the cap bound before any viewport got wide enough. **The owner has now raised the cap to
+// the prototype's own 1560 (`shell.jsx`), which is what changes the answer.** At 1560 the same sum
+// gives 968px and the blocks fit with room to spare.
 //
-// MOBILE IS WHY FLOATING IS RIGHT RATHER THAN MERELY ACCEPTABLE. `PacketBuilder.jsx` has a separate
-// `if (mobile)` branch: below 768px the step rail and the two-column layout do not render at all.
-// So no dock exists on a phone under any option, while `shell.jsx`'s `Overlay variant="drawer"`
-// already clamps itself to `min(680px, 100vw)` and already owns the overlay stack and
-// close-on-navigation. One component serves both sizes. A dock would have needed a second, driftable
-// mobile sheet.
+//   dock   -- viewport >= DOCK_MIN_VIEWPORT. A real third column, in flow, always visible.
+//   float  -- desktop below that. The drawer + fixed launcher, unchanged; it is still the only
+//             honest option when docking would squeeze the blocks under MIN_CONTENT.
+//   sheet  -- mobile. See below.
 //
-// THERE IS DELIBERATELY NO BREAKPOINT CONSTANT. AC-5 guards against standing up a second viewport
-// mechanism beside `keywordColumns`; since the panel floats at every width, a threshold would have
-// exactly one branch, and a rule with one outcome is config that cannot be wrong — which is worse
-// than no rule, because it looks like a decision.
+// MOBILE IS A BOTTOM SHEET, and that is a choice with a reason rather than a leftover. Below 768px
+// `PacketBuilder.jsx` takes a separate branch with no step rail and no columns, so there is no dock
+// to have. A fixed bottom-right launcher is wrong on a phone -- it sits under the thumb on exactly
+// the scroll axis the packet uses, and it overlaps the sticky step controls. The sheet enters from
+// the bottom edge, which is where a phone's reachable zone is, and it is the same `Overlay` the rest
+// of the app already stacks and closes on navigation. One component, three presentations, ONE body:
+// the panel's contents are built once in the component and placed by mode, so the modes cannot drift.
+//
+// THERE IS NOW A BREAKPOINT CONSTANT, and the previous version of this comment argued against one:
+// *"since the panel floats at every width, a threshold would have exactly one branch, and a rule
+// with one outcome is config that cannot be wrong."* That reasoning was correct FOR A ONE-BRANCH
+// WORLD and expired the moment docking became reachable. It is kept here because the rule it states
+// is still right and worth not re-learning: do not add a threshold until it has two real outcomes.
 
 export const ASSISTANT_HOOKS = {
   open: 'assistant-open',         // the affordance that opens it (carries data-qc-seeded)
-  panel: 'assistant-panel',       // the drawer body root (carries data-qc-mode)
+  panel: 'assistant-panel',       // the body root, in every mode (carries the REAL data-qc-mode)
+  dock: 'assistant-dock',         // the docked column wrapper -- present only when mode is 'dock',
+                                  // so its absence is how a verifier proves the app FLOATED
   scope: 'assistant-scope',       // what this request will touch, stated rather than selected
   box: 'assistant-box',           // the request textarea
   send: 'assistant-send',
@@ -115,4 +124,53 @@ export const ASSISTANT_LIMITS = [
  */
 export function canSend({ text, artifactId, busy } = {}) {
   return Boolean(artifactId) && !busy && String(text || '').trim().length > 0
+}
+
+/* ── SPEC 4.11-1 — WHERE THE PANEL SITS ──────────────────────────────────────────────────────── */
+
+/** The prototype's own shell cap (`qc/shell.jsx:96`), which this app now matches. */
+export const SHELL_CAP = 1560
+/** The prototype's right column. */
+export const DOCK_WIDTH = 340
+/** The step rail, and the two 16px gaps around the docked column. */
+export const NAV_WIDTH = 220
+export const GUTTER = 16
+/**
+ * What an asset block needs to render without wrapping its field controls.
+ *
+ * Not invented here: it is the figure the 2026-08-27 decision was made against, quoted in this
+ * file's own history and in `PacketBuilder.jsx` -- "asset blocks that need ~850px". It is the
+ * number that made docking impossible at a 1280 cap, so it is the number the new threshold must
+ * clear, or raising the cap bought nothing.
+ */
+export const MIN_CONTENT = 850
+
+/** Content width left for the packet when the panel is docked at a given viewport width. */
+export function dockedContentWidth(viewport) {
+  const v = Number(viewport)
+  if (!Number.isFinite(v)) return 0
+  return Math.min(v, SHELL_CAP) - NAV_WIDTH - GUTTER - DOCK_WIDTH - GUTTER
+}
+
+/**
+ * The narrowest viewport that may dock.
+ *
+ * DERIVED, never typed as a literal: `NAV + GUTTER + MIN_CONTENT + DOCK + GUTTER` = 1442, rounded up
+ * to 1450 for a little slack. Writing 1450 by hand is how a later tweak to `DOCK_WIDTH` silently
+ * re-creates the squeeze this whole decision exists to avoid -- the blocks would just quietly get
+ * 30px narrower and nobody would see it in a diff.
+ */
+export const DOCK_MIN_VIEWPORT = Math.ceil(
+  (NAV_WIDTH + GUTTER + MIN_CONTENT + DOCK_WIDTH + GUTTER) / 10) * 10
+
+/**
+ * Which presentation to use. Pure, so the arithmetic is testable without a browser.
+ *
+ * `mobile` wins over `wide` unconditionally: the mobile branch of `PacketBuilder` renders no rail
+ * and no columns, so "wide" is meaningless there and a device reporting both must still get the
+ * sheet rather than a dock with nothing to dock beside.
+ */
+export function assistantMode({ mobile = false, wide = false } = {}) {
+  if (mobile) return 'sheet'
+  return wide ? 'dock' : 'float'
 }

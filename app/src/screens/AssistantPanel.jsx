@@ -13,9 +13,9 @@
 import React, { useEffect, useRef, useState } from 'react'
 import { api } from '../api.js'
 import { Overlay } from '../shell.jsx'
-import { ASSISTANT_HOOKS, ASSISTANT_LIMITS, applySeed, assistantScope, canSend } from '../assistantPanel.js'
+import { ASSISTANT_HOOKS, ASSISTANT_LIMITS, applySeed, assistantScope, canSend, DOCK_WIDTH } from '../assistantPanel.js'
 
-export default function AssistantPanel({ artifact = null, seed = null, onSeedConsumed, onSent }) {
+export default function AssistantPanel({ artifact = null, seed = null, onSeedConsumed, onSent, mode = 'float' }) {
   const [open, setOpen] = useState(false)
   const [text, setText] = useState('')
   const [busy, setBusy] = useState(false)
@@ -73,16 +73,98 @@ export default function AssistantPanel({ artifact = null, seed = null, onSeedCon
     }
   }
 
+  // ONE BODY, THREE PLACEMENTS. Built once here and positioned by `mode` below, so a change to the
+  // scope line, the limits or the send button reaches all three presentations. The alternative --
+  // a docked column duplicating the drawer's contents -- is the driftable second surface the
+  // pre-2026-09-02 comment in assistantPanel.js correctly warned against; docking without
+  // extracting the body is what would have made that warning come true.
+  //
+  // `data-qc-mode` now carries the REAL mode. It used to be the literal "float" with a comment
+  // calling it "the assertable record that this app made a layout decision the prototype did not";
+  // that record is only worth anything if it can disagree with itself, so it is now derived.
+  const body = (
+    <div data-qc={ASSISTANT_HOOKS.panel} data-qc-mode={mode}>
+
+      {/* SCOPE IS STATED, NOT SELECTED — see assistantScope(). Two of the prototype's three
+          chips have no route behind them. */}
+      <div className="px-small" data-qc={ASSISTANT_HOOKS.scope} style={{ textTransform: 'none', marginBottom: 10 }}>
+        {scope.text}
+      </div>
+
+      <textarea ref={boxRef} className="px-input" rows={5} value={text}
+        data-qc={ASSISTANT_HOOKS.box}
+        placeholder="Ask for a change to this asset"
+        onChange={(e) => setText(e.target.value)}
+        style={{ width: '100%', resize: 'vertical' }} />
+
+      {error && <div className="px-note" data-qc={ASSISTANT_HOOKS.error} style={{ marginTop: 8 }}>{error}</div>}
+
+      <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
+        <button type="button" className="px-btn" disabled={busy}
+          onClick={() => { setText(''); setError(null) }}>Clear</button>
+        <button type="button" className="px-btn px-btn-accent"
+          data-qc={ASSISTANT_HOOKS.send} disabled={!sendable}
+          onClick={send}>{busy ? 'Sending...' : 'Send'}</button>
+      </div>
+
+      {/* WHAT IT CANNOT DO, said rather than drawn as disabled controls. SPEC 4.11-7's `Keep`
+          and `Revert` are absent because neither has anything to call - `aiEditArtifact` commits
+          before it replies and writes no revertible row. A disabled button would still assert
+          the capability exists; a sentence does not. */}
+      <div className="px-small" data-qc={ASSISTANT_HOOKS.limits}
+        style={{ textTransform: 'none', marginTop: 14, color: 'var(--proto-ink2)', lineHeight: 1.6 }}>
+        {ASSISTANT_LIMITS.map((l, i) => <div key={i}>{l}</div>)}
+      </div>
+    </div>
+  )
+
+  // DOCK — a real column, in flow, no launcher and no overlay. It is always visible, so there is
+  // nothing to open and the `sent` toast belongs inside the column rather than pinned to the
+  // viewport corner where it would float free of the thing it is reporting on.
+  if (mode === 'dock') {
+    return (
+      <aside
+        data-qc={ASSISTANT_HOOKS.dock}
+        aria-label="Assistant"
+        style={{
+          width: DOCK_WIDTH, flexShrink: 0, alignSelf: 'flex-start',
+          position: 'sticky', top: 16, maxHeight: 'calc(100vh - 32px)', overflowY: 'auto',
+        }}>
+        <div className="px-card" style={{ padding: 14 }}>
+          <div style={{ fontWeight: 700, marginBottom: 2 }}>Assistant</div>
+          <div className="px-small" style={{ textTransform: 'none', marginBottom: 10 }}>
+            {scope.label ? `Working on your ${scope.label}` : 'No asset open'}
+          </div>
+          {sent && (
+            <div className="px-note" data-qc={ASSISTANT_HOOKS.sent} style={{ marginBottom: 8 }}>
+              <b>Sent.</b> {'\u201c'}{sent}{'\u201d'} - the change will appear in that field{"'"}s change log.
+              <span className="px-link" role="button" tabIndex={0} style={{ marginLeft: 8, fontSize: 12 }}
+                onClick={() => setSent(null)}
+                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setSent(null) } }}>
+                Dismiss
+              </span>
+            </div>
+          )}
+          {body}
+        </div>
+      </aside>
+    )
+  }
+
+  // FLOAT and SHEET share the launcher + Overlay; only the drawer edge differs. `Overlay` already
+  // owns the stack, the scrim and close-on-navigation, so neither mode positions anything itself.
+  // The launcher sits bottom-RIGHT on desktop and spans the bottom edge on a phone, where a corner
+  // button competes with the sticky step controls and sits under the scrolling thumb.
+  const isSheet = mode === 'sheet'
   return (
     <>
-      {/* The collapsed affordance. It carries NO request count, deliberately: nothing in the app
-          aggregates requests per packet, and the prototype's count comes from an in-memory fixture
-          (`assist.jsx:15-23`). A `0` here would be a measurement the reader could trust and we
-          could not, which is the fake-live-data the standing rule bans. */}
       <button type="button" className="px-btn"
         data-qc={ASSISTANT_HOOKS.open} data-qc-seeded={seed ? '1' : '0'}
         onClick={() => { setSent(null); setOpen(true) }}
-        style={{
+        style={isSheet ? {
+          position: 'fixed', left: 12, right: 12, bottom: 12, zIndex: 'var(--zindex-overlay)',
+          boxShadow: '0 6px 20px rgba(15,23,42,.22)',
+        } : {
           position: 'fixed', right: 18, bottom: 18, zIndex: 'var(--zindex-overlay)',
           boxShadow: '0 6px 20px rgba(15,23,42,.22)',
         }}>
@@ -91,7 +173,9 @@ export default function AssistantPanel({ artifact = null, seed = null, onSeedCon
 
       {sent && !open && (
         <div className="px-note" data-qc={ASSISTANT_HOOKS.sent}
-          style={{ position: 'fixed', right: 18, bottom: 64, zIndex: 'var(--zindex-overlay)', maxWidth: 320 }}>
+          style={isSheet
+            ? { position: 'fixed', left: 12, right: 12, bottom: 60, zIndex: 'var(--zindex-overlay)' }
+            : { position: 'fixed', right: 18, bottom: 64, zIndex: 'var(--zindex-overlay)', maxWidth: 320 }}>
           <b>Sent.</b> {'\u201c'}{sent}{'\u201d'} - the change will appear in that field{"'"}s change log.
           <span className="px-link" role="button" tabIndex={0} style={{ marginLeft: 8, fontSize: 12 }}
             onClick={() => setSent(null)}
@@ -103,47 +187,12 @@ export default function AssistantPanel({ artifact = null, seed = null, onSeedCon
 
       <Overlay
         open={open}
-        variant="drawer"
+        variant={isSheet ? 'sheet' : 'drawer'}
         onClose={() => setOpen(false)}
         title="Assistant"
         subtitle={scope.label ? `Working on your ${scope.label}` : 'No asset open'}
       >
-        {/* `data-qc-mode` is "float" always and says so on purpose: it is the assertable record that
-            this app made a layout decision the prototype did not, so a verifier reading the DOM
-            learns the mode rather than inferring it from what is absent. */}
-        <div data-qc={ASSISTANT_HOOKS.panel} data-qc-mode="float">
-
-          {/* SCOPE IS STATED, NOT SELECTED — see assistantScope(). Two of the prototype's three
-              chips have no route behind them. */}
-          <div className="px-small" data-qc={ASSISTANT_HOOKS.scope} style={{ textTransform: 'none', marginBottom: 10 }}>
-            {scope.text}
-          </div>
-
-          <textarea ref={boxRef} className="px-input" rows={5} value={text}
-            data-qc={ASSISTANT_HOOKS.box}
-            placeholder="Ask for a change to this asset"
-            onChange={(e) => setText(e.target.value)}
-            style={{ width: '100%', resize: 'vertical' }} />
-
-          {error && <div className="px-note" data-qc={ASSISTANT_HOOKS.error} style={{ marginTop: 8 }}>{error}</div>}
-
-          <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
-            <button type="button" className="px-btn" disabled={busy}
-              onClick={() => { setText(''); setError(null) }}>Clear</button>
-            <button type="button" className="px-btn px-btn-accent"
-              data-qc={ASSISTANT_HOOKS.send} disabled={!sendable}
-              onClick={send}>{busy ? 'Sending...' : 'Send'}</button>
-          </div>
-
-          {/* WHAT IT CANNOT DO, said rather than drawn as disabled controls. SPEC 4.11-7's `Keep`
-              and `Revert` are absent because neither has anything to call - `aiEditArtifact` commits
-              before it replies and writes no revertible row. A disabled button would still assert
-              the capability exists; a sentence does not. */}
-          <div className="px-small" data-qc={ASSISTANT_HOOKS.limits}
-            style={{ textTransform: 'none', marginTop: 14, color: 'var(--proto-ink2)', lineHeight: 1.6 }}>
-            {ASSISTANT_LIMITS.map((l, i) => <div key={i}>{l}</div>)}
-          </div>
-        </div>
+        {body}
       </Overlay>
     </>
   )

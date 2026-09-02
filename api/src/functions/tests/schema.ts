@@ -617,7 +617,10 @@ create table if not exists skill_candidate (
 );
 create index if not exists skill_cand_packet_idx on skill_candidate(packet_id, list);
 
--- One row per original (kept/swapped/merged/dropped) plus one per item the ATS pass introduced.
+-- One row per original (kept/swapped/merged/dropped) plus one per item that is in the SHIPPED
+-- list and not in the baseline. It was written as "one per item the ATS pass introduced",
+-- which is false: no pass is named anywhere in this assignment, and the ATS pass returned 0
+-- characters on the packet where those rows were measured. See swaps.ts's header.
 -- driver: 'posting' means a requirement quote justifies the change. There is no omission list in
 -- this pipeline, so a change nothing explains is 'unattributed' - NOT 'rule', which would invent an
 -- authority for a model's unexplained choice. P2.2 blocks on the unattributed count.

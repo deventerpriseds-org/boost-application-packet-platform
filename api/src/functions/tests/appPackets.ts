@@ -525,6 +525,30 @@ export async function ensurePackage(client: any, art: any, opp: any, regen: bool
     resumeTemplateId: packetResumeTemplateId,
   })
   const pkg = built.pkg
+  // THE ASSEMBLED PACKAGE, FROZEN BEFORE ANYTHING MUTATES IT — this is `skillLineage`'s input.
+  //
+  // `pkg` IS `built.pkg` (same reference), and both `applyCorrectionPass` and `normalisePackage`
+  // edit it IN PLACE (`normalise.ts:121` is a bare `pkg[f] = joinItems(kept)`). So by the time
+  // lineage was captured at the bottom of this function, the text it compared against Call 1/2/3
+  // had already been through the owner's corrections and cross-list dedup, matched none of them,
+  // and `winner` fell through to 'none'.
+  //
+  // MEASURED, not theorised: db-query run 33635773017 on opportunity 9f9c370a returned
+  // `winner='none'` for RelevantBullets1/2/3 and SkillsBullets2 — 4 of 5 slots — which is exactly
+  // the failure `packetBuild.ts` warns about in its own header: "a lineage that reports none on
+  // every row of a healthy build is worse than no lineage: it is a panel that always says the same
+  // wrong thing, and it would have been believed."
+  //
+  // A SHALLOW COPY IS SUFFICIENT AND IS THE POINT: every merge-field value is a string, and the
+  // mutators reassign whole values (`pkg[f] = ...`) rather than editing them in place, so the
+  // snapshot's strings cannot be reached by any later write.
+  //
+  // WHY THE PRE-CORRECTION PACKAGE IS THE RIGHT COMPARAND, and not a convenience: `assemblePackage`
+  // builds each field as `firstNonEmpty(call1.x, call2.x, call3.x)`, so the assembled package IS one
+  // of the three calls per field, by construction. Comparing against it answers "which pass produced
+  // this field" exactly. The owner's later corrections are a different fact and are already recorded
+  // as `correction` rows; folding them in here would only destroy the answer, which is what it did.
+  const assembled: Record<string, any> = { ...built.pkg }
   // D8 - this used to pass `{}`, which logUsage discards, so every production packet build
   // recorded nothing. Each of the three generation passes is metered on its own so the cost of
   // the QC pass is separable from the cost of writing the resume.
@@ -646,7 +670,10 @@ export async function ensurePackage(client: any, art: any, opp: any, regen: bool
     pkg, generated: true, grounded, warnings: built.warnings, qcApplied: built.qcApplied,
     // The three calls are discarded when this scope ends, and the merged package alone cannot say
     // which pass wrote a given skill. Captured HERE, where all three are still in hand.
-    lineage: skillLineage(built.calls.c1, built.calls.c2, built.calls.c3, pkg),
+    // `assembled`, NOT `pkg` — see the snapshot at the top of this function. `pkg` has been through
+    // applyCorrectionPass and normalisePackage by now and matches no call's output, which is what
+    // made `winner` read 'none' on 4 of 5 slots in production.
+    lineage: skillLineage(built.calls.c1, built.calls.c2, built.calls.c3, assembled),
     analysis: collectAnalysis(built.calls.c1, built.calls.c2),
   }
 }

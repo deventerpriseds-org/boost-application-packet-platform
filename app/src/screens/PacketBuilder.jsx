@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react'
-import { useApp, go, useIsMobile } from '../state.jsx'
+import { useApp, go, useIsMobile, useIsWide } from '../state.jsx'
 import { api } from '../api.js'
 import { Pill, toneColor } from '../shell.jsx'
 import { Loading, ErrorBox } from './Today.jsx'
@@ -14,6 +14,7 @@ import { PACKET_HOOKS, ASSET_BODY_DEFAULT_OPEN, regenerateWithNote } from '../pa
 import QcRail, { useQcEntries } from './QcRail.jsx'
 import { GateBadge } from './AssetGateDrawer.jsx'
 import AssistantPanel from './AssistantPanel.jsx'
+import { assistantMode, DOCK_MIN_VIEWPORT } from '../assistantPanel.js'
 import { qcStepState, packetGate, railGateMeta, packetReadiness, packetFailList, qcSummaryModel, firstFixTarget, listOwnersFromArtifacts, requirementUsage } from '../qcRail.js'
 
 const TYPE_LABEL = {
@@ -390,6 +391,8 @@ export function ArtifactCard({ a, busy, setBusy, qcResult, onGenerate, onRegener
 export default function PacketBuilder({ id, step }) {
   const { toast } = useApp()
   const mobile = useIsMobile()
+  const wide = useIsWide(DOCK_MIN_VIEWPORT)
+  const assistantMode_ = assistantMode({ mobile, wide })
   const [pState, setPState] = useState({ loading: true, error: null, packet: null })
   const [opp, setOpp] = useState(null)
   const [applying, setApplying] = useState(false)
@@ -1129,7 +1132,8 @@ export default function PacketBuilder({ id, step }) {
       artifact={assistantArtifact}
       seed={assistantSeed ? assistantSeed.text : null}
       onSeedConsumed={() => setAssistantSeed(null)}
-      onSent={load} />
+      onSent={load}
+      mode={assistantMode_} />
   )
 
   if (mobile) {
@@ -1241,8 +1245,13 @@ export default function PacketBuilder({ id, step }) {
         )}
       </div>
 
-      {/* Two columns since D4: nav rail + content. The old 280px right keyword column is gone, which is
-          what gives the centre its width back (1280 shell cap - 196 nav leaves ~664px at 1440). */}
+      {/* THREE COLUMNS WHEN DOCKED, two otherwise: nav rail + content [+ assistant].
+          The keyword column D4 deleted is NOT what came back here -- that was a data panel; this is
+          SPEC 4.11's assistant, and it only fits because the shell cap moved to the prototype's own
+          1560 (owner decision 2026-09-02). The arithmetic lives in `assistantPanel.js`, not here:
+          `dockedContentWidth(1560) = 968px` against blocks needing ~850, and `DOCK_MIN_VIEWPORT`
+          is DERIVED from those parts so narrowing the column can never silently squeeze the packet.
+          Below that width `assistantMode` returns 'float' and this row is two columns again. */}
       <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start' }}>
         {/* Left: step list */}
         <div style={{ width: 220, flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 2 }}>
@@ -1274,16 +1283,22 @@ export default function PacketBuilder({ id, step }) {
           {stepContent}
         </div>
 
+        {/* Right: SPEC 4.11's assistant, DOCKED. Rendered here and nowhere else in this branch —
+            the float render at the bottom of this component is gated on the same mode so the panel
+            can never mount twice. `flexShrink: 0` and the fixed DOCK_WIDTH are what make the
+            centre column's `flex: 1` resolve to the width the arithmetic promised; letting the
+            column flex would hand the packet back the squeeze this design exists to avoid. */}
+        {assistantMode_ === 'dock' && assistant}
+
       </div>
 
       {keywordTally}
 
-      {/* SPEC 4.11 - the assistant, floating rather than docked. The SAME element the mobile branch
-          renders: this app's shell caps content at 1280 against the prototype's 1560, so a docked
-          340px column leaves the packet 688px at every viewport against blocks needing ~850px.
-          Owner decision 2026-08-27; the alternative (raise the cap, re-flowing every screen) is in
-          .claude/DEFERRED.md rather than lost. */}
-      {assistant}
+      {/* SPEC 4.11 - float mode only. When `assistantMode` says 'dock' the panel has already been
+          rendered as the third column above, and rendering it here too would mount it twice: two
+          textareas holding two drafts, and a seed consumed by whichever instance reacted first.
+          The mobile branch renders its own 'sheet' and never reaches this line. */}
+      {assistantMode_ === 'float' && assistant}
     </div>
   )
 }

@@ -50,6 +50,9 @@ export const BLOCK_HOOKS = {
   meterToggle: 'blocks-answers-toggle',   // the disclosure on "What this X answers"
   meterSummary: 'blocks-answers-summary', // the counts kept on the COLLAPSED row
   askChange: 'blocks-ask-change',         // per-field "List Tweaks" (prototype: "Ask for a change")
+  pickList: 'blocks-pick-list',           // SPEC 4.5-12 -- every item CONSIDERED for this list
+  pickToggle: 'blocks-pick-toggle',       // its disclosure; absent when nothing was considered
+  pickSend: 'blocks-pick-send',           // seeds the assistant; it selects nothing itself
   askBox: 'blocks-ask-box',
   askSend: 'blocks-ask-send',
   // SPEC 4.7-7. The ask box confirmed FAILURE in place and said nothing at all on success - it just
@@ -1286,4 +1289,76 @@ export function observedFor(mergeField, row, thresholds) {
     return `${wordCount(row.after_text)} words`
   }
   return null
+}
+
+/* ── SPEC 4.5-12 — the pick list ─────────────────────────────────────────────────────────────── */
+
+/**
+ * Every item that was CONSIDERED for one list, with whether it is on the page.
+ *
+ * WHY THIS ROW WAS ABSENT UNTIL NOW, and what actually unblocked it. `PROTOTYPE-COVERAGE.md` scored
+ * 4.5-12 ABSENT because `shapeOf()` emits only `static`/`pipe`/`list`/`prose` -- no `select` shape --
+ * and noted it "needs per-item candidacy on the insertions payload". That second half was the real
+ * blocker and it is no longer true: `swapsForList` is already threaded to every block
+ * (`AssetBlock` -> `BlockBody` -> `ListBody`), and a swap row per candidate is exactly per-item
+ * candidacy. Nothing new is fetched.
+ *
+ * THE PROTOTYPE'S OWN SHAPE, mapped to real rows rather than invented (`qc/assets.jsx:300`):
+ *   text     the label
+ *   selected on the page now -- `kept`, `added`, or the TO side of a `swapped`
+ *   blocked  the owner's do-not-use list, and ONLY that. `OMIT_LIST_RATIONALE` is compared with
+ *            `===` on a `rule`-driven drop, the same exact test `omitListDrops` already uses; a
+ *            cross-list drop is NOT blocked -- the item is fine, it simply lives in another list.
+ *   req      the requirement this item answers, when a quote attributed it
+ *
+ * IT SELECTS NOTHING AND SAVES NOTHING. The prototype's control seeds the assistant
+ * (`onAsk("Use these for ...")`) and so does this: there is no route that reorders a list, and a
+ * checkbox that silently did nothing would be the dead UI this repo bans outright. The checkboxes
+ * are a SELECTION for the sentence, which is honest -- the owner is composing a request.
+ */
+export function pickListModel(swapsForList, opts = {}) {
+  const swaps = Array.isArray(swapsForList) ? swapsForList : []
+  const onPage = new Set((opts.onPage || []).map(normLabel).filter(Boolean))
+  const seen = new Map()
+  for (const s of swaps) {
+    if (!s) continue
+    // The TO side is what the list carries; the FROM side is what it carried before. A `dropped`
+    // row has only a FROM, and that is the whole point of showing it -- it is the item the owner
+    // cannot otherwise see, because it is not on the page to be seen.
+    const label = s.action === 'dropped' ? s.from_label : (s.to_label || s.from_label)
+    const text = typeof label === 'string' ? label.trim() : ''
+    if (!text) continue
+    const key = normLabel(text)
+    if (!key || seen.has(key)) continue
+    const blocked = s.action === 'dropped' && s.driver === 'rule' && s.rationale === OMIT_LIST_RATIONALE
+    seen.set(key, {
+      text,
+      // Membership in the rendered list decides this, never the action name: an item can be
+      // `swapped` FROM and still appear elsewhere on the page, and the page is the ground truth
+      // for "is this on it".
+      selected: onPage.has(key) || (!onPage.size && (s.action === 'kept' || s.action === 'added' || s.action === 'swapped')),
+      blocked,
+      req: s.requirement_id || null,
+      // Carried so the row can explain itself without the caller re-deriving it. A dropped item the
+      // owner did not ban is not a failure, and saying nothing invites the reader to assume it was.
+      note: blocked ? 'on your do-not-use list'
+        : isCrossListDrop(s.rationale) ? String(s.rationale)
+          : s.action === 'dropped' ? 'considered, not used' : null,
+    })
+  }
+  return [...seen.values()]
+}
+
+/**
+ * The sentence the pick list sends. Named here so the component cannot compose its own.
+ *
+ * NAMES THE FIELD AND EVERY CHOSEN ITEM, for the same reason `keywordSwapOptions`' ask does: a
+ * request that says "use these" without saying what "these" are is one the assistant has to guess
+ * at, against the owner's own document.
+ */
+export function pickListAsk(fieldLabel, chosen) {
+  const items = (chosen || []).map((t) => String(t || '').trim()).filter(Boolean)
+  if (!items.length) return null
+  return `Use exactly these for ${fieldLabel}, in this order: ${items.join(' | ')}. `
+    + 'Keep the wording of each item as written here.'
 }

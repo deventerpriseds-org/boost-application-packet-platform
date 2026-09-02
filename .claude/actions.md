@@ -7142,3 +7142,76 @@ not the goal where the app has deliberately corrected it. Before scoring any row
 the divergence is RECORDED — a comment citing the owner, a decision in `actions.md`, a rule in
 `CLAUDE.md`. **A parity document that cannot tell a divergence from a deficit will keep proposing
 that the product be made worse.**
+
+## D:swap-screen-reads-a-dead-pass — the row settled against live data, 2026-09-02
+
+One `db-query.yml` run (`33635773017`, opportunity `9f9c370a`) settled all three parts of the row,
+and the answer differed from the row on two of them.
+
+**(1) PROVEN, not hypothesised.** `len(call3)` is **0 for all five `final*` fields**. Call 3 emitted
+nothing on this packet, and `swaps.ts:494` stamps `origin: 'pass_b'` — which means Call 3 — on every
+final item Call 1 did not produce. A pass that produced zero characters cannot have introduced
+anything, so the label is false by construction and needs no reconciliation to say so.
+
+**(2) ALREADY FIXED, and fixed better than the row asked.** No `ATS pass` literal survives anywhere
+in `swaps.ts`. Rather than naming the correct pass, the rationales stopped naming a pass at all and
+now state the RELATION — *"replaces the master template item in this slot"*, *"not present in the
+master template list"*, *"unchanged from the master template"*. A statement that names no pass cannot
+credit the wrong one. Marked FIXED in the ledger.
+
+**(3) THE BLOCKING PRECONDITION CANNOT BE DISCHARGED — the numbers it was defined on are gone.** The
+row froze kept 8 / swapped 1 / dropped 1 / added 1. The same opportunity now reads kept 16 / swapped
+5 / dropped 8 / added 7 across 36 rows, because the packet was rebuilt under the master-baseline
+change. Re-stated in the ledger rather than left as a blocker nobody could clear: this is the "a
+STATE recorded as a standing fact" error, and the row had been carrying it since 2026-08-22.
+
+**A second defect surfaced in the same read — now `D:lineage-winner-is-none`.** `last_build.lineage`
+reports `winner: 'none'` on **4 of 5 slots**. `skillLineage` picks a winner by comparing the SHIPPED
+package to each raw call, but `applyCorrectionPass` and the master merge both run first, so nothing
+matches. `packetBuild.ts:120` wrote the epitaph before it happened: *"a lineage that reports none on
+every row of a healthy build is worse than no lineage — it is a panel that always says the same wrong
+thing, and it would have been believed."* Also recorded there: `winner` tests `call2` BEFORE `call1`,
+and `c1_eq_c2` is true for RelevantBullets2/3 (73 chars each), so `winner='call2'` never meant "Call 2
+changed it" — a trap for whoever fixes this next.
+
+**Not started: the fix.** Making `origin` truthful needs a fourth enum value (the CHECK admits only
+`profile_original`/`pass_a`/`pass_b`), `call2` threaded into `buildSwaps`, and its consumers moved —
+a schema migration across several files. Owner's call, not taken unilaterally.
+
+
+## Continuous lane, 2026-09-02 — comments, lineage, 4.11 dock, 4.5-12 pick list
+
+Owner: *"fix both comments and take the lineage row / then fix comparison to happen before the
+corrections / finish 4.5 and 4.11... on desktop wide the panel rather than float but you will need a
+different approach of your choosing for mobile / do all of this continuously without stopping so
+much."*
+
+**All four landed on `main` and deployed.** `e66987c` (comments + lineage, api-deploy `33641267013`
+success), `6996da2` (4.11 dock), `5d37e3d` (4.5-12 pick list).
+
+**Comments + lineage.** `skillLineage` compared the SHIPPED package against each raw call, but
+`const pkg = built.pkg` is one reference and both `applyCorrectionPass` and `normalisePackage`
+mutate it in place, so `winner` read `none` on 4 of 5 slots. Snapshotted before the correction pass.
+Separately the precedence order tested call3 -> call2 -> call1, which credited a PASS-THROUGH as
+authorship -- live on RelevantBullets2/3, where call1 and call2 were byte-identical at 73 chars.
+Reversed to earliest-matching-pass.
+
+**4.11.** Shell cap 1280 -> 1560 (the prototype's own) is what made docking possible; the August
+refusal was arithmetic, not preference. Three modes, one body: `dock` at >= 1450 (DERIVED from
+NAV + GUTTER + MIN_CONTENT + DOCK + GUTTER, never typed), `float` below, `sheet` on mobile via a new
+Overlay variant rising from the bottom edge. Two existing guards encoded the REVERSED decision and
+were replaced, not deleted -- and the replacements are stronger, because the old one asserted
+`data-qc-mode="float"` as a literal and could not tell a mode that was chosen from one that was typed.
+
+**4.5-12.** Scored ABSENT on the wrong half of its own reason. `shapeOf` still has no `select` shape
+and none was invented; the row's real dependency, "per-item candidacy on the insertions payload",
+had been satisfied for months by `swapsForList`. Third row this week to close because the RANKING was
+stale rather than the work.
+
+**Baseline: 160/183 BUILT (87.4%), 22 PARTIAL, 1 ABSENT.** The last row, 4.11-4, stays ABSENT: two of
+its three scope options have no route, so shipping it means shipping two dead controls. NOT
+reclassified DELIBERATE to flatter the count.
+
+**Ten guards this lane, every one mutation-proved FIRED.** One NOT-APPLIED (wrong anchor indent) and
+one false INERT (I piped the test command through `grep -q`, so the must-fail pattern could never
+match) -- both my harness errors, both caught by the harness reporting honestly rather than guessing.

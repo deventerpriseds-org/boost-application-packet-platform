@@ -5652,3 +5652,122 @@ and proved the guard real after three false INERTs. And put the absolute `cd` in
 `parseAtsKeywords` changed nothing, because the live header has `<th>` cells only and the `<td>`
 requirement drops it anyway. That is a real "not proven", and the fix was to add a mixed `<th>`/`<td>`
 header case — ordinary model output — which made the mutation bite.
+
+
+### A ledger row's numbers are a STATE, not a standing fact (2026-09-02)
+
+`D:swap-screen-reads-a-dead-pass` carried a **blocking precondition** — "settle the 2-vs-4 count
+first" — computed on 2026-08-22 from kept 8 / swapped 1 / dropped 1 / added 1. On 2026-09-02 the same
+opportunity read kept 16 / swapped 5 / dropped 8 / added 7 across 36 rows. The packet had been rebuilt
+under the master-baseline change, so **the blocker referenced numbers that no longer existed and could
+never be discharged by anyone.** It had been quietly gating task #20 for eleven days.
+
+This is the same error as *"the credit ran out"* and *"verify.sh is not yet merged"*: a measurement
+written down in the present tense becomes a permanent claim. **Re-measure a row's numbers before
+treating them as a blocker** — one query, and it cost nothing to check.
+
+The corollary that made it worth the query: the row's OTHER two items had also moved. Item (2) was
+already fixed in source, so I would have spent a lane re-fixing it. Item (1) turned out **provable**
+rather than hypothesised — `len(call3) = 0` on all five fields, so the pass being credited emitted
+nothing at all. **The row was wrong in all three cells, in three different directions.** Reading it as
+a to-do list would have produced one wasted fix, one unfixable blocker, and one missed proof.
+
+
+### THE UI-PARITY BASELINE IS `docs/qc-evidence/PROTOTYPE-COVERAGE.md` (owner-confirmed 2026-09-02)
+
+Asked "which of the 11 UI parity rows are next", I answered from the §14 RANKED LIST inside that
+document — a reading of the row tables that had gone stale — and had to be corrected: *"that's not
+where we were working from. it was a log of what needs to be done. your liking at the wrong
+baseline."* The owner then named it: *"I believe it's PROTOTYPE-COVERAGE.md."*
+
+**Two lessons, and the second is the reusable one.**
+
+1. **The ROW TABLES are authoritative; §14 is a ranking OF them and goes stale.** Three of its five
+   ranks have now closed without anyone building anything (4.6-9, 4.1-20, 4.8-21). 4.8-21 was ranked
+   "GATED, its target does not exist" while its own row table already read `BUILT - CHANGED from
+   ABSENT 2026-08-29`. Never answer a status question from a ranking when the table it ranks is
+   right there.
+2. **COUNT BY EARLIEST POSITION, NOT BY CONTAINMENT.** Parsing the verdict cell with
+   `any(token in cell)` scores `BUILT - CHANGED from ABSENT` as **ABSENT**. That produced 134/181
+   with 18 phantom ABSENT rows and would have reported parity going BACKWARDS. Taking the token that
+   appears earliest gives **159/183 = 86.9%**, and the proof it is right is external: `DEFERRED.md`
+   independently quotes "2 ABSENT + 22 PARTIAL", which the positional count reproduces exactly and
+   the containment count does not. **When a parse of your own docs disagrees with a number written
+   elsewhere, the parser is the suspect.**
+
+Live state now recorded in §13-CURRENT: **159/183 BUILT (86.9%)**, 22 PARTIAL, **2 ABSENT** — 4.5-12
+(PickList, portfolio-only, low value) and 4.11-4 (gated on the shell-cap decision). The old 148/183
+headline was measured 2026-08-25 and never caught up.
+
+
+### A BRIEF THAT ASSERTS THE DIAGNOSIS LAUNDERS MY ERROR INTO THE VERIFIER (2026-09-02)
+
+I told the owner `origin='pass_b'` credits Call 3 with work it did not do, put that in the ledger
+row, then put it in the AC brief as a PREMISE. The independent pass accepted it, designed six ACs
+around it, and priced a production migration to fix it. **All of it rested on my misreading.**
+
+`swaps.ts:490-494` assigns origin by MEMBERSHIP, never authorship: an item in `finals` and not in
+`originals` gets `pass_b`, and `finals` is `pkg[f.merge] ?? call3[f.passB]` -- the SHIPPED package
+first, Call 3 only as a fallback this packet never reached. So `pass_b` means "in what shipped, not
+in the baseline", which is TRUE of a Call-2 insertion. The Call-3 binding lives in ONE COMMENT
+(`swaps.ts:8`). `schema.ts:611` defines no meaning for the values at all.
+
+**The tell I ignored:** I read `LIST_FIELDS[*].passB = 'finalSkills1'` -- a FIELD-NAME GROUP -- as a
+definition of the enum value `pass_b`. Two different things that share a name. The five seconds of
+reading `originOf`'s call sites would have settled it, and I had already read that exact region
+twice while writing the ledger row.
+
+**The rule this earns, and it is about how to WRITE A BRIEF, not about being careful:** hand the
+pass the MEASUREMENT, never the diagnosis. "`len(call3)=0` on all five fields; items are stored
+`origin='pass_b'`; what does that value mean and is it true?" would have had it read `originOf` and
+correct me in its first section. Instead I wrote "`pass_b` means Call 3, prove the fix", and an
+independent adversary spent its whole run inside my error. **An independent pass can only falsify
+what you leave open; a premise is the one thing it will not check.**
+
+Cost: one AC pass, a near-miss production migration on a database column nothing reads, and a
+decision put to the owner twice on a false basis.
+
+
+### THE MIGRATION I ALMOST SHIPPED, AND WHY THE BRIEF WAS THE DEFECT (2026-09-02)
+
+The owner chose "widen the database now". I had already put that option in front of them on a false
+premise -- and the withdrawal is recorded above. What belongs HERE is the second-order lesson, because
+the first-order one ("read `originOf`'s call sites") is not a rule anyone can follow reliably.
+
+**An AC brief that states the DIAGNOSIS launders the implementer's error into the verifier.** I wrote
+"`pass_b` means Call 3, prove the fix" and an independent pass spent its whole run inside that
+premise, designing six criteria and pricing a production migration for a defect that was not in the
+data. It could not have caught me: **a premise is the one thing an adversary does not check.** Hand
+over the MEASUREMENT instead -- "`len(call3)=0` on all five fields; rows are stored `origin='pass_b'`;
+what does that value mean and is it true?" -- and the same pass reads `originOf` and corrects you in
+its first section.
+
+**The owner's own question was the right answer to their own choice**: *"should you design the page
+that will use it first so you know the requirements or the other way around?"* Reader first. Both
+fields were write-only, so any shape chosen ahead of a reader is a guess cast in DDL.
+
+### A GUARD THAT ENCODES A DECISION MUST BE REPLACED WHEN THE DECISION REVERSES, NOT DELETED
+
+`H:panel-floats-and-is-defined-ONCE-for-both-layouts` asserted `data-qc-mode="float"` as a literal and
+FORBADE any dock breakpoint. It was correct for the 2026-08-27 float-everywhere decision. When the
+owner reversed that on 2026-09-02, the guard became an obstacle -- and deleting it would have silently
+dropped the invariants it also carried (one mount, one definition).
+
+**Replaced, with the reversal named in the replacement's comment, and made stronger:** the old guard
+could not distinguish a mode that was CHOSEN from one that was TYPED. This is the difference between
+weakening a guard (banned without asking) and re-aiming one whose target moved. The tell that it is
+the second: the new assertion fails on the old code too.
+
+Found the same way, and worth more than the row that surfaced it: `overlayVariant` is
+`OVERLAY_VARIANTS[v] || OVERLAY_VARIANTS.modal`, so a TYPO does not throw -- it silently renders a
+centred dialog. `variant="sheeet"` would have shipped as a modal on every phone and looked merely odd.
+Nothing checked for that before; the guard now does.
+
+**Footnote, same day, same class of bug twice:** the commit recording this lost the phrase
+`OVERLAY_VARIANTS[v] || modal` because it used `git commit -m "..."` with BACKTICKS inside double
+quotes, and bash ran them as command substitution (`OVERLAY_VARIANTS[v]: command not found`). Every
+other commit this lane used `git commit -F - <<'MSG'` — a QUOTED heredoc — and survived intact.
+Earlier the same day backticks inside a TypeScript template literal terminated it and produced six
+TS1005 errors 200 lines away. **Backticks are live in two different languages here; quote the
+heredoc, always.** The commit is on `main` and is not worth a force-push to fix — the content is
+correct in this file, which is the thing that gets read.
