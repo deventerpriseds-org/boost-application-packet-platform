@@ -175,3 +175,54 @@ is checkable by reading the SQL before running it, and it is the check I skipped
 final step to take what it lands on and use synonyms etc so it means verbatim but doesn't read
 verbatim."* Deleting the guard would have removed the symptom's detector while leaving the cause.
 The exclusion stays until the reword step exists.
+
+---
+
+## 2026-09-02 — THE LOG ITSELF WAS THE MISS: 5 entries against ~67 refutations
+
+The owner asked *"have you been logging accuracy? how are you grading? it seems like ac is finding a
+lot of mistakes... is it overdoing it or are you underdoing it?"* Counting, for the first time:
+
+| | Count |
+|---|---|
+| Verification passes with verdicts | 21 |
+| CONFIRMED verdicts | ~398 |
+| REFUTED verdicts | ~67 (**14%**) |
+| Entries in THIS log before today | 5 |
+
+**Four of those five were caught by the OWNER, one by a verifier.** So this log has been recording
+the owner's catches, not my error rate — it measured their patience. A log biased toward
+owner-caught misses under-reports by roughly an order of magnitude and, worse, systematically
+excludes the class the machine is better at finding: silent ones.
+
+**There was no grading.** Verdicts live per-claim inside `docs/qc-evidence/VERIFY-*.md` and nothing
+aggregated them, so "is the verifier over-firing" was unanswerable until someone counted.
+
+### The answer, from the record rather than from feel: I am underdoing it
+
+- **Refutation class is severe, not cosmetic.** Same-day examples: `keywordPresent` matched `Cloud`
+  inside `Cloudera` (inflates a score the owner reads); `H:one-composite-formula` passed 1050/1050
+  with the weights swapped (a guard protecting nothing); `correction.requirement_id` would break on
+  every JD re-parse because `writeRequirements` deletes and re-inserts requirements.
+- **No recorded case of overturning a verifier finding exists.** If it were over-firing there would
+  be a trail of findings successfully refuted. There is none.
+- **The one case that LOOKS like verifier overreach went the other way** — `dfb7fc3`, another
+  session: verifier found a partial-score hole, the agent nearly rejected it on a theory about the
+  data, and one production query reversed the AGENT.
+
+**Honest limit on that conclusion:** absence of recorded overturns may partly reflect not recording
+them either. The class of what gets refuted is the stronger signal than the count.
+
+### Root cause across every entry in this log
+
+**Claiming absence or completion from evidence that cannot support it.** Four of five prior entries
+are that shape, and today added three more (n=1 stuffing; `p.packetId` where the field is `p.id`;
+asserting `artifact_score.created_at` exists — the column is `computed_at`). The variants differ;
+the move is identical — *state it, then look, instead of look, then state it.*
+
+### The guard, since prose here has demonstrably not been enough
+
+**Every REFUTED verdict gets a row in this log, in the commit that fixes it** — the same discipline
+`CLAUDE.md` already demands for H-cases ("a mistake becomes a TEST, not a note"). A refutation the
+owner never sees is a mistake that gets to happen twice. The count above is the baseline: if this
+log does not grow at roughly the rate `VERIFY-*.md` accrues REFUTED verdicts, it is lying again.
