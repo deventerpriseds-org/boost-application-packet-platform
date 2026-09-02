@@ -5698,3 +5698,31 @@ baseline."* The owner then named it: *"I believe it's PROTOTYPE-COVERAGE.md."*
 Live state now recorded in §13-CURRENT: **159/183 BUILT (86.9%)**, 22 PARTIAL, **2 ABSENT** — 4.5-12
 (PickList, portfolio-only, low value) and 4.11-4 (gated on the shell-cap decision). The old 148/183
 headline was measured 2026-08-25 and never caught up.
+
+
+### A BRIEF THAT ASSERTS THE DIAGNOSIS LAUNDERS MY ERROR INTO THE VERIFIER (2026-09-02)
+
+I told the owner `origin='pass_b'` credits Call 3 with work it did not do, put that in the ledger
+row, then put it in the AC brief as a PREMISE. The independent pass accepted it, designed six ACs
+around it, and priced a production migration to fix it. **All of it rested on my misreading.**
+
+`swaps.ts:490-494` assigns origin by MEMBERSHIP, never authorship: an item in `finals` and not in
+`originals` gets `pass_b`, and `finals` is `pkg[f.merge] ?? call3[f.passB]` -- the SHIPPED package
+first, Call 3 only as a fallback this packet never reached. So `pass_b` means "in what shipped, not
+in the baseline", which is TRUE of a Call-2 insertion. The Call-3 binding lives in ONE COMMENT
+(`swaps.ts:8`). `schema.ts:611` defines no meaning for the values at all.
+
+**The tell I ignored:** I read `LIST_FIELDS[*].passB = 'finalSkills1'` -- a FIELD-NAME GROUP -- as a
+definition of the enum value `pass_b`. Two different things that share a name. The five seconds of
+reading `originOf`'s call sites would have settled it, and I had already read that exact region
+twice while writing the ledger row.
+
+**The rule this earns, and it is about how to WRITE A BRIEF, not about being careful:** hand the
+pass the MEASUREMENT, never the diagnosis. "`len(call3)=0` on all five fields; items are stored
+`origin='pass_b'`; what does that value mean and is it true?" would have had it read `originOf` and
+correct me in its first section. Instead I wrote "`pass_b` means Call 3, prove the fix", and an
+independent adversary spent its whole run inside my error. **An independent pass can only falsify
+what you leave open; a premise is the one thing it will not check.**
+
+Cost: one AC pass, a near-miss production migration on a database column nothing reads, and a
+decision put to the owner twice on a false basis.

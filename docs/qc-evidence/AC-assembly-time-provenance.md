@@ -206,3 +206,39 @@ CONFIRMED), assembly-time constraints (§2), six ACs (§3), plain answer on migr
 No prompt in the Prompts table was read or edited. No existing guard or refusal was proposed for
 weakening. Every verdict above is grounded in a `grep`/`read` command shown with its actual output,
 or is explicitly marked as needing a live-DB check (`manual db-query.yml`) this sandbox cannot run.
+
+---
+
+## 6. IMPLEMENTER CORRECTION, 2026-09-02 — AC-1's premise is wrong, and the fault is mine
+
+**Nothing above is edited.** This pass answered the brief it was given, and the brief asserted that
+`origin='pass_b'` claims Call 3 produced the item. **That assertion was mine and it is false.**
+
+`swaps.ts:490-494` assigns origin by MEMBERSHIP, not authorship:
+
+    const finals = splitItems(pkg[f.merge] ?? call3[f.passB])     // :475 -- SHIPPED pkg first
+    for (const o of originals) candidates.push({ ..., origin: originOf(o, 'pass_a') })
+    for (const fin of finals) {
+      if (originalNorms.has(normItem(fin))) continue
+      candidates.push({ ..., origin: originOf(fin, 'pass_b') })   // in finals, NOT in originals
+    }
+
+`finals` is the shipped package; `call3[f.passB]` is only a fallback that this packet never even
+reached (Call 3 returned `{}`). So `pass_b` reads "present in what shipped, absent from the
+baseline" -- a TRUE statement about a Call-2 insertion. The Call-3 binding exists in exactly one
+place, a comment at `swaps.ts:8`, plus `schema.ts:620`'s "one per item the ATS pass introduced".
+`schema.ts:611` itself defines no meaning for the values at all.
+
+**Therefore:** AC-1 and AC-2 are testing for a defect that is not in the data, AC-4 and AC-5 are
+moot (no enum widening, so no deploy window and no backfill), and the migration question the pass
+was asked to rule on **does not arise**. The genuine defects that survive are the PROSE (two
+comments asserting authorship the code never asserts) and `D:lineage-winner-is-none`, which is
+independent of all of this.
+
+**How this got past both of us:** I read `LIST_FIELDS[*].passB = 'finalSkills1'` -- a field-name
+group -- as a definition of `pass_b`, then wrote that into the ledger row on 2026-08-22, then into
+the brief. The pass was handed the conclusion as a premise and asked to design around it. That is
+the ground-truth failure this repo documents, committed by the implementer against the verifier:
+**a brief that asserts the diagnosis instead of the observation launders my error into an
+independent artifact.** A brief should hand over the measurement (`len(call3)=0`, `origin='pass_b'`)
+and let the pass derive what it means.
