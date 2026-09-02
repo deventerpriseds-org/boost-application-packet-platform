@@ -5580,3 +5580,75 @@ open(path,'w').write(theirs.rstrip('\n') + '\n' + mine[j:].lstrip('\n'))
 **The build caught the test file; nothing would have caught the two prose files.** `memory.md` and
 `actions.md` took the same bad splice and stayed syntactically valid — silently short. Rebuilt the
 same way and diffed against both parents to prove nothing was lost.
+
+## Feature: keyword_coverage has a real source before the term library (2026-09-02, LIVE)
+
+`atsKeywords.ts` → `appChecks.ts`. Deployed on `main` `0c3721e` (api-deploy run `33631740581`,
+success). Owner's instruction: *"use what we gain to get the score until library is added to
+suppliment not drop it."*
+
+**Where the number comes from.** The `Missing ATS Skills` section of `packet.last_build.analysis`,
+captured by `collectAnalysis` from Call 1. **Column 1 only** — the ATS keyword list, the denominator.
+The numerator is recomputed against the shipped `pkg_json` skills fields (`ATS_SHIPPED_FIELDS`).
+Resume artifacts only. Library strictly WINS when published — taken instead of, never blended.
+
+**Trinnex, live: 6/9 = 67%.** `must_have` and `keyword` are now both fillable; the composite still
+needs `seniority`, which is null because the reviewer has no caller (workstream D).
+
+## Hardening — the obvious implementation of the keyword score was DEFAMATORY (2026-09-02)
+
+**Column 2 of that table holds the covering skill "else Missing" — a ready-made coverage answer, and
+reading it is wrong.** On the owner's live packet all 9 rows say `Missing`, and **6 of those 9 are
+present verbatim in the shipped resume**. A parser trusting column 2 reports **0%** on a document
+that places 67% of the keywords.
+
+**Root cause: the table describes the PRE-SWAP draft.** Call 1 writes it; Call 3's ATS-QC merge runs
+afterwards. It is a true statement about a document that no longer exists.
+
+**The owner caught this by insisting on real data** — *"I dont understand the alternative, it sounds
+like kicking the can down the road, so i am inclined to parse against real dta"*. Building from the
+PROMPT alone would have produced exactly the wrong parser, and it would also have missed a `<th>`
+header row the prompt never mentions (10 `<tr>` for 9 keywords — an off-by-one in every denominator,
+in the same direction, forever).
+
+**The rule this earns: a spec says what was ASKED FOR; only the data says what is PRODUCED.** When
+parsing model output, read a real sample before writing the parser. Both defects here were invisible
+in the prompt and obvious in one row of production data.
+
+## Hardening — the integration trace found a SECOND composite formula (2026-09-02)
+
+Required by the Stop gate as (g), and it earned its place. `appReviewer.ts:309` computes the
+composite with its own inline weighted sum, while the comment four lines above claims it is
+"recomputed through computeArtifactScore ... so the null-unless-all-three rule stays in one place".
+The null rule is; the ARITHMETIC is not.
+
+**It had never executed.** The branch is gated on `keyword_coverage !== null`, and that column was
+null on all 52 `artifact_score` rows ever written. The interim keyword score is what makes it live —
+so a change in one file activated dead code in another, which is precisely what a producer/consumer
+trace is for and what a diff review would not have shown.
+
+`H:one-composite-formula` pins the two together (weights, the all-three requirement, and a worked
+example). Mutation-proved twice: dropping the keyword-null check FIRED, drifting the keyword weight
+0.3→0.4 FIRED.
+
+## `mutate.sh` INERT is usually MY invocation, not a weak guard (2026-09-02, third occurrence)
+
+Three INERT verdicts in one lane, all mine, none a real finding:
+
+| # | cause |
+|---|---|
+| 1 | test command missing a `cd`, so `npm run build` failed and `&&` short-circuited — the test never ran |
+| 2 | named a source-grep guard as the must-fail pattern for a BEHAVIOURAL mutation |
+| 3 | same missing `cd`, **three times in a row**, while saying each time that I had added it |
+
+**The harness cannot tell "the guard did not fire" from "your command never reached the guard".** It
+reports what it observes, and INERT is the honest report for both.
+
+**So: before believing an INERT, apply the mutation BY HAND and run the test.** It took one command
+and proved the guard real after three false INERTs. And put the absolute `cd` in the test command —
+`cd /path/to/api && node --test ...` — because `mutate.sh` does not run it from your shell's cwd.
+
+**One genuinely equivalent mutation, for contrast:** deleting the `<th>` skip from
+`parseAtsKeywords` changed nothing, because the live header has `<th>` cells only and the `<td>`
+requirement drops it anyway. That is a real "not proven", and the fix was to add a mixed `<th>`/`<td>`
+header case — ordinary model output — which made the mutation bite.

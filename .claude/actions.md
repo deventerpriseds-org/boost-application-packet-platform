@@ -7024,3 +7024,42 @@ and re-mutated), and three test failures I reported as pre-existing that were **
 rather than build against a guessed shape — correct, and it needs `boost-pg-mcp-write`, which is
 `connected: true` but `enabledInChat: false`. `check: manual — read the Missing ATS Skills body for
 packet 85cee965 before writing a parser`
+
+### ACT: the interim keyword score — LIVE (2026-09-02)
+
+**ORIGIN: owner request.** *"confirm a way to use what we gain to get the score until library is
+added to suppliment not drop it"*, then *"keep building the keyword score"*.
+
+**STATUS: DEPLOYED.** `main` `0c3721e`, api-deploy run `33631740581` success. The veto lane landed
+first at `ad73c9e` (run `33630705210` success) — 22 commits that had been sitting unmerged.
+
+| Piece | Status | Evidence |
+|---|---|---|
+| `atsKeywords.ts` — parse + match | LIVE | `9503799` |
+| wired into `appChecks` / `artifactScore` | LIVE | `9503799` |
+| `H:one-composite-formula` | LIVE | `0c3721e`+ |
+| independent verification | **RUNNING — NOT COMPLETE** | `docs/qc-evidence/VERIFY-ats-keyword-score-1.md` |
+
+**The number, on the owner's Trinnex packet: 6/9 ATS keywords = 67%.**
+
+**COMPOSITE IS STILL NULL** — it needs all three components and `seniority_alignment` has no
+producer, because `runReview` has no caller. That is workstream D and it is the last blocker.
+`check: manual db-query.yml — select composite from artifact_score where composite is not null`
+
+**What the real data changed, and it is the reason the owner was right to insist on it:** the
+obvious implementation (read column 2, which literally says "Missing") reports **0%** on a resume
+that places **67%** of the keywords, because the table describes the pre-swap draft. The real table
+also carries a `<th>` header row the prompt never mentions — a denominator of 10 instead of 9 on
+every packet. Both invisible in the spec, both obvious in one row of production data.
+
+**Pre-swap sweep (owner-requested), all traced with greps:**
+- gate reads `packet.pkg_json`, the final package — CLEAN
+- `listB` is *correctly* pre-swap (zap node `290709248` reads "### Original Skills 1 ###") — CLEAN
+- `skillLineage`, `insertions` compare against what shipped — CLEAN
+- the ATS analysis tables were the only leak — NOW HANDLED
+- **still open:** `swaps.ts:185` credits every Call-2 insertion to the ATS pass and stores
+  *"reworded by the ATS pass"* when Call 2 did it (`D:swap-screen-reads-a-dead-pass`)
+
+**Three of my own errors this lane**, all in memory.md Hardening: a bad conflict-hunk splice that
+broke one file and silently shortened two, three INERT mutation verdicts that were my own
+invocation, and two fixture shapes asserted without reading.
