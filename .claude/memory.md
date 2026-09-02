@@ -5434,3 +5434,62 @@ functions across 11 files — not the import closure, which is 50 files and DOES
 transport (`appPackets` → `pipeline`). A grep of imports would have given the wrong answer. It ran a
 sanity control proving its analyser could still find the model path from `artifactDocument`, so the
 negative is a measured absence rather than a broken tool.
+
+## Baseline route: named per-slot overrides (2026-09-02)
+
+`POST /api/app/baseline-artifacts` builds MASTER-FILLED template copies with **no model call**.
+Two ways to set list slots, both optional:
+
+```jsonc
+{
+  "company": "Trinnex",              // -> @Company; defaults to "Company X"
+  "types": ["resume"],               // default ["resume","portfolio"]; "cover" renders blank, see the route note
+  "relevant": [[...],[...],[...]],   // positional shorthand for the three Relevant lists
+  "fields": {                        // NAMED per-slot override -- wins over `relevant`
+    "SkillsBullets1": [...], "SkillsBullets2": [...], "ExpertiseBullets": [...],
+    "RelevantBullets1": [...], "RelevantBullets2": [...], "RelevantBullets3": [...]
+  }
+}
+```
+
+- Only `SLOT_FIELDS` keys are honoured; anything else is ignored (a typo cannot overwrite
+  `ResumeSummary` or an `@`-placeholder with a list).
+- Array or string only. `42`/`true` are ignored, not coerced into a one-item list.
+- An empty/blank list is ignored, never applied — it cannot blank a slot MasterContext filled.
+- **Not trimmed to the slot count.** Over-capacity is reported in the response as
+  `slotOverflow: [{field, items, capacity}]`. Live example: the owner's skills column 2 carries 9
+  items against a capacity of 8; all nine render and the response says so.
+- Template slot counts (as configured today): Skills1 10, Skills2 8, Expertise 6, Relevant 3/3/3.
+
+**HOW TO CHANGE A BUILT PACKET'S SLOTS INSTEAD** (a real tuned packet, not the baseline): the
+baseline route builds its pkg in-process and never reads `pkg_json`, so `fields` does NOT apply
+there. Use the two-step — `POST /api/app/artifact/{id}/content {"pkg":{...}}` merges
+(`{...cur, ...body.pkg}`, so everything else is preserved), then
+`POST /api/app/artifact/{id}/document {}` re-renders. **Check `packet.jd_grounded` FIRST**: if it
+is not `true` while the opportunity has posting text, `buildTemplatedArtifact` treats the cache as
+stale and REGENERATES from the model, discarding the overlay and rewriting every tailored field.
+`qcApplied: null` in the render response is the proof the cached package was used and no model ran.
+
+**Prove the result by reading the DOCUMENT, not the response:**
+`GET /api/diag/doc-layout?artifactId=<id>&type=resume` returns the rendered text per section.
+
+Guards: `H:baseline-slot-override`, `H:baseline-slot-overflow` (4 mutations, 4 FIRED).
+
+### Hardening — three lessons from this build
+1. **A re-stated target REPLACES the earlier one; never merge them.** Asked for a MasterContext
+   build with the nine, I edited the Trinnex tuned packet instead (carrying forward "use them for
+   Trinnex" from hours earlier) and then re-rendered a compact resume nobody asked for. Owner:
+   *"i clearly said i wanted a mastercontext build with the 9 added in the second step... why do
+   what i didnt ask for?"*
+2. **`mutate.sh` restores SOURCE, not `dist/`.** The harness's last build compiled the mutant, so
+   running the suite immediately after reports against mutated output — it showed a bogus failure
+   and read as a red commit. Always `npm run build` after a mutation run.
+3. **An INERT mutation is a coverage hole until proven equivalent.** Dropping `|| cap <= 0` left
+   the suite green; it was not equivalent (a capacity of 0 would flag every non-empty slot). The
+   assertion was added and the mutation then FIRED.
+
+### Open, uncaused by this work
+The STATIC template content changed between the 21:30 and 02:20 baseline builds — certifications
+became the MIT set, Xylem title `ENTERPRISE SOFTWARE STRATEGY` -> `SOFTWARE & DIGITAL STRATEGY`.
+Same packet, same route, so the resume template resolved differently across those hours. Cause
+unestablished.
