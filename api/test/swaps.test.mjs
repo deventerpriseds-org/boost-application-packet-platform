@@ -2,6 +2,7 @@
 // (pipeline.ts buildPackageForJD Call-1/Call-3, mt17.assemblePackage).
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import {
   splitItems, similarity, attribute, buildSwaps, LISTS, LIST_FIELDS,
   SWAP_THRESHOLD, ATTRIBUTION_THRESHOLD, slotsFor,
@@ -854,4 +855,47 @@ test('H:master-key-parity: LIST_FIELDS.masterKey mirrors evidence.MASTER_BASELIN
     assert.equal(LIST_FIELDS[list].masterKey, MASTER_BASELINE_FIELD[LIST_FIELDS[list].merge],
       `${list}: swaps.ts says ${LIST_FIELDS[list].masterKey}, evidence.ts says ${MASTER_BASELINE_FIELD[LIST_FIELDS[list].merge]}`)
   }
+})
+
+test('H:origin-is-membership-not-authorship: pass_b survives a Call 3 that produced nothing', () => {
+  // THE MISREADING THIS PINS, and it cost a whole lane on 2026-09-02. `swaps.ts` used to claim in a
+  // header comment that "Call 3 (ATS QC + merge) -> finalSkills1/2 ... = origin `pass_b`". That was
+  // read as an AUTHORSHIP claim, written into .claude/DEFERRED.md, then into an AC brief AS A
+  // PREMISE, and an independent pass designed six criteria and priced a production migration around
+  // a defect that was never in the data.
+  //
+  // `origin` has only ever been MEMBERSHIP: `pass_a` = in the baseline, `pass_b` = in the shipped
+  // list and not in the baseline. `finals` is `pkg[f.merge] ?? call3[f.passB]` — the SHIPPED package
+  // FIRST, Call 3 only as a fallback.
+  //
+  // THE FIXTURE IS THE LIVE SHAPE, not one invented to pass. db-query run 33635773017 measured
+  // len(call3) === 0 for all five final* fields on opportunity 9f9c370a, and `pipeline.ts:536`'s
+  // `p3.value || {}` produces exactly this `{}` whenever the QC pass returns no parseable JSON.
+  const baseline = 'Product roadmap\nStakeholder alignment'
+  const shipped = 'Product roadmap\nStakeholder alignment\nHiring technology strategy'
+  const { candidates } = buildSwaps({
+    call1: { skills1: baseline },
+    call3: {},                                    // Call 3 produced NOTHING, as in production
+    pkg: { SkillsBullets1: shipped },             // the third item came from Call 2
+  })
+  const added = candidates.find((c) => c.label === 'Hiring technology strategy')
+  assert.ok(added, 'the item that is in the shipped list but not the baseline must be a candidate')
+  assert.equal(added.origin, 'pass_b',
+    'pass_b means "in what shipped, not in the baseline" — it must NOT depend on Call 3 having ' +
+    'produced anything, because on the measured packet Call 3 produced zero characters')
+  const kept = candidates.find((c) => c.label === 'Product roadmap')
+  assert.equal(kept.origin, 'pass_a', 'and a baseline item stays pass_a')
+})
+
+test('H:origin-comment-does-not-claim-authorship: the prose cannot re-teach the wrong meaning', () => {
+  // A guard on a COMMENT, which this repo normally refuses — prose does not run. It earns the
+  // exception because the comment IS the defect here: the code was always correct and the false
+  // sentence in its header is what propagated into a ledger row, a brief, and an AC pass.
+  // Narrow on purpose: it forbids re-binding pass_b to a specific call, not any mention of Call 3.
+  const s = readFileSync(new URL('../src/functions/tests/swaps.ts', import.meta.url), 'utf8')
+  const header = s.slice(0, s.indexOf('export type Origin'))
+  assert.doesNotMatch(header, /Call 3[^\n]*=\s*origin `pass_b`/,
+    'the header must not re-assert that Call 3 is what pass_b means')
+  assert.match(header, /MEMBERSHIP, NOT AUTHORSHIP/,
+    'and it must say plainly what pass_b does mean, so the next reader cannot repeat the misreading')
 })

@@ -3,12 +3,34 @@
 // The packet screen shows all originals against all finals, so an unchanged item is data, not noise:
 // "we looked at this and kept it" is a different statement from "we never considered it".
 //
-// HOW THIS MAPS ONTO THE REAL PIPELINE (pipeline.ts buildPackageForJD, mt17.assemblePackage):
-//   Call 1 (resume writer)  -> skills1/skills2/relevant1..3          = origin `pass_a`
-//   Call 3 (ATS QC + merge) -> finalSkills1/2, finalRelevant1..3     = origin `pass_b`
-//   assemblePackage prefers Call 3 over Call 1 per slot — THAT preference is the swap decision, and
-//   it is recoverable from the three payloads with no model call, which is what the acceptance
-//   ("rendering the swap table requires no model call") demands.
+// WHAT `origin` MEANS. IT IS MEMBERSHIP, NOT AUTHORSHIP — read this before citing it.
+//
+//   `pass_a`           -> the label is in the BASELINE list (the owner's master template, or Call 1
+//                         where no master text exists for that field)
+//   `pass_b`           -> the label is in the SHIPPED list and NOT in the baseline
+//   `profile_original` -> the label is the owner's own text (master or profile), whichever list it
+//                         appears in — `originOf` overrides both of the above
+//
+// `pass_b` DOES NOT NAME A PASS, and the earlier version of this comment said it did: "Call 3
+// (ATS QC + merge) -> finalSkills1/2 ... = origin `pass_b`". That was false, and it cost a whole
+// lane — it was written into `.claude/DEFERRED.md`, then into an AC brief AS A PREMISE, and an
+// independent pass designed six criteria and priced a production migration around it before anyone
+// re-read `originOf`'s call sites (2026-09-02).
+//
+// The code has never made an authorship claim. `:490-494` assigns `pass_b` by set difference —
+// `finals` minus `originals` — and `finals` is `pkg[f.merge] ?? call3[f.passB]`, the SHIPPED package
+// first with Call 3 only as a fallback. On the live Trinnex packet Call 3 returned 0 characters for
+// all five `final*` fields (db-query run 33635773017) and `pass_b` rows were still written, correctly:
+// they were items Call 2 introduced, and "in what shipped, not in the baseline" is true of those.
+//
+// So: `passA`/`passB` in `LIST_FIELDS` below are FIELD-NAME GROUPS (which key to read a list from).
+// They are not definitions of the `origin` enum values, despite sharing the words. That collision is
+// what was misread. `H:origin-is-membership-not-authorship` fails if the assignment is ever changed
+// to depend on which call produced the text.
+//
+// WHICH PASS actually produced a field's text is a different question with a different answer:
+// `skillLineage` (`packetBuild.ts`), which is handed all three call payloads and the ASSEMBLED
+// package — deliberately the pre-correction one, so the comparison can still match.
 //
 // DRIVER, and a correction to an earlier correction. The backlog asks for `driver='rule'` on
 // omission-list drops "so they are never presented as posting-driven", and this module first claimed
