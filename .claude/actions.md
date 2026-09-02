@@ -7442,3 +7442,35 @@ tally lines** — a derived value with no deriver, which IS the defect. DOWNSTRE
 guard in `prototypeCoverage.test.mjs`, and the owner reading status. The tallies had **no consumer
 that validated them**, which is exactly why 11 of 11 rotted while the hand-recomputed headline stayed
 correct. EXTEND, not new: `prototypeCoverage.test.mjs` already owns doc staleness.
+
+### ACT-2026-09-02-i — the tally guard, re-implemented FROM cold ACs; the AC pass rejected 3 of my choices
+
+Withdrawing it (ACT-h) paid for itself immediately. `docs/qc-evidence/AC-tally-drift-guard.md`
+(537 lines, written against a tree where the guard was absent) found **three real defects in the
+version I had shipped**, none of which I would have caught by re-reading my own code:
+
+1. **"the verdict is the 4th cell" is FALSE.** Rows carry 3, 5, 6 and 7 cells — §4.12 is a 3-cell
+   table with the verdict in cell 2 — so my parser resolved NOTHING for those rows and only looked
+   correct because a `cells.length < 4` guard skipped them. I had written **a second row parser into
+   the one file whose header records a second parser reporting "129 BUILT against a real 151."**
+   The fix is to reuse the file's own `parse()`, which resolves 221/221.
+2. **Section boundaries do not partition rows.** One heading at `:487` covers §4.11 AND §4.12 —
+   14 rows against a correct `§4.11 tally — 9 rows`. Attribute by ROW-ID PREFIX.
+3. **A live cry-wolf mine.** `:346` is an orphan fragment `ABSENT **2** · DELIBERATE **7**.` inside
+   §4.5, whose rows hold 0 ABSENT and 6 DELIBERATE. A section-scoped scanner fires TWICE on a correct
+   document on day one. Scan the tally LINE. `:346` is left in place as a permanent negative control.
+
+It also closed a hole my version left open: "only check the categories the line names" lets a
+non-zero category be DROPPED and stay green — the §4.10/§4.11 shape. `sum(stated) == stated N rows`
+forbids it with no category list to maintain. And it named `AC-5` (exactly 11 tally lines must parse)
+as load-bearing: without it the failure mode is not a misfire but **the guard silently ceasing to
+exist**, which is the original defect one level up.
+
+**Shipped:** 4 assertions + a not-vacuous test that reinstates each defect INTO the document in-suite
+(the `deferredLedger.test.mjs:235` pattern, which has anchor-found and change-applied assertions —
+the in-suite equivalent of `mutate.sh`'s NOT-APPLIED outcome). App suite **436/436**. `mutate.sh`
+cross-check against the real §4.11 defect: **FIRED**.
+
+**Honest gap the AC pass surfaced and I am not papering over:** `H26` enforces slug naming by reading
+`new URL('./hardening.test.mjs')`, so it is **structurally blind to `app/test/`**. These H-cases are
+slug-named by discipline, not by enforcement.
