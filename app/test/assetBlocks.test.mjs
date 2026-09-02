@@ -20,7 +20,13 @@ import {
   ORIGINAL_NONE_NOTE, originalState, PLACEHOLDER_NOTE, placeholderToken,
   OMIT_LIST_RATIONALE, omitListCaveat, restoreOptions, shortenAction,
   CROSS_LIST_RATIONALE_PREFIX, isCrossListDrop,
+  attentionWithFields, unplacedFindings, unplacedOf, unplacedTarget, unplacedReason,
+  registerFieldOwners, NO_OWNER_REASON, UNPLACED_LINK_HOOK,
+
+  pickListModel, pickListAsk,
 } from '../src/assetBlocks.js'
+import { severityCounts } from '../src/assetGate.js'
+import { findingsByField, QC_HOOKS } from '../src/qcRail.js'
 
 const src = (rel) => readFileSync(fileURLToPath(new URL(rel, import.meta.url)), 'utf8')
 // Comments describe the rule; only real code can break it.
@@ -1308,4 +1314,256 @@ test('H:omit-caveat-rationale-parity: one producer, and it is the rule branch', 
   const objStart = before.lastIndexOf('swaps.push({')
   assert.ok(objStart !== -1 && before.slice(objStart).includes("driver: 'rule'"),
     'the omit-list rationale is no longer written on a driver:\'rule\' row — omitListCaveat filters on both')
+})
+
+// ── a line with no swap row must not render a blank status ──────────────────────────────────────
+//
+// Owner, 2026-08-29, looking at the live packet: *"the prototype shows the buttons regardless and
+// an unchanged value if not swapped. that's better than showing nothing which doesn't match the
+// design and leaves me wondering if something broken"*. The prototype's own list
+// (`docs/qc-evidence/qc/assets.jsx:292`) renders `unchanged` for every non-swapped item; the app
+// rendered an empty string, and an empty cell in a provenance column is indistinguishable from a
+// broken one.
+//
+// The claim is still evidence-bounded, which is why the second case exists: `unchanged` is only
+// asserted when the list HAS attribution and this line simply was not named by it. With no swap
+// rows at all nothing judged the list, and reporting absent evidence as a finding is the one thing
+// this codebase refuses to do everywhere else.
+test('an unswapped line says "unchanged" when the list has attribution', () => {
+  const m = listBodyModel(LIST_ROW, [SWAP], { artifactId: 'art-resume', listOwners: {} })
+  const untouched = m.lines.find((l) => !l.swap)
+  assert.ok(untouched, 'the fixture must contain a line no swap row names')
+  assert.equal(untouched.text, 'Ran the intake process')
+  assert.equal(untouched.status, 'unchanged',
+    'a line the attribution did not name survived the pass — saying nothing reads as broken')
+})
+
+test('an unswapped line stays silent when the list has NO attribution', () => {
+  const m = listBodyModel(LIST_ROW, [], { artifactId: 'art-resume', listOwners: {} })
+  assert.equal(m.lines.length, 2)
+  for (const l of m.lines) {
+    assert.equal(l.status, '',
+      'with no swap rows nothing judged this list, so "unchanged" would report absent evidence as a finding')
+  }
+})
+
+// ── SPEC 4.4-29 · the findings the field margins do NOT show ─────────────────────────────────────
+//
+// THE DEFECT THESE GUARD, MEASURED. `origin/ui-fixtures:raw-dump.json` (opp `9f9c370a-...`, 540
+// check rows): the resume's asset header prints `40 to fix · 33 to review` = 73 findings while the
+// field margins under it render **20**; the compact resume prints 47 and renders **2**. The gap is
+// structural — `severityCounts` (assetGate.js) counts every fail/warn ROW, while `findingsByField`
+// (qcRail.js) emits one only where `sectionIdForOffender` resolves an offender AND
+// `AssetBlocks.jsx` then renders only `findings[r.merge_field]` for THIS artifact's own rows. Ten of
+// the compact resume's invisible rows name `RelevantBullets1/2/3` and `ExpertiseBullets`, fields the
+// RESUME renders — a real cross-asset navigation, which is the `Go to field ->` the prototype puts
+// on that list (`docs/qc-evidence/qc/assets.jsx:257`).
+
+const UP_RENDERED = ['ResumeSummary', 'SkillsBullets1']
+
+// Distinct check_keys so "how many ROWS were placed" is countable from findingsByField, which keys
+// its output by FIELD and emits one entry per (row, field) pair.
+const UP_RESULT = {
+  results: [
+    // placed: names a field this card renders
+    { check_key: 'whitespace', engine: 'deterministic', state: 'fail', expected: 'no stray spacing',
+      offenders: ['ResumeSummary: two spaces'] },
+    // placed on a field this card renders, via the second offender
+    { check_key: 'ai_tells', engine: 'deterministic', state: 'warn', expected: '',
+      offenders: ['#3 leverage', 'SkillsBullets1: synergy'] },
+    // UNPLACED, names a field only a SIBLING renders
+    { check_key: 'relevant_char_limit', engine: 'deterministic', state: 'fail', expected: 'under 20 chars',
+      offenders: ['RelevantBullets1: far too long a line'] },
+    // UNPLACED, names no field at all
+    { check_key: 'cross_list_redundancy', engine: 'reviewer', state: 'fail', expected: '',
+      offenders: ['#7 repeated across two lists'] },
+    // UNPLACED, names TWO fields, so sectionIdForOffender refuses to pick one
+    { check_key: 'word_counts', engine: 'deterministic', state: 'warn', expected: '',
+      offenders: ['ResumeSummary and ExpertiseBullets disagree'] },
+    // not a finding at all - must never reach either list
+    { check_key: 'company_named', engine: 'deterministic', state: 'pass', expected: '', offenders: [] },
+  ],
+}
+
+const UP_OWNERS = registerFieldOwners(
+  registerFieldOwners({}, 'art-resume', 'Resume', ['RelevantBullets1', 'ExpertiseBullets']),
+  'art-compact', 'Compact resume', UP_RENDERED)
+
+// THE RECONCILIATION. Not a tautology over my own filter: the "placed" side is counted from
+// `findingsByField` — the OTHER function, the one the margins actually render from — so if its
+// placement rule and `unplacedOf`'s ever diverge, this sum breaks. That divergence IS the defect.
+test('H:unplaced-reconciles-the-header-count: placed + unplaced == every finding the header counts', () => {
+  const counts = severityCounts(UP_RESULT)
+  const total = counts.fix + counts.review + counts.soft
+  assert.equal(total, 5, 'the fixture must carry five findings and one pass')
+
+  const byField = findingsByField(UP_RESULT, [])          // no exclusions: count what placement CAN see
+  const placed = new Set()
+  for (const f of UP_RENDERED) for (const row of byField[f] || []) placed.add(row.check_key)
+
+  const unplaced = unplacedFindings(UP_RESULT, UP_RENDERED)
+  assert.equal(placed.size + unplaced.length, total,
+    'every counted finding must be either in a field margin or in the unplaced list - the gap is the bug')
+  assert.equal(unplaced.length, 3)
+  assert.deepEqual(unplaced.map((f) => f.check_key).sort(),
+    ['cross_list_redundancy', 'relevant_char_limit', 'word_counts'])
+})
+
+test('H:unplaced-is-the-complement-never-a-duplicate: a finding in a margin is not listed again', () => {
+  const unplaced = unplacedFindings(UP_RESULT, UP_RENDERED)
+  const keys = unplaced.map((f) => f.check_key)
+  assert.ok(!keys.includes('whitespace'),
+    'whitespace names ResumeSummary, which this card renders - listing it again is the second enumeration 4.2-4 forbids')
+  assert.ok(!keys.includes('ai_tells'),
+    'ONE offender naming a rendered field is enough to place the row - it renders in that margin')
+  assert.ok(!keys.includes('company_named'), 'a pass row is not a finding and belongs on neither list')
+})
+
+test('H:unplaced-worst-first: the thing that blocks is the thing read first', () => {
+  const unplaced = unplacedFindings(UP_RESULT, UP_RENDERED)
+  const rank = { fix: 3, review: 2, soft: 1 }
+  for (let i = 1; i < unplaced.length; i += 1) {
+    assert.ok(rank[unplaced[i - 1].sev] >= rank[unplaced[i].sev],
+      'the same ordering findingsByField uses, or the two surfaces read in different orders')
+  }
+  assert.equal(unplaced[0].sev, 'fix')
+})
+
+// NO DEAD UI, the half a structural grep cannot reach: a link is offered ONLY where an artifact
+// that renders the named field actually exists. `qc/assets.jsx:257` gates on `a.sec` for the same
+// reason, and `requirementUsage` states the identical null contract.
+test('H:unplaced-link-only-with-a-real-target: no target, no control, and always a reason', () => {
+  const unplaced = unplacedFindings(UP_RESULT, UP_RENDERED)
+  const byKey = Object.fromEntries(unplaced.map((f) => [f.check_key, f]))
+
+  const cross = unplacedTarget(byKey.relevant_char_limit, UP_OWNERS, 'art-compact')
+  assert.deepEqual(cross, { artifactId: 'art-resume', mergeField: 'RelevantBullets1', label: 'Resume', self: false },
+    'a field a SIBLING renders is a real navigation - this is the compact-resume case, 10 rows on the live fixture')
+  assert.equal(unplacedReason(byKey.relevant_char_limit, UP_OWNERS, 'art-compact'), '',
+    'a row that offers a link needs no reason')
+
+  for (const key of ['cross_list_redundancy', 'word_counts']) {
+    assert.equal(unplacedTarget(byKey[key], UP_OWNERS, 'art-compact'), null,
+      `${key} names no resolvable field - a link here would land nowhere`)
+    assert.ok(unplacedReason(byKey[key], UP_OWNERS, 'art-compact').length > 10,
+      'not clickable must never be mute - inertReason is the rail\'s own wording, reused')
+  }
+
+  // A field nothing in the packet renders: the finding names one, and there is still no target.
+  const orphan = unplacedTarget({ check_key: 'x', fields: ['@CoverLetterBody'], offenders: [] }, UP_OWNERS, 'art-compact')
+  assert.equal(orphan, null)
+  assert.equal(unplacedReason({ check_key: 'x', fields: ['@CoverLetterBody'], offenders: [] }, UP_OWNERS, 'art-compact'),
+    NO_OWNER_REASON, 'a named field no asset renders is stated, not silently dropped')
+
+  assert.equal(unplacedTarget(byKey.relevant_char_limit, {}, 'art-compact'), null,
+    'an empty registry offers nothing - the asset steps start with {} until the cards report in')
+})
+
+test('H:unplaced-link-is-the-rail-hook-not-a-second-name: SPEC 4.4-29 selects on qc-go-to-field', () => {
+  // The row the render sweep measured as 0 nodes. A second hook name would make the sweep's own
+  // selector unable to see the fix.
+  assert.equal(UNPLACED_LINK_HOOK, 'qc-go-to-field')
+  assert.equal(UNPLACED_LINK_HOOK, QC_HOOKS.goToField, 'one concept, one hook, imported not retyped')
+
+  const jsx = stripComments(src('../src/screens/AssetBlocks.jsx'))
+  const block = jsx.slice(jsx.indexOf('function UnplacedFindings'), jsx.indexOf('function DistributionMeter'))
+  assert.ok(block.length > 500, 'UnplacedFindings not found - this assertion has gone stale')
+  assert.match(block, /data-qc=\{UNPLACED_LINK_HOOK\}/, 'the link must carry the shared hook constant')
+  assert.ok(!/data-qc="qc-go-to-field"/.test(block), 'hand-typed hook strings drift from the constant')
+  assert.match(block, /\{target && onGoToField && \(/,
+    'the control must render only behind a resolved target AND a supplied navigator - no dead UI')
+  assert.match(block, /data-qc=\{BLOCK_HOOKS\.unplaced\}\s+data-qc-n=\{rows\.length\}/,
+    'the container must carry its count, or the reconciliation is not assertable from the DOM')
+  assert.match(block, /if \(!rows \|\| !rows\.length\) return null/,
+    'nothing to show means nothing renders - never an empty "0 findings" box')
+  assert.match(block, /onGoToField\(target\.artifactId, target\.mergeField\)/,
+    'it must call the SAME navigator the rail uses, with the target it resolved')
+})
+
+test('H:field-owners-withdraw-a-stale-owner: a card that stops rendering a field stops owning it', () => {
+  let owners = registerFieldOwners({}, 'a1', 'Resume', ['ResumeSummary', 'SkillsBullets1'])
+  assert.deepEqual(owners.ResumeSummary, [{ id: 'a1', label: 'Resume' }])
+
+  owners = registerFieldOwners(owners, 'a1', 'Resume', ['SkillsBullets1'])
+  assert.deepEqual(owners.ResumeSummary, [],
+    'a stale owner outliving the card that reported it is a link to a field that is no longer there')
+  assert.deepEqual(owners.SkillsBullets1, [{ id: 'a1', label: 'Resume' }])
+
+  const same = registerFieldOwners(owners, 'a1', 'Resume', ['SkillsBullets1'])
+  assert.equal(same, owners, 'an unchanged report must return the SAME object, or the effect re-fires forever')
+
+  assert.equal(registerFieldOwners(owners, null, 'X', ['ResumeSummary']), owners, 'no artifact id, no change')
+})
+
+test('H:one-report-two-registries: fields and lists come from the SAME card callback', () => {
+  // Two callbacks would let a card be registered as the owner of its lists and not of its fields.
+  const jsx = stripComments(src('../src/screens/AssetBlocks.jsx'))
+  // SCOPED TO THE CALL. An unscoped `[\s\S]{0,120}` window ran past the closing paren into the
+  // effect's own dependency array, where `fieldsKey` also appears - so deleting the argument left
+  // the assertion GREEN. Caught by mutation, which is the only thing that catches an inert guard.
+  const at = jsx.indexOf('onListsRendered(artifact.id')
+  assert.ok(at > 0, 'the card no longer reports at all - this assertion has gone stale')
+  const call = jsx.slice(at, jsx.indexOf('\n  }', at))
+  assert.match(call, /listsKey/, 'lists must still be reported')
+  assert.match(call, /fieldsKey/, 'the card must report lists AND fields on ONE call')
+
+  const pb = stripComments(src('../src/screens/PacketBuilder.jsx'))
+  const cb = pb.slice(pb.indexOf('const registerLists = useCallback'))
+  assert.match(cb.slice(0, 400), /registerListOwners\(prev, artifactId, label, lists\)/)
+  assert.match(cb.slice(0, 400), /registerFieldOwners\(prev, artifactId, label, fields\)/,
+    'both registries must be fed from that one report')
+  assert.match(pb, /fieldOwners=\{fieldOwners\} onGoToField=\{goToField\}/,
+    'the asset card must be handed the SAME navigator the QC rail is handed, never a second one')
+})
+
+// ── SPEC 4.5-12 — the pick list ─────────────────────────────────────────────────────────────────
+
+test('H:pick-list-shows-what-was-considered-not-only-what-shipped', () => {
+  // THE POINT OF THE ROW. A dropped item is the one the owner CANNOT otherwise see -- it is not on
+  // the page to be seen -- so a pick list that only lists what shipped would be a list of things
+  // already visible, which is no control at all.
+  const rows = [
+    { action: 'kept', to_label: 'Product roadmap', requirement_id: 'r1' },
+    { action: 'added', to_label: 'Hiring technology', requirement_id: null },
+    { action: 'dropped', from_label: 'Banned wording', driver: 'rule', rationale: OMIT_LIST_RATIONALE },
+    { action: 'dropped', from_label: 'Lives elsewhere', driver: 'rule', rationale: 'already listed in Skills 2' },
+  ]
+  const items = pickListModel(rows, { onPage: ['Product roadmap', 'Hiring technology'] })
+  assert.equal(items.length, 4, 'every considered item must appear, including the dropped ones')
+  const by = Object.fromEntries(items.map((i) => [i.text, i]))
+
+  assert.equal(by['Product roadmap'].selected, true)
+  assert.equal(by['Hiring technology'].selected, true)
+  assert.equal(by['Banned wording'].selected, false, 'a dropped item is not on the page')
+
+  // BLOCKED IS THE OWNER'S DO-NOT-USE LIST AND NOTHING ELSE. A cross-list drop is not a ban -- the
+  // item is fine and lives in another list -- and striking it through would accuse the owner's own
+  // wording of being forbidden. Exact match on the rationale, never a substring: this repo's
+  // standing rule is that anything naming an offender is exact, never fuzzy.
+  assert.equal(by['Banned wording'].blocked, true)
+  assert.equal(by['Lives elsewhere'].blocked, false,
+    'a cross-list drop was marked as banned - it is not on the do-not-use list')
+  assert.match(by['Lives elsewhere'].note, /already listed in/)
+})
+
+test('H:pick-list-seeds-a-request-and-sets-nothing', () => {
+  // There is no route that reorders a list. The checkboxes compose a SENTENCE; if they ever appear
+  // to commit, the control is lying about what it did. The ask must name the field and every chosen
+  // item, so the assistant is not guessing at "these" against the owner's own document.
+  const ask = pickListAsk('Skills 1', ['Product roadmap', 'Hiring technology'])
+  assert.match(ask, /Skills 1/)
+  assert.match(ask, /Product roadmap \| Hiring technology/)
+  assert.equal(pickListAsk('Skills 1', []), null, 'an empty selection must produce NO sentence')
+  assert.equal(pickListAsk('Skills 1', ['   ']), null, 'whitespace is not a selection')
+
+  // NO CANDIDATES, NO CONTROL.
+  assert.deepEqual(pickListModel([], {}), [])
+  assert.deepEqual(pickListModel(null, {}), [])
+
+  const BLOCKS = readFileSync(new URL('../src/screens/AssetBlocks.jsx', import.meta.url), 'utf8')
+  assert.match(BLOCKS, /onAsk=\{\(sentence\) => \{ setAskSent\(null\); seedAsk\(sentence\) \}\}/,
+    'the pick list must route through seedAsk, the same seeder its neighbours use - a second edit ' +
+    'path would be the parallel system, and it would be the one without the confirmation')
+  assert.ok(!/pickList[\s\S]{0,400}api\.\w+\(/.test(BLOCKS),
+    'the pick list calls an API directly - it seeds, it does not commit')
 })

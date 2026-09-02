@@ -63,18 +63,33 @@ Rule (`docs/APP_ARCHITECTURE.md`): components read tokens, never hardcoded color
 - `.claude/` — `memory.md` (durable log, 1066 L), `actions.md` (ACT tracker, 820 L), this file.
 
 ### Build / test / lint — what actually EXISTS
+> **CORRECTED 2026-08-29. This table used to say `test: does not exist` for both packages and that
+> `"run the tests" is not available`. That is FALSE and was materially misleading** — a session
+> trusting it skips the single cheapest guard in the repo, the one the 2026-08-27 hardening entry
+> makes rule #1 (*"`npm test` before ANY bespoke verification — it already contains every lesson this
+> repo learned"*). The claim was written 2026-08-16, before the suites were built, and never revisited.
+
 | | app/ | api/ |
 |---|---|---|
 | build | `npm run build` (`vite build`) | `npm run build` (`tsc`) |
 | dev | `npm run dev` (`vite`) | `npm run dev` (`build && func start`) |
+| **test** | `npm test` — 17 unit files (`node --test test/*.test.mjs`) | **`npm test` — 47 files; builds first, then `node --test`** |
+| **browser tests** | 9 runners: `test:browser`, `test:blocks`, `test:qc`, `test:contrast`, `test:margin`, `test:posting`, `test:tally`, `test:assistant` | — |
 | other | `preview` | `watch`, `start` |
-| **lint** | **does not exist** | **does not exist** |
-| **test** | **does not exist** | **does not exist** |
+| **lint** | still does not exist | still does not exist |
 
-There is **no test framework, no lint config, and no `tsconfig.json` under `app/`** anywhere in this
-repo. `api-test.yml` is a live-API caller, not `npm test`. So "run the tests" is not available —
-verification is the GitHub-Actions loop in §4. Build both (`cd api && npm ci && npm run build`,
-`cd app && npm ci && npm run build`) before any commit that touches them.
+**Measured 2026-08-29 in a cold container:** `cd api && npm ci && npm test` →
+**892 tests, 874 pass, 0 fail, 18 skipped, 7.5s.** `api/test/hardening.test.mjs` is the H-case
+failure memory described in `CLAUDE.md`; running it is how you inherit every mistake this repo has
+already made.
+
+**`npm ci` first.** A fresh container has no `node_modules`, and because `api`'s `test` script runs
+`tsc` before `node --test`, a missing install surfaces as ~40 lines of `TS2591: Cannot find name
+'process'` / `TS2307: Cannot find module '@azure/functions'`. That is a missing install, **not** a
+broken build and not a real type error — do not start "fixing" it.
+
+`api-test.yml` is a live-API caller, not `npm test`; the two verify different things and you want
+both. Build both packages before any commit that touches them.
 
 ---
 
@@ -152,14 +167,27 @@ than claiming UI verification you didn't get.
    statuses with evidence links as you go.
 5. **`remember`** — read `.claude/memory.md` at start; append durable facts and commit at the end.
 
-**Where the skills actually are (verified this session):** `CLAUDE.md` says they're cloned to
-`/workspace/eds-claude-skills` — **that path does not exist in this container**, and the EDS skills are
-not installed into `/root/.claude/skills/` either. They are in the attached repo at
-**`/home/user/eds-claude-skills/.claude/skills/*.md`** (`define-acceptance-criteria.md`,
-`verify-work.md`, `remember.md`, `track-actions.md`, `bootstrap.md`, `uat.md`, …). Read those files
-directly and follow them manually. The **`verifier` agent IS available as a subagent type** — spawn it
-by name. To modify a skill, edit/commit/push the `/home/user/eds-claude-skills` clone; do **not** call
-`add_repo` for it (returns MCP `-32003 requires approval`).
+**Where the skills actually are — and why this paragraph kept being written from a BROKEN container.**
+The state it described (no `/workspace`, nothing in `/root/.claude/skills/`) is what a container looks
+like when **`setup.sh` never ran**, which is a fault to fix rather than a layout to document. Run
+`bash /home/user/eds-claude-skills/setup.sh` and it resolves: 16 skills land in `/root/.claude/skills/`,
+the `verifier` agent in `/root/.claude/agents/`, `/workspace/eds-claude-skills` is cloned, and the six
+enforcement hooks install at `_eds_version` 19+ (done 2026-08-29; the same cold state was reported
+2026-08-16, so it recurs).
+
+**Check, don't assume** — the guards cannot warn you they are missing, because being missing is what
+stops them running:
+```bash
+python3 -c "import json;d=json.load(open('/home/user/.claude/settings.json'));print({e:[h.get('_eds_version') for g in v for h in g['hooks']] for e,v in d['hooks'].items()})"
+```
+Missing file, or missing any of `SessionStart` / `Stop` / `PostToolUse` / `UserPromptSubmit` ⇒ run
+`setup.sh` before anything else.
+
+The **`verifier` agent is available as a subagent type** — spawn it by name. To modify a skill,
+edit/commit/push the `/home/user/eds-claude-skills` clone; do **not** call `add_repo` for it (returns
+MCP `-32003 requires approval`). **Registering is not the same as editing:** `register_repo_root`
+takes `owner`/`repo` only — passing `/workspace/eds-claude-skills` is REJECTED in a managed
+multi-repo session, which names `/home/user/eds-claude-skills` as its clone target.
 
 A Stop hook gates completion claims: bootstrap ran, `memory.md` + `actions.md` updated, and any
 risky/hard-to-reverse action (commit, push, delete/overwrite) was **stated in your own text BEFORE the
@@ -257,6 +285,12 @@ the owner for a key. Check `/api/config-status` (booleans + masked hints) before
 ---
 
 ## 11. Current state
+
+> ⚠️ **THIS SECTION IS STALE — it describes `main` at `01cf5b0` (2026-08-16). As of 2026-08-29 `main`
+> is `2c693d1`, ~9 days and a large amount of QC/evidence work later.** Treat everything below as
+> historical. For the live picture read, in this order: `.claude/DEFERRED.md` (the ledger — **44 rows
+> OPEN**, 47 CLOSED), the bottom of `.claude/memory.md`, then `.claude/HANDOVER.md` for the
+> QC/evidence layer specifically. `git log --oneline -15 origin/main` beats all of them.
 
 **Recent commits (`main` == feature branch == `01cf5b0` at time of writing):**
 ```

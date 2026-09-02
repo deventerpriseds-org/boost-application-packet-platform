@@ -25,6 +25,24 @@
  */
 export const POSTING_HOOKS = {
   usedIn: 'posting-used-in',   // SPEC 4.1-20 - the JD row's link into the field a swap landed in
+  // The owner accepts or refuses a model-proposed excerpt. This is the ONLY control that promotes a
+  // `proposed` row into must_have_coverage's numerator, so it is the one that lets the owner be the
+  // accuser the engine's house rule demands.
+  confirm: 'evidence-confirm',
+  confirmYes: 'evidence-confirm-yes',
+  confirmNo: 'evidence-confirm-no',
+  confirmed: 'evidence-confirmed',
+  // A proposal that was CHALLENGED and held, and therefore COUNTS. Hooked separately from
+  // `confirmed` because "a model was challenged on this and it held" and "you said yes" are
+  // different warrants, and a UAT run has to be able to tell them apart on the page.
+  vetted: 'evidence-vetted',
+  vettedWhy: 'evidence-vetted-why',
+  // THE THREE STATES A COUNTED ROW CAN BE IN, each with its own hook so a UAT run can tell
+  // them apart. They are genuinely different claims about who stands behind the number:
+  // a model alone, the owner's yes, or the owner's no.
+  countingNow: 'evidence-counting-now',
+  vetoed: 'evidence-vetoed',
+  missing: 'evidence-missing',
   card: 'posting-analysis',
   stale: 'posting-stale',
   tab: 'jd-tab',
@@ -420,6 +438,66 @@ export function evidencePresentation(row) {
     // A provable excerpt whose record has since been edited: the quote holds, the RANKING is stale.
     // Surfaced rather than suppressed - the endpoint's own comment calls it a reason to re-resolve.
     recordChanged: !!(ev && ev.recordChanged),
+    // WHO FOUND IT, and WHETHER A HUMAN HAS STOOD BEHIND IT. Both were already on the payload and
+    // had no reader, which is why the owner could see a model's excerpt and had no way to accept it.
+    //
+    // `method` distinguishes a deterministic rule's excerpt from a model's proposal. `checks.ts`
+    // states the rule this serves: "a model may PROPOSE, only an exact rule may ACCUSE" — a
+    // `proposed` row is shown but does NOT count toward `must_have_coverage`, and confirming it is
+    // the ONLY thing that promotes it. So the two fields together decide whether a confirm control
+    // belongs on this row at all.
+    method: ev ? trim(ev.method) : null,
+    // A proposal a human has accepted — READ FROM THE VERDICT, never from the raw columns.
+    // `H:evidence-read-from-the-verdict-not-the-columns` caught the first version of this reading
+    // `r.evidence_confirmed_at` directly and was right to: those keys are nulled for every
+    // non-verified row, so read that way they cannot tell "the confirmation lapsed" from "nobody
+    // ever confirmed it". Inside `ev`, a confirmation vanishes with the quote it vouched for.
+    confirmedAt: ev ? trim(ev.confirmedAt) : null,
+    confirmedBy: ev ? trim(ev.confirmedBy) : null,
+    // IS THERE STILL A DECISION FOR THE OWNER TO MAKE ON THIS ROW?
+    //
+    // RENAMED FROM `awaitingConfirmation`, because that name became a false description of the
+    // state. It meant "a model suggested this and it does not count until you say yes" — the whole
+    // point of the flag. Since the owner's instruction that proposals count until vetoed, the row
+    // is ALREADY counting and nothing is awaited; what remains is the owner's right to overrule it.
+    // Keeping the old name would have left every reader of this file believing the opposite of the
+    // behaviour, which is how a screen and a gate drift apart.
+    //
+    // `vetted` JOINED `proposed` here for the same reason it joined the server's decidable set: a
+    // vetted row also counts on model warrant, and leaving it out would make the STRONGEST model
+    // claims the only ones the owner cannot veto. A row already decided either way is not decidable
+    // again from this control — undoing a decision is a separate act with its own affordance.
+    decidable: !!(ev && ['proposed', 'vetted'].includes(trim(ev.method))
+      && !trim(ev.confirmedAt) && trim(ev.decision) !== 'vetoed'),
+    // VETTED — a proposal that was CHALLENGED and held, and the only model row that counts toward
+    // coverage. The owner has to be able to see which rows those are, because they are the ones
+    // moving the number: "coverage rose" is not falsifiable if a reader cannot tell a better profile
+    // from a chattier model. The reasoning behind it is already carried in `extra`, which is why
+    // this is a flag rather than a second copy of the sentence.
+    //
+    // It deliberately does NOT imply a human agreed. A vetted row still offers the confirm control,
+    // because the owner overruling a model is the point of that control existing.
+    vetted: !!(ev && trim(ev.method) === 'vetted'),
+    // THE OWNER SAID NO. Read from the verdict for the same reason `confirmedAt` is: a decision is
+    // about THIS EXCERPT, so when the excerpt stops being provable and `ev` goes null, the veto
+    // goes with it. A veto outliving its own excerpt would keep a row suppressed on the strength of
+    // a judgement the owner made about text that is no longer there.
+    vetoed: !!(ev && trim(ev.decision) === 'vetoed'),
+    // WHAT A SECOND READ SAID THIS EXCERPT FAILS TO SHOW — the material for deciding whether to
+    // veto. Always an array or null, never a bare string: the server stores text[] and a caller
+    // that has to type-check before mapping is a caller that will eventually forget.
+    missing: (ev && Array.isArray(ev.missing) && ev.missing.length) ? ev.missing : null,
+    // DOES THIS ROW COUNT RIGHT NOW — the question the owner is actually asking of the screen, and
+    // the one the app has never answered directly.
+    //
+    // It MIRRORS `ruleEvidenceOf` in checks.ts, deliberately and with the same order: veto first,
+    // then an allow-list of methods. That duplication is a real risk and it is the lesser one — the
+    // alternative is a screen that says a row counts while the gate does not count it, and a number
+    // the owner cannot reconcile with what they are looking at is worse than a rule written twice.
+    // `H:the-screen-and-the-gate-agree-about-what-counts` pins the two together so a change to one
+    // fails on the other.
+    countsNow: !!(ev && trim(ev.decision) !== 'vetoed'
+      && ['exact', 'anchored', 'proposed', 'vetted'].includes(trim(ev.method))),
     // Null when the state is `verified`; otherwise the ONE sentence for this state, from the API.
     note: trim(r.evidenceNote),
     // What was looked for, on rows with no provable excerpt. Endpoint-computed, never re-derived.

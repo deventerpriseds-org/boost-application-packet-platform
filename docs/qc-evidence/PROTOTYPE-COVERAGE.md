@@ -300,7 +300,7 @@ Import list read (`AssetBlocks.jsx:30-45`) — `CorrectionRow` comes from `QcRai
 | 4.5-9 | Body: list shape, `original → final` rows | `assets.jsx:283-303` (`FieldList`) | BUILT | `ListBody` in `AssetBlocks.jsx`; `shapeOf()` → `list`. Inventory §13: *"BUILT, with a different and better-sourced status column."* |
 | 4.5-10 | Body: `unchanged` on a kept row | `assets.jsx:299` | BUILT | Same component; the app's status column is sourced from `swap_decision.action`. |
 | 4.5-11 | Body: pipe block, monospace | `assets.jsx` | BUILT | `shapeOf()` `assetBlocks.js:147` → `pipe` |
-| 4.5-12 | Body: **pick-list** (`type: 'select'`, checkboxes + per-item requirement) | `assets.jsx:305-...` (`PickList`) | ABSENT | `shapeOf()` (`assetBlocks.js:144-151`) returns only `static` / `pipe` / `list` / `prose` — **no `select` shape exists.** Verified by reading the function, not by grep. Portfolio-only in the prototype, so no resume impact; needs per-item candidacy on the insertions payload. `check: absent app/src/assetBlocks.js 'select'` |
+| 4.5-12 | Body: **pick-list** (`type: 'select'`, checkboxes + per-item requirement) | `assets.jsx:305-...` (`PickList`) | **BUILT — CHANGED from ABSENT 2026-09-02** | SHIPPED as `PickList` (`AssetBlocks.jsx`), model `pickListModel`/`pickListAsk` (`assetBlocks.js`), mounted on `shape === 'list'` fields beside the other field seeders. **The blocker was the second half of this row, not the first.** `shapeOf()` still returns only `static` / `pipe` / `list` / `prose` and no `select` shape was invented -- inventing one would mean inventing a field type the pipeline never produces. What unblocked it was that the row's stated dependency, *"needs per-item candidacy on the insertions payload"*, had already been satisfied: `swapsForList` is threaded to every block and a swap row per candidate IS per-item candidacy, so nothing new is fetched. It SEEDS the assistant and commits nothing, exactly as the prototype's own control does (`onAsk`), because no route reorders a list. Guarded by `H:pick-list-shows-what-was-considered-not-only-what-shipped` and `H:pick-list-seeds-a-request-and-sets-nothing`, both mutation-proved. ORIGINAL NOTE: `shapeOf()` (`assetBlocks.js:144-151`) returns only `static` / `pipe` / `list` / `prose` — **no `select` shape exists.** Verified by reading the function, not by grep. Portfolio-only in the prototype, so no resume impact; needs per-item candidacy on the insertions payload. `check: absent app/src/assetBlocks.js 'select'` |
 | 4.5-13 | **Keyword hits highlighted in the draft text** | `assets.jsx:8-22` (`Marked`) | **BUILT — CHANGED from ABSENT** | `markRuns` imported `AssetBlocks.jsx:41`, called `:446`, `Marked` at `:446-460`, phrases assembled `:486`. Inventory build-order **row 1**, the top-ranked gap and "the unlock for four other rows" — it is built. |
 | 4.5-14 | Posting echoes highlighted (pale tan + underline) | `assets.jsx:8-22` | BUILT | Same pass — `:484` *"Both treatments go through markRuns in ONE pass"*; classes `HIGHLIGHT_CLASS.postingEcho` (`highlight.js`), tokens `theme.css`. |
 | 4.5-15 | Hovering a margin row lights its phrase in the text | `assets.jsx:159` | **BUILT — CHANGED from ABSENT** | `onMouseEnter={() => setActiveWording(phrase)}` `AssetBlocks.jsx:750`, and for a keyword chip `:794`; `active` compared by identity at `:451-456` with `HIGHLIGHT_ACTIVE_CLASS`. |
@@ -413,7 +413,7 @@ Against the 9 non-deferred rows: **7 BUILT (78%), 8 present in some form (89%).*
 | 4.8-18 | Swaps: verbatim posting quote | `evidence.jsx` | BUILT | `CompareTab` renders the stored quote column; `qcRail.js:324` guards it — *"a quote gets read as evidence"* — with a test greping for the column name. |
 | 4.8-19 | Swaps: the reason | `evidence.jsx` | BUILT | Same table (`rationale`). |
 | 4.8-20 | Swaps: `Undo this` | `evidence.jsx:232` | PARTIAL | Correction undo exists (`QcRail.jsx:578-579`); a per-**swap** undo on this tab does not. |
-| 4.8-21 | Swaps: `Ask why` | `evidence.jsx:233` | ABSENT | No equivalent control on `CompareTab` (`:300-355`, read in full). `check: absent app/src/screens/QcRail.jsx Ask why` |
+| 4.8-21 | Swaps: `Ask why` | `evidence.jsx:233` | **BUILT — CHANGED from ABSENT 2026-08-29** | Last column of `CompareTab`; the sentence, the artifact binding and every reason it is absent are `swapAskWhy` (`qcRail.js`). **It is a §4.11 substitution, per `AC-packet-ui-final.md` §2f/AC 34, and stays inside that AC's limits:** it seeds the assistant panel and sends nothing, no swap-revert mutation was built (there is none — `appSwaps.ts` is GET-only, which is why the prototype's `Undo this` does NOT ship beside it), and the `Why` column still prints the answer it always printed. **It is NOT the one-liner §14 called it:** the prototype interpolates `${r.list}`, which here is a CHECK-constrained enum (`skills_1`), so the list is resolved through `insertion.merge_field` → `FIELD_LABEL` to read "Skills 1". Guarded by `H:ask-why-never-names-the-raw-list-enum`, `H:ask-why-is-null-unless-it-has-an-artifact-to-be-about`, `H:ask-why-seeds-the-panel-and-sends-nothing`. |
 | 4.8-22 | Tab: **Passes** — what each loop closed / what remained / where it halted | `evidence.jsx:247-264` | BUILT | `LoopsTab` `QcRail.jsx:356-399` |
 | 4.8-23 | Tab: **Checks** — grouped by name, observed vs target, named offenders | `evidence.jsx:266-289` | BUILT | `ChecksTab` `QcRail.jsx:400-439`; `CheckRow` `:182-239`; offenders `AssetGateDrawer.jsx:93-100`. |
 | 4.8-24 | Tab: **Review** — blind second model: grade, agreement, prompt version, citations, critique | `evidence.jsx:291-334` | BUILT | `ReviewTab` `QcRail.jsx:440-480` |
@@ -539,6 +539,54 @@ already made once.
 ---
 
 ## 13. THE HEADLINE, AND THE DELTA
+
+### 13-CURRENT. Re-counted 2026-09-02 — THIS IS THE LIVE NUMBER
+
+> **THIS DOCUMENT IS THE BASELINE for prototype UI-parity progress** — owner-confirmed
+> 2026-09-02: *"I believe it's PROTOTYPE-COVERAGE.md ... update it for what is now done
+> regarding prototype UI parity progress."* Read §13-CURRENT for the live picture; §13a below is
+> the 2026-08-25 measurement, kept for its delta narrative and NOT current.
+
+> # **160 of 183 prototype elements present (87.4%)**
+>
+> | | Count | Share of 183 |
+> |---|---:|---:|
+> | **BUILT** | **160** | **87.4%** |
+> | **PARTIAL** | 22 | 12.0% |
+> | **ABSENT** | **1** | **0.5%** |
+> | *present (BUILT + PARTIAL)* | *182* | *99.5%* |
+>
+> **+11 BUILT since the 148 (80.9%) headline in §13a**, which was measured 2026-08-25 and never
+> caught up with the rows that shipped after it.
+>
+> **UPDATED 2026-09-02, second pass.** The owner directed *"finish 4.5 and 4.11... on desktop wide
+> the panel rather than float but you will need a different approach of your choosing for mobile."*
+> Both landed:
+> - **4.11-1** the assistant now DOCKS as a third column at `>= 1450px`, floats below that, and uses
+>   a new bottom-`sheet` Overlay variant on mobile. The shell cap moved 1280 -> 1560 (the
+>   prototype's own), which is the arithmetic that made docking possible at all.
+> - **4.5-12** `PickList` SHIPPED. It was scored ABSENT on `shapeOf()` having no `select` shape, but
+>   the row's real dependency was *"per-item candidacy on the insertions payload"* -- and that had
+>   already been satisfied for months by `swapsForList`. No new shape, no new fetch.
+>
+> **ONE ROW REMAINS ABSENT, and it is not open work:**
+> - **4.11-4**, the scope selector (This packet / This asset / My profile). **Two of its three
+>   options have no route behind them**, so building it would ship two controls that do nothing --
+>   the no-dead-UI rule this repo enforces outright. `assistantScope()` STATES the scope instead.
+>   Left ABSENT rather than reclassified DELIBERATE to flatter the count; the number is only worth
+>   something if a row moves when the code does.
+>
+> **METHOD, and the trap in it.** Counted mechanically from the 4th cell of every
+> `| <section>-<n> |` row, taking the verdict token appearing EARLIEST in the cell. Matching on
+> mere containment instead scores `BUILT - CHANGED from ABSENT` as ABSENT and yields a false
+> 134/181 with 18 phantom ABSENT rows -- that error was made and caught on 2026-09-02, and the
+> corroboration that the positional count is right is that `.claude/DEFERRED.md` independently
+> quotes "2 ABSENT + 22 PARTIAL", which this method reproduces exactly.
+>
+> **The §14 ranked list was stale in the other direction** and is corrected in the same pass:
+> 4.8-21 was ranked GATED while the row table had already scored it BUILT. THREE of the five
+> ranks in §14 have now closed without anyone building anything. **A rank is not a verdict —
+> the row tables are authoritative; §14 is a reading of them that goes stale.**
 
 ### 13a. The number
 
@@ -723,7 +771,7 @@ staleness `D:ledger-stale-row-fails` guards in `.claude/DEFERRED.md`, in a docum
 | ~~1~~ | **4.11-1 → 4.11-8** — the assistant panel | §4.11 | **SPLIT, not shipped and not blocked as one thing.** Two rows SHIPPED without the panel (PR #58): **4.11-8** the omit-list caveat, derived and conditional, and **4.11-5**'s two missing quick actions as in-place seeders (three of the five already existed). **Three rows are NOT BUILDABLE on today's data and must not render:** `Revert` has no route for either meaning, `Keep` is worse than vacuous (the route commits before it replies), and **4.11-6** is unreachable because `section` is the caller's input echoed back. **4.11-1's dock is a SHELL decision, not a breakpoint one** — this app caps content at `1280` against the prototype's `1560`, and the 280px difference is exactly the right column D4 deleted, so no viewport passes. What remains is an owner choice: a float-only panel, or raising the shell cap. |
 | ~~2~~ | ~~**4.6-9** — the keyword panel's skill-swap hatch~~ | §4.6 | **ALREADY BUILT — the rank was stale, not the work.** Ranked here as *"blocked on reading the owner's live skill fields"*; the skill-bank work closed that and nobody revisited the rank. Traced end to end 2026-08-27: `useSkillBank` → `api.skillBankGet()` → `app/skill-bank` → `keywordSwapOptions` → the `<select>` at `AssetBlocks.jsx:998`. §4.6 now has no ABSENT row. |
 | ~~3~~ | ~~**4.1-20** — `Where it is used →` on an evidenced requirement~~ | §4.1 | **SHIPPED.** The `list → artifact` map is derived from the packet's own `artifacts` (`listOwnersFromArtifacts`) instead of from render-time registration, so it is populated on the JD step too. `D:jd-evidence-has-no-field-link` is CLOSED. Guarded by `H:jd-field-link-is-wired-not-just-derived` — added after five wiring mutations passed suite AND build, including reverting the exact defect the ledger row described. |
-| 4 | **4.8-21** — `Ask why` on a swap row | §4.8 | **GATED, and it is not the one-liner §14 once called it.** It is specced to seed the assistant panel, so its target does not exist. Moves with rank 1. |
+| ~~4~~ | ~~**4.8-21** — `Ask why` on a swap row~~ | §4.8 | **SHIPPED — the rank was stale, not the work, and this is the THIRD rank in this table to close that way.** Re-checked against source 2026-09-02: `QcRail.jsx:388` renders a real `<button>` carrying `data-qc={QC_HOOKS.askWhy}` and `data-qc-artifact={ask.artifactId}`, fed by `swapAskWhy(s, owners)` at `:359`; the seed builder is `qcRail.js:813` with its null contract documented at `:784`. Its sibling `swapUndo` shipped alongside it. The 'target does not exist' verdict was written when the row was read as needing the 4.11 panel; it seeds through `onAsk` instead, which exists. |
 | 5 | **4.5-12** — `PickList` (`type: 'select'` fields) | §4.5 | **OPEN, expensive, low value.** Portfolio only, so no resume impact. |
 
 **Plus the two the ranking omits, and NEITHER is open work:** **4.1-6** re-verdicted **DELIBERATE**
@@ -732,8 +780,10 @@ staleness `D:ledger-stale-row-fails` guards in `.claude/DEFERRED.md`, in a docum
 measurement removed as a *number*. And **4.7-8** (`Forwards to the assistant`) cannot be built
 independently of rank 1 and moves with it.
 
+**RE-CHECKED 2026-09-02 AGAINST SOURCE — the read below holds and is now STRONGER.** 4.8-21 has since been proven SHIPPED (see rank 4), so only 4.7-8 remains gated behind the panel decision. **Any count of "9-11 remaining UI parity rows" is STALE** — it predates the 2026-08-27 re-reconciliation and does not survive this table. Exactly ONE row in this list is open and unblocked: 4.5-12, which is portfolio-only and explicitly low value.
+
 **The honest read: the packet module's prototype-alignment backlog has NO unblocked work left at any
-size.** What remains is one owner decision (the panel), two rows gated behind it (4.8-21, 4.7-8), one
+size.** What remains is one owner decision (the panel), one row gated behind it (4.7-8), one
 row that is explicitly low value and portfolio-only (4.5-12), and one row that closed as DELIBERATE
 rather than as work (4.1-6). The remaining engineering weight for this module has moved to
 `.claude/DEFERRED.md`, which carries **33 open rows**.

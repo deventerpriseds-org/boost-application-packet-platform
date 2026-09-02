@@ -3,7 +3,13 @@
 import { app, HttpRequest, HttpResponseInit, InvocationContext } from '@azure/functions'
 import { resolveOwner } from './appSession'
 import { getPgClient } from './pgClient'
-import { buildSwaps, RequirementRef } from './swaps'
+import { buildSwaps, ListCounts, RequirementRef } from './swaps'
+// THE MASTER TEXT COMES FROM THE ONE READER THAT ALREADY EXISTS. `loadMasterBaseline` reads the
+// MasterContext table and hands it to `masterBaseline` (`evidence.ts:211`), which is the single
+// place that knows which MasterContext key backs which merge field. A second copy of that mapping
+// is the drift `evidence.ts:167-170` warns about by name, so this imports rather than re-reads —
+// there is deliberately no TableClient in this file.
+import { loadMasterBaseline } from './appInsertions'
 
 const HEADERS = { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': '*', 'Access-Control-Allow-Methods': 'GET,OPTIONS' }
 
@@ -27,10 +33,64 @@ const HEADERS = { 'Content-Type': 'application/json', 'Access-Control-Allow-Orig
  * packet-wide candidate delete would have silently nulled the earlier passes' candidate links even
  * if their swap rows had survived.
  */
+/**
+ * Do the LIVE `list` CHECKs on BOTH provenance tables admit `'expertise'`?
+ *
+ * `schema.ts:594-596` states it in the file's own words: a `create table if not exists` is a no-op
+ * on a table that already exists, so production keeps the OLD check until an explicit ALTER runs.
+ * The old check admits only `skills_1, skills_2, relevant_1..3`.
+ *
+ * BOTH TABLES, not just `swap_decision`. `writeSwaps` inserts a `skill_candidate` row for every
+ * candidate BEFORE it inserts any swap row, and `skill_candidate.list` carries its own CHECK
+ * (`schema.ts:549`). Checking only `swap_decision` would probe the constraint that is NOT hit first.
+ *
+ * WHY PROBING BEATS "JUST INSERT AND SEE". Postgres aborts the whole transaction on a failed CHECK,
+ * `writeSwaps` rethrows, and `appPackets.ts:617-622` swallows that into a `console.warn` — so ONE
+ * rejected expertise row would leave EVERY packet with a completely empty swap table and a
+ * `changes_cited: not_applicable` gate. The quietest possible failure, for every list, caused by
+ * one missing migration.
+ *
+ * Matched on the constraint DEFINITION rather than its name, so a differently-named constraint still
+ * answers correctly. TEMPORARY: once both ALTERs in schema.ts land this always returns true and the
+ * probe can be deleted. Unreachable/erroring => false, i.e. hold the rows back — the conservative
+ * direction, because the cost of a wrong `true` is the whole table.
+ */
+async function listChecksAdmitExpertise(client: any): Promise<boolean> {
+  try {
+    const r = await client.query(
+      `select t.relname from pg_constraint c join pg_class t on t.oid = c.conrelid
+        where t.relname in ('swap_decision','skill_candidate') and c.contype = 'c'
+          and pg_get_constraintdef(c.oid) ilike '%list%'
+          and pg_get_constraintdef(c.oid) ilike '%expertise%'`)
+    const seen = new Set(r.rows.map((x: any) => x.relname))
+    return seen.has('swap_decision') && seen.has('skill_candidate')
+  } catch { return false }
+}
+
 export async function writeSwaps(client: any, packetId: string, oppId: string, args: {
   call1: any; call3: any; pkg: Record<string, any>; profileText?: string; omitList?: string; loop?: number
-}): Promise<{ packet_id: string; loop: number; candidates: number; swaps: number; items: number; unattributed: number }> {
+  /**
+   * Fixed slot counts per merge field, from the per-template config store. Passed straight through
+   * to `buildSwaps`, which is pure and never reads config itself.
+   */
+  slots?: Record<string, number | null>
+  /**
+   * The owner's master template text per merge field. Optional ONLY so a caller that already has it
+   * can avoid a second Storage round-trip; when omitted this function loads it itself.
+   */
+  master?: Record<string, string>
+}): Promise<{
+  packet_id: string; loop: number; candidates: number; swaps: number; items: number; unattributed: number
+  lists: ListCounts[]; mismatched: ListCounts[]; skippedLists: string[]
+}> {
   const loop = Math.max(0, Number(args.loop ?? 0) | 0)
+  // THE "ORIGINAL" IS THE OWNER'S MASTER TEMPLATE, NOT CALL 1'S DRAFT. Measured 2026-08-29: 9 of 14
+  // live swap rows named a from_label that appears nowhere in the master, because the pairing read
+  // `call1[passA]` — the model's own first draft — and presented it to the reviewer as the thing
+  // their resume used to say. `loadMasterBaseline` swallows its errors and returns `{}`, and
+  // `buildSwaps` degrades to Call 1 per list in that case rather than reporting the owner's whole
+  // list as invented; `lists[].baselineSource` records which was used for each list.
+  const master = args.master ?? await loadMasterBaseline()
   // Requirements are matched by `seq`, then resolved to real ids here — swaps.ts is pure and never
   // sees a database id.
   const reqRows = (await client.query(
@@ -48,15 +108,49 @@ export async function writeSwaps(client: any, packetId: string, oppId: string, a
       where a.packet_id = $1 and c.source = 'owner_edit' and c.reverted_at is null`,
     [packetId])).rows.map((r: any) => r.replacement).filter(Boolean)
 
-  const built = buildSwaps({ call1: args.call1, call3: args.call3, pkg: args.pkg, requirements: refs, profileText: args.profileText, omitList: args.omitList, ownerLabels })
+  const built = buildSwaps({
+    call1: args.call1, call3: args.call3, pkg: args.pkg, requirements: refs,
+    profileText: args.profileText, omitList: args.omitList, ownerLabels,
+    master, slots: args.slots,
+  })
+
+  // Hold expertise rows back until the DDL admits them — see `listChecksAdmitExpertise`. Reported in
+  // the return value AND on the log, never silently: a list that produced rows the database refused
+  // is a fact the caller has to be able to see.
+  const admitsExpertise = await listChecksAdmitExpertise(client)
+  const skippedLists: string[] = []
+  if (!admitsExpertise && (built.swaps.some(s => s.list === 'expertise') || built.candidates.some(c => c.list === 'expertise'))) {
+    skippedLists.push('expertise')
+    console.warn("[swaps] a live `list` CHECK still rejects 'expertise'; holding those rows back. "
+      + 'Both tables need the ALTER: swap_decision AND skill_candidate. e.g. '
+      + 'alter table skill_candidate drop constraint if exists skill_candidate_list_check; '
+      + 'alter table skill_candidate add constraint skill_candidate_list_check check '
+      + "(list in ('skills_1','skills_2','relevant_1','relevant_2','relevant_3','expertise'));")
+  }
+  const writeCandidates = skippedLists.length ? built.candidates.filter(c => c.list !== 'expertise') : built.candidates
+  const writeRows = skippedLists.length ? built.swaps.filter(s => s.list !== 'expertise') : built.swaps
 
   await client.query('begin')
   try {
-    await client.query(`delete from swap_decision where packet_id=$1 and loop=$2`, [packetId, loop])
-    await client.query(`delete from skill_candidate where packet_id=$1 and loop=$2`, [packetId, loop])
+    // LOOP 0 IS GROUND ZERO — the same rule `writeInsertions` applies, and it must be applied HERE
+    // TOO or the two tables disagree about which pass is current. That disagreement is exactly the
+    // defect measured on 2026-08-29: `listBodyModel` (`assetBlocks.js:757`) keys `byTo` on
+    // `to_label` and matches it against the rendered line, so a swap set describing one pass and an
+    // insertion set describing another produces NO match on every row — `from` is null and every
+    // `original → final` arrow silently disappears. The arrow code was correct the whole time.
+    //
+    // The scoped delete below stays for loops 1..n: P3-21 records that an unscoped delete once
+    // DESTROYED the first pass's swap record, which is why `loop` was added to this table at all.
+    if (loop === 0) {
+      await client.query(`delete from swap_decision where packet_id=$1`, [packetId])
+      await client.query(`delete from skill_candidate where packet_id=$1`, [packetId])
+    } else {
+      await client.query(`delete from swap_decision where packet_id=$1 and loop=$2`, [packetId, loop])
+      await client.query(`delete from skill_candidate where packet_id=$1 and loop=$2`, [packetId, loop])
+    }
 
     const candidateId = new Map<string, string>()
-    for (const c of built.candidates) {
+    for (const c of writeCandidates) {
       const r = await client.query(
         `insert into skill_candidate (packet_id, list, label, origin, char_len, loop) values ($1,$2,$3,$4,$5,$6) returning id`,
         [packetId, c.list, c.label, c.origin, c.char_len, loop])
@@ -64,7 +158,7 @@ export async function writeSwaps(client: any, packetId: string, oppId: string, a
     }
 
     let seq = 0
-    for (const s of built.swaps) {
+    for (const s of writeRows) {
       await client.query(
         `insert into swap_decision
            (packet_id, list, seq, action, from_candidate_id, to_candidate_id, from_label, to_label,
@@ -81,8 +175,16 @@ export async function writeSwaps(client: any, packetId: string, oppId: string, a
   } catch (e) { await client.query('rollback'); throw e }
 
   return {
-    packet_id: packetId, loop, candidates: built.candidates.length, swaps: built.swaps.length,
+    packet_id: packetId, loop, candidates: writeCandidates.length, swaps: writeRows.length,
     items: built.itemCount, unattributed: built.unattributed,
+    // THE FIXED-SLOT REPORT, returned rather than thrown (AC-9a). `appPackets.ts:617-622` swallows a
+    // throw into a console.warn and the packet then ships with an EMPTY swap table, so throwing on a
+    // count mismatch would be the quietest possible outcome. `mismatched` is the caller's ready-made
+    // offender source for a deterministic `fail` check in `runChecks`; a list whose `expected` is
+    // null is UNKNOWN and must be reported `not_applicable`, never `pass` and never `fail`.
+    lists: built.lists,
+    mismatched: built.lists.filter(l => l.mismatch),
+    skippedLists,
   }
 }
 

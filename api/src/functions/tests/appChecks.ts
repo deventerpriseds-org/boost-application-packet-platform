@@ -10,12 +10,16 @@ import { getPgClient } from './pgClient'
 import { runChecks, gateFor, attentionCount, CheckResult } from './checks'
 import { loadThresholds, resolveOptionsFrom } from './checkPrefs'
 import { computeArtifactScore, ArtifactScore } from './artifactScore'
+import { atsCoverage, atsCoverageSource, ATS_SHIPPED_FIELDS } from './atsKeywords'
 import { loadFacts, sourceText } from './appFacts'
 import { shapeVerdict } from './appReviewer'
 import { resolvePostingSource } from './jdText'
 import { ensureEvidenceTable, writeEvidence, loadRequirementsWithEvidence } from './appRequirements'
 import { listCorrections } from './appCorrections'
 import { EvidenceInput, EvidenceRow } from './evidence'
+import { resolveTemplateSlots } from './roleFocus'
+import { runCoverageJudge, judgeVerdictsFor, runStuffingRead } from './appCoverage'
+import { openAiJson } from './openaiJson'
 
 const HEADERS = { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': '*', 'Access-Control-Allow-Methods': 'GET,POST,OPTIONS' }
 
@@ -32,13 +36,40 @@ export { ensureCheckPrefs, loadThresholds, resolveOptionsFor, resolveOptionsFrom
  */
 export async function evaluateArtifact(client: any, artifactId: string, owner: string): Promise<{
   artifact_id: string; run_id: string; gate: string; attention: number; results: CheckResult[]; score: ArtifactScore
+  /** What the model passes did, or null when they did not run. See the return statement for why. */
+  judge: {
+    coverage_calls: number | null; coverage_cache_hits: number | null; coverage_refused: number | null
+    coverage_unanswered: number | null; stuffing_calls: number | null; stuffing_refused: number | null
+    failures: string[]
+  } | null
 }> {
   const art = (await client.query(
-    `select a.id, a.type, a.packet_id, p.opp_id, p.pkg_json, o.company, o.owner_email,
+    `select a.id, a.type, a.packet_id, p.opp_id, p.pkg_json, p.last_build, p.resume_template_id, o.company, o.owner_email,
             o.jd_html, o.jd_posting_raw, o.why_surfaced
        from artifact a join packet p on p.id = a.packet_id join opportunity o on o.id = p.opp_id
       where a.id = $1`, [artifactId])).rows[0]
   if (!art) throw new Error('artifact not found')
+
+  // THE OWNER'S PER-TEMPLATE FIXED SLOT COUNTS — the input `fixed_slot_count` grades against.
+  //
+  // Nothing supplied these until 2026-08-30, so the check reported `not_applicable` for EVERY packet
+  // while the setting sat filled in on the template row. Measured on the rebuilt Trinnex packet the
+  // same day: `skills_1` shipped 8 items against a template holding 11 and `skills_2` shipped 10
+  // against 9, recorded honestly as `dropped`/`added` swap rows, and the gate could not see any of it.
+  //
+  // READ FROM THE PACKET'S OWN RESUME, through the same `templates/<rowKey>` reader the build used,
+  // so the counts the gate grades against are the counts the swap pairing paired against. NULL
+  // `resume_template_id` (every packet before 2026-08-24) means the owner's default, which resolves
+  // to no per-template row and therefore all-null — `not_applicable`, unchanged from today.
+  //
+  // NOT passed in as an argument by `ensurePackage`: this function is also reached directly from the
+  // checks route, long after any build, from an artifact id alone. A parameter would be absent on
+  // that path and present on the other, which is a check that grades differently depending on who
+  // asked. One derivation, from the stored row, for both callers.
+  //
+  // An unreadable table yields all-null, never zeros and never a throw: a slot count that cannot be
+  // read must not become a `fail`, and a `0` would declare every item in the list illegal.
+  const slots = await resolveTemplateSlots(art.resume_template_id)
 
   const swaps = (await client.query(
     `select action, driver, to_label, from_label, requirement_id, seq, list from swap_decision where packet_id=$1`, [art.packet_id])).rows
@@ -102,20 +133,76 @@ export async function evaluateArtifact(client: any, artifactId: string, owner: s
       // waiting. Without this the gate cannot distinguish them and coverage stays pinned at 0.
       confirmed_at: r.evidence_confirmed_at ?? null,
       confirmed_by: r.evidence_confirmed_by ?? null,
+      // THE VETO, and it must be carried here or it does not exist as far as the gate is concerned.
+      // `H:every-evidence-count-has-a-reader` was written after two fields shipped write-only; the
+      // same shape one level up is a column selected by the loader and dropped by this mapping,
+      // which `tsc` cannot catch because both new fields are optional on EvidenceRow. Without these
+      // two lines the owner's veto lands in the database, reads back in the SELECT, and is silently
+      // discarded three lines before the only code that would act on it.
+      decision: r.evidence_decision ?? null,
+      missing: r.evidence_missing ?? null,
     } as EvidenceRow)])),
   }
+
+  // THE COVERAGE JUDGE — and yes, this is a transport on the gate path, which the comment above
+  // forbids. Read that comment again before deleting this one: its argument is about `writeEvidence`
+  // PERSISTING ROWS SHARED BY THE FOUR ARTIFACTS OF ONE PACKET. Four concurrent runs each propose
+  // different evidence for the same opportunity, the last committer wins, and the other three are
+  // then gated against rows that no longer exist. Every clause of that turns on the rows being
+  // shared. None of it applies here, and the reasons are structural rather than hopeful:
+  //
+  //   - A VERDICT IS ABOUT ONE ARTIFACT'S OWN TEXT. The resume's summary and the cover letter's body
+  //     are different documents; there is no shared row for a concurrent run to overwrite.
+  //   - THE ROW IS CONTENT-ADDRESSED. `verdict_key` is a digest of the requirement, the field, the
+  //     field's text, the model and the prompt version — so two runs that would write the same row
+  //     are writing the same ANSWER, and the write is `on conflict do nothing`. Last-committer-wins
+  //     cannot produce a different state.
+  //   - A SECOND RUN OF UNCHANGED TEXT SPENDS NOTHING and answers identically, which is the property
+  //     the escalation tier could not have and the reason it had to move off this path.
+  //
+  // OFF BY DEFAULT (`chk_coverage_judge`), and every failure — transport, cap, unparseable, a query
+  // that throws — yields SILENCE for the affected field rather than a negative verdict. The whole
+  // call is wrapped because a judge that throws must not take the gate down with it: an artifact
+  // still gets its checks, computed lexically, exactly as before this existed.
+  const judgeModel = process.env.OPENAI_MODEL || 'gpt-4o'
+  const coverage = await runCoverageJudge(client, {
+    oppId: art.opp_id,
+    artifactId: art.id,
+    type: art.type,
+    pkg: art.pkg_json || {},
+    requirements,
+    thresholds,
+    model: judgeModel,
+    // Temperature 0, at the owner's instruction. The model is the same literal the rest of the
+    // pipeline uses — see CheckThresholds.coverageJudge for why it is not a setting yet.
+    fetchJson: openAiJson({ feature: 'coverage:judge', model: judgeModel, temperature: 0, maxTokens: 2000 }),
+  }).catch(() => undefined)
+
+  // THE STUFFING READ, on the same switch and the same transport. It can only ever add passages to
+  // `posting_wording_kept`, which is a `warn` the writer decides -- so unlike the coverage judge it
+  // has no path to a gate at all, and a failure here raises nothing rather than raising doubt.
+  const stuffing = await runStuffingRead({
+    type: art.type,
+    pkg: art.pkg_json || {},
+    postingText: posting.text,
+    thresholds,
+    fetchJson: openAiJson({ feature: 'wording:stuffing', model: judgeModel, temperature: 0, maxTokens: 1500 }),
+  }).catch(() => undefined)
 
   const results = runChecks({
     type: art.type,
     pkg: art.pkg_json || {},
     company: art.company,
     requirements,
+    judgeVerdicts: coverage && judgeVerdictsFor(coverage),
+    stuffingHits: stuffing?.hits,
     swaps,
     postingText: posting.text,
     profileText: profile,
     evidence,
     facts: await loadFacts(client, owner || art.owner_email),
     thresholds,
+    slots,
   })
 
   const runId = randomUUID()
@@ -130,15 +217,44 @@ export async function evaluateArtifact(client: any, artifactId: string, owner: s
   const scoreable = Number((await client.query(
     `select count(*)::int as n from term_library_entry e join term_library l on l.id = e.library_id
       where e.scoreable = true and l.published_at is not null`).catch(() => ({ rows: [{ n: 0 }] }))).rows[0]?.n || 0)
+  // THE INTERIM KEYWORD MEASUREMENT — a real number before the term library exists.
+  //
+  // Owner, 2026-09-01: "confirm a way to use what we gain to get the score until library is added to
+  // suppliment not drop it." `keyword_coverage` has been null on all 52 artifact_score rows ever
+  // written, and a composite needs all three components, so no artifact has ever had one.
+  //
+  // THE LIBRARY STRICTLY WINS, and this ordering IS the "supplement, not replace" instruction. When
+  // a published version has scoreable entries, that path is taken and the interim source is not
+  // consulted at all -- never blended, never averaged. Blending two differently-sourced numbers
+  // would produce a composite whose provenance no one could state, which is the fabricated-composite
+  // failure `artifactScore.ts`'s own header forbids.
+  //
+  // RESUME ONLY, deliberately. The ATS keyword table is emitted by the resume prompt alone (zap node
+  // 289877661); a cover letter does not place the resume's skills lines, and crediting it with the
+  // resume's coverage would invent a measurement for a document nothing measured.
+  let interimKw: { covered: number; scoreable: number; source: string } | null = null
+  if (scoreable === 0 && art.type === 'resume') {
+    const sections: Array<{ title?: string; body?: string }> =
+      Array.isArray((art.last_build as any)?.analysis) ? (art.last_build as any).analysis : []
+    const table = sections.find(x => String(x?.title || '').trim().toLowerCase() === 'missing ats skills')
+    const cov = atsCoverage(table?.body, ATS_SHIPPED_FIELDS.map(f => (art.pkg_json || {})[f]))
+    if (cov.covered !== null && cov.total !== null) {
+      interimKw = { covered: cov.covered, scoreable: cov.total, source: atsCoverageSource(cov) }
+    }
+  }
   const score = computeArtifactScore({
     requirements,
     checks: results,
-    // `covered: null`, NEVER 0. Nothing in the product counts per-asset term placement yet, so the
-    // numerator does not exist. A literal 0 here was latent: `keyword_coverage` reads as an honest
-    // null ONLY while `scoreable === 0`, and the instant a library version is published this
-    // ternary would flip and render a measured-looking 0% across six consumers. Null says
-    // "unmeasured"; 0 would claim "we counted, and the answer was none".
-    keyword: scoreable > 0 ? { covered: null, scoreable } : null,
+    // `covered: null`, NEVER 0, on the LIBRARY path. Nothing counts per-asset term placement against
+    // a published library yet, so that numerator does not exist. A literal 0 here was latent:
+    // `keyword_coverage` reads as an honest null ONLY while `scoreable === 0`, and the instant a
+    // library version is published this ternary would flip and render a measured-looking 0% across
+    // six consumers. Null says "unmeasured"; 0 would claim "we counted, and the answer was none".
+    keyword: scoreable > 0
+      ? { covered: null, scoreable }
+      : interimKw
+        ? { covered: interimKw.covered, scoreable: interimKw.scoreable, source: interimKw.source }
+        : null,
     seniority: null,          // reviewer-graded; P4 supplies it as a stored input
   })
   const uncoveredIds = score.uncovered_requirement_seqs
@@ -182,7 +298,24 @@ export async function evaluateArtifact(client: any, artifactId: string, owner: s
     await client.query('commit')
   } catch (e) { await client.query('rollback'); throw e }
 
-  return { artifact_id: artifactId, run_id: runId, gate, attention, results, score }
+  // F-8, from an independent verifier: `runCoverageJudge` and `runStuffingRead` both return
+  // `{ calls, refused, failures }` and every one of those was DISCARDED at this line. Three live
+  // consequences: a judge outage was invisible (the owner was told "too short to judge either way"
+  // when the truth was that the call failed), `refused` -- the count of times a model claimed a
+  // quote the document does not contain -- was dropped despite `coverageJudge.ts` naming each
+  // refusal separately because "only the second is a defect worth alerting on", and nobody could
+  // say what the judge SPENT. Reported here so the route's caller can see all three; null when the
+  // judge did not run, which is not the same as zero.
+  const judge = coverage || stuffing ? {
+    coverage_calls: coverage?.calls ?? null,
+    coverage_cache_hits: coverage?.cacheHits ?? null,
+    coverage_refused: coverage?.refused ?? null,
+    coverage_unanswered: coverage?.silent?.length ?? null,
+    stuffing_calls: stuffing?.calls ?? null,
+    stuffing_refused: stuffing?.refused ?? null,
+    failures: [...(coverage?.failures || []).map(f => `${f.field}: ${f.error}`), ...(stuffing?.failures || [])],
+  } : null
+  return { artifact_id: artifactId, run_id: runId, gate, attention, results, score, judge }
 }
 
 /**

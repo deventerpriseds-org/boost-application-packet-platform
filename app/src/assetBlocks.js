@@ -27,6 +27,13 @@
  * that flips the wrong one has to be visible.
  */
 import { markRuns } from './highlight.js'
+// SPEC 4.4-29 reads the SAME two selectors every other surface reads — `severityFor` (the fix /
+// review / your-call split D6 rests on) and `sectionIdForOffender` (which field an offender names).
+// Re-deriving either here is how the header and the rail come to disagree about how many findings
+// block an asset, which is the exact defect this row exists to close. `qcRail.js` imports
+// `assetGate.js` and neither imports this module, so there is no cycle.
+import { allRows, sectionIdForOffender, inertReason, QC_HOOKS } from './qcRail.js'
+import { severityFor, arr } from './assetGate.js'
 
 export const BLOCK_HOOKS = {
   root: 'asset-blocks',            // the card root (carries data-qc-open)
@@ -43,6 +50,9 @@ export const BLOCK_HOOKS = {
   meterToggle: 'blocks-answers-toggle',   // the disclosure on "What this X answers"
   meterSummary: 'blocks-answers-summary', // the counts kept on the COLLAPSED row
   askChange: 'blocks-ask-change',         // per-field "List Tweaks" (prototype: "Ask for a change")
+  pickList: 'blocks-pick-list',           // SPEC 4.5-12 -- every item CONSIDERED for this list
+  pickToggle: 'blocks-pick-toggle',       // its disclosure; absent when nothing was considered
+  pickSend: 'blocks-pick-send',           // seeds the assistant; it selects nothing itself
   askBox: 'blocks-ask-box',
   askSend: 'blocks-ask-send',
   // SPEC 4.7-7. The ask box confirmed FAILURE in place and said nothing at all on success - it just
@@ -83,6 +93,12 @@ export const BLOCK_HOOKS = {
   // would trip it on a name collision alone. The guard is right; the key gets the different name.
   fallback: 'blocks-fallback',     // the stored content dump, when there are no rows at all
   empty: 'blocks-empty',
+  // SPEC 4.4-29. The COMPLEMENT of `fieldFindings`: the findings this card's header counts that no
+  // field margin on it renders. It carries data-qc-n so the reconciliation is assertable from the
+  // DOM without reading any prose.
+  unplaced: 'blocks-unplaced',
+  unplacedRow: 'blocks-unplaced-row',       // one of them (carries data-qc-sev / data-qc-check)
+  unplacedReason: 'blocks-unplaced-reason', // why THIS row offers no link, said rather than implied
 }
 
 // ── text shaping ────────────────────────────────────────────────────────────────────────────────
@@ -767,9 +783,19 @@ export function listBodyModel(row, swapsForList, opts) {
       // the two sites the guard DID cover read properly. An independent verifier found it; the
       // guard was titled "a raw enum value must never reach the screen" and looped over two of the
       // three places one could.
+      // A BLANK STATUS READS AS BROKEN, and the prototype never leaves one (`qc/assets.jsx:292`
+      // renders `unchanged` for every non-swapped item). Owner, 2026-08-29: *"the prototype shows
+      // the buttons regardless and an unchanged value if not swapped. that's better than showing
+      // nothing which doesn't match the design and leaves me wondering if something broken"*.
+      //
+      // BUT `unchanged` IS A PROVENANCE CLAIM, so it is only made where the evidence supports it.
+      // When this list HAS swap rows, attribution ran and simply did not name this line — so the
+      // line demonstrably survived the pass and `unchanged` is true. When the list has NO swap rows
+      // at all, nothing judged it: saying `unchanged` there would report absent evidence as a
+      // finding, which is the one thing this codebase refuses to do everywhere else.
       status: swap ? (swap.action === 'kept' ? 'unchanged'
         : swap.driver === 'owner' ? `${swap.action} · you changed this`
-        : `${swap.action} · ${swap.driver}`) : '',
+        : `${swap.action} · ${swap.driver}`) : (swaps.length ? 'unchanged' : ''),
       sharedSource: !!swap,
     }
   })
@@ -962,6 +988,160 @@ export function registerListOwners(prev, artifactId, label, lists) {
   return changed ? next : (prev || {})
 }
 
+// ── SPEC 4.4-29: the findings the field margins do NOT show ─────────────────────────────────────
+
+/**
+ * WHY THIS EXISTS, measured rather than argued.
+ *
+ * 4.4-28 relocated the prototype's asset-header open-items list (`qc/assets.jsx:248-261`) into each
+ * field's own margin, and that relocation is right: a finding belongs beside the sentence carrying
+ * it. But it only ever covered the findings that NAME a field this card renders, and the header's
+ * counts never stopped counting the rest.
+ *
+ * On the production fixture (`origin/ui-fixtures:raw-dump.json`, opp `9f9c370a-…`, 540 check rows)
+ * the resume header prints `40 to fix · 33 to review` = 73 findings while its margins render **20**;
+ * the compact resume prints 47 and renders **2**. Ten of the compact resume's invisible rows
+ * (`relevant_char_limit`, `whitespace`, `empty_merge_fields`) name `RelevantBullets1/2/3` and
+ * `ExpertiseBullets` — fields the RESUME renders, so they are a real cross-asset navigation.
+ *
+ * `severityCounts` (assetGate.js) counts every fail/warn ROW. `findingsByField` (qcRail.js) emits a
+ * finding only where `sectionIdForOffender` resolves an offender, and `AssetBlocks` then renders
+ * only `findings[r.merge_field]` for THIS artifact's own insertion rows. The gap between those two
+ * is what this function returns.
+ *
+ * It is the COMPLEMENT of `findingsByField`, never an overlap: a finding rendered in a margin is
+ * excluded here. One finding in two places is one finding that can drift — the same rule that keeps
+ * `posting_wording_kept` out of `fieldFindings`.
+ */
+export function attentionWithFields(result) {
+  const out = []
+  for (const row of allRows(result)) {
+    const sev = severityFor(row)
+    if (!sev) continue
+    const offenders = arr(row.offenders).map((o) => String(o))
+    const fields = []
+    for (const o of arr(row.offenders)) {
+      const f = sectionIdForOffender(row.check_key, o)
+      if (f && !fields.includes(f)) fields.push(f)
+    }
+    out.push({
+      check_key: row.check_key,
+      sev,
+      state: row.state,
+      engine: row.engine,
+      expected: row.expected || '',
+      offenders,
+      fields,
+    })
+  }
+  return out
+}
+
+/** No asset in this packet renders the field a finding names — stated, never left as a dead link. */
+export const NO_OWNER_REASON = 'no asset in this packet renders that field, so there is nothing to open'
+
+/**
+ * The findings on this asset that NO field margin on this card renders.
+ *
+ * `renderedFields` is this card's OWN merge fields (`latestRows(...).map(r => r.merge_field)`). A
+ * finding is placed — and therefore excluded — as soon as ONE of the fields it names is rendered
+ * here, which is exactly the condition under which `AssetBlocks` hands it to a margin.
+ *
+ * Worst first, through the same `{fix, review, soft}` ranking `findingsByField` uses, so the thing
+ * that blocks is the thing read first on both surfaces.
+ */
+export function unplacedFindings(result, renderedFields) {
+  return unplacedOf(attentionWithFields(result), renderedFields)
+}
+
+/**
+ * The same filter over an ALREADY-derived attention list.
+ *
+ * The component needs this split, not `unplacedFindings`, because the two halves of its input
+ * arrive at different times: `attentionWithFields` is derived once from the checks payload the
+ * corrections hook already fetched, while `renderedFields` comes from the insertions request. One
+ * function over the raw result would re-walk 187 check rows on every insertions render.
+ */
+export function unplacedOf(attention, renderedFields) {
+  const rendered = renderedFields instanceof Set ? renderedFields : new Set(arr(renderedFields))
+  const rank = { fix: 3, review: 2, soft: 1 }
+  return arr(attention)
+    .filter((f) => !arr(f.fields).some((x) => rendered.has(x)))
+    .sort((a, b) => rank[b.sev] - rank[a.sev])
+}
+
+/**
+ * `mergeField -> [{ id, label }]`, reported by each asset card from its OWN insertion rows.
+ *
+ * The sibling of `registerListOwners`, and deliberately a SECOND map rather than an extension of
+ * it: that one is keyed by LIST because a `swap_decision` row is keyed by list, and a list-keyed map
+ * cannot resolve `ResumeSummary` or `@CoverLetterBody` — fields no list backs. Navigation needs
+ * `field -> artifact`, so that is what this holds.
+ *
+ * Not derived from `listOwnersFromArtifacts` (qcRail.js) for the reason that function's own comment
+ * gives in reverse: it needs `entries[].insertions`, which `useQcEntries` fetches only on the QC and
+ * JD steps (`PacketBuilder.jsx` `withInsertions`). On the asset steps — where this list renders —
+ * it would be `{}`, and the link would be absent exactly where it is needed.
+ */
+export function registerFieldOwners(prev, artifactId, label, fields) {
+  if (!artifactId) return prev || {}
+  const rendered = Array.from(new Set(arr(fields).filter(Boolean)))
+  const next = { ...(prev || {}) }
+  let changed = false
+  // Withdraw this artifact from any field it no longer renders, so a stale owner can never outlive
+  // the card that reported it. Same discipline as registerListOwners.
+  for (const key of Object.keys(next)) {
+    if (rendered.includes(key)) continue
+    const kept = next[key].filter((o) => o.id !== artifactId)
+    if (kept.length !== next[key].length) { next[key] = kept; changed = true }
+  }
+  for (const field of rendered) {
+    const owners = next[field] || []
+    const existing = owners.find((o) => o.id === artifactId)
+    if (existing && existing.label === label) continue
+    next[field] = owners.filter((o) => o.id !== artifactId).concat([{ id: artifactId, label }])
+    changed = true
+  }
+  return changed ? next : (prev || {})
+}
+
+/**
+ * Where an unplaced finding can be opened, or null.
+ *
+ * NULL IS THE CONTRACT, the same one `requirementUsage` states: a finding that names no field, or
+ * names one no asset in this packet renders, returns null and the caller renders NO control. The
+ * prototype's own rule is the same shape — `{a.sec && <span>Go to field →</span>}`
+ * (`qc/assets.jsx:257`) — and this repo's no-dead-UI rule makes it mandatory rather than tidy.
+ *
+ * `self` says whether the target is THIS card, so the copy can name the sibling asset when it is
+ * not ("Go to field in Resume →") instead of sending the reader somewhere unannounced.
+ */
+export function unplacedTarget(finding, fieldOwners, selfArtifactId) {
+  const map = fieldOwners || {}
+  for (const field of arr(finding && finding.fields)) {
+    const owners = arr(map[field])
+    if (!owners.length) continue
+    const mine = owners.find((o) => o && o.id === selfArtifactId)
+    const holder = mine || owners.find((o) => o && o.id)
+    if (!holder) continue
+    return { artifactId: holder.id, mergeField: field, label: holder.label || null, self: holder.id === selfArtifactId }
+  }
+  return null
+}
+
+/**
+ * The sentence beside a finding that offers no link. Never blank — "not clickable" must never be
+ * mute (the rule `inertReason` was written for, reused here rather than re-worded).
+ */
+export function unplacedReason(finding, fieldOwners, selfArtifactId) {
+  if (unplacedTarget(finding, fieldOwners, selfArtifactId)) return ''
+  if (arr(finding && finding.fields).length) return NO_OWNER_REASON
+  return inertReason(finding && finding.check_key, arr(finding && finding.offenders)[0] || '')
+}
+
+/** The hook the link carries — the SAME one the rail's deep link uses, not a second name for it. */
+export const UNPLACED_LINK_HOOK = QC_HOOKS.goToField
+
 /**
  * The corrections that touched ONE merge field.
  *
@@ -1109,4 +1289,76 @@ export function observedFor(mergeField, row, thresholds) {
     return `${wordCount(row.after_text)} words`
   }
   return null
+}
+
+/* ── SPEC 4.5-12 — the pick list ─────────────────────────────────────────────────────────────── */
+
+/**
+ * Every item that was CONSIDERED for one list, with whether it is on the page.
+ *
+ * WHY THIS ROW WAS ABSENT UNTIL NOW, and what actually unblocked it. `PROTOTYPE-COVERAGE.md` scored
+ * 4.5-12 ABSENT because `shapeOf()` emits only `static`/`pipe`/`list`/`prose` -- no `select` shape --
+ * and noted it "needs per-item candidacy on the insertions payload". That second half was the real
+ * blocker and it is no longer true: `swapsForList` is already threaded to every block
+ * (`AssetBlock` -> `BlockBody` -> `ListBody`), and a swap row per candidate is exactly per-item
+ * candidacy. Nothing new is fetched.
+ *
+ * THE PROTOTYPE'S OWN SHAPE, mapped to real rows rather than invented (`qc/assets.jsx:300`):
+ *   text     the label
+ *   selected on the page now -- `kept`, `added`, or the TO side of a `swapped`
+ *   blocked  the owner's do-not-use list, and ONLY that. `OMIT_LIST_RATIONALE` is compared with
+ *            `===` on a `rule`-driven drop, the same exact test `omitListDrops` already uses; a
+ *            cross-list drop is NOT blocked -- the item is fine, it simply lives in another list.
+ *   req      the requirement this item answers, when a quote attributed it
+ *
+ * IT SELECTS NOTHING AND SAVES NOTHING. The prototype's control seeds the assistant
+ * (`onAsk("Use these for ...")`) and so does this: there is no route that reorders a list, and a
+ * checkbox that silently did nothing would be the dead UI this repo bans outright. The checkboxes
+ * are a SELECTION for the sentence, which is honest -- the owner is composing a request.
+ */
+export function pickListModel(swapsForList, opts = {}) {
+  const swaps = Array.isArray(swapsForList) ? swapsForList : []
+  const onPage = new Set((opts.onPage || []).map(normLabel).filter(Boolean))
+  const seen = new Map()
+  for (const s of swaps) {
+    if (!s) continue
+    // The TO side is what the list carries; the FROM side is what it carried before. A `dropped`
+    // row has only a FROM, and that is the whole point of showing it -- it is the item the owner
+    // cannot otherwise see, because it is not on the page to be seen.
+    const label = s.action === 'dropped' ? s.from_label : (s.to_label || s.from_label)
+    const text = typeof label === 'string' ? label.trim() : ''
+    if (!text) continue
+    const key = normLabel(text)
+    if (!key || seen.has(key)) continue
+    const blocked = s.action === 'dropped' && s.driver === 'rule' && s.rationale === OMIT_LIST_RATIONALE
+    seen.set(key, {
+      text,
+      // Membership in the rendered list decides this, never the action name: an item can be
+      // `swapped` FROM and still appear elsewhere on the page, and the page is the ground truth
+      // for "is this on it".
+      selected: onPage.has(key) || (!onPage.size && (s.action === 'kept' || s.action === 'added' || s.action === 'swapped')),
+      blocked,
+      req: s.requirement_id || null,
+      // Carried so the row can explain itself without the caller re-deriving it. A dropped item the
+      // owner did not ban is not a failure, and saying nothing invites the reader to assume it was.
+      note: blocked ? 'on your do-not-use list'
+        : isCrossListDrop(s.rationale) ? String(s.rationale)
+          : s.action === 'dropped' ? 'considered, not used' : null,
+    })
+  }
+  return [...seen.values()]
+}
+
+/**
+ * The sentence the pick list sends. Named here so the component cannot compose its own.
+ *
+ * NAMES THE FIELD AND EVERY CHOSEN ITEM, for the same reason `keywordSwapOptions`' ask does: a
+ * request that says "use these" without saying what "these" are is one the assistant has to guess
+ * at, against the owner's own document.
+ */
+export function pickListAsk(fieldLabel, chosen) {
+  const items = (chosen || []).map((t) => String(t || '').trim()).filter(Boolean)
+  if (!items.length) return null
+  return `Use exactly these for ${fieldLabel}, in this order: ${items.join(' | ')}. `
+    + 'Keep the wording of each item as written here.'
 }

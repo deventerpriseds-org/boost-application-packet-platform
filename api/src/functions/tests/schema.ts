@@ -539,6 +539,66 @@ create table if not exists evidence_confirmation (
 );
 create index if not exists evidence_confirmation_opp_idx on evidence_confirmation(opp_id);
 
+-- THE COVERAGE JUDGE'S VERDICTS -- does THIS DOCUMENT address this line of the posting.
+--
+-- WHY A NEW TABLE RATHER THAN AN EXISTING ONE (Extend-don't-duplicate, answered before building).
+-- Three stores were checked and none can hold this. artifact_score has uncovered_requirement_ids
+-- and judged_requirement_ids, but both are bare uuid[] -- no column can carry a basis, a quote, a
+-- reason or a prompt version. check_result is per CHECK KEY, not per requirement, so a verdict has
+-- nowhere to sit in it. requirement_evidence answers the OTHER question entirely: what in the
+-- CANDIDATE'S PROFILE supports the requirement. This one answers what in the DOCUMENT WE WROTE
+-- addresses it. Merging them would fuse the two populations that must_have_coverage and
+-- evidence_placed exist to keep apart.
+--
+-- KEYED ON THE TEXT, NOT ON THE ROW, for exactly the reason evidence_confirmation is:
+-- writeRequirements runs delete from requirement where opp_id=$1 on every re-extraction, so an id
+-- or a seq is destroyed or silently reused. requirement_text survives it.
+--
+-- verdict_key IS THE CACHE, AND EVERY INPUT IS IN IT. A threshold answers identically twice; a
+-- model may not, and a gate that flips between two runs of unchanged code is worse than one that is
+-- wrong consistently. The key is a sha256 over the requirement text, the field name, the FIELD TEXT,
+-- the model, the prompt version and the judge version -- so editing one character of the document,
+-- changing the prompt, or the model-consolidation sweep landing all produce a MISS and a re-judge,
+-- rather than a stale answer no current code would produce.
+--
+-- lexical_covered IS STORED BESIDE covered, deliberately. It is what coversIn said about the same
+-- pair, so a disagreement is queryable rather than anecdotal -- the measurement that says whether
+-- the judge is earning its calls, and the column the UI reads to show both readings.
+create table if not exists requirement_coverage (
+  id               uuid primary key default uuid_generate_v4(),
+  opp_id           uuid not null references opportunity(id) on delete cascade,
+  -- Provenance only, NEVER identity: the verdict is a function of the text, and an artifact that is
+  -- rebuilt with byte-identical text must hit the cache rather than pay for the same answer again.
+  artifact_id      uuid references artifact(id) on delete set null,
+  field            text not null,
+  requirement_text text not null,
+  verdict_key      text not null,
+  covered          boolean not null,
+  basis            text not null check (basis in ('direct','synonym','near_phrasing','absent')),
+  -- A span of the FIELD TEXT at [char_start, char_end), the same offset discipline
+  -- requirement_evidence carries, pointed at the document instead of the profile.
+  quote            text,
+  char_start       int,
+  char_end         int,
+  why              text not null,
+  lexical_covered  boolean not null,
+  judge_version    int not null,
+  prompt_version   int not null,
+  model            text not null,
+  created_at       timestamptz not null default now(),
+  -- Coverage without a quote is the one thing this whole tier exists to refuse. The parser drops
+  -- such a verdict before it is ever stored; this is the same rule where the database can enforce it.
+  check (covered = (quote is not null)),
+  check (not (covered and basis = 'absent')),
+  check (why <> ''),
+  check ((quote is null) = (char_start is null)),
+  check ((char_start is null) = (char_end is null)),
+  check (char_start is null or (char_start >= 0 and char_end > char_start)),
+  check (quote is null or length(quote) = char_end - char_start),
+  unique (opp_id, verdict_key)
+);
+create index if not exists req_coverage_opp_idx on requirement_coverage(opp_id, created_at desc);
+
 -- P1.3 — what the pipeline CHANGED, and whether the posting explains it.
 -- One candidate row per item in every list, INCLUDING unchanged ones: the packet screen shows all
 -- originals against all finals, so "we looked at this and kept it" is a different statement from
@@ -546,7 +606,7 @@ create index if not exists evidence_confirmation_opp_idx on evidence_confirmatio
 create table if not exists skill_candidate (
   id           uuid primary key default uuid_generate_v4(),
   packet_id    uuid not null references packet(id) on delete cascade,
-  list         text not null check (list in ('skills_1','skills_2','relevant_1','relevant_2','relevant_3')),
+  list         text not null check (list in ('skills_1','skills_2','relevant_1','relevant_2','relevant_3','expertise')),
   label        text not null,
   origin       text not null check (origin in ('profile_original','pass_a','pass_b')),
   char_len     int not null,
@@ -557,14 +617,22 @@ create table if not exists skill_candidate (
 );
 create index if not exists skill_cand_packet_idx on skill_candidate(packet_id, list);
 
--- One row per original (kept/swapped/merged/dropped) plus one per item the ATS pass introduced.
+-- One row per original (kept/swapped/merged/dropped) plus one per item that is in the SHIPPED
+-- list and not in the baseline. It was written as "one per item the ATS pass introduced",
+-- which is false: no pass is named anywhere in this assignment, and the ATS pass returned 0
+-- characters on the packet where those rows were measured. See swaps.ts's header.
 -- driver: 'posting' means a requirement quote justifies the change. There is no omission list in
 -- this pipeline, so a change nothing explains is 'unattributed' - NOT 'rule', which would invent an
 -- authority for a model's unexplained choice. P2.2 blocks on the unattributed count.
 create table if not exists swap_decision (
   id             uuid primary key default uuid_generate_v4(),
   packet_id      uuid not null references packet(id) on delete cascade,
-  list           text not null check (list in ('skills_1','skills_2','relevant_1','relevant_2','relevant_3')),
+  -- 'expertise' joined this list on 2026-08-30 (owner: *"also relevant and expertise counts"*).
+  -- ExpertiseBullets is a real merge field of the resume template with its own fixed slot count, so
+  -- a swap in it is as much a provenance record as one in skills_1. The inline CHECK here only
+  -- decides what a FRESH database is born with - see the explicit ALTER below, which is what
+  -- reaches production.
+  list           text not null check (list in ('skills_1','skills_2','relevant_1','relevant_2','relevant_3','expertise')),
   seq            int not null,
   action         text not null check (action in ('kept','swapped','merged','dropped','added')),
   from_candidate_id uuid references skill_candidate(id) on delete set null,
@@ -600,6 +668,49 @@ create table if not exists swap_decision (
 alter table swap_decision drop constraint if exists swap_decision_driver_check;
 alter table swap_decision add constraint swap_decision_driver_check
   check (driver in ('posting','rule','unattributed','owner'));
+-- EXPERTISE (owner, 2026-08-30): *"also relevant and expertise counts"*. ExpertiseBullets carries a
+-- fixed slot count like every other list, so its swaps need somewhere to be recorded.
+--
+-- Identical reasoning to the driver ALTER directly above, and it is not optional. Production's
+-- swap_decision_list_check admits exactly the five original lists - verified against the live
+-- database - and 'create table if not exists' is a NO-OP on a table that already exists, so the
+-- widened inline CHECK above reaches a FRESH database only. Without this ALTER an expertise row is
+-- rejected in production while passing every local fresh-DB test.
+--
+-- Widening a CHECK can never reject a row that already exists, so this is safe to re-run and safe
+-- on a table full of the five old values.
+alter table swap_decision drop constraint if exists swap_decision_list_check;
+alter table swap_decision add constraint swap_decision_list_check
+  check (list in ('skills_1','skills_2','relevant_1','relevant_2','relevant_3','expertise'));
+--
+-- THE OTHER TWO LIST CHECKS, and widening swap_decision ALONE would have shipped broken.
+--
+-- NOTE FOR ANYONE EDITING THIS BLOCK: no backticks. SCHEMA_SQL is a TEMPLATE LITERAL, so a
+-- backtick in a SQL comment TERMINATES the string and the compiler then parses SQL as TypeScript.
+-- Cost when it happened here: 5 x TS1443/TS1005 from a comment that read perfectly well.
+--
+-- The column "list" is spelled out three times in this file - skill_candidate (the inline CHECK
+-- ~80 lines above), swap_decision, and insertion (further down) - and an expertise row has to pass
+-- all three. writeSwaps inserts a skill_candidate row PER ITEM and then the swap_decision rows
+-- that reference them, so skill_candidate rejects FIRST: the swap_decision widening above would
+-- never even have been reached for an expertise list. insertion.list is what listBodyModel joins a
+-- rendered line to its swap row by (assetBlocks.js:754 takes swapsForList), so a null there means
+-- the Expertise list renders every line with a BLANK status - the exact thing the owner rejected
+-- on 2026-08-29: "showing nothing which doesn't match the design and leaves me wondering if
+-- something broken".
+--
+-- Three homes for one concept is the shape H:correction-ddl-parity was written for, and the
+-- reason a parity guard that compares only one of them is structurally blind.
+alter table skill_candidate drop constraint if exists skill_candidate_list_check;
+alter table skill_candidate add constraint skill_candidate_list_check
+  check (list in ('skills_1','skills_2','relevant_1','relevant_2','relevant_3','expertise'));
+-- The matching ALTER for the insertion table is NOT here. It is BELOW that table's own create,
+-- because insertion is created ~20 lines further down and an ALTER cannot precede its table on a
+-- FRESH database: ERROR: relation "insertion" does not exist, which aborts the entire migration.
+-- Measured, and it is the exact MIRROR of the trap this file already documents twice: a
+-- populated-database run passes it (the table is already there) while a fresh one dies. Both
+-- directions have now cost a migration here, so the rule is two-sided - a statement must come
+-- AFTER the ALTER that adds what it names, AND after the CREATE of the table it alters.
 -- ORDER IS LOAD-BEARING, for the same reason as the check_result unique further down (H34).
 -- On a database where these tables ALREADY exist - production, since P1 - 'create table if not
 -- exists' is a NO-OP and the inline 'loop' column above is never added. The index on the next line
@@ -626,7 +737,7 @@ create table if not exists insertion (
   after_text     text,
   method         text not null check (method in ('model_rewrite','template_fill','manual')),
   loop           int not null default 0,
-  list           text check (list in ('skills_1','skills_2','relevant_1','relevant_2','relevant_3')),
+  list           text check (list in ('skills_1','skills_2','relevant_1','relevant_2','relevant_3','expertise')),
   item_count     int not null default 0,
   requirement_id uuid references requirement(id) on delete set null,
   verbatim_quote text,
@@ -637,6 +748,16 @@ create table if not exists insertion (
   check (generated or (after_text is null and verbatim_quote is null and item_count = 0))
 );
 create index if not exists insertion_artifact_idx on insertion(artifact_id, loop);
+-- EXPERTISE on insertion.list — the third of the three list CHECKs (see the pair beside
+-- swap_decision above). It lives HERE, after the create, and the first attempt put it up there with
+-- its two siblings: on a fresh database that produced
+--   ERROR: relation "insertion" does not exist
+-- and aborted the whole migration, while the populated-database check passed because the table was
+-- already present. The inline CHECK on the create above carries 'expertise' for a fresh database;
+-- this ALTER is what reaches production, where the create is a no-op.
+alter table insertion drop constraint if exists insertion_list_check;
+alter table insertion add constraint insertion_list_check
+  check (list in ('skills_1','skills_2','relevant_1','relevant_2','relevant_3','expertise'));
 
 -- P2.1 — one row per check per artifact per run. offenders names the specific items, never a
 -- count: a count tells a reviewer something is wrong without telling them what to fix.
@@ -1489,7 +1610,7 @@ create unique index if not exists pbj_one_live_per_opp
 alter table requirement_evidence drop constraint if exists requirement_evidence_method_check;
 do $$ begin
   alter table requirement_evidence add constraint requirement_evidence_method_check
-    check (method in ('exact','anchored','proposed'));
+    check (method in ('exact','anchored','proposed','vetted'));
 exception when undefined_table then null; end $$;
 -- NULL means no model was involved, which is what every existing row means and why the column is
 -- nullable rather than defaulted. A default would backfill 1 onto 'exact' rows and assert model
@@ -1519,6 +1640,57 @@ alter table requirement_evidence add column if not exists proposal_version int;
 -- create-index and a composite FK naming a column an idempotent ALTER added further down the file.
 alter table skill_bank_entry add column if not exists category text;
 create index if not exists skill_bank_entry_category_idx on skill_bank_entry (owner_email, category);
+
+-- THE OWNER'S VETO. A DECISION HAS A POLARITY; IT IS NOT ONLY EVER A YES.
+--
+-- Owner, 2026-09-01: "I already said proposals can count until vetoed. make room for the vetoed
+-- data." Under that instruction a model-proposed evidence row COUNTS toward must_have_coverage on
+-- creation, and the owner's veto is the only thing that removes it. That inverts the load: the
+-- important decision is now the NO, and this table could only record a YES.
+--
+-- WHY A COLUMN AND NOT A SECOND TABLE. The hard part of this table is its identity key -- this
+-- requirement text, this excerpt, from this record, at these offsets, with that record's digest --
+-- which exists because writeRequirements runs "delete from requirement where opp_id = $1" on every
+-- re-extraction and the parent FK cascades. That key is IDENTICAL for a yes and a no: both say
+-- "about THIS exact claim". Duplicating it into a vetoed_evidence table is the parallel-system
+-- shape "Extend, don't duplicate" forbids, and it would need every future change made twice.
+-- A veto and a confirmation are the same SHAPE of claim with opposite POLARITY. One column.
+--
+-- THE DEFAULT IS 'confirmed' AND THAT IS NOT ARBITRARY. Every row already in this table was written
+-- by the confirm path, so 'confirmed' is what those rows have always meant. A default of 'vetoed'
+-- would silently reinterpret the owner's past yeses as noes -- the most damaging backfill available
+-- here, and the mirror of the no-fake-data rule: never assert a decision a human did not make.
+--
+-- WHY withdrawn_at IS NOT REUSED FOR THIS. It was tempting and it is wrong. Today withdrawn_* means
+-- "undo a yes". If a veto were stored as a withdrawal, then "the owner never confirmed this" and
+-- "the owner actively rejected this" would be the same row, and they are opposite facts about
+-- whether a human looked at the claim at all. With decision present, withdrawn_* keeps one clean
+-- meaning -- "undo whichever decision this row holds" -- and its existing CHECK
+-- ((withdrawn_at is null) = (withdrawn_reason is null)) is unaffected and still correct.
+--
+-- ADDED BY ALTER, so per H39/H39b nothing ABOVE may name it, and the constraint and index below sit
+-- AFTER the column deliberately. The two migration-killing defects this repo already ate were
+-- exactly a create-index and a composite FK naming a column an idempotent ALTER added further down.
+alter table evidence_confirmation add column if not exists decision text not null default 'confirmed';
+-- DROP-THEN-ADD, per this file's own rule: "add constraint" is not idempotent, so an already-present
+-- old constraint would otherwise abort the migration or be silently swallowed.
+alter table evidence_confirmation drop constraint if exists evidence_confirmation_decision_check;
+do $$ begin
+  alter table evidence_confirmation add constraint evidence_confirmation_decision_check
+    check (decision in ('confirmed','vetoed'));
+exception when undefined_table then null; end $$;
+-- WHAT A SECOND READ SAID THE EXCERPT FAILS TO SHOW, kept rather than counted and thrown away.
+-- supportJudge names the gaps and appRequirements tallied them into an in-memory
+-- escalation_refusals counter that dies with the request, so an owner asked to veto a proposal
+-- could see the excerpt but never the reason a second read declined to corroborate it -- which is
+-- the single most useful thing the challenge pass produces. NULL means no second read ran; an empty
+-- array means one ran and named nothing. Those are different facts, so the column is nullable with
+-- no default rather than defaulting to '{}'.
+alter table evidence_confirmation add column if not exists missing text[];
+-- The veto lookup is per-opportunity and reads only the live decisions, which is exactly the shape
+-- ruleEvidenceOf needs on every check run.
+create index if not exists evidence_confirmation_decision_idx
+  on evidence_confirmation (opp_id, decision, withdrawn_at);
 `;
 
 // Tables we expect to exist after migration (used by the runner to report).
@@ -1531,5 +1703,5 @@ export const EXPECTED_TABLES = [
   'term_library', 'term_library_entry', 'term_candidate', 'requirement',
   'skill_candidate', 'swap_decision', 'insertion', 'check_result', 'artifact_gate', 'artifact_score', 'owner_fact', 'review_verdict',
   'remediation_loop', 'escalation', 'requirement_evidence', 'comparison_dimension',
-  'packet_build_job', 'evidence_confirmation'
+  'packet_build_job', 'evidence_confirmation', 'requirement_coverage'
 ]

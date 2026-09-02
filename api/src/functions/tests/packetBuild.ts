@@ -130,13 +130,26 @@ export function skillLineage(c1: any, c2: any, c3: any, pkg: Record<string, any>
   return LINEAGE_SLOTS.map(([slot, k1, k2, k3]) => {
     const call1 = txt(c1?.[k1]), call2 = txt(c2?.[k2]), call3 = txt(c3?.[k3])
     const final = txt(pkg?.[slot])
-    // Compared against the value that SHIPPED, in the precedence order the assembler applies, so the
-    // answer is what actually happened rather than what the ranking says should have happened.
+    // EARLIEST MATCHING PASS WINS, and the order was reversed on 2026-09-02 because the old one
+    // could not tell authorship from pass-through.
+    //
+    // It used to test call3 -> call2 -> call1, "the precedence order the assembler applies". But the
+    // question this field answers is WHICH PASS PRODUCED THIS TEXT, and a later pass that returned
+    // its predecessor's list byte-for-byte produced nothing — it reproduced it. Under the old order
+    // that pass-through was credited to the later pass, and the label was unfalsifiable: `call2`
+    // meant "the text equals Call 2's output", which is also true when Call 2 changed nothing.
+    //
+    // NOT HYPOTHETICAL — it is the majority case on real data. db-query run 33635773017, opportunity
+    // 9f9c370a: `RelevantBullets2` and `RelevantBullets3` both had call1 and call2 byte-identical at
+    // 73 characters each. Both would have read `call2`.
+    //
+    // Reversing costs nothing when the passes differ (only one can match) and is the only order that
+    // makes a match mean something. `H:lineage-credits-the-earliest-matching-pass` holds it.
     const winner: SlotLineage['winner'] =
       !final ? 'none'
-        : sameList(final, call3) ? 'call3'
-        : sameList(final, call2) ? 'call2'
         : sameList(final, call1) ? 'call1'
+        : sameList(final, call2) ? 'call2'
+        : sameList(final, call3) ? 'call3'
         : 'none'
     return { slot, call1, call2, call3, final, winner }
   })
