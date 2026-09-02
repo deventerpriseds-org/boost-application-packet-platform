@@ -5726,3 +5726,48 @@ what you leave open; a premise is the one thing it will not check.**
 
 Cost: one AC pass, a near-miss production migration on a database column nothing reads, and a
 decision put to the owner twice on a false basis.
+
+
+### THE MIGRATION I ALMOST SHIPPED, AND WHY THE BRIEF WAS THE DEFECT (2026-09-02)
+
+The owner chose "widen the database now". I had already put that option in front of them on a false
+premise -- and the withdrawal is recorded above. What belongs HERE is the second-order lesson, because
+the first-order one ("read `originOf`'s call sites") is not a rule anyone can follow reliably.
+
+**An AC brief that states the DIAGNOSIS launders the implementer's error into the verifier.** I wrote
+"`pass_b` means Call 3, prove the fix" and an independent pass spent its whole run inside that
+premise, designing six criteria and pricing a production migration for a defect that was not in the
+data. It could not have caught me: **a premise is the one thing an adversary does not check.** Hand
+over the MEASUREMENT instead -- "`len(call3)=0` on all five fields; rows are stored `origin='pass_b'`;
+what does that value mean and is it true?" -- and the same pass reads `originOf` and corrects you in
+its first section.
+
+**The owner's own question was the right answer to their own choice**: *"should you design the page
+that will use it first so you know the requirements or the other way around?"* Reader first. Both
+fields were write-only, so any shape chosen ahead of a reader is a guess cast in DDL.
+
+### A GUARD THAT ENCODES A DECISION MUST BE REPLACED WHEN THE DECISION REVERSES, NOT DELETED
+
+`H:panel-floats-and-is-defined-ONCE-for-both-layouts` asserted `data-qc-mode="float"` as a literal and
+FORBADE any dock breakpoint. It was correct for the 2026-08-27 float-everywhere decision. When the
+owner reversed that on 2026-09-02, the guard became an obstacle -- and deleting it would have silently
+dropped the invariants it also carried (one mount, one definition).
+
+**Replaced, with the reversal named in the replacement's comment, and made stronger:** the old guard
+could not distinguish a mode that was CHOSEN from one that was TYPED. This is the difference between
+weakening a guard (banned without asking) and re-aiming one whose target moved. The tell that it is
+the second: the new assertion fails on the old code too.
+
+Found the same way, and worth more than the row that surfaced it: `overlayVariant` is
+`OVERLAY_VARIANTS[v] || OVERLAY_VARIANTS.modal`, so a TYPO does not throw -- it silently renders a
+centred dialog. `variant="sheeet"` would have shipped as a modal on every phone and looked merely odd.
+Nothing checked for that before; the guard now does.
+
+**Footnote, same day, same class of bug twice:** the commit recording this lost the phrase
+`OVERLAY_VARIANTS[v] || modal` because it used `git commit -m "..."` with BACKTICKS inside double
+quotes, and bash ran them as command substitution (`OVERLAY_VARIANTS[v]: command not found`). Every
+other commit this lane used `git commit -F - <<'MSG'` — a QUOTED heredoc — and survived intact.
+Earlier the same day backticks inside a TypeScript template literal terminated it and produced six
+TS1005 errors 200 lines away. **Backticks are live in two different languages here; quote the
+heredoc, always.** The commit is on `main` and is not worth a force-push to fix — the content is
+correct in this file, which is the thing that gets read.
