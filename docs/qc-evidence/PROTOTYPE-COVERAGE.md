@@ -11,8 +11,9 @@ touched. No file other than this one was modified.
 > Every measurement in this file below was **read from source**; its own closing line says *"no
 > live UI was verified, nothing was run."* On 2026-09-02 both sides of the `jd` step were rendered
 > and looked at. **§16 supersedes the `jd` row of §1a** (`266% · 27 panels missing · 3 controls`):
-> roughly **19 of those 27 panels are the measuring instrument, not the app.** Read §16 before
-> citing any `jd` figure from this document.
+> roughly **19 of those 27 panels are the measuring instrument, not the app**, and after tracing
+> every remaining row to source there are **zero confirmed prototype-side gaps on this step**. Read
+> §16 before citing any `jd` figure from this document.
 
 > **Written incrementally, section by section.** If this document ends mid-table, everything above
 > the cut is complete and citable; nothing below it was started.
@@ -872,15 +873,22 @@ Each of these looked like a gap in the screenshot. None is.
 | `See how the assets answer these →` | **BUILT, renamed** — `See where each one is answered →`, `PostingAnalysis.jsx:824`. |
 | Per-kind coverage fractions (`4/4`, `7/8`, `12/13`) vs the app's raw counts `(21) (14) (35)` | **DELIBERATE, with a recorded reason.** `PostingAnalysis.jsx:191-199`: the prototype counts requirement KINDS; this app grades role DIMENSIONS, and per-kind coverage "is not a number the system produces — `requirements.ts:61` makes `coverage` `'escalated' \| null`, never `'covered'`". Building the prototype's four literally would mint a **fourth coverage number** that could not agree with the other three. `qcRail.js:917` is the same refusal: nice-to-have is *"unmeasured rather than zero"*. |
 
-### 16c. What the app genuinely does NOT have
+### 16c. What the app genuinely does NOT have — CORRECTED: nothing confirmed
 
-After removing the fixture artifacts, the renames and the recorded decisions, the `jd` step's real
-prototype-side gaps are small:
+**The first draft of this section listed two gaps. Both were wrong, and the owner caught the
+pattern rather than the instances:** *"we have disproven and improved several things so rollback
+isn't necessary if the difference is purposeful and not work left to be done."* A purposeful
+divergence is not a gap, and neither of these was work left to do.
 
-| Gap | Evidence |
+| First claimed as a gap | Ground truth |
 |---|---|
-| The `M1–M5 / D1–D4 / N1–N3` id legend and those id prefixes | Prototype renders the legend under the rows; the app uses `RESP #0` + `competency unassigned`. Different id scheme, no legend. |
-| A numeric match in the header | Prototype: `ATS MATCH 92%` and `AUDITABLE MATCH 95 FAIL`. App: `MATCH ESTIMATE —` with a red `Blocked` chip and **no number** on this opportunity. |
+| "the `M1–M5 / D1–D4 / N1–N3` id legend is absent" | **BUILT, and on this very screen** — `PostingAnalysis.jsx:895-898`, `POSTING_HOOKS.legend`, *"The legend sits under the Requirements and Responsibilities panels."* It was **below the fold** of a 1700px screenshot. Absence asserted from a truncated view — the same error this pass spent its whole length catching elsewhere. |
+| "the id scheme is a gap" | **A DELIBERATE OWNER DECISION (2026-08-23) and strictly better.** `postingAnalysis.js:210-226`: `RQ-MH` / `RQ-NTH` / `RESP` encode the real hierarchy — a must-have and a nice-to-have are two GRADES OF THE SAME THING, hence the shared `RQ-` stem, while a responsibility is a different kind of line and takes no stem. The prototype's three equal-looking letters are precisely the flattening this replaced; the file also records that an earlier `M`/`N`/`R` map drifted against `MH`/`NTH`/`RESP` and rendered one row two different ways. |
+| "no numeric match in the header" | **A DELIBERATE REFUSAL, and the same rule this repo enforces everywhere else.** The prototype prints `ATS MATCH 92%` and `AUDITABLE MATCH 95 FAIL`. The app renames it `MATCH ESTIMATE` and states outright: *"It is not keyword coverage, and no applicant tracking system produced it"* (`PostingAnalysis.jsx:1045-1049`), with `"ATS" is not part of that name` given as the reason at :1085-1088. The em-dash is `atsScore === null ? 'not run yet'` — it will not print a composite it did not compute, which is the standing **"never fabricate a composite"** rule aimed at the prototype. |
+
+**So: zero confirmed prototype-side gaps on the `jd` step.** Not "few" — none that survived a trace
+to source. Every difference visible in the two screenshots is one of: a fixture blind spot (§16a), a
+rename, a recorded owner decision, or an improvement over the prototype (§16d).
 
 ### 16d. Where the app substantially EXCEEDS the prototype
 
@@ -901,9 +909,14 @@ richer surface, and the excess is **provenance**, which is the product's whole a
 **Look:** close. Same shell, same step rail, same card rhythm, same type scale; the app's header
 trades two big numbers for a state chip, and the nav is collapsed by owner decision.
 
-**Function:** the app is **ahead** of the prototype on this step everywhere except the two rows in
-§16c — and the comparison surface, which **could not be judged in this pass** and must not be
+**Function:** the app is **ahead** of the prototype on this step, with **no confirmed shortfall**
+(§16c) — except the comparison surface, which **could not be judged in this pass** and must not be
 scored again until the fixture carries `comparison`.
+
+**The rule this pass earned, owner-stated:** a difference that is purposeful is not a rollback
+candidate and is not work left to be done. Three of this section's own first-draft "gaps" were
+improvements the app made ON the prototype. A parity document that cannot tell a divergence from a
+deficit will keep proposing that the product be made worse.
 
 **Open follow-up (named, not done):** extend `fixture-refresh.yml`'s dump and `build-fixtures.mjs`
 to carry `comparison`, then re-run this measurement. Until then the harness refuses, by design.

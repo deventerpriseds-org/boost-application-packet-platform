@@ -7117,3 +7117,28 @@ it — the doctrine working as designed, and stated to the owner rather than hid
 
 **OPEN:** extend `fixture-refresh.yml` + `build-fixtures.mjs` to carry `comparison`, then re-measure.
 Until then the comparison surface is UNSCORED, not scored zero.
+
+### ACT-2026-09-02-d — a purposeful divergence is not a gap (owner-stated)
+
+> *"we have disproven and improved several things so rollback isn't necessary if the difference is
+> purposeful and not work left to be done... does that apply here in any way?"*
+
+It applied to **every remaining row** of `PROTOTYPE-COVERAGE.md` §16c, which is now corrected to
+**zero confirmed prototype-side gaps on the `jd` step**:
+
+1. **"the id legend is absent"** — BUILT, and on that very screen (`PostingAnalysis.jsx:895-898`).
+   I asserted it from a screenshot **truncated at the fold**. Absence claimed from a partial view is
+   the same error this pass spent its length catching in the fixture; I made it with the render.
+2. **"the id scheme is a gap"** — an owner decision (2026-08-23) that is strictly better:
+   `RQ-MH`/`RQ-NTH`/`RESP` encode that two requirement grades share a stem and a responsibility does
+   not. The prototype's `M/D/N` is the flattening it replaced.
+3. **"no numeric match in the header"** — a deliberate refusal. The prototype prints
+   `ATS MATCH 92%` / `AUDITABLE MATCH 95 FAIL`; the app says *"no applicant tracking system produced
+   it"* and renders `not run yet` when the score is null. That is this repo's **never fabricate a
+   composite** rule applied AGAINST the prototype.
+
+**The standing rule this earns:** the prototype is a proposal, not a specification, and parity is
+not the goal where the app has deliberately corrected it. Before scoring any row a gap, ask whether
+the divergence is RECORDED — a comment citing the owner, a decision in `actions.md`, a rule in
+`CLAUDE.md`. **A parity document that cannot tell a divergence from a deficit will keep proposing
+that the product be made worse.**
