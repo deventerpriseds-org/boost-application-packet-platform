@@ -779,9 +779,20 @@ export default function PacketBuilder({ id, step }) {
   // for navigation. `{ text, artifactId }`: the artifact travels WITH the sentence, because the
   // request is artifact-scoped and inferring it later from the active step would be a guess.
   const [assistantSeed, setAssistantSeed] = useState(null)
-  const seedAssistant = useCallback((text, artifactId) => {
+  // SPEC 4.11-4's field scope is only offered when a field is in focus, and until now the most
+  // NATURAL way into the assistant did not put one there: a reader clicking "Ask the assistant" ON A
+  // FIELD landed on the asset scope, because only `goToField` ever wrote `fieldFocus`. The seed
+  // carried the artifact and dropped the field, so the panel could not know what they were looking
+  // at. Measured live 2026-09-03 (ui-verify 33756770327): go-to-field then open-assistant both
+  // clicked `ok` and the picker still rendered 0 chips.
+  //
+  // `section` is OPTIONAL and the focus is only written when it is present -- a seeder with no field
+  // (a whole-asset ask) must not fabricate a focus, or the panel would offer to change "one field"
+  // the reader never chose.
+  const seedAssistant = useCallback((text, artifactId, section) => {
     if (!text || !artifactId) return                       // never open a panel that cannot send
     setAssistantSeed({ text: String(text), artifactId })
+    if (typeof section === 'string' && section.trim()) setFieldFocus({ artifactId, section: section.trim() })
   }, [])
   const goToField = useCallback((artifactId, section) => {
     const a = artifacts.find((x) => x.id === artifactId)
@@ -991,7 +1002,7 @@ export default function PacketBuilder({ id, step }) {
                 /* SPEC 4.7-8 - the artifact travels WITH the sentence. Binding it at the call site,
                    where `a.id` is unambiguous, is what stops the panel inferring which asset a
                    request meant from whatever step happens to be active. */
-                onSeedAssistant={(text) => seedAssistant(text, a.id)} />
+                onSeedAssistant={(text, section) => seedAssistant(text, a.id, section)} />
             ))}
             {nextStep && (
               <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
