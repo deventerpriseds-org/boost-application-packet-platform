@@ -7850,3 +7850,33 @@ the custom connectors i added in claude"*.
 
 **Evidence:** setup output "Skills registered: 16 / Agents registered: 1 / … eds hooks installed
 (version 19)"; `execute_sql` result above; `ListConnectors` output.
+
+### ACT-68c — guard the COMMITTED fixture, not just the canary's rules (2026-09-02)
+
+**Asked:** fix the thing that made the fixture canary fire twice in one measurement pass.
+
+**Root cause, and why the existing tests could not catch it.** Two canary tests already exist and
+both are good: `H:canary-refuses-a-hollow-comparison` proves the RULES are right, and the
+build-fixtures passthrough test proves the BUILDER is right. **Neither reads
+`docs/qc-evidence/fixtures.json`** — the artifact every `render-app.mjs` / `compare-ui.mjs` call
+actually loads. So a new canary rule can land, the committed fixture can stop satisfying it, and the
+suite stays green while the file is unusable. The staleness surfaces three tool calls into somebody's
+measurement instead of in CI.
+
+**Measured, twice in one pass on 2026-09-02:** (1) the committed fixture carried `{prefs:{}}` with no
+`checks`; (2) mid-pass a parallel lane added the `comparison` rule and the just-rebuilt fixture
+refused too, because its dump predated `apiRequirements` being captured. Each cost a full
+`fixture-refresh.yml` round trip.
+
+**Fix:** one H-case appended to `api/test/hardening.test.mjs` (extending the file that already owns
+the canary tests — not a new suite), running the SHIPPED predicate in a child process against the
+committed file. Its failure message carries the exact rebuild commands, so the next person does not
+have to rediscover them.
+
+**Mutation-proven, not assumed.** Removed `checks` from the committed fixture -> `not ok 141`,
+141 pass -> 140 pass / 1 fail. Restored via `git checkout HEAD --`, verified byte-identical to a
+pre-mutation copy AND clean against HEAD, suite back to 141/141. **FIRED**, not INERT.
+
+**What this does NOT do:** it cannot tell a fixture that is merely OLD from one that is wrong — it
+only enforces what the canary can see. A dump whose rows have drifted from production still passes.
+That is the honest limit, and the reason `fixture-refresh.yml` stays the source of truth.

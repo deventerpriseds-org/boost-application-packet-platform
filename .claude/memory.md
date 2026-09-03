@@ -6171,3 +6171,14 @@ pattern-matcher — the residual IS the evidence for the decision not to automat
 because the rewrite removed the single-file `readFileSync` the row names, so `deferredLedger.test.mjs`
 failed. A stale-row guard reporting its own row stale is the mechanism working exactly as designed —
 row CLOSED, not silenced. api 1063/1063, app 441/441, `tsc` clean.
+
+## 2026-09-02 — the committed fixture is now guarded (ACT-68c)
+
+`api/test/hardening.test.mjs` now carries `H:committed-fixture-passes-the-canary`, which runs the
+shipped canary predicate against `docs/qc-evidence/fixtures.json`. **A stale committed fixture is
+now a RED SUITE, not a surprise three tool calls into a render pass** — the failure mode that cost
+two `fixture-refresh.yml` round trips in a single pass this day.
+
+The guard's failure message carries the rebuild recipe. Its limit, stated so nobody over-trusts it:
+it enforces only what the canary can SEE, so a fixture whose rows have drifted from production still
+passes. `fixture-refresh.yml` remains the source of truth.

@@ -5613,3 +5613,40 @@ test('H:fixture-score-gap-is-per-artifact: one starved asset among scored ones m
   assert.match(err, /artifact_score missing on 1 of 2/,
     `the refusal must name the ratio and the offender so a reader knows what to fix; got: ${err}`)
 })
+
+test('H:committed-fixture-passes-the-canary: the file every render uses must satisfy the rules the canary enforces', async () => {
+  const { execFileSync } = await import('node:child_process')
+
+  // WHY THIS EXISTS, and why the two tests above did not cover it.
+  //
+  // `H:canary-refuses-a-hollow-comparison` proves the canary's RULES are right. The build-fixtures
+  // passthrough test proves the BUILDER is right. Neither looks at `docs/qc-evidence/fixtures.json`
+  // - the artifact every `render-app.mjs` / `compare-ui.mjs` invocation actually loads. So a canary
+  // rule can land, the committed fixture can stop satisfying it, and the suite stays green while
+  // the file is unusable.
+  //
+  // That is not hypothetical. Measured 2026-09-02 in ONE measurement pass, twice:
+  //   1. the committed fixture carried `{prefs:{}}` with no `checks`, and the render refused;
+  //   2. mid-pass a parallel lane added the `comparison` rule, and the just-rebuilt fixture refused
+  //      too - its dump predated `apiRequirements` being captured.
+  // Each cost a full `fixture-refresh.yml` round trip, and each was discovered THREE tool calls into
+  // a measurement rather than by the suite. The canary did its job both times; the point of this
+  // case is that the suite should have said so first.
+  //
+  // THE SHIPPED PREDICATE, in a child process - `assertFixtureCanSee` calls `process.exit`, so the
+  // exit code is the verdict. Same technique as the hollow-comparison case above, and for the same
+  // reason: grading a local copy of the rules is how a guard goes inert.
+  const src = `import('${REPO}scripts/lib/fixture-canary.mjs').then(m => {`
+    + `const fx = JSON.parse(require('fs').readFileSync('${REPO}docs/qc-evidence/fixtures.json','utf8'));`
+    + `m.assertFixtureCanSee(fx, 'committed fixtures.json'); process.exit(0) })`
+  let status = 0, stderr = ''
+  try { execFileSync('node', ['-e', src], { stdio: 'pipe' }) }
+  catch (e) { status = e.status; stderr = String(e.stderr || '') }
+
+  assert.equal(status, 0,
+    'docs/qc-evidence/fixtures.json NO LONGER SATISFIES THE CANARY, so every render measured against '
+    + 'it is a claim about the fixture rather than about the app. Rebuild it: trigger '
+    + 'fixture-refresh.yml, then `git show origin/ui-fixtures:raw-dump.json > /tmp/raw.json` and '
+    + '`node scripts/build-fixtures.mjs --raw /tmp/raw.json --opp <oppId> --out '
+    + `docs/qc-evidence/fixtures.json\`. The canary said:\n${stderr}`)
+})
