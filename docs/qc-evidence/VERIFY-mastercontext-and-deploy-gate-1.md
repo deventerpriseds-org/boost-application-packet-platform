@@ -1,3 +1,18 @@
+RUN_STATUS: OK
+
+# VERIFY-mastercontext-and-deploy-gate-1
+
+**Vehicle:** headless `claude -p`, detached, on the session credential -- no API key.
+**Model:** claude-sonnet-5  **Turns:** 96  **Duration:** 998.2s  **Cost:** $9.431
+**Generated:** 2026-09-03T08:49:41Z
+
+> This verifier CAN execute: it runs suites, applies mutations and observes the
+> result. A claim here that a mutation went red should be an OBSERVATION. Where it
+> could not run something, it must say so rather than reason about what an
+> assertion would evaluate.
+
+---
+
 <!-- WHAT:       Independent verification of three changes landed on main 2026-09-03: the
                  MasterContext accessor + owner_master_block table + Postgres backing, the
                  table-registration guard (H:every-declared-table-is-registered), and the
@@ -375,3 +390,72 @@ pushed (`d646b9e`), and independently confirmed by the peer never to have reache
 
 No live behavior changed as a result of this verification pass. `MASTERCONTEXT_SOURCE` is still
 `storage` in production; the switch remains the owner's decision per the peer's own statement.
+
+---
+
+## Run reply
+
+## Summary
+
+Independent verification of the MasterContext-to-Postgres move and the two deploy-gate defects is complete: **`docs/qc-evidence/VERIFY-mastercontext-and-deploy-gate-1.md`** on `origin/claude/incumbent-wins-swap` (commit `d69a766`).
+
+**Verdicts:** all 7 claims (C1–C7) plus the integration trace are **CONFIRMED**, with one exception — C5 (the `H:every-declared-table-is-registered` guard) is confirmed only for the specific incident it targets; as a general claim it's **REFUTED**. Twelve pre-existing tables (`owner_search_prefs`, `taxonomy_title`, `mail_watch_config`, and 9 others) are created via `ensure*()` helpers entirely outside `SCHEMA_SQL` and remain invisible to that guard, H11, and `pgMigrate` alike — the same failure shape as the D21 incident this lane cites, just not closed for these. Not introduced by this lane, not blocking, but worth a follow-up.
+
+C6 — the deploy-gate discriminator the implementer had flagged as unsettled — is now genuinely settled: I independently verified the load-bearing facts (which commit introduced `buildStamp.ts`, and the exact step timings of the deploy that waited 2 attempts) via `gh api` metadata reads, which make a bundle-compiled sha the only explanation for what was observed.
+
+**Two things worth flagging directly:**
+1. Mid-verification, a temporary mutation-test edit of mine leaked into a real commit (`12b7da0`) pushed by a concurrent instance of this same session sharing the working tree. Caught and fixed within the same turn (`d646b9e`); confirmed by the peer it never reached `main`.
+2. My session's GitHub Actions dispatch and log access are blocked by this session's proxy, and the `boost-pg-mcp-write` connector is off in this chat — both documented in the artifact rather than silently worked around. Live DB data and two log lines came from a peer session with different access; everything those depended on for soundness, I re-verified independently.
+
+No live behavior changed — `MASTERCONTEXT_SOURCE` is still `storage` in production.
+
+---
+
+## IMPLEMENTER'S NOTE — appended after the verifier session ended (not a verdict, not a change to one)
+
+Added by the implementing session. **No verdict above has been altered.** Editing a verifier's
+findings as the author of the work under review would make the whole artifact worthless; this is
+appended, attributed, and separable.
+
+### C5's count is 14, not 12
+
+C5's prose already lists `role_profile` and `template` as belonging to the class — *"quoted elsewhere
+in `schema.ts`'s comments but not created there either"* — but the headline and the final summary
+both say twelve. Swept independently rather than recounted from the list above:
+
+| table | created in |
+|---|---|
+| `ats_source` | `appAts.ts` |
+| `bulk_job` | `appBulk.ts` |
+| `coach_activity`, `coach_thread` | `coachAgent.ts` |
+| `folder_role_map`, `mail_alert_state`, `mail_watch_config`, `seniority_routing` | `mailWatch.ts` |
+| `opportunity_stage_history` | `appMetrics.ts`, `appOpportunities.ts` |
+| `owner_search_prefs` | `appDimensions.ts`, `appRemediation.ts`, `appSearchPrefs.ts`, `appSkillBank.ts`, `checkPrefs.ts` |
+| `role_profile` | `appRoleProfiles.ts` |
+| `taxonomy_title`, `title_tier_draft` | `appRoleTaxonomy.ts` |
+| `template` | `appTemplates.ts` |
+
+The correction was sent to the verifier session so it could amend its own text; that session had
+already ended and the message could not be delivered. Recorded here for that reason, rather than by
+editing C5.
+
+### What was done about the refutation (commit `7f7854d`)
+
+C5 is the most valuable finding in this artifact and it is a refutation of the IMPLEMENTER'S FRAMING,
+not of the code. The commit message for `e3e04f0` said *"H11 could not see a new table"* as though the
+class were closed; one instance of it was closed.
+
+- `H:every-declared-table-is-registered` now **PRINTS** the uncovered tables at run time, so its name
+  cannot be read as a general fix.
+- **Surfaced, not failed** — failing on a pre-existing, deliberate pattern is the cry-wolf shape this
+  repo bans outright.
+- **The obvious fix is wrong, and that is written into the code and the ledger:** adding these to
+  `EXPECTED_TABLES` makes `pgMigrate` report them MISSING on every deploy, because `SCHEMA_SQL` does
+  not create them — a red deploy over a healthy schema. The real fix is D21's, moving each DDL into
+  `SCHEMA_SQL`, tracked as `ACT:ensure-only-tables-are-unmigrated` for the owner to size.
+- `.claude/memory.md`'s claim was corrected in place.
+
+### Standing after this pass
+
+`MASTERCONTEXT_SOURCE` remains `storage`. A green verification artifact is not authority to change
+live behaviour; the flip is the owner's decision.
