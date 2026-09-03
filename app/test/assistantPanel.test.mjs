@@ -300,12 +300,17 @@ test('H:scope-decides-the-section-the-handler-reads', () => {
 test('H:seeding-from-a-field-focuses-that-field', () => {
   // The seeders in AssetBlocks know their row. Both must hand the merge field over -- one that does
   // not is a control that silently drops the reader's context.
+  // NOT `onSeedAssistant\([^)]*\)` + /row\.merge_field/. Mutation-proving showed that reads
+  // EQUIVALENT: `[^)]*` stops at the FIRST ')', which is the one inside
+  // `fieldLabel(row.merge_field)`, so the fallback string satisfies the match whether or not the
+  // ARGUMENT is passed. The guard would have gone green with the field dropped -- an inert guard,
+  // believed. Assert the argument position itself instead.
   const blocks = strip(src('../src/screens/AssetBlocks.jsx'))
-  const seeders = blocks.match(/onSeedAssistant\([^)]*\)/g) || []
-  assert.ok(seeders.length >= 2, `expected both field seeders, found ${seeders.length}`)
-  for (const call of seeders) {
-    assert.match(call, /row\.merge_field/,
-      `a field seeder drops the merge field, so the field scope cannot be offered: ${call}`)
+  const chunks = blocks.split('onSeedAssistant(').slice(1)
+  assert.ok(chunks.length >= 2, `expected both field seeders, found ${chunks.length}`)
+  for (const c of chunks) {
+    assert.match(c.slice(0, 200), /, row\.merge_field\)/,
+      `a field seeder drops the merge field ARGUMENT, so the field scope cannot be offered: onSeedAssistant(${c.slice(0, 120)}`)
   }
   // And the receiver must WRITE the focus, not just accept the argument.
   assert.match(BUILDER, /setFieldFocus\(\{ artifactId, section: section\.trim\(\) \}\)/,
