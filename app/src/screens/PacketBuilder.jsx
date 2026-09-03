@@ -1139,6 +1139,11 @@ export default function PacketBuilder({ id, step }) {
   const assistant = (
     <AssistantPanel
       artifact={assistantArtifact}
+      /* 4.11-4: the field the reader is looking at, from the SAME `fieldFocus` the cards already
+         read - not a second copy of "which field is current". Null unless it belongs to the
+         artifact the assistant is bound to, or the panel would offer a field scope for a document
+         it is not editing. */
+      field={fieldFocus && assistantArtifact && fieldFocus.artifactId === assistantArtifact.id ? fieldFocus.section : null}
       seed={assistantSeed ? assistantSeed.text : null}
       onSeedConsumed={() => setAssistantSeed(null)}
       onSent={load}

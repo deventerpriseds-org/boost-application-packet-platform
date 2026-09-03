@@ -161,7 +161,36 @@ if (raw.apiRequirements) {
     located: requirements.filter((r) => r.char_start !== null && r.char_start !== undefined).length,
   }
 }
-f[`/opportunity/${OPP}`] = { opportunity: { ...opp, id: OPP, stage: pk.status } }
+// 3. GET /app/opportunity/{id} RETURNS THE OPPORTUNITY FLAT AND camelCASED, not wrapped and not
+//    the raw row: appOpportunities.ts:142 is `{ ...rowToOpp(opp), contacts }`. This line used to
+//    emit `{ opportunity: { ...opp } }` -- the raw snake_case DB row inside an envelope the API
+//    does not use -- so `opp?.jdSummary` was undefined in PacketBuilder.jsx:852 and the ENTIRE
+//    "Extracted from this posting" panel fell back to "No posting text and no summary are stored
+//    for this opportunity." Every render pass over the `jd` step was therefore judging a DEGRADED
+//    page, and PROTOTYPE-COVERAGE row 4.1-12 claims it was "confirmed in both source and
+//    screenshot" -- the screenshot could not have shown it. Same class as the missing `comparison`:
+//    a fixture that does not match what the app consumes reports the app as missing things.
+//    The field list below is rowToOpp's, read from the source rather than recalled.
+const rowToOpp = (r) => ({
+  id: r.id, company: r.company, logo: r.logo_url, role: r.role, location: r.location,
+  comp: r.comp_range, match: r.match_score, atsScore: r.ats_score ?? null, fit: r.fit,
+  urgency: r.urgency, source: r.source, why: r.why_surfaced, hm: r.hiring_manager,
+  recruiter: r.recruiter, rolesFor: r.roles_for, stage: r.stage, personaKey: r.persona_key,
+  dismissed: r.dismissed, isFavorite: !!r.is_favorite, tier: r.title_tier,
+  matchedGroup: r.matched_group, matchedRole: r.matched_role,
+  matchedVariation: r.matched_variation, baseScore: r.base_score, signals: r.company_signals,
+  pain: r.pain_hypotheses, isDemo: r.is_demo, createdAt: r.created_at, sourceDate: r.source_date,
+  jdTitle: r.jd_title, jdCompany: r.jd_company, jdSummary: r.jd_summary,
+  jdRequirements: r.jd_requirements, jdTable: r.jd_table,
+})
+if (raw.apiOpportunity) {
+  f[`/opportunity/${OPP}`] = raw.apiOpportunity
+} else {
+  console.error('!!! DERIVED /opportunity - rowToOpp is applied locally, not captured.')
+  console.error('    Re-run fixture-refresh.yml to capture the real response. Derived is')
+  console.error('    correct only while rowToOpp is unchanged; capture cannot go stale.')
+  f[`/opportunity/${OPP}`] = { ...rowToOpp({ ...opp, id: OPP, stage: pk.status }), contacts: [] }
+}
 f['/app/opportunities'] = { opportunities: [{ ...opp, id: OPP, stage: pk.status }] }
 f['/app/packets'] = { packets: [{ id: pk.id, oppId: OPP, ...opp, status: pk.status }] }
 // THE OWNER'S CHECK THRESHOLDS, and they are NOT optional decoration.

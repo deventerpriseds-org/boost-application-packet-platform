@@ -520,6 +520,86 @@ Key tables (PostgreSQL):
 - iOS testing: requires macOS runner or BrowserStack; categorically unavailable in Linux CCR
 
 ## Active work
+**2026-09-03 - 4.11-4 BUILT AND DEPLOYED. PROTOTYPE COVERAGE IS 176 OF 176 (100%).** `main`
+`4da8696`. It was the last open row.
+
+**Closed as DELIBERATE by a parallel session the same day** - *"a selector offering two options that
+cannot be honoured would assert capability the app does not have"*. Right about the prototype's
+THREE chips, wrong about two of them. `artifactAiEdit` (`appPackets.ts`) already reads an optional
+`section`: set -> `pkg[section]` (one merge field), absent -> `art.content` (the whole asset). So
+field-scope and asset-scope are BOTH honoured, one parameter apart on the route that already ships.
+My row supersedes theirs and says so.
+
+**"This packet" and "My profile" stay omitted, swept not assumed:** every write is
+`app/artifact/{artifactId}/...` so packet-scope has no route, and `app/qc/facts/set` takes a
+STRUCTURED FACT rather than an instruction. The prototype's own `send()` never reads `scope` at all,
+so copying it ships three dead controls.
+
+**Proven in the DOM, not argued:** `run-assistant.mjs` claim 8 - asset scope sends `{instruction}`,
+field scope sends `{instruction, section:'ResumeSummary'}`. 20 -> 28 checks.
+
+**NOTE: this file now has TWO `## Active work` headings** (522 and ~6362) - a merge concatenated
+them. The one at the top is live; the lower one is history that should be retitled.
+
+## Hardening -- 2026-09-03: the coverage guards recount FOR you; never hand-pick a side
+Three guards fired in sequence on this one row and each was right: the ABSENT-row watcher, then
+`H:coverage-tally-matches-rows`, then `H:headline-matches-the-rows`. Across TWO merges from `main`
+the rule that worked was: **take the other side's TALLIES wholesale** (their recount covers rows this
+branch never saw), **take my ROW**, then run the guard and apply the delta it names. Hand-editing one
+side of a tally is exactly what these guards exist to stop - the failure text says RECOUNT in capitals.
+
+## Hardening -- 2026-09-03: two HARNESS defects that would have scored a correct product wrong
+1. The assistant probe's api recorder kept only method+URL. `section` travels in the BODY, so the
+   field-scope assertion could NEVER have matched - it failed against correct code. Now records
+   `postData()`.
+2. `force: true` does NOT defeat an intercepting overlay - it skips actionability checks but still
+   dispatches at coordinates, landing on the backdrop. The probe's scaffolding buttons use
+   `$eval(el => el.click())`; every control UNDER TEST still goes through real hit-testing.
+
+**Playwright vs the live app, settled:** Playwright WORKS here and drove every render this session.
+The proxy blocks the HOST - `page.goto` on the SWA gives `net::ERR_TUNNEL_CONNECTION_FAILED`. Live
+checks go through `ui-verify.yml`. Never restate this as "cannot use Playwright".
+
+**2026-09-03 - SPEC 4.5-29/4.5-30 AND 4.6 DISPLACEMENT ARE ON `main` AND DEPLOYED.** PR #64
+(`a55bc25`) then PR #78 (`fd1bc80`). Three rows recorded as blocked, none of them actually were.
+
+**The pattern behind all three: a CODE COMMENT was read as the source of truth about the data.**
+`AssetBlocks.jsx` said SPEC 4.6's three additions had no source; `PULL-CANDIDATES.md` PC-3 named
+`swap_decision.from_label -> to_label` two paragraphs below its own reasoning. The grade was said to
+need `term_library_entry`; the prototype never visualises a library at all (`libTerms()` is
+`ATS_TERMS.filter(t => t.source === 'library')`, a flag filter used as a DENOMINATOR). **The owner
+caught this, not the process** - *"it should simply be pointing to the output not the mechanism"*.
+
+**Measured before building, every time:**
+- displacement: db-query **33687166561** - 35 swapped TO-labels, 7,220 keywords, **11 exact joins**
+- grade: **5,396 exact / 6,804 reworded / 2,221 no verbatim** (live)
+- prototype fixture cross-check: all 6 `variant` rows have a `postingSays` NOT containing the term
+
+**Two grades, not three.** `loose` is decided by not being in the scoreable library; every chip here
+is a `model_keyword`, never scoreable (`schema.ts:338`), so it would be constant AND would read as
+credit two lines below "counts toward nothing".
+
+**`fixtures.json` refreshed** (`fixture-refresh.yml` run 33717477347) - the canary had been refusing
+EVERY `render-app` run. `build-fixtures.mjs` was already correct; the dump was stale. 22 route keys,
+canary passes, and the app renders again for the first time this session.
+
+## Hardening -- 2026-09-03: I validated a SUBSET and pushed on it
+CI went red on PR #78. I ran `node --test` (454/0) and never `npm run test:margin`; the workflow runs
+both. The failing assertion was `the panel repeats "proposed" and shows no match grade or approx
+marker` - a test encoding the very finding the PR overturns.
+**Fixed by INVERTING it and making it stricter**, never by skipping: the old assertion only required a
+grade be ABSENT; the new one requires the RIGHT grade for the row, so an inverted derivation fails
+rather than shrugging. 59 -> 61 checks.
+**Guardrail: before any push touching `app/`, run the FULL gate - `npm run build && npm test &&
+npm run test:margin && npm run test:browser`.** The unit suite alone is not the gate.
+
+## Hardening -- 2026-09-03: `mutate.sh` NOTHING-IS-PROVEN is not a verdict
+The browser mutation returned `NOTHING IS PROVEN` because TWO assertions fail together and the
+harness identifies one by name. Applied by hand: `if (!k)` for `if (!k || !v)` makes the unlocatable
+`coaching` chip render `Reworded` and take a `~` marker; my new assertion AND a pre-existing one both
+catch it; restore verified clean vs HEAD. **Recorded as a hand proof, never as a harness FIRED it did
+not give.** Same discipline as the two INERT catches: the harness's own output is the claim, not my
+summary of it.
 **2026-09-02 — SPEC 4.6 DISPLACEMENT SHIPPED, and the row that called it unsourced was WRONG.**
 Commit `ac0f68d` + two test commits on `claude/boost-app-setup-approach-rjxhca`.
 
@@ -6446,6 +6526,31 @@ tracking-docs PR into someone else's history. The guard itself — a `one-act-id
 mirroring `one-id-one-row` — is the right fix and is a change to a file that decides a gate, so it
 is TIER 1 and needs its own AC pass. Left as the owner's call rather than bolted on here.
 
+### MasterContext move — LANDED ON main `036620a` (2026-09-03), and it is INERT there by design
+Commits `5f4c0c9` (accessor), `d85934d` (`owner_master_block`), `79d843f` (Postgres backing + copy
+route + rollback switch). api 1069/1069, app 454/454, four guards mutation-proved, schema executed
+against a POPULATED local Postgres.
+
+**Nothing observable changed in production.** `MASTERCONTEXT_SOURCE` defaults to `storage`, so every
+build still reads Azure Storage. The table is created by pg-migrate and nothing reads it; the copy
+route exists and must be called deliberately. The move becomes real only when the copy runs and the
+switch is flipped — and AC-5 (byte-identical `masterBaseline` output on the owner's real data) must
+be confirmed live BEFORE that flip.
+
+**TWO MERGE HAZARDS MET IN ONE LANDING — both worth remembering.**
+1. `git diff origin/main..HEAD` showed `-56/-26/-51` on `app/src/assetBlocks.js`, `AssetBlocks.jsx`
+   and its test, plus FIVE whole evidence docs at `-381/-165/-115/-101/-68`. None of it was mine to
+   delete: `main` had moved 22 commits (the swap-attribution-judge lane) and this branch was behind.
+   **Reading the diff BEFORE the merge is what caught it** — a `--ff-only` the other way round would
+   have reverted another lane's work. The rule earns its keep: check the diff, not just the rc.
+2. The merge itself lost a `})`: git treated the trailing closer as a shared suffix and kept ONE
+   copy, so this branch's last test lost its closer at the seam. **`tsc` passed.** The file failed
+   to PARSE, and node reported it as one failing test file while **145 tests inside it silently did
+   not run** — the suite went 1067 -> 924 and still printed `fail 1`. **The COUNT exposed it, not
+   the verdict.** After any merge that touches a test file, compare the test COUNT to before.
+
+Also landed to `eds-claude-skills` main (`4442e36`, PR #33): the `verify.sh` clobber fix,
+`scripts/artifact_shape.py`, and the `mutate.sh` matcher fix.
 ## 2026-09-03 — TRINNEX ONLY (owner-scoped): coverage 71% -> 86% by judging the other artifacts
 
 **Owner: *"I only want us counting trinnex right now stop looking at anything else."*** Everything
@@ -6638,3 +6743,58 @@ first pkg_json persist.
 **Guardrail: a DB row's SHAPE identifies its writer better than my reading of the code does.** One
 unconditional-append column settled an attribution I had argued from behaviour. When attributing a
 row to a code path, find the column that path always touches and check it.
+### The deploy gate was vacuous, and `owner_master_block` is now LIVE (2026-09-03)
+
+**What was broken.** `api-deploy.yml` polls `/api/health` for the sha it just deployed before letting
+pg-migrate run. It read `process.env.DEPLOYED_SHA` -- an APP SETTING written by a step that runs
+BEFORE the code deploy -- so the label flipped while the old bundle served, the poll cleared on
+attempt 1, and the migration ran the PREVIOUS bundle's SCHEMA_SQL. Measured twice: 2026-08-28 at
+"31/31 tables present" (the JD rename never happened) and 2026-09-03 at "32/32". The second is proof
+rather than a symptom: that deploy's SOURCE carried a 33-entry EXPECTED_TABLES and the RUNNING code
+still answered 32.
+
+**Fixed by changing WHAT is measured.** The sha is stamped into `src/functions/buildStamp.ts` before
+`npm run build`, compiled into `dist/`, and ships inside the zip. `DEPLOYED_SHA` survives only as a
+fallback, in one place. The stamp step asserts its own edit applied, and the step was verified by
+EXTRACTING it from the YAML and RUNNING it, not by reading the indented heredoc.
+
+**Result, verified in the deploy log and the live database:** run 33733374880 reported
+`33/33 tables present` with `"owner_master_block":0` in the list, and the table exists with 4
+columns, `PRIMARY KEY (owner_email, block_key)` and the 14-value CHECK intact.
+
+**THE LIMIT IS NOW CLOSED -- the discriminating deploy ran, and the fix is PROVEN.** The entry here
+previously said the poll still cleared on attempt 1, that this was only "consistent with" the fix,
+and that a deploy where BUILD_SHA and DEPLOYED_SHA differ would settle it. That deploy is
+**run 33733707586** (`5dbd4df`), and it settles it:
+
+    08:31:41.257  waiting for 5dbd4df... to serve (health reports 'f0f9afc11...'), attempt 1
+    08:31:53.682  worker is serving 5dbd4df... after 2 attempt(s)
+
+Health reported **`f0f9afc` -- the PREVIOUS commit** -- while `5dbd4df` deployed. `DEPLOYED_SHA` had
+already been overwritten to `5dbd4df` by the Sync-secrets step at 08:31:05-08:31:14, twenty-seven
+seconds earlier, so an env-derived value could only have returned `5dbd4df` and matched instantly.
+The only source of `f0f9afc` at that moment is the `BUILD_SHA` compiled into the bundle still
+serving. The poll waited 12.4s across 2 attempts and then migrated.
+
+**Why the FIRST post-fix run still showed attempt 1, which is the part I had wrong:** the fix needs
+the OUTGOING bundle to be stamped for the difference to appear. On run 33733374880 the old bundle
+predated `buildStamp.ts`, so `BUILD_SHA` was null there and `servingSha()` fell through to
+`DEPLOYED_SHA` -- the documented fallback behaving exactly as designed, not the defect. 33733707586
+is the first deploy with a stamp on both sides, and the first to wait.
+
+**Two guards earned here, both mutation-proved:**
+- `H:every-declared-table-is-registered` -- H11 walked a HAND-MAINTAINED list and was therefore
+  blind to any genuinely new table; the new one derives the list from SCHEMA_SQL.
+  **OVERSTATED, and the independent verifier caught it (C5).** That closes the gap for tables
+  DECLARED IN SCHEMA_SQL. It does nothing for a table created only by a request-time `ensure*()`
+  helper in its own file -- invisible to pgMigrate, to H11 and to the new guard alike, since all
+  three only look at EXPECTED_TABLES' universe. **14 such tables exist today** (reproduced
+  independently of the verifier), including `owner_search_prefs`, created across FIVE files and
+  backing the whole `chk_*` settings family. They PRE-DATE this lane. The guard now PRINTS them
+  so nobody reads its name as a general fix.
+  **THE TRAP, if anyone tries the obvious fix:** adding them to EXPECTED_TABLES makes pgMigrate
+  report them MISSING on every deploy, because SCHEMA_SQL does not create them -- a red deploy
+  over a healthy schema. The real fix is D21's, moving the DDL into SCHEMA_SQL one table at a
+  time, and that is an owner decision, not a test-file change.
+- `H:deploy-sha-comes-from-the-bundle` -- health must report the compiled sha, and must not name
+  `DEPLOYED_SHA` at all so the fallback cannot be reintroduced at the call site.

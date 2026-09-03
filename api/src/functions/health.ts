@@ -1,6 +1,7 @@
 import { app, HttpRequest, HttpResponseInit, InvocationContext } from '@azure/functions'
 import { TableClient, TableServiceClient } from '@azure/data-tables'
 import { google } from 'googleapis'
+import { servingSha } from './buildStamp'
 
 const CONN = process.env.AZURE_STORAGE_CONNECTION_STRING!
 
@@ -36,7 +37,12 @@ export async function health(
         // being deployed. It must stay on the handler registered as `app.http('health')`: the first
         // attempt at this put it on `appHealth.ts`, which serves a DIFFERENT route, so the poll saw
         // nothing on all 40 attempts and the deploy failed on a change that was otherwise correct.
-        deployedSha: process.env.DEPLOYED_SHA || null,
+        // NOW READ FROM THE BUNDLE, not from `DEPLOYED_SHA`. The app setting is written by a
+        // workflow step that runs BEFORE the code deploy, so it flipped to the new sha while
+        // the old bundle was still serving and this poll cleared on attempt 1 every time --
+        // measured twice (2026-08-28 at 31/31, 2026-09-03 at 32/32, both green, both stale).
+        // See buildStamp.ts.
+        deployedSha: servingSha(),
         tables
       }
     }

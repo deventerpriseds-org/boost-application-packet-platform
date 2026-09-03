@@ -308,6 +308,75 @@ test('H11: every table this layer added is registered for migration', () => {
   }
 })
 
+// H:every-declared-table-is-registered -- H11's missing half, and the reason it was believed.
+//
+// H11 above walks a HAND-MAINTAINED list of table names. It can only check a table someone
+// remembered to add to it, so the guard against "you forgot to register your new table" itself
+// requires you to remember your new table -- in a THIRD place. It is structurally incapable of
+// catching a genuinely new one, and it passed while doing nothing.
+//
+// MEASURED 2026-09-03. `owner_master_block` shipped to main declared in SCHEMA_SQL and absent from
+// EXPECTED_TABLES. api-deploy went green, pg-migrate returned `ok: true` with the detail
+// "32/32 tables present", and the live database did not have the table. The count was 32/32 because
+// EXPECTED_TABLES held 32 names and every one of them existed -- a gate that passes by not looking,
+// which is exactly the vacuous-pass this repo bans ("absent evidence is not_applicable, never
+// pass"). H11 was green throughout.
+//
+// So this derives the list from SCHEMA_SQL instead of restating it. It needs no maintenance and
+// cannot be blind to a new table. H11 STAYS: its named list also asserts each table is still
+// DECLARED, which this does not, and two overlapping checks on a migration path is not ceremony.
+//
+// MUTATION that must make this FIRE: delete 'owner_master_block' from EXPECTED_TABLES in schema.ts.
+test('H:every-declared-table-is-registered: SCHEMA_SQL and EXPECTED_TABLES cannot diverge', () => {
+  const schema = src('schema.ts')
+  const body = schema.slice(schema.indexOf('SCHEMA_SQL = `'), schema.indexOf('\n`;'))
+  // Strip SQL line comments first. A comment is prose ABOUT the schema, not schema -- without this
+  // the phrase "create table if not exists is a NO-OP" in this file's own commentary is read as a
+  // table named `is`, and the guard cries wolf on its first run.
+  const code = body.split('\n').map((l) => l.replace(/--.*$/, '')).join('\n')
+  const declared = [...new Set([...code.matchAll(/create table if not exists (\w+)/g)].map((m) => m[1]))]
+  const registered = schema.slice(schema.indexOf('EXPECTED_TABLES'))
+  const unregistered = declared.filter((t) => !new RegExp(`'${t}'`).test(registered))
+  assert.deepEqual(unregistered, [],
+    `these tables are declared in SCHEMA_SQL but not in EXPECTED_TABLES: ${unregistered.join(', ')}. ` +
+    `pgMigrate reports "n/n tables present" against EXPECTED_TABLES, so an unregistered table makes ` +
+    `that number pass while the table itself is never checked -- a green deploy over a missing table.`)
+  assert.ok(declared.length >= 30, `only ${declared.length} tables parsed out of SCHEMA_SQL -- the ` +
+    `extraction broke, and an empty list would make this guard pass vacuously, which is the exact ` +
+    `failure it exists to catch`)
+
+  // THE PART THIS GUARD DOES **NOT** COVER, surfaced so nobody reads its name as a general fix.
+  //
+  // REFUTED BY THE INDEPENDENT VERIFIER, 2026-09-03 (VERIFY-mastercontext-and-deploy-gate-1.md, C5).
+  // The assertion above closes the D21-shaped gap for tables DECLARED IN SCHEMA_SQL. A table created
+  // only by a request-time `ensure*()` helper in its own file is invisible to it -- and to H11, and
+  // to pgMigrate, all three of which only ever look at EXPECTED_TABLES' universe. Reproduced here
+  // independently of the verifier: 14 such tables, `owner_search_prefs` among them, created across
+  // FIVE files and backing the whole `chk_*` settings family this suite polices at length.
+  //
+  // SURFACED, NOT FAILED, and the reason is a trap worth naming: adding these to EXPECTED_TABLES
+  // would make pgMigrate report them MISSING on every deploy -- SCHEMA_SQL does not create them --
+  // turning a green deploy red for a schema that is actually fine. The real fix is D21's: move the
+  // DDL into SCHEMA_SQL, one table at a time. That is a tracked decision, not something to do inside
+  // a test file.
+  const elsewhere = new Map()
+  for (const [name, text] of allSources()) {
+    if (name === 'schema.ts') continue
+    const bare = text.split('\n').map((l) => l.replace(/--.*$/, '')).join('\n')
+    for (const m of bare.matchAll(/create table if not exists (\w+)/g)) {
+      if (!elsewhere.has(m[1])) elsewhere.set(m[1], [])
+      if (!elsewhere.get(m[1]).includes(name)) elsewhere.get(m[1]).push(name)
+    }
+  }
+  const invisible = [...elsewhere.keys()]
+    .filter((t) => !declared.includes(t) && !new RegExp(`'${t}'`).test(registered)).sort()
+  if (invisible.length) {
+    console.log(`       note: ${invisible.length} table(s) are created ONLY by an ensure*() helper ` +
+      `and are invisible to pgMigrate, H11 and this guard:`)
+    for (const t of invisible) console.log(`         ${t}  (${elsewhere.get(t).join(', ')})`)
+  }
+})
+
 // ---------------------------------------------------------------------------------------------
 // H12 — Pure rule modules must stay testable without Azure or a database, or the rules stop being
 // tested and start being hoped for.
@@ -5811,4 +5880,51 @@ test('H:attribution-follows-the-posting-line-not-the-keyword: a swap row never s
     + 'all — the keyword is not an input to the match')
   assert.ok(similarity(text, byPostingLine.verbatim) >= ATTRIBUTION_THRESHOLD,
     'the fixture must actually exercise the threshold, or this test proves nothing')
+})
+
+// H:deploy-sha-comes-from-the-bundle -- the convergence gate cannot be satisfied by a label.
+//
+// `api-deploy.yml` refuses to run pg-migrate until /api/health reports the sha it just deployed.
+// That guard is the only thing between a deploy and a migration against the PREVIOUS bundle, and it
+// read `process.env.DEPLOYED_SHA` -- an APP SETTING the workflow writes in a step that runs BEFORE
+// the code deploy. So the value flipped to the new sha while the old bundle was still serving, and
+// the poll cleared on attempt 1 every time. A gate that checks a label the gate itself wrote cannot
+// fail.
+//
+// MEASURED TWICE, IDENTICALLY:
+//   2026-08-28  "pg-migrate ran the PREVIOUS bundle's SCHEMA_SQL ... '31/31 tables present', and
+//               the JD column rename had not happened" (api-deploy.yml's own comment).
+//   2026-09-03  runs 33731929584 and 33732790777. The second is PROOF rather than a symptom: that
+//               deploy's source contained a 33-entry EXPECTED_TABLES and the running code still
+//               answered "32/32 tables present". Neither deploy created `owner_master_block`; a
+//               manual pg-migrate ten minutes later created it instantly.
+//
+// The 2026-08-28 fix moved `DEPLOYED_SHA` to BEFORE the deploy. That cured the symptom it aimed at
+// (the poll timing out) and reintroduced the disease in a form that ALWAYS passes -- which is why
+// this fix changes WHAT is measured rather than when.
+//
+// MUTATION that must make this FIRE: revert health.ts to `deployedSha: process.env.DEPLOYED_SHA`.
+test('H:deploy-sha-comes-from-the-bundle: health reports the compiled sha, not the app setting', () => {
+  const health = src('../health.ts')
+  assert.match(health, /deployedSha:\s*servingSha\(\)/,
+    'health must report the sha compiled INTO the bundle. Reading process.env.DEPLOYED_SHA directly '
+    + 'makes the deploy gate check an app setting the workflow wrote before deploying the code, '
+    + 'which is how a migration ran against the previous bundle twice.')
+
+  // The fallback may exist, in ONE place. If health reads the env var itself, the bundle stamp can
+  // be bypassed at the call site while this test still sees servingSha().
+  // COMMENTS STRIPPED FIRST. The first run of this guard fired on the explanatory comment directly
+  // above the fixed line -- prose that NAMES the defect, which is exactly the cry-wolf failure this
+  // file bans ("a guard that fires on prose is one people learn to ignore"). The assertion is about
+  // a code reference, so it reads code.
+  assert.ok(!/DEPLOYED_SHA/.test(stripComments(health)),
+    'health.ts must not READ DEPLOYED_SHA -- the fallback belongs in buildStamp.servingSha(), or '
+    + 'the bundle stamp can be bypassed at the call site while this test still sees servingSha()')
+
+  const stamp = src('../buildStamp.ts')
+  assert.match(stamp, /export const BUILD_SHA: string \| null = /,
+    'buildStamp must expose BUILD_SHA in the exact shape api-deploy.yml rewrites; the workflow '
+    + 'asserts its own edit applied, and this asserts the target it edits still exists')
+  assert.match(stamp, /BUILD_SHA \|\| process\.env\.DEPLOYED_SHA/,
+    'the BUNDLE must win over the app setting -- reversing the order restores the defect exactly')
 })

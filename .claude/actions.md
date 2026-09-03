@@ -8324,6 +8324,13 @@ silently absorbed:
    `2c693d1`; at the merged tree it is **95 rows / 45 `OPEN` / 50 `CLOSED`**, counted with the
    ledger's own parser, not by eye.
 
+### ACT:mastercontext-to-postgres — LANDED on main `036620a`, INERT until the copy runs
+Accessor + table + Postgres backing + copy route + rollback switch are on `main`. Reader still uses
+Storage (`MASTERCONTEXT_SOURCE` defaults to `storage`), so nothing changed in production.
+OPEN, in order: (1) run `POST /api/app/master-context/copy` on the deployed Function via
+api-test.yml; (2) confirm AC-5 byte-identical `masterBaseline` output on the owner's real data;
+(3) flip `MASTERCONTEXT_SOURCE=postgres`; (4) build the Settings text editor the owner confirmed
+they want. Storage is NOT deleted at any step (AC-9).
 ### ACT-68l — TRINNEX ONLY: 71% -> 86% coverage by judging the other artifacts (2026-09-03)
 
 **Owner scoped it:** *"I only want us counting trinnex right now stop looking at anything else."*
@@ -8439,3 +8446,94 @@ time; only the culprit moved. Recorded because the pattern is mine, not the code
 
 **Owner decisions still open:** none blocking — the AC pass ruled on the config fork (both, staged).
 **No implementation started.**
+### ACT:deploy-gate-was-vacuous — FIXED and landed (2026-09-03)
+`api-deploy.yml` polled an app setting it wrote before deploying the code, so pg-migrate ran the
+previous bundle. Twice (2026-08-28 "31/31", 2026-09-03 "32/32"). Sha now stamped into the bundle
+(`buildStamp.ts`). Guard `H:deploy-sha-comes-from-the-bundle`, mutation-proved. NOT fully proven:
+the poll still clears on attempt 1, which is consistent with the fix but not evidence of it.
+
+### ACT:mastercontext-to-postgres — table is LIVE, copy NOT run
+`owner_master_block` exists on production (run 33733374880: "33/33 tables present"), 0 rows.
+NEXT: (1) `POST /api/app/master-context/copy` via api-test.yml; (2) confirm AC-5 byte-identical
+`masterBaseline` output on the owner's real data; (3) flip `MASTERCONTEXT_SOURCE=postgres`;
+(4) the Settings text editor. Storage is deleted at NO step.
+
+### ACT:mastercontext-to-postgres — STEP 1 DONE, the copy has run (2026-09-03)
+`POST /api/app/master-context/copy` via api-test.yml run 33734146372 (success). Verified in the
+LIVE database, not from the workflow's exit code: **14 blocks, 8,003 chars**, owner
+`von.ellis@enterpriseds.io`, all 14 `MC_KIND` keys present, `itemsToOmit` absent (the CHECK makes it
+unstorable). Storage untouched.
+
+**Nothing reads Postgres yet** — `MASTERCONTEXT_SOURCE` still defaults to `storage`.
+REMAINING: (2) confirm AC-5, `masterBaseline` byte-identical from both stores on this real data;
+(3) flip the switch; (4) the Settings text editor. Step 3 waits on
+`VERIFY-mastercontext-and-deploy-gate-1.md` (independent verifier, in flight).
+
+### ACT:ensure-only-tables-are-unmigrated — OPEN, pre-existing, surfaced by the verifier
+14 production tables are created ONLY by request-time `ensure*()` helpers and appear in neither
+`SCHEMA_SQL` nor `EXPECTED_TABLES`, so `pgMigrate` can never report them missing:
+`ats_source, bulk_job, coach_activity, coach_thread, folder_role_map, mail_alert_state,
+mail_watch_config, opportunity_stage_history, owner_search_prefs, role_profile, seniority_routing,
+taxonomy_title, template, title_tier_draft`. `owner_search_prefs` is created in five files and backs
+the `chk_*` settings family.
+
+Found by the independent verifier (VERIFY-mastercontext-and-deploy-gate-1.md C5), reproduced
+independently. PRE-DATES the MasterContext lane. `H:every-declared-table-is-registered` now PRINTS
+them rather than pretending to cover them.
+
+**Do NOT "fix" this by adding them to EXPECTED_TABLES** — pgMigrate would report them MISSING on
+every deploy, since SCHEMA_SQL does not create them: a red deploy over a healthy schema. The real
+fix is D21's, moving each table's DDL into SCHEMA_SQL. OWNER DECISION: worth doing, and how many at
+a time.
+---
+
+## ACT-68d — SPEC 4.5-29 / 4.5-30 / 4.6: three "blocked" rows, none of them blocked (2026-09-03)
+
+**Asked:** *"get us to 40"*, then *"build the displacement text as well"*, then *"I need visuals to
+decide"*, then *"why couldn't you do all of these instead of making me choose?"*
+
+**Status: DONE and DEPLOYED.** `main` at `fd1bc80` via PR #64 + PR #78.
+
+| Row | Was recorded as | Truth | Proof |
+|---|---|---|---|
+| `4.6` displacement | no source | **BUILT** | PC-3 names `swap_decision.from_label -> to_label`; db-query 33687166561 = 11 exact joins |
+| `4.5-29` `~` marker | needs term library | **BUILT** | prototype never visualises a library; 5,396/6,804 live split |
+| `4.5-30` match grade | needs term library | **BUILT** (2 grades) | same; `loose` omitted as constant + reads as credit |
+| `4.5-33` open chip | — | **stays closed** | `N2` is the only `coverage:'open'` req and sits on a TERM, never a field section |
+| `4.5-38` reword toggle | — | **stays closed** | prototype persists nothing; `Ask for a reword` already ships |
+
+**Owner correction that unlocked it:** *"it should simply be pointing to the output not the mechanism
+which in that case library or placeholder approach wouldn't matter."* Correct. Every "blocked" verdict
+here came from reading a CODE COMMENT instead of the data it described.
+
+**Also:** `fixtures.json` refreshed (run 33717477347) — the canary had been refusing every
+`render-app` run, so the app had been unrenderable all session. `render-spec.mjs` gained
+`exact: false`, which is what made the variant-chip screenshot possible.
+
+**Phase-tag checker: investigated, NOT changed.** I had offered to relax it to one tag per turn. That
+would revert a v15 fix earned by a measured failure (58 blocks, 19 tagged, 39 untagged, gate reported
+PASS). Withdrew my own suggestion.
+
+**Evidence:** PR #64, PR #78, CI run 33718171918 green; margin 61/61, browser 52/52, api 1064/0,
+app 454/0; 4 unit guards harness-FIRED, browser assertion hand-proved.
+
+---
+
+## ACT-68e — 4.11-4 scope selector: the last open coverage row (2026-09-03)
+
+**Asked:** *"of course you can use playwright. knock out 4.11-4 continuously until deployed"*
+
+**Status: DONE, DEPLOYED, and it closes the board at 176/176 (100%).** `main` `4da8696`.
+
+- **Playwright:** works here, drove every render this session. The proxy blocks the SWA host —
+  `net::ERR_TUNNEL_CONNECTION_FAILED` on `page.goto`. Live checks go via `ui-verify.yml`.
+- **Feasibility first:** swept every write route. All are `app/artifact/{artifactId}/...`, so
+  "This packet" has no route; `app/qc/facts/set` takes a structured fact, so "My profile" cannot
+  carry an instruction. Built the two that route.
+- **The unlock:** `artifactAiEdit` reads an optional `section` — set gives one merge field, absent
+  gives the whole asset. The selection changes what is SENT.
+- **Superseded a same-day DELIBERATE close** by a parallel session whose premise (two options that
+  cannot be honoured) was falsified by that parameter.
+- **Guards:** 4 unit, all mutation-proved FIRED; 8 DOM checks (20 → 28 on the assistant probe).
+
+**Evidence:** api 1071/0 · app 462/0 · margin 61/61 · browser 52/52 · deploy run 33734904497.

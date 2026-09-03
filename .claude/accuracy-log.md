@@ -743,6 +743,7 @@ screen.
 two `verify.sh` runs (~$2.78 each) briefed on the wrong premise. The independent AC pass found it in
 one read — which is the argument for the pass, not against it.
 
+<<<<<<< HEAD
 ## 2026-09-03 — three attributions refuted in one session, same root cause
 
 | # | My claim | Ground truth | The ONE source that would have settled it up front | Pattern |
@@ -766,3 +767,64 @@ shape for #3. Each was one query or one grep away.
 **What went right, and is worth keeping:** all three were caught inside the session — two by the
 independent AC subagent, one by me re-checking the subagent's refutation rather than accepting it.
 The findings themselves survived every correction; only the attributions moved.
+=======
+### A green deploy over a missing table, and the guard that was blind by construction
+
+| | |
+|---|---|
+| **Claim** | "Deployed" — api-deploy run 33731929584 succeeded for `036620a`, pg-migrate returned `ok: true`, detail *"Schema applied to boost_resume_n_packet_builder: 32/32 tables present"*. |
+| **Ground truth** | **REFUTED.** `owner_master_block` did not exist in the live database. Confirmed through `boost-pg-mcp-write`: right database (`boost_resume_n_packet_builder`, 51 tables, `correction` and `swap_decision` present), table absent. |
+| **The single source that would have settled it** | The live database — one `information_schema.tables` query, which is what I ran. **I nearly didn't.** The deploy was green and I had already written "Deployed" in my own report. What made me check was that the repo's own session-start hook names this exact class: *"Work was written to change production and the change did not happen."* |
+| **Root cause** | `pgMigrate` verifies against `EXPECTED_TABLES`, a hand-maintained list. My table was declared in `SCHEMA_SQL` and never added to that list, so "32/32" counted 32 names that all existed and never looked at the 33rd. **The number was true and meaningless.** |
+
+**The guard that should have caught it was blind by construction, and that is the finding worth
+keeping.** `H11` — *"every table this layer added is registered for migration"* — iterates a
+hardcoded array of table names. It can only check a table someone remembered to add to it, so the
+guard against *"you forgot to register your new table"* itself requires you to remember your new
+table, in a **third** place. It was green the entire time. Replaced by
+`H:every-declared-table-is-registered`, which derives the list from `SCHEMA_SQL` and therefore
+cannot be blind to a new table; mutation-proved FIRED.
+
+**Why the table was missing at all is a SEPARATE and still-open question.** A manual pg-migrate
+re-run created it immediately, so the deployed bundle did contain the statement. The workflow's
+converge check reported *"worker is serving 036620a after 1 attempt(s)"* — first attempt, unusually
+fast for a fresh deploy — and its own comment says it exists so that *"pg-migrate would not run
+whichever bundle IS serving"*. **Leading hypothesis, stated as inference not fact:** Azure Functions
+runs several worker instances; the health probe hit a converged one and the pg-migrate POST landed
+on another still serving the old bundle. I have no instance-level evidence, so this is not proven —
+it is the next thing to measure, and it is recorded rather than fixed on a guess.
+
+**Calibration note on my own reporting.** I wrote "Deployed" and "api-deploy → success" before
+querying the database. That sentence was true about the workflow and false about the world. A
+deploy's exit code describes the deploy; only the database describes the schema.
+
+For the trend table: `self-caught`, but only just, and after the claim had already been made to the
+owner in this session.
+
+### `git add -A` on a SHARED working tree committed another session's live mutation
+
+| | |
+|---|---|
+| **Claim** | Commit `12b7da0` — "The copy has run: 14 blocks, 8003 chars, verified in the live database" — described a ledger update and a verifier artifact. |
+| **Ground truth** | **It also contained `entity[r.block_key + '_pg'] = r.text`** in `masterContext.ts`. A concurrent session was mid-`mutate.sh`, proving `H:mastercontext-baseline-parity` fires, and my `git add -A` swept its transient edit in. Confirmed by `git show 12b7da0 -- api/src/functions/tests/masterContext.ts`. Reverted by that session as `d646b9e`. |
+| **The single source that would have settled it** | `git status` before staging, or `git diff --cached` before committing — either would have shown a file I had not touched. I ran neither, because `-A` made the question feel answered. |
+| **Blast radius, had it landed** | `entityFromBlocks` would emit `skills1_pg` instead of `skills1`. `masterBaseline` would not recognise a single key, so the baseline would come back EMPTY — and the baseline is what every swap row's "original" compares against. Silent, total provenance corruption on every packet built after the switch flipped. Exactly the failure the TIER 1 designation exists to prevent. |
+| **Root cause** | Two sessions share this working tree. `git add -A` stages the TREE, not my work, and I have no way to distinguish the two. |
+
+**Caught by a peer, not by me and not by a guard.** `H:mastercontext-baseline-parity` would have fired
+— it is literally the guard being exercised at that moment — but only if the suite ran between my
+commit and my push. **I chained `git add -A && git commit && git push` in one command with no suite
+run in between.** The suite takes twelve seconds.
+
+**Two changes, both concrete rather than a reminder:**
+1. **Never `git add -A` in this repo.** Name the paths. The command is not a convenience here, it is a
+   claim about authorship that I cannot substantiate on a shared tree.
+2. **Run the suite between committing and pushing**, not only before committing. A commit is
+   recoverable; a push is what other lanes and `main` build on.
+
+**It did NOT reach `main`** — verified with `git merge-base --is-ancestor 12b7da0 origin/main` → false,
+and `git show origin/main:...masterContext.ts` still reads `entity[r.block_key]`. Nothing deployed.
+
+For the trend table: `peer-caught`. Not self-caught, not instrument-caught. That is the worst category
+in this log and the first entry in it.
+>>>>>>> origin/main

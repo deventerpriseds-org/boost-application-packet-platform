@@ -14,7 +14,7 @@ import {
   kindSourceNote, noQuoteReason, isQuoted, modelKeywords, groupRequirements,
   summarizeKindSource, isEvidencedKindSource, keywordLibraryState, postingBody,
   KEYWORD_2UP_MIN, keywordColumns, keywordGridTemplate, POSTING_HOOKS,
-  KEYWORD_GROUPS, NOT_COMPARED_NOTE, keywordGroupMeaning, tabEvidenceTone, EVIDENCE_TONE,
+  KEYWORD_GROUPS, NOT_COMPARED_NOTE, keywordGroupMeaning, tabEvidenceTone, tabEvidenced, EVIDENCE_TONE,
   evidencePresentation } from '../src/postingAnalysis.js'
 
 // The fixture from the AC7 reproduction: one line the posting MARKED required, two the parser
@@ -1219,4 +1219,41 @@ test('H:the-control-does-not-claim-a-proposal-is-uncounted', () => {
     'the retired sentence claims a counted row is excluded')
   assert.match(src, /counting toward your coverage now/,
     'the control must say the row is already counting, which is what makes the veto meaningful')
+})
+
+// -- SPEC 4.1-10: the evidenced ratio the tab header states --------------------------------------
+// The app printed `Keywords (35)` plus a provenance split; the prototype prints `4/4` evidenced.
+// Measured against BOTH renders those are different AXES, not two versions of one number, so the
+// substitution PROTOTYPE-COVERAGE 4.1-10 defended as "better-sourced" never replaced anything.
+test('4.1-10: the numerator is `verified` ALONE - a doubted row is not evidenced', () => {
+  const rows = [
+    { evidenceState: 'verified' }, { evidenceState: 'verified' },
+    { evidenceState: 'stale' }, { evidenceState: 'misresolved' },
+    { evidenceState: 'source_missing' }, { evidenceState: 'unverified' }, { evidenceState: 'none' },
+  ]
+  // Every warn state means evidence WAS found and is in doubt. Counting one as evidenced is how a
+  // coverage number comes to overstate - the failure the H-cases exist to stop.
+  assert.deepEqual(tabEvidenced(rows), { evidenced: 2, total: 7 })
+})
+
+test('4.1-10: NULL, never 0 of N, when nothing carries a state', () => {
+  // "Absent evidence is not_applicable, never pass" -- and its mirror: absent evidence is not a
+  // FAILURE either. `0 of 21` over rows nobody measured is a claim the data cannot support.
+  assert.equal(tabEvidenced([{ id: 'a' }, { id: 'b' }]), null)
+  assert.equal(tabEvidenced([]), null)
+  assert.equal(tabEvidenced(null), null)
+})
+
+test('4.1-10: an unmeasured row still counts in the DENOMINATOR', () => {
+  // It is not evidenced, so it belongs below the line - even though that is not the owner's fault.
+  assert.deepEqual(tabEvidenced([{ evidenceState: 'verified' }, { id: 'no-state' }]),
+    { evidenced: 1, total: 2 })
+})
+
+test('4.1-10: the ratio and the tone read the SAME rows', () => {
+  // Two independent counts over one tab is exactly how the card-vs-row "2 of 3" divergence this
+  // file already records came about. One verified, one none: tone red, ratio 1 of 2.
+  const rows = [{ evidenceState: 'verified' }, { evidenceState: 'none' }]
+  assert.equal(tabEvidenceTone(rows), 'red')
+  assert.deepEqual(tabEvidenced(rows), { evidenced: 1, total: 2 })
 })
