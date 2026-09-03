@@ -8537,3 +8537,27 @@ app 454/0; 4 unit guards harness-FIRED, browser assertion hand-proved.
 - **Guards:** 4 unit, all mutation-proved FIRED; 8 DOM checks (20 → 28 on the assistant probe).
 
 **Evidence:** api 1071/0 · app 462/0 · margin 61/61 · browser 52/52 · deploy run 33734904497.
+
+### ACT-69c — Lane 1 SHIPPED: every artifact-text writer now rechecks (2026-09-03)
+
+Owner: *"I said go continuous until deployed."* Commits `c664c85` (seven writers + the shared helper)
+and `88bfe6f` (the eighth, `artifactGenerate`).
+
+**Guards:** `H:render-path-runs-checks`, `H:text-write-rechecks`, `H:recheck-is-non-fatal`.
+`artifactGenerate` was added to the EXISTING writer list rather than given its own test — a writer
+needing a second guard is a writer the first guard was too narrow to see.
+
+**Mutation-proved with the real `/workspace/eds-claude-skills/scripts/mutate.sh`** (Lane 1 could only
+use a scratch harness — the source was uncommitted and mutate.sh correctly refuses a dirty file):
+- delete the eighth writer's recheck -> **FIRED**, restore matches HEAD
+- delete the render-root recheck -> **FIRED**, restore matches HEAD (after an anchor fix; see below)
+Lane 1's own seven mutations all FIRED on its scratch harness; the two re-run on the real tool agree.
+
+**OPEN / NOT DONE:**
+- `checksStale`/`checksError` have **no frontend consumer** — Lane 1 owned `api/` only.
+- `/document` and `/slides` now return `ok:false` (with a real `docUrl`) when the doc was produced but
+  its gate could not be computed. Deliberate, consistent with the P7 rule, but it IS a response-shape
+  change on two routes and nothing in `app/` reads it yet.
+- Lane 2 (judge observability) still running; the shared hardening file is uncommitted until it lands.
+- Not started: config stamp + bounded backfill, re-extraction trigger, swap-attribution judge.
+- **Nothing deployed yet.** `main` has not moved.

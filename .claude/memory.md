@@ -6798,3 +6798,43 @@ is the first deploy with a stamp on both sides, and the first to wait.
   time, and that is an owner decision, not a test-file change.
 - `H:deploy-sha-comes-from-the-bundle` -- health must report the compiled sha, and must not name
   `DEPLOYED_SHA` at all so the fallback cannot be reintroduced at the call site.
+
+## 2026-09-03 — EIGHT writers reached `review` unchecked, not one. Lane 1 shipped.
+
+`recheckAfterTextWrite` (new module `api/src/functions/tests/appRecheck.ts`) is now the ONE funnel
+every artifact-text writer calls. It cannot live in `appChecks.ts` or `appPackets.ts`: `appChecks:19`
+imports `listCorrections` from `appCorrections` and `appPackets:16` imports `applyCorrectionPass`
+from it, so either home creates `appCorrections -> X -> appCorrections`. It resolves
+`evaluateArtifact` by dynamic import — verified lazy in the emitted JS.
+
+| writer | file | was |
+|---|---|---|
+| render root (`buildTemplatedArtifact`, serving `/document` + `/slides`) | appPackets | UNCHECKED |
+| `artifactGenerate` | appPackets:306 | UNCHECKED — the **eighth**, found after the first seven |
+| `artifactContent`, `artifactAiEdit` | appPackets | no recheck |
+| `artifactOwnerEdit`, `correctionRevert` | appCorrections | no recheck |
+| `ensurePackage`/`runPacketBuild`, `artifactRemediate` | — | already evaluated; deliberately untouched |
+
+**A DEPARTURE FROM THE AC RULING, and it was right.** The AC pass said to delete `runPacketBuild`'s
+own `evaluateArtifact` once the render root checked. Lane 1 refused and passed `{check:false}`
+instead, because the build loop renders at `:1139` but `resolveEvidenceForOpp` only runs at `:1175` —
+checking at the render root would grade every build against `requirement_evidence` rows that do not
+exist yet. One evaluation per artifact per build, correctly ordered. **An AC ruling is a strong prior,
+not an instruction: the implementer holds the ordering facts the AC reader does not.**
+
+**Non-fatal everywhere.** A render or a save must never fail because checking failed; failures come
+back as `checksStale`/`checksError` beside `ok:true`. The two writers owning a transaction recheck
+AFTER commit — inside it, `evaluateArtifact`'s own begin/commit nests on one connection and a
+checking failure would roll back the very edit it is checking.
+
+## Hardening
+
+- **`mutate.sh`'s THIRD outcome earned itself, live, today.** My first M1 anchor grabbed four COMMENT
+  lines instead of the code at `:852`. The run reported **INERT** — honest, since the mutation did
+  apply and was behaviourally equivalent — and its own message told me to check for equivalence
+  before rewriting the guard. Re-anchored on the real block: **FIRED**. A two-outcome harness would
+  have said "your guard protects nothing" about a guard that is real. **Guardrail: when a mutation
+  reports INERT, re-read the anchor before you touch the guard.**
+- **`git status --short` before `git add`, when a lane is running.** Committing by explicit path kept
+  Lane 2's six in-flight files out of Lane 1's commit. `git add -A` would have committed another
+  agent's half-finished work under my message.
