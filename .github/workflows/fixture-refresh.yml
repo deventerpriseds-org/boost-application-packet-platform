@@ -275,6 +275,23 @@ jobs:
               dump['apiRemediation'] = rem
               print(f'captured /remediation for {len(rem)} artifact(s)')
 
+          # The packet-scoped analysis route and the template config. Both surfaced only by RUNNING
+          # compare-ui after the first capture landed -- which is the argument for the exit-2 guard
+          # rather than a hand-kept list: the app tells you what it calls, every time it is run.
+          pk_id = (dump.get('packet') or {}).get('id')
+          if pk_id:
+              b, err = capture(f'packet/{pk_id}/analysis')
+              if err: missed.append(f'packet/{pk_id}/analysis: {err}')
+              else:
+                  dump['apiPacketAnalysis'] = {'id': pk_id, 'body': b}
+                  print('captured /packet/{id}/analysis')
+
+          b, err = capture('config/templates')
+          if err: missed.append(f'config/templates: {err}')
+          else:
+              dump['apiConfigTemplates'] = b
+              print('captured /config/templates')
+
           sb, err = capture('skill-bank')
           if err: missed.append(f'skill-bank: {err}')
           else:
