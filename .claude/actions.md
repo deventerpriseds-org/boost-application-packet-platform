@@ -8639,3 +8639,26 @@ same behaviour; re-anchored on the function body and the invariant.
 
 **Evidence:** ui-verify 33757880817 (the finding) · api 1071/0 · app 466/0 · margin 61/61 ·
 browser 52/52 · deploy 33758565832.
+
+### ACT-69e — DEPLOYED AND VERIFIED LIVE (2026-09-03)
+
+`main` `0c716db`; api-deploy `33760333032` success.
+
+- **Check bypass closed:** resume `0051da86` went 0 -> **13 check rows**, 0 -> **1 gate row**, from an
+  empty-body content POST (run `33760552055`) that left `content` at 4347 and `updated_at` at Sep 2.
+- **Judge sink recording:** Trinnex resume `cfdd82e7` (run `33760763873`) wrote coverage
+  invoked 1 / calls 3 / cache_hits 139 / **refused 8** / **unanswered 2**, and stuffing invoked 1 /
+  calls 7 / hits 6. The refusals and unanswered are what used to be invisible.
+- `judge_outcome` and `usage_metering.outcome` both exist in production via the write-time ensure —
+  no `diag/pg-migrate` needed.
+
+**STILL OPEN (nothing here is claimed done):**
+1. No Settings UI for the 90-day retention window — violates no-hardcoded-config.
+2. `checksStale` / `checksError` have no frontend consumer; `/document` and `/slides` now return
+   `ok:false` with a real `docUrl` when the gate could not be computed, and nothing in `app/` reads it.
+3. Config-stamp + bounded settings-flip backfill — ACs written, NOT built. This is the actual Trinnex
+   cause (a settings flip re-judged only the resume) and it remains live.
+4. Re-extraction trigger — ACs written, not built.
+5. Swap-attribution judge (SPEC 4.6-8) — 45 ACs written, not built.
+6. Corpus was 8 of 200 artifacts ever checked. The fix makes checking routine going forward; it does
+   not retroactively check the other 192.

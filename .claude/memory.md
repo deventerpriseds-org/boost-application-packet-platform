@@ -6978,3 +6978,44 @@ repo, which is what makes rollback real: flip the word back and redeploy.
 **NEXT:** the Settings text editor for the master profile — the owner confirmed they want it, and it
 is what this whole move was FOR. Today they still cannot change their own profile without editing
 Azure Storage by hand; the table is per-owner and writable, so that gap is now closable.
+
+## 2026-09-03 — BOTH LANES PROVEN IN PRODUCTION (not "deployed" — observed)
+
+`main` at `0c716db`, api-deploy run `33760333032` success.
+
+**1. The check bypass is closed, proven on live data.** Resume `0051da86` (packet `487cb017`,
+status `review`, 4347 chars) had **0 check_result rows and 0 artifact_gate rows**. One empty-body
+`POST /api/app/artifact/{id}/content` (api-test run `33760552055`) -> **13 check rows, 1 gate row**.
+`content` still 4347 and `updated_at` still 2026-09-02, so the call mutated NOTHING and reached only
+the new recheck. That is the render/edit bypass closed in production.
+
+**2. The judge sink records the half that used to vanish.** First attempt looked like a null result
+and was NOT rounded up: the baseline opp `81317b84` has **0 requirements**, so the coverage judge had
+nothing to ask and correctly wrote nothing. Re-run against Trinnex (`cfdd82e7`, 21 requirements,
+`chk_coverage_judge` true), api-test run `33760763873`:
+
+| judge | outcome_kind | total |
+|---|---|---|
+| coverage | invoked | 1 |
+| coverage | calls | 3 |
+| coverage | cache_hits | 139 |
+| coverage | **refused** | **8** |
+| coverage | **unanswered** | **2** |
+| stuffing | invoked | 1 |
+| stuffing | calls | 7 |
+| stuffing | hits | 6 |
+
+**The 8 refusals and 2 unanswered are the entire point.** Before today they existed only in an
+in-memory object that two of `evaluateArtifact`'s three callers discarded. A judge that stopped
+answering was indistinguishable from a judge that found nothing; it no longer is. Note `cache_hits`
+139 against `calls` 3 — the content-addressed `verdict_key` is doing what it claims, and it is why a
+broader trigger is cheap.
+
+## Hardening
+
+- **A null result is a result to explain, not to round up.** The empty `judge_outcome` after the
+  first live call could have been reported as "deployed and working". It was zero because the target
+  had no requirements. One query (`count(*) from requirement where opp_id=...`) separated "the
+  instrument is broken" from "there was nothing to measure" — the same distinction the repo's own
+  rule makes between `not_applicable` and `pass`. **Always ask what the denominator was before
+  reporting a zero.**
