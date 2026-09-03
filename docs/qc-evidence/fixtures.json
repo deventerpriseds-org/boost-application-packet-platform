@@ -2646,6 +2646,105 @@
   "count": 0,
   "entries": []
  },
+ "/packet/4860ae3b-fa3a-46d0-9cfc-e656ae6835a5/analysis": {
+  "ok": true,
+  "packetId": "4860ae3b-fa3a-46d0-9cfc-e656ae6835a5",
+  "builtAt": "2026-08-30T12:10:40.073Z",
+  "count": 10,
+  "reason": null,
+  "sections": [
+   {
+    "call": 1,
+    "title": "Job Description Summary",
+    "body": "The SVP of Development and Enterprise Architecture at eMoney Advisor is responsible for leading the engineering organization towards an AI-first, platform-driven ecosystem. Key responsibilities include redefining software development practices, fostering a culture of innovation, and ensuring alignment between engineering and business objectives. The role requires extensive experience in large-scale engineering and architecture, with a focus on delivering scalable and secure platforms. Strong leadership skills and a collaborative approach are essential for driving successful outcomes.\n\n<ul>\n<li>Lead engineering transformation towards AI-first practices.</li>\n<li>Define and evolve enterprise architecture vision.</li>\n<li>Drive cloud-native and API-first solutions.</li>\n<li>Establish governance and risk management practices.</li>\n<li>Partner with product leadership to align initiatives.</li>\n<li>Foster a culture of innovation and collaboration.</li>\n<li>Build and scale global engineering teams.</li>\n<li>Ensure compliance with industry standards and regulations.</li>\n<li>Act as a thought leader in technology trends.</li>\n<li>Manage budgets and resource allocation effectively.</li>\n</ul>\n\n<table>\n<tr>\n<th>Category</th>\n<th>Requirements</th>\n<th>ATS Optimized Skills</th>\n<th>Current Skills Location</th>\n</tr>\n<tr>\n<td>Responsibilities</td>\n<td>Lead engineering transformation towards AI-first practices.</td>\n<td>AI-First Transformation</td>\n<td>Missing</td>\n</tr>\n<tr>\n<td>Responsibilities</td>\n<td>Define and evolve enterprise architecture vision.</td>\n<td>Enterprise Architecture Vision</td>\n<td>Missing</td>\n</tr>\n<tr>\n<td>Responsibilities</td>\n<td>Drive cloud-native and API-first solutions.</td>\n<td>Cloud-Native Solutions</td>\n<td>Skills1</td>\n</tr>\n<tr>\n<td>Responsibilities</td>\n<td>Establish governance and risk management practices.</td>\n<td>Governance and Risk Management</td>\n<td>Missing</td>\n</tr>\n<tr>\n<td>Responsibilities</td>\n<td>Partner with product leadership to align initiatives.</td>\n<td>Product Leadership Partnership</td>\n<td>Missing</td>\n</tr>\n<tr>\n<td>Responsibilities</td>\n<td>Foster a culture of innovation and collaboration.</td>\n<td>Innovation Culture</td>\n<td>Missing</td>\n</tr>\n<tr>\n<td>Responsibilities</td>\n<td>Build and scale global engineering teams.</td>\n<td>Global Engineering Teams</td>\n<td>Skills2</td>\n</tr>\n<tr>\n<td>Responsibilities</td>\n<td>Ensure compliance with industry standards and regulations.</td>\n<td>Regulatory Compliance</td>\n<td>Missing</td>\n</tr>\n<tr>\n<td>Responsibilities</td>\n<td>Act as a thought leader in technology trends.</td>\n<td>Technology Thought Leadership</td>\n<td>Missing</td>\n</tr>\n<tr>\n<td>Responsibilities</td>\n<td>Manage budgets and resource allocation effectively.</td>\n<td>Budget Management</td>\n<td>Missing</td>\n</tr>\n<tr>\n<td>Experience</td>\n<td>15+ years of experience leading large-scale engineering and architecture organizations.</td>\n<td>15+ Years Experience</td>\n<td>Not Required</td>\n</tr>\n<tr>\n<td>Experience</td>\n<td>Proven track record of delivering complex, scalable, enterprise-grade platforms in a regulated environment.</td>\n<td>Enterprise-Grade Platforms</td>\n<td>Missing</td>\n</tr>\n<tr>\n<td>Experience</td>\n<td>Deep expertise in modern architecture patterns.</td>\n<td>Modern Architecture Patterns</td>\n<td>Missing</td>\n</tr>\n<tr>\n<td>Experience</td>\n<td>Hands-on experience with AI/ML technologies.</td>\n<td>AI/ML Technologies</td>\n<td>Skills1</td>\n</tr>\n<tr>\n<td>Experience</td>\n<td>Experience driving DevOps, SRE, and platform engineering transformations.</td>\n<td>DevOps and SRE</td>\n<td>Missing</td>\n</tr>\n<tr>\n<td>Experience</td>\n<td>Strong understanding of data architecture, data platforms, and AI integration patterns.</td>\n<td>Data Architecture Understanding</td>\n<td>Missing</td>\n</tr>\n<tr>\n<td>Experience</td>\n<td>Demonstrated success leading global, distributed teams.</td>\n<td>Global Team Leadership</td>\n<td>Skills1</td>\n</tr>\n<tr>\n<td>Experience</td>\n<td>Exceptional communicati",
+    "chars": 4374,
+    "truncated": true
+   },
+   {
+    "call": 1,
+    "title": "Missing ATS Skills",
+    "body": "<table>\n<tr>\n<th>ATS Keywords</th>\n<th>Current Skills & Relevant Skills</th>\n<th>Location</th>\n</tr>\n<tr>\n<td>AI-First Transformation</td>\n<td>Missing</td>\n<td>Missing</td>\n</tr>\n<tr>\n<td>Enterprise Architecture Vision</td>\n<td>Missing</td>\n<td>Missing</td>\n</tr>\n<tr>\n<td>Cloud-Native Solutions</td>\n<td>Skills1</td>\n<td>Skills1</td>\n</tr>\n<tr>\n<td>Governance and Risk Management</td>\n<td>Missing</td>\n<td>Missing</td>\n</tr>\n<tr>\n<td>Product Leadership Partnership</td>\n<td>Missing</td>\n<td>Missing</td>\n</tr>\n<tr>\n<td>Innovation Culture</td>\n<td>Missing</td>\n<td>Missing</td>\n</tr>\n<tr>\n<td>Global Engineering Teams</td>\n<td>Skills2</td>\n<td>Skills2</td>\n</tr>\n<tr>\n<td>Regulatory Compliance</td>\n<td>Missing</td>\n<td>Missing</td>\n</tr>\n<tr>\n<td>Technology Thought Leadership</td>\n<td>Missing</td>\n<td>Missing</td>\n</tr>\n<tr>\n<td>15+ Years Experience</td>\n<td>Not Required</td>\n<td>Not Required</td>\n</tr>\n<tr>\n<td>Enterprise-Grade Platforms</td>\n<td>Missing</td>\n<td>Missing</td>\n</tr>\n<tr>\n<td>Modern Architecture Patterns</td>\n<td>Missing</td>\n<td>Missing</td>\n</tr>\n<tr>\n<td>AI/ML Technologies</td>\n<td>Skills1</td>\n<td>Skills1</td>\n</tr>\n<tr>\n<td>DevOps and SRE</td>\n<td>Missing</td>\n<td>Missing</td>\n</tr>\n<tr>\n<td>Data Architecture Understanding</td>\n<td>Missing</td>\n<td>Missing</td>\n</tr>\n<tr>\n<td>Global Team Leadership</td>\n<td>Skills1</td>\n<td>Skills1</td>\n</tr>\n<tr>\n<td>Exceptional Communication</td>\n<td>Missing</td>\n<td>Missing</td>\n</tr>\n<tr>\n<td>Bachelor’s Degree</td>\n<td>Not Required</td>\n<td>Not Required</td>\n</tr>\n<tr>\n<td>FinTech Experience</td>\n<td>Skills2</td>\n<td>Skills2</td>\n</tr>\n</table>",
+    "chars": 1620,
+    "truncated": false
+   },
+   {
+    "call": 1,
+    "title": "Missing ATS Swap Suggestions",
+    "body": "<table>\n<tr>\n<th>Missing ATS Keywords</th>\n<th>Least Relevant Skills</th>\n<th>Location of Skills</th>\n</tr>\n<tr>\n<td>AI-First Transformation</td>\n<td>Risk Management</td>\n<td>Skills2</td>\n</tr>\n<tr>\n<td>Enterprise Architecture Vision</td>\n<td>Predictive Analytics</td>\n<td>Skills2</td>\n</tr>\n<tr>\n<td>Governance and Risk Management</td>\n<td>Cost Optimization</td>\n<td>Skills2</td>\n</tr>\n<tr>\n<td>Product Leadership Partnership</td>\n<td>Operational Excellence</td>\n<td>Skills2</td>\n</tr>\n<tr>\n<td>Innovation Culture</td>\n<td>Compliance Frameworks</td>\n<td>Skills2</td>\n</tr>\n<tr>\n<td>Regulatory Compliance</td>\n<td>Software Development Lifecycle</td>\n<td>Skills2</td>\n</tr>\n<tr>\n<td>Technology Thought Leadership</td>\n<td>Exceptional Communication</td>\n<td>Skills2</td>\n</tr>\n</tr>\n</table>",
+    "chars": 789,
+    "truncated": false
+   },
+   {
+    "call": 1,
+    "title": "Skills1",
+    "body": "<ul>\n<li>Enterprise Architecture</li>\n<li>AI-First Engineering Strategy</li>\n<li>Platform Engineering</li>\n<li>Cloud-Native Solutions</li>\n<li>API-First Design</li>\n<li>Continuous Delivery Practices</li>\n<li>Security Governance</li>\n<li>Data Integration</li>\n<li>Agile Transformations</li>\n<li>Global Engineering Teams</li>\n</ul>",
+    "chars": 329,
+    "truncated": false
+   },
+   {
+    "call": 1,
+    "title": "Skills2",
+    "body": "<ul>\n<li>Software Development Lifecycle</li>\n<li>Customer-Centric Innovations</li>\n<li>Risk Management</li>\n<li>Developer Experience Enhancement</li>\n<li>Operational Excellence</li>\n<li>Predictive Analytics</li>\n<li>Business Outcomes Alignment</li>\n<li>Technical Due Diligence</li>\n<li>Cost Optimization</li>\n<li>Compliance Frameworks</li>\n</ul>",
+    "chars": 345,
+    "truncated": false
+   },
+   {
+    "call": 1,
+    "title": "Relevant Skills 1",
+    "body": "<ul>\n<li>AI/ML and Data Strategy</li>\n<li>Enterprise Architecture Governance</li>\n<li>Platform Scalability and Resilience</li>\n</ul>",
+    "chars": 132,
+    "truncated": false
+   },
+   {
+    "call": 1,
+    "title": "Relevant Skills 2",
+    "body": "<ul>\n<li>Cloud Infrastructure Management</li>\n<li>Software Development Practices</li>\n<li>Predictive Analytics and Reporting</li>\n</ul>",
+    "chars": 135,
+    "truncated": false
+   },
+   {
+    "call": 1,
+    "title": "Relevant Skills 3",
+    "body": "<ul>\n<li>Security-First Engineering Culture</li>\n<li>Agile Development Methodologies</li>\n<li>Continuous Quality Engineering</li>\n</ul>",
+    "chars": 135,
+    "truncated": false
+   },
+   {
+    "call": 2,
+    "title": "Job Description Summary",
+    "body": "The SVP of Development and Enterprise Architecture at eMoney Advisor is responsible for leading the engineering organization towards an AI-first, platform-driven ecosystem. Key responsibilities include redefining software development practices, fostering a culture of innovation, and ensuring alignment between engineering and business objectives. The role requires extensive experience in large-scale engineering and architecture, with a focus on delivering scalable and secure platforms. Strong leadership skills and a collaborative approach are essential for driving successful outcomes.",
+    "chars": 590,
+    "truncated": false
+   },
+   {
+    "call": 2,
+    "title": "Word and Character Requirements Check",
+    "body": "<table>\n<tr>\n<th>Skill Source</th>\n<th>Original Skill</th>\n<th>Swapped Skill</th>\n<th>Swap Status</th>\n<th>Reason</th>\n</tr>\n<tr>\n<td>Skills1</td>\n<td>AI-First Engineering Strategy</td>\n<td>Same</td>\n<td>Same</td>\n<td>Skill directly aligns with job description.</td>\n</tr>\n<tr>\n<td>Skills1</td>\n<td>Enterprise Architecture Vision</td>\n<td>Same</td>\n<td>Same</td>\n<td>Skill directly aligns with job description.</td>\n</tr>\n<tr>\n<td>Skills1</td>\n<td>Cloud-Native Solutions</td>\n<td>Same</td>\n<td>Same</td>\n<td>Skill directly aligns with job description.</td>\n</tr>\n<tr>\n<td>Skills1</td>\n<td>Governance and Risk Management</td>\n<td>Same</td>\n<td>Same</td>\n<td>Skill directly aligns with job description.</td>\n</tr>\n<tr>\n<td>Skills1</td>\n<td>Platform Engineering</td>\n<td>Same</td>\n<td>Same</td>\n<td>Skill directly aligns with job description.</td>\n</tr>\n<tr>\n<td>Skills1</td>\n<td>API-First Design</td>\n<td>Same</td>\n<td>Same</td>\n<td>Skill directly aligns with job description.</td>\n</tr>\n<tr>\n<td>Skills1</td>\n<td>Innovation Culture</td>\n<td>Same</td>\n<td>Same</td>\n<td>Skill directly aligns with job description.</td>\n</tr>\n<tr>\n<td>Skills1</td>\n<td>Global Engineering Teams</td>\n<td>Same</td>\n<td>Same</td>\n<td>Skill directly aligns with job description.</td>\n</tr>\n<tr>\n<td>Skills1</td>\n<td>Security Governance</td>\n<td>Same</td>\n<td>Same</td>\n<td>Skill directly aligns with job description.</td>\n</tr>\n<tr>\n<td>Skills1</td>\n<td>Continuous Delivery Practices</td>\n<td>Same</td>\n<td>Same</td>\n<td>Skill directly aligns with job description.</td>\n</tr>\n<tr>\n<td>Skills2</td>\n<td>Product Leadership Partnership</td>\n<td>AI-First Engineering Strategy</td>\n<td>Swapped</td>\n<td>Replaced with a critical keyword from the job description.</td>\n</tr>\n<tr>\n<td>Skills2</td>\n<td>Software Development Lifecycle</td>\n<td>Same</td>\n<td>Same</td>\n<td>Skill directly aligns with job description.</td>\n</tr>\n<tr>\n<td>Skills2</td>\n<td>Risk Management</td>\n<td>Same</td>\n<td>Same</td>\n<td>Skill directly aligns with job description.</td>\n</tr>\n<tr>\n<td>Skills2</td>\n<td>Developer Experience Enhancement</td>\n<td>Same</td>\n<td>Same</td>\n<td>Skill directly aligns with job description.</td>\n</tr>\n<tr>\n<td>Skills2</td>\n<td>Operational Excellence</td>\n<td>Same</td>\n<td>Same</td>\n<td>Skill directly aligns with job description.</td>\n</tr>\n<tr>\n<td>Skills2</td>\n<td>Predictive Analytics</td>\n<td>Same</td>\n<td>Same</td>\n<td>Skill directly aligns with job description.</td>\n</tr>\n<tr>\n<td>Skills2</td>\n<td>Business Outcomes Alignment</td>\n<td>Same</td>\n<td>Same</td>\n<td>Skill directly aligns with job description.</td>\n</tr>\n<tr>\n<td>Skills2</td>\n<td>Technical Due Diligence</td>\n<td>Same</td>\n<td>Same</td>\n<td>Skill directly aligns with job description.</td>\n</tr>\n<tr>\n<td>Skills2</td>\n<td>Cost Optimization</td>\n<td>Same</td>\n<td>Same</td>\n<td>Skill directly aligns with job description.</td>\n</tr>\n<tr>\n<td>Skills2</td>\n<td>Regulatory Compliance</td>\n<td>Same</td>\n<td>Same</td>\n<td>Skill directly aligns with job description.</td>\n</tr>\n<tr>\n<td>Relevant Skills 1</td>\n<td>AI/ML and Data Strategy</td>\n<td>Same</td>\n<td>Same</td>\n<td>Skill directly aligns with job description.</td>\n</tr>\n<tr>\n<td>Relevant Skills 1</td>\n<td>Enterprise Architecture Governance</td>\n<td>Same</td>\n<td>Same</td>\n<td>Skill directly aligns with job description.</td>\n</tr>\n<tr>\n<td>Relevant Skills 1</td>\n<td>Platform Scalability and Resilience</td>\n<td>Same</td>\n<td>Same</td>\n<td>Skill directly aligns with job description.</td>\n</tr>\n<tr>\n<td>Relevant Skills 2</td>\n<td>Cloud Infrastructure Management</td>\n<td>Same</td>\n<td>Same</td>\n<td>Skill directly aligns with job description.</td>\n</tr>\n<tr>\n<td>Relevant Skills 2</td>\n<td>Software Development Practices</td>\n<td>Same</td>\n<td>Same</td>\n<td>Skill directly aligns with job description.</td>\n</tr>\n<tr>\n<td>Relevant Skills 2</td>\n<td>Predictive Analytics and Reporting</td>\n<td>Same</td>\n<td>Same</td>\n<td>Skill directly aligns with job description.</td>\n</tr>\n<tr>\n<td>Relevant",
+    "chars": 4473,
+    "truncated": true
+   }
+  ]
+ },
+ "/config/templates": {
+  "success": true,
+  "templates": [
+   {
+    "templateId": "1bwOcxvkbihRTUjOzVjrWSPnDomwqy6gOz6229mdzbZw",
+    "rowKey": "resume-1bwOcxvkbihRTUjOzVjrWSPnDomwqy6gOz6229mdzbZw",
+    "roleFocus": "engineering",
+    "label": "",
+    "source": "config",
+    "slots": {
+     "SkillsBullets1": 10,
+     "SkillsBullets2": 8,
+     "ExpertiseBullets": 6,
+     "RelevantBullets1": 3,
+     "RelevantBullets2": 3,
+     "RelevantBullets3": 3
+    }
+   }
+  ]
+ },
  "/opportunity/2cb56fb3-fc33-4b1a-85b9-06c7aea2fbb3": {
   "metroName": "United States (nationwide)",
   "metroGeoId": "103644278",

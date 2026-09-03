@@ -1,0 +1,787 @@
+[
+ {
+  "step": "jd",
+  "names": "JD analysis (proto) / Posting analysis (app)",
+  "panelsOnlyInPrototype": [
+   "SafetyIQ · Head of Engineering",
+   "fail",
+   "JD analysis",
+   "Extracted from this posting",
+   "12/13",
+   "M1–M5",
+   "D1–D4",
+   "N1–N3",
+   "Posting vs your profile",
+   "Must-have requirements",
+   "Nice-to-have requirements",
+   "No evidence",
+   "ATS keywords",
+   "Moderate match",
+   "Cycle time, regulated"
+  ],
+  "panelsOnlyInApp": [
+   "your master profile (Settings > Facts)",
+   "Blocked",
+   "Posting analysis",
+   "Posting summary",
+   "model-written",
+   "This posting, against your profile",
+   "Nothing found",
+   "Not compared",
+   "Cycle time",
+   "Posting analysis - the source",
+   "source",
+   "Keywords",
+   "0 of 21 evidenced",
+   "5 of 14 evidenced",
+   "no evidence found",
+   "What the models found",
+   "Match & keyword run"
+  ],
+  "controlsOnlyInPrototype": [
+   "Re-parse JD",
+   "Run again"
+  ],
+  "controlsOnlyInApp": [
+   "»",
+   "your master profile (Settings > Facts)",
+   "↻ Re-parse posting",
+   "See the lines this was built from",
+   "See where each one is answered →",
+   "Where it is used → (Resume)",
+   "Show 3",
+   "Run analysis",
+   "Open assistant"
+  ],
+  "prototypeDisclosures": [],
+  "appDisclosures": [
+   {
+    "what": "sidenav",
+    "open": false
+   }
+  ],
+  "bodyLen": {
+   "prototype": 3506,
+   "app": 17609
+  },
+  "unmatchedFixtures": []
+ },
+ {
+  "step": "resume",
+  "names": "Resume",
+  "panelsOnlyInPrototype": [
+   "SafetyIQ · Head of Engineering",
+   "fail",
+   "4 corrected",
+   "3 to review",
+   "56 words · 55–60 words",
+   "Keywords placed",
+   "Platform Modernization",
+   "Cloud-native Services",
+   "Changes made",
+   "Corrected",
+   "sixty-two engineers",
+   "eight figures",
+   "longest 22 chars · ≤ 24 chars each",
+   "Roadmap Alignment",
+   "SOC 2 / ISO 27001",
+   "Multi-region AWS",
+   "SOC 2 Type II",
+   "longest 23 chars · ≤ 24 chars each",
+   "P&L Ownership",
+   "Distributed Teams",
+   "Cycle Time Reduction",
+   "Safety-critical Systems",
+   "Kubernetes",
+   "Wording kept from the posting",
+   "safety-critical",
+   "kept",
+   "6 × 5 words · 6 phrases, exactly 5 words",
+   "Budget development and P&L ownership",
+   "KPI driven engineering performance management",
+   "Enterprise strategy and execution alignment",
+   "Governance frameworks for audit compliance",
+   "Optimizing scaled software delivery operations",
+   "Strategic roadmaps with product partnership",
+   "0 over 20 chars · max 1 item over 20 chars",
+   "DevSecOps",
+   "Board Reporting",
+   "1 over 20 chars · max 1 item over 20 chars",
+   "Cloud Migration",
+   "Org Scaling 62",
+   "Safety-critical",
+   "P&L 8-figure",
+   "Delivery Commitments",
+   "8-figure",
+   "Work experience",
+   "Template · same in every packet",
+   "Needs your answer",
+   "Header, education, certifications",
+   "M1–M5",
+   "D1–D4",
+   "N1–N3",
+   "ATS resume",
+   "What this ats resume answers",
+   "1 to fix",
+   "ATS keyword block",
+   "pipe separated, < 30 chars per term",
+   "ISO 27001",
+   "Relevant 1–3",
+   "1 over 20 chars · max 1 item over 20 chars per list",
+   "Skills 1 and 2",
+   "1 to fix — Every library keyword lands in a field →"
+  ],
+  "panelsOnlyInApp": [
+   "your master profile (Settings > Facts)",
+   "Blocked",
+   "Compact resume",
+   "11 to fix",
+   "2 merge fields",
+   "What this compact resume answers",
+   "4 to fix",
+   "7 to review",
+   "10 open findings with no field of their own",
+   "68 words",
+   "Open on this field",
+   "Section word counts",
+   "Keywords for this line",
+   "proposed",
+   "not in this text",
+   "Posting line answered",
+   "RESP #9",
+   "RESP",
+   "SkillsBullets",
+   "From profile",
+   "RESP #7",
+   "8 to fix",
+   "7 merge fields",
+   "1 corrected",
+   "3 to fix",
+   "5 to review",
+   "6 open findings with no field of their own",
+   "AI-Driven Engineering",
+   "Enterprise Architecture",
+   "Platform Engineering",
+   "Cloud-Native Solutions",
+   "API-First Design",
+   "Continuous Delivery",
+   "Security Governance",
+   "Global Engineering",
+   "Taken out of this list",
+   "RESP #0",
+   "RESP #2",
+   "RESP #6",
+   "RESP #10",
+   "RESP #11",
+   "Why it changed",
+   "Software Dev Lifecycle",
+   "Customer Focused Ideas",
+   "Risk Management",
+   "Dev Experience Boost",
+   "Operational Excellence",
+   "Predictive Analytics",
+   "Outcome Alignment",
+   "Technical Due Diligence",
+   "RESP #19",
+   "RQ-MH #29",
+   "RQ-MH",
+   "AI/ML & Data Plan",
+   "Enterprise Architecture Governance",
+   "Platform Scalability",
+   "RESP #1",
+   "Cloud Infrastructure Management",
+   "Dev Practices",
+   "RQ-MH #25",
+   "Secured Engineering",
+   "Agile Development",
+   "Continuous Quality Engineering",
+   "RESP #3",
+   "5 phrases, 4–5 words",
+   "Driving AI-First Engineering Initiatives",
+   "Modernizing Digital Platforms and Solutions",
+   "Architecting Scalable Cloud-Based Systems",
+   "Enhancing Data-Driven Decision Making",
+   "No stray spacing"
+  ],
+  "controlsOnlyInPrototype": [
+   "Answer",
+   "Ask for a change"
+  ],
+  "controlsOnlyInApp": [
+   "»",
+   "your master profile (Settings > Facts)",
+   "Blocked11 to fixSection word counts ->",
+   "11 to fixSection word counts ->",
+   "Hide",
+   "Hide blocks",
+   "Show original",
+   "List Tweaks",
+   "Ask the assistant",
+   "≈AI strategy proposed not in this text",
+   "↻ Rebuild from current draft",
+   "Blocked8 to fixSection word counts ->",
+   "8 to fixSection word counts ->",
+   "Undo",
+   "Change it",
+   "Re-run QC",
+   "Shorten to fit",
+   "Choose from everything considered (10)",
+   "Put back “AI/Data Science Strategy”",
+   "Put back “Change Management”",
+   "global engineering proposed",
+   "Choose from everything considered (3)",
+   "Choose from everything considered (5)",
+   "Choose from everything considered (4)",
+   "Choose from everything considered (7)",
+   "Open assistant"
+  ],
+  "prototypeDisclosures": [
+   "Show ▾",
+   "Show original"
+  ],
+  "appDisclosures": [
+   {
+    "what": "sidenav",
+    "open": false
+   },
+   {
+    "what": "asset-header",
+    "open": true
+   },
+   {
+    "what": "asset-header-toggle",
+    "open": true
+   },
+   {
+    "what": "asset-blocks",
+    "open": true
+   },
+   {
+    "what": "blocks-toggle",
+    "open": true
+   },
+   {
+    "what": "blocks-meter",
+    "open": false
+   },
+   {
+    "what": "blocks-unplaced",
+    "open": false
+   },
+   {
+    "what": "blocks-compare-toggle",
+    "open": false
+   },
+   {
+    "what": "blocks-compare-toggle",
+    "open": false
+   },
+   {
+    "what": "asset-header",
+    "open": true
+   },
+   {
+    "what": "asset-header-toggle",
+    "open": true
+   },
+   {
+    "what": "asset-blocks",
+    "open": true
+   },
+   {
+    "what": "blocks-toggle",
+    "open": true
+   },
+   {
+    "what": "blocks-meter",
+    "open": false
+   },
+   {
+    "what": "blocks-unplaced",
+    "open": false
+   },
+   {
+    "what": "blocks-compare-toggle",
+    "open": false
+   },
+   {
+    "what": "blocks-compare-toggle",
+    "open": false
+   },
+   {
+    "what": "blocks-compare-toggle",
+    "open": false
+   },
+   {
+    "what": "blocks-compare-toggle",
+    "open": false
+   },
+   {
+    "what": "blocks-compare-toggle",
+    "open": false
+   },
+   {
+    "what": "blocks-compare-toggle",
+    "open": false
+   },
+   {
+    "what": "blocks-compare-toggle",
+    "open": false
+   }
+  ],
+  "bodyLen": {
+   "prototype": 14141,
+   "app": 16277
+  },
+  "unmatchedFixtures": []
+ },
+ {
+  "step": "cover",
+  "names": "Cover letter",
+  "panelsOnlyInPrototype": [
+   "SafetyIQ · Head of Engineering",
+   "fail",
+   "approved",
+   "4 corrected",
+   "254 words · 250–400 words, one page",
+   "Written for this posting",
+   "Keywords placed",
+   "Platform Modernization",
+   "SOC 2 Type II",
+   "ISO 27001",
+   "Posting lines answered",
+   "Changes made",
+   "Corrected",
+   "multiple business units",
+   "sixty-two engineers",
+   "8-figure",
+   "a large industrial operator base",
+   "Letterhead, signature, layout",
+   "Template · same in every packet",
+   "M1–M5",
+   "D1–D4",
+   "N1–N3"
+  ],
+  "panelsOnlyInApp": [
+   "your master profile (Settings > Facts)",
+   "Blocked",
+   "review",
+   "7 to fix",
+   "3 merge fields",
+   "1 corrected",
+   "3 to fix",
+   "4 to review",
+   "5 open findings with no field of their own",
+   "From profile",
+   "Keywords for this line",
+   "proposed",
+   "not in this text",
+   "Posting line answered",
+   "RESP #0",
+   "RESP",
+   "7 lines - 216 words",
+   "Open on this field",
+   "Section word counts",
+   "Fix before approval",
+   "No stray spacing",
+   "Review",
+   "RESP #19"
+  ],
+  "controlsOnlyInPrototype": [
+   "Reopen"
+  ],
+  "controlsOnlyInApp": [
+   "»",
+   "your master profile (Settings > Facts)",
+   "Blocked7 to fixSection word counts ->",
+   "7 to fixSection word counts ->",
+   "Hide",
+   "Hide blocks",
+   "Show original",
+   "List Tweaks",
+   "Ask the assistant",
+   "Undo",
+   "Change it",
+   "Re-run QC",
+   "↻ Rebuild from current draft",
+   "Approve",
+   "Regenerate",
+   "Open assistant"
+  ],
+  "prototypeDisclosures": [
+   "Show ▾",
+   "Show original"
+  ],
+  "appDisclosures": [
+   {
+    "what": "sidenav",
+    "open": false
+   },
+   {
+    "what": "asset-header",
+    "open": true
+   },
+   {
+    "what": "asset-header-toggle",
+    "open": true
+   },
+   {
+    "what": "asset-blocks",
+    "open": true
+   },
+   {
+    "what": "blocks-toggle",
+    "open": true
+   },
+   {
+    "what": "blocks-meter",
+    "open": false
+   },
+   {
+    "what": "blocks-unplaced",
+    "open": false
+   },
+   {
+    "what": "blocks-compare-toggle",
+    "open": false
+   },
+   {
+    "what": "blocks-compare-toggle",
+    "open": false
+   },
+   {
+    "what": "blocks-compare-toggle",
+    "open": false
+   }
+  ],
+  "bodyLen": {
+   "prototype": 4897,
+   "app": 4250
+  },
+  "unmatchedFixtures": []
+ },
+ {
+  "step": "portfolio",
+  "names": "Portfolio",
+  "panelsOnlyInPrototype": [
+   "SafetyIQ · Head of Engineering",
+   "fail",
+   "3 corrected",
+   "48 words · 45–48 words, past tense",
+   "Keywords placed",
+   "Platform Modernization",
+   "Posting lines answered",
+   "77 words · 75–80 words, begins \"My career\"",
+   "Corrected for you",
+   "Changes made",
+   "Corrected",
+   "sixty-two engineers",
+   "52 words · 50–55 words",
+   "eight figures",
+   "113 words · 5 selected, 98–125 words",
+   "Company, date, letter body",
+   "Skills shown on the deck",
+   "Template · same in every packet",
+   "Slide layouts, case studies, title art",
+   "M1–M5",
+   "D1–D4",
+   "N1–N3"
+  ],
+  "panelsOnlyInApp": [
+   "your master profile (Settings > Facts)",
+   "Blocked",
+   "Portfolio one-pager",
+   "7 to fix",
+   "7 merge fields",
+   "3 to fix",
+   "4 to review",
+   "5 open findings with no field of their own",
+   "Company",
+   "Keywords for this line",
+   "proposed",
+   "not in this text",
+   "Posting line answered",
+   "RESP #0",
+   "RESP",
+   "Date",
+   "Letter body",
+   "7 lines - 216 words",
+   "Open on this field",
+   "Section word counts",
+   "Fix before approval",
+   "No stray spacing",
+   "RESP #19",
+   "67 words",
+   "60 words",
+   "54 words",
+   "5 lines - 87 words",
+   "RESP #7"
+  ],
+  "controlsOnlyInPrototype": [
+   "Send to assistant",
+   "Ask for a change"
+  ],
+  "controlsOnlyInApp": [
+   "»",
+   "your master profile (Settings > Facts)",
+   "Blocked7 to fixSection word counts ->",
+   "7 to fixSection word counts ->",
+   "Hide",
+   "Hide blocks",
+   "Show original",
+   "List Tweaks",
+   "Ask the assistant",
+   "↻ Rebuild from current draft",
+   "Open assistant"
+  ],
+  "prototypeDisclosures": [
+   "Show ▾",
+   "Show original"
+  ],
+  "appDisclosures": [
+   {
+    "what": "sidenav",
+    "open": false
+   },
+   {
+    "what": "asset-header",
+    "open": true
+   },
+   {
+    "what": "asset-header-toggle",
+    "open": true
+   },
+   {
+    "what": "asset-blocks",
+    "open": true
+   },
+   {
+    "what": "blocks-toggle",
+    "open": true
+   },
+   {
+    "what": "blocks-meter",
+    "open": false
+   },
+   {
+    "what": "blocks-unplaced",
+    "open": false
+   },
+   {
+    "what": "blocks-compare-toggle",
+    "open": false
+   },
+   {
+    "what": "blocks-compare-toggle",
+    "open": false
+   },
+   {
+    "what": "blocks-compare-toggle",
+    "open": false
+   },
+   {
+    "what": "blocks-compare-toggle",
+    "open": false
+   },
+   {
+    "what": "blocks-compare-toggle",
+    "open": false
+   },
+   {
+    "what": "blocks-compare-toggle",
+    "open": false
+   },
+   {
+    "what": "blocks-compare-toggle",
+    "open": false
+   }
+  ],
+  "bodyLen": {
+   "prototype": 7364,
+   "app": 8263
+  },
+  "unmatchedFixtures": []
+ },
+ {
+  "step": "video",
+  "names": "Intro video",
+  "panelsOnlyInPrototype": [
+   "SafetyIQ · Head of Engineering",
+   "fail"
+  ],
+  "panelsOnlyInApp": [
+   "your master profile (Settings > Facts)",
+   "Blocked",
+   "Not checked"
+  ],
+  "controlsOnlyInPrototype": [],
+  "controlsOnlyInApp": [
+   "»",
+   "your master profile (Settings > Facts)",
+   "Hide",
+   "🎥 Generate clone video",
+   "Open assistant"
+  ],
+  "prototypeDisclosures": [],
+  "appDisclosures": [
+   {
+    "what": "sidenav",
+    "open": false
+   },
+   {
+    "what": "asset-header",
+    "open": true
+   },
+   {
+    "what": "asset-header-toggle",
+    "open": true
+   }
+  ],
+  "bodyLen": {
+   "prototype": 932,
+   "app": 739
+  },
+  "unmatchedFixtures": []
+ },
+ {
+  "step": "qc",
+  "names": "QC & evidence",
+  "panelsOnlyInPrototype": [
+   "SafetyIQ · Head of Engineering",
+   "fail",
+   "warn",
+   "Corrected for you",
+   "“60+” rewritten as “62” in Relevant 2",
+   "“$18M” rewritten as “8-figure” in Relevant 3",
+   "“60+” rewritten as “62” in Relevant 1–3",
+   "“$18M” rewritten as “8-figure” in Relevant 1–3",
+   "“$18M” rewritten as “8-figure” in Letter body",
+   "Every library keyword lands in a field",
+   "Needs your answer",
+   "FedRAMP has no evidence in your profile",
+   "Two must-haves live only in generated fields",
+   "No requirement rests only on static text",
+   "No empty merge field left visible",
+   "Keywords claimed by a field appear in its text",
+   "Your call",
+   "DevSecOps earns no score credit",
+   "Regulated Environments earns no score credit",
+   "Keywords"
+  ],
+  "panelsOnlyInApp": [
+   "your master profile (Settings > Facts)",
+   "Blocked",
+   "11 to fix",
+   "7 to fix",
+   "Not checked",
+   "8 to fix",
+   "not measured",
+   "Compact resume",
+   "Cover letter",
+   "Portfolio",
+   "Intro video",
+   "Resume",
+   "Every change cites the posting",
+   "No empty blocks",
+   "Must-haves your profile can evidence",
+   "Section word counts",
+   "compact skills fit",
+   "evidence placed",
+   "Expertise phrases are the right length",
+   "Wording kept from the posting",
+   "Responsibilities addressed",
+   "Skill count and split",
+   "No stray spacing",
+   "No machine-sounding phrases",
+   "6/13",
+   "0/21"
+  ],
+  "controlsOnlyInPrototype": [
+   "Open field →",
+   "Answer",
+   "Open asset →",
+   "Leave open"
+  ],
+  "controlsOnlyInApp": [
+   "»",
+   "your master profile (Settings > Facts)",
+   "Cover letterBlocked7 to fix7 counted",
+   "PortfolioBlocked7 to fix7 counted",
+   "Intro videoNot checked0 counted",
+   "ResumeBlocked8 to fix8 counted",
+   "Undo",
+   "Re-run QC",
+   "1",
+   "ResumeSummary: 68 words (want 55-60)",
+   "go to the draft ->",
+   "26",
+   "ExpertiseBullets: double space",
+   "5",
+   "2",
+   "Coverage",
+   "Original vs final",
+   "Remediation loops",
+   "Checks",
+   "Independent review",
+   "Exceptional communication skillsopen",
+   "Next: Review & send →",
+   "Open assistant"
+  ],
+  "prototypeDisclosures": [],
+  "appDisclosures": [
+   {
+    "what": "sidenav",
+    "open": false
+   }
+  ],
+  "bodyLen": {
+   "prototype": 6726,
+   "app": 44826
+  },
+  "unmatchedFixtures": []
+ },
+ {
+  "step": "send",
+  "names": "Review & send",
+  "panelsOnlyInPrototype": [
+   "SafetyIQ · Head of Engineering",
+   "fail",
+   "approved",
+   "1 item to fix across 1 asset",
+   "ATS resume",
+   "Every library keyword lands in a field"
+  ],
+  "panelsOnlyInApp": [
+   "your master profile (Settings > Facts)",
+   "Blocked",
+   "8 to fix",
+   "11 to fix",
+   "7 to fix",
+   "Not checked",
+   "14 items to fix across 5 assets",
+   "Compact resume",
+   "Cover letter",
+   "Portfolio one-pager",
+   "Intro video",
+   "Resume"
+  ],
+  "controlsOnlyInPrototype": [],
+  "controlsOnlyInApp": [
+   "»",
+   "your master profile (Settings > Facts)",
+   "Open assistant"
+  ],
+  "prototypeDisclosures": [],
+  "appDisclosures": [
+   {
+    "what": "sidenav",
+    "open": false
+   }
+  ],
+  "bodyLen": {
+   "prototype": 1066,
+   "app": 2277
+  },
+  "unmatchedFixtures": []
+ }
+]
