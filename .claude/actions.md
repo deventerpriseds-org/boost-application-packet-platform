@@ -8110,3 +8110,38 @@ something is likely off."* Swept every model-output store -> `docs/qc-evidence/L
 - **Instrument gap:** `stuffingJudge` and `supportJudge` write through the checks pipeline with no
   table of their own, so this sweep **cannot see their yield at all.** Fix the instrument before
   repeating the exercise on them.
+
+### ACT-68i — went to the LIVE DB; the "2 of 30" was one packet and the wrong action (2026-09-03)
+
+**Owner corrected a standing rule.** `CLAUDE.md` said NUDGE AND STOP when `boost-pg-mcp-write` is
+lapsed, and forbade "quietly rerouting" through `db-query.yml`. Owner: *"forgoing data is absolutely
+unacceptable."* **Rule rewritten: take the fallback AND ask for a refresh, in the same turn.** The old
+wording traded the DATA for the owner's convenience in picking a transport. Real cost, same day: the
+AC pass shipped with every number from a committed fixture and an explicit "no live DB read was
+possible" — while `db-query.yml` was available throughout.
+
+**What the live DB then showed (runs 33725299168, 33725363643):**
+
+| packet | action | rows | with_req | kw exact |
+|---|---|---:|---:|---:|
+| eMoney `4860ae3b` | swapped | 30 | 17 | 2 |
+| eMoney `4860ae3b` | **added** | 1 | 0 | 0 |
+| Trinnex `85cee965` | swapped | 5 | 2 | **1** |
+| Trinnex `85cee965` | **added** | 7 | 7 | **1** |
+
+**TWO defects in my own measurement, both of the shape the owner predicted:**
+1. **Single-packet sample generalised.** Every figure I gave came from one saved snapshot. The DB
+   holds two packets and the second behaves nothing like the first — Trinnex lands **1 of 2** matched
+   swaps against eMoney's 2 of 17. **No single percentage describes this feature**, so the "12%"
+   was one packet's number wearing a general claim's clothes.
+2. **`added` rows were never in the population.** I only queried `action='swapped'`. There are
+   **8 `added` rows, 7 carrying a matched requirement** — a HIGHER hit rate than swaps. An added item
+   displaced nothing so "Took the place of X" does not apply, but "this keyword landed here" does.
+   **The keyword lane has been sized against the wrong denominator throughout.**
+
+**Consequence for the ACs:** the AC pass's feasibility table is fixture-derived and its population is
+swapped-only. It needs a live re-grounding pass before implementation, and the ACs must say whether
+`added` rows are in scope.
+
+**Lineage published** — every table, column and transform, with the live counts and both defects:
+`https://claude.ai/code/artifact/cba98e9b-a9e4-4f5a-9165-29b3abe78f9c`
