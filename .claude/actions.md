@@ -8350,3 +8350,39 @@ the fields are genuinely distinct.
 [#81](https://github.com/deventerpriseds-org/boost-application-packet-platform/pull/81) (docs only —
 `.claude/memory.md`, `.claude/actions.md`; no code path changed, so nothing deploys from it).
 Subscribed to its activity.
+
+### ACT-69 — ALL THREE JUDGE THREADS TAKEN UP; trigger design delegated to me (2026-09-03)
+
+**Owner: *"so all 3, the judge can run when you think it should run based on my goal and workflow."***
+
+Three lanes, all TIER 1 (each admits model output into a stored claim or moves a coverage count):
+
+| # | lane | state entering this |
+|---|---|---|
+| 1 | 4.6-8 swap-attribution judge | 45 ACs already written by an independent subagent (`AC-swap-attribution-judge.md`); no implementation |
+| 2 | judge observability | ACs NOT written — subagent spawned this turn |
+| 3 | when a judge runs | ACs NOT written — subagent spawned this turn; trigger design is mine per the owner |
+
+**CORRECTION to what I told the owner last turn.** I said stuffingJudge and supportJudge have "no
+output table, so their yield cannot be measured at all." Made from a single grep; wrong twice:
+
+- `supportJudge` DOES persist its wins — `requirement_evidence.method = 'vetted'` plus `vettedNote`
+  in `extra` (`appRequirements.ts:432-441`). What vanishes is the NEGATIVE half: span
+  disagreements and refusals go to `escalation_refusals`, an in-memory counter
+  (`appRequirements.ts:328`) returned in the response body and never stored.
+- `stuffingJudge` DOES persist its hits — merged into the single `posting_wording_kept`
+  `check_result` (`checks.ts:658-668`), with the model-raised count written into the message
+  PROSE. No structured column, so a corpus-level question needs string parsing.
+
+**The real gap, stated correctly: we can see these two judges succeed and cannot see them fail.**
+That is the worse half to lose — a judge that stopped answering is indistinguishable from a judge
+that found nothing.
+
+**Trigger design proposed (goes to the AC subagent as a proposal, not a decision).** The enabling
+property is that a coverage verdict is content-addressed (`verdict_key` = requirement + field +
+field text + model + prompt version) and written `on conflict do nothing`, so **re-judging unchanged
+text costs zero calls**; and the judge is OFF by default, so a wider trigger spends nothing until
+`chk_coverage_judge` is on. Proposed points: (a) artifact written / `pkg_json` changed, (b)
+requirements re-extracted, (c) QC screen opened, top-up only where a verdict is absent. Today the
+ONLY trigger is a manual `POST /api/app/artifact/{id}/checks` per artifact — which is precisely why
+Trinnex read 71% for a day.

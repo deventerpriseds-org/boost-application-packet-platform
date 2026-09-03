@@ -6494,3 +6494,35 @@ what it looks like where the fields are genuinely distinct (`@CoverLetterBody` v
   populations — packets, artifact types, opportunities with and without packets. The owner had to
   say "count Trinnex only" to stop it. **Guardrail: state the scope in the query itself (a `where`
   on packet or opp id), not in the prose around the result.**
+
+## 2026-09-03 — WHERE EACH JUDGE'S ANSWER ACTUALLY LANDS (read from the write paths, not grepped)
+
+I told the owner stuffingJudge and supportJudge have "no output table, so their yield cannot be
+measured at all." That came from ONE grep and it is wrong. Corrected by reading the writes:
+
+| judge | persisted where | queryable? |
+|---|---|---|
+| `coverageJudge` | `requirement_coverage`, own table, content-addressed `verdict_key` | fully |
+| `supportJudge` | `requirement_evidence.method='vetted'` + `vettedNote()` in `extra` (appRequirements.ts:432-441) | **wins only** |
+| `stuffingJudge` | merged into the ONE `posting_wording_kept` `check_result` (checks.ts:658-668); model-raised count lives in the message PROSE | **prose only** |
+
+**THE GAP, STATED CORRECTLY: both judges' successes are visible and both judges' FAILURES are not.**
+`support_span_disagreed`, `support_<refusal>` and `support_transport_failed` all go to
+`escalation_refusals` — an in-memory dict (appRequirements.ts:328) returned in the HTTP response and
+then dropped. A judge that stopped answering is indistinguishable from a judge that found nothing.
+
+**Guardrail earned:** "there is no output for X" is an ABSENCE claim and needs the write path read,
+not a filename grepped. The org rule already says never claim a capability is absent from a
+single-file grep; this is the same error against a data sink instead of a function.
+
+## The property that makes judge-trigger design easy (and why Trinnex read 71%)
+
+`verdict_key` digests requirement + field + field text + model + prompt version, and the insert is
+`on conflict do nothing`. **Re-judging unchanged text spends nothing.** Plus `chk_coverage_judge` is
+OFF by default. So a broader trigger is cheap by construction — the constraint was never cost, it
+was that **the only trigger in the system is a manual `POST /api/app/artifact/{id}/checks`, one
+artifact at a time.** Trinnex's cover, portfolio and compact_resume had simply never been asked.
+
+Proposed trigger points (owner delegated the design to me; ACs pending before any of it is built):
+artifact written (`pkg_json` changed), requirements re-extracted, and a QC-open top-up limited to
+requirements with no verdict.
