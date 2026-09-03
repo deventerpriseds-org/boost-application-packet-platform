@@ -775,3 +775,30 @@ deploy's exit code describes the deploy; only the database describes the schema.
 
 For the trend table: `self-caught`, but only just, and after the claim had already been made to the
 owner in this session.
+
+### `git add -A` on a SHARED working tree committed another session's live mutation
+
+| | |
+|---|---|
+| **Claim** | Commit `12b7da0` — "The copy has run: 14 blocks, 8003 chars, verified in the live database" — described a ledger update and a verifier artifact. |
+| **Ground truth** | **It also contained `entity[r.block_key + '_pg'] = r.text`** in `masterContext.ts`. A concurrent session was mid-`mutate.sh`, proving `H:mastercontext-baseline-parity` fires, and my `git add -A` swept its transient edit in. Confirmed by `git show 12b7da0 -- api/src/functions/tests/masterContext.ts`. Reverted by that session as `d646b9e`. |
+| **The single source that would have settled it** | `git status` before staging, or `git diff --cached` before committing — either would have shown a file I had not touched. I ran neither, because `-A` made the question feel answered. |
+| **Blast radius, had it landed** | `entityFromBlocks` would emit `skills1_pg` instead of `skills1`. `masterBaseline` would not recognise a single key, so the baseline would come back EMPTY — and the baseline is what every swap row's "original" compares against. Silent, total provenance corruption on every packet built after the switch flipped. Exactly the failure the TIER 1 designation exists to prevent. |
+| **Root cause** | Two sessions share this working tree. `git add -A` stages the TREE, not my work, and I have no way to distinguish the two. |
+
+**Caught by a peer, not by me and not by a guard.** `H:mastercontext-baseline-parity` would have fired
+— it is literally the guard being exercised at that moment — but only if the suite ran between my
+commit and my push. **I chained `git add -A && git commit && git push` in one command with no suite
+run in between.** The suite takes twelve seconds.
+
+**Two changes, both concrete rather than a reminder:**
+1. **Never `git add -A` in this repo.** Name the paths. The command is not a convenience here, it is a
+   claim about authorship that I cannot substantiate on a shared tree.
+2. **Run the suite between committing and pushing**, not only before committing. A commit is
+   recoverable; a push is what other lanes and `main` build on.
+
+**It did NOT reach `main`** — verified with `git merge-base --is-ancestor 12b7da0 origin/main` → false,
+and `git show origin/main:...masterContext.ts` still reads `entity[r.block_key]`. Nothing deployed.
+
+For the trend table: `peer-caught`. Not self-caught, not instrument-caught. That is the worst category
+in this log and the first entry in it.
