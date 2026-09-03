@@ -2281,7 +2281,113 @@ function PipelineSettings() {
   )
 }
 
-const SECTIONS = [{ key: 'account', label: 'Account' }, { key: 'intake', label: 'Intake' }, { key: 'roles', label: 'Roles' }, { key: 'facts', label: 'Facts' }, { key: 'locations', label: 'Locations' }, { key: 'templates', label: 'Templates' }, { key: 'coach', label: 'Coach' }, { key: 'workspace', label: 'Workspace' }, { key: 'quality', label: 'Quality' }, { key: 'usage', label: 'Usage' }, { key: 'system', label: 'System' }]
+// ── Master profile — the owner's own text ───────────────────────────────────────────────────────
+//
+// THE GAP THIS CLOSES. The 14 blocks below are what every resume, packet and swap "original" is
+// built from, and until now the only way to change them was to hand-edit an Azure Storage table.
+// The owner asked for this directly: "agreed it should be available for text editing in settings
+// once moved to postgres ... it shouldn't be waiting to move to postgres, what's the hold up".
+// The move landed first (owner_master_block, per-owner); this is the owner-facing half.
+//
+// TWO THINGS HERE ARE NOT COSMETIC.
+//  1. Only CHANGED blocks are sent. The route upserts partially, so an untouched block receives no
+//     statement at all — a save of one field cannot overwrite the other thirteen with whatever the
+//     form happened to be holding.
+//  2. A failed save keeps the typed text in the box. `vals` is only reconciled into `saved` on
+//     success, so the owner never loses an edit to a transient API failure.
+//
+// The standing note is permanent copy, not a toast: it is true whether or not a save just happened,
+// and a message that appears only after saving is one the owner reads once and never again.
+
+function MasterProfileSettings() {
+  const [blocks, setBlocks] = useState(null)
+  const [vals, setVals] = useState({})
+  const [saved, setSaved] = useState({})
+  const [note, setNote] = useState(null)
+  const [saving, setSaving] = useState(false)
+
+  useEffect(() => {
+    api.masterProfileGet().then((r) => {
+      if (!r || r.ok === false) { setNote({ ok: false, msg: r?.error || 'could not load your master profile' }); setBlocks([]); return }
+      const list = Array.isArray(r.blocks) ? r.blocks : []
+      const byKey = {}
+      for (const b of list) byKey[b.key] = b.text || ''
+      setBlocks(list); setVals(byKey); setSaved(byKey)
+    }).catch((e) => { setNote({ ok: false, msg: String(e.message || e) }); setBlocks([]) })
+  }, [])
+
+  if (!blocks) return <Card style={{ color: 'var(--proto-ink2)' }}>Loading your master profile…</Card>
+  if (!blocks.length) {
+    return (
+      <Card style={{ color: 'var(--proto-ink2)' }}>
+        Your master profile could not be read.{note ? ` (${note.msg})` : ''}
+      </Card>
+    )
+  }
+
+  const changed = blocks.filter((b) => (vals[b.key] || '') !== (saved[b.key] || '')).map((b) => b.key)
+  const save = async () => {
+    if (!sessionValid()) { setNote({ ok: false, msg: 'Sign-in expired — sign out and back in, then Save.' }); return }
+    setSaving(true); setNote(null)
+    try {
+      const patch = {}
+      for (const k of changed) patch[k] = vals[k] || ''
+      const r = await api.masterProfileSet(patch)
+      if (!r || r.ok === false) throw new Error(r?.error || 'save failed')
+      // Only NOW does the typed text become the baseline. On the failure path below, `saved` is
+      // untouched and every edit is still in its box.
+      setSaved({ ...saved, ...patch })
+      if (Array.isArray(r.blocks)) setBlocks(r.blocks)
+      const n = (r.written || Object.keys(patch)).length
+      setNote({ ok: true, msg: `Saved ${n} block${n === 1 ? '' : 's'}.` })
+    } catch (e) {
+      setNote({ ok: false, msg: `Not saved — ${String(e.message || e)}. Your edits are still here; try Save again.` })
+    } finally { setSaving(false) }
+  }
+
+  return (
+    <Card>
+      <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 4 }}>Master profile</div>
+      <div className="px-small" style={{ color: 'var(--proto-ink2)', marginBottom: 10 }}>
+        This is the source text every resume, packet and comparison is built from. Edit any block and Save.
+      </div>
+      <div className="px-small" style={{ color: 'var(--proto-ink2)', marginBottom: 14, padding: '8px 10px',
+        border: '1px solid var(--proto-rule-soft)', borderRadius: 8, background: 'var(--proto-accent-soft)' }}>
+        Packets already built keep their original wording. Editing here changes what future packets are
+        built from — it does not rewrite anything you have already produced.
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+        {blocks.map((b) => {
+          const v = vals[b.key] === undefined ? '' : vals[b.key]
+          const isChanged = changed.includes(b.key)
+          return (
+            <div key={b.key} style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+              <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 12 }}>
+                <div style={{ fontSize: 13, fontWeight: 600 }}>{b.label || b.key}</div>
+                <div className="px-small" style={{ color: 'var(--proto-ink2)', flexShrink: 0 }}>
+                  {b.stored ? `${(b.text || '').length} characters saved` : 'never set'}
+                  {isChanged ? ' • edited' : ''}
+                </div>
+              </div>
+              <textarea className="px-input" value={v} rows={Math.min(14, Math.max(3, Math.ceil((v.length || 1) / 90) + 1))}
+                onChange={(e) => setVals({ ...vals, [b.key]: e.target.value })}
+                style={{ width: '100%', fontFamily: 'inherit', lineHeight: 1.5, resize: 'vertical',
+                  borderColor: isChanged ? 'var(--proto-accent)' : undefined }} />
+            </div>
+          )
+        })}
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 16 }}>
+        <button className="px-btn px-btn-accent" disabled={!changed.length || saving} onClick={save}>
+          {saving ? 'Saving…' : changed.length ? `Save ${changed.length} block${changed.length === 1 ? '' : 's'}` : 'Save'}
+        </button>
+        {note ? <span className="px-small" style={{ color: note.ok ? 'var(--text-ok)' : 'var(--text-bad)' }}>{note.msg}</span> : null}
+      </div>
+    </Card>
+  )
+}
+
+const SECTIONS = [{ key: 'account', label: 'Account' }, { key: 'profile', label: 'Master profile' }, { key: 'intake', label: 'Intake' }, { key: 'roles', label: 'Roles' }, { key: 'facts', label: 'Facts' }, { key: 'locations', label: 'Locations' }, { key: 'templates', label: 'Templates' }, { key: 'coach', label: 'Coach' }, { key: 'workspace', label: 'Workspace' }, { key: 'quality', label: 'Quality' }, { key: 'usage', label: 'Usage' }, { key: 'system', label: 'System' }]
 
 export default function Settings({ tab = 'account' }) {
   const active = SECTIONS.find((s) => s.key === tab) ? tab : 'account'
@@ -2296,6 +2402,7 @@ export default function Settings({ tab = 'account' }) {
         ))}
       </div>
       {active === 'account' && <AccountSettings />}
+      {active === 'profile' && <MasterProfileSettings />}
       {active === 'intake' && <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}><IntakeSettings /><TemperatureSettings /><AtsSources /></div>}
       {active === 'roles' && <RolesSettings />}
       {active === 'facts' && <FactsSettings />}
