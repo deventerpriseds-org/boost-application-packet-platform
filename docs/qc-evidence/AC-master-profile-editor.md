@@ -1,3 +1,18 @@
+RUN_STATUS: OK
+
+# AC-master-profile-editor
+
+**Vehicle:** headless `claude -p`, detached, on the session credential -- no API key.
+**Model:** claude-sonnet-5  **Turns:** 20  **Duration:** 269.4s  **Cost:** $2.150
+**Generated:** 2026-09-03T13:03:49Z
+
+> These are ACCEPTANCE CRITERIA, written before the work is graded. Each must be
+> SPECIFIC and BINARY -- "works correctly" is not a criterion. The feasibility table
+> comes FIRST: a dependency claimed ABSENT needs a sweep of its producers AND
+> consumers, and ALREADY BUILT is a first-class outcome.
+
+---
+
 <!-- WHAT:       Acceptance criteria for the Settings screen that lets the owner edit their own
                  master profile (the 14 `owner_master_block` rows), produced from
                  BRIEF-ac-master-profile-editor.md.
@@ -199,3 +214,18 @@ literal output. No existing guard's assertion was weakened or proposed to be wea
 existing `H:mastercontext-*` cases are named as guards to preserve, not to loosen. Coverage in §0 was
 measured against the full 14-key population (`MC_KIND`/`MC_LABEL`/CHECK domain diffed as complete
 sets), not a single sampled row.
+
+---
+
+## Run reply
+
+The AC pass is complete, committed, and pushed to `claude/incumbent-wins-swap` (`53ebafe`).
+
+**Summary of `AC-master-profile-editor.md`:**
+
+- **Feasibility (§0):** Confirmed with commands, not assumed — `MC_KIND`/`MC_LABEL`/the DB `CHECK` domain are all identical 14-key sets, `itemsToOmit` is absent from all three, the three existing `H:mastercontext-*` guards are live and passing, and no editor screen/route/writer exists anywhere in the repo (grepped both `api/src` and `app/src`). Not `ALREADY BUILT` — genuinely new work.
+- **Route placement (§1):** Extends `masterContext.ts` (not `appSearchPrefs.ts` — different data shape, would bloat every unrelated settings read) as a new dedicated route, copying `appSearchPrefs.ts`'s auth/partial-update pattern rather than inventing one.
+- **Tier-1 answers (§2):** `itemsToOmit` stays unwritable by construction (route only iterates `MC_KIND`'s keys); partial-update-by-dirty-field is what keeps empty vs. absent honest; write owner comes from `resolveOwner` after `requireWrite`, never the query string; a static one-line note covers the baseline-shift disclosure; last-write-wins is justified against the house pattern rather than building optimistic locking.
+- **11 binary ACs**, 4 mutation-provable guards (each naming its file, exact mutation, and which AC it proves), and a minimal first commit: the route + tests only, no UI yet.
+
+One thing worth flagging: I was handed this task as the detached `verify.sh --kind AC` pass itself (the input matched its `build_context()` output exactly), so this ran headless rather than as an interactive exchange — nothing further is pending from this invocation.

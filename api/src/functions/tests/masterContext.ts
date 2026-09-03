@@ -36,7 +36,7 @@ import { getPgClient } from './pgClient'
 // iterates it rather than restating the list, which is the same reason the SQL CHECK is guarded
 // against it by H:mastercontext-block-key-domain. evidence.ts is a pure transform module and
 // imports nothing from here, so there is no cycle.
-import { MC_KIND } from './evidence'
+import { MC_KIND, MC_LABEL } from './evidence'
 
 /** The Storage table the owner's master profile lived in, and still does as the cold backup. */
 export const MASTER_CONTEXT_TABLE = 'MasterContext'
@@ -212,4 +212,137 @@ export async function masterContextCopy(req: HttpRequest, context: InvocationCon
 
 app.http('masterContextCopy', {
   methods: ['POST', 'OPTIONS'], authLevel: 'anonymous', route: 'app/master-context/copy', handler: masterContextCopy,
+})
+
+// ── the OWNER'S EDITOR for their own master profile ─────────────────────────────────────────────
+// GET  /api/app/master-profile  -> every block, with its MC_LABEL, for the verified/resolved owner
+// POST /api/app/master-profile  -> partial upsert of the blocks named in the body
+//
+// WHY THIS EXISTS. Until the Postgres cut-over the owner could not change their own master text at
+// ALL without hand-editing an Azure Storage table -- the most owner-specific data in the product,
+// with no UI path. That is precisely what CLAUDE.md's no-hardcoded-config rule forbids, and the
+// owner asked for it directly: *"agreed it should be available for text editing in settings once
+// moved to postgres"*.
+//
+// WHY IT LIVES HERE rather than on `appSearchPrefs.ts`'s existing settings route. That route's
+// payload is a handful of scalars read on every Settings load; these 14 blocks are free text and
+// can run to tens of thousands of characters. Folding them in would make every unrelated prefs read
+// drag the owner's whole profile over the wire, and would put two data shapes (one-row-per-owner
+// scalars vs many-rows-per-owner text) behind one endpoint. The AUTH AND PARTIAL-UPDATE SHAPE is
+// copied from that route deliberately, so the pattern is shared even though the endpoint is not.
+//
+// THE KEY WHITELIST IS THE POINT, not paperwork. `itemsToOmit` is the list of things the owner has
+// BANNED; MC_KIND's own comment calls itself "the second lock on the same door" and the DB CHECK is
+// the third. An editor that could write it would walk past all three. The route refuses an unknown
+// key BEFORE any query runs, so the database constraint stays a backstop rather than the only line.
+
+const MP_HEADERS = {
+  'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Methods': 'GET, POST, OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+}
+
+/** The blocks an owner may edit. Derived from MC_KIND so a block added there is editable the same day. */
+export function editableBlockKeys(): string[] {
+  return Object.keys(MC_KIND)
+}
+
+/**
+ * Read every editable block for one owner.
+ *
+ * Returns a row for all 14 keys even when Postgres has none, because the screen must render a field
+ * per block. `stored` distinguishes "the owner emptied this" (`stored: true`, `text: ''`) from
+ * "never set" (`stored: false`) -- the same distinction the column's `not null default ''` exists to
+ * preserve, carried up to the UI instead of collapsed on the way.
+ */
+export async function readMasterProfile(client: any, ownerEmail: string): Promise<Array<{ key: string; label: string; text: string; stored: boolean; updatedAt: string | null }>> {
+  const rows = (await client.query(
+    `select block_key, text, updated_at from owner_master_block where owner_email = $1`, [ownerEmail])).rows
+  const byKey = new Map<string, any>(rows.map((r: any) => [r.block_key, r]))
+  return editableBlockKeys().map((key) => {
+    const r = byKey.get(key)
+    return {
+      key,
+      label: MC_LABEL[key] || key,
+      text: r ? String(r.text ?? '') : '',
+      stored: !!r,
+      updatedAt: r?.updated_at ? new Date(r.updated_at).toISOString() : null,
+    }
+  })
+}
+
+/**
+ * Upsert ONLY the blocks named in `blocks`.
+ *
+ * PARTIAL BY CONSTRUCTION. It iterates the body's own keys, so a block the owner did not touch
+ * receives no statement at all -- not an `update ... set text = text`, which would leave the end
+ * state correct while still writing 14 rows and bumping 14 `updated_at`s. The guard for this spies
+ * on the QUERY CALLS for exactly that reason.
+ *
+ * THROWS on an unknown key, before any query. The caller turns that into a 400.
+ */
+export async function writeMasterProfile(client: any, ownerEmail: string, blocks: Record<string, unknown>): Promise<{ written: string[] }> {
+  const allowed = new Set(editableBlockKeys())
+  const keys = Object.keys(blocks || {})
+  const rejected = keys.filter((k) => !allowed.has(k))
+  if (rejected.length) {
+    // Named, not merely refused: a 400 saying "bad request" would leave the owner guessing which
+    // field the screen sent wrongly.
+    throw new Error(`not an editable master-profile block: ${rejected.join(', ')}`)
+  }
+  const written: string[] = []
+  for (const key of keys) {
+    const v = blocks[key]
+    // A non-string is a bug in the caller, not a value to coerce -- String(undefined) would store
+    // the text "undefined", which is exactly the class of silent corruption this file guards.
+    if (typeof v !== 'string') throw new Error(`block ${key} must be a string, got ${typeof v}`)
+    await client.query(
+      `insert into owner_master_block (owner_email, block_key, text, updated_at)
+       values ($1, $2, $3, now())
+       on conflict (owner_email, block_key) do update set text = excluded.text, updated_at = now()`,
+      [ownerEmail, key, v])
+    written.push(key)
+  }
+  return { written }
+}
+
+export async function masterProfile(req: HttpRequest, _ctx: InvocationContext): Promise<HttpResponseInit> {
+  if (req.method === 'OPTIONS') return { status: 204, headers: MP_HEADERS }
+  let client
+  try {
+    if (req.method === 'GET') {
+      client = await getPgClient()
+      const owner = resolveOwner(req).owner
+      return { status: 200, headers: MP_HEADERS, jsonBody: { ok: true, owner, blocks: await readMasterProfile(client, owner) } }
+    }
+    // POST. The write guard runs BEFORE anything else, and the owner comes from the VERIFIED
+    // session -- never from `?owner=`, which resolveOwner accepts unverified for READS. Writing
+    // another owner's profile from a query string is the data-separation defect this whole move
+    // exists to end.
+    const guard = requireWrite(req)
+    if (guard) return guard
+    const owner = resolveOwner(req).owner
+    const body = (await req.json().catch(() => ({}))) as any
+    if (!body || typeof body.blocks !== 'object' || body.blocks === null || Array.isArray(body.blocks)) {
+      return { status: 400, headers: MP_HEADERS, jsonBody: { ok: false, error: 'body.blocks must be an object of { blockKey: text }' } }
+    }
+    let written: string[]
+    try {
+      client = await getPgClient()
+      written = (await writeMasterProfile(client, owner, body.blocks)).written
+    } catch (e: any) {
+      const msg = String(e?.message || e)
+      // A rejected KEY is the caller's fault (400); anything else is ours (500). Collapsing both
+      // into one status would make "you sent a bad field" indistinguishable from "the database is
+      // down", and the screen has to tell the owner different things in those two cases.
+      const isBadKey = /not an editable master-profile block|must be a string/.test(msg)
+      return { status: isBadKey ? 400 : 500, headers: MP_HEADERS, jsonBody: { ok: false, error: msg } }
+    }
+    return { status: 200, headers: MP_HEADERS, jsonBody: { ok: true, owner, written, blocks: await readMasterProfile(client, owner) } }
+  } catch (e: any) {
+    return { status: 500, headers: MP_HEADERS, jsonBody: { ok: false, error: String(e?.message || e) } }
+  } finally { try { await client?.end() } catch { /* the work already happened */ } }
+}
+
+app.http('masterProfile', {
+  methods: ['GET', 'POST', 'OPTIONS'], authLevel: 'anonymous', route: 'app/master-profile', handler: masterProfile,
 })

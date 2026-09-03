@@ -36,7 +36,8 @@ import { planCorrections } from '../dist/functions/tests/correction.js'
 // MC_KIND joins this import so H:mastercontext-block-key-domain compares the SQL CHECK against
 // the module that OWNS the block list, never against a literal retyped in the test.
 import { profileRecords, resolveEvidence, MC_KIND, masterBaseline } from '../dist/functions/tests/evidence.js'
-import { entityFromBlocks, masterContextSource } from '../dist/functions/tests/masterContext.js'
+import { entityFromBlocks, masterContextSource, writeMasterProfile, readMasterProfile,
+  editableBlockKeys } from '../dist/functions/tests/masterContext.js'
 
 const SRC = new URL('../src/functions/tests/', import.meta.url).pathname
 const src = (f) => readFileSync(join(SRC, f), 'utf8')
@@ -5927,4 +5928,96 @@ test('H:deploy-sha-comes-from-the-bundle: health reports the compiled sha, not t
     + 'asserts its own edit applied, and this asserts the target it edits still exists')
   assert.match(stamp, /BUILD_SHA \|\| process\.env\.DEPLOYED_SHA/,
     'the BUNDLE must win over the app setting -- reversing the order restores the defect exactly')
+})
+
+// ── the master-profile editor: four guards, one per Tier-1 lock ─────────────────────────────────
+//
+// ACs at docs/qc-evidence/AC-master-profile-editor.md (AC7/AC8/AC2+AC4/AC9). Each SPIES ON THE
+// QUERY CALLS rather than only the end state, because the end state cannot tell a partial update
+// from a full resave: an unconditional `update ... set text = text` leaves every row byte-identical
+// while writing 14 rows and bumping 14 `updated_at`s. That distinction is the guard.
+//
+// The owner could not edit their own master profile at all before this -- the most owner-specific
+// data in the product, reachable only by hand-editing Azure Storage.
+function fakePg (rows = []) {
+  const calls = []
+  return {
+    calls,
+    query: async (sql, params) => { calls.push({ sql: String(sql), params }); return { rows, rowCount: rows.length } },
+    end: async () => {},
+    writes: () => calls.filter((c) => /insert into owner_master_block|update owner_master_block/i.test(c.sql)),
+  }
+}
+
+// H:master-profile-editor-rejects-unknown-key -- itemsToOmit is the owner's BANNED list. MC_KIND
+// calls itself "the second lock on the same door" and the DB CHECK is the third; an editor that
+// could write it walks past all three. The route must refuse BEFORE any query runs, so the
+// constraint stays a backstop rather than the only line of defence.
+// MUTATION: in writeMasterProfile, delete the `rejected.length` throw -> FIRED.
+test('H:master-profile-editor-rejects-unknown-key: a non-MC_KIND block never reaches Postgres', async () => {
+  const pg = fakePg()
+  await assert.rejects(
+    () => writeMasterProfile(pg, 'von.ellis@enterpriseds.io', { itemsToOmit: 'banned things' }),
+    /not an editable master-profile block: itemsToOmit/,
+    'the editor must refuse the owner\'s BANNED list by name')
+  assert.equal(pg.calls.length, 0,
+    'refused BEFORE any query -- the DB CHECK is the backstop, not the only line of defence; ' +
+    `got ${pg.calls.length} query call(s)`)
+
+  // The other direction, so the guard cannot pass by rejecting everything.
+  const ok = fakePg()
+  const r = await writeMasterProfile(ok, 'von.ellis@enterpriseds.io', { skills1: 'a' })
+  assert.deepEqual(r.written, ['skills1'])
+  assert.equal(ok.writes().length, 1, 'a legitimate key must still be written')
+})
+
+// H:master-profile-editor-partial-update -- saving one block must not touch the other 13.
+// MUTATION: make writeMasterProfile iterate editableBlockKeys() instead of Object.keys(blocks)
+// (a full-form resave) -> FIRED.
+test('H:master-profile-editor-partial-update: only the blocks in the body get a statement', async () => {
+  const pg = fakePg()
+  await writeMasterProfile(pg, 'von.ellis@enterpriseds.io', { resumeSummary: 'new text' })
+  const writes = pg.writes()
+  assert.equal(writes.length, 1,
+    `one block in the body must produce exactly ONE write; got ${writes.length}. A full resave ` +
+    'leaves the end state correct while bumping 14 updated_at values, which is why this counts ' +
+    'CALLS and not rows.')
+  assert.equal(writes[0].params[1], 'resumeSummary')
+  const touched = new Set(writes.map((w) => w.params[1]))
+  for (const k of editableBlockKeys()) {
+    if (k !== 'resumeSummary') assert.ok(!touched.has(k), `${k} was written and should not have been`)
+  }
+})
+
+// H:master-profile-editor-empty-is-a-value -- '' means "the owner emptied this"; absent means
+// "never set". The column is `not null default ''` to keep them apart, and the reader carries that
+// up as `stored` rather than collapsing it.
+// MUTATION: in writeMasterProfile, skip falsy values (`if (!v) continue`) -> FIRED.
+test('H:master-profile-editor-empty-is-a-value: clearing a block writes it, does not skip it', async () => {
+  const pg = fakePg()
+  await writeMasterProfile(pg, 'von.ellis@enterpriseds.io', { aboutMe1: '' })
+  assert.equal(pg.writes().length, 1, 'clearing a block must WRITE it -- skipping leaves the old text in place')
+  assert.equal(pg.writes()[0].params[2], '', 'the stored value must be the empty string, not the previous text')
+
+  // And a non-string is a caller bug, not a value to coerce: String(undefined) would store the
+  // literal text "undefined" in the owner's profile.
+  await assert.rejects(() => writeMasterProfile(fakePg(), 'o', { aboutMe1: undefined }), /must be a string/)
+  await assert.rejects(() => writeMasterProfile(fakePg(), 'o', { aboutMe1: 42 }), /must be a string/)
+})
+
+// H:master-profile-editor-reader-distinguishes-absent -- the screen must be able to tell an emptied
+// block from one that was never seeded, or "never set" silently renders as "deliberately blank".
+// MUTATION: in readMasterProfile, return `stored: true` unconditionally -> FIRED.
+test('H:master-profile-editor-reader-distinguishes-absent: stored vs never-set survive the read', async () => {
+  const pg = fakePg([{ block_key: 'skills1', text: '', updated_at: new Date('2026-09-03T00:00:00Z') }])
+  const blocks = await readMasterProfile(pg, 'von.ellis@enterpriseds.io')
+  assert.equal(blocks.length, editableBlockKeys().length, 'every editable block gets a field, seeded or not')
+  const s1 = blocks.find((b) => b.key === 'skills1')
+  const other = blocks.find((b) => b.key === 'aboutMe1')
+  assert.equal(s1.stored, true, 'a row that exists with text=\'\' is STORED -- the owner emptied it')
+  assert.equal(s1.text, '')
+  assert.equal(other.stored, false, 'a block with no row was NEVER SET, which is a different fact')
+  assert.equal(other.text, '')
+  assert.ok(s1.label && s1.label !== 'skills1',
+    'every field carries its MC_LABEL wording -- the labels were written for this screen and never used')
 })
