@@ -24,26 +24,32 @@ be re-judged**.
 
 ---
 
-## 1. THE DECISION — two lanes, no overlap
+## 1. THE DECISION — ONE lane: the judge
 
-Each lane makes only the claim its own evidence supports. That is what keeps this small.
+**SIMPLIFIED 2026-09-03 at the owner's instruction.** The previous version had two lanes, exact
+containment settling what it could and the judge taking the rest. The owner asked the question that
+kills lane 1: *"why do I care about only 2 matching the keyword when we added a judge llm?"*
 
-| Lane | Condition | What the panel says | Backed by |
-|---|---|---|---|
-| **1. Exact** | `requirement.model_keyword` appears verbatim in `swap_decision.to_label` | **Placement** — *"'global engineering' is in 'Global Engineering Teams', which replaced 'Agile Transformation'"* | String containment. Deterministic, free, no model |
-| **2. Judge** | everything lane 1 cannot settle | **Causation** — *"Took the place of 'Agile Transformation'"* | A model verdict that must CITE, with the citation verified byte-exact by code |
+**Because the answer is: you don't.** The judge is handed the replacement text and a list of
+candidate posting lines and picks (`buildCoverageUser(reqs, fieldName, fieldText)` —
+`coverageJudge.ts:114`). **It does not consult `requirement_id` and does not need one.** So every
+attrition step in the old analysis constrains only the free lane:
 
-**The judge does NOT re-check lane 1.** An intermediate draft added a confirmation pass over the
-exact matches; the owner withdrew it (*"what you read back seemed super complicated"*) and was right.
-What made it complicated was insisting both lanes make the SAME claim. They need not — placement and
-causation are different statements with different evidence — and once each lane says only what it can
-prove, the extra pass disappears. Spending model calls to re-confirm a string comparison is cost
-with no finding.
+| | reach, live, both packets |
+|---|---|
+| exact keyword containment | **3 of 35** |
+| the judge | **35 of 35** |
 
-**No citation, no claim.** Lane 2 answers `absent` and the panel stays quiet, worded so silence
-reads as deliberate rather than broken.
+Lane 1 saves **2-3 decisions out of 35**, inside a request that is batched into 1-3 calls anyway —
+so it saves **no calls at all**. For that it costs a second code path, a second wording, a
+distinction the reader has to learn, and its own test surface.
 
----
+**So: one lane.** The judge answers, citing, with the citation verified byte-exact by code. It
+answers `absent` and the panel stays quiet. No exact lane, no fuzzy/exact distinction in the copy,
+no second wording.
+
+**The 0.34 matcher is not even needed as a shortlist.** With 35 requirements and short skill labels,
+every candidate fits in one prompt. Keep the shortlist only if a payload measurement later says so.
 
 ## 2. THE FUZZY LINK IS DEMOTED, NOT DELETED
 
@@ -51,7 +57,9 @@ reads as deliberate rather than broken.
 containment at `ATTRIBUTION_THRESHOLD = 0.34`, matched against the requirement's **verbatim posting
 line**, never against the keyword.
 
-**Measured on the live packet, and this is the number that settles it:**
+**Live, both packets — and note these supersede the single-packet figures this document used to
+carry.** 35 `swapped` rows, 19 with a `requirement_id`, 3 with the keyword verbatim in `to_label`.
+The eMoney-only funnel below is kept because it is where the earlier numbers came from:
 
 | | count |
 |---|---:|

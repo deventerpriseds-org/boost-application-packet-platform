@@ -8072,3 +8072,41 @@ is from the committed dump; and the pass did not read the prototype at `docs/qc-
 only on overflow, per-pair prompts so batching cannot change a cached answer) — which now AGREES with
 the owner's 1-3 batch instruction. The earlier 11-AC document's lazy-per-row design was the other
 lane's, not this pass's, and my previous message attributed it wrongly.
+
+### ACT-68j — one lane, not two; `added` is a breach; LLM yield swept app-wide (2026-09-03)
+
+**Owner, on my two-lane design:** *"why do I care about only 2 matching the keyword when we added a
+judge llm? explain to me why an llm doesn't make all of this mute? everything you showed me in the
+artifact is about word matching."* **They are right and the artifact was measuring the wrong thing.**
+
+`buildCoverageUser(reqs, fieldName, fieldText)` (`coverageJudge.ts:114`) takes CANDIDATE
+REQUIREMENTS and a TEXT. It never consults `requirement_id`. So the whole word-matching funnel I
+published constrains only the free lane. Live reach: exact containment **3 of 35**; the judge
+**35 of 35**. Lane 1 saves 2-3 decisions inside a call that is batched anyway — **zero calls saved**
+— for a second code path, a second wording and its own tests.
+**SCOPE SIMPLIFIED TO ONE LANE.** The 0.34 matcher is not needed even as a shortlist.
+
+**Owner, on `added`:** *"there is no such thing as added everything proposed to be added must swap a
+item if lesser relevance from the template."* **Confirmed from the code, which already says it:**
+`swaps.ts:656` — *"UNPAIRED FINAL LEFTOVER — more items shipped than the baseline had. The other
+half of the same violation."* An `added` row is a recorded FIXED-SLOT BREACH, not a category.
+**8 live: 7 Trinnex, 1 eMoney.** I had proposed pulling them into scope; wrong twice over.
+
+**Owner's heuristic, applied app-wide:** *"if there is any instance with an llm but low numbers
+something is likely off."* Swept every model-output store -> `docs/qc-evidence/LLM-YIELD-SWEEP.md`.
+
+- **Fair denominator matters and I nearly botched it again.** Against all 14,595 requirements the
+  judge looks like 1.4%. But only **40 of 2,310 opportunities have a packet**, carrying **140
+  requirements** — the only ones anything runs on. Judged: **21 of 140 (15%)**.
+- **NOT a defect, and I am not calling it one.** `chk_coverage_judge = true` live; the code default
+  is `false` deliberately (it changes a check's state); and `chk_coverage_judge_max = 12` counts
+  **one call per FIELD, not per requirement** (`checks.ts:131-133`), so the cap is not a throttle.
+  15% is consistent with a recently-enabled judge and two built packets.
+- **What IS open: 86% of verdicts are `absent`** (173 of 201; 28 covered). Either the documents
+  really do not address those lines, or `judgeableFields` is handing the judge text that was never
+  going to. **One query separates them** — group `absent` by `field`; clustered means field
+  selection, spread means honest. **Not run yet, and recorded as the next measurement rather than
+  guessed.**
+- **Instrument gap:** `stuffingJudge` and `supportJudge` write through the checks pipeline with no
+  table of their own, so this sweep **cannot see their yield at all.** Fix the instrument before
+  repeating the exercise on them.
