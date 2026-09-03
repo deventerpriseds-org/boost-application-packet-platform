@@ -520,6 +520,46 @@ Key tables (PostgreSQL):
 - iOS testing: requires macOS runner or BrowserStack; categorically unavailable in Linux CCR
 
 ## Active work
+**2026-09-03 - 4.11-4 BUILT AND DEPLOYED. PROTOTYPE COVERAGE IS 176 OF 176 (100%).** `main`
+`4da8696`. It was the last open row.
+
+**Closed as DELIBERATE by a parallel session the same day** - *"a selector offering two options that
+cannot be honoured would assert capability the app does not have"*. Right about the prototype's
+THREE chips, wrong about two of them. `artifactAiEdit` (`appPackets.ts`) already reads an optional
+`section`: set -> `pkg[section]` (one merge field), absent -> `art.content` (the whole asset). So
+field-scope and asset-scope are BOTH honoured, one parameter apart on the route that already ships.
+My row supersedes theirs and says so.
+
+**"This packet" and "My profile" stay omitted, swept not assumed:** every write is
+`app/artifact/{artifactId}/...` so packet-scope has no route, and `app/qc/facts/set` takes a
+STRUCTURED FACT rather than an instruction. The prototype's own `send()` never reads `scope` at all,
+so copying it ships three dead controls.
+
+**Proven in the DOM, not argued:** `run-assistant.mjs` claim 8 - asset scope sends `{instruction}`,
+field scope sends `{instruction, section:'ResumeSummary'}`. 20 -> 28 checks.
+
+**NOTE: this file now has TWO `## Active work` headings** (522 and ~6362) - a merge concatenated
+them. The one at the top is live; the lower one is history that should be retitled.
+
+## Hardening -- 2026-09-03: the coverage guards recount FOR you; never hand-pick a side
+Three guards fired in sequence on this one row and each was right: the ABSENT-row watcher, then
+`H:coverage-tally-matches-rows`, then `H:headline-matches-the-rows`. Across TWO merges from `main`
+the rule that worked was: **take the other side's TALLIES wholesale** (their recount covers rows this
+branch never saw), **take my ROW**, then run the guard and apply the delta it names. Hand-editing one
+side of a tally is exactly what these guards exist to stop - the failure text says RECOUNT in capitals.
+
+## Hardening -- 2026-09-03: two HARNESS defects that would have scored a correct product wrong
+1. The assistant probe's api recorder kept only method+URL. `section` travels in the BODY, so the
+   field-scope assertion could NEVER have matched - it failed against correct code. Now records
+   `postData()`.
+2. `force: true` does NOT defeat an intercepting overlay - it skips actionability checks but still
+   dispatches at coordinates, landing on the backdrop. The probe's scaffolding buttons use
+   `$eval(el => el.click())`; every control UNDER TEST still goes through real hit-testing.
+
+**Playwright vs the live app, settled:** Playwright WORKS here and drove every render this session.
+The proxy blocks the HOST - `page.goto` on the SWA gives `net::ERR_TUNNEL_CONNECTION_FAILED`. Live
+checks go through `ui-verify.yml`. Never restate this as "cannot use Playwright".
+
 **2026-09-03 - SPEC 4.5-29/4.5-30 AND 4.6 DISPLACEMENT ARE ON `main` AND DEPLOYED.** PR #64
 (`a55bc25`) then PR #78 (`fd1bc80`). Three rows recorded as blocked, none of them actually were.
 

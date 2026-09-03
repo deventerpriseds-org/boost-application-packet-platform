@@ -8400,3 +8400,24 @@ PASS). Withdrew my own suggestion.
 
 **Evidence:** PR #64, PR #78, CI run 33718171918 green; margin 61/61, browser 52/52, api 1064/0,
 app 454/0; 4 unit guards harness-FIRED, browser assertion hand-proved.
+
+---
+
+## ACT-68e — 4.11-4 scope selector: the last open coverage row (2026-09-03)
+
+**Asked:** *"of course you can use playwright. knock out 4.11-4 continuously until deployed"*
+
+**Status: DONE, DEPLOYED, and it closes the board at 176/176 (100%).** `main` `4da8696`.
+
+- **Playwright:** works here, drove every render this session. The proxy blocks the SWA host —
+  `net::ERR_TUNNEL_CONNECTION_FAILED` on `page.goto`. Live checks go via `ui-verify.yml`.
+- **Feasibility first:** swept every write route. All are `app/artifact/{artifactId}/...`, so
+  "This packet" has no route; `app/qc/facts/set` takes a structured fact, so "My profile" cannot
+  carry an instruction. Built the two that route.
+- **The unlock:** `artifactAiEdit` reads an optional `section` — set gives one merge field, absent
+  gives the whole asset. The selection changes what is SENT.
+- **Superseded a same-day DELIBERATE close** by a parallel session whose premise (two options that
+  cannot be honoured) was falsified by that parameter.
+- **Guards:** 4 unit, all mutation-proved FIRED; 8 DOM checks (20 → 28 on the assistant probe).
+
+**Evidence:** api 1071/0 · app 462/0 · margin 61/61 · browser 52/52 · deploy run 33734904497.
