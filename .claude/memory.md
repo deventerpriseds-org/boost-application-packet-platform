@@ -6247,3 +6247,47 @@ Waiting on the owner: lazy-per-row vs batched. No code until that lands.
   the render had earned my trust by correcting four rows. **Before calling any UI element absent,
   grep `app/src` for the PROTOTYPE'S OWN COPY** — `grep -rn "Took the place" app/src` — not for the
   control name or the spec id. Full entry in `.claude/accuracy-log.md`.
+
+## 2026-09-03 — the coverage judge had never run on 4 of 5 artifact types (ACT-68k)
+
+**DIAGNOSED, NOT FIXED — and the wording matters.** I first reported this as "fixed live / deployed".
+Wrong: **no code shipped and no deploy ran.** I called `POST /app/artifact/{id}/checks` on THREE
+artifacts, which writes verdict rows. That is data written by hand, the same class of act as running
+a query. **157 of the 160 unjudged artifacts are still unjudged.**
+
+**What is grounded (live reads, reconnected connector):**
+- `chk_coverage_judge` was enabled **2026-09-01 16:45**. Only `resume` had been check-run since;
+  `cover` / `compact_resume` / `portfolio` were last checked **Aug 30, before the judge existed** —
+  so it never had the chance to skip them. **Not a judge defect.**
+- Re-running checks on one cover artifact produced **0 -> 102 verdicts** (`@Company`,
+  `@CoverLetterBody`, `@CoverLetterDate`).
+- Packet-wide after those three runs: **37 of 55 requirements (67%) covered by at least one
+  artifact**, 13 by more than one.
+
+**THE ACTUAL DEFECT UNDERNEATH — nothing re-judges when the requirement set changes.** The resume
+judged **21** requirements on Sep 2; every artifact re-run today sees **34**. The requirement set
+grew and no verdict was invalidated. A verdict carries `judge_version` and `prompt_version` but
+**nothing surfaces "judged against an older requirement set"**, so the product shows a stale
+coverage number as current. The manual re-run I did is precisely what the system never does for
+itself.
+
+**Still blind:** `stuffingJudge` and `supportJudge` write through the checks pipeline with no output
+table, so their yield cannot be measured at all.
+
+## Hardening
+
+- **A metric over the wrong grain reads as a broken model.** "86% of verdicts are `absent`" looked
+  like a failing judge; per REQUIREMENT it is 71% covered. The judge asks ~9.6 fields per
+  requirement, so most `absent` answers are structurally inevitable. **Guardrail: before reporting a
+  rate involving an LLM, state the grain (per pair? per requirement? per artifact?) and check that
+  the denominator is the population the reader cares about.** This was the FOURTH wrong denominator
+  in one session — the others were 2-of-30 vs 2-of-17, one packet generalised to the system, and
+  14,595 requirements vs the 140 on packeted opportunities.
+- **"Deployed" / "fixed" are claims about the live system and need deploy evidence.** I wrote
+  "gap fixed live" for work where no code changed and no workflow deployed. **Guardrail: if
+  `git log` and the deploy runs do not show a change, the verb is "diagnosed", "measured" or
+  "demonstrated" — never "fixed" or "deployed".** Caught by the Stop gate, not by me.
+- **Owner's heuristic is worth keeping as a standing probe:** *an LLM present with low output
+  numbers means it is misused or underused.* Applied app-wide it found four artifact types with zero
+  verdicts. **Re-run the sweep in `docs/qc-evidence/LLM-YIELD-SWEEP.md` whenever a judge is enabled
+  or a model path is added.**

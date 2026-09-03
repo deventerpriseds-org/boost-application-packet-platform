@@ -70,11 +70,11 @@ mild outlier worth watching, but its content is populated and comparable in leng
 `resume` artifacts had been check-run since (2 runs). The other types were last checked **before the
 judge existed**, so it never had the chance to skip them.
 
-**Fixed with no code change** — re-running `POST /app/artifact/{id}/checks` on one artifact of each
+**DEMONSTRATED CLOSEABLE, NOT FIXED** — re-running `POST /app/artifact/{id}/checks` on one artifact of each
 type. The cover letter went from **0 to 102 verdicts** across `@Company`, `@CoverLetterBody`,
 `@CoverLetterDate` on the first run.
 
-### After the fix
+### After re-running checks on THREE artifacts (157 of 160 remain unjudged)
 
 | type | requirements judged | covered | % |
 |---|---:|---:|---:|
