@@ -6655,3 +6655,24 @@ is the first deploy with a stamp on both sides, and the first to wait.
   time, and that is an owner decision, not a test-file change.
 - `H:deploy-sha-comes-from-the-bundle` -- health must report the compiled sha, and must not name
   `DEPLOYED_SHA` at all so the fallback cannot be reintroduced at the call site.
+
+### MasterContext CUT OVER — the app now reads the master profile from Postgres (2026-09-03)
+`MASTERCONTEXT_SOURCE=postgres`, declared in `api-deploy.yml` so the store is in the repo and
+diffable rather than a hand-set portal value. Landed `0da39b2`, deploy 33756518549 success.
+
+**Verified live, before AND after, on the owner's real data** —
+`docs/qc-evidence/RECORD-mastercontext-cutover.md`:
+- **`entities` 1 -> 14.** One Storage entity became 14 `owner_master_block` rows. This is the
+  discriminator: had the deploy kept reading Storage, it would still say 1.
+- **All five fields byte-identical**, compared as STRINGS not lengths (225/180/444/286/958), and
+  matching the row lengths read directly from Postgres. Three paths agree. That is AC-5.
+
+The baseline was captured BEFORE the flip. Doing it the other way round leaves nothing to compare
+against — worth remembering as the general rule, not just for this cut.
+
+**Storage was NOT deleted** (AC-9). The seed row is intact and every raw-read path is still in the
+repo, which is what makes rollback real: flip the word back and redeploy.
+
+**NEXT:** the Settings text editor for the master profile — the owner confirmed they want it, and it
+is what this whole move was FOR. Today they still cannot change their own profile without editing
+Azure Storage by hand; the table is per-owner and writable, so that gap is now closable.

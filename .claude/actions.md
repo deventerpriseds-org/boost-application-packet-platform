@@ -8449,3 +8449,14 @@ app 454/0; 4 unit guards harness-FIRED, browser assertion hand-proved.
 - **Guards:** 4 unit, all mutation-proved FIRED; 8 DOM checks (20 → 28 on the assistant probe).
 
 **Evidence:** api 1071/0 · app 462/0 · margin 61/61 · browser 52/52 · deploy run 33734904497.
+
+### ACT:mastercontext-to-postgres — DONE and VERIFIED LIVE (2026-09-03)
+Cut over at `0da39b2`. `entities` 1 -> 14 proves the source switched; all five fields byte-identical
+proves the data did not. Evidence: `docs/qc-evidence/RECORD-mastercontext-cutover.md`, api-test runs
+33756330116 (before) / 33756688130 (after). Storage deleted at no step — rollback is one word in
+`api-deploy.yml`.
+
+### ACT:master-profile-settings-editor — NEXT, and unblocked
+The owner confirmed they want it ("agreed it should be available for text editing in settings once
+moved to postgres"). `owner_master_block` is per-owner and writable, so the gap is closable. Today
+the owner cannot change their own master profile without hand-editing Azure Storage.
