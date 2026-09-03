@@ -6213,3 +6213,37 @@ leave PARTIAL. **Recommended B first.** The middle path — causation off the fu
 is refused.
 
 **Awaiting the owner's choice. No code started.**
+
+## Feature status — SPEC 4.6-8 swap attribution (as of 2026-09-03)
+
+| Piece | Status |
+|---|---|
+| Causal sentence `Took the place of X` | **ALREADY SHIPPED** — `keywordDisplacementText` (`app/src/assetBlocks.js:601-609`), rendered at `AssetBlocks.jsx:1201-1207`, hook `BLOCK_HOOKS.keywordDisplaced`. Ungated: no citation, no judge |
+| Its gate | `normLabel(to_label) === normLabel(keyword)` — WHOLE-label equality. **Fires on 0 of 30 swapped rows** on the eMoney packet (containment would fire on 2) |
+| Lane 1 (exact containment -> placement wording) | NOT BUILT |
+| Lane 2 (attribution judge -> causal wording, cite + verify) | NOT BUILT |
+| Acceptance criteria | **DONE** — `docs/qc-evidence/AC-swap-attribution-judge.md`, 11 ACs + feasibility table, authored by an independent `Agent` subagent (`general-purpose`, run_in_background), commit `ebbb71c` |
+| `H:attribution-follows-the-posting-line-not-the-keyword` | **SHIPPED + mutation-proven** (`api/test/hardening.test.mjs`), commit `2cdee60` |
+| Implementation | **NOT STARTED.** TIER 1; blocked on the owner's batching decision (below) |
+
+**AC 0 reframes the work:** the first step is RETIRING an ungated causal claim, not adding one.
+
+**OPEN OWNER DECISION — the ACs contradict an owner instruction, deliberately.** The owner said the
+judge calls should fire in **1-3 batches**; AC 8/AC 10.1 chose **lazy, one call per row on panel
+open**, and state "never batched across rows into fewer". The pass's reasoning: a batched eager pass
+spends calls on every build whether or not the panel is ever opened, and puts the call site beside
+the scoring pipeline, which AC 7 forbids. Not resolved — surfaced to the owner.
+
+## Active work
+Waiting on the owner: lazy-per-row vs batched. No code until that lands.
+
+## Hardening
+
+- **A RENDER CANNOT PROVE AN ABSENCE.** I concluded 4.6-8's causal sentence was unbuilt because it
+  did not appear in my renders. It ships; it is simply dormant on this packet (0 of 30 rows clear its
+  whole-label-equality gate). **A zero-row branch and a missing branch look identical on screen.**
+  This is the fixture canary's rule (*"an instrument that cannot see has no standing to report an
+  absence"*) applied to the APP's data rather than the fixture's, and I walked into it right after
+  the render had earned my trust by correcting four rows. **Before calling any UI element absent,
+  grep `app/src` for the PROTOTYPE'S OWN COPY** — `grep -rn "Took the place" app/src` — not for the
+  control name or the spec id. Full entry in `.claude/accuracy-log.md`.
