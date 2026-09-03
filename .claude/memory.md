@@ -7019,3 +7019,42 @@ broader trigger is cheap.
   instrument is broken" from "there was nothing to measure" — the same distinction the repo's own
   rule makes between `not_applicable` and `pass`. **Always ask what the denominator was before
   reporting a zero.**
+
+## 2026-09-03 — SPEC 4.6-8's "Put back" reopening was itself wrong, corrected same day
+
+Owner: "so build the UI, is it in the spec or prototype site?" — answer: the PROTOTYPE, and reading
+it changed what needed building.
+
+**The reopening (recorded earlier this session) said**: "Put back" is a MUTATION, appSwaps.ts is
+GET-only, build `POST /app/packet/{id}/swaps/{swapId}/revert`. **That was reached from the button's
+LABEL, not its `onClick`.** Reading the actual prototype source, `docs/qc-evidence/qc/assets.jsx:70-74`:
+
+    onClick={() => onAsk(`I am not comfortable claiming ${t.term}. Put ${swap.orig} back...`)}
+
+It seeds the ask box — the IDENTICAL pattern already shipped for its two siblings on the same panel
+(`Swap for another skill`, `Drop it, leave the line open`), both `onAsk` too. A code comment in
+`assetBlocks.js` already said as much before this session touched it: *"The prototype's button
+(assets.jsx:82) is itself an onAsk — every one of its three actions is."* The 4.6-8 reopening
+overlooked a sentence already sitting in the codebase.
+
+**Built `keywordPutBackOption`, mirroring `keywordActions`/`keywordSwapOptions` exactly**: gated on
+`canEdit && present`, reuses `keywordDisplacement` rather than re-deriving what a swap displaced,
+wired into `AssetBlocks.jsx` ahead of Drop (prototype order — most specific action first).
+
+**Did NOT copy the prototype's sentence.** Its wording — "record the keyword as uncovered rather
+than met" — is a coverage claim this app cannot make: `requirement.model_keyword` is declared NEVER
+SCOREABLE, and the panel two lines above already tells the reader the keyword "counts toward
+nothing." Copying it would contradict a sentence two inches above it — the same trap `keywordActions`'
+own comment already named for Drop. Wrote a mutation-proved guard specifically forbidding
+"uncovered|coverage|scored" in the seeded sentence, FIRED against the prototype's own wording.
+
+## Hardening
+
+- **A "needs a new backend route" conclusion was reached without reading the control's `onClick`.**
+  The label "Put back" reads like an undo; the prototype's own source shows it is a request, same as
+  its siblings. **Guardrail: before concluding a UI control is a mutation, read its `onClick`/`onAsk`
+  binding in the prototype source, not just its label.**
+- **A code comment already answered the question the session spent time reopening.**
+  `assetBlocks.js:446` stated "every one of [the prototype panel's] three actions is an onAsk" before
+  this session started. Grepping the target file's own comments before concluding something is
+  ABSENT would have caught this in one read.

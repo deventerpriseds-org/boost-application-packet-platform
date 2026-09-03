@@ -8662,3 +8662,17 @@ browser 52/52 · deploy 33758565832.
 5. Swap-attribution judge (SPEC 4.6-8) — 45 ACs written, not built.
 6. Corpus was 8 of 200 artifacts ever checked. The fix makes checking routine going forward; it does
    not retroactively check the other 192.
+
+### ACT-70 — Put back built; the earlier 4.6-8 reopening corrected same day (2026-09-03)
+
+Commit `3d23fa7`. `keywordPutBackOption` (assetBlocks.js), wired into AssetBlocks.jsx beside
+Drop/Swap. PROTOTYPE-COVERAGE.md row 4.6-8 amended in place rather than re-flipped to a new status —
+the row already read DELIBERATE/reopened-as-feature; the correction explains why the reopening was
+itself wrong and records what actually shipped.
+
+Two guards, both mutation-proved FIRED on the real mutate.sh:
+`H:put-back-only-offered-for-a-real-displacement-that-is-present-and-editable`,
+`H:put-back-names-both-terms-and-claims-no-coverage-state`.
+
+app build clean, 490/490 (3 new). No backend route needed or built — confirmed unnecessary by
+reading the prototype's own onClick, not assumed.
