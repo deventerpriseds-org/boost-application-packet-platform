@@ -6587,3 +6587,54 @@ Also verified: `openaiJson.ts` throws on `!r.ok` at line 56 and calls `logUsage`
 **Guardrail earned (second time this session for the same shape):** an absence claim about behaviour
 needs the CALL GRAPH walked, not the defining module read. "Nothing triggers X" is disproved by one
 caller, and there was one.
+
+## 2026-09-03 — AN ARTIFACT REACHES `review` UNCHECKED, and it is the RENDER route (corrected 3x)
+
+**THE FINDING SURVIVED THREE OF MY OWN WRONG ATTRIBUTIONS. Only the culprit changed.**
+
+`POST /api/app/artifact/{id}/document` (appPackets.ts:821) and `POST .../slides` (:901) both call
+`buildTemplatedArtifact`, whose render write at **appPackets.ts:802** is:
+
+    update artifact set doc_url=$1, content = coalesce(nullif(content,''), $2), template_id=$3,
+      status = case when status = 'todo' then 'review' else status end, updated_at=now() where id=$4
+
+It flips the artifact to **`review`** and `evaluateArtifact` is never called anywhere in 815-1000
+(verified by an awk sweep of that range). **So an artifact can be put in front of the owner marked
+ready-to-review with no gate row, no check results and no verdicts.**
+
+**LIVE PROOF — packet `487cb017`, the only packet created since build-judging landed on main
+(commit `4a0b961`, 2026-08-26; the comment's "Measured live 2026-08-22" is the MEASUREMENT date, not
+the commit date):**
+
+| type | status | content | doc_url | template_id | version_history | checks |
+|---|---|---|---|---|---|---|
+| resume | **review** | 4347 | yes | yes | **[]** | **0** |
+| portfolio | **review** | 2954 | yes | yes | **[]** | **0** |
+| cover / compact_resume / video | todo | 0 | no | no | [] | 0 |
+
+`packet.pkg_json` NULL.
+
+**MY WRONG ATTRIBUTION, and the single column that refuted it.** I said this was `artifactGenerate`
+(appPackets.ts:272). The AC subagent refuted it and I confirmed the refutation independently:
+`artifactGenerate`'s write at :302 appends to `version_history` UNCONDITIONALLY
+(`coalesce(version_history,'[]') || jsonb_build_object('len',$2)`), so `version_history = []` is
+proof it never ran. The row shape that IS present — doc_url + template_id + content via
+`coalesce(nullif(content,''), preview)` + untouched version_history — matches :802 exactly.
+
+**CORPUS (live):** 200 artifacts, **8 ever checked**. 40 packets, **2 ever checked**.
+`requirement_coverage` = 813 verdicts across **2** opportunities, against 14,632 requirements across
+976. Judging has effectively run on two packets, ever.
+
+**Consequence for "build already judges":** true in code (runPacketBuild -> evaluateArtifact,
+appPackets.ts:1189) and it has **never demonstrably executed in production** — the one packet built
+since it landed has zero check rows. It needs a proof-of-life test, not just a regression guard.
+
+**Also refuted by the AC pass, correctly:** only 4 of the 6 pkg_json writers are real gaps —
+`ensurePackage` and `artifactRemediate` already call `evaluateArtifact`. Real gaps:
+`artifactContent`, `artifactAiEdit`, `artifactOwnerEdit`, `correctionRevert`. And my "undo is free"
+claim holds ONLY for owner-edit reverts, not for build-time-correction reverts, which predate the
+first pkg_json persist.
+
+**Guardrail: a DB row's SHAPE identifies its writer better than my reading of the code does.** One
+unconditional-append column settled an attribution I had argued from behaviour. When attributing a
+row to a code path, find the column that path always touches and check it.

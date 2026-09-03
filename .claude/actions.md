@@ -8416,3 +8416,26 @@ re-briefed twice with the corrections above.
 :56 and logs usage at :60, so a transport failure writes zero metering rows.
 
 **No implementation started.**
+
+### ACT-69b — Both AC passes COMPLETE; top finding is an unchecked `review` artifact (2026-09-03)
+
+`docs/qc-evidence/AC-judge-trigger-points.md` (627 lines) and `AC-judge-observability.md` both done.
+
+**RE-RANKED by the AC pass, and I agree:**
+1. `POST /artifact/{id}/document` and `/slides` -> `buildTemplatedArtifact` -> the :802 update flips
+   status to `review` and NEVER calls `evaluateArtifact`. An artifact reaches the owner marked ready
+   with zero checks. Live: packet `487cb017` resume+portfolio at `review`, 0 check rows.
+2. Settings-flip staleness (`owner_search_prefs.updated_at` 09-02 15:45; only `resume` re-checked).
+   AC ruling: ship BOTH a config stamp on `artifact_gate` AND a bounded queued backfill extending
+   the existing `appBuildJobs.ts` job/queue pattern. Burst quantified: 4 built packets, ~150 calls
+   worst case.
+3. Four (not six) real pkg_json writer gaps: `artifactContent`, `artifactAiEdit`,
+   `artifactOwnerEdit`, `correctionRevert`. AC ruling: one shared helper called from four sites, NOT
+   a rewritten SQL funnel.
+4. "Build already judges" downgraded from settled fact to NEEDS PROOF-OF-LIFE.
+
+**Three of my attributions were refuted this session** (see accuracy-log). The FINDING held each
+time; only the culprit moved. Recorded because the pattern is mine, not the code's.
+
+**Owner decisions still open:** none blocking — the AC pass ruled on the config fork (both, staged).
+**No implementation started.**
