@@ -8369,3 +8369,14 @@ the poll still clears on attempt 1, which is consistent with the fix but not evi
 NEXT: (1) `POST /api/app/master-context/copy` via api-test.yml; (2) confirm AC-5 byte-identical
 `masterBaseline` output on the owner's real data; (3) flip `MASTERCONTEXT_SOURCE=postgres`;
 (4) the Settings text editor. Storage is deleted at NO step.
+
+### ACT:mastercontext-to-postgres — STEP 1 DONE, the copy has run (2026-09-03)
+`POST /api/app/master-context/copy` via api-test.yml run 33734146372 (success). Verified in the
+LIVE database, not from the workflow's exit code: **14 blocks, 8,003 chars**, owner
+`von.ellis@enterpriseds.io`, all 14 `MC_KIND` keys present, `itemsToOmit` absent (the CHECK makes it
+unstorable). Storage untouched.
+
+**Nothing reads Postgres yet** — `MASTERCONTEXT_SOURCE` still defaults to `storage`.
+REMAINING: (2) confirm AC-5, `masterBaseline` byte-identical from both stores on this real data;
+(3) flip the switch; (4) the Settings text editor. Step 3 waits on
+`VERIFY-mastercontext-and-deploy-gate-1.md` (independent verifier, in flight).
