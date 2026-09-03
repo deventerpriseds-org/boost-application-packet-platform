@@ -193,3 +193,75 @@ in the document, and it remains a candidate for `posting_wording_kept` to list a
   do is silent, not falsely reassuring ("0 rewords needed" reads as a measurement only if something
   was actually scanned; §9's detector must be provably invoked, not merely provably absent of
   output).
+
+## 5. AC-4 — coverage from a LINK is distinguishable from coverage from a PHRASE MATCH
+
+Two mechanisms can make `keywordPresent()` (`atsKeywords.ts:117-149`) or a future consumer say a
+keyword is "covered": the keyword literally appears as a substring of shipped text (today's only
+path), or a `correction` row with `source='reworded'` links `ResumeSummary` to the requirement that
+keyword came from, having deliberately AVOIDED the literal words. These are different strengths of
+claim — one is "the document says it," the other is "the document says it differently, and we can
+show why we believe that counts" — and collapsing them loses exactly the information the owner
+asked for: *"link what the paraphrase/synonym covers... both need to connect to the requirement in
+the UI regardless."*
+
+- **AC-4a (storage distinguishes them).** `Given` a keyword counted via a reword link, `when` it is
+  stored or reported, `then` its provenance is `'reword-link'`, distinct from `'phrase'` for a
+  literal substring hit — extending `AtsKeywordRow` (`atsKeywords.ts`) with a `via` field rather than
+  overloading `covered: boolean`, so a consumer cannot accidentally treat the two as
+  interchangeable by construction (there is no boolean to collapse them into).
+- **AC-4b (UI distinguishes them, reusing the existing mark primitive).** `Given` the resume screen
+  renders `ResumeSummary` with `Marked`/`markRuns` (`AssetBlocks.jsx:670-686`, `highlight.js:28-31`),
+  `when` a reword-linked span is displayed, `then` it uses a THIRD mark value (e.g. `mark: 'reword'`)
+  distinct from the existing `'keyword'` and `'postingEcho'` — the primitive is already generic over
+  `mark` as a free-form string key into `HIGHLIGHT_CLASS` (confirmed: `HIGHLIGHT_CLASS` has exactly
+  two entries today, `highlight.js:28-31`), so this is additive, not a rewrite of the highlighting
+  system. **This is a real, tested boundary, not a free extension** — `app/test/highlight.test.mjs`
+  has guards that currently assume exactly two treatments (`'within a theme the two highlights are
+  different colours AND different treatments'`, line 163) and that every swatch lives only in
+  `theme.css` (`'no module contains a highlight swatch'`, line 193); both must be updated to admit a
+  third treatment rather than bypassed. Clicking the reword mark opens the SAME margin-linkage
+  pattern the keyword chips already use (`activeWording`/`openKeyword` state, `AssetBlocks.jsx:696-
+  712`), pointed at the requirement text instead of a posting excerpt.
+- **AC-4c (a vetoed/reverted reword removes both the text change and the coverage credit
+  together).** `Given` an owner reverts a reword via `correctionRevert`, `when` the revert succeeds,
+  `then` any keyword coverage credited via that link is recomputed on the next `evaluateArtifact`
+  run against the reverted (original) text — no special-case code, because `keyword_coverage` is
+  already recomputed from `pkg_json` fresh on every run (`appChecks.ts:236-244`) and a reverted
+  field's `ATS_SHIPPED_FIELDS`/reword-link scan will simply no longer find the substitute text.
+
+## 6. AC-5 — `ATS_SHIPPED_FIELDS` and `ResumeSummary`
+
+The inherited feasibility table (§0, finding on `ATS_SHIPPED_FIELDS`) states the exclusion of
+`ResumeSummary` (`atsKeywords.ts:212-215`) is a real, deliberate guard against self-scoring — the
+comment there says counting a keyword because it appears in a summary the pipeline "copied from the
+posting" would let the document score itself on the employer's own words — and that re-including it
+is safe only if gated on the reword having run, or counted only via the link, never via the raw
+substring test against un-reworded text.
+
+- **AC-5a (the plain substring path over `ResumeSummary` is NOT reopened).** `Given`
+  `ATS_SHIPPED_FIELDS` (`atsKeywords.ts:212-215`), `when` the keyword-coverage pass runs,
+  `then` `ResumeSummary` is NEVER added to `ATS_SHIPPED_FIELDS` itself — `keywordPresent()`'s plain
+  whole-phrase substring test continues to exclude it exactly as today. Any un-reworded but
+  literally-present keyword in `ResumeSummary` (an accident, or a phrase the candidate wrote
+  independently) is NOT credited by this path. This is the guard the inherited table calls "a real
+  guard against exactly the self-scoring failure the reword pass would otherwise reopen" — reopening
+  it silently would undo work this repo already paid for once.
+- **AC-5b (a SEPARATE, additively-reported count for reword-linked coverage).** `Given` one or more
+  `correction` rows with `source='reworded'` on `ResumeSummary` for the current artifact, `when`
+  keyword coverage is computed, `then` a second, clearly-labelled count is added — following
+  `atsCoverageSource`'s own discipline of naming its source in the sentence that travels with the
+  number (`atsKeywords.ts:atsCoverageSource`) — e.g. `"N/M ATS keywords covered by a reworded
+  ResumeSummary phrase, linked to the requirement it addresses"`. It is NEVER silently summed into
+  the existing `covered`/`total` from `ATS_SHIPPED_FIELDS` without saying so: the owner must be able
+  to tell "this rose because of the six list fields" from "this rose because a reword linked
+  ResumeSummary to something," for the same reason `checks.ts`'s `must_have_coverage` names every
+  model-warranted row rather than folding it silently into the numerator (`checks.ts`'s own
+  `includedNote`/`excluded` pattern, e.g. `"2 on a model's proposal alone — counted until you veto"`
+  — this AC reuses that PATTERN, not that code).
+- **AC-5c (an un-reworded, un-linked `ResumeSummary` changes nothing).** `Given` a packet built
+  before this feature exists, or one for which the reword pass found nothing to do (AC-3), `when`
+  keyword coverage is computed, `then` the number is byte-identical to today's — no `correction` row
+  with `source='reworded'` exists, so AC-5b's separate count is absent (not zero — `atsCoverage`'s
+  own `NOT_PARSED`/null discipline applies: nothing to report is `reason: null` component simply not
+  shown, never a `0` that reads as "measured and found none").
