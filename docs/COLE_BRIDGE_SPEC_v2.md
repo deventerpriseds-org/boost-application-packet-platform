@@ -140,6 +140,51 @@ schema change — arriving back where B starts, having lost the snapshot.
 
 ---
 
+## 6b. CORRECTION — ElevenLabs is a VOICE-ONLY path, and §6 leaned on it too hard
+
+Owner, 2026-09-03: *"check huddle I don't believe it's using openlabs API actively at the moment."*
+Correct for text chat, and it narrows an argument this spec made.
+
+**`src/features/huddle/lib/huddle.functions.ts` — the text-chat turn — contains ZERO
+`synthesizeSpeech` calls.** Typing to an agent never reaches ElevenLabs. EL is called from exactly
+four places, all voice:
+
+| Caller | Path |
+|---|---|
+| `useVoiceCallRealtimeSpeak.ts:222`, `:607` | 1:1 voice call (the DEFAULT engine) |
+| `useGroupVoice.ts:224` | group voice |
+| `useCeremonyVoice.ts:361` | ceremonies / stand-ups |
+| `AgentVoiceField.tsx:29` | the settings voice preview |
+
+**When a call IS running, EL is the voice — despite the engine's name.** `voice-engine-store.ts`
+defaults to `realtime-speak`, which reads as "OpenAI Realtime speaks". It does not: the session is
+minted `output_modalities:["text"]` (`useVoiceCallRealtimeSpeak.ts:18`) and `:380` explicitly
+disables the remote OpenAI audio track — *"Text-out session -> no OpenAI audio track ... we voice
+via EL"*. This matches the org-level pattern in `/root/.claude/CLAUDE.md`: Realtime as brain/ear,
+ElevenLabs as voice.
+
+**A documented silent-failure mode, which is the other way the observation can be true even on a
+call.** `:179-181` and `:213-214` record a reported default-engine bug where the reply text rendered
+and **no audio played with no error** — a mobile autoplay rejection, and separately an `ok:false`
+synth result (e.g. *"ELEVENLABS_API_KEY is not configured"*), both previously swallowed. Both now
+surface a toast, but the failure mode is real and looks exactly like "EL isn't being used".
+
+**What this changes here.** §6 argued for option B partly because Cole's own EL voice speaks the
+relayed reply. That holds **only in a voice call**; in text chat there is no TTS at all, so the
+voice argument is narrower than §6 implied. **The recommendation does not change** — it rests on
+the snapshot being additive rather than subtractive, and on `groom_backlog` as precedent, neither
+of which involves voice. §6's voice line should be read as applying to voice sessions only.
+
+**Incidental correction to a stale comment:** `elevenlabs.server.ts:51-52` says agent `voiceId`s
+"are human placeholders (\"terry\", \"iris\") until real ElevenLabs voices are assigned". All 15
+agents now carry real ~20-char EL ids, Cole's `o2zd9K5QOO7ppTb04Lx0` among them, so `resolveVoiceId`'s
+fallback never fires for a roster agent today.
+
+**Not verified:** whether `ELEVENLABS_API_KEY` is actually populated on the deployed SWA. The
+sandbox cannot reach it, and Huddle exposes no config-status route (`src/routes/api/public/` has
+none). Settle it by reading the SWA app setting, or by starting one voice call and watching for the
+"Couldn't play voice" toast.
+
 ## 7. Build order
 
 **Phase 0 — SECURITY (blocks everything).**
