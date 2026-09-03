@@ -313,13 +313,55 @@ test('H:seeding-from-a-field-focuses-that-field', () => {
       `a field seeder drops the merge field ARGUMENT, so the field scope cannot be offered: onSeedAssistant(${c.slice(0, 120)}`)
   }
   // And the receiver must WRITE the focus, not just accept the argument.
-  assert.match(BUILDER, /setFieldFocus\(\{ artifactId, section: section\.trim\(\) \}\)/,
-    'seedAssistant takes a section and never writes it, so the field scope stays unreachable')
+  //
+  // ANCHORED ON THE FUNCTION BODY, not on a literal call shape. The first version matched
+  // `setFieldFocus({ artifactId, section: section.trim() })` exactly and broke the moment the SAME
+  // behaviour was refactored to hoist `sec`. A guard that fails on a rename is noise; `H2` says
+  // assert the invariant, not the incident.
+  const seedBody = BUILDER.slice(BUILDER.indexOf('const seedAssistant'), BUILDER.indexOf('const goToField'))
+  assert.ok(seedBody.length > 50, 'could not isolate seedAssistant; the guard is not reading what it thinks')
+  assert.match(seedBody, /setFieldFocus\(/,
+    'seedAssistant takes a section and never writes a focus, so the field scope stays unreachable')
 })
 
 test('H:seeding-without-a-field-must-not-invent-a-focus', () => {
   // A whole-asset ask has no field. Writing a focus anyway would offer to change "one field" the
   // reader never chose -- the same class of invention as grading an unlocatable posting line.
-  assert.match(BUILDER, /if \(typeof section === 'string' && section\.trim\(\)\) setFieldFocus/,
-    'the focus is written unconditionally, so a fieldless seed fabricates a field scope')
+  // Anchored on the body and on the INVARIANT: the write is CONDITIONAL on a section being present,
+  // and the section is validated as a real string. Any spelling passes; an unconditional write does
+  // not.
+  const body = BUILDER.slice(BUILDER.indexOf('const seedAssistant'), BUILDER.indexOf('const goToField'))
+  const focusAt = body.indexOf('setFieldFocus(')
+  assert.ok(focusAt > 0, 'seedAssistant never writes a focus at all')
+  const focusLine = body.slice(body.lastIndexOf('\n', focusAt) + 1, body.indexOf('\n', focusAt))
+  assert.match(focusLine, /\bif\s*\(/,
+    `the focus is written unconditionally, so a fieldless seed fabricates a field scope: ${focusLine.trim()}`)
+  assert.match(body, /section === 'string'/,
+    'nothing checks the section is a real string before it becomes a field scope')
+})
+
+
+// ---------------------------------------------------------------------------------------------
+// The binding must OUTLIVE the one-shot seed. Found live, not by reading: ui-verify 33757880817
+// forwarded a field's sentence and the panel opened carrying the text, headed "No asset open", with
+// Send DISABLED -- because the artifact was read off `assistantSeed`, which `applySeed` clears the
+// instant the panel consumes it. Any step rendering two artifacts (resume + compact_resume) hit it,
+// and that is the step readers forward from most.
+
+test('H:assistant-binding-outlives-the-consumed-seed', () => {
+  // The artifact must NOT be resolved from the seed slot -- that slot is emptied by design.
+  assert.doesNotMatch(BUILDER, /assistantArtifact\s*=\s*assistantSeed/,
+    'the artifact is read off the one-shot seed again, so consuming the text unbinds the panel')
+  assert.match(BUILDER, /const assistantArtifact = assistantBinding/,
+    'the artifact must come from the binding, which survives the seed being consumed')
+  // And the seeder must actually write it, or the binding is never populated.
+  assert.match(BUILDER, /setAssistantBinding\(\{ artifactId, section: sec \}\)/,
+    'seedAssistant does not record the binding, so the panel has nothing to fall back on')
+})
+
+test('H:assistant-binding-does-not-outlive-the-step', () => {
+  // The opposite failure, and the more dangerous one: a stale binding points the panel at a document
+  // the reader is no longer looking at, which is worse than refusing to send.
+  assert.match(BUILDER, /useEffect\(\(\) => \{ setAssistantBinding\(null\) \}, \[activeStep\]\)/,
+    'the binding is never cleared, so it follows the reader onto a step it does not belong to')
 })
