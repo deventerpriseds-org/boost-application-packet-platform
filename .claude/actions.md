@@ -8397,6 +8397,94 @@ the fields are genuinely distinct.
 `.claude/memory.md`, `.claude/actions.md`; no code path changed, so nothing deploys from it).
 Subscribed to its activity.
 
+### ACT-69 — ALL THREE JUDGE THREADS TAKEN UP; trigger design delegated to me (2026-09-03)
+
+**Owner: *"so all 3, the judge can run when you think it should run based on my goal and workflow."***
+
+Three lanes, all TIER 1 (each admits model output into a stored claim or moves a coverage count):
+
+| # | lane | state entering this |
+|---|---|---|
+| 1 | 4.6-8 swap-attribution judge | 45 ACs already written by an independent subagent (`AC-swap-attribution-judge.md`); no implementation |
+| 2 | judge observability | ACs NOT written — subagent spawned this turn |
+| 3 | when a judge runs | ACs NOT written — subagent spawned this turn; trigger design is mine per the owner |
+
+**CORRECTION to what I told the owner last turn.** I said stuffingJudge and supportJudge have "no
+output table, so their yield cannot be measured at all." Made from a single grep; wrong twice:
+
+- `supportJudge` DOES persist its wins — `requirement_evidence.method = 'vetted'` plus `vettedNote`
+  in `extra` (`appRequirements.ts:432-441`). What vanishes is the NEGATIVE half: span
+  disagreements and refusals go to `escalation_refusals`, an in-memory counter
+  (`appRequirements.ts:328`) returned in the response body and never stored.
+- `stuffingJudge` DOES persist its hits — merged into the single `posting_wording_kept`
+  `check_result` (`checks.ts:658-668`), with the model-raised count written into the message
+  PROSE. No structured column, so a corpus-level question needs string parsing.
+
+**The real gap, stated correctly: we can see these two judges succeed and cannot see them fail.**
+That is the worse half to lose — a judge that stopped answering is indistinguishable from a judge
+that found nothing.
+
+**Trigger design proposed (goes to the AC subagent as a proposal, not a decision).** The enabling
+property is that a coverage verdict is content-addressed (`verdict_key` = requirement + field +
+field text + model + prompt version) and written `on conflict do nothing`, so **re-judging unchanged
+text costs zero calls**; and the judge is OFF by default, so a wider trigger spends nothing until
+`chk_coverage_judge` is on. Proposed points: (a) artifact written / `pkg_json` changed, (b)
+requirements re-extracted, (c) QC screen opened, top-up only where a verdict is absent. Today the
+ONLY trigger is a manual `POST /api/app/artifact/{id}/checks` per artifact — which is precisely why
+Trinnex read 71% for a day.
+
+### ACT-69a — Trinnex cause corrected: a settings change, not a missing trigger (2026-09-03)
+
+Two corrections to what I told the owner, both from live DB + call-graph reading:
+
+1. **Build already judges.** `runPacketBuild` -> `evaluateArtifact` at appPackets.ts:1189, since
+   2026-08-22. My "the only trigger is a manual POST" was made from reading appChecks.ts without
+   tracing its callers. Trigger point (a) of the proposal is ALREADY BUILT.
+2. **My replacement proposal (judge on text write) would not have fixed Trinnex.** The text never
+   changed. `owner_search_prefs.updated_at = 2026-09-02 15:45`; resume re-checked 15:49; the other
+   three last checked 2026-08-29, while the judge was off.
+
+**Real defect: a settings change neither invalidates nor re-runs prior results, and no run records
+the config it used.** Fork put to the AC pass: auto-re-run on toggle (fixes it, may burst) vs stamp
+a config digest and surface "evaluated under older settings" (cheap, owner acts). UNDECIDED.
+
+Owner rejected proposed trigger (c) (judge on QC-screen open) — "I don't like the page loads spinner
+business" — and correctly noted an unjudged state only exists because nothing judges on write. (c)
+is withdrawn.
+
+**AC artifacts:** `docs/qc-evidence/AC-judge-observability.md` (COMPLETE — 9-row feasibility table,
+groups A-F, 5 H-case slugs, recommends one append-only table and rules out
+`evidence_confirmation.missing` by name). `docs/qc-evidence/AC-judge-trigger-points.md` IN PROGRESS,
+re-briefed twice with the corrections above.
+
+**Verified independently, not taken on the subagent's word:** all three judges lose their failures
+(only appChecks.ts:368 of three `evaluateArtifact` callers reads `.judge`); `openaiJson.ts` throws at
+:56 and logs usage at :60, so a transport failure writes zero metering rows.
+
+**No implementation started.**
+
+### ACT-69b — Both AC passes COMPLETE; top finding is an unchecked `review` artifact (2026-09-03)
+
+`docs/qc-evidence/AC-judge-trigger-points.md` (627 lines) and `AC-judge-observability.md` both done.
+
+**RE-RANKED by the AC pass, and I agree:**
+1. `POST /artifact/{id}/document` and `/slides` -> `buildTemplatedArtifact` -> the :802 update flips
+   status to `review` and NEVER calls `evaluateArtifact`. An artifact reaches the owner marked ready
+   with zero checks. Live: packet `487cb017` resume+portfolio at `review`, 0 check rows.
+2. Settings-flip staleness (`owner_search_prefs.updated_at` 09-02 15:45; only `resume` re-checked).
+   AC ruling: ship BOTH a config stamp on `artifact_gate` AND a bounded queued backfill extending
+   the existing `appBuildJobs.ts` job/queue pattern. Burst quantified: 4 built packets, ~150 calls
+   worst case.
+3. Four (not six) real pkg_json writer gaps: `artifactContent`, `artifactAiEdit`,
+   `artifactOwnerEdit`, `correctionRevert`. AC ruling: one shared helper called from four sites, NOT
+   a rewritten SQL funnel.
+4. "Build already judges" downgraded from settled fact to NEEDS PROOF-OF-LIFE.
+
+**Three of my attributions were refuted this session** (see accuracy-log). The FINDING held each
+time; only the culprit moved. Recorded because the pattern is mine, not the code's.
+
+**Owner decisions still open:** none blocking — the AC pass ruled on the config fork (both, staged).
+**No implementation started.**
 ### ACT:deploy-gate-was-vacuous — FIXED and landed (2026-09-03)
 `api-deploy.yml` polled an app setting it wrote before deploying the code, so pg-migrate ran the
 previous bundle. Twice (2026-08-28 "31/31", 2026-09-03 "32/32"). Sha now stamped into the bundle
@@ -8489,6 +8577,51 @@ app 454/0; 4 unit guards harness-FIRED, browser assertion hand-proved.
 
 **Evidence:** api 1071/0 · app 462/0 · margin 61/61 · browser 52/52 · deploy run 33734904497.
 
+### ACT-69c — Lane 1 SHIPPED: every artifact-text writer now rechecks (2026-09-03)
+
+Owner: *"I said go continuous until deployed."* Commits `c664c85` (seven writers + the shared helper)
+and `88bfe6f` (the eighth, `artifactGenerate`).
+
+**Guards:** `H:render-path-runs-checks`, `H:text-write-rechecks`, `H:recheck-is-non-fatal`.
+`artifactGenerate` was added to the EXISTING writer list rather than given its own test — a writer
+needing a second guard is a writer the first guard was too narrow to see.
+
+**Mutation-proved with the real `/workspace/eds-claude-skills/scripts/mutate.sh`** (Lane 1 could only
+use a scratch harness — the source was uncommitted and mutate.sh correctly refuses a dirty file):
+- delete the eighth writer's recheck -> **FIRED**, restore matches HEAD
+- delete the render-root recheck -> **FIRED**, restore matches HEAD (after an anchor fix; see below)
+Lane 1's own seven mutations all FIRED on its scratch harness; the two re-run on the real tool agree.
+
+**OPEN / NOT DONE:**
+- `checksStale`/`checksError` have **no frontend consumer** — Lane 1 owned `api/` only.
+- `/document` and `/slides` now return `ok:false` (with a real `docUrl`) when the doc was produced but
+  its gate could not be computed. Deliberate, consistent with the P7 rule, but it IS a response-shape
+  change on two routes and nothing in `app/` reads it yet.
+- Lane 2 (judge observability) still running; the shared hardening file is uncommitted until it lands.
+- Not started: config stamp + bounded backfill, re-extraction trigger, swap-attribution judge.
+- **Nothing deployed yet.** `main` has not moved.
+
+### ACT-69d — Lane 2 SHIPPED: judge failures are recorded (2026-09-03)
+
+Commit `711893d`. New `judgeOutcome.ts` sink, `judge_outcome` table + 2 indexes,
+`usage_metering.outcome`, and two routes. Additive: 1082/1082 across the whole suite is the evidence,
+since `matcher`, `stuffingRead` and `evidenceConfirmDb` all read the fields it extends.
+
+**Mutation-proved on the REAL `/workspace/eds-claude-skills/scripts/mutate.sh`** (the lane could only
+use a sha256-oracle variant — mutate.sh correctly refuses a dirty file and the lane could not commit):
+- reinstate "a transport failure meters nothing" -> **FIRED** (`H:metering-sees-a-failed-call`)
+- delete the sink call entirely -> **FIRED** (`H:judge-outcome-not-gating`), after one UNDETERMINED
+  from naming the wrong guard
+- eighth-writer + render-root, from Lane 1 -> both **FIRED**
+Every restore verified against HEAD by the script itself.
+
+**OPEN:**
+- **No Settings UI for the retention window.** Seeded 90 days per-owner on `owner_search_prefs`,
+  reachable by API, not from a screen. A real miss against the no-hardcoded-config rule.
+- `checksStale`/`checksError` still have no frontend consumer (Lane 1).
+- `judge_outcome` does not exist in production until `diag/pg-migrate` runs; the write-time
+  `ENSURE_SQL` covers that window and a parity guard holds the two declarations in step.
+- Not started: config stamp + bounded backfill, re-extraction trigger, swap-attribution judge.
 ### ACT:mastercontext-to-postgres — DONE and VERIFIED LIVE (2026-09-03)
 Cut over at `0da39b2`. `entities` 1 -> 14 proves the source switched; all five fields byte-identical
 proves the data did not. Evidence: `docs/qc-evidence/RECORD-mastercontext-cutover.md`, api-test runs

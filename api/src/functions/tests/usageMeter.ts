@@ -79,12 +79,35 @@ export function tokensOf(usage: any): { prompt: number; completion: number } {
   return { prompt, completion }
 }
 
+/**
+ * D:usage-metering-cannot-see-a-failure — the third defect this file gets wrong when left alone.
+ *
+ * `logUsage` is called from inside `openAiJson`, AFTER its `if (!r.ok) throw`. So a call that never
+ * reached the model, or that came back 429/500, recorded NOTHING — not a failed row, no row at all.
+ * The ledger that exists to answer "what did this feature spend and do" could only ever describe
+ * the calls that worked, which is the same success-is-visible-failure-is-not shape all three judges
+ * had, one layer lower.
+ *
+ * `outcome` is the fix and it is deliberately COARSE: this function sits below the layer that can
+ * tell a refusal from an answer (`openAiJson` has already returned by the time its caller parses
+ * the model's JSON), so it records only what it can actually observe — the call happened, or the
+ * transport failed. Parse-level outcomes belong to `judge_outcome`, which is written by the callers
+ * that know them.
+ *
+ * A FAILED CALL HAS NO TOKENS, so the zero-token early return below is bypassed for it. Keeping
+ * that return for successes is still right: a success with no usage block is a call the API did not
+ * bill and there is nothing to record.
+ */
+export type UsageOutcome = 'ok' | 'transport_failed'
+
 // Best-effort: log one metered call to usage_metering. Never throws — metering
 // must not break the feature it measures. Opens its own short-lived client.
-export async function logUsage(feature: string, model: string, usage: any): Promise<void> {
+export async function logUsage(feature: string, model: string, usage: any, outcome: UsageOutcome = 'ok'): Promise<void> {
   try {
     const { prompt: promptTokens, completion: completionTokens } = tokensOf(usage)
-    if (!promptTokens && !completionTokens) return
+    // A failure is worth a row precisely BECAUSE it has no tokens. Returning here on the failure
+    // path is what made a transport outage invisible in the first place.
+    if (!promptTokens && !completionTokens && outcome === 'ok') return
     const cost = costOf(model, promptTokens, completionTokens)
     let client
     try {
@@ -93,9 +116,13 @@ export async function logUsage(feature: string, model: string, usage: any): Prom
         id bigserial primary key, model text, feature text, prompt_tokens int,
         completion_tokens int, cost_usd numeric(12,8), ts timestamptz not null default now())`)
       await client.query(`alter table usage_metering add column if not exists feature text`)
+      // 'ok' is the correct default for every row already in this table: each was written by the
+      // success path, which is what those rows have always meant. Declared identically in
+      // SCHEMA_SQL — H:judge-outcome-ddl-parity holds the two in step.
+      await client.query(`alter table usage_metering add column if not exists outcome text not null default 'ok'`)
       await client.query(
-        `insert into usage_metering (model, feature, prompt_tokens, completion_tokens, cost_usd) values ($1,$2,$3,$4,$5)`,
-        [model, feature, promptTokens, completionTokens, cost]
+        `insert into usage_metering (model, feature, prompt_tokens, completion_tokens, cost_usd, outcome) values ($1,$2,$3,$4,$5,$6)`,
+        [model, feature, promptTokens, completionTokens, cost, outcome]
       )
     } finally { try { await client?.end() } catch {} }
   } catch { /* swallow — metering is non-critical */ }

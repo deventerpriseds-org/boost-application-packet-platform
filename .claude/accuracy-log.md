@@ -775,6 +775,31 @@ screen.
 two `verify.sh` runs (~$2.78 each) briefed on the wrong premise. The independent AC pass found it in
 one read — which is the argument for the pass, not against it.
 
+<<<<<<< HEAD
+## 2026-09-03 — three attributions refuted in one session, same root cause
+
+| # | My claim | Ground truth | The ONE source that would have settled it up front | Pattern |
+|---|---|---|---|---|
+| 1 | "The only trigger for judging is a manual POST /checks" | `runPacketBuild` calls `evaluateArtifact` (appPackets.ts:1189) since 2026-08-26 | `grep -rn evaluateArtifact api/src` — the CALL GRAPH, not the defining module | Read a module, never traced its callers |
+| 2 | "Judge on artifact-text write fixes Trinnex" | Trinnex's text never changed; `owner_search_prefs.updated_at` 09-02 15:45 flipped the judge on and only `resume` was re-run | `check_result` runs grouped by type and minute — 10 rows | Proposed a fix without testing it against the failing case |
+| 3 | "`artifactGenerate` produced the unchecked `review` artifacts" | It never ran: it appends to `version_history` unconditionally and the rows show `[]`. The real path is `buildTemplatedArtifact`'s :802 render write | `select version_history from artifact where packet_id=...` — one column | Argued attribution from code behaviour instead of the row's own fingerprint |
+
+**Root cause common to all three: I asserted what DOES or DOESN'T happen without consulting the
+artifact that records what happened** — the call graph for #1, the run timestamps for #2, the row
+shape for #3. Each was one query or one grep away.
+
+**Guards earned:**
+- An absence claim about BEHAVIOUR ("nothing triggers X") requires walking the call graph. One caller
+  disproves it, and in #1 there was one.
+- Before proposing a fix, run it against the failing case and check it would have fired. #2 would not
+  have.
+- To attribute a DB row to a code path, find the column that path ALWAYS writes and read it. Do not
+  argue from plausibility.
+
+**What went right, and is worth keeping:** all three were caught inside the session — two by the
+independent AC subagent, one by me re-checking the subagent's refutation rather than accepting it.
+The findings themselves survived every correction; only the attributions moved.
+=======
 ### A green deploy over a missing table, and the guard that was blind by construction
 
 | | |
@@ -834,3 +859,4 @@ and `git show origin/main:...masterContext.ts` still reads `entity[r.block_key]`
 
 For the trend table: `peer-caught`. Not self-caught, not instrument-caught. That is the worst category
 in this log and the first entry in it.
+>>>>>>> origin/main

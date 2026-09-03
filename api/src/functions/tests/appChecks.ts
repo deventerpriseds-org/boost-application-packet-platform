@@ -20,6 +20,9 @@ import { EvidenceInput, EvidenceRow } from './evidence'
 import { resolveTemplateSlots } from './roleFocus'
 import { runCoverageJudge, judgeVerdictsFor, runStuffingRead } from './appCoverage'
 import { openAiJson } from './openaiJson'
+// INSTRUMENTATION ONLY. `recordAndPrune` has no throwing path and nothing in this file reads back
+// what it writes; see `judgeOutcome.ts` and H:judge-outcome-not-gating.
+import { recordAndPrune } from './judgeOutcome'
 
 const HEADERS = { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': '*', 'Access-Control-Allow-Methods': 'GET,POST,OPTIONS' }
 
@@ -315,6 +318,29 @@ export async function evaluateArtifact(client: any, artifactId: string, owner: s
     stuffing_refused: stuffing?.refused ?? null,
     failures: [...(coverage?.failures || []).map(f => `${f.field}: ${f.error}`), ...(stuffing?.failures || [])],
   } : null
+  // ...AND THE SAME FACTS, STORED. The `judge` object above is returned to ONE caller: only
+  // `artifactChecksRun` reads it, and it stores nothing from it. `appPackets.ensurePackage` discards
+  // the return value entirely and `appRemediation` reads `.results`/`.run_id` and nothing else — so
+  // on every build and every remediation pass these numbers were computed and thrown away. A judge
+  // that STOPPED ANSWERING was indistinguishable afterwards from a judge that FOUND NOTHING.
+  //
+  // AFTER THE COMMIT, DELIBERATELY, and this placement is the safety argument rather than a detail.
+  // The transaction above writes `check_result`, `artifact_gate` and `artifact_score`; anything that
+  // throws inside it rolls all three back. Instrumentation must never be able to do that, so it runs
+  // out here where the gate is already durable — and `recordAndPrune` additionally cannot throw at
+  // all, so the worst a sink outage costs is the observability it was added to provide.
+  //
+  // NOTHING BELOW READS THIS. The gate, the score and the coverage count were all computed and
+  // stored above; this line can only append rows to a table none of them consult.
+  if (coverage || stuffing) {
+    await recordAndPrune(client, {
+      oppId: art.opp_id, artifactId, runId, judge: 'coverage', outcomes: coverage?.outcomes || {},
+    }, owner || art.owner_email)
+    await recordAndPrune(client, {
+      oppId: art.opp_id, artifactId, runId, judge: 'stuffing', outcomes: stuffing?.outcomes || {},
+    }, owner || art.owner_email)
+  }
+
   return { artifact_id: artifactId, run_id: runId, gate, attention, results, score, judge }
 }
 
