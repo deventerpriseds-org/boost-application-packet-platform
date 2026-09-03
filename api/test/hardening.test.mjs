@@ -6219,6 +6219,16 @@ test('H:judge-outcome-not-gating: the sink cannot throw, cannot roll back a gate
   assert.equal(await pruneJudgeOutcomes(dead, 'o', 30), 0)
   assert.equal(await recordAndPrune(dead, { oppId: 'o', judge: 'coverage', outcomes: { transport_failed: 1 } }, 'x'), 0)
 
+  // 1b. AC D1 - THE REGRESSION GUARD. With the judges off (the owner's default) the sink must issue
+  //     ZERO statements, so a check run's database traffic is byte-identical to what it was before
+  //     this change existed. An empty tally that still ran a `create table if not exists` would be a
+  //     new statement on every check run of every artifact, for nothing.
+  const quiet = sinkClient()
+  assert.equal(await recordJudgeOutcomes(quiet, { oppId: 'o', judge: 'coverage', outcomes: {} }), 0)
+  assert.deepEqual(quiet.sql, [],
+    'an empty tally must issue NO SQL AT ALL - not even the table ensure. The judges-off path is '
+    + 'the owner default and must be untouched by instrumentation')
+
   // 2. It is written AFTER the gate transaction commits. Ordering is the safety argument: anything
   //    that throws inside that transaction rolls back check_result, artifact_gate AND artifact_score.
   const checks = stripComments(src('appChecks.ts'))

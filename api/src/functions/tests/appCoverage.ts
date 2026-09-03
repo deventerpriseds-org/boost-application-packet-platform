@@ -156,7 +156,6 @@ export async function runCoverageJudge(client: any, input: CoverageRunInput): Pr
     } catch (e: any) {
       failures.push({ field, error: `transport: ${String(e?.message || e).slice(0, 200)}` })
       bump('transport_failed')
-      for (const m of missing) bump(`transport_failed_seq_${m.seq}`)
       perField.push({ field, result: { verdicts: hits, refused: [], unjudged: missing.map(r => r.seq) } })
       continue
     }
