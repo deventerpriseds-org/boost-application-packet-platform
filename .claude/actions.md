@@ -8345,3 +8345,8 @@ the same seven fields with the same text as the resume, so every key was already
 coverage.** It answers who paid for the verdict first, not who covers the requirement. The split I
 quoted (resume 15 / portfolio 10 / cover 9) is provenance and only means what it appears to where
 the fields are genuinely distinct.
+
+**Landed:** commit `8a8ddab`, PR
+[#81](https://github.com/deventerpriseds-org/boost-application-packet-platform/pull/81) (docs only —
+`.claude/memory.md`, `.claude/actions.md`; no code path changed, so nothing deploys from it).
+Subscribed to its activity.

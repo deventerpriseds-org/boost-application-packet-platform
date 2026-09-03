@@ -6452,6 +6452,11 @@ is TIER 1 and needs its own AC pass. Left as the owner's call rather than bolted
 measured earlier this session was eMoney, because that is what the committed fixture holds. Trinnex
 is packet `85cee965-f435-4b8e-910f-c806232092ce`.
 
+**Landed as commit `8a8ddab`, PR
+[#81](https://github.com/deventerpriseds-org/boost-application-packet-platform/pull/81)** — docs
+only (`memory.md`, `actions.md`), no code path touched, so nothing deploys from it. Subscribed to
+its activity.
+
 **Before:** only the resume had ever been judged (Sep 2). `cover`, `portfolio`, `compact_resume`,
 `video` had zero verdicts.
 
