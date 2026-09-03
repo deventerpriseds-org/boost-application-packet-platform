@@ -6539,12 +6539,25 @@ EXTRACTING it from the YAML and RUNNING it, not by reading the indented heredoc.
 `33/33 tables present` with `"owner_master_block":0` in the list, and the table exists with 4
 columns, `PRIMARY KEY (owner_email, block_key)` and the 14-value CHECK intact.
 
-**HONEST LIMIT ON THE FIX'S PROOF.** I predicted the poll would now take real time instead of one
-attempt. It still says `after 1 attempt(s)`. That is CONSISTENT with the fix (the app has
-`WEBSITE_RUN_FROM_PACKAGE`, so a restart can mount the new bundle near-instantly) but it is NOT
-proof of it -- a deploy where BUILD_SHA and DEPLOYED_SHA differ would discriminate, and none has run.
-What IS proven: the stamp applied (its assertion would have failed the step), and the running code
-executed the new schema. Do not upgrade "consistent with" to "proven" without that test.
+**THE LIMIT IS NOW CLOSED -- the discriminating deploy ran, and the fix is PROVEN.** The entry here
+previously said the poll still cleared on attempt 1, that this was only "consistent with" the fix,
+and that a deploy where BUILD_SHA and DEPLOYED_SHA differ would settle it. That deploy is
+**run 33733707586** (`5dbd4df`), and it settles it:
+
+    08:31:41.257  waiting for 5dbd4df... to serve (health reports 'f0f9afc11...'), attempt 1
+    08:31:53.682  worker is serving 5dbd4df... after 2 attempt(s)
+
+Health reported **`f0f9afc` -- the PREVIOUS commit** -- while `5dbd4df` deployed. `DEPLOYED_SHA` had
+already been overwritten to `5dbd4df` by the Sync-secrets step at 08:31:05-08:31:14, twenty-seven
+seconds earlier, so an env-derived value could only have returned `5dbd4df` and matched instantly.
+The only source of `f0f9afc` at that moment is the `BUILD_SHA` compiled into the bundle still
+serving. The poll waited 12.4s across 2 attempts and then migrated.
+
+**Why the FIRST post-fix run still showed attempt 1, which is the part I had wrong:** the fix needs
+the OUTGOING bundle to be stamped for the difference to appear. On run 33733374880 the old bundle
+predated `buildStamp.ts`, so `BUILD_SHA` was null there and `servingSha()` fell through to
+`DEPLOYED_SHA` -- the documented fallback behaving exactly as designed, not the defect. 33733707586
+is the first deploy with a stamp on both sides, and the first to wait.
 
 **Two guards earned here, both mutation-proved:**
 - `H:every-declared-table-is-registered` -- H11 walked a HAND-MAINTAINED list and was therefore
