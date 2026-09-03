@@ -519,7 +519,62 @@ Key tables (PostgreSQL):
 - Android native testing: requires BrowserStack App Automate; CCR cannot run AVD (no KVM)
 - iOS testing: requires macOS runner or BrowserStack; categorically unavailable in Linux CCR
 
+## Hardening -- 2026-09-03: I asserted SELECTORS AND STRINGS FROM MEMORY, three times in one session
+Every `ui-verify` failure this session was MY INPUT, never the app. The app was correct all three
+times and the harness was right to refuse:
+
+| run | I passed | reality |
+|---|---|---|
+| 33735198012 | `expect "Keywords for this line"` | `innerText` returns RENDERED text; CSS uppercases it |
+| 33756564557 | `[data-qc="qc-go-to-field"]` on the RESUME route | that hook lives in `QcRail.jsx`, the QC step |
+| 33757673248 | `[data-qc="blocks-ask-assistant"]` | the hook is `blocks-forward-assistant` |
+
+Each cost a full dispatch-and-poll cycle, and each would have been settled by one grep taking
+seconds. The third is the worst: I had already read `BLOCK_HOOKS` earlier in the same session.
+
+**Guardrail: NEVER pass a selector or an expect string you have not just read out of the source.**
+Before dispatching `ui-verify`:
+
+    grep -n "<hook>:" app/src/*.js            # the hook's VALUE, not the name you remember
+    grep -rn "<hook name>" app/src/screens/   # and WHICH screen renders it
+
+And for `expect`: assert a `data-qc` COUNT rather than visible copy wherever possible. Copy is
+styled (`text-transform`), translated and edited; a hook is a contract. The one run that passed
+(33735472071, count 18) asserted a hook. Every run that failed asserted my memory.
+
+
 ## Active work
+**2026-09-03 - `ui-verify` CLICK_SEL IS A SEQUENCE, and it immediately found a real gap.** `main`
+`5b34b87`.
+
+`CLICK_SEL` is now `;`-separated and clicked IN ORDER (same separator `EXPECT` uses, so one selector
+with no `;` is unchanged). Proven live:
+`"[data-qc=\"qc-go-to-field\"] -> ok | [data-qc=\"assistant-open\"] -> ok"`.
+
+**Two bugs fixed on the way, and the second only existed because the first was built:**
+1. `locator.count()` DOES NOT WAIT. The old pre-check returned 0 for an element that had not
+   rendered yet - and step 2's target usually exists only BECAUSE step 1 fired. That 0 read as
+   `not found`, i.e. a harness race reported as an app gap. Each step now waits for its own target.
+2. **SPEC 4.11-4's field scope was effectively UNREACHABLE.** Only `goToField` wrote `fieldFocus`, so
+   a reader clicking "Ask the assistant" ON A FIELD got the asset scope. Measured live before the
+   fix (ui-verify **33756770327**): both clicks `ok`, picker still rendered **0 chips**. Fixed - both
+   seeders pass `row.merge_field`, `seedAssistant` writes the focus, and the section stays OPTIONAL
+   so a whole-asset ask cannot fabricate a field.
+
+## Hardening -- 2026-09-03: a source-grep guard matched a STRING that survived the defect
+Third time this session mutation-proving caught MY TEST rather than the code, and the sharpest one.
+The guard used `onSeedAssistant\([^)]*\)` plus `/row\.merge_field/`. **`[^)]*` stops at the FIRST
+`)`** - the one inside `fieldLabel(row.merge_field)` - so the FALLBACK STRING satisfied the match
+whether or not the ARGUMENT was passed. The guard would have gone green with the field dropped.
+`mutate.sh` reported `EQUIVALENT`; rewritten to assert the argument position (`, row.merge_field)`)
+it FIRED.
+**Guardrail: a source-grep guard must anchor on the CONSTRUCT it guards, never on a token that also
+appears in nearby prose or a fallback string.** `[^)]*` is not a call - it stops at the first nested
+paren. Split on the call name and inspect the argument list, or assert the argument position
+literally. This is the same class as `H2` ("precise enough never to cry wolf"), inverted: precise
+enough never to stay SILENT.
+
+
 **2026-09-03 - 4.11-4 BUILT AND DEPLOYED. PROTOTYPE COVERAGE IS 176 OF 176 (100%).** `main`
 `4da8696`. It was the last open row.
 
@@ -6655,3 +6710,24 @@ is the first deploy with a stamp on both sides, and the first to wait.
   time, and that is an owner decision, not a test-file change.
 - `H:deploy-sha-comes-from-the-bundle` -- health must report the compiled sha, and must not name
   `DEPLOYED_SHA` at all so the fallback cannot be reintroduced at the call site.
+
+### MasterContext CUT OVER — the app now reads the master profile from Postgres (2026-09-03)
+`MASTERCONTEXT_SOURCE=postgres`, declared in `api-deploy.yml` so the store is in the repo and
+diffable rather than a hand-set portal value. Landed `0da39b2`, deploy 33756518549 success.
+
+**Verified live, before AND after, on the owner's real data** —
+`docs/qc-evidence/RECORD-mastercontext-cutover.md`:
+- **`entities` 1 -> 14.** One Storage entity became 14 `owner_master_block` rows. This is the
+  discriminator: had the deploy kept reading Storage, it would still say 1.
+- **All five fields byte-identical**, compared as STRINGS not lengths (225/180/444/286/958), and
+  matching the row lengths read directly from Postgres. Three paths agree. That is AC-5.
+
+The baseline was captured BEFORE the flip. Doing it the other way round leaves nothing to compare
+against — worth remembering as the general rule, not just for this cut.
+
+**Storage was NOT deleted** (AC-9). The seed row is intact and every raw-read path is still in the
+repo, which is what makes rollback real: flip the word back and redeploy.
+
+**NEXT:** the Settings text editor for the master profile — the owner confirmed they want it, and it
+is what this whole move was FOR. Today they still cannot change their own profile without editing
+Azure Storage by hand; the table is per-owner and writable, so that gap is now closable.
