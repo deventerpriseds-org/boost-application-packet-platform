@@ -37,7 +37,8 @@ import { planCorrections } from '../dist/functions/tests/correction.js'
 // the module that OWNS the block list, never against a literal retyped in the test.
 import { profileRecords, resolveEvidence, MC_KIND, masterBaseline } from '../dist/functions/tests/evidence.js'
 import { entityFromBlocks, masterContextSource, writeMasterProfile, readMasterProfile,
-  editableBlockKeys } from '../dist/functions/tests/masterContext.js'
+  editableBlockKeys, masterProfile } from '../dist/functions/tests/masterContext.js'
+import { resolveOwner, signSession } from '../dist/functions/tests/appSession.js'
 
 const SRC = new URL('../src/functions/tests/', import.meta.url).pathname
 const src = (f) => readFileSync(join(SRC, f), 'utf8')
@@ -6020,6 +6021,54 @@ test('H:master-profile-editor-reader-distinguishes-absent: stored vs never-set s
   assert.equal(other.text, '')
   assert.ok(s1.label && s1.label !== 'skills1',
     'every field carries its MC_LABEL wording -- the labels were written for this screen and never used')
+})
+
+// H:master-profile-editor-requires-write-guard -- AC9. `requireWrite` runs BEFORE anything else on
+// the POST path, so an unverified request naming a REAL owner is refused without a database
+// connection ever being opened. That ordering is the guard as much as the call is: this test runs
+// with no Postgres reachable, so it can only pass if the refusal happens first.
+//
+// MUTATION that must make this FIRE: delete the `const guard = requireWrite(req); if (guard) return
+// guard` pair from masterProfile's POST branch.
+test('H:master-profile-editor-requires-write-guard: an unverified write to a real owner is refused', async () => {
+  const req = {
+    method: 'POST',
+    headers: new Map(),                                  // no Authorization -- unverified
+    query: new Map([['owner', 'von.ellis@enterpriseds.io']]),
+    params: {},
+    json: async () => ({ blocks: { skills1: 'injected' } }),
+  }
+  const res = await masterProfile(req, {})
+  assert.equal(res.status, 401,
+    'an unverified POST naming a real owner must be refused -- ?owner= is a READ affordance only')
+  assert.match(String(res.jsonBody?.error || ''), /sign in required/i)
+})
+
+// H:master-profile-editor-owner-from-session -- AC8. The owner written must come from the VERIFIED
+// session, never from the query string. Two halves, because either alone is passable:
+//   (1) the mechanism: resolveOwner prefers a verified bearer over ?owner=, so a session for A with
+//       ?owner=B resolves to A;
+//   (2) the ROUTE actually uses it: masterProfile's POST branch must not read req.query for an
+//       owner at all. A route that re-adds `req.query.get('owner') ||` in front of resolveOwner
+//       would keep (1) true and still write B's row, which is exactly the spoof requireWrite exists
+//       to close.
+//
+// MUTATION that must make this FIRE: in masterProfile, change `const owner = resolveOwner(req).owner`
+// on the POST path to `req.query.get('owner') || resolveOwner(req).owner`.
+test('H:master-profile-editor-owner-from-session: a verified session wins over ?owner=', () => {
+  const req = {
+    headers: new Map([['authorization', `Bearer ${signSession('a@example.com', 'microsoft', Math.floor(Date.now() / 1000))}`]]),
+    query: new Map([['owner', 'b@example.com']]),
+  }
+  const r = resolveOwner(req)
+  assert.equal(r.owner, 'a@example.com', 'the bearer identity must beat the query string')
+  assert.equal(r.verified, true)
+
+  const handler = stripComments(src('masterContext.ts')).slice(
+    stripComments(src('masterContext.ts')).indexOf('export async function masterProfile'))
+  assert.ok(handler.includes('resolveOwner(req).owner'), 'the slice must actually contain the handler')
+  assert.ok(!/req\.query\.get\(\s*['"]owner['"]\s*\)/.test(handler),
+    'masterProfile must never read an owner out of the query string -- on either path')
 })
 
 // ---------------------------------------------------------------------------------------------
