@@ -573,6 +573,48 @@ incident twice.
 
 
 ## Active work
+**2026-09-03 - THE OWNER CAN NOW EDIT THEIR OWN MASTER PROFILE. `main` `75e1f87`, deployed
+(api `33765530602`, front end `33765530827`) - NOT yet confirmed by the owner in the live app.**
+
+Settings > Master profile: 14 textareas, labelled from `MC_LABEL` (labels written for a settings
+screen months ago and unused until today), reading and writing `owner_master_block` through
+`GET`/`POST /api/app/master-profile`. Closes the residual half of
+`D:master-context-lives-in-the-wrong-store`: the store moved to Postgres at `0da39b2`, but until now
+changing the text still meant hand-editing an Azure Storage table.
+
+**The route extends `masterContext.ts`, NOT `appSearchPrefs.ts`.** Those 14 blocks are free text
+running to tens of thousands of characters; folding them into the scalars route would drag the whole
+profile over the wire on every unrelated settings read. The auth and partial-update SHAPE is copied
+from that route deliberately, so the pattern is shared even though the endpoint is not.
+
+**Three invariants, each mutation-proved** (nine guards total, all FIRED):
+- `itemsToOmit` - the list the owner has BANNED - is refused at the route BEFORE any query runs, so
+  the DB CHECK is a backstop rather than the only line. Three locks, not one.
+- `''` is a VALUE, absent is a different fact. `not null default ''` is carried all the way to the UI
+  as `stored`, so a field says either "N characters saved" or "never set".
+- a write takes the VERIFIED session's owner, never `?owner=` (which `resolveOwner` accepts
+  unverified for READS). `requireWrite` runs first, before a DB connection is even opened.
+
+Only CHANGED blocks are sent, and `saved` is reconciled ONLY after the response is checked - so a
+failed save keeps the owner's typing in the box.
+
+## Hardening -- 2026-09-03: an INERT guard, and the two-thirds diff I shipped
+Two misses on the master-profile editor, neither found by re-reading my own work:
+
+1. **I shipped the route with two of the AC pass's four guards missing - and the two I dropped were
+   the AUTH pair**, the ones actually on the Tier-1 path. The AC document listed all four; the only
+   thing that would have caught it is reading the ACs against the diff before calling the commit
+   done. **A guard the ACs named and the code lacks is invisible to a green suite** - the suite can
+   only run the tests that exist.
+2. **`H:master-profile-ui-standing-note` was INERT on its first mutation.** It scanned a FIXED
+   240-CHARACTER WINDOW before the note text looking for a conditional; `{note?.ok && (` fell about
+   twelve characters outside it. So the guard read a region that could not contain what it was
+   looking for, and PASSED with its defect reinstated. Fixed by checking the note's own opening tag
+   structurally - what precedes it on its line and the line above - then re-proved two ways
+   (gate it, and delete it). **A character window is a magic number; the enclosing tag is a fact
+   about the code.** Fourth time this session `mutate.sh` caught MY TEST rather than the code, and
+   the only one where the guard would have shipped BELIEVED.
+
 **2026-09-03 - `ui-verify` CLICK_SEL IS A SEQUENCE, and it immediately found a real gap.** `main`
 `5b34b87`.
 

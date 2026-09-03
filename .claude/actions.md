@@ -8589,10 +8589,64 @@ proves the data did not. Evidence: `docs/qc-evidence/RECORD-mastercontext-cutove
 33756330116 (before) / 33756688130 (after). Storage deleted at no step — rollback is one word in
 `api-deploy.yml`.
 
-### ACT:master-profile-settings-editor — NEXT, and unblocked
-The owner confirmed they want it ("agreed it should be available for text editing in settings once
-moved to postgres"). `owner_master_block` is per-owner and writable, so the gap is closable. Today
-the owner cannot change their own master profile without hand-editing Azure Storage.
+### ACT:master-profile-settings-editor — BUILT AND ON `main`, live verification pending
+**Asked:** *"agreed it should be available for text editing in settings once moved to postgres ...
+it shouldn't be waiting to move to postgres, what's the hold up... seems simple"*, then
+*"stop pausing after prose and push the work forward"*.
+
+**Status: implemented, both halves on `main` (`75e1f87`), NOT yet confirmed by the owner in the
+live app.** Until they open Settings ▸ Master profile and save a block, this is "mechanism proven,
+not confirmed live".
+
+Two commits, in the order the AC pass specified so each is revertable alone:
+- **`f1888fc` + `1cf54ac` — the route.** `GET`/`POST /api/app/master-profile`, added to
+  `masterContext.ts` (the ONE accessor), not to `appSearchPrefs.ts`: those 14 blocks are free text
+  running to tens of thousands of characters, and folding them into the scalars route would drag
+  the whole profile over the wire on every unrelated settings read. The auth and partial-update
+  SHAPE is copied from that route deliberately.
+- **`360d9ac` + `75e1f87` — the screen.** Settings ▸ Master profile, one textarea per block labelled
+  from `MC_LABEL` — labels written for a settings screen months ago and unused until now.
+
+**Nine guards, every one mutation-proved with `/workspace/eds-claude-skills/scripts/mutate.sh`:**
+
+| guard | mutation applied | outcome |
+|---|---|---|
+| `H:master-profile-editor-rejects-unknown-key` | delete the pre-query refusal | FIRED |
+| `H:master-profile-editor-partial-update` | iterate all 14 keys instead of the body's | FIRED |
+| `H:master-profile-editor-empty-is-a-value` | `if (!v) continue` | FIRED |
+| `H:master-profile-editor-reader-distinguishes-absent` | `stored: true` unconditionally | FIRED |
+| `H:master-profile-editor-requires-write-guard` | delete the `requireWrite` pair | FIRED |
+| `H:master-profile-editor-owner-from-session` | re-add `req.query.get('owner') \|\|` | FIRED |
+| `H:master-profile-ui-keeps-edits-on-failure` | move `setSaved` above the response check | FIRED |
+| `H:master-profile-ui-sends-only-changed` | build the patch from every block | FIRED |
+| `H:master-profile-ui-standing-note` | gate the note on `note?.ok`; and delete the note | FIRED (both) |
+
+**Two things I got wrong, both caught by an instrument rather than by re-reading my own work:**
+1. **I shipped the route with two of the AC pass's four guards missing** — and the two I dropped
+   were the AUTH pair, the ones on the Tier-1 path. Added in `1cf54ac`. The AC document listed
+   them; nothing but reading it against the diff would have caught that, which is the argument for
+   doing exactly that before calling a commit complete.
+2. **`H:master-profile-ui-standing-note` was INERT on its first mutation.** It scanned a fixed
+   240-character window for a conditional, and `{note?.ok && (` fell about twelve characters
+   outside it — so the guard was reading a region that could not contain what it was looking for,
+   and passed with its defect reinstated. Replaced the window with a structural check on the note's
+   own opening tag (`75e1f87`), then re-proved it two ways. A window width is a magic number; the
+   enclosing tag is a fact about the code. This is the case for the three-outcome harness in one
+   line: the guard would have shipped believed.
+
+**The Tier-1 locks the ACs named, and where each now lives:** `itemsToOmit` unwritable (not in
+`MC_KIND`, refused at the route BEFORE any query, and a DB CHECK behind that — three lines, not
+one); `''` distinct from absent (`not null default ''` carried up to the UI as `stored`, so the
+screen says "never set" or "N characters saved"); a write cannot target another owner (`requireWrite`
+first, then the VERIFIED session's email, never `?owner=`).
+
+**Standing copy the ACs asked for:** *"Packets already built keep their original wording"* is always
+on the screen, not a toast — packets already produced carry the old baseline in
+`insertion.before_text`, and a warning shown only after saving is one the owner reads once.
+
+**Evidence:** api 1088/1088 · app 471/471 · both builds clean · smart-quote scan clean ·
+api-deploy `33764335460` success for the route. ACs: `docs/qc-evidence/AC-master-profile-editor.md`.
+**Open:** the owner's own confirmation in the live app, and Playwright-in-GHA proof of the round trip.
 ---
 
 ## ACT-68f — `ui-verify` click sequence, and the unreachable field scope it exposed (2026-09-03)
