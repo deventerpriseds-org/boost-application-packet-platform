@@ -401,6 +401,31 @@ export const EVIDENCE_TONE = {
  * a pass - returning 'green' for an unresolved tab would claim the posting is fully evidenced before
  * the resolver has run, which is the absent-evidence-is-not-pass rule in a colour.
  */
+// SPEC 4.1-10 -- the evidenced ratio the tab header states.
+//
+// WHY THIS EXISTS AT ALL, since the app already printed a number. The tab read `Keywords (35)` and
+// the sub-header `21 (21 from a posting section)` -- a PROVENANCE split, which answers "where did
+// these rows come from". The prototype's `4/4` answers "how much of this is evidenced", which is
+// what the step is FOR. PROTOTYPE-COVERAGE 4.1-10 defended the substitution as "a different and
+// better-sourced number"; measured against both renders it is a different AXIS, not a better
+// version of the same one, so it never replaced anything.
+//
+// TWO RULES THIS COUNT OBEYS, and both come from this repo's own failures:
+//   * NULL, NEVER 0/N, when nothing carries a state. "Absent evidence is not_applicable, never
+//     pass" -- and its mirror is that absent evidence is not a FAILURE either. Printing `0 of 21`
+//     over rows nobody has measured states a coverage claim the data cannot support.
+//   * THE NUMERATOR IS `verified` ALONE. `stale`, `misresolved`, `source_missing` and `unverified`
+//     are warn states: each one means evidence was found and is in doubt. Counting a doubted row as
+//     evidenced is how a coverage number comes to overstate, which is the failure the H-cases in
+//     api/test/hardening.test.mjs exist to stop.
+// The denominator is every row in the tab -- an unmeasured row is not evidenced, so it belongs
+// below the line even though it is not the owner's fault.
+export function tabEvidenced(rows) {
+  const list = Array.isArray(rows) ? rows.filter(Boolean) : []
+  if (!list.some((r) => r.evidenceState)) return null
+  return { evidenced: list.filter((r) => r.evidenceState === 'verified').length, total: list.length }
+}
+
 export function tabEvidenceTone(rows) {
   const list = (Array.isArray(rows) ? rows : []).filter((r) => r && r.evidenceState)
   if (!list.length) return null
