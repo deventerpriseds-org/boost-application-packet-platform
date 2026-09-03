@@ -520,6 +520,46 @@ Key tables (PostgreSQL):
 - iOS testing: requires macOS runner or BrowserStack; categorically unavailable in Linux CCR
 
 ## Active work
+**2026-09-03 - SPEC 4.5-29/4.5-30 AND 4.6 DISPLACEMENT ARE ON `main` AND DEPLOYED.** PR #64
+(`a55bc25`) then PR #78 (`fd1bc80`). Three rows recorded as blocked, none of them actually were.
+
+**The pattern behind all three: a CODE COMMENT was read as the source of truth about the data.**
+`AssetBlocks.jsx` said SPEC 4.6's three additions had no source; `PULL-CANDIDATES.md` PC-3 named
+`swap_decision.from_label -> to_label` two paragraphs below its own reasoning. The grade was said to
+need `term_library_entry`; the prototype never visualises a library at all (`libTerms()` is
+`ATS_TERMS.filter(t => t.source === 'library')`, a flag filter used as a DENOMINATOR). **The owner
+caught this, not the process** - *"it should simply be pointing to the output not the mechanism"*.
+
+**Measured before building, every time:**
+- displacement: db-query **33687166561** - 35 swapped TO-labels, 7,220 keywords, **11 exact joins**
+- grade: **5,396 exact / 6,804 reworded / 2,221 no verbatim** (live)
+- prototype fixture cross-check: all 6 `variant` rows have a `postingSays` NOT containing the term
+
+**Two grades, not three.** `loose` is decided by not being in the scoreable library; every chip here
+is a `model_keyword`, never scoreable (`schema.ts:338`), so it would be constant AND would read as
+credit two lines below "counts toward nothing".
+
+**`fixtures.json` refreshed** (`fixture-refresh.yml` run 33717477347) - the canary had been refusing
+EVERY `render-app` run. `build-fixtures.mjs` was already correct; the dump was stale. 22 route keys,
+canary passes, and the app renders again for the first time this session.
+
+## Hardening -- 2026-09-03: I validated a SUBSET and pushed on it
+CI went red on PR #78. I ran `node --test` (454/0) and never `npm run test:margin`; the workflow runs
+both. The failing assertion was `the panel repeats "proposed" and shows no match grade or approx
+marker` - a test encoding the very finding the PR overturns.
+**Fixed by INVERTING it and making it stricter**, never by skipping: the old assertion only required a
+grade be ABSENT; the new one requires the RIGHT grade for the row, so an inverted derivation fails
+rather than shrugging. 59 -> 61 checks.
+**Guardrail: before any push touching `app/`, run the FULL gate - `npm run build && npm test &&
+npm run test:margin && npm run test:browser`.** The unit suite alone is not the gate.
+
+## Hardening -- 2026-09-03: `mutate.sh` NOTHING-IS-PROVEN is not a verdict
+The browser mutation returned `NOTHING IS PROVEN` because TWO assertions fail together and the
+harness identifies one by name. Applied by hand: `if (!k)` for `if (!k || !v)` makes the unlocatable
+`coaching` chip render `Reworded` and take a `~` marker; my new assertion AND a pre-existing one both
+catch it; restore verified clean vs HEAD. **Recorded as a hand proof, never as a harness FIRED it did
+not give.** Same discipline as the two INERT catches: the harness's own output is the claim, not my
+summary of it.
 **2026-09-02 — SPEC 4.6 DISPLACEMENT SHIPPED, and the row that called it unsourced was WRONG.**
 Commit `ac0f68d` + two test commits on `claude/boost-app-setup-approach-rjxhca`.
 

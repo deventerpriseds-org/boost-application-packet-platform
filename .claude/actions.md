@@ -7916,3 +7916,35 @@ now instead of hand-waved.
 **Also corrected here:** I reported the doc headline to the owner as `167 of 182`. `main` already
 read **172 of 181 (95.0%)** — parallel lanes closed rows in merges I pulled in after taking that
 count. Cover step unchanged at **83 of 84 (98.8%)**, 4.6-8 its only PARTIAL.
+
+---
+
+## ACT-68d — SPEC 4.5-29 / 4.5-30 / 4.6: three "blocked" rows, none of them blocked (2026-09-03)
+
+**Asked:** *"get us to 40"*, then *"build the displacement text as well"*, then *"I need visuals to
+decide"*, then *"why couldn't you do all of these instead of making me choose?"*
+
+**Status: DONE and DEPLOYED.** `main` at `fd1bc80` via PR #64 + PR #78.
+
+| Row | Was recorded as | Truth | Proof |
+|---|---|---|---|
+| `4.6` displacement | no source | **BUILT** | PC-3 names `swap_decision.from_label -> to_label`; db-query 33687166561 = 11 exact joins |
+| `4.5-29` `~` marker | needs term library | **BUILT** | prototype never visualises a library; 5,396/6,804 live split |
+| `4.5-30` match grade | needs term library | **BUILT** (2 grades) | same; `loose` omitted as constant + reads as credit |
+| `4.5-33` open chip | — | **stays closed** | `N2` is the only `coverage:'open'` req and sits on a TERM, never a field section |
+| `4.5-38` reword toggle | — | **stays closed** | prototype persists nothing; `Ask for a reword` already ships |
+
+**Owner correction that unlocked it:** *"it should simply be pointing to the output not the mechanism
+which in that case library or placeholder approach wouldn't matter."* Correct. Every "blocked" verdict
+here came from reading a CODE COMMENT instead of the data it described.
+
+**Also:** `fixtures.json` refreshed (run 33717477347) — the canary had been refusing every
+`render-app` run, so the app had been unrenderable all session. `render-spec.mjs` gained
+`exact: false`, which is what made the variant-chip screenshot possible.
+
+**Phase-tag checker: investigated, NOT changed.** I had offered to relax it to one tag per turn. That
+would revert a v15 fix earned by a measured failure (58 blocks, 19 tagged, 39 untagged, gate reported
+PASS). Withdrew my own suggestion.
+
+**Evidence:** PR #64, PR #78, CI run 33718171918 green; margin 61/61, browser 52/52, api 1064/0,
+app 454/0; 4 unit guards harness-FIRED, browser assertion hand-proved.
