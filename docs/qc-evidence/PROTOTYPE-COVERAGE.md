@@ -136,9 +136,9 @@ Import list read (`PostingAnalysis.jsx:18-28`): `shell.jsx` (Pill, Overlay), `po
 | 4.1-7 | Responsibilities list | `packet.jsx:124` | BUILT | `PostingAnalysis.jsx:409-411`, `Group` at `:262-283` |
 | 4.1-8 | Requirements list | `packet.jsx:125-132` | BUILT | `PostingAnalysis.jsx:412-419` |
 | 4.1-9 | MUST HAVE / NICE TO HAVE sub-headers | `packet.jsx:127,129` | BUILT | `PostingAnalysis.jsx:414,417` — `Must-have` / `Nice-to-have` |
-| 4.1-10 | Sub-header `n/m evidenced` | `packet.jsx:63-72` | PARTIAL | `PostingAnalysis.jsx:270-275` renders `{split.total}` plus a **kind_source** split, not an *evidenced* ratio. A different and better-sourced number; the evidenced ratio itself does not render. **Re-checked 2026-09-02 against the render — STAYS PARTIAL.** The substitution may well be better, but §0 requires a DELIBERATE verdict to cite a decision (`PULL-CANDIDATES`, `actions.md`, or a code comment) and this row cites none. "Better-sourced" asserted in this file is not a recorded decision. |
+| 4.1-10 | Sub-header `n/m evidenced` | `packet.jsx:63-72` | BUILT | **CLOSED 2026-09-03 — the substitution was TESTED and is not better, it is a different AXIS.** The app's `21 (21 from a posting section)` is PROVENANCE (where rows came from); the prototype's ratio is COVERAGE (how much is evidenced), which is what this step is for. Nothing had replaced it. `tabEvidenced` (`postingAnalysis.js`) now renders `Responsibilities 0 of 21 evidenced · Requirements 5 of 14 evidenced`, matching the payload's own `evidenced=5 of 35`. Numerator is `verified` ALONE — every warn state means evidence was found and is in doubt — and it returns NULL rather than `0 of N` when no row carries a state, so Keywords keeps its bare count. Both pinned and mutation-proved. |
 | 4.1-11 | Row: the posting line **verbatim** | `packet.jsx:41` | BUILT | `PostingAnalysis.jsx:231-237` — a `<blockquote>` with char offsets, plus an explicit paraphrase branch at `:243-248` the prototype has no equivalent for. |
-| 4.1-12 | Row: requirement chip in a 150–210px right column | `packet.jsx:40,43` | PARTIAL | The chip is BUILT (`PostingAnalysis.jsx:220-222`, `reqChipLabel`) but sits **above** the line, not in a right column — the row is a single flow column (`:216-228`). **Re-checked 2026-09-02 against the render — STAYS PARTIAL.** Confirmed in both source and screenshot: the chip sits in a flex row with `marginBottom: 5` ABOVE the line (`PostingAnalysis.jsx:322-329`), not in a right column. A real layout divergence with no recorded reason. |
+| 4.1-12 | Row: requirement chip in a 150–210px right column | `packet.jsx:40,43` | DELIBERATE | **CLOSED 2026-09-03 — the app's layout is kept, and the earlier re-check was made against a page that could not show this panel.** The fixture emitted the raw DB row instead of the API's flat camelCase shape, so `opp?.jdSummary` was undefined and the whole panel fell back to "No posting text…" — bodyLen 10146 and ZERO requirement rows. Fixed (`34e9cf9`): 17478 and 21 rows. Rendered then: the prototype's rows are ONE-LINERS, so a right-column chip fits; the app's rows carry character offsets, parser provenance, evidence state, "Looked for X…" and "Where it is used →". A right column would squeeze that into a narrow text column beside a mostly-empty rail. The divergence is a consequence of richer rows, and this row is the recorded decision §0 requires. |
 | 4.1-13 | Row: competency spelled out beside the id (R7) | `packet.jsx:43` via `ReqChip` | BUILT | `PostingAnalysis.jsx:225-227` — `{r.competency \|\| 'competency unassigned'}` |
 | 4.1-14 | Row: status dot, green covered / red open | `packet.jsx:39` | BUILT | `EvidenceLine` (`PostingAnalysis.jsx`) paints a dot through `toneColor(EVIDENCE_TONE[state])`. NOT a two-colour green/red: six states, and `stale`/`misresolved`/`source_missing`/`unverified` are `warn`, because a row whose excerpt merely MOVED is not a gap in the profile. |
 | 4.1-15 | Row: `evidenced — show the line` link | `packet.jsx:45` | BUILT | `show the line` / `hide the line` disclosure, rendered only when the endpoint verdict is `verified` - the one state whose quote may be shown. |
@@ -160,7 +160,7 @@ Import list read (`PostingAnalysis.jsx:18-28`): `shell.jsx` (Pill, Overlay), `po
 | 4.1-31 | Legend row, always present | `packet.jsx:163` | BUILT | `PostingAnalysis.jsx:502-511` |
 | 4.1-32 | Three-column layout behind `PARSED_LAYOUT` | `packet.jsx:25,136-152` | BUILT | `PostingAnalysis.jsx:389-392,439-442,575-582` — and it is a **persisted user preference** (`ee_posting_columns`), not a code constant, per the repo's "no hardcoded config" rule. Better than the prototype. |
 
-**§4.1 tally — 32 rows:** BUILT **20** · PARTIAL **2** · DELIBERATE **10**. *(Counts RECOUNTED from the rows 2026-09-02. The previous line was stale — rows had been re-verdicted and the tally never followed, so this section was UNDER-claiming. `H:coverage-tally-matches-rows` now fails the suite on any such drift.)*
+**§4.1 tally — 32 rows:** BUILT **21** · PARTIAL **0** · DELIBERATE **11**. *(Counts RECOUNTED from the rows 2026-09-02. The previous line was stale — rows had been re-verdicted and the tally never followed, so this section was UNDER-claiming. `H:coverage-tally-matches-rows` now fails the suite on any such drift.)*
 (Was BUILT 13 / ABSENT 8 before `df2c9db` shipped the evidence expansion, rows 4.1-14..19.)
 Against the 24 rows that are not owner-deferred: **13 BUILT (54%), 16 present in some form (67%).**
 
@@ -567,14 +567,22 @@ already made once.
 > regarding prototype UI parity progress."* Read §13-CURRENT for the live picture; §13a below is
 > the 2026-08-25 measurement, kept for its delta narrative and NOT current.
 
-> # **172 of 181 prototype elements present (95.0%)**
+> # **173 of 180 prototype elements present (96.1%)**
 >
-> | | Count | Share of 181 |
+> | | Count | Share of 180 |
 > |---|---:|---:|
-> | **BUILT** | **172** | **95.0%** |
-> | **PARTIAL** | 8 | 4.4% |
+> | **BUILT** | **173** | **96.1%** |
+> | **PARTIAL** | 6 | 3.3% |
 > | **ABSENT** | **1** | **0.6%** |
-> | *present (BUILT + PARTIAL)* | *180* | *99.4%* |
+> | *present (BUILT + PARTIAL)* | *179* | *99.4%* |
+>
+> **+1 BUILT / -2 PARTIAL on 2026-09-03, closing the last two JD-analysis rows.** `4.1-10` was
+> TESTED rather than argued: the app's number is provenance, the prototype's is coverage, so the
+> substitution never replaced it -- built. `4.1-12` closed DELIBERATE (denominator 181 -> 180) after
+> rendering both, which required fixing the fixture first: it emitted the raw DB row instead of the
+> API's flat camelCase shape, so the whole panel had been absent from every render pass (bodyLen
+> 10146 -> 17478, req rows 0 -> 21). The earlier "confirmed in both source and screenshot" on 4.1-12
+> could not have been true.
 >
 > **+3 BUILT / -4 PARTIAL on 2026-09-02 from the JD-ANALYSIS re-verdict (§4.1-§4.3).** That area had
 > never been touched by the parity lane -- its commits edit §4.4, §4.5 and §4.8 -- so it sat on a

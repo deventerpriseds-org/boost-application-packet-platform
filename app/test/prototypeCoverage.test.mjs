@@ -371,7 +371,7 @@ test('H:coverage-tally-guard-not-vacuous: every assertion above fires on its own
       l.replace('BUILT **8** · PARTIAL **0**', 'BUILT **2** · PARTIAL **2**'))],
     // The omission variant: drop a non-zero category, leaving the numbers short of the stated N.
     ['tally-accounts-for-every-row', swap('**§4.1 tally', (l) =>
-      l.replace(' · DELIBERATE **10**', ''))],
+      l.replace(' · DELIBERATE **11**', ''))],
     // A line that stops parsing must not silently disable the guard.
     ['every-tally-is-read', swap('**§4.7 tally', (l) => l.replace('**§4.7 tally', '**S4.7 tally'))],
     // A row whose verdict cannot be resolved.
