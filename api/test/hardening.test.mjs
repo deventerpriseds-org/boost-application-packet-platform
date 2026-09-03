@@ -5928,3 +5928,580 @@ test('H:deploy-sha-comes-from-the-bundle: health reports the compiled sha, not t
   assert.match(stamp, /BUILD_SHA \|\| process\.env\.DEPLOYED_SHA/,
     'the BUNDLE must win over the app setting -- reversing the order restores the defect exactly')
 })
+
+// ---------------------------------------------------------------------------------------------
+// H:render-path-runs-checks / H:text-write-rechecks / H:recheck-is-non-fatal
+//
+// THE DEFECT. `renderArtifact`'s write flips an artifact from 'todo' to 'review'
+// (`appPackets.ts`, `update artifact set doc_url = $1, ... status = case when status = 'todo' then
+// 'review' else status end`). `POST /artifact/{id}/document` and `POST /artifact/{id}/slides` both
+// reach it through `buildTemplatedArtifact`, and NOTHING on that path called `evaluateArtifact` —
+// the only call in the file was inside `runPacketBuild`, a function neither route invokes. So an
+// artifact reached the owner marked ready-to-review with no `artifact_gate` row, no `check_result`
+// rows and no verdicts, and the free DETERMINISTIC half of checks was skipped along with the model
+// half (this needs no `chk_coverage_judge` to bite).
+//
+// MEASURED, live Postgres, 2026-09-03: packet 487cb017-2f3f-4f70-a573-0983b780ea75 holds a resume
+// (4347 chars of content) and a portfolio (2954 chars), BOTH at status 'review', both carrying a
+// real Google doc_url — and ZERO check_result rows. Corpus at the same moment: 8 of 200 artifacts
+// had ever been checked, 2 of 40 packets.
+//
+// The same hole existed on four writers that change artifact text and never re-checked:
+// `artifactContent`, `artifactAiEdit` (appPackets.ts), `artifactOwnerEdit`, `correctionRevert`
+// (appCorrections.ts). `ensurePackage`/`runPacketBuild` and `artifactRemediate` already evaluated
+// and are deliberately NOT in that list.
+//
+// THE INVARIANT, not the incident: every path that writes an artifact's text funnels through the
+// ONE shared helper `recheckAfterTextWrite`, and that helper can never turn a checking failure into
+// a failed write.
+
+/** Body of ONE `[export ]async function <name>(` declaration. '' when the name has gone stale. */
+const anyAsyncFunctionBody = (body, name) => {
+  const m = new RegExp(`^(?:export )?async function ${name}\\(`, 'm').exec(body)
+  if (!m) return ''
+  const end = body.indexOf('\n}', m.index)
+  return end < 0 ? body.slice(m.index) : body.slice(m.index, end + 2)
+}
+
+test('H:render-path-runs-checks: an artifact cannot reach status review from the render path unchecked', () => {
+  const packets = stripComments(src('appPackets.ts'))
+
+  // 1. The shared helper exists and is what the render root calls. Asserting the CALL, not the
+  //    import: an import with no call is exactly the shape this defect had (evaluateArtifact was
+  //    imported at appPackets.ts:19 the entire time the bypass was live).
+  const shared = src('appRecheck.ts')
+  assert.match(shared, /export async function recheckAfterTextWrite\(/,
+    'the one shared post-write recheck must exist in appRecheck.ts')
+
+  const build = anyAsyncFunctionBody(packets, 'buildTemplatedArtifact')
+  assert.ok(build, 'buildTemplatedArtifact has been renamed — this guard has gone stale, fix it')
+  assert.match(build, /recheckAfterTextWrite\(/,
+    'buildTemplatedArtifact is the shared root of runPacketBuild, artifactDocument and '
+    + 'artifactSlides. The check must fire HERE, or the two single-artifact routes render a real '
+    + 'Google document, flip status to review, and leave no gate behind (packet 487cb017: two '
+    + 'artifacts at review, 0 check_result rows)')
+
+  // 2. The two bypassing routes go through that root and DO NOT opt out of the check.
+  for (const route of ['artifactDocument', 'artifactSlides']) {
+    const body = anyAsyncFunctionBody(packets, route)
+    assert.ok(body, `${route} has been renamed — this guard has gone stale, fix it`)
+    assert.match(body, /buildTemplatedArtifact\(/,
+      `${route} must build through buildTemplatedArtifact, which is where the check fires`)
+    assert.ok(!/check\s*:\s*false/.test(body),
+      `${route} must never disable the post-render check — that reinstates the bypass exactly`)
+  }
+
+  // 3. EXACTLY ONE caller may defer the check, and it is runPacketBuild, which evaluates itself
+  //    AFTER the evidence pass. Any second `check: false` is a new bypass.
+  const deferrals = packets.match(/check\s*:\s*false/g) || []
+  assert.equal(deferrals.length, 1,
+    'exactly one call site may pass check:false (runPacketBuild, which evaluates after its '
+    + `evidence pass); found ${deferrals.length}`)
+
+  // 4. runPacketBuild keeps its OWN evaluateArtifact, and keeps it after resolveEvidenceForOpp.
+  //    This is why the "redundant" call was not deleted: coverage is decided by the evidence rows
+  //    that pass persists, so a gate computed before it grades against rows that do not exist yet.
+  const loop = anyAsyncFunctionBody(packets, 'runPacketBuild')
+  assert.ok(loop, 'runPacketBuild has been renamed — this guard has gone stale, fix it')
+  assert.match(loop, /check\s*:\s*false/,
+    'runPacketBuild must defer the render-time check, or every build evaluates twice per artifact')
+  const evidenceAt = loop.indexOf('resolveEvidenceForOpp(')
+  const evaluateAt = loop.indexOf('evaluateArtifact(')
+  assert.ok(evidenceAt >= 0, 'runPacketBuild must still run the evidence pass')
+  assert.ok(evaluateAt >= 0,
+    'runPacketBuild must still evaluate each artifact itself — it deferred the render-time check '
+    + 'on the promise that it would')
+  assert.ok(evaluateAt > evidenceAt,
+    'the build must evaluate AFTER resolveEvidenceForOpp: coverage is decided by the evidence rows '
+    + 'that pass persists, and a gate computed before them grades against rows that do not exist')
+})
+
+test('H:text-write-rechecks: every artifact-text writer re-runs the checks it just invalidated', () => {
+  const packets = stripComments(src('appPackets.ts'))
+  const corrections = stripComments(src('appCorrections.ts'))
+
+  for (const [file, body, name] of [
+    ['appPackets.ts', packets, 'artifactContent'],
+    ['appPackets.ts', packets, 'artifactAiEdit'],
+    // THE EIGHTH WRITER, added 2026-09-03 after the render-path fix landed. `artifactGenerate` sets
+    // `status = 'review'` UNCONDITIONALLY (not the `case when status='todo'` the render write uses),
+    // so a generated draft reached the owner marked ready-to-review having never been checked — the
+    // same defect on a route `buildTemplatedArtifact`'s fix does not reach, because this one writes
+    // `artifact.content` directly. It is listed HERE rather than given its own test on purpose: the
+    // invariant is "every artifact-text writer rechecks", and a writer that needs a second guard to
+    // be covered is a writer the first guard was too narrow to see.
+    ['appPackets.ts', packets, 'artifactGenerate'],
+    ['appCorrections.ts', corrections, 'artifactOwnerEdit'],
+    ['appCorrections.ts', corrections, 'correctionRevert'],
+  ]) {
+    const fn = anyAsyncFunctionBody(body, name)
+    assert.ok(fn, `${file} ${name} has been renamed — this guard has gone stale, fix it`)
+    assert.match(fn, /recheckAfterTextWrite\(/,
+      `${name} writes artifact text and must re-run the checks through the one shared helper. `
+      + 'Without it artifact_gate keeps describing text that no longer exists and the owner can '
+      + 'approve on findings computed against the previous wording.')
+  }
+
+  // The two writers that own a transaction must call the recheck AFTER their commit.
+  // `evaluateArtifact` runs its own begin/commit on the same client (appChecks.ts), so calling it
+  // inside an open transaction nests them on one connection — and a recheck failure inside the
+  // transaction would roll back the owner's edit, which is the opposite of the non-fatal contract.
+  for (const name of ['artifactOwnerEdit', 'correctionRevert']) {
+    const fn = anyAsyncFunctionBody(corrections, name)
+    const commitAt = fn.lastIndexOf("query('commit')")
+    const recheckAt = fn.indexOf('recheckAfterTextWrite(')
+    assert.ok(commitAt >= 0, `${name} must still commit its own write`)
+    assert.ok(recheckAt > commitAt,
+      `${name} must recheck AFTER its commit — inside the transaction it nests begin/commit on one `
+      + 'connection and a checking failure would roll back the write it is checking')
+  }
+})
+
+test('H:recheck-is-non-fatal: a checking failure never fails the write that triggered it', async () => {
+  const { recheckAfterTextWrite } = await import('../dist/functions/tests/appRecheck.js')
+
+  const seen = []
+  const good = await recheckAfterTextWrite({}, 'artifact-1', 'owner@example.com', {
+    evaluate: async (_c, id, owner) => { seen.push([id, owner]); return {} },
+  })
+  assert.deepEqual(good, { ok: true })
+  assert.deepEqual(seen, [['artifact-1', 'owner@example.com']],
+    'the artifact id and the SESSION-resolved owner are what the evaluator is handed — an owner '
+    + 'read from the request body would let a caller pick whose thresholds grade their document')
+
+  // THE INVARIANT. An owner's save is already durable when this runs; a gate that cannot be
+  // recomputed must degrade to "checks are stale", never to "your edit failed". `runPacketBuild`
+  // already held this property with a per-artifact try/catch and the shared helper inherits it.
+  const bad = await recheckAfterTextWrite({}, 'artifact-2', 'owner@example.com', {
+    evaluate: async () => { throw new Error('gate could not be computed') },
+  })
+  assert.equal(bad.ok, false, 'a failure must be reported, not swallowed silently')
+  assert.match(String(bad.error), /gate could not be computed/,
+    'the reason must survive to the caller so it can be shown next to the successful write')
+})
+
+// ==============================================================================================
+// JUDGE OBSERVABILITY — all three model passes persisted their SUCCESSES and dropped their FAILURES
+// ==============================================================================================
+//
+// EVIDENCE (docs/qc-evidence/AC-judge-observability.md, ground-truthed against the write paths):
+//   coverage  - `runCoverageJudge` returns refused/silent/failures; `evaluateArtifact` folded them
+//               into a `judge` object that ONLY `artifactChecksRun` ever read. `appPackets.ts:1189`
+//               discards the return value entirely and `appRemediation.ts:185,272` read `.results`
+//               and `.run_id` only - so on every build and every remediation pass those numbers were
+//               computed and thrown away.
+//   support   - the escalation pass tallies into an in-memory `escalation_refusals` dict that is
+//               JSON-serialised into one response and dies with the request. Zero writes to any
+//               table, confirmed by grep.
+//   stuffing  - the model-raised hit count was embedded in the PROSE of one `posting_wording_kept`
+//               message ("(N raised by a model reading for name-dropping)", checks.ts:664).
+// NET: a judge that STOPPED ANSWERING was indistinguishable afterwards from a judge that FOUND
+// NOTHING. These guards refuse to let that return.
+import { runCoverageJudge, runStuffingRead, judgeableFields } from '../dist/functions/tests/appCoverage.js'
+import { writeEvidence } from '../dist/functions/tests/appRequirements.js'
+import { recordJudgeOutcomes, pruneJudgeOutcomes, recordAndPrune, DEFAULT_JUDGE_OUTCOME_RETENTION_DAYS } from '../dist/functions/tests/judgeOutcome.js'
+
+/** A pg double that records every judge_outcome insert as {judge, kind, count} and nothing else. */
+const sinkClient = (over = {}) => {
+  const rows = []
+  const sql = []
+  return {
+    rows, sql,
+    async query(q, p) {
+      sql.push(String(q).trim().split('\n')[0].trim())
+      if (/insert into judge_outcome/.test(q)) {
+        rows.push({ oppId: p[0], artifactId: p[1], runId: p[2], judge: p[3], kind: p[4], count: p[5] })
+        return { rows: [] }
+      }
+      if (over.rows) return over.rows(q, p)
+      return { rows: [], rowCount: 0 }
+    },
+  }
+}
+
+/** The smallest artifact the coverage judge will actually look at. */
+const judgeInput = (fetchJson, over = {}) => ({
+  oppId: 'opp-1', artifactId: 'art-1', type: 'resume',
+  pkg: { SkillsBullets1: 'Platform reliability engineering across payments' },
+  requirements: [{ seq: 0, verbatim: 'Improve operational reliability' }],
+  thresholds: { coverageJudge: true },
+  model: 'gpt-4o',
+  fetchJson,
+  ...over,
+})
+const noCache = { async query() { return { rows: [] } } }
+const says = (obj) => async () => ({ choices: [{ message: { content: JSON.stringify(obj) } }] })
+
+/**
+ * H:judge-failures-are-recorded
+ *
+ * THE ONE INVARIANT: a refusal, a span disagreement and a transport failure are three DIFFERENT
+ * facts about a run, and each must be identifiable afterwards by a stored key - never by parsing a
+ * human-readable message. The old code had all three, in memory, and lost all three.
+ *
+ * MUTATION that must make this FIRE: delete any single `bump(...)` in `appCoverage.ts`, or the
+ * `supportOutcomes`/`escalationOutcomes` split in `appRequirements.ts`.
+ */
+test('H:judge-failures-are-recorded: refusal, span disagreement and transport failure are each distinguishable by key', async () => {
+  // 1. COVERAGE - the transport throws.
+  const down = await runCoverageJudge(noCache, judgeInput(async () => { throw new Error('OpenAI HTTP 503') }))
+  assert.equal(down.outcomes.transport_failed, 1, 'a transport failure must be recorded under its own key')
+  assert.equal(down.outcomes.invoked, 1, 'and the judge must be recorded as having run at all')
+  assert.equal(down.outcomes.refused, undefined,
+    'an outage is NOT a refusal - collapsing them is the conflation this sink exists to undo')
+
+  // 2. COVERAGE - the model answers, and refuses.
+  //    A CITATION THE DOCUMENT DOES NOT CONTAIN is the refusal that matters most here: the model
+  //    answered, and its answer was rejected by the byte-exact quote check.
+  const refusing = await runCoverageJudge(noCache, judgeInput(
+    says({ verdicts: [{ seq: 0, covered: true, basis: 'direct', why: 'it says so',
+                        quote: 'a sentence that is nowhere in the field text' }] })))
+  assert.ok((refusing.outcomes.refused || 0) >= 1, 'a refusal must be recorded under its own key')
+  assert.equal(refusing.outcomes.transport_failed, undefined,
+    'the model answered - nothing about this run is a transport failure')
+
+  // 3. STUFFING - the transport throws.
+  const stuffDown = await runStuffingRead({
+    type: 'resume', pkg: { SkillsBullets1: 'Platform reliability engineering across payments' },
+    postingText: 'We want a platform reliability leader.', thresholds: { coverageJudge: true },
+    fetchJson: async () => { throw new Error('OpenAI HTTP 503') },
+  })
+  assert.equal(stuffDown.outcomes.transport_failed, 1)
+  assert.equal(stuffDown.outcomes.invoked, 1)
+
+  // 4. SUPPORT - two reads that both find evidence and point at DIFFERENT parts of the record. Not
+  //    an outage, not a refusal: a disagreement about WHERE the evidence is.
+  const REC = { key: 'workHistory1', kind: 'work_history', label: 'Work history',
+    text: 'Reduced outages from nine hours to one across payments. Separately, ran a graduate hiring programme for two years.' }
+  const rows = [{ id: 'r1', seq: 0, verbatim: 'Improve operational reliability', item_text: 'Improve operational reliability' }]
+  const seq = (...answers) => {
+    let i = 0
+    return async () => ({ choices: [{ message: { content: JSON.stringify(answers[Math.min(i++, answers.length - 1)]) } }] })
+  }
+  const client = sinkClient({ rows: (q) => (/from requirement where opp_id/.test(q) ? { rows } : { rows: [] }) })
+  const out = await writeEvidence(client, 'opp-1', [REC], { escalate: true, vetProposals: true }, undefined,
+    seq({ supported: true, source_key: 'workHistory1', quote: 'Reduced outages from nine hours to one',
+          reasoning: 'cutting outage duration improves operational reliability' },
+        { missing: [], supported: true, quote: 'ran a graduate hiring programme for two years', why: 'this shows it' }))
+
+  assert.equal(out.escalation_refusals.support_span_disagreed, 1, 'the in-memory tally is unchanged')
+  const support = client.rows.filter(r => r.judge === 'support')
+  const kinds = Object.fromEntries(support.map(r => [r.kind, r.count]))
+  assert.equal(kinds.support_span_disagreed, 1,
+    'the disagreement must reach judge_outcome under its OWN key, not folded into a failure count')
+  assert.equal(kinds.invoked, 1, 'and the second read must be recorded as having run')
+  assert.equal(kinds.support_transport_failed, undefined,
+    'a disagreement is not an outage - if these ever share a key the sink has lost its whole point')
+
+  // 5. THE KEYS ARE VALUES, NOT PROSE. Nothing here needed a regex over a message.
+  for (const r of client.rows) {
+    assert.equal(typeof r.kind, 'string')
+    assert.ok(!/\s/.test(r.kind), `outcome_kind must be a key, not a sentence: ${r.kind}`)
+  }
+})
+
+/**
+ * H:judge-outcome-not-gating
+ *
+ * INSTRUMENTATION MAY NEVER DECIDE ANYTHING. An observability write that can fail a gate is a worse
+ * failure mode than the blindness it cures, and this repo's standing invariant (appCoverage.ts's
+ * header, and the `.catch(() => undefined)` around both judge calls in appChecks.ts) is that an
+ * outage never takes the gate down. A NEW write that can 500 a request would be a regression
+ * against that, not a feature.
+ *
+ * MUTATION that must make this FIRE: remove the try/catch in `recordJudgeOutcomes`, or move the
+ * `recordAndPrune` calls in `appChecks.ts` above `await client.query('commit')`.
+ */
+test('H:judge-outcome-not-gating: the sink cannot throw, cannot roll back a gate, and nothing reads it', async () => {
+  // 1. A sink whose every statement throws returns 0 and does not propagate.
+  const dead = { async query() { throw new Error('relation "judge_outcome" does not exist') } }
+  assert.equal(await recordJudgeOutcomes(dead, { oppId: 'o', judge: 'coverage', outcomes: { transport_failed: 1 } }), 0)
+  assert.equal(await pruneJudgeOutcomes(dead, 'o', 30), 0)
+  assert.equal(await recordAndPrune(dead, { oppId: 'o', judge: 'coverage', outcomes: { transport_failed: 1 } }, 'x'), 0)
+
+  // 2. It is written AFTER the gate transaction commits. Ordering is the safety argument: anything
+  //    that throws inside that transaction rolls back check_result, artifact_gate AND artifact_score.
+  const checks = stripComments(src('appChecks.ts'))
+  const commit = checks.lastIndexOf(`await client.query('commit')`)
+  const record = checks.indexOf('recordAndPrune(client')
+  assert.ok(commit > 0 && record > 0, 'this guard has lost its target')
+  assert.ok(record > commit,
+    'the sink must be written AFTER the gate/score transaction commits - inside it, a failed '
+    + 'instrumentation insert would roll back check_result, artifact_gate and artifact_score')
+
+  // 3. The sink never writes a table that decides anything.
+  const sink = stripComments(src('judgeOutcome.ts'))
+  for (const t of ['check_result', 'artifact_gate', 'artifact_score', 'requirement_coverage',
+                   'requirement_evidence', 'evidence_confirmation']) {
+    assert.ok(!new RegExp(`(insert into|update|delete from)\\s+${t}\\b`).test(sink),
+      `judgeOutcome must never write ${t} - instrumentation beside gate-deciding rows is exactly `
+      + 'the failure mode this whole design was constrained to avoid')
+  }
+
+  // 4. Nothing that computes a gate, a score, a coverage count or an evidence verdict imports it.
+  for (const f of ['checks.ts', 'artifactScore.ts', 'evidence.ts', 'coverageJudge.ts', 'checkPrefs.ts']) {
+    assert.ok(!/from '\.\/judgeOutcome'/.test(src(f)),
+      `${f} decides a gate, a score or a coverage number and must not read the observability sink`)
+  }
+  // ...and no consumer anywhere SELECTs it back into a decision.
+  for (const [f, body] of allSources()) {
+    if (f === 'judgeOutcome.ts') continue
+    assert.ok(!/from\s+judge_outcome\b/.test(stripComments(body)),
+      `${f} reads judge_outcome. It is write-only by design: the moment a decision reads it, an `
+      + 'instrumentation outage becomes a wrong answer instead of a missing measurement')
+  }
+})
+
+/**
+ * H:judge-off-vs-silent-distinguishable
+ *
+ * "The owner never turned the judge on" and "the judge ran and produced nothing" are opposite facts
+ * about a run and they produced identical evidence: nothing. `invoked` is the single key that
+ * separates them, and it is why OFF must write ZERO rows rather than a row of zeroes.
+ *
+ * MUTATION that must make this FIRE: give `OFF` in appCoverage.ts an `outcomes: { invoked: 1 }`,
+ * or delete `invoked` from the live path.
+ */
+test('H:judge-off-vs-silent-distinguishable: OFF writes nothing; ON-but-silent says it ran', async () => {
+  // OFF - the owner's default. No evidence the judge was invoked, for coverage AND for stuffing.
+  const offCov = await runCoverageJudge(noCache, judgeInput(async () => { throw new Error('must not be called') },
+    { thresholds: { coverageJudge: false } }))
+  assert.deepEqual(offCov.outcomes, {}, 'judges OFF must leave no trace at all')
+  const offStuff = await runStuffingRead({
+    type: 'resume', pkg: { SkillsBullets1: 'Platform reliability engineering' },
+    postingText: 'x', thresholds: { coverageJudge: false }, fetchJson: async () => { throw new Error('must not be called') } })
+  assert.deepEqual(offStuff.outcomes, {}, 'the same rule for the stuffing read')
+  assert.equal(await recordJudgeOutcomes(sinkClient(), { oppId: 'o', judge: 'coverage', outcomes: {} }), 0,
+    'an empty tally must write zero rows - a row of zeroes would make OFF look like ON-and-silent')
+
+  // ON, and every call capped out: nothing was learned, but the judge RAN.
+  const capped = await runCoverageJudge(noCache, judgeInput(async () => { throw new Error('must not be called') },
+    { thresholds: { coverageJudge: true, coverageJudgeMaxCalls: 0 } }))
+  assert.equal(capped.outcomes.invoked, 1, 'ON-but-silent must still say the judge ran')
+  assert.equal(capped.outcomes.cap, 1, 'and why it produced nothing')
+  assert.notDeepEqual(capped.outcomes, offCov.outcomes, 'OFF and ON-but-silent must be different states')
+
+  // SUPPORT: vetProposals off means no support-judge activity at all.
+  const REC = { key: 'workHistory1', kind: 'work_history', label: 'Work history',
+    text: 'Reduced outages from nine hours to one across payments.' }
+  const rows = [{ id: 'r1', seq: 0, verbatim: 'Improve operational reliability', item_text: 'Improve operational reliability' }]
+  const mk = () => sinkClient({ rows: (q) => (/from requirement where opp_id/.test(q) ? { rows } : { rows: [] }) })
+  const proposal = says({ supported: true, source_key: 'workHistory1',
+    quote: 'Reduced outages from nine hours to one', reasoning: 'cutting outage duration improves reliability' })
+
+  const cOff = mk()
+  await writeEvidence(cOff, 'opp-1', [REC], { escalate: true }, undefined, proposal)
+  assert.equal(cOff.rows.filter(r => r.judge === 'support').length, 0,
+    'vetProposals off: the second read was never asked, so the sink must show nothing for it')
+  assert.ok(cOff.rows.some(r => r.judge === 'escalation' && r.kind === 'invoked'),
+    'the escalation pass DID run, and that is a different judge - it must still be visible')
+
+  const cOn = mk()
+  await writeEvidence(cOn, 'opp-1', [REC], { escalate: true, vetProposals: true }, undefined,
+    async (system) => {
+      if (/does NOT show/.test(system) || /missing/.test(system)) throw new Error('OpenAI HTTP 503')
+      return { choices: [{ message: { content: JSON.stringify({ supported: true, source_key: 'workHistory1',
+        quote: 'Reduced outages from nine hours to one', reasoning: 'cutting outage duration improves reliability' }) } }] }
+    })
+  const onKinds = Object.fromEntries(cOn.rows.filter(r => r.judge === 'support').map(r => [r.kind, r.count]))
+  assert.equal(onKinds.invoked, 1, 'vetProposals on: the judge ran')
+  assert.equal(onKinds.attempts, 1, 'and it was asked once')
+  assert.equal(onKinds.support_transport_failed, 1, 'and every attempt failed - provably not "never asked"')
+})
+
+/**
+ * H:evidence-confirmation-missing-scope
+ *
+ * `evidence_confirmation.missing` is the column that LOOKS like the answer to this problem - its own
+ * schema comment names supportJudge's dropped gaps as the reason it exists - and it is the wrong
+ * one. It is keyed by CLAIM IDENTITY (requirement text, source key, offsets, record digest) and is
+ * written only when the owner decides on one specific excerpt. A field-level transport failure has
+ * no excerpt, no offsets and often no requirement at all.
+ *
+ * Repurposing it as a run-level judge log would also break the distinction its own comment protects:
+ * NULL means no second read ran, an empty array means one ran and named nothing. A run-level
+ * aggregate writing into the same column would make "the owner never decided" and "the second read
+ * never disagreed" the same row.
+ *
+ * MUTATION that must make this FIRE: write `missing` from judgeOutcome.ts, or from any run-level
+ * aggregate path.
+ */
+test('H:evidence-confirmation-missing-scope: `missing` stays a per-claim column, never a run-level log', () => {
+  const sink = stripComments(src('judgeOutcome.ts'))
+  assert.ok(!/evidence_confirmation/.test(sink),
+    'the observability sink must not touch evidence_confirmation - a run-level aggregate in a '
+    + 'per-claim column collapses "the owner never decided" into "nothing was missing"')
+
+  // The column is nullable with NO default, and that is the distinction being protected.
+  const schema = src('schema.ts')
+  assert.match(schema, /alter table evidence_confirmation add column if not exists missing text\[\]\s*;/,
+    'missing must stay nullable with no default - NULL "no second read ran" and {} "one ran and '
+    + 'named nothing" are different facts')
+
+  // Every write to it must carry a claim identity. Today there is none, which is a separate known
+  // gap (the column is write-orphaned); this asserts the SCOPE, so a future writer must be the
+  // confirm path rather than an aggregate.
+  for (const [f, body] of allSources()) {
+    const s = stripComments(body)
+    for (const m of s.matchAll(/insert into evidence_confirmation\s*\(([^)]*)\)/g)) {
+      if (!/\bmissing\b/.test(m[1])) continue
+      assert.match(m[1], /requirement_text/,
+        `${f}: a write of evidence_confirmation.missing must carry the claim identity it is keyed `
+        + 'on. An aggregate with no requirement has no business in this column')
+    }
+  }
+})
+
+/**
+ * H:judge-outcome-volume-bounded
+ *
+ * `evaluateArtifact` runs on every manual check, every packet build-all (appPackets.ts:1189, once
+ * per artifact) and EVERY remediation pass (appRemediation.ts:185,272 - a loop runs many per
+ * artifact). So the sink writes constantly, and the only thing keeping that affordable is that a
+ * call produces O(distinct outcome kinds) rows and NOT O(requirements) or O(fields x requirements).
+ *
+ * MUTATION that must make this FIRE: move any `bump(...)` inside a per-requirement loop, or change
+ * `recordJudgeOutcomes` to write a row per requirement.
+ */
+test('H:judge-outcome-volume-bounded: rows per call are O(outcome kinds), not O(requirements)', async () => {
+  const many = (n) => Array.from({ length: n }, (_, i) => ({ seq: i, verbatim: `Improve operational reliability number ${i}` }))
+  const rowsFor = async (n) => {
+    const c = sinkClient()
+    const r = await runCoverageJudge(noCache, judgeInput(async () => { throw new Error('OpenAI HTTP 503') },
+      { requirements: many(n) }))
+    await recordJudgeOutcomes(c, { oppId: 'o', judge: 'coverage', outcomes: r.outcomes })
+    return c.rows.length
+  }
+  const three = await rowsFor(3)
+  const forty = await rowsFor(40)
+  assert.equal(three, forty,
+    `row count moved with the requirement count (${three} -> ${forty}). One row per requirement is `
+    + 'exactly what makes an instrumentation table unaffordable on a loop that runs per remediation pass')
+  assert.ok(forty <= 12, `a single judge call wrote ${forty} rows; the bound is the number of outcome kinds`)
+
+  // And the field loop must not multiply it either.
+  const c = sinkClient()
+  const wide = await runCoverageJudge(noCache, judgeInput(async () => { throw new Error('OpenAI HTTP 503') }, {
+    pkg: Object.fromEntries(judgeableFields('resume', {}).length ? [] :
+      ['ResumeSummary', 'SkillsBullets1', 'SkillsBullets2', 'ExpertiseBullets']
+        .map(f => [f, 'Platform reliability engineering across payments'])),
+    requirements: many(40),
+  }))
+  await recordJudgeOutcomes(c, { oppId: 'o', judge: 'coverage', outcomes: wide.outcomes })
+  assert.ok(c.rows.length <= 12,
+    `four fields x forty requirements wrote ${c.rows.length} rows - the tally must aggregate, not enumerate`)
+  // The COUNT still carries the per-field detail, which is the point of aggregating rather than dropping.
+  assert.equal(wide.outcomes.transport_failed, 4, 'one transport failure per field, summed into one row')
+})
+
+/**
+ * H:judge-outcome-ddl-parity
+ *
+ * `judgeOutcome.ts` ensures the table itself at write time, because a code deploy and pg-migrate are
+ * separate events and a run that lands first must record its outcomes rather than silently lose
+ * them. Two DDL homes for one table is how a column comes to exist in one and not the other -
+ * `H:correction-ddl-parity` exists because that already happened here once, and was structurally
+ * blind to a missing column because it compared only one domain.
+ *
+ * MUTATION that must make this FIRE: add a column to SCHEMA_SQL's judge_outcome and not to
+ * ENSURE_SQL (or the reverse).
+ */
+test('H:judge-outcome-ddl-parity: the schema and the write-time ensure declare the same table', () => {
+  const cols = (body, marker) => {
+    const i = body.indexOf(marker)
+    assert.ok(i > 0, `DDL not found for ${marker} - this guard has lost its target`)
+    const open = body.indexOf('(', i)
+    const close = body.indexOf('\n  )', open) > 0 && body.indexOf('\n  )', open) < body.indexOf('\n);', open)
+      ? body.indexOf('\n  )', open) : body.indexOf('\n);', open)
+    return body.slice(open, close)
+      .split('\n').map(l => l.trim())
+      .filter(l => /^[a-z_]+\s+(uuid|text|int|bigserial|timestamptz)/.test(l))
+      .map(l => l.split(/\s+/).slice(0, 2).join(' '))
+  }
+  const fromSchema = cols(src('schema.ts'), 'create table if not exists judge_outcome')
+  const fromEnsure = cols(src('judgeOutcome.ts'), 'create table if not exists judge_outcome')
+  assert.ok(fromSchema.length >= 8, `parsed ${fromSchema.length} columns from SCHEMA_SQL - the scan is broken`)
+  assert.deepEqual(fromEnsure, fromSchema,
+    'the write-time ensure and SCHEMA_SQL must declare the same columns in the same order. A column '
+    + 'in one and not the other means the table an early-arriving deploy creates is not the table '
+    + 'the migration would have made, and nothing would ever say so')
+
+  // The CHECK domain must match too - a judge name accepted by one and rejected by the other is a
+  // silently dropped row on exactly one of the two paths.
+  const domain = (body) => (body.match(/check \(judge in \(([^)]*)\)\)/) || [])[1]
+  assert.equal(domain(src('judgeOutcome.ts')), domain(src('schema.ts')),
+    'the judge CHECK domain must be identical in both DDL homes')
+})
+
+/**
+ * H:metering-sees-a-failed-call
+ *
+ * The same success-is-visible-failure-is-not shape, one layer BELOW the judges. `logUsage` was
+ * called from inside `openAiJson` AFTER its `if (!r.ok) throw`, so a network failure or a 429
+ * recorded NOTHING - not a failed row, no row at all. `usage_metering` could only ever describe the
+ * calls that worked, which made "this feature is expensive" and "this feature is broken" look the
+ * same from the ledger.
+ *
+ * MUTATION that must make this FIRE: delete either `logUsage(..., 'transport_failed')` call in
+ * openaiJson.ts, or restore the unconditional zero-token early return in usageMeter.ts.
+ */
+test('H:metering-sees-a-failed-call: a transport failure is metered, and the throw still reaches the caller', () => {
+  const oa = stripComments(src('openaiJson.ts'))
+  assert.equal((oa.match(/logUsage\([^)]*'transport_failed'\)/g) || []).length, 2,
+    'BOTH failure paths must meter: the fetch itself throwing, and a non-2xx response. One of the '
+    + 'two covered is the half-fix that leaves the other invisible')
+  // The throw is unchanged. The caller must still be able to tell "the model said no" from "we
+  // never reached the model" - metering the failure must not swallow it.
+  assert.match(oa, /await logUsage\(opts\.feature, model, null, 'transport_failed'\)\s*\n\s*throw /,
+    'the failure must be metered and then RETHROWN - a metered-and-swallowed error would turn a '
+    + 'transport outage into a stored finding of "no evidence exists"')
+
+  const um = stripComments(src('usageMeter.ts'))
+  assert.match(um, /if \(!promptTokens && !completionTokens && outcome === 'ok'\) return/,
+    'a failed call has no tokens, so the zero-token early return must not apply to it - that '
+    + 'return is precisely what made a transport outage invisible')
+  assert.match(um, /add column if not exists outcome text not null default 'ok'/,
+    "'ok' is the correct backfill: every row already in the table was written by the success path")
+  assert.match(stripComments(src('schema.ts')).replace(/\s+/g, ' '),
+    /alter table usage_metering add column if not exists outcome text not null default 'ok'/,
+    'SCHEMA_SQL must declare the same column - the runtime ensure is a fallback, not the source of truth')
+})
+
+/**
+ * H:judge-outcome-retention-is-a-setting
+ *
+ * A prune threshold is exactly the sort of number the owner must be able to change without a deploy,
+ * and this repo's no-hardcoded-config rule was previously violated by OMISSION rather than by a
+ * literal: `owner_search_prefs.chk_*` was read by `loadThresholds` and written by NO route and no
+ * UI for months (appDimensions.ts's own comment). A stored default with no writer is a constant.
+ *
+ * MUTATION that must make this FIRE: inline the retention window as a literal in the delete
+ * statement, or delete the PATCH branch of the prefs route.
+ */
+test('H:judge-outcome-retention-is-a-setting: the prune window is owner-changeable, not a literal', async () => {
+  const sink = stripComments(src('judgeOutcome.ts'))
+  // The delete takes the window as a PARAMETER. A literal interval here is the whole defect.
+  assert.match(sink, /created_at < now\(\) - make_interval\(days => \$2::int\)/,
+    'the retention window must arrive as a bound parameter, never as an inlined literal')
+  assert.ok(!/now\(\) - interval '/.test(sink),
+    'a hardcoded interval literal is a retention policy the owner cannot see or change')
+
+  // It EXTENDS the established per-owner store rather than standing up a settings table.
+  assert.match(sink, /alter table owner_search_prefs\s*\n?\s*add column if not exists judge_outcome_retention_days/,
+    'extend owner_search_prefs - jdSweep, appDimensions, appSearchPrefs and appRemediation all do, '
+    + 'and a second settings table is the parallel-system shape "extend, dont duplicate" forbids')
+  assert.ok(!/create table if not exists judge_outcome_prefs/.test(sink), 'no parallel settings table')
+
+  // And there is a WRITER, so the setting is reachable from the product rather than by hand-written SQL.
+  assert.match(sink, /req\.method === 'PATCH'/, 'a stored default with no writer is a constant')
+  assert.match(sink, /update owner_search_prefs set judge_outcome_retention_days/)
+  assert.equal(typeof DEFAULT_JUDGE_OUTCOME_RETENTION_DAYS, 'number')
+
+  // 0 means keep everything, and it must actually prune nothing rather than prune everything.
+  let deletes = 0
+  const c = { async query(q) { if (/delete from judge_outcome/.test(q)) deletes++; return { rows: [], rowCount: 0 } } }
+  assert.equal(await pruneJudgeOutcomes(c, 'o', 0), 0)
+  assert.equal(deletes, 0, '0 days must mean KEEP FOREVER - deleting everything would be the exact inverse')
+  await pruneJudgeOutcomes(c, 'o', 30)
+  assert.equal(deletes, 1, 'a positive window must actually prune')
+})

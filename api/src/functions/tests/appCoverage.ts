@@ -54,9 +54,25 @@ export interface CoverageRunResult {
   /** Asked and unanswered. Reported so a run that judged nothing is visible rather than silent. */
   silent: number[]
   failures: Array<{ field: string; error: string }>
+  /**
+   * THE SAME FACTS, STRUCTURED — a tally of outcome_kind to count, for `judge_outcome`.
+   *
+   * ADDITIVE, never a replacement: `calls`, `refused`, `silent` and `failures` above are untouched
+   * and still say exactly what they said, because two callers and a test suite read them. What they
+   * could not do is survive the request — `evaluateArtifact` folded them into a `judge` object only
+   * the direct HTTP handler ever read, so a judge that stopped answering looked identical to a judge
+   * that found nothing. This is the shape that can be stored and queried.
+   *
+   * The KEYS are the strings the failure messages already use (`transport`, `cap`, `cache`, `write`
+   * become `transport_failed`, `cap`, `cache_failed`, `write_failed`) so the prose and the structure
+   * cannot describe different runs. `invoked` is present whenever the judge RAN — that single key is
+   * what makes "off" (no rows at all) different from "on and silent" (invoked, nothing else).
+   */
+  outcomes: Record<string, number>
 }
 
-const OFF: CoverageRunResult = { calls: 0, cacheHits: 0, refused: 0, silent: [], failures: [] }
+/** OFF: no `invoked`, so the sink records NOTHING. That absence is the B1/B2 distinction. */
+const OFF: CoverageRunResult = { calls: 0, cacheHits: 0, refused: 0, silent: [], failures: [], outcomes: {} }
 
 const reqText = (r: JudgeRequirement) => String(r.verbatim || r.item_text || '')
 
@@ -96,6 +112,10 @@ export async function runCoverageJudge(client: any, input: CoverageRunInput): Pr
 
   const perField: Array<{ field: string; result: JudgeResult }> = []
   const failures: CoverageRunResult['failures'] = []
+  // Tallied beside the prose rather than parsed back out of it. Every `failures.push` below has a
+  // `bump` next to it naming the SAME event with a stable key.
+  const outcomes: Record<string, number> = { invoked: 1 }
+  const bump = (k: string, n = 1) => { if (n > 0) outcomes[k] = (outcomes[k] || 0) + n }
   let calls = 0
   let cacheHits = 0
   let refused = 0
@@ -109,6 +129,7 @@ export async function runCoverageJudge(client: any, input: CoverageRunInput): Pr
       // A cache that cannot be read is a cache miss, never a verdict. Recorded so a broken query
       // shows up as a cost rather than as a silently model-less run.
       failures.push({ field, error: `cache: ${String(e?.message || e).slice(0, 200)}` })
+      bump('cache_failed')
     }
 
     const hits: CoverageVerdict[] = []
@@ -123,6 +144,7 @@ export async function runCoverageJudge(client: any, input: CoverageRunInput): Pr
       // THE CAP IS SILENCE, NOT A NO. What was cached still counts; what was not is unanswered, and
       // `combineFieldVerdicts` keeps it out of the map.
       failures.push({ field, error: `cap: ${maxCalls} calls already made` })
+      bump('cap')
       perField.push({ field, result: { verdicts: hits, refused: [], unjudged: missing.map(r => r.seq) } })
       continue
     }
@@ -133,6 +155,8 @@ export async function runCoverageJudge(client: any, input: CoverageRunInput): Pr
       raw = await input.fetchJson(COVERAGE_SYSTEM, buildCoverageUser(missing, field, text))
     } catch (e: any) {
       failures.push({ field, error: `transport: ${String(e?.message || e).slice(0, 200)}` })
+      bump('transport_failed')
+      for (const m of missing) bump(`transport_failed_seq_${m.seq}`)
       perField.push({ field, result: { verdicts: hits, refused: [], unjudged: missing.map(r => r.seq) } })
       continue
     }
@@ -141,7 +165,12 @@ export async function runCoverageJudge(client: any, input: CoverageRunInput): Pr
     // The quote floor the profile side already applies, pointed at the document: a two-character
     // "quote" is present in every document ever written and shows nothing.
     const kept = parsed.verdicts.filter(v => !v.covered || (v.quote || '').length >= minQuote)
-    refused += parsed.refused.length + (parsed.verdicts.length - kept.length)
+    const fieldRefused = parsed.refused.length + (parsed.verdicts.length - kept.length)
+    refused += fieldRefused
+    // KEPT SEPARATE FROM THE FAILURE KINDS ABOVE, deliberately. "the model answered and refused" and
+    // "we never reached the model" are different facts about a run and only the second is an outage;
+    // merging them is the collapse this sink exists to undo.
+    bump('refused', fieldRefused)
 
     try {
       await writeVerdicts(client, input, field, text, covText, kept, missing)
@@ -149,6 +178,7 @@ export async function runCoverageJudge(client: any, input: CoverageRunInput): Pr
       // A verdict that could not be stored is still a valid answer for THIS run. It costs a call
       // next time; it does not change what the owner is told now.
       failures.push({ field, error: `write: ${String(e?.message || e).slice(0, 200)}` })
+      bump('write_failed')
     }
 
     perField.push({
@@ -162,7 +192,12 @@ export async function runCoverageJudge(client: any, input: CoverageRunInput): Pr
   }
 
   const combined = combineFieldVerdicts(perField, asked.map(r => r.seq))
-  return { verdicts: combined.verdicts, calls, cacheHits, refused, silent: combined.silent, failures }
+  bump('calls', calls)
+  bump('cache_hits', cacheHits)
+  // ASKED AND UNANSWERED. Distinct from `refused` (the model answered, and its answer was rejected)
+  // and from `transport_failed` (nobody answered because nobody was reached).
+  bump('unanswered', combined.silent.length)
+  return { verdicts: combined.verdicts, calls, cacheHits, refused, silent: combined.silent, failures, outcomes }
 }
 
 async function readCached(
@@ -244,8 +279,18 @@ export async function runStuffingRead(input: {
   postingText: string
   thresholds: Partial<CheckThresholds>
   fetchJson: FetchJson
-}): Promise<{ hits: Array<{ field: string; phrase: string; why: string }>; calls: number; refused: number; failures: string[] }> {
-  const off = { hits: [], calls: 0, refused: 0, failures: [] as string[] }
+}): Promise<{
+  hits: Array<{ field: string; phrase: string; why: string }>
+  calls: number; refused: number; failures: string[]
+  /**
+   * The structured twin of the counters above, for `judge_outcome`. `hits` here is the count that
+   * was previously readable ONLY by regexing it out of the `posting_wording_kept` message prose
+   * ("(N raised by a model reading for name-dropping)"). The prose stays exactly as it is for the
+   * human reader; this is the second, machine-readable view of the same number.
+   */
+  outcomes: Record<string, number>
+}> {
+  const off = { hits: [], calls: 0, refused: 0, failures: [] as string[], outcomes: {} as Record<string, number> }
   if (input.thresholds?.coverageJudge !== true) return off
   const posting = String(input.postingText || '').trim()
   if (!posting) return off          // nothing to compare against is not a finding
@@ -256,10 +301,12 @@ export async function runStuffingRead(input: {
 
   const hits: Array<{ field: string; phrase: string; why: string }> = []
   const failures: string[] = []
+  const outcomes: Record<string, number> = { invoked: 1 }
+  const bump = (k: string, n = 1) => { if (n > 0) outcomes[k] = (outcomes[k] || 0) + n }
   let calls = 0
   let refused = 0
   for (const { field, text } of fields) {
-    if (calls >= maxCalls) { failures.push(`${field}: cap`); continue }
+    if (calls >= maxCalls) { failures.push(`${field}: cap`); bump('cap'); continue }
     try {
       calls++
       const parsed = parseStuffing(
@@ -270,7 +317,11 @@ export async function runStuffingRead(input: {
       // A read that could not run raises NOTHING. Silence is the correct output of a failure here:
       // this surface accuses the owner's own prose, so an outage must never produce a finding.
       failures.push(`${field}: ${String(e?.message || e).slice(0, 120)}`)
+      bump('transport_failed')
     }
   }
-  return { hits, calls, refused, failures }
+  bump('calls', calls)
+  bump('refused', refused)
+  bump('hits', hits.length)
+  return { hits, calls, refused, failures, outcomes }
 }
