@@ -628,3 +628,40 @@ Instance 1 is `self-caught`, six hours late, and only because a container restor
 re-derive what was running. Instance 2 is `self-caught` in the same sweep. Neither reached the
 owner as a false claim of completion — but Instance 2 came within one turn of doing so, because the
 next step it gates is implementation.
+
+### CORRECTED AGAIN, and this time the root cause was mine to find, not the passes'
+
+Both instances above blamed the AC passes. **They had done the work.** `verify.sh` was destroying it.
+
+Every AC/verifier brief in this org tells the pass to write into `docs/qc-evidence/<the artifact>`
+AS IT GOES and commit per section — the standing defence against a container restore. `verify.sh`
+then wrote `header + the model's closing reply` to **that same path** at the end of the run. The
+reply wins.
+
+| | |
+|---|---|
+| **Claim** | (mine, twice) that four AC passes "wrote a chat-style summary instead of any criteria". |
+| **Ground truth** | **REFUTED.** `AC-reword-criteria.md` was **40,222 bytes carrying 24 criteria** at 04:25, committed in four per-section commits. At 04:28 its own run ended and `verify.sh` replaced it with a **2,833-byte** summary. Recovered with `git checkout --`. Every "hollow" artifact is this collision. |
+| **The single source that would have settled it** | `git show HEAD:<the artifact> \| wc -c` against `wc -c < <the artifact>` — the file's own history, one command, and it says the content existed and then stopped existing. I compared the artifact against *my expectation* of an AC pass instead of against *its own previous version*. |
+| **Root cause** | Two mechanisms writing one path, and I only knew about one of them. I had read the brief (which says "write as you go") and I had read `verify.sh` (which writes at the end) — in different hours, never against each other. **A collision between two things you understand separately is invisible until you ask what they do to the same resource.** |
+
+Fixed in `eds-claude-skills` `184560f`: `$OUT` is fingerprinted before the run; if the pass wrote it,
+that content is kept and the reply becomes a `## Run reply` appendix. Three behavioural checks
+(`VS-NOCLOBBER`), mutation-proved — `pass_wrote_it = False` → FIRED.
+
+**The wider lesson, and it is the one worth keeping:** my first two entries today were both written
+with real evidence, real commands, and real numbers, and both told the wrong story — because I
+diagnosed from the artifact's *content* when the answer was in its *history*. "Ground-truth before
+answering" has a second clause I keep missing: **ask what the thing looked like before, not only
+what it looks like now.**
+
+### And one guard was found broken while being used
+
+`mutate.sh`'s Python matcher greps `FAIL␣␣<name>` — two spaces. **Ten of this repo's twelve
+checkers print one space**; only `test_phase_tag.py` matches. So a matcher whose own comment claims
+it "ended the misreport" worked for one suite in twelve and returned UNDETERMINED for the rest —
+found only because the new shape guard could not be proved against `test_verify_sh.py`. This is the
+third defect of the same shape in that one file (TAP-only, then spacing), and the standing lesson
+holds: *a harness that reports the wrong outcome is worse than no harness, because the alarming
+answer is the one that gets acted on.* Fixed by squeezing whitespace on both sides while keeping the
+caller's name an `-F` fixed string.
