@@ -572,6 +572,34 @@ not. `H2` already says this -- *assert the invariant, not the incident* -- and I
 incident twice.
 
 
+## Hardening -- 2026-09-03: THREE loose source-grep guards in one session, all the same shape
+Every one matched a token that ALSO appears somewhere harmless nearby, so the guard was satisfied
+while the defect was live. Two were caught by `mutate.sh` reporting `EQUIVALENT`; the third broke on
+an unrelated rename, which is the same disease showing its other symptom.
+
+| guard | what it actually matched |
+|---|---|
+| `onSeedAssistant\([^)]*\)` + `/row\.merge_field/` | `[^)]*` stops at the FIRST `)` -- the one inside `fieldLabel(row.merge_field)` -- so the FALLBACK STRING satisfied it whether or not the argument was passed |
+| `setFieldFocus\(\{ artifactId, section: section\.trim\(\) \}\)` | pinned a LITERAL spelling; broke when the same behaviour hoisted a variable |
+| `/label: scopeLabel/` | the DESTRUCTURING two lines above the object under test |
+
+**THE RULE: a source-grep guard must isolate the CONSTRUCT first, then assert inside it.**
+
+    const body = SRC.slice(SRC.indexOf('const seedAssistant'), SRC.indexOf('const goToField'))
+    assert.ok(body.length > 50, 'could not isolate it; the guard is not reading what it thinks')
+    assert.match(body, /setFieldFocus\(/)
+
+Three properties make it hold: (1) slice by the ENCLOSING declaration, never a regex over the whole
+file; (2) assert the slice is non-trivial, so a failed slice fails loudly instead of matching an
+empty string; (3) assert the INVARIANT inside it (`/label:/`), not the exact spelling
+(`/label: scopeLabel/`), so a rename passes and the defect does not.
+
+`H2` already said *assert the invariant, not the incident* and I wrote the incident three times.
+**A source grep is the weakest guard available - prefer a behavioural test wherever the behaviour can
+be exercised, and mutation-prove EVERY source grep without exception**, because a loose one and a
+correct one read identically.
+
+
 ## Active work
 **2026-09-03 - `ui-verify` CLICK_SEL IS A SEQUENCE, and it immediately found a real gap.** `main`
 `5b34b87`.
