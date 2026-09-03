@@ -8386,3 +8386,33 @@ text costs zero calls**; and the judge is OFF by default, so a wider trigger spe
 requirements re-extracted, (c) QC screen opened, top-up only where a verdict is absent. Today the
 ONLY trigger is a manual `POST /api/app/artifact/{id}/checks` per artifact — which is precisely why
 Trinnex read 71% for a day.
+
+### ACT-69a — Trinnex cause corrected: a settings change, not a missing trigger (2026-09-03)
+
+Two corrections to what I told the owner, both from live DB + call-graph reading:
+
+1. **Build already judges.** `runPacketBuild` -> `evaluateArtifact` at appPackets.ts:1189, since
+   2026-08-22. My "the only trigger is a manual POST" was made from reading appChecks.ts without
+   tracing its callers. Trigger point (a) of the proposal is ALREADY BUILT.
+2. **My replacement proposal (judge on text write) would not have fixed Trinnex.** The text never
+   changed. `owner_search_prefs.updated_at = 2026-09-02 15:45`; resume re-checked 15:49; the other
+   three last checked 2026-08-29, while the judge was off.
+
+**Real defect: a settings change neither invalidates nor re-runs prior results, and no run records
+the config it used.** Fork put to the AC pass: auto-re-run on toggle (fixes it, may burst) vs stamp
+a config digest and surface "evaluated under older settings" (cheap, owner acts). UNDECIDED.
+
+Owner rejected proposed trigger (c) (judge on QC-screen open) — "I don't like the page loads spinner
+business" — and correctly noted an unjudged state only exists because nothing judges on write. (c)
+is withdrawn.
+
+**AC artifacts:** `docs/qc-evidence/AC-judge-observability.md` (COMPLETE — 9-row feasibility table,
+groups A-F, 5 H-case slugs, recommends one append-only table and rules out
+`evidence_confirmation.missing` by name). `docs/qc-evidence/AC-judge-trigger-points.md` IN PROGRESS,
+re-briefed twice with the corrections above.
+
+**Verified independently, not taken on the subagent's word:** all three judges lose their failures
+(only appChecks.ts:368 of three `evaluateArtifact` callers reads `.judge`); `openaiJson.ts` throws at
+:56 and logs usage at :60, so a transport failure writes zero metering rows.
+
+**No implementation started.**

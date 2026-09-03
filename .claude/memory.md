@@ -6526,3 +6526,64 @@ artifact at a time.** Trinnex's cover, portfolio and compact_resume had simply n
 Proposed trigger points (owner delegated the design to me; ACs pending before any of it is built):
 artifact written (`pkg_json` changed), requirements re-extracted, and a QC-open top-up limited to
 requirements with no verdict.
+
+## 2026-09-03 — WHY TRINNEX READ 71%: a SETTINGS change, not a missing trigger (live DB, corrected twice)
+
+I told the owner twice and was wrong twice. Both corrections matter more than the original claim.
+
+**CORRECTION 1 — "the only trigger is a manual POST /api/app/artifact/{id}/checks" is FALSE.**
+`runPacketBuild` (appPackets.ts:1066) calls `evaluateArtifact` per artifact at **appPackets.ts:1189**
+and has since 2026-08-22; the comment there records why it was added (39 packets, 0 ever sent,
+because no built artifact had an `artifact_gate` row). **Build already judges.** I read appChecks.ts
+and never traced its CALLERS — the same single-source error the org rule already forbids, applied to
+a call graph instead of a grep.
+
+**CORRECTION 2 — my replacement proposal ("judge when artifact text is written") would NOT have
+fixed Trinnex either.** Disproved by the data below: the text never changed.
+
+**THE ACTUAL CAUSE, from the live DB** (packet `85cee965-f435-4b8e-910f-c806232092ce`),
+`check_result` runs grouped by type and minute:
+
+| when | ran |
+|---|---|
+| 08-22 23:29, 08-22 23:56, 08-23 02:26, 08-23 02:46, 08-28 02:51, 08-29 15:47 | **all four types** |
+| 09-01 15:39, 09-01 16:47, 09-02 15:49, 09-02 15:50 | **resume ONLY** |
+| 09-03 08:07 | cover, compact_resume, portfolio — me, manually |
+
+`owner_search_prefs` (NOT `check_prefs` — that table does not exist) for von.ellis@enterpriseds.io:
+`chk_coverage_judge = true`, `chk_coverage_judge_max = 12`, **`updated_at = 2026-09-02 15:45:28`**.
+
+The resume was re-checked at 15:49, four minutes after the toggle — hence its 201 verdicts. The other
+three still carried their **08-29** results, computed while the judge was OFF. Their text never
+changed; their questions were never asked.
+
+**THE DEFECT, STATED PROPERLY: a settings change neither invalidates nor re-runs prior check results,
+and nothing records which configuration an artifact was evaluated under.** A coverage number can be
+computed under a config that no longer exists with nothing on screen saying so. That is invisible
+staleness, not a missing trigger.
+
+Fork sent to the AC pass: (i) re-run on settings change — fixes it automatically, but a toggle could
+burst across every artifact of every packet; (ii) stamp each run with a config digest and surface
+"evaluated under older settings" — near-zero cost, owner acts. Not decided.
+
+**The five post-build `pkg_json` writers are a REAL but LESSER issue** (verdict_key digests field
+text, so an owner edit makes the verdict stop matching and the field reads unjudged):
+`artifactContent` (appPackets:1491), `artifactAiEdit` (appPackets:1549), `artifactRemediate`
+(appRemediation:266), `artifactOwnerEdit` (appCorrections:368), `correctionRevert`
+(appCorrections:283) — plus `ensurePackage` (appPackets:626) which is the build. Six writers, each
+running its own `update packet set pkg_json`; no shared funnel.
+
+## All THREE judges lose their failures, not two (independent AC subagent, verified by me)
+
+`evaluateArtifact` returns `judge: { ...failures: string[] }`. Three callers; only the manual HTTP
+route (appChecks.ts:368) reads it. `appPackets.ts:1189` discards the return entirely;
+`appRemediation.ts:185,272` bind it but touch only `.results`. So coverageJudge's transport errors,
+refusals, cap-hits and unanswered requirements vanish exactly as supportJudge's and stuffingJudge's
+do. **Verified by reading all three call sites, not taken on the subagent's word.**
+
+Also verified: `openaiJson.ts` throws on `!r.ok` at line 56 and calls `logUsage` at line 60 — so
+**a transport failure writes ZERO metering rows.** The shared usage ledger cannot see an outage.
+
+**Guardrail earned (second time this session for the same shape):** an absence claim about behaviour
+needs the CALL GRAPH walked, not the defining module read. "Nothing triggers X" is disproved by one
+caller, and there was one.
