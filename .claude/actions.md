@@ -7991,3 +7991,34 @@ POSTING LINE, never the keyword); only **2 of 17** contain the keyword verbatim.
 
 **The 0.34 fuzzy link is DEMOTED**, not deleted: it becomes a shortlist handed to the judge to narrow
 which requirements to ask about, and must never reach the screen as a claim.
+
+### ACT-68g — scope refreshed, cost sized, attribution guard shipped (2026-09-03)
+
+**Asked:** *"go ahead on all 3, refresh scope first."* All three done.
+
+**1. `SCOPE-swap-driving-keyword.md` REWRITTEN** to the two-lane decision, and it opens by naming
+what the first version got wrong: it offered three options and none was the judge, and it over-priced
+the judge as a generation-contract change when a judge runs after the fact on stored rows.
+
+**2. `COST-swap-attribution-judge.md` — sized from real counts, and the headline is uncomfortable.**
+One call per swap row (`coverageJudge`'s shape is many-requirements-against-one-text, so 28 calls,
+not 980). **Lane 1 removes only 2 of 30 rows — about 7%.** The owner asked what percentage the
+keyword lane lands; that is the answer, and it means **this is a judge feature with a free fast
+path, not a keyword feature with a judge safety net.** Named plainly so nobody plans as though the
+deterministic half carries the load.
+
+**3. `H:attribution-follows-the-posting-line-not-the-keyword` — MUTATION-PROVEN.**
+Behavioural, not a source grep, deliberately: a grep banning `model_keyword` near `attribute` would
+fire on the planned legitimate change (threading the keyword in to build the judge's shortlist).
+What must never change is that the ATTRIBUTION is decided by the posting line. Mutation: made
+`attribute()` also match on `model_keyword` -> **142 pass became 141 pass / 1 fail**; restored via
+`git checkout HEAD --`, verified clean against HEAD, back to 142/142. **FIRED, not INERT.**
+
+**THE AC PASS FAILED AND MUST BE RE-RUN.** `verify.sh --kind AC swap-attribution-judge` reported
+`RUN_STATUS: OK` after 28 turns / 319s / **$2.775**, and wrote **no feasibility table and no
+criteria** — the artifact body is a single line of the agent's own process commentary about run
+state. Probable cause: the killed first run had left an artifact at the same path, and the brief
+told the agent to write there incrementally, so it reasoned about the file it found instead of
+producing the document. **Clearing the stale artifact before relaunching.** Cost of the lesson:
+$2.775 and five minutes, and it is worth recording that `RUN_STATUS: OK` says the process exited
+cleanly, NOT that the pass produced anything.

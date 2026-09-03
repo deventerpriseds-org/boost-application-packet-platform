@@ -1,109 +1,93 @@
-# SCOPE — a driving-keyword record on `swap_decision` (SPEC 4.6-8)
+# SCOPE — how the keyword panel earns "Took the place of X" (SPEC 4.6-8)
 
-**Written 2026-09-02.** Owner: *"scope the swap_decision keyword column."* This is a SCOPE, not an
-AC pass and not an implementation. Nothing under `api/src` or `app/src` is touched by this document.
-
----
-
-## 0. FEASIBILITY FIRST — and the headline is that the column is not the work
-
-| Dependency | Producer (writes it) | Consumer (reads it today) | Proof (command + result) | Verdict |
-|---|---|---|---|---|
-| `swap_decision.requirement_id` | `appSwaps.ts:163-172`, resolved from `SwapRow.requirement_seq` | Swaps tab, `restoreOptions`, this doc | `schema.ts:642` — `requirement_id uuid references requirement(id)` | **EXISTS** |
-| `requirement.model_keyword` | JD parse, `requirements.ts:408` | JD step chips, `proposedKeywordsForRow` | rendered on the JD step today | **EXISTS** |
-| A join keyword -> swap row | — | — | 17 of 30 `swapped` rows resolve `requirement_id` -> a requirement carrying `model_keyword` | **EXISTS-BUT-CONSTRAINED** |
-| **A record of which keyword DROVE a swap** | **nothing** | **nothing** | see §1 | **ABSENT — and not addable as a column alone** |
-
-**`EXISTS-BUT-CONSTRAINED` is the row that matters.** The join exists; it does not mean what 4.6-8
-needs. An earlier note in `PROTOTYPE-COVERAGE.md` claimed there was no join at all — that was wrong
-and is corrected there and in `.claude/accuracy-log.md`.
+**Rewritten 2026-09-03.** The first version of this scope was wrong in its framing and is superseded
+below. Owner decision recorded; implementation gated on the AC pass. Nothing under `api/src` or
+`app/src` is touched by this document.
 
 ---
 
-## 1. WHY A COLUMN ALONE CANNOT BE FILLED
+## 0. WHAT THE FIRST VERSION GOT WRONG
 
-Three facts, each read from source rather than assumed:
+It offered three options — change the generation contract, exact-match only, or leave it — and
+**none of them was the judge.** That was the wrong menu. Owner: *"I thought that's when the judge llm
+was supposed to come into play? we know keyword is insufficient."*
 
-1. **The model returns plain text, not structured provenance.** `buildSwaps` consumes
-   `splitItems(pkg[f.merge] ?? call3[f.passB])` (`swaps.ts:497`) — a list of item STRINGS. There is
-   no per-item field naming a keyword, a target, or a reason.
-2. **Attribution is POST-HOC and FUZZY.** `attribute()` (`swaps.ts:224`) takes the final item text
-   and returns the best-matching requirement by `similarity()` — token-set containment — at
-   `ATTRIBUTION_THRESHOLD = 0.34`, matched against the requirement's **verbatim posting line**.
-3. **The engine cannot see keywords at all.** `RequirementRef` is
-   `{ seq, verbatim, item_text, kind }` (`swaps.ts:213`). `model_keyword` is not in it.
+Three judges already ship on one contract (`coverageJudge`, `supportJudge`, `stuffingJudge`), each
+built for the identical reason: an exact rule was too blunt to answer a question, so a model answers
+it and **must cite words the text really contains, which code then verifies byte-exact**. Proposing
+new machinery without finding them is the "extend, don't duplicate" failure, and it cost four turns.
 
-> **So "record the driving keyword at swap time" is a GENERATION-CONTRACT change, not a schema
-> change.** Adding `swap_decision.driving_keyword` today would produce a column that is null on
-> every row, because nothing upstream knows the answer. Shipping the column first would be the
-> write-only-field defect this repo has already hit once (`correction.frame`).
+It also **over-priced the judge.** The first version's Option A meant changing what the model returns
+during generation — a hot path, no backfill, existing packets null forever. A judge does none of
+that: it runs *after the fact on stored rows*, so generation is untouched and **existing packets can
+be re-judged**.
 
 ---
 
-## 2. THE THREE OPTIONS, with the honest cost of each
+## 1. THE DECISION — two lanes, no overlap
 
-### Option A — structured generation (makes the claim TRUE at the source)
+Each lane makes only the claim its own evidence supports. That is what keeps this small.
 
-Change the call-3 response contract so each emitted list item carries the keyword(s) it was written
-to place; thread `model_keyword` into `RequirementRef`; persist per swap row.
+| Lane | Condition | What the panel says | Backed by |
+|---|---|---|---|
+| **1. Exact** | `requirement.model_keyword` appears verbatim in `swap_decision.to_label` | **Placement** — *"'global engineering' is in 'Global Engineering Teams', which replaced 'Agile Transformation'"* | String containment. Deterministic, free, no model |
+| **2. Judge** | everything lane 1 cannot settle | **Causation** — *"Took the place of 'Agile Transformation'"* | A model verdict that must CITE, with the citation verified byte-exact by code |
 
-- **Unlocks:** the prototype's exact control — *"Took the place of X"* — with real causation.
-- **Cost:** prompt + response-schema + parser change on a hot path that already carries many guards;
-  `RequirementRef` widened; a new column plus a migration.
-- **TIER 1.** It **admits model output into a stored claim**. Needs an independent AC pass before
-  coding, an independent verifier after, and a vet: a model asserting "I placed keyword K here" is
-  exactly the kind of claim that must be checked against the text rather than believed.
-- **No backfill is possible.** Every existing row stays null forever; the UI must handle that
-  permanently, not as a transitional state.
-- **Risk that decides it:** if the model's self-report is wrong, the app prints a false causal claim
-  next to a button that rewrites the owner's document. The vet is not optional.
+**The judge does NOT re-check lane 1.** An intermediate draft added a confirmation pass over the
+exact matches; the owner withdrew it (*"what you read back seemed super complicated"*) and was right.
+What made it complicated was insisting both lanes make the SAME claim. They need not — placement and
+causation are different statements with different evidence — and once each lane says only what it can
+prove, the extra pass disappears. Spending model calls to re-confirm a string comparison is cost
+with no finding.
 
-### Option B — exact placement, and NO causation claim  *(recommended first step)*
-
-Do not claim causation. Render the control only where the keyword appears **exactly** in the
-replacement text, and word it as placement:
-
-> `"global engineering"` is in the item that replaced `"Agile Transformation"`.
-
-- **Unlocks:** a true, checkable statement using data that exists today.
-- **Reuses:** `keywordPresence` (`AssetBlocks.jsx:706`) — the SAME derivation already feeding the
-  chip state and the highlight, so a third opinion about "is this keyword in this text" cannot form.
-- **Cost:** UI wiring only. **TIER 2** — no new stored claim, no gate, no score.
-- **Measured frequency:** **2 of 17** joined swapped rows on the production fixture
-  (`global engineering` -> `Global Engineering Teams`, twice). Low, and honest: the no-dead-UI rule
-  already governs — no exact match, no control.
-- **Limit, stated plainly:** it is a weaker sentence than the prototype's, and it will be absent on
-  most rows. That is the price of only saying what is true.
-
-### Option C — leave 4.6-8 PARTIAL
-
-Zero cost, and defensible: the capability exists in the field margin (`AssetBlocks.jsx:946-954`)
-and in the Swaps tab. Only the panel-level shortcut is missing.
+**No citation, no claim.** Lane 2 answers `absent` and the panel stays quiet, worded so silence
+reads as deliberate rather than broken.
 
 ---
 
-## 3. RECOMMENDATION
+## 2. THE FUZZY LINK IS DEMOTED, NOT DELETED
 
-**B now, A only if the owner wants true causation.** B is a Tier-2 change that says something true
-today; A is a Tier-1 pipeline initiative whose main risk is printing a model's self-report as fact.
-Doing B first also de-risks A: it builds the panel slot and the copy, so A later swaps the
-CONDITION (exact containment -> recorded causation) without redesigning the control.
+`swap_decision.requirement_id` is written by `attribute()` (`swaps.ts:224`) — `similarity()` token
+containment at `ATTRIBUTION_THRESHOLD = 0.34`, matched against the requirement's **verbatim posting
+line**, never against the keyword.
 
-**Do NOT ship the middle path** — rendering causation off `requirement_id`'s 0.34 fuzzy attribution.
-That is `CLAUDE.md:432`, *"fuzzy matching is for RANKING, never for ACCUSING"*, and it is the
-specific thing this scope exists to refuse.
+**Measured on the live packet, and this is the number that settles it:**
+
+| | count |
+|---|---:|
+| `action='swapped'` rows | 30 |
+| …carrying a `requirement_id` | 17 |
+| …**sharing ZERO tokens between keyword and replacement** | **8** |
+| …containing the keyword verbatim | 2 |
+
+Worst case is not a low-confidence row: **`AI governance` → `Risk Management` at confidence 1.000**,
+because that confidence scores the replacement against the POSTING LINE, never against the keyword.
+
+So `requirement_id` becomes a **shortlist handed to the judge** to narrow which requirements to ask
+about — ranking, which it is fine at — and **must never reach the screen as a claim**
+(`CLAUDE.md:432`).
 
 ---
 
-## 4. IF OPTION A IS CHOSEN — what the AC pass must settle
+## 3. WHAT THIS MUST NOT DO
 
-1. What EXACTLY does the model assert, and in what field of the response?
-2. How is that assertion VETTED before it is stored? (Exact containment of the keyword in the item
-   it claims to have placed is the cheapest vet and should probably be mandatory.)
-3. What is written when the vet FAILS — null, or a row marked unvetted? (`Absent evidence is
-   not_applicable, never pass`.)
-4. What does the UI show for the permanent null population of pre-change rows?
-5. Which existing guards does the widened `RequirementRef` touch, and does
-   `H:...` swap coverage still hold?
-6. Does any gate, score or coverage count read the new column? (It must not, or the tier rises
-   again.)
+- **Not touch generation.** `buildSwaps`, `call3` and the prompt stay exactly as they are.
+- **Not feed a gate, a score or a coverage count.** If a verdict does, the tier rises again.
+- **Not merge `must_have_coverage` with `evidence_placed`** — the populations stay apart.
+- **Not replace the exact rule.** Every shipped judge kept its deterministic half as the cheap
+  fallback, and this one does too.
+
+---
+
+## 4. COST
+
+See `docs/qc-evidence/COST-swap-attribution-judge.md` — sized from the real row counts before the
+ACs, so the criteria land against a measured budget rather than a guess.
+
+---
+
+## 5. STATUS
+
+**TIER 1** — a stored verdict is a claim. The AC pass runs independently
+(`scripts/verify.sh --kind AC swap-attribution-judge`), artifact
+`AC-swap-attribution-judge.md`. **No implementation begins until those criteria land.**
