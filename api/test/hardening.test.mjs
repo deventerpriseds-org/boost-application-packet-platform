@@ -35,7 +35,8 @@ import { extractFigures, scanEcho, claimKey, isMarked, generalize } from '../dis
 import { planCorrections } from '../dist/functions/tests/correction.js'
 // MC_KIND joins this import so H:mastercontext-block-key-domain compares the SQL CHECK against
 // the module that OWNS the block list, never against a literal retyped in the test.
-import { profileRecords, resolveEvidence, MC_KIND } from '../dist/functions/tests/evidence.js'
+import { profileRecords, resolveEvidence, MC_KIND, masterBaseline } from '../dist/functions/tests/evidence.js'
+import { entityFromBlocks, masterContextSource } from '../dist/functions/tests/masterContext.js'
 
 const SRC = new URL('../src/functions/tests/', import.meta.url).pathname
 const src = (f) => readFileSync(join(SRC, f), 'utf8')
@@ -5672,4 +5673,66 @@ test('H:mastercontext-block-key-domain: the block_key CHECK matches MC_KIND exac
     `${inSql.filter((k) => !inModule.includes(k))}; only in MC_KIND: ` +
     `${inModule.filter((k) => !inSql.includes(k))}. A block the module knows but the database ` +
     `rejects is a row the migration silently drops.`)
+})
+
+// H:mastercontext-baseline-parity -- the two backings produce the SAME baseline.
+//
+// `masterBaseline()` is what every swap row's "original" compares against, so if the Postgres cut
+// changes its output by one character, provenance is silently rewritten on every packet built after
+// the flip. AC-5 is that the output is byte-identical across the cut; this is its STATIC half (the
+// live half needs the owner's real data and is a db-query.yml check after the copy runs).
+//
+// IT DRIVES THE REAL ASSEMBLY, `entityFromBlocks`, rather than rebuilding the entity in the test.
+// A guard that re-implements the thing it checks passes whenever the test and the code make the
+// same mistake -- the inert-guard shape this repo has already paid for more than once.
+//
+// MUTATION that must make this FIRE: in masterContext.ts, make entityFromBlocks skip or rename a
+// key (e.g. `entity[r.block_key + '_'] = r.text`).
+test('H:mastercontext-baseline-parity: Storage-shaped and Postgres-shaped give the same baseline', () => {
+  // ONE fixture, rendered two ways -- the point is that only the SHAPE differs, never the content.
+  const fixture = {
+    resumeSummary: 'Twenty years shipping platforms.',
+    skills1: 'Product, Platform, AI',
+    skills2: 'Governance, Risk',
+    workHistory1: 'eMoney — CTO — 2019-2024',
+    expertise: 'Executive engineering leadership',
+    softHardSkillsPool: 'facilitation; forecasting',
+  }
+  // What Storage returns: one entity, plus the system columns every Table row carries.
+  const storageShaped = { partitionKey: 'context', rowKey: '1', etag: 'W/"x"', ...fixture }
+  // What Postgres returns: one row per block, through the SHIPPING assembly function.
+  const pgShaped = entityFromBlocks(Object.entries(fixture).map(([block_key, text]) => ({ block_key, text })))
+
+  assert.deepEqual(masterBaseline(pgShaped), masterBaseline(storageShaped),
+    'the Postgres backing changes what masterBaseline() returns. That is the BASELINE every swap ' +
+    'row compares its "original" against, so a difference here rewrites provenance on every packet ' +
+    'built after the flip.')
+})
+
+// H:mastercontext-rollback-flag -- the switch has two REACHABLE branches, not one plus dead code.
+//
+// AC-6 makes rollback "flip MASTERCONTEXT_SOURCE back", which is only true while both branches
+// still work. A switch hardcoded to one side is the shape of a rollback that exists in the comment
+// and not in the code -- and this repo's rule is that a value the owner may need to change must not
+// be a literal only a developer can move.
+//
+// MUTATION that must make this FIRE: make masterContextSource() return a constant.
+test('H:mastercontext-rollback-flag: both source branches are reachable from the env', () => {
+  const before = process.env.MASTERCONTEXT_SOURCE
+  try {
+    process.env.MASTERCONTEXT_SOURCE = 'postgres'
+    assert.equal(masterContextSource(), 'postgres')
+    process.env.MASTERCONTEXT_SOURCE = 'storage'
+    assert.equal(masterContextSource(), 'storage', 'the storage branch is unreachable -- rollback is gone')
+    delete process.env.MASTERCONTEXT_SOURCE
+    assert.equal(masterContextSource(), 'storage',
+      'the DEFAULT must be storage until the copy has run and been confirmed live; defaulting to ' +
+      'postgres flips production the moment this deploys, with no copy behind it')
+    // Anything unrecognised must fall back to the safe side rather than being treated as postgres.
+    process.env.MASTERCONTEXT_SOURCE = 'Postgres'
+    assert.equal(masterContextSource(), 'storage', 'a typo must not silently switch the store')
+  } finally {
+    if (before === undefined) delete process.env.MASTERCONTEXT_SOURCE
+    else process.env.MASTERCONTEXT_SOURCE = before
+  }
 })
