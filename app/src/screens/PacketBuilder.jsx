@@ -16,7 +16,7 @@ import { GateBadge } from './AssetGateDrawer.jsx'
 import AssistantPanel from './AssistantPanel.jsx'
 import AnalysisPanel from './AnalysisPanel.jsx'
 import { assistantMode, DOCK_MIN_VIEWPORT } from '../assistantPanel.js'
-import { qcStepState, packetGate, railGateMeta, packetReadiness, packetFailList, qcSummaryModel, firstFixTarget, listOwnersFromArtifacts, requirementUsage } from '../qcRail.js'
+import { qcStepState, packetGate, railGateMeta, packetReadiness, packetFailList, qcSummaryModel, firstFixTarget, listOwnersFromArtifacts, requirementUsage, staleChecksNote } from '../qcRail.js'
 
 const TYPE_LABEL = {
   resume: 'Resume', compact_resume: 'Compact resume', cover: 'Cover letter',
@@ -148,7 +148,7 @@ function stepDone(key, p, artifacts, qc) {
 // Exported so the browser probe can mount the REAL card (test/browser/run-asset-blocks.mjs). The
 // header's collapsed default is a rendering fact; asserting it against a replica of this component
 // would prove only that the replica was written to match.
-export function ArtifactCard({ a, busy, setBusy, qcResult, onGenerate, onRegenerate, onSetStatus, onMakeDoc, onMakeSlides, onGenVideo, onArchiveVideo, doc, video, provenance, listOwners, onListsRendered, focusField = null, onOpenFirstFix = null, firstFix = null, onSeedAssistant = null, fieldOwners = null, onGoToField = null }) {
+export function ArtifactCard({ a, busy, setBusy, qcResult, qcStale = false, qcStaleError = null, onStaleSignal = null, onGenerate, onRegenerate, onSetStatus, onMakeDoc, onMakeSlides, onGenVideo, onArchiveVideo, doc, video, provenance, listOwners, onListsRendered, focusField = null, onOpenFirstFix = null, firstFix = null, onSeedAssistant = null, fieldOwners = null, onGoToField = null }) {
   const v = video[a.id] || {}
   const d = doc[a.id] || {}
   const videoUrl = v.url || a.docUrl
@@ -191,6 +191,19 @@ export function ArtifactCard({ a, busy, setBusy, qcResult, onGenerate, onRegener
             and therefore no field to open, and a badge that navigates nowhere is the dead UI the
             standing rule forbids. */}
         <GateBadge result={qcResult} compact onClick={onOpenFirstFix || undefined} firstFix={firstFix} />
+        {/* Frontend checks-wiring gap: a write can save the text and still fail to recompute the
+            gate above (checksStale). The full sentence - same wording as the QC step's own note,
+            staleChecksNote - lives in the title so this short pill and that longer note cannot
+            describe the same fact two different ways. */}
+        {qcStale && (
+          // Pill (shell.jsx) does not forward extra props - it renders only children/tone/style - so
+          // `title` and `data-qc` sit on a wrapping span rather than being silently dropped on Pill
+          // itself (the same drop a pre-existing `<Pill data-qc="packet-gate">` at :1288 already has).
+          <span data-qc={PACKET_HOOKS.assetStale} data-qc-artifact={a.id}
+            title={staleChecksNote({ stale: true, staleError: qcStaleError })}>
+            <Pill tone="warn">checks may be stale</Pill>
+          </span>
+        )}
         <span className="px-link" role="button" tabIndex={0} onClick={toggle}
           data-qc={PACKET_HOOKS.assetToggle} data-qc-open={open ? '1' : '0'}
           onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle() } }}
@@ -375,7 +388,8 @@ export function ArtifactCard({ a, busy, setBusy, qcResult, onGenerate, onRegener
               onClick={async () => {
                 setAssetAskBusy(true); setAssetAskError(null)
                 try {
-                  await api.aiEditArtifact(a.id, { instruction: assetAsk.trim() })
+                  const res = await api.aiEditArtifact(a.id, { instruction: assetAsk.trim() })
+                  if (onStaleSignal) onStaleSignal(!!res.checksStale, res.checksError)
                   setAssetAsk(''); setAssetAskOpen(false)
                 } catch (e) { setAssetAskError(String((e && e.message) || e)) }
                 finally { setAssetAskBusy(false) }
@@ -458,7 +472,7 @@ export default function PacketBuilder({ id, step }) {
   // that was a second copy of the same payload, and the tally now reads the resume's entry out of
   // this one map. `null` still means no run has been read yet - a state of its own, not zero.
   const artifactList = pState.packet ? pState.packet.artifacts : null
-  const { entries: qcEntries, setResult: setQcResult } = useQcEntries(artifactList, {
+  const { entries: qcEntries, setResult: setQcResult, markStale: markQcStale, clearStale: clearQcStale } = useQcEntries(artifactList, {
     // SPEC 4.1-20 needs insertions on the JD STEP as well: `list -> artifact` is derived from them,
     // and the whole reason that row never shipped is that the old map was built by asset cards
     // registering as they RENDER, so on this step it was empty - the link would have been absent
@@ -550,6 +564,10 @@ export default function PacketBuilder({ id, step }) {
       if (res.error) throw new Error(res.error)
       patchArtifact(a.id, { status: res.artifactStatus, content: res.content })
       setPState((s) => ({ ...s, packet: { ...s.packet, status: res.packetStatus } }))
+      // The draft was saved either way - `checksStale` says the gate beside it may now describe the
+      // PREVIOUS text, not that anything failed. markQcStale is the shared useQcEntries() signal the
+      // rail's own writes use, so the QC step and this card's badge cannot disagree about it.
+      if (res.checksStale) markQcStale(a.id, res.checksError)
       toast(`Drafted ${TYPE_LABEL[a.type]}`)
     } catch (err) { toast(`Generate failed: ${err.message || err}`) }
     finally { setBusy(null) }
@@ -1003,6 +1021,9 @@ export default function PacketBuilder({ id, step }) {
                 onGenVideo={genVideo} onArchiveVideo={archiveVideo}
                 doc={doc} video={video} provenance={provenance}
                 qcResult={(qcEntries.find((e) => e.artifact.id === a.id) || {}).result || null}
+                qcStale={(qcEntries.find((e) => e.artifact.id === a.id) || {}).stale || false}
+                qcStaleError={(qcEntries.find((e) => e.artifact.id === a.id) || {}).staleError || null}
+                onStaleSignal={(stale, error) => { if (stale) markQcStale(a.id, error) }}
                 onOpenFirstFix={(() => {
                   // Computed at the CALL SITE because `goToField` and the full entry list live here.
                   // `firstFixTarget` returns null when the asset has no openable field - unchecked,
@@ -1039,7 +1060,7 @@ export default function PacketBuilder({ id, step }) {
         <>
           <QcRail
             packetId={p.id} company={p.company} role={p.role}
-            entries={qcEntries} setResult={setQcResult}
+            entries={qcEntries} setResult={setQcResult} markStale={markQcStale} clearStale={clearQcStale}
             requirements={req.data ? req.data.requirements : null} reqError={req.error}
             reqLoading={!req.data && !req.error} onGoToField={goToField}
             /* SPEC 4.8-21 - the swaps table's `Ask why`. The artifact still travels WITH the

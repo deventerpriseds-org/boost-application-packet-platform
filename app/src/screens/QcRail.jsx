@@ -9,7 +9,7 @@ import {
   requirementState, qcStepState, packetGate, loopsModel, notApplicableRows, rowsForRequirement,
   swapsForRequirement, swapAskWhy, swapUndo, listOwnersFromArtifacts, arr, errText,
   railChangeLog, undoAvailability, keepAvailability, revertOutcome, suggestScope, CHANGE_LOG_HEADLINE,
-  railDecisions, DECISION_NOTE, severityFor,
+  railDecisions, DECISION_NOTE, severityFor, staleChecksNote,
 } from '../qcRail.js'
 
 // P5.1 - the packet-level QC & evidence rail.
@@ -126,14 +126,33 @@ export function useQcEntries(artifacts, { withInsertions = false, withRemediatio
       remediation: rm.data,
       remediationLoading: rm.loading,
       remediationError: rm.error,
+      // Frontend checks-wiring gap: a write route (generate/content/ai-edit/owner-edit/revert) can
+      // report `checksStale: true` when it saved the text but could not recompute the gate in the
+      // same request. `markStale`/`clearStale` below are the only writers of these two fields - the
+      // fields are never derived from `c.data` because the GET /checks-result route this rail
+      // already polls just reads the STORED gate row and carries no staleness signal of its own, so
+      // a plain re-fetch after a write must not be read as proof the number is fresh again.
+      stale: !!c.stale,
+      staleError: c.staleError || null,
     }
   }), [list, checks, ins, rem])
 
   const setResult = useCallback((artifactId, fresh) => {
-    setChecks((m) => ({ ...m, [artifactId]: { loading: false, error: null, data: fresh } }))
+    // Deliberately does NOT touch stale/staleError: this fires after a plain GET /checks-result
+    // re-read, which returns the last STORED gate and says nothing about whether it is fresh. Only
+    // an actual recompute (clearStale, below) may resolve a stale mark.
+    setChecks((m) => ({ ...m, [artifactId]: { ...(m[artifactId] || {}), loading: false, error: null, data: fresh } }))
   }, [])
 
-  return { entries, setResult }
+  const markStale = useCallback((artifactId, error) => {
+    setChecks((m) => ({ ...m, [artifactId]: { ...(m[artifactId] || { loading: false, error: null, data: null }), stale: true, staleError: error || null } }))
+  }, [])
+
+  const clearStale = useCallback((artifactId) => {
+    setChecks((m) => ({ ...m, [artifactId]: { ...(m[artifactId] || { loading: false, error: null, data: null }), stale: false, staleError: null } }))
+  }, [])
+
+  return { entries, setResult, markStale, clearStale }
 }
 
 // ── small presentational pieces ─────────────────────────────────────────────────────────────────
@@ -473,6 +492,11 @@ function ChecksTab({ entries, pick, requirements, onOpen, onGoToField }) {
               note={e.resultLoading ? 'loading the gate...' : railBody(result)}
               right={<GateWord gate={railGate(result)} meta={railGateMeta(result)} loading={e.resultLoading} />} />
             {e.resultError && <Quiet>The gate could not be read: {e.resultError}</Quiet>}
+            {staleChecksNote(e) && (
+              <div className="px-note" data-qc={QC_HOOKS.staleChecks} data-qc-artifact={e.artifact.id} style={{ marginBottom: 8 }}>
+                {staleChecksNote(e)}
+              </div>
+            )}
             {!e.resultError && !rows.length && (
               <Quiet>{e.resultLoading
                 ? 'Reading the findings for this asset...'
@@ -547,7 +571,7 @@ function ReviewTab({ entries, onOpen, filtered, onGoToField }) {
  *                                 field-scoped edit path the resume editor already uses. Not a second
  *                                 way to ask for a change.
  */
-export function CorrectionRow({ row, artifactId, onOpen, onUndid, busy, setBusy, inField = false }) {
+export function CorrectionRow({ row, artifactId, onOpen, onUndid, busy, setBusy, inField = false, onStaleSignal = null }) {
   const [refusal, setRefusal] = useState(null)
   const [askOpen, setAskOpen] = useState(false)
   const [ask, setAsk] = useState('')
@@ -563,7 +587,13 @@ export function CorrectionRow({ row, artifactId, onOpen, onUndid, busy, setBusy,
     try {
       // The server's answer decides, on `ok` alone - a correction can revert a field back to the
       // empty string, so branching on the returned text would report a phantom refusal.
-      const outcome = revertOutcome(await api.revertCorrection(row.id))
+      const res = await api.revertCorrection(row.id)
+      // `revertCorrection` is one of the routes that can save the revert but fail to recompute the
+      // gate in the same request (`checksStale`). That is orthogonal to `revertOutcome`'s ok/refused
+      // read of the SAME response - a revert can be both accepted and stale - so both are read off
+      // one fetch rather than two.
+      if (onStaleSignal) onStaleSignal(!!res.checksStale, res.checksError)
+      const outcome = revertOutcome(res)
       if (!outcome.ok) { setRefusal(outcome.reason); return }
       await onUndid()
     } catch (e) {
@@ -584,6 +614,9 @@ export function CorrectionRow({ row, artifactId, onOpen, onUndid, busy, setBusy,
     setBusy({ key: row.key, what: 'rerun' }); setRefusal(null)
     try {
       await api.runArtifactChecks(artifactId)
+      // `checks` is a genuine, deterministic recompute (runChecks(), not a save-plus-attempt), so a
+      // successful call here is the one action allowed to CLEAR a stale mark rather than only set one.
+      if (onStaleSignal) onStaleSignal(false)
       await onUndid()
     } catch (e) { setRefusal(errText(e)) } finally { setBusy(null) }
   }
@@ -591,7 +624,8 @@ export function CorrectionRow({ row, artifactId, onOpen, onUndid, busy, setBusy,
   const doAsk = async () => {
     setBusy({ key: row.key, what: 'ask' }); setRefusal(null)
     try {
-      await api.aiEditArtifact(artifactId, { instruction: ask.trim(), section: row.merge_field })
+      const res = await api.aiEditArtifact(artifactId, { instruction: ask.trim(), section: row.merge_field })
+      if (onStaleSignal) onStaleSignal(!!res.checksStale, res.checksError)
       setAsk(''); setAskOpen(false)
       await onUndid()
     } catch (e) { setRefusal(errText(e)) } finally { setBusy(null) }
@@ -701,7 +735,7 @@ export function CorrectionRow({ row, artifactId, onOpen, onUndid, busy, setBusy,
  * "nothing needed correcting" about it would be this feature's version of the vacuous green, and it
  * is the only state that exists until the correction API lands.
  */
-function ChangeLog({ entries, onOpen, onRefresh }) {
+function ChangeLog({ entries, onOpen, onRefresh, onStaleSignal = null }) {
   const [busy, setBusy] = useState(null)
   const logs = entries.map((e) => ({ entry: e, log: railChangeLog(e.result) }))
   const anyRows = logs.some((l) => l.log.rows.length)
@@ -725,7 +759,8 @@ function ChangeLog({ entries, onOpen, onRefresh }) {
             : log.rows.length
               ? log.rows.map((row) => (
                 <CorrectionRow key={row.key} row={row} artifactId={entry.artifact.id} onOpen={onOpen}
-                  busy={busy} setBusy={setBusy} onUndid={() => onRefresh(entry.artifact.id)} />
+                  busy={busy} setBusy={setBusy} onUndid={() => onRefresh(entry.artifact.id)}
+                  onStaleSignal={onStaleSignal ? (stale, error) => onStaleSignal(entry.artifact.id, stale, error) : null} />
               ))
               : <Quiet hook={QC_HOOKS.correctionNote}>{log.body}</Quiet>}
           {log.anomalies.map((a, i) => (
@@ -805,7 +840,7 @@ function Decisions({ entries, onOpen, onGoToField }) {
 
 // ── the rail ────────────────────────────────────────────────────────────────────────────────────
 
-export default function QcRail({ packetId, company, role, entries, setResult, requirements, reqError, reqLoading = false, onGoToField, onSeedAssistant = null }) {
+export default function QcRail({ packetId, company, role, entries, setResult, markStale = null, clearStale = null, requirements, reqError, reqLoading = false, onGoToField, onSeedAssistant = null }) {
   const [tab, setTab] = useState('coverage')
   const [pick, setPick] = useState(null)
   const [drawer, setDrawer] = useState(null)          // { artifactId, section }
@@ -951,7 +986,11 @@ export default function QcRail({ packetId, company, role, entries, setResult, re
       {/* The change log, ON THE PAGE (SPEC 4.8) - not behind a tab and not behind a search. What the
           run settled by itself is the first thing a reader should see, because R1's whole claim is
           that they are reviewing finished work rather than a list of chores. */}
-      <ChangeLog entries={entries} onOpen={openField} onRefresh={refreshOne} />
+      <ChangeLog entries={entries} onOpen={openField} onRefresh={refreshOne}
+        onStaleSignal={(artifactId, stale, error) => {
+          if (!markStale || !clearStale) return
+          if (stale) markStale(artifactId, error); else clearStale(artifactId)
+        }} />
 
       {/* SPEC 4.8-10, the other half of the same sentence: "the two lists are on the page, not
           behind a tab or a search". The change log is what the run SETTLED; this is what it could

@@ -103,6 +103,12 @@ export const QC_HOOKS = {
   correctionRerun: 'qc-correction-rerun',
   // SPEC 4.11-7 - the sentence standing in for a control that must not render.
   correctionKeepNote: 'qc-correction-keep-note',
+  // Frontend checks-wiring gap: a write to an artifact's text (generate/content/ai-edit/owner-edit/
+  // revert) can succeed while the SERVER's attempt to recompute the gate in that same request fails.
+  // The response still carries `ok: true` (the text WAS saved) plus `checksStale`/`checksError`
+  // beside it, so a silent gate is the one thing that must never happen here: the number on screen
+  // may now describe text that no longer exists. This is that number's caveat.
+  staleChecks: 'qc-stale-checks',
 }
 
 // The five tabs P5.1 specifies, in the backlog's order.
@@ -139,6 +145,23 @@ export const RAIL_GATE_META = {
 export function railGateMeta(result) {
   const g = railGate(result)
   return RAIL_GATE_META[g] || gateMeta(g)
+}
+
+/**
+ * The sentence for a checks-stale caveat, or null when there is nothing to say.
+ *
+ * `entry` is one `useQcEntries()` row - `{ stale, staleError }`. The server names the reason
+ * (`checksError`) whenever it has one (a model call failed, a timeout); when it does not, the
+ * generic sentence still tells the reader the number may be wrong, which is the one thing that must
+ * never go unsaid. Kept a pure function, not inlined in the .jsx, for the same reason every other
+ * sentence in this rail is: the component renders words, it does not compose them.
+ */
+export function staleChecksNote(entry) {
+  if (!entry || !entry.stale) return null
+  const reason = entry.staleError ? String(entry.staleError).trim() : ''
+  return reason
+    ? `Checks could not be recomputed after the last change - ${reason}. The numbers below may be out of date.`
+    : 'Checks could not be recomputed after the last change. The numbers below may be out of date.'
 }
 
 /**
