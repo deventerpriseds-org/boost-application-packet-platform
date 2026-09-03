@@ -309,7 +309,21 @@ export async function artifactGenerate(req: HttpRequest, context: InvocationCont
       [content, content.length, artifactId]
     )
     const status = await recomputePacket(client, art.packet_id)
-    return { status: 200, headers: HEADERS, jsonBody: { ok: true, artifactId, type: art.type, artifactStatus: 'review', packetStatus: status, content, promptSentToAI: { model: 'gpt-4o-mini', system, user } } }
+    // THE EIGHTH WRITER, and the last of them. This route sets `status = 'review'`
+    // UNCONDITIONALLY on the line above, so before this call an artifact could be put in front of
+    // the owner marked ready-to-review having never been checked at all -- the same defect the
+    // render path had, on a route the render path's fix does not reach (`buildTemplatedArtifact` is
+    // not on this path; this route writes `artifact.content` directly).
+    //
+    // It was found by the lane that fixed the other seven, from the one column that identifies this
+    // writer: `version_history` is appended UNCONDITIONALLY here and nowhere else, so a row showing
+    // `[]` proves this route never ran on it. Packet `487cb017` showed exactly that, which is how
+    // the render path was correctly attributed instead of this one.
+    //
+    // NON-FATAL like every other call site: the draft is already persisted and must be reported as
+    // written either way, so a checking failure returns `checksStale` beside `ok: true`.
+    const rc = await recheckAfterTextWrite(client, artifactId, owner, { label: `${art.type} generate` })
+    return { status: 200, headers: HEADERS, jsonBody: { ok: true, artifactId, type: art.type, artifactStatus: 'review', packetStatus: status, content, checksStale: !rc.ok, checksError: rc.error, promptSentToAI: { model: 'gpt-4o-mini', system, user } } }
   } catch (err) {
     return { status: 500, headers: HEADERS, jsonBody: { error: String(err) } }
   } finally { try { await client?.end() } catch {} }
