@@ -6901,3 +6901,66 @@ test('H:reextract-recheck-non-fatal: a checking failure never fails the re-parse
     'applyAnchorTruth must wrap clearRequirements + the recheck in a try/catch so a recheck failure '
     + 'cannot surface as a failure of the anchor-truth write itself')
 })
+
+// H:coach-body-owner-cannot-outrank-guard -- Phase 0 / AC-S2.1. The defect: resolveOwner() reads
+// identity from the Bearer token, the UAT header, or the ?owner= QUERY STRING -- it never sees the
+// body. requireWrite() therefore approved on the DEMO branch (no Bearer, no ?owner=), and the three
+// coach handlers then took `body.owner`, running as an account the guard had never inspected.
+// Measured 2026-09-03 by reading appSession.ts:63 against coachAgent.ts:198/334/380.
+//
+// The invariant, not the incident: a request the guard cleared as DEMO must never execute as a
+// different owner. Asserted through the real handler with NO Postgres reachable, so it can only
+// pass if the refusal happens before any work.
+//
+// MUTATION that must make this FIRE: in appSession.ts resolveOwnerForWrite, delete the
+// `if (claimed && claimed !== owner)` rejection and return `{ owner }` unconditionally.
+test('H:coach-body-owner-cannot-outrank-guard: an unverified body-asserted owner is refused', async () => {
+  const { coachChat } = await import('../dist/functions/tests/coachAgent.js')
+  const req = {
+    method: 'POST',
+    headers: new Map(),                    // no Authorization -- unverified
+    query: new Map(),                      // no ?owner= -- so the guard sees DEMO and allows
+    params: {},
+    json: async () => ({ messages: [{ role: 'user', content: 'hi' }], owner: 'von.ellis@enterpriseds.io' }),
+  }
+  const res = await coachChat(req, {})
+  assert.equal(res.status, 401,
+    'a body-asserted non-demo owner on an unverified request must be refused, not silently honoured')
+  assert.notEqual(res.jsonBody?.owner, 'von.ellis@enterpriseds.io',
+    'the refusal must not echo the attacker-supplied owner as the resolved one')
+})
+
+// H:coach-demo-body-owner-still-works -- Phase 0 / AC-S2.2. The counterweight to the guard above:
+// unauthenticated DEMO exploration must not start 401ing. The frontend sends `owner` in the BODY
+// (app/src/api.js:266,276,277), and for a signed-out user that value IS the demo address, so a fix
+// that rejected every body-supplied owner would break the shipped demo path.
+//
+// MUTATION that must make this FIRE: change the rejection to `if (claimed)` -- i.e. reject ANY
+// body-supplied owner rather than only one that disagrees with the guard-approved owner.
+test('H:coach-demo-body-owner-still-works: a demo-owner body on an unverified request is NOT refused', async () => {
+  const { coachChat } = await import('../dist/functions/tests/coachAgent.js')
+  const req = {
+    method: 'POST',
+    headers: new Map(),
+    query: new Map(),
+    params: {},
+    json: async () => ({ messages: [{ role: 'user', content: 'hi' }], owner: 'demo@executive-engine.local' }),
+  }
+  const res = await coachChat(req, {})
+  assert.notEqual(res.status, 401,
+    'demo-mode exploration must keep working unauthenticated -- only a MISMATCHED owner is refused')
+})
+
+// H:coach-single-identity-source -- Phase 0 / AC-S2.1, structural. The root cause was that the
+// guard and the handler derived identity from two different places, so they could disagree. A
+// source grep is the right shape here: it forbids the DIVERGENCE returning in any coach handler,
+// including one added later that a runtime test would not know to cover.
+//
+// MUTATION that must make this FIRE: reintroduce `body?.owner` into any coachAgent.ts handler.
+test('H:coach-single-identity-source: no coach handler reads body.owner directly', () => {
+  const src = readFileSync(join(import.meta.dirname, '../src/functions/tests/coachAgent.ts'), 'utf8')
+  const stripped = src.split('\n').filter((l) => !l.trim().startsWith('//')).join('\n')
+  assert.ok(!/body\?\.owner/.test(stripped),
+    'coachAgent handlers must take identity from resolveOwnerForWrite(), never from the request body '
+    + '-- that divergence between guard and handler IS the bypass')
+})
