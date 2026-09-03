@@ -118,9 +118,22 @@ test('H:master-profile-ui-standing-note: the already-built warning is not gated 
   const NOTE = 'Packets already built keep their original wording'
   const at = body.indexOf(NOTE)
   assert.ok(at > 0, 'the standing note must be on the screen')
-  // The 240 characters before it must not open a conditional render on save state. `note` is the
-  // save-result banner; the standing copy must sit outside it.
-  const before = body.slice(Math.max(0, at - 240), at)
-  assert.ok(!/\{\s*note[?.\w]*\s*&&/.test(before) && !/note\.ok\s*\?/.test(before),
-    'the standing note must not be conditional on a save having happened')
+
+  // Its own opening tag must be rendered UNCONDITIONALLY. Checked structurally -- what sits before
+  // the tag on its line, and the line above it -- rather than by scanning a fixed window of
+  // characters. The first version of this guard did scan a window, 240 characters wide, and
+  // mutate.sh returned INERT: `{note?.ok && (` fell about twelve characters outside it, so the
+  // guard was reading a window that could not contain what it was looking for. A window is a
+  // magic number; the enclosing tag is a fact about the code.
+  const tag = body.lastIndexOf('<div', at)
+  assert.ok(tag > 0 && tag < at, 'the note must sit inside an element')
+  const lineStart = body.lastIndexOf('\n', tag) + 1
+  const prevLineStart = body.lastIndexOf('\n', lineStart - 2) + 1
+  const GATED = /\bnote[?.\w]*\s*(&&|\?)/   // only a conditional ON THE SAVE BANNER, not any `)}`
+  for (const [what, seg] of [['on its own line', body.slice(lineStart, tag)],
+                             ['on the line above', body.slice(prevLineStart, lineStart)]]) {
+    assert.ok(!GATED.test(seg),
+      `the standing note is gated on save state ${what} -- it must be true whether or not a save `
+      + 'just happened, or the owner reads it once and never again')
+  }
 })
