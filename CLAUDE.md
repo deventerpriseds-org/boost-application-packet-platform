@@ -100,23 +100,12 @@ opposite outcome. The general rule (from the org `query-azure-pg-mcp` skill, pro
 2026-08-07): *a brokered/remote MCP bypasses session egress; a locally-run one does not.*
 
 **Two things to check before concluding you cannot reach the data — neither is a platform
-limit, both need the owner, and NEITHER is fixable from inside an already-running session:**
-- `enabledInChat: false` → the connector is authenticated but **off for this chat**.
-  **CORRECTED 2026-09-03** (was: "ask the owner to enable it in the chat's connector
-  settings; its tools will not load otherwise" — that instruction assumed a live toggle that
-  does not exist for a CCR session). Verified against Anthropic's own docs
-  (`code.claude.com/docs/en/mcp`, `.../cloud-environments`): a cloud/CCR session's connector
-  set is decided **once, at session creation**, from claude.ai account state at that instant —
-  there is no documented mid-session hot-reload. Toggling it on NOW does not add it to THIS
-  session. **TELL THE OWNER to enable it before the NEXT session or reopen** — not "in this
-  chat's settings" as if it will take effect here.
+limit, both are one toggle:**
+- `enabledInChat: false` → the connector is authenticated but **off for this chat**. Ask
+  the owner to enable it in the chat's connector settings; its tools will not load otherwise.
 - A system reminder saying the server *"requires authentication"* → the OAuth session
   lapsed. A CCR session cannot run the OAuth flow. **TELL THE OWNER** so they can re-auth.
-  Do not silently fall back to GitHub Actions and never mention it. (This one CAN resolve
-  mid-session once the owner re-authorises — measured 2026-09-03: `boost-pg-mcp-write`'s
-  tools disappeared and reappeared live in one session after the owner reconnected it. That is
-  the OAuth-validity check refreshing, a different mechanism from the `enabledInChat` toggle
-  above, which is why the two bullets get different advice.)
+  Do not silently fall back to GitHub Actions and never mention it.
 
 #### `boost-pg-mcp-write` is the PREFERRED transport, and a lapse is a NUDGE, not a detour
 (owner-instructed 2026-08-29: *"make a note to use the boost-pg-mcp-write as the preferred option
@@ -515,20 +504,6 @@ what exists, why it's insufficient, and get explicit sign-off before creating it
 3. When the user reports a bug that was "already fixed in a previous session",
    **check git log first** before anything else. If the fix is not in git, that is
    the answer — commit the fix again. Do not blame the user or the live environment.
-4. **Confirm `boost-pg-mcp-write` with a QUERY, not just its status flag** (owner-instructed
-   2026-09-03 — do this at SESSION START, not only when a step first needs it, so a dead
-   connector is known before it blocks something mid-task):
-   ```
-   ListConnectors                              -- want boost-pg-mcp-write: connected:true, enabledInChat:true
-   mcp__boost-pg-mcp-write__execute_sql("select current_database(), now()")
-   ```
-   `connected: true` only proves it authenticated at some point — it is not proof the
-   connector is reachable NOW. The query is cheap, safe, needs no table-name knowledge, and
-   proves the live path end to end. If either step fails: this is a Step-0 problem (see the
-   `eds-claude-skills` `bootstrap` skill) — **enabling it now will not fix THIS session.** Tell
-   the owner plainly, render the reconnect card (`ListConnectors` → `SuggestConnectors` with
-   the `directoryUuid`), and fall back to `db-query.yml` for anything that needs the data before
-   they can re-auth — per "forgoing data is absolutely unacceptable" above.
 
 ## Commit discipline (never leave a session without this)
 
