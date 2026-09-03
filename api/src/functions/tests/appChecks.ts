@@ -19,6 +19,10 @@ import { listCorrections } from './appCorrections'
 import { EvidenceInput, EvidenceRow } from './evidence'
 import { resolveTemplateSlots } from './roleFocus'
 import { runCoverageJudge, judgeVerdictsFor, runStuffingRead } from './appCoverage'
+// D:config-staleness-backfill (AC 9a/9b) — the exact constants a verdict was judged under, read
+// (not redeclared) so a compile-time bump of either is what "older settings" compares against, not
+// a second copy of the number that could drift from the real one.
+import { JUDGE_VERSION, PROMPT_VERSION } from './coverageJudge'
 import { openAiJson } from './openaiJson'
 // INSTRUMENTATION ONLY. `recordAndPrune` has no throwing path and nothing in this file reads back
 // what it writes; see `judgeOutcome.ts` and H:judge-outcome-not-gating.
@@ -29,6 +33,37 @@ const HEADERS = { 'Content-Type': 'application/json', 'Access-Control-Allow-Orig
 // `ensureCheckPrefs` / `loadThresholds` moved to `checkPrefs.ts` (see the note there: it broke an
 // appChecks <-> appRequirements import cycle). Re-exported so every existing importer is unchanged.
 export { ensureCheckPrefs, loadThresholds, resolveOptionsFor, resolveOptionsFrom } from './checkPrefs'
+
+/**
+ * D:config-staleness-backfill (AC 9a) — write the `artifact_gate` row WITH the config it was
+ * actually computed under stamped onto it. Extracted from `evaluateArtifact`'s transaction into its
+ * own exported function for exactly one reason: it is the real production write path, and this way
+ * a test can exercise it directly against a real Postgres (H:gate-records-its-config) without also
+ * having to construct evaluateArtifact's full fixture (a packet, a profile, evidence rows, and a
+ * model transport to stub) — the same tradeoff `shipPathDb.test.mjs` already made for `writeEvidence`.
+ *
+ * Constraint 2 (this lane's brief): a stamp records HOW a run was computed and must never change
+ * WHAT was computed — so this function's SQL is otherwise byte-identical to the INSERT it replaces;
+ * gate/attention_count/run_id and the on-conflict override-clearing behavior are untouched.
+ */
+export async function writeArtifactGate(client: any, args: {
+  artifactId: string; runId: string; gate: string; attention: number
+  coverageJudgeOn: boolean; reviewerAutoOn: boolean; judgeVersion: number; promptVersion: number
+}): Promise<void> {
+  await client.query(
+    `insert into artifact_gate
+       (artifact_id, run_id, gate, attention_count, computed_at,
+        coverage_judge_on, reviewer_auto_on, judge_version, prompt_version)
+     values ($1,$2,$3,$4, now(), $5,$6,$7,$8)
+     on conflict (artifact_id) do update set
+       run_id = excluded.run_id, gate = excluded.gate,
+       attention_count = excluded.attention_count, computed_at = now(),
+       coverage_judge_on = excluded.coverage_judge_on, reviewer_auto_on = excluded.reviewer_auto_on,
+       judge_version = excluded.judge_version, prompt_version = excluded.prompt_version,
+       override_by = null, override_at = null, override_reason = null`,
+    [args.artifactId, args.runId, args.gate, args.attention,
+     args.coverageJudgeOn, args.reviewerAutoOn, args.judgeVersion, args.promptVersion])
+}
 
 /**
  * Run the engine for one artifact and store the results plus the aggregated gate.
@@ -275,14 +310,17 @@ export async function evaluateArtifact(client: any, artifactId: string, owner: s
     // The gate is REPLACED per artifact (it is the current verdict), while check_result accumulates
     // by run_id (it is the history). Overriding is cleared by a new run on purpose: an override
     // approves a specific set of findings, not the artifact forever.
-    await client.query(
-      `insert into artifact_gate (artifact_id, run_id, gate, attention_count, computed_at)
-       values ($1,$2,$3,$4, now())
-       on conflict (artifact_id) do update set
-         run_id = excluded.run_id, gate = excluded.gate,
-         attention_count = excluded.attention_count, computed_at = now(),
-         override_by = null, override_at = null, override_reason = null`,
-      [artifactId, runId, gate, attention])
+    //
+    // STAMPED with the config THIS run actually used (AC 9a) — `thresholds.coverageJudge`/
+    // `.reviewerAuto`, already loaded above for the judge call itself, not re-read: the stamp must
+    // describe what this run did, and re-querying settings here could race a concurrent write and
+    // stamp a value this run never saw.
+    await writeArtifactGate(client, {
+      artifactId, runId, gate, attention,
+      coverageJudgeOn: thresholds.coverageJudge === true,
+      reviewerAutoOn: thresholds.reviewerAuto === true,
+      judgeVersion: JUDGE_VERSION, promptVersion: PROMPT_VERSION,
+    })
     await client.query(
       `insert into artifact_score
          (artifact_id, run_id, must_have_coverage, must_have_source, keyword_coverage, keyword_source,
@@ -428,6 +466,9 @@ export async function artifactChecksGet(req: HttpRequest, context: InvocationCon
     const review = g
       ? (await client.query(`select * from review_verdict where artifact_id=$1 and run_id=$2`, [art.id, g.run_id])).rows[0] || null
       : null
+    // Loaded once, shared by `advisory` (unchanged) and the new staleness signal below, rather than
+    // querying settings twice for the same request.
+    const currentThresholds = await loadThresholds(client, owner).catch(() => ({} as any))
     return {
       status: 200, headers: HEADERS,
       jsonBody: {
@@ -440,7 +481,20 @@ export async function artifactChecksGet(req: HttpRequest, context: InvocationCon
         // input to that same decision, so it has to arrive the same way — as a server-computed
         // boolean. A client that read the owner's settings itself would be a second implementation
         // of the rule, free to disagree with `approvalBlock` about whether a button should be live.
-        advisory: (await loadThresholds(client, owner).catch(() => ({} as any)))?.gateAdvisory === true,
+        advisory: currentThresholds?.gateAdvisory === true,
+        // D:config-staleness-backfill (AC 9b) — the single change that would have made the Trinnex
+        // gap visible without spending anything: a gate stamped `coverage_judge_on: false` while the
+        // owner's CURRENT setting is `true` (or stamped under an older judge/prompt version) is a
+        // verdict the owner is looking at that was never computed under what they turned on. `g`
+        // with no stamp at all (a run that predates this feature) is NOT flagged — absence of
+        // evidence is not evidence of staleness, and flagging every pre-existing gate the day this
+        // ships would bury the real signal in noise.
+        evaluatedUnderOlderSettings: g && g.coverage_judge_on !== null ? (
+          (currentThresholds?.coverageJudge === true && g.coverage_judge_on === false) ||
+          (currentThresholds?.reviewerAuto === true && g.reviewer_auto_on === false) ||
+          (g.judge_version !== null && g.judge_version < JUDGE_VERSION) ||
+          (g.prompt_version !== null && g.prompt_version < PROMPT_VERSION)
+        ) : false,
         computedAt: g?.computed_at ?? null,
         override: g?.override_by ? { by: g.override_by, at: g.override_at, reason: g.override_reason } : null,
         // THE CHANGE LOG. `app/src/api.js` has documented for two phases that "the change log rides

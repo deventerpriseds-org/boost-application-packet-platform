@@ -37,6 +37,11 @@ import { runPacketBuild } from './appPackets'
 import { buildJobOutcome } from './packetBuild'
 import { enqueueBuild, claimNextBuild, finishBuild, abandonExhausted, getBuildJob } from './buildQueue'
 import { BUILD_QUEUE_NAME, decodeBuildSignal, sendBuildSignal } from './buildSignal'
+// D:config-staleness-backfill (AC 10-15) — the same `evaluateArtifact` every other trigger in this
+// codebase calls; a recheck job is not a second implementation of "how a check runs", only a second
+// way to schedule one.
+import { evaluateArtifact } from './appChecks'
+import { loadBackfillPrefs } from './checkPrefs'
 
 const HEADERS = {
   'Content-Type': 'application/json',
@@ -203,7 +208,105 @@ export async function buildQueueSweep(_timer: Timer, context: InvocationContext)
   } finally { try { await client?.end() } catch {} }
 }
 
+// D:config-staleness-backfill (AC 10-15) — the recheck sweep.
+//
+// Extends the D35 SHAPE (a job table + a periodic sweep that claims and runs work), not the same
+// table: `artifact_recheck_job` (schema.ts) is a lighter unit — re-run `evaluateArtifact` for one
+// already-built artifact — queued by `checkPrefs.applyJudgeTransition` on a `chk_coverage_judge`/
+// `chk_reviewer_auto` off->on flip. Timer-only, deliberately no instant Storage Queue wake for this
+// lane (see IMPL-config-stamp.md's design note) — a settings-flip backfill is not a synchronous
+// user wait the way `build-async` is, and the AC's requirement is "bounded, queued, never a
+// synchronous loop", not "instant".
+//
+// A worker that dies mid-run leaves a row `running` forever with nothing to reclaim it — the same
+// gap `packet_build_job`'s lease/reclaim solves, done here directly rather than by reaching into
+// `buildQueue.ts`, which is not owned by this lane and is a different job's table.
+const RECHECK_MAX_ATTEMPTS = 3
+const RECHECK_STALE_MINUTES = 10
+// How many distinct owners' pending recheck queues one sweep tick will service. Today there is one
+// production owner; this bound exists so a future multi-owner corpus cannot make one sweep tick's
+// work grow without limit either — the same "bounded regardless of scale" property AC 14 asks for
+// the per-flip enqueue, applied to the claim side too.
+const RECHECK_MAX_OWNERS_PER_TICK = 20
+
+async function reclaimStaleRechecks(client: any, context: InvocationContext): Promise<number> {
+  const r = await client.query(
+    `update artifact_recheck_job
+        set state = case when attempts + 1 >= $1 then 'failed' else 'pending' end,
+            attempts = attempts + 1, claimed_at = null,
+            error = case when attempts + 1 >= $1 then 'stale: worker died mid-recheck' else error end,
+            finished_at = case when attempts + 1 >= $1 then now() else finished_at end
+      where state = 'running' and claimed_at < now() - ($2 || ' minutes')::interval
+      returning id`,
+    [RECHECK_MAX_ATTEMPTS, RECHECK_STALE_MINUTES])
+  if (r.rowCount) context.log(`artifactRecheckSweep: reclaimed ${r.rowCount} stale job(s)`)
+  return r.rowCount || 0
+}
+
+async function claimRecheckBatch(client: any, owner: string, limit: number): Promise<any[]> {
+  if (limit <= 0) return []
+  // `for update skip locked` inside the CTE, exactly the concurrency-safety shape `packet_build_job`
+  // relies on (D35) — a second sweep tick (or an overlapping manual run) claiming the same owner's
+  // queue skips rows already claimed instead of racing them.
+  const r = await client.query(
+    `update artifact_recheck_job set state='running', claimed_at=now()
+      where id in (
+        select id from artifact_recheck_job
+         where owner_email=$1 and state='pending'
+         order by created_at asc
+         for update skip locked
+         limit $2
+      )
+      returning id, artifact_id, owner_email, reason`,
+    [owner, limit])
+  return r.rows
+}
+
+/** One claimed row, run and recorded. Never throws — a bad artifact must not stop the batch. */
+async function processOneRecheck(client: any, job: any, context: InvocationContext): Promise<void> {
+  try {
+    await evaluateArtifact(client, job.artifact_id, job.owner_email)
+    await client.query(
+      `update artifact_recheck_job set state='done', finished_at=now(), error=null where id=$1`, [job.id])
+    context.log(`artifactRecheckSweep: ${job.id} (artifact ${job.artifact_id}, ${job.reason}) -> done`)
+  } catch (e) {
+    await client.query(
+      `update artifact_recheck_job set state='failed', finished_at=now(), error=$2 where id=$1`,
+      [job.id, String((e as any)?.message || e)])
+    context.log(`artifactRecheckSweep: ${job.id} (artifact ${job.artifact_id}) -> failed: ${String(e)}`)
+  }
+}
+
+/**
+ * The recheck sweep — five minutes, matching `buildQueueSweep`'s cadence, because this is the same
+ * kind of fallback: nothing here is racing a user-facing request, so there is no reason to poll
+ * faster than the failure mode (a stale claim, or a settings flip) actually needs.
+ */
+export async function artifactRecheckSweep(_timer: Timer, context: InvocationContext): Promise<void> {
+  let client
+  try {
+    client = await getPgClient()
+    await reclaimStaleRechecks(client, context)
+    const owners = (await client.query(
+      `select distinct owner_email from artifact_recheck_job where state='pending' limit $1`,
+      [RECHECK_MAX_OWNERS_PER_TICK])).rows.map((r: any) => r.owner_email)
+    let processed = 0
+    for (const owner of owners) {
+      // PER-OWNER, from the owner's OWN `chk_backfill_batch_size` (checkPrefs.ts) — AC 24's
+      // "independently owner-switchable": one owner tuning their batch size never changes how much
+      // work another owner's tick does.
+      const { batchSize } = await loadBackfillPrefs(client, owner)
+      const batch = await claimRecheckBatch(client, owner, batchSize)
+      for (const job of batch) { await processOneRecheck(client, job, context); processed++ }
+    }
+    if (processed) context.log(`artifactRecheckSweep: processed ${processed} recheck(s) across ${owners.length} owner(s)`)
+  } catch (e) {
+    context.log(`artifactRecheckSweep failed: ${String(e)}`)
+  } finally { try { await client?.end() } catch {} }
+}
+
 app.http('packetBuildAsync', { methods: ['POST', 'OPTIONS'], authLevel: 'anonymous', route: 'app/opportunity/{id}/packet/build-async', handler: packetBuildAsync })
 app.http('packetBuildJobRead', { methods: ['GET', 'OPTIONS'], authLevel: 'anonymous', route: 'app/packet/build-job/{jobId}', handler: packetBuildJobRead })
 app.storageQueue('buildQueueWorker', { queueName: BUILD_QUEUE_NAME, connection: 'AZURE_STORAGE_CONNECTION_STRING', handler: buildQueueWorker })
 app.timer('buildQueueSweep', { schedule: '0 */5 * * * *', handler: buildQueueSweep })
+app.timer('artifactRecheckSweep', { schedule: '0 1-59/5 * * * *', handler: artifactRecheckSweep })

@@ -1194,6 +1194,48 @@ create index if not exists comparison_dimension_opp_idx on comparison_dimension(
 -- The ALTER is what actually delivers it. H39/H39b are the general form of this trap.
 alter table artifact_score add column if not exists judged_requirement_ids uuid[] not null default '{}';
 
+-- CONFIG-STALENESS STAMP (AC 9a, AC-judge-trigger-points.md). A gate row records a VERDICT but not
+-- the config it was computed under, so a run made while 'chk_coverage_judge' was OFF looks identical
+-- to one made while it was ON -- which is exactly how the Trinnex incident went undetected for a
+-- week: cover/portfolio/compact_resume carried live 'artifact_gate' rows the whole time, computed
+-- before the judge was ever turned on, with nothing to say so.
+-- Nullable and additive, deliberately: a stamp records HOW a run was computed, and must never alter
+-- WHAT was computed (constraint 2 in this lane's brief) -- so it can never be NOT NULL against rows
+-- this migration did not itself write, and it carries no default that would fabricate a config for a
+-- run made before the stamp existed. A NULL stamp reads as "unknown / predates this feature", never
+-- as false.
+alter table artifact_gate add column if not exists coverage_judge_on boolean;
+alter table artifact_gate add column if not exists reviewer_auto_on  boolean;
+alter table artifact_gate add column if not exists judge_version     int;
+alter table artifact_gate add column if not exists prompt_version    int;
+
+-- D:config-staleness-backfill (AC 10-15) -- extends the D35 job/queue SHAPE (packet_build_job:
+-- table + claim + timer-sweep fallback), not the same table. 'packet_build_job' re-runs the FULL
+-- packet build (Google Docs writes included); a settings-flip only needs the checks/gate/judge
+-- recomputed for artifacts that already exist, so reusing packet_build_job would re-render
+-- documents nobody asked to rebuild. One row per (artifact, reason) queued for recheck.
+create table if not exists artifact_recheck_job (
+  id           uuid primary key default uuid_generate_v4(),
+  artifact_id  uuid not null references artifact(id) on delete cascade,
+  owner_email  text not null,
+  -- WHICH setting's off->on transition caused this row, so a later off->off->on on the OTHER
+  -- setting cannot be mistaken for having already covered this one, and so AC 15's "cancel this
+  -- reason's pending rows on off" can target only the transition that just reversed.
+  reason       text not null check (reason in ('coverage_judge_on','reviewer_auto_on')),
+  state        text not null default 'pending' check (state in ('pending','running','done','failed')),
+  attempts     int not null default 0,
+  claimed_at   timestamptz,
+  finished_at  timestamptz,
+  error        text,
+  created_at   timestamptz not null default now()
+);
+create index if not exists arj_claim_idx on artifact_recheck_job(state, created_at);
+-- One live (pending-or-running) job per artifact per reason. Without this, flipping a setting
+-- off/on/off/on in quick succession -- or the sweep and a second flip racing -- could queue the
+-- same artifact twice for the same reason.
+create unique index if not exists arj_one_live_per_reason
+  on artifact_recheck_job(artifact_id, reason) where state in ('pending','running');
+
 alter table persona        add column if not exists owner_email text not null default 'demo@executive-engine.local';
 alter table persona        add column if not exists is_demo boolean not null default false;
 alter table opportunity    add column if not exists owner_email text not null default 'demo@executive-engine.local';
@@ -1826,5 +1868,7 @@ export const EXPECTED_TABLES = [
   'owner_master_block',
   // D1/H11 again: judge_outcome is a new store, so it is declared here or nothing proves the
   // migration actually created it.
-  'judge_outcome'
+  'judge_outcome',
+  // D1/H11 again: artifact_recheck_job (config-staleness backfill, AC 10-15) is a new store.
+  'artifact_recheck_job'
 ]

@@ -76,10 +76,13 @@ export async function searchPrefs(req: HttpRequest, _ctx: InvocationContext): Pr
     if (sets.length) await client.query(`update owner_search_prefs set ${sets.join(', ')}, updated_at=now() where owner_email=$1`, vals)
     // Partial in the same sense as everything above it: only the `chk_*` keys present in
     // `body.checks` move, so saving a threshold never clobbers the metro or temperature prefs.
-    const wroteChecks = await writeCheckPrefs(client, owner, b?.checks)
+    // D:config-staleness-backfill (AC 10) — `queued` reports how many already-gated artifacts this
+    // write's chk_coverage_judge/chk_reviewer_auto off->on transition (if any) just enqueued for a
+    // bounded background recheck, so a caller sees a count rather than silence.
+    const { written: wroteChecks, queued: checksQueued } = await writeCheckPrefs(client, owner, b?.checks)
     const prefs = await getSearchPrefs(client, owner)
     const checks = await loadThresholds(client, owner)
-    return { status: 200, headers: HEADERS, jsonBody: { ok: true, ...prefs, checks, checkColumns: checkPrefColumns(), wroteChecks } }
+    return { status: 200, headers: HEADERS, jsonBody: { ok: true, ...prefs, checks, checkColumns: checkPrefColumns(), wroteChecks, checksQueued } }
   } catch (e) {
     return { status: 200, headers: HEADERS, jsonBody: { ok: false, error: String(e) } }
   } finally { try { await client?.end() } catch {} }

@@ -6515,3 +6515,247 @@ test('H:judge-outcome-retention-is-a-setting: the prune window is owner-changeab
   await pruneJudgeOutcomes(c, 'o', 30)
   assert.equal(deletes, 1, 'a positive window must actually prune')
 })
+
+// ==============================================================================================
+// RE-EXTRACTION TRIGGER — AC-judge-trigger-points.md Group 2. Re-parsing a posting rewrites
+// `requirement` rows underneath every artifact already built and graded against the OLD set, and
+// nothing re-checked them. The gap already runs unattended: `jdParseTick` (appJdParse.ts) fires
+// every 5 minutes with no owner toggle. Facts confirmed live before this was built:
+//   - `verdictKey` (coverageJudge.ts:253-264) hashes the REQUIREMENT'S OWN TEXT (`req:<verbatim or
+//     item_text>`) alongside judge/prompt version, model, field and field text.
+//   - `runCoverageJudge` (appCoverage.ts:99-142) reads the cache FIRST; a fully-cached field never
+//     reaches `fetchJson` or `writeVerdicts` (line 142's `if (!missing.length) { ...; continue }`).
+//   - the insert is `on conflict (opp_id, verdict_key) do nothing` (appCoverage.ts:236-239).
+// So a byte-identical re-extraction is free ONCE evaluateArtifact runs — this trigger's own job is
+// only to decide WHEN to call it, cheaply, and to bound the fan-out when it does.
+// ==============================================================================================
+
+/**
+ * H:reextraction-rechecks
+ *
+ * Both requirement-changing writers (`writeRequirements`, reached from jdParse/jdBackfill/
+ * jdParseTick via `structureRequirements`; `clearRequirements`, reached from `applyAnchorTruth`)
+ * must trigger a recheck of every already-built artifact of the packet through the ONE shared
+ * `recheckAfterTextWrite` helper (appRecheck.ts) — the same helper Group 1's write-gap triggers use,
+ * extended rather than duplicated.
+ *
+ * MUTATION that must make this FIRE: remove the `result.changed` / `cleared.changed` gate (or the
+ * `recheckArtifactsAfterRequirementsChange(` call) from either function in appJdParse.ts, or make
+ * `recheckArtifactsAfterRequirementsChange` stop calling the evaluator for a returned artifact id.
+ */
+test('H:reextraction-rechecks: a requirements rewrite does not leave artifacts graded on the old set', async () => {
+  const { recheckArtifactsAfterRequirementsChange } = await import('../dist/functions/tests/appRequirements.js')
+
+  // 1. STRUCTURAL — both call sites, gated on the writer's OWN changed result (never unconditional;
+  //    an unconditional call would fail H:reextract-idempotent-noop below).
+  const jd = stripComments(src('appJdParse.ts'))
+  const structure = anyAsyncFunctionBody(jd, 'structureRequirements')
+  assert.ok(structure, 'structureRequirements has been renamed - this guard has gone stale, fix it')
+  assert.match(structure, /result\.changed/,
+    'the recheck must be gated on writeRequirements\' own changed flag, not fired unconditionally')
+  assert.match(structure, /recheckArtifactsAfterRequirementsChange\(/,
+    'structureRequirements (the funnel for jdParse/jdBackfill/jdParseTick) must trigger a recheck '
+    + 'of already-built artifacts once requirements actually change')
+
+  const anchor = anyAsyncFunctionBody(jd, 'applyAnchorTruth')
+  assert.ok(anchor, 'applyAnchorTruth has been renamed - this guard has gone stale, fix it')
+  assert.match(anchor, /cleared\.changed/,
+    'the recheck must be gated on clearRequirements\' own changed flag')
+  assert.match(anchor, /recheckArtifactsAfterRequirementsChange\(/,
+    'applyAnchorTruth must also trigger a recheck when a real requirement spine is dropped - losing '
+    + 'the spine is as much a requirements change as gaining a new one')
+
+  // 2. BEHAVIORAL — given a packet with built artifacts, the function actually evaluates every one
+  //    of them via the injected evaluator, not merely claims it will.
+  const seen = []
+  const client = {
+    async query(q) {
+      if (/select a\.id from artifact/.test(q)) return { rows: [{ id: 'art-1' }, { id: 'art-2' }] }
+      throw new Error(`unexpected query in test: ${q}`)
+    },
+  }
+  const summary = await recheckArtifactsAfterRequirementsChange(client, 'opp-1', {
+    evaluate: async (_c, id) => { seen.push(id); return {} },
+  })
+  assert.deepEqual(seen, ['art-1', 'art-2'],
+    'every already-built artifact returned by the listing query must be re-evaluated')
+  assert.deepEqual(summary, { attempted: 2, ok: 2, failed: 0 })
+})
+
+/**
+ * H:reextract-idempotent-noop
+ *
+ * AC-judge-trigger-points.md Group 2, AC 9: a re-extraction that reproduces the SAME requirement
+ * text (a re-parse of unchanged posting text) must be idempotent per the existing coverage-judge
+ * cache - and this trigger's OWN job is to not even attempt the listing query when nothing changed,
+ * not merely to rely on the cache downstream making a wasted attempt free of model cost.
+ *
+ * MUTATION that must make this FIRE: drop the `changed` computation from `writeRequirements`/
+ * `clearRequirements` (make it always `true`), or delete the `priorHash !== newHash` comparison.
+ */
+test('H:reextract-idempotent-noop: writeRequirements/clearRequirements report changed=false when the posting snapshot is unchanged', async () => {
+  const { writeRequirements, clearRequirements } = await import('../dist/functions/tests/appRequirements.js')
+
+  // writeRequirements: drive it with the REAL buildRequirements hash (not a stand-in), so both
+  // directions are actually proven, not merely typed. `built.jd_posting_snapshot_sha256` is what
+  // `buildRequirements` -- the same deterministic function imported at the top of this file --
+  // computes for THIS posting text; feeding that exact value back as the "prior" answer proves
+  // changed=false for a truly unchanged posting, and a different literal proves changed=true.
+  const opp = { id: 'opp-1', jd_html: null, jd_posting_raw: 'Same posting text, byte for byte.', jd_table: null }
+  const built = buildRequirements(opp)
+  assert.ok(built.jd_posting_snapshot_sha256, 'buildRequirements must hash this posting - fixture is broken')
+
+  const makeClient = (priorHash) => {
+    const queries = []
+    return { queries, client: {
+      async query(q) {
+        queries.push(q)
+        if (/select jd_posting_snapshot_sha256 from opportunity/.test(q)) return { rows: [{ jd_posting_snapshot_sha256: priorHash }] }
+        if (/^begin$/i.test(q) || /^commit$/i.test(q) || /^rollback$/i.test(q)) return {}
+        if (/update opportunity set jd_posting_snapshot/.test(q)) return {}
+        if (/delete from requirement/.test(q)) return {}
+        if (/insert into requirement/.test(q)) return {}
+        throw new Error(`unexpected query: ${q}`)
+      },
+    } }
+  }
+
+  const { queries, client: sameHashClient } = makeClient(built.jd_posting_snapshot_sha256)
+  const same = await writeRequirements(sameHashClient, opp)
+  assert.equal(same.changed, false,
+    'the SAME posting text re-extracted must report changed=false - this is the case that must '
+    + 'trigger zero recheck work, not merely cost zero once triggered')
+  // The prior-hash read must happen BEFORE the write transaction begins, so it reads what was there
+  // before this call, never something this call itself just wrote.
+  const beginAt = queries.findIndex(q => /^begin$/i.test(q))
+  const priorReadAt = queries.findIndex(q => /select jd_posting_snapshot_sha256 from opportunity/.test(q))
+  assert.ok(priorReadAt >= 0 && priorReadAt < beginAt,
+    'the prior snapshot hash must be read BEFORE the write transaction begins - reading it after '
+    + 'would compare the new value against itself and always report changed=false')
+
+  const { client: diffHashClient } = makeClient('A_DIFFERENT_HASH_ENTIRELY')
+  const first = await writeRequirements(diffHashClient, opp)
+  assert.equal(first.changed, true,
+    'a posting whose snapshot hash actually moved must report changed=true')
+
+  // clearRequirements: a real spine existed (non-null prior hash) -> changed=true; nothing existed
+  // (already-null prior hash) -> changed=false, so re-anchoring an opp that never had a posting
+  // never triggers a recheck either.
+  const hadSpine = { async query(q) {
+    if (/select jd_posting_snapshot_sha256/.test(q)) return { rows: [{ jd_posting_snapshot_sha256: 'SOME_HASH' }] }
+    return {}
+  } }
+  const noSpine = { async query(q) {
+    if (/select jd_posting_snapshot_sha256/.test(q)) return { rows: [{ jd_posting_snapshot_sha256: null }] }
+    return {}
+  } }
+  assert.equal((await clearRequirements(hadSpine, 'opp-2')).changed, true,
+    'clearing a real spine is a real requirement-set change (to empty)')
+  assert.equal((await clearRequirements(noSpine, 'opp-3')).changed, false,
+    'clearing an opp that never had a spine must not report a change - nothing to recheck against')
+})
+
+/**
+ * H:reextract-recheck-bounded
+ *
+ * AC-judge-trigger-points.md's own stated concern: the unattended `jdParseTick` timer (up to 10
+ * opps/run, no owner toggle) is "the reason re-extraction is the trigger most likely to silently
+ * accumulate stale artifacts at scale" if the fan-out this trigger performs is unbounded. The bound
+ * is enforced in JS (`.slice(0, max)`), not left to a SQL LIMIT a fake/misbehaving driver could
+ * ignore - see this file's own comment in appRequirements.ts for why.
+ *
+ * MUTATION that must make this FIRE: delete the `.slice(0, max)` in
+ * `recheckArtifactsAfterRequirementsChange`, or remove the `Number.isFinite(...) ? ... :
+ * DEFAULT_REEXTRACT_RECHECK_MAX_ARTIFACTS` clamp so an absurd/non-finite override removes the cap.
+ */
+test('H:reextract-recheck-bounded: the trigger cannot fan out unbounded work', async () => {
+  const { recheckArtifactsAfterRequirementsChange } = await import('../dist/functions/tests/appRequirements.js')
+
+  // A misbehaving/fake driver that ignores LIMIT entirely and returns far more rows than asked for -
+  // the bound must still hold because it is enforced in JS, not trusted to the SQL clause alone.
+  const many = Array.from({ length: 500 }, (_, i) => ({ id: `art-${i}` }))
+  const client = { async query(q) {
+    if (/select a\.id from artifact/.test(q)) return { rows: many }
+    throw new Error(`unexpected query: ${q}`)
+  } }
+  let calls = 0
+  const summary = await recheckArtifactsAfterRequirementsChange(client, 'opp-1', {
+    evaluate: async () => { calls++; return {} },
+  })
+  assert.ok(calls <= 5, `default bound must cap at 5 (DEFAULT_REEXTRACT_RECHECK_MAX_ARTIFACTS); got ${calls} calls`)
+  assert.equal(summary.attempted, calls, 'the reported attempted count must match what actually ran')
+
+  // A caller-supplied override is honored, but a non-finite/absurd one falls back to the default
+  // rather than removing the bound altogether.
+  calls = 0
+  await recheckArtifactsAfterRequirementsChange(client, 'opp-1', {
+    maxArtifacts: 2, evaluate: async () => { calls++; return {} },
+  })
+  assert.equal(calls, 2, 'an explicit smaller bound must be honored')
+
+  calls = 0
+  await recheckArtifactsAfterRequirementsChange(client, 'opp-1', {
+    maxArtifacts: Infinity, evaluate: async () => { calls++; return {} },
+  })
+  assert.ok(calls <= 5, `Infinity must not remove the bound; got ${calls} calls`)
+
+  // And the query-level ceiling this function ALSO sends (cheaper on a real database - fewer rows
+  // fetched) must be a finite number, never an unbounded/absent LIMIT.
+  const src2 = stripComments(src('appRequirements.ts'))
+  const fn = anyAsyncFunctionBody(src2, 'recheckArtifactsAfterRequirementsChange')
+  assert.ok(fn, 'recheckArtifactsAfterRequirementsChange has been renamed - this guard has gone stale, fix it')
+  assert.match(fn, /limit \$2/, 'the artifact-listing query must carry a parameterised LIMIT')
+})
+
+/**
+ * H:reextract-recheck-non-fatal
+ *
+ * AC-judge-trigger-points.md Group 2's own wording: "NON-FATAL. A re-parse must still succeed if
+ * re-checking fails." Two failure surfaces, both must be swallowed: one artifact's evaluation
+ * throwing (already covered structurally by reusing `recheckAfterTextWrite`, which
+ * `H:recheck-is-non-fatal` above already proves never throws), and the ARTIFACT-LISTING query
+ * itself throwing - which is new here and specific to this trigger, since Group 1's writers never
+ * had a listing query to fail.
+ *
+ * MUTATION that must make this FIRE: remove the try/catch around the listing query in
+ * `recheckArtifactsAfterRequirementsChange`, or remove the outer try/catch in
+ * `applyAnchorTruth`/`structureRequirements` around the writer + recheck call.
+ */
+test('H:reextract-recheck-non-fatal: a checking failure never fails the re-parse', async () => {
+  const { recheckArtifactsAfterRequirementsChange } = await import('../dist/functions/tests/appRequirements.js')
+
+  // 1. The artifact-LISTING query itself throwing must not propagate - it must return an empty,
+  //    honest summary instead.
+  const throwingClient = { async query() { throw new Error('connection reset') } }
+  const summary = await recheckArtifactsAfterRequirementsChange(throwingClient, 'opp-1', {
+    evaluate: async () => { throw new Error('should never be reached') },
+  })
+  assert.deepEqual(summary, { attempted: 0, ok: 0, failed: 0 },
+    'a listing-query failure must degrade to an empty summary, never throw past this function')
+
+  // 2. One artifact's evaluator throwing must not stop the others, and must be tallied, not thrown.
+  const client = { async query(q) {
+    if (/select a\.id from artifact/.test(q)) return { rows: [{ id: 'ok-1' }, { id: 'bad-1' }, { id: 'ok-2' }] }
+    throw new Error(`unexpected query: ${q}`)
+  } }
+  const seen = []
+  const mixed = await recheckArtifactsAfterRequirementsChange(client, 'opp-1', {
+    evaluate: async (_c, id) => {
+      seen.push(id)
+      if (id === 'bad-1') throw new Error('gate could not be computed')
+      return {}
+    },
+  })
+  assert.deepEqual(seen, ['ok-1', 'bad-1', 'ok-2'],
+    'a failing artifact must not stop the remaining artifacts from being attempted')
+  assert.deepEqual(mixed, { attempted: 3, ok: 2, failed: 1 })
+
+  // 3. Structural: the callers in appJdParse.ts never let a recheck failure propagate past the
+  //    function that triggers it - the write itself (already durable) must not be reported as
+  //    failed because a gate could not be recomputed.
+  const jd = stripComments(src('appJdParse.ts'))
+  const anchor = anyAsyncFunctionBody(jd, 'applyAnchorTruth')
+  assert.match(anchor, /try\s*\{[\s\S]*clearRequirements\(client, opp\.id\)[\s\S]*recheckArtifactsAfterRequirementsChange\([\s\S]*\}\s*catch/,
+    'applyAnchorTruth must wrap clearRequirements + the recheck in a try/catch so a recheck failure '
+    + 'cannot surface as a failure of the anchor-truth write itself')
+})
